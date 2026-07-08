@@ -1535,7 +1535,7 @@ export function ConversationView({
     const icon = codexTranscriptCellIcon(cell);
     const title = codexTranscriptCellTitle(cell);
     const meta = codexTranscriptCellMeta(cell);
-    const summary = cell.kind === "reasoning_summary" ? cell.text || cell.summary : cell.summary || cell.text;
+    const summary = codexTranscriptVisibleSummary(cell);
     return (
       <section
         key={cell.id}
@@ -1561,6 +1561,13 @@ export function ConversationView({
         </span>
       </section>
     );
+  }
+
+  function codexTranscriptVisibleSummary(cell: CodexTranscriptCell) {
+    if (cell.kind === "tool_call" || cell.kind === "error_notice") {
+      return "";
+    }
+    return cell.kind === "reasoning_summary" ? cell.text || cell.summary : cell.summary || cell.text;
   }
 
   function codexTranscriptCellIcon(cell: CodexTranscriptCell) {
@@ -1627,9 +1634,10 @@ export function ConversationView({
       <details
         className={styles.operationDetails}
         data-codex-tool-detail="true"
+        open
       >
         <summary className={styles.operationDetailToggle}>
-          {lang === "zh" ? "工具详情" : "Tool details"}
+          {lang === "zh" ? "指令与结果" : "Instruction and result"}
         </summary>
         <dl id={detailsId} className={styles.operationDetails}>
           {rows.map((row, index) => {
@@ -1669,24 +1677,20 @@ export function ConversationView({
     );
     const rows: OperationDetailRow[] = [];
     const primaryToolCall = toolCalls[0];
-    const rawToolName = String(primaryToolCall?.rawToolName ?? "").trim();
-    if (rawToolName && rawToolName !== codexTranscriptCellTitle(cell)) {
-      rows.push({ label: operationDetailLabels.rawName, value: boundedCodexToolDetailText(rawToolName) });
+    const instructionLabel = lang === "zh" ? "指令" : "Instruction";
+    const pushedInstructions = new Set<string>();
+    function pushInstruction(value: string) {
+      const text = value.trim();
+      if (!text || pushedInstructions.has(text)) {
+        return;
+      }
+      pushedInstructions.add(text);
+      rows.push({ label: instructionLabel, value: boundedCodexToolDetailText(text) });
     }
     for (const operation of terminalOperations) {
       const displayCommand = operation.request?.displayCommand?.trim();
       if (displayCommand) {
-        rows.push({
-          label: lang === "zh" ? "命令" : "Command",
-          value: boundedCodexToolDetailText(displayCommand),
-        });
-      }
-      const cwd = operation.request?.cwd?.trim();
-      if (cwd) {
-        rows.push({
-          label: lang === "zh" ? "工作目录" : "Working directory",
-          value: boundedCodexToolDetailText(cwd),
-        });
+        pushInstruction(displayCommand);
       }
       const output = firstNonEmptyText(
         operation.result?.formattedOutput,
@@ -1705,13 +1709,15 @@ export function ConversationView({
           value: boundedCodexToolDetailText(error),
         });
       }
-      const exitCode = operation.result?.exitCode;
-      if (exitCode !== undefined && exitCode !== null) {
-        rows.push({
-          label: "exitCode",
-          value: String(exitCode),
-        });
-      }
+    }
+    if (pushedInstructions.size === 0) {
+      pushInstruction(
+        firstNonEmptyText(
+          primaryToolCall?.rawToolName,
+          primaryToolCall?.title,
+          codexTranscriptCellTitle(cell),
+        ),
+      );
     }
     const resultPreview = firstNonEmptyText(...toolCalls.map((toolCall) => toolCall.resultPreview));
     if (resultPreview && !rows.some((row) => row.label === operationDetailLabels.toolCallResult && row.value.includes(resultPreview.slice(0, 80)))) {
@@ -1727,29 +1733,7 @@ export function ConversationView({
         value: boundedCodexToolDetailText(error),
       });
     }
-    const metadata = codexToolDetailMetadata(toolCalls);
-    if (metadata) {
-      rows.push({
-        label: lang === "zh" ? "结果元数据" : "Result metadata",
-        value: metadata,
-      });
-    }
     return rows;
-  }
-
-  function codexToolDetailMetadata(toolCalls: NonNullable<CodexTranscriptCell["toolLifecycleModel"]>["toolCalls"]) {
-    const primary = toolCalls[0];
-    if (!primary) {
-      return "";
-    }
-    return [
-      primary.resultKind ? `resultKind: ${primary.resultKind}` : "",
-      primary.resultType ? `resultType: ${primary.resultType}` : "",
-      primary.resultLength !== undefined && primary.resultLength !== null ? `resultLength: ${primary.resultLength}` : "",
-      primary.originalLength !== undefined && primary.originalLength !== null ? `originalLength: ${primary.originalLength}` : "",
-      primary.truncated !== undefined ? `truncated: ${primary.truncated}` : "",
-      primary.tracePath ? `tracePath: ${primary.tracePath}` : "",
-    ].filter(Boolean).join("\n");
   }
 
   function firstNonEmptyText(...values: Array<string | undefined | null>) {

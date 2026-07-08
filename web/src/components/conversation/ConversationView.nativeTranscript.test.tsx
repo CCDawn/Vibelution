@@ -96,7 +96,8 @@ describe("ConversationView native Codex transcript surface", () => {
     expect(html).toContain('data-codex-transcript-surface="true"');
     expect(html).toContain('data-codex-transcript-cell-kind="tool_call"');
     expect(html).toContain('data-codex-transcript-cell-kind="assistant_markdown"');
-    expect(html).toContain("native process renders");
+    expect(html).toContain("native_tool");
+    expect(html).not.toContain("native process renders");
     expect(html).toContain("native answer renders");
     expect(html).not.toContain("legacy process should not render");
     expect(html).not.toContain("legacy response should not duplicate");
@@ -268,6 +269,83 @@ describe("ConversationView native Codex transcript surface", () => {
     expect(html).toContain("code_symbol_tool");
     expect(html).toContain("完整工具结果：命中 20 个符号");
     expect(html).toContain("工具检查完成。");
+  });
+
+  it("renders native tool instructions and returned results without the tool summary", () => {
+    const meaninglessSummary = '{"dirty_summary":"有 unstaged 改动，共 5 个变化文件"}';
+    const html = renderConversation([
+      {
+        id: "assistant-native-tool-io",
+        role: "assistant",
+        content: "",
+        timestamp: "2026-07-07T11:00:00Z",
+        codexTranscript: {
+          version: 1,
+          source: "native",
+          messageId: "assistant-native-tool-io",
+          cells: [
+            {
+              id: "native-tool-io-cell",
+              kind: "tool_call",
+              messageId: "assistant-native-tool-io",
+              status: "completed",
+              tone: "neutral",
+              title: "cli_tool",
+              summary: meaninglessSummary,
+              operationIds: ["operation-cli"],
+              toolLifecycleModel: {
+                toolCalls: [
+                  {
+                    toolCallId: "tool_call:operation-cli",
+                    rawOperationId: "operation-cli",
+                    terminalOperationId: "terminal-cli",
+                    status: "completed",
+                    title: "cli_tool",
+                    summary: meaninglessSummary,
+                    rawToolName: "cli_tool",
+                    runtimeKind: "terminal",
+                  },
+                ],
+                terminalOperations: [
+                  {
+                    operationId: "terminal-cli",
+                    rawOperationId: "operation-cli",
+                    toolCallId: "tool_call:operation-cli",
+                    status: "completed",
+                    title: "cli_tool",
+                    request: {
+                      displayCommand: "git status --short",
+                      cwd: "C:/Users/17533/Desktop/Vibelution",
+                    },
+                    result: {
+                      formattedOutput: "M web/src/components/conversation/ConversationView.tsx",
+                      stdout: "M web/src/components/conversation/ConversationView.tsx",
+                      stderr: "",
+                      exitCode: 0,
+                    },
+                  },
+                ],
+                terminalSessions: [],
+                modelObservations: [],
+              },
+            },
+          ],
+          toolCalls: [],
+          terminalOperations: [],
+          terminalSessions: [],
+          modelObservations: [],
+        },
+      } as ConversationMessage,
+    ]);
+
+    expect(html).toContain("cli_tool");
+    expect(html).toContain('open=""');
+    expect(html).toContain("git status --short");
+    expect(html).toContain("M web/src/components/conversation/ConversationView.tsx");
+    expect(html).not.toContain(meaninglessSummary);
+    expect(html).not.toContain("dirty_summary");
+    expect(html).not.toContain("工作目录");
+    expect(html).not.toContain("exitCode");
   });
 
   it("keeps the legacy projection path when native transcript is unavailable", () => {
