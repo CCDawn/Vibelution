@@ -20,10 +20,7 @@ import type {
   CodexTranscriptCellStatus,
   CodexTranscriptCellTone,
 } from "./codexTranscriptCells";
-import {
-  isInternalStreamingStatusContent,
-  isInternalStreamingStatusStage,
-} from "./conversationInternalStatus";
+import { shouldDisplayTranscriptCell } from "./conversationDisplayProtocol";
 
 export type CodexTranscriptSurfaceMode = "native" | "legacy" | "empty";
 
@@ -122,31 +119,7 @@ export function codexNativeTranscriptToCells(
         sourceItemId: cell.sourceItemId,
       };
     })
-    .filter(shouldRenderNativeTranscriptCell);
-}
-
-function shouldRenderNativeTranscriptCell(cell: CodexTranscriptCell) {
-  if (cell.kind !== "status") {
-    return true;
-  }
-  if (isVisibleErrorStatusCell(cell)) {
-    return true;
-  }
-  return !isInternalNativeRuntimeStatusCell(cell);
-}
-
-function isVisibleErrorStatusCell(cell: CodexTranscriptCell) {
-  return cell.kind === "error_notice"
-    || cell.status === "failed"
-    || cell.tone === "error";
-}
-
-function isInternalNativeRuntimeStatusCell(cell: CodexTranscriptCell) {
-  const title = String(cell.title ?? "").trim();
-  const content = [cell.title, cell.summary, cell.text]
-    .filter((value) => String(value ?? "").trim().length > 0)
-    .join("\n");
-  return isInternalStreamingStatusStage(title) || isInternalStreamingStatusContent(content);
+    .filter(shouldDisplayTranscriptCell);
 }
 
 function normalizeNativeRolloutEvents(events: NonNullable<CodexTranscriptProjection["rolloutEvents"]>): CodexRolloutTraceEvent[] {

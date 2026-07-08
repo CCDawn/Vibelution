@@ -87,6 +87,80 @@ def test_normalized_assistant_message_exposes_native_codex_transcript():
     ]
 
 
+def test_native_codex_transcript_omits_internal_runtime_status_cells():
+    messages = session_service._normalize_messages(
+        "session-codex",
+        [
+            {
+                "role": "assistant",
+                "content": "本轮已按请求停止。",
+                "timestamp": "2026-07-08T17:01:00Z",
+                "feedback_events": [
+                    {
+                        "sequence": 1,
+                        "kind": "status",
+                        "status": "done",
+                        "name": "context_prepare",
+                        "summary": "正在准备对话上下文... 正在读取当前会话、绑定 Agent、工具权限和可恢复的上轮现场。",
+                    },
+                    {
+                        "sequence": 2,
+                        "kind": "status",
+                        "status": "done",
+                        "name": "model_request",
+                        "summary": "正在请求模型，等待首个响应片段... 上下文已组装完成，正在进入 LLM 调用。",
+                    },
+                    {
+                        "sequence": 3,
+                        "kind": "status",
+                        "status": "done",
+                        "name": "retrying",
+                        "summary": "第 1/5 次；原因：server_error。",
+                    },
+                ],
+            }
+        ],
+    )
+
+    transcript = messages[0]["codexTranscript"]
+
+    assert [cell["kind"] for cell in transcript["cells"]] == ["assistant_markdown"]
+    assert transcript["cells"][0]["text"] == "本轮已按请求停止。"
+    serialized_cells = str(transcript["cells"])
+    assert "context_prepare" not in serialized_cells
+    assert "model_request" not in serialized_cells
+    assert "retrying" not in serialized_cells
+
+
+def test_native_codex_transcript_keeps_failed_internal_runtime_status_cells():
+    messages = session_service._normalize_messages(
+        "session-codex",
+        [
+            {
+                "role": "assistant",
+                "content": "",
+                "timestamp": "2026-07-08T17:02:00Z",
+                "feedback_events": [
+                    {
+                        "sequence": 1,
+                        "kind": "status",
+                        "status": "failed",
+                        "name": "model_request",
+                        "summary": "模型请求失败",
+                        "error": "server_error",
+                    }
+                ],
+            }
+        ],
+    )
+
+    transcript = messages[0]["codexTranscript"]
+
+    assert [cell["kind"] for cell in transcript["cells"]] == ["error_notice"]
+    assert transcript["cells"][0]["title"] == "model_request"
+    assert transcript["cells"][0]["summary"] == "server_error"
+
+
 def test_normalized_user_message_does_not_expose_assistant_codex_transcript():
     messages = session_service._normalize_messages(
         "session-codex",
