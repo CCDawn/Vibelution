@@ -68,12 +68,31 @@ function hasDisplayableDiagnosticStatus(input: RuntimeStatusDisplayInput) {
   const status = normalizedText(input.status);
   const tone = normalizedText(input.tone);
   return Boolean(
-    compactText(input.error)
+    isDisplayableProgressStatus(input)
+    || compactText(input.error)
     || compactText(input.failureClass)
     || input.timedOut
     || tone === "error"
     || ["failed", "error", "failure", "timeout", "timed_out", "cancelled"].includes(status)
     || ["degraded", "fallback", "partial", "recovered", "unavailable"].includes(status)
+  );
+}
+
+function isDisplayableProgressStatus(input: RuntimeStatusDisplayInput) {
+  const content = [
+    input.name,
+    input.label,
+    input.title,
+    input.summary,
+    input.resultPreview,
+    input.text,
+  ].map(normalizedText).filter(Boolean).join(" ");
+  return Boolean(
+    content.includes("long_loop_progress")
+    || content.includes("尚未形成最终回答")
+    || content.includes("本轮尚未形成最终回答")
+    || content.includes("工具循环")
+    || content.includes("tool loop")
   );
 }
 

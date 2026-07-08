@@ -169,7 +169,7 @@ describe("ConversationView Codex-like transcript adapter integration", () => {
     expect(conversationViewSource).toContain("data-codex-transcript-cell-count");
   });
 
-  it("renders visible Codex transcript cells instead of only auditing the cell count", () => {
+  it("renders visible native Codex transcript cells instead of only auditing the cell count", () => {
     const html = renderConversation(
       [
         {
@@ -248,6 +248,57 @@ describe("ConversationView Codex-like transcript adapter integration", () => {
               text: "最终回答：Codex-like transcript 已接管主回答。",
             },
           ],
+          codexTranscript: {
+            version: 1,
+            source: "native",
+            messageId: "assistant-codex-cell-render",
+            cells: [
+              {
+                id: "native-reasoning-cell",
+                kind: "reasoning_summary",
+                messageId: "assistant-codex-cell-render",
+                status: "completed",
+                tone: "neutral",
+                text: "分析 transcript cell 映射",
+                summary: "分析 transcript cell 映射",
+              },
+              {
+                id: "native-tool-cell",
+                kind: "tool_call",
+                messageId: "assistant-codex-cell-render",
+                status: "completed",
+                tone: "neutral",
+                title: "read_file",
+                summary: "读取 ConversationView.tsx",
+              },
+              {
+                id: "native-status-cell",
+                kind: "status",
+                messageId: "assistant-codex-cell-render",
+                status: "completed",
+                tone: "neutral",
+                title: "render_status",
+                summary: "普通完成态保持灰色",
+              },
+              {
+                id: "native-error-cell",
+                kind: "error_notice",
+                messageId: "assistant-codex-cell-render",
+                status: "failed",
+                tone: "error",
+                title: "npm_test",
+                summary: "运行测试失败",
+              },
+              {
+                id: "native-answer-cell",
+                kind: "assistant_markdown",
+                messageId: "assistant-codex-cell-render",
+                status: "completed",
+                tone: "neutral",
+                text: "最终回答：Codex-like transcript 已接管主回答。",
+              },
+            ],
+          },
         },
       ],
       { processDisplayMode: "trace" },
@@ -256,11 +307,9 @@ describe("ConversationView Codex-like transcript adapter integration", () => {
     expect(html).toContain('data-codex-transcript-surface="true"');
     expect(html).toContain('data-codex-transcript-cell-kind="reasoning_summary"');
     expect(html).toContain('data-codex-transcript-cell-kind="tool_call"');
-    expect(html).toContain('data-codex-transcript-cell-kind="status"');
     expect(html).toContain('data-codex-transcript-cell-kind="error_notice"');
     expect(html).toContain('data-codex-transcript-cell-kind="assistant_markdown"');
     expect(html).toMatch(/data-codex-transcript-cell-kind="tool_call"[^>]*data-codex-transcript-cell-tone="neutral"/);
-    expect(html).toMatch(/data-codex-transcript-cell-kind="status"[^>]*data-codex-transcript-cell-tone="neutral"/);
     expect(html).toMatch(/data-codex-transcript-cell-kind="error_notice"[^>]*data-codex-transcript-cell-tone="error"/);
     expect(html).toMatch(/<strong[^>]*>最终回答<\/strong>：Codex-like transcript 已接管主回答。/);
   });
@@ -1124,7 +1173,7 @@ describe("ConversationView edit resend affordance", () => {
       },
     );
 
-    expect(html).toContain("正在请求");
+    expect(html).not.toContain("正在请求");
     expect(html).not.toContain("正在思考中");
     expect(html).not.toContain("正在唤起对话 agent");
     expect(html).not.toContain("正在绑定 Agent 实例");
@@ -3884,7 +3933,7 @@ describe("ConversationView edit resend affordance", () => {
       },
     ]);
 
-    expect(html).toContain("正在思考中");
+    expect(html).not.toContain("正在思考中");
     expect(html).not.toContain("正在请求");
     expect(html).not.toContain("执行过程");
     expect(html).not.toContain("模型思考");
@@ -3919,7 +3968,7 @@ describe("ConversationView edit resend affordance", () => {
       },
     ]);
 
-    expect(html).toContain("正在思考中");
+    expect(html).not.toContain("正在思考中");
     expect(html).not.toContain("正在请求");
     expect(html).not.toContain("正在思考，已收到思考片段");
     expect(html).not.toContain("模型已经开始返回 reasoning");
@@ -3928,7 +3977,7 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).not.toContain("responseSection");
   });
 
-  it("hides internal runtime pipeline steps behind a compact request state", () => {
+  it("hides pure internal runtime pipeline steps instead of rendering a process placeholder", () => {
     const fullModelStatus = "正在请求模型，等待首个响应片段... 上下文已组装完成，正在进入 LLM 调用。";
     const html = renderConversation([
       {
@@ -3963,7 +4012,7 @@ describe("ConversationView edit resend affordance", () => {
       },
     ]);
 
-    expect(html).toContain("正在请求");
+    expect(html).not.toContain("正在请求");
     expect(html).not.toContain("执行过程");
     expect(html).not.toContain("执行中");
     expect(html).not.toContain("行动");
@@ -3978,10 +4027,11 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).not.toContain("运行状态 3");
     expect(html).not.toContain("回答</span>");
     expect((html.match(new RegExp(fullModelStatus, "g")) ?? [])).toHaveLength(0);
-    expect(html.match(/statusSpinner/g)?.length).toBe(1);
+    expect(html).not.toContain("statusSpinner");
+    expect(html).not.toContain("answerOnlyProcessGroup");
   });
 
-  it("renders server-side model thinking as a compact thinking state without fake reasoning content", () => {
+  it("hides server-side model thinking status without fake reasoning content", () => {
     const html = renderConversation(
       [
         {
@@ -4006,14 +4056,14 @@ describe("ConversationView edit resend affordance", () => {
       { useDefaultProcessDisplayMode: true },
     );
 
-    expect(html).toContain("正在思考中");
+    expect(html).not.toContain("正在思考中");
     expect(html).not.toContain("正在请求");
     expect(html).not.toContain("思考过程");
     expect(html).not.toContain("正在思考，等待模型输出。");
     expect(html).not.toContain("responseSection");
   });
 
-  it("shows model-request placeholder as a compact process state instead of a separate answer block", () => {
+  it("hides model-request placeholder instead of rendering a separate answer block", () => {
     const placeholder = "正在请求模型，等待首个响应片段...\n上下文已组装完成，正在进入 LLM 调用。";
     const html = renderConversation(
       [
@@ -4037,7 +4087,7 @@ describe("ConversationView edit resend affordance", () => {
       { useDefaultProcessDisplayMode: true },
     );
 
-    expect(html).toContain("正在请求");
+    expect(html).not.toContain("正在请求");
     expect(html).not.toContain("生成中");
     expect(html).not.toContain("正在请求模型，等待首个响应片段...");
     expect(html).not.toContain("上下文已组装完成");
@@ -4082,7 +4132,7 @@ describe("ConversationView edit resend affordance", () => {
     expect((html.match(/本轮仍在继续/g) ?? [])).toHaveLength(0);
   });
 
-  it("renders request-only process state as static status without empty expandable details", () => {
+  it("hides request-only internal process state without empty expandable details", () => {
     const html = renderConversation(
       [
         {
@@ -4105,11 +4155,11 @@ describe("ConversationView edit resend affordance", () => {
       { useDefaultProcessDisplayMode: true },
     );
 
-    expect(html).toContain("正在请求");
+    expect(html).not.toContain("正在请求");
     expect(html).not.toContain("生成中");
     expect(html).not.toContain("aria-expanded");
     expect(html).not.toContain('title="展开执行明细"');
-    expect(html.match(/正在请求/g)?.length).toBe(1);
+    expect(html).not.toContain("answerOnlyProcessGroup");
   });
 
   it("shows long tool loops as visible progress instead of an empty answer block", () => {
@@ -4236,7 +4286,7 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).not.toContain("回答</span>");
   });
 
-  it("keeps the collapsed answer-only process summary static before details are expanded", () => {
+  it("hides collapsed answer-only internal process summary before real details exist", () => {
     const placeholder = "正在请求模型，等待首个响应片段...\n上下文已组装完成，正在进入 LLM 调用。";
     const html = renderConversation(
       [
@@ -4260,7 +4310,7 @@ describe("ConversationView edit resend affordance", () => {
       { useDefaultProcessDisplayMode: true },
     );
 
-    expect(html).toContain("正在请求");
+    expect(html).not.toContain("正在请求");
     expect(html).not.toContain("生成中");
     expect(html).not.toContain("statusSpinner");
   });

@@ -22,17 +22,27 @@ import type {
 } from "./codexTranscriptCells";
 import { shouldDisplayTranscriptCell } from "./conversationDisplayProtocol";
 
-export type CodexTranscriptSurfaceMode = "native" | "legacy" | "empty";
+export type CodexTranscriptSurfaceMode = "native" | "empty";
+
+export type CodexTranscriptProjectionGapReason =
+  | "native_missing"
+  | "native_empty"
+  | "native_unusable";
+
+export type CodexTranscriptProjectionGap = {
+  reason: CodexTranscriptProjectionGapReason;
+  legacyCellCount: number;
+};
 
 export type CodexTranscriptSurface = {
   mode: CodexTranscriptSurfaceMode;
-  source: "message.codexTranscript" | "legacy_projection" | "none";
+  source: "message.codexTranscript" | "none";
   cells: CodexTranscriptCell[];
   hasAssistantMarkdown: boolean;
   suppressLegacyProcess: boolean;
   suppressLegacyResponse: boolean;
   suppressLegacyTurnStatus: boolean;
-  fallbackReason?: "native_missing" | "native_empty";
+  projectionGap?: CodexTranscriptProjectionGap;
 };
 
 type NativeToolLifecycleModelInput = Partial<
@@ -67,18 +77,6 @@ export function resolveCodexTranscriptSurface(
       suppressLegacyTurnStatus: true,
     };
   }
-  if (legacyCells.length > 0) {
-    return {
-      mode: "legacy",
-      source: "legacy_projection",
-      cells: legacyCells,
-      hasAssistantMarkdown: legacyCells.some((cell) => cell.kind === "assistant_markdown" && Boolean(cell.text?.trim())),
-      suppressLegacyProcess: false,
-      suppressLegacyResponse: false,
-      suppressLegacyTurnStatus: false,
-      fallbackReason: message.codexTranscript ? "native_empty" : "native_missing",
-    };
-  }
   return {
     mode: "empty",
     source: "none",
@@ -87,7 +85,10 @@ export function resolveCodexTranscriptSurface(
     suppressLegacyProcess: false,
     suppressLegacyResponse: false,
     suppressLegacyTurnStatus: false,
-    fallbackReason: message.codexTranscript ? "native_empty" : "native_missing",
+    projectionGap: {
+      reason: nativeTranscriptProjectionGapReason(message),
+      legacyCellCount: legacyCells.length,
+    },
   };
 }
 
@@ -215,4 +216,17 @@ function normalizeNativeModelObservation(
 
 function normalizeLifecycleStatus(status: string | undefined): CodexToolLifecycleStatus {
   return normalizeCodexToolLifecycleStatus(status);
+}
+
+function nativeTranscriptProjectionGapReason(message: ConversationMessage): CodexTranscriptProjectionGapReason {
+  if (!message.codexTranscript) {
+    return "native_missing";
+  }
+  if (message.role !== "assistant" || String(message.codexTranscript.source ?? "").trim() !== "native") {
+    return "native_unusable";
+  }
+  if (!Array.isArray(message.codexTranscript.cells) || message.codexTranscript.cells.length === 0) {
+    return "native_empty";
+  }
+  return "native_unusable";
 }

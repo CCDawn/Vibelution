@@ -483,7 +483,6 @@ export function visibleTimelineOperationDedupeKey(operation: AgentMessageOperati
   return [
     operation.kind,
     operation.rawLabel || operation.label,
-    operation.rawStatus || operation.status,
   ].join(":");
 }
 

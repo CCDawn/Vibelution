@@ -150,6 +150,40 @@ describe("agent thread adapters", () => {
     });
   });
 
+  it("does not backfill legacy thought or tool calls when feedback events own the process chain", () => {
+    const message: ConversationMessage = {
+      id: "assistant-feedback-incomplete",
+      role: "assistant",
+      content: "最终回答",
+      timestamp: "2026-07-08T10:00:00Z",
+      thought: "legacy thought should expose a protocol gap instead of filling it",
+      toolCalls: [
+        {
+          name: "legacy_tool",
+          status: "done",
+          summary: "legacy tool should not fill a missing feedback event",
+        },
+      ],
+      feedbackEvents: [
+        {
+          sequence: 1,
+          kind: "status",
+          status: "running",
+          name: "model_request",
+          summary: "正在请求模型",
+        },
+      ],
+    };
+
+    const agentMessage = conversationMessageToAgentMessage(message);
+    const serializedParts = JSON.stringify(agentMessage.parts);
+
+    expect(agentMessage.parts.map((part) => part.type)).toEqual(["text"]);
+    expect(serializedParts).not.toContain("legacy thought should expose");
+    expect(serializedParts).not.toContain("legacy_tool");
+    expect(serializedParts).not.toContain("legacy tool should not fill");
+  });
+
   it("drops internal runtime pipeline status events from assistant visible parts", () => {
     const message: ConversationMessage = {
       id: "assistant-pipeline-status",

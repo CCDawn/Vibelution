@@ -55,12 +55,9 @@ function processPartsForAssistantMessage(message: ConversationMessage): AgentMes
   }
   if ((message.feedbackEvents?.length ?? 0) > 0) {
     const feedbackParts = feedbackPartsForMessage(message);
-    const feedbackPartTypes = new Set(feedbackParts.map((part) => part.type));
     return [
       ...feedbackParts,
-      ...(feedbackPartTypes.has("thought") ? [] : legacyThoughtPartForMessage(message)),
-      ...(feedbackPartTypes.has("mental") ? [] : legacyMentalPartForMessage(message)),
-      ...(feedbackPartTypes.has("tool-call") ? [] : legacyToolPartsForMessage(message)),
+      ...activeTurnThoughtPartForMessage(message, feedbackParts),
     ];
   }
   return [
@@ -75,6 +72,19 @@ function feedbackPartsForMessage(message: ConversationMessage): AgentMessagePart
     .sort((left, right) => normalizedSequence(left.sequence) - normalizedSequence(right.sequence))
     .map((event, index) => feedbackEventToAgentPart(message, event, index))
     .filter((part): part is AgentMessagePart => part !== null);
+}
+
+function activeTurnThoughtPartForMessage(
+  message: ConversationMessage,
+  feedbackParts: AgentMessagePart[],
+): AgentThoughtPart[] {
+  if (message.metadata?.kind !== "session_active_turn_layer") {
+    return [];
+  }
+  if (feedbackParts.some((part) => part.type === "thought")) {
+    return [];
+  }
+  return legacyThoughtPartForMessage(message);
 }
 
 function feedbackEventToAgentPart(
