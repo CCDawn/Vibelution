@@ -37,7 +37,7 @@ import {
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
 import { LazyConversationView } from "../components/conversation/LazyConversationView";
 import { PaneCollapseHandle } from "../components/layout/PaneCollapseHandle";
-import { VButton, VNativeInput, VNativeTextarea } from "../components/vui";
+import { VButton, VNativeInput } from "../components/vui";
 import { TranslationKey } from "../i18n/dictionary";
 import { petAvatarPresetLabel } from "../i18n/petLabels";
 import { useAppI18n } from "../i18n/useAppI18n";
@@ -688,7 +688,6 @@ export function SelfEvolutionTrack({
     isObservationQueuedOrRunning(observationRun?.status || "") ? "observation" : "isolated_development",
   );
   const [observationGoalInput, setObservationGoalInput] = useState("");
-  const [observationDurationInput, setObservationDurationInput] = useState(String(DEFAULT_OBSERVATION_DURATION_SECONDS));
   const [worktreePage, setWorktreePage] = useState(1);
   const [activePage, setActivePage] = useState<"workspace" | "status">("workspace");
   const [selectedHistoryTxnIds, setSelectedHistoryTxnIds] = useState<string[]>([]);
@@ -835,15 +834,10 @@ export function SelfEvolutionTrack({
   const observationRunActive = isObservationQueuedOrRunning(observationRun?.status || "");
   const observationRunModeActive = selfEvolutionMode === "observation";
   const observationGoalValue = observationGoalInput.trim();
-  const parsedObservationDuration = useMemo(
-    () => parseObservationDurationInput(observationDurationInput),
-    [observationDurationInput],
-  );
+  const parsedObservationDuration = parseObservationDurationInput(String(DEFAULT_OBSERVATION_DURATION_SECONDS));
   const normalizedObservationDuration = parsedObservationDuration.durationSeconds;
   const observationDurationValid = parsedObservationDuration.isValid;
-  const observationDurationError = observationDurationInput.trim() && !observationDurationValid
-    ? (lang === "zh" ? "请输入 30 到 3600 秒之间的时长。" : "Enter a duration between 30 and 3600 seconds.")
-    : "";
+  const observationDurationError = "";
   const observationConversationSessionId = String(observationRun?.conversationSessionId || "").trim();
   const observationConversationReady = observationRunModeActive && Boolean(observationConversationSessionId);
   const observationSessionDetailQuery = useQuery({
@@ -1027,6 +1021,23 @@ export function SelfEvolutionTrack({
       },
     ];
   }, [overview, selectedWorkflowStep]);
+  const observationPendingConversationMessages = useMemo<ConversationMessage[]>(() => [
+    {
+      id: "self-observation-pending",
+      role: "assistant",
+      content: joinReadableLines([
+        observationRun?.latestMessage || (lang === "zh" ? "等待自主观察 Agent 会话。" : "Waiting for the self-observation agent session."),
+        observationRun?.report,
+        lang === "zh"
+          ? "观察 Agent 固定 0 工具、no worktree。"
+          : "The observation agent stays at 0 tools and no worktree.",
+        lang === "zh"
+          ? "在底部输入观察目标后开始自主观察。"
+          : "Enter an observation goal in the composer, then start observation.",
+      ]),
+      timestamp: observationRun?.updatedAt || "",
+    },
+  ], [lang, observationRun?.latestMessage, observationRun?.report, observationRun?.updatedAt]);
   const activeModeLabel = observationRunModeActive
     ? (lang === "zh" ? "自主观察" : "Observation")
     : (lang === "zh" ? "隔离开发" : "Isolated development");
@@ -1038,8 +1049,8 @@ export function SelfEvolutionTrack({
     : conversationTask.latestSummary;
   const activeNextAction = observationRunModeActive
     ? (observationRunActive
-      ? (lang === "zh" ? "观察运行中，可随时终止。" : "Observation is running and can be stopped.")
-      : (lang === "zh" ? "中央面板保留观察参数和启动入口。" : "Use the center panel for observation settings."))
+      ? (lang === "zh" ? "观察会话运行中，完整输出保留在中央会话区。" : "Observation is running; full output stays in the center conversation area.")
+      : (lang === "zh" ? "在底部输入观察目标后开始自主观察。" : "Enter an observation goal in the composer, then start observation."))
     : conversationTask.nextAction;
   const centerWorkflowSummary = observationRunModeActive
     ? activeNextAction
@@ -1175,143 +1186,40 @@ export function SelfEvolutionTrack({
     );
   }
 
-  function renderObservationSetupPanel({ embedded = false }: { embedded?: boolean } = {}) {
-    const latestPreview = compactObservationPreview(observationRun?.latestMessage, 160);
-    const reportPreview = compactObservationPreview(observationRun?.report, 180);
-    return (
-      <section className={embedded ? styles.observationPendingSetup : styles.observationPanel}>
-        <div className={styles.sectionHeader}>
-          <div>
-            <p className={styles.eyebrow}>{lang === "zh" ? "纯观察沙盒" : "No-tool sandbox"}</p>
-            <h3 className={styles.sectionTitle}>{lang === "zh" ? "自主观察" : "Observation"}</h3>
-          </div>
-          <span className={styles.statusPill}>{statusLabel(observationRun?.status || "idle")}</span>
-        </div>
-
-        <div className={styles.formField}>
-          <span>{lang === "zh" ? "观察目标" : "Observation goal"}</span>
-          <VNativeTextarea
-            className={styles.textArea}
-            rows={3}
-            value={observationGoalInput}
-            onChange={(event) => setObservationGoalInput(event.target.value)}
-            placeholder={lang === "zh" ? "描述要观察 Agent 如何思考的问题" : "Describe what you want to observe"}
-          />
-        </div>
-
-        <div className={styles.formField}>
-          <span>{lang === "zh" ? "运行时长（秒）" : "Duration seconds"}</span>
-          <VNativeInput
-            className={styles.textInput}
-            type="number"
-            min={MIN_OBSERVATION_DURATION_SECONDS}
-            max={MAX_OBSERVATION_DURATION_SECONDS}
-            value={observationDurationInput}
-            onBlur={() => setObservationDurationInput(String(normalizedObservationDuration))}
-            onChange={(event) => setObservationDurationInput(event.target.value)}
-          />
-          {observationDurationError ? <p className={styles.errorText}>{observationDurationError}</p> : null}
-        </div>
-
-        <p className={styles.noticeText}>
-          {lang === "zh"
-            ? "自主观察模式固定 0 工具，不会申请工具、创建 worktree 或修改代码。"
-            : "Observation mode stays at 0 tools, cannot request tools, create worktrees, or modify code."}
-        </p>
-
-        <div className={styles.observationMetricGrid}>
-          <div className={styles.stripItem}>
-            <span>{lang === "zh" ? "工具" : "Tools"}</span>
-            <strong>{OBSERVATION_MODE_TOOL_COUNT}</strong>
-          </div>
-          <div className={styles.stripItem}>
-            <span>{lang === "zh" ? "时长" : "Duration"}</span>
-            <strong>{observationRun?.durationSeconds ?? normalizedObservationDuration}</strong>
-          </div>
-          <div className={styles.stripItem}>
-            <span>{lang === "zh" ? "worktree" : "Worktree"}</span>
-            <strong>{OBSERVATION_MODE_WORKTREE_STATE}</strong>
-          </div>
-        </div>
-
-        <div className={styles.conversationActions}>
-          <VButton
-            type="button"
-            className={styles.secondaryAction}
-            isDisabled={observationStartPending || observationRunActive || !observationGoalValue || !observationDurationValid}
-            onClick={() => onStartObservation({ goal: observationGoalValue, durationSeconds: normalizedObservationDuration })}
-          >
-            {observationStartPending ? <LoaderCircle size={15} className={styles.spinning} /> : <ArrowUpRight size={15} />}
-            {observationStartPending ? (lang === "zh" ? "启动中" : "Starting") : (lang === "zh" ? "开始自主观察" : "Start observation")}
-          </VButton>
-          {observationRun && observationRunActive ? (
-            <VButton
-              type="button"
-              className={styles.secondaryAction}
-              isDisabled={observationActionPending || !observationTerminateAction?.enabled}
-              title={disabledReason(observationTerminateAction) || undefined}
-              onClick={() => onTerminateObservation(observationRun.runId)}
-            >
-              {observationActionPending ? <LoaderCircle size={15} className={styles.spinning} /> : <X size={15} />}
-              {lang === "zh" ? "终止观察" : "Terminate"}
-            </VButton>
-          ) : null}
-        </div>
-
-        {latestPreview ? <p className={styles.compactPreviewText}>{latestPreview}</p> : null}
-        {reportPreview ? <p className={styles.compactPreviewText}>{reportPreview}</p> : null}
-        {observationRun?.boundaryViolation ? <p className={styles.errorText}>{observationRun.boundaryViolation}</p> : null}
-      </section>
-    );
-  }
-
   function renderObservationPendingConversationShell() {
     return (
-      <section
-        className={styles.observationPendingConversationShell}
-        aria-label={lang === "zh" ? "自主观察待启动会话" : "Pending observation conversation"}
-      >
-        <div className={styles.sectionHeader}>
-          <div className={styles.observationPendingTitle}>
-            <span className={styles.statusIcon}><Bot size={15} /></span>
-            <div>
-              <p className={styles.eyebrow}>{lang === "zh" ? "自主观察" : "Self observation"}</p>
-              <h3 className={styles.sectionTitle}>{lang === "zh" ? "自主观察会话" : "Observation session"}</h3>
-            </div>
-          </div>
-          <span className={styles.statusPill}>{statusLabel(observationRun?.status || "idle")}</span>
-        </div>
-
-        <div className={styles.observationPendingBody}>
-          <div className={styles.observationPendingMessage}>
-            <div className={styles.itemTop}>
-              <strong>{lang === "zh" ? "等待观察目标" : "Waiting for observation goal"}</strong>
-              <span className={styles.secondaryPill}>{lang === "zh" ? "0 工具" : "0 tools"}</span>
-            </div>
-            <p className={styles.sectionSummary}>
-              {lang === "zh"
-                ? "填写目标并启动后，这里会切换为实时观察会话；观察 Agent 仍保持 no worktree。"
-                : "After you enter a goal and start, this area switches to the live observation session while the observer keeps no worktree."}
-            </p>
-            <div className={styles.observationMetricGrid}>
-              <div className={styles.stripItem}>
-                <span>{lang === "zh" ? "工具" : "Tools"}</span>
-                <strong>{OBSERVATION_MODE_TOOL_COUNT}</strong>
-              </div>
-              <div className={styles.stripItem}>
-                <span>{lang === "zh" ? "默认时长" : "Default duration"}</span>
-                <strong>{normalizedObservationDuration}</strong>
-              </div>
-              <div className={styles.stripItem}>
-                <span>{lang === "zh" ? "worktree" : "Worktree"}</span>
-                <strong>{OBSERVATION_MODE_WORKTREE_STATE}</strong>
-              </div>
-            </div>
-          </div>
-
-          {renderObservationSetupPanel({ embedded: true })}
-        </div>
-      </section>
+      <LazyConversationView
+        sessionId="self-observation-pending"
+        density="compact"
+        eyebrowLabel={lang === "zh" ? "自主观察" : "Self observation"}
+        title={lang === "zh" ? "自主观察会话" : "Observation session"}
+        phase={observationRun?.status || "idle"}
+        messages={observationPendingConversationMessages}
+        assistantDisplayName={pet?.name}
+        assistantAvatarFallback={petAvatarFallback}
+        userDisplayName={runtime?.userName}
+        taskSummary={observationRun?.latestMessage || (lang === "zh" ? "等待自主观察 Agent 会话。" : "Waiting for the self-observation agent session.")}
+        defaultFileContext={SELF_EVOLUTION_CONVERSATION_CONTEXT}
+        summaryItems={[]}
+        stats={[
+          { label: lang === "zh" ? "目标" : "Goal", value: observationRun?.goal || observationGoalValue || (lang === "zh" ? "输入观察目标" : "Enter a goal") },
+          { label: lang === "zh" ? "工具" : "Tools", value: OBSERVATION_MODE_TOOL_COUNT },
+          { label: lang === "zh" ? "时长" : "Duration", value: observationRun?.durationSeconds ?? normalizedObservationDuration },
+          { label: "worktree", value: OBSERVATION_MODE_WORKTREE_STATE },
+        ]}
+        autoScrollToLatest={observationRunActive}
+        showComposer={!observationRunActive}
+        composerValue={observationGoalInput}
+        composerPlaceholder={lang === "zh" ? "描述要观察 Agent 如何思考的问题" : "Describe what you want to observe"}
+        composerDisabled={observationStartPending || observationRunActive || !observationDurationValid}
+        composerPending={observationStartPending}
+        composerError={observationStartError || observationDurationError || undefined}
+        submitLabel={lang === "zh" ? "开始自主观察" : "Start observation"}
+        submitPendingLabel={lang === "zh" ? "启动中" : "Starting"}
+        onComposerChange={setObservationGoalInput}
+        onSubmit={() => onStartObservation({ goal: observationGoalValue, durationSeconds: normalizedObservationDuration })}
+        fallback={<div className={styles.loadingShell}>{t("loadingSession")}</div>}
+      />
     );
   }
 

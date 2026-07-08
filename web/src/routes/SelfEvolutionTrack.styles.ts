@@ -73,18 +73,6 @@ export const selfEvolutionTrackStyles = {
   modeTabActive:
     "inline-flex min-h-8 w-fit cursor-pointer items-center justify-center rounded-md border border-[color-mix(in_srgb,var(--accent-warm)_24%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_12%,transparent)] px-3 py-1 text-[var(--vui-font-sm)] font-semibold text-[var(--accent-warm-2)]",
   surface: `${panelSurface} p-3.5 max-[760px]:p-4`,
-  observationPanel:
-    `grid min-h-0 content-start gap-3 overflow-auto p-3.5 ${panelSurface}`,
-  observationPendingConversationShell:
-    `grid h-full max-h-full min-h-[420px] min-w-0 max-w-full grid-rows-[auto_minmax(0,1fr)] gap-3 overflow-auto overflow-x-hidden p-3.5 max-[1180px]:h-[min(72vh,720px)] max-[760px]:min-h-[540px] ${panelSurface}`,
-  observationPendingTitle:
-    "grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-center gap-2.5",
-  observationPendingBody:
-    "grid min-h-0 content-start gap-3",
-  observationPendingMessage:
-    `grid min-w-0 gap-2 p-3 ${rowSurfaceSoft}`,
-  observationPendingSetup:
-    "grid min-h-0 content-start gap-3 overflow-visible p-0",
   loadingShell:
     "grid min-h-[148px] max-h-[180px] content-start self-start overflow-hidden grid-cols-[minmax(240px,300px)_minmax(0,1fr)] gap-2 max-[1180px]:min-h-[172px] max-[1180px]:max-h-[210px] max-[1180px]:grid-cols-1",
   loadingRail: `grid min-h-0 content-start gap-2.5 p-3 ${rowSurfaceSoft}`,

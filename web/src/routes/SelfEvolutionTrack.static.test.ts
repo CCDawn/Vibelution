@@ -279,14 +279,19 @@ describe("SelfEvolutionTrack static assets", () => {
     expect(selfEvolutionSource).not.toContain("{renderObservationPanel()}");
   });
 
-  it("keeps no-session observation mode inside a conversation-like empty shell", () => {
+  it("keeps no-session observation mode inside the shared conversation view", () => {
     expect(selfEvolutionSource).toContain("function renderObservationPendingConversationShell()");
     expect(selfEvolutionSource).toContain("renderObservationPendingConversationShell()");
-    expect(selfEvolutionSource).toContain("renderObservationSetupPanel({ embedded: true })");
-    expect(selfEvolutionSource).toContain("styles.observationPendingConversationShell");
-    expect(selfEvolutionSource).toContain("styles.observationPendingMessage");
-    expect(selfEvolutionStylesSource).toContain("observationPendingConversationShell:");
-    expect(selfEvolutionStylesSource).toContain("min-h-[420px]");
+    expect(selfEvolutionSource).toContain("observationPendingConversationMessages");
+    expect(selfEvolutionSource).toContain("sessionId=\"self-observation-pending\"");
+    expect(selfEvolutionSource).toContain('title={lang === "zh" ? "自主观察会话" : "Observation session"}');
+    expect(selfEvolutionSource).toContain("composerValue={observationGoalInput}");
+    expect(selfEvolutionSource).toContain("submitLabel={lang === \"zh\" ? \"开始自主观察\" : \"Start observation\"}");
+    expect(selfEvolutionSource).not.toContain("renderObservationSetupPanel({ embedded: true })");
+    expect(selfEvolutionSource).not.toContain("styles.observationPendingConversationShell");
+    expect(selfEvolutionSource).not.toContain("styles.observationPendingMessage");
+    expect(selfEvolutionSource).not.toContain("等待观察目标");
+    expect(selfEvolutionStylesSource).not.toContain("observationPendingConversationShell:");
     expect(selfEvolutionSource).not.toContain(") : (\n                    renderObservationSetupPanel()\n                  )");
   });
 
@@ -424,7 +429,6 @@ describe("SelfEvolutionTrack static assets", () => {
       styles.trackShell,
       styles.observationEvidenceRail,
       styles.surface,
-      styles.observationPanel,
       styles.approvalPanel,
       styles.subsurface,
       styles.petCompanionSurface,
