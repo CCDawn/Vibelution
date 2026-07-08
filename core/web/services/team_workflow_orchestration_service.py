@@ -1035,7 +1035,7 @@ def _source_collection_stage_session_previous_round_evidence(
 ) -> dict[str, str]:
     normalized_session_id = _trim_text(session_id, max_length=160)
     normalized_run_id = _trim_text(run_id, max_length=160)
-    if not normalized_session_id or not normalized_run_id:
+    if not normalized_session_id:
         return {}
     detail = session_service.get_session_detail(normalized_session_id)
     if not isinstance(detail, dict):
@@ -1052,7 +1052,9 @@ def _source_collection_stage_session_previous_round_evidence(
             or _trim_text(metadata.get("sourceCollectionRunId"), max_length=160)
             or _trim_text(metadata.get("sourceCollectionStageRunId"), max_length=160)
         )
-        if not message_run_id or message_run_id == normalized_run_id:
+        if not message_run_id:
+            continue
+        if normalized_run_id and message_run_id == normalized_run_id:
             continue
         message_team_id = _trim_text(metadata.get("teamId"), max_length=160)
         return {
@@ -1061,8 +1063,105 @@ def _source_collection_stage_session_previous_round_evidence(
             "previousTeamId": message_team_id,
             "previousMessageKind": kind,
             "previousMessageId": _trim_text(message.get("id"), max_length=160),
+            "previousStageId": _trim_text(metadata.get("stageId"), max_length=80),
         }
     return {}
+
+
+def _source_collection_stage_id_for_agent_role(agent_role: str) -> str:
+    normalized_role = _normalize_source_collection_agent_role(agent_role)
+    for stage_id, roles in SOURCE_COLLECTION_AGENT_CONTEXT_STAGE_ROLES.items():
+        if normalized_role in roles:
+            return stage_id
+    return "finding"
+
+
+def _clean_source_collection_stage_agent_sessions_for_new_round(
+    team_id: str,
+    roles: list[str],
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    normalized_team_id = _trim_text(team_id, max_length=160)
+    cleanup: dict[str, Any] = {
+        "status": "completed",
+        "reason": "new_source_collection_round",
+        "cleanedCount": 0,
+        "items": [],
+        "skipped": [],
+    }
+    agent_ids = payload.get("agentIds") if isinstance(payload.get("agentIds"), dict) else {}
+    seen_agent_ids: set[str] = set()
+    for role in roles:
+        normalized_role = _normalize_source_collection_agent_role(role)
+        if not normalized_role:
+            continue
+        agent_id = _trim_text(agent_ids.get(normalized_role), max_length=160)
+        if not agent_id or agent_id in seen_agent_ids:
+            continue
+        seen_agent_ids.add(agent_id)
+        agent = agent_directory_service.get_agent(agent_id)
+        if not isinstance(agent, dict):
+            cleanup["skipped"].append({"agentRole": normalized_role, "agentId": agent_id, "reason": "missing_agent"})
+            continue
+        session_id = _trim_text(agent.get("directSessionId"), max_length=160)
+        if not session_id:
+            cleanup["skipped"].append({"agentRole": normalized_role, "agentId": agent_id, "reason": "missing_direct_session"})
+            continue
+        evidence = _source_collection_stage_session_previous_round_evidence(session_id, run_id="")
+        if not evidence:
+            continue
+        stage_id = _normalize_source_collection_stage_id(
+            evidence.get("previousStageId") or _source_collection_stage_id_for_agent_role(normalized_role),
+            default="finding",
+        )
+        try:
+            reset_result = session_service.reset_agent_direct_session_lightweight(
+                session_id,
+                agent_id=agent_id,
+                title=_source_collection_stage_task_title(stage_id),
+            )
+        except session_service.SessionNotFoundError:
+            cleanup["skipped"].append({"agentRole": normalized_role, "agentId": agent_id, "sessionId": session_id, "reason": "missing_session"})
+            continue
+        except Exception as exc:
+            _record_workflow_event(
+                "source_collection.stage_session_cleanup_failed",
+                normalized_team_id,
+                level="warning",
+                fields={
+                    "agentRole": normalized_role,
+                    "agentId": agent_id,
+                    "previousDirectSessionId": session_id,
+                    "previousSourceRunId": evidence.get("previousSourceRunId", ""),
+                    "errorType": type(exc).__name__,
+                },
+            )
+            raise TeamWorkflowOrchestrationError(
+                f"Previous source collection Agent session records could not be cleaned: {exc}"
+            ) from exc
+        replacement_session_id = (
+            _trim_text(reset_result.get("replacementDirectSessionId"), max_length=160)
+            or _trim_text(reset_result.get("nextActiveSessionId"), max_length=160)
+        )
+        item = {
+            "status": "cleaned",
+            "reason": "previous_source_collection_round",
+            "agentRole": normalized_role,
+            "agentId": agent_id,
+            "previousDirectSessionId": session_id,
+            "replacementDirectSessionId": replacement_session_id,
+            "previousSourceRunId": evidence.get("previousSourceRunId", ""),
+            "previousTeamId": evidence.get("previousTeamId", ""),
+            "previousMessageKind": evidence.get("previousMessageKind", ""),
+        }
+        cleanup["items"].append(item)
+        _record_workflow_event(
+            "source_collection.stage_session_cleaned_for_new_round",
+            normalized_team_id,
+            fields=item,
+        )
+    cleanup["cleanedCount"] = len(cleanup["items"])
+    return cleanup
 
 
 def _ensure_source_collection_stage_agent_session_isolated(
@@ -1901,6 +2000,11 @@ def start_source_collection_run(team_id: str, payload: dict[str, Any] | None = N
         prompt_cache_policy=prompt_cache_policy,
     )
     scope["dataSearchPlanRef"] = _source_collection_search_plan_ref(preliminary_search_plan)
+    session_cleanup = _clean_source_collection_stage_agent_sessions_for_new_round(
+        normalized_team_id,
+        roles,
+        request_payload,
+    )
     run = data_processing_service.create_processing_run(
         data_processing_service.DEFAULT_PROFILE_ID,
         title=title,
@@ -1921,6 +2025,8 @@ def start_source_collection_run(team_id: str, payload: dict[str, Any] | None = N
             "promptCacheModelId": prompt_cache_policy["modelId"],
             "promptCacheMode": prompt_cache_policy["promptCacheMode"],
             "promptCacheGateStatus": prompt_cache_policy["gate"]["status"],
+            "sessionCleanupStatus": session_cleanup["status"],
+            "sessionCleanupCleanedCount": session_cleanup["cleanedCount"],
         },
     )
     search_plan = _build_source_collection_search_plan(
@@ -1990,6 +2096,7 @@ def start_source_collection_run(team_id: str, payload: dict[str, Any] | None = N
             "promptCacheGateStatus": prompt_cache_policy["gate"]["status"],
             "teamAgentBindingCount": sum(1 for item in assignments if str(item.get("agentId") or "") != str(item.get("agentRole") or "")),
             "sourceCollectionRunDirectory": storage_artifacts["runDirectory"],
+            "sessionCleanupCleanedCount": session_cleanup["cleanedCount"],
         },
     )
     local_workspace_scan = _import_source_collection_local_workspace_sources(
@@ -2003,6 +2110,7 @@ def start_source_collection_run(team_id: str, payload: dict[str, Any] | None = N
         "searchPlan": search_plan,
         "storageArtifacts": storage_artifacts,
         "promptCachePolicy": prompt_cache_policy,
+        "sessionCleanup": session_cleanup,
         "localWorkspaceScan": local_workspace_scan,
         "assignments": assignments,
         "assignmentCount": len(assignments),
