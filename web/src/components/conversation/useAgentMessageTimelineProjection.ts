@@ -229,6 +229,22 @@ function hasVisibleProjectionMessageContent(message: ConversationMessage) {
   );
 }
 
+function shouldKeepStreamingActiveTurnPlaceholder(message: ConversationMessage) {
+  return Boolean(
+    message.role === "assistant"
+    && message.streaming
+    && isSessionActiveTurnLayerMessage(message)
+  );
+}
+
+function compactStreamingActiveTurnPlaceholderMessage(message: ConversationMessage): ConversationMessage {
+  return {
+    ...message,
+    content: answerProjectionContent(message),
+    feedbackEvents: visibleFeedbackEvents(message.feedbackEvents),
+  };
+}
+
 function mergeProjectedMessageIds(...messages: ConversationMessage[]) {
   const ids: string[] = [];
   const seen = new Set<string>();
@@ -307,10 +323,16 @@ export function projectAgentMessageTimelineMessages({
       }
       return true;
     });
-    if (!hasVisibleProjectionMessageContent(mergedActiveTurnMessage)) {
+    const keepStreamingActiveTurnPlaceholder = shouldKeepStreamingActiveTurnPlaceholder(mergedActiveTurnMessage);
+    if (!hasVisibleProjectionMessageContent(mergedActiveTurnMessage) && !keepStreamingActiveTurnPlaceholder) {
       return projectTimelineProcessMessages(dedupedTimelineMessages);
     }
-    return projectTimelineProcessMessages([...dedupedTimelineMessages, mergedActiveTurnMessage]);
+    return projectTimelineProcessMessages([
+      ...dedupedTimelineMessages,
+      keepStreamingActiveTurnPlaceholder
+        ? compactStreamingActiveTurnPlaceholderMessage(mergedActiveTurnMessage)
+        : mergedActiveTurnMessage,
+    ]);
   })();
   const projectedAgentMessages = projectedMessages.map(conversationMessageToAgentMessage);
 
