@@ -29,6 +29,34 @@ const SPECIAL_ROUTE_STYLE_FILES = [
   resolve(routeRoot, "KernelTaskCenterRoute.styles.ts"),
 ] as const;
 
+const NON_HOT_ROUTE_HOVER_STYLE_FILES = [
+  resolve(routeRoot, "ToolsRoute.styles.ts"),
+  resolve(routeRoot, "RuntimeScenesPane.styles.ts"),
+  resolve(routeRoot, "ResearchRoute.styles.ts"),
+  resolve(routeRoot, "LogsRoute.styles.ts"),
+  resolve(routeRoot, "ResearchFlowCanvasRoute.styles.ts"),
+  resolve(routeRoot, "TeamsRoute.styles.ts"),
+] as const;
+
+const MEMORY_ROUTE_HOVER_STYLE_FILES = MEMORY_STYLE_FILES;
+
+const CHAT_ROUTE_HOVER_STYLE_FILES = [
+  resolve(routeRoot, "AgentSessionTabStrip.styles.ts"),
+  resolve(routeRoot, "ChatCodingRoute.styles.ts"),
+  resolve(routeRoot, "chat/ChatFileWorkspaceTabs.styles.ts"),
+  resolve(routeRoot, "DirectSessionIndexItem.styles.ts"),
+  resolve(routeRoot, "SessionContextMenu.styles.ts"),
+] as const;
+
+const LEGACY_LOUD_HOVER_RECIPE =
+  "hover:border-[var(--border-strong)] hover:bg-[var(--vui-control-muted-hover)] hover:text-[var(--fg-primary)]";
+
+const SHARED_QUIET_HOVER_TOKENS = [
+  "hover:border-[var(--vui-control-hover-border)]",
+  "hover:bg-[var(--vui-control-hover-bg)]",
+  "hover:text-[var(--vui-control-hover-fg)]",
+] as const;
+
 const HEADER_CHROME_KEYS = [
   "activeWorkDetailHeader",
   "cacheDetailHeader",
@@ -219,6 +247,76 @@ describe("route aesthetic contract", () => {
           entry.value.includes("shadow-[var(--vui-shadow-hairline)]"),
       )
       .map(formatViolation);
+
+    expect(offenders).toEqual([]);
+  });
+
+  it("routes non-hot route hover states through shared quiet hover tokens", () => {
+    const offenders = NON_HOT_ROUTE_HOVER_STYLE_FILES.flatMap((file) => {
+      const source = readSource(file);
+      const filename = file.split(/[/\\]/).pop();
+      const violations = [];
+
+      if (source.includes(LEGACY_LOUD_HOVER_RECIPE)) {
+        violations.push(`${filename}:legacy-loud-hover`);
+      }
+
+      for (const token of SHARED_QUIET_HOVER_TOKENS) {
+        if (!source.includes(token)) {
+          violations.push(`${filename}:missing:${token}`);
+        }
+      }
+
+      return violations;
+    });
+
+    expect(offenders).toEqual([]);
+  });
+
+  it("routes Memory hover states through shared quiet hover tokens", () => {
+    const offenders = MEMORY_ROUTE_HOVER_STYLE_FILES.flatMap((file) => {
+      const source = readSource(file);
+      const filename = file.split(/[/\\]/).pop();
+      const violations = [];
+
+      if (!source.includes(LEGACY_LOUD_HOVER_RECIPE)) {
+        return violations;
+      }
+
+      violations.push(`${filename}:legacy-loud-hover`);
+
+      for (const token of SHARED_QUIET_HOVER_TOKENS) {
+        if (!source.includes(token)) {
+          violations.push(`${filename}:missing:${token}`);
+        }
+      }
+
+      return violations;
+    });
+
+    expect(offenders).toEqual([]);
+  });
+
+  it("routes chat route hover states through shared quiet hover tokens", () => {
+    const offenders = CHAT_ROUTE_HOVER_STYLE_FILES.flatMap((file) => {
+      const source = readSource(file);
+      const filename = file.split(/[/\\]/).pop();
+      const violations = [];
+
+      if (!source.includes(LEGACY_LOUD_HOVER_RECIPE)) {
+        return violations;
+      }
+
+      violations.push(`${filename}:legacy-loud-hover`);
+
+      for (const token of SHARED_QUIET_HOVER_TOKENS) {
+        if (!source.includes(token)) {
+          violations.push(`${filename}:missing:${token}`);
+        }
+      }
+
+      return violations;
+    });
 
     expect(offenders).toEqual([]);
   });
