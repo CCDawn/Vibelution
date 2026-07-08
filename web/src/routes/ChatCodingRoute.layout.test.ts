@@ -1668,7 +1668,8 @@ describe("ChatCodingRoute layout contract", () => {
 
   it("coalesces high-frequency direct session stream snapshots before updating UI cache", () => {
     expect(routeSource).toContain("const SESSION_STREAM_MIN_APPLY_INTERVAL_MS = 350");
-    expect(routeSource).toContain("sessionDetailSnapshotKey(previous) === sessionDetailSnapshotKey(detail)");
+    expect(routeSource).toContain("const nextDetail = mergeSessionDetailMessageWindow(previous, detail)");
+    expect(routeSource).toContain("sessionDetailSnapshotKey(previous) === sessionDetailSnapshotKey(nextDetail)");
     expect(routeSource).toContain("setActiveTurnLayerForSession(current, streamSessionId, undefined)");
     expect(routeSource).toContain("let pendingDetail: SessionDetail | null = null");
     expect(routeSource).toContain("function queueSessionDetail(detail: SessionDetail, payloadLength: number)");
@@ -2452,8 +2453,21 @@ describe("ChatCodingRoute layout contract", () => {
     expect(requestedSessionBranch).toContain("setActiveGroupRoomId(\"\")");
     expect(requestedSessionBranch).toContain("setActiveSession(requestedSessionId)");
     expect(requestedSessionBranch).not.toContain("sessionsQuery.data?.some");
-    expect(routeSource).toContain("queryFn: () => fetchJson<SessionDetail>(`/api/sessions/${activeSessionId}`)");
+    expect(routeSource).toContain("queryFn: () => fetchSessionDetailWindow(activeSessionId)");
     expect(routeSource).toContain("enabled: Boolean(activeSessionId)");
+  });
+
+  it("loads direct session details as a window and wires top-edge history paging", () => {
+    expect(routeSource).toContain("const SESSION_DETAIL_INITIAL_MESSAGE_LIMIT = 40");
+    expect(routeSource).toContain("function fetchSessionDetailWindow(");
+    expect(routeSource).toContain("params.set(\"messageLimit\", String(options.messageLimit ?? SESSION_DETAIL_INITIAL_MESSAGE_LIMIT))");
+    expect(routeSource).toContain("params.set(\"transcriptScope\", options.transcriptScope ?? \"window\")");
+    expect(routeSource).toContain("structuralSharing: (previous, next) =>");
+    expect(routeSource).toContain("mergeSessionDetailMessageWindow(current, page)");
+    expect(routeSource).toContain("const nextDetail = mergeSessionDetailMessageWindow(previous, detail)");
+    expect(routeSource).toContain("hasEarlierMessages={Boolean(detail.messageWindow?.hasEarlier)}");
+    expect(routeSource).toContain("earlierMessagesLoading={loadEarlierSessionMessagesMutation.isPending}");
+    expect(routeSource).toContain("onLoadEarlierMessages={handleLoadEarlierSessionMessages}");
   });
 
   it("keeps paginated session query caches synchronized with optimistic list mutations", () => {

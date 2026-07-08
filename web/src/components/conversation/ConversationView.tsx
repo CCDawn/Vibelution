@@ -471,6 +471,8 @@ export function ConversationView({
   showComposer = true,
   processDisplayMode = "answer",
   autoScrollToLatest = true,
+  hasEarlierMessages = false,
+  earlierMessagesLoading = false,
   onStreamingFramePaint,
   composerValue,
   composerPlaceholder,
@@ -508,6 +510,7 @@ export function ConversationView({
   onRemoveComposerReference,
   onEditUserMessage,
   onCancelComposerMode,
+  onLoadEarlierMessages,
   onSubmit,
   onStop,
   onSafeGuidance,
@@ -702,6 +705,8 @@ export function ConversationView({
     [displayMessages],
   );
   const visibleMessageCount = Math.min(displayMessages.length, visibleMessageLimit);
+  const hiddenRenderedMessageCount = displayMessages.length - visibleMessageCount;
+  const hiddenHistorySignalCount = hiddenRenderedMessageCount + (hasEarlierMessages ? 1 : 0);
   const timelineMessages = useMemo(
     () => displayMessages.slice(displayMessages.length - visibleMessageCount),
     [displayMessages, visibleMessageCount],
@@ -995,7 +1000,7 @@ export function ConversationView({
       const previousScrollTop = lastTimelineScrollTopRef.current;
       if (shouldLoadEarlierConversationMessages({
         clientHeight: timeline.clientHeight,
-        hiddenMessageCount: displayMessages.length - visibleMessageCount,
+        hiddenMessageCount: hiddenHistorySignalCount,
         previousScrollTop,
         scrollHeight: timeline.scrollHeight,
         scrollTop: timeline.scrollTop,
@@ -1018,7 +1023,15 @@ export function ConversationView({
     handleScroll();
     timeline.addEventListener("scroll", handleScroll);
     return () => timeline.removeEventListener("scroll", handleScroll);
-  }, [displayMessages.length, sessionId, visibleMessageCount]);
+  }, [
+    displayMessages.length,
+    earlierMessagesLoading,
+    hasEarlierMessages,
+    hiddenHistorySignalCount,
+    onLoadEarlierMessages,
+    sessionId,
+    visibleMessageCount,
+  ]);
 
   useEffect(() => {
     if (!previewImage) {
@@ -1168,6 +1181,16 @@ export function ConversationView({
 
   function revealEarlierTimelineMessages() {
     if (visibleMessageCount >= displayMessages.length) {
+      if (!hasEarlierMessages || !onLoadEarlierMessages || earlierMessagesLoading) {
+        return;
+      }
+      preserveCurrentExpansionDefaults();
+      historyScrollAnchorRef.current = captureTimelineRowKeyAnchor(timelineRef.current);
+      atBottomRef.current = false;
+      followLatestRef.current = false;
+      setIsAtBottom(false);
+      setVisibleMessageLimit((current) => current + TIMELINE_HISTORY_LOAD_BATCH_COUNT);
+      onLoadEarlierMessages();
       return;
     }
     preserveCurrentExpansionDefaults();

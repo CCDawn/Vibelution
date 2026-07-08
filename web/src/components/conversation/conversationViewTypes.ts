@@ -54,6 +54,8 @@ export type ConversationViewProps = {
   showComposer?: boolean;
   processDisplayMode?: ConversationProcessDisplayMode;
   autoScrollToLatest?: boolean;
+  hasEarlierMessages?: boolean;
+  earlierMessagesLoading?: boolean;
   onStreamingFramePaint?: (metrics: ConversationStreamingFramePaintMetrics) => void;
   composerValue: string;
   composerPlaceholder: string;
@@ -92,6 +94,7 @@ export type ConversationViewProps = {
   onRemoveComposerReference?: (referenceId: string) => void;
   onEditUserMessage?: (message: ConversationMessage) => void;
   onCancelComposerMode?: () => void;
+  onLoadEarlierMessages?: () => void;
   onSubmit: () => void;
   onStop?: () => void;
   onSafeGuidance?: () => void;

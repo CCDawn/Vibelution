@@ -5613,6 +5613,18 @@ export type SessionCacheComposition = {
   averageObservedTurnCount?: number;
 };
 
+export type SessionMessageWindow = {
+  mode: "window" | string;
+  totalMessages: number;
+  returnedMessages: number;
+  oldestMessageIndex: number;
+  newestMessageIndex: number;
+  hasEarlier: boolean;
+  hasLater: boolean;
+  nextBeforeMessageIndex?: number | null;
+  transcriptScope: "all" | "window" | "none" | string;
+};
+
 export type SessionDetail = SessionSummary & {
   ledgerSeq?: number;
   activeTask?: SessionActiveTask | null;
@@ -5622,6 +5634,7 @@ export type SessionDetail = SessionSummary & {
   changedFiles: string[];
   readFiles: string[];
   messages: ConversationMessage[];
+  messageWindow?: SessionMessageWindow;
   runtimeNotices?: SessionRuntimeNotice[];
   contextUsage?: {
     used: number;

@@ -1,4 +1,4 @@
-import { ConversationMessage, SessionDetail, SessionReferenceAttachment, SessionStreamEvent, SessionSummary } from "../api/types";
+import { ConversationMessage, SessionDetail, SessionMessageWindow, SessionReferenceAttachment, SessionStreamEvent, SessionSummary } from "../api/types";
 
 export type OptimisticUserMessageInput = {
   sessionId: string;
@@ -82,6 +82,93 @@ export type SessionDetailLoadState = {
   transientError: boolean;
   backgroundError: boolean;
 };
+
+function messageWindowIndex(message: ConversationMessage): number {
+  const match = String(message.id || "").match(/-message-(\d+)$/);
+  const index = match ? Number(match[1]) : 0;
+  return Number.isFinite(index) && index > 0 ? index : Number.POSITIVE_INFINITY;
+}
+
+function mergeConversationMessageWindows(
+  previousMessages: ConversationMessage[],
+  nextMessages: ConversationMessage[],
+): ConversationMessage[] {
+  const orderById = new Map<string, number>();
+  const mergedById = new Map<string, ConversationMessage>();
+  for (const message of [...previousMessages, ...nextMessages]) {
+    const id = String(message.id || "").trim();
+    if (!id) {
+      continue;
+    }
+    if (!orderById.has(id)) {
+      orderById.set(id, orderById.size);
+    }
+    mergedById.set(id, message);
+  }
+  return [...mergedById.values()].sort((left, right) => {
+    const leftIndex = messageWindowIndex(left);
+    const rightIndex = messageWindowIndex(right);
+    if (leftIndex !== rightIndex) {
+      return leftIndex - rightIndex;
+    }
+    return (orderById.get(left.id) ?? 0) - (orderById.get(right.id) ?? 0);
+  });
+}
+
+function mergedMessageWindow(
+  previous: SessionMessageWindow,
+  next: SessionMessageWindow,
+  messages: ConversationMessage[],
+): SessionMessageWindow {
+  const totalMessages = Math.max(previous.totalMessages || 0, next.totalMessages || 0);
+  const finiteIndexes = messages
+    .map(messageWindowIndex)
+    .filter((index) => Number.isFinite(index));
+  const oldestCandidates = [
+    ...finiteIndexes,
+    previous.oldestMessageIndex || 0,
+    next.oldestMessageIndex || 0,
+  ].filter((index) => index > 0);
+  const newestCandidates = [
+    ...finiteIndexes,
+    previous.newestMessageIndex || 0,
+    next.newestMessageIndex || 0,
+  ].filter((index) => index > 0);
+  const oldestMessageIndex = finiteIndexes.length
+    ? Math.min(...oldestCandidates)
+    : Math.min(previous.oldestMessageIndex || 0, next.oldestMessageIndex || 0);
+  const newestMessageIndex = finiteIndexes.length
+    ? Math.max(...newestCandidates)
+    : Math.max(previous.newestMessageIndex || 0, next.newestMessageIndex || 0);
+  const hasEarlier = oldestMessageIndex > 1 && (previous.hasEarlier || next.hasEarlier || oldestMessageIndex > 1);
+  const hasLater = totalMessages > 0 && newestMessageIndex < totalMessages;
+  return {
+    ...next,
+    totalMessages,
+    returnedMessages: messages.length,
+    oldestMessageIndex,
+    newestMessageIndex,
+    hasEarlier,
+    hasLater,
+    nextBeforeMessageIndex: hasEarlier ? oldestMessageIndex : null,
+  };
+}
+
+export function mergeSessionDetailMessageWindow(
+  previous: SessionDetail | undefined,
+  next: SessionDetail,
+): SessionDetail {
+  if (!previous || previous.id !== next.id || !previous.messageWindow || !next.messageWindow) {
+    return next;
+  }
+  const messages = mergeConversationMessageWindows(previous.messages ?? [], next.messages ?? []);
+  const base = next.messageWindow.hasLater ? previous : next;
+  return {
+    ...base,
+    messages,
+    messageWindow: mergedMessageWindow(previous.messageWindow, next.messageWindow, messages),
+  };
+}
 
 export function sessionSummaryFromDetail(detail: SessionDetail): SessionSummary {
   const summary: SessionSummary = {
