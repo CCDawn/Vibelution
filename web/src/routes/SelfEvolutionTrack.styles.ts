@@ -28,10 +28,6 @@ export const selfEvolutionTrackStyles = {
   paneCollapsed: "overflow-hidden p-0 invisible",
   centerColumn: "grid h-full min-h-0 min-w-0 max-w-full grid-rows-[auto_minmax(0,1fr)] gap-3 overflow-hidden overflow-x-hidden max-[1180px]:h-auto max-[1180px]:overflow-visible max-[1180px]:overflow-x-hidden",
   conversationShell: "grid h-full max-h-full min-h-[420px] min-w-0 max-w-full overflow-hidden overflow-x-hidden rounded-[var(--radius-panel)] border border-vui-border-subtle bg-vui-surface-panel max-[1180px]:h-[min(74vh,760px)] max-[1180px]:overflow-hidden max-[1180px]:overflow-x-hidden max-[760px]:h-[min(72vh,720px)] max-[760px]:min-h-[540px]",
-  observationWorkspace:
-    "grid h-full max-h-full min-h-0 min-w-0 max-w-full grid-cols-[minmax(0,1fr)_minmax(280px,360px)] gap-2.5 overflow-hidden overflow-x-hidden max-[1180px]:h-auto max-[1180px]:grid-cols-1 max-[1180px]:overflow-visible max-[1180px]:overflow-x-hidden",
-  observationConversationPane:
-    "grid h-full max-h-full min-h-0 overflow-hidden max-[1180px]:h-[min(72vh,720px)] max-[1180px]:min-h-[520px]",
   observationEvidenceRail:
     `grid h-full max-h-full min-h-0 content-start gap-3 overflow-auto p-3.5 max-[1180px]:h-auto max-[1180px]:max-h-none ${panelSurface}`,
   observationEventTimeline: `grid gap-2 p-2.5 ${rowSurfaceSoft}`,

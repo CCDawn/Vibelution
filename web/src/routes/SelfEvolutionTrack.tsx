@@ -114,6 +114,28 @@ type ConversationTaskSummary = {
   updatedAt: string;
 };
 
+type SelfEvolutionConversationSurface = {
+  sessionId: string;
+  eyebrowLabel: string;
+  title: string;
+  phase: string;
+  messages: ConversationMessage[];
+  taskSummary: string;
+  defaultFileContext: string;
+  stats: Array<{ label: string; value: string | number }>;
+  autoScrollToLatest: boolean;
+  showComposer: boolean;
+  composerValue: string;
+  composerPlaceholder: string;
+  composerDisabled: boolean;
+  composerPending: boolean;
+  composerError?: string;
+  submitLabel: string;
+  submitPendingLabel: string;
+  onComposerChange: (value: string) => void;
+  onSubmit: () => void;
+};
+
 type SelfEvolutionPetCompanionTone = "idle" | "active" | "paused" | "caution" | "error";
 const SELF_EVOLUTION_PET_COMPANION_TONE_CLASS: Record<SelfEvolutionPetCompanionTone, string> = {
   idle: styles.petCompanionTone_idle,
@@ -1055,6 +1077,61 @@ export function SelfEvolutionTrack({
   const centerWorkflowSummary = observationRunModeActive
     ? activeNextAction
     : selectedWorkflowStep?.livePreview || selectedWorkflowStep?.summary || activeNextAction;
+  const activeConversationSurface: SelfEvolutionConversationSurface = observationRunModeActive
+    ? {
+      sessionId: observationConversationReady ? observationConversationSessionId : "self-observation-pending",
+      eyebrowLabel: lang === "zh" ? "自主观察" : "Self observation",
+      title: lang === "zh" ? "自主观察会话" : "Observation session",
+      phase: observationSessionDetail?.currentPhase || observationRun?.status || "idle",
+      messages: observationConversationReady ? observationSessionMessages : observationPendingConversationMessages,
+      taskSummary: observationSessionDetail?.taskSummary
+        || observationRun?.latestMessage
+        || observationRun?.report
+        || (lang === "zh" ? "等待自主观察 Agent 会话。" : "Waiting for the self-observation agent session."),
+      defaultFileContext: observationSessionDetail?.defaultFileContext || SELF_EVOLUTION_CONVERSATION_CONTEXT,
+      stats: [
+        { label: lang === "zh" ? "目标" : "Goal", value: observationRun?.goal || observationGoalValue || (lang === "zh" ? "输入观察目标" : "Enter a goal") },
+        { label: lang === "zh" ? "工具" : "Tools", value: OBSERVATION_MODE_TOOL_COUNT },
+        { label: lang === "zh" ? "时长" : "Duration", value: observationRun?.durationSeconds ?? normalizedObservationDuration },
+        { label: "worktree", value: OBSERVATION_MODE_WORKTREE_STATE },
+      ],
+      autoScrollToLatest: observationRunActive,
+      showComposer: !observationRunActive,
+      composerValue: observationGoalInput,
+      composerPlaceholder: lang === "zh" ? "描述要观察 Agent 如何思考的问题" : "Describe what you want to observe",
+      composerDisabled: observationStartPending || observationRunActive || !observationDurationValid,
+      composerPending: observationStartPending,
+      composerError: observationStartError || observationDurationError || undefined,
+      submitLabel: lang === "zh" ? "开始自主观察" : "Start observation",
+      submitPendingLabel: lang === "zh" ? "启动中" : "Starting",
+      onComposerChange: setObservationGoalInput,
+      onSubmit: () => onStartObservation({ goal: observationGoalValue, durationSeconds: normalizedObservationDuration }),
+    }
+    : {
+      sessionId: selectedWorkflowStep?.conversationSessionId || worktreeRun?.runId || "self-evolution",
+      eyebrowLabel: selfEvolutionStep.label,
+      title: selectedWorkflowStep?.label || t("selfWorkspacePage"),
+      phase: selectedWorkflowStep?.status || worktreeRun?.status || overview?.readiness.state || "idle",
+      messages: conversationMessages,
+      taskSummary: conversationTask.latestSummary,
+      defaultFileContext: SELF_EVOLUTION_CONVERSATION_CONTEXT,
+      stats: [
+        { label: lang === "zh" ? "目标" : "Goal", value: conversationTask.goal },
+        { label: lang === "zh" ? "事务" : "Txn", value: transactionItems.length },
+        { label: lang === "zh" ? "文件" : "Files", value: changedFiles.length || overview?.worktree.dirtyFileCount || 0 },
+        { label: lang === "zh" ? "更新" : "Updated", value: compactTimestamp(conversationTask.updatedAt) },
+      ],
+      autoScrollToLatest: runIsActive,
+      showComposer: !runIsActive && !worktreeRunLocked && !runLocked,
+      composerValue: goalInput,
+      composerPlaceholder: t("selfGoalPlaceholder"),
+      composerDisabled: !startSelfAction?.enabled || runLocked || worktreeRunLocked || startPending,
+      composerPending: startPending,
+      submitLabel: t("startSelfWorktreeRun"),
+      submitPendingLabel: t("loading"),
+      onComposerChange: onGoalInputChange,
+      onSubmit: onStartRun,
+    };
   const worktreeTerminateVisible = runIsActive && Boolean(worktreeRun);
   const observationTerminateVisible = observationRunModeActive && observationRunActive && Boolean(observationRun?.runId);
   const showTopTerminateAction = worktreeTerminateVisible || observationTerminateVisible;
@@ -1183,43 +1260,6 @@ export function SelfEvolutionTrack({
       <section className={styles.surface} aria-busy="false">
         <div className={styles.emptyState}>{t("loadFailed")}</div>
       </section>
-    );
-  }
-
-  function renderObservationPendingConversationShell() {
-    return (
-      <LazyConversationView
-        sessionId="self-observation-pending"
-        density="compact"
-        eyebrowLabel={lang === "zh" ? "自主观察" : "Self observation"}
-        title={lang === "zh" ? "自主观察会话" : "Observation session"}
-        phase={observationRun?.status || "idle"}
-        messages={observationPendingConversationMessages}
-        assistantDisplayName={pet?.name}
-        assistantAvatarFallback={petAvatarFallback}
-        userDisplayName={runtime?.userName}
-        taskSummary={observationRun?.latestMessage || (lang === "zh" ? "等待自主观察 Agent 会话。" : "Waiting for the self-observation agent session.")}
-        defaultFileContext={SELF_EVOLUTION_CONVERSATION_CONTEXT}
-        summaryItems={[]}
-        stats={[
-          { label: lang === "zh" ? "目标" : "Goal", value: observationRun?.goal || observationGoalValue || (lang === "zh" ? "输入观察目标" : "Enter a goal") },
-          { label: lang === "zh" ? "工具" : "Tools", value: OBSERVATION_MODE_TOOL_COUNT },
-          { label: lang === "zh" ? "时长" : "Duration", value: observationRun?.durationSeconds ?? normalizedObservationDuration },
-          { label: "worktree", value: OBSERVATION_MODE_WORKTREE_STATE },
-        ]}
-        autoScrollToLatest={observationRunActive}
-        showComposer={!observationRunActive}
-        composerValue={observationGoalInput}
-        composerPlaceholder={lang === "zh" ? "描述要观察 Agent 如何思考的问题" : "Describe what you want to observe"}
-        composerDisabled={observationStartPending || observationRunActive || !observationDurationValid}
-        composerPending={observationStartPending}
-        composerError={observationStartError || observationDurationError || undefined}
-        submitLabel={lang === "zh" ? "开始自主观察" : "Start observation"}
-        submitPendingLabel={lang === "zh" ? "启动中" : "Starting"}
-        onComposerChange={setObservationGoalInput}
-        onSubmit={() => onStartObservation({ goal: observationGoalValue, durationSeconds: normalizedObservationDuration })}
-        fallback={<div className={styles.loadingShell}>{t("loadingSession")}</div>}
-      />
     );
   }
 
@@ -1414,6 +1454,7 @@ export function SelfEvolutionTrack({
                 {observationRun?.boundaryViolation ? <p className={styles.errorText}>{observationRun.boundaryViolation}</p> : null}
               </div>
             </section>
+            {renderObservationEvidenceRail()}
           </div>
         </div>
       );
@@ -1492,49 +1533,6 @@ export function SelfEvolutionTrack({
         {reportPreview ? <p className={styles.compactPreviewText}>{reportPreview}</p> : null}
         {observationRun?.boundaryViolation ? <p className={styles.errorText}>{observationRun.boundaryViolation}</p> : null}
       </aside>
-    );
-  }
-
-  function renderObservationModeConversationPane() {
-    return (
-      <div className={styles.observationWorkspace}>
-        <div className={styles.observationConversationPane}>
-          {observationConversationReady ? (
-            <LazyConversationView
-              sessionId={observationConversationSessionId}
-              density="compact"
-              eyebrowLabel={lang === "zh" ? "自主观察" : "Self observation"}
-              title={lang === "zh" ? "自主观察会话" : "Observation session"}
-              phase={observationSessionDetail?.currentPhase || observationRun?.status || "idle"}
-              messages={observationSessionMessages}
-              assistantDisplayName={pet?.name}
-              assistantAvatarFallback={petAvatarFallback}
-              userDisplayName={runtime?.userName}
-              taskSummary={observationSessionDetail?.taskSummary || observationRun?.latestMessage || observationRun?.report || ""}
-              defaultFileContext={observationSessionDetail?.defaultFileContext || "self_observation"}
-              summaryItems={[]}
-              stats={[
-                { label: lang === "zh" ? "观察目标" : "Goal", value: observationRun?.goal || observationGoalValue || "--" },
-                { label: lang === "zh" ? "时长" : "Duration", value: observationRun?.durationSeconds ?? normalizedObservationDuration },
-                { label: lang === "zh" ? "工具" : "Tools", value: OBSERVATION_MODE_TOOL_COUNT },
-                { label: "worktree", value: OBSERVATION_MODE_WORKTREE_STATE },
-              ]}
-              autoScrollToLatest={observationRunActive}
-              showComposer={false}
-              composerValue=""
-              composerPlaceholder=""
-              composerDisabled
-              composerPending={false}
-              onComposerChange={() => undefined}
-              onSubmit={() => undefined}
-              fallback={<div className={styles.loadingShell}>{t("loadingSession")}</div>}
-            />
-          ) : (
-            renderObservationPendingConversationShell()
-          )}
-        </div>
-        {renderObservationEvidenceRail()}
-      </div>
     );
   }
 
@@ -1773,11 +1771,8 @@ export function SelfEvolutionTrack({
                     {centerWorkflowSummary}
                   </p>
                 </div>
-                {observationRunModeActive ? (
-                  renderObservationModeConversationPane()
-                ) : (
-                  <div className={styles.conversationShell}>
-                  {selectedWorkflowStep?.id === "approval" ? (
+                <div className={styles.conversationShell}>
+                  {!observationRunModeActive && selectedWorkflowStep?.id === "approval" ? (
                     <section className={styles.approvalPanel}>
                       <div className={styles.subsurfaceHeader}>
                         <div>
@@ -1829,39 +1824,34 @@ export function SelfEvolutionTrack({
                     </section>
                   ) : (
                     <LazyConversationView
-                      sessionId={selectedWorkflowStep?.conversationSessionId || worktreeRun?.runId || "self-evolution"}
+                      sessionId={activeConversationSurface.sessionId}
                       density="compact"
-                      eyebrowLabel={selfEvolutionStep.label}
-                      title={selectedWorkflowStep?.label || t("selfWorkspacePage")}
-                      phase={selectedWorkflowStep?.status || worktreeRun?.status || overview.readiness.state}
-                      messages={conversationMessages}
+                      eyebrowLabel={activeConversationSurface.eyebrowLabel}
+                      title={activeConversationSurface.title}
+                      phase={activeConversationSurface.phase}
+                      messages={activeConversationSurface.messages}
                       assistantDisplayName={pet?.name}
                       assistantAvatarFallback={petAvatarFallback}
                       userDisplayName={runtime?.userName}
-                      taskSummary={conversationTask.latestSummary}
-                      defaultFileContext={SELF_EVOLUTION_CONVERSATION_CONTEXT}
+                      taskSummary={activeConversationSurface.taskSummary}
+                      defaultFileContext={activeConversationSurface.defaultFileContext}
                       summaryItems={[]}
-                      stats={[
-                        { label: lang === "zh" ? "目标" : "Goal", value: conversationTask.goal },
-                        { label: lang === "zh" ? "事务" : "Txn", value: transactionItems.length },
-                        { label: lang === "zh" ? "文件" : "Files", value: changedFiles.length || overview.worktree.dirtyFileCount },
-                        { label: lang === "zh" ? "更新" : "Updated", value: compactTimestamp(conversationTask.updatedAt) },
-                      ]}
-                      autoScrollToLatest={runIsActive}
-                      showComposer={!runIsActive && !worktreeRunLocked && !runLocked}
-                      composerValue={goalInput}
-                      composerPlaceholder={t("selfGoalPlaceholder")}
-                      composerDisabled={!startSelfAction?.enabled || runLocked || worktreeRunLocked || startPending}
-                      composerPending={startPending}
-                      submitLabel={t("startSelfWorktreeRun")}
-                      submitPendingLabel={t("loading")}
-                      onComposerChange={onGoalInputChange}
-                      onSubmit={onStartRun}
+                      stats={activeConversationSurface.stats}
+                      autoScrollToLatest={activeConversationSurface.autoScrollToLatest}
+                      showComposer={activeConversationSurface.showComposer}
+                      composerValue={activeConversationSurface.composerValue}
+                      composerPlaceholder={activeConversationSurface.composerPlaceholder}
+                      composerDisabled={activeConversationSurface.composerDisabled}
+                      composerPending={activeConversationSurface.composerPending}
+                      composerError={activeConversationSurface.composerError}
+                      submitLabel={activeConversationSurface.submitLabel}
+                      submitPendingLabel={activeConversationSurface.submitPendingLabel}
+                      onComposerChange={activeConversationSurface.onComposerChange}
+                      onSubmit={activeConversationSurface.onSubmit}
                       fallback={<div className={styles.loadingShell}>{t("loadingSession")}</div>}
                     />
                   )}
-                  </div>
-                )}
+                </div>
               </>
           </main>
             </div>
