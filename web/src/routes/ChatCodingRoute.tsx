@@ -104,6 +104,7 @@ import {
   appendOptimisticUserMessage,
   markSessionDetailRunning,
   markSessionSummaryRunning,
+  mergeSessionDetailMessageWindow,
   mergeSessionDetailIntoSummaries,
   renameSessionDetail,
   renameSessionInSummaries,
@@ -1134,6 +1135,26 @@ async function uploadSessionImageAttachment(sessionId: string, attachment: Compo
   });
 }
 
+type SessionDetailWindowOptions = {
+  messageLimit?: number;
+  beforeMessageIndex?: number;
+  transcriptScope?: "all" | "window" | "none";
+};
+
+function fetchSessionDetailWindow(
+  sessionId: string | null | undefined,
+  options: SessionDetailWindowOptions = {},
+) {
+  const normalizedSessionId = String(sessionId || "").trim();
+  const params = new URLSearchParams();
+  params.set("messageLimit", String(options.messageLimit ?? SESSION_DETAIL_INITIAL_MESSAGE_LIMIT));
+  params.set("transcriptScope", options.transcriptScope ?? "window");
+  if (options.beforeMessageIndex && options.beforeMessageIndex > 0) {
+    params.set("beforeMessageIndex", String(options.beforeMessageIndex));
+  }
+  return fetchJson<SessionDetail>(`/api/sessions/${encodeURIComponent(normalizedSessionId)}?${params.toString()}`);
+}
+
 const RESIZE_HANDLE_WIDTH = 10;
 const MIN_LEFT_PANEL_WIDTH = 260;
 const MAX_LEFT_PANEL_WIDTH = 560;
@@ -1144,6 +1165,8 @@ const KEYBOARD_RESIZE_STEP = 24;
 const MENTAL_MODEL_TOGGLE_STORAGE_KEY = "vibelution.chat.mentalModelEnabled";
 const MAX_COMPOSER_IMAGE_ATTACHMENTS = 4;
 const MAX_COMPOSER_IMAGE_BYTES = 8 * 1024 * 1024;
+const SESSION_DETAIL_INITIAL_MESSAGE_LIMIT = 40;
+const SESSION_DETAIL_HISTORY_PAGE_SIZE = 40;
 const SESSION_STREAM_MIN_APPLY_INTERVAL_MS = 350;
 const SESSION_STREAM_ROUTE_SWITCH_GRACE_MS = 4_000;
 const CHAT_CENTER_FIRST_MEDIA_QUERY = "(max-width: 980px)";
@@ -2188,7 +2211,7 @@ export function ChatCodingRoute() {
   const expandedGroupAgentDetailQueries = useQueries({
     queries: expandedGroupAgentSessionIds.map((sessionId) => ({
       queryKey: queryKeys.session(sessionId || "none"),
-      queryFn: () => fetchJson<SessionDetail>(`/api/sessions/${sessionId}`),
+      queryFn: () => fetchSessionDetailWindow(sessionId, { messageLimit: 20 }),
       enabled: standardGroupRoomActive && Boolean(sessionId),
       refetchInterval: standardGroupRoomActive && sessionId
         ? resolvePollingInterval(
@@ -2208,11 +2231,12 @@ export function ChatCodingRoute() {
           shouldSyncSummaries = false;
           return previous ?? detail;
         }
-        if (previous && sessionDetailSnapshotKey(previous) === sessionDetailSnapshotKey(detail)) {
+        const nextDetail = mergeSessionDetailMessageWindow(previous, detail);
+        if (previous && sessionDetailSnapshotKey(previous) === sessionDetailSnapshotKey(nextDetail)) {
           shouldSyncSummaries = false;
           return previous;
         }
-        return detail;
+        return nextDetail;
       });
       if (!shouldSyncSummaries) {
         return;
@@ -2369,9 +2393,24 @@ export function ChatCodingRoute() {
   const sessionDetailQuery = useQuery({
     queryKey: queryKeys.session(activeSessionId ?? "none"),
     enabled: Boolean(activeSessionId),
-    queryFn: () => fetchJson<SessionDetail>(`/api/sessions/${activeSessionId}`),
+    queryFn: () => fetchSessionDetailWindow(activeSessionId),
+    structuralSharing: (previous, next) =>
+      mergeSessionDetailMessageWindow(previous as SessionDetail | undefined, next as SessionDetail),
     refetchInterval: chatLiveQueryPolicy.sessionDetailRefetchInterval,
     refetchIntervalInBackground: chatLiveQueryPolicy.directRefetchIntervalInBackground,
+  });
+  const loadEarlierSessionMessagesMutation = useMutation({
+    mutationFn: (variables: { sessionId: string; beforeMessageIndex: number }) =>
+      fetchSessionDetailWindow(variables.sessionId, {
+        messageLimit: SESSION_DETAIL_HISTORY_PAGE_SIZE,
+        beforeMessageIndex: variables.beforeMessageIndex,
+        transcriptScope: "window",
+      }),
+    onSuccess: (page, variables) => {
+      queryClient.setQueryData<SessionDetail>(queryKeys.session(variables.sessionId), (current) =>
+        mergeSessionDetailMessageWindow(current, page),
+      );
+    },
   });
   useEffect(() => {
     if (
@@ -3920,6 +3959,26 @@ export function ChatCodingRoute() {
   const selectedSessionDetail =
     rawSessionDetail && rawSessionDetail.id === activeSessionId ? rawSessionDetail : undefined;
   const detail = selectedSessionDetail;
+  const handleLoadEarlierSessionMessages = useCallback(() => {
+    const beforeMessageIndex = detail?.messageWindow?.nextBeforeMessageIndex ?? 0;
+    if (
+      !activeSessionId
+      || !detail?.messageWindow?.hasEarlier
+      || !beforeMessageIndex
+      || loadEarlierSessionMessagesMutation.isPending
+    ) {
+      return;
+    }
+    loadEarlierSessionMessagesMutation.mutate({
+      sessionId: activeSessionId,
+      beforeMessageIndex,
+    });
+  }, [
+    activeSessionId,
+    detail?.messageWindow?.hasEarlier,
+    detail?.messageWindow?.nextBeforeMessageIndex,
+    loadEarlierSessionMessagesMutation,
+  ]);
   const activeTurnLayer = activeSessionId ? activeTurnLayersBySession[activeSessionId] : undefined;
   const activeTurnMessage = useMemo(
     () => activeTurnLayerToConversationMessage(activeTurnLayer),
@@ -7285,6 +7344,8 @@ export function ChatCodingRoute() {
                   phase={detail.currentPhase}
                   messages={detail.messages}
                   activeTurnMessage={activeTurnMessage}
+                  hasEarlierMessages={Boolean(detail.messageWindow?.hasEarlier)}
+                  earlierMessagesLoading={loadEarlierSessionMessagesMutation.isPending}
                   onStreamingFramePaint={handleConversationStreamingFramePaint}
                   assistantDisplayName={activeAgentDisplayName}
                   assistantAvatarImageUrl={activeAgentAvatarImageUrl}
@@ -7316,6 +7377,7 @@ export function ChatCodingRoute() {
                   onRemoveComposerReference={handleRemoveComposerReference}
                   onEditUserMessage={handleEditUserMessage}
                   onCancelComposerMode={resolvedEditTarget ? handleCancelEditMessage : undefined}
+                  onLoadEarlierMessages={handleLoadEarlierSessionMessages}
                   onSubmit={handleSubmitTurn}
                   onStop={handleStopTurn}
                   onSafeGuidance={() => handleSubmitGuidance("safe")}
