@@ -20,6 +20,10 @@ import type {
   CodexTranscriptCellStatus,
   CodexTranscriptCellTone,
 } from "./codexTranscriptCells";
+import {
+  isInternalStreamingStatusContent,
+  isInternalStreamingStatusStage,
+} from "./conversationInternalStatus";
 
 export type CodexTranscriptSurfaceMode = "native" | "legacy" | "empty";
 
@@ -95,28 +99,54 @@ export function codexNativeTranscriptToCells(
 ): CodexTranscriptCell[] {
   const lifecycleModel = normalizeNativeToolLifecycleModel(transcript);
   const rolloutEvents = transcript.rolloutEvents ?? [];
-  return (transcript.cells ?? []).map((cell) => {
-    const operationIds = [...(cell.operationIds ?? [])];
-    const cellRolloutEvents = normalizeNativeRolloutEvents(cell.rolloutTraceEvents?.length
-      ? cell.rolloutTraceEvents
-      : operationIds.length > 0
-        ? rolloutEvents.filter((event) => operationIds.includes(event.operationId))
-        : rolloutEvents);
-    return {
-      id: cell.id,
-      kind: cell.kind as CodexTranscriptCellKind,
-      messageId: cell.messageId || transcript.messageId,
-      status: cell.status as CodexTranscriptCellStatus,
-      tone: cell.tone as CodexTranscriptCellTone,
-      title: cell.title,
-      text: cell.text,
-      summary: cell.summary,
-      operationIds,
-      rolloutTraceEvents: cellRolloutEvents,
-      toolLifecycleModel: normalizeNativeToolLifecycleModel(cell.toolLifecycleModel ?? lifecycleModel),
-      sourceItemId: cell.sourceItemId,
-    };
-  });
+  return (transcript.cells ?? [])
+    .map((cell) => {
+      const operationIds = [...(cell.operationIds ?? [])];
+      const cellRolloutEvents = normalizeNativeRolloutEvents(cell.rolloutTraceEvents?.length
+        ? cell.rolloutTraceEvents
+        : operationIds.length > 0
+          ? rolloutEvents.filter((event) => operationIds.includes(event.operationId))
+          : rolloutEvents);
+      return {
+        id: cell.id,
+        kind: cell.kind as CodexTranscriptCellKind,
+        messageId: cell.messageId || transcript.messageId,
+        status: cell.status as CodexTranscriptCellStatus,
+        tone: cell.tone as CodexTranscriptCellTone,
+        title: cell.title,
+        text: cell.text,
+        summary: cell.summary,
+        operationIds,
+        rolloutTraceEvents: cellRolloutEvents,
+        toolLifecycleModel: normalizeNativeToolLifecycleModel(cell.toolLifecycleModel ?? lifecycleModel),
+        sourceItemId: cell.sourceItemId,
+      };
+    })
+    .filter(shouldRenderNativeTranscriptCell);
+}
+
+function shouldRenderNativeTranscriptCell(cell: CodexTranscriptCell) {
+  if (cell.kind !== "status") {
+    return true;
+  }
+  if (isVisibleErrorStatusCell(cell)) {
+    return true;
+  }
+  return !isInternalNativeRuntimeStatusCell(cell);
+}
+
+function isVisibleErrorStatusCell(cell: CodexTranscriptCell) {
+  return cell.kind === "error_notice"
+    || cell.status === "failed"
+    || cell.tone === "error";
+}
+
+function isInternalNativeRuntimeStatusCell(cell: CodexTranscriptCell) {
+  const title = String(cell.title ?? "").trim();
+  const content = [cell.title, cell.summary, cell.text]
+    .filter((value) => String(value ?? "").trim().length > 0)
+    .join("\n");
+  return isInternalStreamingStatusStage(title) || isInternalStreamingStatusContent(content);
 }
 
 function normalizeNativeRolloutEvents(events: NonNullable<CodexTranscriptProjection["rolloutEvents"]>): CodexRolloutTraceEvent[] {

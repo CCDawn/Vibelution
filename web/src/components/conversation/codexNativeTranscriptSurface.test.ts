@@ -85,6 +85,82 @@ describe("codexNativeTranscriptSurface", () => {
     expect(surface.suppressLegacyTurnStatus).toBe(true);
   });
 
+  it("removes internal runtime status cells from native transcripts while keeping the answer", () => {
+    const surface = resolveCodexTranscriptSurface(message({
+      content: "模型连接正在重试...\n第 1/5 次；原因：server_error。本轮仍在继续，请不要重复提交。\n\n本轮已按请求停止。",
+      codexTranscript: {
+        version: 1,
+        source: "native",
+        messageId: "assistant-native-retry",
+        cells: [
+          {
+            id: "status-context-prepare",
+            kind: "status",
+            messageId: "assistant-native-retry",
+            status: "completed",
+            tone: "neutral",
+            title: "context_prepare",
+            summary: "正在准备对话上下文... 正在读取当前会话、绑定 Agent、工具权限和可恢复的上轮现场。",
+          },
+          {
+            id: "status-model-request",
+            kind: "status",
+            messageId: "assistant-native-retry",
+            status: "completed",
+            tone: "neutral",
+            title: "model_request",
+            summary: "正在请求模型，等待首个响应片段... 上下文已组装完成，正在进入 LLM 调用。",
+          },
+          {
+            id: "status-retrying",
+            kind: "status",
+            messageId: "assistant-native-retry",
+            status: "completed",
+            tone: "warning",
+            title: "retrying",
+            summary: "第 1/5 次；原因：server_error。",
+          },
+          {
+            id: "native-answer",
+            kind: "assistant_markdown",
+            messageId: "assistant-native-retry",
+            status: "completed",
+            tone: "neutral",
+            text: "本轮已按请求停止。",
+          },
+        ],
+      },
+    }), fallbackCells);
+
+    expect(surface.mode).toBe("native");
+    expect(surface.cells.map((cell) => cell.id)).toEqual(["native-answer"]);
+    expect(surface.hasAssistantMarkdown).toBe(true);
+    expect(surface.suppressLegacyResponse).toBe(true);
+  });
+
+  it("keeps native error status cells visible", () => {
+    const surface = resolveCodexTranscriptSurface(message({
+      codexTranscript: {
+        version: 1,
+        source: "native",
+        messageId: "assistant-native-error",
+        cells: [
+          {
+            id: "status-error",
+            kind: "status",
+            messageId: "assistant-native-error",
+            status: "failed",
+            tone: "error",
+            title: "model_request",
+            summary: "模型请求失败：server_error",
+          },
+        ],
+      },
+    }), []);
+
+    expect(surface.cells.map((cell) => cell.id)).toEqual(["status-error"]);
+  });
+
   it("ignores native assistant transcript cells attached to user messages", () => {
     const surface = resolveCodexTranscriptSurface(message({
       role: "user",
