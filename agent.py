@@ -3055,13 +3055,36 @@ class SelfEvolvingAgent:
                     category = recovery.category
                     is_retryable = recovery.retryable
                     user_msg = recovery.user_message
+                    try:
+                        streaming_enabled_for_failed_attempt = bool(
+                            not disable_streaming_for_retry
+                            and self._should_stream_llm_for_turn(
+                                llm_for_turn if "llm_for_turn" in locals() else None
+                            )
+                            and hasattr(llm_for_turn if "llm_for_turn" in locals() else None, "stream")
+                        )
+                    except Exception:
+                        streaming_enabled_for_failed_attempt = False
+                    provider_stream_retry_exhausted = bool(
+                        llm_error_details.get("retry_budget_exhausted")
+                    ) or reported_attempt >= reported_max_attempts
+                    retry_provider_failure_without_streaming = bool(
+                        streaming_enabled_for_failed_attempt
+                        and is_retryable
+                        and category in {"server_error", "network_error", "timeout"}
+                        and provider_stream_retry_exhausted
+                    )
                     self._last_llm_error_category = category
                     self._last_llm_error_retryable = is_retryable
                     self._last_llm_recovery_action = recovery.action
                     self._last_llm_error_message = f"{category}: {user_msg}".strip(": ")
                     self._last_llm_failure_attempts = reported_attempt
                     self._last_llm_failure_max_attempts = reported_max_attempts
-                    disable_streaming_for_retry = disable_streaming_for_retry or recovery.disable_streaming
+                    disable_streaming_for_retry = (
+                        disable_streaming_for_retry
+                        or recovery.disable_streaming
+                        or retry_provider_failure_without_streaming
+                    )
                     disable_tools_for_retry = disable_tools_for_retry or recovery.disable_tools
                     fallback_profile_id_for_retry = (
                         recovery.fallback_profile_id or fallback_profile_id_for_retry
@@ -3089,15 +3112,15 @@ class SelfEvolvingAgent:
                         "disable_tools_next_attempt": disable_tools_for_retry,
                         "request_context_compression": recovery.request_context_compression,
                         "fallback_profile_id": recovery.fallback_profile_id,
+                        "retry_provider_failure_without_streaming": retry_provider_failure_without_streaming,
+                        "provider_stream_retry_exhausted": provider_stream_retry_exhausted,
                         "attempt": reported_attempt,
                         "max_attempts": reported_max_attempts,
                         "model": getattr(self.config.llm, "model_name", ""),
                         "provider": getattr(self.config.llm, "provider", ""),
                         "api_base": getattr(self.config.llm, "api_base", ""),
                         "api_timeout": getattr(self.config.llm, "api_timeout", None),
-                        "streaming_enabled": bool(
-                            self._should_stream_llm_for_turn(llm_for_turn if "llm_for_turn" in locals() else None)
-                        ),
+                        "streaming_enabled": streaming_enabled_for_failed_attempt,
                         "message_count": len(clean_messages),
                     }
                     try:
@@ -3130,6 +3153,7 @@ class SelfEvolvingAgent:
                             attempt < MAX_CONSECUTIVE_FAILURES
                             and (
                                 can_retry_with_fallback
+                                or retry_provider_failure_without_streaming
                                 or (
                                     (recovery.disable_tools or recovery.disable_streaming)
                                     and not recovery.stop_current_turn
@@ -3145,7 +3169,11 @@ class SelfEvolvingAgent:
                         )
                         return None
 
-                    if recovery.stop_current_turn and not can_retry_with_fallback:
+                    if (
+                        recovery.stop_current_turn
+                        and not can_retry_with_fallback
+                        and not retry_provider_failure_without_streaming
+                    ):
                         return None
 
                     if attempt < MAX_CONSECUTIVE_FAILURES:
