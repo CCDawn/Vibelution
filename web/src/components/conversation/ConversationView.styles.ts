@@ -546,6 +546,16 @@ const styles: Record<string, string> = {
     "vui-components-conversationview operationDetailValue min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
   operationDetails:
     "vui-components-conversationview operationDetails min-w-0 border-0 bg-transparent",
+  operationDetailsChevronButton:
+    "vui-components-conversationview operationDetailsChevronButton inline-flex size-4 min-w-0 shrink-0 items-center justify-center border-0 bg-transparent p-0 text-[var(--fg-tertiary)] leading-none hover:text-[var(--fg-primary)]",
+  operationDetailsChevronClosed:
+    "vui-components-conversationview operationDetailsChevronClosed inline-flex group-open:hidden",
+  operationDetailsChevronOpen:
+    "vui-components-conversationview operationDetailsChevronOpen hidden group-open:inline-flex",
+  operationDetailsDisclosure:
+    "vui-components-conversationview operationDetailsDisclosure min-w-0 border-0 bg-transparent group",
+  operationDetailsSummary:
+    "vui-components-conversationview operationDetailsSummary min-w-0 flex cursor-pointer list-none select-none items-center gap-1.5 [&::-webkit-details-marker]:hidden",
   operationDetails_thought:
     "vui-components-conversationview operationDetails_thought min-w-0",
   operationDuration:
@@ -1017,6 +1027,16 @@ const styles: Record<string, string> = {
     "vui-components-conversationview statRow min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2",
   statusRunningDot:
     "vui-components-conversationview statusRunningDot min-w-0 inline-block h-2 w-2 rounded-full bg-current border-[color-mix(in_srgb,var(--state-success)_32%,transparent)] bg-[color-mix(in_srgb,var(--state-success)_9%,transparent)] text-[var(--state-success)]",
+  slashCommandSuggestionButton:
+    "vui-components-conversationview slashCommandSuggestionButton flex min-h-8 w-full min-w-0 items-center gap-2 px-2 py-1 text-left text-[var(--vui-font-xs)] text-[var(--fg-secondary)] hover:bg-[var(--vui-control-muted)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[var(--accent-cool)]",
+  slashCommandSuggestionCode:
+    "vui-components-conversationview slashCommandSuggestionCode shrink-0 rounded-[var(--radius-control)] bg-[var(--vui-control-muted)] px-1.5 py-0.5 font-semibold text-[var(--fg-primary)]",
+  slashCommandSuggestionDescription:
+    "vui-components-conversationview slashCommandSuggestionDescription min-w-0 truncate",
+  slashCommandSuggestionOption:
+    "vui-components-conversationview slashCommandSuggestionOption min-w-0",
+  slashCommandSuggestions:
+    "vui-components-conversationview slashCommandSuggestions min-w-0 overflow-hidden rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] shadow-[var(--vui-shadow-hairline)]",
   statusSpinner:
     "vui-components-conversationview statusSpinner min-w-0 animate-spin",
   stopButton:

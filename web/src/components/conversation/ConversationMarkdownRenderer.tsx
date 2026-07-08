@@ -3,6 +3,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 import { safeConversationMarkdownUrl } from "./conversationMarkdownUrl";
+import { conversationMarkdownRendererStyles } from "./ConversationMarkdownRenderer.styles";
 
 export type ConversationMarkdownClassNames = {
   inlineCode: string;
@@ -26,7 +27,7 @@ export type ConversationMarkdownClassNames = {
 
 type ConversationMarkdownRendererProps = {
   content: string;
-  classNames: ConversationMarkdownClassNames;
+  classNames?: ConversationMarkdownClassNames;
   duplicateImageUrls?: Set<string>;
   renderImage?: (alt: string, url: string, duplicateImageUrls?: Set<string>) => React.ReactNode;
 };
@@ -35,7 +36,7 @@ const markdownPlugins = [remarkGfm];
 
 export function ConversationMarkdownRenderer({
   content,
-  classNames,
+  classNames = conversationMarkdownRendererStyles,
   duplicateImageUrls,
   renderImage,
 }: ConversationMarkdownRendererProps) {

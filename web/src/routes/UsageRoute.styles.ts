@@ -59,7 +59,9 @@ const styles = {
   usageRow:
     `grid min-w-0 max-w-full grid-cols-[minmax(96px,0.64fr)_minmax(0,1fr)_minmax(58px,max-content)_minmax(54px,max-content)] items-center gap-1.5 ${rowSurface} ${rowSurfaceHover} px-2 py-1.5 max-[620px]:grid-cols-[minmax(0,1fr)] max-[620px]:items-start [&_span]:min-w-0 [&_span]:overflow-hidden [&_span]:text-ellipsis [&_span]:whitespace-nowrap [&_span]:text-[var(--vui-font-xs)] [&_span]:text-vui-fg-tertiary [&_strong]:min-w-0 [&_strong]:overflow-hidden [&_strong]:text-ellipsis [&_strong]:whitespace-nowrap [&_strong]:text-[var(--vui-font-xs)] [&_strong]:text-vui-fg-primary [&_code]:inline-flex [&_code]:min-w-0 [&_code]:max-w-full [&_code]:items-center [&_code]:gap-1 [&_code]:overflow-hidden [&_code]:text-ellipsis [&_code]:whitespace-nowrap [&_code]:font-mono [&_code]:text-[var(--vui-font-xs)] [&_code]:text-[var(--accent-cool)]`,
   usageRowWide:
-    "grid-cols-[minmax(104px,0.68fr)_minmax(0,1.1fr)_minmax(72px,max-content)] max-[620px]:grid-cols-[minmax(0,1fr)]",
+    "grid grid-cols-[minmax(104px,0.68fr)_minmax(0,1.1fr)_minmax(72px,max-content)] max-[620px]:grid-cols-[minmax(0,1fr)]",
+  refreshButton:
+    "h-[var(--vui-control-height-sm)] min-h-8 w-[var(--vui-control-height-sm)] flex-none p-0",
   progressTrack:
     "h-1.5 min-w-0 overflow-hidden rounded-full bg-[color-mix(in_srgb,var(--vui-border-subtle)_48%,transparent)]",
   progressFill:

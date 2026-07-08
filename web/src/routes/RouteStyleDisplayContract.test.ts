@@ -24,7 +24,6 @@ const composedGridTemplateModifiers = new Set([
   "GitRoute.styles.ts:workspaceOverview",
   "GitRoute.styles.ts:historyPanel",
   "GitRoute.styles.ts:modelActionRow",
-  "SelfEvolutionTrack.styles.ts:centerColumnObservation",
 ]);
 
 function readRouteStyleEntries(): StyleEntry[] {
@@ -78,6 +77,6 @@ describe("route style display contract", () => {
     expect(gitRouteSource).toContain("`${styles.commitPanel} ${styles.historyPanel}`");
     expect(gitRouteSource).toContain("`${styles.modelDefaultRow} ${styles.modelActionRow}`");
 
-    expect(selfEvolutionTrackSource).toContain("`${styles.centerColumn} ${styles.centerColumnObservation}`");
+    expect(selfEvolutionTrackSource).toContain("className={styles.centerColumn}");
   });
 });
