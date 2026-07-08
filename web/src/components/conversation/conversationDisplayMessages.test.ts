@@ -83,7 +83,7 @@ describe("conversation display message projection", () => {
     ]);
   });
 
-  it("merges adjacent duplicate turn errors while keeping the newest mental snapshot", async () => {
+  it("merges adjacent duplicate turn errors without carrying legacy process fields", async () => {
     const projected = await projectConversationDisplayMessages([
       message({
         id: "turn-error-1",
@@ -137,18 +137,15 @@ describe("conversation display message projection", () => {
     expect(projected).toHaveLength(1);
     expect(projected[0]).toMatchObject({
       id: "turn-error-1",
-      thought: "first failure thought\n\nsecond failure thought",
-      mentalSnapshot: {
-        feeling: "current",
-        summary: "new snapshot",
-      },
       metadata: {
         kind: "turn_error",
         errorType: "RuntimeError",
         httpStatus: 429,
       },
     });
-    expect(projected[0].toolCalls).toHaveLength(1);
+    expect(projected[0].thought).toBeUndefined();
+    expect(projected[0].mentalSnapshot).toBeUndefined();
+    expect(projected[0].toolCalls).toBeUndefined();
     expect(projected[0].feedbackEvents?.map((event) => event.summary)).toEqual([
       "failed",
       "diagnosed provider limit",

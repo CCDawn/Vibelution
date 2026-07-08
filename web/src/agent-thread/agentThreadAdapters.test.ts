@@ -372,13 +372,13 @@ describe("agent thread adapters", () => {
     });
   });
 
-  it("drops legacy internal thought placeholders when feedback events are absent", () => {
+  it("does not backfill legacy thought or tool calls when feedback events are absent", () => {
     const message: ConversationMessage = {
       id: "assistant-legacy-internal-placeholder",
       role: "assistant",
       content: "真实回答",
       timestamp: "2026-07-07T14:24:00Z",
-      thought: "internal",
+      thought: "legacy thought should not render",
       toolCalls: [
         {
           name: "search_code_tool",
@@ -389,16 +389,14 @@ describe("agent thread adapters", () => {
     };
 
     const agentMessage = conversationMessageToAgentMessage(message);
+    const serializedParts = JSON.stringify(agentMessage.parts);
 
-    expect(agentMessage.parts.map((part) => part.type)).toEqual(["tool-call", "text"]);
-    expect(agentMessage.parts[0]).toMatchObject({
-      id: "assistant-legacy-internal-placeholder-tool-0",
-      type: "tool-call",
-      name: "search_code_tool",
-    });
+    expect(agentMessage.parts.map((part) => part.type)).toEqual(["text"]);
+    expect(serializedParts).not.toContain("legacy thought should not render");
+    expect(serializedParts).not.toContain("search_code_tool");
   });
 
-  it("uses legacy thought and tool calls only when feedback events are absent", () => {
+  it("keeps ordinary assistant history on the feedback-event protocol instead of legacy fields", () => {
     const message: ConversationMessage = {
       id: "assistant-legacy",
       role: "assistant",
@@ -417,25 +415,42 @@ describe("agent thread adapters", () => {
     };
 
     const agentMessage = conversationMessageToAgentMessage(message);
+    const serializedParts = JSON.stringify(agentMessage.parts);
 
     expect(agentMessage.streaming).toBe(true);
-    expect(agentMessage.parts.map((part) => part.type)).toEqual(["thought", "tool-call", "text"]);
+    expect(agentMessage.parts.map((part) => part.type)).toEqual(["text"]);
     expect(agentMessage.parts[0]).toMatchObject({
-      id: "assistant-legacy-thought",
-      type: "thought",
-      text: "旧链路思考",
-      status: "running",
+      id: "assistant-legacy-text",
+      type: "text",
+      text: "旧链路回答",
     });
-    expect(agentMessage.parts[1]).toMatchObject({
-      id: "assistant-legacy-tool-0",
-      type: "tool-call",
-      name: "grep_search_tool",
+    expect(serializedParts).not.toContain("旧链路思考");
+    expect(serializedParts).not.toContain("grep_search_tool");
+  });
+
+  it("keeps active turn thought visible while the live layer is streaming", () => {
+    const message: ConversationMessage = {
+      id: "assistant-active-turn",
+      role: "assistant",
+      content: "实时回答",
+      timestamp: "2026-07-02T08:02:00Z",
+      streaming: true,
+      thought: "实时思考片段",
+      metadata: { kind: "session_active_turn_layer", turnId: "turn-1" },
+    };
+
+    const agentMessage = conversationMessageToAgentMessage(message);
+
+    expect(agentMessage.parts.map((part) => part.type)).toEqual(["thought", "text"]);
+    expect(agentMessage.parts[0]).toMatchObject({
+      id: "assistant-active-turn-thought",
+      type: "thought",
+      text: "实时思考片段",
       status: "running",
-      arguments: { query: "adapter" },
     });
   });
 
-  it("maps legacy mental snapshots to mental parts with the snapshot summary as the primary text", () => {
+  it("does not map legacy mental snapshots to visible AgentMessage parts", () => {
     const message: ConversationMessage = {
       id: "assistant-mental",
       role: "assistant",
@@ -456,20 +471,11 @@ describe("agent thread adapters", () => {
     };
 
     const agentMessage = conversationMessageToAgentMessage(message);
-    const mentalPart = agentMessage.parts.find((part) => part.type === "mental");
+    const serializedParts = JSON.stringify(agentMessage.parts);
 
-    expect(agentMessage.parts.map((part) => part.type)).toEqual(["mental", "text"]);
-    expect(mentalPart).toMatchObject({
-      id: "assistant-mental-mental",
-      type: "mental",
-      status: "done",
-      summary: "心智模型摘要",
-      snapshot: {
-        feeling: "谨慎",
-        summary: "心智模型摘要",
-        cognitiveState: "focused",
-      },
-    });
+    expect(agentMessage.parts.map((part) => part.type)).toEqual(["text"]);
+    expect(serializedParts).not.toContain("心智模型摘要");
+    expect(serializedParts).not.toContain("focused");
   });
 
   it("maps the active turn layer into the same agent message model", () => {

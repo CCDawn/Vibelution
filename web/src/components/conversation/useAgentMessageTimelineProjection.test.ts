@@ -212,12 +212,42 @@ describe("projectAgentMessageTimelineMessages", () => {
     ]);
   });
 
-  it("coalesces same-turn live overlay tool updates by semantic identity", () => {
+  it("drops process-only legacy DTO fields when no protocol event exists", () => {
+    const projection = projectAgentMessageTimelineMessages({
+      timelineMessages: [
+        assistantMessage("legacy-process-only", {
+          content: "",
+          thought: "legacy thought should not reserve a row",
+          toolCalls: [{ name: "legacy_tool", status: "done", summary: "legacy tool" }],
+          mentalSnapshot: {
+            mood: "",
+            feeling: "",
+            whisper: "",
+            summary: "legacy mental",
+            cognitiveState: "normal",
+            confidence: 0,
+            sampleSize: 0,
+            interventionCount: 0,
+            updatedAt: "2026-07-09T01:00:00Z",
+            source: "test",
+          },
+        }),
+      ],
+    });
+
+    expect(projection.messages).toEqual([]);
+    expect(projection.agentMessages).toEqual([]);
+    expect(projection.rowIdentities).toEqual([]);
+  });
+
+  it("coalesces same-turn live overlay feedback events by semantic identity", () => {
     const liveOverlay = assistantMessage("live-overlay", {
       content: "正在读取文件",
       streaming: true,
-      toolCalls: [
+      feedbackEvents: [
         {
+          sequence: 1,
+          kind: "tool",
           name: "read_file_tool",
           status: "running",
           summary: "正在读取 ConversationView.tsx",
@@ -239,8 +269,10 @@ describe("projectAgentMessageTimelineMessages", () => {
     const activeTurn = assistantMessage("active-turn", {
       content: "回答正文",
       streaming: true,
-      toolCalls: [
+      feedbackEvents: [
         {
+          sequence: 1,
+          kind: "tool",
           name: "read_file_tool",
           status: "done",
           summary: "已读取 ConversationView.tsx",
@@ -266,8 +298,11 @@ describe("projectAgentMessageTimelineMessages", () => {
     });
 
     expect(projection.messages).toHaveLength(1);
-    expect(projection.messages[0].toolCalls).toEqual([
+    expect(projection.messages[0].toolCalls).toBeUndefined();
+    expect(projection.messages[0].feedbackEvents).toEqual([
       {
+        sequence: 1,
+        kind: "tool",
         name: "read_file_tool",
         status: "done",
         summary: "已读取 ConversationView.tsx",
@@ -376,12 +411,14 @@ describe("projectAgentMessageTimelineMessages", () => {
     }));
   });
 
-  it("keeps same-name live overlay tools separate when their stable inputs differ", () => {
+  it("keeps same-name live overlay feedback tools separate when their stable inputs differ", () => {
     const liveOverlay = assistantMessage("live-overlay", {
       content: "正在读取文件",
       streaming: true,
-      toolCalls: [
+      feedbackEvents: [
         {
+          sequence: 0,
+          kind: "tool",
           name: "read_file_tool",
           status: "done",
           summary: "读取 A",
@@ -393,8 +430,10 @@ describe("projectAgentMessageTimelineMessages", () => {
     const activeTurn = assistantMessage("active-turn", {
       content: "回答正文",
       streaming: true,
-      toolCalls: [
+      feedbackEvents: [
         {
+          sequence: 0,
+          kind: "tool",
           name: "read_file_tool",
           status: "done",
           summary: "读取 B",
@@ -409,7 +448,8 @@ describe("projectAgentMessageTimelineMessages", () => {
       activeTurnMessage: activeTurn,
     });
 
-    expect(projection.messages[0].toolCalls?.map((toolCall) => toolCall.summary)).toEqual([
+    expect(projection.messages[0].toolCalls).toBeUndefined();
+    expect(projection.messages[0].feedbackEvents?.map((event) => event.summary)).toEqual([
       "读取 A",
       "读取 B",
     ]);
