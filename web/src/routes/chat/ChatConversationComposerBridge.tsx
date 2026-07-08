@@ -20,10 +20,12 @@ export type ChatConversationComposerBridgeLabels = {
   editMessagePlaceholder: string;
   loadingSession: string;
   messageInputPlaceholder: string;
+  saveAndRerunMessage: string;
 };
 
 export type ChatConversationComposerBridgeInput = {
   editTargetMessageId?: string;
+  editTargetPreview?: string;
   error?: string;
   guidance?: string;
   imageAttachments: readonly ChatComposerImageAttachment[];
@@ -52,10 +54,12 @@ export type ChatConversationComposerBridgeState = {
   guidance: string;
   interruptGuidancePending: boolean;
   modeNotice: string;
+  modeTargetPreview: string;
   pending: boolean;
   placeholder: string;
   references: SessionReferenceAttachment[];
   safeGuidancePending: boolean;
+  submitLabel: string;
   value: string;
 };
 
@@ -69,13 +73,15 @@ type BridgeManagedConversationProps =
   | "composerGuidance"
   | "composerInterruptGuidancePending"
   | "composerModeNotice"
+  | "composerModeTargetPreview"
   | "composerPending"
   | "composerPlaceholder"
   | "composerReferences"
   | "composerSafeGuidancePending"
   | "composerValue"
   | "editingMessageId"
-  | "editUserMessageDisabled";
+  | "editUserMessageDisabled"
+  | "submitLabel";
 
 type ChatConversationComposerBridgeProps = Omit<ConversationViewProps, BridgeManagedConversationProps> & {
   composer: ChatConversationComposerBridgeState;
@@ -98,6 +104,7 @@ export function buildConversationComposerBridgeState(
   input: ChatConversationComposerBridgeInput,
 ): ChatConversationComposerBridgeState {
   const hasSession = Boolean(input.sessionId);
+  const isEditingMessage = Boolean(input.editTargetMessageId);
   const actionMode = input.sessionBusy ? "stop" : "send";
   const pending = actionMode === "stop"
     ? input.stopPending || input.sessionStopping
@@ -115,7 +122,7 @@ export function buildConversationComposerBridgeState(
     ? input.labels.loadingSession
     : input.sessionStopping || input.sessionBusy
       ? ""
-      : input.editTargetMessageId
+      : isEditingMessage
         ? input.labels.editMessagePlaceholder
         : input.labels.messageInputPlaceholder;
 
@@ -130,11 +137,13 @@ export function buildConversationComposerBridgeState(
     error: input.error ?? "",
     guidance: input.guidance ?? "",
     interruptGuidancePending: input.interruptGuidancePending,
-    modeNotice: input.editTargetMessageId ? input.labels.editMessageModeNotice : "",
+    modeNotice: isEditingMessage ? input.labels.editMessageModeNotice : "",
+    modeTargetPreview: isEditingMessage ? input.editTargetPreview?.trim() ?? "" : "",
     pending,
     placeholder,
     references: [...input.references],
     safeGuidancePending: input.safeGuidancePending,
+    submitLabel: isEditingMessage ? input.labels.saveAndRerunMessage : "",
     value: input.value,
   };
 }
@@ -163,8 +172,10 @@ export function ChatConversationComposerBridge({
       composerReferences={composer.references}
       composerAttachmentInputDisabled={composer.attachmentInputDisabled}
       composerModeNotice={composer.modeNotice}
+      composerModeTargetPreview={composer.modeTargetPreview}
       editingMessageId={composer.editingMessageId}
       editUserMessageDisabled={composer.editUserMessageDisabled}
+      submitLabel={composer.submitLabel || undefined}
       fallback={fallback}
     />
   );

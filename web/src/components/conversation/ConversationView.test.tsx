@@ -61,9 +61,11 @@ function renderConversation(
     composerDisabled?: boolean;
     composerActionMode?: "send" | "stop";
     composerActionDisabled?: boolean;
+    submitLabel?: string;
     composerError?: string;
     composerGuidance?: string;
     composerModeNotice?: string;
+    composerModeTargetPreview?: string;
     cancelComposerModeLabel?: string;
     turnError?: SessionTurnError | null;
     onSafeGuidance?: () => void;
@@ -112,9 +114,11 @@ function renderConversation(
         composerActionMode={options.composerActionMode}
         composerActionDisabled={options.composerActionDisabled}
         composerPending={false}
+        submitLabel={options.submitLabel}
         composerError={options.composerError}
         composerGuidance={options.composerGuidance}
         composerModeNotice={options.composerModeNotice}
+        composerModeTargetPreview={options.composerModeTargetPreview}
         cancelComposerModeLabel={options.cancelComposerModeLabel}
         turnError={options.turnError}
         composerAttachments={options.composerAttachments}
@@ -360,6 +364,9 @@ describe("ConversationView edit resend affordance", () => {
   });
 
   it("keeps conversation timeline previews wrapped and button slots flat", () => {
+    expect(styles.timeline).toContain("overflow-y-auto");
+    expect(styles.timeline).toContain("overflow-x-hidden");
+    expect(styles.timeline).not.toContain("overflow-auto");
     expect(styles.timelineCellHeader).toContain("!items-start");
     expect(styles.timelineCellHeader).not.toContain("!items-center");
     expect(styles.timelineCellHeader).toContain("!grid");
@@ -613,7 +620,7 @@ describe("ConversationView edit resend affordance", () => {
     expect(conversationViewStylesModuleSource).toContain("composer: conversationComposerShell");
     expect(conversationViewStylesModuleSource).toContain("composerField: composerFieldShell");
     expect(conversationViewStylesModuleSource).toContain("composerFieldDragActive: composerFieldDragActiveShell");
-    expect(styles.composer).toContain("grid-cols-[minmax(0,1fr)_var(--vui-control-height-sm)]");
+    expect(styles.composer).toContain("grid-cols-[minmax(0,1fr)_auto]");
     expect(styles.composerActionStack).toContain("grid-cols-1");
     expect(styles.composerActionStack).toContain("content-end");
     expect(styles.composerActionStack).toContain("gap-1");
@@ -646,12 +653,15 @@ describe("ConversationView edit resend affordance", () => {
       conversationViewSource.indexOf("</div>\n      </div>", conversationViewSource.indexOf("<div className={styles.composerActionStack}>")),
     );
     expect(composerActionStackSource).toContain("className={styles.attachButton}");
-    expect(composerActionStackSource).toContain("styles.composerRoundButtonPrimary");
+    expect(composerActionStackSource).toContain("className={primaryActionClassName}");
+    expect(conversationViewSource).toContain("const primaryActionClassName = primaryActionIsEditSubmit");
+    expect(conversationViewSource).toContain("styles.composerEditSubmitButton");
+    expect(conversationViewSource).toContain("styles.composerRoundButtonPrimary");
   });
 
   it("keeps the composer row compact with stable square actions", () => {
     expect(styles.composer).toContain("items-center");
-    expect(styles.composer).toContain("grid-cols-[minmax(0,1fr)_var(--vui-control-height-sm)]");
+    expect(styles.composer).toContain("grid-cols-[minmax(0,1fr)_auto]");
 
     expect(styles.composerField).toContain("[&_textarea]:min-h-[48px]");
     expect(styles.composerField).toContain("[&_textarea]:max-h-[112px]");
@@ -672,6 +682,9 @@ describe("ConversationView edit resend affordance", () => {
     expect(styles.sendButton).toContain("disabled:!border-[color-mix(in_srgb,var(--border-soft)_70%,transparent)]");
     expect(styles.sendButton).toContain("disabled:!bg-[color-mix(in_srgb,var(--vui-control-muted)_62%,transparent)]");
     expect(styles.sendButton).toContain("disabled:!text-[var(--fg-tertiary)]");
+    expect(styles.composerEditSubmitButton).toContain("w-fit");
+    expect(styles.composerEditSubmitButton).toContain("px-2");
+    expect(styles.composerEditSubmitButton).not.toContain("w-[var(--vui-control-height-sm)]");
 
     const sendButtonClassName = `${styles.sendButton} ${styles.composerRoundButton} ${styles.composerRoundButtonPrimary}`;
     expect(sendButtonClassName).toContain("disabled:hover:!border-[color-mix(in_srgb,var(--border-soft)_70%,transparent)]");
@@ -684,11 +697,14 @@ describe("ConversationView edit resend affordance", () => {
 
   it("keeps edit-mode composer chrome compact", () => {
     expect(styles.composerEditModeBar).toContain("min-h-8");
-    expect(styles.composerEditModeBar).toContain("w-fit");
+    expect(styles.composerEditModeBar).toContain("w-full");
     expect(styles.composerEditModeBar).toContain("px-2");
     expect(styles.composerEditModeBar).not.toContain("shadow-[var(--vui-shadow-hairline)]");
     expect(styles.composerEditModeIcon).not.toContain("p-2");
     expect(styles.composerEditModeCancel).toContain("!min-h-6");
+    expect(styles.composerEditModeDescription).toContain("[overflow-wrap:anywhere]");
+    expect(styles.composerEditModePreview).toContain("truncate");
+    expect(styles.composerEditModeWarning).toContain("state-warning");
   });
 
   it("uses shared readable scale tokens for dense conversation text", () => {
@@ -3207,30 +3223,77 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).toContain("编辑消息");
   });
 
-  it("renders edit mode as a compact composer status row", () => {
+  it("renders edit mode as a visible composer status row with target preview and rerun action", () => {
     const html = renderConversation(
       [
         {
           id: "message-user",
           role: "user",
-          content: "Original prompt",
+          content: "继续",
           timestamp: "2026-05-22T00:00:00Z",
         },
       ],
       {
         editingMessageId: "message-user",
         composerModeNotice: "正在编辑最新一条用户消息；发送后会替换这条消息并重跑后续对话。",
+        composerModeTargetPreview: "继续",
         cancelComposerModeLabel: "取消编辑",
-        composerValue: "Original prompt",
+        composerValue: "继续",
+        submitLabel: "保存并重跑",
         onCancelComposerMode: () => undefined,
       },
     );
 
     expect(html).toContain("composerEditModeBar");
     expect(html).toContain("composerEditModeLabel");
+    expect(html).toContain("composerEditModeDescription");
+    expect(html).toContain("正在编辑最新一条用户消息；发送后会替换这条消息并重跑后续对话。");
+    expect(html).toContain("composerEditModePreview");
+    expect(html).toContain("当前内容：继续");
     expect(html).toContain("composerEditModeCancel");
-    expect(html).toContain('title="正在编辑最新一条用户消息；发送后会替换这条消息并重跑后续对话。"');
+    expect(html).toContain("composerEditSubmitButton");
+    expect(html).toContain("保存并重跑");
     expect(html).not.toContain("composerModeNoticeIcon");
+  });
+
+  it("keeps provider failure context subordinate while editing a failed turn", () => {
+    const html = renderConversation(
+      [
+        {
+          id: "message-user",
+          role: "user",
+          content: "继续",
+          timestamp: "2026-05-22T00:00:00Z",
+        },
+        {
+          id: "message-turn-error",
+          role: "assistant",
+          content: "模型服务上游暂时失败，本轮没有完成。",
+          timestamp: "2026-05-22T00:01:00Z",
+          metadata: {
+            kind: "turn_error",
+            errorType: "provider_upstream_error",
+            providerFailure: true,
+          },
+        },
+      ],
+      {
+        editingMessageId: "message-user",
+        composerModeNotice: "正在编辑最新一条用户消息；发送后会替换这条消息并重跑后续对话。",
+        composerModeTargetPreview: "继续",
+        composerValue: "继续",
+        submitLabel: "保存并重跑",
+        turnError: {
+          message: "模型服务上游暂时失败，本轮没有完成。",
+          errorType: "provider_upstream_error",
+        },
+      },
+    );
+
+    expect(html).toContain("turnErrorNotice");
+    expect(html).toContain("composerEditModeWarning");
+    expect(html).toContain("当前错误来自上一轮失败；保存并重跑后会生成新的后续结果。");
+    expect(html).toContain("保存并重跑");
   });
 
   it("does not render the mental-model option in the composer", () => {

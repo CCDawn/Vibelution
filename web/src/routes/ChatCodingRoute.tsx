@@ -4608,6 +4608,7 @@ export function ChatCodingRoute() {
   const conversationComposer = useMemo(
     () => buildConversationComposerBridgeState({
       editTargetMessageId: resolvedEditTarget?.messageId,
+      editTargetPreview: resolvedEditTarget?.original,
       error: activeComposerError,
       guidance: "",
       imageAttachments: activeImageAttachments,
@@ -4618,6 +4619,7 @@ export function ChatCodingRoute() {
         editMessagePlaceholder: t("editMessagePlaceholder"),
         loadingSession: t("loadingSession"),
         messageInputPlaceholder: t("messageInputPlaceholder"),
+        saveAndRerunMessage: t("saveAndRerunMessage"),
       },
       references: activeReferenceAttachments,
       safeGuidancePending: composerSafeGuidancePending,
@@ -4635,10 +4637,11 @@ export function ChatCodingRoute() {
       activeImageAttachments,
       activeReferenceAttachments,
       activeSessionId,
+      resolvedEditTarget?.original,
+      resolvedEditTarget?.messageId,
       composerInterruptGuidancePending,
       composerSafeGuidancePending,
       composerStopPending,
-      resolvedEditTarget?.messageId,
       sessionBusy,
       sessionStopping,
       submitPending,

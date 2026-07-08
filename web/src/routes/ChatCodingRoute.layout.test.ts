@@ -162,7 +162,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(conversationStyles.surface).toContain("overflow-hidden");
     expect(conversationStyles.timeline).toContain("flex-1");
     expect(conversationStyles.timeline).toContain("min-h-0");
-    expect(conversationStyles.timeline).toContain("overflow-auto");
+    expect(conversationStyles.timeline).toContain("overflow-y-auto");
+    expect(conversationStyles.timeline).toContain("overflow-x-hidden");
     expect(conversationStyles.composer).toContain("flex-none");
     expect(routeStyles.emptySurface).toContain("grid");
     expect(routeStyles.emptySurface).toContain("min-h-[min(420px,calc(100dvh_-_190px))]");
