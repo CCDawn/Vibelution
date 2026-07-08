@@ -7,14 +7,14 @@ import {
   resolveCodexTranscriptSurface,
 } from "./codexNativeTranscriptSurface";
 
-const legacyProjectionCells: CodexTranscriptCell[] = [
+const projectedCells: CodexTranscriptCell[] = [
   {
-    id: "legacy-tool",
+    id: "projected-tool",
     kind: "tool_call",
     messageId: "message-1",
     status: "completed",
     tone: "neutral",
-    title: "legacy",
+    title: "projected",
   },
 ];
 
@@ -22,14 +22,14 @@ function message(patch: Partial<ConversationMessage>): ConversationMessage {
   return {
     id: "message-1",
     role: "assistant",
-    content: "legacy answer",
+    content: "projected answer",
     timestamp: "2026-07-07T10:45:00Z",
     ...patch,
   };
 }
 
 describe("codexNativeTranscriptSurface", () => {
-  it("prefers backend native transcript cells over legacy projection cells", () => {
+  it("prefers backend native transcript cells over projected transcript cells", () => {
     const surface = resolveCodexTranscriptSurface(message({
       codexTranscript: {
         version: 1,
@@ -65,7 +65,7 @@ describe("codexNativeTranscriptSurface", () => {
           },
         ],
       },
-    }), legacyProjectionCells);
+    }), projectedCells);
 
     expect(surface.mode).toBe("native");
     expect(surface.source).toBe("message.codexTranscript");
@@ -80,9 +80,9 @@ describe("codexNativeTranscriptSurface", () => {
       rolloutTraceEvents: [expect.objectContaining({ kind: "ToolCallStarted" })],
     });
     expect(surface.hasAssistantMarkdown).toBe(true);
-    expect(surface.suppressLegacyProcess).toBe(true);
-    expect(surface.suppressLegacyResponse).toBe(true);
-    expect(surface.suppressLegacyTurnStatus).toBe(true);
+    expect(surface.suppressProjectedProcess).toBe(true);
+    expect(surface.suppressProjectedResponse).toBe(true);
+    expect(surface.suppressProjectedTurnStatus).toBe(true);
   });
 
   it("removes internal runtime status cells from native transcripts while keeping the answer", () => {
@@ -130,12 +130,12 @@ describe("codexNativeTranscriptSurface", () => {
           },
         ],
       },
-    }), legacyProjectionCells);
+    }), projectedCells);
 
     expect(surface.mode).toBe("native");
     expect(surface.cells.map((cell) => cell.id)).toEqual(["native-answer"]);
     expect(surface.hasAssistantMarkdown).toBe(true);
-    expect(surface.suppressLegacyResponse).toBe(true);
+    expect(surface.suppressProjectedResponse).toBe(true);
   });
 
   it("keeps native error status cells visible", () => {
@@ -180,7 +180,7 @@ describe("codexNativeTranscriptSurface", () => {
           },
         ],
       },
-    }), legacyProjectionCells);
+    }), projectedCells);
 
     expect(hasUsableNativeCodexTranscript(message({
       role: "user",
@@ -205,23 +205,23 @@ describe("codexNativeTranscriptSurface", () => {
     expect(surface.cells).toEqual([]);
     expect(surface.projectionGap).toEqual({
       reason: "native_unusable",
-      legacyCellCount: 1,
+      projectedCellCount: 1,
     });
-    expect(surface.suppressLegacyResponse).toBe(false);
+    expect(surface.suppressProjectedResponse).toBe(false);
   });
 
-  it("records projection gaps instead of falling back to legacy projected cells when native transcript is missing or empty", () => {
+  it("records projection gaps instead of falling back to projected cells when native transcript is missing or empty", () => {
     expect(hasUsableNativeCodexTranscript(message({}))).toBe(false);
 
-    const missing = resolveCodexTranscriptSurface(message({}), legacyProjectionCells);
+    const missing = resolveCodexTranscriptSurface(message({}), projectedCells);
     expect(missing.mode).toBe("empty");
     expect(missing.source).toBe("none");
     expect(missing.cells).toEqual([]);
-    expect(missing.suppressLegacyProcess).toBe(false);
-    expect(missing.suppressLegacyResponse).toBe(false);
+    expect(missing.suppressProjectedProcess).toBe(false);
+    expect(missing.suppressProjectedResponse).toBe(false);
     expect(missing.projectionGap).toEqual({
       reason: "native_missing",
-      legacyCellCount: 1,
+      projectedCellCount: 1,
     });
 
     const empty = resolveCodexTranscriptSurface(message({
@@ -231,17 +231,17 @@ describe("codexNativeTranscriptSurface", () => {
         messageId: "message-1",
         cells: [],
       },
-    }), legacyProjectionCells);
+    }), projectedCells);
     expect(empty.mode).toBe("empty");
     expect(empty.source).toBe("none");
     expect(empty.cells).toEqual([]);
     expect(empty.projectionGap).toEqual({
       reason: "native_empty",
-      legacyCellCount: 1,
+      projectedCellCount: 1,
     });
   });
 
-  it("does not suppress legacy response text when native transcript has only process cells", () => {
+  it("does not suppress projected response text when native transcript has only process cells", () => {
     const surface = resolveCodexTranscriptSurface(message({
       content: "最终回答应该继续显示",
       codexTranscript: {
@@ -264,12 +264,12 @@ describe("codexNativeTranscriptSurface", () => {
         terminalSessions: [],
         modelObservations: [],
       },
-    }), legacyProjectionCells);
+    }), projectedCells);
 
     expect(surface.mode).toBe("native");
     expect(surface.hasAssistantMarkdown).toBe(false);
-    expect(surface.suppressLegacyProcess).toBe(true);
-    expect(surface.suppressLegacyResponse).toBe(false);
+    expect(surface.suppressProjectedProcess).toBe(true);
+    expect(surface.suppressProjectedResponse).toBe(false);
   });
 
   it("preserves native terminal lifecycle arrays on the transcript cells", () => {

@@ -24,17 +24,11 @@ function mergeUniqueJsonItems<T>(left: T[] | undefined, right: T[] | undefined) 
 }
 
 function mergeAdjacentTurnErrorMessages(previous: ConversationMessage, next: ConversationMessage): ConversationMessage {
-  const previousThought = String(previous.thought ?? "").trim();
-  const nextThought = String(next.thought ?? "").trim();
-  const thought = [previousThought, nextThought]
-    .filter(Boolean)
-    .filter((value, index, values) => values.indexOf(value) === index)
-    .join("\n\n");
   return {
     ...previous,
-    thought: thought || undefined,
-    mentalSnapshot: next.mentalSnapshot,
-    toolCalls: mergeUniqueJsonItems(previous.toolCalls, next.toolCalls),
+    thought: undefined,
+    mentalSnapshot: undefined,
+    toolCalls: undefined,
     feedbackEvents: mergeUniqueJsonItems(previous.feedbackEvents, next.feedbackEvents),
     metadata: {
       ...(next.metadata ?? {}),

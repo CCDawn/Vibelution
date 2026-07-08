@@ -29,7 +29,7 @@ describe("agentMessageSections", () => {
     expect(agentMessageSectionsSource).not.toMatch(/export function (?:hasUserContent|has(?:Response|Thought|Mental|Tool)Block)\b/);
   });
 
-  it("builds AgentMessage section state from legacy assistant fields", () => {
+  it("does not build AgentMessage process sections from legacy assistant fields", () => {
     const assistantMessage = message({
       role: "assistant",
       content: "我会整理下一步。",
@@ -54,9 +54,9 @@ describe("agentMessageSections", () => {
     expect(state).toMatchObject({
       answerText: "我会整理下一步。",
       hasResponseBlock: true,
-      hasThoughtBlock: true,
-      hasMentalBlock: true,
-      hasToolBlock: true,
+      hasThoughtBlock: false,
+      hasMentalBlock: false,
+      hasToolBlock: false,
       hasFeedbackTimeline: false,
       hasUserContent: false,
     });
@@ -320,12 +320,12 @@ describe("agentMessageSections", () => {
       metadata: { kind: "turn_error", providerFailure: true },
     });
 
-    expect(sectionState({ ...errorMessage, thought: "hidden" }).hasThoughtBlock).toBe(true);
-    expect(sectionState({ ...errorMessage, toolCalls: [{ name: "tool", status: "done" }] }).hasToolBlock).toBe(true);
+    expect(sectionState({ ...errorMessage, thought: "hidden" }).hasThoughtBlock).toBe(false);
+    expect(sectionState({ ...errorMessage, toolCalls: [{ name: "tool", status: "done" }] }).hasToolBlock).toBe(false);
     expect(sectionState(errorMessage).hasResponseBlock).toBe(false);
   });
 
-  it("keeps legacy provider failure summary replies out of assistant response blocks", () => {
+  it("keeps legacy provider failure summary replies out of response and process blocks", () => {
     const errorMessage = message({
       role: "assistant",
       content: "模型服务上游暂时失败，本轮没有完成。完整 provider 错误已写入运行日志。",
@@ -334,8 +334,8 @@ describe("agentMessageSections", () => {
     });
 
     const state = sectionState(errorMessage);
-    expect(state.hasThoughtBlock).toBe(true);
-    expect(state.hasToolBlock).toBe(true);
+    expect(state.hasThoughtBlock).toBe(false);
+    expect(state.hasToolBlock).toBe(false);
     expect(state.hasResponseBlock).toBe(false);
   });
 
@@ -352,7 +352,7 @@ describe("agentMessageSections", () => {
     });
 
     const state = sectionState(errorMessage);
-    expect(state.hasToolBlock).toBe(true);
+    expect(state.hasToolBlock).toBe(false);
     expect(state.hasResponseBlock).toBe(false);
   });
 

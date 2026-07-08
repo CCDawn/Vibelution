@@ -129,7 +129,7 @@ describe("agentMessageOperations", () => {
     });
   });
 
-  it("preserves legacy tool-call raw labels while display-labeling event tool calls", () => {
+  it("display-labels feedback-event tool calls without a legacy source escape hatch", () => {
     const message: AgentMessage = {
       id: "agent-tool-labels",
       role: "assistant",
@@ -138,20 +138,20 @@ describe("agentMessageOperations", () => {
       source: { kind: "conversation-message", id: "agent-tool-labels" },
       parts: [
         {
-          id: "agent-tool-labels-legacy",
-          type: "tool-call",
-          source: "legacy-tool-call",
-          name: "image2_generate_tool",
-          status: "failed",
-          summary: "Read timed out.",
-        },
-        {
-          id: "agent-tool-labels-feedback",
+          id: "agent-tool-labels-feedback-search",
           type: "tool-call",
           source: "feedback-event",
           name: "grep_search_tool",
           status: "done",
           summary: "搜索缓存统计代码",
+        },
+        {
+          id: "agent-tool-labels-feedback-image",
+          type: "tool-call",
+          source: "feedback-event",
+          name: "image2_generate_tool",
+          status: "failed",
+          summary: "Read timed out.",
         },
       ],
     };
@@ -159,8 +159,8 @@ describe("agentMessageOperations", () => {
     const operations = buildAgentMessageOperations(message, labels);
 
     expect(operations.map((operation) => `${operation.label}:${operation.rawLabel}`)).toEqual([
-      "image2_generate_tool:image2_generate_tool",
       "搜索:grep_search_tool",
+      "生成图片:image2_generate_tool",
     ]);
   });
 
@@ -264,7 +264,7 @@ describe("agentMessageOperations", () => {
     expect(operations.map((operation) => operation.summary).join("\n")).not.toContain("self._thought_history");
   });
 
-  it("prefers ordered feedback events over legacy thought and tool buckets", () => {
+  it("ignores legacy thought and tool buckets when ordered feedback events exist", () => {
     const message: ConversationMessage = {
       id: "message-feedback",
       role: "assistant",
@@ -319,9 +319,9 @@ describe("agentMessageOperations", () => {
     expect(operations[3].relatedThoughtSequence).toBe(3);
   });
 
-  it("keeps ConversationMessage operation compatibility aligned without restoring hidden internal status", () => {
+  it("does not restore hidden internal status or legacy field operations", () => {
     const message: ConversationMessage = {
-      id: "message-feedback-compat",
+      id: "message-feedback-no-legacy-fallback",
       role: "assistant",
       content: "Done",
       timestamp: "2026-06-05T00:00:00Z",
@@ -338,11 +338,11 @@ describe("agentMessageOperations", () => {
       ],
     };
 
-    const compatibilityOperations = operationsForConversationMessage(message);
+    const projectedOperations = operationsForConversationMessage(message);
     const agentOperations = buildAgentMessageOperations(conversationMessageToAgentMessage(message), labels);
 
-    expect(compatibilityOperations).toEqual(agentOperations);
-    expect(compatibilityOperations).toEqual([]);
+    expect(projectedOperations).toEqual(agentOperations);
+    expect(projectedOperations).toEqual([]);
   });
 
   it("keeps only the latest feedback update for the same unsequenced tool event", () => {
@@ -445,22 +445,33 @@ describe("agentMessageOperations", () => {
       role: "assistant",
       content: "Done",
       timestamp: "2026-05-22T00:00:00Z",
-      thought: "Check plan",
-      mentalSnapshot: {
-        mood: "focused",
-        feeling: "",
-        whisper: "",
-        summary: "Need a narrow pass",
-        cognitiveState: "productive",
-        confidence: 0.8,
-        sampleSize: 1,
-        interventionCount: 0,
-        updatedAt: "2026-05-22T00:00:01Z",
-        source: "test",
-      },
-      toolCalls: [
-        { name: "rg", status: "done", summary: "searched files" },
-        { name: "npm run test", status: "running" },
+      feedbackEvents: [
+        {
+          sequence: 1,
+          kind: "thought",
+          status: "done",
+          summary: "Check plan",
+          resultPreview: "Check plan",
+        },
+        {
+          sequence: 2,
+          kind: "mental",
+          status: "done",
+          summary: "Need a narrow pass",
+        },
+        {
+          sequence: 3,
+          kind: "tool",
+          status: "done",
+          name: "rg",
+          summary: "searched files",
+        },
+        {
+          sequence: 4,
+          kind: "tool",
+          status: "running",
+          name: "npm run test",
+        },
       ],
     };
 
@@ -469,7 +480,7 @@ describe("agentMessageOperations", () => {
     expect(operations).toEqual(buildAgentMessageOperations(conversationMessageToAgentMessage(message), labels));
     expect(operations).toHaveLength(4);
     expect(operations[0]).toMatchObject({
-      id: "message-1-thought",
+      id: "message-1-feedback-1",
       kind: "thought",
       label: "Deep thinking",
       status: "done",
@@ -478,7 +489,7 @@ describe("agentMessageOperations", () => {
       resultPreview: "Check plan",
     });
     expect(operations[1]).toMatchObject({
-      id: "message-1-mental",
+      id: "message-1-feedback-2",
       kind: "mental",
       label: "Mental model",
       status: "done",
@@ -486,15 +497,16 @@ describe("agentMessageOperations", () => {
       durationSeconds: null,
     });
     expect(operations[2]).toMatchObject({
-      id: "message-1-tool-0",
+      id: "message-1-feedback-3",
       kind: "tool",
-      label: "rg",
+      label: "搜索",
+      rawLabel: "rg",
       status: "done",
       summary: "searched files",
       durationSeconds: null,
     });
     expect(operations[3]).toMatchObject({
-      id: "message-1-tool-1",
+      id: "message-1-feedback-4",
       kind: "tool",
       label: "npm run test",
       rawStatus: "running",
@@ -1001,23 +1013,37 @@ describe("agentMessageOperations", () => {
       content: "",
       timestamp: "2026-05-22T00:00:00Z",
       streaming: true,
-      thought: "Reading files",
-      mentalSnapshot: {
-        mood: "focused",
-        feeling: "",
-        whisper: "",
-        summary: "Still working",
-        cognitiveState: "productive",
-        confidence: 0.7,
-        sampleSize: 2,
-        interventionCount: 0,
-        updatedAt: "2026-05-22T00:00:01Z",
-        source: "test",
-      },
-      toolCalls: [
-        { name: "read_file", status: "", summary: "  opened session_service.py  ", durationMs: "1250" },
-        { name: "pytest", status: "running", summary: "focused test", elapsedSeconds: 2.5 },
-      ] as unknown as ConversationMessage["toolCalls"],
+      feedbackEvents: [
+        {
+          sequence: 1,
+          kind: "thought",
+          status: "running",
+          summary: "Reading files",
+          resultPreview: "Reading files",
+        },
+        {
+          sequence: 2,
+          kind: "mental",
+          status: "running",
+          summary: "Still working",
+        },
+        {
+          sequence: 3,
+          kind: "tool",
+          status: "",
+          name: "read_file",
+          summary: "  opened session_service.py  ",
+          durationMs: 1250,
+        },
+        {
+          sequence: 4,
+          kind: "tool",
+          status: "running",
+          name: "pytest",
+          summary: "focused test",
+          durationSeconds: 2.5,
+        },
+      ],
     };
 
     const operations = operationsForConversationMessage(message);
@@ -1025,7 +1051,7 @@ describe("agentMessageOperations", () => {
     expect(operations).toEqual(buildAgentMessageOperations(conversationMessageToAgentMessage(message), labels));
     expect(operations).toHaveLength(4);
     expect(operations[0]).toMatchObject({
-      id: "message-3-thought",
+      id: "message-3-feedback-1",
       kind: "thought",
       label: "Deep thinking",
       rawStatus: "running",
@@ -1035,7 +1061,7 @@ describe("agentMessageOperations", () => {
       resultPreview: "Reading files",
     });
     expect(operations[1]).toMatchObject({
-      id: "message-3-mental",
+      id: "message-3-feedback-2",
       kind: "mental",
       label: "Mental model",
       rawStatus: "running",
@@ -1044,15 +1070,16 @@ describe("agentMessageOperations", () => {
       durationSeconds: null,
     });
     expect(operations[2]).toMatchObject({
-      id: "message-3-tool-0",
+      id: "message-3-feedback-3",
       kind: "tool",
-      label: "read_file",
+      label: "读取",
+      rawLabel: "read_file",
       status: "done",
       summary: "opened session_service.py",
       durationSeconds: 1.25,
     });
     expect(operations[3]).toMatchObject({
-      id: "message-3-tool-1",
+      id: "message-3-feedback-4",
       kind: "tool",
       label: "pytest",
       rawStatus: "running",
@@ -1068,20 +1095,11 @@ describe("agentMessageOperations", () => {
       role: "assistant",
       content: "Done",
       timestamp: "2026-05-22T00:00:00Z",
-      thought: "Plan",
-      mentalSnapshot: {
-        mood: "focused",
-        feeling: "",
-        whisper: "",
-        summary: "Stable",
-        cognitiveState: "productive",
-        confidence: 0.8,
-        sampleSize: 1,
-        interventionCount: 0,
-        updatedAt: "2026-05-22T00:00:01Z",
-        source: "test",
-      },
-      toolCalls: [{ name: "rg", status: "done" }],
+      feedbackEvents: [
+        { sequence: 1, kind: "thought", status: "done", summary: "Plan", resultPreview: "Plan" },
+        { sequence: 2, kind: "mental", status: "done", summary: "Stable" },
+        { sequence: 3, kind: "tool", status: "done", name: "rg" },
+      ],
     };
 
     const grouped = operationGroupsForConversationMessage(message);
@@ -1098,7 +1116,15 @@ describe("agentMessageOperations", () => {
       role: "assistant",
       content: "Done",
       timestamp: "2026-05-29T09:35:18Z",
-      thought: "先看日志。\n然后确认前端有没有渲染 thought 字段。",
+      feedbackEvents: [
+        {
+          sequence: 1,
+          kind: "thought",
+          status: "done",
+          summary: "先看日志。\n然后确认前端有没有渲染 thought 字段。",
+          resultPreview: "先看日志。\n然后确认前端有没有渲染 thought 字段。",
+        },
+      ],
     };
 
     const thought = operationGroupsForConversationMessage(message).thoughts[0];
@@ -1113,18 +1139,14 @@ describe("agentMessageOperations", () => {
       role: "assistant",
       content: "你好！我在。",
       timestamp: "2026-05-26T14:33:52",
-      mentalSnapshot: {
-        mood: "",
-        feeling: "",
-        whisper: "",
-        summary: "当前以规则诊断为主，认知态：稳定。",
-        cognitiveState: "normal",
-        confidence: 0,
-        sampleSize: 0,
-        interventionCount: 0,
-        updatedAt: "2026-05-26T14:33:52.789770",
-        source: "diagnosis",
-      },
+      feedbackEvents: [
+        {
+          sequence: 1,
+          kind: "mental",
+          status: "done",
+          summary: "当前以规则诊断为主，认知态：稳定。",
+        },
+      ],
     };
 
     expect(operationGroupsForConversationMessage(message).mental[0]?.summary).toBe(

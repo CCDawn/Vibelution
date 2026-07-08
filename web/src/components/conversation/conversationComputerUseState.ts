@@ -63,15 +63,6 @@ export function computerUseSessionIdsForMessage(message: ConversationMessage) {
     return [];
   }
   const sessionIds = new Set<string>();
-  for (const toolCall of message.toolCalls ?? []) {
-    if (toolCall.name !== COMPUTER_USE_TOOL_NAME) {
-      continue;
-    }
-    const sessionId = computerUseSessionIdFromPreview(toolCall.resultPreview);
-    if (sessionId) {
-      sessionIds.add(sessionId);
-    }
-  }
   for (const event of message.feedbackEvents ?? []) {
     if (event.kind !== "tool" || event.name !== COMPUTER_USE_TOOL_NAME) {
       continue;
