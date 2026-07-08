@@ -3,6 +3,7 @@ import type {
   MentalStateSnapshot,
   ToolCall,
 } from "../api/types";
+import { answerProjectionContent } from "../components/conversation/conversationInternalStatus";
 import { shouldDisplayRuntimeStatus } from "../components/conversation/conversationDisplayProtocol";
 import { mergeAgentFeedbackEvents, type AgentFeedbackEvent } from "./agentFeedbackEvents";
 import type {
@@ -259,7 +260,7 @@ function optionalNumber(value: unknown) {
 }
 
 function textPartForMessage(message: ConversationMessage): AgentMessagePart[] {
-  const text = String(message.content ?? "").trim();
+  const text = String(message.role === "assistant" ? answerProjectionContent(message) : message.content).trim();
   if (!text) {
     return [];
   }

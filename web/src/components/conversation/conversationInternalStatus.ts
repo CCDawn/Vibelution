@@ -83,15 +83,10 @@ export function isInternalStreamingStatusStage(stage: unknown) {
 }
 
 export function messageHasInternalStreamingStatusContent(message: ConversationMessage) {
-  if (!message.content) {
+  if (message.role !== "assistant" || !message.content) {
     return false;
   }
-  const metadataKind = String(message.metadata?.kind ?? "").trim();
-  return (
-    (metadataKind === "session_live_overlay" || metadataKind === "session_active_turn_layer" || Boolean(message.streaming))
-    && isInternalStreamingStatusStage(message.streamStage)
-    && isInternalStreamingStatusContent(message.content)
-  );
+  return isInternalStreamingStatusContent(message.content);
 }
 
 export function answerProjectionContent(message: ConversationMessage) {

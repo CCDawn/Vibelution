@@ -110,6 +110,34 @@ describe("chat active turn layer", () => {
     expect(message?.codexTranscript?.cells[0]?.id).toBe("native-tool");
   });
 
+  it("keeps internal native assistant markdown snapshots out of the visible active layer", () => {
+    const statusText = "context_prepare\n正在准备对话上下文...\n\nmodel_request\n正在请求模型，等待首个响应片段...\n\nretrying\n模型连接正在重试...\n第 1/5 次；原因：server_error。本轮仍在继续，请不要重复提交。";
+    const active = mergeAssistantDeltaIntoActiveTurnLayer(
+      undefined,
+      assistantDelta({
+        stage: "model_request",
+        contentDelta: "",
+        codexTranscript: {
+          version: 1,
+          source: "native",
+          messageId: "session-1-message-live-turn-1",
+          cells: [
+            {
+              id: "native-status-markdown",
+              kind: "assistant_markdown",
+              messageId: "session-1-message-live-turn-1",
+              status: "completed",
+              tone: "neutral",
+              text: statusText,
+            },
+          ],
+        },
+      }),
+    );
+
+    expect(active).toBeUndefined();
+  });
+
   it("updates the same unsequenced feedback event instead of appending a duplicate", () => {
     const first = mergeAssistantDeltaIntoActiveTurnLayer(
       undefined,

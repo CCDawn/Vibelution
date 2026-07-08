@@ -4,6 +4,7 @@ import type { AgentMessageTimelineItem, AgentMessageTimelineItemStatus } from ".
 import { buildCodexRolloutTraceEvents, type CodexRolloutTraceEvent } from "./codexRolloutTrace";
 import { buildCodexToolLifecycleModel, type CodexToolLifecycleModel } from "./codexToolLifecycleModel";
 import { shouldDisplayTranscriptCell } from "./conversationDisplayProtocol";
+import { isInternalStreamingStatusContent } from "./conversationInternalStatus";
 
 export type CodexTranscriptCellKind =
   | "user"
@@ -198,11 +199,12 @@ function cellFromOperation(
 }
 
 function answerTextFromMessage(message: AgentMessage) {
-  return message.parts
+  const text = message.parts
     .filter(isAssistantAnswerTextPart)
     .map((part) => part.text.trim())
     .filter(Boolean)
     .join("\n\n");
+  return isInternalStreamingStatusContent(text) ? "" : text;
 }
 
 function shouldAddStreamTail(

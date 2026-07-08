@@ -157,6 +157,48 @@ describe("ConversationView native Codex transcript surface", () => {
     expect(html).not.toContain("模型连接正在重试");
   });
 
+  it("does not render internal pipeline text when native transcripts carry it as assistant markdown", () => {
+    const statusText = "context_prepare\n正在准备对话上下文...\n\nagent_prepare\n正在唤起对话 agent...\n\nmodel_request\n正在请求模型，等待首个响应片段...\n\nretrying\n模型连接正在重试...\n第 1/5 次；原因：server_error。本轮仍在继续，请不要重复提交。";
+    const html = renderConversation([
+      {
+        id: "user-message",
+        role: "user",
+        content: "你好",
+        timestamp: "2026-07-08T17:01:00Z",
+      },
+      {
+        id: "assistant-native-status-markdown",
+        role: "assistant",
+        content: statusText,
+        timestamp: "2026-07-08T17:01:05Z",
+        codexTranscript: {
+          version: 1,
+          source: "native",
+          messageId: "assistant-native-status-markdown",
+          cells: [
+            {
+              id: "native-status-markdown",
+              kind: "assistant_markdown",
+              messageId: "assistant-native-status-markdown",
+              status: "completed",
+              tone: "neutral",
+              text: statusText,
+            },
+          ],
+        },
+      },
+    ]);
+
+    expect(html).toContain("你好");
+    expect(html).not.toContain("context_prepare");
+    expect(html).not.toContain("agent_prepare");
+    expect(html).not.toContain("model_request");
+    expect(html).not.toContain("retrying");
+    expect(html).not.toContain("正在准备对话上下文");
+    expect(html).not.toContain("模型连接正在重试");
+    expect(html).not.toContain('data-codex-transcript-cell-kind="assistant_markdown"');
+  });
+
   it("does not render stale native assistant transcript cells on user messages", () => {
     const html = renderConversation([
       {

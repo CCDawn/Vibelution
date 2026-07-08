@@ -54,6 +54,20 @@ describe("conversation internal status helpers", () => {
     expect(answerProjectionContent(message)).toBe("");
   });
 
+  it("keeps persisted internal status text out of the assistant answer projection", () => {
+    const retryStatusText = "context_prepare\n正在准备对话上下文...\n\nmodel_request\n正在请求模型，等待首个响应片段...\n\nretrying\n模型连接正在重试...\n第 2/5 次；原因：server_error。本轮仍在继续，请不要重复提交。";
+    const message = {
+      id: "message-persisted-pipeline-status",
+      role: "assistant" as const,
+      content: retryStatusText,
+      timestamp: "2026-07-08T17:01:00Z",
+    };
+
+    expect(isStreamingStatusPlaceholderContent(retryStatusText)).toBe(true);
+    expect(messageHasInternalStreamingStatusContent(message)).toBe(true);
+    expect(answerProjectionContent(message)).toBe("");
+  });
+
   it("recognizes no-final-answer interruption status text", () => {
     expect(isNoFinalAnswerStatusContent(
       "本轮还没有形成最终回答，已保留当前执行进度；发送“继续”可衔接上一轮继续。",
