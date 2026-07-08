@@ -1759,6 +1759,23 @@ def _conversation_index_visibility_for_kind(kind: str) -> str:
     return agent_directory_service.CONVERSATION_INDEX_VISIBILITY_USER_VISIBLE
 
 
+def _conversation_index_visibility_for_classification(
+    kind: str,
+    agent: dict[str, Any] | None,
+    *,
+    hidden_team_member_agent_ids: set[str] | None = None,
+) -> str:
+    normalized_kind = str(kind or "").strip()
+    if normalized_kind and normalized_kind != agent_directory_service.CONVERSATION_INDEX_KIND_INVALID:
+        return _conversation_index_visibility_for_kind(normalized_kind)
+    if isinstance(agent, dict):
+        return agent_directory_service.agent_conversation_index_visibility(
+            agent,
+            hidden_team_member_agent_ids=hidden_team_member_agent_ids,
+        )
+    return agent_directory_service.CONVERSATION_INDEX_VISIBILITY_USER_VISIBLE
+
+
 def _conversation_hidden_from_index(
     raw: dict[str, Any],
     agent: dict[str, Any] | None,
@@ -2448,10 +2465,7 @@ def _session_agent_visible_in_indexes(summary: dict[str, Any]) -> bool:
         return True
     if conversation_index_visibility == agent_directory_service.CONVERSATION_INDEX_VISIBILITY_TEAM_PRIVATE:
         return False
-    if (
-        conversation_index_visibility == agent_directory_service.CONVERSATION_INDEX_VISIBILITY_HIDDEN
-        and conversation_index_kind in {"", agent_directory_service.CONVERSATION_INDEX_KIND_HIDDEN}
-    ):
+    if conversation_index_visibility == agent_directory_service.CONVERSATION_INDEX_VISIBILITY_HIDDEN:
         return False
     if conversation_index_kind in {
         agent_directory_service.CONVERSATION_INDEX_KIND_TEAM_AGENT,
@@ -7842,13 +7856,11 @@ def _normalize_conversation(
         agent,
         hidden_team_member_agent_ids=hidden_team_member_agent_ids,
     )
-    conversation_index_visibility = (
-        agent_directory_service.agent_conversation_index_visibility(
-            agent,
-            hidden_team_member_agent_ids=hidden_team_member_agent_ids,
-        )
-        if isinstance(agent, dict)
-        else agent_directory_service.CONVERSATION_INDEX_VISIBILITY_USER_VISIBLE
+    conversation_index_kind = str(conversation_index_classification.get("kind") or "").strip()
+    conversation_index_visibility = _conversation_index_visibility_for_classification(
+        conversation_index_kind,
+        agent,
+        hidden_team_member_agent_ids=hidden_team_member_agent_ids,
     )
     return {
         "id": conversation_id,
@@ -7875,7 +7887,7 @@ def _normalize_conversation(
             hidden_team_member_agent_ids=hidden_team_member_agent_ids,
         ),
         "conversationIndexVisibility": conversation_index_visibility,
-        "conversationIndexKind": str(conversation_index_classification.get("kind") or "").strip(),
+        "conversationIndexKind": conversation_index_kind,
         "conversationIndexErrors": list(conversation_index_classification.get("errors") or []),
         "teamId": str(agent.get("teamId") or "").strip() if isinstance(agent, dict) else "",
         "teamName": str(agent.get("teamName") or "").strip() if isinstance(agent, dict) else "",
@@ -11229,6 +11241,7 @@ def _make_empty_conversation(
     normalized_index_kind = agent_directory_service.normalize_conversation_index_kind(conversation_index_kind)
     if not normalized_index_kind:
         normalized_index_kind = agent_directory_service.CONVERSATION_INDEX_KIND_INVALID
+    normalized_index_visibility = _conversation_index_visibility_for_kind(normalized_index_kind)
     conversation = {
         "conversation_id": str(session_id or "").strip(),
         "title": str(title or "").strip() or DEFAULT_CHAT_CONVERSATION_TITLE,
@@ -11239,6 +11252,8 @@ def _make_empty_conversation(
         "active_task": None,
         "conversation_index_kind": normalized_index_kind,
         "conversationIndexKind": normalized_index_kind,
+        "conversation_index_visibility": normalized_index_visibility,
+        "conversationIndexVisibility": normalized_index_visibility,
     }
     if normalized_index_kind == agent_directory_service.CONVERSATION_INDEX_KIND_HIDDEN:
         conversation["hidden_from_index"] = True
