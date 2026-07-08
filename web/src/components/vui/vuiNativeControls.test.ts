@@ -29,6 +29,8 @@ describe("VUI native controls", () => {
       "--vui-native-control-bg",
       "--vui-native-control-bg-hover",
       "--vui-native-control-fg",
+      "--vui-native-control-fg-hover",
+      "--vui-native-control-shadow-hover",
       "--vui-native-field-bg",
       "--vui-native-field-bg-hover",
       "--vui-native-field-fg",
@@ -58,6 +60,10 @@ describe("VUI native controls", () => {
     expect(bridgeSource).toContain("select");
     expect(bridgeSource).toContain("textarea");
     expect(bridgeSource).toContain("box-shadow: none");
+    expect(bridgeSource).toContain("background-color: var(--vui-native-control-bg-hover)");
+    expect(bridgeSource).toContain("box-shadow: var(--vui-native-control-shadow-hover)");
+    expect(bridgeSource).not.toContain("--vui-native-control-border-hover: var(--border-strong)");
+    expect(bridgeSource).not.toContain("--vui-native-control-bg-hover: var(--vui-control-muted-hover)");
     expect(bridgeSource).not.toContain("border-width: 2px");
     expect(bridgeSource).not.toContain("width: 100%");
   });
