@@ -93,7 +93,7 @@ const styles: Record<string, string> = {
   canvas:
     "canvas min-w-0 grid min-h-0 gap-2 p-2 relative flex-1 overflow-auto bg-[var(--vui-surface-base)] [background-image:linear-gradient(to_right,color-mix(in_srgb,var(--vui-border-subtle)_24%,transparent)_1px,transparent_1px),linear-gradient(to_bottom,color-mix(in_srgb,var(--vui-border-subtle)_18%,transparent)_1px,transparent_1px)] [background-size:40px_40px]",
   canvasLayoutModeSwitch:
-    "canvasLayoutModeSwitch min-w-0 grid min-h-0 gap-2 p-2 grid-cols-[repeat(auto-fit,minmax(86px,max-content))]",
+    "canvasLayoutModeSwitch min-w-0 grid min-h-0 gap-2 p-2 grid-cols-[repeat(auto-fit,minmax(86px,max-content))] !gap-1 !p-0 content-start",
   canvasPanel:
     "canvasPanel min-w-0 grid min-h-0 gap-2 p-2 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] !flex min-h-0 flex-col overflow-hidden p-0",
   canvasReadOnlyBadge:
@@ -107,17 +107,17 @@ const styles: Record<string, string> = {
   canvasReadOnlyPanel:
     "canvasReadOnlyPanel min-w-0 grid min-h-0 gap-2 p-2 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] content-start",
   canvasToolbar:
-    "canvasToolbar min-w-0 grid min-h-0 gap-2 p-2 flex flex-wrap items-center gap-1.5 !flex min-h-[38px] flex-wrap items-start justify-between gap-2 border-b border-[var(--vui-border-subtle)] px-2 py-1 [&>div:first-child]:grid [&>div:first-child]:min-w-[220px] [&>div:first-child]:flex-1 [&_small]:truncate [&_strong]:text-[var(--vui-font-xs)] [&_span]:truncate [&_span]:text-[var(--vui-font-xs)]",
+    "canvasToolbar min-w-0 !grid min-h-[44px] grid-cols-[minmax(0,1fr)_max-content] items-start gap-2 border-b border-[var(--vui-border-subtle)] px-2 py-1.5 max-[900px]:grid-cols-[minmax(0,1fr)] [&>div:first-child]:grid [&>div:first-child]:min-w-0 [&>div:first-child]:gap-1 [&_small]:min-w-0 [&_strong]:text-[var(--vui-font-xs)] [&_strong]:leading-tight [&_span]:min-w-0 [&_span]:truncate [&_span]:text-[var(--vui-font-xs)]",
   canvasViewport:
     "canvasViewport min-w-0 grid min-h-0 gap-2 p-2 relative box-content h-[760px] w-[1180px] origin-top-left pl-[var(--canvas-offset-x,0px)] pt-[var(--canvas-offset-y,0px)] [transform:scale(var(--canvas-scale,1))]",
   dangerButton:
-    "dangerButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 text-[var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--border-strong)] hover:bg-[var(--vui-control-muted-hover)] hover:text-[var(--fg-primary)] disabled:cursor-default disabled:opacity-55 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
+    "dangerButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 text-[var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
   deliveryList:
     "deliveryList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
   edgeCommunication:
     "edgeCommunication min-w-0 text-[var(--fg-tertiary)] [stroke-dasharray:4_8] [stroke-width:1px] opacity-60",
   edgeLayerLine:
-    "edgeLayerLine min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2 block truncate text-[var(--vui-font-xs)] font-semibold text-[var(--fg-tertiary)]",
+    "edgeLayerLine min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2 inline-flex max-w-full flex-wrap items-center gap-1 px-2 py-1 text-[var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-tertiary)]",
   edgeOrganization:
     "edgeOrganization min-w-0 text-[var(--accent-cool)] [stroke-width:1.75px] opacity-90",
   edges:
@@ -199,27 +199,27 @@ const styles: Record<string, string> = {
   kernelTraceLink:
     "kernelTraceLink min-w-0",
   knowledgeCompletionFlowActions:
-    "knowledgeCompletionFlowActions min-w-0 flex flex-wrap items-center gap-1.5 !flex flex-wrap gap-1.5 min-w-0 mt-auto [&_a]:inline-flex [&_a]:items-center [&_a]:justify-center [&_a]:gap-1.5 [&_a]:min-h-[28px] [&_a]:px-2.5 [&_a]:rounded-[7px] [&_a]:border [&_a]:border-[color:color-mix(in_srgb,var(--accent-cool)_32%,var(--border-soft))] [&_a]:bg-[color:color-mix(in_srgb,var(--accent-cool)_8%,var(--vui-surface-panel))] [&_a]:text-[var(--fg-primary)] [&_a]:font-[780] [&_a]:no-underline [&_a]:whitespace-nowrap [&_[data-vui=native-button]]:inline-flex [&_[data-vui=native-button]]:items-center [&_[data-vui=native-button]]:justify-center [&_[data-vui=native-button]]:gap-1.5 [&_[data-vui=native-button]]:min-h-[28px] [&_[data-vui=native-button]]:px-2.5 [&_[data-vui=native-button]]:rounded-[7px] [&_[data-vui=native-button]]:border [&_[data-vui=native-button]]:border-[color:color-mix(in_srgb,var(--accent-cool)_32%,var(--border-soft))] [&_[data-vui=native-button]]:bg-[color:color-mix(in_srgb,var(--accent-cool)_8%,var(--vui-surface-panel))] [&_[data-vui=native-button]]:text-[var(--fg-primary)] [&_[data-vui=native-button]]:font-[780]",
+    "knowledgeCompletionFlowActions min-w-0 flex flex-wrap items-center gap-1.5 !flex flex-wrap items-center gap-1.5 min-w-0 mt-auto [&_a]:inline-flex [&_a]:w-fit [&_a]:max-w-full [&_a]:items-center [&_a]:justify-center [&_a]:gap-1.5 [&_a]:min-h-[28px] [&_a]:px-2.5 [&_a]:rounded-[7px] [&_a]:border [&_a]:border-[color:color-mix(in_srgb,var(--accent-cool)_32%,var(--border-soft))] [&_a]:bg-[color:color-mix(in_srgb,var(--accent-cool)_8%,var(--vui-surface-panel))] [&_a]:text-[var(--fg-primary)] [&_a]:font-[780] [&_a]:no-underline [&_a]:whitespace-nowrap [&_[data-vui=native-button]]:inline-flex [&_[data-vui=native-button]]:w-fit [&_[data-vui=native-button]]:max-w-full [&_[data-vui=native-button]]:items-center [&_[data-vui=native-button]]:justify-center [&_[data-vui=native-button]]:gap-1.5 [&_[data-vui=native-button]]:min-h-[28px] [&_[data-vui=native-button]]:px-2.5 [&_[data-vui=native-button]]:rounded-[7px] [&_[data-vui=native-button]]:border [&_[data-vui=native-button]]:border-[color:color-mix(in_srgb,var(--accent-cool)_32%,var(--border-soft))] [&_[data-vui=native-button]]:bg-[color:color-mix(in_srgb,var(--accent-cool)_8%,var(--vui-surface-panel))] [&_[data-vui=native-button]]:text-[var(--fg-primary)] [&_[data-vui=native-button]]:font-[780]",
   knowledgeCompletionFlowError:
-    "knowledgeCompletionFlowError min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
+    "knowledgeCompletionFlowError min-w-0 break-words rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] px-2 py-1 text-[var(--vui-font-xs)] leading-[var(--vui-line-readable)] text-[var(--state-error)]",
   knowledgeCompletionFlowHeader:
-    "knowledgeCompletionFlowHeader min-w-0 flex flex-wrap items-center gap-1.5",
+    "knowledgeCompletionFlowHeader min-w-0 !grid grid-cols-[minmax(0,1fr)_auto] items-start gap-2 max-[680px]:grid-cols-[minmax(0,1fr)] [&>div]:grid [&>div]:min-w-0 [&>div]:gap-1 [&_span]:min-w-0 [&_span]:break-words [&_span]:text-[var(--vui-font-sm)] [&_span]:leading-[var(--vui-line-readable)]",
   knowledgeCompletionFlowNode:
-    "knowledgeCompletionFlowNode min-w-0",
+    "knowledgeCompletionFlowNode min-w-0 grid min-h-[164px] grid-rows-[auto_minmax(0,1fr)_auto] gap-2 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2",
   knowledgeCompletionFlowNodeBody:
-    "knowledgeCompletionFlowNodeBody min-w-0 text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
+    "knowledgeCompletionFlowNodeBody min-w-0 grid content-start gap-1 text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] [&_b]:min-w-0 [&_b]:break-words [&_small]:min-w-0 [&_small]:break-words [&_em]:not-italic [&_p]:m-0 [&_p]:max-w-[min(100%,72ch)] [&_p]:break-words",
   knowledgeCompletionFlowNodeCurrent:
     "knowledgeCompletionFlowNodeCurrent min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)]",
   knowledgeCompletionFlowNodeHeader:
-    "knowledgeCompletionFlowNodeHeader min-w-0 flex flex-wrap items-center gap-1.5",
+    "knowledgeCompletionFlowNodeHeader min-w-0 flex flex-wrap items-center gap-1.5 [&_strong]:shrink-0 [&_span]:min-w-0 [&_span]:truncate",
   knowledgeCompletionFlowNodes:
-    "knowledgeCompletionFlowNodes min-w-0",
+    "knowledgeCompletionFlowNodes min-w-0 !grid grid-cols-[repeat(auto-fit,minmax(280px,1fr))] items-stretch gap-2",
   knowledgeCompletionFlowPanel:
-    "knowledgeCompletionFlowPanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] p-2",
+    "knowledgeCompletionFlowPanel min-w-0 grid gap-2 overflow-hidden rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] p-2",
   layerButtonActive:
     "layerButtonActive min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
   linkedRoomLine:
-    "linkedRoomLine min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2 block truncate text-[var(--vui-font-xs)] font-semibold text-[var(--accent-cool)]",
+    "linkedRoomLine min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2 inline-flex max-w-full flex-wrap items-center gap-1 px-2 py-1 text-[var(--vui-font-xs)] font-semibold leading-tight text-[var(--accent-cool)]",
   messageError:
     "messageError min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)] text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
   messageResult:
@@ -241,7 +241,7 @@ const styles: Record<string, string> = {
   nodeReadOnly:
     "nodeReadOnly min-w-0 cursor-pointer touch-manipulation",
   nodeRoleBadge:
-    "nodeRoleBadge min-w-0 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 text-[var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)] min-h-[18px] justify-self-start rounded-full border border-[var(--node-role-border,var(--vui-border-subtle))] bg-[var(--node-role-bg,var(--vui-control-muted))] px-1.5 py-0 text-[var(--node-role-fg,var(--fg-secondary))] text-[var(--vui-font-xs)] font-semibold leading-none",
+    "nodeRoleBadge min-w-0 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 text-[var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)] min-h-[18px] max-w-[128px] justify-self-start truncate rounded-full border border-[var(--node-role-border,var(--vui-border-subtle))] bg-[var(--node-role-bg,var(--vui-control-muted))] px-1.5 py-0 text-[var(--node-role-fg,var(--fg-secondary))] text-[var(--vui-font-xs)] font-semibold leading-none",
   nodeRoleBadgeAdvisor:
     "nodeRoleBadgeAdvisor min-w-0 [--node-role-bg:color-mix(in_srgb,var(--accent-cool)_12%,var(--vui-surface-row))] [--node-role-border:color-mix(in_srgb,var(--accent-cool)_42%,var(--vui-border-subtle))] [--node-role-fg:var(--accent-cool)]",
   nodeRoleBadgeGeneral:
@@ -393,7 +393,7 @@ const styles: Record<string, string> = {
   researchStageHeroStats:
     "researchStageHeroStats min-w-0 grid gap-2 !grid grid-cols-[repeat(3,minmax(0,1fr))] gap-2",
   researchStageLauncher:
-    "researchStageLauncher min-w-0",
+    "researchStageLauncher min-w-0 grid content-start gap-2 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] p-2",
   researchStageLauncherHeader:
     "researchStageLauncherHeader min-w-0 flex flex-wrap items-center gap-1.5",
   researchStageModuleCard:
@@ -411,7 +411,7 @@ const styles: Record<string, string> = {
   researchStageTopicInput:
     "researchStageTopicInput min-w-0 grid gap-1 text-[var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full",
   revokeButton:
-    "revokeButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 text-[var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--border-strong)] hover:bg-[var(--vui-control-muted-hover)] hover:text-[var(--fg-primary)] disabled:cursor-default disabled:opacity-55",
+    "revokeButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 text-[var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55",
   route:
     "route min-w-0 flex flex-col h-full min-h-0 overflow-hidden text-[var(--fg-primary)] [--team-workbench-gap:4px]",
   saveState:
@@ -467,19 +467,19 @@ const styles: Record<string, string> = {
   teamMemoryActionRail:
     "teamMemoryActionRail min-w-0 flex flex-wrap items-center gap-1.5 grid min-h-0 content-start overflow-auto !flex min-w-0 items-center justify-end gap-[5px] [&_a]:inline-flex [&_a]:min-h-[24px] [&_a]:items-center [&_a]:justify-center [&_a]:gap-1 [&_a]:px-[7px] [&_a]:rounded-[7px] [&_a]:border [&_a]:border-[color:color-mix(in_srgb,var(--accent-cool)_30%,var(--border-soft))] [&_a]:bg-[color:color-mix(in_srgb,var(--vui-surface-panel)_88%,transparent)] [&_a]:text-[var(--fg-primary)] [&_a]:font-[820] [&_a]:no-underline [&_a]:whitespace-nowrap [&_a:hover]:border-[color:color-mix(in_srgb,var(--accent-cool)_46%,var(--border-soft))] [&_a:hover]:bg-[color:color-mix(in_srgb,var(--accent-cool)_8%,var(--vui-surface-panel))]",
   teamMemoryIndex:
-    "teamMemoryIndex min-w-0 !flex-1 min-h-0 grid gap-2 grid-rows-[auto_minmax(0,1fr)] grid-cols-[minmax(0,1fr)]",
+    "teamMemoryIndex min-w-0 !flex-none min-h-0 grid max-h-[36vh] gap-2 grid-rows-[auto_minmax(0,1fr)] grid-cols-[minmax(0,1fr)] overflow-hidden rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] p-2",
   teamMemoryIndexHeader:
     "teamMemoryIndexHeader min-w-0 flex flex-wrap items-center gap-1.5 !flex min-w-0 items-center justify-between gap-2 [&>div]:grid [&>div]:min-w-0 [&>div]:gap-0.5 [&>div_strong]:truncate [&>div_strong]:text-[var(--fg-primary)] [&>div_span]:truncate [&>div_span]:text-[var(--fg-muted)] [&>div_span]:font-[760]",
   teamMemoryMemberActions:
     "teamMemoryMemberActions min-w-0 flex flex-wrap items-center gap-1.5 !flex items-center justify-end gap-[5px] min-w-0 [&_a_span]:hidden [&_a]:inline-flex [&_a]:items-center [&_a]:justify-center [&_a]:w-[26px] [&_a]:min-w-[26px] [&_a]:min-h-[24px] [&_a]:rounded-[7px] [&_a]:border [&_a]:border-[color:color-mix(in_srgb,var(--accent-cool)_30%,var(--border-soft))] [&_a]:bg-[color:color-mix(in_srgb,var(--vui-surface-panel)_88%,transparent)] [&_a]:text-[var(--fg-primary)] [&_a]:no-underline",
   teamMemoryMemberCard:
-    "teamMemoryMemberCard min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2",
+    "teamMemoryMemberCard min-w-0 grid grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_max-content_auto] items-center gap-2 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] px-2 py-1.5 max-[720px]:grid-cols-[minmax(0,1fr)_auto]",
   teamMemoryMemberHeading:
     "teamMemoryMemberHeading min-w-0 hidden",
   teamMemoryMemberIdentity:
     "teamMemoryMemberIdentity min-w-0 grid gap-1",
   teamMemoryMemberTable:
-    "teamMemoryMemberTable min-w-0 min-h-0 !grid grid-cols-[repeat(auto-fit,minmax(260px,max-content))] justify-start content-start auto-rows-max gap-2 overflow-auto",
+    "teamMemoryMemberTable min-w-0 min-h-0 !grid grid-cols-[minmax(0,1fr)] content-start auto-rows-max gap-1.5 overflow-auto pr-1 [scrollbar-gutter:stable]",
   teamMemoryRole:
     "teamMemoryRole min-w-0",
   teamMemoryStatusBadge:
@@ -515,13 +515,13 @@ const styles: Record<string, string> = {
   teamUnavailableSurface:
     "teamUnavailableSurface min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] p-2 grid min-h-0 flex-1 grid-cols-[minmax(0,720px)] content-start justify-items-center overflow-auto px-3 py-4",
   toolbarActions:
-    "toolbarActions min-w-0 flex flex-wrap items-center gap-1.5 !flex min-w-[220px] max-w-[min(100%,560px)] flex-wrap items-center justify-end gap-1.5 overflow-visible [&_a]:min-w-[72px] [&_a]:whitespace-nowrap [&_button]:min-w-[72px] [&_button]:whitespace-nowrap",
+    "toolbarActions min-w-0 flex flex-wrap items-center gap-1.5 !flex max-w-[min(100%,680px)] flex-wrap items-start justify-end gap-1.5 overflow-visible max-[900px]:justify-start [&_a]:min-w-[72px] [&_a]:whitespace-nowrap [&_button]:min-w-[72px] [&_button]:whitespace-nowrap",
   toolbarLink:
     "toolbarLink min-w-0 flex flex-wrap items-center gap-1.5",
   workflowCandidateItemSelected:
     "workflowCandidateItemSelected min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)]",
   workflowError:
-    "workflowError min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
+    "workflowError min-w-0 break-words rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] px-2 py-1.5 text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--state-error)]",
   workflowIngestionActions:
     "workflowIngestionActions min-w-0 flex flex-wrap items-center gap-1.5",
   workflowIngestionBoundary:
@@ -557,7 +557,7 @@ const styles: Record<string, string> = {
   workspace:
     "workspace min-w-0 flex-1 grid min-h-0 gap-[var(--team-workbench-gap)] p-[var(--team-workbench-gap)] !grid min-h-0 grid-cols-[minmax(520px,1fr)_minmax(300px,380px)] gap-[var(--team-workbench-gap)] overflow-hidden max-[760px]:h-auto max-[760px]:grid-cols-[minmax(0,1fr)] max-[760px]:content-start max-[760px]:overflow-auto",
   workspaceResearch:
-    "workspaceResearch min-w-0 grid min-h-0 gap-[var(--team-workbench-gap)] p-[var(--team-workbench-gap)] !grid-cols-[minmax(0,1fr)]",
+    "workspaceResearch min-w-0 grid min-h-0 !grid-cols-[minmax(0,1fr)] !gap-2 !overflow-auto rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] p-2 [scrollbar-gutter:stable]",
   workspaceResearchCanvas:
     "workspaceResearchCanvas min-w-0 grid min-h-0 gap-[var(--team-workbench-gap)] p-[var(--team-workbench-gap)] !grid h-full grid-cols-[minmax(520px,1fr)_minmax(300px,380px)] overflow-hidden max-[760px]:h-auto max-[760px]:grid-cols-[minmax(0,1fr)] max-[760px]:content-start max-[760px]:overflow-auto",
 };

@@ -69,7 +69,7 @@ describe("ConversationStreamingResponseContent", () => {
   });
 
   it("keeps streaming text bounded for long tokens while preserving the table width override", () => {
-    expect(styles.markdownBody).toContain("max-w-[min(100%,76ch)]");
+    expect(styles.markdownBody).toContain("max-w-[min(100%,128ch)]");
     expect(styles.markdownBody).toContain("whitespace-normal");
     expect(styles.markdownBody).toContain("break-words");
     expect(styles.markdownBody).toContain("[overflow-wrap:anywhere]");
@@ -77,6 +77,6 @@ describe("ConversationStreamingResponseContent", () => {
     expect(styles.streamingResponseText).toContain("break-words");
     expect(styles.streamingResponseText).toContain("[overflow-wrap:anywhere]");
     expect(styles.markdownBodyWithTable).toContain("max-w-full");
-    expect(styles.markdownBodyWithTable).not.toContain("max-w-[min(100%,76ch)]");
+    expect(styles.markdownBodyWithTable).not.toContain("max-w-[min(100%,128ch)]");
   });
 });

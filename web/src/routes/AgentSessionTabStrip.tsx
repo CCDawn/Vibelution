@@ -17,6 +17,45 @@ export type CliAgentRunTab = {
   mode: string;
 };
 
+type AgentSessionStatusTone = "running" | "error" | "done";
+
+function agentSessionStatusTone(status: string): AgentSessionStatusTone {
+  const value = status.trim().toLowerCase();
+  if (
+    [
+      "running",
+      "active",
+      "thinking",
+      "tooling",
+      "tool",
+      "answering",
+      "streaming",
+      "pending",
+      "checking",
+      "planning",
+      "reading",
+      "working",
+      "in_progress",
+    ].includes(value)
+  ) {
+    return "running";
+  }
+  if (["error", "failed", "failure", "blocked", "danger", "crashed", "unhealthy"].includes(value)) {
+    return "error";
+  }
+  return "done";
+}
+
+function agentSessionStatusDotClassName(status: string) {
+  const tone = agentSessionStatusTone(status);
+  return [
+    styles.agentSessionTabStatusDot,
+    tone === "running" ? styles.agentSessionTabStatusDotRunning : "",
+    tone === "error" ? styles.agentSessionTabStatusDotError : "",
+    tone === "done" ? styles.agentSessionTabStatusDotDone : "",
+  ].filter(Boolean).join(" ");
+}
+
 export type AgentSessionTabStripProps = {
   activeSessionId: string | null;
   activeCliAgentRunId?: string;
@@ -76,7 +115,7 @@ export function AgentSessionTabStrip({
   onSetActiveTab,
   onSubmitRename,
 }: AgentSessionTabStripProps) {
-  if (cliAgentRuns.length === 0 && sessions.length <= 1) {
+  if (cliAgentRuns.length === 0 && sessions.length === 0) {
     return null;
   }
 
@@ -99,6 +138,11 @@ export function AgentSessionTabStrip({
           (sessionIsChild ? (session.resultCard?.summary || session.taskSummary) : session.taskSummary)
           || sessionDisplay.modelLabel
           || "";
+        const sessionStatusLabel = statusLabel(sessionStatus);
+        const sessionStatusTitle = [sessionStatusLabel, sessionDisplay.modelLabel].filter(Boolean).join(" · ");
+        const sessionHoverTitle = [sessionTitle, sessionStatusLabel, sessionSummary, sessionDisplay.modelLabel]
+          .filter(Boolean)
+          .join(" · ");
         const tabActive = activeSessionId === session.id && workspaceActiveTab === "agent" && !activeCliAgentRunId;
         const tabContextTarget = contextMenuSessionId === session.id;
         const tabEditing = editingSessionId === session.id;
@@ -108,6 +152,11 @@ export function AgentSessionTabStrip({
           tabActive ? styles.agentSessionTabActive : "",
           tabContextTarget && !tabActive ? styles.agentSessionTabContextTarget : "",
           tabEditing ? styles.agentSessionTabEditing : "",
+        ].filter(Boolean).join(" ");
+        const tabMainActionClassName = [
+          styles.agentSessionTabMainAction,
+          tabActive ? styles.agentSessionTabMainActionActive : "",
+          tabContextTarget && !tabActive ? styles.agentSessionTabMainActionContextTarget : "",
         ].filter(Boolean).join(" ");
         if (tabEditing) {
           const sessionRenamePending = renamePending && renameSessionId === session.id;
@@ -119,7 +168,7 @@ export function AgentSessionTabStrip({
               aria-selected={tabActive}
               aria-current={tabActive ? "true" : undefined}
               onContextMenu={(event) => onContextMenu(event, session)}
-              title={[sessionTitle, sessionSummary, sessionDisplay.modelLabel].filter(Boolean).join(" · ")}
+              title={sessionHoverTitle}
             >
               <span className={styles.agentSessionTabIcon} aria-hidden="true">
                 {sessionIsChild ? <MessageCircleHeart size={14} /> : <Bot size={14} />}
@@ -187,11 +236,11 @@ export function AgentSessionTabStrip({
             aria-current={tabActive ? "true" : undefined}
             {...dragReferenceProps}
             onContextMenu={(event) => onContextMenu(event, session)}
-            title={[sessionTitle, sessionSummary, sessionDisplay.modelLabel].filter(Boolean).join(" · ")}
+            title={sessionHoverTitle}
           >
             <VButton
               type="button"
-              className={styles.agentSessionTabMainAction}
+              className={tabMainActionClassName}
               onPress={() => {
                 if (activeSessionId === session.id) {
                   onSetActiveTab(session.id, "agent");
@@ -199,30 +248,33 @@ export function AgentSessionTabStrip({
                 }
                 onOpenDirectSession(session.id);
               }}
-              title={[sessionTitle, sessionSummary, sessionDisplay.modelLabel].filter(Boolean).join(" · ")}
+              title={sessionHoverTitle}
             >
               <span className={styles.agentSessionTabIcon} aria-hidden="true">
                 {sessionIsChild ? <MessageCircleHeart size={14} /> : <Bot size={14} />}
               </span>
-              <span className={styles.agentSessionTabCopy}>
-                <span className={styles.agentSessionTabKicker}>
-                  {sessionIsChild ? (lang === "zh" ? "子对话" : "Child") : t("agentSession")}
-                </span>
-                <span className={styles.agentSessionTabTitle}>{sessionTitle}</span>
-              </span>
               <span
-                className={styles.agentSessionTabMeta}
-                title={[statusLabel(sessionStatus), sessionDisplay.modelLabel].filter(Boolean).join(" · ")}
-              >
-                {statusLabel(sessionStatus)}
-              </span>
+                className={styles.agentSessionTabTitle}
+                title={sessionHoverTitle}
+              >{sessionTitle}</span>
+              <span
+                className={agentSessionStatusDotClassName(sessionStatus)}
+                role="img"
+                aria-label={sessionStatusLabel}
+                title={sessionStatusTitle}
+              />
             </VButton>
           </div>
         );
       })}
       {cliAgentRuns.map((run) => {
         const tabActive = activeCliAgentRunId === run.id;
-        const title = [run.title, run.summary].filter(Boolean).join(" · ");
+        const runStatusLabel = statusLabel(run.status);
+        const title = [run.title, runStatusLabel, run.summary].filter(Boolean).join(" · ");
+        const tabMainActionClassName = [
+          styles.agentSessionTabMainAction,
+          tabActive ? styles.agentSessionTabMainActionActive : "",
+        ].filter(Boolean).join(" ");
         const tabClassName = [
           styles.agentSessionTab,
           styles.agentSessionTabCli,
@@ -239,19 +291,20 @@ export function AgentSessionTabStrip({
           >
             <VButton
               type="button"
-              className={styles.agentSessionTabMainAction}
+              className={tabMainActionClassName}
               onPress={() => onOpenCliAgentRun?.(run.id)}
               title={title}
             >
               <span className={styles.agentSessionTabIcon} aria-hidden="true">
                 <SquareTerminal size={14} />
               </span>
-              <span className={`${styles.agentSessionTabCopy} ${styles.agentSessionTabCopyCompact}`}>
-                <span className={styles.agentSessionTabTitle}>{run.title}</span>
-              </span>
-              <span className={styles.agentSessionTabMeta} title={statusLabel(run.status)}>
-                {statusLabel(run.status)}
-              </span>
+              <span className={styles.agentSessionTabTitle} title={title}>{run.title}</span>
+              <span
+                className={agentSessionStatusDotClassName(run.status)}
+                role="img"
+                aria-label={runStatusLabel}
+                title={runStatusLabel}
+              />
             </VButton>
             <VIconButton
               type="button"

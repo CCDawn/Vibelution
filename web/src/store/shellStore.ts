@@ -22,6 +22,11 @@ type ShellState = {
 };
 
 const DEFAULT_CHAT_PANEL_WIDTHS: ChatPanelWidths = {
+  leftPanelWidth: 300,
+  rightPanelWidth: 220,
+};
+
+const LEGACY_STATUS_LEFT_PANEL_WIDTHS: ChatPanelWidths = {
   leftPanelWidth: 260,
   rightPanelWidth: 340,
 };
@@ -32,6 +37,13 @@ function normalizePanelWidth(value: unknown, fallback: number) {
 }
 
 function normalizePersistedChatPanelWidths(widths: Partial<ChatPanelWidths> | undefined): ChatPanelWidths {
+  if (
+    widths?.leftPanelWidth === LEGACY_STATUS_LEFT_PANEL_WIDTHS.leftPanelWidth &&
+    widths?.rightPanelWidth === LEGACY_STATUS_LEFT_PANEL_WIDTHS.rightPanelWidth
+  ) {
+    return DEFAULT_CHAT_PANEL_WIDTHS;
+  }
+
   return {
     leftPanelWidth: normalizePanelWidth(widths?.leftPanelWidth, DEFAULT_CHAT_PANEL_WIDTHS.leftPanelWidth),
     rightPanelWidth: normalizePanelWidth(widths?.rightPanelWidth, DEFAULT_CHAT_PANEL_WIDTHS.rightPanelWidth),

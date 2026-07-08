@@ -22,6 +22,7 @@ import directSessionIndexListSource from "./DirectSessionIndexList.tsx?raw";
 import groupSessionIndexItemsSource from "./GroupSessionIndexItems.tsx?raw";
 import sessionContextMenuStyles from "./SessionContextMenu.styles";
 import sessionContextMenuSource from "./SessionContextMenu.tsx?raw";
+import agentSessionTabStripStyles from "./AgentSessionTabStrip.styles";
 import routeStyles from "./ChatCodingRoute.styles";
 import routeStylesModuleSource from "./ChatCodingRoute.styles.ts?raw";
 import cacheDetailDialogSource from "./chat/CacheDetailDialog.tsx?raw";
@@ -427,9 +428,9 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("centerFirstLayout");
     expect(routeSource).toContain("centerFirstAutoCollapseRef");
     expect(routeSource).toContain("window.matchMedia(CHAT_CENTER_FIRST_MEDIA_QUERY)");
-    expect(routeSource).toContain("const MIN_LEFT_PANEL_WIDTH = 224");
-    expect(routeSource).toContain("const MIN_RIGHT_PANEL_WIDTH = 300");
-    expect(routeSource).toContain("const TARGET_CENTER_PANE_WIDTH = 520");
+    expect(routeSource).toContain("const MIN_LEFT_PANEL_WIDTH = 260");
+    expect(routeSource).toContain("const MIN_RIGHT_PANEL_WIDTH = 200");
+    expect(routeSource).toContain("const TARGET_CENTER_PANE_WIDTH = 800");
     expect(routeSource).toContain("styles.layoutCenterFirst");
     expect(routeStyles.layout).toBeTypeOf("string");
     expect(routeStyles.layoutCenterFirst).toBeTypeOf("string");
@@ -437,8 +438,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.rightPane).toBeTypeOf("string");
     expect(routeStyles.resizeHandle).toBeTypeOf("string");
     expect(routeStyles.centerPane).toBeTypeOf("string");
-    expect(routeStyles.layout).toContain("var(--chat-left-pane-width,220px)");
-    expect(routeStyles.layout).toContain("var(--chat-right-pane-width,284px)");
+    expect(routeStyles.layout).toContain("var(--chat-left-pane-width,300px)");
+    expect(routeStyles.layout).toContain("var(--chat-right-pane-width,220px)");
     expect(routeStyles.layoutCenterFirst).toContain("var(--chat-left-pane-width,0px)");
     expect(routeStyles.layoutCenterFirst).toContain("var(--chat-right-pane-width,0px)");
   });
@@ -449,10 +450,10 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.layout).toContain("!p-0");
     expect(routeStyles.layout).toContain("[--chat-pane-gutter:1px]");
     expect(routeStyles.layout).toContain(
-      "grid-cols-[var(--chat-left-pane-width,220px)_var(--chat-pane-gutter)_minmax(0,1fr)_var(--chat-pane-gutter)_var(--chat-right-pane-width,284px)]",
+      "grid-cols-[var(--chat-left-pane-width,300px)_var(--chat-pane-gutter)_minmax(0,1fr)_var(--chat-pane-gutter)_var(--chat-right-pane-width,220px)]",
     );
     expect(routeStyles.layout).toContain(
-      "max-[1100px]:grid-cols-[var(--chat-left-pane-width,220px)_var(--chat-pane-gutter)_minmax(0,1fr)_var(--chat-pane-gutter)_var(--chat-right-pane-width,284px)]",
+      "max-[1100px]:grid-cols-[var(--chat-left-pane-width,300px)_var(--chat-pane-gutter)_minmax(0,1fr)_var(--chat-pane-gutter)_var(--chat-right-pane-width,220px)]",
     );
     expect(routeStyles.layoutCenterFirst).toContain(
       "!grid-cols-[minmax(0,var(--chat-left-pane-width,0px))_var(--chat-pane-gutter)_minmax(520px,1fr)_var(--chat-pane-gutter)_minmax(0,var(--chat-right-pane-width,0px))]",
@@ -469,12 +470,17 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.resizeHandle).toContain("before:w-px");
     expect(routeStyles.resizeHandle).toContain("hover:before:bg");
     expect(routeStyles.resizeHandle).toContain("focus-visible:before:bg");
+    expect(routeStyles.resizeHandle).toContain("[&_button[data-vui=icon-button]]:[--tw-translate-x:var(--chat-resize-handle-button-x,-50%)]");
+    expect(routeStyles.resizeHandleLeft).toContain("[grid-column:2]");
+    expect(routeStyles.resizeHandleLeft).toContain("[--chat-resize-handle-button-x:calc(50%_+_var(--vui-control-height-sm)/2)]");
+    expect(routeStyles.resizeHandleRight).toContain("[grid-column:4]");
+    expect(routeStyles.resizeHandleRight).toContain("[--chat-resize-handle-button-x:calc(-50%_-_var(--vui-control-height-sm)/2)]");
     expect(routeStyles.resizeHandleActive).toContain("before:bg");
     expect(routeStyles.resizeHandleActive).toContain("before:shadow");
   });
 
   it("centers the direct conversation reading track when both side panes are collapsed", () => {
-    expect(routeSource).toContain("const bothSidePanesCollapsed = leftRailCollapsed && rightPaneCollapsed;");
+    expect(routeSource).toContain("const bothSidePanesCollapsed = conversationIndexCollapsed && statusRailCollapsed;");
     expect(routeSource).toContain("const conversationFrameClassName = bothSidePanesCollapsed");
     expect(routeSource).toContain("styles.conversationFrameFocus");
     expect(routeSource).toContain("<div className={conversationFrameClassName}>");
@@ -485,13 +491,13 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.conversationFrameFocus).toContain("max-[980px]:w-full");
   });
 
-  it("defaults Chat to dense side panes so the center conversation has priority", () => {
-    expect(shellStoreSource).toContain("leftPanelWidth: 260");
-    expect(shellStoreSource).toContain("rightPanelWidth: 340");
+  it("defaults Chat to a wider left conversation column and narrower right status rail", () => {
+    expect(shellStoreSource).toContain("leftPanelWidth: 300");
+    expect(shellStoreSource).toContain("rightPanelWidth: 220");
     expect(shellStoreSource).toContain("normalizePersistedChatPanelWidths");
     expect(shellStoreSource).toContain("merge: (persistedState, currentState)");
-    expect(routeSource).toContain('"--chat-left-pane-width": leftRailCollapsed ? "0px" : `${leftPanelWidth}px`');
-    expect(routeSource).toContain('"--chat-right-pane-width": rightPaneCollapsed ? "0px" : `${rightPanelWidth}px`');
+    expect(routeSource).toContain('"--chat-left-pane-width": conversationIndexCollapsed ? "0px" : `${leftPanelWidth}px`');
+    expect(routeSource).toContain('"--chat-right-pane-width": statusRailCollapsed ? "0px" : `${rightPanelWidth}px`');
     expect(routeStyles.leftRail).toContain("flex");
     expect(routeStyles.leftRail).toContain("flex-col");
     expect(routeStyles.leftRail).toContain("gap-[var(--chat-workbench-gap)]");
@@ -513,6 +519,33 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeCssSource).not.toContain(".sessionAgentStatusControl");
   });
 
+  it("places the conversation index on the left and the status rail on the right", () => {
+    const statusAsideStart = routeSource.indexOf("<aside className={statusRailCollapsed");
+    const centerPaneStart = routeSource.indexOf("<section className={styles.centerPane}");
+    const conversationAsideStart = routeSource.indexOf("<aside className={conversationIndexCollapsed");
+
+    expect(statusAsideStart).toBeGreaterThan(-1);
+    expect(centerPaneStart).toBeGreaterThan(statusAsideStart);
+    expect(conversationAsideStart).toBeGreaterThan(centerPaneStart);
+    expect(routeStyles.rightPane).toContain("[grid-column:1]");
+    expect(routeStyles.rightPane).toContain("[grid-row:1]");
+    expect(routeStyles.resizeHandleLeft).toContain("[grid-column:2]");
+    expect(routeStyles.resizeHandleLeft).toContain("[grid-row:1]");
+    expect(routeStyles.centerPane).toContain("[grid-column:3]");
+    expect(routeStyles.centerPane).toContain("[grid-row:1]");
+    expect(routeStyles.resizeHandleRight).toContain("[grid-column:4]");
+    expect(routeStyles.resizeHandleRight).toContain("[grid-row:1]");
+    expect(routeStyles.leftRail).toContain("[grid-column:5]");
+    expect(routeStyles.leftRail).toContain("[grid-row:1]");
+    expect(routeSource).toContain("const conversationIndexCollapsed = leftRailCollapsed;");
+    expect(routeSource).toContain("const statusRailCollapsed = rightPaneCollapsed;");
+    expect(routeSource.indexOf("{conversationIndexPanel}")).toBeGreaterThan(conversationAsideStart);
+    expect(routeSource.indexOf("styles.systemEntryGroup")).toBeGreaterThan(conversationAsideStart);
+    expect(routeSource.indexOf("styles.currentSessionBlock")).toBeGreaterThan(statusAsideStart);
+    expect(routeSource.indexOf("<TokenCoreStatusPanel")).toBeGreaterThan(statusAsideStart);
+    expect(routeSource.indexOf("styles.companionBlock")).toBeGreaterThan(statusAsideStart);
+  });
+
   it("uses shared readable scale tokens instead of page-local micro typography", () => {
     const chatSurfaceCss = [
       appShellCssSource,
@@ -532,14 +565,28 @@ describe("ChatCodingRoute layout contract", () => {
   it("uses the unified Agent session tab strip for multi-session or CLI states", () => {
     expect(routeSource).toContain("agentSessionTabs.length > 0 || cliAgentRunTabs.length > 0");
     expect(routeSource).not.toContain("agentSessionTabs.length > 1 || cliAgentRunTabs.length > 0");
-    expect(agentSessionTabStripSource).toContain("cliAgentRuns.length === 0 && sessions.length <= 1");
-    expect(agentSessionTabStripSource).not.toContain("sessions.length === 0 && cliAgentRuns.length === 0");
+    expect(agentSessionTabStripSource).toContain("cliAgentRuns.length === 0 && sessions.length === 0");
+    expect(agentSessionTabStripSource).not.toContain("sessions.length <= 1");
 
     expect(routeStyles.agentSessionTabGroup).toBeTypeOf("string");
     expect(routeStyles.agentSessionTab).toBeTypeOf("string");
     expect(routeStyles.agentSessionTabRoot).toBeTypeOf("string");
     expect(routeStyles.agentSessionTabChild).toBeTypeOf("string");
     expect(routeStyles.agentSessionTabActive).toBeTypeOf("string");
+  });
+
+  it("renders Agent sessions as a full-width browser-like navigation rail", () => {
+    expect(routeStyles.tabStrip).toContain("overflow-hidden");
+    expect(routeStyles.tabStrip).toContain("border-b");
+    expect(routeStyles.tabStrip).toContain("items-end");
+    expect(agentSessionTabStripStyles.agentSessionTabGroup).toContain("w-full");
+    expect(agentSessionTabStripStyles.agentSessionTabGroup).toContain("flex-nowrap");
+    expect(agentSessionTabStripStyles.agentSessionTabGroup).toContain("overflow-x-auto");
+    expect(agentSessionTabStripStyles.agentSessionTab).toContain("shrink-0");
+    expect(agentSessionTabStripStyles.agentSessionTab).toContain("rounded-t-[var(--radius-control)]");
+    expect(agentSessionTabStripStyles.agentSessionTabMainActionActive).toContain("border-b-transparent");
+    expect(agentSessionTabStripStyles.agentSessionTabMainActionActive).toContain("-mb-px");
+    expect(agentSessionTabStripStyles.agentSessionTabTitle).toContain("truncate");
   });
 
   it("routes chat session navigation controls through VUI primitives", () => {
@@ -774,7 +821,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.featureChip).toContain("[&_[data-slot=vui-button-label]]:grid-cols-[minmax(0,1fr)_auto]");
   });
 
-  it("keeps group settings in the left rail and moves member status into the right index", () => {
+  it("keeps group settings in the right status rail and member status in the left conversation index", () => {
     expect(routeSource).toContain("expandedGroupAgentSessionIds");
     expect(routeSource).toContain("useQueries");
     expect(routeSource).toContain("expandedGroupAgentDetailQueries");
@@ -798,15 +845,17 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("styles.agentIndexEmptyState");
     expect(routeSource).toContain("aria-expanded={expanded}");
     expect(routeSource).toContain("只展示可用成员；已归档或断链的历史成员保留在日志里，不在这里打扰。");
-    expect(routeSource).toContain("暂无可用群成员。请在左侧群设置中选择成员并应用变更。");
+    expect(routeSource).toContain("暂无可用群成员。请在右侧群设置中选择成员并应用变更。");
     expect(routeSource).not.toContain("添加群成员");
     expect(routeSource).not.toContain("Add members");
     expect(routeSource).not.toContain("已从群聊调度中停用");
-    expect(routeSource.indexOf("styles.groupProfileBlock")).toBeLessThan(
-      routeSource.indexOf("<aside className={rightPaneCollapsed"),
+    expect(routeStyles.leftRail).toContain("[grid-column:5]");
+    expect(routeStyles.rightPane).toContain("[grid-column:1]");
+    expect(routeSource.indexOf("styles.groupProfileBlock")).toBeGreaterThan(
+      routeSource.indexOf("<aside className={statusRailCollapsed"),
     );
     expect(routeSource.indexOf("styles.agentIndexRoster")).toBeGreaterThan(
-      routeSource.indexOf("<aside className={rightPaneCollapsed"),
+      routeSource.indexOf("<aside className={conversationIndexCollapsed"),
     );
 
     expect(routeStyles.groupProfileBlock).toBeTypeOf("string");
@@ -826,7 +875,7 @@ describe("ChatCodingRoute layout contract", () => {
   });
 
   it("hides the right index tab switcher when only the conversation index is available", () => {
-    const rightAsideStart = routeSource.indexOf("<aside className={rightPaneCollapsed");
+    const rightAsideStart = routeSource.indexOf("<aside className={conversationIndexCollapsed");
     const tabsRenderStart = routeSource.indexOf("{standardGroupRoomActive ? (", rightAsideStart);
     const tabsClassStart = routeSource.indexOf("className={styles.rightIndexTabs}", tabsRenderStart);
     const memberSummaryStart = routeSource.indexOf("{rightIndexPanel === \"members\" && standardGroupRoomActive", tabsClassStart);
@@ -988,7 +1037,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).not.toContain("className={`${styles.leftBlock} ${styles.resourceBlock} ${styles.compressionStatusCard}`}");
     expect(routeSource).not.toContain("className={`${styles.leftBlock} ${styles.compressionStrategyCard}`}");
     expect(routeSource).toContain("lastCacheComposition.source === \"not_called\"");
-    expect(routeSource.indexOf("<TokenCoreStatusPanel")).toBeLessThan(routeSource.indexOf("<aside className={rightPaneCollapsed"));
+    expect(routeStyles.leftRail).toContain("[grid-column:5]");
+    expect(routeSource.indexOf("<TokenCoreStatusPanel")).toBeGreaterThan(routeSource.indexOf("<aside className={statusRailCollapsed"));
 
     expect(routeStyles.tokenCompressionCard).toBeTypeOf("string");
     expect(routeStyles.tokenStatusVisualGrid).toBeTypeOf("string");
@@ -1472,8 +1522,9 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("message.status !== \"completed\" ? <span>{statusLabel(message.status)}</span> : null");
     expect(routeSource).toContain("numericTail.slice(-2)");
     expect(routeSource).not.toContain("navigate(`/chat-rooms");
-    expect(routeSource.indexOf("styles.groupManagementPanel")).toBeLessThan(
-      routeSource.indexOf("<aside className={rightPaneCollapsed"),
+    expect(routeStyles.leftRail).toContain("[grid-column:5]");
+    expect(routeSource.indexOf("styles.groupManagementPanel")).toBeGreaterThan(
+      routeSource.indexOf("<aside className={statusRailCollapsed"),
     );
 
     expect(routeStyles.groupConversationFrame).toBeTypeOf("string");
