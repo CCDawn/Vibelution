@@ -2973,7 +2973,6 @@ export function ConversationView({
             const timelineOptions = {
               lang,
               includeAssistantText: timelineHasAssistantText && !nativeAssistantTranscriptHasAnswer,
-              includeInternalStatus: nativeAssistantTranscriptHasAnswer,
             };
             const timelineServerItems = nativeAssistantTranscriptHasAnswer
               && !(message.timelineItems ?? []).some((item) => item.kind !== "assistant_text")

@@ -3,6 +3,7 @@ import {
   isRuntimeNoticeMessage,
   isTurnErrorMessage,
 } from "./conversationMessagePredicates";
+import { chronologicalConversationMessages } from "./conversationMessageOrder";
 
 function normalizeNoticeText(value: string) {
   return value.replace(/\s+/g, " ").trim().toLowerCase();
@@ -44,7 +45,7 @@ function mergeAdjacentTurnErrorMessages(previous: ConversationMessage, next: Con
 
 export function projectConversationDisplayMessages(messages: ConversationMessage[]) {
   const projected: ConversationMessage[] = [];
-  for (const message of messages) {
+  for (const message of chronologicalConversationMessages(messages)) {
     if (isRuntimeNoticeMessage(message)) {
       continue;
     }

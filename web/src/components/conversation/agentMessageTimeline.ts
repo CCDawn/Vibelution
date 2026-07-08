@@ -49,7 +49,6 @@ export type AgentMessageTimelineItem =
 export type AgentMessageTimelineOptions = {
   lang: "zh" | "en" | string;
   includeAssistantText?: boolean;
-  includeInternalStatus?: boolean;
 };
 
 export type AgentMessageTimelineServerItem = {
@@ -76,7 +75,6 @@ const agentTimelineItemsCache = new WeakMap<
     serverItems: AgentMessageTimelineServerItem[] | undefined;
     lang: string;
     includeAssistantText: boolean | undefined;
-    includeInternalStatus: boolean | undefined;
     items: AgentMessageTimelineItem[];
   }
 >();
@@ -97,7 +95,6 @@ export function buildAgentMessageTimelineItems(
     && cached.serverItems === serverItems
     && cached.lang === options.lang
     && cached.includeAssistantText === options.includeAssistantText
-    && cached.includeInternalStatus === options.includeInternalStatus
   ) {
     return cached.items;
   }
@@ -107,7 +104,6 @@ export function buildAgentMessageTimelineItems(
     serverItems,
     lang: options.lang,
     includeAssistantText: options.includeAssistantText,
-    includeInternalStatus: options.includeInternalStatus,
     items,
   });
   return items;
@@ -282,8 +278,6 @@ function shouldDisplayTimelineOperation(
     summary: item?.summary ?? operation.summary,
     resultPreview: operation.resultPreview,
     error: operation.error,
-  }, {
-    includeInternalPipeline: Boolean(options.includeInternalStatus),
   });
 }
 
