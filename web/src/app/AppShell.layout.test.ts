@@ -150,6 +150,30 @@ describe("AppShell layout contract", () => {
     expect(styles.activeWorkDetailHeader).toContain("text-[var(--accent-cool)]");
   });
 
+  it("routes shell hover states through shared quiet hover tokens", () => {
+    const loudHoverRecipe =
+      "hover:border-[var(--border-strong)] hover:bg-[var(--vui-control-muted-hover)] hover:text-[var(--fg-primary)]";
+    const shellControlStyles = [
+      styles.actionButton,
+      styles.actionIconButton,
+      styles.returnButton,
+      styles.shutdownCancelButton,
+      styles.topBarRestoreButton,
+      styles.utilityButton,
+      styles.utilityFileButton,
+      styles.utilityTrigger,
+      utilityMenuStyles.utilityButton,
+      utilityMenuStyles.utilityFileButton,
+    ];
+
+    for (const value of shellControlStyles) {
+      expect(value).not.toContain(loudHoverRecipe);
+      expect(value).toContain("hover:border-[var(--vui-control-hover-border)]");
+      expect(value).toContain("hover:bg-[var(--vui-control-hover-bg)]");
+      expect(value).toContain("hover:text-[var(--vui-control-hover-fg)]");
+    }
+  });
+
   it("keeps the light shell top bar on light surfaces with a stable brand stack", () => {
     const lightThemeBlock = shellStyles.slice(
       shellStyles.indexOf('.shell[data-theme="light"] {'),
