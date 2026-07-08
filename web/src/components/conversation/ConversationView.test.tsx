@@ -429,13 +429,13 @@ describe("ConversationView edit resend affordance", () => {
     expect(styles.timelineThoughtText).toContain("text-left");
     expect(styles.timelineThoughtText).toContain("whitespace-pre-wrap");
     expect(styles.timelineThoughtText).toContain("overflow-visible");
-    expect(styles.timelineThoughtText).toContain("max-w-[min(100%,76ch)]");
+    expect(styles.timelineThoughtText).toContain("max-w-[min(100%,128ch)]");
     expect(styles.timelineThoughtText).not.toContain("text-center");
     expect(styles.timelineThoughtText).not.toContain("place-items-center");
   });
 
   it("keeps expanded process details out of nested card chrome", () => {
-    expect(styles.answerOnlyProcessGroup).toContain("w-[min(100%,860px)]");
+    expect(styles.answerOnlyProcessGroup).toContain("w-[min(100%,1360px)]");
     expect(styles.answerOnlyProcessGroup).toContain("bg-transparent");
     expect(styles.answerOnlyProcessGroup).toContain("shadow-none");
     expect(styles.answerOnlyProcessGroup).not.toContain("rounded-[var(--radius-control)]");
@@ -541,20 +541,20 @@ describe("ConversationView edit resend affordance", () => {
     expect(styles.timeline).toContain("px-[clamp(1.25rem,6vw,5.5rem)]");
     expect(styles.timeline).not.toContain("px-3");
     expect(styles.surfaceCompact).not.toContain("[&_.timeline]:px-3");
-    expect(styles.assistantTurn).toContain("w-[min(100%,980px)]");
+    expect(styles.assistantTurn).toContain("w-[min(100%,1480px)]");
     expect(styles.assistantTurn).toContain("justify-self-center");
     expect(styles.assistantTurn).toContain("grid-cols-[34px_minmax(0,1fr)]");
-    expect(styles.agentInboxTurn).toContain("w-[min(100%,980px)]");
+    expect(styles.agentInboxTurn).toContain("w-[min(100%,1480px)]");
     expect(styles.agentInboxTurn).toContain("justify-self-center");
-    expect(styles.groupTranscriptTurn).toContain("w-[min(100%,980px)]");
+    expect(styles.groupTranscriptTurn).toContain("w-[min(100%,1480px)]");
     expect(styles.groupTranscriptTurn).toContain("justify-self-center");
-    expect(styles.userTurn).toContain("w-[min(100%,980px)]");
+    expect(styles.userTurn).toContain("w-[min(100%,1480px)]");
     expect(styles.userTurn).toContain("justify-self-center");
     expect(styles.userTurn).toContain("grid-cols-[minmax(0,1fr)_34px]");
     expect(styles.userTurn).toContain("[&_.turnContent]:w-fit");
     expect(styles.userTurn).toContain("[&_.turnContent]:max-w-[min(70%,720px)]");
-    expect(styles.assistantTurnContinuation).toContain("[&_.turnContent]:w-[min(100%,860px)]");
-    expect(styles.assistantTurnContinuation).toContain("w-[min(100%,980px)]");
+    expect(styles.assistantTurnContinuation).toContain("[&_.turnContent]:w-[min(100%,1360px)]");
+    expect(styles.assistantTurnContinuation).toContain("w-[min(100%,1480px)]");
     expect(styles.assistantTurnContinuation).toContain("justify-self-center");
     expect(styles.turnContent).toContain("gap-[5px]");
     expect(styles.turnMeta).toContain("inline-flex");
@@ -575,7 +575,7 @@ describe("ConversationView edit resend affordance", () => {
     expect(styles.userMessageBody).toContain("shadow-none");
     expect(styles.userMessageBody).toContain("text-left");
 
-    expect(styles.responseSection).toContain("w-[min(100%,860px)]");
+    expect(styles.responseSection).toContain("w-[min(100%,1360px)]");
     expect(styles.responseSection).not.toContain("justify-self-stretch");
     expect(styles.responseSection).toContain("border-l");
     expect(styles.responseSection).toContain("bg-transparent");
@@ -590,7 +590,7 @@ describe("ConversationView edit resend affordance", () => {
     expect(styles.responseBody).toContain("shadow-none");
     expect(styles.responseBody).not.toContain("bg-[color-mix(in_srgb,var(--surface-panel)_66%,transparent)]");
 
-    expect(styles.answerOnlyProcessGroup).toContain("w-[min(100%,860px)]");
+    expect(styles.answerOnlyProcessGroup).toContain("w-[min(100%,1360px)]");
     expect(styles.answerOnlyProcessGroup).toContain("max-w-full");
     expect(styles.answerOnlyProcessGroup).toContain("bg-transparent");
     expect(styles.answerOnlyProcessGroup).toContain("shadow-none");
@@ -1618,13 +1618,16 @@ describe("ConversationView edit resend affordance", () => {
     expect(styles.operationText).toContain("max-w-full");
     expect(styles.messageBody).toContain("whitespace-pre-wrap");
     expect(styles.messageBody).toContain("[overflow-wrap:anywhere]");
-    expect(styles.messageBody).toContain("max-w-[min(100%,76ch)]");
-    expect(styles.markdownBody).toContain("max-w-[min(100%,76ch)]");
-    expect(styles.responseSegment_answer).toContain("[&_.markdownBody]:max-w-[min(100%,76ch)]");
-    expect(styles.assistantTurn).toContain("[&_.turnContent]:w-[min(100%,860px)]");
-    expect(styles.agentInboxTurn).toContain("[&_.turnContent]:w-[min(100%,920px)]");
-    expect(styles.groupTranscriptTurn).toContain("[&_.turnContent]:w-[min(100%,920px)]");
-    expect(styles.timelineAssistantTextCell).toContain("max-w-[min(100%,860px)]");
+    expect(styles.messageBody).toContain("max-w-[min(100%,128ch)]");
+    expect(styles.markdownBody).toContain("max-w-[min(100%,128ch)]");
+    expect(styles.responseSegment_answer).toContain("[&_.markdownBody]:max-w-[min(100%,128ch)]");
+    expect(styles.assistantTurn).toContain("[&_.turnContent]:w-[min(100%,1360px)]");
+    expect(styles.agentInboxTurn).toContain("[&_.turnContent]:w-[min(100%,1360px)]");
+    expect(styles.groupTranscriptTurn).toContain("[&_.turnContent]:w-[min(100%,1360px)]");
+    expect(styles.timelineAssistantTextCell).toContain("max-w-[min(100%,1360px)]");
+    expect(styles.codexTranscriptSurface).toContain("w-[min(100%,1360px)]");
+    expect(styles.codexTranscriptCellSummary).toContain("max-w-[min(100%,128ch)]");
+    expect(styles.markdownBody).not.toContain("max-w-[min(100%,96ch)]");
   });
 
   it("can render a read-only transcript without the composer", () => {
@@ -3388,6 +3391,7 @@ describe("ConversationView edit resend affordance", () => {
     expect(styles.turnErrorNoticeIcon).not.toContain("bg-[var(--vui-surface-row)]");
     expect(styles.turnErrorNoticeMeta).not.toContain("bg-[var(--vui-surface-row)]");
     expect(styles.turnErrorNoticeText).toContain("[overflow-wrap:anywhere]");
+    expect(styles.turnErrorNoticeText).toContain("[&_.markdownBody]:max-w-[min(100%,128ch)]");
     expect(styles.turnErrorReasonList).toContain("border-t");
     expect(styles.turnErrorReasonList).not.toContain("rounded-[var(--radius-control)]");
     expect(styles.turnErrorReasonRow).toContain("grid-cols-[max-content_minmax(0,1fr)]");
