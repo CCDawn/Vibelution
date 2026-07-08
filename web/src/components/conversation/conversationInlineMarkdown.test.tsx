@@ -15,7 +15,7 @@ const classNames = {
 describe("conversation inline markdown boundary", () => {
   it("keeps inline markdown rendering out of the heavy ConversationView module", () => {
     expect(existsSync(new URL("./conversationInlineMarkdown.tsx", import.meta.url))).toBe(true);
-    expect(conversationViewSource).toContain('from "./conversationInlineMarkdown"');
+    expect(conversationViewSource).not.toContain('from "./conversationInlineMarkdown"');
     expect(conversationViewSource).not.toContain("function renderInlineMarkdown");
     expect(conversationViewSource).not.toContain("const inlinePattern =");
   });

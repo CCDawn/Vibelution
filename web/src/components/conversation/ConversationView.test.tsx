@@ -173,7 +173,7 @@ describe("ConversationView edit resend affordance", () => {
     expect(conversationViewSource).toContain("function renderStreamingResponseText(content: string)");
     expect(conversationViewSource).toContain('from "./ConversationStreamingResponseContent"');
     expect(conversationViewSource).toContain("<ConversationStreamingResponseContent");
-    expect(conversationViewSource).not.toContain("markdownBodyWithTable: styles.markdownBodyWithTable");
+    expect(conversationViewSource).not.toContain("<ConversationStreamingResponseContent\n        content={content}\n        classNames=");
     expect(conversationStreamingResponseContentSource).toContain("markdownBodyWithTable");
     expect(conversationViewSource).not.toContain("function StreamingResponseContent");
     expect(conversationViewSource).not.toContain("projectStreamingMarkdownBlocks");
@@ -541,17 +541,20 @@ describe("ConversationView edit resend affordance", () => {
     expect(styles.answerOnlyProcessToggle).toContain("grid-cols-[14px_auto_auto_minmax(0,1fr)_14px]");
   });
 
-  it("caches response and markdown parsing so repeated expands avoid synchronous reparsing", () => {
+  it("caches response segmentation while delegating markdown rendering to the shared renderer", () => {
     expect(conversationViewSource).toContain("const responseSegmentCacheRef = useRef<Map<string, ResponseSegment[]>>(new Map())");
-    expect(conversationViewSource).toContain("const markdownBlockCacheRef = useRef<Map<string, MarkdownBlock[]>>(new Map())");
     expect(conversationViewSource).toContain("function getCachedResponseSegments(content: string)");
-    expect(conversationViewSource).toContain("function getCachedMarkdownBlocks(content: string)");
     expect(conversationViewSource).toContain("trimOldestCacheEntries(responseSegmentCacheRef.current, RESPONSE_PARSE_CACHE_LIMIT)");
-    expect(conversationViewSource).toContain("trimOldestCacheEntries(markdownBlockCacheRef.current, MARKDOWN_PARSE_CACHE_LIMIT)");
+    expect(conversationViewSource).not.toContain("markdownBlockCacheRef");
+    expect(conversationViewSource).not.toContain("MARKDOWN_PARSE_CACHE_LIMIT");
+    expect(conversationViewSource).not.toContain("function getCachedMarkdownBlocks(content: string)");
+    expect(conversationViewSource).not.toContain("parseConversationMarkdownBlocks");
+    expect(conversationViewSource).not.toContain("renderConversationInlineMarkdown");
+    expect(conversationViewSource).toContain('from "./ConversationMarkdownRenderer"');
+    expect(conversationViewSource).toContain("<ConversationMarkdownRenderer");
     expect(conversationViewSource).toContain("const responseSegments = showResponseBlock && !isStreamingStatusPlaceholder && !isResponseStreaming");
     expect(conversationViewSource).not.toContain("responseExpanded && !isResponseStreaming");
     expect(conversationViewSource).toContain("? getCachedResponseSegments(responseText)");
-    expect(conversationViewSource).toContain("const blocks = getCachedMarkdownBlocks(content)");
     expect(conversationViewSource).toContain("const prewarmMessages = timelineMessages");
     expect(conversationViewSource).toContain("window.setTimeout(prewarmNext, 48)");
   });

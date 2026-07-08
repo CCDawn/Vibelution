@@ -1,32 +1,28 @@
-import React, { ReactNode, useMemo } from "react";
+import React, { useMemo } from "react";
 
-import type { MarkdownBlock } from "./conversationMarkdownBlocks";
+import { ConversationMarkdownRenderer, type ConversationMarkdownClassNames } from "./ConversationMarkdownRenderer";
 import styles from "./ConversationStreamingResponseContent.styles";
 import { projectStreamingMarkdownBlocks } from "./streamingMarkdown";
 
-export type ConversationStreamingResponseContentClassNames = {
-  markdownBody: string;
+export type ConversationStreamingResponseContentClassNames = ConversationMarkdownClassNames & {
   streamingResponseText: string;
-  markdownBodyWithTable: string;
 };
 
 type ConversationStreamingResponseContentProps = {
   content: string;
   classNames?: ConversationStreamingResponseContentClassNames;
-  renderBlock: (block: MarkdownBlock, index: number) => ReactNode;
 };
 
 export function ConversationStreamingResponseContent({
   content,
   classNames = styles,
-  renderBlock,
 }: ConversationStreamingResponseContentProps) {
   const visibleText = String(content ?? "");
   const markdownProjection = useMemo(() => projectStreamingMarkdownBlocks(visibleText), [visibleText]);
-  const blocks = markdownProjection.blocks;
-  const hasTable = blocks.some((block) => block.type === "table");
+  const renderText = [markdownProjection.stableText, markdownProjection.liveText].filter(Boolean).join("\n\n") || visibleText;
+  const hasTable = /^\s*\|.+\|\s*$/m.test(renderText);
 
-  if (!visibleText || blocks.length === 0) {
+  if (!visibleText.trim()) {
     return null;
   }
 
@@ -38,7 +34,7 @@ export function ConversationStreamingResponseContent({
         hasTable ? classNames.markdownBodyWithTable : "",
       ].filter(Boolean).join(" ")}
     >
-      {blocks.map((block, index) => renderBlock(block, index))}
+      <ConversationMarkdownRenderer content={renderText} classNames={classNames} />
     </div>
   );
 }
