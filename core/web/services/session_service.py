@@ -965,6 +965,9 @@ def _reconcile_stale_session_ledger(session_id: str, *, active_turn_id: str = ""
         checkpoint = _load_session_live_output_checkpoint(normalized_session_id)
         turn_id = latest_open_turn_id(events)
         checkpoint_turn_id = str(getattr(checkpoint, "turn_id", "") or "").strip() if checkpoint is not None else ""
+        if not turn_id and checkpoint_turn_id and _session_events_have_terminal_turn(events, checkpoint_turn_id):
+            _discard_session_live_output_state(normalized_session_id, turn_id=checkpoint_turn_id)
+            return
         if not turn_id and checkpoint_turn_id:
             turn_id = checkpoint_turn_id
             recovered_from_checkpoint_only = True
@@ -2738,8 +2741,10 @@ class SessionTurnCapture:
         cleaned_summary = trim_lines(summary or "", max_lines=3)
         if not stage_key and not cleaned_summary:
             return
+        status_name = str(name or stage_key or "status").strip()
+        self.feedback_events = _close_previous_running_status_events(self.feedback_events, status_name)
         for existing in self.feedback_events:
-            if existing.get("kind") == "status" and existing.get("name") == (name or stage_key):
+            if existing.get("kind") == "status" and existing.get("name") == status_name:
                 existing["status"] = _normalize_tool_call_status(status, default="running")
                 if cleaned_summary:
                     existing["summary"] = cleaned_summary
@@ -2750,7 +2755,7 @@ class SessionTurnCapture:
             {
                 "kind": "status",
                 "status": _normalize_tool_call_status(status, default="running"),
-                "name": name or stage_key,
+                "name": status_name,
                 "summary": cleaned_summary or stage_key,
                 "resultPreview": cleaned_summary or stage_key,
             }
@@ -17025,6 +17030,35 @@ def _normalize_message_feedback_events(value: Any) -> list[dict[str, Any]]:
     return events
 
 
+def _close_previous_running_status_events(events: Any, current_name: str) -> list[dict[str, Any]]:
+    normalized_current_name = str(current_name or "").strip()
+    normalized_events: list[dict[str, Any]] = []
+    for item in _normalize_message_feedback_events(events):
+        entry = dict(item)
+        if (
+            str(entry.get("kind") or "").strip() == "status"
+            and str(entry.get("name") or "").strip() != normalized_current_name
+            and str(entry.get("status") or "").strip().lower() in {"running", "pending"}
+        ):
+            entry["status"] = "done"
+        normalized_events.append(entry)
+    return normalized_events
+
+
+def _session_events_have_terminal_turn(events: Any, turn_id: str) -> bool:
+    normalized_turn_id = str(turn_id or "").strip()
+    if not normalized_turn_id:
+        return False
+    for event in events or []:
+        event_turn_id = str(getattr(event, "turn_id", "") or "").strip()
+        if event_turn_id != normalized_turn_id:
+            continue
+        event_type = str(getattr(event, "event_type", "") or "").strip()
+        if event_type in {EVENT_TURN_COMPLETED, EVENT_TURN_FAILED, EVENT_TURN_INTERRUPTED}:
+            return True
+    return False
+
+
 def _assistant_timeline_events_by_turn(conversation_id: str) -> dict[str, list[dict[str, Any]]]:
     normalized_session_id = str(conversation_id or "").strip()
     if not normalized_session_id:
@@ -19156,6 +19190,7 @@ def _append_session_live_feedback_event(session_id: str, event: dict[str, Any], 
         duplicate_index = -1
         if str(entry.get("kind") or "").strip() == "status":
             name = str(entry.get("name") or "").strip()
+            state.feedback_events = _close_previous_running_status_events(state.feedback_events, name)
             for index, existing in enumerate(state.feedback_events):
                 if existing.get("kind") == "status" and str(existing.get("name") or "").strip() == name:
                     duplicate_index = index
@@ -19484,6 +19519,7 @@ def _persist_session_interrupted_snapshot(
     live_thought = _sanitize_thought_text(getattr(live_state, "thought", "") if live_state else "")
     live_tools = _normalize_message_tool_calls(getattr(live_state, "tool_calls", []) if live_state else [])
     live_feedback_events = _normalize_message_feedback_events(getattr(live_state, "feedback_events", []) if live_state else [])
+    live_feedback_events = _extract_chat_feedback_events({"feedback_events": live_feedback_events}, final_status="stopped")
     live_mental = _normalize_mental_snapshot(getattr(live_state, "mental_snapshot", None) if live_state else None)
     live_stage = str(getattr(live_state, "stage", "") if live_state else "").strip().lower()
     stop_text = text_for(

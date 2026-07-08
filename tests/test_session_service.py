@@ -1,7 +1,14 @@
 from types import SimpleNamespace
 import queue
 
-from core.chat.conversation_ledger import EVENT_ASSISTANT_MESSAGE, EVENT_USER_MESSAGE, append_conversation_event
+from core.chat.conversation_ledger import (
+    EVENT_ASSISTANT_MESSAGE,
+    EVENT_TURN_INTERRUPTED,
+    EVENT_TURN_STARTED,
+    EVENT_USER_MESSAGE,
+    append_conversation_event,
+    load_conversation_events,
+)
 from core.ui.chat_state import load_chat_state, save_chat_state
 from core.web.services import session_service
 from core.web.services import agent_directory_service
@@ -277,6 +284,134 @@ def test_needs_continue_feedback_finalization_does_not_mark_thought_failed():
     feedback_events = session_service._extract_chat_feedback_events(result, final_status="needs_continue")
 
     assert [item["status"] for item in feedback_events] == ["done", "done", "done"]
+
+
+def test_session_turn_progress_live_output_closes_previous_statuses(monkeypatch, tmp_path):
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(session_service, "_publish_session_detail_snapshot", lambda _session_id: None)
+
+    session_service._set_session_running("session-live", True, turn_id="turn-progress")
+    try:
+        session_service._set_session_turn_progress_live_output("session-live", "context_prepare", turn_id="turn-progress")
+        session_service._set_session_turn_progress_live_output("session-live", "agent_prepare", turn_id="turn-progress")
+        session_service._set_session_turn_progress_live_output("session-live", "model_request", turn_id="turn-progress")
+
+        live_state = session_service._snapshot_session_live_output("session-live")
+    finally:
+        session_service._clear_session_live_output("session-live", turn_id="turn-progress")
+        session_service._set_session_running("session-live", False, turn_id="turn-progress")
+
+    assert live_state is not None
+    progress_events = [event for event in live_state.feedback_events if event["kind"] == "status"]
+    assert [event["name"] for event in progress_events] == [
+        "context_prepare",
+        "agent_prepare",
+        "model_request",
+    ]
+    assert [event["status"] for event in progress_events] == ["done", "done", "running"]
+
+
+def test_interrupted_snapshot_finalizes_running_feedback_events(monkeypatch, tmp_path):
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    save_chat_state(
+        tmp_path,
+        {
+            "version": 1,
+            "active_conversation_id": "session-live",
+            "updated_at": "2026-07-08T12:00:00",
+            "conversations": [
+                {
+                    "conversation_id": "session-live",
+                    "title": "真实会话",
+                    "last_turn_status": "running",
+                    "updated_at": "2026-07-08T12:00:00",
+                }
+            ],
+        },
+    )
+    append_conversation_event(tmp_path, "session-live", "turn-stop", EVENT_TURN_STARTED, status="running")
+    session_service._set_session_running("session-live", True, turn_id="turn-stop")
+    try:
+        session_service._set_session_live_output(
+            "session-live",
+            turn_id="turn-stop",
+            content="模型连接正在重试...\n第 3/5 次；原因：server_error。",
+            feedback_events=[
+                {"sequence": 1, "kind": "status", "status": "running", "name": "context_prepare", "summary": "准备上下文"},
+                {"sequence": 2, "kind": "status", "status": "running", "name": "agent_prepare", "summary": "唤起 agent"},
+                {"sequence": 3, "kind": "status", "status": "running", "name": "retrying", "summary": "正在重试"},
+            ],
+        )
+
+        session_service._persist_session_interrupted_snapshot(
+            "session-live",
+            {
+                "turnId": "turn-stop",
+                "stopReason": "操作者请求停止当前轮。",
+                "stopRequestedAt": "2026-07-08T12:06:49",
+            },
+            lang="zh",
+        )
+    finally:
+        session_service._set_session_running("session-live", False, turn_id="turn-stop")
+        session_service._clear_session_live_output("session-live", turn_id="turn-stop")
+
+    events = load_conversation_events(tmp_path, "session-live")
+    assistant_event = next(event for event in events if event.event_type == EVENT_ASSISTANT_MESSAGE)
+    assert assistant_event.status == "stopped"
+    assert [event["status"] for event in assistant_event.payload["feedbackEvents"]] == [
+        "done",
+        "done",
+        "done",
+    ]
+
+
+def test_reconcile_discards_live_checkpoint_for_already_interrupted_turn(monkeypatch, tmp_path):
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    save_chat_state(
+        tmp_path,
+        {
+            "version": 1,
+            "active_conversation_id": "session-live",
+            "updated_at": "2026-07-08T12:00:00",
+            "conversations": [
+                {
+                    "conversation_id": "session-live",
+                    "title": "真实会话",
+                    "last_turn_status": "ready",
+                    "updated_at": "2026-07-08T12:00:00",
+                }
+            ],
+        },
+    )
+    session_service._set_session_running("session-live", True, turn_id="turn-terminal")
+    try:
+        session_service._set_session_live_output(
+            "session-live",
+            turn_id="turn-terminal",
+            content="模型连接正在重试...",
+            feedback_events=[
+                {"sequence": 1, "kind": "status", "status": "running", "name": "context_prepare", "summary": "准备上下文"},
+                {"sequence": 2, "kind": "status", "status": "running", "name": "retrying", "summary": "正在重试"},
+            ],
+        )
+    finally:
+        with session_service._SESSION_LIVE_OUTPUTS_LOCK:
+            session_service._SESSION_LIVE_OUTPUTS.pop("session-live", None)
+        session_service._set_session_running("session-live", False, turn_id="turn-terminal")
+
+    append_conversation_event(tmp_path, "session-live", "turn-terminal", EVENT_TURN_STARTED, status="running")
+    append_conversation_event(tmp_path, "session-live", "turn-terminal", EVENT_TURN_INTERRUPTED, status="stopped")
+    checkpoint_path = session_service._session_live_output_checkpoint_path("session-live")
+    assert checkpoint_path.exists()
+
+    session_service._reconcile_stale_session_ledger("session-live", reason="detail_loaded_after_restart")
+
+    assert not checkpoint_path.exists()
+    assert [event.event_type for event in load_conversation_events(tmp_path, "session-live")] == [
+        EVENT_TURN_STARTED,
+        EVENT_TURN_INTERRUPTED,
+    ]
 
 
 def test_session_stream_full_queue_prefers_dropping_snapshots_before_assistant_delta():
