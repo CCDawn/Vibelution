@@ -71,7 +71,7 @@ describe("projectAgentMessageTimelineMessages", () => {
     expect(projection.messages).toHaveLength(1);
     expect(projection.messages[0].content).toBe("这是正在流式输出的回答。");
     expect(projection.messages[0].content).not.toContain("正在唤起对话 agent");
-    expect(projection.messages[0].feedbackEvents?.map((event) => event.summary)).toEqual(["正在绑定 Agent"]);
+    expect(projection.messages[0].feedbackEvents).toBeUndefined();
     expect(projection.agentMessages.map((message) => message.id)).toEqual(["active-turn"]);
     expect(projection.agentMessages[0].parts.map((part) => part.type)).toEqual(["text"]);
     expect(projection.rowIdentities[0].rowKey).toBe("assistant-turn:turn-1");
@@ -108,7 +108,49 @@ describe("projectAgentMessageTimelineMessages", () => {
     expect(projection.messages).toHaveLength(1);
     expect(projection.messages[0].content).toBe("这是用户应该看到的回答。");
     expect(projection.messages[0].content).not.toContain("过程提示");
-    expect(projection.messages[0].feedbackEvents?.map((event) => event.summary)).toEqual(["正在等待模型响应"]);
+    expect(projection.messages[0].feedbackEvents).toBeUndefined();
+  });
+
+  it("drops status-only live overlay and active layer messages from the visible timeline", () => {
+    const liveOverlay = assistantMessage("live-overlay", {
+      content: "正在唤起对话 agent...\n正在绑定 Agent 实例、私人工作区、记忆根和工具工作区。",
+      streaming: true,
+      streamStage: "agent_prepare",
+      feedbackEvents: [
+        {
+          sequence: 1,
+          kind: "status",
+          status: "running",
+          name: "agent_prepare",
+          summary: "正在绑定 Agent",
+        },
+      ],
+      metadata: { kind: "session_live_overlay", turnId: "live:turn-1" },
+    });
+    const activeTurn = assistantMessage("active-turn", {
+      content: "",
+      streaming: true,
+      streamStage: "model_request",
+      feedbackEvents: [
+        {
+          sequence: 2,
+          kind: "status",
+          status: "running",
+          name: "model_request",
+          summary: "正在请求模型，等待首个响应片段。",
+        },
+      ],
+      metadata: { kind: "session_active_turn_layer", turnId: "turn-1" },
+    });
+
+    const projection = projectAgentMessageTimelineMessages({
+      timelineMessages: [liveOverlay],
+      activeTurnMessage: activeTurn,
+    });
+
+    expect(projection.messages).toEqual([]);
+    expect(projection.agentMessages).toEqual([]);
+    expect(projection.streamingMessages).toEqual([]);
   });
 
   it("does not append an active layer after a committed same-turn answer already exists", () => {

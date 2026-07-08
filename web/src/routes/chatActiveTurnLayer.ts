@@ -4,9 +4,14 @@ import {
   isInternalStreamingStatusContent,
   isInternalStreamingStatusStage,
 } from "../components/conversation/conversationInternalStatus";
+import {
+  shouldDisplayRuntimeStatus,
+  shouldDisplayTranscriptCell,
+} from "../components/conversation/conversationDisplayProtocol";
 import type { ConversationMessage, SessionDetail, SessionStreamEvent } from "../api/types";
 
 export type AssistantDeltaEvent = Extract<SessionStreamEvent, { type: "assistant_delta" }>;
+type ConversationFeedbackEvent = NonNullable<ConversationMessage["feedbackEvents"]>[number];
 export type ActiveTurnLayerState = {
   id: string;
   sessionId: string;
@@ -47,6 +52,62 @@ function assistantDeltaAnswerContent(payload: AssistantDeltaEvent, base: ActiveT
   return isInternalStreamingStatusStage(payload.stage) && isInternalStreamingStatusContent(rawDelta) ? "" : rawDelta;
 }
 
+function compactText(value: unknown) {
+  return String(value ?? "").trim();
+}
+
+function hasVisibleFeedbackEvent(event: ConversationFeedbackEvent) {
+  if (!shouldDisplayRuntimeStatus({
+    kind: event.kind,
+    name: event.name,
+    status: event.status,
+    summary: event.summary,
+    resultPreview: event.resultPreview,
+    error: event.error,
+    failureClass: event.failureClass,
+    timedOut: event.timedOut,
+  })) {
+    return false;
+  }
+  if (event.kind === "status") {
+    return true;
+  }
+  return Boolean(
+    compactText(event.name)
+    || compactText(event.summary)
+    || compactText(event.resultPreview)
+    || compactText(event.error)
+    || compactText(event.failureClass)
+  );
+}
+
+function visibleFeedbackEvents(events: ConversationFeedbackEvent[]) {
+  return events.filter(hasVisibleFeedbackEvent);
+}
+
+function hasVisibleCodexTranscript(transcript: ConversationMessage["codexTranscript"] | undefined) {
+  return Boolean(
+    transcript
+    && String(transcript.source ?? "").trim() === "native"
+    && Array.isArray(transcript.cells)
+    && transcript.cells.some(shouldDisplayTranscriptCell)
+  );
+}
+
+function hasVisibleActiveTurnContent(layer: {
+  answerContent: string;
+  thoughtContent: string;
+  feedbackEvents: ConversationFeedbackEvent[];
+  codexTranscript?: ConversationMessage["codexTranscript"];
+}) {
+  return Boolean(
+    compactText(layer.answerContent)
+    || compactText(layer.thoughtContent)
+    || layer.feedbackEvents.length > 0
+    || hasVisibleCodexTranscript(layer.codexTranscript)
+  );
+}
+
 export function mergeAssistantDeltaIntoActiveTurnLayer(
   previous: ActiveTurnLayerState | undefined,
   payload: AssistantDeltaEvent,
@@ -67,9 +128,15 @@ export function mergeAssistantDeltaIntoActiveTurnLayer(
   const content = payload.replaceContent ? contentDelta : `${base?.answerContent ?? ""}${contentDelta}`;
   const thought = payload.replaceThought ? thoughtDelta : `${base?.thoughtContent ?? ""}${thoughtDelta}`;
   const feedbackEvents = payload.feedbackEvents
-    ? mergeAgentFeedbackEvents(base?.feedbackEvents, payload.feedbackEvents)
+    ? visibleFeedbackEvents(mergeAgentFeedbackEvents(base?.feedbackEvents, payload.feedbackEvents))
     : base?.feedbackEvents ?? [];
-  if (!content && !thought && !payload.stage && !feedbackEvents.length && !payload.codexTranscript && !base?.codexTranscript) {
+  const codexTranscript = payload.codexTranscript ?? base?.codexTranscript;
+  if (!hasVisibleActiveTurnContent({
+    answerContent: content,
+    thoughtContent: thought,
+    feedbackEvents,
+    codexTranscript,
+  })) {
     return undefined;
   }
   return {
@@ -83,7 +150,7 @@ export function mergeAssistantDeltaIntoActiveTurnLayer(
     thoughtContent: thought,
     feedbackEvents,
     timelineItems: payload.timelineItems ?? base?.timelineItems,
-    codexTranscript: payload.codexTranscript ?? base?.codexTranscript,
+    codexTranscript,
     ledgerSeq: Math.max(normalizedLedgerSeq(base?.ledgerSeq), normalizedLedgerSeq(payload.ledgerSeq)),
   };
 }
