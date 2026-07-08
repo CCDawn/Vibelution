@@ -1041,6 +1041,9 @@ export function SelfEvolutionTrack({
       ? (lang === "zh" ? "观察运行中，可随时终止。" : "Observation is running and can be stopped.")
       : (lang === "zh" ? "中央面板保留观察参数和启动入口。" : "Use the center panel for observation settings."))
     : conversationTask.nextAction;
+  const centerWorkflowSummary = observationRunModeActive
+    ? activeNextAction
+    : selectedWorkflowStep?.livePreview || selectedWorkflowStep?.summary || activeNextAction;
   const worktreeTerminateVisible = runIsActive && Boolean(worktreeRun);
   const observationTerminateVisible = observationRunModeActive && observationRunActive && Boolean(observationRun?.runId);
   const showTopTerminateAction = worktreeTerminateVisible || observationTerminateVisible;
@@ -1859,10 +1862,10 @@ export function SelfEvolutionTrack({
                     })}
                   </div>
                   <p className={styles.workflowStepSummary}>
-                    {selectedWorkflowStep?.livePreview || selectedWorkflowStep?.summary || activeNextAction}
+                    {centerWorkflowSummary}
                   </p>
                 </div>
-                {selectedWorkflowStep?.id !== "approval" && observationRunModeActive ? (
+                {observationRunModeActive ? (
                   renderObservationModeConversationPane()
                 ) : (
                   <div className={styles.conversationShell}>
