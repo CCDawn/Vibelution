@@ -1028,6 +1028,114 @@ def _ensure_source_collection_stage_agent_direct_session(
     return agent
 
 
+def _source_collection_stage_session_previous_round_evidence(
+    session_id: str,
+    *,
+    run_id: str,
+) -> dict[str, str]:
+    normalized_session_id = _trim_text(session_id, max_length=160)
+    normalized_run_id = _trim_text(run_id, max_length=160)
+    if not normalized_session_id or not normalized_run_id:
+        return {}
+    detail = session_service.get_session_detail(normalized_session_id)
+    if not isinstance(detail, dict):
+        return {}
+    for message in reversed(list(detail.get("messages") or [])):
+        if not isinstance(message, dict):
+            continue
+        metadata = message.get("metadata") if isinstance(message.get("metadata"), dict) else {}
+        kind = _trim_text(metadata.get("kind"), max_length=120)
+        if kind not in {SOURCE_COLLECTION_STAGE_SESSION_TASK_KIND, "source_collection_agent_context"}:
+            continue
+        message_run_id = (
+            _trim_text(metadata.get("runId"), max_length=160)
+            or _trim_text(metadata.get("sourceCollectionRunId"), max_length=160)
+            or _trim_text(metadata.get("sourceCollectionStageRunId"), max_length=160)
+        )
+        if not message_run_id or message_run_id == normalized_run_id:
+            continue
+        message_team_id = _trim_text(metadata.get("teamId"), max_length=160)
+        return {
+            "previousDirectSessionId": normalized_session_id,
+            "previousSourceRunId": message_run_id,
+            "previousTeamId": message_team_id,
+            "previousMessageKind": kind,
+            "previousMessageId": _trim_text(message.get("id"), max_length=160),
+        }
+    return {}
+
+
+def _ensure_source_collection_stage_agent_session_isolated(
+    agent: dict[str, Any],
+    *,
+    team_id: str,
+    run_id: str,
+    stage_id: str,
+    agent_role: str,
+) -> tuple[dict[str, Any], dict[str, str]]:
+    agent_id = _trim_text(agent.get("agentId"), max_length=160)
+    session_id = _trim_text(agent.get("directSessionId"), max_length=160)
+    evidence = _source_collection_stage_session_previous_round_evidence(
+        session_id,
+        run_id=run_id,
+    )
+    if not evidence:
+        return agent, {}
+    try:
+        reset_result = session_service.reset_agent_direct_session_lightweight(
+            session_id,
+            agent_id=agent_id,
+            title=_source_collection_stage_task_title(stage_id),
+        )
+    except Exception as exc:
+        _record_workflow_event(
+            "source_collection.stage_session_isolation_failed",
+            team_id,
+            level="warning",
+            fields={
+                "runId": run_id,
+                "stageId": stage_id,
+                "agentId": agent_id,
+                "agentRole": agent_role,
+                "previousDirectSessionId": session_id,
+                "errorType": type(exc).__name__,
+            },
+        )
+        raise TeamWorkflowOrchestrationError(
+            f"Previous source collection Agent session could not be isolated: {exc}"
+        ) from exc
+    replacement_session_id = (
+        _trim_text(reset_result.get("replacementDirectSessionId"), max_length=160)
+        or _trim_text(reset_result.get("nextActiveSessionId"), max_length=160)
+    )
+    next_agent = agent_directory_service.get_agent(agent_id) if agent_id else None
+    if not isinstance(next_agent, dict):
+        next_agent = dict(agent)
+    if replacement_session_id:
+        next_agent["directSessionId"] = replacement_session_id
+    isolation = {
+        "status": "isolated",
+        "reason": "previous_source_collection_round",
+        "previousDirectSessionId": session_id,
+        "replacementDirectSessionId": replacement_session_id,
+        "previousSourceRunId": evidence.get("previousSourceRunId", ""),
+        "previousTeamId": evidence.get("previousTeamId", ""),
+        "previousMessageKind": evidence.get("previousMessageKind", ""),
+    }
+    _record_workflow_event(
+        "source_collection.stage_session_isolated",
+        team_id,
+        fields={
+            "runId": run_id,
+            "stageId": stage_id,
+            "agentId": agent_id,
+            "agentRole": agent_role,
+            **isolation,
+        },
+    )
+    return next_agent, isolation
+
+
 def start_source_collection_stage_session_task(
     team_id: str,
     run_id: str,
@@ -1057,6 +1165,13 @@ def start_source_collection_stage_session_task(
     if not isinstance(agent, dict):
         raise TeamWorkflowOrchestrationError(f"Agent not found: {agent_id}")
     agent = _ensure_source_collection_stage_agent_direct_session(agent, stage_id=stage_id, agent_role=agent_role)
+    agent, session_isolation = _ensure_source_collection_stage_agent_session_isolated(
+        agent,
+        team_id=normalized_team_id,
+        run_id=normalized_run_id,
+        stage_id=stage_id,
+        agent_role=agent_role,
+    )
     session_id = _trim_text(agent.get("directSessionId"), max_length=160)
     if not session_id:
         raise TeamWorkflowOrchestrationError(f"Agent has no direct session: {agent_id}")
@@ -1222,6 +1337,7 @@ def start_source_collection_stage_session_task(
         "turn": {},
         "result": {},
         "writeback": {},
+        "sessionIsolation": session_isolation,
         "createdAt": now,
         "updatedAt": now,
     }
@@ -1306,6 +1422,7 @@ def start_source_collection_stage_session_task(
         "writebackContract": writeback_contract,
         "taskChecklist": task_checklist,
         "completionGate": task_record["completionGate"],
+        "sessionIsolation": session_isolation,
         "boundaries": _source_collection_stage_session_task_boundaries(stage_id=stage_id, agent_role=agent_role),
     }
 
