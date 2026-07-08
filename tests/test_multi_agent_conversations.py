@@ -146,6 +146,19 @@ def test_create_chat_session_creates_persistent_agent_and_direct_conversation(tm
     assert detail["taskTitle"] == "配置 Agent"
     assert agent["metadata"]["functionalDisplayName"] == "配置 Agent"
     assert agent["metadata"]["displayNameSource"] == "generated_person_name"
+    assert detail["hiddenFromIndex"] is False
+    assert detail["conversationIndexKind"] == agent_directory_service.CONVERSATION_INDEX_KIND_USER_CHAT
+    assert detail["conversationIndexVisibility"] == (
+        agent_directory_service.CONVERSATION_INDEX_VISIBILITY_USER_VISIBLE
+    )
+
+    listed = {item["id"]: item for item in session_service.list_sessions()}
+    assert listed[detail["id"]]["conversationIndexKind"] == (
+        agent_directory_service.CONVERSATION_INDEX_KIND_USER_CHAT
+    )
+    assert listed[detail["id"]]["conversationIndexVisibility"] == (
+        agent_directory_service.CONVERSATION_INDEX_VISIBILITY_USER_VISIBLE
+    )
 
     conversations = conversation_service.list_conversations()
     direct = [item for item in conversations if item["type"] == "direct_agent"]
@@ -157,6 +170,10 @@ def test_create_chat_session_creates_persistent_agent_and_direct_conversation(tm
     assert created_direct["agentPrimaryMode"] == "chat"
     assert created_direct["agentRoleKey"] == ""
     assert created_direct["agentPromptTemplateId"] == "prompt-chat-default"
+    assert created_direct["conversationIndexKind"] == agent_directory_service.CONVERSATION_INDEX_KIND_USER_CHAT
+    assert created_direct["conversationIndexVisibility"] == (
+        agent_directory_service.CONVERSATION_INDEX_VISIBILITY_USER_VISIBLE
+    )
 
 
 def test_legacy_session_list_is_read_only_until_detail_repairs_agent_binding(tmp_path, monkeypatch):

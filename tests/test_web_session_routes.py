@@ -1058,6 +1058,20 @@ def test_team_private_agent_summary_stays_out_of_user_session_index():
     assert session_service._session_agent_visible_in_indexes(summary) is False
 
 
+def test_hidden_user_chat_summary_stays_out_of_user_session_index():
+    summary = {
+        "id": "session-user-hidden",
+        "agentId": "agent-user-hidden",
+        "agentMissing": False,
+        "hiddenFromIndex": False,
+        "sessionKind": "main",
+        "conversationIndexKind": agent_directory_service.CONVERSATION_INDEX_KIND_USER_CHAT,
+        "conversationIndexVisibility": agent_directory_service.CONVERSATION_INDEX_VISIBILITY_HIDDEN,
+    }
+
+    assert session_service._session_agent_visible_in_indexes(summary) is False
+
+
 def test_ensure_agent_for_session_persists_personal_index_kind_for_session_repair(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path, conversations=[])
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)

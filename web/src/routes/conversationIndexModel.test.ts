@@ -9,6 +9,7 @@ import {
   DEFAULT_COLLAPSED_CONVERSATION_GROUPS,
   hasInvalidChildSessionLink,
   isDiscussionTeam,
+  isVisibleConversation,
   isVisibleConversationAgent,
   normalizeConversationIndexTeams,
   mergeVisibleAgentsIntoConversations,
@@ -424,6 +425,17 @@ describe("conversationIndexModel", () => {
       })),
     ).toBe(true);
     expect(merged.map((item) => item.conversationId).sort()).toEqual(["session-existing", "session-missing"]);
+  });
+
+  it("hides direct conversations with hidden index visibility even when their kind is user chat", () => {
+    expect(isVisibleConversation(conversation({
+      conversationIndexKind: "user_chat",
+      conversationIndexVisibility: "hidden",
+    }))).toBe(false);
+    expect(isVisibleConversation(conversation({
+      conversationIndexKind: "user_chat",
+      conversationIndexVisibility: "user_visible",
+    }))).toBe(true);
   });
 
   it("does not let an Agent placeholder overwrite a conversation with the same direct session id", () => {
