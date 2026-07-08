@@ -118,7 +118,7 @@ describe("ConfigRoute layout contract", () => {
   });
 
   it("converges the model library panel into a compact VUI row-panel contract", () => {
-    expect(modelLibraryPanelStylesSource).not.toContain("surface-card");
+    expect(modelLibraryPanelStylesSource).not.toMatch(/\bsurface-card\b(?!\))/);
     expect(modelLibraryPanelStylesSource).not.toContain("var(--radius-panel)");
     expect(modelLibraryPanelStyles.sectionSurface).toContain("[border-radius:8px]");
     expect(modelLibraryPanelStyles.formSurface).toContain("[max-height:min(360px,_44vh)]");
@@ -159,6 +159,40 @@ describe("ConfigRoute layout contract", () => {
     expect(stylesSource).toContain("max-[720px]:[&_.buttonBlock]:[width:100%]");
     expect(stylesSource).toContain("max-[720px]:[display:grid]");
     expect(stylesSource).toContain("max-[720px]:[grid-template-columns:1fr]");
+  });
+
+  it("keeps the settings workbench readable over custom backgrounds with a bounded draft editor", () => {
+    expect(routeSource).toContain("styles.configStatusBand");
+    expect(routeSource).toContain("styles.configStatusActions");
+    expect(routeSource).toContain("styles.sidebarMetaStrip");
+    expect(routeSource).toContain("styles.sidebarStatusCompact");
+    expect(routeSource).not.toContain("styles.sidebarMetrics");
+
+    expect(stylesSource).toContain("const readablePanelSurface");
+    expect(stylesSource).toContain("const readableRowSurface");
+    expect(styles.page).toContain("[background:color-mix(in_srgb,var(--surface-page)_94%,var(--bg-canvas))]");
+    expect(stylesSource).toContain("configStatusBand:");
+    expect(stylesSource).toContain("sidebar:");
+    expect(styles.configStatusBand).toContain("color-mix(in_srgb,var(--surface-panel)_96%,var(--bg-canvas))");
+    expect(styles.sidebar).toContain("color-mix(in_srgb,var(--surface-panel)_96%,var(--bg-canvas))");
+    expect(styles.sidebarMetaStrip).toContain("[display:flex]");
+    expect(styles.sidebarMetaStrip).toContain("[flex-wrap:wrap]");
+    expect(styles.sidebarStatusCompact).toContain(
+      "[background:color-mix(in_srgb,var(--surface-card)_94%,var(--surface-panel))]",
+    );
+
+    expect(draftPanelSource).toContain("styles.draftWorkbench");
+    expect(draftPanelSource).toContain("styles.draftActionRail");
+    expect(draftPanelStylesSource).toContain("const readablePanelSurface");
+    expect(draftPanelStyles.draftWorkbench).toContain("[max-height:min(520px,_54vh)]");
+    expect(draftPanelStyles.editorWrap).toContain("[min-height:260px]");
+    expect(draftPanelStyles.editorWrap).toContain("[max-height:min(430px,_44vh)]");
+    expect(draftPanelStyles.sectionSurface).not.toContain("color-mix(in_srgb,var(--vui-surface-panel)_72%,transparent)");
+    expect(overviewPanelStyles.sectionSurface).not.toContain("color-mix(in_srgb,var(--vui-surface-panel)_72%,transparent)");
+    expect(runtimePanelStyles.sectionSurface).not.toContain("color-mix(in_srgb,var(--vui-surface-panel)_72%,transparent)");
+    expect(modelLibraryPanelStyles.sectionSurface).not.toContain("color-mix(in_srgb,var(--vui-surface-panel)_72%,transparent)");
+    expect(healthDiagnosticsPanelStyles.sectionSurface).not.toContain("color-mix(in_srgb,var(--vui-surface-panel)_72%,transparent)");
+    expect(placeholderPanelStyles.loadingBoard).not.toContain("color-mix(in_srgb,var(--vui-surface-panel)_72%,transparent)");
   });
 
   it("keeps Config image editors and model content constrained on narrow screens", () => {
@@ -380,16 +414,22 @@ describe("ConfigRoute layout contract", () => {
 
   it("keeps extracted Config panels on local VUI/Tailwind surface contracts", () => {
     expect(extractedPanelStylesSource).toContain("const panelSurface");
-    expect(extractedPanelStylesSource).toContain("var(--vui-surface-panel)");
-    expect(extractedPanelStylesSource).toContain("var(--vui-surface-row)");
+    expect(extractedPanelStylesSource).toContain("color-mix(in_srgb,var(--surface-panel)_96%,var(--bg-canvas))");
+    expect(extractedPanelStylesSource).toContain("color-mix(in_srgb,var(--surface-card)_94%,var(--surface-panel))");
     expect(extractedPanelStylesSource).toContain("var(--vui-control-muted)");
     expect(extractedPanelStylesSource).toContain("var(--vui-border-subtle)");
-    expect(overviewPanelStyles.sectionSurface).toContain("var(--vui-surface-panel)");
+    expect(overviewPanelStyles.sectionSurface).toContain(
+      "color-mix(in_srgb,var(--surface-panel)_96%,var(--bg-canvas))",
+    );
     expect(runtimePanelStyles.segmented).toContain("[background:var(--vui-surface-toolbar)]");
     expect(draftPanelStyles.actionButton).toContain("var(--vui-control-muted)");
-    expect(modelLibraryPanelStyles.formSurface).toContain("var(--vui-surface-panel)");
     expect(healthDiagnosticsPanelStyles.findingCard).toContain("color-mix(in_srgb,var(--surface-card)_94%,var(--surface-panel))");
-    expect(placeholderPanelStyles.loadingBoard).toContain("var(--vui-surface-panel)");
+    expect(modelLibraryPanelStyles.formSurface).toContain(
+      "color-mix(in_srgb,var(--surface-panel)_96%,var(--bg-canvas))",
+    );
+    expect(placeholderPanelStyles.loadingBoard).toContain(
+      "color-mix(in_srgb,var(--surface-panel)_96%,var(--bg-canvas))",
+    );
     expect(extractedPanelStylesSource).not.toContain("[background:var(--vui-gradient-route-soft),var(--surface-panel)]");
   });
 

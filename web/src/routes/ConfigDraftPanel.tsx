@@ -38,25 +38,27 @@ export function ConfigDraftPanel({
         <Database size={16} className={styles.sectionIcon} />
       </div>
       <p className={styles.sectionText}>{copy.draftBody}</p>
-      <div className={styles.actionsRow}>
-        <VButton type="button" className={styles.actionButton} isDisabled={!canCheckCurrentChanges} onClick={onValidateEditorDraft}>
-          <RefreshCw size={14} />
-          {copy.validateDraft}
-        </VButton>
-        <VButton
-          type="button"
-          className={styles.actionButton}
-          isDisabled={!canRestoreEditorText}
-          title={copy.editorRestoreHint}
-          onClick={onRestoreEditorText}
-        >
-          <RotateCcw size={14} />
-          {copy.resetDraft}
-        </VButton>
-        <span className={styles.helperText}>{hasEditorChanges ? copy.editorDirtyHint : copy.editorCleanHint}</span>
-      </div>
-      <div className={styles.editorWrap}>
-        <LazyJsonCodeMirror value={jsonText} onChange={onJsonTextChange} />
+      <div className={styles.draftWorkbench}>
+        <div className={styles.draftActionRail}>
+          <VButton type="button" className={styles.actionButton} isDisabled={!canCheckCurrentChanges} onClick={onValidateEditorDraft}>
+            <RefreshCw size={14} />
+            {copy.validateDraft}
+          </VButton>
+          <VButton
+            type="button"
+            className={styles.actionButton}
+            isDisabled={!canRestoreEditorText}
+            title={copy.editorRestoreHint}
+            onClick={onRestoreEditorText}
+          >
+            <RotateCcw size={14} />
+            {copy.resetDraft}
+          </VButton>
+          <span className={styles.helperText}>{hasEditorChanges ? copy.editorDirtyHint : copy.editorCleanHint}</span>
+        </div>
+        <div className={styles.editorWrap}>
+          <LazyJsonCodeMirror value={jsonText} onChange={onJsonTextChange} />
+        </div>
       </div>
     </section>
   );

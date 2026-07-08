@@ -2994,7 +2994,7 @@ export function ConfigRoute() {
           ) : null}
         </div>
 
-        <div className={styles.sidebarStatus}>
+        <div className={styles.sidebarStatusCompact}>
           <div className={styles.sidebarStatusHeader}>
             <span>{copy.settingsStatusTitle}</span>
             <span
@@ -3017,17 +3017,6 @@ export function ConfigRoute() {
               <strong>{visibleSidebarGroups.length}</strong>
             </span>
           </div>
-          <VButton
-            type="button"
-            className={`${styles.primaryButton} ${styles.buttonBlock}`}
-            isDisabled={!canSaveConfig}
-            onClick={() => {
-              void handleApply();
-            }}
-          >
-            <Save size={14} />
-            {saveButtonLabel}
-          </VButton>
           <span className={styles.helperText}>{sidebarApplyHint}</span>
         </div>
 
@@ -3072,28 +3061,14 @@ export function ConfigRoute() {
             )}
           </section>
 
-        <div className={styles.sidebarMetrics}>
-          <article className={styles.metricCard}>
-            <span>{copy.runtimeProfile}</span>
-            <strong>{workspace.runtimeProfile}</strong>
-          </article>
-          <article className={styles.metricCard}>
-            <span>{copy.defaultMode}</span>
-            <strong>{workspace.defaultMode}</strong>
-          </article>
-          <article className={styles.metricCard}>
-            <span>{copy.defaultRoute}</span>
-            <strong>{workspace.defaultRoute}</strong>
-          </article>
-          <article className={styles.metricCard}>
-            <span>{copy.intakeMode}</span>
-            <strong>{intakeLabel(asRecord(draftConfig.evolution).intake_mode as string)}</strong>
-          </article>
-          <article className={styles.metricCard} aria-label={copy.developerModeReadonly}>
-            <span>{copy.developerModeReadonly}</span>
-            <strong>{developerModeReadonlyLabel}</strong>
-            <small>{copy.developerModeControlled}</small>
-          </article>
+        <div className={styles.sidebarMetaStrip}>
+          <span className={styles.inlineBadge}>{copy.runtimeProfile}: {workspace.runtimeProfile}</span>
+          <span className={styles.inlineBadge}>{copy.defaultMode}: {workspace.defaultMode}</span>
+          <span className={styles.inlineBadge}>{copy.defaultRoute}: {workspace.defaultRoute}</span>
+          <span className={styles.inlineBadge}>{copy.intakeMode}: {intakeLabel(asRecord(draftConfig.evolution).intake_mode as string)}</span>
+          <span className={styles.inlineBadge} aria-label={copy.developerModeReadonly}>
+            {copy.developerModeReadonly}: {developerModeReadonlyLabel}
+          </span>
         </div>
         <div
           className={styles.sidebarResizeX}
@@ -3119,6 +3094,66 @@ export function ConfigRoute() {
       </aside>
 
       <section className={activeSection?.id === "models-profiles" ? `${styles.content} ${styles.contentModels}` : styles.content}>
+        <div className={styles.configStatusBand}>
+          <div className={styles.configStatusCopy}>
+            <div className={styles.configStatusMeta}>
+              <span
+                className={
+                  hasPendingApply
+                    ? `${styles.statusBadge} ${styles.statusBadgePending}`
+                    : `${styles.statusBadge} ${styles.statusBadgeReady}`
+                }
+              >
+                {hasPendingApply ? copy.unsavedDraft : copy.syncedDraft}
+              </span>
+              <span className={styles.inlineBadge}>{copy.settingsNextStep}: {sidebarNextStepLabel}</span>
+              <span className={styles.configStatusPath} title={workspace.configPath}>
+                {copy.configPath}: {workspace.configPath}
+              </span>
+            </div>
+            <p className={styles.helperText}>{sidebarApplyHint}</p>
+          </div>
+          <div className={styles.configStatusActions}>
+            <VButton
+              type="button"
+              className={styles.actionButton}
+              isDisabled={Boolean(busyAction)}
+              onClick={() => {
+                void reloadWorkspace();
+              }}
+            >
+              <RotateCcw size={14} />
+              {copy.refresh}
+            </VButton>
+            <VButton
+              type="button"
+              className={styles.actionButton}
+              isDisabled={Boolean(busyAction)}
+              title={copy.openEnvironmentHint}
+              onClick={() => {
+                void handleOpenEnvironment();
+              }}
+            >
+              {copy.openEnvironment}
+            </VButton>
+            <VButton type="button" className={styles.actionButton} isDisabled={!canRestoreEditorText} title={copy.editorRestoreHint} onClick={restoreEditorText}>
+              <RotateCcw size={14} />
+              {copy.resetDraft}
+            </VButton>
+            <VButton
+              type="button"
+              className={styles.primaryButton}
+              isDisabled={!canSaveConfig}
+              onClick={() => {
+                void handleApply();
+              }}
+            >
+              <Save size={14} />
+              {saveButtonLabel}
+            </VButton>
+          </div>
+        </div>
+
         {notice.text ? (
           <div
             className={
