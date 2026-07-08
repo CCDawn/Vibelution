@@ -278,7 +278,7 @@ def test_turn_journal_visibility_flag_excludes_internal_event(tmp_path):
     assert model_visible_messages_from_events(events) == []
 
 
-def test_turn_journal_replays_compaction_checkpoint_and_cli_result(tmp_path):
+def test_turn_journal_replays_context_compression_marker_and_cli_result(tmp_path):
     append_turn_event(
         tmp_path,
         "session-a",
@@ -305,8 +305,10 @@ def test_turn_journal_replays_compaction_checkpoint_and_cli_result(tmp_path):
 
     messages = model_visible_messages_from_events(load_turn_events(tmp_path, "session-a"))
 
-    assert messages[0]["metadata"]["kind"] == EVENT_COMPACTION_CHECKPOINT
-    assert "继续修复 CLI" in messages[0]["content"]
+    assert messages[0]["metadata"]["kind"] == "context_compression_marker"
+    assert messages[0]["metadata"]["title"] == "上下文已压缩"
+    assert "继续修复 CLI" in messages[0]["metadata"]["summaryPreview"]
+    assert messages[0]["content"] == ""
     tool_call = messages[1]["toolCalls"][0]
     assert tool_call["name"] == "cli_agent_run_tool"
     assert tool_call["status"] == "timeout"

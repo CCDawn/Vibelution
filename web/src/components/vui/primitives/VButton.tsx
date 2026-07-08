@@ -4,6 +4,7 @@ import { type ReactNode } from "react";
 import {
   vuiButtonBaseClass,
   vuiButtonDangerClass,
+  vuiButtonHoverClass,
   vuiButtonPrimaryClass,
 } from "../renderers/heroui/heroSlots";
 import {
@@ -28,15 +29,15 @@ export type VButtonProps = Omit<
 
 function variantClass(variant: VuiButtonVariant | undefined): string {
   if (variant === "primary") {
-    return `${vuiButtonBaseClass} ${vuiButtonPrimaryClass}`;
+    return `${vuiButtonBaseClass} ${vuiButtonHoverClass} ${vuiButtonPrimaryClass}`;
   }
   if (variant === "danger") {
-    return `${vuiButtonBaseClass} ${vuiButtonDangerClass}`;
+    return `${vuiButtonBaseClass} ${vuiButtonHoverClass} ${vuiButtonDangerClass}`;
   }
   if (variant === "ghost") {
-    return "border border-transparent bg-transparent text-vui-fg-secondary shadow-none";
+    return `border border-transparent bg-transparent text-vui-fg-secondary shadow-none ${vuiButtonHoverClass}`;
   }
-  return vuiButtonBaseClass;
+  return `${vuiButtonBaseClass} ${vuiButtonHoverClass}`;
 }
 
 function classNameTokens(className: VButtonProps["className"]): string[] {

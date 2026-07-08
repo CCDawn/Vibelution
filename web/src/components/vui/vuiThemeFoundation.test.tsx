@@ -43,6 +43,11 @@ describe("VUI dual-theme foundation", () => {
       "--vui-surface-row-hover",
       "--vui-control-muted",
       "--vui-control-muted-hover",
+      "--vui-control-hover-bg",
+      "--vui-control-hover-border",
+      "--vui-control-hover-fg",
+      "--vui-control-hover-shadow",
+      "--vui-row-hover-bg",
       "--vui-border-subtle",
       "--vui-status-info-bg",
       "--vui-status-success-bg",
@@ -73,6 +78,9 @@ describe("VUI dual-theme foundation", () => {
     const lightThemeBlock = tokensSource.slice(tokensSource.indexOf('[data-theme="light"]'));
     expect(lightThemeBlock).toContain("--vui-surface-glass");
     expect(lightThemeBlock).toContain("--vui-control-muted");
+    expect(lightThemeBlock).toContain("--vui-control-hover-bg");
+    expect(lightThemeBlock).toContain("--vui-control-hover-border");
+    expect(lightThemeBlock).toContain("--vui-row-hover-bg");
     expect(lightThemeBlock).toContain("--vui-status-info-bg");
     expect(lightThemeBlock).toContain("--accent-cool-contrast");
     expect(lightThemeBlock).toContain("--surface-elevated");
@@ -95,6 +103,10 @@ describe("VUI dual-theme foundation", () => {
     expect(herouiThemeSource).toContain("--vui-component-surface");
     expect(herouiThemeSource).toContain('button[data-slot="button"][data-vui="button"]');
     expect(herouiThemeSource).toContain("border-width: 1px");
+    expect(herouiThemeSource).toContain("--vui-component-control-hover-bg");
+    expect(herouiThemeSource).toContain("--vui-component-control-hover-border");
+    expect(herouiThemeSource).toContain("--vui-component-control-hover-fg");
+    expect(herouiThemeSource).toContain("background: var(--vui-component-control-hover-bg)");
     expect(herouiThemeSource).toContain('[class*="segmentedControl"]');
   });
 
