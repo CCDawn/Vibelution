@@ -36,6 +36,7 @@ const INTERNAL_STREAMING_STATUS_STAGES = new Set([
   "model_request",
   "model_thinking",
   "model_retry",
+  "retrying",
   "followup_prepare",
 ]);
 

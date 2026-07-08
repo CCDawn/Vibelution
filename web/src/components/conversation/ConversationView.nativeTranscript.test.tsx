@@ -105,6 +105,58 @@ describe("ConversationView native Codex transcript surface", () => {
     expect(html).not.toContain("responseSection");
   });
 
+  it("does not render internal runtime status cells from native transcripts", () => {
+    const html = renderConversation([
+      {
+        id: "assistant-native-status-noise",
+        role: "assistant",
+        content: "模型连接正在重试...\n第 1/5 次；原因：server_error。本轮仍在继续，请不要重复提交。\n\n本轮已按请求停止。",
+        timestamp: "2026-07-08T17:01:00Z",
+        codexTranscript: {
+          version: 1,
+          source: "native",
+          messageId: "assistant-native-status-noise",
+          cells: [
+            {
+              id: "status-context-prepare",
+              kind: "status",
+              messageId: "assistant-native-status-noise",
+              status: "completed",
+              tone: "neutral",
+              title: "context_prepare",
+              summary: "正在准备对话上下文... 正在读取当前会话、绑定 Agent、工具权限和可恢复的上轮现场。",
+            },
+            {
+              id: "status-retrying",
+              kind: "status",
+              messageId: "assistant-native-status-noise",
+              status: "completed",
+              tone: "warning",
+              title: "retrying",
+              summary: "第 1/5 次；原因：server_error。",
+            },
+            {
+              id: "native-answer",
+              kind: "assistant_markdown",
+              messageId: "assistant-native-status-noise",
+              status: "completed",
+              tone: "neutral",
+              text: "本轮已按请求停止。",
+            },
+          ],
+        },
+      },
+    ]);
+
+    expect(html).toContain('data-codex-transcript-surface="true"');
+    expect(html).toContain('data-codex-transcript-cell-kind="assistant_markdown"');
+    expect(html).toContain("本轮已按请求停止。");
+    expect(html).not.toContain("context_prepare");
+    expect(html).not.toContain("retrying");
+    expect(html).not.toContain("正在准备对话上下文");
+    expect(html).not.toContain("模型连接正在重试");
+  });
+
   it("does not render stale native assistant transcript cells on user messages", () => {
     const html = renderConversation([
       {
