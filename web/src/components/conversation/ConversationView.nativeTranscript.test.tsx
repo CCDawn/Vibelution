@@ -197,6 +197,79 @@ describe("ConversationView native Codex transcript surface", () => {
     expect(html).toContain('data-codex-transcript-cell-kind="assistant_markdown"');
   });
 
+  it("renders expandable native tool execution details instead of only the short summary", () => {
+    const html = renderConversation([
+      {
+        id: "assistant-native-tool-detail",
+        role: "assistant",
+        content: "工具检查完成。",
+        timestamp: "2026-07-07T11:00:00Z",
+        codexTranscript: {
+          version: 1,
+          source: "native",
+          messageId: "assistant-native-tool-detail",
+          cells: [
+            {
+              id: "native-tool-detail-cell",
+              kind: "tool_call",
+              messageId: "assistant-native-tool-detail",
+              status: "completed",
+              tone: "neutral",
+              title: "code_symbol_tool",
+              summary: '{\n"status": "ok",',
+              operationIds: ["operation-code-symbol"],
+              toolLifecycleModel: {
+                toolCalls: [
+                  {
+                    toolCallId: "tool_call:operation-code-symbol",
+                    rawOperationId: "operation-code-symbol",
+                    status: "completed",
+                    title: "code_symbol_tool",
+                    summary: '{\n"status": "ok",',
+                    rawToolName: "code_symbol_tool",
+                    runtimeKind: "tool",
+                    resultPreview: "完整工具结果：命中 20 个符号",
+                  },
+                ],
+                terminalOperations: [],
+                terminalSessions: [],
+                modelObservations: [],
+              },
+            },
+            {
+              id: "native-tool-detail-answer",
+              kind: "assistant_markdown",
+              messageId: "assistant-native-tool-detail",
+              status: "completed",
+              tone: "neutral",
+              text: "工具检查完成。",
+            },
+          ],
+          toolCalls: [
+            {
+              toolCallId: "tool_call:operation-code-symbol",
+              rawOperationId: "operation-code-symbol",
+              status: "completed",
+              title: "code_symbol_tool",
+              summary: '{\n"status": "ok",',
+              rawToolName: "code_symbol_tool",
+              runtimeKind: "tool",
+              resultPreview: "完整工具结果：命中 20 个符号",
+            },
+          ],
+          terminalOperations: [],
+          terminalSessions: [],
+          modelObservations: [],
+        },
+      } as ConversationMessage,
+    ]);
+
+    expect(html).toContain('data-codex-tool-detail="true"');
+    expect(html).toContain("code_symbol_tool");
+    expect(html).toContain("完整工具结果：命中 20 个符号");
+    expect(html).toContain("工具检查完成。");
+  });
+
   it("keeps the legacy projection path when native transcript is unavailable", () => {
     const html = renderConversation([
       {

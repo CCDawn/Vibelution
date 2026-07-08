@@ -17474,6 +17474,12 @@ def _codex_tool_lifecycle_projection_from_source(
             "terminalOperationId": terminal_operation_id,
             "tracePath": str(source.get("tracePath") or "").strip(),
             "error": _trim_tool_detail_text(source.get("error") or "", max_chars=1200, max_lines=10),
+            "resultPreview": _trim_tool_detail_text(source.get("resultPreview") or "", max_chars=4000, max_lines=80),
+            "resultType": str(source.get("resultType") or source.get("result_type") or "").strip(),
+            "resultLength": _coerce_tool_number(_first_present_mapping_value(source, ("resultLength", "result_length"))),
+            "resultKind": str(source.get("resultKind") or source.get("result_kind") or "").strip(),
+            "truncated": bool(source.get("truncated")) if "truncated" in source else None,
+            "originalLength": _coerce_tool_number(_first_present_mapping_value(source, ("originalLength", "original_length"))),
         }
     )
     lifecycle["toolCalls"].append(tool_call)
