@@ -97,9 +97,23 @@ function isProjectableProcessOnlyMessage(message: ConversationMessage) {
     String(message.streamStage ?? "").trim()
     || (message.feedbackEvents?.length ?? 0) > 0
     || (message.timelineItems?.length ?? 0) > 0
-    || (message.toolCalls?.length ?? 0) > 0
-    || String(message.thought ?? "").trim()
-    || message.mentalSnapshot,
+    || hasVisibleNativeTranscript(message)
+  );
+}
+
+function hasVisibleNativeTranscript(message: ConversationMessage) {
+  const transcript = message.codexTranscript;
+  return Boolean(
+    transcript
+    && String(transcript.source ?? "").trim() === "native"
+    && (
+      (transcript.cells?.length ?? 0) > 0
+      || (transcript.rolloutEvents?.length ?? 0) > 0
+      || (transcript.toolCalls?.length ?? 0) > 0
+      || (transcript.terminalOperations?.length ?? 0) > 0
+      || (transcript.terminalSessions?.length ?? 0) > 0
+      || (transcript.modelObservations?.length ?? 0) > 0
+    )
   );
 }
 
@@ -143,11 +157,11 @@ function mergeProcessProjectionMessages(previous: ConversationMessage, next: Con
     content: mergeText(answerProjectionContent(previous), answerProjectionContent(next)),
     streaming: Boolean(previous.streaming || next.streaming),
     streamStage: next.streamStage || previous.streamStage,
-    thought: mergeText(previous.thought, next.thought) || undefined,
-    mentalSnapshot: next.mentalSnapshot ?? previous.mentalSnapshot,
+    thought: undefined,
+    mentalSnapshot: undefined,
     feedbackEvents: mergeExactItems(previous.feedbackEvents, next.feedbackEvents),
     timelineItems: mergeExactItems(previous.timelineItems, next.timelineItems),
-    toolCalls: mergeExactItems(previous.toolCalls, next.toolCalls),
+    toolCalls: undefined,
     attachments: mergeExactItems(previous.attachments, next.attachments),
     references: mergeExactItems(previous.references, next.references),
     codexTranscript: mergeCodexTranscripts(previous.codexTranscript, next.codexTranscript, previous.id),

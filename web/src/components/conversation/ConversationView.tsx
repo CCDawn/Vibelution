@@ -760,7 +760,7 @@ export function ConversationView({
   const agentCodexSurfacesByMessageId = useMemo(() => {
     const surfacesByMessageId = new Map<string, CodexTranscriptSurface>();
     for (const agentMessage of agentThread.messages) {
-      const legacyCells = buildCodexTranscriptCells(agentMessage, {
+      const projectedCells = buildCodexTranscriptCells(agentMessage, {
         operations: agentOperationGroupsByMessageId.get(agentMessage.id)?.timeline,
         timelineItems: agentTimelineItemsByMessageId.get(agentMessage.id),
       });
@@ -768,7 +768,7 @@ export function ConversationView({
       if (!sourceMessage) {
         continue;
       }
-      surfacesByMessageId.set(agentMessage.id, resolveCodexTranscriptSurface(sourceMessage, legacyCells));
+      surfacesByMessageId.set(agentMessage.id, resolveCodexTranscriptSurface(sourceMessage, projectedCells));
     }
     return surfacesByMessageId;
   }, [activeConversationMessagesById, agentOperationGroupsByMessageId, agentThread, agentTimelineItemsByMessageId]);
@@ -3081,7 +3081,7 @@ export function ConversationView({
               }
               return renderAgentProcessDetails(true);
             };
-            const responseSectionNode = !codexTranscriptSurface?.suppressLegacyResponse && showResponseBlock && !isStreamingStatusPlaceholder && !timelineRendersAssistantText ? (
+            const responseSectionNode = !codexTranscriptSurface?.suppressProjectedResponse && showResponseBlock && !isStreamingStatusPlaceholder && !timelineRendersAssistantText ? (
               <AgentResponseSectionView
                 answerKey={rowIdentity.answerKey}
                 answerContentSectionIds={agentRenderState.answerContentSectionIds}
@@ -3100,7 +3100,7 @@ export function ConversationView({
                   )}
               </AgentResponseSectionView>
             ) : null;
-            const processNode = codexTranscriptSurface?.suppressLegacyProcess ? null : shouldRenderNativeProcessTimeline ? (
+            const processNode = codexTranscriptSurface?.suppressProjectedProcess ? null : shouldRenderNativeProcessTimeline ? (
               renderAgentMessageTimeline(message, agentMessageTimelineItems, rowIdentity, agentRenderState.processSectionIds)
             ) : answerOnlyProcessMode && !timelineRendersAssistantText ? (
               renderAnswerOnlyProcessGroup(
@@ -3121,7 +3121,7 @@ export function ConversationView({
                 agentRenderState.processSectionIds,
               )
             ) : renderAgentProcessDetails();
-            const turnStatusNode = !codexTranscriptSurface?.suppressLegacyTurnStatus && noFinalAnswerStatusText ? (
+            const turnStatusNode = !codexTranscriptSurface?.suppressProjectedTurnStatus && noFinalAnswerStatusText ? (
               <div className={styles.turnStatusNote} role="status" aria-live="polite">
                 <span className={styles.turnStatusLabel}>{lang === "zh" ? "状态" : "Status"}</span>
                 <span className={styles.turnStatusText}>{noFinalAnswerStatusText}</span>
@@ -3200,7 +3200,7 @@ export function ConversationView({
                     data-codex-transcript-surface-mode={codexTranscriptSurface?.mode ?? "empty"}
                     data-codex-transcript-native-primary={nativeCodexTranscriptPrimary ? "true" : "false"}
                     data-codex-transcript-projection-gap-reason={codexTranscriptSurface?.projectionGap?.reason ?? ""}
-                    data-codex-transcript-projection-gap-legacy-cell-count={codexTranscriptSurface?.projectionGap?.legacyCellCount ?? 0}
+                    data-codex-transcript-projection-gap-projected-cell-count={codexTranscriptSurface?.projectionGap?.projectedCellCount ?? 0}
                   />
                   {agentInboxMessage ? (
                     <section className={styles.agentInboxSection}>

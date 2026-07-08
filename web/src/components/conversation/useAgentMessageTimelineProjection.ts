@@ -105,34 +105,6 @@ function projectionItemIdentity(item: unknown) {
   return parts.length > 0 ? parts.join("::") : JSON.stringify(item);
 }
 
-function normalizeMergedText(value: string) {
-  return value.replace(/\s+/g, " ").trim();
-}
-
-function mergeConversationText(...values: Array<string | undefined>) {
-  const merged: string[] = [];
-  const mergedSignals: string[] = [];
-  for (const value of values) {
-    const text = String(value ?? "").trim();
-    if (!text) {
-      continue;
-    }
-    const signal = normalizeMergedText(text);
-    if (mergedSignals.some((existing) => existing === signal || existing.includes(signal))) {
-      continue;
-    }
-    const containedIndex = mergedSignals.findIndex((existing) => signal.includes(existing));
-    if (containedIndex >= 0) {
-      merged[containedIndex] = text;
-      mergedSignals[containedIndex] = signal;
-      continue;
-    }
-    merged.push(text);
-    mergedSignals.push(signal);
-  }
-  return merged.join("\n\n");
-}
-
 function compactText(value: unknown) {
   return String(value ?? "").trim();
 }
@@ -201,28 +173,10 @@ function hasVisibleCodexTranscript(message: ConversationMessage) {
   );
 }
 
-function hasVisibleMentalSnapshot(message: ConversationMessage) {
-  const snapshot = message.mentalSnapshot;
-  return Boolean(
-    snapshot
-    && [
-      snapshot.mood,
-      snapshot.feeling,
-      snapshot.whisper,
-      snapshot.summary,
-      snapshot.cognitiveState,
-      snapshot.intervention,
-    ].some(compactText)
-  );
-}
-
 function hasVisibleProjectionMessageContent(message: ConversationMessage) {
   return Boolean(
     compactText(answerProjectionContent(message))
-    || compactText(message.thought)
-    || hasVisibleMentalSnapshot(message)
     || visibleFeedbackEvents(message.feedbackEvents)?.length
-    || (message.toolCalls?.length ?? 0) > 0
     || (message.timelineItems ?? []).some(hasVisibleTimelineItem)
     || hasVisibleCodexTranscript(message)
     || (message.attachments?.length ?? 0) > 0
@@ -242,7 +196,10 @@ function compactStreamingActiveTurnPlaceholderMessage(message: ConversationMessa
   return {
     ...message,
     content: answerProjectionContent(message),
+    thought: compactText(message.thought) ? message.thought : undefined,
+    mentalSnapshot: undefined,
     feedbackEvents: visibleFeedbackEvents(message.feedbackEvents),
+    toolCalls: undefined,
   };
 }
 
@@ -273,13 +230,13 @@ function mergeLiveOverlayIntoActiveTurnMessage(
     ...liveOverlayMessage,
     ...activeTurnMessage,
     content: activeTurnMessage.content,
-    thought: mergeConversationText(liveOverlayMessage.thought, activeTurnMessage.thought) || undefined,
+    thought: compactText(activeTurnMessage.thought) ? activeTurnMessage.thought : undefined,
     streamStage: activeTurnMessage.streamStage || liveOverlayMessage.streamStage,
     streaming: activeTurnMessage.streaming ?? liveOverlayMessage.streaming,
-    mentalSnapshot: activeTurnMessage.mentalSnapshot ?? liveOverlayMessage.mentalSnapshot,
+    mentalSnapshot: undefined,
     feedbackEvents,
     timelineItems: mergeUniqueProjectionItems(projectionItemIdentity, liveOverlayMessage.timelineItems, activeTurnMessage.timelineItems),
-    toolCalls: mergeUniqueProjectionItems(projectionItemIdentity, liveOverlayMessage.toolCalls, activeTurnMessage.toolCalls),
+    toolCalls: undefined,
     attachments: mergeUniqueProjectionItems(projectionItemIdentity, liveOverlayMessage.attachments, activeTurnMessage.attachments),
     references: mergeUniqueProjectionItems(projectionItemIdentity, liveOverlayMessage.references, activeTurnMessage.references),
     metadata: {

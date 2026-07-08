@@ -120,7 +120,7 @@ export type AgentToolCallPart = {
   sequence?: number;
   timestamp?: string;
   relatedThoughtSequence?: number;
-  source?: "feedback-event" | "legacy-tool-call";
+  source?: "feedback-event";
 };
 
 export type AgentAttachment = {

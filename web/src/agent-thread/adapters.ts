@@ -1,8 +1,4 @@
-import type {
-  ConversationMessage,
-  MentalStateSnapshot,
-  ToolCall,
-} from "../api/types";
+import type { ConversationMessage } from "../api/types";
 import { answerProjectionContent } from "../components/conversation/conversationInternalStatus";
 import { shouldDisplayRuntimeStatus } from "../components/conversation/conversationDisplayProtocol";
 import { mergeAgentFeedbackEvents, type AgentFeedbackEvent } from "./agentFeedbackEvents";
@@ -54,17 +50,10 @@ function processPartsForAssistantMessage(message: ConversationMessage): AgentMes
   if (message.role !== "assistant") {
     return [];
   }
-  if ((message.feedbackEvents?.length ?? 0) > 0) {
-    const feedbackParts = feedbackPartsForMessage(message);
-    return [
-      ...feedbackParts,
-      ...activeTurnThoughtPartForMessage(message, feedbackParts),
-    ];
-  }
+  const feedbackParts = feedbackPartsForMessage(message);
   return [
-    ...legacyThoughtPartForMessage(message),
-    ...legacyMentalPartForMessage(message),
-    ...legacyToolPartsForMessage(message),
+    ...feedbackParts,
+    ...activeTurnThoughtPartForMessage(message, feedbackParts),
   ];
 }
 
@@ -85,7 +74,17 @@ function activeTurnThoughtPartForMessage(
   if (feedbackParts.some((part) => part.type === "thought")) {
     return [];
   }
-  return legacyThoughtPartForMessage(message);
+  const thought = compactText(message.thought);
+  if (!thought || isInternalThoughtPlaceholder(thought, thought)) {
+    return [];
+  }
+  return [{
+    id: `${message.id}-thought`,
+    type: "thought",
+    text: thought,
+    summary: thought,
+    status: assistantStatus(message),
+  }];
 }
 
 function feedbackEventToAgentPart(
@@ -191,78 +190,6 @@ function toolEventToAgentPart(id: string, event: AgentFeedbackEvent): AgentToolC
   };
 }
 
-function legacyThoughtPartForMessage(message: ConversationMessage): AgentThoughtPart[] {
-  const thought = compactText(message.thought);
-  if (!thought || isInternalThoughtPlaceholder(thought, thought)) {
-    return [];
-  }
-  return [{
-    id: `${message.id}-thought`,
-    type: "thought",
-    text: thought,
-    summary: thought,
-    status: assistantStatus(message),
-  }];
-}
-
-function legacyMentalPartForMessage(message: ConversationMessage): AgentMentalPart[] {
-  const summary = mentalSnapshotSummary(message.mentalSnapshot);
-  if (!summary) {
-    return [];
-  }
-  return [{
-    id: `${message.id}-mental`,
-    type: "mental",
-    status: assistantStatus(message),
-    snapshot: message.mentalSnapshot,
-    summary,
-  }];
-}
-
-function legacyToolPartsForMessage(message: ConversationMessage): AgentToolCallPart[] {
-  return (message.toolCalls ?? []).map((toolCall, index) => ({
-    id: `${message.id}-tool-${index}`,
-    type: "tool-call",
-    name: toolCall.name?.trim() || "tool",
-    status: toolCall.status || "done",
-    summary: compactText(toolCall.summary),
-    arguments: toolCall.arguments,
-    resultPreview: toolCall.resultPreview,
-    resultType: toolCall.resultType,
-    resultLength: toolCall.resultLength,
-    error: toolCall.error,
-    durationMs: optionalNumber(toolCall.durationMs),
-    durationSeconds: legacyToolDurationSeconds(toolCall),
-    timeoutSeconds: toolCall.timeoutSeconds,
-    transportStatus: toolCall.transportStatus,
-    semanticStatus: toolCall.semanticStatus,
-    exitCode: toolCall.exitCode,
-    timedOut: toolCall.timedOut,
-    failureClass: toolCall.failureClass,
-    resultKind: toolCall.resultKind,
-    truncated: toolCall.truncated,
-    originalLength: toolCall.originalLength,
-    tracePath: toolCall.tracePath,
-    source: "legacy-tool-call",
-  }));
-}
-
-function legacyToolDurationSeconds(toolCall: ToolCall) {
-  return optionalNumber(toolCall.durationSeconds)
-    ?? optionalNumber((toolCall as ToolCall & { elapsedSeconds?: unknown }).elapsedSeconds);
-}
-
-function optionalNumber(value: unknown) {
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return value;
-  }
-  if (typeof value === "string" && value.trim()) {
-    const parsed = Number(value);
-    return Number.isFinite(parsed) ? parsed : undefined;
-  }
-  return undefined;
-}
-
 function textPartForMessage(message: ConversationMessage): AgentMessagePart[] {
   const text = String(message.role === "assistant" ? answerProjectionContent(message) : message.content).trim();
   if (!text) {
@@ -327,19 +254,4 @@ function isInternalThoughtPlaceholder(text: string, summary: string) {
     return true;
   }
   return normalizedText === normalizedSummary && normalizedText.startsWith("internal");
-}
-
-function mentalSnapshotSummary(snapshot: MentalStateSnapshot | undefined) {
-  if (!snapshot) {
-    return "";
-  }
-  return [
-    snapshot.summary,
-    snapshot.feeling,
-    snapshot.whisper,
-    snapshot.intervention,
-    snapshot.cognitiveState ? `state: ${snapshot.cognitiveState}` : "",
-  ]
-    .map(compactText)
-    .find(Boolean) ?? "";
 }

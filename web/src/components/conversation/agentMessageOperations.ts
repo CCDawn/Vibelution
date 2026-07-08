@@ -15,7 +15,6 @@ export type AgentMessageOperation = {
   kind: AgentMessageOperationKind;
   label: string;
   rawLabel?: string;
-  preserveToolLabel?: boolean;
   status: string;
   rawStatus?: string;
   summary: string;
@@ -175,7 +174,6 @@ function agentToolCallPartToOperation(
     kind: "tool",
     label: rawLabel,
     rawLabel,
-    preserveToolLabel: part.source === "legacy-tool-call",
     status: part.status || "done",
     summary: toolSummaryPreview(rawLabel, part.status || "done", part.summary, resultPreview),
     durationSeconds: coerceAgentToolDurationSeconds(part),
@@ -658,7 +656,7 @@ function normalizeOperationDisplay(operation: AgentMessageOperation): AgentMessa
     ...operation,
     rawStatus,
     status: normalizeDisplayStatus(operation.status),
-    label: operation.kind === "tool" && !operation.preserveToolLabel
+    label: operation.kind === "tool"
       ? displayToolLabel(operation.rawLabel ?? operation.label)
       : operation.label,
   };
