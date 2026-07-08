@@ -102,6 +102,7 @@ import {
   deriveSessionDetailQueryErrorState,
   deriveSessionListQueryErrorState,
   appendOptimisticUserMessage,
+  markOptimisticUserMessageAccepted,
   markSessionDetailRunning,
   markSessionSummaryRunning,
   mergeSessionDetailMessageWindow,
@@ -2620,7 +2621,9 @@ export function ChatCodingRoute() {
       }));
       setSessionImageAttachments((current) => clearSessionImageAttachments(current, variables.sessionId));
       setSessionReferenceAttachments((current) => clearSessionReferenceAttachments(current, variables.sessionId));
-      queryClient.setQueryData<SessionDetail>(queryKeys.session(variables.sessionId), markSessionDetailRunning);
+      queryClient.setQueryData<SessionDetail>(queryKeys.session(variables.sessionId), (detail) =>
+        markSessionDetailRunning(markOptimisticUserMessageAccepted(detail, variables, acceptedTurn.turnId)),
+      );
       void chatWorkspaceCache.afterDirectTurnAccepted(acceptedTurn.sessionId || variables.sessionId);
     },
     onError: (error, variables) => {
