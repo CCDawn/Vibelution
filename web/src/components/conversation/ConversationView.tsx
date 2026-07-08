@@ -1677,11 +1677,12 @@ export function ConversationView({
     );
     const rows: OperationDetailRow[] = [];
     const primaryToolCall = toolCalls[0];
+    const visibleTitle = codexTranscriptCellTitle(cell);
     const instructionLabel = lang === "zh" ? "指令" : "Instruction";
     const pushedInstructions = new Set<string>();
     function pushInstruction(value: string) {
       const text = value.trim();
-      if (!text || pushedInstructions.has(text)) {
+      if (!text || text === visibleTitle || pushedInstructions.has(text)) {
         return;
       }
       pushedInstructions.add(text);
@@ -1715,7 +1716,6 @@ export function ConversationView({
         firstNonEmptyText(
           primaryToolCall?.rawToolName,
           primaryToolCall?.title,
-          codexTranscriptCellTitle(cell),
         ),
       );
     }
