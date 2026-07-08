@@ -362,15 +362,19 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain('view: "graph"');
     expect(routeSource).toContain("teamId: selectedTeam.teamId");
     expect(routeSource).toContain("teamId: selectedTeam?.teamId");
-    expect(routeStyles.teamMemoryMemberTable).toContain("grid-cols-[repeat(auto-fit,minmax(260px,max-content))]");
+    expect(routeStyles.teamMemoryIndex).toContain("!flex-none");
+    expect(routeStyles.teamMemoryIndex).toContain("bg-[var(--vui-surface-panel)]");
+    expect(routeStyles.teamMemoryMemberTable).toContain("grid-cols-[minmax(0,1fr)]");
+    expect(routeStyles.teamMemoryMemberTable).not.toContain("repeat(auto-fit");
     expect(routeStyles.teamMemoryMemberTable).not.toContain("repeat(auto-fill");
-    expect(routeStyles.teamMemoryMemberTable).toContain("justify-start");
     expect(routeStyles.teamMemoryMemberCard).toContain("bg-[var(--vui-surface-row)]");
     expect(routeStyles.teamMemoryMemberCard).not.toContain("bg-[var(--vui-surface-glass)]");
     expect(routeStyles.teamMemoryMemberCard).not.toContain("shadow-[var(--vui-shadow-hairline)]");
-    expect(teamMemoryIndexPanelStyles.teamMemoryMemberTable).toContain("grid-cols-[repeat(auto-fit,minmax(260px,max-content))]");
+    expect(teamMemoryIndexPanelStyles.teamMemoryIndex).toContain("!flex-none");
+    expect(teamMemoryIndexPanelStyles.teamMemoryIndex).toContain("bg-[var(--vui-surface-panel)]");
+    expect(teamMemoryIndexPanelStyles.teamMemoryMemberTable).toContain("grid-cols-[minmax(0,1fr)]");
+    expect(teamMemoryIndexPanelStyles.teamMemoryMemberTable).not.toContain("repeat(auto-fit");
     expect(teamMemoryIndexPanelStyles.teamMemoryMemberTable).not.toContain("repeat(auto-fill");
-    expect(teamMemoryIndexPanelStyles.teamMemoryMemberTable).toContain("justify-start");
     expect(teamMemoryIndexPanelStyles.teamMemoryMemberCard).toContain("bg-[var(--vui-surface-row)]");
     expect(teamMemoryIndexPanelStyles.teamMemoryMemberCard).not.toContain("bg-[var(--vui-surface-glass)]");
     expect(teamMemoryIndexPanelStyles.teamMemoryMemberCard).not.toContain("shadow-[var(--vui-shadow-hairline)]");
@@ -380,6 +384,26 @@ describe("TeamsRoute layout contract", () => {
     expect(routeStyles.teamMemoryMemberHeading).toContain("hidden");
     expect(routeStyles.teamMemoryMemberActions).toContain("[&_a_span]:hidden");
     expect(routeStyles.teamMemoryActionRail).toContain("[&_a]:inline-flex");
+  });
+
+  it("keeps the research overview on a readable workbench surface instead of a transparent card wall", () => {
+    expect(routeStyles.workspaceResearch).toContain("bg-[var(--vui-surface-panel)]");
+    expect(routeStyles.workspaceResearch).toContain("rounded-[var(--radius-panel)]");
+    expect(routeStyles.workspaceResearch).toContain("gap-2");
+    expect(routeStyles.workspaceResearch).not.toContain("gap-[var(--team-workbench-gap)]");
+
+    expect(routeStyles.researchStageLauncher).toContain("bg-[var(--vui-surface-panel)]");
+    expect(routeStyles.researchStageLauncher).toContain("rounded-[var(--radius-panel)]");
+    expect(routeStyles.researchStageLauncher).toContain("grid");
+    expect(routeStyles.researchStageLauncher).toContain("gap-2");
+
+    expect(routeStyles.teamMemoryIndex).toContain("bg-[var(--vui-surface-panel)]");
+    expect(routeStyles.teamMemoryIndex).toContain("rounded-[var(--radius-panel)]");
+    expect(routeStyles.teamMemoryMemberTable).toContain("grid-cols-[minmax(0,1fr)]");
+    expect(routeStyles.teamMemoryMemberTable).not.toContain("repeat(auto-fit");
+    expect(routeStyles.teamMemoryMemberCard).toContain("grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_max-content_auto]");
+    expect(teamMemoryIndexPanelStyles.teamMemoryMemberTable).toContain("grid-cols-[minmax(0,1fr)]");
+    expect(teamMemoryIndexPanelStyles.teamMemoryMemberTable).not.toContain("repeat(auto-fit");
   });
 
   it("keeps only the fixed research and AI search teams in the picker", () => {
@@ -1630,6 +1654,22 @@ describe("TeamsRoute layout contract", () => {
     expect(teamStageCardSource).not.toContain("sourceCollectionStageProjection");
     expect(routeStyles.canvasLayoutModeSwitch).toContain("grid-cols-[repeat(auto-fit,minmax(86px,max-content))]");
     expect(routeStyles.toolbarActions).toContain("flex-wrap");
+    expect(routeStyles.canvasToolbar).toContain("grid-cols-[minmax(0,1fr)_max-content]");
+    expect(routeStyles.canvasToolbar).toContain("max-[900px]:grid-cols-[minmax(0,1fr)]");
+    expect(routeStyles.canvasToolbar).toContain("[&>div:first-child]:min-w-0");
+    expect(routeStyles.toolbarActions).toContain("max-w-[min(100%,680px)]");
+    expect(routeStyles.knowledgeCompletionFlowPanel).toContain("overflow-hidden");
+    expect(routeStyles.knowledgeCompletionFlowHeader).toContain("grid-cols-[minmax(0,1fr)_auto]");
+    expect(routeStyles.knowledgeCompletionFlowNodes).toContain("grid-cols-[repeat(auto-fit,minmax(280px,1fr))]");
+    expect(routeStyles.knowledgeCompletionFlowNode).toContain("grid");
+    expect(routeStyles.knowledgeCompletionFlowNode).toContain("rounded-[var(--radius-control)]");
+    expect(routeStyles.knowledgeCompletionFlowNodeBody).toContain("[&_p]:max-w-[min(100%,72ch)]");
+    expect(routeStyles.knowledgeCompletionFlowNodeBody).toContain("[&_p]:break-words");
+    expect(routeStyles.workflowError).toContain("break-words");
+    expect(routeStyles.knowledgeCompletionFlowError).toContain("break-words");
+    expect(routeStyles.nodeRoleBadge).toContain("max-w-[128px]");
+    expect(routeStyles.nodeRoleBadge).toContain("truncate");
+    expect(teamMemoryIndexPanelStyles.teamMemoryRole).toContain("truncate");
     expect(teamStagePipelineSource).toContain("grid-cols-[repeat(auto-fit,minmax(220px,1fr))]");
     expect(teamStagePipelineSource).not.toContain("repeat(4");
     expect(teamStagePipelineSource).toContain("repeat(auto-fit,minmax(220px,1fr))");
