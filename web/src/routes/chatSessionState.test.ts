@@ -5,6 +5,7 @@ import {
   appendOptimisticUserMessage,
   deriveSessionDetailQueryErrorState,
   deriveSessionListQueryErrorState,
+  markOptimisticUserMessageAccepted,
   markSessionSummaryRunning,
   markSessionDetailRunning,
   mergeSessionDetailMessageWindow,
@@ -520,6 +521,147 @@ describe("chatSessionState", () => {
     const second = appendOptimisticUserMessage(first, input);
 
     expect(second?.messages).toHaveLength(1);
+  });
+
+  it("marks an accepted optimistic user message with the backend turn id", () => {
+    const input = {
+      sessionId: "session-live",
+      content: "按这个执行",
+      createdAt: "2026-05-22T10:02:00Z",
+    };
+    const withPending = appendOptimisticUserMessage(makeDetail(), input);
+
+    const accepted = markOptimisticUserMessageAccepted(withPending, input, "turn-accepted");
+
+    expect(accepted?.messages[0]).toMatchObject({
+      role: "user",
+      content: "按这个执行",
+      metadata: {
+        optimisticUserMessage: true,
+        pending: false,
+        turnId: "turn-accepted",
+      },
+    });
+  });
+
+  it("removes accepted optimistic user messages when the persisted user message enters the window", () => {
+    const input = {
+      sessionId: "session-live",
+      content: "不要重复显示",
+      createdAt: "2026-05-22T10:02:00Z",
+    };
+    const current = markOptimisticUserMessageAccepted(
+      appendOptimisticUserMessage(makeDetail({
+        messageWindow: {
+          mode: "window",
+          totalMessages: 1,
+          returnedMessages: 1,
+          oldestMessageIndex: 1,
+          newestMessageIndex: 1,
+          hasEarlier: false,
+          hasLater: false,
+          nextBeforeMessageIndex: null,
+          transcriptScope: "window",
+        },
+      }), input),
+      input,
+      "turn-accepted",
+    );
+    const authoritativeWindow = makeDetail({
+      messages: [
+        {
+          id: "session-live-message-1",
+          role: "user",
+          content: "不要重复显示",
+          timestamp: "2026-05-22T10:02:01Z",
+          metadata: { turnId: "turn-accepted" },
+        },
+      ],
+      messageWindow: {
+        mode: "window",
+        totalMessages: 1,
+        returnedMessages: 1,
+        oldestMessageIndex: 1,
+        newestMessageIndex: 1,
+        hasEarlier: false,
+        hasLater: false,
+        nextBeforeMessageIndex: null,
+        transcriptScope: "window",
+      },
+    });
+
+    const merged = mergeSessionDetailMessageWindow(current, authoritativeWindow);
+
+    expect(merged.messages).toHaveLength(1);
+    expect(merged.messages[0]).toMatchObject({
+      id: "session-live-message-1",
+      role: "user",
+      content: "不要重复显示",
+      metadata: { turnId: "turn-accepted" },
+    });
+  });
+
+  it("keeps a same-content optimistic user message when the committed turn id is different", () => {
+    const input = {
+      sessionId: "session-live",
+      content: "1",
+      createdAt: "2026-05-22T10:02:00Z",
+    };
+    const current = markOptimisticUserMessageAccepted(
+      appendOptimisticUserMessage(makeDetail({
+        messages: [
+          {
+            id: "session-live-message-1",
+            role: "user",
+            content: "1",
+            timestamp: "2026-05-22T10:01:00Z",
+            metadata: { turnId: "turn-old" },
+          },
+        ],
+        messageWindow: {
+          mode: "window",
+          totalMessages: 2,
+          returnedMessages: 2,
+          oldestMessageIndex: 1,
+          newestMessageIndex: 2,
+          hasEarlier: false,
+          hasLater: false,
+          nextBeforeMessageIndex: null,
+          transcriptScope: "window",
+        },
+      }), input),
+      input,
+      "turn-new",
+    );
+    const assistantWindow = makeDetail({
+      messages: [
+        {
+          id: "session-live-message-2",
+          role: "assistant",
+          content: "上一轮回答",
+          timestamp: "2026-05-22T10:01:30Z",
+          metadata: { turnId: "turn-old" },
+        },
+      ],
+      messageWindow: {
+        mode: "window",
+        totalMessages: 2,
+        returnedMessages: 1,
+        oldestMessageIndex: 2,
+        newestMessageIndex: 2,
+        hasEarlier: true,
+        hasLater: false,
+        nextBeforeMessageIndex: 2,
+        transcriptScope: "window",
+      },
+    });
+
+    const merged = mergeSessionDetailMessageWindow(current, assistantWindow);
+
+    expect(merged.messages.filter((message) => message.role === "user").map((message) => message.metadata?.turnId)).toEqual([
+      "turn-old",
+      "turn-new",
+    ]);
   });
 
   it("removes only the pending optimistic user message when submit fails", () => {

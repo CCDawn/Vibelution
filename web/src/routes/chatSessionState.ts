@@ -23,6 +23,38 @@ function isMatchingOptimisticUserMessage(message: ConversationMessage, input: Op
     && message.metadata?.[OPTIMISTIC_USER_MESSAGE_METADATA_KEY] === true;
 }
 
+function conversationMessageTurnId(message: ConversationMessage): string {
+  const metadata = message.metadata;
+  return String(metadata?.turnId ?? metadata?.turn_id ?? "").trim();
+}
+
+function isOptimisticUserMessage(message: ConversationMessage): boolean {
+  return message.role === "user" && message.metadata?.[OPTIMISTIC_USER_MESSAGE_METADATA_KEY] === true;
+}
+
+function isCommittedUserMessage(message: ConversationMessage): boolean {
+  return message.role === "user" && message.metadata?.[OPTIMISTIC_USER_MESSAGE_METADATA_KEY] !== true;
+}
+
+function removeSettledOptimisticUserMessages(messages: ConversationMessage[]): ConversationMessage[] {
+  const committedTurnIds = new Set(
+    messages
+      .filter(isCommittedUserMessage)
+      .map(conversationMessageTurnId)
+      .filter(Boolean),
+  );
+  if (committedTurnIds.size === 0) {
+    return messages;
+  }
+  return messages.filter((message) => {
+    if (!isOptimisticUserMessage(message)) {
+      return true;
+    }
+    const turnId = conversationMessageTurnId(message);
+    return !turnId || !committedTurnIds.has(turnId);
+  });
+}
+
 export function appendOptimisticUserMessage(
   detail: SessionDetail | undefined,
   input: OptimisticUserMessageInput,
@@ -54,6 +86,40 @@ export function appendOptimisticUserMessage(
     ...detail,
     messages: [...detail.messages, optimisticMessage],
     updatedAt: createdAt,
+  };
+}
+
+export function markOptimisticUserMessageAccepted(
+  detail: SessionDetail | undefined,
+  input: OptimisticUserMessageInput,
+  turnId: string | undefined,
+): SessionDetail | undefined {
+  const normalizedTurnId = String(turnId ?? "").trim();
+  if (!detail || !normalizedTurnId) {
+    return detail;
+  }
+  let changed = false;
+  const messages = detail.messages.map((message) => {
+    if (!isMatchingOptimisticUserMessage(message, input)) {
+      return message;
+    }
+    changed = true;
+    return {
+      ...message,
+      metadata: {
+        ...(message.metadata ?? {}),
+        [OPTIMISTIC_USER_MESSAGE_METADATA_KEY]: true,
+        pending: false,
+        turnId: normalizedTurnId,
+      },
+    };
+  });
+  if (!changed) {
+    return detail;
+  }
+  return {
+    ...detail,
+    messages,
   };
 }
 
@@ -105,7 +171,7 @@ function mergeConversationMessageWindows(
     }
     mergedById.set(id, message);
   }
-  return [...mergedById.values()].sort((left, right) => {
+  return removeSettledOptimisticUserMessages([...mergedById.values()]).sort((left, right) => {
     const leftIndex = messageWindowIndex(left);
     const rightIndex = messageWindowIndex(right);
     if (leftIndex !== rightIndex) {
