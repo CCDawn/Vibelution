@@ -514,6 +514,8 @@ const styles: Record<string, string> = {
     "teamUnavailableMeta min-w-0 flex flex-wrap items-center gap-1.5 grid grid-cols-[repeat(3,minmax(0,1fr))] gap-1.5 text-[var(--vui-font-xs)] max-[760px]:grid-cols-[1fr]",
   teamUnavailableSurface:
     "teamUnavailableSurface min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] p-2 grid min-h-0 flex-1 grid-cols-[minmax(0,720px)] content-start justify-items-center overflow-auto px-3 py-4",
+  teamLoadingInlineSurface:
+    "teamLoadingInlineSurface min-h-[96px]",
   toolbarActions:
     "toolbarActions min-w-0 flex flex-wrap items-center gap-1.5 !flex max-w-[min(100%,680px)] flex-wrap items-start justify-end gap-1.5 overflow-visible max-[900px]:justify-start [&_a]:min-w-[72px] [&_a]:whitespace-nowrap [&_button]:min-w-[72px] [&_button]:whitespace-nowrap",
   toolbarLink:

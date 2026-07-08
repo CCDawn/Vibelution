@@ -26,6 +26,12 @@ export {
   type VStatusTone,
 } from "./aesthetic";
 export { VEmptyState, type VEmptyStateProps } from "./layout/VEmptyState";
+export {
+  VStateSurface,
+  type VStateSurfaceFact,
+  type VStateSurfaceProps,
+  type VStateSurfaceTone,
+} from "./layout/VStateSurface";
 export { VEntityList, type VEntityListItem, type VEntityListProps } from "./layout/VEntityList";
 export { VHStack, type VHStackProps } from "./layout/VHStack";
 export { VPage, type VPageProps } from "./layout/VPage";

@@ -60,6 +60,7 @@ import {
   VNativeTextarea,
   VRouteHeader,
   VSelect,
+  VStateSurface,
   VStatusStrip,
 } from "../components/vui";
 import {
@@ -12341,11 +12342,11 @@ export function TeamsRoute({
   const teamWorkspaceLoadingTitle = lang === "zh" ? "正在读取团队详情" : "Loading team details";
   const teamWorkspaceLoadingMessage = selectedTeamReference
     ? (lang === "zh"
-      ? `正在打开 ${selectedTeamReference.name} 的完整工作区数据，详情、组织画布和科研工作流会一起就绪后显示。`
-      : `Opening the complete workspace for ${selectedTeamReference.name}. Details, organization canvas, and research workflow panels appear together.`)
+      ? `正在补齐 ${selectedTeamReference.name} 的完整详情；当前先保留工作台结构和可用画布。`
+      : `Completing details for ${selectedTeamReference.name}; the workspace shell and available canvas stay visible.`)
     : (lang === "zh"
-      ? "正在打开团队工作区，详情、组织画布和科研工作流会一起就绪后显示。"
-      : "Opening the team workspace. Details, organization canvas, and research workflow panels appear together.");
+      ? "正在补齐团队详情；当前先保留工作台结构和可用画布。"
+      : "Completing team details; the workspace shell and available canvas stay visible.");
   const teamWorkspaceUnavailableTitle = lang === "zh" ? "团队详情不可用" : "Team details unavailable";
   const teamWorkspaceUnavailableMessage = selectedTeamReference
     ? (lang === "zh"
@@ -12618,7 +12619,7 @@ export function TeamsRoute({
             </VButton>
           </div>
         </header>
-        {researchWorkflowTeamSelected && !showTeamLoadingSurface && !showTeamDetailUnavailableSurface ? (
+        {researchWorkflowTeamSelected && !showTeamDetailUnavailableSurface ? (
           <TeamSourceCollectionStandaloneStagePanel
             commandAriaLabel={lang === "zh" ? "知识搜集操作台" : "Knowledge collection command bar"}
             commandTone={sourceCollectionConsoleState}
@@ -12729,21 +12730,6 @@ export function TeamsRoute({
                 <RefreshCw size={14} />
                 {teamsQuery.isFetching ? (lang === "zh" ? "刷新中" : "Refreshing") : (lang === "zh" ? "刷新" : "Refresh")}
               </VNativeButton>
-            </div>
-          </section>
-        </main>
-      ) : showTeamLoadingSurface ? (
-        <main className={styles.teamUnavailableSurface} aria-label={teamWorkspaceLoadingTitle}>
-          <section className={styles.teamUnavailableCard} title={teamWorkspaceLoadingMessage}>
-            <div className={styles.sectionTitle}>
-              <strong>{teamWorkspaceLoadingTitle}</strong>
-              <span>{lang === "zh" ? "详情读取中" : "details loading"}</span>
-            </div>
-            <p>{teamWorkspaceLoadingMessage}</p>
-            <div className={styles.teamUnavailableMeta} aria-label={lang === "zh" ? "团队详情读取状态" : "Team detail loading status"}>
-              <span>{lang === "zh" ? "团队" : "Team"} <strong>{selectedTeamReference?.name ?? effectiveTeamId}</strong></span>
-              <span>{lang === "zh" ? "详情" : "Details"} <strong>{teamDetailLoadMode}</strong></span>
-              <span>{lang === "zh" ? "来源" : "Source"} <strong>Team detail API</strong></span>
             </div>
           </section>
         </main>
@@ -12884,6 +12870,23 @@ export function TeamsRoute({
               )}
             </div>
           </div>
+          {showTeamLoadingSurface ? (
+            <VStateSurface
+              className={styles.teamLoadingInlineSurface}
+              icon={<RefreshCw size={15} />}
+              role="status"
+              skeletonLines
+              title={teamWorkspaceLoadingTitle}
+              tone="loading"
+              facts={[
+                { key: "team", label: lang === "zh" ? "团队" : "Team", value: selectedTeamReference?.name ?? effectiveTeamId },
+                { key: "detail", label: lang === "zh" ? "详情" : "Details", value: teamDetailLoadMode },
+                { key: "source", label: lang === "zh" ? "来源" : "Source", value: "Team detail API" },
+              ]}
+            >
+              {teamWorkspaceLoadingMessage}
+            </VStateSurface>
+          ) : null}
           {renderKnowledgeCollectionCompletionFlowPanel()}
           {canvas ? (
             <div className={styles.canvas} ref={canvasFrameRef}>
