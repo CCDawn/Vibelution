@@ -8,8 +8,9 @@ function cv(key: string, ...classNames: string[]) {
 }
 
 const readableMessageText = "min-w-0 text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]";
-const assistantMessageMeasure = "w-[min(100%,860px)] max-w-full";
-const transcriptTurnRail = "w-[min(100%,980px)] justify-self-center";
+const readableMarkdownMeasure = "max-w-[min(100%,128ch)]";
+const assistantMessageMeasure = "w-[min(100%,1360px)] max-w-full";
+const transcriptTurnRail = "w-[min(100%,1480px)] justify-self-center";
 const assistantResponseSection = cv(
   "responseSection",
   "min-w-0 grid",
@@ -45,7 +46,7 @@ const composerFieldDragActiveShell = cv(
   "border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))] text-[var(--accent-cool)]",
 );
 const compactControlButton =
-  "min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 text-[var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--border-strong)] hover:bg-[var(--vui-control-muted-hover)] hover:text-[var(--fg-primary)] disabled:cursor-default disabled:opacity-55";
+  "min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 text-[var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55";
 const compactIconButtonSize =
   "h-[var(--vui-control-height-sm)] min-h-[var(--vui-control-height-sm)] w-[var(--vui-control-height-sm)] min-w-[var(--vui-control-height-sm)] shrink-0";
 const composerQuietActionState =
@@ -80,7 +81,7 @@ const styles: Record<string, string> = {
   agentInboxToggle:
     "vui-components-conversationview agentInboxToggle min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
   agentInboxTurn:
-    `vui-components-conversationview agentInboxTurn grid min-w-0 ${transcriptTurnRail} grid-cols-[34px_minmax(0,1fr)] gap-x-3 [&_.turnContent]:w-[min(100%,920px)] [&_.turnContent]:p-0 [&_.turnContent]:border-l-0`,
+    `vui-components-conversationview agentInboxTurn grid min-w-0 ${transcriptTurnRail} grid-cols-[34px_minmax(0,1fr)] gap-x-3 [&_.turnContent]:w-[min(100%,1360px)] [&_.turnContent]:p-0 [&_.turnContent]:border-l-0`,
   answerOnlyProcessDetails:
     "vui-components-conversationview answerOnlyProcessDetails min-w-0",
   answerOnlyProcessGroup: answerOnlyProcessShell,
@@ -161,9 +162,9 @@ const styles: Record<string, string> = {
   assistantCard:
     "vui-components-conversationview assistantCard min-w-0 rounded-[var(--radius-panel)] border border-[color-mix(in_srgb,var(--vui-border-strong)_72%,transparent)] bg-[var(--vui-surface-chat-panel)] p-2 shadow-none",
   assistantTurn:
-    `vui-components-conversationview assistantTurn grid min-w-0 ${transcriptTurnRail} grid-cols-[34px_minmax(0,1fr)] gap-x-2.5 [&_.turnContent]:w-[min(100%,860px)] [&_.turnContent]:p-0 [&_.turnContent]:border-l-0`,
+    `vui-components-conversationview assistantTurn grid min-w-0 ${transcriptTurnRail} grid-cols-[34px_minmax(0,1fr)] gap-x-2.5 [&_.turnContent]:w-[min(100%,1360px)] [&_.turnContent]:p-0 [&_.turnContent]:border-l-0`,
   assistantTurnContinuation:
-    `vui-components-conversationview assistantTurnContinuation grid min-w-0 ${transcriptTurnRail} grid-cols-[34px_minmax(0,1fr)] gap-x-2.5 [&_.turnAvatar]:bg-transparent [&_.turnContent]:w-[min(100%,860px)] [&_.turnContent]:gap-1`,
+    `vui-components-conversationview assistantTurnContinuation grid min-w-0 ${transcriptTurnRail} grid-cols-[34px_minmax(0,1fr)] gap-x-2.5 [&_.turnAvatar]:bg-transparent [&_.turnContent]:w-[min(100%,1360px)] [&_.turnContent]:gap-1`,
   attachButton:
     cv("attachButton", "min-w-0 inline-grid", compactIconButtonSize, "place-items-center rounded-[var(--radius-control)] border p-0 text-[var(--vui-font-xs)] font-semibold leading-tight", composerQuietActionState),
   auxiliaryBlock:
@@ -237,7 +238,7 @@ const styles: Record<string, string> = {
   auxiliaryPanel_thought:
     "vui-components-conversationview auxiliaryPanel_thought min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
   backToBottomButton:
-    "vui-components-conversationview backToBottomButton absolute bottom-[calc(var(--vui-control-height-md)_+_18px)] left-1/2 z-20 min-w-0 -translate-x-1/2 !inline-flex min-h-[var(--vui-control-height-sm)] !w-fit max-w-[calc(100%_-_24px)] items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[color-mix(in_srgb,var(--vui-control-muted)_92%,var(--vui-surface-panel))] px-2 py-1 text-[var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] shadow-[var(--vui-shadow-soft)] backdrop-blur-[6px] hover:border-[var(--border-strong)] hover:bg-[var(--vui-control-muted-hover)] hover:text-[var(--fg-primary)] disabled:cursor-default disabled:opacity-55 [&_[data-slot=vui-button-content]]:!inline-flex [&_[data-slot=vui-button-content]]:!w-fit [&_[data-slot=vui-button-content]]:items-center [&_[data-slot=vui-button-content]]:gap-1.5 [&_[data-slot=vui-button-label]]:!inline-flex [&_[data-slot=vui-button-label]]:!w-fit [&_[data-slot=vui-button-label]]:items-center [&_[data-slot=vui-button-label]]:gap-1.5",
+    "vui-components-conversationview backToBottomButton absolute bottom-[calc(var(--vui-control-height-md)_+_18px)] left-1/2 z-20 min-w-0 -translate-x-1/2 !inline-flex min-h-[var(--vui-control-height-sm)] !w-fit max-w-[calc(100%_-_24px)] items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[color-mix(in_srgb,var(--vui-control-muted)_92%,var(--vui-surface-panel))] px-2 py-1 text-[var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] shadow-[var(--vui-shadow-soft)] backdrop-blur-[6px] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55 [&_[data-slot=vui-button-content]]:!inline-flex [&_[data-slot=vui-button-content]]:!w-fit [&_[data-slot=vui-button-content]]:items-center [&_[data-slot=vui-button-content]]:gap-1.5 [&_[data-slot=vui-button-label]]:!inline-flex [&_[data-slot=vui-button-label]]:!w-fit [&_[data-slot=vui-button-label]]:items-center [&_[data-slot=vui-button-label]]:gap-1.5",
   cliAgentLifecycleIcon:
     "vui-components-conversationview cliAgentLifecycleIcon min-w-0 shrink-0 text-[var(--fg-tertiary)] border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
   cliAgentLifecycleMeta:
@@ -326,7 +327,7 @@ const styles: Record<string, string> = {
   codexTranscriptCellMeta:
     "vui-components-conversationview codexTranscriptCellMeta inline-flex min-w-0 shrink-0 align-baseline whitespace-nowrap text-[var(--vui-font-xs)] leading-[var(--vui-line-tight)] text-[var(--fg-tertiary)]",
   codexTranscriptCellSummary:
-    "vui-components-conversationview codexTranscriptCellSummary min-w-0 max-w-[min(100%,76ch)] text-[var(--vui-font-sm)] leading-[1.42] text-[var(--fg-secondary)] whitespace-normal break-words [overflow-wrap:anywhere]",
+    "vui-components-conversationview codexTranscriptCellSummary min-w-0 max-w-[min(100%,128ch)] text-[var(--vui-font-sm)] leading-[1.42] text-[var(--fg-secondary)] whitespace-normal break-words [overflow-wrap:anywhere]",
   codexTranscriptCellTitle:
     "vui-components-conversationview codexTranscriptCellTitle min-w-0 whitespace-normal text-[var(--vui-font-sm)] font-semibold leading-[1.35] text-[var(--fg-secondary)] [overflow-wrap:anywhere]",
   codexTranscriptCellTitleRow:
@@ -342,7 +343,7 @@ const styles: Record<string, string> = {
   codexTranscriptProcessCell:
     "vui-components-conversationview codexTranscriptProcessCell grid grid-cols-[20px_minmax(0,1fr)] items-start gap-x-2 gap-y-1 bg-transparent py-1 text-[var(--vui-font-sm)] leading-[1.42]",
   codexTranscriptSurface:
-    "vui-components-conversationview codexTranscriptSurface min-w-0 grid w-[min(100%,860px)] max-w-full content-start gap-1.5",
+    "vui-components-conversationview codexTranscriptSurface min-w-0 grid w-[min(100%,1360px)] max-w-full content-start gap-1.5",
   conversationCellTimeline:
     "vui-components-conversationview conversationCellTimeline min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
   emptyState:
@@ -356,7 +357,7 @@ const styles: Record<string, string> = {
   groupTranscriptBody:
     "vui-components-conversationview groupTranscriptBody min-w-0 text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
   groupTranscriptTurn:
-    `vui-components-conversationview groupTranscriptTurn grid min-w-0 ${transcriptTurnRail} grid-cols-[34px_minmax(0,1fr)] gap-x-3 [&_.turnContent]:w-[min(100%,920px)] [&_.turnContent]:p-0 [&_.turnContent]:border-l-0`,
+    `vui-components-conversationview groupTranscriptTurn grid min-w-0 ${transcriptTurnRail} grid-cols-[34px_minmax(0,1fr)] gap-x-3 [&_.turnContent]:w-[min(100%,1360px)] [&_.turnContent]:p-0 [&_.turnContent]:border-l-0`,
   header:
     "vui-components-conversationview header min-w-0 flex flex-wrap items-center gap-1.5",
   headerControls:
@@ -373,15 +374,15 @@ const styles: Record<string, string> = {
   imageArtifactPrompt:
     "vui-components-conversationview imageArtifactPrompt min-w-0",
   imageDownloadButton:
-    "vui-components-conversationview imageDownloadButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 text-[var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--border-strong)] hover:bg-[var(--vui-control-muted-hover)] hover:text-[var(--fg-primary)] disabled:cursor-default disabled:opacity-55",
+    "vui-components-conversationview imageDownloadButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 text-[var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55",
   imagePreview:
     "vui-components-conversationview imagePreview min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
   imagePreviewActions:
     "vui-components-conversationview imagePreviewActions min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 flex flex-wrap items-center gap-1.5",
   imagePreviewButton:
-    "vui-components-conversationview imagePreviewButton min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] bg-[var(--vui-control-muted)] px-2 py-1 text-[var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--border-strong)] hover:bg-[var(--vui-control-muted-hover)] hover:text-[var(--fg-primary)] disabled:cursor-default disabled:opacity-55",
+    "vui-components-conversationview imagePreviewButton min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] bg-[var(--vui-control-muted)] px-2 py-1 text-[var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55",
   imagePreviewCloseButton:
-    "vui-components-conversationview imagePreviewCloseButton min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] bg-[var(--vui-control-muted)] px-2 py-1 text-[var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--border-strong)] hover:bg-[var(--vui-control-muted-hover)] hover:text-[var(--fg-primary)] disabled:cursor-default disabled:opacity-55",
+    "vui-components-conversationview imagePreviewCloseButton min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] bg-[var(--vui-control-muted)] px-2 py-1 text-[var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55",
   imagePreviewDialog:
     "vui-components-conversationview imagePreviewDialog min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
   imagePreviewLarge:
@@ -400,7 +401,7 @@ const styles: Record<string, string> = {
   markdownBlockquote:
     "vui-components-conversationview markdownBlockquote min-w-0",
   markdownBody:
-    "vui-components-conversationview markdownBody min-w-0 text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] max-w-[min(100%,76ch)]",
+    `vui-components-conversationview markdownBody min-w-0 text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] ${readableMarkdownMeasure}`,
   markdownBodyWithTable:
     "vui-components-conversationview markdownBodyWithTable min-w-0 text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] max-w-full",
   markdownDivider:
@@ -506,7 +507,7 @@ const styles: Record<string, string> = {
   mentalWhisper:
     "vui-components-conversationview mentalWhisper min-w-0",
   messageBody:
-    "vui-components-conversationview messageBody min-w-0 text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] whitespace-pre-wrap [overflow-wrap:anywhere] max-w-[min(100%,76ch)]",
+    `vui-components-conversationview messageBody min-w-0 text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] whitespace-pre-wrap [overflow-wrap:anywhere] ${readableMarkdownMeasure}`,
   messageCard:
     "vui-components-conversationview messageCard min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
   messageMeta:
@@ -918,7 +919,7 @@ const styles: Record<string, string> = {
   responseSegment_active:
     "vui-components-conversationview responseSegment_active min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
   responseSegment_answer:
-    "vui-components-conversationview responseSegment_answer min-w-0 [&_.markdownBody]:max-w-[min(100%,76ch)] [&_.responseSegmentHeader]:hidden",
+    "vui-components-conversationview responseSegment_answer min-w-0 [&_.markdownBody]:max-w-[min(100%,128ch)] [&_.responseSegmentHeader]:hidden",
   responseSegment_blocked:
     "vui-components-conversationview responseSegment_blocked min-w-0 border-[color-mix(in_srgb,var(--state-warning)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_10%,transparent)] text-[var(--state-warning)]",
   responseSegment_code:
@@ -1053,7 +1054,7 @@ const styles: Record<string, string> = {
   timeline:
     "vui-components-conversationview timeline grid min-h-0 min-w-0 flex-1 content-start gap-[10px] overflow-y-auto overflow-x-hidden bg-[var(--vui-surface-chat)] px-[clamp(1.25rem,6vw,5.5rem)] py-4 [scrollbar-gutter:stable]",
   timelineAssistantTextCell:
-    "vui-components-conversationview timelineAssistantTextCell min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] max-w-[min(100%,860px)]",
+    "vui-components-conversationview timelineAssistantTextCell min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] max-w-[min(100%,1360px)]",
   timelineCellDetailButton:
     "vui-components-conversationview timelineCellDetailButton min-w-0 inline-grid size-6 shrink-0 self-start place-items-center rounded-[var(--radius-control)] border border-transparent bg-transparent p-0 text-[var(--fg-tertiary)] hover:border-[var(--vui-border-subtle)] hover:bg-[var(--vui-control-muted-hover)] hover:text-[var(--fg-primary)] disabled:cursor-default disabled:opacity-55",
   timelineCellHeader:
@@ -1075,7 +1076,7 @@ const styles: Record<string, string> = {
   timelineCommandRow:
     "vui-components-conversationview timelineCommandRow min-w-0 grid grid-cols-[20px_minmax(0,1fr)] items-start gap-x-2 gap-y-1 border-b border-[color-mix(in_srgb,var(--vui-border-subtle)_70%,transparent)] bg-transparent py-2 text-[var(--vui-font-sm)] leading-[1.42] text-[var(--fg-secondary)] last:border-b-0",
   timelineHistoryButton:
-    "vui-components-conversationview timelineHistoryButton min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 text-[var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--border-strong)] hover:bg-[var(--vui-control-muted-hover)] hover:text-[var(--fg-primary)] disabled:cursor-default disabled:opacity-55",
+    "vui-components-conversationview timelineHistoryButton min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 text-[var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55",
   timelineHistoryGate:
     "vui-components-conversationview timelineHistoryGate min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
   timelineThoughtHeader:
@@ -1097,7 +1098,7 @@ const styles: Record<string, string> = {
   timelineThoughtCell:
     "vui-components-conversationview timelineThoughtCell min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
   timelineThoughtText:
-    "vui-components-conversationview timelineThoughtText min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] !block max-w-[min(100%,76ch)] whitespace-pre-wrap overflow-visible text-left border-0 bg-transparent",
+    "vui-components-conversationview timelineThoughtText min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] !block max-w-[min(100%,128ch)] whitespace-pre-wrap overflow-visible text-left border-0 bg-transparent",
   title:
     "vui-components-conversationview title min-w-0 text-[var(--vui-font-title)] font-semibold leading-tight text-[var(--fg-primary)]",
   toolPill:
@@ -1135,7 +1136,7 @@ const styles: Record<string, string> = {
   turnErrorNoticeMeta:
     "vui-components-conversationview turnErrorNoticeMeta flex min-w-0 flex-wrap items-center gap-1.5 text-[var(--vui-font-xs)] font-semibold leading-tight text-[var(--state-error)]",
   turnErrorNoticeText:
-    "vui-components-conversationview turnErrorNoticeText min-w-0 whitespace-normal break-words text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] [overflow-wrap:anywhere] [&_.markdownBody]:max-w-[min(100%,76ch)] [&_.markdownBody]:whitespace-normal [&_.markdownBody]:break-words [&_.markdownBody]:[overflow-wrap:anywhere]",
+    "vui-components-conversationview turnErrorNoticeText min-w-0 whitespace-normal break-words text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] [overflow-wrap:anywhere] [&_.markdownBody]:max-w-[min(100%,128ch)] [&_.markdownBody]:whitespace-normal [&_.markdownBody]:break-words [&_.markdownBody]:[overflow-wrap:anywhere]",
   turnErrorReasonList:
     "vui-components-conversationview turnErrorReasonList grid min-w-0 gap-1 border-t border-[color-mix(in_srgb,var(--state-error)_20%,transparent)] pt-1.5 text-[var(--vui-font-xs)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
   turnErrorReasonRow:
@@ -1147,7 +1148,7 @@ const styles: Record<string, string> = {
   turnErrorType:
     "vui-components-conversationview turnErrorType min-w-0 w-fit max-w-full rounded-[var(--radius-control)] bg-[color-mix(in_srgb,var(--state-error)_10%,transparent)] px-1.5 py-0.5 text-[var(--vui-font-xs)] font-semibold leading-tight text-[var(--state-error)]",
   turnIconButton:
-    "vui-components-conversationview turnIconButton min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2 inline-grid h-[var(--vui-control-height-sm)] min-h-[var(--vui-control-height-sm)] w-[var(--vui-control-height-sm)] min-w-[var(--vui-control-height-sm)] place-items-center bg-[var(--vui-control-muted)] p-0 text-[var(--fg-secondary)] hover:border-[var(--border-strong)] hover:bg-[var(--vui-control-muted-hover)] hover:text-[var(--fg-primary)] shrink-0 text-[var(--fg-tertiary)]",
+    "vui-components-conversationview turnIconButton min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2 inline-grid h-[var(--vui-control-height-sm)] min-h-[var(--vui-control-height-sm)] w-[var(--vui-control-height-sm)] min-w-[var(--vui-control-height-sm)] place-items-center bg-[var(--vui-control-muted)] p-0 text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] shrink-0 text-[var(--fg-tertiary)]",
   turnIconButtonActive:
     "vui-components-conversationview turnIconButtonActive min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2 shrink-0 text-[var(--fg-tertiary)] border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
   turnMeta:
@@ -1163,7 +1164,7 @@ const styles: Record<string, string> = {
   turnStatusNote:
     "vui-components-conversationview turnStatusNote min-w-0 inline-grid w-[min(100%,920px)] grid-cols-[auto_minmax(0,1fr)] items-start gap-2 border-l border-[color-mix(in_srgb,var(--accent-cool)_18%,var(--vui-border-subtle))] bg-transparent py-1 pl-2.5 text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
   turnStatusText:
-    "vui-components-conversationview turnStatusText min-w-0 max-w-[min(100%,76ch)] whitespace-normal [overflow-wrap:anywhere]",
+    "vui-components-conversationview turnStatusText min-w-0 max-w-[min(100%,128ch)] whitespace-normal [overflow-wrap:anywhere]",
   updateLine:
     "vui-components-conversationview updateLine min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2",
   userAttachment:

@@ -1135,11 +1135,11 @@ async function uploadSessionImageAttachment(sessionId: string, attachment: Compo
 }
 
 const RESIZE_HANDLE_WIDTH = 10;
-const MIN_LEFT_PANEL_WIDTH = 224;
-const MAX_LEFT_PANEL_WIDTH = 520;
-const MIN_RIGHT_PANEL_WIDTH = 300;
-const MAX_RIGHT_PANEL_WIDTH = 560;
-const TARGET_CENTER_PANE_WIDTH = 520;
+const MIN_LEFT_PANEL_WIDTH = 260;
+const MAX_LEFT_PANEL_WIDTH = 560;
+const MIN_RIGHT_PANEL_WIDTH = 200;
+const MAX_RIGHT_PANEL_WIDTH = 520;
+const TARGET_CENTER_PANE_WIDTH = 800;
 const KEYBOARD_RESIZE_STEP = 24;
 const MENTAL_MODEL_TOGGLE_STORAGE_KEY = "vibelution.chat.mentalModelEnabled";
 const MAX_COMPOSER_IMAGE_ATTACHMENTS = 4;
@@ -3781,6 +3781,8 @@ export function ChatCodingRoute() {
       fetchJson<FileContent>(`/api/files/content?path=${encodeURIComponent(activeFilePath ?? "")}`),
   });
 
+  const conversationIndexCollapsed = leftRailCollapsed;
+  const statusRailCollapsed = rightPaneCollapsed;
   const changedFiles = new Set(sessionDetailQuery.data?.changedFiles ?? []);
   const leftPanelWidth = chatPanelWidths.leftPanelWidth;
   const rightPanelWidth = chatPanelWidths.rightPanelWidth;
@@ -3862,19 +3864,19 @@ export function ChatCodingRoute() {
       const delta = event.clientX - activeDrag.startX;
 
       if (activeDrag.side === "left") {
-        if (leftRailCollapsed) {
+        if (conversationIndexCollapsed) {
           return;
         }
-        const bounds = getResizeBounds("left", layoutWidth, rightPaneCollapsed ? 0 : activeDrag.startRightWidth);
+        const bounds = getResizeBounds("left", layoutWidth, statusRailCollapsed ? 0 : activeDrag.startRightWidth);
         const nextLeftWidth = clamp(activeDrag.startLeftWidth + delta, bounds.min, bounds.max);
         setChatPanelWidths({ leftPanelWidth: Math.round(nextLeftWidth) });
         return;
       }
 
-      if (rightPaneCollapsed) {
+      if (statusRailCollapsed) {
         return;
       }
-      const bounds = getResizeBounds("right", layoutWidth, leftRailCollapsed ? 0 : activeDrag.startLeftWidth);
+      const bounds = getResizeBounds("right", layoutWidth, conversationIndexCollapsed ? 0 : activeDrag.startLeftWidth);
       const nextRightWidth = clamp(activeDrag.startRightWidth - delta, bounds.min, bounds.max);
       setChatPanelWidths({ rightPanelWidth: Math.round(nextRightWidth) });
     }
@@ -3890,7 +3892,7 @@ export function ChatCodingRoute() {
       window.removeEventListener("pointerup", stopDragging);
       window.removeEventListener("pointercancel", stopDragging);
     };
-  }, [dragState, leftRailCollapsed, rightPaneCollapsed, setChatPanelWidths]);
+  }, [conversationIndexCollapsed, dragState, setChatPanelWidths, statusRailCollapsed]);
 
   const locale = lang === "zh" ? "zh-CN" : "en-US";
 
@@ -6075,7 +6077,7 @@ export function ChatCodingRoute() {
     if (event.button !== 0) {
       return;
     }
-    if ((side === "left" && leftRailCollapsed) || (side === "right" && rightPaneCollapsed)) {
+    if ((side === "left" && conversationIndexCollapsed) || (side === "right" && statusRailCollapsed)) {
       return;
     }
     event.preventDefault();
@@ -6091,7 +6093,7 @@ export function ChatCodingRoute() {
     if (!layoutRef.current) {
       return;
     }
-    if ((side === "left" && leftRailCollapsed) || (side === "right" && rightPaneCollapsed)) {
+    if ((side === "left" && conversationIndexCollapsed) || (side === "right" && statusRailCollapsed)) {
       return;
     }
 
@@ -6106,7 +6108,7 @@ export function ChatCodingRoute() {
     const layoutWidth = layoutRef.current.getBoundingClientRect().width;
 
     if (side === "left") {
-      const bounds = getResizeBounds("left", layoutWidth, rightPaneCollapsed ? 0 : rightPanelWidth);
+      const bounds = getResizeBounds("left", layoutWidth, statusRailCollapsed ? 0 : rightPanelWidth);
       const nextLeftWidth =
         direction === "min"
           ? bounds.min
@@ -6117,7 +6119,7 @@ export function ChatCodingRoute() {
       return;
     }
 
-    const bounds = getResizeBounds("right", layoutWidth, leftRailCollapsed ? 0 : leftPanelWidth);
+    const bounds = getResizeBounds("right", layoutWidth, conversationIndexCollapsed ? 0 : leftPanelWidth);
     const delta =
       direction === "min"
         ? bounds.min
@@ -6137,12 +6139,12 @@ export function ChatCodingRoute() {
   const layoutStyle = useMemo(
     () =>
       ({
-        "--chat-left-pane-width": leftRailCollapsed ? "0px" : `${leftPanelWidth}px`,
-        "--chat-right-pane-width": rightPaneCollapsed ? "0px" : `${rightPanelWidth}px`,
+        "--chat-left-pane-width": conversationIndexCollapsed ? "0px" : `${leftPanelWidth}px`,
+        "--chat-right-pane-width": statusRailCollapsed ? "0px" : `${rightPanelWidth}px`,
       }) as CSSProperties,
-    [leftPanelWidth, leftRailCollapsed, rightPanelWidth, rightPaneCollapsed],
+    [conversationIndexCollapsed, leftPanelWidth, rightPanelWidth, statusRailCollapsed],
   );
-  const bothSidePanesCollapsed = leftRailCollapsed && rightPaneCollapsed;
+  const bothSidePanesCollapsed = conversationIndexCollapsed && statusRailCollapsed;
   const conversationFrameClassName = bothSidePanesCollapsed
     ? `${styles.conversationFrame} ${styles.conversationFrameFocus}`
     : styles.conversationFrame;
@@ -6264,7 +6266,7 @@ export function ChatCodingRoute() {
       className={centerFirstLayout ? `${styles.layout} ${styles.layoutCenterFirst}` : styles.layout}
       style={layoutStyle}
     >
-      <aside className={leftRailCollapsed ? `${styles.leftRail} ${styles.paneCollapsed}` : styles.leftRail} aria-hidden={leftRailCollapsed}>
+      <aside className={statusRailCollapsed ? `${styles.leftRail} ${styles.paneCollapsed}` : styles.leftRail} aria-hidden={statusRailCollapsed}>
         {standardGroupRoomActive ? (
           <section className={`${styles.leftBlock} ${styles.groupProfileBlock}`}>
             <div className={styles.sectionHeader}>
@@ -6282,8 +6284,8 @@ export function ChatCodingRoute() {
                   ? "这是团队关联群聊；成员、角色和同步关系由团队页维护，这里只负责讨论运行与成员状态观察。"
                   : "This room is owned by a Team. Membership, roles, and sync stay in Teams; Chat only runs discussion and shows member status.")
                 : (lang === "zh"
-                  ? "这里管理当前普通群聊的资料、成员和调度；成员状态索引放在右侧独立分栏。"
-                  : "Manage this standalone group's info, members, and scheduling here. Member status lives in the right index.")}
+                  ? "这里管理当前普通群聊的资料、成员和调度；成员状态索引放在左侧会话列。"
+                  : "Manage this standalone group's info, members, and scheduling here. Member status lives in the left conversation column.")}
             </p>
             <div className={styles.resourceSplit}>
               <div className={styles.resourceMetric}>
@@ -6708,11 +6710,11 @@ export function ChatCodingRoute() {
 
       <PaneCollapseHandle
         side="left"
-        collapsed={leftRailCollapsed}
+        collapsed={conversationIndexCollapsed}
         separatorLabel={t("resizeLeftPanel")}
-        collapseLabel={lang === "zh" ? "收起左栏" : "Collapse left pane"}
-        expandLabel={lang === "zh" ? "展开左栏" : "Expand left pane"}
-        className={styles.resizeHandle}
+        collapseLabel={lang === "zh" ? "收起会话列" : "Collapse conversation column"}
+        expandLabel={lang === "zh" ? "展开会话列" : "Expand conversation column"}
+        className={`${styles.resizeHandle} ${styles.resizeHandleLeft}`}
         active={dragState?.side === "left"}
         activeClassName={styles.resizeHandleActive}
         onToggle={() => setLeftRailCollapsed((current) => !current)}
@@ -7344,11 +7346,11 @@ export function ChatCodingRoute() {
 
       <PaneCollapseHandle
         side="right"
-        collapsed={rightPaneCollapsed}
+        collapsed={statusRailCollapsed}
         separatorLabel={t("resizeRightPanel")}
-        collapseLabel={lang === "zh" ? "收起右栏" : "Collapse right pane"}
-        expandLabel={lang === "zh" ? "展开右栏" : "Expand right pane"}
-        className={styles.resizeHandle}
+        collapseLabel={lang === "zh" ? "收起状态栏" : "Collapse status rail"}
+        expandLabel={lang === "zh" ? "展开状态栏" : "Expand status rail"}
+        className={`${styles.resizeHandle} ${styles.resizeHandleRight}`}
         active={dragState?.side === "right"}
         activeClassName={styles.resizeHandleActive}
         onToggle={() => setRightPaneCollapsed((current) => !current)}
@@ -7356,12 +7358,12 @@ export function ChatCodingRoute() {
         onKeyDown={(event) => handleResizeKeyDown("right", event)}
       />
 
-      <aside className={rightPaneCollapsed ? `${rightPaneClassName} ${styles.paneCollapsed}` : rightPaneClassName} aria-hidden={rightPaneCollapsed}>
+      <aside className={conversationIndexCollapsed ? `${rightPaneClassName} ${styles.paneCollapsed}` : rightPaneClassName} aria-hidden={conversationIndexCollapsed}>
         {standardGroupRoomActive ? (
           <div
             className={styles.rightIndexTabs}
             role="tablist"
-            aria-label={lang === "zh" ? "右侧索引" : "Right index"}
+            aria-label={lang === "zh" ? "左侧索引" : "Left index"}
           >
             <VButton
               type="button"
@@ -7550,8 +7552,8 @@ export function ChatCodingRoute() {
                   <UsersRound size={24} />
                   <p>
                     {lang === "zh"
-                      ? "暂无可用群成员。请在左侧群设置中选择成员并应用变更。"
-                      : "No available group members. Choose members in the left group settings and apply the change."}
+                      ? "暂无可用群成员。请在右侧群设置中选择成员并应用变更。"
+                      : "No available group members. Choose members in the right group settings and apply the change."}
                   </p>
                 </div>
               )}

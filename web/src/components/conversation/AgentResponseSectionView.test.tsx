@@ -93,7 +93,7 @@ describe("AgentResponseSectionView", () => {
   });
 
   it("keeps the response control styled as a Codex-like transcript row", () => {
-    expect(styles.responseSection).toContain("w-[min(100%,860px)]");
+    expect(styles.responseSection).toContain("w-[min(100%,1360px)]");
     expect(styles.responseSection).toContain("bg-transparent");
     expect(styles.responseSection).toContain("border-l");
     expect(styles.responseSection).not.toContain("rounded-[var(--radius-panel)]");
