@@ -111,7 +111,7 @@ describe("projectAgentMessageTimelineMessages", () => {
     expect(projection.messages[0].feedbackEvents).toBeUndefined();
   });
 
-  it("drops status-only live overlay and active layer messages from the visible timeline", () => {
+  it("keeps a compact active turn visible when the run only has internal status so far", () => {
     const liveOverlay = assistantMessage("live-overlay", {
       content: "正在唤起对话 agent...\n正在绑定 Agent 实例、私人工作区、记忆根和工具工作区。",
       streaming: true,
@@ -148,9 +148,21 @@ describe("projectAgentMessageTimelineMessages", () => {
       activeTurnMessage: activeTurn,
     });
 
-    expect(projection.messages).toEqual([]);
-    expect(projection.agentMessages).toEqual([]);
-    expect(projection.streamingMessages).toEqual([]);
+    expect(projection.messages).toHaveLength(1);
+    expect(projection.messages[0]).toMatchObject({
+      id: "active-turn",
+      role: "assistant",
+      streaming: true,
+      content: "",
+      metadata: expect.objectContaining({
+        kind: "session_active_turn_layer",
+        turnId: "turn-1",
+      }),
+    });
+    expect(projection.messages[0].feedbackEvents).toBeUndefined();
+    expect(projection.agentMessages.map((message) => message.id)).toEqual(["active-turn"]);
+    expect(projection.streamingMessages.map((message) => message.id)).toEqual(["active-turn"]);
+    expect(projection.rowIdentities[0].rowKey).toBe("assistant-turn:turn-1");
   });
 
   it("does not append an active layer after a committed same-turn answer already exists", () => {

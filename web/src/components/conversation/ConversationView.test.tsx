@@ -313,6 +313,53 @@ describe("ConversationView Codex-like transcript adapter integration", () => {
     expect(html).toMatch(/data-codex-transcript-cell-kind="error_notice"[^>]*data-codex-transcript-cell-tone="error"/);
     expect(html).toMatch(/<strong[^>]*>最终回答<\/strong>：Codex-like transcript 已接管主回答。/);
   });
+
+  it("keeps native runtime failure transcript visible for turn_error messages", () => {
+    const html = renderConversation(
+      [
+        {
+          id: "assistant-runtime-failure",
+          role: "assistant",
+          content: "网页工作台这一轮执行失败，请检查配置或稍后重试。\nauth_error: 认证失败，请检查 provider 凭据",
+          timestamp: "2026-07-08T23:30:09",
+          metadata: {
+            kind: "turn_error",
+            reasonCode: "auth_failed",
+            reasonSummary: "provider 认证失败，请检查 API Key 或权限",
+          },
+          codexTranscript: {
+            version: 1,
+            source: "native",
+            messageId: "assistant-runtime-failure",
+            cells: [
+              {
+                id: "runtime-error-cell",
+                kind: "error_notice",
+                messageId: "assistant-runtime-failure",
+                status: "failed",
+                tone: "error",
+                title: "模型请求失败",
+                summary: "原因：auth_error。",
+              },
+              {
+                id: "runtime-error-answer",
+                kind: "assistant_markdown",
+                messageId: "assistant-runtime-failure",
+                status: "failed",
+                tone: "error",
+                text: "网页工作台这一轮执行失败，请检查配置或稍后重试。\nauth_error: 认证失败，请检查 provider 凭据",
+              },
+            ],
+          },
+        },
+      ],
+      { processDisplayMode: "trace" },
+    );
+
+    expect(html).toContain('data-codex-transcript-cell-kind="error_notice"');
+    expect(html).toContain('data-codex-transcript-cell-kind="assistant_markdown"');
+    expect(html).toContain("网页工作台这一轮执行失败，请检查配置或稍后重试");
+  });
 });
 
 describe("ConversationView edit resend affordance", () => {
@@ -1122,7 +1169,7 @@ describe("ConversationView edit resend affordance", () => {
     expect(semanticArticleClassCount(html, "assistantTurn")).toBe(1);
   });
 
-  it("drops same-turn status-only live overlay and active assistant turn instead of rendering an empty row", () => {
+  it("renders a compact active turn placeholder instead of a blank center panel", () => {
     const html = renderConversation(
       [
         {
@@ -1173,11 +1220,12 @@ describe("ConversationView edit resend affordance", () => {
       },
     );
 
+    expect(html).toContain("正在处理当前任务");
     expect(html).not.toContain("正在请求");
     expect(html).not.toContain("正在思考中");
     expect(html).not.toContain("正在唤起对话 agent");
     expect(html).not.toContain("正在绑定 Agent 实例");
-    expect(semanticArticleClassCount(html, "assistantTurn")).toBe(0);
+    expect(semanticArticleClassCount(html, "assistantTurn")).toBe(1);
   });
 
   it("renders stable row and part identities for the active assistant turn", () => {

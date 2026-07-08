@@ -1648,6 +1648,25 @@ export function ConversationView({
     return surface?.mode === "native" && surface.cells.length > 0;
   }
 
+  function shouldRenderCompactActiveTurnPlaceholder(
+    message: ConversationMessage,
+    options: {
+      showResponseBlock: boolean;
+      hasFeedbackTimeline: boolean;
+      hasActiveProcess: boolean;
+      turnErrorMessage: boolean;
+    },
+  ) {
+    return Boolean(
+      message.role === "assistant"
+      && message.streaming
+      && !options.showResponseBlock
+      && !options.hasFeedbackTimeline
+      && !options.hasActiveProcess
+      && !options.turnErrorMessage
+    );
+  }
+
   function renderCodexTranscriptCell(message: ConversationMessage, cell: CodexTranscriptCell) {
     if (cell.kind === "assistant_markdown") {
       const text = cell.text?.trim() ?? "";
@@ -2989,7 +3008,6 @@ export function ConversationView({
               : [];
             const codexTranscriptNode = (
               shouldRenderCodexTranscriptSurface(codexTranscriptSurface)
-              && !turnErrorMessage
               && !agentInboxMessage
               && !groupTranscriptMessage
             )
@@ -3105,6 +3123,17 @@ export function ConversationView({
                 <span className={styles.turnStatusText}>{noFinalAnswerStatusText}</span>
               </div>
             ) : null;
+            const compactActiveTurnPlaceholderNode = shouldRenderCompactActiveTurnPlaceholder(message, {
+              showResponseBlock,
+              hasFeedbackTimeline,
+              hasActiveProcess,
+              turnErrorMessage,
+            }) ? (
+              <div className={styles.turnStatusNote} role="status" aria-live="polite">
+                <span className={styles.turnStatusLabel}>{lang === "zh" ? "状态" : "Status"}</span>
+                <span className={styles.turnStatusText}>{lang === "zh" ? "正在处理当前任务" : "Working on the current task"}</span>
+              </div>
+            ) : null;
             return (
               <AgentMessageTurnView
                 key={rowIdentity.rowKey}
@@ -3211,6 +3240,7 @@ export function ConversationView({
                   {contextNode}
 
                   {codexTranscriptNode}
+                  {compactActiveTurnPlaceholderNode}
                   {processNode}
                   {turnStatusNode}
                   {answerOnlyProcessMode ? responseSectionNode : null}
