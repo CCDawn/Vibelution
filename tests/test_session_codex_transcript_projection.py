@@ -107,6 +107,52 @@ def test_normalized_user_message_does_not_expose_assistant_codex_transcript():
     assert "codexTranscript" not in user
 
 
+def test_native_codex_transcript_preserves_non_terminal_tool_result_preview_details():
+    result_preview = """{
+  "status": "ok",
+  "mode": "inspect",
+  "target": {
+    "symbol": "agent_conversation_index_classification"
+  },
+  "count": 1
+}"""
+    messages = session_service._normalize_messages(
+        "session-codex",
+        [
+            {
+                "role": "assistant",
+                "content": "已完成。",
+                "timestamp": "2026-07-07T10:32:00Z",
+                "feedback_events": [
+                    {
+                        "sequence": 1,
+                        "kind": "tool",
+                        "status": "done",
+                        "name": "code_symbol_tool",
+                        "summary": '{\n"status": "ok",',
+                        "resultPreview": result_preview,
+                        "resultType": "str",
+                        "resultLength": len(result_preview),
+                        "resultKind": "code_context_graph",
+                        "truncated": False,
+                        "originalLength": len(result_preview),
+                    }
+                ],
+            }
+        ],
+    )
+
+    transcript = messages[0]["codexTranscript"]
+    tool_call = transcript["toolCalls"][0]
+
+    assert transcript["cells"][0]["summary"] == '{\n"status": "ok",'
+    assert tool_call["summary"] == '{\n"status": "ok",'
+    assert tool_call["resultPreview"] == result_preview
+    assert tool_call["resultLength"] == len(result_preview)
+    assert tool_call["resultKind"] == "code_context_graph"
+    assert tool_call["truncated"] is False
+
+
 def test_live_output_checkpoint_includes_native_codex_transcript():
     payload = session_service._live_output_checkpoint_payload(
         session_service.SessionLiveOutputState(

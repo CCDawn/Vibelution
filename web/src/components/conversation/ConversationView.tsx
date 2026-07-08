@@ -41,6 +41,7 @@ import {
   operationDetailsKind,
   readableOperationResult,
   type OperationDetailLabels,
+  type OperationDetailRow,
 } from "./ConversationOperationDetails";
 import {
   buildMentalBodyRows,
@@ -1555,6 +1556,7 @@ export function ConversationView({
             {meta ? <span className={styles.codexTranscriptCellMeta}>{meta}</span> : null}
           </span>
           {summary ? <span className={styles.codexTranscriptCellSummary}>{summary}</span> : null}
+          {renderCodexTranscriptToolDetails(cell)}
           {renderCodexTranscriptRolloutEvents(cell)}
         </span>
       </section>
@@ -1610,6 +1612,175 @@ export function ConversationView({
       return lang === "zh" ? "运行中" : "Running";
     }
     return "";
+  }
+
+  function renderCodexTranscriptToolDetails(cell: CodexTranscriptCell) {
+    if (cell.kind !== "tool_call" && cell.kind !== "error_notice") {
+      return null;
+    }
+    const rows = codexTranscriptToolDetailRows(cell);
+    if (rows.length === 0) {
+      return null;
+    }
+    const detailsId = `codex-tool-detail-${cell.id}`;
+    return (
+      <details
+        className={styles.operationDetails}
+        data-codex-tool-detail="true"
+      >
+        <summary className={styles.operationDetailToggle}>
+          {lang === "zh" ? "工具详情" : "Tool details"}
+        </summary>
+        <dl id={detailsId} className={styles.operationDetails}>
+          {rows.map((row, index) => {
+            const labelId = `${detailsId}-label-${index}`;
+            return (
+              <div key={`${cell.id}-${row.label}-${index}`} className={styles.operationDetailRow}>
+                <dt id={labelId} className={styles.operationDetailLabel}>{row.label}</dt>
+                <dd aria-labelledby={labelId}>
+                  <pre className={styles.operationDetailValue} tabIndex={0}>{row.value}</pre>
+                </dd>
+              </div>
+            );
+          })}
+        </dl>
+      </details>
+    );
+  }
+
+  function codexTranscriptToolDetailRows(cell: CodexTranscriptCell): OperationDetailRow[] {
+    const model = cell.toolLifecycleModel;
+    if (!model) {
+      return [];
+    }
+    const operationIds = new Set(cell.operationIds ?? []);
+    const matchedToolCalls = model.toolCalls.filter((toolCall) =>
+      operationIds.size === 0
+      || operationIds.has(toolCall.rawOperationId)
+      || operationIds.has(toolCall.toolCallId)
+      || (toolCall.terminalOperationId ? operationIds.has(toolCall.terminalOperationId) : false)
+    );
+    const toolCalls = matchedToolCalls.length > 0 ? matchedToolCalls : model.toolCalls;
+    const toolCallIds = new Set(toolCalls.map((toolCall) => toolCall.toolCallId).filter(Boolean));
+    const terminalOperations = model.terminalOperations.filter((operation) =>
+      toolCallIds.has(operation.toolCallId)
+      || operationIds.has(operation.rawOperationId)
+      || operationIds.has(operation.operationId)
+    );
+    const rows: OperationDetailRow[] = [];
+    const primaryToolCall = toolCalls[0];
+    const rawToolName = String(primaryToolCall?.rawToolName ?? "").trim();
+    if (rawToolName && rawToolName !== codexTranscriptCellTitle(cell)) {
+      rows.push({ label: operationDetailLabels.rawName, value: boundedCodexToolDetailText(rawToolName) });
+    }
+    for (const operation of terminalOperations) {
+      const displayCommand = operation.request?.displayCommand?.trim();
+      if (displayCommand) {
+        rows.push({
+          label: lang === "zh" ? "命令" : "Command",
+          value: boundedCodexToolDetailText(displayCommand),
+        });
+      }
+      const cwd = operation.request?.cwd?.trim();
+      if (cwd) {
+        rows.push({
+          label: lang === "zh" ? "工作目录" : "Working directory",
+          value: boundedCodexToolDetailText(cwd),
+        });
+      }
+      const output = firstNonEmptyText(
+        operation.result?.formattedOutput,
+        operation.result?.stdout,
+      );
+      if (output) {
+        rows.push({
+          label: operationDetailLabels.toolCallResult,
+          value: boundedCodexToolDetailText(output),
+        });
+      }
+      const error = firstNonEmptyText(operation.result?.stderr);
+      if (error) {
+        rows.push({
+          label: operationDetailLabels.toolCallError,
+          value: boundedCodexToolDetailText(error),
+        });
+      }
+      const exitCode = operation.result?.exitCode;
+      if (exitCode !== undefined && exitCode !== null) {
+        rows.push({
+          label: "exitCode",
+          value: String(exitCode),
+        });
+      }
+    }
+    const resultPreview = firstNonEmptyText(...toolCalls.map((toolCall) => toolCall.resultPreview));
+    if (resultPreview && !rows.some((row) => row.label === operationDetailLabels.toolCallResult && row.value.includes(resultPreview.slice(0, 80)))) {
+      rows.push({
+        label: operationDetailLabels.toolCallResult,
+        value: boundedCodexToolDetailText(resultPreview),
+      });
+    }
+    const error = firstNonEmptyText(...toolCalls.map((toolCall) => toolCall.error));
+    if (error) {
+      rows.push({
+        label: operationDetailLabels.toolCallError,
+        value: boundedCodexToolDetailText(error),
+      });
+    }
+    const metadata = codexToolDetailMetadata(toolCalls);
+    if (metadata) {
+      rows.push({
+        label: lang === "zh" ? "结果元数据" : "Result metadata",
+        value: metadata,
+      });
+    }
+    return rows;
+  }
+
+  function codexToolDetailMetadata(toolCalls: NonNullable<CodexTranscriptCell["toolLifecycleModel"]>["toolCalls"]) {
+    const primary = toolCalls[0];
+    if (!primary) {
+      return "";
+    }
+    return [
+      primary.resultKind ? `resultKind: ${primary.resultKind}` : "",
+      primary.resultType ? `resultType: ${primary.resultType}` : "",
+      primary.resultLength !== undefined && primary.resultLength !== null ? `resultLength: ${primary.resultLength}` : "",
+      primary.originalLength !== undefined && primary.originalLength !== null ? `originalLength: ${primary.originalLength}` : "",
+      primary.truncated !== undefined ? `truncated: ${primary.truncated}` : "",
+      primary.tracePath ? `tracePath: ${primary.tracePath}` : "",
+    ].filter(Boolean).join("\n");
+  }
+
+  function firstNonEmptyText(...values: Array<string | undefined | null>) {
+    for (const value of values) {
+      const text = String(value ?? "").trim();
+      if (text) {
+        return text;
+      }
+    }
+    return "";
+  }
+
+  function boundedCodexToolDetailText(value: string) {
+    const normalized = String(value ?? "").trim();
+    if (!normalized) {
+      return "";
+    }
+    const maxLines = 18;
+    const maxChars = 1600;
+    const lines = normalized.split(/\r?\n/);
+    const lineBounded = lines.slice(0, maxLines).join("\n").trimEnd();
+    const lengthBounded = lineBounded.length > maxChars
+      ? lineBounded.slice(0, maxChars).trimEnd()
+      : lineBounded;
+    const omittedLineCount = Math.max(0, lines.length - maxLines);
+    const omittedCharCount = Math.max(0, normalized.length - lengthBounded.length);
+    const notices = [
+      omittedLineCount > 0 ? (lang === "zh" ? `已省略 ${omittedLineCount} 行` : `${omittedLineCount} lines omitted`) : "",
+      omittedCharCount > 0 ? (lang === "zh" ? `已省略 ${omittedCharCount} 个字符` : `${omittedCharCount} characters omitted`) : "",
+    ].filter(Boolean);
+    return notices.length > 0 ? `${lengthBounded}\n\n[${notices.join(lang === "zh" ? "，" : ", ")}]` : lengthBounded;
   }
 
   function renderCodexTranscriptRolloutEvents(cell: CodexTranscriptCell) {
