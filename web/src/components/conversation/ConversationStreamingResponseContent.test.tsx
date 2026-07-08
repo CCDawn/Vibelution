@@ -3,11 +3,11 @@ import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
-import type { MarkdownBlock } from "./conversationMarkdownBlocks";
 import styles from "./ConversationStreamingResponseContent.styles";
 import conversationViewSource from "./ConversationView.tsx?raw";
 
 const classNames = {
+  ...styles,
   markdownBody: "markdown-body",
   streamingResponseText: "streaming-response",
   markdownBodyWithTable: "markdown-table",
@@ -19,26 +19,22 @@ describe("ConversationStreamingResponseContent", () => {
     expect(conversationViewSource).toContain('from "./ConversationStreamingResponseContent"');
     expect(conversationViewSource).not.toContain("function StreamingResponseContent");
     expect(conversationViewSource).not.toContain("projectStreamingMarkdownBlocks");
+    expect(conversationViewSource).not.toContain("renderBlock={renderMarkdownBlock}");
   });
 
-  it("renders projected streaming markdown blocks through the caller renderer", async () => {
+  it("renders streaming markdown through the shared conversation markdown renderer", async () => {
     const { ConversationStreamingResponseContent } = await import("./ConversationStreamingResponseContent");
     const html = renderToStaticMarkup(
       <ConversationStreamingResponseContent
         content={"# 标题\n\n正文"}
         classNames={classNames}
-        renderBlock={(block: MarkdownBlock, index: number) => (
-          <span key={index} data-block-type={block.type}>
-            {"content" in block ? String(block.content) : block.type}
-          </span>
-        )}
       />,
     );
 
     expect(html).toContain('class="markdown-body streaming-response"');
-    expect(html).toContain('data-block-type="heading"');
+    expect(html).toContain("<h3");
     expect(html).toContain("标题");
-    expect(html).toContain('data-block-type="paragraph"');
+    expect(html).toContain("<p");
     expect(html).toContain("正文");
   });
 
@@ -48,11 +44,11 @@ describe("ConversationStreamingResponseContent", () => {
       <ConversationStreamingResponseContent
         content={"| A | B |\n| --- | --- |\n| 1 | 2 |"}
         classNames={classNames}
-        renderBlock={(block: MarkdownBlock, index: number) => <span key={index}>{block.type}</span>}
       />,
     );
 
     expect(html).toContain('class="markdown-body streaming-response markdown-table"');
+    expect(html).toContain("<table");
   });
 
   it("keeps streaming text bounded for long tokens while preserving the table width override", () => {
