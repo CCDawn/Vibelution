@@ -106,15 +106,75 @@ describe("AgentSessionTabStrip", () => {
     expect(markup).toContain("知识管理员");
     expect(markup).toContain("GPT 5.5");
     expect(markup).not.toContain("idle · GPT 5.5</span>");
-    expect(markup).toContain("子对话");
+    expect(markup).not.toContain(">子对话</span>");
     expect(markup).toContain("接续分析");
     expect(markup).toContain("结果摘要");
-    expect(markup).toContain("running");
+    expect(markup).toContain("title=\"running · GPT 5.5\"");
+    expect(markup).not.toContain(">running</span>");
+    expect(markup).toContain("agentSessionTabStatusDot");
+    expect(markup).toContain("agentSessionTabStatusDotRunning");
+    expect(markup).toContain("agentSessionTabMainActionActive");
     expect(markup).toContain("aria-current=\"true\"");
     expect(markup).toContain("role=\"tablist\"");
     expect(markup.match(/role="tab"/g)?.length).toBe(2);
     expect(markup).toContain("aria-selected=\"true\"");
     expect(markup).toContain("aria-selected=\"false\"");
+  });
+
+  it("uses a browser-style tab rail for one Agent managing multiple sessions", () => {
+    const markup = renderStrip({
+      activeSessionId: "session-child-a",
+      sessions: [
+        session({ id: "session-root", title: "主线会话" }),
+        session({
+          id: "session-child-a",
+          title: "资料核对",
+          taskTitle: "资料核对",
+          sessionKind: "child",
+          parentSessionId: "session-root",
+          rootSessionId: "session-root",
+        }),
+        session({
+          id: "session-child-b",
+          title: "结果整理",
+          taskTitle: "结果整理",
+          sessionKind: "child",
+          parentSessionId: "session-root",
+          rootSessionId: "session-root",
+        }),
+      ],
+    });
+
+    expect(markup).toContain("agentSessionTabGroup");
+    expect(markup).toContain("w-full");
+    expect(markup).toContain("flex-nowrap");
+    expect(markup).toContain("overflow-x-auto");
+    expect(markup.match(/role="tab"/g)?.length).toBe(3);
+    expect(markup).toContain("资料核对");
+    expect(markup).toContain("结果整理");
+    expect(markup).toContain("aria-selected=\"true\"");
+    expect(markup).toContain("aria-selected=\"false\"");
+  });
+
+  it("uses compact colored status dots instead of visible status text", () => {
+    const markup = renderStrip({
+      sessions: [
+        session({ id: "session-running", status: "running" }),
+        session({ id: "session-error", status: "error" }),
+        session({ id: "session-done", status: "completed" }),
+      ],
+    });
+
+    expect(markup).toContain("agentSessionTabStatusDotRunning");
+    expect(markup).toContain("agentSessionTabStatusDotError");
+    expect(markup).toContain("agentSessionTabStatusDotDone");
+    expect(markup).toContain("aria-label=\"running\"");
+    expect(markup).toContain("aria-label=\"error\"");
+    expect(markup).toContain("aria-label=\"completed\"");
+    expect(markup).not.toContain(">running</span>");
+    expect(markup).not.toContain(">error</span>");
+    expect(markup).not.toContain(">completed</span>");
+    expect(markup).not.toContain("agentSessionTabKicker");
   });
 
   it("renders the rename input for the edited session", () => {
@@ -172,9 +232,16 @@ describe("AgentSessionTabStrip", () => {
     expect(markup).toContain("agentSessionTabActive");
   });
 
-  it("renders nothing when there is only one session", () => {
-    const markup = renderStrip({ sessions: [session()] });
+  it("keeps the root Agent session tab visible when there is only one session", () => {
+    const markup = renderStrip({
+      activeSessionId: "session-root",
+      sessions: [session()],
+    });
 
-    expect(markup).toBe("");
+    expect(markup).toContain("role=\"tablist\"");
+    expect(markup.match(/role="tab"/g)?.length).toBe(1);
+    expect(markup).toContain("知识管理员");
+    expect(markup).toContain("aria-current=\"true\"");
+    expect(markup).toContain("aria-selected=\"true\"");
   });
 });
