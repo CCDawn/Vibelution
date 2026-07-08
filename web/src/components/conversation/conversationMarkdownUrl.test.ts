@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import conversationViewSource from "./ConversationView.tsx?raw";
+import conversationMarkdownRendererSource from "./ConversationMarkdownRenderer.tsx?raw";
 import { safeConversationMarkdownUrl } from "./conversationMarkdownUrl";
 
 describe("safeConversationMarkdownUrl", () => {
@@ -25,8 +25,8 @@ describe("safeConversationMarkdownUrl", () => {
     expect(safeConversationMarkdownUrl("")).toBeNull();
   });
 
-  it("keeps markdown URL safety outside the ConversationView render component", () => {
-    expect(conversationViewSource).toContain('from "./conversationMarkdownUrl"');
-    expect(conversationViewSource).not.toMatch(/export function safeConversationMarkdownUrl|function safeConversationMarkdownUrl/);
+  it("keeps markdown URL safety in the shared markdown renderer", () => {
+    expect(conversationMarkdownRendererSource).toContain('from "./conversationMarkdownUrl"');
+    expect(conversationMarkdownRendererSource).not.toMatch(/export function safeConversationMarkdownUrl|function safeConversationMarkdownUrl/);
   });
 });

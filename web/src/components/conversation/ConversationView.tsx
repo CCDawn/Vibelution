@@ -129,7 +129,7 @@ import {
 } from "./agentMessageSections";
 import { shouldLoadEarlierConversationMessages } from "./conversationHistoryWindow";
 import { parseResponseSegments, ResponseSegment } from "./messageResponseSegments";
-import { ConversationMarkdownRenderer, type ConversationMarkdownClassNames } from "./ConversationMarkdownRenderer";
+import { ConversationMarkdownRenderer } from "./ConversationMarkdownRenderer";
 import {
   addComparableConversationImageUrl,
   comparableConversationImageUrl,
@@ -194,26 +194,6 @@ const INITIAL_VISIBLE_FEEDBACK_OPERATION_COUNT = 36;
 const RESPONSE_PARSE_CACHE_LIMIT = 80;
 const RESPONSE_PREWARM_MESSAGE_LIMIT = 8;
 const EMPTY_SECTION_EXPANSION: Record<string, boolean> = {};
-const CONVERSATION_MARKDOWN_CLASS_NAMES: ConversationMarkdownClassNames = {
-  inlineCode: styles.inlineCode,
-  inlineLink: styles.inlineLink,
-  inlineStrong: styles.inlineStrong,
-  markdownBlockquote: styles.markdownBlockquote,
-  markdownBody: styles.markdownBody,
-  markdownBodyWithTable: styles.markdownBodyWithTable,
-  markdownDivider: styles.markdownDivider,
-  markdownHeading: styles.markdownHeading,
-  markdownHeading1: styles.markdownHeading1,
-  markdownHeading2: styles.markdownHeading2,
-  markdownHeading3: styles.markdownHeading3,
-  markdownHeading4: styles.markdownHeading4,
-  markdownTable: styles.markdownTable,
-  markdownTableWrap: styles.markdownTableWrap,
-  messageBody: styles.messageBody,
-  responseSegmentList: styles.responseSegmentList,
-  responseSegmentPre: styles.responseSegmentPre,
-};
-
 function conversationPerformanceNowMs() {
   return typeof performance === "undefined" ? Date.now() : performance.now();
 }
@@ -1811,23 +1791,23 @@ export function ConversationView({
     const toggleLabel = lang === "zh" ? `展开或收起工具结果：${title}` : `Expand or collapse tool results: ${title}`;
     return (
       <details
-        className={`${styles.operationDetails} group`}
+        className={styles.operationDetailsDisclosure}
         data-codex-tool-detail="true"
         open
       >
         <summary
-          className={`${styles.codexTranscriptCellTitleRow} cursor-pointer list-none select-none [&::-webkit-details-marker]:hidden`}
+          className={styles.operationDetailsSummary}
           aria-label={toggleLabel}
         >
           <span className={styles.codexTranscriptCellTitle}>{title}</span>
           {meta ? <span className={styles.codexTranscriptCellMeta}>{meta}</span> : null}
           <span
-            className="inline-flex size-4 shrink-0 items-center justify-center border-0 bg-transparent p-0 text-[var(--fg-tertiary)] leading-none hover:text-[var(--fg-primary)]"
+            className={styles.operationDetailsChevronButton}
             data-codex-tool-detail-toggle="inline-symbol"
             aria-hidden="true"
           >
-            <span className="inline-flex group-open:hidden">▸</span>
-            <span className="hidden group-open:inline-flex">▾</span>
+            <span className={styles.operationDetailsChevronClosed}>▸</span>
+            <span className={styles.operationDetailsChevronOpen}>▾</span>
           </span>
         </summary>
         <dl id={detailsId} className={styles.operationDetails}>
@@ -2734,7 +2714,6 @@ export function ConversationView({
     return (
       <ConversationMarkdownRenderer
         content={content}
-        classNames={CONVERSATION_MARKDOWN_CLASS_NAMES}
         duplicateImageUrls={duplicateImageUrls}
         renderImage={renderMarkdownImage}
       />
@@ -3424,7 +3403,7 @@ export function ConversationView({
               id={slashSuggestionListId}
               role="listbox"
               aria-label={lang === "zh" ? "斜杠指令" : "Slash commands"}
-              className="vui-components-conversationview slashCommandSuggestions min-w-0 overflow-hidden rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] shadow-[var(--vui-shadow-hairline)]"
+              className={styles.slashCommandSuggestions}
             >
               {slashSuggestions.map((skill, index) => {
                 const description = skill.description?.trim() || skill.name || skill.directoryName;
@@ -3434,18 +3413,18 @@ export function ConversationView({
                     key={skill.command}
                     role="option"
                     aria-selected={false}
-                    className="min-w-0"
+                    className={styles.slashCommandSuggestionOption}
                   >
                     <VButton
                       type="button"
-                      className="flex min-h-8 w-full min-w-0 items-center gap-2 px-2 py-1 text-left text-[var(--vui-font-xs)] text-[var(--fg-secondary)] hover:bg-[var(--vui-control-muted)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[var(--accent-cool)]"
+                      className={styles.slashCommandSuggestionButton}
                       onMouseDown={(event) => event.preventDefault()}
                       onClick={() => handleSlashCommandSuggestion(skill)}
                     >
-                      <code className="shrink-0 rounded-[var(--radius-control)] bg-[var(--vui-control-muted)] px-1.5 py-0.5 font-semibold text-[var(--fg-primary)]">
+                      <code className={styles.slashCommandSuggestionCode}>
                         {skill.command}
                       </code>
-                      <span className="min-w-0 truncate">{description}</span>
+                      <span className={styles.slashCommandSuggestionDescription}>{description}</span>
                     </VButton>
                   </div>
                 );

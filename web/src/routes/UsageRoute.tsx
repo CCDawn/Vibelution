@@ -256,7 +256,7 @@ export function UsageRoute() {
               </div>
               <VIconButton
                 type="button"
-                className="h-[var(--vui-control-height-sm)] min-h-8 w-[var(--vui-control-height-sm)] flex-none p-0"
+                className={styles.refreshButton}
                 label={label(lang, "刷新 Token 用量", "Refresh token usage")}
                 icon={<RefreshCw size={16} />}
                 onPress={refresh}
