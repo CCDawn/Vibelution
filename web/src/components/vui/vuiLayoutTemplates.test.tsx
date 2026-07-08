@@ -7,6 +7,7 @@ import {
   VEntityList,
   VRouteHeader,
   VSplitWorkspace,
+  VStateSurface,
   VStatusStrip,
   VWorkbenchPage,
 } from "./index";
@@ -27,6 +28,14 @@ describe("VUI workbench layout templates", () => {
             { label: "Ready", value: "9" },
           ]}
         />
+        <VStateSurface
+          tone="loading"
+          title="Loading team details"
+          facts={[{ key: "source", label: "Source", value: "Team detail API" }]}
+          skeletonLines
+        >
+          Keeping the workspace frame visible while details load.
+        </VStateSurface>
         <VSplitWorkspace
           sidebar={<nav>Team list</nav>}
           main={
@@ -51,6 +60,10 @@ describe("VUI workbench layout templates", () => {
     expect(markup).toContain("text-[var(--font-size-caption)]");
     expect(markup).toContain("text-[var(--font-size-micro)]");
     expect(markup).toContain('data-vui="status-strip"');
+    expect(markup).toContain('data-vui="state-surface"');
+    expect(markup).toContain('data-tone="loading"');
+    expect(markup).toContain("Team detail API");
+    expect(markup).toContain("animate-pulse");
     expect(markup).toContain('data-vui="split-workspace"');
     expect(markup).toContain('data-vui="entity-list"');
     expect(markup).toContain('data-vui="empty-state"');
