@@ -12,6 +12,7 @@ import {
   conversationMessageTurnId,
   projectedConversationMessageIdsOrSelf,
 } from "./conversationMessageIdentity";
+import { chronologicalConversationMessages } from "./conversationMessageOrder";
 import { projectTimelineProcessMessages } from "./timelineMessageProcessProjection";
 import {
   buildAgentMessageTimelineRowIdentities,
@@ -311,7 +312,8 @@ export function projectAgentMessageTimelineMessages({
   activeTurnMessage,
 }: AgentMessageTimelineProjectionInput): AgentMessageTimelineProjection {
   const projectedMessages = (() => {
-    const visibleTimelineMessages = timelineMessages.filter(hasVisibleProjectionMessageContent);
+    const visibleTimelineMessages = chronologicalConversationMessages(timelineMessages)
+      .filter(hasVisibleProjectionMessageContent);
     if (!activeTurnMessage || hasCommittedAssistantAnswerForActiveTurn(visibleTimelineMessages, activeTurnMessage)) {
       return projectTimelineProcessMessages(visibleTimelineMessages);
     }
@@ -327,12 +329,12 @@ export function projectAgentMessageTimelineMessages({
     if (!hasVisibleProjectionMessageContent(mergedActiveTurnMessage) && !keepStreamingActiveTurnPlaceholder) {
       return projectTimelineProcessMessages(dedupedTimelineMessages);
     }
-    return projectTimelineProcessMessages([
+    return projectTimelineProcessMessages(chronologicalConversationMessages([
       ...dedupedTimelineMessages,
       keepStreamingActiveTurnPlaceholder
         ? compactStreamingActiveTurnPlaceholderMessage(mergedActiveTurnMessage)
         : mergedActiveTurnMessage,
-    ]);
+    ]));
   })();
   const projectedAgentMessages = projectedMessages.map(conversationMessageToAgentMessage);
 

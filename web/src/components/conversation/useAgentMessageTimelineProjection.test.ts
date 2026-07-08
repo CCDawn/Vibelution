@@ -186,6 +186,32 @@ describe("projectAgentMessageTimelineMessages", () => {
     expect(projection.rowIdentities[0].rowKey).toBe("assistant-turn:turn-1");
   });
 
+  it("normalizes timeline messages to chronological order before projecting rows", () => {
+    const projection = projectAgentMessageTimelineMessages({
+      timelineMessages: [
+        assistantMessage("assistant-new", {
+          content: "new answer",
+          timestamp: "2026-07-09T01:27:00Z",
+          metadata: { turnId: "turn-2" },
+        }),
+        assistantMessage("assistant-old", {
+          content: "old answer",
+          timestamp: "2026-07-09T01:26:48Z",
+          metadata: { turnId: "turn-1" },
+        }),
+      ],
+    });
+
+    expect(projection.messages.map((message) => message.id)).toEqual([
+      "assistant-old",
+      "assistant-new",
+    ]);
+    expect(projection.agentMessages.map((message) => message.id)).toEqual([
+      "assistant-old",
+      "assistant-new",
+    ]);
+  });
+
   it("coalesces same-turn live overlay tool updates by semantic identity", () => {
     const liveOverlay = assistantMessage("live-overlay", {
       content: "正在读取文件",

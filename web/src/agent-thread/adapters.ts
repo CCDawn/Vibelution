@@ -142,8 +142,6 @@ function runtimeEventToAgentPart(
     error: event.error,
     failureClass: event.failureClass,
     timedOut: event.timedOut,
-  }, {
-    includeInternalPipeline: shouldKeepInternalRuntimeStatusForMessage(message),
   })) {
     return null;
   }
@@ -160,31 +158,6 @@ function runtimeEventToAgentPart(
     timestamp: event.timestamp,
     tracePath: event.tracePath,
   };
-}
-
-function shouldKeepInternalRuntimeStatusForMessage(message: ConversationMessage) {
-  if (message.role !== "assistant") {
-    return false;
-  }
-  const transcript = message.codexTranscript;
-  if (!transcript || String(transcript.source ?? "").trim() !== "native") {
-    return false;
-  }
-  const hasNativeAnswer = (transcript.cells ?? []).some((cell) =>
-    cell.kind === "assistant_markdown" && Boolean(String(cell.text ?? "").trim()),
-  );
-  return hasNativeAnswer && !nativeTranscriptCarriesProcess(transcript);
-}
-
-function nativeTranscriptCarriesProcess(transcript: NonNullable<ConversationMessage["codexTranscript"]>) {
-  return Boolean(
-    (transcript.cells ?? []).some((cell) => !["assistant_markdown", "status", "user"].includes(String(cell.kind ?? "")))
-    || (transcript.toolCalls?.length ?? 0) > 0
-    || (transcript.terminalOperations?.length ?? 0) > 0
-    || (transcript.terminalSessions?.length ?? 0) > 0
-    || (transcript.modelObservations?.length ?? 0) > 0
-    || (transcript.rolloutEvents?.length ?? 0) > 0,
-  );
 }
 
 function toolEventToAgentPart(id: string, event: AgentFeedbackEvent): AgentToolCallPart {
