@@ -163,6 +163,76 @@ def test_source_collection_summary_reconciles_needs_continue_stage_task(tmp_path
     assert stored_task["reconciledFromTurn"]["status"] == "needs_continue"
 
 
+def test_source_collection_stage_task_isolates_agent_session_from_previous_round(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
+    discovery = agent_directory_service.create_agent_instance(display_name="资料寻找")
+    session_service.ensure_agent_direct_session(agent_id=discovery["agentId"], title="资料寻找")
+    old_session_id = agent_directory_service.get_agent(discovery["agentId"])["directSessionId"]
+    team = team_service.create_team(
+        name="挑战杯科研团队",
+        members=[{"agentId": discovery["agentId"], "role": "source_finder", "agentName": "资料寻找"}],
+    )
+    first_run = team_workflow_orchestration_service.start_source_collection_run(
+        team["teamId"],
+        {
+            "topic": "predictive coding old round",
+            "agentRoles": ["source_finder"],
+            "agentIds": {"source_finder": discovery["agentId"]},
+            "querySeeds": ["predictive coding old round"],
+            "promptCachePolicy": {"requirement": "disabled"},
+        },
+    )
+    session_service.append_session_assistant_artifact_message(
+        old_session_id,
+        "上一轮资料搜集任务上下文。",
+        metadata={
+            "kind": team_workflow_orchestration_service.SOURCE_COLLECTION_STAGE_SESSION_TASK_KIND,
+            "teamId": team["teamId"],
+            "runId": first_run["run"]["runId"],
+            "stageId": "finding",
+            "agentId": discovery["agentId"],
+            "agentRole": "source_finder",
+            "sourceCollectionStageTaskId": "stagetask-old-round",
+            "turnId": "turn-old-round",
+        },
+    )
+    second_run = team_workflow_orchestration_service.start_source_collection_run(
+        team["teamId"],
+        {
+            "topic": "predictive coding new round",
+            "agentRoles": ["source_finder"],
+            "agentIds": {"source_finder": discovery["agentId"]},
+            "querySeeds": ["predictive coding new round"],
+            "promptCachePolicy": {"requirement": "disabled"},
+        },
+    )
+    submitted_session_ids: list[str] = []
+
+    def fake_submit_session_message(session_id, content, **kwargs):
+        submitted_session_ids.append(session_id)
+        return {
+            "accepted": True,
+            "sessionId": session_id,
+            "turnId": "turn-new-round",
+            "status": "running",
+        }
+
+    monkeypatch.setattr(session_service, "submit_session_message", fake_submit_session_message)
+
+    task = team_workflow_orchestration_service.start_source_collection_stage_session_task(
+        team["teamId"],
+        second_run["run"]["runId"],
+        {"stageId": "finding", "agentId": discovery["agentId"], "agentRole": "source_finder"},
+    )
+
+    assert submitted_session_ids == [task["sessionId"]]
+    assert task["sessionId"] != old_session_id
+    assert agent_directory_service.get_agent(discovery["agentId"])["directSessionId"] == task["sessionId"]
+    assert task["task"]["sessionIsolation"]["previousDirectSessionId"] == old_session_id
+    assert task["task"]["sessionIsolation"]["reason"] == "previous_source_collection_round"
+
+
 def test_source_collection_summary_defaults_to_latest_run_with_records(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)
