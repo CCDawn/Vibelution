@@ -348,6 +348,60 @@ describe("ConversationView native Codex transcript surface", () => {
     expect(html).not.toContain("exitCode");
   });
 
+  it("does not repeat the tool title as an instruction when no command was sent", () => {
+    const html = renderConversation([
+      {
+        id: "assistant-native-tool-title-only",
+        role: "assistant",
+        content: "",
+        timestamp: "2026-07-07T11:00:00Z",
+        codexTranscript: {
+          version: 1,
+          source: "native",
+          messageId: "assistant-native-tool-title-only",
+          cells: [
+            {
+              id: "native-tool-title-only-cell",
+              kind: "tool_call",
+              messageId: "assistant-native-tool-title-only",
+              status: "completed",
+              tone: "neutral",
+              title: "glob_tool",
+              summary: "glob_tool",
+              operationIds: ["operation-glob"],
+              toolLifecycleModel: {
+                toolCalls: [
+                  {
+                    toolCallId: "tool_call:operation-glob",
+                    rawOperationId: "operation-glob",
+                    status: "completed",
+                    title: "glob_tool",
+                    summary: "glob_tool",
+                    rawToolName: "glob_tool",
+                    runtimeKind: "tool",
+                    resultPreview: "web/src/components/conversation/ConversationView.tsx",
+                  },
+                ],
+                terminalOperations: [],
+                terminalSessions: [],
+                modelObservations: [],
+              },
+            },
+          ],
+          toolCalls: [],
+          terminalOperations: [],
+          terminalSessions: [],
+          modelObservations: [],
+        },
+      } as ConversationMessage,
+    ]);
+
+    expect(html).toContain("glob_tool");
+    expect(html).toContain("指令与结果");
+    expect(html).toContain("web/src/components/conversation/ConversationView.tsx");
+    expect(html).not.toContain(">指令</dt>");
+  });
+
   it("keeps the legacy projection path when native transcript is unavailable", () => {
     const html = renderConversation([
       {
