@@ -65,14 +65,16 @@ export function resolveCodexTranscriptSurface(
   legacyCells: CodexTranscriptCell[] = [],
 ): CodexTranscriptSurface {
   if (hasUsableNativeCodexTranscript(message)) {
-    const cells = codexNativeTranscriptToCells(message.codexTranscript as CodexTranscriptProjection);
+    const transcript = message.codexTranscript as CodexTranscriptProjection;
+    const cells = codexNativeTranscriptToCells(transcript);
     const hasAssistantMarkdown = cells.some((cell) => cell.kind === "assistant_markdown" && Boolean(cell.text?.trim()));
+    const hasNativeProcessProjection = hasNativeProcessCells(cells) || hasNativeLifecycleProjection(transcript);
     return {
       mode: "native",
       source: "message.codexTranscript",
       cells,
       hasAssistantMarkdown,
-      suppressLegacyProcess: true,
+      suppressLegacyProcess: hasNativeProcessProjection,
       suppressLegacyResponse: hasAssistantMarkdown,
       suppressLegacyTurnStatus: true,
     };
@@ -121,6 +123,20 @@ export function codexNativeTranscriptToCells(
       };
     })
     .filter(shouldDisplayTranscriptCell);
+}
+
+function hasNativeProcessCells(cells: CodexTranscriptCell[]) {
+  return cells.some((cell) => cell.kind !== "assistant_markdown" && cell.kind !== "user");
+}
+
+function hasNativeLifecycleProjection(transcript: CodexTranscriptProjection) {
+  return Boolean(
+    (transcript.toolCalls?.length ?? 0) > 0
+    || (transcript.terminalOperations?.length ?? 0) > 0
+    || (transcript.terminalSessions?.length ?? 0) > 0
+    || (transcript.modelObservations?.length ?? 0) > 0
+    || (transcript.rolloutEvents?.length ?? 0) > 0,
+  );
 }
 
 function normalizeNativeRolloutEvents(events: NonNullable<CodexTranscriptProjection["rolloutEvents"]>): CodexRolloutTraceEvent[] {

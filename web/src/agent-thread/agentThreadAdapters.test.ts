@@ -243,6 +243,57 @@ describe("agent thread adapters", () => {
     expect(serializedParts).not.toContain("正在准备对话上下文");
   });
 
+  it("keeps compact runtime status parts when a native transcript owns the final answer", () => {
+    const message: ConversationMessage = {
+      id: "assistant-native-answer-status",
+      role: "assistant",
+      content: "你好，我在。",
+      timestamp: "2026-07-08T15:53:00Z",
+      feedbackEvents: [
+        { sequence: 1, kind: "status", status: "done", name: "context_prepare", summary: "正在准备对话上下文..." },
+        { sequence: 2, kind: "status", status: "done", name: "agent_prepare", summary: "正在唤起对话 agent..." },
+        { sequence: 3, kind: "status", status: "done", name: "model_request", summary: "正在请求模型，等待首个响应片段..." },
+        { sequence: 4, kind: "status", status: "done", name: "model_thinking", summary: "正在思考中，等待模型输出..." },
+      ],
+      codexTranscript: {
+        version: 1,
+        source: "native",
+        messageId: "assistant-native-answer-status",
+        cells: [
+          {
+            id: "assistant-native-answer-status-answer",
+            kind: "assistant_markdown",
+            messageId: "assistant-native-answer-status",
+            status: "completed",
+            tone: "neutral",
+            text: "你好，我在。",
+          },
+        ],
+      },
+    };
+
+    const agentMessage = conversationMessageToAgentMessage(message);
+
+    expect(agentMessage.parts.map((part) => part.type)).toEqual([
+      "runtime-event",
+      "runtime-event",
+      "runtime-event",
+      "runtime-event",
+      "text",
+    ]);
+    expect(agentMessage.parts[0]).toMatchObject({
+      type: "runtime-event",
+      kind: "status",
+      name: "context_prepare",
+      status: "done",
+    });
+    expect(agentMessage.parts[4]).toMatchObject({
+      type: "text",
+      channel: "answer",
+      text: "你好，我在。",
+    });
+  });
+
   it("drops internal runtime pipeline status text when it arrives as assistant content", () => {
     const statusText = "context_prepare\n正在准备对话上下文...\n\nagent_prepare\n正在唤起对话 agent...\n\nmodel_request\n正在请求模型，等待首个响应片段...\n\nretrying\n模型连接正在重试...\n第 2/5 次；原因：server_error。本轮仍在继续，请不要重复提交。";
     const message: ConversationMessage = {

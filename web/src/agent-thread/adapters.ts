@@ -125,10 +125,14 @@ function feedbackEventToAgentPart(
   if (event.kind === "tool") {
     return toolEventToAgentPart(id, event);
   }
-  return runtimeEventToAgentPart(id, event);
+  return runtimeEventToAgentPart(message, id, event);
 }
 
-function runtimeEventToAgentPart(id: string, event: AgentFeedbackEvent): AgentRuntimeEventPart | null {
+function runtimeEventToAgentPart(
+  message: ConversationMessage,
+  id: string,
+  event: AgentFeedbackEvent,
+): AgentRuntimeEventPart | null {
   if (!shouldDisplayRuntimeStatus({
     kind: event.kind,
     name: event.name,
@@ -138,6 +142,8 @@ function runtimeEventToAgentPart(id: string, event: AgentFeedbackEvent): AgentRu
     error: event.error,
     failureClass: event.failureClass,
     timedOut: event.timedOut,
+  }, {
+    includeInternalPipeline: shouldKeepInternalRuntimeStatusForMessage(message),
   })) {
     return null;
   }
@@ -154,6 +160,31 @@ function runtimeEventToAgentPart(id: string, event: AgentFeedbackEvent): AgentRu
     timestamp: event.timestamp,
     tracePath: event.tracePath,
   };
+}
+
+function shouldKeepInternalRuntimeStatusForMessage(message: ConversationMessage) {
+  if (message.role !== "assistant") {
+    return false;
+  }
+  const transcript = message.codexTranscript;
+  if (!transcript || String(transcript.source ?? "").trim() !== "native") {
+    return false;
+  }
+  const hasNativeAnswer = (transcript.cells ?? []).some((cell) =>
+    cell.kind === "assistant_markdown" && Boolean(String(cell.text ?? "").trim()),
+  );
+  return hasNativeAnswer && !nativeTranscriptCarriesProcess(transcript);
+}
+
+function nativeTranscriptCarriesProcess(transcript: NonNullable<ConversationMessage["codexTranscript"]>) {
+  return Boolean(
+    (transcript.cells ?? []).some((cell) => !["assistant_markdown", "status", "user"].includes(String(cell.kind ?? "")))
+    || (transcript.toolCalls?.length ?? 0) > 0
+    || (transcript.terminalOperations?.length ?? 0) > 0
+    || (transcript.terminalSessions?.length ?? 0) > 0
+    || (transcript.modelObservations?.length ?? 0) > 0
+    || (transcript.rolloutEvents?.length ?? 0) > 0,
+  );
 }
 
 function toolEventToAgentPart(id: string, event: AgentFeedbackEvent): AgentToolCallPart {

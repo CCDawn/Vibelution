@@ -23,8 +23,18 @@ export type TranscriptCellDisplayInput = RuntimeStatusDisplayInput & {
   messageId?: unknown;
 };
 
-export function shouldDisplayRuntimeStatus(input: RuntimeStatusDisplayInput) {
+export type RuntimeStatusDisplayOptions = {
+  includeInternalPipeline?: boolean;
+};
+
+export function shouldDisplayRuntimeStatus(
+  input: RuntimeStatusDisplayInput,
+  options: RuntimeStatusDisplayOptions = {},
+) {
   if (normalizedText(input.kind) !== "status") {
+    return true;
+  }
+  if (options.includeInternalPipeline && isInternalRuntimeStatus(input)) {
     return true;
   }
   return hasDisplayableDiagnosticStatus(input);
