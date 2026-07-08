@@ -47,6 +47,42 @@ describe("conversation display message projection", () => {
     expect(projected.map((item) => item.id)).toEqual(["answer"]);
   });
 
+  it("normalizes display messages to chronological order before rendering", async () => {
+    const projected = await projectConversationDisplayMessages([
+      message({
+        id: "assistant-new",
+        role: "assistant",
+        content: "new answer",
+        timestamp: "2026-07-09T01:27:00Z",
+      }),
+      message({
+        id: "user-new",
+        role: "user",
+        content: "new question",
+        timestamp: "2026-07-09T01:26:58Z",
+      }),
+      message({
+        id: "assistant-old",
+        role: "assistant",
+        content: "old answer",
+        timestamp: "2026-07-09T01:26:48Z",
+      }),
+      message({
+        id: "user-old",
+        role: "user",
+        content: "old question",
+        timestamp: "2026-07-09T01:26:16Z",
+      }),
+    ]);
+
+    expect(projected.map((item) => item.id)).toEqual([
+      "user-old",
+      "assistant-old",
+      "user-new",
+      "assistant-new",
+    ]);
+  });
+
   it("merges adjacent duplicate turn errors while keeping the newest mental snapshot", async () => {
     const projected = await projectConversationDisplayMessages([
       message({

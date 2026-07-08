@@ -243,7 +243,7 @@ describe("agent thread adapters", () => {
     expect(serializedParts).not.toContain("正在准备对话上下文");
   });
 
-  it("keeps compact runtime status parts when a native transcript owns the final answer", () => {
+  it("does not resurrect internal runtime status parts when a native transcript owns the final answer", () => {
     const message: ConversationMessage = {
       id: "assistant-native-answer-status",
       role: "assistant",
@@ -273,25 +273,18 @@ describe("agent thread adapters", () => {
     };
 
     const agentMessage = conversationMessageToAgentMessage(message);
+    const serializedParts = JSON.stringify(agentMessage.parts);
 
-    expect(agentMessage.parts.map((part) => part.type)).toEqual([
-      "runtime-event",
-      "runtime-event",
-      "runtime-event",
-      "runtime-event",
-      "text",
-    ]);
+    expect(agentMessage.parts.map((part) => part.type)).toEqual(["text"]);
     expect(agentMessage.parts[0]).toMatchObject({
-      type: "runtime-event",
-      kind: "status",
-      name: "context_prepare",
-      status: "done",
-    });
-    expect(agentMessage.parts[4]).toMatchObject({
       type: "text",
       channel: "answer",
       text: "你好，我在。",
     });
+    expect(serializedParts).not.toContain("context_prepare");
+    expect(serializedParts).not.toContain("agent_prepare");
+    expect(serializedParts).not.toContain("model_request");
+    expect(serializedParts).not.toContain("model_thinking");
   });
 
   it("drops internal runtime pipeline status text when it arrives as assistant content", () => {
