@@ -40,7 +40,7 @@ function renderConversation(messages: ConversationMessage[], processDisplayMode:
 }
 
 describe("ConversationView native Codex transcript surface", () => {
-  it("keeps compact runtime process visible without duplicating the native final answer", () => {
+  it("hides internal runtime process when a native transcript owns the final answer", () => {
     const answer = "你好，我在。";
     const html = renderConversation([
       {
@@ -88,11 +88,11 @@ describe("ConversationView native Codex transcript surface", () => {
 
     expect(html.match(/你好，我在。/g)).toHaveLength(1);
     expect(html).toContain('data-codex-transcript-cell-kind="assistant_markdown"');
-    expect(html).toContain('data-agent-process-kind="timeline"');
-    expect(html).toContain("准备上下文");
-    expect(html).toContain("绑定 Agent");
-    expect(html).toContain("请求模型");
-    expect(html).toContain("模型思考");
+    expect(html).not.toContain('data-agent-process-kind="timeline"');
+    expect(html).not.toContain("准备上下文");
+    expect(html).not.toContain("绑定 Agent");
+    expect(html).not.toContain("请求模型");
+    expect(html).not.toContain("模型思考");
     expect(html).not.toContain("正在准备对话上下文...");
     expect(html).not.toContain("正在唤起对话 Agent...");
     expect(html).not.toContain("正在请求模型，等待首个响应片段...");
