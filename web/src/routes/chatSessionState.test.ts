@@ -7,6 +7,7 @@ import {
   deriveSessionListQueryErrorState,
   markSessionSummaryRunning,
   markSessionDetailRunning,
+  mergeSessionDetailMessageWindow,
   mergeSessionDetailIntoSummaries,
   renameSessionDetail,
   renameSessionInSummaries,
@@ -55,6 +56,67 @@ function makeDetail(overrides: Partial<SessionDetail> = {}): SessionDetail {
 }
 
 describe("chatSessionState", () => {
+  it("prepends earlier session detail windows without dropping the latest loaded tail", () => {
+    const current = makeDetail({
+      messages: [5, 6, 7, 8].map((index) => ({
+        id: `session-live-message-${index}`,
+        role: index % 2 === 0 ? "assistant" : "user",
+        content: `message ${index}`,
+        timestamp: "2026-05-22T10:00:00Z",
+      })),
+      messageWindow: {
+        mode: "window",
+        totalMessages: 8,
+        returnedMessages: 4,
+        oldestMessageIndex: 5,
+        newestMessageIndex: 8,
+        hasEarlier: true,
+        hasLater: false,
+        nextBeforeMessageIndex: 5,
+        transcriptScope: "window",
+      },
+    });
+    const earlierPage = makeDetail({
+      messages: [3, 4].map((index) => ({
+        id: `session-live-message-${index}`,
+        role: index % 2 === 0 ? "assistant" : "user",
+        content: `message ${index}`,
+        timestamp: "2026-05-22T09:00:00Z",
+      })),
+      messageWindow: {
+        mode: "window",
+        totalMessages: 8,
+        returnedMessages: 2,
+        oldestMessageIndex: 3,
+        newestMessageIndex: 4,
+        hasEarlier: true,
+        hasLater: true,
+        nextBeforeMessageIndex: 3,
+        transcriptScope: "window",
+      },
+    });
+
+    const merged = mergeSessionDetailMessageWindow(current, earlierPage);
+
+    expect(merged.messages.map((message) => message.content)).toEqual([
+      "message 3",
+      "message 4",
+      "message 5",
+      "message 6",
+      "message 7",
+      "message 8",
+    ]);
+    expect(merged.messageWindow).toMatchObject({
+      totalMessages: 8,
+      returnedMessages: 6,
+      oldestMessageIndex: 3,
+      newestMessageIndex: 8,
+      hasEarlier: true,
+      hasLater: false,
+      nextBeforeMessageIndex: 3,
+    });
+  });
+
   it("derives a sidebar-safe summary from active session detail", () => {
     expect(sessionSummaryFromDetail(makeDetail())).toEqual({
       id: "session-live",

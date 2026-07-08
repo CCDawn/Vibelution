@@ -165,6 +165,8 @@ _SESSION_STREAM_QUEUE_SIZE = 8
 _SESSION_STREAM_COALESCED_EVENT_TYPES = {"session_detail"}
 _SESSION_STREAM_BUSY_PHASES = {"queued", "running", "stopping", "paused"}
 _SESSION_STREAM_MIN_BUSY_SNAPSHOT_INTERVAL_SECONDS = 0.75
+_SESSION_STREAM_DETAIL_MESSAGE_LIMIT = 40
+_SESSION_STREAM_DETAIL_TRANSCRIPT_SCOPE = "window"
 _SESSION_STREAM_LAST_SNAPSHOT_LOCK = threading.Lock()
 _SESSION_STREAM_LAST_SNAPSHOT_AT: dict[str, float] = {}
 _SESSION_STREAM_THROTTLED_COUNTS: dict[str, int] = {}
@@ -189,6 +191,7 @@ _SESSION_LIST_CACHE: dict[str, Any] = {}
 _SESSION_CONVERSATION_EVENTS_CACHE_LOCK = threading.Lock()
 _SESSION_CONVERSATION_EVENTS_CACHE_MAX_ENTRIES = 64
 _SESSION_CONVERSATION_EVENTS_CACHE: dict[str, dict[str, Any]] = {}
+_SESSION_DETAIL_MESSAGE_WINDOW_MAX_LIMIT = 200
 _AGENT_DIRECTORY_STUB_HIDDEN_TEAM_SOURCES = {
     "ai_search",
     "research_organization",
@@ -3366,6 +3369,37 @@ def _coerce_session_query_limit(value: Any) -> int:
     return min(limit, _SESSION_QUERY_MAX_LIMIT)
 
 
+def _coerce_session_detail_message_limit(value: Any) -> int | None:
+    if value is None or str(value).strip() == "":
+        return None
+    limit = _coerce_nonnegative_int(value)
+    if limit <= 0:
+        return None
+    return min(limit, _SESSION_DETAIL_MESSAGE_WINDOW_MAX_LIMIT)
+
+
+def _coerce_session_detail_before_index(value: Any) -> int:
+    return max(0, _coerce_nonnegative_int(value))
+
+
+def _normalize_session_detail_transcript_scope(value: Any) -> str:
+    normalized = str(value or "all").strip().lower()
+    return normalized if normalized in {"all", "window", "none"} else "all"
+
+
+def _session_detail_window_requested(
+    *,
+    message_limit: Any = None,
+    before_message_index: Any = None,
+    transcript_scope: Any = "all",
+) -> bool:
+    return (
+        _coerce_session_detail_message_limit(message_limit) is not None
+        or _coerce_session_detail_before_index(before_message_index) > 0
+        or _normalize_session_detail_transcript_scope(transcript_scope) != "all"
+    )
+
+
 def _normalize_session_query_sort(value: str) -> str:
     normalized = str(value or "").strip()
     return normalized if normalized in {"updatedAt_desc", "updatedAt_asc", "title_asc", "title_desc"} else "updatedAt_desc"
@@ -3418,12 +3452,23 @@ def _session_query_matches(
     return query in haystack
 
 
-def get_session_detail(session_id: str) -> dict | None:
+def get_session_detail(
+    session_id: str,
+    *,
+    message_limit: Any = None,
+    before_message_index: Any = None,
+    transcript_scope: Any = "all",
+) -> dict | None:
     """Return a session detail payload by persisted conversation id."""
 
     normalized_session_id = str(session_id or "").strip()
     if not normalized_session_id:
         return None
+    window_requested = _session_detail_window_requested(
+        message_limit=message_limit,
+        before_message_index=before_message_index,
+        transcript_scope=transcript_scope,
+    )
 
     with _RUNNING_SESSIONS_LOCK:
         active_turn_id = str(_SESSION_ACTIVE_TURN_IDS.get(normalized_session_id) or "").strip()
@@ -3441,12 +3486,23 @@ def get_session_detail(session_id: str) -> dict | None:
         payload=payload,
         repair=True,
         agent_by_id=agent_by_id,
+        lightweight=window_requested,
     )
     if target is not None:
-        return _build_session_detail(target)
+        return _build_session_detail(
+            target,
+            message_limit=message_limit,
+            before_message_index=before_message_index,
+            transcript_scope=transcript_scope,
+        )
     fallback = _agent_directory_session_stub_for_id(normalized_session_id, agent_by_id=agent_by_id)
     if fallback is not None:
-        return _build_session_detail(fallback)
+        return _build_session_detail(
+            fallback,
+            message_limit=message_limit,
+            before_message_index=before_message_index,
+            transcript_scope=transcript_scope,
+        )
     return None
 
 
@@ -7863,12 +7919,25 @@ def _public_agent_prompt_snapshot(snapshot: Any) -> dict[str, Any]:
     return result
 
 
-def _normalize_messages(conversation_id: str, items: Any) -> list[dict[str, Any]]:
+def _normalize_messages(
+    conversation_id: str,
+    items: Any,
+    *,
+    source_start_index: int = 1,
+    transcript_scope: Any = "all",
+    include_timeline: bool = True,
+) -> list[dict[str, Any]]:
     ledger_events_by_turn: dict[str, list[dict[str, Any]]] | None = None
     raw_items = list(items or [])
-    timeline_target_indices = _assistant_timeline_target_indices(raw_items)
+    normalized_start_index = max(1, int(source_start_index or 1))
+    normalized_transcript_scope = _normalize_session_detail_transcript_scope(transcript_scope)
+    timeline_target_indices = (
+        _assistant_timeline_target_indices(raw_items, source_start_index=normalized_start_index)
+        if include_timeline
+        else {}
+    )
     messages: list[dict[str, Any]] = []
-    for index, raw in enumerate(raw_items, start=1):
+    for index, raw in enumerate(raw_items, start=normalized_start_index):
         if not isinstance(raw, dict):
             continue
         role = str(raw.get("role") or "").strip().lower()
@@ -7907,7 +7976,7 @@ def _normalize_messages(conversation_id: str, items: Any) -> list[dict[str, Any]
         turn_id = _message_turn_id(raw)
         timeline_feedback_events = feedback_events
         include_assistant_text = True
-        if role == "assistant" and turn_id:
+        if include_timeline and role == "assistant" and turn_id:
             if ledger_events_by_turn is None:
                 ledger_events_by_turn = _assistant_timeline_events_by_turn(conversation_id)
             ordered_timeline_events = ledger_events_by_turn.get(turn_id) or []
@@ -7917,25 +7986,27 @@ def _normalize_messages(conversation_id: str, items: Any) -> list[dict[str, Any]
             elif ordered_timeline_events:
                 timeline_feedback_events = []
                 include_assistant_text = False
-        timeline_items = _build_message_timeline_items(
-            message_id=entry["id"],
-            content=content,
-            feedback_events=timeline_feedback_events,
-            streaming=bool(raw.get("streaming")),
-            include_assistant_text=include_assistant_text,
-        )
-        if timeline_items:
-            entry["timelineItems"] = timeline_items
-        codex_transcript = _build_codex_transcript_projection(
-            message_id=entry["id"],
-            role=role,
-            content=content,
-            feedback_events=timeline_feedback_events,
-            tool_calls=tool_calls,
-            streaming=bool(raw.get("streaming")),
-        )
-        if codex_transcript:
-            entry["codexTranscript"] = codex_transcript
+        if include_timeline:
+            timeline_items = _build_message_timeline_items(
+                message_id=entry["id"],
+                content=content,
+                feedback_events=timeline_feedback_events,
+                streaming=bool(raw.get("streaming")),
+                include_assistant_text=include_assistant_text,
+            )
+            if timeline_items:
+                entry["timelineItems"] = timeline_items
+        if normalized_transcript_scope != "none":
+            codex_transcript = _build_codex_transcript_projection(
+                message_id=entry["id"],
+                role=role,
+                content=content,
+                feedback_events=timeline_feedback_events,
+                tool_calls=tool_calls,
+                streaming=bool(raw.get("streaming")),
+            )
+            if codex_transcript:
+                entry["codexTranscript"] = codex_transcript
         if attachments:
             entry["attachments"] = attachments
         if references:
@@ -7969,10 +8040,10 @@ def _dedupe_turn_error_messages(messages: list[dict[str, Any]]) -> list[dict[str
     return deduped
 
 
-def _assistant_timeline_target_indices(items: list[Any]) -> dict[str, int]:
+def _assistant_timeline_target_indices(items: list[Any], *, source_start_index: int = 1) -> dict[str, int]:
     targets: dict[str, int] = {}
     first_assistant_by_turn: dict[str, int] = {}
-    for index, raw in enumerate(list(items or []), start=1):
+    for index, raw in enumerate(list(items or []), start=max(1, int(source_start_index or 1))):
         if not isinstance(raw, dict):
             continue
         if str(raw.get("role") or "").strip().lower() != "assistant":
@@ -8783,9 +8854,22 @@ def _build_session_summary(conversation: dict[str, Any], *, hydrate_agent: bool 
     }
 
 
-def _build_session_detail(conversation: dict[str, Any]) -> dict[str, Any]:
+def _build_session_detail(
+    conversation: dict[str, Any],
+    *,
+    message_limit: Any = None,
+    before_message_index: Any = None,
+    transcript_scope: Any = "all",
+) -> dict[str, Any]:
     summary = _build_session_summary(conversation)
-    return _build_session_detail_from_summary(conversation, summary, hydrate_agent=True)
+    return _build_session_detail_from_summary(
+        conversation,
+        summary,
+        hydrate_agent=True,
+        message_limit=message_limit,
+        before_message_index=before_message_index,
+        transcript_scope=transcript_scope,
+    )
 
 
 def _build_lightweight_session_detail(conversation: dict[str, Any]) -> dict[str, Any]:
@@ -8866,6 +8950,9 @@ def _build_session_detail_from_summary(
     summary: dict[str, Any],
     *,
     hydrate_agent: bool,
+    message_limit: Any = None,
+    before_message_index: Any = None,
+    transcript_scope: Any = "all",
 ) -> dict[str, Any]:
     turn_control = _get_session_turn_control(conversation["id"])
     turn_snapshot = turn_control.snapshot() if turn_control is not None else {
@@ -8887,11 +8974,27 @@ def _build_session_detail_from_summary(
     active_preview_path = (
         str(active_task.get("active_preview_path") or "").strip() if active_task else ""
     ) or "agent"
-    detail_messages = _messages_with_live_output(conversation["id"])
+    message_window: dict[str, Any] | None = None
+    stat_messages: list[dict[str, Any]] | None = None
+    if _session_detail_window_requested(
+        message_limit=message_limit,
+        before_message_index=before_message_index,
+        transcript_scope=transcript_scope,
+    ):
+        detail_messages, message_window, stat_messages = _session_detail_messages_with_window(
+            conversation["id"],
+            message_limit=message_limit,
+            before_message_index=before_message_index,
+            transcript_scope=transcript_scope,
+            fallback_items=conversation.get("messages") or [],
+        )
+    else:
+        detail_messages = _messages_with_live_output(conversation["id"])
     if not detail_messages:
         detail_messages = _normalize_messages(conversation["id"], conversation.get("messages") or [])
-    context_usage = _build_session_context_usage(conversation, detail_messages)
-    llm_usage = _session_last_llm_usage(detail_messages)
+    usage_messages = stat_messages or detail_messages
+    context_usage = _build_session_context_usage(conversation, usage_messages)
+    llm_usage = _session_last_llm_usage(usage_messages)
     stored_last_cache_composition = _normalize_session_cache_composition(
         conversation.get("lastCacheComposition") or conversation.get("last_cache_composition")
     )
@@ -8906,7 +9009,7 @@ def _build_session_detail_from_summary(
                 "recordedAt": str(stored_last_cache_composition.get("updatedAt") or "").strip(),
             }
         )
-    cache_usage = _build_session_cache_usage(llm_usage, detail_messages)
+    cache_usage = _build_session_cache_usage(llm_usage, usage_messages)
     live_context_composition = _current_session_live_context_composition(conversation["id"])
     last_context_composition = live_context_composition or _normalize_session_context_composition(
         conversation.get("lastContextComposition") or conversation.get("last_context_composition")
@@ -8977,6 +9080,8 @@ def _build_session_detail_from_summary(
         if bool(turn_snapshot.get("releasedToUser"))
         else str(turn_snapshot["stopReason"] or "").strip(),
     }
+    if message_window is not None:
+        detail["messageWindow"] = message_window
     return detail
 
 
@@ -18925,6 +19030,87 @@ def _session_ledger_visible_messages(session_id: str) -> list[dict[str, Any]]:
     return _normalize_messages(session_id, _ledger_visible_messages_for_session(session_id))
 
 
+def _session_detail_messages_with_window(
+    session_id: str,
+    *,
+    message_limit: Any = None,
+    before_message_index: Any = None,
+    transcript_scope: Any = "all",
+    fallback_items: Any = None,
+) -> tuple[list[dict[str, Any]], dict[str, Any], list[dict[str, Any]]]:
+    raw_messages = _ledger_visible_messages_for_session(session_id)
+    if not raw_messages:
+        raw_messages = list(fallback_items or [])
+    raw_message_count = len(raw_messages)
+    normalized_limit = _coerce_session_detail_message_limit(message_limit)
+    normalized_before_index = _coerce_session_detail_before_index(before_message_index)
+    normalized_transcript_scope = _normalize_session_detail_transcript_scope(transcript_scope)
+    include_live_message = normalized_before_index <= 0 or normalized_before_index > raw_message_count + 1
+    live_message = _build_live_output_message(session_id) if include_live_message else None
+    if live_message is not None and normalized_transcript_scope == "none":
+        live_message = dict(live_message)
+        live_message.pop("codexTranscript", None)
+        live_message.pop("timelineItems", None)
+
+    total_messages = raw_message_count + (1 if live_message is not None else 0)
+    if total_messages <= 0:
+        message_window = {
+            "mode": "window",
+            "totalMessages": 0,
+            "returnedMessages": 0,
+            "oldestMessageIndex": 0,
+            "newestMessageIndex": 0,
+            "hasEarlier": False,
+            "hasLater": False,
+            "nextBeforeMessageIndex": None,
+            "transcriptScope": normalized_transcript_scope,
+        }
+        return [], message_window, []
+
+    end_index = total_messages
+    if 0 < normalized_before_index <= total_messages:
+        end_index = max(0, normalized_before_index - 1)
+    if normalized_limit is None:
+        start_index = 1 if end_index > 0 else 0
+    else:
+        start_index = max(1, end_index - normalized_limit + 1) if end_index > 0 else 0
+
+    raw_start = max(0, start_index - 1)
+    raw_end = min(raw_message_count, end_index)
+    raw_window = raw_messages[raw_start:raw_end]
+    detail_messages = _normalize_messages(
+        session_id,
+        raw_window,
+        source_start_index=raw_start + 1,
+        transcript_scope=normalized_transcript_scope,
+    )
+    if live_message is not None and start_index <= total_messages <= end_index:
+        detail_messages = _without_live_turn_ledger_partials(detail_messages, live_message) + [live_message]
+
+    stat_messages = _normalize_messages(
+        session_id,
+        raw_messages,
+        transcript_scope="none",
+        include_timeline=False,
+    )
+    if live_message is not None:
+        stat_messages = _without_live_turn_ledger_partials(stat_messages, live_message) + [live_message]
+
+    returned_messages = len(detail_messages)
+    message_window = {
+        "mode": "window",
+        "totalMessages": total_messages,
+        "returnedMessages": returned_messages,
+        "oldestMessageIndex": start_index if returned_messages else 0,
+        "newestMessageIndex": end_index if returned_messages else 0,
+        "hasEarlier": start_index > 1,
+        "hasLater": end_index < total_messages,
+        "nextBeforeMessageIndex": start_index if start_index > 1 else None,
+        "transcriptScope": normalized_transcript_scope,
+    }
+    return detail_messages, message_window, stat_messages
+
+
 def _truncate_session_ledger_before_message(session_id: str, message: dict[str, Any]) -> None:
     metadata = message.get("metadata") if isinstance(message.get("metadata"), dict) else {}
     event_id = str(metadata.get("eventId") or "").strip()
@@ -21202,7 +21388,11 @@ def _publish_session_detail_snapshot(session_id: str, *, detail: dict[str, Any] 
         subscribers = list(_SESSION_STREAM_SUBSCRIBERS.get(session_id) or [])
     if not subscribers:
         return
-    detail = detail if detail is not None else get_session_detail(session_id)
+    detail = detail if detail is not None else get_session_detail(
+        session_id,
+        message_limit=_SESSION_STREAM_DETAIL_MESSAGE_LIMIT,
+        transcript_scope=_SESSION_STREAM_DETAIL_TRANSCRIPT_SCOPE,
+    )
     if detail is None:
         return
     current_phase = str(detail.get("currentPhase") or detail.get("status") or "") if isinstance(detail, dict) else ""
