@@ -538,7 +538,7 @@ describe("ConversationView edit resend affordance", () => {
       expect(skeletonClass).not.toMatch(/(?:^|\s)p-2(?:\s|$)/);
     }
 
-    expect(styles.timeline).toContain("px-[clamp(1.25rem,6vw,5.5rem)]");
+    expect(styles.timeline).toContain("px-[clamp(1rem,3vw,3rem)]");
     expect(styles.timeline).not.toContain("px-3");
     expect(styles.surfaceCompact).not.toContain("[&_.timeline]:px-3");
     expect(styles.assistantTurn).toContain("w-[min(100%,1480px)]");
