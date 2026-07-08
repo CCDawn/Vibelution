@@ -3,6 +3,10 @@ import type {
   MentalStateSnapshot,
   ToolCall,
 } from "../api/types";
+import {
+  isInternalStreamingStatusContent,
+  isInternalStreamingStatusStage,
+} from "../components/conversation/conversationInternalStatus";
 import { mergeAgentFeedbackEvents, type AgentFeedbackEvent } from "./agentFeedbackEvents";
 import type {
   AgentMentalPart,
@@ -116,7 +120,10 @@ function feedbackEventToAgentPart(
   return runtimeEventToAgentPart(id, event);
 }
 
-function runtimeEventToAgentPart(id: string, event: AgentFeedbackEvent): AgentRuntimeEventPart {
+function runtimeEventToAgentPart(id: string, event: AgentFeedbackEvent): AgentRuntimeEventPart | null {
+  if (isInternalRuntimePipelineEvent(event) && !eventHasTemporaryErrorInfo(event)) {
+    return null;
+  }
   return {
     id,
     type: "runtime-event",
@@ -130,6 +137,34 @@ function runtimeEventToAgentPart(id: string, event: AgentFeedbackEvent): AgentRu
     timestamp: event.timestamp,
     tracePath: event.tracePath,
   };
+}
+
+const INTERNAL_RUNTIME_EVENT_NAME_ALIASES = new Set([
+  "retrying",
+]);
+
+function isInternalRuntimePipelineEvent(event: AgentFeedbackEvent) {
+  if (event.kind !== "status") {
+    return false;
+  }
+  const name = compactText(event.name).toLowerCase();
+  if (isInternalStreamingStatusStage(name) || INTERNAL_RUNTIME_EVENT_NAME_ALIASES.has(name)) {
+    return true;
+  }
+  return isInternalStreamingStatusContent([
+    event.summary,
+    event.resultPreview,
+  ].map(compactText).filter(Boolean).join(" "));
+}
+
+function eventHasTemporaryErrorInfo(event: AgentFeedbackEvent) {
+  const status = compactText(event.status).toLowerCase();
+  return Boolean(
+    compactText(event.error)
+    || compactText(event.failureClass)
+    || event.timedOut
+    || ["error", "errored", "failed", "failure", "timeout", "timed_out"].includes(status),
+  );
 }
 
 function toolEventToAgentPart(id: string, event: AgentFeedbackEvent): AgentToolCallPart {

@@ -4,7 +4,8 @@ import { resolve } from "node:path";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
-import type { AgentThread } from ".";
+import type { ConversationMessage } from "../api/types";
+import { conversationMessageToAgentMessage, type AgentThread } from ".";
 import { AgentThreadView } from "./AgentThreadView";
 
 function renderThread(thread: AgentThread) {
@@ -51,14 +52,6 @@ describe("AgentThreadView", () => {
           source: { kind: "conversation-message", id: "assistant-1" },
           parts: [
             {
-              id: "assistant-1-status",
-              type: "runtime-event",
-              kind: "status",
-              name: "model_request",
-              status: "running",
-              summary: "正在请求模型",
-            },
-            {
               id: "assistant-1-tool",
               type: "tool-call",
               name: "read_file_tool",
@@ -81,8 +74,8 @@ describe("AgentThreadView", () => {
     expect(html).toContain('data-agent-thread-status="streaming"');
     expect(html).toContain('data-agent-message-role="user"');
     expect(html).toContain('data-agent-message-role="assistant"');
-    expect(html.indexOf("正在请求模型")).toBeLessThan(html.indexOf("read_file_tool"));
     expect(html.indexOf("read_file_tool")).toBeLessThan(html.indexOf("已经完成第一层 adapter"));
+    expect(html).not.toContain("正在请求模型");
     expect(html).toContain('data-agent-part-type="tool-call"');
     expect(html).toContain("export function ConversationView");
   });
@@ -137,6 +130,61 @@ describe("AgentThreadView", () => {
     expect(html).toContain("分析 Agent");
   });
 
+  it("does not render internal runtime pipeline statuses from conversation feedback", () => {
+    const assistantMessage: ConversationMessage = {
+      id: "assistant-pipeline-status",
+      role: "assistant",
+      content: "最终回答",
+      timestamp: "2026-07-08T09:10:00Z",
+      feedbackEvents: [
+        {
+          sequence: 1,
+          kind: "status",
+          status: "running",
+          name: "context_prepare",
+          summary: "正在准备对话上下文...",
+        },
+        {
+          sequence: 2,
+          kind: "status",
+          status: "running",
+          name: "model_request",
+          summary: "正在请求模型，等待首个响应片段...",
+        },
+        {
+          sequence: 3,
+          kind: "status",
+          status: "running",
+          name: "retrying",
+          summary: "模型连接正在重试...",
+          resultPreview: "第 2/5 次；原因：server_error。本轮仍在继续，请不要重复提交。",
+        },
+        {
+          sequence: 4,
+          kind: "tool",
+          status: "done",
+          name: "read_file_tool",
+          summary: "读取 AgentThreadView",
+        },
+      ],
+    };
+    const html = renderThread({
+      id: "thread-pipeline-status",
+      source: { kind: "session", id: "session-pipeline-status" },
+      status: "streaming",
+      messages: [conversationMessageToAgentMessage(assistantMessage)],
+    });
+
+    expect(html).toContain("read_file_tool");
+    expect(html).toContain("最终回答");
+    expect(html).not.toContain("context_prepare");
+    expect(html).not.toContain("model_request");
+    expect(html).not.toContain("retrying");
+    expect(html).not.toContain("正在准备对话上下文");
+    expect(html).not.toContain("正在请求模型");
+    expect(html).not.toContain("模型连接正在重试");
+  });
+
   it("renders message parts through stable process, content, and context sections", () => {
     const html = renderThread({
       id: "thread-sections",
@@ -150,14 +198,6 @@ describe("AgentThreadView", () => {
           streaming: true,
           source: { kind: "conversation-message", id: "assistant-sections" },
           parts: [
-            {
-              id: "assistant-sections-status",
-              type: "runtime-event",
-              kind: "status",
-              name: "model_request",
-              status: "running",
-              summary: "正在请求模型",
-            },
             {
               id: "assistant-sections-tool",
               type: "tool-call",

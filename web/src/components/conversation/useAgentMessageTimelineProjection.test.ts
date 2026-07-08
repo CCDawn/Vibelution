@@ -73,7 +73,7 @@ describe("projectAgentMessageTimelineMessages", () => {
     expect(projection.messages[0].content).not.toContain("正在唤起对话 agent");
     expect(projection.messages[0].feedbackEvents?.map((event) => event.summary)).toEqual(["正在绑定 Agent"]);
     expect(projection.agentMessages.map((message) => message.id)).toEqual(["active-turn"]);
-    expect(projection.agentMessages[0].parts.map((part) => part.type)).toEqual(["runtime-event", "text"]);
+    expect(projection.agentMessages[0].parts.map((part) => part.type)).toEqual(["text"]);
     expect(projection.rowIdentities[0].rowKey).toBe("assistant-turn:turn-1");
     expect(projection.streamingMessages.map((message) => message.id)).toEqual(["active-turn"]);
   });
