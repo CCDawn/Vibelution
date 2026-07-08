@@ -77,7 +77,7 @@ describe("agent thread adapters", () => {
     });
   });
 
-  it("prefers ordered feedback event parts before assistant answer text", () => {
+  it("keeps ordered visible feedback event parts before assistant answer text", () => {
     const message: ConversationMessage = {
       id: "assistant-1",
       role: "assistant",
@@ -124,12 +124,8 @@ describe("agent thread adapters", () => {
     const agentMessage = conversationMessageToAgentMessage(message);
 
     expect(agentMessage.turnId).toBe("turn-1");
-    expect(agentMessage.parts.map((part) => part.type)).toEqual([
-      "thought",
-      "runtime-event",
-      "tool-call",
-      "text",
-    ]);
+    expect(agentMessage.parts.map((part) => part.type)).toEqual(["thought", "tool-call", "text"]);
+    expect(agentMessage.parts.some((part) => part.type === "runtime-event")).toBe(false);
     expect(agentMessage.parts[0]).toMatchObject({
       id: "assistant-1-feedback-1",
       type: "thought",
@@ -137,7 +133,7 @@ describe("agent thread adapters", () => {
       text: "先检查上下文",
       sequence: 1,
     });
-    expect(agentMessage.parts[2]).toMatchObject({
+    expect(agentMessage.parts[1]).toMatchObject({
       id: "assistant-1-feedback-3",
       type: "tool-call",
       name: "read_file_tool",
@@ -146,11 +142,102 @@ describe("agent thread adapters", () => {
       resultPreview: "export function ConversationView",
       relatedThoughtSequence: 1,
     });
-    expect(agentMessage.parts[3]).toMatchObject({
+    expect(agentMessage.parts[2]).toMatchObject({
       id: "assistant-1-text",
       type: "text",
       channel: "answer",
       text: "最终回答",
+    });
+  });
+
+  it("drops internal runtime pipeline status events from assistant visible parts", () => {
+    const message: ConversationMessage = {
+      id: "assistant-pipeline-status",
+      role: "assistant",
+      content: "最终回答",
+      timestamp: "2026-07-08T09:00:00Z",
+      feedbackEvents: [
+        {
+          sequence: 1,
+          kind: "status",
+          status: "running",
+          name: "context_prepare",
+          summary: "正在准备对话上下文...",
+          resultPreview: "正在读取当前会话、绑定 Agent、工具权限和可恢复的上轮现场。",
+        },
+        {
+          sequence: 2,
+          kind: "status",
+          status: "running",
+          name: "agent_prepare",
+          summary: "正在唤起对话 agent...",
+        },
+        {
+          sequence: 3,
+          kind: "status",
+          status: "running",
+          name: "model_request",
+          summary: "正在请求模型，等待首个响应片段...",
+        },
+        {
+          sequence: 4,
+          kind: "status",
+          status: "running",
+          name: "model_thinking",
+          summary: "正在思考中，等待模型输出...",
+        },
+        {
+          sequence: 5,
+          kind: "status",
+          status: "running",
+          name: "retrying",
+          summary: "模型连接正在重试...",
+          resultPreview: "第 2/5 次；原因：server_error。本轮仍在继续，请不要重复提交。",
+        },
+      ],
+    };
+
+    const agentMessage = conversationMessageToAgentMessage(message);
+    const serializedParts = JSON.stringify(agentMessage.parts);
+
+    expect(agentMessage.parts.map((part) => part.type)).toEqual(["text"]);
+    expect(serializedParts).not.toContain("context_prepare");
+    expect(serializedParts).not.toContain("agent_prepare");
+    expect(serializedParts).not.toContain("model_request");
+    expect(serializedParts).not.toContain("model_thinking");
+    expect(serializedParts).not.toContain("retrying");
+    expect(serializedParts).not.toContain("正在准备对话上下文");
+  });
+
+  it("keeps failed internal runtime status events as temporary error info", () => {
+    const message: ConversationMessage = {
+      id: "assistant-pipeline-error",
+      role: "assistant",
+      content: "稍后重试",
+      timestamp: "2026-07-08T09:01:00Z",
+      feedbackEvents: [
+        {
+          sequence: 1,
+          kind: "status",
+          status: "failed",
+          name: "model_request",
+          summary: "模型请求失败",
+          error: "server_error",
+        },
+      ],
+    };
+
+    const agentMessage = conversationMessageToAgentMessage(message);
+
+    expect(agentMessage.parts.map((part) => part.type)).toEqual(["runtime-event", "text"]);
+    expect(agentMessage.parts[0]).toMatchObject({
+      id: "assistant-pipeline-error-feedback-1",
+      type: "runtime-event",
+      kind: "status",
+      name: "model_request",
+      status: "failed",
+      summary: "模型请求失败",
+      error: "server_error",
     });
   });
 
@@ -318,11 +405,7 @@ describe("agent thread adapters", () => {
     expect(agentMessage?.id).toBe("session-1-message-active-turn-1");
     expect(agentMessage?.source.kind).toBe("conversation-message");
     expect(agentMessage?.turnId).toBe("turn-1");
-    expect(agentMessage?.parts.map((part) => part.type)).toEqual(["runtime-event", "thought", "text"]);
-    expect(agentMessage?.parts[0]).toMatchObject({
-      type: "runtime-event",
-      name: "model_request",
-      status: "running",
-    });
+    expect(agentMessage?.parts.map((part) => part.type)).toEqual(["thought", "text"]);
+    expect(agentMessage?.parts.some((part) => part.type === "runtime-event")).toBe(false);
   });
 });

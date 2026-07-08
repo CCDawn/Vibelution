@@ -223,7 +223,7 @@ describe("agentMessageSections", () => {
 
     expect(state).toMatchObject({
       hasResponseBlock: false,
-      hasFeedbackTimeline: true,
+      hasFeedbackTimeline: false,
       hasThoughtBlock: false,
       hasToolBlock: false,
     });
