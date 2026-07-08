@@ -11,6 +11,7 @@ import {
   Link2,
   LoaderCircle,
   Pencil,
+  RefreshCw,
   Square,
   X,
   Search,
@@ -344,6 +345,7 @@ export function ConversationView({
   editUserMessageLabel,
   editUserMessageDisabled,
   composerModeNotice,
+  composerModeTargetPreview,
   cancelComposerModeLabel,
   onComposerChange,
   onAddComposerAttachments,
@@ -398,6 +400,17 @@ export function ConversationView({
   const assistantLabel = assistantDisplayName?.trim() || t("agent");
   const userLabel = userDisplayName?.trim() || t("operator");
   const userAvatarLabel = userAvatarSymbol(userAvatarPreset, userLabel);
+  const composerEditModeActive = Boolean(composerModeNotice);
+  const composerEditTargetPreview = composerEditModeActive
+    ? compactPreview(composerModeTargetPreview ?? "", 96)
+    : "";
+  const composerEditFailureNote = composerEditModeActive && turnError?.message
+    ? t("editMessageFailureRerunNotice")
+    : "";
+  const primaryActionIsEditSubmit = resolvedActionMode === "send" && composerEditModeActive;
+  const primaryActionClassName = primaryActionIsEditSubmit
+    ? `${styles.composerEditSubmitButton} ${styles.composerRoundButtonPrimary}`
+    : `${styles.sendButton} ${styles.composerRoundButton} ${styles.composerRoundButtonPrimary}`;
   const handlePrimaryAction = resolvedActionMode === "stop" ? onStop ?? onSubmit : onSubmit;
   const runningGuidanceActionsEnabled = resolvedActionMode === "stop";
   const guidanceActionDisabled =
@@ -3278,7 +3291,18 @@ export function ConversationView({
               <span className={styles.composerEditModeIcon} aria-hidden="true">
                 <Pencil size={14} />
               </span>
-              <span className={styles.composerEditModeLabel}>{t("editMessage")}</span>
+              <span className={styles.composerEditModeCopy}>
+                <span className={styles.composerEditModeLabel}>{t("editMessage")}</span>
+                <span className={styles.composerEditModeDescription}>{composerModeNotice}</span>
+                {composerEditTargetPreview ? (
+                  <span className={styles.composerEditModePreview} title={composerModeTargetPreview}>
+                    {`${t("editMessageCurrentContentPrefix")}：${composerEditTargetPreview}`}
+                  </span>
+                ) : null}
+                {composerEditFailureNote ? (
+                  <span className={styles.composerEditModeWarning}>{composerEditFailureNote}</span>
+                ) : null}
+              </span>
               {onCancelComposerMode ? (
                 <VButton
                   type="button"
@@ -3454,7 +3478,7 @@ export function ConversationView({
           </VButton>
           {!runningGuidanceActionsEnabled || showSafeGuidanceAction ? (
             <VButton
-              className={`${styles.sendButton} ${styles.composerRoundButton} ${styles.composerRoundButtonPrimary}`}
+              className={primaryActionClassName}
               isDisabled={runningGuidanceActionsEnabled ? guidanceActionDisabled || !onSafeGuidance : resolvedActionDisabled}
               type="button"
               onClick={runningGuidanceActionsEnabled ? onSafeGuidance : handlePrimaryAction}
@@ -3479,6 +3503,11 @@ export function ConversationView({
             >
               {composerPending || composerSafeGuidancePending ? (
                 <LoaderCircle className={styles.statusSpinner} size={17} aria-hidden="true" />
+              ) : primaryActionIsEditSubmit ? (
+                <>
+                  <RefreshCw size={15} aria-hidden="true" />
+                  <span>{resolvedActionLabel}</span>
+                </>
               ) : (
                 <ArrowUp size={18} aria-hidden="true" />
               )}

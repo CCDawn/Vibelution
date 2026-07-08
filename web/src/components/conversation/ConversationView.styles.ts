@@ -34,7 +34,7 @@ const userMessageBubble = cv(
 );
 const conversationComposerShell = cv(
   "composer",
-  "grid flex-none grid-cols-[minmax(0,1fr)_var(--vui-control-height-sm)] items-center gap-2 border-t border-[color-mix(in_srgb,var(--border-soft)_82%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-panel)_74%,transparent)] px-[11px] py-[7px] pb-[9px] backdrop-blur-[6px] shadow-none",
+  "grid flex-none grid-cols-[minmax(0,1fr)_auto] items-center gap-2 border-t border-[color-mix(in_srgb,var(--border-soft)_82%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-panel)_74%,transparent)] px-[11px] py-[7px] pb-[9px] backdrop-blur-[6px] shadow-none",
 );
 const composerNativeFieldTargets =
   "[&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-[48px] [&_textarea]:max-h-[112px] [&_textarea]:resize-none [&_input]:w-full [&_select]:w-full [&_textarea]:w-full";
@@ -260,17 +260,27 @@ const styles: Record<string, string> = {
   composerAttachmentTray:
     "vui-components-conversationview composerAttachmentTray min-w-0 max-w-full overflow-hidden flex flex-wrap items-center gap-1.5",
   composerActionStack:
-    "vui-components-conversationview composerActionStack grid min-w-0 w-[var(--vui-control-height-sm)] grid-cols-1 content-end items-end gap-1 self-end",
+    "vui-components-conversationview composerActionStack grid min-w-0 w-fit grid-cols-1 content-end items-end gap-1 self-end justify-self-end",
   composerError:
     "vui-components-conversationview composerError min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
+  composerEditModeDescription:
+    "vui-components-conversationview composerEditModeDescription min-w-0 whitespace-normal break-words text-[var(--vui-font-xs)] font-medium leading-[1.45] text-[var(--fg-secondary)] [overflow-wrap:anywhere]",
   composerEditModeBar:
-    "vui-components-conversationview composerEditModeBar min-w-0 flex min-h-8 w-fit max-w-full items-center gap-1.5 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--accent-cool)_24%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] px-2 py-1 text-[var(--vui-font-xs)] leading-tight text-[var(--fg-secondary)]",
+    "vui-components-conversationview composerEditModeBar grid min-w-0 min-h-8 w-full max-w-full grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-x-2 gap-y-1 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--accent-cool)_24%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] px-2 py-1.5 text-[var(--vui-font-xs)] leading-tight text-[var(--fg-secondary)]",
   composerEditModeCancel:
     "vui-components-conversationview composerEditModeCancel !min-h-6 !w-fit !rounded-[var(--radius-control)] !px-1.5 !py-0 text-[var(--vui-font-xs)] font-semibold leading-none",
+  composerEditModeCopy:
+    "vui-components-conversationview composerEditModeCopy grid min-w-0 gap-0.5",
   composerEditModeIcon:
-    "vui-components-conversationview composerEditModeIcon min-w-0 shrink-0 text-[var(--accent-cool)]",
+    "vui-components-conversationview composerEditModeIcon min-w-0 shrink-0 pt-0.5 text-[var(--accent-cool)]",
   composerEditModeLabel:
     "vui-components-conversationview composerEditModeLabel min-w-0 truncate font-semibold text-[var(--fg-primary)]",
+  composerEditModePreview:
+    "vui-components-conversationview composerEditModePreview min-w-0 max-w-full truncate text-[var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
+  composerEditModeWarning:
+    "vui-components-conversationview composerEditModeWarning min-w-0 whitespace-normal break-words text-[var(--vui-font-xs)] font-semibold leading-[1.45] text-[var(--state-warning)] [overflow-wrap:anywhere]",
+  composerEditSubmitButton:
+    "vui-components-conversationview composerEditSubmitButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-[min(100%,11rem)] items-center justify-center gap-1.5 rounded-[var(--radius-control)] border px-2 py-1 text-[var(--vui-font-xs)] font-semibold leading-tight shadow-none",
   composerField: composerFieldShell,
   composerFieldDragActive: composerFieldDragActiveShell,
   composerGuidance:
@@ -1041,7 +1051,7 @@ const styles: Record<string, string> = {
   thoughtTextBlock:
     "vui-components-conversationview thoughtTextBlock min-w-0 text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
   timeline:
-    "vui-components-conversationview timeline grid min-h-0 min-w-0 flex-1 content-start gap-[10px] overflow-auto bg-[var(--vui-surface-chat)] px-[clamp(1.25rem,6vw,5.5rem)] py-4 [scrollbar-gutter:stable]",
+    "vui-components-conversationview timeline grid min-h-0 min-w-0 flex-1 content-start gap-[10px] overflow-y-auto overflow-x-hidden bg-[var(--vui-surface-chat)] px-[clamp(1.25rem,6vw,5.5rem)] py-4 [scrollbar-gutter:stable]",
   timelineAssistantTextCell:
     "vui-components-conversationview timelineAssistantTextCell min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] max-w-[min(100%,860px)]",
   timelineCellDetailButton:

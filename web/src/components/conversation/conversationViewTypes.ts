@@ -83,6 +83,7 @@ export type ConversationViewProps = {
   editUserMessageLabel?: string;
   editUserMessageDisabled?: boolean;
   composerModeNotice?: string;
+  composerModeTargetPreview?: string;
   cancelComposerModeLabel?: string;
   onComposerChange: (value: string) => void;
   onAddComposerAttachments?: (files: FileList | File[]) => void;

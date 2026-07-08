@@ -12,6 +12,7 @@ const labels: ChatConversationComposerBridgeLabels = {
   editMessagePlaceholder: "edit message",
   loadingSession: "loading",
   messageInputPlaceholder: "message",
+  saveAndRerunMessage: "save and rerun",
 };
 
 describe("ChatConversationComposerBridge", () => {
@@ -73,10 +74,13 @@ describe("ChatConversationComposerBridge", () => {
     const editingState = buildConversationComposerBridgeState({
       ...emptyStateInput(),
       editTargetMessageId: "message-1",
+      editTargetPreview: "Original prompt",
       value: "rewrite",
     });
     expect(editingState.attachmentInputDisabled).toBe(true);
     expect(editingState.modeNotice).toBe("editing");
+    expect(editingState.modeTargetPreview).toBe("Original prompt");
+    expect(editingState.submitLabel).toBe("save and rerun");
     expect(editingState.placeholder).toBe("edit message");
     expect(editingState.editingMessageId).toBe("message-1");
 
