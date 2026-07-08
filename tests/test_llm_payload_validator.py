@@ -24,6 +24,75 @@ def qwen_route():
     return resolve_model_protocol(profile, provider)
 
 
+def responses_route():
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "relay",
+            "llm.providers.default.api": "responses",
+            "llm.providers.default.api_key": "test-key",
+            "llm.providers.default.base_url": "https://pixel.try-chatapi.com/v1",
+            "llm.providers.default.compat_mode": "openai",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "gpt-5.5",
+            "llm.profiles.primary.transport": "responses",
+        }
+    )
+    profile = config.llm.get_profile("primary")
+    provider = config.llm.get_provider(profile.provider_id)
+    return resolve_model_protocol(profile, provider)
+
+
+def test_responses_transport_accepts_paired_function_items():
+    payload = {
+        "model": "openai/gpt-5.5",
+        "input": [
+            {"role": "user", "content": [{"type": "input_text", "text": "查资料"}]},
+            {"type": "function_call", "call_id": "call_search", "name": "web_search_tool", "arguments": "{}"},
+            {"type": "function_call_output", "call_id": "call_search", "output": "找到 1 条"},
+            {"role": "user", "content": [{"type": "input_text", "text": "继续"}]},
+        ],
+    }
+
+    result = validate_payload_against_protocol(payload, responses_route())
+
+    assert result.ok is True
+    assert result.details["payloadValidationResult"] == "passed"
+    assert result.details["responsesItemTypeTail"] == ["user", "function_call", "function_call_output", "user"]
+
+
+def test_responses_transport_rejects_missing_function_output():
+    payload = {
+        "model": "openai/gpt-5.5",
+        "input": [
+            {"role": "user", "content": [{"type": "input_text", "text": "查资料"}]},
+            {"type": "function_call", "call_id": "call_search", "name": "web_search_tool", "arguments": "{}"},
+            {"role": "user", "content": [{"type": "input_text", "text": "继续"}]},
+        ],
+    }
+
+    result = validate_payload_against_protocol(payload, responses_route())
+
+    assert result.ok is False
+    assert result.error_type == "missing_function_call_output"
+    assert result.details["pendingCallIds"] == ["call_search"]
+
+
+def test_responses_transport_rejects_orphan_function_output():
+    payload = {
+        "model": "openai/gpt-5.5",
+        "input": [
+            {"role": "user", "content": [{"type": "input_text", "text": "查资料"}]},
+            {"type": "function_call_output", "call_id": "call_search", "output": "找到 1 条"},
+        ],
+    }
+
+    result = validate_payload_against_protocol(payload, responses_route())
+
+    assert result.ok is False
+    assert result.error_type == "orphan_function_call_output"
+    assert result.details["callId"] == "call_search"
+
+
 def test_qwen_thinking_rejects_assistant_prefill():
     route = qwen_route()
     payload = {

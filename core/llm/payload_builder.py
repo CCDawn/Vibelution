@@ -273,12 +273,62 @@ def _tool_pairing_snapshot(messages: List[Dict[str, Any]]) -> Dict[str, int]:
     }
 
 
+def _responses_tool_pairing_snapshot(items: List[Dict[str, Any]]) -> Dict[str, int]:
+    pending: list[str] = []
+    paired = 0
+    orphan = 0
+    missing = 0
+    duplicate_calls = 0
+    function_calls = 0
+    function_outputs = 0
+    seen_calls: set[str] = set()
+    for item in list(items or []):
+        item_type = str(item.get("type") or "").strip().lower()
+        if item_type == "function_call":
+            call_id = str(item.get("call_id") or "").strip()
+            if call_id:
+                if call_id in seen_calls:
+                    duplicate_calls += 1
+                seen_calls.add(call_id)
+                pending.append(call_id)
+            function_calls += 1
+            continue
+        if item_type == "function_call_output":
+            function_outputs += 1
+            call_id = str(item.get("call_id") or "").strip()
+            if call_id and call_id in pending:
+                pending.remove(call_id)
+                paired += 1
+            else:
+                orphan += 1
+            continue
+        if pending:
+            missing += len(pending)
+            pending = []
+    if pending:
+        missing += len(pending)
+    return {
+        "payloadResponsesFunctionCallCount": function_calls,
+        "payloadResponsesFunctionCallOutputCount": function_outputs,
+        "payloadResponsesPairedFunctionOutputCount": paired,
+        "payloadResponsesOrphanFunctionOutputCount": orphan,
+        "payloadResponsesMissingFunctionOutputCount": missing,
+        "payloadResponsesDuplicateFunctionCallCount": duplicate_calls,
+    }
+
+
 def _payload_message_snapshot(payload: Dict[str, Any]) -> Dict[str, Any]:
     messages = payload.get("messages")
     message_list = [item for item in messages if isinstance(item, dict)] if isinstance(messages, list) else []
+    input_items: list[dict[str, Any]] = []
     if not message_list and isinstance(payload.get("input"), list):
-        message_list = [item for item in payload.get("input", []) if isinstance(item, dict)]
+        input_items = [item for item in payload.get("input", []) if isinstance(item, dict)]
+        message_list = input_items
     roles = [str(item.get("role") or "").strip().lower() or "unknown" for item in message_list]
+    response_item_types = [
+        str(item.get("type") or item.get("role") or "unknown").strip().lower() or "unknown"
+        for item in input_items
+    ]
     shape_items: list[dict[str, Any]] = []
     has_image = False
     for index, message in enumerate(message_list):
@@ -302,17 +352,31 @@ def _payload_message_snapshot(payload: Dict[str, Any]) -> Dict[str, Any]:
         "payloadMessageRoleSequence": roles,
         "payloadMessageShapeTail": shape_items[-8:],
         "payloadMessageHasImage": has_image,
+        "payloadResponsesItemTypeSequence": response_item_types,
+        "payloadResponsesItemTypeTail": response_item_types[-8:],
         **_tool_pairing_snapshot(message_list),
+        **_responses_tool_pairing_snapshot(input_items),
     }
 
 
-def _responses_content_blocks(content: Any, convert_content_blocks_for_transport) -> list[dict[str, Any]]:
+def _responses_content_blocks(
+    content: Any,
+    convert_content_blocks_for_transport,
+    *,
+    role: str = "user",
+) -> list[dict[str, Any]]:
+    text_block_type = "output_text" if role == "assistant" else "input_text"
     if isinstance(content, list):
         converted = convert_content_blocks_for_transport(content, transport="responses")
-        return [dict(item) for item in converted if isinstance(item, dict)] if isinstance(converted, list) else []
+        blocks = [dict(item) for item in converted if isinstance(item, dict)] if isinstance(converted, list) else []
+        if role == "assistant":
+            for block in blocks:
+                if str(block.get("type") or "").strip().lower() == "input_text":
+                    block["type"] = "output_text"
+        return blocks
     text = str(content or "").strip()
     if text:
-        return [{"type": "input_text", "text": text}]
+        return [{"type": text_block_type, "text": text}]
     return []
 
 
@@ -325,14 +389,42 @@ def _responses_input_from_messages(
     for message in list(messages or []):
         if not isinstance(message, dict):
             continue
-        item: Dict[str, Any] = {
-            "role": str(message.get("role") or "user").strip().lower() or "user",
-            "content": _responses_content_blocks(
-                message.get("content"),
-                convert_content_blocks_for_transport,
-            ),
-        }
-        input_items.append(item)
+        role = str(message.get("role") or "user").strip().lower() or "user"
+        if role == "tool":
+            input_items.append(
+                {
+                    "type": "function_call_output",
+                    "call_id": str(message.get("tool_call_id") or "").strip(),
+                    "output": extract_text_content(message.get("content")),
+                }
+            )
+            continue
+        content = _responses_content_blocks(
+            message.get("content"),
+            convert_content_blocks_for_transport,
+            role=role,
+        )
+        if role == "assistant":
+            if content:
+                input_items.append({"role": role, "content": content})
+            for call in list(message.get("tool_calls") or []):
+                if not isinstance(call, dict):
+                    continue
+                function = call.get("function") if isinstance(call.get("function"), dict) else {}
+                input_items.append(
+                    {
+                        "type": "function_call",
+                        "call_id": str(call.get("id") or call.get("call_id") or "").strip(),
+                        "name": str(function.get("name") or call.get("name") or "").strip(),
+                        "arguments": (
+                            function.get("arguments")
+                            if isinstance(function.get("arguments"), str)
+                            else json.dumps(function.get("arguments") or {}, ensure_ascii=False)
+                        ),
+                    }
+                )
+            continue
+        input_items.append({"role": role, "content": content})
     return input_items
 
 
