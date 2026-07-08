@@ -116,7 +116,9 @@ describe("SelfEvolutionTrack static assets", () => {
   it("keeps self-evolution conversation context readable instead of falling back to workspace fragments", () => {
     expect(selfEvolutionSource).toContain("SELF_EVOLUTION_CONVERSATION_CONTEXT");
     expect(selfEvolutionSource).toContain("self-evolution");
-    expect(selfEvolutionSource).toContain("defaultFileContext={SELF_EVOLUTION_CONVERSATION_CONTEXT}");
+    expect(selfEvolutionSource).toContain("defaultFileContext={activeConversationSurface.defaultFileContext}");
+    expect(selfEvolutionSource).toContain("defaultFileContext: observationSessionDetail?.defaultFileContext || SELF_EVOLUTION_CONVERSATION_CONTEXT");
+    expect(selfEvolutionSource).toContain("defaultFileContext: SELF_EVOLUTION_CONVERSATION_CONTEXT");
     expect(selfEvolutionSource).not.toContain('|| "workspace"');
   });
 
@@ -148,7 +150,8 @@ describe("SelfEvolutionTrack static assets", () => {
     expect(selfEvolutionSource).toContain("styles.primaryAction");
     expect(selfEvolutionSource).toContain('onWorktreeAction(worktreeRun.runId, "terminate")');
     expect(selfEvolutionSource).toContain("onTerminateObservation(observationRun.runId)");
-    expect(selfEvolutionSource).toContain("showComposer={!runIsActive && !worktreeRunLocked && !runLocked}");
+    expect(selfEvolutionSource).toContain("showComposer: !runIsActive && !worktreeRunLocked && !runLocked");
+    expect(selfEvolutionSource).toContain("showComposer={activeConversationSurface.showComposer}");
   });
 
   it("loads the heavy conversation renderer through the shared lazy bridge", () => {
@@ -271,28 +274,43 @@ describe("SelfEvolutionTrack static assets", () => {
     expect(selfEvolutionSource).not.toContain("worktreeCreated");
   });
 
-  it("renders the pure observation session through the shared conversation view", () => {
-    expect(selfEvolutionSource).toContain("observationConversationSessionId");
-    expect(selfEvolutionSource).toContain("observationConversationReady");
-    expect(selfEvolutionSource).toContain("sessionId={observationConversationSessionId}");
-    expect(selfEvolutionSource).toContain("renderObservationPendingConversationShell()");
-    expect(selfEvolutionSource).not.toContain("{renderObservationPanel()}");
+  it("drives isolated development and observation through one center conversation surface", () => {
+    const centerStart = selfEvolutionSource.indexOf("<main className={styles.centerColumn}>");
+    const centerEnd = selfEvolutionSource.indexOf("</main>", centerStart);
+    const centerSurface = centerStart >= 0 && centerEnd > centerStart
+      ? selfEvolutionSource.slice(centerStart, centerEnd)
+      : "";
+    const centerConversationViewCount = (centerSurface.match(/<LazyConversationView/g) ?? []).length;
+
+    expect(selfEvolutionSource).toContain("const activeConversationSurface: SelfEvolutionConversationSurface =");
+    expect(selfEvolutionSource).toContain("activeConversationSurface.sessionId");
+    expect(selfEvolutionSource).toContain("activeConversationSurface.messages");
+    expect(selfEvolutionSource).toContain("activeConversationSurface.submitLabel");
+    expect(selfEvolutionSource).toContain("activeConversationSurface.onSubmit");
+    expect(selfEvolutionSource).toContain("onStartObservation({ goal: observationGoalValue, durationSeconds: normalizedObservationDuration })");
+    expect(selfEvolutionSource).toContain("onStartRun");
+    expect(centerConversationViewCount).toBe(1);
+    expect(centerSurface).toContain("sessionId={activeConversationSurface.sessionId}");
+    expect(centerSurface).toContain("title={activeConversationSurface.title}");
+    expect(centerSurface).toContain("messages={activeConversationSurface.messages}");
+    expect(centerSurface).toContain("showComposer={activeConversationSurface.showComposer}");
+    expect(centerSurface).toContain("onSubmit={activeConversationSurface.onSubmit}");
   });
 
-  it("keeps no-session observation mode inside the shared conversation view", () => {
-    expect(selfEvolutionSource).toContain("function renderObservationPendingConversationShell()");
-    expect(selfEvolutionSource).toContain("renderObservationPendingConversationShell()");
+  it("does not split observation into a dedicated center workspace shell", () => {
+    expect(selfEvolutionSource).toContain("observationConversationSessionId");
+    expect(selfEvolutionSource).toContain("observationConversationReady");
     expect(selfEvolutionSource).toContain("observationPendingConversationMessages");
-    expect(selfEvolutionSource).toContain("sessionId=\"self-observation-pending\"");
-    expect(selfEvolutionSource).toContain('title={lang === "zh" ? "自主观察会话" : "Observation session"}');
-    expect(selfEvolutionSource).toContain("composerValue={observationGoalInput}");
-    expect(selfEvolutionSource).toContain("submitLabel={lang === \"zh\" ? \"开始自主观察\" : \"Start observation\"}");
+    expect(selfEvolutionSource).not.toContain("function renderObservationModeConversationPane()");
+    expect(selfEvolutionSource).not.toContain("renderObservationModeConversationPane()");
+    expect(selfEvolutionSource).not.toContain("function renderObservationPendingConversationShell()");
+    expect(selfEvolutionSource).not.toContain("renderObservationPendingConversationShell()");
+    expect(selfEvolutionSource).not.toContain("styles.observationWorkspace");
+    expect(selfEvolutionSource).not.toContain("styles.observationConversationPane");
+    expect(selfEvolutionStylesSource).not.toContain("observationWorkspace:");
+    expect(selfEvolutionStylesSource).not.toContain("observationConversationPane:");
     expect(selfEvolutionSource).not.toContain("renderObservationSetupPanel({ embedded: true })");
-    expect(selfEvolutionSource).not.toContain("styles.observationPendingConversationShell");
-    expect(selfEvolutionSource).not.toContain("styles.observationPendingMessage");
     expect(selfEvolutionSource).not.toContain("等待观察目标");
-    expect(selfEvolutionStylesSource).not.toContain("observationPendingConversationShell:");
-    expect(selfEvolutionSource).not.toContain(") : (\n                    renderObservationSetupPanel()\n                  )");
   });
 
   it("loads real observation session detail instead of rendering only snapshot text", () => {
@@ -301,16 +319,13 @@ describe("SelfEvolutionTrack static assets", () => {
     expect(selfEvolutionSource).toContain("queryKeys.session(observationConversationSessionId || \"__none__\")");
     expect(selfEvolutionSource).toContain("fetchJson<SessionDetail>(`/api/sessions/${encodeURIComponent(observationConversationSessionId)}`)");
     expect(selfEvolutionSource).toContain("observationSessionMessages");
-    expect(selfEvolutionSource).toContain("messages={observationSessionMessages}");
+    expect(selfEvolutionSource).toContain("messages: observationConversationReady ? observationSessionMessages : observationPendingConversationMessages");
+    expect(selfEvolutionSource).toContain("messages={activeConversationSurface.messages}");
     expect(selfEvolutionSource).not.toContain("messages={observationConversationMessages}");
   });
 
   it("keeps observation mode inside the self-evolution workspace instead of switching pages", () => {
-    expect(selfEvolutionSource).toContain("function renderObservationModeConversationPane()");
     expect(selfEvolutionSource).toContain("<main className={styles.centerColumn}>");
-    expect(selfEvolutionSource).toContain("renderObservationModeConversationPane()");
-    expect(selfEvolutionSource).toContain("styles.observationWorkspace");
-    expect(selfEvolutionSource).toContain("styles.observationConversationPane");
     expect(selfEvolutionSource).toContain("styles.observationEvidenceRail");
     expect(selfEvolutionSource).toContain("styles.observationEventTimeline");
     expect(selfEvolutionSource).toContain("observationEventTail.map");
@@ -318,12 +333,10 @@ describe("SelfEvolutionTrack static assets", () => {
     expect(selfEvolutionSource).not.toContain("event.message || event.event");
     expect(selfEvolutionSource).not.toContain("className={observationRunModeActive ? `${styles.centerColumn} ${styles.centerColumnObservation}` : styles.centerColumn}");
     expect(selfEvolutionSource).not.toContain("{observationRunModeActive ? (\n              <div className={styles.observationWorkspace}>");
-    expect(selfEvolutionStylesSource).toContain("observationWorkspace:");
-    expect(selfEvolutionStylesSource).toContain("grid-cols-[minmax(0,1fr)_minmax(280px,360px)]");
     expect(selfEvolutionStylesSource).toContain("observationEvidenceRail:");
   });
 
-  it("lets observation mode own the center conversation area even when the approval step is selected", () => {
+  it("lets observation mode keep the shared center conversation area even when the approval step is selected", () => {
     const centerStart = selfEvolutionSource.indexOf("<main className={styles.centerColumn}>");
     const centerEnd = selfEvolutionSource.indexOf("</main>", centerStart);
     const centerSurface = centerStart >= 0 && centerEnd > centerStart
@@ -334,9 +347,9 @@ describe("SelfEvolutionTrack static assets", () => {
 
     expect(selfEvolutionSource).toContain("const centerWorkflowSummary = observationRunModeActive");
     expect(centerSurface).toContain("{centerWorkflowSummary}");
-    expect(centerSurface).toContain("renderObservationModeConversationPane()");
-    expect(observationBranch).toBeGreaterThanOrEqual(0);
-    expect(approvalBranch).toBeGreaterThan(observationBranch);
+    expect(centerSurface).toContain("activeConversationSurface");
+    expect(observationBranch).toBeLessThan(0);
+    expect(approvalBranch).toBeGreaterThanOrEqual(0);
     expect(centerSurface).not.toContain('selectedWorkflowStep?.id !== "approval" && observationRunModeActive');
   });
 
@@ -494,7 +507,6 @@ describe("SelfEvolutionTrack static assets", () => {
     [
       styles.pageStack,
       styles.workspaceLayout,
-      styles.observationWorkspace,
       styles.centerColumn,
       styles.conversationShell,
     ].forEach((className) => {
