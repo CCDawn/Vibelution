@@ -196,6 +196,7 @@ import {
 } from "./chat/ChatConversationComposerBridge";
 import { ChatFileWorkspaceTabs } from "./chat/ChatFileWorkspaceTabs";
 import { ChatSessionWorkspacePanel } from "./chat/ChatSessionWorkspacePanel";
+import { LlmPayloadTracePanel } from "./chat/LlmPayloadTracePanel";
 import { TokenCoreStatusPanel, type TokenCoreStatusMetric } from "./chat/TokenCoreStatusPanel";
 import {
   clamp,
@@ -4052,6 +4053,7 @@ export function ChatCodingRoute() {
     : "";
   const lastContextComposition = detail?.lastContextComposition ?? null;
   const lastCacheComposition = detail?.lastCacheComposition ?? null;
+  const lastLlmPayloadTrace = detail?.lastLlmPayloadTrace ?? null;
   const lastCacheDiagnostics = lastCacheComposition as SessionCacheCompositionDiagnostics | null;
   const activeSkillContract = (detail as SessionDetailWithActiveSkill | undefined)?.activeSkillContract ?? null;
   const activeSkillCommand = String(activeSkillContract?.command ?? "").trim();
@@ -6498,6 +6500,8 @@ export function ChatCodingRoute() {
           metrics={tokenStatusMetrics}
           onOpenCacheDetail={openCacheDetail}
         />
+
+        <LlmPayloadTracePanel lang={lang} trace={lastLlmPayloadTrace} />
 
         <section className={`${styles.leftBlock} ${styles.companionBlock}`}>
           <div className={styles.sectionHeader}>

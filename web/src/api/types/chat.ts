@@ -615,6 +615,39 @@ export type SessionCacheComposition = {
   averageObservedTurnCount?: number;
 };
 
+export type SessionLlmPayloadTraceSafeMap = Record<string, string | number | boolean | string[] | number[] | Record<string, unknown>>;
+
+export type SessionLlmPayloadTrace = {
+  schemaVersion?: number;
+  traceId?: string;
+  recordedAt?: string;
+  phase?: string;
+  stream?: boolean;
+  role?: string;
+  profileId?: string;
+  provider?: string;
+  model?: string;
+  sessionId?: string;
+  turnId?: string;
+  agentId?: string;
+  llmSlot?: string;
+  modelId?: string;
+  promptPurpose?: string;
+  dialogueChainMode?: string;
+  messageCount?: number;
+  toolCount?: number;
+  imageBlockCount?: number;
+  messageRoleCounts?: Record<string, number>;
+  messageRoles?: string[];
+  transport?: string;
+  selectedProtocol?: string;
+  protocolSource?: string;
+  payloadShape?: SessionLlmPayloadTraceSafeMap;
+  promptCache?: SessionLlmPayloadTraceSafeMap;
+  thinking?: SessionLlmPayloadTraceSafeMap;
+  contextAssembly?: SessionLlmPayloadTraceSafeMap;
+};
+
 export type SessionMessageWindow = {
   mode: "window" | string;
   totalMessages: number;
@@ -675,6 +708,7 @@ export type SessionDetail = SessionSummary & {
   };
   llmUsage?: SessionLlmUsage | null;
   lastContextComposition?: SessionContextComposition | null;
+  lastLlmPayloadTrace?: SessionLlmPayloadTrace | null;
   lastCacheComposition?: SessionCacheComposition | null;
   handoffContext?: SessionChildHandoffContext | null;
   lastTurnError?: SessionTurnError | null;

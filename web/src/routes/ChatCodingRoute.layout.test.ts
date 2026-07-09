@@ -938,7 +938,9 @@ describe("ChatCodingRoute layout contract", () => {
   it("presents previous-turn token state as compact visual metrics with hover details", () => {
     expect(routeSource).toContain("const lastContextComposition = detail?.lastContextComposition ?? null");
     expect(routeSource).toContain("const lastCacheComposition = detail?.lastCacheComposition ?? null");
+    expect(routeSource).toContain("const lastLlmPayloadTrace = detail?.lastLlmPayloadTrace ?? null");
     expect(routeSource).toContain("import { CacheDetailDialog, type CacheDonutSegment }");
+    expect(routeSource).toContain("import { LlmPayloadTracePanel }");
     expect(routeSource).toContain("import { TokenCoreStatusPanel, type TokenCoreStatusMetric }");
     expect(routeSource).not.toContain("<details className={styles.sessionDiagnosticsDetails}>");
     expect(routeSource).not.toContain("<summary className={styles.sessionDiagnosticsSummary}>");
@@ -949,6 +951,9 @@ describe("ChatCodingRoute layout contract", () => {
     expect(tokenCoreStatusPanelSource).toContain("styles.tokenCompressionCard");
     expect(routeSource).toContain("const tokenStatusMetrics");
     expect(routeSource).toContain("<TokenCoreStatusPanel");
+    expect(routeSource).toContain("<LlmPayloadTracePanel");
+    expect(routeSource).toContain("trace={lastLlmPayloadTrace}");
+    expect(routeSource.indexOf("<LlmPayloadTracePanel")).toBeGreaterThan(routeSource.indexOf("<TokenCoreStatusPanel"));
     expect(tokenCoreStatusPanelSource).toContain("styles.tokenStatusVisualGrid");
     expect(tokenCoreStatusPanelSource).toContain("styles.tokenStatusMetric");
     expect(tokenCoreStatusPanelSource).toContain("styles.tokenStatusRing");
@@ -1180,6 +1185,10 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.contextCompositionSegmentMissing).toBeTypeOf("string");
     expect(routeStyles.contextCompositionSegmentExact).toBeTypeOf("string");
     expect(routeStyles.contextCompositionSegmentUnused).toBeTypeOf("string");
+    expect(routeStyles.llmPayloadTracePanel).toBeTypeOf("string");
+    expect(routeStyles.llmPayloadTraceGrid).toContain("grid");
+    expect(routeStyles.llmPayloadTraceItem).toContain("min-w-0");
+    expect(routeStyles.llmPayloadTraceMuted).toContain("truncate");
   });
 
   it("disables the cache metric trigger when cache details are unavailable", () => {
