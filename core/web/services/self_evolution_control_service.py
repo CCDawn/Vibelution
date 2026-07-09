@@ -2161,8 +2161,13 @@ def _self_observation_tool_policy() -> dict[str, Any]:
     }
 
 
+def _normalize_self_observation_prompt(goal: Any) -> str:
+    prompt = "" if goal is None else str(goal)
+    return prompt if prompt else DEFAULT_SELF_EVOLUTION_GOAL
+
+
 def build_self_observation_prompt(goal: str, duration_seconds: int) -> str:
-    return str(goal or "").strip() or DEFAULT_SELF_EVOLUTION_GOAL
+    return _normalize_self_observation_prompt(goal)
 
 
 def detect_self_observation_boundary_violation(text: str) -> str:
@@ -2614,7 +2619,7 @@ def _run_observation_session(*, run_id: str, prompt: str, duration_seconds: int)
 def _run_self_observation_turn(context: dict[str, Any]) -> None:
     global _ACTIVE_OBSERVATION_RUN_ID
     run_id = str((context or {}).get("runId") or "").strip()
-    goal = str((context or {}).get("goal") or DEFAULT_SELF_EVOLUTION_GOAL).strip() or DEFAULT_SELF_EVOLUTION_GOAL
+    goal = _normalize_self_observation_prompt((context or {}).get("goal"))
     duration_seconds = _normalize_observation_duration((context or {}).get("durationSeconds"))
     if not run_id:
         return None
@@ -2714,7 +2719,7 @@ def start_self_observation_run(payload: dict[str, Any]) -> dict[str, Any]:
                 en=f"Observation mode has zero tools and does not support tool authorization or policy override fields: {field_list}",
             )
         )
-    goal = str(data.get("goal") or DEFAULT_SELF_EVOLUTION_GOAL).strip() or DEFAULT_SELF_EVOLUTION_GOAL
+    goal = _normalize_self_observation_prompt(data.get("goal"))
     duration_seconds = _normalize_observation_duration(data.get("durationSeconds"))
     now = _now_timestamp()
     with _OBSERVATION_RUN_STATE_LOCK:

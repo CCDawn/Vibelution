@@ -1136,9 +1136,9 @@ def test_runtime_manager_start_self_evolution_blocks_write_chat_session(monkeypa
 
 
 def test_self_observation_prompt_preserves_user_prompt_without_default_contract():
-    prompt = service.build_self_observation_prompt("  思考  ", duration_seconds=120)
+    prompt = service.build_self_observation_prompt("  思考\n下一段  ", duration_seconds=120)
 
-    assert prompt == "思考"
+    assert prompt == "  思考\n下一段  "
     assert "无工具观察沙盒" not in prompt
     assert "你没有任何工具" not in prompt
     assert "不能声称已经读取" not in prompt
@@ -1157,10 +1157,12 @@ def test_start_self_observation_run_has_no_tools_no_worktree(monkeypatch):
     monkeypatch.setattr(service, "_run_self_observation_turn", lambda context: None)
     service.force_cancel_active_self_observation_runs_for_shutdown("test cleanup")
 
-    snapshot = service.start_self_observation_run({"goal": "观察规划能力", "durationSeconds": 90})
+    raw_prompt = "  观察规划能力\n  "
+    snapshot = service.start_self_observation_run({"goal": raw_prompt, "durationSeconds": 90})
 
     assert snapshot["runKind"] == "self_observation_run"
     assert snapshot["selfMode"] == "observation"
+    assert snapshot["goal"] == raw_prompt
     assert snapshot["allowedTools"] == []
     assert snapshot["writeLeases"] == []
     assert snapshot["worktreeCreated"] is False
@@ -1395,11 +1397,14 @@ def test_run_self_observation_turn_records_session_progress_events(monkeypatch):
         lambda: {"agentId": "agent-observer"},
     )
     monkeypatch.setattr(service, "create_supervised_agent_session", lambda **kwargs: {"id": "session-observe-live"})
-    monkeypatch.setattr(
-        service,
-        "submit_session_message",
-        lambda *args, **kwargs: {"turnId": "turn-observe-live", "startedTurnId": "turn-observe-live"},
-    )
+    submitted: dict[str, object] = {}
+
+    def fake_submit_session_message(*args, **kwargs):
+        submitted["args"] = args
+        submitted["kwargs"] = kwargs
+        return {"turnId": "turn-observe-live", "startedTurnId": "turn-observe-live"}
+
+    monkeypatch.setattr(service, "submit_session_message", fake_submit_session_message)
     monkeypatch.setattr(
         service,
         "get_session_detail",
@@ -1423,9 +1428,10 @@ def test_run_self_observation_turn_records_session_progress_events(monkeypatch):
     )
     monkeypatch.setattr(service._RUN_EXECUTOR, "submit", lambda fn, context: None)
 
-    queued = service.start_self_observation_run({"goal": "观察规划能力", "durationSeconds": 90})
+    raw_prompt = "  观察规划能力\n  "
+    queued = service.start_self_observation_run({"goal": raw_prompt, "durationSeconds": 90})
     service._run_self_observation_turn(
-        {"runId": queued["runId"], "goal": "观察规划能力", "durationSeconds": 90}
+        {"runId": queued["runId"], "goal": raw_prompt, "durationSeconds": 90}
     )
 
     final_snapshot = service.get_self_observation_run_snapshot(queued["runId"])
@@ -1442,6 +1448,7 @@ def test_run_self_observation_turn_records_session_progress_events(monkeypatch):
         "assistant_output",
         "done",
     ]
+    assert submitted["args"][1] == raw_prompt
     assert final_snapshot["eventTail"][2]["conversationSessionId"] == "session-observe-live"
     assert final_snapshot["eventTail"][3]["turnId"] == "turn-observe-live"
 
