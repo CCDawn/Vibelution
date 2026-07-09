@@ -278,8 +278,33 @@ class ResponsesStreamNormalizer:
     @staticmethod
     def _extract_completed_text(event: Dict[str, Any]) -> str:
         response = _as_dict(event.get("response"))
-        if isinstance(response, dict) and isinstance(response.get("output_text"), str):
+        if not isinstance(response, dict):
+            return ""
+        if isinstance(response.get("output_text"), str):
             return response.get("output_text") or ""
+        return ResponsesStreamNormalizer._extract_output_text(response.get("output"))
+
+    @staticmethod
+    def _extract_output_text(output: Any) -> str:
+        parts: List[str] = []
+        for item in list(output or []):
+            item_dict = _as_dict(item)
+            if not isinstance(item_dict, dict):
+                continue
+            if isinstance(item_dict.get("text"), str):
+                parts.append(item_dict.get("text") or "")
+            content = item_dict.get("content")
+            if not isinstance(content, list):
+                continue
+            for block in content:
+                block_dict = _as_dict(block)
+                if not isinstance(block_dict, dict):
+                    continue
+                text = block_dict.get("text")
+                if isinstance(text, str):
+                    parts.append(text)
+        if parts:
+            return "".join(parts)
         return ""
 
     @staticmethod

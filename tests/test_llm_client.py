@@ -703,6 +703,54 @@ def test_responses_transport_streams_with_responses_normalizer(monkeypatch):
     assert "messages" not in calls[0]
 
 
+def test_responses_transport_streams_completed_output_blocks_when_no_delta(monkeypatch):
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "relay",
+            "llm.providers.default.api_key": "test-key",
+            "llm.providers.default.base_url": "https://pixel.try-chatapi.com/v1",
+            "llm.providers.default.compat_mode": "openai",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "gpt-5.5",
+            "llm.profiles.primary.transport": "responses",
+            "llm.profiles.primary.streaming": True,
+        }
+    )
+
+    def default_responses_backend(payload):
+        return iter(
+            [
+                {
+                    "type": "response.completed",
+                    "response": {
+                        "output": [
+                            {
+                                "type": "message",
+                                "role": "assistant",
+                                "content": [
+                                    {
+                                        "type": "output_text",
+                                        "text": "completed fallback",
+                                    }
+                                ],
+                            }
+                        ],
+                        "usage": {"input_tokens": 3, "output_tokens": 2, "total_tokens": 5},
+                    },
+                },
+            ]
+        )
+
+    monkeypatch.setattr("core.llm.client._default_responses_backend", default_responses_backend)
+    client = LLMClient(config=config)
+
+    events = list(client.stream_events([{"role": "user", "content": "ping"}]))
+
+    assert [event.type for event in events] == ["text_delta", "done"]
+    assert events[0].text == "completed fallback"
+    assert events[-1].usage.total_tokens == 5
+
+
 def test_responses_transport_streams_function_call_items(monkeypatch):
     config = make_config(
         **{
