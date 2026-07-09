@@ -5,6 +5,7 @@ import * as chatActiveTurnLayerModule from "./chatActiveTurnLayer";
 import {
   activeTurnLayerToConversationMessage,
   type ActiveTurnLayerState,
+  activeTurnLayerTextLength,
   isActiveTurnSettledByDetail,
   mergeAssistantDeltaIntoActiveTurnLayer,
 } from "./chatActiveTurnLayer";
@@ -136,6 +137,42 @@ describe("chat active turn layer", () => {
     );
 
     expect(active).toBeUndefined();
+  });
+
+  it("keeps native assistant markdown answer visible when legacy content is empty", () => {
+    const active = mergeAssistantDeltaIntoActiveTurnLayer(
+      undefined,
+      assistantDelta({
+        contentDelta: "",
+        codexTranscript: {
+          version: 1,
+          source: "native",
+          messageId: "session-1-message-live-turn-1",
+          cells: [
+            {
+              id: "native-answer",
+              kind: "assistant_markdown",
+              messageId: "session-1-message-live-turn-1",
+              status: "completed",
+              tone: "neutral",
+              text: "这是 native transcript 里的最终回答。",
+            },
+          ],
+        },
+      }),
+    );
+
+    const message = activeTurnLayerToConversationMessage(active);
+
+    expect(active).toBeDefined();
+    expect(activeTurnLayerTextLength(active)).toBeGreaterThan(0);
+    expect(message?.content).toBe("");
+    expect(message?.codexTranscript?.source).toBe("native");
+    expect(message?.codexTranscript?.cells[0]).toMatchObject({
+      id: "native-answer",
+      kind: "assistant_markdown",
+      text: "这是 native transcript 里的最终回答。",
+    });
   });
 
   it("updates the same unsequenced feedback event instead of appending a duplicate", () => {
@@ -340,6 +377,113 @@ describe("chat active turn layer", () => {
               summary: "正在请求模型",
             },
           ],
+          metadata: { turnId: "turn-1" },
+        } satisfies ConversationMessage,
+      ],
+    } as SessionDetail;
+
+    expect(isActiveTurnSettledByDetail(active, detail)).toBe(false);
+  });
+
+  it("settles the active layer when committed detail has same-turn native assistant markdown answer", () => {
+    const active = mergeAssistantDeltaIntoActiveTurnLayer(
+      undefined,
+      assistantDelta({
+        contentDelta: "",
+        codexTranscript: {
+          version: 1,
+          source: "native",
+          messageId: "session-1-message-live-turn-1",
+          cells: [
+            {
+              id: "native-live-answer",
+              kind: "assistant_markdown",
+              messageId: "session-1-message-live-turn-1",
+              status: "completed",
+              tone: "neutral",
+              text: "流式阶段的 native 回答。",
+            },
+          ],
+        },
+      }),
+    );
+    const detail = {
+      id: "session-1",
+      messages: [
+        {
+          id: "assistant-final-native",
+          role: "assistant",
+          content: "",
+          timestamp: "2026-06-26T08:31:00Z",
+          codexTranscript: {
+            version: 1,
+            source: "native",
+            messageId: "assistant-final-native",
+            cells: [
+              {
+                id: "native-final-answer",
+                kind: "assistant_markdown",
+                messageId: "assistant-final-native",
+                status: "completed",
+                tone: "neutral",
+                text: "正式 native 回答。",
+              },
+            ],
+          },
+          metadata: { turnId: "turn-1" },
+        } satisfies ConversationMessage,
+      ],
+    } as SessionDetail;
+
+    expect(isActiveTurnSettledByDetail(active, detail)).toBe(true);
+  });
+
+  it("does not settle the active layer for same-turn native process-only transcript", () => {
+    const active = mergeAssistantDeltaIntoActiveTurnLayer(
+      undefined,
+      assistantDelta({
+        contentDelta: "",
+        codexTranscript: {
+          version: 1,
+          source: "native",
+          messageId: "session-1-message-live-turn-1",
+          cells: [
+            {
+              id: "native-live-answer",
+              kind: "assistant_markdown",
+              messageId: "session-1-message-live-turn-1",
+              status: "completed",
+              tone: "neutral",
+              text: "流式阶段的 native 回答。",
+            },
+          ],
+        },
+      }),
+    );
+    const detail = {
+      id: "session-1",
+      messages: [
+        {
+          id: "assistant-final-tool",
+          role: "assistant",
+          content: "",
+          timestamp: "2026-06-26T08:31:00Z",
+          codexTranscript: {
+            version: 1,
+            source: "native",
+            messageId: "assistant-final-tool",
+            cells: [
+              {
+                id: "native-tool",
+                kind: "tool_call",
+                messageId: "assistant-final-tool",
+                status: "completed",
+                tone: "neutral",
+                title: "npm build",
+                summary: "构建完成",
+              },
+            ],
+          },
           metadata: { turnId: "turn-1" },
         } satisfies ConversationMessage,
       ],
