@@ -26,6 +26,7 @@ from core.evaluation.self_evolution_reflection import (
 )
 from core.infrastructure import developer_sandbox, git_process
 from core.launcher import service as launcher_service
+from core.llm import LLMInvocationContext, get_llm_client, invoke_llm
 from core.infrastructure.agent_session import get_session_state
 from core.orchestration.context_engine import build_agent_context, record_agent_turn_result
 from core.orchestration.turn_runner import AgentSingleTurnRequest, run_agent_single_turn
@@ -56,8 +57,6 @@ from .session_service import (
     active_session_has_write_leases,
     get_active_session_detail,
     create_supervised_agent_session,
-    get_session_detail,
-    get_session_turn_completion_snapshot,
     has_running_sessions,
     list_active_session_work_runs,
     request_stop_session_turn,
@@ -2421,28 +2420,6 @@ def _self_observation_operator_terminated(run_id: str) -> bool:
     return _self_observation_has_operator_terminal_state(snapshot)
 
 
-def _self_observation_assistant_messages(detail: dict[str, Any]) -> list[str]:
-    messages: list[str] = []
-    for item in list((detail or {}).get("messages") or []):
-        if not isinstance(item, dict):
-            continue
-        role = str(item.get("role") or "").strip().lower()
-        content = str(item.get("content") or "").strip()
-        if role != "assistant" or not content:
-            continue
-        messages.append(content)
-    return messages
-
-
-def _self_observation_completion_status(completion_snapshot: dict[str, Any], detail: dict[str, Any]) -> str:
-    return str(
-        completion_snapshot.get("terminalStatus")
-        or completion_snapshot.get("lastTurnStatus")
-        or detail.get("lastTurnStatus")
-        or ""
-    ).strip().lower()
-
-
 def _update_self_observation_progress(
     run_id: str,
     *,
@@ -2476,6 +2453,189 @@ def _update_self_observation_progress(
             )
         snapshot["updatedAt"] = timestamp
         return dict(snapshot)
+
+
+def _self_observation_prompt_cache_partition(run_id: str, agent_id: str, model_id: str = "") -> str:
+    raw = "|".join(
+        [
+            "self_observation",
+            str(run_id or "").strip(),
+            str(agent_id or "").strip(),
+            str(model_id or "").strip(),
+        ]
+    )
+    digest = hashlib.sha256(raw.encode("utf-8", errors="replace")).hexdigest()[:16]
+    return f"self-observation-{digest}"
+
+
+def _extract_self_observation_response_text(response: Any) -> str:
+    content = response.get("content") if isinstance(response, dict) else getattr(response, "content", "")
+    if isinstance(content, str):
+        return content.strip()
+    if isinstance(content, list):
+        parts: list[str] = []
+        for block in content:
+            if isinstance(block, dict):
+                parts.append(str(block.get("text") or block.get("content") or ""))
+            else:
+                parts.append(str(block or ""))
+        return "\n".join(part for part in parts if part).strip()
+    return str(content or "").strip()
+
+
+def _cap_self_observation_llm_timeout(config: Any, profile_id: str, duration_seconds: int) -> None:
+    timeout_limit = max(5, int(duration_seconds or 0))
+    if timeout_limit <= 0:
+        return
+    try:
+        profile = config.llm.get_profile(profile_id)
+    except Exception:
+        return
+    try:
+        current_timeout = float(getattr(profile, "timeout", 0) or 0)
+    except (TypeError, ValueError):
+        current_timeout = 0
+    if current_timeout <= 0 or current_timeout > timeout_limit:
+        try:
+            profile.timeout = timeout_limit
+        except Exception:
+            return
+
+
+def _resolve_self_observation_llm(agent_id: str, duration_seconds: int) -> tuple[Any, Any]:
+    agent = agent_directory_service.get_agent(agent_id, include_archived=False)
+    if not agent:
+        raise SelfEvolutionRunValidationError("Self observation observer agent is unavailable.")
+    resolved = session_service._resolve_session_agent_llm(agent, "dialogue")
+    profile_id = str(getattr(resolved, "runtime_profile_id", "") or "").strip()
+    config = getattr(resolved, "config", None)
+    _cap_self_observation_llm_timeout(config, profile_id, duration_seconds)
+    client = get_llm_client(profile_id=profile_id or None, config=config)
+    return resolved, client
+
+
+def _invoke_strict_self_observation_llm(
+    *,
+    run_id: str,
+    session_id: str,
+    agent_id: str,
+    prompt: str,
+    duration_seconds: int,
+) -> dict[str, Any]:
+    if _self_observation_operator_terminated(run_id):
+        raise TimeoutError("Observation session was terminated before model invocation.")
+    resolved, client = _resolve_self_observation_llm(agent_id, duration_seconds)
+    model_id = str(getattr(resolved, "model_id", "") or "").strip()
+    messages = [{"role": "user", "content": prompt}]
+    cache_partition = _self_observation_prompt_cache_partition(run_id, agent_id, model_id)
+    metadata = {
+        "feature": "self_observation",
+        "strictPromptPayload": True,
+        "messageRoleSummary": ["user"],
+        "toolsCount": 0,
+        "promptChars": len(str(prompt or "")),
+    }
+    _record_self_scene_event(
+        "self_observation",
+        "self_observation.llm.strict_invocation_started",
+        run_id=run_id,
+        message="Strict self-observation LLM invocation started.",
+        fields={
+            "agentId": agent_id,
+            "sessionId": session_id,
+            "modelId": model_id,
+            "messageRoles": ["user"],
+            "toolsCount": 0,
+            "promptChars": len(str(prompt or "")),
+            "invocationPath": "strict_direct_llm",
+        },
+        lifecycle=True,
+    )
+    response = invoke_llm(
+        client,
+        messages,
+        tools=[],
+        context=LLMInvocationContext(
+            surface="self_observation",
+            run_kind="self_observation_run",
+            run_id=run_id,
+            session_id=session_id,
+            agent_id=agent_id,
+            llm_slot="dialogue",
+            model_id=model_id,
+            cache_scope="self_observation",
+            cache_partition=cache_partition,
+            prompt_purpose="strict_observation",
+            conversation_bound=False,
+            metadata={"strictPromptPayload": True},
+        ),
+        metadata=metadata,
+    )
+    content = _extract_self_observation_response_text(response)
+    tool_calls = list((response.get("tool_calls") if isinstance(response, dict) else getattr(response, "tool_calls", [])) or [])
+    _record_self_scene_event(
+        "self_observation",
+        "self_observation.llm.strict_invocation_completed",
+        run_id=run_id,
+        message="Strict self-observation LLM invocation completed.",
+        outcome="succeeded",
+        fields={
+            "agentId": agent_id,
+            "sessionId": session_id,
+            "modelId": model_id,
+            "outputChars": len(content),
+            "toolCallCount": len(tool_calls),
+            "invocationPath": "strict_direct_llm",
+        },
+        lifecycle=True,
+    )
+    if _self_observation_operator_terminated(run_id):
+        raise TimeoutError("Observation session was terminated after model invocation.")
+    return {
+        "content": content,
+        "toolCalls": tool_calls,
+        "modelId": model_id,
+    }
+
+
+def _append_self_observation_assistant_artifact(
+    *,
+    run_id: str,
+    session_id: str,
+    content: str,
+    model_id: str = "",
+) -> None:
+    if not str(content or "").strip():
+        return
+    try:
+        session_service.append_session_assistant_artifact_message(
+            session_id,
+            content,
+            metadata={
+                "runKind": "self_observation_run",
+                "runId": run_id,
+                "mode": "self_observation",
+                "status": "completed",
+                "strictPromptPayload": True,
+                "toolsCount": 0,
+                "modelId": str(model_id or "").strip(),
+                "turnId": f"strict:{run_id}",
+            },
+            tool_calls=[],
+        )
+    except Exception as exc:
+        _record_self_scene_event(
+            "self_observation",
+            "self_observation.session_artifact_append_failed",
+            run_id=run_id,
+            message="Failed to append self-observation assistant artifact.",
+            level="warning",
+            outcome="failed",
+            fields={
+                "sessionId": session_id,
+                "errorType": type(exc).__name__,
+            },
+        )
 
 
 def _run_observation_session(*, run_id: str, prompt: str, duration_seconds: int) -> dict[str, Any]:
@@ -2516,99 +2676,47 @@ def _run_observation_session(*, run_id: str, prompt: str, duration_seconds: int)
         conversation_session_id=session_id,
     )
 
-    accepted = submit_session_message(
-        session_id,
-        prompt,
-        mental_model_enabled=False,
-        message_metadata={
-            "runKind": "self_observation_run",
-            "runId": run_id,
-            "mode": "self_observation",
-            "toolPolicy": tool_policy,
-        },
-        message_source="self_observation",
-        include_started_turn_id=True,
-        lightweight_response=True,
-    )
-    turn_id = str(accepted.get("turnId") or accepted.get("startedTurnId") or "").strip()
+    turn_id = f"strict:{run_id}"
     _append_self_observation_event(
         run_id,
         event="prompt_submitted",
         status="running",
         message=text_for(
             get_web_language(),
-            zh="观察 prompt 已提交，等待模型输出。",
-            en="Observation prompt submitted; waiting for model output.",
+            zh="观察 prompt 已提交到严格无工具模型路径，等待输出。",
+            en="Observation prompt submitted to the strict no-tool model path; waiting for output.",
         ),
         conversation_session_id=session_id,
         turn_id=turn_id,
     )
-    deadline = time.monotonic() + max(5, int(duration_seconds or 0))
-    stop_requested = False
-    latest_detail: dict[str, Any] = {}
-    latest_completion_snapshot: dict[str, Any] = {}
-    while True:
-        latest_detail = get_session_detail(session_id) or {}
-        latest_completion_snapshot = get_session_turn_completion_snapshot(session_id, turn_id)
-        assistant_messages = _self_observation_assistant_messages(latest_detail)
-        assistant_text = str(latest_completion_snapshot.get("assistantText") or "").strip()
-        if assistant_text and (not assistant_messages or assistant_messages[-1] != assistant_text):
-            assistant_messages.append(assistant_text)
-        latest_message = assistant_text or (assistant_messages[-1] if assistant_messages else "")
-        if assistant_messages or latest_message:
-            _update_self_observation_progress(
-                run_id,
-                conversation_session_id=session_id,
-                latest_message=latest_message,
-                messages=assistant_messages,
-            )
-        if bool(latest_completion_snapshot.get("terminal")):
-            break
-        last_status = _self_observation_completion_status(latest_completion_snapshot, latest_detail)
-        if last_status and last_status not in {"queued", "running"}:
-            break
-        if _self_observation_operator_terminated(run_id) and not stop_requested:
-            stop_requested = True
-            _append_self_observation_event(
-                run_id,
-                event="stop_requested",
-                status="terminated",
-                message=text_for(
-                    get_web_language(),
-                    zh="用户已请求终止观察会话。",
-                    en="User requested observation session stop.",
-                ),
-                conversation_session_id=session_id,
-                turn_id=turn_id,
-            )
-            try:
-                request_stop_session_turn(session_id)
-            except Exception:
-                pass
-        if time.monotonic() >= deadline:
-            try:
-                request_stop_session_turn(session_id)
-            except Exception:
-                pass
-            raise TimeoutError("Observation session timed out.")
-        time.sleep(0.5)
-
-    latest_detail = get_session_detail(session_id) or latest_detail
-    latest_completion_snapshot = get_session_turn_completion_snapshot(session_id, turn_id)
-    assistant_messages = _self_observation_assistant_messages(latest_detail)
-    assistant_text = str(latest_completion_snapshot.get("assistantText") or "").strip()
-    if assistant_text and (not assistant_messages or assistant_messages[-1] != assistant_text):
-        assistant_messages.append(assistant_text)
-    report = assistant_text or (assistant_messages[-1] if assistant_messages else "")
+    llm_result = _invoke_strict_self_observation_llm(
+        run_id=run_id,
+        session_id=session_id,
+        agent_id=agent_id,
+        prompt=prompt,
+        duration_seconds=duration_seconds,
+    )
+    report = str(llm_result.get("content") or "").strip()
     if not report:
-        turn_error = latest_detail.get("lastTurnError") if isinstance(latest_detail.get("lastTurnError"), dict) else {}
-        error_text = str(turn_error.get("message") or _self_observation_completion_status(latest_completion_snapshot, latest_detail) or "").strip()
         report = (
             "当前理解：\n"
-            "- observation conversation 已结束，但未返回可见 assistant 输出。\n\n"
+            "- observation LLM 调用已结束，但未返回可见 assistant 输出。\n\n"
             "无法验证：\n"
-            f"- {error_text or '未获得会话结果。'}"
+            "- 未获得模型输出内容。"
         )
+    assistant_messages = [report] if report else []
+    _append_self_observation_assistant_artifact(
+        run_id=run_id,
+        session_id=session_id,
+        content=report,
+        model_id=str(llm_result.get("modelId") or "").strip(),
+    )
+    _update_self_observation_progress(
+        run_id,
+        conversation_session_id=session_id,
+        latest_message=report,
+        messages=assistant_messages,
+    )
     return {
         "conversationSessionId": session_id,
         "messages": assistant_messages,
