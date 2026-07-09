@@ -148,6 +148,8 @@ describe("sessionAssistantDeltaScheduler", () => {
       sessionId: "session-1",
       ledgerSeq: 1,
       turnId: "turn-1",
+      itemId: "session-1-turn-turn-1-agent-message",
+      turnItemCount: 1,
       stage: "responding",
       done: false,
     });

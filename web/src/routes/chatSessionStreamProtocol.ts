@@ -31,6 +31,8 @@ export type SessionStreamProtocolTrace = {
   sessionId: string;
   ledgerSeq: number;
   turnId: string;
+  itemId: string;
+  turnItemCount: number;
   stage: string;
   done: boolean;
 };
@@ -103,6 +105,8 @@ export function sessionStreamProtocolTelemetryFields(trace: SessionStreamProtoco
     streamPayloadLength: trace.payloadLength,
     streamLedgerSeq: trace.ledgerSeq,
     streamTurnId: trace.turnId,
+    streamItemId: trace.itemId,
+    streamTurnItemCount: trace.turnItemCount,
     streamStage: trace.stage,
     streamDone: trace.done,
   };
@@ -147,6 +151,8 @@ function baseTrace<T extends SessionStreamEventType>(
     sessionId: String(payload?.sessionId ?? input.activeSessionId ?? ""),
     ledgerSeq: normalizedNumber(payload?.ledgerSeq),
     turnId: String(assistantPayload?.turnId ?? ""),
+    itemId: String(assistantPayload?.itemId ?? ""),
+    turnItemCount: Array.isArray(assistantPayload?.turnItems) ? assistantPayload.turnItems.length : 0,
     stage: String(assistantPayload?.stage ?? ""),
     done: Boolean(assistantPayload?.done),
   };
