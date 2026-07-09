@@ -323,6 +323,15 @@ def test_assistant_delta_publish_and_coalesce_preserve_native_codex_transcript(m
                 "messageId": "old",
                 "cells": [{"id": "old-cell", "kind": "status", "status": "running", "tone": "running"}],
             },
+            "itemId": "old-agent-message",
+            "turnItems": [
+                {
+                    "id": "old-agent-message",
+                    "type": "agent_message",
+                    "status": "in_progress",
+                    "turnId": "turn-1",
+                }
+            ],
         },
         {
             "type": "assistant_delta",
@@ -338,9 +347,73 @@ def test_assistant_delta_publish_and_coalesce_preserve_native_codex_transcript(m
                 "messageId": "new",
                 "cells": [{"id": "new-cell", "kind": "tool_call", "status": "running", "tone": "running"}],
             },
+            "itemId": "new-agent-message",
+            "turnItems": [
+                {
+                    "id": "new-agent-message",
+                    "type": "agent_message",
+                    "status": "in_progress",
+                    "turnId": "turn-1",
+                }
+            ],
         },
     )
 
     assert merged["contentDelta"] == "正在"
     assert merged["codexTranscript"]["messageId"] == "new"
     assert merged["codexTranscript"]["cells"][0]["id"] == "new-cell"
+    assert merged["itemId"] == "new-agent-message"
+    assert merged["turnItems"][0]["id"] == "new-agent-message"
+
+
+def test_assistant_delta_publish_exposes_codex_like_turn_items(monkeypatch):
+    monkeypatch.setattr(session_service, "_session_ledger_sequence", lambda _session_id: 12)
+    subscriber = queue.Queue(maxsize=4)
+    session_service._register_session_stream_subscriber("session-live", subscriber)
+    try:
+        session_service._publish_session_assistant_delta(
+            "session-live",
+            session_service.SessionLiveOutputState(
+                session_id="session-live",
+                turn_id="turn-1",
+                stage="tooling",
+                content="正在处理",
+                content_delta="处理",
+                tool_calls=[
+                    {
+                        "name": "cli_tool",
+                        "status": "running",
+                        "summary": "npm --prefix web run build",
+                    }
+                ],
+                feedback_events=[
+                    {
+                        "sequence": 1,
+                        "kind": "tool",
+                        "status": "running",
+                        "name": "cli_tool",
+                        "summary": "npm --prefix web run build",
+                    }
+                ],
+            ),
+            include_feedback_events=True,
+        )
+    finally:
+        session_service._unregister_session_stream_subscriber("session-live", subscriber)
+
+    event = subscriber.get_nowait()
+
+    assert event["itemId"] == "session-live-turn-turn-1-agent-message"
+    assert event["turnItems"][0] == {
+        "id": "session-live-turn-turn-1-agent-message",
+        "type": "agent_message",
+        "status": "in_progress",
+        "turnId": "turn-1",
+        "messageId": "session-live-message-live-turn-1",
+        "source": "assistant_delta",
+        "text": "正在处理",
+    }
+    assert event["turnItems"][1]["type"] == "tool_call"
+    assert event["turnItems"][1]["status"] == "running"
+    assert event["turnItems"][1]["title"] == "cli_tool"
+    assert event["turnItems"][1]["sourceCellId"] == event["codexTranscript"]["cells"][0]["id"]
