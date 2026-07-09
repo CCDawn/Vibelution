@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { resolveLegacyTeamsRedirect } from "./LegacyTeamsRedirect";
 import canvasDataSource from "./TeamsRoute.canvasData.ts?raw";
 import routeSource from "./TeamsRoute.tsx?raw";
+import teamsSourceCollectionPanelSource from "./teams/TeamsSourceCollectionPanel.tsx?raw";
 import teamMemoryIndexPanelSource from "./TeamMemoryIndexPanel.tsx?raw";
 import teamMemoryIndexPanelStyles from "./TeamMemoryIndexPanel.styles";
 import teamSourceCollectionActiveStagePanelSource from "./TeamSourceCollectionActiveStagePanel.tsx?raw";
@@ -323,6 +324,15 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("TEAM_ORGANIZATION_CANVAS_KIND");
     expect(canvasDataSource).toContain("team_organization_canvas");
     expect(routeSource).not.toContain("/api/research/flow-canvas");
+  });
+
+  it("extracts the research source-collection workspace through a route-local wrapper", () => {
+    expect(routeSource).toContain("TeamsSourceCollectionPanel");
+    expect(routeSource).toContain('from "./teams/TeamsSourceCollectionPanel"');
+    expect(teamsSourceCollectionPanelSource).toContain("TeamSourceCollectionOverviewPanel");
+    expect(teamsSourceCollectionPanelSource).not.toContain("TeamsRoute.styles");
+    expect(teamsSourceCollectionPanelSource).not.toContain("useQuery");
+    expect(teamsSourceCollectionPanelSource).not.toContain("useMutation");
   });
 
   it("can deep-link from Agent references to a selected Team", () => {
