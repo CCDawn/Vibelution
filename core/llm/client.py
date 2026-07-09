@@ -25,6 +25,7 @@ from .errors import classify_exception
 from .message_projector import message_to_openai_dict as project_message_to_openai_dict
 from .message_projector import normalize_messages_for_provider
 from .payload_builder import PayloadBuildInput, build_llm_payload
+from .payload_trace import build_llm_payload_trace
 from .payload_validator import payload_protocol_summary
 from .protocol_resolver import resolve_model_protocol
 from .reasoning_extractor import extract_reasoning_text, strip_think_tag_reasoning
@@ -1396,24 +1397,53 @@ class LLMClient:
         thinking_summary = _safe_payload_thinking_summary(payload)
         protocol_summary = dict(self._last_payload_protocol_summary or payload_protocol_summary(payload, self.protocol_route))
         capability_source_summary = _safe_capability_source_summary(self._resolved_spec)
+        event_metadata = {
+            **(metadata or {}),
+            **message_role_summary,
+            **message_order_summary,
+            **route_summary,
+            **payload_shape_summary,
+            **prompt_cache_design_summary,
+            **prompt_cache_payload_summary,
+            **thinking_summary,
+            **protocol_summary,
+            **capability_source_summary,
+        }
+        trace_metadata = {**dict(_LLM_STATUS_CONTEXT.get({}) or {}), **event_metadata}
+        llm_payload_trace = build_llm_payload_trace(
+            phase="invoke",
+            stream=False,
+            role=self.role,
+            profile_id=self.profile_id,
+            provider=self.provider.kind,
+            model=self.profile.model,
+            message_count=len(messages or []),
+            tool_count=len(tools or self.bound_tools or []),
+            metadata=trace_metadata,
+            summaries=[
+                message_role_summary,
+                message_order_summary,
+                route_summary,
+                payload_shape_summary,
+                prompt_cache_design_summary,
+                prompt_cache_payload_summary,
+                thinking_summary,
+                protocol_summary,
+                capability_source_summary,
+            ],
+        )
+        _publish_llm_status_event(
+            "payload_trace",
+            traceId=llm_payload_trace.get("traceId"),
+            llmPayloadTrace=llm_payload_trace,
+        )
         response = self._invoke_backend_with_retry(
             payload,
             phase="invoke",
             event_code="llm.invoke.failed",
             message_count=len(messages or []),
             tool_count=len(tools or self.bound_tools or []),
-            metadata={
-                **(metadata or {}),
-                **message_role_summary,
-                **message_order_summary,
-                **route_summary,
-                **payload_shape_summary,
-                **prompt_cache_design_summary,
-                **prompt_cache_payload_summary,
-                **thinking_summary,
-                **protocol_summary,
-                **capability_source_summary,
-            },
+            metadata=event_metadata,
         )
         latency_ms = int((time.time() - start) * 1000)
         message = self._responses_message(response) if _payload_uses_responses(payload) else self._choice_message(response)
@@ -1463,6 +1493,7 @@ class LLMClient:
                 **thinking_summary,
                 **protocol_summary,
                 **capability_source_summary,
+                "llmPayloadTraceId": llm_payload_trace.get("traceId", ""),
                 "inputTokens": usage.input_tokens,
                 "outputTokens": usage.output_tokens,
                 "reasoningOutputTokens": usage.reasoning_output_tokens,
@@ -1736,6 +1767,34 @@ class LLMClient:
             **protocol_summary,
             **capability_source_summary,
         }
+        trace_metadata = {**dict(_LLM_STATUS_CONTEXT.get({}) or {}), **event_metadata}
+        llm_payload_trace = build_llm_payload_trace(
+            phase="stream",
+            stream=True,
+            role=self.role,
+            profile_id=self.profile_id,
+            provider=self.provider.kind,
+            model=self.profile.model,
+            message_count=message_count,
+            tool_count=tool_count,
+            metadata=trace_metadata,
+            summaries=[
+                message_role_summary,
+                message_order_summary,
+                route_summary,
+                payload_shape_summary,
+                prompt_cache_design_summary,
+                prompt_cache_payload_summary,
+                thinking_summary,
+                protocol_summary,
+                capability_source_summary,
+            ],
+        )
+        _publish_llm_status_event(
+            "payload_trace",
+            traceId=llm_payload_trace.get("traceId"),
+            llmPayloadTrace=llm_payload_trace,
+        )
         max_attempts = _retry_policy_max_attempts(self.profile)
         last_error: LLMError | None = None
         stream_usage_options_downgraded = False
@@ -1776,6 +1835,7 @@ class LLMClient:
                         "messageCount": message_count,
                         "toolCount": tool_count,
                         **event_metadata,
+                        "llmPayloadTraceId": llm_payload_trace.get("traceId", ""),
                         "attempt": attempt,
                         "maxAttempts": max_attempts,
                     },
@@ -1885,6 +1945,7 @@ class LLMClient:
                         "messageCount": message_count,
                         "toolCount": tool_count,
                         **event_metadata,
+                        "llmPayloadTraceId": llm_payload_trace.get("traceId", ""),
                         "chunkCount": chunk_count,
                         "textDeltaCount": text_delta_count,
                         "reasoningDeltaCount": reasoning_delta_count,
