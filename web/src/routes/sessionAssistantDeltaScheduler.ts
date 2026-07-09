@@ -1,4 +1,5 @@
 import type { SessionStreamEvent } from "../api/types";
+import type { SessionStreamProtocolTrace } from "./chatSessionStreamProtocol";
 
 export type SessionAssistantDeltaPayload = Extract<SessionStreamEvent, { type: "assistant_delta" }>;
 export type SessionAssistantDeltaDrainReason = "frame" | "close" | "final";
@@ -8,6 +9,7 @@ export type QueuedSessionAssistantDelta = {
   payload: SessionAssistantDeltaPayload;
   payloadLength: number;
   receivedAtMs: number;
+  protocolTrace?: SessionStreamProtocolTrace;
 };
 
 export type SessionAssistantDeltaDrainTelemetry = {
@@ -21,6 +23,7 @@ export type SessionAssistantDeltaDrainTelemetry = {
   oldestReceivedAtMs: number;
   newestReceivedAtMs: number;
   frameScheduledAtMs: number;
+  turnRenderProtocol: string;
 };
 
 export type SessionAssistantDeltaDrainResult = {
@@ -60,9 +63,13 @@ class SessionAssistantDeltaScheduler {
     this.nowMs = options.nowMs ?? Date.now;
   }
 
-  enqueue(payload: SessionAssistantDeltaPayload, payloadLength: number) {
+  enqueue(
+    payload: SessionAssistantDeltaPayload,
+    payloadLength: number,
+    protocolTrace?: SessionStreamProtocolTrace,
+  ) {
     const receivedAtMs = this.nowMs();
-    this.queue.push({ payload, payloadLength, receivedAtMs });
+    this.queue.push({ payload, payloadLength, receivedAtMs, protocolTrace });
     return {
       receivedAtMs,
       pendingCount: this.queue.length,
@@ -116,6 +123,7 @@ function assistantDeltaDrainTelemetry(
   frameScheduledAtMs: number,
 ): SessionAssistantDeltaDrainTelemetry {
   const lastPayload = entries[entries.length - 1]?.payload;
+  const lastProtocolTrace = entries[entries.length - 1]?.protocolTrace;
   return {
     payloadLength: sum(entries, (entry) => entry.payloadLength),
     turnId: lastPayload?.turnId ?? "",
@@ -127,6 +135,7 @@ function assistantDeltaDrainTelemetry(
     oldestReceivedAtMs: entries.length > 0 ? Math.min(...entries.map((entry) => entry.receivedAtMs)) : 0,
     newestReceivedAtMs: entries.length > 0 ? Math.max(...entries.map((entry) => entry.receivedAtMs)) : 0,
     frameScheduledAtMs,
+    turnRenderProtocol: lastProtocolTrace?.turnRenderProtocol ?? "",
   };
 }
 

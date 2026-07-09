@@ -1704,10 +1704,12 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("sessionDetailSnapshotKey(previous) === sessionDetailSnapshotKey(nextDetail)");
     expect(routeSource).toContain("setActiveTurnLayerForSession(current, streamSessionId, undefined)");
     expect(routeSource).toContain("let pendingDetail: SessionDetail | null = null");
-    expect(routeSource).toContain("function queueSessionDetail(detail: SessionDetail, payloadLength: number)");
+    expect(routeSource).toContain("let pendingDetailTrace: SessionStreamProtocolTrace | null = null");
+    expect(routeSource).toContain("function queueSessionDetail(detail: SessionDetail, trace: SessionStreamProtocolTrace)");
     expect(routeSource).toContain("browser.session_stream.snapshot_queued");
     expect(routeSource).toContain("browser.session_stream.snapshot_applied");
-    expect(routeSource).toContain("queueSessionDetail(payload.detail, event.data.length)");
+    expect(routeSource).toContain("queueSessionDetail(routed.payload.detail, routed.trace)");
+    expect(routeSource).toContain("sessionStreamProtocolTelemetryFields(trace)");
   });
 
   it("applies lightweight assistant delta stream events on browser frames without timer coalescing", () => {
@@ -1737,7 +1739,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("window.requestAnimationFrame");
     expect(routeSource).toContain("window.cancelAnimationFrame");
     expect(routeSource).toContain("function queueAssistantDelta(");
-    expect(routeSource).toContain("assistantDeltaScheduler.enqueue(payload, payloadLength)");
+    expect(routeSource).toContain("assistantDeltaScheduler.enqueue(payload, trace.payloadLength, trace)");
     expect(routeSource).toContain("const applyStartedAtMs = chatStreamPerformanceNowMs()");
     expect(routeSource).toContain("applyPendingAssistantDeltas(\"final\")");
     expect(routeSource).toContain("browser.session_stream.assistant_delta_frame_scheduled");
@@ -1751,10 +1753,13 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).not.toContain("let pendingAssistantDeltaDetail: SessionDetail | undefined");
     expect(routeSource).not.toContain("pendingAssistantDeltaDetail = mergeAssistantDeltaIntoSessionDetail");
     expect(routeSource).not.toContain("queryClient.setQueryData<SessionDetail>(queryKeys.session(streamSessionId)");
-    expect(routeSource).toContain("queueAssistantDelta(payload, event.data.length)");
+    expect(routeSource).toContain("queueAssistantDelta(routed.payload, routed.trace)");
     expect(routeSource).toContain("applyPendingAssistantDeltas(\"close\")");
     expect(routeSource).toContain("browser.session_stream.assistant_delta_applied");
     expect(routeSource).toContain("pendingTextLength");
+    expect(routeSource).toContain("turnRenderProtocol: telemetry?.turnRenderProtocol ?? \"\"");
+    expect(routeSource).toContain("routeSessionStreamEvent({");
+    expect(routeSource).toContain("sessionStreamProtocolTelemetryFields(routed.trace)");
     expect(routeSource).toContain("batchSize");
     expect(routeSource).toContain("drainMode: drain.mode");
     expect(routeSource).toContain("pendingBefore: drain.pendingBefore");
@@ -1782,15 +1787,17 @@ describe("ChatCodingRoute layout contract", () => {
       "stream.addEventListener(\"session_initial\", handleSessionInitial as EventListener);",
     );
     expectOrderedFragments(handleAssistantDeltaSection, [
-      "if (!shouldAcceptSessionStreamEvent(payload, streamSessionId) || payload.type !== \"assistant_delta\") {",
-      "desktopConversationNotifierRef.current.handleAssistantDelta(payload, {",
-      "queueAssistantDelta(payload, event.data.length);",
+      "const routed = routeSessionStreamEvent({",
+      "expectedType: \"assistant_delta\"",
+      "if (!routed.accepted) {",
+      "desktopConversationNotifierRef.current.handleAssistantDelta(routed.payload, {",
+      "queueAssistantDelta(routed.payload, routed.trace);",
     ]);
 
     const applyPendingDetailSection = sliceRequiredSection(
       routeSource,
       "function applyPendingDetail(reason: \"timer\" | \"close\" | \"final\") {",
-      "function queueSessionDetail(detail: SessionDetail, payloadLength: number) {",
+      "function queueSessionDetail(detail: SessionDetail, trace: SessionStreamProtocolTrace) {",
     );
     expectOrderedFragments(applyPendingDetailSection, [
       "syncSessionDetail(detail);",
