@@ -91,6 +91,8 @@ _OBSERVATION_RUN_STATE_LOCK = threading.RLock()
 _OBSERVATION_RUNS: dict[str, dict[str, Any]] = {}
 _ACTIVE_OBSERVATION_RUN_ID: str = ""
 _SELF_OBSERVATION_EVENT_TAIL_LIMIT = 12
+_SELF_OBSERVATION_CONTINUATION_SLEEP_SECONDS = 1.0
+_SELF_OBSERVATION_CONTINUATION_PREVIOUS_OUTPUT_CHARS = 6000
 _MANAGER_CONTROL_KEY = "runtimeManagerControl"
 SELF_OBSERVATION_MIN_DURATION_SECONDS = 30
 SELF_OBSERVATION_MAX_DURATION_SECONDS = 3600
@@ -2521,6 +2523,7 @@ def _invoke_strict_self_observation_llm(
     agent_id: str,
     prompt: str,
     duration_seconds: int,
+    invocation_index: int = 1,
 ) -> dict[str, Any]:
     if _self_observation_operator_terminated(run_id):
         raise TimeoutError("Observation session was terminated before model invocation.")
@@ -2534,6 +2537,7 @@ def _invoke_strict_self_observation_llm(
         "messageRoleSummary": ["user"],
         "toolsCount": 0,
         "promptChars": len(str(prompt or "")),
+        "invocationIndex": int(invocation_index or 1),
     }
     _record_self_scene_event(
         "self_observation",
@@ -2548,6 +2552,7 @@ def _invoke_strict_self_observation_llm(
             "toolsCount": 0,
             "promptChars": len(str(prompt or "")),
             "invocationPath": "strict_direct_llm",
+            "invocationIndex": int(invocation_index or 1),
         },
         lifecycle=True,
     )
@@ -2586,6 +2591,7 @@ def _invoke_strict_self_observation_llm(
             "outputChars": len(content),
             "toolCallCount": len(tool_calls),
             "invocationPath": "strict_direct_llm",
+            "invocationIndex": int(invocation_index or 1),
         },
         lifecycle=True,
     )
@@ -2636,6 +2642,24 @@ def _append_self_observation_assistant_artifact(
                 "errorType": type(exc).__name__,
             },
         )
+
+
+def _build_self_observation_continuation_prompt(
+    original_prompt: str,
+    previous_output: str,
+    *,
+    remaining_seconds: float,
+) -> str:
+    bounded_previous_output = str(previous_output or "").strip()
+    if len(bounded_previous_output) > _SELF_OBSERVATION_CONTINUATION_PREVIOUS_OUTPUT_CHARS:
+        bounded_previous_output = bounded_previous_output[-_SELF_OBSERVATION_CONTINUATION_PREVIOUS_OUTPUT_CHARS:]
+    remaining = max(0, int(remaining_seconds))
+    return (
+        f"{str(original_prompt or '')}\n\n"
+        "上一段观察输出：\n"
+        f"{bounded_previous_output}\n\n"
+        f"时间仍未结束，剩余约 {remaining} 秒。请继续下一段观察，不要总结结束，也不要重复上一段。"
+    )
 
 
 def _run_observation_session(*, run_id: str, prompt: str, duration_seconds: int) -> dict[str, Any]:
@@ -2689,34 +2713,83 @@ def _run_observation_session(*, run_id: str, prompt: str, duration_seconds: int)
         conversation_session_id=session_id,
         turn_id=turn_id,
     )
-    llm_result = _invoke_strict_self_observation_llm(
-        run_id=run_id,
-        session_id=session_id,
-        agent_id=agent_id,
-        prompt=prompt,
-        duration_seconds=duration_seconds,
-    )
-    report = str(llm_result.get("content") or "").strip()
-    if not report:
-        report = (
-            "当前理解：\n"
-            "- observation LLM 调用已结束，但未返回可见 assistant 输出。\n\n"
-            "无法验证：\n"
-            "- 未获得模型输出内容。"
+    started_monotonic = time.monotonic()
+    deadline_monotonic = started_monotonic + max(0.0, float(duration_seconds or 0))
+    assistant_messages: list[str] = []
+    current_prompt = prompt
+    turn_duration_seconds = max(1, int(duration_seconds or 1))
+    invocation_index = 1
+
+    while True:
+        llm_result = _invoke_strict_self_observation_llm(
+            run_id=run_id,
+            session_id=session_id,
+            agent_id=agent_id,
+            prompt=current_prompt,
+            duration_seconds=turn_duration_seconds,
+            invocation_index=invocation_index,
         )
-    assistant_messages = [report] if report else []
-    _append_self_observation_assistant_artifact(
-        run_id=run_id,
-        session_id=session_id,
-        content=report,
-        model_id=str(llm_result.get("modelId") or "").strip(),
-    )
-    _update_self_observation_progress(
-        run_id,
-        conversation_session_id=session_id,
-        latest_message=report,
-        messages=assistant_messages,
-    )
+        report = str(llm_result.get("content") or "").strip()
+        if not report:
+            report = (
+                "当前理解：\n"
+                "- observation LLM 调用已结束，但未返回可见 assistant 输出。\n\n"
+                "无法验证：\n"
+                "- 未获得模型输出内容。"
+            )
+        assistant_messages.append(report)
+        _append_self_observation_assistant_artifact(
+            run_id=run_id,
+            session_id=session_id,
+            content=report,
+            model_id=str(llm_result.get("modelId") or "").strip(),
+        )
+        _update_self_observation_progress(
+            run_id,
+            conversation_session_id=session_id,
+            latest_message=report,
+            messages=assistant_messages,
+        )
+
+        if detect_self_observation_boundary_violation(report):
+            break
+
+        remaining_seconds = deadline_monotonic - time.monotonic()
+        if remaining_seconds <= 0:
+            break
+        if _self_observation_operator_terminated(run_id):
+            break
+
+        next_invocation_index = invocation_index + 1
+        _append_self_observation_event(
+            run_id,
+            event="continuation_prompt_submitted",
+            status="running",
+            message=text_for(
+                get_web_language(),
+                zh=f"观察输出暂停但运行时长未结束，继续第 {next_invocation_index} 段观察。",
+                en=f"Observation output paused before the duration expired; continuing segment {next_invocation_index}.",
+            ),
+            conversation_session_id=session_id,
+            turn_id=f"strict:{run_id}:{next_invocation_index}",
+        )
+        sleep_seconds = min(_SELF_OBSERVATION_CONTINUATION_SLEEP_SECONDS, remaining_seconds)
+        if sleep_seconds > 0:
+            time.sleep(sleep_seconds)
+        remaining_after_wait = deadline_monotonic - time.monotonic()
+        if remaining_after_wait <= 0:
+            break
+        if _self_observation_operator_terminated(run_id):
+            break
+        current_prompt = _build_self_observation_continuation_prompt(
+            prompt,
+            report,
+            remaining_seconds=remaining_after_wait,
+        )
+        turn_duration_seconds = max(1, int(remaining_after_wait))
+        invocation_index = next_invocation_index
+
+    report = "\n\n".join(assistant_messages).strip()
     return {
         "conversationSessionId": session_id,
         "messages": assistant_messages,
