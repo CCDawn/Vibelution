@@ -9429,13 +9429,70 @@ _SESSION_LLM_PAYLOAD_TRACE_INT_FIELDS = {
     "toolCount",
     "imageBlockCount",
 }
-_SESSION_LLM_PAYLOAD_TRACE_DICT_FIELDS = {
-    "messageRoleCounts",
-    "payloadShape",
-    "promptCache",
-    "thinking",
-    "contextAssembly",
+_SESSION_LLM_PAYLOAD_TRACE_MAP_FIELD_KEYS = {
+    "payloadShape": {
+        "inputItemCount",
+        "messagePayloadCount",
+        "toolDefinitionCount",
+        "imageBlockCount",
+        "hasTools",
+        "usesResponsesPayload",
+    },
+    "promptCache": {
+        "promptCacheMode",
+        "promptCacheEnabled",
+        "promptCachePayloadEnabled",
+        "promptCachePartitionHash",
+        "promptCachePartitionChars",
+        "cacheControlMessageCount",
+    },
+    "thinking": {
+        "thinkingRequested",
+        "thinkingType",
+        "thinkingDisplay",
+    },
+    "contextAssembly": {
+        "turnId",
+        "messageCount",
+        "includedMessageCount",
+        "historyMessageCount",
+        "toolResultCount",
+        "contextTokenEstimate",
+        "tokenBudget",
+        "truncated",
+    },
 }
+
+
+def _normalize_llm_payload_trace_counts(value: Any) -> dict[str, int]:
+    if not isinstance(value, dict):
+        return {}
+    counts: dict[str, int] = {}
+    for item_key, item_value in value.items():
+        key = str(item_key or "").strip()
+        if not key:
+            continue
+        counts[key] = _coerce_nonnegative_int(item_value)
+    return counts
+
+
+def _normalize_llm_payload_trace_map(value: Any, allowed_keys: set[str]) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return {}
+    safe_item: dict[str, Any] = {}
+    for key in allowed_keys:
+        item_value = value.get(key)
+        if item_value in (None, ""):
+            continue
+        if isinstance(item_value, bool):
+            safe_item[key] = item_value
+        elif isinstance(item_value, (int, float)):
+            safe_item[key] = _coerce_nonnegative_int(item_value)
+        elif isinstance(item_value, str):
+            text = item_value.strip()
+            if text:
+                safe_item[key] = text
+    return safe_item
 
 
 def _normalize_session_llm_payload_trace(value: Any) -> dict[str, Any] | None:
@@ -9456,16 +9513,13 @@ def _normalize_session_llm_payload_trace(value: Any) -> dict[str, Any] | None:
         safe_roles = [str(role or "").strip() for role in roles if str(role or "").strip()]
         if safe_roles:
             trace["messageRoles"] = safe_roles[:80]
-    for key in _SESSION_LLM_PAYLOAD_TRACE_DICT_FIELDS:
-        item = value.get(key)
-        if isinstance(item, dict):
-            safe_item = {
-                str(item_key): item_value
-                for item_key, item_value in item.items()
-                if isinstance(item_value, (str, int, float, bool, list, dict)) and item_value not in (None, "")
-            }
-            if safe_item:
-                trace[key] = safe_item
+    message_role_counts = _normalize_llm_payload_trace_counts(value.get("messageRoleCounts"))
+    if message_role_counts:
+        trace["messageRoleCounts"] = message_role_counts
+    for key, allowed_keys in _SESSION_LLM_PAYLOAD_TRACE_MAP_FIELD_KEYS.items():
+        safe_item = _normalize_llm_payload_trace_map(value.get(key), allowed_keys)
+        if safe_item:
+            trace[key] = safe_item
     return trace or None
 
 

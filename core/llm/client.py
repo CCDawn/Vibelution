@@ -1397,6 +1397,8 @@ class LLMClient:
         thinking_summary = _safe_payload_thinking_summary(payload)
         protocol_summary = dict(self._last_payload_protocol_summary or payload_protocol_summary(payload, self.protocol_route))
         capability_source_summary = _safe_capability_source_summary(self._resolved_spec)
+        effective_tools = tools if tools is not None else self.bound_tools
+        tool_count = len(effective_tools or [])
         event_metadata = {
             **(metadata or {}),
             **message_role_summary,
@@ -1418,7 +1420,7 @@ class LLMClient:
             provider=self.provider.kind,
             model=self.profile.model,
             message_count=len(messages or []),
-            tool_count=len(tools or self.bound_tools or []),
+            tool_count=tool_count,
             metadata=trace_metadata,
             summaries=[
                 message_role_summary,
@@ -1442,7 +1444,7 @@ class LLMClient:
             phase="invoke",
             event_code="llm.invoke.failed",
             message_count=len(messages or []),
-            tool_count=len(tools or self.bound_tools or []),
+            tool_count=tool_count,
             metadata=event_metadata,
         )
         latency_ms = int((time.time() - start) * 1000)
@@ -1482,7 +1484,7 @@ class LLMClient:
                 "provider": self.provider.kind,
                 "model": self.profile.model,
                 "messageCount": len(messages or []),
-                "toolCount": len(tools or self.bound_tools or []),
+                "toolCount": tool_count,
                 "toolCallCount": len(tool_calls),
                 **route_summary,
                 **message_role_summary,
@@ -1741,7 +1743,8 @@ class LLMClient:
         """Yield normalized stream events independent of LangChain chunks."""
         payload = self._build_payload(messages, tools=tools, stream=True)
         message_count = len(messages or [])
-        tool_count = len(tools or self.bound_tools or [])
+        effective_tools = tools if tools is not None else self.bound_tools
+        tool_count = len(effective_tools or [])
         provider_conversation_items = _payload_conversation_items(payload) or messages
         message_role_summary = _safe_message_role_summary(provider_conversation_items)
         message_order_summary = _safe_message_order_cache_summary(provider_conversation_items)
