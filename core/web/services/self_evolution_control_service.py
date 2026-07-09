@@ -2162,26 +2162,7 @@ def _self_observation_tool_policy() -> dict[str, Any]:
 
 
 def build_self_observation_prompt(goal: str, duration_seconds: int) -> str:
-    normalized_goal = str(goal or "").strip() or DEFAULT_SELF_EVOLUTION_GOAL
-    normalized_duration = _normalize_observation_duration(duration_seconds)
-    return (
-        "你是 Vibelution 的自进化观察 Agent，处在无工具观察沙盒中。\n"
-        f"观察目标：{normalized_goal}\n"
-        f"运行时长上限：{normalized_duration} 秒。\n\n"
-        "硬性规则：\n"
-        "1. 你没有任何工具。\n"
-        "2. 你不能声称已经读取、搜索、运行、验证、修改、提交、合并或调用外部能力。\n"
-        "3. 你不能请求工具授权，因为本模式本阶段不支持工具申请。\n"
-        "4. 你只能理解目标、提出假设、分解可能路径、识别风险、描述未来需要的证据。\n"
-        "5. 需要证据时必须写入“无法验证”，不能编造结果。\n\n"
-        "每段输出使用以下结构：\n"
-        "当前理解：\n"
-        "可观察推理：\n"
-        "关键假设：\n"
-        "无法验证：\n"
-        "如果未来允许工具，需要的证据：\n"
-        "下一段观察重点：\n"
-    )
+    return str(goal or "").strip() or DEFAULT_SELF_EVOLUTION_GOAL
 
 
 def detect_self_observation_boundary_violation(text: str) -> str:

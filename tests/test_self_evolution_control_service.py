@@ -1135,15 +1135,15 @@ def test_runtime_manager_start_self_evolution_blocks_write_chat_session(monkeypa
         service.start_self_evolution_run({"goal": "managed"})
 
 
-def test_self_observation_prompt_is_no_tool_contract():
-    prompt = service.build_self_observation_prompt("观察自进化能力", duration_seconds=120)
+def test_self_observation_prompt_preserves_user_prompt_without_default_contract():
+    prompt = service.build_self_observation_prompt("  思考  ", duration_seconds=120)
 
-    assert "无工具观察沙盒" in prompt
-    assert "你没有任何工具" in prompt
-    assert "不能声称已经读取" in prompt
-    assert "不能请求工具授权" in prompt
-    assert "无法验证" in prompt
-    assert "未来需要的证据" in prompt
+    assert prompt == "思考"
+    assert "无工具观察沙盒" not in prompt
+    assert "你没有任何工具" not in prompt
+    assert "不能声称已经读取" not in prompt
+    assert "不能请求工具授权" not in prompt
+    assert "未来需要的证据" not in prompt
 
 
 def test_self_observation_boundary_violation_detects_fake_execution_claims():
