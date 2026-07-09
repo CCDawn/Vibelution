@@ -135,4 +135,25 @@ describe("sessionAssistantDeltaScheduler", () => {
     expect(drain.telemetry.contentDeltaLength).toBe(0);
     expect(drain.telemetry.thoughtDeltaLength).toBe(0);
   });
+
+  it("carries stream protocol trace through assistant delta drains", () => {
+    const scheduler = createSessionAssistantDeltaScheduler({ nowMs: () => 0 });
+
+    scheduler.enqueue(assistantDelta({ contentDelta: "回答" }), 80, {
+      expectedType: "assistant_delta",
+      actualType: "assistant_delta",
+      eventRoute: "assistant_delta",
+      turnRenderProtocol: "legacy_assistant_delta",
+      payloadLength: 80,
+      sessionId: "session-1",
+      ledgerSeq: 1,
+      turnId: "turn-1",
+      stage: "responding",
+      done: false,
+    });
+
+    const drain = scheduler.drain("frame");
+
+    expect(drain.telemetry.turnRenderProtocol).toBe("legacy_assistant_delta");
+  });
 });

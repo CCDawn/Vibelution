@@ -1,14 +1,15 @@
 import { mergeAgentFeedbackEvents } from "../agent-thread/agentFeedbackEvents";
 import {
-  answerProjectionContent,
   isInternalStreamingStatusContent,
   isInternalStreamingStatusStage,
 } from "../components/conversation/conversationInternalStatus";
-import {
-  shouldDisplayRuntimeStatus,
-  shouldDisplayTranscriptCell,
-} from "../components/conversation/conversationDisplayProtocol";
+import { shouldDisplayRuntimeStatus } from "../components/conversation/conversationDisplayProtocol";
 import type { ConversationMessage, SessionDetail, SessionStreamEvent } from "../api/types";
+import {
+  activeTurnProtocolTextLength,
+  hasCommittedAssistantProtocolAnswer,
+  hasVisibleActiveTurnProtocolContent,
+} from "./chatTurnProtocol";
 
 export type AssistantDeltaEvent = Extract<SessionStreamEvent, { type: "assistant_delta" }>;
 type ConversationFeedbackEvent = NonNullable<ConversationMessage["feedbackEvents"]>[number];
@@ -85,29 +86,6 @@ function visibleFeedbackEvents(events: ConversationFeedbackEvent[]) {
   return events.filter(hasVisibleFeedbackEvent);
 }
 
-function hasVisibleCodexTranscript(transcript: ConversationMessage["codexTranscript"] | undefined) {
-  return Boolean(
-    transcript
-    && String(transcript.source ?? "").trim() === "native"
-    && Array.isArray(transcript.cells)
-    && transcript.cells.some(shouldDisplayTranscriptCell)
-  );
-}
-
-function hasVisibleActiveTurnContent(layer: {
-  answerContent: string;
-  thoughtContent: string;
-  feedbackEvents: ConversationFeedbackEvent[];
-  codexTranscript?: ConversationMessage["codexTranscript"];
-}) {
-  return Boolean(
-    compactText(layer.answerContent)
-    || compactText(layer.thoughtContent)
-    || layer.feedbackEvents.length > 0
-    || hasVisibleCodexTranscript(layer.codexTranscript)
-  );
-}
-
 export function mergeAssistantDeltaIntoActiveTurnLayer(
   previous: ActiveTurnLayerState | undefined,
   payload: AssistantDeltaEvent,
@@ -131,10 +109,10 @@ export function mergeAssistantDeltaIntoActiveTurnLayer(
     ? visibleFeedbackEvents(mergeAgentFeedbackEvents(base?.feedbackEvents, payload.feedbackEvents))
     : base?.feedbackEvents ?? [];
   const codexTranscript = payload.codexTranscript ?? base?.codexTranscript;
-  if (!hasVisibleActiveTurnContent({
+  if (!hasVisibleActiveTurnProtocolContent({
     answerContent: content,
     thoughtContent: thought,
-    feedbackEvents,
+    feedbackEventCount: feedbackEvents.length,
     codexTranscript,
   })) {
     return undefined;
@@ -182,7 +160,11 @@ export function activeTurnLayerToConversationMessage(
 }
 
 export function activeTurnLayerTextLength(layer: ActiveTurnLayerState | undefined): number {
-  return String(layer?.answerContent ?? "").length + String(layer?.thoughtContent ?? "").length;
+  return activeTurnProtocolTextLength({
+    answerContent: layer?.answerContent,
+    thoughtContent: layer?.thoughtContent,
+    codexTranscript: layer?.codexTranscript,
+  });
 }
 
 export function isActiveTurnSettledByDetail(
@@ -201,6 +183,6 @@ export function isActiveTurnSettledByDetail(
     && String(message.metadata?.kind ?? "") !== "session_live_overlay"
     && String(message.metadata?.kind ?? "") !== "session_active_turn_layer"
     && messageTurnId(message) === activeTurnId
-    && Boolean(String(answerProjectionContent(message) ?? "").trim())
+    && hasCommittedAssistantProtocolAnswer(message)
   ));
 }

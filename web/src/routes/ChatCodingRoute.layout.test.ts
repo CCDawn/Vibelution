@@ -12,6 +12,7 @@ import routerSource from "../app/router.tsx?raw";
 import shellStoreSource from "../store/shellStore.ts?raw";
 import agentSessionTabStripSource from "./AgentSessionTabStrip.tsx?raw";
 import routeSource from "./ChatCodingRoute.tsx?raw";
+import chatStreamApplyControllerSource from "./chatStreamApplyController.ts?raw";
 import terminalPanelSource from "./chat/CliAgentRunTerminalPanel.tsx?raw";
 import conversationIndexModelSource from "./conversationIndexModel.ts?raw";
 import conversationIndexTreeSource from "./ConversationIndexTree.tsx?raw";
@@ -398,7 +399,8 @@ describe("ChatCodingRoute layout contract", () => {
   it("keeps live assistant output in an active turn layer outside committed session messages", () => {
     expect(routeSource).toContain("activeTurnLayersBySession");
     expect(routeSource).toContain("activeTurnMessage,");
-    expect(routeSource).toContain("mergeAssistantDeltaIntoActiveTurnLayer");
+    expect(routeSource).toContain("planAppliedAssistantDeltaDrain");
+    expect(chatStreamApplyControllerSource).toContain("mergeAssistantDeltaIntoActiveTurnLayer");
     expect(routeSource).toContain("isActiveTurnSettledByDetail");
     expect(routeSource).not.toContain("mergeLiveAssistantMessagesIntoSessionDetail");
     expect(routeSource).not.toContain("setLiveAssistantMessagesBySession");
@@ -1704,10 +1706,12 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("sessionDetailSnapshotKey(previous) === sessionDetailSnapshotKey(nextDetail)");
     expect(routeSource).toContain("setActiveTurnLayerForSession(current, streamSessionId, undefined)");
     expect(routeSource).toContain("let pendingDetail: SessionDetail | null = null");
-    expect(routeSource).toContain("function queueSessionDetail(detail: SessionDetail, payloadLength: number)");
+    expect(routeSource).toContain("let pendingDetailTrace: SessionStreamProtocolTrace | null = null");
+    expect(routeSource).toContain("function queueSessionDetail(detail: SessionDetail, trace: SessionStreamProtocolTrace)");
     expect(routeSource).toContain("browser.session_stream.snapshot_queued");
     expect(routeSource).toContain("browser.session_stream.snapshot_applied");
-    expect(routeSource).toContain("queueSessionDetail(payload.detail, event.data.length)");
+    expect(routeSource).toContain("queueSessionDetail(routed.payload.detail, routed.trace)");
+    expect(routeSource).toContain("sessionStreamProtocolTelemetryFields(trace)");
   });
 
   it("applies lightweight assistant delta stream events on browser frames without timer coalescing", () => {
@@ -1716,15 +1720,17 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("activeTurnLayersBySession");
     expect(routeSource).toContain("activeTurnLayersBySessionRef");
     expect(routeSource).toContain("Record<string, ActiveTurnLayerState>");
-    expect(routeSource).toContain("mergeAssistantDeltaIntoActiveTurnLayer(pendingLayer, entry.payload)");
-    expect(routeSource).toContain("setActiveTurnLayerForSession(current, streamSessionId, pendingLayer)");
+    expect(routeSource).toContain("planAppliedAssistantDeltaDrain({");
+    expect(routeSource).toContain("committedLayer: committedAssistantDeltaLayer");
+    expect(routeSource).toContain("setActiveTurnLayerForSession(current, streamSessionId, decision.nextCommittedLayer)");
+    expect(chatStreamApplyControllerSource).toContain("mergeAssistantDeltaIntoActiveTurnLayer(pendingLayer, entry.payload)");
     expect(routeSource).toContain("isActiveTurnSettledByDetail(activeLayer, detail)");
     expect(routeSource).toContain("activeTurnMessage,");
     expect(routeSource).toContain("function isStaleLedgerUpdate(currentSeq: unknown, incomingSeq: unknown)");
     expect(routeSource).not.toContain("function mergeLiveAssistantMessagesIntoSessionDetail(");
     expect(routeSource).not.toContain("kind: \"session_live_overlay\"");
-    expect(routeSource).toContain("committedAssistantDeltaLayer = pendingLayer");
-    expect(routeSource).toContain("pendingTextLength: activeTurnLayerTextLength(pendingLayer)");
+    expect(routeSource).toContain("committedAssistantDeltaLayer = decision.nextCommittedLayer");
+    expect(chatStreamApplyControllerSource).toContain("pendingTextLength: activeTurnLayerTextLength(input.pendingLayer)");
     expect(routeSource).toContain("createSessionAssistantDeltaScheduler");
     expect(routeSource).toContain("const assistantDeltaScheduler = createSessionAssistantDeltaScheduler({");
     expect(routeSource).toContain("nowMs: chatStreamPerformanceNowMs");
@@ -1732,12 +1738,12 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("let assistantDeltaApplyFrame: number | null = null");
     expect(routeSource).toContain("function applyPendingAssistantDeltas(reason: \"frame\" | \"close\" | \"final\")");
     expect(routeSource).toContain("assistantDeltaScheduler.drain(reason, { frameScheduledAtMs: scheduledAtMs })");
-    expect(routeSource).toContain("for (const entry of drain.entries)");
+    expect(chatStreamApplyControllerSource).toContain("for (const entry of input.drain.entries)");
     expect(routeSource).toContain("function scheduleAssistantDeltaFrame()");
     expect(routeSource).toContain("window.requestAnimationFrame");
     expect(routeSource).toContain("window.cancelAnimationFrame");
     expect(routeSource).toContain("function queueAssistantDelta(");
-    expect(routeSource).toContain("assistantDeltaScheduler.enqueue(payload, payloadLength)");
+    expect(routeSource).toContain("assistantDeltaScheduler.enqueue(payload, trace.payloadLength, trace)");
     expect(routeSource).toContain("const applyStartedAtMs = chatStreamPerformanceNowMs()");
     expect(routeSource).toContain("applyPendingAssistantDeltas(\"final\")");
     expect(routeSource).toContain("browser.session_stream.assistant_delta_frame_scheduled");
@@ -1751,21 +1757,24 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).not.toContain("let pendingAssistantDeltaDetail: SessionDetail | undefined");
     expect(routeSource).not.toContain("pendingAssistantDeltaDetail = mergeAssistantDeltaIntoSessionDetail");
     expect(routeSource).not.toContain("queryClient.setQueryData<SessionDetail>(queryKeys.session(streamSessionId)");
-    expect(routeSource).toContain("queueAssistantDelta(payload, event.data.length)");
+    expect(routeSource).toContain("queueAssistantDelta(routed.payload, routed.trace)");
     expect(routeSource).toContain("applyPendingAssistantDeltas(\"close\")");
     expect(routeSource).toContain("browser.session_stream.assistant_delta_applied");
     expect(routeSource).toContain("pendingTextLength");
+    expect(chatStreamApplyControllerSource).toContain("turnRenderProtocol: input.drain.telemetry.turnRenderProtocol ?? \"\"");
+    expect(routeSource).toContain("routeSessionStreamEvent({");
+    expect(routeSource).toContain("sessionStreamProtocolTelemetryFields(routed.trace)");
     expect(routeSource).toContain("batchSize");
-    expect(routeSource).toContain("drainMode: drain.mode");
-    expect(routeSource).toContain("pendingBefore: drain.pendingBefore");
-    expect(routeSource).toContain("pendingAfter: drain.pendingAfter");
-    expect(routeSource).toContain("oldestQueuedAgeMs");
-    expect(routeSource).toContain("oldestReceivedAtMs");
-    expect(routeSource).toContain("newestReceivedAtMs");
-    expect(routeSource).toContain("receivedToApplyMs");
-    expect(routeSource).toContain("queuedForMs");
-    expect(routeSource).toContain("frameLagMs");
-    expect(routeSource).toContain("applyElapsedMs");
+    expect(chatStreamApplyControllerSource).toContain("drainMode: input.drain.mode");
+    expect(chatStreamApplyControllerSource).toContain("pendingBefore: input.drain.pendingBefore");
+    expect(chatStreamApplyControllerSource).toContain("pendingAfter: input.drain.pendingAfter");
+    expect(chatStreamApplyControllerSource).toContain("oldestQueuedAgeMs");
+    expect(chatStreamApplyControllerSource).toContain("oldestReceivedAtMs");
+    expect(chatStreamApplyControllerSource).toContain("newestReceivedAtMs");
+    expect(chatStreamApplyControllerSource).toContain("receivedToApplyMs");
+    expect(chatStreamApplyControllerSource).toContain("queuedForMs");
+    expect(chatStreamApplyControllerSource).toContain("frameLagMs");
+    expect(chatStreamApplyControllerSource).toContain("applyElapsedMs");
     expect(routeSource).not.toContain("pendingTextLength: String(projectedLayer?.content ?? \"\").length + String(projectedLayer?.thought ?? \"\").length");
     const queueAssistantDeltaStart = routeSource.indexOf("function queueAssistantDelta(");
     const handleSessionInitialStart = routeSource.indexOf("function handleSessionInitial", queueAssistantDeltaStart);
@@ -1782,15 +1791,17 @@ describe("ChatCodingRoute layout contract", () => {
       "stream.addEventListener(\"session_initial\", handleSessionInitial as EventListener);",
     );
     expectOrderedFragments(handleAssistantDeltaSection, [
-      "if (!shouldAcceptSessionStreamEvent(payload, streamSessionId) || payload.type !== \"assistant_delta\") {",
-      "desktopConversationNotifierRef.current.handleAssistantDelta(payload, {",
-      "queueAssistantDelta(payload, event.data.length);",
+      "const routed = routeSessionStreamEvent({",
+      "expectedType: \"assistant_delta\"",
+      "if (!routed.accepted) {",
+      "desktopConversationNotifierRef.current.handleAssistantDelta(routed.payload, {",
+      "queueAssistantDelta(routed.payload, routed.trace);",
     ]);
 
     const applyPendingDetailSection = sliceRequiredSection(
       routeSource,
       "function applyPendingDetail(reason: \"timer\" | \"close\" | \"final\") {",
-      "function queueSessionDetail(detail: SessionDetail, payloadLength: number) {",
+      "function queueSessionDetail(detail: SessionDetail, trace: SessionStreamProtocolTrace) {",
     );
     expectOrderedFragments(applyPendingDetailSection, [
       "syncSessionDetail(detail);",
