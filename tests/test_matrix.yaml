@@ -48,6 +48,7 @@ rules:
       - "frontend"
     paths:
       - "core/web/services/session_service.py"
+      - "core/web/services/session/**"
       - "core/web/services/chat_room_service.py"
       - "core/web/routes/sessions.py"
       - "core/web/routes/chat_rooms.py"
@@ -59,6 +60,7 @@ rules:
       - "web/src/routes/ChatCodingRoute.tsx"
       - "web/src/routes/ChatCodingRoute.styles.ts"
       - "web/src/routes/ChatCodingRoute.layout.test.ts"
+      - "web/src/routes/chat/**"
       - "web/src/components/conversation/**"
     commands:
       - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_web_session_routes.py tests/test_chat_room_service.py tests/test_chat_room_routes.py -q"
@@ -212,6 +214,7 @@ rules:
       - "core/web/services/team_service.py"
       - "core/web/services/team_knowledge_service.py"
       - "core/web/services/team_workflow_orchestration_service.py"
+      - "core/web/services/team_workflow/**"
       - "core/web/routes/team_workflows.py"
       - "tests/test_team_service.py"
       - "tests/test_team_knowledge_service.py"
@@ -220,6 +223,7 @@ rules:
       - "web/src/routes/TeamsRoute.tsx"
       - "web/src/routes/TeamsRoute.styles.ts"
       - "web/src/routes/TeamsRoute.layout.test.ts"
+      - "web/src/routes/teams/**"
       - "挑战杯/**"
     commands:
       - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_team_service.py tests/test_team_knowledge_service.py tests/test_team_workflow_orchestration_service.py tests/test_team_workflow_routes.py -q"
@@ -237,6 +241,7 @@ rules:
     paths:
       - "web/src/routes/**"
       - "web/src/components/**"
+      - "web/src/api/types/**"
       - "web/src/api/**"
       - "web/src/app/**"
       - "web/src/i18n/**"
