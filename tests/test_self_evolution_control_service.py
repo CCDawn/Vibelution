@@ -1200,11 +1200,19 @@ def test_start_self_observation_run_rejects_tool_and_authorization_fields(monkey
 def _install_strict_self_observation_llm(
     monkeypatch,
     *,
-    content: str,
+    content: str | list[str],
     model_id: str = "observer-model",
 ) -> tuple[dict[str, object], list[dict[str, object]]]:
     captured: dict[str, object] = {}
     artifact_messages: list[dict[str, object]] = []
+    response_contents = list(content) if isinstance(content, list) else [content]
+    monotonic_state = {"calls": 0}
+
+    def default_monotonic() -> float:
+        monotonic_state["calls"] += 1
+        return 0.0 if monotonic_state["calls"] == 1 else 999999.0
+
+    monkeypatch.setattr(service.time, "monotonic", default_monotonic)
 
     monkeypatch.setattr(
         service.agent_directory_service,
@@ -1226,11 +1234,22 @@ def _install_strict_self_observation_llm(
     monkeypatch.setattr(service, "get_llm_client", lambda **kwargs: SimpleNamespace(), raising=False)
 
     def fake_invoke_llm(client, messages, *, context, tools=None, metadata=None):
+        calls = captured.setdefault("calls", [])
+        assert isinstance(calls, list)
+        response_content = response_contents[min(len(calls), len(response_contents) - 1)]
+        calls.append(
+            {
+                "messages": copy.deepcopy(messages),
+                "tools": copy.deepcopy(tools),
+                "context": context,
+                "metadata": copy.deepcopy(metadata),
+            }
+        )
         captured["messages"] = copy.deepcopy(messages)
         captured["tools"] = copy.deepcopy(tools)
         captured["context"] = context
         captured["metadata"] = copy.deepcopy(metadata)
-        return SimpleNamespace(content=content, tool_calls=[])
+        return SimpleNamespace(content=response_content, tool_calls=[])
 
     monkeypatch.setattr(service, "invoke_llm", fake_invoke_llm, raising=False)
 
@@ -1344,6 +1363,48 @@ def test_self_observation_session_sends_only_raw_prompt_to_strict_llm(monkeypatc
     assert result["messages"] == ["当前理解：只观察。\n可观察推理：没有工具。"]
     assert artifact_messages[0]["content"] == result["report"]
     assert artifact_messages[0]["toolCalls"] == []
+
+
+def test_self_observation_session_continues_until_duration_when_model_stops(monkeypatch):
+    raw_prompt = "思考"
+    captured, artifact_messages = _install_strict_self_observation_llm(
+        monkeypatch,
+        content=["第一段观察", "第二段观察"],
+    )
+
+    monkeypatch.setattr(service, "self_observation_agent_binding", lambda: {"agentId": "agent-observer-loop"})
+    monkeypatch.setattr(service, "create_supervised_agent_session", lambda **kwargs: {"id": "session-loop"})
+    monkeypatch.setattr(service.time, "sleep", lambda seconds: None)
+    monotonic_values = iter([0.0, 1.0, 1.0, 3.1])
+    monkeypatch.setattr(service.time, "monotonic", lambda: next(monotonic_values))
+
+    result = service._run_observation_session(
+        run_id="self-observe-loop",
+        prompt=raw_prompt,
+        duration_seconds=3,
+    )
+
+    calls = captured["calls"]
+    assert isinstance(calls, list)
+    assert len(calls) == 2
+    assert calls[0]["messages"] == [{"role": "user", "content": raw_prompt}]
+    assert calls[0]["tools"] == []
+    assert calls[1]["tools"] == []
+    assert calls[1]["messages"][0]["role"] == "user"
+    assert len(calls[1]["messages"]) == 1
+    continuation_prompt = calls[1]["messages"][0]["content"]
+    assert raw_prompt in continuation_prompt
+    assert "第一段观察" in continuation_prompt
+    assert "时间仍未结束" in continuation_prompt
+    payload_text = json.dumps(calls[1]["messages"], ensure_ascii=False)
+    assert "\"system\"" not in payload_text
+    assert "Dynamic System Context" not in payload_text
+    assert "你的记忆与状态" not in payload_text
+    assert result["conversationSessionId"] == "session-loop"
+    assert result["messages"] == ["第一段观察", "第二段观察"]
+    assert result["report"] == "第一段观察\n\n第二段观察"
+    assert [item["content"] for item in artifact_messages] == ["第一段观察", "第二段观察"]
+    assert all(item["toolCalls"] == [] for item in artifact_messages)
 
 
 def test_self_observation_turn_marks_boundary_violation(monkeypatch):
