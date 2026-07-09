@@ -30,6 +30,8 @@ export const selfEvolutionTrackStyles = {
   conversationShell: "grid h-full max-h-full min-h-[420px] min-w-0 max-w-full overflow-hidden overflow-x-hidden rounded-[var(--radius-panel)] border border-vui-border-subtle bg-vui-surface-panel max-[1180px]:h-[min(74vh,760px)] max-[1180px]:overflow-hidden max-[1180px]:overflow-x-hidden max-[760px]:h-[min(72vh,720px)] max-[760px]:min-h-[540px]",
   observationEvidenceRail:
     `grid h-full max-h-full min-h-0 content-start gap-3 overflow-auto p-3.5 max-[1180px]:h-auto max-[1180px]:max-h-none ${panelSurface}`,
+  observationConfigForm: "grid gap-2.5",
+  observationConfigActions: "flex flex-wrap items-center gap-2",
   observationEventTimeline: `grid gap-2 p-2.5 ${rowSurfaceSoft}`,
   observationEventItem:
     `grid gap-1.5 px-2.5 py-2 ${rowSurfaceSoft} [&_strong]:overflow-wrap-anywhere [&_strong]:text-[var(--vui-font-xs)] [&_strong]:text-vui-fg-primary`,
