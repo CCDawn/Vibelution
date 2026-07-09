@@ -39,6 +39,18 @@ describe("chat session stream protocol router", () => {
       expectedType: "assistant_delta",
       rawData: raw(assistantDelta({
         contentDelta: "",
+        itemId: "session-1-turn-turn-1-agent-message",
+        turnItems: [
+          {
+            id: "session-1-turn-turn-1-agent-message",
+            type: "agent_message",
+            status: "in_progress",
+            turnId: "turn-1",
+            messageId: "session-1-message-live-turn-1",
+            source: "assistant_delta",
+            text: "native answer",
+          },
+        ],
         codexTranscript: {
           version: 1,
           source: "native",
@@ -67,6 +79,8 @@ describe("chat session stream protocol router", () => {
       actualType: "assistant_delta",
       eventRoute: "assistant_delta",
       turnRenderProtocol: "native_codex_transcript",
+      itemId: "session-1-turn-turn-1-agent-message",
+      turnItemCount: 1,
       sessionId: "session-1",
       turnId: "turn-1",
       stage: "responding",
@@ -78,6 +92,8 @@ describe("chat session stream protocol router", () => {
       streamActualType: "assistant_delta",
       streamEventRoute: "assistant_delta",
       turnRenderProtocol: "native_codex_transcript",
+      streamItemId: "session-1-turn-turn-1-agent-message",
+      streamTurnItemCount: 1,
       streamRejectReason: "",
     });
   });
