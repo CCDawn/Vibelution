@@ -80,7 +80,6 @@ import { TeamSourceCollectionStageAgentsPanel, type TeamSourceCollectionStageAge
 import { TeamSourceCollectionRunSwitcherPanel, type TeamSourceCollectionRunSwitcherRun } from "./TeamSourceCollectionRunSwitcherPanel";
 import { TeamSourceCollectionFindingDetailsPanel } from "./TeamSourceCollectionFindingDetailsPanel";
 import {
-  TeamSourceCollectionOverviewPanel,
   type TeamSourceCollectionOverviewPlan,
   type TeamSourceCollectionOverviewResult,
   type TeamSourceCollectionOverviewStat,
@@ -112,6 +111,13 @@ import {
 } from "./TeamSourceCollectionResultControls";
 import { TeamSourceCollectionStorageActionsPanel, type TeamSourceCollectionStorageAction } from "./TeamSourceCollectionStorageActionsPanel";
 import { TeamWorkflowCandidatePreviewPanel, type TeamWorkflowCandidatePreviewItem } from "./TeamWorkflowCandidatePreviewPanel";
+import { TeamsSourceCollectionPanel } from "./teams/TeamsSourceCollectionPanel";
+import {
+  selectDefaultSourceCollectionRun,
+  sourceCollectionRunCandidateMetric,
+  sourceCollectionRunHasUsableRecords,
+  sourceCollectionRunRecordCount,
+} from "./teams/teamsRouteViewModel";
 import { TeamWorkflowGraphView, workflowGraphLayout } from "./TeamWorkflowGraphView";
 import {
   TeamWorkflowCandidateGraphStatusPanel,
@@ -2434,38 +2440,6 @@ function sourceCollectionRunsForTeam(payload: DataProcessingRunListPayload | und
   );
 }
 
-type SourceCollectionRunSummaryValue = DataProcessingRunListPayload["runs"][number] | null | undefined;
-
-function sourceCollectionRunMetric(run: SourceCollectionRunSummaryValue, keys: string[]) {
-  if (!run) {
-    return 0;
-  }
-  const scopes = [
-    run.summary,
-    (run.scope as Record<string, unknown> | undefined)?.sourceCollectionSummary,
-    (run.metadata as Record<string, unknown> | undefined)?.sourceCollectionSummary,
-    run.scope,
-    run.metadata,
-  ].filter((value): value is Record<string, unknown> => Boolean(value && typeof value === "object"));
-  for (const scope of scopes) {
-    for (const key of keys) {
-      const value = Number(scope[key]);
-      if (Number.isFinite(value) && value > 0) {
-        return value;
-      }
-    }
-  }
-  return 0;
-}
-
-export function sourceCollectionRunRecordCount(run: SourceCollectionRunSummaryValue) {
-  return sourceCollectionRunMetric(run, ["recordCount", "rawRecordCount", "createdUniqueRecordCount"]);
-}
-
-export function sourceCollectionRunCandidateMetric(run: SourceCollectionRunSummaryValue) {
-  return sourceCollectionRunMetric(run, ["sourceCandidateCount", "candidateCount", "importedCount"]);
-}
-
 export function sourceCollectionStableCountText(input: {
   loading: boolean;
   value: number;
@@ -2483,20 +2457,6 @@ export function sourceCollectionStableCountText(input: {
     return countText;
   }
   return value > 0 ? `${countText} · ${input.syncingText}` : input.loadingText;
-}
-
-function sourceCollectionRunHasUsableRecords(run: SourceCollectionRunSummaryValue) {
-  return sourceCollectionRunRecordCount(run) > 0 || sourceCollectionRunCandidateMetric(run) > 0;
-}
-
-export function selectDefaultSourceCollectionRun(
-  runs: DataProcessingRunListPayload["runs"],
-  requestedRunId: string,
-) {
-  return runs.find((run) => run.runId === requestedRunId)
-    ?? runs.find(sourceCollectionRunHasUsableRecords)
-    ?? runs[0]
-    ?? null;
 }
 
 function sourceCollectionRunLabel(runId: string) {
@@ -13135,7 +13095,7 @@ export function TeamsRoute({
                         </>
                       ) : null}
                       {showResearchSourceCollection ? (
-                      <TeamSourceCollectionOverviewPanel
+                      <TeamsSourceCollectionPanel
                         lang={lang}
                         title={lang === "zh" ? "资料搜索执行" : "Source collection"}
                         summary={sourceCollectionOverviewSummary}

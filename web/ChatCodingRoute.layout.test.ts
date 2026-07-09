@@ -2,12 +2,15 @@ import { describe, expect, it } from "vitest";
 
 import chatStyles from "./src/routes/ChatCodingRoute.styles";
 import chatRoute from "./src/routes/ChatCodingRoute.tsx?raw";
+import chatSessionWorkspacePanelStyles from "./src/routes/chat/ChatSessionWorkspacePanel.styles";
+import chatSessionWorkspacePanelSource from "./src/routes/chat/ChatSessionWorkspacePanel.tsx?raw";
 
 describe("ChatCodingRoute layout contract", () => {
   it("lets the conversation view fill the center frame so the composer stays at the bottom", () => {
-    expect(chatRoute).toContain("styles.conversationFrame");
-    expect(chatStyles.conversationFrame).toContain("min-w-0");
-    expect(chatStyles.conversationFrame).not.toContain("grid-rows-[auto_minmax(0,1fr)]");
+    expect(chatRoute).toContain("<ChatSessionWorkspacePanel");
+    expect(chatSessionWorkspacePanelSource).toContain("styles.conversationFrame");
+    expect(chatSessionWorkspacePanelStyles.conversationFrame).toContain("min-w-0");
+    expect(chatSessionWorkspacePanelStyles.conversationFrame).not.toContain("grid-rows-[auto_minmax(0,1fr)]");
   });
 
   it("keeps the next-turn mental model toggle in the left feature card", () => {

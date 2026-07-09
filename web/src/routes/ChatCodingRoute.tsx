@@ -70,7 +70,6 @@ import {
   SessionStreamEvent,
   SessionReferenceAttachment,
   SessionTurnAcceptedResponse,
-  SessionTurnError,
   SkillLibraryPayload,
   TeamListPayload,
   ConversationMessage,
@@ -185,13 +184,21 @@ import {
 import { CacheDetailDialog, type CacheDonutSegment } from "./chat/CacheDetailDialog";
 import {
   buildConversationComposerBridgeState,
-  ChatConversationComposerBridge,
 } from "./chat/ChatConversationComposerBridge";
-import { ChatFilePreviewPanel } from "./chat/ChatFilePreviewPanel";
 import { ChatFileWorkspaceTabs } from "./chat/ChatFileWorkspaceTabs";
-import { ChatRuntimeNoticeStack } from "./chat/ChatRuntimeNoticeStack";
-import { ChatToolApprovalDialog } from "./chat/ChatToolApprovalDialog";
+import { ChatSessionWorkspacePanel } from "./chat/ChatSessionWorkspacePanel";
 import { TokenCoreStatusPanel, type TokenCoreStatusMetric } from "./chat/TokenCoreStatusPanel";
+import {
+  clamp,
+  describeChatRouteError as describeError,
+  formatTokenSpeedValue,
+  getResizeBounds,
+  isBusyPhase,
+  isRunningPhase,
+  isStoppingPhase,
+  normalizePanelWidths,
+  shouldSuppressComposerErrorForTurnError,
+} from "./chat/chatCodingRouteViewModel";
 import styles from "./ChatCodingRoute.styles";
 
 const CliAgentRunTerminalPanel = lazy(() =>
@@ -1156,12 +1163,6 @@ function fetchSessionDetailWindow(
   return fetchJson<SessionDetail>(`/api/sessions/${encodeURIComponent(normalizedSessionId)}?${params.toString()}`);
 }
 
-const RESIZE_HANDLE_WIDTH = 10;
-const MIN_LEFT_PANEL_WIDTH = 260;
-const MAX_LEFT_PANEL_WIDTH = 560;
-const MIN_RIGHT_PANEL_WIDTH = 200;
-const MAX_RIGHT_PANEL_WIDTH = 520;
-const TARGET_CENTER_PANE_WIDTH = 800;
 const KEYBOARD_RESIZE_STEP = 24;
 const MENTAL_MODEL_TOGGLE_STORAGE_KEY = "vibelution.chat.mentalModelEnabled";
 const MAX_COMPOSER_IMAGE_ATTACHMENTS = 4;
@@ -1241,80 +1242,6 @@ function chatFeaturePresetShortLabel(key: FeaturePresetKey, lang: string, fallba
     default:
       return fallback;
   }
-}
-
-function clamp(value: number, min: number, max: number) {
-  return Math.min(Math.max(value, min), max);
-}
-
-function getDesiredCenterWidth(layoutWidth: number) {
-  const usableWidth = Math.max(0, layoutWidth - RESIZE_HANDLE_WIDTH * 2);
-  return Math.min(
-    TARGET_CENTER_PANE_WIDTH,
-    Math.max(0, usableWidth - MIN_LEFT_PANEL_WIDTH - MIN_RIGHT_PANEL_WIDTH),
-  );
-}
-
-function normalizePanelWidths(layoutWidth: number, leftWidth: number, rightWidth: number) {
-  const usableWidth = Math.max(0, layoutWidth - RESIZE_HANDLE_WIDTH * 2);
-  const availableForPanels = Math.max(
-    MIN_LEFT_PANEL_WIDTH + MIN_RIGHT_PANEL_WIDTH,
-    usableWidth - getDesiredCenterWidth(layoutWidth),
-  );
-
-  let nextLeft = clamp(leftWidth, MIN_LEFT_PANEL_WIDTH, MAX_LEFT_PANEL_WIDTH);
-  let nextRight = clamp(rightWidth, MIN_RIGHT_PANEL_WIDTH, MAX_RIGHT_PANEL_WIDTH);
-  let overflow = nextLeft + nextRight - availableForPanels;
-
-  if (overflow > 0) {
-    const rightSlack = nextRight - MIN_RIGHT_PANEL_WIDTH;
-    const leftSlack = nextLeft - MIN_LEFT_PANEL_WIDTH;
-
-    if (rightSlack >= leftSlack) {
-      const reduceRight = Math.min(overflow, rightSlack);
-      nextRight -= reduceRight;
-      overflow -= reduceRight;
-
-      const reduceLeft = Math.min(overflow, nextLeft - MIN_LEFT_PANEL_WIDTH);
-      nextLeft -= reduceLeft;
-    } else {
-      const reduceLeft = Math.min(overflow, leftSlack);
-      nextLeft -= reduceLeft;
-      overflow -= reduceLeft;
-
-      const reduceRight = Math.min(overflow, nextRight - MIN_RIGHT_PANEL_WIDTH);
-      nextRight -= reduceRight;
-    }
-  }
-
-  return {
-    leftPanelWidth: Math.round(nextLeft),
-    rightPanelWidth: Math.round(nextRight),
-  };
-}
-
-function getResizeBounds(side: ResizableSide, layoutWidth: number, siblingWidth: number) {
-  const usableWidth = Math.max(0, layoutWidth - RESIZE_HANDLE_WIDTH * 2);
-  const maxWidth = usableWidth - getDesiredCenterWidth(layoutWidth) - siblingWidth;
-
-  if (side === "left") {
-    return {
-      min: MIN_LEFT_PANEL_WIDTH,
-      max: Math.max(MIN_LEFT_PANEL_WIDTH, Math.min(MAX_LEFT_PANEL_WIDTH, maxWidth)),
-    };
-  }
-
-  return {
-    min: MIN_RIGHT_PANEL_WIDTH,
-    max: Math.max(MIN_RIGHT_PANEL_WIDTH, Math.min(MAX_RIGHT_PANEL_WIDTH, maxWidth)),
-  };
-}
-
-function describeError(error: unknown, fallback: string) {
-  if (error instanceof Error && error.message) {
-    return `${fallback}: ${error.message}`;
-  }
-  return fallback;
 }
 
 function isSessionNotFoundError(error: unknown) {
@@ -1488,55 +1415,9 @@ function postSubmitTelemetry(
   });
 }
 
-function comparableErrorText(value: unknown) {
-  return String(value ?? "").replace(/\s+/g, " ").trim().toLowerCase();
-}
-
 function latestVisibleTurnErrorMessage(messages: ConversationMessage[] | undefined) {
   const latestMessage = messages?.[messages.length - 1];
   return latestMessage && isTurnErrorMessage(latestMessage) ? String(latestMessage.content ?? "") : "";
-}
-
-function shouldSuppressComposerErrorForTurnError(
-  composerError: string,
-  latestTurnErrorMessage: string,
-  turnError: SessionTurnError | null | undefined,
-) {
-  const composer = comparableErrorText(composerError);
-  const latestMessage = comparableErrorText(latestTurnErrorMessage);
-  const turnErrorMessage = comparableErrorText(turnError?.message);
-  const turnErrorType = comparableErrorText(turnError?.errorType);
-  if (!composer || !latestMessage) {
-    return false;
-  }
-  return (
-    (turnErrorMessage && (composer.includes(turnErrorMessage) || turnErrorMessage.includes(composer)))
-    || composer.includes(latestMessage)
-    || latestMessage.includes(composer)
-    || (turnErrorType && composer.includes(turnErrorType))
-  );
-}
-
-function isRunningPhase(value: string | null | undefined) {
-  const phase = String(value ?? "").trim().toLowerCase();
-  return ["queued", "running", "thinking", "tooling", "answering", "planning", "reading", "editing", "verifying"].includes(phase);
-}
-
-function isStoppingPhase(value: string | null | undefined) {
-  const phase = String(value ?? "").trim().toLowerCase();
-  return phase === "stopping";
-}
-
-function isBusyPhase(value: string | null | undefined) {
-  const phase = String(value ?? "").trim().toLowerCase();
-  return isRunningPhase(phase) || phase === "stopping";
-}
-
-function formatTokenSpeedValue(tokensPerSecond: number | null | undefined) {
-  if (typeof tokensPerSecond !== "number" || !Number.isFinite(tokensPerSecond) || tokensPerSecond <= 0) {
-    return "";
-  }
-  return tokensPerSecond < 1 ? "<1 t/s" : `${Math.round(tokensPerSecond)} t/s`;
 }
 
 function readStoredMentalModelToggle(): boolean | null {
@@ -6207,9 +6088,6 @@ export function ChatCodingRoute() {
     [conversationIndexCollapsed, leftPanelWidth, rightPanelWidth, statusRailCollapsed],
   );
   const bothSidePanesCollapsed = conversationIndexCollapsed && statusRailCollapsed;
-  const conversationFrameClassName = bothSidePanesCollapsed
-    ? `${styles.conversationFrame} ${styles.conversationFrameFocus}`
-    : styles.conversationFrame;
   const rightPaneLayoutClassName = standardGroupRoomActive ? styles.rightPaneWithTabs : styles.rightPaneWithoutTabs;
   const rightPaneClassName = `${styles.rightPane} ${rightPaneLayoutClassName}`;
 
@@ -6320,16 +6198,6 @@ export function ChatCodingRoute() {
         </>
       )}
     </>
-  );
-
-  const conversationLoadingFallback = (
-    <div className={styles.loadingSurface} role="status" aria-live="polite">
-      <div className={styles.loadingSurfaceBody}>
-        <strong>{t("loadingSession")}</strong>
-        <span className={styles.loadingSkeletonLine} />
-        <span className={styles.loadingSkeletonLineShort} />
-      </div>
-    </div>
   );
 
   return (
@@ -7320,100 +7188,95 @@ export function ChatCodingRoute() {
                 ) : null}
               </div>
             </div>
-          ) : !activeSessionId && !sessionsQuery.isPending ? (
-            <div className={styles.emptyConversationSurface}>{t("noSessionsYet")}</div>
-          ) : sessionDetailErrorState.blockingError ? (
-            <div className={styles.emptySurface}>
-              {sessionDetailErrorMessage}
-            </div>
-          ) : invalidChildSessionLinkMessage ? (
-            <div className={styles.emptySurface}>
-              {invalidChildSessionLinkMessage}
-            </div>
-          ) : workspace.activeTab === "agent" ? (
-            detail ? (
-              <div className={conversationFrameClassName}>
-                {sessionDetailErrorState.transientError ? (
-                  <div className={styles.inlineNotice} role="status">
-                    {sessionDetailErrorMessage}
-                  </div>
-                ) : null}
-                <ChatRuntimeNoticeStack lang={lang} notices={activeRuntimeNotices} />
-                {pendingToolApproval ? (
-                  <ChatToolApprovalDialog
-                    lang={lang}
-                    pending={pendingToolApprovalPending}
-                    rawTitle={pendingToolApprovalRawTitle}
-                    riskLabel={pendingToolApprovalRisk}
-                    scopeLabel={pendingToolApprovalScope}
-                    toolLabels={pendingToolApprovalLabels}
-                    onApprove={() => resolveToolApprovalMutation.mutate({ request: pendingToolApproval, decision: "approve" })}
-                    onReject={() => resolveToolApprovalMutation.mutate({ request: pendingToolApproval, decision: "reject" })}
-                  />
-                ) : null}
-                <ChatConversationComposerBridge
-                  sessionId={activeSessionId ?? detail.id}
-                  title={detail.title}
-                  phase={detail.currentPhase}
-                  messages={detail.messages}
-                  activeTurnMessage={activeTurnMessage}
-                  hasEarlierMessages={Boolean(detail.messageWindow?.hasEarlier)}
-                  earlierMessagesLoading={loadEarlierSessionMessagesMutation.isPending}
-                  onStreamingFramePaint={handleConversationStreamingFramePaint}
-                  assistantDisplayName={activeAgentDisplayName}
-                  assistantAvatarImageUrl={activeAgentAvatarImageUrl}
-                  assistantAvatarFallback={activeAgentAvatarFallback}
-                  resolveTurnAvatar={resolveConversationTurnAvatar}
-                  userDisplayName={runtime?.userName}
-                  userAvatarPreset={runtime?.userProfile?.avatarPreset}
-                  userAvatarImageUrl={runtime?.userProfile?.avatarImageUrl}
-                  taskSummary={currentTaskSummary}
-                  defaultFileContext={detail.defaultFileContext}
-                  showHeader={false}
-                  showSessionOverview={false}
-                  showMentalSnapshots={mentalModelEnabledForNextTurn}
-                  composer={conversationComposer}
-                  slashCommandSuggestions={slashCommandSuggestions}
-                  cancelComposerModeLabel={t("cancelEditMessage")}
-                  turnError={detail.lastTurnError}
-                  stopLabel={t("stop")}
-                  stopPendingLabel={t("stopPending")}
-                  safeGuidanceLabel={t("safeGuidance")}
-                  safeGuidancePendingLabel={t("safeGuidancePending")}
-                  interruptGuidanceLabel={t("interruptGuidance")}
-                  interruptGuidancePendingLabel={t("interruptGuidancePending")}
-                  editUserMessageLabel={t("editAndResendMessage")}
-                  onComposerChange={handleComposerChange}
-                  onAddComposerAttachments={handleAddComposerAttachments}
-                  onRemoveComposerAttachment={handleRemoveComposerAttachment}
-                  onAddComposerReference={handleAddComposerReference}
-                  onRemoveComposerReference={handleRemoveComposerReference}
-                  onEditUserMessage={handleEditUserMessage}
-                  onCancelComposerMode={resolvedEditTarget ? handleCancelEditMessage : undefined}
-                  onLoadEarlierMessages={handleLoadEarlierSessionMessages}
-                  onSubmit={handleSubmitTurn}
-                  onStop={handleStopTurn}
-                  onSafeGuidance={() => handleSubmitGuidance("safe")}
-                  onInterruptGuidance={() => handleSubmitGuidance("interrupt")}
-                  fallback={conversationLoadingFallback}
-                />
-              </div>
-            ) : (
-              conversationLoadingFallback
-            )
-          ) : activeCliAgentRunId ? (
-            activeCliAgentRun ? null : (
-              <div className={styles.emptySurface}>
-                {lang === "zh" ? "这个 CLI 工具页还没有可显示的运行记录。" : "This CLI tool page has no run to display."}
-              </div>
-            )
           ) : (
-            <ChatFilePreviewPanel
-              changed={fileContentQuery.data ? changedFiles.has(fileContentQuery.data.path) : false}
-              errorMessage={fileContentQuery.isError ? describeError(fileContentQuery.error, t("loadFailed")) : ""}
-              file={fileContentQuery.data}
-              loadingLabel={t("loadingFilePreview")}
-              sourceLabel={detail?.title ?? t("currentSession")}
+            <ChatSessionWorkspacePanel
+              activeCliAgentRunAvailable={Boolean(activeCliAgentRun)}
+              activeCliAgentRunId={activeCliAgentRunId}
+              activeSessionId={activeSessionId}
+              blockingErrorMessage={sessionDetailErrorMessage}
+              cliAgentRunEmptyLabel={lang === "zh" ? "这个 CLI 工具页还没有可显示的运行记录。" : "This CLI tool page has no run to display."}
+              conversation={detail ? {
+                sessionId: activeSessionId ?? detail.id,
+                title: detail.title,
+                phase: detail.currentPhase,
+                messages: detail.messages,
+                activeTurnMessage,
+                hasEarlierMessages: Boolean(detail.messageWindow?.hasEarlier),
+                earlierMessagesLoading: loadEarlierSessionMessagesMutation.isPending,
+                onStreamingFramePaint: handleConversationStreamingFramePaint,
+                assistantDisplayName: activeAgentDisplayName,
+                assistantAvatarImageUrl: activeAgentAvatarImageUrl,
+                assistantAvatarFallback: activeAgentAvatarFallback,
+                resolveTurnAvatar: resolveConversationTurnAvatar,
+                userDisplayName: runtime?.userName,
+                userAvatarPreset: runtime?.userProfile?.avatarPreset,
+                userAvatarImageUrl: runtime?.userProfile?.avatarImageUrl,
+                taskSummary: currentTaskSummary,
+                defaultFileContext: detail.defaultFileContext,
+                showHeader: false,
+                showSessionOverview: false,
+                showMentalSnapshots: mentalModelEnabledForNextTurn,
+                composer: conversationComposer,
+                slashCommandSuggestions,
+                cancelComposerModeLabel: t("cancelEditMessage"),
+                turnError: detail.lastTurnError,
+                stopLabel: t("stop"),
+                stopPendingLabel: t("stopPending"),
+                safeGuidanceLabel: t("safeGuidance"),
+                safeGuidancePendingLabel: t("safeGuidancePending"),
+                interruptGuidanceLabel: t("interruptGuidance"),
+                interruptGuidancePendingLabel: t("interruptGuidancePending"),
+                editUserMessageLabel: t("editAndResendMessage"),
+                onComposerChange: handleComposerChange,
+                onAddComposerAttachments: handleAddComposerAttachments,
+                onRemoveComposerAttachment: handleRemoveComposerAttachment,
+                onAddComposerReference: handleAddComposerReference,
+                onRemoveComposerReference: handleRemoveComposerReference,
+                onEditUserMessage: handleEditUserMessage,
+                onCancelComposerMode: resolvedEditTarget ? handleCancelEditMessage : undefined,
+                onLoadEarlierMessages: handleLoadEarlierSessionMessages,
+                onSubmit: handleSubmitTurn,
+                onStop: handleStopTurn,
+                onSafeGuidance: () => handleSubmitGuidance("safe"),
+                onInterruptGuidance: () => handleSubmitGuidance("interrupt"),
+              } : null}
+              conversationFocused={bothSidePanesCollapsed}
+              filePreview={{
+                changed: fileContentQuery.data ? changedFiles.has(fileContentQuery.data.path) : false,
+                errorMessage: fileContentQuery.isError ? describeError(fileContentQuery.error, t("loadFailed")) : "",
+                file: fileContentQuery.data,
+                loadingLabel: t("loadingFilePreview"),
+                sourceLabel: detail?.title ?? t("currentSession"),
+              }}
+              hasBlockingError={sessionDetailErrorState.blockingError}
+              hasTransientError={sessionDetailErrorState.transientError}
+              invalidChildSessionLinkMessage={invalidChildSessionLinkMessage}
+              lang={lang}
+              loadingSessionLabel={t("loadingSession")}
+              noSessionsLabel={t("noSessionsYet")}
+              notices={activeRuntimeNotices}
+              sessionsPending={sessionsQuery.isPending}
+              toolApproval={pendingToolApproval ? {
+                pending: pendingToolApprovalPending,
+                rawTitle: pendingToolApprovalRawTitle,
+                riskLabel: pendingToolApprovalRisk,
+                scopeLabel: pendingToolApprovalScope,
+                toolLabels: pendingToolApprovalLabels,
+              } : null}
+              transientErrorMessage={sessionDetailErrorMessage}
+              workspaceActiveTab={workspace.activeTab}
+              onApproveToolApproval={() => {
+                if (!pendingToolApproval) {
+                  return;
+                }
+                resolveToolApprovalMutation.mutate({ request: pendingToolApproval, decision: "approve" });
+              }}
+              onRejectToolApproval={() => {
+                if (!pendingToolApproval) {
+                  return;
+                }
+                resolveToolApprovalMutation.mutate({ request: pendingToolApproval, decision: "reject" });
+              }}
             />
           )}
         </div>
