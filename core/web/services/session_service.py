@@ -17491,6 +17491,144 @@ def _build_codex_transcript_projection(
     )
 
 
+def _session_turn_item_base_id(session_id: str, turn_id: str) -> str:
+    normalized_session_id = str(session_id or "").strip() or "session"
+    normalized_turn_id = str(turn_id or "").strip() or "current"
+    return f"{normalized_session_id}-turn-{normalized_turn_id}"
+
+
+def _session_turn_agent_message_item_id(session_id: str, turn_id: str) -> str:
+    return f"{_session_turn_item_base_id(session_id, turn_id)}-agent-message"
+
+
+def _build_session_turn_items_projection(
+    *,
+    session_id: str,
+    turn_id: str,
+    message_id: str,
+    content: Any = "",
+    thought: Any = "",
+    codex_transcript: dict[str, Any] | None = None,
+    done: bool = False,
+    source: str = "assistant_delta",
+) -> list[dict[str, Any]]:
+    normalized_message_id = str(message_id or "").strip()
+    if not normalized_message_id:
+        return []
+    normalized_turn_id = str(turn_id or "").strip()
+    transcript_cells = list((codex_transcript or {}).get("cells") or [])
+    content_text = _sanitize_message_content("assistant", content)
+    assistant_markdown_text = _session_turn_assistant_markdown_text(transcript_cells)
+    thought_text = _sanitize_message_content("assistant", thought)
+    items: list[dict[str, Any]] = []
+    agent_text = content_text or assistant_markdown_text
+    if agent_text:
+        items.append(
+            _compact_codex_record(
+                {
+                    "id": _session_turn_agent_message_item_id(session_id, normalized_turn_id),
+                    "type": "agent_message",
+                    "status": "completed" if done else "in_progress",
+                    "turnId": normalized_turn_id,
+                    "messageId": normalized_message_id,
+                    "source": source,
+                    "text": agent_text,
+                }
+            )
+        )
+    if thought_text:
+        items.append(
+            _compact_codex_record(
+                {
+                    "id": f"{_session_turn_item_base_id(session_id, normalized_turn_id)}-reasoning",
+                    "type": "reasoning",
+                    "status": "completed" if done else "in_progress",
+                    "turnId": normalized_turn_id,
+                    "messageId": normalized_message_id,
+                    "source": source,
+                    "text": thought_text,
+                }
+            )
+        )
+    for index, cell in enumerate(transcript_cells, start=1):
+        if not isinstance(cell, dict):
+            continue
+        item = _session_turn_item_from_codex_cell(
+            session_id=session_id,
+            turn_id=normalized_turn_id,
+            message_id=normalized_message_id,
+            cell=cell,
+            index=index,
+            source=source,
+        )
+        if item:
+            items.append(item)
+    return items
+
+
+def _session_turn_assistant_markdown_text(cells: list[Any]) -> str:
+    text_parts: list[str] = []
+    for cell in cells:
+        if not isinstance(cell, dict):
+            continue
+        if str(cell.get("kind") or "").strip() != "assistant_markdown":
+            continue
+        text = _sanitize_message_content("assistant", cell.get("text") or "")
+        if text:
+            text_parts.append(text)
+    return "\n\n".join(text_parts)
+
+
+def _session_turn_item_from_codex_cell(
+    *,
+    session_id: str,
+    turn_id: str,
+    message_id: str,
+    cell: dict[str, Any],
+    index: int,
+    source: str,
+) -> dict[str, Any] | None:
+    cell_kind = str(cell.get("kind") or "").strip()
+    if cell_kind == "assistant_markdown":
+        return None
+    item_type = _session_turn_item_type_from_codex_cell(cell_kind)
+    if not item_type:
+        return None
+    cell_id = str(cell.get("id") or "").strip()
+    suffix = cell_id or f"{item_type}-{index}"
+    return _compact_codex_record(
+        {
+            "id": f"{_session_turn_item_base_id(session_id, turn_id)}-{item_type}-{_short_hash(suffix) or index}",
+            "type": item_type,
+            "status": str(cell.get("status") or "completed").strip() or "completed",
+            "turnId": turn_id,
+            "messageId": message_id,
+            "source": source,
+            "sourceCellId": cell_id,
+            "sourceCellKind": cell_kind,
+            "title": str(cell.get("title") or "").strip(),
+            "summary": str(cell.get("summary") or "").strip(),
+            "text": str(cell.get("text") or "").strip(),
+            "sourceItemId": str(cell.get("sourceItemId") or "").strip(),
+            "operationIds": list(cell.get("operationIds") or []),
+        }
+    )
+
+
+def _session_turn_item_type_from_codex_cell(cell_kind: str) -> str:
+    if cell_kind == "reasoning_summary":
+        return "reasoning"
+    if cell_kind == "tool_call":
+        return "tool_call"
+    if cell_kind == "status":
+        return "status"
+    if cell_kind == "error_notice":
+        return "error"
+    if cell_kind == "stream_tail":
+        return "status"
+    return ""
+
+
 def _codex_transcript_operation_sources(
     message_id: str,
     feedback_events: list[dict[str, Any]],
@@ -19021,6 +19159,8 @@ def _record_session_assistant_delta_published_event(
     dropped_count: int,
     content_chars: int,
     thought_chars: int,
+    item_id: str,
+    turn_item_count: int,
     done: bool,
 ) -> None:
     if subscriber_count <= 0:
@@ -19043,6 +19183,8 @@ def _record_session_assistant_delta_published_event(
                 "droppedCount": max(0, int(dropped_count)),
                 "contentChars": max(0, int(content_chars)),
                 "thoughtChars": max(0, int(thought_chars)),
+                "itemId": str(item_id or "").strip(),
+                "turnItemCount": max(0, int(turn_item_count)),
                 "done": bool(done),
             },
             lifecycle=False,
@@ -21627,6 +21769,26 @@ def _publish_session_assistant_delta(
     )
     if codex_transcript:
         event["codexTranscript"] = codex_transcript
+    turn_items = _build_session_turn_items_projection(
+        session_id=session_id,
+        turn_id=state.turn_id,
+        message_id=_live_assistant_message_id(session_id, state.turn_id),
+        content=state.content,
+        thought=state.thought,
+        codex_transcript=codex_transcript,
+        done=done,
+        source="assistant_delta",
+    )
+    if turn_items:
+        event["itemId"] = next(
+            (
+                item["id"]
+                for item in turn_items
+                if str(item.get("type") or "") == "agent_message" and item.get("id")
+            ),
+            turn_items[0]["id"],
+        )
+        event["turnItems"] = turn_items
     recovery_event = _assistant_delta_recovery_stream_event(
         {
             **event,
@@ -21658,6 +21820,8 @@ def _publish_session_assistant_delta(
         dropped_count=dropped_count,
         content_chars=len(str(state.content_delta or "")),
         thought_chars=len(str(state.thought_delta or "")),
+        item_id=str(event.get("itemId") or ""),
+        turn_item_count=len(event.get("turnItems") or []),
         done=done,
     )
 
@@ -21729,6 +21893,13 @@ def _merge_session_assistant_delta_events(
         merged["codexTranscript"] = codex_transcript
     else:
         merged.pop("codexTranscript", None)
+    turn_items = current.get("turnItems") or previous.get("turnItems")
+    if turn_items:
+        merged["turnItems"] = list(turn_items)
+        merged["itemId"] = current.get("itemId") or previous.get("itemId") or (turn_items[0] or {}).get("id")
+    else:
+        merged.pop("turnItems", None)
+        merged.pop("itemId", None)
     return merged
 
 
