@@ -149,7 +149,7 @@ describe("SelfEvolutionTrack static assets", () => {
     expect(selfEvolutionSource).toContain("styles.dangerAction");
     expect(selfEvolutionSource).toContain("styles.primaryAction");
     expect(selfEvolutionSource).toContain('onWorktreeAction(worktreeRun.runId, "terminate")');
-    expect(selfEvolutionSource).toContain("onTerminateObservation(observationRun.runId)");
+    expect(selfEvolutionSource).not.toContain("observationTerminateVisible && observationRun?.runId");
     expect(selfEvolutionSource).toContain("showComposer: !runIsActive && !worktreeRunLocked && !runLocked");
     expect(selfEvolutionSource).toContain("showComposer={activeConversationSurface.showComposer}");
   });
@@ -265,12 +265,18 @@ describe("SelfEvolutionTrack static assets", () => {
     expect(selfEvolutionSource).toContain("parseObservationDurationInput(observationDurationInput)");
     expect(selfEvolutionSource).not.toContain("parseObservationDurationInput(String(DEFAULT_OBSERVATION_DURATION_SECONDS))");
     expect(workspaceSurface).toContain("观察配置");
-    expect(workspaceSurface).toContain("观察目标");
+    expect(workspaceSurface).toContain("观察提示词");
+    expect(workspaceSurface).toContain("原样发送");
     expect(workspaceSurface).toContain("运行时长（秒）");
     expect(workspaceSurface).toContain("开始自主观察");
+    expect(workspaceSurface).toContain("终止这一轮");
+    expect(workspaceSurface).toContain("observationPrimaryActionDisabled");
+    expect(workspaceSurface).toContain("onTerminateObservation(observationRun.runId)");
     expect(workspaceSurface).toContain("onStartObservation({ goal: observationGoalValue, durationSeconds: normalizedObservationDuration })");
     expect(selfEvolutionSource).not.toContain("在底部输入观察目标后开始自主观察。");
     expect(selfEvolutionSource).not.toContain("Enter an observation goal in the composer, then start observation.");
+    expect(selfEvolutionSource).not.toContain("设置观察目标和时长后启动。");
+    expect(selfEvolutionSource).not.toContain("Observation goal");
   });
 
   it("keeps the observation conversation as output-only while setup lives in the left rail", () => {
@@ -279,15 +285,18 @@ describe("SelfEvolutionTrack static assets", () => {
     expect(selfEvolutionSource).not.toContain('submitLabel: lang === "zh" ? "开始自主观察"');
   });
 
-  it("filters the left Agent cards to the observer in observation mode", () => {
+  it("keeps observation and isolated development Agent cards scoped to their active modes", () => {
     const agentCardsStart = selfEvolutionSource.indexOf("function renderSelfEvolutionAgentCards()");
     const agentCardsEnd = selfEvolutionSource.indexOf("\n  function renderObservationStatusSurface()", agentCardsStart);
     const agentCardsSurface = agentCardsStart >= 0 && agentCardsEnd > agentCardsStart
       ? selfEvolutionSource.slice(agentCardsStart, agentCardsEnd)
       : "";
 
+    expect(selfEvolutionSource).toContain('const SELF_EVOLUTION_AGENT_ROLE_ORDER = ["executor", "reviewer"] as const;');
+    expect(selfEvolutionSource).toContain('const SELF_OBSERVATION_AGENT_ROLE = "observer";');
     expect(agentCardsSurface).toContain("visibleSelfEvolutionAgentCards");
-    expect(agentCardsSurface).toContain('card.role === "observer"');
+    expect(agentCardsSurface).toContain("SELF_OBSERVATION_AGENT_ROLE");
+    expect(agentCardsSurface).toContain("SELF_EVOLUTION_AGENT_ROLE_SET.has(card.role)");
     expect(agentCardsSurface).toContain("visibleSelfEvolutionAgentCards.map");
     expect(agentCardsSurface).toContain("visibleSelfEvolutionAgentCards.length");
   });
