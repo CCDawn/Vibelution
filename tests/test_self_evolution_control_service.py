@@ -1197,78 +1197,80 @@ def test_start_self_observation_run_rejects_tool_and_authorization_fields(monkey
         service.start_self_observation_run(payload)
 
 
+def _install_strict_self_observation_llm(
+    monkeypatch,
+    *,
+    content: str,
+    model_id: str = "observer-model",
+) -> tuple[dict[str, object], list[dict[str, object]]]:
+    captured: dict[str, object] = {}
+    artifact_messages: list[dict[str, object]] = []
+
+    monkeypatch.setattr(
+        service.agent_directory_service,
+        "get_agent",
+        lambda agent_id, include_archived=False: {
+            "agentId": agent_id,
+            "llmBindings": {"dialogue": {"modelId": model_id}},
+        },
+    )
+    monkeypatch.setattr(
+        service.session_service,
+        "_resolve_session_agent_llm",
+        lambda agent, slot: SimpleNamespace(
+            runtime_profile_id="agent-runtime",
+            model_id=model_id,
+            config=SimpleNamespace(),
+        ),
+    )
+    monkeypatch.setattr(service, "get_llm_client", lambda **kwargs: SimpleNamespace(), raising=False)
+
+    def fake_invoke_llm(client, messages, *, context, tools=None, metadata=None):
+        captured["messages"] = copy.deepcopy(messages)
+        captured["tools"] = copy.deepcopy(tools)
+        captured["context"] = context
+        captured["metadata"] = copy.deepcopy(metadata)
+        return SimpleNamespace(content=content, tool_calls=[])
+
+    monkeypatch.setattr(service, "invoke_llm", fake_invoke_llm, raising=False)
+
+    def fake_append_artifact(session_id, artifact_content, *, metadata=None, tool_calls=None):
+        artifact_messages.append(
+            {
+                "sessionId": session_id,
+                "content": artifact_content,
+                "metadata": copy.deepcopy(metadata),
+                "toolCalls": copy.deepcopy(tool_calls),
+            }
+        )
+        return {"role": "assistant", "content": artifact_content, "metadata": metadata or {}}
+
+    monkeypatch.setattr(service.session_service, "append_session_assistant_artifact_message", fake_append_artifact)
+    return captured, artifact_messages
+
+
 def test_self_observation_turn_finishes_with_report(monkeypatch):
     monkeypatch.setattr(service, "get_workbench_contract", lambda: {"modeAvailability": {"self_evolution": True}})
     monkeypatch.setattr(service, "self_observation_agent_binding", lambda: {"agentId": "agent-observe-1"})
     monkeypatch.setattr(service, "create_supervised_agent_session", lambda **kwargs: {"id": "session-observe-1"})
-    monkeypatch.setattr(service, "submit_session_message", lambda *args, **kwargs: {"turnId": "turn-observe-1"})
     monkeypatch.setattr(service._RUN_EXECUTOR, "submit", lambda fn, context: None)
+    llm_content = "观察目标：观察规划\n无法验证清单：不能读取项目。"
+    captured, artifact_messages = _install_strict_self_observation_llm(monkeypatch, content=llm_content)
     service.force_cancel_active_self_observation_runs_for_shutdown("test cleanup")
 
-    detail_calls = {"count": 0}
-    completion_calls = {"count": 0}
-    observed_latest_messages: list[str] = []
-
-    def fake_get_session_detail(session_id):
-        assert session_id == "session-observe-1"
-        detail_calls["count"] += 1
-        if detail_calls["count"] == 1:
-            return {
-                "messages": [
-                    {"role": "assistant", "content": "当前理解：目标是观察规划。"},
-                ],
-                "lastTurnError": {},
-            }
-        return {
-            "messages": [
-                {"role": "assistant", "content": "当前理解：目标是观察规划。"},
-                {"role": "assistant", "content": "观察目标：观察规划\n无法验证清单：不能读取项目。"},
-            ],
-            "lastTurnError": {},
-        }
-
-    def fake_get_session_turn_completion_snapshot(session_id, turn_id):
-        assert session_id == "session-observe-1"
-        assert turn_id == "turn-observe-1"
-        completion_calls["count"] += 1
-        if completion_calls["count"] == 1:
-            return {
-                "terminal": False,
-                "assistantText": "当前理解：目标是观察规划。",
-                "lastTurnStatus": "running",
-            }
-        return {
-            "terminal": True,
-            "assistantText": "观察目标：观察规划\n无法验证清单：不能读取项目。",
-            "lastTurnStatus": "done",
-        }
-
-    monkeypatch.setattr(service, "get_session_detail", fake_get_session_detail)
-    monkeypatch.setattr(service, "get_session_turn_completion_snapshot", fake_get_session_turn_completion_snapshot)
-    monkeypatch.setattr(service, "request_stop_session_turn", lambda session_id: None)
-    run_id_box = {"value": ""}
-
-    def fake_sleep(*_args, **_kwargs):
-        snapshot = service.get_self_observation_run_snapshot(run_id_box["value"]) or {}
-        observed_latest_messages.append(str(snapshot.get("latestMessage") or ""))
-
-    monkeypatch.setattr(service.time, "sleep", fake_sleep)
-
     started = service.start_self_observation_run({"goal": "观察规划", "durationSeconds": 60})
-    run_id_box["value"] = started["runId"]
     service._run_self_observation_turn({"runId": started["runId"], "goal": "观察规划", "durationSeconds": 60})
 
     snapshot = service.get_self_observation_run_snapshot(started["runId"])
     assert snapshot is not None
     assert snapshot["status"] == "done"
     assert snapshot["conversationSessionId"] == "session-observe-1"
-    assert snapshot["messages"] == [
-        "当前理解：目标是观察规划。",
-        "观察目标：观察规划\n无法验证清单：不能读取项目。",
-    ]
+    assert snapshot["messages"] == [llm_content]
     assert "观察目标" in snapshot["report"]
-    assert snapshot["latestMessage"] == "观察目标：观察规划\n无法验证清单：不能读取项目。"
-    assert "当前理解：目标是观察规划。" in observed_latest_messages
+    assert snapshot["latestMessage"] == llm_content
+    assert captured["messages"] == [{"role": "user", "content": "观察规划"}]
+    assert captured["tools"] == []
+    assert artifact_messages[0]["content"] == llm_content
 
 
 def test_self_observation_session_uses_observer_binding_without_full_role_validation(monkeypatch):
@@ -1281,36 +1283,13 @@ def test_self_observation_session_uses_observer_binding_without_full_role_valida
     )
     monkeypatch.setattr(service, "self_observation_agent_binding", lambda: {"agentId": "agent-observer-only"})
     observed: dict[str, object] = {}
+    captured, artifact_messages = _install_strict_self_observation_llm(monkeypatch, content="观察完成。")
 
     def fake_create_supervised_agent_session(**kwargs):
         observed["session_kwargs"] = kwargs
         return {"id": "session-observer-only"}
 
-    def fake_submit_session_message(*args, **kwargs):
-        observed["submit_args"] = args
-        observed["submit_kwargs"] = kwargs
-        return {"turnId": "turn-observer-only"}
-
     monkeypatch.setattr(service, "create_supervised_agent_session", fake_create_supervised_agent_session)
-    monkeypatch.setattr(service, "submit_session_message", fake_submit_session_message)
-    monkeypatch.setattr(
-        service,
-        "get_session_detail",
-        lambda session_id: {
-            "id": session_id,
-            "messages": [{"role": "assistant", "content": "观察完成。"}],
-            "lastTurnStatus": "done",
-        },
-    )
-    monkeypatch.setattr(
-        service,
-        "get_session_turn_completion_snapshot",
-        lambda session_id, turn_id: {
-            "terminal": True,
-            "terminalStatus": "done",
-            "assistantText": "观察完成。",
-        },
-    )
 
     result = service._run_observation_session(
         run_id="self-observe-observer-only",
@@ -1321,7 +1300,50 @@ def test_self_observation_session_uses_observer_binding_without_full_role_valida
     assert result["conversationSessionId"] == "session-observer-only"
     assert result["messages"] == ["观察完成。"]
     assert observed["session_kwargs"]["agent_id"] == "agent-observer-only"
-    assert observed["submit_kwargs"]["message_source"] == "self_observation"
+    assert captured["messages"] == [{"role": "user", "content": "观察目标"}]
+    assert captured["tools"] == []
+    assert captured["context"].agent_id == "agent-observer-only"
+    assert artifact_messages[0]["sessionId"] == "session-observer-only"
+
+
+def test_self_observation_session_sends_only_raw_prompt_to_strict_llm(monkeypatch):
+    raw_prompt = "  思考\n下一段  "
+    captured, artifact_messages = _install_strict_self_observation_llm(
+        monkeypatch,
+        content="当前理解：只观察。\n可观察推理：没有工具。",
+    )
+
+    monkeypatch.setattr(service, "self_observation_agent_binding", lambda: {"agentId": "agent-observer-strict"})
+    monkeypatch.setattr(service, "create_supervised_agent_session", lambda **kwargs: {"id": "session-strict"})
+
+    def fail_submit_session_message(*_args, **_kwargs):
+        raise AssertionError("strict self-observation must not use submit_session_message")
+
+    monkeypatch.setattr(service, "submit_session_message", fail_submit_session_message)
+
+    result = service._run_observation_session(
+        run_id="self-observe-strict",
+        prompt=raw_prompt,
+        duration_seconds=300,
+    )
+
+    assert captured["messages"] == [{"role": "user", "content": raw_prompt}]
+    assert captured["tools"] == []
+    assert captured["context"].surface == "self_observation"
+    assert captured["context"].run_kind == "self_observation_run"
+    assert captured["context"].session_id == "session-strict"
+    assert captured["context"].agent_id == "agent-observer-strict"
+    assert captured["context"].conversation_bound is False
+    payload_text = json.dumps(captured["messages"], ensure_ascii=False)
+    assert "\"system\"" not in payload_text
+    assert "## 对话用户输入" not in payload_text
+    assert "Vibelution" not in payload_text
+    assert "Dynamic System Context" not in payload_text
+    assert "你的记忆与状态" not in payload_text
+    assert result["conversationSessionId"] == "session-strict"
+    assert result["messages"] == ["当前理解：只观察。\n可观察推理：没有工具。"]
+    assert artifact_messages[0]["content"] == result["report"]
+    assert artifact_messages[0]["toolCalls"] == []
 
 
 def test_self_observation_turn_marks_boundary_violation(monkeypatch):
@@ -1397,35 +1419,7 @@ def test_run_self_observation_turn_records_session_progress_events(monkeypatch):
         lambda: {"agentId": "agent-observer"},
     )
     monkeypatch.setattr(service, "create_supervised_agent_session", lambda **kwargs: {"id": "session-observe-live"})
-    submitted: dict[str, object] = {}
-
-    def fake_submit_session_message(*args, **kwargs):
-        submitted["args"] = args
-        submitted["kwargs"] = kwargs
-        return {"turnId": "turn-observe-live", "startedTurnId": "turn-observe-live"}
-
-    monkeypatch.setattr(service, "submit_session_message", fake_submit_session_message)
-    monkeypatch.setattr(
-        service,
-        "get_session_detail",
-        lambda session_id: {
-            "id": session_id,
-            "messages": [
-                {"role": "user", "content": "观察 prompt"},
-                {"role": "assistant", "content": "最终观察报告"},
-            ],
-            "lastTurnStatus": "done",
-        },
-    )
-    monkeypatch.setattr(
-        service,
-        "get_session_turn_completion_snapshot",
-        lambda session_id, turn_id: {
-            "terminal": True,
-            "terminalStatus": "done",
-            "assistantText": "最终观察报告",
-        },
-    )
+    captured, artifact_messages = _install_strict_self_observation_llm(monkeypatch, content="最终观察报告")
     monkeypatch.setattr(service._RUN_EXECUTOR, "submit", lambda fn, context: None)
 
     raw_prompt = "  观察规划能力\n  "
@@ -1448,9 +1442,11 @@ def test_run_self_observation_turn_records_session_progress_events(monkeypatch):
         "assistant_output",
         "done",
     ]
-    assert submitted["args"][1] == raw_prompt
+    assert captured["messages"] == [{"role": "user", "content": raw_prompt}]
+    assert captured["tools"] == []
+    assert artifact_messages[0]["content"] == "最终观察报告"
     assert final_snapshot["eventTail"][2]["conversationSessionId"] == "session-observe-live"
-    assert final_snapshot["eventTail"][3]["turnId"] == "turn-observe-live"
+    assert final_snapshot["eventTail"][3]["turnId"] == f"strict:{queued['runId']}"
 
 
 @pytest.mark.parametrize(
