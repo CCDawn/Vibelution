@@ -29,6 +29,30 @@ from core.research import smoke_runner
 from core.runtime_manager import work_run_store
 from core.web.services import agent_directory_service, candidate_schema_registry, chat_room_service, data_processing_service, session_service, team_knowledge_service, team_service
 from core.web.services.runtime_scene_service import record_runtime_scene_event
+from core.web.services.team_workflow.source_collection_context import (
+    normalize_source_collection_context_mode as _normalize_source_collection_context_mode,
+    source_collection_context_continuation_hint as _source_collection_context_continuation_hint,
+    source_collection_context_record_continuation_hint as _source_collection_context_record_continuation_hint,
+)
+from core.web.services.team_workflow.source_collection_projection import (
+    latest_source_collection_stage_task as _latest_source_collection_stage_task,
+    source_collection_stage_card_blocking_reasons as _source_collection_stage_card_blocking_reasons,
+    source_collection_stage_card_projection as _source_collection_stage_card_projection,
+    source_collection_stage_task_card_summary as _source_collection_stage_task_card_summary,
+    source_collection_stage_task_coverage_summary as _source_collection_stage_task_coverage_summary,
+    source_collection_stage_user_status_label as _source_collection_stage_user_status_label,
+    source_collection_stage_user_summary as _source_collection_stage_user_summary,
+    source_collection_summary_payload_status as _source_collection_summary_payload_status,
+)
+from core.web.services.team_workflow.source_collection_stage_tasks import (
+    source_collection_stage_can_materialize_formal_knowledge as _source_collection_stage_can_materialize_formal_knowledge,
+    source_collection_stage_completion_gate as _source_collection_stage_completion_gate,
+    source_collection_stage_round_status_from_task_refs as _source_collection_stage_round_status_from_task_refs,
+    source_collection_stage_task_checklist as _source_collection_stage_task_checklist,
+    source_collection_stage_task_title as _source_collection_stage_task_title,
+    source_collection_stage_task_tool_progress as _source_collection_stage_task_tool_progress,
+    source_collection_stage_task_writeback_contract as _source_collection_stage_task_writeback_contract,
+)
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -9111,31 +9135,6 @@ def _record_source_collection_summary_timing(
     )
 
 
-def _source_collection_summary_payload_status(
-    run_id: str,
-    *,
-    run_status: dict[str, Any],
-    active_work_run: dict[str, Any],
-    stage_round_ref: dict[str, Any],
-    projection: dict[str, Any],
-) -> str:
-    if not _trim_text(run_id, max_length=160):
-        return "idle"
-    if active_work_run:
-        return "active"
-    latest_tasks = projection.get("latestTasks") if isinstance(projection.get("latestTasks"), dict) else {}
-    for task in latest_tasks.values():
-        if not isinstance(task, dict):
-            continue
-        task_status = _trim_text(task.get("status"), max_length=80).lower()
-        if task_status in {"queued", "running", "accepted"}:
-            return "active"
-    lifecycle_status = _trim_text(run_status.get("runStatus"), max_length=80).lower()
-    if lifecycle_status in {"collecting", "processing"} and not stage_round_ref:
-        return "active"
-    return "ready"
-
-
 def list_candidate_store(
     team_id: str,
     *,
@@ -17029,13 +17028,6 @@ def _source_collection_matching_assignments(
     ]
 
 
-def _source_collection_stage_can_materialize_formal_knowledge(stage_id: str, agent_role: str) -> bool:
-    return (
-        _normalize_source_collection_stage_id(stage_id, default="") == "ingestion"
-        and _normalize_source_collection_agent_role(agent_role) == "source_ingestor"
-    )
-
-
 def _source_collection_stage_session_task_boundaries(*, stage_id: str = "", agent_role: str = "") -> dict[str, bool]:
     can_materialize_formal_knowledge = _source_collection_stage_can_materialize_formal_knowledge(stage_id, agent_role)
     return {
@@ -18266,143 +18258,6 @@ def _source_collection_stage_cards_projection(
     }
 
 
-def _source_collection_stage_card_projection(
-    stage_id: str,
-    tasks: list[dict[str, Any]],
-    *,
-    artifact_count: int,
-    input_count: int,
-    output_count: int,
-    pending_count: int,
-    artifact_status: str,
-    artifact_summary: str,
-    historical_task_count: int = 0,
-    extra_counts: dict[str, int] | None = None,
-) -> dict[str, Any]:
-    latest_task = _latest_source_collection_stage_task(tasks)
-    agent_status = _trim_text(latest_task.get("status"), max_length=80).lower() if latest_task else "not_started"
-    coverage_summary = _source_collection_stage_task_coverage_summary(latest_task or {})
-    coverage_missing = _source_collection_count(coverage_summary.get("missing")) + _source_collection_count(coverage_summary.get("invalid"))
-    coverage_incomplete = bool(coverage_summary.get("applicable")) and not bool(coverage_summary.get("complete"))
-    effective_pending_count = max(pending_count, coverage_missing)
-    current_total = max(
-        0,
-        _source_collection_count(artifact_count),
-        _source_collection_count(output_count) + effective_pending_count,
-    )
-    current_processed = max(0, current_total - effective_pending_count) if current_total else 0
-    current_coverage_summary = (
-        {
-            "applicable": True,
-            "coverageKind": f"{stage_id}_current_inputs",
-            "complete": effective_pending_count <= 0,
-            "total": current_total,
-            "processed": min(current_processed, current_total),
-            "missing": max(0, effective_pending_count),
-            "invalid": 0,
-            "blocked": 0,
-            "duplicate": 0,
-        }
-        if current_total > 0
-        else {}
-    )
-    task_completed = agent_status == "completed"
-    task_interrupted = agent_status == "interrupted"
-    task_settled = agent_status in {"completed", "needs_review"}
-    task_blocked = agent_status in {"blocked", "failed"}
-    artifact_ready = artifact_status == "ready" and artifact_count > 0
-    artifact_complete = artifact_ready and effective_pending_count <= 0 and not coverage_incomplete
-    if agent_status in {"running", "queued"}:
-        card_status = "agent_running"
-    elif task_interrupted:
-        card_status = "agent_interrupted"
-    elif task_blocked and artifact_ready:
-        card_status = "artifact_ready_agent_blocked"
-    elif task_blocked:
-        card_status = "agent_blocked"
-    elif task_completed and artifact_complete:
-        card_status = "closed_loop"
-    elif task_settled and effective_pending_count > 0 and artifact_count > 0:
-        card_status = "partial_current_inputs"
-    elif task_settled and artifact_ready:
-        card_status = "artifact_ready_agent_needs_review"
-    elif task_settled:
-        card_status = "agent_done_artifact_pending"
-    elif artifact_complete:
-        card_status = "artifact_ready_no_latest_agent_task"
-    elif effective_pending_count > 0 or input_count > 0:
-        card_status = "pending"
-    else:
-        card_status = "idle"
-    next_actions = latest_task.get("nextActions") if latest_task and isinstance(latest_task.get("nextActions"), list) else []
-    result = latest_task.get("result") if latest_task and isinstance(latest_task.get("result"), dict) else {}
-    result_keys = sorted(str(key) for key in result.keys()) if result else []
-    normalized_extra_counts = {
-        _trim_text(key, max_length=80): _source_collection_count(value)
-        for key, value in dict(extra_counts or {}).items()
-        if _trim_text(key, max_length=80)
-    }
-    action_readiness = _source_collection_stage_action_readiness(
-        stage_id,
-        card_status,
-        agent_status,
-        artifact_count=artifact_count,
-        input_count=input_count,
-        output_count=output_count,
-        pending_count=effective_pending_count,
-    )
-    return {
-        "stageId": stage_id,
-        "status": card_status,
-        "isClosedLoop": card_status == "closed_loop",
-        "userStatusLabel": _source_collection_stage_user_status_label(
-            stage_id,
-            card_status,
-            current_coverage_summary=current_coverage_summary,
-        ),
-        "userSummary": _source_collection_stage_user_summary(
-            stage_id,
-            card_status,
-            artifact_summary,
-            latest_task=latest_task,
-            current_coverage_summary=current_coverage_summary,
-            action_readiness=action_readiness,
-        ),
-        "actionReadiness": action_readiness,
-        "agentTaskStatus": agent_status,
-        "artifactStatus": artifact_status,
-        "artifactSummary": artifact_summary,
-        "currentCoverageSummary": current_coverage_summary,
-        "counts": {
-            "input": input_count,
-            "artifact": artifact_count,
-            "output": output_count,
-            "pending": effective_pending_count,
-            "task": len(tasks),
-            "historicalTask": max(0, _source_collection_count(historical_task_count)),
-            **normalized_extra_counts,
-        },
-        "latestTask": _source_collection_stage_task_card_summary(latest_task) if latest_task else {},
-        "resultKeys": result_keys,
-        "nextActions": [_trim_text(item, max_length=500) for item in next_actions if _trim_text(item, max_length=500)][:6],
-        "blockingReasons": _source_collection_stage_card_blocking_reasons(
-            card_status,
-            artifact_status,
-            artifact_count,
-            effective_pending_count,
-            coverage_summary,
-            current_coverage_summary=current_coverage_summary,
-        ),
-    }
-
-
-def _latest_source_collection_stage_task(tasks: list[dict[str, Any]]) -> dict[str, Any] | None:
-    valid = [item for item in tasks if isinstance(item, dict)]
-    if not valid:
-        return None
-    return sorted(valid, key=lambda item: str(item.get("updatedAt") or item.get("createdAt") or ""))[-1]
-
-
 def _source_collection_stage_tasks_for_current_team(
     team_id: str,
     stage_id: str,
@@ -18570,281 +18425,6 @@ def _source_collection_current_stage_agent_ids_by_stage(team_id: str, stage_ids:
 
 def _source_collection_current_stage_agent_ids(team_id: str, stage_id: str) -> set[str]:
     return _source_collection_current_stage_agent_ids_by_stage(team_id, [stage_id]).get(stage_id, set())
-
-
-def _source_collection_stage_task_card_summary(task: dict[str, Any]) -> dict[str, Any]:
-    writeback = task.get("writeback") if isinstance(task.get("writeback"), dict) else {}
-    result = task.get("result") if isinstance(task.get("result"), dict) else {}
-    evidence_refs = task.get("evidenceRefs") if isinstance(task.get("evidenceRefs"), list) else []
-    next_actions = task.get("nextActions") if isinstance(task.get("nextActions"), list) else []
-    return {
-        "taskId": _trim_text(task.get("taskId"), max_length=160),
-        "stageId": _trim_text(task.get("stageId"), max_length=80),
-        "agentId": _trim_text(task.get("agentId"), max_length=160),
-        "agentRole": _trim_text(task.get("agentRole"), max_length=80),
-        "sessionId": _trim_text(task.get("sessionId"), max_length=160),
-        "status": _trim_text(task.get("status"), max_length=80),
-        "summary": _trim_text(task.get("summary"), max_length=1000),
-        "updatedAt": _trim_text(task.get("updatedAt"), max_length=120),
-        "resultKeys": sorted(str(key) for key in result.keys()),
-        "evidenceRefCount": len(evidence_refs),
-        "nextActionCount": len(next_actions),
-        "coverageSummary": _source_collection_stage_task_coverage_summary(task),
-        "invalidCandidateIds": (
-            list(writeback.get("invalidCandidateIds") or [])
-            if isinstance(writeback.get("invalidCandidateIds"), list)
-            else list(result.get("invalidCandidateIds") or []) if isinstance(result.get("invalidCandidateIds"), list) else []
-        )[:80],
-        "invalidRecordIds": (
-            list(writeback.get("invalidRecordIds") or [])
-            if isinstance(writeback.get("invalidRecordIds"), list)
-            else list(result.get("invalidRecordIds") or []) if isinstance(result.get("invalidRecordIds"), list) else []
-        )[:80],
-        "closureSummary": (
-            writeback.get("closureSummary")
-            if isinstance(writeback.get("closureSummary"), dict)
-            else result.get("closureSummary") if isinstance(result.get("closureSummary"), dict) else {}
-        ),
-        "taskToolRequired": bool(task.get("taskToolRequired")),
-        "taskChecklist": [
-            item for item in list(task.get("taskChecklist") or [])
-            if isinstance(item, dict)
-        ][:12],
-        "taskToolProgress": (
-            task.get("taskToolProgress")
-            if isinstance(task.get("taskToolProgress"), dict)
-            else {}
-        ),
-        "completionGate": (
-            task.get("completionGate")
-            if isinstance(task.get("completionGate"), dict)
-            else {}
-        ),
-        "materializedSources": writeback.get("materializedSources") if isinstance(writeback.get("materializedSources"), dict) else {},
-        "materializedContentExtraction": writeback.get("materializedContentExtraction") if isinstance(writeback.get("materializedContentExtraction"), dict) else {},
-        "materializedKnowledgeIngestion": writeback.get("materializedKnowledgeIngestion") if isinstance(writeback.get("materializedKnowledgeIngestion"), dict) else {},
-    }
-
-
-def _source_collection_stage_task_coverage_summary(task: dict[str, Any]) -> dict[str, Any]:
-    writeback = task.get("writeback") if isinstance(task.get("writeback"), dict) else {}
-    result = task.get("result") if isinstance(task.get("result"), dict) else {}
-    coverage = writeback.get("coverageSummary") if isinstance(writeback.get("coverageSummary"), dict) else {}
-    if not coverage:
-        coverage = result.get("coverageSummary") if isinstance(result.get("coverageSummary"), dict) else {}
-    return _normalize_metadata(coverage)
-
-
-def _source_collection_stage_card_blocking_reasons(
-    card_status: str,
-    artifact_status: str,
-    artifact_count: int,
-    pending_count: int,
-    coverage_summary: dict[str, Any] | None = None,
-    *,
-    current_coverage_summary: dict[str, Any] | None = None,
-) -> list[str]:
-    reasons: list[str] = []
-    coverage = coverage_summary if isinstance(coverage_summary, dict) else {}
-    current_coverage = current_coverage_summary if isinstance(current_coverage_summary, dict) else {}
-    if card_status == "partial_current_inputs" and bool(current_coverage.get("applicable")):
-        reasons.append(
-            "当前阶段覆盖不足："
-            f"已处理 {_source_collection_count(current_coverage.get('processed'))}/{_source_collection_count(current_coverage.get('total'))}，"
-            f"{_source_collection_count(current_coverage.get('missing'))} 条待补。"
-        )
-    if bool(coverage.get("applicable")) and not bool(coverage.get("complete")):
-        reasons.append(
-            "Agent 回写覆盖不完整："
-            f"已处理 {_source_collection_count(coverage.get('processed'))}/{_source_collection_count(coverage.get('total'))}，"
-            f"{_source_collection_count(coverage.get('missing'))} 条待补，"
-            f"{_source_collection_count(coverage.get('invalid'))} 个 ID 未匹配。"
-        )
-    if card_status == "agent_interrupted":
-        reasons.append("最近一次 Agent 会话在阶段写回前中断，需要继续这次任务或重试。")
-    if card_status == "agent_done_artifact_pending":
-        reasons.append("Agent task wrote back a structured result, but the expected stage artifact has not been created yet.")
-    if card_status == "artifact_ready_agent_blocked":
-        reasons.append("Ready artifact exists, but the latest Agent task is blocked or failed.")
-    if card_status == "agent_blocked":
-        reasons.append("Latest Agent task is blocked or failed.")
-    if artifact_status == "empty" and artifact_count <= 0 and pending_count > 0:
-        reasons.append("Inputs exist, but this stage has not produced its expected artifact yet.")
-    return reasons
-
-
-def _source_collection_stage_readable_object_label(stage_id: str) -> str:
-    labels = {
-        "finding": "原始资料",
-        "extraction": "候选资料",
-        "relations": "资料关系",
-        "ingestion": "入库结果",
-    }
-    return labels.get(stage_id, "可用资料")
-
-
-def _source_collection_stage_recovery_status_label(stage_id: str) -> str:
-    labels = {
-        "finding": "待继续寻找",
-        "extraction": "待补提炼",
-        "relations": "待补关系",
-        "ingestion": "待补入库",
-    }
-    return labels.get(stage_id, "待补齐")
-
-
-def _source_collection_stage_action_label(stage_id: str, recommended_action: str = "") -> str:
-    if recommended_action == "wait":
-        return "等待 Agent 完成"
-    if recommended_action == "continue_interrupted":
-        return "继续这次任务"
-    if stage_id == "finding":
-        return "搜索下一批" if recommended_action in {"continue", "retry"} else "开始找资料"
-    if stage_id == "extraction":
-        return "Agent 继续提炼" if recommended_action in {"continue", "retry"} else "Agent 提炼资料"
-    if stage_id == "relations":
-        return "Agent 重新整理关系" if recommended_action == "retry" else "Agent 整理关系"
-    if stage_id == "ingestion":
-        return "Agent 继续入库" if recommended_action in {"continue", "retry"} else "Agent 入库资料"
-    return "启动 Agent"
-
-
-def _source_collection_stage_action_readiness(
-    stage_id: str,
-    card_status: str,
-    agent_status: str,
-    *,
-    artifact_count: int,
-    input_count: int,
-    output_count: int,
-    pending_count: int,
-) -> dict[str, Any]:
-    if agent_status in SOURCE_COLLECTION_STAGE_SESSION_TASK_ACTIVE_STATUSES or card_status == "agent_running":
-        return {
-            "canStart": False,
-            "reasonCode": "agent_running",
-            "disabledReason": "已有 Agent 正在执行",
-            "recommendedAction": "wait",
-            "actionLabel": _source_collection_stage_action_label(stage_id, "wait"),
-        }
-    if card_status == "agent_interrupted":
-        return {
-            "canStart": True,
-            "reasonCode": "agent_interrupted",
-            "disabledReason": "",
-            "recommendedAction": "continue",
-            "actionLabel": _source_collection_stage_action_label(stage_id, "continue_interrupted"),
-        }
-    has_input = any(
-        _source_collection_count(value) > 0
-        for value in (artifact_count, input_count, output_count, pending_count)
-    )
-    if not has_input:
-        return {
-            "canStart": False,
-            "reasonCode": "no_stage_input",
-            "disabledReason": "当前阶段还没有可执行输入",
-            "recommendedAction": "wait",
-            "actionLabel": _source_collection_stage_action_label(stage_id, "wait"),
-        }
-    if card_status in {"agent_blocked", "artifact_ready_agent_blocked"}:
-        recommended_action = "retry"
-    elif card_status in {"partial_current_inputs", "agent_done_artifact_pending", "artifact_ready_agent_needs_review", "pending"}:
-        recommended_action = "continue"
-    elif card_status in {"closed_loop", "artifact_ready_no_latest_agent_task"}:
-        recommended_action = "retry"
-    else:
-        recommended_action = "start"
-    return {
-        "canStart": True,
-        "reasonCode": "ready",
-        "disabledReason": "",
-        "recommendedAction": recommended_action,
-        "actionLabel": _source_collection_stage_action_label(stage_id, recommended_action),
-    }
-
-
-def _source_collection_stage_user_status_label(
-    stage_id: str,
-    card_status: str,
-    *,
-    current_coverage_summary: dict[str, Any] | None = None,
-) -> str:
-    if card_status == "agent_running":
-        return "Agent 正在处理"
-    if card_status == "agent_interrupted":
-        return "已中断，需要继续"
-    current_coverage = current_coverage_summary if isinstance(current_coverage_summary, dict) else {}
-    if bool(current_coverage.get("applicable")) and current_coverage.get("complete") is False:
-        return _source_collection_stage_recovery_status_label(stage_id)
-    labels = {
-        "agent_running": "Agent 正在处理",
-        "agent_interrupted": "已中断，需要继续",
-        "closed_loop": "本阶段已完成",
-        "artifact_ready_no_latest_agent_task": "产物已就绪",
-        "artifact_ready_agent_blocked": "产物已生成，任务需排查",
-        "agent_blocked": "Agent 任务受阻",
-        "partial_current_inputs": _source_collection_stage_recovery_status_label(stage_id),
-        "artifact_ready_agent_needs_review": "产物待复核",
-        "agent_done_artifact_pending": "Agent 已回写，仍待产物",
-        "pending": "等待本阶段产出",
-        "idle": "未开始",
-    }
-    return labels.get(card_status, "需要处理")
-
-
-def _source_collection_stage_user_summary(
-    stage_id: str,
-    card_status: str,
-    artifact_summary: str,
-    *,
-    latest_task: dict[str, Any] | None = None,
-    current_coverage_summary: dict[str, Any] | None = None,
-    action_readiness: dict[str, Any] | None = None,
-) -> str:
-    current_coverage = current_coverage_summary if isinstance(current_coverage_summary, dict) else {}
-    action = action_readiness if isinstance(action_readiness, dict) else {}
-    if card_status == "agent_running":
-        return "Agent 正在处理本阶段，请等待结果同步。"
-    if card_status == "agent_interrupted":
-        latest_summary = _trim_text(latest_task.get("summary"), max_length=240) if isinstance(latest_task, dict) else ""
-        next_action = _trim_text(action.get("actionLabel"), max_length=120) or "继续这次任务"
-        detail = latest_summary or "Agent 会话已停止，尚未调用阶段写回工具。"
-        return f"{detail} 本阶段已中断，尚未回写最终产物。建议：{next_action}。"
-    if bool(current_coverage.get("applicable")) and current_coverage.get("complete") is False:
-        processed = _source_collection_count(current_coverage.get("processed"))
-        total = _source_collection_count(current_coverage.get("total"))
-        missing = _source_collection_count(current_coverage.get("missing"))
-        invalid = _source_collection_count(current_coverage.get("invalid"))
-        invalid_text = f"无效 ID {invalid} 条。" if invalid > 0 else ""
-        next_action = _trim_text(action.get("actionLabel"), max_length=120) or _source_collection_stage_action_label(stage_id, "continue")
-        return f"{_source_collection_stage_readable_object_label(stage_id)}已处理 {processed}/{total}，还有 {missing} 条需要补齐。{invalid_text}建议：{next_action}。"
-    closure = {}
-    if isinstance(latest_task, dict):
-        writeback = latest_task.get("writeback") if isinstance(latest_task.get("writeback"), dict) else {}
-        result = latest_task.get("result") if isinstance(latest_task.get("result"), dict) else {}
-        closure = (
-            writeback.get("closureSummary")
-            if isinstance(writeback.get("closureSummary"), dict)
-            else result.get("closureSummary")
-            if isinstance(result.get("closureSummary"), dict)
-            else {}
-        )
-    if _trim_text(closure.get("message"), max_length=500):
-        retry_instruction = _trim_text(closure.get("retryInstruction") or closure.get("nextAction"), max_length=500)
-        return (
-            _trim_text(closure.get("message"), max_length=500)
-            if not retry_instruction
-            else f"{_trim_text(closure.get('message'), max_length=500)}建议：{retry_instruction}"
-        )
-    if card_status == "artifact_ready_agent_blocked":
-        return f"{_source_collection_stage_readable_object_label(stage_id)}已经可用，但最近一次 Agent 任务受阻；可以先查看结果，再决定是否重试。"
-    if card_status == "agent_blocked":
-        return "最近一次 Agent 任务没有完成。建议进入 Agent 私聊查看原因，或重新启动本阶段。"
-    if card_status == "agent_done_artifact_pending":
-        next_action = _trim_text(action.get("actionLabel"), max_length=120) or _source_collection_stage_action_label(stage_id, "continue")
-        return f"已收到 Agent 结果，但还没有生成可用{_source_collection_stage_readable_object_label(stage_id)}。建议：{next_action}。"
-    return artifact_summary
 
 
 def _source_collection_candidate_trace_run_id(candidate: dict[str, Any]) -> str:
@@ -19539,13 +19119,6 @@ def _source_collection_context_candidate_summary(candidate: dict[str, Any]) -> d
     }
 
 
-def _normalize_source_collection_context_mode(value: Any) -> str:
-    normalized = _trim_text(value, max_length=40).lower()
-    if normalized in {"full", "compact", "minimal", "retry_missing"}:
-        return normalized
-    return "compact"
-
-
 def _source_collection_stage_retry_focus(
     task: dict[str, Any],
     candidates: list[dict[str, Any]],
@@ -19590,24 +19163,6 @@ def _source_collection_stage_retry_focus(
         "missingRecordIds": missing_record_ids[:120],
         "retryInstruction": "只补这些缺失 ID；不要重新处理 processedCandidateIds / processedRecordIds。",
     }
-
-
-def _source_collection_context_continuation_hint(candidate_page: dict[str, Any], *, context_mode: str) -> str:
-    if not isinstance(candidate_page, dict) or not bool(candidate_page.get("hasMore")):
-        return ""
-    next_offset = _source_collection_count(candidate_page.get("nextOffset"))
-    limit = _source_collection_count(candidate_page.get("limit")) or 5
-    mode = _normalize_source_collection_context_mode(context_mode)
-    return f"hasMore: source_collection_context_tool(candidate_offset={next_offset}, candidate_limit={limit}, context_mode={mode})"
-
-
-def _source_collection_context_record_continuation_hint(record_page: dict[str, Any], *, context_mode: str) -> str:
-    if not isinstance(record_page, dict) or not bool(record_page.get("hasMore")):
-        return ""
-    next_offset = _source_collection_count(record_page.get("nextOffset"))
-    limit = _source_collection_count(record_page.get("limit")) or 5
-    mode = _normalize_source_collection_context_mode(context_mode)
-    return f"hasMore: source_collection_context_tool(record_offset={next_offset}, record_limit={limit}, context_mode={mode})"
 
 
 def _compact_source_collection_stage_task_context(context: dict[str, Any]) -> dict[str, Any]:
@@ -19876,39 +19431,6 @@ def _upsert_source_collection_stage_session_task(team_id: str, run_id: str, task
     return task
 
 
-def _source_collection_stage_task_writeback_contract(
-    team_id: str,
-    run_id: str,
-    task_id: str,
-    *,
-    stage_id: str,
-    agent_id: str,
-    agent_role: str,
-) -> dict[str, Any]:
-    endpoint = f"/api/teams/{urllib.parse.quote(team_id, safe='')}/workflow-orchestration/stage-session-tasks/{urllib.parse.quote(task_id, safe='')}/writeback"
-    can_materialize_formal_knowledge = _source_collection_stage_can_materialize_formal_knowledge(stage_id, agent_role)
-    return {
-        "schemaVersion": SCHEMA_VERSION,
-        "contractKind": "source_collection_stage_session_task_writeback",
-        "toolName": "source_collection_stage_writeback_tool",
-        "taskId": task_id,
-        "teamId": team_id,
-        "runId": run_id,
-        "stageId": stage_id,
-        "agentId": agent_id,
-        "agentRole": agent_role,
-        "endpoint": endpoint,
-        "acceptedStatuses": sorted(SOURCE_COLLECTION_STAGE_SESSION_TASK_STATUSES),
-        "requiredFields": ["status", "summary", "result"],
-        "writesFormalKnowledge": can_materialize_formal_knowledge,
-        "writesRag": False,
-        "writesOfficialGraph": can_materialize_formal_knowledge,
-        "resultAuthority": "source_collection_stage_writeback_tool+knowledge_ingestion_gate"
-        if can_materialize_formal_knowledge
-        else "source_collection_stage_writeback_tool",
-    }
-
-
 def _source_collection_stage_task_idempotency_key(
     *,
     team_id: str,
@@ -19924,89 +19446,6 @@ def _source_collection_stage_task_idempotency_key(
         key_digest = hashlib.sha256(requested_key.encode("utf-8", errors="replace")).hexdigest()[:24]
         return _trim_text(f"stage_task:{key_scope}:request:{key_digest}", max_length=240)
     return _trim_text(f"stage_task:{key_scope}:task:{task_id}", max_length=240)
-
-
-def _source_collection_stage_task_title(stage_id: str) -> str:
-    return {
-        "finding": "资料寻找任务",
-        "extraction": "资料提炼任务",
-        "relations": "资料关系整理任务",
-        "ingestion": "资料入库任务",
-    }.get(stage_id, "知识搜集阶段任务")
-
-
-def _source_collection_stage_task_checklist(stage_id: str, agent_role: str = "") -> list[dict[str, Any]]:
-    normalized_stage_id = _normalize_source_collection_stage_id(stage_id, default="finding")
-    normalized_agent_role = _normalize_source_collection_agent_role(agent_role)
-    raw_items_by_stage: dict[str, tuple[tuple[str, str, str], ...]] = {
-        "finding": (
-            ("read_context", "读取本轮 compact 上下文", "source_collection_context_tool"),
-            ("page_existing_sources", "分页检查已有资料和候选", "source_collection_context_tool"),
-            ("search_and_dedupe_sources", "搜索并去重新资料", "batch_web_search_tool"),
-            ("write_candidate_leads", "用 candidateLeads[] 回写新资料", "source_collection_stage_writeback_tool"),
-            ("write_invalid_sources", "写入 invalidSources[] 或说明无无效来源", "source_collection_stage_writeback_tool"),
-            ("confirm_materialized_sources", "确认新增资料或候选已物化", "source_collection_stage_writeback_tool"),
-        ),
-        "extraction": (
-            ("read_candidates", "读取候选或原始资料上下文", "source_collection_context_tool"),
-            ("page_candidate_inputs", "分页覆盖本阶段输入", "source_collection_context_tool"),
-            ("extract_and_review_each_source", "逐候选提炼并审查保留/待补/无效", ""),
-            ("write_extractions", "回写 candidateExtractions[] 或 recordExtractions[]", "source_collection_stage_writeback_tool"),
-            ("confirm_coverage", "确认 coverageSummary 覆盖率和待补原因", "source_collection_stage_writeback_tool"),
-        ),
-        "relations": (
-            ("read_approved_candidates", "读取已通过或已保留候选", "source_collection_context_tool"),
-            ("build_candidate_relations", "生成候选级主题、来源和证据关系", ""),
-            ("write_candidate_graph", "回写 candidateGraph 候选关系图", "source_collection_stage_writeback_tool"),
-            ("confirm_graph_materialized", "确认关系节点和边已物化", "source_collection_stage_writeback_tool"),
-        ),
-        "ingestion": (
-            ("read_ingestion_inputs", "读取已通过候选和关系整理结果", "source_collection_context_tool"),
-            ("decide_ingestion_scope", "生成入库通过、退回或阻塞决策", ""),
-            ("write_ingestion_decision", "调用入库 writeback 写回审核结果", "source_collection_stage_writeback_tool"),
-            ("confirm_formal_knowledge_or_return", "确认正式知识项已生成或明确退回原因", "source_collection_stage_writeback_tool"),
-        ),
-    }
-    raw_items = raw_items_by_stage.get(normalized_stage_id, raw_items_by_stage["finding"])
-    return [
-        {
-            "id": item_id,
-            "order": index,
-            "description": description,
-            "requiredTool": required_tool,
-            "stageId": normalized_stage_id,
-            "agentRole": normalized_agent_role,
-        }
-        for index, (item_id, description, required_tool) in enumerate(raw_items, start=1)
-    ]
-
-
-def _source_collection_stage_task_tool_progress(
-    task_checklist: list[dict[str, Any]] | None,
-    *,
-    completed_ids: Iterable[str] | None = None,
-) -> dict[str, Any]:
-    checklist = [item for item in list(task_checklist or []) if isinstance(item, dict)]
-    expected_ids = [
-        _trim_text(item.get("id"), max_length=120)
-        for item in checklist
-        if _trim_text(item.get("id"), max_length=120)
-    ]
-    completed = {
-        _trim_text(item, max_length=120)
-        for item in list(completed_ids or [])
-        if _trim_text(item, max_length=120)
-    }
-    completed_ordered = [item_id for item_id in expected_ids if item_id in completed]
-    pending = [item_id for item_id in expected_ids if item_id not in completed]
-    return {
-        "required": bool(checklist),
-        "total": len(expected_ids),
-        "completed": len(completed_ordered),
-        "complete": bool(expected_ids) and len(completed_ordered) >= len(expected_ids),
-        "completedIds": completed_ordered,
-        "pendingIds": pending,
-    }
 
 
 def _source_collection_stage_task_tool_progress_from_trace(
@@ -20282,23 +19721,6 @@ def _source_collection_stage_task_tool_item_id(
             if description == _trim_text(item.get("description"), max_length=500):
                 return item_id
     return ""
-
-
-def _source_collection_stage_completion_gate(
-    *,
-    task_checklist: list[dict[str, Any]] | None,
-    artifact_complete: bool,
-    task_checklist_complete: bool,
-) -> dict[str, Any]:
-    requires_task_checklist = bool(task_checklist)
-    passed = bool(artifact_complete) and (not requires_task_checklist or bool(task_checklist_complete))
-    return {
-        "requiresTaskChecklist": requires_task_checklist,
-        "requiresArtifact": True,
-        "taskChecklistComplete": bool(task_checklist_complete),
-        "artifactComplete": bool(artifact_complete),
-        "passed": passed,
-    }
 
 
 def _source_collection_stage_task_chat_route(session_id: str, *, return_to: str, return_label: str) -> str:
@@ -20728,26 +20150,6 @@ def _sync_stage_round_with_source_collection_stage_task(team_id: str, run_id: st
         workflow["updatedAt"] = now
         _write_json(_stage_round_store_path(team_id), store)
         _write_json(_workflow_path(team_id), workflow)
-
-
-def _source_collection_stage_round_status_from_task_refs(stage_round: dict[str, Any], task_refs: list[dict[str, Any]]) -> str:
-    statuses = {
-        _trim_text(item.get("status"), max_length=80).lower()
-        for item in task_refs
-        if isinstance(item, dict) and _trim_text(item.get("status"), max_length=80)
-    }
-    if statuses & {"running", "queued"}:
-        return "running"
-    if statuses & {"failed", "blocked", "needs_review"}:
-        return "needs_attention"
-    existing_status = _trim_text(stage_round.get("status"), max_length=80)
-    if existing_status not in {"running", "planning", "initializing"}:
-        return existing_status or "needs_continue"
-    search_execution = stage_round.get("sourceCollectionSearchExecution") if isinstance(stage_round.get("sourceCollectionSearchExecution"), dict) else {}
-    search_status = _trim_text(search_execution.get("status") or search_execution.get("resultStatus"), max_length=80)
-    if search_status and search_status not in {"running", "queued", "accepted"}:
-        return search_status
-    return "needs_continue" if statuses else existing_status
 
 
 def _source_collection_agent_context_next_actions(stage_id: str, record_count: int, candidate_count: int, open_assignment_count: int) -> list[str]:
