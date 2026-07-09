@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { SkillLibraryItem } from "../../api/types";
 import chatRouteSource from "../../routes/ChatCodingRoute.tsx?raw";
 import chatConversationComposerBridgeSource from "../../routes/chat/ChatConversationComposerBridge.tsx?raw";
+import chatSessionWorkspacePanelSource from "../../routes/chat/ChatSessionWorkspacePanel.tsx?raw";
 import conversationViewSource from "./ConversationView.tsx?raw";
 import {
   composerSlashCommandQuery,
@@ -69,7 +70,9 @@ describe("conversation slash command suggestions", () => {
   it("wires skill library data from the route into the conversation composer", () => {
     expect(chatRouteSource).toContain('fetchJson<SkillLibraryPayload>("/api/skills")');
     expect(chatRouteSource).toContain("const slashCommandSuggestions = skillsQuery.data?.skills ?? []");
-    expect(chatRouteSource).toContain("slashCommandSuggestions={slashCommandSuggestions}");
+    expect(chatRouteSource).toContain("slashCommandSuggestions,");
+    expect(chatSessionWorkspacePanelSource).toContain('type ConversationBridgeProps = Omit<ComponentProps<typeof ChatConversationComposerBridge>, "fallback">');
+    expect(chatSessionWorkspacePanelSource).toContain("{...conversation}");
     expect(chatConversationComposerBridgeSource).toContain("slashCommandSuggestions={slashCommandSuggestions}");
     expect(conversationViewSource).toContain("filterSlashCommandSuggestions(slashCommandSuggestions, composerValue)");
     expect(conversationViewSource).toContain("insertSlashCommandSuggestion(composerValue, skill.command)");
