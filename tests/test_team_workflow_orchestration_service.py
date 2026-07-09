@@ -29,6 +29,28 @@ def test_source_collection_stage_round_sync_has_single_implementation():
 
     assert source.count("def _sync_source_collection_stage_round_after_search(") == 1
 
+
+def test_source_collection_pure_helpers_are_package_backed():
+    from core.web.services.team_workflow import (
+        source_collection_context,
+        source_collection_projection,
+        source_collection_stage_tasks,
+    )
+
+    assert (
+        team_workflow_orchestration_service._source_collection_stage_task_checklist
+        is source_collection_stage_tasks.source_collection_stage_task_checklist
+    )
+    assert (
+        team_workflow_orchestration_service._source_collection_stage_card_projection
+        is source_collection_projection.source_collection_stage_card_projection
+    )
+    assert (
+        team_workflow_orchestration_service._source_collection_context_continuation_hint
+        is source_collection_context.source_collection_context_continuation_hint
+    )
+
+
 def test_source_collection_agent_role_registries_only_include_four_stage_roles():
     expected = {"source_finder", "source_extractor", "source_relation_mapper", "source_ingestor"}
 
