@@ -6069,6 +6069,60 @@ def test_source_collection_stage_task_enables_bounded_internal_auto_continue(tmp
     assert captured["max_internal_auto_continue_turns"] == session_service.SOURCE_COLLECTION_STAGE_TASK_AUTO_CONTINUE_MAX_TURNS
 
 
+def test_source_collection_stage_task_ack_only_result_does_not_finish_before_required_tools(tmp_path, monkeypatch):
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(session_service, "_publish_session_detail_snapshot", lambda _session_id: None)
+    prompts: list[str] = []
+
+    def fake_run_existing_agent_single_turn(agent, **kwargs):
+        prompts.append(str(kwargs.get("initial_prompt") or ""))
+        if len(prompts) == 1:
+            return {
+                "status": "completed",
+                "summary": "已接收资料提炼任务，我将先绑定检查清单并分页读取候选上下文。",
+                "raw_output": "已接收资料提炼任务，我将先绑定检查清单并分页读取候选上下文。",
+                "tool_call_count": 0,
+                "tool_trace": [],
+            }
+        return {
+            "status": "completed",
+            "summary": "已读取候选上下文并完成阶段回写。",
+            "raw_output": "已读取候选上下文并完成阶段回写。",
+            "outcome": "done",
+            "tool_call_count": 2,
+            "tool_trace": [
+                {"name": "source_collection_context_tool", "status": "done"},
+                {"name": "source_collection_stage_writeback_tool", "status": "done"},
+            ],
+        }
+
+    monkeypatch.setattr(session_service, "run_existing_agent_single_turn", fake_run_existing_agent_single_turn)
+
+    turn_control = session_service._create_session_turn_control("session-stage-ack-only")
+    try:
+        result = session_service._run_session_continuation_loop(
+            object(),
+            session_id="session-stage-ack-only",
+            turn_control=turn_control,
+            initial_prompt="资料搜集阶段任务",
+            history_messages=[],
+            user_message_source="agent_inbox",
+            allow_internal_auto_continue=True,
+            max_internal_auto_continue_turns=2,
+            require_tool_progress=True,
+            required_tool_names=["source_collection_context_tool", "source_collection_stage_writeback_tool"],
+        )
+    finally:
+        session_service._clear_session_turn_control("session-stage-ack-only", turn_id=turn_control.turn_id)
+
+    assert len(prompts) == 2
+    assert isinstance(result, dict)
+    assert result["status"] == "completed"
+    assert result["raw_output"] == "已读取候选上下文并完成阶段回写。"
+    assert "上一轮只输出了接收或计划" in prompts[1]
+    assert "source_collection_context_tool" in prompts[1]
+
+
 def test_session_continuation_auto_continue_pauses_at_bounded_limit(tmp_path, monkeypatch):
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(session_service, "_publish_session_detail_snapshot", lambda _session_id: None)
@@ -6436,12 +6490,14 @@ def test_capture_session_ui_stream_commits_response_segments_at_tool_boundaries(
         source="persist_session_turn_result",
     )
     detail = session_service.get_session_detail("session-live")
-    timeline_items = detail["messages"][-1]["timelineItems"]
-    assert [item["kind"] for item in timeline_items] == ["assistant_text", "operation", "assistant_text"]
+    message = detail["messages"][-1]
+    timeline_items = message["timelineItems"]
+    assert [item["kind"] for item in timeline_items] == ["operation", "assistant_text"]
     assert [item.get("text") for item in timeline_items if item["kind"] == "assistant_text"] == [
-        "先给出初步判断。",
         "再根据日志给出结论。",
     ]
+    assert message["codexTranscript"]["cells"][-1]["kind"] == "assistant_markdown"
+    assert message["codexTranscript"]["cells"][-1]["text"] == "先给出初步判断。"
 
 
 def test_session_detail_interleaves_committed_assistant_segments_with_tool_events(tmp_path, monkeypatch):
@@ -6511,12 +6567,11 @@ def test_session_detail_interleaves_committed_assistant_segments_with_tool_event
     timeline_items = message["timelineItems"]
 
     assert message["content"] == "先给出初步判断。\n\n再根据日志给出结论。"
-    assert [item["kind"] for item in timeline_items] == ["assistant_text", "operation", "assistant_text"]
-    assert [item.get("text") for item in timeline_items if item["kind"] == "assistant_text"] == [
-        "先给出初步判断。",
-        "再根据日志给出结论。",
-    ]
-    assert timeline_items[1]["title"] == "读取"
+    assert [item["kind"] for item in timeline_items] == ["operation"]
+    assert all(item.get("kind") != "assistant_text" for item in timeline_items)
+    assert timeline_items[0]["title"] == "读取"
+    assert message["codexTranscript"]["cells"][-1]["kind"] == "assistant_markdown"
+    assert message["codexTranscript"]["cells"][-1]["text"] == "先给出初步判断。\n\n再根据日志给出结论。"
 
 
 def test_capture_session_ui_stream_does_not_mark_returned_degraded_tool_running(tmp_path, monkeypatch):

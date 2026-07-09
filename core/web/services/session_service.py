@@ -7993,7 +7993,10 @@ def _normalize_messages(
                 ledger_events_by_turn = _assistant_timeline_events_by_turn(conversation_id)
             ordered_timeline_events = ledger_events_by_turn.get(turn_id) or []
             if ordered_timeline_events and timeline_target_indices.get(turn_id) == index:
-                timeline_feedback_events = ordered_timeline_events
+                timeline_feedback_events = _filter_redundant_assistant_timeline_events(
+                    ordered_timeline_events,
+                    content,
+                )
                 include_assistant_text = False
             elif ordered_timeline_events:
                 timeline_feedback_events = []
@@ -12462,6 +12465,23 @@ def _source_collection_stage_task_context_metadata(context: dict[str, Any]) -> d
     }
 
 
+def _source_collection_stage_task_required_tool_names(context: dict[str, Any]) -> list[str]:
+    metadata = context.get("message_metadata") if isinstance(context.get("message_metadata"), dict) else {}
+    contract = metadata.get("writebackContract") if isinstance(metadata.get("writebackContract"), dict) else {}
+    checklist = contract.get("taskChecklist") or metadata.get("taskChecklist") or []
+    names: list[str] = []
+    for item in list(checklist or []):
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("requiredTool") or "").strip()
+        if name and name not in names:
+            names.append(name)
+    writeback_tool = str(contract.get("toolName") or "").strip()
+    if writeback_tool and writeback_tool not in names:
+        names.append(writeback_tool)
+    return names
+
+
 def _session_context_allows_internal_auto_continue(context: dict[str, Any]) -> bool:
     explicit = _normalize_optional_bool(context.get("allow_internal_auto_continue"))
     if explicit is not None:
@@ -12678,6 +12698,7 @@ def _run_session_turn(context: dict[str, Any]) -> None:
         else {"llmModelId": llm_model_id_for_turn}
     )
     source_collection_stage_task_auto_continue = _source_collection_stage_task_context_metadata(context)
+    source_collection_stage_task_required_tools = _source_collection_stage_task_required_tool_names(context)
     allow_internal_auto_continue = _session_context_allows_internal_auto_continue(context)
     internal_auto_continue_max_turns = _session_context_internal_auto_continue_max_turns(context)
     prompt_cache_partition = _session_prompt_cache_partition(
@@ -13227,6 +13248,8 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                         disable_tools=lightweight_chat_payload,
                         allow_internal_auto_continue=allow_internal_auto_continue,
                         max_internal_auto_continue_turns=internal_auto_continue_max_turns,
+                        require_tool_progress=bool(source_collection_stage_task_auto_continue),
+                        required_tool_names=source_collection_stage_task_required_tools,
                     )
                 if isinstance(result, dict):
                     result["context_composition"] = context_composition
@@ -13504,11 +13527,18 @@ def _run_session_continuation_loop(
     disable_tools: bool = False,
     allow_internal_auto_continue: bool = False,
     max_internal_auto_continue_turns: int = INTERNAL_AUTO_CONTINUE_MAX_TURNS,
+    require_tool_progress: bool = False,
+    required_tool_names: list[str] | None = None,
 ) -> Any:
     prompt = str(initial_prompt or "").strip()
     has_initial_attachments = bool(list(attachments or []))
     normalized_user_message_source = str(user_message_source or "").strip()
     auto_continue_turn_limit = max(1, _coerce_nonnegative_int(max_internal_auto_continue_turns) or INTERNAL_AUTO_CONTINUE_MAX_TURNS)
+    normalized_required_tool_names = [
+        str(item or "").strip()
+        for item in list(required_tool_names or [])
+        if str(item or "").strip()
+    ]
     if (
         normalized_user_message_source == "agent_inbox"
         and not has_initial_attachments
@@ -13654,6 +13684,10 @@ def _run_session_continuation_loop(
         result_status = str(result.get("status") or "").strip().lower() if isinstance(result, dict) else type(result).__name__
         result_visible_reply = _visible_reply_candidate(result) if isinstance(result, dict) else ""
         result_contract = build_chat_coding_result_contract(result) if isinstance(result, dict) else {}
+        required_tool_progress_missing = _required_tool_progress_missing(
+            result,
+            require_tool_progress=bool(require_tool_progress),
+        )
         _record_session_turn_lifecycle_event(
             session_id,
             "agent_turn_returned",
@@ -13674,6 +13708,7 @@ def _run_session_continuation_loop(
                 "promptCacheScope": str(prompt_cache_scope or "").strip(),
                 "promptCachePartition": str(prompt_cache_partition or "").strip(),
                 "llmModelId": str(llm_model_id or "").strip(),
+                "requiredToolProgressMissing": bool(required_tool_progress_missing),
             },
         )
         _record_session_execution_registry_event(
@@ -13688,7 +13723,8 @@ def _run_session_continuation_loop(
                 "durationMs": llm_elapsed_ms,
             },
         )
-        last_visible_result = _remember_continuation_visible_result(result, last_visible_result)
+        if not required_tool_progress_missing:
+            last_visible_result = _remember_continuation_visible_result(result, last_visible_result)
         if _is_provider_failed_result(result):
             _record_session_turn_circuit_breaker_event(
                 session_id,
@@ -13697,7 +13733,7 @@ def _run_session_continuation_loop(
                 turn_index=turn_index,
             )
             return _annotate_continuation_result(result, turn_index, reached_limit=False)
-        if _is_session_turn_terminal(result):
+        if _is_session_turn_terminal(result) and not required_tool_progress_missing:
             result = _merge_continuation_visible_result(result, last_visible_result)
             terminal_visible_reply = _visible_reply_candidate(result) if isinstance(result, dict) else ""
             terminal_contract = build_chat_coding_result_contract(result) if isinstance(result, dict) else {}
@@ -13717,6 +13753,19 @@ def _run_session_continuation_loop(
                 },
             )
             return _annotate_continuation_result(result, turn_index, reached_limit=False)
+        if required_tool_progress_missing:
+            _record_session_turn_lifecycle_event(
+                session_id,
+                "required_tool_progress_missing",
+                turn_id=getattr(turn_control, "turn_id", ""),
+                outcome="needs_continue",
+                fields={
+                    "turnIndex": turn_index,
+                    "resultStatus": result_status,
+                    "requiredToolNames": normalized_required_tool_names[:12],
+                    "visibleReplyLength": len(result_visible_reply),
+                },
+            )
 
         if not allow_internal_auto_continue:
             paused_result = _build_auto_continue_paused_result(result, last_visible_result, turn_index)
@@ -13758,17 +13807,21 @@ def _run_session_continuation_loop(
             )
             return paused_result
 
+        required_tool_guidance = _required_tool_progress_followup_guidance(normalized_required_tool_names)
+        guidance_summaries = _recent_session_guidance_summaries(
+            session_id,
+            turn_id=getattr(turn_control, "turn_id", ""),
+            limit=3,
+        )
+        if required_tool_progress_missing and required_tool_guidance:
+            guidance_summaries = [required_tool_guidance, *guidance_summaries]
         prompt = _build_followup_prompt(
             original_prompt=initial_prompt,
             effective_prompt=prompt,
             latest_result=result,
             history_messages=history_messages,
             turn_index=turn_index,
-            guidance_summaries=_recent_session_guidance_summaries(
-                session_id,
-                turn_id=getattr(turn_control, "turn_id", ""),
-                limit=3,
-            ),
+            guidance_summaries=guidance_summaries,
         )
         _set_session_turn_progress_live_output(
             session_id,
@@ -17334,6 +17387,28 @@ def _build_message_timeline_items(
     )
 
 
+def _filter_redundant_assistant_timeline_events(
+    events: list[dict[str, Any]],
+    content: Any,
+) -> list[dict[str, Any]]:
+    content_key = _assistant_projection_text_key(content)
+    if not content_key:
+        return events
+    filtered: list[dict[str, Any]] = []
+    for event in events:
+        if str(event.get("kind") or "").strip() == "assistant_text":
+            text = _sanitize_message_content("assistant", event.get("text") or event.get("content") or "")
+            text_key = _assistant_projection_text_key(text)
+            if text_key and text_key in content_key:
+                continue
+        filtered.append(event)
+    return filtered
+
+
+def _assistant_projection_text_key(value: Any) -> str:
+    return "".join(str(value or "").split())
+
+
 def _build_codex_transcript_projection(
     *,
     message_id: str,
@@ -20873,6 +20948,38 @@ def _build_resume_goal_from_conversation_context(
         lines.append("当前已读文件：" + "、".join(read_files))
     lines.append("请先恢复真实任务语境，再基于已有证据继续推进并输出可见结果。")
     return "\n".join(lines)
+
+
+def _required_tool_progress_missing(result: Any, *, require_tool_progress: bool) -> bool:
+    if not require_tool_progress or not isinstance(result, dict):
+        return False
+    if bool(result.get("stop_requested")) or _is_provider_failed_result(result):
+        return False
+    if _explicit_chat_result_outcome(result) == "progress":
+        return False
+    if _coerce_nonnegative_int(result.get("tool_call_count") or 0) > 0:
+        return False
+    tool_trace = result.get("tool_trace") or result.get("tool_calls") or []
+    if list(tool_trace or []):
+        return False
+    visible = _visible_reply_candidate(result)
+    if not visible or _raw_visible_payload_is_control_marker_only(result):
+        return False
+    return True
+
+
+def _required_tool_progress_followup_guidance(required_tool_names: list[str] | None = None) -> str:
+    names = [
+        str(item or "").strip()
+        for item in list(required_tool_names or [])
+        if str(item or "").strip()
+    ]
+    if names:
+        return (
+            "上一轮只输出了接收或计划，没有调用阶段任务要求的工具。"
+            f"本轮必须先调用这些工具中的相关项：{', '.join(names[:8])}。"
+        )
+    return "上一轮只输出了接收或计划，没有调用阶段任务要求的工具。本轮必须先调用阶段任务工具取得真实进度。"
 
 
 def _is_session_turn_terminal(result: Any) -> bool:

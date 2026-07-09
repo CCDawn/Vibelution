@@ -10,6 +10,7 @@ This directory contains project documentation that is useful across sessions. Us
 | Frontend style ownership | [../DEVELOPMENT_STANDARD.md#9-frontend-standards](../DEVELOPMENT_STANDARD.md#9-frontend-standards) | Tailwind-first styling, HeroUI primitive usage, and VUI composition rules. |
 | Domain language | [../CONTEXT.md](../CONTEXT.md) | Stable product and architecture vocabulary. |
 | Multi-agent work | [agents/worktree-collaboration.md](agents/worktree-collaboration.md) | Worktree, branch, claim, and merge protocol. |
+| Conversation flow | [agents/conversation-flow-map.md](agents/conversation-flow-map.md) | Chat/Coding message path from submit to model stream, journal facts, SSE, and frontend projection. |
 | Tests | [../tests/README.md](../tests/README.md) | Test entrypoints and validation guidance. |
 | Runtime logging | [../core/logging/README.md](../core/logging/README.md) | Logging module overview. |
 | Challenge Cup flow | [../挑战杯/research_team_flow_design.html](../挑战杯/research_team_flow_design.html) | Current generated research-flow site. |
