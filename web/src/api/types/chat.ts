@@ -373,6 +373,40 @@ export type CodexTranscriptProjection = CodexToolLifecycleModel & {
   rolloutEvents?: CodexRolloutTraceEvent[];
 };
 
+export type SessionTurnItemType =
+  | "agent_message"
+  | "reasoning"
+  | "tool_call"
+  | "status"
+  | "error"
+  | string;
+
+export type SessionTurnItemStatus =
+  | "pending"
+  | "running"
+  | "in_progress"
+  | "completed"
+  | "failed"
+  | "degraded"
+  | string;
+
+export type SessionTurnItem = {
+  id: string;
+  type: SessionTurnItemType;
+  status: SessionTurnItemStatus;
+  turnId?: string;
+  messageId?: string;
+  source?: string;
+  sourceCellId?: string;
+  sourceCellKind?: string;
+  sourceItemId?: string;
+  operationIds?: string[];
+  title?: string;
+  summary?: string;
+  text?: string;
+  metadata?: Record<string, unknown>;
+};
+
 export type MentalStateSnapshot = {
   mood: string;
   feeling: string;
@@ -416,6 +450,8 @@ export type ConversationMessage = {
   feedbackEvents?: ConversationFeedbackEvent[];
   timelineItems?: ConversationTimelineItem[];
   codexTranscript?: CodexTranscriptProjection;
+  itemId?: string;
+  turnItems?: SessionTurnItem[];
   streaming?: boolean;
   toolCalls?: ToolCall[];
   attachments?: ConversationAttachment[];
@@ -711,6 +747,8 @@ export type SessionAssistantDeltaStreamEvent = {
   feedbackEvents?: ConversationFeedbackEvent[];
   timelineItems?: ConversationTimelineItem[];
   codexTranscript?: CodexTranscriptProjection;
+  itemId?: string;
+  turnItems?: SessionTurnItem[];
   updatedAt: string;
   done: boolean;
 };
