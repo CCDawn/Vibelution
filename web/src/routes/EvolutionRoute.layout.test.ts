@@ -20,7 +20,7 @@ import stylesSource from "./EvolutionRoute.styles.ts?raw";
 
 const worktreeReviewStylesSource = readFileSync(new URL("./SupervisedWorktreeReviewPanel.styles.ts", import.meta.url), "utf-8");
 const dictionarySource = readFileSync(new URL("../i18n/dictionary.ts", import.meta.url), "utf-8");
-const apiTypesSource = readFileSync(new URL("../api/types.ts", import.meta.url), "utf-8");
+const evolutionTypesSource = readFileSync(new URL("../api/types/evolution.ts", import.meta.url), "utf-8");
 
 describe("EvolutionRoute library user flow contract", () => {
   it("shows self-evolution candidates as local pending details instead of proposal details", () => {
@@ -134,15 +134,15 @@ describe("EvolutionRoute library user flow contract", () => {
   });
 
   it("surfaces the supervised evidence root from workbench storage metadata", () => {
-    expect(apiTypesSource).toContain("export type EvolutionWorkbenchStorage");
-    expect(apiTypesSource).toContain("storage?: EvolutionWorkbenchStorage");
+    expect(evolutionTypesSource).toContain("export type EvolutionWorkbenchStorage");
+    expect(evolutionTypesSource).toContain("storage?: EvolutionWorkbenchStorage");
     expect(routeSource).toContain("const workbenchStorage");
     expect(routeSource).toContain("workbenchStorage?.relativeEvidenceRoot");
     expect(routeSource).toContain("workbenchStorage?.activeEvidenceRoot");
   });
 
   it("keeps the runnable source picker separate from the full supervised benchmark catalog", () => {
-    expect(apiTypesSource).toContain("datasetCatalog: EvolutionDatasetOption[]");
+    expect(evolutionTypesSource).toContain("datasetCatalog: EvolutionDatasetOption[]");
     expect(routeSource).toContain("const datasetCatalog = workbenchControl?.datasetCatalog");
     expect(routeSource).toContain("datasetCatalogGroups");
     expect(routeSource).toContain("selectedDatasetCatalogFilter");
@@ -433,8 +433,8 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).not.toContain('{ id: "results", zh: "运行结果"');
     expect(routeSource).not.toContain('{ id: "proposal", zh: "改进提案"');
     expect(routeSource).not.toContain('{ id: "review", zh: "样本评审"');
-    expect(apiTypesSource).toContain("export type EvolutionWorkflowStep");
-    expect(apiTypesSource).toContain("workflowSteps?: EvolutionWorkflowStep[]");
+    expect(evolutionTypesSource).toContain("export type EvolutionWorkflowStep");
+    expect(evolutionTypesSource).toContain("workflowSteps?: EvolutionWorkflowStep[]");
     expect(routeSource).toContain("selectedSupervisedWorkflowStepId");
     expect(routeSource).toContain("supervisedRuntimeWorkflowStepId");
     expect(routeSource).toContain("supervisedSelectedWorkflowStep");
@@ -454,7 +454,7 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).toContain("modelDisplayLabel(supervisedMemberModelId(binding), resolveModelLabel)");
     expect(routeSource).toContain("configQuery.data?.modelLabels");
     expect(routeSource).toContain("EvolutionRoleConversationSession");
-    expect(apiTypesSource).toContain("roleConversationSessions?: Record<string, EvolutionRoleConversationSession>");
+    expect(evolutionTypesSource).toContain("roleConversationSessions?: Record<string, EvolutionRoleConversationSession>");
     expect(routeSource).toContain("function supervisedMemberChatRoute");
     expect(routeSource).toContain("const roleSessions = supervisedMembersRun?.roleConversationSessions ?? {}");
     expect(routeSource).toContain("const conversationSession = roleSessions[role]");
@@ -547,10 +547,10 @@ describe("EvolutionRoute library user flow contract", () => {
   });
 
   it("keeps supervised closed-loop review in a dedicated ledger projection", () => {
-    expect(apiTypesSource).toContain("export type EvolutionClosedLoopRecord");
-    expect(apiTypesSource).toContain("export type EvolutionClosedLoopRoleSession");
-    expect(apiTypesSource).toContain("closedLoopRecord?: EvolutionClosedLoopRecord | null");
-    expect(apiTypesSource).toContain("latestClosedLoopRecord: EvolutionClosedLoopRecord | null");
+    expect(evolutionTypesSource).toContain("export type EvolutionClosedLoopRecord");
+    expect(evolutionTypesSource).toContain("export type EvolutionClosedLoopRoleSession");
+    expect(evolutionTypesSource).toContain("closedLoopRecord?: EvolutionClosedLoopRecord | null");
+    expect(evolutionTypesSource).toContain("latestClosedLoopRecord: EvolutionClosedLoopRecord | null");
     expect(routeSource).toContain("const supervisedClosedLoopRecord");
     expect(routeSource).toContain("workspaceSnapshot?.latestClosedLoopRecord");
     expect(routeSource).toContain("const supervisedClosedLoopLedger");

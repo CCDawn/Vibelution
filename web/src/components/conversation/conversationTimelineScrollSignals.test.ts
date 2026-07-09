@@ -37,7 +37,7 @@ describe("conversation timeline scroll signals", () => {
     content: "",
     timestamp: "2026-05-22T00:01:00Z",
     streaming: true,
-    toolCalls: [{ name: "read_file", status: "running" }],
+    feedbackEvents: [{ sequence: 1, kind: "tool", name: "read_file", status: "running" }],
   };
 
   it("keeps scroll signal helpers outside the React component file", () => {
@@ -54,7 +54,7 @@ describe("conversation timeline scroll signals", () => {
     const after = timelineSignalFor([
       {
         ...baseAssistantMessage,
-        toolCalls: [{ name: "read_file", status: "done" }],
+        feedbackEvents: [{ sequence: 1, kind: "tool", name: "read_file", status: "done" }],
       },
     ]);
 
@@ -66,53 +66,39 @@ describe("conversation timeline scroll signals", () => {
     const after = timelineSignalFor([
       {
         ...baseAssistantMessage,
-        toolCalls: [{ name: "read_file", status: "running", summary: "opened session_service.py" }],
+        feedbackEvents: [
+          { sequence: 1, kind: "tool", name: "read_file", status: "running", summary: "opened session_service.py" },
+        ],
       },
     ]);
 
     expect(after).not.toBe(before);
   });
 
-  it("changes when a mental snapshot becomes visible", () => {
+  it("changes when mental feedback becomes visible", () => {
     const before = timelineSignalFor([baseAssistantMessage]);
     const after = timelineSignalFor([
       {
         ...baseAssistantMessage,
-        mentalSnapshot: {
-          mood: "focused",
-          feeling: "tracking tool output",
-          whisper: "",
-          summary: "Following the active tool result",
-          cognitiveState: "productive",
-          confidence: 0.7,
-          sampleSize: 1,
-          interventionCount: 0,
-          updatedAt: "2026-05-22T00:01:05Z",
-          source: "runtime",
-        },
+        feedbackEvents: [
+          ...(baseAssistantMessage.feedbackEvents ?? []),
+          { sequence: 2, kind: "mental", status: "done", summary: "Following the active tool result" },
+        ],
       },
     ]);
 
     expect(after).not.toBe(before);
   });
 
-  it("ignores mental snapshot signal changes when mental snapshots are hidden", () => {
+  it("ignores mental feedback signal changes when mental snapshots are hidden", () => {
     const before = timelineSignalWithoutMentalFor([baseAssistantMessage]);
     const after = timelineSignalWithoutMentalFor([
       {
         ...baseAssistantMessage,
-        mentalSnapshot: {
-          mood: "focused",
-          feeling: "tracking tool output",
-          whisper: "",
-          summary: "Following the active tool result",
-          cognitiveState: "productive",
-          confidence: 0.7,
-          sampleSize: 1,
-          interventionCount: 0,
-          updatedAt: "2026-05-22T00:01:05Z",
-          source: "runtime",
-        },
+        feedbackEvents: [
+          ...(baseAssistantMessage.feedbackEvents ?? []),
+          { sequence: 2, kind: "mental", status: "done", summary: "Following the active tool result" },
+        ],
       },
     ]);
 

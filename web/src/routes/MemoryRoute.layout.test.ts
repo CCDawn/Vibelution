@@ -57,7 +57,7 @@ import knowledgeDetailPanelSource from "./MemoryKnowledgeDetailPanel.tsx?raw";
 import userContentPanelSource from "./MemoryUserContentPanel.tsx?raw";
 import userContentPanelStyles from "./MemoryUserContentPanel.styles";
 import queryKeysSource from "../api/queryKeys.ts?raw";
-import apiTypesSource from "../api/types.ts?raw";
+import memoryTypesSource from "../api/types/memory.ts?raw";
 import knowledgeItemRatingCardSource from "./MemoryKnowledgeItemRatingCard.tsx?raw";
 import knowledgeItemRatingCardStyles from "./MemoryKnowledgeItemRatingCard.styles";
 
@@ -109,9 +109,9 @@ describe("MemoryRoute layout contract", () => {
   });
 
   it("wires user Markdown content through dedicated panel and query keys", () => {
-    const userMarkdownSpaceSummaryBlock = apiTypesSource.slice(
-      apiTypesSource.indexOf("export interface UserMarkdownSpaceSummary"),
-      apiTypesSource.indexOf("export interface UserMarkdownPageSummary"),
+    const userMarkdownSpaceSummaryBlock = memoryTypesSource.slice(
+      memoryTypesSource.indexOf("export interface UserMarkdownSpaceSummary"),
+      memoryTypesSource.indexOf("export interface UserMarkdownPageSummary"),
     );
 
     expect(routeSource).toContain("MemoryUserContentPanel");
@@ -125,8 +125,8 @@ describe("MemoryRoute layout contract", () => {
     expect(queryKeysSource).toContain("userMarkdownSpaces: (userId: string)");
     expect(queryKeysSource).toContain("[\"user-content\", \"markdown-spaces\", userId]");
     expect(userContentPanelSource).not.toContain("MemoryRoute.styles");
-    expect(apiTypesSource).toContain("counts?: UserMarkdownSpaceCounts;");
-    expect(apiTypesSource).toContain("sourceRef?: Record<string, unknown>;");
+    expect(memoryTypesSource).toContain("counts?: UserMarkdownSpaceCounts;");
+    expect(memoryTypesSource).toContain("sourceRef?: Record<string, unknown>;");
     expect(userMarkdownSpaceSummaryBlock).toContain("userId: string;");
     expect(userMarkdownSpaceSummaryBlock).toContain("pageCount: number;");
     expect(userContentPanelSource).toContain("type NormalizedSpaceSummary =");
