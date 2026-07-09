@@ -272,7 +272,8 @@ describe("SelfEvolutionTrack static assets", () => {
     expect(workspaceSurface).toContain("终止这一轮");
     expect(workspaceSurface).toContain("observationPrimaryActionDisabled");
     expect(workspaceSurface).toContain("onTerminateObservation(observationRun.runId)");
-    expect(workspaceSurface).toContain("onStartObservation({ goal: observationGoalValue, durationSeconds: normalizedObservationDuration })");
+    expect(workspaceSurface).toContain("onStartObservation({ goal: observationGoalInput, durationSeconds: normalizedObservationDuration })");
+    expect(workspaceSurface).not.toContain("onStartObservation({ goal: observationGoalValue");
     expect(selfEvolutionSource).not.toContain("在底部输入观察目标后开始自主观察。");
     expect(selfEvolutionSource).not.toContain("Enter an observation goal in the composer, then start observation.");
     expect(selfEvolutionSource).not.toContain("设置观察目标和时长后启动。");
@@ -329,7 +330,7 @@ describe("SelfEvolutionTrack static assets", () => {
     expect(selfEvolutionSource).toContain("activeConversationSurface.messages");
     expect(selfEvolutionSource).toContain("activeConversationSurface.submitLabel");
     expect(selfEvolutionSource).toContain("activeConversationSurface.onSubmit");
-    expect(selfEvolutionSource).toContain("onStartObservation({ goal: observationGoalValue, durationSeconds: normalizedObservationDuration })");
+    expect(selfEvolutionSource).toContain("onStartObservation({ goal: observationGoalInput, durationSeconds: normalizedObservationDuration })");
     expect(selfEvolutionSource).toContain("onStartRun");
     expect(centerConversationViewCount).toBe(1);
     expect(centerSurface).toContain("sessionId={activeConversationSurface.sessionId}");

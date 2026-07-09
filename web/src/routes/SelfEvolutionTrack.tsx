@@ -863,6 +863,7 @@ export function SelfEvolutionTrack({
   const observationRunActive = isObservationQueuedOrRunning(observationRun?.status || "");
   const observationRunModeActive = selfEvolutionMode === "observation";
   const observationGoalValue = observationGoalInput.trim();
+  const observationPromptFilled = observationGoalValue.length > 0;
   const parsedObservationDuration = parseObservationDurationInput(observationDurationInput);
   const normalizedObservationDuration = parsedObservationDuration.durationSeconds;
   const observationDurationValid = parsedObservationDuration.isValid;
@@ -871,11 +872,11 @@ export function SelfEvolutionTrack({
     : "";
   const observationStartDisabled = observationStartPending
     || observationRunActive
-    || observationGoalValue.length === 0
+    || !observationPromptFilled
     || !observationDurationValid;
   const observationStartDisabledReason = observationRunActive
     ? (lang === "zh" ? "当前观察正在运行。" : "Observation is already running.")
-    : observationDurationError || (!observationGoalValue ? (lang === "zh" ? "先填写观察提示词。" : "Enter an observation prompt first.") : undefined);
+    : observationDurationError || (!observationPromptFilled ? (lang === "zh" ? "先填写观察提示词。" : "Enter an observation prompt first.") : undefined);
   const observationPrimaryActionDisabled = observationRunActive
     ? observationActionPending || !observationTerminateAction?.enabled || !observationRun?.runId
     : observationStartDisabled;
@@ -1718,7 +1719,7 @@ export function SelfEvolutionTrack({
                             onTerminateObservation(observationRun.runId);
                             return;
                           }
-                          onStartObservation({ goal: observationGoalValue, durationSeconds: normalizedObservationDuration });
+                          onStartObservation({ goal: observationGoalInput, durationSeconds: normalizedObservationDuration });
                         }}
                       >
                         {(observationStartPending || observationActionPending) ? <LoaderCircle size={15} className={styles.spinning} /> : observationRunActive ? <X size={15} /> : <ArrowUpRight size={15} />}
