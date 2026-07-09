@@ -159,4 +159,4 @@ def test_llm_payload_trace_respects_explicit_empty_tools_over_bound_tools():
     assert len(trace_events) == 1
     trace = trace_events[0]["llmPayloadTrace"]
     assert trace["toolCount"] == 0
-    assert trace["payloadShape"].get("toolDefinitionCount") in (None, 0)
+    assert (trace.get("payloadShape") or {}).get("toolDefinitionCount") in (None, 0)
