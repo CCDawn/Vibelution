@@ -164,6 +164,7 @@ import {
 import {
   activeTurnLayerToConversationMessage,
   activeTurnLayerTextLength,
+  createOptimisticActiveTurnLayer,
   isActiveTurnSettledByDetail,
   type ActiveTurnLayerState,
 } from "./chatActiveTurnLayer";
@@ -1721,6 +1722,25 @@ function setActiveTurnLayerForSession(
   };
 }
 
+function optimisticTurnIdForSubmission(kind: "submit" | "edit", sessionId: string, createdAt: string) {
+  return `optimistic-${kind}-${stableCliHash([kind, sessionId, createdAt].join("\n"))}`;
+}
+
+function latestUserTurnId(detail: SessionDetail | undefined) {
+  const messages = detail?.messages ?? [];
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message?.role !== "user") {
+      continue;
+    }
+    const turnId = String(message.metadata?.turnId ?? message.metadata?.turn_id ?? "").trim();
+    if (turnId) {
+      return turnId.startsWith("live:") ? turnId.slice("live:".length) : turnId;
+    }
+  }
+  return "";
+}
+
 function latestMentalSnapshot(messages: ConversationMessage[] | undefined): MentalStateSnapshot | undefined {
   return [...(messages ?? [])].reverse().find((message) => message.role === "assistant" && message.mentalSnapshot)?.mentalSnapshot;
 }
@@ -2487,6 +2507,18 @@ export function ChatCodingRoute() {
           mentalModelEnabled: variables.mentalModelEnabled,
         },
       );
+      const createdAt = new Date().toISOString();
+      setActiveTurnLayersBySession((current) =>
+        setActiveTurnLayerForSession(
+          current,
+          variables.sessionId,
+          createOptimisticActiveTurnLayer({
+            sessionId: variables.sessionId,
+            turnId: optimisticTurnIdForSubmission("submit", variables.sessionId, createdAt),
+            updatedAt: createdAt,
+          }),
+        )
+      );
       queryClient.setQueryData<SessionDetail>(queryKeys.session(variables.sessionId), (detail) =>
         markSessionDetailRunning(appendOptimisticUserMessage(detail, variables)),
       );
@@ -2515,6 +2547,20 @@ export function ChatCodingRoute() {
       queryClient.setQueryData<SessionDetail>(queryKeys.session(variables.sessionId), (detail) =>
         markSessionDetailRunning(markOptimisticUserMessageAccepted(detail, variables, acceptedTurn.turnId)),
       );
+      const acceptedTurnId = String(acceptedTurn.turnId || "").trim();
+      setActiveTurnLayersBySession((current) =>
+        setActiveTurnLayerForSession(
+          current,
+          variables.sessionId,
+          acceptedTurnId
+            ? createOptimisticActiveTurnLayer({
+              sessionId: variables.sessionId,
+              turnId: acceptedTurn.turnId,
+              updatedAt: acceptedTurn.acceptedAt,
+            })
+            : undefined,
+        )
+      );
       void chatWorkspaceCache.afterDirectTurnAccepted(acceptedTurn.sessionId || variables.sessionId);
     },
     onError: (error, variables) => {
@@ -2533,6 +2579,9 @@ export function ChatCodingRoute() {
       );
       queryClient.setQueryData<SessionDetail>(queryKeys.session(variables.sessionId), (detail) =>
         removeOptimisticUserMessage(detail, variables),
+      );
+      setActiveTurnLayersBySession((current) =>
+        setActiveTurnLayerForSession(current, variables.sessionId, undefined)
       );
       setSessionDrafts((current) => restoreSubmittedDraftIfComposerStillEmpty(current, variables.sessionId, variables.content));
       setSessionComposerErrors((current) => ({
@@ -2567,6 +2616,18 @@ export function ChatCodingRoute() {
         body: JSON.stringify({ messageId, content, contentUtf8Base64: encodeUtf8Base64(content), mentalModelEnabled }),
       }),
     onMutate: async (variables) => {
+      const createdAt = new Date().toISOString();
+      setActiveTurnLayersBySession((current) =>
+        setActiveTurnLayerForSession(
+          current,
+          variables.sessionId,
+          createOptimisticActiveTurnLayer({
+            sessionId: variables.sessionId,
+            turnId: optimisticTurnIdForSubmission("edit", variables.sessionId, createdAt),
+            updatedAt: createdAt,
+          }),
+        )
+      );
       queryClient.setQueryData<SessionDetail>(queryKeys.session(variables.sessionId), markSessionDetailRunning);
       updateSessionSummaryCaches(queryClient, (sessions) =>
         markSessionSummaryRunning(sessions, variables.sessionId),
@@ -2586,9 +2647,27 @@ export function ChatCodingRoute() {
         return remaining;
       });
       syncSessionDetail(nextDetail);
+      const acceptedTurnId = latestUserTurnId(nextDetail);
+      setActiveTurnLayersBySession((current) => {
+        if (!acceptedTurnId || !isBusyPhase(nextDetail.currentPhase || nextDetail.status)) {
+          return setActiveTurnLayerForSession(current, variables.sessionId, undefined);
+        }
+        return setActiveTurnLayerForSession(
+          current,
+          variables.sessionId,
+          createOptimisticActiveTurnLayer({
+            sessionId: variables.sessionId,
+            turnId: acceptedTurnId,
+            updatedAt: nextDetail.updatedAt,
+          }),
+        );
+      });
       void chatWorkspaceCache.afterSessionChanged();
     },
     onError: (error, variables) => {
+      setActiveTurnLayersBySession((current) =>
+        setActiveTurnLayerForSession(current, variables.sessionId, undefined)
+      );
       setSessionComposerErrors((current) => ({
         ...current,
         [variables.sessionId]: describeError(error, t("editResubmitFailed")),

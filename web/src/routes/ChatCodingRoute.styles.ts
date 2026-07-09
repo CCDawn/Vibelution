@@ -1051,15 +1051,15 @@ layout:
   tokenStatusBar:
     "vui-routes-chatcodingroute tokenStatusBar relative mt-1.5 block h-1.5 overflow-hidden rounded-full bg-[color-mix(in_srgb,var(--vui-border-subtle)_78%,transparent)] [&>span]:block [&>span]:h-full [&>span]:rounded-full [&>span]:bg-[var(--accent-cool)] [&>span]:w-[calc(var(--token-status-value)*1%)]",
   tokenStatusCopy:
-    "vui-routes-chatcodingroute tokenStatusCopy grid min-w-0 self-center gap-1 overflow-visible [overflow-wrap:anywhere]",
+    "vui-routes-chatcodingroute tokenStatusCopy grid min-w-0 self-center gap-0.5 overflow-visible text-center",
   tokenStatusLabel:
-    "vui-routes-chatcodingroute tokenStatusLabel block min-w-0 max-w-full whitespace-normal text-[var(--vui-font-sm)] font-semibold leading-tight text-vui-fg-primary",
+    "vui-routes-chatcodingroute tokenStatusLabel block min-w-0 max-w-full truncate whitespace-nowrap text-[11px] font-semibold leading-none text-vui-fg-primary",
   tokenStatusMeta:
-    "vui-routes-chatcodingroute tokenStatusMeta block min-w-0 max-w-full whitespace-normal text-[var(--vui-font-xs)] leading-[1.3] text-vui-fg-secondary [overflow-wrap:anywhere]",
+    "vui-routes-chatcodingroute tokenStatusMeta sr-only",
   tokenStatusMetric:
-    "vui-routes-chatcodingroute tokenStatusMetric !grid min-h-[64px] !w-full grid-cols-[44px_minmax(0,1fr)] items-center justify-stretch gap-2.5 overflow-visible rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--vui-border-strong)_60%,transparent)] bg-[var(--vui-surface-raised)] px-2.5 py-2 text-left shadow-none",
+    "vui-routes-chatcodingroute tokenStatusMetric !grid min-h-[64px] !w-full grid-cols-1 grid-rows-[28px_minmax(0,1fr)] place-items-center justify-stretch gap-1 overflow-visible rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--vui-border-strong)_60%,transparent)] bg-[var(--vui-surface-raised)] px-1 py-1.5 text-center shadow-none",
   tokenStatusMetricButton:
-    "vui-routes-chatcodingroute tokenStatusMetricButton !grid !w-full [&_[data-slot=vui-button-content]]:contents [&_[data-slot=vui-button-label]]:contents",
+    "vui-routes-chatcodingroute tokenStatusMetricButton !grid !h-full !min-h-0 !w-full !border-0 !bg-transparent !p-0 !text-inherit !shadow-none [&_[data-slot=vui-button-content]]:contents [&_[data-slot=vui-button-label]]:contents",
   tokenStatusMetric_active:
     "vui-routes-chatcodingroute tokenStatusMetric_active min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
   tokenStatusMetric_answering:
@@ -1187,11 +1187,11 @@ layout:
   tokenStatusMetric_warning:
     "vui-routes-chatcodingroute tokenStatusMetric_warning min-w-0 border-[color-mix(in_srgb,var(--state-warning)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_10%,transparent)] text-[var(--state-warning)]",
   tokenStatusRing:
-    "vui-routes-chatcodingroute tokenStatusRing relative size-[44px] shrink-0 rounded-full bg-[conic-gradient(var(--accent-cool)_calc(var(--token-status-value)*1%),var(--vui-border-subtle)_0)]",
+    "vui-routes-chatcodingroute tokenStatusRing relative size-[28px] shrink-0 rounded-full bg-[conic-gradient(var(--accent-cool)_calc(var(--token-status-value)*1%),var(--vui-border-subtle)_0)]",
   tokenStatusRingCore:
-    "vui-routes-chatcodingroute tokenStatusRingCore absolute inset-[6px] grid max-w-full place-items-center overflow-hidden text-ellipsis rounded-full bg-[var(--vui-surface-panel)] px-0.5 text-center text-[11px] font-bold leading-none text-vui-fg-primary",
+    "vui-routes-chatcodingroute tokenStatusRingCore absolute inset-[3px] grid max-w-full place-items-center overflow-hidden text-ellipsis rounded-full bg-[var(--vui-surface-panel)] px-0.5 text-center text-[10px] font-bold leading-none text-vui-fg-primary",
   tokenStatusVisualGrid:
-    "vui-routes-chatcodingroute tokenStatusVisualGrid !grid w-full grid-cols-1 justify-stretch gap-1.5 rounded-[var(--radius-control)]",
+    "vui-routes-chatcodingroute tokenStatusVisualGrid !grid w-full grid-cols-[repeat(4,minmax(0,1fr))] justify-stretch gap-1.5 rounded-[var(--radius-control)]",
 };
 
 export default styles;

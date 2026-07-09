@@ -815,9 +815,11 @@ describe("ChatCodingRoute layout contract", () => {
   });
 
   it("keeps left rail VButton cards from collapsing their internal grid layout", () => {
-    expect(routeStyles.tokenStatusMetric).toContain("grid-cols-[44px_minmax(0,1fr)]");
+    expect(tokenCoreStatusPanelSource).toContain("tokenMetricShortLabel(metric, lang)");
+    expect(tokenCoreStatusPanelSource).toContain("<div key={metric.key} className={metricClassName}");
+    expect(routeStyles.tokenStatusMetric).toContain("grid-rows-[28px_minmax(0,1fr)]");
     expect(routeStyles.tokenStatusMetric).toContain("min-h-[64px]");
-    expect(routeStyles.tokenStatusMetric).not.toContain("min-h-[44px]");
+    expect(routeStyles.tokenStatusMetric).not.toContain("min-h-[96px]");
     expect(routeStyles.tokenStatusMetric).toContain("bg-[var(--vui-surface-raised)]");
     expect(routeStyles.tokenStatusMetric).not.toContain("white)");
     expect(routeStyles.tokenStatusMetric).toContain("shadow-none");
@@ -825,17 +827,16 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.tokenStatusMetric).toContain("!w-full");
     expect(routeStyles.tokenStatusMetric).toContain("overflow-visible");
     expect(routeStyles.tokenStatusVisualGrid).toContain("!grid");
-    expect(routeStyles.tokenStatusVisualGrid).toContain("grid-cols-1");
+    expect(routeStyles.tokenStatusVisualGrid).toContain("grid-cols-[repeat(4,minmax(0,1fr))]");
     expect(routeStyles.tokenStatusVisualGrid).toContain("w-full");
     expect(routeStyles.tokenStatusCopy).toContain("min-w-0");
     expect(routeStyles.tokenStatusCopy).toContain("overflow-visible");
     expect(routeStyles.tokenStatusCopy).toContain("self-center");
-    expect(routeStyles.tokenStatusLabel).toContain("whitespace-normal");
-    expect(routeStyles.tokenStatusLabel).toContain("text-[var(--vui-font-sm)]");
-    expect(routeStyles.tokenStatusMeta).toContain("[overflow-wrap:anywhere]");
-    expect(routeStyles.tokenStatusMeta).toContain("text-[var(--vui-font-xs)]");
-    expect(routeStyles.tokenStatusRing).toContain("size-[44px]");
-    expect(routeStyles.tokenStatusRingCore).toContain("text-[11px]");
+    expect(routeStyles.tokenStatusLabel).toContain("whitespace-nowrap");
+    expect(routeStyles.tokenStatusLabel).toContain("text-[11px]");
+    expect(routeStyles.tokenStatusMeta).toContain("sr-only");
+    expect(routeStyles.tokenStatusRing).toContain("size-[28px]");
+    expect(routeStyles.tokenStatusRingCore).toContain("text-[10px]");
     expect(routeStyles.tokenStatusRingCore).toContain("max-w-full");
     expect(routeStyles.tokenStatusRingCore).toContain("overflow-hidden");
     expect(routeStyles.tokenStatusRingCore).toContain("text-ellipsis");
@@ -843,6 +844,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.tokenStatusMetricButton).toContain("[&_[data-slot=vui-button-content]]:contents");
     expect(routeStyles.tokenStatusMetricButton).toContain("!grid");
     expect(routeStyles.tokenStatusMetricButton).toContain("!w-full");
+    expect(routeStyles.tokenStatusMetricButton).toContain("!bg-transparent");
     expect(routeStyles.tokenStatusMetricButton).toContain("[&_[data-slot=vui-button-label]]:contents");
     expect(routeStyles.tokenStatusMetric_cache).not.toContain("inline-flex");
     expect(routeStyles.tokenStatusMetric_modelInput).not.toContain("inline-flex");
@@ -852,6 +854,44 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.featureChip).toContain("[&_[data-slot=vui-button-content]]:min-w-0");
     expect(routeStyles.featureChip).toContain("[&_[data-slot=vui-button-content]]:max-w-full");
     expect(routeStyles.featureChip).toContain("[&_[data-slot=vui-button-label]]:grid-cols-[minmax(0,1fr)_auto]");
+  });
+
+  it("optimistically renders the agent turn while submitted chat content is waiting for backend stream", () => {
+    expect(routeSource).toContain("createOptimisticActiveTurnLayer");
+    expect(routeSource).toContain("optimisticTurnIdForSubmission");
+
+    const submitMutationStart = routeSource.indexOf("const submitTurnMutation = useMutation");
+    const submitMutateStart = routeSource.indexOf("onMutate: async (variables)", submitMutationStart);
+    const submitSuccessStart = routeSource.indexOf("onSuccess: (acceptedTurn, variables)", submitMutateStart);
+    const submitErrorStart = routeSource.indexOf("onError: (error, variables)", submitSuccessStart);
+    const submitMutateBlock = routeSource.slice(submitMutateStart, submitSuccessStart);
+    const submitSuccessBlock = routeSource.slice(submitSuccessStart, submitErrorStart);
+    const submitErrorBlock = routeSource.slice(submitErrorStart, routeSource.indexOf("const editResubmitMutation", submitErrorStart));
+
+    expect(submitMutateBlock).toContain("setActiveTurnLayersBySession((current) =>");
+    expect(submitMutateBlock).toContain("createOptimisticActiveTurnLayer({");
+    expect(submitMutateBlock).toContain("sessionId: variables.sessionId");
+    expect(submitMutateBlock).toContain("turnId: optimisticTurnIdForSubmission(\"submit\", variables.sessionId, createdAt)");
+    expect(submitSuccessBlock).toContain("createOptimisticActiveTurnLayer({");
+    expect(submitSuccessBlock).toContain("turnId: acceptedTurn.turnId");
+    expect(submitErrorBlock).toContain("setActiveTurnLayerForSession(current, variables.sessionId, undefined)");
+
+    const editMutationStart = routeSource.indexOf("const editResubmitMutation = useMutation");
+    const editMutateStart = routeSource.indexOf("onMutate: async (variables)", editMutationStart);
+    const editSuccessStart = routeSource.indexOf("onSuccess: (nextDetail, variables)", editMutateStart);
+    const editErrorStart = routeSource.indexOf("onError: (error, variables)", editSuccessStart);
+    const editMutateBlock = routeSource.slice(editMutateStart, editSuccessStart);
+    const editSuccessBlock = routeSource.slice(editSuccessStart, editErrorStart);
+    const editErrorBlock = routeSource.slice(editErrorStart, routeSource.indexOf("const stopTurnMutation", editErrorStart));
+
+    expect(editMutateBlock).toContain("setActiveTurnLayersBySession((current) =>");
+    expect(editMutateBlock).toContain("createOptimisticActiveTurnLayer({");
+    expect(editMutateBlock).toContain("turnId: optimisticTurnIdForSubmission(\"edit\", variables.sessionId, createdAt)");
+    expect(editSuccessBlock).toContain("const acceptedTurnId = latestUserTurnId(nextDetail)");
+    expect(editSuccessBlock).toContain("setActiveTurnLayersBySession((current) =>");
+    expect(editSuccessBlock).toContain("turnId: acceptedTurnId");
+    expect(editSuccessBlock).toContain("setActiveTurnLayerForSession(current, variables.sessionId, undefined)");
+    expect(editErrorBlock).toContain("setActiveTurnLayerForSession(current, variables.sessionId, undefined)");
   });
 
   it("keeps group settings in the right status rail and member status in the left conversation index", () => {

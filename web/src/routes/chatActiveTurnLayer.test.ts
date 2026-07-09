@@ -6,6 +6,7 @@ import {
   activeTurnLayerToConversationMessage,
   type ActiveTurnLayerState,
   activeTurnLayerTextLength,
+  createOptimisticActiveTurnLayer,
   isActiveTurnSettledByDetail,
   mergeAssistantDeltaIntoActiveTurnLayer,
 } from "./chatActiveTurnLayer";
@@ -51,6 +52,53 @@ describe("chat active turn layer", () => {
     expect(message?.metadata?.kind).toBe("session_active_turn_layer");
     expect(message?.metadata?.turnId).toBe("turn-1");
     expect(message?.content).toBe("你好");
+  });
+
+  it("creates an optimistic assistant layer as soon as the user submits content", () => {
+    const active = createOptimisticActiveTurnLayer({
+      sessionId: "session-1",
+      turnId: "optimistic-submit",
+      updatedAt: "2026-07-10T01:10:00Z",
+    });
+
+    const message = activeTurnLayerToConversationMessage(active);
+
+    expect(active).toMatchObject<Partial<ActiveTurnLayerState>>({
+      id: "session-1-message-active-optimistic-submit",
+      sessionId: "session-1",
+      turnId: "optimistic-submit",
+      streaming: true,
+      processStage: "user_submit",
+      answerContent: "",
+      thoughtContent: "",
+      ledgerSeq: 0,
+    });
+    expect(active?.feedbackEvents).toEqual([
+      {
+        sequence: 1,
+        kind: "status",
+        status: "running",
+        name: "user_submit",
+        summary: "已发送，正在连接 Agent",
+      },
+    ]);
+    expect(message).toMatchObject<Partial<ConversationMessage>>({
+      role: "assistant",
+      streaming: true,
+      streamStage: "user_submit",
+      content: "",
+      metadata: {
+        kind: "session_active_turn_layer",
+        sessionId: "session-1",
+        turnId: "optimistic-submit",
+        ledgerSeq: 0,
+      },
+    });
+    expect(message?.feedbackEvents?.[0]).toMatchObject({
+      kind: "status",
+      status: "running",
+      name: "user_submit",
+    });
   });
 
   it("uses replace deltas as a full active-layer recovery snapshot", () => {
