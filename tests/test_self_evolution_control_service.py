@@ -1393,8 +1393,9 @@ def test_self_observation_session_continues_until_duration_when_model_stops(monk
     assert calls[1]["messages"][0]["role"] == "user"
     assert len(calls[1]["messages"]) == 1
     continuation_prompt = calls[1]["messages"][0]["content"]
-    assert raw_prompt in continuation_prompt
+    assert raw_prompt not in continuation_prompt
     assert "第一段观察" in continuation_prompt
+    assert "上一段观察输出" in continuation_prompt
     assert "时间仍未结束" in continuation_prompt
     payload_text = json.dumps(calls[1]["messages"], ensure_ascii=False)
     assert "\"system\"" not in payload_text

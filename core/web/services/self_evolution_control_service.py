@@ -2645,7 +2645,6 @@ def _append_self_observation_assistant_artifact(
 
 
 def _build_self_observation_continuation_prompt(
-    original_prompt: str,
     previous_output: str,
     *,
     remaining_seconds: float,
@@ -2655,7 +2654,6 @@ def _build_self_observation_continuation_prompt(
         bounded_previous_output = bounded_previous_output[-_SELF_OBSERVATION_CONTINUATION_PREVIOUS_OUTPUT_CHARS:]
     remaining = max(0, int(remaining_seconds))
     return (
-        f"{str(original_prompt or '')}\n\n"
         "上一段观察输出：\n"
         f"{bounded_previous_output}\n\n"
         f"时间仍未结束，剩余约 {remaining} 秒。请继续下一段观察，不要总结结束，也不要重复上一段。"
@@ -2782,7 +2780,6 @@ def _run_observation_session(*, run_id: str, prompt: str, duration_seconds: int)
         if _self_observation_operator_terminated(run_id):
             break
         current_prompt = _build_self_observation_continuation_prompt(
-            prompt,
             report,
             remaining_seconds=remaining_after_wait,
         )
