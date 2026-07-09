@@ -595,12 +595,14 @@ def test_session_detail_attaches_turn_timeline_once_for_tool_result_packets(tmp_
         "tool_result",
         "journal_assistant_message",
     ]
-    assert len(assistant_text_messages) == 1
-    assert assistant_text_messages[0] is turn_messages[-1]
+    assert assistant_text_messages == []
     assert [
         item["kind"]
-        for item in assistant_text_messages[0]["timelineItems"]
-    ] == ["operation", "operation", "assistant_text"]
+        for item in turn_messages[-1]["timelineItems"]
+    ] == ["operation", "operation"]
+    transcript = turn_messages[-1]["codexTranscript"]
+    assert transcript["cells"][-1]["kind"] == "assistant_markdown"
+    assert transcript["cells"][-1]["text"] == "先说明现象，再给出结论。"
     assert all("timelineItems" not in message for message in turn_messages[:-1])
 
 

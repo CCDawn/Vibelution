@@ -1,6 +1,7 @@
 import {
   isInternalStreamingStatusContent,
   isInternalStreamingStatusStage,
+  isNoFinalAnswerStatusContent,
 } from "./conversationInternalStatus";
 
 export type RuntimeStatusDisplayInput = {
@@ -32,7 +33,7 @@ export function shouldDisplayRuntimeStatus(input: RuntimeStatusDisplayInput) {
 
 export function shouldDisplayTranscriptCell(cell: TranscriptCellDisplayInput) {
   const kind = normalizedText(cell.kind);
-  if (kind === "assistant_markdown" && hasInternalTranscriptText(cell)) {
+  if (kind === "assistant_markdown" && hasNonAnswerTranscriptText(cell)) {
     return false;
   }
   if (kind !== "status") {
@@ -82,13 +83,13 @@ function hasDisplayableDiagnosticStatus(input: RuntimeStatusDisplayInput) {
   );
 }
 
-function hasInternalTranscriptText(cell: TranscriptCellDisplayInput) {
+function hasNonAnswerTranscriptText(cell: TranscriptCellDisplayInput) {
   const content = [
     cell.summary,
     cell.resultPreview,
     cell.text,
   ].map(compactText).filter(Boolean).join("\n");
-  return Boolean(content && isInternalStreamingStatusContent(content));
+  return Boolean(content && (isInternalStreamingStatusContent(content) || isNoFinalAnswerStatusContent(content)));
 }
 
 function isDisplayableProgressStatus(input: RuntimeStatusDisplayInput) {

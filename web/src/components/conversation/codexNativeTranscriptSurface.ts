@@ -21,6 +21,7 @@ import type {
   CodexTranscriptCellTone,
 } from "./codexTranscriptCells";
 import { shouldDisplayTranscriptCell } from "./conversationDisplayProtocol";
+import { isNoFinalAnswerStatusContent } from "./conversationInternalStatus";
 
 export type CodexTranscriptSurfaceMode = "native" | "empty";
 
@@ -68,6 +69,7 @@ export function resolveCodexTranscriptSurface(
     const transcript = message.codexTranscript as CodexTranscriptProjection;
     const cells = codexNativeTranscriptToCells(transcript);
     const hasAssistantMarkdown = cells.some((cell) => cell.kind === "assistant_markdown" && Boolean(cell.text?.trim()));
+    const hasNoFinalAnswerStatus = isNoFinalAnswerStatusContent(String(message.content ?? ""));
     const hasNativeProcessProjection = hasNativeProcessCells(cells) || hasNativeLifecycleProjection(transcript);
     return {
       mode: "native",
@@ -76,7 +78,7 @@ export function resolveCodexTranscriptSurface(
       hasAssistantMarkdown,
       suppressProjectedProcess: hasNativeProcessProjection,
       suppressProjectedResponse: hasAssistantMarkdown,
-      suppressProjectedTurnStatus: true,
+      suppressProjectedTurnStatus: hasNoFinalAnswerStatus ? false : hasAssistantMarkdown || hasNativeProcessProjection,
     };
   }
   return {

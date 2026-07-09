@@ -99,6 +99,44 @@ describe("ConversationView native Codex transcript surface", () => {
     expect(html).not.toContain("正在思考中，等待模型输出...");
   });
 
+  it("renders no-final-answer native assistant markdown as a turn status instead of an empty row", () => {
+    const statusText = "本轮还没有形成最终回答，已保留当前执行进度；发送“继续”可衔接上一轮继续。";
+    const html = renderConversation([
+      {
+        id: "user-continue",
+        role: "user",
+        content: "继续",
+        timestamp: "2026-07-09T17:38:16Z",
+      },
+      {
+        id: "assistant-native-needs-continue",
+        role: "assistant",
+        content: statusText,
+        timestamp: "2026-07-09T17:38:35Z",
+        codexTranscript: {
+          version: 1,
+          source: "native",
+          messageId: "assistant-native-needs-continue",
+          cells: [
+            {
+              id: "assistant-native-needs-continue-status",
+              kind: "assistant_markdown",
+              messageId: "assistant-native-needs-continue",
+              status: "completed",
+              tone: "neutral",
+              text: statusText,
+            },
+          ],
+        },
+      },
+    ]);
+
+    expect(html).toContain(statusText);
+    expect(html).toContain("状态");
+    expect(html).not.toContain('data-codex-transcript-cell-kind="assistant_markdown"');
+    expect(html).not.toContain("responseSection");
+  });
+
   it("renders native transcript as the primary assistant surface without duplicating legacy process or response", () => {
     const html = renderConversation([
       {
