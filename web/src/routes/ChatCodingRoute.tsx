@@ -110,7 +110,6 @@ import {
   renameSessionInSummaries,
   removeDeletedSessionFromSummaries,
   removeOptimisticUserMessage,
-  shouldAcceptSessionStreamEvent,
 } from "./chatSessionState";
 import {
   SESSION_INDEX_PAGE_SIZE,
@@ -170,6 +169,11 @@ import {
   type ActiveTurnLayerState,
 } from "./chatActiveTurnLayer";
 import { createSessionAssistantDeltaScheduler } from "./sessionAssistantDeltaScheduler";
+import {
+  routeSessionStreamEvent,
+  sessionStreamProtocolTelemetryFields,
+  type SessionStreamProtocolTrace,
+} from "./chatSessionStreamProtocol";
 import {
   isChildSession,
   isAgentRootSession,
@@ -3162,6 +3166,7 @@ export function ChatCodingRoute() {
       return;
     }
     let pendingDetail: SessionDetail | null = null;
+    let pendingDetailTrace: SessionStreamProtocolTrace | null = null;
     let applyTimer: number | null = null;
     let lastAppliedAt = 0;
     let committedAssistantDeltaLayer: ActiveTurnLayerState | undefined = activeTurnLayersBySessionRef.current[streamSessionId];
@@ -3170,6 +3175,7 @@ export function ChatCodingRoute() {
     });
     let assistantDeltaApplyFrame: number | null = null;
     let frameScheduledAtMs = 0;
+    let rejectedSessionStreamRouteLogged = false;
     const decisionSnapshot = sessionStreamDecisionSnapshotRef.current;
     postBrowserTelemetry({
       phase: "session_stream",
@@ -3194,12 +3200,48 @@ export function ChatCodingRoute() {
     });
     const stream = new EventSource(`/api/sessions/${streamSessionId}/events?initial=light`);
 
+    function logRejectedSessionStreamRoute(trace: SessionStreamProtocolTrace, message: string) {
+      if (trace.rejectReason === "parse_error") {
+        if (!sessionStreamPayloadErrorLoggedRef.current[streamSessionId]) {
+          sessionStreamPayloadErrorLoggedRef.current[streamSessionId] = true;
+          postBrowserTelemetry({
+            phase: "session_stream",
+            eventCode: "browser.session_stream.bad_payload",
+            message,
+            level: "warning",
+            fields: {
+              sessionId: streamSessionId,
+              payloadLength: trace.payloadLength,
+              ...sessionStreamProtocolTelemetryFields(trace),
+            },
+          });
+        }
+        return;
+      }
+      if (rejectedSessionStreamRouteLogged) {
+        return;
+      }
+      rejectedSessionStreamRouteLogged = true;
+      postBrowserTelemetry({
+        phase: "session_stream",
+        eventCode: "browser.session_stream.event_rejected",
+        message: "Session stream event was rejected by the protocol router.",
+        level: "info",
+        fields: {
+          sessionId: streamSessionId,
+          ...sessionStreamProtocolTelemetryFields(trace),
+        },
+      });
+    }
+
     function applyPendingDetail(reason: "timer" | "close" | "final") {
       if (!pendingDetail || disposed) {
         return;
       }
       const detail = pendingDetail;
+      const trace = pendingDetailTrace;
       pendingDetail = null;
+      pendingDetailTrace = null;
       if (applyTimer) {
         window.clearTimeout(applyTimer);
         applyTimer = null;
@@ -3222,6 +3264,7 @@ export function ChatCodingRoute() {
             droppedCount: stats.dropped,
             messageCount: detail.messages?.length ?? 0,
             currentPhase: detail.currentPhase || detail.status || "",
+            ...(trace ? sessionStreamProtocolTelemetryFields(trace) : {}),
           },
         });
       }
@@ -3239,7 +3282,7 @@ export function ChatCodingRoute() {
       }
     }
 
-    function queueSessionDetail(detail: SessionDetail, payloadLength: number) {
+    function queueSessionDetail(detail: SessionDetail, trace: SessionStreamProtocolTrace) {
       const stats = sessionStreamApplyStatsRef.current[streamSessionId] ?? { received: 0, applied: 0, dropped: 0 };
       stats.received += 1;
       if (pendingDetail) {
@@ -3247,6 +3290,7 @@ export function ChatCodingRoute() {
       }
       sessionStreamApplyStatsRef.current[streamSessionId] = stats;
       pendingDetail = detail;
+      pendingDetailTrace = trace;
       const phase = String(detail.currentPhase || detail.status || "").trim().toLowerCase();
       if (phase && !isBusyPhase(phase)) {
         applyPendingDetail("final");
@@ -3271,10 +3315,11 @@ export function ChatCodingRoute() {
             receivedCount: stats.received,
             appliedCount: stats.applied,
             droppedCount: stats.dropped,
-            payloadLength,
+            payloadLength: trace.payloadLength,
             messageCount: detail.messages?.length ?? 0,
             currentPhase: detail.currentPhase || detail.status || "",
             minApplyIntervalMs: SESSION_STREAM_MIN_APPLY_INTERVAL_MS,
+            ...sessionStreamProtocolTelemetryFields(trace),
           },
         });
       }
@@ -3342,6 +3387,7 @@ export function ChatCodingRoute() {
             pendingTextLength: telemetry?.pendingTextLength ?? 0,
             batchSize: telemetry?.batchSize ?? appliedPayloadCount,
             done: telemetry?.done ?? false,
+            turnRenderProtocol: telemetry?.turnRenderProtocol ?? "",
             drainMode: drain.mode,
             pendingBefore: drain.pendingBefore,
             pendingAfter: drain.pendingAfter,
@@ -3381,12 +3427,12 @@ export function ChatCodingRoute() {
 
     function queueAssistantDelta(
       payload: Extract<SessionStreamEvent, { type: "assistant_delta" }>,
-      payloadLength: number,
+      trace: SessionStreamProtocolTrace,
     ) {
       const stats = sessionStreamApplyStatsRef.current[streamSessionId] ?? { received: 0, applied: 0, dropped: 0 };
       stats.received += 1;
       sessionStreamApplyStatsRef.current[streamSessionId] = stats;
-      const queued = assistantDeltaScheduler.enqueue(payload, payloadLength);
+      const queued = assistantDeltaScheduler.enqueue(payload, trace.payloadLength, trace);
       if (payload.done) {
         applyPendingAssistantDeltas("final");
         return;
@@ -3405,7 +3451,7 @@ export function ChatCodingRoute() {
             receivedCount: stats.received,
             appliedCount: stats.applied,
             droppedCount: stats.dropped,
-            payloadLength,
+            payloadLength: trace.payloadLength,
             contentDeltaLength: queued.contentDeltaLength,
             thoughtDeltaLength: queued.thoughtDeltaLength,
             pendingTextLength: 0,
@@ -3414,6 +3460,7 @@ export function ChatCodingRoute() {
             receivedAtMs: Math.round(queued.receivedAtMs),
             frameScheduledAtMs: Math.round(frameScheduledAtMs),
             queuedForMs: Math.max(0, Math.round(frameScheduledAtMs - queued.receivedAtMs)),
+            ...sessionStreamProtocolTelemetryFields(trace),
           },
         });
       }
@@ -3455,53 +3502,27 @@ export function ChatCodingRoute() {
     };
 
     function handleSessionDetail(event: MessageEvent<string>) {
-      let payload: SessionStreamEvent;
-      try {
-        payload = JSON.parse(event.data) as SessionStreamEvent;
-      } catch {
-        if (!sessionStreamPayloadErrorLoggedRef.current[streamSessionId]) {
-          sessionStreamPayloadErrorLoggedRef.current[streamSessionId] = true;
-          postBrowserTelemetry({
-            phase: "session_stream",
-            eventCode: "browser.session_stream.bad_payload",
-            message: "Session detail stream payload could not be parsed.",
-            level: "warning",
-            fields: {
-              sessionId: streamSessionId,
-              payloadLength: event.data.length,
-            },
-          });
-        }
-        return;
-      }
-      if (!shouldAcceptSessionStreamEvent(payload, streamSessionId) || payload.type !== "session_detail") {
+      const routed = routeSessionStreamEvent({
+        activeSessionId: streamSessionId,
+        expectedType: "session_detail",
+        rawData: event.data,
+      });
+      if (!routed.accepted) {
+        logRejectedSessionStreamRoute(routed.trace, "Session detail stream payload could not be parsed.");
         return;
       }
       setSessionStreamConnected(true);
-      queueSessionDetail(payload.detail, event.data.length);
+      queueSessionDetail(routed.payload.detail, routed.trace);
     }
 
     function handleSessionInitial(event: MessageEvent<string>) {
-      let payload: SessionStreamEvent;
-      try {
-        payload = JSON.parse(event.data) as SessionStreamEvent;
-      } catch {
-        if (!sessionStreamPayloadErrorLoggedRef.current[streamSessionId]) {
-          sessionStreamPayloadErrorLoggedRef.current[streamSessionId] = true;
-          postBrowserTelemetry({
-            phase: "session_stream",
-            eventCode: "browser.session_stream.bad_payload",
-            message: "Session initial stream payload could not be parsed.",
-            level: "warning",
-            fields: {
-              sessionId: streamSessionId,
-              payloadLength: event.data.length,
-            },
-          });
-        }
-        return;
-      }
-      if (!shouldAcceptSessionStreamEvent(payload, streamSessionId) || payload.type !== "session_initial") {
+      const routed = routeSessionStreamEvent({
+        activeSessionId: streamSessionId,
+        expectedType: "session_initial",
+        rawData: event.data,
+      });
+      if (!routed.accepted) {
+        logRejectedSessionStreamRoute(routed.trace, "Session initial stream payload could not be parsed.");
         return;
       }
       setSessionStreamConnected(true);
@@ -3512,45 +3533,33 @@ export function ChatCodingRoute() {
         level: "info",
         fields: {
           sessionId: streamSessionId,
-          payloadLength: event.data.length,
-          ledgerSeq: payload.ledgerSeq,
-          currentPhase: payload.currentPhase || "",
-          running: payload.running,
-          latestMessageRole: payload.latestMessage?.role || "",
-          latestMessageContentLength: payload.latestMessage?.contentLength ?? 0,
-          latestMessageThoughtLength: payload.latestMessage?.thoughtLength ?? 0,
+          payloadLength: routed.trace.payloadLength,
+          ledgerSeq: routed.payload.ledgerSeq,
+          currentPhase: routed.payload.currentPhase || "",
+          running: routed.payload.running,
+          latestMessageRole: routed.payload.latestMessage?.role || "",
+          latestMessageContentLength: routed.payload.latestMessage?.contentLength ?? 0,
+          latestMessageThoughtLength: routed.payload.latestMessage?.thoughtLength ?? 0,
+          ...sessionStreamProtocolTelemetryFields(routed.trace),
         },
       });
     }
 
     function handleAssistantDelta(event: MessageEvent<string>) {
-      let payload: SessionStreamEvent;
-      try {
-        payload = JSON.parse(event.data) as SessionStreamEvent;
-      } catch {
-        if (!sessionStreamPayloadErrorLoggedRef.current[streamSessionId]) {
-          sessionStreamPayloadErrorLoggedRef.current[streamSessionId] = true;
-          postBrowserTelemetry({
-            phase: "session_stream",
-            eventCode: "browser.session_stream.bad_payload",
-            message: "Session assistant delta stream payload could not be parsed.",
-            level: "warning",
-            fields: {
-              sessionId: streamSessionId,
-              payloadLength: event.data.length,
-            },
-          });
-        }
-        return;
-      }
-      if (!shouldAcceptSessionStreamEvent(payload, streamSessionId) || payload.type !== "assistant_delta") {
+      const routed = routeSessionStreamEvent({
+        activeSessionId: streamSessionId,
+        expectedType: "assistant_delta",
+        rawData: event.data,
+      });
+      if (!routed.accepted) {
+        logRejectedSessionStreamRoute(routed.trace, "Session assistant delta stream payload could not be parsed.");
         return;
       }
       setSessionStreamConnected(true);
-      desktopConversationNotifierRef.current.handleAssistantDelta(payload, {
+      desktopConversationNotifierRef.current.handleAssistantDelta(routed.payload, {
         sessionTitle: sessionDetailQuery.data?.title || directSessionActiveSummary?.title || streamSessionId,
       });
-      queueAssistantDelta(payload, event.data.length);
+      queueAssistantDelta(routed.payload, routed.trace);
     }
 
     stream.addEventListener("session_detail", handleSessionDetail as EventListener);
