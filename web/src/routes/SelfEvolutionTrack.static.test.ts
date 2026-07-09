@@ -259,6 +259,39 @@ describe("SelfEvolutionTrack static assets", () => {
     expect(selfEvolutionSource).toContain("隔离开发");
   });
 
+  it("moves self-observation setup controls into the left rail", () => {
+    expect(selfEvolutionSource).toContain("observationDurationInput");
+    expect(selfEvolutionSource).toContain("setObservationDurationInput");
+    expect(selfEvolutionSource).toContain("parseObservationDurationInput(observationDurationInput)");
+    expect(selfEvolutionSource).not.toContain("parseObservationDurationInput(String(DEFAULT_OBSERVATION_DURATION_SECONDS))");
+    expect(workspaceSurface).toContain("观察配置");
+    expect(workspaceSurface).toContain("观察目标");
+    expect(workspaceSurface).toContain("运行时长（秒）");
+    expect(workspaceSurface).toContain("开始自主观察");
+    expect(workspaceSurface).toContain("onStartObservation({ goal: observationGoalValue, durationSeconds: normalizedObservationDuration })");
+    expect(selfEvolutionSource).not.toContain("在底部输入观察目标后开始自主观察。");
+    expect(selfEvolutionSource).not.toContain("Enter an observation goal in the composer, then start observation.");
+  });
+
+  it("keeps the observation conversation as output-only while setup lives in the left rail", () => {
+    expect(selfEvolutionSource).toContain("showComposer: observationRunModeActive ? false");
+    expect(selfEvolutionSource).not.toContain('composerPlaceholder: lang === "zh" ? "描述要观察 Agent 如何思考的问题"');
+    expect(selfEvolutionSource).not.toContain('submitLabel: lang === "zh" ? "开始自主观察"');
+  });
+
+  it("filters the left Agent cards to the observer in observation mode", () => {
+    const agentCardsStart = selfEvolutionSource.indexOf("function renderSelfEvolutionAgentCards()");
+    const agentCardsEnd = selfEvolutionSource.indexOf("\n  function renderObservationStatusSurface()", agentCardsStart);
+    const agentCardsSurface = agentCardsStart >= 0 && agentCardsEnd > agentCardsStart
+      ? selfEvolutionSource.slice(agentCardsStart, agentCardsEnd)
+      : "";
+
+    expect(agentCardsSurface).toContain("visibleSelfEvolutionAgentCards");
+    expect(agentCardsSurface).toContain('card.role === "observer"');
+    expect(agentCardsSurface).toContain("visibleSelfEvolutionAgentCards.map");
+    expect(agentCardsSurface).toContain("visibleSelfEvolutionAgentCards.length");
+  });
+
   it("keeps observation mode free of tool and merge actions", () => {
     expect(selfEvolutionSource).toContain("observationRun");
     expect(selfEvolutionSource).toContain("renderObservationStatusSurface()");
