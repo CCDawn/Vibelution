@@ -487,6 +487,14 @@ layout:
   layoutCenterFirst:
     "vui-routes-chatcodingroute layoutCenterFirst min-w-0 !gap-0 !p-0 !grid-cols-[minmax(0,var(--chat-left-pane-width,0px))_var(--chat-pane-gutter)_minmax(520px,1fr)_var(--chat-pane-gutter)_minmax(0,var(--chat-right-pane-width,0px))] max-[980px]:!grid-cols-[minmax(0,var(--chat-left-pane-width,0px))_var(--chat-pane-gutter)_minmax(420px,1fr)_var(--chat-pane-gutter)_minmax(0,var(--chat-right-pane-width,0px))] max-[640px]:!grid-cols-[minmax(0,var(--chat-left-pane-width,0px))_var(--chat-pane-gutter)_minmax(280px,1fr)_var(--chat-pane-gutter)_minmax(0,var(--chat-right-pane-width,0px))]",
   leftBlock:    "vui-routes-chatcodingroute leftBlock min-w-0 grid shrink-0 gap-1.5 rounded-[var(--radius-panel)] border border-[color-mix(in_srgb,var(--vui-border-strong)_66%,transparent)] !bg-[var(--vui-surface-rail)] p-1.5 shadow-none",
+  llmPayloadTraceGrid:
+    "vui-routes-chatcodingroute llmPayloadTraceGrid grid min-w-0 grid-cols-2 gap-2",
+  llmPayloadTraceItem:
+    "vui-routes-chatcodingroute llmPayloadTraceItem grid min-w-0 gap-0.5 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--vui-border-subtle)_76%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-row)_46%,transparent)] px-2 py-1 text-[var(--vui-font-xs)] leading-tight [&_strong]:min-w-0 [&_strong]:truncate [&_strong]:font-semibold [&_strong]:text-[var(--fg-primary)]",
+  llmPayloadTraceMuted:
+    "vui-routes-chatcodingroute llmPayloadTraceMuted min-w-0 truncate text-[var(--fg-tertiary)]",
+  llmPayloadTracePanel:
+    "vui-routes-chatcodingroute llmPayloadTracePanel min-w-0",
   leftRail:
     "vui-routes-chatcodingroute leftRail min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto !flex h-full min-h-0 !flex-col gap-[var(--chat-workbench-gap)] overflow-auto p-[var(--chat-workbench-gap)] [scrollbar-gutter:stable] [grid-column:5] [grid-row:1]",
   memberIndexSummary:

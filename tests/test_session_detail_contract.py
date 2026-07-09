@@ -110,6 +110,46 @@ def test_session_detail_context_usage_comes_from_ledger_after_restart(tmp_path, 
     assert payload["contextUsage"]["used"] > 0
 
 
+def test_session_detail_exposes_latest_llm_payload_trace(tmp_path, monkeypatch):
+    _seed_chat_state(tmp_path)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    trace = {
+        "schemaVersion": 1,
+        "traceId": "trace-safe-1",
+        "sessionId": "session-live",
+        "turnId": "turn-trace",
+        "agentId": "agent-safe",
+        "provider": "relay",
+        "model": "gpt-5.5",
+        "selectedProtocol": "relay_responses",
+        "messageCount": 2,
+        "messageRoles": ["system", "user"],
+        "messageRoleCounts": {"system": 1, "user": 1},
+        "promptCache": {
+            "promptCacheMode": "automatic",
+            "promptCachePartitionHash": "hash-safe",
+            "promptPreview": "secret raw prompt",
+        },
+        "metadata": {"promptPreview": "secret raw prompt"},
+    }
+
+    session_service._set_session_llm_payload_trace_live_output(
+        "session-live",
+        trace,
+        turn_id="turn-trace",
+    )
+
+    response = client.get("/api/sessions/session-live")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["lastLlmPayloadTrace"]["traceId"] == "trace-safe-1"
+    assert payload["lastLlmPayloadTrace"]["turnId"] == "turn-trace"
+    assert payload["lastLlmPayloadTrace"]["provider"] == "relay"
+    assert payload["lastLlmPayloadTrace"]["promptCache"]["promptCachePartitionHash"] == "hash-safe"
+    assert "secret raw prompt" not in json.dumps(payload, ensure_ascii=False)
+
+
 def test_session_detail_context_limit_uses_agent_dialogue_model_window(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path)
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
