@@ -368,6 +368,14 @@ const styles: Record<string, string> = {
     "vui-routes-chatcodingroute emptyConversationSurface min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 text-[var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)] grid min-h-[74px] w-[min(360px,calc(100%_-_32px))] place-self-center place-items-center rounded-[var(--radius-panel)] border border-dashed border-[var(--vui-border-subtle)] bg-[color-mix(in_srgb,var(--vui-surface-row)_58%,transparent)] px-4 py-3 text-center text-[var(--vui-font-sm)] font-semibold leading-tight text-[var(--fg-secondary)] shadow-[var(--vui-shadow-hairline)]",
   emptySurface:
     "vui-routes-chatcodingroute emptySurface min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 text-[var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)] grid h-full min-h-[min(420px,calc(100dvh_-_190px))] place-items-center px-4 py-8 text-center text-[var(--fg-secondary)]",
+  loadingSurface:
+    "vui-routes-chatcodingroute loadingSurface min-w-0 grid min-h-[120px] content-start gap-2 rounded-[var(--radius-panel)] border border-[color-mix(in_srgb,var(--vui-border-subtle)_72%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-panel)_62%,transparent)] p-3 text-left text-[var(--vui-font-xs)] leading-tight text-[var(--fg-secondary)]",
+  loadingSurfaceBody:
+    "vui-routes-chatcodingroute loadingSurfaceBody grid max-w-[560px] min-w-0 content-start gap-2 [&_strong]:text-[var(--fg-primary)]",
+  loadingSkeletonLine:
+    "vui-routes-chatcodingroute loadingSkeletonLine block h-2 w-[min(100%,520px)] animate-pulse rounded-full bg-[var(--vui-gradient-route-soft)]",
+  loadingSkeletonLineShort:
+    "vui-routes-chatcodingroute loadingSkeletonLineShort block h-2 w-[min(58%,320px)] animate-pulse rounded-full bg-[var(--vui-gradient-route-soft)]",
   featureChip:
     "vui-routes-chatcodingroute featureChip relative !grid min-h-[32px] min-w-0 !w-full max-w-full grid-cols-[auto_minmax(0,1fr)] items-center justify-start gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-1.5 py-1 text-[var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] transition-colors hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55 [&_[data-slot=vui-button-content]]:min-w-0 [&_[data-slot=vui-button-content]]:max-w-full [&_[data-slot=vui-button-content]]:w-full [&_[data-slot=vui-button-label]]:grid [&_[data-slot=vui-button-label]]:min-w-0 [&_[data-slot=vui-button-label]]:w-full [&_[data-slot=vui-button-label]]:grid-cols-[minmax(0,1fr)_auto] [&_[data-slot=vui-button-label]]:items-center [&_[data-slot=vui-button-label]]:gap-1 before:content-[''] before:h-1.5 before:w-1.5 before:shrink-0 before:rounded-full before:bg-[var(--fg-tertiary)] [&_em]:shrink-0 [&_em]:not-italic [&_strong]:min-w-0 [&_strong]:whitespace-normal [&_strong]:leading-tight [&_strong]:[overflow-wrap:anywhere]",
   featureChipActive:
@@ -427,7 +435,7 @@ const styles: Record<string, string> = {
   groupDeleteButton:
     "vui-routes-chatcodingroute groupDeleteButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 text-[var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
   groupEmptyState:
-    "vui-routes-chatcodingroute groupEmptyState grid min-h-[min(420px,calc(100dvh_-_220px))] min-w-0 place-items-center px-6 text-center text-[var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)] [&_svg]:mb-2 [&_svg]:text-[var(--accent-cool)]",
+    "vui-routes-chatcodingroute groupEmptyState grid min-h-[min(220px,calc(100dvh_-_260px))] min-w-0 place-items-center px-6 text-center text-[var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)] [&_svg]:mb-2 [&_svg]:text-[var(--accent-cool)]",
   groupManagementActions:
     "vui-routes-chatcodingroute groupManagementActions min-w-0 flex flex-wrap items-center gap-1.5 !grid grid-cols-[repeat(2,minmax(0,1fr))] gap-[7px]",
   groupManagementControls:

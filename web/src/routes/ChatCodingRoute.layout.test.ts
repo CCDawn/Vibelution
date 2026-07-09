@@ -172,6 +172,13 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.emptySurface).toContain("min-h-[min(420px,calc(100dvh_-_190px))]");
     expect(routeStyles.emptySurface).toContain("place-items-center");
     expect(routeStyles.emptySurface).toContain("text-center");
+    expect(routeStyles.loadingSurface).toBeTypeOf("string");
+    expect(routeStyles.loadingSkeletonLine).toBeTypeOf("string");
+    expect(routeStyles.loadingSurface).toContain("grid");
+    expect(routeStyles.loadingSurface).toContain("min-h-[120px]");
+    expect(routeStyles.loadingSurface).not.toContain("min-h-[min(420px,calc(100dvh_-_190px))]");
+    expect(routeStyles.loadingSurface).not.toContain("h-full");
+    expect(routeStyles.loadingSkeletonLine).toContain("animate-pulse");
     expect(routeStyles.rightPane).toContain("h-full");
     expect(routeStyles.rightPane).toContain("overflow-hidden");
     expect(routeStyles.rightPaneWithTabs).toContain("grid-rows-[auto_auto_minmax(0,1fr)]");
@@ -339,7 +346,10 @@ describe("ChatCodingRoute layout contract", () => {
     expect(chatConversationComposerBridgeSource).toContain("composerValue={composer.value}");
     expect(chatConversationComposerBridgeSource).toContain("composerAttachments={composer.attachments}");
     expect(routeSource).toContain("conversationConstants");
-    expect(routeSource).toContain("fallback={<div className={styles.emptySurface}>{t(\"loadingSession\")}</div>}");
+    expect(routeSource).toContain("const conversationLoadingFallback = (");
+    expect(routeSource).toContain("fallback={conversationLoadingFallback}");
+    expect(routeSource).not.toContain("fallback={<div className={styles.emptySurface}>{t(\"loadingSession\")}</div>}");
+    expect(routeSource).not.toContain("<div className={styles.emptySurface}>{t(\"loadingSession\")}</div>");
     expect(routeSource).not.toContain('import { COMPOSER_SESSION_REFERENCE_MIME, ConversationView } from "../components/conversation/ConversationView"');
   });
 
@@ -1600,7 +1610,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.groupMessageTimeline).toContain("p-2");
     expect(routeStyles.groupEmptyState).toContain("grid");
     expect(routeStyles.groupEmptyState).toContain("place-items-center");
-    expect(routeStyles.groupEmptyState).toContain("min-h-[min(420px,calc(100dvh_-_220px))]");
+    expect(routeStyles.groupEmptyState).toContain("min-h-[min(220px,calc(100dvh_-_260px))]");
+    expect(routeStyles.groupEmptyState).not.toContain("min-h-[min(420px,calc(100dvh_-_220px))]");
 
     expect(routeStyles.groupMemberPicker).toContain("grid");
     expect(routeStyles.groupMemberPicker).toContain("gap-1.5");
@@ -2173,7 +2184,9 @@ describe("ChatCodingRoute layout contract", () => {
     expect(chatFilePreviewPanelSource).toContain('role="alert"');
     expect(chatFilePreviewPanelSource).toContain('role="status"');
     expect(chatFilePreviewPanelSource).toContain('aria-live="polite"');
-    expect(chatFilePreviewPanelStyles.emptySurface).toContain("min-h-[min(420px,calc(100dvh_-_190px))]");
+    expect(chatFilePreviewPanelStyles.emptySurface).toContain("min-h-[96px]");
+    expect(chatFilePreviewPanelStyles.emptySurface).not.toContain("h-full");
+    expect(chatFilePreviewPanelStyles.emptySurface).not.toContain("min-h-[min(420px,calc(100dvh_-_190px))]");
     expect(chatFilePreviewPanelStyles.emptySurface).toContain("bg-[color-mix(in_srgb,var(--vui-surface-panel)_70%,transparent)]");
     expect(chatFilePreviewPanelStyles.emptySurface).toContain("shadow-none");
     expect(chatFilePreviewPanelStyles.emptySurface).toContain("break-words");

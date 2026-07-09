@@ -6322,6 +6322,16 @@ export function ChatCodingRoute() {
     </>
   );
 
+  const conversationLoadingFallback = (
+    <div className={styles.loadingSurface} role="status" aria-live="polite">
+      <div className={styles.loadingSurfaceBody}>
+        <strong>{t("loadingSession")}</strong>
+        <span className={styles.loadingSkeletonLine} />
+        <span className={styles.loadingSkeletonLineShort} />
+      </div>
+    </div>
+  );
+
   return (
     <div
       ref={layoutRef}
@@ -7385,11 +7395,11 @@ export function ChatCodingRoute() {
                   onStop={handleStopTurn}
                   onSafeGuidance={() => handleSubmitGuidance("safe")}
                   onInterruptGuidance={() => handleSubmitGuidance("interrupt")}
-                  fallback={<div className={styles.emptySurface}>{t("loadingSession")}</div>}
+                  fallback={conversationLoadingFallback}
                 />
               </div>
             ) : (
-              <div className={styles.emptySurface}>{t("loadingSession")}</div>
+              conversationLoadingFallback
             )
           ) : activeCliAgentRunId ? (
             activeCliAgentRun ? null : (

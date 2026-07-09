@@ -26,6 +26,9 @@ describe("ChatFilePreviewPanel layout contract", () => {
     expect(html).toContain("Unable to load C:/workspace/");
     expect(styles.emptySurface).toContain("break-words");
     expect(styles.emptySurface).toContain("[overflow-wrap:anywhere]");
+    expect(styles.emptySurface).toContain("min-h-[96px]");
+    expect(styles.emptySurface).not.toContain("h-full");
+    expect(styles.emptySurface).not.toContain("min-h-[min(420px,calc(100dvh_-_190px))]");
   });
 
   it("exposes empty and lazy loading states as polite status updates", () => {
