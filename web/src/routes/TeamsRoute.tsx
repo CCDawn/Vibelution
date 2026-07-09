@@ -80,7 +80,6 @@ import { TeamSourceCollectionStageAgentsPanel, type TeamSourceCollectionStageAge
 import { TeamSourceCollectionRunSwitcherPanel, type TeamSourceCollectionRunSwitcherRun } from "./TeamSourceCollectionRunSwitcherPanel";
 import { TeamSourceCollectionFindingDetailsPanel } from "./TeamSourceCollectionFindingDetailsPanel";
 import {
-  TeamSourceCollectionOverviewPanel,
   type TeamSourceCollectionOverviewPlan,
   type TeamSourceCollectionOverviewResult,
   type TeamSourceCollectionOverviewStat,
@@ -112,6 +111,7 @@ import {
 } from "./TeamSourceCollectionResultControls";
 import { TeamSourceCollectionStorageActionsPanel, type TeamSourceCollectionStorageAction } from "./TeamSourceCollectionStorageActionsPanel";
 import { TeamWorkflowCandidatePreviewPanel, type TeamWorkflowCandidatePreviewItem } from "./TeamWorkflowCandidatePreviewPanel";
+import { TeamsSourceCollectionPanel } from "./teams/TeamsSourceCollectionPanel";
 import { TeamWorkflowGraphView, workflowGraphLayout } from "./TeamWorkflowGraphView";
 import {
   TeamWorkflowCandidateGraphStatusPanel,
@@ -13135,7 +13135,7 @@ export function TeamsRoute({
                         </>
                       ) : null}
                       {showResearchSourceCollection ? (
-                      <TeamSourceCollectionOverviewPanel
+                      <TeamsSourceCollectionPanel
                         lang={lang}
                         title={lang === "zh" ? "资料搜索执行" : "Source collection"}
                         summary={sourceCollectionOverviewSummary}
