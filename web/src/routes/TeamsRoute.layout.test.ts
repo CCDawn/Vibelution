@@ -4,6 +4,7 @@ import { resolveLegacyTeamsRedirect } from "./LegacyTeamsRedirect";
 import canvasDataSource from "./TeamsRoute.canvasData.ts?raw";
 import routeSource from "./TeamsRoute.tsx?raw";
 import teamsSourceCollectionPanelSource from "./teams/TeamsSourceCollectionPanel.tsx?raw";
+import teamsRouteViewModelSource from "./teams/teamsRouteViewModel.ts?raw";
 import teamMemoryIndexPanelSource from "./TeamMemoryIndexPanel.tsx?raw";
 import teamMemoryIndexPanelStyles from "./TeamMemoryIndexPanel.styles";
 import teamSourceCollectionActiveStagePanelSource from "./TeamSourceCollectionActiveStagePanel.tsx?raw";
@@ -258,6 +259,10 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("sourceCollectionRunsForTeam");
     expect(routeSource).toContain("sourceCollectionRunHasUsableRecords");
     expect(routeSource).toContain("selectDefaultSourceCollectionRun");
+    expect(routeSource).not.toContain("function sourceCollectionRunMetric");
+    expect(routeSource).not.toContain("export function sourceCollectionRunRecordCount");
+    expect(teamsRouteViewModelSource).toContain("function sourceCollectionRunMetric");
+    expect(teamsRouteViewModelSource).toContain("export function selectDefaultSourceCollectionRun");
     expect(routeSource).toContain("sourceCollectionHistoricalRunWithRecords");
     expect(routeSource).toContain("sourceCollectionLatestRunIsEmpty");
     expect(routeSource).toContain("renderSourceCollectionRunSwitcher");
