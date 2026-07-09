@@ -740,6 +740,7 @@ def _live_output_checkpoint_payload(state: "SessionLiveOutputState") -> dict[str
         "toolCalls": _normalize_message_tool_calls(getattr(state, "tool_calls", []) or []),
         "feedbackEvents": feedback_events,
         "contextComposition": _normalize_session_context_composition(getattr(state, "context_composition", None)),
+        "llmPayloadTrace": _normalize_session_llm_payload_trace(getattr(state, "llm_payload_trace", None)),
         "updatedAt": str(getattr(state, "updated_at", "") or "").strip() or _now_timestamp(),
     }
     timeline_items = _build_message_timeline_items(
@@ -763,6 +764,17 @@ def _live_output_checkpoint_payload(state: "SessionLiveOutputState") -> dict[str
 
 
 def _live_output_checkpoint_has_visible_payload(payload: dict[str, Any]) -> bool:
+    return bool(
+        str(payload.get("content") or "").strip()
+        or str(payload.get("thought") or "").strip()
+        or list(payload.get("toolCalls") or [])
+        or list(payload.get("feedbackEvents") or [])
+        or isinstance(payload.get("mentalSnapshot"), dict)
+        or isinstance(payload.get("llmPayloadTrace"), dict)
+    )
+
+
+def _live_output_checkpoint_has_assistant_payload(payload: dict[str, Any]) -> bool:
     return bool(
         str(payload.get("content") or "").strip()
         or str(payload.get("thought") or "").strip()
@@ -853,6 +865,7 @@ def _load_session_live_output_checkpoint(session_id: str) -> "SessionLiveOutputS
         tool_calls=_normalize_message_tool_calls(payload.get("toolCalls") or []),
         feedback_events=_normalize_message_feedback_events(payload.get("feedbackEvents") or []),
         context_composition=_normalize_session_context_composition(payload.get("contextComposition")),
+        llm_payload_trace=_normalize_session_llm_payload_trace(payload.get("llmPayloadTrace")),
         updated_at=str(payload.get("updatedAt") or "").strip(),
     )
 
@@ -968,8 +981,12 @@ def _reconcile_stale_session_ledger(session_id: str, *, active_turn_id: str = ""
         checkpoint = _load_session_live_output_checkpoint(normalized_session_id)
         turn_id = latest_open_turn_id(events)
         checkpoint_turn_id = str(getattr(checkpoint, "turn_id", "") or "").strip() if checkpoint is not None else ""
+        checkpoint_payload = _live_output_checkpoint_payload(checkpoint) if checkpoint is not None else {}
+        checkpoint_has_assistant_payload = _live_output_checkpoint_has_assistant_payload(checkpoint_payload)
         if not turn_id and checkpoint_turn_id and _session_events_have_terminal_turn(events, checkpoint_turn_id):
             _discard_session_live_output_state(normalized_session_id, turn_id=checkpoint_turn_id)
+            return
+        if not turn_id and checkpoint_turn_id and not checkpoint_has_assistant_payload:
             return
         if not turn_id and checkpoint_turn_id:
             turn_id = checkpoint_turn_id
@@ -980,25 +997,26 @@ def _reconcile_stale_session_ledger(session_id: str, *, active_turn_id: str = ""
         if active_turn_id and turn_id == str(active_turn_id or "").strip():
             return
         if checkpoint is not None and (not checkpoint.turn_id or checkpoint.turn_id == turn_id):
-            payload = _live_output_checkpoint_payload(checkpoint)
-            _persist_recovered_live_output_to_chat_state(normalized_session_id, turn_id, checkpoint)
-            _append_session_conversation_event(
-                normalized_session_id,
-                turn_id,
-                EVENT_ASSISTANT_MESSAGE,
-                status="interrupted",
-                payload={
-                    "content": str(payload.get("content") or ""),
-                    "thought": str(payload.get("thought") or ""),
-                    "toolCalls": list(payload.get("toolCalls") or []),
-                    "feedbackEvents": list(payload.get("feedbackEvents") or []),
-                    "metadata": {
-                        "interrupted": True,
-                        "recoveredFromLiveOutputCheckpoint": True,
+            payload = checkpoint_payload
+            if checkpoint_has_assistant_payload:
+                _persist_recovered_live_output_to_chat_state(normalized_session_id, turn_id, checkpoint)
+                _append_session_conversation_event(
+                    normalized_session_id,
+                    turn_id,
+                    EVENT_ASSISTANT_MESSAGE,
+                    status="interrupted",
+                    payload={
+                        "content": str(payload.get("content") or ""),
+                        "thought": str(payload.get("thought") or ""),
+                        "toolCalls": list(payload.get("toolCalls") or []),
+                        "feedbackEvents": list(payload.get("feedbackEvents") or []),
+                        "metadata": {
+                            "interrupted": True,
+                            "recoveredFromLiveOutputCheckpoint": True,
+                        },
                     },
-                },
-                source="recover_live_output_checkpoint",
-            )
+                    source="recover_live_output_checkpoint",
+                )
         event = append_conversation_event(
             PROJECT_ROOT,
             normalized_session_id,
@@ -2578,6 +2596,7 @@ class SessionLiveOutputState:
     tool_calls: list[dict[str, Any]] = field(default_factory=list)
     feedback_events: list[dict[str, Any]] = field(default_factory=list)
     context_composition: dict[str, Any] | None = None
+    llm_payload_trace: dict[str, Any] | None = None
     updated_at: str = ""
 
 
@@ -9029,6 +9048,9 @@ def _build_session_detail_from_summary(
     last_context_composition = live_context_composition or _normalize_session_context_composition(
         conversation.get("lastContextComposition") or conversation.get("last_context_composition")
     )
+    last_llm_payload_trace = _current_session_live_llm_payload_trace(conversation["id"]) or _normalize_session_llm_payload_trace(
+        conversation.get("lastLlmPayloadTrace") or conversation.get("last_llm_payload_trace")
+    )
     last_cache_composition = (
         _build_session_cache_composition(
             str(live_context_composition.get("turnId") or "").strip(),
@@ -9068,6 +9090,7 @@ def _build_session_detail_from_summary(
         "cacheUsage": cache_usage,
         "llmUsage": llm_usage,
         "lastContextComposition": last_context_composition,
+        "lastLlmPayloadTrace": last_llm_payload_trace,
         "agentPromptSnapshot": summary.get("agentPromptSnapshot") if isinstance(summary.get("agentPromptSnapshot"), dict) else {},
         "activeSkillContract": normalize_active_skill_contract(
             conversation.get("activeSkillContract") or conversation.get("active_skill_contract")
@@ -9379,6 +9402,71 @@ def _normalize_session_context_composition(value: Any) -> dict[str, Any] | None:
     updated = dict(normalized)
     updated["segments"] = next_segments
     return updated
+
+
+_SESSION_LLM_PAYLOAD_TRACE_TEXT_FIELDS = {
+    "traceId",
+    "recordedAt",
+    "phase",
+    "role",
+    "profileId",
+    "provider",
+    "model",
+    "sessionId",
+    "turnId",
+    "agentId",
+    "llmSlot",
+    "modelId",
+    "promptPurpose",
+    "dialogueChainMode",
+    "transport",
+    "selectedProtocol",
+    "protocolSource",
+}
+_SESSION_LLM_PAYLOAD_TRACE_INT_FIELDS = {
+    "schemaVersion",
+    "messageCount",
+    "toolCount",
+    "imageBlockCount",
+}
+_SESSION_LLM_PAYLOAD_TRACE_DICT_FIELDS = {
+    "messageRoleCounts",
+    "payloadShape",
+    "promptCache",
+    "thinking",
+    "contextAssembly",
+}
+
+
+def _normalize_session_llm_payload_trace(value: Any) -> dict[str, Any] | None:
+    if not isinstance(value, dict):
+        return None
+    trace: dict[str, Any] = {}
+    for key in _SESSION_LLM_PAYLOAD_TRACE_TEXT_FIELDS:
+        text = str(value.get(key) or "").strip()
+        if text:
+            trace[key] = text
+    for key in _SESSION_LLM_PAYLOAD_TRACE_INT_FIELDS:
+        if key in value:
+            trace[key] = _coerce_nonnegative_int(value.get(key))
+    if "stream" in value:
+        trace["stream"] = bool(value.get("stream"))
+    roles = value.get("messageRoles")
+    if isinstance(roles, list):
+        safe_roles = [str(role or "").strip() for role in roles if str(role or "").strip()]
+        if safe_roles:
+            trace["messageRoles"] = safe_roles[:80]
+    for key in _SESSION_LLM_PAYLOAD_TRACE_DICT_FIELDS:
+        item = value.get(key)
+        if isinstance(item, dict):
+            safe_item = {
+                str(item_key): item_value
+                for item_key, item_value in item.items()
+                if isinstance(item_value, (str, int, float, bool, list, dict)) and item_value not in (None, "")
+            }
+            if safe_item:
+                trace[key] = safe_item
+    return trace or None
 
 
 def _active_chat_turn_work_run_for_session(session_id: str) -> dict[str, Any] | None:
@@ -13957,6 +14045,9 @@ def _persist_session_turn_result(
             if context_composition is not None:
                 conversation["last_context_composition"] = context_composition
             conversation["last_cache_composition"] = cache_composition
+            last_llm_payload_trace = _current_session_live_llm_payload_trace(session_id)
+            if last_llm_payload_trace is not None:
+                conversation["last_llm_payload_trace"] = last_llm_payload_trace
             conversation["last_turn_status"] = "failed"
             conversation["last_turn_error"] = turn_error
             conversation["updated_at"] = timestamp
@@ -14234,6 +14325,9 @@ def _persist_session_turn_result(
         if context_composition is not None:
             conversation["last_context_composition"] = context_composition
         conversation["last_cache_composition"] = cache_composition
+        last_llm_payload_trace = _current_session_live_llm_payload_trace(session_id)
+        if last_llm_payload_trace is not None:
+            conversation["last_llm_payload_trace"] = last_llm_payload_trace
         if runtime_failed and turn_error is not None:
             conversation["last_turn_error"] = turn_error
         else:
@@ -19476,6 +19570,7 @@ def _set_session_live_output(
     tool_calls: Any = _UNSET,
     feedback_events: Any = _UNSET,
     context_composition: Any = _UNSET,
+    llm_payload_trace: Any = _UNSET,
 ) -> None:
     requested_turn_id = str(turn_id or "").strip()
     assistant_delta_state: SessionLiveOutputState | None = None
@@ -19487,6 +19582,7 @@ def _set_session_live_output(
         and mental_snapshot is _UNSET
         and tool_calls is _UNSET
         and context_composition is _UNSET
+        and llm_payload_trace is _UNSET
         and (content is not _UNSET or thought is not _UNSET or feedback_events is not _UNSET)
     )
     with _RUNNING_SESSIONS_LOCK:
@@ -19528,6 +19624,8 @@ def _set_session_live_output(
             state.feedback_events = _normalize_message_feedback_events(feedback_events)
         if context_composition is not _UNSET:
             state.context_composition = _normalize_session_context_composition(context_composition)
+        if llm_payload_trace is not _UNSET:
+            state.llm_payload_trace = _normalize_session_llm_payload_trace(llm_payload_trace)
         state.updated_at = _now_timestamp()
         if (
             not state.thought
@@ -19536,6 +19634,7 @@ def _set_session_live_output(
             and not state.tool_calls
             and not state.feedback_events
             and state.context_composition is None
+            and state.llm_payload_trace is None
         ):
             if content is not _UNSET or thought is not _UNSET or feedback_events is not _UNSET:
                 assistant_delta_state = SessionLiveOutputState(
@@ -19574,6 +19673,7 @@ def _set_session_live_output(
             or tool_calls is not _UNSET
             or feedback_events is not _UNSET
             or mental_snapshot is not _UNSET
+            or llm_payload_trace is not _UNSET
         ):
             checkpoint_snapshot = SessionLiveOutputState(
                 session_id=state.session_id,
@@ -19585,6 +19685,7 @@ def _set_session_live_output(
                 tool_calls=list(state.tool_calls or []),
                 feedback_events=list(state.feedback_events or []),
                 context_composition=dict(state.context_composition or {}) if isinstance(state.context_composition, dict) else None,
+                llm_payload_trace=dict(state.llm_payload_trace or {}) if isinstance(state.llm_payload_trace, dict) else None,
                 updated_at=state.updated_at,
             )
     if delete_checkpoint:
@@ -19655,12 +19756,29 @@ def _set_session_live_context_composition(
     _set_session_live_output(session_id, turn_id=turn_id, context_composition=context_composition)
 
 
+def _set_session_llm_payload_trace_live_output(
+    session_id: str,
+    trace: Any,
+    *,
+    turn_id: str = "",
+) -> None:
+    _set_session_live_output(session_id, turn_id=turn_id, llm_payload_trace=trace)
+
+
 def _current_session_live_context_composition(session_id: str) -> dict[str, Any] | None:
     with _SESSION_LIVE_OUTPUTS_LOCK:
         state = _SESSION_LIVE_OUTPUTS.get(session_id)
         if state is None:
             return None
         return _normalize_session_context_composition(state.context_composition)
+
+
+def _current_session_live_llm_payload_trace(session_id: str) -> dict[str, Any] | None:
+    with _SESSION_LIVE_OUTPUTS_LOCK:
+        state = _SESSION_LIVE_OUTPUTS.get(session_id)
+        if state is None:
+            return None
+        return _normalize_session_llm_payload_trace(state.llm_payload_trace)
 
 
 def _seed_capture_from_live_feedback_events(session_id: str, capture: SessionTurnCapture) -> None:
@@ -19939,6 +20057,7 @@ def _snapshot_session_live_output(session_id: str) -> SessionLiveOutputState | N
             tool_calls=list(state.tool_calls or []),
             feedback_events=list(state.feedback_events or []),
             context_composition=dict(state.context_composition or {}) if isinstance(state.context_composition, dict) else None,
+            llm_payload_trace=dict(state.llm_payload_trace or {}) if isinstance(state.llm_payload_trace, dict) else None,
             updated_at=state.updated_at,
         )
 
@@ -20395,6 +20514,13 @@ def _capture_session_ui_stream(
             return
         status = str(data.get("status") or "").strip()
         if not status:
+            return
+        if status == "payload_trace" and isinstance(data.get("llmPayloadTrace"), dict):
+            _set_session_llm_payload_trace_live_output(
+                target_session_id,
+                data.get("llmPayloadTrace"),
+                turn_id=event_turn_id or capture.turn_id,
+            )
             return
         batcher = context.get("textBatcher") if isinstance(context, dict) else None
         if isinstance(batcher, _SessionUiCaptureTextBatcher):
