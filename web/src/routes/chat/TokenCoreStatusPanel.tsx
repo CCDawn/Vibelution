@@ -23,6 +23,35 @@ type TokenCoreStatusPanelProps = {
   onOpenCacheDetail: () => void;
 };
 
+function tokenMetricShortLabel(metric: TokenCoreStatusMetric, lang: "zh" | "en") {
+  if (lang === "zh") {
+    switch (metric.key) {
+      case "cache":
+        return "缓存";
+      case "modelInput":
+        return "输入";
+      case "compression":
+        return "压缩";
+      case "speed":
+        return "速度";
+      default:
+        return metric.label;
+    }
+  }
+  switch (metric.key) {
+    case "cache":
+      return "Cache";
+    case "modelInput":
+      return "Input";
+    case "compression":
+      return "Zip";
+    case "speed":
+      return "Speed";
+    default:
+      return metric.label;
+  }
+}
+
 export function TokenCoreStatusPanel({
   cacheDetailAvailable,
   cacheDetailOpen,
@@ -46,14 +75,16 @@ export function TokenCoreStatusPanel({
         {metrics.map((metric) => {
           const metricStyle = { "--token-status-value": metric.percent } as CSSProperties;
           const metricClassName = `${styles.tokenStatusMetric} ${styles[`tokenStatusMetric_${metric.tone}`]}`;
+          const visibleValue = metric.displayValue ?? metric.value;
+          const visibleLabel = tokenMetricShortLabel(metric, lang);
           const metricContent = (
             <>
               <span className={styles.tokenStatusRing} aria-hidden="true">
-                <span className={styles.tokenStatusRingCore}>{metric.displayValue ?? metric.value}</span>
+                <span className={styles.tokenStatusRingCore}>{visibleValue}</span>
               </span>
               <span className={styles.tokenStatusCopy}>
-                <span className={styles.tokenStatusLabel}>{metric.label}</span>
-                <span className={styles.tokenStatusMeta}>{metric.meta}</span>
+                <span className={styles.tokenStatusLabel}>{visibleLabel}</span>
+                <span className={styles.tokenStatusMeta}>{metric.label}: {metric.value}. {metric.meta}</span>
                 <span className={styles.tokenStatusBar} aria-hidden="true">
                   <span />
                 </span>
@@ -63,11 +94,10 @@ export function TokenCoreStatusPanel({
 
           if (metric.key === "cache") {
             return (
-              <div key={metric.key} className="min-w-0" role="listitem">
+              <div key={metric.key} className={metricClassName} style={metricStyle} title={metric.title} role="listitem">
                 <VButton
                   type="button"
-                  className={`${metricClassName} ${styles.tokenStatusMetricButton}`}
-                  style={metricStyle}
+                  className={styles.tokenStatusMetricButton}
                   isDisabled={!cacheDetailAvailable}
                   onClick={cacheDetailAvailable ? onOpenCacheDetail : undefined}
                   aria-disabled={!cacheDetailAvailable}
@@ -88,6 +118,7 @@ export function TokenCoreStatusPanel({
               className={metricClassName}
               style={metricStyle}
               title={metric.title}
+              aria-label={`${metric.label} ${metric.value}. ${metric.meta}`}
               role="listitem"
             >
               {metricContent}

@@ -28,6 +28,13 @@ export type ActiveTurnLayerState = {
   ledgerSeq: number;
 };
 
+export type OptimisticActiveTurnLayerInput = {
+  sessionId: string;
+  turnId?: string;
+  updatedAt?: string;
+  summary?: string;
+};
+
 function normalizedLedgerSeq(value: unknown): number {
   const numeric = Number(value ?? 0);
   return Number.isFinite(numeric) && numeric > 0 ? numeric : 0;
@@ -55,6 +62,38 @@ function assistantDeltaAnswerContent(payload: AssistantDeltaEvent, base: ActiveT
 
 function compactText(value: unknown) {
   return String(value ?? "").trim();
+}
+
+export function createOptimisticActiveTurnLayer(
+  input: OptimisticActiveTurnLayerInput,
+): ActiveTurnLayerState | undefined {
+  const sessionId = compactText(input.sessionId);
+  if (!sessionId) {
+    return undefined;
+  }
+  const turnId = compactText(input.turnId) || "optimistic";
+  const updatedAt = compactText(input.updatedAt) || new Date().toISOString();
+  const summary = compactText(input.summary) || "已发送，正在连接 Agent";
+  return {
+    id: activeTurnMessageId(sessionId, turnId),
+    sessionId,
+    turnId,
+    updatedAt,
+    streaming: true,
+    processStage: "user_submit",
+    answerContent: "",
+    thoughtContent: "",
+    feedbackEvents: [
+      {
+        sequence: 1,
+        kind: "status",
+        status: "running",
+        name: "user_submit",
+        summary,
+      },
+    ],
+    ledgerSeq: 0,
+  };
 }
 
 function hasVisibleFeedbackEvent(event: ConversationFeedbackEvent) {
