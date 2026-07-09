@@ -237,6 +237,11 @@ class ResponsesStreamNormalizer:
             if text_delta:
                 self._text_emitted = True
                 yield StreamChunk(type="text_delta", text=text_delta, provider_payload=event)
+            elif event_type == "response.output_item.done" and not self._text_emitted:
+                output_item_text = self._extract_output_item_done_text(event)
+                if output_item_text:
+                    self._text_emitted = True
+                    yield StreamChunk(type="text_delta", text=output_item_text, provider_payload=event)
             tool_call = self._extract_tool_call(event_type, event)
             if tool_call is not None:
                 yield StreamChunk(type="tool_call_final", tool_calls=[tool_call], provider_payload=event)
@@ -283,6 +288,20 @@ class ResponsesStreamNormalizer:
         if isinstance(response.get("output_text"), str):
             return response.get("output_text") or ""
         return ResponsesStreamNormalizer._extract_output_text(response.get("output"))
+
+    @staticmethod
+    def _extract_output_item_done_text(event: Dict[str, Any]) -> str:
+        item = _as_dict(event.get("item"))
+        if not isinstance(item, dict):
+            return ""
+        item_type = str(item.get("type") or "").strip()
+        if item_type == "message":
+            role = str(item.get("role") or "").strip()
+            if role and role != "assistant":
+                return ""
+        elif item_type not in {"output_text", "text"}:
+            return ""
+        return ResponsesStreamNormalizer._extract_output_text([item])
 
     @staticmethod
     def _extract_output_text(output: Any) -> str:
