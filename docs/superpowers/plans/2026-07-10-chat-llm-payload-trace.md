@@ -1,13 +1,13 @@
 # Chat LLM Payload Trace Implementation Plan
 
-> **Status:** validated-branch  
+> **Status:** implemented  
 > **Owner:** codex-chat-llm-payload-trace  
 > **Claim:** claim-89bf0d10463a  
 > **Branch:** codex/chat-llm-payload-trace  
 > **Worktree:** `C:\Users\17533\Desktop\Vibelution-worktrees\chat-llm-payload-trace`  
 > **Scope:** safe LLM payload trace builder, LLM_STATUS propagation, session detail projection, and Chat/Coding diagnostic render.  
-> **Validation:** backend focused pytest 161 passed; frontend focused Vitest 114 passed; `npm --prefix web run build` passed; `git diff --check` clean.  
-> **Close condition:** commit this branch, merge into local `main` if gates pass, sync project memory, and release the guard claim.
+> **Validation:** root `main` follow-up validation passed: backend focused pytest 163 passed; frontend focused Vitest 114 passed; `npm --prefix web run build` passed; py_compile passed; scoped `git diff --check` clean.  
+> **Close condition:** local `main` contains safe payload trace and hardening follow-up; remaining closeout is project-memory sync and guard claim release.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
