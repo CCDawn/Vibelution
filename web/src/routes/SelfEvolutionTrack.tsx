@@ -37,7 +37,7 @@ import {
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
 import { LazyConversationView } from "../components/conversation/LazyConversationView";
 import { PaneCollapseHandle } from "../components/layout/PaneCollapseHandle";
-import { VButton, VNativeInput } from "../components/vui";
+import { VButton, VNativeInput, VNativeTextarea } from "../components/vui";
 import { TranslationKey } from "../i18n/dictionary";
 import { petAvatarPresetLabel } from "../i18n/petLabels";
 import { useAppI18n } from "../i18n/useAppI18n";
@@ -710,6 +710,7 @@ export function SelfEvolutionTrack({
     isObservationQueuedOrRunning(observationRun?.status || "") ? "observation" : "isolated_development",
   );
   const [observationGoalInput, setObservationGoalInput] = useState("");
+  const [observationDurationInput, setObservationDurationInput] = useState(String(DEFAULT_OBSERVATION_DURATION_SECONDS));
   const [worktreePage, setWorktreePage] = useState(1);
   const [activePage, setActivePage] = useState<"workspace" | "status">("workspace");
   const [selectedHistoryTxnIds, setSelectedHistoryTxnIds] = useState<string[]>([]);
@@ -856,10 +857,25 @@ export function SelfEvolutionTrack({
   const observationRunActive = isObservationQueuedOrRunning(observationRun?.status || "");
   const observationRunModeActive = selfEvolutionMode === "observation";
   const observationGoalValue = observationGoalInput.trim();
-  const parsedObservationDuration = parseObservationDurationInput(String(DEFAULT_OBSERVATION_DURATION_SECONDS));
+  const parsedObservationDuration = parseObservationDurationInput(observationDurationInput);
   const normalizedObservationDuration = parsedObservationDuration.durationSeconds;
   const observationDurationValid = parsedObservationDuration.isValid;
-  const observationDurationError = "";
+  const observationDurationError = !observationRunActive && !observationDurationValid
+    ? (lang === "zh" ? "时长需在 30 到 3600 秒之间。" : "Duration must be between 30 and 3600 seconds.")
+    : "";
+  const observationStartDisabled = observationStartPending
+    || observationRunActive
+    || observationGoalValue.length === 0
+    || !observationDurationValid;
+  const observationStartDisabledReason = observationRunActive
+    ? (lang === "zh" ? "当前观察正在运行。" : "Observation is already running.")
+    : observationDurationError || (!observationGoalValue ? (lang === "zh" ? "先填写观察目标。" : "Enter an observation prompt first.") : undefined);
+  const observationGoalDisplayValue = observationRunActive && observationRun?.goal
+    ? observationRun.goal
+    : observationGoalInput;
+  const observationDurationDisplayValue = observationRunActive && observationRun?.durationSeconds != null
+    ? String(observationRun.durationSeconds)
+    : observationDurationInput;
   const observationConversationSessionId = String(observationRun?.conversationSessionId || "").trim();
   const observationConversationReady = observationRunModeActive && Boolean(observationConversationSessionId);
   const observationSessionDetailQuery = useQuery({
@@ -1054,8 +1070,8 @@ export function SelfEvolutionTrack({
           ? "观察 Agent 固定 0 工具、no worktree。"
           : "The observation agent stays at 0 tools and no worktree.",
         lang === "zh"
-          ? "在底部输入观察目标后开始自主观察。"
-          : "Enter an observation goal in the composer, then start observation.",
+          ? "在左侧观察配置里填写目标和时长后开始自主观察。"
+          : "Set the goal and duration in the left observation config, then start observation.",
       ]),
       timestamp: observationRun?.updatedAt || "",
     },
@@ -1072,7 +1088,7 @@ export function SelfEvolutionTrack({
   const activeNextAction = observationRunModeActive
     ? (observationRunActive
       ? (lang === "zh" ? "观察会话运行中，完整输出保留在中央会话区。" : "Observation is running; full output stays in the center conversation area.")
-      : (lang === "zh" ? "在底部输入观察目标后开始自主观察。" : "Enter an observation goal in the composer, then start observation."))
+      : (lang === "zh" ? "在左侧观察配置里填写目标和时长后开始自主观察。" : "Set the goal and duration in the left observation config, then start observation."))
     : conversationTask.nextAction;
   const centerWorkflowSummary = observationRunModeActive
     ? activeNextAction
@@ -1096,16 +1112,16 @@ export function SelfEvolutionTrack({
         { label: "worktree", value: OBSERVATION_MODE_WORKTREE_STATE },
       ],
       autoScrollToLatest: observationRunActive,
-      showComposer: !observationRunActive,
-      composerValue: observationGoalInput,
-      composerPlaceholder: lang === "zh" ? "描述要观察 Agent 如何思考的问题" : "Describe what you want to observe",
-      composerDisabled: observationStartPending || observationRunActive || !observationDurationValid,
+      showComposer: observationRunModeActive ? false : !observationRunActive,
+      composerValue: "",
+      composerPlaceholder: "",
+      composerDisabled: true,
       composerPending: observationStartPending,
       composerError: observationStartError || observationDurationError || undefined,
-      submitLabel: lang === "zh" ? "开始自主观察" : "Start observation",
-      submitPendingLabel: lang === "zh" ? "启动中" : "Starting",
-      onComposerChange: setObservationGoalInput,
-      onSubmit: () => onStartObservation({ goal: observationGoalValue, durationSeconds: normalizedObservationDuration }),
+      submitLabel: "",
+      submitPendingLabel: "",
+      onComposerChange: () => undefined,
+      onSubmit: () => undefined,
     }
     : {
       sessionId: selectedWorkflowStep?.conversationSessionId || worktreeRun?.runId || "self-evolution",
@@ -1304,19 +1320,26 @@ export function SelfEvolutionTrack({
       : selectedWorkflowStep?.id === "approval"
         ? "reviewer"
         : "executor";
+    const visibleSelfEvolutionAgentCards = observationRunModeActive
+      ? selfEvolutionAgentCards.filter((card) => card.role === "observer")
+      : selfEvolutionAgentCards;
     return (
       <section className={styles.surface}>
         <div className={styles.sectionHeader}>
           <div>
-            <p className={styles.eyebrow}>{lang === "zh" ? "自进化成员" : "Self-evolution agents"}</p>
-            <h3 className={styles.sectionTitle}>{lang === "zh" ? "Agent 卡片" : "Agent cards"}</h3>
+            <p className={styles.eyebrow}>
+              {observationRunModeActive ? (lang === "zh" ? "观察成员" : "Observation member") : (lang === "zh" ? "自进化成员" : "Self-evolution agents")}
+            </p>
+            <h3 className={styles.sectionTitle}>
+              {observationRunModeActive ? (lang === "zh" ? "观察 Agent" : "Observation agent") : (lang === "zh" ? "Agent 卡片" : "Agent cards")}
+            </h3>
           </div>
-          <span className={styles.counter}>{selfEvolutionAgentCards.length}</span>
+          <span className={styles.counter}>{visibleSelfEvolutionAgentCards.length}</span>
         </div>
 
         <div className={styles.agentCardList}>
-          {selfEvolutionAgentCards.length ? (
-            selfEvolutionAgentCards.map((card) => {
+          {visibleSelfEvolutionAgentCards.length ? (
+            visibleSelfEvolutionAgentCards.map((card) => {
               const agent = card.agent;
               const agentId = agent?.agentId || card.agentId;
               const roleLabel = selfEvolutionAgentRoleLabel(card.role, lang);
@@ -1370,7 +1393,9 @@ export function SelfEvolutionTrack({
             <div className={styles.emptyState}>
               {agentConfigWorkspaceQuery.isLoading
                 ? (lang === "zh" ? "正在加载 Agent 绑定。" : "Loading Agent bindings.")
-                : (lang === "zh" ? "还没有可展示的自进化 Agent 绑定。" : "No self-evolution Agent binding is available.")}
+                : observationRunModeActive
+                  ? (lang === "zh" ? "还没有可展示的观察 Agent 绑定。" : "No observation Agent binding is available.")
+                  : (lang === "zh" ? "还没有可展示的自进化 Agent 绑定。" : "No self-evolution Agent binding is available.")}
             </div>
           )}
         </div>
@@ -1625,7 +1650,7 @@ export function SelfEvolutionTrack({
               <div className={styles.sectionHeader}>
                 <div>
                   <p className={styles.eyebrow}>{t("selfEvolutionMode")}</p>
-                  <h3 className={styles.sectionTitle}>{t("selfWorkspacePage")}</h3>
+                  <h3 className={styles.sectionTitle}>{observationRunModeActive ? (lang === "zh" ? "观察配置" : "Observation config") : t("selfWorkspacePage")}</h3>
                 </div>
                 <span className={styles.statusPill}>
                   {statusLabel(observationRunModeActive ? (observationRun?.status || "idle") : conversationTask.status)}
@@ -1656,14 +1681,52 @@ export function SelfEvolutionTrack({
 
               {observationRunModeActive ? (
                 <>
-                  <p className={styles.sectionSummary}>
-                    {lang === "zh" ? "只读观察 Agent 的思考与输出，不申请工具、不创建 worktree。 " : "Read-only observation with no tools and no worktree."}
-                  </p>
+                  <div className={styles.observationConfigForm}>
+                    <label className={styles.formField}>
+                      <span>{lang === "zh" ? "观察目标" : "Observation prompt"}</span>
+                      <VNativeTextarea
+                        className={styles.textArea}
+                        rows={4}
+                        value={observationGoalDisplayValue}
+                        disabled={observationRunActive || observationStartPending}
+                        placeholder={lang === "zh" ? "描述要观察 Agent 如何思考的问题" : "Describe what the observation agent should inspect"}
+                        onChange={(event) => setObservationGoalInput(event.target.value)}
+                      />
+                    </label>
+                    <label className={styles.formField}>
+                      <span>{lang === "zh" ? "运行时长（秒）" : "Duration seconds"}</span>
+                      <VNativeInput
+                        className={styles.textInput}
+                        type="number"
+                        min={MIN_OBSERVATION_DURATION_SECONDS}
+                        max={MAX_OBSERVATION_DURATION_SECONDS}
+                        step={30}
+                        value={observationDurationDisplayValue}
+                        disabled={observationRunActive || observationStartPending}
+                        onChange={(event) => setObservationDurationInput(event.target.value)}
+                      />
+                    </label>
+                    {observationDurationError ? <p className={styles.errorText}>{observationDurationError}</p> : null}
+                    <div className={styles.observationConfigActions}>
+                      <VButton
+                        type="button"
+                        className={styles.primaryAction}
+                        isDisabled={observationStartDisabled}
+                        title={observationStartDisabledReason}
+                        onClick={() => onStartObservation({ goal: observationGoalValue, durationSeconds: normalizedObservationDuration })}
+                      >
+                        {observationStartPending ? <LoaderCircle size={15} className={styles.spinning} /> : <ArrowUpRight size={15} />}
+                        {observationStartPending
+                          ? (lang === "zh" ? "启动中" : "Starting")
+                          : (lang === "zh" ? "开始自主观察" : "Start observation")}
+                      </VButton>
+                    </div>
+                  </div>
                   <div className={styles.noticeStack}>
                     <p className={styles.noticeText}>
                       {observationRunActive
                         ? (lang === "zh" ? "观察会话正在运行，完整输出在中间会话区。" : "Observation is running; full output stays in the center conversation.")
-                        : (lang === "zh" ? "准备启动一轮纯观察沙盒。" : "Ready to start a no-tool observation sandbox.")}
+                        : (lang === "zh" ? "配置观察目标和时长后启动纯观察沙盒。" : "Set the observation prompt and duration, then start a no-tool observation sandbox.")}
                     </p>
                     {compactObservationPreview(observationRun?.latestMessage, 110) ? (
                       <p className={styles.compactPreviewText}>{compactObservationPreview(observationRun?.latestMessage, 110)}</p>
