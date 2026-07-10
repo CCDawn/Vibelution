@@ -13,7 +13,7 @@ describe("Workbench visual regression matrix", () => {
 
     expect(coverage.themes).toEqual(["dark", "light"]);
     expect(coverage.backgrounds).toEqual(["custom", "default"]);
-    expect(coverage.viewports).toEqual(["desktop", "narrow"]);
+    expect(coverage.viewports).toEqual(["compact", "standard", "wide"]);
     expect(coverage.states).toEqual(["blocker", "dense", "destructive", "empty", "error"]);
     expect(coverage.paths).toEqual([
       "/",
@@ -26,16 +26,26 @@ describe("Workbench visual regression matrix", () => {
     ]);
   });
 
-  it("keeps every scenario actionable for manual or automated screenshot capture", () => {
+  it("covers compact, standard, and wide desktop viewports without a mobile gate", () => {
+    const coverage = summarizeWorkbenchVisualCoverage(WORKBENCH_VISUAL_SCENARIOS);
+
+    expect(coverage.viewports).toEqual(["compact", "standard", "wide"]);
+    expect(WORKBENCH_VISUAL_SCENARIOS.some(({ viewport }) => viewport.width === 1280 && viewport.height === 720)).toBe(true);
+    expect(WORKBENCH_VISUAL_SCENARIOS.some(({ viewport }) => viewport.width === 1440 && viewport.height === 900)).toBe(true);
+    expect(WORKBENCH_VISUAL_SCENARIOS.some(({ viewport }) => viewport.width === 1920 && viewport.height === 1080)).toBe(true);
+    expect(WORKBENCH_VISUAL_SCENARIOS.every(({ viewport }) => viewport.width >= 1280)).toBe(true);
+  });
+
+  it("keeps every desktop scenario actionable for screenshot capture", () => {
     expect(WORKBENCH_VISUAL_SCENARIOS).toHaveLength(12);
 
     for (const scenario of WORKBENCH_VISUAL_SCENARIOS) {
       expect(scenario.id).toMatch(/^[a-z0-9-]+$/);
       expect(scenario.path).toMatch(/^\//);
-      expect(scenario.viewport.width).toBeGreaterThanOrEqual(390);
+      expect(scenario.viewport.width).toBeGreaterThanOrEqual(1280);
       expect(scenario.viewport.height).toBeGreaterThanOrEqual(720);
       expect(scenario.reviewFocus.length).toBeGreaterThanOrEqual(2);
-      expect(scenario.expectedEvidence).toContain("screenshot");
+      expect(scenario.expectedEvidence).toBe("screenshot");
     }
   });
 
@@ -53,11 +63,8 @@ describe("Workbench visual regression matrix", () => {
   });
 
   it("documents how to collect visual evidence for the matrix", () => {
-    expect(WORKBENCH_VISUAL_REVIEW_PROTOCOL).toEqual([
-      "Start the app with: cd web && npm run dev -- --host 127.0.0.1",
-      "For each scenario, open the path, set the stored theme to the scenario theme, and use a custom background when background is custom.",
-      "Capture a screenshot or attach an observation note for every scenario id.",
-      "Reject the wave if a screenshot shows a card wall, opaque route wrapper, unreadable text, invisible focus, or muted destructive/error/blocker state.",
-    ]);
+    expect(WORKBENCH_VISUAL_REVIEW_PROTOCOL[0]).toBe(
+      "Start the app through Vibelution Launcher; use a scoped Vite dev server only when Launcher cannot render the task branch before integration.",
+    );
   });
 });

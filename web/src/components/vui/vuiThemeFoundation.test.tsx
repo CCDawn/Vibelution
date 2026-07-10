@@ -54,6 +54,10 @@ describe("VUI dual-theme foundation", () => {
       "--vui-status-warning-bg",
       "--vui-status-danger-bg",
       "--vui-shadow-none",
+      "--vui-radius-panel-soft",
+      "--vui-radius-overlay",
+      "--vui-elevation-panel",
+      "--vui-elevation-overlay",
       "--fg-muted",
       "--fg-subtle",
       "--accent-primary",
@@ -74,6 +78,13 @@ describe("VUI dual-theme foundation", () => {
     ]) {
       expect(tokensSource).toContain(token);
     }
+
+    expect(tokensSource).toContain("--vui-radius-panel-soft: 10px;");
+    expect(tokensSource).toContain("--vui-radius-overlay: 12px;");
+    expect(tokensSource).toContain("--vui-elevation-panel: var(--vui-elevation-1-sheen);");
+    expect(tokensSource).toContain("--vui-elevation-overlay: var(--vui-elevation-2-sheen);");
+    expect(tailwindSource).toContain("--color-vui-surface-rail: var(--vui-surface-rail)");
+    expect(tailwindSource).toContain("--color-vui-surface-raised: var(--vui-surface-raised)");
 
     const lightThemeBlock = tokensSource.slice(tokensSource.indexOf('[data-theme="light"]'));
     expect(lightThemeBlock).toContain("--vui-surface-glass");

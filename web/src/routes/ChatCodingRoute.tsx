@@ -81,7 +81,7 @@ import type { ConversationStreamingFramePaintMetrics } from "../components/conve
 import { shouldShowNextStateSignalInConversation } from "../components/conversation/conversationNextStateSignal";
 import type { TurnAvatarResolution } from "../components/conversation/conversationTurnAvatar";
 import { isAgentInboxMessage, isTurnErrorMessage } from "../components/conversation/conversationMessagePredicates";
-import { VButton, VInput, VNativeInput, VNativeSelect } from "../components/vui";
+import { VButton, VInput, VNativeInput, VNativeSelect, VStateSurface, VTooltip, type VButtonProps } from "../components/vui";
 import { collectBrowserPageSnapshot, postBrowserTelemetry } from "../app/browserTelemetry";
 import { getPageInstanceId } from "../app/pageInstance";
 import { resolvePollingInterval, usePageVisibility, useStartupWarmup } from "../app/pollingPolicy";
@@ -1182,7 +1182,7 @@ const SESSION_DETAIL_INITIAL_MESSAGE_LIMIT = 40;
 const SESSION_DETAIL_HISTORY_PAGE_SIZE = 40;
 const SESSION_STREAM_MIN_APPLY_INTERVAL_MS = 350;
 const SESSION_STREAM_ROUTE_SWITCH_GRACE_MS = 4_000;
-const CHAT_CENTER_FIRST_MEDIA_QUERY = "(max-width: 980px)";
+const CHAT_COMPACT_DESKTOP_MEDIA_QUERY = "(max-width: 1279px)";
 
 type ResizableSide = "left" | "right";
 type PetInteractionAction = "feed" | "talk" | "care";
@@ -1771,9 +1771,9 @@ export function ChatCodingRoute() {
   const [dragState, setDragState] = useState<DragState | null>(null);
   const [leftRailCollapsed, setLeftRailCollapsed] = useState(false);
   const [rightPaneCollapsed, setRightPaneCollapsed] = useState(false);
-  const [centerFirstLayout, setCenterFirstLayout] = useState(false);
+  const [compactDesktopLayout, setCompactDesktopLayout] = useState(false);
   const [cacheDetailOpen, setCacheDetailOpen] = useState(false);
-  const centerFirstAutoCollapseRef = useRef(false);
+  const compactDesktopAutoCollapseRef = useRef(false);
   const imageUploadInFlightRef = useRef<Record<string, boolean>>({});
   const [sessionDrafts, setSessionDrafts] = useState<Record<string, string>>({});
   const [sessionComposerErrors, setSessionComposerErrors] = useState<Record<string, string>>({});
@@ -3791,21 +3791,20 @@ export function ChatCodingRoute() {
     if (typeof window === "undefined") {
       return;
     }
-    const mediaQuery = window.matchMedia(CHAT_CENTER_FIRST_MEDIA_QUERY);
-    function applyCenterFirstState(matches: boolean) {
-      setCenterFirstLayout(matches);
-      if (matches && !centerFirstAutoCollapseRef.current) {
-        centerFirstAutoCollapseRef.current = true;
-        setLeftRailCollapsed(true);
+    const mediaQuery = window.matchMedia(CHAT_COMPACT_DESKTOP_MEDIA_QUERY);
+    function applyCompactDesktopState(matches: boolean) {
+      setCompactDesktopLayout(matches);
+      if (matches && !compactDesktopAutoCollapseRef.current) {
+        compactDesktopAutoCollapseRef.current = true;
         setRightPaneCollapsed(true);
       }
       if (!matches) {
-        centerFirstAutoCollapseRef.current = false;
+        compactDesktopAutoCollapseRef.current = false;
       }
     }
-    applyCenterFirstState(mediaQuery.matches);
+    applyCompactDesktopState(mediaQuery.matches);
     const handleChange = (event: MediaQueryListEvent) => {
-      applyCenterFirstState(event.matches);
+      applyCompactDesktopState(event.matches);
     };
     mediaQuery.addEventListener("change", handleChange);
     return () => mediaQuery.removeEventListener("change", handleChange);
@@ -6158,19 +6157,30 @@ export function ChatCodingRoute() {
   const conversationIndexPanel = (
     <>
       {sessionComposerErrors.__sessions__ ? (
-        <div className={styles.panelState}>{sessionComposerErrors.__sessions__}</div>
+        <VStateSurface
+          className={styles.panelState}
+          tone="error"
+          title={sessionComposerErrors.__sessions__}
+        />
       ) : null}
       {sessionsErrorState.transientError ? (
         <div className={styles.panelNotice} role="status">{sessionsErrorMessage}</div>
       ) : null}
       {sessionsErrorState.blockingError ? (
-        <div className={styles.panelState}>{sessionsErrorMessage}</div>
+        <VStateSurface className={styles.panelState} tone="error" title={sessionsErrorMessage} />
       ) : conversationsQuery.isPending && !conversationsQuery.data && sessionsQuery.isPending && !sessionsQuery.data ? (
-        <div className={styles.panelState}>{t("loadingSession")}</div>
+        <VStateSurface
+          className={styles.panelState}
+          tone="loading"
+          title={t("loadingSession")}
+          skeletonLines={2}
+        />
       ) : filteredConversations.length === 0 && filteredTeams.length === 0 && filteredStandaloneGroupConversations.length === 0 ? (
-        <div className={styles.panelState}>
-          {sessionFilter.trim() ? t("noSessionMatches") : t("noSessionsYet")}
-        </div>
+        <VStateSurface
+          className={styles.panelState}
+          tone="empty"
+          title={sessionFilter.trim() ? t("noSessionMatches") : t("noSessionsYet")}
+        />
       ) : (
         <>
           <ConversationIndexTree
@@ -6252,7 +6262,7 @@ export function ChatCodingRoute() {
   return (
     <div
       ref={layoutRef}
-      className={centerFirstLayout ? `${styles.layout} ${styles.layoutCenterFirst}` : styles.layout}
+      className={compactDesktopLayout ? `${styles.layout} ${styles.layoutCompactDesktop}` : styles.layout}
       style={layoutStyle}
     >
       <aside className={statusRailCollapsed ? `${styles.leftRail} ${styles.paneCollapsed}` : styles.leftRail} aria-hidden={statusRailCollapsed}>
@@ -6529,10 +6539,7 @@ export function ChatCodingRoute() {
 
         <section className={`${styles.leftBlock} ${styles.featurePresetBlock} ${styles.runModeBlock}`}>
           <div className={styles.sectionHeader}>
-            <div className={styles.sectionIdentity}>
-              <p className={styles.blockEyebrow}>{lang === "zh" ? "模式控制" : "Mode controls"}</p>
-              <h3 className={styles.sectionTitle}>{lang === "zh" ? "运行模式" : "Run modes"}</h3>
-            </div>
+            <h3 className={styles.sectionTitle}>{lang === "zh" ? "运行模式" : "Run modes"}</h3>
             <span className={styles.featurePresetScope} title={t("chatFeaturePanelHint")}>{lang === "zh" ? "下轮生效" : "Next turn"}</span>
           </div>
           <div className={styles.featureChipRow}>
@@ -6584,13 +6591,36 @@ export function ChatCodingRoute() {
 
         <section className={`${styles.leftBlock} ${styles.companionBlock}`}>
           <div className={styles.sectionHeader}>
-            <div className={styles.sectionIdentity}>
-              <p className={styles.blockEyebrow}>{t("mentalState")} / {t("petSpace")}</p>
-              <p className={styles.sectionMetaLine}>{mentalCompactLine || mentalSourceLabel}</p>
-            </div>
-            <span className={`${styles.mentalStateBadge} ${styles[`mentalStateBadge_${mentalCognitiveStateValue}`]}`}>
+            <h3 className={styles.sectionTitle}>{t("mentalState")} / {t("petSpace")}</h3>
+            <VTooltip
+              content={mentalCompactLine || mentalSourceLabel}
+              renderTrigger={(tooltipTriggerProps) => {
+                const {
+                  children: _triggerChildren,
+                  className: triggerClassName,
+                  role: _triggerRole,
+                  tabIndex: _triggerTabIndex,
+                  ...triggerProps
+                } = tooltipTriggerProps;
+
+                return (
+                  <VButton
+                    {...(triggerProps as unknown as VButtonProps)}
+                    type="button"
+                    className={[
+                      triggerClassName,
+                      styles.mentalStateBadge,
+                      styles[`mentalStateBadge_${mentalCognitiveStateValue}`],
+                    ].filter(Boolean).join(" ")}
+                    aria-label={`${mentalStateLabel}. ${mentalCompactLine || mentalSourceLabel}`}
+                  >
+                    {mentalStateLabel}
+                  </VButton>
+                );
+              }}
+            >
               {mentalStateLabel}
-            </span>
+            </VTooltip>
           </div>
           <p className={styles.contextLineCompact}>{mentalSummary}</p>
           <div className={styles.companionCompact}>

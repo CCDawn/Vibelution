@@ -11,6 +11,8 @@
   --color-vui-surface-page: var(--surface-page);
   --color-vui-surface-panel: var(--surface-panel);
   --color-vui-surface-card: var(--surface-card);
+  --color-vui-surface-rail: var(--vui-surface-rail);
+  --color-vui-surface-raised: var(--vui-surface-raised);
   --color-vui-surface-glass: var(--vui-surface-glass);
   --color-vui-surface-toolbar: var(--vui-surface-toolbar);
   --color-vui-surface-row: var(--vui-surface-row);
