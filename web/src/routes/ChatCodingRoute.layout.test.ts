@@ -174,17 +174,13 @@ describe("ChatCodingRoute layout contract", () => {
     expect(conversationStyles.timeline).toContain("overflow-y-auto");
     expect(conversationStyles.timeline).toContain("overflow-x-hidden");
     expect(conversationStyles.composer).toContain("flex-none");
-    expect(chatSessionWorkspacePanelStyles.emptySurface).toContain("grid");
     expect(chatSessionWorkspacePanelStyles.emptySurface).toContain("min-h-[min(420px,calc(100dvh_-_190px))]");
     expect(chatSessionWorkspacePanelStyles.emptySurface).toContain("place-items-center");
     expect(chatSessionWorkspacePanelStyles.emptySurface).toContain("text-center");
     expect(chatSessionWorkspacePanelStyles.loadingSurface).toBeTypeOf("string");
-    expect(chatSessionWorkspacePanelStyles.loadingSkeletonLine).toBeTypeOf("string");
-    expect(chatSessionWorkspacePanelStyles.loadingSurface).toContain("grid");
     expect(chatSessionWorkspacePanelStyles.loadingSurface).toContain("min-h-[120px]");
     expect(chatSessionWorkspacePanelStyles.loadingSurface).not.toContain("min-h-[min(420px,calc(100dvh_-_190px))]");
     expect(chatSessionWorkspacePanelStyles.loadingSurface).not.toContain("h-full");
-    expect(chatSessionWorkspacePanelStyles.loadingSkeletonLine).toContain("animate-pulse");
     expect(routeStyles.rightPane).toContain("h-full");
     expect(routeStyles.rightPane).toContain("overflow-hidden");
     expect(routeStyles.rightPaneWithTabs).toContain("grid-rows-[auto_auto_minmax(0,1fr)]");
@@ -196,12 +192,21 @@ describe("ChatCodingRoute layout contract", () => {
 
   it("keeps the no-session center state compact on wide screens", () => {
     expect(routeSource).toContain("noSessionsLabel={t(\"noSessionsYet\")}");
-    expect(chatSessionWorkspacePanelSource).toContain("<div className={styles.emptyConversationSurface}>{noSessionsLabel}</div>");
     expect(chatSessionWorkspacePanelStyles.emptyConversationSurface).toContain("place-self-center");
-    expect(chatSessionWorkspacePanelStyles.emptyConversationSurface).toContain("w-[min(360px,calc(100%_-_32px))]");
+    expect(chatSessionWorkspacePanelStyles.emptyConversationSurface).toContain("!w-[min(360px,calc(100%_-_32px))]");
     expect(chatSessionWorkspacePanelStyles.emptyConversationSurface).toContain("min-h-[74px]");
     expect(chatSessionWorkspacePanelStyles.emptyConversationSurface).not.toContain("h-full");
     expect(chatSessionWorkspacePanelStyles.emptyConversationSurface).not.toContain("min-h-[min(420px,calc(100dvh_-_190px))]");
+  });
+
+  it("uses VStateSurface for center loading, empty, error, and unavailable states", () => {
+    expect(chatSessionWorkspacePanelSource).toContain('import { VStateSurface } from "../../components/vui"');
+    expect(chatSessionWorkspacePanelSource).toContain('tone="loading"');
+    expect(chatSessionWorkspacePanelSource).toContain('tone="empty"');
+    expect(chatSessionWorkspacePanelSource).toContain('tone="error"');
+    expect(chatSessionWorkspacePanelSource).toContain('tone="unavailable"');
+    expect(chatSessionWorkspacePanelSource).not.toContain("<div className={styles.emptyConversationSurface}");
+    expect(chatSessionWorkspacePanelSource).not.toContain("<div className={styles.emptySurface}");
   });
 
   it("keeps the conversation page aligned to the V2.1 quiet light style system", () => {
@@ -1514,7 +1519,7 @@ describe("ChatCodingRoute layout contract", () => {
 
     expect(routeStyles.sessionActionRow).toBeTypeOf("string");
     expect(routeStyles.newGroupButton).toBeTypeOf("string");
-    expect(routeStyles.sessionActionRow).toContain("grid-cols-[auto_auto]");
+    expect(routeStyles.sessionActionRow).not.toContain("grid-cols-[auto_auto]");
     expect(routeStyles.newSessionButton).toContain("!h-[32px]");
     expect(routeStyles.newSessionButton).toContain("min-h-[32px]");
     expect(routeStyles.newSessionButton).toContain("!w-auto");
@@ -2052,6 +2057,16 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.sessionStatusCluster).toContain("justify-end");
     expect(routeStyles.agentModelTag).toContain("max-w-[96px]");
     expect(routeStyles.agentModelTag).toContain("[&_span]:truncate");
+  });
+
+  it("renders the conversation index as one soft panel with flat rows and compact actions", () => {
+    expect(routeStyles.rightPane).toContain("rounded-[var(--vui-radius-panel-soft)]");
+    expect(routeStyles.rightPane).toContain("bg-[var(--vui-surface-rail)]");
+    expect(routeStyles.rightPane).toContain("shadow-[var(--vui-elevation-panel)]");
+    expect(routeStyles.sessionActionRow).toContain("flex-wrap");
+    expect(routeStyles.newSessionButton).toContain("!w-auto");
+    expect(routeStyles.panelSearchInput).toContain("w-full");
+    expect(directSessionIndexItemStyles.sessionItem).not.toContain("shadow-[var(--vui-elevation-panel)]");
   });
 
   it("moves direct session actions into a right-click context menu", () => {

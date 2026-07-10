@@ -81,7 +81,7 @@ import type { ConversationStreamingFramePaintMetrics } from "../components/conve
 import { shouldShowNextStateSignalInConversation } from "../components/conversation/conversationNextStateSignal";
 import type { TurnAvatarResolution } from "../components/conversation/conversationTurnAvatar";
 import { isAgentInboxMessage, isTurnErrorMessage } from "../components/conversation/conversationMessagePredicates";
-import { VButton, VInput, VNativeInput, VNativeSelect, VTooltip, type VButtonProps } from "../components/vui";
+import { VButton, VInput, VNativeInput, VNativeSelect, VStateSurface, VTooltip, type VButtonProps } from "../components/vui";
 import { collectBrowserPageSnapshot, postBrowserTelemetry } from "../app/browserTelemetry";
 import { getPageInstanceId } from "../app/pageInstance";
 import { resolvePollingInterval, usePageVisibility, useStartupWarmup } from "../app/pollingPolicy";
@@ -6157,19 +6157,30 @@ export function ChatCodingRoute() {
   const conversationIndexPanel = (
     <>
       {sessionComposerErrors.__sessions__ ? (
-        <div className={styles.panelState}>{sessionComposerErrors.__sessions__}</div>
+        <VStateSurface
+          className={styles.panelState}
+          tone="error"
+          title={sessionComposerErrors.__sessions__}
+        />
       ) : null}
       {sessionsErrorState.transientError ? (
         <div className={styles.panelNotice} role="status">{sessionsErrorMessage}</div>
       ) : null}
       {sessionsErrorState.blockingError ? (
-        <div className={styles.panelState}>{sessionsErrorMessage}</div>
+        <VStateSurface className={styles.panelState} tone="error" title={sessionsErrorMessage} />
       ) : conversationsQuery.isPending && !conversationsQuery.data && sessionsQuery.isPending && !sessionsQuery.data ? (
-        <div className={styles.panelState}>{t("loadingSession")}</div>
+        <VStateSurface
+          className={styles.panelState}
+          tone="loading"
+          title={t("loadingSession")}
+          skeletonLines={2}
+        />
       ) : filteredConversations.length === 0 && filteredTeams.length === 0 && filteredStandaloneGroupConversations.length === 0 ? (
-        <div className={styles.panelState}>
-          {sessionFilter.trim() ? t("noSessionMatches") : t("noSessionsYet")}
-        </div>
+        <VStateSurface
+          className={styles.panelState}
+          tone="empty"
+          title={sessionFilter.trim() ? t("noSessionMatches") : t("noSessionsYet")}
+        />
       ) : (
         <>
           <ConversationIndexTree
