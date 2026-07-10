@@ -30,9 +30,10 @@ from .payload_validator import payload_protocol_summary
 from .protocol_resolver import resolve_model_protocol
 from .reasoning_extractor import extract_reasoning_text, strip_think_tag_reasoning
 from .streaming import ResponsesStreamNormalizer, extract_message_tool_calls, extract_text_content
-from .types import LLMCapabilities, LLMError, StreamChunk, UsageStats
+from .types import LLMCapabilities, LLMError, StreamChunk, ToolCall, TurnOutcome, UsageStats
 from .usage import read_usage_int as _read_provider_usage_int
 from .usage import usage_stats_from_payload, usage_to_dict
+from .wire.registry import build_default_wire_adapter_registry
 
 
 _LLM_STATUS_CONTEXT: ContextVar[Dict[str, str]] = ContextVar(
@@ -52,6 +53,7 @@ _PROXY_ENV_NAMES = ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "htt
 _PROXY_ENV_CONDITION = threading.Condition(threading.RLock())
 _PROXY_ENV_STATE = {"readers": 0, "writer": False}
 PROMPT_CACHE_OPPORTUNITY_PREFIX_CHARS = 4096
+_CANONICAL_WIRE_ADAPTERS = build_default_wire_adapter_registry()
 
 
 class LLMCancelledError(Exception):
@@ -1381,6 +1383,47 @@ class LLMClient:
             return dict(getattr(value, "__dict__", {}) or {})
         return None
 
+    def _decode_canonical_response(
+        self,
+        response: Any,
+        metadata: Optional[Dict[str, Any]],
+    ) -> Optional[TurnOutcome]:
+        from .invocation import invocation_scope_from_metadata
+
+        try:
+            adapter = _CANONICAL_WIRE_ADAPTERS.resolve(self.protocol_route)
+        except LookupError:
+            return None
+        return adapter.decode_response(
+            response,
+            route=self.protocol_route,
+            scope=invocation_scope_from_metadata(metadata),
+        )
+
+    @staticmethod
+    def _canonical_compatibility_text(outcome: TurnOutcome) -> str:
+        if outcome.kind == "final_answer":
+            return outcome.final_text
+        completed_by_item: Dict[str, Any] = {}
+        for event in outcome.events:
+            if event.kind == "item_completed" and event.phase == "commentary" and event.text:
+                completed_by_item[event.item_id or str(event.sequence)] = event
+        completed_text = "".join(event.text for event in completed_by_item.values())
+        if completed_text:
+            return completed_text
+        return "".join(
+            event.text
+            for event in outcome.events
+            if event.kind in {"interim_text_delta", "commentary_delta"} and event.text
+        )
+
+    @staticmethod
+    def _canonical_compatibility_tool_calls(outcome: TurnOutcome) -> List[Dict[str, Any]]:
+        return [
+            {"id": call.call_id, "name": call.name, "args": dict(call.arguments)}
+            for call in outcome.tool_calls
+        ]
+
     def invoke(self, messages: List[Any], *, tools: Optional[List[Any]] = None, metadata: Optional[Dict[str, Any]] = None) -> AIMessage:
         start = time.time()
         payload = self._build_payload(messages, tools=tools, stream=False)
@@ -1447,6 +1490,7 @@ class LLMClient:
             tool_count=tool_count,
             metadata=event_metadata,
         )
+        turn_outcome = self._decode_canonical_response(response, metadata)
         latency_ms = int((time.time() - start) * 1000)
         message = self._responses_message(response) if _payload_uses_responses(payload) else self._choice_message(response)
         tool_calls = extract_message_tool_calls(message)
@@ -1456,6 +1500,8 @@ class LLMClient:
         reasoning_content = reasoning.text
         if reasoning_content.strip():
             additional_kwargs["reasoning_content"] = reasoning_content
+        if turn_outcome is not None:
+            additional_kwargs["turn_outcome"] = turn_outcome
         cache_observation_fields = _usage_cache_observation_fields(usage)
         estimated_input_tokens = 0
         estimated_output_tokens = 0
@@ -1510,11 +1556,19 @@ class LLMClient:
             lifecycle=False,
         )
         return AIMessage(
-            content=strip_think_tag_reasoning(message.get("content") or "", extract_text_content),
-            tool_calls=[
-                {"id": call.id, "name": call.name, "args": call.arguments}
-                for call in tool_calls
-            ],
+            content=(
+                self._canonical_compatibility_text(turn_outcome)
+                if turn_outcome is not None
+                else strip_think_tag_reasoning(message.get("content") or "", extract_text_content)
+            ),
+            tool_calls=(
+                self._canonical_compatibility_tool_calls(turn_outcome)
+                if turn_outcome is not None
+                else [
+                    {"id": call.id, "name": call.name, "args": call.arguments}
+                    for call in tool_calls
+                ]
+            ),
             response_metadata={
                 "role": self.role,
                 "profile_id": self.profile_id,
@@ -1700,6 +1754,8 @@ class LLMClient:
         *,
         message_count: int,
         tool_count: int,
+        metadata: Optional[Dict[str, Any]] = None,
+        invocation_scope: Any = None,
     ) -> Tuple[Iterator[StreamChunk], Callable[[], bool]]:
         _raise_if_llm_cancelled()
         emitted = False
@@ -1710,18 +1766,100 @@ class LLMClient:
             normalized_iterator: Any = None
             with _llm_provider_proxy_env(self.config, payload.get("base_url")):
                 iterator = self._backend_for_payload(payload)(payload)
-                stream_normalizer = (
-                    ResponsesStreamNormalizer()
-                    if _payload_uses_responses(payload)
-                    else self.adapter.stream_normalizer()
-                )
-                normalized_iterator = stream_normalizer.events(iterator)
                 try:
-                    for event in normalized_iterator:
-                        _raise_if_llm_cancelled()
+                    wire_adapter = _CANONICAL_WIRE_ADAPTERS.resolve(self.protocol_route)
+                except LookupError:
+                    wire_adapter = None
+                if wire_adapter is None:
+                    stream_normalizer = (
+                        ResponsesStreamNormalizer()
+                        if _payload_uses_responses(payload)
+                        else self.adapter.stream_normalizer()
+                    )
+                    normalized_iterator = stream_normalizer.events(iterator)
+                else:
+                    from .invocation import invocation_scope_from_metadata
+
+                    provider_usage: UsageStats | None = None
+
+                    def observed_wire_events() -> Iterator[Any]:
+                        nonlocal provider_usage
+                        for raw_event in iterator:
+                            raw_dict = self._provider_object_to_dict(raw_event) or {}
+                            response_dict = self._provider_object_to_dict(raw_dict.get("response")) or {}
+                            raw_usage = raw_dict.get("usage") or response_dict.get("usage")
+                            if raw_usage is not None:
+                                provider_usage = usage_stats_from_payload(raw_usage)
+                            yield raw_event
+
+                    normalized_iterator = wire_adapter.decode_stream(
+                        observed_wire_events(),
+                        route=self.protocol_route,
+                        scope=(invocation_scope or invocation_scope_from_metadata(metadata)),
+                    )
+                try:
+                    if wire_adapter is None:
+                        for event in normalized_iterator:
+                            _raise_if_llm_cancelled()
+                            emitted = True
+                            yield event
+                            _raise_if_llm_cancelled()
+                    else:
+                        text_items_seen: set[str] = set()
+                        canonical_usage: UsageStats | None = None
+                        for event in normalized_iterator:
+                            _raise_if_llm_cancelled()
+                            projected: StreamChunk | None = None
+                            item_key = event.item_id or f"sequence:{event.sequence}"
+                            if event.kind in {"interim_text_delta", "commentary_delta", "answer_delta"}:
+                                text_items_seen.add(item_key)
+                                projected = StreamChunk(type="text_delta", text=event.text)
+                            elif event.kind == "item_completed" and event.text and item_key not in text_items_seen:
+                                text_items_seen.add(item_key)
+                                projected = StreamChunk(type="text_delta", text=event.text)
+                            elif event.kind == "reasoning_delta":
+                                projected = StreamChunk(
+                                    type="reasoning_delta",
+                                    text=event.text,
+                                    provider_payload={"reasoning_source": "canonical"},
+                                )
+                            elif event.kind == "usage_updated":
+                                usage_summary = dict(event.diagnostic_summary)
+                                canonical_usage = UsageStats(
+                                    input_tokens=int(usage_summary.get("inputTokens") or 0),
+                                    output_tokens=int(usage_summary.get("outputTokens") or 0),
+                                    total_tokens=int(usage_summary.get("totalTokens") or 0),
+                                    provider_raw_usage={
+                                        "input_tokens": int(usage_summary.get("inputTokens") or 0),
+                                        "output_tokens": int(usage_summary.get("outputTokens") or 0),
+                                        "total_tokens": int(usage_summary.get("totalTokens") or 0),
+                                    },
+                                )
+                            if projected is not None:
+                                emitted = True
+                                yield projected
+                            _raise_if_llm_cancelled()
+                        turn_outcome = normalized_iterator.outcome
+                        if turn_outcome.tool_calls:
+                            emitted = True
+                            yield StreamChunk(
+                                type="tool_call_final",
+                                tool_calls=[
+                                    ToolCall(
+                                        id=call.call_id,
+                                        name=call.name,
+                                        arguments=dict(call.arguments),
+                                        raw_arguments=json.dumps(dict(call.arguments), ensure_ascii=False),
+                                    )
+                                    for call in turn_outcome.tool_calls
+                                ],
+                            )
                         emitted = True
-                        yield event
-                        _raise_if_llm_cancelled()
+                        yield StreamChunk(
+                            type="done",
+                            usage=provider_usage or canonical_usage,
+                            provider_payload={"turn_outcome": turn_outcome},
+                        )
                 except LLMCancelledError:
                     close = getattr(normalized_iterator, "close", None)
                     if callable(close):
@@ -1741,6 +1879,9 @@ class LLMClient:
         metadata: Optional[Dict[str, Any]] = None,
     ) -> Iterator[StreamChunk]:
         """Yield normalized stream events independent of LangChain chunks."""
+        from .invocation import invocation_scope_from_metadata
+
+        invocation_scope = invocation_scope_from_metadata(metadata)
         payload = self._build_payload(messages, tools=tools, stream=True)
         message_count = len(messages or [])
         effective_tools = tools if tools is not None else self.bound_tools
@@ -1859,6 +2000,8 @@ class LLMClient:
                         payload,
                         message_count=message_count,
                         tool_count=tool_count,
+                        metadata=metadata,
+                        invocation_scope=invocation_scope,
                     )
                     for event in events:
                         _raise_if_llm_cancelled()
@@ -2084,11 +2227,20 @@ class LLMClient:
         for event in self.stream_events(messages, tools=tools, metadata=metadata):
             response_metadata = self._response_metadata(metadata)
             if event.type == "done":
-                if event.usage is not None:
+                turn_outcome = (event.provider_payload or {}).get("turn_outcome")
+                if event.usage is not None or turn_outcome is not None:
                     done_metadata = dict(response_metadata)
-                    done_metadata["usage"] = event.usage.provider_raw_usage
-                    done_metadata["usage_observation"] = _usage_observation_metadata(event.usage)
-                    yield AIMessageChunk(content="", response_metadata=done_metadata)
+                    additional_kwargs = {}
+                    if event.usage is not None:
+                        done_metadata["usage"] = event.usage.provider_raw_usage
+                        done_metadata["usage_observation"] = _usage_observation_metadata(event.usage)
+                    if turn_outcome is not None:
+                        additional_kwargs["turn_outcome"] = turn_outcome
+                    yield AIMessageChunk(
+                        content="",
+                        additional_kwargs=additional_kwargs,
+                        response_metadata=done_metadata,
+                    )
                 continue
             if event.type == "text_delta":
                 yield AIMessageChunk(content=event.text, response_metadata=response_metadata)
