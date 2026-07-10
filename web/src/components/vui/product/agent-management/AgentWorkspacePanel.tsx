@@ -22,8 +22,9 @@ export function AgentWorkspacePanel({
       as={Element}
       data-vui-product="agent-workspace-panel"
       ariaLabel={ariaLabel}
+      elevation="panel"
       padding="none"
-      tone="glass"
+      tone="rail"
       className={[
         "grid min-h-0 content-start gap-[var(--agent-density-gap)] p-[var(--agent-panel-pad)]",
         className,

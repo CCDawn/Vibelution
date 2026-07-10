@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 
+import { VChip, VMetricStrip, VPanelHeader, VSurface } from "../components/vui";
 import styles from "./MemoryOverviewPanel.styles";
 
 export type MemoryOverviewPanelCopy = {
@@ -54,70 +55,49 @@ export function MemoryOverviewPanel({
 }: MemoryOverviewPanelProps) {
   return (
     <>
-      <div className={styles.summaryGrid}>
-        <section className={styles.summaryCard}>
-          <span>{copy.sectionCount}</span>
-          <strong>{summary?.sectionCount ?? 0}</strong>
-        </section>
-        <section className={styles.summaryCard}>
-          <span>{copy.itemCount}</span>
-          <strong>{summary?.itemCount ?? 0}</strong>
-        </section>
-        <section className={styles.summaryCard}>
-          <span>{copy.agentVisible}</span>
-          <strong>{summary?.agentVisibleCount ?? 0}</strong>
-        </section>
-        <section className={styles.summaryCard}>
-          <span>{copy.runtimeInjected}</span>
-          <strong>{summary?.runtimeInjectedCount ?? 0}</strong>
-        </section>
-        <section className={styles.summaryCard}>
-          <span>{copy.managedMemory}</span>
-          <strong>{managedStateCount}</strong>
-        </section>
-        <section className={styles.summaryCard}>
-          <span>{copy.disabledOrOverridden}</span>
-          <strong>{disabledOrOverriddenCount}</strong>
-        </section>
-      </div>
+      <VMetricStrip
+        ariaLabel={copy.healthOverview}
+        metrics={[
+          { id: "sections", label: copy.sectionCount, value: summary?.sectionCount ?? 0 },
+          { id: "items", label: copy.itemCount, value: summary?.itemCount ?? 0 },
+          { id: "visible", label: copy.agentVisible, value: summary?.agentVisibleCount ?? 0 },
+          { id: "runtime", label: copy.runtimeInjected, value: summary?.runtimeInjectedCount ?? 0 },
+          { id: "managed", label: copy.managedMemory, value: managedStateCount },
+          { id: "overrides", label: copy.disabledOrOverridden, value: disabledOrOverriddenCount },
+        ]}
+      />
 
       {warningStrip}
 
-      <section className={styles.reviewQueuePanel}>
-        <div className={styles.panelHeader}>
-          <div>
-            <p className={styles.panelEyebrow}>{copy.healthOverview}</p>
-            <h2>{copy.reviewQueue}</h2>
-          </div>
-          <span className={styles.countPill}>{priorityReviewCount}</span>
-        </div>
+      <VSurface className={styles.reviewQueuePanel} elevation="panel" tone="rail">
+        <VPanelHeader
+          eyebrow={copy.healthOverview}
+          title={copy.reviewQueue}
+          actions={<VChip tone="neutral">{priorityReviewCount}</VChip>}
+        />
         <div title={copy.reviewQueueHint}>{reviewQueue}</div>
-      </section>
+      </VSurface>
 
       {projectMemoryQueue}
 
       <div className={styles.overviewGrid}>
-        <section className={styles.overviewPanel}>
-          <div className={styles.panelHeader}>
-            <div>
-              <p className={styles.panelEyebrow}>{copy.healthOverview}</p>
-              <h2>{copy.affectedRuntimeMemory}</h2>
-            </div>
-            <span className={styles.countPill}>{runtimeMemoryCount}</span>
-          </div>
+        <VSurface className={styles.overviewPanel} elevation="panel" tone="rail">
+          <VPanelHeader
+            eyebrow={copy.healthOverview}
+            title={copy.affectedRuntimeMemory}
+            actions={<VChip tone="neutral">{runtimeMemoryCount}</VChip>}
+          />
           {runtimeMemoryList}
-        </section>
+        </VSurface>
 
-        <section className={styles.overviewPanel}>
-          <div className={styles.panelHeader}>
-            <div>
-              <p className={styles.panelEyebrow}>{copy.healthOverview}</p>
-              <h2>{copy.needsReview}</h2>
-            </div>
-            <span className={styles.countPill}>{reviewMemoryCount}</span>
-          </div>
+        <VSurface className={styles.overviewPanel} elevation="panel" tone="rail">
+          <VPanelHeader
+            eyebrow={copy.healthOverview}
+            title={copy.needsReview}
+            actions={<VChip tone="neutral">{reviewMemoryCount}</VChip>}
+          />
           {reviewMemoryList}
-        </section>
+        </VSurface>
       </div>
     </>
   );

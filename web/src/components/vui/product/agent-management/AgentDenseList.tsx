@@ -117,14 +117,14 @@ function AgentRow({
   onToggleBulk: AgentDenseListProps["onToggleBulk"];
 }) {
   const rowClass = [
-    "w-full min-h-[44px] px-2 py-[var(--agent-row-pad-y)] border border-[var(--border-soft)] rounded-[var(--radius-control)] bg-[var(--vui-surface-row)] text-[var(--fg-primary)] text-left items-center gap-2 min-w-0 grid",
+    "w-full min-h-[44px] px-2 py-[var(--agent-row-pad-y)] border-0 border-b border-l-2 border-b-[var(--vui-border-hairline)] border-l-transparent rounded-none bg-transparent text-[var(--fg-primary)] text-left items-center gap-2 min-w-0 grid",
     GRID_TEMPLATE,
     "max-[860px]:grid-cols-[1fr] max-[860px]:items-start",
-    "transition-[border-color,background,box-shadow] duration-150 hover:border-[var(--border-strong)] hover:bg-[var(--vui-surface-row-hover)]",
+    "transition-[border-color,background] duration-150 hover:bg-[var(--vui-surface-row-hover)]",
     row.active
-      ? "border-[color-mix(in_srgb,var(--accent-warm)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_9%,var(--vui-surface-panel))]"
+      ? "border-l-[var(--accent-warm)] bg-[color-mix(in_srgb,var(--accent-warm)_9%,transparent)]"
       : "",
-    row.bulkSelected ? "bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-panel))]" : "",
+    row.bulkSelected ? "bg-[color-mix(in_srgb,var(--accent-cool)_10%,transparent)]" : "",
   ]
     .filter(Boolean)
     .join(" ");

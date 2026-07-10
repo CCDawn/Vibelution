@@ -52,6 +52,7 @@ import {
 import { useShellI18n } from "../i18n/useShellI18n";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
 import {
+  VActionGroup,
   VButton,
   VIconButton,
   VNativeButton,
@@ -62,6 +63,7 @@ import {
   VSelect,
   VStateSurface,
   VStatusStrip,
+  VSurface,
 } from "../components/vui";
 import {
   TeamCandidateCard,
@@ -12674,49 +12676,56 @@ export function TeamsRoute({
       />
       {showTeamUnavailableSurface ? (
         <main className={styles.teamUnavailableSurface} aria-label={teamUnavailableTitle}>
-          <section className={styles.teamUnavailableCard} title={teamUnavailableDetail || teamUnavailableMessage}>
-            <div className={styles.sectionTitle}>
-              <strong>{teamUnavailableTitle}</strong>
-              <span>{teamListUnavailable ? (lang === "zh" ? "接口不可用" : "API unavailable") : teamListLoading ? (lang === "zh" ? "读取中" : "loading") : (lang === "zh" ? "空团队" : "empty")}</span>
-            </div>
-            <p>{teamUnavailableMessage}</p>
-            <div className={styles.teamUnavailableMeta} aria-label={lang === "zh" ? "团队入口状态" : "Team entry status"}>
-              <span>{lang === "zh" ? "团队" : "Teams"} <strong>{visibleTeamSummary.activeTeamCount}</strong></span>
-              <span>{lang === "zh" ? "成员" : "Members"} <strong>{visibleTeamSummary.memberCount}</strong></span>
-              <span>{lang === "zh" ? "来源" : "Source"} <strong>Agent Center</strong></span>
-            </div>
-            <div className={styles.teamUnavailableActions}>
-              <VNativeButton type="button" onClick={() => void teamsQuery.refetch()} disabled={teamsQuery.isFetching}>
+          <VStateSurface
+            className={styles.teamUnavailableCard}
+            title={teamUnavailableTitle}
+            tone="unavailable"
+            facts={[
+              { key: "teams", label: lang === "zh" ? "团队" : "Teams", value: visibleTeamSummary.activeTeamCount },
+              { key: "members", label: lang === "zh" ? "成员" : "Members", value: visibleTeamSummary.memberCount },
+              { key: "source", label: lang === "zh" ? "来源" : "Source", value: "Agent Center" },
+            ]}
+            actions={(
+              <VButton type="button" variant="secondary" onPress={() => void teamsQuery.refetch()} isDisabled={teamsQuery.isFetching}>
                 <RefreshCw size={14} />
                 {teamsQuery.isFetching ? (lang === "zh" ? "刷新中" : "Refreshing") : (lang === "zh" ? "刷新" : "Refresh")}
-              </VNativeButton>
-            </div>
-          </section>
+              </VButton>
+            )}
+          >
+            {teamUnavailableDetail || teamUnavailableMessage}
+          </VStateSurface>
         </main>
       ) : showTeamDetailUnavailableSurface ? (
         <main className={styles.teamUnavailableSurface} aria-label={teamWorkspaceUnavailableTitle}>
-          <section className={styles.teamUnavailableCard} title={teamWorkspaceUnavailableDetail || teamWorkspaceUnavailableMessage}>
-            <div className={styles.sectionTitle}>
-              <strong>{teamWorkspaceUnavailableTitle}</strong>
-              <span>{lang === "zh" ? "详情不可用" : "details unavailable"}</span>
-            </div>
-            <p>{teamWorkspaceUnavailableDetail || teamWorkspaceUnavailableMessage}</p>
-            <div className={styles.teamUnavailableMeta} aria-label={lang === "zh" ? "团队详情错误状态" : "Team detail error status"}>
-              <span>{lang === "zh" ? "团队" : "Team"} <strong>{selectedTeamReference?.name ?? effectiveTeamId}</strong></span>
-              <span>{lang === "zh" ? "详情" : "Details"} <strong>{teamDetailLoadMode}</strong></span>
-              <span>{lang === "zh" ? "状态" : "Status"} <strong>{lang === "zh" ? "失败" : "failed"}</strong></span>
-            </div>
-            <div className={styles.teamUnavailableActions}>
-              <VNativeButton type="button" onClick={() => void teamDetailQuery.refetch()} disabled={teamDetailQuery.isFetching}>
+          <VStateSurface
+            className={styles.teamUnavailableCard}
+            title={teamWorkspaceUnavailableTitle}
+            tone="unavailable"
+            facts={[
+              { key: "team", label: lang === "zh" ? "团队" : "Team", value: selectedTeamReference?.name ?? effectiveTeamId },
+              { key: "detail", label: lang === "zh" ? "详情" : "Details", value: teamDetailLoadMode },
+              { key: "status", label: lang === "zh" ? "状态" : "Status", value: lang === "zh" ? "失败" : "failed" },
+            ]}
+            actions={(
+              <VButton type="button" variant="secondary" onPress={() => void teamDetailQuery.refetch()} isDisabled={teamDetailQuery.isFetching}>
                 <RefreshCw size={14} />
                 {teamDetailQuery.isFetching ? (lang === "zh" ? "刷新中" : "Refreshing") : (lang === "zh" ? "刷新详情" : "Refresh details")}
-              </VNativeButton>
-            </div>
-          </section>
+              </VButton>
+            )}
+          >
+            {teamWorkspaceUnavailableDetail || teamWorkspaceUnavailableMessage}
+          </VStateSurface>
         </main>
       ) : (
       <div className={workspaceClassName}>
-        <main className={canvasPanelClassName} id="research-organization-canvas">
+        <VSurface
+          as="main"
+          className={canvasPanelClassName}
+          elevation="panel"
+          padding="none"
+          tone="rail"
+          id="research-organization-canvas"
+        >
           <div className={styles.canvasToolbar}>
             <div>
               <strong>{selectedTeam?.name ?? (lang === "zh" ? "暂无团队" : "No team")}</strong>
@@ -12752,7 +12761,10 @@ export function TeamsRoute({
                 </small>
               ) : null}
             </div>
-            <div className={styles.toolbarActions}>
+            <VActionGroup
+              className={styles.toolbarActions}
+              ariaLabel={lang === "zh" ? "团队画布操作" : "Team canvas actions"}
+            >
               {researchCanvasReadOnly ? (
                 <span className={styles.canvasReadOnlyBadge}>{lang === "zh" ? "只读" : "Read only"}</span>
               ) : saveLabel ? (
@@ -12828,7 +12840,7 @@ export function TeamsRoute({
                   </VNativeButton>
                 </>
               )}
-            </div>
+            </VActionGroup>
           </div>
           {showTeamLoadingSurface ? (
             <VStateSurface
@@ -12929,7 +12941,7 @@ export function TeamsRoute({
               </div>
             </div>
           )}
-        </main>
+        </VSurface>
 
         <aside className={inspectorClassName}>
           <div className={styles.inspectorHeader}>
