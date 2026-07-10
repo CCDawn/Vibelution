@@ -15,22 +15,40 @@ export type VIconButtonProps = Omit<
 
 export function VIconButton({ label, icon, title, tooltip, ...props }: VIconButtonProps) {
   return (
-    <VTooltip content={tooltip ?? label}>
-      <VButton
-        {...props}
-        data-vui="icon-button"
-        isIconOnly
-        aria-label={label}
-        title={title ?? label}
-        className={[
-          "h-[var(--vui-control-height-sm)] w-[var(--vui-control-height-sm)] min-w-[var(--vui-control-height-sm)] aspect-square flex-none shrink-0 px-0",
-          props.className,
-        ]
-          .filter(Boolean)
-          .join(" ")}
-      >
-        {icon}
-      </VButton>
+    <VTooltip
+      content={tooltip ?? label}
+      renderTrigger={(tooltipTriggerProps) => {
+        const {
+          children: _triggerChildren,
+          className: triggerClassName,
+          role: _triggerRole,
+          tabIndex: _triggerTabIndex,
+          ...triggerProps
+        } = tooltipTriggerProps;
+        const buttonTriggerProps = triggerProps as unknown as VButtonProps;
+
+        return (
+          <VButton
+            {...props}
+            {...buttonTriggerProps}
+            data-vui="icon-button"
+            isIconOnly
+            aria-label={label}
+            title={title ?? label}
+            className={[
+              triggerClassName,
+              "h-[var(--vui-control-height-sm)] w-[var(--vui-control-height-sm)] min-w-[var(--vui-control-height-sm)] aspect-square flex-none shrink-0 px-0",
+              props.className,
+            ]
+              .filter(Boolean)
+              .join(" ")}
+          >
+            {icon}
+          </VButton>
+        );
+      }}
+    >
+      {icon}
     </VTooltip>
   );
 }

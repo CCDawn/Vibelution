@@ -9,7 +9,11 @@ export {
   type VSurfaceProps,
   type VSurfaceTone,
 } from "./primitives/VSurface";
-export { VTooltip, type VTooltipProps } from "./primitives/VTooltip";
+export {
+  VTooltip,
+  type VTooltipProps,
+  type VTooltipTriggerRender,
+} from "./primitives/VTooltip";
 export { VDenseTable, type VDenseTableColumn, type VDenseTableProps } from "./display/VDenseTable";
 export { VMetricStrip, type VMetricStripMetric, type VMetricStripProps, type VMetricStripStatus } from "./display/VMetricStrip";
 export { VCheckbox, type VCheckboxProps } from "./forms/VCheckbox";

@@ -100,6 +100,28 @@ describe("VUI foundation primitives", () => {
     expect(markup).toContain('data-slot="tooltip-trigger"');
     expect(markup).toContain('aria-label="Refresh"');
     expect(markup).toContain('data-vui="icon-button"');
+    expect(markup.match(/<button\b/g)).toHaveLength(1);
+    expect(markup.match(/tabindex="0"/g)).toHaveLength(1);
+    expect(markup).toMatch(/<button(?=[^>]*data-slot="tooltip-trigger")[^>]*>/);
+    expect(markup).not.toMatch(/<div[^>]*role="button"[^>]*>[\s\S]*<button/);
+  });
+
+  it("does not leave a focusable tooltip wrapper around a disabled icon button", () => {
+    const markup = renderToStaticMarkup(
+      <VibelutionHeroProvider>
+        <VIconButton
+          label="Refresh"
+          tooltip="Refresh frontend data"
+          icon={<Search size={14} />}
+          isDisabled
+        />
+      </VibelutionHeroProvider>,
+    );
+
+    expect(markup.match(/<button\b/g)).toHaveLength(1);
+    expect(markup).toContain('disabled=""');
+    expect(markup).not.toContain('tabindex="0"');
+    expect(markup).not.toMatch(/<div[^>]*role="button"[^>]*>[\s\S]*<button/);
   });
 
   it("renders VButton content in explicit compact inline slots", () => {
