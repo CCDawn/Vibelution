@@ -156,24 +156,29 @@ python tests/select_tests.py --from-git main --commands-only
 
 `scripts/local_quality_gate.py` 有三个 mode，按任务阶段选择：
 
-- `commit`：由 pre-commit hook 自动调用，只验证 staged content；gate-definition 文件同时存在 staged 与 unstaged 内容时拒绝提交，避免验证与提交的定义不同。
+- `commit`：由 pre-commit hook 自动调用，以 staged paths 驱动；diff check 与 Python Ruff 使用 Git index 中的 staged 内容。gate-definition 文件同时存在 staged 与 unstaged 内容时拒绝提交；gate-definition staged 时还会在当前 worktree 运行 focused self-test，因此未 stage 的测试或 `conftest.py` 可能影响结果。
 - `closeout --base main --claim-id <claim-id>`：只在内容已提交且 clean 的 task worktree 运行，绑定 claim、本地 `main` SHA、HEAD SHA、selector 命令和 merge preflight，并写入 `.runtime/quality_gates/<task-id>.json`。
 - `verify-manifest --manifest <path> --base main`：在进入 root local `main` fast-forward gate 前复核 manifest 的 schema、`outcome`、`validatedMainSha` 与 `headSha`。`passed` 是验证证据，不表示已经 merge。
 
 首次配置 hook 使用 `git config core.hooksPath .githooks`。`powershell -ExecutionPolicy Bypass -File scripts/doctor.ps1 -Json` 只读报告 `checks.git_hooks_path` 及固定修复命令，不会静默写 Git 配置。远端 CI 的 `workflow_dispatch` 可按需补充验证，但 remote push 不是默认本地闭环的一部分。
 
-Outcome 只对应一个恢复动作：
+Outcome 必须结合 mode 解释，每个组合只对应一个恢复动作：
 
-| Outcome | 操作 |
-| --- | --- |
-| `passed` | 复核 manifest 后进入本地 main fast-forward gate |
-| `failed` | 修复首个失败命令并重跑 closeout |
-| `stale_main` | 在任务 worktree 合并最新本地 main，解决冲突并重跑 |
-| `claim_conflict` | 修正/续期本任务 claim，不使用其他任务 claim |
-| `dirty_worktree` | 提交或撤回本任务未提交内容 |
-| `merge_conflict` | 仅在任务 worktree 解决冲突 |
-| `unsupported_validation_command` | 修正 matrix 为允许命令族，不放宽到 shell |
-| `gate_definition_dirty` | 整文件 stage gate-definition 或拆成独立 commit |
+| Mode | Outcome | 操作 |
+| --- | --- | --- |
+| `commit` | `passed` | 当前 commit 轻门通过，可继续 commit；该 mode 不生成 manifest |
+| `commit` | `failed` | 修复 staged diff、staged Python Ruff 或 gate focused self-test 的首个失败后重试 commit |
+| `commit` | `gate_definition_dirty` | 整文件 stage gate-definition 或拆成独立 commit，再重试 commit |
+| `closeout` | `passed` | 复核生成的 manifest 后进入本地 main fast-forward gate |
+| `closeout` | `failed` | 先按当前 branch 修复非法 task branch/precondition；若已有失败命令，则按首个失败命令及其 `failureSummary` 修复后重跑 closeout |
+| `closeout` | `stale_main` | 在任务 worktree 合并最新本地 main，解决冲突并重跑 closeout |
+| `closeout` | `claim_conflict` | 修正或续期本任务 claim，不使用其他任务 claim，然后重跑 closeout |
+| `closeout` | `dirty_worktree` | 提交或撤回本任务未提交内容，使 task worktree clean 后重跑 closeout |
+| `closeout` | `merge_conflict` | 仅在任务 worktree 解决冲突并重跑 closeout |
+| `closeout` | `unsupported_validation_command` | 修正 matrix 为允许命令族，不放宽到 shell，然后重跑 closeout |
+| `verify-manifest` | `passed` | manifest 对当前本地 main 与 task HEAD 仍新鲜，可进入 merge gate |
+| `verify-manifest` | `failed` | manifest 不可读、schema/`outcome` 无效或 `headSha` 不匹配；生成或选择正确 manifest，必要时重跑 closeout |
+| `verify-manifest` | `stale_main` | 当前本地 main 已变化；回任务 worktree 同步最新 main，并重跑 closeout 生成新 manifest |
 
 质量门只生成或复核证据，不执行 merge、claim release、junction/worktree/branch 删除。冲突和 `stale_main` 都回 task worktree 处理；root local `main` 仅在 clean 且 SHA 仍匹配时执行 `git merge --ff-only <task-branch>`，随后做最小 post-merge verification，并只清理本任务资源。
 

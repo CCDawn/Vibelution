@@ -538,7 +538,7 @@ git status --short --branch
 
 Never use `git add .`. Stage only files belonging to the current task.
 
-Every commit uses the tracked pre-commit hook and `scripts/local_quality_gate.py commit`. This light gate intentionally reads staged content only: it runs `git diff --cached --check`, checks staged Python blobs, and runs the focused gate self-test when gate-definition files are staged. If `core.hooksPath` is wrong, `scripts/doctor.ps1` reports the read-only repair hint `git config core.hooksPath .githooks`; the doctor must not silently write Git configuration.
+Every commit uses the tracked pre-commit hook and `scripts/local_quality_gate.py commit`. This light gate is driven by staged paths: `git diff --cached --check` and Python Ruff read Git-index staged content. It is not completely isolated from the unstaged worktree. Gate-definition paths are checked for staged/unstaged overlap, and staging a gate-definition file runs the focused self-test in the current worktree, where unstaged tests or `conftest.py` may affect the result. If `core.hooksPath` is wrong, `scripts/doctor.ps1` reports the read-only repair hint `git config core.hooksPath .githooks`; the doctor must not silently write Git configuration.
 
 Run Git commands non-interactively in automation and agent workflows. Do not start `git commit`, `git merge --continue`, or similar commands in a way that can open an editor unless the user explicitly asked for interactive Git. Supply a message, use `--no-edit` when appropriate, or set a bounded non-interactive editor for scripted flows.
 
@@ -657,7 +657,7 @@ Task handoff must include version bump recommendation, capability domain, user-v
 
 ## 16. Mainline Integration
 
-Task-owning Agents should self-review and self-merge by default when the merge gates in section 13 pass. The mandatory local sequence is: branch from current local `main`; commit through the staged-content light gate; run claim-bound `closeout` in the clean task worktree; verify the manifest immediately before integration; confirm root `main` is clean and unchanged; run `git merge --ff-only <task-branch>` in root `main`; run minimal post-merge verification; then release and remove only the current task's resources. A mainline integration session is a fallback and serialization owner, not the normal destination for routine clean task branches. It is still responsible for queued, cross-lane, large-conflict, release-sensitive, or user-designated integration work:
+Task-owning Agents should self-review and self-merge by default when the merge gates in section 13 pass. The mandatory local sequence is: branch from current local `main`; commit through the staged-path-driven light gate; run claim-bound `closeout` in the clean task worktree; verify the manifest immediately before integration; confirm root `main` is clean and unchanged; run `git merge --ff-only <task-branch>` in root `main`; run minimal post-merge verification; then release and remove only the current task's resources. A mainline integration session is a fallback and serialization owner, not the normal destination for routine clean task branches. It is still responsible for queued, cross-lane, large-conflict, release-sensitive, or user-designated integration work:
 
 - keeping local `main` clean before each merge;
 - reviewing claim status and write scopes;
