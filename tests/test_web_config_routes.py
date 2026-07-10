@@ -641,6 +641,7 @@ def test_config_workspace_apply_allows_deleted_non_primary_profile_model(monkeyp
         "model_ref": "deepseek_v4_pro",
         "overrides": {},
     }
+    public_config.setdefault("git", {})["commit_message_model_ref"] = "deepseek_v4_pro"
     public_config["llm"]["profiles"]["mental_model"] = {
         "model_ref": "relay_gpt_5_6_luna",
         "overrides": {},
