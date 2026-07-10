@@ -173,9 +173,9 @@ def _wire_protocol_from_opencode(provider: ProviderConfig, effective_model: str)
     variant = _opencode_variant(provider)
     model = str(effective_model or "").strip().lower()
     if variant == "zen":
-        if "gpt" in model or "codex" in model or model.startswith("o"):
+        if "gpt" in model or "codex" in model or (len(model) > 1 and model[0] == "o" and model[1].isdigit()):
             return WireProtocol.RESPONSES
-        if "claude" in model or "qwen" in model:
+        if any(name in model for name in ("claude", "opus", "sonnet", "haiku", "qwen")):
             return WireProtocol.ANTHROPIC_MESSAGES
         return WireProtocol.CHAT_COMPLETIONS
     if variant == "go":
