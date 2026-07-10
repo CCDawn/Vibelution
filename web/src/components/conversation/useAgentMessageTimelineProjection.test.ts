@@ -169,12 +169,29 @@ describe("projectAgentMessageTimelineMessages", () => {
     const liveOverlay = assistantMessage("live-overlay", {
       content: "你好！我在。需要我帮你做什么？",
       streaming: true,
+      feedbackEvents: [
+        {
+          sequence: 1,
+          kind: "tool",
+          status: "done",
+          name: "read_file_tool",
+          summary: "保留 overlay 独有过程数据",
+        },
+      ],
       timelineItems: [
         {
           id: "live-answer-text",
           kind: "assistant_text",
           status: "completed",
           text: "你好！我在。需要我帮你做什么？",
+        },
+        {
+          id: "overlay-operation",
+          kind: "operation",
+          status: "completed",
+          title: "读取文件",
+          summary: "保留 overlay 独有过程数据",
+          operationIds: ["read-file-operation"],
         },
       ],
       metadata: { kind: "session_live_overlay", turnId: "live:turn-duplicate" },
@@ -199,7 +216,13 @@ describe("projectAgentMessageTimelineMessages", () => {
 
     expect(projection.messages.map((message) => message.id)).toEqual(["committed-answer"]);
     expect(projection.agentMessages.map((message) => message.id)).toEqual(["committed-answer"]);
-    expect(projection.messages[0].timelineItems?.map((item) => item.id)).toEqual(["committed-answer-text"]);
+    expect(projection.messages[0].timelineItems?.map((item) => item.id)).toEqual([
+      "overlay-operation",
+      "committed-answer-text",
+    ]);
+    expect(projection.messages[0].feedbackEvents?.map((event) => event.summary)).toEqual([
+      "保留 overlay 独有过程数据",
+    ]);
     expect(projection.rowIdentities).toHaveLength(1);
   });
 
