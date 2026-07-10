@@ -847,6 +847,7 @@ export type ChatRoomMessage = {
   sessionId: string;
   speakerTitle: string;
   status: string;
+  resultStatus?: string;
   content: string;
   summary: string;
   messageKind?: "user_clarification" | "team_discussion" | "team_message" | string;

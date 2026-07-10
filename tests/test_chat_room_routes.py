@@ -109,6 +109,49 @@ def test_chat_room_api_create_and_run_round(tmp_path, monkeypatch):
 
 
 @pytest.mark.slow
+def test_chat_room_api_exposes_partial_round_and_message_result_status(tmp_path, monkeypatch):
+    _seed_chat_sessions(tmp_path)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        chat_room_service,
+        "_run_participant_agent",
+        lambda participant, prompt, context: {
+            "status": "degraded",
+            "raw_output": f"{participant['title']} 仅完成部分分析",
+            "summary": "partial result",
+        },
+    )
+
+    room = client.post(
+        "/api/chat-rooms",
+        json={
+            "title": "部分完成接口群聊",
+            "participantSessionIds": ["session-a", "session-b"],
+            "purpose": "discussion",
+        },
+    ).json()
+
+    round_response = client.post(
+        f"/api/chat-rooms/{room['roomId']}/rounds",
+        json={"topic": "验证部分完成接口契约"},
+    )
+
+    assert round_response.status_code == 202
+    detail = wait_for_chat_room_round_completed(
+        client,
+        room["roomId"],
+        timeout_s=8.0,
+        desired_status="partial",
+    )
+    latest_round = detail["rounds"][-1]
+    assert detail["status"] == "ready"
+    assert latest_round["status"] == "partial"
+    assert [message["status"] for message in latest_round["messages"]] == ["partial", "partial"]
+    assert [message["resultStatus"] for message in latest_round["messages"]] == ["degraded", "degraded"]
+
+
+@pytest.mark.slow
 def test_chat_room_round_prefer_async_returns_lightweight_acceptance(tmp_path, monkeypatch):
     _seed_chat_sessions(tmp_path)
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
