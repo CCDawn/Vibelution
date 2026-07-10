@@ -4,6 +4,8 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
+import shlex
 import subprocess
 import sys
 import time
@@ -23,6 +25,8 @@ Outcome = Literal[
 ]
 
 FATAL_RUFF_RULES = "E9,F63,F7,F82"
+PROJECT_PYTHON_NAME = Path(".venv") / "Scripts" / "python.exe"
+SHELL_META = re.compile(r"[|&;<>\r\n]|\$\(|`")
 GATE_DEFINITION_FILES = frozenset(
     {
         ".githooks/pre-commit",
@@ -54,8 +58,63 @@ class GateResult:
     manifest_path: Path | None = None
 
 
+class UnsupportedValidationCommand(ValueError):
+    pass
+
+
+@dataclass(frozen=True)
+class CommandSpec:
+    kind: str
+    argv: list[str]
+    cwd: Path
+
+
 def normalize_path(value: str) -> str:
     return value.replace("\\", "/").removeprefix("./")
+
+
+def split_command(command: str) -> list[str]:
+    if SHELL_META.search(command):
+        raise UnsupportedValidationCommand(command)
+    tokens = shlex.split(command, posix=False)
+    return [
+        token[1:-1]
+        if len(token) >= 2
+        and token[0] == token[-1]
+        and token[0] in {'"', "'"}
+        else token
+        for token in tokens
+    ]
+
+
+def parse_allowed_command(command: str, root: Path) -> CommandSpec:
+    argv = split_command(command)
+    normalized = [normalize_path(token) for token in argv]
+    python_tokens = {
+        normalize_path(str(PROJECT_PYTHON_NAME)),
+        ".venv/Scripts/python.exe",
+    }
+    if normalized == ["git", "diff", "--check"]:
+        return CommandSpec("diff-check", argv, root)
+    if normalized and normalized[0] in python_tokens:
+        canonical = [str(PROJECT_PYTHON_NAME), *argv[1:]]
+        if argv[1:3] == ["-m", "pytest"]:
+            return CommandSpec("pytest", canonical, root)
+        if len(argv) >= 2 and normalized[1] == "tests/select_tests.py":
+            return CommandSpec("selector", canonical, root)
+        if len(argv) >= 2 and normalized[1] == "tests/prompt_debugger.py":
+            return CommandSpec("prompt-debugger", canonical, root)
+    if normalized[:4] == ["npm", "--prefix", "web", "run"] and len(argv) >= 5:
+        npm_kinds = {
+            "test": "web-test",
+            "build": "web-build",
+            "check:bundle": "bundle-check",
+        }
+        if argv[4] in npm_kinds:
+            return CommandSpec(npm_kinds[argv[4]], argv, root)
+    if normalized == ["node", "挑战杯/build_research_flow_site.mjs"]:
+        return CommandSpec("challenge-cup-build", argv, root)
+    raise UnsupportedValidationCommand(command)
 
 
 def run_process(
@@ -149,6 +208,13 @@ def measured(
         status="passed" if completed.returncode == 0 else "failed",
         failure_summary="" if completed.returncode == 0 else summarize_failure(completed, subject),
     )
+
+
+def execute_command(spec: CommandSpec) -> ProcessResult:
+    argv = list(spec.argv)
+    if Path(argv[0]) == PROJECT_PYTHON_NAME:
+        argv[0] = str((spec.cwd / PROJECT_PYTHON_NAME).resolve())
+    return measured(spec.kind, argv, spec.cwd, subject=spec.kind)
 
 
 def gate_definition_is_dirty(root: Path, staged: Sequence[str]) -> bool:
