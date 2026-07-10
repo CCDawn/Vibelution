@@ -5,7 +5,16 @@ import { Search } from "lucide-react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
-import { VButton, VChip, VIconButton, VNativeButton, VPanel, VToolbar, VTooltip } from "./index";
+import {
+  VButton,
+  VChip,
+  VIconButton,
+  VNativeButton,
+  VPanel,
+  VSurface,
+  VToolbar,
+  VTooltip,
+} from "./index";
 import { VibelutionHeroProvider } from "./renderers/heroui/HeroProvider";
 
 describe("VUI foundation primitives", () => {
@@ -65,6 +74,32 @@ describe("VUI foundation primitives", () => {
     expect(markup).toContain('data-vui="chip"');
     expect(markup).toContain('aria-label="Refresh"');
     expect(markup).toContain("mimo-v2.5");
+  });
+
+  it("renders project-owned surface tone and elevation contracts", () => {
+    const markup = renderToStaticMarkup(
+      <VSurface tone="rail" elevation="panel" ariaLabel="Status rail">
+        Status
+      </VSurface>,
+    );
+
+    expect(markup).toContain('data-tone="rail"');
+    expect(markup).toContain('data-elevation="panel"');
+    expect(markup).toContain("bg-vui-surface-rail");
+    expect(markup).toContain("shadow-[var(--vui-elevation-panel)]");
+    expect(markup).toContain("rounded-[var(--vui-radius-panel-soft)]");
+  });
+
+  it("gives every icon button a HeroUI tooltip trigger with an accessible name", () => {
+    const markup = renderToStaticMarkup(
+      <VibelutionHeroProvider>
+        <VIconButton label="Refresh" tooltip="Refresh frontend data" icon={<Search size={14} />} />
+      </VibelutionHeroProvider>,
+    );
+
+    expect(markup).toContain('data-slot="tooltip-trigger"');
+    expect(markup).toContain('aria-label="Refresh"');
+    expect(markup).toContain('data-vui="icon-button"');
   });
 
   it("renders VButton content in explicit compact inline slots", () => {

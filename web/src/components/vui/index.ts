@@ -3,7 +3,12 @@ export { VChip, type VChipProps } from "./primitives/VChip";
 export { VIconButton, type VIconButtonProps } from "./primitives/VIconButton";
 export { VNativeButton, type VNativeButtonProps } from "./primitives/VNativeButton";
 export { VPanel, type VPanelProps } from "./primitives/VPanel";
-export { VSurface, type VSurfaceProps } from "./primitives/VSurface";
+export {
+  VSurface,
+  type VSurfaceElevation,
+  type VSurfaceProps,
+  type VSurfaceTone,
+} from "./primitives/VSurface";
 export { VTooltip, type VTooltipProps } from "./primitives/VTooltip";
 export { VDenseTable, type VDenseTableColumn, type VDenseTableProps } from "./display/VDenseTable";
 export { VMetricStrip, type VMetricStripMetric, type VMetricStripProps, type VMetricStripStatus } from "./display/VMetricStrip";
