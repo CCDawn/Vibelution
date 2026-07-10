@@ -91,6 +91,33 @@ def test_selector_matches_session_service_to_chat_validation_commands():
     assert any("ChatCodingRoute.layout.test.ts" in command for command in result["commands"])
 
 
+def test_selector_matches_local_quality_gate_surfaces():
+    result = select_tests.select_tests(
+        [
+            ".githooks/pre-commit",
+            ".github/workflows/ci.yml",
+            "scripts/doctor.ps1",
+            "scripts/local_quality_gate.py",
+            "tests/test_matrix.yaml",
+        ],
+        select_tests.load_matrix(),
+    )
+
+    rule = next(rule for rule in result["matchedRules"] if rule["id"] == "local-quality-gate")
+    assert set(rule["matchedFiles"]) == {
+        ".githooks/pre-commit",
+        ".github/workflows/ci.yml",
+        "scripts/doctor.ps1",
+        "scripts/local_quality_gate.py",
+        "tests/test_matrix.yaml",
+    }
+    assert any("tests/test_local_quality_gate.py" in command for command in result["commands"])
+    assert any("tests/test_ci_workflow_contract.py" in command for command in result["commands"])
+    assert any("tests/test_environment_doctor.py" in command for command in result["commands"])
+    assert any("tests/test_select_tests.py" in command for command in result["commands"])
+    assert "local-serial" in result["validationLayers"]
+
+
 def test_selector_matches_chat_style_map_to_chat_validation_commands():
     result = select_tests.select_tests(
         ["web/src/routes/ChatCodingRoute.styles.ts"],

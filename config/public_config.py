@@ -146,22 +146,22 @@ LLM_MODEL_PRESETS = {
             "discovery_enabled": False,
         },
     },
-    "relay_openai_gpt_5_5": {
-        "label": "中转站 API · GPT-5.5",
+    "relay_gpt_5_6_luna": {
+        "label": "Relay GPT-5.6 Luna",
         "category": "relay",
         "provider_id": "relay_openai",
-        "model_id": "relay_openai_gpt_5_5",
+        "model_id": "relay_gpt_5_6_luna",
         "provider": {
             "kind": "relay",
             "api_key_env": "OPENAI_API_KEY",
-            "base_url": "https://pixel.try-chatapi.com/v1",
+            "base_url": "https://ai-pixel.online",
             "compat_mode": "openai",
             "requires_api_key": True,
             "context_window": 1000000,
         },
         "model": {
-            "model": "gpt-5.5",
-            "label": "GPT-5.5 via relay",
+            "model": "gpt-5.6-luna",
+            "label": "Relay GPT-5.6 Luna",
             "transport": "responses",
             "contract": "tool_chat",
             "temperature": 0.7,

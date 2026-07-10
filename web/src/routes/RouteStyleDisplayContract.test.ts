@@ -18,7 +18,7 @@ const styleEntryPattern = /^\s*([A-Za-z0-9_]+):\s*\r?\n?\s*"([^"]*)"/gm;
 const hostGridDisplayClasses = new Set(["grid", "!grid", "inline-grid", "!inline-grid"]);
 const hostGridTemplatePattern = /^!?(grid-cols|grid-rows|grid-flow|auto-rows|auto-cols)-/;
 const composedGridTemplateModifiers = new Set([
-  "ChatCodingRoute.styles.ts:layoutCenterFirst",
+  "ChatCodingRoute.styles.ts:layoutCompactDesktop",
   "ChatCodingRoute.styles.ts:rightPaneWithTabs",
   "ChatCodingRoute.styles.ts:rightPaneWithoutTabs",
   "GitRoute.styles.ts:workspaceOverview",
@@ -70,7 +70,7 @@ describe("route style display contract", () => {
   });
 
   it("keeps composed grid-template modifiers attached to grid-bearing base styles", () => {
-    expect(chatRouteSource).toContain("`${styles.layout} ${styles.layoutCenterFirst}`");
+    expect(chatRouteSource).toContain("`${styles.layout} ${styles.layoutCompactDesktop}`");
     expect(chatRouteSource).toContain("`${styles.rightPane} ${rightPaneLayoutClassName}`");
 
     expect(gitRouteSource).toContain("`${styles.workspace} ${styles.workspaceOverview}`");

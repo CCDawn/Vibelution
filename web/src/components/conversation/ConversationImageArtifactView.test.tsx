@@ -5,6 +5,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
 import type { ImageArtifactMessage } from "./conversationMessagePredicates";
+import { ConversationImageArtifactView } from "./ConversationImageArtifactView";
 import conversationViewSource from "./ConversationView.tsx?raw";
 import styles from "./ConversationImageArtifactView.styles";
 
@@ -26,8 +27,7 @@ describe("ConversationImageArtifactView", () => {
     expect(conversationViewSource).not.toContain("const metaItems = [artifact.size, artifact.quality, artifact.model]");
   });
 
-  it("renders generated image artifact preview, metadata, and download affordance", async () => {
-    const { ConversationImageArtifactView } = await import("./ConversationImageArtifactView");
+  it("renders generated image artifact preview, metadata, and download affordance", () => {
     const html = renderToStaticMarkup(
       <ConversationImageArtifactView artifact={artifact} lang="zh" onPreviewImage={vi.fn()} />,
     );

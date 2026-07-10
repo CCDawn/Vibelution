@@ -9,7 +9,15 @@ from urllib.parse import urlparse
 
 from config import LLMProfile, ProviderConfig
 
-from .protocols import CompatPolicy, ModelProtocol, ProtocolPolicy, compat_override_fields, get_protocol_policy
+from .protocols import (
+    CompatPolicy,
+    ModelProtocol,
+    ProtocolPolicy,
+    WireProtocol,
+    compat_override_fields,
+    get_protocol_policy,
+    wire_protocol_from_model_protocol_alias,
+)
 
 
 @dataclass(frozen=True)
@@ -20,10 +28,17 @@ class ResolvedProtocolRoute:
     provider_kind: str
     provider_api: str
     model: str
+    effective_model: str
+    wire_protocol: WireProtocol
+    adapter_id: str
+    configured_endpoint: str
+    runtime_endpoint: str
     protocol: ModelProtocol
     policy: ProtocolPolicy
     compat: CompatPolicy
     source: str
+    wire_source: str
+    source_scope: str
     warnings: tuple[str, ...] = ()
 
     def log_summary(self) -> dict[str, Any]:
@@ -31,6 +46,13 @@ class ResolvedProtocolRoute:
             "protocol": self.protocol.value,
             "selectedProtocol": self.protocol.value,
             "protocolSource": self.source,
+            "wireProtocol": self.wire_protocol.value,
+            "wireProtocolSource": self.wire_source,
+            "wireProtocolSourceScope": self.source_scope,
+            "adapterId": self.adapter_id,
+            "effectiveModel": self.effective_model,
+            "configuredEndpoint": self.configured_endpoint,
+            "runtimeEndpoint": self.runtime_endpoint,
             "modelId": self.model_id,
             "providerId": self.provider_id,
             "providerKind": self.provider_kind,
@@ -99,6 +121,175 @@ def _base_url_is_localish(base_url: str) -> bool:
 
 def _normalize_provider_api(provider: ProviderConfig) -> str:
     return _read_optional_string(provider, "api").lower().replace("_", "-")
+
+
+def _normalize_wire_protocol(value: str) -> WireProtocol | None:
+    normalized = str(value or "").strip().lower().replace("-", "_")
+    aliases = {
+        "openai_chat_completions": WireProtocol.CHAT_COMPLETIONS,
+        "openai_completions": WireProtocol.CHAT_COMPLETIONS,
+        "openai_responses": WireProtocol.RESPONSES,
+        "anthropic": WireProtocol.ANTHROPIC_MESSAGES,
+        "anthropic_messages": WireProtocol.ANTHROPIC_MESSAGES,
+        "gemini": WireProtocol.GEMINI_GENERATE_CONTENT,
+        "gemini_generate_content": WireProtocol.GEMINI_GENERATE_CONTENT,
+    }
+    if normalized in aliases:
+        return aliases[normalized]
+    try:
+        return WireProtocol(normalized)
+    except ValueError:
+        return None
+
+
+def _wire_protocol_from_model_entry(model_entry: Any) -> WireProtocol | None:
+    for field in ("wireProtocol", "wire_protocol", "apiMode", "api_mode"):
+        raw = _read_optional_string(model_entry, field)
+        if raw:
+            wire_protocol = _normalize_wire_protocol(raw)
+            if wire_protocol is None:
+                raise ValueError(f"unknown explicit wire protocol `{raw}`")
+            return wire_protocol
+    return None
+
+
+def _opencode_variant(provider: ProviderConfig) -> str:
+    identity = " ".join(
+        (
+            _read_optional_string(provider, "provider_id"),
+            _read_optional_string(provider, "kind"),
+            _read_optional_string(provider, "api"),
+            _read_optional_string(provider, "base_url"),
+        )
+    ).lower().replace("_", "-")
+    if "opencode" not in identity:
+        return ""
+    if "opencode-go" in identity or "/go" in identity:
+        return "go"
+    return "zen"
+
+
+def _wire_protocol_from_opencode(provider: ProviderConfig, effective_model: str) -> WireProtocol | None:
+    variant = _opencode_variant(provider)
+    model = str(effective_model or "").strip().lower()
+    if variant == "zen":
+        if "gpt" in model or "codex" in model or (len(model) > 1 and model[0] == "o" and model[1].isdigit()):
+            return WireProtocol.RESPONSES
+        if any(name in model for name in ("claude", "opus", "sonnet", "haiku", "qwen")):
+            return WireProtocol.ANTHROPIC_MESSAGES
+        return WireProtocol.CHAT_COMPLETIONS
+    if variant == "go":
+        if "minimax" in model or "qwen" in model:
+            return WireProtocol.ANTHROPIC_MESSAGES
+        if any(name in model for name in ("glm", "kimi", "deepseek", "mimo")):
+            return WireProtocol.CHAT_COMPLETIONS
+    return None
+
+
+def _wire_protocol_from_provider_api(provider_api: str) -> WireProtocol | None:
+    api = str(provider_api or "").strip().lower().replace("_", "-")
+    if api in {"openai-responses", "responses"}:
+        return WireProtocol.RESPONSES
+    if api in {"anthropic", "anthropic-messages"}:
+        return WireProtocol.ANTHROPIC_MESSAGES
+    if api in {"gemini", "gemini-generate-content", "generate-content"}:
+        return WireProtocol.GEMINI_GENERATE_CONTENT
+    if api in {
+        "deepseek-chat",
+        "deepseek-reasoning",
+        "local-openai-compatible",
+        "minimax",
+        "minimax-chat",
+        "openai-chat-completions",
+        "openai-completions",
+        "qwen",
+        "qwen-openai-compatible",
+    }:
+        return WireProtocol.CHAT_COMPLETIONS
+    return None
+
+
+def _wire_protocol_from_provider_kind(provider_kind: str) -> WireProtocol | None:
+    kind = str(provider_kind or "").strip().lower().replace("-", "_")
+    if kind == "anthropic":
+        return WireProtocol.ANTHROPIC_MESSAGES
+    if kind in {"gemini", "google_gemini"}:
+        return WireProtocol.GEMINI_GENERATE_CONTENT
+    return None
+
+
+def _wire_protocol_from_endpoint(base_url: str) -> WireProtocol | None:
+    try:
+        parsed = urlparse(str(base_url or ""))
+        host = (parsed.hostname or "").lower()
+        path = (parsed.path or "").lower().rstrip("/")
+    except Exception:
+        return None
+    if host == "api.anthropic.com" or host.endswith(".anthropic.com"):
+        return WireProtocol.ANTHROPIC_MESSAGES
+    if host == "generativelanguage.googleapis.com":
+        return WireProtocol.GEMINI_GENERATE_CONTENT
+    if path.endswith("/responses"):
+        return WireProtocol.RESPONSES
+    return None
+
+
+def _runtime_endpoint(provider: ProviderConfig, configured_endpoint: str, wire_protocol: WireProtocol) -> str:
+    endpoint = str(configured_endpoint or "").strip().rstrip("/")
+    try:
+        host = (urlparse(endpoint).hostname or "").lower()
+    except Exception:
+        host = ""
+    official_opencode = host == "opencode.ai" or host.endswith(".opencode.ai")
+    if not official_opencode:
+        return endpoint
+    if wire_protocol == WireProtocol.ANTHROPIC_MESSAGES:
+        return endpoint[:-3] if endpoint.lower().endswith("/v1") else endpoint
+    if wire_protocol in {WireProtocol.CHAT_COMPLETIONS, WireProtocol.RESPONSES}:
+        return endpoint if endpoint.lower().endswith("/v1") else f"{endpoint}/v1"
+    return endpoint
+
+
+def _resolve_wire_protocol(
+    *,
+    model_entry: Any,
+    explicit_model_protocol: ModelProtocol | None,
+    profile: LLMProfile,
+    provider: ProviderConfig,
+    provider_kind: str,
+    provider_api: str,
+    effective_model: str,
+    warnings: list[str],
+) -> tuple[WireProtocol, str, str]:
+    explicit_wire = _wire_protocol_from_model_entry(model_entry)
+    if explicit_wire is not None:
+        return explicit_wire, "explicit_model_wire", "model"
+    if explicit_model_protocol is not None:
+        migrated = wire_protocol_from_model_protocol_alias(explicit_model_protocol)
+        if migrated is not None:
+            warnings.append("wire_protocol.migrated_model_protocol_alias")
+            return migrated, "model_protocol_alias", "model"
+    provider_model_wire = _wire_protocol_from_opencode(provider, effective_model)
+    if provider_model_wire is not None:
+        return provider_model_wire, "provider_effective_model_rule", "provider_model"
+    provider_wire = _wire_protocol_from_provider_api(provider_api)
+    if provider_wire is not None:
+        return provider_wire, "provider_api", "provider"
+    provider_kind_wire = _wire_protocol_from_provider_kind(provider_kind)
+    if provider_kind_wire is not None:
+        return provider_kind_wire, "provider_kind", "provider"
+    profile_transport = _normalize_wire_protocol(_read_optional_string(profile, "transport"))
+    if profile_transport is not None:
+        return profile_transport, "profile_transport", "profile"
+    endpoint_wire = _wire_protocol_from_endpoint(_read_optional_string(provider, "base_url"))
+    if endpoint_wire is not None:
+        return endpoint_wire, "endpoint_heuristic", "heuristic"
+    if _is_openai_compatible_provider(provider_kind, _read_optional_string(provider, "compat_mode")):
+        return WireProtocol.CHAT_COMPLETIONS, "declared_openai_compatibility", "fallback"
+    raise ValueError(
+        f"unable to resolve wire protocol for provider={provider_kind or 'unknown'} "
+        f"model={effective_model or 'unknown'}"
+    )
 
 
 def _is_openai_compatible_provider(provider_kind: str, compat_mode: str = "") -> bool:
@@ -204,6 +395,12 @@ def resolve_model_protocol(
     warnings: list[str] = []
     provider_kind = _read_optional_string(provider, "kind").lower() or "unknown"
     provider_api = _normalize_provider_api(provider)
+    effective_model = (
+        _read_optional_string(model_entry, "model")
+        or _read_optional_string(model_entry, "modelName")
+        or _read_optional_string(model_entry, "model_name")
+        or _read_optional_string(profile, "model")
+    )
     model_id = _read_optional_string(model_entry, "modelId") or _read_optional_string(model_entry, "model_id")
     if not model_id:
         model_id = _read_optional_string(profile, "profile_id") or _read_optional_string(profile, "model")
@@ -243,17 +440,35 @@ def resolve_model_protocol(
         CompatPolicy.from_raw(raw_compat),
         override_fields=compat_override_fields(raw_compat),
     )
+    wire_protocol, wire_source, source_scope = _resolve_wire_protocol(
+        model_entry=model_entry,
+        explicit_model_protocol=protocol if explicit_protocol else None,
+        profile=profile,
+        provider=provider,
+        provider_kind=provider_kind,
+        provider_api=provider_api,
+        effective_model=effective_model,
+        warnings=warnings,
+    )
+    configured_endpoint = _read_optional_string(provider, "base_url")
     return ResolvedProtocolRoute(
         profile_id=_read_optional_string(profile, "profile_id"),
         model_id=model_id,
         provider_id=_read_optional_string(provider, "provider_id") or _read_optional_string(profile, "provider_id"),
         provider_kind=provider_kind,
         provider_api=provider_api,
-        model=_read_optional_string(profile, "model"),
+        model=effective_model,
+        effective_model=effective_model,
+        wire_protocol=wire_protocol,
+        adapter_id=wire_protocol.value,
+        configured_endpoint=configured_endpoint,
+        runtime_endpoint=_runtime_endpoint(provider, configured_endpoint, wire_protocol),
         protocol=protocol,
         policy=policy,
         compat=compat,
         source=source,
+        wire_source=wire_source,
+        source_scope=source_scope,
         warnings=tuple(warnings),
     )
 

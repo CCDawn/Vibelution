@@ -226,12 +226,12 @@ def test_agent_config_workspace_repairs_legacy_agent_model_ids(tmp_path, monkeyp
         return {
             "modelOptions": [
                 {
-                    "model_id": "relay_openai_gpt_5_5",
+                    "model_id": "relay_gpt_5_6_luna",
                     "source": "model_library",
                     "provider": {"id": "relay_openai", "kind": "relay", "compat_mode": "openai"},
                     "provider_kind": "relay",
-                    "model": "gpt-5.5",
-                    "label": "GPT-5.5 via relay",
+                    "model": "gpt-5.6-luna",
+                    "label": "Relay GPT-5.6 Luna",
                     "transport": "responses",
                     "details": {"transport": "responses"},
                     "api_key_env": "OPENAI_API_KEY",
@@ -255,7 +255,7 @@ def test_agent_config_workspace_repairs_legacy_agent_model_ids(tmp_path, monkeyp
 
     fake_llm = SimpleNamespace(
         model_library={
-            "relay_openai_gpt_5_5": {"model": "gpt-5.5"},
+            "relay_gpt_5_6_luna": {"model": "gpt-5.6-luna"},
             "xiaomi_mimo_v2_5_pro_token_plan": {"model": "mimo-v2.5-pro"},
         },
     )
@@ -277,7 +277,7 @@ def test_agent_config_workspace_repairs_legacy_agent_model_ids(tmp_path, monkeyp
     payload = agent_config_workspace_service.get_agent_config_workspace()
     by_id = {item["agentId"]: item for item in payload["agents"]}
 
-    assert by_id[gpt_agent["agentId"]]["llmBindings"]["dialogue"]["modelId"] == "relay_openai_gpt_5_5"
+    assert by_id[gpt_agent["agentId"]]["llmBindings"]["dialogue"]["modelId"] == "relay_gpt_5_6_luna"
     assert by_id[mimo_agent["agentId"]]["llmBindings"]["dialogue"]["modelId"] == "xiaomi_mimo_v2_5_pro_token_plan"
     assert not any(
         item["code"] == "unresolved_model_reference_dialogue"
@@ -290,7 +290,7 @@ def test_agent_config_workspace_repairs_legacy_agent_model_ids(tmp_path, monkeyp
 
     stored = json.loads((tmp_path / "workspace" / "agents" / "agents.json").read_text(encoding="utf-8"))
     stored_by_id = {item["agentId"]: item for item in stored["agents"]}
-    assert stored_by_id[gpt_agent["agentId"]]["llmBindings"]["dialogue"]["modelId"] == "relay_openai_gpt_5_5"
+    assert stored_by_id[gpt_agent["agentId"]]["llmBindings"]["dialogue"]["modelId"] == "relay_gpt_5_6_luna"
     assert stored_by_id[mimo_agent["agentId"]]["llmBindings"]["dialogue"]["modelId"] == "xiaomi_mimo_v2_5_pro_token_plan"
     assert stored_by_id[gpt_agent["agentId"]]["metadata"]["llmBindingModelIdRepairs"][-1]["legacyModelId"] == "gpt_5_5_gpt_5_5"
     assert stored_by_id[mimo_agent["agentId"]]["metadata"]["llmBindingModelIdRepairs"][-1]["legacyModelId"] == "mimo_v2_5_pro"

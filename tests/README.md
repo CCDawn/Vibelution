@@ -152,7 +152,39 @@ python tests/select_tests.py --from-git main --commands-only
 - 没有规则命中时，默认输出轻量 runner smoke、collect-only 和 `git diff --check`，帮助 Agent 先判断测试集合是否可收集。
 - 新增高频模块或拆分测试文件后，同步补充 `tests/test_matrix.yaml` 和 `tests/test_select_tests.py`。
 
-### 3.6 使用服务器分布式测试
+### 3.6 本地质量门
+
+`scripts/local_quality_gate.py` 有三个 mode，按任务阶段选择：
+
+- `commit`：由 pre-commit hook 自动调用，以 staged paths 驱动；diff check 与 Python Ruff 使用 Git index 中的 staged 内容。gate-definition 文件同时存在 staged 与 unstaged 内容时拒绝提交；gate-definition staged 时还会在当前 worktree 运行 focused self-test，因此未 stage 的测试或 `conftest.py` 可能影响结果。
+- `closeout --base main --claim-id <claim-id>`：只在内容已提交且 clean 的 task worktree 运行，绑定 claim、本地 `main` SHA、HEAD SHA、selector 命令和 merge preflight，并写入 `.runtime/quality_gates/<task-id>.json`。
+- `verify-manifest --manifest <path> --base main`：在进入 root local `main` fast-forward gate 前复核 manifest 的 schema、outcome、branch/worktree、main/HEAD/changed files、active claim、clean 状态、checks、allowlisted command 结果与 fast-forward ancestry。`passed` 是当前授权证据，不表示已经 merge。
+
+首次配置 hook 使用 `git config core.hooksPath .githooks`。`powershell -ExecutionPolicy Bypass -File scripts/doctor.ps1 -Json` 只读报告 `checks.git_hooks_path` 及固定修复命令，不会静默写 Git 配置。远端 CI 的 `workflow_dispatch` 可按需补充验证，但 remote push 不是默认本地闭环的一部分。
+
+Outcome 必须结合 mode 解释，每个组合只对应一个恢复动作：
+
+| Mode | Outcome | 操作 |
+| --- | --- | --- |
+| `commit` | `passed` | 当前 commit 轻门通过，可继续 commit；该 mode 不生成 manifest |
+| `commit` | `failed` | 修复 staged diff、staged Python Ruff 或 gate focused self-test 的首个失败后重试 commit |
+| `commit` | `gate_definition_dirty` | 整文件 stage gate-definition 或拆成独立 commit，再重试 commit |
+| `closeout` | `passed` | 复核生成的 manifest 后进入本地 main fast-forward gate |
+| `closeout` | `failed` | 先按当前 branch 修复非法 task branch/precondition；若已有失败命令，则按首个失败命令及其 `failureSummary` 修复后重跑 closeout |
+| `closeout` | `stale_main` | 在任务 worktree 合并最新本地 main，解决冲突并重跑 closeout |
+| `closeout` | `claim_conflict` | 修正或续期本任务 claim，不使用其他任务 claim，然后重跑 closeout |
+| `closeout` | `dirty_worktree` | 提交或撤回本任务未提交内容，使 task worktree clean 后重跑 closeout |
+| `closeout` | `merge_conflict` | 仅在任务 worktree 解决冲突并重跑 closeout |
+| `closeout` | `unsupported_validation_command` | 修正 matrix 为允许命令族，不放宽到 shell，然后重跑 closeout |
+| `verify-manifest` | `passed` | manifest 与当前 task branch/worktree/HEAD/changed files 一致，main 仍新鲜且是 task HEAD 祖先，claim、clean 状态、checks 与 commands 仍有效，可进入 merge gate |
+| `verify-manifest` | `failed` | manifest 不可读，或 schema/`outcome`/branch/worktree/HEAD/changed files/checks/commands 被篡改或不匹配；生成或选择正确 manifest，必要时重跑 closeout |
+| `verify-manifest` | `stale_main` | 当前本地 main 已变化或不再是 task HEAD 祖先；回任务 worktree 同步最新 main，并重跑 closeout 生成新 manifest |
+| `verify-manifest` | `claim_conflict` | manifest claim 已失效、缺失或不覆盖当前 changed files；修正或续期本任务 claim 后重跑 closeout |
+| `verify-manifest` | `dirty_worktree` | task worktree 在 closeout 后出现改动；提交或撤回本任务内容，使 worktree clean 后重跑 closeout |
+
+质量门只生成或复核证据，不执行 merge、claim release、junction/worktree/branch 删除。冲突和 `stale_main` 都回 task worktree 处理；root local `main` 仅在 clean 且 SHA 仍匹配时执行 `git merge --ff-only <task-branch>`，随后做最小 post-merge verification，并只清理本任务资源。
+
+### 3.7 使用服务器分布式测试
 
 服务器分布式用于高吞吐 Python 回归：
 
@@ -167,7 +199,7 @@ python scripts/remote_test_runner.py --backend docker --distributed
 - 不覆盖前端 Vitest、前端 build、Launcher/runtime 本地生命周期、Windows-only、真实端口/进程、operator config、Git 副作用测试。
 - 远端失败时先看 `logs/remote_test_runs/<run-id>/remote-test.log` 和本地 `local-test.log`，定位首个失败分片后再聚焦复跑。
 
-### 3.7 使用 prompt_debugger.py（工具变更时必用）
+### 3.8 使用 prompt_debugger.py（工具变更时必用）
 
 验证模型能够正确理解并调用工具。**每次添加或修改工具后必须运行**。
 
@@ -188,7 +220,7 @@ python tests/prompt_debugger.py "你的测试 prompt"
 - 模型在适当场景下主动调用该工具
 - 无幻觉调用（不该调用时不调用）
 
-### 3.8 独立脚本 simulate_lifecycle.py
+### 3.9 独立脚本 simulate_lifecycle.py
 
 不调用大模型，验证生命周期防断裂加固：
 

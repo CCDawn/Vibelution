@@ -156,7 +156,8 @@ AI_SEARCH_ROLE_PROMPT_TEMPLATE_IDS = agent_role_tool_profile_service.AI_SEARCH_R
 KNOWLEDGE_EXPANSION_ROLE_PROMPT_TEMPLATE_IDS = agent_role_tool_profile_service.KNOWLEDGE_EXPANSION_ROLE_PROMPT_TEMPLATE_IDS
 AGENT_LLM_BINDING_SLOTS = AGENT_LLM_SLOTS
 LEGACY_AGENT_MODEL_ID_ALIASES = {
-    "gpt_5_5_gpt_5_5": "relay_openai_gpt_5_5",
+    "relay_openai_gpt_5_5": "relay_gpt_5_6_luna",
+    "gpt_5_5_gpt_5_5": "relay_gpt_5_6_luna",
     "mimo_v2_5_pro": "xiaomi_mimo_v2_5_pro_token_plan",
 }
 LEGACY_AGENT_PRIMARY_MODEL_IDS = {"model-primary"}

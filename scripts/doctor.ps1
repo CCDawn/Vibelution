@@ -22,6 +22,11 @@ function New-CheckResult {
 $resolvedRoot = (Resolve-Path $ProjectRoot).Path
 $expectedPython = Join-Path $resolvedRoot ".venv\Scripts\python.exe"
 $selectedPython = $expectedPython
+$expectedHooksPath = ".githooks"
+$configuredHooksPath = (& git -C $resolvedRoot config --get core.hooksPath 2>$null)
+$hooksPathOk = ($LASTEXITCODE -eq 0) -and (($configuredHooksPath -join "").Trim() -eq $expectedHooksPath)
+$preCommitHook = Join-Path $resolvedRoot ".githooks\pre-commit"
+$qualityGateScript = Join-Path $resolvedRoot "scripts\local_quality_gate.py"
 
 if (-not (Test-Path $selectedPython)) {
     $pythonCmd = Get-Command python -ErrorAction SilentlyContinue
@@ -49,9 +54,20 @@ foreach ($moduleName in $criticalModules) {
 }
 $pytestVersion = & $selectedPython -m pytest --version
 $pytestOk = $LASTEXITCODE -eq 0
+$ruffVersion = & $selectedPython -m ruff --version 2>$null
+$ruffOk = ($LASTEXITCODE -eq 0)
 
 $importChecksOk = (($imports | Where-Object { -not $_.ok }).Count -eq 0)
-$allChecksOk = $venvOk -and $pytestOk -and $importChecksOk
+$preCommitHookOk = Test-Path $preCommitHook
+$qualityGateScriptOk = Test-Path $qualityGateScript
+$allChecksOk = (
+    $venvOk -and
+    $pytestOk -and
+    $importChecksOk -and
+    $preCommitHookOk -and
+    $qualityGateScriptOk -and
+    $ruffOk
+)
 
 $report = [PSCustomObject]@{
     ok = $allChecksOk
@@ -71,6 +87,25 @@ $report = [PSCustomObject]@{
             ok = $pytestOk
             version = ($pytestVersion -join "`n")
         }
+        git_hooks_path = [PSCustomObject]@{
+            ok = $hooksPathOk
+            expected = $expectedHooksPath
+            configured = (($configuredHooksPath -join "").Trim())
+            repair = "git config core.hooksPath .githooks"
+        }
+        pre_commit_hook = [PSCustomObject]@{
+            ok = $preCommitHookOk
+            path = $preCommitHook
+        }
+        local_quality_gate = [PSCustomObject]@{
+            ok = $qualityGateScriptOk
+            path = $qualityGateScript
+        }
+        ruff = [PSCustomObject]@{
+            ok = $ruffOk
+            version = ($ruffVersion -join "`n")
+            executable = $selectedPython
+        }
     }
 }
 
@@ -89,6 +124,11 @@ foreach ($item in $report.checks.imports) {
 }
 
 Write-Host "Pytest      : $(if ($report.checks.pytest_module.ok) { $report.checks.pytest_module.version } else { 'FAIL' })"
+Write-Host "Ruff        : $(if ($report.checks.ruff.ok) { $report.checks.ruff.version } else { 'FAIL' })"
+Write-Host "Hooks path  : configured='$($report.checks.git_hooks_path.configured)' expected='$($report.checks.git_hooks_path.expected)'"
+if (-not $report.checks.git_hooks_path.ok) {
+    Write-Host "Repair      : $($report.checks.git_hooks_path.repair)"
+}
 if ($report.ok) {
     exit 0
 }

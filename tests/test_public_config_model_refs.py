@@ -112,14 +112,14 @@ def test_claude_opus_4_7_model_ref_template_omits_temperature():
 def test_current_prompt_cache_modes_follow_model_library_config():
     public_config = load_public_config()
     public_config["llm"]["profiles"]["primary"] = {
-        "model_ref": "relay_openai_gpt_5_5",
+        "model_ref": "relay_gpt_5_6_luna",
         "overrides": {},
     }
 
     effective = build_effective_config(public_config)
     profile = effective.llm.get_profile("primary")
 
-    assert profile.model == "gpt-5.5"
+    assert profile.model == "gpt-5.6-luna"
     assert profile.prompt_cache.mode == "automatic"
 
 
