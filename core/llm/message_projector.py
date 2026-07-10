@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Project canonical model messages to provider-neutral OpenAI-style dicts."""
+"""OpenAI Chat Completions message projection compatibility helpers."""
 
 from __future__ import annotations
 
@@ -25,6 +25,7 @@ def message_to_openai_dict(
     preserve_structured_content: bool = False,
     preserve_reasoning_content: bool = False,
 ) -> Dict[str, Any]:
+    """Project one compatibility message into OpenAI Chat Completions shape."""
     def content_value(value: Any) -> Any:
         if preserve_structured_content and isinstance(value, list):
             return value
