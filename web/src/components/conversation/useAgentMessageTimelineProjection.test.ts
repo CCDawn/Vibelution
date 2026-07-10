@@ -194,6 +194,26 @@ describe("projectAgentMessageTimelineMessages", () => {
           operationIds: ["read-file-operation"],
         },
       ],
+      codexTranscript: {
+        version: 1,
+        source: "native",
+        messageId: "live-overlay",
+        cells: [
+          {
+            id: "overlay-tool-cell",
+            kind: "tool_call",
+            messageId: "live-overlay",
+            status: "completed",
+            tone: "neutral",
+            title: "read_file_tool",
+            summary: "保留 overlay 原生工具过程",
+          },
+        ],
+        toolCalls: [],
+        terminalOperations: [],
+        terminalSessions: [],
+        modelObservations: [],
+      },
       metadata: { kind: "session_live_overlay", turnId: "live:turn-duplicate" },
     });
     const committed = assistantMessage("committed-answer", {
@@ -207,6 +227,25 @@ describe("projectAgentMessageTimelineMessages", () => {
           text: "你好！我在。需要我帮你做什么？",
         },
       ],
+      codexTranscript: {
+        version: 1,
+        source: "native",
+        messageId: "committed-answer",
+        cells: [
+          {
+            id: "committed-answer-cell",
+            kind: "assistant_markdown",
+            messageId: "committed-answer",
+            status: "completed",
+            tone: "neutral",
+            text: "你好！我在。需要我帮你做什么？",
+          },
+        ],
+        toolCalls: [],
+        terminalOperations: [],
+        terminalSessions: [],
+        modelObservations: [],
+      },
       metadata: { turnId: "turn-duplicate" },
     });
 
@@ -222,6 +261,11 @@ describe("projectAgentMessageTimelineMessages", () => {
     ]);
     expect(projection.messages[0].feedbackEvents?.map((event) => event.summary)).toEqual([
       "保留 overlay 独有过程数据",
+    ]);
+    expect(projection.messages[0].codexTranscript?.messageId).toBe("committed-answer");
+    expect(projection.messages[0].codexTranscript?.cells.map((cell) => cell.id)).toEqual([
+      "overlay-tool-cell",
+      "committed-answer-cell",
     ]);
     expect(projection.rowIdentities).toHaveLength(1);
   });
