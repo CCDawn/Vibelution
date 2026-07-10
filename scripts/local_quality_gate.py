@@ -10,6 +10,7 @@ import subprocess
 import sys
 import time
 from dataclasses import asdict, dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal, Sequence
 
@@ -25,8 +26,23 @@ Outcome = Literal[
 ]
 
 FATAL_RUFF_RULES = "E9,F63,F7,F82"
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+GUARD_SCRIPT = (
+    Path.home()
+    / ".codex"
+    / "skills"
+    / "ccdawn-dawn-agent-html-memory"
+    / "scripts"
+    / "agent_work_guard.py"
+)
+MANIFEST_SCHEMA_VERSION = 1
 PROJECT_PYTHON_NAME = Path(".venv") / "Scripts" / "python.exe"
 SHELL_META = re.compile(r"[|&;<>\r\n]|\$\(|`")
+GATE_SELF_TEST_COMMAND = (
+    ".\\.venv\\Scripts\\python.exe -m pytest "
+    "tests/test_local_quality_gate.py tests/test_ci_workflow_contract.py "
+    "tests/test_environment_doctor.py tests/test_select_tests.py -q"
+)
 GATE_DEFINITION_FILES = frozenset(
     {
         ".githooks/pre-commit",
@@ -184,8 +200,8 @@ def staged_blob(root: Path, path: str) -> str:
 
 def summarize_failure(completed: subprocess.CompletedProcess[str], subject: str) -> str:
     raw = completed.stderr.strip() or completed.stdout.strip() or "command failed"
-    first_line = raw.splitlines()[0][:300]
-    return f"{subject}: {first_line}"
+    first_line = raw.splitlines()[0]
+    return f"{subject}: {first_line}"[:300]
 
 
 def measured(
@@ -215,6 +231,290 @@ def execute_command(spec: CommandSpec) -> ProcessResult:
     if Path(argv[0]) == PROJECT_PYTHON_NAME:
         argv[0] = str((spec.cwd / PROJECT_PYTHON_NAME).resolve())
     return measured(spec.kind, argv, spec.cwd, subject=spec.kind)
+
+
+def current_branch(root: Path) -> str:
+    branches = git_lines(root, "branch", "--show-current")
+    return branches[0] if branches else ""
+
+
+def rev_parse(root: Path, revision: str) -> str:
+    return git_lines(root, "rev-parse", revision)[0]
+
+
+def changed_files(root: Path, base: str) -> list[str]:
+    return [
+        normalize_path(path)
+        for path in git_lines(root, "diff", "--name-only", f"{base}...HEAD")
+    ]
+
+
+def main_worktree(root: Path, base: str) -> Path:
+    completed = run_process(["git", "worktree", "list", "--porcelain"], root)
+    if completed.returncode != 0:
+        raise RuntimeError(completed.stderr.strip() or "cannot list worktrees")
+    blocks = completed.stdout.strip().split("\n\n")
+    expected_branch = f"branch refs/heads/{base}"
+    for block in blocks:
+        lines = block.splitlines()
+        if expected_branch in lines:
+            path_line = next(line for line in lines if line.startswith("worktree "))
+            return Path(path_line.removeprefix("worktree ")).resolve()
+    return root.resolve()
+
+
+def read_guard_status(project_root: Path) -> dict[str, object]:
+    completed = run_process(
+        [sys.executable, str(GUARD_SCRIPT), str(project_root), "status", "--json"],
+        project_root,
+    )
+    if completed.returncode != 0:
+        raise RuntimeError(completed.stderr.strip() or "guard status failed")
+    loaded = json.loads(completed.stdout)
+    if not isinstance(loaded, dict):
+        raise RuntimeError("guard status must be an object")
+    return loaded
+
+
+def scope_covers(scope: str, changed_path: str) -> bool:
+    normalized_scope = normalize_path(scope)
+    normalized_path = normalize_path(changed_path)
+    if normalized_scope == "repo":
+        return True
+    if normalized_scope.endswith("/**"):
+        prefix = normalized_scope[:-3]
+        return normalized_path == prefix or normalized_path.startswith(prefix + "/")
+    return normalized_scope == normalized_path
+
+
+def validate_claim(project_root: Path, claim_id: str, files: Sequence[str]) -> bool:
+    status = read_guard_status(project_root)
+    claims = status.get("claims", [])
+    if not isinstance(claims, list):
+        return False
+    claim = next(
+        (
+            item
+            for item in claims
+            if isinstance(item, dict)
+            and item.get("id") == claim_id
+            and item.get("status") == "active"
+        ),
+        None,
+    )
+    if claim is None:
+        return False
+    scopes = claim.get("scopes", [])
+    return isinstance(scopes, list) and all(
+        any(scope_covers(str(scope), path) for scope in scopes) for path in files
+    )
+
+
+def selected_validation(files: Sequence[str]) -> dict[str, object]:
+    from tests.select_tests import load_matrix, select_tests
+
+    return select_tests(list(files), load_matrix())
+
+
+def utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def bounded_failure_summary(summary: str) -> str:
+    return summary.splitlines()[0][:300] if summary else ""
+
+
+def manifest_payload(
+    *,
+    task_id: str,
+    branch: str,
+    root: Path,
+    claim_id: str,
+    validated_main_sha: str,
+    head_sha: str,
+    files: Sequence[str],
+    commands: Sequence[ProcessResult],
+    checks: dict[str, bool],
+    outcome: Outcome,
+) -> dict[str, object]:
+    return {
+        "schemaVersion": MANIFEST_SCHEMA_VERSION,
+        "taskId": task_id,
+        "branch": branch,
+        "worktree": str(root),
+        "claimId": claim_id,
+        "validatedMainSha": validated_main_sha,
+        "headSha": head_sha,
+        "changedFiles": list(files),
+        "commands": [
+            {
+                "kind": command.kind,
+                "argv": command.argv,
+                "cwd": command.cwd,
+                "exitCode": command.exit_code,
+                "durationMs": command.duration_ms,
+                "status": command.status,
+                "failureSummary": bounded_failure_summary(command.failure_summary),
+            }
+            for command in commands
+        ],
+        "checks": checks,
+        "outcome": outcome,
+        "generatedAt": utc_now(),
+    }
+
+
+def write_manifest(root: Path, task_id: str, payload: dict[str, object]) -> Path:
+    directory = root / ".runtime" / "quality_gates"
+    directory.mkdir(parents=True, exist_ok=True)
+    safe_task_id = re.sub(r"[^A-Za-z0-9_.-]+", "-", task_id).strip("-") or "task"
+    path = directory / f"{safe_task_id}.json"
+    path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    return path
+
+
+def merge_preflight(root: Path, base: str, head: str) -> bool:
+    completed = run_process(["git", "merge-tree", "--write-tree", base, head], root)
+    return completed.returncode == 0
+
+
+def run_closeout(root: Path, base: str, claim_id: str) -> GateResult:
+    root = repository_root(root)
+    branch = current_branch(root)
+    task_id = branch.removeprefix("codex/") if branch else "unknown-task"
+    commands: list[ProcessResult] = []
+    files: list[str] = []
+    validated_main_sha = ""
+    head_sha = rev_parse(root, "HEAD")
+    checks = {
+        "worktreeClean": False,
+        "claimValid": False,
+        "mergePreflight": False,
+        "commandsAllowlisted": False,
+    }
+
+    def finish(outcome: Outcome) -> GateResult:
+        payload = manifest_payload(
+            task_id=task_id,
+            branch=branch,
+            root=root,
+            claim_id=claim_id,
+            validated_main_sha=validated_main_sha,
+            head_sha=head_sha,
+            files=files,
+            commands=commands,
+            checks=checks,
+            outcome=outcome,
+        )
+        path = write_manifest(root, task_id, payload)
+        return GateResult(
+            outcome=outcome,
+            exit_code=0 if outcome == "passed" else 1,
+            commands=commands,
+            manifest_path=path,
+        )
+
+    if not branch or branch == base or not branch.startswith("codex/"):
+        return finish("failed")
+    if git_lines(root, "status", "--porcelain"):
+        return finish("dirty_worktree")
+    checks["worktreeClean"] = True
+
+    main_root = main_worktree(root, base)
+    main_revision = "HEAD" if current_branch(main_root) == base else base
+    validated_main_sha = rev_parse(main_root, main_revision)
+    files = changed_files(root, base)
+    checks["claimValid"] = validate_claim(main_root, claim_id, files)
+    if not checks["claimValid"]:
+        return finish("claim_conflict")
+
+    selection = selected_validation(files)
+    raw_commands = selection.get("commands", [])
+    if not isinstance(raw_commands, list):
+        return finish("unsupported_validation_command")
+    if (
+        GATE_DEFINITION_FILES.intersection(files)
+        and GATE_SELF_TEST_COMMAND not in raw_commands
+    ):
+        raw_commands.append(GATE_SELF_TEST_COMMAND)
+    try:
+        specs = [parse_allowed_command(str(command), root) for command in raw_commands]
+    except UnsupportedValidationCommand:
+        return finish("unsupported_validation_command")
+    checks["commandsAllowlisted"] = True
+
+    def main_is_fresh() -> bool:
+        return rev_parse(main_root, main_revision) == validated_main_sha
+
+    python_files = [path for path in files if path.endswith(".py")]
+    if python_files:
+        if not main_is_fresh():
+            return finish("stale_main")
+        lint = measured(
+            "changed-python-ruff",
+            [
+                sys.executable,
+                "-m",
+                "ruff",
+                "check",
+                "--select",
+                FATAL_RUFF_RULES,
+                *python_files,
+            ],
+            root,
+            subject="changed Python",
+        )
+        commands.append(lint)
+        if lint.status == "failed":
+            return finish("failed")
+        if not main_is_fresh():
+            return finish("stale_main")
+
+    for spec in specs:
+        if not main_is_fresh():
+            return finish("stale_main")
+        result = execute_command(spec)
+        commands.append(result)
+        if result.status == "failed":
+            return finish("failed")
+        if not main_is_fresh():
+            return finish("stale_main")
+
+    checks["mergePreflight"] = merge_preflight(root, base, "HEAD")
+    if not checks["mergePreflight"]:
+        return finish("merge_conflict")
+    if not main_is_fresh():
+        return finish("stale_main")
+    if rev_parse(root, "HEAD") != head_sha:
+        return finish("failed")
+    if not validate_claim(main_root, claim_id, files):
+        checks["claimValid"] = False
+        return finish("claim_conflict")
+    return finish("passed")
+
+
+def verify_manifest(path: Path, root: Path, base: str) -> GateResult:
+    root = repository_root(root)
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return GateResult(outcome="failed", exit_code=1, manifest_path=path)
+    if not isinstance(payload, dict):
+        return GateResult(outcome="failed", exit_code=1, manifest_path=path)
+    if payload.get("schemaVersion") != MANIFEST_SCHEMA_VERSION:
+        return GateResult(outcome="failed", exit_code=1, manifest_path=path)
+    if payload.get("outcome") != "passed":
+        return GateResult(outcome="failed", exit_code=1, manifest_path=path)
+    main_root = main_worktree(root, base)
+    main_revision = "HEAD" if current_branch(main_root) == base else base
+    if payload.get("validatedMainSha") != rev_parse(main_root, main_revision):
+        return GateResult(outcome="stale_main", exit_code=1, manifest_path=path)
+    if payload.get("headSha") != rev_parse(root, "HEAD"):
+        return GateResult(outcome="failed", exit_code=1, manifest_path=path)
+    return GateResult(outcome="passed", exit_code=0, manifest_path=path)
 
 
 def gate_definition_is_dirty(root: Path, staged: Sequence[str]) -> bool:
@@ -291,6 +591,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Vibelution local quality gate")
     subparsers = parser.add_subparsers(dest="mode", required=True)
     subparsers.add_parser("commit")
+    closeout = subparsers.add_parser("closeout")
+    closeout.add_argument("--base", default="main")
+    closeout.add_argument("--claim-id", required=True)
+    verify = subparsers.add_parser("verify-manifest")
+    verify.add_argument("--manifest", type=Path, required=True)
+    verify.add_argument("--base", default="main")
     return parser
 
 
@@ -298,9 +604,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.mode == "commit":
         result = run_commit_gate(Path.cwd())
-        print(json.dumps(asdict(result), ensure_ascii=False, default=str))
-        return result.exit_code
-    raise AssertionError(f"unhandled mode: {args.mode}")
+    elif args.mode == "closeout":
+        result = run_closeout(Path.cwd(), args.base, args.claim_id)
+    elif args.mode == "verify-manifest":
+        result = verify_manifest(args.manifest, Path.cwd(), args.base)
+    else:
+        raise AssertionError(f"unhandled mode: {args.mode}")
+    print(json.dumps(asdict(result), ensure_ascii=False, default=str))
+    return result.exit_code
 
 
 if __name__ == "__main__":
