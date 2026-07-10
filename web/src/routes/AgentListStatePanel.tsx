@@ -55,7 +55,7 @@ export function AgentListStatePanel({
   }
 
   if (isPending && !hasWorkspace) {
-    return <VEmptyState icon={<RefreshCw size={22} />} title={copy.loading} />;
+    return <VEmptyState aria-busy={isPending && !hasWorkspace || undefined} icon={<RefreshCw size={22} />} title={copy.loading} />;
   }
 
   if (visibleAgentCount === 0) {

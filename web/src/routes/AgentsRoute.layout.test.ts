@@ -286,6 +286,22 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("staleTime: 10_000");
   });
 
+  it("binds the initial Agent list to the active summary/full-workspace data sources", () => {
+    expect(routeSource).toContain("agentWorkspaceInitialLoading");
+    expect(routeSource).toContain("agentWorkspaceInitialError");
+    expect(routeSource).toContain("agentSummaryQuery.isError");
+    expect(routeSource).toContain("agentSummaryQuery.isPending");
+    expect(routeSource).toContain("<VLoadingValue");
+    expect(routeSource).not.toContain("isError: workspaceQuery.isError,");
+    expect(routeSource).not.toContain("isPending: workspaceQuery.isPending,");
+  });
+
+  it("keeps real zero distinct from an unresolved Agent summary", () => {
+    expect(routeSource).toContain("agentSummaryInitialLoading");
+    expect(routeSource).toContain("loadingAgentMetricValue");
+    expect(routeSource).toContain("summary?.activeAgentCount ?? 0");
+  });
+
   it("uses the lightweight shell language source instead of the full app dictionary", () => {
     expect(routeSource).toContain("useShellI18n");
     expect(routeSource).toContain("const { lang } = useShellI18n()");
