@@ -6,6 +6,7 @@ import json
 import os
 import re
 import shlex
+import shutil
 import subprocess
 import sys
 import time
@@ -260,16 +261,23 @@ def measured(
 
 
 def execute_command(spec: CommandSpec) -> ProcessResult:
-    argv = list(spec.argv)
-    if Path(argv[0]) == PROJECT_PYTHON_NAME:
-        argv[0] = str((spec.cwd / PROJECT_PYTHON_NAME).resolve())
-    return measured(spec.kind, argv, spec.cwd, subject=spec.kind)
+    materialized = materialize_command(spec)
+    return measured(
+        materialized.kind,
+        materialized.argv,
+        materialized.cwd,
+        subject=materialized.kind,
+    )
 
 
 def materialize_command(spec: CommandSpec) -> CommandSpec:
     argv = list(spec.argv)
     if Path(argv[0]) == PROJECT_PYTHON_NAME:
         argv[0] = str((spec.cwd / PROJECT_PYTHON_NAME).resolve())
+    elif os.name == "nt" and str(argv[0]).strip().lower() == "npm":
+        npm_launcher = shutil.which("npm.cmd") or shutil.which("npm")
+        if npm_launcher:
+            argv[0] = npm_launcher
     return CommandSpec(spec.kind, argv, spec.cwd)
 
 
