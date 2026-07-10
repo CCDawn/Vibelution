@@ -1,4 +1,4 @@
-import { type ComponentPropsWithoutRef } from "react";
+import { type ComponentPropsWithoutRef, type ReactNode } from "react";
 
 import { type VuiTone } from "../renderers/heroui/heroVariants";
 
@@ -7,7 +7,7 @@ export type VMetricStripMetric = {
   id?: string;
   label: string;
   tone?: VuiTone;
-  value: string | number;
+  value: ReactNode;
 };
 
 export type VMetricStripStatus = {
