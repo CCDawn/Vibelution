@@ -273,6 +273,20 @@ def materialize_command(spec: CommandSpec) -> CommandSpec:
     return CommandSpec(spec.kind, argv, spec.cwd)
 
 
+def bind_closeout_command(
+    spec: CommandSpec,
+    validated_main_sha: str,
+    head_sha: str,
+) -> CommandSpec:
+    if spec.kind != "diff-check":
+        return spec
+    return CommandSpec(
+        spec.kind,
+        [*spec.argv, f"{validated_main_sha}...{head_sha}"],
+        spec.cwd,
+    )
+
+
 def current_branch(root: Path) -> str:
     branches = git_lines(root, "branch", "--show-current")
     return branches[0] if branches else ""
@@ -286,6 +300,21 @@ def changed_files(root: Path, base: str) -> list[str]:
     return [
         normalize_path(path)
         for path in git_lines(root, "diff", "--name-only", f"{base}...HEAD")
+    ]
+
+
+def changed_python_files(root: Path, base_sha: str, head_sha: str) -> list[str]:
+    return [
+        path
+        for path in git_paths(
+            root,
+            "diff",
+            "--name-only",
+            "--diff-filter=ACMR",
+            "-z",
+            f"{base_sha}...{head_sha}",
+        )
+        if path.endswith(".py")
     ]
 
 
@@ -440,7 +469,12 @@ def is_ancestor(root: Path, ancestor: str, descendant: str) -> bool:
     return completed.returncode == 0
 
 
-def expected_closeout_commands(root: Path, files: Sequence[str]) -> list[CommandSpec]:
+def expected_closeout_commands(
+    root: Path,
+    files: Sequence[str],
+    validated_main_sha: str,
+    head_sha: str,
+) -> list[CommandSpec]:
     selection = selected_validation(files)
     raw_commands = selection.get("commands", [])
     if not isinstance(raw_commands, list):
@@ -453,7 +487,7 @@ def expected_closeout_commands(root: Path, files: Sequence[str]) -> list[Command
         selected_commands.append(GATE_SELF_TEST_COMMAND)
 
     specs: list[CommandSpec] = []
-    python_files = [path for path in files if path.endswith(".py")]
+    python_files = changed_python_files(root, validated_main_sha, head_sha)
     if python_files:
         specs.append(
             CommandSpec(
@@ -471,7 +505,12 @@ def expected_closeout_commands(root: Path, files: Sequence[str]) -> list[Command
             )
         )
     specs.extend(
-        parse_allowed_command(str(command), root) for command in selected_commands
+        bind_closeout_command(
+            parse_allowed_command(str(command), root),
+            validated_main_sha,
+            head_sha,
+        )
+        for command in selected_commands
     )
     return [materialize_command(spec) for spec in specs]
 
@@ -550,7 +589,7 @@ def run_closeout(root: Path, base: str, claim_id: str) -> GateResult:
         return finish("claim_conflict")
 
     try:
-        specs = expected_closeout_commands(root, files)
+        specs = expected_closeout_commands(root, files, validated_main_sha, head_sha)
     except UnsupportedValidationCommand:
         return finish("unsupported_validation_command")
     checks["commandsAllowlisted"] = True
@@ -650,7 +689,12 @@ def verify_manifest(path: Path, root: Path, base: str) -> GateResult:
     ):
         return GateResult(outcome="failed", exit_code=1, manifest_path=path)
     try:
-        expected_commands = expected_closeout_commands(root, files)
+        expected_commands = expected_closeout_commands(
+            root,
+            files,
+            str(payload["validatedMainSha"]),
+            str(payload["headSha"]),
+        )
     except UnsupportedValidationCommand:
         return GateResult(outcome="failed", exit_code=1, manifest_path=path)
     if not manifest_commands_are_valid(payload.get("commands"), expected_commands):
