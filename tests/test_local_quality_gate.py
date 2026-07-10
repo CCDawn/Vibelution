@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from scripts import local_quality_gate as gate
+from tests import select_tests
 
 
 def test_pre_commit_is_thin_adapter() -> None:
@@ -231,6 +232,28 @@ def test_parse_allowed_command(
     assert spec.cwd == git_repo
 
 
+def test_local_quality_gate_matrix_command_matches_self_test_and_allowlist(
+    git_repo: Path,
+) -> None:
+    matrix = select_tests.load_matrix()
+    rule = next(rule for rule in matrix["rules"] if rule["id"] == "local-quality-gate")
+
+    assert rule["commands"] == [gate.GATE_SELF_TEST_COMMAND]
+    spec = gate.parse_allowed_command(rule["commands"][0], git_repo)
+    assert spec.kind == "pytest"
+    assert spec.argv == [
+        str(gate.PROJECT_PYTHON_NAME),
+        "-m",
+        "pytest",
+        "tests/test_local_quality_gate.py",
+        "tests/test_ci_workflow_contract.py",
+        "tests/test_environment_doctor.py",
+        "tests/test_select_tests.py",
+        "-q",
+    ]
+    assert spec.cwd == git_repo
+
+
 @pytest.mark.parametrize(
     "command",
     [
@@ -292,6 +315,11 @@ def test_closeout_writes_bounded_passed_manifest(
         gate,
         "read_guard_status",
         lambda root: active_claim("claim-test", ["README.md"]),
+    )
+    monkeypatch.setattr(
+        gate,
+        "selected_validation",
+        lambda changed: {"commands": ["git diff --check"]},
     )
 
     result = gate.run_closeout(git_repo, "main", "claim-test")
@@ -543,6 +571,11 @@ def test_closeout_reads_claim_from_linked_main_worktree(
         return active_claim("claim-test", ["README.md"])
 
     monkeypatch.setattr(gate, "read_guard_status", guard_status)
+    monkeypatch.setattr(
+        gate,
+        "selected_validation",
+        lambda changed: {"commands": ["git diff --check"]},
+    )
 
     result = gate.run_closeout(task_worktree, "main", "claim-test")
 
