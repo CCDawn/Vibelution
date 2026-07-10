@@ -380,7 +380,40 @@ Expected: PASS; all prior scenarios remain and the total is exactly 60.
     $root = "C:\Users\17533\Desktop\Vibelution"
     $worktree = "C:\Users\17533\Desktop\Vibelution-worktrees\heroui-frontend-unification-phase-3b"
     $branch = "codex/heroui-frontend-unification-phase-3b"
-    $claim = & "$root\.venv\Scripts\python.exe" "C:\Users\17533\.codex\skills\ccdawn-dawn-agent-html-memory\scripts\agent_work_guard.py" $root claim --lane web-workbench-surface --scope web/src/components/vui/forms/VStringSelect.tsx --scope web/src/components/vui/index.ts --scope web/src/routes/EvolutionRoute.tsx --scope web/src/routes/ConfigRoute.tsx --scope web/src/visual-regression/workbenchVisualMatrix.ts --agent codex-heroui-phase3b --task "Implement HeroUI Phase 3B" --ttl-minutes 240 --json | ConvertFrom-Json
+    $scopes = @(
+      "web/src/components/vui/forms/VStringSelect.tsx",
+      "web/src/components/vui/forms/VStringSelect.test.tsx",
+      "web/src/components/vui/index.ts",
+      "web/src/routes/EvolutionRoute.tsx",
+      "web/src/routes/EvolutionRoute.styles.ts",
+      "web/src/routes/EvolutionActiveRunMonitorPanel.tsx",
+      "web/src/routes/EvolutionActiveRunMonitorPanel.styles.ts",
+      "web/src/routes/EvolutionProposalActionBandsPanel.tsx",
+      "web/src/routes/EvolutionProposalActionBandsPanel.styles.ts",
+      "web/src/routes/EvolutionRunRecordsPanel.tsx",
+      "web/src/routes/EvolutionRunRecordsPanel.styles.ts",
+      "web/src/routes/EvolutionRoute.layout.test.ts",
+      "web/src/routes/ConfigRoute.tsx",
+      "web/src/routes/ConfigRoute.styles.ts",
+      "web/src/routes/ConfigModelLibraryPanel.tsx",
+      "web/src/routes/ConfigModelLibraryPanel.styles.ts",
+      "web/src/routes/ConfigDraftPanel.tsx",
+      "web/src/routes/ConfigDraftPanel.styles.ts",
+      "web/src/routes/ConfigOverviewPanel.tsx",
+      "web/src/routes/ConfigOverviewPanel.styles.ts",
+      "web/src/routes/ConfigRuntimePanel.tsx",
+      "web/src/routes/ConfigRuntimePanel.styles.ts",
+      "web/src/routes/ConfigHealthDiagnosticsPanel.tsx",
+      "web/src/routes/ConfigHealthDiagnosticsPanel.styles.ts",
+      "web/src/routes/ConfigWorkspacePlaceholderPanel.tsx",
+      "web/src/routes/ConfigWorkspacePlaceholderPanel.styles.ts",
+      "web/src/routes/ConfigRoute.layout.test.ts",
+      "web/src/visual-regression/workbenchVisualMatrix.ts",
+      "web/src/visual-regression/workbenchVisualMatrix.test.ts"
+    )
+    $claimArgs = @($root, "claim", "--lane", "web-workbench-surface")
+    foreach ($scope in $scopes) { $claimArgs += @("--scope", $scope) }
+    $claim = & "$root\.venv\Scripts\python.exe" "C:\Users\17533\.codex\skills\ccdawn-dawn-agent-html-memory\scripts\agent_work_guard.py" @claimArgs --agent codex-heroui-phase3b --task "Implement HeroUI Phase 3B" --ttl-minutes 240 --json | ConvertFrom-Json
     git -C $root worktree add $worktree -b $branch main
 
 Expected: a non-overlapping claim and an isolated branch based on the then-current local main.
