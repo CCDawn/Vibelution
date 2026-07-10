@@ -220,6 +220,11 @@ def test_opencode_zen_effective_model_rule_beats_profile_default_transport():
         provider,
         model_entry={"modelId": "zen-qwen", "model": "qwen3-coder"},
     )
+    opus_route = resolve_model_protocol(
+        profile,
+        provider,
+        model_entry={"modelId": "zen-opus", "model": "opus-4"},
+    )
 
     assert gpt_route.effective_model == "gpt-5.5-codex"
     assert gpt_route.wire_protocol == WireProtocol.RESPONSES
@@ -230,6 +235,8 @@ def test_opencode_zen_effective_model_rule_beats_profile_default_transport():
     assert qwen_route.source_scope == "provider_model"
     assert qwen_route.configured_endpoint == "https://opencode.ai/zen/v1"
     assert qwen_route.runtime_endpoint == "https://opencode.ai/zen"
+    assert opus_route.wire_protocol == WireProtocol.ANTHROPIC_MESSAGES
+    assert opus_route.runtime_endpoint == "https://opencode.ai/zen"
     assert provider.base_url == "https://opencode.ai/zen/v1"
 
 
