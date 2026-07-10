@@ -23,6 +23,12 @@ export { VNativeInput, type VNativeInputProps } from "./forms/VNativeInput";
 export { VNativeSelect, type VNativeSelectProps } from "./forms/VNativeSelect";
 export { VNativeTextarea, type VNativeTextareaProps } from "./forms/VNativeTextarea";
 export { VSelect, type VSelectOption, type VSelectProps } from "./forms/VSelect";
+export {
+  VStringSelect,
+  resolveStringSelectChange,
+  type VStringSelectOption,
+  type VStringSelectProps,
+} from "./forms/VStringSelect";
 export { VTextarea, type VTextareaProps } from "./forms/VTextarea";
 export { VActionGroup, type VActionGroupProps } from "./layout/VActionGroup";
 export {
