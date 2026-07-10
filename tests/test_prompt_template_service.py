@@ -356,7 +356,7 @@ def test_prompt_template_repair_upgrades_builtin_challenge_stage_prompt_content(
     prompt_template_service.repair_prompt_templates()
     detail = prompt_template_service.get_prompt_template("prompt-source-extractor")
 
-    assert detail["metadata"]["builtinContentVersion"] == prompt_template_service.CHALLENGE_CUP_STAGE_TASK_PROMPT_VERSION
+    assert detail["metadata"]["builtinContentVersion"] == prompt_template_service.SOURCE_COLLECTION_STAGE_TOOL_PROTOCOL_VERSION
     assert "资料提炼阶段" in detail["content"]
     assert "source_collection_stage_writeback_tool" in detail["content"]
     assert "candidateExtractions" in detail["content"]
@@ -381,6 +381,23 @@ def test_source_extractor_prompt_requires_candidate_paging_and_structured_decisi
     assert "系统会按真实 candidateId/recordId 累计上一批结果" in detail["content"]
     assert "资料入库/知识库管理员" not in detail["content"]
     assert "无有效内容" in detail["content"]
+
+
+def test_source_collection_stage_prompts_align_tool_first_protocol(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    prompt_template_service.repair_prompt_templates()
+
+    for template_id in (
+        "prompt-source-finder",
+        "prompt-source-extractor",
+        "prompt-source-relation-mapper",
+        "prompt-source-ingestor",
+    ):
+        detail = prompt_template_service.get_prompt_template(template_id)
+
+        assert "第一动作必须调用 task_list_tool" in detail["content"]
+        assert "随后调用 task_create_tool" in detail["content"]
+        assert "第一动作必须调用 task_create_tool" not in detail["content"]
 
 
 def test_challenge_cup_source_collection_contract_names_source_ingestor_as_ingestion_owner():

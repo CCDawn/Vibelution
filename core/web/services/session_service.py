@@ -11528,6 +11528,8 @@ def _agent_prompt_snapshot_matches_agent(
     snapshot: Any,
     *,
     agent_id: str,
+    prompt_template_id: str,
+    builtin_content_version: int = 0,
 ) -> bool:
     if not isinstance(snapshot, dict):
         return False
@@ -11535,7 +11537,13 @@ def _agent_prompt_snapshot_matches_agent(
         return False
     if str(snapshot.get("agentId") or "").strip() != str(agent_id or "").strip():
         return False
-    return bool(str(snapshot.get("promptTemplateId") or snapshot.get("templateId") or "").strip())
+    if str(snapshot.get("promptTemplateId") or snapshot.get("templateId") or "").strip() != str(prompt_template_id or "").strip():
+        return False
+    try:
+        snapshot_builtin_content_version = max(0, int(snapshot.get("builtinContentVersion") or 0))
+    except (TypeError, ValueError):
+        snapshot_builtin_content_version = 0
+    return max(0, int(builtin_content_version or 0)) <= snapshot_builtin_content_version
 
 
 def _ensure_session_agent_prompt_snapshot(
@@ -11555,9 +11563,22 @@ def _ensure_session_agent_prompt_snapshot(
         if conversation is None:
             return {}
         existing = conversation.get("agentPromptSnapshot")
+        snapshot = prompt_template_service.build_agent_prompt_snapshot(
+            prompt_template_id,
+            agent_id=agent_id,
+            agent_code=str(agent.get("agentCode") or "").strip(),
+            agent_display_name=str(agent.get("displayName") or "").strip(),
+            project_root=PROJECT_ROOT,
+        )
+        try:
+            builtin_content_version = max(0, int(snapshot.get("builtinContentVersion") or 0))
+        except (TypeError, ValueError):
+            builtin_content_version = 0
         if _agent_prompt_snapshot_matches_agent(
             existing,
             agent_id=agent_id,
+            prompt_template_id=prompt_template_id,
+            builtin_content_version=builtin_content_version,
         ):
             _record_session_prompt_snapshot_event(
                 normalized_session_id,
@@ -11566,13 +11587,6 @@ def _ensure_session_agent_prompt_snapshot(
                 outcome="reused",
             )
             return dict(existing)
-        snapshot = prompt_template_service.build_agent_prompt_snapshot(
-            prompt_template_id,
-            agent_id=agent_id,
-            agent_code=str(agent.get("agentCode") or "").strip(),
-            agent_display_name=str(agent.get("displayName") or "").strip(),
-            project_root=PROJECT_ROOT,
-        )
         if str(snapshot.get("reason") or "").strip():
             _record_session_prompt_snapshot_event(
                 normalized_session_id,
@@ -11588,7 +11602,7 @@ def _ensure_session_agent_prompt_snapshot(
             normalized_session_id,
             agent_id=agent_id,
             snapshot=snapshot,
-            outcome="created",
+            outcome="refreshed" if isinstance(existing, dict) else "created",
         )
         return dict(snapshot)
 
