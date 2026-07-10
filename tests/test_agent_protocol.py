@@ -5104,7 +5104,7 @@ class TestResolvedApiKeyUsage:
     """解析后的 API Key 使用一致性测试"""
 
     def test_agent_missing_api_key_error_names_selected_model_envs(self, monkeypatch):
-        monkeypatch.delenv("VIBELUTION_LLM_MODEL_RELAY_OPENAI_GPT_5_5_API_KEY", raising=False)
+        monkeypatch.delenv("VIBELUTION_LLM_MODEL_RELAY_GPT_5_6_LUNA_API_KEY", raising=False)
         monkeypatch.delenv("OPENAI_API_KEY", raising=False)
         scene_events = []
         monkeypatch.setattr(
@@ -5123,15 +5123,15 @@ class TestResolvedApiKeyUsage:
                 "llm.providers.default.compat_mode": "openai",
                 "llm.providers.default.requires_api_key": True,
                 "llm.profiles.primary.provider_id": "default",
-                "llm.profiles.primary.model": "gpt-5.5",
-                "llm.profiles.primary.api_key_env": "VIBELUTION_LLM_MODEL_RELAY_OPENAI_GPT_5_5_API_KEY",
+                "llm.profiles.primary.model": "gpt-5.6-luna",
+                "llm.profiles.primary.api_key_env": "VIBELUTION_LLM_MODEL_RELAY_GPT_5_6_LUNA_API_KEY",
             },
         ).config
         config.llm.model_library = {
-            "relay_openai_gpt_5_5": {
+            "relay_gpt_5_6_luna": {
                 "provider_id": "default",
-                "model": "gpt-5.5",
-                "api_key_env": "VIBELUTION_LLM_MODEL_RELAY_OPENAI_GPT_5_5_API_KEY",
+                "model": "gpt-5.6-luna",
+                "api_key_env": "VIBELUTION_LLM_MODEL_RELAY_GPT_5_6_LUNA_API_KEY",
             }
         }
 
@@ -5139,17 +5139,17 @@ class TestResolvedApiKeyUsage:
             SelfEvolvingAgent(config=config)
 
         message = str(exc_info.value)
-        assert "modelId=relay_openai_gpt_5_5" in message
+        assert "modelId=relay_gpt_5_6_luna" in message
         assert "provider=inline_profile_primary" in message
-        assert "VIBELUTION_LLM_MODEL_RELAY_OPENAI_GPT_5_5_API_KEY" in message
+        assert "VIBELUTION_LLM_MODEL_RELAY_GPT_5_6_LUNA_API_KEY" in message
         assert "OPENAI_API_KEY" in message
         assert "llm.providers.<provider_id>" not in message
         missing_event = next(event for event in scene_events if event[1] == "agent.api_key.missing")
         fields = missing_event[2]["fields"]
-        assert fields["modelId"] == "relay_openai_gpt_5_5"
+        assert fields["modelId"] == "relay_gpt_5_6_luna"
         assert fields["providerId"] == "inline_profile_primary"
         assert fields["providerKind"] == "relay"
-        assert fields["modelApiKeyEnv"] == "VIBELUTION_LLM_MODEL_RELAY_OPENAI_GPT_5_5_API_KEY"
+        assert fields["modelApiKeyEnv"] == "VIBELUTION_LLM_MODEL_RELAY_GPT_5_6_LUNA_API_KEY"
         assert fields["providerApiKeyEnv"] == "OPENAI_API_KEY"
         assert fields["apiKeySource"] == "missing"
 

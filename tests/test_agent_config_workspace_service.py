@@ -60,7 +60,7 @@ def _use_tmp_project_root(tmp_path, monkeypatch):
         for item in _fake_config_workspace()["modelOptions"]
         if str(item.get("model_id") or "").strip()
     }
-    model_library_ids.update({"relay_openai_gpt_5_5", "xiaomi_mimo_v2_5_pro_token_plan"})
+    model_library_ids.update({"relay_gpt_5_6_luna", "xiaomi_mimo_v2_5_pro_token_plan"})
     monkeypatch.setattr(agent_directory_service, "_configured_model_library_ids", lambda *args, **kwargs: set(model_library_ids))
     monkeypatch.setattr(supervised_agent_service, "_configured_model_library_ids", lambda *args, **kwargs: set(model_library_ids))
     monkeypatch.setattr(config_service, "get_agent_model_options_workspace", _fake_config_workspace)

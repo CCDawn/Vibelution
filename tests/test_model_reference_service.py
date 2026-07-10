@@ -172,7 +172,7 @@ def test_scan_can_ignore_public_config_refs_for_workspace_guard(tmp_path):
 def test_draft_delete_model_blocks_workspace_agent_reference(tmp_path, monkeypatch):
     public_config = copy.deepcopy(load_public_config())
     public_config["llm"]["model_library"]["model_a"] = copy.deepcopy(
-        public_config["llm"]["model_library"]["relay_openai_gpt_5_5"]
+        public_config["llm"]["model_library"]["relay_gpt_5_6_luna"]
     )
     _seed_agent_registry(tmp_path, "model_a")
     scene_events = []
@@ -196,7 +196,7 @@ def test_draft_delete_model_blocks_workspace_agent_reference(tmp_path, monkeypat
 def test_draft_delete_model_keeps_non_primary_profile_unconfigured(monkeypatch):
     public_config = copy.deepcopy(load_public_config())
     public_config["llm"]["model_library"]["model_a"] = copy.deepcopy(
-        public_config["llm"]["model_library"]["relay_openai_gpt_5_5"]
+        public_config["llm"]["model_library"]["relay_gpt_5_6_luna"]
     )
     public_config["llm"]["profiles"]["mental_model"]["model_ref"] = "model_a"
 
@@ -211,7 +211,7 @@ def test_draft_delete_model_keeps_non_primary_profile_unconfigured(monkeypatch):
 def test_apply_config_workspace_blocks_removed_model_with_workspace_reference(tmp_path, monkeypatch):
     public_config = copy.deepcopy(load_public_config())
     public_config["llm"]["model_library"]["model_a"] = copy.deepcopy(
-        public_config["llm"]["model_library"]["relay_openai_gpt_5_5"]
+        public_config["llm"]["model_library"]["relay_gpt_5_6_luna"]
     )
     submitted = copy.deepcopy(public_config)
     submitted["llm"]["model_library"].pop("model_a", None)
