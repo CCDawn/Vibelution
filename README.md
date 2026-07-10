@@ -145,6 +145,26 @@ $env:MINIMAX_API_KEY="your-api-key"
 
 外部 `config.toml` 不属于项目仓库，不应提交真实密钥。README 中的示例只使用环境变量名，不包含密钥值。
 
+## 本地任务闭环
+
+首次在本仓库开发时配置 tracked pre-commit hook。`scripts/doctor.ps1` 只读检查环境与 `core.hooksPath`；如果配置不匹配，它只在输出中提示下面的修复命令，不会静默改写 Git 配置。
+
+日常提交时，hook 自动调用 `local_quality_gate.py commit`，只检查 staged content，保持提交前反馈快速；未 stage 的改动不在这次 commit gate 的验证范围内。任务内容全部提交、task worktree clean 后，在该 task worktree 运行 `closeout` 和 manifest 复核：
+
+```powershell
+git config core.hooksPath .githooks
+$claimId = $env:VIBELUTION_CLAIM_ID
+if ([string]::IsNullOrWhiteSpace($claimId)) { throw "Set VIBELUTION_CLAIM_ID first." }
+powershell -ExecutionPolicy Bypass -File scripts/doctor.ps1 -Json
+& .\.venv\Scripts\python.exe scripts/local_quality_gate.py closeout --base main --claim-id $claimId
+$taskId = (git branch --show-current).Replace("codex/", "")
+& .\.venv\Scripts\python.exe scripts/local_quality_gate.py verify-manifest --manifest ".runtime/quality_gates/$taskId.json" --base main
+```
+
+`closeout` 绑定本任务 claim、当前本地 `main` SHA、task HEAD SHA、影响面 selector 命令与 merge preflight。manifest 的 `outcome=passed` 只表示这些证据通过，不代表任务已经 merge；进入 root local `main` 前仍须确认 root clean、manifest 对应的 `main` SHA 未变化，并只用 `git merge --ff-only <task-branch>`。如果得到 `stale_main` 或合并冲突，回到 task worktree 同步最新本地 `main`、解决冲突并重新运行 `closeout`。
+
+质量门不会执行 merge、release 或删除。fast-forward 后在 root `main` 做最小 post-merge verification，再由任务拥有者只释放本任务 claim，并只移除本任务创建的 junction（如有）、worktree 与 branch；不得清理其他未完成任务。远端 push、PR 和 CI `workflow_dispatch` 是可选发布/远端验证步骤，不属于默认本地闭环。
+
 ## 启动方式
 
 ### Web Workbench
