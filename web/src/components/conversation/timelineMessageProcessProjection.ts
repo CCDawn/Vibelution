@@ -51,7 +51,7 @@ function mergeText(...values: Array<string | undefined>) {
   return merged.join("\n\n");
 }
 
-function mergeCodexTranscripts(
+export function mergeCodexTranscripts(
   previous: CodexTranscriptProjection | undefined,
   next: CodexTranscriptProjection | undefined,
   messageId: string,
