@@ -448,6 +448,140 @@ def test_closeout_writes_bounded_passed_manifest(
     assert "stderr" not in serialized.lower()
 
 
+def test_closeout_keeps_deleted_python_in_ownership_without_linting_it(
+    git_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    git(git_repo, "branch", "-M", "main")
+    commit_file(git_repo, ".gitignore", ".runtime/\n", "ignore gate runtime")
+    commit_file(
+        git_repo,
+        "removed.py",
+        "def removed() -> int:\n    return 1\n",
+        "add removable Python",
+    )
+    git(git_repo, "switch", "-c", "codex/test-task")
+    git(git_repo, "rm", "removed.py")
+    git(git_repo, "commit", "-m", "remove Python")
+    monkeypatch.setattr(
+        gate,
+        "read_guard_status",
+        lambda root: active_claim("claim-test", ["removed.py"]),
+    )
+    monkeypatch.setattr(
+        gate,
+        "selected_validation",
+        lambda changed: {"commands": ["git diff --check"]},
+    )
+
+    result = gate.run_closeout(git_repo, "main", "claim-test")
+
+    assert result.outcome == "passed", result.commands
+    assert result.manifest_path is not None
+    manifest = json.loads(result.manifest_path.read_text(encoding="utf-8"))
+    assert manifest["changedFiles"] == ["removed.py"]
+    assert all(
+        command["kind"] != "changed-python-ruff"
+        or "removed.py" not in command["argv"]
+        for command in manifest["commands"]
+    )
+    assert gate.verify_manifest(result.manifest_path, git_repo, "main").outcome == (
+        "passed"
+    )
+
+
+def test_closeout_checks_committed_diff_range_for_trailing_whitespace(
+    git_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    git(git_repo, "branch", "-M", "main")
+    commit_file(git_repo, ".gitignore", ".runtime/\n", "ignore gate runtime")
+    validated_main_sha = git(git_repo, "rev-parse", "HEAD").stdout.strip()
+    git(git_repo, "switch", "-c", "codex/test-task")
+    commit_file(git_repo, "docs/note.md", "trailing whitespace  \n", "bad diff")
+    head_sha = git(git_repo, "rev-parse", "HEAD").stdout.strip()
+    monkeypatch.setattr(
+        gate,
+        "read_guard_status",
+        lambda root: active_claim("claim-test", ["docs/note.md"]),
+    )
+    monkeypatch.setattr(
+        gate,
+        "selected_validation",
+        lambda changed: {"commands": ["git diff --check"]},
+    )
+
+    result = gate.run_closeout(git_repo, "main", "claim-test")
+
+    assert result.outcome == "failed"
+    assert result.manifest_path is not None
+    manifest = json.loads(result.manifest_path.read_text(encoding="utf-8"))
+    diff_check = next(
+        command for command in manifest["commands"] if command["kind"] == "diff-check"
+    )
+    assert diff_check["argv"] == [
+        "git",
+        "diff",
+        "--check",
+        f"{validated_main_sha}...{head_sha}",
+    ]
+    assert manifest["outcome"] == "failed"
+
+
+def test_closeout_records_exact_committed_diff_range_for_valid_diff(
+    git_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    git(git_repo, "branch", "-M", "main")
+    commit_file(git_repo, ".gitignore", ".runtime/\n", "ignore gate runtime")
+    validated_main_sha = git(git_repo, "rev-parse", "HEAD").stdout.strip()
+    git(git_repo, "switch", "-c", "codex/test-task")
+    commit_file(git_repo, "docs/note.md", "valid diff\n", "valid diff")
+    head_sha = git(git_repo, "rev-parse", "HEAD").stdout.strip()
+    monkeypatch.setattr(
+        gate,
+        "read_guard_status",
+        lambda root: active_claim("claim-test", ["docs/note.md"]),
+    )
+    monkeypatch.setattr(
+        gate,
+        "selected_validation",
+        lambda changed: {"commands": ["git diff --check"]},
+    )
+
+    result = gate.run_closeout(git_repo, "main", "claim-test")
+
+    assert result.outcome == "passed"
+    assert result.manifest_path is not None
+    manifest = json.loads(result.manifest_path.read_text(encoding="utf-8"))
+    diff_check = next(
+        command for command in manifest["commands"] if command["kind"] == "diff-check"
+    )
+    assert diff_check["argv"] == [
+        "git",
+        "diff",
+        "--check",
+        f"{validated_main_sha}...{head_sha}",
+    ]
+
+
+def test_verify_manifest_rejects_bare_diff_check_argv(
+    git_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manifest = create_passed_manifest(git_repo, monkeypatch)
+    payload = json.loads(manifest.read_text(encoding="utf-8"))
+    diff_check = next(
+        command for command in payload["commands"] if command["kind"] == "diff-check"
+    )
+    diff_check["argv"] = ["git", "diff", "--check"]
+    manifest.write_text(json.dumps(payload), encoding="utf-8")
+
+    result = gate.verify_manifest(manifest, git_repo, "main")
+
+    assert result.outcome == "failed"
+
+
 def test_closeout_rejects_main_branch(git_repo: Path) -> None:
     git(git_repo, "branch", "-M", "main")
 
