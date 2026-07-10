@@ -474,6 +474,51 @@ def test_run_session_turn_uses_fixed_agent_prompt_snapshot(tmp_path, monkeypatch
     assert "统一 Agent 配置迁移" in snapshot["content"]
 
 
+def test_session_refreshes_snapshot_when_builtin_prompt_version_advances(tmp_path, monkeypatch):
+    _seed_session(tmp_path, "session-live")
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(prompt_template_service, "PROJECT_ROOT", tmp_path)
+    prompt_template_service.update_prompt_template(
+        "prompt-chat-builtin",
+        name="内置会话提示词",
+        category="chat",
+        source_path="workspace/prompts/chat/builtin.md",
+        content="内置提示词第一版。",
+        metadata={"builtin": True, "builtinContentVersion": 1},
+    )
+    agent = agent_directory_service.create_agent_instance(
+        display_name="内置提示词会话 Agent",
+        llm_bindings={"dialogue": {"modelId": "model-primary"}},
+        direct_session_id="session-live",
+        primary_mode="chat",
+        prompt_template_id="prompt-chat-builtin",
+    )
+    initial = prompt_template_service.build_agent_prompt_snapshot(
+        "prompt-chat-builtin",
+        agent_id=agent["agentId"],
+        project_root=tmp_path,
+    )
+    state = load_chat_state(tmp_path)
+    state["conversations"][0]["agent_id"] = agent["agentId"]
+    state["conversations"][0]["agentId"] = agent["agentId"]
+    state["conversations"][0]["agentPromptSnapshot"] = initial
+    save_chat_state(tmp_path, state)
+
+    prompt_template_service.update_prompt_template(
+        "prompt-chat-builtin",
+        content="内置提示词第二版。",
+        metadata={"builtin": True, "builtinContentVersion": 2},
+    )
+
+    refreshed = session_service._ensure_session_agent_prompt_snapshot("session-live", agent)
+
+    assert initial["builtinContentVersion"] == 1
+    assert refreshed["builtinContentVersion"] == 2
+    assert refreshed["content"] == "内置提示词第二版。"
+    assert refreshed["contentHash"] != initial["contentHash"]
+
+
 def test_session_detail_exposes_prompt_snapshot_metadata_without_content(tmp_path, monkeypatch):
     _seed_session(tmp_path, "session-live")
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
