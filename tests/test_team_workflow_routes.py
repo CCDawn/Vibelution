@@ -1134,9 +1134,9 @@ def test_team_workflow_route_resolves_stale_prompt_cache_model_for_stage_round(t
                     "label": "RiverSyncle Qwen3 32B AWQ / Server B",
                     "provider": {"kind": "local"},
                 },
-                "relay_openai_gpt_5_5": {
-                    "model": "gpt-5.5",
-                    "label": "GPT-5.5-pixel",
+                "relay_gpt_5_6_luna": {
+                    "model": "gpt-5.6-luna",
+                    "label": "Relay GPT-5.6 Luna",
                     "provider": {"kind": "relay"},
                     "prompt_cache": {"mode": "automatic"},
                 },
@@ -1167,11 +1167,11 @@ def test_team_workflow_route_resolves_stale_prompt_cache_model_for_stage_round(t
     assert response.status_code == 201, response.text
     policy = response.json()["promptCachePolicy"]
     assert policy["gate"]["status"] == "satisfied"
-    assert policy["modelId"] == "relay_openai_gpt_5_5"
+    assert policy["modelId"] == "relay_gpt_5_6_luna"
     assert policy["promptCacheMode"] == "automatic"
     assert policy["modelResolution"]["status"] == "fallback"
     assert policy["modelResolution"]["requestedModelId"] == "houmo_qwen35_9b_agent"
-    assert response.json()["searchPlan"]["promptCachePolicy"]["modelId"] == "relay_openai_gpt_5_5"
+    assert response.json()["searchPlan"]["promptCachePolicy"]["modelId"] == "relay_gpt_5_6_luna"
 
 
 def test_team_workflow_route_retries_research_stage_coordination(tmp_path, monkeypatch):

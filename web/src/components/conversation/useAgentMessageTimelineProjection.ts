@@ -13,7 +13,10 @@ import {
   projectedConversationMessageIdsOrSelf,
 } from "./conversationMessageIdentity";
 import { chronologicalConversationMessages } from "./conversationMessageOrder";
-import { projectTimelineProcessMessages } from "./timelineMessageProcessProjection";
+import {
+  mergeCodexTranscripts,
+  projectTimelineProcessMessages,
+} from "./timelineMessageProcessProjection";
 import {
   buildAgentMessageTimelineRowIdentities,
   type AgentMessageTimelineRowIdentity,
@@ -239,6 +242,11 @@ function mergeLiveOverlayIntoActiveTurnMessage(
     toolCalls: undefined,
     attachments: mergeUniqueProjectionItems(projectionItemIdentity, liveOverlayMessage.attachments, activeTurnMessage.attachments),
     references: mergeUniqueProjectionItems(projectionItemIdentity, liveOverlayMessage.references, activeTurnMessage.references),
+    codexTranscript: mergeCodexTranscripts(
+      liveOverlayMessage.codexTranscript,
+      activeTurnMessage.codexTranscript,
+      activeTurnMessage.id,
+    ),
     metadata: {
       ...(liveOverlayMessage.metadata ?? {}),
       ...(activeTurnMessage.metadata ?? {}),
@@ -247,20 +255,66 @@ function mergeLiveOverlayIntoActiveTurnMessage(
   };
 }
 
-function hasCommittedAssistantAnswerForActiveTurn(
+function committedAssistantAnswerForTurn(
   messages: ConversationMessage[],
-  activeTurnMessage: ConversationMessage,
+  turnMessage: ConversationMessage,
 ) {
-  return messages.some((message) => {
+  return messages.find((message) => {
     if (
       message.role !== "assistant"
       || isSessionLiveOverlayMessage(message)
       || isSessionActiveTurnLayerMessage(message)
-      || !isSameConversationTurn(message, activeTurnMessage)
+      || !isSameConversationTurn(message, turnMessage)
     ) {
       return false;
     }
     return Boolean(String(answerProjectionContent(message) ?? "").trim());
+  });
+}
+
+function hasCommittedAssistantAnswerForActiveTurn(
+  messages: ConversationMessage[],
+  activeTurnMessage: ConversationMessage,
+) {
+  return Boolean(committedAssistantAnswerForTurn(messages, activeTurnMessage));
+}
+
+function withoutSupersededAssistantAnswer(message: ConversationMessage): ConversationMessage {
+  return {
+    ...message,
+    content: "",
+    timelineItems: message.timelineItems?.filter((item) => item.kind !== "assistant_text"),
+  };
+}
+
+function consolidateSupersededSessionLiveOverlays(messages: ConversationMessage[]) {
+  const overlaysByCommittedMessageId = new Map<string, ConversationMessage[]>();
+  const supersededOverlays = new Set<ConversationMessage>();
+  for (const message of messages) {
+    if (!isSessionLiveOverlayMessage(message)) {
+      continue;
+    }
+    const committedMessage = committedAssistantAnswerForTurn(messages, message);
+    if (!committedMessage) {
+      continue;
+    }
+    supersededOverlays.add(message);
+    const overlays = overlaysByCommittedMessageId.get(committedMessage.id) ?? [];
+    overlays.push(withoutSupersededAssistantAnswer(message));
+    overlaysByCommittedMessageId.set(committedMessage.id, overlays);
+  }
+  return messages.flatMap((message) => {
+    if (supersededOverlays.has(message)) {
+      return [];
+    }
+    const overlays = overlaysByCommittedMessageId.get(message.id);
+    if (!overlays?.length) {
+      return [message];
+    }
+    return [overlays.reduce(
+      (committedMessage, overlay) => mergeLiveOverlayIntoActiveTurnMessage(overlay, committedMessage),
+      message,
+    )];
   });
 }
 
@@ -269,8 +323,10 @@ export function projectAgentMessageTimelineMessages({
   activeTurnMessage,
 }: AgentMessageTimelineProjectionInput): AgentMessageTimelineProjection {
   const projectedMessages = (() => {
-    const visibleTimelineMessages = chronologicalConversationMessages(timelineMessages)
-      .filter(hasVisibleProjectionMessageContent);
+    const visibleTimelineMessages = consolidateSupersededSessionLiveOverlays(
+      chronologicalConversationMessages(timelineMessages)
+        .filter(hasVisibleProjectionMessageContent),
+    );
     if (!activeTurnMessage || hasCommittedAssistantAnswerForActiveTurn(visibleTimelineMessages, activeTurnMessage)) {
       return projectTimelineProcessMessages(visibleTimelineMessages);
     }

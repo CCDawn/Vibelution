@@ -182,9 +182,9 @@ def test_remote_script_prepares_venv_and_captures_log():
     assert "backend=venv" in script
     assert 'cat > "$REMOTE_SOURCE/.remote-test/config.toml"' in script
     assert 'profile = "safe_remote"' in script
-    assert "[llm.model_library.relay_openai_gpt_5_5]" in script
-    assert 'model = "gpt-5.5"' in script
-    assert "[llm.model_library.relay_openai_gpt_5_5.prompt_cache]" in script
+    assert "[llm.model_library.relay_gpt_5_6_luna]" in script
+    assert 'model = "gpt-5.6-luna"' in script
+    assert "[llm.model_library.relay_gpt_5_6_luna.prompt_cache]" in script
     assert 'mode = "automatic"' in script
     assert 'name = "SOUL"' in script
     assert 'path = "core/core_prompt/SOUL.md"' in script
