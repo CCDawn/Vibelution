@@ -18,6 +18,35 @@ def test_work_run_store_tracks_active_and_latest_per_kind(tmp_path):
     assert store.load_latest_snapshot("chat_turn")["status"] == "running"
 
 
+def test_work_run_store_records_partial_as_terminal_warning(tmp_path, monkeypatch):
+    store = WorkRunStore(root=tmp_path / ".runtime" / "work_runs")
+    events = []
+    monkeypatch.setattr(
+        work_run_store,
+        "_record_work_run_event",
+        lambda phase, event_code, **kwargs: events.append((phase, event_code, kwargs)),
+    )
+
+    store.persist_snapshot(
+        "chat_room_round",
+        {
+            "runId": "round_partial",
+            "runKind": "chat_room_round",
+            "status": "partial",
+            "currentPhase": "partial",
+            "finishedAt": "2026-07-10T03:00:00Z",
+        },
+        active_run_id="round_partial",
+    )
+
+    assert store.load_active_snapshot("chat_room_round") is None
+    assert store.load_latest_snapshot("chat_room_round")["status"] == "partial"
+    assert events[-1][0:2] == ("state", "work_run.snapshot.persisted")
+    assert events[-1][2]["status"] == "partial"
+    assert events[-1][2]["level"] == "warning"
+    assert events[-1][2]["lifecycle"] is True
+
+
 def test_work_run_store_skips_identical_snapshot_write_and_event(tmp_path, monkeypatch):
     store = WorkRunStore(root=tmp_path / ".runtime" / "work_runs")
     writes = []

@@ -1182,6 +1182,213 @@ def test_start_chat_room_round_runs_participants_in_round_robin_and_persists_wor
     assert speaker_fields["totalSpeakerMs"] >= 0
 
 
+def test_start_chat_room_round_preserves_structured_runner_failure(tmp_path, monkeypatch):
+    _seed_chat_sessions(tmp_path)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    recorded_events = []
+    monkeypatch.setattr(
+        chat_room_service,
+        "record_runtime_scene_event",
+        lambda *args, **kwargs: recorded_events.append((args, kwargs)) or {"accepted": True},
+    )
+
+    room = chat_room_service.create_chat_room(
+        title="结构化失败群聊",
+        participant_session_ids=["session-alpha", "session-beta"],
+    )
+
+    detail = chat_room_service.start_chat_room_round(
+        room["roomId"],
+        "验证结构化失败不会伪装成功",
+        agent_runner=lambda participant, prompt, context: {
+            "status": "failed",
+            "raw_output": "",
+            "summary": "configured model does not exist",
+            "error": "provider_protocol_error",
+            "llm_failure": {"category": "provider_protocol_error"},
+        },
+    )
+
+    latest_round = detail["rounds"][-1]
+    assert detail["status"] == "failed"
+    assert latest_round["status"] == "failed"
+    assert [message["status"] for message in latest_round["messages"]] == ["failed", "failed"]
+    assert [message["resultStatus"] for message in latest_round["messages"]] == ["failed", "failed"]
+    assert [message["errorType"] for message in latest_round["messages"]] == [
+        "provider_protocol_error",
+        "provider_protocol_error",
+    ]
+    assert chat_room_service.load_chat_room_work_run_summary()["latest"]["status"] == "failed"
+    assert any(
+        event[0][:3] == ("chat_room", "speaker", "chat_room.speaker.failed")
+        and event[1]["fields"]["status"] == "failed"
+        for event in recorded_events
+    )
+    assert any(
+        event[0][:3] == ("chat_room", "round", "chat_room.round.failed")
+        for event in recorded_events
+    )
+    assert not _has_room_transcript(tmp_path, "session-alpha", room["roomId"])
+    assert not _has_room_transcript(tmp_path, "session-beta", room["roomId"])
+
+
+def test_start_chat_room_round_projects_mixed_results_as_partial(tmp_path, monkeypatch):
+    _seed_chat_sessions(tmp_path)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    recorded_events = []
+    monkeypatch.setattr(
+        chat_room_service,
+        "record_runtime_scene_event",
+        lambda *args, **kwargs: recorded_events.append((args, kwargs)) or {"accepted": True},
+    )
+
+    def mixed_runner(participant, prompt, context):
+        if participant["sessionId"] == "session-alpha":
+            return {
+                "status": "completed",
+                "raw_output": "Alpha 提供了可用结论。",
+                "summary": "Alpha completed",
+            }
+        return {
+            "status": "failed",
+            "raw_output": "",
+            "summary": "Beta provider failure must not enter group context.",
+            "llm_failure": {"category": "provider_protocol_error"},
+        }
+
+    room = chat_room_service.create_chat_room(
+        title="部分完成群聊",
+        participant_session_ids=["session-alpha", "session-beta"],
+    )
+
+    detail = chat_room_service.start_chat_room_round(
+        room["roomId"],
+        "验证部分完成状态",
+        agent_runner=mixed_runner,
+    )
+
+    latest_round = detail["rounds"][-1]
+    assert detail["status"] == "ready"
+    assert latest_round["status"] == "partial"
+    assert [message["status"] for message in latest_round["messages"]] == ["completed", "failed"]
+    assert chat_room_service.load_chat_room_work_run_summary()["latest"]["status"] == "partial"
+    partial_event = next(
+        event
+        for event in recorded_events
+        if event[0][:3] == ("chat_room", "round", "chat_room.round.partial")
+    )
+    assert partial_event[1]["fields"]["completedCount"] == 1
+    assert partial_event[1]["fields"]["failedCount"] == 1
+    assert partial_event[1]["fields"]["unsuccessfulCount"] == 1
+    for session_id in ("session-alpha", "session-beta"):
+        transcript = "\n".join(str(item.get("content") or "") for item in _session_ledger_messages(tmp_path, session_id))
+        assert "Alpha 提供了可用结论。" in transcript
+        assert "Beta provider failure must not enter group context." not in transcript
+
+
+def test_start_chat_room_round_preserves_all_partial_results(tmp_path, monkeypatch):
+    _seed_chat_sessions(tmp_path)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    recorded_events = []
+    monkeypatch.setattr(
+        chat_room_service,
+        "record_runtime_scene_event",
+        lambda *args, **kwargs: recorded_events.append((args, kwargs)) or {"accepted": True},
+    )
+
+    room = chat_room_service.create_chat_room(
+        title="全员部分完成群聊",
+        participant_session_ids=["session-alpha", "session-beta"],
+    )
+
+    detail = chat_room_service.start_chat_room_round(
+        room["roomId"],
+        "验证全员降级结果不会被误判失败",
+        agent_runner=lambda participant, prompt, context: {
+            "status": "degraded",
+            "raw_output": f"{participant['title']} 仅完成了部分分析。",
+            "summary": "Partial output must remain visible but not enter group context.",
+        },
+    )
+
+    latest_round = detail["rounds"][-1]
+    assert detail["status"] == "ready"
+    assert latest_round["status"] == "partial"
+    assert [message["status"] for message in latest_round["messages"]] == ["partial", "partial"]
+    assert "2 位部分完成" in latest_round["summary"]
+    assert chat_room_service.load_chat_room_work_run_summary()["latest"]["status"] == "partial"
+    partial_event = next(
+        event
+        for event in recorded_events
+        if event[0][:3] == ("chat_room", "round", "chat_room.round.partial")
+    )
+    assert partial_event[1]["fields"]["completedCount"] == 0
+    assert partial_event[1]["fields"]["partialCount"] == 2
+    assert partial_event[1]["fields"]["unsuccessfulCount"] == 2
+    assert not _has_room_transcript(tmp_path, "session-alpha", room["roomId"])
+    assert not _has_room_transcript(tmp_path, "session-beta", room["roomId"])
+
+
+@pytest.mark.parametrize(
+    ("runner_status", "expected_message_status", "expected_result_status", "expected_error_type"),
+    [
+        (None, "completed", "", ""),
+        ("succeeded", "completed", "succeeded", ""),
+        ("blocked", "blocked", "blocked", ""),
+        ("stopped_by_user", "stopped", "stopped_by_user", ""),
+        ("degraded", "partial", "degraded", ""),
+        ("needs_continue", "partial", "needs_continue", ""),
+        ("unexpected_status", "failed", "unexpected_status", "UnexpectedResultStatus"),
+    ],
+)
+def test_run_one_speaker_normalizes_structured_result_status(
+    monkeypatch,
+    runner_status,
+    expected_message_status,
+    expected_result_status,
+    expected_error_type,
+):
+    monkeypatch.setattr(
+        chat_room_service,
+        "_evaluate_speaker_supervision_policy",
+        lambda participant: SimpleNamespace(
+            allowed=True,
+            reason="",
+            supervision_enabled=False,
+            requires_review=False,
+            review_mode="",
+            evidence_level="",
+        ),
+    )
+    monkeypatch.setattr(agent_directory_service, "record_supervision_policy_decision", lambda decision: None)
+    result = {"raw_output": "可见输出", "summary": "摘要"}
+    if runner_status is not None:
+        result["status"] = runner_status
+
+    message = chat_room_service._run_one_speaker(
+        {
+            "participantId": "participant-status",
+            "agentId": "agent-status",
+            "agentCode": "A-status",
+            "sessionId": "session-status",
+            "title": "状态 Agent",
+        },
+        "测试结构化状态",
+        {},
+        lambda participant, prompt, context: result,
+    )
+
+    assert message["status"] == expected_message_status
+    assert message["resultStatus"] == expected_result_status
+    assert message.get("errorType", "") == expected_error_type
+
+
 def test_start_chat_room_round_records_kernel_trace_without_agent_inbox_delivery(tmp_path, monkeypatch):
     _isolate_chat_room_kernel(tmp_path, monkeypatch)
     recorded_events = []
@@ -1419,10 +1626,16 @@ def test_chat_room_required_supervision_blocks_autonomous_speaker_before_runner(
         },
     )
     recorded_events = []
+    recorded_room_events = []
     monkeypatch.setattr(
         agent_directory_service,
         "record_runtime_scene_event",
         lambda *args, **kwargs: recorded_events.append((args, kwargs)) or {"accepted": True},
+    )
+    monkeypatch.setattr(
+        chat_room_service,
+        "record_runtime_scene_event",
+        lambda *args, **kwargs: recorded_room_events.append((args, kwargs)) or {"accepted": True},
     )
     runner_calls = []
 
@@ -1442,7 +1655,7 @@ def test_chat_room_required_supervision_blocks_autonomous_speaker_before_runner(
     detail = chat_room_service.start_chat_room_round(room["roomId"], "需要审核的群聊发言", agent_runner=fake_runner)
 
     latest_round = detail["rounds"][-1]
-    assert latest_round["status"] == "completed"
+    assert latest_round["status"] == "partial"
     assert [message["status"] for message in latest_round["messages"]] == ["blocked", "completed"]
     blocked = latest_round["messages"][0]
     assert blocked["agentId"] == alpha["agentId"]
@@ -1455,6 +1668,14 @@ def test_chat_room_required_supervision_blocks_autonomous_speaker_before_runner(
         and event[1]["fields"]["agentId"] == alpha["agentId"]
         and event[1]["fields"]["action"] == "chat_room_speaker"
         for event in recorded_events
+    )
+    assert any(
+        event[0][:3] == ("chat_room", "speaker", "chat_room.speaker.blocked")
+        for event in recorded_room_events
+    )
+    assert any(
+        event[0][:3] == ("chat_room", "round", "chat_room.round.partial")
+        for event in recorded_room_events
     )
 
 

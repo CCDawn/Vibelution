@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import { dictionary } from "./dictionary";
 import { petAvatarPresetLabel } from "./petLabels";
 import { shellDictionary } from "./shellDictionary";
+import useAppI18nSource from "./useAppI18n.ts?raw";
+import useShellI18nSource from "./useShellI18n.ts?raw";
 
 describe("dictionary", () => {
   it("does not keep the retired conversation operation summary key", () => {
@@ -65,5 +67,17 @@ describe("dictionary", () => {
       expect(shellDictionary.zh[key]).toBe(dictionary.zh[routeKey]);
       expect(shellDictionary.en[key]).toBe(dictionary.en[routeKey]);
     }
+  });
+
+  it("labels partial completion consistently in full and shell dictionaries", () => {
+    expect(dictionary.zh.status_partial).toBe("部分完成");
+    expect(dictionary.en.status_partial).toBe("partially completed");
+    expect(shellDictionary.zh.status_partial).toBe(dictionary.zh.status_partial);
+    expect(shellDictionary.en.status_partial).toBe(dictionary.en.status_partial);
+  });
+
+  it("routes partial runtime status through both status label maps", () => {
+    expect(useAppI18nSource).toContain('partial: "status_partial"');
+    expect(useShellI18nSource).toContain('partial: "status_partial"');
   });
 });

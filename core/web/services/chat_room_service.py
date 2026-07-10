@@ -1359,7 +1359,7 @@ def _execute_chat_room_round(
         _publish_chat_room_detail_snapshot(normalized_room_id)
         _record_room_event(
             "speaker",
-            "chat_room.speaker.completed" if message["status"] == "completed" else "chat_room.speaker.failed",
+            _speaker_event_code(message.get("status")),
             room,
             round_payload,
             fields={
@@ -1385,7 +1385,17 @@ def _execute_chat_room_round(
         )
 
     completed_count = sum(1 for item in messages if item.get("status") == "completed")
-    final_status = "completed" if completed_count > 0 else "failed"
+    failed_count = sum(1 for item in messages if item.get("status") == "failed")
+    blocked_count = sum(1 for item in messages if item.get("status") == "blocked")
+    stopped_count = sum(1 for item in messages if item.get("status") == "stopped")
+    partial_count = sum(1 for item in messages if item.get("status") == "partial")
+    unsuccessful_count = len(messages) - completed_count
+    if completed_count == len(messages):
+        final_status = "completed"
+    elif completed_count > 0 or partial_count > 0:
+        final_status = "partial"
+    else:
+        final_status = "failed"
     summary = _round_summary(messages, lang=lang)
     finished_at = utc_now_iso()
     with _CHAT_ROOM_LOCK:
@@ -1404,7 +1414,7 @@ def _execute_chat_room_round(
         target_round["status"] = final_status
         target_round["updatedAt"] = finished_at
         target_round["finishedAt"] = finished_at
-        room["status"] = "ready" if final_status == "completed" else "failed"
+        room["status"] = "ready" if final_status in {"completed", "partial"} else "failed"
         room["activeRoundId"] = ""
         room["updatedAt"] = finished_at
         _store().save(state)
@@ -1412,7 +1422,7 @@ def _execute_chat_room_round(
     _persist_chat_room_work_run(room, target_round, status=final_status, summary=summary)
     _record_room_event(
         "round",
-        "chat_room.round.completed" if final_status == "completed" else "chat_room.round.failed",
+        f"chat_room.round.{final_status}",
         room,
         target_round,
         fields={
@@ -1420,7 +1430,11 @@ def _execute_chat_room_round(
             "purpose": round_purpose,
             "messageCount": len(messages),
             "completedCount": completed_count,
-            "failedCount": len(messages) - completed_count,
+            "failedCount": failed_count,
+            "blockedCount": blocked_count,
+            "stoppedCount": stopped_count,
+            "partialCount": partial_count,
+            "unsuccessfulCount": unsuccessful_count,
             "caseIntent": (target_round.get("caseState") or {}).get("intent") if isinstance(target_round.get("caseState"), dict) else "",
             "caseNextAction": (target_round.get("caseState") or {}).get("nextAction") if isinstance(target_round.get("caseState"), dict) else "",
             "caseInformationSufficiency": (target_round.get("caseState") or {}).get("informationSufficiency") if isinstance(target_round.get("caseState"), dict) else "",
@@ -1428,7 +1442,7 @@ def _execute_chat_room_round(
             "caseDiscussionVisibility": (target_round.get("caseState") or {}).get("discussionVisibility") if isinstance(target_round.get("caseState"), dict) else "",
         },
         outcome=final_status,
-        level="info" if final_status == "completed" else "error",
+        level="info" if final_status == "completed" else ("warning" if final_status == "partial" else "error"),
         lifecycle=True,
     )
     if completed_count > 0:
@@ -1601,6 +1615,8 @@ def _run_one_speaker(
         content = _enforce_case_visible_output_boundary(content, context, participant)
         summary = _enforce_case_visible_output_boundary(summary, context, participant, record_event=False)
         result_timings = dict(result.get("timings") or {}) if isinstance(result, dict) else {}
+        message_status, result_status = _structured_speaker_result_status(result)
+        error_type = _structured_speaker_result_error_type(result) if message_status == "failed" else ""
         timestamp = utc_now_iso()
         return {
             "messageId": _new_id("message", set()),
@@ -1609,9 +1625,11 @@ def _run_one_speaker(
             "speakerCode": participant.get("agentCode") or "",
             "sessionId": participant.get("sessionId") or "",
             "speakerTitle": _participant_speaker_label(participant),
-            "status": "completed",
+            "status": message_status,
+            "resultStatus": result_status,
             "content": content,
             "summary": summary,
+            **({"errorType": error_type} if error_type else {}),
             "timestamp": timestamp,
             **_case_message_metadata(context),
             "supervision": supervision_payload,
@@ -2219,14 +2237,66 @@ def _result_summary(result: Any) -> str:
     return ""
 
 
+def _structured_speaker_result_status(result: Any) -> tuple[str, str]:
+    if not isinstance(result, dict):
+        return "completed", ""
+    result_status = str(result.get("status") or "").strip().lower()
+    if not result_status or result_status in {"completed", "success", "succeeded", "done", "ready"}:
+        return "completed", result_status
+    if result_status in {"failed", "failed_provider", "failed_runtime", "error"}:
+        return "failed", result_status
+    if result_status == "blocked":
+        return "blocked", result_status
+    if result_status in {"stopped", "stopped_by_user", "cancelled"}:
+        return "stopped", result_status
+    if result_status in {"partial", "degraded", "needs_continue", "paused_limit"}:
+        return "partial", result_status
+    return "failed", result_status
+
+
+def _structured_speaker_result_error_type(result: Any) -> str:
+    if not isinstance(result, dict):
+        return ""
+    llm_failure = result.get("llm_failure") if isinstance(result.get("llm_failure"), dict) else {}
+    result_status = str(result.get("status") or "").strip().lower()
+    known_failure_statuses = {"failed", "failed_provider", "failed_runtime", "error"}
+    return trim_lines(
+        str(
+            result.get("errorType")
+            or result.get("error_type")
+            or llm_failure.get("category")
+            or ("AgentTurnFailed" if result_status in known_failure_statuses else "UnexpectedResultStatus")
+        ),
+        max_lines=1,
+    ).strip()
+
+
+def _speaker_event_code(status: Any) -> str:
+    normalized_status = str(status or "").strip().lower()
+    if normalized_status not in {"completed", "failed", "blocked", "stopped", "partial"}:
+        normalized_status = "failed"
+    return f"chat_room.speaker.{normalized_status}"
+
+
 def _round_summary(messages: list[dict[str, Any]], *, lang: str) -> str:
     total = len(messages)
     completed = sum(1 for item in messages if item.get("status") == "completed")
-    failed = total - completed
+    failed = sum(1 for item in messages if item.get("status") == "failed")
+    blocked = sum(1 for item in messages if item.get("status") == "blocked")
+    stopped = sum(1 for item in messages if item.get("status") == "stopped")
+    partial = sum(1 for item in messages if item.get("status") == "partial")
+    unsuccessful = total - completed
     return text_for(
         lang,
-        zh=f"本轮群聊完成：{completed}/{total} 位参与者成功发言，{failed} 位失败。",
-        en=f"Chat room round finished: {completed}/{total} participants responded, {failed} failed.",
+        zh=(
+            f"本轮群聊完成：{completed}/{total} 位参与者成功发言，{unsuccessful} 位未成功"
+            f"（失败 {failed}、受阻 {blocked}、停止 {stopped}、{partial} 位部分完成）。"
+        ),
+        en=(
+            f"Chat room round finished: {completed}/{total} participants responded successfully; "
+            f"{unsuccessful} did not fully succeed "
+            f"({failed} failed, {blocked} blocked, {stopped} stopped, {partial} partially completed)."
+        ),
     )
 
 

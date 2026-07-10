@@ -9,6 +9,7 @@ const statusKeyMap: Record<string, TranslationKey> = {
   idle: "status_idle",
   running: "status_running",
   failed: "status_failed",
+  partial: "status_partial",
   waiting: "status_waiting",
   inconclusive: "status_inconclusive",
   done: "status_done",
