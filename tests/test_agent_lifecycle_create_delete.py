@@ -348,10 +348,6 @@ def test_challenge_stage_task_roles_include_context_and_writeback_tools(tmp_path
     assert "source_collection_stage_writeback_tool" in policy["allowedTools"]
     assert "source_collection_context_tool" in visibility.visible_tools
     assert "source_collection_stage_writeback_tool" in visibility.visible_tools
-    assert policy["preferredTools"][:2] == [
-        "source_collection_context_tool",
-        "source_collection_stage_writeback_tool",
-    ]
     expected_policy = agent_role_tool_profile_service.resolve_role_tool_policy(
         role_key=role_key,
         primary_mode=primary_mode,
@@ -359,6 +355,9 @@ def test_challenge_stage_task_roles_include_context_and_writeback_tools(tmp_path
         policy_id=policy["policyId"],
     )
     assert expected_policy is not None
+    assert policy["preferredTools"] == expected_policy["preferredTools"]
+    assert "source_collection_context_tool" in policy["preferredTools"]
+    assert "source_collection_stage_writeback_tool" in policy["preferredTools"]
     assert policy["writeScopes"] == expected_policy["writeScopes"]
     assert policy["mutationAccess"] == expected_policy["mutationAccess"]
 

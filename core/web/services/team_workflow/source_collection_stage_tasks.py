@@ -13,7 +13,6 @@ from .source_collection_common import (
 )
 
 
-SCHEMA_VERSION = 1
 SOURCE_COLLECTION_STAGE_SESSION_TASK_STATUSES = {
     "queued",
     "running",
@@ -42,11 +41,12 @@ def source_collection_stage_task_writeback_contract(
     stage_id: str,
     agent_id: str,
     agent_role: str,
+    schema_version: int,
 ) -> dict[str, Any]:
     endpoint = f"/api/teams/{urllib.parse.quote(team_id, safe='')}/workflow-orchestration/stage-session-tasks/{urllib.parse.quote(task_id, safe='')}/writeback"
     can_materialize_formal_knowledge = source_collection_stage_can_materialize_formal_knowledge(stage_id, agent_role)
     return {
-        "schemaVersion": SCHEMA_VERSION,
+        "schemaVersion": schema_version,
         "contractKind": "source_collection_stage_session_task_writeback",
         "toolName": "source_collection_stage_writeback_tool",
         "taskId": task_id,

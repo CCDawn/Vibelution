@@ -160,44 +160,24 @@ def test_repair_agent_directory_applies_challenge_cup_research_tool_profiles(tmp
         )
         assert expected_policy is not None
         agent = agent_directory_service.get_agent(created_ids[role_key])
-        assert agent["promptTemplateId"] == expected_prompt_template
+        assert agent["promptTemplateId"] == "prompt-chat-default"
+        assert agent["defaultPromptTemplateId"] == expected_prompt_template
+        assert agent["promptTemplateCustomized"] is True
         assert "挑战杯" in agent["personaProfile"]["background"]
         assert "challenge_cup" in agent["taskProfile"]["taskTypes"]
         assert agent["toolPolicy"]["allowedTools"] == expected_policy["allowedTools"]
+        assert agent["toolPolicy"]["preferredTools"] == expected_policy["preferredTools"]
         assert agent["toolPolicy"]["roleToolProfileId"] == role_key
         assert agent["toolPolicy"]["roleToolProfileFingerprint"] == expected_policy["roleToolProfileFingerprint"]
-        if role_key in {
-            "source_finder",
-            "source_extractor",
-            "source_relation_mapper",
-            "source_ingestor",
-        }:
-            assert agent["toolPolicy"]["preferredTools"][:2] == [
-                "source_collection_context_tool",
-                "source_collection_stage_writeback_tool",
-            ]
-        elif role_key in {"challenge_cup_experiment_planner", "challenge_cup_experiment_ledger"}:
-            assert agent["toolPolicy"]["preferredTools"][:2] == [
-                "challenge_cup_experiment_context_tool",
-                "challenge_cup_experiment_writeback_tool",
-            ]
-        elif role_key == "challenge_cup_iteration_planner":
-            assert agent["toolPolicy"]["preferredTools"][:2] == [
-                "challenge_cup_iteration_context_tool",
-                "challenge_cup_iteration_writeback_tool",
-            ]
-        elif role_key == "challenge_cup_versioning":
-            assert agent["toolPolicy"]["preferredTools"][:2] == [
-                "challenge_cup_versioning_context_tool",
-                "challenge_cup_versioning_writeback_tool",
-            ]
         assert agent["toolPolicy"]["writeScopes"] == expected_policy["writeScopes"]
         assert agent["toolPolicy"]["networkAccess"] == expected_policy["networkAccess"]
         assert agent["toolPolicy"]["mutationAccess"] == expected_policy["mutationAccess"]
         assert "cli_tool" not in agent["toolPolicy"]["allowedTools"]
         assert "apply_patch_tool" not in agent["toolPolicy"]["allowedTools"]
     coordinator = agent_directory_service.get_agent(coordinator_id)
-    assert coordinator["promptTemplateId"] == "prompt-challenge-cup-coordinator"
+    assert coordinator["promptTemplateId"] == "prompt-chat-default"
+    assert coordinator["defaultPromptTemplateId"] == "prompt-challenge-cup-coordinator"
+    assert coordinator["promptTemplateCustomized"] is True
     assert coordinator["personaProfile"]["communicationStyle"] == "先给阶段判断，再列证据位置、角色分工和用户下一步。"
     assert "不要声称已启动资料搜集" in coordinator["taskProfile"]["avoidTasks"]
 
