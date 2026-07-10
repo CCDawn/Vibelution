@@ -4,9 +4,9 @@ const styles = {
   conversationFrameFocus:
     "vui-routes-chatsessionworkspacepanel conversationFrameFocus min-w-0 justify-self-center w-[min(calc(100%_-_48px),1480px)] max-w-full max-[980px]:w-full",
   emptyConversationSurface:
-    "vui-routes-chatsessionworkspacepanel emptyConversationSurface min-h-[74px] !w-[min(360px,calc(100%_-_32px))] place-self-center text-center",
+    "vui-routes-chatsessionworkspacepanel emptyConversationSurface min-h-[74px] !w-[min(360px,calc(100%_-_32px))] place-self-center !content-center !text-center",
   emptySurface:
-    "vui-routes-chatsessionworkspacepanel emptySurface h-full min-h-[min(420px,calc(100dvh_-_190px))] place-self-stretch place-items-center text-center",
+    "vui-routes-chatsessionworkspacepanel emptySurface h-full min-h-[min(420px,calc(100dvh_-_190px))] place-self-stretch place-items-center !content-center !text-center",
   inlineNotice:
     "vui-routes-chatsessionworkspacepanel inlineNotice min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
   loadingSurface:

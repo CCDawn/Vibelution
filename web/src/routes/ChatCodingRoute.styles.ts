@@ -627,7 +627,7 @@ layout:
   paneCollapsed:
     "vui-routes-chatcodingroute paneCollapsed min-w-0 hidden invisible pointer-events-none !overflow-hidden opacity-0",
   panelBody:
-    "vui-routes-chatcodingroute panelBody min-w-0 h-full rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] min-h-0 overflow-auto [scrollbar-gutter:stable]",
+    "vui-routes-chatcodingroute panelBody min-w-0 h-full p-2 text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] min-h-0 overflow-auto [scrollbar-gutter:stable]",
   panelNotice:
     "vui-routes-chatcodingroute panelNotice grid min-w-0 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--accent-warm)_22%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-warm)_5%,var(--vui-surface-row))] px-2 py-1.5 text-[var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)]",
   panelSearch:
@@ -635,7 +635,7 @@ layout:
   panelSearchInput:
     "vui-routes-chatcodingroute panelSearchInput min-w-0 w-full !border-0 !bg-transparent px-0 py-0 text-[var(--fg-primary)] !shadow-none [&_[data-slot=input-wrapper]]:min-h-[34px] [&_[data-slot=input-wrapper]]:rounded-[var(--radius-control)] [&_[data-slot=input-wrapper]]:border [&_[data-slot=input-wrapper]]:border-[color-mix(in_srgb,var(--vui-border-subtle)_72%,transparent)] [&_[data-slot=input-wrapper]]:bg-[color-mix(in_srgb,var(--vui-surface-row)_56%,transparent)] [&_[data-slot=input-wrapper]]:shadow-none [&_[data-slot=input-wrapper]]:transition-colors [&_[data-slot=input-wrapper]]:hover:border-[color-mix(in_srgb,var(--accent-cool)_24%,var(--vui-border-subtle))] [&_[data-slot=input-wrapper]]:data-[focus=true]:border-[color-mix(in_srgb,var(--accent-cool)_42%,var(--vui-border-subtle))] [&_[data-slot=input-wrapper]]:data-[focus=true]:bg-[color-mix(in_srgb,var(--surface-card)_66%,transparent)] [&_[data-slot=input]]:text-[var(--vui-font-sm)] [&_[data-slot=input]]:text-[var(--fg-primary)] [&_[data-slot=input]]:placeholder:text-[var(--fg-tertiary)] [&_[data-slot=inner-wrapper]]:gap-1.5",
   panelState:
-    "vui-routes-chatcodingroute panelState min-h-[72px] place-items-center text-center",
+    "vui-routes-chatcodingroute panelState min-h-[72px] place-items-center !content-center !text-center",
   petMiniAvatar:
     "vui-routes-chatcodingroute petMiniAvatar min-w-0 inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)]",
   petShowcaseAction:
