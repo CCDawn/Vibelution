@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from .source_collection_common import source_collection_count, trim_text
+from .source_collection_common import normalize_metadata, normalize_text_list, source_collection_count, trim_text
 
 
 def normalize_source_collection_context_mode(value: Any) -> str:
@@ -30,3 +30,223 @@ def source_collection_context_record_continuation_hint(record_page: dict[str, An
     limit = source_collection_count(record_page.get("limit")) or 5
     mode = normalize_source_collection_context_mode(context_mode)
     return f"hasMore: source_collection_context_tool(record_offset={next_offset}, record_limit={limit}, context_mode={mode})"
+
+
+def compact_source_collection_stage_task_context(context: dict[str, Any]) -> dict[str, Any]:
+    context_mode = normalize_source_collection_context_mode(context.get("contextMode"))
+    minimal_mode = context_mode in {"minimal", "retry_missing"}
+    candidate_page = context.get("candidatePage") if isinstance(context.get("candidatePage"), dict) else {}
+    record_page = context.get("recordPage") if isinstance(context.get("recordPage"), dict) else {}
+    usage = context.get("usage") if isinstance(context.get("usage"), dict) else {}
+    record_continuation_hint = source_collection_context_record_continuation_hint(record_page, context_mode=context_mode)
+    compact_usage = {
+        "readTool": "source_collection_context_tool",
+        "writebackTool": "source_collection_stage_writeback_tool",
+        "continuationHint": source_collection_context_continuation_hint(candidate_page, context_mode=context_mode),
+    }
+    if not minimal_mode:
+        compact_usage["doNotUse"] = usage.get("doNotUse") if isinstance(usage.get("doNotUse"), list) else []
+    if trim_text(usage.get("retryInstruction"), max_length=1000):
+        compact_usage["retryInstruction"] = trim_text(usage.get("retryInstruction"), max_length=1000)
+    records = [
+        compact_source_collection_context_record(item)
+        for item in list(context.get("records") or [])
+        if isinstance(item, dict)
+    ] if not minimal_mode or not list(context.get("candidates") or []) else []
+    candidates = [
+        compact_source_collection_context_candidate(item, minimal=minimal_mode)
+        for item in list(context.get("candidates") or [])
+        if isinstance(item, dict)
+    ]
+    returned_candidate_count = source_collection_count(candidate_page.get("returned"))
+    compact = {
+        "schemaVersion": context.get("schemaVersion"),
+        "status": context.get("status"),
+        "contextKind": context.get("contextKind"),
+        "contextMode": context_mode,
+        "fieldMode": "id_and_locator_only" if minimal_mode else "preview_only",
+        "candidateFieldsTruncated": True,
+        "doNotUsePreviewAsEvidence": True,
+        "teamId": trim_text(context.get("teamId"), max_length=128),
+        "runId": trim_text(context.get("runId"), max_length=128),
+        "stageId": trim_text(context.get("stageId"), max_length=80),
+        "taskId": trim_text(context.get("taskId"), max_length=160),
+        "counts": normalize_metadata(context.get("counts")),
+        "candidates": candidates,
+        "candidatePage": normalize_metadata(candidate_page),
+        "usage": compact_usage,
+    }
+    if not minimal_mode:
+        compact["visibleCandidateCount"] = len(candidates)
+        compact["omittedReturnedCandidateCount"] = max(0, returned_candidate_count - len(candidates))
+        compact["agentId"] = trim_text(context.get("agentId"), max_length=160)
+        compact["agentRole"] = trim_text(context.get("agentRole"), max_length=80)
+        compact["run"] = compact_source_collection_context_run(context.get("run") if isinstance(context.get("run"), dict) else {})
+        compact["task"] = compact_source_collection_context_task(context.get("task") if isinstance(context.get("task"), dict) else {})
+        compact["unassessedCandidateIds"] = normalize_text_list(context.get("unassessedCandidateIds"), max_items=80, max_length=160)
+        compact["allUnassessedCandidateCount"] = source_collection_count(context.get("allUnassessedCandidateCount"))
+    if records:
+        compact["records"] = records
+    if not minimal_mode:
+        compact["writebackContract"] = compact_source_collection_writeback_contract(
+            context.get("writebackContract") if isinstance(context.get("writebackContract"), dict) else {}
+        )
+        compact["boundaries"] = compact_source_collection_boundaries(
+            context.get("boundaries") if isinstance(context.get("boundaries"), dict) else {}
+        )
+    if isinstance(context.get("retryFocus"), dict):
+        compact["retryFocus"] = normalize_metadata(context["retryFocus"])
+    compact_record_ids = [
+        trim_text(item.get("recordId"), max_length=160)
+        for item in records
+        if trim_text(item.get("recordId"), max_length=160)
+    ]
+    if record_continuation_hint:
+        compact_usage["recordContinuationHint"] = record_continuation_hint
+    excluded_source_summary = normalize_metadata(context.get("excludedSourceSummary"))
+    if source_collection_count(excluded_source_summary.get("excludedCount")):
+        compact["excludedSourceSummary"] = compact_source_collection_excluded_summary(excluded_source_summary)
+    if compact_record_ids or source_collection_count(record_page.get("total")) or bool(record_page.get("hasMore")):
+        compact["recordPage"] = normalize_metadata(record_page)
+        compact["recordIds"] = compact_record_ids
+    if isinstance(context.get("stewardActionPacket"), dict):
+        compact["stewardActionPacket"] = context["stewardActionPacket"]
+    return compact
+
+
+def compact_source_collection_excluded_summary(summary: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: summary.get(key)
+        for key in ("excludedCount", "activeRecordCount", "rawRecordCount")
+        if key in summary
+    }
+
+
+def compact_source_collection_context_record(record: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "recordId": trim_text(record.get("recordId"), max_length=128),
+        "title": trim_text(record.get("title"), max_length=180),
+        "summary": trim_text(record.get("summary"), max_length=260),
+        "sourceType": trim_text(record.get("sourceType"), max_length=80),
+        "sourceUrl": trim_text(record.get("sourceUrl"), max_length=320),
+        "doi": trim_text(record.get("doi"), max_length=160),
+        "containerTitle": trim_text(record.get("containerTitle"), max_length=160),
+        "issued": trim_text(record.get("issued"), max_length=80),
+        "query": trim_text(record.get("query"), max_length=240),
+        "assignmentId": trim_text(record.get("assignmentId"), max_length=128),
+        "identityKey": trim_text(record.get("identityKey"), max_length=180),
+    }
+
+
+def compact_source_collection_context_candidate(candidate: dict[str, Any], *, minimal: bool = False) -> dict[str, Any]:
+    latest_assessment = candidate.get("latestAssessment") if isinstance(candidate.get("latestAssessment"), dict) else {}
+    content_extraction = candidate.get("contentExtraction") if isinstance(candidate.get("contentExtraction"), dict) else {}
+    doi = trim_text(candidate.get("doi"), max_length=160)
+    source_url = trim_text(candidate.get("sourceUrl"), max_length=120 if minimal else 180)
+    source_path = trim_text(candidate.get("sourcePath"), max_length=120 if minimal else 180)
+    locator = doi or source_url or source_path
+    compact: dict[str, Any] = {
+        "candidateId": trim_text(candidate.get("candidateId"), max_length=128),
+        "title": trim_text(candidate.get("title"), max_length=80 if minimal else 120),
+        "summaryPreview": trim_text(candidate.get("summary"), max_length=48 if minimal else 24),
+        "sourceKind": trim_text(candidate.get("sourceKind"), max_length=80),
+        "locator": locator,
+        "sourceRecordId": trim_text(candidate.get("sourceRecordId"), max_length=128),
+        "qualityStatus": trim_text(candidate.get("qualityStatus"), max_length=80),
+        "qualityBucket": trim_text(candidate.get("qualityBucket"), max_length=80),
+    }
+    if latest_assessment and not minimal:
+        compact["latestAssessment"] = {
+            "decision": trim_text(latest_assessment.get("decision"), max_length=80),
+            "assessedByAgent": trim_text(latest_assessment.get("assessedByAgent"), max_length=160),
+            "notes": trim_text(latest_assessment.get("notes"), max_length=220),
+        }
+    if content_extraction and not minimal:
+        compact["contentExtraction"] = {
+            "status": trim_text(content_extraction.get("status"), max_length=80),
+            "summary": trim_text(content_extraction.get("summary"), max_length=140),
+            "taskId": trim_text(content_extraction.get("taskId"), max_length=160),
+        }
+    return {
+        key: value
+        for key, value in compact.items()
+        if value not in ("", [], {})
+    }
+
+
+def compact_source_collection_context_run(run: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "runId": trim_text(run.get("runId"), max_length=128),
+        "status": trim_text(run.get("status"), max_length=80),
+    }
+
+
+def compact_source_collection_context_task(task: dict[str, Any]) -> dict[str, Any]:
+    compact = {
+        "taskId": trim_text(task.get("taskId"), max_length=160),
+        "stageId": trim_text(task.get("stageId"), max_length=80),
+        "agentId": trim_text(task.get("agentId"), max_length=160),
+        "agentRole": trim_text(task.get("agentRole"), max_length=80),
+        "status": trim_text(task.get("status"), max_length=80),
+        "summary": trim_text(task.get("summary"), max_length=240),
+    }
+    task_status = trim_text(task.get("status"), max_length=80).lower()
+    should_show_gate = task_status not in {"", "running", "queued"}
+    if should_show_gate and isinstance(task.get("taskToolProgress"), dict):
+        progress = task["taskToolProgress"]
+        compact["taskToolProgress"] = {
+            key: progress.get(key)
+            for key in (
+                "complete",
+                "completed",
+                "total",
+                "pendingIds",
+                "pendingReason",
+                "traceAvailable",
+                "taskCreateObserved",
+                "toolCallCount",
+                "completedByTrace",
+            )
+            if key in progress
+        }
+    if should_show_gate and isinstance(task.get("completionGate"), dict):
+        gate = task["completionGate"]
+        compact["completionGate"] = {
+            key: gate.get(key)
+            for key in ("passed", "artifactComplete", "taskChecklistComplete")
+            if key in gate
+        }
+    return compact
+
+
+def compact_source_collection_writeback_contract(contract: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: contract.get(key)
+        for key in (
+            "taskId",
+            "teamId",
+            "runId",
+            "stageId",
+            "writebackTool",
+            "requiresStructuredResult",
+            "resultAuthority",
+            "writesFormalKnowledge",
+            "writesOfficialGraph",
+        )
+        if key in contract
+    }
+
+
+def compact_source_collection_boundaries(boundaries: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: boundaries.get(key)
+        for key in (
+            "writesFormalKnowledge",
+            "writesRag",
+            "writesOfficialGraph",
+            "requiresStructuredWriteback",
+            "externalSearchAllowed",
+            "localFileReadAllowed",
+        )
+        if key in boundaries
+    }

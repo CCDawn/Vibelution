@@ -10,11 +10,12 @@ def trim_text(value: Any, *, max_length: int) -> str:
     return text[:max_length]
 
 
-def source_collection_count(value: Any) -> int:
+def source_collection_count(value: Any, *, maximum: int = 100_000) -> int:
     try:
-        return max(0, int(value or 0))
+        number = int(value or 0)
     except (TypeError, ValueError):
         return 0
+    return max(0, min(maximum, number))
 
 
 def normalize_source_collection_stage_id(value: Any, *, default: str = "finding") -> str:
@@ -48,3 +49,14 @@ def normalize_metadata_value(value: Any) -> Any:
     if isinstance(value, dict):
         return normalize_metadata(value)
     return trim_text(value, max_length=1000)
+
+
+def normalize_text_list(value: Any, *, max_items: int, max_length: int) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    normalized: list[str] = []
+    for item in value[:max_items]:
+        text = trim_text(item, max_length=max_length)
+        if text and text not in normalized:
+            normalized.append(text)
+    return normalized
