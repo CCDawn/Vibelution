@@ -1,10 +1,12 @@
 # HeroUI Frontend Unification Phase 2 Implementation Plan
 
+> **Implementation status:** complete on 2026-07-10 after focused tests, production build, scoped diff review, Launcher refresh, and live Agents/Teams/Memory desktop verification.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 ## Status Metadata
 
-- **Status:** active-plan
+- **Status:** implemented and locally validated
 - **Owner:** `codex-heroui-frontend-unification`
 - **Planning claim:** `claim-3d254fa14e72`
 - **Execution branch:** `codex/heroui-frontend-unification-phase-2`

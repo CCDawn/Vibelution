@@ -2,15 +2,15 @@
 
 ## Status Metadata
 
-- **Status:** user-approved — converted into the Phase 1 implementation plan
+- **Status:** Phase 1 and Phase 2 implemented and locally validated; Evolution/operational and remaining-route phases remain planned separately
 - **Owner:** `codex-heroui-frontend-unification`
 - **Claim:** `claim-1d2ef8a22871`
 - **Branch:** `codex/heroui-frontend-unification`
 - **Worktree:** `C:\Users\17533\Desktop\Vibelution-worktrees\heroui-frontend-unification`
 - **Scope:** unify the complete desktop frontend through existing VUI/HeroUI/Tailwind ownership, with `AppShell + Chat` as the first implementation stage
 - **Supersedes:** none
-- **Implementation link:** `docs/superpowers/plans/2026-07-10-heroui-frontend-unification-phase-1.md`
-- **Validation:** written-spec self-review, scoped Markdown/diff checks, then phase-specific frontend tests, builds, and browser evidence during implementation
+- **Implementation link:** `docs/superpowers/plans/2026-07-10-heroui-frontend-unification-phase-2.md`
+- **Validation:** Phase 1 AppShell/Chat and Phase 2 Agents/Teams/Memory focused Vitest, production build, scoped diff review, Launcher refresh, and three-viewport light/dark browser evidence passed
 - **Close condition:** satisfied on 2026-07-10 when the user approved the written design and it was converted into the bounded Phase 1 implementation plan
 
 ## Goal
