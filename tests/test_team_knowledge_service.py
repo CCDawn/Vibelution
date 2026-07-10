@@ -1,7 +1,14 @@
 import pytest
 
 from core.infrastructure import developer_sandbox
-from core.web.services import agent_directory_service, chat_room_service, memory_graph_service, team_knowledge_service, team_service
+from core.web.services import (
+    agent_directory_service,
+    agent_role_tool_profile_service,
+    chat_room_service,
+    memory_graph_service,
+    team_knowledge_service,
+    team_service,
+)
 
 
 def _enable_developer_sandbox(project_root, monkeypatch):
@@ -469,15 +476,19 @@ def test_agent_inbox_is_private_and_global_steward_can_promote(knowledge_env):
 
 def test_knowledge_steward_policy_includes_skill_library_search_tool():
     policy = agent_directory_service._knowledge_steward_tool_policy()
+    expected_policy = agent_role_tool_profile_service.resolve_role_tool_policy(
+        role_key="knowledge_steward",
+        primary_mode="general",
+        metadata={"systemRole": "knowledge_steward"},
+        policy_id=agent_directory_service.KNOWLEDGE_STEWARD_TOOL_POLICY_ID,
+    )
+    assert expected_policy is not None
 
     assert "skill_library_search_tool" in policy["allowedTools"]
     assert "skill_library_search_tool" in policy["preferredTools"]
     assert "source_collection_context_tool" in policy["allowedTools"]
     assert "source_collection_stage_writeback_tool" in policy["allowedTools"]
-    assert policy["preferredTools"][:2] == [
-        "source_collection_context_tool",
-        "source_collection_stage_writeback_tool",
-    ]
+    assert policy["preferredTools"] == expected_policy["preferredTools"]
 
 
 def test_research_agent_creation_and_readiness_report_expose_unified_memory_search(knowledge_env):
@@ -495,9 +506,15 @@ def test_research_agent_creation_and_readiness_report_expose_unified_memory_sear
         name="Research Memory KB",
         actor_agent_id=research_agent["agentId"],
     )
+    expected_policy = agent_role_tool_profile_service.resolve_role_tool_policy(
+        role_key="research_paper_reader",
+        primary_mode="research",
+        policy_id=f"tool-{research_agent['agentId']}",
+    )
+    assert expected_policy is not None
 
-    assert "unified_memory_search_tool" in research_agent["toolPolicy"]["allowedTools"]
-    assert research_agent["toolPolicy"]["preferredTools"][0] == "unified_memory_search_tool"
+    assert research_agent["toolPolicy"]["allowedTools"] == expected_policy["allowedTools"]
+    assert research_agent["toolPolicy"]["preferredTools"] == expected_policy["preferredTools"]
 
     report = team_knowledge_service.get_agent_memory_readiness_report(agent_id=knowledge_env["lead"]["agentId"])
     row = next(item for item in report["agents"] if item["agentId"] == research_agent["agentId"])

@@ -2448,7 +2448,7 @@
               <b>M6.66</b>
               <strong>阶段卡 Agent 会话任务桥</strong>
               <span>知识搜集四张步骤卡的主按钮不再直接执行本地阶段动作，而是创建对应功能 Agent 的 direct session task 并跳转到会话页执行。</span>
-              <span>任务落盘到 source_collection_runs/&lt;runId&gt;/stage_session_tasks.json；Chat URL 保留 returnTo/returnLabel；Agent 先用 source_collection_context_tool 读取受控资料上下文，再用 source_collection_stage_writeback_tool 结构化回写 sourceCollectionStageSessionTasks，团队阶段再展示结果；不通过 file:// 或 localhost fetch 猜本地资料。</span>
+              <span>任务落盘到 source_collection_runs/&lt;runId&gt;/stage_session_tasks.json；Chat URL 保留 returnTo/returnLabel；Agent 先调用 task_list_tool / task_create_tool 绑定阶段 checklist，再用 source_collection_context_tool 读取受控资料上下文，并用 source_collection_stage_writeback_tool 结构化回写 sourceCollectionStageSessionTasks；团队阶段再展示结果；不通过 file:// 或 localhost fetch 猜本地资料。</span>
             </div>
 <div class="blueprint-row">
               <b>M6.67</b>
