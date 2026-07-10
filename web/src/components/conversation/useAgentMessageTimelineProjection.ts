@@ -247,16 +247,16 @@ function mergeLiveOverlayIntoActiveTurnMessage(
   };
 }
 
-function hasCommittedAssistantAnswerForActiveTurn(
+function committedAssistantAnswerForTurn(
   messages: ConversationMessage[],
-  activeTurnMessage: ConversationMessage,
+  turnMessage: ConversationMessage,
 ) {
-  return messages.some((message) => {
+  return messages.find((message) => {
     if (
       message.role !== "assistant"
       || isSessionLiveOverlayMessage(message)
       || isSessionActiveTurnLayerMessage(message)
-      || !isSameConversationTurn(message, activeTurnMessage)
+      || !isSameConversationTurn(message, turnMessage)
     ) {
       return false;
     }
@@ -264,11 +264,50 @@ function hasCommittedAssistantAnswerForActiveTurn(
   });
 }
 
-function removeSupersededSessionLiveOverlays(messages: ConversationMessage[]) {
-  return messages.filter((message) => (
-    !isSessionLiveOverlayMessage(message)
-    || !hasCommittedAssistantAnswerForActiveTurn(messages, message)
-  ));
+function hasCommittedAssistantAnswerForActiveTurn(
+  messages: ConversationMessage[],
+  activeTurnMessage: ConversationMessage,
+) {
+  return Boolean(committedAssistantAnswerForTurn(messages, activeTurnMessage));
+}
+
+function withoutSupersededAssistantAnswer(message: ConversationMessage): ConversationMessage {
+  return {
+    ...message,
+    content: "",
+    timelineItems: message.timelineItems?.filter((item) => item.kind !== "assistant_text"),
+  };
+}
+
+function consolidateSupersededSessionLiveOverlays(messages: ConversationMessage[]) {
+  const overlaysByCommittedMessageId = new Map<string, ConversationMessage[]>();
+  const supersededOverlays = new Set<ConversationMessage>();
+  for (const message of messages) {
+    if (!isSessionLiveOverlayMessage(message)) {
+      continue;
+    }
+    const committedMessage = committedAssistantAnswerForTurn(messages, message);
+    if (!committedMessage) {
+      continue;
+    }
+    supersededOverlays.add(message);
+    const overlays = overlaysByCommittedMessageId.get(committedMessage.id) ?? [];
+    overlays.push(withoutSupersededAssistantAnswer(message));
+    overlaysByCommittedMessageId.set(committedMessage.id, overlays);
+  }
+  return messages.flatMap((message) => {
+    if (supersededOverlays.has(message)) {
+      return [];
+    }
+    const overlays = overlaysByCommittedMessageId.get(message.id);
+    if (!overlays?.length) {
+      return [message];
+    }
+    return [overlays.reduce(
+      (committedMessage, overlay) => mergeLiveOverlayIntoActiveTurnMessage(overlay, committedMessage),
+      message,
+    )];
+  });
 }
 
 export function projectAgentMessageTimelineMessages({
@@ -276,7 +315,7 @@ export function projectAgentMessageTimelineMessages({
   activeTurnMessage,
 }: AgentMessageTimelineProjectionInput): AgentMessageTimelineProjection {
   const projectedMessages = (() => {
-    const visibleTimelineMessages = removeSupersededSessionLiveOverlays(
+    const visibleTimelineMessages = consolidateSupersededSessionLiveOverlays(
       chronologicalConversationMessages(timelineMessages)
         .filter(hasVisibleProjectionMessageContent),
     );
