@@ -264,13 +264,22 @@ function hasCommittedAssistantAnswerForActiveTurn(
   });
 }
 
+function removeSupersededSessionLiveOverlays(messages: ConversationMessage[]) {
+  return messages.filter((message) => (
+    !isSessionLiveOverlayMessage(message)
+    || !hasCommittedAssistantAnswerForActiveTurn(messages, message)
+  ));
+}
+
 export function projectAgentMessageTimelineMessages({
   timelineMessages,
   activeTurnMessage,
 }: AgentMessageTimelineProjectionInput): AgentMessageTimelineProjection {
   const projectedMessages = (() => {
-    const visibleTimelineMessages = chronologicalConversationMessages(timelineMessages)
-      .filter(hasVisibleProjectionMessageContent);
+    const visibleTimelineMessages = removeSupersededSessionLiveOverlays(
+      chronologicalConversationMessages(timelineMessages)
+        .filter(hasVisibleProjectionMessageContent),
+    );
     if (!activeTurnMessage || hasCommittedAssistantAnswerForActiveTurn(visibleTimelineMessages, activeTurnMessage)) {
       return projectTimelineProcessMessages(visibleTimelineMessages);
     }
