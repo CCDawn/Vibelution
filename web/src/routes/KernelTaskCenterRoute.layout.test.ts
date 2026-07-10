@@ -106,12 +106,14 @@ describe("KernelTaskCenterRoute layout contract", () => {
     expect(styles.ledgerSectionClass).toContain("border-t");
     expect(styles.ledgerSectionClass).toContain("pt-2");
     expect(styles.ledgerSectionClass).not.toContain("bg-");
+    expect(styles.ledgerSectionClass).not.toContain("[background:");
     expect(styles.ledgerSectionClass).not.toContain("rounded-[var(--radius-panel)]");
     expect(styles.ledgerSectionClass).not.toContain("shadow-");
 
     expect(styles.ledgerBucketClass).toContain("grid");
     expect(styles.ledgerBucketClass).toContain("content-start");
     expect(styles.ledgerBucketClass).not.toContain("bg-");
+    expect(styles.ledgerBucketClass).not.toContain("[background:");
     expect(styles.ledgerBucketClass).not.toContain("rounded-[var(--radius-panel)]");
     expect(styles.ledgerBucketClass).not.toContain("cardSurface");
     expect(styles.ledgerBucketClass).not.toContain("shadow-");
