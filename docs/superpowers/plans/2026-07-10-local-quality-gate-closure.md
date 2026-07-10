@@ -1177,7 +1177,7 @@ git commit -m "feat: record local closeout evidence"
 ```python
 def test_pre_commit_is_thin_adapter() -> None:
     hook = (gate.PROJECT_ROOT / ".githooks" / "pre-commit").read_text(encoding="utf-8")
-    assert "scripts/local_quality_gate.py commit" in hook
+    assert '"$repo_root/scripts/local_quality_gate.py" commit' in hook
     assert "pytest" not in hook
     assert "ruff" not in hook
 ```
@@ -1192,6 +1192,8 @@ def test_doctor_reports_local_quality_gate_and_hook_configuration():
     assert report["checks"]["git_hooks_path"]["repair"] == "git config core.hooksPath .githooks"
     assert report["checks"]["pre_commit_hook"]["ok"] is True
     assert report["checks"]["local_quality_gate"]["ok"] is True
+    assert report["checks"]["ruff"]["ok"] is True
+    assert "ruff" in report["checks"]["ruff"]["version"].lower()
 ```
 
 - [ ] **Step 2: 运行 tests 并确认新契约失败**
@@ -1213,6 +1215,7 @@ project_python="$repo_root/.venv/Scripts/python.exe"
 
 if [ ! -x "$project_python" ]; then
   echo "[pre-commit] missing project Python: $project_python" >&2
+  echo "[pre-commit] repair: powershell -ExecutionPolicy Bypass -File scripts/vibelution_launcher.ps1 -Action repair-deps" >&2
   exit 1
 fi
 
@@ -1229,6 +1232,8 @@ $configuredHooksPath = (& git -C $resolvedRoot config --get core.hooksPath 2>$nu
 $hooksPathOk = ($LASTEXITCODE -eq 0) -and (($configuredHooksPath -join "").Trim() -eq $expectedHooksPath)
 $preCommitHook = Join-Path $resolvedRoot ".githooks\pre-commit"
 $qualityGateScript = Join-Path $resolvedRoot "scripts\local_quality_gate.py"
+$ruffVersion = & $selectedPython -m ruff --version 2>$null
+$ruffOk = ($LASTEXITCODE -eq 0)
 ```
 
 在 `$report.checks` 中加入：
@@ -1248,9 +1253,14 @@ local_quality_gate = [PSCustomObject]@{
     ok = (Test-Path $qualityGateScript)
     path = $qualityGateScript
 }
+ruff = [PSCustomObject]@{
+    ok = $ruffOk
+    version = ($ruffVersion -join "`n")
+    executable = $selectedPython
+}
 ```
 
-将 `$allChecksOk` 纳入这三项；非 JSON 输出打印 configured/expected 与 repair，但不得调用 `git config` 写操作。
+`$allChecksOk` 纳入 tracked hook、gate script 与 Ruff 可用性，但 `git_hooks_path.ok` 只作为用户级 advisory，不把尚未运行 `git config core.hooksPath .githooks` 的仓库误判为 Python 环境损坏。非 JSON 输出打印 configured/expected、Ruff version 与 repair，但不得调用 `git config` 写操作。
 
 - [ ] **Step 5: 运行 doctor tests、静态写操作扫描与 diff hygiene**
 
