@@ -635,7 +635,7 @@ layout:
   panelSearchInput:
     "vui-routes-chatcodingroute panelSearchInput min-w-0 w-full !border-0 !bg-transparent px-0 py-0 text-[var(--fg-primary)] !shadow-none [&_[data-slot=input-wrapper]]:min-h-[34px] [&_[data-slot=input-wrapper]]:rounded-[var(--radius-control)] [&_[data-slot=input-wrapper]]:border [&_[data-slot=input-wrapper]]:border-[color-mix(in_srgb,var(--vui-border-subtle)_72%,transparent)] [&_[data-slot=input-wrapper]]:bg-[color-mix(in_srgb,var(--vui-surface-row)_56%,transparent)] [&_[data-slot=input-wrapper]]:shadow-none [&_[data-slot=input-wrapper]]:transition-colors [&_[data-slot=input-wrapper]]:hover:border-[color-mix(in_srgb,var(--accent-cool)_24%,var(--vui-border-subtle))] [&_[data-slot=input-wrapper]]:data-[focus=true]:border-[color-mix(in_srgb,var(--accent-cool)_42%,var(--vui-border-subtle))] [&_[data-slot=input-wrapper]]:data-[focus=true]:bg-[color-mix(in_srgb,var(--surface-card)_66%,transparent)] [&_[data-slot=input]]:text-[var(--vui-font-sm)] [&_[data-slot=input]]:text-[var(--fg-primary)] [&_[data-slot=input]]:placeholder:text-[var(--fg-tertiary)] [&_[data-slot=inner-wrapper]]:gap-1.5",
   panelState:
-    "vui-routes-chatcodingroute panelState grid min-h-[42px] min-w-0 place-items-center rounded-[var(--radius-control)] border border-dashed border-[var(--vui-border-subtle)] bg-[color-mix(in_srgb,var(--vui-surface-row)_66%,transparent)] px-2 py-2 text-center text-[var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-tertiary)]",
+    "vui-routes-chatcodingroute panelState min-h-[72px] place-items-center text-center",
   petMiniAvatar:
     "vui-routes-chatcodingroute petMiniAvatar min-w-0 inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)]",
   petShowcaseAction:
@@ -820,7 +820,7 @@ layout:
   rightIndexTabs:
     "vui-routes-chatcodingroute rightIndexTabs min-w-0 !grid grid-cols-[repeat(2,minmax(0,1fr))] gap-1",
   rightPane:
-    "vui-routes-chatcodingroute rightPane min-w-0 grid h-full min-h-0 gap-[var(--chat-workbench-gap)] overflow-hidden p-[var(--chat-workbench-gap)] [grid-column:1] [grid-row:1]",
+    "vui-routes-chatcodingroute rightPane min-w-0 grid h-full min-h-0 gap-[var(--chat-workbench-gap)] overflow-hidden rounded-[var(--vui-radius-panel-soft)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-rail)] p-[var(--chat-workbench-gap)] shadow-[var(--vui-elevation-panel)] [grid-column:1] [grid-row:1]",
   rightPaneWithTabs:
     "vui-routes-chatcodingroute rightPaneWithTabs grid-rows-[auto_auto_minmax(0,1fr)]",
   rightPaneWithoutTabs:
@@ -836,7 +836,7 @@ layout:
   sectionTitle:
     "vui-routes-chatcodingroute sectionTitle min-w-0 text-[var(--vui-font-title)] font-semibold leading-tight text-[var(--fg-primary)] m-0 text-[var(--vui-font-title)] font-semibold leading-tight text-[var(--fg-primary)]",
   sessionActionRow:
-    "vui-routes-chatcodingroute sessionActionRow grid min-w-0 grid-cols-[auto_auto] flex flex-wrap items-center justify-start gap-1.5 rounded-none border-0 bg-transparent p-0",
+    "vui-routes-chatcodingroute sessionActionRow flex min-w-0 flex-wrap items-center justify-start gap-1.5 border-0 bg-transparent p-0",
   sessionActionStack:
     "vui-routes-chatcodingroute sessionActionStack min-w-0 flex flex-wrap items-center gap-1.5",
   sessionBindingNotice:
