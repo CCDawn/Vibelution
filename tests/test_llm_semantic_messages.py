@@ -140,13 +140,13 @@ class StubAdapter:
         self.wire_protocol = protocol
         self.adapter_id = adapter_id
 
-    def encode_request(self, request: SemanticModelRequest) -> BuiltPayload:
-        return BuiltPayload(body={"semantic_message_count": len(request.messages)})
+    def encode_request(self, request: SemanticModelRequest, *, route) -> BuiltPayload:
+        return BuiltPayload(body={"model": route.effective_model, "semantic_message_count": len(request.messages)})
 
-    def decode_response(self, response):
+    def decode_response(self, response, *, route, scope):
         return TurnOutcome.final_answer(identity=identity(), text=str(response))
 
-    def decode_stream(self, events):
+    def decode_stream(self, events, *, route, scope):
         return iter(())
 
     def encode_tool_results(self, results):
@@ -170,9 +170,9 @@ def test_wire_registry_rejects_cross_route_replay_before_adapter_send():
     class CountingAdapter(StubAdapter):
         called = False
 
-        def encode_request(self, request: SemanticModelRequest) -> BuiltPayload:
+        def encode_request(self, request: SemanticModelRequest, *, route) -> BuiltPayload:
             self.called = True
-            return super().encode_request(request)
+            return super().encode_request(request, route=route)
 
     registry = WireAdapterRegistry()
     adapter = CountingAdapter(WireProtocol.RESPONSES, "responses")
@@ -183,6 +183,7 @@ def test_wire_registry_rejects_cross_route_replay_before_adapter_send():
         provider_id="relay_openai",
         runtime_endpoint="https://relay.example.test/v1",
         model_id="relay_gpt_5_6_luna",
+        effective_model="gpt-5.6-luna",
     )
     replay_state = ProviderReplayState(
         issuer="other-adapter",
@@ -208,3 +209,27 @@ def test_wire_registry_rejects_cross_route_replay_before_adapter_send():
     with pytest.raises(ValueError, match="route identity mismatch"):
         registry.encode_request(route, request)
     assert adapter.called is False
+
+
+def test_wire_registry_passes_immutable_route_to_stateless_encoder():
+    registry = WireAdapterRegistry()
+    adapter = StubAdapter(WireProtocol.RESPONSES, "responses")
+    registry.register(adapter)
+    route = SimpleNamespace(
+        adapter_id="responses",
+        wire_protocol=WireProtocol.RESPONSES,
+        provider_id="relay_openai",
+        runtime_endpoint="https://relay.example.test/v1",
+        model_id="relay_gpt_5_6_luna",
+        effective_model="gpt-5.6-luna",
+    )
+    request = SemanticModelRequest(
+        scope=InvocationScope(session_id="s", turn_id="t", invocation_id="i", iteration=0),
+        messages=(),
+        tools=(),
+        settings=SemanticGenerationSettings(max_output_tokens=32),
+    )
+
+    payload = registry.encode_request(route, request)
+
+    assert payload.body["model"] == "gpt-5.6-luna"

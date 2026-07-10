@@ -6,7 +6,8 @@ from typing import Any
 
 from ..protocols import WireProtocol
 from ..provider_replay_state import endpoint_fingerprint
-from ..semantic_messages import SemanticModelRequest
+from ..semantic_messages import InvocationScope, SemanticModelRequest
+from ..types import TurnOutcome
 from .base import WireAdapter
 from .types import BuiltPayload
 
@@ -43,4 +44,10 @@ class WireAdapterRegistry:
                 model_id=str(getattr(route, "model_id", "") or ""),
                 wire_protocol=route.wire_protocol,
             )
-        return adapter.encode_request(request)
+        return adapter.encode_request(request, route=route)
+
+    def decode_response(self, route: Any, response: Any, *, scope: InvocationScope) -> TurnOutcome:
+        return self.resolve(route).decode_response(response, route=route, scope=scope)
+
+    def decode_stream(self, route: Any, events: Any, *, scope: InvocationScope):
+        return self.resolve(route).decode_stream(events, route=route, scope=scope)
