@@ -81,7 +81,7 @@ import type { ConversationStreamingFramePaintMetrics } from "../components/conve
 import { shouldShowNextStateSignalInConversation } from "../components/conversation/conversationNextStateSignal";
 import type { TurnAvatarResolution } from "../components/conversation/conversationTurnAvatar";
 import { isAgentInboxMessage, isTurnErrorMessage } from "../components/conversation/conversationMessagePredicates";
-import { VButton, VInput, VNativeInput, VNativeSelect } from "../components/vui";
+import { VButton, VInput, VNativeInput, VNativeSelect, VTooltip, type VButtonProps } from "../components/vui";
 import { collectBrowserPageSnapshot, postBrowserTelemetry } from "../app/browserTelemetry";
 import { getPageInstanceId } from "../app/pageInstance";
 import { resolvePollingInterval, usePageVisibility, useStartupWarmup } from "../app/pollingPolicy";
@@ -6528,10 +6528,7 @@ export function ChatCodingRoute() {
 
         <section className={`${styles.leftBlock} ${styles.featurePresetBlock} ${styles.runModeBlock}`}>
           <div className={styles.sectionHeader}>
-            <div className={styles.sectionIdentity}>
-              <p className={styles.blockEyebrow}>{lang === "zh" ? "模式控制" : "Mode controls"}</p>
-              <h3 className={styles.sectionTitle}>{lang === "zh" ? "运行模式" : "Run modes"}</h3>
-            </div>
+            <h3 className={styles.sectionTitle}>{lang === "zh" ? "运行模式" : "Run modes"}</h3>
             <span className={styles.featurePresetScope} title={t("chatFeaturePanelHint")}>{lang === "zh" ? "下轮生效" : "Next turn"}</span>
           </div>
           <div className={styles.featureChipRow}>
@@ -6583,13 +6580,36 @@ export function ChatCodingRoute() {
 
         <section className={`${styles.leftBlock} ${styles.companionBlock}`}>
           <div className={styles.sectionHeader}>
-            <div className={styles.sectionIdentity}>
-              <p className={styles.blockEyebrow}>{t("mentalState")} / {t("petSpace")}</p>
-              <p className={styles.sectionMetaLine}>{mentalCompactLine || mentalSourceLabel}</p>
-            </div>
-            <span className={`${styles.mentalStateBadge} ${styles[`mentalStateBadge_${mentalCognitiveStateValue}`]}`}>
+            <h3 className={styles.sectionTitle}>{t("mentalState")} / {t("petSpace")}</h3>
+            <VTooltip
+              content={mentalCompactLine || mentalSourceLabel}
+              renderTrigger={(tooltipTriggerProps) => {
+                const {
+                  children: _triggerChildren,
+                  className: triggerClassName,
+                  role: _triggerRole,
+                  tabIndex: _triggerTabIndex,
+                  ...triggerProps
+                } = tooltipTriggerProps;
+
+                return (
+                  <VButton
+                    {...(triggerProps as unknown as VButtonProps)}
+                    type="button"
+                    className={[
+                      triggerClassName,
+                      styles.mentalStateBadge,
+                      styles[`mentalStateBadge_${mentalCognitiveStateValue}`],
+                    ].filter(Boolean).join(" ")}
+                    aria-label={`${mentalStateLabel}. ${mentalCompactLine || mentalSourceLabel}`}
+                  >
+                    {mentalStateLabel}
+                  </VButton>
+                );
+              }}
+            >
               {mentalStateLabel}
-            </span>
+            </VTooltip>
           </div>
           <p className={styles.contextLineCompact}>{mentalSummary}</p>
           <div className={styles.companionCompact}>

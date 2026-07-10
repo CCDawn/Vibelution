@@ -44,6 +44,7 @@ import chatToolApprovalDialogStyles from "./chat/ChatToolApprovalDialog.styles";
 import chatToolApprovalDialogSource from "./chat/ChatToolApprovalDialog.tsx?raw";
 import { ChatToolApprovalDialog } from "./chat/ChatToolApprovalDialog";
 import cliAgentRunTerminalPanelStyles from "./chat/CliAgentRunTerminalPanel.styles";
+import llmPayloadTracePanelSource from "./chat/LlmPayloadTracePanel.tsx?raw";
 import { TokenCoreStatusPanel, type TokenCoreStatusMetric } from "./chat/TokenCoreStatusPanel";
 import tokenCoreStatusPanelSource from "./chat/TokenCoreStatusPanel.tsx?raw";
 
@@ -523,11 +524,10 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain('"--chat-right-pane-width": statusRailCollapsed ? "0px" : `${rightPanelWidth}px`');
     expect(routeStyles.leftRail).toContain("flex");
     expect(routeStyles.leftRail).toContain("flex-col");
-    expect(routeStyles.leftRail).toContain("gap-[var(--chat-workbench-gap)]");
-    expect(routeStyles.leftRail).toContain("p-[var(--chat-workbench-gap)]");
+    expect(routeStyles.leftRail).toContain("p-1");
     expect(routeStyles.leftBlock).toContain("shrink-0");
     expect(routeStyles.leftBlock).toContain("gap-1.5");
-    expect(routeStyles.leftBlock).toContain("p-1.5");
+    expect(routeStyles.leftBlock).toContain("p-2");
     expect(routeStyles.leftBlock).not.toContain("gap-[2px]");
     expect(routeStyles.leftBlock).not.toContain("p-[2px]");
     expect(routeStyles.companionBlock).not.toContain("!flex-1");
@@ -763,12 +763,15 @@ describe("ChatCodingRoute layout contract", () => {
   });
 
   it("keeps the left rail status stack soft and non-nested", () => {
-    expect(routeStyles.leftBlock).toContain("!bg-[var(--vui-surface-rail)]");
-    expect(routeStyles.leftBlock).toContain("border-[color-mix(in_srgb,var(--vui-border-strong)_66%,transparent)]");
+    expect(routeStyles.leftRail).toContain("rounded-[var(--vui-radius-panel-soft)]");
+    expect(routeStyles.leftRail).toContain("bg-[var(--vui-surface-rail)]");
+    expect(routeStyles.leftRail).toContain("shadow-[var(--vui-elevation-panel)]");
+    expect(routeStyles.leftBlock).toContain("border-b");
+    expect(routeStyles.leftBlock).toContain("bg-transparent");
     expect(routeStyles.leftBlock).toContain("shadow-none");
-    expect(routeStyles.leftBlock).not.toContain("bg-[color-mix(in_srgb,var(--vui-surface-glass)_82%,transparent)]");
-    expect(routeStyles.leftBlock).not.toContain("white)");
-    expect(routeStyles.blockEyebrow).toContain("text-[var(--vui-font-sm)]");
+    expect(routeStyles.leftBlock).not.toContain("rounded-[var(--radius-panel)]");
+    expect(routeStyles.leftBlock).not.toContain("!bg-[var(--vui-surface-rail)]");
+    expect(routeStyles.blockEyebrow).toContain("text-[var(--vui-font-xs)]");
     expect(routeStyles.blockEyebrow).toContain("font-semibold");
 
     expect(routeStyles.tokenCompressionCard).toBe("vui-routes-chatcodingroute tokenCompressionCard min-w-0");
@@ -801,6 +804,22 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.inlineMetaPill).toContain("min-h-[24px]");
     expect(routeStyles.petShowcaseAction).toContain("min-h-[30px]");
     expect(routeStyles.petShowcaseAction).toContain("text-[var(--vui-font-sm)]");
+  });
+
+  it("compresses repeated status prose while keeping critical guidance visible", () => {
+    expect(tokenCoreStatusPanelSource).toContain("VTooltip");
+    expect(tokenCoreStatusPanelSource).not.toContain('<p className={styles.blockEyebrow}>Token</p>');
+    expect(llmPayloadTracePanelSource).toContain("VTooltip");
+    expect(llmPayloadTracePanelSource).toContain("renderTrigger");
+    expect(llmPayloadTracePanelSource).toContain("aria-label={subtitle}");
+    expect(llmPayloadTracePanelSource).not.toContain("<span className={styles.llmPayloadTraceHelp} tabIndex={0}");
+    expect(llmPayloadTracePanelSource).not.toContain('<p className={styles.blockEyebrow}>LLM</p>');
+    expect(routeSource).not.toContain('<p className={styles.blockEyebrow}>{lang === "zh" ? "模式控制" : "Mode controls"}</p>');
+    expect(routeSource).not.toContain('<p className={styles.sectionMetaLine}>{mentalCompactLine || mentalSourceLabel}</p>');
+    expect(routeSource).toContain("content={mentalCompactLine || mentalSourceLabel}");
+    expect(routeSource).toContain('aria-label={`${mentalStateLabel}. ${mentalCompactLine || mentalSourceLabel}`}');
+    expect(routeSource).toContain("groupManagementHint");
+    expect(routeSource).toContain("sessionBindingNotice");
   });
 
   it("keeps left rail VButton cards from collapsing their internal grid layout", () => {
@@ -1010,7 +1029,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("const tokenStatusCacheTitle = [");
     expect(routeSource).not.toContain("const tokenStatusContextTitle = [");
     expect(routeSource).toContain("const tokenStatusCompressionTitle = [");
-    expect(tokenCoreStatusPanelSource).toContain("title={metric.title}");
+    expect(tokenCoreStatusPanelSource).toContain("content={metric.title}");
     expect(tokenCoreStatusPanelSource).toContain("\"--token-status-value\": metric.percent");
     expect(routeSource).toContain("cacheDetailOpenLabel");
     expect(routeSource).toContain("onOpenCacheDetail={openCacheDetail}");
@@ -1044,7 +1063,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("setCacheDetailOpen(true)");
     expect(tokenCoreStatusPanelSource).not.toContain("aria-controls={cacheDetailOpen ? \"cache-detail-dialog\" : undefined}");
     expect(routeSource).not.toContain("className={styles.contextCompositionItem} title={cacheCompositionTitle}");
-    expect(tokenCoreStatusPanelSource).toContain("title={metric.title}");
+    expect(tokenCoreStatusPanelSource).toContain("content={metric.title}");
     expect(routeSource).toContain("handleCacheDetailKeyDown");
     expect(routeSource).toContain("event.key === \"Escape\"");
     expect(routeSource).toContain("setCacheDetailOpen(false);");
@@ -1214,10 +1233,11 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.contextCompositionSegmentMissing).toBeTypeOf("string");
     expect(routeStyles.contextCompositionSegmentExact).toBeTypeOf("string");
     expect(routeStyles.contextCompositionSegmentUnused).toBeTypeOf("string");
-    expect(routeStyles.llmPayloadTracePanel).toBeTypeOf("string");
-    expect(routeStyles.llmPayloadTraceGrid).toContain("grid");
-    expect(routeStyles.llmPayloadTraceItem).toContain("min-w-0");
-    expect(routeStyles.llmPayloadTraceMuted).toContain("truncate");
+    expect(llmPayloadTracePanelSource).toContain('import styles from "./LlmPayloadTracePanel.styles"');
+    expect(llmPayloadTracePanelSource).toContain("styles.llmPayloadTracePanel");
+    expect(llmPayloadTracePanelSource).toContain("styles.llmPayloadTraceGrid");
+    expect(llmPayloadTracePanelSource).toContain("styles.llmPayloadTraceItem");
+    expect(llmPayloadTracePanelSource).toContain("styles.llmPayloadTraceMuted");
   });
 
   it("disables the cache metric trigger when cache details are unavailable", () => {
@@ -1290,7 +1310,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(tokenCoreStatusPanelSource).toContain("metric.displayValue ?? metric.value");
     expect(html).toContain(">128k</span>");
     expect(html).toContain("128,000 / 200,000");
-    expect(html).toContain("title=\"模型输入 128,000\"");
+    expect(html).toContain('aria-label="模型输入 128,000. 128,000 / 200,000 · 64%"');
     expect(routeSource).toContain("const compactNumberFormatter = useMemo(");
     expect(routeSource).toContain("displayValue: modelInputAvailable ? compactNumberFormatter.format(modelInputTokens) : \"--\"");
   });
