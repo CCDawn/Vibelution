@@ -1308,7 +1308,10 @@ def test_runtime_llm_probe_extends_private_lan_local_timeout(monkeypatch):
     result = _probe_llm_runtime(provider, profile)
 
     assert result["ok"] is True
-    assert captured["timeout"] == 30
+    assert captured["timeout"].connect == 20.0
+    assert captured["timeout"].read == 30.0
+    assert captured["timeout"].write == 30.0
+    assert captured["timeout"].pool == 30.0
     assert captured["max_tokens"] == 1
     assert captured["stream"] is False
 
