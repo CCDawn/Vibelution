@@ -158,7 +158,7 @@ describe("KernelTaskCenterRoute layout contract", () => {
     expect(routeSource).toContain("styles.detailContentClass");
   });
 
-  it("wraps long Kernel ids, refs, paths, and errors inside their panels", () => {
+  it("keeps long Kernel reference chips compact inside the flat ledger", () => {
     expect(styles.detailHeaderClass).toContain("max-w-full");
     expect(styles.detailTitleClass).toContain("truncate");
     expect(styles.deliveryRowClass).toContain("max-w-full");
@@ -167,8 +167,10 @@ describe("KernelTaskCenterRoute layout contract", () => {
     expect(styles.warningLineClass).toContain("break-words");
     expect(styles.lifecycleSummaryClass).toContain("break-words");
     expect(styles.chipCodeClass).toContain("max-w-full");
-    expect(styles.chipCodeClass).toContain("break-all");
-    expect(styles.chipCodeClass).toContain("whitespace-normal");
+    expect(styles.chipCodeClass).toContain("overflow-hidden");
+    expect(styles.chipCodeClass).toContain("truncate");
+    expect(styles.chipCodeClass).toContain("whitespace-nowrap");
+    expect(styles.chipCodeClass).not.toContain("break-all");
     expect(styles.emptyStateClass).toContain("break-words");
   });
 
