@@ -4,6 +4,7 @@ import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
+import { ConversationImagePreviewDialog } from "./ConversationImagePreviewDialog";
 import dialogSource from "./ConversationImagePreviewDialog.tsx?raw";
 import conversationViewSource from "./ConversationView.tsx?raw";
 import styles from "./ConversationImagePreviewDialog.styles";
@@ -24,8 +25,7 @@ describe("ConversationImagePreviewDialog", () => {
     expect(conversationViewSource).not.toContain("className={styles.imagePreviewToolbar}");
   });
 
-  it("renders a preview dialog with download and close actions", async () => {
-    const { ConversationImagePreviewDialog } = await import("./ConversationImagePreviewDialog");
+  it("renders a preview dialog with download and close actions", () => {
     const onClose = vi.fn();
     const html = renderToStaticMarkup(
       <ConversationImagePreviewDialog image={image} lang="zh" onClose={onClose} />,
