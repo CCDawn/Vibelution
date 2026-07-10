@@ -2220,6 +2220,399 @@ def test_force_stop_chat_room_round_cancels_waiting_agent_slot(tmp_path, monkeyp
     assert chat_room_service.load_chat_room_work_run_summary()["active"] is None
 
 
+def test_chat_room_detail_reconciles_terminal_work_run_after_backend_restart(tmp_path, monkeypatch):
+    _seed_chat_sessions(tmp_path)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(work_run_store, "WORK_RUNS_DIR", tmp_path / "work_runs")
+
+    room = chat_room_service.create_chat_room(
+        title="重启后待收口群聊",
+        participant_session_ids=["session-alpha", "session-beta"],
+    )
+    round_id = "round-restart-stopping"
+    original_message = {
+        "messageId": "message-before-restart",
+        "participantId": "session-session-alpha",
+        "speakerTitle": "Alpha Agent",
+        "status": "completed",
+        "content": "重启前已经完成的发言",
+        "summary": "已完成发言",
+        "timestamp": "2026-07-10T02:35:00+00:00",
+    }
+    state = chat_room_service._store().load()
+    stored_room = next(item for item in state["rooms"] if item["roomId"] == room["roomId"])
+    stored_room["status"] = "stopping"
+    stored_room["activeRoundId"] = round_id
+    stored_room["rounds"] = [
+        {
+            "roundId": round_id,
+            "roomId": room["roomId"],
+            "topic": "probe topic",
+            "mode": "round_robin",
+            "purpose": "discussion",
+            "config": {},
+            "status": "stopping",
+            "speakerOrder": ["session-session-alpha", "session-session-beta"],
+            "messages": [original_message],
+            "summary": "正在停止当前群聊轮次，等待正在发言的 Agent 收尾。",
+            "startedAt": "2026-07-10T02:30:52+00:00",
+            "updatedAt": "2026-07-10T02:49:48+00:00",
+            "finishedAt": "",
+        }
+    ]
+    chat_room_service._store().save(state)
+    chat_room_service._work_run_store().persist_snapshot(
+        chat_room_service.RUN_KIND,
+        {
+            "runId": round_id,
+            "runKind": chat_room_service.RUN_KIND,
+            "roomId": room["roomId"],
+            "roundId": round_id,
+            "status": "stopped",
+            "currentPhase": "stopped",
+            "runtimeStatus": "force_stopped",
+            "forceStopReason": "pytest launcher force stop",
+            "summary": "Launcher force-stopped the stale chat room round.",
+            "startedAt": "2026-07-10T02:30:52+00:00",
+            "updatedAt": "2026-07-10T07:44:40+00:00",
+            "finishedAt": "2026-07-10T07:44:40+00:00",
+        },
+        active_run_id="",
+    )
+
+    detail = chat_room_service.get_chat_room_detail(room["roomId"])
+
+    assert detail is not None
+    assert detail["status"] == "ready"
+    assert detail["activeRoundId"] == ""
+    reconciled_round = detail["rounds"][-1]
+    assert reconciled_round["status"] == "stopped"
+    assert reconciled_round["finishedAt"] == "2026-07-10T07:44:40+00:00"
+    assert reconciled_round["messages"][0]["messageId"] == original_message["messageId"]
+    assert reconciled_round["messages"][0]["content"] == original_message["content"]
+    stored_detail = chat_room_service._store().load()["rooms"][0]
+    assert stored_detail["rounds"][-1]["messages"] == [original_message]
+    assert "pytest launcher force stop" in reconciled_round["summary"]
+    assert chat_room_service.list_active_chat_room_work_runs() == []
+
+
+@pytest.mark.parametrize(
+    ("work_status", "expected_round_status", "expected_room_status"),
+    [
+        ("completed", "completed", "ready"),
+        ("partial", "partial", "ready"),
+        ("closed", "stopped", "ready"),
+        ("stop_failed", "failed", "failed"),
+    ],
+)
+def test_chat_room_detail_maps_terminal_work_run_status(
+    tmp_path,
+    monkeypatch,
+    work_status,
+    expected_round_status,
+    expected_room_status,
+):
+    _seed_chat_sessions(tmp_path)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(work_run_store, "WORK_RUNS_DIR", tmp_path / "work_runs")
+    room = chat_room_service.create_chat_room(
+        title=f"{work_status} 终态对账",
+        participant_session_ids=["session-alpha"],
+    )
+    round_id = f"round-terminal-{work_status}"
+    state = chat_room_service._store().load()
+    stored_room = next(item for item in state["rooms"] if item["roomId"] == room["roomId"])
+    stored_room["status"] = "stopping"
+    stored_room["activeRoundId"] = round_id
+    stored_room["rounds"] = [
+        {
+            "roundId": round_id,
+            "roomId": room["roomId"],
+            "topic": "terminal result",
+            "mode": "round_robin",
+            "purpose": "discussion",
+            "config": {},
+            "status": "stopping",
+            "speakerOrder": ["session-session-alpha"],
+            "messages": [],
+            "summary": "旧的停止中摘要",
+            "startedAt": "2026-07-10T02:30:52+00:00",
+            "updatedAt": "2026-07-10T02:49:48+00:00",
+            "finishedAt": "",
+        }
+    ]
+    chat_room_service._store().save(state)
+    expected_summary = f"pytest {work_status} terminal summary"
+    chat_room_service._work_run_store().persist_snapshot(
+        chat_room_service.RUN_KIND,
+        {
+            "runId": round_id,
+            "runKind": chat_room_service.RUN_KIND,
+            "roomId": room["roomId"],
+            "roundId": round_id,
+            "status": work_status,
+            "currentPhase": work_status,
+            "summary": expected_summary,
+            "startedAt": "2026-07-10T02:30:52+00:00",
+            "updatedAt": "2026-07-10T07:44:40+00:00",
+            "finishedAt": "2026-07-10T07:44:40+00:00",
+        },
+        active_run_id="",
+    )
+
+    detail = chat_room_service.get_chat_room_detail(room["roomId"])
+
+    assert detail is not None
+    assert detail["status"] == expected_room_status
+    assert detail["activeRoundId"] == ""
+    assert detail["rounds"][-1]["status"] == expected_round_status
+    assert expected_summary in detail["rounds"][-1]["summary"]
+
+
+def test_active_chat_room_list_reconciles_round_without_process_controller(tmp_path, monkeypatch):
+    _seed_chat_sessions(tmp_path)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(work_run_store, "WORK_RUNS_DIR", tmp_path / "work_runs")
+
+    room = chat_room_service.create_chat_room(
+        title="后端重启后遗留群聊",
+        participant_session_ids=["session-alpha", "session-beta"],
+    )
+    round_id = "round-orphaned-after-restart"
+    state = chat_room_service._store().load()
+    stored_room = next(item for item in state["rooms"] if item["roomId"] == room["roomId"])
+    stored_room["status"] = "stopping"
+    stored_room["activeRoundId"] = round_id
+    stored_room["rounds"] = [
+        {
+            "roundId": round_id,
+            "roomId": room["roomId"],
+            "topic": "orphan topic",
+            "mode": "round_robin",
+            "purpose": "discussion",
+            "config": {},
+            "status": "stopping",
+            "speakerOrder": ["session-session-alpha", "session-session-beta"],
+            "messages": [],
+            "summary": "正在停止当前群聊轮次，等待正在发言的 Agent 收尾。",
+            "startedAt": "2026-07-10T02:30:52+00:00",
+            "updatedAt": "2026-07-10T02:49:48+00:00",
+            "finishedAt": "",
+        }
+    ]
+    chat_room_service._store().save(state)
+    chat_room_service._work_run_store().persist_snapshot(
+        chat_room_service.RUN_KIND,
+        {
+            "runId": round_id,
+            "runKind": chat_room_service.RUN_KIND,
+            "roomId": room["roomId"],
+            "roundId": round_id,
+            "status": "stopping",
+            "currentPhase": "stopping",
+            "summary": "Waiting for the current speaker to finish.",
+            "startedAt": "2026-07-10T02:30:52+00:00",
+            "updatedAt": "2026-07-10T02:49:48+00:00",
+            "finishedAt": "",
+        },
+        active_run_id=round_id,
+    )
+    monkeypatch.setattr(chat_room_service, "utc_now_iso", lambda: "2026-07-10T08:00:00+00:00")
+
+    active_runs = chat_room_service.list_active_chat_room_work_runs()
+
+    assert active_runs == []
+    detail = chat_room_service.get_chat_room_detail(room["roomId"])
+    assert detail is not None
+    assert detail["status"] == "ready"
+    assert detail["activeRoundId"] == ""
+    assert detail["rounds"][-1]["status"] == "stopped"
+    assert detail["rounds"][-1]["finishedAt"] == "2026-07-10T08:00:00+00:00"
+    assert "后端进程已重启" in detail["rounds"][-1]["summary"]
+    run_summary = chat_room_service.load_chat_room_work_run_summary()
+    assert run_summary["active"] is None
+    assert run_summary["latest"]["status"] == "stopped"
+
+
+@pytest.mark.parametrize(
+    "reader_name",
+    ["full", "conversation_index", "compact"],
+)
+def test_chat_room_list_surfaces_reconcile_orphaned_rounds(tmp_path, monkeypatch, reader_name):
+    _seed_chat_sessions(tmp_path)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(work_run_store, "WORK_RUNS_DIR", tmp_path / "work_runs")
+
+    room = chat_room_service.create_chat_room(
+        title=f"{reader_name} 遗留群聊",
+        participant_session_ids=["session-alpha", "session-beta"],
+    )
+    round_id = f"round-orphaned-{reader_name}"
+    state = chat_room_service._store().load()
+    stored_room = next(item for item in state["rooms"] if item["roomId"] == room["roomId"])
+    stored_room["status"] = "stopping"
+    stored_room["activeRoundId"] = round_id
+    stored_room["rounds"] = [
+        {
+            "roundId": round_id,
+            "roomId": room["roomId"],
+            "topic": "orphan list topic",
+            "mode": "round_robin",
+            "purpose": "discussion",
+            "config": {},
+            "status": "stopping",
+            "speakerOrder": ["session-session-alpha", "session-session-beta"],
+            "messages": [],
+            "summary": "正在停止当前群聊轮次。",
+            "startedAt": "2026-07-10T02:30:52+00:00",
+            "updatedAt": "2026-07-10T02:49:48+00:00",
+            "finishedAt": "",
+        }
+    ]
+    chat_room_service._store().save(state)
+    chat_room_service._work_run_store().persist_snapshot(
+        chat_room_service.RUN_KIND,
+        {
+            "runId": round_id,
+            "runKind": chat_room_service.RUN_KIND,
+            "roomId": room["roomId"],
+            "roundId": round_id,
+            "status": "stopping",
+            "currentPhase": "stopping",
+            "startedAt": "2026-07-10T02:30:52+00:00",
+            "updatedAt": "2026-07-10T02:49:48+00:00",
+            "finishedAt": "",
+        },
+        active_run_id=round_id,
+    )
+
+    if reader_name == "full":
+        chat_room_service.list_chat_rooms()
+    elif reader_name == "conversation_index":
+        chat_room_service.list_chat_rooms_for_conversation_index()
+    else:
+        chat_room_service.list_chat_rooms_compact()
+
+    reconciled_room = chat_room_service._store().load()["rooms"][0]
+    assert reconciled_room["status"] == "ready"
+    assert reconciled_room["activeRoundId"] == ""
+    assert reconciled_room["rounds"][-1]["status"] == "stopped"
+
+
+def test_chat_room_round_registers_process_control_before_active_work_run_persist(tmp_path, monkeypatch):
+    _seed_chat_sessions(tmp_path)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(work_run_store, "WORK_RUNS_DIR", tmp_path / "work_runs")
+    room = chat_room_service.create_chat_room(
+        title="启动顺序群聊",
+        participant_session_ids=["session-alpha"],
+    )
+    observed_process_control: dict[str, bool] = {}
+    real_persist = chat_room_service._persist_chat_room_work_run
+
+    def observe_persist(room_payload, round_payload, *, status, summary):
+        observed_process_control.setdefault(
+            status,
+            chat_room_service._chat_room_round_has_process_control(round_payload["roundId"]),
+        )
+        return real_persist(room_payload, round_payload, status=status, summary=summary)
+
+    monkeypatch.setattr(chat_room_service, "_persist_chat_room_work_run", observe_persist)
+
+    chat_room_service.start_chat_room_round(
+        room["roomId"],
+        "验证控制器注册顺序",
+        agent_runner=lambda *_args: {"status": "completed", "raw_output": "done", "summary": "done"},
+    )
+
+    assert observed_process_control["running"] is True
+
+
+def test_nested_compact_room_read_defers_orphan_reconciliation_until_outer_lock_releases(tmp_path, monkeypatch):
+    _seed_chat_sessions(tmp_path)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(work_run_store, "WORK_RUNS_DIR", tmp_path / "work_runs")
+    stale_room = chat_room_service.create_chat_room(
+        title="待外层事务结束再收口",
+        participant_session_ids=["session-alpha"],
+    )
+    round_id = "round-nested-read-orphan"
+    state = chat_room_service._store().load()
+    stored_room = next(item for item in state["rooms"] if item["roomId"] == stale_room["roomId"])
+    stored_room["status"] = "stopping"
+    stored_room["activeRoundId"] = round_id
+    stored_room["rounds"] = [
+        {
+            "roundId": round_id,
+            "roomId": stale_room["roomId"],
+            "topic": "nested read",
+            "mode": "round_robin",
+            "purpose": "discussion",
+            "config": {},
+            "status": "stopping",
+            "speakerOrder": ["session-session-alpha"],
+            "messages": [],
+            "summary": "正在停止当前群聊轮次。",
+            "startedAt": "2026-07-10T02:30:52+00:00",
+            "updatedAt": "2026-07-10T02:49:48+00:00",
+            "finishedAt": "",
+        }
+    ]
+    chat_room_service._store().save(state)
+    chat_room_service._work_run_store().persist_snapshot(
+        chat_room_service.RUN_KIND,
+        {
+            "runId": round_id,
+            "runKind": chat_room_service.RUN_KIND,
+            "roomId": stale_room["roomId"],
+            "roundId": round_id,
+            "status": "stopping",
+            "currentPhase": "stopping",
+            "startedAt": "2026-07-10T02:30:52+00:00",
+            "updatedAt": "2026-07-10T02:49:48+00:00",
+            "finishedAt": "",
+        },
+        active_run_id=round_id,
+    )
+    recorded_events = []
+    monkeypatch.setattr(
+        chat_room_service,
+        "record_runtime_scene_event",
+        lambda *args, **kwargs: recorded_events.append((args, kwargs)) or {"accepted": True},
+    )
+
+    with chat_room_service._CHAT_ROOM_LOCK:
+        outer_state = chat_room_service._store().load()
+        chat_room_service.list_chat_rooms_compact()
+        chat_room_service._store().save(outer_state)
+
+    reconciliation_events = [
+        item for item in recorded_events if item[0][:3] == ("chat_room", "round", "chat_room.round.orphan_reconciled")
+    ]
+    assert reconciliation_events == []
+    still_stale = next(
+        item for item in chat_room_service._store().load()["rooms"] if item["roomId"] == stale_room["roomId"]
+    )
+    assert still_stale["status"] == "stopping"
+
+    chat_room_service.list_chat_rooms_compact()
+
+    reconciliation_events = [
+        item for item in recorded_events if item[0][:3] == ("chat_room", "round", "chat_room.round.orphan_reconciled")
+    ]
+    assert len(reconciliation_events) == 1
+    reconciled = next(
+        item for item in chat_room_service._store().load()["rooms"] if item["roomId"] == stale_room["roomId"]
+    )
+    assert reconciled["status"] == "ready"
+
+
 @pytest.mark.slow
 def test_stop_chat_room_round_enters_stopping_then_publishes_ready_detail(tmp_path, monkeypatch):
     _seed_chat_sessions(tmp_path)

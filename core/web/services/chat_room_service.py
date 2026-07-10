@@ -103,7 +103,7 @@ CHAT_ROOM_PURPOSES = [
     },
 ]
 RUNNING_ROUND_STATUSES = {"queued", "running", "stopping"}
-_CHAT_ROOM_LOCK = threading.Lock()
+_CHAT_ROOM_LOCK = threading.RLock()
 _CHAT_ROOM_EXECUTOR = ThreadPoolExecutor(max_workers=2, thread_name_prefix="web-chat-room")
 _CHAT_ROOM_STREAM_SUBSCRIBERS_LOCK = threading.Lock()
 _CHAT_ROOM_STREAM_SUBSCRIBERS: dict[str, set[queue.Queue[dict[str, Any]]]] = {}
@@ -146,6 +146,11 @@ def _elapsed_ms_between(started_at: Any, ended_at: float | None = None) -> int:
     return max(0, int(round((end_value - start_value) * 1000)))
 
 
+def _chat_room_lock_owned_by_current_thread() -> bool:
+    ownership_probe = getattr(_CHAT_ROOM_LOCK, "_is_owned", None)
+    return bool(ownership_probe()) if callable(ownership_probe) else False
+
+
 def _sync_agent_directory_project_root() -> None:
     if agent_directory_service.PROJECT_ROOT != PROJECT_ROOT:
         agent_directory_service.PROJECT_ROOT = PROJECT_ROOT
@@ -176,6 +181,7 @@ def list_chat_rooms(
     session_summaries: dict[str, dict[str, Any]] | None = None,
     repair_participants: bool = False,
 ) -> list[dict[str, Any]]:
+    _reconcile_chat_room_round_state()
     state = _store().load()
     summaries = session_summaries
     if repair_participants:
@@ -204,6 +210,7 @@ def list_chat_rooms_for_conversation_index(
 ) -> list[dict[str, Any]]:
     """Return compact room references suitable for `/conversations` payload."""
 
+    _reconcile_chat_room_round_state()
     state = _store().load()
     if repair_room_participants:
         summaries = session_summaries if session_summaries is not None else _session_summary_index()
@@ -221,6 +228,7 @@ def list_chat_rooms_for_conversation_index(
 def list_chat_rooms_compact() -> list[dict[str, Any]]:
     """Return room references without scanning sessions or full room hydration."""
 
+    _reconcile_chat_room_round_state()
     state = _store().load()
     rooms = [
         _room_to_compact_reference(item)
@@ -237,6 +245,7 @@ def get_chat_room_compact(room_id: str) -> dict[str, Any] | None:
     normalized_room_id = str(room_id or "").strip()
     if not normalized_room_id:
         return None
+    _reconcile_chat_room_round_state()
     state = _store().load()
     room = _find_room(state, normalized_room_id)
     return _room_to_compact_reference(room) if room else None
@@ -245,6 +254,14 @@ def get_chat_room_compact(room_id: str) -> dict[str, Any] | None:
 def get_chat_room_detail(room_id: str) -> dict[str, Any] | None:
     started_at = _perf_counter()
     phase_timings: list[dict[str, Any]] = []
+    stage_started_at = _perf_counter()
+    reconciled_rounds = _reconcile_chat_room_round_state()
+    _append_chat_room_detail_timing(
+        phase_timings,
+        "round_state.reconcile",
+        stage_started_at,
+        count=len(reconciled_rounds),
+    )
     stage_started_at = _perf_counter()
     state = _store().load()
     _append_chat_room_detail_timing(phase_timings, "state.load", stage_started_at)
@@ -879,6 +896,9 @@ def start_chat_room_round(
         stage_started_at = _perf_counter()
         _store().save(state)
         submit_timings["storeSaveMs"] = _elapsed_ms(stage_started_at)
+        stage_started_at = _perf_counter()
+        _create_chat_room_round_control(normalized_room_id, round_id)
+        submit_timings["roundControlCreateMs"] = _elapsed_ms(stage_started_at)
         submit_timings["chatRoomLockedMs"] = _elapsed_ms_between(lock_acquired_at)
 
     stage_started_at = _perf_counter()
@@ -896,9 +916,6 @@ def start_chat_room_round(
     stage_started_at = _perf_counter()
     _persist_chat_room_work_run(room, round_payload, status="running", summary="")
     submit_timings["workRunPersistMs"] = _elapsed_ms(stage_started_at)
-    stage_started_at = _perf_counter()
-    _create_chat_room_round_control(normalized_room_id, round_id)
-    submit_timings["roundControlCreateMs"] = _elapsed_ms(stage_started_at)
     submit_timings["submitElapsedBeforeStartLogMs"] = _elapsed_ms(submit_started_at)
     _record_room_event(
         "round",
@@ -1469,6 +1486,7 @@ def load_chat_room_work_run_summary() -> dict[str, Any]:
 def list_active_chat_room_work_runs() -> list[dict[str, Any]]:
     """Return all active chat room rounds as lightweight WorkRun snapshots."""
 
+    _reconcile_chat_room_round_state()
     try:
         state = _store().load()
     except Exception:
@@ -3633,6 +3651,7 @@ def _room_to_compact_reference(room: dict[str, Any]) -> dict[str, Any]:
                 "dialogueModelId": str(item.get("dialogueModelId") or "").strip(),
                 "llmBindings": agent_directory_service.normalize_agent_llm_bindings(item.get("llmBindings")),
                 "enabled": bool(item.get("enabled", True)),
+                **{field: item.get(field) for field in _PARTICIPANT_CONTEXT_FIELDS if field in item},
             }
             for item in list(room.get("participants") or [])
             if isinstance(item, dict)
@@ -3706,6 +3725,14 @@ def _clear_chat_room_round_control(round_id: str) -> None:
         _CHAT_ROOM_ROUND_CONTROLS.pop(normalized_round_id, None)
 
 
+def _chat_room_round_has_process_control(round_id: str) -> bool:
+    normalized_round_id = str(round_id or "").strip()
+    if not normalized_round_id:
+        return False
+    with _CHAT_ROOM_ROUND_CONTROLS_LOCK:
+        return normalized_round_id in _CHAT_ROOM_ROUND_CONTROLS
+
+
 def _chat_room_work_run_snapshot(
     room: dict[str, Any],
     round_payload: dict[str, Any],
@@ -3751,6 +3778,177 @@ def _chat_room_round_is_terminal(room: dict[str, Any], round_payload: dict[str, 
         return True
     active_round_id = str(room.get("activeRoundId") or "").strip()
     return bool(active_round_id and normalized_round_id and active_round_id != normalized_round_id)
+
+
+def _terminal_chat_room_status_from_work_run(snapshot: dict[str, Any] | None) -> str:
+    payload = snapshot if isinstance(snapshot, dict) else {}
+    status = str(payload.get("status") or payload.get("currentPhase") or payload.get("phase") or "").strip().lower()
+    runtime_status = str(payload.get("runtimeStatus") or "").strip().lower()
+    if status in {"completed", "done", "ready", "routed", "success", "succeeded"}:
+        return "completed"
+    if status in {"partial", "needs_continue", "paused_limit"}:
+        return "partial"
+    if status in {"stopped", "stopped_by_user", "cancelled", "canceled", "closed", "idle", "superseded", "terminated"}:
+        return "stopped"
+    if runtime_status in {"force_stopped", "stopped", "cancelled", "canceled", "terminated"}:
+        return "stopped"
+    if status in {"failed", "failed_provider", "failed_runtime", "error", "stop_failed"}:
+        return "failed"
+    if runtime_status in {"failed", "failed_provider", "failed_runtime", "error"}:
+        return "failed"
+    return ""
+
+
+def _chat_room_reconciliation_reason(snapshot: dict[str, Any], *, final_status: str) -> str:
+    reason = trim_lines(
+        str(
+            snapshot.get("forceStopReason")
+            or snapshot.get("stopReason")
+            or snapshot.get("reason")
+            or snapshot.get("summary")
+            or snapshot.get("error")
+            or ""
+        ),
+        max_lines=2,
+    ).strip()
+    if reason:
+        return reason
+    fallback_messages = {
+        "completed": (
+            "运行任务已完成，群聊状态已完成对账。",
+            "The work run completed and the chat room state was reconciled.",
+        ),
+        "partial": (
+            "运行任务已部分完成，群聊状态已完成对账。",
+            "The work run partially completed and the chat room state was reconciled.",
+        ),
+        "stopped": (
+            "运行任务已终止，群聊状态已完成对账。",
+            "The work run terminated and the chat room state was reconciled.",
+        ),
+        "failed": (
+            "运行任务失败，群聊状态已完成对账。",
+            "The work run failed and the chat room state was reconciled.",
+        ),
+    }
+    zh, en = fallback_messages.get(final_status, fallback_messages["failed"])
+    return text_for(
+        get_web_language(),
+        zh=zh,
+        en=en,
+    )
+
+
+def _reconcile_chat_room_round_state() -> list[dict[str, Any]]:
+    """Converge persisted active rooms with terminal WorkRuns or process ownership."""
+
+    if _chat_room_lock_owned_by_current_thread():
+        return []
+    reconciled: list[dict[str, Any]] = []
+    store = _work_run_store()
+    reconciled_at = utc_now_iso()
+    with _CHAT_ROOM_LOCK:
+        state = _store().load()
+        for room in list(state.get("rooms") or []):
+            if not isinstance(room, dict):
+                continue
+            round_id = str(room.get("activeRoundId") or "").strip()
+            if not round_id:
+                continue
+            round_payload = _find_round(room, round_id)
+            if not isinstance(round_payload, dict):
+                continue
+            previous_status = str(round_payload.get("status") or "").strip().lower()
+            if previous_status not in RUNNING_ROUND_STATUSES:
+                continue
+            work_run = store.load_snapshot(RUN_KIND, round_id)
+            final_status = _terminal_chat_room_status_from_work_run(work_run)
+            reconciliation_source = "terminal_work_run"
+            if not final_status and not _chat_room_round_has_process_control(round_id):
+                final_status = "stopped"
+                reconciliation_source = "missing_process_controller"
+            if not final_status:
+                continue
+            finished_at = (
+                reconciled_at
+                if reconciliation_source == "missing_process_controller"
+                else str((work_run or {}).get("finishedAt") or (work_run or {}).get("updatedAt") or reconciled_at).strip()
+            )
+            reason = (
+                text_for(
+                    get_web_language(),
+                    zh="后端进程已重启，已收口没有当前进程控制器的群聊轮次。",
+                    en="The backend process restarted, so the chat room round without a current process controller was closed.",
+                )
+                if reconciliation_source == "missing_process_controller"
+                else _chat_room_reconciliation_reason(work_run or {}, final_status=final_status)
+            )
+            message_count = len(list(round_payload.get("messages") or []))
+            speaker_count = len(list(round_payload.get("speakerOrder") or []))
+            round_payload["status"] = final_status
+            round_payload["summary"] = (
+                _stopped_round_summary(reason, message_count=message_count, speaker_count=speaker_count)
+                if final_status == "stopped"
+                else reason
+            )
+            round_payload["updatedAt"] = finished_at
+            round_payload["finishedAt"] = finished_at
+            room["status"] = "ready" if final_status in {"completed", "partial", "stopped"} else "failed"
+            room["activeRoundId"] = ""
+            room["updatedAt"] = finished_at
+            reconciled.append(
+                {
+                    "room": dict(room),
+                    "round": dict(round_payload),
+                    "previousStatus": previous_status,
+                    "finalStatus": final_status,
+                    "reconciliationSource": reconciliation_source,
+                    "workRunStatus": str((work_run or {}).get("status") or "").strip(),
+                    "runtimeStatus": str((work_run or {}).get("runtimeStatus") or "").strip(),
+                    "messageCount": message_count,
+                    "speakerCount": speaker_count,
+                    "persistWorkRun": not _terminal_chat_room_status_from_work_run(work_run),
+                }
+            )
+        if reconciled:
+            _store().save(state)
+
+    for item in reconciled:
+        if item["persistWorkRun"]:
+            work_run_payload = _chat_room_work_run_snapshot(item["room"], item["round"], status=item["finalStatus"])
+            work_run_payload.update(
+                {
+                    "summary": str(item["round"].get("summary") or "").strip(),
+                    "finishedAt": str(item["round"].get("finishedAt") or "").strip(),
+                    "runtimeStatus": "orphan_reconciled",
+                    "reconciliationSource": item["reconciliationSource"],
+                }
+            )
+            store.persist_snapshot(RUN_KIND, work_run_payload, active_run_id="")
+        _record_room_event(
+            "round",
+            "chat_room.round.orphan_reconciled",
+            item["room"],
+            item["round"],
+            fields={
+                "previousStatus": item["previousStatus"],
+                "reconciliationSource": item["reconciliationSource"],
+                "workRunStatus": item["workRunStatus"],
+                "runtimeStatus": item["runtimeStatus"],
+                "messageCount": item["messageCount"],
+                "speakerCount": item["speakerCount"],
+            },
+            outcome=item["finalStatus"],
+            level=(
+                "error"
+                if item["finalStatus"] == "failed"
+                else "warning"
+                if item["finalStatus"] in {"partial", "stopped"}
+                else "info"
+            ),
+            lifecycle=True,
+        )
+    return reconciled
 
 
 def _stopped_chat_room_round_detail(room_id: str, round_id: str) -> dict[str, Any] | None:
