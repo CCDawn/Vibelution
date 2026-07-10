@@ -1447,7 +1447,8 @@ def test_stream_records_success_event_with_safe_summary(monkeypatch):
                                         "function": {"name": "read_file", "arguments": "{}"},
                                     }
                                 ]
-                            }
+                            },
+                            "finish_reason": "tool_calls",
                         }
                     ]
                 },
@@ -1645,12 +1646,15 @@ def test_stream_logs_prompt_cache_design_for_automatic_mode(monkeypatch):
     def backend(_payload):
         return iter(
             [
-                {"choices": [{"delta": {"content": "ok"}}]},
+                {"type": "response.output_text.delta", "delta": "ok"},
                 {
-                    "usage": {
-                        "input_tokens": 160,
-                        "output_tokens": 12,
-                        "prompt_tokens_details": {"cached_tokens": 80},
+                    "type": "response.completed",
+                    "response": {
+                        "usage": {
+                            "input_tokens": 160,
+                            "output_tokens": 12,
+                            "prompt_tokens_details": {"cached_tokens": 80},
+                        }
                     },
                 },
             ]
@@ -2844,7 +2848,8 @@ def test_stream_merges_tool_call_argument_deltas():
                                 "function": {"arguments": ": \"agent.py\"}"},
                             }
                         ]
-                    }
+                    },
+                    "finish_reason": "tool_calls",
                 }
             ]
         },
@@ -2853,10 +2858,12 @@ def test_stream_merges_tool_call_argument_deltas():
     client = LLMClient(config=config, backend=lambda payload: iter(chunks))
     streamed = list(client.stream([{"role": "user", "content": "read"}]))
 
-    assert streamed[-1].tool_calls[0]["id"] == "call_1"
-    assert streamed[-1].tool_calls[0]["name"] == "read_file"
-    assert streamed[-1].tool_calls[0]["args"] == {"path": "agent.py"}
-    assert all(not chunk.tool_calls for chunk in streamed[:-1])
+    tool_chunks = [chunk for chunk in streamed if chunk.tool_calls]
+    assert len(tool_chunks) == 1
+    assert tool_chunks[0].tool_calls[0]["id"] == "call_1"
+    assert tool_chunks[0].tool_calls[0]["name"] == "read_file"
+    assert tool_chunks[0].tool_calls[0]["args"] == {"path": "agent.py"}
+    assert streamed[-1].additional_kwargs["turn_outcome"].kind == "tool_calls"
 
 
 def test_stream_chunks_merge_without_duplicate_tool_calls():
@@ -2895,7 +2902,8 @@ def test_stream_chunks_merge_without_duplicate_tool_calls():
                                 "function": {"arguments": ": \"agent.py\"}"},
                             }
                         ]
-                    }
+                    },
+                    "finish_reason": "tool_calls",
                 }
             ]
         },
@@ -2948,7 +2956,8 @@ def test_stream_events_expose_tool_calls_only_after_finalization():
                                 "function": {"arguments": ": \"agent.py\"}"},
                             }
                         ]
-                    }
+                    },
+                    "finish_reason": "tool_calls",
                 }
             ]
         },
@@ -3134,7 +3143,11 @@ def test_stream_events_drop_incomplete_tool_calls_with_empty_name():
     events = list(client.stream_events([{"role": "user", "content": "read"}]))
 
     assert [event.type for event in events] == ["done"]
-    assert list(client.stream([{"role": "user", "content": "read"}])) == []
+    streamed = list(client.stream([{"role": "user", "content": "read"}]))
+    assert len(streamed) == 1
+    assert streamed[0].content == ""
+    assert streamed[0].tool_calls == []
+    assert streamed[0].additional_kwargs["turn_outcome"].kind == "incomplete"
 
 
 def test_transcript_replay_duplicate_tool_call_id_regression():
@@ -3174,7 +3187,8 @@ def test_transcript_replay_duplicate_tool_call_id_regression():
                                 "function": {"arguments": "{\"limit\": 10}"},
                             }
                         ]
-                    }
+                    },
+                    "finish_reason": "tool_calls",
                 }
             ]
         },

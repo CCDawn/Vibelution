@@ -51,3 +51,14 @@ class WireAdapterRegistry:
 
     def decode_stream(self, route: Any, events: Any, *, scope: InvocationScope):
         return self.resolve(route).decode_stream(events, route=route, scope=scope)
+
+
+def build_default_wire_adapter_registry() -> WireAdapterRegistry:
+    """Return the canonical adapters supported by the normalized runtime."""
+    from .chat_completions import ChatCompletionsWireAdapter
+    from .responses import ResponsesWireAdapter
+
+    registry = WireAdapterRegistry()
+    registry.register(ResponsesWireAdapter())
+    registry.register(ChatCompletionsWireAdapter())
+    return registry
