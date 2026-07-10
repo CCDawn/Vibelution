@@ -388,6 +388,9 @@ def validate_claim(project_root: Path, claim_id: str, files: Sequence[str]) -> b
 
 
 def selected_validation(files: Sequence[str]) -> dict[str, object]:
+    project_root = str(PROJECT_ROOT.resolve())
+    if project_root not in sys.path:
+        sys.path.insert(0, project_root)
     from tests.select_tests import load_matrix, select_tests
 
     return select_tests(list(files), load_matrix())
