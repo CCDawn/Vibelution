@@ -1,7 +1,6 @@
 import pytest
 import json
 import time
-from pathlib import Path
 
 from core.web.services import agent_directory_service
 from core.web.services import tool_catalog
@@ -147,14 +146,10 @@ def test_tool_registry_lists_builtins_as_protected(tmp_path, monkeypatch):
     assert stage_context_tool["category"] == "media_research"
     assert "no_quota_api" in stage_context_tool["capabilityTags"]
     assert stage_context_tool["permissionTier"] == "medium"
-    key_tools_source = (Path(__file__).resolve().parents[1] / "tools" / "Key_Tools.py").read_text(encoding="utf-8")
-    assert "record_offset" in key_tools_source
-    assert "record_limit" in key_tools_source
-    assert "candidate_offset" in key_tools_source
-    assert "candidate_limit" in key_tools_source
-    assert "context_mode" in key_tools_source
-    assert "minimal" in key_tools_source
-    assert "retry_missing" in key_tools_source
+    context_args = stage_context_tool["argsSchema"]["properties"]
+    assert {"record_offset", "record_limit", "candidate_offset", "candidate_limit", "context_mode"}.issubset(context_args)
+    assert context_args["context_mode"]["default"] == "compact"
+    assert set(context_args["context_mode"]["enum"]) == {"compact", "full", "minimal", "retry_missing"}
     stage_writeback_tool = next(item for item in payload["tools"] if item["name"] == "source_collection_stage_writeback_tool")
     assert stage_writeback_tool["source"] == "built_in"
     assert stage_writeback_tool["category"] == "media_research"
