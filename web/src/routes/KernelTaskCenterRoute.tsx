@@ -44,6 +44,7 @@ const COPY = {
     directView: "Direct",
     taskHidden: "当前任务不在左侧列表中，可能被状态筛选或数量限制隐藏。",
     noTasks: "暂无 Kernel 任务",
+    noMatchingTasks: "没有符合筛选条件的任务",
     loading: "读取中",
     loadFailed: "读取失败",
     noTimeline: "选择一个任务查看链路",
@@ -76,6 +77,7 @@ const COPY = {
     directView: "Direct",
     taskHidden: "This task is not in the left list; it may be hidden by status filtering or list limits.",
     noTasks: "No Kernel tasks",
+    noMatchingTasks: "No tasks match this filter",
     loading: "Loading",
     loadFailed: "Load failed",
     noTimeline: "Select a task to inspect the chain",
@@ -179,7 +181,7 @@ export function KernelTaskCenterRoute() {
       {copy.taskList}
     </VStateSurface>
   ) : tasks.length === 0 ? (
-    <VStateSurface className={styles.emptyStateClass} title={copy.noTasks} tone="empty">
+    <VStateSurface className={styles.emptyStateClass} title={status ? copy.noMatchingTasks : copy.noTasks} tone="empty">
       {copy.taskList}
     </VStateSurface>
   ) : (

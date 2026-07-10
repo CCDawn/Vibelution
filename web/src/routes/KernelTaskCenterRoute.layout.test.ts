@@ -64,6 +64,12 @@ describe("KernelTaskCenterRoute layout contract", () => {
     expect(routeSource).not.toContain("useAppI18n");
   });
 
+  it("distinguishes a globally empty task list from a status-filtered empty result", () => {
+    expect(routeSource).toContain('noMatchingTasks: "没有符合筛选条件的任务"');
+    expect(routeSource).toContain('noMatchingTasks: "No tasks match this filter"');
+    expect(routeSource).toContain("title={status ? copy.noMatchingTasks : copy.noTasks}");
+  });
+
   it("keeps the route root background-aware", () => {
     expect(styles.routeClass).not.toContain("bg-[var(--surface-page)]");
     expect(styles.routeClass).toContain("grid-rows-[auto_minmax(0,1fr)]");
@@ -99,13 +105,13 @@ describe("KernelTaskCenterRoute layout contract", () => {
     expect(styles.ledgerSectionClass).toContain("grid");
     expect(styles.ledgerSectionClass).toContain("border-t");
     expect(styles.ledgerSectionClass).toContain("pt-2");
-    expect(styles.ledgerSectionClass).not.toContain("bg-[");
+    expect(styles.ledgerSectionClass).not.toContain("bg-");
     expect(styles.ledgerSectionClass).not.toContain("rounded-[var(--radius-panel)]");
     expect(styles.ledgerSectionClass).not.toContain("shadow-");
 
     expect(styles.ledgerBucketClass).toContain("grid");
     expect(styles.ledgerBucketClass).toContain("content-start");
-    expect(styles.ledgerBucketClass).not.toContain("bg-[");
+    expect(styles.ledgerBucketClass).not.toContain("bg-");
     expect(styles.ledgerBucketClass).not.toContain("rounded-[var(--radius-panel)]");
     expect(styles.ledgerBucketClass).not.toContain("cardSurface");
     expect(styles.ledgerBucketClass).not.toContain("shadow-");
