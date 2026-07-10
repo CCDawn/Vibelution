@@ -299,6 +299,27 @@ def test_closeout_reports_claim_conflict(
     assert result.outcome == "claim_conflict"
 
 
+def test_validate_claim_matches_central_guard_scope_semantics(
+    git_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        gate,
+        "read_guard_status",
+        lambda root: active_claim("claim-test", [" readme.md ", "scripts"]),
+    )
+
+    assert gate.validate_claim(
+        git_repo,
+        "claim-test",
+        ["README.md", "scripts/local_quality_gate.py"],
+    )
+
+
+def test_scope_covers_rejects_unrelated_path_prefix() -> None:
+    assert not gate.scope_covers("scripts", "scripts-archive/local_quality_gate.py")
+
+
 def test_closeout_reports_unsupported_validation_command(
     git_repo: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -402,6 +423,59 @@ def test_closeout_reports_merge_conflict(
     manifest = json.loads(result.manifest_path.read_text(encoding="utf-8"))
     assert result.outcome == "merge_conflict"
     assert manifest["outcome"] == "merge_conflict"
+
+
+def test_closeout_reports_stale_main_when_main_moves_during_conflicting_preflight(
+    git_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    conflict = git_repo / "conflict.txt"
+    conflict.write_text("base\n", encoding="utf-8")
+    git(git_repo, "add", "conflict.txt")
+    git(git_repo, "commit", "-m", "add conflict base")
+    git(git_repo, "branch", "-M", "main")
+    git(git_repo, "switch", "-c", "codex/test-task")
+    commit_file(git_repo, "conflict.txt", "task\n", "task side")
+    git(git_repo, "switch", "main")
+    commit_file(git_repo, "conflict.txt", "main\n", "main side")
+    validated_main_sha = git(git_repo, "rev-parse", "HEAD").stdout.strip()
+    git(git_repo, "switch", "-c", "future-main")
+    commit_file(git_repo, "conflict.txt", "future main\n", "move main")
+    future_main_sha = git(git_repo, "rev-parse", "HEAD").stdout.strip()
+    git(git_repo, "switch", "codex/test-task")
+    monkeypatch.setattr(
+        gate,
+        "read_guard_status",
+        lambda root: active_claim("claim-test", ["conflict.txt"]),
+    )
+    monkeypatch.setattr(
+        gate,
+        "selected_validation",
+        lambda changed: {"commands": ["git diff --check"]},
+    )
+    original_run_process = gate.run_process
+    merge_bases: list[str] = []
+
+    def run_process_and_move_main(
+        argv: list[str],
+        cwd: Path,
+        *,
+        input_text: str | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        if argv[:3] == ["git", "merge-tree", "--write-tree"]:
+            merge_bases.append(argv[3])
+            git(git_repo, "update-ref", "refs/heads/main", future_main_sha)
+        return original_run_process(argv, cwd, input_text=input_text)
+
+    monkeypatch.setattr(gate, "run_process", run_process_and_move_main)
+
+    result = gate.run_closeout(git_repo, "main", "claim-test")
+
+    assert result.manifest_path is not None
+    manifest = json.loads(result.manifest_path.read_text(encoding="utf-8"))
+    assert merge_bases == [validated_main_sha]
+    assert result.outcome == "stale_main"
+    assert manifest["outcome"] == "stale_main"
 
 
 def test_closeout_reads_claim_from_linked_main_worktree(
