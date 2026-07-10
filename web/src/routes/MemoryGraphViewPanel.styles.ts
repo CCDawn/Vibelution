@@ -4,7 +4,7 @@ const styles = {
   graphCanvasFallback:
     "graphCanvasFallback min-w-0 grid min-h-0 gap-2 p-2",
   graphCanvasPanel:
-    "graphCanvasPanel min-w-0 grid h-full min-h-0 gap-2 p-2 grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)]",
+    "graphCanvasPanel grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)_auto] gap-2 overflow-hidden",
   graphCanvasToolbar:
     "graphCanvasToolbar min-w-0 flex flex-wrap items-center justify-between gap-1.5 px-1 py-0.5 [&>div]:min-w-0 [&_strong]:break-words",
   graphClearFocusButton:
@@ -23,10 +23,8 @@ const styles = {
     "itemButton min-w-0 w-full max-w-full rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2 text-left text-[var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55 [&_[data-slot=vui-button-content]]:w-full [&_[data-slot=vui-button-label]]:grid [&_[data-slot=vui-button-label]]:grid-cols-[minmax(0,0.8fr)_minmax(0,1fr)_auto] [&_[data-slot=vui-button-label]]:items-center [&_[data-slot=vui-button-label]]:gap-1.5 [&_strong]:min-w-0 [&_strong]:truncate [&_small]:min-w-0 [&_small]:truncate",
   itemButtonActive:
     "itemButtonActive min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
-  managementHeader:
-    "managementHeader min-w-0 flex flex-wrap items-center gap-1.5",
   managementPanel:
-    "managementPanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] p-2",
+    "managementPanel gap-1.5 border-t border-[var(--vui-border-hairline)] pt-1.5",
   panelEyebrow:
     "panelEyebrow min-w-0 text-[var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
   panelHeader:
@@ -34,11 +32,7 @@ const styles = {
   searchBox:
     "searchBox min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-1.5",
   sourcePanel:
-    "sourcePanel min-w-0 min-h-0 overflow-auto rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] p-2",
-  summaryCard:
-    "summaryCard min-w-[138px] max-w-[210px] rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] grid min-h-[54px] grid-cols-[minmax(0,1fr)_auto] items-center gap-2 px-2 py-1.5 [&>span]:min-w-0 [&>span]:truncate [&>span]:text-[var(--vui-font-xs)] [&>strong]:text-[var(--vui-font-title)] [&>small]:col-span-2 [&>small]:min-w-0 [&>small]:truncate",
-  summaryGrid:
-    "summaryGrid min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] p-2 grid grid-cols-[repeat(auto-fit,minmax(138px,max-content))] justify-start gap-1.5",
+    "sourcePanel min-h-0 overflow-auto",
   workspace:
     "workspace min-w-0 grid h-full min-h-0 flex-1 gap-2 p-2 grid-rows-[minmax(0,1fr)] overflow-auto",
 } as const;

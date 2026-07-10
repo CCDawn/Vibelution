@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 
 import { Brain, Pencil, Search, Square, SquareCheckBig, Trash2, Undo2 } from "lucide-react";
 
-import { VButton, VNativeInput } from "../components/vui";
+import { VButton, VNativeInput, VSection, VStateSurface, VSurface } from "../components/vui";
 import styles from "./MemoryManagePanel.styles";
 
 export type MemoryManageFilterView = {
@@ -108,7 +108,7 @@ export function MemoryManagePanel({
     <>
       {warningStrip}
       <div className={`${styles.workspace} ${styles.manageWorkspace}`}>
-        <main className={styles.manageListPanel}>
+        <VSurface as="main" className={styles.manageListPanel} elevation="panel" tone="rail">
           <div className={styles.panelHeader}>
             <div>
               <p className={styles.panelEyebrow}>{copy.management}</p>
@@ -120,11 +120,12 @@ export function MemoryManagePanel({
             <Search size={15} />
             <VNativeInput value={searchText} placeholder={copy.searchPlaceholder} onChange={(event) => onSearchTextChange(event.target.value)} />
           </label>
-          <section className={styles.manageFilterPanel} aria-label={copy.manageFilters}>
-            <div className={styles.manageFilterHeader}>
-              <span>{copy.manageFilters}</span>
-              <strong>{visibleItemCount}</strong>
-            </div>
+          <VSection
+            className={styles.manageFilterPanel}
+            title={copy.manageFilters}
+            meta={visibleItemCount}
+            aria-label={copy.manageFilters}
+          >
             <div className={styles.filterGroup}>
               {manageFilterOptions.map((option) => (
                 <VButton
@@ -139,7 +140,7 @@ export function MemoryManagePanel({
                 </VButton>
               ))}
             </div>
-          </section>
+          </VSection>
           <section className={styles.manageSourceFilters} aria-label={copy.sourceFilters}>
             <VButton
               type="button"
@@ -182,9 +183,9 @@ export function MemoryManagePanel({
             </VButton>
           </section>
           {memoryList}
-        </main>
+        </VSurface>
 
-        <section className={styles.manageFormPanel}>
+        <VSurface className={styles.manageFormPanel} elevation="panel" tone="rail">
           <div className={styles.managementHeader}>
             <div>
               <p className={styles.panelEyebrow}>{copy.management}</p>
@@ -198,13 +199,11 @@ export function MemoryManagePanel({
           {managementEditor}
           {selectedConfig}
           {showEmptySelection ? (
-            <section className={styles.emptyDetail}>
-              <Brain size={24} />
-              <strong>{copy.selectedMemory}</strong>
-              <p>{copy.noMatches}</p>
-            </section>
+            <VStateSurface className={styles.emptyDetail} icon={<Brain size={18} />} title={copy.selectedMemory} tone="empty">
+              {copy.noMatches}
+            </VStateSurface>
           ) : null}
-        </section>
+        </VSurface>
 
         {detailPanel}
       </div>
