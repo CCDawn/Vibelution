@@ -276,15 +276,23 @@ def read_guard_status(project_root: Path) -> dict[str, object]:
     return loaded
 
 
+def normalize_scope(value: str) -> str:
+    normalized = value.strip().replace("\\", "/").strip("/")
+    return normalized.lower() or "."
+
+
+def is_repository_scope(scope: str) -> bool:
+    return scope in {"*", ".", "repo", "repository", "project", "project-root"}
+
+
 def scope_covers(scope: str, changed_path: str) -> bool:
-    normalized_scope = normalize_path(scope)
-    normalized_path = normalize_path(changed_path)
-    if normalized_scope == "repo":
+    normalized_scope = normalize_scope(scope)
+    normalized_path = normalize_scope(changed_path)
+    if is_repository_scope(normalized_scope):
         return True
-    if normalized_scope.endswith("/**"):
-        prefix = normalized_scope[:-3]
-        return normalized_path == prefix or normalized_path.startswith(prefix + "/")
-    return normalized_scope == normalized_path
+    return normalized_path == normalized_scope or normalized_path.startswith(
+        f"{normalized_scope}/"
+    )
 
 
 def validate_claim(project_root: Path, claim_id: str, files: Sequence[str]) -> bool:
@@ -483,11 +491,13 @@ def run_closeout(root: Path, base: str, claim_id: str) -> GateResult:
         if not main_is_fresh():
             return finish("stale_main")
 
-    checks["mergePreflight"] = merge_preflight(root, base, "HEAD")
-    if not checks["mergePreflight"]:
-        return finish("merge_conflict")
     if not main_is_fresh():
         return finish("stale_main")
+    checks["mergePreflight"] = merge_preflight(root, validated_main_sha, "HEAD")
+    if not main_is_fresh():
+        return finish("stale_main")
+    if not checks["mergePreflight"]:
+        return finish("merge_conflict")
     if rev_parse(root, "HEAD") != head_sha:
         return finish("failed")
     if not validate_claim(main_root, claim_id, files):
