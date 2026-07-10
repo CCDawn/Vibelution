@@ -801,6 +801,11 @@ def build_agent_prompt_snapshot(
             "templateId": normalized,
             "reason": "missing_template",
         }
+    metadata = template.get("metadata") if isinstance(template.get("metadata"), dict) else {}
+    try:
+        builtin_content_version = max(0, int(metadata.get("builtinContentVersion") or 0))
+    except (TypeError, ValueError):
+        builtin_content_version = 0
     content = str(template.get("content") or "")
     if not content.strip():
         return {
@@ -814,6 +819,7 @@ def build_agent_prompt_snapshot(
             "content": "",
             "contentHash": _content_hash(""),
             "contentLength": 0,
+            "builtinContentVersion": builtin_content_version,
             "capturedAt": _now(),
             "agentId": str(agent_id or "").strip(),
             "agentCode": str(agent_code or "").strip(),
@@ -831,6 +837,7 @@ def build_agent_prompt_snapshot(
         "content": content,
         "contentHash": str(template.get("contentHash") or _content_hash(content)).strip(),
         "contentLength": len(content),
+        "builtinContentVersion": builtin_content_version,
         "capturedAt": _now(),
         "agentId": str(agent_id or "").strip(),
         "agentCode": str(agent_code or "").strip(),
