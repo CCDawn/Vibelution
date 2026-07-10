@@ -112,9 +112,11 @@ class LLMInvocationContext:
             return self
         route = getattr(client, "protocol_route", None)
         profile = getattr(client, "profile", None)
+        wire_transport = str(getattr(getattr(route, "wire_protocol", None), "value", "") or "")
         mode = dialogue_chain_mode_for_protocol(
             getattr(route, "protocol", ""),
-            transport=getattr(getattr(route, "policy", None), "transport", "")
+            transport=wire_transport
+            or getattr(getattr(route, "policy", None), "transport", "")
             or getattr(profile, "transport", ""),
             contract=getattr(profile, "contract", ""),
         )
@@ -146,6 +148,9 @@ class LLMInvocationContext:
                 {
                     "selectedProtocol": str(getattr(getattr(route, "protocol", None), "value", "") or ""),
                     "protocolSource": _clean(getattr(route, "source", "")),
+                    "selectedWireProtocol": str(getattr(getattr(route, "wire_protocol", None), "value", "") or ""),
+                    "wireProtocolSource": _clean(getattr(route, "wire_source", "")),
+                    "wireProtocolSourceScope": _clean(getattr(route, "source_scope", "")),
                 }
             )
         return {key: value for key, value in metadata.items() if value not in (None, "")}
