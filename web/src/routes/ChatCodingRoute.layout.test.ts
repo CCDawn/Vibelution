@@ -454,27 +454,17 @@ describe("ChatCodingRoute layout contract", () => {
     );
   });
 
-  it("keeps side panes collapsible while allowing narrow screens to prioritize the center pane", () => {
-    expect(routeSource).toContain("CHAT_CENTER_FIRST_MEDIA_QUERY");
-    expect(routeSource).toContain("centerFirstLayout");
-    expect(routeSource).toContain("centerFirstAutoCollapseRef");
-    expect(routeSource).toContain("window.matchMedia(CHAT_CENTER_FIRST_MEDIA_QUERY)");
-    expect(routeSource).toContain("normalizePanelWidths");
-    expect(routeSource).toContain("getResizeBounds");
-    expect(chatCodingRouteViewModelSource).toContain("const MIN_LEFT_PANEL_WIDTH = 260");
-    expect(chatCodingRouteViewModelSource).toContain("const MIN_RIGHT_PANEL_WIDTH = 200");
-    expect(chatCodingRouteViewModelSource).toContain("const TARGET_CENTER_PANE_WIDTH = 800");
-    expect(routeSource).toContain("styles.layoutCenterFirst");
-    expect(routeStyles.layout).toBeTypeOf("string");
-    expect(routeStyles.layoutCenterFirst).toBeTypeOf("string");
-    expect(routeStyles.leftRail).toBeTypeOf("string");
-    expect(routeStyles.rightPane).toBeTypeOf("string");
-    expect(routeStyles.resizeHandle).toBeTypeOf("string");
-    expect(routeStyles.centerPane).toBeTypeOf("string");
-    expect(routeStyles.layout).toContain("var(--chat-left-pane-width,300px)");
-    expect(routeStyles.layout).toContain("var(--chat-right-pane-width,220px)");
-    expect(routeStyles.layoutCenterFirst).toContain("var(--chat-left-pane-width,0px)");
-    expect(routeStyles.layoutCenterFirst).toContain("var(--chat-right-pane-width,0px)");
+  it("uses compact desktop mode below 1280px and auto-collapses only the status rail", () => {
+    expect(routeSource).toContain('const CHAT_COMPACT_DESKTOP_MEDIA_QUERY = "(max-width: 1279px)";');
+    expect(routeSource).toContain("compactDesktopLayout");
+    expect(routeSource).toContain("compactDesktopAutoCollapseRef");
+    expect(routeSource).toContain("window.matchMedia(CHAT_COMPACT_DESKTOP_MEDIA_QUERY)");
+    expect(routeSource).toContain("setRightPaneCollapsed(true)");
+    expect(routeSource).not.toContain("setLeftRailCollapsed(true)");
+    expect(routeSource).toContain("styles.layoutCompactDesktop");
+    expect(routeStyles.layoutCompactDesktop).toContain("minmax(520px,1fr)");
+    expect(routeStyles.layoutCompactDesktop).toContain("var(--chat-left-pane-width,300px)");
+    expect(routeStyles.layoutCompactDesktop).toContain("var(--chat-right-pane-width,0px)");
   });
 
   it("aligns side-pane gutters while preserving overlay resize handles", () => {
@@ -488,13 +478,13 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.layout).toContain(
       "max-[1100px]:grid-cols-[var(--chat-left-pane-width,300px)_var(--chat-pane-gutter)_minmax(0,1fr)_var(--chat-pane-gutter)_var(--chat-right-pane-width,220px)]",
     );
-    expect(routeStyles.layoutCenterFirst).toContain(
-      "!grid-cols-[minmax(0,var(--chat-left-pane-width,0px))_var(--chat-pane-gutter)_minmax(520px,1fr)_var(--chat-pane-gutter)_minmax(0,var(--chat-right-pane-width,0px))]",
+    expect(routeStyles.layoutCompactDesktop).toContain(
+      "!grid-cols-[var(--chat-left-pane-width,300px)_var(--chat-pane-gutter)_minmax(520px,1fr)_var(--chat-pane-gutter)_minmax(0,var(--chat-right-pane-width,0px))]",
     );
     expect(routeStyles.layout).not.toContain("_0px_minmax(0,1fr)_0px_");
-    expect(routeStyles.layoutCenterFirst).not.toContain("_0px_minmax(520px,1fr)_0px_");
+    expect(routeStyles.layoutCompactDesktop).not.toContain("_0px_minmax(520px,1fr)_0px_");
     expect(routeStyles.layout).not.toContain("_8px_");
-    expect(routeStyles.layoutCenterFirst).not.toContain("_8px_");
+    expect(routeStyles.layoutCompactDesktop).not.toContain("_8px_");
     expect(routeStyles.resizeHandle).toContain("h-full");
     expect(routeStyles.resizeHandle).toContain("w-[1px]");
     expect(routeStyles.resizeHandle).toContain("cursor-col-resize");
@@ -665,8 +655,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.layout).toContain("minmax(0,1fr)");
     expect(routeStyles.layout).not.toContain("minmax(192px,var(--chat-left-pane-width,220px))");
     expect(routeStyles.layout).not.toContain("minmax(244px,var(--chat-right-pane-width,284px))");
-    expect(routeStyles.layoutCenterFirst).toContain("max-[980px]:!grid-cols");
-    expect(routeStyles.layoutCenterFirst).toContain("minmax(420px,1fr)");
+    expect(routeStyles.layoutCompactDesktop).toContain("max-[980px]:!grid-cols");
+    expect(routeStyles.layoutCompactDesktop).toContain("minmax(420px,1fr)");
     expect(routeStyles.conversationTitleRow).toContain("grid-cols-[minmax(0,1fr)_auto]");
     expect(routeStyles.conversationTitleRow).toContain("max-w-full");
     expect(conversationStyles.surfaceCompact).not.toContain("[&_.timeline]:px-3");
@@ -696,16 +686,15 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.agentModelTag).toContain("text-[var(--vui-font-xs)]");
   });
 
-  it("clamps responsive side panes in center-first mode so the conversation remains visible near 1024px", () => {
+  it("clamps the compact desktop conversation index at the compatibility floor", () => {
     expect(routeStyles.layout).toContain("max-[1100px]");
     expect(routeStyles.layout).toContain("minmax(0,1fr)");
     expect(routeStyles.layout).not.toContain("minmax(192px,var(--chat-left-pane-width,220px))");
     expect(routeStyles.layout).not.toContain("minmax(244px,var(--chat-right-pane-width,284px))");
-    expect(routeStyles.layoutCenterFirst).toContain("!grid-cols-[minmax(0,var(--chat-left-pane-width,0px))");
-    expect(routeStyles.layoutCenterFirst).toContain("max-[980px]:!grid-cols");
-    expect(routeStyles.layoutCenterFirst).toContain("minmax(420px,1fr)");
-    expect(routeStyles.layoutCenterFirst).toContain("max-[640px]:!grid-cols");
-    expect(routeStyles.layoutCenterFirst).toContain("minmax(280px,1fr)");
+    expect(routeStyles.layoutCompactDesktop).toContain("!grid-cols-[var(--chat-left-pane-width,300px)");
+    expect(routeStyles.layoutCompactDesktop).toContain("max-[980px]:!grid-cols");
+    expect(routeStyles.layoutCompactDesktop).toContain("minmax(260px,var(--chat-left-pane-width,300px))");
+    expect(routeStyles.layoutCompactDesktop).toContain("minmax(420px,1fr)");
     expect(routeStyles.paneCollapsed).toContain("!overflow-hidden");
     expect(routeStyles.paneCollapsed).toContain("invisible");
     expect(routeStyles.paneCollapsed).not.toContain("!hidden");

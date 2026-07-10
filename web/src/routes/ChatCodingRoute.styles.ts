@@ -484,8 +484,8 @@ const styles: Record<string, string> = {
     "vui-routes-chatcodingroute kernelTraceLink min-w-0",
 layout:
     "vui-routes-chatcodingroute layout min-w-0 grid !gap-0 !p-0 [--chat-workbench-gap:4px] [--chat-pane-gutter:1px] h-[calc(100dvh_-_var(--shell-topbar-height))] max-h-[calc(100dvh_-_var(--shell-topbar-height))] overflow-hidden grid-cols-[var(--chat-left-pane-width,300px)_var(--chat-pane-gutter)_minmax(0,1fr)_var(--chat-pane-gutter)_var(--chat-right-pane-width,220px)] max-[1100px]:grid-cols-[var(--chat-left-pane-width,300px)_var(--chat-pane-gutter)_minmax(0,1fr)_var(--chat-pane-gutter)_var(--chat-right-pane-width,220px)]",
-  layoutCenterFirst:
-    "vui-routes-chatcodingroute layoutCenterFirst min-w-0 !gap-0 !p-0 !grid-cols-[minmax(0,var(--chat-left-pane-width,0px))_var(--chat-pane-gutter)_minmax(520px,1fr)_var(--chat-pane-gutter)_minmax(0,var(--chat-right-pane-width,0px))] max-[980px]:!grid-cols-[minmax(0,var(--chat-left-pane-width,0px))_var(--chat-pane-gutter)_minmax(420px,1fr)_var(--chat-pane-gutter)_minmax(0,var(--chat-right-pane-width,0px))] max-[640px]:!grid-cols-[minmax(0,var(--chat-left-pane-width,0px))_var(--chat-pane-gutter)_minmax(280px,1fr)_var(--chat-pane-gutter)_minmax(0,var(--chat-right-pane-width,0px))]",
+  layoutCompactDesktop:
+    "vui-routes-chatcodingroute layoutCompactDesktop min-w-0 !gap-0 !p-0 !grid-cols-[var(--chat-left-pane-width,300px)_var(--chat-pane-gutter)_minmax(520px,1fr)_var(--chat-pane-gutter)_minmax(0,var(--chat-right-pane-width,0px))] max-[980px]:!grid-cols-[minmax(260px,var(--chat-left-pane-width,300px))_var(--chat-pane-gutter)_minmax(420px,1fr)_var(--chat-pane-gutter)_minmax(0,var(--chat-right-pane-width,0px))]",
   leftBlock:    "vui-routes-chatcodingroute leftBlock min-w-0 grid shrink-0 gap-1.5 rounded-[var(--radius-panel)] border border-[color-mix(in_srgb,var(--vui-border-strong)_66%,transparent)] !bg-[var(--vui-surface-rail)] p-1.5 shadow-none",
   llmPayloadTraceGrid:
     "vui-routes-chatcodingroute llmPayloadTraceGrid grid min-w-0 grid-cols-2 gap-2",
