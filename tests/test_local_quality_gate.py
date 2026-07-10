@@ -46,6 +46,18 @@ def test_commit_mode_lints_staged_blob_instead_of_worktree(git_repo: Path) -> No
     assert "broken.py" in result.commands[1].failure_summary
 
 
+def test_commit_mode_lints_non_ascii_staged_python_path(git_repo: Path) -> None:
+    target = git_repo / "挑战杯" / "broken.py"
+    target.parent.mkdir()
+    target.write_text("def broken(:\n", encoding="utf-8")
+    git(git_repo, "add", "挑战杯/broken.py")
+
+    result = gate.run_commit_gate(git_repo)
+
+    assert result.outcome == "failed"
+    assert any(command.kind == "ruff-staged" for command in result.commands)
+
+
 def test_commit_mode_ignores_deleted_python(git_repo: Path) -> None:
     target = git_repo / "removed.py"
     target.write_text("def value() -> int:\n    return 1\n", encoding="utf-8")
@@ -66,6 +78,21 @@ def test_commit_mode_rejects_partially_staged_gate_definition(git_repo: Path) ->
     hook.write_text("first\n", encoding="utf-8")
     git(git_repo, "add", ".githooks/pre-commit")
     hook.write_text("first\nsecond\n", encoding="utf-8")
+
+    result = gate.run_commit_gate(git_repo)
+
+    assert result.outcome == "gate_definition_dirty"
+    assert result.exit_code == 1
+
+
+def test_commit_mode_rejects_staged_gate_definition_deleted_from_worktree(
+    git_repo: Path,
+) -> None:
+    hook = git_repo / ".githooks" / "pre-commit"
+    hook.parent.mkdir()
+    hook.write_text("first\n", encoding="utf-8")
+    git(git_repo, "add", ".githooks/pre-commit")
+    hook.unlink()
 
     result = gate.run_commit_gate(git_repo)
 
