@@ -25,6 +25,8 @@ class RoundStateController:
     substantive_tool_calls: int = 0
     last_response_tool_call_count: int = 0
     last_response_visible_text: str = ""
+    last_turn_outcome_kind: str = ""
+    lifecycle_completed: bool = False
 
     BOOKKEEPING_TOOL_NAMES: ClassVar[set[str]] = {
         "get_git_status_summary_tool",
@@ -95,6 +97,12 @@ class RoundStateController:
             self.consecutive_tool_only_steps = 0
             self.consecutive_bookkeeping_tool_only_steps = 0
 
+    def note_turn_outcome(self, kind: str) -> None:
+        self.last_turn_outcome_kind = str(kind or "").strip().lower()
+
+    def note_lifecycle_completion(self) -> None:
+        self.lifecycle_completed = True
+
     def add_tool_calls(self, count: int) -> None:
         self.total_tool_calls += max(0, int(count or 0))
 
@@ -147,11 +155,23 @@ class RoundStateController:
         }
 
     def finish_success(self, last_turn_failed: bool) -> bool:
+        if self.lifecycle_completed:
+            return self.turn_had_progress and not last_turn_failed
+        if self.last_turn_outcome_kind:
+            return (
+                self.turn_had_progress
+                and not last_turn_failed
+                and self.last_turn_outcome_kind == "final_answer"
+            )
         return self.turn_had_progress and not last_turn_failed and not self.exhausted_without_final_answer()
 
     def exhausted_without_final_answer(self) -> bool:
+        if self.lifecycle_completed:
+            return False
         if self.iteration < self.max_iterations:
             return False
+        if self.last_turn_outcome_kind:
+            return self.last_turn_outcome_kind != "final_answer"
         return self.last_response_tool_call_count > 0 or not self.last_response_visible_text.strip()
 
     def final_stats(self) -> Dict[str, int]:
