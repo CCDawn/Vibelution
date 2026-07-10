@@ -43,12 +43,13 @@ import {
   ToolRegistryPayload,
 } from "../api/types";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
+import { deriveQueryPresentation } from "../app/queryPresentation";
 import {
   type AgentDenseColumn,
   type AgentFilterSectionView,
   type AgentSummaryMetric,
 } from "../components/vui/product/agent-management";
-import { VButton } from "../components/vui";
+import { VButton, VLoadingValue } from "../components/vui";
 import { safeReturnToPath } from "../app/navigationReturn";
 import { useShellI18n } from "../i18n/useShellI18n";
 import { useChatWorkbenchStore } from "../store/chatWorkbenchStore";
@@ -3591,6 +3592,23 @@ export function AgentsRoute() {
     [agentSummaryQuery.data, agentSummaryQuery.dataUpdatedAt],
   );
   const workspace = workspaceQuery.data ?? lightweightWorkspace;
+  const hasAgentWorkspace = Boolean(workspace);
+  const agentWorkspaceInitialLoading = !hasAgentWorkspace && (
+    agentSummaryQuery.isPending
+    || (fullWorkspaceNeeded && workspaceQuery.isPending)
+  );
+  const agentWorkspaceInitialError = !hasAgentWorkspace
+    && agentSummaryQuery.isError
+    && (!fullWorkspaceNeeded || workspaceQuery.isError);
+  const agentWorkspaceError = agentSummaryQuery.error ?? workspaceQuery.error;
+  const agentSummaryPresentation = deriveQueryPresentation({
+    hasData: Boolean(agentSummaryQuery.data),
+    isError: agentSummaryQuery.isError,
+    isFetching: agentSummaryQuery.isFetching,
+    isPending: agentSummaryQuery.isPending,
+  });
+  const agentSummaryInitialLoading = agentSummaryPresentation === "initial-loading";
+  const loadingAgentMetricValue = <VLoadingValue label={copy.loading} />;
   const tools = toolsQuery.data?.tools ?? EMPTY_TOOL_REGISTRY_ITEMS;
   const agentModelChoices = useMemo(
     () => buildAgentModelChoices(workspace?.agentModelChoices ?? []),
@@ -3811,65 +3829,62 @@ export function AgentsRoute() {
   const healthStatus = workspace?.health.status ?? "ok";
   const healthStatusLabel = workspaceHealthStatusLabel(healthStatus, lang);
   const healthStatusDescription = workspaceHealthStatusDescription(healthStatus, summary, lang);
-  const workspaceAgents = workspace?.agents ?? [];
-  const workspaceTeams = workspace?.teams ?? [];
-  const workspaceChatRooms = workspace?.chatRooms ?? [];
   const agentSummaryMetrics: AgentSummaryMetric[] = [
     {
       id: "all-agents",
       label: copy.allAgents,
-      value: summary?.agentCount ?? workspaceAgents.length,
+      value: agentSummaryInitialLoading ? loadingAgentMetricValue : summary?.agentCount ?? 0,
       detail: copy.allAgents,
     },
     {
       id: "active-agents",
       label: copy.activeAgents,
-      value: summary?.activeAgentCount ?? workspaceAgents.filter((agent) => agent.status !== "archived").length,
+      value: agentSummaryInitialLoading ? loadingAgentMetricValue : summary?.activeAgentCount ?? 0,
       detail: copy.activeAgents,
       tone: "accent",
     },
     {
       id: "archived-agents",
       label: copy.archivedAgents,
-      value: summary?.archivedAgentCount ?? workspaceAgents.filter((agent) => agent.status === "archived").length,
+      value: agentSummaryInitialLoading ? loadingAgentMetricValue : summary?.archivedAgentCount ?? 0,
       detail: copy.archivedAgents,
     },
     {
       id: "teams",
       label: copy.teams,
-      value: summary?.teamCount ?? workspaceTeams.length,
+      value: agentSummaryInitialLoading ? loadingAgentMetricValue : summary?.teamCount ?? 0,
       detail: copy.teams,
     },
     {
       id: "health-issues",
       label: copy.healthIssues,
-      value: summary?.healthIssueCount ?? 0,
+      value: agentSummaryInitialLoading ? loadingAgentMetricValue : summary?.healthIssueCount ?? 0,
       detail: `${copy.workspaceHealthStatus}: ${healthStatusLabel}. ${healthStatusDescription}`,
       tone: healthStatus === "blocked" ? "danger" : healthStatus === "warning" ? "warning" : "success",
     },
     {
       id: "chat-rooms",
       label: copy.chatRooms,
-      value: summary?.chatRoomCount ?? workspaceChatRooms.length,
+      value: agentSummaryInitialLoading ? loadingAgentMetricValue : summary?.chatRoomCount ?? 0,
       detail: copy.chatRooms,
     },
     {
       id: "inbox",
       label: copy.inbox,
-      value: summary?.inboxPendingCount ?? 0,
+      value: agentSummaryInitialLoading ? loadingAgentMetricValue : summary?.inboxPendingCount ?? 0,
       detail: copy.inbox,
     },
     {
       id: "running-agents",
       label: copy.runningAgents,
-      value: summary?.runningAgentCount ?? 0,
+      value: agentSummaryInitialLoading ? loadingAgentMetricValue : summary?.runningAgentCount ?? 0,
       detail: copy.runningAgents,
       tone: "accent",
     },
     {
       id: "blocked-agents",
       label: copy.blockedAgents,
-      value: summary?.blockedAgentCount ?? 0,
+      value: agentSummaryInitialLoading ? loadingAgentMetricValue : summary?.blockedAgentCount ?? 0,
       detail: copy.blockedAgents,
       tone: (summary?.blockedAgentCount ?? 0) > 0 ? "danger" : undefined,
     },
@@ -6094,10 +6109,10 @@ export function AgentsRoute() {
             },
             columns: denseColumns,
             visibleAgentCount: visibleAgents.length,
-            isError: workspaceQuery.isError,
-            error: workspaceQuery.error,
-            isPending: workspaceQuery.isPending,
-            hasWorkspace: Boolean(workspace),
+            isError: agentWorkspaceInitialError,
+            error: agentWorkspaceError,
+            isPending: agentWorkspaceInitialLoading,
+            hasWorkspace: hasAgentWorkspace,
             onSelectRow: (rowId, event) => {
               const agent = agentRowLookup.get(rowId);
               if (agent) {
