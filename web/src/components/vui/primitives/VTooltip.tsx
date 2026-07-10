@@ -2,13 +2,17 @@ import {
   Tooltip,
   type TooltipContentProps,
   type TooltipProps,
+  type TooltipTriggerProps,
 } from "@heroui/react";
 import { type ReactNode } from "react";
+
+export type VTooltipTriggerRender = NonNullable<TooltipTriggerProps<"button">["render"]>;
 
 export type VTooltipProps = Omit<TooltipProps, "children"> & {
   children: ReactNode;
   content: ReactNode;
   className?: string;
+  renderTrigger?: VTooltipTriggerRender;
 };
 
 export function VTooltip({
@@ -17,6 +21,7 @@ export function VTooltip({
   children,
   content,
   className,
+  renderTrigger,
   ...props
 }: VTooltipProps) {
   const contentProps: TooltipContentProps = {
@@ -31,7 +36,7 @@ export function VTooltip({
 
   return (
     <Tooltip {...props} delay={delay} closeDelay={closeDelay}>
-      <Tooltip.Trigger>{children}</Tooltip.Trigger>
+      <Tooltip.Trigger<"button"> render={renderTrigger}>{children}</Tooltip.Trigger>
       <Tooltip.Content {...contentProps} />
     </Tooltip>
   );

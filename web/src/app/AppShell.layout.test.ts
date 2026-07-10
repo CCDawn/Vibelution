@@ -26,6 +26,31 @@ describe("AppShell layout contract", () => {
     expect(shellSource).not.toMatch(/<button\b/);
   });
 
+  it("exposes three stable desktop top-bar groups with shared soft-layer geometry", () => {
+    expect(shellSource).toContain('data-shell-group="brand"');
+    expect(shellSource).toContain('data-shell-group="navigation"');
+    expect(shellSource).toContain('data-shell-group="system-actions"');
+    expect(styles.nav).toContain("rounded-[var(--vui-radius-panel-soft)]");
+    expect(styles.nav).toContain("bg-[var(--vui-surface-toolbar)]");
+    expect(styles.nav).toContain("shadow-[var(--vui-elevation-panel)]");
+    expect(styles.topActions).toContain("rounded-[var(--vui-radius-panel-soft)]");
+    expect(styles.topActions).toContain("bg-[var(--vui-surface-toolbar)]");
+    expect(styles.actionIconButton).toContain("h-[var(--vui-control-height-sm)]");
+    expect(styles.actionIconButton).toContain("w-[var(--vui-control-height-sm)]");
+    expect(shellStyles).toContain("@media (max-width: 1279px)");
+  });
+
+  it("keeps desktop primary navigation labels at their intrinsic readable width", () => {
+    const navStyles = shellStyles.slice(
+      shellStyles.indexOf(":where(.vui-app-appshell).nav {"),
+      shellStyles.indexOf(":where(.vui-app-appshell).navLinkActive {")
+    );
+
+    expect(navStyles).toContain("overflow-x: auto");
+    expect(navStyles).toContain("flex-shrink: 0");
+    expect(navStyles).toContain("white-space: nowrap");
+  });
+
   it("renders one compact status summary chip while keeping the detailed guide panel", () => {
     expect(shellSource).toContain("statusSummaryChip");
     expect(shellSource).toContain('t("brandSubtle")');
@@ -76,7 +101,7 @@ describe("AppShell layout contract", () => {
     expect(styles.utilityTrigger).toContain("h-8");
     expect(styles.utilityTrigger).toContain("[&_[data-slot=vui-button-content]]:whitespace-nowrap");
     expect(styles.statusSummaryChip).toContain("whitespace-nowrap");
-    expect(shellStyles).toContain("@media (max-width: 1420px)");
+    expect(shellStyles).toContain("@media (max-width: 1279px)");
     expect(shellStyles).toContain("@media (max-width: 1180px)");
     expect(shellStyles).toContain(".topClock span:last-child");
     expect(shellStyles).toContain("@media (max-width: 980px)");
@@ -101,7 +126,7 @@ describe("AppShell layout contract", () => {
     expect(shellStyles).toContain("transition: border-color 140ms ease, background 140ms ease, color 140ms ease, box-shadow 140ms ease");
 
     const compactDesktopBlock = shellStyles.slice(
-      shellStyles.indexOf("@media (max-width: 1420px)"),
+      shellStyles.indexOf("@media (max-width: 1279px)"),
       shellStyles.indexOf("@media (max-width: 1180px)"),
     );
     expect(compactDesktopBlock).toContain(":where(.vui-app-appshell).topClock span:last-child");
@@ -155,7 +180,6 @@ describe("AppShell layout contract", () => {
       "hover:border-[var(--border-strong)] hover:bg-[var(--vui-control-muted-hover)] hover:text-[var(--fg-primary)]";
     const shellControlStyles = [
       styles.actionButton,
-      styles.actionIconButton,
       styles.returnButton,
       styles.shutdownCancelButton,
       styles.topBarRestoreButton,
