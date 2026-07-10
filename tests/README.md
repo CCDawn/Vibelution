@@ -152,7 +152,32 @@ python tests/select_tests.py --from-git main --commands-only
 - 没有规则命中时，默认输出轻量 runner smoke、collect-only 和 `git diff --check`，帮助 Agent 先判断测试集合是否可收集。
 - 新增高频模块或拆分测试文件后，同步补充 `tests/test_matrix.yaml` 和 `tests/test_select_tests.py`。
 
-### 3.6 使用服务器分布式测试
+### 3.6 本地质量门
+
+`scripts/local_quality_gate.py` 有三个 mode，按任务阶段选择：
+
+- `commit`：由 pre-commit hook 自动调用，只验证 staged content；gate-definition 文件同时存在 staged 与 unstaged 内容时拒绝提交，避免验证与提交的定义不同。
+- `closeout --base main --claim-id <claim-id>`：只在内容已提交且 clean 的 task worktree 运行，绑定 claim、本地 `main` SHA、HEAD SHA、selector 命令和 merge preflight，并写入 `.runtime/quality_gates/<task-id>.json`。
+- `verify-manifest --manifest <path> --base main`：在进入 root local `main` fast-forward gate 前复核 manifest 的 schema、`outcome`、`validatedMainSha` 与 `headSha`。`passed` 是验证证据，不表示已经 merge。
+
+首次配置 hook 使用 `git config core.hooksPath .githooks`。`powershell -ExecutionPolicy Bypass -File scripts/doctor.ps1 -Json` 只读报告 `checks.git_hooks_path` 及固定修复命令，不会静默写 Git 配置。远端 CI 的 `workflow_dispatch` 可按需补充验证，但 remote push 不是默认本地闭环的一部分。
+
+Outcome 只对应一个恢复动作：
+
+| Outcome | 操作 |
+| --- | --- |
+| `passed` | 复核 manifest 后进入本地 main fast-forward gate |
+| `failed` | 修复首个失败命令并重跑 closeout |
+| `stale_main` | 在任务 worktree 合并最新本地 main，解决冲突并重跑 |
+| `claim_conflict` | 修正/续期本任务 claim，不使用其他任务 claim |
+| `dirty_worktree` | 提交或撤回本任务未提交内容 |
+| `merge_conflict` | 仅在任务 worktree 解决冲突 |
+| `unsupported_validation_command` | 修正 matrix 为允许命令族，不放宽到 shell |
+| `gate_definition_dirty` | 整文件 stage gate-definition 或拆成独立 commit |
+
+质量门只生成或复核证据，不执行 merge、claim release、junction/worktree/branch 删除。冲突和 `stale_main` 都回 task worktree 处理；root local `main` 仅在 clean 且 SHA 仍匹配时执行 `git merge --ff-only <task-branch>`，随后做最小 post-merge verification，并只清理本任务资源。
+
+### 3.7 使用服务器分布式测试
 
 服务器分布式用于高吞吐 Python 回归：
 
@@ -167,7 +192,7 @@ python scripts/remote_test_runner.py --backend docker --distributed
 - 不覆盖前端 Vitest、前端 build、Launcher/runtime 本地生命周期、Windows-only、真实端口/进程、operator config、Git 副作用测试。
 - 远端失败时先看 `logs/remote_test_runs/<run-id>/remote-test.log` 和本地 `local-test.log`，定位首个失败分片后再聚焦复跑。
 
-### 3.7 使用 prompt_debugger.py（工具变更时必用）
+### 3.8 使用 prompt_debugger.py（工具变更时必用）
 
 验证模型能够正确理解并调用工具。**每次添加或修改工具后必须运行**。
 
@@ -188,7 +213,7 @@ python tests/prompt_debugger.py "你的测试 prompt"
 - 模型在适当场景下主动调用该工具
 - 无幻觉调用（不该调用时不调用）
 
-### 3.8 独立脚本 simulate_lifecycle.py
+### 3.9 独立脚本 simulate_lifecycle.py
 
 不调用大模型，验证生命周期防断裂加固：
 

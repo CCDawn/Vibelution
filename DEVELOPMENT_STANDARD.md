@@ -216,6 +216,8 @@ Default task branch:
 
 Default branch base is the current local `main`, not `origin/main`. Use `origin/main` only when the user explicitly asks to align with GitHub.
 
+Local task independence is deliberate: create each `codex/<task-slug>` branch from the current local `main`, perform ordinary development and conflict resolution in its task worktree, and keep root `main` for clean integration only. A change in local `main` invalidates prior closeout evidence; a `stale_main` outcome returns the task to its own worktree to merge the latest local `main`, resolve conflicts there, and rerun validation.
+
 Typical start:
 
 ```powershell
@@ -239,6 +241,8 @@ One Agent should bind to one active task worktree at a time. Do not reuse an old
 The lightweight guard command vocabulary is `status`, `check`, `claim`, `activate`, `release`, and `prune`. Historical registry or merge-queue records may still use states such as `ready_for_merge`, `merged_to_main`, `local_applied`, `blocked`, or `cancelled`; treat those as queue semantics, not guard subcommands.
 
 For `STANDARD_TASK` and `HIGH_RISK`, the Agent that implements a task owns the full local development loop by default: self-review the diff, run the scoped validation, commit the task branch, decide whether the merge gate is satisfied, and either merge the task into local `main` or explicitly hand off a ready/blocked queue state with the reason. Do not treat implementation as complete merely because a worktree commit exists.
+
+The local quality gate is evidence-producing, not lifecycle-owning. `scripts/local_quality_gate.py closeout` runs in the clean task worktree and binds the current claim, validated local `main` SHA, task HEAD SHA, selector-selected commands, and merge preflight into a manifest. A `passed` manifest does not mean merged. The gate never performs the root merge, claim release, junction removal, worktree removal, or branch deletion.
 
 ## 7. Shared Hot Files
 
@@ -534,6 +538,8 @@ git status --short --branch
 
 Never use `git add .`. Stage only files belonging to the current task.
 
+Every commit uses the tracked pre-commit hook and `scripts/local_quality_gate.py commit`. This light gate intentionally reads staged content only: it runs `git diff --cached --check`, checks staged Python blobs, and runs the focused gate self-test when gate-definition files are staged. If `core.hooksPath` is wrong, `scripts/doctor.ps1` reports the read-only repair hint `git config core.hooksPath .githooks`; the doctor must not silently write Git configuration.
+
 Run Git commands non-interactively in automation and agent workflows. Do not start `git commit`, `git merge --continue`, or similar commands in a way that can open an editor unless the user explicitly asked for interactive Git. Supply a message, use `--no-edit` when appropriate, or set a bounded non-interactive editor for scripted flows.
 
 Do not revert unrelated user or Agent changes. If unrelated changes exist in files you must touch, read carefully and work with them instead of overwriting.
@@ -563,22 +569,23 @@ After implementation and validation in a task worktree, the owning Agent should 
 
 - the claim belongs to the current Agent/session and covers the changed files;
 - the task branch is committed and contains only current-task changes;
-- scoped validation ran, or a precise validation blocker is recorded;
-- the task branch merges cleanly into current local `main`;
-- local `main` has no unrelated dirty changes in files affected by the merge;
+- `local_quality_gate.py closeout` passed in the task worktree, and `verify-manifest` still confirms the recorded local `main` SHA and task HEAD SHA;
+- selector-selected validation and merge preflight passed;
+- root local `main` is clean and has not moved since the manifest was created;
+- the task branch can enter local `main` with `git merge --ff-only <task-branch>`;
 - no active claim or hotspot conflict blocks the scope;
 - the user did not ask to stop before merge, keep work isolated, or hand off only;
 - any post-merge remote sync uses the remote sync gate in section 14.
 
-When the gates pass, merge one task at a time into local `main`, run the smallest useful post-merge validation or state why docs-only/rule-only/`FAST_PATCH` validation is sufficient, close the claim, and remove the task worktree when it is clean.
+When the gates pass, merge one task at a time into root local `main` with `git merge --ff-only <task-branch>`, run the smallest useful post-merge validation or state why docs-only/rule-only/`FAST_PATCH` validation is sufficient, then close only that task's claim and remove only that task's junction (when present), worktree, and branch. The gate supplies evidence for this sequence but does not execute merge, release, or cleanup.
 
-When any gate fails, do not force the merge. Routine small conflicts inside the owning Agent's claimed scope should be resolved in the task worktree and revalidated by that same Agent before retrying the local merge. Wait for a main integration session only for large conflicts, cross-lane conflicts, shared DTO/projection conflicts, hot-file conflicts with active claims, release/version conflicts, unclear semantic conflicts, or user-designated integration work. Close the lightweight guard claim as blocked, or create a separate ready/blocked queue handoff in the project memory lane if integration must happen later:
+When any gate fails, do not force the merge. `stale_main` and routine small conflicts inside the owning Agent's claimed scope return to the task worktree: merge the latest local `main` there, resolve conflicts, commit, and rerun `closeout`. Wait for a main integration session only for large conflicts, cross-lane conflicts, shared DTO/projection conflicts, hot-file conflicts with active claims, release/version conflicts, unclear semantic conflicts, or user-designated integration work. Close the lightweight guard claim as blocked, or create a separate ready/blocked queue handoff in the project memory lane if integration must happen later:
 
 ```powershell
 python "C:\Users\17533\.codex\skills\ccdawn-dawn-agent-html-memory\scripts\agent_work_guard.py" "C:\Users\17533\Desktop\Vibelution" release --claim-id "<claim-id>" --status blocked --reason "<failed merge gate, validation, or conflict summary>"
 ```
 
-Self-merge may be followed by push, PR creation, or publication when the remote sync gate passes. Remote branch deletion, force/overwrite, and treating `origin/main` as authority to reset local `main` remain destructive choices and require explicit confirmation.
+Self-merge may be followed by push, PR creation, `workflow_dispatch`, or publication when the remote sync gate passes, but remote push is not part of the default local closeout. Remote branch deletion, force/overwrite, and treating `origin/main` as authority to reset local `main` remain destructive choices and require explicit confirmation.
 
 ## 14. Remote GitHub Sync
 
@@ -650,7 +657,7 @@ Task handoff must include version bump recommendation, capability domain, user-v
 
 ## 16. Mainline Integration
 
-Task-owning Agents should self-review and self-merge by default when the merge gates in section 13 pass. A mainline integration session is a fallback and serialization owner, not the normal destination for routine clean task branches. It is still responsible for queued, cross-lane, large-conflict, release-sensitive, or user-designated integration work:
+Task-owning Agents should self-review and self-merge by default when the merge gates in section 13 pass. The mandatory local sequence is: branch from current local `main`; commit through the staged-content light gate; run claim-bound `closeout` in the clean task worktree; verify the manifest immediately before integration; confirm root `main` is clean and unchanged; run `git merge --ff-only <task-branch>` in root `main`; run minimal post-merge verification; then release and remove only the current task's resources. A mainline integration session is a fallback and serialization owner, not the normal destination for routine clean task branches. It is still responsible for queued, cross-lane, large-conflict, release-sensitive, or user-designated integration work:
 
 - keeping local `main` clean before each merge;
 - reviewing claim status and write scopes;
@@ -664,6 +671,8 @@ Task-owning Agents should self-review and self-merge by default when the merge g
 - pushing or creating PRs only after the remote sync gate passes, and keeping destructive remote/history operations behind explicit confirmation.
 
 If a branch cannot merge cleanly, leave it in its own worktree and mark it blocked with the conflicting files and next action.
+
+The quality gate does not merge, release claims, or delete resources. Cleanup is task-owned and bounded (`只清理本任务`): release only the current task claim; remove only its junction if one was created; remove only its clean worktree; then delete only its merged task branch. Never delete or reuse another unfinished task's branch, worktree, junction, or claim. As each task closes itself, the worktree inventory naturally converges to the durable root `main` only; do not achieve that appearance by deleting unfinished work.
 
 Do not keep conflict markers, staged partial resolutions, or an in-progress merge in the main integration workspace.
 
