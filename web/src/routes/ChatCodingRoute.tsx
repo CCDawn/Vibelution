@@ -1182,7 +1182,7 @@ const SESSION_DETAIL_INITIAL_MESSAGE_LIMIT = 40;
 const SESSION_DETAIL_HISTORY_PAGE_SIZE = 40;
 const SESSION_STREAM_MIN_APPLY_INTERVAL_MS = 350;
 const SESSION_STREAM_ROUTE_SWITCH_GRACE_MS = 4_000;
-const CHAT_CENTER_FIRST_MEDIA_QUERY = "(max-width: 980px)";
+const CHAT_COMPACT_DESKTOP_MEDIA_QUERY = "(max-width: 1279px)";
 
 type ResizableSide = "left" | "right";
 type PetInteractionAction = "feed" | "talk" | "care";
@@ -1771,9 +1771,9 @@ export function ChatCodingRoute() {
   const [dragState, setDragState] = useState<DragState | null>(null);
   const [leftRailCollapsed, setLeftRailCollapsed] = useState(false);
   const [rightPaneCollapsed, setRightPaneCollapsed] = useState(false);
-  const [centerFirstLayout, setCenterFirstLayout] = useState(false);
+  const [compactDesktopLayout, setCompactDesktopLayout] = useState(false);
   const [cacheDetailOpen, setCacheDetailOpen] = useState(false);
-  const centerFirstAutoCollapseRef = useRef(false);
+  const compactDesktopAutoCollapseRef = useRef(false);
   const imageUploadInFlightRef = useRef<Record<string, boolean>>({});
   const [sessionDrafts, setSessionDrafts] = useState<Record<string, string>>({});
   const [sessionComposerErrors, setSessionComposerErrors] = useState<Record<string, string>>({});
@@ -3791,21 +3791,20 @@ export function ChatCodingRoute() {
     if (typeof window === "undefined") {
       return;
     }
-    const mediaQuery = window.matchMedia(CHAT_CENTER_FIRST_MEDIA_QUERY);
-    function applyCenterFirstState(matches: boolean) {
-      setCenterFirstLayout(matches);
-      if (matches && !centerFirstAutoCollapseRef.current) {
-        centerFirstAutoCollapseRef.current = true;
-        setLeftRailCollapsed(true);
+    const mediaQuery = window.matchMedia(CHAT_COMPACT_DESKTOP_MEDIA_QUERY);
+    function applyCompactDesktopState(matches: boolean) {
+      setCompactDesktopLayout(matches);
+      if (matches && !compactDesktopAutoCollapseRef.current) {
+        compactDesktopAutoCollapseRef.current = true;
         setRightPaneCollapsed(true);
       }
       if (!matches) {
-        centerFirstAutoCollapseRef.current = false;
+        compactDesktopAutoCollapseRef.current = false;
       }
     }
-    applyCenterFirstState(mediaQuery.matches);
+    applyCompactDesktopState(mediaQuery.matches);
     const handleChange = (event: MediaQueryListEvent) => {
-      applyCenterFirstState(event.matches);
+      applyCompactDesktopState(event.matches);
     };
     mediaQuery.addEventListener("change", handleChange);
     return () => mediaQuery.removeEventListener("change", handleChange);
@@ -6252,7 +6251,7 @@ export function ChatCodingRoute() {
   return (
     <div
       ref={layoutRef}
-      className={centerFirstLayout ? `${styles.layout} ${styles.layoutCenterFirst}` : styles.layout}
+      className={compactDesktopLayout ? `${styles.layout} ${styles.layoutCompactDesktop}` : styles.layout}
       style={layoutStyle}
     >
       <aside className={statusRailCollapsed ? `${styles.leftRail} ${styles.paneCollapsed}` : styles.leftRail} aria-hidden={statusRailCollapsed}>
