@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 import time
@@ -87,11 +88,32 @@ def git_lines(root: Path, *args: str) -> list[str]:
     return [line for line in completed.stdout.splitlines() if line]
 
 
-def staged_paths(root: Path) -> list[str]:
+def git_paths(root: Path, *args: str) -> list[str]:
+    completed = subprocess.run(
+        ["git", *args],
+        cwd=root,
+        capture_output=True,
+        check=False,
+    )
+    if completed.returncode != 0:
+        error = completed.stderr.decode("utf-8", errors="replace").strip()
+        raise RuntimeError(error or "git command failed")
     return [
-        normalize_path(path)
-        for path in git_lines(root, "diff", "--cached", "--name-only", "--diff-filter=ACMR")
+        normalize_path(os.fsdecode(raw_path))
+        for raw_path in completed.stdout.split(b"\0")
+        if raw_path
     ]
+
+
+def staged_paths(root: Path) -> list[str]:
+    return git_paths(
+        root,
+        "diff",
+        "--cached",
+        "--name-only",
+        "--diff-filter=ACMR",
+        "-z",
+    )
 
 
 def staged_blob(root: Path, path: str) -> str:
@@ -130,10 +152,9 @@ def measured(
 
 
 def gate_definition_is_dirty(root: Path, staged: Sequence[str]) -> bool:
-    unstaged = {
-        normalize_path(path)
-        for path in git_lines(root, "diff", "--name-only", "--diff-filter=ACMR")
-    }
+    unstaged = set(
+        git_paths(root, "diff", "--name-only", "--diff-filter=ACMRD", "-z")
+    )
     return bool(GATE_DEFINITION_FILES.intersection(staged).intersection(unstaged))
 
 
