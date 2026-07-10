@@ -29,16 +29,11 @@ const monoCodeClass = "block w-full min-w-0 break-all text-[var(--vui-font-xs)] 
 const detailHeaderClass = `flex min-w-0 max-w-full items-center justify-between gap-2 ${cardSurface}`;
 const detailTitleWrapClass = "min-w-0";
 const detailTitleClass = "m-0 min-w-0 truncate text-base text-vui-fg-primary";
-const summaryGridClass = "grid grid-cols-[repeat(5,minmax(0,1fr))] gap-2 max-[1280px]:grid-cols-3 max-[960px]:grid-cols-2 max-[720px]:grid-cols-1";
-const metricClass = `flex min-w-0 items-center gap-2 ${cardSurface}`;
-const metricIconClass = "inline-flex text-[var(--accent-cool)]";
-const metricBodyClass = "grid min-w-0 gap-0.5";
-const metricLabelClass = "text-[var(--vui-font-xs)] uppercase tracking-[0.06em] text-vui-fg-tertiary";
-const metricValueClass = "min-w-0 truncate text-[var(--vui-font-xs)] text-vui-fg-primary";
+const summaryGridClass = "min-w-0 max-w-full overflow-x-auto";
 const selectionNoticeClass = "rounded-[var(--radius-panel)] border border-[color-mix(in_srgb,var(--state-warning)_28%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_8%,transparent)] px-2 py-[7px] text-[var(--vui-font-xs)] leading-[1.35] text-vui-fg-secondary";
-const ledgerSectionClass = "grid gap-[7px] rounded-[var(--radius-panel)] border border-vui-border-soft bg-[color-mix(in_srgb,var(--vui-surface-panel)_72%,transparent)] p-2";
+const ledgerSectionClass = "grid min-w-0 gap-[7px] border-t border-vui-border-soft pt-2";
 const ledgerFlowClass = "grid grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)_minmax(0,1fr)] gap-2 max-[1280px]:grid-cols-1";
-const ledgerBucketClass = `grid min-w-0 content-start gap-[7px] ${cardSurface}`;
+const ledgerBucketClass = "grid min-w-0 content-start gap-[7px]";
 const sectionHeaderClass = "flex items-center justify-between gap-2";
 const sectionTitleClass = "m-0 text-[0.9rem] text-vui-fg-primary";
 const sectionCountClass = "text-[var(--vui-font-xs)] text-vui-fg-tertiary";
@@ -55,16 +50,12 @@ const lifecycleTitleClass = "flex items-center justify-between gap-2";
 const lifecycleKindClass = "text-[var(--vui-font-xs)] text-vui-fg-primary";
 const lifecycleSummaryClass = "m-0 my-[3px] min-w-0 break-words text-[var(--vui-font-xs)] leading-[1.35] text-vui-fg-secondary";
 const chipsClass = "mt-[5px] flex flex-wrap gap-[5px]";
-const chipCodeClass = "max-w-full break-all whitespace-normal rounded-full border border-vui-border-soft bg-[var(--surface-code)] px-1.5 py-[3px] text-[var(--vui-font-xs)] text-vui-fg-tertiary";
-const refListClass = "mt-[5px] flex flex-wrap gap-[5px]";
-const evidenceRefListClass = "mt-[5px] flex flex-wrap gap-[5px]";
+const chipCodeClass = "max-w-full overflow-hidden truncate whitespace-nowrap rounded-full border border-vui-border-soft bg-[var(--surface-code)] px-1.5 py-[3px] text-[var(--vui-font-xs)] text-vui-fg-tertiary";
+const refListClass = "mt-[5px] flex min-w-0 max-w-full flex-wrap gap-[5px]";
+const evidenceRefListClass = "mt-[5px] flex min-w-0 max-w-full flex-wrap gap-[5px]";
 const emptyInlineClass = "text-[var(--vui-font-xs)] leading-[1.35] text-vui-fg-secondary";
 const statusPillBaseClass = "inline-flex min-h-[22px] items-center whitespace-nowrap rounded-full border border-vui-border-soft px-[7px] text-[var(--vui-font-xs)]";
-const emptyStateClass = "grid min-h-16 content-start gap-1 rounded-[var(--radius-panel)] border border-dashed border-vui-border-soft bg-[color-mix(in_srgb,var(--vui-surface-row)_74%,transparent)] p-2.5";
-const emptyStateLoadingClass = "border-solid";
-const emptyStateErrorClass = "border-[color-mix(in_srgb,var(--state-error)_32%,transparent)]";
-const emptyTitleClass = "text-[var(--vui-font-xs)] text-vui-fg-primary";
-const emptyDetailClass = "min-w-0 break-words text-[var(--vui-font-xs)] text-vui-fg-secondary";
+const emptyStateClass = "grid min-h-16 content-start gap-1 break-words rounded-[var(--radius-panel)] border border-dashed border-vui-border-soft bg-[color-mix(in_srgb,var(--vui-surface-row)_74%,transparent)] p-2.5";
 
 const styles = {
   routeClass,
@@ -92,11 +83,6 @@ const styles = {
   detailTitleWrapClass,
   detailTitleClass,
   summaryGridClass,
-  metricClass,
-  metricIconClass,
-  metricBodyClass,
-  metricLabelClass,
-  metricValueClass,
   selectionNoticeClass,
   ledgerSectionClass,
   ledgerFlowClass,
@@ -123,10 +109,6 @@ const styles = {
   emptyInlineClass,
   statusPillBaseClass,
   emptyStateClass,
-  emptyStateLoadingClass,
-  emptyStateErrorClass,
-  emptyTitleClass,
-  emptyDetailClass,
 } as const;
 
 export default styles;
