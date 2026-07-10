@@ -103,8 +103,26 @@ def test_research_organization_initializes_protected_core_agents_with_explicit_t
     assert ceo["toolPolicy"]["preferredTools"] == expected_ceo_policy["preferredTools"]
     assert advisor["toolPolicy"]["preferredTools"] == expected_advisor_policy["preferredTools"]
     assert steward["toolPolicy"]["preferredTools"] == expected_steward_policy["preferredTools"]
-    assert "write_file_tool" not in steward["toolPolicy"]["allowedTools"]
-    assert "cli_tool" not in steward["toolPolicy"]["allowedTools"]
+    shared_governance_tools = {
+        "agent_message_tool",
+        "research_agent_creation_proposal_tool",
+        "research_communication_edge_proposal_tool",
+        "research_proposal_apply_tool",
+    }
+    forbidden_direct_mutation_tools = {"cli_tool", "write_file_tool", "apply_patch_tool"}
+    for core_agent in (ceo, advisor, steward):
+        policy = core_agent["toolPolicy"]
+        assert shared_governance_tools.issubset(policy["allowedTools"])
+        assert forbidden_direct_mutation_tools.isdisjoint(policy["allowedTools"])
+        assert policy["writeScopes"] == []
+        assert policy["mutationAccess"] == "restricted"
+        assert policy["networkAccess"] == "controlled"
+    assert "agent_tool_permission_request_tool" in advisor["toolPolicy"]["allowedTools"]
+    assert "agent_tool_permission_request_tool" in steward["toolPolicy"]["allowedTools"]
+    assert {
+        "unified_memory_search_tool",
+        "research_knowledge_query_tool",
+    }.issubset(steward["toolPolicy"]["allowedTools"])
     assert steward["memoryPolicy"]["readSharedGroups"] == ["project", "research", "agent_config"]
     assert steward["memoryPolicy"]["writeSharedGroups"] == ["agent_config"]
     assert (ceo["agentId"], advisor["agentId"]) in {(edge["fromAgentId"], edge["toAgentId"]) for edge in org["edges"]}
