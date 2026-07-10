@@ -244,12 +244,8 @@
   flex-wrap: nowrap;
   gap: 3px;
   max-width: 100%;
-  padding: 3px;
   overflow-x: auto;
   overscroll-behavior-x: contain;
-  border: 1px solid var(--vui-border-subtle);
-  border-radius: var(--radius-control);
-  background: color-mix(in srgb, var(--shell-surface) 86%, transparent);
   scrollbar-width: none;
 }
 
@@ -1234,11 +1230,17 @@
   white-space: nowrap;
 }
 
-@media (max-width: 1420px) {
+@media (max-width: 1279px) {
+  :where(.vui-app-appshell).brandSubtle,
   :where(.vui-app-appshell).topClock span:last-child,
   :where(.vui-app-appshell).utilityTriggerLabel,
   :where(.vui-app-appshell).statusBadgeLabel {
     display: none;
+  }
+
+  :where(.vui-app-appshell).topBar {
+    gap: 8px;
+    padding-inline: 12px;
   }
 }
 
