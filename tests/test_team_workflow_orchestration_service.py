@@ -1,4 +1,5 @@
 ﻿import json
+import ast
 from concurrent.futures import Future
 from pathlib import Path
 from types import SimpleNamespace
@@ -23,20 +24,65 @@ from core.web.services import (
 pytestmark = pytest.mark.serial
 
 
-def test_source_collection_stage_round_sync_has_single_implementation():
+def test_source_collection_stage_round_sync_has_single_implementation_across_split_modules():
     service_path = Path(team_workflow_orchestration_service.__file__)
-    source = service_path.read_text(encoding="utf-8")
+    split_module_paths = sorted((service_path.parent / "team_workflow").glob("*.py"))
+    candidate_paths = [service_path, *split_module_paths]
 
-    assert source.count("def _sync_source_collection_stage_round_after_search(") == 1
+    implementation_count = 0
+    for path in candidate_paths:
+        tree = ast.parse(path.read_text(encoding="utf-8-sig"), filename=str(path))
+        implementation_count += sum(
+            1
+            for node in ast.walk(tree)
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and node.name == "_sync_source_collection_stage_round_after_search"
+        )
+
+    assert implementation_count == 1
 
 
 def test_source_collection_pure_helpers_are_package_backed():
     from core.web.services.team_workflow import (
+        source_collection_common,
         source_collection_context,
         source_collection_projection,
         source_collection_stage_tasks,
     )
 
+    count_cases = [
+        ("invalid", 0),
+        (-7, 0),
+        (42, 42),
+        (1_000_000, 100_000),
+    ]
+    for value, expected in count_cases:
+        package_result = source_collection_common.source_collection_count(value)
+        facade_result = team_workflow_orchestration_service._source_collection_count(value)
+
+        assert package_result == facade_result
+        assert package_result == expected
+
+    text_list_cases = [
+        ("not-a-list", 4, 12, []),
+        ([" alpha ", "", "alpha", " beta ", None], 5, 12, ["alpha", "beta"]),
+        (["one", "two", "three"], 2, 12, ["one", "two"]),
+        (["alphabet", "beta"], 2, 4, ["alph", "beta"]),
+    ]
+    for value, max_items, max_length, expected in text_list_cases:
+        package_result = source_collection_common.normalize_text_list(
+            value,
+            max_items=max_items,
+            max_length=max_length,
+        )
+        facade_result = team_workflow_orchestration_service._normalize_text_list(
+            value,
+            max_items=max_items,
+            max_length=max_length,
+        )
+
+        assert package_result == facade_result
+        assert package_result == expected
     assert (
         team_workflow_orchestration_service._source_collection_stage_task_checklist
         is source_collection_stage_tasks.source_collection_stage_task_checklist
@@ -48,6 +94,10 @@ def test_source_collection_pure_helpers_are_package_backed():
     assert (
         team_workflow_orchestration_service._source_collection_context_continuation_hint
         is source_collection_context.source_collection_context_continuation_hint
+    )
+    assert (
+        team_workflow_orchestration_service._compact_source_collection_stage_task_context
+        is source_collection_context.compact_source_collection_stage_task_context
     )
 
 
@@ -83,6 +133,21 @@ def test_source_collection_formal_knowledge_boundary_requires_source_ingestor_st
     assert contract["writesFormalKnowledge"] is False
     assert contract["writesOfficialGraph"] is False
     assert contract["resultAuthority"] == "source_collection_stage_writeback_tool"
+
+
+def test_source_collection_writeback_contract_uses_facade_schema_version(monkeypatch):
+    monkeypatch.setattr(team_workflow_orchestration_service, "SCHEMA_VERSION", 7)
+
+    contract = team_workflow_orchestration_service._source_collection_stage_task_writeback_contract(
+        "team-schema",
+        "run-schema",
+        "task-schema",
+        stage_id="finding",
+        agent_id="finder-agent",
+        agent_role="source_finder",
+    )
+
+    assert contract["schemaVersion"] == 7
 
 
 def test_source_collection_summary_reuses_processing_status_for_projection(tmp_path, monkeypatch):

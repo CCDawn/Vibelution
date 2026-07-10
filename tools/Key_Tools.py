@@ -5,7 +5,7 @@ LangChain 工具包装模块
 所有在此注册的 Tool 都会通过 agent._tools 传递给 LLM。
 文档（SOUL.md / SPEC.md）中提到的工具必须在此注册，否则 Agent 无法调用。
 """
-from typing import Dict, List, Optional
+from typing import Dict, List, Literal, Optional
 from langchain_core.tools import BaseTool, tool, StructuredTool
 from tools.rebirth_tools import trigger_self_restart_tool as _restart_impl
 from tools.memory_tools import (
@@ -578,7 +578,7 @@ def create_key_tools() -> List[BaseTool]:
         record_limit: int = 5,
         candidate_offset: int = 0,
         candidate_limit: int = 5,
-        context_mode: str = "compact",
+        context_mode: Literal["compact", "full", "minimal", "retry_missing"] = "compact",
     ) -> str:
         """
         【知识搜集阶段上下文】读取当前团队资料搜集阶段任务的受控上下文。

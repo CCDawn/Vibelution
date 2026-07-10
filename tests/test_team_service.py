@@ -6,6 +6,7 @@ from core.infrastructure import developer_sandbox
 from core.web.services import (
     agent_config_workspace_service,
     agent_directory_service,
+    agent_role_tool_profile_service,
     chat_room_service,
     project_agent_bus_service,
     session_service,
@@ -214,57 +215,23 @@ def test_research_team_sync_applies_challenge_cup_agent_tool_profiles(tmp_path, 
 
     assert [member["role"] for member in team["members"]] == ["source_finder", "source_extractor", "source_relation_mapper"]
     cases = {
-        finder["agentId"]: (
-            "source_finder",
-            [
-                "agent_message_tool",
-                "unified_memory_search_tool",
-                "research_knowledge_query_tool",
-                "task_create_tool",
-                "task_update_tool",
-                "source_collection_context_tool",
-                "source_collection_stage_writeback_tool",
-                "batch_web_search_tool",
-                "paper_search_tool",
-                "project_search_tool",
-                "news_search_tool",
-                "search_summarize_sources_tool",
-                "web_fetch_tool",
-            ],
-        ),
-        extractor["agentId"]: (
-            "source_extractor",
-            [
-                "agent_message_tool",
-                "unified_memory_search_tool",
-                "research_knowledge_query_tool",
-                "task_create_tool",
-                "task_update_tool",
-                "source_collection_context_tool",
-                "source_collection_stage_writeback_tool",
-                "web_fetch_tool",
-                "search_summarize_sources_tool",
-            ],
-        ),
-        mapper["agentId"]: (
-            "source_relation_mapper",
-            [
-                "agent_message_tool",
-                "unified_memory_search_tool",
-                "research_knowledge_query_tool",
-                "task_create_tool",
-                "task_update_tool",
-                "source_collection_context_tool",
-                "source_collection_stage_writeback_tool",
-            ],
-        ),
+        finder["agentId"]: "source_finder",
+        extractor["agentId"]: "source_extractor",
+        mapper["agentId"]: "source_relation_mapper",
     }
-    for agent_id, (role_key, expected_tools) in cases.items():
+    for agent_id, role_key in cases.items():
         agent = agent_directory_service.get_agent(agent_id)
+        expected_policy = agent_role_tool_profile_service.resolve_role_tool_policy(
+            role_key=role_key,
+            primary_mode="research",
+            policy_id=str(agent["toolPolicyId"]),
+        )
+        assert expected_policy is not None
         assert agent["primaryMode"] == "research"
         assert agent["roleKey"] == role_key
         assert agent["metadata"]["researchTeamRoleKey"] == role_key
-        assert agent["toolPolicy"]["allowedTools"] == expected_tools
+        assert agent["toolPolicy"]["allowedTools"] == expected_policy["allowedTools"]
+        assert agent["toolPolicy"]["preferredTools"] == expected_policy["preferredTools"]
         assert agent["toolPolicy"]["writeScopes"] == []
         assert agent["toolPolicy"]["mutationAccess"] == "none"
 
@@ -290,23 +257,16 @@ def test_research_team_repair_applies_challenge_cup_agent_tool_profiles(tmp_path
     team_service.list_teams()
 
     agent = agent_directory_service.get_agent(finder["agentId"])
+    expected_policy = agent_role_tool_profile_service.resolve_role_tool_policy(
+        role_key="source_finder",
+        primary_mode="research",
+        policy_id=str(agent["toolPolicyId"]),
+    )
+    assert expected_policy is not None
     assert agent["primaryMode"] == "research"
     assert agent["roleKey"] == "source_finder"
-    assert agent["toolPolicy"]["allowedTools"] == [
-        "agent_message_tool",
-        "unified_memory_search_tool",
-        "research_knowledge_query_tool",
-        "task_create_tool",
-        "task_update_tool",
-        "source_collection_context_tool",
-        "source_collection_stage_writeback_tool",
-        "batch_web_search_tool",
-        "paper_search_tool",
-        "project_search_tool",
-        "news_search_tool",
-        "search_summarize_sources_tool",
-        "web_fetch_tool",
-    ]
+    assert agent["toolPolicy"]["allowedTools"] == expected_policy["allowedTools"]
+    assert agent["toolPolicy"]["preferredTools"] == expected_policy["preferredTools"]
     assert agent["toolPolicy"]["mutationAccess"] == "none"
     assert agent["toolPolicy"]["writeScopes"] == []
 
@@ -587,18 +547,14 @@ def test_challenge_cup_research_team_agent_repair_purges_stale_and_rebuilds_comp
             else:
                 assert "source_collection_context_tool" in policy["allowedTools"]
                 assert "source_collection_stage_writeback_tool" in policy["allowedTools"]
-                if member["role"] == "source_ingestor":
-                    assert policy["preferredTools"][:4] == [
-                        "task_create_tool",
-                        "task_update_tool",
-                        "source_collection_context_tool",
-                        "source_collection_stage_writeback_tool",
-                    ]
-                else:
-                    assert policy["preferredTools"][:2] == [
-                        "source_collection_context_tool",
-                        "source_collection_stage_writeback_tool",
-                    ]
+                role_key = team_service.RESEARCH_TEAM_MEMBER_ROLE_KEYS[member["role"]]
+                expected_policy = agent_role_tool_profile_service.resolve_role_tool_policy(
+                    role_key=role_key,
+                    primary_mode="research",
+                    policy_id=str(policy["policyId"]),
+                )
+                assert expected_policy is not None
+                assert policy["preferredTools"] == expected_policy["preferredTools"]
     canvas = team_service.get_team_canvas("research-team")
     assert {node["agentId"] for node in canvas["nodes"]} == {member["agentId"] for member in team["members"]}
     assert stale_agent["agentId"] not in {node["agentId"] for node in canvas["nodes"]}
