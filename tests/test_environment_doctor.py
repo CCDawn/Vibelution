@@ -4,6 +4,7 @@
 """
 
 import json
+import os
 import shutil
 import subprocess
 import pytest
@@ -25,7 +26,9 @@ def _powershell_exe() -> str:
     return exe
 
 
-def run_doctor():
+def run_doctor(extra_env: dict[str, str] | None = None):
+    env = os.environ.copy()
+    env.update(extra_env or {})
     result = subprocess.run(
         [
             _powershell_exe(),
@@ -39,6 +42,7 @@ def run_doctor():
         text=True,
         cwd=str(PROJECT_ROOT),
         timeout=30,
+        env=env,
     )
     assert result.returncode == 0, result.stderr or result.stdout
     return json.loads(result.stdout)
@@ -83,3 +87,17 @@ def test_doctor_reports_local_quality_gate_and_hook_configuration():
     assert report["checks"]["local_quality_gate"]["ok"] is True
     assert report["checks"]["ruff"]["ok"] is True
     assert "ruff" in report["checks"]["ruff"]["version"].lower()
+
+
+def test_doctor_treats_hooks_path_mismatch_as_advisory():
+    report = run_doctor(
+        {
+            "GIT_CONFIG_COUNT": "1",
+            "GIT_CONFIG_KEY_0": "core.hooksPath",
+            "GIT_CONFIG_VALUE_0": "wrong-hooks",
+        }
+    )
+
+    assert report["checks"]["git_hooks_path"]["ok"] is False
+    assert report["checks"]["git_hooks_path"]["configured"] == "wrong-hooks"
+    assert report["ok"] is True
