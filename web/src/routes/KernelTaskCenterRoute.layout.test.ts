@@ -26,6 +26,17 @@ describe("KernelTaskCenterRoute layout contract", () => {
     expect(routeSource).not.toMatch(/<button\b/);
   });
 
+  it("maps Kernel task state and facts through shared VUI compositions", () => {
+    expect(routeSource).toContain("VSurface");
+    expect(routeSource).toContain("VMetricStrip");
+    expect(routeSource).toContain("VStateSurface");
+    expect(routeSource).toContain("VActionGroup");
+    expect(routeSource).toContain('ariaLabel={copy.taskList}');
+    expect(routeSource).toContain('ariaLabel={copy.detail}');
+    expect(styles.taskRowClass).toContain("w-full");
+    expect(styles.taskRowSelectedClass).toContain("border-");
+  });
+
   it("is wired as a read-only kernel route", () => {
     expect(routerSource).toContain('path: "kernel"');
     expect(routerSource).toContain("<KernelTaskCenterRoute />");
@@ -53,6 +64,12 @@ describe("KernelTaskCenterRoute layout contract", () => {
     expect(routeSource).not.toContain("useAppI18n");
   });
 
+  it("distinguishes a globally empty task list from a status-filtered empty result", () => {
+    expect(routeSource).toContain('noMatchingTasks: "没有符合筛选条件的任务"');
+    expect(routeSource).toContain('noMatchingTasks: "No tasks match this filter"');
+    expect(routeSource).toContain("title={status ? copy.noMatchingTasks : copy.noTasks}");
+  });
+
   it("keeps the route root background-aware", () => {
     expect(styles.routeClass).not.toContain("bg-[var(--surface-page)]");
     expect(styles.routeClass).toContain("grid-rows-[auto_minmax(0,1fr)]");
@@ -67,9 +84,6 @@ describe("KernelTaskCenterRoute layout contract", () => {
     [
       styles.paneClass,
       styles.detailHeaderClass,
-      styles.metricClass,
-      styles.ledgerSectionClass,
-      styles.ledgerBucketClass,
       styles.deliveryRowClass,
       styles.lifecycleSectionClass,
       styles.lifecycleRowClass,
@@ -79,15 +93,30 @@ describe("KernelTaskCenterRoute layout contract", () => {
     [
       styles.paneClass,
       styles.detailHeaderClass,
-      styles.metricClass,
-      styles.ledgerSectionClass,
-      styles.ledgerBucketClass,
       styles.lifecycleSectionClass,
     ].forEach((className) => {
       expect(className).not.toContain("shadow-[var(--vui-shadow-hairline)]");
       expect(className).not.toContain("bg-[var(--surface-panel)]");
       expect(className).not.toContain("bg-[var(--surface-card)]");
     });
+  });
+
+  it("keeps the Kernel ledger as a flat bordered structure", () => {
+    expect(styles.ledgerSectionClass).toContain("grid");
+    expect(styles.ledgerSectionClass).toContain("border-t");
+    expect(styles.ledgerSectionClass).toContain("pt-2");
+    expect(styles.ledgerSectionClass).not.toContain("bg-");
+    expect(styles.ledgerSectionClass).not.toContain("[background:");
+    expect(styles.ledgerSectionClass).not.toContain("rounded-[var(--radius-panel)]");
+    expect(styles.ledgerSectionClass).not.toContain("shadow-");
+
+    expect(styles.ledgerBucketClass).toContain("grid");
+    expect(styles.ledgerBucketClass).toContain("content-start");
+    expect(styles.ledgerBucketClass).not.toContain("bg-");
+    expect(styles.ledgerBucketClass).not.toContain("[background:");
+    expect(styles.ledgerBucketClass).not.toContain("rounded-[var(--radius-panel)]");
+    expect(styles.ledgerBucketClass).not.toContain("cardSurface");
+    expect(styles.ledgerBucketClass).not.toContain("shadow-");
   });
 
   it("keeps Kernel panel surface tokens centralized in route-local constants", () => {
@@ -129,7 +158,7 @@ describe("KernelTaskCenterRoute layout contract", () => {
     expect(routeSource).toContain("styles.detailContentClass");
   });
 
-  it("wraps long Kernel ids, refs, paths, and errors inside their panels", () => {
+  it("keeps long Kernel reference chips compact inside the flat ledger", () => {
     expect(styles.detailHeaderClass).toContain("max-w-full");
     expect(styles.detailTitleClass).toContain("truncate");
     expect(styles.deliveryRowClass).toContain("max-w-full");
@@ -138,9 +167,15 @@ describe("KernelTaskCenterRoute layout contract", () => {
     expect(styles.warningLineClass).toContain("break-words");
     expect(styles.lifecycleSummaryClass).toContain("break-words");
     expect(styles.chipCodeClass).toContain("max-w-full");
-    expect(styles.chipCodeClass).toContain("break-all");
-    expect(styles.chipCodeClass).toContain("whitespace-normal");
-    expect(styles.emptyDetailClass).toContain("break-words");
+    expect(styles.chipCodeClass).toContain("overflow-hidden");
+    expect(styles.chipCodeClass).toContain("truncate");
+    expect(styles.chipCodeClass).toContain("whitespace-nowrap");
+    expect(styles.chipCodeClass).not.toContain("break-all");
+    expect(styles.refListClass).toContain("min-w-0");
+    expect(styles.refListClass).toContain("max-w-full");
+    expect(styles.evidenceRefListClass).toContain("min-w-0");
+    expect(styles.evidenceRefListClass).toContain("max-w-full");
+    expect(styles.emptyStateClass).toContain("break-words");
   });
 
   it("keeps Kernel header actions content-sized", () => {

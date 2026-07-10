@@ -40,6 +40,18 @@ describe("LogsRoute layout contract", () => {
     expect(routeSource).not.toMatch(/<textarea\b/);
   });
 
+  it("uses VUI surfaces without changing the resizable logs contract", () => {
+    expect(routeSource).toContain("VSurface");
+    expect(routeSource).toContain("VStateSurface");
+    expect(routeSource).toContain("VActionGroup");
+    expect(routeSource).toContain("LOG_SIDEBAR_STORAGE_KEY");
+    expect(routeSource).toContain("LOG_RIGHT_RAIL_STORAGE_KEY");
+    expect(styles.resizableLayout).toContain("grid-cols-[var(--logs-sidebar-width)_auto_minmax(0,1fr)]");
+    expect(styles.packageButtonPath).toContain("truncate");
+    expect(styles.rootButtonPath).toContain("truncate");
+    expect(styles.deleteButton).toContain("w-fit");
+  });
+
   it("keeps the raw file preview before the diagnostic summary in the main column", () => {
     const filePreviewIndex = routeSource.indexOf("<LazyFilePreview");
     const diagnosticsIndex = routeSource.indexOf("{renderDiagnosticsPanel(contentQuery.data.diagnostics, lang)}");
@@ -61,12 +73,12 @@ describe("LogsRoute layout contract", () => {
     expect(routeSource).toContain("initialPath={initialRuntimeScenePath}");
   });
 
-  it("uses dense structured states for log index and preview loading or empty states", () => {
+  it("uses VUI state surfaces for log index and preview loading or empty states", () => {
     expect(routeSource).toContain("function renderLogIndexState");
     expect(routeSource).toContain("function renderLogPreviewState");
-    expect(routeSource).toContain("styles.stateSkeletonStack");
-    expect(routeSource).toContain("styles.previewStateFlow");
-    expect(routeSource).not.toContain('<div className={styles.emptySurface}>{t("loadingLogs")}</div>');
+    expect(routeSource).toContain("<VStateSurface");
+    expect(routeSource).toContain('skeletonLines={tone === "loading" ? 2 : false}');
+    expect(styles.stateSurface).toContain("min-w-0");
   });
 
   it("keeps log root guidance in hover text instead of a permanent card row", () => {

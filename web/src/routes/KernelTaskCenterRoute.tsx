@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { Activity, Boxes, RefreshCw, Router, ShieldCheck } from "lucide-react";
+import { RefreshCw } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { useSearchParams } from "react-router-dom";
@@ -7,7 +7,7 @@ import { useSearchParams } from "react-router-dom";
 import { getKernelTaskTimeline, listKernelTasks, selectKernelTaskId } from "../api/kernel";
 import { queryKeys } from "../api/queryKeys";
 import type { KernelDelivery, KernelTask, KernelTimelineItem } from "../api/types";
-import { VButton, VIconButton, VRouteHeader, VSelect } from "../components/vui";
+import { VActionGroup, VButton, VIconButton, VMetricStrip, VRouteHeader, VSelect, VStateSurface, VSurface } from "../components/vui";
 import { useShellI18n } from "../i18n/useShellI18n";
 import styles from "./KernelTaskCenterRoute.styles";
 
@@ -44,6 +44,7 @@ const COPY = {
     directView: "Direct",
     taskHidden: "当前任务不在左侧列表中，可能被状态筛选或数量限制隐藏。",
     noTasks: "暂无 Kernel 任务",
+    noMatchingTasks: "没有符合筛选条件的任务",
     loading: "读取中",
     loadFailed: "读取失败",
     noTimeline: "选择一个任务查看链路",
@@ -76,6 +77,7 @@ const COPY = {
     directView: "Direct",
     taskHidden: "This task is not in the left list; it may be hidden by status filtering or list limits.",
     noTasks: "No Kernel tasks",
+    noMatchingTasks: "No tasks match this filter",
     loading: "Loading",
     loadFailed: "Load failed",
     noTimeline: "Select a task to inspect the chain",
@@ -170,6 +172,102 @@ export function KernelTaskCenterRoute() {
     ],
     [copy.allStatus],
   );
+  const taskPaneContent = taskQuery.isError ? (
+    <VStateSurface className={styles.emptyStateClass} title={copy.loadFailed} tone="error">
+      {describeError(taskQuery.error, copy.loadFailed)}
+    </VStateSurface>
+  ) : taskQuery.isLoading ? (
+    <VStateSurface className={styles.emptyStateClass} title={copy.loading} tone="loading">
+      {copy.taskList}
+    </VStateSurface>
+  ) : tasks.length === 0 ? (
+    <VStateSurface className={styles.emptyStateClass} title={status ? copy.noMatchingTasks : copy.noTasks} tone="empty">
+      {copy.taskList}
+    </VStateSurface>
+  ) : (
+    tasks.map((task) => (
+      <TaskRow
+        key={task.taskId}
+        task={task}
+        selected={task.taskId === selectedTaskId}
+        onSelect={() => updateSelectedTaskId(task.taskId)}
+        copy={copy}
+      />
+    ))
+  );
+  const timelinePaneContent = !selectedTaskId ? (
+    <VStateSurface className={styles.emptyStateClass} title={copy.noTimeline} tone="empty">
+      {copy.detail}
+    </VStateSurface>
+  ) : timelineQuery.isError ? (
+    <VStateSurface className={styles.emptyStateClass} title={copy.loadFailed} tone="error">
+      {describeError(timelineQuery.error, copy.loadFailed)}
+    </VStateSurface>
+  ) : timelineQuery.isLoading || !timeline ? (
+    <VStateSurface className={styles.emptyStateClass} title={copy.loading} tone="loading">
+      {selectedTaskId}
+    </VStateSurface>
+  ) : (
+    <>
+      <div className={styles.detailContentClass}>
+        <div className={styles.detailHeaderClass}>
+          <div className={styles.detailTitleWrapClass}>
+            <p className={styles.eyebrowClass}>{copy.detail}</p>
+            <h2 className={styles.detailTitleClass}>{shortId(timeline.taskId)}</h2>
+          </div>
+          <StatusPill status={timeline.task.status} />
+        </div>
+
+        <VMetricStrip
+          ariaLabel={copy.detail}
+          className={styles.summaryGridClass}
+          metrics={[
+            { id: "authority", label: copy.factAuthority, value: timeline.readModel.truthSource || "-", tone: "info" },
+            { id: "view", label: copy.viewType, value: timeline.readModel.projection ? copy.projectionView : copy.directView },
+            { id: "event", label: copy.event, value: shortId(timeline.event.eventId) },
+            { id: "work-run", label: copy.workRun, value: shortId(timeline.execution.workRunId) },
+            { id: "outcome", label: copy.outcome, value: timeline.outcome.status || "-" },
+          ]}
+        />
+
+        {selectedTaskHiddenFromList ? <div className={styles.selectionNoticeClass}>{copy.taskHidden}</div> : null}
+
+        <section className={styles.ledgerSectionClass} aria-label={copy.taskChain}>
+          <div className={styles.sectionHeaderClass}>
+            <h3 className={styles.sectionTitleClass}>{copy.taskChain}</h3>
+            <span className={styles.sectionCountClass}>3</span>
+          </div>
+          <div className={styles.ledgerFlowClass}>
+            <LedgerBucket title={copy.deliveryResult} count={timeline.deliveries.length}>
+              <div className={styles.deliveryGridClass}>
+                {timeline.deliveries.map((delivery) => (
+                  <DeliveryRow key={`${delivery.targetAgentId}-${delivery.inboxMessageId}`} delivery={delivery} copy={copy} />
+                ))}
+              </div>
+            </LedgerBucket>
+            <LedgerBucket title={copy.projectionRefs} count={timeline.projectionRefs.length}>
+              <RefList refs={timeline.projectionRefs} />
+            </LedgerBucket>
+            <LedgerBucket title={copy.evidenceRefs} count={timeline.runtimeEvidenceRefs.length}>
+              <RefList refs={timeline.runtimeEvidenceRefs} className={styles.evidenceRefListClass} />
+            </LedgerBucket>
+          </div>
+        </section>
+      </div>
+
+      <section className={styles.lifecycleSectionClass}>
+        <div className={styles.sectionHeaderClass}>
+          <h3 className={styles.sectionTitleClass}>{copy.lifecycleTimeline}</h3>
+          <span className={styles.sectionCountClass}>{timeline.timeline.length}</span>
+        </div>
+        <div className={styles.lifecycleTimelineClass}>
+          {timeline.timeline.map((item, index) => (
+            <LifecycleRow key={`${item.kind}-${item.at}-${index}`} item={item} />
+          ))}
+        </div>
+      </section>
+    </>
+  );
 
   return (
     <div className={styles.routeClass}>
@@ -179,7 +277,7 @@ export function KernelTaskCenterRoute() {
         title={copy.title}
         meta={copy.subtitle}
         actions={(
-          <div className={styles.headerActionsClass}>
+          <VActionGroup ariaLabel={copy.status} className={styles.headerActionsClass}>
             <div className={styles.statusFilterClass}>
               <span className={styles.statusFilterLabelClass}>{copy.status}</span>
               <VSelect
@@ -201,12 +299,12 @@ export function KernelTaskCenterRoute() {
                 }
               }}
             />
-          </div>
+          </VActionGroup>
         )}
       />
 
-      <main className={styles.workspaceClass}>
-        <section className={styles.taskPaneClass} aria-label={copy.taskList}>
+      <div className={styles.workspaceClass}>
+        <VSurface as="aside" ariaLabel={copy.taskList} className={styles.taskPaneClass} elevation="panel" padding="none" tone="rail">
           <div className={styles.panelHeaderClass}>
             <div>
               <p className={styles.eyebrowClass}>{copy.taskList}</p>
@@ -214,96 +312,14 @@ export function KernelTaskCenterRoute() {
             </div>
           </div>
           <div className={styles.taskListClass}>
-            {taskQuery.isError ? (
-              <EmptyState label={copy.loadFailed} detail={describeError(taskQuery.error, copy.loadFailed)} tone="error" />
-            ) : taskQuery.isLoading ? (
-              <EmptyState label={copy.loading} detail={copy.taskList} tone="loading" />
-            ) : tasks.length === 0 ? (
-              <EmptyState label={copy.noTasks} detail={copy.taskList} />
-            ) : (
-              tasks.map((task) => (
-                <TaskRow
-                  key={task.taskId}
-                  task={task}
-                  selected={task.taskId === selectedTaskId}
-                  onSelect={() => updateSelectedTaskId(task.taskId)}
-                  copy={copy}
-                />
-              ))
-            )}
+            {taskPaneContent}
           </div>
-        </section>
+        </VSurface>
 
-        <section className={styles.detailPaneClass} aria-label={copy.detail}>
-          {!selectedTaskId ? (
-            <EmptyState label={copy.noTimeline} detail={copy.detail} />
-          ) : timelineQuery.isError ? (
-            <EmptyState label={copy.loadFailed} detail={describeError(timelineQuery.error, copy.loadFailed)} tone="error" />
-          ) : timelineQuery.isLoading || !timeline ? (
-            <EmptyState label={copy.loading} detail={selectedTaskId} tone="loading" />
-          ) : (
-            <>
-              <div className={styles.detailContentClass}>
-                <div className={styles.detailHeaderClass}>
-                  <div className={styles.detailTitleWrapClass}>
-                    <p className={styles.eyebrowClass}>{copy.detail}</p>
-                    <h2 className={styles.detailTitleClass}>{shortId(timeline.taskId)}</h2>
-                  </div>
-                  <StatusPill status={timeline.task.status} />
-                </div>
-
-                <div className={styles.summaryGridClass}>
-                  <Metric label={copy.factAuthority} value={timeline.readModel.truthSource} icon={<ShieldCheck size={15} />} />
-                  <Metric
-                    label={copy.viewType}
-                    value={timeline.readModel.projection ? copy.projectionView : copy.directView}
-                    icon={<ShieldCheck size={15} />}
-                  />
-                  <Metric label={copy.event} value={shortId(timeline.event.eventId)} icon={<Router size={15} />} />
-                  <Metric label={copy.workRun} value={shortId(timeline.execution.workRunId)} icon={<Activity size={15} />} />
-                  <Metric label={copy.outcome} value={timeline.outcome.status || "-"} icon={<Boxes size={15} />} />
-                </div>
-
-                {selectedTaskHiddenFromList ? <div className={styles.selectionNoticeClass}>{copy.taskHidden}</div> : null}
-
-                <section className={styles.ledgerSectionClass} aria-label={copy.taskChain}>
-                  <div className={styles.sectionHeaderClass}>
-                    <h3 className={styles.sectionTitleClass}>{copy.taskChain}</h3>
-                    <span className={styles.sectionCountClass}>3</span>
-                  </div>
-                  <div className={styles.ledgerFlowClass}>
-                    <LedgerBucket title={copy.deliveryResult} count={timeline.deliveries.length}>
-                      <div className={styles.deliveryGridClass}>
-                        {timeline.deliveries.map((delivery) => (
-                          <DeliveryRow key={`${delivery.targetAgentId}-${delivery.inboxMessageId}`} delivery={delivery} copy={copy} />
-                        ))}
-                      </div>
-                    </LedgerBucket>
-                    <LedgerBucket title={copy.projectionRefs} count={timeline.projectionRefs.length}>
-                      <RefList refs={timeline.projectionRefs} />
-                    </LedgerBucket>
-                    <LedgerBucket title={copy.evidenceRefs} count={timeline.runtimeEvidenceRefs.length}>
-                      <RefList refs={timeline.runtimeEvidenceRefs} className={styles.evidenceRefListClass} />
-                    </LedgerBucket>
-                  </div>
-                </section>
-              </div>
-
-              <section className={styles.lifecycleSectionClass}>
-                <div className={styles.sectionHeaderClass}>
-                  <h3 className={styles.sectionTitleClass}>{copy.lifecycleTimeline}</h3>
-                  <span className={styles.sectionCountClass}>{timeline.timeline.length}</span>
-                </div>
-                <div className={styles.lifecycleTimelineClass}>
-                  {timeline.timeline.map((item, index) => (
-                    <LifecycleRow key={`${item.kind}-${item.at}-${index}`} item={item} />
-                  ))}
-                </div>
-              </section>
-            </>
-          )}
-        </section>
-      </main>
+        <VSurface as="main" ariaLabel={copy.detail} className={styles.detailPaneClass} elevation="panel" padding="compact" tone="panel">
+          {timelinePaneContent}
+        </VSurface>
+      </div>
     </div>
   );
 }
@@ -430,36 +446,6 @@ function RefList({
   );
 }
 
-function Metric({ label, value, icon }: { label: string; value: string; icon: ReactNode }) {
-  return (
-    <div className={styles.metricClass}>
-      <span className={styles.metricIconClass}>{icon}</span>
-      <div className={styles.metricBodyClass}>
-        <small className={styles.metricLabelClass}>{label}</small>
-        <strong className={styles.metricValueClass}>{value || "-"}</strong>
-      </div>
-    </div>
-  );
-}
-
 function StatusPill({ status }: { status: string }) {
   return <span className={`${styles.statusPillBaseClass} ${statusTone(status)}`}>{status || "unknown"}</span>;
-}
-
-function EmptyState({
-  label,
-  detail,
-  tone = "idle",
-}: {
-  label: string;
-  detail: string;
-  tone?: "idle" | "loading" | "error";
-}) {
-  const toneStyle = tone === "error" ? styles.emptyStateErrorClass : tone === "loading" ? styles.emptyStateLoadingClass : "";
-  return (
-    <div className={`${styles.emptyStateClass} ${toneStyle}`} data-tone={tone}>
-      <strong className={styles.emptyTitleClass}>{label}</strong>
-      <span className={styles.emptyDetailClass}>{detail}</span>
-    </div>
-  );
 }
