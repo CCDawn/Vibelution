@@ -349,6 +349,28 @@ def test_local_quality_gate_matrix_command_matches_self_test_and_allowlist(
     assert spec.cwd == git_repo
 
 
+def test_selected_validation_loads_from_isolated_script_execution(
+    git_repo: Path,
+) -> None:
+    project_python = gate.PROJECT_ROOT / gate.PROJECT_PYTHON_NAME
+    script = gate.PROJECT_ROOT / "scripts" / "local_quality_gate.py"
+    probe = (
+        "import runpy; "
+        f"namespace = runpy.run_path({str(script)!r}); "
+        "namespace['selected_validation'](['README.md'])"
+    )
+
+    result = subprocess.run(
+        [str(project_python), "-I", "-c", probe],
+        cwd=git_repo,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+
+
 @pytest.mark.parametrize(
     "command",
     [
