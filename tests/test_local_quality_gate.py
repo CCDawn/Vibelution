@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -28,6 +29,20 @@ def git(root: Path, *args: str, check: bool = True) -> subprocess.CompletedProce
     )
 
 
+def _git_sh_exe() -> Path:
+    git_exe = shutil.which("git")
+    if not git_exe:
+        pytest.skip("Git is required for pre-commit hook tests")
+    git_root = Path(git_exe).resolve().parent.parent
+    for candidate in (
+        git_root / "usr" / "bin" / "sh.exe",
+        git_root / "bin" / "sh.exe",
+    ):
+        if candidate.is_file():
+            return candidate
+    pytest.skip("Git for Windows sh.exe is required for pre-commit hook tests")
+
+
 @pytest.fixture
 def git_repo(tmp_path: Path) -> Path:
     git(tmp_path, "init")
@@ -37,6 +52,32 @@ def git_repo(tmp_path: Path) -> Path:
     git(tmp_path, "add", "seed.txt")
     git(tmp_path, "commit", "-m", "seed")
     return tmp_path
+
+
+def test_pre_commit_missing_project_python_fails_with_repair_command(
+    git_repo: Path,
+) -> None:
+    hook_dir = git_repo / ".githooks"
+    hook_dir.mkdir()
+    shutil.copyfile(
+        gate.PROJECT_ROOT / ".githooks" / "pre-commit",
+        hook_dir / "pre-commit",
+    )
+
+    result = subprocess.run(
+        [str(_git_sh_exe()), ".githooks/pre-commit"],
+        cwd=git_repo,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+    assert result.returncode != 0
+    assert (
+        "[pre-commit] repair: powershell -ExecutionPolicy Bypass -File "
+        "scripts/vibelution_launcher.ps1 -Action repair-deps"
+        in result.stderr.splitlines()
+    )
 
 
 def commit_file(root: Path, path: str, content: str, message: str) -> None:
