@@ -52,12 +52,12 @@ describe("gitRouteLogic", () => {
     const workspace = {
       publicConfig: {
         git: {
-          commit_message_model_ref: " relay_openai_gpt_5_5 ",
+          commit_message_model_ref: " relay_gpt_5_6_luna ",
         },
       },
     } as unknown as ConfigWorkspace;
 
-    expect(configuredGitModelId(workspace)).toBe("relay_openai_gpt_5_5");
+    expect(configuredGitModelId(workspace)).toBe("relay_gpt_5_6_luna");
     expect(configuredGitModelId({ publicConfig: { git: [] } } as unknown as ConfigWorkspace)).toBe("");
     expect(configuredGitModelId(undefined)).toBe("");
   });

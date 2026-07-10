@@ -25,10 +25,10 @@ window_size = "auto"
 [llm.discovery]
 timeout = 12
 
-[llm.model_library.relay_openai_gpt_5_5]
-model = "gpt-5.5"
-label = "Relay GPT 5.5"
-transport = "chat_completions"
+[llm.model_library.relay_gpt_5_6_luna]
+model = "gpt-5.6-luna"
+label = "Relay GPT-5.6 Luna"
+transport = "responses"
 contract = "tool_chat"
 temperature = 0.7
 max_output_tokens = 128000
@@ -38,16 +38,16 @@ streaming = true
 tool_calling_mode = "auto"
 discovery_enabled = true
 
-[llm.model_library.relay_openai_gpt_5_5.provider]
-kind = "openai"
+[llm.model_library.relay_gpt_5_6_luna.provider]
+kind = "relay"
 api_key_env = "OPENAI_API_KEY"
-base_url = "https://api.openai.com/v1"
+base_url = "https://ai-pixel.online"
 compat_mode = "openai"
 requires_api_key = true
-context_window = 1050000
+context_window = 1000000
 
 [llm.profiles.primary]
-model_ref = "relay_openai_gpt_5_5"
+model_ref = "relay_gpt_5_6_luna"
 
 [llm.profiles.primary.overrides]
 temperature = 0.2
@@ -139,8 +139,8 @@ def test_sample_config_exposes_all_public_model_blocks(tmp_path):
     assert "overrides" in raw["llm"]["profiles"]["primary"]
     assert "compression" not in raw["llm"]["profiles"]
     assert "subagent_explorer" not in raw["llm"]["profiles"]
-    assert "relay_openai_gpt_5_5" in raw["llm"]["model_library"]
-    assert "provider" in raw["llm"]["model_library"]["relay_openai_gpt_5_5"]
+    assert "relay_gpt_5_6_luna" in raw["llm"]["model_library"]
+    assert "provider" in raw["llm"]["model_library"]["relay_gpt_5_6_luna"]
 
 
 def test_config_loader_normalizes_nested_public_blocks(tmp_path):

@@ -22,7 +22,7 @@ def _use_isolated_agent_directory(tmp_path, monkeypatch):
     return project_root, data_home
 
 
-def _patch_primary_model(monkeypatch, model_id="relay_openai_gpt_5_5"):
+def _patch_primary_model(monkeypatch, model_id="relay_gpt_5_6_luna"):
     fake_llm = SimpleNamespace(
         model_library={model_id: {"model": "gpt-test"}},
         get_profile=lambda profile_id=None, role="primary": SimpleNamespace(profile_id=profile_id or "primary"),
@@ -67,7 +67,7 @@ def test_agent_avatar_options_do_not_read_project_workspace_avatar_dir(tmp_path,
 
 def test_agent_directory_repairs_model_primary_to_configured_primary_profile(tmp_path, monkeypatch):
     _use_isolated_agent_directory(tmp_path, monkeypatch)
-    _patch_primary_model(monkeypatch, model_id="relay_openai_gpt_5_5")
+    _patch_primary_model(monkeypatch, model_id="relay_gpt_5_6_luna")
     registry_path = agent_directory_service.registry_path()
     registry_path.parent.mkdir(parents=True)
     registry_path.write_text(
@@ -97,4 +97,4 @@ def test_agent_directory_repairs_model_primary_to_configured_primary_profile(tmp
     repaired = agent_directory_service.repair_agent_directory()
     repaired_agent = next(item for item in repaired["agents"] if item["agentId"] == "agent-legacy-primary")
 
-    assert repaired_agent["llmBindings"]["dialogue"]["modelId"] == "relay_openai_gpt_5_5"
+    assert repaired_agent["llmBindings"]["dialogue"]["modelId"] == "relay_gpt_5_6_luna"
