@@ -34,7 +34,7 @@ from core.orchestration.response_processor import ResponseProcessor
 from core.orchestration.response_surface import ResponseSurfaceController
 from core.orchestration.turn_outcome import TurnOutcomeController
 from core.orchestration.tool_lifecycle import ToolLifecycleBridge
-from core.llm.types import LLMError
+from core.llm.types import CanonicalItemIdentity, CanonicalToolCall, LLMError, TurnOutcome as LLMTurnOutcome
 from tools.agent_tools import spawn_agent as spawn_agent_impl, set_subagent_stream_sink
 from tools.Key_Tools import create_key_tools, create_llm_facing_tools
 
@@ -5784,6 +5784,147 @@ class TestRuntimeStateMemoryFlow:
             tool_calls=[],
             visible_text="请问你希望我继续做什么？比如：继续提示词系统缓存机制的探索？检查最近提交的运行状态？",
         ) is True
+
+    def test_iteration_decision_uses_canonical_tool_outcome_not_visible_message_shape(self):
+        identity = CanonicalItemIdentity(
+            session_id="session-1",
+            turn_id="turn-1",
+            invocation_id="invocation-1",
+            iteration=1,
+            item_id="call-1",
+        )
+        canonical_call = CanonicalToolCall(
+            identity=identity,
+            call_id="call-1",
+            name="read_file_tool",
+            arguments={"path": "agent.py"},
+        )
+        outcome = LLMTurnOutcome(
+            kind="tool_calls",
+            identity=identity,
+            tool_calls=(canonical_call,),
+            pending_tool_call_ids=("call-1",),
+            terminal_event_seen=True,
+        )
+        response = AIMessage(
+            content="这段文字看起来像最终回答，但实际上后面有工具调用。",
+            tool_calls=[],
+            additional_kwargs={"turn_outcome": outcome},
+        )
+
+        decision = TurnOutcomeController.decide_llm_iteration(response)
+
+        assert decision.should_finish is False
+        assert decision.should_execute_tools is True
+        assert decision.should_stop_unsuccessfully is False
+        assert decision.tool_calls[0]["id"] == "call-1"
+        assert decision.tool_calls[0]["canonical_tool_call"] is canonical_call
+
+        processed = ResponseProcessor().process(response)
+        history_message = processed.build_ai_message(
+            response,
+            tool_calls_override=list(decision.tool_calls),
+        )
+        assert history_message.tool_calls[0]["id"] == "call-1"
+        assert history_message.tool_calls[0]["name"] == "read_file_tool"
+        assert "canonical_tool_call" not in history_message.tool_calls[0]
+
+    def test_iteration_decision_does_not_promote_visible_text_from_incomplete_outcome(self):
+        identity = CanonicalItemIdentity(
+            session_id="session-1",
+            turn_id="turn-1",
+            invocation_id="invocation-2",
+            iteration=1,
+            item_id="draft-1",
+        )
+        outcome = LLMTurnOutcome(
+            kind="incomplete",
+            identity=identity,
+            terminal_event_seen=True,
+        )
+        response = AIMessage(
+            content="可见草稿不能成为最终回答。",
+            additional_kwargs={"turn_outcome": outcome},
+        )
+
+        decision = TurnOutcomeController.decide_llm_iteration(response)
+
+        assert decision.should_finish is False
+        assert decision.should_execute_tools is False
+        assert decision.should_stop_unsuccessfully is True
+
+    def test_iteration_decision_accepts_only_terminal_final_answer(self):
+        identity = CanonicalItemIdentity(
+            session_id="session-1",
+            turn_id="turn-1",
+            invocation_id="invocation-3",
+            iteration=1,
+            item_id="answer-1",
+        )
+        outcome = LLMTurnOutcome.final_answer(identity=identity, text="最终回答")
+        response = AIMessage(content="", additional_kwargs={"turn_outcome": outcome})
+
+        decision = TurnOutcomeController.decide_llm_iteration(response)
+
+        assert decision.should_finish is True
+        assert decision.should_execute_tools is False
+        assert decision.should_stop_unsuccessfully is False
+
+    def test_iteration_decision_rejects_nonterminal_tool_outcome(self):
+        identity = CanonicalItemIdentity(
+            session_id="session-1",
+            turn_id="turn-1",
+            invocation_id="invocation-4",
+            iteration=1,
+            item_id="call-4",
+        )
+        canonical_call = CanonicalToolCall(
+            identity=identity,
+            call_id="call-4",
+            name="read_file_tool",
+            arguments={},
+        )
+        outcome = LLMTurnOutcome(
+            kind="tool_calls",
+            identity=identity,
+            tool_calls=(canonical_call,),
+            pending_tool_call_ids=("call-4",),
+            terminal_event_seen=False,
+        )
+        response = AIMessage(content="", additional_kwargs={"turn_outcome": outcome})
+
+        with pytest.raises(ValueError, match="terminal evidence"):
+            TurnOutcomeController.decide_llm_iteration(response)
+
+    def test_round_success_uses_canonical_outcome_instead_of_visible_text(self):
+        incomplete = RoundStateController(max_iterations=1)
+        incomplete.next_iteration()
+        incomplete.note_progress()
+        incomplete.note_response_tools(0, visible_text="看起来像最终回答")
+        incomplete.note_turn_outcome("incomplete")
+
+        assert incomplete.finish_success(last_turn_failed=False) is False
+        assert incomplete.exhausted_without_final_answer() is True
+
+        completed = RoundStateController(max_iterations=1)
+        completed.next_iteration()
+        completed.note_progress()
+        completed.note_response_tools(0, visible_text="")
+        completed.note_turn_outcome("final_answer")
+
+        assert completed.finish_success(last_turn_failed=False) is True
+        assert completed.exhausted_without_final_answer() is False
+
+    def test_round_success_preserves_explicit_tool_lifecycle_completion(self):
+        state = RoundStateController(max_iterations=3)
+        state.next_iteration()
+        state.note_progress()
+        state.note_response_tools(1, visible_text="")
+        state.note_turn_outcome("tool_calls")
+        state.note_lifecycle_completion()
+
+        assert state.finish_success(last_turn_failed=False) is True
+        assert state.exhausted_without_final_answer() is False
 
     def test_web_session_active_task_requires_task_tool_call(self):
         from core.web.services import session_service

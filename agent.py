@@ -2499,6 +2499,43 @@ class SelfEvolvingAgent:
                         break
                     continue
 
+                try:
+                    iteration_decision = TurnOutcomeController.decide_llm_iteration(response)
+                except ValueError as exc:
+                    consecutive_failures = round_state.note_llm_failure()
+                    self._last_turn_failed = True
+                    self._last_llm_error_category = "protocol_error"
+                    ui.update_status("ERROR", **round_state.current_status())
+                    ui.add_log("LLM 响应缺少 canonical TurnOutcome，本轮失败收口。", "ERROR")
+                    _record_agent_scene_event(
+                        "llm",
+                        "llm.turn_outcome.missing",
+                        message="Agent rejected an LLM response without canonical TurnOutcome.",
+                        level="error",
+                        fields={
+                            "iteration": iteration,
+                            "consecutiveFailures": consecutive_failures,
+                            "errorType": type(exc).__name__,
+                        },
+                    )
+                    break
+                tool_call_count = len(iteration_decision.tool_calls)
+                has_tool_calls = iteration_decision.should_execute_tools
+                round_state.note_turn_outcome(iteration_decision.outcome.kind)
+                _record_agent_scene_event(
+                    "llm",
+                    "llm.turn_outcome.finalized",
+                    message="Agent accepted canonical TurnOutcome for iteration control.",
+                    fields={
+                        "iteration": iteration,
+                        "outcomeKind": iteration_decision.outcome.kind,
+                        "terminalEventSeen": bool(iteration_decision.outcome.terminal_event_seen),
+                        "pendingCallCount": len(iteration_decision.outcome.pending_tool_call_ids),
+                        "toolCallCount": tool_call_count,
+                        "invocationId": iteration_decision.outcome.identity.invocation_id,
+                    },
+                )
+
                 # ── 感知层触发 ──
                 state_block_str = self._get_response_surface_controller().build_state_block(
                     raw_content=raw_content,
@@ -2572,7 +2609,7 @@ class SelfEvolvingAgent:
                         "state_info": dict(processed.state_info),
                     }
 
-                tool_calls = processed.tool_calls
+                tool_calls = list(iteration_decision.tool_calls)
                 response_tool_names = [
                     str(tool_call.get("name") or "").strip()
                     for tool_call in tool_calls
@@ -2584,38 +2621,50 @@ class SelfEvolvingAgent:
                     tool_names=response_tool_names,
                 )
                 turn_tool_names.extend(response_tool_names)
-                if tool_calls:
+                if iteration_decision.should_execute_tools:
                     ui.update_status(
                         "ACTING",
                         **round_state.acting_status(len(tool_calls)),
                     )
-                else:
+                elif iteration_decision.should_finish:
                     ui.update_status(
                         "SUCCESS",
                         **round_state.current_status(),
                     )
-                messages.append(processed.build_ai_message(response))
+                else:
+                    ui.update_status(
+                        "ERROR",
+                        **round_state.current_status(),
+                    )
+                messages.append(
+                    processed.build_ai_message(
+                        response,
+                        tool_calls_override=tool_calls,
+                    )
+                )
                 self._raise_if_turn_stop_requested()
-                if TurnOutcomeController.should_finish_single_turn_after_direct_response(
-                    single_turn_mode_active=self._single_turn_mode_active,
-                    tool_calls=tool_calls,
-                    visible_text=self._last_visible_response_text,
-                    active_goal=getattr(self, "_active_goal", "") or user_prompt or goal_override or "",
-                    active_evolution_txn_id=get_session_state().get_active_evolution_txn(),
-                ):
-                    ui.add_log("单轮请求已给出直接回答，本轮收束。", "INFO")
+                if iteration_decision.should_finish:
+                    ui.add_log("模型已返回 canonical final_answer，本轮收束。", "INFO")
                     break
-                if not tool_calls:
-                    if (self._last_visible_response_text or "").strip():
-                        ui.add_log("模型本轮未请求工具调用，本轮收束。", "INFO")
-                    else:
-                        ui.add_log("模型本轮未返回正文或工具调用，本轮收束。", "INFO")
+                if iteration_decision.should_stop_unsuccessfully:
+                    round_state.note_llm_failure()
+                    self._last_turn_failed = True
+                    ui.add_log(
+                        f"模型本轮以 canonical {iteration_decision.outcome.kind} 终止，未标记完成。",
+                        "ERROR",
+                    )
+                    break
+                if not iteration_decision.should_execute_tools:
+                    round_state.note_llm_failure()
+                    self._last_turn_failed = True
+                    ui.add_log("canonical tool_calls outcome 未包含可执行工具，本轮失败收口。", "ERROR")
                     break
                 round_state.add_tool_calls(len(tool_calls))
                 self._raise_if_turn_stop_requested()
                 lifecycle_action = self.tool_lifecycle.execute_tools(tool_calls, messages)
                 self._raise_if_turn_stop_requested()
                 if lifecycle_action == "turn_complete":
+                    round_state.note_lifecycle_completion()
                     get_session_state().note_scope_completion("当前事务已完成，停止当前轮继续扩散。")
                 lifecycle_decision = self._get_turn_outcome_controller().handle_lifecycle_action(lifecycle_action)
                 if lifecycle_decision.pending_action:
