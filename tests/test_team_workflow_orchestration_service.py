@@ -50,9 +50,39 @@ def test_source_collection_pure_helpers_are_package_backed():
         source_collection_stage_tasks,
     )
 
-    assert source_collection_common.source_collection_count(
-        1_000_000
-    ) == team_workflow_orchestration_service._source_collection_count(1_000_000)
+    count_cases = [
+        ("invalid", 0),
+        (-7, 0),
+        (42, 42),
+        (1_000_000, 100_000),
+    ]
+    for value, expected in count_cases:
+        package_result = source_collection_common.source_collection_count(value)
+        facade_result = team_workflow_orchestration_service._source_collection_count(value)
+
+        assert package_result == facade_result
+        assert package_result == expected
+
+    text_list_cases = [
+        ("not-a-list", 4, 12, []),
+        ([" alpha ", "", "alpha", " beta ", None], 5, 12, ["alpha", "beta"]),
+        (["one", "two", "three"], 2, 12, ["one", "two"]),
+        (["alphabet", "beta"], 2, 4, ["alph", "beta"]),
+    ]
+    for value, max_items, max_length, expected in text_list_cases:
+        package_result = source_collection_common.normalize_text_list(
+            value,
+            max_items=max_items,
+            max_length=max_length,
+        )
+        facade_result = team_workflow_orchestration_service._normalize_text_list(
+            value,
+            max_items=max_items,
+            max_length=max_length,
+        )
+
+        assert package_result == facade_result
+        assert package_result == expected
     assert (
         team_workflow_orchestration_service._source_collection_stage_task_checklist
         is source_collection_stage_tasks.source_collection_stage_task_checklist
