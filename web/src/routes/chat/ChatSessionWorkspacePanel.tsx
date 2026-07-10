@@ -1,6 +1,7 @@
 import type { ComponentProps } from "react";
 
 import type { FileContent, SessionRuntimeNotice } from "../../api/types";
+import { VStateSurface } from "../../components/vui";
 import { ChatConversationComposerBridge } from "./ChatConversationComposerBridge";
 import { ChatFilePreviewPanel } from "./ChatFilePreviewPanel";
 import { ChatRuntimeNoticeStack } from "./ChatRuntimeNoticeStack";
@@ -69,25 +70,32 @@ export function ChatSessionWorkspacePanel({
   workspaceActiveTab,
 }: ChatSessionWorkspacePanelProps) {
   const conversationLoadingFallback = (
-    <div className={styles.loadingSurface} role="status" aria-live="polite">
-      <div className={styles.loadingSurfaceBody}>
-        <strong>{loadingSessionLabel}</strong>
-        <span className={styles.loadingSkeletonLine} />
-        <span className={styles.loadingSkeletonLineShort} />
-      </div>
-    </div>
+    <VStateSurface
+      className={styles.loadingSurface}
+      tone="loading"
+      title={loadingSessionLabel}
+      skeletonLines={2}
+      role="status"
+      aria-live="polite"
+    />
   );
 
   if (!activeSessionId && !sessionsPending) {
-    return <div className={styles.emptyConversationSurface}>{noSessionsLabel}</div>;
+    return <VStateSurface className={styles.emptyConversationSurface} tone="empty" title={noSessionsLabel} />;
   }
 
   if (hasBlockingError) {
-    return <div className={styles.emptySurface}>{blockingErrorMessage}</div>;
+    return <VStateSurface className={styles.emptySurface} tone="error" title={blockingErrorMessage} />;
   }
 
   if (invalidChildSessionLinkMessage) {
-    return <div className={styles.emptySurface}>{invalidChildSessionLinkMessage}</div>;
+    return (
+      <VStateSurface
+        className={styles.emptySurface}
+        tone="unavailable"
+        title={invalidChildSessionLinkMessage}
+      />
+    );
   }
 
   if (workspaceActiveTab === "agent") {
@@ -126,9 +134,7 @@ export function ChatSessionWorkspacePanel({
 
   if (activeCliAgentRunId) {
     return activeCliAgentRunAvailable ? null : (
-      <div className={styles.emptySurface}>
-        {cliAgentRunEmptyLabel}
-      </div>
+      <VStateSurface className={styles.emptySurface} tone="empty" title={cliAgentRunEmptyLabel} />
     );
   }
 

@@ -1,5 +1,6 @@
 import type { SessionLlmPayloadTrace } from "../../api/types";
-import styles from "../ChatCodingRoute.styles";
+import { VButton, VTooltip, type VButtonProps } from "../../components/vui";
+import styles from "./LlmPayloadTracePanel.styles";
 
 type LlmPayloadTracePanelProps = {
   lang: "zh" | "en";
@@ -70,11 +71,35 @@ export function LlmPayloadTracePanel({ lang, trace }: LlmPayloadTracePanelProps)
   return (
     <section className={`${styles.leftBlock} ${styles.llmPayloadTracePanel}`} role="status" aria-live="polite" aria-label={title}>
       <div className={styles.sectionHeader}>
-        <div className={styles.sectionIdentity}>
-          <p className={styles.blockEyebrow}>LLM</p>
-          <h3 className={styles.sectionTitle}>{title}</h3>
-          {subtitle ? <p className={styles.sectionMetaLine}>{subtitle}</p> : null}
-        </div>
+        <h3 className={styles.sectionTitle}>{title}</h3>
+        {subtitle ? (
+          <VTooltip
+            content={subtitle}
+            renderTrigger={(tooltipTriggerProps) => {
+              const {
+                children: _triggerChildren,
+                className: triggerClassName,
+                role: _triggerRole,
+                tabIndex: _triggerTabIndex,
+                ...triggerProps
+              } = tooltipTriggerProps;
+
+              return (
+                <VButton
+                  {...(triggerProps as unknown as VButtonProps)}
+                  type="button"
+                  className={[triggerClassName, styles.llmPayloadTraceHelp].filter(Boolean).join(" ")}
+                  aria-label={subtitle}
+                  isIconOnly
+                >
+                  i
+                </VButton>
+              );
+            }}
+          >
+            i
+          </VTooltip>
+        ) : null}
       </div>
       <div className={styles.llmPayloadTraceGrid}>
         {rows.map((row) => (
