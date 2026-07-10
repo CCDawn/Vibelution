@@ -284,17 +284,6 @@ describe("MemoryRoute layout contract", () => {
     expect(styles.headerActions).toContain("[&_[data-vui=\"button\"]]:max-w-full");
     expect(styles.refreshButton).toContain("shrink-0");
     expect(styles.returnButton).toContain("shrink-0");
-    expect(overviewPanelStyles.summaryGrid).toContain("grid-cols-[repeat(auto-fit,minmax(156px,max-content))]");
-    expect(overviewPanelStyles.summaryGrid).toContain("justify-start");
-    expect(overviewPanelStyles.summaryGrid).toContain("bg-[var(--vui-surface-panel)]");
-    expect(overviewPanelStyles.summaryGrid).not.toContain("bg-[var(--vui-surface-glass)]");
-    expect(overviewPanelStyles.summaryGrid).not.toContain("shadow-[var(--vui-shadow-hairline)]");
-    expect(overviewPanelStyles.summaryCard).toContain("grid-cols-[minmax(0,1fr)_auto]");
-    expect(overviewPanelStyles.summaryCard).toContain("min-w-[156px]");
-    expect(overviewPanelStyles.summaryCard).toContain("max-w-[220px]");
-    expect(overviewPanelStyles.summaryCard).toContain("bg-[var(--vui-surface-row)]");
-    expect(overviewPanelStyles.summaryCard).not.toContain("bg-[var(--vui-surface-glass)]");
-    expect(overviewPanelStyles.summaryCard).not.toContain("shadow-[var(--vui-shadow-hairline)]");
     expect(overviewPanelStyles.overviewGrid).toContain("grid-cols-[repeat(2,minmax(0,1fr))]");
     expect(overviewPanelStyles.reviewQueuePanel).toContain("max-h-[min(280px,34vh)]");
     expect(overviewPanelStyles.overviewPanel).not.toContain("bg-[var(--vui-surface-glass)]");
@@ -321,6 +310,16 @@ describe("MemoryRoute layout contract", () => {
     expect(matrixPanelStyles.matrixCardActive).not.toContain("shadow-[var(--vui-shadow-hairline)]");
   });
 
+  it("uses shared metric and primary-surface contracts for the Memory overview", () => {
+    expect(overviewPanelSource).toContain("VMetricStrip");
+    expect(overviewPanelSource).toContain("VSurface");
+    expect(overviewPanelSource).toContain("VPanelHeader");
+    expect(overviewPanelSource).not.toContain("styles.summaryCard");
+    expect(overviewPanelStyles.overviewPanel).not.toContain("rounded-[var(--radius-panel)]");
+    expect(overviewPanelStyles.overviewPanel).not.toContain("bg-[var(--vui-surface-panel)]");
+    expect(overviewPanelStyles.reviewQueuePanel).not.toContain("bg-[var(--vui-surface-panel)]");
+  });
+
   it("tightens Memory detail, manage, source, and graph surfaces without glass card walls", () => {
     const secondWavePanelClasses = [
       detailPanelStyles.detailPanel,
@@ -328,14 +327,8 @@ describe("MemoryRoute layout contract", () => {
       detailPanelStyles.visibilityPanel,
       detailPanelStyles.sectionPanel,
       detailPanelStyles.rawPanel,
-      managePanelStyles.manageListPanel,
-      managePanelStyles.manageFilterPanel,
-      managePanelStyles.manageFormPanel,
       sourceAndItemPanelStyles.sourcePanel,
       sourceAndItemPanelStyles.itemPanel,
-      graphViewPanelStyles.sourcePanel,
-      graphViewPanelStyles.managementPanel,
-      graphViewPanelStyles.graphCanvasPanel,
       graphNodeInspectorPanelStyles.detailPanel,
       graphNodeInspectorPanelStyles.graphRelationPanel,
       graphNodeInspectorPanelStyles.graphKnowledgePanel,
@@ -352,7 +345,6 @@ describe("MemoryRoute layout contract", () => {
       detailPanelStyles.copyNotice,
       detailPanelStyles.detailActions,
       detailPanelStyles.emptyDetail,
-      managePanelStyles.emptyDetail,
       sourceAndItemPanelStyles.panelNotice,
       graphNodeInspectorPanelStyles.emptyDetail,
       graphNodeInspectorPanelStyles.selectedConfigSummary,
@@ -379,9 +371,6 @@ describe("MemoryRoute layout contract", () => {
     expect(graphViewPanelStyles.graphWorkspace).toContain("max-[1180px]:grid-cols-[minmax(180px,220px)_minmax(0,1fr)]");
     expect(graphViewPanelStyles.graphWorkspace).toContain("max-[1180px]:[&_.detailPanel]:col-span-2");
     expect(graphViewPanelStyles.graphWorkspace).toContain("max-[860px]:grid-cols-[minmax(0,1fr)]");
-    expect(graphViewPanelStyles.summaryGrid).toContain("grid-cols-[repeat(auto-fit,minmax(138px,max-content))]");
-    expect(graphViewPanelStyles.summaryGrid).toContain("justify-start");
-    expect(graphViewPanelStyles.summaryCard).toContain("bg-[var(--vui-surface-row)]");
 
     expect(detailPanelStyles.detailHeader).toContain("[&_h2]:break-words");
     expect(detailPanelStyles.detailHeader).toContain("[&_p]:line-clamp-2");
@@ -395,6 +384,19 @@ describe("MemoryRoute layout contract", () => {
     expect(graphNodeInspectorPanelStyles.graphKnowledgeContent).toContain("break-words");
   });
 
+  it("uses shared Phase 2 surfaces for Memory manage and graph workspaces", () => {
+    expect(managePanelSource).toContain("VSurface");
+    expect(managePanelSource).toContain("VSection");
+    expect(managePanelSource).toContain("VStateSurface");
+    expect(managePanelStyles.manageFilterPanel).not.toContain("bg-[var(--vui-surface-panel)]");
+    expect(graphViewPanelSource).toContain("VMetricStrip");
+    expect(graphViewPanelSource).toContain("VSurface");
+    expect(graphViewPanelSource).not.toContain("styles.summaryCard");
+    expect(graphViewPanelStyles.sourcePanel).not.toContain("bg-[var(--vui-surface-panel)]");
+    expect(graphViewPanelStyles.graphCanvasPanel).not.toContain("rounded-[var(--radius-panel)]");
+    expect(graphViewPanelStyles).not.toHaveProperty("managementHeader");
+  });
+
   it("delegates the dense overview body to a dedicated panel component", () => {
     expect(routeSource).toContain('import { MemoryOverviewPanel } from "./MemoryOverviewPanel"');
     expect(routeSource).toContain("<MemoryOverviewPanel");
@@ -403,10 +405,10 @@ describe("MemoryRoute layout contract", () => {
     expect(overviewPanelSource).toContain("export function MemoryOverviewPanel");
     expect(overviewPanelSource).toContain('from "./MemoryOverviewPanel.styles"');
     expect(overviewPanelSource).not.toContain("MemoryRoute.styles");
-    expect(overviewPanelSource).toContain("className={styles.summaryGrid}");
+    expect(overviewPanelSource).toContain("VMetricStrip");
+    expect(overviewPanelSource).not.toContain("styles.summaryCard");
     expect(overviewPanelSource).toContain("className={styles.reviewQueuePanel}");
     expect(overviewPanelSource).toContain("className={styles.overviewGrid}");
-    expect(overviewPanelStyles.summaryGrid).toBeTruthy();
     expect(overviewPanelStyles.reviewQueuePanel).toBeTruthy();
     expect(overviewPanelStyles.overviewGrid).toBeTruthy();
     expect(overviewPanelSource).not.toContain("useQuery");

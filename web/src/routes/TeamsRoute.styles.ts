@@ -95,7 +95,7 @@ const styles: Record<string, string> = {
   canvasLayoutModeSwitch:
     "canvasLayoutModeSwitch min-w-0 grid min-h-0 gap-2 p-2 grid-cols-[repeat(auto-fit,minmax(86px,max-content))] !gap-1 !p-0 content-start",
   canvasPanel:
-    "canvasPanel min-w-0 grid min-h-0 gap-2 p-2 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] !flex min-h-0 flex-col overflow-hidden p-0",
+    "canvasPanel min-w-0 !flex min-h-0 flex-col overflow-hidden",
   canvasReadOnlyBadge:
     "canvasReadOnlyBadge min-w-0 grid min-h-0 gap-2 p-2 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 text-[var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)] min-h-[26px] border-[color-mix(in_srgb,var(--accent-cool)_36%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))] px-2 text-[var(--accent-cool)]",
   canvasReadOnlyNode:
@@ -506,18 +506,14 @@ const styles: Record<string, string> = {
     "teamTaskForm min-w-0 grid gap-1 text-[var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full",
   teamTitleBlock:
     "teamTitleBlock min-w-0 text-[var(--vui-font-title)] font-semibold leading-tight text-[var(--fg-primary)]",
-  teamUnavailableActions:
-    "teamUnavailableActions min-w-0 flex flex-wrap items-center gap-1.5 !flex min-w-0 justify-end gap-1.5 [&_button]:min-w-[78px]",
   teamUnavailableCard:
-    "teamUnavailableCard min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] p-2 grid w-full max-w-[720px] content-start gap-3 p-4 text-left",
-  teamUnavailableMeta:
-    "teamUnavailableMeta min-w-0 flex flex-wrap items-center gap-1.5 grid grid-cols-[repeat(3,minmax(0,1fr))] gap-1.5 text-[var(--vui-font-xs)] max-[760px]:grid-cols-[1fr]",
+    "teamUnavailableCard w-full max-w-[720px]",
   teamUnavailableSurface:
-    "teamUnavailableSurface min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] p-2 grid min-h-0 flex-1 grid-cols-[minmax(0,720px)] content-start justify-items-center overflow-auto px-3 py-4",
+    "teamUnavailableSurface grid min-h-0 flex-1 grid-cols-[minmax(0,720px)] content-start justify-center overflow-auto px-3 py-4",
   teamLoadingInlineSurface:
     "teamLoadingInlineSurface min-h-[96px]",
   toolbarActions:
-    "toolbarActions min-w-0 flex flex-wrap items-center gap-1.5 !flex max-w-[min(100%,680px)] flex-wrap items-start justify-end gap-1.5 overflow-visible max-[900px]:justify-start [&_a]:min-w-[72px] [&_a]:whitespace-nowrap [&_button]:min-w-[72px] [&_button]:whitespace-nowrap",
+    "toolbarActions max-w-[min(100%,680px)] items-start justify-end overflow-visible max-[900px]:justify-start [&_a]:min-w-[72px] [&_a]:whitespace-nowrap [&_button]:min-w-[72px] [&_button]:whitespace-nowrap",
   toolbarLink:
     "toolbarLink min-w-0 flex flex-wrap items-center gap-1.5",
   workflowCandidateItemSelected:
