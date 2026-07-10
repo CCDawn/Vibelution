@@ -165,6 +165,59 @@ describe("projectAgentMessageTimelineMessages", () => {
     expect(projection.rowIdentities[0].rowKey).toBe("assistant-turn:turn-1");
   });
 
+  it("drops a stale live overlay after a committed same-turn answer arrives", () => {
+    const liveOverlay = assistantMessage("live-overlay", {
+      content: "你好！我在。需要我帮你做什么？",
+      streaming: true,
+      timelineItems: [
+        {
+          id: "live-answer-text",
+          kind: "assistant_text",
+          status: "completed",
+          text: "你好！我在。需要我帮你做什么？",
+        },
+      ],
+      metadata: { kind: "session_live_overlay", turnId: "live:turn-duplicate" },
+    });
+    const committed = assistantMessage("committed-answer", {
+      content: "你好！我在。需要我帮你做什么？",
+      streaming: false,
+      timelineItems: [
+        {
+          id: "committed-answer-text",
+          kind: "assistant_text",
+          status: "completed",
+          text: "你好！我在。需要我帮你做什么？",
+        },
+      ],
+      metadata: { turnId: "turn-duplicate" },
+    });
+
+    const projection = projectAgentMessageTimelineMessages({
+      timelineMessages: [liveOverlay, committed],
+    });
+
+    expect(projection.messages.map((message) => message.id)).toEqual(["committed-answer"]);
+    expect(projection.agentMessages.map((message) => message.id)).toEqual(["committed-answer"]);
+    expect(projection.messages[0].timelineItems?.map((item) => item.id)).toEqual(["committed-answer-text"]);
+    expect(projection.rowIdentities).toHaveLength(1);
+  });
+
+  it("keeps a live overlay visible while no committed same-turn answer exists", () => {
+    const liveOverlay = assistantMessage("live-overlay", {
+      content: "尚未完成的回答",
+      streaming: true,
+      metadata: { kind: "session_live_overlay", turnId: "live:turn-interrupted" },
+    });
+
+    const projection = projectAgentMessageTimelineMessages({
+      timelineMessages: [liveOverlay],
+    });
+
+    expect(projection.messages.map((message) => message.id)).toEqual(["live-overlay"]);
+    expect(projection.streamingMessages.map((message) => message.id)).toEqual(["live-overlay"]);
+  });
+
   it("does not append an active layer after a committed same-turn answer already exists", () => {
     const committed = assistantMessage("committed-answer", {
       content: "最终回答已经落库。",
