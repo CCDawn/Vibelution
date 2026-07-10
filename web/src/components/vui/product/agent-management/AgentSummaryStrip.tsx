@@ -1,10 +1,12 @@
+import { type ReactNode } from "react";
+
 import { type VuiTone } from "../../renderers/heroui/heroVariants";
 import { VMetricStrip } from "../../index";
 
 export type AgentSummaryMetric = {
   id: string;
   label: string;
-  value: string | number;
+  value: ReactNode;
   detail?: string;
   tone?: VuiTone;
 };

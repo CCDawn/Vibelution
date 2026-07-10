@@ -15,6 +15,7 @@ export {
   type VTooltipTriggerRender,
 } from "./primitives/VTooltip";
 export { VDenseTable, type VDenseTableColumn, type VDenseTableProps } from "./display/VDenseTable";
+export { VLoadingValue, type VLoadingValueProps } from "./display/VLoadingValue";
 export { VMetricStrip, type VMetricStripMetric, type VMetricStripProps, type VMetricStripStatus } from "./display/VMetricStrip";
 export { VCheckbox, type VCheckboxProps } from "./forms/VCheckbox";
 export { VFieldRow, type VFieldRowProps } from "./forms/VFieldRow";

@@ -3,6 +3,7 @@ import { createBrowserRouter } from "react-router-dom";
 
 import { AppShell } from "./AppShell";
 import { LauncherShell } from "./LauncherShell";
+import { RouteLoadingShell } from "./RouteLoadingShell";
 import { RouteErrorBoundary, type RouteErrorSurface } from "./RouteErrorBoundary";
 import { LegacyChatRoomsRedirect } from "../routes/LegacyChatRoomsRedirect";
 import { LegacyTeamsRedirect } from "../routes/LegacyTeamsRedirect";
@@ -13,7 +14,6 @@ import { WorkbenchDomainRoute } from "../routes/WorkbenchDomainRoute";
 import { WorkbenchModeRoute } from "../routes/WorkbenchModeRoute";
 import { postBrowserTelemetry } from "./browserTelemetry";
 import { recoverFromDynamicImportFetchError } from "./routeChunkRecovery";
-import styles from "./router.styles";
 
 const AgentsRoute = lazyRoute(() => import("../routes/AgentsRoute").then((module) => ({ default: module.AgentsRoute })));
 type ChatCodingRouteModule = typeof import("../routes/ChatCodingRoute");
@@ -85,24 +85,6 @@ function currentPathname(): string {
   return typeof window === "undefined" ? "" : window.location.pathname;
 }
 
-
-function RouteLoadingShell({ surface }: { surface: RouteErrorSurface }) {
-  const label = surface === "launcher" ? "正在打开启动器" : "正在打开工作台";
-  return (
-    <div
-      role="status"
-      aria-live="polite"
-      aria-busy="true"
-      data-vui-app={surface}
-      className={styles.routeLoadingSurfaceClass}
-    >
-      <div className={styles.routeLoadingPanelClass}>
-        <strong className={styles.routeLoadingTitleClass}>{label}</strong>
-        <span className={styles.routeLoadingMetaClass}>加载界面模块</span>
-      </div>
-    </div>
-  );
-}
 
 function lazyElement(element: ReactNode, surface: RouteErrorSurface = "workbench") {
   return <Suspense fallback={<RouteLoadingShell surface={surface} />}>{element}</Suspense>;
