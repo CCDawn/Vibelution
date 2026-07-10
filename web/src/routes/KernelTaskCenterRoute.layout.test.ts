@@ -26,6 +26,17 @@ describe("KernelTaskCenterRoute layout contract", () => {
     expect(routeSource).not.toMatch(/<button\b/);
   });
 
+  it("maps Kernel task state and facts through shared VUI compositions", () => {
+    expect(routeSource).toContain("VSurface");
+    expect(routeSource).toContain("VMetricStrip");
+    expect(routeSource).toContain("VStateSurface");
+    expect(routeSource).toContain("VActionGroup");
+    expect(routeSource).toContain('ariaLabel={copy.taskList}');
+    expect(routeSource).toContain('ariaLabel={copy.detail}');
+    expect(styles.taskRowClass).toContain("w-full");
+    expect(styles.taskRowSelectedClass).toContain("border-");
+  });
+
   it("is wired as a read-only kernel route", () => {
     expect(routerSource).toContain('path: "kernel"');
     expect(routerSource).toContain("<KernelTaskCenterRoute />");
@@ -67,9 +78,6 @@ describe("KernelTaskCenterRoute layout contract", () => {
     [
       styles.paneClass,
       styles.detailHeaderClass,
-      styles.metricClass,
-      styles.ledgerSectionClass,
-      styles.ledgerBucketClass,
       styles.deliveryRowClass,
       styles.lifecycleSectionClass,
       styles.lifecycleRowClass,
@@ -79,15 +87,28 @@ describe("KernelTaskCenterRoute layout contract", () => {
     [
       styles.paneClass,
       styles.detailHeaderClass,
-      styles.metricClass,
-      styles.ledgerSectionClass,
-      styles.ledgerBucketClass,
       styles.lifecycleSectionClass,
     ].forEach((className) => {
       expect(className).not.toContain("shadow-[var(--vui-shadow-hairline)]");
       expect(className).not.toContain("bg-[var(--surface-panel)]");
       expect(className).not.toContain("bg-[var(--surface-card)]");
     });
+  });
+
+  it("keeps the Kernel ledger as a flat bordered structure", () => {
+    expect(styles.ledgerSectionClass).toContain("grid");
+    expect(styles.ledgerSectionClass).toContain("border-t");
+    expect(styles.ledgerSectionClass).toContain("pt-2");
+    expect(styles.ledgerSectionClass).not.toContain("bg-[");
+    expect(styles.ledgerSectionClass).not.toContain("rounded-[var(--radius-panel)]");
+    expect(styles.ledgerSectionClass).not.toContain("shadow-");
+
+    expect(styles.ledgerBucketClass).toContain("grid");
+    expect(styles.ledgerBucketClass).toContain("content-start");
+    expect(styles.ledgerBucketClass).not.toContain("bg-[");
+    expect(styles.ledgerBucketClass).not.toContain("rounded-[var(--radius-panel)]");
+    expect(styles.ledgerBucketClass).not.toContain("cardSurface");
+    expect(styles.ledgerBucketClass).not.toContain("shadow-");
   });
 
   it("keeps Kernel panel surface tokens centralized in route-local constants", () => {
@@ -140,7 +161,7 @@ describe("KernelTaskCenterRoute layout contract", () => {
     expect(styles.chipCodeClass).toContain("max-w-full");
     expect(styles.chipCodeClass).toContain("break-all");
     expect(styles.chipCodeClass).toContain("whitespace-normal");
-    expect(styles.emptyDetailClass).toContain("break-words");
+    expect(styles.emptyStateClass).toContain("break-words");
   });
 
   it("keeps Kernel header actions content-sized", () => {
