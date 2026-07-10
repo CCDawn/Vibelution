@@ -77,7 +77,40 @@ git -C 'C:\Users\17533\Desktop\Vibelution' status --short --branch
 git -C 'C:\Users\17533\Desktop\Vibelution' worktree add 'C:\Users\17533\Desktop\Vibelution-worktrees\llm-provider-model-config' -b 'codex/llm-provider-model-config' main
 $guard = 'C:\Users\17533\.codex\skills\ccdawn-dawn-agent-html-memory\scripts\agent_work_guard.py'
 $python = 'C:\Users\17533\Desktop\Vibelution\.venv\Scripts\python.exe'
-$claimOutput = & $python $guard 'C:\Users\17533\Desktop\Vibelution' claim --lane 'llm-provider-model-config' --scope 'config' --scope 'core/llm' --scope 'core/web/services/provider_config_service.py' --scope 'core/web/services/config_service.py' --scope 'core/web/services/model_reference_service.py' --scope 'core/web/routes/config.py' --scope 'web/src/api/types/config.ts' --scope 'web/src/routes/ConfigRoute.tsx' --scope 'web/src/routes/ConfigProviderRegistryPanel.tsx' --scope 'web/src/routes/ConfigProviderWizard.tsx' --scope 'web/src/routes/ConfigModelMigrationPanel.tsx' --scope 'web/src/routes/configProviderLogic.ts' --scope 'tests' --agent 'codex-llm-provider-model-config' --task 'Implement provider-scoped LLM configuration' --ttl-minutes 480 --note 'Tasks 1-11 only; no real operator migration, Launcher refresh, version edit, push, or PR.'
+$scopes = @(
+  'config/llm_credentials.py', 'config/llm_identity.py', 'config/llm_projection.py',
+  'config/llm_provider_registry.py', 'config/model_catalog.py', 'config/model_config_migration.py',
+  'config/models.py', 'config/settings.py', 'config/public_config.py', 'config/runtime_capabilities.py',
+  'config/paths.py', 'config/llm_security.py', 'config/__init__.py',
+  'core/llm/provider_discovery', 'core/llm/protocol_resolver.py', 'core/llm/client.py',
+  'core/llm/discovery.py', 'core/llm/agent_runtime.py',
+  'core/web/services/provider_config_service.py', 'core/web/services/config_service.py',
+  'core/web/services/model_reference_service.py', 'core/web/routes/config.py',
+  'web/src/api/types/config.ts', 'web/src/routes/ConfigRoute.tsx',
+  'web/src/routes/ConfigProviderRegistryPanel.tsx', 'web/src/routes/ConfigProviderWizard.tsx',
+  'web/src/routes/ConfigModelMigrationPanel.tsx', 'web/src/routes/ConfigProviderRegistryPanel.styles.ts',
+  'web/src/routes/configProviderLogic.ts', 'web/src/routes/configProviderLogic.test.ts',
+  'web/src/routes/configRouteLogic.ts', 'web/src/routes/configRouteLogic.test.ts',
+  'web/src/routes/ConfigRoute.layout.test.ts', 'web/src/routes/ConfigModelLibraryPanel.tsx',
+  'web/src/routes/ConfigModelLibraryPanel.styles.ts',
+  'tests/test_llm_identity.py', 'tests/test_llm_config_schema_v2.py',
+  'tests/test_llm_provider_registry.py', 'tests/test_model_catalog.py',
+  'tests/test_provider_discovery_adapters.py', 'tests/test_llm_protocol_resolver.py',
+  'tests/test_agent_llm_runtime.py', 'tests/test_provider_config_service.py',
+  'tests/test_model_config_migration.py', 'tests/test_model_reference_service.py',
+  'tests/test_public_config_model_refs.py', 'tests/test_runtime_capabilities.py',
+  'tests/test_web_config_routes.py', 'tests/test_config_paths.py', 'tests/test_config_redaction.py',
+  'tests/test_config_patch_apply.py', 'tests/test_config_panel.py', 'tests/test_config_sync.py',
+  'tests/test_llm_config_v2_integration.py', 'tests/fixtures/config', 'tests/select_tests.py', 'tests/README.md'
+)
+$checkArgs = @('C:\Users\17533\Desktop\Vibelution', 'check', '--lane', 'llm-provider-model-config')
+foreach ($scope in $scopes) { $checkArgs += @('--scope', $scope) }
+& $python $guard @checkArgs
+if ($LASTEXITCODE -ne 0) { throw 'Implementation scope overlaps active or ready work.' }
+$claimArgs = @('C:\Users\17533\Desktop\Vibelution', 'claim', '--lane', 'llm-provider-model-config')
+foreach ($scope in $scopes) { $claimArgs += @('--scope', $scope) }
+$claimArgs += @('--agent', 'codex-llm-provider-model-config', '--task', 'Implement provider-scoped LLM configuration', '--ttl-minutes', '480', '--note', 'Tasks 1-11 only; no real operator migration, Launcher refresh, version edit, push, or PR.')
+$claimOutput = & $python $guard @claimArgs
 if (($claimOutput -join "`n") -notmatch '(claim-[a-z0-9]+)') { throw 'Failed to capture implementation claim id.' }
 $env:VIBELUTION_AGENT_CLAIM_ID = $Matches[1]
 ```
