@@ -40,6 +40,17 @@ describe("AppShell layout contract", () => {
     expect(shellStyles).toContain("@media (max-width: 1279px)");
   });
 
+  it("keeps desktop primary navigation labels at their intrinsic readable width", () => {
+    const navStyles = shellStyles.slice(
+      shellStyles.indexOf(":where(.vui-app-appshell).nav {"),
+      shellStyles.indexOf(":where(.vui-app-appshell).navLinkActive {")
+    );
+
+    expect(navStyles).toContain("overflow-x: auto");
+    expect(navStyles).toContain("flex-shrink: 0");
+    expect(navStyles).toContain("white-space: nowrap");
+  });
+
   it("renders one compact status summary chip while keeping the detailed guide panel", () => {
     expect(shellSource).toContain("statusSummaryChip");
     expect(shellSource).toContain('t("brandSubtle")');

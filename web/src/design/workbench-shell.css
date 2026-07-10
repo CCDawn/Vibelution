@@ -254,6 +254,7 @@
 }
 
 :where(.vui-app-appshell).navLink {
+  flex-shrink: 0;
   min-height: 30px;
   padding-inline: 10px;
   white-space: nowrap;
