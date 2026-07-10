@@ -9159,7 +9159,7 @@ def test_submit_session_message_surfaces_local_runtime_exception_as_turn_error(t
     )
 
     def raise_missing_key(*_args, **_kwargs):
-        raise ValueError("未设置 API Key: VIBELUTION_LLM_MODEL_RELAY_OPENAI_GPT_5_5_API_KEY")
+        raise ValueError("未设置 API Key: VIBELUTION_LLM_MODEL_RELAY_GPT_5_6_LUNA_API_KEY")
 
     monkeypatch.setattr(session_service, "create_chat_agent", raise_missing_key)
     monkeypatch.setattr(
@@ -9186,7 +9186,7 @@ def test_submit_session_message_surfaces_local_runtime_exception_as_turn_error(t
     assert payload["lastTurnError"]["recoverable"] is False
     latest_run = session_service._WORK_RUN_STORE.load_latest_snapshot("chat_turn")
     assert latest_run["errorType"] == "ValueError"
-    assert "VIBELUTION_LLM_MODEL_RELAY_OPENAI_GPT_5_5_API_KEY" in latest_run["error"]
+    assert "VIBELUTION_LLM_MODEL_RELAY_GPT_5_6_LUNA_API_KEY" in latest_run["error"]
 
 
 def test_failed_runtime_turn_result_is_persisted_as_turn_error_with_trace(tmp_path, monkeypatch):

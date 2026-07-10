@@ -528,12 +528,12 @@ export function selectModelScenarioPresetId(
     );
   }
   if (scenario === "relay") {
-    return byId("relay_openai_gpt_5_5") || (presets.find((preset) => presetCategory(preset) === "relay")?.preset_id ?? "");
+    return byId("relay_gpt_5_6_luna") || (presets.find((preset) => presetCategory(preset) === "relay")?.preset_id ?? "");
   }
   if (scenario === "local") {
     return presets.find((preset) => presetCategory(preset) === "local")?.preset_id ?? "";
   }
-  return byId("relay_openai_gpt_5_5") || byId("openai_gpt_5_5") || (presets.find((preset) => presetCategory(preset) === "official")?.preset_id ?? "");
+  return byId("relay_gpt_5_6_luna") || byId("openai_gpt_5_5") || (presets.find((preset) => presetCategory(preset) === "official")?.preset_id ?? "");
 }
 
 export function defaultModelApiKeyEnv(modelId: string): string {

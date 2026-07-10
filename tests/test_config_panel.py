@@ -362,7 +362,7 @@ def test_draft_add_llm_profile_endpoint_is_removed_without_persisting_config_fil
                     "response_mode": "fragments",
                     "profile_id": "preview_profile_copy",
                     "source_profile_id": "primary",
-                    "model_id": "relay_openai_gpt_5_5",
+                    "model_id": "relay_gpt_5_6_luna",
                     "lang": "zh",
                 },
             )
@@ -381,7 +381,7 @@ def test_draft_add_llm_profile_endpoint_is_removed_without_persisting_config_fil
 def test_draft_delete_llm_model_fragments_leave_legacy_profiles_unchanged(tmp_path, monkeypatch):
     public_config = load_public_config()
     public_config["llm"]["profiles"]["primary"] = {
-        "model_ref": "relay_openai_gpt_5_5",
+        "model_ref": "relay_gpt_5_6_luna",
         "overrides": {},
     }
     config_path = tmp_path / "config.toml"
@@ -400,7 +400,7 @@ def test_draft_delete_llm_model_fragments_leave_legacy_profiles_unchanged(tmp_pa
                 "draft_meta": json.dumps({}, ensure_ascii=False),
                 "base_hash": base_hash,
                 "response_mode": "fragments",
-                "model_id": "relay_openai_gpt_5_5",
+                "model_id": "relay_gpt_5_6_luna",
                 "lang": "zh",
             },
         )
@@ -413,7 +413,7 @@ def test_draft_delete_llm_model_fragments_leave_legacy_profiles_unchanged(tmp_pa
     assert response.status == 200
     assert result["ok"] is True
     assert result["public_config"]["llm"]["profiles"]["primary"] == public_config["llm"]["profiles"]["primary"]
-    assert "relay_openai_gpt_5_5" not in result["public_config"]["llm"]["model_library"]
+    assert "relay_gpt_5_6_luna" not in result["public_config"]["llm"]["model_library"]
     assert 'data-profile-required="primary"' not in result["main_html"]
     assert 'data-card-path="llm.profiles.primary"' not in result["main_html"]
     assert result["message"] == "修改已确认，等待应用"
@@ -568,13 +568,13 @@ def test_model_preset_options_include_codex_preset():
     assert presets["relay_image2"]["provider"]["kind"] == "relay"
     assert presets["relay_image2"]["provider"]["base_url"] == "https://ai-pixel.online"
     assert not presets["relay_image2"]["provider"]["base_url"].endswith("/v1")
-    assert "relay_openai_gpt_5_5" in presets
-    assert presets["relay_openai_gpt_5_5"]["category"] == "relay"
-    assert presets["relay_openai_gpt_5_5"]["model"]["model"] == "gpt-5.5"
-    assert presets["relay_openai_gpt_5_5"]["model"]["transport"] == "responses"
-    assert presets["relay_openai_gpt_5_5"]["model"]["contract"] == "tool_chat"
-    assert presets["relay_openai_gpt_5_5"]["provider"]["kind"] == "relay"
-    assert presets["relay_openai_gpt_5_5"]["provider"]["base_url"] == "https://pixel.try-chatapi.com/v1"
+    assert "relay_gpt_5_6_luna" in presets
+    assert presets["relay_gpt_5_6_luna"]["category"] == "relay"
+    assert presets["relay_gpt_5_6_luna"]["model"]["model"] == "gpt-5.6-luna"
+    assert presets["relay_gpt_5_6_luna"]["model"]["transport"] == "responses"
+    assert presets["relay_gpt_5_6_luna"]["model"]["contract"] == "tool_chat"
+    assert presets["relay_gpt_5_6_luna"]["provider"]["kind"] == "relay"
+    assert presets["relay_gpt_5_6_luna"]["provider"]["base_url"] == "https://ai-pixel.online"
     assert presets["custom_openai_compatible_relay"]["category"] == "openai_compatible"
     assert presets["custom_openai_compatible_relay"]["provider"]["kind"] == "openai_compatible"
     assert presets["custom_openai_compatible_relay"]["model"]["transport"] == "chat_completions"
@@ -754,21 +754,21 @@ def test_apply_codex_model_preset_materializes_inline_provider():
 
 def test_apply_relay_model_preset_materializes_openai_compatible_provider():
     public_config = load_public_config()
-    public_config["llm"]["model_library"].pop("relay_openai_gpt_5_5", None)
+    public_config["llm"]["model_library"].pop("relay_gpt_5_6_luna", None)
 
-    updated = apply_llm_model_preset(public_config, "relay_openai_gpt_5_5")
-    model = updated["llm"]["model_library"]["relay_openai_gpt_5_5"]
+    updated = apply_llm_model_preset(public_config, "relay_gpt_5_6_luna")
+    model = updated["llm"]["model_library"]["relay_gpt_5_6_luna"]
 
     assert model["provider"]["kind"] == "relay"
     assert model["provider"]["api_key_env"] == "OPENAI_API_KEY"
-    assert model["provider"]["base_url"] == "https://pixel.try-chatapi.com/v1"
+    assert model["provider"]["base_url"] == "https://ai-pixel.online"
     assert model["provider"]["compat_mode"] == "openai"
     assert model["provider"]["requires_api_key"] is True
     assert model["provider"]["context_window"] == 1000000
-    assert model["model"] == "gpt-5.5"
+    assert model["model"] == "gpt-5.6-luna"
     assert model["transport"] == "responses"
     assert model["contract"] == "tool_chat"
-    assert model["api_key_env"] == "VIBELUTION_LLM_MODEL_RELAY_OPENAI_GPT_5_5_API_KEY"
+    assert model["api_key_env"] == "VIBELUTION_LLM_MODEL_RELAY_GPT_5_6_LUNA_API_KEY"
     build_effective_config(updated)
 
 
@@ -909,19 +909,16 @@ def test_apply_custom_relay_responses_preset_accepts_custom_public_relay_host():
 
 def test_default_public_config_includes_new_official_model_templates():
     public_config = load_public_config()
-    relay_model = public_config["llm"]["model_library"]["relay_openai_gpt_5_5"]
+    relay_model = public_config["llm"]["model_library"]["relay_gpt_5_6_luna"]
     image_model = public_config["llm"]["model_library"]["relay_image2"]
 
     assert relay_model["provider"]["kind"] == "relay"
     assert relay_model["provider"]["context_window"] == 1000000
-    assert relay_model["provider"]["base_url"] in {
-        "https://pixel.try-chatapi.com/v1",
-        "https://ai-pixel.online",
-    }
-    assert relay_model["model"] == "gpt-5.5"
+    assert relay_model["provider"]["base_url"] == "https://ai-pixel.online"
+    assert relay_model["model"] == "gpt-5.6-luna"
     assert relay_model["contract"] == "tool_chat"
     assert relay_model["max_output_tokens"] == 128000
-    assert relay_model["api_key_env"] == "VIBELUTION_LLM_MODEL_RELAY_OPENAI_GPT_5_5_API_KEY"
+    assert relay_model["api_key_env"] == "VIBELUTION_LLM_MODEL_RELAY_GPT_5_6_LUNA_API_KEY"
     assert image_model["provider"]["kind"] == "relay"
     assert image_model["provider"]["base_url"] == "https://ai-pixel.online"
     assert not image_model["provider"]["base_url"].endswith("/v1")
@@ -1246,7 +1243,7 @@ def test_inline_profile_provider_switch_resets_incompatible_responses_transport(
 def test_runtime_llm_probe_uses_real_backend_with_small_payload(monkeypatch):
     public_config = load_public_config()
     public_config["llm"]["profiles"]["primary"] = {
-        "model_ref": "relay_openai_gpt_5_5",
+        "model_ref": "relay_gpt_5_6_luna",
         "overrides": {},
     }
     effective = build_effective_config(public_config)
@@ -1261,7 +1258,7 @@ def test_runtime_llm_probe_uses_real_backend_with_small_payload(monkeypatch):
             "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
         }
 
-    monkeypatch.setenv("VIBELUTION_LLM_MODEL_RELAY_OPENAI_GPT_5_5_API_KEY", "relay-secret")
+    monkeypatch.setenv("VIBELUTION_LLM_MODEL_RELAY_GPT_5_6_LUNA_API_KEY", "relay-secret")
     monkeypatch.setattr("core.llm.client._default_completion_backend", fake_backend)
     monkeypatch.setattr("core.llm.client._default_responses_backend", fake_backend)
 
@@ -1491,15 +1488,15 @@ def test_preserve_secret_blanks_keeps_existing_api_key():
 
 
 def test_toml_writer_round_trip_for_public_config_uses_inline_provider_blocks():
-    public_config = _ensure_llm_model_preset(load_public_config(), "relay_openai_gpt_5_5")
-    public_config["llm"]["profiles"]["primary"] = {"model_ref": "relay_openai_gpt_5_5"}
+    public_config = _ensure_llm_model_preset(load_public_config(), "relay_gpt_5_6_luna")
+    public_config["llm"]["profiles"]["primary"] = {"model_ref": "relay_gpt_5_6_luna"}
     dumped = dumps_public_config(public_config, HEADER_LINES)
     loaded = tomllib.loads(dumped)
 
     assert "[llm.providers]" not in dumped
     assert "[llm.profiles.primary.provider]" not in dumped
     assert "model_ref" in loaded["llm"]["profiles"]["primary"]
-    assert "[llm.model_library.relay_openai_gpt_5_5.provider]" in dumped
+    assert "[llm.model_library.relay_gpt_5_6_luna.provider]" in dumped
     primary_model_ref = loaded["llm"]["profiles"]["primary"]["model_ref"]
     assert loaded["llm"]["model_library"][primary_model_ref]["provider"]["kind"]
     assert loaded["prompt"]["sections"][0]["name"] == public_config["prompt"]["sections"][0]["name"]
@@ -1610,9 +1607,9 @@ def test_inspect_public_config_summarizes_effective_state():
 
 def test_inspect_public_config_warns_when_profiles_bypass_matching_relay_responses_route():
     public_config = load_public_config()
-    public_config["llm"]["model_library"].pop("relay_openai_gpt_5_5", None)
-    public_config = apply_llm_model_preset(public_config, "relay_openai_gpt_5_5")
-    relay_model = public_config["llm"]["model_library"]["relay_openai_gpt_5_5"]
+    public_config["llm"]["model_library"].pop("relay_gpt_5_6_luna", None)
+    public_config = apply_llm_model_preset(public_config, "relay_gpt_5_6_luna")
+    relay_model = public_config["llm"]["model_library"]["relay_gpt_5_6_luna"]
     public_config["llm"]["profiles"]["primary"] = {
         "provider": {
             "kind": "openai_compatible",
@@ -1633,4 +1630,4 @@ def test_inspect_public_config_warns_when_profiles_bypass_matching_relay_respons
     snapshot = inspect_public_config(public_config)
 
     assert any("openai_compatible/chat_completions" in item for item in snapshot["diagnosis"]["warnings"])
-    assert any("relay_openai_gpt_5_5" in item for item in snapshot["diagnosis"]["suggested_actions"])
+    assert any("relay_gpt_5_6_luna" in item for item in snapshot["diagnosis"]["suggested_actions"])
