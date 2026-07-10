@@ -35,7 +35,7 @@ import {
   LogRoot,
   LogTreeResponse,
 } from "../api/types";
-import { VButton, VIconButton, VNativeInput, VRouteHeader, VStatusStrip } from "../components/vui";
+import { VActionGroup, VButton, VIconButton, VNativeInput, VRouteHeader, VStateSurface, VStatusStrip, VSurface } from "../components/vui";
 import { PaneCollapseHandle } from "../components/layout/PaneCollapseHandle";
 import { LazyFilePreview } from "../components/preview/LazyFilePreview";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
@@ -247,7 +247,6 @@ function renderDiagnosticsPanel(diagnostics: LogDiagnostics, lang: "zh" | "en") 
 function renderLogIndexState({
   title,
   detail,
-  lang,
   tone = "empty",
 }: {
   title: string;
@@ -256,31 +255,21 @@ function renderLogIndexState({
   tone?: "loading" | "empty" | "error" | "missing";
 }) {
   return (
-    <div className={`${styles.panelState} ${styles.logIndexState}`} data-state-tone={tone}>
-      <span className={styles.stateKicker}>{lang === "zh" ? "索引状态" : "Index state"}</span>
-      <strong>{title}</strong>
-      <span>{detail}</span>
-      {tone === "loading" ? (
-        <div className={styles.stateSkeletonStack} aria-hidden="true">
-          <span />
-          <span />
-          <span />
-        </div>
-      ) : (
-        <div className={styles.stateFactRow}>
-          <span>{lang === "zh" ? "根目录" : "Root"}</span>
-          <span>{lang === "zh" ? "日志包" : "Packages"}</span>
-          <span>{lang === "zh" ? "文件" : "Files"}</span>
-        </div>
-      )}
-    </div>
+    <VStateSurface
+      className={styles.stateSurface}
+      data-state-tone={tone}
+      tone={tone === "missing" ? "unavailable" : tone}
+      title={title}
+      skeletonLines={tone === "loading" ? 2 : false}
+    >
+      {detail}
+    </VStateSurface>
   );
 }
 
 function renderLogPreviewState({
   title,
   detail,
-  lang,
   tone = "empty",
 }: {
   title: string;
@@ -288,31 +277,16 @@ function renderLogPreviewState({
   lang: "zh" | "en";
   tone?: "loading" | "empty" | "error" | "missing" | "select";
 }) {
-  const stepLabels =
-    lang === "zh"
-      ? ["选日志包", "选文件", "看原文", "折叠诊断"]
-      : ["Pick package", "Pick file", "Read raw", "Fold diagnostics"];
   return (
-    <div className={`${styles.emptySurface} ${styles.previewStateSurface}`} data-state-tone={tone}>
-      <div className={styles.previewStateCard}>
-        <div className={styles.previewStateHeader}>
-          <span className={styles.stateKicker}>{lang === "zh" ? "预览工作区" : "Preview workspace"}</span>
-          <strong>{title}</strong>
-          <span>{detail}</span>
-        </div>
-        <div className={styles.previewStateFlow} aria-hidden="true">
-          {stepLabels.map((label) => (
-            <span key={label}>{label}</span>
-          ))}
-        </div>
-        <div className={styles.previewStateSkeleton} aria-hidden="true">
-          <span />
-          <span />
-          <span />
-          <span />
-        </div>
-      </div>
-    </div>
+    <VStateSurface
+      className={styles.stateSurface}
+      data-state-tone={tone}
+      tone={tone === "missing" ? "unavailable" : tone === "select" ? "info" : tone}
+      title={title}
+      skeletonLines={tone === "loading" ? 2 : false}
+    >
+      {detail}
+    </VStateSurface>
   );
 }
 
@@ -1065,17 +1039,19 @@ export function LogsRoute() {
       <VButton type="button" variant="secondary" className={styles.copyButton} onPress={handleCopy} icon={copyState === "copied" ? <Check size={15} /> : <Copy size={15} />}>
         <span>{copyLabel}</span>
       </VButton>
-      <VButton
-        type="button"
-        variant="danger"
-        className={styles.clearButton}
-        onPress={handleClearCurrent}
-        isDisabled={!activeFilePath || clearLogMutation.isPending}
-        title={!activeFilePath ? t("clearCurrentDisabled") : undefined}
-        icon={<Eraser size={15} />}
-      >
-        <span>{clearLogMutation.isPending ? t("clearingCurrentLog") : t("clearCurrentLog")}</span>
-      </VButton>
+      <VActionGroup ariaLabel={t("clearCurrentLog")} className={styles.cleanupActionGroup}>
+        <VButton
+          type="button"
+          variant="danger"
+          className={styles.clearButton}
+          onPress={handleClearCurrent}
+          isDisabled={!activeFilePath || clearLogMutation.isPending}
+          title={!activeFilePath ? t("clearCurrentDisabled") : undefined}
+          icon={<Eraser size={15} />}
+        >
+          <span>{clearLogMutation.isPending ? t("clearingCurrentLog") : t("clearCurrentLog")}</span>
+        </VButton>
+      </VActionGroup>
     </div>
   );
 
@@ -1111,7 +1087,13 @@ export function LogsRoute() {
           />
         ) : (
           <div ref={layoutRef} className={styles.resizableLayout}>
-            <aside className={sidebarCollapsed ? `${styles.sidebar} ${styles.paneCollapsed}` : styles.sidebar} aria-hidden={sidebarCollapsed}>
+            <VSurface
+              as="aside"
+              tone="rail"
+              padding="none"
+              className={sidebarCollapsed ? `${styles.sidebar} ${styles.paneCollapsed}` : styles.sidebar}
+              aria-hidden={sidebarCollapsed}
+            >
               <div className={styles.sidebarHeader}>
                 <div>
                   <p className={styles.sidebarEyebrow}>{activeRootLabelKey ? t(activeRootLabelKey) : t("navLogs")}</p>
@@ -1143,17 +1125,19 @@ export function LogsRoute() {
                     >
                       <span>{t("clearSelection")}</span>
                     </VButton>
-                    <VButton
-                      type="button"
-                      variant="danger"
-                      className={styles.deleteButton}
-                      onPress={handleDeleteSelected}
-                      isDisabled={selectedLogPaths.length === 0 || destructiveBusy}
-                      title={selectedLogPaths.length === 0 ? t("deleteSelectedDisabled") : undefined}
-                      icon={<Trash2 size={15} />}
-                    >
-                      <span>{destructiveBusy ? t("deletingSelectedLogs") : t("deleteSelectedLogs")}</span>
-                    </VButton>
+                    <VActionGroup ariaLabel={t("deleteSelectedLogs")} className={styles.cleanupActionGroup}>
+                      <VButton
+                        type="button"
+                        variant="danger"
+                        className={styles.deleteButton}
+                        onPress={handleDeleteSelected}
+                        isDisabled={selectedLogPaths.length === 0 || destructiveBusy}
+                        title={selectedLogPaths.length === 0 ? t("deleteSelectedDisabled") : undefined}
+                        icon={<Trash2 size={15} />}
+                      >
+                        <span>{destructiveBusy ? t("deletingSelectedLogs") : t("deleteSelectedLogs")}</span>
+                      </VButton>
+                    </VActionGroup>
                   </div>
                 </div>
                 {actionNotice ? (
@@ -1268,7 +1252,7 @@ export function LogsRoute() {
                   })
                 )}
               </div>
-            </aside>
+            </VSurface>
 
             <PaneCollapseHandle
               side="left"
@@ -1432,7 +1416,13 @@ export function LogsRoute() {
           onKeyDown={handleRightRailResizeKeyDown}
         />
 
-        <aside className={rightRailCollapsed ? `${styles.rightRail} ${styles.paneCollapsed}` : styles.rightRail} aria-hidden={rightRailCollapsed}>
+        <VSurface
+          as="aside"
+          tone="rail"
+          padding="none"
+          className={rightRailCollapsed ? `${styles.rightRail} ${styles.paneCollapsed}` : styles.rightRail}
+          aria-hidden={rightRailCollapsed}
+        >
           <div className={styles.railHeader}>
             <p className={styles.sidebarEyebrow}>{t("logsRootNavigation")}</p>
             <h2 className={styles.railTitle}>{t("navLogs")}</h2>
@@ -1483,7 +1473,7 @@ export function LogsRoute() {
               );
             })}
           </nav>
-        </aside>
+        </VSurface>
       </div>
     </div>
   );

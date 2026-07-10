@@ -9,6 +9,7 @@
 const styles = {
   clearButton:
     "clearButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 text-[var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55",
+  cleanupActionGroup: "cleanupActionGroup min-w-0 border-t border-[var(--vui-border-soft)] pt-1.5",
   copyButton:
     "copyButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 text-[var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55 text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)]",
   deleteButton:
@@ -327,6 +328,7 @@ const styles = {
     "stateKicker min-w-0",
   stateSkeletonStack:
     "stateSkeletonStack min-w-0",
+  stateSurface: "stateSurface min-w-0 max-w-full",
   timelineCode:
     "timelineCode min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto font-mono text-[var(--vui-font-xs)]",
   timelineField:
