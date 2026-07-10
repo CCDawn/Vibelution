@@ -2,7 +2,7 @@
 
 ## 状态元数据
 
-- **状态：** draft-review — 隔离方案已获用户选择 A，等待书面 spec 审阅
+- **状态：** approved — 用户已于 2026-07-10 确认书面 spec，并同意将 `chat_room_service.py` 现有 owner 结果作为前置依赖
 - **负责人：** `codex-challenge-cup-evidence-chain`
 - **Claim：** `claim-6014f58cee98`
 - **分支：** `codex/challenge-cup-evidence-chain`
@@ -39,7 +39,8 @@
 - root 位于 `main`，挑战杯相关改动没有现成 task branch，也没有 guard claim 冲突。
 - 12 个相关改动覆盖 workflow helper 拆分和研究 Agent 测试契约更新；另有 `chat_room_service.py` 改动属于其他 active claim。
 - 隔离 worktree 已从当前 local `main` 创建，12 个文件已按 root scoped diff 镜像。
-- 既有焦点验证在 root 上通过：`tests/test_team_workflow_orchestration_service.py` 207 passed，相邻 7 个测试文件 266 passed。
+- 隔离 worktree 的 `tests/test_team_workflow_orchestration_service.py` 已复跑为 207 passed；相邻 7 个测试文件在隔离 worktree 运行到 202 passed 后，被 `test_team_detail_uses_lightweight_agent_references_for_member_repair` 的外部 `chat_room_service.py` 前置依赖阻断。
+- 同一 lightweight team detail 测试在包含现有 owner participant-context 投影的 root 上 1 passed，根因已确认；本分支等待 owner 将该结果提交并进入 local `main`，不复制其未提交 hunk。
 - 最新挑战杯运行轮没有 active source work run；因此本阶段不需要为了保全代码而干预运行态。
 
 ## 复用决策
@@ -65,7 +66,7 @@
 
 设计意图：
 
-- 把 source collection 的纯规范化、compact context 和 writeback contract 逻辑放回对应 package 模块；
+- 把 source collection split module 所需的纯规范化、compact context 和 writeback contract 逻辑放回对应 package 模块；未拆分 orchestration callsite 继续使用 facade 中既有的兼容私有 helper，本阶段只验证两者行为等价，不扩大迁移；
 - 保留 `team_workflow_orchestration_service.py` 兼容 facade，避免调用方和 API contract 漂移；
 - `SCHEMA_VERSION` 仍由 facade 作为运行时事实源传入 helper，避免 split module 形成第二份版本事实；
 - 本阶段不继续拆分其他 orchestration 逻辑。
