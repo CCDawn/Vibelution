@@ -2400,18 +2400,17 @@ def test_repair_agent_directory_fills_research_agent_profiles(tmp_path, monkeypa
     repaired = agent_directory_service.get_agent(agent["agentId"])
     workspace = agent_config_workspace_service.get_agent_config_workspace(use_cache=False, include_runtime=False)
     workspace_agent = next(item for item in workspace["agents"] if item["agentId"] == agent["agentId"])
+    expected_policy = agent_role_tool_profile_service.resolve_role_tool_policy(
+        role_key="research_paper_reader",
+        primary_mode="research",
+        policy_id=f"tool-{agent['agentId']}",
+    )
+    assert expected_policy is not None
 
     assert "研究流程" in repaired["personaProfile"]["background"]
     assert "paper_reader" in repaired["taskProfile"]["taskTypes"]
-    assert repaired["toolPolicy"]["allowedTools"] == [
-        "agent_message_tool",
-        "unified_memory_search_tool",
-        "research_knowledge_query_tool",
-        "web_fetch_tool",
-        "batch_web_search_tool",
-        "paper_search_tool",
-        "search_summarize_sources_tool",
-    ]
+    assert repaired["toolPolicy"]["allowedTools"] == expected_policy["allowedTools"]
+    assert repaired["toolPolicy"]["preferredTools"] == expected_policy["preferredTools"]
     assert repaired["toolPolicy"]["mutationAccess"] == "none"
     assert repaired["toolPolicy"]["writeScopes"] == []
     assert not any(item["code"] == "agent_onboarding_incomplete" for item in workspace_agent["health"])

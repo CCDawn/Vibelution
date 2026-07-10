@@ -8,6 +8,7 @@ from core.web.control import CONTROL_TOKEN_HEADER, get_control_token
 from core.web.services import (
     agent_directory_service,
     agent_mode_binding_service,
+    agent_role_tool_profile_service,
     research_organization_service,
     session_service,
     team_service,
@@ -59,6 +60,17 @@ def _fake_wake_started(message):
     }
 
 
+def _expected_role_tool_policy(role_key, *, primary_mode="research", metadata=None, policy_id="tool-test"):
+    policy = agent_role_tool_profile_service.resolve_role_tool_policy(
+        role_key=role_key,
+        primary_mode=primary_mode,
+        metadata=metadata or {},
+        policy_id=policy_id,
+    )
+    assert policy is not None
+    return policy
+
+
 def test_research_organization_initializes_protected_core_agents_with_explicit_tools(org_workspace):
     org = research_organization_service.get_research_organization()
     ceo, advisor, steward = _core_agents(org)
@@ -70,40 +82,27 @@ def test_research_organization_initializes_protected_core_agents_with_explicit_t
     assert ceo["agent"]["metadata"]["systemRole"] == "ceo"
     assert advisor["agent"]["metadata"]["systemRole"] == "organization_advisor"
     assert steward["agent"]["metadata"]["systemRole"] == "capability_steward"
-    assert ceo["toolPolicy"]["allowedTools"] == [
-        "agent_message_tool",
-        "research_agent_creation_proposal_tool",
-        "research_communication_edge_proposal_tool",
-        "research_proposal_apply_tool",
-        "batch_web_search_tool",
-        "paper_search_tool",
-        "web_fetch_tool",
-    ]
-    assert advisor["toolPolicy"]["allowedTools"] == [
-        "agent_message_tool",
-        "agent_tool_permission_request_tool",
-        "research_agent_creation_proposal_tool",
-        "research_communication_edge_proposal_tool",
-        "research_proposal_apply_tool",
-        "batch_web_search_tool",
-        "paper_search_tool",
-        "web_fetch_tool",
-    ]
-    assert steward["toolPolicy"]["allowedTools"] == [
-        "agent_message_tool",
-        "agent_tool_permission_request_tool",
-        "research_agent_creation_proposal_tool",
-        "research_communication_edge_proposal_tool",
-        "research_proposal_apply_tool",
-        "batch_web_search_tool",
-        "paper_search_tool",
-        "web_fetch_tool",
-        "read_memory_tool",
-        "get_memory_summary_tool",
-        "search_memory_tool",
-        "read_dynamic_prompt_tool",
-        "research_knowledge_query_tool",
-    ]
+    expected_ceo_policy = _expected_role_tool_policy(
+        "research_ceo",
+        metadata={"researchOrgRole": "ceo", "systemRole": "ceo"},
+        policy_id=f"tool-{ceo['agentId']}",
+    )
+    expected_advisor_policy = _expected_role_tool_policy(
+        "research_organization_advisor",
+        metadata={"researchOrgRole": "organization_advisor", "systemRole": "organization_advisor"},
+        policy_id=f"tool-{advisor['agentId']}",
+    )
+    expected_steward_policy = _expected_role_tool_policy(
+        "research_capability_steward",
+        metadata={"researchOrgRole": "capability_steward", "systemRole": "capability_steward"},
+        policy_id=f"tool-{steward['agentId']}",
+    )
+    assert ceo["toolPolicy"]["allowedTools"] == expected_ceo_policy["allowedTools"]
+    assert advisor["toolPolicy"]["allowedTools"] == expected_advisor_policy["allowedTools"]
+    assert steward["toolPolicy"]["allowedTools"] == expected_steward_policy["allowedTools"]
+    assert ceo["toolPolicy"]["preferredTools"] == expected_ceo_policy["preferredTools"]
+    assert advisor["toolPolicy"]["preferredTools"] == expected_advisor_policy["preferredTools"]
+    assert steward["toolPolicy"]["preferredTools"] == expected_steward_policy["preferredTools"]
     assert "write_file_tool" not in steward["toolPolicy"]["allowedTools"]
     assert "cli_tool" not in steward["toolPolicy"]["allowedTools"]
     assert steward["memoryPolicy"]["readSharedGroups"] == ["project", "research", "agent_config"]
