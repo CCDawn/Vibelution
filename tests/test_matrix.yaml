@@ -40,6 +40,30 @@ rules:
       - "Pure test-tooling changes do not require Launcher refresh."
       - "Remote distributed testing is a speed path for Python not-serial coverage; it is not a complete gate."
 
+  - id: local-quality-gate
+    description: "Local commit hook, closeout manifest, doctor, selector, and manual CI contracts."
+    executionLayers:
+      - "focused"
+      - "local-serial"
+    paths:
+      - ".githooks/pre-commit"
+      - ".github/workflows/ci.yml"
+      - "scripts/doctor.ps1"
+      - "scripts/local_quality_gate.py"
+      - "tests/select_tests.py"
+      - "tests/test_matrix.yaml"
+      - "tests/test_local_quality_gate.py"
+      - "tests/test_ci_workflow_contract.py"
+      - "tests/test_environment_doctor.py"
+      - "tests/test_select_tests.py"
+      - "README.md"
+      - "tests/README.md"
+      - "DEVELOPMENT_STANDARD.md"
+    commands:
+      - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_local_quality_gate.py tests/test_ci_workflow_contract.py tests/test_environment_doctor.py tests/test_select_tests.py -q"
+    notes:
+      - "Gate-definition changes must validate the gate itself even when the matrix changes in the same branch."
+
   - id: web-session-chat
     description: "Direct chat, session routes, room routes, and conversation UI."
     executionLayers:
