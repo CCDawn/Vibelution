@@ -3,10 +3,11 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { Search } from "lucide-react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   VButton,
+  type VButtonProps,
   VChip,
   VIconButton,
   VNativeButton,
@@ -14,6 +15,7 @@ import {
   VSurface,
   VToolbar,
   VTooltip,
+  type VTooltipTriggerRender,
 } from "./index";
 import { VibelutionHeroProvider } from "./renderers/heroui/HeroProvider";
 
@@ -122,6 +124,45 @@ describe("VUI foundation primitives", () => {
     expect(markup).toContain('disabled=""');
     expect(markup).not.toContain('tabindex="0"');
     expect(markup).not.toMatch(/<div[^>]*role="button"[^>]*>[\s\S]*<button/);
+  });
+
+  it("composes icon button caller and tooltip trigger handlers and refs", () => {
+    const callerClick = vi.fn();
+    const tooltipClick = vi.fn();
+    const callerRef = vi.fn();
+    const tooltipRef = vi.fn();
+    const tooltipElement = VIconButton({
+      label: "Refresh",
+      icon: <Search size={14} />,
+      className: "caller-icon-class",
+      onClick: callerClick,
+      ref: callerRef,
+    });
+    const renderTrigger = tooltipElement.props.renderTrigger as VTooltipTriggerRender;
+    const buttonElement = renderTrigger(
+      {
+        className: "tooltip-trigger-class",
+        onClick: tooltipClick,
+        ref: tooltipRef,
+      },
+      undefined,
+    ) as React.ReactElement<VButtonProps>;
+
+    buttonElement.props.onClick?.({} as never);
+
+    expect(callerClick).toHaveBeenCalledTimes(1);
+    expect(tooltipClick).toHaveBeenCalledTimes(1);
+    expect(buttonElement.props.className).toContain("tooltip-trigger-class");
+    expect(buttonElement.props.className).toContain("caller-icon-class");
+    expect(buttonElement.props.ref).toEqual(expect.any(Function));
+
+    const buttonNode = {} as HTMLButtonElement;
+    (buttonElement.props.ref as React.RefCallback<HTMLButtonElement>)(buttonNode);
+
+    expect(callerRef).toHaveBeenCalledTimes(1);
+    expect(callerRef).toHaveBeenCalledWith(buttonNode);
+    expect(tooltipRef).toHaveBeenCalledTimes(1);
+    expect(tooltipRef).toHaveBeenCalledWith(buttonNode);
   });
 
   it("renders VButton content in explicit compact inline slots", () => {
