@@ -327,6 +327,17 @@ def test_parse_allowed_command(
     assert spec.cwd == git_repo
 
 
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows launcher resolution")
+def test_materialize_command_resolves_windows_npm_launcher(git_repo: Path) -> None:
+    spec = gate.parse_allowed_command("npm --prefix web run build", git_repo)
+
+    materialized = gate.materialize_command(spec)
+
+    assert Path(materialized.argv[0]).name.lower() == "npm.cmd"
+    assert materialized.argv[1:] == ["--prefix", "web", "run", "build"]
+    assert materialized.cwd == git_repo
+
+
 def test_local_quality_gate_matrix_command_matches_self_test_and_allowlist(
     git_repo: Path,
 ) -> None:
