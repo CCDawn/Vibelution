@@ -37,10 +37,10 @@ export type AgentFilterRailProps = {
 };
 
 const GROUP_BUTTON_BASE =
-  "grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-2 w-full min-h-[34px] px-[9px] py-[6px] rounded-[var(--radius-control)] border border-[var(--border-soft)] bg-[var(--vui-surface-row)] text-[var(--fg-secondary)] text-left transition-[border-color,background,color] duration-150 hover:border-[var(--border-strong)] hover:text-[var(--fg-primary)] hover:bg-[var(--vui-surface-row-hover)]";
+  "grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-2 w-full min-h-[34px] px-[9px] py-[6px] rounded-none border-0 border-b border-[var(--vui-border-hairline)] bg-transparent text-[var(--fg-secondary)] text-left transition-[background,color,border-color] duration-150 hover:bg-[var(--vui-surface-row-hover)] hover:text-[var(--fg-primary)]";
 
 const GROUP_BUTTON_ACTIVE =
-  "border-[color-mix(in_srgb,var(--accent-warm)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_10%,var(--vui-surface-panel))] text-[var(--fg-primary)]";
+  "border-l-2 border-l-[var(--accent-warm)] bg-[color-mix(in_srgb,var(--accent-warm)_9%,transparent)] text-[var(--fg-primary)]";
 
 const GROUP_LABEL =
   "inline-flex items-center gap-2 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap";
@@ -141,7 +141,7 @@ export function AgentFilterRail({
         ))}
         {advancedSections && advancedSections.length ? (
           <details data-vui-product="agent-filter-advanced" className="group grid min-w-0">
-            <summary className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-2 min-h-[34px] px-[9px] py-[6px] rounded-[var(--radius-control)] border border-[var(--border-soft)] bg-[color-mix(in_srgb,var(--vui-surface-row)_86%,var(--bg-canvas))] text-[var(--fg-secondary)] text-[0.8rem] font-[760] cursor-pointer list-none [&::-webkit-details-marker]:hidden hover:border-[var(--border-strong)] hover:text-[var(--fg-primary)] hover:bg-[var(--vui-surface-row-hover)]">
+            <summary className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-2 min-h-[34px] px-[9px] py-[6px] rounded-none border-0 border-b border-[var(--vui-border-hairline)] bg-transparent text-[var(--fg-secondary)] text-[0.8rem] font-[760] cursor-pointer list-none [&::-webkit-details-marker]:hidden hover:bg-[var(--vui-surface-row-hover)] hover:text-[var(--fg-primary)]">
               <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">
                 {advancedLabel}
               </span>

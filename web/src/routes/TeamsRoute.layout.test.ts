@@ -1668,7 +1668,7 @@ describe("TeamsRoute layout contract", () => {
     expect(teamStageCardSource).toContain("ACTION_BUTTON");
     expect(teamStageCardSource).not.toContain("sourceCollectionStageProjection");
     expect(routeStyles.canvasLayoutModeSwitch).toContain("grid-cols-[repeat(auto-fit,minmax(86px,max-content))]");
-    expect(routeStyles.toolbarActions).toContain("flex-wrap");
+    expect(routeSource).toContain("<VActionGroup");
     expect(routeStyles.canvasToolbar).toContain("grid-cols-[minmax(0,1fr)_max-content]");
     expect(routeStyles.canvasToolbar).toContain("max-[900px]:grid-cols-[minmax(0,1fr)]");
     expect(routeStyles.canvasToolbar).toContain("[&>div:first-child]:min-w-0");
@@ -1828,12 +1828,10 @@ describe("TeamsRoute layout contract", () => {
     expect(routeStyles.aiSearchRunCard).toBeTypeOf("string");
     expect(routeStyles.aiSearchRunRefs).toBeTypeOf("string");
     expect(routeStyles.teamUnavailableSurface).not.toContain("place-items-center");
-    expect(routeStyles.teamUnavailableSurface).not.toContain("justify-center");
+    expect(routeStyles.teamUnavailableSurface).toContain("justify-center");
     expect(routeStyles.teamUnavailableSurface).toContain("content-start");
-    expect(routeStyles.teamUnavailableSurface).toContain("justify-items-center");
     expect(routeStyles.teamUnavailableSurface).toContain("grid-cols-[minmax(0,720px)]");
     expect(routeStyles.teamUnavailableCard).toContain("max-w-[720px]");
-    expect(routeStyles.teamUnavailableActions).toContain("justify-end");
     expect(routeStyles.workspace).toContain("grid-cols-[minmax(520px,1fr)_minmax(300px,380px)]");
     expect(routeStyles.workspace).toContain("overflow-hidden");
     expect(routeStyles.workspace).toContain("max-[760px]:h-auto");
@@ -1851,7 +1849,7 @@ describe("TeamsRoute layout contract", () => {
     expect(workflowGraphViewStyles.workflowGraphFrame).not.toContain("h-full");
     expect(workflowGraphViewStyles.workflowGraphFrame).toContain("overflow-auto");
     expect(routeStyles.canvasPanel).toContain("!flex");
-    expect(routeStyles.canvasPanel).toContain("bg-[var(--vui-surface-panel)]");
+    expect(routeStyles.canvasPanel).not.toContain("bg-[var(--vui-surface-panel)]");
     expect(routeStyles.canvasPanel).not.toContain("bg-[var(--vui-surface-glass)]");
     expect(routeStyles.canvasPanel).not.toContain("shadow-[var(--vui-shadow-hairline)]");
     expect(routeStyles.canvas).toContain("bg-[var(--vui-surface-base)]");
@@ -1859,6 +1857,18 @@ describe("TeamsRoute layout contract", () => {
     expect(routeStyles.canvas).not.toContain("var(--vui-surface-glass)_94%");
     expect(routeStyles.inspector).toContain("!flex");
     expect(routeStylesSource).toContain(".canvasLayoutModeSwitch");
+  });
+
+  it("uses shared Phase 2 surfaces for Team unavailable and canvas states", () => {
+    expect(routeSource).toContain("VActionGroup");
+    expect(routeSource).toContain("VSurface");
+    expect(routeSource).toContain('tone="unavailable"');
+    expect(routeSource).toContain('tone="rail"');
+    expect(routeSource).toContain('elevation="panel"');
+    expect(routeSource).not.toContain("<section className={styles.teamUnavailableCard}");
+    expect(routeStyles.canvasPanel).not.toContain("rounded-[var(--radius-panel)]");
+    expect(routeStyles.canvasPanel).not.toContain("bg-[var(--vui-surface-panel)]");
+    expect(routeStyles.teamUnavailableSurface).not.toContain("bg-[var(--vui-surface-panel)]");
   });
 
   it("uses quiet workbench panels instead of nested glass card walls in the Team canvas", () => {
@@ -1901,8 +1911,6 @@ describe("TeamsRoute layout contract", () => {
       "researchStageHeroPanel",
       "researchStageModuleCard",
       "teamRoundCard",
-      "teamUnavailableCard",
-      "teamUnavailableSurface",
       "workflowPanel",
     ] as const;
 
@@ -2603,7 +2611,7 @@ describe("TeamsRoute layout contract", () => {
 
     const mainRenderSource = routeSource.slice(
       routeSource.indexOf("{showTeamUnavailableSurface ? ("),
-      routeSource.indexOf("<main className={canvasPanelClassName}"),
+      routeSource.indexOf("className={canvasPanelClassName}"),
     );
     expect(mainRenderSource).not.toContain("showTeamLoadingSurface ? (");
     expect(mainRenderSource).toContain("showTeamDetailUnavailableSurface ? (");

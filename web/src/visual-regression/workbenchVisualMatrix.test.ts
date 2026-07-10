@@ -22,7 +22,9 @@ describe("Workbench visual regression matrix", () => {
       "/config",
       "/memory",
       "/memory/graph",
+      "/memory/manage",
       "/supervised-evolution",
+      "/teams",
     ]);
   });
 
@@ -37,7 +39,7 @@ describe("Workbench visual regression matrix", () => {
   });
 
   it("keeps every desktop scenario actionable for screenshot capture", () => {
-    expect(WORKBENCH_VISUAL_SCENARIOS).toHaveLength(12);
+    expect(WORKBENCH_VISUAL_SCENARIOS).toHaveLength(18);
 
     for (const scenario of WORKBENCH_VISUAL_SCENARIOS) {
       expect(scenario.id).toMatch(/^[a-z0-9-]+$/);
@@ -47,6 +49,20 @@ describe("Workbench visual regression matrix", () => {
       expect(scenario.reviewFocus.length).toBeGreaterThanOrEqual(2);
       expect(scenario.expectedEvidence).toBe("screenshot");
     }
+  });
+
+  it("adds explicit light and dark Phase 2 management-route coverage", () => {
+    const phase2Paths = ["/agents", "/teams", "/memory", "/memory/manage", "/memory/graph"];
+
+    for (const path of phase2Paths) {
+      const scenarios = WORKBENCH_VISUAL_SCENARIOS.filter((scenario) => scenario.path === path);
+      expect(scenarios.length).toBeGreaterThan(0);
+    }
+
+    expect(WORKBENCH_VISUAL_SCENARIOS.filter(({ id }) => id.startsWith("agents-"))).toHaveLength(2);
+    expect(WORKBENCH_VISUAL_SCENARIOS.filter(({ id }) => id.startsWith("teams-"))).toHaveLength(2);
+    expect(WORKBENCH_VISUAL_SCENARIOS.filter(({ id }) => id.startsWith("memory-"))).toHaveLength(6);
+    expect(WORKBENCH_VISUAL_SCENARIOS).toHaveLength(18);
   });
 
   it("documents the quiet workbench visual acceptance checklist", () => {

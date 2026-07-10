@@ -2,7 +2,7 @@ import { Search, XCircle } from "lucide-react";
 import { lazy, Suspense } from "react";
 
 import type { MemoryKnowledgeGraphEdge, MemoryKnowledgeGraphNode, MemoryKnowledgeGraphPayload } from "../api/types";
-import { VButton, VNativeInput } from "../components/vui";
+import { VButton, VMetricStrip, VNativeInput, VSection, VSurface } from "../components/vui";
 import {
   GRAPH_NODE_TYPE_LABELS,
   MemoryGraphNodeInspectorPanel,
@@ -84,37 +84,20 @@ export function MemoryGraphViewPanel({
 }: MemoryGraphViewPanelProps) {
   return (
     <>
-      <div className={styles.summaryGrid}>
-        <section className={styles.summaryCard}>
-          <span>{copy.graphVisibleNodes}</span>
-          <strong>{filteredGraphNodes.length}</strong>
-          <small>{copy.graphNodes}: {graphPayload?.summary.nodeCount ?? 0}</small>
-        </section>
-        <section className={styles.summaryCard}>
-          <span>{copy.graphVisibleEdges}</span>
-          <strong>{filteredGraphEdges.length}</strong>
-          <small>{copy.graphEdges}: {graphPayload?.summary.edgeCount ?? 0}</small>
-        </section>
-        <section className={styles.summaryCard}>
-          <span>{copy.graphGpu}</span>
-          <strong>{graphPayload?.operatingBoundary.gpuPreferred ? copy.yes : copy.no}</strong>
-        </section>
-        <section className={styles.summaryCard}>
-          <span>{copy.graphWorker}</span>
-          <strong>{graphPayload?.operatingBoundary.layoutWorker ? copy.yes : copy.no}</strong>
-        </section>
-        <section className={styles.summaryCard}>
-          <span>{copy.graphReadOnly}</span>
-          <strong>{graphPayload?.operatingBoundary.readOnly ? copy.yes : copy.no}</strong>
-        </section>
-        <section className={styles.summaryCard}>
-          <span>{copy.graphAcl}</span>
-          <strong>{graphPayload?.operatingBoundary.honorsKnowledgeAcl ? copy.yes : copy.no}</strong>
-        </section>
-      </div>
+      <VMetricStrip
+        ariaLabel={copy.knowledgeGraph}
+        metrics={[
+          { id: "visible-nodes", label: copy.graphVisibleNodes, value: filteredGraphNodes.length, detail: `${copy.graphNodes}: ${graphPayload?.summary.nodeCount ?? 0}` },
+          { id: "visible-edges", label: copy.graphVisibleEdges, value: filteredGraphEdges.length, detail: `${copy.graphEdges}: ${graphPayload?.summary.edgeCount ?? 0}` },
+          { id: "gpu", label: copy.graphGpu, value: graphPayload?.operatingBoundary.gpuPreferred ? copy.yes : copy.no },
+          { id: "worker", label: copy.graphWorker, value: graphPayload?.operatingBoundary.layoutWorker ? copy.yes : copy.no },
+          { id: "readonly", label: copy.graphReadOnly, value: graphPayload?.operatingBoundary.readOnly ? copy.yes : copy.no },
+          { id: "acl", label: copy.graphAcl, value: graphPayload?.operatingBoundary.honorsKnowledgeAcl ? copy.yes : copy.no },
+        ]}
+      />
 
       <div className={`${styles.workspace} ${styles.graphWorkspace}`}>
-        <aside className={styles.sourcePanel}>
+        <VSurface as="aside" className={styles.sourcePanel} elevation="panel" tone="rail">
           <div className={styles.panelHeader}>
             <div>
               <p className={styles.panelEyebrow}>{copy.knowledgeGraph}</p>
@@ -130,13 +113,7 @@ export function MemoryGraphViewPanel({
               placeholder={copy.graphSearchPlaceholder}
             />
           </label>
-          <section className={styles.managementPanel}>
-            <div className={styles.managementHeader}>
-              <div>
-                <p className={styles.panelEyebrow}>{copy.graphNodeTypes}</p>
-                <h2>{copy.graphNodes}</h2>
-              </div>
-            </div>
+          <VSection className={styles.managementPanel} title={copy.graphNodes} eyebrow={copy.graphNodeTypes}>
             <div className={styles.graphTypeList}>
               {graphTypeEntries.map(([type, count]) => (
                 <VButton
@@ -161,10 +138,10 @@ export function MemoryGraphViewPanel({
                 {copy.graphClearFocus}
               </VButton>
             ) : null}
-          </section>
-        </aside>
+          </VSection>
+        </VSurface>
 
-        <main className={styles.graphCanvasPanel}>
+        <VSurface as="main" className={styles.graphCanvasPanel} elevation="panel" tone="rail">
           <div className={styles.graphCanvasToolbar}>
             <div>
               <p className={styles.panelEyebrow}>{copy.knowledgeGraph}</p>
@@ -199,7 +176,7 @@ export function MemoryGraphViewPanel({
               </VButton>
             ))}
           </div>
-        </main>
+        </VSurface>
 
         <MemoryGraphNodeInspectorPanel
           copy={copy}
