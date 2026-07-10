@@ -38,6 +38,27 @@ GUARD_SCRIPT = (
 MANIFEST_SCHEMA_VERSION = 1
 PROJECT_PYTHON_NAME = Path(".venv") / "Scripts" / "python.exe"
 SHELL_META = re.compile(r"[|&;<>\r\n]|\$\(|`")
+FAILURE_SUMMARY_REDACTIONS = (
+    (
+        re.compile(r"\bAuthorization\s*:\s*Bearer\s+[^\s,;]+", re.IGNORECASE),
+        "Authorization: Bearer [REDACTED]",
+    ),
+    (
+        re.compile(r"\b(https?://)[^\s/:@]+:[^\s/@]+@", re.IGNORECASE),
+        r"\1[REDACTED]@",
+    ),
+    (
+        re.compile(
+            r"\b(api[_-]?key|token|secret|password)\b\s*[:=]\s*[^\s,;]+",
+            re.IGNORECASE,
+        ),
+        r"\1=[REDACTED]",
+    ),
+    (
+        re.compile(r"\bsk-[A-Za-z0-9_-]+"),
+        "[REDACTED]",
+    ),
+)
 GATE_SELF_TEST_COMMAND = (
     ".\\.venv\\Scripts\\python.exe -m pytest "
     "tests/test_local_quality_gate.py tests/test_ci_workflow_contract.py "
@@ -51,6 +72,19 @@ GATE_DEFINITION_FILES = frozenset(
         "scripts/local_quality_gate.py",
         "tests/select_tests.py",
         "tests/test_matrix.yaml",
+    }
+)
+SUPPORTED_RECORDED_COMMAND_KINDS = frozenset(
+    {
+        "bundle-check",
+        "challenge-cup-build",
+        "changed-python-ruff",
+        "diff-check",
+        "prompt-debugger",
+        "pytest",
+        "selector",
+        "web-build",
+        "web-test",
     }
 )
 
@@ -200,8 +234,7 @@ def staged_blob(root: Path, path: str) -> str:
 
 def summarize_failure(completed: subprocess.CompletedProcess[str], subject: str) -> str:
     raw = completed.stderr.strip() or completed.stdout.strip() or "command failed"
-    first_line = raw.splitlines()[0]
-    return f"{subject}: {first_line}"[:300]
+    return bounded_failure_summary(f"{subject}: {raw}")
 
 
 def measured(
@@ -231,6 +264,13 @@ def execute_command(spec: CommandSpec) -> ProcessResult:
     if Path(argv[0]) == PROJECT_PYTHON_NAME:
         argv[0] = str((spec.cwd / PROJECT_PYTHON_NAME).resolve())
     return measured(spec.kind, argv, spec.cwd, subject=spec.kind)
+
+
+def materialize_command(spec: CommandSpec) -> CommandSpec:
+    argv = list(spec.argv)
+    if Path(argv[0]) == PROJECT_PYTHON_NAME:
+        argv[0] = str((spec.cwd / PROJECT_PYTHON_NAME).resolve())
+    return CommandSpec(spec.kind, argv, spec.cwd)
 
 
 def current_branch(root: Path) -> str:
@@ -329,7 +369,10 @@ def utc_now() -> str:
 
 
 def bounded_failure_summary(summary: str) -> str:
-    return summary.splitlines()[0][:300] if summary else ""
+    redacted = summary
+    for pattern, replacement in FAILURE_SUMMARY_REDACTIONS:
+        redacted = pattern.sub(replacement, redacted)
+    return redacted.splitlines()[0][:300] if redacted else ""
 
 
 def manifest_payload(
@@ -389,6 +432,73 @@ def merge_preflight(root: Path, base: str, head: str) -> bool:
     return completed.returncode == 0
 
 
+def is_ancestor(root: Path, ancestor: str, descendant: str) -> bool:
+    completed = run_process(
+        ["git", "merge-base", "--is-ancestor", ancestor, descendant],
+        root,
+    )
+    return completed.returncode == 0
+
+
+def expected_closeout_commands(root: Path, files: Sequence[str]) -> list[CommandSpec]:
+    selection = selected_validation(files)
+    raw_commands = selection.get("commands", [])
+    if not isinstance(raw_commands, list):
+        raise UnsupportedValidationCommand("selector commands must be a list")
+    selected_commands = list(raw_commands)
+    if (
+        GATE_DEFINITION_FILES.intersection(files)
+        and GATE_SELF_TEST_COMMAND not in selected_commands
+    ):
+        selected_commands.append(GATE_SELF_TEST_COMMAND)
+
+    specs: list[CommandSpec] = []
+    python_files = [path for path in files if path.endswith(".py")]
+    if python_files:
+        specs.append(
+            CommandSpec(
+                "changed-python-ruff",
+                [
+                    sys.executable,
+                    "-m",
+                    "ruff",
+                    "check",
+                    "--select",
+                    FATAL_RUFF_RULES,
+                    *python_files,
+                ],
+                root,
+            )
+        )
+    specs.extend(
+        parse_allowed_command(str(command), root) for command in selected_commands
+    )
+    return [materialize_command(spec) for spec in specs]
+
+
+def manifest_commands_are_valid(
+    commands: object,
+    expected: Sequence[CommandSpec],
+) -> bool:
+    if not isinstance(commands, list) or len(commands) != len(expected):
+        return False
+    return all(
+        isinstance(command, dict)
+        and command.get("status") == "passed"
+        and type(command.get("exitCode")) is int
+        and command["exitCode"] == 0
+        and isinstance(command.get("argv"), list)
+        and all(isinstance(argument, str) for argument in command["argv"])
+        and isinstance(command.get("cwd"), str)
+        and isinstance(command.get("kind"), str)
+        and command.get("kind") in SUPPORTED_RECORDED_COMMAND_KINDS
+        and command["kind"] == spec.kind
+        and command["argv"] == spec.argv
+        and command["cwd"] == str(spec.cwd)
+        for command, spec in zip(commands, expected, strict=True)
+    )
+
+
 def run_closeout(root: Path, base: str, claim_id: str) -> GateResult:
     root = repository_root(root)
     branch = current_branch(root)
@@ -439,47 +549,14 @@ def run_closeout(root: Path, base: str, claim_id: str) -> GateResult:
     if not checks["claimValid"]:
         return finish("claim_conflict")
 
-    selection = selected_validation(files)
-    raw_commands = selection.get("commands", [])
-    if not isinstance(raw_commands, list):
-        return finish("unsupported_validation_command")
-    if (
-        GATE_DEFINITION_FILES.intersection(files)
-        and GATE_SELF_TEST_COMMAND not in raw_commands
-    ):
-        raw_commands.append(GATE_SELF_TEST_COMMAND)
     try:
-        specs = [parse_allowed_command(str(command), root) for command in raw_commands]
+        specs = expected_closeout_commands(root, files)
     except UnsupportedValidationCommand:
         return finish("unsupported_validation_command")
     checks["commandsAllowlisted"] = True
 
     def main_is_fresh() -> bool:
         return rev_parse(main_root, main_revision) == validated_main_sha
-
-    python_files = [path for path in files if path.endswith(".py")]
-    if python_files:
-        if not main_is_fresh():
-            return finish("stale_main")
-        lint = measured(
-            "changed-python-ruff",
-            [
-                sys.executable,
-                "-m",
-                "ruff",
-                "check",
-                "--select",
-                FATAL_RUFF_RULES,
-                *python_files,
-            ],
-            root,
-            subject="changed Python",
-        )
-        commands.append(lint)
-        if lint.status == "failed":
-            return finish("failed")
-        if not main_is_fresh():
-            return finish("stale_main")
 
     for spec in specs:
         if not main_is_fresh():
@@ -493,11 +570,17 @@ def run_closeout(root: Path, base: str, claim_id: str) -> GateResult:
 
     if not main_is_fresh():
         return finish("stale_main")
-    checks["mergePreflight"] = merge_preflight(root, validated_main_sha, "HEAD")
+    ancestry_valid = is_ancestor(root, validated_main_sha, head_sha)
     if not main_is_fresh():
         return finish("stale_main")
-    if not checks["mergePreflight"]:
+    if not ancestry_valid:
+        return finish("stale_main")
+    merge_tree_valid = merge_preflight(root, validated_main_sha, head_sha)
+    if not main_is_fresh():
+        return finish("stale_main")
+    if not merge_tree_valid:
         return finish("merge_conflict")
+    checks["mergePreflight"] = True
     if rev_parse(root, "HEAD") != head_sha:
         return finish("failed")
     if not validate_claim(main_root, claim_id, files):
@@ -514,7 +597,10 @@ def verify_manifest(path: Path, root: Path, base: str) -> GateResult:
         return GateResult(outcome="failed", exit_code=1, manifest_path=path)
     if not isinstance(payload, dict):
         return GateResult(outcome="failed", exit_code=1, manifest_path=path)
-    if payload.get("schemaVersion") != MANIFEST_SCHEMA_VERSION:
+    if (
+        type(payload.get("schemaVersion")) is not int
+        or payload["schemaVersion"] != MANIFEST_SCHEMA_VERSION
+    ):
         return GateResult(outcome="failed", exit_code=1, manifest_path=path)
     if payload.get("outcome") != "passed":
         return GateResult(outcome="failed", exit_code=1, manifest_path=path)
@@ -522,8 +608,64 @@ def verify_manifest(path: Path, root: Path, base: str) -> GateResult:
     main_revision = "HEAD" if current_branch(main_root) == base else base
     if payload.get("validatedMainSha") != rev_parse(main_root, main_revision):
         return GateResult(outcome="stale_main", exit_code=1, manifest_path=path)
+    branch = current_branch(root)
+    payload_branch = payload.get("branch")
+    if (
+        not branch
+        or branch == base
+        or not branch.startswith("codex/")
+        or payload_branch != branch
+    ):
+        return GateResult(outcome="failed", exit_code=1, manifest_path=path)
+    if payload.get("taskId") != branch.removeprefix("codex/"):
+        return GateResult(outcome="failed", exit_code=1, manifest_path=path)
+    payload_worktree = payload.get("worktree")
+    if not isinstance(payload_worktree, str) or Path(payload_worktree).resolve() != root:
+        return GateResult(outcome="failed", exit_code=1, manifest_path=path)
     if payload.get("headSha") != rev_parse(root, "HEAD"):
         return GateResult(outcome="failed", exit_code=1, manifest_path=path)
+    if not is_ancestor(
+        root,
+        str(payload["validatedMainSha"]),
+        str(payload["headSha"]),
+    ):
+        return GateResult(outcome="stale_main", exit_code=1, manifest_path=path)
+    payload_files = payload.get("changedFiles")
+    if not isinstance(payload_files, list) or not all(
+        isinstance(item, str) for item in payload_files
+    ):
+        return GateResult(outcome="failed", exit_code=1, manifest_path=path)
+    files = [normalize_path(item) for item in payload_files]
+    if files != changed_files(root, base):
+        return GateResult(outcome="failed", exit_code=1, manifest_path=path)
+    checks = payload.get("checks")
+    required_checks = (
+        "worktreeClean",
+        "claimValid",
+        "mergePreflight",
+        "commandsAllowlisted",
+    )
+    if not isinstance(checks, dict) or not all(
+        checks.get(name) is True for name in required_checks
+    ):
+        return GateResult(outcome="failed", exit_code=1, manifest_path=path)
+    try:
+        expected_commands = expected_closeout_commands(root, files)
+    except UnsupportedValidationCommand:
+        return GateResult(outcome="failed", exit_code=1, manifest_path=path)
+    if not manifest_commands_are_valid(payload.get("commands"), expected_commands):
+        return GateResult(outcome="failed", exit_code=1, manifest_path=path)
+    claim_id = payload.get("claimId")
+    if not isinstance(claim_id, str) or not claim_id.strip():
+        return GateResult(outcome="claim_conflict", exit_code=1, manifest_path=path)
+    if git_lines(root, "status", "--porcelain"):
+        return GateResult(outcome="dirty_worktree", exit_code=1, manifest_path=path)
+    try:
+        claim_valid = validate_claim(main_root, claim_id, files)
+    except (OSError, RuntimeError, ValueError, json.JSONDecodeError):
+        claim_valid = False
+    if not claim_valid:
+        return GateResult(outcome="claim_conflict", exit_code=1, manifest_path=path)
     return GateResult(outcome="passed", exit_code=0, manifest_path=path)
 
 
