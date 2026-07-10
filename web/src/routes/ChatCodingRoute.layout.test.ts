@@ -188,6 +188,10 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.panelBody).toContain("min-h-0");
     expect(routeStyles.panelBody).toContain("h-full");
     expect(routeStyles.panelBody).toContain("overflow-auto");
+    expect(routeStyles.panelBody).not.toContain("rounded-[var(--radius-panel)]");
+    expect(routeStyles.panelBody).not.toContain("border border-[var(--vui-border-subtle)]");
+    expect(routeStyles.panelBody).not.toContain("bg-[var(--vui-surface-glass)]");
+    expect(routeStyles.panelBody).not.toContain("shadow-[var(--vui-shadow-hairline)]");
   });
 
   it("keeps the no-session center state compact on wide screens", () => {
@@ -195,6 +199,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(chatSessionWorkspacePanelStyles.emptyConversationSurface).toContain("place-self-center");
     expect(chatSessionWorkspacePanelStyles.emptyConversationSurface).toContain("!w-[min(360px,calc(100%_-_32px))]");
     expect(chatSessionWorkspacePanelStyles.emptyConversationSurface).toContain("min-h-[74px]");
+    expect(chatSessionWorkspacePanelStyles.emptyConversationSurface).toContain("!content-center");
+    expect(chatSessionWorkspacePanelStyles.emptyConversationSurface).toContain("!text-center");
     expect(chatSessionWorkspacePanelStyles.emptyConversationSurface).not.toContain("h-full");
     expect(chatSessionWorkspacePanelStyles.emptyConversationSurface).not.toContain("min-h-[min(420px,calc(100dvh_-_190px))]");
   });
@@ -207,6 +213,18 @@ describe("ChatCodingRoute layout contract", () => {
     expect(chatSessionWorkspacePanelSource).toContain('tone="unavailable"');
     expect(chatSessionWorkspacePanelSource).not.toContain("<div className={styles.emptyConversationSurface}");
     expect(chatSessionWorkspacePanelSource).not.toContain("<div className={styles.emptySurface}");
+    expect(chatSessionWorkspacePanelStyles.emptySurface).toContain("!content-center");
+    expect(chatSessionWorkspacePanelStyles.emptySurface).toContain("!text-center");
+    expect(chatSessionWorkspacePanelStyles.loadingSurface).not.toContain("!content-center");
+    for (const geometryClass of [
+      chatSessionWorkspacePanelStyles.emptyConversationSurface,
+      chatSessionWorkspacePanelStyles.emptySurface,
+      chatSessionWorkspacePanelStyles.loadingSurface,
+    ]) {
+      expect(geometryClass).not.toContain("border");
+      expect(geometryClass).not.toContain("bg-");
+      expect(geometryClass).not.toContain("shadow");
+    }
   });
 
   it("keeps the conversation page aligned to the V2.1 quiet light style system", () => {
@@ -2063,6 +2081,11 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.rightPane).toContain("rounded-[var(--vui-radius-panel-soft)]");
     expect(routeStyles.rightPane).toContain("bg-[var(--vui-surface-rail)]");
     expect(routeStyles.rightPane).toContain("shadow-[var(--vui-elevation-panel)]");
+    expect(routeStyles.panelState).toContain("!content-center");
+    expect(routeStyles.panelState).toContain("!text-center");
+    expect(routeStyles.panelState).not.toContain("border");
+    expect(routeStyles.panelState).not.toContain("bg-");
+    expect(routeStyles.panelState).not.toContain("shadow");
     expect(routeStyles.sessionActionRow).toContain("flex-wrap");
     expect(routeStyles.newSessionButton).toContain("!w-auto");
     expect(routeStyles.panelSearchInput).toContain("w-full");
