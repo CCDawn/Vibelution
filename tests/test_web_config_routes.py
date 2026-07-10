@@ -178,10 +178,10 @@ def test_config_workspace_exposes_unified_config_payload(monkeypatch):
     assert "rawToml" in payload
     assert "diagnosis" in payload
     preset_options = {item["preset_id"]: item for item in payload["modelPresetOptions"]}
-    relay_preset = preset_options["relay_openai_gpt_5_5"]
+    relay_preset = preset_options["relay_gpt_5_6_luna"]
     assert relay_preset["category"] == "relay"
     assert relay_preset["provider"]["kind"] == "relay"
-    assert relay_preset["provider"]["base_url"] == "https://pixel.try-chatapi.com/v1"
+    assert relay_preset["provider"]["base_url"] == "https://ai-pixel.online"
     assert relay_preset["model"]["transport"] == "responses"
     assert relay_preset["model"]["contract"] == "tool_chat"
     image2_preset = preset_options["relay_image2"]
@@ -578,7 +578,7 @@ def test_config_workspace_surfaces_llm_security_diagnostics_without_blocking_rea
 def test_config_workspace_draft_delete_model_rejects_primary_profile_model(monkeypatch):
     public_config = copy.deepcopy(load_public_config())
     public_config["llm"]["profiles"]["primary"] = {
-        "model_ref": "relay_openai_gpt_5_5",
+        "model_ref": "relay_gpt_5_6_luna",
         "overrides": {},
     }
     scene_events = []
@@ -596,7 +596,7 @@ def test_config_workspace_draft_delete_model_rejects_primary_profile_model(monke
             "publicConfig": public_config,
             "draftMeta": {},
             "baseHash": public_config_hash(public_config),
-            "modelId": "relay_openai_gpt_5_5",
+            "modelId": "relay_gpt_5_6_luna",
         },
     )
 
@@ -608,7 +608,7 @@ def test_config_workspace_draft_delete_model_rejects_primary_profile_model(monke
 
 def test_config_workspace_draft_delete_model_rejects_git_commit_model(monkeypatch):
     public_config = copy.deepcopy(load_public_config())
-    public_config.setdefault("git", {})["commit_message_model_ref"] = "relay_openai_gpt_5_5"
+    public_config.setdefault("git", {})["commit_message_model_ref"] = "relay_gpt_5_6_luna"
     scene_events = []
 
     monkeypatch.setattr(config_service, "load_public_config", lambda: copy.deepcopy(public_config))
@@ -624,7 +624,7 @@ def test_config_workspace_draft_delete_model_rejects_git_commit_model(monkeypatc
             "publicConfig": public_config,
             "draftMeta": {},
             "baseHash": public_config_hash(public_config),
-            "modelId": "relay_openai_gpt_5_5",
+            "modelId": "relay_gpt_5_6_luna",
         },
     )
 
@@ -642,7 +642,7 @@ def test_config_workspace_apply_allows_deleted_non_primary_profile_model(monkeyp
         "overrides": {},
     }
     public_config["llm"]["profiles"]["mental_model"] = {
-        "model_ref": "relay_openai_gpt_5_5",
+        "model_ref": "relay_gpt_5_6_luna",
         "overrides": {},
     }
 
@@ -663,7 +663,7 @@ def test_config_workspace_apply_allows_deleted_non_primary_profile_model(monkeyp
             "publicConfig": public_config,
             "draftMeta": {},
             "baseHash": public_config_hash(public_config),
-            "modelId": "relay_openai_gpt_5_5",
+            "modelId": "relay_gpt_5_6_luna",
         },
     )
 
@@ -682,7 +682,7 @@ def test_config_workspace_apply_allows_deleted_non_primary_profile_model(monkeyp
 
     assert apply_response.status_code == 200, apply_response.json()
     assert saved_configs
-    assert "relay_openai_gpt_5_5" not in saved_configs[-1]["llm"]["model_library"]
+    assert "relay_gpt_5_6_luna" not in saved_configs[-1]["llm"]["model_library"]
     assert any(event_code == "config.llm_profiles.optional_missing_allowed" for _, event_code, _ in scene_events)
 
 
@@ -846,7 +846,7 @@ def test_config_workspace_test_llm_uses_pending_draft_key(monkeypatch):
     monkeypatch.delenv("VIBELUTION_LLM_DEEPSEEK_V4_PRO_API_KEY", raising=False)
     monkeypatch.delenv(deepseek_env, raising=False)
     monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
-    monkeypatch.delenv("VIBELUTION_LLM_MODEL_RELAY_OPENAI_GPT_5_5_API_KEY", raising=False)
+    monkeypatch.delenv("VIBELUTION_LLM_MODEL_RELAY_GPT_5_6_LUNA_API_KEY", raising=False)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
 
     monkeypatch.setattr(config_service, "load_public_config", lambda: copy.deepcopy(public_config))
@@ -958,7 +958,7 @@ def test_config_workspace_test_llm_ignores_forged_pending_draft_key(monkeypatch)
     monkeypatch.delenv("VIBELUTION_LLM_DEEPSEEK_V4_PRO_API_KEY", raising=False)
     monkeypatch.delenv(deepseek_env, raising=False)
     monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
-    monkeypatch.delenv("VIBELUTION_LLM_MODEL_RELAY_OPENAI_GPT_5_5_API_KEY", raising=False)
+    monkeypatch.delenv("VIBELUTION_LLM_MODEL_RELAY_GPT_5_6_LUNA_API_KEY", raising=False)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.setattr(config_service, "_read_env_var", lambda _name: "")
     monkeypatch.setattr(public_config_module, "_read_env_var", lambda _name: "")
@@ -1635,7 +1635,7 @@ def test_config_workspace_draft_model_persists_manual_image_input_support(monkey
     assert model["capability_source"] == "manual"
 def test_config_workspace_draft_model_allows_custom_public_relay_host(monkeypatch):
     public_config = copy.deepcopy(load_public_config())
-    target = public_config["llm"]["model_library"]["relay_openai_gpt_5_5"]
+    target = public_config["llm"]["model_library"]["relay_gpt_5_6_luna"]
     provider = copy.deepcopy(target["provider"])
     provider["base_url"] = "https://relay.example.com/v1"
 
@@ -1647,19 +1647,19 @@ def test_config_workspace_draft_model_allows_custom_public_relay_host(monkeypatc
             "publicConfig": public_config,
             "draftMeta": {},
             "baseHash": public_config_hash(public_config),
-            "modelId": "relay_openai_gpt_5_5",
+            "modelId": "relay_gpt_5_6_luna",
             "provider": provider,
-            "model": "gpt-5.5",
-            "label": "GPT-5.5 via relay",
+            "model": "gpt-5.6-luna",
+            "label": "Relay GPT-5.6 Luna",
             "details": target,
-            "apiKeyEnv": "VIBELUTION_LLM_MODEL_RELAY_OPENAI_GPT_5_5_API_KEY",
+            "apiKeyEnv": "VIBELUTION_LLM_MODEL_RELAY_GPT_5_6_LUNA_API_KEY",
             "apiKey": "",
         },
     )
 
     assert response.status_code == 200, response.json()
     payload = response.json()
-    updated = payload["publicConfig"]["llm"]["model_library"]["relay_openai_gpt_5_5"]
+    updated = payload["publicConfig"]["llm"]["model_library"]["relay_gpt_5_6_luna"]
     assert updated["provider"]["base_url"] == "https://relay.example.com/v1"
 
 
@@ -1806,11 +1806,11 @@ def test_config_workspace_draft_model_rejects_unknown_model_id(monkeypatch):
             "draftMeta": {},
             "baseHash": public_config_hash(public_config),
             "modelId": "generated_from_profile",
-            "provider": public_config["llm"]["model_library"]["relay_openai_gpt_5_5"]["provider"],
-            "model": "gpt-5.5",
+            "provider": public_config["llm"]["model_library"]["relay_gpt_5_6_luna"]["provider"],
+            "model": "gpt-5.6-luna",
             "label": "Generated from profile",
-            "details": public_config["llm"]["model_library"]["relay_openai_gpt_5_5"],
-            "apiKeyEnv": "VIBELUTION_LLM_MODEL_RELAY_OPENAI_GPT_5_5_API_KEY",
+            "details": public_config["llm"]["model_library"]["relay_gpt_5_6_luna"],
+            "apiKeyEnv": "VIBELUTION_LLM_MODEL_RELAY_GPT_5_6_LUNA_API_KEY",
             "apiKey": "",
         },
     )

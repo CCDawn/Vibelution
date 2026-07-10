@@ -83,20 +83,20 @@ function providerPreset(
 
 function option(overrides: Partial<ConfigModelOption> = {}): ConfigModelOption {
   return {
-    model_id: "relay_openai_gpt_5_5",
+    model_id: "relay_gpt_5_6_luna",
     source: "model_library",
     provider: {
       kind: "relay",
       api: "openai-responses",
-      base_url: "https://pixel.try-chatapi.com/v1",
+      base_url: "https://ai-pixel.online",
       compat_mode: "openai",
       requires_api_key: true,
     },
     provider_kind: "relay",
-    model: "gpt-5.5",
-    label: "GPT-5.5 via relay",
+    model: "gpt-5.6-luna",
+    label: "Relay GPT-5.6 Luna",
     details: {
-      transport: "chat_completions",
+      transport: "responses",
       contract: "tool_chat",
       protocol: "relay_responses",
       compat: { streamUsageOptions: true },
@@ -278,7 +278,7 @@ describe("configRouteLogic", () => {
       [
         preset("local_model", { kind: "local", base_url: "http://localhost:11434/v1" }),
         preset("compatible_model", { kind: "openai_compatible", base_url: "https://relay.example.com/v1" }),
-        preset("relay_model", { kind: "relay", base_url: "https://pixel.try-chatapi.com/v1" }),
+        preset("relay_model", { kind: "relay", base_url: "https://ai-pixel.online" }),
       ],
       {
         official: "Official",
@@ -476,9 +476,9 @@ describe("configRouteLogic", () => {
       },
     });
     const chatModel = option({
-      model_id: "relay_openai_gpt_5_5",
-      label: "GPT-5.5 via relay",
-      model: "gpt-5.5",
+      model_id: "relay_gpt_5_6_luna",
+      label: "Relay GPT-5.6 Luna",
+      model: "gpt-5.6-luna",
       api_key_state: "missing",
       api_key_configured: false,
       provider: {
@@ -498,7 +498,7 @@ describe("configRouteLogic", () => {
 
   it("builds compact model inventory rows with asset editability in one place", () => {
     const libraryModel = option({
-      model_id: "relay_openai_gpt_5_5",
+      model_id: "relay_gpt_5_6_luna",
       source: "model_library",
       api_key_state: "configured",
       api_key_configured: true,
@@ -512,7 +512,7 @@ describe("configRouteLogic", () => {
     expect(summary.accounts).toHaveLength(1);
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({
-      modelId: "relay_openai_gpt_5_5",
+      modelId: "relay_gpt_5_6_luna",
       editable: true,
       deletable: true,
       apiKeyState: "configured",
@@ -626,13 +626,13 @@ describe("configRouteLogic", () => {
   it("maps model creation scenarios to extensible preset defaults", () => {
     const presets = [
       preset("openai_gpt_5_5", { kind: "openai" }, "official"),
-      preset("relay_openai_gpt_5_5", { kind: "relay", base_url: "https://ai-pixel.online" }, "relay"),
+      preset("relay_gpt_5_6_luna", { kind: "relay", base_url: "https://ai-pixel.online" }, "relay"),
       preset("relay_image2", { kind: "relay", base_url: "https://ai-pixel.online" }, "relay"),
       preset("local_llama", { kind: "local", base_url: "http://localhost:11434/v1" }, "local"),
     ];
 
-    expect(selectModelScenarioPresetId("chat", presets)).toBe("relay_openai_gpt_5_5");
-    expect(selectModelScenarioPresetId("relay", presets)).toBe("relay_openai_gpt_5_5");
+    expect(selectModelScenarioPresetId("chat", presets)).toBe("relay_gpt_5_6_luna");
+    expect(selectModelScenarioPresetId("relay", presets)).toBe("relay_gpt_5_6_luna");
     expect(selectModelScenarioPresetId("image", presets)).toBe("relay_image2");
     expect(selectModelScenarioPresetId("local", presets)).toBe("local_llama");
     expect(selectModelScenarioPresetId("manual", presets)).toBe("");
