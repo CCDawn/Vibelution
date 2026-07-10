@@ -2114,7 +2114,7 @@ export function AppShell() {
         </VButton>
       ) : null}
       <header className={styles.topBar}>
-        <div className={styles.brandBlock}>
+        <div className={styles.brandBlock} data-shell-group="brand">
           {returnNavigationTarget ? (
             <VIconButton
               type="button"
@@ -2199,7 +2199,7 @@ export function AppShell() {
           ) : null}
         </div>
 
-        <nav className={styles.nav}>
+        <nav className={styles.nav} data-shell-group="navigation">
           {chatEnabled ? (
             <NavLink
               to="/chat"
@@ -2247,7 +2247,7 @@ export function AppShell() {
           </NavLink>
         </nav>
 
-        <div className={styles.topActions}>
+        <div className={styles.topActions} data-shell-group="system-actions">
           <div
             ref={utilityMenuRef}
             className={
@@ -2342,6 +2342,7 @@ export function AppShell() {
             type="button"
             className={styles.actionIconButton}
             label={themeToggleLabel}
+            tooltip={themeToggleLabel}
             title={themeToggleLabel}
             icon={theme === "dark" ? <Sun size={16} /> : <Moon size={16} />}
             onPress={toggleTheme}
@@ -2350,6 +2351,7 @@ export function AppShell() {
             type="button"
             className={styles.actionIconButton}
             label={refreshFrontendLabel}
+            tooltip={refreshFrontendLabel}
             title={refreshFrontendLabel}
             icon={<RefreshCw size={16} />}
             onPress={refreshFrontend}
@@ -2359,6 +2361,7 @@ export function AppShell() {
             type="button"
             className={styles.actionIconButton}
             label={hideTopBarLabel}
+            tooltip={hideTopBarLabel}
             title={hideTopBarLabel}
             icon={<PanelTopClose size={16} />}
             onPress={() => setTopBarMode("hidden")}
@@ -2375,6 +2378,7 @@ export function AppShell() {
               type="button"
               className={styles.actionIconButton}
               label={lifecycleMenuLabel}
+              tooltip={lifecycleMenuLabel}
               title={lifecycleMenuLabel}
               aria-haspopup="menu"
               aria-expanded={lifecycleMenuOpen}

@@ -75,6 +75,10 @@
   --vui-sheen: inset 0 1px 0 rgba(255, 255, 255, 0.05);
   --vui-elevation-1-sheen: var(--vui-sheen), var(--vui-elevation-1);
   --vui-elevation-2-sheen: var(--vui-sheen), var(--vui-elevation-2);
+  --vui-radius-panel-soft: 10px;
+  --vui-radius-overlay: 12px;
+  --vui-elevation-panel: var(--vui-elevation-1-sheen);
+  --vui-elevation-overlay: var(--vui-elevation-2-sheen);
   --vui-ease: cubic-bezier(0.2, 0, 0, 1);
   --vui-transition: 150ms var(--vui-ease);
   --vui-radius-soft: 10px;
@@ -247,6 +251,10 @@
   --vui-sheen: inset 0 1px 0 rgba(255, 255, 255, 0.7);
   --vui-elevation-1-sheen: var(--vui-sheen), var(--vui-elevation-1);
   --vui-elevation-2-sheen: var(--vui-sheen), var(--vui-elevation-2);
+  --vui-radius-panel-soft: 10px;
+  --vui-radius-overlay: 12px;
+  --vui-elevation-panel: var(--vui-elevation-1-sheen);
+  --vui-elevation-overlay: var(--vui-elevation-2-sheen);
 
   --vui-gradient-route-soft: linear-gradient(
     180deg,
