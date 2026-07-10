@@ -30,6 +30,26 @@ class ModelProtocol(StrEnum):
     RELAY_RESPONSES = "relay_responses"
 
 
+class WireProtocol(StrEnum):
+    CHAT_COMPLETIONS = "chat_completions"
+    RESPONSES = "responses"
+    ANTHROPIC_MESSAGES = "anthropic_messages"
+    GEMINI_GENERATE_CONTENT = "gemini_generate_content"
+
+
+WIRE_SHAPED_MODEL_PROTOCOL_ALIASES: Dict[ModelProtocol, WireProtocol] = {
+    ModelProtocol.OPENAI_CHAT_TOOLS: WireProtocol.CHAT_COMPLETIONS,
+    ModelProtocol.OPENAI_RESPONSES: WireProtocol.RESPONSES,
+    ModelProtocol.RELAY_RESPONSES: WireProtocol.RESPONSES,
+    ModelProtocol.ANTHROPIC_CHAT: WireProtocol.ANTHROPIC_MESSAGES,
+    ModelProtocol.ANTHROPIC_THINKING: WireProtocol.ANTHROPIC_MESSAGES,
+}
+
+
+def wire_protocol_from_model_protocol_alias(protocol: ModelProtocol) -> WireProtocol | None:
+    return WIRE_SHAPED_MODEL_PROTOCOL_ALIASES.get(protocol)
+
+
 @dataclass(frozen=True)
 class CompatPolicy:
     requires_string_content: bool = False
@@ -264,5 +284,8 @@ __all__ = [
     "ModelProtocol",
     "ProtocolPolicy",
     "PROTOCOL_POLICIES",
+    "WIRE_SHAPED_MODEL_PROTOCOL_ALIASES",
+    "WireProtocol",
     "get_protocol_policy",
+    "wire_protocol_from_model_protocol_alias",
 ]
