@@ -7,7 +7,6 @@ import json
 import shutil
 import subprocess
 import pytest
-import sys
 from pathlib import Path
 
 
@@ -70,3 +69,17 @@ def test_doctor_reports_critical_imports_and_pytest():
     pytest_check = report["checks"]["pytest_module"]
     assert pytest_check["ok"] is True
     assert "pytest" in pytest_check["version"].lower()
+
+
+def test_doctor_reports_local_quality_gate_and_hook_configuration():
+    report = run_doctor()
+
+    assert report["checks"]["git_hooks_path"]["expected"] == ".githooks"
+    assert (
+        report["checks"]["git_hooks_path"]["repair"]
+        == "git config core.hooksPath .githooks"
+    )
+    assert report["checks"]["pre_commit_hook"]["ok"] is True
+    assert report["checks"]["local_quality_gate"]["ok"] is True
+    assert report["checks"]["ruff"]["ok"] is True
+    assert "ruff" in report["checks"]["ruff"]["version"].lower()

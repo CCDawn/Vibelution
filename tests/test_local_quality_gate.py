@@ -2,12 +2,20 @@ from __future__ import annotations
 
 import json
 import subprocess
-import sys
 from pathlib import Path
 
 import pytest
 
 from scripts import local_quality_gate as gate
+
+
+def test_pre_commit_is_thin_adapter() -> None:
+    hook = (gate.PROJECT_ROOT / ".githooks" / "pre-commit").read_text(
+        encoding="utf-8"
+    )
+    assert '"$repo_root/scripts/local_quality_gate.py" commit' in hook
+    assert "pytest" not in hook
+    assert "ruff" not in hook
 
 
 def git(root: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
