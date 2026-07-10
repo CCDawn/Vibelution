@@ -149,6 +149,7 @@ def test_tool_registry_lists_builtins_as_protected(tmp_path, monkeypatch):
     context_args = stage_context_tool["argsSchema"]["properties"]
     assert {"record_offset", "record_limit", "candidate_offset", "candidate_limit", "context_mode"}.issubset(context_args)
     assert context_args["context_mode"]["default"] == "compact"
+    assert set(context_args["context_mode"]["enum"]) == {"compact", "full", "minimal", "retry_missing"}
     stage_writeback_tool = next(item for item in payload["tools"] if item["name"] == "source_collection_stage_writeback_tool")
     assert stage_writeback_tool["source"] == "built_in"
     assert stage_writeback_tool["category"] == "media_research"
