@@ -3651,6 +3651,7 @@ def _room_to_compact_reference(room: dict[str, Any]) -> dict[str, Any]:
                 "dialogueModelId": str(item.get("dialogueModelId") or "").strip(),
                 "llmBindings": agent_directory_service.normalize_agent_llm_bindings(item.get("llmBindings")),
                 "enabled": bool(item.get("enabled", True)),
+                **{field: item.get(field) for field in _PARTICIPANT_CONTEXT_FIELDS if field in item},
             }
             for item in list(room.get("participants") or [])
             if isinstance(item, dict)
