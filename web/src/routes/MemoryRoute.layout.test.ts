@@ -327,14 +327,8 @@ describe("MemoryRoute layout contract", () => {
       detailPanelStyles.visibilityPanel,
       detailPanelStyles.sectionPanel,
       detailPanelStyles.rawPanel,
-      managePanelStyles.manageListPanel,
-      managePanelStyles.manageFilterPanel,
-      managePanelStyles.manageFormPanel,
       sourceAndItemPanelStyles.sourcePanel,
       sourceAndItemPanelStyles.itemPanel,
-      graphViewPanelStyles.sourcePanel,
-      graphViewPanelStyles.managementPanel,
-      graphViewPanelStyles.graphCanvasPanel,
       graphNodeInspectorPanelStyles.detailPanel,
       graphNodeInspectorPanelStyles.graphRelationPanel,
       graphNodeInspectorPanelStyles.graphKnowledgePanel,
@@ -351,7 +345,6 @@ describe("MemoryRoute layout contract", () => {
       detailPanelStyles.copyNotice,
       detailPanelStyles.detailActions,
       detailPanelStyles.emptyDetail,
-      managePanelStyles.emptyDetail,
       sourceAndItemPanelStyles.panelNotice,
       graphNodeInspectorPanelStyles.emptyDetail,
       graphNodeInspectorPanelStyles.selectedConfigSummary,
@@ -378,9 +371,6 @@ describe("MemoryRoute layout contract", () => {
     expect(graphViewPanelStyles.graphWorkspace).toContain("max-[1180px]:grid-cols-[minmax(180px,220px)_minmax(0,1fr)]");
     expect(graphViewPanelStyles.graphWorkspace).toContain("max-[1180px]:[&_.detailPanel]:col-span-2");
     expect(graphViewPanelStyles.graphWorkspace).toContain("max-[860px]:grid-cols-[minmax(0,1fr)]");
-    expect(graphViewPanelStyles.summaryGrid).toContain("grid-cols-[repeat(auto-fit,minmax(138px,max-content))]");
-    expect(graphViewPanelStyles.summaryGrid).toContain("justify-start");
-    expect(graphViewPanelStyles.summaryCard).toContain("bg-[var(--vui-surface-row)]");
 
     expect(detailPanelStyles.detailHeader).toContain("[&_h2]:break-words");
     expect(detailPanelStyles.detailHeader).toContain("[&_p]:line-clamp-2");
@@ -392,6 +382,19 @@ describe("MemoryRoute layout contract", () => {
     expect(graphViewPanelStyles.graphNodeList).toContain("[&_[data-vui=\"button\"]]:w-full");
     expect(graphNodeInspectorPanelStyles.graphKnowledgeContent).toContain("whitespace-pre-wrap");
     expect(graphNodeInspectorPanelStyles.graphKnowledgeContent).toContain("break-words");
+  });
+
+  it("uses shared Phase 2 surfaces for Memory manage and graph workspaces", () => {
+    expect(managePanelSource).toContain("VSurface");
+    expect(managePanelSource).toContain("VSection");
+    expect(managePanelSource).toContain("VStateSurface");
+    expect(managePanelStyles.manageFilterPanel).not.toContain("bg-[var(--vui-surface-panel)]");
+    expect(graphViewPanelSource).toContain("VMetricStrip");
+    expect(graphViewPanelSource).toContain("VSurface");
+    expect(graphViewPanelSource).not.toContain("styles.summaryCard");
+    expect(graphViewPanelStyles.sourcePanel).not.toContain("bg-[var(--vui-surface-panel)]");
+    expect(graphViewPanelStyles.graphCanvasPanel).not.toContain("rounded-[var(--radius-panel)]");
+    expect(graphViewPanelStyles).not.toHaveProperty("managementHeader");
   });
 
   it("delegates the dense overview body to a dedicated panel component", () => {
