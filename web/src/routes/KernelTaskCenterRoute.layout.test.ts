@@ -171,6 +171,10 @@ describe("KernelTaskCenterRoute layout contract", () => {
     expect(styles.chipCodeClass).toContain("truncate");
     expect(styles.chipCodeClass).toContain("whitespace-nowrap");
     expect(styles.chipCodeClass).not.toContain("break-all");
+    expect(styles.refListClass).toContain("min-w-0");
+    expect(styles.refListClass).toContain("max-w-full");
+    expect(styles.evidenceRefListClass).toContain("min-w-0");
+    expect(styles.evidenceRefListClass).toContain("max-w-full");
     expect(styles.emptyStateClass).toContain("break-words");
   });
 
