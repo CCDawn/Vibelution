@@ -13,7 +13,10 @@ import {
   projectedConversationMessageIdsOrSelf,
 } from "./conversationMessageIdentity";
 import { chronologicalConversationMessages } from "./conversationMessageOrder";
-import { projectTimelineProcessMessages } from "./timelineMessageProcessProjection";
+import {
+  mergeCodexTranscripts,
+  projectTimelineProcessMessages,
+} from "./timelineMessageProcessProjection";
 import {
   buildAgentMessageTimelineRowIdentities,
   type AgentMessageTimelineRowIdentity,
@@ -239,6 +242,11 @@ function mergeLiveOverlayIntoActiveTurnMessage(
     toolCalls: undefined,
     attachments: mergeUniqueProjectionItems(projectionItemIdentity, liveOverlayMessage.attachments, activeTurnMessage.attachments),
     references: mergeUniqueProjectionItems(projectionItemIdentity, liveOverlayMessage.references, activeTurnMessage.references),
+    codexTranscript: mergeCodexTranscripts(
+      liveOverlayMessage.codexTranscript,
+      activeTurnMessage.codexTranscript,
+      activeTurnMessage.id,
+    ),
     metadata: {
       ...(liveOverlayMessage.metadata ?? {}),
       ...(activeTurnMessage.metadata ?? {}),
