@@ -158,7 +158,7 @@ python tests/select_tests.py --from-git main --commands-only
 
 - `commit`：由 pre-commit hook 自动调用，以 staged paths 驱动；diff check 与 Python Ruff 使用 Git index 中的 staged 内容。gate-definition 文件同时存在 staged 与 unstaged 内容时拒绝提交；gate-definition staged 时还会在当前 worktree 运行 focused self-test，因此未 stage 的测试或 `conftest.py` 可能影响结果。
 - `closeout --base main --claim-id <claim-id>`：只在内容已提交且 clean 的 task worktree 运行，绑定 claim、本地 `main` SHA、HEAD SHA、selector 命令和 merge preflight，并写入 `.runtime/quality_gates/<task-id>.json`。
-- `verify-manifest --manifest <path> --base main`：在进入 root local `main` fast-forward gate 前复核 manifest 的 schema、`outcome`、`validatedMainSha` 与 `headSha`。`passed` 是验证证据，不表示已经 merge。
+- `verify-manifest --manifest <path> --base main`：在进入 root local `main` fast-forward gate 前复核 manifest 的 schema、outcome、branch/worktree、main/HEAD/changed files、active claim、clean 状态、checks、allowlisted command 结果与 fast-forward ancestry。`passed` 是当前授权证据，不表示已经 merge。
 
 首次配置 hook 使用 `git config core.hooksPath .githooks`。`powershell -ExecutionPolicy Bypass -File scripts/doctor.ps1 -Json` 只读报告 `checks.git_hooks_path` 及固定修复命令，不会静默写 Git 配置。远端 CI 的 `workflow_dispatch` 可按需补充验证，但 remote push 不是默认本地闭环的一部分。
 
@@ -176,9 +176,11 @@ Outcome 必须结合 mode 解释，每个组合只对应一个恢复动作：
 | `closeout` | `dirty_worktree` | 提交或撤回本任务未提交内容，使 task worktree clean 后重跑 closeout |
 | `closeout` | `merge_conflict` | 仅在任务 worktree 解决冲突并重跑 closeout |
 | `closeout` | `unsupported_validation_command` | 修正 matrix 为允许命令族，不放宽到 shell，然后重跑 closeout |
-| `verify-manifest` | `passed` | manifest 对当前本地 main 与 task HEAD 仍新鲜，可进入 merge gate |
-| `verify-manifest` | `failed` | manifest 不可读、schema/`outcome` 无效或 `headSha` 不匹配；生成或选择正确 manifest，必要时重跑 closeout |
-| `verify-manifest` | `stale_main` | 当前本地 main 已变化；回任务 worktree 同步最新 main，并重跑 closeout 生成新 manifest |
+| `verify-manifest` | `passed` | manifest 与当前 task branch/worktree/HEAD/changed files 一致，main 仍新鲜且是 task HEAD 祖先，claim、clean 状态、checks 与 commands 仍有效，可进入 merge gate |
+| `verify-manifest` | `failed` | manifest 不可读，或 schema/`outcome`/branch/worktree/HEAD/changed files/checks/commands 被篡改或不匹配；生成或选择正确 manifest，必要时重跑 closeout |
+| `verify-manifest` | `stale_main` | 当前本地 main 已变化或不再是 task HEAD 祖先；回任务 worktree 同步最新 main，并重跑 closeout 生成新 manifest |
+| `verify-manifest` | `claim_conflict` | manifest claim 已失效、缺失或不覆盖当前 changed files；修正或续期本任务 claim 后重跑 closeout |
+| `verify-manifest` | `dirty_worktree` | task worktree 在 closeout 后出现改动；提交或撤回本任务内容，使 worktree clean 后重跑 closeout |
 
 质量门只生成或复核证据，不执行 merge、claim release、junction/worktree/branch 删除。冲突和 `stale_main` 都回 task worktree 处理；root local `main` 仅在 clean 且 SHA 仍匹配时执行 `git merge --ff-only <task-branch>`，随后做最小 post-merge verification，并只清理本任务资源。
 

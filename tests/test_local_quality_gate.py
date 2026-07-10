@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -99,6 +100,100 @@ def active_claim(claim_id: str, scopes: list[str]) -> dict[str, object]:
             }
         ]
     }
+
+
+def create_passed_manifest(
+    git_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> Path:
+    git(git_repo, "branch", "-M", "main")
+    commit_file(git_repo, ".gitignore", ".runtime/\n", "ignore gate runtime")
+    git(git_repo, "switch", "-c", "codex/test-task")
+    commit_file(git_repo, "docs/note.md", "changed\n", "docs change")
+    monkeypatch.setattr(
+        gate,
+        "read_guard_status",
+        lambda root: active_claim("claim-test", ["docs/note.md"]),
+    )
+
+    result = gate.run_closeout(git_repo, "main", "claim-test")
+
+    assert result.outcome == "passed"
+    assert result.manifest_path is not None
+    return result.manifest_path
+
+
+def create_recorded_contract_manifest(
+    git_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> Path:
+    git(git_repo, "branch", "-M", "main")
+    commit_file(git_repo, ".gitignore", ".runtime/\n", "ignore gate runtime")
+    validated_main_sha = git(git_repo, "rev-parse", "HEAD").stdout.strip()
+    git(git_repo, "switch", "-c", "codex/test-task")
+    commit_file(git_repo, "scripts/local_quality_gate.py", "VALUE = 1\n", "gate change")
+    head_sha = git(git_repo, "rev-parse", "HEAD").stdout.strip()
+    files = ["scripts/local_quality_gate.py"]
+    monkeypatch.setattr(
+        gate,
+        "read_guard_status",
+        lambda root: active_claim("claim-test", files),
+    )
+    selection = gate.selected_validation(files)
+    raw_commands = list(selection["commands"])
+    if gate.GATE_SELF_TEST_COMMAND not in raw_commands:
+        raw_commands.append(gate.GATE_SELF_TEST_COMMAND)
+    commands = [
+        gate.ProcessResult(
+            kind="changed-python-ruff",
+            argv=[
+                sys.executable,
+                "-m",
+                "ruff",
+                "check",
+                "--select",
+                gate.FATAL_RUFF_RULES,
+                *files,
+            ],
+            cwd=str(git_repo.resolve()),
+            exit_code=0,
+            duration_ms=1,
+            status="passed",
+        )
+    ]
+    for raw_command in raw_commands:
+        spec = gate.parse_allowed_command(raw_command, git_repo.resolve())
+        argv = list(spec.argv)
+        if Path(argv[0]) == gate.PROJECT_PYTHON_NAME:
+            argv[0] = str((spec.cwd / gate.PROJECT_PYTHON_NAME).resolve())
+        commands.append(
+            gate.ProcessResult(
+                kind=spec.kind,
+                argv=argv,
+                cwd=str(spec.cwd),
+                exit_code=0,
+                duration_ms=1,
+                status="passed",
+            )
+        )
+    payload = gate.manifest_payload(
+        task_id="test-task",
+        branch="codex/test-task",
+        root=git_repo.resolve(),
+        claim_id="claim-test",
+        validated_main_sha=validated_main_sha,
+        head_sha=head_sha,
+        files=files,
+        commands=commands,
+        checks={
+            "worktreeClean": True,
+            "claimValid": True,
+            "mergePreflight": True,
+            "commandsAllowlisted": True,
+        },
+        outcome="passed",
+    )
+    return gate.write_manifest(git_repo, "test-task", payload)
 
 
 def test_commit_mode_lints_staged_blob_instead_of_worktree(git_repo: Path) -> None:
@@ -337,6 +432,15 @@ def test_closeout_writes_bounded_passed_manifest(
     assert manifest["checks"]["mergePreflight"] is True
     assert manifest["checks"]["commandsAllowlisted"] is True
     assert manifest["outcome"] == "passed"
+    ancestry = git(
+        git_repo,
+        "merge-base",
+        "--is-ancestor",
+        manifest["validatedMainSha"],
+        manifest["headSha"],
+        check=False,
+    )
+    assert ancestry.returncode == 0
     serialized = json.dumps(manifest, ensure_ascii=False)
     assert "environment" not in serialized.lower()
     assert "prompt" not in serialized.lower()
@@ -440,6 +544,227 @@ def test_verify_manifest_detects_stale_main(git_repo: Path) -> None:
     assert result.outcome == "stale_main"
 
 
+def test_verify_manifest_accepts_current_authorization(
+    git_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manifest = create_passed_manifest(git_repo, monkeypatch)
+
+    result = gate.verify_manifest(manifest, git_repo, "main")
+
+    assert result.outcome == "passed"
+
+
+def test_verify_manifest_rejects_inactive_claim(
+    git_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manifest = create_passed_manifest(git_repo, monkeypatch)
+    monkeypatch.setattr(gate, "read_guard_status", lambda root: {"claims": []})
+
+    result = gate.verify_manifest(manifest, git_repo, "main")
+
+    assert result.outcome == "claim_conflict"
+
+
+def test_verify_manifest_rejects_dirty_worktree(
+    git_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manifest = create_passed_manifest(git_repo, monkeypatch)
+    (git_repo / "dirty.txt").write_text("dirty\n", encoding="utf-8")
+
+    result = gate.verify_manifest(manifest, git_repo, "main")
+
+    assert result.outcome == "dirty_worktree"
+
+
+def test_verify_manifest_rejects_current_branch_mismatch(
+    git_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manifest = create_passed_manifest(git_repo, monkeypatch)
+    git(git_repo, "switch", "-c", "codex/other-task")
+
+    result = gate.verify_manifest(manifest, git_repo, "main")
+
+    assert result.outcome == "failed"
+
+
+@pytest.mark.parametrize(
+    "tamper",
+    [
+        "payload-branch",
+        "schema-version-type",
+        "worktree",
+        "changed-files",
+        "check-worktree-clean",
+        "check-claim-valid",
+        "check-merge-preflight",
+        "check-commands-allowlisted",
+        "command-status",
+        "command-exit-code",
+        "command-argv",
+        "command-cwd",
+        "command-kind",
+        "command-kind-type",
+    ],
+)
+def test_verify_manifest_rejects_tampered_authorization(
+    git_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tamper: str,
+) -> None:
+    manifest = create_passed_manifest(git_repo, monkeypatch)
+    payload = json.loads(manifest.read_text(encoding="utf-8"))
+    if tamper == "payload-branch":
+        payload["branch"] = "codex/other-task"
+    elif tamper == "schema-version-type":
+        payload["schemaVersion"] = True
+    elif tamper == "worktree":
+        payload["worktree"] = str(git_repo / "other-worktree")
+    elif tamper == "changed-files":
+        payload["changedFiles"] = ["other.md"]
+    elif tamper.startswith("check-"):
+        check_name = {
+            "check-worktree-clean": "worktreeClean",
+            "check-claim-valid": "claimValid",
+            "check-merge-preflight": "mergePreflight",
+            "check-commands-allowlisted": "commandsAllowlisted",
+        }[tamper]
+        payload["checks"][check_name] = False
+    elif tamper == "command-status":
+        payload["commands"][0]["status"] = "failed"
+    elif tamper == "command-exit-code":
+        payload["commands"][0]["exitCode"] = 1
+    elif tamper == "command-argv":
+        payload["commands"][0]["argv"] = "git diff --check"
+    elif tamper == "command-cwd":
+        payload["commands"][0]["cwd"] = 7
+    elif tamper == "command-kind":
+        payload["commands"][0]["kind"] = "unsupported"
+    elif tamper == "command-kind-type":
+        payload["commands"][0]["kind"] = ["diff-check"]
+    manifest.write_text(json.dumps(payload), encoding="utf-8")
+
+    result = gate.verify_manifest(manifest, git_repo, "main")
+
+    assert result.outcome == "failed"
+
+
+def test_verify_manifest_rejects_empty_commands(
+    git_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manifest = create_recorded_contract_manifest(git_repo, monkeypatch)
+    payload = json.loads(manifest.read_text(encoding="utf-8"))
+    payload["commands"] = []
+    manifest.write_text(json.dumps(payload), encoding="utf-8")
+
+    result = gate.verify_manifest(manifest, git_repo, "main")
+
+    assert result.outcome == "failed"
+
+
+def test_verify_manifest_rejects_missing_expected_command(
+    git_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manifest = create_recorded_contract_manifest(git_repo, monkeypatch)
+    payload = json.loads(manifest.read_text(encoding="utf-8"))
+    assert len(payload["commands"]) > 1
+    del payload["commands"][1]
+    manifest.write_text(json.dumps(payload), encoding="utf-8")
+
+    result = gate.verify_manifest(manifest, git_repo, "main")
+
+    assert result.outcome == "failed"
+
+
+@pytest.mark.parametrize("field", ["argv", "cwd"])
+def test_verify_manifest_rejects_changed_command_contract(
+    git_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    field: str,
+) -> None:
+    manifest = create_recorded_contract_manifest(git_repo, monkeypatch)
+    payload = json.loads(manifest.read_text(encoding="utf-8"))
+    if field == "argv":
+        payload["commands"][0]["argv"][-1] = "other.py"
+    else:
+        payload["commands"][0]["cwd"] = str(git_repo / "other")
+    manifest.write_text(json.dumps(payload), encoding="utf-8")
+
+    result = gate.verify_manifest(manifest, git_repo, "main")
+
+    assert result.outcome == "failed"
+
+
+def test_verify_manifest_rejects_task_id_that_does_not_match_branch(
+    git_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manifest = create_recorded_contract_manifest(git_repo, monkeypatch)
+    payload = json.loads(manifest.read_text(encoding="utf-8"))
+    payload["taskId"] = "other-task"
+    manifest.write_text(json.dumps(payload), encoding="utf-8")
+
+    result = gate.verify_manifest(manifest, git_repo, "main")
+
+    assert result.outcome == "failed"
+
+
+def test_verify_manifest_rejects_non_ancestor_validated_main(
+    git_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    git(git_repo, "branch", "-M", "main")
+    commit_file(git_repo, ".gitignore", ".runtime/\n", "ignore gate runtime")
+    git(git_repo, "switch", "-c", "codex/test-task")
+    commit_file(git_repo, "README.md", "task\n", "task change")
+    head_sha = git(git_repo, "rev-parse", "HEAD").stdout.strip()
+    git(git_repo, "switch", "main")
+    commit_file(git_repo, "main.txt", "main\n", "main change")
+    validated_main_sha = git(git_repo, "rev-parse", "HEAD").stdout.strip()
+    git(git_repo, "switch", "codex/test-task")
+    monkeypatch.setattr(
+        gate,
+        "read_guard_status",
+        lambda root: active_claim("claim-test", ["README.md"]),
+    )
+    payload = gate.manifest_payload(
+        task_id="test-task",
+        branch="codex/test-task",
+        root=git_repo.resolve(),
+        claim_id="claim-test",
+        validated_main_sha=validated_main_sha,
+        head_sha=head_sha,
+        files=["README.md"],
+        commands=[
+            gate.ProcessResult(
+                kind="diff-check",
+                argv=["git", "diff", "--check"],
+                cwd=str(git_repo.resolve()),
+                exit_code=0,
+                duration_ms=1,
+                status="passed",
+            )
+        ],
+        checks={
+            "worktreeClean": True,
+            "claimValid": True,
+            "mergePreflight": True,
+            "commandsAllowlisted": True,
+        },
+        outcome="passed",
+    )
+    manifest = gate.write_manifest(git_repo, "test-task", payload)
+
+    result = gate.verify_manifest(manifest, git_repo, "main")
+
+    assert result.outcome == "stale_main"
+
+
 def test_closeout_detects_main_moving_during_commands(
     git_repo: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -469,7 +794,7 @@ def test_closeout_detects_main_moving_during_commands(
     assert manifest["outcome"] == "stale_main"
 
 
-def test_closeout_reports_merge_conflict(
+def test_closeout_prioritizes_stale_main_over_merge_conflict(
     git_repo: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -498,32 +823,66 @@ def test_closeout_reports_merge_conflict(
 
     assert result.manifest_path is not None
     manifest = json.loads(result.manifest_path.read_text(encoding="utf-8"))
-    assert result.outcome == "merge_conflict"
-    assert manifest["outcome"] == "merge_conflict"
+    assert result.outcome == "stale_main"
+    assert manifest["outcome"] == "stale_main"
 
 
-def test_closeout_reports_stale_main_when_main_moves_during_conflicting_preflight(
+def test_closeout_rejects_clean_diverged_history_even_when_merge_tree_passes(
     git_repo: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    conflict = git_repo / "conflict.txt"
-    conflict.write_text("base\n", encoding="utf-8")
-    git(git_repo, "add", "conflict.txt")
-    git(git_repo, "commit", "-m", "add conflict base")
     git(git_repo, "branch", "-M", "main")
     git(git_repo, "switch", "-c", "codex/test-task")
-    commit_file(git_repo, "conflict.txt", "task\n", "task side")
+    commit_file(git_repo, "task.txt", "task\n", "task change")
     git(git_repo, "switch", "main")
-    commit_file(git_repo, "conflict.txt", "main\n", "main side")
-    validated_main_sha = git(git_repo, "rev-parse", "HEAD").stdout.strip()
+    commit_file(git_repo, "main.txt", "main\n", "main change")
+    git(git_repo, "switch", "codex/test-task")
+    monkeypatch.setattr(
+        gate,
+        "read_guard_status",
+        lambda root: active_claim("claim-test", ["task.txt"]),
+    )
+    monkeypatch.setattr(
+        gate,
+        "selected_validation",
+        lambda changed: {"commands": ["git diff --check"]},
+    )
+    merge_tree = git(
+        git_repo,
+        "merge-tree",
+        "--write-tree",
+        "main",
+        "HEAD",
+        check=False,
+    )
+    assert merge_tree.returncode == 0
+
+    result = gate.run_closeout(git_repo, "main", "claim-test")
+
+    assert result.outcome == "stale_main"
+    assert result.manifest_path is not None
+    manifest = json.loads(result.manifest_path.read_text(encoding="utf-8"))
+    assert manifest["outcome"] == "stale_main"
+    assert manifest["checks"]["mergePreflight"] is False
+
+
+def test_closeout_reports_stale_main_when_main_moves_during_merge_tree_preflight(
+    git_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    git(git_repo, "branch", "-M", "main")
+    git(git_repo, "switch", "-c", "codex/test-task")
+    commit_file(git_repo, "task.txt", "task\n", "task side")
+    validated_main_sha = git(git_repo, "rev-parse", "main").stdout.strip()
+    git(git_repo, "switch", "main")
     git(git_repo, "switch", "-c", "future-main")
-    commit_file(git_repo, "conflict.txt", "future main\n", "move main")
+    commit_file(git_repo, "main.txt", "future main\n", "move main")
     future_main_sha = git(git_repo, "rev-parse", "HEAD").stdout.strip()
     git(git_repo, "switch", "codex/test-task")
     monkeypatch.setattr(
         gate,
         "read_guard_status",
-        lambda root: active_claim("claim-test", ["conflict.txt"]),
+        lambda root: active_claim("claim-test", ["task.txt"]),
     )
     monkeypatch.setattr(
         gate,
@@ -551,6 +910,54 @@ def test_closeout_reports_stale_main_when_main_moves_during_conflicting_prefligh
     assert result.manifest_path is not None
     manifest = json.loads(result.manifest_path.read_text(encoding="utf-8"))
     assert merge_bases == [validated_main_sha]
+    assert result.outcome == "stale_main"
+    assert manifest["outcome"] == "stale_main"
+
+
+def test_closeout_reports_stale_main_when_main_moves_during_ancestry_preflight(
+    git_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    git(git_repo, "branch", "-M", "main")
+    git(git_repo, "switch", "-c", "codex/test-task")
+    commit_file(git_repo, "task.txt", "task\n", "task side")
+    validated_main_sha = git(git_repo, "rev-parse", "main").stdout.strip()
+    git(git_repo, "switch", "main")
+    git(git_repo, "switch", "-c", "future-main")
+    commit_file(git_repo, "main.txt", "future main\n", "move main")
+    future_main_sha = git(git_repo, "rev-parse", "HEAD").stdout.strip()
+    git(git_repo, "switch", "codex/test-task")
+    monkeypatch.setattr(
+        gate,
+        "read_guard_status",
+        lambda root: active_claim("claim-test", ["task.txt"]),
+    )
+    monkeypatch.setattr(
+        gate,
+        "selected_validation",
+        lambda changed: {"commands": ["git diff --check"]},
+    )
+    original_run_process = gate.run_process
+    ancestry_bases: list[str] = []
+
+    def run_process_and_move_main(
+        argv: list[str],
+        cwd: Path,
+        *,
+        input_text: str | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        if argv[:3] == ["git", "merge-base", "--is-ancestor"]:
+            ancestry_bases.append(argv[3])
+            git(git_repo, "update-ref", "refs/heads/main", future_main_sha)
+        return original_run_process(argv, cwd, input_text=input_text)
+
+    monkeypatch.setattr(gate, "run_process", run_process_and_move_main)
+
+    result = gate.run_closeout(git_repo, "main", "claim-test")
+
+    assert result.manifest_path is not None
+    manifest = json.loads(result.manifest_path.read_text(encoding="utf-8"))
+    assert ancestry_bases == [validated_main_sha]
     assert result.outcome == "stale_main"
     assert manifest["outcome"] == "stale_main"
 
@@ -640,9 +1047,23 @@ def test_closeout_appends_gate_self_tests_when_gate_definition_changes(
     ]
 
 
-def test_manifest_payload_bounds_failure_summary_to_first_300_characters(
+def test_manifest_payload_redacts_and_bounds_failure_summary_before_persistence(
     git_repo: Path,
 ) -> None:
+    fake_secrets = [
+        "bearer-secret-value",
+        "fake-api-key-value",
+        "url-password-value",
+        "sk-test-abcdefghijklmnopqrstuvwxyz012345",
+    ]
+    failure_summary = (
+        "pytest: Authorization: Bearer bearer-secret-value; "
+        "api_key=fake-api-key-value; "
+        "https://user:url-password-value@example.com; "
+        "sk-test-abcdefghijklmnopqrstuvwxyz012345; "
+        + "x" * 400
+        + "\nsecret second line"
+    )
     payload = gate.manifest_payload(
         task_id="test-task",
         branch="codex/test-task",
@@ -659,7 +1080,7 @@ def test_manifest_payload_bounds_failure_summary_to_first_300_characters(
                 exit_code=1,
                 duration_ms=1,
                 status="failed",
-                failure_summary="x" * 400 + "\nsecret second line",
+                failure_summary=failure_summary,
             )
         ],
         checks={
@@ -670,5 +1091,12 @@ def test_manifest_payload_bounds_failure_summary_to_first_300_characters(
         },
         outcome="failed",
     )
+    manifest_path = gate.write_manifest(git_repo, "test-task", payload)
+    persisted = json.loads(manifest_path.read_text(encoding="utf-8"))
+    persisted_summary = persisted["commands"][0]["failureSummary"]
 
-    assert payload["commands"][0]["failureSummary"] == "x" * 300
+    assert persisted_summary.startswith("pytest:")
+    assert "[REDACTED]" in persisted_summary
+    assert all(secret not in persisted_summary for secret in fake_secrets)
+    assert "\n" not in persisted_summary
+    assert len(persisted_summary) <= 300

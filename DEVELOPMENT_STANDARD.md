@@ -569,7 +569,7 @@ After implementation and validation in a task worktree, the owning Agent should 
 
 - the claim belongs to the current Agent/session and covers the changed files;
 - the task branch is committed and contains only current-task changes;
-- `local_quality_gate.py closeout` passed in the task worktree, and `verify-manifest` still confirms the recorded local `main` SHA and task HEAD SHA;
+- `local_quality_gate.py closeout` passed in the task worktree, and `verify-manifest` still confirms branch/worktree/HEAD/changed files, an active covering claim, clean state, checks/commands, and that the recorded local `main` SHA is still current and an ancestor of task HEAD;
 - selector-selected validation and merge preflight passed;
 - root local `main` is clean and has not moved since the manifest was created;
 - the task branch can enter local `main` with `git merge --ff-only <task-branch>`;
