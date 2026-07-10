@@ -19860,7 +19860,7 @@ def _source_collection_stage_session_task_message(
             "- 如果任一检查项无法完成，不要自然语言声称完成；调用 `source_collection_stage_writeback_tool` 写入 blocked/failed/needs_review 和失败原因。",
             "",
             "## 执行要求",
-            "- 先用一句简短状态回应已接收任务，再按需要调用工具；不要让用户看到像未启动一样的空白等待。",
+            "- 在输出任何可见文字前，第一动作必须是 `task_list_tool`；随后调用 `task_create_tool` 绑定 checklist。不要先输出“已接收”、计划或等待说明来替代工具执行。",
             f"- 先调用 `source_collection_context_tool` 读取本轮受控资料上下文，参数如下：`{context_tool_json}`。",
             "- 资料寻找阶段的新资料首选写入 `candidateLeads[]`；兼容字段只用于历史回写，不要把自然语言表格当作唯一结果。",
             "- 资料寻找阶段的无效来源写入 `invalidSources[]`，每条包含 title/sourceRef 或 DOI/url、reason，系统会记录并从后续流程过滤。",
