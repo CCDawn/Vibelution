@@ -1,15 +1,18 @@
 import { describe, expect, it } from "vitest";
 
 import styles from "./ChatCodingRoute.styles";
+import tokenCoreStatusPanelSource from "./chat/TokenCoreStatusPanel.tsx?raw";
 
 describe("ChatCodingRoute left status panel layout contract", () => {
-  it("uses a readable solid panel surface instead of letting the scene image dominate text", () => {
-    expect(styles.leftBlock).toContain("!bg-[var(--vui-surface-rail)]");
-    expect(styles.leftBlock).toContain("border-[color-mix(in_srgb,var(--vui-border-strong)_66%,transparent)]");
-    expect(styles.leftBlock).not.toContain("var(--vui-surface-glass)_58%,transparent");
-    expect(styles.leftBlock).not.toContain("var(--vui-surface-panel)");
-    expect(styles.leftBlock).not.toContain("white)");
-    expect(styles.leftBlock).not.toContain("backdrop-blur");
+  it("uses one raised status rail with flat separator-based groups", () => {
+    expect(styles.leftRail).toContain("rounded-[var(--vui-radius-panel-soft)]");
+    expect(styles.leftRail).toContain("bg-[var(--vui-surface-rail)]");
+    expect(styles.leftRail).toContain("shadow-[var(--vui-elevation-panel)]");
+    expect(styles.leftBlock).toContain("border-b");
+    expect(styles.leftBlock).toContain("bg-transparent");
+    expect(styles.leftBlock).toContain("shadow-none");
+    expect(styles.leftBlock).not.toContain("rounded-[var(--radius-panel)]");
+    expect(styles.leftBlock).not.toContain("!bg-[var(--vui-surface-rail)]");
   });
 
   it("keeps card headers on stable title and badge columns", () => {
@@ -22,15 +25,18 @@ describe("ChatCodingRoute left status panel layout contract", () => {
     expect(styles.sectionMetaLine).not.toContain("truncate");
   });
 
-  it("does not truncate critical current session, skill, token, or companion copy", () => {
+  it("keeps critical copy visible and moves token detail to accessible tooltip triggers", () => {
     expect(styles.currentSessionLine).toContain("whitespace-normal");
     expect(styles.currentSessionLine).toContain("[overflow-wrap:anywhere]");
     expect(styles.activeSkillStatus).toContain("grid-cols-[minmax(0,1fr)]");
     expect(styles.activeSkillIdentity).toContain("[&_strong]:whitespace-normal");
     expect(styles.activeSkillMeta).toContain("[&_span]:whitespace-normal");
-    expect(styles.tokenStatusMeta).toContain("whitespace-normal");
-    expect(styles.tokenStatusMeta).toContain("[overflow-wrap:anywhere]");
+    expect(styles.tokenStatusMeta).toContain("sr-only");
     expect(styles.tokenStatusMeta).not.toContain("line-clamp");
+    expect(tokenCoreStatusPanelSource).toContain("VTooltip");
+    expect(tokenCoreStatusPanelSource).toContain("renderTrigger");
+    expect(tokenCoreStatusPanelSource).toContain("aria-label={cacheDetailOpenLabel}");
+    expect(tokenCoreStatusPanelSource).toContain('aria-label={`${metric.label} ${metric.value}. ${metric.meta}`}');
     expect(styles.companionCopy).toContain("[&>p]:whitespace-normal");
     expect(styles.companionTopLine).toContain("[&_strong]:whitespace-normal");
     expect(styles.companionTopLine).toContain("[&_span]:whitespace-normal");

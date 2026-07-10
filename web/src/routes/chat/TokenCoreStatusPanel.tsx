@@ -1,6 +1,6 @@
 import { useId, type CSSProperties } from "react";
 
-import { VButton } from "../../components/vui";
+import { VButton, VTooltip, type VButtonProps } from "../../components/vui";
 import styles from "../ChatCodingRoute.styles";
 
 export type TokenCoreStatusMetric = {
@@ -66,10 +66,7 @@ export function TokenCoreStatusPanel({
   return (
     <section className={`${styles.leftBlock} ${styles.tokenCompressionCard}`} aria-labelledby={titleId}>
       <div className={styles.sectionHeader}>
-        <div className={styles.sectionIdentity}>
-          <p className={styles.blockEyebrow}>Token</p>
-          <h3 id={titleId} className={styles.sectionTitle}>{lang === "zh" ? "核心状态" : "Core status"}</h3>
-        </div>
+        <h3 id={titleId} className={styles.sectionTitle}>Token</h3>
       </div>
       <div className={styles.tokenStatusVisualGrid} role="list" aria-label={lang === "zh" ? "Token 核心状态" : "Token core status"}>
         {metrics.map((metric) => {
@@ -94,34 +91,68 @@ export function TokenCoreStatusPanel({
 
           if (metric.key === "cache") {
             return (
-              <div key={metric.key} className={metricClassName} style={metricStyle} title={metric.title} role="listitem">
-                <VButton
-                  type="button"
-                  className={styles.tokenStatusMetricButton}
-                  isDisabled={!cacheDetailAvailable}
-                  onClick={cacheDetailAvailable ? onOpenCacheDetail : undefined}
-                  aria-disabled={!cacheDetailAvailable}
-                  aria-label={cacheDetailOpenLabel}
-                  aria-expanded={cacheDetailAvailable ? cacheDetailOpen : undefined}
-                  aria-controls={cacheDetailAvailable ? "cache-detail-dialog" : undefined}
-                  title={metric.title}
+              <div key={metric.key} className={metricClassName} style={metricStyle} role="listitem">
+                <VTooltip
+                  content={metric.title}
+                  renderTrigger={(tooltipTriggerProps) => {
+                    const {
+                      children: _triggerChildren,
+                      className: triggerClassName,
+                      role: _triggerRole,
+                      tabIndex: _triggerTabIndex,
+                      ...triggerProps
+                    } = tooltipTriggerProps;
+
+                    return (
+                      <VButton
+                        {...(triggerProps as unknown as VButtonProps)}
+                        type="button"
+                        className={[triggerClassName, styles.tokenStatusMetricButton].filter(Boolean).join(" ")}
+                        isDisabled={!cacheDetailAvailable}
+                        onClick={cacheDetailAvailable ? onOpenCacheDetail : undefined}
+                        aria-disabled={!cacheDetailAvailable}
+                        aria-label={cacheDetailOpenLabel}
+                        aria-expanded={cacheDetailAvailable ? cacheDetailOpen : undefined}
+                        aria-controls={cacheDetailAvailable ? "cache-detail-dialog" : undefined}
+                      >
+                        {metricContent}
+                      </VButton>
+                    );
+                  }}
                 >
                   {metricContent}
-                </VButton>
+                </VTooltip>
               </div>
             );
           }
 
           return (
-            <div
-              key={metric.key}
-              className={metricClassName}
-              style={metricStyle}
-              title={metric.title}
-              aria-label={`${metric.label} ${metric.value}. ${metric.meta}`}
-              role="listitem"
-            >
-              {metricContent}
+            <div key={metric.key} className={metricClassName} style={metricStyle} role="listitem">
+              <VTooltip
+                content={metric.title}
+                renderTrigger={(tooltipTriggerProps) => {
+                  const {
+                    children: _triggerChildren,
+                    className: triggerClassName,
+                    role: _triggerRole,
+                    tabIndex: _triggerTabIndex,
+                    ...triggerProps
+                  } = tooltipTriggerProps;
+
+                  return (
+                    <VButton
+                      {...(triggerProps as unknown as VButtonProps)}
+                      type="button"
+                      className={[triggerClassName, styles.tokenStatusMetricButton].filter(Boolean).join(" ")}
+                      aria-label={`${metric.label} ${metric.value}. ${metric.meta}`}
+                    >
+                      {metricContent}
+                    </VButton>
+                  );
+                }}
+              >
+                {metricContent}
+              </VTooltip>
             </div>
           );
         })}

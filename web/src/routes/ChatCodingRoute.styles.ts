@@ -127,7 +127,7 @@ const styles: Record<string, string> = {
   agentSessionTabTitleInput:
     "vui-routes-chatcodingroute agentSessionTabTitleInput min-w-0 grid gap-1 text-[var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full text-[var(--vui-font-title)] font-semibold leading-tight text-[var(--fg-primary)] border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
   blockEyebrow:
-    "vui-routes-chatcodingroute blockEyebrow min-w-0 text-[var(--vui-font-sm)] font-semibold leading-tight text-[var(--fg-secondary)]",
+    "vui-routes-chatcodingroute blockEyebrow min-w-0 text-[var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-tertiary)]",
   cacheDetailBody:
     "vui-routes-chatcodingroute cacheDetailBody min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] max-h-[min(620px,calc(100dvh_-_238px))] overflow-auto [scrollbar-gutter:stable]",
   cacheDetailBoundary:
@@ -486,17 +486,10 @@ layout:
     "vui-routes-chatcodingroute layout min-w-0 grid !gap-0 !p-0 [--chat-workbench-gap:4px] [--chat-pane-gutter:1px] h-[calc(100dvh_-_var(--shell-topbar-height))] max-h-[calc(100dvh_-_var(--shell-topbar-height))] overflow-hidden grid-cols-[var(--chat-left-pane-width,300px)_var(--chat-pane-gutter)_minmax(0,1fr)_var(--chat-pane-gutter)_var(--chat-right-pane-width,220px)] max-[1100px]:grid-cols-[var(--chat-left-pane-width,300px)_var(--chat-pane-gutter)_minmax(0,1fr)_var(--chat-pane-gutter)_var(--chat-right-pane-width,220px)]",
   layoutCompactDesktop:
     "vui-routes-chatcodingroute layoutCompactDesktop min-w-0 !gap-0 !p-0 !grid-cols-[var(--chat-left-pane-width,300px)_var(--chat-pane-gutter)_minmax(520px,1fr)_var(--chat-pane-gutter)_minmax(0,var(--chat-right-pane-width,0px))] max-[980px]:!grid-cols-[minmax(260px,var(--chat-left-pane-width,300px))_var(--chat-pane-gutter)_minmax(420px,1fr)_var(--chat-pane-gutter)_minmax(0,var(--chat-right-pane-width,0px))]",
-  leftBlock:    "vui-routes-chatcodingroute leftBlock min-w-0 grid shrink-0 gap-1.5 rounded-[var(--radius-panel)] border border-[color-mix(in_srgb,var(--vui-border-strong)_66%,transparent)] !bg-[var(--vui-surface-rail)] p-1.5 shadow-none",
-  llmPayloadTraceGrid:
-    "vui-routes-chatcodingroute llmPayloadTraceGrid grid min-w-0 grid-cols-2 gap-2",
-  llmPayloadTraceItem:
-    "vui-routes-chatcodingroute llmPayloadTraceItem grid min-w-0 gap-0.5 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--vui-border-subtle)_76%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-row)_46%,transparent)] px-2 py-1 text-[var(--vui-font-xs)] leading-tight [&_strong]:min-w-0 [&_strong]:truncate [&_strong]:font-semibold [&_strong]:text-[var(--fg-primary)]",
-  llmPayloadTraceMuted:
-    "vui-routes-chatcodingroute llmPayloadTraceMuted min-w-0 truncate text-[var(--fg-tertiary)]",
-  llmPayloadTracePanel:
-    "vui-routes-chatcodingroute llmPayloadTracePanel min-w-0",
+  leftBlock:
+    "vui-routes-chatcodingroute leftBlock grid min-w-0 shrink-0 gap-1.5 border-0 border-b border-[var(--vui-border-subtle)] bg-transparent p-2 shadow-none last:border-b-0",
   leftRail:
-    "vui-routes-chatcodingroute leftRail min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto !flex h-full min-h-0 !flex-col gap-[var(--chat-workbench-gap)] overflow-auto p-[var(--chat-workbench-gap)] [scrollbar-gutter:stable] [grid-column:5] [grid-row:1]",
+    "vui-routes-chatcodingroute leftRail min-w-0 !flex h-full min-h-0 !flex-col overflow-auto rounded-[var(--vui-radius-panel-soft)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-rail)] p-1 shadow-[var(--vui-elevation-panel)] [scrollbar-gutter:stable] [grid-column:5] [grid-row:1]",
   memberIndexSummary:
     "vui-routes-chatcodingroute memberIndexSummary min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 !grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-1.5",
   mentalStateBadge:
