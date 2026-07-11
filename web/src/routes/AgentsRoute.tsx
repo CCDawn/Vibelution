@@ -223,6 +223,27 @@ export function resolveAgentWorkspaceSource<T>({
   return fullWorkspaceNeeded && full ? full : summary ?? full;
 }
 
+export function resolveAgentWorkspaceQueryState({
+  hasSummary,
+  hasFull,
+  fullWorkspaceNeeded,
+  summaryError,
+  fullError,
+}: {
+  hasSummary: boolean;
+  hasFull: boolean;
+  fullWorkspaceNeeded: boolean;
+  summaryError: boolean;
+  fullError: boolean;
+}) {
+  const hasWorkspace = hasSummary || hasFull;
+  const requiredFullError = fullWorkspaceNeeded && fullError;
+  const initialError = !hasWorkspace && summaryError && (!fullWorkspaceNeeded || fullError);
+  const backgroundError = hasWorkspace && (requiredFullError || (!fullWorkspaceNeeded && summaryError));
+  const errorOwner = requiredFullError ? "full" : summaryError ? "summary" : null;
+  return { hasWorkspace, initialError, backgroundError, errorOwner } as const;
+}
+
 export function agentSummaryMetricValue(
   presentation: ReturnType<typeof deriveQueryPresentation>,
   value: number | undefined,
@@ -3612,19 +3633,21 @@ export function AgentsRoute() {
     full: workspaceQuery.data,
     fullWorkspaceNeeded,
   });
-  const hasAgentWorkspace = Boolean(workspace);
+  const workspaceQueryState = resolveAgentWorkspaceQueryState({
+    hasSummary: Boolean(lightweightWorkspace),
+    hasFull: Boolean(workspaceQuery.data),
+    fullWorkspaceNeeded,
+    summaryError: agentSummaryQuery.isError,
+    fullError: workspaceQuery.isError,
+  });
+  const hasAgentWorkspace = workspaceQueryState.hasWorkspace;
   const agentWorkspaceInitialLoading = !hasAgentWorkspace && (
     agentSummaryQuery.isPending
     || (fullWorkspaceNeeded && workspaceQuery.isPending)
   );
-  const agentWorkspaceInitialError = !hasAgentWorkspace
-    && agentSummaryQuery.isError
-    && (!fullWorkspaceNeeded || workspaceQuery.isError);
-  const fullWorkspaceOwnsPresentation = Boolean(fullWorkspaceNeeded && workspaceQuery.data);
-  const agentWorkspaceBackgroundError = hasAgentWorkspace && (
-    fullWorkspaceOwnsPresentation ? workspaceQuery.isError : agentSummaryQuery.isError
-  );
-  const agentWorkspaceError = fullWorkspaceOwnsPresentation
+  const agentWorkspaceInitialError = workspaceQueryState.initialError;
+  const agentWorkspaceBackgroundError = workspaceQueryState.backgroundError;
+  const agentWorkspaceError = workspaceQueryState.errorOwner === "full"
     ? workspaceQuery.error
     : agentSummaryQuery.error ?? workspaceQuery.error;
   const agentSummaryPresentation = deriveQueryPresentation({
@@ -3933,6 +3956,9 @@ export function AgentsRoute() {
       appliedRouteTargetRef.current = "";
       return;
     }
+    if (requestedAgentId && !workspaceQuery.data) {
+      return;
+    }
     if (!workspace || appliedRouteTargetRef.current === routeTargetKey) {
       return;
     }
@@ -3953,7 +3979,7 @@ export function AgentsRoute() {
     setSelectedBulkAgentIds(new Set());
     setBulkSelectionAnchorAgentId(targetAgent.agentId);
     appliedRouteTargetRef.current = routeTargetKey;
-  }, [lang, requestedAgentId, requestedPane, workspace]);
+  }, [lang, requestedAgentId, requestedPane, workspace, workspaceQuery.data]);
 
   useEffect(() => {
     setBulkConfigDraft(bulkConfigDraftFromAgents(selectedBulkAgents));
