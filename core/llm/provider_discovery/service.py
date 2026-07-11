@@ -21,7 +21,7 @@ from config.model_catalog import (
 from config.paths import resolve_model_catalog_state_path
 
 from .adapters import get_provider_discovery_adapter
-from .types import ProviderDiscoveryRequest, ProviderDiscoveryResult
+from .types import ProviderDiscoveryRequest, ProviderDiscoveryResult, assert_no_credential_taint
 
 
 def _utcnow_iso() -> str:
@@ -74,6 +74,7 @@ def discover_provider_models(
     attempted_at = _utcnow_iso()
     try:
         result = _filter_models(adapter.discover(request), discovery)
+        assert_no_credential_taint(dataclasses.asdict(result), credential)
         if adapter_id == "manual":
             return result
         if not result.models:

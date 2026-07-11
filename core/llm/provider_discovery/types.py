@@ -39,9 +39,31 @@ class ProviderDiscoveryAdapter(Protocol):
     def discover(self, request: ProviderDiscoveryRequest) -> ProviderDiscoveryResult: ...
 
 
+def assert_no_credential_taint(value: Any, credential: str) -> None:
+    """Fail closed when provider-controlled data contains the active credential."""
+
+    secret = str(credential or "")
+    if not secret:
+        return
+    pending = [value]
+    while pending:
+        current = pending.pop()
+        if isinstance(current, str):
+            if secret in current:
+                raise ValueError("provider discovery response contains credential material")
+            continue
+        if isinstance(current, dict):
+            pending.extend(current.keys())
+            pending.extend(current.values())
+            continue
+        if isinstance(current, (list, tuple, set, frozenset)):
+            pending.extend(current)
+
+
 __all__ = [
     "DiscoveredProviderModel",
     "ProviderDiscoveryAdapter",
     "ProviderDiscoveryRequest",
     "ProviderDiscoveryResult",
+    "assert_no_credential_taint",
 ]
