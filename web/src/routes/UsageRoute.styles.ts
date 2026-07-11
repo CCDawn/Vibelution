@@ -19,11 +19,11 @@ const styles = {
   overviewBand:
     `grid min-w-0 max-w-full grid-cols-[minmax(220px,0.58fr)_minmax(0,1.42fr)] gap-1.5 px-3 pt-2 max-[820px]:grid-cols-1 max-[520px]:px-2`,
   heroMetric:
-    `grid min-w-0 max-w-full gap-1 ${panelSurface} px-2.5 py-2 text-left [&_span]:min-w-0 [&_span]:overflow-hidden [&_span]:text-ellipsis [&_span]:whitespace-nowrap [&_span]:text-[var(--vui-font-xs)] [&_span]:uppercase [&_span]:tracking-[0.04em] [&_span]:text-vui-fg-tertiary [&_strong]:min-w-0 [&_strong]:overflow-hidden [&_strong]:text-ellipsis [&_strong]:whitespace-nowrap [&_strong]:text-[1.18rem] [&_strong]:leading-none [&_strong]:text-vui-fg-primary [&_small]:min-w-0 [&_small]:overflow-hidden [&_small]:text-ellipsis [&_small]:whitespace-nowrap [&_small]:text-[var(--vui-font-xs)] [&_small]:text-vui-fg-secondary`,
+    `grid min-h-[76px] min-w-0 max-w-full gap-1 ${panelSurface} px-2.5 py-2 text-left [&_span]:min-w-0 [&_span]:overflow-hidden [&_span]:text-ellipsis [&_span]:whitespace-nowrap [&_span]:text-[var(--vui-font-xs)] [&_span]:uppercase [&_span]:tracking-[0.04em] [&_span]:text-vui-fg-tertiary [&_strong]:min-w-0 [&_strong]:overflow-hidden [&_strong]:text-ellipsis [&_strong]:whitespace-nowrap [&_strong]:text-[1.18rem] [&_strong]:leading-none [&_strong]:text-vui-fg-primary [&_small]:min-w-0 [&_small]:overflow-hidden [&_small]:text-ellipsis [&_small]:whitespace-nowrap [&_small]:text-[var(--vui-font-xs)] [&_small]:text-vui-fg-secondary`,
   overviewStats:
     "grid min-w-0 max-w-full grid-cols-[repeat(3,minmax(0,1fr))] gap-1.5 max-[700px]:grid-cols-1",
   overviewStat:
-    `grid min-w-0 max-w-full gap-0.5 ${panelSurface} px-2 py-1.5 text-left [&_span]:min-w-0 [&_span]:overflow-hidden [&_span]:text-ellipsis [&_span]:whitespace-nowrap [&_span]:text-[var(--vui-font-xs)] [&_span]:uppercase [&_span]:tracking-[0.04em] [&_span]:text-vui-fg-tertiary [&_strong]:min-w-0 [&_strong]:overflow-hidden [&_strong]:text-ellipsis [&_strong]:whitespace-nowrap [&_strong]:text-[0.96rem] [&_strong]:leading-tight [&_strong]:text-vui-fg-primary [&_small]:min-w-0 [&_small]:overflow-hidden [&_small]:text-ellipsis [&_small]:whitespace-nowrap [&_small]:text-[var(--vui-font-xs)] [&_small]:text-vui-fg-secondary`,
+    `grid min-h-[58px] min-w-0 max-w-full gap-0.5 ${panelSurface} px-2 py-1.5 text-left [&_span]:min-w-0 [&_span]:overflow-hidden [&_span]:text-ellipsis [&_span]:whitespace-nowrap [&_span]:text-[var(--vui-font-xs)] [&_span]:uppercase [&_span]:tracking-[0.04em] [&_span]:text-vui-fg-tertiary [&_strong]:min-w-0 [&_strong]:overflow-hidden [&_strong]:text-ellipsis [&_strong]:whitespace-nowrap [&_strong]:text-[0.96rem] [&_strong]:leading-tight [&_strong]:text-vui-fg-primary [&_small]:min-w-0 [&_small]:overflow-hidden [&_small]:text-ellipsis [&_small]:whitespace-nowrap [&_small]:text-[var(--vui-font-xs)] [&_small]:text-vui-fg-secondary`,
   metricBand:
     "grid min-h-0 min-w-0 max-w-full grid-cols-[minmax(0,1fr)_minmax(280px,360px)] gap-1.5 overflow-hidden overflow-x-hidden p-[var(--route-workspace-padding)] max-[980px]:grid-cols-[minmax(0,1fr)] max-[980px]:grid-rows-none max-[860px]:gap-2 max-[860px]:overflow-y-visible max-[860px]:overflow-x-hidden max-[520px]:px-2",
   primaryColumn:
@@ -43,7 +43,7 @@ const styles = {
   sourceGrid:
     "grid min-w-0 max-w-full grid-cols-[repeat(2,minmax(0,1fr))] gap-1 max-[520px]:grid-cols-1",
   sourceTile:
-    `grid min-w-0 max-w-full gap-0.5 ${rowSurface} px-2 py-1.5 [&_span]:min-w-0 [&_span]:overflow-hidden [&_span]:text-ellipsis [&_span]:whitespace-nowrap [&_span]:text-[var(--vui-font-xs)] [&_span]:text-vui-fg-tertiary [&_strong]:min-w-0 [&_strong]:overflow-hidden [&_strong]:text-ellipsis [&_strong]:whitespace-nowrap [&_strong]:text-[0.9rem] [&_strong]:leading-tight [&_strong]:text-vui-fg-primary`,
+    `grid min-h-[50px] min-w-0 max-w-full gap-0.5 ${rowSurface} px-2 py-1.5 [&_span]:min-w-0 [&_span]:overflow-hidden [&_span]:text-ellipsis [&_span]:whitespace-nowrap [&_span]:text-[var(--vui-font-xs)] [&_span]:text-vui-fg-tertiary [&_strong]:min-w-0 [&_strong]:overflow-hidden [&_strong]:text-ellipsis [&_strong]:whitespace-nowrap [&_strong]:text-[0.9rem] [&_strong]:leading-tight [&_strong]:text-vui-fg-primary`,
   sourceTileObserved:
     "border-[color-mix(in_srgb,var(--state-success)_30%,transparent)] bg-[color-mix(in_srgb,var(--state-success)_8%,var(--vui-surface-row))]",
   sourceTileEstimated:
