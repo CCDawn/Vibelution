@@ -1,7 +1,7 @@
 import { ExternalLink, RefreshCw } from "lucide-react";
 
 import { type HealthDiagnostics, type HealthFinding, type HealthQuickAction, type LogHelper, type SessionHelper } from "../api/types";
-import { VButton, VSection, VSurface } from "../components/vui";
+import { VButton, VSection } from "../components/vui";
 import styles from "./ConfigHealthDiagnosticsPanel.styles";
 
 export type ConfigLanguage = "zh" | "en";
@@ -128,11 +128,13 @@ export function ConfigHealthDiagnosticsPanel({
   const priorityFindings = findings.filter((finding) => finding.severity !== "info").slice(0, 4);
   const quickActions = diagnostics?.quickActions ?? [];
   return (
-    <VSurface as="section" id="config-health-diagnostics" className={styles.sectionSurface} padding="none">
-      <VSection
-        eyebrow={copy.healthTitle}
-        title={copy.healthTitle}
-        actions={
+    <VSection
+      id="config-health-diagnostics"
+      className={styles.sectionSurface}
+      headerClassName={styles.sectionHeader}
+      eyebrow={copy.healthTitle}
+      title={copy.healthTitle}
+      actions={
           <div className={styles.sectionHeaderActions}>
             {diagnostics ? (
               <span className={healthStatusClassName(diagnostics.status)}>
@@ -145,7 +147,7 @@ export function ConfigHealthDiagnosticsPanel({
             </VButton>
           </div>
         }
-      >
+    >
         <p className={styles.sectionText}>{copy.healthBody}</p>
         {loading && !diagnostics ? <p className={styles.helperText}>{copy.healthLoading}</p> : null}
         {diagnostics ? (
@@ -215,8 +217,7 @@ export function ConfigHealthDiagnosticsPanel({
         ) : !loading ? (
           <p className={styles.helperText}>{copy.healthEmpty}</p>
         ) : null}
-      </VSection>
-    </VSurface>
+    </VSection>
   );
 }
 

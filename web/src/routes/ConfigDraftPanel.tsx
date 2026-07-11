@@ -1,7 +1,7 @@
 import { Database, RefreshCw, RotateCcw } from "lucide-react";
 
 import { LazyJsonCodeMirror } from "../components/editor/LazyJsonCodeMirror";
-import { VButton, VSection, VSurface } from "../components/vui";
+import { VButton, VSection } from "../components/vui";
 import type { ConfigCopy } from "./ConfigRoute";
 import styles from "./ConfigDraftPanel.styles";
 
@@ -29,8 +29,14 @@ export function ConfigDraftPanel({
   onJsonTextChange,
 }: ConfigDraftPanelProps) {
   return (
-    <VSurface as="section" id="config-draft" className={styles.sectionSurface} padding="none">
-      <VSection eyebrow={eyebrow} title={copy.draftTitle} actions={<Database size={16} className={styles.sectionIcon} />}>
+    <VSection
+      id="config-draft"
+      className={styles.sectionSurface}
+      headerClassName={styles.sectionHeader}
+      eyebrow={eyebrow}
+      title={copy.draftTitle}
+      actions={<Database size={16} className={styles.sectionIcon} />}
+    >
         <p className={styles.sectionText}>{copy.draftBody}</p>
         <div className={styles.draftWorkbench}>
         <div className={styles.draftActionRail}>
@@ -54,7 +60,6 @@ export function ConfigDraftPanel({
           <LazyJsonCodeMirror value={jsonText} onChange={onJsonTextChange} />
         </div>
         </div>
-      </VSection>
-    </VSurface>
+    </VSection>
   );
 }

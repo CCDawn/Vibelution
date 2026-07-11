@@ -443,6 +443,26 @@ describe("ConfigRoute layout contract", () => {
     expect(extractedPanelStylesSource).not.toContain("[background:var(--vui-gradient-route-soft),var(--surface-panel)]");
   });
 
+  it("keeps Config section roots and status primitives in their direct layout slots", () => {
+    const affectedPanelSources = [
+      draftPanelSource,
+      overviewPanelSource,
+      runtimePanelSource,
+      healthDiagnosticsPanelSource,
+    ].join("\n");
+
+    expect(affectedPanelSources).not.toMatch(/<VSurface[\s\S]*?<VSection/);
+    expect(routeSource).not.toMatch(/<VSurface as="section" id="config-diagnostics"[\s\S]*?<VSection/);
+    expect(draftPanelSource).toContain("headerClassName={styles.sectionHeader}");
+    expect(overviewPanelSource).toContain("headerClassName={styles.sectionHeader}");
+    expect(runtimePanelSource).toContain("headerClassName={styles.sectionHeader}");
+    expect(healthDiagnosticsPanelSource).toContain("headerClassName={styles.sectionHeader}");
+    expect(routeSource).toContain("headerClassName={styles.sectionHeader}");
+    expect((routeSource.match(/<VRouteHeader\b/g) ?? []).length).toBe(1);
+    expect(routeSource).not.toMatch(/<VRouteHeader[\s\S]*?<VStatusStrip[\s\S]*?<\/VRouteHeader>/);
+    expect(styles.configStatusBand).toContain("[grid-template-columns:1fr]");
+  });
+
   it("routes Config controls through VUI primitives", () => {
     expect(routeSource).toContain('from "../components/vui"');
     expect(routeSource).toContain("VRouteHeader");
