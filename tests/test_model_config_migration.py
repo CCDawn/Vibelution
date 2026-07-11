@@ -252,6 +252,27 @@ def test_preview_preserves_local_artifact_as_wire_id_with_explicit_resolution(tm
     assert "weights.gguf" not in repr(preview)
 
 
+def test_preview_preserve_keeps_exact_legacy_artifact_string_with_surrounding_whitespace(tmp_path) -> None:
+    artifact_path = "  C:\\models\\private\\weights.gguf  "
+    legacy = legacy_config_with_models(
+        ("local_a", "http://127.0.0.1:8080/v1", "", artifact_path),
+    )
+    legacy["llm"]["model_library"]["local_a"]["provider"]["kind"] = "local"
+
+    preview = preview_v1_to_v2(
+        legacy,
+        project_root=tmp_path,
+        artifact_resolutions=[
+            {"modelId": "local_a", "decision": "preserve_upstream_id"},
+        ],
+    )
+
+    provider_id, model_key = preview.model_ref_map["local_a"].split("/", 1)
+    provider = preview.proposed_public_config["llm"]["providers"][provider_id]
+    assert provider["models"][model_key]["upstream_id"] == artifact_path
+    assert provider["deployment"]["artifact_path"] == artifact_path
+
+
 def test_preview_splits_deployment_artifact_from_explicit_wire_id(tmp_path) -> None:
     artifact_path = "/srv/models/private/weights.gguf"
     legacy = legacy_config_with_models(
@@ -282,6 +303,30 @@ def test_preview_splits_deployment_artifact_from_explicit_wire_id(tmp_path) -> N
     model = preview.proposed_public_config["llm"]["providers"][provider_id]["models"][model_key]
     assert model["upstream_id"] == "served-model-a"
     assert artifact_path not in json.dumps(model)
+
+
+def test_preview_split_accepts_namespace_slash_upstream_id(tmp_path) -> None:
+    legacy = legacy_config_with_models(
+        ("local_a", "http://127.0.0.1:8080/v1", "", r"C:\models\private.gguf"),
+    )
+    legacy["llm"]["model_library"]["local_a"]["provider"]["kind"] = "local"
+
+    preview = preview_v1_to_v2(
+        legacy,
+        project_root=tmp_path,
+        artifact_resolutions=[
+            {
+                "modelId": "local_a",
+                "decision": "split_deployment_artifact",
+                "upstreamId": "namespace/served-model-a",
+            },
+        ],
+    )
+
+    provider_id, model_key = preview.model_ref_map["local_a"].split("/", 1)
+    model = preview.proposed_public_config["llm"]["providers"][provider_id]["models"][model_key]
+    assert preview.status == "READY"
+    assert model["upstream_id"] == "namespace/served-model-a"
 
 
 def test_preview_blocks_multiple_artifact_paths_in_one_provider_group(tmp_path) -> None:
@@ -330,6 +375,22 @@ def test_preview_rejects_preserve_for_non_local_provider_without_path_disclosure
     assert "relay.gguf" not in str(exc_info.value)
 
 
+def test_preview_rejects_preserve_for_official_provider(tmp_path) -> None:
+    legacy = legacy_config_with_models(
+        ("official_a", "https://api.openai.example/v1", "OFFICIAL_KEY", r"C:\private\official.gguf"),
+    )
+    legacy["llm"]["model_library"]["official_a"]["provider"]["kind"] = "openai"
+
+    with pytest.raises(ValueError, match="requires a local provider"):
+        preview_v1_to_v2(
+            legacy,
+            project_root=tmp_path,
+            artifact_resolutions=[
+                {"modelId": "official_a", "decision": "preserve_upstream_id"},
+            ],
+        )
+
+
 @pytest.mark.parametrize(
     "artifact_resolutions, error",
     [
@@ -339,6 +400,46 @@ def test_preview_rejects_preserve_for_non_local_provider_without_path_disclosure
                     "modelId": "local_a",
                     "decision": "split_deployment_artifact",
                     "upstreamId": r"D:\served\model.gguf",
+                }
+            ],
+            "must not be an artifact path",
+        ),
+        (
+            [
+                {
+                    "modelId": "local_a",
+                    "decision": "split_deployment_artifact",
+                    "upstreamId": "./served-model",
+                }
+            ],
+            "must not be an artifact path",
+        ),
+        (
+            [
+                {
+                    "modelId": "local_a",
+                    "decision": "split_deployment_artifact",
+                    "upstreamId": "../served-model",
+                }
+            ],
+            "must not be an artifact path",
+        ),
+        (
+            [
+                {
+                    "modelId": "local_a",
+                    "decision": "split_deployment_artifact",
+                    "upstreamId": r".\served-model",
+                }
+            ],
+            "must not be an artifact path",
+        ),
+        (
+            [
+                {
+                    "modelId": "local_a",
+                    "decision": "split_deployment_artifact",
+                    "upstreamId": r"..\served-model",
                 }
             ],
             "must not be an artifact path",
