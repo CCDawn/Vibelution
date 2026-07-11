@@ -2522,6 +2522,14 @@ class SelfEvolvingAgent:
                 tool_call_count = len(iteration_decision.tool_calls)
                 has_tool_calls = iteration_decision.should_execute_tools
                 round_state.note_turn_outcome(iteration_decision.outcome.kind)
+                from core.infrastructure.event_bus import EventNames
+
+                self.event_bus.publish(
+                    EventNames.LLM_RESPONSE,
+                    {"turn_outcome": iteration_decision.outcome},
+                    source="agent.canonical_turn_outcome",
+                    blocking=True,
+                )
                 _record_agent_scene_event(
                     "llm",
                     "llm.turn_outcome.finalized",

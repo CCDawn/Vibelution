@@ -55,8 +55,10 @@ from core.chat.conversation_ledger import (
     EVENT_USER_MESSAGE,
     TURN_INTERRUPTED_MARKER,
     append_conversation_event,
+    append_conversation_turn_outcome,
     conversation_ledger_path,
     conversation_visible_messages_from_events,
+    conversation_turn_items_from_events,
     latest_ledger_sequence,
     latest_open_turn_id,
     load_conversation_events,
@@ -14524,22 +14526,34 @@ def _persist_session_turn_result(
                     "hasImageArtifactEvidence": False,
                 },
             )
-        _append_session_conversation_event(
-            session_id,
-            turn_id,
-            EVENT_ASSISTANT_MESSAGE,
-            status=final_status,
-            payload={
-                "content": visible_assistant_text,
-                "thought": str(assistant_entry.get("thought") or ""),
-                "toolCalls": _normalize_message_tool_calls(assistant_entry.get("tool_calls") or assistant_entry.get("toolCalls") or []),
-                "feedbackEvents": _normalize_message_feedback_events(assistant_entry.get("feedback_events") or assistant_entry.get("feedbackEvents") or []),
-                "llmUsage": turn_llm_usage,
-                "mentalSnapshot": _normalize_mental_snapshot(assistant_entry.get("mental_snapshot")),
-                "metadata": assistant_entry.get("metadata") if isinstance(assistant_entry.get("metadata"), dict) else {},
-            },
-            source="persist_session_turn_result",
+        canonical_turn_items = conversation_turn_items_from_events(
+            load_conversation_events(PROJECT_ROOT, session_id),
+            turn_id=turn_id,
         )
+        has_canonical_final = any(
+            item.get("kind") == "assistant_message"
+            and item.get("channel") == "answer"
+            and item.get("phase") == "final_answer"
+            and str(item.get("text") or "").strip()
+            for item in canonical_turn_items
+        )
+        if not has_canonical_final:
+            _append_session_conversation_event(
+                session_id,
+                turn_id,
+                EVENT_ASSISTANT_MESSAGE,
+                status=final_status,
+                payload={
+                    "content": visible_assistant_text,
+                    "thought": str(assistant_entry.get("thought") or ""),
+                    "toolCalls": _normalize_message_tool_calls(assistant_entry.get("tool_calls") or assistant_entry.get("toolCalls") or []),
+                    "feedbackEvents": _normalize_message_feedback_events(assistant_entry.get("feedback_events") or assistant_entry.get("feedbackEvents") or []),
+                    "llmUsage": turn_llm_usage,
+                    "mentalSnapshot": _normalize_mental_snapshot(assistant_entry.get("mental_snapshot")),
+                    "metadata": assistant_entry.get("metadata") if isinstance(assistant_entry.get("metadata"), dict) else {},
+                },
+                source="persist_session_turn_result",
+            )
         terminal_event = EVENT_TURN_FAILED if final_status in {"failed_provider", "failed_runtime", "failed"} else (
             EVENT_TURN_INTERRUPTED if stop_requested or final_status in {"stopped", "stopped_by_user"} else EVENT_TURN_COMPLETED
         )
@@ -17674,6 +17688,12 @@ def _build_session_turn_items_projection(
     done: bool = False,
     source: str = "assistant_delta",
 ) -> list[dict[str, Any]]:
+    canonical_items = conversation_turn_items_from_events(
+        _load_session_conversation_events_cached(str(session_id or "").strip()),
+        turn_id=str(turn_id or "").strip(),
+    )
+    if canonical_items:
+        return canonical_items
     normalized_message_id = str(message_id or "").strip()
     if not normalized_message_id:
         return []
@@ -20600,6 +20620,18 @@ def _capture_session_ui_stream(
             fields=data,
         )
 
+    def llm_response_event_proxy(event):
+        context = _SESSION_UI_CAPTURE_CONTEXT.get({})
+        if not isinstance(context, dict) or context.get("capture") is not capture:
+            return
+        data = event.data if isinstance(event.data, dict) else {}
+        outcome = data.get("turn_outcome")
+        if outcome is None:
+            return
+        append_conversation_turn_outcome(PROJECT_ROOT, session_id, capture.turn_id, outcome)
+        _invalidate_session_conversation_events_cache(session_id)
+        capture.mark_content_committed()
+
     for event_name in (EventNames.TOOL_START, EventNames.TOOL_SUCCESS, EventNames.TOOL_ERROR):
         callback_ids.append(
             event_bus.subscribe(
@@ -20608,6 +20640,13 @@ def _capture_session_ui_stream(
                 callback_id=f"web_chat_{session_id}_{event_name}_{id(capture)}",
             )
         )
+    callback_ids.append(
+        event_bus.subscribe(
+            EventNames.LLM_RESPONSE,
+            llm_response_event_proxy,
+            callback_id=f"web_chat_{session_id}_{EventNames.LLM_RESPONSE}_{id(capture)}",
+        )
+    )
     callback_ids.append(
         event_bus.subscribe(
             EventNames.LLM_STATUS,
