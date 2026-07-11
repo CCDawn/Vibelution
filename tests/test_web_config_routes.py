@@ -48,6 +48,37 @@ def _walk_json(value):
             yield from _walk_json(item)
 
 
+def _sensitive_model_reference_impact() -> dict:
+    return {
+        "modelId": "relay_a/model-a",
+        "liveReferences": [
+            {
+                "source": "agent_registry",
+                "sourcePath": "pending-secret:token"
+                if index == 0
+                else "workspace/agents.json",
+                "path": f"agents[{index}].modelId",
+                "field": "modelId",
+                "ownerType": "agent",
+                "ownerId": f"agent-{index}",
+                "label": {"credential_ref": "env:SECRET"}
+                if index == 0
+                else f"Agent {index}",
+                "historical": False,
+                "rawPayload": "pending-secret:token",
+                "nested": {"credential_ref": "env:SECRET"},
+            }
+            for index in range(55)
+        ],
+        "historicalReferences": [],
+        "liveReferenceCount": 73,
+        "historicalReferenceCount": 0,
+        "blocking": True,
+        "rawPayload": "pending-secret:token",
+        "credential_ref": "env:SECRET",
+    }
+
+
 def test_provider_routes_never_return_submitted_secret(monkeypatch) -> None:
     submitted = {
         "llm": {
@@ -136,6 +167,80 @@ def test_provider_routes_never_return_submitted_secret(monkeypatch) -> None:
     assert "rawToml" not in flattened
     assert not any("pending-secret:" in item for item in flattened)
     assert "secret-value" not in response.text
+
+
+def test_provider_route_preview_projects_bounded_redacted_impacts(monkeypatch) -> None:
+    monkeypatch.setattr(
+        provider_config_service,
+        "preview_draft_provider_route",
+        lambda *_args, **_kwargs: {
+            "providerId": "relay_a",
+            "routeChanged": True,
+            "routePreviewToken": "route-preview-token",
+            "modelRefs": ["relay_a/model-a"],
+            "impactedRefs": [_sensitive_model_reference_impact()],
+            "rawPayload": "pending-secret:token",
+        },
+    )
+    response = client.post(
+        "/api/config/draft/providers/relay_a/route-preview",
+        json={
+            "providerId": "relay_a",
+            "publicConfig": {},
+            "baseHash": "base-hash",
+            "provider": {},
+        },
+    )
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert set(payload) == {
+        "impactedRefs",
+        "modelRefs",
+        "providerId",
+        "routeChanged",
+        "routePreviewToken",
+    }
+    impact = payload["impactedRefs"][0]
+    assert impact["liveReferenceCount"] == 73
+    assert len(impact["liveReferences"]) == 50
+    assert impact["liveReferences"][0]["ownerId"] == "agent-0"
+    flattened = [str(item) for item in _walk_json(payload)]
+    assert "credential_ref" not in flattened
+    assert "rawPayload" not in flattened
+    assert not any("pending-secret:" in item for item in flattened)
+
+
+def test_provider_reference_conflict_409_projects_redacted_detail(monkeypatch) -> None:
+    def fail_with_sensitive_impact(*_args, **_kwargs):
+        raise provider_config_service.ModelReferenceConflictError(
+            _sensitive_model_reference_impact()
+        )
+
+    monkeypatch.setattr(
+        provider_config_service,
+        "draft_unpin_provider_model",
+        fail_with_sensitive_impact,
+    )
+    response = client.request(
+        "DELETE",
+        "/api/config/draft/providers/relay_a/models/model-a",
+        json={
+            "providerId": "relay_a",
+            "upstreamId": "model-a",
+            "publicConfig": {},
+            "baseHash": "base-hash",
+        },
+    )
+    assert response.status_code == 409, response.text
+    detail = response.json()["detail"]
+    assert detail["modelId"] == "relay_a/model-a"
+    assert detail["liveReferenceCount"] == 73
+    assert len(detail["liveReferences"]) == 50
+    assert detail["liveReferences"][0]["source"] == "agent_registry"
+    flattened = [str(item) for item in _walk_json(detail)]
+    assert "credential_ref" not in flattened
+    assert "rawPayload" not in flattened
+    assert not any("pending-secret:" in item for item in flattened)
 
 
 @pytest.fixture(autouse=True)
