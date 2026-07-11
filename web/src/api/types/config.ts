@@ -116,7 +116,6 @@ export type ConfigCapabilityObservation = {
   source: "operator_override" | "runtime_probe" | "provider_endpoint" | "curated_snapshot" | "driver_default";
   confidence: string;
   checked_at: string;
-  error: string;
 };
 
 export type ConfigProviderOption = {
@@ -140,6 +139,7 @@ export type ConfigCatalogModel = {
   modelRef: string;
   status: string;
   upstreamId: string;
+  capabilities: Record<string, ConfigCapabilityObservation>;
 };
 
 export type ConfigCatalogWarning = {

@@ -153,17 +153,23 @@ def test_provider_routes_never_return_submitted_secret(monkeypatch) -> None:
         "schemaVersion",
     }
     assert set(payload["providerOptions"][0]) <= {
+        "artifact_path",
+        "base_url",
         "credential_state",
         "default_protocol",
         "driver",
         "label",
         "pinned_count",
         "provider_id",
+        "runtime_framework",
         "service_class",
         "vendor",
     }
+    assert payload["providerOptions"][0]["base_url"] == "https://relay-a.example/v1"
     flattened = [str(item) for item in _walk_json(payload)]
     assert "credential_ref" not in flattened
+    assert "query" not in flattened
+    assert "rawPayload" not in flattened
     assert "rawToml" not in flattened
     assert not any("pending-secret:" in item for item in flattened)
     assert "secret-value" not in response.text

@@ -589,9 +589,28 @@ def test_provider_http_projection_recursively_allowlists_nested_data() -> None:
             "providerOptions": [
                 {
                     "provider_id": "relay_a",
+                    "label": "Relay A",
+                    "service_class": "relay",
+                    "vendor": "example",
+                    "driver": "openai",
+                    "runtime_framework": "vllm",
+                    "artifact_path": "C:/models/relay-a",
+                    "base_url": "https://relay.example/v1",
                     "credential_state": "configured",
+                    "default_protocol": "openai_chat_completions",
+                    "pinned_count": 1,
                     "credential_ref": "env:SECRET",
-                }
+                    "query": {"api_key": "secret-value"},
+                    "unknownNested": {"rawPayload": "secret-value"},
+                },
+                {
+                    "provider_id": {"nested": "relay_secret"},
+                    "label": "pending-secret:token",
+                    "runtime_framework": ["vllm", "secret-value"],
+                    "artifact_path": "x" * 1200,
+                    "base_url": "https://relay.example/v1?api_key=secret-value",
+                    "pinned_count": True,
+                },
             ],
             "modelCatalog": {
                 "schemaVersion": 2,
@@ -601,8 +620,48 @@ def test_provider_http_projection_recursively_allowlists_nested_data() -> None:
                     "relay_a": {
                         "providerId": "relay_a",
                         "status": "reachable",
-                        "modelCount": 0,
-                        "models": {},
+                        "modelCount": 1,
+                        "models": {
+                            "model": {
+                                "modelKey": "model",
+                                "modelRef": "relay_a/model",
+                                "upstreamId": "model",
+                                "label": "Model",
+                                "availability": "observed",
+                                "status": "observed",
+                                "capabilities": {
+                                    "image_input": {
+                                        "value": "supported",
+                                        "source": "runtime_probe",
+                                        "confidence": "high",
+                                        "checked_at": "2026-07-11T10:00:00Z",
+                                        "error": "Bearer secret-value",
+                                        "rawMetadata": {"token": "secret-value"},
+                                        "unknownNested": ["secret-value"],
+                                    },
+                                    "tool_calling": {
+                                        "value": "unsupported",
+                                        "source": "provider_endpoint",
+                                        "confidence": "medium",
+                                        "checked_at": "2026-07-11T09:00:00Z",
+                                    },
+                                    "reasoning": {
+                                        "value": "yes",
+                                        "source": "provider_endpoint",
+                                    },
+                                    "credential_ref": {
+                                        "value": "supported",
+                                        "source": "operator_override",
+                                    },
+                                    "raw_payload": {
+                                        "value": "unknown",
+                                        "source": "runtime_probe",
+                                    },
+                                },
+                                "metadata": {"api_key": "secret-value"},
+                                "rawPayload": "pending-secret:token",
+                            }
+                        },
                         "credential_ref": "env:SECRET",
                         "rawPayload": "pending-secret:token",
                     }
@@ -621,9 +680,34 @@ def test_provider_http_projection_recursively_allowlists_nested_data() -> None:
             ],
         }
     )
+    option = projected["providerOptions"][0]
+    assert option["base_url"] == "https://relay.example/v1"
+    assert option["runtime_framework"] == "vllm"
+    assert option["artifact_path"] == "C:/models/relay-a"
+    assert projected["providerOptions"][1] == {"artifact_path": "x" * 1024}
+    model = projected["modelCatalog"]["providers"]["relay_a"]["models"]["model"]
+    assert model["capabilities"] == {
+        "image_input": {
+            "value": "supported",
+            "source": "runtime_probe",
+            "confidence": "high",
+            "checked_at": "2026-07-11T10:00:00Z",
+        },
+        "tool_calling": {
+            "value": "unsupported",
+            "source": "provider_endpoint",
+            "confidence": "medium",
+            "checked_at": "2026-07-11T09:00:00Z",
+        },
+    }
     serialized = json.dumps(projected)
     assert "credential_ref" not in serialized
     assert "rawPayload" not in serialized
+    assert "rawMetadata" not in serialized
+    assert "unknownNested" not in serialized
+    assert "secret-value" not in serialized
+    assert '"query"' not in serialized
+    assert '"error"' not in serialized
     assert "pending-secret:" not in serialized
 
 
