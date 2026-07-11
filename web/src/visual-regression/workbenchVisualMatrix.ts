@@ -87,7 +87,39 @@ const PHASE_3A_THEME_VIEWPORTS = [
   { theme: "dark" as const, viewport: wide, viewportId: "wide" },
 ] as const;
 
+const PHASE_3B_ROUTE_FOCUS = [
+  {
+    path: "/supervised-evolution",
+    id: "phase3b-supervised-evolution",
+    focus: ["live run action hierarchy", "disabled and blocker state"],
+  },
+  {
+    path: "/self-evolution",
+    id: "phase3b-self-evolution",
+    focus: ["track workspace hierarchy", "conversation and control separation"],
+  },
+  {
+    path: "/config",
+    id: "phase3b-config",
+    focus: ["dirty/save status clarity", "dense form and model-library controls"],
+  },
+] as const;
+
 const PHASE_3A_VISUAL_SCENARIOS: WorkbenchVisualScenario[] = PHASE_3A_ROUTE_FOCUS.flatMap(
+  (route) =>
+    PHASE_3A_THEME_VIEWPORTS.map(({ theme, viewport, viewportId }) => ({
+      id: [route.id, theme, "default", viewportId, "dense"].join("-"),
+      path: route.path,
+      theme,
+      background: "default",
+      viewport,
+      state: "dense",
+      reviewFocus: [...route.focus],
+      expectedEvidence: "screenshot",
+    })),
+);
+
+const PHASE_3B_VISUAL_SCENARIOS: WorkbenchVisualScenario[] = PHASE_3B_ROUTE_FOCUS.flatMap(
   (route) =>
     PHASE_3A_THEME_VIEWPORTS.map(({ theme, viewport, viewportId }) => ({
       id: [route.id, theme, "default", viewportId, "dense"].join("-"),
@@ -283,6 +315,7 @@ export const WORKBENCH_VISUAL_SCENARIOS: WorkbenchVisualScenario[] = [
     expectedEvidence: "screenshot",
   },
   ...PHASE_3A_VISUAL_SCENARIOS,
+  ...PHASE_3B_VISUAL_SCENARIOS,
 ];
 
 function sortedUnique<T extends string>(items: T[]): T[] {
