@@ -73,6 +73,7 @@ type GitRecentCommitsStateProps = {
   onRetry: () => void;
   presentation: QueryPresentation;
   retryLabel: ReactNode;
+  syncingLabel?: ReactNode;
 };
 
 export function GitRecentCommitsState({
@@ -83,6 +84,7 @@ export function GitRecentCommitsState({
   onRetry,
   presentation,
   retryLabel,
+  syncingLabel,
 }: GitRecentCommitsStateProps) {
   if (presentation === "initial-loading") {
     return <VStateSurface tone="loading" title={loadingLabel} skeletonLines />;
@@ -100,10 +102,90 @@ export function GitRecentCommitsState({
   }
   return (
     <>
-      {presentation === "error-with-data" ? <p className={styles.notice}>{errorLabel}</p> : null}
+      {presentation === "error-with-data" ? (
+        <VStateSurface
+          className={styles.notice}
+          tone="error"
+          title={errorLabel}
+          actions={<VButton type="button" variant="secondary" onPress={onRetry}>{retryLabel}</VButton>}
+        />
+      ) : presentation === "refreshing" ? (
+        <p className={styles.notice} role="status">{syncingLabel}</p>
+      ) : null}
       <div className={styles.commitList}>
         {commitsContent || <p className={styles.emptyState}>{emptyMessage}</p>}
       </div>
+    </>
+  );
+}
+
+type GitStatusSummaryStateProps = {
+  presentation: QueryPresentation;
+  status?: GitStatusSummary;
+  labels: {
+    aria: string;
+    branch: string;
+    changed: string;
+    upstream: string;
+    aheadBehind: string;
+    localCommits: string;
+    worktrees: string;
+  };
+  loadingLabel: string;
+  errorLabel: ReactNode;
+  unavailableLabel: string;
+  noUpstreamLabel: string;
+  retryLabel: ReactNode;
+  syncingLabel: ReactNode;
+  onRetry: () => void;
+};
+
+export function GitStatusSummaryState({
+  presentation,
+  status,
+  labels,
+  loadingLabel,
+  errorLabel,
+  unavailableLabel,
+  noUpstreamLabel,
+  retryLabel,
+  syncingLabel,
+  onRetry,
+}: GitStatusSummaryStateProps) {
+  const loading = presentation === "initial-loading";
+  const unavailable = presentation === "error-empty";
+  const value = (resolved: ReactNode) => loading
+    ? <VLoadingValue label={loadingLabel} />
+    : unavailable
+      ? unavailableLabel
+      : resolved;
+  const upstream = status?.upstream;
+  const aheadBehind = upstream?.hasUpstream ? `${upstream.ahead} / ${upstream.behind}` : noUpstreamLabel;
+
+  return (
+    <>
+      <VMetricStrip
+        ariaLabel={labels.aria}
+        className={styles.summaryGrid}
+        metrics={[
+          { id: "branch", label: labels.branch, value: value(status?.branch || status?.headRevShort || unavailableLabel) },
+          { id: "changed", label: labels.changed, value: value(status?.counts.total ?? unavailableLabel) },
+          { id: "upstream", label: labels.upstream, value: value(upstream?.name || upstream?.remote || noUpstreamLabel) },
+          { id: "ahead-behind", label: labels.aheadBehind, value: value(aheadBehind) },
+          { id: "local-commits", label: labels.localCommits, value: value(status?.localCommits?.total ?? upstream?.ahead ?? unavailableLabel) },
+          { id: "worktrees", label: labels.worktrees, value: value(status?.worktrees ? `${status.worktrees.withCommits} / ${status.worktrees.total}` : unavailableLabel) },
+        ]}
+      />
+      {presentation === "error-empty" || presentation === "error-with-data" ? (
+        <VStateSurface
+          className={styles.notice}
+          title={errorLabel}
+          tone="error"
+          actions={<VButton type="button" variant="secondary" onPress={onRetry}>{retryLabel}</VButton>}
+        />
+      ) : presentation === "refreshing" ? (
+        <p className={styles.notice} role="status">{syncingLabel}</p>
+      ) : null}
     </>
   );
 }
@@ -349,8 +431,10 @@ export function GitRoute() {
   const gitCommitsLoading = lang === "zh" ? "正在读取最近提交" : "Loading recent commits";
   const gitCommitsError = lang === "zh" ? "无法读取最近提交" : "Unable to load recent commits";
   const retryLabel = lang === "zh" ? "重试" : "Retry";
+  const unavailableLabel = lang === "zh" ? "不可用" : "Unavailable";
+  const gitStatusSyncing = lang === "zh" ? "正在同步 Git 状态" : "Syncing Git status";
+  const gitCommitsSyncing = lang === "zh" ? "正在同步最近提交" : "Syncing recent commits";
   const upstream = status?.upstream;
-  const aheadBehind = upstream?.hasUpstream ? `${upstream.ahead} / ${upstream.behind}` : t("gitNoUpstream");
   const localCommitCount = status?.localCommits?.total ?? upstream?.ahead ?? 0;
   const worktreeBranchCount = status?.worktrees?.withCommits ?? 0;
   const worktreeTotalCount = status?.worktrees?.total ?? 0;
@@ -533,6 +617,7 @@ export function GitRoute() {
       errorLabel={gitCommitsError}
       loadingLabel={gitCommitsLoading}
       retryLabel={retryLabel}
+      syncingLabel={gitCommitsSyncing}
       onRetry={() => void commitsQuery.refetch()}
     />
   );
@@ -555,22 +640,28 @@ export function GitRoute() {
         )}
       />
 
-      <VMetricStrip
-        ariaLabel={t("gitPageTitle")}
-        className={styles.summaryGrid}
-        metrics={[
-          { id: "branch", label: t("gitBranch"), value: statusInitialLoading ? <VLoadingValue label={gitStatusLoading} /> : status?.branch || status?.headRevShort || "-" },
-          { id: "changed", label: t("gitChangedFiles"), value: statusInitialLoading ? <VLoadingValue label={gitStatusLoading} /> : status?.counts.total ?? 0 },
-          { id: "upstream", label: t("gitUpstream"), value: statusInitialLoading ? <VLoadingValue label={gitStatusLoading} /> : upstream?.name || upstream?.remote || t("gitNoUpstream") },
-          { id: "ahead-behind", label: t("gitAheadBehind"), value: statusInitialLoading ? <VLoadingValue label={gitStatusLoading} /> : aheadBehind },
-          { id: "local-commits", label: t("gitLocalCommits"), value: statusInitialLoading ? <VLoadingValue label={gitStatusLoading} /> : localCommitCount },
-          { id: "worktrees", label: t("gitWorktreeBranches"), value: statusInitialLoading ? <VLoadingValue label={gitStatusLoading} /> : [worktreeBranchCount, worktreeTotalCount].join(" / ") },
-        ]}
+      <GitStatusSummaryState
+        presentation={statusPresentation}
+        status={status}
+        labels={{
+          aria: t("gitPageTitle"),
+          branch: t("gitBranch"),
+          changed: t("gitChangedFiles"),
+          upstream: t("gitUpstream"),
+          aheadBehind: t("gitAheadBehind"),
+          localCommits: t("gitLocalCommits"),
+          worktrees: t("gitWorktreeBranches"),
+        }}
+        loadingLabel={gitStatusLoading}
+        errorLabel={statusQuery.error instanceof Error ? statusQuery.error.message : gitStatusError}
+        unavailableLabel={unavailableLabel}
+        noUpstreamLabel={t("gitNoUpstream")}
+        retryLabel={retryLabel}
+        syncingLabel={gitStatusSyncing}
+        onRetry={() => void statusQuery.refetch()}
       />
 
-      {statusPresentation === "error-with-data" ? (
-        <VStateSurface className={styles.notice} title={statusQuery.error instanceof Error ? statusQuery.error.message : gitStatusError} tone="error" />
-      ) : status && !status.available ? (
+      {status && !status.available && statusPresentation !== "error-empty" ? (
         <VStateSurface className={styles.notice} title={status.error || t("gitStatusUnavailable")} tone="unavailable" />
       ) : null}
 
