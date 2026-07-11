@@ -1,7 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { createElement, type ReactElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { describe, expect, it, vi } from "vitest";
 
 import { dictionary } from "../i18n/dictionary";
 import routeSource from "./GitRoute.tsx?raw";
+import { GitRecentCommitsState } from "./GitRoute";
 import stylesSource from "./GitRoute.styles.ts?raw";
 import { gitRouteStyles } from "./GitRoute.styles";
 import diffStylesSource from "./GitDiffView.styles.ts?raw";
@@ -157,6 +160,74 @@ describe("GitRoute layout contract", () => {
     expect(routeSource).toContain("worktreeBranchCount");
     expect(routeSource).toContain('t("gitLocalCommits")');
     expect(routeSource).toContain('t("gitWorktreeBranches")');
+  });
+
+  it("keeps Git summary cards visible without projecting pending status as zero", () => {
+    expect(routeSource).toContain("deriveQueryPresentation");
+    expect(routeSource).toContain("statusInitialLoading");
+    expect(routeSource).toContain("<VLoadingValue");
+    expect(routeSource).toContain('statusPresentation === "refreshing"');
+    expect(routeSource).not.toContain("<strong>{status?.counts.total ?? 0}</strong>");
+    expect(routeSource).not.toContain("<strong>{status?.branch || status?.headRevShort || \"-\"}</strong>");
+  });
+
+  it("reserves loading surfaces for the Git workspace panes", () => {
+    expect(routeSource).toContain('tone="loading"');
+    expect(routeSource).toContain("gitStatusLoading");
+    expect(gitRouteStyles.summaryCard).toContain("min-h-");
+  });
+
+  it("renders an aria-busy recent commits surface while commits load independently", () => {
+    const markup = renderToStaticMarkup(createElement(GitRecentCommitsState, {
+      presentation: "initial-loading",
+      commitsContent: createElement("span", null, "old commit"),
+      emptyMessage: "No commits",
+      errorLabel: "Unable to load recent commits",
+      loadingLabel: "Loading recent commits",
+      retryLabel: "Retry",
+      onRetry: vi.fn(),
+    }));
+
+    expect(markup).toContain('aria-busy="true"');
+    expect(markup).toContain("Loading recent commits");
+    expect(markup).not.toContain("old commit");
+  });
+
+  it("wires empty commit errors to retry", () => {
+    const onRetry = vi.fn();
+    const state = GitRecentCommitsState({
+      presentation: "error-empty",
+      commitsContent: null,
+      emptyMessage: "No commits",
+      errorLabel: "Unable to load recent commits",
+      loadingLabel: "Loading recent commits",
+      retryLabel: "Retry",
+      onRetry,
+    }) as ReactElement<{ actions: ReactElement<{ onPress: () => void }> }>;
+
+    state.props.actions.props.onPress();
+
+    expect(onRetry).toHaveBeenCalledOnce();
+    expect(renderToStaticMarkup(state)).toContain("Unable to load recent commits");
+  });
+
+  it.each(["error-with-data", "refreshing"] as const)("retains old commits for %s", (presentation) => {
+    const markup = renderToStaticMarkup(createElement(GitRecentCommitsState, {
+      presentation,
+      commitsContent: createElement("span", null, "abc123 retained commit"),
+      emptyMessage: "No commits",
+      errorLabel: "Unable to load recent commits",
+      loadingLabel: "Loading recent commits",
+      retryLabel: "Retry",
+      onRetry: vi.fn(),
+    }));
+
+    expect(markup).toContain("abc123 retained commit");
+    if (presentation === "error-with-data") {
+      expect(markup).toContain("Unable to load recent commits");
+    } else {
+      expect(markup).not.toContain("Unable to load recent commits");
+    }
   });
 
   it("switches clean worktrees to a Git situation overview instead of an empty diff workspace", () => {
