@@ -1,0 +1,24 @@
+[llm]
+
+[llm.model_library.relay_text]
+model = "gpt-5.6-luna"
+label = "GPT-5.6 Luna"
+transport = "responses"
+contract = "tool_chat"
+timeout = 120
+
+[llm.model_library.relay_text.provider]
+kind = "relay"
+base_url = "https://relay.example/v1"
+api_key_env = "VIBELUTION_LLM_MODEL_RELAY_TEXT_API_KEY"
+compat_mode = "openai"
+requires_api_key = true
+
+[llm.profiles.primary]
+model_ref = "relay_text"
+
+[tools.image2]
+default_model_ref = "relay_text"
+
+[git]
+commit_message_model_ref = "relay_text"

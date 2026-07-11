@@ -569,7 +569,7 @@ function compactRepeatedTokenHalves(token: string): string {
   return parts.join("_");
 }
 
-export function legacyModelLibraryIdFromParts(label: string, model: string): string {
+export function modelLibraryIdFromParts(label: string, model: string): string {
   const raw = `${label}-${model}`.trim();
   const token = compactRepeatedTokenHalves(raw
     .toLowerCase()
@@ -580,7 +580,7 @@ export function legacyModelLibraryIdFromParts(label: string, model: string): str
 
 export function uniqueModelLibraryId(baseId: string, existingIds: Iterable<string>): string {
   const existing = new Set(Array.from(existingIds, (value) => value.trim()).filter(Boolean));
-  const base = legacyModelLibraryIdFromParts(baseId, "") || "custom_model";
+  const base = modelLibraryIdFromParts(baseId, "") || "custom_model";
   if (!existing.has(base)) {
     return base;
   }
@@ -653,9 +653,9 @@ export function canDiscoverModelsForProvider(provider: Record<string, unknown>):
   return compatMode === "openai" || compatMode === "openai_compatible";
 }
 
-// Compatibility exports remain until ConfigRoute's v1 editor is replaced by the
-// provider-first Task 10 surface. V2 view models must not call either helper.
-export const modelLibraryIdFromParts = legacyModelLibraryIdFromParts;
+// The v1 editor keeps this read-only compatibility alias. Provider-first v2
+// selection controls consume canonical provider/model refs and never call it.
+export const legacyModelLibraryIdFromParts = modelLibraryIdFromParts;
 
 function legacyAccountIdForModelOption(option: ConfigModelOption): string {
   const provider = asRecord(option.provider);

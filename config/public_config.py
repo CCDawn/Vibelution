@@ -64,6 +64,10 @@ HEADER_LINES = [
 ]
 PUBLIC_PROVIDER_FIELDS = PUBLIC_INLINE_PROVIDER_FIELDS
 PROFILE_OVERRIDE_FIELDS = PROFILE_REFERENCE_OVERRIDE_FIELDS
+SCHEMA_V2_LEGACY_MODEL_WRITE_ERROR = (
+    "schema v2 model writes must use provider-scoped configuration; "
+    "use migration preview for schema v1 configuration"
+)
 LLM_MODEL_PRESETS = {
     "openai_gpt_5_5": {
         "label": "OpenAI GPT-5.5",
@@ -1359,6 +1363,7 @@ def apply_llm_model_preset(
     details: dict | None = None,
     api_key_env: str = "",
 ) -> dict:
+    _require_v1_model_library_write(public_config)
     preset_id = (preset_id or "").strip()
     if preset_id not in LLM_MODEL_PRESETS:
         raise ValueError(f"unknown LLM model preset: {preset_id}")
@@ -1395,6 +1400,12 @@ def apply_llm_model_preset(
     model_library[resolved_model_id] = entry
     build_effective_config(updated)
     return updated
+
+
+def _require_v1_model_library_write(public_config: dict) -> None:
+    llm = public_config.get("llm", {}) if isinstance(public_config, dict) else {}
+    if isinstance(llm, dict) and int(llm.get("schema_version") or 1) == 2:
+        raise ValueError(SCHEMA_V2_LEGACY_MODEL_WRITE_ERROR)
 
 
 def list_llm_model_options(public_config: dict) -> list[dict[str, object]]:
@@ -1480,6 +1491,7 @@ def add_llm_model(
     details: dict | None = None,
     api_key_env: str = "",
 ) -> dict:
+    _require_v1_model_library_write(public_config)
     model_id = (model_id or "").strip()
     model = (model or "").strip()
     label = (label or "").strip()
@@ -1515,6 +1527,7 @@ def update_llm_model(
     details: dict | None = None,
     api_key_env: str = "",
 ) -> dict:
+    _require_v1_model_library_write(public_config)
     model_id = (model_id or "").strip()
     model = (model or "").strip()
     label = (label or "").strip()
@@ -1554,6 +1567,7 @@ def update_llm_model(
 
 
 def delete_llm_model(public_config: dict, model_id: str) -> dict:
+    _require_v1_model_library_write(public_config)
     updated = copy.deepcopy(public_config)
     llm = updated.setdefault("llm", {})
     reference = _resolve_model_reference(updated, model_id)
