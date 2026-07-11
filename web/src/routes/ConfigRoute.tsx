@@ -2806,10 +2806,14 @@ export function ConfigRoute() {
   function focusModelEditor() {
     window.setTimeout(() => {
       modelEditorRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-      const firstInput = modelEditorRef.current?.querySelector<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>(
-        "input:not([disabled]), select:not([disabled]), textarea:not([disabled])",
+      const firstFocusableControl = modelEditorRef.current?.querySelector<HTMLButtonElement | HTMLInputElement | HTMLTextAreaElement>(
+        [
+          'button[data-vui="select-trigger"]:not([data-disabled="true"]):not([disabled])',
+          'input:not([disabled]):not([type="hidden"])',
+          "textarea:not([disabled])",
+        ].join(", "),
       );
-      firstInput?.focus({ preventScroll: true });
+      firstFocusableControl?.focus({ preventScroll: true });
     }, 0);
   }
 
