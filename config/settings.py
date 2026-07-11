@@ -1349,7 +1349,45 @@ class ConfigLoader:
         Returns:
             更新后的配置
         """
-        data = normalize_public_config_dict(data)
+        incoming_llm = data.get("llm")
+        is_v2_increment = (
+            config.llm.schema_version == 2
+            and isinstance(incoming_llm, dict)
+            and "schema_version" not in incoming_llm
+        )
+        if is_v2_increment:
+            data = copy.deepcopy(data)
+            incoming_llm = data["llm"]
+
+            def reject_credential_fields(node: Any) -> None:
+                if not isinstance(node, dict):
+                    return
+                for key, value in node.items():
+                    if key in {"api_key", "api_key_env", "credential_ref"}:
+                        raise ValueError("schema v2 credential fields are not allowed in incremental config")
+                    reject_credential_fields(value)
+
+            reject_credential_fields(incoming_llm)
+            provider_updates = incoming_llm.get("providers")
+            if isinstance(provider_updates, dict):
+                unknown_providers = sorted(set(provider_updates) - set(config.llm.providers))
+                if unknown_providers:
+                    raise ValueError("schema v2 incremental config cannot add providers")
+            profile_updates = incoming_llm.get("profiles")
+            if isinstance(profile_updates, dict):
+                unknown_profiles = sorted(set(profile_updates) - set(config.llm.profiles))
+                if unknown_profiles:
+                    raise ValueError("schema v2 incremental config cannot add profiles")
+                for profile_update in profile_updates.values():
+                    if not isinstance(profile_update, dict):
+                        continue
+                    if "provider" in profile_update:
+                        raise ValueError("schema v2 inline providers are not allowed in incremental config")
+                    overrides = profile_update.pop("overrides", None)
+                    if isinstance(overrides, dict):
+                        profile_update.update(overrides)
+        else:
+            data = normalize_public_config_dict(data)
         # 深度合并字典
         current = config.model_dump()
 
