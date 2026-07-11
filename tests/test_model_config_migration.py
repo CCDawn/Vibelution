@@ -63,6 +63,57 @@ def test_preview_groups_same_endpoint_and_credential_without_writing(tmp_path) -
     assert config_path.read_text(encoding="utf-8") == before
 
 
+def test_preview_blocks_conflicting_provider_classification_with_stable_redacted_context(tmp_path) -> None:
+    legacy = legacy_config_with_models(
+        ("z_relay", "https://gateway.example/v1", "SHARED_KEY", "gpt-z"),
+        ("a_official", "https://gateway.example/v1", "SHARED_KEY", "claude-a"),
+    )
+    legacy["llm"]["model_library"]["a_official"]["provider"].update(
+        {"kind": "anthropic", "compat_mode": "anthropic"}
+    )
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(dumps_public_config(legacy), encoding="utf-8")
+    before = config_path.read_bytes()
+
+    preview = preview_v1_to_v2(legacy, project_root=tmp_path)
+
+    conflict = next(item for item in preview.conflicts if item["code"] == "provider_classification_conflict")
+    assert preview.status == "NEEDS_REVIEW"
+    assert conflict == {
+        "code": "provider_classification_conflict",
+        "modelIds": ["a_official", "z_relay"],
+        "fields": ["adapter", "driver", "service_class"],
+    }
+    assert "SHARED_KEY" not in json.dumps(conflict)
+    with pytest.raises(ValueError, match="unresolved conflicts"):
+        apply_v1_to_v2(
+            preview.preview_id,
+            expected_base_hash=public_config_hash(legacy),
+            config_path=config_path,
+            project_root=tmp_path,
+        )
+    assert config_path.read_bytes() == before
+
+
+def test_preview_merges_multi_protocol_gateway_without_classification_conflict(tmp_path) -> None:
+    legacy = legacy_config_with_models(
+        ("relay_chat", "https://gateway.example/v1", "SHARED_KEY", "gpt-chat"),
+        ("relay_responses", "https://gateway.example/v1", "SHARED_KEY", "gpt-responses"),
+    )
+    legacy["llm"]["model_library"]["relay_responses"]["transport"] = "responses"
+    legacy["llm"]["model_library"]["relay_responses"]["protocol"] = "responses-v2"
+
+    preview = preview_v1_to_v2(legacy, project_root=tmp_path)
+
+    assert preview.status == "READY"
+    assert len(preview.providers) == 1
+    assert preview.providers[0]["protocols"] == {
+        "default": "chat_completions",
+        "allowed": ["chat_completions", "responses"],
+    }
+    assert all(item["code"] != "provider_classification_conflict" for item in preview.conflicts)
+
+
 def test_preview_splits_same_endpoint_with_different_credentials(tmp_path) -> None:
     legacy = legacy_config_with_models(
         ("relay_a", "https://relay.example/v1", "RELAY_A_KEY", "gpt-a"),

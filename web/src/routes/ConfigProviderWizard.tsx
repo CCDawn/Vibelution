@@ -15,6 +15,7 @@ import {
   VSurface,
 } from "../components/vui";
 import {
+  buildProviderWizardDraft,
   canAdvanceProviderWizard,
   dispatchProviderWizardConnectionAction,
   isProviderWizardConnectionLocked,
@@ -77,29 +78,6 @@ function templateServiceClass(template: ConfigProviderPresetOption): string {
   return "self_hosted";
 }
 
-function providerDraft(state: ProviderWizardState, template?: ConfigProviderPresetOption): Record<string, unknown> {
-  const source = asRecord(template?.provider);
-  return {
-    ...source,
-    label: state.label,
-    service_class: state.serviceClass,
-    driver: state.driver,
-    base_url: state.baseUrl,
-    auth_kind: state.authKind,
-    credential_ref: state.credentialRef,
-    requires_credential: state.authKind !== "none",
-    protocols: { default: state.defaultProtocol, allowed: state.allowedProtocols },
-    discovery: {
-      ...asRecord(source.discovery),
-      mode: asString(asRecord(source.discovery).mode) || "auto",
-    },
-    ...(state.serviceClass === "local_runtime"
-      ? { runtime_framework: state.runtimeFramework, artifact_path: state.artifactPath }
-      : {}),
-    models: {},
-  };
-}
-
 function templateModelFamily(template: ConfigProviderPresetOption): string {
   const model = asRecord(template.default_model);
   return asString(model.family) || asString(model.model) || asString(model.label) || "模型族未标注";
@@ -124,7 +102,7 @@ export function ConfigProviderWizard({
   const selectedTemplate = templates.find((item) => item.provider_preset_id === state.templateId);
   const connectionLocked = isProviderWizardConnectionLocked(disabled, providerCreated);
   const selectedProviderDraft = useMemo(
-    () => providerDraft(state, selectedTemplate),
+    () => buildProviderWizardDraft(state, selectedTemplate?.provider),
     [selectedTemplate, state],
   );
 
@@ -134,6 +112,7 @@ export function ConfigProviderWizard({
     }
     appliedTemplateRef.current = selectedTemplate.provider_preset_id;
     const templateProvider = asRecord(selectedTemplate.provider);
+    const templateDeployment = asRecord(templateProvider.deployment);
     const protocols = asRecord(templateProvider.protocols);
     const allowed = Array.isArray(protocols.allowed)
       ? protocols.allowed.filter((value): value is string => typeof value === "string")
@@ -156,8 +135,8 @@ export function ConfigProviderWizard({
     if (state.serviceClass === "local_runtime") {
       onChange({
         type: "set_deployment",
-        runtimeFramework: state.runtimeFramework || asString(templateProvider.runtime_framework),
-        artifactPath: state.artifactPath || asString(templateProvider.artifact_path),
+        runtimeFramework: state.runtimeFramework || asString(templateDeployment.runtime_framework),
+        artifactPath: state.artifactPath || asString(templateDeployment.artifact_path),
       });
     }
   }, [onChange, selectedTemplate, state]);
