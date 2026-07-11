@@ -1,10 +1,70 @@
-import { describe, expect, it } from "vitest";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const usageQueryState = vi.hoisted(() => ({
+  current: {} as Record<string, unknown>,
+  invalidateQueries: vi.fn(),
+}));
+
+vi.mock("@tanstack/react-query", () => ({
+  useQuery: () => usageQueryState.current,
+  useQueryClient: () => ({ invalidateQueries: usageQueryState.invalidateQueries }),
+}));
+vi.mock("../app/pollingPolicy", () => ({
+  resolvePollingInterval: () => false,
+  usePageVisibility: () => true,
+}));
+vi.mock("../i18n/useAppI18n", () => ({ useAppI18n: () => ({ lang: "zh" }) }));
 
 import routeSource from "./UsageRoute.tsx?raw";
 import stylesSource from "./UsageRoute.styles.ts?raw";
 import styles from "./UsageRoute.styles";
+import { UsageRoute } from "./UsageRoute";
+
+const ZERO_ROLLUP = {
+  inputTokens: 0,
+  cachedInputTokens: 0,
+  cacheReadInputTokens: 0,
+  cacheCreationInputTokens: 0,
+  uncachedInputTokens: 0,
+  outputTokens: 0,
+  reasoningOutputTokens: 0,
+  totalTokens: 0,
+  callCount: 0,
+  observedCallCount: 0,
+  estimatedCallCount: 0,
+  missingCallCount: 0,
+  notCalledCount: 0,
+  latencyMs: 0,
+  cacheHitRate: 0,
+};
+
+const LOADED_ZERO_SUMMARY = {
+  scope: "global",
+  globalTokenUsage: { allTime: ZERO_ROLLUP, today: ZERO_ROLLUP, last7Days: ZERO_ROLLUP },
+  sessionTokenUsage: ZERO_ROLLUP,
+  agentTokenUsage: ZERO_ROLLUP,
+  scopeTokenUsage: ZERO_ROLLUP,
+};
+
+function renderUsage(state: Record<string, unknown>) {
+  usageQueryState.current = {
+    data: undefined,
+    error: null,
+    isError: false,
+    isFetching: false,
+    isPending: false,
+    refetch: vi.fn(),
+    ...state,
+  };
+  return renderToStaticMarkup(createElement(UsageRoute));
+}
 
 describe("UsageRoute layout contract", () => {
+  beforeEach(() => {
+    usageQueryState.invalidateQueries.mockReset();
+  });
   const overflowGuardStyles = [
     styles.page,
     styles.metricBand,
@@ -110,5 +170,22 @@ describe("UsageRoute layout contract", () => {
     expect(styles.heroMetric).toContain("grid min-h-[76px]");
     expect(styles.overviewStat).toContain("grid min-h-[58px]");
     expect(styles.sourceTile).toContain("grid min-h-[50px]");
+  });
+
+  it.each([
+    ["initial-loading", { isFetching: true, isPending: true }, 'data-vui="loading-value"'],
+    ["loaded-zero", { data: LOADED_ZERO_SUMMARY }, ">0<"],
+    ["refreshing-with-data", { data: LOADED_ZERO_SUMMARY, isFetching: true }, "同步中"],
+    ["error-with-data", { data: LOADED_ZERO_SUMMARY, error: new Error("stale"), isError: true }, "stale"],
+  ])("renders the %s query presentation", (_name, state, expected) => {
+    expect(renderUsage(state)).toContain(expected);
+  });
+
+  it("renders unavailable values and retry without zero projection for error-empty", () => {
+    const markup = renderUsage({ error: new Error("usage unavailable"), isError: true });
+    expect(markup).toContain('data-tone="error"');
+    expect(markup).toContain("usage unavailable");
+    expect(markup).toContain("重试");
+    expect(markup).not.toContain(">0<");
   });
 });
