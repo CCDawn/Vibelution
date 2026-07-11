@@ -169,13 +169,39 @@ export type ConfigModelCatalog = {
   providers: Record<string, ConfigCatalogProvider>;
 };
 
-export type ConfigMigrationConflict = {
+export type ConfigMigrationArtifactResolutionDecision =
+  | "preserve_upstream_id"
+  | "split_deployment_artifact";
+
+export type ConfigMigrationArtifactResolution =
+  | { modelId: string; decision: "preserve_upstream_id" }
+  | { modelId: string; decision: "split_deployment_artifact"; upstreamId: string };
+
+export type ConfigMigrationPreviewRequest = {
+  artifactResolutions?: ConfigMigrationArtifactResolution[];
+};
+
+export type ConfigMigrationArtifactConflict = {
+  code: "artifact_path_suspected";
+  severity?: string;
+  modelId: string;
+  proposedProviderId?: string;
+  requiresExplicitResolution: true;
+  allowedResolutions: ConfigMigrationArtifactResolutionDecision[];
+  verificationState: "unverified_offline";
+};
+
+export type ConfigMigrationOtherConflict = {
   code: string;
   severity?: string;
   modelId?: string;
   fields?: string[];
   proposedProviderId?: string;
 };
+
+export type ConfigMigrationConflict =
+  | ConfigMigrationArtifactConflict
+  | ConfigMigrationOtherConflict;
 
 export type ConfigMigrationProviderPreview = {
   providerId: string;

@@ -24,7 +24,9 @@ import {
   ConfigLlmTestResult,
   ConfigModelDiscoveryResult,
   ConfigModelOption,
+  ConfigMigrationArtifactResolution,
   ConfigMigrationPreview,
+  ConfigMigrationPreviewRequest,
   ConfigWorkspace,
   HealthDiagnostics,
 } from "../api/types";
@@ -2656,12 +2658,17 @@ export function ConfigRoute() {
     }
   }
 
-  async function handlePreviewMigration() {
+  async function handlePreviewMigration(
+    artifactResolutions: ConfigMigrationArtifactResolution[] = [],
+  ) {
     setBusyAction("正在生成迁移预览…");
     try {
+      const payload: ConfigMigrationPreviewRequest = {
+        artifactResolutions,
+      };
       const response = await requestJson<ConfigMigrationPreview>(
         "/api/config/migration/llm-v2/preview",
-        buildProviderDraftRequest({}),
+        payload,
       );
       setMigrationPreview(response);
     } catch (error) {
@@ -3723,8 +3730,8 @@ export function ConfigRoute() {
                 preview={migrationPreview}
                 aliasUsageCount={workspace.modelAliasUsage.totalLiveReferenceCount}
                 busy={Boolean(busyAction)}
-                onPreview={() => {
-                  void handlePreviewMigration();
+                onPreview={(artifactResolutions) => {
+                  void handlePreviewMigration(artifactResolutions);
                 }}
                 onApply={(previewId, previewBaseHash) => {
                   void handleApplyMigration(previewId, previewBaseHash);
