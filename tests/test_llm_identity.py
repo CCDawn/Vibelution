@@ -78,6 +78,14 @@ def test_model_key_is_stable_and_order_independent() -> None:
     assert make_model_key("Model") != make_model_key("model")
 
 
+def test_model_key_preserves_upstream_whitespace_identity() -> None:
+    upstream_id = " model "
+    expected = f"model~{hashlib.sha256(upstream_id.encode('utf-8')).hexdigest()[:8]}"
+
+    assert make_model_key(upstream_id) == expected
+    assert make_model_key(upstream_id) != make_model_key("model")
+
+
 def test_model_key_rejects_length_without_room_for_slug_and_digest() -> None:
     with pytest.raises(ValueError, match="max_length"):
         make_model_key("safe-model", max_length=9)
