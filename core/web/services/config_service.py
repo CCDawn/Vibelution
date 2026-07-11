@@ -19,13 +19,16 @@ from urllib.parse import urljoin, urlparse
 import httpx
 
 import config.public_config as public_config_module
-from config import LLMProfile, ProviderConfig
+from config import LLMConfig, LLMProfile, ProviderConfig
 from config.models import PROVIDER_API_KEY_ENV_ALIASES, _read_env_var, get_provider_api_key_env
 from config.runtime_capabilities import (
     apply_model_capability_overrides,
     record_model_image_input_capability,
     strip_runtime_model_capability_fields,
 )
+from config.llm_identity import make_model_ref, split_model_ref, validate_provider_id
+from config.llm_provider_registry import pin_llm_model
+from config.model_catalog import load_model_catalog_state, provider_catalog_refresh_due
 from core.chat.chat_task_types import trim_lines
 from core.llm import LLMInvocationContext, invoke_llm
 from core.llm.provider_discovery.service import discover_provider_models
@@ -42,6 +45,7 @@ from config.public_config import (
     inspect_public_config,
     list_llm_model_options,
     list_llm_model_preset_options,
+    list_llm_provider_options,
     list_llm_provider_preset_options,
     load_public_config,
     preserve_secret_blanks,
@@ -1188,6 +1192,188 @@ def _read_raw_public_config() -> str:
         return ""
 
 
+def _catalog_protocol_diagnostic(
+    provider: dict[str, Any],
+    model: dict[str, Any],
+) -> str:
+    protocols = provider.get("protocols", {})
+    protocols = protocols if isinstance(protocols, dict) else {}
+    allowed = {
+        str(item or "").strip().lower().replace("-", "_")
+        for item in protocols.get("allowed", [])
+        if str(item or "").strip()
+    }
+    routes = protocols.get("routes", {})
+    routes = routes if isinstance(routes, dict) else {}
+    upstream_id = str(model.get("upstream_id") or "").strip()
+    configured = str(
+        model.get("wire_protocol")
+        or routes.get(upstream_id)
+        or protocols.get("default")
+        or ""
+    ).strip().lower().replace("-", "_")
+    if configured and allowed and configured not in allowed:
+        return "protocol_mismatch"
+    defaults = model.get("defaults", {})
+    defaults = defaults if isinstance(defaults, dict) else {}
+    strict = bool(model.get("strict_compatibility", defaults.get("strict_compatibility", True)))
+    if strict and not configured:
+        return "protocol_unknown"
+    return ""
+
+
+def summarize_model_catalog(
+    state: dict[str, Any],
+    *,
+    public_config: dict[str, Any],
+) -> dict[str, Any]:
+    llm = public_config.get("llm", {}) if isinstance(public_config, dict) else {}
+    configured_providers = llm.get("providers", {}) if isinstance(llm, dict) else {}
+    catalog_providers = state.get("providers", {}) if isinstance(state, dict) else {}
+    now = datetime.now(timezone.utc).isoformat()
+    providers: dict[str, Any] = {}
+    raw_provider_ids = sorted(
+        set(configured_providers if isinstance(configured_providers, dict) else {})
+        | set(catalog_providers if isinstance(catalog_providers, dict) else {})
+    )
+    provider_ids: list[str] = []
+    for raw_provider_id in raw_provider_ids:
+        try:
+            provider_ids.append(validate_provider_id(str(raw_provider_id)))
+        except ValueError:
+            continue
+    for provider_id in provider_ids[:100]:
+        configured = (
+            configured_providers.get(provider_id, {})
+            if isinstance(configured_providers, dict)
+            else {}
+        )
+        configured = configured if isinstance(configured, dict) else {}
+        catalog = (
+            catalog_providers.get(provider_id, {})
+            if isinstance(catalog_providers, dict)
+            else {}
+        )
+        catalog = catalog if isinstance(catalog, dict) else {}
+        pinned = configured.get("models", {})
+        pinned = pinned if isinstance(pinned, dict) else {}
+        catalog_models = catalog.get("models", {})
+        catalog_models = catalog_models if isinstance(catalog_models, dict) else {}
+        models: dict[str, Any] = {}
+        provider_protocol_status = ""
+        for model_key in sorted(set(pinned) | set(catalog_models))[:500]:
+            try:
+                model_ref = make_model_ref(str(provider_id), str(model_key))
+            except ValueError:
+                continue
+            pinned_model = pinned.get(model_key, {})
+            pinned_model = pinned_model if isinstance(pinned_model, dict) else {}
+            catalog_model = catalog_models.get(model_key, {})
+            catalog_model = catalog_model if isinstance(catalog_model, dict) else {}
+            protocol_status = (
+                _catalog_protocol_diagnostic(configured, pinned_model)
+                if pinned_model
+                else ""
+            )
+            if protocol_status == "protocol_mismatch":
+                provider_protocol_status = "protocol_mismatch"
+            elif protocol_status == "protocol_unknown" and not provider_protocol_status:
+                provider_protocol_status = "blocked"
+            availability = str(
+                catalog_model.get("availability")
+                or ("pinned" if pinned_model else "unknown")
+            )[:64]
+            models[str(model_key)] = {
+                "modelKey": str(model_key),
+                "modelRef": model_ref,
+                "upstreamId": str(
+                    catalog_model.get("upstreamId")
+                    or pinned_model.get("upstream_id")
+                    or model_key
+                )[:256],
+                "label": str(
+                    pinned_model.get("label")
+                    or catalog_model.get("label")
+                    or model_key
+                )[:256],
+                "availability": availability,
+                "status": protocol_status or availability,
+            }
+        status = provider_protocol_status or str(
+            catalog.get("status") or "not_discovered"
+        )[:64]
+        discovery = configured.get("discovery", {})
+        discovery = discovery if isinstance(discovery, dict) else {}
+        try:
+            ttl_seconds = int(discovery.get("cache_ttl_seconds") or 0)
+        except (TypeError, ValueError):
+            ttl_seconds = 0
+        warnings: list[dict[str, Any]] = []
+        for warning in catalog.get("warnings", [])[:20]:
+            if not isinstance(warning, dict):
+                continue
+            warnings.append(
+                {
+                    "code": str(warning.get("code") or "")[:64],
+                    "modelKeys": [
+                        str(item)[:128]
+                        for item in warning.get("modelKeys", [])[:20]
+                    ]
+                    if isinstance(warning.get("modelKeys"), list)
+                    else [],
+                }
+            )
+        providers[str(provider_id)] = {
+            "providerId": str(provider_id),
+            "status": status,
+            "catalogStale": bool(catalog.get("catalogStale")),
+            "refreshDue": provider_catalog_refresh_due(
+                state,
+                str(provider_id),
+                ttl_seconds=max(0, min(ttl_seconds, 86400)),
+                now=now,
+            ),
+            "lastAttemptAt": str(catalog.get("lastAttemptAt") or "")[:64],
+            "lastSuccessAt": str(catalog.get("lastSuccessAt") or "")[:64],
+            "lastErrorType": str(catalog.get("lastErrorType") or "")[:64],
+            "modelCount": len(models),
+            "pinnedCount": len(pinned),
+            "observedCount": sum(
+                1
+                for item in models.values()
+                if item.get("availability") == "observed"
+            ),
+            "models": models,
+            "warnings": warnings,
+        }
+    return {
+        "schemaVersion": int(state.get("schemaVersion") or 2)
+        if isinstance(state, dict)
+        else 2,
+        "providerCount": len(providers),
+        "modelCount": sum(item["modelCount"] for item in providers.values()),
+        "providers": providers,
+    }
+
+
+def _provider_workspace_fields(public_config: dict[str, Any]) -> dict[str, Any]:
+    llm = public_config.get("llm", {}) if isinstance(public_config, dict) else {}
+    try:
+        catalog = load_model_catalog_state()
+    except ValueError:
+        catalog = {"schemaVersion": 2, "providers": {}}
+    return {
+        "schemaVersion": int(llm.get("schema_version") or 1)
+        if isinstance(llm, dict)
+        else 1,
+        "providerOptions": list_llm_provider_options(public_config),
+        "modelCatalog": summarize_model_catalog(
+            catalog,
+            public_config=public_config,
+        ),
+    }
+
+
 def _build_workspace(
     public_config: dict[str, Any],
     *,
@@ -1237,6 +1423,7 @@ def _build_workspace(
         "summary": summary,
         "editorSections": editor_sections,
         "editorMeta": editor_meta,
+        **_provider_workspace_fields(public_config),
         "modelPresetOptions": list_llm_model_preset_options(),
         "providerPresetOptions": list_llm_provider_preset_options(),
         "modelOptions": _decorate_model_options(public_config, normalized_meta),
@@ -2529,6 +2716,123 @@ def open_system_environment_settings() -> dict[str, object]:
     }
 
 
+def _operator_owned_model_refs(public_config: dict[str, Any]) -> list[str]:
+    values: list[Any] = []
+    llm = public_config.get("llm", {}) if isinstance(public_config, dict) else {}
+    profiles = llm.get("profiles", {}) if isinstance(llm, dict) else {}
+    if isinstance(profiles, dict):
+        values.extend(
+            profile.get("model_ref")
+            for profile in profiles.values()
+            if isinstance(profile, dict)
+        )
+    tools = public_config.get("tools", {}) if isinstance(public_config, dict) else {}
+    image2 = tools.get("image2", {}) if isinstance(tools, dict) else {}
+    if isinstance(image2, dict):
+        values.append(image2.get("default_model_ref"))
+    git = public_config.get("git", {}) if isinstance(public_config, dict) else {}
+    if isinstance(git, dict):
+        values.append(git.get("commit_message_model_ref"))
+
+    aliases = llm.get("model_aliases", {}) if isinstance(llm, dict) else {}
+    aliases = aliases if isinstance(aliases, dict) else {}
+    alias_resolver = LLMConfig.model_construct(model_aliases=aliases)
+    refs: set[str] = set()
+    for raw in values:
+        requested = str(raw or "").strip()
+        try:
+            canonical = alias_resolver.resolve_model_ref(requested)
+            provider_id, model_key = split_model_ref(canonical)
+            refs.add(make_model_ref(provider_id, model_key))
+        except ValueError:
+            continue
+    return sorted(refs)
+
+
+def materialize_observed_binding_pins(
+    public_config: dict[str, Any],
+) -> dict[str, Any]:
+    materialized = copy.deepcopy(public_config)
+    llm = materialized.get("llm", {}) if isinstance(materialized, dict) else {}
+    if not isinstance(llm, dict) or int(llm.get("schema_version") or 1) != 2:
+        return materialized
+    providers = llm.get("providers", {})
+    if not isinstance(providers, dict):
+        return materialized
+    unresolved_refs: list[str] = []
+    for model_ref in _operator_owned_model_refs(materialized):
+        provider_id, model_key = split_model_ref(model_ref)
+        provider = providers.get(provider_id)
+        pinned = provider.get("models", {}) if isinstance(provider, dict) else {}
+        if isinstance(provider, dict) and not (
+            isinstance(pinned, dict) and model_key in pinned
+        ):
+            unresolved_refs.append(model_ref)
+    if not unresolved_refs:
+        return materialized
+    try:
+        catalog = load_model_catalog_state()
+    except ValueError:
+        return materialized
+    catalog_providers = catalog.get("providers", {}) if isinstance(catalog, dict) else {}
+    for model_ref in unresolved_refs:
+        provider_id, model_key = split_model_ref(model_ref)
+        provider = providers.get(provider_id)
+        if not isinstance(provider, dict):
+            continue
+        pinned = provider.get("models", {})
+        if isinstance(pinned, dict) and model_key in pinned:
+            continue
+        catalog_provider = (
+            catalog_providers.get(provider_id, {})
+            if isinstance(catalog_providers, dict)
+            else {}
+        )
+        catalog_models = (
+            catalog_provider.get("models", {})
+            if isinstance(catalog_provider, dict)
+            else {}
+        )
+        observed = (
+            catalog_models.get(model_key, {})
+            if isinstance(catalog_models, dict)
+            else {}
+        )
+        if not isinstance(observed, dict) or observed.get("availability") != "observed":
+            continue
+        upstream_id = str(observed.get("upstreamId") or "").strip()
+        if not upstream_id:
+            continue
+        materialized = pin_llm_model(
+            materialized,
+            provider_id,
+            upstream_id=upstream_id,
+            model_key=model_key,
+            label=str(observed.get("label") or upstream_id),
+        )
+        llm = materialized.get("llm", {})
+        providers = llm.get("providers", {}) if isinstance(llm, dict) else {}
+    return materialized
+
+
+def _pinned_provider_model_refs(public_config: dict[str, Any]) -> set[str]:
+    refs: set[str] = set()
+    llm = public_config.get("llm", {}) if isinstance(public_config, dict) else {}
+    providers = llm.get("providers", {}) if isinstance(llm, dict) else {}
+    if not isinstance(providers, dict):
+        return refs
+    for provider_id, provider in providers.items():
+        models = provider.get("models", {}) if isinstance(provider, dict) else {}
+        if not isinstance(models, dict):
+            continue
+        for model_key in models:
+            try:
+                refs.add(make_model_ref(str(provider_id), str(model_key)))
+            except ValueError:
+                continue
+    return refs
+
+
 def apply_config_workspace(
     public_config: dict[str, Any] | None,
     *,
@@ -2555,6 +2859,9 @@ def apply_config_workspace(
     removed_model_ids = _removed_model_ids_from_paths(changed_paths, base_for_summary, submitted)
     for removed_model_id in removed_model_ids:
         _assert_model_delete_workspace_references_allowed(merged, removed_model_id)
+    pinned_before = _pinned_provider_model_refs(merged)
+    merged = materialize_observed_binding_pins(merged)
+    observed_pins = sorted(_pinned_provider_model_refs(merged) - pinned_before)[:50]
     validate_llm_public_config(merged)
     _validate_git_commit_settings(merged)
     optional_unconfigured_profile_ids = _optional_unconfigured_profile_ids(merged)
@@ -2623,6 +2930,8 @@ def apply_config_workspace(
             "addedModelIds": _added_model_ids_from_paths(changed_paths, base_for_summary, submitted),
             "removedModelIds": removed_model_ids,
             "changedModelIds": _changed_model_ids_from_paths(changed_paths, base_for_summary, submitted),
+            "observedPinCount": len(observed_pins),
+            "observedPinnedModelRefs": observed_pins,
             "runtimeConfigReloaded": True,
             "primaryProviderKind": primary_provider.kind,
             "primaryModel": primary_profile.model,
@@ -2647,6 +2956,7 @@ __all__ = [
     "get_agent_model_options_workspace",
     "get_config_summary",
     "get_config_workspace",
+    "materialize_observed_binding_pins",
     "open_system_environment_settings",
     "preview_config_workspace",
     "run_draft_llm_test",

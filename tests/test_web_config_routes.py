@@ -17,6 +17,7 @@ from core.web.control import CONTROL_TOKEN_HEADER, get_control_token
 from core.web.services import (
     config_service,
     log_service,
+    provider_config_service,
     runtime_scene_service,
     runtime_service,
     self_evolution_control_service,
@@ -34,6 +35,73 @@ pytestmark = pytest.mark.serial
 
 
 client = TestClient(create_app(), headers={CONTROL_TOKEN_HEADER: get_control_token()})
+
+
+def test_provider_routes_never_return_submitted_secret(monkeypatch) -> None:
+    submitted = {
+        "llm": {
+            "schema_version": 2,
+            "providers": {
+                "relay_a": {
+                    "label": "Relay A",
+                    "service_class": "relay",
+                    "vendor": "multi_model",
+                    "driver": "openai",
+                    "base_url": "https://relay-a.example/v1",
+                    "auth_kind": "none",
+                    "credential_ref": "none",
+                    "requires_credential": False,
+                    "protocols": {"default": "responses", "allowed": ["responses"]},
+                    "discovery": {"mode": "manual", "adapter": "manual", "cache_ttl_seconds": 0},
+                    "models": {
+                        "base-model": {
+                            "upstream_id": "base-model",
+                            "label": "Base Model",
+                            "enabled": True,
+                        }
+                    },
+                }
+            },
+            "profiles": {
+                "primary": {"model_ref": "relay_a/base-model", "overrides": {}}
+            },
+            "model_aliases": {},
+        }
+    }
+    provider = {
+        "label": "Relay B",
+        "service_class": "relay",
+        "vendor": "multi_model",
+        "driver": "openai",
+        "base_url": "https://relay.example/v1",
+        "auth_kind": "api_key",
+        "credential_ref": "env:VIBELUTION_LLM_PROVIDER_RELAY_B_API_KEY",
+        "requires_credential": True,
+        "protocols": {"default": "responses", "allowed": ["responses"]},
+        "discovery": {
+            "mode": "auto",
+            "adapter": "openai_compatible",
+            "cache_ttl_seconds": 3600,
+        },
+        "models": {},
+    }
+    monkeypatch.setattr(
+        provider_config_service,
+        "load_public_config",
+        lambda: copy.deepcopy(submitted),
+    )
+    response = client.post(
+        "/api/config/draft/providers",
+        json={
+            "publicConfig": submitted,
+            "baseHash": public_config_hash(submitted),
+            "providerId": "relay_b",
+            "provider": provider,
+            "credentialValue": "secret-value",
+        },
+    )
+    assert response.status_code == 200, response.text
+    assert "secret-value" not in response.text
 
 
 @pytest.fixture(autouse=True)
