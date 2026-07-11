@@ -86,6 +86,24 @@ def test_model_key_preserves_upstream_whitespace_identity() -> None:
     assert make_model_key(upstream_id) != make_model_key("model")
 
 
+@pytest.mark.parametrize(
+    ("ascii_id", "compatibility_id"),
+    [
+        (" model ", "\N{NO-BREAK SPACE}model\N{NO-BREAK SPACE}"),
+        ("Model", "\N{FULLWIDTH LATIN CAPITAL LETTER M}odel"),
+        ("model", "\N{FULLWIDTH LATIN SMALL LETTER M}odel"),
+    ],
+)
+def test_model_key_preserves_raw_compatibility_distinctions(
+    ascii_id: str,
+    compatibility_id: str,
+) -> None:
+    compatibility_key = make_model_key(compatibility_id)
+
+    assert compatibility_key.startswith("model~")
+    assert make_model_key(ascii_id) != compatibility_key
+
+
 def test_model_key_rejects_length_without_room_for_slug_and_digest() -> None:
     with pytest.raises(ValueError, match="max_length"):
         make_model_key("safe-model", max_length=9)

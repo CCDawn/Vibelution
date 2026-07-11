@@ -69,9 +69,9 @@ def make_model_key(upstream_id: str, *, max_length: int = 96) -> str:
     if not raw.strip():
         raise ValueError("upstream_id is required")
     exact = unicodedata.normalize("NFKC", raw)
-    if _SAFE_MODEL_KEY_RE.fullmatch(exact) and len(exact) <= max_length:
-        return exact
-    digest = hashlib.sha256(exact.encode("utf-8")).hexdigest()[:8]
+    if _SAFE_MODEL_KEY_RE.fullmatch(raw) and len(raw) <= max_length:
+        return raw
+    digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:8]
     slug = re.sub(r"[^a-z0-9._-]+", "_", exact.lower()).strip("_.-") or "model"
     suffix = f"~{digest}"
     return f"{slug[: max_length - len(suffix)]}{suffix}"
