@@ -91,6 +91,14 @@ def test_provider_draft_add_returns_stable_provider_without_secret(monkeypatch) 
         provider=_provider("env:VIBELUTION_LLM_PROVIDER_RELAY_B_API_KEY"),
         credential_value="secret-value",
     )
+    assert {
+        "publicConfig",
+        "draftMeta",
+        "editorSections",
+        "hash",
+        "providerOptions",
+        "modelCatalog",
+    } <= set(workspace)
     assert workspace["providerOptions"][-1]["provider_id"] == "relay_b"
     assert "credential_ref" not in workspace["providerOptions"][-1]
     assert "secret-value" not in json.dumps(workspace)
