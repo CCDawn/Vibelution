@@ -178,9 +178,13 @@ export function UsageRoute() {
   const agentRollupLabel = summary?.rollupFilters?.agentId || "-";
   const totalTokens = allTimeLoaded.totalTokens;
   const lastSource = lastTokenUsage?.source ?? "not_called";
+  const sourceStatus = initialUsageLoading ? label(lang, "加载中", "Loading") : sourceLabel(lastSource, lang);
   const observedRatio = allTimeLoaded.callCount > 0 ? allTimeLoaded.observedCallCount / allTimeLoaded.callCount : 0;
   const refresh = () => {
     void queryClient.invalidateQueries({ queryKey: queryKeys.usageSummary("global") });
+  };
+  const retry = () => {
+    void usageQuery.refetch();
   };
   const emptyBreakdownLabel = label(
     lang,
@@ -199,9 +203,9 @@ export function UsageRoute() {
           <VStatusStrip
             className={styles.headerMeta}
             items={[
-              { label: label(lang, "来源", "Source"), value: sourceLabel(lastSource, lang), tone: lastSource === "provider_usage" ? "success" : lastSource === "missing" ? "warning" : "info" },
+              { label: label(lang, "来源", "Source"), value: sourceStatus, tone: lastSource === "provider_usage" ? "success" : lastSource === "missing" ? "warning" : "info" },
               { label: label(lang, "刷新", "Refresh"), value: usagePresentation === "refreshing" ? label(lang, "同步中", "Syncing") : label(lang, "自动", "Auto"), tone: usageQuery.isError ? "danger" : "neutral" },
-              { label: label(lang, "账本", "Ledger"), value: summary?.diagnostics?.source ?? "usage_ledger", tone: "info" },
+              { label: label(lang, "账本", "Ledger"), value: initialUsageLoading ? label(lang, "加载中", "Loading") : summary?.diagnostics?.source ?? "usage_ledger", tone: "info" },
             ]}
           />
         )}
@@ -214,13 +218,18 @@ export function UsageRoute() {
           { id: "all-time", label: label(lang, "全局累计", "All time"), value: usageValue(usageValueState, allTime?.totalTokens, label(lang, "正在加载全局累计", "Loading all-time usage")) },
           { id: "today", label: label(lang, "今日", "Today"), value: usageValue(usageValueState, today?.totalTokens, label(lang, "正在加载今日用量", "Loading today's usage")) },
           { id: "last-seven-days", label: label(lang, "最近七日", "Last 7 days"), value: usageValue(usageValueState, last7Days?.totalTokens, label(lang, "正在加载七日用量", "Loading seven-day usage")) },
-          { id: "latest", label: label(lang, "最近一次", "Latest"), value: usageValue(usageValueState, lastTokenUsage?.totalTokens, label(lang, "正在加载最近用量", "Loading latest usage")), detail: formatTimestamp(lastTokenUsage?.recordedAt, lang) },
+          { id: "latest", label: label(lang, "最近一次", "Latest"), value: usageValue(usageValueState, lastTokenUsage?.totalTokens, label(lang, "正在加载最近用量", "Loading latest usage")), detail: initialUsageLoading ? label(lang, "加载中", "Loading") : formatTimestamp(lastTokenUsage?.recordedAt, lang) },
         ]}
-        status={{ label: sourceLabel(lastSource, lang), tone: lastSource === "provider_usage" ? "success" : lastSource === "missing" ? "warning" : "info" }}
+        status={{ label: sourceStatus, tone: lastSource === "provider_usage" ? "success" : lastSource === "missing" ? "warning" : "info" }}
       />
 
       {usagePresentation === "error-with-data" ? (
-        <VStateSurface className={styles.emptyState} title={label(lang, "用量摘要读取失败。", "Usage summary failed to load.")} tone="error">
+        <VStateSurface
+          actions={<VButton type="button" onPress={retry}>{label(lang, "重试", "Retry")}</VButton>}
+          className={styles.emptyState}
+          title={label(lang, "用量摘要读取失败。", "Usage summary failed to load.")}
+          tone="error"
+        >
           {usageQuery.error instanceof Error ? usageQuery.error.message : label(lang, "用量摘要读取失败。", "Usage summary failed to load.")}
         </VStateSurface>
       ) : usageUnavailable ? (
@@ -228,10 +237,18 @@ export function UsageRoute() {
           className={styles.emptyState}
           title={label(lang, "Token 用量暂不可用", "Token usage unavailable")}
           tone="error"
-          actions={<VButton type="button" onPress={() => void usageQuery.refetch()}>{label(lang, "重试", "Retry")}</VButton>}
+          actions={<VButton type="button" onPress={retry}>{label(lang, "重试", "Retry")}</VButton>}
         >
           {usageQuery.error instanceof Error ? usageQuery.error.message : label(lang, "用量摘要读取失败。", "Usage summary failed to load.")}
         </VStateSurface>
+      ) : initialUsageLoading ? (
+        <VStateSurface
+          busy
+          className={styles.emptyState}
+          skeletonLines={2}
+          title={label(lang, "正在加载 Token 用量", "Loading token usage")}
+          tone="loading"
+        />
       ) : !summary || lastSource === "not_called" ? (
         <VStateSurface
           busy={usageQuery.isFetching}
@@ -338,11 +355,15 @@ export function UsageRoute() {
           <div className={styles.panelHeader}>
             <div>
               <p className={styles.panelEyebrow}>{label(lang, "最近记录", "Latest record")}</p>
-              <h2>{sourceLabel(lastSource, lang)}</h2>
+              <h2>{sourceStatus}</h2>
             </div>
             <span className={styles.countPill}>
               <Database size={13} />
-              {usageUnavailable ? label(lang, "不可用", "Unavailable") : summary?.diagnostics?.schemaVersion ?? 1}
+              {usageUnavailable
+                ? label(lang, "不可用", "Unavailable")
+                : initialUsageLoading
+                  ? <VLoadingValue label={label(lang, "正在加载 schema 版本", "Loading schema version")} />
+                  : summary?.diagnostics?.schemaVersion ?? "-"}
             </span>
           </div>
           {!hasUsageData ? (
