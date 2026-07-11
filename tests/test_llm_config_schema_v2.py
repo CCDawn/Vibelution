@@ -43,6 +43,41 @@ def _v2_config() -> dict:
     }
 
 
+def _v2_toml() -> str:
+    return """
+[llm]
+schema_version = 2
+
+[llm.providers.pixel_relay]
+label = "Pixel Relay"
+service_class = "relay"
+vendor = "multi_model"
+driver = "openai"
+base_url = "https://relay.example/v1"
+auth_kind = "api_key"
+credential_ref = "env:VIBELUTION_LLM_PROVIDER_PIXEL_RELAY_API_KEY"
+requires_credential = true
+
+[llm.providers.pixel_relay.protocols]
+default = "responses"
+allowed = ["responses", "chat_completions"]
+
+[llm.providers.pixel_relay.models."gpt-5.6-luna"]
+upstream_id = "gpt-5.6-luna"
+label = "GPT-5.6 Luna"
+
+[llm.providers.pixel_relay.models."gpt-5.6-luna".defaults]
+max_output_tokens = 32000
+timeout = 120
+
+[llm.profiles.primary]
+model_ref = "pixel_relay/gpt-5.6-luna"
+
+[llm.profiles.primary.overrides]
+temperature = 0.4
+""".strip()
+
+
 def test_v2_projection_keeps_one_provider_and_flattens_only_runtime_models() -> None:
     normalized = normalize_public_config_dict(_v2_config())
     assert set(normalized["llm"]["providers"]) == {"pixel_relay"}
@@ -220,41 +255,7 @@ def test_v1_public_config_hash_still_accepts_legacy_model_library() -> None:
 
 def test_v2_config_loader_keeps_credential_lazy_and_secret_out_of_effective_config(tmp_path, monkeypatch) -> None:
     config_path = tmp_path / "config.toml"
-    config_path.write_text(
-        """
-[llm]
-schema_version = 2
-
-[llm.providers.pixel_relay]
-label = "Pixel Relay"
-service_class = "relay"
-vendor = "multi_model"
-driver = "openai"
-base_url = "https://relay.example/v1"
-auth_kind = "api_key"
-credential_ref = "env:VIBELUTION_LLM_PROVIDER_PIXEL_RELAY_API_KEY"
-requires_credential = true
-
-[llm.providers.pixel_relay.protocols]
-default = "responses"
-allowed = ["responses", "chat_completions"]
-
-[llm.providers.pixel_relay.models."gpt-5.6-luna"]
-upstream_id = "gpt-5.6-luna"
-label = "GPT-5.6 Luna"
-
-[llm.providers.pixel_relay.models."gpt-5.6-luna".defaults]
-max_output_tokens = 32000
-timeout = 120
-
-[llm.profiles.primary]
-model_ref = "pixel_relay/gpt-5.6-luna"
-
-[llm.profiles.primary.overrides]
-temperature = 0.4
-""".strip(),
-        encoding="utf-8",
-    )
+    config_path.write_text(_v2_toml(), encoding="utf-8")
     monkeypatch.setenv("VIBELUTION_LLM_PROVIDER_PIXEL_RELAY_API_KEY", "lazy-secret-must-not-materialize")
 
     effective = ConfigLoader(str(config_path)).load()
@@ -266,6 +267,41 @@ temperature = 0.4
     assert provider.credential_ref == "env:VIBELUTION_LLM_PROVIDER_PIXEL_RELAY_API_KEY"
     assert provider.resolve_api_key() == "lazy-secret-must-not-materialize"
     assert "lazy-secret-must-not-materialize" not in repr(effective)
+
+
+@pytest.mark.parametrize(
+    "env_name",
+    [
+        "OPENAI_API_KEY",
+        "AGENT_LLM__PROFILES__PRIMARY__PROVIDER__API_KEY",
+    ],
+)
+def test_v2_config_loader_ignores_legacy_provider_credential_env(env_name: str, tmp_path, monkeypatch) -> None:
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(_v2_toml(), encoding="utf-8")
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("AGENT_LLM__PROFILES__PRIMARY__PROVIDER__API_KEY", raising=False)
+    monkeypatch.setenv(env_name, "legacy-env-secret-must-not-appear")
+
+    effective = ConfigLoader(str(config_path)).load()
+    profile = effective.llm.get_profile("primary")
+    provider = effective.llm.get_provider("pixel_relay")
+
+    assert set(effective.llm.providers) == {"pixel_relay"}
+    assert profile.provider_id == "pixel_relay"
+    assert provider.api_key == ""
+    assert "legacy-env-secret-must-not-appear" not in repr(effective)
+
+
+def test_v2_config_loader_keeps_noncredential_profile_env_override(tmp_path, monkeypatch) -> None:
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(_v2_toml(), encoding="utf-8")
+    monkeypatch.setenv("AGENT_LLM__PROFILES__PRIMARY__TEMPERATURE", "0.25")
+
+    effective = ConfigLoader(str(config_path)).load()
+
+    assert effective.llm.get_profile("primary").temperature == 0.25
+    assert effective.llm.get_profile("primary").provider_id == "pixel_relay"
 
 
 def test_v1_config_loader_still_materializes_legacy_provider_api_key(tmp_path, monkeypatch) -> None:
