@@ -169,6 +169,7 @@ def _artifact_path_suspected(value: str) -> bool:
         or bool(_WINDOWS_ABSOLUTE_RE.match(candidate))
         or candidate.startswith("\\\\")
         or candidate.startswith("/")
+        or candidate.startswith(("./", "../", ".\\", "..\\"))
     )
 
 
@@ -283,19 +284,21 @@ def preview_v1_to_v2(
             conflicts.append({"code": "invalid_model_entry", "modelId": str(model_id)})
             continue
         provider = raw_entry.get("provider") if isinstance(raw_entry.get("provider"), dict) else {}
-        upstream_id = str(raw_entry.get("model") or "").strip()
+        legacy_upstream_id = str(raw_entry.get("model") or "")
+        upstream_id = legacy_upstream_id.strip()
         artifact_path = ""
-        if _artifact_path_suspected(upstream_id):
+        if _artifact_path_suspected(legacy_upstream_id):
             resolution = resolutions.get(str(model_id))
             if resolution is None:
                 conflicts.append({"code": "artifact_path_suspected", "modelId": str(model_id)})
                 continue
             consumed_resolution_ids.add(str(model_id))
-            artifact_path = upstream_id
+            artifact_path = legacy_upstream_id
             if resolution.decision == "preserve_upstream_id":
                 provider_kind = str(provider.get("kind") or "").strip().lower()
                 if provider_kind not in {"local", "local_runtime", "ollama"}:
                     raise ValueError("preserve_upstream_id requires a local provider")
+                upstream_id = legacy_upstream_id
             else:
                 upstream_id = resolution.upstream_id
         adapter, driver = _adapter_and_driver(provider)
