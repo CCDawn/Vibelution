@@ -2334,7 +2334,7 @@ def test_dashscope_qwen_explicit_prompt_cache_adds_history_checkpoint_marker():
     ]
     assert payload["messages"][-1]["role"] == "user"
     assert payload["messages"][-1]["content"] == "current question"
-    assert payload["messages"][-1]["metadata"] == {"schemaVersion": 1, "sourceIndex": 3}
+    assert "metadata" not in payload["messages"][-1]
     cache_marker_count = sum(
         1
         for message in payload["messages"]
