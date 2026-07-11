@@ -53,3 +53,30 @@ def test_unsupported_native_adapter_fails_before_provider_io():
     assert exc_info.value.details["payloadValidationResult"] == "blocked_before_provider"
     assert calls == []
     assert "test-key" not in str(exc_info.value.details)
+
+
+def test_responses_client_uses_registry_encoder_once_and_preserves_runtime_envelope(monkeypatch):
+    client = LLMClient(config=_config(transport="responses"), backend=lambda payload: payload)
+    adapter = client._required_wire_adapter()
+    calls = []
+    original = adapter.encode_request
+
+    def observed(request, *, route):
+        calls.append((request, route))
+        return original(request, route=route)
+
+    monkeypatch.setattr(adapter, "encode_request", observed)
+    payload = client._build_payload(
+        [{"role": "user", "content": "ping"}],
+        stream=True,
+        metadata=_metadata(),
+    )
+
+    assert len(calls) == 1
+    assert calls[0][0].scope.invocation_id == "invocation-1"
+    assert "input" in payload and "messages" not in payload
+    assert payload["api_key"] == "test-key"
+    assert payload["base_url"] == "https://relay.example.test/v1"
+    assert payload["timeout"] is not None
+    assert payload["stream"] is True
+    assert client._last_payload_protocol_summary["wireProtocol"] == "responses"

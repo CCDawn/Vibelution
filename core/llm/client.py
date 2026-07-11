@@ -24,12 +24,15 @@ from .discovery import discover_model
 from .errors import classify_exception
 from .message_projector import message_to_openai_dict as project_message_to_openai_dict
 from .message_projector import normalize_messages_for_provider
-from .payload_builder import PayloadBuildInput, build_llm_payload
+from .payload_builder import PayloadBuildInput, build_llm_payload, compose_runtime_wire_payload
 from .payload_trace import build_llm_payload_trace
 from .payload_validator import payload_protocol_summary
 from .protocol_resolver import resolve_model_protocol
+from .protocols import WireProtocol
 from .reasoning_extractor import extract_reasoning_text, strip_think_tag_reasoning
 from .streaming import ResponsesStreamNormalizer, extract_message_tool_calls, extract_text_content
+from .semantic_messages import SemanticGenerationSettings
+from .semantic_projector import SemanticProjectionInput, project_semantic_request
 from .types import LLMCapabilities, LLMError, StreamChunk, ToolCall, TurnOutcome, UsageStats
 from .usage import read_usage_int as _read_provider_usage_int
 from .usage import usage_stats_from_payload, usage_to_dict
@@ -1287,8 +1290,15 @@ class LLMClient:
             responses_backend=self._responses_backend,
         )
 
-    def _build_payload(self, messages: List[Any], *, tools: Optional[List[Any]] = None, stream: bool = False) -> Dict[str, Any]:
-        self._required_wire_adapter()
+    def _build_payload(
+        self,
+        messages: List[Any],
+        *,
+        tools: Optional[List[Any]] = None,
+        stream: bool = False,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        wire_adapter = self._required_wire_adapter()
         selected_tools = list(self.bound_tools)
         if tools is not None:
             selected_tools = list(tools or [])
@@ -1307,27 +1317,59 @@ class LLMClient:
                 },
             )
         provider_messages = normalize_messages_for_provider(list(messages or []))
-        built = build_llm_payload(
-            PayloadBuildInput(
-                messages=provider_messages,
-                tools=selected_tools,
-                profile=self.profile,
-                provider=self.provider,
-                adapter=self.adapter,
-                route=self.protocol_route,
-                capabilities=self.capabilities,
-                stream=stream,
-                api_key=self.config.get_api_key_for_profile(profile_id=self.profile_id),
-                profile_id=self.profile_id,
-                config=self.config,
-            ),
+        build_input = PayloadBuildInput(
+            messages=provider_messages,
+            tools=selected_tools,
+            profile=self.profile,
+            provider=self.provider,
+            adapter=self.adapter,
+            route=self.protocol_route,
+            capabilities=self.capabilities,
+            stream=stream,
+            api_key=self.config.get_api_key_for_profile(profile_id=self.profile_id),
+            profile_id=self.profile_id,
+            config=self.config,
+        )
+        if self.protocol_route.wire_protocol == WireProtocol.RESPONSES:
+            from .invocation import invocation_scope_from_metadata
+
+            if selected_tools and (
+                not self.capabilities.supports_tool_calling
+                or not self.protocol_route.policy.allow_tools
+            ):
+                raise LLMError(
+                    "capability_error",
+                    f"profile `{self.profile_id}` 不支持 tool calling",
+                    retryable=False,
+                )
+            semantic_request = project_semantic_request(
+                SemanticProjectionInput(
+                    messages=tuple(provider_messages),
+                    tools=tuple(selected_tools),
+                    scope=invocation_scope_from_metadata(metadata),
+                    settings=SemanticGenerationSettings(
+                        max_output_tokens=self.profile.max_output_tokens,
+                        stream=stream,
+                    ),
+                    tool_to_schema=lambda tool: self.adapter.sanitize_tool_schema(_tool_to_schema(tool)),
+                )
+            )
+            wire_payload = wire_adapter.encode_request(semantic_request, route=self.protocol_route)
+            built = compose_runtime_wire_payload(
+                build_input,
+                wire_payload=wire_payload,
+                has_prompt_cache_control=_messages_have_prompt_cache_control(provider_messages),
+            )
+        else:
+            built = build_llm_payload(
+                build_input,
             messages_have_prompt_cache_control=_messages_have_prompt_cache_control,
             strip_cache_control_from_messages=_strip_cache_control_from_messages,
             message_to_openai_dict=_message_to_openai_dict,
             content_blocks_have_image=_content_blocks_have_image,
             convert_content_blocks_for_transport=_convert_content_blocks_for_transport,
             tool_to_schema=_tool_to_schema,
-        )
+            )
         self._last_payload_protocol_summary = dict(built.summary or payload_protocol_summary(built.payload, self.protocol_route))
         return built.payload
 
@@ -1449,7 +1491,7 @@ class LLMClient:
 
     def invoke(self, messages: List[Any], *, tools: Optional[List[Any]] = None, metadata: Optional[Dict[str, Any]] = None) -> AIMessage:
         start = time.time()
-        payload = self._build_payload(messages, tools=tools, stream=False)
+        payload = self._build_payload(messages, tools=tools, stream=False, metadata=metadata)
         provider_conversation_items = _payload_conversation_items(payload) or messages
         message_role_summary = _safe_message_role_summary(provider_conversation_items)
         message_order_summary = _safe_message_order_cache_summary(provider_conversation_items)
@@ -1905,7 +1947,7 @@ class LLMClient:
         from .invocation import invocation_scope_from_metadata
 
         invocation_scope = invocation_scope_from_metadata(metadata)
-        payload = self._build_payload(messages, tools=tools, stream=True)
+        payload = self._build_payload(messages, tools=tools, stream=True, metadata=metadata)
         message_count = len(messages or [])
         effective_tools = tools if tools is not None else self.bound_tools
         tool_count = len(effective_tools or [])
