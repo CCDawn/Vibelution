@@ -20,6 +20,7 @@ from core.infrastructure.atomic_io import atomic_write_text
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 _HISTORICAL_REFERENCE_LIMIT = 50
 _ACTIVE_RUN_STATUSES = {"", "active", "queued", "running", "paused", "stopping", "started", "in_progress"}
+MIGRATION_WRITABLE_RUN_STATUSES = frozenset({"active", "running", "paused"})
 
 
 class ModelReferenceConflictError(ValueError):
@@ -389,6 +390,41 @@ def _active_supervised_snapshot_path(project_root: Path) -> Path | None:
     if status not in _ACTIVE_RUN_STATUSES:
         return None
     return path
+
+
+def _migration_writable_supervised_snapshot_path(project_root: Path) -> Path | None:
+    snapshot = _indexed_supervised_snapshot(project_root)
+    if snapshot is None:
+        return None
+    path, payload = snapshot
+    status = str(payload.get("status") or "").strip().lower()
+    return path if status in MIGRATION_WRITABLE_RUN_STATUSES else None
+
+
+def _migration_historical_indexed_run_refs(
+    mapping: dict[str, str], project_root: Path
+) -> tuple[dict[str, Any], ...]:
+    snapshot = _indexed_supervised_snapshot(project_root)
+    if snapshot is None:
+        return ()
+    path, payload = snapshot
+    status = str(payload.get("status") or "").strip().lower()
+    if status in MIGRATION_WRITABLE_RUN_STATUSES:
+        return ()
+    text = json.dumps(payload, ensure_ascii=False)
+    if not any(model_id in text for model_id in mapping):
+        return ()
+    return (
+        _reference(
+            source="historical_supervised_run",
+            source_path=_display_path(path, project_root),
+            path="$",
+            field="json",
+            owner_type="supervised_artifact",
+            owner_id=_normalized_model_id(payload.get("runId") or path.stem),
+            historical=True,
+        ),
+    )
 
 
 def _scan_active_supervised_run_refs(refs: list[dict[str, Any]], model_id: str, project_root: Path) -> None:
@@ -796,7 +832,7 @@ def build_model_reference_rewrite_plan(
         ("agent_registry", _workspace_path(root, "agent_directory", "agents", "agents.json")),
         ("chat_room_registry", _workspace_path(root, "chat_room", "chat_rooms", "chat_rooms.json")),
     ]
-    active_path = _active_supervised_snapshot_path(root)
+    active_path = _migration_writable_supervised_snapshot_path(root)
     if active_path is not None:
         candidates.append(("active_supervised_run", active_path))
     candidates.extend(("team_live_prompt_cache_policy", path) for path in _team_live_policy_paths(root))
@@ -827,6 +863,9 @@ def build_model_reference_rewrite_plan(
                 project_root=root,
             )["historicalReferences"]
         )
+    for reference in _migration_historical_indexed_run_refs(normalized_mapping, root):
+        if reference not in historical:
+            historical.append(reference)
     return ModelReferenceRewritePlan(
         mapping=normalized_mapping,
         public_config=updated_public,
@@ -1104,6 +1143,7 @@ __all__ = [
     "ModelReferenceConflictError",
     "ModelReferenceFileRewrite",
     "ModelReferenceRewritePlan",
+    "MIGRATION_WRITABLE_RUN_STATUSES",
     "apply_model_reference_rewrite_plan",
     "assert_model_delete_safe",
     "build_model_reference_rewrite_plan",
