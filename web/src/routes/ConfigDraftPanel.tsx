@@ -1,7 +1,7 @@
 import { Database, RefreshCw, RotateCcw } from "lucide-react";
 
 import { LazyJsonCodeMirror } from "../components/editor/LazyJsonCodeMirror";
-import { VButton } from "../components/vui";
+import { VButton, VSection } from "../components/vui";
 import type { ConfigCopy } from "./ConfigRoute";
 import styles from "./ConfigDraftPanel.styles";
 
@@ -29,16 +29,16 @@ export function ConfigDraftPanel({
   onJsonTextChange,
 }: ConfigDraftPanelProps) {
   return (
-    <section id="config-draft" className={styles.sectionSurface}>
-      <div className={styles.sectionHeader}>
-        <div>
-          <p className={styles.eyebrow}>{eyebrow}</p>
-          <h2 className={styles.sectionTitle}>{copy.draftTitle}</h2>
-        </div>
-        <Database size={16} className={styles.sectionIcon} />
-      </div>
-      <p className={styles.sectionText}>{copy.draftBody}</p>
-      <div className={styles.draftWorkbench}>
+    <VSection
+      id="config-draft"
+      className={styles.sectionSurface}
+      headerClassName={styles.sectionHeader}
+      eyebrow={eyebrow}
+      title={copy.draftTitle}
+      actions={<Database size={16} className={styles.sectionIcon} />}
+    >
+        <p className={styles.sectionText}>{copy.draftBody}</p>
+        <div className={styles.draftWorkbench}>
         <div className={styles.draftActionRail}>
           <VButton type="button" className={styles.actionButton} isDisabled={!canCheckCurrentChanges} onClick={onValidateEditorDraft}>
             <RefreshCw size={14} />
@@ -59,7 +59,7 @@ export function ConfigDraftPanel({
         <div className={styles.editorWrap}>
           <LazyJsonCodeMirror value={jsonText} onChange={onJsonTextChange} />
         </div>
-      </div>
-    </section>
+        </div>
+    </VSection>
   );
 }

@@ -1,4 +1,14 @@
-import { describe, expect, it } from "vitest";
+import { isValidElement, type ReactElement, type ReactNode } from "react";
+import { describe, expect, it, vi } from "vitest";
+import {
+  AgentListStatePanel,
+  resolveAgentListPresentation,
+} from "./AgentListStatePanel";
+import {
+  agentSummaryMetricValue,
+  resolveAgentWorkspaceQueryState,
+  resolveAgentWorkspaceSource,
+} from "./AgentsRoute";
 
 // @ts-expect-error Vitest runs this contract in Node; the web project intentionally omits global Node types.
 import { readFileSync } from "node:fs";
@@ -274,16 +284,154 @@ function expectNoLegacySurfaceDebt(styleMap: Record<string, string>, label: stri
   }
 }
 
+function findElement(
+  node: ReactNode,
+  predicate: (element: ReactElement<Record<string, unknown>>) => boolean,
+): ReactElement<Record<string, unknown>> | null {
+  if (!isValidElement<Record<string, unknown>>(node)) {
+    return null;
+  }
+  if (predicate(node)) {
+    return node;
+  }
+  const children = node.props.children;
+  const childList = Array.isArray(children) ? children : [children];
+  for (const child of childList) {
+    const match = findElement(child as ReactNode, predicate);
+    if (match) {
+      return match;
+    }
+  }
+  return null;
+}
+
 describe("AgentsRoute layout contract", () => {
+  it("does not present failed empty summary metrics as nine real zeroes", () => {
+    const failedValues = Array.from({ length: 9 }, () => agentSummaryMetricValue("error-empty", undefined, "不可用"));
+
+    expect(failedValues).toEqual(Array(9).fill("不可用"));
+    expect(failedValues).not.toContain(0);
+    expect(agentSummaryMetricValue("ready", 0, "不可用")).toBe(0);
+  });
+
+  it("keeps summary ownership by default while accepting a successful deep-link workspace", () => {
+    const summary = { source: "summary" };
+    const full = { source: "full" };
+
+    expect(resolveAgentWorkspaceSource({ summary, full, fullWorkspaceNeeded: false })).toBe(summary);
+    expect(resolveAgentWorkspaceSource({ summary, full, fullWorkspaceNeeded: true })).toBe(full);
+    expect(resolveAgentWorkspaceSource({ summary: undefined, full, fullWorkspaceNeeded: true })).toBe(full);
+    expect(resolveAgentWorkspaceSource({ summary, full: undefined, fullWorkspaceNeeded: true })).toBe(summary);
+  });
+
+  it("keeps summary rows visible while surfacing a failed required full workspace", () => {
+    expect(resolveAgentWorkspaceQueryState({
+      hasSummary: true,
+      hasFull: false,
+      fullWorkspaceNeeded: true,
+      summaryError: false,
+      fullError: true,
+    })).toEqual({ hasWorkspace: true, initialError: false, backgroundError: true, errorOwner: "full" });
+  });
+
+  it("keeps stale Agent data visible during refresh and background errors", () => {
+    expect(resolveAgentListPresentation({ hasWorkspace: true, isPending: false, isFetching: true, isError: false })).toBe("refreshing");
+    expect(resolveAgentListPresentation({ hasWorkspace: true, isPending: false, isFetching: false, isError: true })).toBe("error-with-data");
+  });
+
+  it("keeps background status visible when the retained Agent list is empty", () => {
+    const baseProps = {
+      copy: {
+        loadFailed: "加载失败",
+        loading: "加载中",
+        noAgents: "暂无 Agent",
+        retry: "重试",
+        refreshing: "正在更新",
+        staleError: "更新失败，继续显示已有数据",
+        model: "模型",
+        prompt: "提示词",
+        runtimeStatus: "运行状态",
+        modeMembership: "模式",
+        statusReminders: "提醒",
+      },
+      columns: [],
+      visibleAgentCount: 0,
+      error: new Error("full workspace failed"),
+      isPending: false,
+      hasWorkspace: true,
+      onRetry: vi.fn(),
+      onSelectRow: vi.fn(),
+      onToggleBulk: vi.fn(),
+    };
+    const trees = [
+      AgentListStatePanel({ ...baseProps, isError: true, isFetching: false }),
+      AgentListStatePanel({ ...baseProps, isError: false, isFetching: true }),
+    ];
+
+    for (const tree of trees) {
+      expect(findElement(tree, (element) => element.props.role === "status")).toBeTruthy();
+      expect(findElement(tree, (element) => element.props.title === "暂无 Agent")).toBeTruthy();
+    }
+  });
+
+  it("wires the Agent list error retry control to the supplied callback", () => {
+    const onRetry = vi.fn();
+    const tree = AgentListStatePanel({
+      copy: {
+        loadFailed: "加载失败",
+        loading: "加载中",
+        noAgents: "暂无 Agent",
+        retry: "重试",
+        refreshing: "正在更新",
+        staleError: "更新失败，继续显示已有数据",
+        model: "模型",
+        prompt: "提示词",
+        runtimeStatus: "运行状态",
+        modeMembership: "模式",
+        statusReminders: "提醒",
+      },
+      columns: [],
+      visibleAgentCount: 0,
+      isError: true,
+      error: new Error("network down"),
+      isPending: false,
+      isFetching: false,
+      hasWorkspace: false,
+      onRetry,
+      onSelectRow: vi.fn(),
+      onToggleBulk: vi.fn(),
+    });
+    const retryButton = findElement(tree, (element) => element.props.onPress === onRetry);
+
+    expect(retryButton).toBeTruthy();
+    retryButton?.props.onPress();
+    expect(onRetry).toHaveBeenCalledOnce();
+  });
   it("loads the read-only Agent config workspace endpoint", () => {
     expect(routeSource).toContain("fetchJson<AgentConfigWorkspaceWithTeamIndexes>(\"/api/agents/config-workspace?includeRuntime=false\")");
     expect(routeSource).toContain("fetchJson<AgentConfigWorkspaceAgent[]>(\"/api/agents?includeArchived=true&detail=summary\")");
     expect(routeSource).toContain("queryKeys.agentSummary(true)");
     expect(routeSource).toContain("queryKeys.agentConfigWorkspace()");
-    expect(routeSource).toContain("const workspace = workspaceQuery.data ?? lightweightWorkspace");
+    expect(routeSource).toContain("const workspace = resolveAgentWorkspaceSource({");
     expect(routeSource).toContain('const fullWorkspaceNeeded = Boolean(createOpen || activePane === "config" || activePane === "activity" || requestedAgentId)');
     expect(routeSource).toContain("enabled: fullWorkspaceNeeded");
     expect(routeSource).toContain("staleTime: 10_000");
+  });
+
+  it("binds the initial Agent list to the active summary/full-workspace data sources", () => {
+    expect(routeSource).toContain("agentWorkspaceInitialLoading");
+    expect(routeSource).toContain("agentWorkspaceInitialError");
+    expect(routeSource).toContain("agentSummaryQuery.isError");
+    expect(routeSource).toContain("agentSummaryQuery.isPending");
+    expect(routeSource).toContain("<VLoadingValue");
+    expect(routeSource).not.toContain("isError: workspaceQuery.isError,");
+    expect(routeSource).not.toContain("isPending: workspaceQuery.isPending,");
+  });
+
+  it("keeps real zero distinct from an unresolved Agent summary", () => {
+    expect(routeSource).toContain("agentSummaryInitialLoading");
+    expect(routeSource).toContain("loadingAgentMetricValue");
+    expect(agentSummaryMetricValue("ready", 0, "不可用")).toBe(0);
   });
 
   it("uses the lightweight shell language source instead of the full app dictionary", () => {
@@ -348,6 +496,7 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("return safeReturnToPath(value)");
     expect(routeSource).toContain("const routeTargetKey = requestedAgentId ? `${requestedAgentId}:${requestedPane}` : \"\"");
     expect(routeSource).toContain("workspace.agents.find((agent) => agent.agentId === requestedAgentId)");
+    expect(routeSource).toContain("if (requestedAgentId && !workspaceQuery.data)");
     expect(routeSource).toContain("setSelectedAgentId(targetAgent.agentId)");
     expect(routeSource).toContain("setActivePane(requestedPane)");
     expect(routeSource).toContain('setActiveFilter(targetAgent.status === "archived" ? "archived" : "active")');

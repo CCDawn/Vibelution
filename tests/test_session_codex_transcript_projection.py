@@ -417,3 +417,41 @@ def test_assistant_delta_publish_exposes_codex_like_turn_items(monkeypatch):
     assert event["turnItems"][1]["status"] == "running"
     assert event["turnItems"][1]["title"] == "cli_tool"
     assert event["turnItems"][1]["sourceCellId"] == event["codexTranscript"]["cells"][0]["id"]
+
+
+def test_turn_items_projection_prefers_explicit_canonical_v2(monkeypatch):
+    canonical = {
+        "version": 2,
+        "id": "answer-1:0",
+        "type": "assistant_message",
+        "sessionId": "session-live",
+        "turnId": "turn-1",
+        "invocationId": "inv-1",
+        "iteration": 0,
+        "itemId": "answer-1",
+        "revision": 0,
+        "sequence": 4,
+        "kind": "assistant_message",
+        "channel": "answer",
+        "phase": "final_answer",
+        "status": "completed",
+        "protocol": "responses",
+        "provisional": False,
+        "terminal": True,
+        "text": "最终答案",
+    }
+    monkeypatch.setattr(session_service, "load_conversation_events", lambda *_args, **_kwargs: [object()])
+    monkeypatch.setattr(
+        session_service,
+        "conversation_turn_items_from_events",
+        lambda _events, *, turn_id="": [canonical] if turn_id == "turn-1" else [],
+    )
+
+    items = session_service._build_session_turn_items_projection(
+        session_id="session-live",
+        turn_id="turn-1",
+        message_id="legacy-message",
+        content="legacy text",
+    )
+
+    assert items == [canonical]

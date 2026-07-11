@@ -20,6 +20,7 @@ from .payload_validator import assert_payload_valid
 from .schema import sanitize_tool_schema
 from .streaming import extract_text_content
 from .types import LLMCapabilities, LLMError
+from .wire.types import BuiltPayload as WireBuiltPayload
 
 
 @dataclass
@@ -912,10 +913,129 @@ def build_llm_payload(
     return BuiltPayload(payload=payload, route=route, summary=summary, warnings=route.warnings)
 
 
+def compose_runtime_wire_payload(
+    build_input: PayloadBuildInput,
+    *,
+    wire_payload: WireBuiltPayload,
+    has_prompt_cache_control: bool = False,
+) -> BuiltPayload:
+    """Attach runtime-owned transport fields without rewriting protocol content."""
+
+    profile = build_input.profile
+    route = build_input.route
+    adapter = build_input.adapter
+    actions = PayloadPolicyActions()
+    if route.policy.system_message_policy == "first_only_rest_user":
+        system_count = sum(
+            1
+            for message in build_input.messages
+            if str(
+                (message.get("role") if isinstance(message, dict) else getattr(message, "type", ""))
+                or ""
+            ).strip().lower() in {"system"}
+        )
+        actions.system_messages_converted = max(0, system_count - 1)
+    if not route.compat.reasoning_roundtrip:
+        actions.reasoning_content_stripped = _outgoing_reasoning_content_count(build_input.messages)
+    if not route.policy.allow_assistant_prefill:
+        actions.empty_assistant_prefill_removed = sum(
+            1
+            for message in build_input.messages
+            if str(
+                (message.get("role") if isinstance(message, dict) else getattr(message, "type", ""))
+                or ""
+            ).strip().lower() in {"assistant", "ai"}
+            and not extract_text_content(
+                message.get("content") if isinstance(message, dict) else getattr(message, "content", "")
+            ).strip()
+        )
+    if build_input.tools and (
+        route.policy.tool_schema_policy == "minimal"
+        or route.compat.strict_message_keys
+    ):
+        actions.minimal_tool_schema = True
+    prompt_cache_mode = str(
+        getattr(getattr(profile, "prompt_cache", None), "mode", "") or "disabled"
+    ).strip().lower()
+    actions.prompt_cache_provider_strategy = _prompt_cache_provider_strategy(
+        build_input,
+        prompt_cache_mode,
+    )
+    if has_prompt_cache_control and prompt_cache_mode == "unsupported":
+        raise LLMError(
+            "prompt_cache_unsupported",
+            f"profile `{build_input.profile_id}` does not support explicit prompt cache control",
+            retryable=False,
+            provider=str(build_input.provider.kind or ""),
+            model=str(profile.model or ""),
+            details={
+                "profile_id": build_input.profile_id,
+                "provider_kind": str(build_input.provider.kind or ""),
+                "prompt_cache_mode": prompt_cache_mode,
+                "payloadValidationResult": "blocked_before_provider",
+            },
+        )
+
+    payload = dict(wire_payload.body)
+    payload["model"] = adapter.litellm_model_name()
+    payload["timeout"] = _provider_timeout(profile)
+    payload["api_key"] = build_input.api_key
+    payload["base_url"] = wire_payload.endpoint or route.runtime_endpoint
+    payload.update(adapter.payload_sampling_parameters())
+    payload.update(adapter.payload_thinking_parameters())
+    thinking_payload = _payload_thinking_parameters(profile, build_input.provider, route, actions)
+    thinking_extra_body = thinking_payload.pop("extra_body", None)
+    payload.update(thinking_payload)
+    _merge_extra_body(payload, thinking_extra_body)
+
+    prompt_cache = getattr(profile, "prompt_cache", None)
+    if prompt_cache_mode == "automatic":
+        prompt_cache_key = str(getattr(prompt_cache, "key", "") or "").strip()
+        prompt_cache_retention = str(getattr(prompt_cache, "retention", "") or "").strip()
+        if not prompt_cache_key:
+            prompt_cache_key = _default_prompt_cache_key(build_input)
+        if not prompt_cache_retention:
+            prompt_cache_retention = _default_prompt_cache_retention(
+                actions.prompt_cache_provider_strategy,
+                model=str(getattr(profile, "model", "") or ""),
+            )
+        if prompt_cache_key:
+            payload["prompt_cache_key"] = prompt_cache_key
+        if prompt_cache_retention:
+            payload["prompt_cache_retention"] = prompt_cache_retention
+    if build_input.stream and adapter.supports_stream_usage_options() and route.compat.stream_usage_options:
+        payload["stream_options"] = {"include_usage": True}
+    headers = dict(wire_payload.headers)
+    headers.update(build_input.provider.extra_headers or {})
+    if headers:
+        payload["extra_headers"] = headers
+
+    try:
+        validation_summary = assert_payload_valid(payload, route)
+    except LLMError as exc:
+        details = dict(exc.details or {})
+        details.update(actions.to_log_dict())
+        details.update(_payload_message_snapshot(payload))
+        raise LLMError(
+            exc.category,
+            str(exc),
+            retryable=exc.retryable,
+            provider=exc.provider,
+            model=exc.model,
+            details=details,
+        ) from exc
+    summary = route.log_summary()
+    summary.update(validation_summary)
+    summary.update(actions.to_log_dict())
+    summary.update(_payload_message_snapshot(payload))
+    return BuiltPayload(payload=payload, route=route, summary=summary, warnings=route.warnings)
+
+
 __all__ = [
     "BuiltPayload",
     "PayloadBuildInput",
     "build_llm_payload",
+    "compose_runtime_wire_payload",
     "current_prompt_cache_partition",
     "prompt_cache_partition_scope",
     "reset_prompt_cache_partition",

@@ -15,9 +15,9 @@ const styles = {
   compactActionGroup:
     "inline-flex [align-items:center] [gap:6px] min-w-0",
   compactIconAction:
-    `${actionSurface} inline-flex w-9 [align-items:center] [justify-content:center] [gap:7px] [min-height:34px] [width:36px] [padding:0] disabled:[cursor:not-allowed] disabled:[color:var(--fg-tertiary)] disabled:[opacity:0.52]`,
+    `${actionSurface} inline-flex w-9 [align-items:center] [justify-content:center] [gap:7px] [min-height:34px] [width:36px] [padding:0] data-[disabled=true]:[cursor:not-allowed] data-[disabled=true]:[color:var(--fg-tertiary)] data-[disabled=true]:[opacity:0.52]`,
   compactTextAction:
-    `${actionSurface} inline-flex [align-items:center] [justify-content:center] [gap:6px] [min-height:32px] [width:fit-content] [max-width:160px] [padding:0_9px] [white-space:nowrap] [overflow:hidden] [text-overflow:ellipsis] disabled:[cursor:not-allowed] disabled:[color:var(--fg-tertiary)] disabled:[opacity:0.52]`,
+    `${actionSurface} inline-flex [align-items:center] [justify-content:center] [gap:6px] [min-height:32px] [width:fit-content] [max-width:160px] [padding:0_9px] [white-space:nowrap] [overflow:hidden] [text-overflow:ellipsis] data-[disabled=true]:[cursor:not-allowed] data-[disabled=true]:[color:var(--fg-tertiary)] data-[disabled=true]:[opacity:0.52]`,
   detailSection:
     "[&_p]:[margin:0] [&_p]:[color:var(--fg-secondary)] [&_p]:[line-height:1.6] grid [border-top:1px_solid_var(--border-hairline)] [gap:6px] [padding-top:10px] [margin-top:10px]",
   detailSectionCompact:

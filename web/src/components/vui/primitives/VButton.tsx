@@ -17,6 +17,7 @@ export type VButtonProps = Omit<
   ButtonProps,
   "variant" | "color" | "size" | "startContent" | "endContent"
 > & {
+  contentLayout?: "label" | "plain";
   variant?: VuiButtonVariant;
   density?: VuiDensity;
   icon?: ReactNode;
@@ -53,9 +54,13 @@ function hasExplicitRootWidth(className: VButtonProps["className"]): boolean {
   });
 }
 
-function buttonGeometryClass(className: VButtonProps["className"]): string {
+function buttonGeometryClass(
+  className: VButtonProps["className"],
+  contentLayout: NonNullable<VButtonProps["contentLayout"]>,
+): string {
   return [
-    "inline-flex max-w-full shrink-0 justify-self-start whitespace-nowrap",
+    "inline-flex max-w-full shrink-0 justify-self-start",
+    contentLayout === "label" ? "whitespace-nowrap" : null,
     hasExplicitRootWidth(className) ? null : "w-fit",
   ]
     .filter(Boolean)
@@ -63,6 +68,7 @@ function buttonGeometryClass(className: VButtonProps["className"]): string {
 }
 
 export function VButton({
+  contentLayout = "label",
   variant = "secondary",
   density = "compact",
   icon,
@@ -84,38 +90,46 @@ export function VButton({
       size={vuiControlHeight(density)}
       className={[
         variantClass(variant),
-        buttonGeometryClass(className),
+        buttonGeometryClass(className, contentLayout),
         "min-w-0 px-2 text-[var(--vui-font-sm)] font-semibold",
         className,
       ]
         .filter(Boolean)
         .join(" ")}
     >
-      <span
-        data-slot="vui-button-content"
-        title={title}
-        className="inline-flex min-w-0 max-w-full items-center justify-center gap-1.5"
-      >
-        {icon ? (
-          <span data-slot="vui-button-icon" className="inline-grid shrink-0 place-items-center">
-            {icon}
-          </span>
-        ) : null}
-        {isIconOnly && children ? (
-          <span data-slot="vui-button-icon" className="inline-grid shrink-0 place-items-center">
-            {children}
-          </span>
-        ) : children ? (
-          <span data-slot="vui-button-label" className="min-w-0 truncate whitespace-nowrap">
-            {children}
-          </span>
-        ) : null}
-        {trailingIcon ? (
-          <span data-slot="vui-button-trailing-icon" className="inline-grid shrink-0 place-items-center">
-            {trailingIcon}
-          </span>
-        ) : null}
-      </span>
+      {contentLayout === "plain" ? (
+        <>
+          {icon}
+          {children}
+          {trailingIcon}
+        </>
+      ) : (
+        <span
+          data-slot="vui-button-content"
+          title={title}
+          className="inline-flex min-w-0 max-w-full items-center justify-center gap-1.5"
+        >
+          {icon ? (
+            <span data-slot="vui-button-icon" className="inline-grid shrink-0 place-items-center">
+              {icon}
+            </span>
+          ) : null}
+          {isIconOnly && children ? (
+            <span data-slot="vui-button-icon" className="inline-grid shrink-0 place-items-center">
+              {children}
+            </span>
+          ) : children ? (
+            <span data-slot="vui-button-label" className="min-w-0 truncate whitespace-nowrap">
+              {children}
+            </span>
+          ) : null}
+          {trailingIcon ? (
+            <span data-slot="vui-button-trailing-icon" className="inline-grid shrink-0 place-items-center">
+              {trailingIcon}
+            </span>
+          ) : null}
+        </span>
+      )}
     </Button>
   );
 }

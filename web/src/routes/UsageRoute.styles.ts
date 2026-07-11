@@ -17,7 +17,7 @@ const styles = {
   headerMeta:
     "min-w-0 max-w-full flex flex-wrap items-center gap-1 max-[720px]:w-full [&_[data-vui=\"status-strip-item\"]]:max-w-full [&_[data-vui=\"status-strip-item\"]]:grid-cols-[auto_minmax(0,1fr)] [&_[data-vui=\"status-strip-item\"]_span]:min-w-0 [&_[data-vui=\"status-strip-item\"]_span]:overflow-hidden [&_[data-vui=\"status-strip-item\"]_span]:text-ellipsis [&_[data-vui=\"status-strip-item\"]_span]:whitespace-nowrap",
   overviewBand:
-    "mx-3 mt-2 min-w-0 max-w-full overflow-x-auto",
+    "mx-3 mt-2 min-h-[58px] min-w-0 max-w-full overflow-x-auto",
   emptyState:
     "mx-3 mt-2 min-w-0 max-w-full",
   metricBand:
@@ -39,7 +39,7 @@ const styles = {
   sourceGrid:
     "grid min-w-0 max-w-full grid-cols-[repeat(2,minmax(0,1fr))] gap-1 max-[520px]:grid-cols-1",
   sourceTile:
-    `grid min-w-0 max-w-full gap-0.5 ${rowSurface} px-2 py-1.5 [&_span]:min-w-0 [&_span]:overflow-hidden [&_span]:text-ellipsis [&_span]:whitespace-nowrap [&_span]:text-[var(--vui-font-xs)] [&_span]:text-vui-fg-tertiary [&_strong]:min-w-0 [&_strong]:overflow-hidden [&_strong]:text-ellipsis [&_strong]:whitespace-nowrap [&_strong]:text-[0.9rem] [&_strong]:leading-tight [&_strong]:text-vui-fg-primary`,
+    `grid min-h-[50px] min-w-0 max-w-full gap-0.5 ${rowSurface} px-2 py-1.5 [&_span]:min-w-0 [&_span]:overflow-hidden [&_span]:text-ellipsis [&_span]:whitespace-nowrap [&_span]:text-[var(--vui-font-xs)] [&_span]:text-vui-fg-tertiary [&_strong]:min-w-0 [&_strong]:overflow-hidden [&_strong]:text-ellipsis [&_strong]:whitespace-nowrap [&_strong]:text-[0.9rem] [&_strong]:leading-tight [&_strong]:text-vui-fg-primary`,
   sourceTileObserved:
     "border-[color-mix(in_srgb,var(--state-success)_30%,transparent)] bg-[color-mix(in_srgb,var(--state-success)_8%,var(--vui-surface-row))]",
   sourceTileEstimated:

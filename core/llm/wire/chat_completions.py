@@ -14,6 +14,7 @@ from ..semantic_messages import (
     ImagePart,
     InvocationScope,
     ReasoningReplayPart,
+    ReasoningTextPart,
     SemanticMessage,
     SemanticModelRequest,
     TextPart,
@@ -119,7 +120,8 @@ class ChatCompletionsWireAdapter:
                 }
                 for tool in request.tools
             ]
-            payload["tool_choice"] = request.settings.tool_choice
+            if request.settings.tool_choice != "omit":
+                payload["tool_choice"] = request.settings.tool_choice
         if request.settings.temperature is not None:
             payload["temperature"] = request.settings.temperature
         if request.settings.top_p is not None:
@@ -192,12 +194,19 @@ class ChatCompletionsWireAdapter:
         content_blocks: list[dict[str, Any]] = []
         tool_calls: list[dict[str, Any]] = []
         standalone: list[dict[str, Any]] = []
+        reasoning_text_parts: list[str] = []
         for part in message.parts:
             if isinstance(part, TextPart):
                 text_parts.append(part.text)
-                content_blocks.append({"type": "text", "text": part.text})
+                block = {"type": "text", "text": part.text}
+                if part.cache_hint is not None:
+                    block["cache_control"] = {"type": part.cache_hint.mode}
+                content_blocks.append(block)
             elif isinstance(part, ImagePart):
-                content_blocks.append({"type": "image_url", "image_url": {"url": part.uri}})
+                block = {"type": "image_url", "image_url": {"url": part.uri}}
+                if part.cache_hint is not None:
+                    block["cache_control"] = {"type": part.cache_hint.mode}
+                content_blocks.append(block)
             elif isinstance(part, ToolCallPart):
                 tool_calls.append(
                     {
@@ -222,19 +231,26 @@ class ChatCompletionsWireAdapter:
                 if not isinstance(provider_message, dict):
                     raise ValueError("reasoning replay item must decode to an object")
                 standalone.append(provider_message)
+            elif isinstance(part, ReasoningTextPart):
+                reasoning_text_parts.append(part.text)
         primary: list[dict[str, Any]] = []
         if text_parts or content_blocks or tool_calls:
-            has_image = any(block.get("type") == "image_url" for block in content_blocks)
+            has_structured_content = any(
+                block.get("type") == "image_url" or block.get("cache_control")
+                for block in content_blocks
+            )
             payload: dict[str, Any] = {
                 "role": message.role,
-                "content": content_blocks if has_image else "".join(text_parts),
+                "content": content_blocks if has_structured_content else "".join(text_parts),
             }
             if tool_calls:
                 payload["tool_calls"] = tool_calls
+            if reasoning_text_parts:
+                payload["reasoning_content"] = "".join(reasoning_text_parts)
             primary.append(
                 message_to_openai_dict(
                     payload,
-                    preserve_structured_content=has_image,
+                preserve_structured_content=has_structured_content,
                     preserve_reasoning_content=True,
                 )
             )

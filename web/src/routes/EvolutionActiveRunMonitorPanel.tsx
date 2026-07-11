@@ -9,7 +9,7 @@ import {
   TriangleAlert,
 } from "lucide-react";
 
-import { VNativeButton } from "../components/vui";
+import { VButton } from "../components/vui";
 import { type SupervisedRunControlSummary } from "./supervisedRunSummary";
 import styles from "./EvolutionActiveRunMonitorPanel.styles";
 
@@ -158,16 +158,16 @@ function EvolutionActiveRunClosedLoopLedgerPanel({
         {ledger.evidence.map((item) => renderMetric(item, ""))}
       </div>
       <div className={styles.actionRow}>
-        <VNativeButton
+        <VButton
           type="button"
           className={styles.inlineAction}
-          disabled={ledger.action.disabled}
+          isDisabled={ledger.action.disabled}
           onClick={ledger.action.onClick}
           title={ledger.action.title}
         >
           <LibraryBig size={15} />
           {ledger.action.label}
-        </VNativeButton>
+        </VButton>
       </div>
     </div>
   );
@@ -203,29 +203,30 @@ export function EvolutionActiveRunMonitorPanel({
         <div className={styles.runMonitorDense}>
           <div className={styles.liveRunToolbar}>
             <div className={styles.compactActionGroup}>
-              <VNativeButton
+              <VButton
                 type="button"
+                variant="danger"
                 className={styles.compactIconAction}
-                disabled={run.termination.disabled || run.termination.pending}
+                isDisabled={run.termination.disabled || run.termination.pending}
                 title={run.termination.title}
                 onClick={run.termination.onClick}
                 aria-label={run.termination.ariaLabel}
               >
                 {run.termination.pending ? <LoaderCircle size={15} /> : <Square size={15} />}
-              </VNativeButton>
+              </VButton>
             </div>
             <div className={styles.compactActionGroup}>
               {run.openSessionAction ? (
-                <VNativeButton
+                <VButton
                   type="button"
                   className={styles.compactTextAction}
-                  disabled={run.openSessionAction.disabled}
+                  isDisabled={run.openSessionAction.disabled}
                   onClick={run.openSessionAction.onClick}
                   title={run.openSessionAction.title}
                 >
                   <Activity size={15} />
                   {run.openSessionAction.label}
-                </VNativeButton>
+                </VButton>
               ) : null}
             </div>
           </div>
@@ -283,26 +284,26 @@ export function EvolutionActiveRunMonitorPanel({
             {idle.related.map((metric) => renderMetric(metric, styles.relatedRow))}
           </div>
           <div className={styles.actionRow}>
-            <VNativeButton
+            <VButton
               type="button"
               className={styles.inlineAction}
-              disabled={idle.latestRunAction.disabled}
+              isDisabled={idle.latestRunAction.disabled}
               onClick={idle.latestRunAction.onClick}
               title={idle.latestRunAction.title}
             >
               <Activity size={15} />
               {idle.latestRunAction.label}
-            </VNativeButton>
-            <VNativeButton
+            </VButton>
+            <VButton
               type="button"
               className={styles.inlineAction}
-              disabled={idle.libraryAction.disabled}
+              isDisabled={idle.libraryAction.disabled}
               onClick={idle.libraryAction.onClick}
               title={idle.libraryAction.title}
             >
               <LibraryBig size={15} />
               {idle.libraryAction.label}
-            </VNativeButton>
+            </VButton>
           </div>
         </div>
       )}

@@ -6,7 +6,7 @@ const styles = {
   actionRow:
     "flex [flex-wrap:wrap] [gap:6px]",
   batchToggle:
-    "inline-flex [align-items:center] [gap:8px] [color:var(--fg-tertiary)] [font-size:var(--vui-font-xs)] [&_input]:[width:15px] [&_input]:[height:15px]",
+    "[color:var(--fg-tertiary)] [font-size:var(--vui-font-xs)] [&_[data-slot=checkbox]]:[width:15px] [&_[data-slot=checkbox]]:[height:15px]",
   bulkToolbar:
     "flex [align-items:center] [justify-content:space-between] [gap:8px] [flex-wrap:wrap]",
   bulkToolbarHint:
@@ -42,7 +42,7 @@ const styles = {
   feedbackText:
     "[margin:0] [color:var(--fg-secondary)] [line-height:1.55] [white-space:pre-wrap]",
   inlineAction:
-    `${actionSurface} [justify-self:end] min-w-0 [max-width:100%] inline-flex [align-items:center] [justify-content:center] [gap:6px] [width:fit-content] [min-height:30px] [padding:0_9px] [font-size:var(--vui-font-xs)]`,
+    `${actionSurface} [justify-self:end] min-w-0 [max-width:100%] inline-flex [align-items:center] [justify-content:center] [gap:6px] [width:fit-content] [min-height:30px] [padding:0_9px] [font-size:var(--vui-font-xs)] data-[disabled=true]:[opacity:0.52]`,
   listRowTop:
     "flex [align-items:center] [justify-content:space-between] [gap:8px]",
   metaRow:

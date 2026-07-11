@@ -4,6 +4,7 @@ export type VSectionProps = ComponentPropsWithoutRef<"section"> & {
   actions?: ReactNode;
   children: ReactNode;
   eyebrow?: ReactNode;
+  headerClassName?: string;
   meta?: ReactNode;
   title: ReactNode;
 };
@@ -13,6 +14,7 @@ export function VSection({
   children,
   className,
   eyebrow,
+  headerClassName,
   meta,
   title,
   ...props
@@ -23,7 +25,14 @@ export function VSection({
       data-vui="section"
       className={["grid min-w-0 gap-2", className].filter(Boolean).join(" ")}
     >
-      <header className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-start gap-2">
+      <header
+        className={[
+          "grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-start gap-2",
+          headerClassName,
+        ]
+          .filter(Boolean)
+          .join(" ")}
+      >
         <div className="grid min-w-0 gap-0.5">
           {eyebrow ? (
             <span className="truncate text-[var(--vui-font-xs)] font-semibold uppercase tracking-[0.06em] text-vui-fg-tertiary">

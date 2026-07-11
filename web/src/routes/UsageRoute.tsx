@@ -5,7 +5,8 @@ import { fetchJson } from "../api/client";
 import { queryKeys } from "../api/queryKeys";
 import type { TokenUsageBreakdownItem, TokenUsageRollup, UsageSource, UsageSummaryResponse } from "../api/types";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
-import { VIconButton, VMetricStrip, VRouteHeader, VStateSurface, VStatusStrip, VSurface } from "../components/vui";
+import { deriveQueryPresentation } from "../app/queryPresentation";
+import { VButton, VIconButton, VLoadingValue, VMetricStrip, VRouteHeader, VStateSurface, VStatusStrip, VSurface } from "../components/vui";
 import { useAppI18n } from "../i18n/useAppI18n";
 import styles from "./UsageRoute.styles";
 
@@ -75,10 +76,6 @@ function sourceLabel(source: UsageSource, lang: "zh" | "en") {
   return String(source || "-").replaceAll("_", " ");
 }
 
-function rollupOrEmpty(rollup: TokenUsageRollup | undefined): TokenUsageRollup {
-  return rollup ?? EMPTY_ROLLUP;
-}
-
 function sourceCount(rollup: TokenUsageRollup, source: UsageSource) {
   if (source === "provider_usage") {
     return rollup.observedCallCount;
@@ -106,6 +103,13 @@ function sourceClassName(source: UsageSource) {
     return `${styles.sourceTile} ${styles.sourceTileMissing}`;
   }
   return `${styles.sourceTile} ${styles.sourceTileEmpty}`;
+}
+
+function usageValue(state: boolean | "unavailable", value: number | undefined, loadingLabel: string) {
+  if (state === "unavailable") {
+    return "不可用";
+  }
+  return state ? <VLoadingValue label={loadingLabel} /> : numberText(value);
 }
 
 function renderUsageRow(labelText: string, value: number, total: number, detail: string) {
@@ -152,19 +156,35 @@ export function UsageRoute() {
   const summary = usageQuery.data;
   const globalTokenUsage = summary?.globalTokenUsage;
   const lastTokenUsage = summary?.lastTokenUsage;
-  const allTime = rollupOrEmpty(globalTokenUsage?.allTime);
-  const today = rollupOrEmpty(globalTokenUsage?.today);
-  const last7Days = rollupOrEmpty(globalTokenUsage?.last7Days);
-  const sessionUsage = rollupOrEmpty(summary?.sessionTokenUsage);
-  const agentUsage = rollupOrEmpty(summary?.agentTokenUsage);
-  const scopeUsage = rollupOrEmpty(summary?.scopeTokenUsage);
+  const usagePresentation = deriveQueryPresentation({
+    hasData: Boolean(summary),
+    isError: usageQuery.isError,
+    isFetching: usageQuery.isFetching,
+    isPending: usageQuery.isPending,
+  });
+  const initialUsageLoading = usagePresentation === "initial-loading";
+  const hasUsageData = Boolean(summary);
+  const usageUnavailable = usagePresentation === "error-empty";
+  const usageValueState = usageUnavailable ? "unavailable" : initialUsageLoading;
+  const allTime = globalTokenUsage?.allTime;
+  const today = globalTokenUsage?.today;
+  const last7Days = globalTokenUsage?.last7Days;
+  const sessionUsage = summary?.sessionTokenUsage;
+  const agentUsage = summary?.agentTokenUsage;
+  const scopeUsage = summary?.scopeTokenUsage;
+  const loadedRollup = (rollup: TokenUsageRollup | undefined) => rollup ?? EMPTY_ROLLUP;
+  const allTimeLoaded = loadedRollup(allTime);
   const sessionRollupLabel = summary?.rollupFilters?.sessionId || "-";
   const agentRollupLabel = summary?.rollupFilters?.agentId || "-";
-  const totalTokens = allTime.totalTokens;
+  const totalTokens = allTimeLoaded.totalTokens;
   const lastSource = lastTokenUsage?.source ?? "not_called";
-  const observedRatio = allTime.callCount > 0 ? allTime.observedCallCount / allTime.callCount : 0;
+  const sourceStatus = initialUsageLoading ? label(lang, "加载中", "Loading") : sourceLabel(lastSource, lang);
+  const observedRatio = allTimeLoaded.callCount > 0 ? allTimeLoaded.observedCallCount / allTimeLoaded.callCount : 0;
   const refresh = () => {
     void queryClient.invalidateQueries({ queryKey: queryKeys.usageSummary("global") });
+  };
+  const retry = () => {
+    void usageQuery.refetch();
   };
   const emptyBreakdownLabel = label(
     lang,
@@ -173,7 +193,7 @@ export function UsageRoute() {
   );
 
   return (
-    <section className={styles.page} aria-busy={usageQuery.isPending && !summary}>
+    <section className={styles.page} aria-busy={initialUsageLoading}>
       <VRouteHeader
         className={styles.header}
         eyebrow="Token"
@@ -183,9 +203,9 @@ export function UsageRoute() {
           <VStatusStrip
             className={styles.headerMeta}
             items={[
-              { label: label(lang, "来源", "Source"), value: sourceLabel(lastSource, lang), tone: lastSource === "provider_usage" ? "success" : lastSource === "missing" ? "warning" : "info" },
-              { label: label(lang, "刷新", "Refresh"), value: usageQuery.isFetching ? label(lang, "同步中", "Syncing") : label(lang, "自动", "Auto"), tone: usageQuery.isError ? "danger" : "neutral" },
-              { label: label(lang, "账本", "Ledger"), value: summary?.diagnostics?.source ?? "usage_ledger", tone: "info" },
+              { label: label(lang, "来源", "Source"), value: sourceStatus, tone: lastSource === "provider_usage" ? "success" : lastSource === "missing" ? "warning" : "info" },
+              { label: label(lang, "刷新", "Refresh"), value: usagePresentation === "refreshing" ? label(lang, "同步中", "Syncing") : label(lang, "自动", "Auto"), tone: usageQuery.isError ? "danger" : "neutral" },
+              { label: label(lang, "账本", "Ledger"), value: initialUsageLoading ? label(lang, "加载中", "Loading") : summary?.diagnostics?.source ?? "usage_ledger", tone: "info" },
             ]}
           />
         )}
@@ -195,22 +215,40 @@ export function UsageRoute() {
         ariaLabel={label(lang, "Token 用量概览", "Token usage overview")}
         className={styles.overviewBand}
         metrics={[
-          { id: "all-time", label: label(lang, "全局累计", "All time"), value: numberText(allTime.totalTokens) },
-          { id: "today", label: label(lang, "今日", "Today"), value: numberText(today.totalTokens) },
-          { id: "last-seven-days", label: label(lang, "最近七日", "Last 7 days"), value: numberText(last7Days.totalTokens) },
-          { id: "latest", label: label(lang, "最近一次", "Latest"), value: numberText(lastTokenUsage?.totalTokens), detail: formatTimestamp(lastTokenUsage?.recordedAt, lang) },
+          { id: "all-time", label: label(lang, "全局累计", "All time"), value: usageValue(usageValueState, allTime?.totalTokens, label(lang, "正在加载全局累计", "Loading all-time usage")) },
+          { id: "today", label: label(lang, "今日", "Today"), value: usageValue(usageValueState, today?.totalTokens, label(lang, "正在加载今日用量", "Loading today's usage")) },
+          { id: "last-seven-days", label: label(lang, "最近七日", "Last 7 days"), value: usageValue(usageValueState, last7Days?.totalTokens, label(lang, "正在加载七日用量", "Loading seven-day usage")) },
+          { id: "latest", label: label(lang, "最近一次", "Latest"), value: usageValue(usageValueState, lastTokenUsage?.totalTokens, label(lang, "正在加载最近用量", "Loading latest usage")), detail: initialUsageLoading ? label(lang, "加载中", "Loading") : formatTimestamp(lastTokenUsage?.recordedAt, lang) },
         ]}
-        status={{ label: sourceLabel(lastSource, lang), tone: lastSource === "provider_usage" ? "success" : lastSource === "missing" ? "warning" : "info" }}
+        status={{ label: sourceStatus, tone: lastSource === "provider_usage" ? "success" : lastSource === "missing" ? "warning" : "info" }}
       />
 
-      {usageQuery.isError ? (
+      {usagePresentation === "error-with-data" ? (
         <VStateSurface
+          actions={<VButton type="button" onPress={retry}>{label(lang, "重试", "Retry")}</VButton>}
           className={styles.emptyState}
           title={label(lang, "用量摘要读取失败。", "Usage summary failed to load.")}
           tone="error"
         >
           {usageQuery.error instanceof Error ? usageQuery.error.message : label(lang, "用量摘要读取失败。", "Usage summary failed to load.")}
         </VStateSurface>
+      ) : usageUnavailable ? (
+        <VStateSurface
+          className={styles.emptyState}
+          title={label(lang, "Token 用量暂不可用", "Token usage unavailable")}
+          tone="error"
+          actions={<VButton type="button" onPress={retry}>{label(lang, "重试", "Retry")}</VButton>}
+        >
+          {usageQuery.error instanceof Error ? usageQuery.error.message : label(lang, "用量摘要读取失败。", "Usage summary failed to load.")}
+        </VStateSurface>
+      ) : initialUsageLoading ? (
+        <VStateSurface
+          busy
+          className={styles.emptyState}
+          skeletonLines={2}
+          title={label(lang, "正在加载 Token 用量", "Loading token usage")}
+          tone="loading"
+        />
       ) : !summary || lastSource === "not_called" ? (
         <VStateSurface
           busy={usageQuery.isFetching}
@@ -239,22 +277,28 @@ export function UsageRoute() {
                 <p className={styles.panelEyebrow}>{label(lang, "可信度", "Reliability")}</p>
                 <h2>{label(lang, "Token 构成", "Token composition")}</h2>
               </div>
-              <span className={styles.countPill}>{percentText(observedRatio)}</span>
+              <span className={styles.countPill}>{usageUnavailable ? label(lang, "不可用", "Unavailable") : initialUsageLoading ? <VLoadingValue label={label(lang, "正在加载可信度", "Loading reliability")} /> : percentText(observedRatio)}</span>
             </div>
-            <div className={styles.sourceGrid}>
+            {!hasUsageData ? (
+              <VStateSurface
+                tone={usageUnavailable ? "unavailable" : "loading"}
+                title={usageUnavailable ? label(lang, "Token 构成不可用", "Token composition unavailable") : label(lang, "正在加载 Token 构成", "Loading token composition")}
+                skeletonLines={usageUnavailable ? undefined : 3}
+              />
+            ) : <><div className={styles.sourceGrid}>
               {SOURCE_KEYS.map((source) => (
                 <section key={source} className={sourceClassName(source)}>
                   <span>{sourceLabel(source, lang)}</span>
-                  <strong>{numberText(sourceCount(allTime, source))}</strong>
+                  <strong>{usageValue(usageValueState, sourceCount(allTimeLoaded, source), label(lang, "正在加载来源计数", "Loading source count"))}</strong>
                 </section>
               ))}
             </div>
             <div className={styles.usageList}>
-              {renderUsageRow(label(lang, "输入", "Input"), allTime.inputTokens, totalTokens, label(lang, "prompt", "prompt"))}
-              {renderUsageRow(label(lang, "缓存输入", "Cached input"), allTime.cachedInputTokens, allTime.inputTokens, percentText(allTime.cacheHitRate))}
-              {renderUsageRow(label(lang, "输出", "Output"), allTime.outputTokens, totalTokens, label(lang, "answer", "answer"))}
-              {renderUsageRow(label(lang, "推理输出", "Reasoning output"), allTime.reasoningOutputTokens, totalTokens, "reasoningOutputTokens")}
-            </div>
+              {renderUsageRow(label(lang, "输入", "Input"), allTimeLoaded.inputTokens, totalTokens, label(lang, "prompt", "prompt"))}
+              {renderUsageRow(label(lang, "缓存输入", "Cached input"), allTimeLoaded.cachedInputTokens, allTimeLoaded.inputTokens, percentText(allTimeLoaded.cacheHitRate))}
+              {renderUsageRow(label(lang, "输出", "Output"), allTimeLoaded.outputTokens, totalTokens, label(lang, "answer", "answer"))}
+              {renderUsageRow(label(lang, "推理输出", "Reasoning output"), allTimeLoaded.reasoningOutputTokens, totalTokens, "reasoningOutputTokens")}
+            </div></>}
           </VSurface>
 
           <VSurface as="section" className={styles.rollupPanel} elevation="panel" tone="rail">
@@ -271,33 +315,39 @@ export function UsageRoute() {
                 onPress={refresh}
               />
             </div>
-            <div className={styles.rollupGrid}>
+            {!hasUsageData ? (
+              <VStateSurface
+                tone={usageUnavailable ? "unavailable" : "loading"}
+                title={usageUnavailable ? label(lang, "计数概览不可用", "Counting overview unavailable") : label(lang, "正在加载计数概览", "Loading counting overview")}
+                skeletonLines={usageUnavailable ? undefined : 3}
+              />
+            ) : <div className={styles.rollupGrid}>
               <div className={`${styles.usageRow} ${styles.usageRowWide}`}>
                 <span>{label(lang, "当前范围", "Current scope")}</span>
-                <strong>{numberText(scopeUsage.totalTokens)}</strong>
+                <strong>{usageValue(usageValueState, scopeUsage?.totalTokens, label(lang, "正在加载范围用量", "Loading scope usage"))}</strong>
                 <code>{summary?.scope ?? "global"}</code>
               </div>
               <div className={`${styles.usageRow} ${styles.usageRowWide}`}>
                 <span>{label(lang, "最近会话", "Latest session")}</span>
-                <strong>{numberText(sessionUsage.totalTokens)}</strong>
+                <strong>{usageValue(usageValueState, sessionUsage?.totalTokens, label(lang, "正在加载会话用量", "Loading session usage"))}</strong>
                 <code>{sessionRollupLabel}</code>
               </div>
               <div className={`${styles.usageRow} ${styles.usageRowWide}`}>
                 <span>{label(lang, "最近 Agent", "Latest agent")}</span>
-                <strong>{numberText(agentUsage.totalTokens)}</strong>
+                <strong>{usageValue(usageValueState, agentUsage?.totalTokens, label(lang, "正在加载 Agent 用量", "Loading agent usage"))}</strong>
                 <code>{agentRollupLabel}</code>
               </div>
               <div className={`${styles.usageRow} ${styles.usageRowWide}`}>
                 <span>{label(lang, "上下文窗口", "Context window")}</span>
-                <strong>{numberText(summary?.modelContextWindow)}</strong>
+                <strong>{usageValue(usageValueState, summary?.modelContextWindow, label(lang, "正在加载上下文窗口", "Loading context window"))}</strong>
                 <code><Gauge size={13} /> window</code>
               </div>
               <div className={`${styles.usageRow} ${styles.usageRowWide}`}>
                 <span>{label(lang, "延迟累计", "Latency total")}</span>
-                <strong>{numberText(allTime.latencyMs)} ms</strong>
+                <strong>{usageValue(usageValueState, allTime?.latencyMs, label(lang, "正在加载延迟", "Loading latency"))} ms</strong>
                 <code><Activity size={13} /> api</code>
               </div>
-            </div>
+            </div>}
           </VSurface>
         </div>
 
@@ -305,14 +355,24 @@ export function UsageRoute() {
           <div className={styles.panelHeader}>
             <div>
               <p className={styles.panelEyebrow}>{label(lang, "最近记录", "Latest record")}</p>
-              <h2>{sourceLabel(lastSource, lang)}</h2>
+              <h2>{sourceStatus}</h2>
             </div>
             <span className={styles.countPill}>
               <Database size={13} />
-              {summary?.diagnostics?.schemaVersion ?? 1}
+              {usageUnavailable
+                ? label(lang, "不可用", "Unavailable")
+                : initialUsageLoading
+                  ? <VLoadingValue label={label(lang, "正在加载 schema 版本", "Loading schema version")} />
+                  : summary?.diagnostics?.schemaVersion ?? "-"}
             </span>
           </div>
-          <div className={styles.detailGrid}>
+          {!hasUsageData ? (
+            <VStateSurface
+              tone={usageUnavailable ? "unavailable" : "loading"}
+              title={usageUnavailable ? label(lang, "最近记录不可用", "Latest record unavailable") : label(lang, "正在加载最近记录", "Loading latest record")}
+              skeletonLines={usageUnavailable ? undefined : 3}
+            />
+          ) : <><div className={styles.detailGrid}>
             <div className={styles.detailRow}>
               <span>provider / model</span>
               <strong>{[lastTokenUsage?.provider, lastTokenUsage?.model].filter(Boolean).join(" / ") || "-"}</strong>
@@ -334,7 +394,7 @@ export function UsageRoute() {
               <strong>{numberText(summary?.diagnostics?.skippedRecordCount)}</strong>
             </div>
           </div>
-          {renderBreakdownList(summary?.breakdowns?.models ?? [], emptyBreakdownLabel)}
+          {renderBreakdownList(summary?.breakdowns?.models ?? [], emptyBreakdownLabel)}</>}
         </VSurface>
       </div>
     </section>

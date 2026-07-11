@@ -1,7 +1,7 @@
 import { Sparkles, Trash2 } from "lucide-react";
 
 import type { EvolutionProposalDetail } from "../api/types";
-import { VNativeButton } from "../components/vui";
+import { VButton } from "../components/vui";
 import type { TranslationKey } from "../i18n/dictionary";
 import styles from "./EvolutionProposalActionBandsPanel.styles";
 
@@ -65,16 +65,16 @@ export function EvolutionProposalActionBandsPanel({
         {proposal.availableActions.length > 0 ? (
           <div className={styles.actionRow}>
             {proposal.availableActions.map((action) => (
-              <VNativeButton
+              <VButton
                 key={action}
                 type="button"
                 className={styles.inlineAction}
-                disabled={runLocked || actionPending}
+                isDisabled={runLocked || actionPending}
                 onClick={() => onRunAction(proposal.sourceRun, action)}
               >
                 <Sparkles size={15} />
                 {proposalActionLabel(action)}
-              </VNativeButton>
+              </VButton>
             ))}
           </div>
         ) : null}
@@ -93,15 +93,16 @@ export function EvolutionProposalActionBandsPanel({
         <p>{proposal.review.deleteImpact}</p>
         {proposal.review.evidenceNotes.length > 0 ? renderReviewList(proposal.review.evidenceNotes) : null}
         <div className={styles.actionRow}>
-          <VNativeButton
+          <VButton
             type="button"
+            variant="danger"
             className={styles.inlineAction}
-            disabled={!proposal.canDelete || deleteProposalPending}
+            isDisabled={!proposal.canDelete || deleteProposalPending}
             onClick={() => onDeleteProposal(proposal.sourceRun)}
           >
             <Trash2 size={15} />
             {t("deleteProposal")}
-          </VNativeButton>
+          </VButton>
         </div>
         {deleteProposalError ? <p className={styles.errorText}>{deleteProposalError}</p> : null}
       </div>

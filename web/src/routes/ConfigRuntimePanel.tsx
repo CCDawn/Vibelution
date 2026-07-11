@@ -1,6 +1,6 @@
 import { SlidersHorizontal } from "lucide-react";
 
-import { VButton } from "../components/vui";
+import { VButton, VSection } from "../components/vui";
 import type { ConfigCopy } from "./ConfigRoute";
 import styles from "./ConfigRuntimePanel.styles";
 
@@ -22,16 +22,16 @@ export function ConfigRuntimePanel({
   onIntakeModeChange,
 }: ConfigRuntimePanelProps) {
   return (
-    <section id="config-shell" className={styles.sectionSurface}>
-      <div className={styles.sectionHeader}>
-        <div>
-          <p className={styles.eyebrow}>{eyebrow}</p>
-          <h2 className={styles.sectionTitle}>{copy.runtimeTitle}</h2>
-        </div>
-        <SlidersHorizontal size={16} className={styles.sectionIcon} />
-      </div>
-      <p className={styles.sectionText}>{copy.runtimeBody}</p>
-      <div className={styles.matrixGrid}>
+    <VSection
+      id="config-shell"
+      className={styles.sectionSurface}
+      headerClassName={styles.sectionHeader}
+      eyebrow={eyebrow}
+      title={copy.runtimeTitle}
+      actions={<SlidersHorizontal size={16} className={styles.sectionIcon} />}
+    >
+        <p className={styles.sectionText}>{copy.runtimeBody}</p>
+        <div className={styles.matrixGrid}>
         <article className={styles.matrixCard}>
           <p className={styles.matrixTitle}>{copy.intakeMode}</p>
           <div className={styles.segmented}>
@@ -52,7 +52,7 @@ export function ConfigRuntimePanel({
             ))}
           </div>
         </article>
-      </div>
-    </section>
+        </div>
+    </VSection>
   );
 }
