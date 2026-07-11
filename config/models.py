@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Optional, List, Dict, Any, Tuple
+from typing import Optional, List, Dict, Any, Tuple, Literal
 from urllib.parse import urlparse
 
 from pydantic import (
@@ -181,6 +181,56 @@ class PromptCacheConfig(BaseModel):
         return value
 
 
+class ProviderProtocolsConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    default: str = ""
+    allowed: List[str] = Field(default_factory=list)
+    routes: Dict[str, str] = Field(default_factory=dict)
+
+
+class ProviderDiscoverySettings(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    mode: str = "manual"
+    adapter: str = "manual"
+    cache_ttl_seconds: int = Field(default=3600, ge=0, le=86400)
+    include: List[str] = Field(default_factory=list)
+    exclude: List[str] = Field(default_factory=list)
+
+
+class ProviderDeploymentConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    runtime_framework: str = ""
+    artifact_path: str = ""
+
+
+class PinnedModelDefaults(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    temperature: float = Field(default=0.7, ge=0.0, le=2.0)
+    max_output_tokens: int = Field(default=4096, gt=0)
+    timeout: int = Field(default=60, gt=0)
+    connect_timeout: int = Field(default=30, gt=0)
+    streaming: bool = True
+    tool_calling_mode: str = "auto"
+
+
+class PinnedModelConfig(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    upstream_id: str
+    label: str = ""
+    enabled: bool = True
+    wire_protocol: str = ""
+    interaction_contract: str = "tool_chat"
+    model_protocol: str = ""
+    defaults: PinnedModelDefaults = Field(default_factory=PinnedModelDefaults)
+    compatibility: Dict[str, Any] = Field(default_factory=dict)
+    capabilities: Dict[str, Any] = Field(default_factory=dict)
+
+
 class ProviderConfig(BaseModel):
     """Provider 级配置。"""
     model_config = ConfigDict(extra="ignore")
@@ -198,6 +248,18 @@ class ProviderConfig(BaseModel):
     compat_mode: str = Field(default="native")
     requires_api_key: bool = Field(default=True)
     context_window: int = Field(default=32768, gt=0)
+    label: str = ""
+    service_class: Literal["official_api", "aggregator", "relay", "self_hosted", "local_runtime"] = "official_api"
+    vendor: str = "custom"
+    driver: Literal["openai", "anthropic", "gemini"] = "openai"
+    auth_kind: Literal["api_key", "oauth", "none"] = "api_key"
+    credential_ref: str = ""
+    requires_credential: bool = True
+    protocols: ProviderProtocolsConfig = Field(default_factory=ProviderProtocolsConfig)
+    discovery: ProviderDiscoverySettings = Field(default_factory=ProviderDiscoverySettings)
+    deployment: ProviderDeploymentConfig = Field(default_factory=ProviderDeploymentConfig)
+    models: Dict[str, PinnedModelConfig] = Field(default_factory=dict)
+    legacy_inference_allowed: bool = Field(default=True, exclude=True)
 
     @field_validator("kind")
     @classmethod
@@ -209,7 +271,35 @@ class ProviderConfig(BaseModel):
     def normalize_api(cls, v: str) -> str:
         return (v or "").strip().lower().replace("_", "-")
 
+    @model_validator(mode="after")
+    def validate_v2_provider_contract(self) -> "ProviderConfig":
+        if not self.credential_ref and not self.models:
+            return self
+        from .llm_credentials import canonicalize_credential_ref
+        from .llm_identity import make_model_ref, normalize_provider_endpoint
+
+        normalize_provider_endpoint(self.base_url)
+        canonical_ref = canonicalize_credential_ref(self.credential_ref or "none")
+        if self.auth_kind == "none" and canonical_ref != "none":
+            raise ValueError("auth_kind none requires credential_ref none")
+        if self.auth_kind != "none" and canonical_ref == "none" and self.requires_credential:
+            raise ValueError("credential_ref is required when provider requires a credential")
+        if self.protocols.default and self.protocols.allowed and self.protocols.default not in self.protocols.allowed:
+            raise ValueError("provider default protocol must be present in protocols.allowed")
+        if self.service_class != "local_runtime" and self.deployment.runtime_framework:
+            raise ValueError("runtime_framework is only valid for local_runtime providers")
+        for model_key, model in self.models.items():
+            make_model_ref(self.provider_id or "provider", model_key)
+            if not model.upstream_id.strip():
+                raise ValueError(f"pinned model {model_key} requires upstream_id")
+        return self
+
     def resolve_api_key(self) -> Optional[str]:
+        if self.credential_ref:
+            from .llm_credentials import resolve_credential_ref
+
+            resolution = resolve_credential_ref(self.credential_ref)
+            return resolution.secret or None
         env_candidates: List[str] = []
         if self.api_key_env:
             env_candidates.append(self.api_key_env)
@@ -224,9 +314,7 @@ class ProviderConfig(BaseModel):
             value = _read_env_var(alias)
             if value:
                 return value
-        if self.api_key:
-            return self.api_key
-        return None
+        return self.api_key or None
 
 
 class LLMProfile(BaseModel):
@@ -234,6 +322,7 @@ class LLMProfile(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     profile_id: str = Field(default="")
+    model_ref: str = Field(default="")
     provider_id: str = Field(default="default")
     model: str = Field(default="qwen-plus")
     api_key_env: str = Field(default="")
@@ -389,9 +478,11 @@ class LLMConfig(BaseModel):
     """新的 LLM 根配置：providers / profiles / discovery。"""
     model_config = ConfigDict(extra="ignore")
 
+    schema_version: int = Field(default=1, ge=1, le=2)
     providers: Dict[str, ProviderConfig] = Field(default_factory=dict)
     profiles: Dict[str, LLMProfile] = Field(default_factory=dict)
     model_library: Dict[str, Dict[str, Any]] = Field(default_factory=dict)
+    model_aliases: Dict[str, str] = Field(default_factory=dict)
     discovery: LLMDiscoveryConfig = Field(default_factory=LLMDiscoveryConfig)
 
     @model_validator(mode="after")
@@ -447,6 +538,17 @@ class LLMConfig(BaseModel):
             raise ValueError(f"missing provider: {resolved_provider_id}")
         return provider
 
+    def resolve_model_ref(self, model_ref: str) -> str:
+        requested = str(model_ref or "").strip()
+        current = requested
+        visited: set[str] = set()
+        while current in self.model_aliases:
+            if current in visited:
+                raise ValueError(f"cyclic model alias: {requested}")
+            visited.add(current)
+            current = str(self.model_aliases[current] or "").strip()
+        return current
+
     @staticmethod
     def _provider_identity(provider: Optional[ProviderConfig]) -> tuple:
         if provider is None:
@@ -463,6 +565,12 @@ class LLMConfig(BaseModel):
         )
 
     def get_model_library_entry_for_profile(self, profile: LLMProfile) -> tuple[str, Dict[str, Any]] | tuple[None, None]:
+        requested_ref = str(profile.model_ref or "").strip()
+        if requested_ref:
+            canonical_ref = self.resolve_model_ref(requested_ref)
+            direct_entry = self.model_library.get(canonical_ref)
+            if isinstance(direct_entry, dict):
+                return canonical_ref, direct_entry
         profile_provider = self.get_provider(profile.provider_id)
         for model_id, item in self.model_library.items():
             if not isinstance(item, dict):
