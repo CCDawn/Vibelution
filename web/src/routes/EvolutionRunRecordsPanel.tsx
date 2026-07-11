@@ -322,6 +322,7 @@ export function EvolutionRunRecordsPanel({
                   </div>
                   <VButton
                     type="button"
+                    contentLayout="plain"
                     className={styles.runCardButton}
                     onClick={() => onSelectRun(run.id)}
                   >

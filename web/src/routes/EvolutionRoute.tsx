@@ -1351,6 +1351,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                   >
                     <VButton
                       type="button"
+                      contentLayout="plain"
                       className={styles.caseTraceSummary}
                       aria-expanded={expanded}
                       onClick={() => toggleCaseTraceItem(entry)}
@@ -3314,6 +3315,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                         >
                           <VButton
                             type="button"
+                            contentLayout="plain"
                             className={selected ? `${styles.workflowStepButton} ${styles.workflowStepButtonActive}` : styles.workflowStepButton}
                             aria-pressed={selected}
                             onClick={() => setSelectedSupervisedWorkflowStepId(step.id)}
@@ -3951,6 +3953,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                         </div>
                         <VButton
                           type="button"
+                          contentLayout="plain"
                           className={styles.proposalCardButton}
                           onClick={() => setSelectedLibraryItemId(item.id)}
                         >
@@ -3999,6 +4002,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                         </div>
                         <VButton
                           type="button"
+                          contentLayout="plain"
                           className={styles.proposalCardButton}
                           onClick={() => setSelectedPendingItemId(item.id)}
                         >
