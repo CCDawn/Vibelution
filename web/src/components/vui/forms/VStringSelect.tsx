@@ -19,13 +19,19 @@ export type VStringSelectProps = {
   value: string;
 };
 
+function resolveStringSelectSelectedKey(
+  value: string,
+  options: readonly VStringSelectOption[],
+): string | null {
+  const option = options.find((candidate) => candidate.value === value);
+  return option && !option.disabled ? option.value : null;
+}
+
 export function resolveStringSelectChange(
   key: Key | null,
   options: readonly VStringSelectOption[],
 ): string | null {
-  const value = key == null ? "" : String(key);
-  const option = options.find((candidate) => candidate.value === value);
-  return option && !option.disabled ? option.value : null;
+  return key == null ? null : resolveStringSelectSelectedKey(String(key), options);
 }
 
 export function VStringSelect({
@@ -51,7 +57,7 @@ export function VStringSelect({
       isDisabled={isDisabled}
       options={vuiOptions}
       placeholder={placeholder}
-      selectedKey={value || null}
+      selectedKey={resolveStringSelectSelectedKey(value, options)}
       onSelectionChange={(key) => {
         const nextValue = resolveStringSelectChange(key, options);
         if (nextValue !== null && nextValue !== value) onValueChange(nextValue);
