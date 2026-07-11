@@ -80,6 +80,169 @@ def _patch_saved(monkeypatch: pytest.MonkeyPatch, config: dict) -> None:
     )
 
 
+def _v1_artifact_config() -> dict:
+    return {
+        "llm": {
+            "schema_version": 1,
+            "model_library": {
+                "local-model": {
+                    "model": "C:/models/local-model.gguf",
+                    "provider": {"kind": "local"},
+                },
+                "remote-model": {
+                    "model": "C:/models/remote-model.gguf",
+                    "provider": {"kind": "openai"},
+                },
+            },
+        }
+    }
+
+
+def test_migration_preview_passes_resolutions_and_projects_provider_kind_choices(monkeypatch) -> None:
+    public_config = _v1_artifact_config()
+    resolutions = [
+        {"modelId": "local-model", "decision": "preserve_upstream_id"},
+        {
+            "modelId": "remote-model",
+            "decision": "split_deployment_artifact",
+            "upstreamId": "remote-upstream",
+        },
+    ]
+    captured: dict[str, object] = {}
+    events: list[tuple[str, str, dict]] = []
+
+    def fake_preview(config, *, project_root, artifact_resolutions=None):
+        captured["config"] = config
+        captured["project_root"] = project_root
+        captured["artifact_resolutions"] = artifact_resolutions
+        return SimpleNamespace(
+            preview_id="preview-a",
+            base_hash="hash-a",
+            status="CONFLICT",
+            providers=(),
+            model_ref_map={},
+            reference_impact={"liveReferenceCount": 3},
+            conflicts=(
+                {"code": "artifact_path_suspected", "modelId": "local-model"},
+                {"code": "artifact_path_suspected", "modelId": "remote-model"},
+            ),
+        )
+
+    monkeypatch.setattr(provider_config_service, "load_public_config", lambda: copy.deepcopy(public_config))
+    monkeypatch.setattr(provider_config_service, "preview_v1_to_v2", fake_preview)
+    monkeypatch.setattr(
+        provider_config_service,
+        "_record_migration_event",
+        lambda event_code, *, outcome, fields: events.append((event_code, outcome, fields)),
+    )
+
+    raw = provider_config_service.preview_llm_v2_migration(
+        artifact_resolutions=resolutions
+    )
+    projected = provider_config_service.project_llm_v2_migration_preview(raw)
+
+    assert captured["config"] == public_config
+    assert captured["artifact_resolutions"] == resolutions
+    assert projected["conflicts"] == [
+        {
+            "code": "artifact_path_suspected",
+            "modelId": "local-model",
+            "requiresExplicitResolution": True,
+            "allowedResolutions": [
+                "preserve_upstream_id",
+                "split_deployment_artifact",
+            ],
+            "verificationState": "unverified_offline",
+        },
+        {
+            "code": "artifact_path_suspected",
+            "modelId": "remote-model",
+            "requiresExplicitResolution": True,
+            "allowedResolutions": ["split_deployment_artifact"],
+            "verificationState": "unverified_offline",
+        },
+    ]
+    assert events == [
+        (
+            "config.schema.migration_previewed",
+            "previewed",
+            {
+                "status": "CONFLICT",
+                "resolutionCount": 2,
+                "preserveResolutionCount": 1,
+                "splitResolutionCount": 1,
+                "providerCount": 0,
+                "modelCount": 0,
+                "referenceCount": 3,
+                "elapsedMs": events[0][2]["elapsedMs"],
+            },
+        )
+    ]
+
+
+def test_migration_preview_failure_event_is_bounded_and_redacted(monkeypatch) -> None:
+    events: list[tuple[str, str, dict]] = []
+    secret_resolution = {
+        "modelId": "private-model",
+        "decision": "split_deployment_artifact",
+        "upstreamId": "private-upstream-secret",
+    }
+    monkeypatch.setattr(provider_config_service, "load_public_config", _v1_artifact_config)
+    monkeypatch.setattr(
+        provider_config_service,
+        "preview_v1_to_v2",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            ValueError("C:/private/artifact.gguf Authorization credential-ref-secret")
+        ),
+    )
+    monkeypatch.setattr(
+        provider_config_service,
+        "_record_migration_event",
+        lambda event_code, *, outcome, fields: events.append((event_code, outcome, fields)),
+    )
+
+    with pytest.raises(ValueError):
+        provider_config_service.preview_llm_v2_migration(
+            artifact_resolutions=[secret_resolution]
+        )
+
+    assert len(events) == 1
+    assert set(events[0][2]) == {
+        "resolutionCount",
+        "preserveResolutionCount",
+        "splitResolutionCount",
+        "elapsedMs",
+        "errorType",
+    }
+    serialized = json.dumps(events)
+    for forbidden in (
+        "private-model",
+        "private-upstream-secret",
+        "C:/private/artifact.gguf",
+        "Authorization",
+        "credential-ref-secret",
+    ):
+        assert forbidden not in serialized
+
+
+@pytest.mark.parametrize("provider_kind", ["local", "local_runtime", "ollama"])
+def test_artifact_conflict_preserve_is_available_only_for_local_provider_kinds(
+    provider_kind: str,
+) -> None:
+    public_config = _v1_artifact_config()
+    public_config["llm"]["model_library"]["local-model"]["provider"]["kind"] = provider_kind
+
+    assert provider_config_service._artifact_conflict_allowed_resolutions(
+        public_config, "local-model"
+    ) == ["preserve_upstream_id", "split_deployment_artifact"]
+
+
+def test_artifact_conflict_non_local_provider_only_allows_split() -> None:
+    assert provider_config_service._artifact_conflict_allowed_resolutions(
+        _v1_artifact_config(), "remote-model"
+    ) == ["split_deployment_artifact"]
+
+
 def test_provider_draft_add_returns_stable_provider_without_secret(monkeypatch) -> None:
     config = _v2_with_provider()
     _patch_saved(monkeypatch, config)

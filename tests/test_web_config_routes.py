@@ -3188,8 +3188,126 @@ def test_llm_v2_migration_preview_route_projects_allowlisted_fields(monkeypatch)
     ]
 
 
+def test_llm_v2_migration_preview_route_passes_artifact_resolutions(monkeypatch) -> None:
+    received: list[object] = []
+
+    def fake_preview(*, artifact_resolutions=None):
+        received.append(artifact_resolutions)
+        return {
+            "previewId": "preview-a",
+            "baseHash": "hash-a",
+            "status": "READY",
+            "providers": [],
+            "modelRefMap": {},
+            "referenceImpact": {},
+            "conflicts": [],
+        }
+
+    monkeypatch.setattr(provider_config_service, "preview_llm_v2_migration", fake_preview)
+
+    empty = client.post("/api/config/migration/llm-v2/preview", json={})
+    no_body = client.post("/api/config/migration/llm-v2/preview")
+    resolutions = [
+        {"modelId": "local-model", "decision": "preserve_upstream_id"},
+        {
+            "modelId": "remote-model",
+            "decision": "split_deployment_artifact",
+            "upstreamId": "remote-upstream",
+        },
+    ]
+    resolved = client.post(
+        "/api/config/migration/llm-v2/preview",
+        json={"artifactResolutions": resolutions},
+    )
+
+    assert empty.status_code == 200, empty.text
+    assert no_body.status_code == 200, no_body.text
+    assert resolved.status_code == 200, resolved.text
+    assert received == [None, None, resolutions]
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"unexpected": True},
+        {
+            "artifactResolutions": [
+                {
+                    "modelId": "model-a",
+                    "decision": "preserve_upstream_id",
+                    "unexpected": True,
+                }
+            ]
+        },
+        {"artifactResolutions": [{"modelId": "model-a", "decision": "unknown"}]},
+        {
+            "artifactResolutions": [
+                {"modelId": "model-a", "decision": "split_deployment_artifact"}
+            ]
+        },
+        {
+            "artifactResolutions": [
+                {
+                    "modelId": "model-a",
+                    "decision": "preserve_upstream_id",
+                    "upstreamId": "forbidden",
+                }
+            ]
+        },
+    ],
+)
+def test_llm_v2_migration_preview_rejects_invalid_resolution_shapes(payload) -> None:
+    response = client.post("/api/config/migration/llm-v2/preview", json=payload)
+    assert response.status_code == 422
+
+
+@pytest.mark.parametrize(
+    ("error", "resolutions"),
+    [
+        (
+            "duplicate artifact resolution modelId",
+            [
+                {"modelId": "model-a", "decision": "preserve_upstream_id"},
+                {"modelId": "model-a", "decision": "preserve_upstream_id"},
+            ],
+        ),
+        (
+            "unknown artifact resolution modelId",
+            [{"modelId": "unknown-model", "decision": "preserve_upstream_id"}],
+        ),
+    ],
+)
+def test_llm_v2_migration_preview_maps_resolution_value_errors_to_422(
+    monkeypatch,
+    error: str,
+    resolutions: list[dict],
+) -> None:
+    monkeypatch.setattr(
+        provider_config_service,
+        "preview_llm_v2_migration",
+        lambda **_kwargs: (_ for _ in ()).throw(ValueError(error)),
+    )
+
+    response = client.post(
+        "/api/config/migration/llm-v2/preview",
+        json={"artifactResolutions": resolutions},
+    )
+
+    assert response.status_code == 422
+
+
 def test_llm_v2_migration_apply_requires_preview_and_hash() -> None:
     response = client.post("/api/config/migration/llm-v2/apply", json={})
+    assert response.status_code == 422
+
+
+@pytest.mark.parametrize("extra_field", ["artifactResolutions", "override", "bypass"])
+def test_llm_v2_migration_apply_rejects_bypass_fields(extra_field: str) -> None:
+    response = client.post(
+        "/api/config/migration/llm-v2/apply",
+        json={"previewId": "preview-a", "baseHash": "hash-a", extra_field: True},
+    )
+
     assert response.status_code == 422
 
 

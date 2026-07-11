@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from core.web.services.avatar_image_service import resolve_user_avatar_file, store_user_avatar_image
 from core.web.services.config_service import (
@@ -130,7 +130,36 @@ class ConfigThemeBackgroundImagePayload(BaseModel):
     dataBase64: str = ""
 
 
+class ConfigMigrationPreserveArtifactResolution(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    modelId: str = Field(min_length=1)
+    decision: Literal["preserve_upstream_id"]
+
+
+class ConfigMigrationSplitArtifactResolution(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    modelId: str = Field(min_length=1)
+    decision: Literal["split_deployment_artifact"]
+    upstreamId: str = Field(min_length=1)
+
+
+ConfigMigrationArtifactResolution = Annotated[
+    ConfigMigrationPreserveArtifactResolution | ConfigMigrationSplitArtifactResolution,
+    Field(discriminator="decision"),
+]
+
+
+class ConfigMigrationPreviewPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    artifactResolutions: list[ConfigMigrationArtifactResolution] | None = None
+
+
 class ConfigMigrationApplyPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     previewId: str = Field(min_length=1)
     baseHash: str = Field(min_length=1)
 
@@ -169,10 +198,24 @@ def config_workspace() -> dict:
 
 
 @router.post("/config/migration/llm-v2/preview")
-def config_llm_v2_migration_preview() -> dict:
+def config_llm_v2_migration_preview(
+    payload: ConfigMigrationPreviewPayload | None = None,
+) -> dict:
     try:
+        artifact_resolutions = (
+            [item.model_dump() for item in payload.artifactResolutions]
+            if payload is not None and payload.artifactResolutions is not None
+            else None
+        )
+        preview = (
+            provider_config_service.preview_llm_v2_migration(
+                artifact_resolutions=artifact_resolutions
+            )
+            if artifact_resolutions is not None
+            else provider_config_service.preview_llm_v2_migration()
+        )
         return provider_config_service.project_llm_v2_migration_preview(
-            provider_config_service.preview_llm_v2_migration()
+            preview
         )
     except Exception as exc:  # pragma: no cover - routed below
         _raise_config_http_error(exc)

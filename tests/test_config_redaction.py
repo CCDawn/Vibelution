@@ -4,6 +4,7 @@
 """
 
 import inspect
+import json
 import subprocess
 
 from pathlib import Path
@@ -11,9 +12,56 @@ from pathlib import Path
 import pytest
 
 from config import ConfigLoader, Settings
+from core.web.services import provider_config_service
 
 
 PROJECT_ROOT = Path(__file__).parent.parent
+
+
+def test_artifact_conflict_projection_exposes_only_resolution_contract() -> None:
+    payload = {
+        "previewId": "preview-a",
+        "baseHash": "hash-a",
+        "status": "CONFLICT",
+        "providers": [],
+        "modelRefMap": {},
+        "referenceImpact": {},
+        "conflicts": [
+            {
+                "code": "artifact_path_suspected",
+                "modelId": "model-a",
+                "requiresExplicitResolution": True,
+                "allowedResolutions": ["split_deployment_artifact"],
+                "verificationState": "unverified_offline",
+                "artifactPath": "C:/private/model.gguf",
+                "upstreamId": "private-upstream",
+                "credentialRef": "env:PRIVATE_CREDENTIAL",
+                "secret": "private-secret",
+                "Authorization": "Bearer private-token",
+            }
+        ],
+    }
+
+    projected = provider_config_service.project_llm_v2_migration_preview(payload)
+    serialized = json.dumps(projected)
+
+    assert projected["conflicts"] == [
+        {
+            "code": "artifact_path_suspected",
+            "modelId": "model-a",
+            "requiresExplicitResolution": True,
+            "allowedResolutions": ["split_deployment_artifact"],
+            "verificationState": "unverified_offline",
+        }
+    ]
+    for forbidden in (
+        "C:/private/model.gguf",
+        "private-upstream",
+        "PRIVATE_CREDENTIAL",
+        "private-secret",
+        "Bearer private-token",
+    ):
+        assert forbidden not in serialized
 
 
 def _clear_provider_env(monkeypatch):
