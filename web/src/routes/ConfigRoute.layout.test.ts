@@ -7,9 +7,7 @@ import draftPanelStyles from "./ConfigDraftPanel.styles";
 import healthDiagnosticsPanelSource from "./ConfigHealthDiagnosticsPanel.tsx?raw";
 import healthDiagnosticsPanelStylesSource from "./ConfigHealthDiagnosticsPanel.styles.ts?raw";
 import healthDiagnosticsPanelStyles from "./ConfigHealthDiagnosticsPanel.styles";
-import modelLibraryPanelSource from "./ConfigModelLibraryPanel.tsx?raw";
-import modelLibraryPanelStylesSource from "./ConfigModelLibraryPanel.styles.ts?raw";
-import modelLibraryPanelStyles from "./ConfigModelLibraryPanel.styles";
+import migrationPanelSource from "./ConfigModelMigrationPanel.tsx?raw";
 import overviewPanelSource from "./ConfigOverviewPanel.tsx?raw";
 import overviewPanelStylesSource from "./ConfigOverviewPanel.styles.ts?raw";
 import overviewPanelStyles from "./ConfigOverviewPanel.styles";
@@ -19,15 +17,19 @@ import placeholderPanelStyles from "./ConfigWorkspacePlaceholderPanel.styles";
 import runtimePanelSource from "./ConfigRuntimePanel.tsx?raw";
 import runtimePanelStylesSource from "./ConfigRuntimePanel.styles.ts?raw";
 import runtimePanelStyles from "./ConfigRuntimePanel.styles";
+import providerPanelSource from "./ConfigProviderRegistryPanel.tsx?raw";
+import providerPanelStylesSource from "./ConfigProviderRegistryPanel.styles.ts?raw";
+import providerPanelStyles from "./ConfigProviderRegistryPanel.styles";
+import wizardSource from "./ConfigProviderWizard.tsx?raw";
 import styles from "./ConfigRoute.styles";
 import stylesSource from "./ConfigRoute.styles.ts?raw";
 
 const extractedPanelStylesSource = [
   draftPanelStylesSource,
   healthDiagnosticsPanelStylesSource,
-  modelLibraryPanelStylesSource,
   overviewPanelStylesSource,
   placeholderPanelStylesSource,
+  providerPanelStylesSource,
   runtimePanelStylesSource,
 ].join("\n");
 
@@ -36,12 +38,94 @@ const configSources = [
   overviewPanelSource,
   runtimePanelSource,
   draftPanelSource,
-  modelLibraryPanelSource,
+  providerPanelSource,
+  wizardSource,
+  migrationPanelSource,
   healthDiagnosticsPanelSource,
   placeholderPanelSource,
 ].join("\n");
 
 describe("ConfigRoute layout contract", () => {
+  it("renders provider-first configuration without endpoint fingerprint identity", () => {
+    expect(routeSource).toContain("ConfigProviderRegistryPanel");
+    expect(routeSource).toContain("ConfigProviderWizard");
+    expect(routeSource).toContain("ConfigModelMigrationPanel");
+    expect(providerPanelSource).toContain("provider.providerId");
+    expect(providerPanelSource).toContain("model.modelRef");
+    expect(providerPanelSource).toContain("connection");
+    expect(providerPanelSource).toContain("models");
+    expect(providerPanelSource).toContain("protocols");
+    expect(providerPanelSource).toContain("diagnostics");
+    expect(providerPanelSource).not.toContain("api_key");
+  });
+
+  it("keeps v1 migration preview explicit and apply disabled on unresolved conflicts", () => {
+    expect(migrationPanelSource).toContain('preview.status !== "READY"');
+    expect(migrationPanelSource).toContain("preview.conflicts");
+    expect(migrationPanelSource).toContain("onApply(preview.previewId, preview.baseHash)");
+  });
+
+  it("implements the four provider wizard steps", () => {
+    expect(wizardSource).toContain('"template"');
+    expect(wizardSource).toContain('"connection"');
+    expect(wizardSource).toContain('"discovery"');
+    expect(wizardSource).toContain('"pin"');
+    expect(wizardSource).toContain("canAdvanceProviderWizard");
+  });
+
+  it("refreshes only ttl-expired providers when the model surface opens", () => {
+    expect(routeSource).toContain("row.refreshDue");
+    expect(routeSource).toContain("autoRefreshAttemptedProviderIds");
+    expect(routeSource).not.toContain("load_public_config");
+  });
+
+  it("synchronizes every Provider mutation from the full backend ConfigWorkspace response", () => {
+    expect(routeSource).toContain('requestJson<ConfigWorkspace>(\n        "/api/config/draft/providers"');
+    expect(routeSource).toContain("/discover`");
+    expect(routeSource).toContain("/models`");
+    expect(routeSource).toContain("/models/${encodeURIComponent(modelKey)}`");
+    expect(routeSource).toContain('buildProviderDraftRequest({ providerId, provider }),\n        "DELETE"');
+    expect(routeSource).toContain("routePreviewToken: routePreview.routePreviewToken");
+    expect((routeSource.match(/syncWorkspace\(response, "success", \{ resetBase: false \}\);/g) ?? []).length).toBeGreaterThanOrEqual(6);
+    expect(routeSource).not.toContain("syncProviderProjection");
+  });
+
+  it("chains create then discover from the latest synchronized Provider draft", () => {
+    expect(routeSource).toContain("providerDraftRequestRef");
+    expect(routeSource).toContain("providerDraftRequestRef.current = {");
+    expect(routeSource).toContain("publicConfig: workspace.publicConfig");
+    expect(routeSource).toContain("const latestDraft = providerDraftRequestRef.current");
+    expect(routeSource).toContain("publicConfig: latestDraft.publicConfig");
+  });
+
+  it("previews and applies the same proposed Provider route with backend token authority", () => {
+    expect(routeSource).toContain("routeEditProviderId");
+    expect(routeSource).toContain("routeEditProvider");
+    expect(routeSource).toContain("handlePreviewProviderRoute(routeEditProviderId, routeEditProvider)");
+    expect(routeSource).toContain("proposedProvider: provider");
+    expect(routeSource).toContain("provider: routePreview.proposedProvider");
+    expect(routeSource).toContain("routePreviewToken: routePreview.routePreviewToken");
+    expect(routeSource).toContain("routePreview.impactedRefs.map");
+  });
+
+  it("keeps the provider workbench on VUI controls with stable visual-state selectors", () => {
+    const providerSources = [providerPanelSource, wizardSource, migrationPanelSource].join("\n");
+    expect(providerSources).toContain('from "../components/vui"');
+    expect(providerSources).not.toContain("@heroui/react");
+    expect(providerSources).not.toMatch(/<(button|select|textarea)\b/);
+    expect(providerPanelSource).toContain("data-provider-status");
+    expect(providerPanelSource).toContain("data-model-availability");
+    expect(wizardSource).toContain("data-wizard-step");
+    expect(migrationPanelSource).toContain("data-migration-status");
+  });
+
+  it("collapses provider comparison below 960px without route-level horizontal overflow", () => {
+    expect(providerPanelStyles.registryWorkspace).toContain("max-[960px]:[grid-template-columns:minmax(0,1fr)]");
+    expect(providerPanelStyles.tableScroll).toContain("[overflow-x:auto]");
+    expect(providerPanelStyles.mobileActionGroup).toContain("max-[390px]:[grid-template-columns:minmax(0,1fr)]");
+    expect(providerPanelStylesSource).not.toContain("width:100vw");
+  });
+
   it("passes the workspace schema version into legacy model account compatibility", () => {
     expect(routeSource).toMatch(
       /deriveModelCenterSummary\(\{\s*modelOptions,\s*schemaVersion: workspace\?\.schemaVersion,\s*\}\)/,
@@ -66,7 +150,10 @@ describe("ConfigRoute layout contract", () => {
     expect(routeSource).toContain("<ConfigOverviewPanel");
     expect(routeSource).toContain("<ConfigRuntimePanel");
     expect(routeSource).toContain("<ConfigDraftPanel");
-    expect(routeSource).toContain("<ConfigModelLibraryPanel");
+    expect(routeSource).toContain("<ConfigProviderRegistryPanel");
+    expect(routeSource).toContain("<ConfigProviderWizard");
+    expect(routeSource).toContain("<ConfigModelMigrationPanel");
+    expect(routeSource).not.toContain('from "./ConfigModelLibraryPanel"');
     expect(routeSource).not.toContain('<section id="config-overview"');
     expect(routeSource).not.toContain('<section id="config-shell"');
     expect(routeSource).not.toContain('<section id="config-draft"');
@@ -75,17 +162,17 @@ describe("ConfigRoute layout contract", () => {
     expect(overviewPanelSource).toContain('from "./ConfigOverviewPanel.styles"');
     expect(runtimePanelSource).toContain('from "./ConfigRuntimePanel.styles"');
     expect(draftPanelSource).toContain('from "./ConfigDraftPanel.styles"');
-    expect(modelLibraryPanelSource).toContain('from "./ConfigModelLibraryPanel.styles"');
+    expect(providerPanelSource).toContain('from "./ConfigProviderRegistryPanel.styles"');
     expect(overviewPanelSource).not.toContain("ConfigRoute.styles");
     expect(runtimePanelSource).not.toContain("ConfigRoute.styles");
     expect(draftPanelSource).not.toContain("ConfigRoute.styles");
-    expect(modelLibraryPanelSource).not.toContain("ConfigRoute.styles");
+    expect(providerPanelSource).not.toContain("ConfigRoute.styles");
 
     expect(overviewPanelStyles.sectionSurface).toBeTypeOf("string");
     expect(runtimePanelStyles.sectionSurface).toBeTypeOf("string");
     expect(draftPanelStyles.sectionSurface).toBeTypeOf("string");
-    expect(modelLibraryPanelStyles.sectionSurface).toBeTypeOf("string");
-    expect(modelLibraryPanelStyles.modelLibrarySection).toBeTypeOf("string");
+    expect(providerPanelStyles.sectionSurface).toBeTypeOf("string");
+    expect(providerPanelStyles.registryWorkspace).toBeTypeOf("string");
     expect(draftPanelSource).toContain("<LazyJsonCodeMirror");
     expect(routeSource).toContain("onIntakeModeChange");
   });
@@ -108,9 +195,9 @@ describe("ConfigRoute layout contract", () => {
     expect(routeSource).toContain("subtitleHint");
     expect(routeSource).toContain('title={copy.subtitleHint}');
     expect(overviewPanelSource).toContain("sourceBodyShort");
-    expect(modelLibraryPanelSource).toContain("modelsBodyShort");
+    expect(providerPanelSource).toContain("Provider 与模型工作台");
     expect(overviewPanelSource).toContain('title={copy.sourceBody}');
-    expect(modelLibraryPanelSource).toContain('title={copy.modelsBody}');
+    expect(providerPanelSource).toContain('title={provider.providerId}');
     expect(overviewPanelSource).toContain('title={copy.openEnvironmentHint}');
     expect(routeSource).not.toContain('<span className={styles.helperText}>{copy.openEnvironmentHint}</span>');
   });
@@ -118,35 +205,30 @@ describe("ConfigRoute layout contract", () => {
   it("keeps the model settings group dense enough to use the bottom viewport", () => {
     expect(routeSource).toContain('activeSection?.id === "models-profiles"');
     expect(routeSource).toContain("styles.contentModels");
-    expect(routeSource).toContain("<ConfigModelLibraryPanel");
-    expect(modelLibraryPanelSource).toContain('id="config-models"');
-    expect(modelLibraryPanelSource).toContain("styles.modelLibrarySection");
-    expect(modelLibraryPanelSource).toContain("styles.modelInventoryTable");
+    expect(routeSource).toContain("<ConfigProviderRegistryPanel");
+    expect(providerPanelSource).toContain('id="config-models"');
+    expect(providerPanelSource).toContain("styles.registryWorkspace");
+    expect(providerPanelSource).toContain("<VDenseTable");
     expect(routeSource).toContain("styles.configEditorSection");
     expect(routeSource).toContain('section.id === "llm-discovery" ? styles.configDiscoverySection : ""');
     expect(routeSource).toContain("styles.notice");
-    expect(modelLibraryPanelSource).toContain("styles.profileTableWrap");
-    expect(modelLibraryPanelSource).toContain("styles.profileTaskCell");
+    expect(providerPanelSource).toContain("styles.tableScroll");
+    expect(providerPanelSource).toContain("styles.modelIdentity");
     expect(stylesSource).toContain("contentModels:");
-    expect(modelLibraryPanelStylesSource).toContain("modelLibrarySection:");
-    expect(modelLibraryPanelStylesSource).toContain("modelInventoryTable:");
+    expect(providerPanelStylesSource).toContain("registryWorkspace:");
+    expect(providerPanelStylesSource).toContain("tableScroll:");
     expect(stylesSource).toContain("configEditorSection:");
     expect(stylesSource).toContain("configDiscoverySection:");
   });
 
-  it("converges the model library panel into a compact VUI row-panel contract", () => {
-    expect(modelLibraryPanelStylesSource).not.toMatch(/\bsurface-card\b(?!\))/);
-    expect(modelLibraryPanelStylesSource).not.toContain("var(--radius-panel)");
-    expect(modelLibraryPanelStyles.sectionSurface).toContain("[border-radius:8px]");
-    expect(modelLibraryPanelStyles.formSurface).toContain("[max-height:min(360px,_44vh)]");
-    expect(modelLibraryPanelStyles.formSurface).toContain("[overflow:auto]");
-    expect(modelLibraryPanelStyles.formGridWide).toContain("repeat(auto-fit,minmax(176px,1fr))");
-    expect(modelLibraryPanelStyles.modelLibrarySection).toContain("[grid-template-rows:auto_auto_auto_auto_minmax(0,0.58fr)_minmax(0,1fr)]");
-    expect(modelLibraryPanelStyles.modelLibraryTestBar).toContain("[padding:6px_8px]");
-    expect(modelLibraryPanelStyles.modelLibraryTestBar).toContain("max-[720px]:[&_.actionButton]:[width:fit-content]");
-    expect(modelLibraryPanelStyles.profileTableWrap).toContain("[min-height:min(240px,_34vh)]");
-    expect(modelLibraryPanelStyles.profileTableWrap).toContain("[min-width:0]");
-    expect(modelLibraryPanelStyles.profileTableActions).toContain("[flex-wrap:nowrap]");
+  it("converges the provider registry into a compact VUI workbench contract", () => {
+    expect(providerPanelStylesSource).not.toMatch(/\bsurface-card\b(?!\))/);
+    expect(providerPanelStylesSource).not.toContain("var(--radius-panel)");
+    expect(providerPanelStyles.sectionSurface).toContain("[border-radius:8px]");
+    expect(providerPanelStyles.registryWorkspace).toContain("[grid-template-columns:minmax(220px,0.34fr)_minmax(0,1fr)]");
+    expect(providerPanelStyles.providerList).toContain("overflow-y-auto");
+    expect(providerPanelStyles.tableScroll).toContain("[overflow-x:auto]");
+    expect(providerPanelStyles.mobileActionGroup).toContain("max-[390px]:[grid-template-columns:minmax(0,1fr)]");
   });
 
   it("bounds Config diagnostics and transient notices so long text cannot force page overflow", () => {
@@ -207,7 +289,7 @@ describe("ConfigRoute layout contract", () => {
     expect(draftPanelStyles.sectionSurface).not.toContain("color-mix(in_srgb,var(--vui-surface-panel)_72%,transparent)");
     expect(overviewPanelStyles.sectionSurface).not.toContain("color-mix(in_srgb,var(--vui-surface-panel)_72%,transparent)");
     expect(runtimePanelStyles.sectionSurface).not.toContain("color-mix(in_srgb,var(--vui-surface-panel)_72%,transparent)");
-    expect(modelLibraryPanelStyles.sectionSurface).not.toContain("color-mix(in_srgb,var(--vui-surface-panel)_72%,transparent)");
+    expect(providerPanelStyles.sectionSurface).not.toContain("color-mix(in_srgb,var(--vui-surface-panel)_72%,transparent)");
     expect(healthDiagnosticsPanelStyles.sectionSurface).not.toContain("color-mix(in_srgb,var(--vui-surface-panel)_72%,transparent)");
     expect(placeholderPanelStyles.loadingBoard).not.toContain("color-mix(in_srgb,var(--vui-surface-panel)_72%,transparent)");
   });
@@ -253,13 +335,13 @@ describe("ConfigRoute layout contract", () => {
     expect(stylesSource).toContain("returnButton:");
   });
 
-  it("splits model creation into vendor templates and concrete model discovery", () => {
-    expect(routeSource).toContain("providerVendorGroups");
-    expect(routeSource).toContain("selectedProviderVendorTemplates");
-    expect(modelLibraryPanelSource).toContain("copy.providerVendor");
-    expect(modelLibraryPanelSource).toContain("copy.providerTemplate");
-    expect(routeSource).toContain("applyProviderTemplate");
-    expect(modelLibraryPanelSource).not.toContain("modelPresetGroups.map");
+  it("splits Provider creation into service-class templates and concrete model discovery", () => {
+    expect(wizardSource).toContain("TEMPLATE_GROUPS");
+    expect(wizardSource).toContain('"official_api"');
+    expect(wizardSource).toContain('"local_runtime"');
+    expect(wizardSource).toContain("templateModelFamily");
+    expect(wizardSource).toContain("onDiscover");
+    expect(wizardSource).not.toContain("modelPresetGroups.map");
   });
 
   it("shows developer mode as launcher-owned read-only state", () => {
@@ -441,7 +523,7 @@ describe("ConfigRoute layout contract", () => {
     expect(runtimePanelStyles.segmented).toContain("[background:var(--vui-surface-toolbar)]");
     expect(draftPanelStyles.actionButton).toContain("var(--vui-control-muted)");
     expect(healthDiagnosticsPanelStyles.findingCard).toContain("color-mix(in_srgb,var(--surface-card)_94%,var(--surface-panel))");
-    expect(modelLibraryPanelStyles.formSurface).toContain(
+    expect(providerPanelStyles.sectionSurface).toContain(
       "color-mix(in_srgb,var(--surface-panel)_96%,var(--bg-canvas))",
     );
     expect(placeholderPanelStyles.loadingBoard).toContain(

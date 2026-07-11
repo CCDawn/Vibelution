@@ -84,6 +84,11 @@ export type ConfigModelLibraryPanelProps = {
   imageInputStatusLabel: (result: ImageInputStatusLabelInput) => string;
 };
 
+/**
+ * @deprecated Runtime ownership moved to ConfigProviderRegistryPanel,
+ * ConfigProviderWizard, and ConfigModelMigrationPanel. This zero-reference
+ * compatibility file remains only so Task 11 can remove it independently.
+ */
 export function ConfigModelLibraryPanel({
   copy,
   eyebrow,

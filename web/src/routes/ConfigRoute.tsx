@@ -10,7 +10,7 @@ import {
   Upload,
   X,
 } from "lucide-react";
-import { type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode, useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { Link, type BlockerFunction, useBlocker, useSearchParams } from "react-router-dom";
 
 import { fetchJson } from "../api/client";
@@ -18,11 +18,13 @@ import { queryKeys } from "../api/queryKeys";
 import {
   ConfigEditorMeta,
   ConfigEditorSection,
+  ConfigCatalogModel,
   ConfigDiscoveredModel,
   ConfigDraftMeta,
   ConfigLlmTestResult,
   ConfigModelDiscoveryResult,
   ConfigModelOption,
+  ConfigMigrationPreview,
   ConfigWorkspace,
   HealthDiagnostics,
 } from "../api/types";
@@ -54,6 +56,7 @@ import {
 } from "./configRouteLogic";
 import {
   VButton,
+  VActionGroup,
   VCheckbox,
   VInput,
   VPanelHeader,
@@ -61,20 +64,39 @@ import {
   VSection,
   VStatusStrip,
   VStringSelect,
+  VStateSurface,
   VSurface,
   VTextarea,
 } from "../components/vui";
 import { safeAgentCenterReturnToPath } from "./agentCenterRoutes";
 import { ConfigDraftPanel } from "./ConfigDraftPanel";
 import { ConfigHealthDiagnosticsPanel, type ConfigHealthDiagnosticsPanelCopy } from "./ConfigHealthDiagnosticsPanel";
-import { ConfigModelLibraryPanel } from "./ConfigModelLibraryPanel";
+import { ConfigModelMigrationPanel } from "./ConfigModelMigrationPanel";
 import { ConfigOverviewPanel } from "./ConfigOverviewPanel";
+import { ConfigProviderRegistryPanel, type ConfigProviderRegistryTab } from "./ConfigProviderRegistryPanel";
+import { ConfigProviderWizard } from "./ConfigProviderWizard";
 import { ConfigRuntimePanel } from "./ConfigRuntimePanel";
 import { ConfigWorkspacePlaceholderPanel } from "./ConfigWorkspacePlaceholderPanel";
+import { deriveProviderRegistryRows, initialProviderWizardState, providerWizardReducer } from "./configProviderLogic";
 import styles from "./ConfigRoute.styles";
 
 export type ConfigLanguage = "zh" | "en";
 type NoticeTone = "neutral" | "success" | "error";
+
+type ProviderRouteImpact = {
+  modelRef?: string;
+  liveReferenceCount?: number;
+  historicalReferenceCount?: number;
+};
+
+type ProviderRoutePreview = {
+  providerId: string;
+  routeChanged: boolean;
+  routePreviewToken: string;
+  modelRefs: string[];
+  impactedRefs: ProviderRouteImpact[];
+  proposedProvider: Record<string, unknown>;
+};
 
 export type ProviderDraft = {
   kind: string;
@@ -2047,6 +2069,12 @@ export function ConfigRoute() {
   const modelEditorRef = useRef<HTMLDivElement | null>(null);
   const sidebarResizeCleanupRef = useRef<(() => void) | null>(null);
   const lastRequestedSectionRef = useRef("");
+  const autoRefreshAttemptedProviderIds = useRef(new Set<string>());
+  const providerDraftRequestRef = useRef<{
+    publicConfig: PublicConfigShape;
+    draftMeta: ConfigDraftMeta;
+    baseHash: string;
+  } | null>(null);
   const workspaceQuery = useQuery({
     queryKey: queryKeys.configWorkspace(),
     queryFn: () => fetchJson<ConfigWorkspace>("/api/config/workspace"),
@@ -2072,6 +2100,14 @@ export function ConfigRoute() {
   const [discoveredModels, setDiscoveredModels] = useState<ConfigDiscoveredModel[]>([]);
   const [selectedDiscoveredModelId, setSelectedDiscoveredModelId] = useState("");
   const [selectedProviderVendorId, setSelectedProviderVendorId] = useState("");
+  const [selectedProviderId, setSelectedProviderId] = useState("");
+  const [selectedProviderTab, setSelectedProviderTab] = useState<ConfigProviderRegistryTab>("connection");
+  const [providerWizardState, dispatchProviderWizard] = useReducer(providerWizardReducer, undefined, initialProviderWizardState);
+  const [migrationPreview, setMigrationPreview] = useState<ConfigMigrationPreview | null>(null);
+  const [routePreview, setRoutePreview] = useState<ProviderRoutePreview | null>(null);
+  const [routeEditProviderId, setRouteEditProviderId] = useState("");
+  const [routeEditProvider, setRouteEditProvider] = useState<Record<string, unknown>>({});
+  const [providerActionError, setProviderActionError] = useState("");
   const [modelEditorExpanded, setModelEditorExpanded] = useState(false);
   const [sidebarIndexCollapsed, setSidebarIndexCollapsed] = useState(() => readStoredFlag(SIDEBAR_INDEX_COLLAPSED_STORAGE_KEY) ?? false);
   const [activeSectionId, setActiveSectionId] = useState(() => searchParams.get("section") ?? "");
@@ -2089,6 +2125,11 @@ export function ConfigRoute() {
   });
 
   function syncWorkspace(workspace: ConfigWorkspace, tone: NoticeTone = "neutral", options: { resetBase?: boolean } = {}) {
+    providerDraftRequestRef.current = {
+      publicConfig: workspace.publicConfig,
+      draftMeta: workspace.draftMeta,
+      baseHash: workspace.baseHash,
+    };
     setActiveWorkspace(clonePublicConfig(workspace));
     setDraftConfig(clonePublicConfig(workspace.publicConfig));
     if (options.resetBase !== false) {
@@ -2197,6 +2238,10 @@ export function ConfigRoute() {
   const modelOptions = workspace?.modelOptions ?? [];
   const modelOptionsById = useMemo(() => new Map(modelOptions.map((option) => [option.model_id, option])), [modelOptions]);
   const providerPresetOptions = workspace?.providerPresetOptions ?? [];
+  const providerRows = useMemo(
+    () => deriveProviderRegistryRows(workspace?.providerOptions ?? [], workspace?.modelCatalog ?? { schemaVersion: 2, providerCount: 0, modelCount: 0, providers: {} }),
+    [workspace?.modelCatalog, workspace?.providerOptions],
+  );
   const providerVendorGroups = useMemo(() => groupProviderPresetsByVendor(providerPresetOptions), [providerPresetOptions]);
   const selectedProviderVendorTemplates = useMemo(
     () => providerVendorGroups.find((group) => group.id === selectedProviderVendorId)?.templates ?? [],
@@ -2235,6 +2280,20 @@ export function ConfigRoute() {
   }, [modelOptions, modelOptionsById, selectedModelTestId]);
   const modelCapabilityIssueCount = countModelCenterHealthIssues(modelCenterRows);
   const modelDiscoveryAvailable = canDiscoverModelsForProvider(modelEditor.provider);
+
+  useEffect(() => {
+    if (!providerRows.length) {
+      if (selectedProviderId) setSelectedProviderId("");
+      return;
+    }
+    if (!selectedProviderId || !providerRows.some((row) => row.providerId === selectedProviderId)) {
+      setSelectedProviderId(providerRows[0].providerId);
+    }
+  }, [providerRows, selectedProviderId]);
+
+  useEffect(() => {
+    autoRefreshAttemptedProviderIds.current.clear();
+  }, [workspaceQuery.data?.baseHash]);
 
   useEffect(() => {
     if (!visibleSidebarGroups.length) {
@@ -2366,6 +2425,272 @@ export function ConfigRoute() {
       throw new Error(copy.loadFailed);
     }
     return draftConfig;
+  }
+
+  const buildProviderDraftRequest = useCallback((extra: Record<string, unknown>) => {
+    const latestDraft = providerDraftRequestRef.current ?? (draftConfig ? { publicConfig: draftConfig, draftMeta, baseHash } : null);
+    if (!latestDraft) {
+      throw new Error(copy.loadFailed);
+    }
+    return {
+      publicConfig: latestDraft.publicConfig,
+      draftMeta: latestDraft.draftMeta,
+      baseHash: latestDraft.baseHash,
+      ...extra,
+    };
+  }, [baseHash, copy.loadFailed, draftConfig, draftMeta]);
+
+  const handleDiscoverProvider = useCallback(async (providerId: string, credentialValue = ""): Promise<ConfigCatalogModel[]> => {
+    setBusyAction("正在发现 Provider 模型…");
+    setProviderActionError("");
+    try {
+      const response = await requestJson<ConfigWorkspace>(
+        `/api/config/draft/providers/${encodeURIComponent(providerId)}/discover`,
+        buildProviderDraftRequest({ providerId, credentialValue }),
+      );
+      syncWorkspace(response, "success", { resetBase: false });
+      return Object.values(response.modelCatalog.providers[providerId]?.models ?? {});
+    } catch (error) {
+      const message = readableErrorMessage(error).slice(0, 480);
+      setProviderActionError(message);
+      markError(error);
+      throw error;
+    } finally {
+      setBusyAction("");
+    }
+  }, [buildProviderDraftRequest]);
+
+  useEffect(() => {
+    if ((activeSectionId !== "models" && activeSectionId !== "models-profiles") || workspace?.schemaVersion !== 2) return;
+    let cancelled = false;
+    const refreshDueProviders = async () => {
+      for (const row of providerRows.filter((row) => row.refreshDue && row.driver !== "manual")) {
+        if (cancelled || autoRefreshAttemptedProviderIds.current.has(row.providerId)) continue;
+        autoRefreshAttemptedProviderIds.current.add(row.providerId);
+        try {
+          await handleDiscoverProvider(row.providerId);
+        } catch {
+          // The bounded route notice keeps the failure visible; later Providers still refresh sequentially.
+        }
+      }
+    };
+    void refreshDueProviders();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeSectionId, handleDiscoverProvider, providerRows, workspace?.schemaVersion]);
+
+  async function handleSuggestProviderId(provider: Record<string, unknown>): Promise<string> {
+    const response = await requestJson<{ suggestedProviderId: string }>(
+      "/api/config/draft/providers/id-suggestion",
+      buildProviderDraftRequest({ provider }),
+    );
+    return response.suggestedProviderId;
+  }
+
+  async function handleCreateProvider(state: typeof providerWizardState, credentialValue: string): Promise<void> {
+    setBusyAction("正在创建 Provider 草稿…");
+    setProviderActionError("");
+    const template = providerPresetOptions.find((item) => item.provider_preset_id === state.templateId);
+    const templateProvider = asRecord(template?.provider);
+    const provider = {
+      ...templateProvider,
+      label: state.label,
+      service_class: state.serviceClass,
+      driver: state.driver,
+      base_url: state.baseUrl,
+      auth_kind: getString(templateProvider.auth_kind) || (state.credentialRef === "none" ? "none" : "api_key"),
+      credential_ref: state.credentialRef,
+      requires_credential: state.credentialRef !== "none",
+      protocols: { default: state.defaultProtocol, allowed: state.allowedProtocols },
+      discovery: { ...asRecord(templateProvider.discovery), mode: getString(asRecord(templateProvider.discovery).mode) || "auto" },
+      ...(state.serviceClass === "local_runtime" ? { runtime_framework: state.runtimeFramework, artifact_path: state.artifactPath } : {}),
+      models: {},
+    };
+    try {
+      const response = await requestJson<ConfigWorkspace>(
+        "/api/config/draft/providers",
+        buildProviderDraftRequest({ providerId: state.providerId, provider, credentialValue }),
+      );
+      syncWorkspace(response, "success", { resetBase: false });
+      setSelectedProviderId(state.providerId);
+    } catch (error) {
+      const message = readableErrorMessage(error).slice(0, 480);
+      setProviderActionError(message);
+      markError(error);
+      throw error;
+    } finally {
+      setBusyAction("");
+    }
+  }
+
+  async function handlePinProviderModels(providerId: string, models: ConfigCatalogModel[]): Promise<void> {
+    setBusyAction("正在固定模型…");
+    setProviderActionError("");
+    let currentConfig = requireDraft();
+    let currentMeta = draftMeta;
+    try {
+      for (const model of models) {
+        const response = await requestJson<ConfigWorkspace>(
+          `/api/config/draft/providers/${encodeURIComponent(providerId)}/models`,
+          {
+            publicConfig: currentConfig,
+            draftMeta: currentMeta,
+            baseHash,
+            providerId,
+            upstreamId: model.upstreamId,
+            modelKey: model.modelKey,
+            label: model.label,
+            overrides: {},
+          },
+        );
+        currentConfig = response.publicConfig;
+        currentMeta = response.draftMeta;
+        syncWorkspace(response, "success", { resetBase: false });
+      }
+      setSelectedProviderId(providerId);
+      setSelectedProviderTab("models");
+    } catch (error) {
+      const message = readableErrorMessage(error).slice(0, 480);
+      setProviderActionError(message);
+      markError(error);
+      throw error;
+    } finally {
+      setBusyAction("");
+    }
+  }
+
+  async function handleUnpinProviderModel(modelRef: string) {
+    const separator = modelRef.indexOf("/");
+    if (separator <= 0) return;
+    const providerId = modelRef.slice(0, separator);
+    const modelKey = modelRef.slice(separator + 1);
+    const model = providerRows.find((row) => row.providerId === providerId)?.models.find((item) => item.modelRef === modelRef);
+    setBusyAction("正在取消固定模型…");
+    try {
+      const response = await requestJson<ConfigWorkspace>(
+        `/api/config/draft/providers/${encodeURIComponent(providerId)}/models/${encodeURIComponent(modelKey)}`,
+        buildProviderDraftRequest({ providerId, upstreamId: model?.upstreamId ?? "", modelKey }),
+        "DELETE",
+      );
+      syncWorkspace(response, "success", { resetBase: false });
+    } catch (error) {
+      setProviderActionError(readableErrorMessage(error).slice(0, 480));
+      markError(error);
+    } finally {
+      setBusyAction("");
+    }
+  }
+
+  async function handleDeleteProvider(providerId: string) {
+    if (typeof window !== "undefined" && !window.confirm(`删除 Provider ${providerId}？此操作只允许在没有固定模型时继续。`)) return;
+    setBusyAction("正在删除 Provider…");
+    try {
+      const provider = asRecord(asRecord(asRecord(requireDraft().llm).providers)[providerId]);
+      const response = await requestJson<ConfigWorkspace>(
+        `/api/config/draft/providers/${encodeURIComponent(providerId)}`,
+        buildProviderDraftRequest({ providerId, provider }),
+        "DELETE",
+      );
+      syncWorkspace(response, "success", { resetBase: false });
+      setSelectedProviderId("");
+    } catch (error) {
+      setProviderActionError(readableErrorMessage(error).slice(0, 480));
+      markError(error);
+    } finally {
+      setBusyAction("");
+    }
+  }
+
+  function handleBeginProviderRouteEdit(providerId: string) {
+    const provider = clonePublicConfig(asRecord(asRecord(asRecord(requireDraft().llm).providers)[providerId]));
+    setRouteEditProviderId(providerId);
+    setRouteEditProvider(provider);
+    setRoutePreview(null);
+  }
+
+  async function handlePreviewProviderRoute(providerId: string, provider: Record<string, unknown>) {
+    setBusyAction("正在预览路由影响…");
+    try {
+      const preview = await requestJson<Omit<ProviderRoutePreview, "proposedProvider">>(
+        `/api/config/draft/providers/${encodeURIComponent(providerId)}/route-preview`,
+        buildProviderDraftRequest({ providerId, provider }),
+      );
+      setRoutePreview({ ...preview, proposedProvider: provider });
+    } catch (error) {
+      setProviderActionError(readableErrorMessage(error).slice(0, 480));
+      markError(error);
+    } finally {
+      setBusyAction("");
+    }
+  }
+
+  async function handleApplyProviderRoutePreview() {
+    if (!routePreview?.routeChanged || !routePreview.routePreviewToken) return;
+    setBusyAction("正在更新 Provider 路由…");
+    try {
+      const response = await requestJson<ConfigWorkspace>(
+        `/api/config/draft/providers/${encodeURIComponent(routePreview.providerId)}`,
+        buildProviderDraftRequest({
+          providerId: routePreview.providerId,
+          provider: routePreview.proposedProvider,
+          routePreviewToken: routePreview.routePreviewToken,
+        }),
+        "PUT",
+      );
+      syncWorkspace(response, "success", { resetBase: false });
+      setRoutePreview(null);
+      setRouteEditProviderId("");
+      setRouteEditProvider({});
+    } catch (error) {
+      setProviderActionError(readableErrorMessage(error).slice(0, 480));
+      markError(error);
+    } finally {
+      setBusyAction("");
+    }
+  }
+
+  async function handlePreviewMigration() {
+    setBusyAction("正在生成迁移预览…");
+    try {
+      const response = await requestJson<ConfigMigrationPreview>(
+        "/api/config/migration/llm-v2/preview",
+        buildProviderDraftRequest({}),
+      );
+      setMigrationPreview(response);
+    } catch (error) {
+      setProviderActionError(readableErrorMessage(error).slice(0, 480));
+      markError(error);
+    } finally {
+      setBusyAction("");
+    }
+  }
+
+  async function handleApplyMigration(previewId: string, previewBaseHash: string) {
+    if (!migrationPreview || migrationPreview.previewId !== previewId || migrationPreview.baseHash !== previewBaseHash) return;
+    const impactedRefs = Object.values(migrationPreview.modelRefMap).slice(0, 8).join("\n");
+    const confirmed = typeof window === "undefined" || window.confirm(
+      `将修改外部 operator config。\nLive references: ${migrationPreview.referenceImpact.liveReferenceCount}\nCanonical model refs:\n${impactedRefs}\n\n确认应用已预览的迁移？`,
+    );
+    if (!confirmed) return;
+    setBusyAction("正在应用迁移…");
+    try {
+      await requestJson<{ migrationId: string; updatedReferenceCount?: number }>(
+        "/api/config/migration/llm-v2/apply",
+        { previewId, baseHash: previewBaseHash },
+      );
+      const refreshed = await workspaceQuery.refetch();
+      if (refreshed.data) {
+        syncWorkspace(refreshed.data, "success");
+      }
+      setMigrationPreview(null);
+      await queryClient.invalidateQueries({ queryKey: queryKeys.configWorkspace() });
+    } catch (error) {
+      setProviderActionError(readableErrorMessage(error).slice(0, 480));
+      markError(error);
+    } finally {
+      setBusyAction("");
+    }
   }
 
   function resolveDraftForSubmission(): PublicConfigShape {
@@ -3245,50 +3570,162 @@ export function ConfigRoute() {
         ) : null}
 
         {isSectionVisible("models") ? (
-          <ConfigModelLibraryPanel
-            copy={copy}
-            eyebrow={sectionTitle("models", copy.modelsTitle)}
-            modelCenterRows={modelCenterRows}
-            modelCenterSummary={modelCenterSummary}
-            modelCapabilityIssueCount={modelCapabilityIssueCount}
-            selectedModelTestId={selectedModelTestId}
-            modelOptions={modelOptions}
-            modelOptionsById={modelOptionsById}
-            setSelectedModelTestId={setSelectedModelTestId}
-            structuredActionsDisabled={structuredActionsDisabled}
-            busyAction={busyAction}
-            onTestSelectedLibraryModel={handleTestSelectedLibraryModel}
-            onCheckModelImageCapabilities={handleCheckModelImageCapabilities}
-            modelEditorRef={modelEditorRef}
-            modelEditor={modelEditor}
-            modelEditorExpanded={modelEditorExpanded}
-            setModelEditorExpanded={setModelEditorExpanded}
-            setModelEditor={setModelEditor}
-            modelEditorError={modelEditorError}
-            setModelEditorError={setModelEditorError}
-            providerVendorGroups={providerVendorGroups}
-            selectedProviderVendorId={selectedProviderVendorId}
-            selectedProviderVendorTemplates={selectedProviderVendorTemplates}
-            applyProviderVendor={applyProviderVendor}
-            applyProviderTemplate={applyProviderTemplate}
-            modelScenarioOptions={modelScenarioOptions}
-            applyModelScenario={applyModelScenario}
-            modelDiscoveryAvailable={modelDiscoveryAvailable}
-            onDiscoverModels={handleDiscoverModels}
-            discoveredModels={discoveredModels}
-            selectedDiscoveredModelId={selectedDiscoveredModelId}
-            applyDiscoveredModel={applyDiscoveredModel}
-            modelDiscoveryError={modelDiscoveryError}
-            canSubmitModelEditor={canSubmitModelEditor}
-            modelEditorRequiredFieldsReady={modelEditorRequiredFieldsReady}
-            onSaveModel={handleSaveModel}
-            onDeleteModel={handleDeleteModel}
-            emptyModelEditorState={emptyModelEditorState}
-            hydrateModelEditorFromOption={hydrateModelEditorFromOption}
-            focusModelEditor={focusModelEditor}
-            keyStateLabel={keyStateLabel}
-            imageInputStatusLabel={imageInputStatusLabel}
-          />
+          <div className="grid min-w-0 gap-3">
+            {workspace.schemaVersion === 2 ? (
+              <>
+                <ConfigProviderRegistryPanel
+                  rows={providerRows}
+                  selectedProviderId={selectedProviderId}
+                  selectedTab={selectedProviderTab}
+                  disabled={structuredActionsDisabled || Boolean(busyAction)}
+                  onSelectProvider={setSelectedProviderId}
+                  onSelectTab={setSelectedProviderTab}
+                  onDiscover={(providerId) => {
+                    void handleDiscoverProvider(providerId).catch(() => undefined);
+                  }}
+                  onEditRoute={(providerId) => {
+                    handleBeginProviderRouteEdit(providerId);
+                  }}
+                  onUnpin={(modelRef) => {
+                    void handleUnpinProviderModel(modelRef);
+                  }}
+                  onDeleteProvider={(providerId) => {
+                    void handleDeleteProvider(providerId);
+                  }}
+                />
+                {routeEditProviderId && !routePreview ? (
+                  <VSurface as="section" padding="compact" tone="row" className="grid min-w-0 gap-2">
+                    <VSection
+                    title={`编辑 ${routeEditProviderId} 的连接路由`}
+                    actions={(
+                      <VActionGroup ariaLabel="Provider 路由编辑操作">
+                        <VButton
+                          isDisabled={Boolean(busyAction)}
+                          onPress={() => {
+                            setRouteEditProviderId("");
+                            setRouteEditProvider({});
+                          }}
+                        >
+                          取消
+                        </VButton>
+                        <VButton
+                          variant="primary"
+                          isDisabled={Boolean(busyAction) || !getString(routeEditProvider.base_url) || !getString(routeEditProvider.driver)}
+                          onPress={() => {
+                            void handlePreviewProviderRoute(routeEditProviderId, routeEditProvider);
+                          }}
+                        >
+                          预览替换影响
+                        </VButton>
+                      </VActionGroup>
+                    )}
+                    >
+                    <div className="grid min-w-0 grid-cols-3 gap-2 max-[720px]:grid-cols-1">
+                      <label className="grid min-w-0 gap-1">
+                        <span>Service root</span>
+                        <VInput
+                          value={getString(routeEditProvider.base_url)}
+                          disabled={Boolean(busyAction)}
+                          onChange={(event) => setRouteEditProvider((current) => ({ ...current, base_url: event.target.value }))}
+                        />
+                      </label>
+                      <label className="grid min-w-0 gap-1">
+                        <span>Driver</span>
+                        <VStringSelect
+                          ariaLabel="Provider route driver"
+                          value={getString(routeEditProvider.driver)}
+                          isDisabled={Boolean(busyAction)}
+                          options={["openai", "anthropic", "gemini"].map((value) => ({ value, label: value }))}
+                          onValueChange={(driver) => setRouteEditProvider((current) => ({ ...current, driver }))}
+                        />
+                      </label>
+                      <label className="grid min-w-0 gap-1">
+                        <span>Default wire protocol</span>
+                        <VStringSelect
+                          ariaLabel="Provider default wire protocol"
+                          value={getString(asRecord(routeEditProvider.protocols).default)}
+                          isDisabled={Boolean(busyAction)}
+                          options={["responses", "chat_completions", "anthropic_messages", "gemini_generate_content"].map((value) => ({ value, label: value }))}
+                          onValueChange={(defaultProtocol) => setRouteEditProvider((current) => {
+                            const protocols = asRecord(current.protocols);
+                            const allowed = Array.isArray(protocols.allowed) ? protocols.allowed.filter((item): item is string => typeof item === "string") : [];
+                            return {
+                              ...current,
+                              protocols: { ...protocols, default: defaultProtocol, allowed: Array.from(new Set([...allowed, defaultProtocol])) },
+                            };
+                          })}
+                        />
+                      </label>
+                    </div>
+                    <p className="m-0 text-[var(--vui-font-xs)] text-[var(--state-warning)]" role="alert">
+                      修改端点、驱动或默认协议后必须先获取后端 preview token；界面不会展示凭据引用或 secret。
+                    </p>
+                    </VSection>
+                  </VSurface>
+                ) : null}
+                {routePreview ? (
+                  <VStateSurface
+                    tone={routePreview.routeChanged ? "unavailable" : "info"}
+                    title={routePreview.routeChanged ? "确认 Provider 路由替换影响" : "当前路由没有变化"}
+                    facts={routePreview.impactedRefs.map((impact, index) => ({
+                      key: impact.modelRef ?? String(index),
+                      label: impact.modelRef ?? routePreview.modelRefs[index] ?? "modelRef",
+                      value: `${impact.liveReferenceCount ?? 0} live`,
+                    }))}
+                    actions={(
+                      <VActionGroup ariaLabel="Provider 路由替换确认">
+                        <VButton onPress={() => setRoutePreview(null)}>取消</VButton>
+                        <VButton
+                          variant="danger"
+                          isDisabled={!routePreview.routeChanged || !routePreview.routePreviewToken || Boolean(busyAction)}
+                          onPress={() => {
+                            void handleApplyProviderRoutePreview();
+                          }}
+                        >
+                          使用 preview token 更新
+                        </VButton>
+                      </VActionGroup>
+                    )}
+                  >
+                    后端 preview token 是唯一授权；本地 checkbox 或布尔值不能替代。受影响 canonical modelRef 与 live-reference counts 如上。
+                  </VStateSurface>
+                ) : null}
+                <ConfigProviderWizard
+                  state={providerWizardState}
+                  templates={providerPresetOptions}
+                  disabled={structuredActionsDisabled}
+                  busyLabel={busyAction}
+                  onChange={dispatchProviderWizard}
+                  onSuggestProviderId={handleSuggestProviderId}
+                  onCreateProvider={handleCreateProvider}
+                  onDiscover={handleDiscoverProvider}
+                  onPin={handlePinProviderModels}
+                />
+                <ConfigModelMigrationPanel
+                  schemaVersion={2}
+                  preview={null}
+                  aliasUsageCount={workspace.modelAliasUsage.totalLiveReferenceCount}
+                  busy={Boolean(busyAction)}
+                  onPreview={() => undefined}
+                  onApply={() => undefined}
+                />
+              </>
+            ) : (
+              <ConfigModelMigrationPanel
+                schemaVersion={1}
+                preview={migrationPreview}
+                aliasUsageCount={workspace.modelAliasUsage.totalLiveReferenceCount}
+                busy={Boolean(busyAction)}
+                onPreview={() => {
+                  void handlePreviewMigration();
+                }}
+                onApply={(previewId, previewBaseHash) => {
+                  void handleApplyMigration(previewId, previewBaseHash);
+                }}
+              />
+            )}
+            {providerActionError ? <p className={styles.noticeError} role="alert">{providerActionError}</p> : null}
+          </div>
         ) : null}
 
         {activeEditorSections.map((section) => (
