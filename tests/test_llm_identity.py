@@ -32,6 +32,17 @@ def test_provider_endpoint_rejects_embedded_sensitive_or_ambiguous_parts(value: 
         normalize_provider_endpoint(value)
 
 
+def test_provider_endpoint_rejects_invalid_port_without_echoing_input() -> None:
+    sensitive_port = "super-secret"
+
+    with pytest.raises(ValueError) as exc_info:
+        normalize_provider_endpoint(f"https://relay.example:{sensitive_port}/v1")
+
+    assert str(exc_info.value) == "provider base_url contains an invalid port"
+    assert sensitive_port not in str(exc_info.value)
+    assert exc_info.value.__cause__ is None
+
+
 def test_env_credential_reference_is_windows_case_insensitive() -> None:
     assert canonicalize_credential_ref("env:Relay_Key", windows_env=True) == "env:RELAY_KEY"
     assert canonicalize_credential_ref("none", windows_env=True) == "none"
@@ -65,6 +76,11 @@ def test_model_key_is_stable_and_order_independent() -> None:
     assert make_model_key("anthropic/claude-sonnet-4.6") == "anthropic_claude-sonnet-4.6~3e041007"
     assert make_model_key(r"C:\models\Qwen.gguf") == "c_models_qwen.gguf~88f2e351"
     assert make_model_key("Model") != make_model_key("model")
+
+
+def test_model_key_rejects_length_without_room_for_slug_and_digest() -> None:
+    with pytest.raises(ValueError, match="max_length"):
+        make_model_key("safe-model", max_length=9)
 
 
 def test_model_ref_round_trip() -> None:
