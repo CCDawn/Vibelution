@@ -132,7 +132,12 @@ class ConfigThemeBackgroundImagePayload(BaseModel):
 
 def _raise_config_http_error(exc: Exception) -> None:
     if isinstance(exc, ModelReferenceConflictError):
-        raise HTTPException(status_code=409, detail=exc.impact) from exc
+        raise HTTPException(
+            status_code=409,
+            detail=provider_config_service.project_model_reference_impact(
+                exc.impact
+            ),
+        ) from exc
     if isinstance(exc, ConfigConflictError):
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -286,11 +291,13 @@ def config_draft_preview_provider_route(
     payload: ConfigProviderDraftPayload,
 ) -> dict:
     try:
-        return provider_config_service.preview_draft_provider_route(
-            payload.publicConfig,
-            base_hash=payload.baseHash,
-            provider_id=provider_id,
-            provider=payload.provider,
+        return provider_config_service.project_provider_route_preview_response(
+            provider_config_service.preview_draft_provider_route(
+                payload.publicConfig,
+                base_hash=payload.baseHash,
+                provider_id=provider_id,
+                provider=payload.provider,
+            )
         )
     except Exception as exc:  # pragma: no cover - routed below
         _raise_config_http_error(exc)

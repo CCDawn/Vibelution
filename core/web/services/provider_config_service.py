@@ -331,11 +331,8 @@ def _owned_provider_model_refs(
 
 
 def _bounded_impact(impact: dict[str, Any]) -> dict[str, Any]:
-    bounded = copy.deepcopy(impact)
-    for key in ("liveReferences", "historicalReferences"):
-        refs = bounded.get(key)
-        bounded[key] = refs[:_MAX_IMPACT_REFS] if isinstance(refs, list) else []
-    return bounded
+    projected = project_model_reference_impacts([impact])
+    return projected[0] if projected else {}
 
 
 def _scan_impacts(
@@ -374,11 +371,18 @@ def _allowlisted_fields(
     payload: dict[str, Any],
     fields: tuple[str, ...],
 ) -> dict[str, Any]:
-    return {
-        key: copy.deepcopy(payload[key])
-        for key in fields
-        if key in payload
-    }
+    projected: dict[str, Any] = {}
+    for key in fields:
+        if key not in payload:
+            continue
+        value = payload[key]
+        if not isinstance(value, (str, bool, int, float)) and value is not None:
+            continue
+        if isinstance(value, str) and "pending-secret:" in value:
+            projected[key] = "[redacted]"
+        else:
+            projected[key] = value
+    return projected
 
 
 def _project_model_catalog(value: Any) -> dict[str, Any]:
@@ -425,7 +429,7 @@ def _project_model_catalog(value: Any) -> dict[str, Any]:
     }
 
 
-def _project_impacted_refs(value: Any) -> list[dict[str, Any]]:
+def project_model_reference_impacts(value: Any) -> list[dict[str, Any]]:
     impacts = value if isinstance(value, list) else []
     projected: list[dict[str, Any]] = []
     for raw_impact in impacts[:_MAX_IMPACT_REFS]:
@@ -441,6 +445,28 @@ def _project_impacted_refs(value: Any) -> list[dict[str, Any]]:
             ] if isinstance(raw_refs, list) else []
         projected.append(impact)
     return projected
+
+
+def project_model_reference_impact(value: Any) -> dict[str, Any]:
+    projected = project_model_reference_impacts([value])
+    return projected[0] if projected else {}
+
+
+def project_provider_route_preview_response(
+    preview: dict[str, Any],
+) -> dict[str, Any]:
+    raw_model_refs = preview.get("modelRefs", [])
+    return {
+        "impactedRefs": project_model_reference_impacts(
+            preview.get("impactedRefs")
+        ),
+        "modelRefs": [str(item) for item in raw_model_refs[:_MAX_IMPACT_REFS]]
+        if isinstance(raw_model_refs, list)
+        else [],
+        "providerId": str(preview.get("providerId") or ""),
+        "routeChanged": bool(preview.get("routeChanged")),
+        "routePreviewToken": str(preview.get("routePreviewToken") or ""),
+    }
 
 
 def project_provider_draft_response(workspace: dict[str, Any]) -> dict[str, Any]:
@@ -459,7 +485,9 @@ def project_provider_draft_response(workspace: dict[str, Any]) -> dict[str, Any]
     return {
         "baseHash": str(workspace.get("baseHash") or ""),
         "hash": str(workspace.get("hash") or ""),
-        "impactedRefs": _project_impacted_refs(workspace.get("impactedRefs")),
+        "impactedRefs": project_model_reference_impacts(
+            workspace.get("impactedRefs")
+        ),
         "modelCatalog": _project_model_catalog(workspace.get("modelCatalog")),
         "providerOptions": provider_options,
         "schemaVersion": int(workspace.get("schemaVersion") or 1),
@@ -550,7 +578,7 @@ def preview_draft_provider_route(
         "routeChanged": bool(preview.get("routeChanged")),
         "routePreviewToken": token,
         "modelRefs": model_refs[:_MAX_IMPACT_REFS],
-        "impactedRefs": impacts[:_MAX_IMPACT_REFS],
+        "impactedRefs": project_model_reference_impacts(impacts),
     }
 
 
@@ -776,6 +804,9 @@ __all__ = [
     "draft_unpin_provider_model",
     "draft_update_provider",
     "preview_draft_provider_route",
+    "project_model_reference_impact",
+    "project_model_reference_impacts",
     "project_provider_draft_response",
+    "project_provider_route_preview_response",
     "suggest_draft_provider_id",
 ]
