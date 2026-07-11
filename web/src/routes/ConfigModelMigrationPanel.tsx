@@ -11,7 +11,7 @@ import {
   VStatusChip,
   VSurface,
 } from "../components/vui";
-import styles from "./ConfigProviderRegistryPanel.styles";
+import styles from "./ConfigModelMigrationPanel.styles";
 
 export type ConfigModelMigrationPanelProps = {
   schemaVersion: 1 | 2;
