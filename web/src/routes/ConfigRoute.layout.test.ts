@@ -31,6 +31,16 @@ const extractedPanelStylesSource = [
   runtimePanelStylesSource,
 ].join("\n");
 
+const configSources = [
+  routeSource,
+  overviewPanelSource,
+  runtimePanelSource,
+  draftPanelSource,
+  modelLibraryPanelSource,
+  healthDiagnosticsPanelSource,
+  placeholderPanelSource,
+].join("\n");
+
 describe("ConfigRoute layout contract", () => {
   it("uses a full workspace placeholder for initial loading and load failure states", () => {
     expect(routeSource).toContain("<ConfigWorkspacePlaceholderPanel title={copy.loading} />");
@@ -433,16 +443,55 @@ describe("ConfigRoute layout contract", () => {
     expect(extractedPanelStylesSource).not.toContain("[background:var(--vui-gradient-route-soft),var(--surface-panel)]");
   });
 
+  it("keeps Config section roots and status primitives in their direct layout slots", () => {
+    const affectedPanelSources = [
+      draftPanelSource,
+      overviewPanelSource,
+      runtimePanelSource,
+      healthDiagnosticsPanelSource,
+    ].join("\n");
+
+    expect(affectedPanelSources).not.toMatch(/<VSurface[\s\S]*?<VSection/);
+    expect(routeSource).not.toMatch(/<VSurface as="section" id="config-diagnostics"[\s\S]*?<VSection/);
+    expect(draftPanelSource).toContain("headerClassName={styles.sectionHeader}");
+    expect(overviewPanelSource).toContain("headerClassName={styles.sectionHeader}");
+    expect(runtimePanelSource).toContain("headerClassName={styles.sectionHeader}");
+    expect(healthDiagnosticsPanelSource).toContain("headerClassName={styles.sectionHeader}");
+    expect(routeSource).toContain("headerClassName={styles.sectionHeader}");
+    expect((routeSource.match(/<VRouteHeader\b/g) ?? []).length).toBe(1);
+    expect(routeSource).not.toMatch(/<VRouteHeader[\s\S]*?<VStatusStrip[\s\S]*?<\/VRouteHeader>/);
+    expect(styles.configStatusBand).toContain("[grid-template-columns:1fr]");
+  });
+
+  it("keeps a canonical Config h1 across loaded and placeholder states", () => {
+    expect(placeholderPanelSource).toContain("VRouteHeader");
+    expect(placeholderPanelSource).not.toContain("<VPanelHeader");
+    expect(routeSource).toContain("<VPanelHeader");
+    expect(routeSource).toContain("headingLevel={null}");
+    expect((routeSource.match(/<VRouteHeader\b/g) ?? []).length).toBe(1);
+  });
+
   it("routes Config controls through VUI primitives", () => {
-    const configSources = [routeSource, overviewPanelSource, runtimePanelSource, draftPanelSource, modelLibraryPanelSource].join("\n");
     expect(routeSource).toContain('from "../components/vui"');
+    expect(routeSource).toContain("VRouteHeader");
+    expect(routeSource).toContain("VStatusStrip");
+    expect(routeSource).toContain("VStringSelect");
     expect(configSources).toContain("<VButton");
-    expect(routeSource).toContain("<VNativeInput");
-    expect(routeSource).toContain("<VNativeSelect");
-    expect(routeSource).toContain("<VNativeTextarea");
+    expect(configSources).toContain("<VSurface");
+    expect(configSources).toContain("<VSection");
+    expect(configSources).not.toContain("<VNativeInput");
+    expect(configSources).not.toContain("<VNativeSelect");
+    expect(configSources).not.toContain("<VNativeTextarea");
+    expect(configSources).not.toContain("<VNativeButton");
+    expect(routeSource).toContain('type="file"');
     expect(configSources).not.toMatch(/<button\b/);
-    expect(configSources).not.toMatch(/<input\b/);
     expect(configSources).not.toMatch(/<select\b/);
     expect(configSources).not.toMatch(/<textarea\b/);
+  });
+
+  it("prioritizes the visible VUI select trigger when focusing the model editor", () => {
+    expect(routeSource).toContain('button[data-vui="select-trigger"]:not([data-disabled="true"]):not([disabled])');
+    expect(routeSource).toContain('input:not([disabled]):not([type="hidden"])');
+    expect(routeSource).toContain("textarea:not([disabled])");
   });
 });

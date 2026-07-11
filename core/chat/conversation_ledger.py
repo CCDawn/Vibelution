@@ -18,6 +18,7 @@ from typing import Any, Iterable
 from .turn_journal import (
     AUDIT_ONLY_EVENT_TYPES,
     EVENT_ASSISTANT_DELTA_COMMITTED,
+    EVENT_ASSISTANT_ITEM_COMMITTED,
     EVENT_ASSISTANT_MESSAGE,
     EVENT_ASSISTANT_PARTIAL,
     EVENT_CLI_SESSION_LIFECYCLE,
@@ -38,6 +39,7 @@ from .turn_journal import (
     TurnJournalEvent,
     VOLATILE_MODEL_EVENT_TYPES,
     append_interrupted_if_open,
+    append_canonical_turn_outcome,
     append_turn_event,
     event_has_model_projection,
     event_projection_category,
@@ -46,6 +48,7 @@ from .turn_journal import (
     load_turn_events,
     model_messages_from_events,
     model_visible_messages_from_events,
+    session_turn_items_from_events,
     rewrite_turn_events,
     turn_journal_path,
 )
@@ -122,6 +125,15 @@ def append_conversation_event(
     )
 
 
+def append_conversation_turn_outcome(
+    project_root: Path,
+    session_id: str,
+    turn_id: str,
+    outcome: Any,
+) -> list[ConversationLedgerEvent]:
+    return append_canonical_turn_outcome(project_root, session_id, turn_id, outcome)
+
+
 def load_conversation_events(project_root: Path, session_id: str) -> list[ConversationLedgerEvent]:
     return load_turn_events(project_root, session_id)
 
@@ -144,6 +156,14 @@ def conversation_visible_messages_from_events(
     events: Iterable[ConversationLedgerEvent],
 ) -> list[dict[str, Any]]:
     return model_visible_messages_from_events(events)
+
+
+def conversation_turn_items_from_events(
+    events: Iterable[ConversationLedgerEvent],
+    *,
+    turn_id: str = "",
+) -> list[dict[str, Any]]:
+    return session_turn_items_from_events(events, turn_id=turn_id)
 
 
 def project_conversation_ledger(

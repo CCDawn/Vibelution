@@ -19,6 +19,10 @@ const compactMetricSurface =
   `grid [gap:3px] min-w-0 ${rowSurfaceSoft} [&_span]:[color:var(--fg-tertiary)] [&_span]:[font-size:var(--vui-font-xs)] [&_strong]:[color:var(--fg-primary)] [&_strong]:[font-weight:600] [&_strong]:min-w-0 [&_strong]:[overflow:hidden] [&_strong]:[text-overflow:ellipsis] [&_strong]:[white-space:nowrap] [min-height:36px] [padding:5px_7px]`;
 
 const styles = {
+  sourceInventorySection:
+    "grid [gap:6px]",
+  toolbarHeaderHidden:
+    "[&>div:first-child]:hidden",
   actionButton:
     `${actionSurface} inline-flex [align-items:center] [justify-content:center] [gap:8px] [min-height:34px] [padding:0_12px]`,
   actionGrid:

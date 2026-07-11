@@ -56,6 +56,12 @@ def _json_output(value: Any) -> str:
     return json.dumps(_thaw(value), ensure_ascii=False, separators=(",", ":"))
 
 
+def _json_arguments(value: Any) -> str:
+    if isinstance(value, str):
+        return value
+    return json.dumps(_thaw(value), ensure_ascii=False)
+
+
 def _item_text(item: Mapping[str, Any]) -> str:
     direct = item.get("text")
     if isinstance(direct, str):
@@ -148,7 +154,8 @@ class ResponsesWireAdapter:
                 }
                 for tool in request.tools
             ]
-            payload["tool_choice"] = request.settings.tool_choice
+            if request.settings.tool_choice != "omit":
+                payload["tool_choice"] = request.settings.tool_choice
         if request.settings.temperature is not None:
             payload["temperature"] = request.settings.temperature
         if request.settings.top_p is not None:
@@ -240,7 +247,7 @@ class ResponsesWireAdapter:
                         "type": "function_call",
                         "call_id": part.call.call_id,
                         "name": part.call.name,
-                        "arguments": _json_output(part.call.arguments),
+                        "arguments": _json_arguments(part.call.arguments),
                     }
                 )
             elif isinstance(part, ToolResultPart):

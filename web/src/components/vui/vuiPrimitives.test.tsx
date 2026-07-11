@@ -189,6 +189,19 @@ describe("VUI foundation primitives", () => {
     );
   });
 
+  it("renders plain VButton card content without compact label wrappers", () => {
+    const markup = renderToStaticMarkup(
+      <VButton contentLayout="plain" className="grid">
+        <div data-test-id="plain-card-child">Card body</div>
+      </VButton>,
+    );
+
+    expect(markup).not.toContain('data-slot="vui-button-content"');
+    expect(markup).not.toContain('data-slot="vui-button-label"');
+    expect(markup).not.toContain("whitespace-nowrap");
+    expect(markup).toContain('data-test-id="plain-card-child"');
+  });
+
   it("keeps button geometry content-sized unless a caller opts into full width", () => {
     const compactMarkup = renderToStaticMarkup(
       <VToolbar ariaLabel="Button fit">

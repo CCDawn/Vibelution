@@ -5,7 +5,11 @@ import { describe, expect, it } from "vitest";
 import {
   VEmptyState,
   VEntityList,
+  VLoadingValue,
+  VMetricStrip,
+  VPanelHeader,
   VRouteHeader,
+  VSection,
   VSplitWorkspace,
   VStateSurface,
   VStatusStrip,
@@ -13,6 +17,28 @@ import {
 } from "./index";
 
 describe("VUI workbench layout templates", () => {
+  it("keeps panel-header text without rendering a heading when requested", () => {
+    const markup = renderToStaticMarkup(
+      <VPanelHeader headingLevel={null} title="Sidebar navigation" />,
+    );
+
+    expect(markup).toContain('data-vui="panel-header"');
+    expect(markup).toContain("Sidebar navigation");
+    expect(markup).not.toContain("<h2");
+  });
+
+  it("places a public section header class on the direct header before its direct body", () => {
+    const markup = renderToStaticMarkup(
+      <VSection headerClassName="config-section-header-contract" title="Config section">
+        <div data-layout-marker="section-body">Body</div>
+      </VSection>,
+    );
+
+    expect(markup).toMatch(
+      /<section[^>]*><header[^>]*config-section-header-contract[^>]*>.*<\/header><div data-layout-marker="section-body">Body<\/div><\/section>/,
+    );
+  });
+
   it("renders reusable route-level layout slots with stable data attributes", () => {
     const markup = renderToStaticMarkup(
       <VWorkbenchPage ariaLabel="Agent workbench">
@@ -26,6 +52,12 @@ describe("VUI workbench layout templates", () => {
           items={[
             { label: "Running", value: "2" },
             { label: "Ready", value: "9" },
+          ]}
+        />
+        <VMetricStrip
+          ariaLabel="Agent summary"
+          metrics={[
+            { id: "agents", label: "Agents", value: <VLoadingValue label="Loading agents" /> },
           ]}
         />
         <VStateSurface
@@ -60,6 +92,11 @@ describe("VUI workbench layout templates", () => {
     expect(markup).toContain("text-[var(--font-size-caption)]");
     expect(markup).toContain("text-[var(--font-size-micro)]");
     expect(markup).toContain('data-vui="status-strip"');
+    expect(markup).toContain('data-vui="loading-value"');
+    expect(markup).toContain('role="status"');
+    expect(markup).toContain('aria-label="Loading agents"');
+    expect(markup).toContain("animate-spin");
+    expect(markup).toContain("motion-reduce:animate-none");
     expect(markup).toContain('data-vui="state-surface"');
     expect(markup).toContain('data-tone="loading"');
     expect(markup).toContain("Team detail API");

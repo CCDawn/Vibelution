@@ -1,3 +1,4 @@
+import { VRouteHeader, VSurface } from "../components/vui";
 import styles from "./ConfigWorkspacePlaceholderPanel.styles";
 
 type ConfigWorkspacePlaceholderPanelProps = {
@@ -14,10 +15,9 @@ export function ConfigWorkspacePlaceholderPanel({
   const navLabels = ["Source", "Runtime", "Models", "Diagnostics", "Tools"];
   const matrixLabels = ["operator config", "providers", "models", "runtime"];
   return (
-    <div className={`${styles.loadingShell} ${tone === "error" ? styles.loadingShellError : ""}`}>
-      <aside className={styles.loadingNavPanel}>
-        <p className={styles.eyebrow}>Config</p>
-        <h1 className={styles.title}>{title}</h1>
+    <VSurface as="div" className={`${styles.loadingShell} ${tone === "error" ? styles.loadingShellError : ""}`} padding="none">
+      <VSurface as="aside" className={styles.loadingNavPanel} tone="rail">
+        <VRouteHeader eyebrow="Config" title={title} />
         {subtitle ? <p className={styles.subtitle}>{subtitle}</p> : null}
         <div className={styles.loadingNavList} aria-hidden="true">
           {navLabels.map((label, index) => (
@@ -26,8 +26,8 @@ export function ConfigWorkspacePlaceholderPanel({
             </span>
           ))}
         </div>
-      </aside>
-      <section className={styles.loadingBoard} aria-hidden="true">
+      </VSurface>
+      <VSurface as="section" className={styles.loadingBoard} aria-hidden="true" padding="none">
         <div className={styles.loadingBoardHeader}>
           <span />
           <span />
@@ -49,7 +49,7 @@ export function ConfigWorkspacePlaceholderPanel({
           <span />
           <span />
         </div>
-      </section>
-    </div>
+      </VSurface>
+    </VSurface>
   );
 }

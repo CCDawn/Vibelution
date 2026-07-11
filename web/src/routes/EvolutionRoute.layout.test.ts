@@ -21,8 +21,39 @@ import stylesSource from "./EvolutionRoute.styles.ts?raw";
 const worktreeReviewStylesSource = readFileSync(new URL("./SupervisedWorktreeReviewPanel.styles.ts", import.meta.url), "utf-8");
 const dictionarySource = readFileSync(new URL("../i18n/dictionary.ts", import.meta.url), "utf-8");
 const evolutionTypesSource = readFileSync(new URL("../api/types/evolution.ts", import.meta.url), "utf-8");
+const evolutionSources = [
+  routeSource,
+  activeRunMonitorPanelSource,
+  proposalActionBandsPanelSource,
+  runRecordsPanelSource,
+].join("\n");
 
 describe("EvolutionRoute library user flow contract", () => {
+  it("uses VUI composition for supervised Evolution surfaces without native control wrappers", () => {
+    expect(routeSource).toContain("VRouteHeader");
+    expect(routeSource).toContain("VMetricStrip");
+    expect(routeSource).toContain("VStateSurface");
+    expect(routeSource).toContain("VStringSelect");
+    expect(routeSource).toContain("onChange={setKeepWorktree}");
+    expect(routeSource).toContain("styles.toolbarHeaderHidden");
+    expect(routeSource).not.toContain('"\\u200B"');
+    expect(activeRunMonitorPanelSource).toContain("<VButton");
+    expect(proposalActionBandsPanelSource).toContain("<VButton");
+    expect(runRecordsPanelSource).toContain("<VButton");
+    expect(evolutionSources).not.toContain("<VNativeButton");
+    expect(evolutionSources).not.toContain("<VNativeInput");
+    expect(evolutionSources).not.toContain("<VNativeSelect");
+    expect(evolutionSources).not.toContain("<VNativeTextarea");
+  });
+
+  it("keeps complex Evolution card buttons in the VButton plain-content layout", () => {
+    expect(routeSource.match(/contentLayout="plain"/g)).toHaveLength(4);
+    expect(routeSource).toMatch(/contentLayout="plain"[\s\S]{0,160}styles\.caseTraceSummary/);
+    expect(routeSource).toMatch(/contentLayout="plain"[\s\S]{0,160}styles\.workflowStepButton/);
+    expect(routeSource.match(/contentLayout="plain"[\s\S]{0,160}styles\.proposalCardButton/g)).toHaveLength(2);
+    expect(runRecordsPanelSource).toMatch(/contentLayout="plain"[\s\S]{0,160}styles\.runCardButton/);
+  });
+
   it("shows self-evolution candidates as local pending details instead of proposal details", () => {
     expect(routeSource).toContain("selectedProposalIsSelfCandidate");
     expect(routeSource).toContain("!selectedProposalIsSelfCandidate");
@@ -42,7 +73,7 @@ describe("EvolutionRoute library user flow contract", () => {
   });
 
   it("does not let blocked library items enter batch delete selection", () => {
-    const disabledSelectionCount = routeSource.match(/disabled={!item\.canDelete}/g)?.length ?? 0;
+    const disabledSelectionCount = routeSource.match(/isDisabled={!item\.canDelete}/g)?.length ?? 0;
     expect(disabledSelectionCount).toBeGreaterThanOrEqual(2);
     expect(routeSource).toContain("visibleLibraryEntries.filter((item) => item.canDelete).map((item) => item.sourceRun)");
     expect(routeSource).toContain("function toggleProposalSelection(item: EvolutionLibraryEntry)");
@@ -244,8 +275,8 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).not.toContain("proposalDetailQuery.data.availableActions.map((action)");
     expect(proposalActionBandsPanelSource).toContain("export function EvolutionProposalActionBandsPanel");
     expect(proposalActionBandsPanelSource).toContain("proposal.availableActions.map((action)");
-    expect(proposalActionBandsPanelSource).toContain("disabled={runLocked || actionPending}");
-    expect(proposalActionBandsPanelSource).toContain("disabled={!proposal.canDelete || deleteProposalPending}");
+    expect(proposalActionBandsPanelSource).toContain("isDisabled={runLocked || actionPending}");
+    expect(proposalActionBandsPanelSource).toContain("isDisabled={!proposal.canDelete || deleteProposalPending}");
     expect(proposalActionBandsPanelSource).not.toContain("useQuery");
     expect(proposalActionBandsPanelSource).not.toContain("useMutation");
     expect(proposalActionBandsPanelSource).not.toContain("queryClient");
@@ -381,7 +412,7 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).toContain("const terminateSupervisedPending = approvalWorktreeActionMutation.isPending;");
     expect(routeSource).toContain("disabled: !canTerminateSupervisedRun");
     expect(routeSource).toContain("pending: terminateSupervisedPending");
-    expect(activeRunMonitorPanelSource).toContain("disabled={run.termination.disabled || run.termination.pending}");
+    expect(activeRunMonitorPanelSource).toContain("isDisabled={run.termination.disabled || run.termination.pending}");
     expect(routeSource).not.toContain("terminateRunMutation.mutate(monitoredRun.runId);");
     expect(routeSource).not.toContain("legacyTerminateSupervisedAction");
   });
@@ -397,7 +428,7 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).toContain("SupervisedMentalModelMode");
     expect(routeSource).toContain("supervisedMentalModelMode");
     expect(routeSource).toContain("mentalModelMode: supervisedMentalModelMode");
-    expect(routeSource).toContain('id="supervised-mental-mode"');
+    expect(routeSource).toContain('ariaLabel={t("supervisedMentalMode")}');
     expect(dictionarySource).toContain('supervisedMentalMode: "心智模式"');
   });
 
@@ -574,7 +605,7 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).not.toContain("styles.eventListScrollable");
     expect(routeSource).not.toContain("styles.runNextActionStrip");
     expect(activeRunMonitorPanelSource).toContain("RUN_SUMMARY_TONE_CLASS");
-    expect(activeRunMonitorPanelSource).toContain("<VNativeButton");
+    expect(activeRunMonitorPanelSource).toContain("<VButton");
     expect(activeRunMonitorPanelSource).toContain("styles.runMonitorDense");
     expect(activeRunMonitorPanelSource).toContain("styles.eventListScrollable");
     expect(activeRunMonitorPanelSource).toContain("styles.runNextActionStrip");
@@ -721,10 +752,10 @@ describe("EvolutionRoute library user flow contract", () => {
 
   it("hides the supervised toolbar intro so workflow cards own the top row", () => {
     expect(routeSource).toContain('const hideSupervisedToolbarIntro = activeTrack === "supervised"');
-    expect(routeSource).toContain("hideSupervisedToolbarIntro ? `${styles.toolbar} ${styles.toolbarSupervisedFocus}` : styles.toolbar");
+    expect(routeSource).toContain("styles.toolbarSupervisedFocus} ${styles.toolbarHeaderHidden}");
     expect(routeSource).toContain("hideSupervisedToolbarIntro");
     expect(routeSource).toContain("styles.toolbarControlsSupervisedFocus");
-    expect(routeSource).toContain("{!hideSupervisedToolbarIntro ? (");
+    expect(routeSource).toContain("aria-label={routeTitle}");
     expect(routeStyles.toolbarSupervisedFocus).toContain("[justify-content:flex-end]");
     expect(routeStyles.toolbarControls).toContain("[justify-content:flex-end]");
     expect(routeStyles.toolbarControls).toContain("max-[900px]:[justify-content:stretch]");

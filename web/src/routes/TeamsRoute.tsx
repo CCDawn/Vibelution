@@ -4815,7 +4815,7 @@ export function TeamsRoute({
 
   const teamsQuery = useQuery({
     queryKey: queryKeys.teams(),
-    queryFn: () => fetchJson<TeamListPayload>("/api/teams"),
+    queryFn: ({ signal }) => fetchJson<TeamListPayload>("/api/teams", { signal }),
     refetchInterval: (query) =>
       TEAM_BOOTSTRAP_REFETCH_STATUSES.has(query.state.data?.systemTeamBootstrap?.status ?? "")
         ? resolvePollingInterval(pageVisible, TEAM_BOOTSTRAP_ACTIVE_REFETCH_MS, { backgroundMs: TEAM_BOOTSTRAP_BACKGROUND_REFETCH_MS })
@@ -4823,7 +4823,7 @@ export function TeamsRoute({
   });
   const agentSummaryQuery = useQuery({
     queryKey: queryKeys.agentSummary(true),
-    queryFn: () => fetchJson<AgentConfigWorkspaceAgent[]>("/api/agents?includeArchived=true&detail=summary"),
+    queryFn: ({ signal }) => fetchJson<AgentConfigWorkspaceAgent[]>("/api/agents?includeArchived=true&detail=summary", { signal }),
     staleTime: 10_000,
   });
   const projectBusQuery = useQuery({
@@ -4887,7 +4887,7 @@ export function TeamsRoute({
   const teamDetailLoadMode = sourceCollectionStandalone ? "light" : "full";
   const teamDetailQuery = useQuery({
     queryKey: queryKeys.team(effectiveTeamId, teamDetailLoadMode),
-    queryFn: () => fetchJson<Team>(`/api/teams/${encodeURIComponent(effectiveTeamId)}?detail=${teamDetailLoadMode}`),
+    queryFn: ({ signal }) => fetchJson<Team>(`/api/teams/${encodeURIComponent(effectiveTeamId)}?detail=${teamDetailLoadMode}`, { signal }),
     enabled: Boolean(effectiveTeamId),
   });
   const selectedTeamReference = visibleTeams.find((team) => team.teamId === effectiveTeamId) ?? null;
@@ -4897,7 +4897,7 @@ export function TeamsRoute({
   );
   const teamCanvasQuery = useQuery({
     queryKey: queryKeys.teamCanvas(effectiveTeamId || "none"),
-    queryFn: () => fetchJson<TeamOrganizationCanvas>(`/api/teams/${encodeURIComponent(effectiveTeamId)}/canvas`),
+    queryFn: ({ signal }) => fetchJson<TeamOrganizationCanvas>(`/api/teams/${encodeURIComponent(effectiveTeamId)}/canvas`, { signal }),
     enabled: Boolean(effectiveTeamId),
     staleTime: 10_000,
   });
@@ -4973,7 +4973,7 @@ export function TeamsRoute({
   }, [forcedResearchWorkspaceView, requestedResearchWorkspaceView]);
   const teamWorkflowQuery = useQuery({
     queryKey: queryKeys.teamWorkflow(effectiveTeamId || "none"),
-    queryFn: () => fetchJson<TeamWorkflowOrchestration>(`/api/teams/${encodeURIComponent(effectiveTeamId)}/workflow-orchestration`),
+    queryFn: ({ signal }) => fetchJson<TeamWorkflowOrchestration>(`/api/teams/${encodeURIComponent(effectiveTeamId)}/workflow-orchestration`, { signal }),
     enabled: Boolean(effectiveTeamId && researchWorkflowTeamSelected),
   });
   const researchStageRoundStatusQuery = useQuery({
@@ -5040,7 +5040,7 @@ export function TeamsRoute({
       fetchJson<TeamWorkflowOfficialModelEvidenceStatus>(
         `/api/teams/${encodeURIComponent(effectiveTeamId)}/workflow-orchestration/official-model-evidence/status`,
       ),
-    enabled: Boolean(effectiveTeamId && researchWorkflowTeamSelected && researchWorkspaceView === "overview" && teamWorkflowQuery.data),
+    enabled: Boolean(effectiveTeamId && researchWorkflowTeamSelected && researchWorkspaceView === "overview"),
   });
   const teamWorkflowSourceQualityStatusQuery = useQuery({
     queryKey: sourceQualityStatusQueryKey(effectiveTeamId || "none"),
@@ -5062,7 +5062,7 @@ export function TeamsRoute({
       fetchJson<TeamWorkflowPaperNoteChunkStatus>(
         `/api/teams/${encodeURIComponent(effectiveTeamId)}/workflow-orchestration/paper-note-chunks/status`,
       ),
-    enabled: Boolean(effectiveTeamId && researchWorkflowTeamSelected && researchWorkspaceView === "overview" && teamWorkflowQuery.data),
+    enabled: Boolean(effectiveTeamId && researchWorkflowTeamSelected && researchWorkspaceView === "overview"),
   });
   const experimentPlanningStatusQuery = useQuery({
     queryKey: experimentPlanningStatusQueryKey(effectiveTeamId || "none"),
@@ -5070,7 +5070,7 @@ export function TeamsRoute({
       fetchJson<ExperimentPlanningStatusPayload>(
         `/api/teams/${encodeURIComponent(effectiveTeamId)}/workflow-orchestration/experiments/status`,
       ),
-    enabled: Boolean(effectiveTeamId && researchWorkflowTeamSelected && researchWorkspaceView !== "source_collection" && !sourceCollectionStandalone && teamWorkflowQuery.data),
+    enabled: Boolean(effectiveTeamId && researchWorkflowTeamSelected && researchWorkspaceView !== "source_collection" && !sourceCollectionStandalone),
   });
   const researchLoopTemplatesQuery = useQuery({
     queryKey: researchLoopTemplatesQueryKey(effectiveTeamId || "none"),
@@ -5078,7 +5078,7 @@ export function TeamsRoute({
       fetchJson<ResearchLoopTemplatesPayload>(
         `/api/teams/${encodeURIComponent(effectiveTeamId)}/workflow-orchestration/research-loop/templates`,
       ),
-    enabled: Boolean(effectiveTeamId && researchWorkflowTeamSelected && researchWorkspaceView !== "source_collection" && !sourceCollectionStandalone && teamWorkflowQuery.data),
+    enabled: Boolean(effectiveTeamId && researchWorkflowTeamSelected && researchWorkspaceView !== "source_collection" && !sourceCollectionStandalone),
   });
   const researchLoopStatusQuery = useQuery({
     queryKey: researchLoopStatusQueryKey(effectiveTeamId || "none"),
@@ -5086,7 +5086,7 @@ export function TeamsRoute({
       fetchJson<ResearchLoopStatusPayload>(
         `/api/teams/${encodeURIComponent(effectiveTeamId)}/workflow-orchestration/research-loop/status`,
       ),
-    enabled: Boolean(effectiveTeamId && researchWorkflowTeamSelected && researchWorkspaceView !== "source_collection" && !sourceCollectionStandalone && teamWorkflowQuery.data),
+    enabled: Boolean(effectiveTeamId && researchWorkflowTeamSelected && researchWorkspaceView !== "source_collection" && !sourceCollectionStandalone),
   });
   const sourceCollectionRunsQuery = useQuery({
     queryKey: queryKeys.teamWorkflowSourceCollectionRuns(effectiveTeamId || "none", SOURCE_COLLECTION_RUN_PREVIEW_LIMIT),
