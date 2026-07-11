@@ -35,21 +35,6 @@ const styles = {
   critical:
     "vui-routes-configproviderregistrypanel critical rounded-md border border-[color-mix(in_srgb,var(--state-error)_38%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--state-error)_8%,var(--vui-surface-row))] px-2 py-1.5 text-[var(--vui-font-sm)] text-[var(--state-error)]",
   muted: "vui-routes-configproviderregistrypanel muted text-[var(--vui-font-xs)] text-vui-fg-tertiary",
-  wizard: `vui-routes-configproviderregistrypanel wizard ${panelSurface} grid min-w-0 gap-3 p-3`,
-  wizardSteps: "vui-routes-configproviderregistrypanel wizardSteps grid min-w-0 [grid-template-columns:repeat(4,minmax(0,1fr))] gap-1 max-[640px]:[grid-template-columns:repeat(2,minmax(0,1fr))]",
-  wizardBody: "vui-routes-configproviderregistrypanel wizardBody grid min-w-0 gap-2",
-  templateGroups: "vui-routes-configproviderregistrypanel templateGroups grid min-w-0 [grid-template-columns:repeat(2,minmax(0,1fr))] gap-2 max-[720px]:[grid-template-columns:minmax(0,1fr)]",
-  templateGroup: "vui-routes-configproviderregistrypanel templateGroup grid min-w-0 content-start gap-1.5 rounded-md border border-vui-border-subtle bg-vui-surface-row p-2",
-  templateGrid: "vui-routes-configproviderregistrypanel templateGrid grid min-w-0 [grid-template-columns:repeat(auto-fit,minmax(150px,1fr))] gap-1",
-  fieldGrid: "vui-routes-configproviderregistrypanel fieldGrid grid min-w-0 [grid-template-columns:repeat(2,minmax(0,1fr))] gap-2 max-[640px]:[grid-template-columns:minmax(0,1fr)]",
-  field: "vui-routes-configproviderregistrypanel field grid min-w-0 gap-1 text-[var(--vui-font-xs)] font-semibold text-vui-fg-secondary",
-  fieldWide: "vui-routes-configproviderregistrypanel fieldWide col-span-full grid min-w-0 gap-1 max-[640px]:col-span-1",
-  protocolGrid: "vui-routes-configproviderregistrypanel protocolGrid flex min-w-0 flex-wrap gap-1.5",
-  discoveryGrid: "vui-routes-configproviderregistrypanel discoveryGrid grid min-w-0 gap-1.5",
-  wizardFooter: "vui-routes-configproviderregistrypanel wizardFooter flex min-w-0 flex-wrap items-center justify-between gap-2 border-t border-vui-border-hairline pt-2",
-  migration: `vui-routes-configproviderregistrypanel migration ${panelSurface} grid min-w-0 gap-3 p-3`,
-  migrationSummary: "vui-routes-configproviderregistrypanel migrationSummary grid min-w-0 [grid-template-columns:repeat(3,minmax(0,1fr))] gap-2 max-[640px]:[grid-template-columns:minmax(0,1fr)]",
-  conflictList: "vui-routes-configproviderregistrypanel conflictList m-0 grid min-w-0 gap-1 pl-5 text-[var(--vui-font-sm)] text-[var(--state-error)]",
 };
 
 export default styles;

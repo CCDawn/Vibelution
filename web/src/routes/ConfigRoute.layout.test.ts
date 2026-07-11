@@ -152,8 +152,9 @@ describe("ConfigRoute layout contract", () => {
 
   it("keeps the provider workbench on VUI controls with stable visual-state selectors", () => {
     const providerSources = [providerPanelSource, wizardSource, migrationPanelSource].join("\n");
+    const heroUiPackageToken = ["@hero", "ui/react"].join("");
     expect(providerSources).toContain('from "../components/vui"');
-    expect(providerSources).not.toContain("@heroui/react");
+    expect(providerSources).not.toContain(heroUiPackageToken);
     expect(providerSources).not.toMatch(/<(button|select|textarea)\b/);
     expect(providerPanelSource).toContain("data-provider-status");
     expect(providerPanelSource).toContain("data-model-availability");

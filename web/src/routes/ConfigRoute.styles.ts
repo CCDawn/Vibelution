@@ -111,6 +111,16 @@ const styles = {
     "vui-routes-configroute content [display:grid] [align-content:start] [gap:6px] [min-width:0] [min-height:0] [overflow:auto] [padding-right:2px] [scrollbar-gutter:stable]",
   contentModels:
     "vui-routes-configroute contentModels [align-content:stretch] [grid-template-rows:minmax(0,1fr)_auto] [height:100%] [max-height:calc(100dvh_-_76px)] [min-width:0] [&:has(>_.notice)]:[grid-template-rows:auto_minmax(0,1fr)_auto] [&>_.configDiscoverySection:last-child]:[display:grid] [&>_.configDiscoverySection:last-child]:[grid-template-rows:auto_auto] max-[720px]:[max-height:none] max-[720px]:[height:auto] max-[720px]:[overflow:visible]",
+  providerModelsLayout:
+    "vui-routes-configroute providerModelsLayout grid min-w-0 gap-3",
+  providerRouteEditSurface:
+    "vui-routes-configroute providerRouteEditSurface grid min-w-0 gap-2",
+  providerRouteEditGrid:
+    "vui-routes-configroute providerRouteEditGrid grid min-w-0 grid-cols-3 gap-2 max-[720px]:grid-cols-1",
+  providerRouteEditField:
+    "vui-routes-configroute providerRouteEditField grid min-w-0 gap-1",
+  providerRouteEditWarning:
+    "vui-routes-configroute providerRouteEditWarning m-0 text-[var(--vui-font-xs)] text-[var(--state-warning)]",
   countPill:
     "vui-routes-configroute countPill [display:inline-flex] [align-items:center] [justify-content:center] [min-width:30px] [min-height:28px] [padding:0_9px] [border:1px_solid_var(--border-hairline)] [border-radius:999px] [color:var(--fg-secondary)] [background:var(--vui-surface-row)] [font-size:var(--vui-font-xs)] [font-weight:700]",
   dangerButton:

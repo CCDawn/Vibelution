@@ -23,7 +23,7 @@ import {
   type ProviderWizardState,
   type ProviderWizardStep,
 } from "./configProviderLogic";
-import styles from "./ConfigProviderRegistryPanel.styles";
+import styles from "./ConfigProviderWizard.styles";
 
 export type ConfigProviderWizardProps = {
   state: ProviderWizardState;
@@ -69,8 +69,8 @@ function normalizeProviderAuthKind(value: unknown, credentialRef: string): Provi
 }
 
 function templateServiceClass(template: ConfigProviderPresetOption): string {
-  const serviceClass = asString(asRecord(template.provider).service_class);
-  if (serviceClass) return serviceClass;
+  const providerServiceType = asString(asRecord(template.provider).service_class);
+  if (providerServiceType) return providerServiceType;
   if (template.category === "local") return "local_runtime";
   if (template.category === "official") return "official_api";
   if (template.category === "relay") return "relay";

@@ -3590,7 +3590,7 @@ export function ConfigRoute() {
         ) : null}
 
         {isSectionVisible("models") ? (
-          <div className="grid min-w-0 gap-3">
+          <div className={styles.providerModelsLayout}>
             {workspace.schemaVersion === 2 ? (
               <>
                 <ConfigProviderRegistryPanel
@@ -3615,7 +3615,7 @@ export function ConfigRoute() {
                   }}
                 />
                 {routeEditProviderId && !routePreview ? (
-                  <VSurface as="section" padding="compact" tone="row" className="grid min-w-0 gap-2">
+                  <VSurface as="section" padding="compact" tone="row" className={styles.providerRouteEditSurface}>
                     <VSection
                     title={`编辑 ${routeEditProviderId} 的连接路由`}
                     actions={(
@@ -3641,8 +3641,8 @@ export function ConfigRoute() {
                       </VActionGroup>
                     )}
                     >
-                    <div className="grid min-w-0 grid-cols-3 gap-2 max-[720px]:grid-cols-1">
-                      <label className="grid min-w-0 gap-1">
+                    <div className={styles.providerRouteEditGrid}>
+                      <label className={styles.providerRouteEditField}>
                         <span>Service root</span>
                         <VInput
                           value={getString(routeEditProvider.base_url)}
@@ -3650,7 +3650,7 @@ export function ConfigRoute() {
                           onChange={(event) => setRouteEditProvider((current) => ({ ...current, base_url: event.target.value }))}
                         />
                       </label>
-                      <label className="grid min-w-0 gap-1">
+                      <label className={styles.providerRouteEditField}>
                         <span>Driver</span>
                         <VStringSelect
                           ariaLabel="Provider route driver"
@@ -3660,7 +3660,7 @@ export function ConfigRoute() {
                           onValueChange={(driver) => setRouteEditProvider((current) => ({ ...current, driver }))}
                         />
                       </label>
-                      <label className="grid min-w-0 gap-1">
+                      <label className={styles.providerRouteEditField}>
                         <span>Default wire protocol</span>
                         <VStringSelect
                           ariaLabel="Provider default wire protocol"
@@ -3678,7 +3678,7 @@ export function ConfigRoute() {
                         />
                       </label>
                     </div>
-                    <p className="m-0 text-[var(--vui-font-xs)] text-[var(--state-warning)]" role="alert">
+                    <p className={styles.providerRouteEditWarning} role="alert">
                       修改端点、驱动或默认协议后必须先获取后端 preview token；界面不会展示凭据引用或 secret。
                     </p>
                     </VSection>
