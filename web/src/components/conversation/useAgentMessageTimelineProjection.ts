@@ -247,6 +247,10 @@ function mergeLiveOverlayIntoActiveTurnMessage(
       activeTurnMessage.codexTranscript,
       activeTurnMessage.id,
     ),
+    turnItems: consolidateSessionTurnItemsV2(
+      liveOverlayMessage.turnItems,
+      activeTurnMessage.turnItems,
+    ),
     metadata: {
       ...(liveOverlayMessage.metadata ?? {}),
       ...(activeTurnMessage.metadata ?? {}),
@@ -322,6 +326,10 @@ export function projectAgentMessageTimelineMessages({
   timelineMessages,
   activeTurnMessage,
 }: AgentMessageTimelineProjectionInput): AgentMessageTimelineProjection {
+  timelineMessages = timelineMessages.map(projectConversationMessageFromTurnItemsV2);
+  activeTurnMessage = activeTurnMessage
+    ? projectConversationMessageFromTurnItemsV2(activeTurnMessage)
+    : undefined;
   const projectedMessages = (() => {
     const visibleTimelineMessages = consolidateSupersededSessionLiveOverlays(
       chronologicalConversationMessages(timelineMessages)
@@ -333,7 +341,9 @@ export function projectAgentMessageTimelineMessages({
     let mergedActiveTurnMessage = activeTurnMessage;
     const dedupedTimelineMessages = visibleTimelineMessages.filter((message) => {
       if (isSessionLiveOverlayMessage(message) && isSameConversationTurn(message, activeTurnMessage)) {
-        mergedActiveTurnMessage = mergeLiveOverlayIntoActiveTurnMessage(message, mergedActiveTurnMessage);
+        mergedActiveTurnMessage = projectConversationMessageFromTurnItemsV2(
+          mergeLiveOverlayIntoActiveTurnMessage(message, mergedActiveTurnMessage),
+        );
         return false;
       }
       return true;
@@ -358,3 +368,7 @@ export function projectAgentMessageTimelineMessages({
     rowIdentities: buildAgentMessageTimelineRowIdentities(projectedAgentMessages),
   };
 }
+import {
+  consolidateSessionTurnItemsV2,
+  projectConversationMessageFromTurnItemsV2,
+} from "../../routes/chatTurnProtocol";
