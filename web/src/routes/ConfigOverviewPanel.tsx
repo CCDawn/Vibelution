@@ -1,7 +1,7 @@
 import { Database, ExternalLink, RefreshCw, RotateCcw } from "lucide-react";
 
 import type { ConfigWorkspace } from "../api/types";
-import { VButton, VSection, VSurface } from "../components/vui";
+import { VButton, VSection } from "../components/vui";
 import type { ConfigCopy } from "./ConfigRoute";
 import styles from "./ConfigOverviewPanel.styles";
 
@@ -29,8 +29,14 @@ export function ConfigOverviewPanel({
   onRestoreEditorText,
 }: ConfigOverviewPanelProps) {
   return (
-    <VSurface as="section" id="config-overview" className={styles.sectionSurface} padding="none">
-      <VSection eyebrow={eyebrow} title={copy.sourceTitle} actions={<Database size={16} className={styles.sectionIcon} />}>
+    <VSection
+      id="config-overview"
+      className={styles.sectionSurface}
+      headerClassName={styles.sectionHeader}
+      eyebrow={eyebrow}
+      title={copy.sourceTitle}
+      actions={<Database size={16} className={styles.sectionIcon} />}
+    >
         <p className={styles.sectionText} title={copy.sourceBody}>{copy.sourceBodyShort}</p>
         <div className={styles.hashGrid}>
         <article className={styles.detailCard}>
@@ -73,7 +79,6 @@ export function ConfigOverviewPanel({
         <p className={styles.helperText}>{copy.rawTomlHint}</p>
         <pre className={styles.rawToml}>{workspace.rawToml}</pre>
         </details>
-      </VSection>
-    </VSurface>
+    </VSection>
   );
 }

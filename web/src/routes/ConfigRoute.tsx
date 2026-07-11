@@ -56,6 +56,7 @@ import {
   VButton,
   VCheckbox,
   VInput,
+  VPanelHeader,
   VRouteHeader,
   VSection,
   VStatusStrip,
@@ -2995,20 +2996,21 @@ export function ConfigRoute() {
         </div>
       ) : null}
       <VSurface as="aside" className={styles.sidebar} style={sidebarStyle} padding="compact" tone="rail">
-        <VRouteHeader
-          className={styles.sidebarIntro}
-          eyebrow="Config"
-          title={copy.pageTitle}
-          meta={<span className={styles.subtitle} title={copy.subtitleHint}>{copy.subtitle}</span>}
-          actions={
-            returnToPath ? (
-              <Link to={returnToPath} className={styles.returnButton}>
-                <ChevronRight size={14} />
-                {returnToLabel}
-              </Link>
-            ) : null
-          }
-        />
+        <div className={styles.sidebarIntro}>
+          <VPanelHeader
+            eyebrow="Config"
+            title={copy.pageTitle}
+            actions={
+              returnToPath ? (
+                <Link to={returnToPath} className={styles.returnButton}>
+                  <ChevronRight size={14} />
+                  {returnToLabel}
+                </Link>
+              ) : null
+            }
+          />
+          <p className={styles.subtitle} title={copy.subtitleHint}>{copy.subtitle}</p>
+        </div>
 
         <VSurface as="div" className={styles.sidebarStatusCompact} tone="row" padding="compact">
           <div className={styles.sidebarStatusHeader}>
@@ -3126,23 +3128,6 @@ export function ConfigRoute() {
             className={styles.configStatusCopy}
             eyebrow="Config"
             title={copy.pageTitle}
-            meta={
-              <VStatusStrip
-                className={styles.configStatusMeta}
-                items={[
-                  {
-                    label: copy.configStatus,
-                    value: hasPendingApply ? copy.unsavedDraft : copy.syncedDraft,
-                    tone: hasPendingApply ? "warning" : "success",
-                  },
-                  { label: copy.settingsNextStep, value: sidebarNextStepLabel, tone: "info" },
-                  {
-                    label: copy.configPath,
-                    value: <span className={styles.configStatusPath} title={workspace.configPath}>{workspace.configPath}</span>,
-                  },
-                ]}
-              />
-            }
             actions={
               <div className={styles.configStatusActions}>
                 <VButton
@@ -3185,6 +3170,21 @@ export function ConfigRoute() {
                 </VButton>
               </div>
             }
+          />
+          <VStatusStrip
+            className={styles.configStatusMeta}
+            items={[
+              {
+                label: copy.configStatus,
+                value: hasPendingApply ? copy.unsavedDraft : copy.syncedDraft,
+                tone: hasPendingApply ? "warning" : "success",
+              },
+              { label: copy.settingsNextStep, value: sidebarNextStepLabel, tone: "info" },
+              {
+                label: copy.configPath,
+                value: <span className={styles.configStatusPath} title={workspace.configPath}>{workspace.configPath}</span>,
+              },
+            ]}
           />
           <p className={styles.helperText}>{sidebarApplyHint}</p>
         </div>
@@ -3331,12 +3331,14 @@ export function ConfigRoute() {
         ) : null}
 
         {isSectionVisible("diagnostics") ? (
-        <VSurface as="section" id="config-diagnostics" className={styles.sectionSurface} padding="none">
-          <VSection
-            eyebrow={sectionTitle("diagnostics", copy.diagnosticsTitle)}
-            title={copy.diagnosticsTitle}
-            actions={<ShieldAlert size={16} className={styles.sectionIcon} />}
-          >
+        <VSection
+          id="config-diagnostics"
+          className={styles.sectionSurface}
+          headerClassName={styles.sectionHeader}
+          eyebrow={sectionTitle("diagnostics", copy.diagnosticsTitle)}
+          title={copy.diagnosticsTitle}
+          actions={<ShieldAlert size={16} className={styles.sectionIcon} />}
+        >
             <p className={styles.sectionText}>{copy.diagnosticsBody}</p>
             <div className={styles.diagnosticsGrid}>
             <article className={styles.matrixCard}>
@@ -3376,8 +3378,7 @@ export function ConfigRoute() {
               )}
             </article>
             </div>
-          </VSection>
-        </VSurface>
+        </VSection>
         ) : null}
       </VSurface>
     </div>

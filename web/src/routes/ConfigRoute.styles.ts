@@ -100,7 +100,7 @@ const styles = {
   configStatusActions:
     "vui-routes-configroute configStatusActions [display:flex] [align-items:center] [justify-content:end] [gap:6px] [flex-wrap:wrap] max-[720px]:[justify-content:start]",
   configStatusBand:
-    `vui-routes-configroute configStatusBand ${readablePanelSurface} [display:grid] [grid-template-columns:minmax(0,1fr)_auto] [align-items:center] [gap:8px_12px] [padding:8px_10px] [min-width:0] max-[900px]:[grid-template-columns:1fr]`,
+    `vui-routes-configroute configStatusBand ${readablePanelSurface} [display:grid] [grid-template-columns:1fr] [align-items:stretch] [gap:8px] [padding:8px_10px] [min-width:0]`,
   configStatusCopy:
     "vui-routes-configroute configStatusCopy [display:grid] [gap:5px] [min-width:0]",
   configStatusMeta:

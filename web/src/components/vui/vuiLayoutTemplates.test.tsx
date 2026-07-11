@@ -6,6 +6,7 @@ import {
   VEmptyState,
   VEntityList,
   VRouteHeader,
+  VSection,
   VSplitWorkspace,
   VStateSurface,
   VStatusStrip,
@@ -13,6 +14,18 @@ import {
 } from "./index";
 
 describe("VUI workbench layout templates", () => {
+  it("places a public section header class on the direct header before its direct body", () => {
+    const markup = renderToStaticMarkup(
+      <VSection headerClassName="config-section-header-contract" title="Config section">
+        <div data-layout-marker="section-body">Body</div>
+      </VSection>,
+    );
+
+    expect(markup).toMatch(
+      /<section[^>]*><header[^>]*config-section-header-contract[^>]*>.*<\/header><div data-layout-marker="section-body">Body<\/div><\/section>/,
+    );
+  });
+
   it("renders reusable route-level layout slots with stable data attributes", () => {
     const markup = renderToStaticMarkup(
       <VWorkbenchPage ariaLabel="Agent workbench">
