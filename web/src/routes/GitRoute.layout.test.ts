@@ -174,6 +174,16 @@ describe("GitRoute layout contract", () => {
     expect(gitRouteStyles.summaryCard).toContain("min-h-");
   });
 
+  it("keeps recent commits independently stateful after Git status loads", () => {
+    expect(routeSource).toContain("renderRecentCommitsContent");
+    expect(routeSource).toContain('commitsPresentation === "initial-loading"');
+    expect(routeSource).toContain('commitsPresentation === "error-empty"');
+    expect(routeSource).toContain('commitsPresentation === "error-with-data"');
+    expect(routeSource).toContain("commitsQuery.refetch()");
+    expect(routeSource.match(/renderRecentCommitsContent\(\)/g)).toHaveLength(4);
+    expect(routeSource).not.toContain("!commitsQuery.isPending && !recentCommits.length");
+  });
+
   it("switches clean worktrees to a Git situation overview instead of an empty diff workspace", () => {
     expect(routeSource).toContain("noChangedFiles");
     expect(routeSource).toContain("styles.workspaceOverview");
