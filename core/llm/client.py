@@ -24,7 +24,7 @@ from .discovery import discover_model
 from .errors import classify_exception
 from .message_projector import message_to_openai_dict as project_message_to_openai_dict
 from .message_projector import normalize_messages_for_provider
-from .payload_builder import PayloadBuildInput, build_llm_payload, compose_runtime_wire_payload
+from .payload_builder import PayloadBuildInput, compose_runtime_wire_payload
 from .payload_trace import build_llm_payload_trace
 from .payload_validator import payload_protocol_summary
 from .protocol_resolver import resolve_model_protocol
@@ -1429,15 +1429,7 @@ class LLMClient:
                 has_prompt_cache_control=_messages_have_prompt_cache_control(provider_messages),
             )
         else:
-            built = build_llm_payload(
-                build_input,
-            messages_have_prompt_cache_control=_messages_have_prompt_cache_control,
-            strip_cache_control_from_messages=_strip_cache_control_from_messages,
-            message_to_openai_dict=_message_to_openai_dict,
-            content_blocks_have_image=_content_blocks_have_image,
-            convert_content_blocks_for_transport=_convert_content_blocks_for_transport,
-            tool_to_schema=_tool_to_schema,
-            )
+            raise AssertionError("registered wire adapter uses unsupported protocol")
         self._last_payload_protocol_summary = dict(built.summary or payload_protocol_summary(built.payload, self.protocol_route))
         return built.payload
 
@@ -1524,10 +1516,7 @@ class LLMClient:
     ) -> Optional[TurnOutcome]:
         from .invocation import invocation_scope_from_metadata
 
-        try:
-            adapter = _CANONICAL_WIRE_ADAPTERS.resolve(self.protocol_route)
-        except LookupError:
-            return None
+        adapter = self._required_wire_adapter()
         return adapter.decode_response(
             response,
             route=self.protocol_route,
@@ -1913,17 +1902,9 @@ class LLMClient:
             normalized_iterator: Any = None
             with _llm_provider_proxy_env(self.config, payload.get("base_url")):
                 iterator = self._backend_for_payload(payload)(payload)
-                try:
-                    wire_adapter = _CANONICAL_WIRE_ADAPTERS.resolve(self.protocol_route)
-                except LookupError:
-                    wire_adapter = None
+                wire_adapter = self._required_wire_adapter()
                 if wire_adapter is None:
-                    stream_normalizer = (
-                        ResponsesStreamNormalizer()
-                        if _payload_uses_responses(payload)
-                        else self.adapter.stream_normalizer()
-                    )
-                    normalized_iterator = stream_normalizer.events(iterator)
+                    raise AssertionError("required wire adapter returned None")
                 else:
                     from .invocation import invocation_scope_from_metadata
 
@@ -1946,11 +1927,7 @@ class LLMClient:
                     )
                 try:
                     if wire_adapter is None:
-                        for event in normalized_iterator:
-                            _raise_if_llm_cancelled()
-                            emitted = True
-                            yield event
-                            _raise_if_llm_cancelled()
+                        raise AssertionError("required wire adapter returned None")
                     else:
                         text_items_seen: set[str] = set()
                         canonical_usage: UsageStats | None = None

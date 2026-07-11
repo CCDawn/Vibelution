@@ -1,4 +1,5 @@
 from dataclasses import replace
+import inspect
 
 import pytest
 
@@ -105,3 +106,14 @@ def test_chat_client_uses_registry_encoder_once_and_preserves_runtime_envelope(m
     assert payload["model"] == client.adapter.litellm_model_name()
     assert payload["api_key"] == "test-key"
     assert payload["base_url"] == "https://relay.example.test/v1"
+
+
+def test_client_has_no_legacy_outbound_or_decode_fallback_ownership():
+    payload_source = inspect.getsource(LLMClient._build_payload)
+    decode_source = inspect.getsource(LLMClient._decode_canonical_response)
+    stream_source = inspect.getsource(LLMClient._stream_attempt)
+
+    assert "build_llm_payload(" not in payload_source
+    assert "except LookupError" not in decode_source
+    assert "wire_adapter = None" not in stream_source
+    assert "ResponsesStreamNormalizer" not in stream_source
