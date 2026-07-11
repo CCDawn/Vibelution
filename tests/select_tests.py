@@ -41,7 +41,7 @@ LLM_PROVIDER_CONFIG_V2_RULE = {
     ],
     "commands": [
         ".\\.venv\\Scripts\\python.exe -m pytest tests/test_llm_config_v2_integration.py tests/test_llm_config_schema_v2.py tests/test_llm_provider_registry.py tests/test_model_catalog.py tests/test_provider_discovery_adapters.py tests/test_llm_protocol_resolver.py tests/test_provider_config_service.py tests/test_model_config_migration.py -q",
-        "npm --prefix web test -- src/routes/configProviderLogic.test.ts src/routes/configRouteLogic.test.ts src/routes/ConfigRoute.layout.test.ts",
+        "npm --prefix web run test -- src/routes/configProviderLogic.test.ts src/routes/configRouteLogic.test.ts src/routes/ConfigRoute.layout.test.ts",
         FRONTEND_BUILD_COMMAND,
     ],
     "notes": [
