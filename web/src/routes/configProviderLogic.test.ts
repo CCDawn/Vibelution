@@ -38,8 +38,9 @@ const providers: ConfigProviderOption[] = [
 ];
 
 function catalogModel(modelRef: string): ConfigCatalogModel {
+  const modelKey = modelRef.split("/").at(-1) || "";
   return {
-    modelKey: "gpt-a",
+    modelKey,
     modelRef,
     upstreamId: "gpt-a",
     label: "GPT A",
@@ -141,12 +142,25 @@ describe("configProviderLogic", () => {
       baseUrl: "https://relay.example/v1",
       credentialRef: "env:RELAY_A_KEY",
     });
+    expect(canAdvanceProviderWizard(state)).toBe(false);
+    state = providerWizardReducer(state, {
+      type: "set_protocol",
+      driver: "openai",
+      defaultProtocol: "responses",
+      allowedProtocols: ["responses"],
+    });
     expect(canAdvanceProviderWizard(state)).toBe(true);
   });
 
   it("keeps reducer output immutable and ignores raw credential values", () => {
     const initial = initialProviderWizardState();
-    const state = providerWizardReducer(initial, {
+    const template = providerWizardReducer(initial, {
+      type: "choose_template",
+      templateId: "relay_openai",
+      serviceClass: "relay",
+    });
+    const connection = providerWizardReducer(template, { type: "next" });
+    const state = providerWizardReducer(connection, {
       type: "set_connection",
       providerId: "stable_provider",
       label: "Label Can Change",
@@ -172,7 +186,7 @@ describe("configProviderLogic", () => {
       type: "set_connection",
       providerId: "local_a",
       label: "Local A",
-      baseUrl: "",
+      baseUrl: "http://127.0.0.1:8001/v1",
       credentialRef: "none",
     });
     expect(canAdvanceProviderWizard(state)).toBe(false);
@@ -181,6 +195,7 @@ describe("configProviderLogic", () => {
       type: "set_protocol",
       driver: "openai",
       defaultProtocol: "responses",
+      allowedProtocols: ["responses"],
     });
     expect(canAdvanceProviderWizard(state)).toBe(false);
 
@@ -194,12 +209,18 @@ describe("configProviderLogic", () => {
 
   it("pins only canonical model refs returned by backend discovery", () => {
     const discovered = catalogModel("relay_a/gpt-a");
+    const otherProvider = catalogModel("relay_b/gpt-a");
+    const malformed = catalogModel("relay_a/gpt/a");
     let state = {
       ...initialProviderWizardState(),
       step: "discovery" as const,
       providerId: "relay_a",
     };
-    state = providerWizardReducer(state, { type: "set_discovery", models: [discovered] });
+    state = providerWizardReducer(state, {
+      type: "set_discovery",
+      models: [otherProvider, malformed, discovered],
+    });
+    expect(state.discoveredModels.map((model) => model.modelRef)).toEqual(["relay_a/gpt-a"]);
     expect(canAdvanceProviderWizard(state)).toBe(true);
 
     state = providerWizardReducer(state, { type: "next" });
@@ -210,5 +231,162 @@ describe("configProviderLogic", () => {
     state = providerWizardReducer(state, { type: "toggle_pin", modelRef: "relay_a/gpt-a" });
     expect(state.pinnedModelRefs).toEqual(["relay_a/gpt-a"]);
     expect(canAdvanceProviderWizard(state)).toBe(true);
+
+    const stalePins = { ...state, pinnedModelRefs: ["relay_b/gpt-a"] };
+    expect(canAdvanceProviderWizard(stalePins)).toBe(false);
+
+    state = providerWizardReducer(state, { type: "back" });
+    state = providerWizardReducer(state, {
+      type: "set_discovery",
+      models: [catalogModel("relay_a/gpt-b")],
+    });
+    expect(state.pinnedModelRefs).toEqual([]);
   });
+
+  it("rejects actions outside their owning wizard step", () => {
+    const initial = initialProviderWizardState();
+    expect(providerWizardReducer(initial, {
+      type: "set_connection",
+      providerId: "illegal",
+      label: "Illegal",
+      baseUrl: "https://illegal.example/v1",
+      credentialRef: "none",
+    })).toBe(initial);
+
+    const template = providerWizardReducer(initial, {
+      type: "choose_template",
+      templateId: "relay_openai",
+      serviceClass: "relay",
+    });
+    const connection = providerWizardReducer(template, { type: "next" });
+    expect(providerWizardReducer(connection, {
+      type: "choose_template",
+      templateId: "other",
+      serviceClass: "official_api",
+    })).toBe(connection);
+    expect(providerWizardReducer(connection, {
+      type: "set_discovery",
+      models: [catalogModel("relay_a/gpt-a")],
+    })).toBe(connection);
+
+    const discovery = { ...connection, step: "discovery" as const, providerId: "relay_a" };
+    expect(providerWizardReducer(discovery, { type: "toggle_pin", modelRef: "relay_a/gpt-a" })).toBe(discovery);
+  });
+
+  it("clears downstream state when template, connection, protocol, deployment, or discovery changes", () => {
+    const discovered = catalogModel("relay_a/gpt-a");
+    const dirty = {
+      ...initialProviderWizardState(),
+      step: "connection" as const,
+      templateId: "relay_openai",
+      serviceClass: "relay",
+      providerId: "relay_a",
+      label: "Relay A",
+      baseUrl: "https://relay.example/v1",
+      credentialRef: "env:RELAY_KEY",
+      driver: "openai",
+      defaultProtocol: "responses",
+      allowedProtocols: ["responses"],
+      runtimeFramework: "vllm",
+      artifactPath: "models/a",
+      discoveredModels: [discovered],
+      pinnedModelRefs: [discovered.modelRef],
+    };
+
+    const providerChanged = providerWizardReducer(dirty, {
+      type: "set_connection",
+      providerId: "relay_b",
+      label: "Relay B",
+      baseUrl: "https://relay-b.example/v1",
+      credentialRef: "env:RELAY_B_KEY",
+    });
+    expect(providerChanged).toMatchObject({
+      driver: "",
+      defaultProtocol: "",
+      allowedProtocols: [],
+      runtimeFramework: "",
+      artifactPath: "",
+      discoveredModels: [],
+      pinnedModelRefs: [],
+    });
+
+    const protocolChanged = providerWizardReducer(dirty, {
+      type: "set_protocol",
+      driver: "openai",
+      defaultProtocol: "chat_completions",
+      allowedProtocols: ["chat_completions"],
+    });
+    expect(protocolChanged.discoveredModels).toEqual([]);
+    expect(protocolChanged.pinnedModelRefs).toEqual([]);
+
+    const deploymentChanged = providerWizardReducer(dirty, {
+      type: "set_deployment",
+      runtimeFramework: "ollama",
+      artifactPath: "models/b",
+    });
+    expect(deploymentChanged.discoveredModels).toEqual([]);
+    expect(deploymentChanged.pinnedModelRefs).toEqual([]);
+
+    const templateDirty = { ...dirty, step: "template" as const };
+    const templateChanged = providerWizardReducer(templateDirty, {
+      type: "choose_template",
+      templateId: "official_openai",
+      serviceClass: "official_api",
+    });
+    expect(templateChanged).toMatchObject({
+      providerId: "",
+      driver: "",
+      discoveredModels: [],
+      pinnedModelRefs: [],
+    });
+  });
+
+  it.each(["relay", "official_api", "self_hosted"])(
+    "requires a complete connection and allowed default protocol for %s",
+    (serviceClass) => {
+      let state = {
+        ...initialProviderWizardState(),
+        step: "connection" as const,
+        templateId: `${serviceClass}_template`,
+        serviceClass,
+      };
+      state = providerWizardReducer(state, {
+        type: "set_connection",
+        providerId: `${serviceClass}_provider`,
+        label: "Provider",
+        baseUrl: "https://provider.example/v1",
+        credentialRef: "",
+      });
+      state = providerWizardReducer(state, {
+        type: "set_protocol",
+        driver: "openai",
+        defaultProtocol: "responses",
+        allowedProtocols: ["responses"],
+      });
+      expect(canAdvanceProviderWizard(state)).toBe(false);
+
+      state = providerWizardReducer(state, {
+        type: "set_connection",
+        providerId: `${serviceClass}_provider`,
+        label: "Provider",
+        baseUrl: "https://provider.example/v1",
+        credentialRef: "none",
+      });
+      state = providerWizardReducer(state, {
+        type: "set_protocol",
+        driver: "openai",
+        defaultProtocol: "responses",
+        allowedProtocols: ["chat_completions"],
+      });
+      expect(canAdvanceProviderWizard(state)).toBe(false);
+
+      state = providerWizardReducer(state, {
+        type: "set_protocol",
+        driver: "openai",
+        defaultProtocol: "responses",
+        allowedProtocols: ["responses", "chat_completions"],
+      });
+      expect(canAdvanceProviderWizard(state)).toBe(true);
+    },
+  );
 });

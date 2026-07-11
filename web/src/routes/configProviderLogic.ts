@@ -63,6 +63,7 @@ export type ProviderWizardState = {
   credentialRef: string;
   driver: string;
   defaultProtocol: string;
+  allowedProtocols: string[];
   runtimeFramework: string;
   artifactPath: string;
   discoveredModels: ConfigCatalogModel[];
@@ -72,7 +73,7 @@ export type ProviderWizardState = {
 export type ProviderWizardAction =
   | { type: "choose_template"; templateId: string; serviceClass: string }
   | { type: "set_connection"; providerId: string; label: string; baseUrl: string; credentialRef: string }
-  | { type: "set_protocol"; driver: string; defaultProtocol: string }
+  | { type: "set_protocol"; driver: string; defaultProtocol: string; allowedProtocols: string[] }
   | { type: "set_deployment"; runtimeFramework: string; artifactPath: string }
   | { type: "set_discovery"; models: ConfigCatalogModel[] }
   | { type: "toggle_pin"; modelRef: string }
@@ -93,6 +94,7 @@ export function initialProviderWizardState(): ProviderWizardState {
     credentialRef: "",
     driver: "",
     defaultProtocol: "",
+    allowedProtocols: [],
     runtimeFramework: "",
     artifactPath: "",
     discoveredModels: [],
@@ -105,22 +107,51 @@ export function canAdvanceProviderWizard(state: ProviderWizardState): boolean {
     return Boolean(state.templateId && state.serviceClass);
   }
   if (state.step === "connection") {
-    if (state.serviceClass === "local_runtime") {
-      return Boolean(
-        state.providerId
-        && state.label
-        && state.driver
-        && state.defaultProtocol
-        && state.runtimeFramework
-        && state.artifactPath
-      );
-    }
-    return Boolean(state.providerId && state.label && state.baseUrl && state.credentialRef);
+    const connectionReady = Boolean(
+      state.providerId
+      && state.label
+      && state.baseUrl
+      && state.credentialRef
+      && state.driver
+      && state.defaultProtocol
+      && state.allowedProtocols.includes(state.defaultProtocol)
+    );
+    return state.serviceClass === "local_runtime"
+      ? connectionReady && Boolean(state.runtimeFramework && state.artifactPath)
+      : connectionReady;
   }
   if (state.step === "discovery") {
-    return state.discoveredModels.length > 0;
+    return state.discoveredModels.length > 0
+      && state.discoveredModels.every((model) => isCanonicalModelForProvider(model, state.providerId));
   }
-  return state.pinnedModelRefs.length > 0;
+  const discoveredRefs = new Set(
+    state.discoveredModels
+      .filter((model) => isCanonicalModelForProvider(model, state.providerId))
+      .map((model) => model.modelRef),
+  );
+  return state.pinnedModelRefs.length > 0
+    && state.pinnedModelRefs.every(
+      (modelRef) => isCanonicalModelRefForProvider(modelRef, state.providerId) && discoveredRefs.has(modelRef),
+    );
+}
+
+function isCanonicalModelRefForProvider(modelRef: string, providerId: string): boolean {
+  if (!/^[a-z][a-z0-9_-]{0,63}$/.test(providerId) || modelRef !== modelRef.trim()) {
+    return false;
+  }
+  const separator = modelRef.indexOf("/");
+  if (separator <= 0 || modelRef.indexOf("/", separator + 1) >= 0) {
+    return false;
+  }
+  const refProviderId = modelRef.slice(0, separator);
+  const modelKey = modelRef.slice(separator + 1);
+  return refProviderId === providerId && modelKey.length > 0 && modelKey.length <= 96;
+}
+
+function isCanonicalModelForProvider(model: ConfigCatalogModel, providerId: string): boolean {
+  const separator = model.modelRef.indexOf("/");
+  return isCanonicalModelRefForProvider(model.modelRef, providerId)
+    && model.modelKey === model.modelRef.slice(separator + 1);
 }
 
 export function providerWizardReducer(state: ProviderWizardState, action: ProviderWizardAction): ProviderWizardState {
@@ -128,28 +159,92 @@ export function providerWizardReducer(state: ProviderWizardState, action: Provid
     return initialProviderWizardState();
   }
   if (action.type === "choose_template") {
-    return { ...state, templateId: action.templateId, serviceClass: action.serviceClass };
+    if (state.step !== "template") {
+      return state;
+    }
+    return {
+      ...initialProviderWizardState(),
+      templateId: action.templateId,
+      serviceClass: action.serviceClass,
+    };
   }
   if (action.type === "set_connection") {
+    if (state.step !== "connection") {
+      return state;
+    }
+    const routeChanged = state.providerId !== action.providerId
+      || state.baseUrl !== action.baseUrl
+      || state.credentialRef !== action.credentialRef;
     return {
       ...state,
       providerId: action.providerId,
       label: action.label,
       baseUrl: action.baseUrl,
       credentialRef: action.credentialRef,
+      ...(routeChanged
+        ? {
+            driver: "",
+            defaultProtocol: "",
+            allowedProtocols: [],
+            runtimeFramework: "",
+            artifactPath: "",
+          }
+        : {}),
+      discoveredModels: [],
+      pinnedModelRefs: [],
     };
   }
   if (action.type === "set_protocol") {
-    return { ...state, driver: action.driver, defaultProtocol: action.defaultProtocol };
+    if (state.step !== "connection") {
+      return state;
+    }
+    return {
+      ...state,
+      driver: action.driver.trim(),
+      defaultProtocol: action.defaultProtocol.trim(),
+      allowedProtocols: Array.from(
+        new Set(action.allowedProtocols.map((protocol) => protocol.trim()).filter(Boolean)),
+      ).sort(),
+      discoveredModels: [],
+      pinnedModelRefs: [],
+    };
   }
   if (action.type === "set_deployment") {
-    return { ...state, runtimeFramework: action.runtimeFramework, artifactPath: action.artifactPath };
+    if (state.step !== "connection") {
+      return state;
+    }
+    return {
+      ...state,
+      runtimeFramework: action.runtimeFramework,
+      artifactPath: action.artifactPath,
+      discoveredModels: [],
+      pinnedModelRefs: [],
+    };
   }
   if (action.type === "set_discovery") {
-    return { ...state, discoveredModels: action.models };
+    if (state.step !== "discovery") {
+      return state;
+    }
+    const modelsByRef = new Map<string, ConfigCatalogModel>();
+    for (const model of action.models) {
+      if (isCanonicalModelForProvider(model, state.providerId)) {
+        modelsByRef.set(model.modelRef, model);
+      }
+    }
+    return {
+      ...state,
+      discoveredModels: Array.from(modelsByRef.values()).sort((left, right) => left.modelRef.localeCompare(right.modelRef)),
+      pinnedModelRefs: [],
+    };
   }
   if (action.type === "toggle_pin") {
-    if (!state.discoveredModels.some((model) => model.modelRef === action.modelRef)) {
+    if (
+      state.step !== "pin"
+      || !isCanonicalModelRefForProvider(action.modelRef, state.providerId)
+      || !state.discoveredModels.some(
+        (model) => isCanonicalModelForProvider(model, state.providerId) && model.modelRef === action.modelRef,
+      )
+    ) {
       return state;
     }
     const selected = new Set(state.pinnedModelRefs);
