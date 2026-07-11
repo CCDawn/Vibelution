@@ -195,6 +195,7 @@ export type ConfigMigrationOtherConflict = {
   code: string;
   severity?: string;
   modelId?: string;
+  modelIds?: string[];
   fields?: string[];
   proposedProviderId?: string;
 };

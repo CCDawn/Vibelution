@@ -217,6 +217,49 @@ def _raise_config_http_error(exc: Exception) -> None:
     raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
+def _raise_migration_http_error(exc: Exception) -> None:
+    error_type = type(exc).__name__
+    if isinstance(exc, ModelReferenceConflictError):
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "migration_reference_conflict",
+                "errorType": error_type,
+                "referenceImpact": provider_config_service.project_model_reference_impact(
+                    exc.impact
+                ),
+            },
+        ) from exc
+    if isinstance(exc, ConfigConflictError):
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "migration_state_conflict", "errorType": error_type},
+        ) from exc
+    if isinstance(exc, ValueError):
+        message = str(exc).lower()
+        if "live model alias references" in message:
+            raise HTTPException(
+                status_code=409,
+                detail={"code": "migration_reference_conflict", "errorType": error_type},
+            ) from exc
+        if any(
+            token in message
+            for token in (
+                "stale config hash",
+                "hash drift",
+                "hash mismatch",
+            )
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail={"code": "migration_state_conflict", "errorType": error_type},
+            ) from exc
+    raise HTTPException(
+        status_code=422,
+        detail={"code": "migration_request_rejected", "errorType": error_type},
+    ) from exc
+
+
 @router.get("/config/public")
 def public_config_summary() -> dict:
     return get_config_summary()
@@ -248,7 +291,7 @@ def config_llm_v2_migration_preview(
             preview
         )
     except Exception as exc:  # pragma: no cover - routed below
-        _raise_config_http_error(exc)
+        _raise_migration_http_error(exc)
 
 
 @migration_router.post("/config/migration/llm-v2/apply")
@@ -259,7 +302,7 @@ def config_llm_v2_migration_apply(payload: ConfigMigrationApplyPayload) -> dict:
             base_hash=payload.baseHash,
         )
     except Exception as exc:  # pragma: no cover - routed below
-        _raise_config_http_error(exc)
+        _raise_migration_http_error(exc)
 
 
 router.include_router(migration_router)
@@ -278,7 +321,7 @@ def config_llm_v2_migration_rollback(
             base_hash=payload.baseHash,
         )
     except Exception as exc:  # pragma: no cover - routed below
-        _raise_config_http_error(exc)
+        _raise_migration_http_error(exc)
 
 
 @router.post("/config/open-environment")

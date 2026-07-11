@@ -166,9 +166,11 @@ def _artifact_path_suspected(value: str) -> bool:
     lowered = candidate.lower()
     return (
         lowered.endswith(_ARTIFACT_SUFFIXES)
+        or lowered.startswith("file:")
         or bool(_WINDOWS_ABSOLUTE_RE.match(candidate))
         or candidate.startswith("\\\\")
         or candidate.startswith("/")
+        or candidate.startswith(("~/", "~\\"))
         or candidate.startswith(("./", "../", ".\\", "..\\"))
     )
 

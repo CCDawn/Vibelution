@@ -15,6 +15,7 @@ from config.public_config import LLM_MODEL_PRESETS, UNCONFIGURED_MODEL_REF, load
 from config.runtime_capabilities import MODEL_CAPABILITY_CACHE_ENV
 from core.web.app import create_app
 from core.web.control import CONTROL_TOKEN_HEADER, get_control_token
+from core.web.services.model_reference_service import ModelReferenceConflictError
 from core.web.services import (
     config_service,
     log_service,
@@ -3148,7 +3149,12 @@ def test_llm_v2_migration_preview_route_projects_allowlisted_fields(monkeypatch)
                     "severity": "suggestion",
                     "proposedProviderId": "relay_a",
                     "credentialReferences": ["env:SECRET_A", "env:SECRET_B"],
-                }
+                },
+                {
+                    "code": "provider_artifact_path_conflict",
+                    "modelIds": ["model-a", "model-b"],
+                    "artifactPath": "C:/private/sentinel-model.gguf",
+                },
             ],
             "proposedPublicConfig": {"secret": "forbidden"},
         },
@@ -3184,8 +3190,13 @@ def test_llm_v2_migration_preview_route_projects_allowlisted_fields(monkeypatch)
             "code": "same_secret_different_reference",
             "severity": "suggestion",
             "proposedProviderId": "relay_a",
-        }
+        },
+        {
+            "code": "provider_artifact_path_conflict",
+            "modelIds": ["model-a", "model-b"],
+        },
     ]
+    assert "sentinel-model.gguf" not in response.text
 
 
 def test_llm_v2_migration_preview_route_passes_artifact_resolutions(monkeypatch) -> None:
@@ -3354,6 +3365,150 @@ def test_llm_v2_migration_preview_maps_resolution_value_errors_to_422(
     )
 
     assert response.status_code == 422
+
+
+@pytest.mark.parametrize(
+    "upstream_id",
+    ["file:///srv/models/sentinel-model", "~/models/sentinel-model"],
+)
+def test_llm_v2_migration_preview_rejects_path_like_split_upstream_id_without_echo(
+    monkeypatch,
+    upstream_id: str,
+) -> None:
+    monkeypatch.setattr(
+        provider_config_service,
+        "load_public_config",
+        lambda: {
+            "llm": {
+                "schema_version": 1,
+                "model_library": {
+                    "local-model": {
+                        "model": r"C:\private\artifact.gguf",
+                        "provider": {
+                            "kind": "local",
+                            "base_url": "http://127.0.0.1:8080/v1",
+                        },
+                    }
+                },
+            }
+        },
+    )
+
+    response = client.post(
+        "/api/config/migration/llm-v2/preview",
+        json={
+            "artifactResolutions": [
+                {
+                    "modelId": "local-model",
+                    "decision": "split_deployment_artifact",
+                    "upstreamId": upstream_id,
+                }
+            ]
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == {
+        "code": "migration_request_rejected",
+        "errorType": "ValueError",
+    }
+    assert "sentinel-model" not in response.text
+
+
+@pytest.mark.parametrize(
+    ("service_name", "endpoint", "payload", "exception", "status_code", "code"),
+    [
+        (
+            "preview_llm_v2_migration",
+            "/api/config/migration/llm-v2/preview",
+            {},
+            ValueError("preview sentinel Authorization C:/private/model.gguf"),
+            422,
+            "migration_request_rejected",
+        ),
+        (
+            "apply_llm_v2_migration",
+            "/api/config/migration/llm-v2/apply",
+            {"previewId": "preview-a", "baseHash": "hash-a"},
+            ValueError("stale config hash apply sentinel secret"),
+            409,
+            "migration_state_conflict",
+        ),
+        (
+            "rollback_llm_v2_migration",
+            "/api/config/migration/llm-v2/migration-a/rollback",
+            {"migrationId": "migration-a", "baseHash": "hash-a"},
+            RuntimeError("rollback sentinel credentialRef upstreamId"),
+            422,
+            "migration_request_rejected",
+        ),
+    ],
+)
+def test_llm_v2_migration_routes_project_safe_stable_errors(
+    monkeypatch,
+    service_name: str,
+    endpoint: str,
+    payload: dict,
+    exception: Exception,
+    status_code: int,
+    code: str,
+) -> None:
+    monkeypatch.setattr(
+        provider_config_service,
+        service_name,
+        lambda **_kwargs: (_ for _ in ()).throw(exception),
+    )
+
+    response = client.post(endpoint, json=payload)
+
+    assert response.status_code == status_code
+    assert response.json()["detail"] == {
+        "code": code,
+        "errorType": type(exception).__name__,
+    }
+    for forbidden in (
+        "sentinel",
+        "Authorization",
+        "private/model.gguf",
+        "secret",
+        "credentialRef",
+        "upstreamId",
+    ):
+        assert forbidden not in response.text
+
+
+def test_llm_v2_migration_reference_conflict_keeps_safe_409_impact(monkeypatch) -> None:
+    impact = {
+        "modelId": "provider/model-a",
+        "liveReferenceCount": 2,
+        "historicalReferenceCount": 1,
+        "artifactPath": "C:/private/sentinel.gguf",
+        "secret": "sentinel-secret",
+    }
+    monkeypatch.setattr(
+        provider_config_service,
+        "apply_llm_v2_migration",
+        lambda **_kwargs: (_ for _ in ()).throw(ModelReferenceConflictError(impact)),
+    )
+
+    response = client.post(
+        "/api/config/migration/llm-v2/apply",
+        json={"previewId": "preview-a", "baseHash": "hash-a"},
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == {
+        "code": "migration_reference_conflict",
+        "errorType": "ModelReferenceConflictError",
+        "referenceImpact": {
+            "modelId": "provider/model-a",
+            "liveReferenceCount": 2,
+            "historicalReferenceCount": 1,
+            "liveReferences": [],
+            "historicalReferences": [],
+        },
+    }
+    assert "sentinel" not in response.text
 
 
 def test_llm_v2_migration_apply_requires_preview_and_hash() -> None:

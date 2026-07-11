@@ -180,6 +180,34 @@ def test_migration_preview_passes_resolutions_and_projects_provider_kind_choices
     ]
 
 
+def test_migration_preview_projection_keeps_conflict_model_ids_without_artifact_paths() -> None:
+    projected = provider_config_service.project_llm_v2_migration_preview(
+        {
+            "previewId": "preview-a",
+            "baseHash": "hash-a",
+            "status": "NEEDS_REVIEW",
+            "providers": [],
+            "modelRefMap": {},
+            "referenceImpact": {},
+            "conflicts": [
+                {
+                    "code": "provider_artifact_path_conflict",
+                    "modelIds": ["model-a", "model-b"],
+                    "artifactPath": "C:/private/sentinel-model.gguf",
+                }
+            ],
+        }
+    )
+
+    assert projected["conflicts"] == [
+        {
+            "code": "provider_artifact_path_conflict",
+            "modelIds": ["model-a", "model-b"],
+        }
+    ]
+    assert "sentinel-model.gguf" not in json.dumps(projected)
+
+
 def test_migration_preview_failure_event_is_bounded_and_redacted(monkeypatch) -> None:
     events: list[tuple[str, str, dict]] = []
     secret_resolution = {
