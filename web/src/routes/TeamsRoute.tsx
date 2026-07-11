@@ -4955,9 +4955,10 @@ export function TeamsRoute({
   const sourceCollectionStageWritebackAwaitingTask = sourceCollectionStageWritebackSyncActive && sourceCollectionPendingStageTaskIdList.length > 0;
   const aiSearchRunsQuery = useQuery({
     queryKey: queryKeys.teamAiSearchRuns(effectiveTeamId || "none", AI_SEARCH_RUN_PREVIEW_LIMIT),
-    queryFn: () =>
+    queryFn: ({ signal }) =>
       fetchJson<AiSearchRunListPayload>(
         `/api/teams/${encodeURIComponent(effectiveTeamId)}/ai-search-runs?limit=${AI_SEARCH_RUN_PREVIEW_LIMIT}`,
+        { signal },
       ),
     enabled: Boolean(effectiveTeamId && aiSearchScopeTeamSelected),
   });
@@ -4978,9 +4979,10 @@ export function TeamsRoute({
   });
   const researchStageRoundStatusQuery = useQuery({
     queryKey: researchStageRoundStatusQueryKey(effectiveTeamId || "none"),
-    queryFn: () =>
+    queryFn: ({ signal }) =>
       fetchJson<ResearchStageRoundStatusPayload>(
         `/api/teams/${encodeURIComponent(effectiveTeamId)}/workflow-orchestration/stage-rounds/status`,
+        { signal },
       ),
     enabled: researchStageRoundStatusEnabled,
     refetchInterval: (query) =>
@@ -4993,9 +4995,10 @@ export function TeamsRoute({
   });
   const teamWorkflowCandidatesQuery = useQuery({
     queryKey: queryKeys.teamWorkflowCandidates(effectiveTeamId || "none", TEAM_WORKFLOW_CANDIDATE_PREVIEW_LIMIT),
-    queryFn: () =>
+    queryFn: ({ signal }) =>
       fetchJson<TeamWorkflowCandidateListPayload>(
         `/api/teams/${encodeURIComponent(effectiveTeamId)}/workflow-orchestration/candidates?limit=${TEAM_WORKFLOW_CANDIDATE_PREVIEW_LIMIT}&includeValidation=false&includeStore=false`,
+        { signal },
       ),
     enabled: teamWorkflowCandidateListEnabled,
     refetchInterval: () => sourceCollectionStageWritebackRefetchInterval(
@@ -5007,25 +5010,28 @@ export function TeamsRoute({
   });
   const teamWorkflowCandidateGraphQuery = useQuery({
     queryKey: queryKeys.teamWorkflowCandidateGraph(effectiveTeamId || "none"),
-    queryFn: () =>
+    queryFn: ({ signal }) =>
       fetchJson<TeamWorkflowCandidateListPayload>(
         `/api/teams/${encodeURIComponent(effectiveTeamId)}/workflow-orchestration/candidates?candidateType=candidate_graph&limit=${TEAM_WORKFLOW_CANDIDATE_GRAPH_LIMIT}&includeStore=false`,
+        { signal },
       ),
     enabled: teamWorkflowGraphEnabled,
   });
   const teamWorkflowCoordinationStatusQuery = useQuery({
     queryKey: queryKeys.teamWorkflowCoordinationStatus(effectiveTeamId || "none"),
-    queryFn: () =>
+    queryFn: ({ signal }) =>
       fetchJson<TeamWorkflowCoordinationStatus>(
         `/api/teams/${encodeURIComponent(effectiveTeamId)}/workflow-orchestration/coordination/status`,
+        { signal },
       ),
     enabled: Boolean(effectiveTeamId && researchWorkflowTeamSelected && researchWorkspaceView === "coordination"),
   });
   const teamWorkflowKnowledgeIngestionStatusQuery = useQuery({
     queryKey: queryKeys.teamWorkflowKnowledgeIngestionStatus(effectiveTeamId || "none"),
-    queryFn: () =>
+    queryFn: ({ signal }) =>
       fetchJson<TeamWorkflowKnowledgeIngestionStatus>(
         `/api/teams/${encodeURIComponent(effectiveTeamId)}/workflow-orchestration/knowledge-ingestion/status`,
+        { signal },
       ),
     enabled: teamWorkflowKnowledgeIngestionEnabled,
     // 后台入库进行中（activeWorkRun 存在）时轮询，完成后停止。
@@ -5036,17 +5042,19 @@ export function TeamsRoute({
   });
   const teamWorkflowOfficialModelEvidenceStatusQuery = useQuery({
     queryKey: officialModelEvidenceStatusQueryKey(effectiveTeamId || "none"),
-    queryFn: () =>
+    queryFn: ({ signal }) =>
       fetchJson<TeamWorkflowOfficialModelEvidenceStatus>(
         `/api/teams/${encodeURIComponent(effectiveTeamId)}/workflow-orchestration/official-model-evidence/status`,
+        { signal },
       ),
     enabled: Boolean(effectiveTeamId && researchWorkflowTeamSelected && researchWorkspaceView === "overview"),
   });
   const teamWorkflowSourceQualityStatusQuery = useQuery({
     queryKey: sourceQualityStatusQueryKey(effectiveTeamId || "none"),
-    queryFn: () =>
+    queryFn: ({ signal }) =>
       fetchJson<TeamWorkflowSourceQualityStatus>(
         `/api/teams/${encodeURIComponent(effectiveTeamId)}/workflow-orchestration/source-quality/status`,
+        { signal },
       ),
     enabled: teamWorkflowSourceQualityEnabled,
     refetchInterval: () => sourceCollectionStageWritebackRefetchInterval(
@@ -5058,41 +5066,46 @@ export function TeamsRoute({
   });
   const teamWorkflowPaperNoteChunkStatusQuery = useQuery({
     queryKey: paperNoteChunkStatusQueryKey(effectiveTeamId || "none"),
-    queryFn: () =>
+    queryFn: ({ signal }) =>
       fetchJson<TeamWorkflowPaperNoteChunkStatus>(
         `/api/teams/${encodeURIComponent(effectiveTeamId)}/workflow-orchestration/paper-note-chunks/status`,
+        { signal },
       ),
     enabled: Boolean(effectiveTeamId && researchWorkflowTeamSelected && researchWorkspaceView === "overview"),
   });
   const experimentPlanningStatusQuery = useQuery({
     queryKey: experimentPlanningStatusQueryKey(effectiveTeamId || "none"),
-    queryFn: () =>
+    queryFn: ({ signal }) =>
       fetchJson<ExperimentPlanningStatusPayload>(
         `/api/teams/${encodeURIComponent(effectiveTeamId)}/workflow-orchestration/experiments/status`,
+        { signal },
       ),
     enabled: Boolean(effectiveTeamId && researchWorkflowTeamSelected && researchWorkspaceView !== "source_collection" && !sourceCollectionStandalone),
   });
   const researchLoopTemplatesQuery = useQuery({
     queryKey: researchLoopTemplatesQueryKey(effectiveTeamId || "none"),
-    queryFn: () =>
+    queryFn: ({ signal }) =>
       fetchJson<ResearchLoopTemplatesPayload>(
         `/api/teams/${encodeURIComponent(effectiveTeamId)}/workflow-orchestration/research-loop/templates`,
+        { signal },
       ),
     enabled: Boolean(effectiveTeamId && researchWorkflowTeamSelected && researchWorkspaceView !== "source_collection" && !sourceCollectionStandalone),
   });
   const researchLoopStatusQuery = useQuery({
     queryKey: researchLoopStatusQueryKey(effectiveTeamId || "none"),
-    queryFn: () =>
+    queryFn: ({ signal }) =>
       fetchJson<ResearchLoopStatusPayload>(
         `/api/teams/${encodeURIComponent(effectiveTeamId)}/workflow-orchestration/research-loop/status`,
+        { signal },
       ),
     enabled: Boolean(effectiveTeamId && researchWorkflowTeamSelected && researchWorkspaceView !== "source_collection" && !sourceCollectionStandalone),
   });
   const sourceCollectionRunsQuery = useQuery({
     queryKey: queryKeys.teamWorkflowSourceCollectionRuns(effectiveTeamId || "none", SOURCE_COLLECTION_RUN_PREVIEW_LIMIT),
-    queryFn: () =>
+    queryFn: ({ signal }) =>
       fetchJson<DataProcessingRunListPayload>(
         `/api/data-processing/runs?limit=${SOURCE_COLLECTION_RUN_PREVIEW_LIMIT}&teamId=${encodeURIComponent(effectiveTeamId)}&startedFrom=team_workflow_source_collection`,
+        { signal },
       ),
     enabled: Boolean(effectiveTeamId && researchWorkflowTeamSelected),
     refetchInterval: (query) => {
@@ -5105,7 +5118,7 @@ export function TeamsRoute({
   const linkedRoomStatusForPolling = String(selectedTeam?.linkedChatRoom?.status || "").toLowerCase();
   const linkedChatRoomQuery = useQuery({
     queryKey: queryKeys.chatRoom(linkedChatRoomId || "none"),
-    queryFn: () => fetchJson<ChatRoomDetail>(`/api/chat-rooms/${encodeURIComponent(linkedChatRoomId)}`),
+    queryFn: ({ signal }) => fetchJson<ChatRoomDetail>(`/api/chat-rooms/${encodeURIComponent(linkedChatRoomId)}`, { signal }),
     enabled: Boolean(linkedChatRoomId && teamDetailQuery.data),
     refetchInterval: (query) => {
       const detail = query.state.data as ChatRoomDetail | undefined;
@@ -5222,12 +5235,13 @@ export function TeamsRoute({
   const selectedSourceCollectionRunEffectiveId = selectedSourceCollectionRun?.runId ?? "";
   const sourceCollectionSummaryQuery = useQuery({
     queryKey: sourceCollectionSummaryQueryKey(effectiveTeamId || "none", selectedSourceCollectionRunEffectiveId || "latest"),
-    queryFn: () => {
+    queryFn: ({ signal }) => {
       const params = selectedSourceCollectionRunEffectiveId
         ? `?runId=${encodeURIComponent(selectedSourceCollectionRunEffectiveId)}`
         : "";
       return fetchJson<SourceCollectionSummaryPayload>(
         `/api/teams/${encodeURIComponent(effectiveTeamId)}/workflow-orchestration/source-collection/summary${params}`,
+        { signal },
       );
     },
     enabled: Boolean(effectiveTeamId && sourceCollectionWorkspaceSelected),
@@ -5249,7 +5263,7 @@ export function TeamsRoute({
   const sourceCollectionRunStatusQueryEnabled = sourceCollectionRecordsQueryEnabled || sourceCollectionAssignmentsQueryEnabled;
   const runtimeSummaryQuery = useQuery({
     queryKey: queryKeys.runtimeSummary(),
-    queryFn: () => fetchJson<RuntimeSummary>("/api/runtime/summary"),
+    queryFn: ({ signal }) => fetchJson<RuntimeSummary>("/api/runtime/summary", { signal }),
     enabled: Boolean(researchWorkflowTeamSelected && researchWorkspaceView === "overview"),
     refetchInterval: (query) => {
       const runtime = query.state.data as RuntimeSummary | undefined;
@@ -5259,7 +5273,7 @@ export function TeamsRoute({
   });
   const sourceCollectionRunStatusQuery = useQuery({
     queryKey: queryKeys.dataProcessingRunStatus(selectedSourceCollectionRunEffectiveId || "none"),
-    queryFn: () => fetchJson<DataProcessingStatus>(`/api/data-processing/runs/${encodeURIComponent(selectedSourceCollectionRunEffectiveId)}/status`),
+    queryFn: ({ signal }) => fetchJson<DataProcessingStatus>(`/api/data-processing/runs/${encodeURIComponent(selectedSourceCollectionRunEffectiveId)}/status`, { signal }),
     enabled: sourceCollectionRunStatusQueryEnabled,
     refetchInterval: (query) => {
       const status = query.state.data as DataProcessingStatus | undefined;
@@ -5268,9 +5282,10 @@ export function TeamsRoute({
   });
   const sourceCollectionRecordsQuery = useQuery({
     queryKey: sourceCollectionRunRecordsQueryKey(selectedSourceCollectionRunEffectiveId || "none"),
-    queryFn: () =>
+    queryFn: ({ signal }) =>
       fetchJson<DataProcessingRecordListPayload>(
         `/api/data-processing/runs/${encodeURIComponent(selectedSourceCollectionRunEffectiveId)}/records`,
+        { signal },
       ),
     enabled: sourceCollectionRecordsQueryEnabled,
     refetchInterval: () => sourceCollectionRunRefetchInterval(
@@ -5280,9 +5295,10 @@ export function TeamsRoute({
   });
   const sourceCollectionAssignmentsQuery = useQuery({
     queryKey: queryKeys.dataProcessingCollectionAssignments(selectedSourceCollectionRunEffectiveId || "none"),
-    queryFn: () =>
+    queryFn: ({ signal }) =>
       fetchJson<DataProcessingCollectionAssignmentListPayload>(
         `/api/data-processing/runs/${encodeURIComponent(selectedSourceCollectionRunEffectiveId)}/collection-assignments`,
+        { signal },
       ),
     enabled: sourceCollectionAssignmentsQueryEnabled,
     refetchInterval: () => sourceCollectionRunRefetchInterval(
