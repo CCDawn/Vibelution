@@ -8,6 +8,7 @@ import threading
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, Iterable
 from uuid import uuid4
 
@@ -23,6 +24,7 @@ EVENT_USER_MESSAGE = "user_message"
 EVENT_TURN_CONTEXT = "turn_context"
 EVENT_ASSISTANT_PARTIAL = "assistant_partial"
 EVENT_ASSISTANT_DELTA_COMMITTED = "assistant_delta_committed"
+EVENT_ASSISTANT_ITEM_COMMITTED = "assistant_item_committed"
 EVENT_ASSISTANT_MESSAGE = "assistant_message"
 EVENT_TOOL_CALL_STARTED = "tool_call_started"
 EVENT_TOOL_RESULT = "tool_result"
@@ -45,6 +47,7 @@ MODEL_VISIBLE_EVENT_TYPES = {
     EVENT_USER_MESSAGE,
     EVENT_ASSISTANT_PARTIAL,
     EVENT_ASSISTANT_DELTA_COMMITTED,
+    EVENT_ASSISTANT_ITEM_COMMITTED,
     EVENT_ASSISTANT_MESSAGE,
     EVENT_TOOL_CALL_STARTED,
     EVENT_TOOL_RESULT,
@@ -363,6 +366,221 @@ def append_interrupted_if_open(
     )
 
 
+def _canonical_item_payload(protocol_event: Any, *, outcome: Any) -> dict[str, Any]:
+    diagnostic_summary = dict(getattr(protocol_event, "diagnostic_summary", {}) or {})
+    call_id = str(getattr(protocol_event, "call_id", "") or "").strip()
+    tool_name = str(getattr(protocol_event, "tool_name", "") or "").strip()
+    channel = str(getattr(protocol_event, "channel", "") or "").strip().lower()
+    phase = str(getattr(protocol_event, "phase", "") or "").strip().lower()
+    if call_id or tool_name:
+        kind = "tool_call"
+        channel = channel or "commentary"
+        phase = phase or "tool_call"
+    elif channel == "reasoning":
+        kind = "reasoning"
+    elif channel == "commentary":
+        kind = "commentary"
+    else:
+        kind = "assistant_message"
+        channel = channel or "answer"
+        phase = phase or ("final_answer" if str(getattr(outcome, "kind", "")) == "final_answer" else "interim")
+    terminal = bool(getattr(protocol_event, "terminal", False)) or (
+        str(getattr(outcome, "kind", "")) == "final_answer"
+        and channel == "answer"
+        and phase == "final_answer"
+    )
+    return {
+        "schemaVersion": 2,
+        "sessionId": str(getattr(protocol_event, "session_id", "") or "").strip(),
+        "turnId": str(getattr(protocol_event, "turn_id", "") or "").strip(),
+        "invocationId": str(getattr(protocol_event, "invocation_id", "") or "").strip(),
+        "iteration": max(0, int(getattr(protocol_event, "iteration", 0) or 0)),
+        "itemId": str(getattr(protocol_event, "item_id", "") or "").strip(),
+        "revision": max(0, int(getattr(protocol_event, "item_revision", 0) or 0)),
+        "sequence": max(0, int(getattr(protocol_event, "sequence", 0) or 0)),
+        "kind": kind,
+        "channel": channel,
+        "phase": phase,
+        "status": str(getattr(protocol_event, "status", "") or "completed").strip().lower(),
+        "protocol": str(diagnostic_summary.get("protocol") or "canonical").strip().lower(),
+        "provisional": bool(getattr(protocol_event, "provisional", False)),
+        "terminal": terminal,
+        "text": str(getattr(protocol_event, "text", "") or ""),
+        "callId": call_id,
+        "toolName": tool_name,
+        "diagnosticSummary": diagnostic_summary,
+    }
+
+
+def append_canonical_turn_outcome(
+    project_root: str | Path,
+    session_id: str,
+    turn_id: str,
+    outcome: Any,
+) -> list["TurnJournalEvent"]:
+    """Commit canonical item identities before their tool lifecycle events."""
+
+    normalized_session_id = str(session_id or "").strip()
+    normalized_turn_id = str(turn_id or "").strip()
+    identity = getattr(outcome, "identity", None)
+    if identity is None or not normalized_session_id or not normalized_turn_id:
+        raise ValueError("canonical outcome requires session_id, turn_id, and identity")
+    outcome_session_id = str(getattr(identity, "session_id", "") or "").strip()
+    outcome_turn_id = str(getattr(identity, "turn_id", "") or "").strip()
+    if outcome_session_id != normalized_session_id or (outcome_turn_id and outcome_turn_id != normalized_turn_id):
+        raise ValueError("canonical outcome identity does not match journal turn")
+
+    protocol_events = [
+        event
+        for event in tuple(getattr(outcome, "events", ()) or ())
+        if str(getattr(event, "kind", "") or "").strip() == "item_completed"
+    ]
+    committed_call_ids = {
+        str(getattr(event, "call_id", "") or "").strip()
+        for event in protocol_events
+        if str(getattr(event, "call_id", "") or "").strip()
+    }
+    for tool_call in tuple(getattr(outcome, "tool_calls", ()) or ()):
+        if str(getattr(tool_call, "call_id", "") or "").strip() not in committed_call_ids:
+            tool_identity = getattr(tool_call, "identity", identity)
+            protocol_events.append(
+                SimpleNamespace(
+                    session_id=getattr(tool_identity, "session_id", normalized_session_id),
+                    turn_id=getattr(tool_identity, "turn_id", normalized_turn_id),
+                    invocation_id=getattr(tool_identity, "invocation_id", ""),
+                    iteration=getattr(tool_identity, "iteration", 0),
+                    item_id=getattr(tool_identity, "item_id", ""),
+                    item_revision=getattr(tool_identity, "item_revision", 0),
+                    sequence=0,
+                    call_id=getattr(tool_call, "call_id", ""),
+                    tool_name=getattr(tool_call, "name", ""),
+                    channel="commentary",
+                    phase="tool_call",
+                    status="ready",
+                    text="",
+                    provisional=False,
+                    terminal=False,
+                    diagnostic_summary={},
+                )
+            )
+    has_final_item = any(
+        str(getattr(event, "channel", "") or "").strip().lower() == "answer"
+        and str(getattr(event, "phase", "") or "").strip().lower() == "final_answer"
+        for event in protocol_events
+    )
+    if str(getattr(outcome, "kind", "")) == "final_answer" and not has_final_item:
+        protocol_events.append(
+            SimpleNamespace(
+                session_id=outcome_session_id,
+                turn_id=outcome_turn_id or normalized_turn_id,
+                invocation_id=str(getattr(identity, "invocation_id", "") or ""),
+                iteration=getattr(identity, "iteration", 0),
+                item_id=getattr(identity, "item_id", ""),
+                item_revision=getattr(identity, "item_revision", 0),
+                sequence=0,
+                call_id="",
+                tool_name="",
+                channel="answer",
+                phase="final_answer",
+                status="completed",
+                text=str(getattr(outcome, "final_text", "") or ""),
+                provisional=False,
+                terminal=True,
+                diagnostic_summary={},
+            )
+        )
+
+    existing_keys = {
+        (
+            str(event.payload.get("invocationId") or ""),
+            int(event.payload.get("iteration") or 0),
+            str(event.payload.get("itemId") or ""),
+            int(event.payload.get("revision") or 0),
+            str(event.payload.get("kind") or ""),
+            str(event.payload.get("callId") or ""),
+        )
+        for event in load_turn_events(project_root, normalized_session_id)
+        if event.event_type == EVENT_ASSISTANT_ITEM_COMMITTED and event.turn_id == normalized_turn_id
+    }
+    committed: list[TurnJournalEvent] = []
+    for protocol_event in protocol_events:
+        payload = _canonical_item_payload(protocol_event, outcome=outcome)
+        key = (
+            payload["invocationId"], payload["iteration"], payload["itemId"],
+            payload["revision"], payload["kind"], payload["callId"],
+        )
+        if key in existing_keys:
+            continue
+        committed.append(
+            append_turn_event(
+                project_root,
+                normalized_session_id,
+                normalized_turn_id,
+                EVENT_ASSISTANT_ITEM_COMMITTED,
+                status=payload["status"],
+                payload=payload,
+                source="canonical_turn_outcome",
+                visible_in_model=(payload["kind"] == "assistant_message" and payload["channel"] == "answer" and payload["phase"] == "final_answer"),
+                projection_kind="session_turn_item_v2",
+                provider_role="assistant",
+                tool_call_id=payload["callId"],
+                correlation_id=payload["invocationId"],
+                source_kind="canonical_protocol",
+            )
+        )
+        existing_keys.add(key)
+    return committed
+
+
+def session_turn_items_from_events(
+    events: Iterable["TurnJournalEvent"],
+    *,
+    turn_id: str = "",
+) -> list[dict[str, Any]]:
+    """Project safe, deterministic SessionTurnItem v2 records from canonical commits."""
+
+    normalized_turn_id = str(turn_id or "").strip()
+    items: list[dict[str, Any]] = []
+    for event in sorted(list(events or []), key=lambda item: (item.sequence, item.event_id)):
+        if event.event_type != EVENT_ASSISTANT_ITEM_COMMITTED:
+            continue
+        if normalized_turn_id and event.turn_id != normalized_turn_id:
+            continue
+        payload = dict(event.payload or {})
+        item = {
+            "version": 2,
+            "id": f"{payload.get('itemId') or event.event_id}:{int(payload.get('revision') or 0)}",
+            "type": str(payload.get("kind") or "assistant_message"),
+            "sessionId": str(payload.get("sessionId") or event.session_id),
+            "turnId": str(payload.get("turnId") or event.turn_id),
+            "invocationId": str(payload.get("invocationId") or ""),
+            "iteration": max(0, int(payload.get("iteration") or 0)),
+            "itemId": str(payload.get("itemId") or ""),
+            "revision": max(0, int(payload.get("revision") or 0)),
+            "sequence": max(0, int(event.sequence or 0)),
+            "kind": str(payload.get("kind") or "assistant_message"),
+            "channel": str(payload.get("channel") or ""),
+            "phase": str(payload.get("phase") or ""),
+            "status": str(payload.get("status") or event.status),
+            "protocol": str(payload.get("protocol") or "canonical"),
+            "provisional": bool(payload.get("provisional")),
+            "terminal": bool(payload.get("terminal")),
+            "text": str(payload.get("text") or ""),
+        }
+        if str(payload.get("callId") or ""):
+            item["callId"] = str(payload.get("callId"))
+        if str(payload.get("toolName") or ""):
+            item["toolName"] = str(payload.get("toolName"))
+        diagnostic_summary = dict(payload.get("diagnosticSummary") or {})
+        if diagnostic_summary:
+            item["diagnosticSummary"] = diagnostic_summary
+        protocol_sequence = max(0, int(payload.get("sequence") or 0))
+        if protocol_sequence:
+            item["protocolSequence"] = protocol_sequence
+        items.append(item)
+    return items
+
+
 def model_visible_messages_from_events(events: Iterable[TurnJournalEvent]) -> list[dict[str, Any]]:
     event_list = list(events or [])
     messages: list[dict[str, Any]] = []
@@ -376,6 +594,15 @@ def model_visible_messages_from_events(events: Iterable[TurnJournalEvent]) -> li
         for key in [_event_tool_correlation_key(event)]
         if key
     }
+    canonical_final_turn_ids = {
+        event.turn_id
+        for event in event_list
+        if event.event_type == EVENT_ASSISTANT_ITEM_COMMITTED
+        and str(event.payload.get("kind") or "") == "assistant_message"
+        and str(event.payload.get("channel") or "") == "answer"
+        and str(event.payload.get("phase") or "") == "final_answer"
+        and str(event.payload.get("text") or "").strip()
+    }
 
     for event in event_list:
         if not event.visible_in_model and event.event_type != EVENT_COMPRESSION_ATTEMPT:
@@ -388,6 +615,8 @@ def model_visible_messages_from_events(events: Iterable[TurnJournalEvent]) -> li
             continue
         turn_id = str(event.turn_id or "").strip()
         payload = dict(event.payload or {})
+        if event.event_type == EVENT_ASSISTANT_MESSAGE and turn_id in canonical_final_turn_ids:
+            continue
         if event.event_type == EVENT_USER_MESSAGE:
             content = str(payload.get("content") or "").strip()
             attachments = list(payload.get("attachments") or [])
@@ -411,6 +640,30 @@ def model_visible_messages_from_events(events: Iterable[TurnJournalEvent]) -> li
                         "metadata": message_metadata,
                     }
                 )
+        elif event.event_type == EVENT_ASSISTANT_ITEM_COMMITTED:
+            if (
+                str(payload.get("kind") or "") == "assistant_message"
+                and str(payload.get("channel") or "") == "answer"
+                and str(payload.get("phase") or "") == "final_answer"
+            ):
+                content = str(payload.get("text") or "").strip()
+                if content:
+                    messages.append(
+                        {
+                            "role": "assistant",
+                            "content": content,
+                            "timestamp": event.timestamp,
+                            "metadata": {
+                                "kind": EVENT_ASSISTANT_ITEM_COMMITTED,
+                                "turnId": turn_id,
+                                "eventId": event.event_id,
+                                "invocationId": str(payload.get("invocationId") or ""),
+                                "itemId": str(payload.get("itemId") or ""),
+                                "revision": int(payload.get("revision") or 0),
+                            },
+                        }
+                    )
+                    final_turn_ids.add(turn_id)
         elif event.event_type in {EVENT_ASSISTANT_PARTIAL, EVENT_ASSISTANT_DELTA_COMMITTED}:
             partial = _assistant_message_from_payload(
                 payload,
@@ -1161,6 +1414,7 @@ def _now_timestamp() -> str:
 __all__ = [
     "EVENT_ASSISTANT_MESSAGE",
     "EVENT_ASSISTANT_DELTA_COMMITTED",
+    "EVENT_ASSISTANT_ITEM_COMMITTED",
     "EVENT_ASSISTANT_PARTIAL",
     "AUDIT_ONLY_EVENT_TYPES",
     "EVENT_CLI_SESSION_LIFECYCLE",
@@ -1181,6 +1435,7 @@ __all__ = [
     "TURN_INTERRUPTED_MARKER",
     "TurnJournalEvent",
     "append_interrupted_if_open",
+    "append_canonical_turn_outcome",
     "append_turn_event",
     "event_has_model_projection",
     "event_projection_category",
@@ -1190,5 +1445,6 @@ __all__ = [
     "rewrite_turn_events",
     "model_visible_messages_from_events",
     "model_messages_from_events",
+    "session_turn_items_from_events",
     "turn_journal_path",
 ]

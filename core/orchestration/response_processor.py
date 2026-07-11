@@ -51,10 +51,25 @@ class ResponseProcessingResult:
     def visible_text(self) -> str:
         return self.raw_content_clean
 
-    def build_ai_message(self, response: Any) -> AIMessage:
+    def build_ai_message(
+        self,
+        response: Any,
+        *,
+        tool_calls_override: List[Dict[str, Any]] | None = None,
+    ) -> AIMessage:
+        selected_tool_calls = self.tool_calls
+        if tool_calls_override is not None:
+            selected_tool_calls = [
+                {
+                    "id": str(call.get("id") or ""),
+                    "name": str(call.get("name") or ""),
+                    "args": dict(call.get("args") or call.get("arguments") or {}),
+                }
+                for call in tool_calls_override
+            ]
         ai_kwargs = {
             "content": self.raw_content_with_state,
-            "tool_calls": self.tool_calls,
+            "tool_calls": selected_tool_calls,
         }
         additional_kwargs = getattr(response, "additional_kwargs", None)
         if additional_kwargs:

@@ -18,7 +18,7 @@ export const gitRouteStyles = {
   refreshButton:
     "h-[var(--vui-control-height-sm)] min-h-8 w-[var(--vui-control-height-sm)] flex-none p-0",
   summaryGrid:
-    "mx-3 mt-1.5 min-w-0 max-w-full overflow-x-auto",
+    "mx-3 mt-1.5 min-h-[52px] min-w-0 max-w-full overflow-x-auto",
   notice:
     "mx-3.5 mt-2 rounded-[var(--radius-panel)] border border-[color-mix(in_srgb,var(--state-error)_32%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_12%,transparent)] px-2.5 py-2 text-[var(--vui-font-xs)] text-[var(--state-error)]",
   workspace:

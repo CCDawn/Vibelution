@@ -5,6 +5,8 @@ import { describe, expect, it } from "vitest";
 import {
   VEmptyState,
   VEntityList,
+  VLoadingValue,
+  VMetricStrip,
   VPanelHeader,
   VRouteHeader,
   VSection,
@@ -52,6 +54,12 @@ describe("VUI workbench layout templates", () => {
             { label: "Ready", value: "9" },
           ]}
         />
+        <VMetricStrip
+          ariaLabel="Agent summary"
+          metrics={[
+            { id: "agents", label: "Agents", value: <VLoadingValue label="Loading agents" /> },
+          ]}
+        />
         <VStateSurface
           tone="loading"
           title="Loading team details"
@@ -84,6 +92,11 @@ describe("VUI workbench layout templates", () => {
     expect(markup).toContain("text-[var(--font-size-caption)]");
     expect(markup).toContain("text-[var(--font-size-micro)]");
     expect(markup).toContain('data-vui="status-strip"');
+    expect(markup).toContain('data-vui="loading-value"');
+    expect(markup).toContain('role="status"');
+    expect(markup).toContain('aria-label="Loading agents"');
+    expect(markup).toContain("animate-spin");
+    expect(markup).toContain("motion-reduce:animate-none");
     expect(markup).toContain('data-vui="state-surface"');
     expect(markup).toContain('data-tone="loading"');
     expect(markup).toContain("Team detail API");

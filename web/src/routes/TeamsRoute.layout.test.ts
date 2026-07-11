@@ -135,7 +135,7 @@ describe("TeamsRoute layout contract", () => {
   });
 
   it("uses Team APIs and Agent Center as the binding source", () => {
-    expect(routeSource).toContain('fetchJson<TeamListPayload>("/api/teams")');
+    expect(routeSource).toContain('fetchJson<TeamListPayload>("/api/teams", { signal })');
     expect(routeSource).toContain("TEAM_BOOTSTRAP_REFETCH_STATUSES");
     expect(routeSource).toContain("query.state.data?.systemTeamBootstrap?.status");
     expect(routeSource).toContain("TEAM_BOOTSTRAP_ACTIVE_REFETCH_MS");
@@ -144,9 +144,9 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).not.toContain("instantiateTeamTemplateMutation");
     expect(routeSource).toContain("TEAM_PICKER_TEAM_IDS");
     expect(canvasDataSource).toContain("const TEAM_PICKER_TEAM_IDS = [AI_SEARCH_TEAM_ID, KNOWLEDGE_EXPANSION_TEAM_ID, RESEARCH_TEAM_ID] as const");
-    expect(routeSource).toContain("fetchJson<Team>(`/api/teams/${encodeURIComponent(effectiveTeamId)}?detail=${teamDetailLoadMode}`)");
+    expect(routeSource).toContain("fetchJson<Team>(`/api/teams/${encodeURIComponent(effectiveTeamId)}?detail=${teamDetailLoadMode}`, { signal })");
     expect(routeSource).toContain("queryKeys.agentSummary(true)");
-    expect(routeSource).toContain('fetchJson<AgentConfigWorkspaceAgent[]>("/api/agents?includeArchived=true&detail=summary")');
+    expect(routeSource).toContain('fetchJson<AgentConfigWorkspaceAgent[]>("/api/agents?includeArchived=true&detail=summary", { signal })');
     expect(routeSource).not.toContain('fetchJson<AgentConfigWorkspace>("/api/agents/config-workspace")');
     expect(routeSource).toContain("fetchJson<Team>(`/api/teams/${encodeURIComponent(teamId)}`");
     expect(routeSource).toContain('method: "DELETE"');
@@ -160,7 +160,7 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("fetchJson<ChatRoomDetail>(`/api/chat-rooms/${encodeURIComponent(linkedChatRoomId)}`)");
     expect(routeSource).toContain("linkedRoomRefetchInterval(pageVisible");
     expect(routeSource).toContain("latestChatRoomRound(linkedRoomDetail)");
-    expect(routeSource).toContain("fetchJson<TeamWorkflowOrchestration>(`/api/teams/${encodeURIComponent(effectiveTeamId)}/workflow-orchestration`)");
+    expect(routeSource).toContain("fetchJson<TeamWorkflowOrchestration>(`/api/teams/${encodeURIComponent(effectiveTeamId)}/workflow-orchestration`, { signal })");
     expect(routeSource).toContain("fetchJson<TeamWorkflowCandidateListPayload>");
     expect(routeSource).toContain("fetchJson<TeamWorkflowCandidateGraphBuildPayload>");
     expect(routeSource).toContain("fetchJson<TeamWorkflowKnowledgeIngestionStatus>");
@@ -1282,6 +1282,17 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).not.toContain("researchStageRoundStatusQueryKey(effectiveTeamId || \"none\"),\n    queryFn: () =>\n      fetchJson<ResearchStageRoundStatusPayload>(\n        `/api/teams/${encodeURIComponent(effectiveTeamId)}/workflow-orchestration/stage-rounds/status`,\n      ),\n    enabled: Boolean(effectiveTeamId && researchWorkflowTeamSelected && teamWorkflowQuery.data)");
     expect(routeSource).not.toContain("queryKeys.teamWorkflowCandidates(effectiveTeamId || \"none\", TEAM_WORKFLOW_CANDIDATE_PREVIEW_LIMIT),\n    queryFn: () =>\n      fetchJson<TeamWorkflowCandidateListPayload>(\n        `/api/teams/${encodeURIComponent(effectiveTeamId)}/workflow-orchestration/candidates?limit=${TEAM_WORKFLOW_CANDIDATE_PREVIEW_LIMIT}`,\n      ),\n    enabled: Boolean(effectiveTeamId && researchWorkflowTeamSelected && teamWorkflowQuery.data)");
     expect(routeSource).not.toContain("enabled: Boolean(effectiveTeamId && researchWorkflowTeamSelected && teamWorkflowQuery.data)");
+    expect(routeSource.match(/&& teamWorkflowQuery\.data\)/g) ?? []).toEqual([]);
+
+    const queryLayerSource = routeSource.slice(
+      routeSource.indexOf("const teamsQuery = useQuery"),
+      routeSource.indexOf("const autoCanvasViewportStyle = useMemo"),
+    );
+    expect(queryLayerSource).toContain("queryFn: ({ signal }) => fetchJson<TeamListPayload>(\"/api/teams\", { signal })");
+    expect(queryLayerSource).toContain("queryFn: ({ signal }) => fetchJson<Team>(`/api/teams/${encodeURIComponent(effectiveTeamId)}?detail=${teamDetailLoadMode}`, { signal })");
+    expect(queryLayerSource).toContain("queryFn: ({ signal }) => fetchJson<TeamOrganizationCanvas>(`/api/teams/${encodeURIComponent(effectiveTeamId)}/canvas`, { signal })");
+    expect(queryLayerSource).toContain("queryFn: ({ signal }) =>");
+    expect(queryLayerSource.match(/\{ signal \}/g)?.length ?? 0).toBeGreaterThanOrEqual(5);
     const sourceCollectionStageReturnRefreshSource = routeSource.slice(
       routeSource.indexOf("if (!researchWorkflowTeamSelected || !pageVisible"),
       routeSource.indexOf("if (!selectedTeam?.teamId || !selectedSourceCollectionRunEffectiveId || !selectedSourceCollectionSearchAccepted"),

@@ -1,10 +1,78 @@
-import { describe, expect, it } from "vitest";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const usageQueryState = vi.hoisted(() => ({
+  current: {} as Record<string, unknown>,
+  invalidateQueries: vi.fn(),
+}));
+
+vi.mock("@tanstack/react-query", () => ({
+  useQuery: () => usageQueryState.current,
+  useQueryClient: () => ({ invalidateQueries: usageQueryState.invalidateQueries }),
+}));
+vi.mock("../app/pollingPolicy", () => ({
+  resolvePollingInterval: () => false,
+  usePageVisibility: () => true,
+}));
+vi.mock("../i18n/useAppI18n", () => ({ useAppI18n: () => ({ lang: "zh" }) }));
 
 import routeSource from "./UsageRoute.tsx?raw";
 import stylesSource from "./UsageRoute.styles.ts?raw";
 import styles from "./UsageRoute.styles";
+import { UsageRoute } from "./UsageRoute";
+
+const ZERO_ROLLUP = {
+  inputTokens: 0,
+  cachedInputTokens: 0,
+  cacheReadInputTokens: 0,
+  cacheCreationInputTokens: 0,
+  uncachedInputTokens: 0,
+  outputTokens: 0,
+  reasoningOutputTokens: 0,
+  totalTokens: 0,
+  callCount: 0,
+  observedCallCount: 0,
+  estimatedCallCount: 0,
+  missingCallCount: 0,
+  notCalledCount: 0,
+  latencyMs: 0,
+  cacheHitRate: 0,
+};
+
+const LOADED_ZERO_SUMMARY = {
+  scope: "global",
+  globalTokenUsage: { allTime: ZERO_ROLLUP, today: ZERO_ROLLUP, last7Days: ZERO_ROLLUP },
+  sessionTokenUsage: ZERO_ROLLUP,
+  agentTokenUsage: ZERO_ROLLUP,
+  scopeTokenUsage: ZERO_ROLLUP,
+};
+
+const STALE_SENTINEL_SUMMARY = {
+  ...LOADED_ZERO_SUMMARY,
+  globalTokenUsage: {
+    ...LOADED_ZERO_SUMMARY.globalTokenUsage,
+    allTime: { ...ZERO_ROLLUP, totalTokens: 12_345, callCount: 1 },
+  },
+};
+
+function renderUsage(state: Record<string, unknown>) {
+  usageQueryState.current = {
+    data: undefined,
+    error: null,
+    isError: false,
+    isFetching: false,
+    isPending: false,
+    refetch: vi.fn(),
+    ...state,
+  };
+  return renderToStaticMarkup(createElement(UsageRoute));
+}
 
 describe("UsageRoute layout contract", () => {
+  beforeEach(() => {
+    usageQueryState.invalidateQueries.mockReset();
+  });
   const overflowGuardStyles = [
     styles.page,
     styles.metricBand,
@@ -100,5 +168,72 @@ describe("UsageRoute layout contract", () => {
     expect(styles.usageRow).toContain("[&_code]:max-w-full");
     expect(styles.usageRowWide).toContain("max-[620px]:grid-cols-[minmax(0,1fr)]");
     expect(styles.detailRow).toContain("max-[520px]:grid-cols-[minmax(0,1fr)]");
+  });
+
+  it("distinguishes pending rollups from loaded zero values", () => {
+    expect(routeSource).toContain("deriveQueryPresentation");
+    expect(routeSource).toContain("<VLoadingValue");
+    expect(routeSource).not.toContain("function rollupOrEmpty");
+    expect(routeSource).not.toContain("const allTime = rollupOrEmpty");
+    expect(routeSource).toContain('usagePresentation === "initial-loading"');
+    expect(routeSource).toContain('usagePresentation === "refreshing"');
+  });
+
+  it("reserves stable metric heights while values load", () => {
+    expect(styles.overviewBand).toContain("min-h-[58px]");
+    expect(styles.sourceTile).toContain("grid min-h-[50px]");
+  });
+
+  it.each([
+    ["initial-loading", { isFetching: true, isPending: true }, "正在加载 Token 用量"],
+    ["loaded-zero", { data: LOADED_ZERO_SUMMARY }, ">0<"],
+  ])("renders the %s query presentation", (_name, state, expected) => {
+    expect(renderUsage(state)).toContain(expected);
+  });
+
+  it("keeps the complete card structure during initial loading without projecting factual empty values", () => {
+    const markup = renderUsage({ isFetching: true, isPending: true });
+    expect(markup).toContain("Token 构成");
+    expect(markup).toContain("计数概览");
+    expect(markup).toContain("最近记录");
+    expect(markup).toContain("正在加载 Token 用量");
+    expect(markup).toContain('data-vui="loading-value"');
+    expect(markup).not.toContain("尚未调用");
+    expect(markup).not.toContain("当前没有可用的 Token 用量记录");
+    expect(markup).not.toContain("未记录");
+    expect(markup).not.toContain("usage_ledger");
+    expect(markup).not.toContain(">1</span>");
+  });
+
+  it("preserves stale non-zero usage while refreshing", () => {
+    const markup = renderUsage({ data: STALE_SENTINEL_SUMMARY, isFetching: true });
+    expect(markup).toContain("12,345");
+    expect(markup).toContain("同步中");
+    expect(markup).toContain('aria-busy="false"');
+    expect(markup).not.toContain('data-vui="loading-value"');
+    expect(markup).not.toContain("不可用");
+  });
+
+  it("preserves stale non-zero usage while showing an error warning", () => {
+    const markup = renderUsage({
+      data: STALE_SENTINEL_SUMMARY,
+      error: new Error("stale usage warning"),
+      isError: true,
+    });
+    expect(markup).toContain("12,345");
+    expect(markup).toContain("stale usage warning");
+    expect(markup).toContain('aria-busy="false"');
+    expect(markup).not.toContain('data-vui="loading-value"');
+    expect(markup).not.toContain("不可用");
+    expect(markup).toContain("重试");
+    expect(routeSource).toContain("usageQuery.refetch()");
+  });
+
+  it("renders unavailable values and retry without zero projection for error-empty", () => {
+    const markup = renderUsage({ error: new Error("usage unavailable"), isError: true });
+    expect(markup).toContain('data-tone="error"');
+    expect(markup).toContain("usage unavailable");
+    expect(markup).toContain("重试");
+    expect(markup).not.toContain(">0<");
   });
 });
