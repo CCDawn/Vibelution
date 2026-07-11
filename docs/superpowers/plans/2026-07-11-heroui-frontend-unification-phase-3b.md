@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use subagent-driven-development (recommended) or executing-plans to implement this plan task-by-task. Steps use checkbox syntax for tracking.
 
-**Status:** active-plan
+**Status:** completed-local-main
 **Owner:** codex-heroui-phase3b-plan
 **Claim:** claim-37484783343d
 **Scope:** aggressive VUI/HeroUI migration for /supervised-evolution, /self-evolution, and /config
@@ -44,7 +44,7 @@
 - Produces: VStringSelectOption, VStringSelectProps, resolveStringSelectChange.
 - Excludes: React Query, mutations, EventSource, route drafts, and API payloads.
 
-- [ ] **Step 1: Write the failing behavior tests**
+- [x] **Step 1: Write the failing behavior tests**
 
     import { describe, expect, it } from "vitest";
     import { resolveStringSelectChange } from "./VStringSelect";
@@ -65,13 +65,13 @@
       });
     });
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
     npm --prefix web exec vitest run src/components/vui/forms/VStringSelect.test.tsx
 
 Expected: FAIL because the component and resolver do not exist.
 
-- [ ] **Step 3: Implement the smallest adapter**
+- [x] **Step 3: Implement the smallest adapter**
 
     import { type Key, type ReactNode } from "react";
     import { VSelect, type VSelectOption } from "./VSelect";
@@ -129,13 +129,13 @@ Expected: FAIL because the component and resolver do not exist.
 
 Export the component, resolver, and types from the VUI index.
 
-- [ ] **Step 4: Verify GREEN**
+- [x] **Step 4: Verify GREEN**
 
     npm --prefix web exec vitest run src/components/vui/forms/VStringSelect.test.tsx src/components/vui/vuiForms.test.tsx
 
 Expected: PASS; only enabled known keys resolve, while empty/unknown/disabled keys cannot dispatch a route value callback.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
     git add -- web/src/components/vui/forms/VStringSelect.tsx web/src/components/vui/forms/VStringSelect.test.tsx web/src/components/vui/index.ts
     git commit -m "feat(vui): add string select bridge"
@@ -155,7 +155,7 @@ Expected: PASS; only enabled known keys resolve, while empty/unknown/disabled ke
 - Produces: VUI route header, metric/status strips, state surfaces, supported form/action controls, and repeated panel surfaces.
 - Excludes: evolutionLiveRun.ts, API types, query keys, EventSource parsing, payload shapes, mutation ownership, and resizer behavior.
 
-- [ ] **Step 1: Write failing Evolution layout assertions**
+- [x] **Step 1: Write failing Evolution layout assertions**
 
     expect(routeSource).toContain("VRouteHeader");
     expect(routeSource).toContain("VMetricStrip");
@@ -171,13 +171,13 @@ Expected: PASS; only enabled known keys resolve, while empty/unknown/disabled ke
 
 Keep assertions for parseRunStreamSnapshot, selectSupervisedRunStreamTarget, existing mutation handlers, and resize handles.
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
     npm --prefix web exec vitest run src/routes/EvolutionRoute.layout.test.ts
 
 Expected: FAIL because VNative controls remain and route-level VUI composition is absent.
 
-- [ ] **Step 3: Convert route controls and state surfaces**
+- [x] **Step 3: Convert route controls and state surfaces**
 
     <VStringSelect
       ariaLabel={copy.source}
@@ -200,7 +200,7 @@ Expected: FAIL because VNative controls remain and route-level VUI composition i
 
 Use VRouteHeader, VMetricStrip, VSurface, VSection, and VStateSurface around current Live/Runs/Library content. Keep grid variables, pane handles, EventSource, query keys, and callbacks intact.
 
-- [ ] **Step 4: Convert all supported panel controls**
+- [x] **Step 4: Convert all supported panel controls**
 
     <VButton
       type="button"
@@ -213,13 +213,13 @@ Use VRouteHeader, VMetricStrip, VSurface, VSection, and VStateSurface around cur
 
 Replace every VNativeButton, VNativeInput, VNativeSelect, and VNativeTextarea in the named panels. Do not move onRunAction, onDeleteRunRecord, proposal-action handlers, selected IDs, or local edit state into VUI.
 
-- [ ] **Step 5: Verify GREEN**
+- [x] **Step 5: Verify GREEN**
 
     npm --prefix web exec vitest run src/routes/EvolutionRoute.layout.test.ts src/routes/evolutionLiveRun.test.ts src/routes/supervisedRunSummary.test.ts src/routes/supervisedRunRecordLabel.test.ts
 
 Expected: PASS; VUI boundaries pass and stream/run-summary/record-label behavior remains unchanged.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
     git add -- web/src/routes/EvolutionRoute.tsx web/src/routes/EvolutionRoute.styles.ts web/src/routes/EvolutionActiveRunMonitorPanel.tsx web/src/routes/EvolutionActiveRunMonitorPanel.styles.ts web/src/routes/EvolutionProposalActionBandsPanel.tsx web/src/routes/EvolutionProposalActionBandsPanel.styles.ts web/src/routes/EvolutionRunRecordsPanel.tsx web/src/routes/EvolutionRunRecordsPanel.styles.ts web/src/routes/EvolutionRoute.layout.test.ts
     git commit -m "style(web): unify Evolution control surfaces"
@@ -242,7 +242,7 @@ Expected: PASS; VUI boundaries pass and stream/run-summary/record-label behavior
 - Produces: VUI shell/panel/form controls with unchanged source path, draft, validation, save, restore, reload, secret, and leave-guard semantics.
 - Excludes: API clients, configRouteLogic.ts, persistence payloads, secret behavior, external operator config, and mutation ownership.
 
-- [ ] **Step 1: Write failing Config boundary assertions**
+- [x] **Step 1: Write failing Config boundary assertions**
 
     expect(routeSource).toContain("VRouteHeader");
     expect(routeSource).toContain("VStatusStrip");
@@ -257,13 +257,13 @@ Expected: PASS; VUI boundaries pass and stream/run-summary/record-label behavior
 
 Keep existing assertions for apply payloads, dirty/validation recovery, pending secrets, LazyJsonCodeMirror, and leave guards.
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
     npm --prefix web exec vitest run src/routes/ConfigRoute.layout.test.ts
 
 Expected: FAIL because VNative controls and non-VUI shell patterns remain.
 
-- [ ] **Step 3: Convert form fields without moving draft ownership**
+- [x] **Step 3: Convert form fields without moving draft ownership**
 
     <VInput
       aria-label={label}
@@ -289,7 +289,7 @@ Expected: FAIL because VNative controls and non-VUI shell patterns remain.
 
 Keep hidden file inputs and pointer crop/resizer affordances native with existing accept, onChange, and pointer handling.
 
-- [ ] **Step 4: Convert shell and repeated panels**
+- [x] **Step 4: Convert shell and repeated panels**
 
     <VButton
       type="button"
@@ -302,13 +302,13 @@ Keep hidden file inputs and pointer crop/resizer affordances native with existin
 
 Use VRouteHeader and VStatusStrip for source, dirty, validation, and restart facts; use VSurface, VSection, and VPanelHeader for listed panels. Do not move editor text, pending secrets, model-editor state, validation result, busy state, or query-client calls into VUI. Preserve CodeMirror and table scroll bounds.
 
-- [ ] **Step 5: Verify GREEN**
+- [x] **Step 5: Verify GREEN**
 
     npm --prefix web exec vitest run src/routes/ConfigRoute.layout.test.ts src/routes/configRouteLogic.test.ts
 
 Expected: PASS; visual boundary moves to VUI while payloads, leave guard, validation recovery, and secret state remain unchanged.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
     git add -- web/src/routes/ConfigRoute.tsx web/src/routes/ConfigRoute.styles.ts web/src/routes/ConfigModelLibraryPanel.tsx web/src/routes/ConfigModelLibraryPanel.styles.ts web/src/routes/ConfigDraftPanel.tsx web/src/routes/ConfigDraftPanel.styles.ts web/src/routes/ConfigOverviewPanel.tsx web/src/routes/ConfigOverviewPanel.styles.ts web/src/routes/ConfigRuntimePanel.tsx web/src/routes/ConfigRuntimePanel.styles.ts web/src/routes/ConfigHealthDiagnosticsPanel.tsx web/src/routes/ConfigHealthDiagnosticsPanel.styles.ts web/src/routes/ConfigWorkspacePlaceholderPanel.tsx web/src/routes/ConfigWorkspacePlaceholderPanel.styles.ts web/src/routes/ConfigRoute.layout.test.ts
     git commit -m "style(web): unify Config control surfaces"
@@ -323,7 +323,7 @@ Expected: PASS; visual boundary moves to VUI while payloads, leave guard, valida
 - Consumes: current 42-scenario matrix and WORKBENCH_DESKTOP_VIEWPORTS.
 - Produces: 18 stable scenarios for /supervised-evolution, /self-evolution, and /config at light/dark × 1280/1440/1920.
 
-- [ ] **Step 1: Write the failing matrix test**
+- [x] **Step 1: Write the failing matrix test**
 
     const paths = ["/supervised-evolution", "/self-evolution", "/config"];
     const phase3bScenarios = WORKBENCH_VISUAL_SCENARIOS.filter((scenario) => scenario.id.startsWith("phase3b-"));
@@ -335,13 +335,13 @@ Expected: PASS; visual boundary moves to VUI while payloads, leave guard, valida
     expect(WORKBENCH_VISUAL_SCENARIOS.some((scenario) => scenario.id === "supervised-light-default-standard-blocker")).toBe(true);
     expect(WORKBENCH_VISUAL_SCENARIOS.some((scenario) => scenario.id === "config-light-default-standard-destructive")).toBe(true);
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
     npm --prefix web exec vitest run src/visual-regression/workbenchVisualMatrix.test.ts
 
 Expected: FAIL because the current matrix has 42 scenarios, no phase3b-prefixed scenarios, and no /self-evolution Phase 3B coverage.
 
-- [ ] **Step 3: Add route focus and scenarios**
+- [x] **Step 3: Add route focus and scenarios**
 
     const PHASE_3B_ROUTE_FOCUS = [
       {
@@ -363,7 +363,7 @@ Expected: FAIL because the current matrix has 42 scenarios, no phase3b-prefixed 
 
 Map every entry through the existing six light/dark × compact/standard/wide variants with dense state and screenshot evidence. Keep older blocker/error/destructive Config and supervised scenarios because they cover distinct non-stable states.
 
-- [ ] **Step 4: Verify GREEN and commit**
+- [x] **Step 4: Verify GREEN and commit**
 
     npm --prefix web exec vitest run src/visual-regression/workbenchVisualMatrix.test.ts
     git add -- web/src/visual-regression/workbenchVisualMatrix.ts web/src/visual-regression/workbenchVisualMatrix.test.ts
@@ -377,7 +377,7 @@ Expected: PASS; all prior scenarios remain and the total is exactly 60.
 - Modify only files listed in Tasks 1-4.
 - Sync after merge with the project-memory scripts for web-workbench-surface.
 
-- [ ] **Step 1: Create the implementation claim and task worktree**
+- [x] **Step 1: Create the implementation claim and task worktree**
 
     $root = "C:\Users\17533\Desktop\Vibelution"
     $worktree = "C:\Users\17533\Desktop\Vibelution-worktrees\heroui-frontend-unification-phase-3b"
@@ -420,7 +420,7 @@ Expected: PASS; all prior scenarios remain and the total is exactly 60.
 
 Expected: a non-overlapping claim and an isolated branch based on the then-current local main.
 
-- [ ] **Step 2: Run focused validation in the clean task worktree**
+- [x] **Step 2: Run focused validation in the clean task worktree**
 
     npm --prefix web exec vitest run src/components/vui/forms/VStringSelect.test.tsx src/components/vui/vuiForms.test.tsx src/routes/EvolutionRoute.layout.test.ts src/routes/evolutionLiveRun.test.ts src/routes/supervisedRunSummary.test.ts src/routes/supervisedRunRecordLabel.test.ts src/routes/ConfigRoute.layout.test.ts src/routes/configRouteLogic.test.ts src/visual-regression/workbenchVisualMatrix.test.ts
     npm --prefix web run build
@@ -428,7 +428,7 @@ Expected: a non-overlapping claim and an isolated branch based on the then-curre
 
 Expected: all selected tests pass, build succeeds, and the diff is clean.
 
-- [ ] **Step 3: Close out and merge only when local main is current**
+- [x] **Step 3: Close out and merge only when local main is current**
 
     & "$root\.venv\Scripts\python.exe" "$root\scripts\local_quality_gate.py" closeout --base main --claim-id $claim.claim.id
     & "$root\.venv\Scripts\python.exe" "$root\scripts\local_quality_gate.py" verify-manifest --claim-id $claim.claim.id
@@ -436,7 +436,7 @@ Expected: all selected tests pass, build succeeds, and the diff is clean.
 
 Expected: the manifest is bound to current main and the clean task branch fast-forwards root main. If main moved, merge it into the task worktree and rerun closeout; do not force merge.
 
-- [ ] **Step 4: Refresh through Launcher and collect live evidence**
+- [x] **Step 4: Refresh through Launcher and collect live evidence**
 
 Read GET http://127.0.0.1:8000/api/launcher/status. If activeWorkRuns.count is nonzero, stop with the project-standard active-work block. Otherwise run:
 
@@ -444,7 +444,7 @@ Read GET http://127.0.0.1:8000/api/launcher/status. If activeWorkRuns.count is n
 
 Verify /supervised-evolution, /self-evolution, and /config in light/dark at 1280x720, 1440x900, and 1920x1080. Inspect 720px separately for page overflow. Check loading/ready geometry, disabled controls, safe blocker/error/destructive visibility, long labels, focus, internal scroll boundaries, and application console errors. Browser-plugin telemetry is not application-console evidence.
 
-- [ ] **Step 5: Synchronize memory and clean only task resources**
+- [x] **Step 5: Synchronize memory and clean only task resources**
 
     $skillRoot = "C:\Users\17533\.codex\skills\ccdawn-dawn-agent-html-memory"
     & "$root\.venv\Scripts\python.exe" "$skillRoot\scripts\sync_project_memory.py" $root --lane web-workbench-surface --focus "HeroUI Phase 3B Evolution and Config migration validated on local main" --phase validated-local-main --health green --update "Record final local-main SHA, focused checks, build, Launcher/browser evidence, no remote action, and patch impact."
@@ -473,4 +473,5 @@ Expected: project memory records the local-main SHA and validation; only the cle
 - **Unresolved risk:** VInput/VTextarea event parity and VSelect representation must prove RED then GREEN before route migration. Active work can block Launcher refresh.
 - **Task 4 contract correction:** The 18 Phase 3B stable scenarios are identified by the phase3b ID prefix. The existing four target-route blocker/error/destructive scenarios remain in the 60-scenario total and are intentionally excluded from the 18-scenario new-coverage count.
 - **Task graph:** ccdawn-task-splitting must determine the execution partition before implementation.
+- **Local-main closeout:** `8c0dd93c` was validated after a clean fast-forward with the full Web suite, production build, Launcher restart, and the 18-combination browser matrix. No remote push or PR was created; version impact is patch-only.
 - **Recommended next stage:** ccdawn-task-splitting, then execute in the named Phase 3B worktree.
