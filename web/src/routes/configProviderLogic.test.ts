@@ -169,6 +169,68 @@ describe("configProviderLogic", () => {
     expect(canAdvanceProviderWizard(state)).toBe(true);
   });
 
+  it("preserves template route fields when the backend first suggests providerId", () => {
+    const discovered = catalogModel("relay_a/gpt-a");
+    const connection = {
+      ...initialProviderWizardState(),
+      step: "connection" as const,
+      templateId: "relay_openai",
+      serviceClass: "relay",
+      providerId: "",
+      label: "Relay A",
+      baseUrl: "https://relay.example/v1",
+      authKind: "api_key" as const,
+      credentialRef: "env:RELAY_KEY",
+      driver: "openai",
+      defaultProtocol: "responses",
+      allowedProtocols: ["responses"],
+      runtimeFramework: "vllm",
+      artifactPath: "models/a",
+      discoveredModels: [discovered],
+      pinnedModelRefs: [discovered.modelRef],
+    };
+
+    const suggested = providerWizardReducer(connection, {
+      type: "set_connection",
+      providerId: "relay_a",
+      label: connection.label,
+      baseUrl: connection.baseUrl,
+      authKind: connection.authKind,
+      credentialRef: connection.credentialRef,
+    });
+
+    expect(suggested).toMatchObject({
+      providerId: "relay_a",
+      driver: "openai",
+      defaultProtocol: "responses",
+      allowedProtocols: ["responses"],
+      runtimeFramework: "vllm",
+      artifactPath: "models/a",
+      discoveredModels: [],
+      pinnedModelRefs: [],
+    });
+  });
+
+  it("validates auth kind against backend credential requirements", () => {
+    const base = {
+      ...initialProviderWizardState(),
+      step: "connection" as const,
+      templateId: "custom",
+      serviceClass: "self_hosted",
+      providerId: "custom_a",
+      label: "Custom A",
+      baseUrl: "https://custom.example/v1",
+      driver: "openai",
+      defaultProtocol: "responses",
+      allowedProtocols: ["responses"],
+    };
+
+    expect(canAdvanceProviderWizard({ ...base, authKind: "none", credentialRef: "none" })).toBe(true);
+    expect(canAdvanceProviderWizard({ ...base, authKind: "none", credentialRef: "env:WRONG" })).toBe(false);
+    expect(canAdvanceProviderWizard({ ...base, authKind: "api_key", credentialRef: "none" })).toBe(false);
+    expect(canAdvanceProviderWizard({ ...base, authKind: "oauth", credentialRef: "env:OAUTH_TOKEN" })).toBe(true);
+  });
+
   it("keeps reducer output immutable and ignores raw credential values", () => {
     const initial = initialProviderWizardState();
     const template = providerWizardReducer(initial, {
@@ -204,6 +266,7 @@ describe("configProviderLogic", () => {
       providerId: "local_a",
       label: "Local A",
       baseUrl: "http://127.0.0.1:8001/v1",
+      authKind: "none",
       credentialRef: "none",
     });
     expect(canAdvanceProviderWizard(state)).toBe(false);
@@ -429,6 +492,7 @@ describe("configProviderLogic", () => {
         providerId: `${serviceClass}_provider`,
         label: "Provider",
         baseUrl: "https://provider.example/v1",
+        authKind: "none",
         credentialRef: "none",
       });
       state = providerWizardReducer(state, {
