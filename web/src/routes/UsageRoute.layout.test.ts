@@ -185,10 +185,24 @@ describe("UsageRoute layout contract", () => {
   });
 
   it.each([
-    ["initial-loading", { isFetching: true, isPending: true }, 'data-vui="loading-value"'],
+    ["initial-loading", { isFetching: true, isPending: true }, "正在加载 Token 用量"],
     ["loaded-zero", { data: LOADED_ZERO_SUMMARY }, ">0<"],
   ])("renders the %s query presentation", (_name, state, expected) => {
     expect(renderUsage(state)).toContain(expected);
+  });
+
+  it("keeps the complete card structure during initial loading without projecting factual empty values", () => {
+    const markup = renderUsage({ isFetching: true, isPending: true });
+    expect(markup).toContain("Token 构成");
+    expect(markup).toContain("计数概览");
+    expect(markup).toContain("最近记录");
+    expect(markup).toContain("正在加载 Token 用量");
+    expect(markup).toContain('data-vui="loading-value"');
+    expect(markup).not.toContain("尚未调用");
+    expect(markup).not.toContain("当前没有可用的 Token 用量记录");
+    expect(markup).not.toContain("未记录");
+    expect(markup).not.toContain("usage_ledger");
+    expect(markup).not.toContain(">1</span>");
   });
 
   it("preserves stale non-zero usage while refreshing", () => {
@@ -211,6 +225,8 @@ describe("UsageRoute layout contract", () => {
     expect(markup).toContain('aria-busy="false"');
     expect(markup).not.toContain('data-vui="loading-value"');
     expect(markup).not.toContain("不可用");
+    expect(markup).toContain("重试");
+    expect(routeSource).toContain("usageQuery.refetch()");
   });
 
   it("renders unavailable values and retry without zero projection for error-empty", () => {
