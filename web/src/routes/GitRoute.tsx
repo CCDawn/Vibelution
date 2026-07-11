@@ -477,6 +477,32 @@ export function GitRoute() {
     );
   }
 
+  function renderRecentCommitsContent() {
+    if (commitsPresentation === "initial-loading") {
+      return <VStateSurface tone="loading" title={gitCommitsLoading} skeletonLines />;
+    }
+    if (commitsPresentation === "error-empty") {
+      return (
+        <VStateSurface
+          tone="error"
+          title={gitCommitsError}
+          actions={(
+            <VButton type="button" variant="secondary" onPress={() => void commitsQuery.refetch()}>{retryLabel}</VButton>
+          )}
+        />
+      );
+    }
+    return (
+      <>
+        {commitsPresentation === "error-with-data" ? <p className={styles.notice}>{gitCommitsError}</p> : null}
+        <div className={styles.commitList}>
+          {recentCommits.map((commit) => renderCommitItem(commit, gitCommitSourceLabel))}
+          {!recentCommits.length ? <p className={styles.emptyState}>{commitsQuery.data?.error || t("gitNoCommits")}</p> : null}
+        </div>
+      </>
+    );
+  }
+
   return (
     <section className={styles.route}>
       <VRouteHeader
@@ -592,32 +618,16 @@ export function GitRoute() {
                 )}
               />
             )}
-            {commitsPresentation === "loaded" || commitsPresentation === "refreshing" || commitsPresentation === "error-with-data" ? (
-              <aside className={styles.commitPanel}>
-                <div className={styles.panelHeader}>
-                  <div>
-                    <p className={styles.panelEyebrow}>{t("gitHead")}</p>
-                    <h2>{t("gitRecentCommits")}</h2>
-                  </div>
-                  <GitCommitHorizontal size={18} />
+            <aside className={styles.commitPanel}>
+              <div className={styles.panelHeader}>
+                <div>
+                  <p className={styles.panelEyebrow}>{t("gitHead")}</p>
+                  <h2>{t("gitRecentCommits")}</h2>
                 </div>
-                {commitsPresentation === "error-with-data" ? <p className={styles.notice}>{gitCommitsError}</p> : null}
-                <div className={styles.commitList}>
-                  {recentCommits.map((commit) => renderCommitItem(commit, gitCommitSourceLabel))}
-                  {!recentCommits.length ? <p className={styles.emptyState}>{commitsQuery.data?.error || t("gitNoCommits")}</p> : null}
-                </div>
-              </aside>
-            ) : (
-              <VStateSurface
-                className={styles.commitPanel}
-                tone={commitsPresentation === "error-empty" ? "error" : "loading"}
-                title={commitsPresentation === "error-empty" ? gitCommitsError : gitCommitsLoading}
-                skeletonLines={commitsPresentation !== "error-empty"}
-                actions={commitsPresentation === "error-empty" ? (
-                  <VButton type="button" variant="secondary" onPress={() => void commitsQuery.refetch()}>{retryLabel}</VButton>
-                ) : undefined}
-              />
-            )}
+                <GitCommitHorizontal size={18} />
+              </div>
+              {renderRecentCommitsContent()}
+            </aside>
           </>
         ) : noChangedFiles ? (
           <>
@@ -710,12 +720,7 @@ export function GitRoute() {
                 </div>
                 <GitCommitHorizontal size={18} />
               </div>
-              <div className={styles.commitList}>
-                {recentCommits.map((commit) => renderCommitItem(commit, gitCommitSourceLabel))}
-                {!commitsQuery.isPending && !recentCommits.length ? (
-                  <p className={styles.emptyState}>{commitsQuery.data?.error || t("gitNoCommits")}</p>
-                ) : null}
-              </div>
+              {renderRecentCommitsContent()}
             </aside>
           </>
         ) : (
@@ -979,12 +984,7 @@ export function GitRoute() {
             </div>
             <GitCommitHorizontal size={18} />
           </div>
-          <div className={styles.commitList}>
-            {recentCommits.map((commit) => renderCommitItem(commit, gitCommitSourceLabel))}
-            {!commitsQuery.isPending && !recentCommits.length ? (
-              <p className={styles.emptyState}>{commitsQuery.data?.error || t("gitNoCommits")}</p>
-            ) : null}
-          </div>
+          {renderRecentCommitsContent()}
             </aside>
           </>
         )}
