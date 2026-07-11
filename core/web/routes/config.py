@@ -227,13 +227,15 @@ def config_draft_provider_id_suggestion(
 @router.post("/config/draft/providers")
 def config_draft_add_provider(payload: ConfigProviderDraftPayload) -> dict:
     try:
-        return provider_config_service.draft_add_provider(
-            payload.publicConfig,
-            draft_meta=payload.draftMeta,
-            base_hash=payload.baseHash,
-            provider_id=payload.providerId,
-            provider=payload.provider,
-            credential_value=payload.credentialValue,
+        return provider_config_service.project_provider_draft_response(
+            provider_config_service.draft_add_provider(
+                payload.publicConfig,
+                draft_meta=payload.draftMeta,
+                base_hash=payload.baseHash,
+                provider_id=payload.providerId,
+                provider=payload.provider,
+                credential_value=payload.credentialValue,
+            )
         )
     except Exception as exc:  # pragma: no cover - routed below
         _raise_config_http_error(exc)
@@ -245,14 +247,16 @@ def config_draft_update_provider(
     payload: ConfigProviderDraftPayload,
 ) -> dict:
     try:
-        return provider_config_service.draft_update_provider(
-            payload.publicConfig,
-            draft_meta=payload.draftMeta,
-            base_hash=payload.baseHash,
-            provider_id=provider_id,
-            provider=payload.provider,
-            credential_value=payload.credentialValue,
-            route_preview_token=payload.routePreviewToken,
+        return provider_config_service.project_provider_draft_response(
+            provider_config_service.draft_update_provider(
+                payload.publicConfig,
+                draft_meta=payload.draftMeta,
+                base_hash=payload.baseHash,
+                provider_id=provider_id,
+                provider=payload.provider,
+                credential_value=payload.credentialValue,
+                route_preview_token=payload.routePreviewToken,
+            )
         )
     except Exception as exc:  # pragma: no cover - routed below
         _raise_config_http_error(exc)
@@ -264,11 +268,13 @@ def config_draft_delete_provider(
     payload: ConfigProviderDraftPayload,
 ) -> dict:
     try:
-        return provider_config_service.draft_delete_provider(
-            payload.publicConfig,
-            draft_meta=payload.draftMeta,
-            base_hash=payload.baseHash,
-            provider_id=provider_id,
+        return provider_config_service.project_provider_draft_response(
+            provider_config_service.draft_delete_provider(
+                payload.publicConfig,
+                draft_meta=payload.draftMeta,
+                base_hash=payload.baseHash,
+                provider_id=provider_id,
+            )
         )
     except Exception as exc:  # pragma: no cover - routed below
         _raise_config_http_error(exc)
@@ -296,12 +302,14 @@ def config_draft_discover_provider(
     payload: ConfigProviderDiscoveryPayload,
 ) -> dict:
     try:
-        return provider_config_service.discover_draft_provider(
-            payload.publicConfig,
-            draft_meta=payload.draftMeta,
-            base_hash=payload.baseHash,
-            provider_id=provider_id,
-            credential_value=payload.credentialValue,
+        return provider_config_service.project_provider_draft_response(
+            provider_config_service.discover_draft_provider(
+                payload.publicConfig,
+                draft_meta=payload.draftMeta,
+                base_hash=payload.baseHash,
+                provider_id=provider_id,
+                credential_value=payload.credentialValue,
+            )
         )
     except Exception as exc:  # pragma: no cover - routed below
         _raise_config_http_error(exc)
@@ -313,15 +321,17 @@ def config_draft_pin_provider_model(
     payload: ConfigProviderModelPayload,
 ) -> dict:
     try:
-        return provider_config_service.draft_pin_provider_model(
-            payload.publicConfig,
-            draft_meta=payload.draftMeta,
-            base_hash=payload.baseHash,
-            provider_id=provider_id,
-            upstream_id=payload.upstreamId,
-            model_key=payload.modelKey,
-            label=payload.label,
-            overrides=payload.overrides,
+        return provider_config_service.project_provider_draft_response(
+            provider_config_service.draft_pin_provider_model(
+                payload.publicConfig,
+                draft_meta=payload.draftMeta,
+                base_hash=payload.baseHash,
+                provider_id=provider_id,
+                upstream_id=payload.upstreamId,
+                model_key=payload.modelKey,
+                label=payload.label,
+                overrides=payload.overrides,
+            )
         )
     except Exception as exc:  # pragma: no cover - routed below
         _raise_config_http_error(exc)
@@ -334,12 +344,14 @@ def config_draft_unpin_provider_model(
     payload: ConfigProviderModelPayload,
 ) -> dict:
     try:
-        return provider_config_service.draft_unpin_provider_model(
-            payload.publicConfig,
-            draft_meta=payload.draftMeta,
-            base_hash=payload.baseHash,
-            provider_id=provider_id,
-            model_key=model_key,
+        return provider_config_service.project_provider_draft_response(
+            provider_config_service.draft_unpin_provider_model(
+                payload.publicConfig,
+                draft_meta=payload.draftMeta,
+                base_hash=payload.baseHash,
+                provider_id=provider_id,
+                model_key=model_key,
+            )
         )
     except Exception as exc:  # pragma: no cover - routed below
         _raise_config_http_error(exc)

@@ -2861,7 +2861,7 @@ def apply_config_workspace(
         _assert_model_delete_workspace_references_allowed(merged, removed_model_id)
     pinned_before = _pinned_provider_model_refs(merged)
     merged = materialize_observed_binding_pins(merged)
-    observed_pins = sorted(_pinned_provider_model_refs(merged) - pinned_before)[:50]
+    observed_pins = sorted(_pinned_provider_model_refs(merged) - pinned_before)
     validate_llm_public_config(merged)
     _validate_git_commit_settings(merged)
     optional_unconfigured_profile_ids = _optional_unconfigured_profile_ids(merged)
@@ -2931,7 +2931,7 @@ def apply_config_workspace(
             "removedModelIds": removed_model_ids,
             "changedModelIds": _changed_model_ids_from_paths(changed_paths, base_for_summary, submitted),
             "observedPinCount": len(observed_pins),
-            "observedPinnedModelRefs": observed_pins,
+            "observedPinnedModelRefs": observed_pins[:50],
             "runtimeConfigReloaded": True,
             "primaryProviderKind": primary_provider.kind,
             "primaryModel": primary_profile.model,
