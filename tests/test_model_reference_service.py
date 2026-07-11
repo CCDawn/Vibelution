@@ -12,6 +12,7 @@ from core.web.services import config_service
 from core.web.services import model_reference_service
 from core.web.services.model_reference_service import (
     ModelReferenceConflictError,
+    apply_model_reference_rewrite_plan,
     assert_model_delete_safe,
     build_model_reference_rewrite_plan,
     rebind_model_references,
@@ -105,8 +106,11 @@ def test_historical_alias_usage_is_reported_but_does_not_block_exit(tmp_path) ->
     assert usage["canRemoveAliases"] is True
 
 
-@pytest.mark.parametrize("status", ["completed", "failed", "cancelled"])
-def test_rewrite_plan_reuses_scanner_status_gate_for_historical_run(tmp_path, status) -> None:
+@pytest.mark.parametrize(
+    "status",
+    ["", "queued", "stopping", "started", "in_progress", "unknown", "completed", "failed", "cancelled"],
+)
+def test_rewrite_plan_treats_non_writable_indexed_run_as_historical(tmp_path, status) -> None:
     index_path = tmp_path / ".runtime" / "runtime-manager" / "work_runs" / "supervised" / "index.json"
     run_path = index_path.parent / "runs" / "run-old.json"
     _write_json(index_path, {"activeRunId": "run-old"})
@@ -128,7 +132,12 @@ def test_rewrite_plan_reuses_scanner_status_gate_for_historical_run(tmp_path, st
 
     assert all(rewrite.path != run_path for rewrite in plan.file_rewrites)
     assert {item["source"] for item in plan.historical_references} == {"historical_supervised_run"}
+    result = apply_model_reference_rewrite_plan(plan)
+    assert result["updatedReferenceCount"] == 0
     assert run_path.read_bytes() == before
+    general_impact = scan_model_references("legacy_model", project_root=tmp_path)
+    if status in {"", "queued", "stopping", "started", "in_progress"}:
+        assert general_impact["liveReferenceCount"] == 1
 
 
 @pytest.mark.parametrize("status", ["active", "running", "paused"])
@@ -152,6 +161,9 @@ def test_rewrite_plan_accepts_only_live_indexed_run_candidates(tmp_path, status)
     )
 
     assert [rewrite.path for rewrite in plan.file_rewrites] == [run_path]
+    result = apply_model_reference_rewrite_plan(plan)
+    assert result["updatedReferenceCount"] == 1
+    assert "relay/gpt-a" in run_path.read_text(encoding="utf-8")
 
 
 def _seed_agent_registry(root, model_id: str, other_model_id: str = "model-b") -> None:
