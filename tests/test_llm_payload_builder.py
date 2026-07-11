@@ -1,3 +1,5 @@
+import copy
+
 from langchain_core.messages import AIMessage, ToolMessage
 import pytest
 
@@ -38,6 +40,35 @@ def make_vllm_qwen_config(**kwargs):
     }
     values.update(kwargs)
     return make_config(**values)
+
+
+def test_disabled_prompt_cache_strips_cache_control_without_mutating_messages():
+    messages = [{
+        "role": "system",
+        "content": [
+            {"type": "text", "text": "stable", "cache_control": {"type": "ephemeral"}},
+            {"type": "text", "text": "dynamic"},
+        ],
+    }]
+    original = copy.deepcopy(messages)
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "local",
+            "llm.providers.default.requires_api_key": False,
+            "llm.providers.default.base_url": "http://localhost:8000/v1",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "qwen-32b-awq",
+            "llm.profiles.primary.prompt_cache.mode": "disabled",
+        }
+    )
+
+    payload = LLMClient(config=config, backend=lambda value: value)._build_payload(messages)
+
+    assert payload["messages"][0]["content"] == [
+        {"type": "text", "text": "stable"},
+        {"type": "text", "text": "dynamic"},
+    ]
+    assert messages == original
 
 
 @pytest.mark.parametrize("transport", ["chat_completions", "responses"])

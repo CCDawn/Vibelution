@@ -623,6 +623,31 @@ def _content_cache_marker_count(content: Any) -> int:
     )
 
 
+def _strip_cache_control_from_content_copy(content: Any) -> Any:
+    if not isinstance(content, list):
+        return content
+    normalized: list[Any] = []
+    for block in content:
+        if isinstance(block, dict):
+            copied = dict(block)
+            copied.pop("cache_control", None)
+            normalized.append(copied)
+        else:
+            normalized.append(block)
+    return normalized
+
+
+def _strip_cache_control_from_messages_copy(
+    messages: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    normalized: List[Dict[str, Any]] = []
+    for message in messages:
+        copied = dict(message)
+        copied["content"] = _strip_cache_control_from_content_copy(copied.get("content"))
+        normalized.append(copied)
+    return normalized
+
+
 def _message_cache_marker_count(message: Dict[str, Any]) -> int:
     return _content_cache_marker_count(message.get("content"))
 
@@ -977,6 +1002,20 @@ def compose_runtime_wire_payload(
         )
 
     payload = dict(wire_payload.body)
+    payload_messages = payload.get("messages")
+    if isinstance(payload_messages, list) and all(
+        isinstance(item, dict) for item in payload_messages
+    ):
+        normalized_messages = [dict(item) for item in payload_messages]
+        if prompt_cache_mode == "disabled":
+            normalized_messages = _strip_cache_control_from_messages_copy(normalized_messages)
+        elif prompt_cache_mode == "explicit_cache_control":
+            normalized_messages = _apply_qwen_explicit_prompt_cache_markers(
+                normalized_messages,
+                actions,
+                marker_limit=4,
+            )
+        payload["messages"] = normalized_messages
     payload["model"] = adapter.litellm_model_name()
     payload["timeout"] = _provider_timeout(profile)
     payload["api_key"] = build_input.api_key
