@@ -326,35 +326,37 @@ Expected: PASS; visual boundary moves to VUI while payloads, leave guard, valida
 - [ ] **Step 1: Write the failing matrix test**
 
     const paths = ["/supervised-evolution", "/self-evolution", "/config"];
-    const scenarios = WORKBENCH_VISUAL_SCENARIOS.filter((scenario) => paths.includes(scenario.path));
-    expect(scenarios).toHaveLength(18);
+    const phase3bScenarios = WORKBENCH_VISUAL_SCENARIOS.filter((scenario) => scenario.id.startsWith("phase3b-"));
+    expect(phase3bScenarios).toHaveLength(18);
     expect(WORKBENCH_VISUAL_SCENARIOS).toHaveLength(60);
     for (const path of paths) {
-      expect(scenarios.filter((scenario) => scenario.path === path)).toHaveLength(6);
+      expect(phase3bScenarios.filter((scenario) => scenario.path === path)).toHaveLength(6);
     }
+    expect(WORKBENCH_VISUAL_SCENARIOS.some((scenario) => scenario.id === "supervised-light-default-standard-blocker")).toBe(true);
+    expect(WORKBENCH_VISUAL_SCENARIOS.some((scenario) => scenario.id === "config-light-default-standard-destructive")).toBe(true);
 
 - [ ] **Step 2: Verify RED**
 
     npm --prefix web exec vitest run src/visual-regression/workbenchVisualMatrix.test.ts
 
-Expected: FAIL because the current matrix has 42 scenarios and no /self-evolution Phase 3B coverage.
+Expected: FAIL because the current matrix has 42 scenarios, no phase3b-prefixed scenarios, and no /self-evolution Phase 3B coverage.
 
 - [ ] **Step 3: Add route focus and scenarios**
 
     const PHASE_3B_ROUTE_FOCUS = [
       {
         path: "/supervised-evolution",
-        id: "supervised-evolution",
+        id: "phase3b-supervised-evolution",
         focus: ["live run action hierarchy", "disabled and blocker state"],
       },
       {
         path: "/self-evolution",
-        id: "self-evolution",
+        id: "phase3b-self-evolution",
         focus: ["track workspace hierarchy", "conversation and control separation"],
       },
       {
         path: "/config",
-        id: "config",
+        id: "phase3b-config",
         focus: ["dirty/save status clarity", "dense form and model-library controls"],
       },
     ] as const;
@@ -469,5 +471,6 @@ Expected: project memory records the local-main SHA and validation; only the cle
 - **Type consistency:** VStringSelectOption, VStringSelectProps, resolveStringSelectChange, value, and onValueChange are defined in Task 1 and used with the same spelling later.
 - **Reuse decision:** ADAPT current VUI with one string-select bridge; do not install dependencies or import HeroUI in routes.
 - **Unresolved risk:** VInput/VTextarea event parity and VSelect representation must prove RED then GREEN before route migration. Active work can block Launcher refresh.
+- **Task 4 contract correction:** The 18 Phase 3B stable scenarios are identified by the phase3b ID prefix. The existing four target-route blocker/error/destructive scenarios remain in the 60-scenario total and are intentionally excluded from the 18-scenario new-coverage count.
 - **Task graph:** ccdawn-task-splitting must determine the execution partition before implementation.
 - **Recommended next stage:** ccdawn-task-splitting, then execute in the named Phase 3B worktree.
