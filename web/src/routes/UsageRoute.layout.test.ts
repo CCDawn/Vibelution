@@ -96,4 +96,19 @@ describe("UsageRoute layout contract", () => {
     expect(styles.usageRowWide).toContain("max-[620px]:grid-cols-[minmax(0,1fr)]");
     expect(styles.detailRow).toContain("max-[520px]:grid-cols-[minmax(0,1fr)]");
   });
+
+  it("distinguishes pending rollups from loaded zero values", () => {
+    expect(routeSource).toContain("deriveQueryPresentation");
+    expect(routeSource).toContain("<VLoadingValue");
+    expect(routeSource).not.toContain("function rollupOrEmpty");
+    expect(routeSource).not.toContain("const allTime = rollupOrEmpty");
+    expect(routeSource).toContain('usagePresentation === "initial-loading"');
+    expect(routeSource).toContain('usagePresentation === "refreshing"');
+  });
+
+  it("reserves stable metric heights while values load", () => {
+    expect(styles.heroMetric).toContain("grid min-h-[76px]");
+    expect(styles.overviewStat).toContain("grid min-h-[58px]");
+    expect(styles.sourceTile).toContain("grid min-h-[50px]");
+  });
 });

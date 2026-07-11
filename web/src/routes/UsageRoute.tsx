@@ -5,7 +5,8 @@ import { fetchJson } from "../api/client";
 import { queryKeys } from "../api/queryKeys";
 import type { TokenUsageBreakdownItem, TokenUsageRollup, UsageSource, UsageSummaryResponse } from "../api/types";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
-import { VIconButton, VRouteHeader, VStatusStrip } from "../components/vui";
+import { deriveQueryPresentation } from "../app/queryPresentation";
+import { VIconButton, VLoadingValue, VRouteHeader, VStateSurface, VStatusStrip } from "../components/vui";
 import { useAppI18n } from "../i18n/useAppI18n";
 import styles from "./UsageRoute.styles";
 
@@ -75,10 +76,6 @@ function sourceLabel(source: UsageSource, lang: "zh" | "en") {
   return String(source || "-").replaceAll("_", " ");
 }
 
-function rollupOrEmpty(rollup: TokenUsageRollup | undefined): TokenUsageRollup {
-  return rollup ?? EMPTY_ROLLUP;
-}
-
 function sourceCount(rollup: TokenUsageRollup, source: UsageSource) {
   if (source === "provider_usage") {
     return rollup.observedCallCount;
@@ -106,6 +103,10 @@ function sourceClassName(source: UsageSource) {
     return `${styles.sourceTile} ${styles.sourceTileMissing}`;
   }
   return `${styles.sourceTile} ${styles.sourceTileEmpty}`;
+}
+
+function usageValue(loading: boolean, value: number | undefined, loadingLabel: string) {
+  return loading ? <VLoadingValue label={loadingLabel} /> : numberText(value);
 }
 
 function renderUsageRow(labelText: string, value: number, total: number, detail: string) {
@@ -152,17 +153,26 @@ export function UsageRoute() {
   const summary = usageQuery.data;
   const globalTokenUsage = summary?.globalTokenUsage;
   const lastTokenUsage = summary?.lastTokenUsage;
-  const allTime = rollupOrEmpty(globalTokenUsage?.allTime);
-  const today = rollupOrEmpty(globalTokenUsage?.today);
-  const last7Days = rollupOrEmpty(globalTokenUsage?.last7Days);
-  const sessionUsage = rollupOrEmpty(summary?.sessionTokenUsage);
-  const agentUsage = rollupOrEmpty(summary?.agentTokenUsage);
-  const scopeUsage = rollupOrEmpty(summary?.scopeTokenUsage);
+  const usagePresentation = deriveQueryPresentation({
+    hasData: Boolean(summary),
+    isError: usageQuery.isError,
+    isFetching: usageQuery.isFetching,
+    isPending: usageQuery.isPending,
+  });
+  const initialUsageLoading = usagePresentation === "initial-loading";
+  const allTime = globalTokenUsage?.allTime;
+  const today = globalTokenUsage?.today;
+  const last7Days = globalTokenUsage?.last7Days;
+  const sessionUsage = summary?.sessionTokenUsage;
+  const agentUsage = summary?.agentTokenUsage;
+  const scopeUsage = summary?.scopeTokenUsage;
+  const loadedRollup = (rollup: TokenUsageRollup | undefined) => rollup ?? EMPTY_ROLLUP;
+  const allTimeLoaded = loadedRollup(allTime);
   const sessionRollupLabel = summary?.rollupFilters?.sessionId || "-";
   const agentRollupLabel = summary?.rollupFilters?.agentId || "-";
-  const totalTokens = allTime.totalTokens;
+  const totalTokens = allTimeLoaded.totalTokens;
   const lastSource = lastTokenUsage?.source ?? "not_called";
-  const observedRatio = allTime.callCount > 0 ? allTime.observedCallCount / allTime.callCount : 0;
+  const observedRatio = allTimeLoaded.callCount > 0 ? allTimeLoaded.observedCallCount / allTimeLoaded.callCount : 0;
   const refresh = () => {
     void queryClient.invalidateQueries({ queryKey: queryKeys.usageSummary("global") });
   };
@@ -173,7 +183,7 @@ export function UsageRoute() {
   );
 
   return (
-    <section className={styles.page} aria-busy={usageQuery.isPending && !summary}>
+    <section className={styles.page} aria-busy={initialUsageLoading}>
       <VRouteHeader
         className={styles.header}
         eyebrow="Token"
@@ -184,7 +194,7 @@ export function UsageRoute() {
             className={styles.headerMeta}
             items={[
               { label: label(lang, "来源", "Source"), value: sourceLabel(lastSource, lang), tone: lastSource === "provider_usage" ? "success" : lastSource === "missing" ? "warning" : "info" },
-              { label: label(lang, "刷新", "Refresh"), value: usageQuery.isFetching ? label(lang, "同步中", "Syncing") : label(lang, "自动", "Auto"), tone: usageQuery.isError ? "danger" : "neutral" },
+              { label: label(lang, "刷新", "Refresh"), value: usagePresentation === "refreshing" ? label(lang, "同步中", "Syncing") : label(lang, "自动", "Auto"), tone: usageQuery.isError ? "danger" : "neutral" },
               { label: label(lang, "账本", "Ledger"), value: summary?.diagnostics?.source ?? "usage_ledger", tone: "info" },
             ]}
           />
@@ -194,29 +204,29 @@ export function UsageRoute() {
       <div className={styles.overviewBand}>
         <section className={styles.heroMetric}>
           <span>{label(lang, "全局累计", "All time")}</span>
-          <strong>{numberText(allTime.totalTokens)}</strong>
-          <small>{allTime.callCount} {label(lang, "次调用", "calls")}</small>
+          <strong>{usageValue(initialUsageLoading, allTime?.totalTokens, label(lang, "正在加载全局累计", "Loading all-time usage"))}</strong>
+          <small>{usageValue(initialUsageLoading, allTime?.callCount, label(lang, "正在加载调用次数", "Loading call count"))} {label(lang, "次调用", "calls")}</small>
         </section>
         <div className={styles.overviewStats}>
           <section className={styles.overviewStat}>
             <span>{label(lang, "今日", "Today")}</span>
-            <strong>{numberText(today.totalTokens)}</strong>
-            <small>{numberText(today.inputTokens)} / {numberText(today.outputTokens)}</small>
+            <strong>{usageValue(initialUsageLoading, today?.totalTokens, label(lang, "正在加载今日用量", "Loading today's usage"))}</strong>
+            <small>{usageValue(initialUsageLoading, today?.inputTokens, label(lang, "正在加载今日输入", "Loading today's input"))} / {usageValue(initialUsageLoading, today?.outputTokens, label(lang, "正在加载今日输出", "Loading today's output"))}</small>
           </section>
           <section className={styles.overviewStat}>
             <span>{label(lang, "最近七日", "Last 7 days")}</span>
-            <strong>{numberText(last7Days.totalTokens)}</strong>
-            <small>{numberText(last7Days.reasoningOutputTokens)} {label(lang, "推理输出", "reasoning")}</small>
+            <strong>{usageValue(initialUsageLoading, last7Days?.totalTokens, label(lang, "正在加载七日用量", "Loading seven-day usage"))}</strong>
+            <small>{usageValue(initialUsageLoading, last7Days?.reasoningOutputTokens, label(lang, "正在加载推理输出", "Loading reasoning output"))} {label(lang, "推理输出", "reasoning")}</small>
           </section>
           <section className={styles.overviewStat}>
             <span>{label(lang, "最近一次", "Latest")}</span>
-            <strong>{numberText(lastTokenUsage?.totalTokens)}</strong>
+            <strong>{usageValue(initialUsageLoading, lastTokenUsage?.totalTokens, label(lang, "正在加载最近用量", "Loading latest usage"))}</strong>
             <small>{formatTimestamp(lastTokenUsage?.recordedAt, lang)}</small>
           </section>
         </div>
       </div>
 
-      {usageQuery.isError ? (
+      {usagePresentation === "error-with-data" || usagePresentation === "error-empty" ? (
         <p className={styles.errorState}>
           {usageQuery.error instanceof Error ? usageQuery.error.message : label(lang, "用量摘要读取失败。", "Usage summary failed to load.")}
         </p>
@@ -230,22 +240,24 @@ export function UsageRoute() {
                 <p className={styles.panelEyebrow}>{label(lang, "可信度", "Reliability")}</p>
                 <h2>{label(lang, "Token 构成", "Token composition")}</h2>
               </div>
-              <span className={styles.countPill}>{percentText(observedRatio)}</span>
+              <span className={styles.countPill}>{initialUsageLoading ? <VLoadingValue label={label(lang, "正在加载可信度", "Loading reliability")} /> : percentText(observedRatio)}</span>
             </div>
-            <div className={styles.sourceGrid}>
+            {initialUsageLoading ? (
+              <VStateSurface tone="loading" title={label(lang, "正在加载 Token 构成", "Loading token composition")} skeletonLines={3} />
+            ) : <><div className={styles.sourceGrid}>
               {SOURCE_KEYS.map((source) => (
                 <section key={source} className={sourceClassName(source)}>
                   <span>{sourceLabel(source, lang)}</span>
-                  <strong>{numberText(sourceCount(allTime, source))}</strong>
+                  <strong>{usageValue(initialUsageLoading, sourceCount(allTimeLoaded, source), label(lang, "正在加载来源计数", "Loading source count"))}</strong>
                 </section>
               ))}
             </div>
             <div className={styles.usageList}>
-              {renderUsageRow(label(lang, "输入", "Input"), allTime.inputTokens, totalTokens, label(lang, "prompt", "prompt"))}
-              {renderUsageRow(label(lang, "缓存输入", "Cached input"), allTime.cachedInputTokens, allTime.inputTokens, percentText(allTime.cacheHitRate))}
-              {renderUsageRow(label(lang, "输出", "Output"), allTime.outputTokens, totalTokens, label(lang, "answer", "answer"))}
-              {renderUsageRow(label(lang, "推理输出", "Reasoning output"), allTime.reasoningOutputTokens, totalTokens, "reasoningOutputTokens")}
-            </div>
+              {renderUsageRow(label(lang, "输入", "Input"), allTimeLoaded.inputTokens, totalTokens, label(lang, "prompt", "prompt"))}
+              {renderUsageRow(label(lang, "缓存输入", "Cached input"), allTimeLoaded.cachedInputTokens, allTimeLoaded.inputTokens, percentText(allTimeLoaded.cacheHitRate))}
+              {renderUsageRow(label(lang, "输出", "Output"), allTimeLoaded.outputTokens, totalTokens, label(lang, "answer", "answer"))}
+              {renderUsageRow(label(lang, "推理输出", "Reasoning output"), allTimeLoaded.reasoningOutputTokens, totalTokens, "reasoningOutputTokens")}
+            </div></>}
           </section>
 
           <section className={styles.rollupPanel}>
@@ -262,33 +274,35 @@ export function UsageRoute() {
                 onPress={refresh}
               />
             </div>
-            <div className={styles.rollupGrid}>
+            {initialUsageLoading ? (
+              <VStateSurface tone="loading" title={label(lang, "正在加载计数概览", "Loading counting overview")} skeletonLines={3} />
+            ) : <div className={styles.rollupGrid}>
               <div className={`${styles.usageRow} ${styles.usageRowWide}`}>
                 <span>{label(lang, "当前范围", "Current scope")}</span>
-                <strong>{numberText(scopeUsage.totalTokens)}</strong>
+                <strong>{usageValue(initialUsageLoading, scopeUsage?.totalTokens, label(lang, "正在加载范围用量", "Loading scope usage"))}</strong>
                 <code>{summary?.scope ?? "global"}</code>
               </div>
               <div className={`${styles.usageRow} ${styles.usageRowWide}`}>
                 <span>{label(lang, "最近会话", "Latest session")}</span>
-                <strong>{numberText(sessionUsage.totalTokens)}</strong>
+                <strong>{usageValue(initialUsageLoading, sessionUsage?.totalTokens, label(lang, "正在加载会话用量", "Loading session usage"))}</strong>
                 <code>{sessionRollupLabel}</code>
               </div>
               <div className={`${styles.usageRow} ${styles.usageRowWide}`}>
                 <span>{label(lang, "最近 Agent", "Latest agent")}</span>
-                <strong>{numberText(agentUsage.totalTokens)}</strong>
+                <strong>{usageValue(initialUsageLoading, agentUsage?.totalTokens, label(lang, "正在加载 Agent 用量", "Loading agent usage"))}</strong>
                 <code>{agentRollupLabel}</code>
               </div>
               <div className={`${styles.usageRow} ${styles.usageRowWide}`}>
                 <span>{label(lang, "上下文窗口", "Context window")}</span>
-                <strong>{numberText(summary?.modelContextWindow)}</strong>
+                <strong>{usageValue(initialUsageLoading, summary?.modelContextWindow, label(lang, "正在加载上下文窗口", "Loading context window"))}</strong>
                 <code><Gauge size={13} /> window</code>
               </div>
               <div className={`${styles.usageRow} ${styles.usageRowWide}`}>
                 <span>{label(lang, "延迟累计", "Latency total")}</span>
-                <strong>{numberText(allTime.latencyMs)} ms</strong>
+                <strong>{usageValue(initialUsageLoading, allTime?.latencyMs, label(lang, "正在加载延迟", "Loading latency"))} ms</strong>
                 <code><Activity size={13} /> api</code>
               </div>
-            </div>
+            </div>}
           </section>
         </div>
 
@@ -303,7 +317,9 @@ export function UsageRoute() {
               {summary?.diagnostics?.schemaVersion ?? 1}
             </span>
           </div>
-          <div className={styles.detailGrid}>
+          {initialUsageLoading ? (
+            <VStateSurface tone="loading" title={label(lang, "正在加载最近记录", "Loading latest record")} skeletonLines={3} />
+          ) : <><div className={styles.detailGrid}>
             <div className={styles.detailRow}>
               <span>provider / model</span>
               <strong>{[lastTokenUsage?.provider, lastTokenUsage?.model].filter(Boolean).join(" / ") || "-"}</strong>
@@ -325,7 +341,7 @@ export function UsageRoute() {
               <strong>{numberText(summary?.diagnostics?.skippedRecordCount)}</strong>
             </div>
           </div>
-          {renderBreakdownList(summary?.breakdowns?.models ?? [], emptyBreakdownLabel)}
+          {renderBreakdownList(summary?.breakdowns?.models ?? [], emptyBreakdownLabel)}</>}
         </aside>
       </div>
     </section>
