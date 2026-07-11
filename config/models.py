@@ -487,6 +487,11 @@ class LLMConfig(BaseModel):
 
     @model_validator(mode="after")
     def ensure_defaults(self) -> "LLMConfig":
+        if self.schema_version == 2:
+            if not self.providers:
+                raise ValueError("llm.providers must not be empty in schema v2")
+            if not self.profiles:
+                raise ValueError("llm.profiles must not be empty in schema v2")
         if not self.providers:
             self.providers["default"] = ProviderConfig(
                 provider_id="default",
