@@ -17,7 +17,7 @@ import {
   ConfigModelOption,
   ConfigProviderPresetOption,
 } from "../api/types";
-import { VButton, VNativeInput, VNativeSelect, VNativeTextarea } from "../components/vui";
+import { VButton, VCheckbox, VInput, VPanelHeader, VStringSelect, VSurface, VTextarea } from "../components/vui";
 import {
   MODEL_CONTRACT_OPTIONS,
   MODEL_PROMPT_CACHE_MODE_OPTIONS,
@@ -129,14 +129,13 @@ export function ConfigModelLibraryPanel({
   imageInputStatusLabel,
 }: ConfigModelLibraryPanelProps) {
   return (
-    <section id="config-models" className={`${styles.sectionSurface} ${styles.modelLibrarySection}`}>
-      <div className={styles.sectionHeader}>
-        <div>
-          <p className={styles.eyebrow}>{eyebrow}</p>
-          <h2 className={styles.sectionTitle}>{copy.modelsTitle}</h2>
-        </div>
-        <Blocks size={16} className={styles.sectionIcon} />
-      </div>
+    <VSurface as="section" id="config-models" className={`${styles.sectionSurface} ${styles.modelLibrarySection}`} padding="none">
+      <VPanelHeader
+        className={styles.sectionHeader}
+        eyebrow={eyebrow}
+        title={copy.modelsTitle}
+        actions={<Blocks size={16} className={styles.sectionIcon} />}
+      />
       <p className={styles.sectionText} title={copy.modelsBody}>
         {copy.modelsBodyShort}
       </p>
@@ -154,18 +153,17 @@ export function ConfigModelLibraryPanel({
       <div className={styles.modelLibraryTestBar}>
         <label className={`${styles.field} ${styles.modelLibraryTestSelect}`}>
           <span>{copy.modelTestSelect}</span>
-          <VNativeSelect
+          <VStringSelect
+            ariaLabel={copy.modelTestSelect}
             value={selectedModelTestId}
-            disabled={structuredActionsDisabled || !modelOptions.length}
-            onChange={(event) => setSelectedModelTestId(event.target.value)}
-          >
-            {modelOptions.length ? null : <option value="">{copy.modelTestPlaceholder}</option>}
-            {modelOptions.map((option) => (
-              <option key={option.model_id} value={option.model_id}>
-                {option.label || option.model || option.model_id}
-              </option>
-            ))}
-          </VNativeSelect>
+            isDisabled={structuredActionsDisabled || !modelOptions.length}
+            placeholder={copy.modelTestPlaceholder}
+            options={modelOptions.map((option) => ({
+              value: option.model_id,
+              label: option.label || option.model || option.model_id,
+            }))}
+            onValueChange={setSelectedModelTestId}
+          />
         </label>
         <VButton
           type="button"
@@ -235,33 +233,36 @@ export function ConfigModelLibraryPanel({
             <div className={styles.formGridWide}>
               <label className={styles.field}>
                 <span>{copy.providerVendor}</span>
-                <VNativeSelect value={selectedProviderVendorId} onChange={(event) => applyProviderVendor(event.target.value)}>
-                  <option value="">{copy.customEntry}</option>
-                  {providerVendorGroups.map((group) => (
-                    <option key={group.id} value={group.id}>
-                      {group.label}
-                    </option>
-                  ))}
-                </VNativeSelect>
+                <VStringSelect
+                  ariaLabel={copy.providerVendor}
+                  value={selectedProviderVendorId}
+                  options={[
+                    { value: "", label: copy.customEntry },
+                    ...providerVendorGroups.map((group) => ({ value: group.id, label: group.label })),
+                  ]}
+                  onValueChange={applyProviderVendor}
+                />
               </label>
               <label className={styles.field}>
                 <span>{copy.providerTemplate}</span>
-                <VNativeSelect
+                <VStringSelect
+                  ariaLabel={copy.providerTemplate}
                   value={modelEditor.provider_template_id}
-                  disabled={!selectedProviderVendorTemplates.length}
-                  onChange={(event) => applyProviderTemplate(event.target.value)}
-                >
-                  <option value="">{copy.providerTemplatePlaceholder}</option>
-                  {selectedProviderVendorTemplates.map((template: ConfigProviderPresetOption) => (
-                    <option key={template.provider_preset_id} value={template.provider_preset_id}>
-                      {template.label}
-                    </option>
-                  ))}
-                </VNativeSelect>
+                  isDisabled={!selectedProviderVendorTemplates.length}
+                  placeholder={copy.providerTemplatePlaceholder}
+                  options={[
+                    { value: "", label: copy.providerTemplatePlaceholder },
+                    ...selectedProviderVendorTemplates.map((template: ConfigProviderPresetOption) => ({
+                      value: template.provider_preset_id,
+                      label: template.label,
+                    })),
+                  ]}
+                  onValueChange={applyProviderTemplate}
+                />
               </label>
               <label className={styles.field}>
                 <span>{copy.modelId}</span>
-                <VNativeInput
+                <VInput
                   value={modelEditor.model_id}
                   onChange={(event) => setModelEditor((current) => ({ ...current, model_id: event.target.value }))}
                   disabled={modelEditor.mode === "edit"}
@@ -270,33 +271,29 @@ export function ConfigModelLibraryPanel({
               </label>
               <label className={styles.field}>
                 <span>{copy.label}</span>
-                <VNativeInput value={modelEditor.label} onChange={(event) => setModelEditor((current) => ({ ...current, label: event.target.value }))} />
+                <VInput value={modelEditor.label} onChange={(event) => setModelEditor((current) => ({ ...current, label: event.target.value }))} />
               </label>
               <label className={styles.field}>
                 <span>{copy.modelName}</span>
-                <VNativeInput value={modelEditor.model} onChange={(event) => setModelEditor((current) => ({ ...current, model: event.target.value }))} />
+                <VInput value={modelEditor.model} onChange={(event) => setModelEditor((current) => ({ ...current, model: event.target.value }))} />
               </label>
               <label className={styles.field}>
                 <span>{copy.providerKind}</span>
-                <VNativeSelect
+                <VStringSelect
+                  ariaLabel={copy.providerKind}
                   value={modelEditor.provider.kind}
-                  onChange={(event) =>
+                  options={PROVIDER_KIND_OPTIONS.map((option) => ({ value: option.value, label: option.label }))}
+                  onValueChange={(nextValue) =>
                     setModelEditor((current) => ({
                       ...current,
-                      provider: { ...current.provider, kind: event.target.value },
+                      provider: { ...current.provider, kind: nextValue },
                     }))
                   }
-                >
-                  {PROVIDER_KIND_OPTIONS.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </VNativeSelect>
+                />
               </label>
               <label className={styles.field}>
                 <span>{copy.baseUrl}</span>
-                <VNativeInput
+                <VInput
                   value={modelEditor.provider.base_url}
                   onChange={(event) =>
                     setModelEditor((current) => ({
@@ -308,7 +305,7 @@ export function ConfigModelLibraryPanel({
               </label>
               <label className={styles.field}>
                 <span>{copy.modelKeyInput}</span>
-                <VNativeInput
+                <VInput
                   type="password"
                   value={modelEditor.api_key}
                   onChange={(event) => setModelEditor((current) => ({ ...current, api_key: event.target.value }))}
@@ -335,21 +332,17 @@ export function ConfigModelLibraryPanel({
               {discoveredModels.length ? (
                 <label className={`${styles.field} ${styles.profileTableSelect}`}>
                   <span>{copy.discoveredModel}</span>
-                  <VNativeSelect
+                  <VStringSelect
+                    ariaLabel={copy.discoveredModel}
                     value={selectedDiscoveredModelId}
-                    onChange={(event) => {
-                      const selected = discoveredModels.find((item) => item.id === event.target.value);
+                    options={discoveredModels.map((model) => ({ value: model.id, label: model.label || model.id }))}
+                    onValueChange={(nextValue) => {
+                      const selected = discoveredModels.find((item) => item.id === nextValue);
                       if (selected) {
                         applyDiscoveredModel(selected);
                       }
                     }}
-                  >
-                    {discoveredModels.map((model) => (
-                      <option key={model.id} value={model.id}>
-                        {model.label || model.id}
-                      </option>
-                    ))}
-                  </VNativeSelect>
+                  />
                 </label>
               ) : null}
               {modelDiscoveryError ? (
@@ -380,25 +373,21 @@ export function ConfigModelLibraryPanel({
                 </label>
                 <label className={styles.field}>
                   <span>{copy.compatMode}</span>
-                  <VNativeSelect
+                  <VStringSelect
+                    ariaLabel={copy.compatMode}
                     value={modelEditor.provider.compat_mode}
-                    onChange={(event) =>
+                    options={PROVIDER_COMPAT_MODE_OPTIONS.map((option) => ({ value: option.value, label: option.label }))}
+                    onValueChange={(nextValue) =>
                       setModelEditor((current) => ({
                         ...current,
-                        provider: { ...current.provider, compat_mode: event.target.value },
+                        provider: { ...current.provider, compat_mode: nextValue },
                       }))
                     }
-                  >
-                    {PROVIDER_COMPAT_MODE_OPTIONS.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </VNativeSelect>
+                  />
                 </label>
                 <label className={styles.field}>
                   <span>{copy.providerApi}</span>
-                  <VNativeInput
+                  <VInput
                     value={modelEditor.provider.api}
                     onChange={(event) =>
                       setModelEditor((current) => ({
@@ -410,7 +399,7 @@ export function ConfigModelLibraryPanel({
                 </label>
                 <label className={styles.field}>
                   <span>{copy.contextWindow}</span>
-                  <VNativeInput
+                  <VInput
                     value={modelEditor.provider.context_window}
                     onChange={(event) =>
                       setModelEditor((current) => ({
@@ -422,43 +411,35 @@ export function ConfigModelLibraryPanel({
                 </label>
                 <label className={styles.field}>
                   <span>{copy.transport}</span>
-                  <VNativeSelect
+                  <VStringSelect
+                    ariaLabel={copy.transport}
                     value={modelEditor.details.transport}
-                    onChange={(event) =>
+                    options={MODEL_TRANSPORT_OPTIONS.map((option) => ({ value: option.value, label: option.label }))}
+                    onValueChange={(nextValue) =>
                       setModelEditor((current) => ({
                         ...current,
-                        details: { ...current.details, transport: event.target.value },
+                        details: { ...current.details, transport: nextValue },
                       }))
                     }
-                  >
-                    {MODEL_TRANSPORT_OPTIONS.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </VNativeSelect>
+                  />
                 </label>
                 <label className={styles.field}>
                   <span>{copy.contract}</span>
-                  <VNativeSelect
+                  <VStringSelect
+                    ariaLabel={copy.contract}
                     value={modelEditor.details.contract}
-                    onChange={(event) =>
+                    options={MODEL_CONTRACT_OPTIONS.map((option) => ({ value: option.value, label: option.label }))}
+                    onValueChange={(nextValue) =>
                       setModelEditor((current) => ({
                         ...current,
-                        details: { ...current.details, contract: event.target.value },
+                        details: { ...current.details, contract: nextValue },
                       }))
                     }
-                  >
-                    {MODEL_CONTRACT_OPTIONS.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </VNativeSelect>
+                  />
                 </label>
                 <label className={styles.field}>
                   <span>{copy.modelProtocol}</span>
-                  <VNativeInput
+                  <VInput
                     value={modelEditor.details.protocol}
                     onChange={(event) =>
                       setModelEditor((current) => ({
@@ -470,7 +451,7 @@ export function ConfigModelLibraryPanel({
                 </label>
                 <label className={styles.field}>
                   <span>{copy.reasoningStateField}</span>
-                  <VNativeInput
+                  <VInput
                     value={modelEditor.details.reasoning_state_field}
                     onChange={(event) =>
                       setModelEditor((current) => ({
@@ -482,47 +463,40 @@ export function ConfigModelLibraryPanel({
                 </label>
                 <label className={styles.field}>
                   <span>{copy.toolCallingMode}</span>
-                  <VNativeSelect
+                  <VStringSelect
+                    ariaLabel={copy.toolCallingMode}
                     value={modelEditor.details.tool_calling_mode}
-                    onChange={(event) =>
+                    options={MODEL_TOOL_CALLING_MODE_OPTIONS.map((option) => ({ value: option.value, label: option.label }))}
+                    onValueChange={(nextValue) =>
                       setModelEditor((current) => ({
                         ...current,
-                        details: { ...current.details, tool_calling_mode: event.target.value },
+                        details: { ...current.details, tool_calling_mode: nextValue },
                       }))
                     }
-                  >
-                    {MODEL_TOOL_CALLING_MODE_OPTIONS.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </VNativeSelect>
+                  />
                 </label>
                 <label className={styles.field}>
                   <span>{copy.promptCacheMode}</span>
-                  <VNativeSelect
+                  <VStringSelect
+                    ariaLabel={copy.promptCacheMode}
                     value={modelEditor.details.prompt_cache_mode}
-                    onChange={(event) =>
+                    options={MODEL_PROMPT_CACHE_MODE_OPTIONS.map((option) => ({ value: option.value, label: option.label }))}
+                    onValueChange={(nextValue) =>
                       setModelEditor((current) => ({
                         ...current,
                         details: {
                           ...current.details,
-                          prompt_cache_mode: event.target.value,
+                          prompt_cache_mode: nextValue,
                           prompt_cache_configured: true,
                         },
                       }))
                     }
-                  >
-                    {MODEL_PROMPT_CACHE_MODE_OPTIONS.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </VNativeSelect>
+                  />
                 </label>
                 <label className={`${styles.field} ${styles.formGridWideSpan}`}>
                   <span>{copy.modelCompat}</span>
-                  <VNativeTextarea
+                  <VTextarea
+                    minRows={3}
                     value={modelEditor.details.compat}
                     onChange={(event) =>
                       setModelEditor((current) => ({
@@ -534,7 +508,7 @@ export function ConfigModelLibraryPanel({
                 </label>
                 <label className={styles.field}>
                   <span>{copy.temperature}</span>
-                  <VNativeInput
+                  <VInput
                     value={modelEditor.details.temperature}
                     onChange={(event) =>
                       setModelEditor((current) => ({
@@ -546,7 +520,7 @@ export function ConfigModelLibraryPanel({
                 </label>
                 <label className={styles.field}>
                   <span>{copy.maxOutputTokens}</span>
-                  <VNativeInput
+                  <VInput
                     value={modelEditor.details.max_output_tokens}
                     onChange={(event) =>
                       setModelEditor((current) => ({
@@ -558,7 +532,7 @@ export function ConfigModelLibraryPanel({
                 </label>
                 <label className={styles.field}>
                   <span>{copy.timeout}</span>
-                  <VNativeInput
+                  <VInput
                     value={modelEditor.details.timeout}
                     onChange={(event) =>
                       setModelEditor((current) => ({
@@ -570,7 +544,7 @@ export function ConfigModelLibraryPanel({
                 </label>
                 <label className={styles.field}>
                   <span>{copy.connectTimeout}</span>
-                  <VNativeInput
+                  <VInput
                     value={modelEditor.details.connect_timeout}
                     onChange={(event) =>
                       setModelEditor((current) => ({
@@ -584,85 +558,82 @@ export function ConfigModelLibraryPanel({
             </details>
 
             <div className={styles.toggleGrid}>
-              <label className={styles.toggleField}>
-                <VNativeInput
-                  type="checkbox"
-                  checked={modelEditor.provider.requires_api_key}
-                  onChange={(event) =>
-                    setModelEditor((current) => ({
-                      ...current,
-                      provider: { ...current.provider, requires_api_key: event.target.checked },
-                    }))
-                  }
-                />
-                <span>{copy.requiresApiKey}</span>
-              </label>
+              <VCheckbox
+                className={styles.toggleField}
+                isSelected={modelEditor.provider.requires_api_key}
+                onChange={(isSelected) =>
+                  setModelEditor((current) => ({
+                    ...current,
+                    provider: { ...current.provider, requires_api_key: isSelected },
+                  }))
+                }
+              >
+                {copy.requiresApiKey}
+              </VCheckbox>
               <label className={styles.field}>
                 <span>{copy.imageInputSupport}</span>
-                <VNativeSelect
+                <VStringSelect
+                  ariaLabel={copy.imageInputSupport}
                   value={modelEditor.details.supports_image_input}
-                  onChange={(event) =>
+                  options={[
+                    { value: "unknown", label: copy.imageInputSupportUnknown },
+                    { value: "supported", label: copy.imageInputSupportSupported },
+                    { value: "unsupported", label: copy.imageInputSupportUnsupported },
+                  ]}
+                  onValueChange={(nextValue) =>
                     setModelEditor((current) => ({
                       ...current,
                       details: {
                         ...current.details,
-                        supports_image_input: event.target.value as ModelDetailsDraft["supports_image_input"],
+                        supports_image_input: nextValue as ModelDetailsDraft["supports_image_input"],
                       },
                     }))
                   }
-                >
-                  <option value="unknown">{copy.imageInputSupportUnknown}</option>
-                  <option value="supported">{copy.imageInputSupportSupported}</option>
-                  <option value="unsupported">{copy.imageInputSupportUnsupported}</option>
-                </VNativeSelect>
-              </label>
-              <label className={styles.toggleField}>
-                <VNativeInput
-                  type="checkbox"
-                  checked={modelEditor.details.strict_compatibility}
-                  onChange={(event) =>
-                    setModelEditor((current) => ({
-                      ...current,
-                      details: { ...current.details, strict_compatibility: event.target.checked },
-                    }))
-                  }
                 />
-                <span>{copy.strictCompatibility}</span>
               </label>
-              <label className={styles.toggleField}>
-                <VNativeInput
-                  type="checkbox"
-                  checked={modelEditor.details.streaming}
-                  onChange={(event) =>
-                    setModelEditor((current) => ({
-                      ...current,
-                      details: { ...current.details, streaming: event.target.checked },
-                    }))
-                  }
-                />
-                <span>{copy.streaming}</span>
-              </label>
-              <label className={styles.toggleField}>
-                <VNativeInput
-                  type="checkbox"
-                  checked={modelEditor.details.discovery_enabled}
-                  onChange={(event) =>
-                    setModelEditor((current) => ({
-                      ...current,
-                      details: { ...current.details, discovery_enabled: event.target.checked },
-                    }))
-                  }
-                />
-                <span>{copy.discoveryEnabled}</span>
-              </label>
-              <label className={styles.toggleField}>
-                <VNativeInput
-                  type="checkbox"
-                  checked={modelEditor.clear_api_key}
-                  onChange={(event) => setModelEditor((current) => ({ ...current, clear_api_key: event.target.checked }))}
-                />
-                <span>{copy.clearSecret}</span>
-              </label>
+              <VCheckbox
+                className={styles.toggleField}
+                isSelected={modelEditor.details.strict_compatibility}
+                onChange={(isSelected) =>
+                  setModelEditor((current) => ({
+                    ...current,
+                    details: { ...current.details, strict_compatibility: isSelected },
+                  }))
+                }
+              >
+                {copy.strictCompatibility}
+              </VCheckbox>
+              <VCheckbox
+                className={styles.toggleField}
+                isSelected={modelEditor.details.streaming}
+                onChange={(isSelected) =>
+                  setModelEditor((current) => ({
+                    ...current,
+                    details: { ...current.details, streaming: isSelected },
+                  }))
+                }
+              >
+                {copy.streaming}
+              </VCheckbox>
+              <VCheckbox
+                className={styles.toggleField}
+                isSelected={modelEditor.details.discovery_enabled}
+                onChange={(isSelected) =>
+                  setModelEditor((current) => ({
+                    ...current,
+                    details: { ...current.details, discovery_enabled: isSelected },
+                  }))
+                }
+              >
+                {copy.discoveryEnabled}
+              </VCheckbox>
+              <VCheckbox
+                className={styles.toggleField}
+                isSelected={modelEditor.clear_api_key}
+                onChange={(isSelected) => setModelEditor((current) => ({ ...current, clear_api_key: isSelected }))}
+              >
+                {copy.clearSecret}
+              </VCheckbox>
             </div>
             <p className={styles.fieldHint}>{copy.deleteModelHint}</p>
 
@@ -814,6 +785,6 @@ export function ConfigModelLibraryPanel({
           </tbody>
         </table>
       </div>
-    </section>
+    </VSurface>
   );
 }

@@ -1,7 +1,7 @@
 import { Database, ExternalLink, RefreshCw, RotateCcw } from "lucide-react";
 
 import type { ConfigWorkspace } from "../api/types";
-import { VButton } from "../components/vui";
+import { VButton, VSection, VSurface } from "../components/vui";
 import type { ConfigCopy } from "./ConfigRoute";
 import styles from "./ConfigOverviewPanel.styles";
 
@@ -29,16 +29,10 @@ export function ConfigOverviewPanel({
   onRestoreEditorText,
 }: ConfigOverviewPanelProps) {
   return (
-    <section id="config-overview" className={styles.sectionSurface}>
-      <div className={styles.sectionHeader}>
-        <div>
-          <p className={styles.eyebrow}>{eyebrow}</p>
-          <h2 className={styles.sectionTitle}>{copy.sourceTitle}</h2>
-        </div>
-        <Database size={16} className={styles.sectionIcon} />
-      </div>
-      <p className={styles.sectionText} title={copy.sourceBody}>{copy.sourceBodyShort}</p>
-      <div className={styles.hashGrid}>
+    <VSurface as="section" id="config-overview" className={styles.sectionSurface} padding="none">
+      <VSection eyebrow={eyebrow} title={copy.sourceTitle} actions={<Database size={16} className={styles.sectionIcon} />}>
+        <p className={styles.sectionText} title={copy.sourceBody}>{copy.sourceBodyShort}</p>
+        <div className={styles.hashGrid}>
         <article className={styles.detailCard}>
           <span>{copy.configPath}</span>
           <code className={styles.hashValue}>{workspace.configPath}</code>
@@ -47,8 +41,8 @@ export function ConfigOverviewPanel({
           <span>{copy.configStatus}</span>
           <strong>{hasPendingApply ? copy.unsavedDraft : copy.syncedDraft}</strong>
         </article>
-      </div>
-      <div className={styles.actionsRow}>
+        </div>
+        <div className={styles.actionsRow}>
         <VButton type="button" className={styles.actionButton} isDisabled={Boolean(busyAction)} onClick={onReloadWorkspace}>
           <RefreshCw size={14} />
           {copy.refresh}
@@ -73,12 +67,13 @@ export function ConfigOverviewPanel({
           <RotateCcw size={14} />
           {copy.resetDraft}
         </VButton>
-      </div>
-      <details className={styles.rawConfigPanel}>
+        </div>
+        <details className={styles.rawConfigPanel}>
         <summary>{copy.rawToml}</summary>
         <p className={styles.helperText}>{copy.rawTomlHint}</p>
         <pre className={styles.rawToml}>{workspace.rawToml}</pre>
-      </details>
-    </section>
+        </details>
+      </VSection>
+    </VSurface>
   );
 }
