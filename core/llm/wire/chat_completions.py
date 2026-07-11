@@ -9,7 +9,11 @@ from typing import Any
 from ..message_projector import message_to_openai_dict
 from ..protocols import WireProtocol
 from ..provider_replay_state import OpaqueReplayItem, endpoint_fingerprint
-from ..reasoning_extractor import ThinkTagStreamParser, extract_reasoning_text
+from ..reasoning_extractor import (
+    REASONING_DELTA_FIELD_CANDIDATES,
+    ThinkTagStreamParser,
+    extract_reasoning_text,
+)
 from ..semantic_messages import (
     ImagePart,
     InvocationScope,
@@ -266,6 +270,7 @@ class _ChatTurnAssembler:
         self.events: list[LLMProtocolEvent] = []
         self.text_by_choice: dict[int, str] = {}
         self.text_item_by_choice: dict[int, str] = {}
+        self.reasoning_by_choice_source: dict[tuple[int, str], str] = {}
         self.tool_accumulators: dict[int, ToolCallAccumulator] = {}
         self.tool_call_ids_by_position: dict[tuple[int, int], str] = {}
         self.started_call_ids: set[str] = set()
@@ -332,15 +337,17 @@ class _ChatTurnAssembler:
     def _delta(self, choice_index: int, delta: Mapping[str, Any]) -> list[LLMProtocolEvent]:
         emitted: list[LLMProtocolEvent] = []
         reasoning = extract_reasoning_text(delta, extract_text_content, include_content_tags=False)
-        if reasoning.text:
+        reasoning_delta = self._reasoning_delta(choice_index, reasoning.source, reasoning.text)
+        if reasoning_delta:
             emitted.append(
                 self._emit(
                     "reasoning_delta",
                     item_id=self._reasoning_item_id(choice_index),
                     channel="reasoning",
                     phase="reasoning",
-                    text=reasoning.text,
+                    text=reasoning_delta,
                     provider_event_type="chat.delta.reasoning",
+                    diagnostic_summary={"reasoningSource": reasoning.source},
                 )
             )
         parser = self.think_parsers.setdefault(choice_index, ThinkTagStreamParser())
@@ -354,6 +361,7 @@ class _ChatTurnAssembler:
                     phase="reasoning",
                     text=split.reasoning_text,
                     provider_event_type="chat.delta.think_tag",
+                    diagnostic_summary={"reasoningSource": "think_tag"},
                 )
             )
         if split.visible_text:
@@ -514,6 +522,7 @@ class _ChatTurnAssembler:
                     phase="reasoning",
                     text=flushed.reasoning_text,
                     provider_event_type="chat.finish.think_tag",
+                    diagnostic_summary={"reasoningSource": "think_tag"},
                 )
             )
         if flushed.visible_text:
@@ -606,3 +615,14 @@ class _ChatTurnAssembler:
 
     def _reasoning_item_id(self, choice_index: int) -> str:
         return f"chat:{self.scope.invocation_id}:choice:{choice_index}:reasoning"
+
+    def _reasoning_delta(self, choice_index: int, source: str, text: str) -> str:
+        leaf_source = source.rsplit(".", 1)[-1]
+        if leaf_source in REASONING_DELTA_FIELD_CANDIDATES:
+            return text
+        key = (choice_index, source)
+        previous = self.reasoning_by_choice_source.get(key, "")
+        self.reasoning_by_choice_source[key] = text
+        if previous and text.startswith(previous):
+            return text[len(previous) :]
+        return text

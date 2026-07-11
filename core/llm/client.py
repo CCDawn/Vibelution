@@ -2000,10 +2000,13 @@ class LLMClient:
                                 text_items_seen.add(item_key)
                                 projected = StreamChunk(type="text_delta", text=event.text)
                             elif event.kind == "reasoning_delta":
+                                reasoning_source = str(
+                                    event.diagnostic_summary.get("reasoningSource") or "canonical"
+                                ).strip()
                                 projected = StreamChunk(
                                     type="reasoning_delta",
                                     text=event.text,
-                                    provider_payload={"reasoning_source": "canonical"},
+                                    provider_payload={"reasoning_source": reasoning_source},
                                 )
                             elif event.kind == "usage_updated":
                                 usage_summary = dict(event.diagnostic_summary)

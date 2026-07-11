@@ -187,3 +187,61 @@ def test_chat_tool_result_encoder_preserves_call_id():
     assert ChatCompletionsWireAdapter().encode_tool_results([result]) == [
         {"role": "tool", "tool_call_id": "call-1", "content": "ok"}
     ]
+
+
+def test_chat_cumulative_reasoning_emits_prefix_deltas_with_bounded_source():
+    decoded = ChatCompletionsWireAdapter().decode_stream(
+        [
+            {"choices": [{"index": 0, "delta": {"reasoning": "先看"}}]},
+            {"choices": [{"index": 0, "delta": {"reasoning": "先看日志"}}]},
+            {"choices": [{"index": 0, "delta": {"reasoning": "先看日志再回答"}}]},
+            {"choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]},
+        ],
+        route=route(),
+        scope=scope(),
+    )
+
+    events = [event for event in decoded if event.kind == "reasoning_delta"]
+
+    assert [event.text for event in events] == ["先看", "日志", "再回答"]
+    assert [dict(event.diagnostic_summary) for event in events] == [
+        {"reasoningSource": "reasoning"},
+        {"reasoningSource": "reasoning"},
+        {"reasoningSource": "reasoning"},
+    ]
+
+
+def test_chat_explicit_reasoning_delta_fields_remain_direct_deltas():
+    decoded = ChatCompletionsWireAdapter().decode_stream(
+        [
+            {"choices": [{"index": 0, "delta": {"reasoning_delta": "A"}}]},
+            {"choices": [{"index": 0, "delta": {"reasoning_delta": "B"}}]},
+            {"choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]},
+        ],
+        route=route(),
+        scope=scope(),
+    )
+
+    events = [event for event in decoded if event.kind == "reasoning_delta"]
+
+    assert [event.text for event in events] == ["A", "B"]
+    assert [event.diagnostic_summary["reasoningSource"] for event in events] == [
+        "reasoning_delta",
+        "reasoning_delta",
+    ]
+
+
+def test_chat_non_prefix_reasoning_replacement_is_emitted_whole():
+    decoded = ChatCompletionsWireAdapter().decode_stream(
+        [
+            {"choices": [{"index": 0, "delta": {"reasoning": "先看日志"}}]},
+            {"choices": [{"index": 0, "delta": {"reasoning": "改查配置"}}]},
+            {"choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]},
+        ],
+        route=route(),
+        scope=scope(),
+    )
+
+    events = [event for event in decoded if event.kind == "reasoning_delta"]
+
+    assert [event.text for event in events] == ["先看日志", "改查配置"]

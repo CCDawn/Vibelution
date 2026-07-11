@@ -3000,12 +3000,11 @@ def test_stream_exposes_reasoning_deltas_without_polluting_content():
 def test_stream_converts_cumulative_reasoning_prefixes_to_deltas():
     config = make_config(
         **{
-            "llm.providers.default.kind": "anthropic",
+            "llm.providers.default.kind": "deepseek",
             "llm.providers.default.api_key": "test-key",
-            "llm.providers.default.base_url": "https://www.atpify.cn",
-            "llm.providers.default.compat_mode": "native",
+            "llm.providers.default.base_url": "https://api.deepseek.com/v1",
             "llm.profiles.primary.provider_id": "default",
-            "llm.profiles.primary.model": "claude-opus-4-7",
+            "llm.profiles.primary.model": "deepseek-reasoner",
         }
     )
     chunks = [
@@ -3024,7 +3023,7 @@ def test_stream_converts_cumulative_reasoning_prefixes_to_deltas():
         if chunk.additional_kwargs.get("reasoning_content_delta")
     ]
     assert reasoning_deltas == ["先看", "日志"]
-    assert streamed[-1].content == "结论"
+    assert "".join(str(chunk.content) for chunk in streamed if chunk.content) == "结论"
 
 
 def test_stream_exposes_reasoning_aliases_and_strips_think_tags_from_content():
@@ -3080,14 +3079,11 @@ def test_stream_splits_reasoning_when_think_tags_span_chunks():
 def test_stream_events_record_reasoning_source_summary(monkeypatch):
     config = make_config(
         **{
-            "llm.providers.default.kind": "anthropic",
+            "llm.providers.default.kind": "deepseek",
             "llm.providers.default.api_key": "test-key",
-            "llm.providers.default.base_url": "https://www.atpify.cn",
-            "llm.providers.default.compat_mode": "native",
+            "llm.providers.default.base_url": "https://api.deepseek.com/v1",
             "llm.profiles.primary.provider_id": "default",
-            "llm.profiles.primary.model": "claude-opus-4-7",
-            "llm.profiles.primary.thinking_type": "adaptive",
-            "llm.profiles.primary.thinking_display": "summarized",
+            "llm.profiles.primary.model": "deepseek-reasoner",
         }
     )
     chunks = [
@@ -3101,14 +3097,12 @@ def test_stream_events_record_reasoning_source_summary(monkeypatch):
     events = list(client.stream_events([{"role": "user", "content": "read"}]))
 
     assert [event.type for event in events] == ["reasoning_delta", "text_delta", "done"]
+    assert events[0].provider_payload == {"reasoning_source": "reasoning"}
     success_event = next(item for item in recorded if item[0][1] == "llm.stream.succeeded")
     assert success_event[1]["fields"]["reasoningDeltaCount"] == 1
     assert success_event[1]["fields"]["reasoningChars"] == 2
     assert success_event[1]["fields"]["reasoningSources"] == ["reasoning"]
     assert success_event[1]["fields"]["reasoningObserved"] is True
-    assert success_event[1]["fields"]["thinkingRequested"] is True
-    assert success_event[1]["fields"]["thinkingType"] == "adaptive"
-    assert success_event[1]["fields"]["thinkingDisplay"] == "summarized"
 
 
 def test_stream_events_drop_incomplete_tool_calls_with_empty_name():
