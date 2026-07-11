@@ -2148,7 +2148,65 @@ def test_config_workspace_discovers_custom_openai_compatible_models(monkeypatch)
     }
 
 
-def test_config_workspace_discovers_custom_public_relay_models(monkeypatch):
+def test_config_workspace_read_never_performs_model_discovery_http(monkeypatch):
+    import tools.Key_Tools as key_tools
+
+    public_config = copy.deepcopy(load_public_config())
+    monkeypatch.setattr(config_service, "load_public_config", lambda: copy.deepcopy(public_config))
+    monkeypatch.setattr(key_tools, "_is_autoglm_search_tool_available", lambda: False)
+    monkeypatch.setattr(
+        httpx.Client,
+        "get",
+        lambda *args, **kwargs: pytest.fail("workspace read performed model discovery HTTP"),
+    )
+    workspace = config_service.get_config_workspace()
+    assert workspace["publicConfig"]
+
+
+def test_v2_config_discovery_delegates_by_canonical_provider_id(monkeypatch, tmp_path):
+    config = {
+        "llm": {
+            "schema_version": 2,
+            "providers": {
+                "lab": {
+                    "service_class": "self_hosted",
+                    "vendor": "custom",
+                    "driver": "openai",
+                    "base_url": "https://models.example/v1",
+                    "credential_ref": "none",
+                    "requires_credential": False,
+                    "discovery": {"adapter": "manual"},
+                    "models": {},
+                }
+            },
+        }
+    }
+    seen = {}
+
+    def fake_discover(public_config, provider_id, **kwargs):
+        seen.update({"public_config": public_config, "provider_id": provider_id, **kwargs})
+        return SimpleNamespace(
+            provider_id="lab",
+            adapter_id="manual",
+            attempted_endpoints=(),
+            discovered_at="2026-07-11T00:00:00+00:00",
+            models=(),
+        )
+
+    monkeypatch.setattr(config_service, "discover_provider_models", fake_discover, raising=False)
+    result = config_service.discover_config_models(config, provider_id="lab", api_key="one-time")
+    assert seen["provider_id"] == "lab"
+    assert seen["credential_override"] == "one-time"
+    assert result["providerId"] == "lab"
+    assert result["adapterId"] == "manual"
+
+
+def test_v2_config_discovery_requires_provider_id() -> None:
+    with pytest.raises(ValueError, match="provider_id is required"):
+        config_service.discover_config_models({"llm": {"schema_version": 2, "providers": {}}})
+
+
+def test_config_workspace_public_relay_discovery_uses_manual_key(monkeypatch):
     public_config = copy.deepcopy(load_public_config())
     seen = {}
 

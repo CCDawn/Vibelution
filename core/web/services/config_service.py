@@ -28,6 +28,7 @@ from config.runtime_capabilities import (
 )
 from core.chat.chat_task_types import trim_lines
 from core.llm import LLMInvocationContext, invoke_llm
+from core.llm.provider_discovery.service import discover_provider_models
 from core.llm.protocol_resolver import resolve_model_protocol
 from config.public_config import (
     CONFIG_PATH,
@@ -2329,12 +2330,41 @@ def _discover_openai_compatible_model_list(
 def discover_config_models(
     public_config: dict[str, Any] | None,
     *,
+    provider_id: str = "",
     draft_meta: dict | None = None,
     provider: dict[str, Any] | None = None,
     model_id: str = "",
     api_key_env: str = "",
     api_key: str = "",
 ) -> dict[str, Any]:
+    submitted = public_config if isinstance(public_config, dict) else {}
+    llm = submitted.get("llm", {}) if isinstance(submitted, dict) else {}
+    if isinstance(llm, dict) and int(llm.get("schema_version") or 1) == 2:
+        canonical_provider_id = str(provider_id or "").strip()
+        if not canonical_provider_id:
+            raise ValueError("provider_id is required for schema v2 model discovery")
+        result = discover_provider_models(
+            submitted,
+            canonical_provider_id,
+            credential_override=str(api_key or ""),
+        )
+        return {
+            "providerId": result.provider_id,
+            "adapterId": result.adapter_id,
+            "attemptedEndpoints": list(result.attempted_endpoints),
+            "discoveredAt": result.discovered_at,
+            "models": [
+                {
+                    "id": model.upstream_id,
+                    "label": model.label,
+                    "capabilities": copy.deepcopy(model.capabilities),
+                    "limits": copy.deepcopy(model.limits),
+                    "metadataSource": model.metadata_source,
+                }
+                for model in result.models
+            ],
+        }
+
     old_public = _with_config_workspace_defaults(load_public_config())
     current = _prepare_submitted_public_config(public_config, old_public)
     current_meta = _normalize_draft_meta(draft_meta)

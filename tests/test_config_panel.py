@@ -48,10 +48,80 @@ from scripts.config_panel import (
 from config.public_config import UNCONFIGURED_MODEL_REF, public_config_hash
 from config.paths import resolve_config_backup_dir, resolve_config_lock_path
 import config.public_config as public_config_module
+from config.llm_security import validate_llm_provider_target
 
 
 PROJECT_ROOT = Path(__file__).parent.parent
 pytestmark = pytest.mark.serial
+
+
+def _v2_provider(**overrides):
+    provider = {
+        "service_class": "self_hosted",
+        "vendor": "custom",
+        "base_url": "https://models.example/v1",
+        "credential_ref": "env:VIBELUTION_LLM_PROVIDER_LAB_API_KEY",
+        "extra_headers": {},
+    }
+    provider.update(overrides)
+    return provider
+
+
+def test_v2_provider_target_allows_local_runtime_private_lan() -> None:
+    validate_llm_provider_target(
+        _v2_provider(
+            service_class="local_runtime",
+            base_url="http://192.168.1.20:11434",
+            credential_ref="none",
+        )
+    )
+
+
+def test_v2_provider_target_rejects_self_hosted_private_lan() -> None:
+    with pytest.raises(ValueError, match="non-public network address"):
+        validate_llm_provider_target(_v2_provider(base_url="https://192.168.1.20/v1"))
+
+
+def test_v2_provider_target_allows_public_relay_after_dns_validation(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "config.llm_security.socket.getaddrinfo",
+        lambda host, port, type=None: [(None, None, None, None, ("8.8.8.8", port))],
+    )
+    validate_llm_provider_target(
+        _v2_provider(service_class="relay", base_url="https://relay.example/v1"),
+        resolve_dns=True,
+    )
+
+
+@pytest.mark.parametrize("field", ["api_key", "api_key_env"])
+def test_v2_provider_target_rejects_inline_legacy_secret_fields(field: str) -> None:
+    with pytest.raises(ValueError, match="must not contain"):
+        validate_llm_provider_target(_v2_provider(**{field: "secret"}))
+
+
+def test_v2_provider_target_rejects_invalid_credential_env_prefix() -> None:
+    with pytest.raises(ValueError, match="approved LLM API key"):
+        validate_llm_provider_target(_v2_provider(credential_ref="env:PATHLIKE_SECRET"))
+
+
+@pytest.mark.parametrize("name", ["authorization", "Proxy-Authorization", "x-api-key", "api-key"])
+def test_v2_provider_target_rejects_sensitive_custom_header(name: str) -> None:
+    with pytest.raises(ValueError, match="credential-bearing"):
+        validate_llm_provider_target(_v2_provider(extra_headers={name: "secret"}))
+
+
+@pytest.mark.parametrize(
+    "headers",
+    [
+        {f"X-Test-{index}": "value" for index in range(17)},
+        {"Bad Header": "value"},
+        {"X" * 65: "value"},
+        {"X-Test": "x" * 513},
+    ],
+)
+def test_v2_provider_target_rejects_bounded_invalid_extra_headers(headers: dict[str, str]) -> None:
+    with pytest.raises(ValueError, match="extra_headers"):
+        validate_llm_provider_target(_v2_provider(extra_headers=headers))
 
 
 def _start_test_config_panel(monkeypatch: pytest.MonkeyPatch, config_path: Path):
@@ -1136,7 +1206,8 @@ def test_save_public_config_strips_runtime_probe_capability_fields(tmp_path):
 def test_build_effective_config_applies_runtime_capability_cache(monkeypatch, tmp_path):
     monkeypatch.setenv("VIBELUTION_MODEL_CAPABILITY_CACHE", str(tmp_path / "model-capabilities.json"))
     public_config = copy.deepcopy(load_public_config())
-    public_config["llm"]["model_library"]["runtime_cached_probe"] = {
+    model_ref = "local/local-vision"
+    public_config["llm"]["model_library"][model_ref] = {
         "provider": _provider(
             "local",
             "http://127.0.0.1:11434/v1",
@@ -1148,10 +1219,10 @@ def test_build_effective_config_applies_runtime_capability_cache(monkeypatch, tm
         "label": "Local Vision",
         "api_key_env": "",
     }
-    public_config["llm"]["profiles"]["primary"] = {"model_ref": "runtime_cached_probe"}
+    public_config["llm"]["profiles"]["primary"] = {"model_ref": model_ref}
 
     record_model_image_input_capability(
-        "runtime_cached_probe",
+        model_ref,
         {
             "supports_image_input": True,
             "capability_status": "supported",
@@ -1162,7 +1233,7 @@ def test_build_effective_config_applies_runtime_capability_cache(monkeypatch, tm
     effective = build_effective_config(public_config)
     profile = effective.llm.get_profile(profile_id="primary")
     assert profile.supports_image_input is True
-    assert "supports_image_input" not in public_config["llm"]["model_library"]["runtime_cached_probe"]
+    assert "supports_image_input" not in public_config["llm"]["model_library"][model_ref]
 
 
 def test_delete_generated_profile_model_leaves_matching_profiles_unchanged():

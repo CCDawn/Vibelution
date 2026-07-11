@@ -61,6 +61,8 @@ _FORBIDDEN_API_KEY_ENV_NAMES = {
 
 _LOCAL_PROVIDER_KINDS = {"local", "ollama", "llamacpp"}
 _LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1"}
+_HEADER_TOKEN_PATTERN = re.compile(r"^[!#$%&'*+.^_`|~0-9A-Za-z-]+$")
+_CREDENTIAL_HEADER_NAMES = {"authorization", "proxy-authorization", "x-api-key", "api-key"}
 _REMOTE_PROVIDER_HOSTS = {
     "aliyun": {"dashscope.aliyuncs.com"},
     "anthropic": {"api.anthropic.com", "www.atpify.cn"},
@@ -91,6 +93,57 @@ def _provider_label(provider: Any) -> str:
     provider_id = str(_read_field(provider, "provider_id", "") or "").strip()
     kind = str(_read_field(provider, "kind", "") or "").strip()
     return provider_id or kind or "provider"
+
+
+def _provider_security_kind(provider: Any) -> str:
+    service_class = str(_read_field(provider, "service_class", "") or "").strip().lower()
+    if not service_class or not _is_schema_v2_provider(provider):
+        return str(_read_field(provider, "kind", "") or "").strip().lower()
+    if service_class == "local_runtime":
+        return "local"
+    if service_class in {"relay", "aggregator", "self_hosted"}:
+        return "relay"
+    return str(_read_field(provider, "vendor", "custom") or "custom").strip().lower()
+
+
+def _is_schema_v2_provider(provider: Any) -> bool:
+    if isinstance(provider, dict):
+        return any(
+            key in provider
+            for key in ("service_class", "credential_ref", "auth_kind", "protocols", "discovery", "models")
+        )
+    return bool(str(_read_field(provider, "credential_ref", "") or "").strip())
+
+
+def _validate_v2_provider_security_fields(provider: Any, *, context: str) -> None:
+    if not _is_schema_v2_provider(provider):
+        return
+    if isinstance(provider, dict):
+        forbidden = sorted(field for field in ("api_key", "api_key_env") if field in provider)
+        if forbidden:
+            raise ValueError(f"{context} must not contain legacy secret fields: {', '.join(forbidden)}")
+    from .llm_credentials import canonicalize_credential_ref
+
+    credential_ref = canonicalize_credential_ref(str(_read_field(provider, "credential_ref", "none") or "none"))
+    if credential_ref.startswith("env:"):
+        validate_llm_api_key_env(
+            credential_ref.removeprefix("env:"),
+            context=f"{context}.credential_ref",
+        )
+    headers = _read_field(provider, "extra_headers", {})
+    if not isinstance(headers, dict):
+        raise ValueError(f"{context}.extra_headers must be a mapping")
+    if len(headers) > 16:
+        raise ValueError(f"{context}.extra_headers cannot contain more than 16 entries")
+    for raw_name, raw_value in headers.items():
+        name = str(raw_name)
+        value = str(raw_value)
+        if not name or len(name) > 64 or not _HEADER_TOKEN_PATTERN.fullmatch(name):
+            raise ValueError(f"{context}.extra_headers contains an invalid header name")
+        if name.lower() in _CREDENTIAL_HEADER_NAMES:
+            raise ValueError(f"{context}.extra_headers must not contain credential-bearing names")
+        if len(value) > 512:
+            raise ValueError(f"{context}.extra_headers contains a value longer than 512 characters")
 
 
 def _is_ip_address(host: str) -> bool:
@@ -188,8 +241,9 @@ def validate_llm_provider_target(provider: Any, *, context: str = "provider", re
     """Validate a provider before it can drive an outbound LLM HTTP request."""
 
     label = _provider_label(provider)
-    kind = str(_read_field(provider, "kind", "") or "").strip().lower()
+    kind = _provider_security_kind(provider)
     base_url = str(_read_field(provider, "base_url", "") or "").strip()
+    _validate_v2_provider_security_fields(provider, context=f"{context}.{label}")
     provider_env = str(_read_field(provider, "api_key_env", "") or "").strip()
     if provider_env:
         validate_llm_api_key_env(provider_env, context=f"{context}.{label}.api_key_env")
@@ -218,7 +272,8 @@ def validate_llm_provider_target(provider: Any, *, context: str = "provider", re
     if _is_ip_address(host):
         if _is_blocked_ip(host):
             raise ValueError(f"{context}.{label}.base_url targets a non-public network address")
-        raise ValueError(f"{context}.{label}.base_url for remote providers must use an approved provider host")
+        if kind != "relay":
+            raise ValueError(f"{context}.{label}.base_url for remote providers must use an approved provider host")
 
     if kind in {"openai_compatible", "relay"}:
         if resolve_dns:
@@ -290,7 +345,7 @@ def coerce_llm_runtime_probe_timeout(provider: Any, connect_timeout: Any, timeou
     """Return a bounded runtime probe timeout, allowing private-LAN local models a longer check."""
 
     default_timeout = coerce_llm_probe_timeout(connect_timeout, timeout)
-    kind = str(_read_field(provider, "kind", "") or "").strip().lower()
+    kind = _provider_security_kind(provider)
     base_url = str(_read_field(provider, "base_url", "") or "").strip()
     if kind not in _LOCAL_PROVIDER_KINDS or not is_llm_local_network_base_url(base_url):
         return default_timeout
