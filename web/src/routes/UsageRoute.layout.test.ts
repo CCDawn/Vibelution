@@ -48,6 +48,14 @@ const LOADED_ZERO_SUMMARY = {
   scopeTokenUsage: ZERO_ROLLUP,
 };
 
+const STALE_SENTINEL_SUMMARY = {
+  ...LOADED_ZERO_SUMMARY,
+  globalTokenUsage: {
+    ...LOADED_ZERO_SUMMARY.globalTokenUsage,
+    allTime: { ...ZERO_ROLLUP, totalTokens: 12_345, callCount: 1 },
+  },
+};
+
 function renderUsage(state: Record<string, unknown>) {
   usageQueryState.current = {
     data: undefined,
@@ -175,10 +183,30 @@ describe("UsageRoute layout contract", () => {
   it.each([
     ["initial-loading", { isFetching: true, isPending: true }, 'data-vui="loading-value"'],
     ["loaded-zero", { data: LOADED_ZERO_SUMMARY }, ">0<"],
-    ["refreshing-with-data", { data: LOADED_ZERO_SUMMARY, isFetching: true }, "同步中"],
-    ["error-with-data", { data: LOADED_ZERO_SUMMARY, error: new Error("stale"), isError: true }, "stale"],
   ])("renders the %s query presentation", (_name, state, expected) => {
     expect(renderUsage(state)).toContain(expected);
+  });
+
+  it("preserves stale non-zero usage while refreshing", () => {
+    const markup = renderUsage({ data: STALE_SENTINEL_SUMMARY, isFetching: true });
+    expect(markup).toContain("12,345");
+    expect(markup).toContain("同步中");
+    expect(markup).toContain('aria-busy="false"');
+    expect(markup).not.toContain('data-vui="loading-value"');
+    expect(markup).not.toContain("不可用");
+  });
+
+  it("preserves stale non-zero usage while showing an error warning", () => {
+    const markup = renderUsage({
+      data: STALE_SENTINEL_SUMMARY,
+      error: new Error("stale usage warning"),
+      isError: true,
+    });
+    expect(markup).toContain("12,345");
+    expect(markup).toContain("stale usage warning");
+    expect(markup).toContain('aria-busy="false"');
+    expect(markup).not.toContain('data-vui="loading-value"');
+    expect(markup).not.toContain("不可用");
   });
 
   it("renders unavailable values and retry without zero projection for error-empty", () => {
