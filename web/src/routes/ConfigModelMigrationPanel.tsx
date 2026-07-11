@@ -96,7 +96,6 @@ export function ConfigModelMigrationPanel({
               columns={[
                 { id: "old", header: "v1 model ID", render: (row) => <span title={row.legacyModelId}>{row.legacyModelId}</span> },
                 { id: "new", header: "Canonical modelRef", render: (row) => <strong title={row.modelRef}>{row.modelRef}</strong> },
-                { id: "live", header: "Live references", render: () => preview.referenceImpact.liveReferenceCount },
               ]}
             />
           </div>

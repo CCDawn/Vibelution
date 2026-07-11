@@ -14,7 +14,7 @@ import {
   type VStatusTone,
 } from "../components/vui";
 import type { ConfigCapabilityObservation, ConfigCatalogModel } from "../api/types";
-import type { ProviderRegistryRow } from "./configProviderLogic";
+import { canUnpinProviderModel, type ProviderRegistryRow } from "./configProviderLogic";
 import styles from "./ConfigProviderRegistryPanel.styles";
 
 export type ConfigProviderRegistryTab = "connection" | "models" | "protocols" | "diagnostics";
@@ -24,6 +24,7 @@ export type ConfigProviderRegistryPanelProps = {
   selectedProviderId: string;
   selectedTab: ConfigProviderRegistryTab;
   disabled: boolean;
+  liveReferenceCountByModelRef: Record<string, number>;
   onSelectProvider: (providerId: string) => void;
   onSelectTab: (tab: ConfigProviderRegistryTab) => void;
   onDiscover: (providerId: string) => void;
@@ -60,13 +61,14 @@ function CapabilityList({ model }: { model: ConfigCatalogModel }) {
   return (
     <div className={styles.capabilityList}>
       {capabilities.map(([name, observation]) => (
-        <VStatusChip
-          key={name}
-          tone={capabilityTone(observation)}
-          title={`${observation.source} · ${observation.confidence} · ${observation.checked_at || "未记录时间"}`}
-        >
-          {name}: {observation.value === "unknown" ? "unknown（未知）" : observation.value === "unsupported" ? "unsupported（不支持）" : "supported"}
-        </VStatusChip>
+        <span key={name} className={styles.providerIdentity}>
+          <VStatusChip tone={capabilityTone(observation)}>
+            {name}: {observation.value === "unknown" ? "unknown（未知）" : observation.value === "unsupported" ? "unsupported（不支持）" : "supported"}
+          </VStatusChip>
+          <small className={styles.muted}>
+            {observation.source} · {observation.confidence || "confidence unknown"} · {observation.checked_at || "未记录时间"}
+          </small>
+        </span>
       ))}
     </div>
   );
@@ -112,10 +114,12 @@ function ConnectionTab({ provider }: { provider: ProviderRegistryRow }) {
 function ModelsTab({
   provider,
   disabled,
+  liveReferenceCountByModelRef,
   onUnpin,
 }: {
   provider: ProviderRegistryRow;
   disabled: boolean;
+  liveReferenceCountByModelRef: Record<string, number>;
   onUnpin: (modelRef: string) => void;
 }) {
   return (
@@ -152,7 +156,8 @@ function ModelsTab({
               <VButton
                 variant="danger"
                 density="compact"
-                isDisabled={disabled || model.availability !== "pinned"}
+                isDisabled={disabled || !canUnpinProviderModel(provider, model) || (liveReferenceCountByModelRef[model.modelRef] ?? 0) > 0}
+                title={(liveReferenceCountByModelRef[model.modelRef] ?? 0) > 0 ? "存在 live references，无法取消固定。" : undefined}
                 onPress={() => onUnpin(model.modelRef)}
               >
                 取消固定
@@ -230,6 +235,7 @@ export function ConfigProviderRegistryPanel({
   selectedProviderId,
   selectedTab,
   disabled,
+  liveReferenceCountByModelRef,
   onSelectProvider,
   onSelectTab,
   onDiscover,
@@ -239,6 +245,11 @@ export function ConfigProviderRegistryPanel({
 }: ConfigProviderRegistryPanelProps) {
   const provider = rows.find((row) => row.providerId === selectedProviderId) ?? rows[0];
   const items = rows.map((row) => ({ ...row, id: row.providerId }));
+  const providerLiveReferenceCount = provider?.models.reduce(
+    (total, model) => total + (liveReferenceCountByModelRef[model.modelRef] ?? 0),
+    0,
+  ) ?? 0;
+  const providerDeleteBlocked = Boolean(provider && (provider.pinnedCount > 0 || providerLiveReferenceCount > 0));
 
   return (
     <VSurface as="section" id="config-models" className={styles.sectionSurface} padding="none">
@@ -301,21 +312,21 @@ export function ConfigProviderRegistryPanel({
               ))}
             </VActionGroup>
             {selectedTab === "connection" ? <ConnectionTab provider={provider} /> : null}
-            {selectedTab === "models" ? <ModelsTab provider={provider} disabled={disabled} onUnpin={onUnpin} /> : null}
+            {selectedTab === "models" ? <ModelsTab provider={provider} disabled={disabled} liveReferenceCountByModelRef={liveReferenceCountByModelRef} onUnpin={onUnpin} /> : null}
             {selectedTab === "protocols" ? <ProtocolsTab provider={provider} /> : null}
             {selectedTab === "diagnostics" ? <DiagnosticsTab provider={provider} disabled={disabled} onDiscover={onDiscover} /> : null}
             <div className={styles.mobileActionGroup}>
               <VButton
                 variant="danger"
                 icon={<Trash2 size={14} />}
-                isDisabled={disabled || provider.models.length > 0}
-                title={provider.models.length ? "先取消固定全部模型，才能删除 Provider。" : "删除 Provider 草稿"}
+                isDisabled={disabled || providerDeleteBlocked}
+                title={providerDeleteBlocked ? "先清除 pinned ownership 与 live references，才能删除 Provider。" : "删除 Provider 草稿"}
                 onPress={() => onDeleteProvider(provider.providerId)}
               >
                 删除 Provider
               </VButton>
-              {provider.models.length ? (
-                <p className={styles.critical}><AlertTriangle size={14} className="inline" /> 仍有 {provider.models.length} 个固定模型，删除已禁用。</p>
+              {providerDeleteBlocked ? (
+                <p className={styles.critical}><AlertTriangle size={14} className="inline" /> pinned: {provider.pinnedCount} · live refs: {providerLiveReferenceCount}，删除已禁用。</p>
               ) : null}
             </div>
           </div>

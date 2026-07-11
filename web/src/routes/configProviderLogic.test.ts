@@ -3,8 +3,12 @@ import { describe, expect, it } from "vitest";
 import type { ConfigCatalogModel, ConfigModelCatalog, ConfigProviderOption } from "../api/types";
 import {
   canAdvanceProviderWizard,
+  canUnpinProviderModel,
   deriveProviderRegistryRows,
+  dispatchProviderWizardConnectionAction,
+  filterAlreadyPinnedModels,
   initialProviderWizardState,
+  isProviderWizardConnectionLocked,
   providerWizardReducer,
 } from "./configProviderLogic";
 
@@ -96,6 +100,19 @@ describe("configProviderLogic", () => {
     ]);
     expect(rows[1].credentialState).toBe("missing");
     expect(rows[1].status).toBe("auth_failed");
+    expect(rows.map((row) => row.pinnedCount)).toEqual([1, 1]);
+  });
+
+  it("allows unpin only for backend-owned pinned or missing-remote models", () => {
+    const [provider] = deriveProviderRegistryRows(providers, catalog);
+    const pinned = catalogModel("relay_a/pinned");
+    const missingRemote = { ...catalogModel("relay_a/missing"), availability: "missing_remote" as const };
+    const observed = { ...catalogModel("relay_a/observed"), availability: "observed" as const };
+
+    expect(canUnpinProviderModel(provider, pinned)).toBe(true);
+    expect(canUnpinProviderModel(provider, missingRemote)).toBe(true);
+    expect(canUnpinProviderModel(provider, observed)).toBe(false);
+    expect(canUnpinProviderModel({ ...provider, pinnedCount: 0 }, pinned)).toBe(false);
   });
 
   it("accepts the redacted provider mutation allowlist without inventing identity", () => {
@@ -241,6 +258,48 @@ describe("configProviderLogic", () => {
       models: [catalogModel("relay_a/gpt-b")],
     });
     expect(state.pinnedModelRefs).toEqual([]);
+  });
+
+  it("keeps only unfinished pins after partial success and filters them on retry", () => {
+    const models = ["a", "b", "c"].map((key) => ({
+      ...catalogModel(`relay_a/${key}`),
+      modelKey: key,
+      upstreamId: key,
+    }));
+    let state = {
+      ...initialProviderWizardState(),
+      step: "pin" as const,
+      providerId: "relay_a",
+      discoveredModels: models,
+      pinnedModelRefs: models.map((model) => model.modelRef),
+    };
+
+    state = providerWizardReducer(state, { type: "pin_succeeded", modelRef: "relay_a/a" });
+    state = providerWizardReducer(state, { type: "pin_succeeded", modelRef: "relay_a/b" });
+    expect(state.pinnedModelRefs).toEqual(["relay_a/c"]);
+    expect(state.discoveredModels.map((model) => model.modelRef)).toEqual(["relay_a/c"]);
+
+    const retry = filterAlreadyPinnedModels(models, new Set(["relay_a/a", "relay_a/b"]));
+    expect(retry.map((model) => model.modelRef)).toEqual(["relay_a/c"]);
+  });
+
+  it("locks every saved connection field after Provider creation", () => {
+    expect(isProviderWizardConnectionLocked(false, false)).toBe(false);
+    expect(isProviderWizardConnectionLocked(true, false)).toBe(true);
+    expect(isProviderWizardConnectionLocked(false, true)).toBe(true);
+
+    const actions: Parameters<typeof providerWizardReducer>[1][] = [];
+    const action = {
+      type: "set_connection" as const,
+      providerId: "relay_a",
+      label: "Ignored",
+      baseUrl: "https://ignored.example/v1",
+      credentialRef: "none",
+    };
+    expect(dispatchProviderWizardConnectionAction(true, action, (next) => actions.push(next))).toBe(false);
+    expect(actions).toEqual([]);
+    expect(dispatchProviderWizardConnectionAction(false, action, (next) => actions.push(next))).toBe(true);
+    expect(actions).toEqual([action]);
   });
 
   it("rejects actions outside their owning wizard step", () => {

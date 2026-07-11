@@ -108,6 +108,36 @@ describe("ConfigRoute layout contract", () => {
     expect(routeSource).toContain("routePreview.impactedRefs.map");
   });
 
+  it("uses backend pinned ownership and live references for destructive controls", () => {
+    expect(providerPanelSource).toContain("provider.pinnedCount");
+    expect(providerPanelSource).toContain("canUnpinProviderModel(provider, model)");
+    expect(providerPanelSource).toContain("liveReferenceCountByModelRef");
+    expect(providerPanelSource).not.toContain("provider.models.length > 0");
+    expect(providerPanelSource).not.toContain('availability !== "pinned"');
+  });
+
+  it("recovers multi-pin partial success without resubmitting completed models", () => {
+    expect(routeSource).toContain("filterAlreadyPinnedModels");
+    expect(routeSource).toContain('dispatchProviderWizard({ type: "pin_succeeded", modelRef: model.modelRef })');
+    expect(routeSource).toContain('model.availability === "pinned" || model.availability === "missing_remote"');
+  });
+
+  it("locks all saved wizard connection fields after creation", () => {
+    expect(wizardSource).toContain("isProviderWizardConnectionLocked");
+    expect(wizardSource).toContain("dispatchProviderWizardConnectionAction");
+    expect(wizardSource).toContain("Provider 已创建");
+    expect(wizardSource).toContain("disabled={connectionLocked}");
+    expect(wizardSource).toContain("isDisabled={connectionLocked}");
+  });
+
+  it("shows capability provenance without native title and avoids fake row-level migration counts", () => {
+    expect(providerPanelSource).not.toContain('title={`${observation.source}');
+    expect(providerPanelSource).toContain("observation.source");
+    expect(providerPanelSource).toContain("observation.confidence");
+    expect(providerPanelSource).toContain("observation.checked_at");
+    expect(migrationPanelSource).not.toContain('header: "Live references"');
+  });
+
   it("keeps the provider workbench on VUI controls with stable visual-state selectors", () => {
     const providerSources = [providerPanelSource, wizardSource, migrationPanelSource].join("\n");
     expect(providerSources).toContain('from "../components/vui"');
