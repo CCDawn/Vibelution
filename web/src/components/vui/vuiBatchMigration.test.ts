@@ -14,6 +14,13 @@ import teamStyles from "../../routes/TeamsRoute.styles";
 
 const sourceRoot = resolve(import.meta.dirname, "../..");
 const rawControlPattern = /<(button|input|select|textarea)\b/;
+const configFileInputPattern = /<input\s+type="file"\s+accept="image\/png,image\/jpeg,image\/webp"\s+disabled=\{disabled \|\| imageUploading\}[\s\S]*?\/>/g;
+const configFileInputContexts = [
+  /styles\.themeBackgroundDropButton[\s\S]{0,1200}<input\s+type="file"/,
+  /styles\.themeBackgroundImageActions[\s\S]{0,1200}<input\s+type="file"/,
+  /styles\.avatarImageDropButton[\s\S]{0,1200}<input\s+type="file"/,
+  /styles\.avatarImageActions[\s\S]{0,1200}<input\s+type="file"/,
+] as const;
 
 const rawControlAllowedFiles = new Set([
   "components/vui/forms/VNativeInput.tsx",
@@ -229,10 +236,17 @@ function isRawControlGuardExempt(path: string): boolean {
 }
 
 function sourceHasRawControlOutsideAllowedExceptions(path: string, source: string): boolean {
-  const sourceWithoutAllowedFileInputs = path === "routes/ConfigRoute.tsx"
-    ? source.replaceAll(/<input\s+type="file"[\s\S]*?\/>/g, "")
-    : source;
-  return rawControlPattern.test(sourceWithoutAllowedFileInputs);
+  if (path === "routes/ConfigRoute.tsx") {
+    const allowedFileInputs = source.match(configFileInputPattern) ?? [];
+    const hasExpectedFileInputExceptions = allowedFileInputs.length === configFileInputContexts.length
+      && allowedFileInputs.every((input) => input.includes("onChange={async"))
+      && configFileInputContexts.every((context) => context.test(source));
+    if (!hasExpectedFileInputExceptions) {
+      return true;
+    }
+    return rawControlPattern.test(source.replaceAll(configFileInputPattern, ""));
+  }
+  return rawControlPattern.test(source);
 }
 
 describe("VUI batch migration", () => {
@@ -266,6 +280,24 @@ describe("VUI batch migration", () => {
       .filter((path) => sourceHasRawControlOutsideAllowedExceptions(path, readTargetSource(path)));
 
     expect(violations).toEqual([]);
+  });
+
+  it("permits only the four styled image-upload inputs in Config", () => {
+    const configSource = readTargetSource("routes/ConfigRoute.tsx");
+    const configStyles = readTargetSource("routes/ConfigRoute.styles.ts");
+    const currentFileInputs = configSource.match(configFileInputPattern) ?? [];
+
+    expect(currentFileInputs).toHaveLength(4);
+    expect(currentFileInputs.every((input) => input.includes("onChange={async"))).toBe(true);
+    for (const context of configFileInputContexts) {
+      expect(configSource).toMatch(context);
+    }
+    expect(configStyles).toContain("themeBackgroundDropButton");
+    expect(configStyles).toContain("avatarImageDropButton");
+    expect(configStyles).toContain("fileUploadButton");
+    expect((configStyles.match(/\[&_input\]:\[opacity:0\]/g) ?? []).length).toBeGreaterThanOrEqual(3);
+    expect(sourceHasRawControlOutsideAllowedExceptions("routes/ConfigRoute.tsx", configSource)).toBe(false);
+    expect(sourceHasRawControlOutsideAllowedExceptions("routes/ConfigRoute.tsx", `${configSource}\n${currentFileInputs[0]}`)).toBe(true);
   });
 
   it("Evolution route and run-record panels preserve block button geometry after VUI native migration", () => {
