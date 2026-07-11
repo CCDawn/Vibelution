@@ -96,6 +96,18 @@ describe("Workbench visual regression matrix", () => {
           .sort((left, right) => left - right),
       ).toEqual([1280, 1280, 1440, 1440, 1920, 1920]);
       expect(
+        routeScenarios
+          .map((scenario) => `${scenario.theme}-${scenario.viewport.width}`)
+          .sort(),
+      ).toEqual([
+        "dark-1280",
+        "dark-1440",
+        "dark-1920",
+        "light-1280",
+        "light-1440",
+        "light-1920",
+      ]);
+      expect(
         routeScenarios.every(
           (scenario) => scenario.state === "dense" && scenario.expectedEvidence === "screenshot",
         ),
