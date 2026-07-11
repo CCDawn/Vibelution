@@ -26,7 +26,12 @@ export function VCheckbox({
         .filter(Boolean)
         .join(" ")}
     >
-      {children}
+      <Checkbox.Content>
+        <Checkbox.Control>
+          <Checkbox.Indicator />
+        </Checkbox.Control>
+        {children}
+      </Checkbox.Content>
     </Checkbox>
   );
 }
