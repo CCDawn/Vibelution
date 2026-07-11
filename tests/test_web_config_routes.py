@@ -2820,6 +2820,97 @@ def test_config_workspace_apply_rejects_stale_base_hash(monkeypatch):
     assert "重新加载" in response.json()["detail"]
 
 
+def test_llm_v2_migration_preview_route_projects_allowlisted_fields(monkeypatch):
+    monkeypatch.setattr(
+        provider_config_service,
+        "preview_llm_v2_migration",
+        lambda: {
+            "previewId": "preview-a",
+            "baseHash": "hash-a",
+            "status": "READY",
+            "providers": [
+                {
+                    "provider_id": "relay_a",
+                    "label": "Relay A",
+                    "service_class": "relay",
+                    "vendor": "multi_model",
+                    "driver": "openai",
+                    "base_url": "https://relay.example/v1",
+                    "credential_ref": "env:SECRET",
+                    "credential_state": "configured",
+                    "models": {"gpt-a": {"upstream_id": "gpt-a"}},
+                }
+            ],
+            "modelRefMap": {"legacy": "relay_a/gpt-a"},
+            "referenceImpact": {"liveReferenceCount": 1, "historicalReferenceCount": 2},
+            "conflicts": [],
+            "proposedPublicConfig": {"secret": "forbidden"},
+        },
+    )
+
+    response = client.post("/api/config/migration/llm-v2/preview", json={})
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert set(payload) == {
+        "baseHash",
+        "conflicts",
+        "modelRefMap",
+        "previewId",
+        "providers",
+        "referenceImpact",
+        "status",
+    }
+    assert set(payload["providers"][0]) == {
+        "baseUrl",
+        "credentialState",
+        "driver",
+        "label",
+        "modelRefs",
+        "providerId",
+        "serviceClass",
+        "vendor",
+    }
+    assert "SECRET" not in response.text
+    assert "proposedPublicConfig" not in response.text
+
+
+def test_llm_v2_migration_apply_requires_preview_and_hash() -> None:
+    response = client.post("/api/config/migration/llm-v2/apply", json={})
+    assert response.status_code == 422
+
+
+def test_llm_v2_migration_apply_maps_stale_hash_to_conflict(monkeypatch) -> None:
+    monkeypatch.setattr(
+        provider_config_service,
+        "apply_llm_v2_migration",
+        lambda **_kwargs: (_ for _ in ()).throw(ValueError("stale config hash")),
+    )
+    response = client.post(
+        "/api/config/migration/llm-v2/apply",
+        json={"previewId": "preview-a", "baseHash": "stale"},
+    )
+    assert response.status_code == 409
+
+
+def test_llm_v2_migration_rollback_requires_matching_id_and_hash(monkeypatch) -> None:
+    monkeypatch.setattr(
+        provider_config_service,
+        "rollback_llm_v2_migration",
+        lambda **kwargs: {"migrationId": kwargs["migration_id"], "status": "rolled_back", "hash": "old"},
+    )
+    mismatch = client.post(
+        "/api/config/migration/llm-v2/migration-a/rollback",
+        json={"migrationId": "migration-b", "baseHash": "hash-a"},
+    )
+    assert mismatch.status_code == 409
+    response = client.post(
+        "/api/config/migration/llm-v2/migration-a/rollback",
+        json={"migrationId": "migration-a", "baseHash": "hash-a"},
+    )
+    assert response.status_code == 200
+
+
 def test_config_workspace_apply_persists_changes_and_pending_env(monkeypatch):
     public_config = copy.deepcopy(load_public_config())
     _ensure_preset_model(public_config, "deepseek_v4_pro")
