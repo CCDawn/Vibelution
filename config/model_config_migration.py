@@ -249,6 +249,28 @@ def preview_v1_to_v2(public_config: dict[str, Any], *, project_root: Path | str)
         first_id, _, first_provider, _, adapter, driver = rows[0]
         service_class = _service_class(first_provider)
         vendor = _vendor(base_url, first_provider)
+        classifications = [
+            {
+                "service_class": _service_class(row_provider),
+                "vendor": _vendor(base_url, row_provider),
+                "adapter": row_adapter,
+                "driver": row_driver,
+            }
+            for _, _, row_provider, _, row_adapter, row_driver in rows
+        ]
+        classification_fields = sorted(
+            field_name
+            for field_name in ("service_class", "vendor", "adapter", "driver")
+            if len({classification[field_name] for classification in classifications}) > 1
+        )
+        if classification_fields:
+            conflicts.append(
+                {
+                    "code": "provider_classification_conflict",
+                    "modelIds": sorted(row[0] for row in rows),
+                    "fields": classification_fields,
+                }
+            )
         protocol_values = sorted({str(row[1].get("transport") or "chat_completions") for row in rows})
         provider = {
             "label": str(first_provider.get("label") or vendor.replace("_", " ").title()),

@@ -88,6 +88,54 @@ export type ProviderWizardAction =
 
 const STEPS: ProviderWizardStep[] = ["template", "connection", "discovery", "pin"];
 
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
+function asString(value: unknown): string {
+  return typeof value === "string" ? value : "";
+}
+
+export function buildProviderWizardDraft(
+  state: ProviderWizardState,
+  templateProvider?: unknown,
+): Record<string, unknown> {
+  const source = { ...asRecord(templateProvider) };
+  const templateDeployment = asRecord(source.deployment);
+  delete source.runtime_framework;
+  delete source.artifact_path;
+  if (state.serviceClass !== "local_runtime") {
+    delete source.deployment;
+  }
+  return {
+    ...source,
+    label: state.label,
+    service_class: state.serviceClass,
+    driver: state.driver,
+    base_url: state.baseUrl,
+    auth_kind: state.authKind,
+    credential_ref: state.credentialRef,
+    requires_credential: state.authKind !== "none",
+    protocols: { default: state.defaultProtocol, allowed: state.allowedProtocols },
+    discovery: {
+      ...asRecord(source.discovery),
+      mode: asString(asRecord(source.discovery).mode) || "auto",
+    },
+    ...(state.serviceClass === "local_runtime"
+      ? {
+          deployment: {
+            ...templateDeployment,
+            runtime_framework: state.runtimeFramework || asString(templateDeployment.runtime_framework),
+            artifact_path: state.artifactPath || asString(templateDeployment.artifact_path),
+          },
+        }
+      : {}),
+    models: {},
+  };
+}
+
 export function initialProviderWizardState(): ProviderWizardState {
   return {
     step: "template",

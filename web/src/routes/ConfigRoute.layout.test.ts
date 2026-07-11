@@ -20,6 +20,7 @@ import runtimePanelStyles from "./ConfigRuntimePanel.styles";
 import providerPanelSource from "./ConfigProviderRegistryPanel.tsx?raw";
 import providerPanelStylesSource from "./ConfigProviderRegistryPanel.styles.ts?raw";
 import providerPanelStyles from "./ConfigProviderRegistryPanel.styles";
+import providerLogicSource from "./configProviderLogic.ts?raw";
 import wizardSource from "./ConfigProviderWizard.tsx?raw";
 import styles from "./ConfigRoute.styles";
 import stylesSource from "./ConfigRoute.styles.ts?raw";
@@ -136,10 +137,19 @@ describe("ConfigRoute layout contract", () => {
     expect(wizardSource).toContain('{ value: "oauth", label: "OAuth" }');
     expect(wizardSource).toContain('{ value: "none", label: "None" }');
     expect(wizardSource).not.toContain('value: "bearer"');
-    expect(wizardSource).toContain("auth_kind: state.authKind");
-    expect(wizardSource).toContain('requires_credential: state.authKind !== "none"');
-    expect(routeSource).toContain("auth_kind: state.authKind");
-    expect(routeSource).toContain('requires_credential: state.authKind !== "none"');
+    expect(providerLogicSource).toContain("auth_kind: state.authKind");
+    expect(providerLogicSource).toContain('requires_credential: state.authKind !== "none"');
+  });
+
+  it("reuses one canonical Provider draft builder for suggestion and creation", () => {
+    expect(wizardSource).toContain("buildProviderWizardDraft(state, selectedTemplate?.provider)");
+    expect(routeSource).toContain("buildProviderWizardDraft(state, template?.provider)");
+    expect(wizardSource).toContain("const templateDeployment = asRecord(templateProvider.deployment)");
+    expect(wizardSource).not.toContain("asString(templateProvider.runtime_framework)");
+    expect(wizardSource).not.toContain("asString(templateProvider.artifact_path)");
+    expect(wizardSource).not.toContain("function providerDraft(");
+    expect(routeSource).not.toContain("runtime_framework: state.runtimeFramework");
+    expect(routeSource).not.toContain("artifact_path: state.artifactPath");
   });
 
   it("shows capability provenance without native title and avoids fake row-level migration counts", () => {

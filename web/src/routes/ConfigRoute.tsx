@@ -77,7 +77,7 @@ import { ConfigProviderRegistryPanel, type ConfigProviderRegistryTab } from "./C
 import { ConfigProviderWizard } from "./ConfigProviderWizard";
 import { ConfigRuntimePanel } from "./ConfigRuntimePanel";
 import { ConfigWorkspacePlaceholderPanel } from "./ConfigWorkspacePlaceholderPanel";
-import { deriveProviderRegistryRows, filterAlreadyPinnedModels, initialProviderWizardState, providerWizardReducer } from "./configProviderLogic";
+import { buildProviderWizardDraft, deriveProviderRegistryRows, filterAlreadyPinnedModels, initialProviderWizardState, providerWizardReducer } from "./configProviderLogic";
 import styles from "./ConfigRoute.styles";
 
 export type ConfigLanguage = "zh" | "en";
@@ -2502,21 +2502,7 @@ export function ConfigRoute() {
     setBusyAction("正在创建 Provider 草稿…");
     setProviderActionError("");
     const template = providerPresetOptions.find((item) => item.provider_preset_id === state.templateId);
-    const templateProvider = asRecord(template?.provider);
-    const provider = {
-      ...templateProvider,
-      label: state.label,
-      service_class: state.serviceClass,
-      driver: state.driver,
-      base_url: state.baseUrl,
-      auth_kind: state.authKind,
-      credential_ref: state.credentialRef,
-      requires_credential: state.authKind !== "none",
-      protocols: { default: state.defaultProtocol, allowed: state.allowedProtocols },
-      discovery: { ...asRecord(templateProvider.discovery), mode: getString(asRecord(templateProvider.discovery).mode) || "auto" },
-      ...(state.serviceClass === "local_runtime" ? { runtime_framework: state.runtimeFramework, artifact_path: state.artifactPath } : {}),
-      models: {},
-    };
+    const provider = buildProviderWizardDraft(state, template?.provider);
     try {
       const response = await requestJson<ConfigWorkspace>(
         "/api/config/draft/providers",

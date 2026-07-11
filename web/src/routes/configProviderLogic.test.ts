@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { ConfigCatalogModel, ConfigModelCatalog, ConfigProviderOption } from "../api/types";
 import {
+  buildProviderWizardDraft,
   canAdvanceProviderWizard,
   canUnpinProviderModel,
   deriveProviderRegistryRows,
@@ -90,6 +91,79 @@ const catalog: ConfigModelCatalog = {
 };
 
 describe("configProviderLogic", () => {
+  it("builds local runtime deployment under the backend-owned nested object", () => {
+    const state = {
+      ...initialProviderWizardState(),
+      serviceClass: "local_runtime",
+      label: "Local VLLM",
+      baseUrl: "http://127.0.0.1:8000/v1",
+      authKind: "none" as const,
+      credentialRef: "none",
+      driver: "openai",
+      defaultProtocol: "responses",
+      allowedProtocols: ["responses"],
+      runtimeFramework: "vllm",
+      artifactPath: "D:/models/qwen.gguf",
+    };
+
+    const provider = buildProviderWizardDraft(state, {
+      label: "Template label",
+      deployment: {
+        runtime_framework: "ollama",
+        artifact_path: "template/model.gguf",
+      },
+      runtime_framework: "legacy-top-level",
+      artifact_path: "legacy-top-level.gguf",
+      discovery: { mode: "manual", adapter: "openai_compatible" },
+    });
+
+    expect(provider.deployment).toEqual({
+      runtime_framework: "vllm",
+      artifact_path: "D:/models/qwen.gguf",
+    });
+    expect(provider).not.toHaveProperty("runtime_framework");
+    expect(provider).not.toHaveProperty("artifact_path");
+    expect(provider.discovery).toEqual({ mode: "manual", adapter: "openai_compatible" });
+  });
+
+  it("does not fabricate deployment for a non-local provider", () => {
+    const provider = buildProviderWizardDraft({
+      ...initialProviderWizardState(),
+      serviceClass: "relay",
+      label: "Relay A",
+      baseUrl: "https://relay.example/v1",
+      driver: "openai",
+      defaultProtocol: "responses",
+      allowedProtocols: ["responses"],
+      credentialRef: "env:RELAY_KEY",
+    }, {
+      discovery: { adapter: "openai_compatible" },
+      runtime_framework: "legacy-top-level",
+      artifact_path: "legacy-top-level.gguf",
+    });
+
+    expect(provider).not.toHaveProperty("deployment");
+    expect(provider).not.toHaveProperty("runtime_framework");
+    expect(provider).not.toHaveProperty("artifact_path");
+  });
+
+  it("preserves nested local deployment template values until the wizard overrides them", () => {
+    const provider = buildProviderWizardDraft({
+      ...initialProviderWizardState(),
+      serviceClass: "local_runtime",
+    }, {
+      deployment: {
+        runtime_framework: "ollama",
+        artifact_path: "template/model.gguf",
+      },
+    });
+
+    expect(provider.deployment).toEqual({
+      runtime_framework: "ollama",
+      artifact_path: "template/model.gguf",
+    });
+  });
+
   it("uses backend provider ids and keeps same-name models distinct", () => {
     const rows = deriveProviderRegistryRows(providers, catalog);
 
