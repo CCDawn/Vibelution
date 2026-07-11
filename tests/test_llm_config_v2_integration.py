@@ -112,6 +112,45 @@ def test_v1_fixture_remains_readable_and_migration_preview_is_write_free(tmp_pat
     assert list(tmp_path.rglob("*")) == []
 
 
+def test_migrated_runtime_projection_uses_split_upstream_id_not_artifact_path(tmp_path) -> None:
+    artifact_path = r"C:\models\private\weights.gguf"
+    source = {
+        "llm": {
+            "model_library": {
+                "local_a": {
+                    "provider": {
+                        "kind": "local",
+                        "base_url": "http://127.0.0.1:8080/v1",
+                        "requires_api_key": False,
+                    },
+                    "model": artifact_path,
+                    "label": artifact_path,
+                    "transport": "chat_completions",
+                    "contract": "tool_chat",
+                }
+            },
+            "profiles": {"primary": {"model_ref": "local_a"}},
+        }
+    }
+
+    preview = preview_v1_to_v2(
+        source,
+        project_root=tmp_path,
+        artifact_resolutions=[
+            {
+                "modelId": "local_a",
+                "decision": "split_deployment_artifact",
+                "upstreamId": "served-model-a",
+            }
+        ],
+    )
+    effective = build_effective_config(preview.proposed_public_config)
+    provider_id = preview.model_ref_map["local_a"].split("/", 1)[0]
+
+    assert effective.llm.get_profile("primary").model == "served-model-a"
+    assert effective.llm.providers[provider_id].deployment.artifact_path == artifact_path
+
+
 def test_schema_v2_inline_provider_materializer_is_inert() -> None:
     source = _fixture("llm_schema_v2_provider.toml")
     llm = copy.deepcopy(source["llm"])

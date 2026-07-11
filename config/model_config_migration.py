@@ -52,11 +52,18 @@ class ModelConfigMigrationPreview:
     preview_id: str
     base_hash: str
     status: str
-    providers: tuple[dict[str, Any], ...]
-    model_ref_map: dict[str, str]
+    providers: tuple[dict[str, Any], ...] = field(repr=False)
+    model_ref_map: dict[str, str] = field(repr=False)
     reference_impact: dict[str, Any]
     conflicts: tuple[dict[str, Any], ...]
     proposed_public_config: dict[str, Any] = field(repr=False)
+
+
+@dataclass(frozen=True)
+class ArtifactResolution:
+    model_id: str
+    decision: str
+    upstream_id: str = ""
 
 
 class ModelConfigMigrationRollbackError(RuntimeError):
@@ -165,6 +172,51 @@ def _artifact_path_suspected(value: str) -> bool:
     )
 
 
+def _parse_artifact_resolutions(
+    payload: list[dict[str, Any]] | None,
+    *,
+    model_ids: set[str],
+) -> dict[str, ArtifactResolution]:
+    if payload is None:
+        return {}
+    if not isinstance(payload, list):
+        raise ValueError("artifact resolutions must be an array")
+    parsed: dict[str, ArtifactResolution] = {}
+    for item in payload:
+        if not isinstance(item, dict):
+            raise ValueError("artifact resolution entries must be objects")
+        model_id = item.get("modelId")
+        decision = item.get("decision")
+        if not isinstance(model_id, str) or not model_id.strip():
+            raise ValueError("artifact resolution requires modelId")
+        if model_id not in model_ids:
+            raise ValueError("unknown artifact resolution modelId")
+        if model_id in parsed:
+            raise ValueError("duplicate artifact resolution modelId")
+        if decision == "preserve_upstream_id":
+            if set(item) != {"modelId", "decision"}:
+                raise ValueError("invalid artifact resolution fields")
+            parsed[model_id] = ArtifactResolution(model_id=model_id, decision=decision)
+            continue
+        if decision == "split_deployment_artifact":
+            if set(item) != {"modelId", "decision", "upstreamId"}:
+                raise ValueError("invalid artifact resolution fields")
+            upstream_id = item.get("upstreamId")
+            if not isinstance(upstream_id, str) or not upstream_id.strip():
+                raise ValueError("split_deployment_artifact requires upstreamId")
+            if _artifact_path_suspected(upstream_id):
+                raise ValueError("split_deployment_artifact upstreamId must not be an artifact path")
+            parsed[model_id] = ArtifactResolution(
+                model_id=model_id,
+                decision=decision,
+                upstream_id=upstream_id.strip(),
+            )
+            continue
+        if decision not in {"preserve_upstream_id", "split_deployment_artifact"}:
+            raise ValueError("unknown artifact resolution decision")
+    return parsed
+
+
 def _model_behavior(payload: dict[str, Any]) -> dict[str, Any]:
     return {key: value for key, value in payload.items() if key not in {"label", "enabled", "upstream_id"}}
 
@@ -200,7 +252,12 @@ def _reference_impact(mapping: dict[str, str], public_config: dict[str, Any], pr
     }
 
 
-def preview_v1_to_v2(public_config: dict[str, Any], *, project_root: Path | str) -> ModelConfigMigrationPreview:
+def preview_v1_to_v2(
+    public_config: dict[str, Any],
+    *,
+    project_root: Path | str,
+    artifact_resolutions: list[dict[str, Any]] | None = None,
+) -> ModelConfigMigrationPreview:
     source = copy.deepcopy(public_config)
     llm = source.get("llm") if isinstance(source, dict) else None
     if not isinstance(llm, dict) or int(llm.get("schema_version") or 1) != 1:
@@ -209,8 +266,17 @@ def preview_v1_to_v2(public_config: dict[str, Any], *, project_root: Path | str)
     if not isinstance(library, dict) or not library:
         raise ValueError("migration preview requires llm.model_library")
 
+    resolutions = _parse_artifact_resolutions(
+        artifact_resolutions,
+        model_ids={str(model_id) for model_id in library},
+    )
+
     conflicts: list[dict[str, Any]] = []
-    grouped: dict[tuple[str, str], list[tuple[str, dict[str, Any], dict[str, Any], str, str, str]]] = {}
+    grouped: dict[
+        tuple[str, str],
+        list[tuple[str, dict[str, Any], dict[str, Any], str, str, str, str]],
+    ] = {}
+    consumed_resolution_ids: set[str] = set()
     secret_fingerprints: dict[tuple[str, str], str] = {}
     for model_id, raw_entry in sorted(library.items(), key=lambda item: str(item[0])):
         if not isinstance(raw_entry, dict):
@@ -218,9 +284,20 @@ def preview_v1_to_v2(public_config: dict[str, Any], *, project_root: Path | str)
             continue
         provider = raw_entry.get("provider") if isinstance(raw_entry.get("provider"), dict) else {}
         upstream_id = str(raw_entry.get("model") or "").strip()
+        artifact_path = ""
         if _artifact_path_suspected(upstream_id):
-            conflicts.append({"code": "artifact_path_suspected", "modelId": str(model_id)})
-            continue
+            resolution = resolutions.get(str(model_id))
+            if resolution is None:
+                conflicts.append({"code": "artifact_path_suspected", "modelId": str(model_id)})
+                continue
+            consumed_resolution_ids.add(str(model_id))
+            artifact_path = upstream_id
+            if resolution.decision == "preserve_upstream_id":
+                provider_kind = str(provider.get("kind") or "").strip().lower()
+                if provider_kind not in {"local", "local_runtime", "ollama"}:
+                    raise ValueError("preserve_upstream_id requires a local provider")
+            else:
+                upstream_id = resolution.upstream_id
         adapter, driver = _adapter_and_driver(provider)
         wire_protocol = str(raw_entry.get("transport") or "chat_completions").strip().lower()
         base_url = normalize_legacy_service_root(
@@ -231,13 +308,18 @@ def preview_v1_to_v2(public_config: dict[str, Any], *, project_root: Path | str)
             conflicts.append({"code": "credential_source_missing", "modelId": str(model_id)})
             credential_ref = "none"
         key = (base_url, canonicalize_credential_ref(credential_ref))
-        grouped.setdefault(key, []).append((str(model_id), raw_entry, provider, upstream_id, adapter, driver))
+        grouped.setdefault(key, []).append(
+            (str(model_id), raw_entry, provider, upstream_id, adapter, driver, artifact_path)
+        )
         if key[1] != "none":
             resolution = resolve_credential_ref(key[1])
             if resolution.secret:
                 secret_fingerprints[key] = hmac.new(
                     _PROCESS_HMAC_KEY, resolution.secret.encode("utf-8"), hashlib.sha256
                 ).hexdigest()
+
+    if set(resolutions) != consumed_resolution_ids:
+        raise ValueError("artifact resolution does not target an artifact path")
 
     provider_dicts: list[dict[str, Any]] = []
     provider_registry: dict[str, Any] = {}
@@ -246,7 +328,7 @@ def preview_v1_to_v2(public_config: dict[str, Any], *, project_root: Path | str)
     existing_ids: list[str] = []
     model_defaults_seen: dict[tuple[str, str], dict[str, Any]] = {}
     for (base_url, credential_ref), rows in sorted(grouped.items(), key=lambda item: item[0]):
-        first_id, _, first_provider, _, adapter, driver = rows[0]
+        first_id, _, first_provider, _, adapter, driver, _ = rows[0]
         service_class = _service_class(first_provider)
         vendor = _vendor(base_url, first_provider)
         classifications = [
@@ -256,7 +338,7 @@ def preview_v1_to_v2(public_config: dict[str, Any], *, project_root: Path | str)
                 "adapter": row_adapter,
                 "driver": row_driver,
             }
-            for _, _, row_provider, _, row_adapter, row_driver in rows
+            for _, _, row_provider, _, row_adapter, row_driver, _ in rows
         ]
         classification_fields = sorted(
             field_name
@@ -285,12 +367,31 @@ def preview_v1_to_v2(public_config: dict[str, Any], *, project_root: Path | str)
             "discovery": {"mode": "manual", "adapter": adapter, "cache_ttl_seconds": 0},
             "models": {},
         }
+        artifact_rows = [row for row in rows if row[6]]
+        artifact_paths = {row[6] for row in artifact_rows}
+        if len(artifact_paths) > 1:
+            conflicts.append(
+                {
+                    "code": "provider_artifact_path_conflict",
+                    "modelIds": sorted(row[0] for row in artifact_rows),
+                }
+            )
+        elif artifact_paths:
+            provider["deployment"] = {
+                "runtime_framework": "",
+                "artifact_path": next(iter(artifact_paths)),
+            }
         provider_id = suggest_provider_id(provider, existing_ids)
         existing_ids.append(provider_id)
         group_provider_ids[(base_url, credential_ref)] = provider_id
-        for legacy_id, entry, _, upstream_id, _, _ in rows:
+        for legacy_id, entry, _, upstream_id, _, _, artifact_path in rows:
             model_key = make_model_key(upstream_id)
-            model_payload = _model_payload(entry, upstream_id)
+            model_entry = entry
+            legacy_label = str(entry.get("label") or "").strip()
+            if artifact_path and upstream_id != artifact_path and _artifact_path_suspected(legacy_label):
+                model_entry = copy.deepcopy(entry)
+                model_entry["label"] = upstream_id
+            model_payload = _model_payload(model_entry, upstream_id)
             seen_key = (provider_id, upstream_id)
             behavior = _model_behavior(model_payload)
             previous = model_defaults_seen.get(seen_key)
@@ -369,7 +470,20 @@ def preview_v1_to_v2(public_config: dict[str, Any], *, project_root: Path | str)
 
     base_hash = public_config_hash(source)
     stable_payload = json.dumps(
-        {"baseHash": base_hash, "providers": provider_dicts, "mapping": model_ref_map, "conflicts": conflicts},
+        {
+            "baseHash": base_hash,
+            "providers": provider_dicts,
+            "mapping": model_ref_map,
+            "conflicts": conflicts,
+            "artifactResolutions": [
+                {
+                    "modelId": resolution.model_id,
+                    "decision": resolution.decision,
+                    "upstreamId": resolution.upstream_id,
+                }
+                for resolution in sorted(resolutions.values(), key=lambda item: item.model_id)
+            ],
+        },
         ensure_ascii=False,
         sort_keys=True,
         separators=(",", ":"),
@@ -613,6 +727,7 @@ def rollback_v1_to_v2(
 
 
 __all__ = [
+    "ArtifactResolution",
     "ModelConfigMigrationPreview",
     "ModelConfigMigrationRollbackError",
     "apply_v1_to_v2",
