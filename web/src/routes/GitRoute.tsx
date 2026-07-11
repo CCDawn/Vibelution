@@ -18,14 +18,17 @@ import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy"
 import { deriveQueryPresentation, type QueryPresentation } from "../app/queryPresentation";
 import { PaneCollapseHandle } from "../components/layout/PaneCollapseHandle";
 import {
+  VActionGroup,
   VButton,
   VIconButton,
   VLoadingValue,
+  VMetricStrip,
   VNativeButton,
   VNativeSelect,
   VNativeTextarea,
   VRouteHeader,
   VStateSurface,
+  VSurface,
 } from "../components/vui";
 import { GitDiffView } from "./GitDiffView";
 import {
@@ -360,7 +363,6 @@ export function GitRoute() {
   const localCommitPreview = (status?.localCommits?.commits ?? []).slice(0, 6);
   const pendingWorktrees = (status?.worktrees?.items ?? []).filter((item) => !item.isMain && item.hasCommits);
   const pendingWorktreePreview = pendingWorktrees.slice(0, 8);
-  const worktreeDetailTarget = pendingWorktrees[0] ?? (status?.worktrees?.items ?? []).find((item) => !item.isMain) ?? null;
   const recentCommits = commitsQuery.data?.commits ?? [];
   const commitBlockReason = getGitCommitBlockReason(
     selectedCount,
@@ -553,58 +555,23 @@ export function GitRoute() {
         )}
       />
 
-      <div className={styles.summaryGrid}>
-        <VNativeButton type="button" className={styles.summaryCard} onClick={selectCurrentBranch} disabled={!status?.branch}>
-          <span>{t("gitBranch")}</span>
-          <strong>
-            {statusInitialLoading
-              ? <VLoadingValue label={gitStatusLoading} />
-              : status?.branch || status?.headRevShort || "-"}
-          </strong>
-        </VNativeButton>
-        <section className={styles.summaryCard}>
-          <span>{t("gitChangedFiles")}</span>
-          <strong>{statusInitialLoading ? <VLoadingValue label={gitStatusLoading} /> : status?.counts.total ?? 0}</strong>
-        </section>
-        <section className={styles.summaryCard}>
-          <span>{t("gitUpstream")}</span>
-          <strong>
-            {statusInitialLoading
-              ? <VLoadingValue label={gitStatusLoading} />
-              : upstream?.name || upstream?.remote || t("gitNoUpstream")}
-          </strong>
-        </section>
-        <section className={styles.summaryCard}>
-          <span>{t("gitAheadBehind")}</span>
-          <strong>{statusInitialLoading ? <VLoadingValue label={gitStatusLoading} /> : aheadBehind}</strong>
-        </section>
-        <section className={styles.summaryCard}>
-          <span>{t("gitLocalCommits")}</span>
-          <strong>{statusInitialLoading ? <VLoadingValue label={gitStatusLoading} /> : localCommitCount}</strong>
-        </section>
-        <VNativeButton
-          type="button"
-          className={styles.summaryCard}
-          onClick={() => {
-            if (worktreeDetailTarget) {
-              selectWorktree(worktreeDetailTarget);
-            }
-          }}
-          disabled={!worktreeDetailTarget}
-        >
-          <span>{t("gitWorktreeBranches")}</span>
-          <strong>
-            {statusInitialLoading
-              ? <VLoadingValue label={gitStatusLoading} />
-              : <>{worktreeBranchCount} / {worktreeTotalCount}</>}
-          </strong>
-        </VNativeButton>
-      </div>
+      <VMetricStrip
+        ariaLabel={t("gitPageTitle")}
+        className={styles.summaryGrid}
+        metrics={[
+          { id: "branch", label: t("gitBranch"), value: statusInitialLoading ? <VLoadingValue label={gitStatusLoading} /> : status?.branch || status?.headRevShort || "-" },
+          { id: "changed", label: t("gitChangedFiles"), value: statusInitialLoading ? <VLoadingValue label={gitStatusLoading} /> : status?.counts.total ?? 0 },
+          { id: "upstream", label: t("gitUpstream"), value: statusInitialLoading ? <VLoadingValue label={gitStatusLoading} /> : upstream?.name || upstream?.remote || t("gitNoUpstream") },
+          { id: "ahead-behind", label: t("gitAheadBehind"), value: statusInitialLoading ? <VLoadingValue label={gitStatusLoading} /> : aheadBehind },
+          { id: "local-commits", label: t("gitLocalCommits"), value: statusInitialLoading ? <VLoadingValue label={gitStatusLoading} /> : localCommitCount },
+          { id: "worktrees", label: t("gitWorktreeBranches"), value: statusInitialLoading ? <VLoadingValue label={gitStatusLoading} /> : [worktreeBranchCount, worktreeTotalCount].join(" / ") },
+        ]}
+      />
 
       {statusPresentation === "error-with-data" ? (
-        <p className={styles.notice}>{statusQuery.error instanceof Error ? statusQuery.error.message : gitStatusError}</p>
+        <VStateSurface className={styles.notice} title={statusQuery.error instanceof Error ? statusQuery.error.message : gitStatusError} tone="error" />
       ) : status && !status.available ? (
-        <p className={styles.notice}>{status.error || t("gitStatusUnavailable")}</p>
+        <VStateSurface className={styles.notice} title={status.error || t("gitStatusUnavailable")} tone="unavailable" />
       ) : null}
 
       <div className={noChangedFiles ? `${styles.workspace} ${styles.workspaceOverview}` : styles.workspace} style={workspaceStyle}>
@@ -721,7 +688,7 @@ export function GitRoute() {
                 </section>
               </div>
             </main>
-            <main className={styles.objectDetailPanel}>
+            <VSurface as="main" ariaLabel={t("gitFileDiff")} className={styles.objectDetailPanel} elevation="panel" padding="none" tone="rail">
               {activeObject ? (
                 <GitDiffView
                   path={activeObject.label}
@@ -737,14 +704,12 @@ export function GitRoute() {
                   }
                 />
               ) : (
-                <div className={styles.emptyPreview}>
-                  <GitBranch size={24} />
-                  <strong>{gitObjectDetailTitle}</strong>
-                  <p>{lang === "zh" ? "点击提交、分支或 worktree 查看内容。" : "Select a commit, branch, or worktree."}</p>
-                </div>
+                <VStateSurface className={styles.emptyPreview} icon={<GitBranch size={24} />} title={gitObjectDetailTitle} tone="empty">
+                  {lang === "zh" ? "点击提交、分支或 worktree 查看内容。" : "Select a commit, branch, or worktree."}
+                </VStateSurface>
               )}
-            </main>
-            <aside className={`${styles.commitPanel} ${styles.historyPanel}`}>
+            </VSurface>
+            <VSurface as="aside" ariaLabel={t("gitRecentCommits")} className={`${styles.commitPanel} ${styles.historyPanel}`} elevation="panel" padding="none" tone="rail">
               <div className={styles.panelHeader}>
                 <div>
                   <p className={styles.panelEyebrow}>{t("gitHead")}</p>
@@ -753,11 +718,11 @@ export function GitRoute() {
                 <GitCommitHorizontal size={18} />
               </div>
               {renderRecentCommitsContent()}
-            </aside>
+            </VSurface>
           </>
         ) : (
           <>
-            <aside className={changePanelCollapsed ? `${styles.changePanel} ${styles.paneCollapsed}` : styles.changePanel} aria-hidden={changePanelCollapsed}>
+            <VSurface as="aside" ariaLabel={t("gitChangedScope")} className={changePanelCollapsed ? `${styles.changePanel} ${styles.paneCollapsed}` : styles.changePanel} elevation="panel" padding="none" tone="rail" aria-hidden={changePanelCollapsed}>
               <div className={styles.panelHeader}>
                 <div>
                   <p className={styles.panelEyebrow}>{t("gitChangedScope")}</p>
@@ -823,7 +788,7 @@ export function GitRoute() {
                 })}
                 {!filteredFiles.length ? <p className={styles.emptyState}>{t("gitNoMatchingChanges")}</p> : null}
               </div>
-            </aside>
+            </VSurface>
 
             <PaneCollapseHandle
               side="left"
@@ -837,7 +802,7 @@ export function GitRoute() {
               onKeyDown={handleChangePanelResizeKeyDown}
             />
 
-            <main className={styles.diffPanel}>
+            <VSurface as="main" ariaLabel={t("gitFileDiff")} className={styles.diffPanel} elevation="panel" padding="none" tone="rail">
               {activeObject ? (
                 <GitDiffView
                   path={activeObject.label}
@@ -867,15 +832,13 @@ export function GitRoute() {
                   }
                 />
               ) : (
-                <div className={styles.emptyPreview}>
-                  <GitBranch size={24} />
-                  <strong>{t("gitFileDiff")}</strong>
-                  <p>{statusQuery.isPending ? t("loading") : t("gitSelectFile")}</p>
-                </div>
+                <VStateSurface className={styles.emptyPreview} icon={<GitBranch size={24} />} title={t("gitFileDiff")} tone="empty">
+                  {statusQuery.isPending ? t("loading") : t("gitSelectFile")}
+                </VStateSurface>
               )}
-            </main>
+            </VSurface>
 
-            <aside className={styles.commitPanel}>
+            <VSurface as="aside" ariaLabel={t("gitManualCommit")} className={styles.commitPanel} elevation="panel" padding="none" tone="rail">
           <section className={styles.manualCommitPanel}>
             <div className={styles.panelHeader}>
               <div>
@@ -975,7 +938,7 @@ export function GitRoute() {
                 onChange={(event) => setCommitMessage(event.target.value)}
               />
             </label>
-            <div className={styles.commitActions} title={t("gitCommitHint")}>
+            <VActionGroup ariaLabel={t("gitManualCommit")} className={styles.commitActions}>
               <VButton
                 type="button"
                 variant="secondary"
@@ -998,7 +961,7 @@ export function GitRoute() {
               >
                 {commitMutation.isPending ? t("gitCommitting") : t("gitCommitSelected")}
               </VButton>
-            </div>
+            </VActionGroup>
             {commitNotice.text ? (
               <p className={commitNotice.tone === "error" ? styles.commitNoticeError : styles.commitNotice}>
                 {commitNotice.text}
@@ -1017,7 +980,7 @@ export function GitRoute() {
             <GitCommitHorizontal size={18} />
           </div>
           {renderRecentCommitsContent()}
-            </aside>
+        </VSurface>
           </>
         )}
       </div>

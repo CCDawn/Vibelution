@@ -18,8 +18,7 @@ export const gitRouteStyles = {
   refreshButton:
     "h-[var(--vui-control-height-sm)] min-h-8 w-[var(--vui-control-height-sm)] flex-none p-0",
   summaryGrid:
-    "grid min-w-0 grid-cols-[repeat(6,minmax(0,1fr))] gap-1.5 px-3 pt-1.5 max-[1180px]:grid-cols-[repeat(3,minmax(0,1fr))] max-[640px]:grid-cols-1",
-  summaryCard: `grid min-h-[52px] min-w-0 grid-cols-[auto_minmax(0,1fr)] items-baseline gap-1.5 ${panelSurface} px-2 py-[5px] text-left text-inherit disabled:cursor-default disabled:opacity-75 data-[vui=native-button]:cursor-pointer data-[vui=native-button]:hover:border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] data-[vui=native-button]:hover:bg-[color-mix(in_srgb,var(--accent-cool)_8%,var(--vui-surface-panel))] [&_span]:whitespace-nowrap [&_span]:text-[var(--vui-font-xs)] [&_span]:uppercase [&_span]:tracking-[0.06em] [&_span]:text-vui-fg-tertiary [&_strong]:min-w-0 [&_strong]:overflow-hidden [&_strong]:text-ellipsis [&_strong]:whitespace-nowrap [&_strong]:text-[var(--vui-font-xs)] [&_strong]:text-vui-fg-primary`,
+    "mx-3 mt-1.5 min-h-[52px] min-w-0 max-w-full overflow-x-auto",
   notice:
     "mx-3.5 mt-2 rounded-[var(--radius-panel)] border border-[color-mix(in_srgb,var(--state-error)_32%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_12%,transparent)] px-2.5 py-2 text-[var(--vui-font-xs)] text-[var(--state-error)]",
   workspace:
@@ -108,7 +107,7 @@ export const gitRouteStyles = {
     "grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 [&_span]:min-w-0 [&_span]:overflow-hidden [&_span]:text-ellipsis [&_span]:whitespace-nowrap [&_span]:text-[var(--vui-font-xs)] [&_span]:text-[var(--fg-tertiary)]",
   modelActionRow: "grid-cols-[auto] justify-end",
   commitActions:
-    "grid min-w-0 grid-cols-[repeat(2,max-content)] justify-end gap-1.5 max-[520px]:grid-cols-[1fr] max-[520px]:justify-start [&_.secondaryButton]:w-fit [&_.primaryButton]:w-fit",
+    "flex min-w-0 flex-wrap justify-end gap-1.5 max-[520px]:justify-start",
   secondaryButton:
     mutedControl,
   primaryButton:

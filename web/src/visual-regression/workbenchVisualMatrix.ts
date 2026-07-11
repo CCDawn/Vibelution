@@ -55,6 +55,52 @@ const compact = WORKBENCH_DESKTOP_VIEWPORTS.compact;
 const standard = WORKBENCH_DESKTOP_VIEWPORTS.standard;
 const wide = WORKBENCH_DESKTOP_VIEWPORTS.wide;
 
+const PHASE_3A_ROUTE_FOCUS = [
+  {
+    path: "/kernel",
+    id: "kernel",
+    focus: ["task queue row density", "selected task and lifecycle hierarchy"],
+  },
+  {
+    path: "/usage",
+    id: "usage",
+    focus: ["metric strip readability", "truthful usage-source state"],
+  },
+  {
+    path: "/logs",
+    id: "logs",
+    focus: ["resizable preview hierarchy", "long path and cleanup visibility"],
+  },
+  {
+    path: "/git",
+    id: "git",
+    focus: ["file/diff/commit hierarchy", "direct commit blocker visibility"],
+  },
+] as const;
+
+const PHASE_3A_THEME_VIEWPORTS = [
+  { theme: "light" as const, viewport: compact, viewportId: "compact" },
+  { theme: "light" as const, viewport: standard, viewportId: "standard" },
+  { theme: "light" as const, viewport: wide, viewportId: "wide" },
+  { theme: "dark" as const, viewport: compact, viewportId: "compact" },
+  { theme: "dark" as const, viewport: standard, viewportId: "standard" },
+  { theme: "dark" as const, viewport: wide, viewportId: "wide" },
+] as const;
+
+const PHASE_3A_VISUAL_SCENARIOS: WorkbenchVisualScenario[] = PHASE_3A_ROUTE_FOCUS.flatMap(
+  (route) =>
+    PHASE_3A_THEME_VIEWPORTS.map(({ theme, viewport, viewportId }) => ({
+      id: [route.id, theme, "default", viewportId, "dense"].join("-"),
+      path: route.path,
+      theme,
+      background: "default",
+      viewport,
+      state: "dense",
+      reviewFocus: [...route.focus],
+      expectedEvidence: "screenshot",
+    })),
+);
+
 export const WORKBENCH_VISUAL_SCENARIOS: WorkbenchVisualScenario[] = [
   {
     id: "home-light-default-standard-empty",
@@ -236,6 +282,7 @@ export const WORKBENCH_VISUAL_SCENARIOS: WorkbenchVisualScenario[] = [
     reviewFocus: ["error state contrast", "custom background overlay in dark smoke"],
     expectedEvidence: "screenshot",
   },
+  ...PHASE_3A_VISUAL_SCENARIOS,
 ];
 
 function sortedUnique<T extends string>(items: T[]): T[] {

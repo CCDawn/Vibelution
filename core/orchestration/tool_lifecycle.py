@@ -13,6 +13,7 @@ from typing import Any, Callable, ClassVar, Dict, List, Optional, Tuple
 
 from langchain_core.messages import AIMessage, ToolMessage
 
+from core.llm.types import CanonicalToolCall, CanonicalToolResult
 from core.infrastructure.llm_utils import parse_tool_args
 from core.infrastructure.tool_result import (
     infer_tool_business_success,
@@ -224,7 +225,12 @@ class ToolLifecycleBridge:
         return "turn_complete"
 
     @staticmethod
-    def handle_tool_result(tool_call: Dict[str, Any], result: Any, action: Optional[str], messages: list) -> None:
+    def handle_tool_result(
+        tool_call: Dict[str, Any],
+        result: Any,
+        action: Optional[str],
+        messages: list,
+    ) -> Optional[CanonicalToolResult]:
         """将工具结果回写到消息历史。"""
         facts = package_tool_result_facts(
             result,
@@ -235,12 +241,36 @@ class ToolLifecycleBridge:
         if action in ("restart", "skip", "hibernated"):
             logger.log_action(action, {"tool": tool_call["name"]})
         tool_call_id = tool_call.get("id")
+        canonical_call = tool_call.get("canonical_tool_call")
+        canonical_result: Optional[CanonicalToolResult] = None
+        if isinstance(canonical_call, CanonicalToolCall):
+            is_error = not infer_tool_business_success(result) or action == "skip"
+            canonical_result = CanonicalToolResult(
+                identity=canonical_call.identity,
+                call_id=canonical_call.call_id,
+                tool_name=canonical_call.name,
+                output=result_str,
+                status="failed" if is_error else "completed",
+                is_error=is_error,
+            )
         if tool_call_id:
-            messages.append(ToolMessage(content=result_str, tool_call_id=tool_call_id))
+            additional_kwargs = (
+                {"canonical_tool_result": canonical_result}
+                if canonical_result is not None
+                else {}
+            )
+            messages.append(
+                ToolMessage(
+                    content=result_str,
+                    tool_call_id=tool_call_id,
+                    additional_kwargs=additional_kwargs,
+                )
+            )
         else:
             messages.append(AIMessage(content=result_str))
         if facts.truncated:
             _debug_logger.warning(f"[工具] {tool_call['name']} 结果过长，已截断", tag="TOOL")
+        return canonical_result
 
     def execute_tools(
         self,

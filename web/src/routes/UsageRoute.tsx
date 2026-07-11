@@ -6,7 +6,7 @@ import { queryKeys } from "../api/queryKeys";
 import type { TokenUsageBreakdownItem, TokenUsageRollup, UsageSource, UsageSummaryResponse } from "../api/types";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
 import { deriveQueryPresentation } from "../app/queryPresentation";
-import { VButton, VIconButton, VLoadingValue, VRouteHeader, VStateSurface, VStatusStrip } from "../components/vui";
+import { VButton, VIconButton, VLoadingValue, VMetricStrip, VRouteHeader, VStateSurface, VStatusStrip, VSurface } from "../components/vui";
 import { useAppI18n } from "../i18n/useAppI18n";
 import styles from "./UsageRoute.styles";
 
@@ -207,49 +207,54 @@ export function UsageRoute() {
         )}
       />
 
-      <div className={styles.overviewBand}>
-        <section className={styles.heroMetric}>
-          <span>{label(lang, "全局累计", "All time")}</span>
-          <strong>{usageValue(usageValueState, allTime?.totalTokens, label(lang, "正在加载全局累计", "Loading all-time usage"))}</strong>
-          <small>{usageValue(usageValueState, allTime?.callCount, label(lang, "正在加载调用次数", "Loading call count"))} {label(lang, "次调用", "calls")}</small>
-        </section>
-        <div className={styles.overviewStats}>
-          <section className={styles.overviewStat}>
-            <span>{label(lang, "今日", "Today")}</span>
-            <strong>{usageValue(usageValueState, today?.totalTokens, label(lang, "正在加载今日用量", "Loading today's usage"))}</strong>
-            <small>{usageValue(usageValueState, today?.inputTokens, label(lang, "正在加载今日输入", "Loading today's input"))} / {usageValue(usageValueState, today?.outputTokens, label(lang, "正在加载今日输出", "Loading today's output"))}</small>
-          </section>
-          <section className={styles.overviewStat}>
-            <span>{label(lang, "最近七日", "Last 7 days")}</span>
-            <strong>{usageValue(usageValueState, last7Days?.totalTokens, label(lang, "正在加载七日用量", "Loading seven-day usage"))}</strong>
-            <small>{usageValue(usageValueState, last7Days?.reasoningOutputTokens, label(lang, "正在加载推理输出", "Loading reasoning output"))} {label(lang, "推理输出", "reasoning")}</small>
-          </section>
-          <section className={styles.overviewStat}>
-            <span>{label(lang, "最近一次", "Latest")}</span>
-            <strong>{usageValue(usageValueState, lastTokenUsage?.totalTokens, label(lang, "正在加载最近用量", "Loading latest usage"))}</strong>
-            <small>{formatTimestamp(lastTokenUsage?.recordedAt, lang)}</small>
-          </section>
-        </div>
-      </div>
+      <VMetricStrip
+        ariaLabel={label(lang, "Token 用量概览", "Token usage overview")}
+        className={styles.overviewBand}
+        metrics={[
+          { id: "all-time", label: label(lang, "全局累计", "All time"), value: usageValue(usageValueState, allTime?.totalTokens, label(lang, "正在加载全局累计", "Loading all-time usage")) },
+          { id: "today", label: label(lang, "今日", "Today"), value: usageValue(usageValueState, today?.totalTokens, label(lang, "正在加载今日用量", "Loading today's usage")) },
+          { id: "last-seven-days", label: label(lang, "最近七日", "Last 7 days"), value: usageValue(usageValueState, last7Days?.totalTokens, label(lang, "正在加载七日用量", "Loading seven-day usage")) },
+          { id: "latest", label: label(lang, "最近一次", "Latest"), value: usageValue(usageValueState, lastTokenUsage?.totalTokens, label(lang, "正在加载最近用量", "Loading latest usage")), detail: formatTimestamp(lastTokenUsage?.recordedAt, lang) },
+        ]}
+        status={{ label: sourceLabel(lastSource, lang), tone: lastSource === "provider_usage" ? "success" : lastSource === "missing" ? "warning" : "info" }}
+      />
 
       {usagePresentation === "error-with-data" ? (
-        <p className={styles.errorState}>
+        <VStateSurface className={styles.emptyState} title={label(lang, "用量摘要读取失败。", "Usage summary failed to load.")} tone="error">
           {usageQuery.error instanceof Error ? usageQuery.error.message : label(lang, "用量摘要读取失败。", "Usage summary failed to load.")}
-        </p>
+        </VStateSurface>
       ) : usageUnavailable ? (
         <VStateSurface
-          className={styles.errorState}
-          tone="error"
+          className={styles.emptyState}
           title={label(lang, "Token 用量暂不可用", "Token usage unavailable")}
+          tone="error"
           actions={<VButton type="button" onPress={() => void usageQuery.refetch()}>{label(lang, "重试", "Retry")}</VButton>}
         >
           {usageQuery.error instanceof Error ? usageQuery.error.message : label(lang, "用量摘要读取失败。", "Usage summary failed to load.")}
+        </VStateSurface>
+      ) : !summary || lastSource === "not_called" ? (
+        <VStateSurface
+          busy={usageQuery.isFetching}
+          className={styles.emptyState}
+          skeletonLines={usageQuery.isFetching}
+          title={label(lang, "尚未调用", "Not called yet")}
+          tone={usageQuery.isFetching ? "loading" : "info"}
+        >
+          {label(lang, "当前没有可用的 Token 用量记录。", "No token usage record is available yet.")}
+        </VStateSurface>
+      ) : lastSource === "missing" ? (
+        <VStateSurface
+          className={styles.emptyState}
+          title={label(lang, "缺少用量", "Missing usage")}
+          tone="unavailable"
+        >
+          {label(lang, "最近一次调用未返回用量；0 不代表成功用量。", "The latest call did not return usage; zero is not successful usage.")}
         </VStateSurface>
       ) : null}
 
       <div className={styles.metricBand}>
         <div className={styles.primaryColumn}>
-          <section className={styles.compositionPanel}>
+          <VSurface as="section" className={styles.compositionPanel} elevation="panel" tone="rail">
             <div className={styles.panelHeader}>
               <div>
                 <p className={styles.panelEyebrow}>{label(lang, "可信度", "Reliability")}</p>
@@ -277,9 +282,9 @@ export function UsageRoute() {
               {renderUsageRow(label(lang, "输出", "Output"), allTimeLoaded.outputTokens, totalTokens, label(lang, "answer", "answer"))}
               {renderUsageRow(label(lang, "推理输出", "Reasoning output"), allTimeLoaded.reasoningOutputTokens, totalTokens, "reasoningOutputTokens")}
             </div></>}
-          </section>
+          </VSurface>
 
-          <section className={styles.rollupPanel}>
+          <VSurface as="section" className={styles.rollupPanel} elevation="panel" tone="rail">
             <div className={styles.panelHeader}>
               <div>
                 <p className={styles.panelEyebrow}>{label(lang, "汇总", "Rollups")}</p>
@@ -326,10 +331,10 @@ export function UsageRoute() {
                 <code><Activity size={13} /> api</code>
               </div>
             </div>}
-          </section>
+          </VSurface>
         </div>
 
-        <aside className={styles.recordPanel}>
+        <VSurface as="aside" className={styles.recordPanel} elevation="panel" tone="rail">
           <div className={styles.panelHeader}>
             <div>
               <p className={styles.panelEyebrow}>{label(lang, "最近记录", "Latest record")}</p>
@@ -369,7 +374,7 @@ export function UsageRoute() {
             </div>
           </div>
           {renderBreakdownList(summary?.breakdowns?.models ?? [], emptyBreakdownLabel)}</>}
-        </aside>
+        </VSurface>
       </div>
     </section>
   );

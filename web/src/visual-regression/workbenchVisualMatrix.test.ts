@@ -20,11 +20,15 @@ describe("Workbench visual regression matrix", () => {
       "/agents",
       "/chat",
       "/config",
+      "/git",
+      "/kernel",
+      "/logs",
       "/memory",
       "/memory/graph",
       "/memory/manage",
       "/supervised-evolution",
       "/teams",
+      "/usage",
     ]);
   });
 
@@ -39,7 +43,7 @@ describe("Workbench visual regression matrix", () => {
   });
 
   it("keeps every desktop scenario actionable for screenshot capture", () => {
-    expect(WORKBENCH_VISUAL_SCENARIOS).toHaveLength(18);
+    expect(WORKBENCH_VISUAL_SCENARIOS).toHaveLength(42);
 
     for (const scenario of WORKBENCH_VISUAL_SCENARIOS) {
       expect(scenario.id).toMatch(/^[a-z0-9-]+$/);
@@ -62,7 +66,36 @@ describe("Workbench visual regression matrix", () => {
     expect(WORKBENCH_VISUAL_SCENARIOS.filter(({ id }) => id.startsWith("agents-"))).toHaveLength(2);
     expect(WORKBENCH_VISUAL_SCENARIOS.filter(({ id }) => id.startsWith("teams-"))).toHaveLength(2);
     expect(WORKBENCH_VISUAL_SCENARIOS.filter(({ id }) => id.startsWith("memory-"))).toHaveLength(6);
-    expect(WORKBENCH_VISUAL_SCENARIOS).toHaveLength(18);
+    expect(WORKBENCH_VISUAL_SCENARIOS).toHaveLength(42);
+  });
+
+  it("covers all stable Phase 3A operational route combinations", () => {
+    const paths = ["/kernel", "/usage", "/logs", "/git"];
+    const scenarios = WORKBENCH_VISUAL_SCENARIOS.filter((scenario) => paths.includes(scenario.path));
+
+    expect(scenarios).toHaveLength(24);
+    for (const path of paths) {
+      const routeScenarios = scenarios.filter((scenario) => scenario.path === path);
+      expect(routeScenarios).toHaveLength(6);
+      expect(routeScenarios.map((scenario) => scenario.theme).sort()).toEqual([
+        "dark",
+        "dark",
+        "dark",
+        "light",
+        "light",
+        "light",
+      ]);
+      expect(
+        routeScenarios
+          .map((scenario) => scenario.viewport.width)
+          .sort((left, right) => left - right),
+      ).toEqual([1280, 1280, 1440, 1440, 1920, 1920]);
+      expect(
+        routeScenarios.every(
+          (scenario) => scenario.state === "dense" && scenario.expectedEvidence === "screenshot",
+        ),
+      ).toBe(true);
+    }
   });
 
   it("documents the quiet workbench visual acceptance checklist", () => {

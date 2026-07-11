@@ -91,7 +91,6 @@ describe("UsageRoute layout contract", () => {
     expect(routeSource).toContain("globalTokenUsage");
     expect(routeSource).toContain("lastTokenUsage");
     expect(routeSource).toContain("rollupFilters");
-    expect(routeSource).toContain("heroMetric");
     expect(routeSource).toContain("Token 构成");
     expect(routeSource).toContain("Token composition");
     expect(routeSource).toContain("计数概览");
@@ -108,19 +107,25 @@ describe("UsageRoute layout contract", () => {
     expect(routeSource).not.toContain("billing");
   });
 
-  it("keeps the usage page dense without hero or nested-card composition", () => {
+  it("uses a metric strip and distinguishes not-called usage from zero usage", () => {
+    expect(routeSource).toContain("VMetricStrip");
+    expect(routeSource).toContain("VStateSurface");
+    expect(routeSource).toContain('lastSource === "not_called"');
+    expect(routeSource).toContain("尚未调用");
+    expect(routeSource).toContain("Not called yet");
+    expect(styles.overviewBand).toContain("min-w-0");
+  });
+
+  it("keeps the usage page dense with shared hierarchy instead of hero or nested-card composition", () => {
     expect(styles.page).toBeTypeOf("string");
     expect(styles.overviewBand).toBeTypeOf("string");
-    expect(styles.heroMetric).toBeTypeOf("string");
+    expect(styles.emptyState).toBeTypeOf("string");
     expect(styles.metricBand).toBeTypeOf("string");
     expect(stylesSource).toContain("grid-cols-[minmax(0,1fr)_minmax(280px,360px)]");
     expect(stylesSource).toContain("bg-vui-surface-panel/88");
     expect(stylesSource).toContain("min-h-0");
-    expect(styles.heroMetric).toContain("rounded-[var(--radius-panel)]");
     expect(styles.usageRow).toContain("hover:bg-[var(--vui-surface-row-hover)]");
-    expect(styles.errorState).toContain("rounded-[var(--radius-control)]");
-    expect(styles.heroMetric).toContain("[&_strong]:text-[1.18rem]");
-    expect(styles.overviewStat).toContain("[&_strong]:text-[0.96rem]");
+    expect(styles.emptyState).toContain("mx-3 mt-2");
     expect(styles.compositionPanel).toContain("p-2");
     expect(styles.rollupPanel).toContain("p-2");
     expect(styles.recordPanel).toContain("p-2");
@@ -175,8 +180,7 @@ describe("UsageRoute layout contract", () => {
   });
 
   it("reserves stable metric heights while values load", () => {
-    expect(styles.heroMetric).toContain("grid min-h-[76px]");
-    expect(styles.overviewStat).toContain("grid min-h-[58px]");
+    expect(styles.overviewBand).toContain("min-h-[58px]");
     expect(styles.sourceTile).toContain("grid min-h-[50px]");
   });
 
