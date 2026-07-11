@@ -334,6 +334,133 @@ def test_v2_config_loader_applies_named_provider_noncredential_env_increment(
     assert effective.llm.get_profile("primary").provider_id == "pixel_relay"
 
 
+def test_v2_config_loader_rejects_env_schema_downgrade_without_secret_echo(tmp_path, monkeypatch) -> None:
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(_v2_toml(), encoding="utf-8")
+    monkeypatch.setenv("AGENT_LLM__SCHEMA_VERSION", "1")
+    monkeypatch.setenv("OPENAI_API_KEY", "downgrade-secret-must-not-appear")
+
+    with pytest.raises(ValueError) as exc_info:
+        ConfigLoader(str(config_path)).load()
+
+    message = str(exc_info.value)
+    assert message == "schema_version cannot be changed by incremental config"
+    assert "downgrade-secret-must-not-appear" not in message
+
+
+def test_v2_config_loader_treats_equal_env_schema_as_noop_and_keeps_credentials_lazy(tmp_path, monkeypatch) -> None:
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(_v2_toml(), encoding="utf-8")
+    monkeypatch.setenv("AGENT_LLM__SCHEMA_VERSION", "2")
+    monkeypatch.setenv("OPENAI_API_KEY", "canonical-secret-must-stay-lazy")
+
+    effective = ConfigLoader(str(config_path)).load()
+
+    assert effective.llm.schema_version == 2
+    assert set(effective.llm.providers) == {"pixel_relay"}
+    assert effective.llm.get_profile("primary").provider_id == "pixel_relay"
+    assert effective.llm.get_provider("pixel_relay").api_key == ""
+    assert "canonical-secret-must-stay-lazy" not in repr(effective)
+
+
+def test_v2_config_loader_locks_schema_for_kwargs_and_strips_equal_declaration(tmp_path) -> None:
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(_v2_toml(), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="^schema_version cannot be changed by incremental config$"):
+        ConfigLoader(str(config_path)).load(**{"llm.schema_version": 1})
+
+    effective = ConfigLoader(str(config_path)).load(
+        **{
+            "llm.schema_version": 2,
+            "llm.providers.pixel_relay.label": "Schema Locked Relay",
+        }
+    )
+    assert effective.llm.schema_version == 2
+    assert effective.llm.get_provider("pixel_relay").label == "Schema Locked Relay"
+
+
+@pytest.mark.parametrize(
+    ("path", "field", "value"),
+    [
+        ("llm.providers.pixel_relay.base_url", "base_url", "https://kwargs-relay.example/v1"),
+        ("llm.providers.pixel_relay.label", "label", "Kwargs Relay"),
+    ],
+)
+def test_v2_config_loader_applies_named_provider_noncredential_kwargs(
+    path: str,
+    field: str,
+    value: str,
+    tmp_path,
+) -> None:
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(_v2_toml(), encoding="utf-8")
+
+    effective = ConfigLoader(str(config_path)).load(**{path: value})
+
+    assert getattr(effective.llm.get_provider("pixel_relay"), field) == value
+    assert set(effective.llm.providers) == {"pixel_relay"}
+    assert effective.llm.get_profile("primary").provider_id == "pixel_relay"
+
+
+def test_v2_config_loader_applies_profile_scalar_kwargs(tmp_path) -> None:
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(_v2_toml(), encoding="utf-8")
+
+    effective = ConfigLoader(str(config_path)).load(**{"llm.profiles.primary.temperature": 0.15})
+
+    assert effective.llm.get_profile("primary").temperature == 0.15
+    assert effective.llm.get_profile("primary").provider_id == "pixel_relay"
+
+
+@pytest.mark.parametrize(
+    ("path", "expected_error"),
+    [
+        (
+            "llm.providers.pixel_relay.api_key",
+            "schema v2 credential fields are not allowed in incremental config",
+        ),
+        (
+            "llm.profiles.primary.provider.base_url",
+            "schema v2 inline providers are not allowed in incremental config",
+        ),
+        ("llm.providers.unknown.base_url", "schema v2 incremental config cannot add providers"),
+        ("llm.profiles.unknown.temperature", "schema v2 incremental config cannot add profiles"),
+    ],
+)
+def test_v2_config_loader_rejects_unsafe_kwargs_increment(path: str, expected_error: str, tmp_path) -> None:
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(_v2_toml(), encoding="utf-8")
+
+    with pytest.raises(ValueError) as exc_info:
+        ConfigLoader(str(config_path)).load(**{path: "kwargs-secret-must-not-appear"})
+
+    message = str(exc_info.value)
+    assert message == expected_error
+    assert "kwargs-secret-must-not-appear" not in message
+
+
+def test_v1_config_loader_keeps_profile_scalar_kwargs_behavior(tmp_path) -> None:
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        """
+[llm.providers.default]
+kind = "relay"
+base_url = "https://relay.example/v1"
+
+[llm.profiles.primary]
+provider_id = "default"
+model = "gpt-5.6-luna"
+""".strip(),
+        encoding="utf-8",
+    )
+
+    effective = ConfigLoader(str(config_path)).load(**{"llm.profiles.primary.temperature": 0.2})
+
+    assert effective.llm.schema_version == 1
+    assert effective.llm.get_profile("primary").temperature == 0.2
+
+
 def test_v1_config_loader_still_materializes_legacy_provider_api_key(tmp_path, monkeypatch) -> None:
     config_path = tmp_path / "config.toml"
     config_path.write_text(

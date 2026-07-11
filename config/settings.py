@@ -1264,7 +1264,7 @@ class ConfigLoader:
         # 2. 从 TOML 加载
         toml_config = self._load_from_toml()
         if toml_config:
-            config = self._apply_dict(config, toml_config)
+            config = self._apply_dict(config, toml_config, allow_schema_transition=True)
 
         # 3. 从环境变量加载（较高优先级，会覆盖 TOML）
         env_config = self._load_from_env(
@@ -1335,10 +1335,15 @@ class ConfigLoader:
             else:
                 result[normalized_key] = value
 
-        # 转换嵌套格式为 Pydantic 字段格式（与 _normalize_toml_keys 一致）
-        return self._normalize_toml_keys(result)
+        return result
 
-    def _apply_dict(self, config: AppConfig, data: Dict[str, Any]) -> AppConfig:
+    def _apply_dict(
+        self,
+        config: AppConfig,
+        data: Dict[str, Any],
+        *,
+        allow_schema_transition: bool = False,
+    ) -> AppConfig:
         """
         将字典应用到配置对象（深度合并）
 
@@ -1350,6 +1355,16 @@ class ConfigLoader:
             更新后的配置
         """
         incoming_llm = data.get("llm")
+        if isinstance(incoming_llm, dict) and "schema_version" in incoming_llm and not allow_schema_transition:
+            try:
+                incoming_schema_version = int(incoming_llm.get("schema_version"))
+            except (TypeError, ValueError):
+                raise ValueError("invalid schema_version in incremental config") from None
+            if incoming_schema_version != config.llm.schema_version:
+                raise ValueError("schema_version cannot be changed by incremental config")
+            data = copy.deepcopy(data)
+            incoming_llm = data["llm"]
+            incoming_llm.pop("schema_version", None)
         is_v2_increment = (
             config.llm.schema_version == 2
             and isinstance(incoming_llm, dict)
