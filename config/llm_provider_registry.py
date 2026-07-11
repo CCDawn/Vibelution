@@ -15,6 +15,21 @@ from .llm_identity import (
 )
 
 
+_PINNED_MODEL_RESERVED_OVERRIDE_FIELDS = frozenset(
+    {
+        "api_key",
+        "api_key_env",
+        "credential_ref",
+        "enabled",
+        "label",
+        "model_key",
+        "model_ref",
+        "provider_id",
+        "upstream_id",
+    }
+)
+
+
 def _providers(public_config: dict[str, Any]) -> dict[str, dict[str, Any]]:
     llm = public_config.get("llm", {}) if isinstance(public_config, dict) else {}
     if int(llm.get("schema_version") or 1) != 2:
@@ -128,6 +143,9 @@ def pin_llm_model(
     overrides: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     updated = copy.deepcopy(public_config)
+    resolved_overrides = copy.deepcopy(overrides or {})
+    if _PINNED_MODEL_RESERVED_OVERRIDE_FIELDS.intersection(resolved_overrides):
+        raise ValueError("pinned model overrides contain reserved fields")
     provider = _providers(updated).get(provider_id)
     if not isinstance(provider, dict):
         raise ValueError(f"unknown LLM provider: {provider_id}")
@@ -140,7 +158,7 @@ def pin_llm_model(
         "upstream_id": str(upstream_id),
         "label": str(label or upstream_id),
         "enabled": True,
-        **copy.deepcopy(overrides or {}),
+        **resolved_overrides,
     }
     return updated
 
@@ -151,7 +169,12 @@ def unpin_llm_model(public_config: dict[str, Any], model_ref: str) -> dict[str, 
     provider = _providers(updated).get(provider_id)
     if not isinstance(provider, dict):
         raise ValueError(f"unknown LLM provider: {provider_id}")
-    provider.get("models", {}).pop(model_key, None)
+    models = provider.get("models")
+    if not isinstance(models, dict):
+        raise ValueError("provider models must be an object")
+    if model_key not in models:
+        raise ValueError("unknown pinned model")
+    models.pop(model_key)
     return updated
 
 
