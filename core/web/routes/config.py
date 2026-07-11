@@ -5,7 +5,9 @@ from __future__ import annotations
 from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.routing import APIRoute
 from pydantic import BaseModel, ConfigDict, Field
 
 from core.web.services.avatar_image_service import resolve_user_avatar_file, store_user_avatar_image
@@ -34,6 +36,34 @@ from core.web.services.theme_background_service import (
 
 
 router = APIRouter(tags=["config"])
+
+
+class _RedactedMigrationValidationRoute(APIRoute):
+    def get_route_handler(self):
+        original_route_handler = super().get_route_handler()
+
+        async def redacted_route_handler(request):
+            try:
+                return await original_route_handler(request)
+            except RequestValidationError as exc:
+                return JSONResponse(
+                    status_code=422,
+                    content={
+                        "detail": [
+                            {
+                                "loc": ["body"],
+                                "type": str(error.get("type") or "validation_error"),
+                                "msg": "Invalid request payload",
+                            }
+                            for error in exc.errors()
+                        ]
+                    },
+                )
+
+        return redacted_route_handler
+
+
+migration_router = APIRouter(route_class=_RedactedMigrationValidationRoute)
 
 
 class IntakeModeUpdateRequest(BaseModel):
@@ -197,7 +227,7 @@ def config_workspace() -> dict:
     return get_config_workspace()
 
 
-@router.post("/config/migration/llm-v2/preview")
+@migration_router.post("/config/migration/llm-v2/preview")
 def config_llm_v2_migration_preview(
     payload: ConfigMigrationPreviewPayload | None = None,
 ) -> dict:
@@ -221,7 +251,7 @@ def config_llm_v2_migration_preview(
         _raise_config_http_error(exc)
 
 
-@router.post("/config/migration/llm-v2/apply")
+@migration_router.post("/config/migration/llm-v2/apply")
 def config_llm_v2_migration_apply(payload: ConfigMigrationApplyPayload) -> dict:
     try:
         return provider_config_service.apply_llm_v2_migration(
@@ -230,6 +260,9 @@ def config_llm_v2_migration_apply(payload: ConfigMigrationApplyPayload) -> dict:
         )
     except Exception as exc:  # pragma: no cover - routed below
         _raise_config_http_error(exc)
+
+
+router.include_router(migration_router)
 
 
 @router.post("/config/migration/llm-v2/{migration_id}/rollback")
