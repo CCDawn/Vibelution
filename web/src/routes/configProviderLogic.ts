@@ -54,6 +54,7 @@ export function deriveProviderRegistryRows(
 }
 
 export type ProviderWizardStep = "template" | "connection" | "discovery" | "pin";
+export type ProviderAuthKind = "api_key" | "oauth" | "none";
 
 export type ProviderWizardState = {
   step: ProviderWizardStep;
@@ -62,6 +63,7 @@ export type ProviderWizardState = {
   providerId: string;
   label: string;
   baseUrl: string;
+  authKind: ProviderAuthKind;
   credentialRef: string;
   driver: string;
   defaultProtocol: string;
@@ -74,7 +76,7 @@ export type ProviderWizardState = {
 
 export type ProviderWizardAction =
   | { type: "choose_template"; templateId: string; serviceClass: string }
-  | { type: "set_connection"; providerId: string; label: string; baseUrl: string; credentialRef: string }
+  | { type: "set_connection"; providerId: string; label: string; baseUrl: string; authKind?: ProviderAuthKind; credentialRef: string }
   | { type: "set_protocol"; driver: string; defaultProtocol: string; allowedProtocols: string[] }
   | { type: "set_deployment"; runtimeFramework: string; artifactPath: string }
   | { type: "set_discovery"; models: ConfigCatalogModel[] }
@@ -94,6 +96,7 @@ export function initialProviderWizardState(): ProviderWizardState {
     providerId: "",
     label: "",
     baseUrl: "",
+    authKind: "api_key",
     credentialRef: "",
     driver: "",
     defaultProtocol: "",
@@ -110,11 +113,14 @@ export function canAdvanceProviderWizard(state: ProviderWizardState): boolean {
     return Boolean(state.templateId && state.serviceClass);
   }
   if (state.step === "connection") {
+    const credentialReady = state.authKind === "none"
+      ? state.credentialRef === "none"
+      : Boolean(state.credentialRef && state.credentialRef !== "none");
     const connectionReady = Boolean(
       state.providerId
       && state.label
       && state.baseUrl
-      && state.credentialRef
+      && credentialReady
       && state.driver
       && state.defaultProtocol
       && state.allowedProtocols.includes(state.defaultProtocol)
@@ -200,14 +206,16 @@ export function providerWizardReducer(state: ProviderWizardState, action: Provid
     if (state.step !== "connection") {
       return state;
     }
-    const routeChanged = state.providerId !== action.providerId
-      || state.baseUrl !== action.baseUrl
-      || state.credentialRef !== action.credentialRef;
+    const nextAuthKind = action.authKind ?? state.authKind;
+    const routeChanged = state.baseUrl !== action.baseUrl
+      || state.credentialRef !== action.credentialRef
+      || state.authKind !== nextAuthKind;
     return {
       ...state,
       providerId: action.providerId,
       label: action.label,
       baseUrl: action.baseUrl,
+      authKind: nextAuthKind,
       credentialRef: action.credentialRef,
       ...(routeChanged
         ? {

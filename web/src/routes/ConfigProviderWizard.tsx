@@ -18,6 +18,7 @@ import {
   canAdvanceProviderWizard,
   dispatchProviderWizardConnectionAction,
   isProviderWizardConnectionLocked,
+  type ProviderAuthKind,
   type ProviderWizardAction,
   type ProviderWizardState,
   type ProviderWizardStep,
@@ -62,6 +63,11 @@ function asString(value: unknown): string {
   return typeof value === "string" ? value : "";
 }
 
+function normalizeProviderAuthKind(value: unknown, credentialRef: string): ProviderAuthKind {
+  if (value === "api_key" || value === "oauth" || value === "none") return value;
+  return credentialRef === "none" ? "none" : "api_key";
+}
+
 function templateServiceClass(template: ConfigProviderPresetOption): string {
   const serviceClass = asString(asRecord(template.provider).service_class);
   if (serviceClass) return serviceClass;
@@ -79,9 +85,9 @@ function providerDraft(state: ProviderWizardState, template?: ConfigProviderPres
     service_class: state.serviceClass,
     driver: state.driver,
     base_url: state.baseUrl,
-    auth_kind: asString(source.auth_kind) || (state.credentialRef === "none" ? "none" : "api_key"),
+    auth_kind: state.authKind,
     credential_ref: state.credentialRef,
-    requires_credential: state.credentialRef !== "none",
+    requires_credential: state.authKind !== "none",
     protocols: { default: state.defaultProtocol, allowed: state.allowedProtocols },
     discovery: {
       ...asRecord(source.discovery),
@@ -132,12 +138,14 @@ export function ConfigProviderWizard({
     const allowed = Array.isArray(protocols.allowed)
       ? protocols.allowed.filter((value): value is string => typeof value === "string")
       : [];
+    const credentialRef = state.credentialRef || asString(templateProvider.credential_ref) || "none";
     onChange({
       type: "set_connection",
       providerId: state.providerId,
       label: state.label || selectedTemplate.label,
       baseUrl: state.baseUrl || asString(templateProvider.base_url),
-      credentialRef: state.credentialRef || asString(templateProvider.credential_ref) || "none",
+      authKind: normalizeProviderAuthKind(templateProvider.auth_kind, credentialRef),
+      credentialRef,
     });
     onChange({
       type: "set_protocol",
@@ -166,6 +174,7 @@ export function ConfigProviderWizard({
               providerId: suggestedProviderId,
               label: state.label,
               baseUrl: state.baseUrl,
+              authKind: state.authKind,
               credentialRef: state.credentialRef,
             });
           }
@@ -180,12 +189,13 @@ export function ConfigProviderWizard({
     };
   }, [onChange, onSuggestProviderId, providerCreated, selectedProviderDraft, state.baseUrl, state.credentialRef, state.label, state.providerId, state.step, state.templateId]);
 
-  function updateConnection(patch: Partial<Pick<ProviderWizardState, "providerId" | "label" | "baseUrl" | "credentialRef">>) {
+  function updateConnection(patch: Partial<Pick<ProviderWizardState, "providerId" | "label" | "baseUrl" | "authKind" | "credentialRef">>) {
     const changed = dispatchProviderWizardConnectionAction(connectionLocked, {
       type: "set_connection",
       providerId: patch.providerId ?? state.providerId,
       label: patch.label ?? state.label,
       baseUrl: patch.baseUrl ?? state.baseUrl,
+      authKind: patch.authKind ?? state.authKind,
       credentialRef: patch.credentialRef ?? state.credentialRef,
     }, onChange);
     if (changed) setLocalError("");
@@ -331,7 +341,23 @@ export function ConfigProviderWizard({
             </label>
             <label className={styles.field}>
               <span>Auth kind</span>
-              <VStringSelect ariaLabel="Auth kind" value={asString(selectedProviderDraft.auth_kind)} isDisabled options={[{ value: "none", label: "none" }, { value: "api_key", label: "API key" }, { value: "bearer", label: "Bearer" }]} onValueChange={() => undefined} />
+              <VStringSelect
+                ariaLabel="Auth kind"
+                value={state.authKind}
+                isDisabled={connectionLocked}
+                options={[
+                  { value: "api_key", label: "API key" },
+                  { value: "oauth", label: "OAuth" },
+                  { value: "none", label: "None" },
+                ]}
+                onValueChange={(value) => {
+                  const authKind = value as ProviderAuthKind;
+                  updateConnection({
+                    authKind,
+                    credentialRef: authKind === "none" ? "none" : state.credentialRef === "none" ? "" : state.credentialRef,
+                  });
+                }}
+              />
             </label>
             <label className={styles.field}>
               <span>Driver</span>

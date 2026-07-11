@@ -130,6 +130,18 @@ describe("ConfigRoute layout contract", () => {
     expect(wizardSource).toContain("isDisabled={connectionLocked}");
   });
 
+  it("uses the backend auth kind contract in wizard state and create payload", () => {
+    expect(wizardSource).toContain('value={state.authKind}');
+    expect(wizardSource).toContain('{ value: "api_key", label: "API key" }');
+    expect(wizardSource).toContain('{ value: "oauth", label: "OAuth" }');
+    expect(wizardSource).toContain('{ value: "none", label: "None" }');
+    expect(wizardSource).not.toContain('value: "bearer"');
+    expect(wizardSource).toContain("auth_kind: state.authKind");
+    expect(wizardSource).toContain('requires_credential: state.authKind !== "none"');
+    expect(routeSource).toContain("auth_kind: state.authKind");
+    expect(routeSource).toContain('requires_credential: state.authKind !== "none"');
+  });
+
   it("shows capability provenance without native title and avoids fake row-level migration counts", () => {
     expect(providerPanelSource).not.toContain('title={`${observation.source}');
     expect(providerPanelSource).toContain("observation.source");
