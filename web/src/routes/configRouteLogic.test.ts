@@ -529,6 +529,19 @@ describe("configRouteLogic", () => {
     expect(summary.accounts.map((account) => account.id)).toEqual(["relay_a", "relay_b"]);
   });
 
+  it("enables legacy account heuristics only for explicit schema version one", () => {
+    const legacy = option({
+      provider_id: undefined,
+      model_ref: undefined,
+      upstream_id: undefined,
+      provider: { kind: "relay", base_url: "https://legacy.example/v1", api_key_env: "LEGACY_KEY" },
+    });
+
+    expect(deriveModelCenterSummary({ modelOptions: [legacy] }).accounts).toEqual([]);
+    expect(deriveModelCenterSummary({ schemaVersion: 2, modelOptions: [legacy] }).accounts).toEqual([]);
+    expect(deriveModelCenterSummary({ schemaVersion: 1, modelOptions: [legacy] }).accounts).toHaveLength(1);
+  });
+
   it("builds compact model inventory rows with asset editability in one place", () => {
     const libraryModel = option({
       model_id: "relay_gpt_5_6_luna",

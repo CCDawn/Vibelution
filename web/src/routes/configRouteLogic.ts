@@ -689,7 +689,7 @@ export function deriveModelCenterSummary(input: {
   for (const option of input.modelOptions) {
     const provider = asRecord(option.provider);
     const providerId = String(option.provider_id || "").trim();
-    const id = providerId || (input.schemaVersion === 2 ? "" : legacyAccountIdForModelOption(option));
+    const id = providerId || (input.schemaVersion === 1 ? legacyAccountIdForModelOption(option) : "");
     if (!id) {
       continue;
     }
