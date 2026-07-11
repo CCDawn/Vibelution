@@ -28,6 +28,27 @@ _PINNED_MODEL_RESERVED_OVERRIDE_FIELDS = frozenset(
         "upstream_id",
     }
 )
+_CREDENTIAL_FIELDS = frozenset({"api_key", "api_key_env", "credential_ref"})
+
+
+def _contains_credential_field(value: Any) -> bool:
+    pending = [value]
+    visited: set[int] = set()
+    while pending:
+        current = pending.pop()
+        if not isinstance(current, (dict, list)):
+            continue
+        identity = id(current)
+        if identity in visited:
+            continue
+        visited.add(identity)
+        if isinstance(current, dict):
+            if _CREDENTIAL_FIELDS.intersection(current):
+                return True
+            pending.extend(current.values())
+        else:
+            pending.extend(current)
+    return False
 
 
 def _providers(public_config: dict[str, Any]) -> dict[str, dict[str, Any]]:
@@ -144,7 +165,9 @@ def pin_llm_model(
 ) -> dict[str, Any]:
     updated = copy.deepcopy(public_config)
     resolved_overrides = copy.deepcopy(overrides or {})
-    if _PINNED_MODEL_RESERVED_OVERRIDE_FIELDS.intersection(resolved_overrides):
+    if _PINNED_MODEL_RESERVED_OVERRIDE_FIELDS.intersection(
+        resolved_overrides
+    ) or _contains_credential_field(resolved_overrides):
         raise ValueError("pinned model overrides contain reserved fields")
     provider = _providers(updated).get(provider_id)
     if not isinstance(provider, dict):

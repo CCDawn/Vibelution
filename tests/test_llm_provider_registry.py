@@ -138,6 +138,59 @@ def test_pin_rejects_reserved_identity_and_ownership_overrides(
     assert config == original
 
 
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"compatibility": {"api_key": "must-not-appear"}},
+        {"compatibility": {"payload": [{"api_key_env": "must-not-appear"}]}},
+        {"metadata": [{"nested": {"credential_ref": "must-not-appear"}}]},
+    ],
+)
+def test_pin_rejects_nested_credential_fields_without_mutating_input(
+    overrides: dict,
+) -> None:
+    config = add_llm_provider(_empty_v2(), "relay_a", _provider())
+    original = copy.deepcopy(config)
+    sentinel = "must-not-appear"
+
+    with pytest.raises(
+        ValueError, match="^pinned model overrides contain reserved fields$"
+    ) as exc_info:
+        pin_llm_model(
+            config,
+            "relay_a",
+            upstream_id="gpt-a",
+            overrides=overrides,
+        )
+
+    assert str(exc_info.value) == "pinned model overrides contain reserved fields"
+    assert sentinel not in str(exc_info.value)
+    assert config == original
+
+
+def test_pin_preserves_nested_noncredential_metadata() -> None:
+    config = add_llm_provider(_empty_v2(), "relay_a", _provider())
+    overrides = {
+        "compatibility": {
+            "payload": [{"supports_tools": True}],
+            "tags": ["relay", "stable"],
+        }
+    }
+
+    updated = pin_llm_model(
+        config,
+        "relay_a",
+        upstream_id="gpt-a",
+        overrides=overrides,
+    )
+
+    assert (
+        updated["llm"]["providers"]["relay_a"]["models"]["gpt-a"]["compatibility"]
+        == overrides["compatibility"]
+    )
+    assert config["llm"]["providers"]["relay_a"]["models"] == {}
+
+
 def test_update_preserves_models_without_implicit_ref_migration() -> None:
     config = add_llm_provider(_empty_v2(), "relay_a", _provider())
     config = pin_llm_model(config, "relay_a", upstream_id="gpt-a")
