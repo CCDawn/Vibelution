@@ -2,10 +2,8 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import configRouteSource from "./src/routes/ConfigRoute.tsx?raw";
-import modelLibraryPanelSource from "./src/routes/ConfigModelLibraryPanel.tsx?raw";
 
 const configRouteStylesSource = readFileSync(new URL("./src/routes/ConfigRoute.styles.ts", import.meta.url), "utf-8");
-const modelLibrarySurfaceSource = [configRouteSource, modelLibraryPanelSource].join("\n");
 
 describe("ConfigRoute layout density contract", () => {
   it("uses separate compact view and edit field card classes", () => {
@@ -54,11 +52,13 @@ describe("ConfigRoute content experience contract", () => {
     expect(schemaSource).toContain("Restart the workbench after changing it");
   });
 
-  it("shows model edit failures inside the model editor instead of relying only on the page notice", () => {
-    expect(configRouteSource).toContain("modelEditorError");
-    expect(modelLibraryPanelSource).toContain('role="alert"');
-    expect(modelLibraryPanelSource).toContain("styles.inlineFormError");
-    expect(configRouteSource).toContain("setModelEditorError(markError(error))");
+  it("keeps provider-first actions visible and does not restore the legacy model panel", () => {
+    expect(configRouteSource).toContain("workspace.schemaVersion === 2");
+    expect(configRouteSource).toContain("<ConfigProviderRegistryPanel");
+    expect(configRouteSource).toContain("<ConfigProviderWizard");
+    expect(configRouteSource).toContain("<ConfigModelMigrationPanel");
+    expect(configRouteSource).toContain('providerActionError ? <p className={styles.noticeError} role="alert"');
+    expect(configRouteSource).not.toContain('from "./ConfigModelLibraryPanel"');
   });
 
   it("keeps model binding editing out of settings after moving it to Agent management", () => {
@@ -75,14 +75,6 @@ describe("ConfigRoute content experience contract", () => {
     expect(configRouteSource).not.toContain("handleApplySelectedProfileModels");
     expect(configRouteSource).not.toContain("handleAddProfile");
     expect(configRouteSource).not.toContain("handleTestProfile(");
-
-    const modelsStart = modelLibraryPanelSource.indexOf("copy.modelsBodyShort");
-    const modelEditorStart = modelLibraryPanelSource.indexOf("modelEditor.mode", modelsStart);
-    const modelsIntroSource = modelLibraryPanelSource.slice(modelsStart, modelEditorStart);
-    expect(modelsIntroSource).toContain("copy.modelCenterModels");
-    expect(modelsIntroSource).toContain("copy.modelCenterAccounts");
-    expect(modelsIntroSource).toContain("copy.modelCenterCapabilityIssues");
-    expect(modelsIntroSource).not.toContain("copy.modelCenterBindings");
   });
 
   it("separates model assets and git model settings in the sidebar", () => {
@@ -94,98 +86,6 @@ describe("ConfigRoute content experience contract", () => {
     expect(configRouteSource).not.toContain('memberSectionIds: ["prompt"]');
     expect(configRouteSource).not.toContain('memberSectionIds: ["profiles", "models", "llm-profiles", "llm-discovery", "git-commit-profile"]');
     expect(configRouteSource).not.toContain('memberSectionIds: ["health-diagnostics", "tools", "git-commit-profile"');
-  });
-
-  it("keeps model-library advanced transport fields behind a disclosure", () => {
-    expect(modelLibraryPanelSource).toContain("styles.advancedEditorPanel");
-    expect(modelLibraryPanelSource).toContain("copy.modelEditorAdvancedTitle");
-
-    const advancedPanelStart = modelLibraryPanelSource.indexOf('className={styles.advancedEditorPanel}');
-    const saveButtonStart = modelLibraryPanelSource.indexOf("copy.saveModel", advancedPanelStart);
-    const advancedPanelSource = modelLibraryPanelSource.slice(advancedPanelStart, saveButtonStart);
-
-    expect(advancedPanelSource).toContain("copy.transport");
-    expect(advancedPanelSource).toContain("copy.contract");
-    expect(advancedPanelSource).toContain("copy.timeout");
-    expect(advancedPanelSource).toContain("MODEL_TRANSPORT_OPTIONS.map");
-    expect(advancedPanelSource).toContain("MODEL_CONTRACT_OPTIONS.map");
-    expect(advancedPanelSource).toContain("MODEL_TOOL_CALLING_MODE_OPTIONS.map");
-    expect(advancedPanelSource).toContain("PROVIDER_COMPAT_MODE_OPTIONS.map");
-    expect(advancedPanelSource).toContain("value={modelEditor.details.transport}");
-    expect(advancedPanelSource).toContain("value={modelEditor.details.contract}");
-    expect(advancedPanelSource).toContain("value={modelEditor.details.tool_calling_mode}");
-  });
-
-  it("treats model deletion as model-key cleanup in user-facing copy", () => {
-    expect(configRouteSource).toContain("删除模型会同步清理该模型唯一绑定的环境密钥");
-    expect(configRouteSource).toContain("Deleting a model also clears the unique environment key bound to that model");
-    expect(configRouteSource).toContain("window.confirm(copy.deleteModelConfirm)");
-    expect(configRouteSource).not.toContain("Deleting a model only removes the config entry");
-  });
-
-  it("guards model library action buttons against invalid or locked edits", () => {
-    expect(configRouteSource).toContain("const modelEditorRequiredFieldsReady = Boolean(modelEditor.model.trim() && modelEditor.provider.base_url.trim())");
-    expect(configRouteSource).toContain("const canSubmitModelEditor = !structuredActionsDisabled && modelEditorRequiredFieldsReady");
-    expect(modelLibraryPanelSource).toContain("isDisabled={!canSubmitModelEditor}");
-    expect(configRouteSource).toContain("setModelEditorError(copy.modelRequiredFieldsMissing)");
-    expect(modelLibraryPanelSource).toContain("title={modelEditorRequiredFieldsReady ? undefined : copy.modelRequiredFieldsMissing}");
-    expect(modelLibraryPanelSource).toContain("isDisabled={structuredActionsDisabled || !row.editable || !option}");
-    expect(modelLibraryPanelSource).toContain("isDisabled={structuredActionsDisabled}");
-  });
-
-  it("labels the bulk image capability check as saved-model scoped", () => {
-    expect(modelLibraryPanelSource).toContain("copy.checkSavedImageCapabilities");
-    expect(configRouteSource).toContain('checkSavedImageCapabilities: "检测已保存模型图像输入"');
-    expect(configRouteSource).toContain('checkSavedImageCapabilities: "Check saved models image input"');
-  });
-
-  it("uses one model-library test control for the selected model", () => {
-    expect(configRouteSource).toContain("selectedModelTestId");
-    expect(configRouteSource).toContain("handleTestSelectedLibraryModel");
-    expect(modelLibraryPanelSource).toContain("copy.modelTestSelect");
-    expect(modelLibraryPanelSource).toContain("copy.testSelectedLibraryModel");
-    expect(configRouteSource).toContain("modelId: selectedModelTestId");
-    expect(modelLibraryPanelSource).toContain("styles.modelLibraryTestBar");
-
-    const tableStart = modelLibraryPanelSource.indexOf("styles.modelInventoryTable");
-    const tableEnd = modelLibraryPanelSource.indexOf("styles.modelEditorPanel", tableStart);
-    const tableSource = modelLibraryPanelSource.slice(tableStart, tableEnd);
-    expect(tableSource).toContain("copy.modelCenterActions");
-    expect(tableSource).not.toContain("copy.testConnection");
-    expect(tableSource).not.toContain("handleTestSelectedLibraryModel");
-  });
-
-  it("keeps model-library rows free of usage-location details", () => {
-    const tableStart = modelLibraryPanelSource.indexOf("styles.modelInventoryTable");
-    const tableEnd = modelLibraryPanelSource.indexOf("styles.modelEditorPanel", tableStart);
-    const tableSource = modelLibraryPanelSource.slice(tableStart, tableEnd);
-
-    expect(tableSource).not.toContain("copy.modelCenterUsage");
-    expect(tableSource).not.toContain("copy.modelCenterUsageCount");
-    expect(tableSource).not.toContain("row.usages");
-    expect(tableSource).not.toContain("row.usageCount");
-  });
-
-  it("shows the model key environment variable as a read-only model-id binding", () => {
-    expect(modelLibraryPanelSource).toContain("copy.modelKeyEnv");
-    expect(configRouteSource).toContain("模型密钥变量名由模型 ID 唯一生成");
-    expect(modelLibraryPanelSource).toContain('aria-readonly="true"');
-    expect(modelLibrarySurfaceSource).not.toContain("setModelEditor((current) => ({ ...current, api_key_env: event.target.value }))");
-  });
-
-  it("shows provider default variables as compatibility-only display instead of editable key inputs", () => {
-    expect(modelLibraryPanelSource).toContain("copy.providerKeyEnv");
-    expect(configRouteSource).toContain("服务商默认变量仅作兼容来源展示");
-    expect(configRouteSource).toContain("The provider default variable is compatibility-only display");
-    expect(modelLibrarySurfaceSource).not.toContain("provider: { ...current.provider, api_key_env: event.target.value }");
-  });
-
-  it("passes the model unique key binding to model discovery requests", () => {
-    expect(configRouteSource).toContain("const discoveryModelId =");
-    expect(configRouteSource).toContain("const discoveryApiKeyEnv =");
-    expect(configRouteSource).toContain("modelId: discoveryModelId");
-    expect(configRouteSource).toContain("apiKeyEnv: discoveryApiKeyEnv");
-    expect(configRouteSource).toContain("defaultModelApiKeyEnv(discoveryModelId)");
   });
 
   it("keeps Agent editing out of the config page", () => {
