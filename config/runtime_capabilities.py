@@ -14,8 +14,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from .llm_identity import make_model_key, split_model_ref
+from .llm_identity import split_model_ref
 from .model_catalog import (
+    classify_capability_error,
     import_legacy_capability_cache,
     load_model_catalog_state,
     merge_capability_observations,
@@ -35,7 +36,15 @@ RUNTIME_MODEL_CAPABILITY_FIELDS = (
     "capability_error",
 )
 OPERATOR_CAPABILITY_SOURCES = {"manual", "manual_config", "operator", "operator_config"}
-_LEGACY_PROVIDER_ID = "legacy"
+
+_CAPABILITY_ERROR_MESSAGES = {
+    "auth_failed": "runtime capability probe authentication failed",
+    "blocked": "runtime capability probe was blocked",
+    "other": "runtime capability probe failed",
+    "protocol_mismatch": "runtime capability probe protocol mismatch",
+    "timeout": "runtime capability probe timed out",
+    "unsupported": "image input is not supported by this model route",
+}
 
 
 def _utcnow_iso() -> str:
@@ -100,7 +109,7 @@ def _normalized_image_input_capability(details: dict[str, Any]) -> dict[str, Any
         normalized["supports_image_input"] = bool(supports)
     error = str(details.get("capability_error") or "").strip()
     if error:
-        normalized["capability_error"] = error[:240]
+        normalized["capability_error"] = _capability_error_message(classify_capability_error(error))
     return normalized
 
 
@@ -108,9 +117,7 @@ def _catalog_location(model_ref: str) -> tuple[str, str]:
     value = str(model_ref or "").strip()
     if not value:
         raise ValueError("model_ref is required")
-    if "/" in value:
-        return split_model_ref(value)
-    return _LEGACY_PROVIDER_ID, make_model_key(value)
+    return split_model_ref(value)
 
 
 def _catalog_capability(normalized: dict[str, Any]) -> dict[str, Any]:
@@ -121,6 +128,10 @@ def _catalog_capability(normalized: dict[str, Any]) -> dict[str, Any]:
         "checked_at": normalized["capability_checked_at"],
         "error": str(normalized.get("capability_error") or ""),
     }
+
+
+def _capability_error_message(category: str) -> str:
+    return _CAPABILITY_ERROR_MESSAGES.get(category, "")
 
 
 def record_model_image_input_capability(
@@ -141,7 +152,7 @@ def record_model_image_input_capability(
     model = models.setdefault(
         model_key,
         {
-            "upstreamId": model_key if provider_id != _LEGACY_PROVIDER_ID else normalized_model_id,
+            "upstreamId": model_key,
             "availability": "unknown",
         },
     )
@@ -178,7 +189,7 @@ def _legacy_details(record: dict[str, Any]) -> dict[str, Any]:
         details["supports_image_input"] = value == "supported"
     error = str(record.get("error") or "")
     if error:
-        details["capability_error"] = error
+        details["capability_error"] = _capability_error_message(classify_capability_error(error))
     return details
 
 
