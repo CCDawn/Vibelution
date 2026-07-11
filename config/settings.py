@@ -1375,12 +1375,14 @@ class ConfigLoader:
             incoming_llm = data["llm"]
 
             def reject_credential_fields(node: Any) -> None:
-                if not isinstance(node, dict):
-                    return
-                for key, value in node.items():
-                    if key in {"api_key", "api_key_env", "credential_ref"}:
-                        raise ValueError("schema v2 credential fields are not allowed in incremental config")
-                    reject_credential_fields(value)
+                if isinstance(node, dict):
+                    for key, value in node.items():
+                        if key in {"api_key", "api_key_env", "credential_ref"}:
+                            raise ValueError("schema v2 credential fields are not allowed in incremental config")
+                        reject_credential_fields(value)
+                elif isinstance(node, list):
+                    for value in node:
+                        reject_credential_fields(value)
 
             reject_credential_fields(incoming_llm)
             provider_updates = incoming_llm.get("providers")
