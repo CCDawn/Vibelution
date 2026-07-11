@@ -57,16 +57,18 @@ _ROUTE_PREVIEW_EXPIRY: dict[str, float] = {}
 _ROUTE_PREVIEW_LOCK = threading.Lock()
 _MAX_IMPACT_REFS = 50
 _MAX_REFERENCE_SCAN_MODELS = 1000
-_PROVIDER_OPTION_RESPONSE_FIELDS = (
-    "credential_state",
-    "default_protocol",
-    "driver",
-    "label",
-    "pinned_count",
-    "provider_id",
-    "service_class",
-    "vendor",
-)
+_PROVIDER_OPTION_STRING_LIMITS = {
+    "artifact_path": 1024,
+    "base_url": 1024,
+    "credential_state": 64,
+    "default_protocol": 128,
+    "driver": 64,
+    "label": 256,
+    "provider_id": 64,
+    "runtime_framework": 128,
+    "service_class": 64,
+    "vendor": 128,
+}
 _CATALOG_PROVIDER_RESPONSE_FIELDS = (
     "catalogStale",
     "lastAttemptAt",
@@ -86,6 +88,27 @@ _CATALOG_MODEL_RESPONSE_FIELDS = (
     "modelRef",
     "status",
     "upstreamId",
+)
+_CAPABILITY_VALUES = {"supported", "unsupported", "unknown"}
+_CAPABILITY_SOURCES = {
+    "curated_snapshot",
+    "driver_default",
+    "operator_override",
+    "provider_endpoint",
+    "runtime_probe",
+}
+_MAX_CAPABILITY_FIELDS = 50
+_SENSITIVE_CAPABILITY_FIELD_PARTS = (
+    "authorization",
+    "credential",
+    "error",
+    "key",
+    "metadata",
+    "password",
+    "query",
+    "raw",
+    "secret",
+    "token",
 )
 _IMPACT_RESPONSE_FIELDS = (
     "blocking",
@@ -393,27 +416,105 @@ def _allowlisted_fields(
     return projected
 
 
+def _bounded_string(value: Any, *, max_length: int) -> str | None:
+    if not isinstance(value, str) or "pending-secret:" in value:
+        return None
+    return value[:max_length]
+
+
+def _project_provider_option(value: Any) -> dict[str, Any]:
+    option = value if isinstance(value, dict) else {}
+    projected: dict[str, Any] = {}
+    for key, max_length in _PROVIDER_OPTION_STRING_LIMITS.items():
+        bounded = _bounded_string(option.get(key), max_length=max_length)
+        if bounded is None:
+            continue
+        if key == "base_url" and ("?" in bounded or "#" in bounded):
+            continue
+        projected[key] = bounded
+    pinned_count = option.get("pinned_count")
+    if (
+        isinstance(pinned_count, int)
+        and not isinstance(pinned_count, bool)
+        and 0 <= pinned_count <= 1_000_000
+    ):
+        projected["pinned_count"] = pinned_count
+    return projected
+
+
+def _project_capabilities(value: Any) -> dict[str, Any]:
+    capabilities = value if isinstance(value, dict) else {}
+    projected: dict[str, Any] = {}
+    for raw_field, raw_observation in list(capabilities.items())[
+        :_MAX_CAPABILITY_FIELDS
+    ]:
+        if not isinstance(raw_field, str) or not isinstance(raw_observation, dict):
+            continue
+        field = raw_field.strip()
+        if (
+            not re.fullmatch(r"[a-z][a-z0-9_]{0,63}", field)
+            or any(part in field for part in _SENSITIVE_CAPABILITY_FIELD_PARTS)
+        ):
+            continue
+        observation_value = raw_observation.get("value")
+        source = raw_observation.get("source")
+        if (
+            not isinstance(observation_value, str)
+            or observation_value not in _CAPABILITY_VALUES
+            or not isinstance(source, str)
+            or source not in _CAPABILITY_SOURCES
+        ):
+            continue
+        confidence = _bounded_string(
+            raw_observation.get("confidence"),
+            max_length=64,
+        )
+        checked_at = _bounded_string(
+            raw_observation.get("checked_at"),
+            max_length=64,
+        )
+        projected[field] = {
+            "value": observation_value,
+            "source": source,
+            "confidence": confidence or "",
+            "checked_at": checked_at or "",
+        }
+    return projected
+
+
 def _project_model_catalog(value: Any) -> dict[str, Any]:
     catalog = value if isinstance(value, dict) else {}
     raw_providers = catalog.get("providers", {})
     providers: dict[str, Any] = {}
     if isinstance(raw_providers, dict):
-        for provider_id, raw_provider in list(raw_providers.items())[:100]:
+        for raw_provider_id, raw_provider in list(raw_providers.items())[:100]:
             if not isinstance(raw_provider, dict):
+                continue
+            provider_id = _project_provider_id(raw_provider_id)
+            if not provider_id:
                 continue
             provider = _allowlisted_fields(
                 raw_provider,
                 _CATALOG_PROVIDER_RESPONSE_FIELDS,
             )
             raw_models = raw_provider.get("models", {})
-            provider["models"] = {
-                str(model_key): _allowlisted_fields(
-                    raw_model,
-                    _CATALOG_MODEL_RESPONSE_FIELDS,
-                )
-                for model_key, raw_model in list(raw_models.items())[:500]
-                if isinstance(raw_model, dict)
-            } if isinstance(raw_models, dict) else {}
+            provider["models"] = {}
+            if isinstance(raw_models, dict):
+                for model_key, raw_model in list(raw_models.items())[:500]:
+                    if not isinstance(model_key, str) or not isinstance(raw_model, dict):
+                        continue
+                    try:
+                        make_model_ref(provider_id, model_key)
+                    except ValueError:
+                        continue
+                    model = _allowlisted_fields(
+                        raw_model,
+                        _CATALOG_MODEL_RESPONSE_FIELDS,
+                    )
+                    model["capabilities"] = _project_capabilities(
+                        raw_model.get("capabilities")
+                    )
+                    provider["models"][model_key[:128]] = model
             raw_warnings = raw_provider.get("warnings", [])
             provider["warnings"] = [
                 {
@@ -428,7 +529,7 @@ def _project_model_catalog(value: Any) -> dict[str, Any]:
                 for warning in raw_warnings[:20]
                 if isinstance(warning, dict)
             ] if isinstance(raw_warnings, list) else []
-            providers[str(provider_id)] = provider
+            providers[provider_id] = provider
     return {
         "modelCount": int(catalog.get("modelCount") or 0),
         "providerCount": int(catalog.get("providerCount") or 0),
@@ -524,11 +625,7 @@ def project_provider_draft_response(workspace: dict[str, Any]) -> dict[str, Any]
 
     raw_options = workspace.get("providerOptions", [])
     provider_options = [
-        {
-            key: copy.deepcopy(option[key])
-            for key in _PROVIDER_OPTION_RESPONSE_FIELDS
-            if key in option
-        }
+        _project_provider_option(option)
         for option in raw_options
         if isinstance(option, dict)
     ] if isinstance(raw_options, list) else []
