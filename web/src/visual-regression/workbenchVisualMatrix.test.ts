@@ -79,18 +79,36 @@ describe("Workbench visual regression matrix", () => {
     expect(phase3bScenarios).toHaveLength(18);
     expect(WORKBENCH_VISUAL_SCENARIOS).toHaveLength(60);
     for (const path of paths) {
-      expect(phase3bScenarios.filter((scenario) => scenario.path === path)).toHaveLength(6);
+      const routeScenarios = phase3bScenarios.filter((scenario) => scenario.path === path);
+
+      expect(routeScenarios).toHaveLength(6);
+      expect(routeScenarios.map((scenario) => scenario.theme).sort()).toEqual([
+        "dark",
+        "dark",
+        "dark",
+        "light",
+        "light",
+        "light",
+      ]);
+      expect(
+        routeScenarios
+          .map((scenario) => scenario.viewport.width)
+          .sort((left, right) => left - right),
+      ).toEqual([1280, 1280, 1440, 1440, 1920, 1920]);
+      expect(
+        routeScenarios.every(
+          (scenario) => scenario.state === "dense" && scenario.expectedEvidence === "screenshot",
+        ),
+      ).toBe(true);
     }
-    expect(
-      WORKBENCH_VISUAL_SCENARIOS.some(
-        (scenario) => scenario.id === "supervised-light-default-standard-blocker",
-      ),
-    ).toBe(true);
-    expect(
-      WORKBENCH_VISUAL_SCENARIOS.some(
-        (scenario) => scenario.id === "config-light-default-standard-destructive",
-      ),
-    ).toBe(true);
+    for (const scenarioId of [
+      "supervised-light-default-standard-blocker",
+      "supervised-light-custom-compact-blocker",
+      "config-light-default-standard-destructive",
+      "config-dark-custom-wide-error",
+    ]) {
+      expect(WORKBENCH_VISUAL_SCENARIOS.some((scenario) => scenario.id === scenarioId)).toBe(true);
+    }
   });
 
   it("covers all stable Phase 3A operational route combinations", () => {
