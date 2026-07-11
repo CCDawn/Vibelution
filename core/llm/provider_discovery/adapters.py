@@ -14,6 +14,7 @@ from .types import (
     ProviderDiscoveryAdapter,
     ProviderDiscoveryRequest,
     ProviderDiscoveryResult,
+    assert_no_credential_taint,
 )
 
 
@@ -87,7 +88,9 @@ def _bounded_json_get(
         except TypeError:
             sanitized_error = httpx.RequestError("provider discovery request failed", request=safe_request)
         raise sanitized_error from None
-    return json.loads(b"".join(chunks))
+    payload = json.loads(b"".join(chunks))
+    assert_no_credential_taint(payload, request.credential)
+    return payload
 
 
 def _validate_models(models: list[DiscoveredProviderModel]) -> tuple[DiscoveredProviderModel, ...]:
@@ -142,6 +145,11 @@ def _discover_candidates(
             payload = _bounded_json_get(endpoint, headers=headers, params=params, request=request)
             models = _validate_models(normalize(payload))
         except Exception as exc:
+            if (
+                isinstance(exc, httpx.HTTPStatusError)
+                and exc.response.status_code in {401, 403}
+            ):
+                raise
             last_error = exc
             continue
         if models:

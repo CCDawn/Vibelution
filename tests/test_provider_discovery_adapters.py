@@ -247,6 +247,85 @@ def test_gemini_transport_error_redacts_query_credential(monkeypatch, tmp_path) 
     assert load_model_catalog_state(path)["providers"]["lab"]["lastErrorType"] == "network"
 
 
+@pytest.mark.parametrize(
+    "echoed_model",
+    [
+        {"id": "credential-echo", "label": "safe"},
+        {"id": "safe-id", "display_name": "credential-echo"},
+        {"id": "safe-id", "capabilities": {"nested": ["safe", {"value": "credential-echo"}]}},
+        {"id": "safe-id", "context_window": {"raw": "credential-echo"}},
+    ],
+)
+def test_success_response_rejects_resolved_credential_taint_recursively(
+    monkeypatch, tmp_path, echoed_model: dict
+) -> None:
+    monkeypatch.setenv("VIBELUTION_LLM_PROVIDER_LAB_API_KEY", "credential-echo")
+    path = tmp_path / "state.json"
+    transport = httpx.MockTransport(lambda request: httpx.Response(200, json={"data": [echoed_model]}))
+
+    with pytest.raises(ValueError, match="provider discovery response contains credential material") as raised:
+        discover_provider_models(_config("openai_compatible"), "lab", catalog_path=path, transport=transport)
+
+    assert "credential-echo" not in str(raised.value)
+    state = load_model_catalog_state(path)
+    assert "credential-echo" not in json.dumps(state)
+    assert state["providers"]["lab"]["models"] == {}
+
+
+def test_success_response_rejects_one_time_override_taint(tmp_path) -> None:
+    path = tmp_path / "state.json"
+    transport = httpx.MockTransport(
+        lambda request: httpx.Response(200, json={"data": [{"id": "safe", "label": "override-echo"}]})
+    )
+
+    with pytest.raises(ValueError, match="provider discovery response contains credential material") as raised:
+        discover_provider_models(
+            _config("openai_compatible"),
+            "lab",
+            credential_override="override-echo",
+            catalog_path=path,
+            transport=transport,
+        )
+
+    assert "override-echo" not in str(raised.value)
+    assert "override-echo" not in json.dumps(load_model_catalog_state(path))
+
+
+@pytest.mark.parametrize(
+    ("statuses", "expected_calls"),
+    [
+        ((401, 404), 1),
+        ((404, 403), 2),
+    ],
+)
+def test_multi_candidate_discovery_preserves_safe_auth_failure_priority(
+    monkeypatch, tmp_path, statuses: tuple[int, int], expected_calls: int
+) -> None:
+    monkeypatch.setenv("VIBELUTION_LLM_PROVIDER_LAB_API_KEY", "auth-secret")
+    calls: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request.url.path)
+        return httpx.Response(statuses[len(calls) - 1], json={"error": "auth-secret echoed"})
+
+    path = tmp_path / "state.json"
+    with pytest.raises(httpx.HTTPStatusError) as raised:
+        discover_provider_models(
+            _config("openai_compatible", base_url="https://models.example"),
+            "lab",
+            catalog_path=path,
+            transport=httpx.MockTransport(handler),
+        )
+
+    assert len(calls) == expected_calls
+    assert raised.value.response.status_code in {401, 403}
+    assert "auth-secret" not in str(raised.value)
+    state = load_model_catalog_state(path)
+    assert state["providers"]["lab"]["status"] == "auth_failed"
+    assert state["providers"]["lab"]["lastErrorType"] == "auth_failed"
+    assert "auth-secret" not in json.dumps(state)
+
+
 def test_discovery_include_and_exclude_filters_are_provider_scoped(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("VIBELUTION_LLM_PROVIDER_LAB_API_KEY", "secret")
     config = _config("openai_compatible")
