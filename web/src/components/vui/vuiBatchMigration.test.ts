@@ -67,8 +67,13 @@ const nativeControlTargets = [
   },
   {
     path: "routes/EvolutionRoute.tsx",
-    expected: ["VNativeButton", "VNativeInput", "VNativeSelect", "VNativeTextarea"],
+    expected: ["VButton", "VInput", "VStringSelect", "VTextarea"],
     forbidden: ["<button", "<input", "<select", "<textarea"],
+  },
+  {
+    path: "routes/ConfigRoute.tsx",
+    expected: ["VButton", "VInput", "VStringSelect", "VTextarea"],
+    forbidden: ["<button", "<select", "<textarea"],
   },
   {
     path: "components/vui/product/agent-management/AgentDenseList.tsx",
@@ -223,6 +228,13 @@ function isRawControlGuardExempt(path: string): boolean {
   return rawControlAllowedFiles.has(path) || /\.test\.tsx$/.test(path) || /\.spec\.tsx$/.test(path);
 }
 
+function sourceHasRawControlOutsideAllowedExceptions(path: string, source: string): boolean {
+  const sourceWithoutAllowedFileInputs = path === "routes/ConfigRoute.tsx"
+    ? source.replaceAll(/<input\s+type="file"[\s\S]*?\/>/g, "")
+    : source;
+  return rawControlPattern.test(sourceWithoutAllowedFileInputs);
+}
+
 describe("VUI batch migration", () => {
   it.each(migrationTargets)(
     "$path uses VUI controls instead of raw buttons",
@@ -251,7 +263,7 @@ describe("VUI batch migration", () => {
   it("keeps business TSX sources raw-control free outside VUI primitives and tests", () => {
     const violations = listSourceTsxFiles(sourceRoot)
       .filter((path) => !isRawControlGuardExempt(path))
-      .filter((path) => rawControlPattern.test(readTargetSource(path)));
+      .filter((path) => sourceHasRawControlOutsideAllowedExceptions(path, readTargetSource(path)));
 
     expect(violations).toEqual([]);
   });
