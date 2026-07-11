@@ -15,8 +15,18 @@ import {
   GitStatusSummary,
 } from "../api/types";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
+import { deriveQueryPresentation } from "../app/queryPresentation";
 import { PaneCollapseHandle } from "../components/layout/PaneCollapseHandle";
-import { VButton, VIconButton, VNativeButton, VNativeSelect, VNativeTextarea, VRouteHeader } from "../components/vui";
+import {
+  VButton,
+  VIconButton,
+  VLoadingValue,
+  VNativeButton,
+  VNativeSelect,
+  VNativeTextarea,
+  VRouteHeader,
+  VStateSurface,
+} from "../components/vui";
 import { GitDiffView } from "./GitDiffView";
 import {
   getGitAiDraftBlockReason,
@@ -274,12 +284,36 @@ export function GitRoute() {
   };
 
   const status = statusQuery.data;
+  const statusPresentation = deriveQueryPresentation({
+    hasData: Boolean(statusQuery.data),
+    isError: statusQuery.isError,
+    isFetching: statusQuery.isFetching,
+    isPending: statusQuery.isPending,
+  });
+  const commitsPresentation = deriveQueryPresentation({
+    hasData: Boolean(commitsQuery.data),
+    isError: commitsQuery.isError,
+    isFetching: commitsQuery.isFetching,
+    isPending: commitsQuery.isPending,
+  });
+  const statusInitialLoading = statusPresentation === "initial-loading";
+  const statusEmptyError = statusPresentation === "error-empty";
+  const gitStatusLoading = lang === "zh" ? "正在读取 Git 状态" : "Loading Git status";
+  const gitStatusError = lang === "zh" ? "无法读取 Git 状态" : "Unable to load Git status";
+  const gitCommitsLoading = lang === "zh" ? "正在读取最近提交" : "Loading recent commits";
+  const gitCommitsError = lang === "zh" ? "无法读取最近提交" : "Unable to load recent commits";
+  const retryLabel = lang === "zh" ? "重试" : "Retry";
   const upstream = status?.upstream;
   const aheadBehind = upstream?.hasUpstream ? `${upstream.ahead} / ${upstream.behind}` : t("gitNoUpstream");
   const localCommitCount = status?.localCommits?.total ?? upstream?.ahead ?? 0;
   const worktreeBranchCount = status?.worktrees?.withCommits ?? 0;
   const worktreeTotalCount = status?.worktrees?.total ?? 0;
-  const noChangedFiles = Boolean(status && status.available && !statusQuery.isPending && files.length === 0);
+  const noChangedFiles = Boolean(
+    status &&
+      status.available &&
+      (statusPresentation === "loaded" || statusPresentation === "refreshing") &&
+      files.length === 0,
+  );
   const localCommitPreview = (status?.localCommits?.commits ?? []).slice(0, 6);
   const pendingWorktrees = (status?.worktrees?.items ?? []).filter((item) => !item.isMain && item.hasCommits);
   const pendingWorktreePreview = pendingWorktrees.slice(0, 8);
@@ -464,23 +498,31 @@ export function GitRoute() {
       <div className={styles.summaryGrid}>
         <VNativeButton type="button" className={styles.summaryCard} onClick={selectCurrentBranch} disabled={!status?.branch}>
           <span>{t("gitBranch")}</span>
-          <strong>{status?.branch || status?.headRevShort || "-"}</strong>
+          <strong>
+            {statusInitialLoading
+              ? <VLoadingValue label={gitStatusLoading} />
+              : status?.branch || status?.headRevShort || "-"}
+          </strong>
         </VNativeButton>
         <section className={styles.summaryCard}>
           <span>{t("gitChangedFiles")}</span>
-          <strong>{status?.counts.total ?? 0}</strong>
+          <strong>{statusInitialLoading ? <VLoadingValue label={gitStatusLoading} /> : status?.counts.total ?? 0}</strong>
         </section>
         <section className={styles.summaryCard}>
           <span>{t("gitUpstream")}</span>
-          <strong>{upstream?.name || upstream?.remote || t("gitNoUpstream")}</strong>
+          <strong>
+            {statusInitialLoading
+              ? <VLoadingValue label={gitStatusLoading} />
+              : upstream?.name || upstream?.remote || t("gitNoUpstream")}
+          </strong>
         </section>
         <section className={styles.summaryCard}>
           <span>{t("gitAheadBehind")}</span>
-          <strong>{aheadBehind}</strong>
+          <strong>{statusInitialLoading ? <VLoadingValue label={gitStatusLoading} /> : aheadBehind}</strong>
         </section>
         <section className={styles.summaryCard}>
           <span>{t("gitLocalCommits")}</span>
-          <strong>{localCommitCount}</strong>
+          <strong>{statusInitialLoading ? <VLoadingValue label={gitStatusLoading} /> : localCommitCount}</strong>
         </section>
         <VNativeButton
           type="button"
@@ -493,16 +535,91 @@ export function GitRoute() {
           disabled={!worktreeDetailTarget}
         >
           <span>{t("gitWorktreeBranches")}</span>
-          <strong>{worktreeBranchCount} / {worktreeTotalCount}</strong>
+          <strong>
+            {statusInitialLoading
+              ? <VLoadingValue label={gitStatusLoading} />
+              : <>{worktreeBranchCount} / {worktreeTotalCount}</>}
+          </strong>
         </VNativeButton>
       </div>
 
-      {!statusQuery.isPending && status && !status.available ? (
+      {statusPresentation === "error-with-data" ? (
+        <p className={styles.notice}>{statusQuery.error instanceof Error ? statusQuery.error.message : gitStatusError}</p>
+      ) : status && !status.available ? (
         <p className={styles.notice}>{status.error || t("gitStatusUnavailable")}</p>
       ) : null}
 
       <div className={noChangedFiles ? `${styles.workspace} ${styles.workspaceOverview}` : styles.workspace} style={workspaceStyle}>
-        {noChangedFiles ? (
+        {statusInitialLoading || statusEmptyError ? (
+          <>
+            {statusInitialLoading ? (
+              <VStateSurface
+                className={changePanelCollapsed ? `${styles.changePanel} ${styles.paneCollapsed}` : styles.changePanel}
+                tone="loading"
+                title={gitStatusLoading}
+                skeletonLines
+              />
+            ) : (
+              <VStateSurface
+                className={changePanelCollapsed ? `${styles.changePanel} ${styles.paneCollapsed}` : styles.changePanel}
+                tone="error"
+                title={gitStatusError}
+                actions={(
+                <VButton type="button" variant="secondary" onPress={() => void statusQuery.refetch()}>{retryLabel}</VButton>
+                )}
+              />
+            )}
+            <PaneCollapseHandle
+              side="left"
+              collapsed={changePanelCollapsed}
+              separatorLabel={resizeChangePanelLabel}
+              collapseLabel={lang === "zh" ? "收起变更列表" : "Collapse changed files"}
+              expandLabel={lang === "zh" ? "展开变更列表" : "Expand changed files"}
+              className={styles.resizeHandle}
+              onToggle={() => setChangePanelCollapsed((current) => !current)}
+              onPointerDown={handleChangePanelResizeStart}
+              onKeyDown={handleChangePanelResizeKeyDown}
+            />
+            {statusInitialLoading ? (
+              <VStateSurface className={styles.diffPanel} tone="loading" title={gitStatusLoading} skeletonLines />
+            ) : (
+              <VStateSurface
+                className={styles.diffPanel}
+                tone="error"
+                title={gitStatusError}
+                actions={(
+                  <VButton type="button" variant="secondary" onPress={() => void statusQuery.refetch()}>{retryLabel}</VButton>
+                )}
+              />
+            )}
+            {commitsPresentation === "loaded" || commitsPresentation === "refreshing" || commitsPresentation === "error-with-data" ? (
+              <aside className={styles.commitPanel}>
+                <div className={styles.panelHeader}>
+                  <div>
+                    <p className={styles.panelEyebrow}>{t("gitHead")}</p>
+                    <h2>{t("gitRecentCommits")}</h2>
+                  </div>
+                  <GitCommitHorizontal size={18} />
+                </div>
+                {commitsPresentation === "error-with-data" ? <p className={styles.notice}>{gitCommitsError}</p> : null}
+                <div className={styles.commitList}>
+                  {recentCommits.map((commit) => renderCommitItem(commit, gitCommitSourceLabel))}
+                  {!recentCommits.length ? <p className={styles.emptyState}>{commitsQuery.data?.error || t("gitNoCommits")}</p> : null}
+                </div>
+              </aside>
+            ) : (
+              <VStateSurface
+                className={styles.commitPanel}
+                tone={commitsPresentation === "error-empty" ? "error" : "loading"}
+                title={commitsPresentation === "error-empty" ? gitCommitsError : gitCommitsLoading}
+                skeletonLines={commitsPresentation !== "error-empty"}
+                actions={commitsPresentation === "error-empty" ? (
+                  <VButton type="button" variant="secondary" onPress={() => void commitsQuery.refetch()}>{retryLabel}</VButton>
+                ) : undefined}
+              />
+            )}
+          </>
+        ) : noChangedFiles ? (
           <>
             <main className={styles.gitOverviewPanel}>
               <VNativeButton type="button" className={styles.cleanStateStrip} onClick={selectCurrentBranch}>
