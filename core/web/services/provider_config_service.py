@@ -972,9 +972,78 @@ def _record_migration_event(event_code: str, *, outcome: str, fields: dict[str, 
         return
 
 
-def preview_llm_v2_migration() -> dict[str, Any]:
+def _artifact_resolution_counts(
+    artifact_resolutions: list[dict[str, Any]] | None,
+) -> dict[str, int]:
+    resolutions = artifact_resolutions or []
+    return {
+        "resolutionCount": len(resolutions),
+        "preserveResolutionCount": sum(
+            item.get("decision") == "preserve_upstream_id"
+            for item in resolutions
+            if isinstance(item, dict)
+        ),
+        "splitResolutionCount": sum(
+            item.get("decision") == "split_deployment_artifact"
+            for item in resolutions
+            if isinstance(item, dict)
+        ),
+    }
+
+
+def _artifact_conflict_allowed_resolutions(
+    public_config: dict[str, Any],
+    model_id: str,
+) -> list[str]:
+    llm = public_config.get("llm") if isinstance(public_config, dict) else None
+    library = llm.get("model_library") if isinstance(llm, dict) else None
+    entry = library.get(model_id) if isinstance(library, dict) else None
+    provider = entry.get("provider") if isinstance(entry, dict) else None
+    provider_kind = str(provider.get("kind") or "").strip().lower() if isinstance(provider, dict) else ""
+    if provider_kind in {"local", "local_runtime", "ollama"}:
+        return ["preserve_upstream_id", "split_deployment_artifact"]
+    return ["split_deployment_artifact"]
+
+
+def preview_llm_v2_migration(
+    *,
+    artifact_resolutions: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     started = time.monotonic()
-    preview = preview_v1_to_v2(load_public_config(), project_root=_PROJECT_ROOT)
+    resolution_counts = _artifact_resolution_counts(artifact_resolutions)
+    try:
+        public_config = load_public_config()
+        preview = preview_v1_to_v2(
+            public_config,
+            project_root=_PROJECT_ROOT,
+            artifact_resolutions=artifact_resolutions,
+        )
+    except Exception as exc:
+        _record_migration_event(
+            "config.schema.migration_previewed",
+            outcome="failed",
+            fields={
+                **resolution_counts,
+                "elapsedMs": int((time.monotonic() - started) * 1000),
+                "errorType": type(exc).__name__,
+            },
+        )
+        raise
+    conflicts: list[dict[str, Any]] = []
+    for raw in preview.conflicts:
+        projected = copy.deepcopy(raw)
+        if projected.get("code") == "artifact_path_suspected":
+            model_id = str(projected.get("modelId") or "")
+            projected.update(
+                {
+                    "requiresExplicitResolution": True,
+                    "allowedResolutions": _artifact_conflict_allowed_resolutions(
+                        public_config, model_id
+                    ),
+                    "verificationState": "unverified_offline",
+                }
+            )
+        conflicts.append(projected)
     payload = {
         "previewId": preview.preview_id,
         "baseHash": preview.base_hash,
@@ -982,17 +1051,17 @@ def preview_llm_v2_migration() -> dict[str, Any]:
         "providers": list(preview.providers),
         "modelRefMap": dict(preview.model_ref_map),
         "referenceImpact": copy.deepcopy(preview.reference_impact),
-        "conflicts": list(preview.conflicts),
+        "conflicts": conflicts,
     }
     _record_migration_event(
         "config.schema.migration_previewed",
         outcome="previewed",
         fields={
-            "migrationId": preview.preview_id,
+            "status": preview.status,
+            **resolution_counts,
             "providerCount": len(preview.providers),
             "modelCount": len(preview.model_ref_map),
             "referenceCount": int(preview.reference_impact.get("liveReferenceCount") or 0),
-            "phase": "preview",
             "elapsedMs": int((time.monotonic() - started) * 1000),
         },
     )
@@ -1022,11 +1091,25 @@ def project_llm_v2_migration_preview(payload: dict[str, Any]) -> dict[str, Any]:
     for raw in payload.get("conflicts", []):
         if not isinstance(raw, dict):
             continue
-        projected = {
-            key: copy.deepcopy(raw[key])
-            for key in ("code", "severity", "modelId", "fields", "proposedProviderId")
-            if key in raw
-        }
+        if raw.get("code") == "artifact_path_suspected":
+            allowed_resolutions = [
+                value
+                for value in raw.get("allowedResolutions", [])
+                if value in {"preserve_upstream_id", "split_deployment_artifact"}
+            ]
+            projected = {
+                "code": "artifact_path_suspected",
+                "modelId": str(raw.get("modelId") or ""),
+                "requiresExplicitResolution": True,
+                "allowedResolutions": allowed_resolutions,
+                "verificationState": "unverified_offline",
+            }
+        else:
+            projected = {
+                key: copy.deepcopy(raw[key])
+                for key in ("code", "severity", "modelId", "fields", "proposedProviderId")
+                if key in raw
+            }
         conflicts.append(projected)
     impact = payload.get("referenceImpact") if isinstance(payload.get("referenceImpact"), dict) else {}
     return {
