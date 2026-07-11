@@ -3,6 +3,8 @@ from __future__ import annotations
 import pytest
 
 from core.chat.turn_journal import (
+    EVENT_ASSISTANT_DELTA_COMMITTED,
+    EVENT_ASSISTANT_ITEM_COMMITTED,
     EVENT_ASSISTANT_MESSAGE,
     EVENT_CLI_SESSION_LIFECYCLE,
     EVENT_CLI_TASK_RESULT,
@@ -16,12 +18,127 @@ from core.chat.turn_journal import (
     EVENT_USER_MESSAGE,
     TURN_INTERRUPTED_MARKER,
     append_interrupted_if_open,
+    append_canonical_turn_outcome,
     append_turn_event,
     latest_open_turn_id,
     load_turn_events,
     model_visible_messages_from_events,
+    session_turn_items_from_events,
     turn_journal_path,
 )
+from core.llm.types import CanonicalItemIdentity, CanonicalToolCall, LLMProtocolEvent, TurnOutcome
+
+
+def test_canonical_outcomes_commit_items_before_tools_and_project_safe_v2(tmp_path):
+    identity = CanonicalItemIdentity("session-a", "turn-1", "inv-1", 0, "msg-1")
+    commentary = LLMProtocolEvent(
+        kind="item_completed",
+        sequence=2,
+        session_id="session-a",
+        turn_id="turn-1",
+        invocation_id="inv-1",
+        iteration=0,
+        item_id="comment-1",
+        channel="commentary",
+        phase="commentary",
+        status="completed",
+        text="我先检查。",
+        diagnostic_summary={"protocol": "responses", "provider": "relay"},
+    )
+    tool_event = LLMProtocolEvent(
+        kind="item_completed",
+        sequence=3,
+        session_id="session-a",
+        turn_id="turn-1",
+        invocation_id="inv-1",
+        iteration=0,
+        item_id="call-item-1",
+        call_id="call-1",
+        tool_name="read_file",
+        channel="commentary",
+        phase="tool_call",
+        status="ready",
+    )
+    tool_identity = CanonicalItemIdentity("session-a", "turn-1", "inv-1", 0, "call-item-1")
+    append_turn_event(tmp_path, "session-a", "turn-1", EVENT_TURN_STARTED, status="running")
+    append_canonical_turn_outcome(
+        tmp_path,
+        "session-a",
+        "turn-1",
+        TurnOutcome(
+            kind="tool_calls",
+            identity=identity,
+            events=(commentary, tool_event),
+            tool_calls=(CanonicalToolCall(tool_identity, "call-1", "read_file", {"path": "a.txt"}),),
+            pending_tool_call_ids=("call-1",),
+            terminal_event_seen=True,
+        ),
+    )
+    append_turn_event(
+        tmp_path,
+        "session-a",
+        "turn-1",
+        EVENT_TOOL_CALL_STARTED,
+        status="running",
+        payload={"toolCall": {"name": "read_file", "callId": "call-1"}},
+    )
+    append_turn_event(
+        tmp_path,
+        "session-a",
+        "turn-1",
+        EVENT_TOOL_RESULT,
+        status="done",
+        payload={"toolCall": {"name": "read_file", "callId": "call-1", "result": "ok"}},
+    )
+    final_identity = CanonicalItemIdentity("session-a", "turn-1", "inv-2", 1, "answer-1")
+    append_canonical_turn_outcome(
+        tmp_path,
+        "session-a",
+        "turn-1",
+        TurnOutcome.final_answer(identity=final_identity, text="最终答案"),
+    )
+    append_turn_event(tmp_path, "session-a", "turn-1", EVENT_TURN_COMPLETED, status="completed")
+
+    events = load_turn_events(tmp_path, "session-a")
+    assert [event.event_type for event in events] == [
+        EVENT_TURN_STARTED,
+        EVENT_ASSISTANT_ITEM_COMMITTED,
+        EVENT_ASSISTANT_ITEM_COMMITTED,
+        EVENT_TOOL_CALL_STARTED,
+        EVENT_TOOL_RESULT,
+        EVENT_ASSISTANT_ITEM_COMMITTED,
+        EVENT_TURN_COMPLETED,
+    ]
+    assert EVENT_ASSISTANT_DELTA_COMMITTED not in [event.event_type for event in events]
+    assert [
+        message["content"]
+        for message in model_visible_messages_from_events(events)
+        if message["role"] == "assistant" and str(message.get("content") or "").strip()
+    ] == ["最终答案"]
+
+    items = session_turn_items_from_events(events, turn_id="turn-1")
+    assert items[-1] == {
+        "version": 2,
+        "id": "answer-1:0",
+        "type": "assistant_message",
+        "sessionId": "session-a",
+        "turnId": "turn-1",
+        "invocationId": "inv-2",
+        "iteration": 1,
+        "itemId": "answer-1",
+        "revision": 0,
+        "sequence": events[-2].sequence,
+        "kind": "assistant_message",
+        "channel": "answer",
+        "phase": "final_answer",
+        "status": "completed",
+        "protocol": "canonical",
+        "provisional": False,
+        "terminal": True,
+        "text": "最终答案",
+    }
+    assert "replay" not in str(items).lower()
+    assert "opaque" not in str(items).lower()
 
 
 def test_turn_journal_rejects_model_visible_events_after_terminal_turn(tmp_path):
