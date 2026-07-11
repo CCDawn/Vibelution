@@ -502,6 +502,46 @@ def test_v2_config_loader_rejects_unsafe_kwargs_increment(path: str, expected_er
     assert "kwargs-secret-must-not-appear" not in message
 
 
+@pytest.mark.parametrize("credential_field", ["api_key", "api_key_env", "credential_ref"])
+def test_v2_config_loader_rejects_credentials_nested_in_list_valued_kwargs(
+    credential_field: str,
+    tmp_path,
+) -> None:
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(_v2_toml(), encoding="utf-8")
+    sentinel = "list-secret-must-not-appear"
+
+    with pytest.raises(ValueError) as exc_info:
+        effective = ConfigLoader(str(config_path)).load(
+            **{
+                "llm.providers.pixel_relay.models": {
+                    "gpt-5.6-luna": {"compatibility": {"payload": [{credential_field: sentinel}]}}
+                }
+            }
+        )
+
+    assert str(exc_info.value) == "schema v2 credential fields are not allowed in incremental config"
+    assert sentinel not in str(exc_info.value)
+    assert sentinel not in repr(exc_info.value)
+    assert "effective" not in locals()
+
+
+def test_v2_config_loader_allows_noncredential_list_metadata_in_kwargs(tmp_path) -> None:
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(_v2_toml(), encoding="utf-8")
+
+    effective = ConfigLoader(str(config_path)).load(
+        **{
+            "llm.providers.pixel_relay.models": {
+                "gpt-5.6-luna": {"compatibility": {"payload": [{"format": "json"}]}}
+            }
+        }
+    )
+
+    compatibility = effective.llm.get_provider("pixel_relay").models["gpt-5.6-luna"].compatibility
+    assert compatibility["payload"] == [{"format": "json"}]
+
+
 @pytest.mark.parametrize(
     "override_path",
     [
