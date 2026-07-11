@@ -171,6 +171,7 @@ function resolveAssistantDeltaProtocol(payload: SessionAssistantDeltaStreamEvent
     thoughtContent: payload.thoughtDelta ?? payload.thought,
     feedbackEventCount: payload.feedbackEvents?.length ?? 0,
     codexTranscript: payload.codexTranscript,
+    turnItems: payload.turnItems,
   });
 }
 
