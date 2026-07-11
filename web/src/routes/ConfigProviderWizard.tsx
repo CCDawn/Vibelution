@@ -16,6 +16,8 @@ import {
 } from "../components/vui";
 import {
   canAdvanceProviderWizard,
+  dispatchProviderWizardConnectionAction,
+  isProviderWizardConnectionLocked,
   type ProviderWizardAction,
   type ProviderWizardState,
   type ProviderWizardStep,
@@ -114,6 +116,7 @@ export function ConfigProviderWizard({
   const [discoveryAttempted, setDiscoveryAttempted] = useState(false);
   const appliedTemplateRef = useRef("");
   const selectedTemplate = templates.find((item) => item.provider_preset_id === state.templateId);
+  const connectionLocked = isProviderWizardConnectionLocked(disabled, providerCreated);
   const selectedProviderDraft = useMemo(
     () => providerDraft(state, selectedTemplate),
     [selectedTemplate, state],
@@ -178,14 +181,21 @@ export function ConfigProviderWizard({
   }, [onChange, onSuggestProviderId, providerCreated, selectedProviderDraft, state.baseUrl, state.credentialRef, state.label, state.providerId, state.step, state.templateId]);
 
   function updateConnection(patch: Partial<Pick<ProviderWizardState, "providerId" | "label" | "baseUrl" | "credentialRef">>) {
-    setLocalError("");
-    onChange({
+    const changed = dispatchProviderWizardConnectionAction(connectionLocked, {
       type: "set_connection",
       providerId: patch.providerId ?? state.providerId,
       label: patch.label ?? state.label,
       baseUrl: patch.baseUrl ?? state.baseUrl,
       credentialRef: patch.credentialRef ?? state.credentialRef,
-    });
+    }, onChange);
+    if (changed) setLocalError("");
+  }
+
+  function updateSavedConnection(
+    action: Extract<ProviderWizardAction, { type: "set_protocol" | "set_deployment" }>,
+  ) {
+    const changed = dispatchProviderWizardConnectionAction(connectionLocked, action, onChange);
+    if (changed) setLocalError("");
   }
 
   async function createAndDiscover() {
@@ -288,21 +298,26 @@ export function ConfigProviderWizard({
 
         {state.step === "connection" ? (
           <div className={styles.fieldGrid}>
+            {providerCreated ? (
+              <VStateSurface className={styles.fieldWide} tone="unavailable" title="Provider 已创建，连接字段已锁定">
+                返回 Provider 详情使用“修改路由”并完成 backend preview token 确认；向导不会静默忽略字段修改。
+              </VStateSurface>
+            ) : null}
             <label className={styles.field}>
               <span>Provider ID</span>
-              <VInput value={state.providerId} disabled={disabled || providerCreated} onChange={(event) => updateConnection({ providerId: event.target.value })} />
+              <VInput value={state.providerId} disabled={connectionLocked} onChange={(event) => updateConnection({ providerId: event.target.value })} />
             </label>
             <label className={styles.field}>
               <span>显示名称</span>
-              <VInput value={state.label} disabled={disabled} onChange={(event) => updateConnection({ label: event.target.value })} />
+              <VInput value={state.label} disabled={connectionLocked} onChange={(event) => updateConnection({ label: event.target.value })} />
             </label>
             <label className={styles.fieldWide}>
               <span>Service root</span>
-              <VInput value={state.baseUrl} disabled={disabled} onChange={(event) => updateConnection({ baseUrl: event.target.value })} />
+              <VInput value={state.baseUrl} disabled={connectionLocked} onChange={(event) => updateConnection({ baseUrl: event.target.value })} />
             </label>
             <label className={styles.field}>
               <span>Credential reference</span>
-              <VInput value={state.credentialRef} disabled={disabled} onChange={(event) => updateConnection({ credentialRef: event.target.value })} />
+              <VInput value={state.credentialRef} disabled={connectionLocked} onChange={(event) => updateConnection({ credentialRef: event.target.value })} />
             </label>
             <label className={styles.field}>
               <span>Secret（仅本次请求）</span>
@@ -310,7 +325,7 @@ export function ConfigProviderWizard({
                 type="password"
                 autoComplete="new-password"
                 value={credentialValue}
-                disabled={disabled}
+                disabled={connectionLocked}
                 onChange={(event) => setCredentialValue(event.target.value)}
               />
             </label>
@@ -323,9 +338,9 @@ export function ConfigProviderWizard({
               <VStringSelect
                 ariaLabel="Driver"
                 value={state.driver}
-                isDisabled={disabled}
+                isDisabled={connectionLocked}
                 options={["openai", "anthropic", "gemini"].map((value) => ({ value, label: value }))}
-                onValueChange={(driver) => onChange({ type: "set_protocol", driver, defaultProtocol: state.defaultProtocol, allowedProtocols: state.allowedProtocols })}
+                onValueChange={(driver) => updateSavedConnection({ type: "set_protocol", driver, defaultProtocol: state.defaultProtocol, allowedProtocols: state.allowedProtocols })}
               />
             </label>
             <label className={styles.field}>
@@ -333,9 +348,9 @@ export function ConfigProviderWizard({
               <VStringSelect
                 ariaLabel="默认 wire protocol"
                 value={state.defaultProtocol}
-                isDisabled={disabled}
+                isDisabled={connectionLocked}
                 options={PROTOCOL_OPTIONS.map((value) => ({ value, label: value }))}
-                onValueChange={(defaultProtocol) => onChange({ type: "set_protocol", driver: state.driver, defaultProtocol, allowedProtocols: Array.from(new Set([...state.allowedProtocols, defaultProtocol])) })}
+                onValueChange={(defaultProtocol) => updateSavedConnection({ type: "set_protocol", driver: state.driver, defaultProtocol, allowedProtocols: Array.from(new Set([...state.allowedProtocols, defaultProtocol])) })}
               />
             </label>
             <div className={styles.fieldWide}>
@@ -345,8 +360,8 @@ export function ConfigProviderWizard({
                   <VCheckbox
                     key={protocol}
                     isSelected={state.allowedProtocols.includes(protocol)}
-                    isDisabled={disabled || state.defaultProtocol === protocol}
-                    onChange={(selected) => onChange({
+                    isDisabled={connectionLocked || state.defaultProtocol === protocol}
+                    onChange={(selected) => updateSavedConnection({
                       type: "set_protocol",
                       driver: state.driver,
                       defaultProtocol: state.defaultProtocol,
@@ -362,11 +377,11 @@ export function ConfigProviderWizard({
               <>
                 <label className={styles.field}>
                   <span>Runtime framework</span>
-                  <VInput value={state.runtimeFramework} disabled={disabled} onChange={(event) => onChange({ type: "set_deployment", runtimeFramework: event.target.value, artifactPath: state.artifactPath })} />
+                  <VInput value={state.runtimeFramework} disabled={connectionLocked} onChange={(event) => updateSavedConnection({ type: "set_deployment", runtimeFramework: event.target.value, artifactPath: state.artifactPath })} />
                 </label>
                 <label className={styles.field}>
                   <span>Artifact path</span>
-                  <VInput value={state.artifactPath} disabled={disabled} onChange={(event) => onChange({ type: "set_deployment", runtimeFramework: state.runtimeFramework, artifactPath: event.target.value })} />
+                  <VInput value={state.artifactPath} disabled={connectionLocked} onChange={(event) => updateSavedConnection({ type: "set_deployment", runtimeFramework: state.runtimeFramework, artifactPath: event.target.value })} />
                 </label>
               </>
             ) : null}

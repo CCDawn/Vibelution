@@ -77,7 +77,7 @@ import { ConfigProviderRegistryPanel, type ConfigProviderRegistryTab } from "./C
 import { ConfigProviderWizard } from "./ConfigProviderWizard";
 import { ConfigRuntimePanel } from "./ConfigRuntimePanel";
 import { ConfigWorkspacePlaceholderPanel } from "./ConfigWorkspacePlaceholderPanel";
-import { deriveProviderRegistryRows, initialProviderWizardState, providerWizardReducer } from "./configProviderLogic";
+import { deriveProviderRegistryRows, filterAlreadyPinnedModels, initialProviderWizardState, providerWizardReducer } from "./configProviderLogic";
 import styles from "./ConfigRoute.styles";
 
 export type ConfigLanguage = "zh" | "en";
@@ -2074,6 +2074,7 @@ export function ConfigRoute() {
     publicConfig: PublicConfigShape;
     draftMeta: ConfigDraftMeta;
     baseHash: string;
+    modelCatalog: ConfigWorkspace["modelCatalog"];
   } | null>(null);
   const workspaceQuery = useQuery({
     queryKey: queryKeys.configWorkspace(),
@@ -2129,6 +2130,7 @@ export function ConfigRoute() {
       publicConfig: workspace.publicConfig,
       draftMeta: workspace.draftMeta,
       baseHash: workspace.baseHash,
+      modelCatalog: workspace.modelCatalog,
     };
     setActiveWorkspace(clonePublicConfig(workspace));
     setDraftConfig(clonePublicConfig(workspace.publicConfig));
@@ -2241,6 +2243,14 @@ export function ConfigRoute() {
   const providerRows = useMemo(
     () => deriveProviderRegistryRows(workspace?.providerOptions ?? [], workspace?.modelCatalog ?? { schemaVersion: 2, providerCount: 0, modelCount: 0, providers: {} }),
     [workspace?.modelCatalog, workspace?.providerOptions],
+  );
+  const liveReferenceCountByModelRef = useMemo(
+    () => Object.fromEntries(
+      (routePreview?.impactedRefs ?? [])
+        .filter((impact): impact is ProviderRouteImpact & { modelRef: string } => Boolean(impact.modelRef))
+        .map((impact) => [impact.modelRef, impact.liveReferenceCount ?? 0]),
+    ),
+    [routePreview],
   );
   const providerVendorGroups = useMemo(() => groupProviderPresetsByVendor(providerPresetOptions), [providerPresetOptions]);
   const selectedProviderVendorTemplates = useMemo(
@@ -2527,16 +2537,24 @@ export function ConfigRoute() {
   async function handlePinProviderModels(providerId: string, models: ConfigCatalogModel[]): Promise<void> {
     setBusyAction("正在固定模型…");
     setProviderActionError("");
-    let currentConfig = requireDraft();
-    let currentMeta = draftMeta;
+    const latestDraft = providerDraftRequestRef.current;
+    let currentConfig = latestDraft?.publicConfig ?? requireDraft();
+    let currentMeta = latestDraft?.draftMeta ?? draftMeta;
+    let currentBaseHash = latestDraft?.baseHash ?? baseHash;
+    const pinnedModelRefs = new Set(
+      Object.values(latestDraft?.modelCatalog.providers[providerId]?.models ?? {})
+        .filter((model) => model.availability === "pinned" || model.availability === "missing_remote")
+        .map((model) => model.modelRef),
+    );
+    const pendingModels = filterAlreadyPinnedModels(models, pinnedModelRefs);
     try {
-      for (const model of models) {
+      for (const model of pendingModels) {
         const response = await requestJson<ConfigWorkspace>(
           `/api/config/draft/providers/${encodeURIComponent(providerId)}/models`,
           {
             publicConfig: currentConfig,
             draftMeta: currentMeta,
-            baseHash,
+            baseHash: currentBaseHash,
             providerId,
             upstreamId: model.upstreamId,
             modelKey: model.modelKey,
@@ -2546,7 +2564,9 @@ export function ConfigRoute() {
         );
         currentConfig = response.publicConfig;
         currentMeta = response.draftMeta;
+        currentBaseHash = response.baseHash;
         syncWorkspace(response, "success", { resetBase: false });
+        dispatchProviderWizard({ type: "pin_succeeded", modelRef: model.modelRef });
       }
       setSelectedProviderId(providerId);
       setSelectedProviderTab("models");
@@ -3578,6 +3598,7 @@ export function ConfigRoute() {
                   selectedProviderId={selectedProviderId}
                   selectedTab={selectedProviderTab}
                   disabled={structuredActionsDisabled || Boolean(busyAction)}
+                  liveReferenceCountByModelRef={liveReferenceCountByModelRef}
                   onSelectProvider={setSelectedProviderId}
                   onSelectTab={setSelectedProviderTab}
                   onDiscover={(providerId) => {

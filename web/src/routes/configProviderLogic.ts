@@ -16,6 +16,7 @@ export type ProviderRegistryRow = {
   baseUrl: string;
   credentialState: string;
   defaultProtocol: string;
+  pinnedCount: number;
   status: ConfigProviderStatus | "configured";
   lastAttemptAt: string;
   lastSuccessAt: string;
@@ -41,6 +42,7 @@ export function deriveProviderRegistryRows(
         baseUrl: provider.base_url ?? "",
         credentialState: provider.credential_state,
         defaultProtocol: provider.default_protocol,
+        pinnedCount: provider.pinned_count,
         status: observed?.status ?? "configured",
         lastAttemptAt: observed?.lastAttemptAt ?? "",
         lastSuccessAt: observed?.lastSuccessAt ?? "",
@@ -77,6 +79,7 @@ export type ProviderWizardAction =
   | { type: "set_deployment"; runtimeFramework: string; artifactPath: string }
   | { type: "set_discovery"; models: ConfigCatalogModel[] }
   | { type: "toggle_pin"; modelRef: string }
+  | { type: "pin_succeeded"; modelRef: string }
   | { type: "next" }
   | { type: "back" }
   | { type: "reset" };
@@ -133,6 +136,31 @@ export function canAdvanceProviderWizard(state: ProviderWizardState): boolean {
     && state.pinnedModelRefs.every(
       (modelRef) => isCanonicalModelRefForProvider(modelRef, state.providerId) && discoveredRefs.has(modelRef),
     );
+}
+
+export function canUnpinProviderModel(row: ProviderRegistryRow, model: ConfigCatalogModel): boolean {
+  return row.pinnedCount > 0 && (model.availability === "pinned" || model.availability === "missing_remote");
+}
+
+export function filterAlreadyPinnedModels(
+  models: ConfigCatalogModel[],
+  pinnedModelRefs: ReadonlySet<string>,
+): ConfigCatalogModel[] {
+  return models.filter((model) => !pinnedModelRefs.has(model.modelRef));
+}
+
+export function isProviderWizardConnectionLocked(disabled: boolean, providerCreated: boolean): boolean {
+  return disabled || providerCreated;
+}
+
+export function dispatchProviderWizardConnectionAction(
+  locked: boolean,
+  action: Extract<ProviderWizardAction, { type: "set_connection" | "set_protocol" | "set_deployment" }>,
+  onChange: (action: ProviderWizardAction) => void,
+): boolean {
+  if (locked) return false;
+  onChange(action);
+  return true;
 }
 
 function isCanonicalModelRefForProvider(modelRef: string, providerId: string): boolean {
@@ -254,6 +282,20 @@ export function providerWizardReducer(state: ProviderWizardState, action: Provid
       selected.add(action.modelRef);
     }
     return { ...state, pinnedModelRefs: Array.from(selected).sort() };
+  }
+  if (action.type === "pin_succeeded") {
+    if (
+      state.step !== "pin"
+      || !state.pinnedModelRefs.includes(action.modelRef)
+      || !state.discoveredModels.some((model) => model.modelRef === action.modelRef)
+    ) {
+      return state;
+    }
+    return {
+      ...state,
+      discoveredModels: state.discoveredModels.filter((model) => model.modelRef !== action.modelRef),
+      pinnedModelRefs: state.pinnedModelRefs.filter((modelRef) => modelRef !== action.modelRef),
+    };
   }
   const index = STEPS.indexOf(state.step);
   if (action.type === "back") {
