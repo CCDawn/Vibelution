@@ -1,4 +1,4 @@
-import { VPanelHeader, VSurface } from "../components/vui";
+import { VRouteHeader, VSurface } from "../components/vui";
 import styles from "./ConfigWorkspacePlaceholderPanel.styles";
 
 type ConfigWorkspacePlaceholderPanelProps = {
@@ -17,7 +17,7 @@ export function ConfigWorkspacePlaceholderPanel({
   return (
     <VSurface as="div" className={`${styles.loadingShell} ${tone === "error" ? styles.loadingShellError : ""}`} padding="none">
       <VSurface as="aside" className={styles.loadingNavPanel} tone="rail">
-        <VPanelHeader eyebrow="Config" title={title} />
+        <VRouteHeader eyebrow="Config" title={title} />
         {subtitle ? <p className={styles.subtitle}>{subtitle}</p> : null}
         <div className={styles.loadingNavList} aria-hidden="true">
           {navLabels.map((label, index) => (

@@ -463,6 +463,14 @@ describe("ConfigRoute layout contract", () => {
     expect(styles.configStatusBand).toContain("[grid-template-columns:1fr]");
   });
 
+  it("keeps a canonical Config h1 across loaded and placeholder states", () => {
+    expect(placeholderPanelSource).toContain("VRouteHeader");
+    expect(placeholderPanelSource).not.toContain("<VPanelHeader");
+    expect(routeSource).toContain("<VPanelHeader");
+    expect(routeSource).toContain("headingLevel={null}");
+    expect((routeSource.match(/<VRouteHeader\b/g) ?? []).length).toBe(1);
+  });
+
   it("routes Config controls through VUI primitives", () => {
     expect(routeSource).toContain('from "../components/vui"');
     expect(routeSource).toContain("VRouteHeader");

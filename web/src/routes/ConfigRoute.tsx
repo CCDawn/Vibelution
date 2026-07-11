@@ -3000,6 +3000,7 @@ export function ConfigRoute() {
           <VPanelHeader
             eyebrow="Config"
             title={copy.pageTitle}
+            headingLevel={null}
             actions={
               returnToPath ? (
                 <Link to={returnToPath} className={styles.returnButton}>

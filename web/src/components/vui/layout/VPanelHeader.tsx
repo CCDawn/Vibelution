@@ -5,14 +5,19 @@ export type VPanelHeaderProps = {
   eyebrow?: ReactNode;
   actions?: ReactNode;
   className?: string;
+  headingLevel?: 2 | 3 | 4 | null;
   "data-vui"?: string;
 };
+
+const titleClassName =
+  "m-0 text-[1rem] font-bold leading-[1.2] text-[var(--fg-primary)] [overflow-wrap:anywhere] [font-family:var(--font-display)]";
 
 export function VPanelHeader({
   title,
   eyebrow,
   actions,
   className,
+  headingLevel = 2,
   "data-vui": dataVui,
 }: VPanelHeaderProps) {
   return (
@@ -28,9 +33,15 @@ export function VPanelHeader({
             {eyebrow}
           </p>
         ) : null}
-        <h2 className="m-0 text-[1rem] font-bold leading-[1.2] text-[var(--fg-primary)] [overflow-wrap:anywhere] [font-family:var(--font-display)]">
-          {title}
-        </h2>
+        {headingLevel === null ? (
+          <div className={titleClassName}>{title}</div>
+        ) : headingLevel === 3 ? (
+          <h3 className={titleClassName}>{title}</h3>
+        ) : headingLevel === 4 ? (
+          <h4 className={titleClassName}>{title}</h4>
+        ) : (
+          <h2 className={titleClassName}>{title}</h2>
+        )}
       </div>
       {actions ? (
         <div className="inline-flex items-center justify-end gap-2 min-w-0">{actions}</div>
