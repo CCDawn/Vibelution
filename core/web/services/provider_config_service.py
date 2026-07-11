@@ -847,6 +847,16 @@ def discover_draft_provider(
 
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[3]
+_SAFE_MIGRATION_ROLLBACK_ERRORS = frozenset(
+    {
+        "unknown migration id",
+        "migration is not rollback eligible",
+        "stale config hash",
+        "invalid migration manifest",
+        "migration backup hash mismatch",
+        "migration target hash drift",
+    }
+)
 
 
 def _record_migration_event(event_code: str, *, outcome: str, fields: dict[str, Any]) -> None:
@@ -917,7 +927,7 @@ def project_llm_v2_migration_preview(payload: dict[str, Any]) -> dict[str, Any]:
             continue
         projected = {
             key: copy.deepcopy(raw[key])
-            for key in ("code", "severity", "modelId", "fields")
+            for key in ("code", "severity", "modelId", "fields", "proposedProviderId")
             if key in raw
         }
         conflicts.append(projected)
@@ -988,12 +998,27 @@ def apply_llm_v2_migration(*, preview_id: str, base_hash: str) -> dict[str, Any]
 
 def rollback_llm_v2_migration(*, migration_id: str, base_hash: str) -> dict[str, Any]:
     started = time.monotonic()
-    result = rollback_v1_to_v2(
-        migration_id,
-        config_path=CONFIG_PATH,
-        project_root=_PROJECT_ROOT,
-        expected_current_hash=base_hash,
-    )
+    try:
+        result = rollback_v1_to_v2(
+            migration_id,
+            config_path=CONFIG_PATH,
+            project_root=_PROJECT_ROOT,
+            expected_current_hash=base_hash,
+        )
+    except Exception as exc:
+        _record_migration_event(
+            "config.schema.migration_rolled_back",
+            outcome="failed",
+            fields={
+                "migrationId": migration_id,
+                "phase": "rollback",
+                "errorType": type(exc).__name__,
+                "elapsedMs": int((time.monotonic() - started) * 1000),
+            },
+        )
+        if isinstance(exc, ValueError) and str(exc) in _SAFE_MIGRATION_ROLLBACK_ERRORS:
+            raise
+        raise RuntimeError("migration rollback failed") from None
     _record_migration_event(
         "config.schema.migration_rolled_back",
         outcome="rolled_back",

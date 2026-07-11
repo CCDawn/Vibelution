@@ -13,6 +13,7 @@ from core.web.services import model_reference_service
 from core.web.services.model_reference_service import (
     ModelReferenceConflictError,
     assert_model_delete_safe,
+    build_model_reference_rewrite_plan,
     rebind_model_references,
     rewrite_model_reference_payload,
     scan_model_alias_usage,
@@ -102,6 +103,55 @@ def test_historical_alias_usage_is_reported_but_does_not_block_exit(tmp_path) ->
     assert usage["totalLiveReferenceCount"] == 0
     assert usage["totalHistoricalReferenceCount"] == 1
     assert usage["canRemoveAliases"] is True
+
+
+@pytest.mark.parametrize("status", ["completed", "failed", "cancelled"])
+def test_rewrite_plan_reuses_scanner_status_gate_for_historical_run(tmp_path, status) -> None:
+    index_path = tmp_path / ".runtime" / "runtime-manager" / "work_runs" / "supervised" / "index.json"
+    run_path = index_path.parent / "runs" / "run-old.json"
+    _write_json(index_path, {"activeRunId": "run-old"})
+    _write_json(
+        run_path,
+        {
+            "runId": "run-old",
+            "status": status,
+            "currentAgentBinding": {"modelId": "legacy_model"},
+        },
+    )
+    before = run_path.read_bytes()
+
+    plan = build_model_reference_rewrite_plan(
+        {"legacy_model": "relay/gpt-a"},
+        public_config={"llm": {"profiles": {}}},
+        project_root=tmp_path,
+    )
+
+    assert all(rewrite.path != run_path for rewrite in plan.file_rewrites)
+    assert {item["source"] for item in plan.historical_references} == {"historical_supervised_run"}
+    assert run_path.read_bytes() == before
+
+
+@pytest.mark.parametrize("status", ["active", "running", "paused"])
+def test_rewrite_plan_accepts_only_live_indexed_run_candidates(tmp_path, status) -> None:
+    index_path = tmp_path / ".runtime" / "runtime-manager" / "work_runs" / "supervised" / "index.json"
+    run_path = index_path.parent / "runs" / "run-live.json"
+    _write_json(index_path, {"activeRunId": "run-live"})
+    _write_json(
+        run_path,
+        {
+            "runId": "run-live",
+            "status": status,
+            "currentAgentBinding": {"modelId": "legacy_model"},
+        },
+    )
+
+    plan = build_model_reference_rewrite_plan(
+        {"legacy_model": "relay/gpt-a"},
+        public_config={"llm": {"profiles": {}}},
+        project_root=tmp_path,
+    )
+
+    assert [rewrite.path for rewrite in plan.file_rewrites] == [run_path]
 
 
 def _seed_agent_registry(root, model_id: str, other_model_id: str = "model-b") -> None:

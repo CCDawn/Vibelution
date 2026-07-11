@@ -369,13 +369,26 @@ def _scan_chat_room_refs(refs: list[dict[str, Any]], model_id: str, project_root
             )
 
 
-def _active_supervised_snapshot_path(project_root: Path) -> Path | None:
+def _indexed_supervised_snapshot(project_root: Path) -> tuple[Path, dict[str, Any]] | None:
     index_path = project_root / ".runtime" / "runtime-manager" / "work_runs" / "supervised" / "index.json"
     index = _load_json(index_path)
     active_run_id = _normalized_model_id(index.get("activeRunId")) if isinstance(index, dict) else ""
     if not active_run_id:
         return None
-    return index_path.parent / "runs" / f"{active_run_id}.json"
+    path = index_path.parent / "runs" / f"{active_run_id}.json"
+    payload = _load_json(path)
+    return (path, payload) if payload else None
+
+
+def _active_supervised_snapshot_path(project_root: Path) -> Path | None:
+    snapshot = _indexed_supervised_snapshot(project_root)
+    if snapshot is None:
+        return None
+    path, payload = snapshot
+    status = str(payload.get("status") or "").strip().lower() if payload else ""
+    if status not in _ACTIVE_RUN_STATUSES:
+        return None
+    return path
 
 
 def _scan_active_supervised_run_refs(refs: list[dict[str, Any]], model_id: str, project_root: Path) -> None:
@@ -448,6 +461,24 @@ def _scan_team_live_prompt_cache_refs(refs: list[dict[str, Any]], model_id: str,
 def _scan_historical_supervised_refs(
     refs: list[dict[str, Any]], model_id: str, project_root: Path, *, limit: int = _HISTORICAL_REFERENCE_LIMIT
 ) -> None:
+    indexed_snapshot = _indexed_supervised_snapshot(project_root)
+    if indexed_snapshot is not None:
+        indexed_path, indexed_payload = indexed_snapshot
+        indexed_status = str(indexed_payload.get("status") or "").strip().lower()
+        if indexed_status not in _ACTIVE_RUN_STATUSES and model_id in json.dumps(indexed_payload, ensure_ascii=False):
+            refs.append(
+                _reference(
+                    source="historical_supervised_run",
+                    source_path=_display_path(indexed_path, project_root),
+                    path="$",
+                    field="json",
+                    owner_type="supervised_artifact",
+                    owner_id=_normalized_model_id(indexed_payload.get("runId") or indexed_path.stem),
+                    historical=True,
+                )
+            )
+            if len(refs) >= limit:
+                return
     base = _workspace_path(project_root, "supervised_evolution", "supervised_evolution")
     if not base.exists():
         return
