@@ -1400,6 +1400,9 @@ class ConfigLoader:
                         raise ValueError("schema v2 inline providers are not allowed in incremental config")
                     overrides = profile_update.pop("overrides", None)
                     if isinstance(overrides, dict):
+                        from .llm_projection import _validate_runtime_overrides
+
+                        _validate_runtime_overrides(overrides, "overrides")
                         profile_update.update(overrides)
         else:
             data = normalize_public_config_dict(data)

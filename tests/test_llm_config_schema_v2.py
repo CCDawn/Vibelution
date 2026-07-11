@@ -237,6 +237,68 @@ api_key = "load-secret-must-not-appear"
     assert "load-secret-must-not-appear" not in message
 
 
+def test_v2_public_hash_rejects_nested_model_credential_without_echo() -> None:
+    public_config = _v2_config()
+    model = public_config["llm"]["providers"]["pixel_relay"]["models"]["gpt-5.6-luna"]
+    model["compatibility"] = {"nested": {"api_key": "nested-hash-secret-must-not-appear"}}
+
+    with pytest.raises(ValueError) as exc_info:
+        public_config_hash(public_config)
+
+    assert str(exc_info.value) == "schema v2 credential ownership violation: model.api_key"
+    assert "nested-hash-secret-must-not-appear" not in str(exc_info.value)
+    assert "nested-hash-secret-must-not-appear" not in repr(exc_info.value)
+
+
+def test_v2_public_hash_rejects_nested_llm_credential_without_echo() -> None:
+    public_config = _v2_config()
+    public_config["llm"]["discovery"] = {
+        "enabled": True,
+        "metadata": {"api_key_env": "NESTED_ROOT_SECRET_MUST_NOT_APPEAR"},
+    }
+
+    with pytest.raises(ValueError) as exc_info:
+        public_config_hash(public_config)
+
+    assert str(exc_info.value) == "schema v2 credential ownership violation: llm.api_key_env"
+    assert "NESTED_ROOT_SECRET_MUST_NOT_APPEAR" not in str(exc_info.value)
+    assert "NESTED_ROOT_SECRET_MUST_NOT_APPEAR" not in repr(exc_info.value)
+
+
+def test_v2_effective_config_rejects_nested_override_credential_without_echo() -> None:
+    public_config = _v2_config()
+    public_config["llm"]["profiles"]["primary"]["overrides"]["compat"] = {
+        "nested": {"credential_ref": "env:NESTED_SECRET_MUST_NOT_APPEAR"}
+    }
+
+    with pytest.raises(ValueError) as exc_info:
+        build_effective_config(public_config)
+
+    assert str(exc_info.value) == "schema v2 credential ownership violation: overrides.credential_ref"
+    assert "NESTED_SECRET_MUST_NOT_APPEAR" not in str(exc_info.value)
+    assert "NESTED_SECRET_MUST_NOT_APPEAR" not in repr(exc_info.value)
+
+
+def test_v2_load_public_config_rejects_nested_model_credential_without_echo(tmp_path) -> None:
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        _v2_toml()
+        + """
+
+[llm.providers.pixel_relay.models."gpt-5.6-luna".compatibility.nested]
+api_key = "nested-load-secret-must-not-appear"
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError) as exc_info:
+        load_public_config(config_path)
+
+    assert str(exc_info.value) == "schema v2 credential ownership violation: model.api_key"
+    assert "nested-load-secret-must-not-appear" not in str(exc_info.value)
+    assert "nested-load-secret-must-not-appear" not in repr(exc_info.value)
+
+
 def test_v1_public_config_hash_still_accepts_legacy_model_library() -> None:
     legacy = {
         "llm": {
@@ -438,6 +500,41 @@ def test_v2_config_loader_rejects_unsafe_kwargs_increment(path: str, expected_er
     message = str(exc_info.value)
     assert message == expected_error
     assert "kwargs-secret-must-not-appear" not in message
+
+
+@pytest.mark.parametrize(
+    "override_path",
+    [
+        "provider.base_url",
+        "provider_id",
+        "model_ref",
+        "model",
+        "unknown_runtime_field",
+    ],
+)
+def test_v2_config_loader_rejects_identity_or_unknown_nested_profile_override(override_path: str, tmp_path) -> None:
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(_v2_toml(), encoding="utf-8")
+    top_level_field = override_path.split(".", 1)[0]
+
+    with pytest.raises(ValueError) as exc_info:
+        ConfigLoader(str(config_path)).load(
+            **{f"llm.profiles.primary.overrides.{override_path}": "override-must-not-apply"}
+        )
+
+    assert str(exc_info.value) == f"unsupported schema v2 runtime field: overrides.{top_level_field}"
+
+
+def test_v2_config_loader_applies_allowlisted_nested_profile_override(tmp_path) -> None:
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(_v2_toml(), encoding="utf-8")
+
+    effective = ConfigLoader(str(config_path)).load(
+        **{"llm.profiles.primary.overrides.temperature": 0.12}
+    )
+
+    assert effective.llm.get_profile("primary").temperature == 0.12
+    assert effective.llm.get_profile("primary").provider_id == "pixel_relay"
 
 
 def test_v1_config_loader_keeps_profile_scalar_kwargs_behavior(tmp_path) -> None:

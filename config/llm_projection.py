@@ -38,10 +38,21 @@ def _validate_credential_ownership(
     scope: str,
     *,
     allowed: frozenset[str] = frozenset(),
+    skip_descendants: frozenset[str] = frozenset(),
 ) -> None:
-    forbidden = sorted((_CREDENTIAL_OWNERSHIP_FIELDS - allowed).intersection(payload))
-    if forbidden:
-        raise ValueError(f"schema v2 credential ownership violation: {scope}.{forbidden[0]}")
+    def visit(node: Any, *, is_root: bool = False) -> None:
+        if isinstance(node, dict):
+            for key, value in node.items():
+                if key in _CREDENTIAL_OWNERSHIP_FIELDS and not (is_root and key in allowed):
+                    raise ValueError(f"schema v2 credential ownership violation: {scope}.{key}")
+                if is_root and key in skip_descendants:
+                    continue
+                visit(value)
+        elif isinstance(node, list):
+            for value in node:
+                visit(value)
+
+    visit(payload, is_root=True)
 
 
 def _validate_runtime_overrides(payload: dict[str, Any], scope: str) -> None:
@@ -82,6 +93,8 @@ def project_v2_llm_for_runtime(public_config: dict[str, Any]) -> dict[str, Any]:
         return projected
     if "model_library" in llm:
         raise ValueError("llm.model_library is not allowed in schema v2 input")
+    llm_root_fields = {key: value for key, value in llm.items() if key not in {"providers", "profiles"}}
+    _validate_credential_ownership(llm_root_fields, "llm")
     providers = llm.get("providers")
     profiles = llm.get("profiles")
     if not isinstance(providers, dict) or not isinstance(profiles, dict):
@@ -96,7 +109,12 @@ def project_v2_llm_for_runtime(public_config: dict[str, Any]) -> dict[str, Any]:
         validate_provider_id(str(provider_id))
         if not isinstance(raw_provider, dict):
             raise ValueError(f"llm.providers.{provider_id} must be an object")
-        _validate_credential_ownership(raw_provider, "provider", allowed=frozenset({"credential_ref"}))
+        _validate_credential_ownership(
+            raw_provider,
+            "provider",
+            allowed=frozenset({"credential_ref"}),
+            skip_descendants=frozenset({"models"}),
+        )
         runtime_providers[str(provider_id)] = _runtime_provider(str(provider_id), raw_provider)
         raw_models = raw_provider.get("models", {})
         if not isinstance(raw_models, dict):
@@ -105,7 +123,7 @@ def project_v2_llm_for_runtime(public_config: dict[str, Any]) -> dict[str, Any]:
             model_ref = make_model_ref(str(provider_id), str(model_key))
             if not isinstance(raw_model, dict):
                 raise ValueError(f"pinned model {model_ref} must be an object")
-            _validate_credential_ownership(raw_model, "model")
+            _validate_credential_ownership(raw_model, "model", skip_descendants=frozenset({"defaults"}))
             raw_upstream_id = raw_model.get("upstream_id")
             if not isinstance(raw_upstream_id, str) or not raw_upstream_id.strip():
                 raise ValueError(f"pinned model {model_ref} requires upstream_id")
@@ -133,7 +151,7 @@ def project_v2_llm_for_runtime(public_config: dict[str, Any]) -> dict[str, Any]:
     for profile_id, raw_profile in profiles.items():
         if not isinstance(raw_profile, dict):
             raise ValueError(f"llm.profiles.{profile_id} must be an object")
-        _validate_credential_ownership(raw_profile, "profile")
+        _validate_credential_ownership(raw_profile, "profile", skip_descendants=frozenset({"overrides"}))
         requested_ref = str(raw_profile.get("model_ref") or "").strip()
         model_ref = alias_resolver.resolve_model_ref(requested_ref)
         provider_id, model_key = split_model_ref(model_ref)
