@@ -1463,7 +1463,8 @@ class LLMClient:
                         stream=stream,
                         tool_choice=(
                             "auto"
-                            if self.protocol_route.policy.allow_explicit_tool_choice
+                            if self.capabilities.supports_explicit_tool_choice
+                            and self.protocol_route.policy.allow_explicit_tool_choice
                             and self.protocol_route.compat.tool_choice_mode != "omit"
                             else "omit"
                         ),
