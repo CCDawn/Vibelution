@@ -215,6 +215,246 @@ def test_preview_rejects_suspected_artifact_paths(tmp_path, model) -> None:
     assert "relay_a" not in preview.model_ref_map
 
 
+def test_preview_preserves_local_artifact_as_wire_id_with_explicit_resolution(tmp_path) -> None:
+    artifact_path = r"C:\models\private\weights.gguf"
+    legacy = legacy_config_with_models(
+        ("local_a", "http://127.0.0.1:8080/v1", "", artifact_path),
+    )
+    legacy["llm"]["model_library"]["local_a"]["provider"]["kind"] = "local"
+
+    preview = preview_v1_to_v2(
+        legacy,
+        project_root=tmp_path,
+        artifact_resolutions=[
+            {"modelId": "local_a", "decision": "preserve_upstream_id"},
+        ],
+    )
+
+    assert preview.status == "READY"
+    provider = preview.providers[0]
+    assert provider["deployment"] == {
+        "runtime_framework": "",
+        "artifact_path": artifact_path,
+    }
+    provider_id, model_key = preview.model_ref_map["local_a"].split("/", 1)
+    proposed_provider = preview.proposed_public_config["llm"]["providers"][provider_id]
+    assert proposed_provider["models"][model_key]["upstream_id"] == artifact_path
+    assert proposed_provider["deployment"] == provider["deployment"]
+    assert preview.proposed_public_config["llm"]["profiles"]["primary"]["model_ref"] == (
+        preview.model_ref_map["local_a"]
+    )
+    assert preview.proposed_public_config["tools"]["image2"]["default_model_ref"] == (
+        preview.model_ref_map["local_a"]
+    )
+    assert preview.proposed_public_config["git"]["commit_message_model_ref"] == (
+        preview.model_ref_map["local_a"]
+    )
+    assert "weights.gguf" not in repr(preview)
+
+
+def test_preview_splits_deployment_artifact_from_explicit_wire_id(tmp_path) -> None:
+    artifact_path = "/srv/models/private/weights.gguf"
+    legacy = legacy_config_with_models(
+        ("local_a", "http://127.0.0.1:8080/v1", "", artifact_path),
+    )
+    legacy["llm"]["model_library"]["local_a"]["provider"]["kind"] = "local_runtime"
+
+    preview = preview_v1_to_v2(
+        legacy,
+        project_root=tmp_path,
+        artifact_resolutions=[
+            {
+                "modelId": "local_a",
+                "decision": "split_deployment_artifact",
+                "upstreamId": "served-model-a",
+            },
+        ],
+    )
+
+    assert preview.status == "READY"
+    provider = preview.providers[0]
+    assert provider["deployment"] == {
+        "runtime_framework": "",
+        "artifact_path": artifact_path,
+    }
+    provider_id, model_key = preview.model_ref_map["local_a"].split("/", 1)
+    assert model_key == "served-model-a"
+    model = preview.proposed_public_config["llm"]["providers"][provider_id]["models"][model_key]
+    assert model["upstream_id"] == "served-model-a"
+    assert artifact_path not in json.dumps(model)
+
+
+def test_preview_blocks_multiple_artifact_paths_in_one_provider_group(tmp_path) -> None:
+    legacy = legacy_config_with_models(
+        ("local_a", "http://127.0.0.1:8080/v1", "", r"C:\models\a.gguf"),
+        ("local_b", "http://127.0.0.1:8080/v1", "", r"C:\models\b.gguf"),
+    )
+    for entry in legacy["llm"]["model_library"].values():
+        entry["provider"]["kind"] = "local"
+
+    preview = preview_v1_to_v2(
+        legacy,
+        project_root=tmp_path,
+        artifact_resolutions=[
+            {"modelId": "local_a", "decision": "preserve_upstream_id"},
+            {"modelId": "local_b", "decision": "preserve_upstream_id"},
+        ],
+    )
+
+    conflict = next(item for item in preview.conflicts if item["code"] == "provider_artifact_path_conflict")
+    assert preview.status == "NEEDS_REVIEW"
+    assert conflict == {
+        "code": "provider_artifact_path_conflict",
+        "modelIds": ["local_a", "local_b"],
+    }
+    assert "deployment" not in preview.providers[0]
+    assert "a.gguf" not in json.dumps(conflict)
+    assert "b.gguf" not in json.dumps(conflict)
+
+
+def test_preview_rejects_preserve_for_non_local_provider_without_path_disclosure(tmp_path) -> None:
+    artifact_path = r"C:\private\relay.gguf"
+    legacy = legacy_config_with_models(
+        ("relay_a", "https://relay.example/v1", "RELAY_KEY", artifact_path),
+    )
+
+    with pytest.raises(ValueError, match="requires a local provider") as exc_info:
+        preview_v1_to_v2(
+            legacy,
+            project_root=tmp_path,
+            artifact_resolutions=[
+                {"modelId": "relay_a", "decision": "preserve_upstream_id"},
+            ],
+        )
+
+    assert "relay.gguf" not in str(exc_info.value)
+
+
+@pytest.mark.parametrize(
+    "artifact_resolutions, error",
+    [
+        (
+            [
+                {
+                    "modelId": "local_a",
+                    "decision": "split_deployment_artifact",
+                    "upstreamId": r"D:\served\model.gguf",
+                }
+            ],
+            "must not be an artifact path",
+        ),
+        ([{"modelId": "local_a", "decision": "guess_runtime"}], "unknown.*decision"),
+        ([{"modelId": "missing", "decision": "preserve_upstream_id"}], "unknown.*modelId"),
+        (
+            [
+                {"modelId": "local_a", "decision": "preserve_upstream_id"},
+                {"modelId": "local_a", "decision": "preserve_upstream_id"},
+            ],
+            "duplicate.*modelId",
+        ),
+        (
+            [
+                {
+                    "modelId": "local_a",
+                    "decision": "preserve_upstream_id",
+                    "artifactPath": "not accepted",
+                }
+            ],
+            "invalid.*fields",
+        ),
+    ],
+)
+def test_preview_rejects_invalid_artifact_resolutions(tmp_path, artifact_resolutions, error) -> None:
+    legacy = legacy_config_with_models(
+        ("local_a", "http://127.0.0.1:8080/v1", "", r"C:\models\private.gguf"),
+    )
+    legacy["llm"]["model_library"]["local_a"]["provider"]["kind"] = "local"
+
+    with pytest.raises(ValueError, match=error):
+        preview_v1_to_v2(
+            legacy,
+            project_root=tmp_path,
+            artifact_resolutions=artifact_resolutions,
+        )
+
+
+def test_preview_rejects_resolution_for_non_artifact_model(tmp_path) -> None:
+    legacy = legacy_config_with_models(
+        ("local_a", "http://127.0.0.1:8080/v1", "", "served-model-a"),
+    )
+    legacy["llm"]["model_library"]["local_a"]["provider"]["kind"] = "local"
+
+    with pytest.raises(ValueError, match="does not target an artifact path"):
+        preview_v1_to_v2(
+            legacy,
+            project_root=tmp_path,
+            artifact_resolutions=[
+                {"modelId": "local_a", "decision": "preserve_upstream_id"},
+            ],
+        )
+
+
+def test_artifact_resolution_is_stable_and_bound_to_preview_id(tmp_path) -> None:
+    artifact_path = r"C:\models\private.gguf"
+    legacy = legacy_config_with_models(
+        ("local_a", "http://127.0.0.1:8080/v1", "", artifact_path),
+    )
+    legacy["llm"]["model_library"]["local_a"]["provider"]["kind"] = "local"
+    preserve = [{"modelId": "local_a", "decision": "preserve_upstream_id"}]
+    split_a = [
+        {
+            "modelId": "local_a",
+            "decision": "split_deployment_artifact",
+            "upstreamId": "served-model-a",
+        }
+    ]
+    split_b = [
+        {
+            "modelId": "local_a",
+            "decision": "split_deployment_artifact",
+            "upstreamId": "served-model-b",
+        }
+    ]
+
+    first = preview_v1_to_v2(legacy, project_root=tmp_path, artifact_resolutions=preserve)
+    second = preview_v1_to_v2(legacy, project_root=tmp_path, artifact_resolutions=preserve)
+    split_first = preview_v1_to_v2(legacy, project_root=tmp_path, artifact_resolutions=split_a)
+    split_second = preview_v1_to_v2(legacy, project_root=tmp_path, artifact_resolutions=split_b)
+
+    assert first.preview_id == second.preview_id
+    assert len({first.preview_id, split_first.preview_id, split_second.preview_id}) == 3
+
+
+def test_artifact_resolution_preview_performs_no_network_or_disk_writes(tmp_path, monkeypatch) -> None:
+    artifact_path = r"C:\models\private.gguf"
+    legacy = legacy_config_with_models(
+        ("local_a", "http://192.0.2.10:8080/v1", "", artifact_path),
+    )
+    legacy["llm"]["model_library"]["local_a"]["provider"]["kind"] = "local"
+
+    def fail_network(*_args, **_kwargs):
+        raise AssertionError("network access attempted")
+
+    monkeypatch.setattr("socket.create_connection", fail_network)
+    monkeypatch.setattr(
+        "core.llm.provider_discovery.service.discover_provider_models",
+        fail_network,
+    )
+    before = sorted(str(path.relative_to(tmp_path)) for path in tmp_path.rglob("*"))
+
+    preview = preview_v1_to_v2(
+        legacy,
+        project_root=tmp_path,
+        artifact_resolutions=[
+            {"modelId": "local_a", "decision": "preserve_upstream_id"},
+        ],
+    )
+
+    after = sorted(str(path.relative_to(tmp_path)) for path in tmp_path.rglob("*"))
+    assert preview.status == "READY"
+    assert before == after
+
+
 def test_preview_moves_profile_fields_to_overrides(tmp_path) -> None:
     legacy = legacy_config_with_models(("relay_a", "https://relay.example/v1", "RELAY_KEY", "gpt-a"))
     legacy["llm"]["profiles"]["primary"]["temperature"] = 0.2
