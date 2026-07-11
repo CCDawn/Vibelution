@@ -44,6 +44,8 @@ class ResolvedAgentLlm:
     slot: str = DEFAULT_AGENT_LLM_SLOT
     requested_slot: str = DEFAULT_AGENT_LLM_SLOT
     model_id: str = ""
+    requested_model_ref: str = ""
+    model_ref: str = ""
     runtime_profile_id: str = DEFAULT_RUNTIME_PROFILE_ID
     provider_id: str = ""
     provider_kind: str = ""
@@ -61,6 +63,8 @@ class ResolvedAgentLlm:
             "llmSlot": self.slot,
             "requestedLlmSlot": self.requested_slot,
             "llmModelId": self.model_id,
+            "requestedModelRef": self.requested_model_ref,
+            "modelRef": self.model_ref,
             "runtimeProfileId": self.runtime_profile_id,
             "providerId": self.provider_id,
             "providerKind": self.provider_kind,
@@ -136,6 +140,7 @@ def resolve_agent_llm(
     if not model_id:
         raise AgentLlmResolutionError(f"Agent {requested_slot} LLM binding is required.")
 
+    requested_model_ref = model_id
     runtime_config = config_for_agent_llm_model(
         config,
         model_id=model_id,
@@ -144,13 +149,16 @@ def resolve_agent_llm(
     )
     profile = runtime_config.llm.get_profile(profile_id=runtime_profile_id)
     provider = runtime_config.llm.get_provider(profile.provider_id)
+    model_ref = runtime_config.llm.resolve_model_ref(requested_model_ref)
     _apply_agent_reasoning_effort_override(agent, effective_slot, profile, provider)
     spec = discover_model(runtime_config, runtime_profile_id)
     return ResolvedAgentLlm(
         agent_id=str((agent or {}).get("agentId") or "").strip() if isinstance(agent, dict) else "",
         slot=effective_slot,
         requested_slot=requested_slot,
-        model_id=model_id,
+        model_id=model_ref,
+        requested_model_ref=requested_model_ref,
+        model_ref=model_ref,
         runtime_profile_id=runtime_profile_id,
         provider_id=profile.provider_id,
         provider_kind=provider.kind,
@@ -171,10 +179,11 @@ def config_for_agent_llm_model(
     runtime_profile_id: str = DEFAULT_RUNTIME_PROFILE_ID,
     slot: str = DEFAULT_AGENT_LLM_SLOT,
 ) -> AppConfig:
-    normalized_model_id = str(model_id or "").strip()
-    if not normalized_model_id:
+    requested_model_ref = str(model_id or "").strip()
+    if not requested_model_ref:
         raise AgentLlmResolutionError(f"Agent {slot} LLM binding is required.")
     runtime_config = copy.deepcopy(config)
+    normalized_model_id = runtime_config.llm.resolve_model_ref(requested_model_ref)
     model_library = getattr(runtime_config.llm, "model_library", {}) or {}
     entry = model_library.get(normalized_model_id) if isinstance(model_library, dict) else None
     if not isinstance(entry, dict):
@@ -216,6 +225,7 @@ def config_for_agent_llm_model(
             },
             "profile_id": runtime_profile_id,
             "provider_id": provider_id,
+            "model_ref": normalized_model_id,
             "model": model_name,
             "api_key_env": str(entry.get("api_key_env") or "").strip(),
             "prompt_cache": entry.get("prompt_cache") if "prompt_cache" in entry else PromptCacheConfig(),

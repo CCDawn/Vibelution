@@ -7,6 +7,7 @@ from dataclasses import replace
 from typing import Any
 
 from config import AppConfig
+from config.model_catalog import load_model_catalog_state, resolve_model_capabilities
 
 from .adapters import capabilities_for_adapter
 from .types import DiagnosticReport, LLMCapabilities, ResolvedModelSpec
@@ -87,6 +88,28 @@ _CAPABILITY_FIELD_ALIASES = {
     "supports_structured_content": "supports_structured_content",
 }
 
+_RUNTIME_TO_CATALOG_CAPABILITY = {
+    "supports_streaming": "streaming",
+    "supports_tool_calling": "tool_calling",
+    "supports_parallel_tool_calls": "parallel_tool_calls",
+    "supports_system_messages": "system_messages",
+    "supports_json_mode": "json_mode",
+    "supports_model_discovery": "model_discovery",
+    "supports_image_input": "image_input",
+    "supports_prompt_cache": "prompt_cache",
+    "supports_thinking": "thinking",
+    "supports_reasoning_roundtrip": "reasoning_roundtrip",
+    "supports_explicit_tool_choice": "explicit_tool_choice",
+    "supports_stream_usage": "stream_usage",
+    "supports_strict_json_schema": "strict_json_schema",
+    "supports_responses_transport": "responses_transport",
+    "supports_structured_content": "structured_content",
+}
+_CATALOG_TO_RUNTIME_CAPABILITY = {
+    catalog_field: runtime_field
+    for runtime_field, catalog_field in _RUNTIME_TO_CATALOG_CAPABILITY.items()
+}
+
 
 def _lookup_context_window(model_name: str, fallback: int) -> int:
     normalized = (model_name or "").strip().lower()
@@ -151,6 +174,80 @@ def _apply_runtime_capability_gates(
     return updated
 
 
+def _curated_capabilities(profile: Any) -> dict[str, bool]:
+    from config.public_config import LLM_MODEL_PRESETS
+
+    model_name = str(getattr(profile, "model", "") or "").strip()
+    for preset in LLM_MODEL_PRESETS.values():
+        if not isinstance(preset, dict):
+            continue
+        preset_model = preset.get("model") if isinstance(preset.get("model"), dict) else {}
+        if str(preset_model.get("model") or "").strip() != model_name:
+            continue
+        capabilities, _fields = _declared_capability_overrides(preset_model)
+        return capabilities
+    return {}
+
+
+def _catalog_model_details(provider_id: str, model_ref: str) -> tuple[dict[str, Any], dict[str, Any]]:
+    if "/" not in model_ref:
+        return {}, {"catalog_availability": "not_applicable"}
+    ref_provider_id, model_key = model_ref.split("/", 1)
+    if ref_provider_id != provider_id or not model_key:
+        return {}, {"catalog_availability": "not_found"}
+    try:
+        state = load_model_catalog_state()
+    except ValueError:
+        return {}, {"catalog_availability": "invalid"}
+    providers = state.get("providers", {}) if isinstance(state, dict) else {}
+    provider_record = providers.get(provider_id, {}) if isinstance(providers, dict) else {}
+    models = provider_record.get("models", {}) if isinstance(provider_record, dict) else {}
+    model_record = models.get(model_key, {}) if isinstance(models, dict) else {}
+    details = {
+        "catalog_availability": str(model_record.get("availability") or "not_found"),
+        "catalog_status": str(provider_record.get("status") or "unknown"),
+        "catalog_stale": bool(provider_record.get("catalogStale", False)),
+    }
+    return model_record if isinstance(model_record, dict) else {}, details
+
+
+def _catalog_capability_layers(model_record: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+    provider_metadata: dict[str, Any] = {}
+    runtime_probe: dict[str, Any] = {}
+    raw = model_record.get("capabilities", {}) if isinstance(model_record, dict) else {}
+    if not isinstance(raw, dict):
+        return provider_metadata, runtime_probe
+    for field, record in raw.items():
+        if not isinstance(record, dict):
+            continue
+        source = str(record.get("source") or "").strip()
+        if source == "provider_endpoint":
+            provider_metadata[str(field)] = record
+        elif source == "runtime_probe":
+            runtime_probe[str(field)] = record
+    return provider_metadata, runtime_probe
+
+
+def _catalog_capability_names(capabilities: dict[str, Any]) -> dict[str, Any]:
+    return {
+        _RUNTIME_TO_CATALOG_CAPABILITY.get(str(field), str(field)): value
+        for field, value in capabilities.items()
+    }
+
+
+def _capabilities_from_resolution(
+    driver_capabilities: LLMCapabilities,
+    resolved: dict[str, Any],
+) -> LLMCapabilities:
+    values = vars(driver_capabilities).copy()
+    for field, record in resolved.items():
+        runtime_field = _CATALOG_TO_RUNTIME_CAPABILITY.get(field, field)
+        if runtime_field not in values or not isinstance(record, dict):
+            continue
+        values[runtime_field] = str(record.get("value") or "unknown") == "supported"
+    return LLMCapabilities(**values)
+
+
 def _base_capabilities_for_model(profile, provider) -> LLMCapabilities:
     model_name = str(profile.model or "").lower()
     provider_kind = str(provider.kind or "").lower()
@@ -171,13 +268,41 @@ def discover_model(config: AppConfig, profile_id: str) -> ResolvedModelSpec:
     profile = config.llm.get_profile(profile_id)
     provider = config.llm.get_provider(profile.provider_id)
     base_capabilities = _base_capabilities_for_model(profile, provider)
-    capabilities = capabilities_for_adapter(provider, profile, base_capabilities)
+    driver_capabilities = capabilities_for_adapter(provider, profile, base_capabilities)
     model_id, model_entry = config.llm.get_model_library_entry_for_profile(profile)
+    model_ref = str((model_entry or {}).get("model_ref") or model_id or "").strip()
+    provider_id = str((model_entry or {}).get("provider_id") or provider.provider_id or "").strip()
+    upstream_id = str(
+        (model_entry or {}).get("upstream_id") or (model_entry or {}).get("model") or profile.model or ""
+    ).strip()
     declared_overrides, declared_fields = _declared_capability_overrides(model_entry)
-    capabilities = _apply_declared_capability_overrides(capabilities, declared_overrides)
+    catalog_model, catalog_details = _catalog_model_details(provider_id, model_ref)
+    provider_metadata, runtime_probe = _catalog_capability_layers(catalog_model)
+    discovery_metadata = (
+        model_entry.get("discovery_metadata", {})
+        if isinstance(model_entry, dict) and isinstance(model_entry.get("discovery_metadata"), dict)
+        else {}
+    )
+    metadata_capabilities, _metadata_fields = _declared_capability_overrides(discovery_metadata)
+    provider_metadata = {**provider_metadata, **_catalog_capability_names(metadata_capabilities)}
+    resolved_capabilities = resolve_model_capabilities(
+        operator=_catalog_capability_names(declared_overrides),
+        runtime_probe=runtime_probe,
+        provider_metadata=provider_metadata,
+        curated_snapshot=_catalog_capability_names(_curated_capabilities(profile)),
+        driver_default=_catalog_capability_names(vars(driver_capabilities)),
+    )
+    capabilities = _capabilities_from_resolution(driver_capabilities, resolved_capabilities)
     capabilities = _apply_runtime_capability_gates(capabilities, profile)
     context_window = _lookup_context_window(profile.model, provider.context_window)
-    provider_details = {"provider_id": provider.provider_id, "base_url": provider.base_url}
+    provider_details = {
+        "provider_id": provider_id,
+        "base_url": provider.base_url,
+        "model_ref": model_ref,
+        "upstream_id": upstream_id,
+        "capabilities": resolved_capabilities,
+        **catalog_details,
+    }
     if model_id:
         provider_details["model_library_id"] = model_id
     if declared_fields:
