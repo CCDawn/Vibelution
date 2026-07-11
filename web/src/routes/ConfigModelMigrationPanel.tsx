@@ -1,16 +1,31 @@
+import { useEffect, useMemo, useState } from "react";
 import { AlertTriangle, DatabaseBackup, FileWarning, ShieldCheck } from "lucide-react";
 
-import type { ConfigMigrationPreview } from "../api/types";
+import type {
+  ConfigMigrationArtifactConflict,
+  ConfigMigrationArtifactResolution,
+  ConfigMigrationConflict,
+  ConfigMigrationPreview,
+} from "../api/types";
 import {
   VActionGroup,
   VButton,
+  VCheckbox,
   VDenseTable,
+  VInput,
   VPanelHeader,
   VSection,
   VStateSurface,
   VStatusChip,
+  VStringSelect,
   VSurface,
 } from "../components/vui";
+import {
+  buildArtifactResolutions,
+  createArtifactResolutionDrafts,
+  isValidSplitUpstreamId,
+  updateArtifactResolutionDraft,
+} from "./configMigrationResolutionLogic";
 import styles from "./ConfigModelMigrationPanel.styles";
 
 export type ConfigModelMigrationPanelProps = {
@@ -18,7 +33,7 @@ export type ConfigModelMigrationPanelProps = {
   preview: ConfigMigrationPreview | null;
   aliasUsageCount: number;
   busy: boolean;
-  onPreview: () => void;
+  onPreview: (artifactResolutions?: ConfigMigrationArtifactResolution[]) => void;
   onApply: (previewId: string, baseHash: string) => void;
 };
 
@@ -30,6 +45,18 @@ export function ConfigModelMigrationPanel({
   onPreview,
   onApply,
 }: ConfigModelMigrationPanelProps) {
+  const artifactWarnings = useMemo(
+    () => preview?.conflicts.filter(isArtifactConflict) ?? [],
+    [preview],
+  );
+  const [resolutionDrafts, setResolutionDrafts] = useState(() =>
+    createArtifactResolutionDrafts(artifactWarnings),
+  );
+
+  useEffect(() => {
+    setResolutionDrafts(createArtifactResolutionDrafts(artifactWarnings));
+  }, [artifactWarnings]);
+
   if (schemaVersion === 2) {
     return (
       <VSurface as="section" className={styles.migration} padding="none" data-migration-status={aliasUsageCount ? "aliases_in_use" : "aliases_clear"}>
@@ -44,8 +71,11 @@ export function ConfigModelMigrationPanel({
   }
 
   const mappings = Object.entries(preview?.modelRefMap ?? {}).map(([legacyModelId, modelRef]) => ({ legacyModelId, modelRef }));
-  const artifactWarnings = preview?.conflicts.filter((conflict) => conflict.fields?.includes("artifact_path")) ?? [];
-  const credentialConflicts = preview?.conflicts.filter((conflict) => conflict.fields?.some((field) => field.includes("credential"))) ?? [];
+  const credentialConflicts = preview?.conflicts.filter(
+    (conflict) => "fields" in conflict && conflict.fields?.some((field) => field.includes("credential")),
+  ) ?? [];
+  const otherConflicts = preview?.conflicts.filter((conflict) => conflict.code !== "artifact_path_suspected") ?? [];
+  const resolutions = buildArtifactResolutions(resolutionDrafts);
   const applyDisabled = busy || !preview || preview.status !== "READY";
 
   return (
@@ -101,25 +131,98 @@ export function ConfigModelMigrationPanel({
           </div>
 
           {artifactWarnings.length ? (
-            <VStateSurface tone="unavailable" icon={<FileWarning size={15} />} title="Artifact path 需要人工确认">
-              本地运行时 artifact path 不会与 upstream model ID 混用；请在应用前核对 {artifactWarnings.length} 项警告。
-            </VStateSurface>
+            <section className={styles.resolutionSection} aria-label="模型部署标识冲突裁决">
+              <div className={styles.resolutionHeading}>
+                <strong><FileWarning size={15} className="inline" /> 模型部署标识需要显式裁决</strong>
+                <span className={styles.muted}>裁决只重新生成服务端预览，不会应用迁移。</span>
+              </div>
+              <div className={styles.resolutionGrid}>
+                {resolutionDrafts.map((draft) => {
+                  const preserveAllowed = draft.allowedResolutions.includes("preserve_upstream_id");
+                  const splitAllowed = draft.allowedResolutions.includes("split_deployment_artifact");
+                  const splitInvalid = draft.decision === "split_deployment_artifact" && !isValidSplitUpstreamId(draft.upstreamId);
+                  return (
+                    <section key={draft.modelId} className={styles.resolutionCard} data-resolution-model-id={draft.modelId}>
+                      <div className={styles.resolutionCardHeader}>
+                        <strong>{draft.modelId}</strong>
+                        <VStatusChip tone="warning">离线未核验</VStatusChip>
+                      </div>
+                      <p className={styles.resolutionWarning} role="status">
+                        verificationState: unverified_offline。请仅从服务端允许的裁决中选择。
+                      </p>
+                      <VStringSelect
+                        ariaLabel={`${draft.modelId} 裁决方式`}
+                        value={draft.decision}
+                        placeholder="选择裁决方式"
+                        options={[
+                          ...(preserveAllowed ? [{ value: "preserve_upstream_id", label: "保留现有 upstream ID" }] : []),
+                          ...(splitAllowed ? [{ value: "split_deployment_artifact", label: "拆分部署记录并指定 upstream ID" }] : []),
+                        ]}
+                        onValueChange={(decision) => {
+                          setResolutionDrafts((current) => updateArtifactResolutionDraft(current, draft.modelId, {
+                            decision: decision as typeof draft.decision,
+                            preserveConfirmed: false,
+                          }));
+                        }}
+                      />
+                      {draft.decision === "preserve_upstream_id" && preserveAllowed ? (
+                        <VCheckbox
+                          isSelected={draft.preserveConfirmed}
+                          onChange={(preserveConfirmed) => {
+                            setResolutionDrafts((current) => updateArtifactResolutionDraft(current, draft.modelId, { preserveConfirmed }));
+                          }}
+                        >
+                          我确认保留此模型的现有 upstream ID
+                        </VCheckbox>
+                      ) : null}
+                      {draft.decision === "split_deployment_artifact" && splitAllowed ? (
+                        <div className={styles.resolutionFields}>
+                          <VInput
+                            aria-label={`${draft.modelId} 新 upstream ID`}
+                            value={draft.upstreamId}
+                            placeholder="namespace/model-a"
+                            aria-invalid={splitInvalid}
+                            onChange={(event) => {
+                              setResolutionDrafts((current) => updateArtifactResolutionDraft(current, draft.modelId, { upstreamId: event.target.value }));
+                            }}
+                          />
+                          {splitInvalid ? (
+                            <p className={styles.resolutionError} role="alert">请输入非空且非路径型的 upstream ID。</p>
+                          ) : null}
+                        </div>
+                      ) : null}
+                    </section>
+                  );
+                })}
+              </div>
+              <VActionGroup ariaLabel="冲突裁决预览" className={styles.resolutionActions}>
+                <VButton
+                  isDisabled={busy || !resolutions}
+                  onPress={() => {
+                    if (!resolutions) return;
+                    onPreview(resolutions);
+                  }}
+                >
+                  重新生成裁决预览
+                </VButton>
+              </VActionGroup>
+            </section>
           ) : null}
           {credentialConflicts.length ? (
             <VStateSurface tone="error" title="Credential 冲突阻止应用">
               {credentialConflicts.length} 个凭据映射冲突必须先处理；界面不会显示 credential reference 目标或 secret。
             </VStateSurface>
           ) : null}
-          {preview.conflicts.length ? (
+          {otherConflicts.length ? (
             <section className={styles.fact}>
               <strong>未解决冲突</strong>
               <ul className={styles.conflictList}>
-                {preview.conflicts.map((conflict, index) => (
+                {otherConflicts.map((conflict, index) => (
                   <li key={`${conflict.code}-${index}`}>{conflict.code} · {conflict.modelId || conflict.proposedProviderId || "全局"}</li>
                 ))}
               </ul>
             </section>
-          ) : (
+          ) : artifactWarnings.length ? null : (
             <VStateSurface tone="info" icon={<ShieldCheck size={15} />} title="预览无阻塞冲突">Apply 仍需最终 destructive impact 确认，不会在预览后自动执行。</VStateSurface>
           )}
         </>
@@ -128,7 +231,7 @@ export function ConfigModelMigrationPanel({
       )}
 
       <VActionGroup ariaLabel="迁移操作" className={styles.actions}>
-        <VButton isDisabled={busy} onPress={onPreview}>生成迁移预览</VButton>
+        <VButton isDisabled={busy} onPress={() => onPreview([])}>生成迁移预览</VButton>
         <VButton
           variant="danger"
           isDisabled={applyDisabled}
@@ -143,4 +246,8 @@ export function ConfigModelMigrationPanel({
       </VActionGroup>
     </VSurface>
   );
+}
+
+function isArtifactConflict(conflict: ConfigMigrationConflict): conflict is ConfigMigrationArtifactConflict {
+  return conflict.code === "artifact_path_suspected";
 }

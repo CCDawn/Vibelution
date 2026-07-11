@@ -8,6 +8,7 @@ import healthDiagnosticsPanelSource from "./ConfigHealthDiagnosticsPanel.tsx?raw
 import healthDiagnosticsPanelStylesSource from "./ConfigHealthDiagnosticsPanel.styles.ts?raw";
 import healthDiagnosticsPanelStyles from "./ConfigHealthDiagnosticsPanel.styles";
 import migrationPanelSource from "./ConfigModelMigrationPanel.tsx?raw";
+import migrationPanelStyles from "./ConfigModelMigrationPanel.styles";
 import overviewPanelSource from "./ConfigOverviewPanel.tsx?raw";
 import overviewPanelStylesSource from "./ConfigOverviewPanel.styles.ts?raw";
 import overviewPanelStyles from "./ConfigOverviewPanel.styles";
@@ -62,8 +63,28 @@ describe("ConfigRoute layout contract", () => {
 
   it("keeps v1 migration preview explicit and apply disabled on unresolved conflicts", () => {
     expect(migrationPanelSource).toContain('preview.status !== "READY"');
-    expect(migrationPanelSource).toContain("preview.conflicts");
+    expect(migrationPanelSource).toContain("preview?.conflicts");
     expect(migrationPanelSource).toContain("onApply(preview.previewId, preview.baseHash)");
+    expect(migrationPanelSource).toContain('conflict.code === "artifact_path_suspected"');
+    expect(migrationPanelSource).not.toContain('conflict.fields?.includes("artifact_path")');
+  });
+
+  it("submits artifact decisions only through a new preview request", () => {
+    expect(migrationPanelSource).toContain("onPreview(resolutions)");
+    expect(migrationPanelSource).toContain("onPreview([])");
+    expect(routeSource).toContain("artifactResolutions,");
+    expect(routeSource).toContain("ConfigMigrationPreviewRequest");
+    expect(routeSource).toContain("setMigrationPreview(response)");
+    expect(routeSource).not.toContain("handleApplyMigration(resolutions");
+  });
+
+  it("keeps artifact resolution cards and actions wrapping without page-level overflow", () => {
+    expect(migrationPanelStyles.resolutionGrid).toContain("[grid-template-columns:repeat(auto-fit,minmax(min(100%,280px),1fr))]");
+    expect(migrationPanelStyles.resolutionCard).toContain("[overflow-wrap:anywhere]");
+    expect(migrationPanelStyles.resolutionFields).toContain("max-[390px]:[grid-template-columns:minmax(0,1fr)]");
+    expect(migrationPanelStyles.actions).toContain("flex-wrap");
+    expect(migrationPanelStyles.tableScroll).toContain("[overflow-x:auto]");
+    expect(migrationPanelStyles.migration).toContain("min-w-0");
   });
 
   it("implements the four provider wizard steps", () => {
