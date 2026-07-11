@@ -488,4 +488,10 @@ describe("ConfigRoute layout contract", () => {
     expect(configSources).not.toMatch(/<select\b/);
     expect(configSources).not.toMatch(/<textarea\b/);
   });
+
+  it("prioritizes the visible VUI select trigger when focusing the model editor", () => {
+    expect(routeSource).toContain('button[data-vui="select-trigger"]:not([data-disabled="true"]):not([disabled])');
+    expect(routeSource).toContain('input:not([disabled]):not([type="hidden"])');
+    expect(routeSource).toContain("textarea:not([disabled])");
+  });
 });
