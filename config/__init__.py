@@ -85,8 +85,6 @@ from .settings import (
     normalize_public_config_dict,
     reload_config,
 )
-from .public_config import list_llm_provider_options
-
 __all__ = [
     "AgentConfig",
     "AgentModesConfig",
@@ -149,7 +147,6 @@ __all__ = [
     "get_model_preset",
     "get_settings",
     "list_models",
-    "list_llm_provider_options",
     "normalize_public_config_dict",
     "project_v2_llm_for_runtime",
     "pin_llm_model",

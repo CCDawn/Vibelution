@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import copy
+import subprocess
+import sys
+from pathlib import Path
 
 import pytest
 
@@ -15,6 +18,24 @@ from config.llm_provider_registry import (
     validate_provider_registry,
 )
 from config.public_config import list_llm_provider_options
+
+
+def test_protocol_resolver_imports_in_fresh_process() -> None:
+    project_root = Path(__file__).resolve().parents[1]
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "from core.llm.protocol_resolver import resolve_model_protocol",
+        ],
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
+
+    assert result.returncode == 0, result.stderr
 
 
 def _empty_v2() -> dict:
