@@ -10,6 +10,8 @@ from typing import Any, Callable, Dict, Optional
 
 from langchain_core.messages import AIMessage
 
+from core.llm.types import TurnOutcome as LLMTurnOutcome
+
 
 @dataclass
 class LifecycleDecision:
@@ -35,6 +37,15 @@ class TurnMessageCarryover:
     goal: str
 
 
+@dataclass(frozen=True)
+class LLMIterationDecision:
+    outcome: LLMTurnOutcome
+    tool_calls: tuple[Dict[str, Any], ...]
+    should_execute_tools: bool
+    should_finish: bool
+    should_stop_unsuccessfully: bool
+
+
 class TurnOutcomeController:
     """集中管理停机判定、生命周期出口与回合收尾。"""
 
@@ -46,6 +57,32 @@ class TurnOutcomeController:
     ) -> None:
         self.max_consecutive_failures = max_consecutive_failures
         self._get_attention_snapshot = get_attention_snapshot
+
+    @staticmethod
+    def decide_llm_iteration(response: Any) -> LLMIterationDecision:
+        """Derive Agent control flow exclusively from the canonical outcome."""
+        additional_kwargs = getattr(response, "additional_kwargs", None) or {}
+        outcome = additional_kwargs.get("turn_outcome")
+        if not isinstance(outcome, LLMTurnOutcome):
+            raise ValueError("LLM response is missing canonical TurnOutcome")
+        if not outcome.terminal_event_seen:
+            raise ValueError("canonical TurnOutcome is missing terminal evidence")
+        tool_calls = tuple(
+            {
+                "id": call.call_id,
+                "name": call.name,
+                "args": dict(call.arguments),
+                "canonical_tool_call": call,
+            }
+            for call in outcome.tool_calls
+        )
+        return LLMIterationDecision(
+            outcome=outcome,
+            tool_calls=tool_calls,
+            should_execute_tools=outcome.kind == "tool_calls" and bool(tool_calls),
+            should_finish=outcome.kind == "final_answer",
+            should_stop_unsuccessfully=outcome.kind in {"incomplete", "failed", "cancelled"},
+        )
 
     def should_stop_after_llm_failure(
         self,

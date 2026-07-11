@@ -28,6 +28,20 @@ describe("GitRoute layout contract", () => {
     expect(routeSource).not.toMatch(/<textarea\b/);
   });
 
+  it("uses VUI metrics, state, and action grouping without changing Git ownership", () => {
+    expect(routeSource).toContain("VMetricStrip");
+    expect(routeSource).toContain("VStateSurface");
+    expect(routeSource).toContain("VActionGroup");
+    expect(routeSource).toContain("commitSelected");
+    expect(routeSource).toContain("generateMessage");
+    expect(routeSource).toContain("stagedOutsideSelection");
+    expect(routeSource).toContain("commitBlockReasonText");
+    expect(routeSource).toContain("selectCurrentBranch");
+    expect(routeSource).toContain("selectWorktree(item)");
+    expect(gitRouteStyles.fileButton).toContain("grid-cols-[22px_34px_minmax(0,1fr)]");
+    expect(gitRouteStyles.commitActions).toContain("flex");
+  });
+
   it("uses shell language state without loading the full app dictionary", () => {
     expect(routeSource).toContain("useGitRouteI18n");
     expect(routeSource).toContain("const { lang, t } = useGitRouteI18n()");
@@ -92,7 +106,6 @@ describe("GitRoute layout contract", () => {
 
   it("keeps Git large surfaces translucent and action controls content-sized", () => {
     const largeSurfaceKeys = [
-      "summaryCard",
       "changePanel",
       "commitPanel",
       "gitSituationCard",
@@ -116,16 +129,14 @@ describe("GitRoute layout contract", () => {
       expect(gitRouteStyles[key]).toContain("h-[var(--vui-control-height-sm)]");
       expect(gitRouteStyles[key]).not.toContain("bg-[var(--surface-card)]");
     }
-    expect(gitRouteStyles.commitActions).toContain("grid-cols-[repeat(2,max-content)]");
-    expect(gitRouteStyles.commitActions).toContain("max-[520px]:grid-cols-[1fr]");
+    expect(gitRouteStyles.commitActions).toContain("flex");
+    expect(gitRouteStyles.commitActions).toContain("flex-wrap");
   });
 
   it("keeps Git summary and list rows dense without stretching controls", () => {
-    expect(gitRouteStyles.summaryGrid).toContain("grid-cols-[repeat(6,minmax(0,1fr))]");
-    expect(gitRouteStyles.summaryGrid).toContain("max-[1180px]:grid-cols-[repeat(3,minmax(0,1fr))]");
-    expect(gitRouteStyles.summaryGrid).toContain("max-[640px]:grid-cols-1");
-    expect(gitRouteStyles.summaryCard).toContain("px-2");
-    expect(gitRouteStyles.summaryCard).toContain("py-[5px]");
+    expect(gitRouteStyles.summaryGrid).toContain("mx-3");
+    expect(gitRouteStyles.summaryGrid).toContain("mt-1.5");
+    expect(gitRouteStyles.summaryGrid).toContain("overflow-x-auto");
     expect(gitRouteStyles.changePanel).toContain("gap-1.5");
     expect(gitRouteStyles.changePanel).toContain("p-2");
     expect(gitRouteStyles.commitPanel).toContain("gap-1.5");
@@ -174,7 +185,7 @@ describe("GitRoute layout contract", () => {
   it("reserves loading surfaces for the Git workspace panes", () => {
     expect(routeSource).toContain('tone="loading"');
     expect(routeSource).toContain("gitStatusLoading");
-    expect(gitRouteStyles.summaryCard).toContain("min-h-");
+    expect(gitRouteStyles.summaryGrid).toContain("min-h-[52px]");
   });
 
   it("renders an aria-busy recent commits surface while commits load independently", () => {
@@ -241,13 +252,13 @@ describe("GitRoute layout contract", () => {
     expect(routeSource).toContain("localCommitPreview.map((commit) => renderCommitItem(commit, gitCommitSourceLabel))");
   });
 
-  it("lets clean Git summaries open commit branch and worktree detail previews", () => {
+  it("keeps clean Git branch and worktree detail previews reachable from the overview", () => {
     expect(routeSource).toContain("type GitObjectSelection");
     expect(routeSource).toContain("setActiveObject(selection)");
     expect(routeSource).toContain("/api/git/object-detail?");
     expect(routeSource).toContain("selectCurrentBranch");
     expect(routeSource).toContain("selectWorktree");
-    expect(routeSource).toContain("worktreeDetailTarget");
+    expect(routeSource).toContain("selectWorktree(item)");
     expect(routeSource).toContain('kind: "worktree"');
     expect(routeSource).toContain('kind: "commit"');
     expect(routeSource).toContain("objectDetailQuery");
@@ -268,11 +279,12 @@ describe("GitRoute layout contract", () => {
 
     expect(manualCommitStyles).toContain("max-h-[min(100%,calc(100dvh-178px))]");
     expect(manualCommitStyles).toContain("overflow-auto");
-    expect(actionStyles).toContain("grid-cols-[repeat(2,max-content)]");
+    expect(actionStyles).toContain("flex");
+    expect(actionStyles).toContain("flex-wrap");
     expect(actionStyles).toContain("justify-end");
-    expect(actionStyles).toContain("[&_.secondaryButton]:w-fit");
     expect(routeSource).toContain('title={t("gitAiPromptHint")}');
-    expect(routeSource).toContain('title={t("gitCommitHint")}');
+    expect(routeSource).toContain("title={aiDraftBlockReasonText || undefined}");
+    expect(routeSource).toContain("title={commitBlockReasonText || undefined}");
     expect(routeSource).not.toContain('<span>{t("gitAiPromptHint")}</span>');
     expect(routeSource).not.toContain('<p className={styles.commitHint}>{t("gitCommitHint")}</p>');
   });

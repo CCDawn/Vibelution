@@ -38,6 +38,43 @@ def _merged_metadata(context: LLMInvocationContext, client: Any, metadata: dict[
     return _developer_sandbox_module().enrich_debug_fields(merged)
 
 
+def invocation_scope_from_metadata(metadata: Any = None):
+    """Build a stable canonical scope from invocation metadata.
+
+    Conversation-bound calls keep their explicit session identity. Auxiliary
+    calls use the controlled synthetic namespace required by wire adapters.
+    """
+    from uuid import uuid4
+
+    from .semantic_messages import InvocationScope
+
+    values = dict(metadata or {})
+    run_id = str(values.get("llmRunId") or "").strip()
+    invocation_id = str(values.get("invocationId") or run_id or uuid4().hex).strip()
+    session_id = str(values.get("sessionId") or "").strip()
+    if session_id:
+        turn_id = str(values.get("turnId") or run_id or f"{session_id}:turn").strip()
+        raw_iteration = values.get("iteration", 0)
+        try:
+            iteration = max(0, int(raw_iteration))
+        except (TypeError, ValueError):
+            iteration = 0
+        return InvocationScope(
+            session_id=session_id,
+            turn_id=turn_id,
+            invocation_id=invocation_id,
+            iteration=iteration,
+        )
+
+    purpose = str(
+        values.get("promptPurpose")
+        or values.get("llmRunKind")
+        or values.get("llmInvocationSurface")
+        or "llm"
+    ).strip()
+    return InvocationScope.for_synthetic(invocation_id=invocation_id, purpose=purpose)
+
+
 def invoke_llm(
     client: Any,
     messages: list[Any],
