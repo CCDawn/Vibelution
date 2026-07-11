@@ -2843,7 +2843,14 @@ def test_llm_v2_migration_preview_route_projects_allowlisted_fields(monkeypatch)
             ],
             "modelRefMap": {"legacy": "relay_a/gpt-a"},
             "referenceImpact": {"liveReferenceCount": 1, "historicalReferenceCount": 2},
-            "conflicts": [],
+            "conflicts": [
+                {
+                    "code": "same_secret_different_reference",
+                    "severity": "suggestion",
+                    "proposedProviderId": "relay_a",
+                    "credentialReferences": ["env:SECRET_A", "env:SECRET_B"],
+                }
+            ],
             "proposedPublicConfig": {"secret": "forbidden"},
         },
     )
@@ -2873,6 +2880,13 @@ def test_llm_v2_migration_preview_route_projects_allowlisted_fields(monkeypatch)
     }
     assert "SECRET" not in response.text
     assert "proposedPublicConfig" not in response.text
+    assert payload["conflicts"] == [
+        {
+            "code": "same_secret_different_reference",
+            "severity": "suggestion",
+            "proposedProviderId": "relay_a",
+        }
+    ]
 
 
 def test_llm_v2_migration_apply_requires_preview_and_hash() -> None:
@@ -2909,6 +2923,42 @@ def test_llm_v2_migration_rollback_requires_matching_id_and_hash(monkeypatch) ->
         json={"migrationId": "migration-a", "baseHash": "hash-a"},
     )
     assert response.status_code == 200
+
+
+@pytest.mark.parametrize("exception_type", [RuntimeError, ValueError])
+def test_llm_v2_migration_rollback_failure_emits_bounded_event(monkeypatch, exception_type) -> None:
+    events = []
+    monkeypatch.setattr(
+        provider_config_service,
+        "rollback_v1_to_v2",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(exception_type("secret-token raw rollback")),
+    )
+    monkeypatch.setattr(
+        provider_config_service,
+        "_record_migration_event",
+        lambda event_code, *, outcome, fields: events.append((event_code, outcome, fields)),
+    )
+
+    response = client.post(
+        "/api/config/migration/llm-v2/migration-a/rollback",
+        json={"migrationId": "migration-a", "baseHash": "hash-a"},
+    )
+
+    assert response.status_code == 422
+    assert "secret-token" not in response.text
+    assert events == [
+        (
+            "config.schema.migration_rolled_back",
+            "failed",
+            {
+                "migrationId": "migration-a",
+                "phase": "rollback",
+                "errorType": exception_type.__name__,
+                "elapsedMs": events[0][2]["elapsedMs"],
+            },
+        )
+    ]
+    assert set(events[0][2]) == {"migrationId", "phase", "errorType", "elapsedMs"}
 
 
 def test_config_workspace_apply_persists_changes_and_pending_env(monkeypatch):

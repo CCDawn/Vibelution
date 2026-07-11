@@ -59,6 +59,10 @@ class ModelConfigMigrationPreview:
     proposed_public_config: dict[str, Any] = field(repr=False)
 
 
+class ModelConfigMigrationRollbackError(RuntimeError):
+    """Raised when disk rollback succeeds but restored runtime reload fails."""
+
+
 def normalize_legacy_service_root(base_url: str, *, adapter: str, wire_protocol: str) -> str:
     normalized = normalize_provider_endpoint(base_url)
     suffixes = {
@@ -151,12 +155,28 @@ def _model_payload(entry: dict[str, Any], upstream_id: str) -> dict[str, Any]:
 
 
 def _artifact_path_suspected(value: str) -> bool:
-    lowered = value.strip().lower()
-    return lowered.endswith(_ARTIFACT_SUFFIXES) or bool(_WINDOWS_ABSOLUTE_RE.match(value.strip()))
+    candidate = value.strip()
+    lowered = candidate.lower()
+    return (
+        lowered.endswith(_ARTIFACT_SUFFIXES)
+        or bool(_WINDOWS_ABSOLUTE_RE.match(candidate))
+        or candidate.startswith("\\\\")
+        or candidate.startswith("/")
+    )
 
 
 def _model_behavior(payload: dict[str, Any]) -> dict[str, Any]:
     return {key: value for key, value in payload.items() if key not in {"label", "enabled", "upstream_id"}}
+
+
+def _stable_diff_fields(left: Any, right: Any, *, prefix: str = "") -> list[str]:
+    if isinstance(left, dict) and isinstance(right, dict):
+        fields: list[str] = []
+        for key in sorted(set(left) | set(right), key=str):
+            path = f"{prefix}.{key}" if prefix else str(key)
+            fields.extend(_stable_diff_fields(left.get(key), right.get(key), prefix=path))
+        return fields
+    return [prefix] if left != right and prefix else []
 
 
 def _purge_expired_previews(now: float) -> None:
@@ -222,6 +242,7 @@ def preview_v1_to_v2(public_config: dict[str, Any], *, project_root: Path | str)
     provider_dicts: list[dict[str, Any]] = []
     provider_registry: dict[str, Any] = {}
     model_ref_map: dict[str, str] = {}
+    group_provider_ids: dict[tuple[str, str], str] = {}
     existing_ids: list[str] = []
     model_defaults_seen: dict[tuple[str, str], dict[str, Any]] = {}
     for (base_url, credential_ref), rows in sorted(grouped.items(), key=lambda item: item[0]):
@@ -244,6 +265,7 @@ def preview_v1_to_v2(public_config: dict[str, Any], *, project_root: Path | str)
         }
         provider_id = suggest_provider_id(provider, existing_ids)
         existing_ids.append(provider_id)
+        group_provider_ids[(base_url, credential_ref)] = provider_id
         for legacy_id, entry, _, upstream_id, _, _ in rows:
             model_key = make_model_key(upstream_id)
             model_payload = _model_payload(entry, upstream_id)
@@ -251,9 +273,7 @@ def preview_v1_to_v2(public_config: dict[str, Any], *, project_root: Path | str)
             behavior = _model_behavior(model_payload)
             previous = model_defaults_seen.get(seen_key)
             if previous is not None and previous != behavior:
-                differing = sorted(
-                    key for key in set(previous) | set(behavior) if previous.get(key) != behavior.get(key)
-                )
+                differing = _stable_diff_fields(previous, behavior)
                 conflicts.append(
                     {"code": "model_defaults_conflict", "modelId": legacy_id, "fields": differing}
                 )
@@ -284,6 +304,7 @@ def preview_v1_to_v2(public_config: dict[str, Any], *, project_root: Path | str)
                             "severity": "suggestion",
                             "endpoint": endpoint,
                             "credentialReferences": [left[1], right[1]],
+                            "proposedProviderId": group_provider_ids[left],
                         }
                     )
 
@@ -491,12 +512,23 @@ def apply_v1_to_v2(
                 _strict_atomic_write(target, before)
             restored = load_public_config(resolved_config)
             build_effective_config(restored)
+            rollback_reload_error: Exception | None = None
+            try:
+                reload_config(str(resolved_config))
+            except Exception as rollback_exc:
+                rollback_reload_error = rollback_exc
             manifest.update(
                 status="rolled_back",
                 phase=phase,
                 errorType=type(exc).__name__,
             )
+            if rollback_reload_error is not None:
+                manifest["rollbackErrorType"] = type(rollback_reload_error).__name__
             _write_manifest(manifest_path, manifest)
+            if rollback_reload_error is not None:
+                raise ModelConfigMigrationRollbackError(
+                    "migration failed and restored config reload failed"
+                ) from None
             raise
 
 
@@ -560,6 +592,7 @@ def rollback_v1_to_v2(
 
 __all__ = [
     "ModelConfigMigrationPreview",
+    "ModelConfigMigrationRollbackError",
     "apply_v1_to_v2",
     "normalize_legacy_service_root",
     "preview_v1_to_v2",
