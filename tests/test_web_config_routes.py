@@ -176,7 +176,7 @@ def test_provider_route_preview_projects_bounded_redacted_impacts(monkeypatch) -
         lambda *_args, **_kwargs: {
             "providerId": "relay_a",
             "routeChanged": True,
-            "routePreviewToken": "route-preview-token",
+            "routePreviewToken": "a" * 64,
             "modelRefs": ["relay_a/model-a"],
             "impactedRefs": [_sensitive_model_reference_impact()],
             "rawPayload": "pending-secret:token",
@@ -204,6 +204,49 @@ def test_provider_route_preview_projects_bounded_redacted_impacts(monkeypatch) -
     assert impact["liveReferenceCount"] == 73
     assert len(impact["liveReferences"]) == 50
     assert impact["liveReferences"][0]["ownerId"] == "agent-0"
+    flattened = [str(item) for item in _walk_json(payload)]
+    assert "credential_ref" not in flattened
+    assert "rawPayload" not in flattened
+    assert not any("pending-secret:" in item for item in flattened)
+
+
+def test_provider_route_preview_rejects_nested_and_sensitive_allowed_values(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        provider_config_service,
+        "preview_draft_provider_route",
+        lambda *_args, **_kwargs: {
+            "providerId": {"credential_ref": "env:SECRET"},
+            "routeChanged": {"rawPayload": True},
+            "routePreviewToken": "pending-secret:token",
+            "modelRefs": [
+                "relay_a/model-a",
+                {"credential_ref": "env:SECRET"},
+                ["relay_a/model-b"],
+                "pending-secret:token",
+                "INVALID",
+                "relay_a/bad/model",
+            ],
+            "impactedRefs": [],
+            "rawPayload": "pending-secret:token",
+        },
+    )
+    response = client.post(
+        "/api/config/draft/providers/relay_a/route-preview",
+        json={
+            "providerId": "relay_a",
+            "publicConfig": {},
+            "baseHash": "base-hash",
+            "provider": {},
+        },
+    )
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["providerId"] == ""
+    assert payload["routeChanged"] is False
+    assert payload["routePreviewToken"] == ""
+    assert payload["modelRefs"] == ["relay_a/model-a"]
     flattened = [str(item) for item in _walk_json(payload)]
     assert "credential_ref" not in flattened
     assert "rawPayload" not in flattened
