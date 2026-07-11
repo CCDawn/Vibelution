@@ -37,6 +37,17 @@ pytestmark = pytest.mark.serial
 client = TestClient(create_app(), headers={CONTROL_TOKEN_HEADER: get_control_token()})
 
 
+def _walk_json(value):
+    yield value
+    if isinstance(value, dict):
+        for key, item in value.items():
+            yield key
+            yield from _walk_json(item)
+    elif isinstance(value, list):
+        for item in value:
+            yield from _walk_json(item)
+
+
 def test_provider_routes_never_return_submitted_secret(monkeypatch) -> None:
     submitted = {
         "llm": {
@@ -101,6 +112,29 @@ def test_provider_routes_never_return_submitted_secret(monkeypatch) -> None:
         },
     )
     assert response.status_code == 200, response.text
+    payload = response.json()
+    assert set(payload) == {
+        "baseHash",
+        "hash",
+        "impactedRefs",
+        "modelCatalog",
+        "providerOptions",
+        "schemaVersion",
+    }
+    assert set(payload["providerOptions"][0]) <= {
+        "credential_state",
+        "default_protocol",
+        "driver",
+        "label",
+        "pinned_count",
+        "provider_id",
+        "service_class",
+        "vendor",
+    }
+    flattened = [str(item) for item in _walk_json(payload)]
+    assert "credential_ref" not in flattened
+    assert "rawToml" not in flattened
+    assert not any("pending-secret:" in item for item in flattened)
     assert "secret-value" not in response.text
 
 

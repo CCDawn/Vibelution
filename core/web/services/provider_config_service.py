@@ -49,6 +49,52 @@ _ROUTE_PREVIEW_EXPIRY: dict[str, float] = {}
 _ROUTE_PREVIEW_LOCK = threading.Lock()
 _MAX_IMPACT_REFS = 50
 _MAX_REFERENCE_SCAN_MODELS = 1000
+_PROVIDER_OPTION_RESPONSE_FIELDS = (
+    "credential_state",
+    "default_protocol",
+    "driver",
+    "label",
+    "pinned_count",
+    "provider_id",
+    "service_class",
+    "vendor",
+)
+_CATALOG_PROVIDER_RESPONSE_FIELDS = (
+    "catalogStale",
+    "lastAttemptAt",
+    "lastErrorType",
+    "lastSuccessAt",
+    "modelCount",
+    "observedCount",
+    "pinnedCount",
+    "providerId",
+    "refreshDue",
+    "status",
+)
+_CATALOG_MODEL_RESPONSE_FIELDS = (
+    "availability",
+    "label",
+    "modelKey",
+    "modelRef",
+    "status",
+    "upstreamId",
+)
+_IMPACT_RESPONSE_FIELDS = (
+    "blocking",
+    "historicalReferenceCount",
+    "liveReferenceCount",
+    "modelId",
+)
+_REFERENCE_RESPONSE_FIELDS = (
+    "field",
+    "historical",
+    "label",
+    "ownerId",
+    "ownerType",
+    "path",
+    "source",
+    "sourcePath",
+)
 
 
 def _compute_route_preview_token(
@@ -324,6 +370,102 @@ def _workspace_with_impacts(
     return workspace
 
 
+def _allowlisted_fields(
+    payload: dict[str, Any],
+    fields: tuple[str, ...],
+) -> dict[str, Any]:
+    return {
+        key: copy.deepcopy(payload[key])
+        for key in fields
+        if key in payload
+    }
+
+
+def _project_model_catalog(value: Any) -> dict[str, Any]:
+    catalog = value if isinstance(value, dict) else {}
+    raw_providers = catalog.get("providers", {})
+    providers: dict[str, Any] = {}
+    if isinstance(raw_providers, dict):
+        for provider_id, raw_provider in list(raw_providers.items())[:100]:
+            if not isinstance(raw_provider, dict):
+                continue
+            provider = _allowlisted_fields(
+                raw_provider,
+                _CATALOG_PROVIDER_RESPONSE_FIELDS,
+            )
+            raw_models = raw_provider.get("models", {})
+            provider["models"] = {
+                str(model_key): _allowlisted_fields(
+                    raw_model,
+                    _CATALOG_MODEL_RESPONSE_FIELDS,
+                )
+                for model_key, raw_model in list(raw_models.items())[:500]
+                if isinstance(raw_model, dict)
+            } if isinstance(raw_models, dict) else {}
+            raw_warnings = raw_provider.get("warnings", [])
+            provider["warnings"] = [
+                {
+                    "code": str(warning.get("code") or "")[:64],
+                    "modelKeys": [
+                        str(item)[:128]
+                        for item in warning.get("modelKeys", [])[:20]
+                    ]
+                    if isinstance(warning.get("modelKeys"), list)
+                    else [],
+                }
+                for warning in raw_warnings[:20]
+                if isinstance(warning, dict)
+            ] if isinstance(raw_warnings, list) else []
+            providers[str(provider_id)] = provider
+    return {
+        "modelCount": int(catalog.get("modelCount") or 0),
+        "providerCount": int(catalog.get("providerCount") or 0),
+        "providers": providers,
+        "schemaVersion": int(catalog.get("schemaVersion") or 2),
+    }
+
+
+def _project_impacted_refs(value: Any) -> list[dict[str, Any]]:
+    impacts = value if isinstance(value, list) else []
+    projected: list[dict[str, Any]] = []
+    for raw_impact in impacts[:_MAX_IMPACT_REFS]:
+        if not isinstance(raw_impact, dict):
+            continue
+        impact = _allowlisted_fields(raw_impact, _IMPACT_RESPONSE_FIELDS)
+        for key in ("liveReferences", "historicalReferences"):
+            raw_refs = raw_impact.get(key, [])
+            impact[key] = [
+                _allowlisted_fields(ref, _REFERENCE_RESPONSE_FIELDS)
+                for ref in raw_refs[:_MAX_IMPACT_REFS]
+                if isinstance(ref, dict)
+            ] if isinstance(raw_refs, list) else []
+        projected.append(impact)
+    return projected
+
+
+def project_provider_draft_response(workspace: dict[str, Any]) -> dict[str, Any]:
+    """Return the explicit, credential-free HTTP projection for Provider drafts."""
+
+    raw_options = workspace.get("providerOptions", [])
+    provider_options = [
+        {
+            key: copy.deepcopy(option[key])
+            for key in _PROVIDER_OPTION_RESPONSE_FIELDS
+            if key in option
+        }
+        for option in raw_options
+        if isinstance(option, dict)
+    ] if isinstance(raw_options, list) else []
+    return {
+        "baseHash": str(workspace.get("baseHash") or ""),
+        "hash": str(workspace.get("hash") or ""),
+        "impactedRefs": _project_impacted_refs(workspace.get("impactedRefs")),
+        "modelCatalog": _project_model_catalog(workspace.get("modelCatalog")),
+        "providerOptions": provider_options,
+        "schemaVersion": int(workspace.get("schemaVersion") or 1),
+    }
+
+
 def suggest_draft_provider_id(
     public_config: dict[str, Any],
     *,
@@ -480,6 +622,15 @@ def draft_delete_provider(
     )
     updated = delete_llm_provider(current, provider_id)
     _validate_draft(updated)
+    meta = _normalize_draft_meta(draft_meta)
+    credential_ref = canonicalize_credential_ref(
+        str(provider.get("credential_ref") or "none")
+    )
+    if credential_ref.startswith("env:"):
+        meta = _drop_api_key_state(
+            meta,
+            credential_ref.removeprefix("env:"),
+        )
     _record_provider_event(
         "config.provider.deleted",
         provider_id=provider_id,
@@ -488,7 +639,7 @@ def draft_delete_provider(
     )
     return _workspace_with_impacts(
         updated,
-        draft_meta=draft_meta,
+        draft_meta=meta,
         base_hash=base_hash,
         impacts=impacts,
     )
@@ -598,7 +749,7 @@ def discover_draft_provider(
                 "status": "failed",
             },
         )
-        raise ValueError("provider discovery failed") from exc
+        raise ValueError("provider discovery failed") from None
     _record_provider_event(
         "config.provider.discovery_succeeded",
         provider_id=provider_id,
@@ -625,5 +776,6 @@ __all__ = [
     "draft_unpin_provider_model",
     "draft_update_provider",
     "preview_draft_provider_route",
+    "project_provider_draft_response",
     "suggest_draft_provider_id",
 ]
