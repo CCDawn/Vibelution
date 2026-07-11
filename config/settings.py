@@ -865,7 +865,7 @@ class ConfigLoader:
             with open(config_file, 'rb') as f:
                 config = tomllib.load(f)
             # 转换 TOML 嵌套键为 Pydantic 字段格式
-            return self._normalize_toml_keys(_canonicalize_runtime_public_config(config))
+            return self._normalize_toml_keys(config)
         except Exception as e:
             print(f"警告: 读取配置文件失败: {e}")
             return {}
