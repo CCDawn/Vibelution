@@ -304,6 +304,36 @@ def test_v2_config_loader_keeps_noncredential_profile_env_override(tmp_path, mon
     assert effective.llm.get_profile("primary").provider_id == "pixel_relay"
 
 
+@pytest.mark.parametrize(
+    ("env_name", "field", "value"),
+    [
+        (
+            "AGENT_LLM__PROVIDERS__PIXEL_RELAY__BASE_URL",
+            "base_url",
+            "https://override-relay.example/v1",
+        ),
+        ("AGENT_LLM__PROVIDERS__PIXEL_RELAY__LABEL", "label", "Overridden Relay"),
+    ],
+)
+def test_v2_config_loader_applies_named_provider_noncredential_env_increment(
+    env_name: str,
+    field: str,
+    value: str,
+    tmp_path,
+    monkeypatch,
+) -> None:
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(_v2_toml(), encoding="utf-8")
+    monkeypatch.setenv(env_name, value)
+
+    effective = ConfigLoader(str(config_path)).load()
+    provider = effective.llm.get_provider("pixel_relay")
+
+    assert getattr(provider, field) == value
+    assert set(effective.llm.providers) == {"pixel_relay"}
+    assert effective.llm.get_profile("primary").provider_id == "pixel_relay"
+
+
 def test_v1_config_loader_still_materializes_legacy_provider_api_key(tmp_path, monkeypatch) -> None:
     config_path = tmp_path / "config.toml"
     config_path.write_text(
