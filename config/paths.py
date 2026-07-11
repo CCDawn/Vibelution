@@ -19,12 +19,41 @@ EXAMPLE_CONFIG_FILENAME = "config.example.toml"
 CONFIG_META_FILENAME = "config.meta.json"
 CONFIG_META_SCHEMA_VERSION = 3
 CONFIG_STARTER_TEXT = """# Vibelution operator config
-# Active operator config is stored outside the project repository.
-# Edit this file through the Launcher or Config page so runtime processes reload it safely.
+[llm]
+schema_version = 2
+
+[llm.providers.local_openai]
+label = "Local OpenAI-compatible service"
+service_class = "local_runtime"
+vendor = "custom"
+driver = "openai"
+base_url = "http://127.0.0.1:8000/v1"
+auth_kind = "none"
+credential_ref = "none"
+requires_credential = false
+
+[llm.providers.local_openai.protocols]
+default = "chat_completions"
+allowed = ["chat_completions"]
+
+[llm.providers.local_openai.discovery]
+mode = "auto"
+adapter = "openai_compatible"
+cache_ttl_seconds = 300
+
+[llm.providers.local_openai.models.local-model]
+upstream_id = "local-model"
+label = "Local model"
+enabled = true
+
+[llm.profiles.primary]
+model_ref = "local_openai/local-model"
 """
-EXAMPLE_CONFIG_STARTER_TEXT = """# Vibelution example operator config
-# This example belongs to the external config home, not to the project repository.
-"""
+EXAMPLE_CONFIG_STARTER_TEXT = CONFIG_STARTER_TEXT.replace(
+    "# Vibelution operator config",
+    "# Vibelution example operator config",
+    1,
+)
 _CONFIGURED_DATA_HOME_CACHE: dict[str, tuple[int, int, Path | None]] = {}
 
 

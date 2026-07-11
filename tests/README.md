@@ -58,6 +58,19 @@ python tests/select_tests.py --from-git main --commands-only
 4. 如果输出 `remote-distributed`，可以用服务器/Docker 分片加速 Python `not serial` 回归，但它不是完整 gate。
 5. 如果输出 `frontend`，必须单独跑对应 Vitest/build；Python 本地或远端测试都不能替代前端验证。
 
+#### Provider-scoped LLM 配置收敛
+
+配置 schema v2、Provider catalog/discovery、protocol、migration 与 Provider-first 前端变更使用以下聚焦命令：
+
+```powershell
+& 'C:\Users\17533\Desktop\Vibelution\.venv\Scripts\python.exe' -m pytest tests\test_llm_config_v2_integration.py tests\test_llm_config_schema_v2.py tests\test_model_config_migration.py -q
+& 'C:\Users\17533\Desktop\Vibelution\.venv\Scripts\python.exe' -m pytest tests\test_provider_config_service.py tests\test_provider_discovery_adapters.py tests\test_model_config_migration.py tests\test_config_redaction.py -q
+npm --prefix web test -- src/routes/configProviderLogic.test.ts src/routes/configRouteLogic.test.ts src/routes/ConfigRoute.layout.test.ts
+npm --prefix web run build
+```
+
+这些自动化测试只使用 fixture 或临时目录；真实 operator config 的迁移、应用、回滚与 Launcher refresh 不属于自动化测试范围。
+
 ### 3.2 直接使用 pytest
 
 ```bash

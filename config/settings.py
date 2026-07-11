@@ -606,6 +606,8 @@ def _runtime_provider_id(owner_kind: str, owner_id: str) -> str:
 
 
 def _materialize_inline_llm_providers(llm_section: Dict[str, Any]) -> None:
+    if int(llm_section.get("schema_version") or 1) != 1:
+        return
     legacy_providers = llm_section.get("providers")
     runtime_providers: Dict[str, Any] = {}
 

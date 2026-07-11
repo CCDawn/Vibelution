@@ -41,6 +41,7 @@ from core.llm.provider_discovery.service import discover_provider_models
 from core.llm.protocol_resolver import resolve_model_protocol
 from config.public_config import (
     CONFIG_PATH,
+    SCHEMA_V2_LEGACY_MODEL_WRITE_ERROR,
     UNCONFIGURED_MODEL_REF,
     _delete_user_env_var,
     _set_user_env_var,
@@ -1822,6 +1823,7 @@ def draft_add_model(
     api_key_env: str = "",
     api_key: str = "",
 ) -> dict[str, Any]:
+    _reject_schema_v2_legacy_model_route(public_config)
     old_public = _with_config_workspace_defaults(load_public_config())
     current = _prepare_submitted_public_config(public_config, old_public)
     current_meta = _normalize_draft_meta(draft_meta)
@@ -1886,6 +1888,7 @@ def draft_update_model(
     api_key: str = "",
     clear_api_key: bool = False,
 ) -> dict[str, Any]:
+    _reject_schema_v2_legacy_model_route(public_config)
     old_public = _with_config_workspace_defaults(load_public_config())
     current = _prepare_submitted_public_config(public_config, old_public)
     current_meta = _normalize_draft_meta(draft_meta)
@@ -1929,6 +1932,7 @@ def draft_delete_model(
     base_hash: str = "",
     model_id: str,
 ) -> dict[str, Any]:
+    _reject_schema_v2_legacy_model_route(public_config)
     old_public = _with_config_workspace_defaults(load_public_config())
     current = _prepare_submitted_public_config(public_config, old_public)
     current_meta = _normalize_draft_meta(draft_meta)
@@ -2291,6 +2295,13 @@ def _assert_model_delete_workspace_references_allowed(public_config: dict[str, A
         raise
 
 
+def _reject_schema_v2_legacy_model_route(public_config: dict[str, Any] | None) -> None:
+    submitted = public_config if isinstance(public_config, dict) else {}
+    llm = submitted.get("llm", {}) if isinstance(submitted, dict) else {}
+    if isinstance(llm, dict) and int(llm.get("schema_version") or 1) == 2:
+        raise ValueError(SCHEMA_V2_LEGACY_MODEL_WRITE_ERROR)
+
+
 def _validate_git_commit_settings(public_config: dict[str, Any]) -> None:
     git_config = _git_config(public_config)
     prompt = git_config.get("commit_message_prompt")
@@ -2606,7 +2617,10 @@ def discover_config_models(
     if isinstance(llm, dict) and int(llm.get("schema_version") or 1) == 2:
         canonical_provider_id = str(provider_id or "").strip()
         if not canonical_provider_id:
-            raise ValueError("provider_id is required for schema v2 model discovery")
+            raise ValueError(
+                "provider_id is required for schema v2 provider-scoped discovery; "
+                "use migration preview for schema v1 configuration"
+            )
         result = discover_provider_models(
             submitted,
             canonical_provider_id,

@@ -1,0 +1,64 @@
+[llm]
+schema_version = 2
+
+[llm.providers.pixel_relay]
+label = "Pixel Relay"
+service_class = "relay"
+vendor = "multi_model"
+driver = "openai"
+base_url = "https://relay.example/v1"
+auth_kind = "api_key"
+credential_ref = "env:VIBELUTION_LLM_PROVIDER_PIXEL_RELAY_API_KEY"
+requires_credential = true
+
+[llm.providers.pixel_relay.protocols]
+default = "responses"
+allowed = ["responses", "chat_completions"]
+
+[llm.providers.pixel_relay.discovery]
+mode = "auto"
+adapter = "openai_compatible"
+cache_ttl_seconds = 3600
+
+[llm.providers.pixel_relay.models."gpt-5.6-luna"]
+upstream_id = "gpt-5.6-luna"
+label = "GPT-5.6 Luna"
+enabled = true
+
+[llm.providers.pixel_relay.models."gpt-5.6-luna".defaults]
+max_output_tokens = 32000
+timeout = 120
+
+[llm.providers.lab_llamacpp_a]
+label = "Lab llama.cpp A"
+service_class = "local_runtime"
+vendor = "custom"
+driver = "openai"
+base_url = "http://127.0.0.1:8081/v1"
+auth_kind = "none"
+credential_ref = "none"
+requires_credential = false
+
+[llm.providers.lab_llamacpp_a.protocols]
+default = "chat_completions"
+allowed = ["chat_completions"]
+
+[llm.providers.lab_llamacpp_a.discovery]
+mode = "auto"
+adapter = "openai_compatible"
+cache_ttl_seconds = 300
+
+[llm.providers.lab_llamacpp_a.deployment]
+runtime_framework = "llamacpp"
+artifact_path = "C:/models/qwen3.6-35b-a3b.gguf"
+
+[llm.providers.lab_llamacpp_a.models."qwen3.6-35b-a3b"]
+upstream_id = "qwen3.6-35b-a3b"
+label = "Qwen3.6 35B A3B"
+enabled = true
+
+[llm.profiles.primary]
+model_ref = "pixel_relay/gpt-5.6-luna"
+
+[llm.profiles.local]
+model_ref = "lab_llamacpp_a/qwen3.6-35b-a3b"

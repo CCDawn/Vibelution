@@ -9,6 +9,7 @@ tool still works in a fresh Python environment.
 from __future__ import annotations
 
 import argparse
+import copy
 import fnmatch
 import json
 import subprocess
@@ -26,6 +27,28 @@ REMOTE_DISTRIBUTED_COMMAND = (
     ".\\.venv\\Scripts\\python.exe scripts/remote_test_runner.py --backend docker --distributed"
 )
 FRONTEND_BUILD_COMMAND = "npm --prefix web run build"
+LLM_PROVIDER_CONFIG_V2_RULE = {
+    "id": "llm-provider-config-v2",
+    "description": "Provider-scoped config, catalog, discovery, protocol, migration, and frontend convergence.",
+    "paths": [
+        "config/llm_*.py",
+        "config/model_catalog.py",
+        "config/model_config_migration.py",
+        "core/llm/provider_discovery/**",
+        "core/web/services/provider_config_service.py",
+        "web/src/routes/ConfigProvider*.tsx",
+        "web/src/routes/configProviderLogic.ts",
+    ],
+    "commands": [
+        ".\\.venv\\Scripts\\python.exe -m pytest tests/test_llm_config_v2_integration.py tests/test_llm_config_schema_v2.py tests/test_llm_provider_registry.py tests/test_model_catalog.py tests/test_provider_discovery_adapters.py tests/test_llm_protocol_resolver.py tests/test_provider_config_service.py tests/test_model_config_migration.py -q",
+        "npm --prefix web test -- src/routes/configProviderLogic.test.ts src/routes/configRouteLogic.test.ts src/routes/ConfigRoute.layout.test.ts",
+        FRONTEND_BUILD_COMMAND,
+    ],
+    "notes": [
+        "Do not read or migrate the real operator config during automated validation.",
+    ],
+    "executionLayers": ["focused", "frontend"],
+}
 
 VALIDATION_LAYER_DESCRIPTIONS = {
     "hygiene": "Diff hygiene and cheap structural checks.",
@@ -178,10 +201,17 @@ def load_matrix(path: Path = DEFAULT_MATRIX) -> dict[str, Any]:
     try:
         import yaml  # type: ignore[import-not-found]
     except ImportError:
-        return _parse_yaml_subset(text)
-    loaded = yaml.safe_load(text)
+        loaded = _parse_yaml_subset(text)
+    else:
+        loaded = yaml.safe_load(text)
     if not isinstance(loaded, dict):
         raise ValueError(f"Matrix must be a mapping: {path}")
+    rules = loaded.setdefault("rules", [])
+    if isinstance(rules, list) and not any(
+        isinstance(rule, dict) and rule.get("id") == LLM_PROVIDER_CONFIG_V2_RULE["id"]
+        for rule in rules
+    ):
+        rules.append(copy.deepcopy(LLM_PROVIDER_CONFIG_V2_RULE))
     return loaded
 
 
