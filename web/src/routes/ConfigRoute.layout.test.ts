@@ -42,6 +42,13 @@ const configSources = [
 ].join("\n");
 
 describe("ConfigRoute layout contract", () => {
+  it("passes the workspace schema version into legacy model account compatibility", () => {
+    expect(routeSource).toMatch(
+      /deriveModelCenterSummary\(\{\s*modelOptions,\s*schemaVersion: workspace\?\.schemaVersion,\s*\}\)/,
+    );
+    expect(routeSource).toContain("[modelOptions, workspace?.schemaVersion]");
+  });
+
   it("uses a full workspace placeholder for initial loading and load failure states", () => {
     expect(routeSource).toContain("<ConfigWorkspacePlaceholderPanel title={copy.loading} />");
     expect(placeholderPanelSource).toContain("export function ConfigWorkspacePlaceholderPanel");
