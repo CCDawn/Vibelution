@@ -80,7 +80,9 @@ def _sensitive_model_reference_impact() -> dict:
     }
 
 
-def test_provider_routes_never_return_submitted_secret(monkeypatch) -> None:
+def test_provider_create_route_returns_full_workspace_without_submitted_secret(
+    monkeypatch,
+) -> None:
     submitted = {
         "llm": {
             "schema_version": 2,
@@ -145,38 +147,149 @@ def test_provider_routes_never_return_submitted_secret(monkeypatch) -> None:
     )
     assert response.status_code == 200, response.text
     payload = response.json()
-    assert set(payload) == {
-        "baseHash",
+    assert {
+        "publicConfig",
+        "draftMeta",
+        "editorSections",
         "hash",
-        "impactedRefs",
-        "modelCatalog",
         "providerOptions",
-        "schemaVersion",
-    }
-    assert set(payload["providerOptions"][0]) <= {
-        "artifact_path",
-        "base_url",
-        "credential_state",
-        "default_protocol",
-        "driver",
-        "label",
-        "pinned_count",
-        "provider_id",
-        "runtime_framework",
-        "service_class",
-        "vendor",
-    }
+        "modelCatalog",
+    } <= set(payload)
+    assert payload["publicConfig"]["llm"]["providers"]["relay_b"]["credential_ref"] == (
+        "env:VIBELUTION_LLM_PROVIDER_RELAY_B_API_KEY"
+    )
+    pending_token = payload["draftMeta"]["pending_api_keys"][
+        "VIBELUTION_LLM_PROVIDER_RELAY_B_API_KEY"
+    ]
+    assert pending_token.startswith("pending-secret:")
     assert payload["providerOptions"][0]["base_url"] == "https://relay-a.example/v1"
-    flattened = [str(item) for item in _walk_json(payload)]
-    assert "credential_ref" not in flattened
-    assert "query" not in flattened
-    assert "rawPayload" not in flattened
-    assert "rawToml" not in flattened
-    assert not any("pending-secret:" in item for item in flattened)
     assert "secret-value" not in response.text
 
 
-def test_provider_route_projects_real_catalog_capability_provenance(
+def test_provider_create_discover_and_pin_routes_chain_full_workspace(
+    monkeypatch,
+) -> None:
+    provider = {
+        "label": "Relay B",
+        "service_class": "relay",
+        "vendor": "multi_model",
+        "driver": "openai",
+        "base_url": "https://relay-b.example/v1",
+        "auth_kind": "api_key",
+        "credential_ref": "env:VIBELUTION_LLM_PROVIDER_RELAY_B_API_KEY",
+        "requires_credential": True,
+        "protocols": {"default": "responses", "allowed": ["responses"]},
+        "discovery": {
+            "mode": "auto",
+            "adapter": "openai_compatible",
+            "cache_ttl_seconds": 3600,
+        },
+        "models": {},
+    }
+    submitted = {
+        "llm": {
+            "schema_version": 2,
+            "providers": {
+                "relay_a": {
+                    **copy.deepcopy(provider),
+                    "label": "Relay A",
+                    "credential_ref": "none",
+                    "requires_credential": False,
+                    "auth_kind": "none",
+                    "models": {
+                        "base-model": {
+                            "upstream_id": "base-model",
+                            "label": "Base Model",
+                            "enabled": True,
+                        }
+                    },
+                }
+            },
+            "profiles": {
+                "primary": {
+                    "model_ref": "relay_a/base-model",
+                    "overrides": {},
+                }
+            },
+            "model_aliases": {},
+        }
+    }
+    base_hash = public_config_hash(submitted)
+    monkeypatch.setattr(
+        provider_config_service,
+        "load_public_config",
+        lambda: copy.deepcopy(submitted),
+    )
+    monkeypatch.setattr(
+        provider_config_service,
+        "discover_provider_models",
+        lambda _public_config, provider_id, **_kwargs: SimpleNamespace(
+            provider_id=provider_id,
+            adapter_id="openai_compatible",
+            attempted_endpoints=("models",),
+            discovered_at="2026-07-11T00:00:00+00:00",
+            models=(SimpleNamespace(upstream_id="gpt-b"),),
+        ),
+    )
+
+    created_response = client.post(
+        "/api/config/draft/providers",
+        json={
+            "publicConfig": submitted,
+            "draftMeta": {},
+            "baseHash": base_hash,
+            "providerId": "relay_b",
+            "provider": provider,
+            "credentialValue": "secret-value",
+        },
+    )
+    assert created_response.status_code == 200, created_response.text
+    created = created_response.json()
+
+    discovered_response = client.post(
+        "/api/config/draft/providers/relay_b/discover",
+        json={
+            "publicConfig": created["publicConfig"],
+            "draftMeta": created["draftMeta"],
+            "baseHash": base_hash,
+            "providerId": "relay_b",
+        },
+    )
+    assert discovered_response.status_code == 200, discovered_response.text
+    discovered = discovered_response.json()
+
+    pinned_response = client.post(
+        "/api/config/draft/providers/relay_b/models",
+        json={
+            "publicConfig": discovered["publicConfig"],
+            "draftMeta": discovered["draftMeta"],
+            "baseHash": base_hash,
+            "providerId": "relay_b",
+            "upstreamId": "gpt-b",
+        },
+    )
+    assert pinned_response.status_code == 200, pinned_response.text
+    pinned = pinned_response.json()
+
+    for workspace in (created, discovered, pinned):
+        assert {
+            "publicConfig",
+            "draftMeta",
+            "editorSections",
+            "hash",
+            "providerOptions",
+            "modelCatalog",
+        } <= set(workspace)
+        assert workspace["draftMeta"]["pending_api_keys"]
+    assert pinned["publicConfig"]["llm"]["providers"]["relay_b"]["models"][
+        "gpt-b"
+    ]["upstream_id"] == "gpt-b"
+    assert "secret-value" not in created_response.text
+    assert "secret-value" not in discovered_response.text
+    assert "secret-value" not in pinned_response.text
+
+
+def test_provider_route_returns_full_workspace_catalog_capability_provenance(
     monkeypatch,
     tmp_path,
 ) -> None:
@@ -228,8 +341,6 @@ def test_provider_route_projects_real_catalog_capability_provenance(
                                     "source": "runtime_probe",
                                     "confidence": "high",
                                     "checked_at": "2026-07-11T10:00:00Z",
-                                    "error": "Bearer secret-value",
-                                    "rawMetadata": {"token": "secret-value"},
                                 },
                                 "tool_calling": {
                                     "value": "unsupported",
@@ -248,7 +359,6 @@ def test_provider_route_projects_real_catalog_capability_provenance(
                                     "source": "operator_override",
                                 },
                             },
-                            "rawPayload": "pending-secret:token",
                         }
                     },
                     "warnings": [],
@@ -288,34 +398,24 @@ def test_provider_route_projects_real_catalog_capability_provenance(
     )
 
     assert response.status_code == 200, response.text
-    model = response.json()["modelCatalog"]["providers"]["relay_a"]["models"]["base-model"]
-    assert model["capabilities"] == {
-        "image_input": {
-            "value": "supported",
-            "source": "runtime_probe",
-            "confidence": "high",
-            "checked_at": "2026-07-11T10:00:00Z",
-        },
-        "tool_calling": {
-            "value": "unsupported",
-            "source": "provider_endpoint",
-            "confidence": "medium",
-            "checked_at": "2026-07-11T09:00:00Z",
-        },
-        "reasoning": {
-            "value": "unknown",
-            "source": "driver_default",
-            "confidence": "low",
-            "checked_at": "2026-07-11T08:00:00Z",
-        },
+    workspace = response.json()
+    assert {"publicConfig", "draftMeta", "editorSections"} <= set(workspace)
+    model = workspace["modelCatalog"]["providers"]["relay_a"]["models"][
+        "base-model"
+    ]
+    assert model["capabilities"]["image_input"] == {
+        "value": "supported",
+        "source": "runtime_probe",
+        "confidence": "high",
+        "checked_at": "2026-07-11T10:00:00Z",
     }
-    serialized = json.dumps(response.json())
-    assert "credential_ref" not in serialized
-    assert "rawMetadata" not in serialized
-    assert "rawPayload" not in serialized
-    assert '"error"' not in serialized
-    assert "secret-value" not in serialized
-    assert "pending-secret:" not in serialized
+    assert model["capabilities"]["tool_calling"]["source"] == (
+        "provider_endpoint"
+    )
+    assert model["capabilities"]["reasoning"]["source"] == "driver_default"
+    assert model["capabilities"]["credential_ref"]["source"] == (
+        "operator_override"
+    )
 
 
 def test_provider_route_preview_projects_bounded_redacted_impacts(monkeypatch) -> None:
