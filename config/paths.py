@@ -14,6 +14,7 @@ CONFIG_PATH_ENV = "VIBELUTION_CONFIG_PATH"
 CONFIG_HOME_ENV = "VIBELUTION_CONFIG_HOME"
 DATA_HOME_ENV = "VIBELUTION_DATA_HOME"
 CONFIG_FILENAME = "config.toml"
+MODEL_CATALOG_STATE_FILENAME = "model-catalog-state.json"
 EXAMPLE_CONFIG_FILENAME = "config.example.toml"
 CONFIG_META_FILENAME = "config.meta.json"
 CONFIG_META_SCHEMA_VERSION = 3
@@ -51,6 +52,10 @@ def resolve_config_path(config_path: str | os.PathLike[str] | None = None) -> Pa
     if raw:
         return Path(raw).expanduser().resolve()
     return (resolve_config_home() / CONFIG_FILENAME).resolve()
+
+
+def resolve_model_catalog_state_path(config_path: str | os.PathLike[str] | None = None) -> Path:
+    return resolve_config_path(config_path).with_name(MODEL_CATALOG_STATE_FILENAME)
 
 
 def resolve_data_home(
@@ -241,6 +246,7 @@ __all__ = [
     "CONFIG_META_SCHEMA_VERSION",
     "CONFIG_PATH_ENV",
     "EXAMPLE_CONFIG_FILENAME",
+    "MODEL_CATALOG_STATE_FILENAME",
     "PROJECT_ROOT",
     "default_config_home",
     "default_data_home",
@@ -249,6 +255,7 @@ __all__ = [
     "resolve_config_home",
     "resolve_config_lock_path",
     "resolve_config_meta_path",
+    "resolve_model_catalog_state_path",
     "resolve_config_path",
     "resolve_data_backup_dir",
     "resolve_data_home",
