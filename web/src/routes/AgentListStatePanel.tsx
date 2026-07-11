@@ -83,14 +83,24 @@ export function AgentListStatePanel({
     return <VEmptyState aria-busy={isPending && !hasWorkspace || undefined} icon={<RefreshCw size={22} />} title={copy.loading} />;
   }
 
+  const backgroundStatus = presentation === "refreshing"
+    ? <p role="status">{copy.refreshing}</p>
+    : presentation === "error-with-data"
+      ? <div role="status">{copy.staleError} <VButton variant="secondary" onPress={onRetry}>{copy.retry}</VButton></div>
+      : null;
+
   if (visibleAgentCount === 0) {
-    return <VEmptyState icon={<Bot size={22} />} title={copy.noAgents} />;
+    return (
+      <>
+        {backgroundStatus}
+        <VEmptyState icon={<Bot size={22} />} title={copy.noAgents} />
+      </>
+    );
   }
 
   return (
     <>
-      {presentation === "refreshing" ? <p role="status">{copy.refreshing}</p> : null}
-      {presentation === "error-with-data" ? <p role="status">{copy.staleError}</p> : null}
+      {backgroundStatus}
       <AgentDenseList
         columns={columns}
         columnLabels={{
