@@ -1,6 +1,7 @@
 import pytest
 
-from core.llm.protocol_resolver import resolve_model_protocol
+from config import LLMProfile, ProviderConfig
+from core.llm.protocol_resolver import ProtocolResolutionError, resolve_model_protocol
 from core.llm.protocols import ModelProtocol, WireProtocol
 from tests.helpers.isolated_config import isolated_settings_config
 
@@ -349,7 +350,7 @@ def test_unknown_native_provider_rejects_silent_chat_fallback():
     profile = config.llm.get_profile("primary")
     provider = config.llm.get_provider(profile.provider_id)
 
-    with pytest.raises(ValueError, match="wire protocol"):
+    with pytest.raises(ProtocolResolutionError, match="wire protocol") as error:
         resolve_model_protocol(
             profile,
             provider,
@@ -359,3 +360,130 @@ def test_unknown_native_provider_rejects_silent_chat_fallback():
                 "wireProtocol": "custom_native",
             },
         )
+    assert error.value.code == "protocol_mismatch"
+    assert error.value.provider_id == provider.provider_id
+    assert error.value.model_ref == ""
+
+
+def _v2_provider(**overrides):
+    payload = {
+        "provider_id": "relay",
+        "kind": "openai",
+        "driver": "openai",
+        "service_class": "relay",
+        "base_url": "https://relay.example/v1",
+        "protocols": {"default": "responses", "allowed": ["responses", "chat_completions"]},
+        "legacy_inference_allowed": False,
+    }
+    payload.update(overrides)
+    driver = str(payload.pop("driver"))
+    provider = ProviderConfig(**payload)
+    provider.__dict__["driver"] = driver
+    return provider
+
+
+def test_v2_model_wire_override_beats_provider_default() -> None:
+    provider = _v2_provider()
+    profile = LLMProfile(profile_id="primary", provider_id="relay", model="gpt-a")
+    route = resolve_model_protocol(
+        profile,
+        provider,
+        model_entry={"model_ref": "relay/gpt-a", "model": "gpt-a", "wire_protocol": "chat_completions"},
+    )
+    assert route.wire_protocol == WireProtocol.CHAT_COMPLETIONS
+    assert route.wire_source == "explicit_model_wire"
+
+
+def test_v2_provider_default_beats_driver_default() -> None:
+    provider = _v2_provider(driver="anthropic")
+    profile = LLMProfile(profile_id="primary", provider_id="relay", model="gpt-a")
+    route = resolve_model_protocol(profile, provider, model_entry={"model_ref": "relay/gpt-a", "model": "gpt-a"})
+    assert route.wire_protocol == WireProtocol.RESPONSES
+    assert route.wire_source == "provider_default"
+
+
+def test_v2_driver_declaration_is_used_when_provider_default_is_empty() -> None:
+    provider = _v2_provider(
+        driver="anthropic",
+        protocols={"default": "", "allowed": ["anthropic_messages"]},
+    )
+    profile = LLMProfile(profile_id="primary", provider_id="relay", model="claude-a")
+    route = resolve_model_protocol(
+        profile,
+        provider,
+        model_entry={"model_ref": "relay/claude-a", "model": "claude-a"},
+    )
+    assert route.wire_protocol == WireProtocol.ANTHROPIC_MESSAGES
+    assert route.wire_source == "driver_default"
+
+
+def test_v2_model_wire_override_must_be_allowed_by_provider() -> None:
+    provider = _v2_provider(protocols={"default": "responses", "allowed": ["responses"]})
+    profile = LLMProfile(profile_id="primary", provider_id="relay", model="gpt-a")
+    with pytest.raises(ProtocolResolutionError) as error:
+        resolve_model_protocol(
+            profile,
+            provider,
+            model_entry={
+                "model_ref": "relay/gpt-a",
+                "model": "gpt-a",
+                "wire_protocol": "chat_completions",
+            },
+        )
+    assert error.value.code == "protocol_mismatch"
+    assert error.value.provider_id == "relay"
+    assert error.value.model_ref == "relay/gpt-a"
+
+
+def test_v2_unknown_protocol_fails_closed_without_endpoint_or_model_heuristics() -> None:
+    provider = _v2_provider(driver="custom", protocols={"default": "", "allowed": []})
+    profile = LLMProfile(profile_id="primary", provider_id="relay", model="qwen-local")
+    with pytest.raises(ProtocolResolutionError) as error:
+        resolve_model_protocol(
+            profile,
+            provider,
+            model_entry={"model_ref": "relay/qwen-local", "model": "qwen-local"},
+        )
+    assert error.value.code == "protocol_unknown"
+
+
+def test_v2_relative_protocol_route_builds_final_runtime_endpoint() -> None:
+    provider = _v2_provider(
+        protocols={
+            "default": "responses",
+            "allowed": ["responses"],
+            "routes": {"responses": "custom/responses"},
+        }
+    )
+    profile = LLMProfile(profile_id="primary", provider_id="relay", model="gpt-a")
+    route = resolve_model_protocol(profile, provider, model_entry={"model_ref": "relay/gpt-a", "model": "gpt-a"})
+    assert route.configured_endpoint == "https://relay.example/v1"
+    assert route.runtime_endpoint == "https://relay.example/v1/custom/responses"
+
+
+def test_v2_protocol_route_rejects_absolute_or_query_override() -> None:
+    provider = _v2_provider(
+        protocols={
+            "default": "responses",
+            "allowed": ["responses"],
+            "routes": {"responses": "https://evil.example/responses?key=secret"},
+        }
+    )
+    profile = LLMProfile(profile_id="primary", provider_id="relay", model="gpt-a")
+    with pytest.raises(ProtocolResolutionError) as error:
+        resolve_model_protocol(profile, provider, model_entry={"model_ref": "relay/gpt-a", "model": "gpt-a"})
+    assert error.value.code == "protocol_mismatch"
+    assert error.value.model_ref == "relay/gpt-a"
+
+
+def test_v1_keeps_diagnostic_inference() -> None:
+    provider = ProviderConfig(provider_id="legacy", kind="llamacpp", base_url="http://127.0.0.1:8080/v1")
+    profile = LLMProfile(
+        profile_id="primary",
+        provider_id="legacy",
+        model="qwen-local",
+        thinking_type="adaptive",
+    )
+    route = resolve_model_protocol(profile, provider)
+    assert route.source == "inferred"
+    assert "model_protocol.missing_explicit_protocol" in route.warnings

@@ -20,6 +20,14 @@ from .protocols import (
 )
 
 
+class ProtocolResolutionError(ValueError):
+    def __init__(self, code: str, message: str, *, provider_id: str, model_ref: str) -> None:
+        super().__init__(message)
+        self.code = code
+        self.provider_id = provider_id
+        self.model_ref = model_ref
+
+
 @dataclass(frozen=True)
 class ResolvedProtocolRoute:
     profile_id: str
@@ -142,15 +150,39 @@ def _normalize_wire_protocol(value: str) -> WireProtocol | None:
         return None
 
 
-def _wire_protocol_from_model_entry(model_entry: Any) -> WireProtocol | None:
+def _wire_protocol_from_model_entry(
+    model_entry: Any,
+    *,
+    provider_id: str = "",
+) -> WireProtocol | None:
     for field in ("wireProtocol", "wire_protocol", "apiMode", "api_mode"):
         raw = _read_optional_string(model_entry, field)
         if raw:
             wire_protocol = _normalize_wire_protocol(raw)
             if wire_protocol is None:
-                raise ValueError(f"unknown explicit wire protocol `{raw}`")
+                raise ProtocolResolutionError(
+                    "protocol_mismatch",
+                    f"unknown explicit wire protocol `{raw}`",
+                    provider_id=provider_id,
+                    model_ref=_read_optional_string(model_entry, "model_ref"),
+                )
             return wire_protocol
     return None
+
+
+def _provider_default_wire(provider: ProviderConfig) -> WireProtocol | None:
+    protocols = getattr(provider, "protocols", None)
+    raw = str(getattr(protocols, "default", "") or "")
+    return _normalize_wire_protocol(raw) if raw else None
+
+
+def _driver_default_wire(provider: ProviderConfig) -> WireProtocol | None:
+    driver = _read_optional_string(provider, "driver").lower()
+    return {
+        "openai": WireProtocol.CHAT_COMPLETIONS,
+        "anthropic": WireProtocol.ANTHROPIC_MESSAGES,
+        "gemini": WireProtocol.GEMINI_GENERATE_CONTENT,
+    }.get(driver)
 
 
 def _opencode_variant(provider: ProviderConfig) -> str:
@@ -234,7 +266,11 @@ def _wire_protocol_from_endpoint(base_url: str) -> WireProtocol | None:
     return None
 
 
-def _runtime_endpoint(provider: ProviderConfig, configured_endpoint: str, wire_protocol: WireProtocol) -> str:
+def _legacy_runtime_endpoint(
+    provider: ProviderConfig,
+    configured_endpoint: str,
+    wire_protocol: WireProtocol,
+) -> str:
     endpoint = str(configured_endpoint or "").strip().rstrip("/")
     try:
         host = (urlparse(endpoint).hostname or "").lower()
@@ -250,6 +286,36 @@ def _runtime_endpoint(provider: ProviderConfig, configured_endpoint: str, wire_p
     return endpoint
 
 
+def _runtime_endpoint(
+    provider: ProviderConfig,
+    configured_endpoint: str,
+    wire_protocol: WireProtocol,
+    *,
+    model_ref: str = "",
+) -> str:
+    endpoint = str(configured_endpoint or "").strip().rstrip("/")
+    if bool(getattr(provider, "legacy_inference_allowed", True)):
+        return _legacy_runtime_endpoint(provider, endpoint, wire_protocol)
+    routes = getattr(getattr(provider, "protocols", None), "routes", {}) or {}
+    relative = str(routes.get(wire_protocol.value) or "").strip()
+    if not relative:
+        relative = {
+            WireProtocol.CHAT_COMPLETIONS: "chat/completions",
+            WireProtocol.RESPONSES: "responses",
+            WireProtocol.ANTHROPIC_MESSAGES: "v1/messages",
+            WireProtocol.GEMINI_GENERATE_CONTENT: "v1beta/models:generateContent",
+        }[wire_protocol]
+    parsed = urlparse(relative)
+    if parsed.scheme or parsed.netloc or parsed.query or parsed.fragment or relative.startswith(("/", "\\")):
+        raise ProtocolResolutionError(
+            "protocol_mismatch",
+            "provider protocol route must be a relative path without query or fragment",
+            provider_id=_read_optional_string(provider, "provider_id"),
+            model_ref=model_ref,
+        )
+    return f"{endpoint}/{relative.lstrip('/')}"
+
+
 def _resolve_wire_protocol(
     *,
     model_entry: Any,
@@ -261,9 +327,33 @@ def _resolve_wire_protocol(
     effective_model: str,
     warnings: list[str],
 ) -> tuple[WireProtocol, str, str]:
-    explicit_wire = _wire_protocol_from_model_entry(model_entry)
+    explicit_wire = _wire_protocol_from_model_entry(
+        model_entry,
+        provider_id=_read_optional_string(provider, "provider_id"),
+    )
+    allowed = tuple(getattr(getattr(provider, "protocols", None), "allowed", ()) or ())
     if explicit_wire is not None:
+        if allowed and explicit_wire.value not in allowed:
+            raise ProtocolResolutionError(
+                "protocol_mismatch",
+                "model wire protocol is not allowed by provider",
+                provider_id=_read_optional_string(provider, "provider_id"),
+                model_ref=_read_optional_string(model_entry, "model_ref"),
+            )
         return explicit_wire, "explicit_model_wire", "model"
+    if not bool(getattr(provider, "legacy_inference_allowed", True)):
+        provider_default = _provider_default_wire(provider)
+        if provider_default is not None:
+            return provider_default, "provider_default", "provider"
+        driver_default = _driver_default_wire(provider)
+        if driver_default is not None:
+            return driver_default, "driver_default", "driver"
+        raise ProtocolResolutionError(
+            "protocol_unknown",
+            "schema v2 requires an explicit model, provider, or driver wire protocol",
+            provider_id=_read_optional_string(provider, "provider_id"),
+            model_ref=_read_optional_string(model_entry, "model_ref"),
+        )
     if explicit_model_protocol is not None:
         migrated = wire_protocol_from_model_protocol_alias(explicit_model_protocol)
         if migrated is not None:
@@ -271,24 +361,32 @@ def _resolve_wire_protocol(
             return migrated, "model_protocol_alias", "model"
     provider_model_wire = _wire_protocol_from_opencode(provider, effective_model)
     if provider_model_wire is not None:
+        warnings.append("wire_protocol.legacy_inference")
         return provider_model_wire, "provider_effective_model_rule", "provider_model"
     provider_wire = _wire_protocol_from_provider_api(provider_api)
     if provider_wire is not None:
+        warnings.append("wire_protocol.legacy_inference")
         return provider_wire, "provider_api", "provider"
     provider_kind_wire = _wire_protocol_from_provider_kind(provider_kind)
     if provider_kind_wire is not None:
+        warnings.append("wire_protocol.legacy_inference")
         return provider_kind_wire, "provider_kind", "provider"
     profile_transport = _normalize_wire_protocol(_read_optional_string(profile, "transport"))
     if profile_transport is not None:
+        warnings.append("wire_protocol.legacy_inference")
         return profile_transport, "profile_transport", "profile"
     endpoint_wire = _wire_protocol_from_endpoint(_read_optional_string(provider, "base_url"))
     if endpoint_wire is not None:
+        warnings.append("wire_protocol.legacy_inference")
         return endpoint_wire, "endpoint_heuristic", "heuristic"
     if _is_openai_compatible_provider(provider_kind, _read_optional_string(provider, "compat_mode")):
+        warnings.append("wire_protocol.legacy_inference")
         return WireProtocol.CHAT_COMPLETIONS, "declared_openai_compatibility", "fallback"
-    raise ValueError(
-        f"unable to resolve wire protocol for provider={provider_kind or 'unknown'} "
-        f"model={effective_model or 'unknown'}"
+    raise ProtocolResolutionError(
+        "protocol_unknown",
+        f"unable to resolve wire protocol for provider={provider_kind or 'unknown'} model={effective_model or 'unknown'}",
+        provider_id=_read_optional_string(provider, "provider_id"),
+        model_ref=_read_optional_string(model_entry, "model_ref"),
     )
 
 
@@ -462,7 +560,12 @@ def resolve_model_protocol(
         wire_protocol=wire_protocol,
         adapter_id=wire_protocol.value,
         configured_endpoint=configured_endpoint,
-        runtime_endpoint=_runtime_endpoint(provider, configured_endpoint, wire_protocol),
+        runtime_endpoint=_runtime_endpoint(
+            provider,
+            configured_endpoint,
+            wire_protocol,
+            model_ref=_read_optional_string(model_entry, "model_ref"),
+        ),
         protocol=protocol,
         policy=policy,
         compat=compat,
@@ -473,4 +576,4 @@ def resolve_model_protocol(
     )
 
 
-__all__ = ["ResolvedProtocolRoute", "resolve_model_protocol"]
+__all__ = ["ProtocolResolutionError", "ResolvedProtocolRoute", "resolve_model_protocol"]

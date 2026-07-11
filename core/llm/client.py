@@ -27,7 +27,7 @@ from .message_projector import normalize_messages_for_provider
 from .payload_builder import PayloadBuildInput, compose_runtime_wire_payload
 from .payload_trace import build_llm_payload_trace
 from .payload_validator import payload_protocol_summary
-from .protocol_resolver import resolve_model_protocol
+from .protocol_resolver import ProtocolResolutionError, resolve_model_protocol
 from .protocols import WireProtocol
 from .reasoning_extractor import extract_reasoning_text, strip_think_tag_reasoning
 from .schema import sanitize_tool_schema
@@ -86,6 +86,35 @@ def _safe_semantic_projection_snapshot(messages: List[Any]) -> Dict[str, Any]:
         "payloadMessageShapeHash": shape_hash,
         "payloadMessageShapeTail": bounded_tail,
     }
+
+
+def _normalize_semantic_messages_with_adapter(messages: List[Any], adapter: Any) -> List[Any]:
+    role_envelopes: list[dict[str, Any]] = []
+    for index, message in enumerate(messages):
+        raw_role = message.get("role") if isinstance(message, dict) else getattr(message, "type", "")
+        role = {"ai": "assistant", "human": "user"}.get(
+            str(raw_role or "").strip().lower(),
+            str(raw_role or "").strip().lower(),
+        )
+        role_envelopes.append({"role": role, "messageIndex": index})
+    normalized_roles = adapter.messages(role_envelopes)
+    normalized_messages: list[Any] = []
+    for index, message in enumerate(messages):
+        original_role = str(role_envelopes[index].get("role") or "").strip().lower()
+        normalized_role = str(normalized_roles[index].get("role") or original_role).strip().lower()
+        if normalized_role == original_role:
+            normalized_messages.append(message)
+            continue
+        if isinstance(message, dict):
+            converted = dict(message)
+            converted["role"] = normalized_role
+        else:
+            converted = {
+                "role": normalized_role,
+                "content": getattr(message, "content", ""),
+            }
+        normalized_messages.append(converted)
+    return normalized_messages
 
 
 class LLMCancelledError(Exception):
@@ -1272,10 +1301,35 @@ class LLMClient:
         self.adapter = get_provider_adapter(self.provider, self.profile)
         self._resolved_spec = discover_model(self.config, self.profile_id)
         _model_id, model_entry = self.config.llm.get_model_library_entry_for_profile(self.profile)
-        self.protocol_route = resolve_model_protocol(
-            self.profile,
-            self.provider,
-            model_entry=model_entry if isinstance(model_entry, dict) else None,
+        try:
+            self.protocol_route = resolve_model_protocol(
+                self.profile,
+                self.provider,
+                model_entry=model_entry if isinstance(model_entry, dict) else None,
+            )
+        except ProtocolResolutionError as exc:
+            _record_llm_scene_event(
+                "protocol",
+                "llm.protocol.blocked",
+                outcome="blocked",
+                fields={
+                    "providerId": exc.provider_id,
+                    "modelRef": exc.model_ref,
+                    "errorType": exc.code,
+                },
+            )
+            raise LLMError(
+                "provider_protocol_error",
+                str(exc),
+                retryable=False,
+                provider=self.provider.provider_id,
+                model=self.profile.model,
+            ) from exc
+        _record_llm_scene_event(
+            "protocol",
+            "llm.protocol.resolved",
+            outcome="succeeded",
+            fields=self.protocol_route.log_summary(),
         )
         self._last_payload_protocol_summary: Dict[str, Any] = {}
 
@@ -1367,7 +1421,10 @@ class LLMClient:
                     "forbiddenField": "toolCalls",
                 },
             )
-        provider_messages = normalize_messages_for_provider(list(messages or []))
+        provider_messages = _normalize_semantic_messages_with_adapter(
+            normalize_messages_for_provider(list(messages or [])),
+            self.adapter,
+        )
         build_input = PayloadBuildInput(
             messages=provider_messages,
             tools=selected_tools,
