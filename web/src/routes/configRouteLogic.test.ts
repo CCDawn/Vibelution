@@ -20,7 +20,7 @@ import {
   groupProviderPresetsByVendor,
   hasPendingSecretChanges,
   listSupervisedAgentInstances,
-  modelLibraryIdFromParts,
+  legacyModelLibraryIdFromParts,
   mergeEditableConfigView,
   MODEL_CONTRACT_OPTIONS,
   MODEL_PROMPT_CACHE_MODE_OPTIONS,
@@ -83,6 +83,9 @@ function providerPreset(
 
 function option(overrides: Partial<ConfigModelOption> = {}): ConfigModelOption {
   return {
+    model_ref: "relay/relay_gpt_5_6_luna",
+    provider_id: "relay",
+    upstream_id: "gpt-5.6-luna",
     model_id: "relay_gpt_5_6_luna",
     source: "model_library",
     provider: {
@@ -423,9 +426,9 @@ describe("configRouteLogic", () => {
   });
 
   it("derives readable internal model ids and exposes provider kind choices", () => {
-    expect(modelLibraryIdFromParts("pixel-open", "gpt-5.5")).toBe("pixel_open_gpt_5_5");
-    expect(modelLibraryIdFromParts("", "gpt-5.5")).toBe("gpt_5_5");
-    expect(modelLibraryIdFromParts("GPT-5.5", "gpt-5.5")).toBe("gpt_5_5");
+    expect(legacyModelLibraryIdFromParts("pixel-open", "gpt-5.5")).toBe("pixel_open_gpt_5_5");
+    expect(legacyModelLibraryIdFromParts("", "gpt-5.5")).toBe("gpt_5_5");
+    expect(legacyModelLibraryIdFromParts("GPT-5.5", "gpt-5.5")).toBe("gpt_5_5");
     expect(PROVIDER_KIND_OPTIONS.map((item) => item.value)).toContain("openai_compatible");
     expect(PROVIDER_KIND_OPTIONS.map((item) => item.value)).toContain("relay");
     expect(PROVIDER_KIND_OPTIONS.map((item) => item.value)).toContain("xiaomi");
@@ -462,6 +465,9 @@ describe("configRouteLogic", () => {
 
   it("derives model center accounts without surfacing usage bindings", () => {
     const imageModel = option({
+      model_ref: "relay_a/image2",
+      provider_id: "relay_a",
+      upstream_id: "image2",
       model_id: "relay_image2",
       label: "Relay image2",
       model: "image2",
@@ -476,6 +482,9 @@ describe("configRouteLogic", () => {
       },
     });
     const chatModel = option({
+      model_ref: "relay_a/gpt-5-6-luna",
+      provider_id: "relay_a",
+      upstream_id: "gpt-5.6-luna",
       model_id: "relay_gpt_5_6_luna",
       label: "Relay GPT-5.6 Luna",
       model: "gpt-5.6-luna",
@@ -489,11 +498,35 @@ describe("configRouteLogic", () => {
       },
     });
     const summary = deriveModelCenterSummary({
+      schemaVersion: 2,
       modelOptions: [imageModel, chatModel],
     });
 
-    expect(summary.accounts).toHaveLength(2);
-    expect(summary.accounts.map((account) => account.apiKeyState).sort()).toEqual(["configured", "missing"]);
+    expect(summary.accounts).toHaveLength(1);
+    expect(summary.accounts[0]).toMatchObject({
+      id: "relay_a",
+      apiKeyState: "missing",
+      modelIds: ["relay_image2", "relay_gpt_5_6_luna"],
+    });
+  });
+
+  it("uses only backend provider ids for v2 account identity", () => {
+    const first = option({
+      provider_id: "relay_a",
+      label: "Same label",
+      provider: { kind: "relay", base_url: "https://shared.example/v1", api_key_env: "SHARED_KEY" },
+    });
+    const second = option({
+      provider_id: "relay_b",
+      model_id: "second",
+      model_ref: "relay_b/gpt-a",
+      label: "Same label",
+      provider: { kind: "relay", base_url: "https://shared.example/v1", api_key_env: "SHARED_KEY" },
+    });
+
+    const summary = deriveModelCenterSummary({ modelOptions: [second, first] });
+
+    expect(summary.accounts.map((account) => account.id)).toEqual(["relay_a", "relay_b"]);
   });
 
   it("builds compact model inventory rows with asset editability in one place", () => {
