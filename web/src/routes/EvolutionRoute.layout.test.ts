@@ -46,6 +46,14 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(evolutionSources).not.toContain("<VNativeTextarea");
   });
 
+  it("keeps complex Evolution card buttons in the VButton plain-content layout", () => {
+    expect(routeSource.match(/contentLayout="plain"/g)).toHaveLength(4);
+    expect(routeSource).toMatch(/contentLayout="plain"[\s\S]{0,160}styles\.caseTraceSummary/);
+    expect(routeSource).toMatch(/contentLayout="plain"[\s\S]{0,160}styles\.workflowStepButton/);
+    expect(routeSource.match(/contentLayout="plain"[\s\S]{0,160}styles\.proposalCardButton/g)).toHaveLength(2);
+    expect(runRecordsPanelSource).toMatch(/contentLayout="plain"[\s\S]{0,160}styles\.runCardButton/);
+  });
+
   it("shows self-evolution candidates as local pending details instead of proposal details", () => {
     expect(routeSource).toContain("selectedProposalIsSelfCandidate");
     expect(routeSource).toContain("!selectedProposalIsSelfCandidate");
