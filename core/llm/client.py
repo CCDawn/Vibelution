@@ -1255,6 +1255,28 @@ class LLMClient:
     def resolved_spec(self):
         return self._resolved_spec
 
+    def _required_wire_adapter(self):
+        try:
+            return _CANONICAL_WIRE_ADAPTERS.require(self.protocol_route)
+        except LookupError as exc:
+            route = self.protocol_route
+            raise LLMError(
+                "unsupported_wire_protocol",
+                str(exc),
+                retryable=False,
+                provider=self.provider.kind,
+                model=self.profile.model,
+                details={
+                    "profileId": self.profile_id,
+                    "providerKind": self.provider.kind,
+                    "modelId": route.model_id,
+                    "wireProtocol": route.wire_protocol.value,
+                    "adapterId": route.adapter_id,
+                    "routeSource": route.wire_source,
+                    "payloadValidationResult": "blocked_before_provider",
+                },
+            ) from exc
+
     def bind_tools(self, tools: List[Any], *, binding_name: str = "default") -> "LLMClient":
         return LLMClient(
             config=self.config,
@@ -1266,6 +1288,7 @@ class LLMClient:
         )
 
     def _build_payload(self, messages: List[Any], *, tools: Optional[List[Any]] = None, stream: bool = False) -> Dict[str, Any]:
+        self._required_wire_adapter()
         selected_tools = list(self.bound_tools)
         if tools is not None:
             selected_tools = list(tools or [])

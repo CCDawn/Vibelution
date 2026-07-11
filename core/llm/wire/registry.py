@@ -34,6 +34,16 @@ class WireAdapterRegistry:
             raise ValueError("wire adapter and immutable route wire protocol do not match")
         return adapter
 
+    def require(self, route: Any) -> WireAdapter:
+        adapter_id = str(getattr(route, "adapter_id", "") or "").strip()
+        try:
+            return self.resolve(route)
+        except LookupError as exc:
+            wire_protocol = str(getattr(getattr(route, "wire_protocol", None), "value", "") or "")
+            raise LookupError(
+                f"required wire adapter `{adapter_id or wire_protocol or 'unknown'}` is unavailable"
+            ) from exc
+
     def encode_request(self, route: Any, request: SemanticModelRequest) -> BuiltPayload:
         adapter = self.resolve(route)
         if request.replay_state is not None:
