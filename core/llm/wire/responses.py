@@ -154,7 +154,8 @@ class ResponsesWireAdapter:
                 }
                 for tool in request.tools
             ]
-            payload["tool_choice"] = request.settings.tool_choice
+            if request.settings.tool_choice != "omit":
+                payload["tool_choice"] = request.settings.tool_choice
         if request.settings.temperature is not None:
             payload["temperature"] = request.settings.temperature
         if request.settings.top_p is not None:
