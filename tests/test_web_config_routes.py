@@ -3262,6 +3262,66 @@ def test_llm_v2_migration_preview_rejects_invalid_resolution_shapes(payload) -> 
 
 
 @pytest.mark.parametrize(
+    ("endpoint", "payload"),
+    [
+        (
+            "/api/config/migration/llm-v2/preview",
+            {
+                "artifactResolutions": [
+                    {
+                        "modelId": "model-a",
+                        "decision": "preserve_upstream_id",
+                        "upstreamId": "sentinel-upstream-id",
+                        "artifactPath": "C:/sentinel/private-model.gguf",
+                        "credentialRef": "env:SENTINEL_CREDENTIAL_REF",
+                        "secret": "sentinel-secret-value",
+                        "Authorization": "Bearer sentinel-authorization",
+                    }
+                ]
+            },
+        ),
+        (
+            "/api/config/migration/llm-v2/apply",
+            {
+                "previewId": "preview-a",
+                "baseHash": "hash-a",
+                "artifactResolutions": [
+                    {
+                        "upstreamId": "sentinel-upstream-id",
+                        "artifactPath": "C:/sentinel/private-model.gguf",
+                        "credentialRef": "env:SENTINEL_CREDENTIAL_REF",
+                        "secret": "sentinel-secret-value",
+                        "Authorization": "Bearer sentinel-authorization",
+                    }
+                ],
+            },
+        ),
+    ],
+)
+def test_llm_v2_migration_validation_errors_do_not_echo_request_input(
+    endpoint: str,
+    payload: dict,
+) -> None:
+    response = client.post(endpoint, json=payload)
+
+    assert response.status_code == 422
+    errors = response.json()["detail"]
+    assert errors
+    assert all(set(error) <= {"loc", "type", "msg"} for error in errors)
+    for forbidden in (
+        "sentinel-upstream-id",
+        "private-model.gguf",
+        "SENTINEL_CREDENTIAL_REF",
+        "sentinel-secret-value",
+        "sentinel-authorization",
+        "artifactPath",
+        "credentialRef",
+        "Authorization",
+    ):
+        assert forbidden not in response.text
+
+
+@pytest.mark.parametrize(
     ("error", "resolutions"),
     [
         (
