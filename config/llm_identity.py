@@ -65,9 +65,10 @@ def validate_provider_id(provider_id: str) -> str:
 def make_model_key(upstream_id: str, *, max_length: int = 96) -> str:
     if max_length < 10:
         raise ValueError("max_length must be at least 10")
-    exact = unicodedata.normalize("NFKC", str(upstream_id or "").strip())
-    if not exact:
+    raw = str(upstream_id or "")
+    if not raw.strip():
         raise ValueError("upstream_id is required")
+    exact = unicodedata.normalize("NFKC", raw)
     if _SAFE_MODEL_KEY_RE.fullmatch(exact) and len(exact) <= max_length:
         return exact
     digest = hashlib.sha256(exact.encode("utf-8")).hexdigest()[:8]
