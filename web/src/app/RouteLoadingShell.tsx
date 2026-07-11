@@ -1,5 +1,5 @@
 import { type RouteErrorSurface } from "./RouteErrorBoundary";
-import styles from "./router.styles";
+import styles from "./RouteLoadingShell.styles";
 
 export type RouteLoadingShellProps = {
   label?: string;
@@ -19,11 +19,11 @@ export function RouteLoadingShell({
       aria-live="polite"
       aria-busy="true"
       data-vui-app={surface}
-      className={styles.routeLoadingSurfaceClass}
+      className={styles.surface}
     >
-      <div className={styles.routeLoadingPanelClass}>
-        <strong className={styles.routeLoadingTitleClass}>{resolvedLabel}</strong>
-        <span className={styles.routeLoadingMetaClass}>{meta}</span>
+      <div className={styles.panel}>
+        <strong className={styles.title}>{resolvedLabel}</strong>
+        <span className={styles.meta}>{meta}</span>
       </div>
     </div>
   );
