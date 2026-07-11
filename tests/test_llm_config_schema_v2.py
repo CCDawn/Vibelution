@@ -4,7 +4,7 @@ import pytest
 
 from config.models import AppConfig
 from config.public_config import build_effective_config, load_public_config, public_config_hash
-from config.settings import normalize_public_config_dict
+from config.settings import ConfigLoader, normalize_public_config_dict
 
 
 def _v2_config() -> dict:
@@ -216,6 +216,79 @@ def test_v1_public_config_hash_still_accepts_legacy_model_library() -> None:
     }
 
     assert len(public_config_hash(legacy)) == 64
+
+
+def test_v2_config_loader_keeps_credential_lazy_and_secret_out_of_effective_config(tmp_path, monkeypatch) -> None:
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        """
+[llm]
+schema_version = 2
+
+[llm.providers.pixel_relay]
+label = "Pixel Relay"
+service_class = "relay"
+vendor = "multi_model"
+driver = "openai"
+base_url = "https://relay.example/v1"
+auth_kind = "api_key"
+credential_ref = "env:VIBELUTION_LLM_PROVIDER_PIXEL_RELAY_API_KEY"
+requires_credential = true
+
+[llm.providers.pixel_relay.protocols]
+default = "responses"
+allowed = ["responses", "chat_completions"]
+
+[llm.providers.pixel_relay.models."gpt-5.6-luna"]
+upstream_id = "gpt-5.6-luna"
+label = "GPT-5.6 Luna"
+
+[llm.providers.pixel_relay.models."gpt-5.6-luna".defaults]
+max_output_tokens = 32000
+timeout = 120
+
+[llm.profiles.primary]
+model_ref = "pixel_relay/gpt-5.6-luna"
+
+[llm.profiles.primary.overrides]
+temperature = 0.4
+""".strip(),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("VIBELUTION_LLM_PROVIDER_PIXEL_RELAY_API_KEY", "lazy-secret-must-not-materialize")
+
+    effective = ConfigLoader(str(config_path)).load()
+    provider = effective.llm.get_provider("pixel_relay")
+
+    assert effective.llm.schema_version == 2
+    assert set(effective.llm.providers) == {"pixel_relay"}
+    assert provider.api_key == ""
+    assert provider.credential_ref == "env:VIBELUTION_LLM_PROVIDER_PIXEL_RELAY_API_KEY"
+    assert provider.resolve_api_key() == "lazy-secret-must-not-materialize"
+    assert "lazy-secret-must-not-materialize" not in repr(effective)
+
+
+def test_v1_config_loader_still_materializes_legacy_provider_api_key(tmp_path, monkeypatch) -> None:
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        """
+[llm.providers.default]
+kind = "relay"
+api_key_env = "LEGACY_RELAY_KEY"
+base_url = "https://relay.example/v1"
+
+[llm.profiles.primary]
+provider_id = "default"
+model = "gpt-5.6-luna"
+""".strip(),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("LEGACY_RELAY_KEY", "legacy-materialized-secret")
+
+    effective = ConfigLoader(str(config_path)).load()
+
+    assert effective.llm.schema_version == 1
+    assert effective.llm.get_provider(role="primary").api_key == "legacy-materialized-secret"
 
 
 @pytest.mark.parametrize("scope", ["defaults", "overrides"])

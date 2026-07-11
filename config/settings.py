@@ -864,8 +864,8 @@ class ConfigLoader:
         try:
             with open(config_file, 'rb') as f:
                 config = tomllib.load(f)
-            # 转换 TOML 嵌套键为 Pydantic 字段格式
-            return self._normalize_toml_keys(config)
+            # Keep raw TOML until _apply_dict() performs the single normalization pass.
+            return config
         except Exception as e:
             print(f"警告: 读取配置文件失败: {e}")
             return {}
@@ -1281,10 +1281,11 @@ class ConfigLoader:
                 if runtime_overrides:
                     config = self._apply_dict(config, {"runtime": runtime_overrides})
 
-        for provider in config.llm.providers.values():
-            resolved_api_key = provider.resolve_api_key()
-            if resolved_api_key:
-                provider.api_key = resolved_api_key
+        if config.llm.schema_version == 1:
+            for provider in config.llm.providers.values():
+                resolved_api_key = provider.resolve_api_key()
+                if resolved_api_key:
+                    provider.api_key = resolved_api_key
         return config
 
     def _flatten_kwargs(self, kwargs: Dict[str, Any]) -> Dict[str, Any]:
@@ -1348,6 +1349,13 @@ class ConfigLoader:
             return result
 
         merged = deep_merge(current, data)
+        data_llm = data.get("llm")
+        if isinstance(data_llm, dict) and int(data_llm.get("schema_version") or 1) == 2:
+            merged_llm = merged.get("llm")
+            if isinstance(merged_llm, dict):
+                for collection in ("providers", "profiles", "model_library", "model_aliases"):
+                    if collection in data_llm:
+                        merged_llm[collection] = copy.deepcopy(data_llm[collection])
 
         if merged != current:
             config = AppConfig.model_validate(merged)
