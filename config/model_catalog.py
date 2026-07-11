@@ -23,6 +23,15 @@ CAPABILITY_SOURCE_PRIORITY = {
     "operator_override": 50,
 }
 CAPABILITY_VALUES = {"supported", "unsupported", "unknown"}
+CAPABILITY_ERROR_CATEGORIES = {
+    "",
+    "auth_failed",
+    "blocked",
+    "other",
+    "protocol_mismatch",
+    "timeout",
+    "unsupported",
+}
 _PROVIDER_FAILURE_STATUSES = {
     "auth_failed",
     "discovery_failed",
@@ -32,7 +41,6 @@ _PROVIDER_FAILURE_STATUSES = {
 }
 _MAX_WARNINGS = 20
 _MAX_WARNING_KEYS = 20
-_MAX_ERROR_TYPE_LENGTH = 120
 
 
 def empty_model_catalog_state() -> dict[str, Any]:
@@ -87,9 +95,28 @@ def merge_capability_observations(observations: list[dict[str, Any]]) -> dict[st
                 "source": source,
                 "confidence": str(observation.get("confidence") or ""),
                 "checked_at": str(observation.get("checked_at") or ""),
-                "error": str(observation.get("error") or "")[:240],
+                "error": classify_capability_error(observation.get("error")),
             }
     return merged
+
+
+def classify_capability_error(value: Any) -> str:
+    raw = str(value or "").strip().lower()
+    if raw in CAPABILITY_ERROR_CATEGORIES:
+        return raw
+    if not raw:
+        return ""
+    if "not support" in raw or "unsupported" in raw or "no endpoints found" in raw:
+        return "unsupported"
+    if "unauthor" in raw or "forbidden" in raw or "auth" in raw or "401" in raw or "403" in raw:
+        return "auth_failed"
+    if "timeout" in raw or "timed out" in raw:
+        return "timeout"
+    if "protocol" in raw or "schema" in raw or "decode" in raw:
+        return "protocol_mismatch"
+    if "blocked" in raw or "permission" in raw:
+        return "blocked"
+    return "other"
 
 
 def _capability_observations(capabilities: Any, *, default_source: str) -> list[dict[str, Any]]:
@@ -123,6 +150,13 @@ def _capability_observations(capabilities: Any, *, default_source: str) -> list[
     return observations
 
 
+def _labeled_capability_observations(capabilities: Any, *, source: str) -> list[dict[str, Any]]:
+    observations = _capability_observations(capabilities, default_source=source)
+    for observation in observations:
+        observation["source"] = source
+    return observations
+
+
 def resolve_model_capabilities(
     *,
     operator: dict[str, Any],
@@ -139,10 +173,7 @@ def resolve_model_capabilities(
         (runtime_probe, "runtime_probe"),
         (operator, "operator_override"),
     ):
-        labeled = _capability_observations(capabilities, default_source=source)
-        for observation in labeled:
-            observation["source"] = source
-        observations.extend(labeled)
+        observations.extend(_labeled_capability_observations(capabilities, source=source))
     return merge_capability_observations(observations)
 
 
@@ -184,8 +215,8 @@ def record_discovery_success(
         operator_capabilities = pinned_model.get("capabilities", {}) if is_pinned else {}
         capability_observations = [
             *_capability_observations(prior.get("capabilities", {}), default_source="driver_default"),
-            *_capability_observations(raw.get("capabilities", {}), default_source="provider_endpoint"),
-            *_capability_observations(operator_capabilities, default_source="operator_override"),
+            *_labeled_capability_observations(raw.get("capabilities", {}), source="provider_endpoint"),
+            *_labeled_capability_observations(operator_capabilities, source="operator_override"),
         ]
         models[model_key] = {
             "upstreamId": upstream_id,
@@ -193,7 +224,7 @@ def record_discovery_success(
             "availability": "pinned" if is_pinned else "observed",
             "capabilities": merge_capability_observations(capability_observations),
             "limits": copy.deepcopy(raw.get("limits", {})) if isinstance(raw.get("limits", {}), dict) else {},
-            "metadataSource": str(raw.get("metadata_source") or "provider_endpoint"),
+            "metadataSource": "provider_endpoint",
         }
 
     for model_key, pinned_model in pinned.items():
@@ -208,7 +239,7 @@ def record_discovery_success(
         capabilities = merge_capability_observations(
             [
                 *_capability_observations(prior.get("capabilities", {}), default_source="driver_default"),
-                *_capability_observations(pinned_model.get("capabilities", {}), default_source="operator_override"),
+                *_labeled_capability_observations(pinned_model.get("capabilities", {}), source="operator_override"),
             ]
         )
         models[model_key] = {
@@ -261,15 +292,12 @@ def record_discovery_failure(
     resolved_status = str(status or ("stale" if previous_success else "discovery_failed")).strip()
     if resolved_status not in _PROVIDER_FAILURE_STATUSES:
         raise ValueError("invalid provider discovery status")
-    safe_error_type = "".join(
-        character for character in str(error_type or "") if character.isalnum() or character in "._-"
-    )[:_MAX_ERROR_TYPE_LENGTH]
     provider.setdefault("models", {})
     provider.setdefault("warnings", [])
     provider["status"] = resolved_status
     provider["catalogStale"] = previous_success
     provider["lastAttemptAt"] = str(attempted_at)
-    provider["lastErrorType"] = safe_error_type
+    provider["lastErrorType"] = _classify_discovery_error_type(error_type, status=resolved_status)
     providers[provider_key] = provider
     return updated
 
@@ -317,9 +345,9 @@ def import_legacy_capability_cache(
                 provider_id, model_key = split_model_ref(model_ref)
             except ValueError:
                 continue
-            observations = _capability_observations(
+            observations = _labeled_capability_observations(
                 legacy_model.get("capabilities", {}),
-                default_source="runtime_probe",
+                source="runtime_probe",
             )
             if not observations:
                 continue
@@ -349,11 +377,30 @@ def _parse_utc(value: str) -> datetime:
     return parsed.astimezone(timezone.utc)
 
 
+def _classify_discovery_error_type(value: Any, *, status: str) -> str:
+    if status == "auth_failed":
+        return "auth_failed"
+    raw = str(value or "").strip().lower()
+    if raw in {"auth_failed", "blocked", "network", "other", "protocol_mismatch", "timeout"}:
+        return raw
+    if "timeout" in raw or "timedout" in raw or "timed out" in raw:
+        return "timeout"
+    if "connection" in raw or "network" in raw or "dns" in raw:
+        return "network"
+    if "protocol" in raw or "schema" in raw or "decode" in raw:
+        return "protocol_mismatch"
+    if "blocked" in raw or "permission" in raw:
+        return "blocked"
+    return "other"
+
+
 __all__ = [
     "CAPABILITY_SOURCE_PRIORITY",
     "CAPABILITY_VALUES",
+    "CAPABILITY_ERROR_CATEGORIES",
     "MODEL_CATALOG_SCHEMA_VERSION",
     "empty_model_catalog_state",
+    "classify_capability_error",
     "import_legacy_capability_cache",
     "load_model_catalog_state",
     "merge_capability_observations",

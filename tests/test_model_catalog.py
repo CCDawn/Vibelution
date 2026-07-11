@@ -91,6 +91,43 @@ def test_capabilities_merge_per_field_by_source_priority() -> None:
     assert merged["tool_calling"]["value"] == "supported"
 
 
+def test_discovery_payload_cannot_spoof_operator_capability_or_metadata_source() -> None:
+    state = record_discovery_success(
+        empty_model_catalog_state(),
+        provider_id="relay",
+        provider_fingerprint="fp",
+        discovered_at="2026-07-11T12:00:00Z",
+        observed=[
+            {
+                "upstream_id": "gpt-a",
+                "metadata_source": "operator_override",
+                "capabilities": {
+                    "image_input": {
+                        "value": "supported",
+                        "source": "operator_override",
+                        "capability_source": "operator_override",
+                    }
+                },
+            }
+        ],
+        pinned={
+            "gpt-a": {
+                "upstream_id": "gpt-a",
+                "capabilities": {
+                    "image_input": {
+                        "value": "unsupported",
+                        "source": "provider_endpoint",
+                    }
+                },
+            }
+        },
+    )
+    model = state["providers"]["relay"]["models"]["gpt-a"]
+    assert model["capabilities"]["image_input"]["value"] == "unsupported"
+    assert model["capabilities"]["image_input"]["source"] == "operator_override"
+    assert model["metadataSource"] == "provider_endpoint"
+
+
 def test_resolve_capabilities_uses_independent_field_precedence() -> None:
     resolved = resolve_model_capabilities(
         operator={"image_input": "unsupported"},
@@ -122,6 +159,48 @@ def test_invalid_capability_value_is_rejected_without_coercion() -> None:
         merge_capability_observations(
             [{"field": "image_input", "value": "yes", "source": "operator_override"}]
         )
+
+
+@pytest.mark.parametrize(
+    "secret_shaped_error",
+    [
+        "sk_liveABC123XYZ",
+        "Bearer dummyTokenABC123",
+        "https://relay.example/error?api_key=dummyTokenABC123",
+    ],
+)
+def test_capability_errors_are_persisted_only_as_controlled_categories(secret_shaped_error) -> None:
+    merged = merge_capability_observations(
+        [
+            {
+                "field": "image_input",
+                "value": "unknown",
+                "source": "runtime_probe",
+                "error": secret_shaped_error,
+            }
+        ]
+    )
+    assert merged["image_input"]["error"] == "other"
+    assert secret_shaped_error not in repr(merged)
+
+
+@pytest.mark.parametrize(
+    "secret_shaped_error",
+    [
+        "sk_liveABC123XYZ",
+        "BearerDummyTokenABC123",
+        "httpsrelayexampleerrorapi_keydummyTokenABC123",
+    ],
+)
+def test_discovery_error_type_is_reduced_to_controlled_category(secret_shaped_error) -> None:
+    failed = record_discovery_failure(
+        empty_model_catalog_state(),
+        provider_id="relay",
+        attempted_at="2026-07-11T13:00:00Z",
+        error_type=secret_shaped_error,
+    )
+    assert failed["providers"]["relay"]["lastErrorType"] == "other"
+    assert secret_shaped_error not in repr(failed)
 
 
 def test_catalog_refresh_due_uses_last_attempt_and_ttl() -> None:
