@@ -54,6 +54,16 @@ from .models import (
     resolve_api_key,
 )
 from .llm_projection import project_v2_llm_for_runtime
+from .llm_provider_registry import (
+    add_llm_provider,
+    delete_llm_provider,
+    pin_llm_model,
+    preview_provider_route_replacement,
+    suggest_provider_id,
+    unpin_llm_model,
+    update_llm_provider,
+    validate_provider_registry,
+)
 from .providers import (
     MODEL_PRESETS,
     get_model_preset,
@@ -75,6 +85,7 @@ from .settings import (
     normalize_public_config_dict,
     reload_config,
 )
+from .public_config import list_llm_provider_options
 
 __all__ = [
     "AgentConfig",
@@ -130,18 +141,27 @@ __all__ = [
     "WebChatConfig",
     "WorkbenchConfig",
     "MODEL_PRESETS",
+    "add_llm_provider",
     "denormalize_config_dict",
+    "delete_llm_provider",
     "ensure_global_config_initialized",
     "get_config",
     "get_model_preset",
     "get_settings",
     "list_models",
+    "list_llm_provider_options",
     "normalize_public_config_dict",
     "project_v2_llm_for_runtime",
+    "pin_llm_model",
+    "preview_provider_route_replacement",
     "reload_config",
     "resolve_api_key",
     "resolve_config_home",
     "resolve_config_path",
     "resolve_model_alias",
     "show_model_info",
+    "suggest_provider_id",
+    "unpin_llm_model",
+    "update_llm_provider",
+    "validate_provider_registry",
 ]

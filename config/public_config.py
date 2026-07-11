@@ -16,6 +16,7 @@ from typing import Any
 
 import tomllib
 from core.llm import LLMInvocationContext, assert_llm_compatibility, invoke_llm
+from .llm_credentials import resolve_credential_ref
 from .llm_security import (
     coerce_llm_runtime_probe_timeout,
     is_llm_local_network_base_url,
@@ -1314,6 +1315,40 @@ def list_llm_provider_preset_options() -> list[dict[str, object]]:
     return options
 
 
+def list_llm_provider_options(public_config: dict) -> list[dict[str, object]]:
+    llm = public_config.get("llm", {}) if isinstance(public_config, dict) else {}
+    providers = llm.get("providers", {}) if isinstance(llm, dict) else {}
+    if int(llm.get("schema_version") or 1) != 2 or not isinstance(providers, dict):
+        return []
+    options: list[dict[str, object]] = []
+    for provider_id, provider in sorted(providers.items()):
+        if not isinstance(provider, dict):
+            continue
+        credential_ref = str(provider.get("credential_ref") or "none")
+        resolution = resolve_credential_ref(credential_ref)
+        deployment = provider.get("deployment", {})
+        deployment = deployment if isinstance(deployment, dict) else {}
+        protocols = provider.get("protocols", {})
+        protocols = protocols if isinstance(protocols, dict) else {}
+        models = provider.get("models", {})
+        options.append(
+            {
+                "provider_id": str(provider_id),
+                "label": str(provider.get("label") or provider_id),
+                "service_class": str(provider.get("service_class") or ""),
+                "vendor": str(provider.get("vendor") or "custom"),
+                "driver": str(provider.get("driver") or "openai"),
+                "runtime_framework": str(deployment.get("runtime_framework") or ""),
+                "artifact_path": str(deployment.get("artifact_path") or ""),
+                "base_url": str(provider.get("base_url") or ""),
+                "credential_state": resolution.state,
+                "default_protocol": str(protocols.get("default") or ""),
+                "pinned_count": len(models) if isinstance(models, dict) else 0,
+            }
+        )
+    return options
+
+
 def apply_llm_model_preset(
     public_config: dict,
     preset_id: str,
@@ -2047,6 +2082,7 @@ __all__ = [
     "resolve_llm_model_context_window",
     "list_llm_model_preset_options",
     "list_llm_provider_preset_options",
+    "list_llm_provider_options",
     "apply_llm_model_preset",
     "list_llm_model_options",
     "add_llm_model",
