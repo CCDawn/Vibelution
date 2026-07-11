@@ -569,7 +569,7 @@ function compactRepeatedTokenHalves(token: string): string {
   return parts.join("_");
 }
 
-export function modelLibraryIdFromParts(label: string, model: string): string {
+export function legacyModelLibraryIdFromParts(label: string, model: string): string {
   const raw = `${label}-${model}`.trim();
   const token = compactRepeatedTokenHalves(raw
     .toLowerCase()
@@ -580,7 +580,7 @@ export function modelLibraryIdFromParts(label: string, model: string): string {
 
 export function uniqueModelLibraryId(baseId: string, existingIds: Iterable<string>): string {
   const existing = new Set(Array.from(existingIds, (value) => value.trim()).filter(Boolean));
-  const base = modelLibraryIdFromParts(baseId, "") || "custom_model";
+  const base = legacyModelLibraryIdFromParts(baseId, "") || "custom_model";
   if (!existing.has(base)) {
     return base;
   }
@@ -653,7 +653,11 @@ export function canDiscoverModelsForProvider(provider: Record<string, unknown>):
   return compatMode === "openai" || compatMode === "openai_compatible";
 }
 
-function accountIdForModelOption(option: ConfigModelOption): string {
+// Compatibility exports remain until ConfigRoute's v1 editor is replaced by the
+// provider-first Task 10 surface. V2 view models must not call either helper.
+export const modelLibraryIdFromParts = legacyModelLibraryIdFromParts;
+
+function legacyAccountIdForModelOption(option: ConfigModelOption): string {
   const provider = asRecord(option.provider);
   const providerKind = option.provider_kind || getString(provider.kind) || "unknown";
   const baseUrl = getString(provider.base_url) || providerKind;
@@ -679,11 +683,16 @@ function summarizeAccountState(account: Omit<ModelCenterAccount, "modelCount" | 
 
 export function deriveModelCenterSummary(input: {
   modelOptions: ConfigModelOption[];
+  schemaVersion?: 1 | 2;
 }): ModelCenterSummary {
   const accountsById = new Map<string, Omit<ModelCenterAccount, "modelCount" | "apiKeyState">>();
   for (const option of input.modelOptions) {
     const provider = asRecord(option.provider);
-    const id = accountIdForModelOption(option);
+    const providerId = String(option.provider_id || "").trim();
+    const id = providerId || (input.schemaVersion === 2 ? "" : legacyAccountIdForModelOption(option));
+    if (!id) {
+      continue;
+    }
     const current =
       accountsById.get(id) ?? {
         id,
@@ -716,7 +725,7 @@ export function deriveModelCenterSummary(input: {
       modelCount: account.modelIds.length,
       apiKeyState: summarizeAccountState(account),
     }))
-    .sort((left, right) => `${left.providerKind}:${left.baseUrl}`.localeCompare(`${right.providerKind}:${right.baseUrl}`));
+    .sort((left, right) => left.id.localeCompare(right.id));
 
   return {
     accounts,

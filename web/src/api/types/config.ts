@@ -90,7 +90,189 @@ export type ConfigProviderPresetOption = {
   default_model: Record<string, unknown>;
 };
 
+export type ConfigProviderStatus =
+  | "configured"
+  | "reachable"
+  | "auth_failed"
+  | "discovery_failed"
+  | "not_discovered"
+  | "stale"
+  | "protocol_mismatch"
+  | "blocked"
+  | (string & {});
+
+export type ConfigModelAvailability =
+  | "observed"
+  | "pinned"
+  | "missing_remote"
+  | "capability_unknown"
+  | "protocol_unknown"
+  | "disabled"
+  | "unknown"
+  | (string & {});
+
+export type ConfigCapabilityObservation = {
+  value: "supported" | "unsupported" | "unknown";
+  source: "operator_override" | "runtime_probe" | "provider_endpoint" | "curated_snapshot" | "driver_default";
+  confidence: string;
+  checked_at: string;
+  error: string;
+};
+
+export type ConfigProviderOption = {
+  provider_id: string;
+  label: string;
+  service_class: "official_api" | "aggregator" | "relay" | "self_hosted" | "local_runtime" | (string & {});
+  vendor: string;
+  driver: "openai" | "anthropic" | "gemini" | (string & {});
+  runtime_framework?: string;
+  artifact_path?: string;
+  base_url?: string;
+  credential_state: "configured" | "missing" | "not_required" | (string & {});
+  default_protocol: string;
+  pinned_count: number;
+};
+
+export type ConfigCatalogModel = {
+  availability: ConfigModelAvailability;
+  label: string;
+  modelKey: string;
+  modelRef: string;
+  status: string;
+  upstreamId: string;
+};
+
+export type ConfigCatalogWarning = {
+  code: string;
+  modelKeys: string[];
+};
+
+export type ConfigCatalogProvider = {
+  catalogStale: boolean;
+  lastAttemptAt: string;
+  lastErrorType: string;
+  lastSuccessAt: string;
+  modelCount: number;
+  observedCount: number;
+  pinnedCount: number;
+  providerId: string;
+  refreshDue: boolean;
+  status: ConfigProviderStatus;
+  models: Record<string, ConfigCatalogModel>;
+  warnings: ConfigCatalogWarning[];
+};
+
+export type ConfigModelCatalog = {
+  schemaVersion: number;
+  providerCount: number;
+  modelCount: number;
+  providers: Record<string, ConfigCatalogProvider>;
+};
+
+export type ConfigMigrationConflict = {
+  code: string;
+  severity?: string;
+  modelId?: string;
+  fields?: string[];
+  proposedProviderId?: string;
+};
+
+export type ConfigMigrationProviderPreview = {
+  providerId: string;
+  label: string;
+  serviceClass: string;
+  vendor: string;
+  driver: string;
+  baseUrl: string;
+  credentialState: "configured" | "missing" | "not_required" | "conflict" | (string & {});
+  modelRefs: string[];
+};
+
+export type ConfigMigrationPreview = {
+  previewId: string;
+  baseHash: string;
+  status: "READY" | "NEEDS_REVIEW";
+  providers: ConfigMigrationProviderPreview[];
+  modelRefMap: Record<string, string>;
+  referenceImpact: {
+    liveReferenceCount: number;
+    historicalReferenceCount: number;
+  };
+  conflicts: ConfigMigrationConflict[];
+};
+
+export type ConfigModelAliasUsage = {
+  aliases: Array<{
+    alias: string;
+    liveReferenceCount: number;
+    historicalReferenceCount: number;
+  }>;
+  totalLiveReferenceCount: number;
+  totalHistoricalReferenceCount: number;
+  canRemoveAliases: boolean;
+};
+
+export type ConfigProviderWorkspaceFields = {
+  schemaVersion: 1 | 2;
+  providerOptions: ConfigProviderOption[];
+  modelCatalog: ConfigModelCatalog;
+  modelAliasUsage: ConfigModelAliasUsage;
+};
+
+export type ConfigProviderDraftMutationPayload = {
+  publicConfig: Record<string, unknown>;
+  baseConfig?: Record<string, unknown> | null;
+  draftMeta: ConfigDraftMeta;
+  baseHash: string;
+  providerId: string;
+  provider: Record<string, unknown>;
+  credentialValue?: string;
+  routePreviewToken?: string;
+};
+
+export type ConfigProviderModelMutationPayload = {
+  publicConfig: Record<string, unknown>;
+  baseConfig?: Record<string, unknown> | null;
+  draftMeta: ConfigDraftMeta;
+  baseHash: string;
+  providerId: string;
+  upstreamId: string;
+  modelKey?: string;
+  label?: string;
+  overrides?: Record<string, unknown>;
+};
+
+export type ConfigProviderDiscoveryMutationPayload = {
+  publicConfig: Record<string, unknown>;
+  baseConfig?: Record<string, unknown> | null;
+  draftMeta: ConfigDraftMeta;
+  baseHash: string;
+  providerId: string;
+  credentialValue?: string;
+};
+
+export type ConfigProviderSuggestionMutationPayload = {
+  publicConfig: Record<string, unknown>;
+  baseConfig?: Record<string, unknown> | null;
+  draftMeta: ConfigDraftMeta;
+  baseHash: string;
+  provider: Record<string, unknown>;
+};
+
+export type ConfigMigrationApplyPayload = {
+  previewId: string;
+  baseHash: string;
+};
+
+export type ConfigMigrationRollbackPayload = {
+  migrationId: string;
+  baseHash: string;
+};
+
 export type ConfigModelOption = {
+  model_ref?: string;
+  provider_id?: string;
+  upstream_id?: string;
   model_id: string;
   source: string;
   provider: Record<string, unknown>;
@@ -117,7 +299,7 @@ export type ConfigModelOption = {
   capability_error?: string;
 };
 
-export type ConfigWorkspace = ConfigSummary & {
+export type ConfigWorkspace = ConfigSummary & ConfigProviderWorkspaceFields & {
   message: string;
   baseHash: string;
   configPath: string;
