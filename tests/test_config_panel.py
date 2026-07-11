@@ -49,6 +49,7 @@ from config.public_config import UNCONFIGURED_MODEL_REF, public_config_hash
 from config.paths import resolve_config_backup_dir, resolve_config_lock_path
 import config.public_config as public_config_module
 from config.llm_security import validate_llm_provider_target
+from core.web.services.config_service import summarize_model_catalog
 
 
 PROJECT_ROOT = Path(__file__).parent.parent
@@ -65,6 +66,103 @@ def _v2_provider(**overrides):
     }
     provider.update(overrides)
     return provider
+
+
+def test_summarize_model_catalog_projects_capabilities_without_untrusted_fields() -> None:
+    state = {
+        "schemaVersion": 2,
+        "providers": {
+            "relay": {
+                "status": "reachable",
+                "models": {
+                    "model": {
+                        "upstreamId": "model",
+                        "availability": "observed",
+                        "capabilities": {
+                            "image_input": {
+                                "value": "supported",
+                                "source": "runtime_probe",
+                                "confidence": "high",
+                                "checked_at": "2026-07-11T10:00:00Z",
+                                "error": "Bearer secret-value",
+                                "rawMetadata": {"token": "secret-value"},
+                                "unknownNested": {"secret": "secret-value"},
+                            },
+                            "tool_calling": {
+                                "value": "unsupported",
+                                "source": "provider_endpoint",
+                                "confidence": "medium",
+                                "checked_at": "2026-07-11T09:00:00Z",
+                            },
+                            "invalid_value": {
+                                "value": "yes",
+                                "source": "runtime_probe",
+                            },
+                            "invalid_source": {
+                                "value": "unknown",
+                                "source": "raw_provider_payload",
+                            },
+                            "credential_ref": {
+                                "value": "supported",
+                                "source": "operator_override",
+                            },
+                            "raw_payload": {
+                                "value": "unknown",
+                                "source": "runtime_probe",
+                            },
+                        },
+                    }
+                },
+            }
+        },
+    }
+    public_config = {
+        "llm": {
+            "schema_version": 2,
+            "providers": {
+                "relay": {
+                    "protocols": {
+                        "default": "responses",
+                        "allowed": ["responses"],
+                    },
+                    "discovery": {"cache_ttl_seconds": 0},
+                    "models": {},
+                }
+            },
+        }
+    }
+
+    summary = summarize_model_catalog(state, public_config=public_config)
+
+    capabilities = summary["providers"]["relay"]["models"]["model"][
+        "capabilities"
+    ]
+    assert capabilities == {
+        "image_input": {
+            "value": "supported",
+            "source": "runtime_probe",
+            "confidence": "high",
+            "checked_at": "2026-07-11T10:00:00Z",
+        },
+        "tool_calling": {
+            "value": "unsupported",
+            "source": "provider_endpoint",
+            "confidence": "medium",
+            "checked_at": "2026-07-11T09:00:00Z",
+        },
+    }
+    serialized = json.dumps(summary)
+    for forbidden in (
+        "Bearer secret-value",
+        "rawMetadata",
+        "unknownNested",
+        "credential_ref",
+        "raw_payload",
+        "raw_provider_payload",
+        "secret-value",
+        '"error"',
+    ):
+        assert forbidden not in serialized
 
 
 def test_v2_provider_target_allows_local_runtime_private_lan() -> None:
