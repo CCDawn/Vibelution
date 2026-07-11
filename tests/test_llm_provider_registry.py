@@ -102,6 +102,42 @@ def test_pin_uses_upstream_id_and_stable_provider_scoped_key() -> None:
     assert config["llm"]["providers"]["relay_a"]["models"] == {}
 
 
+@pytest.mark.parametrize(
+    "reserved_field",
+    [
+        "upstream_id",
+        "label",
+        "enabled",
+        "model_key",
+        "provider_id",
+        "model_ref",
+        "api_key",
+        "api_key_env",
+        "credential_ref",
+    ],
+)
+def test_pin_rejects_reserved_identity_and_ownership_overrides(
+    reserved_field: str,
+) -> None:
+    config = add_llm_provider(_empty_v2(), "relay_a", _provider())
+    original = copy.deepcopy(config)
+    sentinel = "must-not-appear"
+
+    with pytest.raises(
+        ValueError, match="^pinned model overrides contain reserved fields$"
+    ) as exc_info:
+        pin_llm_model(
+            config,
+            "relay_a",
+            upstream_id="anthropic/claude-sonnet-4.6",
+            overrides={reserved_field: sentinel},
+        )
+
+    assert str(exc_info.value) == "pinned model overrides contain reserved fields"
+    assert sentinel not in str(exc_info.value)
+    assert config == original
+
+
 def test_update_preserves_models_without_implicit_ref_migration() -> None:
     config = add_llm_provider(_empty_v2(), "relay_a", _provider())
     config = pin_llm_model(config, "relay_a", upstream_id="gpt-a")
@@ -129,6 +165,30 @@ def test_unpin_and_delete_require_explicit_order_and_are_immutable() -> None:
 
     assert set(config["llm"]["providers"]["relay_a"]["models"]) == {"gpt-a"}
     assert deleted["llm"]["providers"] == {}
+
+
+def test_unpin_rejects_unknown_pinned_model_without_mutating_input() -> None:
+    config = add_llm_provider(_empty_v2(), "relay_a", _provider())
+    original = copy.deepcopy(config)
+
+    with pytest.raises(ValueError, match="^unknown pinned model$"):
+        unpin_llm_model(config, "relay_a/missing-model")
+
+    assert config == original
+
+
+@pytest.mark.parametrize("invalid_models", [None, [], "not-a-model-registry"])
+def test_unpin_rejects_invalid_model_registry_without_mutating_input(
+    invalid_models: object,
+) -> None:
+    provider = {**_provider(), "models": invalid_models}
+    config = add_llm_provider(_empty_v2(), "relay_a", provider)
+    original = copy.deepcopy(config)
+
+    with pytest.raises(ValueError, match="^provider models must be an object$"):
+        unpin_llm_model(config, "relay_a/gpt-a")
+
+    assert config == original
 
 
 def test_route_replacement_preview_reports_all_provider_models() -> None:
