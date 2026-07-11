@@ -5,13 +5,18 @@ from __future__ import annotations
 import copy
 import hashlib
 import hmac
+import re
 import secrets
 import threading
 import time
 from typing import Any
 
 from config.llm_credentials import canonicalize_credential_ref
-from config.llm_identity import make_model_ref
+from config.llm_identity import (
+    make_model_ref,
+    split_model_ref,
+    validate_provider_id,
+)
 from config.llm_provider_registry import (
     add_llm_provider,
     delete_llm_provider,
@@ -452,20 +457,62 @@ def project_model_reference_impact(value: Any) -> dict[str, Any]:
     return projected[0] if projected else {}
 
 
+def _project_provider_id(value: Any) -> str:
+    if not isinstance(value, str):
+        return ""
+    try:
+        return validate_provider_id(value)
+    except ValueError:
+        return ""
+
+
+def _project_model_refs(value: Any, *, provider_id: str) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    projected: list[str] = []
+    for raw_ref in value:
+        if not isinstance(raw_ref, str) or "pending-secret:" in raw_ref:
+            continue
+        try:
+            ref_provider_id, model_key = split_model_ref(raw_ref)
+            canonical = make_model_ref(ref_provider_id, model_key)
+        except ValueError:
+            continue
+        if provider_id and ref_provider_id != provider_id:
+            continue
+        projected.append(canonical)
+        if len(projected) >= _MAX_IMPACT_REFS:
+            break
+    return projected
+
+
+def _project_route_preview_token(value: Any) -> str:
+    if not isinstance(value, str):
+        return ""
+    token = value.strip()
+    if not token:
+        return ""
+    return token if re.fullmatch(r"[0-9a-f]{64}", token) else ""
+
+
 def project_provider_route_preview_response(
     preview: dict[str, Any],
 ) -> dict[str, Any]:
-    raw_model_refs = preview.get("modelRefs", [])
+    provider_id = _project_provider_id(preview.get("providerId"))
+    route_changed = preview.get("routeChanged")
     return {
         "impactedRefs": project_model_reference_impacts(
             preview.get("impactedRefs")
         ),
-        "modelRefs": [str(item) for item in raw_model_refs[:_MAX_IMPACT_REFS]]
-        if isinstance(raw_model_refs, list)
-        else [],
-        "providerId": str(preview.get("providerId") or ""),
-        "routeChanged": bool(preview.get("routeChanged")),
-        "routePreviewToken": str(preview.get("routePreviewToken") or ""),
+        "modelRefs": _project_model_refs(
+            preview.get("modelRefs"),
+            provider_id=provider_id,
+        ),
+        "providerId": provider_id,
+        "routeChanged": route_changed if isinstance(route_changed, bool) else False,
+        "routePreviewToken": _project_route_preview_token(
+            preview.get("routePreviewToken")
+        ),
     }
 
 
