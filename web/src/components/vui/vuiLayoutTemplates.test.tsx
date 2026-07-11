@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import {
   VEmptyState,
   VEntityList,
+  VPanelHeader,
   VRouteHeader,
   VSection,
   VSplitWorkspace,
@@ -14,6 +15,16 @@ import {
 } from "./index";
 
 describe("VUI workbench layout templates", () => {
+  it("keeps panel-header text without rendering a heading when requested", () => {
+    const markup = renderToStaticMarkup(
+      <VPanelHeader headingLevel={null} title="Sidebar navigation" />,
+    );
+
+    expect(markup).toContain('data-vui="panel-header"');
+    expect(markup).toContain("Sidebar navigation");
+    expect(markup).not.toContain("<h2");
+  });
+
   it("places a public section header class on the direct header before its direct body", () => {
     const markup = renderToStaticMarkup(
       <VSection headerClassName="config-section-header-contract" title="Config section">
