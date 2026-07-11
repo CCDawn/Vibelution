@@ -2,7 +2,7 @@ import { ArrowUpRight, CheckCircle2, LoaderCircle, Sparkles, Trash2 } from "luci
 import type { CSSProperties, ReactNode } from "react";
 
 import type { EvolutionLibraryEntry, EvolutionRun } from "../api/types";
-import { VNativeButton, VNativeInput } from "../components/vui";
+import { VButton, VCheckbox } from "../components/vui";
 import type { Language, TranslationKey } from "../i18n/dictionary";
 import { buildSupervisedRunRecordDisplay, supervisedDecisionLabel } from "./supervisedRunRecordLabel";
 import styles from "./EvolutionRunRecordsPanel.styles";
@@ -184,23 +184,24 @@ export function EvolutionRunRecordsPanel({
       </div>
       <p>{item.changeSummary || item.headline}</p>
       <div className={styles.actionRow}>
-        <VNativeButton
+        <VButton
           type="button"
           className={styles.inlineAction}
           onClick={() => onOpenProposal(item, view)}
         >
           <ArrowUpRight size={15} />
           {t("openProposal")}
-        </VNativeButton>
-        <VNativeButton
+        </VButton>
+        <VButton
           type="button"
+          variant="danger"
           className={styles.inlineAction}
-          disabled={!item.canDelete || deleteProposalPending}
+          isDisabled={!item.canDelete || deleteProposalPending}
           onClick={() => onDeleteProposal(item.sourceRun)}
         >
           <Trash2 size={15} />
           {t("deleteProposal")}
-        </VNativeButton>
+        </VButton>
       </div>
       {!item.canDelete && item.deleteBlockReason ? (
         <p>{item.deleteBlockReason}</p>
@@ -225,32 +226,33 @@ export function EvolutionRunRecordsPanel({
               <span>{selectedRunIds.length}</span>
             </div>
             <div className={styles.actionRow}>
-              <VNativeButton
+              <VButton
                 type="button"
                 className={styles.inlineAction}
-                disabled={visibleDeletableRunCount === 0 || allVisibleDeletableRunsSelected}
+                isDisabled={visibleDeletableRunCount === 0 || allVisibleDeletableRunsSelected}
                 onClick={onSelectVisibleRunRecords}
               >
                 <CheckCircle2 size={15} />
                 {t("selectVisibleRuns")}
-              </VNativeButton>
-              <VNativeButton
+              </VButton>
+              <VButton
                 type="button"
                 className={styles.inlineAction}
-                disabled={selectedRunIds.length === 0}
+                isDisabled={selectedRunIds.length === 0}
                 onClick={onClearRunSelection}
               >
                 {t("clearSelection")}
-              </VNativeButton>
-              <VNativeButton
+              </VButton>
+              <VButton
                 type="button"
+                variant="danger"
                 className={styles.inlineAction}
-                disabled={selectedRunIds.length === 0 || bulkDeleteRunRecordsPending}
+                isDisabled={selectedRunIds.length === 0 || bulkDeleteRunRecordsPending}
                 onClick={onBulkDeleteRunRecords}
               >
                 {bulkDeleteRunRecordsPending ? <LoaderCircle size={15} /> : <Trash2 size={15} />}
                 {t("deleteSelectedRuns")}
-              </VNativeButton>
+              </VButton>
             </div>
             <p className={styles.bulkToolbarHint}>{t("runBatchDeleteHint")}</p>
           </div>
@@ -265,14 +267,14 @@ export function EvolutionRunRecordsPanel({
             <h3>{t("noSupervisedRunsYet")}</h3>
             <p>{t("noRunsRecordedHint")}</p>
             <div className={styles.actionRow}>
-              <VNativeButton
+              <VButton
                 type="button"
                 className={styles.inlineAction}
                 onClick={onReturnToOverview}
               >
                 <ArrowUpRight size={15} />
                 {t("returnToOverview")}
-              </VNativeButton>
+              </VButton>
             </div>
           </div>
         ) : filteredRunsEmpty ? (
@@ -280,13 +282,13 @@ export function EvolutionRunRecordsPanel({
             <h3>{t("noRunMatches")}</h3>
             <p>{t("runFilterEmptyHint")}</p>
             <div className={styles.actionRow}>
-              <VNativeButton
+              <VButton
                 type="button"
                 className={styles.inlineAction}
                 onClick={onShowAllRuns}
               >
                 {t("allRuns")}
-              </VNativeButton>
+              </VButton>
             </div>
           </div>
         ) : (
@@ -306,20 +308,19 @@ export function EvolutionRunRecordsPanel({
                   }
                 >
                   <div className={styles.selectionBar}>
-                    <label className={styles.batchToggle}>
-                      <VNativeInput
-                        type="checkbox"
-                        checked={selectedRunIdSet.has(run.id)}
-                        disabled={!run.canDelete}
-                        onChange={() => onToggleRunSelection(run)}
-                      />
-                      <span>{t("selectRunForDelete")}</span>
-                    </label>
+                    <VCheckbox
+                      className={styles.batchToggle}
+                      isSelected={selectedRunIdSet.has(run.id)}
+                      isDisabled={!run.canDelete}
+                      onChange={() => onToggleRunSelection(run)}
+                    >
+                      {t("selectRunForDelete")}
+                    </VCheckbox>
                     <span className={run.canDelete ? styles.secondaryPill : styles.statusPill}>
                       {run.canDelete ? t("deletionAllowed") : t("deletionBlocked")}
                     </span>
                   </div>
-                  <VNativeButton
+                  <VButton
                     type="button"
                     className={styles.runCardButton}
                     onClick={() => onSelectRun(run.id)}
@@ -346,7 +347,7 @@ export function EvolutionRunRecordsPanel({
                         {displaySupervisedTechnicalText(run.nextAction, run.decision, lang, decisionLabel) || "--"}
                       </span>
                     </div>
-                  </VNativeButton>
+                  </VButton>
                   {!run.canDelete && run.deleteBlockReason ? (
                     <p className={styles.noticeText}>{run.deleteBlockReason}</p>
                   ) : null}
@@ -459,16 +460,16 @@ export function EvolutionRunRecordsPanel({
               {selectedRun.availableActions.length > 0 ? (
                 <div className={styles.actionRow}>
                   {selectedRun.availableActions.map((action) => (
-                    <VNativeButton
+                    <VButton
                       key={action}
                       type="button"
                       className={styles.inlineAction}
-                      disabled={runLocked || actionPending}
+                      isDisabled={runLocked || actionPending}
                       onClick={() => onRunAction(selectedRun.id, action)}
                     >
                       <Sparkles size={15} />
                       {proposalActionLabel(action)}
-                    </VNativeButton>
+                    </VButton>
                   ))}
                 </div>
               ) : null}
@@ -529,15 +530,16 @@ export function EvolutionRunRecordsPanel({
               </div>
               <p>{t("runDeleteImpact")}</p>
               <div className={styles.actionRow}>
-                <VNativeButton
+                <VButton
                   type="button"
+                  variant="danger"
                   className={styles.inlineAction}
-                  disabled={!selectedRun.canDelete || deleteRunRecordPending}
+                  isDisabled={!selectedRun.canDelete || deleteRunRecordPending}
                   onClick={() => onDeleteRunRecord(selectedRun.id)}
                 >
                   {deleteRunRecordPending ? <LoaderCircle size={15} /> : <Trash2 size={15} />}
                   {t("deleteRunRecord")}
-                </VNativeButton>
+                </VButton>
               </div>
             </div>
           </>
@@ -558,22 +560,22 @@ export function EvolutionRunRecordsPanel({
             </div>
             <div className={styles.actionRow}>
               {!hasRuns ? (
-                <VNativeButton
+                <VButton
                   type="button"
                   className={styles.inlineAction}
                   onClick={onReturnToOverview}
                 >
                   <ArrowUpRight size={15} />
                   {t("returnToOverview")}
-                </VNativeButton>
+                </VButton>
               ) : (
-                <VNativeButton
+                <VButton
                   type="button"
                   className={styles.inlineAction}
                   onClick={onShowAllRuns}
                 >
                   {t("allRuns")}
-                </VNativeButton>
+                </VButton>
               )}
             </div>
           </div>

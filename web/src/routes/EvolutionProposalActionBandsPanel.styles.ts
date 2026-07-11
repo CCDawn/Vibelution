@@ -13,7 +13,7 @@ const styles = {
   feedbackText:
     "[margin:0] [color:var(--fg-secondary)] [line-height:1.55] [white-space:pre-wrap]",
   inlineAction:
-    `${actionSurface} [justify-self:end] min-w-0 [max-width:100%] inline-flex [align-items:center] [justify-content:center] [gap:8px] [width:fit-content] [min-height:32px] [padding:0_10px] [font-size:var(--vui-font-xs)]`,
+    `${actionSurface} [justify-self:end] min-w-0 [max-width:100%] inline-flex [align-items:center] [justify-content:center] [gap:8px] [width:fit-content] [min-height:32px] [padding:0_10px] [font-size:var(--vui-font-xs)] data-[disabled=true]:[opacity:0.52]`,
   relatedList:
     "grid [grid-template-columns:repeat(2,_minmax(0,_1fr))] [gap:8px] max-[900px]:[grid-template-columns:1fr]",
   relatedRow:

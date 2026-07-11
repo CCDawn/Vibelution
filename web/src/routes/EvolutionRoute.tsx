@@ -50,7 +50,18 @@ import {
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
 import { PaneCollapseHandle } from "../components/layout/PaneCollapseHandle";
 import { LazyConversationView } from "../components/conversation/LazyConversationView";
-import { VNativeButton, VNativeInput, VNativeSelect, VNativeTextarea } from "../components/vui";
+import {
+  VButton,
+  VCheckbox,
+  VInput,
+  VMetricStrip,
+  VRouteHeader,
+  VSection,
+  VStateSurface,
+  VStringSelect,
+  VSurface,
+  VTextarea,
+} from "../components/vui";
 import { useAppI18n } from "../i18n/useAppI18n";
 import { useShellStore } from "../store/shellStore";
 import { SupervisedWorkspaceControls } from "./SupervisedWorkspaceControls";
@@ -1338,7 +1349,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                     key={entry.key}
                     className={`${styles.caseTraceTurn} ${CASE_TRACE_TURN_CLASS[entry.tone]}`}
                   >
-                    <VNativeButton
+                    <VButton
                       type="button"
                       className={styles.caseTraceSummary}
                       aria-expanded={expanded}
@@ -1360,7 +1371,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                       <span className={styles.caseTraceChevron}>
                         {expanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
                       </span>
-                    </VNativeButton>
+                    </VButton>
                     {expanded ? (
                       <div className={styles.caseTraceBody}>
                         {entry.sections.map((section, sectionIndex) => renderCaseTraceSection(section, sectionIndex))}
@@ -2901,16 +2912,18 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   return (
     <div className={activeTrack === "self" ? `${styles.page} ${styles.selfPage}` : styles.page}>
       {showRouteToolbar ? (
-        <section className={hideSupervisedToolbarIntro ? `${styles.toolbar} ${styles.toolbarSupervisedFocus}` : styles.toolbar}>
-          {!hideSupervisedToolbarIntro ? (
-            <div className={styles.toolbarIntro}>
-              <p className={styles.eyebrow}>{routeEyebrow}</p>
-              <h1 className={styles.title}>{routeTitle}</h1>
-              <p className={styles.subtitle}>{routeSubtitle}</p>
-            </div>
-          ) : null}
-
-          <div
+        <VRouteHeader
+          aria-label={routeTitle}
+          className={
+            hideSupervisedToolbarIntro
+              ? `${styles.toolbar} ${styles.toolbarSupervisedFocus} ${styles.toolbarHeaderHidden}`
+              : styles.toolbar
+          }
+          eyebrow={routeEyebrow}
+          title={routeTitle}
+          meta={routeSubtitle}
+          actions={(
+            <div
             className={
               hideSupervisedToolbarIntro
                 ? `${styles.toolbarControls} ${styles.toolbarControlsSupervisedFocus}`
@@ -2923,7 +2936,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                   { key: "supervised", label: t("supervisedEvolutionMode") },
                   { key: "self", label: t("selfEvolutionMode") },
                 ] as const).map((track) => (
-                  <VNativeButton
+                  <VButton
                     key={track.key}
                     type="button"
                     className={
@@ -2934,7 +2947,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                     onClick={() => setEvolutionTrack(track.key)}
                   >
                     {track.label}
-                  </VNativeButton>
+                  </VButton>
                 ))}
               </div>
             ) : null}
@@ -2949,8 +2962,9 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                 tabSummaries={supervisedTabSummaries}
               />
             ) : null}
-          </div>
-        </section>
+            </div>
+          )}
+        />
       ) : null}
 
       {activeTrack === "self" ? (
@@ -2994,7 +3008,13 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
             }
             aria-hidden={liveLaunchCollapsed}
           >
-            <div className={`${styles.surface} ${styles.launchSurface} ${styles.supervisedRunConsole}`}>
+            <VSurface
+              as="section"
+              className={`${styles.surface} ${styles.launchSurface} ${styles.supervisedRunConsole}`}
+              elevation="panel"
+              padding="none"
+              tone="panel"
+            >
               <div className={`${styles.surfaceHeaderCompact} ${styles.supervisedRunConsoleHeader}`}>
                 <div>
                   <p className={styles.eyebrow}>{t("supervisedControl")}</p>
@@ -3010,14 +3030,22 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                 </div>
               </div>
 
-              <div className={styles.sourceInventoryBar}>
-                <span>{lang === "zh" ? "数据集" : "Datasets"} <strong>{workbenchCatalogLoading ? "--" : primaryDatasets.length}</strong></span>
-                <span>{lang === "zh" ? "评测包" : "Bundles"} <strong>{workbenchCatalogLoading ? "--" : availableBundles.length}</strong></span>
-                <span title={supervisedEvidenceRootTitle}>{lang === "zh" ? "证据根" : "Evidence"} <strong>{supervisedEvidenceRootLabel}</strong></span>
-                {hiddenDatasetCount > 0 ? (
-                  <span>{lang === "zh" ? "隐藏" : "Hidden"} <strong>{hiddenDatasetCount}</strong></span>
-                ) : null}
-              </div>
+              <VSection
+                className={styles.sourceInventorySection}
+                eyebrow={lang === "zh" ? "运行前检查" : "Preflight"}
+                title={lang === "zh" ? "监督运行来源" : "Supervised run sources"}
+              >
+                <VMetricStrip
+                  ariaLabel={lang === "zh" ? "监督运行来源概览" : "Supervised run source overview"}
+                  className={styles.sourceInventoryBar}
+                  metrics={[
+                    { id: "datasets", label: lang === "zh" ? "数据集" : "Datasets", value: workbenchCatalogLoading ? "--" : primaryDatasets.length },
+                    { id: "bundles", label: lang === "zh" ? "评测包" : "Bundles", value: workbenchCatalogLoading ? "--" : availableBundles.length },
+                    { id: "evidence", label: lang === "zh" ? "证据根" : "Evidence", value: supervisedEvidenceRootLabel, detail: supervisedEvidenceRootTitle },
+                    ...(hiddenDatasetCount > 0 ? [{ id: "hidden", label: lang === "zh" ? "隐藏" : "Hidden", value: hiddenDatasetCount }] : []),
+                  ]}
+                />
+              </VSection>
               {datasetCatalog.length > 0 ? (
                 <div className={styles.datasetCatalogPanel}>
                   <div className={styles.datasetCatalogHeader}>
@@ -3034,7 +3062,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                         ["blocked", t("datasetCatalogBlocked"), datasetCatalogGroups.blocked.length],
                         ["roadmap", t("datasetCatalogRoadmap"), datasetCatalogGroups.roadmap.length],
                       ] as Array<[DatasetCatalogFilter, string, number]>).map(([filter, label, count]) => (
-                        <VNativeButton
+                        <VButton
                           key={filter}
                           type="button"
                           className={
@@ -3046,7 +3074,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                           aria-pressed={selectedDatasetCatalogFilter === filter}
                         >
                           {label} {count}
-                        </VNativeButton>
+                        </VButton>
                       ))}
                     </div>
                   </div>
@@ -3095,13 +3123,19 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                           ? "数据集会先物化，评测包可直接运行。"
                           : "A dataset is materialized first; a bundle runs directly."}
                       >
-                        <label htmlFor="supervised-source">{lang === "zh" ? "评测来源" : "Evaluation source"}</label>
-                        <VNativeSelect
-                          id="supervised-source"
+                        <label>{lang === "zh" ? "评测来源" : "Evaluation source"}</label>
+                        <VStringSelect
+                          ariaLabel={lang === "zh" ? "评测来源" : "Evaluation source"}
                           className={styles.selectInput}
                           value={selectedSourceValue}
-                          onChange={(event) => {
-                            const [nextKind, ...nameParts] = event.target.value.split(":");
+                          options={supervisedSourceOptions.map((source) => ({
+                            value: source.value,
+                            label: source.kind === "dataset"
+                              ? `${source.name} [${datasetUsabilityLabel(source.dataset, lang)}]`
+                              : `${source.name} [${source.caseCount} cases]`,
+                          }))}
+                          onValueChange={(value) => {
+                            const [nextKind, ...nameParts] = value.split(":");
                             const nextName = nameParts.join(":");
                             if (nextKind === "bundle") {
                               setSourceKind("bundle");
@@ -3111,31 +3145,12 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                             setSourceKind("dataset");
                             setDatasetName(nextName);
                           }}
-                        >
-                          {primaryDatasets.length > 0 ? (
-                            <optgroup label={lang === "zh" ? "可运行数据集：运行前自动物化为评测包" : "Runnable datasets: materialized before run"}>
-                              {primaryDatasets.map((item) => (
-                                <option key={`dataset:${item.name}`} value={`dataset:${item.name}`}>
-                                  {item.name} [{datasetUsabilityLabel(item, lang)}]
-                                </option>
-                              ))}
-                            </optgroup>
-                          ) : null}
-                          {availableBundles.length > 0 ? (
-                            <optgroup label={lang === "zh" ? "已有评测包：直接运行" : "Existing bundles: run directly"}>
-                              {availableBundles.map((item) => (
-                                <option key={`bundle:${item.name}`} value={`bundle:${item.name}`}>
-                                  {item.name} [{item.caseCount} cases]
-                                </option>
-                              ))}
-                            </optgroup>
-                          ) : null}
-                        </VNativeSelect>
+                        />
                       </div>
                       {sourceKind === "dataset" ? (
                         <div className={styles.formField} title={t("caseLimitHint")}>
                           <label htmlFor="supervised-limit">{t("caseLimit")}</label>
-                          <VNativeInput
+                          <VInput
                             id="supervised-limit"
                             className={styles.textInput}
                             type="number"
@@ -3170,35 +3185,36 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                   </div>
 
                   <div className={styles.supervisedRunOptions}>
-                    <label className={styles.checkboxRow} title={t("keepWorktreeLabel")}>
-                      <VNativeInput
-                        type="checkbox"
-                        checked={keepWorktree}
-                        onChange={(event) => setKeepWorktree(event.target.checked)}
-                      />
+                    <VCheckbox
+                      className={styles.checkboxRow}
+                      isSelected={keepWorktree}
+                      onChange={setKeepWorktree}
+                    >
                       <span className={styles.checkboxLabel}>{lang === "zh" ? "保留 worktree" : "Keep worktree"}</span>
-                    </label>
+                    </VCheckbox>
                     <div className={styles.formField} title={t("supervisedMentalModeHint")}>
-                      <label htmlFor="supervised-mental-mode">{t("supervisedMentalMode")}</label>
-                      <VNativeSelect
-                        id="supervised-mental-mode"
+                      <label>{t("supervisedMentalMode")}</label>
+                      <VStringSelect
+                        ariaLabel={t("supervisedMentalMode")}
                         className={styles.selectInput}
                         value={supervisedMentalModelMode}
-                        onChange={(event) => setSupervisedMentalModelMode(event.target.value as SupervisedMentalModelMode)}
-                      >
-                        <option value="follow">{t("supervisedMentalModeFollow")}</option>
-                        <option value="enabled">{t("supervisedMentalModeEnabled")}</option>
-                        <option value="disabled">{t("supervisedMentalModeDisabled")}</option>
-                      </VNativeSelect>
+                        options={[
+                          { value: "follow", label: t("supervisedMentalModeFollow") },
+                          { value: "enabled", label: t("supervisedMentalModeEnabled") },
+                          { value: "disabled", label: t("supervisedMentalModeDisabled") },
+                        ]}
+                        onValueChange={(value) => setSupervisedMentalModelMode(value as SupervisedMentalModelMode)}
+                      />
                     </div>
                   </div>
 
                   <div className={styles.controlFooter}>
                     <div className={styles.controlActions}>
-                      <VNativeButton
+                      <VButton
                         type="button"
+                        variant="primary"
                         className={styles.inlineAction}
-                        disabled={
+                        isDisabled={
                           runLocked
                           || worktreeRunLocked
                           || !workbenchControl
@@ -3211,7 +3227,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                       >
                         {supervisedStartSubmitting || supervisedPrimaryRunning ? <LoaderCircle size={15} /> : <Play size={15} />}
                         {supervisedStartButtonLabel}
-                      </VNativeButton>
+                      </VButton>
                     </div>
                     <div className={styles.closedLoopLaunchBlock} title={t("closedLoopLaunchPanelHint")}>
                       <div>
@@ -3225,10 +3241,10 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                             : "Runs the orchestration rehearsal without real LLM self-editing."}
                         </span>
                       </div>
-                      <VNativeButton
+                      <VButton
                         type="button"
                         className={styles.inlineAction}
-                        disabled={
+                        isDisabled={
                           runLocked
                           || worktreeRunLocked
                           || !workbenchControl
@@ -3241,7 +3257,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                       >
                         {startSimulationWorktreeRunMutation.isPending ? <LoaderCircle size={15} /> : <Sparkles size={15} />}
                         {t("startClosedLoopRun")}
-                      </VNativeButton>
+                      </VButton>
                     </div>
                     {runLocked || worktreeRunLocked ? <p className={styles.noticeText}>{t("runningLockHint")}</p> : null}
                     {supervisedControlError ? (
@@ -3267,14 +3283,14 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                     </div>
                     <div className={styles.supervisedMembersHeaderActions}>
                       {supervisedWorkflowManualSelection ? (
-                        <VNativeButton
+                        <VButton
                           type="button"
                           className={styles.supervisedWorkflowFollowButton}
                           onClick={() => setSelectedSupervisedWorkflowStepId(null)}
                           title={lang === "zh" ? "回到当前执行阶段" : "Follow the current run stage"}
                         >
                           {lang === "zh" ? "跟随现场" : "Follow live"}
-                        </VNativeButton>
+                        </VButton>
                       ) : null}
                       <span className={styles.secondaryPill}>{supervisedWorkflowCards.length}</span>
                     </div>
@@ -3296,7 +3312,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                           key={step.id}
                           className={current && !selected ? `${styles.workflowStepItem} ${styles.workflowStepItemCurrent}` : styles.workflowStepItem}
                         >
-                          <VNativeButton
+                          <VButton
                             type="button"
                             className={selected ? `${styles.workflowStepButton} ${styles.workflowStepButtonActive}` : styles.workflowStepButton}
                             aria-pressed={selected}
@@ -3311,7 +3327,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                             <span className={styles.workflowStepPreview}>
                               {step.livePreview || step.summary || (lang === "zh" ? "等待实时输出" : "Waiting for live output")}
                             </span>
-                          </VNativeButton>
+                          </VButton>
                           {stepRoute ? (
                             <Link
                               className={styles.supervisedWorkflowSessionLink}
@@ -3346,7 +3362,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                   </div>
                 </aside>
               </div>
-            </div>
+            </VSurface>
 
           </section>
 
@@ -3410,7 +3426,13 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
             onKeyDown={handleLiveRunResizeKeyDown}
           />
 
-          <section className={`${styles.surface} ${styles.ioSurface} ${styles.dashboardIo}`}>
+          <VSurface
+            as="section"
+            className={`${styles.surface} ${styles.ioSurface} ${styles.dashboardIo}`}
+            elevation="panel"
+            padding="none"
+            tone="panel"
+          >
               <div className={styles.surfaceHeaderCompact}>
                 <div>
                   <p className={styles.eyebrow}>{supervisedWorkflowStepLabel(supervisedSelectedWorkflowStep, lang)}</p>
@@ -3443,26 +3465,26 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                     ))}
                     <div className={styles.approvalEvidenceActions}>
                       {reviewCandidateWorktree?.actionStates?.approveReview?.enabled ? (
-                        <VNativeButton
+                        <VButton
                           type="button"
                           className={styles.inlineAction}
-                          disabled={approvalWorktreeActionMutation.isPending}
+                          isDisabled={approvalWorktreeActionMutation.isPending}
                           onClick={() => approvalWorktreeActionMutation.mutate({ runId: reviewCandidateWorktree.runId, action: "approve_review" })}
                         >
                           {approvalWorktreeActionMutation.isPending ? <LoaderCircle size={15} /> : <CheckCircle2 size={15} />}
                           {lang === "zh" ? "审批通过" : "Approve"}
-                        </VNativeButton>
+                        </VButton>
                       ) : null}
                       {reviewCandidateWorktree?.actionStates?.merge?.enabled ? (
-                        <VNativeButton
+                        <VButton
                           type="button"
                           className={styles.inlineAction}
-                          disabled={approvalWorktreeActionMutation.isPending}
+                          isDisabled={approvalWorktreeActionMutation.isPending}
                           onClick={() => approvalWorktreeActionMutation.mutate({ runId: reviewCandidateWorktree.runId, action: "merge" })}
                         >
                           {approvalWorktreeActionMutation.isPending ? <LoaderCircle size={15} /> : <Save size={15} />}
                           {lang === "zh" ? "人工入库" : "Store"}
-                        </VNativeButton>
+                        </VButton>
                       ) : null}
                     </div>
                     {approvalWorktreeActionMutation.error?.message ? (
@@ -3541,7 +3563,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                 )}
               </div>
 
-              <VNativeButton
+              <VButton
                 type="button"
                 className={styles.liveIoResizeHandle}
                 aria-label={resizeLiveIoLabel}
@@ -3550,23 +3572,22 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                 onKeyDown={handleLiveIoResizeKeyDown}
               >
                 <span className={styles.liveIoResizeHandleLine} aria-hidden="true" />
-              </VNativeButton>
-          </section>
+              </VButton>
+          </VSurface>
 
         </div>
       ) : null}
 
       {activeTrack === "supervised" && evolutionView === "runs" ? (
         <div className={styles.viewStack}>
-          <section className={`${styles.surface} ${styles.runsCommandStrip}`}>
-            <div className={styles.runsCommandHeader}>
-              <div>
-                <p className={styles.eyebrow}>{t("recentRunPerformance")}</p>
-                <h2 className={styles.sectionTitle}>{t("runList")}</h2>
-              </div>
+          <VSection
+            className={`${styles.surface} ${styles.runsCommandStrip}`}
+            eyebrow={t("recentRunPerformance")}
+            title={t("runList")}
+            actions={(
               <div className={styles.filterSegmented}>
                 {(["all", "success", "failed"] as const).map((filter) => (
-                  <VNativeButton
+                  <VButton
                     key={filter}
                     type="button"
                     className={
@@ -3577,10 +3598,11 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                     onClick={() => setRunFilter(filter)}
                   >
                     {filter === "all" ? t("allRuns") : supervisedRunBucketLabel(filter, lang, statusLabel)}
-                  </VNativeButton>
+                  </VButton>
                 ))}
               </div>
-            </div>
+            )}
+          >
 
             <div className={styles.runsCommandMetrics}>
               <article className={styles.compactFact}>
@@ -3608,7 +3630,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                 <strong>{selectedRunIds.length}</strong>
               </article>
             </div>
-          </section>
+          </VSection>
 
           <EvolutionRunRecordsPanel
             className={styles.runsWorkspace}
@@ -3679,7 +3701,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                 </div>
                 <div className={styles.filterSegmented}>
                   {(["items", "pending"] as const).map((view) => (
-                    <VNativeButton
+                    <VButton
                       key={view}
                       type="button"
                       className={
@@ -3690,7 +3712,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                       onClick={() => setLibraryView(view)}
                     >
                       {view === "items" ? t("libraryItems") : t("pendingReview")}
-                    </VNativeButton>
+                    </VButton>
                   ))}
                 </div>
               </div>
@@ -3746,13 +3768,13 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
               </div>
               {hasLibraryFilters ? (
                 <div className={styles.actionRow}>
-                  <VNativeButton
+                  <VButton
                     type="button"
                     className={styles.inlineAction}
                     onClick={clearLibraryFilters}
                   >
                     {t("clearFilters")}
-                  </VNativeButton>
+                  </VButton>
                 </div>
               ) : null}
             </section>
@@ -3789,27 +3811,31 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
               </div>
               {selectedProposalSummary && selectedProposalCanOpenSourceRun ? (
                 <div className={styles.actionRow}>
-                  <VNativeButton
+                  <VButton
                     type="button"
                     className={styles.inlineAction}
                     onClick={() => openRun(selectedProposalSummary.sourceRun)}
                   >
                     <ArrowUpRight size={15} />
                     {t("openSourceRun")}
-                  </VNativeButton>
+                  </VButton>
                 </div>
               ) : null}
             </section>
           </div>
 
           <div className={styles.masterDetail} style={libraryWorkspaceStyle}>
-            <section
+            <VSurface
+              as="section"
               className={
                 libraryListCollapsed
                   ? `${styles.surface} ${styles.listPanel} ${styles.paneCollapsed}`
                   : `${styles.surface} ${styles.listPanel}`
               }
               aria-hidden={libraryListCollapsed}
+              elevation="panel"
+              padding="none"
+              tone="rail"
             >
               <>
                 <div className={styles.bulkToolbar}>
@@ -3818,30 +3844,31 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                     <span>{selectedProposalRunIds.length}</span>
                   </div>
                   <div className={styles.actionRow}>
-                    <VNativeButton
+                    <VButton
                       type="button"
                       className={styles.inlineAction}
-                      disabled={selectedProposalRunIds.length === 0}
+                      isDisabled={selectedProposalRunIds.length === 0}
                       onClick={() => setSelectedProposalRunIds([])}
                     >
                       {t("clearSelection")}
-                    </VNativeButton>
-                    <VNativeButton
+                    </VButton>
+                    <VButton
                       type="button"
+                      variant="danger"
                       className={styles.inlineAction}
-                      disabled={selectedProposalRunIds.length === 0 || bulkDeleteMutation.isPending}
+                      isDisabled={selectedProposalRunIds.length === 0 || bulkDeleteMutation.isPending}
                       onClick={triggerBulkDelete}
                     >
                       <Trash2 size={15} />
                       {t("deleteSelected")}
-                    </VNativeButton>
+                    </VButton>
                   </div>
                 </div>
                 <div className={styles.libraryFilters}>
                   <div className={styles.filterRow}>
                     <label className={styles.filterField}>
                       <span>{t("proposalTarget")}</span>
-                      <VNativeInput
+                      <VInput
                         type="text"
                         className={styles.textInput}
                         value={librarySearchInput}
@@ -3849,32 +3876,33 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                         onChange={(event) => setLibrarySearchInput(event.target.value)}
                       />
                     </label>
-                    <label className={styles.filterField}>
+                    <div className={styles.filterField}>
                       <span>{t("filterByStatus")}</span>
-                      <VNativeSelect
+                      <VStringSelect
+                        ariaLabel={t("filterByStatus")}
                         className={styles.selectInput}
                         value={libraryStatusFilter}
-                        onChange={(event) => setLibraryStatusFilter(event.target.value as LibraryStatusFilter)}
-                      >
-                        {LIBRARY_STATUS_FILTERS.map((status) => (
-                          <option key={status} value={status}>
-                            {status === "all" ? t("filterAll") : statusLabel(status)}
-                          </option>
-                        ))}
-                      </VNativeSelect>
-                    </label>
-                    <label className={styles.filterField}>
+                        options={LIBRARY_STATUS_FILTERS.map((status) => ({
+                          value: status,
+                          label: status === "all" ? t("filterAll") : statusLabel(status),
+                        }))}
+                        onValueChange={(value) => setLibraryStatusFilter(value as LibraryStatusFilter)}
+                      />
+                    </div>
+                    <div className={styles.filterField}>
                       <span>{t("filterByDeleteState")}</span>
-                      <VNativeSelect
+                      <VStringSelect
+                        ariaLabel={t("filterByDeleteState")}
                         className={styles.selectInput}
                         value={libraryDeleteFilter}
-                        onChange={(event) => setLibraryDeleteFilter(event.target.value as LibraryDeleteFilter)}
-                      >
-                        <option value="all">{t("filterAll")}</option>
-                        <option value="deletable">{t("filterDeletableOnly")}</option>
-                        <option value="blocked">{t("filterBlockedOnly")}</option>
-                      </VNativeSelect>
-                    </label>
+                        options={[
+                          { value: "all", label: t("filterAll") },
+                          { value: "deletable", label: t("filterDeletableOnly") },
+                          { value: "blocked", label: t("filterBlockedOnly") },
+                        ]}
+                        onValueChange={(value) => setLibraryDeleteFilter(value as LibraryDeleteFilter)}
+                      />
+                    </div>
                   </div>
                   <div className={styles.filterMeta}>
                     <div className={styles.selectionSummary}>
@@ -3882,13 +3910,13 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                       <strong>{visibleLibraryEntries.length} / {currentLibraryEntries.length}</strong>
                     </div>
                     {hasLibraryFilters ? (
-                      <VNativeButton
+                      <VButton
                         type="button"
                         className={styles.inlineAction}
                         onClick={clearLibraryFilters}
                       >
                         {t("clearFilters")}
-                      </VNativeButton>
+                      </VButton>
                     ) : null}
                   </div>
                 </div>
@@ -3896,9 +3924,9 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                 {bulkDeleteMutation.error ? <p className={styles.errorText}>{bulkDeleteMutation.error.message}</p> : null}
                 {libraryView === "items"
                 ? libraryItems.length === 0
-                  ? <div className={styles.emptyState}>{t("emptyLibraryItems")}</div>
+                  ? <VStateSurface className={styles.emptyState} title={t("emptyLibraryItems")} tone="empty" />
                   : filteredLibraryItems.length === 0
-                    ? <div className={styles.emptyState}>{t("noProposalMatches")}</div>
+                    ? <VStateSurface className={styles.emptyState} title={t("noProposalMatches")} tone="empty" />
                     : filteredLibraryItems.map((item) => (
                       <article
                         key={item.id}
@@ -3909,20 +3937,19 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                         }
                       >
                         <div className={styles.selectionBar}>
-                          <label className={styles.batchToggle}>
-                            <VNativeInput
-                              type="checkbox"
-                              disabled={!item.canDelete}
-                              checked={proposalSelected(item.sourceRun)}
-                              onChange={() => toggleProposalSelection(item)}
-                            />
-                            <span>{t("selectForBatchDelete")}</span>
-                          </label>
+                          <VCheckbox
+                            className={styles.batchToggle}
+                            isDisabled={!item.canDelete}
+                            isSelected={proposalSelected(item.sourceRun)}
+                            onChange={() => toggleProposalSelection(item)}
+                          >
+                            {t("selectForBatchDelete")}
+                          </VCheckbox>
                           <span className={item.canDelete ? styles.secondaryPill : styles.statusPill}>
                             {item.canDelete ? t("deletionAllowed") : t("deletionBlocked")}
                           </span>
                         </div>
-                        <VNativeButton
+                        <VButton
                           type="button"
                           className={styles.proposalCardButton}
                           onClick={() => setSelectedLibraryItemId(item.id)}
@@ -3941,13 +3968,13 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                             <span>{item.targetLabel || item.targetKey || "--"}</span>
                             <span>{compactTimestamp(item.updatedAt)}</span>
                           </div>
-                        </VNativeButton>
+                        </VButton>
                       </article>
                     ))
                 : pendingItems.length === 0
-                  ? <div className={styles.emptyState}>{t("emptyPendingItems")}</div>
+                  ? <VStateSurface className={styles.emptyState} title={t("emptyPendingItems")} tone="empty" />
                   : filteredPendingItems.length === 0
-                    ? <div className={styles.emptyState}>{t("noProposalMatches")}</div>
+                    ? <VStateSurface className={styles.emptyState} title={t("noProposalMatches")} tone="empty" />
                     : filteredPendingItems.map((item) => (
                       <article
                         key={item.id}
@@ -3958,20 +3985,19 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                         }
                       >
                         <div className={styles.selectionBar}>
-                          <label className={styles.batchToggle}>
-                            <VNativeInput
-                              type="checkbox"
-                              disabled={!item.canDelete}
-                              checked={proposalSelected(item.sourceRun)}
-                              onChange={() => toggleProposalSelection(item)}
-                            />
-                            <span>{t("selectForBatchDelete")}</span>
-                          </label>
+                          <VCheckbox
+                            className={styles.batchToggle}
+                            isDisabled={!item.canDelete}
+                            isSelected={proposalSelected(item.sourceRun)}
+                            onChange={() => toggleProposalSelection(item)}
+                          >
+                            {t("selectForBatchDelete")}
+                          </VCheckbox>
                           <span className={item.canDelete ? styles.secondaryPill : styles.statusPill}>
                             {item.canDelete ? t("deletionAllowed") : t("deletionBlocked")}
                           </span>
                         </div>
-                        <VNativeButton
+                        <VButton
                           type="button"
                           className={styles.proposalCardButton}
                           onClick={() => setSelectedPendingItemId(item.id)}
@@ -3990,11 +4016,11 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                             <span>{item.targetLabel || item.targetKey || "--"}</span>
                             <span>{compactTimestamp(item.updatedAt)}</span>
                           </div>
-                        </VNativeButton>
+                        </VButton>
                       </article>
                     ))}
               </>
-            </section>
+            </VSurface>
 
             <PaneCollapseHandle
               side="left"
@@ -4008,7 +4034,13 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
               onKeyDown={handleLibraryResizeKeyDown}
             />
 
-            <section className={`${styles.surface} ${styles.detailPanel}`}>
+            <VSurface
+              as="section"
+              className={`${styles.surface} ${styles.detailPanel}`}
+              elevation="panel"
+              padding="none"
+              tone="panel"
+            >
               {selectedProposalSummary ? (
                 selectedProposalIsSelfCandidate ? (
                   renderSelfEvolutionCandidateDetail(selectedProposalSummary)
@@ -4037,35 +4069,36 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                         <h3>{t("editProposalTitle")}</h3>
                         {proposalEditOpen ? (
                           <div className={styles.actionRow}>
-                            <VNativeButton
+                            <VButton
                               type="button"
                               className={styles.inlineAction}
-                              disabled={updateProposalMutation.isPending}
+                              isDisabled={updateProposalMutation.isPending}
                               onClick={() => cancelProposalEdit(proposalDetailQuery.data)}
                             >
                               <X size={15} />
                               {t("cancelEdit")}
-                            </VNativeButton>
-                            <VNativeButton
+                            </VButton>
+                            <VButton
                               type="button"
+                              variant="primary"
                               className={styles.inlineAction}
-                              disabled={!proposalDetailQuery.data.canEdit || updateProposalMutation.isPending}
+                              isDisabled={!proposalDetailQuery.data.canEdit || updateProposalMutation.isPending}
                               onClick={() => triggerProposalUpdate(proposalDetailQuery.data.sourceRun)}
                             >
                               <Save size={15} />
                               {updateProposalMutation.isPending ? t("saving") : t("saveProposalEdit")}
-                            </VNativeButton>
+                            </VButton>
                           </div>
                         ) : (
-                          <VNativeButton
+                          <VButton
                             type="button"
                             className={styles.inlineAction}
-                            disabled={!proposalDetailQuery.data.canEdit}
+                            isDisabled={!proposalDetailQuery.data.canEdit}
                             onClick={() => beginProposalEdit(proposalDetailQuery.data)}
                           >
                             <Pencil size={15} />
                             {t("editProposal")}
-                          </VNativeButton>
+                          </VButton>
                         )}
                       </div>
                       {!proposalDetailQuery.data.canEdit ? (
@@ -4080,7 +4113,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                         <div className={styles.proposalEditGrid}>
                           <label className={styles.formField}>
                             <span>{t("proposalImprovementType")}</span>
-                            <VNativeInput
+                            <VInput
                               className={styles.textInput}
                               value={proposalEditDraft.improvementType}
                               onChange={(event) => updateProposalEditDraft("improvementType", event.target.value)}
@@ -4088,7 +4121,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                           </label>
                           <label className={styles.formField}>
                             <span>{t("proposalExpectedEffect")}</span>
-                            <VNativeTextarea
+                            <VTextarea
                               className={styles.textArea}
                               rows={3}
                               value={proposalEditDraft.expectedEffect}
@@ -4097,7 +4130,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                           </label>
                           <label className={styles.formField}>
                             <span>{t("proposalDraftSummary")}</span>
-                            <VNativeTextarea
+                            <VTextarea
                               className={styles.textArea}
                               rows={3}
                               value={proposalEditDraft.summary}
@@ -4106,7 +4139,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                           </label>
                           <label className={styles.formField}>
                             <span>{t("proposalCandidatePrompt")}</span>
-                            <VNativeTextarea
+                            <VTextarea
                               className={styles.textArea}
                               rows={6}
                               value={proposalEditDraft.candidatePrompt}
@@ -4115,7 +4148,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                           </label>
                           <label className={styles.formField}>
                             <span>{t("proposalBaselinePrompt")}</span>
-                            <VNativeTextarea
+                            <VTextarea
                               className={styles.textArea}
                               rows={5}
                               value={proposalEditDraft.baselinePrompt}
@@ -4124,7 +4157,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                           </label>
                           <label className={styles.formField}>
                             <span>{t("proposalEditNote")}</span>
-                            <VNativeInput
+                            <VInput
                               className={styles.textInput}
                               value={proposalEditDraft.editNote}
                               onChange={(event) => updateProposalEditDraft("editNote", event.target.value)}
@@ -4299,14 +4332,14 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
 
                     <div className={styles.detailSection}>
                       <h3>{t("navEvolution")}</h3>
-                      <VNativeButton
+                      <VButton
                         type="button"
                         className={styles.inlineAction}
                         onClick={() => openRun(proposalDetailQuery.data.sourceRun)}
                       >
                         <ArrowUpRight size={15} />
                         {t("openSourceRun")}
-                      </VNativeButton>
+                      </VButton>
                     </div>
 
                     <div className={styles.detailSection}>
@@ -4318,14 +4351,14 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                     </div>
                   </>
                 ) : proposalDetailQuery.error ? (
-                  <div className={styles.emptyState}>{proposalDetailQuery.error.message}</div>
+                  <VStateSurface className={styles.emptyState} title={proposalDetailQuery.error.message} tone="error" />
                 ) : (
-                  <div className={styles.emptyState}>{t("loadingRunDetails")}</div>
+                  <VStateSurface className={styles.emptyState} title={t("loadingRunDetails")} tone="loading" />
                 )
               ) : (
-                <div className={styles.emptyState}>{t("chooseProposalDetail")}</div>
+                <VStateSurface className={styles.emptyState} title={t("chooseProposalDetail")} tone="empty" />
               )}
-            </section>
+            </VSurface>
           </div>
         </div>
       ) : null}
