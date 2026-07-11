@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 
 from config import models as config_models
 from config import public_config as public_config_module
+from config.model_catalog import save_model_catalog_state
 from config.models import LLMProfile, ProviderConfig
 from config.public_config import LLM_MODEL_PRESETS, UNCONFIGURED_MODEL_REF, load_public_config, public_config_hash
 from config.runtime_capabilities import MODEL_CAPABILITY_CACHE_ENV
@@ -173,6 +174,148 @@ def test_provider_routes_never_return_submitted_secret(monkeypatch) -> None:
     assert "rawToml" not in flattened
     assert not any("pending-secret:" in item for item in flattened)
     assert "secret-value" not in response.text
+
+
+def test_provider_route_projects_real_catalog_capability_provenance(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    submitted = {
+        "llm": {
+            "schema_version": 2,
+            "providers": {
+                "relay_a": {
+                    "label": "Relay A",
+                    "service_class": "relay",
+                    "vendor": "multi_model",
+                    "driver": "openai",
+                    "base_url": "https://relay-a.example/v1",
+                    "auth_kind": "none",
+                    "credential_ref": "none",
+                    "requires_credential": False,
+                    "protocols": {"default": "responses", "allowed": ["responses"]},
+                    "discovery": {"mode": "manual", "adapter": "manual", "cache_ttl_seconds": 0},
+                    "models": {
+                        "base-model": {
+                            "upstream_id": "base-model",
+                            "label": "Base Model",
+                            "enabled": True,
+                        }
+                    },
+                }
+            },
+            "profiles": {
+                "primary": {"model_ref": "relay_a/base-model", "overrides": {}}
+            },
+            "model_aliases": {},
+        }
+    }
+    save_model_catalog_state(
+        {
+            "schemaVersion": 2,
+            "providers": {
+                "relay_a": {
+                    "status": "reachable",
+                    "catalogStale": False,
+                    "models": {
+                        "base-model": {
+                            "upstreamId": "base-model",
+                            "label": "Base Model",
+                            "availability": "observed",
+                            "capabilities": {
+                                "image_input": {
+                                    "value": "supported",
+                                    "source": "runtime_probe",
+                                    "confidence": "high",
+                                    "checked_at": "2026-07-11T10:00:00Z",
+                                    "error": "Bearer secret-value",
+                                    "rawMetadata": {"token": "secret-value"},
+                                },
+                                "tool_calling": {
+                                    "value": "unsupported",
+                                    "source": "provider_endpoint",
+                                    "confidence": "medium",
+                                    "checked_at": "2026-07-11T09:00:00Z",
+                                },
+                                "reasoning": {
+                                    "value": "unknown",
+                                    "source": "driver_default",
+                                    "confidence": "low",
+                                    "checked_at": "2026-07-11T08:00:00Z",
+                                },
+                                "credential_ref": {
+                                    "value": "supported",
+                                    "source": "operator_override",
+                                },
+                            },
+                            "rawPayload": "pending-secret:token",
+                        }
+                    },
+                    "warnings": [],
+                }
+            },
+            "metadata": {"legacyCapabilityImportCompleted": False},
+        },
+        tmp_path / "model-catalog-state.json",
+    )
+    monkeypatch.setenv("VIBELUTION_CONFIG_PATH", str(tmp_path / "config.toml"))
+    monkeypatch.setattr(
+        provider_config_service,
+        "load_public_config",
+        lambda: copy.deepcopy(submitted),
+    )
+
+    response = client.post(
+        "/api/config/draft/providers",
+        json={
+            "publicConfig": submitted,
+            "baseHash": public_config_hash(submitted),
+            "providerId": "relay_b",
+            "provider": {
+                "label": "Relay B",
+                "service_class": "relay",
+                "vendor": "multi_model",
+                "driver": "openai",
+                "base_url": "https://relay-b.example/v1",
+                "auth_kind": "none",
+                "credential_ref": "none",
+                "requires_credential": False,
+                "protocols": {"default": "responses", "allowed": ["responses"]},
+                "discovery": {"mode": "manual", "adapter": "manual", "cache_ttl_seconds": 0},
+                "models": {},
+            },
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    model = response.json()["modelCatalog"]["providers"]["relay_a"]["models"]["base-model"]
+    assert model["capabilities"] == {
+        "image_input": {
+            "value": "supported",
+            "source": "runtime_probe",
+            "confidence": "high",
+            "checked_at": "2026-07-11T10:00:00Z",
+        },
+        "tool_calling": {
+            "value": "unsupported",
+            "source": "provider_endpoint",
+            "confidence": "medium",
+            "checked_at": "2026-07-11T09:00:00Z",
+        },
+        "reasoning": {
+            "value": "unknown",
+            "source": "driver_default",
+            "confidence": "low",
+            "checked_at": "2026-07-11T08:00:00Z",
+        },
+    }
+    serialized = json.dumps(response.json())
+    assert "credential_ref" not in serialized
+    assert "rawMetadata" not in serialized
+    assert "rawPayload" not in serialized
+    assert '"error"' not in serialized
+    assert "secret-value" not in serialized
+    assert "pending-secret:" not in serialized
 
 
 def test_provider_route_preview_projects_bounded_redacted_impacts(monkeypatch) -> None:

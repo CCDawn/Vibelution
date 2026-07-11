@@ -1303,6 +1303,9 @@ def summarize_model_catalog(
                 )[:256],
                 "availability": availability,
                 "status": protocol_status or availability,
+                "capabilities": copy.deepcopy(
+                    catalog_model.get("capabilities", {})
+                ),
             }
         status = provider_protocol_status or str(
             catalog.get("status") or "not_discovered"
