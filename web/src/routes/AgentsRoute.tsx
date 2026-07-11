@@ -43,12 +43,13 @@ import {
   ToolRegistryPayload,
 } from "../api/types";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
+import { deriveQueryPresentation } from "../app/queryPresentation";
 import {
   type AgentDenseColumn,
   type AgentFilterSectionView,
   type AgentSummaryMetric,
 } from "../components/vui/product/agent-management";
-import { VButton } from "../components/vui";
+import { VButton, VLoadingValue } from "../components/vui";
 import { safeReturnToPath } from "../app/navigationReturn";
 import { useShellI18n } from "../i18n/useShellI18n";
 import { useChatWorkbenchStore } from "../store/chatWorkbenchStore";
@@ -213,6 +214,43 @@ type RuntimeFocusEvidenceResult = {
   match: AgentRuntimeEvidenceMatch | null;
   reason: "run" | "source_run" | "session" | "fallback" | "missing";
 };
+
+export function resolveAgentWorkspaceSource<T>({
+  summary,
+  full,
+  fullWorkspaceNeeded,
+}: { summary: T | undefined; full: T | undefined; fullWorkspaceNeeded: boolean }): T | undefined {
+  return fullWorkspaceNeeded && full ? full : summary ?? full;
+}
+
+export function resolveAgentWorkspaceQueryState({
+  hasSummary,
+  hasFull,
+  fullWorkspaceNeeded,
+  summaryError,
+  fullError,
+}: {
+  hasSummary: boolean;
+  hasFull: boolean;
+  fullWorkspaceNeeded: boolean;
+  summaryError: boolean;
+  fullError: boolean;
+}) {
+  const hasWorkspace = hasSummary || hasFull;
+  const requiredFullError = fullWorkspaceNeeded && fullError;
+  const initialError = !hasWorkspace && summaryError && (!fullWorkspaceNeeded || fullError);
+  const backgroundError = hasWorkspace && (requiredFullError || (!fullWorkspaceNeeded && summaryError));
+  const errorOwner = requiredFullError ? "full" : summaryError ? "summary" : null;
+  return { hasWorkspace, initialError, backgroundError, errorOwner } as const;
+}
+
+export function agentSummaryMetricValue(
+  presentation: ReturnType<typeof deriveQueryPresentation>,
+  value: number | undefined,
+  unavailable: string,
+): number | string {
+  return presentation === "error-empty" ? unavailable : value ?? 0;
+}
 
 const AGENT_PRIMARY_MODE_OPTIONS = ["chat", "research", "supervised_evolution", "self_evolution", "general"];
 const FALLBACK_AGENT_LLM_SLOTS: AgentLlmSlotDefinition[] = [
@@ -3590,7 +3628,40 @@ export function AgentsRoute() {
     () => agentSummaryQuery.data ? buildLightweightAgentWorkspace(agentSummaryQuery.data, agentSummaryQuery.dataUpdatedAt) : undefined,
     [agentSummaryQuery.data, agentSummaryQuery.dataUpdatedAt],
   );
-  const workspace = workspaceQuery.data ?? lightweightWorkspace;
+  const workspace = resolveAgentWorkspaceSource({
+    summary: lightweightWorkspace,
+    full: workspaceQuery.data,
+    fullWorkspaceNeeded,
+  });
+  const workspaceQueryState = resolveAgentWorkspaceQueryState({
+    hasSummary: Boolean(lightweightWorkspace),
+    hasFull: Boolean(workspaceQuery.data),
+    fullWorkspaceNeeded,
+    summaryError: agentSummaryQuery.isError,
+    fullError: workspaceQuery.isError,
+  });
+  const hasAgentWorkspace = workspaceQueryState.hasWorkspace;
+  const agentWorkspaceInitialLoading = !hasAgentWorkspace && (
+    agentSummaryQuery.isPending
+    || (fullWorkspaceNeeded && workspaceQuery.isPending)
+  );
+  const agentWorkspaceInitialError = workspaceQueryState.initialError;
+  const agentWorkspaceBackgroundError = workspaceQueryState.backgroundError;
+  const agentWorkspaceError = workspaceQueryState.errorOwner === "full"
+    ? workspaceQuery.error
+    : agentSummaryQuery.error ?? workspaceQuery.error;
+  const agentSummaryPresentation = deriveQueryPresentation({
+    hasData: Boolean(agentSummaryQuery.data),
+    isError: agentSummaryQuery.isError,
+    isFetching: agentSummaryQuery.isFetching,
+    isPending: agentSummaryQuery.isPending,
+  });
+  const agentSummaryInitialLoading = agentSummaryPresentation === "initial-loading";
+  const loadingAgentMetricValue = <VLoadingValue label={copy.loading} />;
+  const unavailableAgentMetricValue = lang === "zh" ? "不可用" : "Unavailable";
+  const summaryMetricValue = (value: number | undefined) => agentSummaryInitialLoading
+    ? loadingAgentMetricValue
+    : agentSummaryMetricValue(agentSummaryPresentation, value, unavailableAgentMetricValue);
   const tools = toolsQuery.data?.tools ?? EMPTY_TOOL_REGISTRY_ITEMS;
   const agentModelChoices = useMemo(
     () => buildAgentModelChoices(workspace?.agentModelChoices ?? []),
@@ -3811,71 +3882,71 @@ export function AgentsRoute() {
   const healthStatus = workspace?.health.status ?? "ok";
   const healthStatusLabel = workspaceHealthStatusLabel(healthStatus, lang);
   const healthStatusDescription = workspaceHealthStatusDescription(healthStatus, summary, lang);
-  const workspaceAgents = workspace?.agents ?? [];
-  const workspaceTeams = workspace?.teams ?? [];
-  const workspaceChatRooms = workspace?.chatRooms ?? [];
   const agentSummaryMetrics: AgentSummaryMetric[] = [
     {
       id: "all-agents",
       label: copy.allAgents,
-      value: summary?.agentCount ?? workspaceAgents.length,
+      value: summaryMetricValue(summary?.agentCount),
       detail: copy.allAgents,
     },
     {
       id: "active-agents",
       label: copy.activeAgents,
-      value: summary?.activeAgentCount ?? workspaceAgents.filter((agent) => agent.status !== "archived").length,
+      value: summaryMetricValue(summary?.activeAgentCount),
       detail: copy.activeAgents,
       tone: "accent",
     },
     {
       id: "archived-agents",
       label: copy.archivedAgents,
-      value: summary?.archivedAgentCount ?? workspaceAgents.filter((agent) => agent.status === "archived").length,
+      value: summaryMetricValue(summary?.archivedAgentCount),
       detail: copy.archivedAgents,
     },
     {
       id: "teams",
       label: copy.teams,
-      value: summary?.teamCount ?? workspaceTeams.length,
+      value: summaryMetricValue(summary?.teamCount),
       detail: copy.teams,
     },
     {
       id: "health-issues",
       label: copy.healthIssues,
-      value: summary?.healthIssueCount ?? 0,
+      value: summaryMetricValue(summary?.healthIssueCount),
       detail: `${copy.workspaceHealthStatus}: ${healthStatusLabel}. ${healthStatusDescription}`,
       tone: healthStatus === "blocked" ? "danger" : healthStatus === "warning" ? "warning" : "success",
     },
     {
       id: "chat-rooms",
       label: copy.chatRooms,
-      value: summary?.chatRoomCount ?? workspaceChatRooms.length,
+      value: summaryMetricValue(summary?.chatRoomCount),
       detail: copy.chatRooms,
     },
     {
       id: "inbox",
       label: copy.inbox,
-      value: summary?.inboxPendingCount ?? 0,
+      value: summaryMetricValue(summary?.inboxPendingCount),
       detail: copy.inbox,
     },
     {
       id: "running-agents",
       label: copy.runningAgents,
-      value: summary?.runningAgentCount ?? 0,
+      value: summaryMetricValue(summary?.runningAgentCount),
       detail: copy.runningAgents,
       tone: "accent",
     },
     {
       id: "blocked-agents",
       label: copy.blockedAgents,
-      value: summary?.blockedAgentCount ?? 0,
+      value: summaryMetricValue(summary?.blockedAgentCount),
       detail: copy.blockedAgents,
       tone: (summary?.blockedAgentCount ?? 0) > 0 ? "danger" : undefined,
     },
   ];
   const refresh = () => {
     void queryClient.invalidateQueries({ queryKey: queryKeys.agentSummary(true) });
+    if (fullWorkspaceNeeded) {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.agentConfigWorkspace() });
+    }
     void chatWorkspaceCache.afterAgentWorkspaceChanged();
   };
 
@@ -3883,6 +3954,9 @@ export function AgentsRoute() {
     const routeTargetKey = requestedAgentId ? `${requestedAgentId}:${requestedPane}` : "";
     if (!routeTargetKey) {
       appliedRouteTargetRef.current = "";
+      return;
+    }
+    if (requestedAgentId && !workspaceQuery.data) {
       return;
     }
     if (!workspace || appliedRouteTargetRef.current === routeTargetKey) {
@@ -3905,7 +3979,7 @@ export function AgentsRoute() {
     setSelectedBulkAgentIds(new Set());
     setBulkSelectionAnchorAgentId(targetAgent.agentId);
     appliedRouteTargetRef.current = routeTargetKey;
-  }, [lang, requestedAgentId, requestedPane, workspace]);
+  }, [lang, requestedAgentId, requestedPane, workspace, workspaceQuery.data]);
 
   useEffect(() => {
     setBulkConfigDraft(bulkConfigDraftFromAgents(selectedBulkAgents));
@@ -6086,6 +6160,9 @@ export function AgentsRoute() {
               loadFailed: copy.loadFailed,
               loading: copy.loading,
               noAgents: copy.noAgents,
+              retry: lang === "zh" ? "重试" : "Retry",
+              refreshing: lang === "zh" ? "正在更新 Agent 列表…" : "Refreshing Agent list…",
+              staleError: lang === "zh" ? "更新失败，继续显示已有 Agent 数据。" : "Refresh failed; showing existing Agent data.",
               model: copy.model,
               prompt: copy.prompt,
               runtimeStatus: copy.runtimeStatus,
@@ -6094,10 +6171,12 @@ export function AgentsRoute() {
             },
             columns: denseColumns,
             visibleAgentCount: visibleAgents.length,
-            isError: workspaceQuery.isError,
-            error: workspaceQuery.error,
-            isPending: workspaceQuery.isPending,
-            hasWorkspace: Boolean(workspace),
+            isError: agentWorkspaceInitialError || agentWorkspaceBackgroundError,
+            error: agentWorkspaceError,
+            isPending: agentWorkspaceInitialLoading,
+            isFetching: agentSummaryQuery.isFetching || workspaceQuery.isFetching,
+            hasWorkspace: hasAgentWorkspace,
+            onRetry: refresh,
             onSelectRow: (rowId, event) => {
               const agent = agentRowLookup.get(rowId);
               if (agent) {

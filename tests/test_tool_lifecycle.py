@@ -4,6 +4,7 @@ from typing import Any
 
 from langchain_core.messages import ToolMessage
 
+from core.llm.types import CanonicalItemIdentity, CanonicalToolCall, CanonicalToolResult
 from core.orchestration.tool_lifecycle import ToolLifecycleBridge
 
 
@@ -45,3 +46,72 @@ def test_readonly_batch_isolates_worker_exception_and_preserves_success_results(
     assert "worker-local mutation" not in original_messages
     assert worker_message_ids
     assert all(message_id != id(original_messages) for message_id in worker_message_ids)
+
+
+def test_handle_tool_result_creates_one_canonical_result_and_one_compatibility_message():
+    identity = CanonicalItemIdentity(
+        session_id="session-1",
+        turn_id="turn-1",
+        invocation_id="invocation-1",
+        iteration=1,
+        item_id="call-1",
+    )
+    canonical_call = CanonicalToolCall(
+        identity=identity,
+        call_id="call-1",
+        name="read_file_tool",
+        arguments={"path": "agent.py"},
+    )
+    messages: list[Any] = []
+
+    canonical_result = ToolLifecycleBridge.handle_tool_result(
+        {
+            "name": "read_file_tool",
+            "id": "call-1",
+            "canonical_tool_call": canonical_call,
+        },
+        "file content",
+        None,
+        messages,
+    )
+
+    assert isinstance(canonical_result, CanonicalToolResult)
+    assert canonical_result.call_id == "call-1"
+    assert canonical_result.tool_name == "read_file_tool"
+    assert len(messages) == 1
+    assert isinstance(messages[0], ToolMessage)
+    assert messages[0].tool_call_id == "call-1"
+    assert messages[0].additional_kwargs["canonical_tool_result"] is canonical_result
+
+
+def test_handle_tool_result_uses_business_failure_semantics_for_canonical_status():
+    identity = CanonicalItemIdentity(
+        session_id="session-1",
+        turn_id="turn-1",
+        invocation_id="invocation-2",
+        iteration=1,
+        item_id="call-2",
+    )
+    canonical_call = CanonicalToolCall(
+        identity=identity,
+        call_id="call-2",
+        name="write_file_tool",
+        arguments={"path": "blocked.txt"},
+    )
+    messages: list[Any] = []
+
+    canonical_result = ToolLifecycleBridge.handle_tool_result(
+        {
+            "name": "write_file_tool",
+            "id": "call-2",
+            "canonical_tool_call": canonical_call,
+        },
+        {"ok": False, "error": "blocked"},
+        None,
+        messages,
+    )
+
+    assert isinstance(canonical_result, CanonicalToolResult)
+    assert canonical_result.status == "failed"
+    assert canonical_result.is_error is True
+    assert messages[0].additional_kwargs["canonical_tool_result"] is canonical_result

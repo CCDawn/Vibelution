@@ -7,8 +7,10 @@ import { shouldDisplayRuntimeStatus } from "../components/conversation/conversat
 import type { ConversationMessage, SessionDetail, SessionStreamEvent } from "../api/types";
 import {
   activeTurnProtocolTextLength,
+  consolidateSessionTurnItemsV2,
   hasCommittedAssistantProtocolAnswer,
   hasVisibleActiveTurnProtocolContent,
+  resolveAssistantTurnRenderSurface,
 } from "./chatTurnProtocol";
 
 export type AssistantDeltaEvent = Extract<SessionStreamEvent, { type: "assistant_delta" }>;
@@ -22,6 +24,7 @@ export type ActiveTurnLayerState = {
   processStage?: string;
   answerContent: string;
   thoughtContent: string;
+  turnItems?: ConversationMessage["turnItems"];
   feedbackEvents: NonNullable<ConversationMessage["feedbackEvents"]>;
   timelineItems?: ConversationMessage["timelineItems"];
   codexTranscript?: ConversationMessage["codexTranscript"];
@@ -142,17 +145,30 @@ export function mergeAssistantDeltaIntoActiveTurnLayer(
   const base = sameTurn ? previous : undefined;
   const contentDelta = assistantDeltaAnswerContent(payload, base);
   const thoughtDelta = payload.thoughtDelta ?? (payload.replaceThought || !base ? payload.thought ?? "" : "");
-  const content = payload.replaceContent ? contentDelta : `${base?.answerContent ?? ""}${contentDelta}`;
-  const thought = payload.replaceThought ? thoughtDelta : `${base?.thoughtContent ?? ""}${thoughtDelta}`;
+  const legacyContent = payload.replaceContent ? contentDelta : `${base?.answerContent ?? ""}${contentDelta}`;
+  const legacyThought = payload.replaceThought ? thoughtDelta : `${base?.thoughtContent ?? ""}${thoughtDelta}`;
   const feedbackEvents = payload.feedbackEvents
     ? visibleFeedbackEvents(mergeAgentFeedbackEvents(base?.feedbackEvents, payload.feedbackEvents))
     : base?.feedbackEvents ?? [];
-  const codexTranscript = payload.codexTranscript ?? base?.codexTranscript;
+  const turnItems = consolidateSessionTurnItemsV2(base?.turnItems, payload.turnItems);
+  const canonicalSurface = turnItems.length > 0
+    ? resolveAssistantTurnRenderSurface({
+      answerProjectionContent: legacyContent,
+      thoughtContent: legacyThought,
+      feedbackEvents,
+      codexTranscript: payload.codexTranscript ?? base?.codexTranscript,
+      turnItems,
+    })
+    : undefined;
+  const content = canonicalSurface?.answerContent ?? legacyContent;
+  const thought = canonicalSurface?.thoughtContent ?? legacyThought;
+  const codexTranscript = canonicalSurface?.codexTranscript ?? payload.codexTranscript ?? base?.codexTranscript;
   if (!hasVisibleActiveTurnProtocolContent({
     answerContent: content,
     thoughtContent: thought,
     feedbackEventCount: feedbackEvents.length,
     codexTranscript,
+    turnItems,
   })) {
     return undefined;
   }
@@ -168,6 +184,7 @@ export function mergeAssistantDeltaIntoActiveTurnLayer(
     feedbackEvents,
     timelineItems: payload.timelineItems ?? base?.timelineItems,
     codexTranscript,
+    turnItems: turnItems.length > 0 ? turnItems : undefined,
     ledgerSeq: Math.max(normalizedLedgerSeq(base?.ledgerSeq), normalizedLedgerSeq(payload.ledgerSeq)),
   };
 }
@@ -189,6 +206,7 @@ export function activeTurnLayerToConversationMessage(
     feedbackEvents: layer.feedbackEvents.length > 0 ? layer.feedbackEvents : undefined,
     timelineItems: layer.timelineItems,
     codexTranscript: layer.codexTranscript,
+    turnItems: layer.turnItems,
     metadata: {
       kind: "session_active_turn_layer",
       sessionId: layer.sessionId,
@@ -203,6 +221,7 @@ export function activeTurnLayerTextLength(layer: ActiveTurnLayerState | undefine
     answerContent: layer?.answerContent,
     thoughtContent: layer?.thoughtContent,
     codexTranscript: layer?.codexTranscript,
+    turnItems: layer?.turnItems,
   });
 }
 

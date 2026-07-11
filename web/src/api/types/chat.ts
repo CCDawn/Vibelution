@@ -394,7 +394,22 @@ export type SessionTurnItem = {
   id: string;
   type: SessionTurnItemType;
   status: SessionTurnItemStatus;
+  version?: number;
+  sessionId?: string;
   turnId?: string;
+  invocationId?: string;
+  iteration?: number;
+  itemId?: string;
+  revision?: number;
+  sequence?: number;
+  kind?: string;
+  channel?: string;
+  phase?: string;
+  protocol?: string;
+  provisional?: boolean;
+  terminal?: boolean;
+  callId?: string;
+  toolName?: string;
   messageId?: string;
   source?: string;
   sourceCellId?: string;
@@ -404,6 +419,7 @@ export type SessionTurnItem = {
   title?: string;
   summary?: string;
   text?: string;
+  diagnosticSummary?: Record<string, unknown>;
   metadata?: Record<string, unknown>;
 };
 

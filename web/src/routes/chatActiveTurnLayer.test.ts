@@ -540,3 +540,53 @@ describe("chat active turn layer", () => {
     expect(isActiveTurnSettledByDetail(active, detail)).toBe(false);
   });
 });
+import * as canonicalActiveTurn from "./chatActiveTurnLayer";
+
+describe("canonical SessionTurnItem v2 active turn", () => {
+  it("replaces the same item revision across streamed payloads without duplicating the answer", () => {
+    const common = {
+      type: "assistant_delta",
+      sessionId: "session-v2",
+      turnId: "turn-v2",
+      content: "legacy duplicate",
+      replaceContent: true,
+      updatedAt: "2026-07-11T00:00:00.000Z",
+    } as const;
+    const item = (revision: number, text: string, terminal: boolean) => ({
+      version: 2,
+      id: `answer-r${revision}`,
+      itemId: "answer",
+      sessionId: "session-v2",
+      turnId: "turn-v2",
+      invocationId: "invocation-v2",
+      iteration: 0,
+      revision,
+      sequence: revision + 1,
+      kind: "assistant_message",
+      channel: "answer",
+      phase: "final_answer",
+      type: "assistant_message",
+      status: terminal ? "completed" : "running",
+      provisional: !terminal,
+      terminal,
+      text,
+    });
+    const draft = canonicalActiveTurn.mergeAssistantDeltaIntoActiveTurnLayer(undefined, {
+      ...common,
+      ledgerSeq: 1,
+      done: false,
+      turnItems: [item(0, "draft", false)],
+    } as never);
+    const final = canonicalActiveTurn.mergeAssistantDeltaIntoActiveTurnLayer(draft, {
+      ...common,
+      ledgerSeq: 2,
+      done: true,
+      turnItems: [item(1, "final", true)],
+    } as never);
+    const message = canonicalActiveTurn.activeTurnLayerToConversationMessage(final);
+
+    expect(message?.content).toBe("final");
+    expect(message?.turnItems).toHaveLength(1);
+    expect(message?.codexTranscript?.cells.filter((cell) => cell.kind === "assistant_markdown")).toHaveLength(1);
+  });
+});
