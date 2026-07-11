@@ -1,7 +1,7 @@
 import { ExternalLink, RefreshCw } from "lucide-react";
 
 import { type HealthDiagnostics, type HealthFinding, type HealthQuickAction, type LogHelper, type SessionHelper } from "../api/types";
-import { VButton } from "../components/vui";
+import { VButton, VSection, VSurface } from "../components/vui";
 import styles from "./ConfigHealthDiagnosticsPanel.styles";
 
 export type ConfigLanguage = "zh" | "en";
@@ -128,28 +128,28 @@ export function ConfigHealthDiagnosticsPanel({
   const priorityFindings = findings.filter((finding) => finding.severity !== "info").slice(0, 4);
   const quickActions = diagnostics?.quickActions ?? [];
   return (
-    <section id="config-health-diagnostics" className={styles.sectionSurface}>
-      <div className={styles.sectionHeader}>
-        <div className={styles.sectionHeaderMain}>
-          <p className={styles.eyebrow}>{copy.healthTitle}</p>
-          <h2 className={styles.sectionTitle}>{copy.healthTitle}</h2>
-          <p className={styles.sectionText}>{copy.healthBody}</p>
-        </div>
-        <div className={styles.sectionHeaderActions}>
-          {diagnostics ? (
-            <span className={healthStatusClassName(diagnostics.status)}>
-              {healthStatusLabel(diagnostics.status, copy)}
-            </span>
-          ) : null}
-          <VButton type="button" className={styles.actionButton} onClick={onRefresh} isDisabled={loading}>
-            <RefreshCw size={14} />
-            {copy.healthRefresh}
-          </VButton>
-        </div>
-      </div>
-      {loading && !diagnostics ? <p className={styles.helperText}>{copy.healthLoading}</p> : null}
-      {diagnostics ? (
-        <div className={styles.healthSummaryGrid}>
+    <VSurface as="section" id="config-health-diagnostics" className={styles.sectionSurface} padding="none">
+      <VSection
+        eyebrow={copy.healthTitle}
+        title={copy.healthTitle}
+        actions={
+          <div className={styles.sectionHeaderActions}>
+            {diagnostics ? (
+              <span className={healthStatusClassName(diagnostics.status)}>
+                {healthStatusLabel(diagnostics.status, copy)}
+              </span>
+            ) : null}
+            <VButton type="button" className={styles.actionButton} onClick={onRefresh} isDisabled={loading}>
+              <RefreshCw size={14} />
+              {copy.healthRefresh}
+            </VButton>
+          </div>
+        }
+      >
+        <p className={styles.sectionText}>{copy.healthBody}</p>
+        {loading && !diagnostics ? <p className={styles.helperText}>{copy.healthLoading}</p> : null}
+        {diagnostics ? (
+          <div className={styles.healthSummaryGrid}>
           <article className={styles.matrixCard}>
             <p className={styles.matrixTitle}>{copy.healthStatusOk}</p>
             <strong className={styles.healthMetric}>{diagnostics.counts.ok}</strong>
@@ -162,11 +162,11 @@ export function ConfigHealthDiagnosticsPanel({
             <p className={styles.matrixTitle}>{copy.healthStatusBlocked}</p>
             <strong className={styles.healthMetric}>{diagnostics.counts.blocked}</strong>
           </article>
-        </div>
-      ) : null}
-      {diagnostics?.summary ? <p className={styles.sectionText}>{diagnostics.summary}</p> : null}
-      {diagnostics ? (
-        <div className={styles.healthWorkbenchGrid}>
+          </div>
+        ) : null}
+        {diagnostics?.summary ? <p className={styles.sectionText}>{diagnostics.summary}</p> : null}
+        {diagnostics ? (
+          <div className={styles.healthWorkbenchGrid}>
           <div className={styles.healthPanel}>
             <div className={styles.healthPanelHeader}>
               <h3>{copy.healthPriority}</h3>
@@ -197,25 +197,26 @@ export function ConfigHealthDiagnosticsPanel({
               <p className={styles.helperText}>{copy.healthNoFindings}</p>
             )}
           </div>
-        </div>
-      ) : null}
-      {sessionHelpers.length ? (
-        <div className={styles.logHelperGrid}>
+          </div>
+        ) : null}
+        {sessionHelpers.length ? (
+          <div className={styles.logHelperGrid}>
           {sessionHelpers.map((helper) => (
             <SessionHelperCard key={helper.id} helper={helper} lang={lang} copy={copy} />
           ))}
-        </div>
-      ) : null}
-      {helpers.length ? (
-        <div className={styles.logHelperGrid}>
+          </div>
+        ) : null}
+        {helpers.length ? (
+          <div className={styles.logHelperGrid}>
           {helpers.map((helper) => (
             <LogHelperCard key={helper.id} helper={helper} lang={lang} copy={copy} />
           ))}
-        </div>
-      ) : !loading ? (
-        <p className={styles.helperText}>{copy.healthEmpty}</p>
-      ) : null}
-    </section>
+          </div>
+        ) : !loading ? (
+          <p className={styles.helperText}>{copy.healthEmpty}</p>
+        ) : null}
+      </VSection>
+    </VSurface>
   );
 }
 

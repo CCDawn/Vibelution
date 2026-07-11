@@ -52,7 +52,17 @@ import {
   uniqueModelLibraryId,
   type PublicConfigShape,
 } from "./configRouteLogic";
-import { VButton, VNativeInput, VNativeSelect, VNativeTextarea } from "../components/vui";
+import {
+  VButton,
+  VCheckbox,
+  VInput,
+  VRouteHeader,
+  VSection,
+  VStatusStrip,
+  VStringSelect,
+  VSurface,
+  VTextarea,
+} from "../components/vui";
 import { safeAgentCenterReturnToPath } from "./agentCenterRoutes";
 import { ConfigDraftPanel } from "./ConfigDraftPanel";
 import { ConfigHealthDiagnosticsPanel, type ConfigHealthDiagnosticsPanelCopy } from "./ConfigHealthDiagnosticsPanel";
@@ -1282,7 +1292,7 @@ function ConfigSectionEditor({
                 <ImageIcon size={16} />
               </span>
             )}
-            <VNativeInput
+            <input
               type="file"
               accept="image/png,image/jpeg,image/webp"
               disabled={disabled || imageUploading}
@@ -1303,7 +1313,7 @@ function ConfigSectionEditor({
               <label className={`${styles.actionButton} ${styles.compactButton} ${styles.fileUploadButton}`}>
                 <Upload size={14} />
                 {imageUploading ? copy.themeBackgroundImageUploading : copy.uploadThemeBackgroundImage}
-                <VNativeInput
+                <input
                   type="file"
                   accept="image/png,image/jpeg,image/webp"
                   disabled={disabled || imageUploading}
@@ -1464,7 +1474,7 @@ function ConfigSectionEditor({
               <span className={styles.avatarImageUploadCue}>
                 <Upload size={12} />
               </span>
-              <VNativeInput
+              <input
                 type="file"
                 accept="image/png,image/jpeg,image/webp"
                 disabled={disabled || imageUploading}
@@ -1543,7 +1553,7 @@ function ConfigSectionEditor({
               </div>
               <label className={styles.avatarCropZoomField}>
                 <span>{copy.avatarCropZoom}</span>
-                <VNativeInput
+                <VInput
                   type="range"
                   min="1"
                   max="3"
@@ -1583,7 +1593,7 @@ function ConfigSectionEditor({
             <label className={`${styles.actionButton} ${styles.compactButton} ${styles.fileUploadButton}`}>
               <Upload size={14} />
               {cropDraft ? copy.uploadAvatarImage : imageUploading ? copy.avatarImageUploading : copy.uploadAvatarImage}
-              <VNativeInput
+              <input
                 type="file"
                 accept="image/png,image/jpeg,image/webp"
                 disabled={disabled || imageUploading}
@@ -1620,33 +1630,34 @@ function ConfigSectionEditor({
       );
     } else if (kind === "boolean") {
       control = (
-        <label className={styles.toggleField}>
-          <VNativeInput
-            type="checkbox"
-            checked={Boolean(fieldValue)}
-            onChange={(event) => updateSectionDraft(absolutePath, event.target.checked)}
-          />
-          <span>{configLabel(metaMap, absolutePath)}</span>
-        </label>
+        <VCheckbox
+          className={styles.toggleField}
+          isSelected={Boolean(fieldValue)}
+          onChange={(isSelected) => updateSectionDraft(absolutePath, isSelected)}
+        >
+          {configLabel(metaMap, absolutePath)}
+        </VCheckbox>
       );
     } else if (kind === "select") {
       control = (
         <label className={styles.field}>
           <span>{configLabel(metaMap, absolutePath)}</span>
-          <VNativeSelect value={getString(fieldValue)} onChange={(event) => updateSectionDraft(absolutePath, event.target.value)}>
-            {(meta?.options ?? []).map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </VNativeSelect>
+          <VStringSelect
+            ariaLabel={configLabel(metaMap, absolutePath)}
+            value={getString(fieldValue)}
+            options={(meta?.options ?? []).map((option) => ({
+              value: option.value,
+              label: option.label,
+            }))}
+            onValueChange={(nextValue) => updateSectionDraft(absolutePath, nextValue)}
+          />
         </label>
       );
     } else if (kind === "number") {
       control = (
         <label className={styles.field}>
           <span>{configLabel(metaMap, absolutePath)}</span>
-          <VNativeInput
+          <VInput
             type="number"
             step="any"
             value={getString(fieldValue)}
@@ -1661,8 +1672,8 @@ function ConfigSectionEditor({
       control = (
         <label className={styles.field}>
           <span>{configLabel(metaMap, absolutePath)}</span>
-          <VNativeTextarea
-            rows={Math.max(4, Array.isArray(fieldValue) ? fieldValue.length + 1 : 4)}
+          <VTextarea
+            minRows={Math.max(4, Array.isArray(fieldValue) ? fieldValue.length + 1 : 4)}
             value={Array.isArray(fieldValue) ? fieldValue.join("\n") : getString(fieldValue)}
             onChange={(event) =>
               updateSectionDraft(
@@ -1680,8 +1691,8 @@ function ConfigSectionEditor({
       control = (
         <label className={styles.field}>
           <span>{configLabel(metaMap, absolutePath)}</span>
-          <VNativeTextarea
-            rows={10}
+          <VTextarea
+            minRows={10}
             value={getString(fieldValue)}
             onChange={(event) => updateSectionDraft(absolutePath, event.target.value)}
           />
@@ -1691,8 +1702,8 @@ function ConfigSectionEditor({
       control = (
         <label className={styles.field}>
           <span>{configLabel(metaMap, absolutePath)}</span>
-          <VNativeTextarea
-            rows={6}
+          <VTextarea
+            minRows={6}
             value={typeof fieldValue === "string" ? fieldValue : formatJson(fieldValue)}
             onChange={(event) => {
               const raw = event.target.value;
@@ -1709,7 +1720,7 @@ function ConfigSectionEditor({
       control = (
         <label className={styles.field}>
           <span>{configLabel(metaMap, absolutePath)}</span>
-          <VNativeInput
+          <VInput
             type={kind === "secret" ? "password" : "text"}
             value={getString(fieldValue)}
             onChange={(event) => updateSectionDraft(absolutePath, event.target.value)}
@@ -1866,7 +1877,7 @@ function ConfigSectionEditor({
   }
 
   return (
-    <section id={`config-${section.id}`} className={sectionClassName}>
+    <VSurface as="section" id={`config-${section.id}`} className={sectionClassName} padding="none">
       <div className={styles.sectionHeader}>
         <div className={styles.sectionHeaderMain}>
           <p className={styles.eyebrow}>{section.path}</p>
@@ -1938,7 +1949,7 @@ function ConfigSectionEditor({
         </div>
       </div>
       {sectionExpanded ? renderNode(editing ? draftValue : value, section.path, editing ? "edit" : "view") : null}
-    </section>
+    </VSurface>
   );
 }
 
@@ -2947,11 +2958,13 @@ export function ConfigRoute() {
     <div ref={pageRef} className={styles.page} style={pageStyle}>
       {leaveGuardOpen ? (
         <div className={styles.leaveGuardOverlay}>
-          <section
+          <VSurface
+            as="section"
             className={styles.leaveGuardPanel}
             role="dialog"
             aria-modal="true"
             aria-labelledby="config-leave-guard-title"
+            elevation="overlay"
           >
             <div className={styles.leaveGuardCopy}>
               <p className={styles.eyebrow}>Config</p>
@@ -2978,23 +2991,26 @@ export function ConfigRoute() {
                 {copy.leaveGuardCancel}
               </VButton>
             </div>
-          </section>
+          </VSurface>
         </div>
       ) : null}
-      <aside className={styles.sidebar} style={sidebarStyle}>
-        <div className={styles.sidebarIntro}>
-          <p className={styles.eyebrow}>Config</p>
-          <h1 className={styles.title}>{copy.pageTitle}</h1>
-          <p className={styles.subtitle} title={copy.subtitleHint}>{copy.subtitle}</p>
-          {returnToPath ? (
-            <Link to={returnToPath} className={styles.returnButton}>
-              <ChevronRight size={14} />
-              {returnToLabel}
-            </Link>
-          ) : null}
-        </div>
+      <VSurface as="aside" className={styles.sidebar} style={sidebarStyle} padding="compact" tone="rail">
+        <VRouteHeader
+          className={styles.sidebarIntro}
+          eyebrow="Config"
+          title={copy.pageTitle}
+          meta={<span className={styles.subtitle} title={copy.subtitleHint}>{copy.subtitle}</span>}
+          actions={
+            returnToPath ? (
+              <Link to={returnToPath} className={styles.returnButton}>
+                <ChevronRight size={14} />
+                {returnToLabel}
+              </Link>
+            ) : null
+          }
+        />
 
-        <div className={styles.sidebarStatusCompact}>
+        <VSurface as="div" className={styles.sidebarStatusCompact} tone="row" padding="compact">
           <div className={styles.sidebarStatusHeader}>
             <span>{copy.settingsStatusTitle}</span>
             <span
@@ -3018,9 +3034,14 @@ export function ConfigRoute() {
             </span>
           </div>
           <span className={styles.helperText}>{sidebarApplyHint}</span>
-        </div>
+        </VSurface>
 
-        <section className={sidebarIndexCollapsed ? `${styles.sidebarNavPanel} ${styles.sidebarNavPanelCollapsed}` : styles.sidebarNavPanel}>
+        <VSurface
+          as="section"
+          className={sidebarIndexCollapsed ? `${styles.sidebarNavPanel} ${styles.sidebarNavPanelCollapsed}` : styles.sidebarNavPanel}
+          tone="row"
+          padding="compact"
+        >
           <div className={styles.sidebarPanelHeader}>
             <div className={styles.sidebarPanelIntro}>
               <p className={styles.matrixTitle}>{sectionIndexTitle}</p>
@@ -3059,17 +3080,19 @@ export function ConfigRoute() {
                 ))}
               </nav>
             )}
-          </section>
+          </VSurface>
 
-        <div className={styles.sidebarMetaStrip}>
-          <span className={styles.inlineBadge}>{copy.runtimeProfile}: {workspace.runtimeProfile}</span>
-          <span className={styles.inlineBadge}>{copy.defaultMode}: {workspace.defaultMode}</span>
-          <span className={styles.inlineBadge}>{copy.defaultRoute}: {workspace.defaultRoute}</span>
-          <span className={styles.inlineBadge}>{copy.intakeMode}: {intakeLabel(asRecord(draftConfig.evolution).intake_mode as string)}</span>
-          <span className={styles.inlineBadge} aria-label={copy.developerModeReadonly}>
-            {copy.developerModeReadonly}: {developerModeReadonlyLabel}
-          </span>
-        </div>
+        <VStatusStrip
+          className={styles.sidebarMetaStrip}
+          aria-label={copy.developerModeReadonly}
+          items={[
+            { label: copy.runtimeProfile, value: workspace.runtimeProfile, tone: "info" },
+            { label: copy.defaultMode, value: workspace.defaultMode },
+            { label: copy.defaultRoute, value: workspace.defaultRoute },
+            { label: copy.intakeMode, value: intakeLabel(asRecord(draftConfig.evolution).intake_mode as string) },
+            { label: copy.developerModeReadonly, value: developerModeReadonlyLabel },
+          ]}
+        />
         <div
           className={styles.sidebarResizeX}
           title={resizeWidthTitle}
@@ -3091,67 +3114,79 @@ export function ConfigRoute() {
           }}
           onPointerDown={beginSidebarResize("both")}
         />
-      </aside>
+      </VSurface>
 
-      <section className={activeSection?.id === "models-profiles" ? `${styles.content} ${styles.contentModels}` : styles.content}>
+      <VSurface
+        as="section"
+        className={activeSection?.id === "models-profiles" ? `${styles.content} ${styles.contentModels}` : styles.content}
+        padding="none"
+      >
         <div className={styles.configStatusBand}>
-          <div className={styles.configStatusCopy}>
-            <div className={styles.configStatusMeta}>
-              <span
-                className={
-                  hasPendingApply
-                    ? `${styles.statusBadge} ${styles.statusBadgePending}`
-                    : `${styles.statusBadge} ${styles.statusBadgeReady}`
-                }
-              >
-                {hasPendingApply ? copy.unsavedDraft : copy.syncedDraft}
-              </span>
-              <span className={styles.inlineBadge}>{copy.settingsNextStep}: {sidebarNextStepLabel}</span>
-              <span className={styles.configStatusPath} title={workspace.configPath}>
-                {copy.configPath}: {workspace.configPath}
-              </span>
-            </div>
-            <p className={styles.helperText}>{sidebarApplyHint}</p>
-          </div>
-          <div className={styles.configStatusActions}>
-            <VButton
-              type="button"
-              className={styles.actionButton}
-              isDisabled={Boolean(busyAction)}
-              onClick={() => {
-                void reloadWorkspace();
-              }}
-            >
-              <RotateCcw size={14} />
-              {copy.refresh}
-            </VButton>
-            <VButton
-              type="button"
-              className={styles.actionButton}
-              isDisabled={Boolean(busyAction)}
-              title={copy.openEnvironmentHint}
-              onClick={() => {
-                void handleOpenEnvironment();
-              }}
-            >
-              {copy.openEnvironment}
-            </VButton>
-            <VButton type="button" className={styles.actionButton} isDisabled={!canRestoreEditorText} title={copy.editorRestoreHint} onClick={restoreEditorText}>
-              <RotateCcw size={14} />
-              {copy.resetDraft}
-            </VButton>
-            <VButton
-              type="button"
-              className={styles.primaryButton}
-              isDisabled={!canSaveConfig}
-              onClick={() => {
-                void handleApply();
-              }}
-            >
-              <Save size={14} />
-              {saveButtonLabel}
-            </VButton>
-          </div>
+          <VRouteHeader
+            className={styles.configStatusCopy}
+            eyebrow="Config"
+            title={copy.pageTitle}
+            meta={
+              <VStatusStrip
+                className={styles.configStatusMeta}
+                items={[
+                  {
+                    label: copy.configStatus,
+                    value: hasPendingApply ? copy.unsavedDraft : copy.syncedDraft,
+                    tone: hasPendingApply ? "warning" : "success",
+                  },
+                  { label: copy.settingsNextStep, value: sidebarNextStepLabel, tone: "info" },
+                  {
+                    label: copy.configPath,
+                    value: <span className={styles.configStatusPath} title={workspace.configPath}>{workspace.configPath}</span>,
+                  },
+                ]}
+              />
+            }
+            actions={
+              <div className={styles.configStatusActions}>
+                <VButton
+                  type="button"
+                  className={styles.actionButton}
+                  isDisabled={Boolean(busyAction)}
+                  onClick={() => {
+                    void reloadWorkspace();
+                  }}
+                >
+                  <RotateCcw size={14} />
+                  {copy.refresh}
+                </VButton>
+                <VButton
+                  type="button"
+                  className={styles.actionButton}
+                  isDisabled={Boolean(busyAction)}
+                  title={copy.openEnvironmentHint}
+                  onClick={() => {
+                    void handleOpenEnvironment();
+                  }}
+                >
+                  {copy.openEnvironment}
+                </VButton>
+                <VButton type="button" className={styles.actionButton} isDisabled={!canRestoreEditorText} title={copy.editorRestoreHint} onClick={restoreEditorText}>
+                  <RotateCcw size={14} />
+                  {copy.resetDraft}
+                </VButton>
+                <VButton
+                  type="button"
+                  variant="primary"
+                  className={styles.primaryButton}
+                  isDisabled={!canSaveConfig || Boolean(busyAction)}
+                  onClick={() => {
+                    void handleApply();
+                  }}
+                >
+                  <Save size={14} />
+                  {saveButtonLabel}
+                </VButton>
+              </div>
+            }
+          />
+          <p className={styles.helperText}>{sidebarApplyHint}</p>
         </div>
 
         {notice.text ? (
@@ -3296,16 +3331,14 @@ export function ConfigRoute() {
         ) : null}
 
         {isSectionVisible("diagnostics") ? (
-        <section id="config-diagnostics" className={styles.sectionSurface}>
-          <div className={styles.sectionHeader}>
-            <div>
-              <p className={styles.eyebrow}>{sectionTitle("diagnostics", copy.diagnosticsTitle)}</p>
-              <h2 className={styles.sectionTitle}>{copy.diagnosticsTitle}</h2>
-            </div>
-            <ShieldAlert size={16} className={styles.sectionIcon} />
-          </div>
-          <p className={styles.sectionText}>{copy.diagnosticsBody}</p>
-          <div className={styles.diagnosticsGrid}>
+        <VSurface as="section" id="config-diagnostics" className={styles.sectionSurface} padding="none">
+          <VSection
+            eyebrow={sectionTitle("diagnostics", copy.diagnosticsTitle)}
+            title={copy.diagnosticsTitle}
+            actions={<ShieldAlert size={16} className={styles.sectionIcon} />}
+          >
+            <p className={styles.sectionText}>{copy.diagnosticsBody}</p>
+            <div className={styles.diagnosticsGrid}>
             <article className={styles.matrixCard}>
               <p className={styles.matrixTitle}>{copy.blockingIssues}</p>
               {workspace.diagnosis.blocking_issues.length ? (
@@ -3342,10 +3375,11 @@ export function ConfigRoute() {
                 <p className={styles.helperText}>{copy.noSuggestions}</p>
               )}
             </article>
-          </div>
-        </section>
+            </div>
+          </VSection>
+        </VSurface>
         ) : null}
-      </section>
+      </VSurface>
     </div>
   );
 }

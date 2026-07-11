@@ -31,6 +31,16 @@ const extractedPanelStylesSource = [
   runtimePanelStylesSource,
 ].join("\n");
 
+const configSources = [
+  routeSource,
+  overviewPanelSource,
+  runtimePanelSource,
+  draftPanelSource,
+  modelLibraryPanelSource,
+  healthDiagnosticsPanelSource,
+  placeholderPanelSource,
+].join("\n");
+
 describe("ConfigRoute layout contract", () => {
   it("uses a full workspace placeholder for initial loading and load failure states", () => {
     expect(routeSource).toContain("<ConfigWorkspacePlaceholderPanel title={copy.loading} />");
@@ -434,14 +444,19 @@ describe("ConfigRoute layout contract", () => {
   });
 
   it("routes Config controls through VUI primitives", () => {
-    const configSources = [routeSource, overviewPanelSource, runtimePanelSource, draftPanelSource, modelLibraryPanelSource].join("\n");
     expect(routeSource).toContain('from "../components/vui"');
+    expect(routeSource).toContain("VRouteHeader");
+    expect(routeSource).toContain("VStatusStrip");
+    expect(routeSource).toContain("VStringSelect");
     expect(configSources).toContain("<VButton");
-    expect(routeSource).toContain("<VNativeInput");
-    expect(routeSource).toContain("<VNativeSelect");
-    expect(routeSource).toContain("<VNativeTextarea");
+    expect(configSources).toContain("<VSurface");
+    expect(configSources).toContain("<VSection");
+    expect(configSources).not.toContain("<VNativeInput");
+    expect(configSources).not.toContain("<VNativeSelect");
+    expect(configSources).not.toContain("<VNativeTextarea");
+    expect(configSources).not.toContain("<VNativeButton");
+    expect(routeSource).toContain('type="file"');
     expect(configSources).not.toMatch(/<button\b/);
-    expect(configSources).not.toMatch(/<input\b/);
     expect(configSources).not.toMatch(/<select\b/);
     expect(configSources).not.toMatch(/<textarea\b/);
   });
