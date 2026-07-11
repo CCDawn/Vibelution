@@ -26,6 +26,7 @@ describe("Workbench visual regression matrix", () => {
       "/memory",
       "/memory/graph",
       "/memory/manage",
+      "/self-evolution",
       "/supervised-evolution",
       "/teams",
       "/usage",
@@ -43,7 +44,7 @@ describe("Workbench visual regression matrix", () => {
   });
 
   it("keeps every desktop scenario actionable for screenshot capture", () => {
-    expect(WORKBENCH_VISUAL_SCENARIOS).toHaveLength(42);
+    expect(WORKBENCH_VISUAL_SCENARIOS).toHaveLength(60);
 
     for (const scenario of WORKBENCH_VISUAL_SCENARIOS) {
       expect(scenario.id).toMatch(/^[a-z0-9-]+$/);
@@ -66,7 +67,30 @@ describe("Workbench visual regression matrix", () => {
     expect(WORKBENCH_VISUAL_SCENARIOS.filter(({ id }) => id.startsWith("agents-"))).toHaveLength(2);
     expect(WORKBENCH_VISUAL_SCENARIOS.filter(({ id }) => id.startsWith("teams-"))).toHaveLength(2);
     expect(WORKBENCH_VISUAL_SCENARIOS.filter(({ id }) => id.startsWith("memory-"))).toHaveLength(6);
-    expect(WORKBENCH_VISUAL_SCENARIOS).toHaveLength(42);
+    expect(WORKBENCH_VISUAL_SCENARIOS).toHaveLength(60);
+  });
+
+  it("covers all stable Phase 3B operational route combinations", () => {
+    const paths = ["/supervised-evolution", "/self-evolution", "/config"];
+    const phase3bScenarios = WORKBENCH_VISUAL_SCENARIOS.filter((scenario) =>
+      scenario.id.startsWith("phase3b-"),
+    );
+
+    expect(phase3bScenarios).toHaveLength(18);
+    expect(WORKBENCH_VISUAL_SCENARIOS).toHaveLength(60);
+    for (const path of paths) {
+      expect(phase3bScenarios.filter((scenario) => scenario.path === path)).toHaveLength(6);
+    }
+    expect(
+      WORKBENCH_VISUAL_SCENARIOS.some(
+        (scenario) => scenario.id === "supervised-light-default-standard-blocker",
+      ),
+    ).toBe(true);
+    expect(
+      WORKBENCH_VISUAL_SCENARIOS.some(
+        (scenario) => scenario.id === "config-light-default-standard-destructive",
+      ),
+    ).toBe(true);
   });
 
   it("covers all stable Phase 3A operational route combinations", () => {
