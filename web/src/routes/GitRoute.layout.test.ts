@@ -159,6 +159,21 @@ describe("GitRoute layout contract", () => {
     expect(routeSource).toContain('t("gitWorktreeBranches")');
   });
 
+  it("keeps Git summary cards visible without projecting pending status as zero", () => {
+    expect(routeSource).toContain("deriveQueryPresentation");
+    expect(routeSource).toContain("statusInitialLoading");
+    expect(routeSource).toContain("<VLoadingValue");
+    expect(routeSource).toContain('statusPresentation === "refreshing"');
+    expect(routeSource).not.toContain("<strong>{status?.counts.total ?? 0}</strong>");
+    expect(routeSource).not.toContain("<strong>{status?.branch || status?.headRevShort || \"-\"}</strong>");
+  });
+
+  it("reserves loading surfaces for the Git workspace panes", () => {
+    expect(routeSource).toContain('tone="loading"');
+    expect(routeSource).toContain("gitStatusLoading");
+    expect(gitRouteStyles.summaryCard).toContain("min-h-");
+  });
+
   it("switches clean worktrees to a Git situation overview instead of an empty diff workspace", () => {
     expect(routeSource).toContain("noChangedFiles");
     expect(routeSource).toContain("styles.workspaceOverview");
