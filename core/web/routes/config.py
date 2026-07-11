@@ -130,6 +130,16 @@ class ConfigThemeBackgroundImagePayload(BaseModel):
     dataBase64: str = ""
 
 
+class ConfigMigrationApplyPayload(BaseModel):
+    previewId: str = Field(min_length=1)
+    baseHash: str = Field(min_length=1)
+
+
+class ConfigMigrationRollbackPayload(BaseModel):
+    migrationId: str = Field(min_length=1)
+    baseHash: str = Field(min_length=1)
+
+
 def _raise_config_http_error(exc: Exception) -> None:
     if isinstance(exc, ModelReferenceConflictError):
         raise HTTPException(
@@ -139,6 +149,11 @@ def _raise_config_http_error(exc: Exception) -> None:
             ),
         ) from exc
     if isinstance(exc, ConfigConflictError):
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if isinstance(exc, ValueError) and any(
+        token in str(exc).lower()
+        for token in ("stale config hash", "hash drift", "live model alias references")
+    ):
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     raise HTTPException(status_code=422, detail=str(exc)) from exc
 
@@ -151,6 +166,43 @@ def public_config_summary() -> dict:
 @router.get("/config/workspace")
 def config_workspace() -> dict:
     return get_config_workspace()
+
+
+@router.post("/config/migration/llm-v2/preview")
+def config_llm_v2_migration_preview() -> dict:
+    try:
+        return provider_config_service.project_llm_v2_migration_preview(
+            provider_config_service.preview_llm_v2_migration()
+        )
+    except Exception as exc:  # pragma: no cover - routed below
+        _raise_config_http_error(exc)
+
+
+@router.post("/config/migration/llm-v2/apply")
+def config_llm_v2_migration_apply(payload: ConfigMigrationApplyPayload) -> dict:
+    try:
+        return provider_config_service.apply_llm_v2_migration(
+            preview_id=payload.previewId,
+            base_hash=payload.baseHash,
+        )
+    except Exception as exc:  # pragma: no cover - routed below
+        _raise_config_http_error(exc)
+
+
+@router.post("/config/migration/llm-v2/{migration_id}/rollback")
+def config_llm_v2_migration_rollback(
+    migration_id: str,
+    payload: ConfigMigrationRollbackPayload,
+) -> dict:
+    if payload.migrationId != migration_id:
+        raise HTTPException(status_code=409, detail="migration id mismatch")
+    try:
+        return provider_config_service.rollback_llm_v2_migration(
+            migration_id=migration_id,
+            base_hash=payload.baseHash,
+        )
+    except Exception as exc:  # pragma: no cover - routed below
+        _raise_config_http_error(exc)
 
 
 @router.post("/config/open-environment")

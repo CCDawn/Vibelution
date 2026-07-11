@@ -9,6 +9,7 @@ import re
 import secrets
 import threading
 import time
+from pathlib import Path
 from typing import Any
 
 from config.llm_credentials import canonicalize_credential_ref
@@ -27,7 +28,9 @@ from config.llm_provider_registry import (
     update_llm_provider,
 )
 from config.model_catalog import load_model_catalog_state
+from config.model_config_migration import apply_v1_to_v2, preview_v1_to_v2, rollback_v1_to_v2
 from config.public_config import (
+    CONFIG_PATH,
     build_effective_config,
     load_public_config,
     validate_llm_public_config,
@@ -843,6 +846,166 @@ def discover_draft_provider(
     )
 
 
+_PROJECT_ROOT = Path(__file__).resolve().parents[3]
+
+
+def _record_migration_event(event_code: str, *, outcome: str, fields: dict[str, Any]) -> None:
+    try:
+        record_runtime_scene_event(
+            "config",
+            "model_config_migration",
+            event_code,
+            message=event_code,
+            outcome=outcome,
+            level="warning" if outcome == "failed" else "info",
+            fields=fields,
+            lifecycle=True,
+        )
+    except Exception:
+        return
+
+
+def preview_llm_v2_migration() -> dict[str, Any]:
+    started = time.monotonic()
+    preview = preview_v1_to_v2(load_public_config(), project_root=_PROJECT_ROOT)
+    payload = {
+        "previewId": preview.preview_id,
+        "baseHash": preview.base_hash,
+        "status": preview.status,
+        "providers": list(preview.providers),
+        "modelRefMap": dict(preview.model_ref_map),
+        "referenceImpact": copy.deepcopy(preview.reference_impact),
+        "conflicts": list(preview.conflicts),
+    }
+    _record_migration_event(
+        "config.schema.migration_previewed",
+        outcome="previewed",
+        fields={
+            "migrationId": preview.preview_id,
+            "providerCount": len(preview.providers),
+            "modelCount": len(preview.model_ref_map),
+            "referenceCount": int(preview.reference_impact.get("liveReferenceCount") or 0),
+            "phase": "preview",
+            "elapsedMs": int((time.monotonic() - started) * 1000),
+        },
+    )
+    return payload
+
+
+def project_llm_v2_migration_preview(payload: dict[str, Any]) -> dict[str, Any]:
+    providers: list[dict[str, Any]] = []
+    for raw in payload.get("providers", []):
+        if not isinstance(raw, dict):
+            continue
+        models = raw.get("models") if isinstance(raw.get("models"), dict) else {}
+        provider_id = str(raw.get("provider_id") or "")
+        providers.append(
+            {
+                "providerId": provider_id,
+                "label": str(raw.get("label") or ""),
+                "serviceClass": str(raw.get("service_class") or ""),
+                "vendor": str(raw.get("vendor") or ""),
+                "driver": str(raw.get("driver") or ""),
+                "baseUrl": str(raw.get("base_url") or ""),
+                "credentialState": str(raw.get("credential_state") or "unknown"),
+                "modelRefs": [make_model_ref(provider_id, str(key)) for key in sorted(models)] if provider_id else [],
+            }
+        )
+    conflicts: list[dict[str, Any]] = []
+    for raw in payload.get("conflicts", []):
+        if not isinstance(raw, dict):
+            continue
+        projected = {
+            key: copy.deepcopy(raw[key])
+            for key in ("code", "severity", "modelId", "fields")
+            if key in raw
+        }
+        conflicts.append(projected)
+    impact = payload.get("referenceImpact") if isinstance(payload.get("referenceImpact"), dict) else {}
+    return {
+        "previewId": str(payload.get("previewId") or ""),
+        "baseHash": str(payload.get("baseHash") or ""),
+        "status": str(payload.get("status") or ""),
+        "providers": providers,
+        "modelRefMap": {
+            str(key): str(value)
+            for key, value in (payload.get("modelRefMap") or {}).items()
+        }
+        if isinstance(payload.get("modelRefMap"), dict)
+        else {},
+        "referenceImpact": {
+            "liveReferenceCount": int(impact.get("liveReferenceCount") or 0),
+            "historicalReferenceCount": int(impact.get("historicalReferenceCount") or 0),
+        },
+        "conflicts": conflicts,
+    }
+
+
+def apply_llm_v2_migration(*, preview_id: str, base_hash: str) -> dict[str, Any]:
+    started = time.monotonic()
+    try:
+        result = apply_v1_to_v2(
+            preview_id,
+            expected_base_hash=base_hash,
+            config_path=CONFIG_PATH,
+            project_root=_PROJECT_ROOT,
+        )
+    except Exception as exc:
+        _record_migration_event(
+            "config.schema.migration_applied",
+            outcome="failed",
+            fields={
+                "migrationId": str(preview_id),
+                "phase": "apply",
+                "elapsedMs": int((time.monotonic() - started) * 1000),
+                "errorType": type(exc).__name__,
+            },
+        )
+        raise
+    _record_migration_event(
+        "config.schema.migration_applied",
+        outcome="applied",
+        fields={
+            "migrationId": result["migrationId"],
+            "referenceCount": int(result.get("updatedReferenceCount") or 0),
+            "phase": "apply",
+            "elapsedMs": int((time.monotonic() - started) * 1000),
+        },
+    )
+    if int(result.get("updatedReferenceCount") or 0):
+        _record_migration_event(
+            "config.model_reference.migrated",
+            outcome="applied",
+            fields={
+                "migrationId": result["migrationId"],
+                "referenceCount": int(result["updatedReferenceCount"]),
+                "phase": "apply",
+                "elapsedMs": int((time.monotonic() - started) * 1000),
+            },
+        )
+    return result
+
+
+def rollback_llm_v2_migration(*, migration_id: str, base_hash: str) -> dict[str, Any]:
+    started = time.monotonic()
+    result = rollback_v1_to_v2(
+        migration_id,
+        config_path=CONFIG_PATH,
+        project_root=_PROJECT_ROOT,
+        expected_current_hash=base_hash,
+    )
+    _record_migration_event(
+        "config.schema.migration_rolled_back",
+        outcome="rolled_back",
+        fields={
+            "migrationId": migration_id,
+            "phase": "rollback",
+            "elapsedMs": int((time.monotonic() - started) * 1000),
+        },
+    )
+    return result
+
+
 __all__ = [
     "discover_draft_provider",
     "draft_add_provider",
@@ -851,9 +1014,13 @@ __all__ = [
     "draft_unpin_provider_model",
     "draft_update_provider",
     "preview_draft_provider_route",
+    "apply_llm_v2_migration",
+    "preview_llm_v2_migration",
+    "project_llm_v2_migration_preview",
     "project_model_reference_impact",
     "project_model_reference_impacts",
     "project_provider_draft_response",
     "project_provider_route_preview_response",
     "suggest_draft_provider_id",
+    "rollback_llm_v2_migration",
 ]

@@ -14,6 +14,8 @@ from core.web.services.model_reference_service import (
     ModelReferenceConflictError,
     assert_model_delete_safe,
     rebind_model_references,
+    rewrite_model_reference_payload,
+    scan_model_alias_usage,
     scan_model_references,
 )
 
@@ -38,6 +40,68 @@ def _public_config_with_refs(model_id: str, other_model_id: str = "model-b") -> 
         "tools": {"image2": {"default_model_ref": model_id}},
         "git": {"commit_message_model_ref": model_id},
     }
+
+
+@pytest.mark.parametrize(
+    ("owner_kind", "payload", "expected_count"),
+    [
+        (
+            "public_config",
+            {
+                "llm": {"profiles": {"primary": {"model_ref": "legacy_model"}}},
+                "tools": {"image2": {"default_model_ref": "legacy_model"}},
+                "git": {"commit_message_model_ref": "legacy_model"},
+            },
+            3,
+        ),
+        (
+            "agent_registry",
+            {"agents": [{"dialogueModelId": "legacy_model", "llmBindings": {"dialogue": {"modelId": "legacy_model"}}}]},
+            2,
+        ),
+        (
+            "chat_room_registry",
+            {"rooms": [{"participants": [{"dialogueModelId": "legacy_model", "llmBindings": {"vision": {"modelId": "legacy_model"}}}]}]},
+            2,
+        ),
+        (
+            "active_supervised_run",
+            {"status": "running", "currentAgentBinding": {"modelId": "legacy_model"}, "agentBindings": {"baseline": {"modelId": "legacy_model"}}},
+            2,
+        ),
+        ("team_live_prompt_cache_policy", {"promptCachePolicy": {"modelId": "legacy_model"}}, 1),
+    ],
+)
+def test_known_live_reference_payloads_rewrite_only_owned_model_fields(owner_kind, payload, expected_count) -> None:
+    updated, references = rewrite_model_reference_payload(owner_kind, payload, {"legacy_model": "relay/gpt-a"})
+    assert json.dumps(updated).count("relay/gpt-a") == expected_count
+    assert len(references) == expected_count
+
+
+def test_historical_payload_is_never_rewritten() -> None:
+    payload = {"decision": {"modelId": "legacy_model"}}
+    updated, references = rewrite_model_reference_payload(
+        "historical_supervised_artifact", payload, {"legacy_model": "relay/gpt-a"}
+    )
+    assert updated == payload
+    assert references == ()
+
+
+def test_unknown_reference_owner_fails_closed() -> None:
+    with pytest.raises(ValueError, match="unknown model reference owner"):
+        rewrite_model_reference_payload("plugin_payload", {"modelId": "legacy_model"}, {"legacy_model": "relay/gpt-a"})
+
+
+def test_historical_alias_usage_is_reported_but_does_not_block_exit(tmp_path) -> None:
+    decision_path = tmp_path / "workspace" / "supervised_evolution" / "decisions" / "decision-a.json"
+    _write_json(decision_path, {"modelId": "legacy_model"})
+    usage = scan_model_alias_usage(
+        {"llm": {"model_aliases": {"legacy_model": "relay/gpt-a"}}},
+        project_root=tmp_path,
+    )
+    assert usage["totalLiveReferenceCount"] == 0
+    assert usage["totalHistoricalReferenceCount"] == 1
+    assert usage["canRemoveAliases"] is True
 
 
 def _seed_agent_registry(root, model_id: str, other_model_id: str = "model-b") -> None:

@@ -62,7 +62,12 @@ from .config_editor_schema import build_editor_meta, build_editor_sections
 from .git_status_service import validate_git_commit_message_prompt, with_git_config_defaults
 from .i18n import resolve_language, text_for
 from .model_capability_service import model_record_image_input_support
-from .model_reference_service import ModelReferenceConflictError, assert_model_delete_safe
+from .model_reference_service import (
+    PROJECT_ROOT as MODEL_REFERENCE_PROJECT_ROOT,
+    ModelReferenceConflictError,
+    assert_model_delete_safe,
+    scan_model_alias_usage,
+)
 from .runtime_scene_service import record_runtime_scene_event
 from .theme_background_service import DEFAULT_THEME_BACKGROUND_PATH, theme_background_image_url
 from .workbench_contract_service import get_workbench_contract
@@ -1410,6 +1415,10 @@ def _build_workspace(
         "modeAvailability": contract["modeAvailability"],
         "domainAvailability": contract["domainAvailability"],
         "modelLibraryCount": len(model_library) if isinstance(model_library, dict) else 0,
+        "modelAliasUsage": scan_model_alias_usage(
+            public_config,
+            project_root=MODEL_REFERENCE_PROJECT_ROOT,
+        ),
         "blockingCount": len(blocking),
         "warningCount": len(warnings),
         "themeBackgroundImagePath": _theme_background_path(public_config),
