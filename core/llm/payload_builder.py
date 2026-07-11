@@ -925,6 +925,35 @@ def compose_runtime_wire_payload(
     route = build_input.route
     adapter = build_input.adapter
     actions = PayloadPolicyActions()
+    if route.policy.system_message_policy == "first_only_rest_user":
+        system_count = sum(
+            1
+            for message in build_input.messages
+            if str(
+                (message.get("role") if isinstance(message, dict) else getattr(message, "type", ""))
+                or ""
+            ).strip().lower() in {"system"}
+        )
+        actions.system_messages_converted = max(0, system_count - 1)
+    if not route.compat.reasoning_roundtrip:
+        actions.reasoning_content_stripped = _outgoing_reasoning_content_count(build_input.messages)
+    if not route.policy.allow_assistant_prefill:
+        actions.empty_assistant_prefill_removed = sum(
+            1
+            for message in build_input.messages
+            if str(
+                (message.get("role") if isinstance(message, dict) else getattr(message, "type", ""))
+                or ""
+            ).strip().lower() in {"assistant", "ai"}
+            and not extract_text_content(
+                message.get("content") if isinstance(message, dict) else getattr(message, "content", "")
+            ).strip()
+        )
+    if build_input.tools and (
+        route.policy.tool_schema_policy == "minimal"
+        or route.compat.strict_message_keys
+    ):
+        actions.minimal_tool_schema = True
     prompt_cache_mode = str(
         getattr(getattr(profile, "prompt_cache", None), "mode", "") or "disabled"
     ).strip().lower()

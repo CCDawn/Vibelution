@@ -186,7 +186,8 @@ def test_deepseek_reasoning_protocol_preserves_assistant_reasoning_roundtrip():
                 content="",
                 tool_calls=[{"id": "call_1", "name": "read_file", "args": {"path": "agent.py"}}],
                 additional_kwargs={"reasoning_content": "先读文件再决定"},
-            )
+            ),
+            ToolMessage(content="file content", tool_call_id="call_1", name="read_file"),
         ]
     )
 

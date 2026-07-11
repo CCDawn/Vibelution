@@ -12,6 +12,7 @@ from .semantic_messages import (
     ImagePart,
     InvocationScope,
     ReasoningReplayPart,
+    ReasoningTextPart,
     SemanticGenerationSettings,
     SemanticMessage,
     SemanticModelRequest,
@@ -38,6 +39,9 @@ class SemanticProjectionInput:
     settings: SemanticGenerationSettings
     tool_to_schema: Callable[[Any], Mapping[str, Any]]
     replay_state: ProviderReplayState | None = None
+    system_message_policy: str = "preserve"
+    allow_assistant_prefill: bool = True
+    reasoning_roundtrip: bool = False
 
 
 def _value(owner: Any, name: str, default: Any = None) -> Any:
@@ -144,9 +148,17 @@ def _tool_call(raw: Any, *, scope: InvocationScope, index: int) -> CanonicalTool
     )
 
 
-def _project_messages(messages: Sequence[Any], *, scope: InvocationScope) -> list[SemanticMessage]:
+def _project_messages(
+    messages: Sequence[Any],
+    *,
+    scope: InvocationScope,
+    system_message_policy: str,
+    allow_assistant_prefill: bool,
+    reasoning_roundtrip: bool,
+) -> list[SemanticMessage]:
     projected: list[SemanticMessage] = []
     calls_by_id: dict[str, CanonicalToolCall] = {}
+    system_seen = False
     for index, message in enumerate(messages):
         if isinstance(message, Mapping) and "toolCalls" in message:
             raise SemanticProjectionError(
@@ -155,6 +167,10 @@ def _project_messages(messages: Sequence[Any], *, scope: InvocationScope) -> lis
                 "UI toolCalls projection is not valid model input",
             )
         role = _role(message, index)
+        if role == "system":
+            if system_seen and system_message_policy == "first_only_rest_user":
+                role = "user"
+            system_seen = True
         parts = _content_parts(_value(message, "content", ""), index)
         raw_calls = _value(message, "tool_calls", ()) or ()
         for raw_call in raw_calls:
@@ -170,6 +186,13 @@ def _project_messages(messages: Sequence[Any], *, scope: InvocationScope) -> lis
         ).strip()
         if replay_item_id:
             parts.append(ReasoningReplayPart(replay_item_id))
+        reasoning_text = str(
+            _value(message, "reasoning_content", "")
+            or _value(_value(message, "additional_kwargs", {}), "reasoning_content", "")
+            or ""
+        ).strip()
+        if reasoning_text and reasoning_roundtrip:
+            parts.append(ReasoningTextPart(reasoning_text))
         if role == "tool":
             call_id = str(_value(message, "tool_call_id", "") or "").strip()
             call = calls_by_id.get(call_id)
@@ -186,6 +209,8 @@ def _project_messages(messages: Sequence[Any], *, scope: InvocationScope) -> lis
                     )
                 )
             ]
+        if role == "assistant" and not parts and not allow_assistant_prefill:
+            continue
         projected.append(SemanticMessage(role=role, parts=tuple(parts)))
     return projected
 
@@ -212,7 +237,15 @@ def _project_tools(
 def project_semantic_request(input: SemanticProjectionInput) -> SemanticModelRequest:
     return SemanticModelRequest(
         scope=input.scope,
-        messages=tuple(_project_messages(input.messages, scope=input.scope)),
+        messages=tuple(
+            _project_messages(
+                input.messages,
+                scope=input.scope,
+                system_message_policy=input.system_message_policy,
+                allow_assistant_prefill=input.allow_assistant_prefill,
+                reasoning_roundtrip=input.reasoning_roundtrip,
+            )
+        ),
         tools=tuple(_project_tools(input.tools, tool_to_schema=input.tool_to_schema)),
         settings=input.settings,
         replay_state=input.replay_state,
