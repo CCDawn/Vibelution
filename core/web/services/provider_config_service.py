@@ -1104,6 +1104,18 @@ def project_llm_v2_migration_preview(payload: dict[str, Any]) -> dict[str, Any]:
                 "allowedResolutions": allowed_resolutions,
                 "verificationState": "unverified_offline",
             }
+        elif raw.get("code") == "provider_artifact_path_conflict":
+            raw_model_ids = raw.get("modelIds")
+            projected = {
+                "code": "provider_artifact_path_conflict",
+                "modelIds": [
+                    value[:128]
+                    for value in raw_model_ids[:50]
+                    if isinstance(value, str)
+                ]
+                if isinstance(raw_model_ids, list)
+                else [],
+            }
         else:
             projected = {
                 key: copy.deepcopy(raw[key])

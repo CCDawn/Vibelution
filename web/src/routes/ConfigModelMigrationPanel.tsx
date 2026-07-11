@@ -218,7 +218,7 @@ export function ConfigModelMigrationPanel({
               <strong>未解决冲突</strong>
               <ul className={styles.conflictList}>
                 {otherConflicts.map((conflict, index) => (
-                  <li key={`${conflict.code}-${index}`}>{conflict.code} · {conflict.modelId || conflict.proposedProviderId || "全局"}</li>
+                  <li key={`${conflict.code}-${index}`}>{conflict.code} · {conflict.modelId || ("modelIds" in conflict ? conflict.modelIds?.join(", ") : "") || conflict.proposedProviderId || "全局"}</li>
                 ))}
               </ul>
             </section>

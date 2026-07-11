@@ -444,6 +444,46 @@ def test_preview_rejects_preserve_for_official_provider(tmp_path) -> None:
             ],
             "must not be an artifact path",
         ),
+        (
+            [
+                {
+                    "modelId": "local_a",
+                    "decision": "split_deployment_artifact",
+                    "upstreamId": "file:///srv/models/model",
+                }
+            ],
+            "must not be an artifact path",
+        ),
+        (
+            [
+                {
+                    "modelId": "local_a",
+                    "decision": "split_deployment_artifact",
+                    "upstreamId": r"FILE:C:\models\model",
+                }
+            ],
+            "must not be an artifact path",
+        ),
+        (
+            [
+                {
+                    "modelId": "local_a",
+                    "decision": "split_deployment_artifact",
+                    "upstreamId": "~/models/model",
+                }
+            ],
+            "must not be an artifact path",
+        ),
+        (
+            [
+                {
+                    "modelId": "local_a",
+                    "decision": "split_deployment_artifact",
+                    "upstreamId": r"~\models\model",
+                }
+            ],
+            "must not be an artifact path",
+        ),
         ([{"modelId": "local_a", "decision": "guess_runtime"}], "unknown.*decision"),
         ([{"modelId": "missing", "decision": "preserve_upstream_id"}], "unknown.*modelId"),
         (

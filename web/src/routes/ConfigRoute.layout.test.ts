@@ -69,6 +69,11 @@ describe("ConfigRoute layout contract", () => {
     expect(migrationPanelSource).not.toContain('conflict.fields?.includes("artifact_path")');
   });
 
+  it("shows all safe model IDs for provider artifact conflicts without rendering paths", () => {
+    expect(migrationPanelSource).toContain('conflict.modelIds?.join(", ")');
+    expect(migrationPanelSource).not.toContain("conflict.artifactPath");
+  });
+
   it("submits artifact decisions only through a new preview request", () => {
     expect(migrationPanelSource).toContain("onPreview(resolutions)");
     expect(migrationPanelSource).toContain("onPreview([])");
