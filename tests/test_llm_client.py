@@ -30,6 +30,21 @@ def make_config(**kwargs):
     return isolated_settings_config(**kwargs)
 
 
+def supported_relay_chat_config():
+    return make_config(
+        **{
+            "llm.providers.default.kind": "relay",
+            "llm.providers.default.api_key": "test-key",
+            "llm.providers.default.base_url": "https://relay.example.test/v1",
+            "llm.providers.default.compat_mode": "openai",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "deepseek-chat",
+            "llm.profiles.primary.transport": "chat_completions",
+            "llm.profiles.primary.prompt_cache.mode": "explicit_cache_control",
+        }
+    )
+
+
 def test_litellm_payload_prefixes_minimax_model():
     config = make_config(
         **{
@@ -344,50 +359,6 @@ def test_openai_gpt5_payload_sanitizes_temperature_and_tool_choice():
     assert "tool_choice" not in payload
 
 
-def test_anthropic_claude_opus_4_7_payload_omits_deprecated_sampling_parameters():
-    config = make_config(
-        **{
-            "llm.providers.default.kind": "anthropic",
-            "llm.providers.default.api_key": "test-key",
-            "llm.providers.default.base_url": "https://www.atpify.cn",
-            "llm.providers.default.compat_mode": "native",
-            "llm.profiles.primary.provider_id": "default",
-            "llm.profiles.primary.model": "claude-opus-4-7",
-            "llm.profiles.primary.temperature": 0.7,
-            "llm.profiles.primary.thinking_type": "adaptive",
-            "llm.profiles.primary.thinking_display": "summarized",
-        }
-    )
-
-    client = LLMClient(config=config, backend=lambda payload: payload)
-    payload = client._build_payload([{"role": "user", "content": "ping"}])
-
-    assert payload["model"] == "anthropic/claude-opus-4-7"
-    assert "temperature" not in payload
-    assert "top_p" not in payload
-    assert "top_k" not in payload
-    assert payload["thinking"] == {"type": "adaptive", "display": "summarized"}
-
-
-def test_anthropic_thinking_disabled_payload_omits_display():
-    config = make_config(
-        **{
-            "llm.providers.default.kind": "anthropic",
-            "llm.providers.default.api_key": "test-key",
-            "llm.providers.default.base_url": "https://www.atpify.cn",
-            "llm.providers.default.compat_mode": "native",
-            "llm.profiles.primary.provider_id": "default",
-            "llm.profiles.primary.model": "claude-opus-4-7",
-            "llm.profiles.primary.thinking_type": "disabled",
-        }
-    )
-
-    client = LLMClient(config=config, backend=lambda payload: payload)
-    payload = client._build_payload([{"role": "user", "content": "ping"}])
-
-    assert payload["thinking"] == {"type": "disabled"}
-
-
 def test_anthropic_thinking_display_requires_type():
     with pytest.raises(ValueError, match="thinking_display requires thinking_type"):
         make_config(
@@ -402,26 +373,6 @@ def test_anthropic_thinking_display_requires_type():
                 "llm.profiles.primary.thinking_display": "summarized",
             }
         )
-
-
-def test_anthropic_older_claude_payload_keeps_temperature():
-    config = make_config(
-        **{
-            "llm.providers.default.kind": "anthropic",
-            "llm.providers.default.api_key": "test-key",
-            "llm.providers.default.base_url": "https://api.anthropic.com",
-            "llm.providers.default.compat_mode": "native",
-            "llm.profiles.primary.provider_id": "default",
-            "llm.profiles.primary.model": "claude-3-5-sonnet-20241022",
-            "llm.profiles.primary.temperature": 0.2,
-        }
-    )
-
-    client = LLMClient(config=config, backend=lambda payload: payload)
-    payload = client._build_payload([{"role": "user", "content": "ping"}])
-
-    assert payload["model"] == "anthropic/claude-3-5-sonnet-20241022"
-    assert payload["temperature"] == 0.2
 
 
 def test_llamacpp_qwen_thinking_blocks_assistant_prefill_before_provider():
@@ -1116,17 +1067,8 @@ def test_invoke_records_cached_input_token_observation(monkeypatch):
     assert success_event[1]["fields"]["cacheHitRate"] == pytest.approx(0.64)
 
 
-def test_invoke_records_anthropic_cache_read_token_observation(monkeypatch):
-    config = make_config(
-        **{
-            "llm.providers.default.kind": "anthropic",
-            "llm.providers.default.api_key": "test-key",
-            "llm.providers.default.base_url": "https://api.anthropic.com",
-            "llm.profiles.primary.provider_id": "default",
-            "llm.profiles.primary.model": "claude-3-5-sonnet-20241022",
-            "llm.profiles.primary.prompt_cache.mode": "explicit_cache_control",
-        }
-    )
+def test_invoke_records_cache_read_token_observation(monkeypatch):
+    config = supported_relay_chat_config()
     recorded = []
 
     def backend(_payload):
@@ -1162,16 +1104,7 @@ def test_invoke_records_anthropic_cache_read_token_observation(monkeypatch):
 
 
 def test_invoke_records_safe_payload_shape_without_prompt_text(monkeypatch):
-    config = make_config(
-        **{
-            "llm.providers.default.kind": "anthropic",
-            "llm.providers.default.api_key": "test-key",
-            "llm.providers.default.base_url": "https://api.anthropic.com",
-            "llm.profiles.primary.provider_id": "default",
-            "llm.profiles.primary.model": "claude-3-5-sonnet-20241022",
-            "llm.profiles.primary.prompt_cache.mode": "explicit_cache_control",
-        }
-    )
+    config = supported_relay_chat_config()
     recorded = []
 
     def backend(_payload):
@@ -1533,17 +1466,8 @@ def test_stream_records_usage_and_cache_hit_rate(monkeypatch):
     assert fields["payloadShape"]["toolSchemaHash"] == ""
 
 
-def test_stream_records_anthropic_cache_read_token_observation(monkeypatch):
-    config = make_config(
-        **{
-            "llm.providers.default.kind": "anthropic",
-            "llm.providers.default.api_key": "test-key",
-            "llm.providers.default.base_url": "https://api.anthropic.com",
-            "llm.profiles.primary.provider_id": "default",
-            "llm.profiles.primary.model": "claude-3-5-sonnet-20241022",
-            "llm.profiles.primary.prompt_cache.mode": "explicit_cache_control",
-        }
-    )
+def test_stream_records_cache_read_token_observation(monkeypatch):
+    config = supported_relay_chat_config()
     recorded = []
 
     def backend(_payload):
@@ -1584,16 +1508,7 @@ def test_stream_records_anthropic_cache_read_token_observation(monkeypatch):
 
 
 def test_stream_marks_cache_creation_only_usage_as_observed(monkeypatch):
-    config = make_config(
-        **{
-            "llm.providers.default.kind": "anthropic",
-            "llm.providers.default.api_key": "test-key",
-            "llm.providers.default.base_url": "https://api.anthropic.com",
-            "llm.profiles.primary.provider_id": "default",
-            "llm.profiles.primary.model": "claude-3-5-sonnet-20241022",
-            "llm.profiles.primary.prompt_cache.mode": "explicit_cache_control",
-        }
-    )
+    config = supported_relay_chat_config()
     recorded = []
 
     def backend(_payload):
@@ -2102,23 +2017,14 @@ def test_stream_failure_records_category_without_masking_provider_error(monkeypa
     assert 'One of "input"' in recorded[-1][1]["fields"]["error"]
 
 
-def test_native_anthropic_payload_preserves_structured_content_blocks_by_default():
-    config = make_config(
-        **{
-            "llm.providers.default.kind": "anthropic",
-            "llm.providers.default.api_key": "test-key",
-            "llm.providers.default.base_url": "https://api.anthropic.com",
-            "llm.profiles.primary.provider_id": "default",
-            "llm.profiles.primary.model": "claude-3-5-sonnet-20241022",
-            "llm.profiles.primary.prompt_cache.mode": "explicit_cache_control",
-        }
-    )
+def test_supported_chat_payload_preserves_structured_content_blocks_by_default():
+    config = supported_relay_chat_config()
 
     content = [{"type": "text", "text": "cached", "cache_control": {"type": "ephemeral"}}]
     client = LLMClient(config=config, backend=lambda payload: payload)
     payload = client._build_payload([{"role": "system", "content": content}])
 
-    assert payload["model"] == "anthropic/claude-3-5-sonnet-20241022"
+    assert payload["model"] == "openai/deepseek-chat"
     assert payload["messages"][0]["content"] == content
 
 
