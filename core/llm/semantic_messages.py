@@ -50,8 +50,18 @@ class InvocationScope:
 
 
 @dataclass(frozen=True)
+class CacheHint:
+    mode: str
+
+    def __post_init__(self) -> None:
+        if self.mode != "ephemeral":
+            raise ValueError("unsupported semantic cache hint")
+
+
+@dataclass(frozen=True)
 class TextPart:
     text: str
+    cache_hint: CacheHint | None = None
 
 
 @dataclass(frozen=True)
@@ -59,6 +69,7 @@ class ImagePart:
     uri: str
     media_type: str
     detail: str = ""
+    cache_hint: CacheHint | None = None
 
     def __post_init__(self) -> None:
         if not self.uri.strip() or not self.media_type.strip():
@@ -84,7 +95,16 @@ class ReasoningReplayPart:
             raise ValueError("reasoning replay part requires replay_item_id")
 
 
-SemanticPart = TextPart | ImagePart | ToolCallPart | ToolResultPart | ReasoningReplayPart
+@dataclass(frozen=True)
+class ReasoningTextPart:
+    text: str
+
+    def __post_init__(self) -> None:
+        if not self.text.strip():
+            raise ValueError("reasoning text part requires text")
+
+
+SemanticPart = TextPart | ImagePart | ToolCallPart | ToolResultPart | ReasoningReplayPart | ReasoningTextPart
 
 
 @dataclass(frozen=True)

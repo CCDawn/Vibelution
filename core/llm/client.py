@@ -24,12 +24,16 @@ from .discovery import discover_model
 from .errors import classify_exception
 from .message_projector import message_to_openai_dict as project_message_to_openai_dict
 from .message_projector import normalize_messages_for_provider
-from .payload_builder import PayloadBuildInput, build_llm_payload
+from .payload_builder import PayloadBuildInput, compose_runtime_wire_payload
 from .payload_trace import build_llm_payload_trace
 from .payload_validator import payload_protocol_summary
 from .protocol_resolver import resolve_model_protocol
+from .protocols import WireProtocol
 from .reasoning_extractor import extract_reasoning_text, strip_think_tag_reasoning
+from .schema import sanitize_tool_schema
 from .streaming import ResponsesStreamNormalizer, extract_message_tool_calls, extract_text_content
+from .semantic_messages import SemanticGenerationSettings
+from .semantic_projector import SemanticProjectionError, SemanticProjectionInput, project_semantic_request
 from .types import LLMCapabilities, LLMError, StreamChunk, ToolCall, TurnOutcome, UsageStats
 from .usage import read_usage_int as _read_provider_usage_int
 from .usage import usage_stats_from_payload, usage_to_dict
@@ -54,6 +58,34 @@ _PROXY_ENV_CONDITION = threading.Condition(threading.RLock())
 _PROXY_ENV_STATE = {"readers": 0, "writer": False}
 PROMPT_CACHE_OPPORTUNITY_PREFIX_CHARS = 4096
 _CANONICAL_WIRE_ADAPTERS = build_default_wire_adapter_registry()
+
+
+def _safe_semantic_projection_snapshot(messages: List[Any]) -> Dict[str, Any]:
+    shape_tail: list[dict[str, Any]] = []
+    assistant_tool_calls = 0
+    tool_results = 0
+    for message in list(messages or []):
+        role = str(
+            (message.get("role") if isinstance(message, dict) else getattr(message, "type", ""))
+            or ""
+        ).strip().lower()
+        role = {"ai": "assistant", "human": "user"}.get(role, role)
+        tool_calls = (
+            message.get("tool_calls") if isinstance(message, dict) else getattr(message, "tool_calls", None)
+        ) or []
+        assistant_tool_calls += len(tool_calls) if role == "assistant" else 0
+        tool_results += 1 if role == "tool" else 0
+        shape_tail.append({"role": role, "toolCallCount": len(tool_calls)})
+    bounded_tail = shape_tail[-8:]
+    shape_hash = hashlib.sha256(
+        json.dumps(bounded_tail, ensure_ascii=False, sort_keys=True).encode("utf-8")
+    ).hexdigest()[:16]
+    return {
+        "payloadMessageAssistantToolCallCount": assistant_tool_calls,
+        "payloadMessageToolResultCount": tool_results,
+        "payloadMessageShapeHash": shape_hash,
+        "payloadMessageShapeTail": bounded_tail,
+    }
 
 
 class LLMCancelledError(Exception):
@@ -1255,6 +1287,49 @@ class LLMClient:
     def resolved_spec(self):
         return self._resolved_spec
 
+    def _required_wire_adapter(self):
+        try:
+            return _CANONICAL_WIRE_ADAPTERS.require(self.protocol_route)
+        except LookupError as exc:
+            route = self.protocol_route
+            raise LLMError(
+                "unsupported_wire_protocol",
+                str(exc),
+                retryable=False,
+                provider=self.provider.kind,
+                model=self.profile.model,
+                details={
+                    "profileId": self.profile_id,
+                    "providerKind": self.provider.kind,
+                    "modelId": route.model_id,
+                    "wireProtocol": route.wire_protocol.value,
+                    "adapterId": route.adapter_id,
+                    "routeSource": route.wire_source,
+                    "payloadValidationResult": "blocked_before_provider",
+                },
+            ) from exc
+
+    def _project_semantic_request_or_raise(self, projection_input: SemanticProjectionInput):
+        try:
+            return project_semantic_request(projection_input)
+        except SemanticProjectionError as exc:
+            details = _safe_semantic_projection_snapshot(list(projection_input.messages))
+            details.update(
+                {
+                    "messageIndex": exc.message_index,
+                    "payloadValidationErrorType": exc.code,
+                    "payloadValidationResult": "blocked_before_provider",
+                }
+            )
+            raise LLMError(
+                "payload_protocol_error",
+                str(exc),
+                retryable=False,
+                provider=self.provider.kind,
+                model=self.profile.model,
+                details=details,
+            ) from exc
+
     def bind_tools(self, tools: List[Any], *, binding_name: str = "default") -> "LLMClient":
         return LLMClient(
             config=self.config,
@@ -1265,7 +1340,16 @@ class LLMClient:
             responses_backend=self._responses_backend,
         )
 
-    def _build_payload(self, messages: List[Any], *, tools: Optional[List[Any]] = None, stream: bool = False) -> Dict[str, Any]:
+    def _build_payload(
+        self,
+        messages: List[Any],
+        *,
+        tools: Optional[List[Any]] = None,
+        stream: bool = False,
+        metadata: Optional[Dict[str, Any]] = None,
+        invocation_scope: Any = None,
+    ) -> Dict[str, Any]:
+        wire_adapter = self._required_wire_adapter()
         selected_tools = list(self.bound_tools)
         if tools is not None:
             selected_tools = list(tools or [])
@@ -1284,27 +1368,68 @@ class LLMClient:
                 },
             )
         provider_messages = normalize_messages_for_provider(list(messages or []))
-        built = build_llm_payload(
-            PayloadBuildInput(
-                messages=provider_messages,
-                tools=selected_tools,
-                profile=self.profile,
-                provider=self.provider,
-                adapter=self.adapter,
-                route=self.protocol_route,
-                capabilities=self.capabilities,
-                stream=stream,
-                api_key=self.config.get_api_key_for_profile(profile_id=self.profile_id),
-                profile_id=self.profile_id,
-                config=self.config,
-            ),
-            messages_have_prompt_cache_control=_messages_have_prompt_cache_control,
-            strip_cache_control_from_messages=_strip_cache_control_from_messages,
-            message_to_openai_dict=_message_to_openai_dict,
-            content_blocks_have_image=_content_blocks_have_image,
-            convert_content_blocks_for_transport=_convert_content_blocks_for_transport,
-            tool_to_schema=_tool_to_schema,
+        build_input = PayloadBuildInput(
+            messages=provider_messages,
+            tools=selected_tools,
+            profile=self.profile,
+            provider=self.provider,
+            adapter=self.adapter,
+            route=self.protocol_route,
+            capabilities=self.capabilities,
+            stream=stream,
+            api_key=self.config.get_api_key_for_profile(profile_id=self.profile_id),
+            profile_id=self.profile_id,
+            config=self.config,
         )
+        if self.protocol_route.wire_protocol in {
+            WireProtocol.RESPONSES,
+            WireProtocol.CHAT_COMPLETIONS,
+        }:
+            from .invocation import invocation_scope_from_metadata
+
+            if selected_tools and (
+                not self.capabilities.supports_tool_calling
+                or not self.protocol_route.policy.allow_tools
+            ):
+                raise LLMError(
+                    "capability_error",
+                    f"profile `{self.profile_id}` 不支持 tool calling",
+                    retryable=False,
+                )
+            semantic_request = self._project_semantic_request_or_raise(
+                SemanticProjectionInput(
+                    messages=tuple(provider_messages),
+                    tools=tuple(selected_tools),
+                    scope=invocation_scope or invocation_scope_from_metadata(metadata),
+                    settings=SemanticGenerationSettings(
+                        max_output_tokens=self.profile.max_output_tokens,
+                        stream=stream,
+                        tool_choice=(
+                            "auto"
+                            if self.protocol_route.policy.allow_explicit_tool_choice
+                            and self.protocol_route.compat.tool_choice_mode != "omit"
+                            else "omit"
+                        ),
+                    ),
+                    tool_to_schema=lambda tool: (
+                        sanitize_tool_schema(self.adapter.sanitize_tool_schema(_tool_to_schema(tool)))
+                        if self.protocol_route.policy.tool_schema_policy == "minimal"
+                        or self.protocol_route.compat.strict_message_keys
+                        else self.adapter.sanitize_tool_schema(_tool_to_schema(tool))
+                    ),
+                    system_message_policy=self.protocol_route.policy.system_message_policy,
+                    allow_assistant_prefill=self.protocol_route.policy.allow_assistant_prefill,
+                    reasoning_roundtrip=self.protocol_route.compat.reasoning_roundtrip,
+                )
+            )
+            wire_payload = wire_adapter.encode_request(semantic_request, route=self.protocol_route)
+            built = compose_runtime_wire_payload(
+                build_input,
+                wire_payload=wire_payload,
+                has_prompt_cache_control=_messages_have_prompt_cache_control(provider_messages),
+            )
+        else:
+            raise AssertionError("registered wire adapter uses unsupported protocol")
         self._last_payload_protocol_summary = dict(built.summary or payload_protocol_summary(built.payload, self.protocol_route))
         return built.payload
 
@@ -1387,17 +1512,15 @@ class LLMClient:
         self,
         response: Any,
         metadata: Optional[Dict[str, Any]],
+        invocation_scope: Any = None,
     ) -> Optional[TurnOutcome]:
         from .invocation import invocation_scope_from_metadata
 
-        try:
-            adapter = _CANONICAL_WIRE_ADAPTERS.resolve(self.protocol_route)
-        except LookupError:
-            return None
+        adapter = self._required_wire_adapter()
         return adapter.decode_response(
             response,
             route=self.protocol_route,
-            scope=invocation_scope_from_metadata(metadata),
+            scope=invocation_scope or invocation_scope_from_metadata(metadata),
         )
 
     @staticmethod
@@ -1425,8 +1548,17 @@ class LLMClient:
         ]
 
     def invoke(self, messages: List[Any], *, tools: Optional[List[Any]] = None, metadata: Optional[Dict[str, Any]] = None) -> AIMessage:
+        from .invocation import invocation_scope_from_metadata
+
         start = time.time()
-        payload = self._build_payload(messages, tools=tools, stream=False)
+        invocation_scope = invocation_scope_from_metadata(metadata)
+        payload = self._build_payload(
+            messages,
+            tools=tools,
+            stream=False,
+            metadata=metadata,
+            invocation_scope=invocation_scope,
+        )
         provider_conversation_items = _payload_conversation_items(payload) or messages
         message_role_summary = _safe_message_role_summary(provider_conversation_items)
         message_order_summary = _safe_message_order_cache_summary(provider_conversation_items)
@@ -1490,7 +1622,11 @@ class LLMClient:
             tool_count=tool_count,
             metadata=event_metadata,
         )
-        turn_outcome = self._decode_canonical_response(response, metadata)
+        turn_outcome = self._decode_canonical_response(
+            response,
+            metadata,
+            invocation_scope=invocation_scope,
+        )
         latency_ms = int((time.time() - start) * 1000)
         message = self._responses_message(response) if _payload_uses_responses(payload) else self._choice_message(response)
         tool_calls = extract_message_tool_calls(message)
@@ -1766,17 +1902,9 @@ class LLMClient:
             normalized_iterator: Any = None
             with _llm_provider_proxy_env(self.config, payload.get("base_url")):
                 iterator = self._backend_for_payload(payload)(payload)
-                try:
-                    wire_adapter = _CANONICAL_WIRE_ADAPTERS.resolve(self.protocol_route)
-                except LookupError:
-                    wire_adapter = None
+                wire_adapter = self._required_wire_adapter()
                 if wire_adapter is None:
-                    stream_normalizer = (
-                        ResponsesStreamNormalizer()
-                        if _payload_uses_responses(payload)
-                        else self.adapter.stream_normalizer()
-                    )
-                    normalized_iterator = stream_normalizer.events(iterator)
+                    raise AssertionError("required wire adapter returned None")
                 else:
                     from .invocation import invocation_scope_from_metadata
 
@@ -1799,11 +1927,7 @@ class LLMClient:
                     )
                 try:
                     if wire_adapter is None:
-                        for event in normalized_iterator:
-                            _raise_if_llm_cancelled()
-                            emitted = True
-                            yield event
-                            _raise_if_llm_cancelled()
+                        raise AssertionError("required wire adapter returned None")
                     else:
                         text_items_seen: set[str] = set()
                         canonical_usage: UsageStats | None = None
@@ -1882,7 +2006,13 @@ class LLMClient:
         from .invocation import invocation_scope_from_metadata
 
         invocation_scope = invocation_scope_from_metadata(metadata)
-        payload = self._build_payload(messages, tools=tools, stream=True)
+        payload = self._build_payload(
+            messages,
+            tools=tools,
+            stream=True,
+            metadata=metadata,
+            invocation_scope=invocation_scope,
+        )
         message_count = len(messages or [])
         effective_tools = tools if tools is not None else self.bound_tools
         tool_count = len(effective_tools or [])
