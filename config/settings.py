@@ -431,7 +431,14 @@ def _canonicalize_model_library_api_key_envs(public_config: Dict[str, Any]) -> D
 
 
 def _canonicalize_runtime_public_config(public_config: Dict[str, Any]) -> Dict[str, Any]:
-    repaired = _repair_legacy_model_library_shape(public_config)
+    candidate = copy.deepcopy(public_config)
+    llm = candidate.get("llm", {})
+    schema_version = int(llm.get("schema_version") or 1) if isinstance(llm, dict) else 1
+    if schema_version == 2:
+        from .llm_projection import project_v2_llm_for_runtime
+
+        return project_v2_llm_for_runtime(candidate)
+    repaired = _repair_legacy_model_library_shape(candidate)
     with_profile_models = _ensure_profile_model_library_entries(repaired)
     return _ensure_model_library_prompt_cache_defaults(with_profile_models)
 
@@ -528,7 +535,11 @@ def _unconfigured_profile_stub() -> Dict[str, Any]:
     }
 
 
-def _materialize_model_ref_profiles(llm_section: Dict[str, Any]) -> None:
+def _materialize_model_ref_profiles(
+    llm_section: Dict[str, Any],
+    *,
+    preserve_model_ref: bool = False,
+) -> None:
     model_library = llm_section.get("model_library")
     profiles = llm_section.get("profiles")
     if not isinstance(model_library, dict) or not isinstance(profiles, dict):
@@ -551,6 +562,11 @@ def _materialize_model_ref_profiles(llm_section: Dict[str, Any]) -> None:
                 provider = _inline_provider_payload(item.get("provider"))
                 if provider:
                     materialized["provider"] = provider
+                if preserve_model_ref:
+                    provider_id = str(item.get("provider_id", "") or "").strip()
+                    if provider_id:
+                        materialized["provider_id"] = provider_id
+                    materialized["model_ref"] = model_ref
                 model_name = str(item.get("model", "") or "").strip()
                 if model_name:
                     materialized["model"] = model_name
@@ -562,8 +578,9 @@ def _materialize_model_ref_profiles(llm_section: Dict[str, Any]) -> None:
             materialized = _unconfigured_profile_stub()
 
         profile.pop("provider", None)
-        profile.pop("provider_id", None)
-        profile.pop("model_ref", None)
+        if not preserve_model_ref:
+            profile.pop("provider_id", None)
+            profile.pop("model_ref", None)
         profile.pop("overrides", None)
         profile.update(materialized)
         profile.update(overrides)
@@ -627,7 +644,7 @@ def _materialize_inline_llm_providers(llm_section: Dict[str, Any]) -> None:
 
 def normalize_public_config_dict(config: Dict[str, Any]) -> Dict[str, Any]:
     """将公开 TOML 结构转换为运行时模型结构。"""
-    result = copy.deepcopy(config)
+    result = _canonicalize_runtime_public_config(config)
 
     if "llm" in result and isinstance(result["llm"], dict):
         llm_section = result["llm"]
@@ -651,7 +668,15 @@ def normalize_public_config_dict(config: Dict[str, Any]) -> Dict[str, Any]:
             )
         # Accept role_bindings only as an input compatibility shim; it is
         # normalized away before the config reaches the runtime/UI layers.
-        supported_llm_keys = {"providers", "profiles", "role_bindings", "discovery", "model_library"}
+        supported_llm_keys = {
+            "schema_version",
+            "providers",
+            "profiles",
+            "role_bindings",
+            "discovery",
+            "model_library",
+            "model_aliases",
+        }
         unknown_llm_keys = sorted(key for key in llm_section if key not in supported_llm_keys)
         if unknown_llm_keys:
             raise ValueError(
@@ -660,8 +685,10 @@ def normalize_public_config_dict(config: Dict[str, Any]) -> Dict[str, Any]:
                 + ". Use [llm.profiles.<id>] / [llm.model_library.<id>] / [llm.discovery]."
             )
         _materialize_role_bound_profiles(llm_section)
-        _materialize_model_ref_profiles(llm_section)
-        _materialize_inline_llm_providers(llm_section)
+        schema_version = int(llm_section.get("schema_version") or 1)
+        _materialize_model_ref_profiles(llm_section, preserve_model_ref=schema_version == 2)
+        if schema_version == 1:
+            _materialize_inline_llm_providers(llm_section)
 
     if "pet" in result and isinstance(result["pet"], dict):
         pet_section = result["pet"]

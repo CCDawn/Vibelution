@@ -17,7 +17,6 @@ from typing import Any
 import tomllib
 from core.llm import LLMInvocationContext, assert_llm_compatibility, invoke_llm
 from .llm_security import (
-    coerce_llm_probe_timeout,
     coerce_llm_runtime_probe_timeout,
     is_llm_local_network_base_url,
     redact_llm_probe_error,
@@ -868,7 +867,14 @@ def _ensure_profile_model_library_entries(public_config: dict) -> dict:
 
 
 def _canonicalize_public_config(public_config: dict) -> dict:
-    denormalized = denormalize_config_dict(copy.deepcopy(public_config))
+    candidate = copy.deepcopy(public_config) if isinstance(public_config, dict) else {}
+    llm = candidate.get("llm", {})
+    schema_version = int(llm.get("schema_version") or 1) if isinstance(llm, dict) else 1
+    if schema_version == 2:
+        build_effective_config_for_validation = normalize_public_config_dict(candidate)
+        AppConfig.model_validate(build_effective_config_for_validation)
+        return candidate
+    denormalized = denormalize_config_dict(candidate)
     repaired = _repair_legacy_model_library_shape(denormalized)
     with_profile_models = _ensure_profile_model_library_entries(repaired)
     with_prompt_cache_defaults = _ensure_model_library_prompt_cache_defaults(with_profile_models)
