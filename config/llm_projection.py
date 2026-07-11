@@ -80,6 +80,8 @@ def project_v2_llm_for_runtime(public_config: dict[str, Any]) -> dict[str, Any]:
     llm = projected.setdefault("llm", {})
     if int(llm.get("schema_version") or 1) != 2:
         return projected
+    if "model_library" in llm:
+        raise ValueError("llm.model_library is not allowed in schema v2 input")
     providers = llm.get("providers")
     profiles = llm.get("profiles")
     if not isinstance(providers, dict) or not isinstance(profiles, dict):

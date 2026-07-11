@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 from config.models import AppConfig
-from config.public_config import build_effective_config, public_config_hash
+from config.public_config import build_effective_config, load_public_config, public_config_hash
 from config.settings import normalize_public_config_dict
 
 
@@ -162,6 +162,60 @@ def test_v2_public_config_boundary_rejects_inline_secret_without_echo() -> None:
     message = str(exc_info.value)
     assert message == "schema v2 credential ownership violation: provider.api_key"
     assert "public-secret-must-not-appear" not in message
+
+
+def test_v2_public_config_hash_rejects_input_model_library_without_echo() -> None:
+    public_config = _v2_config()
+    public_config["llm"]["model_library"] = {
+        "secret-model-key": {"model": "legacy", "api_key": "hash-secret-must-not-appear"}
+    }
+
+    with pytest.raises(ValueError) as exc_info:
+        public_config_hash(public_config)
+
+    message = str(exc_info.value)
+    assert message == "llm.model_library is not allowed in schema v2 input"
+    assert "secret-model-key" not in message
+    assert "hash-secret-must-not-appear" not in message
+
+
+def test_v2_load_public_config_rejects_input_model_library_without_echo(tmp_path) -> None:
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        """
+[llm]
+schema_version = 2
+
+[llm.model_library.secret_model_key]
+model = "legacy"
+api_key = "load-secret-must-not-appear"
+""".strip(),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError) as exc_info:
+        load_public_config(config_path)
+
+    message = str(exc_info.value)
+    assert message == "llm.model_library is not allowed in schema v2 input"
+    assert "secret_model_key" not in message
+    assert "load-secret-must-not-appear" not in message
+
+
+def test_v1_public_config_hash_still_accepts_legacy_model_library() -> None:
+    legacy = {
+        "llm": {
+            "model_library": {
+                "relay_model": {
+                    "provider": {"kind": "relay", "base_url": "https://relay.example/v1"},
+                    "model": "gpt-5.6-luna",
+                }
+            },
+            "profiles": {"primary": {"model_ref": "relay_model"}},
+        }
+    }
+
+    assert len(public_config_hash(legacy)) == 64
 
 
 @pytest.mark.parametrize("scope", ["defaults", "overrides"])
