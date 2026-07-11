@@ -50,6 +50,10 @@ describe("VUI form primitives", () => {
     expect(markup).toContain('data-vui="select"');
     expect(markup).toContain('data-vui="textarea"');
     expect(markup).toContain('data-vui="checkbox"');
+    expect(markup).toContain('data-slot="checkbox-content"');
+    expect(markup).toContain('data-slot="checkbox-control"');
+    expect(markup).toContain('data-slot="checkbox-indicator"');
+    expect(markup).toContain('type="checkbox"');
     expect(markup).toContain("MiMo V2.5");
     expect(markup).toContain("Running only");
   });
