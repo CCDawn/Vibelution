@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Bot, CheckSquare, Clock3, FileText, GitBranch, GitCommitHorizontal, RefreshCw, Save, Square } from "lucide-react";
-import { type CSSProperties, type KeyboardEvent, type PointerEvent, useEffect, useMemo, useState } from "react";
+import { type CSSProperties, type KeyboardEvent, type PointerEvent, type ReactNode, useEffect, useMemo, useState } from "react";
 
 import { fetchJson } from "../api/client";
 import { queryKeys } from "../api/queryKeys";
@@ -15,7 +15,7 @@ import {
   GitStatusSummary,
 } from "../api/types";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
-import { deriveQueryPresentation } from "../app/queryPresentation";
+import { deriveQueryPresentation, type QueryPresentation } from "../app/queryPresentation";
 import { PaneCollapseHandle } from "../components/layout/PaneCollapseHandle";
 import {
   VButton,
@@ -61,6 +61,49 @@ type GitObjectSelection = {
   label: string;
   sourceLabel: string;
 };
+
+type GitRecentCommitsStateProps = {
+  commitsContent: ReactNode;
+  emptyMessage: ReactNode;
+  errorLabel: ReactNode;
+  loadingLabel: ReactNode;
+  onRetry: () => void;
+  presentation: QueryPresentation;
+  retryLabel: ReactNode;
+};
+
+export function GitRecentCommitsState({
+  commitsContent,
+  emptyMessage,
+  errorLabel,
+  loadingLabel,
+  onRetry,
+  presentation,
+  retryLabel,
+}: GitRecentCommitsStateProps) {
+  if (presentation === "initial-loading") {
+    return <VStateSurface tone="loading" title={loadingLabel} skeletonLines />;
+  }
+  if (presentation === "error-empty") {
+    return (
+      <VStateSurface
+        tone="error"
+        title={errorLabel}
+        actions={(
+          <VButton type="button" variant="secondary" onPress={onRetry}>{retryLabel}</VButton>
+        )}
+      />
+    );
+  }
+  return (
+    <>
+      {presentation === "error-with-data" ? <p className={styles.notice}>{errorLabel}</p> : null}
+      <div className={styles.commitList}>
+        {commitsContent || <p className={styles.emptyState}>{emptyMessage}</p>}
+      </div>
+    </>
+  );
+}
 
 export function GitRoute() {
   const { lang, t } = useGitRouteI18n();
@@ -477,31 +520,20 @@ export function GitRoute() {
     );
   }
 
-  function renderRecentCommitsContent() {
-    if (commitsPresentation === "initial-loading") {
-      return <VStateSurface tone="loading" title={gitCommitsLoading} skeletonLines />;
-    }
-    if (commitsPresentation === "error-empty") {
-      return (
-        <VStateSurface
-          tone="error"
-          title={gitCommitsError}
-          actions={(
-            <VButton type="button" variant="secondary" onPress={() => void commitsQuery.refetch()}>{retryLabel}</VButton>
-          )}
-        />
-      );
-    }
-    return (
-      <>
-        {commitsPresentation === "error-with-data" ? <p className={styles.notice}>{gitCommitsError}</p> : null}
-        <div className={styles.commitList}>
-          {recentCommits.map((commit) => renderCommitItem(commit, gitCommitSourceLabel))}
-          {!recentCommits.length ? <p className={styles.emptyState}>{commitsQuery.data?.error || t("gitNoCommits")}</p> : null}
-        </div>
-      </>
-    );
-  }
+  const recentCommitsContent = recentCommits.length
+    ? recentCommits.map((commit) => renderCommitItem(commit, gitCommitSourceLabel))
+    : null;
+  const renderRecentCommitsContent = () => (
+    <GitRecentCommitsState
+      presentation={commitsPresentation}
+      commitsContent={recentCommitsContent}
+      emptyMessage={commitsQuery.data?.error || t("gitNoCommits")}
+      errorLabel={gitCommitsError}
+      loadingLabel={gitCommitsLoading}
+      retryLabel={retryLabel}
+      onRetry={() => void commitsQuery.refetch()}
+    />
+  );
 
   return (
     <section className={styles.route}>
