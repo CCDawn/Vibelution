@@ -14,7 +14,10 @@ _SAFE_MODEL_KEY_RE = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
 
 def normalize_provider_endpoint(base_url: str) -> str:
     value = str(base_url or "").strip()
-    parsed = urlsplit(value)
+    try:
+        parsed = urlsplit(value)
+    except ValueError:
+        raise ValueError("provider base_url must be an absolute http(s) URL") from None
     if parsed.scheme.lower() not in {"http", "https"} or not parsed.hostname:
         raise ValueError("provider base_url must be an absolute http(s) URL")
     if parsed.username or parsed.password or parsed.query or parsed.fragment:
@@ -22,7 +25,10 @@ def normalize_provider_endpoint(base_url: str) -> str:
     scheme = parsed.scheme.lower()
     host = parsed.hostname.lower()
     display_host = f"[{host}]" if ":" in host else host
-    port = parsed.port
+    try:
+        port = parsed.port
+    except ValueError:
+        raise ValueError("provider base_url contains an invalid port") from None
     if port is not None and not ((scheme == "https" and port == 443) or (scheme == "http" and port == 80)):
         display_host = f"{display_host}:{port}"
     path = parsed.path.rstrip("/")
@@ -57,6 +63,8 @@ def validate_provider_id(provider_id: str) -> str:
 
 
 def make_model_key(upstream_id: str, *, max_length: int = 96) -> str:
+    if max_length < 10:
+        raise ValueError("max_length must be at least 10")
     exact = unicodedata.normalize("NFKC", str(upstream_id or "").strip())
     if not exact:
         raise ValueError("upstream_id is required")
