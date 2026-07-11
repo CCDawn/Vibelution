@@ -7,6 +7,7 @@ import ctypes
 import hashlib
 import os
 import queue
+import re
 import secrets
 import subprocess
 import threading
@@ -28,7 +29,12 @@ from config.runtime_capabilities import (
 )
 from config.llm_identity import make_model_ref, split_model_ref, validate_provider_id
 from config.llm_provider_registry import pin_llm_model
-from config.model_catalog import load_model_catalog_state, provider_catalog_refresh_due
+from config.model_catalog import (
+    CAPABILITY_SOURCE_PRIORITY,
+    CAPABILITY_VALUES,
+    load_model_catalog_state,
+    provider_catalog_refresh_due,
+)
 from core.chat.chat_task_types import trim_lines
 from core.llm import LLMInvocationContext, invoke_llm
 from core.llm.provider_discovery.service import discover_provider_models
@@ -78,6 +84,20 @@ class ConfigConflictError(ValueError):
 
 
 _MISSING = object()
+
+_MAX_CATALOG_CAPABILITY_FIELDS = 50
+_SENSITIVE_CATALOG_CAPABILITY_FIELD_PARTS = (
+    "authorization",
+    "credential",
+    "error",
+    "key",
+    "metadata",
+    "password",
+    "query",
+    "raw",
+    "secret",
+    "token",
+)
 
 
 PROFILE_LABELS = {
@@ -1227,6 +1247,51 @@ def _catalog_protocol_diagnostic(
     return ""
 
 
+def _bounded_catalog_capability_string(value: Any) -> str:
+    if not isinstance(value, str) or _PENDING_SECRET_PREFIX in value:
+        return ""
+    return value[:64]
+
+
+def _project_catalog_capabilities(value: Any) -> dict[str, Any]:
+    capabilities = value if isinstance(value, dict) else {}
+    projected: dict[str, Any] = {}
+    for raw_field, raw_observation in list(capabilities.items())[
+        :_MAX_CATALOG_CAPABILITY_FIELDS
+    ]:
+        if not isinstance(raw_field, str) or not isinstance(raw_observation, dict):
+            continue
+        field = raw_field.strip()
+        if (
+            not re.fullmatch(r"[a-z][a-z0-9_]{0,63}", field)
+            or any(
+                part in field
+                for part in _SENSITIVE_CATALOG_CAPABILITY_FIELD_PARTS
+            )
+        ):
+            continue
+        observation_value = raw_observation.get("value")
+        source = raw_observation.get("source")
+        if (
+            not isinstance(observation_value, str)
+            or observation_value not in CAPABILITY_VALUES
+            or not isinstance(source, str)
+            or source not in CAPABILITY_SOURCE_PRIORITY
+        ):
+            continue
+        projected[field] = {
+            "value": observation_value,
+            "source": source,
+            "confidence": _bounded_catalog_capability_string(
+                raw_observation.get("confidence")
+            ),
+            "checked_at": _bounded_catalog_capability_string(
+                raw_observation.get("checked_at")
+            ),
+        }
+    return projected
+
+
 def summarize_model_catalog(
     state: dict[str, Any],
     *,
@@ -1303,8 +1368,8 @@ def summarize_model_catalog(
                 )[:256],
                 "availability": availability,
                 "status": protocol_status or availability,
-                "capabilities": copy.deepcopy(
-                    catalog_model.get("capabilities", {})
+                "capabilities": _project_catalog_capabilities(
+                    catalog_model.get("capabilities")
                 ),
             }
         status = provider_protocol_status or str(

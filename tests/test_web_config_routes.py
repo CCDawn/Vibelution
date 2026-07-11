@@ -289,7 +289,7 @@ def test_provider_create_discover_and_pin_routes_chain_full_workspace(
     assert "secret-value" not in pinned_response.text
 
 
-def test_provider_route_returns_full_workspace_catalog_capability_provenance(
+def test_provider_create_and_discover_routes_redact_catalog_capability_provenance(
     monkeypatch,
     tmp_path,
 ) -> None:
@@ -341,6 +341,9 @@ def test_provider_route_returns_full_workspace_catalog_capability_provenance(
                                     "source": "runtime_probe",
                                     "confidence": "high",
                                     "checked_at": "2026-07-11T10:00:00Z",
+                                    "error": "Bearer secret-value",
+                                    "rawMetadata": {"token": "secret-value"},
+                                    "unknownNested": {"secret": "secret-value"},
                                 },
                                 "tool_calling": {
                                     "value": "unsupported",
@@ -358,6 +361,10 @@ def test_provider_route_returns_full_workspace_catalog_capability_provenance(
                                     "value": "supported",
                                     "source": "operator_override",
                                 },
+                                "raw_payload": {
+                                    "value": "unknown",
+                                    "source": "runtime_probe",
+                                },
                             },
                         }
                     },
@@ -373,6 +380,17 @@ def test_provider_route_returns_full_workspace_catalog_capability_provenance(
         provider_config_service,
         "load_public_config",
         lambda: copy.deepcopy(submitted),
+    )
+    monkeypatch.setattr(
+        provider_config_service,
+        "discover_provider_models",
+        lambda _public_config, provider_id, **_kwargs: SimpleNamespace(
+            provider_id=provider_id,
+            adapter_id="manual",
+            attempted_endpoints=(),
+            discovered_at="2026-07-11T10:05:00Z",
+            models=(),
+        ),
     )
 
     response = client.post(
@@ -398,24 +416,56 @@ def test_provider_route_returns_full_workspace_catalog_capability_provenance(
     )
 
     assert response.status_code == 200, response.text
-    workspace = response.json()
-    assert {"publicConfig", "draftMeta", "editorSections"} <= set(workspace)
-    model = workspace["modelCatalog"]["providers"]["relay_a"]["models"][
-        "base-model"
-    ]
-    assert model["capabilities"]["image_input"] == {
-        "value": "supported",
-        "source": "runtime_probe",
-        "confidence": "high",
-        "checked_at": "2026-07-11T10:00:00Z",
-    }
-    assert model["capabilities"]["tool_calling"]["source"] == (
-        "provider_endpoint"
+    created = response.json()
+    discovered_response = client.post(
+        "/api/config/draft/providers/relay_a/discover",
+        json={
+            "publicConfig": created["publicConfig"],
+            "draftMeta": created["draftMeta"],
+            "baseHash": public_config_hash(submitted),
+            "providerId": "relay_a",
+        },
     )
-    assert model["capabilities"]["reasoning"]["source"] == "driver_default"
-    assert model["capabilities"]["credential_ref"]["source"] == (
-        "operator_override"
-    )
+    assert discovered_response.status_code == 200, discovered_response.text
+
+    for route_response in (response, discovered_response):
+        workspace = route_response.json()
+        assert {"publicConfig", "draftMeta", "editorSections"} <= set(workspace)
+        model = workspace["modelCatalog"]["providers"]["relay_a"]["models"][
+            "base-model"
+        ]
+        assert model["capabilities"] == {
+            "image_input": {
+                "value": "supported",
+                "source": "runtime_probe",
+                "confidence": "high",
+                "checked_at": "2026-07-11T10:00:00Z",
+            },
+            "tool_calling": {
+                "value": "unsupported",
+                "source": "provider_endpoint",
+                "confidence": "medium",
+                "checked_at": "2026-07-11T09:00:00Z",
+            },
+            "reasoning": {
+                "value": "unknown",
+                "source": "driver_default",
+                "confidence": "low",
+                "checked_at": "2026-07-11T08:00:00Z",
+            },
+        }
+        serialized = json.dumps(model["capabilities"])
+        for forbidden in (
+            "Bearer secret-value",
+            "rawMetadata",
+            "unknownNested",
+            "credential_ref",
+            "raw_payload",
+            "secret-value",
+            '"error"',
+        ):
+            assert forbidden not in serialized
+        assert "secret-value" not in route_response.text
 
 
 def test_provider_route_preview_projects_bounded_redacted_impacts(monkeypatch) -> None:
