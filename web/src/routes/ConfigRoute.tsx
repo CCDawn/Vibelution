@@ -2217,8 +2217,9 @@ export function ConfigRoute() {
     () =>
       deriveModelCenterSummary({
         modelOptions,
+        schemaVersion: workspace?.schemaVersion,
       }),
-    [modelOptions],
+    [modelOptions, workspace?.schemaVersion],
   );
   const modelCenterRows = useMemo(() => deriveModelCenterInventoryRows(modelOptions), [modelOptions]);
   useEffect(() => {
