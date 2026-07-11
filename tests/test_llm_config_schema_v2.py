@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from config.public_config import build_effective_config
+import pytest
+
+from config.models import AppConfig
+from config.public_config import build_effective_config, public_config_hash
 from config.settings import normalize_public_config_dict
 
 
@@ -106,3 +109,113 @@ def test_v2_projection_uses_cycle_safe_runtime_alias_resolver() -> None:
         assert str(exc) == "cyclic model alias: first"
     else:  # pragma: no cover - assertion guard
         raise AssertionError("cyclic aliases must be rejected")
+
+
+@pytest.mark.parametrize(
+    ("scope", "field"),
+    [
+        ("provider", "api_key"),
+        ("provider", "api_key_env"),
+        ("model", "api_key"),
+        ("model", "api_key_env"),
+        ("model", "credential_ref"),
+        ("defaults", "api_key"),
+        ("defaults", "api_key_env"),
+        ("defaults", "credential_ref"),
+        ("profile", "api_key"),
+        ("profile", "api_key_env"),
+        ("profile", "credential_ref"),
+        ("overrides", "api_key"),
+        ("overrides", "api_key_env"),
+        ("overrides", "credential_ref"),
+    ],
+)
+def test_v2_rejects_credential_ownership_outside_provider_credential_ref(scope: str, field: str) -> None:
+    public_config = _v2_config()
+    provider = public_config["llm"]["providers"]["pixel_relay"]
+    model = provider["models"]["gpt-5.6-luna"]
+    profile = public_config["llm"]["profiles"]["primary"]
+    owner = {
+        "provider": provider,
+        "model": model,
+        "defaults": model["defaults"],
+        "profile": profile,
+        "overrides": profile["overrides"],
+    }[scope]
+    owner[field] = "secret-must-not-appear"
+
+    with pytest.raises(ValueError) as exc_info:
+        build_effective_config(public_config)
+
+    message = str(exc_info.value)
+    assert message == f"schema v2 credential ownership violation: {scope}.{field}"
+    assert "secret-must-not-appear" not in message
+
+
+def test_v2_public_config_boundary_rejects_inline_secret_without_echo() -> None:
+    public_config = _v2_config()
+    public_config["llm"]["providers"]["pixel_relay"]["api_key"] = "public-secret-must-not-appear"
+
+    with pytest.raises(ValueError) as exc_info:
+        public_config_hash(public_config)
+
+    message = str(exc_info.value)
+    assert message == "schema v2 credential ownership violation: provider.api_key"
+    assert "public-secret-must-not-appear" not in message
+
+
+@pytest.mark.parametrize("scope", ["defaults", "overrides"])
+def test_v2_rejects_runtime_fields_outside_explicit_allowlist(scope: str) -> None:
+    public_config = _v2_config()
+    provider = public_config["llm"]["providers"]["pixel_relay"]
+    target = (
+        provider["models"]["gpt-5.6-luna"]["defaults"]
+        if scope == "defaults"
+        else public_config["llm"]["profiles"]["primary"]["overrides"]
+    )
+    target["unapproved_runtime_flag"] = True
+
+    with pytest.raises(ValueError) as exc_info:
+        normalize_public_config_dict(public_config)
+
+    assert str(exc_info.value) == f"unsupported schema v2 runtime field: {scope}.unapproved_runtime_flag"
+
+
+@pytest.mark.parametrize("missing_section", ["providers", "profiles"])
+def test_v2_empty_provider_or_profile_set_fails_closed_without_legacy_defaults(missing_section: str) -> None:
+    public_config = _v2_config()
+    public_config["llm"][missing_section] = {}
+
+    with pytest.raises(ValueError, match=f"^llm.{missing_section} must not be empty in schema v2$"):
+        normalize_public_config_dict(public_config)
+
+    typed_input = {"llm": {"schema_version": 2, "providers": {}, "profiles": {}}}
+    with pytest.raises(ValueError) as typed_exc_info:
+        AppConfig.model_validate(typed_input)
+    assert "llm.providers must not be empty in schema v2" in str(typed_exc_info.value)
+
+
+@pytest.mark.parametrize(
+    "upstream_id",
+    [
+        "  model with spaces  ",
+        "模型/版本 β",
+        "../models/private\\checkpoint",
+    ],
+)
+def test_v2_projection_preserves_nonempty_upstream_id_exactly(upstream_id: str) -> None:
+    public_config = _v2_config()
+    public_config["llm"]["providers"]["pixel_relay"]["models"]["gpt-5.6-luna"]["upstream_id"] = upstream_id
+
+    normalized = normalize_public_config_dict(public_config)
+
+    assert normalized["llm"]["model_library"]["pixel_relay/gpt-5.6-luna"]["model"] == upstream_id
+    assert normalized["llm"]["profiles"]["primary"]["model"] == upstream_id
+
+
+def test_v2_projection_rejects_whitespace_only_upstream_id() -> None:
+    public_config = _v2_config()
+    public_config["llm"]["providers"]["pixel_relay"]["models"]["gpt-5.6-luna"]["upstream_id"] = " \t\n "
+
+    with pytest.raises(ValueError, match="^pinned model pixel_relay/gpt-5.6-luna requires upstream_id$"):
+        normalize_public_config_dict(public_config)

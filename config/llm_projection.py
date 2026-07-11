@@ -7,6 +7,50 @@ from .llm_credentials import canonicalize_credential_ref
 from .llm_identity import make_model_ref, split_model_ref, validate_provider_id
 
 
+_CREDENTIAL_OWNERSHIP_FIELDS = frozenset({"api_key", "api_key_env", "credential_ref"})
+V2_RUNTIME_OVERRIDE_FIELDS = frozenset(
+    {
+        "compat",
+        "connect_timeout",
+        "contract",
+        "discovery_enabled",
+        "max_output_tokens",
+        "prompt_cache",
+        "protocol",
+        "reasoning_effort",
+        "reasoning_state_field",
+        "retry_policy",
+        "streaming",
+        "strict_compatibility",
+        "supports_image_input",
+        "temperature",
+        "thinking_display",
+        "thinking_type",
+        "timeout",
+        "tool_calling_mode",
+        "transport",
+    }
+)
+
+
+def _validate_credential_ownership(
+    payload: dict[str, Any],
+    scope: str,
+    *,
+    allowed: frozenset[str] = frozenset(),
+) -> None:
+    forbidden = sorted((_CREDENTIAL_OWNERSHIP_FIELDS - allowed).intersection(payload))
+    if forbidden:
+        raise ValueError(f"schema v2 credential ownership violation: {scope}.{forbidden[0]}")
+
+
+def _validate_runtime_overrides(payload: dict[str, Any], scope: str) -> None:
+    _validate_credential_ownership(payload, scope)
+    unsupported = sorted(set(payload) - V2_RUNTIME_OVERRIDE_FIELDS)
+    if unsupported:
+        raise ValueError(f"unsupported schema v2 runtime field: {scope}.{unsupported[0]}")
+
+
 def _credential_env(credential_ref: str) -> str:
     canonical = canonicalize_credential_ref(credential_ref)
     return canonical.removeprefix("env:") if canonical.startswith("env:") else ""
@@ -40,12 +84,17 @@ def project_v2_llm_for_runtime(public_config: dict[str, Any]) -> dict[str, Any]:
     profiles = llm.get("profiles")
     if not isinstance(providers, dict) or not isinstance(profiles, dict):
         raise ValueError("llm.providers and llm.profiles must be objects in schema v2")
+    if not providers:
+        raise ValueError("llm.providers must not be empty in schema v2")
+    if not profiles:
+        raise ValueError("llm.profiles must not be empty in schema v2")
     runtime_providers: dict[str, dict[str, Any]] = {}
     runtime_models: dict[str, dict[str, Any]] = {}
     for provider_id, raw_provider in providers.items():
         validate_provider_id(str(provider_id))
         if not isinstance(raw_provider, dict):
             raise ValueError(f"llm.providers.{provider_id} must be an object")
+        _validate_credential_ownership(raw_provider, "provider", allowed=frozenset({"credential_ref"}))
         runtime_providers[str(provider_id)] = _runtime_provider(str(provider_id), raw_provider)
         raw_models = raw_provider.get("models", {})
         if not isinstance(raw_models, dict):
@@ -54,16 +103,18 @@ def project_v2_llm_for_runtime(public_config: dict[str, Any]) -> dict[str, Any]:
             model_ref = make_model_ref(str(provider_id), str(model_key))
             if not isinstance(raw_model, dict):
                 raise ValueError(f"pinned model {model_ref} must be an object")
-            upstream_id = str(raw_model.get("upstream_id") or "").strip()
-            if not upstream_id:
+            _validate_credential_ownership(raw_model, "model")
+            raw_upstream_id = raw_model.get("upstream_id")
+            if not isinstance(raw_upstream_id, str) or not raw_upstream_id.strip():
                 raise ValueError(f"pinned model {model_ref} requires upstream_id")
             defaults = raw_model.get("defaults", {}) if isinstance(raw_model.get("defaults"), dict) else {}
+            _validate_runtime_overrides(defaults, "defaults")
             runtime_models[model_ref] = {
                 **copy.deepcopy(raw_model),
                 **copy.deepcopy(defaults),
                 "provider_id": str(provider_id),
-                "model": upstream_id,
-                "label": str(raw_model.get("label") or upstream_id),
+                "model": raw_upstream_id,
+                "label": str(raw_model.get("label") or raw_upstream_id),
                 "transport": str(
                     raw_model.get("wire_protocol") or raw_provider.get("protocols", {}).get("default") or ""
                 ),
@@ -80,6 +131,7 @@ def project_v2_llm_for_runtime(public_config: dict[str, Any]) -> dict[str, Any]:
     for profile_id, raw_profile in profiles.items():
         if not isinstance(raw_profile, dict):
             raise ValueError(f"llm.profiles.{profile_id} must be an object")
+        _validate_credential_ownership(raw_profile, "profile")
         requested_ref = str(raw_profile.get("model_ref") or "").strip()
         model_ref = alias_resolver.resolve_model_ref(requested_ref)
         provider_id, model_key = split_model_ref(model_ref)
@@ -88,6 +140,7 @@ def project_v2_llm_for_runtime(public_config: dict[str, Any]) -> dict[str, Any]:
         if model is None:
             raise ValueError(f"unknown profile model_ref: {requested_ref}")
         overrides = raw_profile.get("overrides", {}) if isinstance(raw_profile.get("overrides"), dict) else {}
+        _validate_runtime_overrides(overrides, "overrides")
         runtime_profiles[str(profile_id)] = {
             **copy.deepcopy(model),
             **copy.deepcopy(overrides),

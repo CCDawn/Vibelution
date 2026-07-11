@@ -567,8 +567,10 @@ def _materialize_model_ref_profiles(
                     if provider_id:
                         materialized["provider_id"] = provider_id
                     materialized["model_ref"] = model_ref
-                model_name = str(item.get("model", "") or "").strip()
-                if model_name:
+                model_name = str(item.get("model", "") or "")
+                if model_name.strip():
+                    if not preserve_model_ref:
+                        model_name = model_name.strip()
                     materialized["model"] = model_name
                 for key in PROFILE_REFERENCE_OVERRIDE_FIELDS:
                     if key in item:
