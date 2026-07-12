@@ -69,6 +69,15 @@ const memoryCssSource = [
 const graphWorkerSource = readFileSync(new URL("./memoryGraphLayout.worker.ts", import.meta.url), "utf-8");
 
 describe("MemoryRoute layout contract", () => {
+  it("cancels stale entry queries when the memory view changes", () => {
+    const entryQuerySource = routeSource.slice(
+      routeSource.indexOf("const overviewQuery = useQuery"),
+      routeSource.indexOf("const knowledgeActorAgents ="),
+    );
+    expect(entryQuerySource.match(/queryFn: \(\{ signal \}\) =>/g)?.length ?? 0).toBe(5);
+    expect(entryQuerySource).not.toContain("queryFn: () =>");
+    expect(entryQuerySource.match(/\{ signal \}/g)?.length ?? 0).toBe(10);
+  });
   it("uses shell language state without loading the full app dictionary", () => {
     expect(routeSource).toContain("useShellI18n");
     expect(routeSource).toContain("const { lang } = useShellI18n()");
@@ -77,7 +86,7 @@ describe("MemoryRoute layout contract", () => {
 
   it("reads the read-only memory overview endpoint through the shared query key", () => {
     expect(routeSource).toContain("queryKeys.memoryOverview()");
-    expect(routeSource).toContain('fetchJson<MemoryOverview>("/api/memory/overview?includeContent=false")');
+    expect(routeSource).toContain('fetchJson<MemoryOverview>("/api/memory/overview?includeContent=false", { signal })');
     expect(routeSource).toContain("queryKeys.memoryItemDetail(activeSection?.id ?? \"\", activeItem?.id ?? \"\")");
     expect(routeSource).toContain("/api/memory/items/${encodeURIComponent(activeSection?.id ?? \"\")}/${encodeURIComponent(activeItem?.id ?? \"\")}");
     expect(routeSource).toContain("queryKeys.memoryItemDetails()");
@@ -85,7 +94,7 @@ describe("MemoryRoute layout contract", () => {
 
   it("reads Agent-private memory through the dedicated inventory API", () => {
     expect(routeSource).toContain("AgentMemoryInventoryPayload");
-    expect(routeSource).toContain('fetchJson<AgentMemoryInventoryPayload>("/api/memory/agents")');
+    expect(routeSource).toContain('fetchJson<AgentMemoryInventoryPayload>("/api/memory/agents", { signal })');
     expect(routeSource).toContain(
       "`/api/memory/agents/${encodeURIComponent(selectedAgentMemoryAgentId)}?actorAgentId=${encodeURIComponent(selectedAgentMemoryAgentId)}`",
     );
@@ -690,7 +699,7 @@ describe("MemoryRoute layout contract", () => {
 
   it("wires the team knowledge platform to a dashboard snapshot plus scoped action APIs", () => {
     expect(routeSource).toContain("queryKeys.memoryUsageContract()");
-    expect(routeSource).toContain('fetchJson<MemoryUsageContractPayload>("/api/memory/usage-contract")');
+    expect(routeSource).toContain('fetchJson<MemoryUsageContractPayload>("/api/memory/usage-contract", { signal })');
     expect(routeSource).toContain("queryKeys.knowledgeDashboardSnapshot(fallbackKnowledgeActorAgentId)");
     expect(routeSource).toContain("appendAgentParam(new URLSearchParams({");
     expect(routeSource).toContain('recommendationLimit: "6"');
