@@ -455,3 +455,50 @@ def test_turn_items_projection_prefers_explicit_canonical_v2(monkeypatch):
     )
 
     assert items == [canonical]
+
+
+def test_terminal_provider_error_builds_canonical_v2_item():
+    item = session_service._build_terminal_error_turn_item(
+        session_id="session-live",
+        turn_id="turn-1",
+        message_id="message-error",
+        content="模型服务上游暂时失败，本轮没有完成。",
+        metadata={
+            "kind": "turn_error",
+            "reasonCode": "upstream_unavailable",
+            "reasonSummary": "provider 上游服务不可用或网关失败",
+            "httpStatus": 502,
+            "providerErrorType": "upstream_error",
+            "provider": "ai-pixel_ad214f09",
+            "model": "gpt-5.6-luna",
+            "turnId": "turn-1",
+        },
+    )
+
+    assert item == {
+        "version": 2,
+        "id": "session-live-turn-turn-1-error:0",
+        "type": "error",
+        "sessionId": "session-live",
+        "turnId": "turn-1",
+        "itemId": "session-live-turn-turn-1-error",
+        "revision": 0,
+        "sequence": 1,
+        "kind": "error",
+        "phase": "turn_failed",
+        "status": "failed",
+        "provisional": False,
+        "terminal": True,
+        "messageId": "message-error",
+        "source": "session_turn_error",
+        "text": "模型服务上游暂时失败，本轮没有完成。",
+        "diagnosticSummary": {
+            "reasonCode": "upstream_unavailable",
+            "reasonSummary": "provider 上游服务不可用或网关失败",
+            "httpStatus": 502,
+            "providerErrorType": "upstream_error",
+            "provider": "ai-pixel_ad214f09",
+            "model": "gpt-5.6-luna",
+        },
+        "metadata": {"turnId": "turn-1"},
+    }

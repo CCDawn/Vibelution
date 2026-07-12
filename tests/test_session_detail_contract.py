@@ -1276,8 +1276,11 @@ def test_provider_failure_persists_previous_context_composition_with_missing_cac
         "session-live",
         {
             "status": "failed_provider",
-            "error": "provider timeout",
-            "summary": "provider timeout",
+            "error": (
+                "provider_protocol_error: litellm.BadGatewayError: "
+                "OpenAIException - upstream request failed"
+            ),
+            "summary": "模型服务上游暂时失败，本轮没有完成。",
             "context_composition": {
                 "turnId": "turn-context-failure",
                 "segments": [
@@ -1300,6 +1303,18 @@ def test_provider_failure_persists_previous_context_composition_with_missing_cac
     assert detail["lastContextComposition"]["segments"][0]["key"] == "current_user"
     assert detail["lastCacheComposition"]["source"] == "missing"
     assert detail["lastCacheComposition"]["segments"][0]["key"] == "missing"
+    error_messages = [
+        message
+        for message in detail["messages"]
+        if message.get("metadata", {}).get("kind") == "turn_error"
+    ]
+    assert len(error_messages) == 1
+    error_message = error_messages[0]
+    assert len(error_message["turnItems"]) == 1
+    assert error_message["turnItems"][0]["type"] == "error"
+    assert error_message["turnItems"][0]["terminal"] is True
+    assert error_message["turnItems"][0]["text"] == error_message["content"]
+    assert error_message["codexTranscript"]["cells"][0]["kind"] == "error_notice"
 
 
 def test_session_detail_keeps_persisted_tool_only_assistant_message(tmp_path, monkeypatch):
