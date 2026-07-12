@@ -125,6 +125,24 @@ describe("ConfigQuickSetupPanel", () => {
     expect(markup).toContain("保存并完成");
   });
 
+  it.each([
+    ["checking", "检测中…", "检测中"],
+    ["error", "重新检测", "需处理"],
+    ["saving", "保存中…", "保存中"],
+    ["success", "配置已保存", "已完成"],
+  ] as const)("aligns the primary feedback for %s", (phase, actionCopy, statusCopy) => {
+    const state = {
+      ...initialProviderQuickSetupState(),
+      phase,
+      errorKind: phase === "error" ? "auth" as const : "" as const,
+      errorMessage: phase === "error" ? "认证失败" : "",
+    };
+    const markup = renderToStaticMarkup(<ConfigQuickSetupPanel {...props({ state })} />);
+
+    expect(markup).toContain(actionCopy);
+    expect(markup).toContain(statusCopy);
+  });
+
   it("never renders a credential value in result or error copy", () => {
     const secret = "sk-never-render-this";
     const state = {
