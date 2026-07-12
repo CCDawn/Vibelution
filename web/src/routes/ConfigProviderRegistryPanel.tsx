@@ -28,6 +28,7 @@ export type ConfigProviderRegistryPanelProps = {
   onSelectProvider: (providerId: string) => void;
   onSelectTab: (tab: ConfigProviderRegistryTab) => void;
   onDiscover: (providerId: string) => void;
+  onEditCredential: (providerId: string) => void;
   onEditRoute: (providerId: string) => void;
   onUnpin: (modelRef: string) => void;
   onDeleteProvider: (providerId: string) => void;
@@ -239,6 +240,7 @@ export function ConfigProviderRegistryPanel({
   onSelectProvider,
   onSelectTab,
   onDiscover,
+  onEditCredential,
   onEditRoute,
   onUnpin,
   onDeleteProvider,
@@ -295,6 +297,12 @@ export function ConfigProviderRegistryPanel({
               </span>
               <VActionGroup ariaLabel="Provider 操作" className={styles.actions}>
                 <VButton icon={<RefreshCw size={14} />} isDisabled={disabled} onPress={() => onDiscover(provider.providerId)}>发现</VButton>
+                <VButton
+                  isDisabled={disabled || provider.credentialState === "not_required"}
+                  onPress={() => onEditCredential(provider.providerId)}
+                >
+                  设置 API Key
+                </VButton>
                 <VButton icon={<Route size={14} />} isDisabled={disabled} onPress={() => onEditRoute(provider.providerId)}>修改路由</VButton>
               </VActionGroup>
             </div>

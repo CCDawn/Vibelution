@@ -135,6 +135,19 @@ describe("ConfigRoute layout contract", () => {
     expect(routeSource).toContain("routePreview.impactedRefs.map");
   });
 
+  it("edits an existing Provider API Key through the draft credential boundary", () => {
+    expect(providerPanelSource).toContain("onEditCredential");
+    expect(providerPanelSource).toContain("设置 API Key");
+    expect(providerPanelSource).toContain('provider.credentialState === "not_required"');
+    expect(routeSource).toContain('type="password"');
+    expect(routeSource).toContain('`/api/config/draft/providers/${encodeURIComponent(providerId)}`');
+    expect(routeSource).toContain("buildProviderDraftRequest({ providerId, provider, credentialValue: providerCredentialValue })");
+    expect(routeSource).toContain('"PUT"');
+    expect(routeSource).toContain("最终保存会写入用户环境变量，不会写入 config.toml。");
+    expect(providerPanelSource).not.toContain("credential_ref");
+    expect(routeSource).not.toContain("credential_ref");
+  });
+
   it("uses backend pinned ownership and live references for destructive controls", () => {
     expect(providerPanelSource).toContain("provider.pinnedCount");
     expect(providerPanelSource).toContain("canUnpinProviderModel(provider, model)");
