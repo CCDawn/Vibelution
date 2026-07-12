@@ -152,7 +152,7 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain('method: "DELETE"');
     expect(routeSource).toContain("sendTeamProjectBusMessage(payload)");
     expect(routeSource).toContain("kernelTaskCenterHref");
-    expect(routeSource).toContain("listProjectAgentBusTimeline(PROJECT_AGENT_BUS_TEAM_TIMELINE_LIMIT)");
+    expect(routeSource).toContain("queryFn: ({ signal }) => listProjectAgentBusTimeline(PROJECT_AGENT_BUS_TEAM_TIMELINE_LIMIT, { signal })");
     expect(routeSource).toContain("revokeProjectAgentBusMessage({");
     expect(routeSource).toContain("/api/teams/${encodeURIComponent(teamId)}/chat-room/sync");
     expect(routeSource).toContain("syncTeamChatRoomMutation");
@@ -1292,11 +1292,8 @@ describe("TeamsRoute layout contract", () => {
     expect(queryLayerSource).toContain("queryFn: ({ signal }) => fetchJson<Team>(`/api/teams/${encodeURIComponent(effectiveTeamId)}?detail=${teamDetailLoadMode}`, { signal })");
     expect(queryLayerSource).toContain("queryFn: ({ signal }) => fetchJson<TeamOrganizationCanvas>(`/api/teams/${encodeURIComponent(effectiveTeamId)}/canvas`, { signal })");
     expect(queryLayerSource).toContain("queryFn: ({ signal }) =>");
-    expect(queryLayerSource.match(/queryFn: \(\{ signal \}\) =>/g)?.length ?? 0).toBe(24);
-    expect(queryLayerSource.match(/queryFn: \(\) =>/g) ?? []).toEqual([
-      "queryFn: () =>",
-    ]);
-    expect(queryLayerSource).toContain("queryFn: () => listProjectAgentBusTimeline");
+    expect(queryLayerSource.match(/queryFn: \(\{ signal \}\) =>/g)?.length ?? 0).toBe(25);
+    expect(queryLayerSource.match(/queryFn: \(\) =>/g) ?? []).toEqual([]);
     const sourceCollectionStageReturnRefreshSource = routeSource.slice(
       routeSource.indexOf("if (!researchWorkflowTeamSelected || !pageVisible"),
       routeSource.indexOf("if (!selectedTeam?.teamId || !selectedSourceCollectionRunEffectiveId || !selectedSourceCollectionSearchAccepted"),

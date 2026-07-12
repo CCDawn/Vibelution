@@ -4828,7 +4828,7 @@ export function TeamsRoute({
   });
   const projectBusQuery = useQuery({
     queryKey: queryKeys.projectAgentBus(),
-    queryFn: () => listProjectAgentBusTimeline(PROJECT_AGENT_BUS_TEAM_TIMELINE_LIMIT),
+    queryFn: ({ signal }) => listProjectAgentBusTimeline(PROJECT_AGENT_BUS_TEAM_TIMELINE_LIMIT, { signal }),
   });
   const activeAgents = useMemo(
     () => (agentSummaryQuery.data ?? []).filter((agent) => agent.status !== "archived"),

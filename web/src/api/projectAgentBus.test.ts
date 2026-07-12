@@ -1,7 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   isProjectAgentBusEventRevoked,
+  listProjectAgentBusTimeline,
   projectAgentBusEventsForTeam,
   projectAgentBusTimelineUrl,
 } from "./projectAgentBus";
@@ -33,6 +34,23 @@ describe("projectAgentBus api helpers", () => {
   it("builds canonical timeline urls", () => {
     expect(projectAgentBusTimelineUrl()).toBe("/api/project-agent-bus");
     expect(projectAgentBusTimelineUrl(120)).toBe("/api/project-agent-bus?limit=120");
+  });
+
+  it("forwards cancellation to the shared timeline request", async () => {
+    const controller = new AbortController();
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ events: [] }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await listProjectAgentBusTimeline(120, { signal: controller.signal });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/project-agent-bus?limit=120",
+      expect.objectContaining({ signal: controller.signal }),
+    );
+    vi.unstubAllGlobals();
   });
 
   it("detects revoked bus events without leaking status normalization to routes", () => {
