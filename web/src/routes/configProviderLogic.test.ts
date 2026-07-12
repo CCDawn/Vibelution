@@ -4,6 +4,7 @@ import type { ConfigCatalogModel, ConfigModelCatalog, ConfigProviderOption } fro
 import {
   buildProviderWizardDraft,
   canAdvanceProviderWizard,
+  canTestProviderModel,
   canUnpinProviderModel,
   deriveProviderRegistryRows,
   dispatchProviderWizardConnectionAction,
@@ -330,6 +331,12 @@ describe("configProviderLogic", () => {
     expect(canUnpinProviderModel(provider, missingRemote)).toBe(true);
     expect(canUnpinProviderModel(provider, observed)).toBe(false);
     expect(canUnpinProviderModel({ ...provider, pinnedCount: 0 }, pinned)).toBe(false);
+  });
+
+  it("allows real call tests only after a model is pinned", () => {
+    expect(canTestProviderModel(catalogModel("relay_a/pinned"))).toBe(true);
+    expect(canTestProviderModel({ ...catalogModel("relay_a/missing"), availability: "missing_remote" })).toBe(true);
+    expect(canTestProviderModel({ ...catalogModel("relay_a/observed"), availability: "observed" })).toBe(false);
   });
 
   it("accepts the redacted provider mutation allowlist without inventing identity", () => {
