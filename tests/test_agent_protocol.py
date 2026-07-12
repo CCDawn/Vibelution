@@ -421,6 +421,8 @@ class TestToolMessageFlow:
 
     def test_invoke_llm_uses_fallback_profile_after_exhausted_provider_error(self, monkeypatch):
         calls = []
+        invocation_ids = []
+        events = []
         recovery_inputs = []
 
         class DummyContext:
@@ -440,8 +442,15 @@ class TestToolMessageFlow:
         class PrimaryLLM:
             profile_id = "primary"
 
-            def invoke(self, _msgs, **_kwargs):
+            def effective_route_identity(self):
+                return ("relay", "responses", "gpt-5.6-luna", self.profile_id)
+
+            def effective_route_id(self):
+                return "primary-route"
+
+            def invoke(self, _msgs, **kwargs):
                 calls.append("primary")
+                invocation_ids.append(kwargs.get("metadata", {}).get("invocationId"))
                 raise LLMError(
                     "server_error",
                     "provider 服务异常",
@@ -456,8 +465,15 @@ class TestToolMessageFlow:
         class FallbackLLM:
             profile_id = "fallback_backup"
 
-            def invoke(self, _msgs, **_kwargs):
+            def effective_route_identity(self):
+                return ("local", "chat", "qwen-32b", self.profile_id)
+
+            def effective_route_id(self):
+                return "fallback-route"
+
+            def invoke(self, _msgs, **kwargs):
                 calls.append("fallback_backup")
+                invocation_ids.append(kwargs.get("metadata", {}).get("invocationId"))
                 return AIMessage(content="fallback ok")
 
         def fake_recovery(*_args, current_profile_id=None, **_kwargs):
@@ -478,6 +494,11 @@ class TestToolMessageFlow:
         monkeypatch.setattr(agent_module, "get_ui", lambda: DummyUI())
         monkeypatch.setattr(agent_module, "plan_llm_recovery", fake_recovery)
         monkeypatch.setattr(agent_module.logger, "log_error", lambda *_args, **_kwargs: None)
+        monkeypatch.setattr(
+            agent_module,
+            "_record_agent_scene_event",
+            lambda phase, code, **kwargs: events.append((phase, code, kwargs.get("fields") or {})),
+        )
 
         agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
         agent.llm_with_tools = PrimaryLLM()
@@ -500,8 +521,200 @@ class TestToolMessageFlow:
         assert result.content == "fallback ok"
         assert calls == ["primary", "fallback_backup"]
         assert recovery_inputs == ["primary"]
+        assert all(invocation_ids)
+        assert invocation_ids[0] != invocation_ids[1]
+        assert [code for _, code, _ in events].count("llm_fallback_selected") == 1
+        assert "hello" not in str(events)
 
-    def test_invoke_llm_retries_exhausted_stream_provider_error_without_streaming(self, monkeypatch):
+    def test_invoke_llm_rejects_duplicate_effective_fallback_before_io(self, monkeypatch):
+        calls = []
+        events = []
+
+        class DummyContext:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+        class DummyUI:
+            def thinking(self, _label):
+                return DummyContext()
+
+            def add_log(self, *_args, **_kwargs):
+                return None
+
+        class RouteLLM:
+            def __init__(self, profile_id, *, succeeds=False):
+                self.profile_id = profile_id
+                self.succeeds = succeeds
+
+            def effective_route_identity(self):
+                return ("relay", "responses", "gpt-5.6-luna")
+
+            def effective_route_id(self):
+                return f"{self.profile_id}-alias"
+
+            def invoke(self, _msgs, **_kwargs):
+                calls.append(self.profile_id)
+                if self.succeeds:
+                    return AIMessage(content="must not run")
+                raise LLMError(
+                    "server_error",
+                    "primary exhausted",
+                    retryable=True,
+                    details={"attempt": 5, "max_attempts": 5, "retry_budget_exhausted": True},
+                )
+
+        primary = RouteLLM("primary")
+        alias = RouteLLM("fallback_alias", succeeds=True)
+        monkeypatch.setattr(agent_module, "get_ui", lambda: DummyUI())
+        monkeypatch.setattr(agent_module.logger, "log_error", lambda *_args, **_kwargs: None)
+        monkeypatch.setattr(
+            agent_module,
+            "plan_llm_recovery",
+            lambda *_args, **_kwargs: SimpleNamespace(
+                category="server_error",
+                retryable=True,
+                action="retry_with_backoff",
+                user_message="provider 服务异常",
+                wait_seconds=0,
+                stop_current_turn=True,
+                disable_streaming=False,
+                disable_tools=False,
+                request_context_compression=False,
+                fallback_profile_id="fallback_alias",
+            ),
+        )
+        monkeypatch.setattr(
+            agent_module,
+            "_record_agent_scene_event",
+            lambda phase, code, **kwargs: events.append((phase, code, kwargs.get("fields") or {})),
+        )
+        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+        agent.llm_with_tools = primary
+        agent._base_llm = primary
+        agent.config = SimpleNamespace(
+            llm=SimpleNamespace(
+                model_name="gpt-5.6-luna",
+                provider="relay",
+                api_base="https://example.invalid",
+                api_timeout=30,
+            )
+        )
+        agent._should_stream_llm_for_turn = lambda *_args, **_kwargs: False
+        agent._get_llm_for_current_mode = lambda **kwargs: (
+            alias if kwargs.get("profile_id") == "fallback_alias" else primary
+        )
+
+        result = agent._invoke_llm([AIMessage(content="hello")])
+
+        assert result is None
+        assert calls == ["primary"]
+        assert any(
+            code == "llm_fallback_rejected" and fields.get("reasonCode") == "duplicate_effective_route"
+            for _, code, fields in events
+        )
+        assert [code for _, code, _ in events].count("llm_turn_terminal") == 1
+
+    def test_invoke_llm_stops_after_distinct_fallback_failure(self, monkeypatch):
+        calls = []
+        invocation_ids = []
+        events = []
+
+        class DummyContext:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+        class DummyUI:
+            def thinking(self, _label):
+                return DummyContext()
+
+            def add_log(self, *_args, **_kwargs):
+                return None
+
+        class FailingRouteLLM:
+            def __init__(self, profile_id, identity):
+                self.profile_id = profile_id
+                self.identity = identity
+
+            def effective_route_identity(self):
+                return self.identity
+
+            def effective_route_id(self):
+                return f"{self.profile_id}-route"
+
+            def invoke(self, _msgs, **kwargs):
+                calls.append(self.profile_id)
+                invocation_ids.append(kwargs.get("metadata", {}).get("invocationId"))
+                raise LLMError(
+                    "server_error",
+                    f"{self.profile_id} exhausted",
+                    retryable=True,
+                    details={"attempt": 5, "max_attempts": 5, "retry_budget_exhausted": True},
+                )
+
+        primary = FailingRouteLLM("primary", ("relay", "responses", "gpt-5.6-luna"))
+        fallback = FailingRouteLLM("fallback_backup", ("local", "chat", "qwen-32b"))
+        monkeypatch.setattr(agent_module, "get_ui", lambda: DummyUI())
+        monkeypatch.setattr(agent_module.logger, "log_error", lambda *_args, **_kwargs: None)
+        monkeypatch.setattr(
+            agent_module,
+            "plan_llm_recovery",
+            lambda *_args, current_profile_id=None, **_kwargs: SimpleNamespace(
+                category="server_error",
+                retryable=True,
+                action="retry_with_backoff",
+                user_message="provider 服务异常",
+                wait_seconds=0,
+                stop_current_turn=True,
+                disable_streaming=False,
+                disable_tools=False,
+                request_context_compression=False,
+                fallback_profile_id="fallback_backup" if current_profile_id == "primary" else "third_route",
+            ),
+        )
+        monkeypatch.setattr(
+            agent_module,
+            "_record_agent_scene_event",
+            lambda phase, code, **kwargs: events.append((phase, code, kwargs.get("fields") or {})),
+        )
+        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+        agent.llm_with_tools = primary
+        agent._base_llm = primary
+        agent.config = SimpleNamespace(
+            llm=SimpleNamespace(
+                model_name="gpt-5.6-luna",
+                provider="relay",
+                api_base="https://example.invalid",
+                api_timeout=30,
+            )
+        )
+        agent._should_stream_llm_for_turn = lambda *_args, **_kwargs: False
+
+        def resolve_client(**kwargs):
+            profile_id = kwargs.get("profile_id")
+            if profile_id == "fallback_backup":
+                return fallback
+            if profile_id == "third_route":
+                raise AssertionError("third route must not be resolved")
+            return primary
+
+        agent._get_llm_for_current_mode = resolve_client
+
+        result = agent._invoke_llm([AIMessage(content="hello")])
+
+        assert result is None
+        assert calls == ["primary", "fallback_backup"]
+        assert all(invocation_ids)
+        assert invocation_ids[0] != invocation_ids[1]
+        assert [code for _, code, _ in events].count("llm_fallback_selected") == 1
+        assert [code for _, code, _ in events].count("llm_turn_terminal") == 1
+
+    def test_invoke_llm_does_not_retry_exhausted_stream_route_without_fallback(self, monkeypatch):
         calls = []
         streamed = []
 
@@ -524,6 +737,12 @@ class TestToolMessageFlow:
 
         class StreamFailingLLM:
             profile_id = "primary"
+
+            def effective_route_identity(self):
+                return ("relay", "responses", "gpt-5.6-luna", self.profile_id)
+
+            def effective_route_id(self):
+                return "primary-route"
 
             def stream(self, _msgs, **_kwargs):
                 calls.append("stream")
@@ -579,11 +798,11 @@ class TestToolMessageFlow:
 
         result = agent._invoke_llm([AIMessage(content="hello")])
 
-        assert result.content == "nonstream ok"
-        assert calls == ["stream", "invoke"]
-        assert streamed == [("nonstream ok", True)]
+        assert result is None
+        assert calls == ["stream"]
+        assert streamed == []
         assert agent._last_llm_error_category == "server_error"
-        assert agent._last_llm_error_details["disable_streaming_next_attempt"] is True
+        assert "retry_provider_failure_without_streaming" not in agent._last_llm_error_details
 
     def test_invoke_llm_returns_none_for_exhausted_llmerror(self, monkeypatch):
         calls = {"count": 0}

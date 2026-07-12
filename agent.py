@@ -10,6 +10,7 @@ from contextlib import nullcontext
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, List, Dict, Any
+from uuid import uuid4
 # 添加项目根目录到 Python 路径
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -390,6 +391,49 @@ def _record_agent_scene_event(
         )
     except Exception:
         return
+
+
+def _llm_effective_route_identity(client: Any) -> tuple[str, ...]:
+    identity_builder = getattr(client, "effective_route_identity", None)
+    if callable(identity_builder):
+        try:
+            identity = identity_builder()
+            if isinstance(identity, (list, tuple)):
+                return tuple(str(part or "").strip() for part in identity)
+            if identity not in (None, ""):
+                return (str(identity).strip(),)
+        except Exception:
+            pass
+    profile = getattr(client, "profile", None)
+    provider = getattr(client, "provider", None)
+    route = getattr(client, "protocol_route", None)
+    wire_protocol = str(
+        getattr(getattr(route, "wire_protocol", None), "value", "")
+        or getattr(route, "protocol", "")
+        or ""
+    ).strip()
+    return (
+        str(getattr(profile, "provider_id", "") or "").strip(),
+        str(getattr(provider, "kind", "") or "").strip(),
+        str(getattr(provider, "base_url", "") or "").strip().rstrip("/").lower(),
+        str(getattr(client, "profile_id", "") or "").strip(),
+        str(getattr(profile, "model", "") or "").strip(),
+        wire_protocol,
+        str(getattr(route, "adapter_id", "") or "").strip(),
+    )
+
+
+def _llm_effective_route_id(client: Any) -> str:
+    route_id_builder = getattr(client, "effective_route_id", None)
+    if callable(route_id_builder):
+        try:
+            route_id = str(route_id_builder() or "").strip()
+            if route_id:
+                return route_id
+        except Exception:
+            pass
+    material = "\x1f".join(_llm_effective_route_identity(client)).encode("utf-8")
+    return hashlib.sha256(material).hexdigest()[:16]
 
 
 def _record_agent_tool_surface_event(tool_names: List[str]) -> None:
@@ -2892,7 +2936,12 @@ class SelfEvolvingAgent:
                 )
         return llm_usage
 
-    def _build_llm_invocation_context(self, *, prompt_purpose: str = "main_reply") -> LLMInvocationContext:
+    def _build_llm_invocation_context(
+        self,
+        *,
+        prompt_purpose: str = "main_reply",
+        route_attempt: int = 1,
+    ) -> LLMInvocationContext:
         runtime = _turn_runtime_from_env()
         binding = getattr(self, "runtime_agent_binding", {}) or {}
         try:
@@ -2922,6 +2971,8 @@ class SelfEvolvingAgent:
             metadata={
                 "agentMode": mode_value,
                 "orchestratorKind": orchestrator_kind,
+                "invocationId": uuid4().hex,
+                "routeAttempt": max(1, int(route_attempt)),
             },
         )
 
@@ -2949,22 +3000,65 @@ class SelfEvolvingAgent:
                 clean_messages.append(msg)
 
         with ui.thinking("?? 思考中..."), llm_cancel_context(self._current_turn_stop_reason):
-            attempt = 0
-            disable_streaming_for_retry = False
-            disable_tools_for_retry = False
-            fallback_profile_id_for_retry = None
-            invocation_context = self._build_llm_invocation_context(prompt_purpose="main_reply")
-            while attempt < MAX_CONSECUTIVE_FAILURES:
+            route_attempt = 0
+            fallback_client_for_retry = None
+            attempted_route_identities: set[tuple[str, ...]] = set()
+            while route_attempt < 2:
+                route_attempt += 1
                 try:
                     self._raise_if_turn_stop_requested()
-                    llm_for_turn = self._get_llm_for_current_mode(
-                        disable_tools=disable_tools_for_retry
-                        or bool(getattr(self, "_force_disable_tools_for_turn", False)),
-                        profile_id=fallback_profile_id_for_retry,
+                    llm_for_turn = fallback_client_for_retry
+                    fallback_client_for_retry = None
+                    if llm_for_turn is None:
+                        llm_for_turn = self._get_llm_for_current_mode(
+                            disable_tools=bool(getattr(self, "_force_disable_tools_for_turn", False)),
+                            profile_id=None,
+                        )
+                    route_identity = _llm_effective_route_identity(llm_for_turn)
+                    route_id = _llm_effective_route_id(llm_for_turn)
+                    if route_identity in attempted_route_identities:
+                        _record_agent_scene_event(
+                            "llm_route",
+                            "llm_fallback_rejected",
+                            message="Duplicate effective LLM route rejected.",
+                            fields={
+                                "routeAttempt": route_attempt,
+                                "routeId": route_id,
+                                "reasonCode": "duplicate_effective_route",
+                            },
+                            level="warning",
+                            outcome="rejected",
+                        )
+                        return None
+                    attempted_route_identities.add(route_identity)
+                    invocation_context = self._build_llm_invocation_context(
+                        prompt_purpose="main_reply",
+                        route_attempt=route_attempt,
+                    )
+                    invocation_id = str(invocation_context.metadata.get("invocationId") or "").strip()
+                    route = getattr(llm_for_turn, "protocol_route", None)
+                    profile = getattr(llm_for_turn, "profile", None)
+                    provider = getattr(llm_for_turn, "provider", None)
+                    _record_agent_scene_event(
+                        "llm_route",
+                        "llm_route_attempt_started",
+                        message="LLM effective route attempt started.",
+                        fields={
+                            "routeAttempt": route_attempt,
+                            "routeId": route_id,
+                            "invocationId": invocation_id,
+                            "profileId": str(getattr(llm_for_turn, "profile_id", "") or ""),
+                            "provider": str(getattr(provider, "kind", "") or ""),
+                            "model": str(getattr(profile, "model", "") or ""),
+                            "protocol": str(
+                                getattr(getattr(route, "wire_protocol", None), "value", "")
+                                or getattr(route, "protocol", "")
+                                or ""
+                            ),
+                        },
                     )
                     if (
-                        not disable_streaming_for_retry
-                        and self._should_stream_llm_for_turn(llm_for_turn)
+                        self._should_stream_llm_for_turn(llm_for_turn)
                         and hasattr(llm_for_turn, "stream")
                     ):
                         full_chunk = None
@@ -3077,25 +3171,16 @@ class SelfEvolvingAgent:
                         clean_messages,
                         context=invocation_context,
                     )
-                    if disable_streaming_for_retry:
-                        final_content = ResponseProcessor.coerce_content_text(
-                            getattr(invoke_response, "content", "")
-                        )
-                        if final_content.strip():
-                            stream_response = getattr(ui, "stream_response", None)
-                            if callable(stream_response):
-                                stream_response(final_content, done=True)
                     return invoke_response
                 except TurnStopRequested:
                     raise
                 except KeyboardInterrupt:
                     raise
                 except Exception as e:
-                    attempt += 1
                     llm_error_details = dict(getattr(e, "details", {}) or {}) if isinstance(e, LLMError) else {}
-                    reported_attempt = int(llm_error_details.get("attempt") or attempt or 1)
+                    reported_attempt = int(llm_error_details.get("attempt") or 1)
                     reported_max_attempts = int(
-                        llm_error_details.get("max_attempts") or MAX_CONSECUTIVE_FAILURES
+                        llm_error_details.get("max_attempts") or reported_attempt or 1
                     )
                     recovery = plan_llm_recovery(
                         e,
@@ -3114,8 +3199,7 @@ class SelfEvolvingAgent:
                     user_msg = recovery.user_message
                     try:
                         streaming_enabled_for_failed_attempt = bool(
-                            not disable_streaming_for_retry
-                            and self._should_stream_llm_for_turn(
+                            self._should_stream_llm_for_turn(
                                 llm_for_turn if "llm_for_turn" in locals() else None
                             )
                             and hasattr(llm_for_turn if "llm_for_turn" in locals() else None, "stream")
@@ -3125,37 +3209,12 @@ class SelfEvolvingAgent:
                     provider_stream_retry_exhausted = bool(
                         llm_error_details.get("retry_budget_exhausted")
                     ) or reported_attempt >= reported_max_attempts
-                    retry_provider_failure_without_streaming = bool(
-                        streaming_enabled_for_failed_attempt
-                        and is_retryable
-                        and category in {"server_error", "network_error", "timeout"}
-                        and provider_stream_retry_exhausted
-                    )
                     self._last_llm_error_category = category
                     self._last_llm_error_retryable = is_retryable
                     self._last_llm_recovery_action = recovery.action
                     self._last_llm_error_message = f"{category}: {user_msg}".strip(": ")
                     self._last_llm_failure_attempts = reported_attempt
                     self._last_llm_failure_max_attempts = reported_max_attempts
-                    disable_streaming_for_retry = (
-                        disable_streaming_for_retry
-                        or recovery.disable_streaming
-                        or retry_provider_failure_without_streaming
-                    )
-                    disable_tools_for_retry = disable_tools_for_retry or recovery.disable_tools
-                    fallback_profile_id_for_retry = (
-                        recovery.fallback_profile_id or fallback_profile_id_for_retry
-                    )
-                    current_profile_id = str(
-                        getattr(llm_for_turn if "llm_for_turn" in locals() else None, "profile_id", "")
-                        or getattr(getattr(self, "_base_llm", None), "profile_id", "")
-                        or ""
-                    ).strip()
-                    can_retry_with_fallback = bool(
-                        recovery.fallback_profile_id
-                        and recovery.fallback_profile_id != current_profile_id
-                        and fallback_profile_id_for_retry == recovery.fallback_profile_id
-                    )
                     exception_type = type(e).__name__
                     exception_message = str(e)
                     llm_error_traceback = traceback.format_exc()
@@ -3165,14 +3224,20 @@ class SelfEvolvingAgent:
                         "retryable": is_retryable,
                         "recovery_action": recovery.action,
                         "stop_current_turn": recovery.stop_current_turn,
-                        "disable_streaming_next_attempt": disable_streaming_for_retry,
-                        "disable_tools_next_attempt": disable_tools_for_retry,
                         "request_context_compression": recovery.request_context_compression,
                         "fallback_profile_id": recovery.fallback_profile_id,
-                        "retry_provider_failure_without_streaming": retry_provider_failure_without_streaming,
                         "provider_stream_retry_exhausted": provider_stream_retry_exhausted,
                         "attempt": reported_attempt,
                         "max_attempts": reported_max_attempts,
+                        "route_attempt": route_attempt,
+                        "route_id": _llm_effective_route_id(
+                            llm_for_turn if "llm_for_turn" in locals() else None
+                        ),
+                        "invocation_id": str(
+                            getattr(invocation_context, "metadata", {}).get("invocationId")
+                            if "invocation_context" in locals()
+                            else ""
+                        ),
                         "model": getattr(self.config.llm, "model_name", ""),
                         "provider": getattr(self.config.llm, "provider", ""),
                         "api_base": getattr(self.config.llm, "api_base", ""),
@@ -3191,7 +3256,7 @@ class SelfEvolvingAgent:
                     self._last_llm_error_details = dict(error_details)
 
                     _debug_logger.error(
-                        f"LLM 调用失败 [{attempt}/{MAX_CONSECUTIVE_FAILURES}] "
+                        f"LLM 路由调用失败 [{route_attempt}/2] "
                         f"{category}: {user_msg} | action={recovery.action} | "
                         f"fallback={recovery.fallback_profile_id or '-'} | "
                         f"{exception_type}: {exception_message[:300]}",
@@ -3203,45 +3268,124 @@ class SelfEvolvingAgent:
                         traceback=llm_error_traceback,
                         details=error_details,
                     )
-
-                    if (
-                        isinstance(e, LLMError)
-                        and not (
-                            attempt < MAX_CONSECUTIVE_FAILURES
-                            and (
-                                can_retry_with_fallback
-                                or retry_provider_failure_without_streaming
-                                or (
-                                    (recovery.disable_tools or recovery.disable_streaming)
-                                    and not recovery.stop_current_turn
-                                )
-                            )
-                        )
-                    ):
-                        return None
+                    failed_route = llm_for_turn if "llm_for_turn" in locals() else None
+                    failed_route_id = _llm_effective_route_id(failed_route)
+                    failed_invocation_id = str(
+                        getattr(invocation_context, "metadata", {}).get("invocationId")
+                        if "invocation_context" in locals()
+                        else ""
+                    )
+                    _record_agent_scene_event(
+                        "llm_route",
+                        "llm_route_attempt_exhausted",
+                        message="LLM effective route attempt exhausted.",
+                        fields={
+                            "routeAttempt": route_attempt,
+                            "routeId": failed_route_id,
+                            "invocationId": failed_invocation_id,
+                            "profileId": str(getattr(failed_route, "profile_id", "") or ""),
+                            "transportAttempt": reported_attempt,
+                            "maxTransportAttempts": reported_max_attempts,
+                            "errorCategory": category,
+                            "retryable": bool(is_retryable),
+                        },
+                        level="warning" if is_retryable else "error",
+                        outcome="failed",
+                    )
 
                     if recovery.request_context_compression:
+                        _record_agent_scene_event(
+                            "llm_route",
+                            "llm_turn_terminal",
+                            message="LLM turn stopped for context compression.",
+                            fields={
+                                "routeAttempts": route_attempt,
+                                "routeId": failed_route_id,
+                                "errorCategory": category,
+                                "reasonCode": "context_compression_required",
+                            },
+                            level="warning",
+                            outcome="failed",
+                        )
                         request_compression(
                             f"LLM provider reported context limit: {category}"
                         )
                         return None
 
-                    if (
-                        recovery.stop_current_turn
-                        and not can_retry_with_fallback
-                        and not retry_provider_failure_without_streaming
-                    ):
-                        return None
+                    fallback_profile_id = str(recovery.fallback_profile_id or "").strip()
+                    if route_attempt == 1 and is_retryable and fallback_profile_id:
+                        try:
+                            candidate = self._get_llm_for_current_mode(
+                                disable_tools=bool(getattr(self, "_force_disable_tools_for_turn", False)),
+                                profile_id=fallback_profile_id,
+                            )
+                        except Exception as fallback_error:
+                            _record_agent_scene_event(
+                                "llm_route",
+                                "llm_fallback_rejected",
+                                message="LLM fallback route resolution failed.",
+                                fields={
+                                    "routeAttempt": 2,
+                                    "primaryRouteId": failed_route_id,
+                                    "reasonCode": "fallback_resolution_failed",
+                                    "errorType": type(fallback_error).__name__,
+                                },
+                                level="error",
+                                outcome="rejected",
+                            )
+                        else:
+                            candidate_identity = _llm_effective_route_identity(candidate)
+                            if candidate_identity not in attempted_route_identities:
+                                fallback_client_for_retry = candidate
+                                _record_agent_scene_event(
+                                    "llm_route",
+                                    "llm_fallback_selected",
+                                    message="Distinct LLM fallback route selected.",
+                                    fields={
+                                        "routeAttempt": 2,
+                                        "primaryRouteId": failed_route_id,
+                                        "fallbackRouteId": _llm_effective_route_id(candidate),
+                                        "reasonCode": category,
+                                    },
+                                    level="warning",
+                                    outcome="fallback_selected",
+                                )
+                            else:
+                                _record_agent_scene_event(
+                                    "llm_route",
+                                    "llm_fallback_rejected",
+                                    message="Duplicate effective LLM fallback route rejected.",
+                                    fields={
+                                        "routeAttempt": 2,
+                                        "primaryRouteId": failed_route_id,
+                                        "fallbackRouteId": _llm_effective_route_id(candidate),
+                                        "reasonCode": "duplicate_effective_route",
+                                    },
+                                    level="warning",
+                                    outcome="rejected",
+                                )
 
-                    if attempt < MAX_CONSECUTIVE_FAILURES:
-                        wait = recovery.wait_seconds
+                    if fallback_client_for_retry is not None:
                         ui.add_log(
-                            f"LLM 恢复策略 `{recovery.action}`，等待 {wait}s 后重试"
-                            f"（第 {attempt} 次）...",
+                            f"LLM 主路由失败，切换到备用配置 `{fallback_profile_id}`。",
                             "WARN",
                         )
-                        if wait > 0:
-                            time.sleep(wait)
+                        continue
+
+                    _record_agent_scene_event(
+                        "llm_route",
+                        "llm_turn_terminal",
+                        message="LLM turn exhausted all permitted routes.",
+                        fields={
+                            "routeAttempts": route_attempt,
+                            "routeId": failed_route_id,
+                            "errorCategory": category,
+                            "reasonCode": "no_distinct_fallback",
+                        },
+                        level="error",
+                        outcome="failed",
+                    )
+                    return None
 
             _debug_logger.error(
                 f"LLM 连续 {MAX_CONSECUTIVE_FAILURES} 次调用失败", tag="LLM"
