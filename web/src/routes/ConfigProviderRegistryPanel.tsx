@@ -212,6 +212,7 @@ export function ProviderModelsTab({
           {
             id: "model-ref",
             header: "Canonical modelRef",
+            className: "w-[23%]",
             render: (model) => (
               <span className={styles.modelIdentity} data-model-availability={model.availability}>
                 <strong className={styles.ellipsis} title={model.modelRef}>{model.modelRef}</strong>
@@ -222,12 +223,14 @@ export function ProviderModelsTab({
           {
             id: "upstream",
             header: "Upstream ID",
+            className: "w-[18%]",
             render: (model) => <span className={styles.ellipsis} title={model.upstreamId}>{model.upstreamId}</span>,
           },
-          { id: "availability", header: "可用性", render: (model) => <VStatusChip tone={model.availability === "disabled" ? "danger" : "neutral"}>{model.availability}</VStatusChip> },
+          { id: "availability", header: "可用性", className: "w-[11%]", render: (model) => <VStatusChip tone={model.availability === "disabled" ? "danger" : "neutral"}>{model.availability}</VStatusChip> },
           {
             id: "verification",
             header: "真实调用",
+            className: "w-[18%]",
             render: (model) => {
               const verificationStatus = model.verificationStatus || "unverified";
               const detail = [
@@ -245,10 +248,11 @@ export function ProviderModelsTab({
               );
             },
           },
-          { id: "capabilities", header: "能力来源", render: (model) => <CapabilityList model={model} /> },
+          { id: "capabilities", header: "能力来源", className: "w-[13%]", render: (model) => <CapabilityList model={model} /> },
           {
             id: "actions",
             header: "操作",
+            className: "w-[17%]",
             align: "right",
             render: (model) => {
               const action = deriveProviderModelActionState(
@@ -257,16 +261,19 @@ export function ProviderModelsTab({
                 liveReferenceCountByModelRef[model.modelRef] ?? 0,
                 disabled,
               );
+              const testAvailable = canTestProviderModel(model);
               return (
                 <VActionGroup ariaLabel={`${model.modelRef} 模型操作`}>
-                  <VButton
-                    density="compact"
-                    isDisabled={disabled || !canTestProviderModel(model)}
-                    title={canTestProviderModel(model) ? "发送最小真实模型请求并保存脱敏结果。" : "先固定模型，再测试真实调用。"}
-                    onPress={() => onTestModel(model.modelRef)}
-                  >
-                    测试调用
-                  </VButton>
+                  {testAvailable ? (
+                    <VButton
+                      density="compact"
+                      isDisabled={disabled}
+                      title="发送最小真实模型请求并保存脱敏结果。"
+                      onPress={() => onTestModel(model.modelRef)}
+                    >
+                      测试调用
+                    </VButton>
+                  ) : null}
                   {action.kind === "unpin" ? (
                     <VButton
                       variant="danger"

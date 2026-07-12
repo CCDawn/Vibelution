@@ -404,7 +404,7 @@ describe("ConfigRoute layout contract", () => {
     expect(providerPanelStyles.sectionSurface).toContain("[border-radius:8px]");
     expect(providerPanelStyles.registryWorkspace).toContain("[--vui-workspace-sidebar:30%]");
     expect(providerPanelStyles.providerList).toContain("overflow-y-auto");
-    expect(providerPanelStyles.tableScroll).toContain("max-h-[calc(100dvh-26rem)]");
+    expect(providerPanelStyles.tableScroll).toContain("max-h-[calc(100dvh-33rem)]");
     expect(providerPanelStyles.tableScroll).toContain("overflow-auto");
     expect(providerPanelStyles.table).toContain("[&_thead]:sticky");
     expect(providerPanelSource).toContain("filterProviderModels");
