@@ -134,6 +134,15 @@ describe("ConfigRoute layout contract", () => {
     expect(confirmationBody).toContain("handleApply(");
   });
 
+  it("applies quick setup from the latest synchronized Provider workspace instead of stale React state", () => {
+    expect(routeSource).toContain("type ConfigApplyDraftOverride");
+    expect(routeSource).toContain("draftOverride?: ConfigApplyDraftOverride");
+    expect(routeSource).toContain('handleApply("正在应用快速配置…", providerDraftRequestRef.current ?? undefined)');
+    expect(routeSource).toContain("publicConfig: draftOverride.publicConfig");
+    expect(routeSource).toContain("draftMeta: draftOverride.draftMeta");
+    expect(routeSource).toContain("baseHash: draftOverride.baseHash");
+  });
+
   it("refreshes only ttl-expired providers when the model surface opens", () => {
     expect(routeSource).toContain("row.refreshDue");
     expect(routeSource).toContain("autoRefreshAttemptedProviderIds");

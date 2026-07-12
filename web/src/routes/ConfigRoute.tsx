@@ -98,6 +98,7 @@ import styles from "./ConfigRoute.styles";
 export type ConfigLanguage = "zh" | "en";
 type NoticeTone = "neutral" | "success" | "error";
 type ProviderWorkspaceMode = "quick" | "manage" | "advanced";
+type ConfigApplyDraftOverride = Pick<ConfigWorkspace, "publicConfig" | "draftMeta" | "baseHash">;
 
 type ProviderRouteImpact = {
   modelRef?: string;
@@ -2659,7 +2660,7 @@ export function ConfigRoute() {
     dispatchProviderQuickSetup({ type: "start_save" });
     try {
       await handlePinProviderModels(provider.providerId, [selectedModel]);
-      const applied = await handleApply("正在应用快速配置…");
+      const applied = await handleApply("正在应用快速配置…", providerDraftRequestRef.current ?? undefined);
       if (!applied) {
         dispatchProviderQuickSetup({
           type: "save_failed",
@@ -2903,20 +2904,30 @@ export function ConfigRoute() {
     }
   }
 
-  async function handleApply(pendingLabel: string = copy.applying): Promise<boolean> {
+  async function handleApply(
+    pendingLabel: string = copy.applying,
+    draftOverride?: ConfigApplyDraftOverride,
+  ): Promise<boolean> {
     setBusyAction(pendingLabel);
     try {
-      const nextConfig = resolveDraftForSubmission();
-      const payload = buildConfigApplyPayload({
-        draftConfig,
-        draftMeta,
-        baseHash,
-        baseConfig,
-        editorText: jsonText,
-        hasEditorChanges,
-        editorSections: workspace?.editorSections ?? [],
-        loadFailedMessage: copy.loadFailed,
-      });
+      const payload = draftOverride
+        ? {
+            publicConfig: draftOverride.publicConfig,
+            draftMeta: draftOverride.draftMeta,
+            baseHash: draftOverride.baseHash,
+            baseConfig,
+          }
+        : buildConfigApplyPayload({
+            draftConfig,
+            draftMeta,
+            baseHash,
+            baseConfig,
+            editorText: jsonText,
+            hasEditorChanges,
+            editorSections: workspace?.editorSections ?? [],
+            loadFailedMessage: copy.loadFailed,
+          });
+      const nextConfig = payload.publicConfig;
       const response = await requestJson<ConfigWorkspace>(
         "/api/config/apply",
         payload,
