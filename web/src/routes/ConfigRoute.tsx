@@ -2260,6 +2260,9 @@ export function ConfigRoute() {
   );
   const activeSection = visibleSidebarGroups.find((section) => section.id === activeSectionId) ?? visibleSidebarGroups[0] ?? null;
   const activeEditorSections = editorSections.filter((section) => {
+    if (activeSection?.id === "models" && workspace?.schemaVersion === 2) {
+      return false;
+    }
     if (!activeSection?.memberSectionIds.includes(section.id)) {
       return false;
     }
@@ -3615,7 +3618,7 @@ export function ConfigRoute() {
 
       <VSurface
         as="section"
-        className={activeSection?.id === "models-profiles" ? `${styles.content} ${styles.contentModels}` : styles.content}
+        className={activeSection?.id === "models-profiles" && workspace.schemaVersion !== 2 ? `${styles.content} ${styles.contentModels}` : styles.content}
         padding="none"
       >
         <div className={styles.configStatusBand}>
@@ -3949,6 +3952,7 @@ export function ConfigRoute() {
                   </>
                 ) : null}
                 {providerWorkspaceMode === "advanced" ? (
+                  <>
                 <ConfigProviderWizard
                   state={providerWizardState}
                   templates={providerPresetOptions}
@@ -3960,7 +3964,6 @@ export function ConfigRoute() {
                   onDiscover={handleDiscoverProvider}
                   onPin={handlePinProviderModels}
                 />
-                ) : null}
                 <ConfigModelMigrationPanel
                   schemaVersion={2}
                   preview={null}
@@ -3969,6 +3972,8 @@ export function ConfigRoute() {
                   onPreview={() => undefined}
                   onApply={() => undefined}
                 />
+                  </>
+                ) : null}
               </>
             ) : (
               <ConfigModelMigrationPanel
@@ -3988,7 +3993,7 @@ export function ConfigRoute() {
           </div>
         ) : null}
 
-        {activeEditorSections.map((section) => (
+        {workspace.schemaVersion === 2 && isSectionVisible("models") ? null : activeEditorSections.map((section) => (
           <ConfigSectionEditor
             key={section.id}
             section={section}
