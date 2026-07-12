@@ -119,6 +119,7 @@ describe("ConfigProviderRegistryPanel", () => {
   it("renders neutral action labels instead of inapplicable danger buttons", () => {
     expect(renderModels([model("observed", "observed")])).toContain("未固定");
     expect(renderModels([model("observed", "observed")])).not.toContain("取消固定");
+    expect(renderModels([model("observed", "observed")])).not.toContain("测试调用");
     expect(renderModels([model("disabled", "disabled")])).toContain("不可用");
     expect(renderModels([model("disabled", "disabled")])).not.toContain("取消固定");
 
@@ -127,6 +128,7 @@ describe("ConfigProviderRegistryPanel", () => {
     expect(inUseMarkup).toContain("使用中 · 2 个引用");
     expect(inUseMarkup).not.toContain("取消固定");
 
+    expect(renderModels([pinned])).toContain("测试调用");
     expect(renderModels([pinned])).toContain("取消固定");
   });
 
@@ -140,8 +142,9 @@ describe("ConfigProviderRegistryPanel", () => {
 
     expect(markup).toContain("未观测");
     expect(markup).not.toContain("unknown · 未观测");
-    expect(panelStyles.tableScroll).toContain("max-h-[calc(100dvh-26rem)]");
+    expect(panelStyles.tableScroll).toContain("max-h-[calc(100dvh-33rem)]");
     expect(panelStyles.tableScroll).toContain("overflow-auto");
+    expect(panelStyles.table).toContain("min-w-[820px]");
     expect(panelStyles.table).toContain("[&amp;_thead]:sticky".replace("&amp;", "&"));
     expect(panelSource).not.toContain('@heroui/react');
   });
