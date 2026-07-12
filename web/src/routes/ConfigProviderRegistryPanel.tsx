@@ -395,7 +395,7 @@ export function ConfigProviderRegistryPanel({
   useEffect(() => {
     setModelQuery("");
     setModelFilter("all");
-  }, [selectedProviderId]);
+  }, [provider?.providerId]);
 
   return (
     <VSurface as="section" id="config-models" className={styles.sectionSurface} padding="none">
