@@ -1,10 +1,12 @@
 import { AlertTriangle, Database, RefreshCw, Route, Trash2 } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
 
 import {
   VActionGroup,
   VButton,
   VDenseTable,
   VEntityList,
+  VInput,
   VPanelHeader,
   VSection,
   VSplitWorkspace,
@@ -14,7 +16,14 @@ import {
   type VStatusTone,
 } from "../components/vui";
 import type { ConfigCapabilityObservation, ConfigCatalogModel } from "../api/types";
-import { canTestProviderModel, canUnpinProviderModel, type ProviderRegistryRow } from "./configProviderLogic";
+import {
+  canTestProviderModel,
+  deriveProviderModelActionState,
+  filterProviderModels,
+  summarizeProviderModels,
+  type ProviderModelFilter,
+  type ProviderRegistryRow,
+} from "./configProviderLogic";
 import styles from "./ConfigProviderRegistryPanel.styles";
 
 export type ConfigProviderRegistryTab = "connection" | "models" | "protocols" | "diagnostics";
@@ -42,6 +51,17 @@ const TABS: Array<{ id: ConfigProviderRegistryTab; label: string }> = [
   { id: "diagnostics", label: "诊断" },
 ];
 
+const MODEL_FILTERS: Array<{
+  id: ProviderModelFilter;
+  label: string;
+  countKey: "total" | "pinned" | "discovered" | "unavailable";
+}> = [
+  { id: "all", label: "全部", countKey: "total" },
+  { id: "pinned", label: "已固定", countKey: "pinned" },
+  { id: "discovered", label: "已发现", countKey: "discovered" },
+  { id: "unavailable", label: "不可用", countKey: "unavailable" },
+];
+
 function statusTone(status: string): VStatusTone {
   if (status === "reachable") return "success";
   if (status === "stale" || status === "not_discovered" || status === "configured") return "warning";
@@ -58,7 +78,7 @@ function capabilityTone(observation: ConfigCapabilityObservation): VStatusTone {
 function CapabilityList({ model }: { model: ConfigCatalogModel }) {
   const capabilities = Object.entries(model.capabilities);
   if (!capabilities.length) {
-    return <VStatusChip tone="warning">unknown · 未观测</VStatusChip>;
+    return <span className={styles.capabilityUnknown}>未观测</span>;
   }
   return (
     <div className={styles.capabilityList}>
@@ -113,28 +133,70 @@ function ConnectionTab({ provider }: { provider: ProviderRegistryRow }) {
   );
 }
 
-function ModelsTab({
-  provider,
-  disabled,
-  liveReferenceCountByModelRef,
-  onUnpin,
-  onTestModel,
-}: {
+export type ProviderModelsTabProps = {
   provider: ProviderRegistryRow;
   disabled: boolean;
+  modelQuery: string;
+  modelFilter: ProviderModelFilter;
   liveReferenceCountByModelRef: Record<string, number>;
+  onQueryChange: (query: string) => void;
+  onFilterChange: (filter: ProviderModelFilter) => void;
   onUnpin: (modelRef: string) => void;
   onTestModel: (modelRef: string) => void;
-}) {
+};
+
+export function ProviderModelsTab({
+  provider,
+  disabled,
+  modelQuery,
+  modelFilter,
+  liveReferenceCountByModelRef,
+  onQueryChange,
+  onFilterChange,
+  onUnpin,
+  onTestModel,
+}: ProviderModelsTabProps) {
+  const summary = useMemo(() => summarizeProviderModels(provider.models), [provider.models]);
+  const visibleModels = useMemo(
+    () => filterProviderModels(provider.models, modelQuery, modelFilter),
+    [modelFilter, modelQuery, provider.models],
+  );
+  const emptyText = provider.models.length === 0
+    ? "该 Provider 暂无模型。先运行发现。"
+    : "没有匹配的模型。请调整搜索或筛选条件。";
+
   return (
-    <div className={styles.tableScroll}>
-      <VDenseTable
-        ariaLabel={`${provider.label} 模型目录`}
-        className={styles.table}
-        rows={provider.models}
-        getRowKey={(model) => model.modelRef}
-        emptyText="尚无观测或固定模型。先运行发现。"
-        columns={[
+    <div className={styles.modelsWorkspace}>
+      <div className={styles.modelToolbar}>
+        <VInput
+          aria-label="搜索模型"
+          className={styles.modelSearch}
+          placeholder="搜索 modelRef、Upstream ID 或名称"
+          value={modelQuery}
+          onChange={(event) => onQueryChange(event.currentTarget.value)}
+        />
+        <VActionGroup ariaLabel="模型状态筛选" className={styles.modelFilters}>
+          {MODEL_FILTERS.map((filter) => (
+            <VButton
+              key={filter.id}
+              density="compact"
+              variant={modelFilter === filter.id ? "primary" : "ghost"}
+              aria-pressed={modelFilter === filter.id}
+              onPress={() => onFilterChange(filter.id)}
+            >
+              {filter.label} {summary[filter.countKey]}
+            </VButton>
+          ))}
+        </VActionGroup>
+      </div>
+      <div className={styles.tableScroll}>
+        <VDenseTable
+          ariaLabel={`${provider.label} 模型目录`}
+          className={styles.table}
+          rows={visibleModels}
+          getRowKey={(model) => model.modelRef}
+          emptyText={emptyText}
+          columns={[
           {
             id: "model-ref",
             header: "Canonical modelRef",
@@ -176,30 +238,45 @@ function ModelsTab({
             id: "actions",
             header: "操作",
             align: "right",
-            render: (model) => (
-              <VActionGroup ariaLabel={`${model.modelRef} 模型操作`}>
-                <VButton
-                  density="compact"
-                  isDisabled={disabled || !canTestProviderModel(model)}
-                  title={canTestProviderModel(model) ? "发送最小真实模型请求并保存脱敏结果。" : "先固定模型，再测试真实调用。"}
-                  onPress={() => onTestModel(model.modelRef)}
-                >
-                  测试调用
-                </VButton>
-                <VButton
-                  variant="danger"
-                  density="compact"
-                  isDisabled={disabled || !canUnpinProviderModel(provider, model) || (liveReferenceCountByModelRef[model.modelRef] ?? 0) > 0}
-                  title={(liveReferenceCountByModelRef[model.modelRef] ?? 0) > 0 ? "存在 live references，无法取消固定。" : undefined}
-                  onPress={() => onUnpin(model.modelRef)}
-                >
-                  取消固定
-                </VButton>
-              </VActionGroup>
-            ),
+            render: (model) => {
+              const action = deriveProviderModelActionState(
+                provider,
+                model,
+                liveReferenceCountByModelRef[model.modelRef] ?? 0,
+                disabled,
+              );
+              return (
+                <VActionGroup ariaLabel={`${model.modelRef} 模型操作`}>
+                  <VButton
+                    density="compact"
+                    isDisabled={disabled || !canTestProviderModel(model)}
+                    title={canTestProviderModel(model) ? "发送最小真实模型请求并保存脱敏结果。" : "先固定模型，再测试真实调用。"}
+                    onPress={() => onTestModel(model.modelRef)}
+                  >
+                    测试调用
+                  </VButton>
+                  {action.kind === "unpin" ? (
+                    <VButton
+                      variant="danger"
+                      density="compact"
+                      isDisabled={action.disabled}
+                      title={action.reason || undefined}
+                      onPress={() => onUnpin(model.modelRef)}
+                    >
+                      {action.label}
+                    </VButton>
+                  ) : (
+                    <span className={styles.modelActionState} data-model-action={action.kind}>
+                      {action.label}{action.kind === "in_use" ? ` · ${action.referenceCount} 个引用` : ""}
+                    </span>
+                  )}
+                </VActionGroup>
+              );
+            },
           },
-        ]}
-      />
+          ]}
+        />
+      </div>
     </div>
   );
 }
@@ -279,6 +356,8 @@ export function ConfigProviderRegistryPanel({
   onTestModel,
   onDeleteProvider,
 }: ConfigProviderRegistryPanelProps) {
+  const [modelQuery, setModelQuery] = useState("");
+  const [modelFilter, setModelFilter] = useState<ProviderModelFilter>("all");
   const provider = rows.find((row) => row.providerId === selectedProviderId) ?? rows[0];
   const items = rows.map((row) => ({ ...row, id: row.providerId }));
   const providerLiveReferenceCount = provider?.models.reduce(
@@ -286,6 +365,11 @@ export function ConfigProviderRegistryPanel({
     0,
   ) ?? 0;
   const providerDeleteBlocked = Boolean(provider && (provider.pinnedCount > 0 || providerLiveReferenceCount > 0));
+
+  useEffect(() => {
+    setModelQuery("");
+    setModelFilter("all");
+  }, [selectedProviderId]);
 
   return (
     <VSurface as="section" id="config-models" className={styles.sectionSurface} padding="none">
@@ -354,7 +438,19 @@ export function ConfigProviderRegistryPanel({
               ))}
             </VActionGroup>
             {selectedTab === "connection" ? <ConnectionTab provider={provider} /> : null}
-            {selectedTab === "models" ? <ModelsTab provider={provider} disabled={disabled} liveReferenceCountByModelRef={liveReferenceCountByModelRef} onUnpin={onUnpin} onTestModel={onTestModel} /> : null}
+            {selectedTab === "models" ? (
+              <ProviderModelsTab
+                provider={provider}
+                disabled={disabled}
+                modelQuery={modelQuery}
+                modelFilter={modelFilter}
+                liveReferenceCountByModelRef={liveReferenceCountByModelRef}
+                onQueryChange={setModelQuery}
+                onFilterChange={setModelFilter}
+                onUnpin={onUnpin}
+                onTestModel={onTestModel}
+              />
+            ) : null}
             {selectedTab === "protocols" ? <ProtocolsTab provider={provider} /> : null}
             {selectedTab === "diagnostics" ? <DiagnosticsTab provider={provider} disabled={disabled} onDiscover={onDiscover} /> : null}
             <div className={styles.mobileActionGroup}>

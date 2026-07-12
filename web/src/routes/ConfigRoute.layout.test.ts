@@ -201,7 +201,7 @@ describe("ConfigRoute layout contract", () => {
 
   it("uses backend pinned ownership and live references for destructive controls", () => {
     expect(providerPanelSource).toContain("provider.pinnedCount");
-    expect(providerPanelSource).toContain("canUnpinProviderModel(provider, model)");
+    expect(providerPanelSource).toContain("deriveProviderModelActionState(");
     expect(providerPanelSource).toContain("liveReferenceCountByModelRef");
     expect(providerPanelSource).not.toContain("provider.models.length > 0");
     expect(providerPanelSource).not.toContain('availability !== "pinned"');
@@ -264,7 +264,7 @@ describe("ConfigRoute layout contract", () => {
 
   it("keeps Provider management desktop-first with bounded internal table overflow", () => {
     expect(providerPanelStyles.registryWorkspace).not.toContain("max-[960px]");
-    expect(providerPanelStyles.tableScroll).toContain("[overflow-x:auto]");
+    expect(providerPanelStyles.tableScroll).toContain("overflow-auto");
     expect(providerPanelStylesSource).not.toContain("width:100vw");
   });
 
@@ -385,7 +385,12 @@ describe("ConfigRoute layout contract", () => {
     expect(providerPanelStyles.sectionSurface).toContain("[border-radius:8px]");
     expect(providerPanelStyles.registryWorkspace).toContain("[--vui-workspace-sidebar:30%]");
     expect(providerPanelStyles.providerList).toContain("overflow-y-auto");
-    expect(providerPanelStyles.tableScroll).toContain("[overflow-x:auto]");
+    expect(providerPanelStyles.tableScroll).toContain("max-h-[calc(100dvh-26rem)]");
+    expect(providerPanelStyles.tableScroll).toContain("overflow-auto");
+    expect(providerPanelStyles.table).toContain("[&_thead]:sticky");
+    expect(providerPanelSource).toContain("filterProviderModels");
+    expect(providerPanelSource).toContain("deriveProviderModelActionState");
+    expect(providerPanelSource).toContain('aria-label="搜索模型"');
     expect(providerPanelStyles.mobileActionGroup).toContain("max-[390px]:[grid-template-columns:minmax(0,1fr)]");
     expect(providerPanelSource).toContain("测试调用");
     expect(providerPanelSource).toContain("verificationStatus");

@@ -25,10 +25,20 @@ const styles = {
   factValue: "vui-routes-configproviderregistrypanel factValue min-w-0 truncate text-[var(--vui-font-sm)] font-semibold text-vui-fg-primary",
   deployment:
     "vui-routes-configproviderregistrypanel deployment grid min-w-0 gap-2 rounded-md border border-vui-border-subtle bg-vui-surface-glass p-2",
-  tableScroll: "vui-routes-configproviderregistrypanel tableScroll min-w-0 [overflow-x:auto]",
-  table: "vui-routes-configproviderregistrypanel table min-w-[760px]",
+  modelsWorkspace: "vui-routes-configproviderregistrypanel modelsWorkspace grid min-h-0 min-w-0 gap-2",
+  modelToolbar:
+    "vui-routes-configproviderregistrypanel modelToolbar grid min-w-0 [grid-template-columns:minmax(16rem,0.7fr)_minmax(0,1fr)] items-center gap-2",
+  modelSearch: "vui-routes-configproviderregistrypanel modelSearch min-w-0",
+  modelFilters: "vui-routes-configproviderregistrypanel modelFilters flex min-w-0 flex-wrap items-center justify-end gap-1",
+  tableScroll:
+    "vui-routes-configproviderregistrypanel tableScroll min-w-0 max-h-[calc(100dvh-26rem)] overflow-auto rounded-[var(--radius-control)]",
+  table:
+    "vui-routes-configproviderregistrypanel table min-w-[920px] !overflow-visible [&_thead]:sticky [&_thead]:top-0 [&_thead]:z-10",
   modelIdentity: "vui-routes-configproviderregistrypanel modelIdentity grid min-w-0 gap-0.5",
+  modelActionState:
+    "vui-routes-configproviderregistrypanel modelActionState inline-flex min-h-6 items-center rounded-full border border-vui-border-subtle bg-vui-surface-row/70 px-2 text-[var(--vui-font-xs)] font-semibold text-vui-fg-tertiary",
   capabilityList: "vui-routes-configproviderregistrypanel capabilityList flex min-w-0 flex-wrap gap-1",
+  capabilityUnknown: "vui-routes-configproviderregistrypanel capabilityUnknown text-[var(--vui-font-xs)] text-vui-fg-tertiary",
   actions: "vui-routes-configproviderregistrypanel actions flex min-w-0 flex-wrap items-center gap-1.5",
   mobileActionGroup:
     "vui-routes-configproviderregistrypanel mobileActionGroup grid min-w-0 [grid-template-columns:repeat(auto-fit,minmax(max-content,1fr))] gap-1.5 max-[390px]:[grid-template-columns:minmax(0,1fr)] max-[390px]:[&_[data-vui=button]]:!w-full",
