@@ -105,37 +105,77 @@ Expected: both test files pass and Vite build succeeds.
 
 Stage only the three frontend files, then commit `fix(web): recover stale config migration previews`.
 
-### Task 3: Integrate, migrate, and verify runtime settings
+### Task 3: Existing Provider API Key editor
 
 **Files:**
-- Modify outside Git: `C:\Users\17533\Documents\Vibelution\config\config.toml`
-- Generated outside Git: migration backup manifest and before/after payloads under the operator config backup directory.
+- Modify: `web/src/routes/ConfigProviderRegistryPanel.tsx`
+- Modify: `web/src/routes/ConfigRoute.tsx`
+- Test: `web/src/routes/ConfigRoute.layout.test.ts`
+
+**Interfaces:**
+- Consumes: existing `PUT /api/config/draft/providers/{provider_id}` and `buildProviderDraftRequest(...)`.
+- Produces: `onEditCredential(providerId: string)` Provider panel callback and a ConfigRoute password editor that submits only `credentialValue` while preserving the selected Provider payload.
+
+- [ ] **Step 1: Write failing frontend contract tests**
+
+Add source-contract assertions for a Provider action named `设置 API Key`, a `type="password"` input, a disabled state for `credentialState === "not_required"`, a PUT to the existing Provider endpoint containing `credentialValue`, and guidance that the final save writes a user environment variable rather than `config.toml`.
+
+- [ ] **Step 2: Run the focused test and verify RED**
+
+Run:
+
+```powershell
+npm test -- src/routes/ConfigRoute.layout.test.ts
+```
+
+Expected: FAIL because the existing Provider credential editor and update handler are absent.
+
+- [ ] **Step 3: Implement the minimal credential editor**
+
+Add the Provider action callback, ConfigRoute-local `providerCredentialEditId` and `providerCredentialValue` state, password input, cancel and save-to-draft actions. Reuse the selected Provider object unchanged and send `credentialValue` to the existing PUT endpoint. Clear local input on cancel, Provider switch, and successful response; never render or log `credential_ref` or the saved secret.
+
+- [ ] **Step 4: Verify GREEN and production build**
+
+Run:
+
+```powershell
+npm test -- src/routes/ConfigRoute.layout.test.ts src/routes/configRouteLogic.test.ts src/routes/configProviderLogic.test.ts
+npm run build
+```
+
+Expected: all focused tests and the Vite production build pass.
+
+- [ ] **Step 5: Commit the task**
+
+Stage only the two frontend files and the layout test, then commit `feat(web): edit existing Provider API keys`.
+
+### Task 4: Integrate, migrate, and verify runtime settings
+
+**Files:**
+- Verify outside Git: `C:\Users\17533\Documents\Vibelution\config\config.toml`
+- Verify generated evidence: `migration-60b5d8cafa964143930dfc0a06ca32fe` manifest and before/after payloads under the operator config backup directory.
 - Modify after successful evidence: `.docs/project-memory/lanes/llm-model-config-alignment.json`
 
 **Interfaces:**
-- Consumes: Task 1 migration behavior and Task 2 recovery behavior.
-- Produces: applied Schema v2 operator config, rollback migration ID, Launcher-refreshed settings UI evidence.
+- Consumes: Task 1 migration behavior, Task 2 recovery behavior, and Task 3 existing-Provider credential editing.
+- Produces: verified Schema v2 operator config, preserved rollback migration ID, Launcher-refreshed settings UI evidence.
 
 - [ ] **Step 1: Rebase/reconcile against current local main and run focused tests**
 
-Verify both task commits remain isolated and rerun Python tests, frontend tests, and build. Stop on any overlap with active claims.
+Verify the new Task 3 commit remains isolated and rerun Python tests, frontend tests, and build. Stop on any overlap with active claims.
 
 - [ ] **Step 2: Merge the task branch into local main**
 
 Use a non-interactive local merge after gates pass. Keep root on `main` and stage no unrelated files.
 
-- [ ] **Step 3: Generate and apply a fresh migration preview**
+- [ ] **Step 3: Reverify the applied migration evidence**
 
-Through the authenticated local Config API, assert `READY`, 6 Providers, 110 live references, 8 historical references, zero conflicts, and matching workspace `baseHash`; immediately Apply within the same backend process.
+Assert Schema v2, 6 Providers, 7 models, compatibility aliases, no unresolved live alias references, and migration `migration-60b5d8cafa964143930dfc0a06ca32fe` in `applied` state with before/after backups. Do not rerun migration against Schema v2.
 
-- [ ] **Step 4: Verify disk and rollback evidence**
+- [ ] **Step 4: Refresh Launcher and perform browser QA**
 
-Assert Schema v2, 6 Providers, 7 models, compatibility aliases, no unresolved live alias references, changed file hash, and an `applied` migration manifest with before/after backups. Do not expose secrets.
+Use the normal Launcher path. Verify Model Center exposes existing models, `relay_gpt_5_6_luna`, Provider grouping, API Key password input/environment-variable storage guidance, and stable desktop plus 390x844 layouts. Confirm Agent binding still resolves through the compatibility alias. Do not enter or invent an API Key during QA.
 
-- [ ] **Step 5: Refresh Launcher and perform browser QA**
-
-Use the normal Launcher path. Verify Model Center exposes existing models, `relay_gpt_5_6_luna`, Provider grouping, API Key password input/environment-variable storage guidance, and stable desktop plus 390x844 layouts. Confirm Agent binding still resolves through the compatibility alias.
-
-- [ ] **Step 6: Close governance state**
+- [ ] **Step 5: Close governance state**
 
 Sync project memory through the project memory skill, release both active claims with evidence, remove the task worktree after integration, and report version impact as `none` unless runtime code versioning policy requires otherwise.

@@ -29,18 +29,27 @@ Provider ID、模型 upstream ID、base URL、credential ref 和 model alias 映
 
 其他错误继续显示原始可读消息，不改变既有处理。
 
+### 现有 Provider 的 API Key 编辑
+
+Schema v2 Provider 工作台在“连接”页为需要凭据的现有 Provider 提供“设置 API Key”入口。入口打开独立的密码输入区，只接收本次新值，不展示当前 secret，也不展示内部 `credential_ref`。
+
+提交时复用现有 `PUT /api/config/draft/providers/{provider_id}` 契约，保持 Provider 路由和模型不变，仅通过 `credentialValue` 把 secret 注册为服务端 pending token。响应同步回 Config 草稿后，用户仍需点击全局“保存到外部配置”；保存阶段把 secret 写入既有凭据引用对应的用户级环境变量，公开 `config.toml` 只保留引用。
+
+`credentialState == "not_required"` 的 Provider 不开放入口。空值不能提交；取消、Provider 切换和成功提交都会清空本地输入。错误信息不得包含输入值。
+
 ## 数据流
 
 1. 用户生成迁移预览并显式裁决 artifact 冲突。
 2. 迁移器规范化 endpoint，并把 loopback 服务分类为 `local_runtime`。
 3. Apply 创建备份与 manifest，写入 Schema v2，重写 live references，校验并重载。
 4. 若 Apply 请求因预览/状态失效而失败，前端清除旧预览，要求重新生成。
-5. Launcher 刷新后，设置页展示 Provider-first 模型中心、模型编辑和 API Key 环境变量入口。
+5. Launcher 刷新后，设置页展示 Provider-first 模型中心；现有 Provider 可通过密码输入把 API Key 加入服务端草稿，再由全局保存写入用户环境变量。
 
 ## 验证
 
 - Python RED/GREEN：旧 `relay` + loopback endpoint 迁移后是 `local_runtime`，完整 Apply 不再触发 localhost 校验错误。
 - TypeScript RED/GREEN：迁移失效错误返回恢复提示，非迁移错误不被误判。
+- TypeScript RED/GREEN：Provider 面板暴露受控的 API Key 入口；ConfigRoute 使用现有 update-provider 契约提交 `credentialValue`，成功后清空输入并保留全局保存门禁。
 - 聚焦回归：`tests/test_model_config_migration.py`、`configRouteLogic.test.ts`、`ConfigRoute.layout.test.ts`。
 - 前端构建：`npm run build`。
 - 真实闭环：READY 预览、备份 manifest、Schema v2 落盘、引用扫描、Launcher 刷新、桌面与窄屏设置页验收。
