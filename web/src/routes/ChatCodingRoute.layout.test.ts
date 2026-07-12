@@ -1741,7 +1741,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("handleOpenProjectAgentBus");
     expect(routeSource).toContain("setActiveGroupRoomId(\"__project_agent_bus__\")");
     expect(routeSource).toContain("queryKeys.projectAgentBus()");
-    expect(routeSource).toContain("listProjectAgentBusTimeline()");
+    expect(routeSource).toContain("queryFn: ({ signal }) => listProjectAgentBusTimeline(undefined, { signal })");
     expect(routeSource).toContain("sendProjectAgentBusMessage({ content, interruptTargets })");
     expect(routeSource).toContain("revokeProjectAgentBusMessage({");
     expect(routeSource).toContain("isProjectAgentBusEventRevoked(event)");

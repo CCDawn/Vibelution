@@ -2115,7 +2115,7 @@ export function ChatCodingRoute() {
   });
   const projectAgentBusQuery = useQuery({
     queryKey: queryKeys.projectAgentBus(),
-    queryFn: () => listProjectAgentBusTimeline(),
+    queryFn: ({ signal }) => listProjectAgentBusTimeline(undefined, { signal }),
     enabled: projectBusActive,
     refetchInterval: projectBusActive ? resolvePollingInterval(chatPollingVisible, 3_000) : false,
     refetchIntervalInBackground: chatStartupWarmupActive,

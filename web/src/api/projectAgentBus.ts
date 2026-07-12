@@ -27,8 +27,8 @@ export function projectAgentBusTimelineUrl(limit?: number) {
   return `${PROJECT_AGENT_BUS_ENDPOINT}?limit=${encodeURIComponent(String(limit))}`;
 }
 
-export function listProjectAgentBusTimeline(limit?: number) {
-  return fetchJson<ProjectAgentBusTimeline>(projectAgentBusTimelineUrl(limit));
+export function listProjectAgentBusTimeline(limit?: number, init?: RequestInit) {
+  return fetchJson<ProjectAgentBusTimeline>(projectAgentBusTimelineUrl(limit), init);
 }
 
 export function sendProjectAgentBusMessage({ content, interruptTargets = false }: SendProjectAgentBusMessageInput) {
