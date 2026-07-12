@@ -86,6 +86,43 @@ export type ProviderWizardAction =
   | { type: "back" }
   | { type: "reset" };
 
+export type ProviderQuickSetupPhase = "input" | "checking" | "review" | "saving" | "success" | "error";
+
+export type ProviderQuickSetupErrorKind =
+  | "auth"
+  | "endpoint"
+  | "discovery"
+  | "no_recommendation"
+  | "partial_save"
+  | "save";
+
+export type ProviderQuickSetupState = {
+  phase: ProviderQuickSetupPhase;
+  provider: ProviderWizardState;
+  discoveredModels: ConfigCatalogModel[];
+  selectedModelRef: string;
+  recommendationReason: string;
+  errorKind: ProviderQuickSetupErrorKind | "";
+  errorMessage: string;
+};
+
+export type ProviderQuickSetupAction =
+  | { type: "reset" }
+  | { type: "set_provider"; provider: ProviderWizardState }
+  | { type: "start_check" }
+  | { type: "check_succeeded"; models: ConfigCatalogModel[]; selectedModelRef: string; recommendationReason: string }
+  | { type: "check_failed"; errorKind: ProviderQuickSetupErrorKind; errorMessage: string }
+  | { type: "select_model"; modelRef: string }
+  | { type: "start_save" }
+  | { type: "save_failed"; errorKind: "partial_save" | "save"; errorMessage: string }
+  | { type: "save_succeeded" };
+
+export type ProviderModelRecommendationReason =
+  | "template_default"
+  | "verified_capabilities"
+  | "stable_fallback"
+  | "no_compatible_model";
+
 const STEPS: ProviderWizardStep[] = ["template", "connection", "discovery", "pin"];
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -154,6 +191,86 @@ export function initialProviderWizardState(): ProviderWizardState {
     discoveredModels: [],
     pinnedModelRefs: [],
   };
+}
+
+export function initialProviderQuickSetupState(): ProviderQuickSetupState {
+  return {
+    phase: "input",
+    provider: initialProviderWizardState(),
+    discoveredModels: [],
+    selectedModelRef: "",
+    recommendationReason: "",
+    errorKind: "",
+    errorMessage: "",
+  };
+}
+
+export function providerQuickSetupReducer(
+  state: ProviderQuickSetupState,
+  action: ProviderQuickSetupAction,
+): ProviderQuickSetupState {
+  if (action.type === "reset") {
+    return initialProviderQuickSetupState();
+  }
+  if (action.type === "set_provider") {
+    return { ...initialProviderQuickSetupState(), provider: action.provider };
+  }
+  if (action.type === "start_check") {
+    return { ...state, phase: "checking", errorKind: "", errorMessage: "" };
+  }
+  if (action.type === "check_succeeded") {
+    return {
+      ...state,
+      phase: "review",
+      discoveredModels: [...action.models],
+      selectedModelRef: action.selectedModelRef,
+      recommendationReason: action.recommendationReason,
+      errorKind: action.selectedModelRef ? "" : "no_recommendation",
+      errorMessage: "",
+    };
+  }
+  if (action.type === "check_failed") {
+    return { ...state, phase: "error", errorKind: action.errorKind, errorMessage: action.errorMessage };
+  }
+  if (action.type === "select_model") {
+    return { ...state, selectedModelRef: action.modelRef, errorKind: "", errorMessage: "" };
+  }
+  if (action.type === "start_save") {
+    return { ...state, phase: "saving", errorKind: "", errorMessage: "" };
+  }
+  if (action.type === "save_failed") {
+    return { ...state, phase: "error", errorKind: action.errorKind, errorMessage: action.errorMessage };
+  }
+  return { ...state, phase: "success", errorKind: "", errorMessage: "" };
+}
+
+function hasVerifiedCapabilities(model: ConfigCatalogModel): boolean {
+  return Object.values(model.capabilities ?? {}).some(
+    (capability) => capability.value === "supported"
+      && ["runtime_probe", "provider_endpoint", "operator_override"].includes(capability.source),
+  );
+}
+
+export function recommendProviderModel(
+  models: ConfigCatalogModel[],
+  options: { templateDefaultModelRef?: string; allowedProtocols: string[] },
+): { modelRef: string; reason: ProviderModelRecommendationReason } {
+  const compatible = models
+    .filter((model) => !["disabled", "protocol_mismatch", "unavailable"].includes(model.status.toLowerCase()))
+    .slice()
+    .sort((left, right) => left.modelRef.localeCompare(right.modelRef));
+  if (!compatible.length || !options.allowedProtocols.length) {
+    return { modelRef: "", reason: "no_compatible_model" };
+  }
+  const templateDefault = compatible.find((model) => model.modelRef === options.templateDefaultModelRef);
+  if (templateDefault) {
+    return { modelRef: templateDefault.modelRef, reason: "template_default" };
+  }
+  const verified = compatible.find(hasVerifiedCapabilities);
+  if (verified) {
+    return { modelRef: verified.modelRef, reason: "verified_capabilities" };
+  }
+  return { modelRef: compatible[0].modelRef, reason: "stable_fallback" };
 }
 
 export function canAdvanceProviderWizard(state: ProviderWizardState): boolean {
