@@ -28,11 +28,23 @@ import styles from "./ConfigProviderRegistryPanel.styles";
 
 export type ConfigProviderRegistryTab = "connection" | "models" | "protocols" | "diagnostics";
 
+export type ProviderActionKind = "discover" | "credential" | "route";
+
+export type ProviderActionFeedback = {
+  kind: ProviderActionKind;
+  providerId: string;
+  phase: "busy" | "success" | "error";
+  message: string;
+} | null;
+
 export type ConfigProviderRegistryPanelProps = {
   rows: ProviderRegistryRow[];
   selectedProviderId: string;
   selectedTab: ConfigProviderRegistryTab;
   disabled: boolean;
+  activeCredentialProviderId: string;
+  activeRouteProviderId: string;
+  actionFeedback: ProviderActionFeedback;
   liveReferenceCountByModelRef: Record<string, number>;
   onSelectProvider: (providerId: string) => void;
   onSelectTab: (tab: ConfigProviderRegistryTab) => void;
@@ -346,6 +358,9 @@ export function ConfigProviderRegistryPanel({
   selectedProviderId,
   selectedTab,
   disabled,
+  activeCredentialProviderId,
+  activeRouteProviderId,
+  actionFeedback,
   liveReferenceCountByModelRef,
   onSelectProvider,
   onSelectTab,
@@ -365,6 +380,10 @@ export function ConfigProviderRegistryPanel({
     0,
   ) ?? 0;
   const providerDeleteBlocked = Boolean(provider && (provider.pinnedCount > 0 || providerLiveReferenceCount > 0));
+  const visibleFeedback = actionFeedback?.providerId === provider?.providerId ? actionFeedback : null;
+  const discoverBusy = visibleFeedback?.kind === "discover" && visibleFeedback.phase === "busy";
+  const credentialActive = activeCredentialProviderId === provider?.providerId;
+  const routeActive = activeRouteProviderId === provider?.providerId;
 
   useEffect(() => {
     setModelQuery("");
@@ -414,16 +433,45 @@ export function ConfigProviderRegistryPanel({
                 <small className={styles.muted}>{provider.providerId} · {provider.vendor || provider.serviceClass}</small>
               </span>
               <VActionGroup ariaLabel="Provider 操作" className={styles.actions}>
-                <VButton icon={<RefreshCw size={14} />} isDisabled={disabled} onPress={() => onDiscover(provider.providerId)}>发现</VButton>
                 <VButton
+                  data-provider-action="discover"
+                  icon={<RefreshCw size={14} />}
+                  isDisabled={disabled}
+                  onPress={() => onDiscover(provider.providerId)}
+                >
+                  {discoverBusy ? "发现中…" : "发现"}
+                </VButton>
+                <VButton
+                  data-provider-action="credential"
+                  aria-pressed={credentialActive}
+                  variant={credentialActive ? "primary" : "ghost"}
                   isDisabled={disabled || provider.credentialState === "not_required"}
                   onPress={() => onEditCredential(provider.providerId)}
                 >
                   设置 API Key
                 </VButton>
-                <VButton icon={<Route size={14} />} isDisabled={disabled} onPress={() => onEditRoute(provider.providerId)}>修改路由</VButton>
+                <VButton
+                  data-provider-action="route"
+                  aria-pressed={routeActive}
+                  variant={routeActive ? "primary" : "ghost"}
+                  icon={<Route size={14} />}
+                  isDisabled={disabled}
+                  onPress={() => onEditRoute(provider.providerId)}
+                >
+                  修改路由
+                </VButton>
               </VActionGroup>
             </div>
+            {visibleFeedback ? (
+              <p
+                className={visibleFeedback.phase === "error" ? styles.actionFeedbackError : styles.actionFeedback}
+                data-feedback-phase={visibleFeedback.phase}
+                role={visibleFeedback.phase === "error" ? "alert" : "status"}
+                aria-live="polite"
+              >
+                {visibleFeedback.message}
+              </p>
+            ) : null}
             <VActionGroup ariaLabel="Provider 详情标签" className={styles.tabs}>
               {TABS.map((tab) => (
                 <VButton

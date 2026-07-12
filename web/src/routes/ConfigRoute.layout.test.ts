@@ -194,9 +194,28 @@ describe("ConfigRoute layout contract", () => {
     expect(routeSource).toContain('credentialProvider.credentialState === "not_required"');
     expect(routeSource).toContain("structuredActionsDisabled || Boolean(busyAction) || !providerCredentialValue.trim()");
     expect(routeSource).toContain("providerCredentialEditId === selectedProviderId");
-    expect(routeSource).toContain('onSelectProvider={(providerId) => {\n                    setProviderCredentialEditId("");\n                    setProviderCredentialValue("");\n                    setSelectedProviderId(providerId);');
+    expect(routeSource).toContain('onSelectProvider={(providerId) => {');
+    expect(routeSource).toContain('setProviderCredentialEditId("")');
+    expect(routeSource).toContain('setProviderCredentialValue("")');
+    expect(routeSource).toContain("setSelectedProviderId(providerId)");
     expect(providerPanelSource).not.toContain("credential_ref");
     expect(routeSource).not.toContain("credential_ref");
+  });
+
+  it("owns typed Provider action feedback and resets local editors when switching Provider", () => {
+    expect(routeSource).toContain("providerActionFeedback");
+    expect(routeSource).toContain('phase: "busy"');
+    expect(routeSource).toContain('phase: "success"');
+    expect(routeSource).toContain('phase: "error"');
+    expect(providerPanelSource).toContain("发现中…");
+    expect(routeSource).toContain("保存中…");
+    expect(routeSource).toContain("生成预览中…");
+    expect(routeSource).toContain("更新中…");
+    expect(routeSource).toContain('setRouteEditProviderId("")');
+    expect(routeSource).toContain("setRoutePreview(null)");
+    expect(providerPanelSource).toContain('aria-live="polite"');
+    expect(providerPanelSource).toContain("activeCredentialProviderId");
+    expect(providerPanelSource).toContain("activeRouteProviderId");
   });
 
   it("uses backend pinned ownership and live references for destructive controls", () => {

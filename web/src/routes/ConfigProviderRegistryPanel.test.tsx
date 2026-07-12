@@ -49,12 +49,18 @@ function provider(models: ConfigCatalogModel[]): ProviderRegistryRow {
   };
 }
 
-function panelProps(models: ConfigCatalogModel[]): ConfigProviderRegistryPanelProps {
+function panelProps(
+  models: ConfigCatalogModel[],
+  overrides: Record<string, unknown> = {},
+): ConfigProviderRegistryPanelProps {
   return {
     rows: [provider(models)],
     selectedProviderId: "relay_a",
     selectedTab: "models",
     disabled: false,
+    activeCredentialProviderId: "",
+    activeRouteProviderId: "",
+    actionFeedback: null,
     liveReferenceCountByModelRef: {},
     onSelectProvider: () => undefined,
     onSelectTab: () => undefined,
@@ -64,6 +70,7 @@ function panelProps(models: ConfigCatalogModel[]): ConfigProviderRegistryPanelPr
     onUnpin: () => undefined,
     onTestModel: () => undefined,
     onDeleteProvider: () => undefined,
+    ...overrides,
   };
 }
 
@@ -137,5 +144,51 @@ describe("ConfigProviderRegistryPanel", () => {
     expect(panelStyles.tableScroll).toContain("overflow-auto");
     expect(panelStyles.table).toContain("[&amp;_thead]:sticky".replace("&amp;", "&"));
     expect(panelSource).not.toContain('@heroui/react');
+  });
+
+  it("aligns Provider action labels, active states, and nearby feedback", () => {
+    const models = [model("observed", "observed")];
+    const busyMarkup = renderToStaticMarkup(<ConfigProviderRegistryPanel {...panelProps(models, {
+      activeCredentialProviderId: "relay_a",
+      activeRouteProviderId: "",
+      actionFeedback: {
+        kind: "discover",
+        providerId: "relay_a",
+        phase: "busy",
+        message: "正在发现模型…",
+      },
+    })} />);
+
+    expect(busyMarkup).toContain("发现中…");
+    expect(busyMarkup).toContain('data-provider-action="credential"');
+    expect(busyMarkup).toMatch(/data-provider-action="credential"[^>]*aria-pressed="true"/);
+    expect(busyMarkup).toContain('aria-live="polite"');
+    expect(busyMarkup).toContain("正在发现模型…");
+
+    const successMarkup = renderToStaticMarkup(<ConfigProviderRegistryPanel {...panelProps(models, {
+      activeCredentialProviderId: "",
+      activeRouteProviderId: "relay_a",
+      actionFeedback: {
+        kind: "route",
+        providerId: "relay_a",
+        phase: "success",
+        message: "路由预览已生成",
+      },
+    })} />);
+    expect(successMarkup).toMatch(/data-provider-action="route"[^>]*aria-pressed="true"/);
+    expect(successMarkup).toContain("路由预览已生成");
+
+    const errorMarkup = renderToStaticMarkup(<ConfigProviderRegistryPanel {...panelProps(models, {
+      activeCredentialProviderId: "",
+      activeRouteProviderId: "",
+      actionFeedback: {
+        kind: "credential",
+        providerId: "relay_a",
+        phase: "error",
+        message: "API Key 更新失败",
+      },
+    })} />);
+    expect(errorMarkup).toContain('role="alert"');
+    expect(errorMarkup).toContain("API Key 更新失败");
   });
 });
