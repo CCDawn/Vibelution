@@ -42,15 +42,18 @@ function props(overrides: Partial<ConfigQuickSetupPanelProps> = {}): ConfigQuick
 }
 
 describe("ConfigQuickSetupPanel", () => {
-  it("renders one Provider selector, one password input, and collapsed advanced settings", () => {
+  it("renders a compact input flow without an idle result panel", () => {
     const markup = renderToStaticMarkup(<ConfigQuickSetupPanel {...props()} />);
 
+    expect(markup).toContain("连接一个模型服务");
     expect(markup).toContain("选择服务商");
     expect(markup).toContain('type="password"');
     expect(markup.match(/type="password"/g)).toHaveLength(1);
     expect(markup).toContain("高级参数");
     expect(markup).not.toContain("<details open");
-    expect(markup).toContain("检测并生成配置");
+    expect(markup).toContain("检测连接");
+    expect(markup).not.toContain('data-quick-setup-result="true"');
+    expect(markup).not.toContain("等待检测");
   });
 
   it("hides the credential input for a no-auth Provider", () => {
@@ -77,7 +80,7 @@ describe("ConfigQuickSetupPanel", () => {
     ["saving", "正在保存配置"],
     ["success", "配置已保存"],
     ["error", "需要处理后重试"],
-  ] as const)("keeps the result surface mounted for %s", (phase, title) => {
+  ] as const)("renders the progressive result region for %s", (phase, title) => {
     const state = {
       ...initialProviderQuickSetupState(),
       phase,
@@ -88,6 +91,56 @@ describe("ConfigQuickSetupPanel", () => {
 
     expect(markup).toContain('data-quick-setup-result="true"');
     expect(markup).toContain(title);
+    if (phase === "review") expect(markup).toContain("保存并完成");
+  });
+
+  it("shows model confirmation only after detection reaches review", () => {
+    const state = {
+      ...initialProviderQuickSetupState(),
+      phase: "review" as const,
+      provider: {
+        ...initialProviderWizardState(),
+        templateId: "openai",
+        providerId: "openai",
+        label: "OpenAI 官方 API",
+        baseUrl: "https://api.openai.com/v1",
+        defaultProtocol: "responses",
+      },
+      discoveredModels: [{
+        availability: "observed" as const,
+        label: "GPT-5",
+        modelKey: "openai/gpt-5",
+        modelRef: "openai/gpt-5",
+        status: "observed",
+        upstreamId: "gpt-5",
+        capabilities: {},
+      }],
+      selectedModelRef: "openai/gpt-5",
+      recommendationReason: "使用 Provider 模板默认模型",
+    };
+    const markup = renderToStaticMarkup(<ConfigQuickSetupPanel {...props({ state })} />);
+
+    expect(markup).toContain("默认模型");
+    expect(markup).toContain("GPT-5");
+    expect(markup).toContain("保存并完成");
+  });
+
+  it.each([
+    ["checking", "检测中…", "检测中"],
+    ["error", "重新检测", "需处理"],
+    ["saving", "保存中…", "保存中"],
+    ["success", "配置已保存", "已完成"],
+  ] as const)("aligns the primary feedback for %s", (phase, actionCopy, statusCopy) => {
+    const state = {
+      ...initialProviderQuickSetupState(),
+      phase,
+      errorKind: phase === "error" ? "auth" as const : "" as const,
+      errorMessage: phase === "error" ? "认证失败" : "",
+    };
+    const markup = renderToStaticMarkup(<ConfigQuickSetupPanel {...props({ state })} />);
+
+    expect(markup).toContain(actionCopy);
+    expect(markup).toContain(statusCopy);
   });
 
   it("never renders a credential value in result or error copy", () => {
