@@ -144,6 +144,11 @@ describe("ConfigRoute layout contract", () => {
     expect(routeSource).toContain("buildProviderDraftRequest({ providerId, provider, credentialValue: providerCredentialValue })");
     expect(routeSource).toContain('"PUT"');
     expect(routeSource).toContain("最终保存会写入用户环境变量，不会写入 config.toml。");
+    expect(routeSource).toContain("if (structuredActionsDisabled || !providerCredentialValue.trim()) return;");
+    expect(routeSource).toContain('credentialProvider.credentialState === "not_required"');
+    expect(routeSource).toContain("structuredActionsDisabled || Boolean(busyAction) || !providerCredentialValue.trim()");
+    expect(routeSource).toContain("providerCredentialEditId === selectedProviderId");
+    expect(routeSource).toContain('onSelectProvider={(providerId) => {\n                    setProviderCredentialEditId("");\n                    setProviderCredentialValue("");\n                    setSelectedProviderId(providerId);');
     expect(providerPanelSource).not.toContain("credential_ref");
     expect(routeSource).not.toContain("credential_ref");
   });

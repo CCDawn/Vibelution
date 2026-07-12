@@ -2372,6 +2372,7 @@ export function ConfigRoute() {
     canCheckCurrentChanges,
     canRestoreEditorText,
   } = editorSyncState;
+  const credentialProvider = providerRows.find((row) => row.providerId === providerCredentialEditId);
   const modelEditorRequiredFieldsReady = Boolean(modelEditor.model.trim() && modelEditor.provider.base_url.trim());
   const canSubmitModelEditor = !structuredActionsDisabled && modelEditorRequiredFieldsReady;
   const shouldBlockLeave = useCallback<BlockerFunction>(
@@ -2623,6 +2624,8 @@ export function ConfigRoute() {
   }
 
   async function handleUpdateProviderCredential(providerId: string) {
+    if (structuredActionsDisabled || !providerCredentialValue.trim()) return;
+    if (!credentialProvider || credentialProvider.providerId !== providerId || credentialProvider.credentialState === "not_required") return;
     setBusyAction("正在更新 Provider API Key 草稿…");
     setProviderActionError("");
     try {
@@ -3630,7 +3633,11 @@ export function ConfigRoute() {
                   selectedTab={selectedProviderTab}
                   disabled={structuredActionsDisabled || Boolean(busyAction)}
                   liveReferenceCountByModelRef={liveReferenceCountByModelRef}
-                  onSelectProvider={setSelectedProviderId}
+                  onSelectProvider={(providerId) => {
+                    setProviderCredentialEditId("");
+                    setProviderCredentialValue("");
+                    setSelectedProviderId(providerId);
+                  }}
                   onSelectTab={setSelectedProviderTab}
                   onDiscover={(providerId) => {
                     void handleDiscoverProvider(providerId).catch(() => undefined);
@@ -3649,7 +3656,7 @@ export function ConfigRoute() {
                     void handleDeleteProvider(providerId);
                   }}
                 />
-                {providerCredentialEditId ? (
+                {providerCredentialEditId && providerCredentialEditId === selectedProviderId ? (
                   <VSurface as="section" padding="compact" tone="row" className={styles.providerRouteEditSurface}>
                     <VSection
                       title={`设置 ${providerCredentialEditId} 的 API Key`}
@@ -3666,7 +3673,10 @@ export function ConfigRoute() {
                           </VButton>
                           <VButton
                             variant="primary"
-                            isDisabled={Boolean(busyAction) || !providerCredentialValue}
+                            isDisabled={
+                              structuredActionsDisabled || Boolean(busyAction) || !providerCredentialValue.trim()
+                              || !credentialProvider || credentialProvider.credentialState === "not_required"
+                            }
                             onPress={() => {
                               void handleUpdateProviderCredential(providerCredentialEditId);
                             }}
