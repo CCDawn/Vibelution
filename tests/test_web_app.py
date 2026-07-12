@@ -322,6 +322,21 @@ def test_history_seed_omits_state_only_assistant_messages():
     ]
 
 
+def test_history_seed_excludes_current_turn_by_identity_without_text_dedupe():
+    history = session_service._history_messages_for_agent_seed(
+        [
+            {"role": "user", "content": "你好", "metadata": {"turnId": "turn-1"}},
+            {"role": "assistant", "content": "第一轮", "metadata": {"turnId": "turn-1"}},
+            {"role": "user", "content": "你好", "metadata": {"turnId": "turn-2"}},
+            {"role": "assistant", "content": "第二轮", "metadata": {"turnId": "turn-2"}},
+            {"role": "user", "content": "你好", "metadata": {"turnId": "turn-current"}},
+        ],
+        exclude_turn_id="turn-current",
+    )
+
+    assert [item["content"] for item in history if item["role"] == "user"] == ["你好", "你好"]
+
+
 def test_history_seed_keeps_empty_assistant_message_with_tool_calls():
     history = session_service._history_messages_for_agent_seed(
         [

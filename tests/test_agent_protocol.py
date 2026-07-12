@@ -6147,6 +6147,77 @@ class TestRuntimeStateMemoryFlow:
         assert messages[-1]["role"] == "user"
         assert "对话用户输入" in messages[-1]["content"]
 
+    def test_prepare_turn_messages_preserves_same_text_across_distinct_turns(self):
+        history = [
+            SystemMessage(content="old system"),
+            build_chat_user_message("你好"),
+            AIMessage(content="第一轮"),
+            build_chat_user_message("你好"),
+            AIMessage(content="第二轮"),
+        ]
+
+        messages, resumed = TurnOutcomeController.prepare_turn_messages(
+            system_prompt="new system",
+            user_prompt="你好",
+            effective_goal="你好",
+            active_turn_messages=history,
+            active_turn_goal="__chat_session__",
+            build_system_message=agent_module.build_system_message,
+            build_external_request_message=build_chat_user_message,
+            allow_append_user_message=True,
+        )
+
+        user_messages = [
+            item
+            for item in messages
+            if isinstance(item, dict) and item.get("role") == "user"
+        ]
+        assert resumed is True
+        assert len(user_messages) == 3
+        assert all("你好" in str(item.get("content") or "") for item in user_messages)
+        assert messages[-1] == build_chat_user_message("你好")
+
+    def test_prepare_turn_messages_appends_multimodal_current_submission_once(self):
+        history = [
+            SystemMessage(content="old system"),
+            build_chat_user_message("第一句"),
+            AIMessage(content="第一轮回复"),
+        ]
+
+        def build_multimodal_message(content):
+            return {
+                "role": "user",
+                "content": [
+                    {"type": "input_text", "text": content},
+                    {"type": "input_image", "image_url": "data:image/png;base64,AA=="},
+                ],
+            }
+
+        messages, resumed = TurnOutcomeController.prepare_turn_messages(
+            system_prompt="new system",
+            user_prompt="看图",
+            effective_goal="看图",
+            active_turn_messages=history,
+            active_turn_goal="__chat_session__",
+            build_system_message=agent_module.build_system_message,
+            build_external_request_message=build_multimodal_message,
+            allow_append_user_message=True,
+        )
+
+        multimodal_messages = [
+            item
+            for item in messages
+            if (
+                isinstance(item, dict)
+                and item.get("role") == "user"
+                and isinstance(item.get("content"), list)
+            )
+        ]
+        assert resumed is True
+        assert len(multimodal_messages) == 1
+        assert multimodal_messages[0] == build_multimodal_message("看图")
+        assert messages[-1] == multimodal_messages[0]
+
     def test_dynamic_system_context_is_after_history_and_not_carried_over(self):
         from core.infrastructure.llm_utils import (
             build_cacheable_system_prefix_message,
