@@ -5,6 +5,7 @@ agent.py 协议层回归测试
 
 from types import SimpleNamespace
 from unittest.mock import MagicMock
+import copy
 import json
 
 import pytest
@@ -35,6 +36,7 @@ from core.orchestration.response_surface import ResponseSurfaceController
 from core.orchestration.turn_outcome import TurnOutcomeController
 from core.orchestration.tool_lifecycle import ToolLifecycleBridge
 from core.llm.types import CanonicalItemIdentity, CanonicalToolCall, LLMError, TurnOutcome as LLMTurnOutcome
+from tests.helpers.isolated_config import isolated_settings_config
 from tools.agent_tools import spawn_agent as spawn_agent_impl, set_subagent_stream_sink
 from tools.Key_Tools import create_key_tools, create_llm_facing_tools
 
@@ -4359,20 +4361,17 @@ class TestLocalProviderBootstrap:
         mental_model = MagicMock()
         monkeypatch.setattr(agent_module, "get_mental_model", lambda **_kwargs: mental_model)
 
-        config = Settings(
-            None,
+        config = isolated_settings_config(
             **{
                 "llm.profiles.primary.model": "",
-                "llm.profiles.primary.api_key_env": "",
-                "llm.profiles.primary.provider.kind": "local",
-                "llm.profiles.primary.provider.api_key": "",
-                "llm.profiles.primary.provider.api_key_env": "",
-                "llm.profiles.primary.provider.base_url": "http://localhost:11434/v1",
-                "llm.profiles.primary.provider.compat_mode": "openai",
-                "llm.profiles.primary.provider.requires_api_key": False,
+                "llm.profiles.primary.provider_id": "default",
+                "llm.providers.default.kind": "local",
+                "llm.providers.default.base_url": "http://localhost:11434/v1",
+                "llm.providers.default.compat_mode": "openai",
+                "llm.providers.default.requires_api_key": False,
             },
         )
-        agent = SelfEvolvingAgent(config=config.config)
+        agent = SelfEvolvingAgent(config=config)
         provider = agent.config.llm.get_provider(role="primary")
 
         assert provider.kind == "local"
@@ -4415,29 +4414,20 @@ class TestLocalProviderBootstrap:
             ),
         )
 
-        config = Settings(
-            None,
+        original_config = isolated_settings_config(
             **{
                 "llm.profiles.primary.model": "primary-model",
-                "llm.profiles.primary.api_key_env": "",
-                "llm.profiles.primary.provider.kind": "local",
-                "llm.profiles.primary.provider.api_key": "",
-                "llm.profiles.primary.provider.api_key_env": "",
-                "llm.profiles.primary.provider.base_url": "http://localhost:11434/v1",
-                "llm.profiles.primary.provider.compat_mode": "openai",
-                "llm.profiles.primary.provider.requires_api_key": False,
-                "llm.profiles.supervised_baseline.model": "baseline-model",
-                "llm.profiles.supervised_baseline.api_key_env": "",
-                "llm.profiles.supervised_baseline.provider.kind": "local",
-                "llm.profiles.supervised_baseline.provider.api_key": "",
-                "llm.profiles.supervised_baseline.provider.api_key_env": "",
-                "llm.profiles.supervised_baseline.provider.base_url": "http://localhost:11434/v1",
-                "llm.profiles.supervised_baseline.provider.compat_mode": "openai",
-                "llm.profiles.supervised_baseline.provider.requires_api_key": False,
+                "llm.profiles.primary.provider_id": "default",
+                "llm.providers.default.kind": "local",
+                "llm.providers.default.base_url": "http://localhost:11434/v1",
+                "llm.providers.default.compat_mode": "openai",
+                "llm.providers.default.requires_api_key": False,
             },
         )
-
-        original_config = config.config
+        baseline_profile = copy.deepcopy(original_config.llm.profiles["primary"])
+        baseline_profile.profile_id = "supervised_baseline"
+        baseline_profile.model = "baseline-model"
+        original_config.llm.profiles["supervised_baseline"] = baseline_profile
         agent = SelfEvolvingAgent(config=original_config)
 
         assert agent.runtime_agent_binding["agentId"] == "agent-supervised-baseline"
@@ -4458,19 +4448,16 @@ class TestLocalProviderBootstrap:
         mental_model = MagicMock()
         monkeypatch.setattr(agent_module, "get_mental_model", lambda **_kwargs: mental_model)
 
-        config = Settings(
-            None,
+        config = isolated_settings_config(
             **{
                 "llm.providers.default.kind": "local",
-                "llm.providers.default.api_key": "",
-                "llm.providers.default.api_key_env": "",
                 "llm.providers.default.base_url": "http://localhost:11434/v1",
                 "llm.providers.default.compat_mode": "openai",
                 "llm.providers.default.requires_api_key": False,
                 "llm.profiles.primary.provider_id": "default",
                 "llm.profiles.primary.model": "dialogue-model",
             },
-        ).config
+        )
         provider_id = config.llm.get_profile(profile_id="primary").provider_id
         config.llm.model_library = {
             "dialogue-model-id": {"provider_id": provider_id, "model": "dialogue-model"},
@@ -4544,12 +4531,9 @@ class TestLocalProviderBootstrap:
         monkeypatch.setattr(agent_module, "get_git_memory_service", lambda: MagicMock())
         monkeypatch.setattr(agent_module, "get_mental_model", lambda **_kwargs: MagicMock())
 
-        config = Settings(
-            None,
+        config = isolated_settings_config(
             **{
                 "llm.providers.default.kind": "local",
-                "llm.providers.default.api_key": "",
-                "llm.providers.default.api_key_env": "",
                 "llm.providers.default.base_url": "http://localhost:11434/v1",
                 "llm.providers.default.compat_mode": "openai",
                 "llm.providers.default.requires_api_key": False,
@@ -4557,7 +4541,7 @@ class TestLocalProviderBootstrap:
                 "llm.profiles.primary.model": "global-primary-model",
                 "llm.profiles.primary.tool_calling_mode": "disabled",
             },
-        ).config
+        )
         provider_id = config.llm.get_profile(profile_id="primary").provider_id
         config.llm.model_library = {
             "agent-dialogue-model-id": {
@@ -4631,12 +4615,9 @@ class TestLocalProviderBootstrap:
         monkeypatch.setattr(agent_module, "get_git_memory_service", lambda: MagicMock())
         monkeypatch.setattr(agent_module, "get_mental_model", lambda **_kwargs: MagicMock())
 
-        config = Settings(
-            None,
+        config = isolated_settings_config(
             **{
                 "llm.providers.default.kind": "local",
-                "llm.providers.default.api_key": "",
-                "llm.providers.default.api_key_env": "",
                 "llm.providers.default.base_url": "http://localhost:11434/v1",
                 "llm.providers.default.compat_mode": "openai",
                 "llm.providers.default.requires_api_key": False,
@@ -4644,7 +4625,7 @@ class TestLocalProviderBootstrap:
                 "llm.profiles.primary.model": "global-primary-model",
                 "llm.profiles.primary.tool_calling_mode": "disabled",
             },
-        ).config
+        )
         agent_record = {
             "agentId": "agent-compression-runtime",
             "contextCompressionPolicy": {
@@ -4833,19 +4814,16 @@ class TestLocalProviderBootstrap:
         monkeypatch.setattr(agent_module, "get_git_memory_service", lambda: MagicMock())
         monkeypatch.setattr(agent_module, "get_mental_model", lambda **_kwargs: MagicMock())
 
-        config = Settings(
-            None,
+        config = isolated_settings_config(
             **{
                 "llm.providers.default.kind": "local",
-                "llm.providers.default.api_key": "",
-                "llm.providers.default.api_key_env": "",
                 "llm.providers.default.base_url": "http://localhost:11434/v1",
                 "llm.providers.default.compat_mode": "openai",
                 "llm.providers.default.requires_api_key": False,
                 "llm.profiles.primary.provider_id": "default",
                 "llm.profiles.primary.model": "dialogue-model",
             },
-        ).config
+        )
         provider_id = config.llm.get_profile(profile_id="primary").provider_id
         config.llm.model_library = {
             "dialogue-model-id": {"provider_id": provider_id, "model": "dialogue-model"},
@@ -4915,19 +4893,16 @@ class TestLocalProviderBootstrap:
         monkeypatch.setattr(agent_module, "get_git_memory_service", lambda: MagicMock())
         monkeypatch.setattr(agent_module, "get_mental_model", lambda **_kwargs: MagicMock())
 
-        config = Settings(
-            None,
+        config = isolated_settings_config(
             **{
                 "llm.providers.default.kind": "local",
-                "llm.providers.default.api_key": "",
-                "llm.providers.default.api_key_env": "",
                 "llm.providers.default.base_url": "http://localhost:11434/v1",
                 "llm.providers.default.compat_mode": "openai",
                 "llm.providers.default.requires_api_key": False,
                 "llm.profiles.primary.provider_id": "default",
                 "llm.profiles.primary.model": "global-primary-model",
             },
-        ).config
+        )
         provider_id = config.llm.get_profile(profile_id="primary").provider_id
         config.llm.model_library = {
             "supervised-dialogue-model-id": {
@@ -4974,19 +4949,16 @@ class TestLocalProviderBootstrap:
     def test_runtime_agent_llm_slot_binding_failure_is_fatal(self, monkeypatch):
         monkeypatch.setenv("VIBELUTION_AGENT_ID", "agent-bad-slot")
         monkeypatch.setenv("VIBELUTION_AGENT_LLM_SLOT", "dialogue")
-        config = Settings(
-            None,
+        config = isolated_settings_config(
             **{
                 "llm.providers.default.kind": "local",
-                "llm.providers.default.api_key": "",
-                "llm.providers.default.api_key_env": "",
                 "llm.providers.default.base_url": "http://localhost:11434/v1",
                 "llm.providers.default.compat_mode": "openai",
                 "llm.providers.default.requires_api_key": False,
                 "llm.profiles.primary.provider_id": "default",
                 "llm.profiles.primary.model": "primary-model",
             },
-        ).config
+        )
         directory_module = __import__(
             "core.web.services.agent_directory_service",
             fromlist=["agent_directory_service"],
@@ -5006,19 +4978,16 @@ class TestLocalProviderBootstrap:
     def test_runtime_agent_llm_slot_binding_does_not_fallback_to_dialogue(self, monkeypatch):
         monkeypatch.setenv("VIBELUTION_AGENT_ID", "agent-missing-subagent-slot")
         monkeypatch.setenv("VIBELUTION_AGENT_LLM_SLOT", "subagentExecution")
-        config = Settings(
-            None,
+        config = isolated_settings_config(
             **{
                 "llm.providers.default.kind": "local",
-                "llm.providers.default.api_key": "",
-                "llm.providers.default.api_key_env": "",
                 "llm.providers.default.base_url": "http://localhost:11434/v1",
                 "llm.providers.default.compat_mode": "openai",
                 "llm.providers.default.requires_api_key": False,
                 "llm.profiles.primary.provider_id": "default",
                 "llm.profiles.primary.model": "primary-model",
             },
-        ).config
+        )
         provider_id = config.llm.get_profile(profile_id="primary").provider_id
         config.llm.model_library = {
             "dialogue-model-id": {"provider_id": provider_id, "model": "dialogue-model"},
@@ -5087,21 +5056,18 @@ class TestLocalProviderBootstrap:
             ),
         )
 
-        config = Settings(
-            None,
+        config = isolated_settings_config(
             **{
                 "agent.default_mode": "supervised_evolution",
                 "llm.profiles.primary.model": "primary-model",
-                "llm.profiles.primary.api_key_env": "",
-                "llm.profiles.primary.provider.kind": "local",
-                "llm.profiles.primary.provider.api_key": "",
-                "llm.profiles.primary.provider.api_key_env": "",
-                "llm.profiles.primary.provider.base_url": "http://localhost:11434/v1",
-                "llm.profiles.primary.provider.compat_mode": "openai",
-                "llm.profiles.primary.provider.requires_api_key": False,
+                "llm.profiles.primary.provider_id": "default",
+                "llm.providers.default.kind": "local",
+                "llm.providers.default.base_url": "http://localhost:11434/v1",
+                "llm.providers.default.compat_mode": "openai",
+                "llm.providers.default.requires_api_key": False,
             },
         )
-        agent = SelfEvolvingAgent(config=config.config)
+        agent = SelfEvolvingAgent(config=config)
         messages, resumed = TurnOutcomeController.prepare_turn_messages(
             system_prompt=(
                 "static",
@@ -5323,8 +5289,11 @@ class TestResolvedApiKeyUsage:
     """解析后的 API Key 使用一致性测试"""
 
     def test_agent_missing_api_key_error_names_selected_model_envs(self, monkeypatch):
-        monkeypatch.delenv("VIBELUTION_LLM_MODEL_RELAY_GPT_5_6_LUNA_API_KEY", raising=False)
-        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        model_key_env = "VIBELUTION_TEST_MODEL_MISSING_API_KEY"
+        provider_key_env = "VIBELUTION_TEST_PROVIDER_MISSING_API_KEY"
+        monkeypatch.delenv("DASHSCOPE_API_KEY", raising=False)
+        monkeypatch.delenv(model_key_env, raising=False)
+        monkeypatch.delenv(provider_key_env, raising=False)
         scene_events = []
         monkeypatch.setattr(
             agent_module,
@@ -5332,25 +5301,26 @@ class TestResolvedApiKeyUsage:
             lambda phase, event_code, **kwargs: scene_events.append((phase, event_code, kwargs)),
         )
 
-        config = Settings(
-            None,
+        config = isolated_settings_config(
             **{
                 "llm.providers.default.kind": "relay",
-                "llm.providers.default.api_key": "",
-                "llm.providers.default.api_key_env": "OPENAI_API_KEY",
                 "llm.providers.default.base_url": "https://ai-pixel.online",
                 "llm.providers.default.compat_mode": "openai",
                 "llm.providers.default.requires_api_key": True,
                 "llm.profiles.primary.provider_id": "default",
                 "llm.profiles.primary.model": "gpt-5.6-luna",
-                "llm.profiles.primary.api_key_env": "VIBELUTION_LLM_MODEL_RELAY_GPT_5_6_LUNA_API_KEY",
             },
-        ).config
+        )
+        primary_profile = config.llm.get_profile(role="primary")
+        primary_provider = config.llm.get_provider(role="primary")
+        primary_provider.api_key = ""
+        primary_provider.api_key_env = provider_key_env
+        primary_profile.api_key_env = model_key_env
         config.llm.model_library = {
             "relay_gpt_5_6_luna": {
-                "provider_id": "default",
+                "provider_id": primary_provider.provider_id,
                 "model": "gpt-5.6-luna",
-                "api_key_env": "VIBELUTION_LLM_MODEL_RELAY_GPT_5_6_LUNA_API_KEY",
+                "api_key_env": model_key_env,
             }
         }
 
@@ -5360,16 +5330,16 @@ class TestResolvedApiKeyUsage:
         message = str(exc_info.value)
         assert "modelId=relay_gpt_5_6_luna" in message
         assert "provider=inline_profile_primary" in message
-        assert "VIBELUTION_LLM_MODEL_RELAY_GPT_5_6_LUNA_API_KEY" in message
-        assert "OPENAI_API_KEY" in message
+        assert model_key_env in message
+        assert provider_key_env in message
         assert "llm.providers.<provider_id>" not in message
         missing_event = next(event for event in scene_events if event[1] == "agent.api_key.missing")
         fields = missing_event[2]["fields"]
         assert fields["modelId"] == "relay_gpt_5_6_luna"
         assert fields["providerId"] == "inline_profile_primary"
         assert fields["providerKind"] == "relay"
-        assert fields["modelApiKeyEnv"] == "VIBELUTION_LLM_MODEL_RELAY_GPT_5_6_LUNA_API_KEY"
-        assert fields["providerApiKeyEnv"] == "OPENAI_API_KEY"
+        assert fields["modelApiKeyEnv"] == model_key_env
+        assert fields["providerApiKeyEnv"] == provider_key_env
         assert fields["apiKeySource"] == "missing"
 
     def test_agent_uses_provider_specific_resolved_key(self, monkeypatch):
@@ -5411,20 +5381,20 @@ class TestResolvedApiKeyUsage:
             lambda role=None, profile_id=None, config=None: DummyClient(config=config, role=role, profile_id=profile_id),
         )
 
-        config = Settings(
-            None,
+        config = isolated_settings_config(
             **{
                 "llm.profiles.primary.model": "",
-                "llm.profiles.primary.api_key_env": "",
-                "llm.profiles.primary.provider.kind": "minimax",
-                "llm.profiles.primary.provider.api_key": "",
-                "llm.profiles.primary.provider.api_key_env": "MINIMAX_API_KEY",
-                "llm.profiles.primary.provider.base_url": "https://api.minimaxi.com/v1",
-                "llm.profiles.primary.provider.compat_mode": "openai",
-                "llm.profiles.primary.provider.requires_api_key": True,
+                "llm.profiles.primary.provider_id": "default",
+                "llm.providers.default.kind": "minimax",
+                "llm.providers.default.base_url": "https://api.minimaxi.com/v1",
+                "llm.providers.default.compat_mode": "openai",
+                "llm.providers.default.requires_api_key": True,
             },
         )
-        agent = SelfEvolvingAgent(config=config.config)
+        primary_provider = config.llm.get_provider(role="primary")
+        primary_provider.api_key = ""
+        primary_provider.api_key_env = "MINIMAX_API_KEY"
+        agent = SelfEvolvingAgent(config=config)
 
         assert agent.api_key == "minimax-test-key"
         assert agent.config.llm.api_key == "minimax-test-key"
