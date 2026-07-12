@@ -225,6 +225,9 @@ def record_discovery_success(
             "capabilities": merge_capability_observations(capability_observations),
             "limits": copy.deepcopy(raw.get("limits", {})) if isinstance(raw.get("limits", {}), dict) else {},
             "metadataSource": "provider_endpoint",
+            "verification": copy.deepcopy(prior.get("verification", {}))
+            if isinstance(prior.get("verification"), dict)
+            else {},
         }
 
     for model_key, pinned_model in pinned.items():
@@ -248,6 +251,9 @@ def record_discovery_success(
             "label": str(pinned_model.get("label") or prior.get("label") or upstream_id),
             "availability": "missing_remote",
             "capabilities": capabilities,
+            "verification": copy.deepcopy(prior.get("verification", {}))
+            if isinstance(prior.get("verification"), dict)
+            else {},
         }
 
     warnings = []
@@ -299,6 +305,62 @@ def record_discovery_failure(
     provider["lastAttemptAt"] = str(attempted_at)
     provider["lastErrorType"] = _classify_discovery_error_type(error_type, status=resolved_status)
     providers[provider_key] = provider
+    return updated
+
+
+def record_model_verification(
+    state: dict[str, Any],
+    *,
+    model_ref: str,
+    checked_at: str,
+    ok: bool,
+    error_type: str = "",
+    http_status: int | None = None,
+) -> dict[str, Any]:
+    provider_id, model_key = split_model_ref(model_ref)
+    _parse_utc(checked_at)
+    normalized_error = "" if ok else str(error_type or "failed").strip().lower()[:64]
+    normalized_status = None
+    if http_status is not None:
+        try:
+            candidate = int(http_status)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("invalid model verification HTTP status") from exc
+        if candidate < 100 or candidate > 599:
+            raise ValueError("invalid model verification HTTP status")
+        normalized_status = candidate
+
+    updated = copy.deepcopy(state)
+    providers = updated.setdefault("providers", {})
+    provider = providers.setdefault(
+        provider_id,
+        {
+            "status": "not_discovered",
+            "catalogStale": False,
+            "lastAttemptAt": "",
+            "lastSuccessAt": "",
+            "lastErrorType": "",
+            "models": {},
+            "warnings": [],
+        },
+    )
+    models = provider.setdefault("models", {})
+    model = models.setdefault(
+        model_key,
+        {
+            "upstreamId": model_key,
+            "label": model_key,
+            "availability": "pinned",
+            "capabilities": {},
+        },
+    )
+    verification = {
+        "status": "verified" if ok else "failed",
+        "checkedAt": str(checked_at),
+        "errorType": normalized_error,
+        "httpStatus": normalized_status,
+    }
+    model["verification"] = verification
     return updated
 
 
@@ -407,6 +469,7 @@ __all__ = [
     "provider_catalog_refresh_due",
     "record_discovery_failure",
     "record_discovery_success",
+    "record_model_verification",
     "resolve_model_capabilities",
     "save_model_catalog_state",
 ]

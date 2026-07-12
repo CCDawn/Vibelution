@@ -34,6 +34,8 @@ from config.model_catalog import (
     CAPABILITY_VALUES,
     load_model_catalog_state,
     provider_catalog_refresh_due,
+    record_model_verification,
+    save_model_catalog_state,
 )
 from core.chat.chat_task_types import trim_lines
 from core.llm import LLMInvocationContext, invoke_llm
@@ -784,6 +786,102 @@ def _profile_test_target(
     }
 
 
+def _v2_model_ref_test_target(
+    public_config: dict[str, Any],
+    model_ref: str,
+    draft_meta: dict | None = None,
+) -> dict[str, Any]:
+    normalized_ref = make_model_ref(*split_model_ref(model_ref))
+    route_id = _model_probe_route_id(normalized_ref)
+    probe_config = copy.deepcopy(public_config)
+    llm = probe_config.setdefault("llm", {})
+    profiles = llm.setdefault("profiles", {})
+    if not isinstance(profiles, dict):
+        raise ValueError("llm.profiles must be an object")
+    profiles[route_id] = {
+        "label": "Model callability probe",
+        "model_ref": normalized_ref,
+        "overrides": {},
+    }
+    target = _profile_test_target(probe_config, route_id, draft_meta)
+    target["model_id"] = normalized_ref
+    return target
+
+
+def _model_verification_summary(result: dict[str, Any]) -> dict[str, Any]:
+    ok = bool(result.get("ok") if "ok" in result else result.get("success"))
+    message = str(result.get("message") or result.get("error") or "").strip()
+    lowered = message.lower()
+    raw_status = result.get("http_status") or result.get("status_code")
+    http_status: int | None = None
+    try:
+        http_status = int(raw_status) if raw_status is not None else None
+    except (TypeError, ValueError):
+        http_status = None
+    if http_status is None:
+        match = re.search(r"\b([1-5][0-9]{2})\b", message)
+        if match:
+            http_status = int(match.group(1))
+        elif "service temporarily unavailable" in lowered:
+            http_status = 503
+        elif "upstream request failed" in lowered:
+            http_status = 502
+
+    error_type = ""
+    if not ok:
+        if "missing api key" in lowered or "missing credential" in lowered:
+            error_type = "missing_credential"
+        elif http_status in {401, 403} or "unauthor" in lowered or "forbidden" in lowered:
+            error_type = "auth_failed"
+        elif http_status == 429 or "rate limit" in lowered:
+            error_type = "rate_limited"
+        elif http_status == 503 or "service temporarily unavailable" in lowered:
+            error_type = "service_unavailable"
+        elif http_status == 502 or "upstream" in lowered:
+            error_type = "upstream_unavailable"
+        elif "timeout" in lowered or "timed out" in lowered:
+            error_type = "timeout"
+        elif "connection" in lowered or "network" in lowered:
+            error_type = "network"
+        elif "notfound" in lowered or "not found" in lowered:
+            error_type = "not_found"
+        else:
+            error_type = "failed"
+    return {
+        "status": "verified" if ok else "failed",
+        "checked_at": datetime.now(timezone.utc).isoformat(),
+        "error_type": error_type,
+        "http_status": http_status,
+    }
+
+
+def _persist_saved_model_verification(
+    public_config: dict[str, Any],
+    draft_meta: dict | None,
+    model_ref: str,
+    verification: dict[str, Any],
+) -> bool:
+    llm = public_config.get("llm", {}) if isinstance(public_config, dict) else {}
+    if int(llm.get("schema_version") or 1) != 2:
+        return False
+    if _llm_test_config_scope(public_config, draft_meta) != "saved":
+        return False
+    try:
+        state = load_model_catalog_state()
+        updated = record_model_verification(
+            state,
+            model_ref=model_ref,
+            checked_at=str(verification["checked_at"]),
+            ok=verification["status"] == "verified",
+            error_type=str(verification["error_type"]),
+            http_status=verification["http_status"],
+        )
+        save_model_catalog_state(updated)
+    except (OSError, ValueError):
+        return False
+    return True
+
+
 def _apply_image_input_capability_details_to_runtime_view(
     public_config: dict[str, Any],
     model_id: str,
@@ -933,6 +1031,13 @@ def _run_draft_test_llm_connection(
         },
         lifecycle=True,
     )
+    verification = _model_verification_summary(result)
+    verification_persisted = _persist_saved_model_verification(
+        public_config,
+        draft_meta,
+        model_id,
+        verification,
+    )
     return {
         **result,
         "route_id": route_id,
@@ -949,6 +1054,11 @@ def _run_draft_test_llm_connection(
         "capability": "text",
         "capability_status": "supported" if success else "unknown",
         "supports_image_input": None,
+        "verification_status": verification["status"],
+        "verification_checked_at": verification["checked_at"],
+        "verification_error_type": verification["error_type"],
+        "verification_http_status": verification["http_status"],
+        "verification_persisted": verification_persisted,
     }
 
 
@@ -1293,6 +1403,25 @@ def _project_catalog_capabilities(value: Any) -> dict[str, Any]:
     return projected
 
 
+def _project_catalog_verification(value: Any) -> dict[str, Any]:
+    raw = value if isinstance(value, dict) else {}
+    status = str(raw.get("status") or "unverified").strip().lower()
+    if status not in {"unverified", "verified", "failed"}:
+        status = "unverified"
+    try:
+        http_status = int(raw.get("httpStatus")) if raw.get("httpStatus") is not None else None
+    except (TypeError, ValueError):
+        http_status = None
+    if http_status is not None and not 100 <= http_status <= 599:
+        http_status = None
+    return {
+        "verificationStatus": status,
+        "verificationCheckedAt": str(raw.get("checkedAt") or "")[:64],
+        "verificationErrorType": str(raw.get("errorType") or "")[:64],
+        "verificationHttpStatus": http_status,
+    }
+
+
 def summarize_model_catalog(
     state: dict[str, Any],
     *,
@@ -1372,6 +1501,7 @@ def summarize_model_catalog(
                 "capabilities": _project_catalog_capabilities(
                     catalog_model.get("capabilities")
                 ),
+                **_project_catalog_verification(catalog_model.get("verification")),
             }
         status = provider_protocol_status or str(
             catalog.get("status") or "not_discovered"
@@ -1970,11 +2100,15 @@ def run_draft_llm_test(
     normalized_model_id = str(model_id or "").strip()
     normalized_profile_id = str(profile_id or "").strip()
     if normalized_model_id:
-        options = list_llm_model_options(submitted)
-        option = next((item for item in options if str(item.get("model_id") or "").strip() == normalized_model_id), None)
-        if option is None:
-            raise ValueError(f"unknown LLM model: {normalized_model_id}")
-        target = _model_option_test_target(submitted, option, draft_meta)
+        llm = submitted.get("llm", {}) if isinstance(submitted, dict) else {}
+        if int(llm.get("schema_version") or 1) == 2 and "/" in normalized_model_id:
+            target = _v2_model_ref_test_target(submitted, normalized_model_id, draft_meta)
+        else:
+            options = list_llm_model_options(submitted)
+            option = next((item for item in options if str(item.get("model_id") or "").strip() == normalized_model_id), None)
+            if option is None:
+                raise ValueError(f"unknown LLM model: {normalized_model_id}")
+            target = _model_option_test_target(submitted, option, draft_meta)
     elif normalized_profile_id:
         target = _profile_test_target(submitted, normalized_profile_id, draft_meta)
     else:
