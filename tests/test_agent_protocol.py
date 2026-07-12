@@ -5,6 +5,7 @@ agent.py 协议层回归测试
 
 from types import SimpleNamespace
 from unittest.mock import MagicMock
+import copy
 import json
 
 import pytest
@@ -35,6 +36,7 @@ from core.orchestration.response_surface import ResponseSurfaceController
 from core.orchestration.turn_outcome import TurnOutcomeController
 from core.orchestration.tool_lifecycle import ToolLifecycleBridge
 from core.llm.types import CanonicalItemIdentity, CanonicalToolCall, LLMError, TurnOutcome as LLMTurnOutcome
+from tests.helpers.isolated_config import isolated_settings_config
 from tools.agent_tools import spawn_agent as spawn_agent_impl, set_subagent_stream_sink
 from tools.Key_Tools import create_key_tools, create_llm_facing_tools
 
@@ -421,6 +423,8 @@ class TestToolMessageFlow:
 
     def test_invoke_llm_uses_fallback_profile_after_exhausted_provider_error(self, monkeypatch):
         calls = []
+        invocation_ids = []
+        events = []
         recovery_inputs = []
 
         class DummyContext:
@@ -440,8 +444,15 @@ class TestToolMessageFlow:
         class PrimaryLLM:
             profile_id = "primary"
 
-            def invoke(self, _msgs, **_kwargs):
+            def effective_route_identity(self):
+                return ("relay", "responses", "gpt-5.6-luna", self.profile_id)
+
+            def effective_route_id(self):
+                return "primary-route"
+
+            def invoke(self, _msgs, **kwargs):
                 calls.append("primary")
+                invocation_ids.append(kwargs.get("metadata", {}).get("invocationId"))
                 raise LLMError(
                     "server_error",
                     "provider 服务异常",
@@ -456,8 +467,15 @@ class TestToolMessageFlow:
         class FallbackLLM:
             profile_id = "fallback_backup"
 
-            def invoke(self, _msgs, **_kwargs):
+            def effective_route_identity(self):
+                return ("local", "chat", "qwen-32b", self.profile_id)
+
+            def effective_route_id(self):
+                return "fallback-route"
+
+            def invoke(self, _msgs, **kwargs):
                 calls.append("fallback_backup")
+                invocation_ids.append(kwargs.get("metadata", {}).get("invocationId"))
                 return AIMessage(content="fallback ok")
 
         def fake_recovery(*_args, current_profile_id=None, **_kwargs):
@@ -478,6 +496,11 @@ class TestToolMessageFlow:
         monkeypatch.setattr(agent_module, "get_ui", lambda: DummyUI())
         monkeypatch.setattr(agent_module, "plan_llm_recovery", fake_recovery)
         monkeypatch.setattr(agent_module.logger, "log_error", lambda *_args, **_kwargs: None)
+        monkeypatch.setattr(
+            agent_module,
+            "_record_agent_scene_event",
+            lambda phase, code, **kwargs: events.append((phase, code, kwargs.get("fields") or {})),
+        )
 
         agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
         agent.llm_with_tools = PrimaryLLM()
@@ -500,8 +523,200 @@ class TestToolMessageFlow:
         assert result.content == "fallback ok"
         assert calls == ["primary", "fallback_backup"]
         assert recovery_inputs == ["primary"]
+        assert all(invocation_ids)
+        assert invocation_ids[0] != invocation_ids[1]
+        assert [code for _, code, _ in events].count("llm_fallback_selected") == 1
+        assert "hello" not in str(events)
 
-    def test_invoke_llm_retries_exhausted_stream_provider_error_without_streaming(self, monkeypatch):
+    def test_invoke_llm_rejects_duplicate_effective_fallback_before_io(self, monkeypatch):
+        calls = []
+        events = []
+
+        class DummyContext:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+        class DummyUI:
+            def thinking(self, _label):
+                return DummyContext()
+
+            def add_log(self, *_args, **_kwargs):
+                return None
+
+        class RouteLLM:
+            def __init__(self, profile_id, *, succeeds=False):
+                self.profile_id = profile_id
+                self.succeeds = succeeds
+
+            def effective_route_identity(self):
+                return ("relay", "responses", "gpt-5.6-luna")
+
+            def effective_route_id(self):
+                return f"{self.profile_id}-alias"
+
+            def invoke(self, _msgs, **_kwargs):
+                calls.append(self.profile_id)
+                if self.succeeds:
+                    return AIMessage(content="must not run")
+                raise LLMError(
+                    "server_error",
+                    "primary exhausted",
+                    retryable=True,
+                    details={"attempt": 5, "max_attempts": 5, "retry_budget_exhausted": True},
+                )
+
+        primary = RouteLLM("primary")
+        alias = RouteLLM("fallback_alias", succeeds=True)
+        monkeypatch.setattr(agent_module, "get_ui", lambda: DummyUI())
+        monkeypatch.setattr(agent_module.logger, "log_error", lambda *_args, **_kwargs: None)
+        monkeypatch.setattr(
+            agent_module,
+            "plan_llm_recovery",
+            lambda *_args, **_kwargs: SimpleNamespace(
+                category="server_error",
+                retryable=True,
+                action="retry_with_backoff",
+                user_message="provider 服务异常",
+                wait_seconds=0,
+                stop_current_turn=True,
+                disable_streaming=False,
+                disable_tools=False,
+                request_context_compression=False,
+                fallback_profile_id="fallback_alias",
+            ),
+        )
+        monkeypatch.setattr(
+            agent_module,
+            "_record_agent_scene_event",
+            lambda phase, code, **kwargs: events.append((phase, code, kwargs.get("fields") or {})),
+        )
+        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+        agent.llm_with_tools = primary
+        agent._base_llm = primary
+        agent.config = SimpleNamespace(
+            llm=SimpleNamespace(
+                model_name="gpt-5.6-luna",
+                provider="relay",
+                api_base="https://example.invalid",
+                api_timeout=30,
+            )
+        )
+        agent._should_stream_llm_for_turn = lambda *_args, **_kwargs: False
+        agent._get_llm_for_current_mode = lambda **kwargs: (
+            alias if kwargs.get("profile_id") == "fallback_alias" else primary
+        )
+
+        result = agent._invoke_llm([AIMessage(content="hello")])
+
+        assert result is None
+        assert calls == ["primary"]
+        assert any(
+            code == "llm_fallback_rejected" and fields.get("reasonCode") == "duplicate_effective_route"
+            for _, code, fields in events
+        )
+        assert [code for _, code, _ in events].count("llm_turn_terminal") == 1
+
+    def test_invoke_llm_stops_after_distinct_fallback_failure(self, monkeypatch):
+        calls = []
+        invocation_ids = []
+        events = []
+
+        class DummyContext:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+        class DummyUI:
+            def thinking(self, _label):
+                return DummyContext()
+
+            def add_log(self, *_args, **_kwargs):
+                return None
+
+        class FailingRouteLLM:
+            def __init__(self, profile_id, identity):
+                self.profile_id = profile_id
+                self.identity = identity
+
+            def effective_route_identity(self):
+                return self.identity
+
+            def effective_route_id(self):
+                return f"{self.profile_id}-route"
+
+            def invoke(self, _msgs, **kwargs):
+                calls.append(self.profile_id)
+                invocation_ids.append(kwargs.get("metadata", {}).get("invocationId"))
+                raise LLMError(
+                    "server_error",
+                    f"{self.profile_id} exhausted",
+                    retryable=True,
+                    details={"attempt": 5, "max_attempts": 5, "retry_budget_exhausted": True},
+                )
+
+        primary = FailingRouteLLM("primary", ("relay", "responses", "gpt-5.6-luna"))
+        fallback = FailingRouteLLM("fallback_backup", ("local", "chat", "qwen-32b"))
+        monkeypatch.setattr(agent_module, "get_ui", lambda: DummyUI())
+        monkeypatch.setattr(agent_module.logger, "log_error", lambda *_args, **_kwargs: None)
+        monkeypatch.setattr(
+            agent_module,
+            "plan_llm_recovery",
+            lambda *_args, current_profile_id=None, **_kwargs: SimpleNamespace(
+                category="server_error",
+                retryable=True,
+                action="retry_with_backoff",
+                user_message="provider 服务异常",
+                wait_seconds=0,
+                stop_current_turn=True,
+                disable_streaming=False,
+                disable_tools=False,
+                request_context_compression=False,
+                fallback_profile_id="fallback_backup" if current_profile_id == "primary" else "third_route",
+            ),
+        )
+        monkeypatch.setattr(
+            agent_module,
+            "_record_agent_scene_event",
+            lambda phase, code, **kwargs: events.append((phase, code, kwargs.get("fields") or {})),
+        )
+        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+        agent.llm_with_tools = primary
+        agent._base_llm = primary
+        agent.config = SimpleNamespace(
+            llm=SimpleNamespace(
+                model_name="gpt-5.6-luna",
+                provider="relay",
+                api_base="https://example.invalid",
+                api_timeout=30,
+            )
+        )
+        agent._should_stream_llm_for_turn = lambda *_args, **_kwargs: False
+
+        def resolve_client(**kwargs):
+            profile_id = kwargs.get("profile_id")
+            if profile_id == "fallback_backup":
+                return fallback
+            if profile_id == "third_route":
+                raise AssertionError("third route must not be resolved")
+            return primary
+
+        agent._get_llm_for_current_mode = resolve_client
+
+        result = agent._invoke_llm([AIMessage(content="hello")])
+
+        assert result is None
+        assert calls == ["primary", "fallback_backup"]
+        assert all(invocation_ids)
+        assert invocation_ids[0] != invocation_ids[1]
+        assert [code for _, code, _ in events].count("llm_fallback_selected") == 1
+        assert [code for _, code, _ in events].count("llm_turn_terminal") == 1
+
+    def test_invoke_llm_does_not_retry_exhausted_stream_route_without_fallback(self, monkeypatch):
         calls = []
         streamed = []
 
@@ -524,6 +739,12 @@ class TestToolMessageFlow:
 
         class StreamFailingLLM:
             profile_id = "primary"
+
+            def effective_route_identity(self):
+                return ("relay", "responses", "gpt-5.6-luna", self.profile_id)
+
+            def effective_route_id(self):
+                return "primary-route"
 
             def stream(self, _msgs, **_kwargs):
                 calls.append("stream")
@@ -579,11 +800,11 @@ class TestToolMessageFlow:
 
         result = agent._invoke_llm([AIMessage(content="hello")])
 
-        assert result.content == "nonstream ok"
-        assert calls == ["stream", "invoke"]
-        assert streamed == [("nonstream ok", True)]
+        assert result is None
+        assert calls == ["stream"]
+        assert streamed == []
         assert agent._last_llm_error_category == "server_error"
-        assert agent._last_llm_error_details["disable_streaming_next_attempt"] is True
+        assert "retry_provider_failure_without_streaming" not in agent._last_llm_error_details
 
     def test_invoke_llm_returns_none_for_exhausted_llmerror(self, monkeypatch):
         calls = {"count": 0}
@@ -4140,20 +4361,17 @@ class TestLocalProviderBootstrap:
         mental_model = MagicMock()
         monkeypatch.setattr(agent_module, "get_mental_model", lambda **_kwargs: mental_model)
 
-        config = Settings(
-            None,
+        config = isolated_settings_config(
             **{
                 "llm.profiles.primary.model": "",
-                "llm.profiles.primary.api_key_env": "",
-                "llm.profiles.primary.provider.kind": "local",
-                "llm.profiles.primary.provider.api_key": "",
-                "llm.profiles.primary.provider.api_key_env": "",
-                "llm.profiles.primary.provider.base_url": "http://localhost:11434/v1",
-                "llm.profiles.primary.provider.compat_mode": "openai",
-                "llm.profiles.primary.provider.requires_api_key": False,
+                "llm.profiles.primary.provider_id": "default",
+                "llm.providers.default.kind": "local",
+                "llm.providers.default.base_url": "http://localhost:11434/v1",
+                "llm.providers.default.compat_mode": "openai",
+                "llm.providers.default.requires_api_key": False,
             },
         )
-        agent = SelfEvolvingAgent(config=config.config)
+        agent = SelfEvolvingAgent(config=config)
         provider = agent.config.llm.get_provider(role="primary")
 
         assert provider.kind == "local"
@@ -4196,29 +4414,20 @@ class TestLocalProviderBootstrap:
             ),
         )
 
-        config = Settings(
-            None,
+        original_config = isolated_settings_config(
             **{
                 "llm.profiles.primary.model": "primary-model",
-                "llm.profiles.primary.api_key_env": "",
-                "llm.profiles.primary.provider.kind": "local",
-                "llm.profiles.primary.provider.api_key": "",
-                "llm.profiles.primary.provider.api_key_env": "",
-                "llm.profiles.primary.provider.base_url": "http://localhost:11434/v1",
-                "llm.profiles.primary.provider.compat_mode": "openai",
-                "llm.profiles.primary.provider.requires_api_key": False,
-                "llm.profiles.supervised_baseline.model": "baseline-model",
-                "llm.profiles.supervised_baseline.api_key_env": "",
-                "llm.profiles.supervised_baseline.provider.kind": "local",
-                "llm.profiles.supervised_baseline.provider.api_key": "",
-                "llm.profiles.supervised_baseline.provider.api_key_env": "",
-                "llm.profiles.supervised_baseline.provider.base_url": "http://localhost:11434/v1",
-                "llm.profiles.supervised_baseline.provider.compat_mode": "openai",
-                "llm.profiles.supervised_baseline.provider.requires_api_key": False,
+                "llm.profiles.primary.provider_id": "default",
+                "llm.providers.default.kind": "local",
+                "llm.providers.default.base_url": "http://localhost:11434/v1",
+                "llm.providers.default.compat_mode": "openai",
+                "llm.providers.default.requires_api_key": False,
             },
         )
-
-        original_config = config.config
+        baseline_profile = copy.deepcopy(original_config.llm.profiles["primary"])
+        baseline_profile.profile_id = "supervised_baseline"
+        baseline_profile.model = "baseline-model"
+        original_config.llm.profiles["supervised_baseline"] = baseline_profile
         agent = SelfEvolvingAgent(config=original_config)
 
         assert agent.runtime_agent_binding["agentId"] == "agent-supervised-baseline"
@@ -4239,19 +4448,16 @@ class TestLocalProviderBootstrap:
         mental_model = MagicMock()
         monkeypatch.setattr(agent_module, "get_mental_model", lambda **_kwargs: mental_model)
 
-        config = Settings(
-            None,
+        config = isolated_settings_config(
             **{
                 "llm.providers.default.kind": "local",
-                "llm.providers.default.api_key": "",
-                "llm.providers.default.api_key_env": "",
                 "llm.providers.default.base_url": "http://localhost:11434/v1",
                 "llm.providers.default.compat_mode": "openai",
                 "llm.providers.default.requires_api_key": False,
                 "llm.profiles.primary.provider_id": "default",
                 "llm.profiles.primary.model": "dialogue-model",
             },
-        ).config
+        )
         provider_id = config.llm.get_profile(profile_id="primary").provider_id
         config.llm.model_library = {
             "dialogue-model-id": {"provider_id": provider_id, "model": "dialogue-model"},
@@ -4325,12 +4531,9 @@ class TestLocalProviderBootstrap:
         monkeypatch.setattr(agent_module, "get_git_memory_service", lambda: MagicMock())
         monkeypatch.setattr(agent_module, "get_mental_model", lambda **_kwargs: MagicMock())
 
-        config = Settings(
-            None,
+        config = isolated_settings_config(
             **{
                 "llm.providers.default.kind": "local",
-                "llm.providers.default.api_key": "",
-                "llm.providers.default.api_key_env": "",
                 "llm.providers.default.base_url": "http://localhost:11434/v1",
                 "llm.providers.default.compat_mode": "openai",
                 "llm.providers.default.requires_api_key": False,
@@ -4338,7 +4541,7 @@ class TestLocalProviderBootstrap:
                 "llm.profiles.primary.model": "global-primary-model",
                 "llm.profiles.primary.tool_calling_mode": "disabled",
             },
-        ).config
+        )
         provider_id = config.llm.get_profile(profile_id="primary").provider_id
         config.llm.model_library = {
             "agent-dialogue-model-id": {
@@ -4412,12 +4615,9 @@ class TestLocalProviderBootstrap:
         monkeypatch.setattr(agent_module, "get_git_memory_service", lambda: MagicMock())
         monkeypatch.setattr(agent_module, "get_mental_model", lambda **_kwargs: MagicMock())
 
-        config = Settings(
-            None,
+        config = isolated_settings_config(
             **{
                 "llm.providers.default.kind": "local",
-                "llm.providers.default.api_key": "",
-                "llm.providers.default.api_key_env": "",
                 "llm.providers.default.base_url": "http://localhost:11434/v1",
                 "llm.providers.default.compat_mode": "openai",
                 "llm.providers.default.requires_api_key": False,
@@ -4425,7 +4625,7 @@ class TestLocalProviderBootstrap:
                 "llm.profiles.primary.model": "global-primary-model",
                 "llm.profiles.primary.tool_calling_mode": "disabled",
             },
-        ).config
+        )
         agent_record = {
             "agentId": "agent-compression-runtime",
             "contextCompressionPolicy": {
@@ -4614,19 +4814,16 @@ class TestLocalProviderBootstrap:
         monkeypatch.setattr(agent_module, "get_git_memory_service", lambda: MagicMock())
         monkeypatch.setattr(agent_module, "get_mental_model", lambda **_kwargs: MagicMock())
 
-        config = Settings(
-            None,
+        config = isolated_settings_config(
             **{
                 "llm.providers.default.kind": "local",
-                "llm.providers.default.api_key": "",
-                "llm.providers.default.api_key_env": "",
                 "llm.providers.default.base_url": "http://localhost:11434/v1",
                 "llm.providers.default.compat_mode": "openai",
                 "llm.providers.default.requires_api_key": False,
                 "llm.profiles.primary.provider_id": "default",
                 "llm.profiles.primary.model": "dialogue-model",
             },
-        ).config
+        )
         provider_id = config.llm.get_profile(profile_id="primary").provider_id
         config.llm.model_library = {
             "dialogue-model-id": {"provider_id": provider_id, "model": "dialogue-model"},
@@ -4696,19 +4893,16 @@ class TestLocalProviderBootstrap:
         monkeypatch.setattr(agent_module, "get_git_memory_service", lambda: MagicMock())
         monkeypatch.setattr(agent_module, "get_mental_model", lambda **_kwargs: MagicMock())
 
-        config = Settings(
-            None,
+        config = isolated_settings_config(
             **{
                 "llm.providers.default.kind": "local",
-                "llm.providers.default.api_key": "",
-                "llm.providers.default.api_key_env": "",
                 "llm.providers.default.base_url": "http://localhost:11434/v1",
                 "llm.providers.default.compat_mode": "openai",
                 "llm.providers.default.requires_api_key": False,
                 "llm.profiles.primary.provider_id": "default",
                 "llm.profiles.primary.model": "global-primary-model",
             },
-        ).config
+        )
         provider_id = config.llm.get_profile(profile_id="primary").provider_id
         config.llm.model_library = {
             "supervised-dialogue-model-id": {
@@ -4755,19 +4949,16 @@ class TestLocalProviderBootstrap:
     def test_runtime_agent_llm_slot_binding_failure_is_fatal(self, monkeypatch):
         monkeypatch.setenv("VIBELUTION_AGENT_ID", "agent-bad-slot")
         monkeypatch.setenv("VIBELUTION_AGENT_LLM_SLOT", "dialogue")
-        config = Settings(
-            None,
+        config = isolated_settings_config(
             **{
                 "llm.providers.default.kind": "local",
-                "llm.providers.default.api_key": "",
-                "llm.providers.default.api_key_env": "",
                 "llm.providers.default.base_url": "http://localhost:11434/v1",
                 "llm.providers.default.compat_mode": "openai",
                 "llm.providers.default.requires_api_key": False,
                 "llm.profiles.primary.provider_id": "default",
                 "llm.profiles.primary.model": "primary-model",
             },
-        ).config
+        )
         directory_module = __import__(
             "core.web.services.agent_directory_service",
             fromlist=["agent_directory_service"],
@@ -4787,19 +4978,16 @@ class TestLocalProviderBootstrap:
     def test_runtime_agent_llm_slot_binding_does_not_fallback_to_dialogue(self, monkeypatch):
         monkeypatch.setenv("VIBELUTION_AGENT_ID", "agent-missing-subagent-slot")
         monkeypatch.setenv("VIBELUTION_AGENT_LLM_SLOT", "subagentExecution")
-        config = Settings(
-            None,
+        config = isolated_settings_config(
             **{
                 "llm.providers.default.kind": "local",
-                "llm.providers.default.api_key": "",
-                "llm.providers.default.api_key_env": "",
                 "llm.providers.default.base_url": "http://localhost:11434/v1",
                 "llm.providers.default.compat_mode": "openai",
                 "llm.providers.default.requires_api_key": False,
                 "llm.profiles.primary.provider_id": "default",
                 "llm.profiles.primary.model": "primary-model",
             },
-        ).config
+        )
         provider_id = config.llm.get_profile(profile_id="primary").provider_id
         config.llm.model_library = {
             "dialogue-model-id": {"provider_id": provider_id, "model": "dialogue-model"},
@@ -4868,21 +5056,18 @@ class TestLocalProviderBootstrap:
             ),
         )
 
-        config = Settings(
-            None,
+        config = isolated_settings_config(
             **{
                 "agent.default_mode": "supervised_evolution",
                 "llm.profiles.primary.model": "primary-model",
-                "llm.profiles.primary.api_key_env": "",
-                "llm.profiles.primary.provider.kind": "local",
-                "llm.profiles.primary.provider.api_key": "",
-                "llm.profiles.primary.provider.api_key_env": "",
-                "llm.profiles.primary.provider.base_url": "http://localhost:11434/v1",
-                "llm.profiles.primary.provider.compat_mode": "openai",
-                "llm.profiles.primary.provider.requires_api_key": False,
+                "llm.profiles.primary.provider_id": "default",
+                "llm.providers.default.kind": "local",
+                "llm.providers.default.base_url": "http://localhost:11434/v1",
+                "llm.providers.default.compat_mode": "openai",
+                "llm.providers.default.requires_api_key": False,
             },
         )
-        agent = SelfEvolvingAgent(config=config.config)
+        agent = SelfEvolvingAgent(config=config)
         messages, resumed = TurnOutcomeController.prepare_turn_messages(
             system_prompt=(
                 "static",
@@ -5104,8 +5289,11 @@ class TestResolvedApiKeyUsage:
     """解析后的 API Key 使用一致性测试"""
 
     def test_agent_missing_api_key_error_names_selected_model_envs(self, monkeypatch):
-        monkeypatch.delenv("VIBELUTION_LLM_MODEL_RELAY_GPT_5_6_LUNA_API_KEY", raising=False)
-        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        model_key_env = "VIBELUTION_TEST_MODEL_MISSING_API_KEY"
+        provider_key_env = "VIBELUTION_TEST_PROVIDER_MISSING_API_KEY"
+        monkeypatch.delenv("DASHSCOPE_API_KEY", raising=False)
+        monkeypatch.delenv(model_key_env, raising=False)
+        monkeypatch.delenv(provider_key_env, raising=False)
         scene_events = []
         monkeypatch.setattr(
             agent_module,
@@ -5113,25 +5301,26 @@ class TestResolvedApiKeyUsage:
             lambda phase, event_code, **kwargs: scene_events.append((phase, event_code, kwargs)),
         )
 
-        config = Settings(
-            None,
+        config = isolated_settings_config(
             **{
                 "llm.providers.default.kind": "relay",
-                "llm.providers.default.api_key": "",
-                "llm.providers.default.api_key_env": "OPENAI_API_KEY",
                 "llm.providers.default.base_url": "https://ai-pixel.online",
                 "llm.providers.default.compat_mode": "openai",
                 "llm.providers.default.requires_api_key": True,
                 "llm.profiles.primary.provider_id": "default",
                 "llm.profiles.primary.model": "gpt-5.6-luna",
-                "llm.profiles.primary.api_key_env": "VIBELUTION_LLM_MODEL_RELAY_GPT_5_6_LUNA_API_KEY",
             },
-        ).config
+        )
+        primary_profile = config.llm.get_profile(role="primary")
+        primary_provider = config.llm.get_provider(role="primary")
+        primary_provider.api_key = ""
+        primary_provider.api_key_env = provider_key_env
+        primary_profile.api_key_env = model_key_env
         config.llm.model_library = {
             "relay_gpt_5_6_luna": {
-                "provider_id": "default",
+                "provider_id": primary_provider.provider_id,
                 "model": "gpt-5.6-luna",
-                "api_key_env": "VIBELUTION_LLM_MODEL_RELAY_GPT_5_6_LUNA_API_KEY",
+                "api_key_env": model_key_env,
             }
         }
 
@@ -5141,16 +5330,16 @@ class TestResolvedApiKeyUsage:
         message = str(exc_info.value)
         assert "modelId=relay_gpt_5_6_luna" in message
         assert "provider=inline_profile_primary" in message
-        assert "VIBELUTION_LLM_MODEL_RELAY_GPT_5_6_LUNA_API_KEY" in message
-        assert "OPENAI_API_KEY" in message
+        assert model_key_env in message
+        assert provider_key_env in message
         assert "llm.providers.<provider_id>" not in message
         missing_event = next(event for event in scene_events if event[1] == "agent.api_key.missing")
         fields = missing_event[2]["fields"]
         assert fields["modelId"] == "relay_gpt_5_6_luna"
         assert fields["providerId"] == "inline_profile_primary"
         assert fields["providerKind"] == "relay"
-        assert fields["modelApiKeyEnv"] == "VIBELUTION_LLM_MODEL_RELAY_GPT_5_6_LUNA_API_KEY"
-        assert fields["providerApiKeyEnv"] == "OPENAI_API_KEY"
+        assert fields["modelApiKeyEnv"] == model_key_env
+        assert fields["providerApiKeyEnv"] == provider_key_env
         assert fields["apiKeySource"] == "missing"
 
     def test_agent_uses_provider_specific_resolved_key(self, monkeypatch):
@@ -5192,20 +5381,20 @@ class TestResolvedApiKeyUsage:
             lambda role=None, profile_id=None, config=None: DummyClient(config=config, role=role, profile_id=profile_id),
         )
 
-        config = Settings(
-            None,
+        config = isolated_settings_config(
             **{
                 "llm.profiles.primary.model": "",
-                "llm.profiles.primary.api_key_env": "",
-                "llm.profiles.primary.provider.kind": "minimax",
-                "llm.profiles.primary.provider.api_key": "",
-                "llm.profiles.primary.provider.api_key_env": "MINIMAX_API_KEY",
-                "llm.profiles.primary.provider.base_url": "https://api.minimaxi.com/v1",
-                "llm.profiles.primary.provider.compat_mode": "openai",
-                "llm.profiles.primary.provider.requires_api_key": True,
+                "llm.profiles.primary.provider_id": "default",
+                "llm.providers.default.kind": "minimax",
+                "llm.providers.default.base_url": "https://api.minimaxi.com/v1",
+                "llm.providers.default.compat_mode": "openai",
+                "llm.providers.default.requires_api_key": True,
             },
         )
-        agent = SelfEvolvingAgent(config=config.config)
+        primary_provider = config.llm.get_provider(role="primary")
+        primary_provider.api_key = ""
+        primary_provider.api_key_env = "MINIMAX_API_KEY"
+        agent = SelfEvolvingAgent(config=config)
 
         assert agent.api_key == "minimax-test-key"
         assert agent.config.llm.api_key == "minimax-test-key"
@@ -6146,6 +6335,77 @@ class TestRuntimeStateMemoryFlow:
         assert messages[1:] == previous[1:] + [build_chat_user_message("第二句")]
         assert messages[-1]["role"] == "user"
         assert "对话用户输入" in messages[-1]["content"]
+
+    def test_prepare_turn_messages_preserves_same_text_across_distinct_turns(self):
+        history = [
+            SystemMessage(content="old system"),
+            build_chat_user_message("你好"),
+            AIMessage(content="第一轮"),
+            build_chat_user_message("你好"),
+            AIMessage(content="第二轮"),
+        ]
+
+        messages, resumed = TurnOutcomeController.prepare_turn_messages(
+            system_prompt="new system",
+            user_prompt="你好",
+            effective_goal="你好",
+            active_turn_messages=history,
+            active_turn_goal="__chat_session__",
+            build_system_message=agent_module.build_system_message,
+            build_external_request_message=build_chat_user_message,
+            allow_append_user_message=True,
+        )
+
+        user_messages = [
+            item
+            for item in messages
+            if isinstance(item, dict) and item.get("role") == "user"
+        ]
+        assert resumed is True
+        assert len(user_messages) == 3
+        assert all("你好" in str(item.get("content") or "") for item in user_messages)
+        assert messages[-1] == build_chat_user_message("你好")
+
+    def test_prepare_turn_messages_appends_multimodal_current_submission_once(self):
+        history = [
+            SystemMessage(content="old system"),
+            build_chat_user_message("第一句"),
+            AIMessage(content="第一轮回复"),
+        ]
+
+        def build_multimodal_message(content):
+            return {
+                "role": "user",
+                "content": [
+                    {"type": "input_text", "text": content},
+                    {"type": "input_image", "image_url": "data:image/png;base64,AA=="},
+                ],
+            }
+
+        messages, resumed = TurnOutcomeController.prepare_turn_messages(
+            system_prompt="new system",
+            user_prompt="看图",
+            effective_goal="看图",
+            active_turn_messages=history,
+            active_turn_goal="__chat_session__",
+            build_system_message=agent_module.build_system_message,
+            build_external_request_message=build_multimodal_message,
+            allow_append_user_message=True,
+        )
+
+        multimodal_messages = [
+            item
+            for item in messages
+            if (
+                isinstance(item, dict)
+                and item.get("role") == "user"
+                and isinstance(item.get("content"), list)
+            )
+        ]
+        assert resumed is True
+        assert len(multimodal_messages) == 1
+        assert multimodal_messages[0] == build_multimodal_message("看图")
+        assert messages[-1] == multimodal_messages[0]
 
     def test_dynamic_system_context_is_after_history_and_not_carried_over(self):
         from core.infrastructure.llm_utils import (

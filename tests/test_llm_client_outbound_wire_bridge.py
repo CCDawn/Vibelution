@@ -108,6 +108,48 @@ def test_chat_client_uses_registry_encoder_once_and_preserves_runtime_envelope(m
     assert payload["base_url"] == "https://relay.example.test/v1"
 
 
+def test_distinct_protocol_clients_reencode_semantic_input_with_fresh_scopes(monkeypatch):
+    semantic_messages = [{"role": "user", "content": "ping"}]
+    responses_client = LLMClient(
+        config=_config(transport="responses"),
+        backend=lambda payload: payload,
+    )
+    chat_client = LLMClient(
+        config=_config(transport="chat_completions"),
+        backend=lambda payload: payload,
+    )
+    scopes = []
+    for label, client in (("responses", responses_client), ("chat", chat_client)):
+        adapter = client._required_wire_adapter()
+        original = adapter.encode_request
+
+        def observed(request, *, route, _label=label, _original=original):
+            scopes.append((_label, request.scope.invocation_id))
+            return _original(request, route=route)
+
+        monkeypatch.setattr(adapter, "encode_request", observed)
+
+    responses_payload = responses_client._build_payload(
+        semantic_messages,
+        stream=False,
+        metadata={**_metadata(), "invocationId": "invocation-primary"},
+    )
+    chat_payload = chat_client._build_payload(
+        semantic_messages,
+        stream=False,
+        metadata={**_metadata(), "invocationId": "invocation-fallback"},
+    )
+
+    assert "input" in responses_payload and "messages" not in responses_payload
+    assert "messages" in chat_payload and "input" not in chat_payload
+    assert responses_payload is not chat_payload
+    assert responses_payload["input"] is not chat_payload["messages"]
+    assert scopes == [
+        ("responses", "invocation-primary"),
+        ("chat", "invocation-fallback"),
+    ]
+
+
 def test_client_has_no_legacy_outbound_or_decode_fallback_ownership():
     payload_source = inspect.getsource(LLMClient._build_payload)
     decode_source = inspect.getsource(LLMClient._decode_canonical_response)
