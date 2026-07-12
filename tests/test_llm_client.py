@@ -3259,6 +3259,33 @@ def test_recovery_routing_prefers_no_tool_non_streaming_profile():
     assert fallback == "fallback_plain"
 
 
+def test_effective_route_identity_distinguishes_profiles_without_secrets():
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "relay",
+            "llm.providers.default.api_key": "primary-secret",
+            "llm.providers.default.base_url": "https://relay.example.test/v1/",
+            "llm.providers.backup.kind": "local",
+            "llm.providers.backup.requires_api_key": False,
+            "llm.providers.backup.base_url": "http://localhost:8000/v1",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "gpt-5.6-luna",
+            "llm.profiles.primary.transport": "responses",
+            "llm.profiles.fallback_backup.provider_id": "backup",
+            "llm.profiles.fallback_backup.model": "qwen-32b-awq",
+            "llm.profiles.fallback_backup.transport": "chat_completions",
+        }
+    )
+    primary = LLMClient(config=config, profile_id="primary", backend=lambda payload: payload)
+    fallback = LLMClient(config=config, profile_id="fallback_backup", backend=lambda payload: payload)
+
+    assert primary.effective_route_identity() == primary.effective_route_identity()
+    assert primary.effective_route_identity() != fallback.effective_route_identity()
+    assert primary.effective_route_id() != fallback.effective_route_id()
+    assert "primary-secret" not in repr(primary.effective_route_identity())
+    assert "primary-secret" not in primary.effective_route_id()
+
+
 def test_recovery_decision_attaches_fallback_profile():
     config = make_config(
         **{
