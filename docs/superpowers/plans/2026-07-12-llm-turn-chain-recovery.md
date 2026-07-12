@@ -647,7 +647,7 @@ Expected: PASS. No test performs external provider I/O.
 Run:
 
 ```powershell
-& 'C:\Users\17533\Desktop\Vibelution\.venv\Scripts\python.exe' -m pytest tests/test_llm_client_outbound_wire_bridge.py tests/test_llm_protocol_routes.py tests/test_llm_semantic_messages.py -q
+& 'C:\Users\17533\Desktop\Vibelution\.venv\Scripts\python.exe' -m pytest tests/test_llm_client_outbound_wire_bridge.py tests/test_llm_semantic_messages.py -q
 ```
 
 Expected: PASS. Responses continues to emit `input`; Chat continues to emit `messages`; unsupported native adapters still fail before provider I/O.
