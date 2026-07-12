@@ -163,6 +163,28 @@ const hasCommittedCanonicalAnswer = (items: readonly CanonicalSessionTurnItem[])
     && Boolean(itemText(item))
   ));
 
+const canonicalCellTone = (item: CanonicalSessionTurnItem) => {
+  if (item.status === "failed") return "error" as const;
+  if (item.status === "degraded") return "warning" as const;
+  if (
+    item.status === "running"
+    || item.status === "in_progress"
+    || item.status === "pending"
+  ) {
+    return "running" as const;
+  }
+  return "neutral" as const;
+};
+
+export const hasTerminalCanonicalTurnOutcome = (
+  message: CanonicalConversationMessage,
+): boolean =>
+  consolidateSessionTurnItemsV2(message.turnItems).some((item) => (
+    item.terminal === true
+    && item.provisional !== true
+    && (item.status === "completed" || item.status === "failed")
+  ));
+
 const canonicalTranscript = (
   items: readonly CanonicalSessionTurnItem[],
 ): CanonicalConversationMessage["codexTranscript"] => ({
@@ -176,25 +198,43 @@ const canonicalTranscript = (
       id: item.itemId ?? item.id,
       messageId: item.messageId ?? item.itemId ?? item.id,
       status: item.status,
-      tone: "neutral",
+      tone: canonicalCellTone(item),
+      channel: item.channel,
+      phase: item.phase,
+      terminal: item.terminal,
+      provisional: item.provisional,
+      diagnosticSummary: item.diagnosticSummary,
+      sourceItemId: item.sourceItemId ?? item.itemId ?? item.id,
     };
     if (isCanonicalAnswer(item)) {
-      return [{ ...cellBase, kind: "assistant_markdown", markdown: text } as NonNullable<CanonicalConversationMessage["codexTranscript"]>["cells"][number]];
+      return [{ ...cellBase, kind: "assistant_markdown", text }];
     }
     if (item.kind === "reasoning" || item.channel === "analysis") {
-      return [{ ...cellBase, kind: "reasoning_summary", markdown: text } as NonNullable<CanonicalConversationMessage["codexTranscript"]>["cells"][number]];
+      return [{ ...cellBase, kind: "reasoning_summary", text }];
     }
     if (item.kind === "tool_call") {
       return [{
         ...cellBase,
         kind: "tool_call",
         title: item.toolName ?? item.title ?? "Tool",
-        summary: text,
-        sourceItemId: item.itemId ?? item.id,
-      } as NonNullable<CanonicalConversationMessage["codexTranscript"]>["cells"][number]];
+        text,
+        summary: item.summary,
+      }];
+    }
+    if (item.kind === "error" || item.type === "error") {
+      return [{
+        ...cellBase,
+        kind: "error_notice",
+        tone: "error",
+        text,
+        terminal: true,
+      }];
+    }
+    if (item.kind === "status" || item.type === "status") {
+      return [{ ...cellBase, kind: "status", text }];
     }
     if (item.channel === "commentary") {
-      return [{ ...cellBase, kind: "status", markdown: text } as NonNullable<CanonicalConversationMessage["codexTranscript"]>["cells"][number]];
+      return [{ ...cellBase, kind: "assistant_markdown", text }];
     }
     return [];
   }),
@@ -225,7 +265,7 @@ export const resolveAssistantTurnRenderSurface = (input: {
   const nativeCells = input.codexTranscript?.cells ?? [];
   const nativeAnswer = nativeCells
     .filter((cell) => cell.kind === "assistant_markdown")
-    .map((cell) => "markdown" in cell ? cell.markdown : "")
+    .map((cell) => cell.text ?? ("markdown" in cell ? cell.markdown : ""))
     .filter(Boolean)
     .join("\n\n");
   if (nativeAnswer) {
