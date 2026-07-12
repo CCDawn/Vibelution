@@ -7,6 +7,7 @@ export const queryKeys = {
   launcherMaintenanceSummary: () => ["launcher", "maintenance", "reset", "summary"] as const,
   backendHealth: () => ["runtime", "backend-health"] as const,
   gitStatus: () => ["git", "status"] as const,
+  gitStatusSummary: () => ["git", "status-summary"] as const,
   tools: () => ["tools"] as const,
   toolWebSearchHealth: () => ["tools", "web-search", "health"] as const,
   skills: () => ["skills"] as const,
