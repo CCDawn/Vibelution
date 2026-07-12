@@ -120,6 +120,7 @@ export function ConfigQuickSetupPanel({
       title="一页快速配置"
       meta="只需服务商与凭据"
     >
+      <div className={styles.workspace}>
       <div className={styles.inputColumn}>
         <label className={styles.field}>
           <span>选择服务商</span>
@@ -232,6 +233,7 @@ export function ConfigQuickSetupPanel({
           </div>
         ) : null}
       </section>
+      </div>
     </VSection>
   );
 }

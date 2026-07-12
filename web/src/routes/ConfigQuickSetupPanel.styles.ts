@@ -2,7 +2,8 @@ const panelSurface =
   "[background:color-mix(in_srgb,var(--surface-panel)_96%,var(--bg-canvas))] [border:1px_solid_var(--vui-border-subtle)] [border-radius:8px]";
 
 const styles = {
-  root: "vui-routes-configquicksetuppanel root grid min-w-0 [grid-template-columns:minmax(22rem,0.9fr)_minmax(28rem,1.1fr)] gap-4",
+  root: "vui-routes-configquicksetuppanel root min-w-0",
+  workspace: "vui-routes-configquicksetuppanel workspace grid min-w-0 [grid-template-columns:minmax(22rem,0.9fr)_minmax(28rem,1.1fr)] gap-4",
   inputColumn: `vui-routes-configquicksetuppanel inputColumn ${panelSurface} grid min-w-0 content-start gap-4 p-4`,
   resultColumn: `vui-routes-configquicksetuppanel resultColumn ${panelSurface} grid min-h-[28rem] min-w-0 content-start gap-3 p-4`,
   field: "vui-routes-configquicksetuppanel field grid min-w-0 gap-1 text-[var(--vui-font-xs)] font-semibold text-vui-fg-secondary",

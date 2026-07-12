@@ -23,6 +23,8 @@ import providerPanelStylesSource from "./ConfigProviderRegistryPanel.styles.ts?r
 import providerPanelStyles from "./ConfigProviderRegistryPanel.styles";
 import providerLogicSource from "./configProviderLogic.ts?raw";
 import quickSetupSource from "./ConfigQuickSetupPanel.tsx?raw";
+import quickSetupStylesSource from "./ConfigQuickSetupPanel.styles.ts?raw";
+import quickSetupStyles from "./ConfigQuickSetupPanel.styles";
 import wizardSource from "./ConfigProviderWizard.tsx?raw";
 import styles from "./ConfigRoute.styles";
 import stylesSource from "./ConfigRoute.styles.ts?raw";
@@ -248,11 +250,26 @@ describe("ConfigRoute layout contract", () => {
     expect(migrationPanelSource).toContain("data-migration-status");
   });
 
-  it("collapses provider comparison below 960px without route-level horizontal overflow", () => {
-    expect(providerPanelStyles.registryWorkspace).toContain("max-[960px]:[grid-template-columns:minmax(0,1fr)]");
+  it("keeps Provider management desktop-first with bounded internal table overflow", () => {
+    expect(providerPanelStyles.registryWorkspace).not.toContain("max-[960px]");
     expect(providerPanelStyles.tableScroll).toContain("[overflow-x:auto]");
-    expect(providerPanelStyles.mobileActionGroup).toContain("max-[390px]:[grid-template-columns:minmax(0,1fr)]");
     expect(providerPanelStylesSource).not.toContain("width:100vw");
+  });
+
+  it("keeps quick setup header above a stable desktop two-column workspace", () => {
+    expect(quickSetupSource).toContain('<div className={styles.workspace}>');
+    expect(quickSetupStyles.root).not.toContain("grid-template-columns");
+    expect(quickSetupStyles.workspace).toContain("[grid-template-columns:minmax(22rem,0.9fr)_minmax(28rem,1.1fr)]");
+    expect(quickSetupStyles.workspace).not.toMatch(/max-\[/);
+    expect(quickSetupStylesSource).not.toContain("position:fixed");
+    expect(quickSetupStylesSource).not.toContain("bottom-0");
+  });
+
+  it("keeps existing Provider management in a bounded desktop list-detail grid", () => {
+    expect(providerPanelStyles.registryWorkspace).toContain("[grid-template-columns:minmax(240px,0.3fr)_minmax(0,1fr)]");
+    expect(providerPanelStyles.registryWorkspace).not.toContain("max-[960px]");
+    expect(providerPanelStyles.providerList).toContain("max-h-[calc(100dvh-18rem)]");
+    expect(providerPanelStyles.providerList).toContain("overflow-y-auto");
   });
 
   it("passes the workspace schema version into legacy model account compatibility", () => {
@@ -354,7 +371,7 @@ describe("ConfigRoute layout contract", () => {
     expect(providerPanelStylesSource).not.toMatch(/\bsurface-card\b(?!\))/);
     expect(providerPanelStylesSource).not.toContain("var(--radius-panel)");
     expect(providerPanelStyles.sectionSurface).toContain("[border-radius:8px]");
-    expect(providerPanelStyles.registryWorkspace).toContain("[grid-template-columns:minmax(220px,0.34fr)_minmax(0,1fr)]");
+    expect(providerPanelStyles.registryWorkspace).toContain("[grid-template-columns:minmax(240px,0.3fr)_minmax(0,1fr)]");
     expect(providerPanelStyles.providerList).toContain("overflow-y-auto");
     expect(providerPanelStyles.tableScroll).toContain("[overflow-x:auto]");
     expect(providerPanelStyles.mobileActionGroup).toContain("max-[390px]:[grid-template-columns:minmax(0,1fr)]");

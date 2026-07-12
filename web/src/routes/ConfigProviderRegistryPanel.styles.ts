@@ -5,9 +5,9 @@ const styles = {
   sectionSurface: `vui-routes-configproviderregistrypanel sectionSurface ${panelSurface} grid min-w-0 gap-3 p-3`,
   header: "vui-routes-configproviderregistrypanel header min-w-0",
   registryWorkspace:
-    "vui-routes-configproviderregistrypanel registryWorkspace grid min-w-0 [grid-template-columns:minmax(220px,0.34fr)_minmax(0,1fr)] gap-2 max-[960px]:[grid-template-columns:minmax(0,1fr)]",
+    "vui-routes-configproviderregistrypanel registryWorkspace grid min-w-0 [grid-template-columns:minmax(240px,0.3fr)_minmax(0,1fr)] gap-3",
   providerRail: "vui-routes-configproviderregistrypanel providerRail grid min-w-0 content-start gap-2",
-  providerList: "vui-routes-configproviderregistrypanel providerList max-h-[34rem] min-w-0 overflow-y-auto",
+  providerList: "vui-routes-configproviderregistrypanel providerList max-h-[calc(100dvh-18rem)] min-w-0 overflow-y-auto",
   providerButton:
     "vui-routes-configproviderregistrypanel providerButton !grid !w-full min-w-0 !grid-cols-[minmax(0,1fr)_auto] !justify-stretch gap-2 text-left",
   providerIdentity: "vui-routes-configproviderregistrypanel providerIdentity grid min-w-0 gap-0.5",
