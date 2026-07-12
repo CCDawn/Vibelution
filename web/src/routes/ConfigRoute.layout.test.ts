@@ -297,8 +297,8 @@ describe("ConfigRoute layout contract", () => {
     expect(quickSetupStyles.root).not.toContain("grid-template-columns");
     expect(quickSetupStyles.workspace).toContain("max-w-[72rem]");
     expect(quickSetupStyles.inputGrid).toContain("[grid-template-columns:minmax(15rem,1fr)_minmax(18rem,1.2fr)_max-content]");
-    expect(quickSetupStyles.field).toContain("[&_[data-vui=select-trigger]]:!h-8");
-    expect(quickSetupStyles.field).toContain("[&_[data-vui=select-trigger]]:!min-h-8");
+    expect(quickSetupStyles.field).toContain("[&_[data-vui=select-trigger]]:!h-[var(--vui-control-height-sm)]");
+    expect(quickSetupStyles.field).toContain("[&_[data-vui=select-trigger]]:!min-h-[var(--vui-control-height-sm)]");
     expect(quickSetupStyles.resultRegion).not.toContain("min-h-");
     expect(quickSetupStylesSource).not.toContain("position:fixed");
     expect(quickSetupStylesSource).not.toContain("bottom-0");
