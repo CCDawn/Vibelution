@@ -2113,6 +2113,8 @@ export function ConfigRoute() {
   const [routePreview, setRoutePreview] = useState<ProviderRoutePreview | null>(null);
   const [routeEditProviderId, setRouteEditProviderId] = useState("");
   const [routeEditProvider, setRouteEditProvider] = useState<Record<string, unknown>>({});
+  const [providerCredentialEditId, setProviderCredentialEditId] = useState("");
+  const [providerCredentialValue, setProviderCredentialValue] = useState("");
   const [providerActionError, setProviderActionError] = useState("");
   const [modelEditorExpanded, setModelEditorExpanded] = useState(false);
   const [sidebarIndexCollapsed, setSidebarIndexCollapsed] = useState(() => readStoredFlag(SIDEBAR_INDEX_COLLAPSED_STORAGE_KEY) ?? false);
@@ -2305,6 +2307,13 @@ export function ConfigRoute() {
       setSelectedProviderId(providerRows[0].providerId);
     }
   }, [providerRows, selectedProviderId]);
+
+  useEffect(() => {
+    if (providerCredentialEditId && providerCredentialEditId !== selectedProviderId) {
+      setProviderCredentialEditId("");
+      setProviderCredentialValue("");
+    }
+  }, [providerCredentialEditId, selectedProviderId]);
 
   useEffect(() => {
     autoRefreshAttemptedProviderIds.current.clear();
@@ -2605,6 +2614,27 @@ export function ConfigRoute() {
       );
       syncWorkspace(response, "success", { resetBase: false });
       setSelectedProviderId("");
+    } catch (error) {
+      setProviderActionError(readableErrorMessage(error).slice(0, 480));
+      markError(error);
+    } finally {
+      setBusyAction("");
+    }
+  }
+
+  async function handleUpdateProviderCredential(providerId: string) {
+    setBusyAction("正在更新 Provider API Key 草稿…");
+    setProviderActionError("");
+    try {
+      const provider = asRecord(asRecord(asRecord(requireDraft().llm).providers)[providerId]);
+      const response = await requestJson<ConfigWorkspace>(
+        `/api/config/draft/providers/${encodeURIComponent(providerId)}`,
+        buildProviderDraftRequest({ providerId, provider, credentialValue: providerCredentialValue }),
+        "PUT",
+      );
+      syncWorkspace(response, "success", { resetBase: false });
+      setProviderCredentialEditId("");
+      setProviderCredentialValue("");
     } catch (error) {
       setProviderActionError(readableErrorMessage(error).slice(0, 480));
       markError(error);
@@ -3605,6 +3635,10 @@ export function ConfigRoute() {
                   onDiscover={(providerId) => {
                     void handleDiscoverProvider(providerId).catch(() => undefined);
                   }}
+                  onEditCredential={(providerId) => {
+                    setProviderCredentialEditId(providerId);
+                    setProviderCredentialValue("");
+                  }}
                   onEditRoute={(providerId) => {
                     handleBeginProviderRouteEdit(providerId);
                   }}
@@ -3615,6 +3649,47 @@ export function ConfigRoute() {
                     void handleDeleteProvider(providerId);
                   }}
                 />
+                {providerCredentialEditId ? (
+                  <VSurface as="section" padding="compact" tone="row" className={styles.providerRouteEditSurface}>
+                    <VSection
+                      title={`设置 ${providerCredentialEditId} 的 API Key`}
+                      actions={(
+                        <VActionGroup ariaLabel="Provider API Key 编辑操作">
+                          <VButton
+                            isDisabled={Boolean(busyAction)}
+                            onPress={() => {
+                              setProviderCredentialEditId("");
+                              setProviderCredentialValue("");
+                            }}
+                          >
+                            取消
+                          </VButton>
+                          <VButton
+                            variant="primary"
+                            isDisabled={Boolean(busyAction) || !providerCredentialValue}
+                            onPress={() => {
+                              void handleUpdateProviderCredential(providerCredentialEditId);
+                            }}
+                          >
+                            保存到草稿
+                          </VButton>
+                        </VActionGroup>
+                      )}
+                    >
+                      <label className={styles.providerRouteEditField}>
+                        <span>API Key</span>
+                        <VInput
+                          type="password"
+                          autoComplete="new-password"
+                          value={providerCredentialValue}
+                          disabled={Boolean(busyAction)}
+                          onChange={(event) => setProviderCredentialValue(event.target.value)}
+                        />
+                      </label>
+                      <p className={styles.helperText}>最终保存会写入用户环境变量，不会写入 config.toml。</p>
+                    </VSection>
+                  </VSurface>
+                ) : null}
                 {routeEditProviderId && !routePreview ? (
                   <VSurface as="section" padding="compact" tone="row" className={styles.providerRouteEditSurface}>
                     <VSection
