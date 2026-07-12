@@ -8274,12 +8274,32 @@ def _provider_error_detail_safe_for_chat(reason_detail: Any) -> bool:
     return len(detail) <= 180
 
 
-def _history_messages_for_agent_seed(items: Any) -> list[dict[str, Any]]:
+def _history_message_turn_id(item: Any) -> str:
+    if not isinstance(item, dict):
+        return ""
+    metadata = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+    return str(
+        metadata.get("turnId")
+        or metadata.get("turn_id")
+        or item.get("turnId")
+        or item.get("turn_id")
+        or ""
+    ).strip()
+
+
+def _history_messages_for_agent_seed(
+    items: Any,
+    *,
+    exclude_turn_id: str = "",
+) -> list[dict[str, Any]]:
     """Build the prompt history view without transient runtime failure notices."""
 
     filtered: list[dict[str, Any]] = []
     drop_assistant_until_next_user = False
+    normalized_exclude_turn_id = str(exclude_turn_id or "").strip()
     for item in normalize_chat_messages(items or []):
+        if normalized_exclude_turn_id and _history_message_turn_id(item) == normalized_exclude_turn_id:
+            continue
         role = str(item.get("role") or "").strip().lower()
         if role == "user":
             drop_assistant_until_next_user = False
@@ -13095,7 +13115,10 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                 if callable(stop_configurer):
                     stop_configurer(lambda: _get_turn_control_stop_reason(turn_control))
                 raw_history_messages = list(context.get("history_messages") or [])
-                seedable_history_messages = _history_messages_for_agent_seed(raw_history_messages)
+                seedable_history_messages = _history_messages_for_agent_seed(
+                    raw_history_messages,
+                    exclude_turn_id=turn_id,
+                )
                 conversation_ledger_events = _load_session_conversation_events_cached(session_id)
                 conversation_context_events = [
                     event
