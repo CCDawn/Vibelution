@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import hmac
+import ipaddress
 import json
 import os
 import re
@@ -111,12 +112,20 @@ def _adapter_and_driver(provider: dict[str, Any]) -> tuple[str, str]:
     return "openai_compatible", "openai"
 
 
-def _service_class(provider: dict[str, Any]) -> str:
+def _service_class(provider: dict[str, Any], base_url: str = "") -> str:
     kind = str(provider.get("kind") or "").strip().lower()
-    if kind == "relay":
-        return "relay"
     if kind in {"ollama", "local", "local_runtime"}:
         return "local_runtime"
+    host = (urlsplit(base_url).hostname or "").lower()
+    if host == "localhost":
+        return "local_runtime"
+    try:
+        if ipaddress.ip_address(host).is_loopback:
+            return "local_runtime"
+    except ValueError:
+        pass
+    if kind == "relay":
+        return "relay"
     if kind in {"openrouter", "aggregator"}:
         return "aggregator"
     return "official_api" if kind in {"openai", "anthropic", "gemini"} else "relay"
@@ -334,11 +343,11 @@ def preview_v1_to_v2(
     model_defaults_seen: dict[tuple[str, str], dict[str, Any]] = {}
     for (base_url, credential_ref), rows in sorted(grouped.items(), key=lambda item: item[0]):
         first_id, _, first_provider, _, adapter, driver, _ = rows[0]
-        service_class = _service_class(first_provider)
+        service_class = _service_class(first_provider, base_url)
         vendor = _vendor(base_url, first_provider)
         classifications = [
             {
-                "service_class": _service_class(row_provider),
+                "service_class": _service_class(row_provider, base_url),
                 "vendor": _vendor(base_url, row_provider),
                 "adapter": row_adapter,
                 "driver": row_driver,

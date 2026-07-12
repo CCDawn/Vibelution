@@ -145,6 +145,35 @@ def test_preview_strips_only_adapter_confirmed_protocol_route(tmp_path) -> None:
     assert custom_preview.providers[0]["base_url"] == "https://custom.example/gateway/responses"
 
 
+def test_loopback_relay_migrates_as_local_runtime(tmp_path, monkeypatch) -> None:
+    project_root = tmp_path / "repo"
+    project_root.mkdir()
+    config_path = tmp_path / "operator" / "config.toml"
+    config_path.parent.mkdir()
+    legacy = legacy_config_with_models(
+        (
+            "relay_a",
+            "http://127.0.0.1:8080/v1",
+            "VIBELUTION_LLM_MODEL_RELAY_A_API_KEY",
+            "gpt-a",
+        ),
+    )
+    config_path.write_text(dumps_public_config(legacy), encoding="utf-8")
+    monkeypatch.setattr("config.model_config_migration.reload_config", lambda path: object())
+
+    preview = preview_v1_to_v2(legacy, project_root=project_root)
+
+    assert preview.providers[0]["service_class"] == "local_runtime"
+    applied = apply_v1_to_v2(
+        preview.preview_id,
+        expected_base_hash=public_config_hash(legacy),
+        config_path=config_path,
+        project_root=project_root,
+    )
+    assert applied["status"] == "applied"
+    assert load_public_config(config_path)["llm"]["schema_version"] == 2
+
+
 def test_apply_rejects_stale_hash_without_writes(tmp_path) -> None:
     config_path, project_root, legacy = write_migration_fixture(tmp_path)
     preview = preview_v1_to_v2(legacy, project_root=project_root)
