@@ -14,7 +14,7 @@ import {
   type VStatusTone,
 } from "../components/vui";
 import type { ConfigCapabilityObservation, ConfigCatalogModel } from "../api/types";
-import { canUnpinProviderModel, type ProviderRegistryRow } from "./configProviderLogic";
+import { canTestProviderModel, canUnpinProviderModel, type ProviderRegistryRow } from "./configProviderLogic";
 import styles from "./ConfigProviderRegistryPanel.styles";
 
 export type ConfigProviderRegistryTab = "connection" | "models" | "protocols" | "diagnostics";
@@ -31,6 +31,7 @@ export type ConfigProviderRegistryPanelProps = {
   onEditCredential: (providerId: string) => void;
   onEditRoute: (providerId: string) => void;
   onUnpin: (modelRef: string) => void;
+  onTestModel: (modelRef: string) => void;
   onDeleteProvider: (providerId: string) => void;
 };
 
@@ -117,11 +118,13 @@ function ModelsTab({
   disabled,
   liveReferenceCountByModelRef,
   onUnpin,
+  onTestModel,
 }: {
   provider: ProviderRegistryRow;
   disabled: boolean;
   liveReferenceCountByModelRef: Record<string, number>;
   onUnpin: (modelRef: string) => void;
+  onTestModel: (modelRef: string) => void;
 }) {
   return (
     <div className={styles.tableScroll}>
@@ -148,21 +151,51 @@ function ModelsTab({
             render: (model) => <span className={styles.ellipsis} title={model.upstreamId}>{model.upstreamId}</span>,
           },
           { id: "availability", header: "可用性", render: (model) => <VStatusChip tone={model.availability === "disabled" ? "danger" : "neutral"}>{model.availability}</VStatusChip> },
+          {
+            id: "verification",
+            header: "真实调用",
+            render: (model) => {
+              const verificationStatus = model.verificationStatus || "unverified";
+              const detail = [
+                model.verificationHttpStatus ? `HTTP ${model.verificationHttpStatus}` : "",
+                model.verificationErrorType || "",
+                model.verificationCheckedAt || "未测试",
+              ].filter(Boolean).join(" · ");
+              return (
+                <span className={styles.providerIdentity}>
+                  <VStatusChip tone={verificationStatus === "verified" ? "success" : verificationStatus === "failed" ? "danger" : "warning"}>
+                    {verificationStatus === "verified" ? "verified · 可调用" : verificationStatus === "failed" ? "failed · 调用失败" : "unverified · 未测试"}
+                  </VStatusChip>
+                  <small className={styles.muted} title={detail}>{detail}</small>
+                </span>
+              );
+            },
+          },
           { id: "capabilities", header: "能力来源", render: (model) => <CapabilityList model={model} /> },
           {
             id: "actions",
             header: "操作",
             align: "right",
             render: (model) => (
-              <VButton
-                variant="danger"
-                density="compact"
-                isDisabled={disabled || !canUnpinProviderModel(provider, model) || (liveReferenceCountByModelRef[model.modelRef] ?? 0) > 0}
-                title={(liveReferenceCountByModelRef[model.modelRef] ?? 0) > 0 ? "存在 live references，无法取消固定。" : undefined}
-                onPress={() => onUnpin(model.modelRef)}
-              >
-                取消固定
-              </VButton>
+              <VActionGroup ariaLabel={`${model.modelRef} 模型操作`}>
+                <VButton
+                  density="compact"
+                  isDisabled={disabled || !canTestProviderModel(model)}
+                  title={canTestProviderModel(model) ? "发送最小真实模型请求并保存脱敏结果。" : "先固定模型，再测试真实调用。"}
+                  onPress={() => onTestModel(model.modelRef)}
+                >
+                  测试调用
+                </VButton>
+                <VButton
+                  variant="danger"
+                  density="compact"
+                  isDisabled={disabled || !canUnpinProviderModel(provider, model) || (liveReferenceCountByModelRef[model.modelRef] ?? 0) > 0}
+                  title={(liveReferenceCountByModelRef[model.modelRef] ?? 0) > 0 ? "存在 live references，无法取消固定。" : undefined}
+                  onPress={() => onUnpin(model.modelRef)}
+                >
+                  取消固定
+                </VButton>
+              </VActionGroup>
             ),
           },
         ]}
@@ -243,6 +276,7 @@ export function ConfigProviderRegistryPanel({
   onEditCredential,
   onEditRoute,
   onUnpin,
+  onTestModel,
   onDeleteProvider,
 }: ConfigProviderRegistryPanelProps) {
   const provider = rows.find((row) => row.providerId === selectedProviderId) ?? rows[0];
@@ -320,7 +354,7 @@ export function ConfigProviderRegistryPanel({
               ))}
             </VActionGroup>
             {selectedTab === "connection" ? <ConnectionTab provider={provider} /> : null}
-            {selectedTab === "models" ? <ModelsTab provider={provider} disabled={disabled} liveReferenceCountByModelRef={liveReferenceCountByModelRef} onUnpin={onUnpin} /> : null}
+            {selectedTab === "models" ? <ModelsTab provider={provider} disabled={disabled} liveReferenceCountByModelRef={liveReferenceCountByModelRef} onUnpin={onUnpin} onTestModel={onTestModel} /> : null}
             {selectedTab === "protocols" ? <ProtocolsTab provider={provider} /> : null}
             {selectedTab === "diagnostics" ? <DiagnosticsTab provider={provider} disabled={disabled} onDiscover={onDiscover} /> : null}
             <div className={styles.mobileActionGroup}>

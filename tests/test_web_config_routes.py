@@ -1485,6 +1485,107 @@ def test_config_workspace_test_llm_can_target_model_library_model(monkeypatch):
     assert calls == [("deepseek", "__capability_probe_deepseek_v4_pro", "deepseek-v4-pro", "model-secret")]
 
 
+def test_config_workspace_test_llm_can_target_schema_v2_canonical_model_ref(monkeypatch):
+    public_config = {
+        "llm": {
+            "schema_version": 2,
+            "providers": {
+                "relay_a": {
+                    "label": "Relay A",
+                    "service_class": "relay",
+                    "vendor": "multi_model",
+                    "driver": "openai",
+                    "base_url": "https://relay-a.example/v1",
+                    "auth_kind": "api_key",
+                    "credential_ref": "env:VIBELUTION_LLM_PROVIDER_RELAY_A_API_KEY",
+                    "requires_credential": True,
+                    "protocols": {"default": "responses", "allowed": ["responses"]},
+                    "discovery": {"mode": "manual", "adapter": "openai_compatible", "cache_ttl_seconds": 0},
+                    "models": {
+                        "gpt-a": {
+                            "upstream_id": "gpt-a",
+                            "label": "GPT A",
+                            "enabled": True,
+                            "wire_protocol": "responses",
+                            "interaction_contract": "tool_chat",
+                            "defaults": {
+                                "temperature": 0.3,
+                                "max_output_tokens": 32,
+                                "timeout": 20,
+                                "connect_timeout": 5,
+                                "streaming": False,
+                                "tool_calling_mode": "auto",
+                            },
+                        }
+                    },
+                }
+            },
+            "profiles": {"primary": {"model_ref": "relay_a/gpt-a", "overrides": {}}},
+            "model_aliases": {},
+        }
+    }
+    monkeypatch.setenv("VIBELUTION_LLM_PROVIDER_RELAY_A_API_KEY", "relay-secret")
+    monkeypatch.setattr(config_service, "load_public_config", lambda: copy.deepcopy(public_config))
+    calls = []
+    probe_results = iter(
+        [
+            {"ok": False, "message": "Service temporarily unavailable"},
+            {"ok": True, "message": "ok"},
+        ]
+    )
+
+    def fake_runtime_probe(provider, profile, api_key=None):
+        calls.append((provider.provider_id, profile.profile_id, profile.model, profile.transport, api_key))
+        return next(probe_results)
+
+    saved_catalogs = []
+    monkeypatch.setattr("config.public_config._probe_llm_runtime", fake_runtime_probe)
+    monkeypatch.setattr(config_service, "load_model_catalog_state", lambda: {"schemaVersion": 2, "providers": {}, "metadata": {}})
+    monkeypatch.setattr(config_service, "save_model_catalog_state", lambda state: saved_catalogs.append(copy.deepcopy(state)))
+
+    response = client.post(
+        "/api/config/test-llm",
+        json={"publicConfig": public_config, "draftMeta": {}, "modelId": "relay_a/gpt-a"},
+    )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["ok"] is False
+    assert payload["model_id"] == "relay_a/gpt-a"
+    assert payload["provider_id"] == "relay_a"
+    assert payload["verification_status"] == "failed"
+    assert payload["verification_error_type"] == "service_unavailable"
+    assert saved_catalogs[-1]["providers"]["relay_a"]["models"]["gpt-a"]["verification"]["status"] == "failed"
+
+    second_response = client.post(
+        "/api/config/test-llm",
+        json={"publicConfig": public_config, "draftMeta": {}, "modelId": "relay_a/gpt-a"},
+    )
+    assert second_response.status_code == 200, second_response.text
+    assert second_response.json()["verification_status"] == "verified"
+    assert saved_catalogs[-1]["providers"]["relay_a"]["models"]["gpt-a"]["verification"]["status"] == "verified"
+    assert calls == [
+        ("relay_a", "__capability_probe_relay_a_gpt_a", "gpt-a", "responses", "relay-secret"),
+        ("relay_a", "__capability_probe_relay_a_gpt_a", "gpt-a", "responses", "relay-secret"),
+    ]
+
+
+def test_model_verification_classifies_missing_credentials_separately() -> None:
+    verification = config_service._model_verification_summary(
+        {"ok": False, "message": "missing API key for provider `relay_a`"}
+    )
+    assert verification["status"] == "failed"
+    assert verification["error_type"] == "missing_credential"
+    assert verification["http_status"] is None
+
+
+def test_model_verification_classifies_missing_upstream_model() -> None:
+    verification = config_service._model_verification_summary(
+        {"ok": False, "message": "NotFoundError: File Not Found"}
+    )
+    assert verification["error_type"] == "not_found"
+
+
 def test_config_workspace_test_llm_ignores_forged_pending_draft_key(monkeypatch):
     public_config = copy.deepcopy(load_public_config())
     _ensure_preset_model(public_config, "deepseek_v4_pro")

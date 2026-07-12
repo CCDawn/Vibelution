@@ -313,6 +313,10 @@ export function canUnpinProviderModel(row: ProviderRegistryRow, model: ConfigCat
   return row.pinnedCount > 0 && (model.availability === "pinned" || model.availability === "missing_remote");
 }
 
+export function canTestProviderModel(model: ConfigCatalogModel): boolean {
+  return model.availability === "pinned" || model.availability === "missing_remote";
+}
+
 export function filterAlreadyPinnedModels(
   models: ConfigCatalogModel[],
   pinnedModelRefs: ReadonlySet<string>,

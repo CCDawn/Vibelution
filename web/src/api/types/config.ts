@@ -140,6 +140,10 @@ export type ConfigCatalogModel = {
   status: string;
   upstreamId: string;
   capabilities: Record<string, ConfigCapabilityObservation>;
+  verificationStatus?: "unverified" | "verified" | "failed" | string;
+  verificationCheckedAt?: string;
+  verificationErrorType?: string;
+  verificationHttpStatus?: number | null;
 };
 
 export type ConfigCatalogWarning = {
@@ -360,6 +364,11 @@ export type ConfigLlmTestResult = {
   capability_status?: "supported" | "unsupported" | "unknown" | string;
   supports_image_input?: boolean | null;
   capability_reason?: string;
+  verification_status?: "verified" | "failed" | string;
+  verification_checked_at?: string;
+  verification_error_type?: string;
+  verification_http_status?: number | null;
+  verification_persisted?: boolean;
 };
 
 export type ConfigDiscoveredModel = {
