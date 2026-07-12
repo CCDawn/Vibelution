@@ -40,6 +40,7 @@ describe("AgentMessageTurnView", () => {
     expect(html).toContain("turnSpeaker");
     expect(html).toContain("avatar-slot");
     expect(html).toContain("Assistant");
+    expect(html.match(/>Assistant<\/span>/g)).toHaveLength(1);
     expect(html).toContain("editing");
     expect(html).toContain("19:50");
     expect(html).toContain("turn body");
@@ -87,7 +88,32 @@ describe("AgentMessageTurnView", () => {
     expect(styles.turnMetaActions).toContain("max-w-full");
     expect(styles.turnMetaActions).toContain("flex-wrap");
     expect(styles.turnMetaActions).toContain("shrink-0");
+    expect(styles.turnMetaActions).toContain("text-[var(--fg-tertiary)]");
+    expect(styles.turnMetaActions).toContain("opacity-60");
     expect(styles.turnSpeaker).toContain("max-w-full");
     expect(styles.turnSpeaker).toContain("[overflow-wrap:anywhere]");
+  });
+
+  it("does not render an empty or numeric internal actor label", () => {
+    const html = renderToStaticMarkup(
+      <AgentMessageTurnView
+        rowKey="row-user-internal"
+        messageKey="message-user-internal"
+        agentMessageId="agent-message-user-internal"
+        sectionCount={1}
+        className="user-turn"
+        compactHeader={false}
+        avatar={<span>operator-avatar</span>}
+        speakerLabel="17533"
+        metaActions={<span>20:10</span>}
+      >
+        <p>visible body</p>
+      </AgentMessageTurnView>,
+    );
+
+    expect(html).not.toContain("17533");
+    expect(html).toContain("operator-avatar");
+    expect(html).toContain("20:10");
+    expect(html).toContain("visible body");
   });
 });
