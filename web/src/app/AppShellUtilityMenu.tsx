@@ -88,14 +88,14 @@ export function AppShellUtilityMenu({ lang, t, frontendVisible, onClose }: AppSh
   const openPreviewTab = useChatWorkbenchStore((state) => state.openPreviewTab);
   const gitRefetchInterval = resolvePollingInterval(frontendVisible, 6_000, { backgroundMs: 60_000 });
   const gitStatusQuery = useQuery({
-    queryKey: queryKeys.gitStatus(),
-    queryFn: () => fetchJson<GitStatusSummary>("/api/git/status"),
+    queryKey: queryKeys.gitStatusSummary(),
+    queryFn: ({ signal }) => fetchJson<GitStatusSummary>("/api/git/status", { signal }),
     refetchInterval: gitRefetchInterval,
     refetchIntervalInBackground: false,
   });
   const fileTreeQuery = useQuery({
     queryKey: queryKeys.fileTree(),
-    queryFn: () => fetchJson<FileTreeNode[]>("/api/files/tree"),
+    queryFn: ({ signal }) => fetchJson<FileTreeNode[]>("/api/files/tree", { signal }),
     enabled: fileTreeRequested,
     refetchOnWindowFocus: false,
     staleTime: 30_000,

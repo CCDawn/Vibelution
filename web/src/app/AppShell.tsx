@@ -639,7 +639,7 @@ export function AppShell() {
   const suppressNextReturnStackPushRef = useRef(false);
   const configQuery = useQuery({
     queryKey: queryKeys.configPublic(),
-    queryFn: () => fetchJson<ConfigSummary>("/api/config/public"),
+    queryFn: ({ signal }) => fetchJson<ConfigSummary>("/api/config/public", { signal }),
   });
   const themeBackgroundImageUrl = configThemeBackgroundImageUrl(configQuery.data);
   const themeBackgroundReadability = configThemeBackgroundReadability(
@@ -668,15 +668,16 @@ export function AppShell() {
   );
   const runtimeQuery = useQuery({
     queryKey: queryKeys.runtimeSummary(),
-    queryFn: () => fetchJson<RuntimeSummary>("/api/runtime/summary"),
+    queryFn: ({ signal }) => fetchJson<RuntimeSummary>("/api/runtime/summary", { signal }),
     refetchInterval: runtimeRefetchInterval,
     refetchIntervalInBackground: shellStartupWarmupActive,
   });
   const backendHealthQuery = useQuery({
     queryKey: queryKeys.backendHealth(),
-    queryFn: () =>
+    queryFn: ({ signal }) =>
       fetchJson<BackendHealth>("/api/health", {
         cache: "no-store",
+        signal,
       }),
     refetchInterval: runtimeRefetchInterval,
     refetchIntervalInBackground: shellStartupWarmupActive,

@@ -213,19 +213,19 @@ export function GitRoute() {
 
   const statusQuery = useQuery({
     queryKey: queryKeys.gitStatus(),
-    queryFn: () => fetchJson<GitStatusSummary>("/api/git/status?limit=500"),
+    queryFn: ({ signal }) => fetchJson<GitStatusSummary>("/api/git/status?limit=500", { signal }),
     refetchInterval: resolvePollingInterval(pageVisible, 6_000),
     refetchIntervalInBackground: false,
   });
   const commitsQuery = useQuery({
     queryKey: queryKeys.gitCommits(),
-    queryFn: () => fetchJson<GitCommitsResponse>("/api/git/commits?limit=20"),
+    queryFn: ({ signal }) => fetchJson<GitCommitsResponse>("/api/git/commits?limit=20", { signal }),
     refetchInterval: resolvePollingInterval(pageVisible, 30_000),
     refetchIntervalInBackground: false,
   });
   const configQuery = useQuery({
     queryKey: queryKeys.configWorkspace(),
-    queryFn: () => fetchJson<ConfigWorkspace>("/api/config/workspace"),
+    queryFn: ({ signal }) => fetchJson<ConfigWorkspace>("/api/config/workspace", { signal }),
     staleTime: 30_000,
   });
 
@@ -272,18 +272,18 @@ export function GitRoute() {
 
   const diffQuery = useQuery({
     queryKey: queryKeys.gitDiff(activePath ?? ""),
-    queryFn: () => fetchJson<GitFileDiff>(`/api/git/diff?path=${encodeURIComponent(activePath ?? "")}`),
+    queryFn: ({ signal }) => fetchJson<GitFileDiff>(`/api/git/diff?path=${encodeURIComponent(activePath ?? "")}`, { signal }),
     enabled: Boolean(activePath && statusQuery.data?.available),
   });
   const objectDetailQuery = useQuery({
     queryKey: ["git", "object-detail", activeObject?.kind ?? "", activeObject?.ref ?? "", activeObject?.path ?? ""] as const,
-    queryFn: () => {
+    queryFn: ({ signal }) => {
       const params = new URLSearchParams({
         kind: activeObject?.kind ?? "",
         ref: activeObject?.ref ?? "",
         path: activeObject?.path ?? "",
       });
-      return fetchJson<GitObjectDetail>(`/api/git/object-detail?${params.toString()}`);
+      return fetchJson<GitObjectDetail>(`/api/git/object-detail?${params.toString()}`, { signal });
     },
     enabled: Boolean(activeObject && statusQuery.data?.available),
   });
@@ -370,6 +370,7 @@ export function GitRoute() {
 
   const refresh = () => {
     void queryClient.invalidateQueries({ queryKey: queryKeys.gitStatus() });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.gitStatusSummary() });
     void queryClient.invalidateQueries({ queryKey: queryKeys.gitCommits() });
     if (activePath) {
       void queryClient.invalidateQueries({ queryKey: queryKeys.gitDiff(activePath) });
