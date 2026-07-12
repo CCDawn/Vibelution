@@ -149,6 +149,11 @@ describe("ConfigProviderRegistryPanel", () => {
     expect(panelSource).not.toContain('@heroui/react');
   });
 
+  it("resets local model tools from the actual rendered Provider identity", () => {
+    expect(panelSource).toContain("}, [provider?.providerId]);");
+    expect(panelSource).not.toContain("}, [selectedProviderId]);");
+  });
+
   it("aligns Provider action labels, active states, and nearby feedback", () => {
     const models = [model("observed", "observed")];
     const busyMarkup = renderToStaticMarkup(<ConfigProviderRegistryPanel {...panelProps(models, {
