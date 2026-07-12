@@ -8,9 +8,12 @@ import {
   deriveProviderRegistryRows,
   dispatchProviderWizardConnectionAction,
   filterAlreadyPinnedModels,
+  initialProviderQuickSetupState,
   initialProviderWizardState,
   isProviderWizardConnectionLocked,
+  providerQuickSetupReducer,
   providerWizardReducer,
+  recommendProviderModel,
 } from "./configProviderLogic";
 
 const providers: ConfigProviderOption[] = [
@@ -51,6 +54,7 @@ function catalogModel(modelRef: string): ConfigCatalogModel {
     label: "GPT A",
     availability: "pinned",
     status: "pinned",
+    capabilities: {},
   };
 }
 
@@ -91,6 +95,145 @@ const catalog: ConfigModelCatalog = {
 };
 
 describe("configProviderLogic", () => {
+  it("keeps quick setup phases deterministic without accepting credential values", () => {
+    const initial = initialProviderQuickSetupState();
+    expect(initial.phase).toBe("input");
+    expect(initial.provider).toEqual(initialProviderWizardState());
+    expect(initial.selectedModelRef).toBe("");
+
+    const checking = providerQuickSetupReducer(initial, { type: "start_check" });
+    expect(checking.phase).toBe("checking");
+
+    const reviewed = providerQuickSetupReducer(checking, {
+      type: "check_succeeded",
+      models: [catalogModel("relay_a/gpt-a")],
+      selectedModelRef: "relay_a/gpt-a",
+      recommendationReason: "template_default",
+      credentialValue: "api-key-secret",
+    } as never);
+    expect(reviewed).toMatchObject({
+      phase: "review",
+      selectedModelRef: "relay_a/gpt-a",
+      recommendationReason: "template_default",
+    });
+    expect(JSON.stringify(reviewed)).not.toContain("api-key-secret");
+
+    const saving = providerQuickSetupReducer(reviewed, { type: "start_save" });
+    expect(saving.phase).toBe("saving");
+    expect(providerQuickSetupReducer(saving, { type: "save_succeeded" }).phase).toBe("success");
+  });
+
+  it("resets quick setup results when the Provider template changes", () => {
+    const dirty = {
+      ...initialProviderQuickSetupState(),
+      phase: "review" as const,
+      discoveredModels: [catalogModel("relay_a/gpt-a")],
+      selectedModelRef: "relay_a/gpt-a",
+      recommendationReason: "stable_fallback",
+    };
+    const provider = {
+      ...initialProviderWizardState(),
+      templateId: "local_runtime",
+      serviceClass: "local_runtime",
+      authKind: "none" as const,
+      credentialRef: "none",
+    };
+
+    const changed = providerQuickSetupReducer(dirty, { type: "set_provider", provider });
+
+    expect(changed).toMatchObject({
+      phase: "input",
+      provider,
+      discoveredModels: [],
+      selectedModelRef: "",
+      errorKind: "",
+    });
+  });
+
+  it("represents typed check and save failures without discarding safe preview data", () => {
+    const initial = initialProviderQuickSetupState();
+    const authFailed = providerQuickSetupReducer(initial, {
+      type: "check_failed",
+      errorKind: "auth",
+      errorMessage: "认证失败",
+    });
+    expect(authFailed).toMatchObject({ phase: "error", errorKind: "auth" });
+
+    const review = {
+      ...initial,
+      phase: "review" as const,
+      discoveredModels: [catalogModel("relay_a/gpt-a")],
+      selectedModelRef: "relay_a/gpt-a",
+    };
+    const saveFailed = providerQuickSetupReducer(review, { type: "start_save" });
+    const partial = providerQuickSetupReducer(saveFailed, {
+      type: "save_failed",
+      errorKind: "partial_save",
+      errorMessage: "正式配置未应用",
+    });
+    expect(partial).toMatchObject({
+      phase: "error",
+      errorKind: "partial_save",
+      selectedModelRef: "relay_a/gpt-a",
+    });
+  });
+
+  it("recommends the compatible template default before other discovered models", () => {
+    const models = [
+      catalogModel("relay_a/other"),
+      catalogModel("relay_a/default"),
+    ];
+
+    expect(recommendProviderModel(models, {
+      templateDefaultModelRef: "relay_a/default",
+      allowedProtocols: ["responses"],
+    })).toEqual({ modelRef: "relay_a/default", reason: "template_default" });
+  });
+
+  it("filters disabled and protocol-mismatched models before stable recommendation", () => {
+    const models = [
+      { ...catalogModel("relay_a/disabled"), status: "disabled" },
+      { ...catalogModel("relay_a/mismatch"), status: "protocol_mismatch" },
+      {
+        ...catalogModel("relay_a/z-capable"),
+        availability: "observed" as const,
+        status: "reachable",
+        capabilities: {
+          tools: { value: "supported", source: "runtime_probe", confidence: "high", checked_at: "2026-07-12T00:00:00Z" },
+        },
+      },
+      {
+        ...catalogModel("relay_a/a-capable"),
+        availability: "observed" as const,
+        status: "reachable",
+        capabilities: {
+          tools: { value: "supported", source: "runtime_probe", confidence: "high", checked_at: "2026-07-12T00:00:00Z" },
+        },
+      },
+    ];
+
+    expect(recommendProviderModel(models, { allowedProtocols: ["responses"] })).toEqual({
+      modelRef: "relay_a/a-capable",
+      reason: "verified_capabilities",
+    });
+  });
+
+  it("uses lexical fallback and returns no recommendation when no safe model exists", () => {
+    expect(recommendProviderModel([
+      { ...catalogModel("relay_a/z"), availability: "observed", status: "reachable" },
+      { ...catalogModel("relay_a/a"), availability: "observed", status: "reachable" },
+    ], { allowedProtocols: ["responses"] })).toEqual({
+      modelRef: "relay_a/a",
+      reason: "stable_fallback",
+    });
+    expect(recommendProviderModel([
+      { ...catalogModel("relay_a/off"), status: "disabled" },
+    ], { allowedProtocols: ["responses"] })).toEqual({
+      modelRef: "",
+      reason: "no_compatible_model",
+    });
+  });
+
   it("builds local runtime deployment under the backend-owned nested object", () => {
     const state = {
       ...initialProviderWizardState(),
