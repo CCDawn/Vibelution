@@ -89,6 +89,15 @@ function resultCopy(state: ProviderQuickSetupState) {
   return { title: "等待检测", tone: "empty" as const };
 }
 
+function phaseLabel(state: ProviderQuickSetupState): string {
+  if (state.phase === "checking") return "检测中";
+  if (state.phase === "review") return "待确认";
+  if (state.phase === "saving") return "保存中";
+  if (state.phase === "success") return "已完成";
+  if (state.phase === "error") return "需处理";
+  return "待输入";
+}
+
 export function ConfigQuickSetupPanel({
   state,
   templates,
@@ -111,128 +120,160 @@ export function ConfigQuickSetupPanel({
     && state.phase !== "saving",
   );
   const canConfirm = state.phase === "review" && Boolean(state.selectedModelRef) && !disabled;
+  const showResult = state.phase !== "input";
+  const showDetectAction = state.phase === "input" || state.phase === "checking" || state.phase === "error";
+  const showReviewActions = state.phase === "review" || state.phase === "saving";
+  const detectLabel = state.phase === "checking"
+    ? "检测中…"
+    : state.phase === "error"
+      ? "重新检测"
+      : "检测连接";
+  const resultFacts = [
+    { key: "provider", label: "Provider", value: state.provider.label || selectedTemplate?.label || "-" },
+    { key: "endpoint", label: "端点", value: state.provider.baseUrl || "-" },
+    { key: "protocol", label: "协议", value: state.provider.defaultProtocol || "-" },
+    { key: "models", label: "发现模型", value: state.discoveredModels.length },
+  ];
+  const resultMessage = state.phase === "error"
+    ? state.errorMessage || "检测或保存未完成，请检查输入后重试。"
+    : state.phase === "review"
+      ? `推荐理由：${state.recommendationReason || "等待选择"}`
+      : state.phase === "success"
+        ? "当前模型连接已经保存并同步。"
+        : "保持当前页面，完成后会在这里显示结果。";
 
   return (
     <VSection
       className={styles.root}
       aria-labelledby="provider-quick-setup-title"
       eyebrow="Model connection"
-      title="一页快速配置"
-      meta="只需服务商与凭据"
+      title="连接一个模型服务"
+      meta="约 1 分钟"
     >
       <div className={styles.workspace}>
-      <div className={styles.inputColumn}>
-        <label className={styles.field}>
-          <span>选择服务商</span>
-          <VStringSelect
-            ariaLabel="选择服务商"
-            value={state.provider.templateId}
-            placeholder="选择 Provider 模板"
-            isDisabled={disabled || state.phase === "checking" || state.phase === "saving"}
-            options={templates.map((template) => ({
-              value: template.provider_preset_id,
-              label: template.label,
-              description: asString(asRecord(template.default_model).label) || asString(asRecord(template.default_model).model_ref),
-            }))}
-            onValueChange={(templateId) => {
-              const template = templates.find((candidate) => candidate.provider_preset_id === templateId);
-              if (template) onProviderChange(templateToProvider(template));
-            }}
-          />
-        </label>
-
-        {state.provider.authKind === "none" ? (
-          <VStateSurface tone="info" title="无需凭据" icon={<CheckCircle2 size={15} />}>
-            当前模板使用本地或无认证连接。
-          </VStateSurface>
-        ) : (
-          <label className={styles.field}>
-            <span>API Key</span>
-            <VInput
-              type="password"
-              autoComplete="new-password"
-              value={credentialValue}
-              disabled={disabled || state.phase === "checking" || state.phase === "saving"}
-              placeholder="仅用于本次本地配置请求"
-              onChange={(event) => onCredentialChange(event.target.value)}
-            />
-            <small className={styles.hint}>不会回显旧值，也不会写入浏览器缓存或日志。</small>
-          </label>
-        )}
-
-        <details className={styles.advanced}>
-          <summary className={styles.advancedSummary}>高级参数</summary>
-          <div className={styles.advancedGrid}>
+        <div className={styles.inputPanel}>
+          <div className={styles.inputGrid}>
             <label className={styles.field}>
-              <span>服务端点</span>
-              <VInput value={state.provider.baseUrl} readOnly />
-            </label>
-            <label className={styles.field}>
-              <span>协议</span>
-              <VInput value={state.provider.defaultProtocol} readOnly />
-            </label>
-          </div>
-        </details>
-
-        <div className={styles.actionRow}>
-          <VButton
-            variant="primary"
-            icon={<Search size={14} />}
-            isDisabled={!canDetect}
-            onPress={() => onDetect({ provider: state.provider, credentialValue })}
-          >
-            检测并生成配置
-          </VButton>
-          {state.phase !== "input" ? <VButton variant="ghost" onPress={onReset}>重新开始</VButton> : null}
-        </div>
-      </div>
-
-      <section className={styles.resultColumn} data-quick-setup-result="true" aria-live="polite">
-        <div className={styles.resultHeader}>
-          <h3 className={styles.resultTitle}>{result.title}</h3>
-          <VStatusChip tone={state.phase === "error" ? "danger" : state.phase === "success" ? "success" : "accent"}>
-            {state.phase}
-          </VStatusChip>
-        </div>
-        <VStateSurface
-          tone={result.tone}
-          busy={state.phase === "checking" || state.phase === "saving"}
-          skeletonLines={state.phase === "checking" ? 3 : false}
-          icon={state.phase === "review" || state.phase === "success" ? <Sparkles size={15} /> : <KeyRound size={15} />}
-          title={result.title}
-          facts={state.phase === "review" || state.phase === "success" ? [
-            { key: "provider", label: "Provider", value: state.provider.label || selectedTemplate?.label || "-" },
-            { key: "endpoint", label: "端点", value: state.provider.baseUrl || "-" },
-            { key: "protocol", label: "协议", value: state.provider.defaultProtocol || "-" },
-            { key: "models", label: "发现模型", value: state.discoveredModels.length },
-          ] : []}
-        >
-          {state.phase === "error"
-            ? state.errorMessage || "检测或保存未完成，请检查输入后重试。"
-            : state.phase === "input"
-              ? "系统将自动识别端点、协议、模型目录并给出默认模型建议。检测不会写入正式配置。"
-              : state.phase === "review"
-                ? `推荐理由：${state.recommendationReason || "等待选择"}`
-                : "保持当前页面，完成后会在这里显示结果。"}
-        </VStateSurface>
-
-        {state.phase === "review" ? (
-          <div className={styles.modelList}>
-            <label className={styles.field}>
-              <span>默认模型</span>
+              <span>选择服务商</span>
               <VStringSelect
-                ariaLabel="默认模型"
-                value={state.selectedModelRef}
-                options={state.discoveredModels.map((model) => ({ value: model.modelRef, label: model.label || model.modelRef, description: model.modelRef }))}
-                onValueChange={onModelChange}
+                ariaLabel="选择服务商"
+                value={state.provider.templateId}
+                placeholder="选择 Provider 模板"
+                isDisabled={disabled || state.phase === "checking" || state.phase === "saving"}
+                options={templates.map((template) => ({
+                  value: template.provider_preset_id,
+                  label: template.label,
+                  description: asString(asRecord(template.default_model).label) || asString(asRecord(template.default_model).model_ref),
+                }))}
+                onValueChange={(templateId) => {
+                  const template = templates.find((candidate) => candidate.provider_preset_id === templateId);
+                  if (template) onProviderChange(templateToProvider(template));
+                }}
               />
             </label>
-            <VButton variant="primary" icon={<CheckCircle2 size={14} />} isDisabled={!canConfirm} onPress={onConfirm}>
-              确认并保存
-            </VButton>
+
+            {state.provider.authKind === "none" ? (
+              <div className={styles.field}>
+                <span>凭据</span>
+                <div className={styles.noCredential}>
+                  <CheckCircle2 size={14} />
+                  无需凭据
+                </div>
+              </div>
+            ) : (
+              <label className={styles.field}>
+                <span>API Key</span>
+                <VInput
+                  type="password"
+                  autoComplete="new-password"
+                  value={credentialValue}
+                  disabled={disabled || state.phase === "checking" || state.phase === "saving"}
+                  placeholder="仅用于本次本地配置请求"
+                  onChange={(event) => onCredentialChange(event.target.value)}
+                />
+              </label>
+            )}
+
+            {showDetectAction ? (
+              <VButton
+                className={styles.primaryAction}
+                variant="primary"
+                icon={<Search size={14} />}
+                isDisabled={!canDetect}
+                onPress={() => onDetect({ provider: state.provider, credentialValue })}
+              >
+                {detectLabel}
+              </VButton>
+            ) : null}
           </div>
+
+          <small className={styles.hint}>凭据只用于本次本地检测；确认前不会写入正式配置。</small>
+
+          <details className={styles.advanced}>
+            <summary className={styles.advancedSummary}>高级参数</summary>
+            <div className={styles.advancedGrid}>
+              <label className={styles.field}>
+                <span>服务端点</span>
+                <VInput value={state.provider.baseUrl} readOnly />
+              </label>
+              <label className={styles.field}>
+                <span>协议</span>
+                <VInput value={state.provider.defaultProtocol} readOnly />
+              </label>
+            </div>
+          </details>
+        </div>
+
+        {showResult ? (
+          <section className={styles.resultRegion} data-quick-setup-result="true" aria-live="polite">
+            <div className={styles.resultHeader}>
+              <h3 className={styles.resultTitle}>{result.title}</h3>
+              <VStatusChip tone={state.phase === "error" ? "danger" : state.phase === "success" ? "success" : "accent"}>
+                {phaseLabel(state)}
+              </VStatusChip>
+            </div>
+            <VStateSurface
+              tone={result.tone}
+              busy={state.phase === "checking" || state.phase === "saving"}
+              skeletonLines={state.phase === "checking" ? 3 : false}
+              icon={state.phase === "review" || state.phase === "success" ? <Sparkles size={15} /> : <KeyRound size={15} />}
+              title={result.title}
+              facts={state.phase === "review" || state.phase === "saving" || state.phase === "success" ? resultFacts : []}
+            >
+              {resultMessage}
+            </VStateSurface>
+
+            {showReviewActions ? (
+              <div className={styles.reviewActions}>
+                <label className={styles.field}>
+                  <span>默认模型</span>
+                  <VStringSelect
+                    ariaLabel="默认模型"
+                    value={state.selectedModelRef}
+                    isDisabled={state.phase === "saving"}
+                    options={state.discoveredModels.map((model) => ({
+                      value: model.modelRef,
+                      label: model.label || model.modelRef,
+                      description: model.modelRef,
+                    }))}
+                    onValueChange={onModelChange}
+                  />
+                </label>
+                <VButton variant="ghost" isDisabled={state.phase === "saving"} onPress={onReset}>
+                  重新检测
+                </VButton>
+                <VButton
+                  variant="primary"
+                  icon={<CheckCircle2 size={14} />}
+                  isDisabled={!canConfirm}
+                  onPress={onConfirm}
+                >
+                  {state.phase === "saving" ? "保存中…" : "保存并完成"}
+                </VButton>
+              </div>
+            ) : null}
+          </section>
         ) : null}
-      </section>
       </div>
     </VSection>
   );
