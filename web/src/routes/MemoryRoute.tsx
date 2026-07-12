@@ -2202,20 +2202,20 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
 
   const overviewQuery = useQuery({
     queryKey: queryKeys.memoryOverview(),
-    queryFn: () => fetchJson<MemoryOverview>("/api/memory/overview?includeContent=false"),
+    queryFn: ({ signal }) => fetchJson<MemoryOverview>("/api/memory/overview?includeContent=false", { signal }),
     refetchInterval: resolvePollingInterval(pageVisible, 30_000),
     refetchIntervalInBackground: false,
   });
   const projectMemoryUpdatesQuery = useQuery({
     queryKey: queryKeys.agentProjectMemoryUpdates(memoryProposalStatusFilter, "", 100),
-    queryFn: () => fetchJson<AgentProjectMemoryUpdateProposal[]>(agentProjectMemoryUpdatesEndpoint(memoryProposalStatusFilter, 100)),
+    queryFn: ({ signal }) => fetchJson<AgentProjectMemoryUpdateProposal[]>(agentProjectMemoryUpdatesEndpoint(memoryProposalStatusFilter, 100), { signal }),
     refetchInterval: resolvePollingInterval(pageVisible, 45_000),
     refetchIntervalInBackground: false,
     enabled: forcedView === "overview",
   });
   const memoryUsageContractQuery = useQuery({
     queryKey: queryKeys.memoryUsageContract(),
-    queryFn: () => fetchJson<MemoryUsageContractPayload>("/api/memory/usage-contract"),
+    queryFn: ({ signal }) => fetchJson<MemoryUsageContractPayload>("/api/memory/usage-contract", { signal }),
     refetchInterval: resolvePollingInterval(pageVisible, 60_000),
     refetchIntervalInBackground: false,
     enabled: forcedView === "knowledge",
@@ -2223,7 +2223,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
 
   const agentsQuery = useQuery({
     queryKey: queryKeys.agents(),
-    queryFn: () => fetchJson<AgentInstance[]>("/api/agents?detail=summary"),
+    queryFn: ({ signal }) => fetchJson<AgentInstance[]>("/api/agents?detail=summary", { signal }),
     enabled: forcedView === "agents" || forcedView === "knowledge" || forcedView === "graph" || forcedView === "cleanup",
     refetchInterval: resolvePollingInterval(pageVisible, 60_000),
     refetchIntervalInBackground: false,
@@ -2231,7 +2231,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
 
   const agentMemoryInventoryQuery = useQuery({
     queryKey: ["memory", "agents", "inventory"],
-    queryFn: () => fetchJson<AgentMemoryInventoryPayload>("/api/memory/agents"),
+    queryFn: ({ signal }) => fetchJson<AgentMemoryInventoryPayload>("/api/memory/agents", { signal }),
     enabled: forcedView === "agents",
     refetchInterval: resolvePollingInterval(pageVisible, 45_000),
     refetchIntervalInBackground: false,
