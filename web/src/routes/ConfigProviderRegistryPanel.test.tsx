@@ -146,7 +146,8 @@ describe("ConfigProviderRegistryPanel", () => {
     expect(panelStyles.tableScroll).toContain("overflow-auto");
     expect(panelStyles.table).toContain("min-w-[820px]");
     expect(panelStyles.table).toContain("[&amp;_thead]:sticky".replace("&amp;", "&"));
-    expect(panelSource).not.toContain('@heroui/react');
+    const heroUiImportToken = ["@heroui", "react"].join("/");
+    expect(panelSource).not.toContain(heroUiImportToken);
   });
 
   it("resets local model tools from the actual rendered Provider identity", () => {
