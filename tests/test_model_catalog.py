@@ -8,6 +8,7 @@ from config.model_catalog import (
     load_model_catalog_state,
     merge_capability_observations,
     provider_catalog_refresh_due,
+    record_model_verification,
     record_discovery_failure,
     record_discovery_success,
     resolve_model_capabilities,
@@ -35,6 +36,46 @@ def test_discovery_success_reconciles_observed_and_missing_pinned(tmp_path) -> N
     assert models["gpt-b"]["availability"] == "missing_remote"
     save_model_catalog_state(state, tmp_path / "model-catalog-state.json")
     assert load_model_catalog_state(tmp_path / "model-catalog-state.json") == state
+
+
+def test_model_verification_records_callability_without_overwriting_discovery() -> None:
+    state = record_discovery_success(
+        empty_model_catalog_state(),
+        provider_id="relay",
+        provider_fingerprint="fp",
+        discovered_at="2026-07-11T12:00:00Z",
+        observed=[{"upstream_id": "gpt-a", "label": "GPT A", "capabilities": {}}],
+        pinned={"gpt-a": {"upstream_id": "gpt-a"}},
+    )
+
+    verified = record_model_verification(
+        state,
+        model_ref="relay/gpt-a",
+        checked_at="2026-07-12T09:30:00Z",
+        ok=False,
+        error_type="service_unavailable",
+        http_status=503,
+    )
+
+    provider = verified["providers"]["relay"]
+    model = provider["models"]["gpt-a"]
+    assert provider["status"] == "reachable"
+    assert model["availability"] == "pinned"
+    assert model["verification"] == {
+        "status": "failed",
+        "checkedAt": "2026-07-12T09:30:00Z",
+        "errorType": "service_unavailable",
+        "httpStatus": 503,
+    }
+    rediscovered = record_discovery_success(
+        verified,
+        provider_id="relay",
+        provider_fingerprint="fp",
+        discovered_at="2026-07-12T10:00:00Z",
+        observed=[{"upstream_id": "gpt-a", "label": "GPT A", "capabilities": {}}],
+        pinned={"gpt-a": {"upstream_id": "gpt-a"}},
+    )
+    assert rediscovered["providers"]["relay"]["models"]["gpt-a"]["verification"] == model["verification"]
 
 
 def test_failure_keeps_last_success_and_marks_provider_stale() -> None:

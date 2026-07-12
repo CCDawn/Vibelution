@@ -2706,6 +2706,29 @@ export function ConfigRoute() {
     }
   }
 
+  async function handleTestProviderModel(modelRef: string) {
+    if (structuredActionsDisabled) return;
+    setBusyAction(`正在测试 ${modelRef}…`);
+    setProviderActionError("");
+    try {
+      const result = await requestJson<ConfigLlmTestResult>("/api/config/test-llm", {
+        publicConfig: requireDraft(),
+        draftMeta,
+        baseHash,
+        modelId: modelRef,
+        capability: "text",
+      });
+      setNotice({ tone: result.ok ? "success" : "error", text: formatTestNotice(result) });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.configWorkspace() });
+    } catch (error) {
+      const message = readableErrorMessage(error).slice(0, 480);
+      setProviderActionError(message);
+      markError(error);
+    } finally {
+      setBusyAction("");
+    }
+  }
+
   async function handleDeleteProvider(providerId: string) {
     if (typeof window !== "undefined" && !window.confirm(`删除 Provider ${providerId}？此操作只允许在没有固定模型时继续。`)) return;
     setBusyAction("正在删除 Provider…");
@@ -3803,6 +3826,9 @@ export function ConfigRoute() {
                   }}
                   onUnpin={(modelRef) => {
                     void handleUnpinProviderModel(modelRef);
+                  }}
+                  onTestModel={(modelRef) => {
+                    void handleTestProviderModel(modelRef);
                   }}
                   onDeleteProvider={(providerId) => {
                     void handleDeleteProvider(providerId);

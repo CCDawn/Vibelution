@@ -387,6 +387,9 @@ describe("ConfigRoute layout contract", () => {
     expect(providerPanelStyles.providerList).toContain("overflow-y-auto");
     expect(providerPanelStyles.tableScroll).toContain("[overflow-x:auto]");
     expect(providerPanelStyles.mobileActionGroup).toContain("max-[390px]:[grid-template-columns:minmax(0,1fr)]");
+    expect(providerPanelSource).toContain("测试调用");
+    expect(providerPanelSource).toContain("verificationStatus");
+    expect(routeSource).toContain("handleTestProviderModel");
   });
 
   it("bounds Config diagnostics and transient notices so long text cannot force page overflow", () => {

@@ -516,6 +516,13 @@ def test_catalog_summary_omits_sensitive_details_and_derives_protocol_status(mon
                             "label": "GPT A",
                             "availability": "pinned",
                             "metadata": {"response": "must-not-appear"},
+                            "verification": {
+                                "status": "failed",
+                                "checkedAt": "2026-07-12T09:30:00Z",
+                                "errorType": "service_unavailable",
+                                "httpStatus": 503,
+                                "rawMessage": "Bearer must-not-appear",
+                            },
                         }
                     },
                 }
@@ -524,6 +531,10 @@ def test_catalog_summary_omits_sensitive_details_and_derives_protocol_status(mon
     )
     summary = config_service._provider_workspace_fields(config)["modelCatalog"]
     assert summary["providers"]["relay_a"]["status"] == "protocol_mismatch"
+    model = summary["providers"]["relay_a"]["models"]["gpt-a"]
+    assert model["verificationStatus"] == "failed"
+    assert model["verificationErrorType"] == "service_unavailable"
+    assert model["verificationHttpStatus"] == 503
     serialized = json.dumps(summary)
     assert "providerFingerprint" not in serialized
     assert "credential_ref" not in serialized
