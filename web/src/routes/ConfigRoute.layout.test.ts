@@ -115,6 +115,9 @@ describe("ConfigRoute layout contract", () => {
     expect(routeSource).toContain('providerWorkspaceMode === "advanced"');
     expect(quickSetupSource).toContain("检测并生成配置");
     expect(quickSetupSource).toContain("确认并保存");
+    expect(routeSource).toContain('workspace.schemaVersion === 2 && isSectionVisible("models")');
+    expect(routeSource).toContain('providerWorkspaceMode === "advanced" ? (\n                  <>');
+    expect(routeSource).toContain('activeSection?.id === "models-profiles" && workspace.schemaVersion !== 2');
   });
 
   it("keeps formal config apply outside Provider detection orchestration", () => {
@@ -275,7 +278,7 @@ describe("ConfigRoute layout contract", () => {
   });
 
   it("keeps existing Provider management in a bounded desktop list-detail grid", () => {
-    expect(providerPanelStyles.registryWorkspace).toContain("[grid-template-columns:minmax(240px,0.3fr)_minmax(0,1fr)]");
+    expect(providerPanelStyles.registryWorkspace).toContain("[--vui-workspace-sidebar:30%]");
     expect(providerPanelStyles.registryWorkspace).not.toContain("max-[960px]");
     expect(providerPanelStyles.providerList).toContain("max-h-[calc(100dvh-18rem)]");
     expect(providerPanelStyles.providerList).toContain("overflow-y-auto");
@@ -380,7 +383,7 @@ describe("ConfigRoute layout contract", () => {
     expect(providerPanelStylesSource).not.toMatch(/\bsurface-card\b(?!\))/);
     expect(providerPanelStylesSource).not.toContain("var(--radius-panel)");
     expect(providerPanelStyles.sectionSurface).toContain("[border-radius:8px]");
-    expect(providerPanelStyles.registryWorkspace).toContain("[grid-template-columns:minmax(240px,0.3fr)_minmax(0,1fr)]");
+    expect(providerPanelStyles.registryWorkspace).toContain("[--vui-workspace-sidebar:30%]");
     expect(providerPanelStyles.providerList).toContain("overflow-y-auto");
     expect(providerPanelStyles.tableScroll).toContain("[overflow-x:auto]");
     expect(providerPanelStyles.mobileActionGroup).toContain("max-[390px]:[grid-template-columns:minmax(0,1fr)]");
