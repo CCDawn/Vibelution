@@ -339,15 +339,13 @@ describe("ConversationView Codex-like transcript adapter integration", () => {
                 status: "failed",
                 tone: "error",
                 title: "模型请求失败",
-                summary: "原因：auth_error。",
-              },
-              {
-                id: "runtime-error-answer",
-                kind: "assistant_markdown",
-                messageId: "assistant-runtime-failure",
-                status: "failed",
-                tone: "error",
                 text: "网页工作台这一轮执行失败，请检查配置或稍后重试。\nauth_error: 认证失败，请检查 provider 凭据",
+                phase: "turn_failed",
+                terminal: true,
+                diagnosticSummary: {
+                  reasonCode: "auth_failed",
+                  reasonSummary: "provider 认证失败，请检查 API Key 或权限",
+                },
               },
             ],
           },
@@ -357,8 +355,10 @@ describe("ConversationView Codex-like transcript adapter integration", () => {
     );
 
     expect(html).toContain('data-codex-transcript-cell-kind="error_notice"');
-    expect(html).toContain('data-codex-transcript-cell-kind="assistant_markdown"');
-    expect(html).toContain("网页工作台这一轮执行失败，请检查配置或稍后重试");
+    expect(html).not.toContain('data-codex-transcript-cell-kind="assistant_markdown"');
+    expect(html.match(/网页工作台这一轮执行失败，请检查配置或稍后重试/g)).toHaveLength(1);
+    expect(html).toContain("诊断详情");
+    expect(html).not.toContain("运行提示");
   });
 });
 
