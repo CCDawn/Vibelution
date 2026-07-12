@@ -9,6 +9,7 @@ import {
   activeTurnProtocolTextLength,
   consolidateSessionTurnItemsV2,
   hasCommittedAssistantProtocolAnswer,
+  hasTerminalCanonicalTurnOutcome,
   hasVisibleActiveTurnProtocolContent,
   resolveAssistantTurnRenderSurface,
 } from "./chatTurnProtocol";
@@ -241,6 +242,9 @@ export function isActiveTurnSettledByDetail(
     && String(message.metadata?.kind ?? "") !== "session_live_overlay"
     && String(message.metadata?.kind ?? "") !== "session_active_turn_layer"
     && messageTurnId(message) === activeTurnId
-    && hasCommittedAssistantProtocolAnswer(message)
+    && (
+      hasCommittedAssistantProtocolAnswer(message)
+      || hasTerminalCanonicalTurnOutcome(message)
+    )
   ));
 }

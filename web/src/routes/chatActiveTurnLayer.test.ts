@@ -433,6 +433,37 @@ describe("chat active turn layer", () => {
     expect(isActiveTurnSettledByDetail(active, detail)).toBe(false);
   });
 
+  it("settles the active layer for a same-turn terminal canonical error", () => {
+    const active = mergeAssistantDeltaIntoActiveTurnLayer(undefined, assistantDelta({ contentDelta: "临时回答" }));
+    const detail = {
+      id: "session-1",
+      messages: [
+        {
+          id: "assistant-error",
+          role: "assistant",
+          content: "",
+          timestamp: "2026-07-13T00:00:00.000Z",
+          metadata: { turnId: "turn-1" },
+          turnItems: [
+            {
+              version: 2,
+              id: "error:0",
+              itemId: "error",
+              type: "error",
+              kind: "error",
+              status: "failed",
+              terminal: true,
+              provisional: false,
+              text: "上游服务暂不可用。",
+            },
+          ],
+        } satisfies ConversationMessage,
+      ],
+    } as SessionDetail;
+
+    expect(isActiveTurnSettledByDetail(active, detail)).toBe(true);
+  });
+
   it("settles the active layer when committed detail has same-turn native assistant markdown answer", () => {
     const active = mergeAssistantDeltaIntoActiveTurnLayer(
       undefined,
