@@ -1790,6 +1790,26 @@ class LLMClient:
             "metadata": metadata or {},
         }
 
+    def effective_route_identity(self) -> tuple[str, ...]:
+        wire_protocol = str(
+            getattr(getattr(self.protocol_route, "wire_protocol", None), "value", "")
+            or getattr(self.protocol_route, "protocol", "")
+            or ""
+        ).strip()
+        return (
+            str(getattr(self.profile, "provider_id", "") or "").strip(),
+            str(getattr(self.provider, "kind", "") or "").strip(),
+            str(getattr(self.provider, "base_url", "") or "").strip().rstrip("/").lower(),
+            str(self.profile_id or "").strip(),
+            str(getattr(self.profile, "model", "") or "").strip(),
+            wire_protocol,
+            str(getattr(self.protocol_route, "adapter_id", "") or "").strip(),
+        )
+
+    def effective_route_id(self) -> str:
+        material = "\x1f".join(self.effective_route_identity()).encode("utf-8")
+        return hashlib.sha256(material).hexdigest()[:16]
+
     def _invoke_payload_once(self, payload: Dict[str, Any]) -> Any:
         _raise_if_llm_cancelled()
         with _llm_provider_proxy_env(self.config, payload.get("base_url")):
