@@ -6,15 +6,18 @@ import {
   canAdvanceProviderWizard,
   canTestProviderModel,
   canUnpinProviderModel,
+  deriveProviderModelActionState,
   deriveProviderRegistryRows,
   dispatchProviderWizardConnectionAction,
   filterAlreadyPinnedModels,
+  filterProviderModels,
   initialProviderQuickSetupState,
   initialProviderWizardState,
   isProviderWizardConnectionLocked,
   providerQuickSetupReducer,
   providerWizardReducer,
   recommendProviderModel,
+  summarizeProviderModels,
 } from "./configProviderLogic";
 
 const providers: ConfigProviderOption[] = [
@@ -331,6 +334,100 @@ describe("configProviderLogic", () => {
     expect(canUnpinProviderModel(provider, missingRemote)).toBe(true);
     expect(canUnpinProviderModel(provider, observed)).toBe(false);
     expect(canUnpinProviderModel({ ...provider, pinnedCount: 0 }, pinned)).toBe(false);
+  });
+
+  it("filters Provider models by normalized search fields without mutating their order", () => {
+    const models = [
+      { ...catalogModel("relay_a/zeta"), upstreamId: "UPSTREAM-Z", label: "Vision Pro", availability: "observed" as const },
+      { ...catalogModel("relay_a/alpha"), upstreamId: "alpha-v1", label: "Text Mini", availability: "pinned" as const },
+      { ...catalogModel("relay_a/beta"), upstreamId: "beta-v1", label: "Embedding", availability: "disabled" as const },
+    ];
+    const snapshot = models.map((model) => model.modelRef);
+
+    expect(filterProviderModels(models, "  vision ", "all").map((model) => model.modelRef)).toEqual([
+      "relay_a/zeta",
+    ]);
+    expect(filterProviderModels(models, "upstream-z", "all").map((model) => model.modelRef)).toEqual([
+      "relay_a/zeta",
+    ]);
+    expect(filterProviderModels(models, "RELAY_A/ALPHA", "all").map((model) => model.modelRef)).toEqual([
+      "relay_a/alpha",
+    ]);
+    expect(filterProviderModels(models, "", "all").map((model) => model.modelRef)).toEqual(snapshot);
+    expect(models.map((model) => model.modelRef)).toEqual(snapshot);
+  });
+
+  it("groups Provider models into pinned, discovered, and unavailable summaries", () => {
+    const models = [
+      { ...catalogModel("relay_a/pinned"), availability: "pinned" as const },
+      { ...catalogModel("relay_a/missing"), availability: "missing_remote" as const },
+      { ...catalogModel("relay_a/observed"), availability: "observed" as const },
+      { ...catalogModel("relay_a/capability"), availability: "capability_unknown" as const },
+      { ...catalogModel("relay_a/protocol"), availability: "protocol_unknown" as const },
+      { ...catalogModel("relay_a/unknown"), availability: "unknown" as const },
+      { ...catalogModel("relay_a/disabled"), availability: "disabled" as const },
+    ];
+
+    expect(filterProviderModels(models, "", "pinned").map((model) => model.modelKey)).toEqual([
+      "pinned",
+      "missing",
+    ]);
+    expect(filterProviderModels(models, "", "discovered").map((model) => model.modelKey)).toEqual([
+      "observed",
+      "capability",
+      "protocol",
+      "unknown",
+    ]);
+    expect(filterProviderModels(models, "", "unavailable").map((model) => model.modelKey)).toEqual([
+      "disabled",
+    ]);
+    expect(summarizeProviderModels(models)).toEqual({
+      total: 7,
+      pinned: 2,
+      discovered: 4,
+      unavailable: 1,
+    });
+  });
+
+  it("derives model actions without presenting inapplicable danger controls", () => {
+    const [provider] = deriveProviderRegistryRows(providers, catalog);
+    const pinned = catalogModel("relay_a/pinned");
+
+    expect(deriveProviderModelActionState(provider, pinned, 0, false)).toEqual({
+      kind: "unpin",
+      label: "取消固定",
+      disabled: false,
+      reason: "",
+    });
+    expect(deriveProviderModelActionState(provider, pinned, 0, true)).toEqual({
+      kind: "unpin",
+      label: "取消固定",
+      disabled: true,
+      reason: "当前配置操作不可用",
+    });
+    expect(deriveProviderModelActionState(provider, pinned, 3, false)).toEqual({
+      kind: "in_use",
+      label: "使用中",
+      referenceCount: 3,
+    });
+    expect(deriveProviderModelActionState(
+      provider,
+      { ...pinned, availability: "observed" },
+      0,
+      false,
+    )).toEqual({ kind: "not_pinned", label: "未固定" });
+    expect(deriveProviderModelActionState(
+      provider,
+      { ...pinned, availability: "unknown" },
+      0,
+      false,
+    )).toEqual({ kind: "not_pinned", label: "未固定" });
+    expect(deriveProviderModelActionState(
+      provider,
+      { ...pinned, availability: "disabled" },
+      0,
+      false,
+    )).toEqual({ kind: "unavailable", label: "不可用" });
   });
 
   it("allows real call tests only after a model is pinned", () => {

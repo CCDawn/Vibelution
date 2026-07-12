@@ -24,6 +24,52 @@ export type ProviderRegistryRow = {
   models: ConfigCatalogModel[];
 };
 
+export type ProviderModelFilter = "all" | "pinned" | "discovered" | "unavailable";
+
+export type ProviderModelActionState =
+  | { kind: "unpin"; label: "取消固定"; disabled: boolean; reason: string }
+  | { kind: "in_use"; label: "使用中"; referenceCount: number }
+  | { kind: "not_pinned"; label: "未固定" }
+  | { kind: "unavailable"; label: "不可用" };
+
+const PROVIDER_MODEL_AVAILABILITY_GROUPS: Record<Exclude<ProviderModelFilter, "all">, ReadonlySet<string>> = {
+  pinned: new Set(["pinned", "missing_remote"]),
+  discovered: new Set(["observed", "capability_unknown", "protocol_unknown", "unknown"]),
+  unavailable: new Set(["disabled"]),
+};
+
+export function filterProviderModels(
+  models: ConfigCatalogModel[],
+  query: string,
+  filter: ProviderModelFilter,
+): ConfigCatalogModel[] {
+  const normalizedQuery = query.trim().toLocaleLowerCase();
+  return models.filter((model) => {
+    if (filter !== "all" && !PROVIDER_MODEL_AVAILABILITY_GROUPS[filter].has(model.availability)) {
+      return false;
+    }
+    if (!normalizedQuery) {
+      return true;
+    }
+    return [model.modelRef, model.upstreamId, model.label]
+      .some((value) => value.toLocaleLowerCase().includes(normalizedQuery));
+  });
+}
+
+export function summarizeProviderModels(models: ConfigCatalogModel[]): {
+  total: number;
+  pinned: number;
+  discovered: number;
+  unavailable: number;
+} {
+  return {
+    total: models.length,
+    pinned: models.filter((model) => PROVIDER_MODEL_AVAILABILITY_GROUPS.pinned.has(model.availability)).length,
+    discovered: models.filter((model) => PROVIDER_MODEL_AVAILABILITY_GROUPS.discovered.has(model.availability)).length,
+    unavailable: models.filter((model) => PROVIDER_MODEL_AVAILABILITY_GROUPS.unavailable.has(model.availability)).length,
+  };
+}
+
 export function deriveProviderRegistryRows(
   providers: ConfigProviderOption[],
   catalog: ConfigModelCatalog,
@@ -311,6 +357,29 @@ export function canAdvanceProviderWizard(state: ProviderWizardState): boolean {
 
 export function canUnpinProviderModel(row: ProviderRegistryRow, model: ConfigCatalogModel): boolean {
   return row.pinnedCount > 0 && (model.availability === "pinned" || model.availability === "missing_remote");
+}
+
+export function deriveProviderModelActionState(
+  row: ProviderRegistryRow,
+  model: ConfigCatalogModel,
+  liveReferenceCount: number,
+  disabled: boolean,
+): ProviderModelActionState {
+  if (model.availability === "disabled") {
+    return { kind: "unavailable", label: "不可用" };
+  }
+  if (!canUnpinProviderModel(row, model)) {
+    return { kind: "not_pinned", label: "未固定" };
+  }
+  if (liveReferenceCount > 0) {
+    return { kind: "in_use", label: "使用中", referenceCount: liveReferenceCount };
+  }
+  return {
+    kind: "unpin",
+    label: "取消固定",
+    disabled,
+    reason: disabled ? "当前配置操作不可用" : "",
+  };
 }
 
 export function canTestProviderModel(model: ConfigCatalogModel): boolean {
