@@ -3815,7 +3815,7 @@ export function ChatCodingRoute() {
     if (!responsiveOverlayPane || typeof window === "undefined") {
       return;
     }
-    const handleEscape = (event: KeyboardEvent) => {
+    const handleEscape = (event: globalThis.KeyboardEvent) => {
       if (event.key !== "Escape") {
         return;
       }
