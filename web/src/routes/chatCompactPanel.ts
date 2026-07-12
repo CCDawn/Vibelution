@@ -4,6 +4,26 @@ export type CompactPanelRow = {
   title?: string;
 };
 
+export type ChatResponsiveLayoutMode = "wide" | "compact" | "overlay" | "mobile";
+
+export type ChatResponsiveLayout = {
+  mode: ChatResponsiveLayoutMode;
+  leftVisible: boolean;
+  rightVisible: boolean;
+};
+
+export function resolveChatResponsiveLayout(width: number): ChatResponsiveLayout {
+  if (width < 640) return { mode: "mobile", leftVisible: false, rightVisible: false };
+  if (width < 960) return { mode: "overlay", leftVisible: false, rightVisible: false };
+  if (width < 1280) return { mode: "compact", leftVisible: true, rightVisible: false };
+  return { mode: "wide", leftVisible: true, rightVisible: false };
+}
+
+export function resolveChatUserDisplayName(candidate: string | null | undefined) {
+  const normalized = String(candidate ?? "").trim();
+  return !normalized || /^\d+$/.test(normalized) ? "操作者" : normalized;
+}
+
 const PET_AVATAR_SYMBOLS: Record<string, string> = {
   lobster: "LOB",
   shrimp: "SHR",

@@ -560,18 +560,15 @@ describe("AppShell layout contract", () => {
     expect(styles.topClock).toBeTypeOf("string");
     expect(styles.utilityTriggerLabel).toBeTypeOf("string");
     expect(styles.statusBadgeLabel).toBeTypeOf("string");
-    expect(shellStyles).toContain("@media (max-width: 520px)");
-
-    const narrowShellStyles = shellStyles.slice(shellStyles.indexOf("@media (max-width: 520px)"));
-    expect(narrowShellStyles).toContain("grid-template-columns: minmax(0, 1fr) auto");
-    expect(narrowShellStyles).toContain(".nav {");
-    expect(narrowShellStyles).toContain("justify-self: stretch");
-    expect(narrowShellStyles).toContain("width: 100%");
-    expect(narrowShellStyles).toContain(".navLink {");
-    expect(narrowShellStyles).toContain("flex: 1 1 0");
-    expect(narrowShellStyles).toContain("min-width: 0");
-    expect(narrowShellStyles).toContain("overflow: hidden");
-    expect(narrowShellStyles).toContain("text-overflow: ellipsis");
+    expect(styles.nav).toContain("max-[639px]:hidden");
+    expect(styles.mobileNav).toContain("max-[639px]:flex");
+    expect(styles.mobileRouteMenu).toContain("max-[639px]:grid");
+    expect(shellSource).toContain("activePrimaryRouteLabel");
+    expect(shellSource).toContain('data-shell-group="mobile-navigation"');
+    expect(shellSource).toContain('id="shell-mobile-route-menu"');
+    expect(shellSource).toContain('aria-controls="shell-mobile-route-menu"');
+    expect(shellSource).toContain("mobileLinkClassName");
+    expect(shellSource).toContain("closeUtilityMenu");
   });
 
   it("themes the managed app window chrome to match the light-first shell", () => {
