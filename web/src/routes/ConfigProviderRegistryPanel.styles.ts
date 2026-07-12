@@ -40,6 +40,10 @@ const styles = {
   capabilityList: "vui-routes-configproviderregistrypanel capabilityList flex min-w-0 flex-wrap gap-1",
   capabilityUnknown: "vui-routes-configproviderregistrypanel capabilityUnknown text-[var(--vui-font-xs)] text-vui-fg-tertiary",
   actions: "vui-routes-configproviderregistrypanel actions flex min-w-0 flex-wrap items-center gap-1.5",
+  actionFeedback:
+    "vui-routes-configproviderregistrypanel actionFeedback min-w-0 rounded-md border border-vui-border-subtle bg-vui-surface-row/70 px-2 py-1.5 text-[var(--vui-font-sm)] text-vui-fg-secondary [overflow-wrap:anywhere]",
+  actionFeedbackError:
+    "vui-routes-configproviderregistrypanel actionFeedbackError min-w-0 rounded-md border border-[color-mix(in_srgb,var(--state-error)_38%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--state-error)_8%,var(--vui-surface-row))] px-2 py-1.5 text-[var(--vui-font-sm)] text-[var(--state-error)] [overflow-wrap:anywhere]",
   mobileActionGroup:
     "vui-routes-configproviderregistrypanel mobileActionGroup grid min-w-0 [grid-template-columns:repeat(auto-fit,minmax(max-content,1fr))] gap-1.5 max-[390px]:[grid-template-columns:minmax(0,1fr)] max-[390px]:[&_[data-vui=button]]:!w-full",
   critical:

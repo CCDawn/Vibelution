@@ -77,7 +77,11 @@ import { ConfigHealthDiagnosticsPanel, type ConfigHealthDiagnosticsPanelCopy } f
 import { ConfigModelMigrationPanel } from "./ConfigModelMigrationPanel";
 import { ConfigOverviewPanel } from "./ConfigOverviewPanel";
 import { ConfigQuickSetupPanel } from "./ConfigQuickSetupPanel";
-import { ConfigProviderRegistryPanel, type ConfigProviderRegistryTab } from "./ConfigProviderRegistryPanel";
+import {
+  ConfigProviderRegistryPanel,
+  type ConfigProviderRegistryTab,
+  type ProviderActionFeedback,
+} from "./ConfigProviderRegistryPanel";
 import { ConfigProviderWizard } from "./ConfigProviderWizard";
 import { ConfigRuntimePanel } from "./ConfigRuntimePanel";
 import { ConfigWorkspacePlaceholderPanel } from "./ConfigWorkspacePlaceholderPanel";
@@ -2137,6 +2141,7 @@ export function ConfigRoute() {
   const [providerCredentialEditId, setProviderCredentialEditId] = useState("");
   const [providerCredentialValue, setProviderCredentialValue] = useState("");
   const [providerActionError, setProviderActionError] = useState("");
+  const [providerActionFeedback, setProviderActionFeedback] = useState<ProviderActionFeedback>(null);
   const [modelEditorExpanded, setModelEditorExpanded] = useState(false);
   const [sidebarIndexCollapsed, setSidebarIndexCollapsed] = useState(() => readStoredFlag(SIDEBAR_INDEX_COLLAPSED_STORAGE_KEY) ?? false);
   const [activeSectionId, setActiveSectionId] = useState(() => searchParams.get("section") ?? "");
@@ -2492,16 +2497,24 @@ export function ConfigRoute() {
   const handleDiscoverProvider = useCallback(async (providerId: string, credentialValue = ""): Promise<ConfigCatalogModel[]> => {
     setBusyAction("正在发现 Provider 模型…");
     setProviderActionError("");
+    setProviderActionFeedback({ kind: "discover", providerId, phase: "busy", message: "正在发现模型…" });
     try {
       const response = await requestJson<ConfigWorkspace>(
         `/api/config/draft/providers/${encodeURIComponent(providerId)}/discover`,
         buildProviderDraftRequest({ providerId, credentialValue }),
       );
       syncWorkspace(response, "success", { resetBase: false });
-      return Object.values(response.modelCatalog.providers[providerId]?.models ?? {});
+      const models = Object.values(response.modelCatalog.providers[providerId]?.models ?? {});
+      setProviderActionFeedback({
+        kind: "discover",
+        providerId,
+        phase: "success",
+        message: models.length > 0 ? `发现 ${models.length} 个模型` : "目录已刷新",
+      });
+      return models;
     } catch (error) {
       const message = readableErrorMessage(error).slice(0, 480);
-      setProviderActionError(message);
+      setProviderActionFeedback({ kind: "discover", providerId, phase: "error", message });
       markError(error);
       throw error;
     } finally {
@@ -2754,6 +2767,7 @@ export function ConfigRoute() {
     if (!credentialProvider || credentialProvider.providerId !== providerId || credentialProvider.credentialState === "not_required") return;
     setBusyAction("正在更新 Provider API Key 草稿…");
     setProviderActionError("");
+    setProviderActionFeedback({ kind: "credential", providerId, phase: "busy", message: "正在保存 API Key…" });
     try {
       const provider = asRecord(asRecord(asRecord(requireDraft().llm).providers)[providerId]);
       const response = await requestJson<ConfigWorkspace>(
@@ -2764,8 +2778,10 @@ export function ConfigRoute() {
       syncWorkspace(response, "success", { resetBase: false });
       setProviderCredentialEditId("");
       setProviderCredentialValue("");
+      setProviderActionFeedback({ kind: "credential", providerId, phase: "success", message: "API Key 已更新到草稿" });
     } catch (error) {
-      setProviderActionError(readableErrorMessage(error).slice(0, 480));
+      const message = readableErrorMessage(error).slice(0, 480);
+      setProviderActionFeedback({ kind: "credential", providerId, phase: "error", message });
       markError(error);
     } finally {
       setBusyAction("");
@@ -2777,18 +2793,28 @@ export function ConfigRoute() {
     setRouteEditProviderId(providerId);
     setRouteEditProvider(provider);
     setRoutePreview(null);
+    setProviderActionFeedback(null);
   }
 
   async function handlePreviewProviderRoute(providerId: string, provider: Record<string, unknown>) {
     setBusyAction("正在预览路由影响…");
+    setProviderActionError("");
+    setProviderActionFeedback({ kind: "route", providerId, phase: "busy", message: "正在生成路由预览…" });
     try {
       const preview = await requestJson<Omit<ProviderRoutePreview, "proposedProvider">>(
         `/api/config/draft/providers/${encodeURIComponent(providerId)}/route-preview`,
         buildProviderDraftRequest({ providerId, provider }),
       );
       setRoutePreview({ ...preview, proposedProvider: provider });
+      setProviderActionFeedback({
+        kind: "route",
+        providerId,
+        phase: "success",
+        message: preview.routeChanged ? "路由预览已生成" : "当前路由没有变化",
+      });
     } catch (error) {
-      setProviderActionError(readableErrorMessage(error).slice(0, 480));
+      const message = readableErrorMessage(error).slice(0, 480);
+      setProviderActionFeedback({ kind: "route", providerId, phase: "error", message });
       markError(error);
     } finally {
       setBusyAction("");
@@ -2797,7 +2823,10 @@ export function ConfigRoute() {
 
   async function handleApplyProviderRoutePreview() {
     if (!routePreview?.routeChanged || !routePreview.routePreviewToken) return;
+    const providerId = routePreview.providerId;
     setBusyAction("正在更新 Provider 路由…");
+    setProviderActionError("");
+    setProviderActionFeedback({ kind: "route", providerId, phase: "busy", message: "正在更新 Provider 路由…" });
     try {
       const response = await requestJson<ConfigWorkspace>(
         `/api/config/draft/providers/${encodeURIComponent(routePreview.providerId)}`,
@@ -2812,8 +2841,10 @@ export function ConfigRoute() {
       setRoutePreview(null);
       setRouteEditProviderId("");
       setRouteEditProvider({});
+      setProviderActionFeedback({ kind: "route", providerId, phase: "success", message: "Provider 路由已更新到草稿" });
     } catch (error) {
-      setProviderActionError(readableErrorMessage(error).slice(0, 480));
+      const message = readableErrorMessage(error).slice(0, 480);
+      setProviderActionFeedback({ kind: "route", providerId, phase: "error", message });
       markError(error);
     } finally {
       setBusyAction("");
@@ -3807,10 +3838,17 @@ export function ConfigRoute() {
                   selectedProviderId={selectedProviderId}
                   selectedTab={selectedProviderTab}
                   disabled={structuredActionsDisabled || Boolean(busyAction)}
+                  activeCredentialProviderId={providerCredentialEditId}
+                  activeRouteProviderId={routeEditProviderId}
+                  actionFeedback={providerActionFeedback}
                   liveReferenceCountByModelRef={liveReferenceCountByModelRef}
                   onSelectProvider={(providerId) => {
                     setProviderCredentialEditId("");
                     setProviderCredentialValue("");
+                    setRouteEditProviderId("");
+                    setRouteEditProvider({});
+                    setRoutePreview(null);
+                    setProviderActionFeedback(null);
                     setSelectedProviderId(providerId);
                   }}
                   onSelectTab={setSelectedProviderTab}
@@ -3820,8 +3858,14 @@ export function ConfigRoute() {
                   onEditCredential={(providerId) => {
                     setProviderCredentialEditId(providerId);
                     setProviderCredentialValue("");
+                    setRouteEditProviderId("");
+                    setRouteEditProvider({});
+                    setRoutePreview(null);
+                    setProviderActionFeedback(null);
                   }}
                   onEditRoute={(providerId) => {
+                    setProviderCredentialEditId("");
+                    setProviderCredentialValue("");
                     handleBeginProviderRouteEdit(providerId);
                   }}
                   onUnpin={(modelRef) => {
@@ -3845,6 +3889,7 @@ export function ConfigRoute() {
                             onPress={() => {
                               setProviderCredentialEditId("");
                               setProviderCredentialValue("");
+                              setProviderActionFeedback(null);
                             }}
                           >
                             取消
@@ -3859,7 +3904,9 @@ export function ConfigRoute() {
                               void handleUpdateProviderCredential(providerCredentialEditId);
                             }}
                           >
-                            保存到草稿
+                            {providerActionFeedback?.kind === "credential" && providerActionFeedback.phase === "busy"
+                              ? "保存中…"
+                              : "保存到草稿"}
                           </VButton>
                         </VActionGroup>
                       )}
@@ -3889,6 +3936,8 @@ export function ConfigRoute() {
                           onPress={() => {
                             setRouteEditProviderId("");
                             setRouteEditProvider({});
+                            setRoutePreview(null);
+                            setProviderActionFeedback(null);
                           }}
                         >
                           取消
@@ -3900,7 +3949,9 @@ export function ConfigRoute() {
                             void handlePreviewProviderRoute(routeEditProviderId, routeEditProvider);
                           }}
                         >
-                          预览替换影响
+                          {providerActionFeedback?.kind === "route" && providerActionFeedback.phase === "busy"
+                            ? "生成预览中…"
+                            : "预览替换影响"}
                         </VButton>
                       </VActionGroup>
                     )}
@@ -3959,7 +4010,10 @@ export function ConfigRoute() {
                     }))}
                     actions={(
                       <VActionGroup ariaLabel="Provider 路由替换确认">
-                        <VButton onPress={() => setRoutePreview(null)}>取消</VButton>
+                        <VButton onPress={() => {
+                          setRoutePreview(null);
+                          setProviderActionFeedback(null);
+                        }}>取消</VButton>
                         <VButton
                           variant="danger"
                           isDisabled={!routePreview.routeChanged || !routePreview.routePreviewToken || Boolean(busyAction)}
@@ -3967,7 +4021,9 @@ export function ConfigRoute() {
                             void handleApplyProviderRoutePreview();
                           }}
                         >
-                          使用 preview token 更新
+                          {providerActionFeedback?.kind === "route" && providerActionFeedback.phase === "busy"
+                            ? "更新中…"
+                            : "使用 preview token 更新"}
                         </VButton>
                       </VActionGroup>
                     )}
