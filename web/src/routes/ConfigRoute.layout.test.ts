@@ -22,6 +22,7 @@ import providerPanelSource from "./ConfigProviderRegistryPanel.tsx?raw";
 import providerPanelStylesSource from "./ConfigProviderRegistryPanel.styles.ts?raw";
 import providerPanelStyles from "./ConfigProviderRegistryPanel.styles";
 import providerLogicSource from "./configProviderLogic.ts?raw";
+import quickSetupSource from "./ConfigQuickSetupPanel.tsx?raw";
 import wizardSource from "./ConfigProviderWizard.tsx?raw";
 import styles from "./ConfigRoute.styles";
 import stylesSource from "./ConfigRoute.styles.ts?raw";
@@ -98,6 +99,37 @@ describe("ConfigRoute layout contract", () => {
     expect(wizardSource).toContain('"discovery"');
     expect(wizardSource).toContain('"pin"');
     expect(wizardSource).toContain("canAdvanceProviderWizard");
+  });
+
+  it("makes one-page quick setup the default Provider workspace without mounting management beside it", () => {
+    expect(routeSource).toContain("ConfigQuickSetupPanel");
+    expect(routeSource).toContain('type ProviderWorkspaceMode = "quick" | "manage" | "advanced"');
+    expect(routeSource).toContain('useState<ProviderWorkspaceMode>("quick")');
+    expect(routeSource).toContain("handlePrepareProviderQuickSetup");
+    expect(routeSource).toContain("handleConfirmProviderQuickSetup");
+    expect(routeSource).toContain("recommendProviderModel");
+    expect(routeSource).toContain('providerWorkspaceMode === "quick"');
+    expect(routeSource).toContain('providerWorkspaceMode === "manage"');
+    expect(routeSource).toContain('providerWorkspaceMode === "advanced"');
+    expect(quickSetupSource).toContain("检测并生成配置");
+    expect(quickSetupSource).toContain("确认并保存");
+  });
+
+  it("keeps formal config apply outside Provider detection orchestration", () => {
+    const detectionBody = routeSource.slice(
+      routeSource.indexOf("async function handlePrepareProviderQuickSetup"),
+      routeSource.indexOf("async function handleConfirmProviderQuickSetup"),
+    );
+    const confirmationBody = routeSource.slice(
+      routeSource.indexOf("async function handleConfirmProviderQuickSetup"),
+      routeSource.indexOf("async function handleUnpinProviderModel"),
+    );
+
+    expect(detectionBody).toContain("handleCreateProvider");
+    expect(detectionBody).toContain("handleDiscoverProvider");
+    expect(detectionBody).not.toContain("handleApply(");
+    expect(confirmationBody).toContain("handlePinProviderModels");
+    expect(confirmationBody).toContain("handleApply(");
   });
 
   it("refreshes only ttl-expired providers when the model surface opens", () => {

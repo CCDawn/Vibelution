@@ -76,15 +76,28 @@ import { ConfigDraftPanel } from "./ConfigDraftPanel";
 import { ConfigHealthDiagnosticsPanel, type ConfigHealthDiagnosticsPanelCopy } from "./ConfigHealthDiagnosticsPanel";
 import { ConfigModelMigrationPanel } from "./ConfigModelMigrationPanel";
 import { ConfigOverviewPanel } from "./ConfigOverviewPanel";
+import { ConfigQuickSetupPanel } from "./ConfigQuickSetupPanel";
 import { ConfigProviderRegistryPanel, type ConfigProviderRegistryTab } from "./ConfigProviderRegistryPanel";
 import { ConfigProviderWizard } from "./ConfigProviderWizard";
 import { ConfigRuntimePanel } from "./ConfigRuntimePanel";
 import { ConfigWorkspacePlaceholderPanel } from "./ConfigWorkspacePlaceholderPanel";
-import { buildProviderWizardDraft, deriveProviderRegistryRows, filterAlreadyPinnedModels, initialProviderWizardState, providerWizardReducer } from "./configProviderLogic";
+import {
+  buildProviderWizardDraft,
+  deriveProviderRegistryRows,
+  filterAlreadyPinnedModels,
+  initialProviderQuickSetupState,
+  initialProviderWizardState,
+  providerQuickSetupReducer,
+  providerWizardReducer,
+  recommendProviderModel,
+  type ProviderQuickSetupErrorKind,
+  type ProviderWizardState,
+} from "./configProviderLogic";
 import styles from "./ConfigRoute.styles";
 
 export type ConfigLanguage = "zh" | "en";
 type NoticeTone = "neutral" | "success" | "error";
+type ProviderWorkspaceMode = "quick" | "manage" | "advanced";
 
 type ProviderRouteImpact = {
   modelRef?: string;
@@ -2108,6 +2121,13 @@ export function ConfigRoute() {
   const [selectedProviderVendorId, setSelectedProviderVendorId] = useState("");
   const [selectedProviderId, setSelectedProviderId] = useState("");
   const [selectedProviderTab, setSelectedProviderTab] = useState<ConfigProviderRegistryTab>("connection");
+  const [providerWorkspaceMode, setProviderWorkspaceMode] = useState<ProviderWorkspaceMode>("quick");
+  const [providerQuickSetupState, dispatchProviderQuickSetup] = useReducer(
+    providerQuickSetupReducer,
+    undefined,
+    initialProviderQuickSetupState,
+  );
+  const [providerQuickCredential, setProviderQuickCredential] = useState("");
   const [providerWizardState, dispatchProviderWizard] = useReducer(providerWizardReducer, undefined, initialProviderWizardState);
   const [migrationPreview, setMigrationPreview] = useState<ConfigMigrationPreview | null>(null);
   const [routePreview, setRoutePreview] = useState<ProviderRoutePreview | null>(null);
@@ -2578,6 +2598,85 @@ export function ConfigRoute() {
       throw error;
     } finally {
       setBusyAction("");
+    }
+  }
+
+  function quickSetupErrorKind(error: unknown): ProviderQuickSetupErrorKind {
+    const message = readableErrorMessage(error).toLowerCase();
+    if (message.includes("auth") || message.includes("credential") || message.includes("api key") || message.includes("401") || message.includes("403")) {
+      return "auth";
+    }
+    if (message.includes("endpoint") || message.includes("base_url") || message.includes("target") || message.includes("connect")) {
+      return "endpoint";
+    }
+    return "discovery";
+  }
+
+  async function handlePrepareProviderQuickSetup(input: { provider: ProviderWizardState; credentialValue: string }) {
+    dispatchProviderQuickSetup({ type: "start_check" });
+    try {
+      let provider = input.provider;
+      if (!provider.providerId) {
+        const template = providerPresetOptions.find((item) => item.provider_preset_id === provider.templateId);
+        const suggestedProviderId = await handleSuggestProviderId(buildProviderWizardDraft(provider, template?.provider));
+        provider = { ...provider, providerId: suggestedProviderId };
+        dispatchProviderQuickSetup({ type: "set_provider", provider });
+        dispatchProviderQuickSetup({ type: "start_check" });
+      }
+      await handleCreateProvider(provider, input.credentialValue);
+      const models = await handleDiscoverProvider(provider.providerId, input.credentialValue);
+      const template = providerPresetOptions.find((item) => item.provider_preset_id === provider.templateId);
+      const defaultModel = asRecord(template?.default_model);
+      const templateDefaultModelRef = getString(defaultModel.model_ref)
+        || getString(defaultModel.modelRef)
+        || (getString(defaultModel.model) ? `${provider.providerId}/${getString(defaultModel.model)}` : "");
+      const recommendation = recommendProviderModel(models, {
+        templateDefaultModelRef,
+        allowedProtocols: provider.allowedProtocols,
+      });
+      dispatchProviderQuickSetup({
+        type: "check_succeeded",
+        models,
+        selectedModelRef: recommendation.modelRef,
+        recommendationReason: recommendation.reason,
+      });
+      setProviderQuickCredential("");
+    } catch (error) {
+      dispatchProviderQuickSetup({
+        type: "check_failed",
+        errorKind: quickSetupErrorKind(error),
+        errorMessage: readableErrorMessage(error).slice(0, 320),
+      });
+    }
+  }
+
+  async function handleConfirmProviderQuickSetup() {
+    const { provider, selectedModelRef, discoveredModels: quickModels } = providerQuickSetupState;
+    const selectedModel = quickModels.find((model) => model.modelRef === selectedModelRef);
+    if (providerQuickSetupState.phase !== "review" || !selectedModel || !selectedModelRef.startsWith(`${provider.providerId}/`)) {
+      return;
+    }
+    dispatchProviderQuickSetup({ type: "start_save" });
+    try {
+      await handlePinProviderModels(provider.providerId, [selectedModel]);
+      const applied = await handleApply("正在应用快速配置…");
+      if (!applied) {
+        dispatchProviderQuickSetup({
+          type: "save_failed",
+          errorKind: "partial_save",
+          errorMessage: "Provider 草稿已保留，但正式配置尚未应用。请重试确认保存。",
+        });
+        return;
+      }
+      await queryClient.invalidateQueries({ queryKey: queryKeys.configWorkspace() });
+      setProviderQuickCredential("");
+      dispatchProviderQuickSetup({ type: "save_succeeded" });
+    } catch (error) {
+      dispatchProviderQuickSetup({
+        type: "save_failed",
+        errorKind: "partial_save",
+        errorMessage: readableErrorMessage(error).slice(0, 320),
+      });
     }
   }
 
@@ -3627,6 +3726,45 @@ export function ConfigRoute() {
           <div className={styles.providerModelsLayout}>
             {workspace.schemaVersion === 2 ? (
               <>
+                <VSection
+                  title="模型连接"
+                  eyebrow="Provider workspace"
+                  actions={(
+                    <VActionGroup ariaLabel="Provider 工作区模式">
+                      <VButton variant={providerWorkspaceMode === "quick" ? "primary" : "ghost"} onPress={() => setProviderWorkspaceMode("quick")}>快速配置</VButton>
+                      <VButton variant={providerWorkspaceMode === "manage" ? "primary" : "ghost"} onPress={() => setProviderWorkspaceMode("manage")}>管理已有连接</VButton>
+                      <VButton variant={providerWorkspaceMode === "advanced" ? "primary" : "ghost"} onPress={() => setProviderWorkspaceMode("advanced")}>高级设置</VButton>
+                    </VActionGroup>
+                  )}
+                >
+                  <p className={styles.helperText}>快速配置只需要服务商和凭据；管理与高级参数按需进入。</p>
+                </VSection>
+                {providerWorkspaceMode === "quick" ? (
+                  <ConfigQuickSetupPanel
+                    state={providerQuickSetupState}
+                    templates={providerPresetOptions}
+                    credentialValue={providerQuickCredential}
+                    disabled={structuredActionsDisabled || Boolean(busyAction)}
+                    onCredentialChange={setProviderQuickCredential}
+                    onProviderChange={(provider) => {
+                      setProviderQuickCredential("");
+                      dispatchProviderQuickSetup({ type: "set_provider", provider });
+                    }}
+                    onDetect={(input) => {
+                      void handlePrepareProviderQuickSetup(input);
+                    }}
+                    onModelChange={(modelRef) => dispatchProviderQuickSetup({ type: "select_model", modelRef })}
+                    onConfirm={() => {
+                      void handleConfirmProviderQuickSetup();
+                    }}
+                    onReset={() => {
+                      setProviderQuickCredential("");
+                      dispatchProviderQuickSetup({ type: "reset" });
+                    }}
+                  />
+                ) : null}
+                {providerWorkspaceMode === "manage" ? (
+                  <>
                 <ConfigProviderRegistryPanel
                   rows={providerRows}
                   selectedProviderId={selectedProviderId}
@@ -3797,6 +3935,9 @@ export function ConfigRoute() {
                     后端 preview token 是唯一授权；本地 checkbox 或布尔值不能替代。受影响 canonical modelRef 与 live-reference counts 如上。
                   </VStateSurface>
                 ) : null}
+                  </>
+                ) : null}
+                {providerWorkspaceMode === "advanced" ? (
                 <ConfigProviderWizard
                   state={providerWizardState}
                   templates={providerPresetOptions}
@@ -3808,6 +3949,7 @@ export function ConfigRoute() {
                   onDiscover={handleDiscoverProvider}
                   onPin={handlePinProviderModels}
                 />
+                ) : null}
                 <ConfigModelMigrationPanel
                   schemaVersion={2}
                   preview={null}
