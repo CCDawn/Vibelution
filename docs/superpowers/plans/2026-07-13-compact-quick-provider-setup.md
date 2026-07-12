@@ -314,7 +314,7 @@ Expected: Vitest exits 0; TypeScript and Vite build exit 0. Record bundle-budget
 Run:
 
 ```powershell
-& 'C:\Users\17533\Desktop\Vibelution\.venv\Scripts\python.exe' scripts\local_quality_gate.py closeout --base main --claim-id claim-4572a40259e1
+& 'C:\Users\17533\Desktop\Vibelution\.venv\Scripts\python.exe' scripts\local_quality_gate.py closeout --base main --claim-id claim-0b5c6f942fee
 ```
 
 Expected: selected web tests/build pass and merge preflight reports the task branch based on the validated local `main`.
@@ -367,7 +367,7 @@ Run the memory sync against root local `main`, deriving the freshly verified mer
 $mergeSha = git -C 'C:\Users\17533\Desktop\Vibelution' rev-parse HEAD
 $memoryUpdate = "commit $mergeSha；focused Vitest 与 web build 通过；Launcher 已刷新；1280/1600/1920 双主题视觉验收通过。"
 & 'C:\Users\17533\Desktop\Vibelution\.venv\Scripts\python.exe' 'C:\Users\17533\.codex\skills\ccdawn-dawn-agent-html-memory\scripts\sync_project_memory.py' 'C:\Users\17533\Desktop\Vibelution' --lane web-workbench-surface --focus '快速配置紧凑单页已合入本地 main' --update $memoryUpdate
-& 'C:\Users\17533\Desktop\Vibelution\.venv\Scripts\python.exe' 'C:\Users\17533\.codex\skills\ccdawn-dawn-agent-html-memory\scripts\agent_work_guard.py' 'C:\Users\17533\Desktop\Vibelution' release --claim-id claim-4572a40259e1 --status completed --reason '紧凑快速配置已合入并完成测试、构建、刷新和视觉验收'
+& 'C:\Users\17533\Desktop\Vibelution\.venv\Scripts\python.exe' 'C:\Users\17533\.codex\skills\ccdawn-dawn-agent-html-memory\scripts\agent_work_guard.py' 'C:\Users\17533\Desktop\Vibelution' release --claim-id claim-0b5c6f942fee --status completed --reason '紧凑快速配置已合入并完成测试、构建、刷新和视觉验收'
 ```
 
 Release the active claim as `completed` only after these checks pass.
