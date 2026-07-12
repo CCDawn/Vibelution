@@ -249,6 +249,8 @@ describe("ConversationView native Codex transcript surface", () => {
     expect(html).toContain('data-codex-tool-detail="true"');
     expect(html).not.toContain('open=""');
     expect(html).not.toContain("legacy duplicate final");
+    expect(html).toContain("codexTranscriptCommentaryCell");
+    expect(html).toContain("codexTranscriptFinalCell");
   });
 
   it("renders native transcript as the primary assistant surface without duplicating legacy process or response", () => {

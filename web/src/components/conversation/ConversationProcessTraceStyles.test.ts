@@ -79,4 +79,16 @@ describe("conversation process trace styles", () => {
     expect(styles.timelineCellPreview).not.toContain("text-[var(--fg-tertiary)]");
     expect(styles.timelineCellPreview).not.toContain("text-[var(--vui-font-xs)]");
   });
+
+  it("gives final answers stronger hierarchy than commentary and completed tools", () => {
+    expect(styles.codexTranscriptCommentaryCell).toContain("text-[var(--fg-secondary)]");
+    expect(styles.codexTranscriptCommentaryCell).toContain("bg-transparent");
+    expect(styles.codexTranscriptFinalCell).toContain("leading-[var(--vui-line-readable)]");
+    expect(styles.codexTranscriptFinalCell).toContain("text-[var(--fg-primary)]");
+    expect(styles.codexTranscriptFinalCell).not.toContain("bg-[var(--state-error)]");
+    expect(styles.codexTranscriptErrorCell).toContain("border-l");
+    expect(styles.codexTranscriptProcessCell).toContain("border-0");
+    expect(styles.codexTranscriptSurface).toContain("max-w-[880px]");
+    expect(styles.codexTranscriptSurface).toContain("mx-auto");
+  });
 });

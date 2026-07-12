@@ -34,6 +34,10 @@ export function AgentMessageTurnView({
   children,
 }: AgentMessageTurnViewProps) {
   const speakerId = `agent-turn-speaker-${messageKey}`;
+  const visibleSpeakerLabel = typeof speakerLabel === "string"
+    ? (/^\d+$/.test(speakerLabel.trim()) ? "" : speakerLabel.trim())
+    : speakerLabel;
+  const hasIdentity = Boolean(visibleSpeakerLabel || identityAccessory);
   return (
     <article
       className={className}
@@ -50,12 +54,20 @@ export function AgentMessageTurnView({
       <div className={styles.turnContent}>
         {compactHeader ? null : (
           <div className={styles.turnMeta}>
-            <div className={styles.turnMetaIdentity}>
-              <span id={speakerId} className={styles.turnSpeaker} title={typeof speakerLabel === "string" ? speakerLabel : undefined}>
-                {speakerLabel}
-              </span>
-              {identityAccessory}
-            </div>
+            {hasIdentity ? (
+              <div className={styles.turnMetaIdentity}>
+                {visibleSpeakerLabel ? (
+                  <span
+                    id={speakerId}
+                    className={styles.turnSpeaker}
+                    title={typeof visibleSpeakerLabel === "string" ? visibleSpeakerLabel : undefined}
+                  >
+                    {visibleSpeakerLabel}
+                  </span>
+                ) : null}
+                {identityAccessory}
+              </div>
+            ) : null}
             <span className={styles.turnMetaActions}>
               {metaActions}
             </span>
