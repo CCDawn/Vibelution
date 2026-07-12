@@ -478,17 +478,15 @@ describe("ChatCodingRoute layout contract", () => {
     );
   });
 
-  it("uses compact desktop mode below 1280px and auto-collapses only the status rail", () => {
-    expect(routeSource).toContain('const CHAT_COMPACT_DESKTOP_MEDIA_QUERY = "(max-width: 1279px)";');
-    expect(routeSource).toContain("compactDesktopLayout");
-    expect(routeSource).toContain("compactDesktopAutoCollapseRef");
-    expect(routeSource).toContain("window.matchMedia(CHAT_COMPACT_DESKTOP_MEDIA_QUERY)");
-    expect(routeSource).toContain("setRightPaneCollapsed(true)");
-    expect(routeSource).not.toContain("setLeftRailCollapsed(true)");
+  it("derives responsive layout from the workbench ResizeObserver without overwriting pane preferences", () => {
+    expect(routeSource).toContain("resolveChatResponsiveLayout");
+    expect(routeSource).toContain("new ResizeObserver(syncResponsiveLayout)");
+    expect(routeSource).toContain("data-chat-responsive-mode={responsiveLayout.mode}");
+    expect(routeSource).not.toContain("CHAT_COMPACT_DESKTOP_MEDIA_QUERY");
+    expect(routeSource).not.toContain("compactDesktopAutoCollapseRef");
+    expect(routeSource).not.toContain("setRightPaneCollapsed(true)");
     expect(routeSource).toContain("styles.layoutCompactDesktop");
-    expect(routeStyles.layoutCompactDesktop).toContain("minmax(520px,1fr)");
-    expect(routeStyles.layoutCompactDesktop).toContain("var(--chat-left-pane-width,300px)");
-    expect(routeStyles.layoutCompactDesktop).toContain("var(--chat-right-pane-width,0px)");
+    expect(routeSource).toContain("styles.layoutOverlay");
   });
 
   it("aligns side-pane gutters while preserving overlay resize handles", () => {
@@ -499,14 +497,16 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.layout).toContain(
       "grid-cols-[var(--chat-left-pane-width,300px)_var(--chat-pane-gutter)_minmax(0,1fr)_var(--chat-pane-gutter)_var(--chat-right-pane-width,220px)]",
     );
-    expect(routeStyles.layout).toContain(
-      "max-[1100px]:grid-cols-[var(--chat-left-pane-width,300px)_var(--chat-pane-gutter)_minmax(0,1fr)_var(--chat-pane-gutter)_var(--chat-right-pane-width,220px)]",
-    );
     expect(routeStyles.layoutCompactDesktop).toContain(
-      "!grid-cols-[var(--chat-left-pane-width,300px)_var(--chat-pane-gutter)_minmax(520px,1fr)_var(--chat-pane-gutter)_minmax(0,var(--chat-right-pane-width,0px))]",
+      "grid-cols-[minmax(220px,var(--chat-left-pane-width,248px))_1px_minmax(0,1fr)]",
     );
+    expect(routeStyles.layoutOverlay).toContain("grid-cols-[minmax(0,1fr)]");
+    expect(routeStyles.overlayPane).toContain("fixed");
+    expect(routeStyles.overlayPane).toContain("w-[min(86vw,320px)]");
+    expect(routeStyles.overlayBackdrop).toContain("fixed");
     expect(routeStyles.layout).not.toContain("_0px_minmax(0,1fr)_0px_");
-    expect(routeStyles.layoutCompactDesktop).not.toContain("_0px_minmax(520px,1fr)_0px_");
+    expect(routeStyles.layoutCompactDesktop).not.toContain("minmax(420px");
+    expect(routeStyles.layoutCompactDesktop).not.toContain("minmax(260px");
     expect(routeStyles.layout).not.toContain("_8px_");
     expect(routeStyles.layoutCompactDesktop).not.toContain("_8px_");
     expect(routeStyles.resizeHandle).toContain("h-full");
@@ -566,9 +566,9 @@ describe("ChatCodingRoute layout contract", () => {
   });
 
   it("places the conversation index on the left and the status rail on the right", () => {
-    const statusAsideStart = routeSource.indexOf("<aside className={statusRailCollapsed");
-    const centerPaneStart = routeSource.indexOf("<section className={styles.centerPane}");
-    const conversationAsideStart = routeSource.indexOf("<aside className={conversationIndexCollapsed");
+    const statusAsideStart = routeSource.indexOf('id="chat-status-pane"');
+    const centerPaneStart = routeSource.indexOf("<section className={centerPaneClassName}");
+    const conversationAsideStart = routeSource.indexOf('id="chat-conversation-index-pane"');
 
     expect(statusAsideStart).toBeGreaterThan(-1);
     expect(centerPaneStart).toBeGreaterThan(statusAsideStart);
@@ -583,8 +583,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.resizeHandleRight).toContain("[grid-row:1]");
     expect(routeStyles.leftRail).toContain("[grid-column:5]");
     expect(routeStyles.leftRail).toContain("[grid-row:1]");
-    expect(routeSource).toContain("const conversationIndexCollapsed = leftRailCollapsed;");
-    expect(routeSource).toContain("const statusRailCollapsed = rightPaneCollapsed;");
+    expect(routeSource).toContain("const conversationIndexCollapsed = responsiveLayout.leftVisible");
+    expect(routeSource).toContain("const statusRailCollapsed = responsiveLayout.rightVisible");
     expect(routeSource.indexOf("{conversationIndexPanel}")).toBeGreaterThan(conversationAsideStart);
     expect(routeSource.indexOf("styles.systemEntryGroup")).toBeGreaterThan(conversationAsideStart);
     expect(routeSource.indexOf("styles.currentSessionBlock")).toBeGreaterThan(statusAsideStart);
@@ -678,8 +678,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.layout).toContain("minmax(0,1fr)");
     expect(routeStyles.layout).not.toContain("minmax(192px,var(--chat-left-pane-width,220px))");
     expect(routeStyles.layout).not.toContain("minmax(244px,var(--chat-right-pane-width,284px))");
-    expect(routeStyles.layoutCompactDesktop).toContain("max-[980px]:!grid-cols");
-    expect(routeStyles.layoutCompactDesktop).toContain("minmax(420px,1fr)");
+    expect(routeStyles.layoutCompactDesktop).toContain("minmax(0,1fr)");
+    expect(routeStyles.layoutCompactDesktop).not.toContain("minmax(420px");
     expect(routeStyles.conversationTitleRow).toContain("grid-cols-[minmax(0,1fr)_auto]");
     expect(routeStyles.conversationTitleRow).toContain("max-w-full");
     expect(conversationStyles.surfaceCompact).not.toContain("[&_.timeline]:px-3");
@@ -709,15 +709,18 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.agentModelTag).toContain("text-[var(--vui-font-xs)]");
   });
 
-  it("clamps the compact desktop conversation index at the compatibility floor", () => {
-    expect(routeStyles.layout).toContain("max-[1100px]");
+  it("uses overlay drawers instead of fixed compatibility floors below 960px", () => {
     expect(routeStyles.layout).toContain("minmax(0,1fr)");
     expect(routeStyles.layout).not.toContain("minmax(192px,var(--chat-left-pane-width,220px))");
     expect(routeStyles.layout).not.toContain("minmax(244px,var(--chat-right-pane-width,284px))");
-    expect(routeStyles.layoutCompactDesktop).toContain("!grid-cols-[var(--chat-left-pane-width,300px)");
-    expect(routeStyles.layoutCompactDesktop).toContain("max-[980px]:!grid-cols");
-    expect(routeStyles.layoutCompactDesktop).toContain("minmax(260px,var(--chat-left-pane-width,300px))");
-    expect(routeStyles.layoutCompactDesktop).toContain("minmax(420px,1fr)");
+    expect(routeStyles.layoutCompactDesktop).toContain("minmax(220px,var(--chat-left-pane-width,248px))");
+    expect(routeStyles.layoutCompactDesktop).not.toContain("minmax(260px");
+    expect(routeStyles.layoutCompactDesktop).not.toContain("minmax(420px");
+    expect(routeStyles.layoutOverlay).toContain("grid-cols-[minmax(0,1fr)]");
+    expect(routeSource).toContain('aria-controls="chat-conversation-index-pane"');
+    expect(routeSource).toContain('aria-controls="chat-status-pane"');
+    expect(routeSource).toContain('event.key !== "Escape"');
+    expect(routeSource).toContain("closeResponsiveOverlayPane");
     expect(routeStyles.paneCollapsed).toContain("!overflow-hidden");
     expect(routeStyles.paneCollapsed).toContain("invisible");
     expect(routeStyles.paneCollapsed).not.toContain("!hidden");
@@ -979,7 +982,7 @@ describe("ChatCodingRoute layout contract", () => {
   });
 
   it("hides the right index tab switcher when only the conversation index is available", () => {
-    const rightAsideStart = routeSource.indexOf("<aside className={conversationIndexCollapsed");
+    const rightAsideStart = routeSource.indexOf('id="chat-conversation-index-pane"');
     const tabsRenderStart = routeSource.indexOf("{standardGroupRoomActive ? (", rightAsideStart);
     const tabsClassStart = routeSource.indexOf("className={styles.rightIndexTabs}", tabsRenderStart);
     const memberSummaryStart = routeSource.indexOf("{rightIndexPanel === \"members\" && standardGroupRoomActive", tabsClassStart);
