@@ -1066,4 +1066,3 @@ Stage only tracked project-memory or documentation files that belong to this tas
 | Unresolved Risks | Execution must re-check worktree/claims; Launcher may be blocked by active work; live provider availability may prevent a real 502 replay, in which case use the existing deterministic provider-failure fixture for visual proof and record the limitation |
 | Recommended Next Stage | Subagent-driven execution of Task 1 and Task 2 in parallel, with review before Task 3 |
 | Route Out | `ccdawn-bdd-tdd-development` for Tasks 1-6, then `ccdawn-completion-summary` after Task 7 |
-

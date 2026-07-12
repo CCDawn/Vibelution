@@ -1,7 +1,7 @@
 # Codex 对话前端对齐设计
 
-日期：2026-07-13  
-状态：待用户审查  
+日期：2026-07-13
+状态：待用户审查
 任务等级：`HIGH_RISK`，原因是同时涉及共享 DTO、会话终态投影、流式 active layer、热文件 `ConversationView.tsx`、工作台布局和用户可见错误行为。
 
 ## 1. 目标
@@ -425,4 +425,3 @@ logs/runtime_scenes/<timestamp>-codex-chat-frontend-alignment/
 | 推荐下一阶段 | 用户批准本设计后进入详细 implementation plan 和任务拆分判定 |
 
 版本影响判断：用户可见行为和兼容 DTO 扩展，属于 `minor candidate`；本规划阶段不修改版本文件，由集成/发布负责人最终决定。
-
