@@ -37,6 +37,7 @@ import {
   selectModelScenarioProviderPresetId,
   selectModelScenarioPresetId,
   shouldBlockConfigLeave,
+  shouldResetMigrationPreview,
   supervisedAgentRole,
   supervisedAgentRoleLabel,
   type PublicConfigShape,
@@ -811,6 +812,14 @@ describe("configRouteLogic", () => {
     expect(rect.size).toBe(400);
     expect(rect.sx).toBe(300);
     expect(rect.sy).toBe(200);
+  });
+});
+
+describe("migration preview recovery", () => {
+  it("resets only rejected or conflicting migration previews", () => {
+    expect(shouldResetMigrationPreview(new Error('{"detail":{"code":"migration_request_rejected"}}'))).toBe(true);
+    expect(shouldResetMigrationPreview(new Error('{"detail":{"code":"migration_state_conflict"}}'))).toBe(true);
+    expect(shouldResetMigrationPreview(new Error("Network request failed"))).toBe(false);
   });
 });
 

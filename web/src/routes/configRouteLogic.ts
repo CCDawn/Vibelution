@@ -406,6 +406,11 @@ export function shouldBlockConfigLeave(input: ConfigLeaveGuardInput): boolean {
   return input.hasPendingApply && !input.busy && input.currentPathname === "/config" && input.nextPathname !== "/config";
 }
 
+export function shouldResetMigrationPreview(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return ["migration_request_rejected", "migration_state_conflict"].some((code) => message.includes(code));
+}
+
 export function configInvalidationDomainsForApply(config: PublicConfigShape | null | undefined): ConfigInvalidationDomain[] {
   const domains = new Set<ConfigInvalidationDomain>(["config", "runtime", "sessions", "reset"]);
   if (config && typeof config === "object" && "evolution" in config) {

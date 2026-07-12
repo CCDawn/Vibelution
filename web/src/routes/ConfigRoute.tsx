@@ -51,6 +51,7 @@ import {
   resolveConfigSectionUiStateOnSelect,
   resolveImageInputCapabilityStatus,
   shouldBlockConfigLeave,
+  shouldResetMigrationPreview,
   selectModelScenarioProviderPresetId,
   type ModelScenarioId,
   uniqueModelLibraryId,
@@ -231,6 +232,7 @@ export const CONFIG_COPY = {
     returnToSource: "返回来源页",
     loading: "正在加载统一配置工作区...",
     loadFailed: "配置工作区加载失败",
+    migrationPreviewExpired: "预览已失效，请重新生成",
     sourceTitle: "保存与生效",
     sourceBody: "这里显示当前修改是否已经保存，以及哪些系统级设置需要重启后才会生效。",
     sourceBodyShort: "保存状态、配置路径和外部环境入口。",
@@ -473,6 +475,7 @@ export const CONFIG_COPY = {
     returnToSource: "Return to source page",
     loading: "Loading unified config workspace...",
     loadFailed: "Failed to load config workspace",
+    migrationPreviewExpired: "The migration preview expired. Generate a new preview.",
     sourceTitle: "Save and Apply",
     sourceBody: "Shows whether current changes are saved and which system-level settings take effect after restart.",
     sourceBodyShort: "Save state, config path, and environment entry.",
@@ -2699,7 +2702,12 @@ export function ConfigRoute() {
       setMigrationPreview(null);
       await queryClient.invalidateQueries({ queryKey: queryKeys.configWorkspace() });
     } catch (error) {
-      setProviderActionError(readableErrorMessage(error).slice(0, 480));
+      if (shouldResetMigrationPreview(error)) {
+        setMigrationPreview(null);
+        setProviderActionError(copy.migrationPreviewExpired);
+      } else {
+        setProviderActionError(readableErrorMessage(error).slice(0, 480));
+      }
       markError(error);
     } finally {
       setBusyAction("");
