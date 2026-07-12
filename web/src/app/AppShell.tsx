@@ -756,7 +756,7 @@ export function AppShell() {
     if (pathname.startsWith("/kernel")) return "Kernel";
     if (pathname.startsWith("/memory")) return t("navMemory");
     if (pathname.startsWith("/agents")) return t("navAgents");
-    return t("brand");
+    return t("appTitle");
   }, [location.pathname, t]);
   const handleReturnNavigation = useCallback(() => {
     if (!returnNavigationTarget) {
