@@ -125,6 +125,46 @@ describe("chat session stream protocol router", () => {
     expect(processOnly.accepted && processOnly.trace.turnRenderProtocol).toBe("process_feedback");
   });
 
+  it("reports bounded canonical item counts for a terminal error delta", () => {
+    const routed = routeSessionStreamEvent({
+      activeSessionId: "session-1",
+      expectedType: "assistant_delta",
+      rawData: raw(assistantDelta({
+        done: true,
+        turnItems: [
+          {
+            version: 2,
+            id: "error:0",
+            itemId: "error",
+            type: "error",
+            kind: "error",
+            status: "failed",
+            terminal: true,
+            provisional: false,
+            text: "上游服务暂不可用。",
+          },
+        ],
+      })),
+    });
+
+    expect(routed.accepted).toBe(true);
+    expect(routed.trace).toMatchObject({
+      turnRenderProtocol: "canonical_turn_items_v2",
+      turnItemCount: 1,
+      finalAnswerItemCount: 0,
+      commentaryItemCount: 0,
+      toolItemCount: 0,
+      terminalErrorItemCount: 1,
+    });
+    expect(sessionStreamProtocolTelemetryFields(routed.trace)).toMatchObject({
+      streamFinalAnswerItemCount: 0,
+      streamCommentaryItemCount: 0,
+      streamToolItemCount: 0,
+      streamTerminalErrorItemCount: 1,
+    });
+    expect(JSON.stringify(routed.trace)).not.toContain("上游服务暂不可用");
+  });
+
   it("rejects mismatched stream event types with a traceable reason", () => {
     const routed = routeSessionStreamEvent({
       activeSessionId: "session-1",
