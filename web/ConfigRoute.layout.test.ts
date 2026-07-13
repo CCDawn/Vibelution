@@ -78,12 +78,13 @@ describe("ConfigRoute content experience contract", () => {
     expect(configRouteSource).not.toContain("handleTestProfile(");
   });
 
-  it("separates model assets and git model settings in the sidebar", () => {
+  it("keeps model assets separate while grouping Git and raw config under advanced maintenance", () => {
     expect(configNavigationSource).toContain('"models-profiles"');
     expect(configNavigationSource).toContain('members: ["models"]');
     expect(configNavigationSource).toContain('members: ["llm-discovery"]');
     expect(configNavigationSource).toContain('id: "tooling-git"');
-    expect(configNavigationSource).toContain('members: ["git-commit-model", "git-commit-prompt"]');
+    expect(configNavigationSource).toContain('members: ["git-commit-model", "git-commit-prompt", "draft"]');
+    expect(configNavigationSource).toContain('zh: "高级维护"');
     expect(configNavigationSource).not.toContain('members: ["prompt"]');
     expect(configNavigationSource).not.toContain('members: ["profiles", "models", "llm-profiles"');
   });
