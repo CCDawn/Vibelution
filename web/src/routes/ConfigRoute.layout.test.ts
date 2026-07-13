@@ -4,6 +4,9 @@ import routeSource from "./ConfigRoute.tsx?raw";
 import draftPanelSource from "./ConfigDraftPanel.tsx?raw";
 import draftPanelStylesSource from "./ConfigDraftPanel.styles.ts?raw";
 import draftPanelStyles from "./ConfigDraftPanel.styles";
+import diagnosisPanelSource from "./ConfigDiagnosisPanel.tsx?raw";
+import diagnosisPanelStylesSource from "./ConfigDiagnosisPanel.styles.ts?raw";
+import diagnosisPanelStyles from "./ConfigDiagnosisPanel.styles";
 import healthDiagnosticsPanelSource from "./ConfigHealthDiagnosticsPanel.tsx?raw";
 import healthDiagnosticsPanelStylesSource from "./ConfigHealthDiagnosticsPanel.styles.ts?raw";
 import healthDiagnosticsPanelStyles from "./ConfigHealthDiagnosticsPanel.styles";
@@ -31,6 +34,7 @@ import stylesSource from "./ConfigRoute.styles.ts?raw";
 
 const extractedPanelStylesSource = [
   draftPanelStylesSource,
+  diagnosisPanelStylesSource,
   healthDiagnosticsPanelStylesSource,
   overviewPanelStylesSource,
   placeholderPanelStylesSource,
@@ -43,6 +47,7 @@ const configSources = [
   overviewPanelSource,
   runtimePanelSource,
   draftPanelSource,
+  diagnosisPanelSource,
   providerPanelSource,
   wizardSource,
   migrationPanelSource,
@@ -480,12 +485,26 @@ describe("ConfigRoute layout contract", () => {
   it("bounds Config diagnostics and transient notices so long text cannot force page overflow", () => {
     expect(styles.notice).toContain("[min-width:0]");
     expect(styles.notice).toContain("[overflow-wrap:anywhere]");
-    expect(styles.matrixCard).toContain("[min-width:0]");
-    expect(styles.matrixCard).toContain("[&_*]:[overflow-wrap:anywhere]");
+    expect(diagnosisPanelStyles.blockerCard).toContain("[min-width:0]");
+    expect(diagnosisPanelStyles.blockerHeader).toContain("[&_h3]:[overflow-wrap:anywhere]");
     expect(styles.profileTableWrap).toContain("[min-width:0]");
     expect(healthDiagnosticsPanelStyles.findingCard).toContain("[min-width:0]");
     expect(healthDiagnosticsPanelStyles.healthPanelHeader).toContain("[min-width:0]");
     expect(healthDiagnosticsPanelStyles.quickActionItem).toContain("max-[520px]:[grid-template-columns:1fr]");
+  });
+
+  it("groups repeated config blockers and routes repair directly to Provider credentials", () => {
+    expect(routeSource).toContain("<ConfigDiagnosisPanel");
+    expect(routeSource).toContain("onRepairProvider={handleRepairProviderCredential}");
+    expect(routeSource).toContain('setActiveGroupId("models-profiles")');
+    expect(routeSource).toContain('setActivePageId("model-connection")');
+    expect(routeSource).toContain('setProviderWorkspaceMode("manage")');
+    expect(routeSource).toContain('setSelectedProviderTab("connection")');
+    expect(routeSource).not.toContain("workspace.diagnosis.blocking_issues.map");
+    expect(diagnosisPanelSource).toContain("groupConfigDiagnosisIssues");
+    expect(diagnosisPanelSource).toContain("data-provider-repair");
+    expect(diagnosisPanelStyles.summaryGrid).toContain("grid-template-columns:repeat(3");
+    expect(diagnosisPanelStyles.supportGrid).toContain("[align-items:start]");
   });
 
   it("keeps the tablet config sidebar compact instead of stretching every control full width", () => {
@@ -774,6 +793,7 @@ describe("ConfigRoute layout contract", () => {
   it("keeps Config section roots and status primitives in their direct layout slots", () => {
     const affectedPanelSources = [
       draftPanelSource,
+      diagnosisPanelSource,
       overviewPanelSource,
       runtimePanelSource,
       healthDiagnosticsPanelSource,
@@ -785,7 +805,7 @@ describe("ConfigRoute layout contract", () => {
     expect(overviewPanelSource).toContain("headerClassName={styles.sectionHeader}");
     expect(runtimePanelSource).toContain("headerClassName={styles.sectionHeader}");
     expect(healthDiagnosticsPanelSource).toContain("headerClassName={styles.sectionHeader}");
-    expect(routeSource).toContain("headerClassName={styles.sectionHeader}");
+    expect(diagnosisPanelSource).toContain("headerClassName={styles.sectionHeader}");
     expect((routeSource.match(/<VRouteHeader\b/g) ?? []).length).toBe(1);
     expect(routeSource).not.toMatch(/<VRouteHeader[\s\S]*?<VStatusStrip[\s\S]*?<\/VRouteHeader>/);
     expect(styles.configHeader).toContain("[grid-template-columns:minmax(0,1fr)]");
