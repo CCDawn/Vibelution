@@ -1,32 +1,25 @@
 import json
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from fastapi import HTTPException
 from fastapi.routing import APIRoute
 
+from config.operator_config_transaction import OperatorConfigTransactionError
+from core.web.services.agent_model_promotion_service import AgentModelPromotionConflict
+
 from tests.test_agent_config_workspace_service import (
-    ProviderConfig,
     _fake_config_workspace,
     _mark_config_agent_instances_present,
-    _raw_mode_binding,
-    _seed_supervised_fixed_role_agent,
     _use_tmp_project_root,
-    agent_bulk_delete_service,
     agent_config_workspace_service,
     agent_directory_service,
-    agent_mode_binding_service,
-    agent_tool_governance_service,
     agents_route,
     chat_room_service,
     client,
-    config_package,
     config_service,
     context_engine,
-    prompt_template_service,
-    self_evolution_control_service,
-    session_service,
-    supervised_agent_service,
-    team_service,
 )
 
 
@@ -130,6 +123,142 @@ def test_agent_config_workspace_route_uses_short_lived_cache(tmp_path, monkeypat
     assert first["diagnostics"]["cache"]["hit"] is False
     assert second["diagnostics"]["cache"]["hit"] is True
     assert second["summary"]["agentCount"] == first["summary"]["agentCount"]
+
+
+def test_agent_model_promotion_route_uses_strict_payload_without_duplicate_cache_invalidation(
+    monkeypatch,
+):
+    calls = []
+    monkeypatch.setattr(
+        agents_route,
+        "promote_agent_model",
+        lambda *args, **kwargs: calls.append((args, kwargs))
+        or {
+            "status": "completed",
+            "modelRef": kwargs["model_ref"],
+            "source": "discovered",
+            "agent": {"agentId": args[0]},
+            "operatorConfigHash": "candidate-hash",
+            "manifestPath": "backups/manifest.json",
+        },
+    )
+    monkeypatch.setattr(
+        agents_route,
+        "invalidate_agent_config_workspace_cache",
+        lambda: pytest.fail("promotion service owns cache invalidation"),
+    )
+
+    response = client.post(
+        "/api/agents/agent-a/llm-bindings/dialogue/promote",
+        json={
+            "modelRef": "ai-pixel/gpt-5.6-luna",
+            "expectedBaseHash": "base-hash",
+            "expectedAgentUpdatedAt": "2026-07-13T00:00:00Z",
+            "confirmed": True,
+        },
+    )
+
+    assert response.status_code == 200, response.json()
+    assert calls == [
+        (
+            ("agent-a",),
+            {
+                "slot": "dialogue",
+                "model_ref": "ai-pixel/gpt-5.6-luna",
+                "expected_base_hash": "base-hash",
+                "expected_agent_updated_at": "2026-07-13T00:00:00Z",
+                "confirmed": True,
+            },
+        )
+    ]
+    assert response.json()["operatorConfigHash"] == "candidate-hash"
+
+    extra = client.post(
+        "/api/agents/agent-a/llm-bindings/dialogue/promote",
+        json={
+            "modelRef": "ai-pixel/gpt-5.6-luna",
+            "expectedBaseHash": "base-hash",
+            "expectedAgentUpdatedAt": "2026-07-13T00:00:00Z",
+            "confirmed": True,
+            "modelId": "must-be-rejected",
+        },
+    )
+    assert extra.status_code == 422
+
+
+@pytest.mark.parametrize(
+    ("error", "status_code", "code"),
+    [
+        (
+            agent_directory_service.AgentNotFoundError("raw-not-found-secret"),
+            404,
+            "agent_not_found",
+        ),
+        (
+            AgentModelPromotionConflict("raw-conflict-secret"),
+            409,
+            "agent_model_promotion_conflict",
+        ),
+        (
+            OperatorConfigTransactionError(
+                status="rollback_failed",
+                operation_id="operator-config-safe-id",
+                manifest_path=Path("safe-manifest.json"),
+            ),
+            500,
+            "agent_model_promotion_transaction_failed",
+        ),
+    ],
+)
+def test_agent_model_promotion_route_maps_errors_without_raw_exception_text(
+    monkeypatch,
+    error,
+    status_code,
+    code,
+):
+    monkeypatch.setattr(
+        agents_route,
+        "promote_agent_model",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(error),
+    )
+
+    response = client.post(
+        "/api/agents/agent-a/llm-bindings/dialogue/promote",
+        json={
+            "modelRef": "ai-pixel/gpt-5.6-luna",
+            "expectedBaseHash": "base-hash",
+            "expectedAgentUpdatedAt": "2026-07-13T00:00:00Z",
+            "confirmed": True,
+        },
+    )
+
+    assert response.status_code == status_code
+    assert response.json()["detail"]["code"] == code
+    assert "raw-" not in response.text
+
+
+def test_agent_model_promotion_route_drops_raw_exception_cause(monkeypatch):
+    monkeypatch.setattr(
+        agents_route,
+        "promote_agent_model",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AgentModelPromotionConflict("raw-conflict-secret")
+        ),
+    )
+
+    with pytest.raises(HTTPException) as error:
+        agents_route.agent_model_promote(
+            "agent-a",
+            "dialogue",
+            agents_route.AgentModelPromotionPayload(
+                modelRef="ai-pixel/gpt-5.6-luna",
+                expectedBaseHash="base-hash",
+                expectedAgentUpdatedAt="2026-07-13T00:00:00Z",
+                confirmed=True,
+            ),
+        )
+
+    assert error.value.__cause__ is None
 
 
 def test_agent_config_workspace_surfaces_runtime_status_from_run_snapshots(tmp_path, monkeypatch):

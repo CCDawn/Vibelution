@@ -2,22 +2,43 @@ import json
 
 import pytest
 
-from config import Settings
+from config.public_config import build_effective_config
 from core.llm.agent_runtime import AgentLlmResolutionError, config_for_agent_llm_model, resolve_agent_llm
 from core.llm.client import LLMClient
 from core.llm.types import LLMError
 
 def _config_with_agent_models():
-    config = Settings(
-        None,
-        **{
-            "llm.providers.default.kind": "local",
-            "llm.providers.default.requires_api_key": False,
-            "llm.providers.default.base_url": "http://localhost:8000/v1",
-            "llm.profiles.primary.provider_id": "default",
-            "llm.profiles.primary.model": "dialogue-base",
-        },
-    ).config
+    config = build_effective_config(
+        {
+            "llm": {
+                "schema_version": 2,
+                "providers": {
+                    "default": {
+                        "label": "Test Provider",
+                        "service_class": "local_runtime",
+                        "vendor": "custom",
+                        "driver": "openai",
+                        "base_url": "http://localhost:8000/v1",
+                        "auth_kind": "none",
+                        "credential_ref": "none",
+                        "requires_credential": False,
+                        "protocols": {
+                            "default": "chat_completions",
+                            "allowed": ["chat_completions", "responses"],
+                        },
+                        "models": {
+                            "dialogue-base": {
+                                "upstream_id": "dialogue-base",
+                                "label": "Dialogue Base",
+                                "enabled": True,
+                            }
+                        },
+                    }
+                },
+                "profiles": {"primary": {"model_ref": "default/dialogue-base"}},
+            }
+        }
+    )
     config.llm.model_library = {
         "dialogue-model": {
             "provider_id": "default",

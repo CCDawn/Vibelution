@@ -638,6 +638,31 @@ def test_v2_rejects_runtime_fields_outside_explicit_allowlist(scope: str) -> Non
     assert str(exc_info.value) == f"unsupported schema v2 runtime field: {scope}.unapproved_runtime_flag"
 
 
+def test_v2_projection_preserves_verified_reasoning_contract_model_defaults() -> None:
+    public_config = _v2_config()
+    defaults = public_config["llm"]["providers"]["pixel_relay"]["models"][
+        "gpt-5.6-luna"
+    ]["defaults"]
+    defaults.update(
+        {
+            "reasoning_effort_values": ["low", "high"],
+            "default_reasoning_effort": "high",
+            "reasoning_effort_adapter": "reasoning_object",
+            "reasoning_effort_map": {"low": "low", "high": "high"},
+        }
+    )
+
+    normalized = normalize_public_config_dict(public_config)
+
+    model = normalized["llm"]["model_library"]["pixel_relay/gpt-5.6-luna"]
+    profile = normalized["llm"]["profiles"]["primary"]
+    for projected in (model, profile):
+        assert projected["reasoning_effort_values"] == ["low", "high"]
+        assert projected["default_reasoning_effort"] == "high"
+        assert projected["reasoning_effort_adapter"] == "reasoning_object"
+        assert projected["reasoning_effort_map"] == {"low": "low", "high": "high"}
+
+
 @pytest.mark.parametrize("missing_section", ["providers", "profiles"])
 def test_v2_empty_provider_or_profile_set_fails_closed_without_legacy_defaults(missing_section: str) -> None:
     public_config = _v2_config()
