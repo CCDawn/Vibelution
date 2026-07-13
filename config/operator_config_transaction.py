@@ -7,14 +7,16 @@ import json
 import os
 import re
 import tempfile
+import threading
 import tomllib
 import uuid
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Sequence
 
 from config.llm_security import validate_llm_public_config
-from config.paths import resolve_config_backup_dir
+from config.paths import resolve_config_backup_dir, resolve_config_lock_path
 from config.public_config import (
     CONFIG_PATH,
     _config_edit_lock,
@@ -26,10 +28,10 @@ from config.settings import reload_config
 from config.toml_writer import dumps_toml_table, format_toml_scalar
 
 
-_TABLE_HEADER = re.compile(r"^\s*\[(?!\[)(.+)]\s*(?:#.*)?$")
 _SCALAR_ASSIGNMENT = re.compile(
     r"^(?P<indent>\s*)(?P<key>[A-Za-z0-9_-]+)(?P<separator>\s*=\s*)(?P<payload>.*)$"
 )
+_LOCK_HEARTBEAT_INTERVAL_SECONDS = 30.0
 
 
 @dataclass(frozen=True)
@@ -37,6 +39,13 @@ class _TableSpan:
     path: tuple[str, ...]
     start: int
     end: int
+
+
+@dataclass
+class _TomlLexicalState:
+    multiline_quote: str = ""
+    square_depth: int = 0
+    curly_depth: int = 0
 
 
 @dataclass(frozen=True)
@@ -65,6 +74,86 @@ class _TransactionArtifacts:
     manifest: dict[str, Any]
 
 
+def _touch_lock_if_owned(lock_path: Path, token: str) -> bool:
+    """Refresh a config lock only while its owner token still matches."""
+
+    try:
+        if lock_path.read_text(encoding="utf-8").strip() != token:
+            return False
+        os.utime(lock_path, None)
+        return lock_path.read_text(encoding="utf-8").strip() == token
+    except (OSError, UnicodeError):
+        return False
+
+
+@dataclass
+class _ConfigLockHeartbeat:
+    lock_path: Path
+    token: str = field(repr=False)
+    interval_seconds: float
+    _stop: threading.Event = field(
+        default_factory=threading.Event, init=False, repr=False
+    )
+    _ownership_lost: threading.Event = field(
+        default_factory=threading.Event,
+        init=False,
+        repr=False,
+    )
+    _thread: threading.Thread | None = field(default=None, init=False, repr=False)
+
+    def start(self) -> None:
+        self._thread = threading.Thread(
+            target=self._run,
+            name="operator-config-lock-heartbeat",
+            daemon=True,
+        )
+        self._thread.start()
+
+    def _run(self) -> None:
+        interval = max(float(self.interval_seconds), 0.001)
+        while not self._stop.wait(interval):
+            if not _touch_lock_if_owned(self.lock_path, self.token):
+                self._ownership_lost.set()
+                return
+
+    def assert_owned(self) -> None:
+        if self._ownership_lost.is_set() or not _touch_lock_if_owned(
+            self.lock_path, self.token
+        ):
+            self._ownership_lost.set()
+            raise RuntimeError("operator config edit lock ownership lost")
+
+    def stop(self) -> None:
+        self._stop.set()
+        if self._thread is not None:
+            self._thread.join()
+
+
+@contextmanager
+def _active_config_edit_lock(config_path: Path):
+    with _config_edit_lock(config_path):
+        lock_path = resolve_config_lock_path(config_path)
+        try:
+            token = lock_path.read_text(encoding="utf-8").strip()
+        except (OSError, UnicodeError):
+            raise RuntimeError(
+                "operator config edit lock token is unavailable"
+            ) from None
+        if not token:
+            raise RuntimeError("operator config edit lock token is unavailable")
+        heartbeat = _ConfigLockHeartbeat(
+            lock_path=lock_path,
+            token=token,
+            interval_seconds=_LOCK_HEARTBEAT_INTERVAL_SECONDS,
+        )
+        heartbeat.start()
+        try:
+            heartbeat.assert_owned()
+            yield heartbeat
+        finally:
+            heartbeat.stop()
+
+
 class OperatorConfigTransactionError(RuntimeError):
     """Raised after a failed transaction has attempted every compensation."""
 
@@ -86,18 +175,26 @@ def _normalized_table_path(table_path: Sequence[str]) -> tuple[str, ...]:
 
 
 def _table_path_from_line(line: str) -> tuple[str, ...] | None:
-    match = _TABLE_HEADER.match(line.rstrip("\r\n"))
-    if not match:
+    stripped = line.strip()
+    if not stripped.startswith("["):
         return None
     marker = "__vibelution_table_marker__"
-    payload = tomllib.loads(f"[{match.group(1)}]\n{marker} = true\n")
+    try:
+        payload = tomllib.loads(f"{line.rstrip(chr(13) + chr(10))}\n{marker} = true\n")
+    except tomllib.TOMLDecodeError:
+        return None
 
-    def find(node: dict[str, Any], prefix: tuple[str, ...]) -> tuple[str, ...]:
-        if node.get(marker) is True:
-            return prefix
-        for key, value in node.items():
-            if isinstance(value, dict):
+    def find(node: Any, prefix: tuple[str, ...]) -> tuple[str, ...]:
+        if isinstance(node, dict):
+            if node.get(marker) is True:
+                return prefix
+            for key, value in node.items():
                 found = find(value, (*prefix, str(key)))
+                if found:
+                    return found
+        elif isinstance(node, list):
+            for value in reversed(node):
+                found = find(value, prefix)
                 if found:
                     return found
         return ()
@@ -106,12 +203,95 @@ def _table_path_from_line(line: str) -> tuple[str, ...] | None:
     return resolved or None
 
 
+def _is_unescaped_quote_run(line: str, index: int) -> bool:
+    backslashes = 0
+    cursor = index - 1
+    while cursor >= 0 and line[cursor] == "\\":
+        backslashes += 1
+        cursor -= 1
+    return backslashes % 2 == 0
+
+
+def _advance_lexical_state(line: str, state: _TomlLexicalState) -> None:
+    index = 0
+    local_quote = ""
+    escaped = False
+    while index < len(line):
+        if state.multiline_quote:
+            delimiter = state.multiline_quote * 3
+            if line.startswith(delimiter, index):
+                if state.multiline_quote == "'" or _is_unescaped_quote_run(line, index):
+                    run_end = index
+                    while (
+                        run_end < len(line) and line[run_end] == state.multiline_quote
+                    ):
+                        run_end += 1
+                    state.multiline_quote = ""
+                    index = run_end
+                    continue
+            index += 1
+            continue
+        if local_quote == '"':
+            if escaped:
+                escaped = False
+            elif line[index] == "\\":
+                escaped = True
+            elif line[index] == '"':
+                local_quote = ""
+            index += 1
+            continue
+        if local_quote == "'":
+            if line[index] == "'":
+                local_quote = ""
+            index += 1
+            continue
+        if line[index] == "#":
+            break
+        if line.startswith('"""', index):
+            state.multiline_quote = '"'
+            index += 3
+            continue
+        if line.startswith("'''", index):
+            state.multiline_quote = "'"
+            index += 3
+            continue
+        if line[index] == '"':
+            local_quote = '"'
+        elif line[index] == "'":
+            local_quote = "'"
+        elif line[index] == "[":
+            state.square_depth += 1
+        elif line[index] == "]":
+            state.square_depth -= 1
+            if state.square_depth < 0:
+                raise ValueError("uncertain TOML bracket structure")
+        elif line[index] == "{":
+            state.curly_depth += 1
+        elif line[index] == "}":
+            state.curly_depth -= 1
+            if state.curly_depth < 0:
+                raise ValueError("uncertain TOML brace structure")
+        index += 1
+    if local_quote:
+        raise ValueError("uncertain TOML string structure")
+
+
 def _table_spans(lines: Sequence[str]) -> list[_TableSpan]:
     headers: list[tuple[int, tuple[str, ...]]] = []
+    state = _TomlLexicalState()
     for index, line in enumerate(lines):
-        path = _table_path_from_line(line)
-        if path is not None:
-            headers.append((index, path))
+        if (
+            not state.multiline_quote
+            and state.square_depth == 0
+            and state.curly_depth == 0
+        ):
+            path = _table_path_from_line(line)
+            if path is not None:
+                headers.append((index, path))
+                continue
+        _advance_lexical_state(line, state)
+    if state.multiline_quote or state.square_depth or state.curly_depth:
+        raise ValueError("uncertain TOML multiline structure")
     return [
         _TableSpan(
             path=path,
@@ -126,29 +306,56 @@ def _table_paths(text: str) -> set[tuple[str, ...]]:
     return {span.path for span in _table_spans(text.splitlines(keepends=True))}
 
 
+def _newline_style(text: str) -> str:
+    first_lf = text.find("\n")
+    if first_lf > 0 and text[first_lf - 1] == "\r":
+        return "\r\n"
+    return "\n"
+
+
 def append_toml_table(
     text: str,
     table_path: tuple[str, ...],
     values: dict[str, Any],
 ) -> str:
     path = _normalized_table_path(table_path)
+    tomllib.loads(text)
     if path in _table_paths(text):
         raise ValueError("TOML table already exists")
-    suffix = "" if not text or text.endswith("\n\n") else "\n" if text.endswith("\n") else "\n\n"
-    candidate = text + suffix + dumps_toml_table(path, values)
+    newline = _newline_style(text)
+    suffix = (
+        ""
+        if not text or text.endswith(newline * 2)
+        else newline
+        if text.endswith(newline)
+        else newline * 2
+    )
+    fragment = dumps_toml_table(path, values).replace("\n", newline)
+    candidate = text + suffix + fragment
     tomllib.loads(candidate)
     return candidate
 
 
 def remove_toml_table_tree(text: str, table_path: tuple[str, ...]) -> str:
     path = _normalized_table_path(table_path)
+    tomllib.loads(text)
     lines = text.splitlines(keepends=True)
     spans = _table_spans(lines)
     removed = [span for span in spans if span.path[: len(path)] == path]
     if not removed:
         raise ValueError("TOML table tree not found")
-    indexes = {index for span in removed for index in range(span.start, span.end)}
-    candidate = "".join(line for index, line in enumerate(lines) if index not in indexes)
+    indexes: set[int] = set()
+    for span in removed:
+        content_end = span.end
+        while content_end > span.start + 1:
+            stripped = lines[content_end - 1].strip()
+            if stripped and not stripped.startswith("#"):
+                break
+            content_end -= 1
+        indexes.update(range(span.start, content_end))
+    candidate = "".join(
+        line for index, line in enumerate(lines) if index not in indexes
+    )
     tomllib.loads(candidate)
     return candidate
 
@@ -189,16 +396,32 @@ def replace_toml_scalar(
     for span in _table_spans(lines):
         if span.path != path:
             continue
+        state = _TomlLexicalState()
         for index in range(span.start + 1, span.end):
-            newline = "\r\n" if lines[index].endswith("\r\n") else "\n" if lines[index].endswith("\n") else ""
-            body = lines[index][: -len(newline)] if newline else lines[index]
-            match = _SCALAR_ASSIGNMENT.fullmatch(body)
-            if match and match.group("key") == key:
-                value_text, suffix = _split_toml_value_suffix(match.group("payload"))
-                matches.append((index, match, value_text, suffix + newline))
+            if (
+                not state.multiline_quote
+                and state.square_depth == 0
+                and state.curly_depth == 0
+            ):
+                newline = (
+                    "\r\n"
+                    if lines[index].endswith("\r\n")
+                    else "\n"
+                    if lines[index].endswith("\n")
+                    else ""
+                )
+                body = lines[index][: -len(newline)] if newline else lines[index]
+                match = _SCALAR_ASSIGNMENT.fullmatch(body)
+                if match and match.group("key") == key:
+                    value_text, suffix = _split_toml_value_suffix(
+                        match.group("payload")
+                    )
+                    matches.append((index, match, value_text, suffix + newline))
+            _advance_lexical_state(lines[index], state)
     if len(matches) != 1:
         dotted_key = ".".join((*path, key))
         raise ValueError(f"expected one scalar {dotted_key}, found {len(matches)}")
+    tomllib.loads(text)
     index, match, value_text, suffix = matches[0]
     current = tomllib.loads(f"value = {value_text}\n")["value"]
     if current != expected:
@@ -222,7 +445,9 @@ def _sha256(payload: bytes) -> str:
 def _strict_atomic_write(path: Path, payload: bytes) -> None:
     path = Path(path).resolve()
     path.parent.mkdir(parents=True, exist_ok=True)
-    fd, temp_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=str(path.parent))
+    fd, temp_name = tempfile.mkstemp(
+        prefix=f".{path.name}.", suffix=".tmp", dir=str(path.parent)
+    )
     temp_path = Path(temp_name)
     try:
         with os.fdopen(fd, "wb") as handle:
@@ -235,7 +460,9 @@ def _strict_atomic_write(path: Path, payload: bytes) -> None:
 
 
 def _write_manifest(path: Path, manifest: dict[str, Any]) -> None:
-    payload = (json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n").encode("utf-8")
+    payload = (
+        json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+    ).encode("utf-8")
     _strict_atomic_write(path, payload)
 
 
@@ -252,7 +479,8 @@ def _prepared_transaction(
         raise ValueError("operation_kind is required")
     operation_id = "operator-config-" + uuid.uuid4().hex
     manifest_path = (
-        resolve_config_backup_dir(config_path) / f"operator-config-transaction-{operation_id}.json"
+        resolve_config_backup_dir(config_path)
+        / f"operator-config-transaction-{operation_id}.json"
     ).resolve()
     return PreparedOperatorConfigTransaction(
         operation_id=operation_id,
@@ -305,8 +533,12 @@ def _write_transaction_artifacts(
     participant_names: Sequence[str],
 ) -> _TransactionArtifacts:
     backup_dir = prepared.manifest_path.parent
-    before_path = (backup_dir / f"operator-config-transaction-{prepared.operation_id}.before.bin").resolve()
-    after_path = (backup_dir / f"operator-config-transaction-{prepared.operation_id}.after.bin").resolve()
+    before_path = (
+        backup_dir / f"operator-config-transaction-{prepared.operation_id}.before.bin"
+    ).resolve()
+    after_path = (
+        backup_dir / f"operator-config-transaction-{prepared.operation_id}.after.bin"
+    ).resolve()
     _strict_atomic_write(before_path, prepared.before_bytes)
     _strict_atomic_write(after_path, prepared.after_bytes)
     manifest: dict[str, Any] = {
@@ -325,7 +557,9 @@ def _write_transaction_artifacts(
         "participants": list(participant_names),
     }
     _write_manifest(prepared.manifest_path, manifest)
-    return _TransactionArtifacts(manifest_path=prepared.manifest_path, manifest=manifest)
+    return _TransactionArtifacts(
+        manifest_path=prepared.manifest_path, manifest=manifest
+    )
 
 
 def _update_transaction_manifest(
@@ -347,7 +581,9 @@ def _update_transaction_manifest(
     _write_manifest(artifacts.manifest_path, artifacts.manifest)
 
 
-def _validate_participants(participants: Sequence[TransactionParticipant]) -> tuple[TransactionParticipant, ...]:
+def _validate_participants(
+    participants: Sequence[TransactionParticipant],
+) -> tuple[TransactionParticipant, ...]:
     validated = tuple(participants)
     for participant in validated:
         if not isinstance(participant, TransactionParticipant):
@@ -366,10 +602,16 @@ def apply_operator_config_transaction(
     applied: list[TransactionParticipant] = []
     rollback_errors: list[str] = []
     failure_phase = "write_config"
-    with _config_edit_lock(prepared.config_path):
+    bounded_error: OperatorConfigTransactionError | None = None
+    config_state = "before"
+    runtime_reloaded = False
+    with _active_config_edit_lock(prepared.config_path) as lock_heartbeat:
         current_bytes = prepared.config_path.read_bytes()
         current_public = tomllib.loads(current_bytes.decode("utf-8"))
-        if current_bytes != prepared.before_bytes or public_config_hash(current_public) != prepared.base_hash:
+        if (
+            current_bytes != prepared.before_bytes
+            or public_config_hash(current_public) != prepared.base_hash
+        ):
             raise ValueError("operator config changed after transaction preparation")
         artifacts = _write_transaction_artifacts(
             prepared,
@@ -377,7 +619,9 @@ def apply_operator_config_transaction(
             participant_names=[participant.name for participant in participant_list],
         )
         try:
+            lock_heartbeat.assert_owned()
             _strict_atomic_write(prepared.config_path, prepared.after_bytes)
+            config_state = "candidate"
             failure_phase = "validate_persisted_config"
             persisted = load_public_config(prepared.config_path)
             validate_llm_public_config(persisted)
@@ -387,13 +631,19 @@ def apply_operator_config_transaction(
                 raise ValueError("persisted public config hash mismatch")
             failure_phase = "reload_config"
             reload_config(str(prepared.config_path))
+            runtime_reloaded = True
+            failure_phase = "manifest_reloaded"
             _update_transaction_manifest(artifacts, status="reloaded")
             for participant in participant_list:
                 applied.append(participant)
                 failure_phase = "participant_apply"
+                lock_heartbeat.assert_owned()
                 participant.apply()
                 failure_phase = "participant_verify"
                 participant.verify()
+                lock_heartbeat.assert_owned()
+            failure_phase = "manifest_completed"
+            lock_heartbeat.assert_owned()
             _update_transaction_manifest(artifacts, status="completed")
             return {
                 "status": "completed",
@@ -406,27 +656,60 @@ def apply_operator_config_transaction(
                 try:
                     participant.rollback()
                 except Exception as rollback_exc:
-                    rollback_errors.append(f"{participant.name}:{type(rollback_exc).__name__}")
+                    rollback_errors.append(
+                        f"{participant.name}:{type(rollback_exc).__name__}"
+                    )
             try:
-                _strict_atomic_write(prepared.config_path, prepared.before_bytes)
-                if prepared.config_path.read_bytes() != prepared.before_bytes:
-                    raise RuntimeError("operator config byte restoration mismatch")
-                reload_config(str(prepared.config_path))
+                observed_bytes = prepared.config_path.read_bytes()
+                if observed_bytes == prepared.before_bytes:
+                    config_state = "before"
+                elif observed_bytes == prepared.after_bytes:
+                    config_state = "candidate"
+                else:
+                    config_state = "drift"
+            except Exception as readback_exc:
+                config_state = "unknown"
+                rollback_errors.append(
+                    f"operator_config_readback:{type(readback_exc).__name__}"
+                )
+            config_needs_restore = config_state != "before"
+            config_restored = not config_needs_restore
+            try:
+                if config_needs_restore:
+                    _strict_atomic_write(prepared.config_path, prepared.before_bytes)
+                    if prepared.config_path.read_bytes() != prepared.before_bytes:
+                        raise RuntimeError("operator config byte restoration mismatch")
+                    config_restored = True
             except Exception as rollback_exc:
+                config_restored = False
                 rollback_errors.append(f"operator_config:{type(rollback_exc).__name__}")
+            if config_restored and (config_needs_restore or runtime_reloaded):
+                try:
+                    reload_config(str(prepared.config_path))
+                except Exception as rollback_exc:
+                    rollback_errors.append(
+                        f"operator_config_reload:{type(rollback_exc).__name__}"
+                    )
             status = "rollback_failed" if rollback_errors else "rolled_back"
-            _update_transaction_manifest(
-                artifacts,
-                status=status,
-                failure_phase=failure_phase,
-                error_type=type(exc).__name__,
-                rollback_errors=rollback_errors,
-            )
-            raise OperatorConfigTransactionError(
+            try:
+                _update_transaction_manifest(
+                    artifacts,
+                    status=status,
+                    failure_phase=failure_phase,
+                    error_type=type(exc).__name__,
+                    rollback_errors=rollback_errors,
+                )
+            except Exception as manifest_exc:
+                rollback_errors.append(f"manifest:{type(manifest_exc).__name__}")
+                status = "rollback_failed"
+            bounded_error = OperatorConfigTransactionError(
                 status=status,
                 operation_id=prepared.operation_id,
                 manifest_path=prepared.manifest_path,
-            ) from exc
+            )
+    if bounded_error is not None:
+        raise bounded_error
+    raise RuntimeError("operator config transaction ended without a result")
 
 
 __all__ = [
