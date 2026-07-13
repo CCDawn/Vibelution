@@ -311,12 +311,8 @@ def test_runtime_summary_uses_light_active_session_summary(monkeypatch):
 def test_runtime_summary_falls_back_when_agent_model_identity_fails(monkeypatch):
     public_config = copy.deepcopy(load_public_config())
     expected_profile = str(public_config["runtime"]["profile"])
-    public_config["llm"]["model_library"]["public-fallback-model"] = {
-        "provider_id": "primary",
-        "model": "public-fallback-model",
-        "label": "Public fallback model",
-    }
-    public_config["llm"]["profiles"]["primary"]["model_ref"] = "public-fallback-model"
+    primary_profile = public_config["llm"]["profiles"]["primary"]
+    fallback_model_ref = str(primary_profile.get("model_ref") or primary_profile.get("model"))
     scene_events: list[tuple[str, str, str, dict]] = []
 
     monkeypatch.setattr(runtime_service, "load_public_config", lambda: copy.deepcopy(public_config))
@@ -340,7 +336,7 @@ def test_runtime_summary_falls_back_when_agent_model_identity_fails(monkeypatch)
 
     payload = runtime_service.get_runtime_summary()
 
-    assert payload["model"] == "public-fallback-model"
+    assert payload["model"] == fallback_model_ref
     assert payload["profile"] == expected_profile
     assert payload["modelSource"] == "public_config_primary"
     assert payload["modelId"] == ""
