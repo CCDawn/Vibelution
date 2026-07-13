@@ -250,7 +250,7 @@ export const CONFIG_COPY = {
     groupRuntimeContextTitle: "运行时与上下文",
     groupRuntimeContextSummary: "只保留全局上下文压缩、分析和高级运行策略；Agent 个体配置在 Agent 管理维护。",
     groupToolingTitle: "工具与诊断",
-    groupToolingSummary: "工具、网络、安全、日志、解析器与调试相关设置。",
+    groupToolingSummary: "日常联网与安全、健康诊断、日志追踪和高级维护分层管理。",
     healthTitle: "健康诊断中心",
     healthBody: "把会话入口、日志入口、最近信号、可清理建议和保护边界整理到同一个只读诊断面。",
     healthLoading: "正在整理日志 Helper...",
@@ -499,7 +499,7 @@ export const CONFIG_COPY = {
     groupRuntimeContextTitle: "Runtime and Context",
     groupRuntimeContextSummary: "Keep global context compression, analysis, and advanced runtime policy here. Configure individual Agents in Agent management.",
     groupToolingTitle: "Tooling and Diagnostics",
-    groupToolingSummary: "Tooling, network, security, logging, parser, and debug settings.",
+    groupToolingSummary: "Layer everyday access, health diagnostics, logging, tracing, and advanced maintenance.",
     healthTitle: "Health Diagnostics Center",
     healthBody: "Organizes session entry points, log entry points, recent signals, cleanup hints, and protected boundaries in one read-only diagnostic surface.",
     healthLoading: "Organizing log helpers...",
@@ -3944,6 +3944,18 @@ export function ConfigRoute() {
           </VSurface>
         ) : null}
 
+        {isSectionVisible("health-diagnostics") ? (
+          <ConfigHealthDiagnosticsPanel
+            diagnostics={healthDiagnosticsQuery.data}
+            loading={healthDiagnosticsQuery.isLoading || healthDiagnosticsQuery.isFetching}
+            lang={currentLanguage}
+            copy={copy}
+            onRefresh={() => {
+              void healthDiagnosticsQuery.refetch();
+            }}
+          />
+        ) : null}
+
         {workspace.schemaVersion === 2 && isSectionVisible("models") ? null : activeEditorSections.map((section) => (
           <ConfigSectionEditor
             key={section.id}
@@ -3976,18 +3988,6 @@ export function ConfigRoute() {
             }}
             onRestoreEditorText={restoreEditorText}
             onJsonTextChange={setJsonText}
-          />
-        ) : null}
-
-        {isSectionVisible("health-diagnostics") ? (
-          <ConfigHealthDiagnosticsPanel
-            diagnostics={healthDiagnosticsQuery.data}
-            loading={healthDiagnosticsQuery.isLoading || healthDiagnosticsQuery.isFetching}
-            lang={currentLanguage}
-            copy={copy}
-            onRefresh={() => {
-              void healthDiagnosticsQuery.refetch();
-            }}
           />
         ) : null}
 

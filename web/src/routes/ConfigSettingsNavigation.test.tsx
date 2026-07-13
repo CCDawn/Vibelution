@@ -46,7 +46,7 @@ const groupCopy: ConfigSettingsGroupCopy = {
 };
 
 describe("ConfigSettingsNavigation", () => {
-  it("builds six desktop groups and restores Git commit settings reachability", () => {
+  it("builds six desktop groups and layers tooling into daily, troubleshooting, and advanced pages", () => {
     const groups = buildConfigSettingsGroups(sections, groupCopy, "zh");
 
     expect(groups).toHaveLength(6);
@@ -54,13 +54,11 @@ describe("ConfigSettingsNavigation", () => {
       expect.objectContaining({ id: "workbench-interface", memberSectionIds: ["shell", "ui"] }),
     ]);
     expect(groups.find((group) => group.id === "tooling-diagnostics")?.pages).toEqual(
-      expect.arrayContaining([
+      [
         expect.objectContaining({ id: "tooling-access", memberSectionIds: ["security", "network", "parser"] }),
-        expect.objectContaining({ id: "tooling-logs", memberSectionIds: ["log", "debug"] }),
-        expect.objectContaining({ id: "tooling-git", memberSectionIds: ["git-commit-model", "git-commit-prompt"] }),
-        expect.objectContaining({ id: "tooling-health", memberSectionIds: ["health-diagnostics"] }),
-        expect.objectContaining({ id: "tooling-raw", memberSectionIds: ["draft"] }),
-      ]),
+        expect.objectContaining({ id: "tooling-health", memberSectionIds: ["health-diagnostics", "log", "debug"] }),
+        expect.objectContaining({ id: "tooling-git", memberSectionIds: ["git-commit-model", "git-commit-prompt", "draft"] }),
+      ],
     );
   });
 
@@ -105,7 +103,7 @@ describe("ConfigSettingsNavigation", () => {
       <ConfigSettingsPageTabs
         language="zh"
         group={activeGroup}
-        activePageId="tooling-git"
+        activePageId="tooling-health"
         onSelectPage={() => undefined}
       />,
     );
@@ -113,7 +111,11 @@ describe("ConfigSettingsNavigation", () => {
     expect(sidebarMarkup).toContain("总览与保存");
     expect(sidebarMarkup).toContain("工具与诊断");
     expect(sidebarMarkup).toMatch(/aria-pressed="true"[^>]*><span>工具与诊断<\/span>/);
-    expect(tabsMarkup).toContain("Git 提交");
+    expect(tabsMarkup).toContain("日常工具");
+    expect(tabsMarkup).toContain("排障中心");
+    expect(tabsMarkup).toContain("高级维护");
+    expect(tabsMarkup).not.toContain("日志与调试");
+    expect(tabsMarkup).not.toContain("原始配置");
     expect(tabsMarkup).toContain('aria-current="page"');
     expect(styles.groupButton).toContain("min-h-11");
     expect(styles.pageButton).toContain("min-h-10");
