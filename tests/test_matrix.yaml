@@ -88,7 +88,7 @@ rules:
       - "web/src/components/conversation/**"
     commands:
       - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_web_session_routes.py tests/test_chat_room_service.py tests/test_chat_room_routes.py -q"
-      - "npm --prefix web run test -- ChatCodingRoute.layout.test.ts"
+      - "node web/node_modules/vitest/vitest.mjs run ChatCodingRoute.layout.test.ts"
       - "npm --prefix web run build"
     notes:
       - "Use the route/service subset first; widen to tests/test_web_app.py only when shared app fixtures or legacy route coverage changed."
@@ -251,7 +251,7 @@ rules:
       - "挑战杯/**"
     commands:
       - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_team_service.py tests/test_team_knowledge_service.py tests/test_team_workflow_orchestration_service.py tests/test_team_workflow_routes.py -q"
-      - "npm --prefix web run test -- TeamsRoute.layout.test.ts"
+      - "node web/node_modules/vitest/vitest.mjs run TeamsRoute.layout.test.ts"
       - "npm --prefix web run build"
       - "node 挑战杯/build_research_flow_site.mjs"
     notes:
@@ -270,7 +270,7 @@ rules:
       - "web/src/app/**"
       - "web/src/i18n/**"
     commands:
-      - "npm --prefix web run test"
+      - "node web/node_modules/vitest/vitest.mjs run"
       - "npm --prefix web run build"
     notes:
       - "Prefer narrowing the Vitest file list manually when the changed route has a dedicated layout test."

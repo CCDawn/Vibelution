@@ -163,6 +163,8 @@ def parse_allowed_command(command: str, root: Path) -> CommandSpec:
         }
         if argv[4] in npm_kinds:
             return CommandSpec(npm_kinds[argv[4]], argv, root)
+    if normalized[:3] == ["node", "web/node_modules/vitest/vitest.mjs", "run"]:
+        return CommandSpec("web-test", argv, root)
     if normalized == ["node", "挑战杯/build_research_flow_site.mjs"]:
         return CommandSpec("challenge-cup-build", argv, root)
     raise UnsupportedValidationCommand(command)
@@ -278,6 +280,10 @@ def materialize_command(spec: CommandSpec) -> CommandSpec:
         npm_launcher = shutil.which("npm.cmd") or shutil.which("npm")
         if npm_launcher:
             argv[0] = npm_launcher
+    elif os.name == "nt" and str(argv[0]).strip().lower() == "node":
+        node_launcher = shutil.which("node.exe") or shutil.which("node")
+        if node_launcher:
+            argv[0] = node_launcher
     return CommandSpec(spec.kind, argv, spec.cwd)
 
 
