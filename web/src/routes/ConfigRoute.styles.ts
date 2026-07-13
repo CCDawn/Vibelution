@@ -97,6 +97,10 @@ const styles = {
     "vui-routes-configroute configCommonGridPet ![grid-template-columns:repeat(4,minmax(0,1fr))] max-[1180px]:![grid-template-columns:repeat(2,minmax(0,1fr))]",
   configCommonGridContext:
     "vui-routes-configroute configCommonGridContext ![grid-template-columns:repeat(5,minmax(0,1fr))] max-[1180px]:![grid-template-columns:repeat(2,minmax(0,1fr))]",
+  configCommonGridTwo:
+    "vui-routes-configroute configCommonGridTwo ![grid-template-columns:repeat(2,minmax(0,1fr))]",
+  configCommonGridThree:
+    "vui-routes-configroute configCommonGridThree ![grid-template-columns:repeat(3,minmax(0,1fr))] max-[1180px]:![grid-template-columns:repeat(2,minmax(0,1fr))]",
   configAdvancedGrid:
     "vui-routes-configroute configAdvancedGrid ![grid-template-columns:repeat(3,minmax(0,1fr))] max-[1180px]:![grid-template-columns:repeat(2,minmax(0,1fr))]",
   configTier:
