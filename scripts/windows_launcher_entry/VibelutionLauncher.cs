@@ -18,10 +18,10 @@ internal static class VibelutionLauncher
         {
             var parsed = ParseArgs(args);
             projectDir = parsed.ProjectDir;
-            string action = parsed.ForwardedArgs.Count > 0 ? parsed.ForwardedArgs[0] : "launcher";
+            string action = ResolveAction(parsed.ForwardedArgs);
             if (!action.Equals("launcher", StringComparison.OrdinalIgnoreCase))
             {
-                return RunLegacyScriptAction(projectDir, parsed.ForwardedArgs);
+                return RunNativeAction(projectDir, parsed.ForwardedArgs);
             }
 
             bool created;
@@ -323,42 +323,103 @@ internal static class VibelutionLauncher
         };
     }
 
-    private static int RunLegacyScriptAction(string projectDir, List<string> forwardedArgs)
+    private static string ResolveAction(List<string> forwardedArgs)
     {
-        string desktopEntryPath = Path.Combine(projectDir, "scripts", "vibelution_desktop_entry.vbs");
-        if (!File.Exists(desktopEntryPath))
+        string action = "launcher";
+        for (int index = 0; index < forwardedArgs.Count; index++)
         {
-            WriteFailure(projectDir, "Desktop entry script was not found: " + desktopEntryPath);
+            string value = (forwardedArgs[index] ?? "").Trim();
+            string lowered = value.ToLowerInvariant();
+            if ((lowered == "-action" || lowered == "--action") && index + 1 < forwardedArgs.Count)
+            {
+                return (forwardedArgs[index + 1] ?? "launcher").Trim().ToLowerInvariant();
+            }
+            if (lowered.StartsWith("-action:") || lowered.StartsWith("-action="))
+            {
+                return lowered.Substring(8).Trim();
+            }
+            if (lowered.StartsWith("--action:") || lowered.StartsWith("--action="))
+            {
+                return lowered.Substring(9).Trim();
+            }
+            if (!value.StartsWith("-") && action == "launcher")
+            {
+                action = lowered;
+            }
+        }
+        return action;
+    }
+
+    private static int RunNativeAction(string projectDir, List<string> forwardedArgs)
+    {
+        string action = ResolveAction(forwardedArgs);
+        bool noBrowser = HasArgument(forwardedArgs, "--no-browser", "-nobrowser", "-no-browser");
+        if (action == "open")
+        {
+            RunPythonBridge(projectDir, noBrowser ? "bootstrap" : "launcher", noBrowser, noBrowser);
+            WriteNativeEntryLog(projectDir, "native_action.succeeded", "action=open");
+            return 0;
+        }
+
+        if (action != "toggle" && action != "start" && action != "stop" && action != "close" && action != "restart" && action != "status")
+        {
+            WriteNativeEntryLog(projectDir, "native_action.rejected", "action=" + ShortMessage(action));
             return 2;
         }
 
-        string action = forwardedArgs.Count > 0 ? forwardedArgs[0] : "launcher";
-        var wscriptArgs = new List<string> { Quote(desktopEntryPath), action };
-        for (int index = 1; index < forwardedArgs.Count; index++)
+        RunPythonBridge(projectDir, "bootstrap", true, true);
+        if (action == "status")
         {
-            wscriptArgs.Add(forwardedArgs[index]);
+            RequestLauncher(projectDir, "/api/launcher/status", "GET");
+            WriteNativeEntryLog(projectDir, "native_action.succeeded", "action=status");
+            return 0;
         }
 
-        string wscriptPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "wscript.exe");
-        var startInfo = new ProcessStartInfo
+        string effectiveAction = action == "close" ? "stop" : action;
+        if (effectiveAction == "toggle")
         {
-            FileName = wscriptPath,
-            Arguments = string.Join(" ", wscriptArgs.ToArray()),
-            WorkingDirectory = projectDir,
-            UseShellExecute = false,
-            CreateNoWindow = true,
-            WindowStyle = ProcessWindowStyle.Hidden
-        };
+            string status = RequestLauncher(projectDir, "/api/launcher/status", "GET");
+            string observed = ExtractJsonString(status, "observedState").ToLowerInvariant();
+            effectiveAction = observed == "open" || observed == "running" || observed == "starting" ? "stop" : "start";
+        }
+        RequestLauncher(projectDir, "/api/launcher/" + effectiveAction, "POST");
+        WriteNativeEntryLog(projectDir, "native_action.succeeded", "action=" + action + ";effective_action=" + effectiveAction);
+        return 0;
+    }
 
-        using (Process process = Process.Start(startInfo))
+    private static bool HasArgument(List<string> args, params string[] accepted)
+    {
+        foreach (string value in args)
         {
-            if (process == null)
+            foreach (string candidate in accepted)
             {
-                WriteFailure(projectDir, "Failed to start Windows Script Host.");
-                return 3;
+                if (string.Equals((value ?? "").Trim(), candidate, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
             }
         }
-        return 0;
+        return false;
+    }
+
+    private static string RequestLauncher(string projectDir, string path, string method)
+    {
+        string url = "http://127.0.0.1:" + LauncherControlPort(projectDir).ToString() + path;
+        var request = (HttpWebRequest)WebRequest.Create(url);
+        request.Method = method;
+        request.Timeout = 15000;
+        request.ReadWriteTimeout = 15000;
+        request.Headers["X-Vibelution-Launcher-Trigger"] = "native_entry";
+        if (method == "POST")
+        {
+            request.ContentLength = 0;
+        }
+        using (var response = (HttpWebResponse)request.GetResponse())
+        using (var stream = response.GetResponseStream())
+        using (var reader = new StreamReader(stream))
+        {
+            return reader.ReadToEnd();
+        }
     }
 
     private static void RunPythonBridge(string projectDir, string action, bool noBrowser, bool outputJson)
@@ -505,6 +566,11 @@ internal static class VibelutionLauncher
 
     private static void WriteFailure(string projectDir, string message)
     {
+        WriteNativeEntryLog(projectDir, "native_entry.failed", ShortMessage(message));
+    }
+
+    private static void WriteNativeEntryLog(string projectDir, string eventName, string message)
+    {
         try
         {
             string logDir = Path.Combine(projectDir, ".runtime", "launcher");
@@ -512,7 +578,7 @@ internal static class VibelutionLauncher
             string logPath = Path.Combine(logDir, "native-launcher-entry.log");
             File.AppendAllText(
                 logPath,
-                DateTimeOffset.Now.ToString("o") + " " + message + Environment.NewLine
+                DateTimeOffset.Now.ToString("o") + " " + eventName + " " + ShortMessage(message) + Environment.NewLine
             );
         }
         catch

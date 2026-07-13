@@ -1,0 +1,319 @@
+{
+  "schema_version": 2,
+  "case_id": "canonical_parallel_tool_followup_v2",
+  "identity_fields": [
+    "session_id",
+    "turn_id",
+    "invocation_id",
+    "submission_id"
+  ],
+  "session_id": "session-golden-followup",
+  "turns": [
+    {
+      "session_id": "session-golden-followup",
+      "turn_id": "turn-golden-001",
+      "invocation_id": "invocation-golden-001",
+      "submission_id": "submission-golden-001",
+      "user_text": "继续"
+    },
+    {
+      "session_id": "session-golden-followup",
+      "turn_id": "turn-golden-002",
+      "invocation_id": "invocation-golden-002",
+      "submission_id": "submission-golden-002",
+      "user_text": "继续"
+    }
+  ],
+  "provider_messages": [
+    {
+      "role": "user",
+      "content": "继续",
+      "metadata": {
+        "session_id": "session-golden-followup",
+        "turn_id": "turn-golden-001",
+        "invocation_id": "invocation-golden-001",
+        "submission_id": "submission-golden-001"
+      }
+    },
+    {
+      "role": "assistant",
+      "content": "第一轮已完成，下一轮可以继续检查。",
+      "metadata": {
+        "session_id": "session-golden-followup",
+        "turn_id": "turn-golden-001",
+        "invocation_id": "invocation-golden-001",
+        "submission_id": "submission-golden-001"
+      }
+    },
+    {
+      "role": "user",
+      "content": "继续",
+      "metadata": {
+        "session_id": "session-golden-followup",
+        "turn_id": "turn-golden-002",
+        "invocation_id": "invocation-golden-002",
+        "submission_id": "submission-golden-002"
+      }
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call-weather-002",
+          "type": "function",
+          "function": {
+            "name": "weather_lookup",
+            "arguments": "{\"city\":\"Shanghai\"}"
+          }
+        },
+        {
+          "id": "call-notes-002",
+          "type": "function",
+          "function": {
+            "name": "notes_lookup",
+            "arguments": "{\"topic\":\"conversation chain\"}"
+          }
+        }
+      ],
+      "metadata": {
+        "session_id": "session-golden-followup",
+        "turn_id": "turn-golden-002",
+        "invocation_id": "invocation-golden-002",
+        "submission_id": "submission-golden-002",
+        "parallel": true
+      }
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call-weather-002",
+      "content": "{\"city\":\"Shanghai\",\"condition\":\"sunny\"}",
+      "metadata": {
+        "session_id": "session-golden-followup",
+        "turn_id": "turn-golden-002",
+        "invocation_id": "invocation-golden-002",
+        "submission_id": "submission-golden-002",
+        "tool_name": "weather_lookup"
+      }
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call-notes-002",
+      "content": "{\"matches\":[\"semantic history\",\"wire parity\"]}",
+      "metadata": {
+        "session_id": "session-golden-followup",
+        "turn_id": "turn-golden-002",
+        "invocation_id": "invocation-golden-002",
+        "submission_id": "submission-golden-002",
+        "tool_name": "notes_lookup"
+      }
+    },
+    {
+      "role": "assistant",
+      "content": "第二轮完成：天气晴朗，且语义历史与 wire parity 均已确认。",
+      "metadata": {
+        "session_id": "session-golden-followup",
+        "turn_id": "turn-golden-002",
+        "invocation_id": "invocation-golden-002",
+        "submission_id": "submission-golden-002",
+        "terminal": true
+      }
+    }
+  ],
+  "frontend": {
+    "stream_events": [
+      {
+        "type": "assistant_delta",
+        "sessionId": "session-golden-followup",
+        "turnId": "turn-golden-002",
+        "ledgerSeq": 10,
+        "stage": "tool_running",
+        "content": "",
+        "thought": "",
+        "feedbackEvents": [],
+        "turnItems": [
+          {
+            "id": "status-processing-002-r1",
+            "type": "status",
+            "status": "running",
+            "version": 2,
+            "sessionId": "session-golden-followup",
+            "turnId": "turn-golden-002",
+            "invocationId": "invocation-golden-002",
+            "itemId": "status-processing-002",
+            "revision": 1,
+            "sequence": 1,
+            "kind": "status",
+            "channel": "commentary",
+            "phase": "commentary",
+            "text": "正在处理",
+            "metadata": {
+              "submissionId": "submission-golden-002"
+            }
+          },
+          {
+            "id": "tool-weather-002-r1",
+            "type": "tool_call",
+            "status": "running",
+            "version": 2,
+            "sessionId": "session-golden-followup",
+            "turnId": "turn-golden-002",
+            "invocationId": "invocation-golden-002",
+            "itemId": "tool-weather-002",
+            "callId": "call-weather-002",
+            "toolName": "weather_lookup",
+            "revision": 1,
+            "sequence": 2,
+            "kind": "tool_call",
+            "channel": "commentary",
+            "phase": "commentary",
+            "text": "weather_lookup running",
+            "metadata": {
+              "submissionId": "submission-golden-002"
+            }
+          },
+          {
+            "id": "tool-notes-002-r1",
+            "type": "tool_call",
+            "status": "running",
+            "version": 2,
+            "sessionId": "session-golden-followup",
+            "turnId": "turn-golden-002",
+            "invocationId": "invocation-golden-002",
+            "itemId": "tool-notes-002",
+            "callId": "call-notes-002",
+            "toolName": "notes_lookup",
+            "revision": 1,
+            "sequence": 3,
+            "kind": "tool_call",
+            "channel": "commentary",
+            "phase": "commentary",
+            "text": "notes_lookup running",
+            "metadata": {
+              "submissionId": "submission-golden-002"
+            }
+          }
+        ],
+        "updatedAt": "2026-07-14T02:00:01Z",
+        "done": false
+      },
+      {
+        "type": "assistant_delta",
+        "sessionId": "session-golden-followup",
+        "turnId": "turn-golden-002",
+        "ledgerSeq": 11,
+        "stage": "completed",
+        "content": "",
+        "thought": "",
+        "feedbackEvents": [],
+        "turnItems": [
+          {
+            "id": "status-processing-002-r2",
+            "type": "status",
+            "status": "completed",
+            "version": 2,
+            "sessionId": "session-golden-followup",
+            "turnId": "turn-golden-002",
+            "invocationId": "invocation-golden-002",
+            "itemId": "status-processing-002",
+            "revision": 2,
+            "sequence": 1,
+            "kind": "status",
+            "channel": "commentary",
+            "phase": "commentary",
+            "text": "工具调用已完成",
+            "metadata": {
+              "submissionId": "submission-golden-002"
+            }
+          },
+          {
+            "id": "tool-weather-002-r2",
+            "type": "tool_call",
+            "status": "completed",
+            "version": 2,
+            "sessionId": "session-golden-followup",
+            "turnId": "turn-golden-002",
+            "invocationId": "invocation-golden-002",
+            "itemId": "tool-weather-002",
+            "callId": "call-weather-002",
+            "toolName": "weather_lookup",
+            "revision": 2,
+            "sequence": 2,
+            "kind": "tool_call",
+            "channel": "commentary",
+            "phase": "commentary",
+            "text": "Shanghai: sunny",
+            "metadata": {
+              "submissionId": "submission-golden-002"
+            }
+          },
+          {
+            "id": "tool-notes-002-r2",
+            "type": "tool_call",
+            "status": "completed",
+            "version": 2,
+            "sessionId": "session-golden-followup",
+            "turnId": "turn-golden-002",
+            "invocationId": "invocation-golden-002",
+            "itemId": "tool-notes-002",
+            "callId": "call-notes-002",
+            "toolName": "notes_lookup",
+            "revision": 2,
+            "sequence": 3,
+            "kind": "tool_call",
+            "channel": "commentary",
+            "phase": "commentary",
+            "text": "semantic history; wire parity",
+            "metadata": {
+              "submissionId": "submission-golden-002"
+            }
+          },
+          {
+            "id": "final-answer-002-r0",
+            "type": "agent_message",
+            "status": "running",
+            "version": 2,
+            "sessionId": "session-golden-followup",
+            "turnId": "turn-golden-002",
+            "invocationId": "invocation-golden-002",
+            "itemId": "final-answer-002",
+            "revision": 0,
+            "sequence": 4,
+            "kind": "assistant_message",
+            "channel": "answer",
+            "phase": "final_answer",
+            "provisional": true,
+            "terminal": false,
+            "text": "第二轮完成",
+            "metadata": {
+              "submissionId": "submission-golden-002"
+            }
+          },
+          {
+            "id": "final-answer-002-r1",
+            "type": "agent_message",
+            "status": "completed",
+            "version": 2,
+            "sessionId": "session-golden-followup",
+            "turnId": "turn-golden-002",
+            "invocationId": "invocation-golden-002",
+            "itemId": "final-answer-002",
+            "revision": 1,
+            "sequence": 4,
+            "kind": "assistant_message",
+            "channel": "answer",
+            "phase": "final_answer",
+            "provisional": false,
+            "terminal": true,
+            "text": "第二轮完成：天气晴朗，且语义历史与 wire parity 均已确认。",
+            "metadata": {
+              "submissionId": "submission-golden-002"
+            }
+          }
+        ],
+        "updatedAt": "2026-07-14T02:00:02Z",
+        "done": true
+      }
+    ]
+  }
+}

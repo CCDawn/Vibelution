@@ -133,7 +133,13 @@ def test_run_agent_single_turn_seeds_context_and_exports_carryover():
             workspace_path="workspace/agent",
             config=config,
             initial_prompt="probe",
-            carryover={"previous": "state"},
+            turn_identity="turn-1",
+            carryover={
+                "turnIdentity": "turn-1",
+                "terminal": False,
+                "goal": "probe",
+                "messages": [{"kind": "dict", "role": "user", "content": "probe"}],
+            },
             runtime_context="Agent Runtime Context",
             interrupt_checker=lambda: "stop_requested",
         ),
@@ -144,12 +150,124 @@ def test_run_agent_single_turn_seeds_context_and_exports_carryover():
         "mode": "self_evolution",
         "workspace_path": "workspace/agent",
         "config": config,
-        "carryover": {"previous": "state"},
+        "carryover": {
+            "turnIdentity": "turn-1",
+            "terminal": False,
+            "goal": "probe",
+            "messages": [{"kind": "dict", "role": "user", "content": "probe"}],
+        },
         "interrupt_reason": "stop_requested",
         "initial_prompt": "probe",
     }
     assert result.result == {"status": "completed", "summary": "done"}
     assert result.carryover == {"next": "state"}
+
+
+def test_run_agent_single_turn_forwards_history_through_preparation():
+    captured: dict[str, object] = {}
+    history = [
+        {"role": "user", "content": "first"},
+        {"role": "assistant", "content": "reply"},
+    ]
+
+    class FakeAgent:
+        def seed_chat_history(self, messages):
+            captured["history"] = messages
+
+        def run_single_turn(self, initial_prompt=None):
+            captured["initial_prompt"] = initial_prompt
+            return {"status": "completed"}
+
+    run_agent_single_turn(
+        AgentSingleTurnRequest(
+            mode="chat",
+            initial_prompt="continue",
+            chat_history=history,
+        ),
+        agent_factory=lambda **_kwargs: FakeAgent(),
+    )
+
+    assert captured == {
+        "history": history,
+        "initial_prompt": "continue",
+    }
+
+
+def test_prepare_agent_turn_uses_only_matching_nonterminal_carryover():
+    captured: dict[str, object] = {}
+
+    class FakeAgent:
+        def set_turn_identity(self, turn_identity):
+            captured["turn_identity"] = turn_identity
+
+        def seed_turn_carryover(self, carryover):
+            captured["carryover"] = carryover
+
+        def seed_chat_history(self, history):
+            captured["history"] = history
+
+    carryover = {
+        "turnIdentity": "turn-1",
+        "terminal": False,
+        "goal": "inspect",
+        "messages": [{"kind": "dict", "role": "user", "content": "inspect"}],
+    }
+    prepare_agent_turn(
+        FakeAgent(),
+        turn_identity="turn-1",
+        carryover=carryover,
+        chat_history=[{"role": "assistant", "content": "historical reply"}],
+    )
+
+    assert captured == {
+        "turn_identity": "turn-1",
+        "carryover": carryover,
+    }
+
+
+def test_prepare_agent_turn_rejects_stale_carryover_and_emits_prompt_free_diagnostics():
+    captured: dict[str, object] = {}
+    history = [{"role": "assistant", "content": "normal history"}]
+
+    class FakeAgent:
+        def set_turn_identity(self, turn_identity):
+            captured["turn_identity"] = turn_identity
+
+        def seed_turn_carryover(self, carryover):
+            captured["carryover"] = carryover
+
+        def seed_chat_history(self, messages):
+            captured["history"] = messages
+
+        def record_turn_preparation_diagnostic(self, fields):
+            captured["diagnostic"] = fields
+
+    prepare_agent_turn(
+        FakeAgent(),
+        turn_identity="turn-new",
+        carryover={
+            "turnIdentity": "turn-old",
+            "terminal": False,
+            "goal": "stale secret goal",
+            "messages": [{"kind": "dict", "role": "user", "content": "stale secret prompt"}],
+        },
+        static_runtime_context="static secret context",
+        dynamic_runtime_context="dynamic secret context",
+        chat_history=history,
+    )
+
+    assert "carryover" not in captured
+    assert captured["history"] == history
+    diagnostic_text = str(captured["diagnostic"])
+    assert "secret" not in diagnostic_text
+    assert captured["diagnostic"] == {
+        "path": "history",
+        "carryoverStatus": "identity_mismatch",
+        "historyMessageCount": 1,
+        "hasTurnIdentity": True,
+        "staticContextChars": 21,
+        "dynamicContextChars": 22,
+    }
 
 
 def test_prepare_agent_turn_runtime_builds_stable_isolated_prompt_cache_partitions():
@@ -275,7 +393,6 @@ def test_prepare_agent_turn_seeds_optional_supported_inputs():
 
     prepare_agent_turn(
         FakeAgent(),
-        carryover={"previous": "state"},
         runtime_context="Legacy Runtime Context",
         static_runtime_context="Static Runtime Context",
         dynamic_runtime_context="Dynamic Runtime Context",
@@ -284,7 +401,6 @@ def test_prepare_agent_turn_seeds_optional_supported_inputs():
     )
 
     assert captured == {
-        "carryover": {"previous": "state"},
         "static_runtime_context": "Static Runtime Context",
         "runtime_context_seeded_by_host": True,
         "interrupt_reason": "stop_requested",
@@ -315,6 +431,62 @@ def test_run_existing_agent_single_turn_passes_supported_optional_kwargs():
         "disable_tools": True,
         "attachments": [{"kind": "image"}],
     }
+
+
+def test_run_existing_agent_single_turn_always_prepares_before_execution():
+    events: list[tuple[str, object]] = []
+    history = [{"role": "assistant", "content": "previous"}]
+
+    class FakeAgent:
+        def seed_chat_history(self, messages):
+            events.append(("prepare", messages))
+
+        def run_single_turn(self, initial_prompt=None):
+            events.append(("run", initial_prompt))
+            return {"status": "completed"}
+
+    result = run_existing_agent_single_turn(
+        FakeAgent(),
+        initial_prompt="continue",
+        chat_history=history,
+    )
+
+    assert result == {"status": "completed"}
+    assert events == [("prepare", history), ("run", "continue")]
+
+
+def test_rejected_carryover_clears_old_active_state_without_history():
+    class FakeAgent:
+        def __init__(self):
+            self.messages = ["old current user"]
+            self.goal = "old goal"
+            self.turn_identity = "turn-old"
+
+        def set_turn_identity(self, turn_identity):
+            self.turn_identity = turn_identity
+
+        def clear_turn_preparation_state(self):
+            self.messages = None
+            self.goal = ""
+
+        def seed_turn_carryover(self, _carryover):
+            raise AssertionError("stale carryover must not be seeded")
+
+    agent = FakeAgent()
+    prepare_agent_turn(
+        agent,
+        turn_identity="turn-new",
+        carryover={
+            "turnIdentity": "turn-old",
+            "terminal": False,
+            "goal": "old goal",
+            "messages": [{"kind": "dict", "role": "user", "content": "old current user"}],
+        },
+    )
+
+    assert agent.turn_identity == "turn-new"
+    assert agent.messages is None
+    assert agent.goal == ""
 
 
 def test_run_existing_agent_single_turn_wraps_runner_with_prompt_cache_partition(monkeypatch):

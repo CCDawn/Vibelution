@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import re
 from collections import Counter
 from datetime import datetime, timezone
@@ -16,6 +17,24 @@ LOG_INFO_DIR = PROJECT_ROOT / "log_info"
 MAX_CANDIDATE_SCAN_LINES = 120
 MAX_RESULT_ITEMS = 40
 MAX_TOOL_SEQUENCE = 80
+MAX_SCENE_CONVERSATION_FILES = 20
+MAX_CORRELATION_SUMMARIES = 12
+
+IDENTITY_ALIASES = {
+    "sessionId": ("session_id", "sessionId"),
+    "turnId": ("turn_id", "turnId"),
+    "invocationId": ("invocation_id", "invocationId"),
+    "submissionId": (
+        "submission_id",
+        "submissionId",
+        "client_submission_id",
+        "clientSubmissionId",
+    ),
+}
+BOUNDARY_IDENTITY_KEYS = ("turnId", "invocationId", "submissionId")
+TERMINAL_SUCCESS = {"success", "succeeded", "completed", "complete", "ok"}
+TERMINAL_ERROR = {"error", "failed", "failure"}
+TERMINAL_STOP = {"cancelled", "canceled", "stopped", "aborted", "terminated"}
 
 
 def conversation_log_inspect_tool(
@@ -23,6 +42,10 @@ def conversation_log_inspect_tool(
     log_path: str = "",
     limit: int = 5,
     max_events: int = 8000,
+    session_id: str = "",
+    turn_id: str = "",
+    invocation_id: str = "",
+    submission_id: str = "",
 ) -> str:
     """Inspect conversation JSONL logs and return compact diagnostics."""
 
@@ -32,6 +55,10 @@ def conversation_log_inspect_tool(
             log_path=log_path,
             limit=limit,
             max_events=max_events,
+            session_id=session_id,
+            turn_id=turn_id,
+            invocation_id=invocation_id,
+            submission_id=submission_id,
         )
     except Exception as exc:
         payload = {
@@ -48,20 +75,35 @@ def inspect_conversation_logs(
     log_path: str = "",
     limit: int = 5,
     max_events: int = 8000,
+    session_id: str = "",
+    turn_id: str = "",
+    invocation_id: str = "",
+    submission_id: str = "",
 ) -> dict[str, Any]:
     normalized_limit = _bounded_int(limit, default=5, minimum=1, maximum=20)
     normalized_max_events = _bounded_int(max_events, default=8000, minimum=200, maximum=50000)
+    identity_filters = {
+        "sessionId": str(session_id or "").strip(),
+        "turnId": str(turn_id or "").strip(),
+        "invocationId": str(invocation_id or "").strip(),
+        "submissionId": str(submission_id or "").strip(),
+    }
     candidates = _select_candidate_logs(query=query, log_path=log_path, limit=normalized_limit)
     inspections = [
-        _inspect_log(path, max_events=normalized_max_events)
+        _inspect_target(
+            path,
+            max_events=normalized_max_events,
+            identity_filters=identity_filters,
+        )
         for path in candidates
     ]
     return {
         "status": "ok",
         "tool": "conversation_log_inspect_tool",
         "inspectedAt": datetime.now(timezone.utc).isoformat(),
-        "query": str(query or "").strip(),
+        "query": _safe_text(str(query or "").strip(), limit=120),
         "logPath": str(log_path or "").strip(),
+        "identityFilters": identity_filters,
         "candidateCount": len(candidates),
         "candidates": [
             _candidate_summary(path)
@@ -70,7 +112,7 @@ def inspect_conversation_logs(
         "inspections": inspections,
         "summary": _aggregate_inspections(inspections),
         "usageGuidance": [
-            "Use this tool before grep/read_file when the task is to review conversation JSONL logs.",
+            "Use this tool before grep/read_file when reviewing conversation JSONL or a runtime scene package.",
             "Read raw log lines only after this summary identifies a narrow path and line range.",
         ],
     }
@@ -114,15 +156,41 @@ def _resolve_allowed_log_path(value: str) -> Path:
     root = PROJECT_ROOT.resolve()
     if root not in (path, *path.parents):
         raise ValueError("conversation_log_inspect_tool only reads logs inside the project root.")
-    if path.suffix.lower() != ".jsonl":
-        raise ValueError("conversation_log_inspect_tool only reads .jsonl logs.")
     rel = path.relative_to(root).as_posix()
-    allowed = rel.startswith("log_info/") or rel.startswith("logs/runtime_scenes/")
-    if not allowed:
+    if path.is_dir():
+        if not rel.startswith("logs/runtime_scenes/"):
+            raise ValueError(
+                "conversation_log_inspect_tool only reads log_info/ JSONL files or logs/runtime_scenes/ packages."
+            )
+        if not (path / "manifest.json").is_file() and not (path / "timeline.jsonl").is_file():
+            raise ValueError("Runtime scene package must contain manifest.json or timeline.jsonl.")
+        return path
+    if path.suffix.lower() != ".jsonl":
+        raise ValueError("conversation_log_inspect_tool only reads .jsonl logs or runtime scene packages.")
+    if not (rel.startswith("log_info/") or rel.startswith("logs/runtime_scenes/")):
         raise ValueError("conversation_log_inspect_tool only reads log_info/ or logs/runtime_scenes/ JSONL files.")
     if not path.exists() or not path.is_file():
         raise FileNotFoundError(f"Log file not found: {rel}")
     return path
+
+
+def _inspect_target(
+    path: Path,
+    *,
+    max_events: int,
+    identity_filters: dict[str, str],
+) -> dict[str, Any]:
+    if path.is_dir():
+        return _inspect_scene_package(
+            path,
+            max_events=max_events,
+            identity_filters=identity_filters,
+        )
+    return _inspect_log(
+        path,
+        max_events=max_events,
+        identity_filters=identity_filters,
+    )
 
 
 def _log_matches_query(path: Path, normalized_query: str) -> bool:
@@ -140,25 +208,80 @@ def _log_matches_query(path: Path, normalized_query: str) -> bool:
     return False
 
 
-def _inspect_log(path: Path, *, max_events: int) -> dict[str, Any]:
-    event_counts: Counter[str] = Counter()
-    tool_counts: Counter[str] = Counter()
-    tool_call_keys: Counter[str] = Counter()
-    tool_sequence: list[dict[str, Any]] = []
-    large_results: list[dict[str, Any]] = []
-    errors: list[dict[str, Any]] = []
-    token_usage: list[dict[str, Any]] = []
-    llm_calls = 0
-    total_input = 0
-    total_output = 0
-    total_events = 0
-    malformed_lines = 0
-    first_event: dict[str, Any] | None = None
-    last_event: dict[str, Any] | None = None
+def _inspect_log(
+    path: Path,
+    *,
+    max_events: int,
+    identity_filters: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    records, malformed_lines, truncated = _read_jsonl_records(path, max_events=max_events)
+    return _inspect_records(
+        path=path,
+        records=records,
+        malformed_lines=malformed_lines,
+        truncated=truncated,
+        identity_filters=identity_filters or {},
+        kind="jsonl",
+        source_files=[path],
+    )
 
+
+def _inspect_scene_package(
+    path: Path,
+    *,
+    max_events: int,
+    identity_filters: dict[str, str],
+) -> dict[str, Any]:
+    source_files: list[Path] = []
+    timeline = path / "timeline.jsonl"
+    if timeline.is_file():
+        source_files.append(timeline)
+    conversations = path / "conversations"
+    if conversations.is_dir():
+        conversation_files = sorted(
+            conversations.glob("*.jsonl"),
+            key=lambda item: item.stat().st_mtime,
+            reverse=True,
+        )[:MAX_SCENE_CONVERSATION_FILES]
+        source_files.extend(conversation_files)
+
+    records: list[dict[str, Any]] = []
+    malformed_lines = 0
+    truncated = False
+    for source in source_files:
+        remaining = max_events - len(records)
+        if remaining <= 0:
+            truncated = True
+            break
+        source_records, malformed, source_truncated = _read_jsonl_records(
+            source,
+            max_events=remaining,
+        )
+        records.extend(source_records)
+        malformed_lines += malformed
+        truncated = truncated or source_truncated
+
+    inspection = _inspect_records(
+        path=path,
+        records=records,
+        malformed_lines=malformed_lines,
+        truncated=truncated,
+        identity_filters=identity_filters,
+        kind="runtime_scene",
+        source_files=source_files,
+    )
+    inspection["scene"] = _scene_manifest_summary(path / "manifest.json")
+    return inspection
+
+
+def _read_jsonl_records(path: Path, *, max_events: int) -> tuple[list[dict[str, Any]], int, bool]:
+    records: list[dict[str, Any]] = []
+    malformed_lines = 0
+    truncated = False
     with path.open("r", encoding="utf-8", errors="replace") as handle:
         for line_no, line in enumerate(handle, start=1):
-            if total_events >= max_events:
+            if len(records) >= max_events:
+                truncated = True
                 break
             stripped = line.strip()
             if not stripped:
@@ -171,50 +294,86 @@ def _inspect_log(path: Path, *, max_events: int) -> dict[str, Any]:
             if not isinstance(event, dict):
                 malformed_lines += 1
                 continue
-            total_events += 1
-            last_event = event
-            if first_event is None:
-                first_event = event
-            event_type = str(event.get("type") or "unknown").strip() or "unknown"
-            event_counts[event_type] += 1
+            records.append({
+                "event": event,
+                "line": line_no,
+                "source": _relative(path),
+            })
+    return records, malformed_lines, truncated
 
-            if event_type == "llm_request":
-                llm_calls += 1
-                usage = _token_usage_from_event(event)
-                if usage:
-                    total_input += usage["inputTokens"]
-                    total_output += usage["outputTokens"]
-                    token_usage.append({"line": line_no, **usage})
-            elif event_type in {"token_usage", "llm_response"}:
-                usage = _token_usage_from_event(event)
-                if usage:
-                    total_input += usage["inputTokens"]
-                    total_output += usage["outputTokens"]
-                    token_usage.append({"line": line_no, **usage})
 
-            if event_type == "tool_call":
-                tool_name = str(event.get("tool_name") or event.get("toolName") or "").strip() or "unknown"
-                tool_counts[tool_name] += 1
-                args = event.get("tool_args") if isinstance(event.get("tool_args"), dict) else {}
-                key = _tool_call_key(tool_name, args)
-                tool_call_keys[key] += 1
-                result_length = _bounded_int(event.get("tool_result_length"), default=0, minimum=0, maximum=10_000_000)
-                sequence_item = {
-                    "line": line_no,
-                    "turn": event.get("turn"),
-                    "tool": tool_name,
-                    "status": str(event.get("status") or "").strip(),
-                    "resultLength": result_length,
-                    "argsSummary": _args_summary(args),
-                }
-                if len(tool_sequence) < MAX_TOOL_SEQUENCE:
-                    tool_sequence.append(sequence_item)
-                if result_length >= 8000 and len(large_results) < MAX_RESULT_ITEMS:
-                    large_results.append(sequence_item)
+def _inspect_records(
+    *,
+    path: Path,
+    records: list[dict[str, Any]],
+    malformed_lines: int,
+    truncated: bool,
+    identity_filters: dict[str, str],
+    kind: str,
+    source_files: list[Path],
+) -> dict[str, Any]:
+    event_counts: Counter[str] = Counter()
+    tool_counts: Counter[str] = Counter()
+    tool_call_keys: Counter[str] = Counter()
+    tool_sequence: list[dict[str, Any]] = []
+    large_results: list[dict[str, Any]] = []
+    errors: list[dict[str, Any]] = []
+    token_usage: list[dict[str, Any]] = []
+    llm_calls = 0
+    total_input = 0
+    total_output = 0
+    total_events = len(records)
+    first_event: dict[str, Any] | None = None
+    last_event: dict[str, Any] | None = None
 
-            if event_type in {"llm_error", "error"} or _event_looks_like_error(event):
-                if len(errors) < MAX_RESULT_ITEMS:
-                    errors.append(_error_summary(event, line_no=line_no))
+    for record in records:
+        event = record["event"]
+        line_no = int(record["line"])
+        source = str(record["source"])
+        last_event = event
+        if first_event is None:
+            first_event = event
+        event_type = str(event.get("type") or event.get("event_code") or "unknown").strip() or "unknown"
+        event_counts[event_type] += 1
+
+        if event_type == "llm_request":
+            llm_calls += 1
+            usage = _token_usage_from_event(event)
+            if usage:
+                total_input += usage["inputTokens"]
+                total_output += usage["outputTokens"]
+                token_usage.append({"source": source, "line": line_no, **usage})
+        elif event_type in {"token_usage", "llm_response"}:
+            usage = _token_usage_from_event(event)
+            if usage:
+                total_input += usage["inputTokens"]
+                total_output += usage["outputTokens"]
+                token_usage.append({"source": source, "line": line_no, **usage})
+
+        if event_type == "tool_call":
+            tool_name = str(event.get("tool_name") or event.get("toolName") or "").strip() or "unknown"
+            tool_counts[tool_name] += 1
+            args = event.get("tool_args") if isinstance(event.get("tool_args"), dict) else {}
+            key = _tool_call_key(tool_name, args)
+            tool_call_keys[key] += 1
+            result_length = _bounded_int(event.get("tool_result_length"), default=0, minimum=0, maximum=10_000_000)
+            sequence_item = {
+                "source": source,
+                "line": line_no,
+                "turn": event.get("turn"),
+                "tool": tool_name,
+                "status": str(event.get("status") or "").strip(),
+                "resultLength": result_length,
+                "argsSummary": _args_summary(args),
+            }
+            if len(tool_sequence) < MAX_TOOL_SEQUENCE:
+                tool_sequence.append(sequence_item)
+            if result_length >= 8000 and len(large_results) < MAX_RESULT_ITEMS:
+                large_results.append(sequence_item)
+
+        if event_type in {"llm_error", "error"} or _event_looks_like_error(event):
+            if len(errors) < MAX_RESULT_ITEMS:
+                errors.append(_error_summary(event, line_no=line_no, source=source))
 
     repeated_tools = [
         {"call": key, "count": count}
@@ -231,13 +390,21 @@ def _inspect_log(path: Path, *, max_events: int) -> dict[str, Any]:
         llm_calls=llm_calls,
         errors=errors,
     )
+    stat = path.stat()
+    size_bytes = (
+        sum(item.stat().st_size for item in source_files if item.is_file())
+        if path.is_dir()
+        else stat.st_size
+    )
     return {
         "path": _relative(path),
-        "sizeBytes": path.stat().st_size,
-        "modifiedAt": datetime.fromtimestamp(path.stat().st_mtime, timezone.utc).isoformat(),
+        "kind": kind,
+        "sizeBytes": size_bytes,
+        "modifiedAt": datetime.fromtimestamp(stat.st_mtime, timezone.utc).isoformat(),
+        "sourceFiles": [_candidate_summary(item) for item in source_files],
         "session": _session_summary(first_event),
         "eventCount": total_events,
-        "truncatedAtMaxEvents": total_events >= max_events,
+        "truncatedAtMaxEvents": truncated,
         "malformedLineCount": malformed_lines,
         "eventTypes": dict(event_counts.most_common()),
         "llmCalls": llm_calls,
@@ -257,10 +424,11 @@ def _inspect_log(path: Path, *, max_events: int) -> dict[str, Any]:
         },
         "errors": errors,
         "inefficiencies": inefficiencies,
+        "correlation": _correlate_boundaries(records, identity_filters=identity_filters),
         "lastEvent": {
             "type": str((last_event or {}).get("type") or ""),
-            "line": total_events,
-            "timestamp": str((last_event or {}).get("timestamp") or ""),
+            "line": int(records[-1]["line"]) if records else 0,
+            "timestamp": str((last_event or {}).get("timestamp") or (last_event or {}).get("ts") or ""),
         },
     }
 
@@ -269,7 +437,8 @@ def _candidate_summary(path: Path) -> dict[str, Any]:
     stat = path.stat()
     return {
         "path": _relative(path),
-        "sizeBytes": stat.st_size,
+        "kind": "runtime_scene" if path.is_dir() else "jsonl",
+        "sizeBytes": stat.st_size if path.is_file() else 0,
         "modifiedAt": datetime.fromtimestamp(stat.st_mtime, timezone.utc).isoformat(),
     }
 
@@ -285,6 +454,192 @@ def _aggregate_inspections(inspections: list[dict[str, Any]]) -> dict[str, Any]:
         "errorCount": sum(len(item.get("errors") or []) for item in inspections),
         "inefficiencyCount": sum(len(item.get("inefficiencies") or []) for item in inspections),
     }
+
+
+def _scene_manifest_summary(path: Path) -> dict[str, Any]:
+    if not path.is_file():
+        return {"manifestPresent": False}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8", errors="replace"))
+    except (OSError, json.JSONDecodeError):
+        return {"manifestPresent": True, "manifestReadable": False}
+    if not isinstance(payload, dict):
+        return {"manifestPresent": True, "manifestReadable": False}
+    package = payload.get("package") if isinstance(payload.get("package"), dict) else {}
+    return {
+        "manifestPresent": True,
+        "manifestReadable": True,
+        "runtimeSceneId": str(payload.get("runtime_scene_id") or package.get("package_id") or "").strip(),
+        "status": str(payload.get("status") or "").strip(),
+        "result": str(payload.get("result") or "").strip(),
+        "startedAt": str(payload.get("started_at") or package.get("started_at") or "").strip(),
+        "endedAt": str(payload.get("ended_at") or package.get("ended_at") or "").strip(),
+        "stopReasonSummary": _text_fingerprint(str(payload.get("stop_reason") or "")),
+    }
+
+
+def _correlate_boundaries(
+    records: list[dict[str, Any]],
+    *,
+    identity_filters: dict[str, str],
+) -> dict[str, Any]:
+    boundary_records: list[dict[str, Any]] = []
+    for order, record in enumerate(records):
+        identities = _event_identities(record["event"])
+        if not any(identities.get(key) for key in BOUNDARY_IDENTITY_KEYS):
+            continue
+        boundary_records.append({**record, "order": order, "identities": identities})
+
+    parents = list(range(len(boundary_records)))
+
+    def find(index: int) -> int:
+        while parents[index] != index:
+            parents[index] = parents[parents[index]]
+            index = parents[index]
+        return index
+
+    def union(left: int, right: int) -> None:
+        left_root = find(left)
+        right_root = find(right)
+        if left_root != right_root:
+            parents[right_root] = left_root
+
+    owners: dict[tuple[str, str], int] = {}
+    for index, record in enumerate(boundary_records):
+        for key in BOUNDARY_IDENTITY_KEYS:
+            value = record["identities"].get(key)
+            if not value:
+                continue
+            token = (key, value)
+            if token in owners:
+                union(index, owners[token])
+            else:
+                owners[token] = index
+
+    grouped: dict[int, list[dict[str, Any]]] = {}
+    for index, record in enumerate(boundary_records):
+        grouped.setdefault(find(index), []).append(record)
+
+    boundaries = [_boundary_summary(items) for items in grouped.values()]
+    active_filters = {key: value for key, value in identity_filters.items() if value}
+    if active_filters:
+        boundaries = [
+            boundary
+            for boundary in boundaries
+            if all(boundary["identity"].get(key) == value for key, value in active_filters.items())
+        ]
+    boundaries.sort(key=lambda item: int(item["lastOrder"]), reverse=True)
+
+    terminal = [item for item in boundaries if item["terminal"]]
+    errors = [item for item in boundaries if item["state"] == "error"]
+    successful = [item for item in boundaries if item["state"] == "success"]
+    unterminated = [item for item in boundaries if not item["terminal"]]
+    current_unterminated = unterminated[0] if unterminated else None
+    return {
+        "filters": active_filters,
+        "boundaryCount": len(boundaries),
+        "recentSuccessfulBoundary": _public_boundary(successful[0]) if successful else None,
+        "currentUnterminatedBoundary": _public_boundary(current_unterminated) if current_unterminated else None,
+        "terminalSummary": [_public_boundary(item) for item in terminal[:MAX_CORRELATION_SUMMARIES]],
+        "errorSummary": [_public_boundary(item) for item in errors[:MAX_CORRELATION_SUMMARIES]],
+        "missingIdentity": list((current_unterminated or {}).get("missingIdentity") or []),
+        "truncated": len(boundaries) > MAX_CORRELATION_SUMMARIES,
+    }
+
+
+def _event_identities(event: dict[str, Any]) -> dict[str, str]:
+    containers = [event]
+    for key in ("fields", "metadata", "identity"):
+        value = event.get(key)
+        if isinstance(value, dict):
+            containers.append(value)
+    identities: dict[str, str] = {}
+    for canonical, aliases in IDENTITY_ALIASES.items():
+        for container in containers:
+            for alias in aliases:
+                value = container.get(alias)
+                if value is not None and str(value).strip():
+                    identities[canonical] = str(value).strip()[:240]
+                    break
+            if canonical in identities:
+                break
+    return identities
+
+
+def _boundary_summary(records: list[dict[str, Any]]) -> dict[str, Any]:
+    records.sort(key=lambda item: int(item["order"]))
+    identity: dict[str, str] = {}
+    terminal_records: list[tuple[str, dict[str, Any]]] = []
+    error_records: list[dict[str, Any]] = []
+    for record in records:
+        identity.update(record["identities"])
+        terminal_state = _terminal_state(record["event"])
+        if terminal_state:
+            terminal_records.append((terminal_state, record))
+        if terminal_state == "error" or _event_looks_like_error(record["event"]):
+            error_records.append(record)
+    state = terminal_records[-1][0] if terminal_records else "open"
+    terminal_record = terminal_records[-1][1] if terminal_records else None
+    error_record = error_records[-1] if error_records else None
+    return {
+        "identity": identity,
+        "missingIdentity": [key for key in IDENTITY_ALIASES if not identity.get(key)],
+        "state": state,
+        "terminal": bool(terminal_records),
+        "eventCount": len(records),
+        "firstEvent": _safe_event_summary(records[0]),
+        "lastEvent": _safe_event_summary(records[-1]),
+        "terminalEvent": _safe_event_summary(terminal_record) if terminal_record else None,
+        "errorType": _error_type((error_record or {}).get("event") or {}),
+        "errorEvent": _safe_event_summary(error_record) if error_record else None,
+        "lastOrder": int(records[-1]["order"]),
+    }
+
+
+def _public_boundary(boundary: dict[str, Any] | None) -> dict[str, Any] | None:
+    if boundary is None:
+        return None
+    return {key: value for key, value in boundary.items() if key != "lastOrder"}
+
+
+def _terminal_state(event: dict[str, Any]) -> str:
+    status = str(event.get("status") or "").strip().lower()
+    outcome = str(event.get("outcome") or "").strip().lower()
+    event_code = str(event.get("event_code") or event.get("type") or "").strip().lower()
+    values = {status, outcome}
+    if values & TERMINAL_ERROR or event_code.endswith((".failed", ".failure", ".error")):
+        return "error"
+    if values & TERMINAL_STOP or event_code.endswith((".cancelled", ".canceled", ".stopped", ".aborted", ".terminated")):
+        return "stopped"
+    if values & TERMINAL_SUCCESS or event_code.endswith((".succeeded", ".completed")):
+        return "success"
+    return ""
+
+
+def _safe_event_summary(record: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not record:
+        return None
+    event = record["event"]
+    return {
+        "source": str(record["source"]),
+        "line": int(record["line"]),
+        "timestamp": str(event.get("ts") or event.get("timestamp") or "")[:80],
+        "eventCode": str(event.get("event_code") or event.get("type") or "")[:160],
+        "status": str(event.get("status") or "")[:80],
+        "outcome": str(event.get("outcome") or "")[:80],
+        "level": str(event.get("level") or "")[:40],
+    }
+
+
+def _error_type(event: dict[str, Any]) -> str:
+    fields = event.get("fields") if isinstance(event.get("fields"), dict) else {}
+    return str(
+        event.get("error_type")
+        or event.get("errorType")
+        or fields.get("error_type")
+        or fields.get("errorType")
+        or ""
+    ).strip()[:160]
 
 
 def _token_usage_from_event(event: dict[str, Any]) -> dict[str, int] | None:
@@ -307,16 +662,19 @@ def _token_usage_from_event(event: dict[str, Any]) -> dict[str, int] | None:
 
 
 def _tool_call_key(tool_name: str, args: dict[str, Any]) -> str:
-    stable_args = json.dumps(args or {}, ensure_ascii=False, sort_keys=True)[:400]
-    return f"{tool_name} {stable_args}".strip()
+    stable_args = json.dumps(args or {}, ensure_ascii=False, sort_keys=True, default=str)
+    digest = hashlib.sha256(stable_args.encode("utf-8", errors="replace")).hexdigest()[:16]
+    return f"{tool_name} args_sha256:{digest}".strip()
 
 
 def _args_summary(args: dict[str, Any]) -> dict[str, Any]:
-    summary: dict[str, Any] = {}
-    for key in ("file_path", "search_dir", "regex_pattern", "query", "log_path", "limit", "max_lines", "offset"):
-        if key in args:
-            value = args[key]
-            summary[key] = str(value)[:240] if isinstance(value, str) else value
+    summary: dict[str, Any] = {"keys": sorted(str(key) for key in args)[:20]}
+    for key in ("limit", "max_lines", "offset"):
+        if key in args and isinstance(args[key], (int, float, bool)):
+            summary[key] = args[key]
+    for key in ("file_path", "search_dir", "log_path"):
+        if key in args and isinstance(args[key], str):
+            summary[f"{key}Length"] = len(args[key])
     return summary
 
 
@@ -326,7 +684,7 @@ def _event_looks_like_error(event: dict[str, Any]) -> bool:
     return status in {"error", "failed", "failure"} or level in {"error", "critical"}
 
 
-def _error_summary(event: dict[str, Any], *, line_no: int) -> dict[str, Any]:
+def _error_summary(event: dict[str, Any], *, line_no: int, source: str = "") -> dict[str, Any]:
     text = str(
         event.get("message")
         or event.get("error")
@@ -334,13 +692,36 @@ def _error_summary(event: dict[str, Any], *, line_no: int) -> dict[str, Any]:
         or event.get("tool_result_preview")
         or ""
     ).strip()
+    detail = _text_fingerprint(text)
     return {
+        "source": source,
         "line": line_no,
         "type": str(event.get("type") or "").strip(),
+        "eventCode": str(event.get("event_code") or event.get("type") or "").strip()[:160],
         "status": str(event.get("status") or "").strip(),
         "level": str(event.get("level") or "").strip(),
-        "preview": text[:500],
+        "errorType": _error_type(event),
+        "detailLength": detail["length"],
+        "detailSha256": detail["sha256"],
     }
+
+
+def _text_fingerprint(value: str) -> dict[str, Any]:
+    text = str(value or "")
+    return {
+        "length": len(text),
+        "sha256": hashlib.sha256(text.encode("utf-8", errors="replace")).hexdigest(),
+    }
+
+
+def _safe_text(value: str, *, limit: int) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    if re.search(r"(?i)(api[_-]?key|authorization|bearer|password|secret|access[_-]?token|refresh[_-]?token)\s*[:=]", text):
+        return "[REDACTED]"
+    text = re.sub(r"(?i)bearer\s+[A-Za-z0-9._~+/=-]+", "Bearer [REDACTED]", text)
+    return text[:limit]
 
 
 def _detect_inefficiencies(

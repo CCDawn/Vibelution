@@ -13,6 +13,7 @@ from .semantic_messages import (
     InvocationScope,
     ReasoningReplayPart,
     ReasoningTextPart,
+    SemanticChainValidationError,
     SemanticGenerationSettings,
     SemanticMessage,
     SemanticModelRequest,
@@ -20,6 +21,7 @@ from .semantic_messages import (
     TextPart,
     ToolCallPart,
     ToolResultPart,
+    validate_provider_ready_messages,
 )
 from .types import CanonicalItemIdentity, CanonicalToolCall, CanonicalToolResult
 
@@ -155,9 +157,13 @@ def _project_messages(
     system_message_policy: str,
     allow_assistant_prefill: bool,
     reasoning_roundtrip: bool,
+    replay_state: ProviderReplayState | None,
 ) -> list[SemanticMessage]:
     projected: list[SemanticMessage] = []
     calls_by_id: dict[str, CanonicalToolCall] = {}
+    replay_item_ids = {
+        item.item_id for item in (replay_state.opaque_items if replay_state is not None else ())
+    }
     system_seen = False
     for index, message in enumerate(messages):
         if isinstance(message, Mapping) and "toolCalls" in message:
@@ -171,7 +177,21 @@ def _project_messages(
             if system_seen and system_message_policy == "first_only_rest_user":
                 role = "user"
             system_seen = True
-        parts = _content_parts(_value(message, "content", ""), index)
+        parts: list[Any] = []
+        replay_item_id = str(
+            _value(message, "reasoning_replay_item_id", "")
+            or _value(_value(message, "additional_kwargs", {}), "reasoning_replay_item_id", "")
+            or ""
+        ).strip()
+        if replay_item_id and replay_state is not None:
+            if replay_item_id not in replay_item_ids:
+                raise SemanticProjectionError(
+                    "missing_replay_item",
+                    index,
+                    f"reasoning replay item `{replay_item_id}` is unavailable",
+                )
+            parts.append(ReasoningReplayPart(replay_item_id))
+        parts.extend(_content_parts(_value(message, "content", ""), index))
         raw_calls = _value(message, "tool_calls", ()) or ()
         for raw_call in raw_calls:
             call = _tool_call(raw_call, scope=scope, index=index)
@@ -179,13 +199,6 @@ def _project_messages(
                 raise SemanticProjectionError("duplicate_tool_call_id", index, "duplicate tool call id")
             calls_by_id[call.call_id] = call
             parts.append(ToolCallPart(call))
-        replay_item_id = str(
-            _value(message, "reasoning_replay_item_id", "")
-            or _value(_value(message, "additional_kwargs", {}), "reasoning_replay_item_id", "")
-            or ""
-        ).strip()
-        if replay_item_id:
-            parts.append(ReasoningReplayPart(replay_item_id))
         reasoning_text = str(
             _value(message, "reasoning_content", "")
             or _value(_value(message, "additional_kwargs", {}), "reasoning_content", "")
@@ -212,6 +225,10 @@ def _project_messages(
         if role == "assistant" and not parts and not allow_assistant_prefill:
             continue
         projected.append(SemanticMessage(role=role, parts=tuple(parts)))
+    try:
+        validate_provider_ready_messages(projected)
+    except SemanticChainValidationError as exc:
+        raise SemanticProjectionError(exc.code, exc.message_index, str(exc)) from exc
     return projected
 
 
@@ -244,6 +261,7 @@ def project_semantic_request(input: SemanticProjectionInput) -> SemanticModelReq
                 system_message_policy=input.system_message_policy,
                 allow_assistant_prefill=input.allow_assistant_prefill,
                 reasoning_roundtrip=input.reasoning_roundtrip,
+                replay_state=input.replay_state,
             )
         ),
         tools=tuple(_project_tools(input.tools, tool_to_schema=input.tool_to_schema)),

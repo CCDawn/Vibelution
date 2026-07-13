@@ -739,6 +739,8 @@ class SelfEvolvingAgent:
         self._active_goal: str = ""
         self._active_turn_messages: Optional[List[Any]] = None
         self._active_turn_goal: str = ""
+        self._active_turn_identity: str = ""
+        self._active_turn_terminal: bool = False
         self._pending_static_context_blocks: List[str] = []
         self._pending_runtime_context_blocks: List[str] = []
         self._pending_volatile_context_blocks: List[str] = []
@@ -1728,11 +1730,16 @@ class SelfEvolvingAgent:
             if not isinstance(item, dict):
                 continue
             role = str(item.get("role") or "").strip().lower()
+            assistant_tool_calls = (
+                self._normalize_seeded_tool_calls(item.get("tool_calls") or item.get("toolCalls") or [])
+                if role == "assistant"
+                else []
+            )
             raw_content = item.get("content")
             content = raw_content if isinstance(raw_content, list) else str(raw_content or "").strip()
             if isinstance(content, str):
                 content = self._sanitize_seeded_chat_content(role, content)
-            if not content:
+            if not content and not assistant_tool_calls:
                 continue
             if role in {"runtime_context", "runtime", "system"}:
                 restored.append(SystemMessage(content=str(content)))
@@ -1742,15 +1749,49 @@ class SelfEvolvingAgent:
                 else:
                     restored.append(build_chat_user_message(content))
             elif role == "assistant":
-                restored.append(AIMessage(content=str(content)))
+                restored.append(AIMessage(content=str(content), tool_calls=assistant_tool_calls))
             elif role == "tool":
-                restored.append(AIMessage(content=f"历史工具结果:\n{content}"))
+                tool_call_id = str(item.get("tool_call_id") or item.get("toolCallId") or "").strip()
+                if tool_call_id:
+                    restored.append(ToolMessage(content=str(content), tool_call_id=tool_call_id))
         if len(restored) <= 1:
             self._active_turn_messages = None
             self._active_turn_goal = ""
             return
         self._active_turn_messages = restored
         self._active_turn_goal = "__chat_session__"
+
+    @staticmethod
+    def _normalize_seeded_tool_calls(raw_calls: Any) -> List[Dict[str, Any]]:
+        normalized: List[Dict[str, Any]] = []
+        for raw_call in list(raw_calls or []):
+            if not isinstance(raw_call, dict):
+                continue
+            function = raw_call.get("function") if isinstance(raw_call.get("function"), dict) else {}
+            call_id = str(
+                raw_call.get("id")
+                or raw_call.get("tool_call_id")
+                or raw_call.get("toolCallId")
+                or ""
+            ).strip()
+            name = str(
+                raw_call.get("name")
+                or raw_call.get("toolName")
+                or function.get("name")
+                or ""
+            ).strip()
+            arguments = raw_call.get("args", raw_call.get("arguments", function.get("arguments", {})))
+            if isinstance(arguments, str):
+                try:
+                    parsed_arguments = json.loads(arguments)
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    parsed_arguments = {"raw": arguments}
+                arguments = parsed_arguments if isinstance(parsed_arguments, dict) else {"value": parsed_arguments}
+            if not isinstance(arguments, dict):
+                arguments = {}
+            if call_id and name:
+                normalized.append({"id": call_id, "name": name, "args": arguments})
+        return normalized
 
     @staticmethod
     def _sanitize_seeded_chat_content(role: str, content: str) -> str:
@@ -1877,15 +1918,68 @@ class SelfEvolvingAgent:
     def export_turn_carryover(self) -> Dict[str, Any]:
         messages = self._serialize_turn_messages(self._active_turn_messages)
         goal = str(getattr(self, "_active_turn_goal", "") or "").strip()
-        if not messages or not goal:
+        turn_identity = str(getattr(self, "_active_turn_identity", "") or "").strip()
+        terminal = bool(getattr(self, "_active_turn_terminal", False))
+        if terminal and turn_identity:
+            return {
+                "messages": [],
+                "goal": "",
+                "turnIdentity": turn_identity,
+                "terminal": True,
+            }
+        if not messages or not goal or not turn_identity:
             return {}
         return {
             "messages": messages,
             "goal": goal,
+            "turnIdentity": turn_identity,
+            "terminal": False,
         }
 
+    def set_turn_identity(self, turn_identity: str) -> None:
+        self._active_turn_identity = str(turn_identity or "").strip()
+
+    def clear_turn_preparation_state(self) -> None:
+        """Atomically clear state that could leak an earlier preparation path."""
+        self._active_turn_messages = None
+        self._active_turn_goal = ""
+        self._active_turn_terminal = False
+
+    def record_turn_preparation_diagnostic(self, fields: Dict[str, Any]) -> None:
+        """Record bounded preparation shape without prompt or credential content."""
+        allowed_paths = {"fresh", "history", "carryover"}
+        allowed_statuses = {
+            "absent",
+            "accepted",
+            "terminal",
+            "missing_identity",
+            "identity_mismatch",
+            "invalid",
+        }
+        safe_fields = {
+            "path": str(fields.get("path") or "fresh") if fields.get("path") in allowed_paths else "fresh",
+            "carryoverStatus": (
+                str(fields.get("carryoverStatus") or "absent")
+                if fields.get("carryoverStatus") in allowed_statuses
+                else "invalid"
+            ),
+            "historyMessageCount": min(10000, max(0, int(fields.get("historyMessageCount") or 0))),
+            "hasTurnIdentity": bool(fields.get("hasTurnIdentity")),
+            "staticContextChars": min(1000000, max(0, int(fields.get("staticContextChars") or 0))),
+            "dynamicContextChars": min(1000000, max(0, int(fields.get("dynamicContextChars") or 0))),
+        }
+        _record_agent_scene_event(
+            "prompt",
+            "agent.turn_preparation.completed",
+            message="Agent turn preparation selected one bounded context path.",
+            fields=safe_fields,
+        )
+
     def seed_turn_carryover(self, payload: Dict[str, Any] | None) -> None:
-        if not isinstance(payload, dict):
+        if TurnOutcomeController.classify_turn_carryover(
+            payload,
+            expected_turn_identity=str(getattr(self, "_active_turn_identity", "") or "").strip(),
+        ) != "accepted":
             return
         goal = str(payload.get("goal") or "").strip()
         messages = self._deserialize_turn_messages(payload.get("messages") or [])
@@ -1893,6 +1987,7 @@ class SelfEvolvingAgent:
             return
         self._active_turn_messages = messages
         self._active_turn_goal = goal
+        self._active_turn_terminal = False
 
     def _serialize_turn_messages(self, messages: Optional[List[Any]]) -> List[Dict[str, Any]]:
         serialized: List[Dict[str, Any]] = []
@@ -2106,7 +2201,7 @@ class SelfEvolvingAgent:
         effective_goal = (
             _normalize_goal_from_chat_history(
                 user_prompt,
-                goal_override,
+                None if policy.mode == AgentMode.CHAT else goal_override,
                 getattr(self, "_active_turn_messages", None),
             )
             or user_prompt
@@ -2790,9 +2885,12 @@ class SelfEvolvingAgent:
                 messages=carryover_messages,
                 lifecycle_action=lifecycle_action,
                 active_goal=self._active_goal,
+                turn_identity=str(getattr(self, "_active_turn_identity", "") or "").strip(),
             )
             self._active_turn_messages = carryover.messages
             self._active_turn_goal = carryover.goal
+            self._active_turn_identity = carryover.turn_identity
+            self._active_turn_terminal = carryover.terminal
             self._capture_chat_dataset_candidate_if_needed(
                 user_prompt=user_prompt,
                 current_turn=current_turn,
@@ -3585,6 +3683,7 @@ class SelfEvolvingAgent:
     ) -> Dict[str, Any]:
         """执行单轮思考并返回结构化摘要。"""
         policy = self._get_mode_policy()
+        effective_goal_override = None if policy.mode == AgentMode.CHAT else goal_override
         session_id = datetime.now().strftime("%Y%m%d_%H%M%S")
         _debug_logger.start_session(session_id)
         _debug_logger.system("单轮主循环开始", tag=self.name)
@@ -3596,7 +3695,7 @@ class SelfEvolvingAgent:
         )
         conversation_topic = _normalize_goal_from_chat_history(
             initial_prompt or "",
-            goal_override,
+            effective_goal_override,
             getattr(self, "_active_turn_messages", None),
         )
         logger.start_session(metadata={
@@ -3631,7 +3730,7 @@ class SelfEvolvingAgent:
             with cache_scope:
                 ok = self.think_and_act(
                     user_prompt=initial_prompt,
-                    goal_override=goal_override,
+                    goal_override=effective_goal_override,
                     attachments=attachments,
                 )
             snapshot = session.get_attention_snapshot()

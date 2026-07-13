@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from typing import Any, Callable
 
 from core.llm.payload_builder import prompt_cache_partition_scope
+from core.orchestration.turn_outcome import TurnOutcomeController
 from core.orchestration.turn_runtime import AgentTurnRuntime, AgentTurnRuntimeRequest, prepare_agent_turn_runtime
 
 
@@ -26,6 +27,8 @@ class AgentSingleTurnRequest:
     workspace_path: str | None = None
     config: Any = None
     carryover: dict[str, Any] | None = None
+    chat_history: list[dict[str, Any]] | None = None
+    turn_identity: str = ""
     runtime_context: str = ""
     static_runtime_context: str = ""
     dynamic_runtime_context: str = ""
@@ -84,17 +87,34 @@ def prepare_agent_turn(
     agent: Any,
     *,
     carryover: dict[str, Any] | None = None,
+    turn_identity: str = "",
     runtime_context: str = "",
     static_runtime_context: str = "",
     dynamic_runtime_context: str = "",
     interrupt_checker: InterruptChecker | None = None,
     chat_history: list[dict[str, Any]] | None = None,
 ) -> None:
-    """Seed optional Agent turn inputs when the runtime supports them."""
+    """Own preparation of history or same-turn recovery before execution."""
 
+    normalized_turn_identity = str(turn_identity or "").strip()
+    set_turn_identity = getattr(agent, "set_turn_identity", None)
+    if callable(set_turn_identity) and (normalized_turn_identity or carryover):
+        set_turn_identity(normalized_turn_identity)
+
+    carryover_status = TurnOutcomeController.classify_turn_carryover(
+        carryover,
+        expected_turn_identity=normalized_turn_identity,
+    )
     seed_turn_carryover = getattr(agent, "seed_turn_carryover", None)
-    if callable(seed_turn_carryover) and carryover:
+    if callable(seed_turn_carryover) and carryover_status == "accepted":
         seed_turn_carryover(carryover)
+    else:
+        clear_active_state = getattr(agent, "clear_turn_preparation_state", None)
+        if carryover_status != "absent" and callable(clear_active_state):
+            clear_active_state()
+        restore_chat_history = getattr(agent, "seed_chat_history", None)
+        if callable(restore_chat_history) and chat_history:
+            restore_chat_history(chat_history)
 
     host_seeded_runtime_context = False
     static_context_text = str(static_runtime_context or "").strip()
@@ -118,12 +138,27 @@ def prepare_agent_turn(
     if callable(stop_configurer) and interrupt_checker:
         stop_configurer(interrupt_checker)
 
-    restore_chat_history = getattr(agent, "seed_chat_history", None)
-    if callable(restore_chat_history) and chat_history:
-        restore_chat_history(chat_history)
+    record_diagnostic = getattr(agent, "record_turn_preparation_diagnostic", None)
+    if callable(record_diagnostic):
+        record_diagnostic(
+            {
+                "path": (
+                    "carryover"
+                    if carryover_status == "accepted"
+                    else "history"
+                    if chat_history
+                    else "fresh"
+                ),
+                "carryoverStatus": carryover_status,
+                "historyMessageCount": len(list(chat_history or [])),
+                "hasTurnIdentity": bool(normalized_turn_identity),
+                "staticContextChars": len(static_context_text),
+                "dynamicContextChars": len(str(dynamic_runtime_context or "").strip()),
+            }
+        )
 
 
-def run_existing_agent_single_turn(
+def _execute_existing_agent_single_turn(
     agent: Any,
     *,
     initial_prompt: str,
@@ -131,7 +166,7 @@ def run_existing_agent_single_turn(
     attachments: list[dict[str, Any]] | None = None,
     prompt_cache_partition: str = "",
 ) -> Any:
-    """Run one Turn on an already-created Agent with optional feature probing."""
+    """Execute one already-prepared Agent Turn."""
 
     runner = getattr(agent, "run_single_turn")
     kwargs: dict[str, Any] = {"initial_prompt": initial_prompt}
@@ -157,6 +192,42 @@ def run_existing_agent_single_turn(
         return runner(**kwargs)
 
 
+def run_existing_agent_single_turn(
+    agent: Any,
+    *,
+    initial_prompt: str,
+    disable_tools: bool = False,
+    attachments: list[dict[str, Any]] | None = None,
+    prompt_cache_partition: str = "",
+    carryover: dict[str, Any] | None = None,
+    turn_identity: str = "",
+    runtime_context: str = "",
+    static_runtime_context: str = "",
+    dynamic_runtime_context: str = "",
+    interrupt_checker: InterruptChecker | None = None,
+    chat_history: list[dict[str, Any]] | None = None,
+) -> Any:
+    """Prepare and run one Turn on an already-created Agent."""
+
+    prepare_agent_turn(
+        agent,
+        carryover=carryover,
+        turn_identity=turn_identity,
+        runtime_context=runtime_context,
+        static_runtime_context=static_runtime_context,
+        dynamic_runtime_context=dynamic_runtime_context,
+        interrupt_checker=interrupt_checker,
+        chat_history=chat_history,
+    )
+    return _execute_existing_agent_single_turn(
+        agent,
+        initial_prompt=initial_prompt,
+        disable_tools=disable_tools,
+        attachments=attachments,
+        prompt_cache_partition=prompt_cache_partition,
+    )
+
+
 def run_agent_single_turn(
     request: AgentSingleTurnRequest,
     *,
@@ -179,13 +250,19 @@ def run_agent_single_turn(
     prepare_agent_turn(
         agent,
         carryover=request.carryover,
+        chat_history=request.chat_history,
+        turn_identity=(
+            str(getattr(runtime, "run_id", "") or "").strip()
+            if runtime is not None
+            else str(request.turn_identity or "").strip()
+        ),
         runtime_context=request.runtime_context,
         static_runtime_context=request.static_runtime_context,
         dynamic_runtime_context=request.dynamic_runtime_context,
         interrupt_checker=request.interrupt_checker,
     )
 
-    raw_result = run_existing_agent_single_turn(
+    raw_result = _execute_existing_agent_single_turn(
         agent,
         initial_prompt=request.initial_prompt,
         prompt_cache_partition=prompt_cache_partition,

@@ -1969,12 +1969,8 @@ def test_submit_session_message_runs_turn_and_persists_reply(tmp_path, monkeypat
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
     base_config = session_service.get_config().model_copy(deep=True)
     primary_profile = base_config.llm.get_profile(role="primary")
-    dialogue_model_id = "session-message-dialogue-test"
-    base_config.llm.model_library[dialogue_model_id] = {
-        "provider_id": primary_profile.provider_id,
-        "model": "gpt-5.5",
-        "label": "Session message dialogue test",
-    }
+    base_config.llm.get_provider(primary_profile.provider_id)
+    dialogue_model_id = primary_profile.model_ref
     monkeypatch.setattr(session_service, "get_config", lambda: base_config)
     session_agent = agent_directory_service.ensure_agent_for_session(
         "session-live",
@@ -2077,7 +2073,7 @@ def test_submit_session_message_runs_turn_and_persists_reply(tmp_path, monkeypat
         "conversation.turn.worker_started",
         "conversation.turn.ui_capture_started",
         "conversation.turn.agent_created",
-        "conversation.turn.history_seeded",
+        "conversation.turn.history_assembled",
         "conversation.turn.agent_turn_started",
         "conversation.turn.agent_turn_returned",
         "conversation.turn.terminal_result",
@@ -2257,9 +2253,11 @@ def test_session_worker_seeds_slash_skill_runtime_context(tmp_path, monkeypatch)
     assert "Command: /brt" in seen_contexts[2]
     assert "Ask one question at a time." in seen_contexts[2]
     assert marker_calls
-    history_seeded_events = [event for event in lifecycle_events if event["phase"] == "history_seeded"]
-    assert history_seeded_events
-    history_fields = history_seeded_events[-1]["fields"]
+    history_assembled_events = [event for event in lifecycle_events if event["phase"] == "history_assembled"]
+    assert history_assembled_events
+    history_fields = history_assembled_events[-1]["fields"]
+    assert history_fields["assembledHistoryMessageCount"] >= 1
+    assert history_fields["historyAssemblyMs"] >= 0
     assert history_fields["staticRuntimeContextIncluded"] is True
     assert history_fields["dynamicRuntimeContextIncluded"] is True
     assert history_fields["dynamicRuntimeContextAvailable"] is True
@@ -2373,9 +2371,11 @@ def test_session_worker_seeds_active_skill_contract_on_later_turn(tmp_path, monk
     assert "Ask one question at a time." in volatile_contexts[0]
     assert "## Slash Skill Context" not in volatile_contexts[0]
     assert "SKILL.md:" not in volatile_contexts[0]
-    history_seeded_events = [event for event in lifecycle_events if event["phase"] == "history_seeded"]
-    assert history_seeded_events
-    history_fields = history_seeded_events[-1]["fields"]
+    history_assembled_events = [event for event in lifecycle_events if event["phase"] == "history_assembled"]
+    assert history_assembled_events
+    history_fields = history_assembled_events[-1]["fields"]
+    assert history_fields["assembledHistoryMessageCount"] >= 1
+    assert history_fields["historyAssemblyMs"] >= 0
     assert history_fields["activeSkillContractAvailable"] is True
     assert history_fields["activeSkillContextIncluded"] is True
     assert history_fields["activeSkillContextPlacement"] == "before_current_user"
@@ -3887,6 +3887,162 @@ def test_submit_session_message_continue_preserves_raw_prompt_and_dialogue_histo
     assert any(item["content"] == "?" for item in captured["seeded"])
 
 
+def test_web_session_prepares_agent_from_assembled_history_once(tmp_path, monkeypatch):
+    _seed_chat_state(
+        tmp_path,
+        conversations=[
+            {
+                "conversation_id": "session-live",
+                "title": "真实会话",
+                "updated_at": "2026-07-14T10:00:00",
+                "last_turn_status": "ready",
+                "messages": [],
+            }
+        ],
+    )
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    _bind_live_session_agent(tmp_path)
+
+    previous_turn_id = "turn-previous"
+    previous_call_id = "call-previous"
+    append_conversation_event(
+        tmp_path,
+        "session-live",
+        previous_turn_id,
+        EVENT_USER_MESSAGE,
+        status="recorded",
+        payload={"content": "读取 README 并汇报"},
+    )
+    append_conversation_event(
+        tmp_path,
+        "session-live",
+        previous_turn_id,
+        EVENT_ASSISTANT_MESSAGE,
+        status="completed",
+        payload={
+            "content": "",
+            "toolCalls": [
+                {
+                    "id": previous_call_id,
+                    "name": "read_file_tool",
+                    "arguments": {"file_path": "README.md"},
+                }
+            ],
+        },
+    )
+    append_conversation_event(
+        tmp_path,
+        "session-live",
+        previous_turn_id,
+        EVENT_TOOL_RESULT,
+        status="completed",
+        payload={
+            "toolCall": {
+                "id": previous_call_id,
+                "name": "read_file_tool",
+                "result": "# Vibelution",
+            }
+        },
+        tool_call_id=previous_call_id,
+    )
+    append_conversation_event(
+        tmp_path,
+        "session-live",
+        previous_turn_id,
+        EVENT_ASSISTANT_MESSAGE,
+        status="completed",
+        payload={"content": "README 显示这是 Vibelution 项目。"},
+    )
+
+    class DummyAgent:
+        def __init__(self):
+            self.out_of_band_history_seeds = []
+
+        def seed_chat_history(self, messages):
+            self.out_of_band_history_seeds.append(list(messages))
+
+    runtime_agent = DummyAgent()
+    runner_calls: list[dict] = []
+
+    def fake_run_existing_agent_single_turn(agent, **kwargs):
+        assert agent is runtime_agent
+        runner_calls.append(dict(kwargs))
+        return {
+            "status": "completed",
+            "summary": "已接住上一轮上下文。",
+            "raw_output": "已接住上一轮上下文。",
+            "outcome": "done",
+            "tool_call_count": 0,
+            "tool_trace": [],
+        }
+
+    monkeypatch.setattr(session_service, "create_chat_agent", lambda: runtime_agent)
+    monkeypatch.setattr(session_service, "run_existing_agent_single_turn", fake_run_existing_agent_single_turn)
+    monkeypatch.setattr(
+        session_service,
+        "_schedule_session_turn",
+        lambda context: session_service._run_session_turn(context),
+    )
+
+    response = client.post(
+        "/api/sessions/session-live/messages",
+        json={"content": "继续"},
+    )
+
+    assert response.status_code == 202, response.json()
+    assert runtime_agent.out_of_band_history_seeds == []
+    assert len(runner_calls) == 1
+    call = runner_calls[0]
+    assert call["initial_prompt"] == "继续"
+    assert call["turn_identity"]
+    history = call["chat_history"]
+    assert [item["role"] for item in history] == ["user", "assistant", "tool", "assistant"]
+    assert history[1]["tool_calls"][0]["id"] == previous_call_id
+    assert history[2]["tool_call_id"] == previous_call_id
+    assert history[3]["content"] == "README 显示这是 Vibelution 项目。"
+    assert all(item.get("content") != "继续" for item in history)
+
+
+def test_web_session_preflight_stop_reports_history_assembled_not_seeded(tmp_path, monkeypatch):
+    _seed_chat_state(tmp_path, task_status="done")
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    _bind_live_session_agent(tmp_path)
+    _wait_for_phase, lifecycle_events = _capture_session_lifecycle_events(monkeypatch)
+
+    class StopBeforeRunnerAgent:
+        def run_single_turn(self, initial_prompt=None):
+            pytest.fail("preflight stop must happen before the public runner")
+
+    stop_checks = 0
+
+    def stop_after_history_assembly(_turn_control):
+        nonlocal stop_checks
+        stop_checks += 1
+        return "test preflight stop" if stop_checks >= 2 else ""
+
+    monkeypatch.setattr(session_service, "create_chat_agent", lambda: StopBeforeRunnerAgent())
+    monkeypatch.setattr(session_service, "_get_turn_control_stop_reason", stop_after_history_assembly)
+    monkeypatch.setattr(
+        session_service,
+        "_schedule_session_turn",
+        lambda context: session_service._run_session_turn(context),
+    )
+
+    response = client.post(
+        "/api/sessions/session-live/messages",
+        json={"content": "在 preparation 前停止"},
+    )
+
+    assert response.status_code == 202, response.json()
+    phases = [event["phase"] for event in lifecycle_events]
+    assert phases.count("history_assembled") == 1
+    assembled_event = next(event for event in lifecycle_events if event["phase"] == "history_assembled")
+    assert assembled_event["fields"]["assembledHistoryMessageCount"] >= 1
+    assert assembled_event["fields"]["historyAssemblyMs"] >= 0
+
+
 def test_submit_session_message_does_not_promote_contextual_confirmation_to_task_goal(tmp_path, monkeypatch):
     _seed_chat_state(
         tmp_path,
@@ -5333,7 +5489,10 @@ def test_submit_session_message_records_chat_turn_started_scene_event(tmp_path, 
 
     response = client.post(
         "/api/sessions/session-live/messages",
-        json={"content": "解释当前状态"},
+        json={
+            "content": "解释当前状态",
+            "clientSubmissionId": "submission-timing-1",
+        },
     )
 
     assert response.status_code == 202
@@ -5359,6 +5518,18 @@ def test_submit_session_message_records_chat_turn_started_scene_event(tmp_path, 
     assert scheduled_fields["turnId"] == active_chat["runId"]
     assert scheduled_fields["chatStateLockedMs"] >= 0
     assert scheduled_fields["submitElapsedBeforeScheduleLogMs"] >= 0
+    accepted_events = [
+        item
+        for item in recorded_scene_events
+        if item[0][:3] == ("conversation", "turn_accepted", "conversation.turn.accepted")
+    ]
+    assert accepted_events
+    accepted_fields = accepted_events[-1][1]["fields"]
+    assert accepted_fields["sessionId"] == "session-live"
+    assert accepted_fields["turnId"] == active_chat["runId"]
+    assert accepted_fields["clientSubmissionId"] == "submission-timing-1"
+    assert accepted_fields["scheduleSubmitMs"] >= 0
+    assert accepted_fields["submitTotalMs"] >= accepted_fields["scheduleSubmitMs"]
 
 
 def test_submit_session_message_prefer_async_returns_lightweight_acceptance(tmp_path, monkeypatch):
@@ -5478,16 +5649,17 @@ def test_run_session_turn_records_agent_started_scene_event(tmp_path, monkeypatc
     assert fields["turnId"] == turn_control.turn_id
     assert fields["agentType"] == "DummyAgent"
     assert fields["agentCreateMs"] >= 0
-    seeded_events = [
+    assembled_events = [
         item
         for item in recorded_scene_events
-        if item[0][:3] == ("conversation", "turn_history_seeded", "conversation.turn.history_seeded")
+        if item[0][:3] == ("conversation", "turn_history_assembled", "conversation.turn.history_assembled")
     ]
-    assert seeded_events
-    seeded_fields = seeded_events[-1][1]["fields"]
-    assert seeded_fields["historySeedMs"] >= 0
-    assert seeded_fields["runtimeContextSeedMs"] >= 0
-    assert seeded_fields["totalSeedMs"] >= 0
+    assert assembled_events
+    assembled_fields = assembled_events[-1][1]["fields"]
+    assert assembled_fields["assembledHistoryMessageCount"] >= 1
+    assert assembled_fields["historyAssemblyMs"] >= 0
+    assert assembled_fields["runtimeContextSeedMs"] >= 0
+    assert assembled_fields["totalSeedMs"] >= 0
     returned_events = [
         item
         for item in recorded_scene_events
@@ -6043,6 +6215,59 @@ def test_session_continuation_marks_server_side_model_wait_as_thinking(tmp_path,
         and "正在思考" in str(item.get("resultPreview") or "")
         for item in live_state.feedback_events
     )
+
+
+def test_session_same_turn_continuation_passes_durable_history_only_once(tmp_path, monkeypatch):
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(session_service, "_publish_session_detail_snapshot", lambda _session_id: None)
+    calls: list[dict] = []
+
+    def fake_run_existing_agent_single_turn(agent, **kwargs):
+        calls.append(dict(kwargs))
+        if len(calls) == 1:
+            return {
+                "status": "completed",
+                "summary": "已读取文件，继续形成结论。",
+                "raw_output": "已读取文件，继续形成结论。",
+                "outcome": "progress",
+                "tool_call_count": 1,
+                "tool_trace": [{"name": "read_file_tool", "status": "done"}],
+            }
+        return {
+            "status": "completed",
+            "summary": "结论已形成。",
+            "raw_output": "结论已形成。",
+            "outcome": "done",
+            "tool_call_count": 0,
+            "tool_trace": [],
+        }
+
+    monkeypatch.setattr(session_service, "run_existing_agent_single_turn", fake_run_existing_agent_single_turn)
+    durable_history = [
+        {"role": "user", "content": "读取文件"},
+        {"role": "assistant", "content": "上一轮结论"},
+    ]
+    turn_control = session_service._create_session_turn_control("session-history-once")
+    try:
+        result = session_service._run_session_continuation_loop(
+            object(),
+            session_id="session-history-once",
+            turn_control=turn_control,
+            initial_prompt="继续",
+            history_messages=durable_history,
+            allow_internal_auto_continue=True,
+            max_internal_auto_continue_turns=2,
+        )
+    finally:
+        session_service._clear_session_turn_control("session-history-once", turn_id=turn_control.turn_id)
+
+    assert isinstance(result, dict)
+    assert result["status"] == "completed"
+    assert len(calls) == 2
+    assert calls[0]["chat_history"] == durable_history
+    assert calls[1]["chat_history"] is None
+    assert calls[0]["turn_identity"] == turn_control.turn_id
+    assert calls[1]["turn_identity"] == turn_control.turn_id
 
 
 def test_source_collection_stage_task_enables_bounded_internal_auto_continue(tmp_path, monkeypatch):

@@ -47,6 +47,42 @@ describe("browser telemetry", () => {
     expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
+  it("stamps telemetry with trusted browser occurrence fields", async () => {
+    vi.stubGlobal("window", { location: { origin: "http://127.0.0.1:8000" } });
+    vi.stubGlobal("performance", { now: () => 4321.5 });
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          header: "X-Vibelution-Control-Token",
+          controlToken: "telemetry-token",
+        }),
+      })
+      .mockResolvedValueOnce({ ok: true, status: 202 });
+    vi.stubGlobal("fetch", fetchMock);
+
+    postBrowserTelemetry({
+      phase: "chat_submit",
+      eventCode: "browser.chat_submit.request_started",
+      message: "submit started",
+      fields: {
+        sessionId: "session-demo",
+        clientOccurredAt: "spoofed",
+        clientMonotonicMs: -1,
+      },
+    });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+
+    const request = fetchMock.mock.calls[1]?.[1] as RequestInit;
+    const payload = JSON.parse(String(request.body));
+    expect(payload.fields).toMatchObject({
+      sessionId: "session-demo",
+      clientOccurredAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/),
+      clientMonotonicMs: 4321.5,
+    });
+    expect(payload.fields.clientOccurredAt).not.toBe("spoofed");
+  });
+
   it("summarizes page content without copying main text into telemetry fields", () => {
     vi.stubGlobal("window", {
       location: {

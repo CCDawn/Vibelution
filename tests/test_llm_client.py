@@ -538,6 +538,60 @@ def test_responses_transport_routes_openai_compatible_model_through_responses_br
     ]
 
 
+def test_protocol_switch_reencodes_complete_history_after_private_replay_is_cleared():
+    common = {
+        "llm.providers.default.kind": "relay",
+        "llm.providers.default.api_key": "test-key",
+        "llm.providers.default.base_url": "https://relay.example.test/v1",
+        "llm.providers.default.compat_mode": "openai",
+        "llm.profiles.primary.provider_id": "default",
+        "llm.profiles.primary.model": "gpt-5.5",
+    }
+    messages = [
+        {"role": "user", "content": "look up both"},
+        AIMessage(
+            content="checking",
+            tool_calls=[
+                {"id": "call-a", "name": "first", "args": {}},
+                {"id": "call-b", "name": "second", "args": {}},
+            ],
+            additional_kwargs={"reasoning_replay_item_id": "reasoning-1"},
+        ),
+        ToolMessage(content="A", tool_call_id="call-a"),
+        ToolMessage(content="B", tool_call_id="call-b"),
+        AIMessage(content="both done"),
+        {"role": "user", "content": "continue"},
+    ]
+    responses = LLMClient(
+        config=make_config(**{**common, "llm.profiles.primary.transport": "responses"}),
+        backend=lambda payload: payload,
+    )._build_payload(messages, replay_state=None)
+    chat = LLMClient(
+        config=make_config(**{**common, "llm.profiles.primary.transport": "chat_completions"}),
+        backend=lambda payload: payload,
+    )._build_payload(messages, replay_state=None)
+
+    assert "previous_response_id" not in responses
+    assert "messages" not in responses
+    assert [item.get("type") for item in responses["input"] if "type" in item] == [
+        "function_call",
+        "function_call",
+        "function_call_output",
+        "function_call_output",
+    ]
+    assert "input" not in chat
+    assert [message["role"] for message in chat["messages"]] == [
+        "user",
+        "assistant",
+        "tool",
+        "tool",
+        "assistant",
+        "user",
+    ]
+    assert [call["id"] for call in chat["messages"][1]["tool_calls"]] == ["call-a", "call-b"]
+    assert [message["tool_call_id"] for message in chat["messages"][2:4]] == ["call-a", "call-b"]
+
+
 def test_responses_transport_does_not_add_responses_to_litellm_model_name():
     config = make_config(
         **{

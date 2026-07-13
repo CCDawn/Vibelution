@@ -42,15 +42,18 @@ def test_native_launcher_tray_menu_exposes_lifecycle_controls():
     assert "RunPythonBridge(projectDir, \"stop-launcher\", true, false)" in source
 
 
-def test_native_launcher_non_default_actions_keep_hidden_vbs_fallback():
+def test_native_launcher_non_default_actions_use_console_free_control_api():
     source = _source()
 
-    assert "RunLegacyScriptAction(projectDir, parsed.ForwardedArgs)" in source
-    assert "wscript.exe" in source
-    assert "vibelution_desktop_entry.vbs" in source
-    assert "UseShellExecute = false" in source
-    assert "CreateNoWindow = true" in source
-    assert "WindowStyle = ProcessWindowStyle.Hidden" in source
+    assert "RunNativeAction(projectDir, parsed.ForwardedArgs)" in source
+    assert "RunPythonBridge(projectDir, \"bootstrap\", true, true)" in source
+    assert '"/api/launcher/status"' in source
+    assert '"/api/launcher/start"' in source
+    assert '"/api/launcher/stop"' in source
+    assert '"/api/launcher/restart"' in source
+    assert "vibelution_desktop_entry.vbs" not in source
+    assert "wscript.exe" not in source
+    assert "RunLegacyScriptAction" not in source
 
 
 def test_native_launcher_python_bridge_uses_no_console_outer_runtime():
