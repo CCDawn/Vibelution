@@ -8,6 +8,7 @@ from config.model_catalog import (
     load_model_catalog_state,
     merge_capability_observations,
     provider_catalog_refresh_due,
+    record_model_reasoning_contract,
     record_model_verification,
     record_discovery_failure,
     record_discovery_success,
@@ -78,6 +79,40 @@ def test_model_verification_records_callability_without_overwriting_discovery() 
         pinned={"gpt-a": {"upstream_id": "gpt-a"}},
     )
     assert rediscovered["providers"]["relay"]["models"]["gpt-a"]["verification"] == model["verification"]
+
+
+def test_model_reasoning_contract_records_verified_runtime_probe() -> None:
+    state = record_discovery_success(
+        empty_model_catalog_state(),
+        provider_id="relay",
+        provider_fingerprint="fp",
+        discovered_at="2026-07-11T12:00:00Z",
+        observed=[{"upstream_id": "gpt-a", "label": "GPT A", "capabilities": {}}],
+        pinned={},
+    )
+
+    verified = record_model_reasoning_contract(
+        state,
+        model_ref="relay/gpt-a",
+        provider_fingerprint="fp",
+        checked_at="2026-07-12T09:30:00Z",
+        effort_values=["low", "high"],
+        default_effort="high",
+        adapter="reasoning_object",
+        mapping={"low": "low", "high": "high"},
+        source="runtime_probe",
+    )
+
+    assert verified["providers"]["relay"]["models"]["gpt-a"]["reasoningContract"] == {
+        "verificationStatus": "verified",
+        "providerFingerprint": "fp",
+        "checkedAt": "2026-07-12T09:30:00Z",
+        "source": "runtime_probe",
+        "effortValues": ["low", "high"],
+        "default": "high",
+        "adapter": "reasoning_object",
+        "map": {"low": "low", "high": "high"},
+    }
 
 
 def test_discovery_fingerprint_change_marks_prior_evidence_stale_without_deleting_diagnostics() -> None:
