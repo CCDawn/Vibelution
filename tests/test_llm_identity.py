@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import hashlib
 
 import pytest
@@ -9,6 +10,7 @@ from config.llm_identity import (
     make_model_key,
     make_model_ref,
     normalize_provider_endpoint,
+    provider_discovery_fingerprint,
     provider_identity_fingerprint,
     split_model_ref,
 )
@@ -69,6 +71,34 @@ def test_provider_fingerprint_uses_endpoint_and_reference_not_secret() -> None:
         )
         == expected
     )
+
+
+@pytest.mark.parametrize(
+    ("section", "field", "value"),
+    [
+        ("", "driver", "anthropic"),
+        ("protocols", "default", "chat_completions"),
+        ("discovery", "models_url_override", "https://relay.example/models"),
+    ],
+)
+def test_discovery_fingerprint_changes_for_driver_protocol_and_override(
+    section: str,
+    field: str,
+    value: str,
+) -> None:
+    base = {
+        "base_url": "https://relay.example/v1",
+        "credential_ref": "env:RELAY_KEY",
+        "auth_kind": "api_key",
+        "driver": "openai",
+        "protocols": {"default": "responses"},
+        "discovery": {"adapter": "openai_compatible"},
+    }
+    changed = copy.deepcopy(base)
+    target = changed[section] if section else changed
+    target[field] = value
+
+    assert provider_discovery_fingerprint(base) != provider_discovery_fingerprint(changed)
 
 
 def test_model_key_is_stable_and_order_independent() -> None:

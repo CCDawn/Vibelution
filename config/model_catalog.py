@@ -218,6 +218,20 @@ def record_discovery_success(
             *_labeled_capability_observations(raw.get("capabilities", {}), source="provider_endpoint"),
             *_labeled_capability_observations(operator_capabilities, source="operator_override"),
         ]
+        verification = (
+            copy.deepcopy(prior.get("verification", {}))
+            if isinstance(prior.get("verification"), dict)
+            else {}
+        )
+        if verification and verification.get("providerFingerprint") != provider_fingerprint:
+            verification["status"] = "stale"
+        reasoning_contract = (
+            copy.deepcopy(prior.get("reasoningContract", {}))
+            if isinstance(prior.get("reasoningContract"), dict)
+            else {}
+        )
+        if reasoning_contract and reasoning_contract.get("providerFingerprint") != provider_fingerprint:
+            reasoning_contract["verificationStatus"] = "stale"
         models[model_key] = {
             "upstreamId": upstream_id,
             "label": str(raw.get("label") or upstream_id),
@@ -225,9 +239,8 @@ def record_discovery_success(
             "capabilities": merge_capability_observations(capability_observations),
             "limits": copy.deepcopy(raw.get("limits", {})) if isinstance(raw.get("limits", {}), dict) else {},
             "metadataSource": "provider_endpoint",
-            "verification": copy.deepcopy(prior.get("verification", {}))
-            if isinstance(prior.get("verification"), dict)
-            else {},
+            "verification": verification,
+            "reasoningContract": reasoning_contract,
         }
 
     for model_key, pinned_model in pinned.items():
@@ -245,15 +258,28 @@ def record_discovery_success(
                 *_labeled_capability_observations(pinned_model.get("capabilities", {}), source="operator_override"),
             ]
         )
+        verification = (
+            copy.deepcopy(prior.get("verification", {}))
+            if isinstance(prior.get("verification"), dict)
+            else {}
+        )
+        if verification and verification.get("providerFingerprint") != provider_fingerprint:
+            verification["status"] = "stale"
+        reasoning_contract = (
+            copy.deepcopy(prior.get("reasoningContract", {}))
+            if isinstance(prior.get("reasoningContract"), dict)
+            else {}
+        )
+        if reasoning_contract and reasoning_contract.get("providerFingerprint") != provider_fingerprint:
+            reasoning_contract["verificationStatus"] = "stale"
         models[model_key] = {
             **prior,
             "upstreamId": upstream_id,
             "label": str(pinned_model.get("label") or prior.get("label") or upstream_id),
             "availability": "missing_remote",
             "capabilities": capabilities,
-            "verification": copy.deepcopy(prior.get("verification", {}))
-            if isinstance(prior.get("verification"), dict)
-            else {},
+            "verification": verification,
+            "reasoningContract": reasoning_contract,
         }
 
     warnings = []
@@ -312,6 +338,7 @@ def record_model_verification(
     state: dict[str, Any],
     *,
     model_ref: str,
+    provider_fingerprint: str,
     checked_at: str,
     ok: bool,
     error_type: str = "",
@@ -359,6 +386,7 @@ def record_model_verification(
         "checkedAt": str(checked_at),
         "errorType": normalized_error,
         "httpStatus": normalized_status,
+        "providerFingerprint": str(provider_fingerprint),
     }
     model["verification"] = verification
     return updated

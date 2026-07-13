@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 import unicodedata
+from typing import Any, Mapping
 from urllib.parse import urlsplit, urlunsplit
 
 from .llm_credentials import canonicalize_credential_ref
@@ -55,6 +57,26 @@ def provider_identity_fingerprint(
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
+def provider_discovery_fingerprint(provider: Mapping[str, Any]) -> str:
+    discovery = provider.get("discovery") if isinstance(provider.get("discovery"), dict) else {}
+    protocols = provider.get("protocols") if isinstance(provider.get("protocols"), dict) else {}
+    identity = provider_identity_fingerprint(
+        str(provider.get("base_url") or ""),
+        str(provider.get("credential_ref") or "none"),
+        auth_kind=str(provider.get("auth_kind") or "api_key"),
+    )
+    payload = "\0".join(
+        (
+            identity,
+            str(provider.get("driver") or "").strip().lower(),
+            str(discovery.get("adapter") or "manual").strip().lower(),
+            str(discovery.get("models_url_override") or "").strip(),
+            json.dumps(protocols, ensure_ascii=False, sort_keys=True, separators=(",", ":")),
+        )
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
 def validate_provider_id(provider_id: str) -> str:
     value = str(provider_id or "").strip()
     if not _PROVIDER_ID_RE.fullmatch(value):
@@ -97,6 +119,7 @@ __all__ = [
     "make_model_key",
     "make_model_ref",
     "normalize_provider_endpoint",
+    "provider_discovery_fingerprint",
     "provider_identity_fingerprint",
     "split_model_ref",
     "validate_provider_id",

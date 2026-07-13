@@ -27,7 +27,12 @@ from config.runtime_capabilities import (
     record_model_image_input_capability,
     strip_runtime_model_capability_fields,
 )
-from config.llm_identity import make_model_ref, split_model_ref, validate_provider_id
+from config.llm_identity import (
+    make_model_ref,
+    provider_discovery_fingerprint,
+    split_model_ref,
+    validate_provider_id,
+)
 from config.llm_provider_registry import pin_llm_model
 from config.model_catalog import (
     CAPABILITY_SOURCE_PRIORITY,
@@ -867,10 +872,13 @@ def _persist_saved_model_verification(
     if _llm_test_config_scope(public_config, draft_meta) != "saved":
         return False
     try:
+        provider_id, _model_key = split_model_ref(model_ref)
+        provider = public_config.get("llm", {}).get("providers", {}).get(provider_id, {})
         state = load_model_catalog_state()
         updated = record_model_verification(
             state,
             model_ref=model_ref,
+            provider_fingerprint=provider_discovery_fingerprint(provider),
             checked_at=str(verification["checked_at"]),
             ok=verification["status"] == "verified",
             error_type=str(verification["error_type"]),

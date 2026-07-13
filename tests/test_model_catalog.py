@@ -51,6 +51,7 @@ def test_model_verification_records_callability_without_overwriting_discovery() 
     verified = record_model_verification(
         state,
         model_ref="relay/gpt-a",
+        provider_fingerprint="fp",
         checked_at="2026-07-12T09:30:00Z",
         ok=False,
         error_type="service_unavailable",
@@ -66,6 +67,7 @@ def test_model_verification_records_callability_without_overwriting_discovery() 
         "checkedAt": "2026-07-12T09:30:00Z",
         "errorType": "service_unavailable",
         "httpStatus": 503,
+        "providerFingerprint": "fp",
     }
     rediscovered = record_discovery_success(
         verified,
@@ -76,6 +78,60 @@ def test_model_verification_records_callability_without_overwriting_discovery() 
         pinned={"gpt-a": {"upstream_id": "gpt-a"}},
     )
     assert rediscovered["providers"]["relay"]["models"]["gpt-a"]["verification"] == model["verification"]
+
+
+def test_discovery_fingerprint_change_marks_prior_evidence_stale_without_deleting_diagnostics() -> None:
+    state = record_discovery_success(
+        empty_model_catalog_state(),
+        provider_id="relay",
+        provider_fingerprint="fp-old",
+        discovered_at="2026-07-11T12:00:00Z",
+        observed=[{"upstream_id": "gpt-a", "label": "GPT A", "capabilities": {}}],
+        pinned={
+            "gpt-a": {"upstream_id": "gpt-a"},
+            "gpt-b": {"upstream_id": "gpt-b"},
+        },
+    )
+    for model_key in ("gpt-a", "gpt-b"):
+        state = record_model_verification(
+            state,
+            model_ref=f"relay/{model_key}",
+            provider_fingerprint="fp-old",
+            checked_at="2026-07-12T09:30:00Z",
+            ok=True,
+        )
+        state["providers"]["relay"]["models"][model_key]["reasoningContract"] = {
+            "verificationStatus": "verified",
+            "providerFingerprint": "fp-old",
+            "checkedAt": "2026-07-12T09:31:00Z",
+        }
+
+    rediscovered = record_discovery_success(
+        state,
+        provider_id="relay",
+        provider_fingerprint="fp-new",
+        discovered_at="2026-07-12T10:00:00Z",
+        observed=[{"upstream_id": "gpt-a", "label": "GPT A", "capabilities": {}}],
+        pinned={
+            "gpt-a": {"upstream_id": "gpt-a"},
+            "gpt-b": {"upstream_id": "gpt-b"},
+        },
+    )
+
+    for model_key in ("gpt-a", "gpt-b"):
+        model = rediscovered["providers"]["relay"]["models"][model_key]
+        assert model["verification"] == {
+            "status": "stale",
+            "checkedAt": "2026-07-12T09:30:00Z",
+            "errorType": "",
+            "httpStatus": None,
+            "providerFingerprint": "fp-old",
+        }
+        assert model["reasoningContract"] == {
+            "verificationStatus": "stale",
+            "providerFingerprint": "fp-old",
+            "checkedAt": "2026-07-12T09:31:00Z",
+        }
 
 
 def test_failure_keeps_last_success_and_marks_provider_stale() -> None:

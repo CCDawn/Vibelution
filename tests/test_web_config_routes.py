@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 
 from config import models as config_models
 from config import public_config as public_config_module
+from config.llm_identity import provider_discovery_fingerprint
 from config.model_catalog import save_model_catalog_state
 from config.models import LLMProfile, ProviderConfig
 from config.public_config import (
@@ -1622,6 +1623,9 @@ def test_config_workspace_test_llm_can_target_schema_v2_canonical_model_ref(monk
     assert payload["verification_status"] == "failed"
     assert payload["verification_error_type"] == "service_unavailable"
     assert saved_catalogs[-1]["providers"]["relay_a"]["models"]["gpt-a"]["verification"]["status"] == "failed"
+    assert saved_catalogs[-1]["providers"]["relay_a"]["models"]["gpt-a"]["verification"][
+        "providerFingerprint"
+    ] == provider_discovery_fingerprint(public_config["llm"]["providers"]["relay_a"])
 
     second_response = client.post(
         "/api/config/test-llm",
