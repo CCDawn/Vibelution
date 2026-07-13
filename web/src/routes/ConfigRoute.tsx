@@ -1755,23 +1755,66 @@ function ConfigSectionEditor({
   }
 
   function renderUserProfileBody(nodeValue: Record<string, unknown>, absolutePath: string, mode: "view" | "edit") {
+    if (!presentation) {
+      return null;
+    }
     const field = (key: string) => renderConfigField(nodeValue[key], `${absolutePath}.${key}`, mode);
     return (
       <div className={styles.userProfileLayout}>
-        <div className={styles.userProfileIdentityFields}>
-          {field("display_name")}
-          {field("bio")}
+        <div className={styles.configTier}>
+          <div className={styles.configTierHeader}>
+            <div className={styles.configTierHeaderCopy}>
+              <strong>{presentation.commonTitle}</strong>
+              <span>{presentation.commonHint}</span>
+            </div>
+            <span className={styles.inlineBadge}>{presentation.advancedCountLabel(tierCounts.common)}</span>
+          </div>
+          <div className={styles.userProfilePrimaryGrid}>
+            <div className={styles.userProfileIdentityFields}>{field("display_name")}</div>
+            <div className={styles.userProfileAvatarGroup}>
+              <div className={styles.userProfileAvatarHeader}>
+                <strong>{copy.userProfileAvatarGroupTitle}</strong>
+                <span>{copy.userProfileAvatarGroupHint}</span>
+              </div>
+              <div className={styles.userProfileAvatarFields}>
+                {field("avatar_preset")}
+                {field("avatar_image_path")}
+              </div>
+            </div>
+          </div>
         </div>
-        <div className={styles.userProfilePreferencesField}>{field("preferences")}</div>
-        <div className={styles.userProfileAvatarGroup}>
-          <div className={styles.userProfileAvatarHeader}>
-            <strong>{copy.userProfileAvatarGroupTitle}</strong>
-            <span>{copy.userProfileAvatarGroupHint}</span>
-          </div>
-          <div className={styles.userProfileAvatarFields}>
-            {field("avatar_preset")}
-            {field("avatar_image_path")}
-          </div>
+
+        <div className={`${styles.configTier} ${styles.configAdvancedTier}`}>
+          <VButton
+            type="button"
+            contentLayout="plain"
+            className={styles.configAdvancedToggle}
+            aria-expanded={advancedExpanded}
+            onClick={() => {
+              onUiStateChange(section.id, {
+                ...uiState,
+                advancedExpanded: !advancedExpanded,
+              });
+            }}
+          >
+            <div className={styles.configTierHeaderCopy}>
+              <strong>{presentation.advancedTitle}</strong>
+              <span>{presentation.advancedHint}</span>
+            </div>
+            <div className={styles.configAdvancedToggleMeta}>
+              <span className={styles.inlineBadge}>{presentation.advancedCountLabel(tierCounts.advanced)}</span>
+              <ChevronRight
+                size={16}
+                className={advancedExpanded ? styles.treeToggleIconExpanded : styles.treeToggleIcon}
+              />
+            </div>
+          </VButton>
+          {advancedExpanded ? (
+            <div className={`${styles.configAdvancedBody} ${styles.userProfileAdvancedFields}`}>
+              {field("bio")}
+              {field("preferences")}
+            </div>
+          ) : null}
         </div>
       </div>
     );

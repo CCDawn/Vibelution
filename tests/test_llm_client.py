@@ -726,6 +726,48 @@ def test_responses_transport_streams_completed_output_blocks_when_no_delta(monke
     assert events[-1].usage.total_tokens == 5
 
 
+def test_responses_incomplete_reason_is_recorded_in_canonical_outcome_log(monkeypatch):
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "relay",
+            "llm.providers.default.api_key": "test-key",
+            "llm.providers.default.base_url": "https://pixel.try-chatapi.com/v1",
+            "llm.providers.default.compat_mode": "openai",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "gpt-5.5",
+            "llm.profiles.primary.transport": "responses",
+            "llm.profiles.primary.streaming": True,
+        }
+    )
+    recorded = []
+
+    def default_responses_backend(payload):
+        return iter(
+            [
+                {
+                    "type": "response.incomplete",
+                    "response": {
+                        "id": "resp-incomplete",
+                        "status": "incomplete",
+                        "incomplete_details": {"reason": "max_output_tokens"},
+                    },
+                }
+            ]
+        )
+
+    monkeypatch.setattr("core.llm.client._default_responses_backend", default_responses_backend)
+    monkeypatch.setattr(
+        "core.llm.client._record_llm_scene_event",
+        lambda *args, **kwargs: recorded.append((args, kwargs)),
+    )
+    client = LLMClient(config=config)
+
+    list(client.stream([{"role": "user", "content": "ping"}]))
+
+    canonical_event = next(item for item in recorded if item[0][1] == "llm.canonical_outcome.finalized")
+    assert canonical_event[1]["fields"]["terminalReason"] == "max_output_tokens"
+
+
 def test_responses_transport_streams_output_item_done_message_when_no_delta(monkeypatch):
     config = make_config(
         **{

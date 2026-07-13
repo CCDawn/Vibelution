@@ -474,17 +474,19 @@ const styles = {
   toolingMetaPanel:
     "vui-routes-configroute toolingMetaPanel [display:flex] [align-items:center] [justify-content:space-between] [gap:12px] [min-width:0] [&_[data-vui=status-strip]]:[flex:1_1_auto]",
   userProfileAvatarFields:
-    "vui-routes-configroute userProfileAvatarFields [display:grid] [gap:6px] [min-width:0] [grid-template-columns:minmax(0,0.4fr)_minmax(0,0.6fr)] [&_.treeFieldCardView_.treeHint]:[display:none] max-[900px]:[grid-template-columns:1fr]",
+    "vui-routes-configroute userProfileAvatarFields [display:grid] [gap:6px] [min-width:0] [grid-template-columns:repeat(2,minmax(0,1fr))] [&_.treeFieldCardView]:![grid-template-columns:minmax(132px,0.44fr)_minmax(0,1fr)] [&_.treeFieldCardView_.treeHint]:[display:none] max-[900px]:[grid-template-columns:1fr]",
   userProfileAvatarGroup:
     "vui-routes-configroute userProfileAvatarGroup [min-width:0] [display:grid] [gap:6px]",
   userProfileAvatarHeader:
     "vui-routes-configroute userProfileAvatarHeader [display:flex] [align-items:center] [justify-content:space-between] [gap:12px] [min-width:0] [padding:0_2px] [&_strong]:[flex:0_0_auto] [&_strong]:[color:var(--fg-primary)] [&_strong]:[font-size:var(--vui-font-xs)] [&_strong]:[font-weight:700] [&_strong]:[line-height:1.2] [&_span]:[min-width:0] [&_span]:[overflow:hidden] [&_span]:[color:var(--fg-tertiary)] [&_span]:[font-size:var(--vui-font-xs)] [&_span]:[line-height:1.25] [&_span]:[text-overflow:ellipsis] [&_span]:[white-space:nowrap] max-[720px]:[align-items:start] max-[720px]:[flex-direction:column] max-[720px]:[gap:3px] max-[720px]:[&_span]:[white-space:normal]",
   userProfileIdentityFields:
-    "vui-routes-configroute userProfileIdentityFields [display:grid] [gap:6px] [min-width:0] [grid-template-columns:repeat(2,minmax(220px,1fr))] max-[720px]:[grid-template-columns:1fr]",
+    "vui-routes-configroute userProfileIdentityFields [display:grid] [gap:6px] [min-width:0] [grid-template-columns:minmax(0,1fr)]",
   userProfileLayout:
     "vui-routes-configroute userProfileLayout [display:grid] [gap:7px] [&_.treeFieldCardView_.treeHint]:[-webkit-line-clamp:1]",
-  userProfilePreferencesField:
-    "vui-routes-configroute userProfilePreferencesField [min-width:0]",
+  userProfilePrimaryGrid:
+    "vui-routes-configroute userProfilePrimaryGrid [display:grid] [align-items:start] [gap:8px] [min-width:0] [grid-template-columns:minmax(240px,0.38fr)_minmax(0,0.62fr)] max-[900px]:[grid-template-columns:1fr]",
+  userProfileAdvancedFields:
+    "vui-routes-configroute userProfileAdvancedFields [display:grid] [gap:6px] [min-width:0] [grid-template-columns:minmax(0,1fr)]",
 } as const;
 
 export default styles;

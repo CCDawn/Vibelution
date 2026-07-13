@@ -769,6 +769,9 @@ describe("ConversationView edit resend affordance", () => {
     expect(styles.composerField).toContain("[&_textarea]:max-h-[112px]");
     expect(styles.composerField).toContain("[&_textarea]:resize-none");
     expect(styles.composerField).not.toContain("[&_textarea]:min-h-20");
+    expect(styles.composerFieldCodex).toContain("min-h-[112px]");
+    expect(styles.composerFieldCodex).toContain("gap-1");
+    expect(styles.composerToolbarCodex).toContain("min-h-8");
 
     for (const actionClass of [styles.attachButton, styles.composerRoundButton, styles.composerRoundButtonPrimary]) {
       expect(actionClass).toContain("h-[var(--vui-control-height-sm)]");

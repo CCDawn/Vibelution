@@ -82,6 +82,11 @@ def _response_status(response: Mapping[str, Any]) -> str:
     return str(response.get("status") or "").strip().lower()
 
 
+def _response_incomplete_reason(response: Mapping[str, Any]) -> str:
+    details = _as_dict(response.get("incomplete_details"))
+    return str(details.get("reason") or "").strip()[:160]
+
+
 class ResponsesDecodedStream:
     """Single-consumer canonical stream with an outcome available after exhaustion."""
 
@@ -599,7 +604,13 @@ class _ResponsesTurnAssembler:
             final_text=final_text,
             pending_tool_call_ids=tuple(self.pending_call_ids) if outcome_kind == "tool_calls" else (),
             terminal_event_seen=True,
-            error=self._error_message(event, response) if outcome_kind == "failed" else "",
+            error=(
+                self._error_message(event, response)
+                if outcome_kind == "failed"
+                else _response_incomplete_reason(response)
+                if outcome_kind == "incomplete"
+                else ""
+            ),
             replay_state=replay_state,
         )
         return emitted
