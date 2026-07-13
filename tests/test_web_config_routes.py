@@ -11,7 +11,12 @@ from config import models as config_models
 from config import public_config as public_config_module
 from config.model_catalog import save_model_catalog_state
 from config.models import LLMProfile, ProviderConfig
-from config.public_config import LLM_MODEL_PRESETS, UNCONFIGURED_MODEL_REF, load_public_config, public_config_hash
+from config.public_config import (
+    LLM_MODEL_PRESETS,
+    UNCONFIGURED_MODEL_REF,
+    load_public_config as load_operator_public_config,
+    public_config_hash,
+)
 from config.runtime_capabilities import MODEL_CAPABILITY_CACHE_ENV
 from core.web.app import create_app
 from core.web.control import CONTROL_TOKEN_HEADER, get_control_token
@@ -633,6 +638,47 @@ def _ensure_preset_model(public_config: dict, preset_id: str) -> dict:
     return model_entry
 
 
+def load_public_config() -> dict:
+    """Return a stable schema-v1 fixture for legacy ConfigRoute behavior tests."""
+
+    public_config = copy.deepcopy(load_operator_public_config())
+    public_config["llm"] = {
+        "schema_version": 1,
+        "model_library": {},
+        "profiles": {},
+    }
+    for preset_id in LLM_MODEL_PRESETS:
+        if preset_id in {"custom_openai_compatible_relay", "custom_relay_responses"}:
+            continue
+        _ensure_preset_model(public_config, preset_id)
+    primary_model_ref = "openai_gpt_5_5"
+    public_config["llm"]["profiles"] = {
+        "primary": {"model_ref": primary_model_ref},
+    }
+    public_config.setdefault("git", {})["commit_message_model_ref"] = primary_model_ref
+    public_config.setdefault("tools", {}).setdefault("image2", {})["default_model_ref"] = "relay_image2"
+    return public_config
+
+
+def _replace_with_v1_model_library(
+    public_config: dict,
+    model_library: dict,
+    *,
+    primary_model_ref: str,
+    providers: dict | None = None,
+) -> None:
+    """Keep legacy model-library tests independent from the operator schema version."""
+
+    public_config["llm"] = {
+        "schema_version": 1,
+        "providers": copy.deepcopy(providers or {}),
+        "model_library": copy.deepcopy(model_library),
+        "profiles": {"primary": {"model_ref": primary_model_ref}},
+    }
+    public_config.setdefault("git", {})["commit_message_model_ref"] = primary_model_ref
+    public_config.setdefault("tools", {}).setdefault("image2", {})["default_model_ref"] = primary_model_ref
+
+
 def test_config_summary_exposes_language():
     response = client.get("/api/config/public")
     assert response.status_code == 200
@@ -642,7 +688,7 @@ def test_config_summary_exposes_language():
 
 def test_config_summary_exposes_model_labels(monkeypatch):
     public_config = copy.deepcopy(load_public_config())
-    public_config.setdefault("llm", {})["model_library"] = {
+    model_library = {
         "gpt_5_5_gpt_5_5": {
             "provider": {"kind": "relay", "api": "openai", "base_url": "https://example.test/v1"},
             "model": "gpt-5.5",
@@ -653,6 +699,11 @@ def test_config_summary_exposes_model_labels(monkeypatch):
             "model": "raw-model",
         },
     }
+    _replace_with_v1_model_library(
+        public_config,
+        model_library,
+        primary_model_ref="gpt_5_5_gpt_5_5",
+    )
 
     monkeypatch.setattr(config_service, "load_public_config", lambda: copy.deepcopy(public_config))
 
@@ -666,10 +717,10 @@ def test_config_summary_exposes_model_labels(monkeypatch):
 
 def test_config_summary_exposes_model_image_input_support(monkeypatch):
     public_config = copy.deepcopy(load_public_config())
-    public_config.setdefault("llm", {})["providers"] = {
+    providers = {
         "xiaomi_provider": {"kind": "xiaomi", "api": "openai", "base_url": "https://example.test/v1"},
     }
-    public_config.setdefault("llm", {})["model_library"] = {
+    model_library = {
         "vision_model": {
             "provider": {"kind": "relay", "api": "openai", "base_url": "https://example.test/v1"},
             "model": "vision-model",
@@ -698,6 +749,12 @@ def test_config_summary_exposes_model_image_input_support(monkeypatch):
             "model": "unknown-model",
         },
     }
+    _replace_with_v1_model_library(
+        public_config,
+        model_library,
+        primary_model_ref="vision_model",
+        providers=providers,
+    )
 
     monkeypatch.setattr(config_service, "load_public_config", lambda: copy.deepcopy(public_config))
 
@@ -778,7 +835,7 @@ def test_config_workspace_exposes_unified_config_payload(monkeypatch):
 
 
 def test_config_workspace_exposes_editor_schema_without_launcher_owned_startup_settings(monkeypatch):
-    public_config = copy.deepcopy(load_public_config())
+    public_config = copy.deepcopy(load_operator_public_config())
     monkeypatch.setattr(config_service, "load_public_config", lambda: copy.deepcopy(public_config))
 
     response = client.get("/api/config/workspace")
@@ -1106,13 +1163,22 @@ def test_health_diagnostics_endpoint_returns_log_helpers(tmp_path, monkeypatch):
 
 def test_config_workspace_surfaces_llm_security_diagnostics_without_blocking_read(monkeypatch):
     public_config = copy.deepcopy(load_public_config())
-    public_config["llm"]["profiles"]["primary"]["provider"] = {
-        "kind": "openai",
-        "api_key_env": "OPENAI_API_KEY",
-        "base_url": "file:///C:/Windows/win.ini",
-        "compat_mode": "openai",
-        "requires_api_key": True,
-        "context_window": 100000,
+    public_config["llm"] = {
+        "schema_version": 1,
+        "model_library": {},
+        "profiles": {
+            "primary": {
+                "provider": {
+                    "kind": "openai",
+                    "api_key_env": "OPENAI_API_KEY",
+                    "base_url": "file:///C:/Windows/win.ini",
+                    "compat_mode": "openai",
+                    "requires_api_key": True,
+                    "context_window": 100000,
+                },
+                "model": "gpt-5.5",
+            }
+        },
     }
 
     monkeypatch.setattr(config_service, "load_public_config", lambda: copy.deepcopy(public_config))

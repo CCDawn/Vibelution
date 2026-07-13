@@ -194,11 +194,13 @@ context_window = 1000000
     )
     monkeypatch.delenv("LEGACY_PROFILE_ENV", raising=False)
     monkeypatch.delenv("UNIT_PROVIDER_KEY", raising=False)
-    monkeypatch.delenv("VIBELUTION_ENABLE_USER_ENV_FALLBACK", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setenv("VIBELUTION_ENABLE_USER_ENV_FALLBACK", "0")
 
     config = ConfigLoader(str(config_file)).load()
     profile = config.llm.get_profile("primary")
     model_id, entry = config.llm.get_model_library_entry_for_profile(profile)
+    monkeypatch.delenv(entry["api_key_env"], raising=False)
 
     assert model_id
     assert str(model_id).startswith("generated_openai_compatible_unit_runtime_model_")
