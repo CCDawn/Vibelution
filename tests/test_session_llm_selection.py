@@ -25,7 +25,7 @@ def test_schema_v2_provider_models_feed_the_model_picker():
                 "providers": {
                     "ai-pixel": {
                         "label": "Ai-Pixel",
-                        "kind": "relay",
+                        "service_class": "relay",
                         "api": "openai-responses",
                         "base_url": "https://relay.example/v1",
                         "credential_ref": "env:AI_PIXEL_API_KEY",
@@ -51,6 +51,7 @@ def test_schema_v2_provider_models_feed_the_model_picker():
 
     assert [item["model_id"] for item in options] == ["ai-pixel/luna", "ai-pixel/terra"]
     assert options[0]["provider"]["provider_id"] == "ai-pixel"
+    assert options[0]["provider_kind"] == "relay"
     assert options[0]["model"] == "gpt-5.6-luna"
     assert options[0]["details"]["reasoning_effort_values"] == ["low", "medium", "xhigh"]
 

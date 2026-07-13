@@ -614,6 +614,30 @@ def test_default_responses_backend_maps_internal_base_url_to_litellm_api_base(mo
     assert "api_base" not in payload
 
 
+def test_default_responses_backend_does_not_duplicate_final_responses_endpoint(monkeypatch):
+    import litellm
+
+    calls = []
+
+    def responses(**kwargs):
+        calls.append(kwargs)
+        return {"output_text": "responses ok", "usage": {}}
+
+    monkeypatch.setattr(litellm, "responses", responses, raising=False)
+    payload = {
+        "model": "openai/gpt-5.6-luna",
+        "api_key": "test-key",
+        "base_url": "https://ai-pixel.online/v1/responses",
+        "input": [{"role": "user", "content": [{"type": "input_text", "text": "ping"}]}],
+    }
+
+    response = _default_responses_backend(payload)
+
+    assert response["output_text"] == "responses ok"
+    assert calls[0]["api_base"] == "https://ai-pixel.online/v1"
+    assert payload["base_url"] == "https://ai-pixel.online/v1/responses"
+
+
 def test_responses_transport_streams_with_responses_normalizer(monkeypatch):
     config = make_config(
         **{
