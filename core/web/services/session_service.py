@@ -2806,6 +2806,7 @@ class SessionTurnCapture:
         status: str,
         summary: str = "",
         *,
+        call_id: str = "",
         arguments: dict[str, Any] | None = None,
         result: Any = "",
         error: Any = "",
@@ -2823,10 +2824,13 @@ class SessionTurnCapture:
         tool_name = str(name or "").strip()
         if not tool_name:
             return
+        normalized_call_id = str(call_id or "").strip()
         entry = {
             "name": tool_name,
             "status": _normalize_tool_call_status(semantic_status or status, default="running"),
         }
+        if normalized_call_id:
+            entry["callId"] = normalized_call_id
         cleaned_summary = trim_lines(summary or "", max_lines=2)
         if cleaned_summary:
             entry["summary"] = cleaned_summary
@@ -2863,10 +2867,18 @@ class SessionTurnCapture:
         related_thought_sequence = self._latest_thought_sequence or self._pending_related_thought_sequence or 0
         for index in range(len(self.tool_calls) - 1, -1, -1):
             existing = self.tool_calls[index]
-            if existing.get("name") == tool_name and existing.get("status") == "running":
+            if existing.get("status") != "running":
+                continue
+            existing_call_id = str(existing.get("callId") or "").strip()
+            if normalized_call_id:
+                if existing_call_id != normalized_call_id:
+                    continue
+            elif existing_call_id or existing.get("name") != tool_name:
+                continue
+            if existing.get("name") == tool_name:
                 self.tool_calls[index] = entry
                 self._update_running_tool_feedback_event(entry, related_thought_sequence=related_thought_sequence)
-                self._latest_tool_feedback_sequence = self._feedback_sequence_for_tool(tool_name)
+                self._latest_tool_feedback_sequence = self._feedback_sequence_for_tool(tool_name, normalized_call_id)
                 self._remember_tool_loop_outcome(entry)
                 self._update_long_loop_progress_event(tool_name)
                 self._latest_thought_sequence = 0
@@ -2878,20 +2890,28 @@ class SessionTurnCapture:
         if len(self.tool_calls) > 30:
             self.tool_calls = self.tool_calls[-30:]
         self._append_tool_feedback_event(entry, related_thought_sequence=related_thought_sequence)
-        self._latest_tool_feedback_sequence = self._feedback_sequence_for_tool(tool_name)
+        self._latest_tool_feedback_sequence = self._feedback_sequence_for_tool(tool_name, normalized_call_id)
         self._remember_tool_loop_outcome(entry)
         self._update_long_loop_progress_event(tool_name)
         self._latest_thought_sequence = 0
         self._latest_thought_text = ""
         self._pending_related_thought_sequence = 0
 
-    def _feedback_sequence_for_tool(self, tool_name: str) -> int:
+    def _feedback_sequence_for_tool(self, tool_name: str, call_id: str = "") -> int:
         normalized = str(tool_name or "").strip()
         if not normalized:
             return 0
+        normalized_call_id = str(call_id or "").strip()
         for existing in reversed(self.feedback_events):
-            if existing.get("kind") == "tool" and existing.get("name") == normalized:
-                return _coerce_nonnegative_int(existing.get("sequence"))
+            if existing.get("kind") != "tool":
+                continue
+            existing_call_id = str(existing.get("callId") or "").strip()
+            if normalized_call_id:
+                if existing_call_id != normalized_call_id:
+                    continue
+            elif existing_call_id or existing.get("name") != normalized:
+                continue
+            return _coerce_nonnegative_int(existing.get("sequence"))
         return 0
 
     def _remember_tool_loop_outcome(self, tool_call: dict[str, Any]) -> None:
@@ -2958,6 +2978,7 @@ class SessionTurnCapture:
             "summary": trim_lines(tool_call.get("summary") or "", max_lines=2),
         }
         for key in (
+            "callId",
             "arguments",
             "resultPreview",
             "resultType",
@@ -2986,12 +3007,17 @@ class SessionTurnCapture:
         tool_name = str(tool_call.get("name") or "").strip()
         if not tool_name:
             return
+        call_id = str(tool_call.get("callId") or "").strip()
         for index in range(len(self.feedback_events) - 1, -1, -1):
             existing = self.feedback_events[index]
+            existing_call_id = str(existing.get("callId") or "").strip()
             if (
                 existing.get("kind") == "tool"
-                and existing.get("name") == tool_name
                 and existing.get("status") == "running"
+                and (
+                    (call_id and existing_call_id == call_id)
+                    or (not call_id and not existing_call_id and existing.get("name") == tool_name)
+                )
             ):
                 sequence = existing.get("sequence")
                 timestamp = existing.get("timestamp")
@@ -3004,6 +3030,7 @@ class SessionTurnCapture:
                     "summary": trim_lines(tool_call.get("summary") or "", max_lines=2),
                 }
                 for key in (
+                    "callId",
                     "arguments",
                     "resultPreview",
                     "resultType",
@@ -5590,6 +5617,7 @@ def submit_session_message(
     content_utf8_base64: str = "",
     mental_model_enabled: bool | None = None,
     *,
+    client_submission_id: str = "",
     attachment_ids: list[str] | None = None,
     references: list[dict[str, Any]] | None = None,
     turn_mode: str = "",
@@ -5605,6 +5633,7 @@ def submit_session_message(
     submit_timing_fields: dict[str, Any] = {}
     lang = get_web_language()
     conversation_id = str(session_id or "").strip()
+    normalized_client_submission_id = str(client_submission_id or "").strip()
     message = _resolve_user_message_content(content, content_utf8_base64=content_utf8_base64)
     normalized_message_source = str(message_source or "").strip() or "raw"
     recent_image_reference_routing_enabled = normalized_message_source not in {
@@ -5737,6 +5766,8 @@ def submit_session_message(
             else _active_skill_contract_from_conversation(conversation)
         )
         persisted_message_metadata = dict(message_metadata or {}) if isinstance(message_metadata, dict) else {}
+        if normalized_client_submission_id:
+            persisted_message_metadata["clientSubmissionId"] = normalized_client_submission_id
         persisted_message_metadata.setdefault("turnId", turn_control.turn_id)
         kernel_trace = _create_direct_session_submit_kernel_trace(
             conversation,
@@ -6085,6 +6116,7 @@ def submit_session_message(
             conversation_id,
             turn_control.turn_id,
             status="running",
+            client_submission_id=normalized_client_submission_id,
         )
     detail = get_session_detail(conversation_id) or {}
     if include_started_turn_id:
@@ -6246,14 +6278,24 @@ def _record_direct_session_submit_kernel_trace_event(
         return
 
 
-def _accepted_session_turn_payload(session_id: str, turn_id: str, *, status: str = "running") -> dict[str, Any]:
-    return {
+def _accepted_session_turn_payload(
+    session_id: str,
+    turn_id: str,
+    *,
+    status: str = "running",
+    client_submission_id: str = "",
+) -> dict[str, Any]:
+    payload = {
         "accepted": True,
         "sessionId": str(session_id or "").strip(),
         "turnId": str(turn_id or "").strip(),
         "status": str(status or "running").strip() or "running",
         "acceptedAt": _now_timestamp(),
     }
+    normalized_client_submission_id = str(client_submission_id or "").strip()
+    if normalized_client_submission_id:
+        payload["clientSubmissionId"] = normalized_client_submission_id
+    return payload
 
 
 def submit_session_message_lightweight(
@@ -6262,6 +6304,7 @@ def submit_session_message_lightweight(
     content_utf8_base64: str = "",
     mental_model_enabled: bool | None = None,
     *,
+    client_submission_id: str = "",
     attachment_ids: list[str] | None = None,
     references: list[dict[str, Any]] | None = None,
     turn_mode: str = "",
@@ -6272,6 +6315,7 @@ def submit_session_message_lightweight(
     detail = submit_session_message(
         session_id,
         content,
+        client_submission_id=client_submission_id,
         content_utf8_base64=content_utf8_base64,
         mental_model_enabled=mental_model_enabled,
         attachment_ids=attachment_ids,
@@ -6404,6 +6448,7 @@ def edit_and_resubmit_session_message(
     content_utf8_base64: str = "",
     mental_model_enabled: bool | None = None,
     *,
+    client_submission_id: str = "",
     turn_mode: str = "",
     write_intent: bool | None = None,
 ) -> dict:
@@ -6412,6 +6457,7 @@ def edit_and_resubmit_session_message(
     lang = get_web_language()
     conversation_id = str(session_id or "").strip()
     target_message_id = str(message_id or "").strip()
+    normalized_client_submission_id = str(client_submission_id or "").strip()
     message = _resolve_user_message_content(content, content_utf8_base64=content_utf8_base64)
     if not conversation_id:
         raise SessionNotFoundError(text_for(lang, zh="未找到当前会话。", en="Session not found."))
@@ -6501,6 +6547,8 @@ def edit_and_resubmit_session_message(
             else _active_skill_contract_from_conversation(conversation)
         )
         user_metadata = {}
+        if normalized_client_submission_id:
+            user_metadata["clientSubmissionId"] = normalized_client_submission_id
         if skill_invocation:
             user_metadata["slashSkillCommand"] = {
                 "command": skill_invocation.get("command", ""),
@@ -17419,6 +17467,15 @@ def _normalize_persisted_tool_calls(value: Any) -> list[dict[str, Any]]:
             "status": status,
         }
         if isinstance(item, dict):
+            call_id = str(
+                item.get("callId")
+                or item.get("toolCallId")
+                or item.get("tool_call_id")
+                or item.get("id")
+                or ""
+            ).strip()
+            if call_id:
+                entry["callId"] = call_id
             summary = trim_lines(
                 item.get("summary")
                 or item.get("result_preview")
@@ -17483,6 +17540,7 @@ def _normalize_message_tool_calls(value: Any) -> list[dict[str, Any]]:
         if summary:
             entry["summary"] = summary
         for key in (
+            "callId",
             "arguments",
             "resultPreview",
             "resultType",
@@ -17538,6 +17596,9 @@ def _normalize_persisted_feedback_events(value: Any) -> list[dict[str, Any]]:
         name = str(item.get("name") or item.get("label") or "").strip()
         if name:
             entry["name"] = name
+        call_id = str(item.get("callId") or item.get("toolCallId") or item.get("tool_call_id") or "").strip()
+        if call_id:
+            entry["callId"] = call_id
         summary = trim_lines(
             item.get("summary")
             or item.get("resultPreview")
@@ -17606,6 +17667,7 @@ def _normalize_message_feedback_events(value: Any) -> list[dict[str, Any]]:
         }
         for key in (
             "timestamp",
+            "callId",
             "name",
             "summary",
             "arguments",
@@ -20861,6 +20923,7 @@ def _capture_session_ui_stream(
         name = str(data.get("name") or "").strip()
         if not name:
             return
+        call_id = str(data.get("callId") or data.get("call_id") or "").strip()
         semantic_status = str(data.get("semanticStatus") or data.get("semantic_status") or "").strip()
         status = {
             EventNames.TOOL_START: "running",
@@ -20885,6 +20948,7 @@ def _capture_session_ui_stream(
             name,
             status,
             summary,
+            call_id=call_id,
             arguments=data.get("args") if isinstance(data.get("args"), dict) else None,
             result=result,
             error=error,
@@ -20910,6 +20974,8 @@ def _capture_session_ui_stream(
             "durationMs": data.get("durationMs") or data.get("duration_ms"),
             "timeoutSeconds": data.get("timeoutSeconds") or data.get("timeout_seconds"),
         }
+        if call_id:
+            tool_call_payload["callId"] = call_id
         _copy_tool_result_fact_fields(fact_fields, tool_call_payload)
         _append_session_conversation_event(
             session_id,
@@ -20920,6 +20986,8 @@ def _capture_session_ui_stream(
                 "toolCall": tool_call_payload
             },
             source="session_ui_capture",
+            tool_call_id=call_id,
+            correlation_id=call_id,
         )
         _set_session_live_output(
             session_id,
@@ -20940,6 +21008,7 @@ def _capture_session_ui_stream(
                 stage="tool_error",
                 summary=work_run_summary,
                 last_tool_error={
+                    "callId": call_id,
                     "toolName": name,
                     "summary": work_run_summary,
                     "errorPreview": error_preview,
@@ -22514,6 +22583,9 @@ def _merge_session_assistant_delta_events(
 
 
 def _session_assistant_delta_feedback_event_key(event: dict[str, Any]) -> str:
+    call_id = str(event.get("callId") or event.get("toolCallId") or event.get("tool_call_id") or "").strip()
+    if call_id:
+        return f"call:{call_id}"
     sequence = _coerce_nonnegative_int(event.get("sequence"))
     if sequence > 0:
         return f"seq:{sequence}"

@@ -102,6 +102,7 @@ import {
   deriveSessionDetailQueryErrorState,
   deriveSessionListQueryErrorState,
   appendOptimisticUserMessage,
+  createClientSubmissionId,
   markOptimisticUserMessageAccepted,
   markSessionDetailRunning,
   markSessionSummaryRunning,
@@ -2501,12 +2502,14 @@ export function ChatCodingRoute() {
     mutationFn: async (
       {
         sessionId,
+        clientSubmissionId,
         content,
         mentalModelEnabled,
         attachmentIds,
         references,
       }: {
         sessionId: string;
+        clientSubmissionId: string;
         content: string;
         mentalModelEnabled: boolean;
         attachmentIds?: string[];
@@ -2532,6 +2535,7 @@ export function ChatCodingRoute() {
         },
         body: JSON.stringify({
           content,
+          clientSubmissionId,
           contentUtf8Base64: encodeUtf8Base64(content),
           attachmentIds: attachmentIds ?? [],
           references: references ?? [],
@@ -2641,12 +2645,14 @@ export function ChatCodingRoute() {
       {
         sessionId,
         messageId,
+        clientSubmissionId,
         content,
         mentalModelEnabled,
         attachmentIds: _attachmentIds,
       }: {
         sessionId: string;
         messageId: string;
+        clientSubmissionId: string;
         content: string;
         mentalModelEnabled: boolean;
         attachmentIds?: string[];
@@ -2657,7 +2663,13 @@ export function ChatCodingRoute() {
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ messageId, content, contentUtf8Base64: encodeUtf8Base64(content), mentalModelEnabled }),
+        body: JSON.stringify({
+          messageId,
+          clientSubmissionId,
+          content,
+          contentUtf8Base64: encodeUtf8Base64(content),
+          mentalModelEnabled,
+        }),
       }),
     onMutate: async (variables) => {
       const createdAt = new Date().toISOString();
@@ -5493,6 +5505,7 @@ export function ChatCodingRoute() {
       );
       return;
     }
+    const clientSubmissionId = createClientSubmissionId(sessionId);
     imageUploadInFlightRef.current[sessionId] = true;
     setSessionImageUploadPending((current) => ({
       ...current,
@@ -5505,7 +5518,7 @@ export function ChatCodingRoute() {
     }));
     if (content || references.length) {
       queryClient.setQueryData<SessionDetail>(queryKeys.session(sessionId), (detail) =>
-        markSessionDetailRunning(appendOptimisticUserMessage(detail, { sessionId, content, references })),
+        markSessionDetailRunning(appendOptimisticUserMessage(detail, { sessionId, content, references, clientSubmissionId })),
       );
     }
     try {
@@ -5551,6 +5564,7 @@ export function ChatCodingRoute() {
       );
       submitTurnMutation.mutate({
         sessionId,
+        clientSubmissionId,
         content,
         mentalModelEnabled,
         attachmentIds: uploaded.map((attachment) => attachment.artifactId).filter(Boolean),
@@ -5576,7 +5590,7 @@ export function ChatCodingRoute() {
       }));
       if (content || references.length) {
         queryClient.setQueryData<SessionDetail>(queryKeys.session(sessionId), (detail) =>
-          removeOptimisticUserMessage(detail, { sessionId, content, references }),
+          removeOptimisticUserMessage(detail, { sessionId, content, references, clientSubmissionId }),
         );
         setSessionDrafts((current) => restoreSubmittedDraftIfComposerStillEmpty(current, sessionId, content));
       }
@@ -5678,6 +5692,7 @@ export function ChatCodingRoute() {
       editResubmitMutation.mutate({
         sessionId: activeSessionId,
         messageId: resolvedEditTarget.messageId,
+        clientSubmissionId: createClientSubmissionId(activeSessionId),
         content,
         mentalModelEnabled: mentalModelEnabledForNextTurn,
       });
