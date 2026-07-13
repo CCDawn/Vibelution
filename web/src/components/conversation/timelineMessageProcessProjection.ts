@@ -1,4 +1,5 @@
 import type { CodexTranscriptProjection, ConversationMessage } from "../../api/types";
+import { mergeAgentFeedbackEvents } from "../../agent-thread/agentFeedbackEvents";
 import {
   conversationMessageTurnId,
   projectedConversationMessageIdsOrSelf,
@@ -11,21 +12,67 @@ import {
 } from "./conversationMessagePredicates";
 import { answerProjectionContent } from "./conversationInternalStatus";
 
-function exactItemKey(value: unknown) {
-  return JSON.stringify(value) ?? String(value);
+function projectionItemIdentity(value: unknown) {
+  if (!value || typeof value !== "object") {
+    return "exact:" + (JSON.stringify(value) ?? String(value));
+  }
+  const record = value as Record<string, unknown>;
+  const kind = String(record.kind ?? record.type ?? "item").trim();
+  for (const field of ["sourceItemId", "callId", "itemId", "id"]) {
+    const stableId = String(record[field] ?? "").trim();
+    if (stableId) {
+      return kind + ":" + field + ":" + stableId;
+    }
+  }
+  return "exact:" + (JSON.stringify(value) ?? String(value));
 }
 
-function mergeExactItems<T>(...itemGroups: Array<T[] | undefined>) {
+function mergeProjectionItems<T>(...itemGroups: Array<T[] | undefined>) {
   const merged: T[] = [];
-  const seen = new Set<string>();
+  const indexes = new Map<string, number>();
   for (const group of itemGroups) {
     for (const item of group ?? []) {
-      const key = exactItemKey(item);
-      if (seen.has(key)) {
+      const key = projectionItemIdentity(item);
+      const existingIndex = indexes.get(key);
+      if (existingIndex !== undefined) {
+        merged[existingIndex] = item;
         continue;
       }
-      seen.add(key);
+      indexes.set(key, merged.length);
       merged.push(item);
+    }
+  }
+  return merged.length > 0 ? merged : undefined;
+}
+
+type ConversationFeedbackEvent = NonNullable<ConversationMessage["feedbackEvents"]>[number];
+
+function mergeProjectionFeedbackEvents(
+  ...eventGroups: Array<ConversationMessage["feedbackEvents"]>
+) {
+  const merged: ConversationFeedbackEvent[] = [];
+  const callIndexes = new Map<string, number>();
+  const exactKeys = new Set<string>();
+  for (const group of eventGroups) {
+    for (const event of group ?? []) {
+      const callId = String(event.callId ?? "").trim();
+      if (callId) {
+        const existingIndex = callIndexes.get(callId);
+        if (existingIndex !== undefined) {
+          const consolidated = mergeAgentFeedbackEvents([merged[existingIndex]], [event]) ?? [];
+          merged[existingIndex] = consolidated[0] ?? event;
+          continue;
+        }
+        callIndexes.set(callId, merged.length);
+        merged.push(event);
+        continue;
+      }
+      const exactKey = JSON.stringify(event);
+      if (exactKeys.has(exactKey)) {
+        continue;
+      }
+      exactKeys.add(exactKey);
+      merged.push(event);
     }
   }
   return merged.length > 0 ? merged : undefined;
@@ -66,13 +113,13 @@ export function mergeCodexTranscripts(
     ...previous,
     ...next,
     messageId,
-    streaming: Boolean(previous.streaming || next.streaming) || undefined,
-    cells: mergeExactItems(previous.cells, next.cells) ?? [],
-    rolloutEvents: mergeExactItems(previous.rolloutEvents, next.rolloutEvents),
-    toolCalls: mergeExactItems(previous.toolCalls, next.toolCalls) ?? [],
-    terminalOperations: mergeExactItems(previous.terminalOperations, next.terminalOperations) ?? [],
-    terminalSessions: mergeExactItems(previous.terminalSessions, next.terminalSessions) ?? [],
-    modelObservations: mergeExactItems(previous.modelObservations, next.modelObservations) ?? [],
+    streaming: next.streaming ?? previous.streaming,
+    cells: mergeProjectionItems(previous.cells, next.cells) ?? [],
+    rolloutEvents: mergeProjectionItems(previous.rolloutEvents, next.rolloutEvents),
+    toolCalls: mergeProjectionItems(previous.toolCalls, next.toolCalls) ?? [],
+    terminalOperations: mergeProjectionItems(previous.terminalOperations, next.terminalOperations) ?? [],
+    terminalSessions: mergeProjectionItems(previous.terminalSessions, next.terminalSessions) ?? [],
+    modelObservations: mergeProjectionItems(previous.modelObservations, next.modelObservations) ?? [],
   };
 }
 
@@ -155,23 +202,23 @@ function mergeProcessProjectionMessages(previous: ConversationMessage, next: Con
   return {
     ...previous,
     content: mergeText(answerProjectionContent(previous), answerProjectionContent(next)),
-    streaming: Boolean(previous.streaming || next.streaming),
+    streaming: next.streaming ?? previous.streaming,
     streamStage: next.streamStage || previous.streamStage,
     thought: undefined,
     mentalSnapshot: undefined,
-    feedbackEvents: mergeExactItems(previous.feedbackEvents, next.feedbackEvents),
-    timelineItems: mergeExactItems(previous.timelineItems, next.timelineItems),
+    feedbackEvents: mergeProjectionFeedbackEvents(previous.feedbackEvents, next.feedbackEvents),
+    timelineItems: mergeProjectionItems(previous.timelineItems, next.timelineItems),
     toolCalls: undefined,
-    attachments: mergeExactItems(previous.attachments, next.attachments),
-    references: mergeExactItems(previous.references, next.references),
+    attachments: mergeProjectionItems(previous.attachments, next.attachments),
+    references: mergeProjectionItems(previous.references, next.references),
     codexTranscript: mergeCodexTranscripts(previous.codexTranscript, next.codexTranscript, previous.id),
     metadata: {
       ...(previous.metadata ?? {}),
       ...(next.metadata ?? {}),
-      projectedMessageIds: [
+      projectedMessageIds: [...new Set([
         ...projectedConversationMessageIdsOrSelf(previous),
         ...projectedConversationMessageIdsOrSelf(next),
-      ],
+      ])],
     },
   };
 }

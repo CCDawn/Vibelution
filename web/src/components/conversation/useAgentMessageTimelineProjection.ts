@@ -369,7 +369,7 @@ function committedAssistantAnswerForTurn(
     ) {
       return false;
     }
-    return Boolean(String(answerProjectionContent(message) ?? "").trim());
+    return hasCommittedAssistantProtocolAnswer(message);
   });
 }
 
@@ -471,5 +471,6 @@ export function projectAgentMessageTimelineMessages({
 }
 import {
   consolidateSessionTurnItemsV2,
+  hasCommittedAssistantProtocolAnswer,
   projectConversationMessageFromTurnItemsV2,
 } from "../../routes/chatTurnProtocol";

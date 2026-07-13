@@ -306,6 +306,79 @@ describe("projectAgentMessageTimelineMessages", () => {
     expect(projection.rowIdentities[0].rowKey).toBe("assistant-turn:turn-1");
   });
 
+  it("keeps the active same-turn layer after non-terminal commentary", () => {
+    const commentary = assistantMessage("assistant-commentary", {
+      content: "I will inspect the file.",
+      streaming: false,
+      metadata: { kind: "journal_assistant_partial", turnId: "turn-1" },
+      codexTranscript: {
+        version: 1,
+        source: "native",
+        messageId: "assistant-commentary",
+        cells: [{
+          id: "commentary-cell",
+          kind: "assistant_markdown",
+          messageId: "assistant-commentary",
+          status: "running",
+          tone: "running",
+          channel: "commentary",
+          phase: "commentary",
+          text: "I will inspect the file.",
+        }],
+      },
+    });
+    const activeTurn = assistantMessage("active-turn", {
+      content: "The version is 1.2.3.",
+      streaming: true,
+      feedbackEvents: [{
+        sequence: 1,
+        kind: "tool",
+        callId: "call-read-version",
+        status: "done",
+        name: "read_file_tool",
+        summary: "VERSION -> 1.2.3",
+      }],
+      metadata: { kind: "session_active_turn_layer", turnId: "turn-1" },
+    });
+
+    const projection = projectAgentMessageTimelineMessages({
+      timelineMessages: [commentary],
+      activeTurnMessage: activeTurn,
+    });
+
+    expect(projection.messages).toHaveLength(1);
+    expect(projection.messages[0].metadata?.projectedMessageIds).toEqual([
+      "assistant-commentary",
+      "active-turn",
+    ]);
+    expect(projection.messages[0].content).toContain("I will inspect the file.");
+    expect(projection.messages[0].content).toContain("The version is 1.2.3.");
+    expect(projection.messages[0].feedbackEvents).toEqual([
+      expect.objectContaining({
+        callId: "call-read-version",
+        status: "done",
+      }),
+    ]);
+  });
+
+  it("keeps identical assistant text from distinct turns as distinct rows", () => {
+    const projection = projectAgentMessageTimelineMessages({
+      timelineMessages: [
+        assistantMessage("assistant-turn-a", { content: "确认。", metadata: { turnId: "turn-a" } }),
+        assistantMessage("assistant-turn-b", { content: "确认。", metadata: { turnId: "turn-b" } }),
+      ],
+    });
+
+    expect(projection.messages.map((message) => message.id)).toEqual([
+      "assistant-turn-a",
+      "assistant-turn-b",
+    ]);
+    expect(projection.rowIdentities.map((row) => row.rowKey)).toEqual([
+      "assistant-turn:turn-a",
+      "assistant-turn:turn-b",
+    ]);
+  });
+
   it("normalizes timeline messages to chronological order before projecting rows", () => {
     const projection = projectAgentMessageTimelineMessages({
       timelineMessages: [
