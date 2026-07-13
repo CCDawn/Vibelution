@@ -59,7 +59,7 @@ export type AppliedSessionDetailDecision = {
   stats: SessionStreamApplyStats;
   shouldLogApplied: boolean;
   clearActiveLayer: boolean;
-  clearActiveLayerReason: "committed_detail" | "final_phase" | "";
+  clearActiveLayerReason: "committed_detail" | "";
   telemetry: Record<string, unknown>;
 };
 
@@ -147,14 +147,9 @@ export function planAppliedSessionDetail(
   const nextStats = normalizeSessionStreamApplyStats(input.stats);
   nextStats.applied += 1;
 
-  const finalPhase = isFinalSessionDetailPhase(input.detail, input.isBusyPhase);
   const clearByCommittedDetail = Boolean(input.activeLayer && input.activeLayerSettled);
-  const clearActiveLayer = clearByCommittedDetail || finalPhase;
-  const clearActiveLayerReason = clearByCommittedDetail
-    ? "committed_detail"
-    : finalPhase
-      ? "final_phase"
-      : "";
+  const clearActiveLayer = clearByCommittedDetail;
+  const clearActiveLayerReason = clearByCommittedDetail ? "committed_detail" : "";
 
   return {
     stats: nextStats,

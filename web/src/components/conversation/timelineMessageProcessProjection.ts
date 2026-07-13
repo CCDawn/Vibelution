@@ -45,6 +45,71 @@ function mergeProjectionItems<T>(...itemGroups: Array<T[] | undefined>) {
   return merged.length > 0 ? merged : undefined;
 }
 
+function normalizedAssistantCellText(value: unknown) {
+  return String(value ?? "").replace(/\s+/g, " ").trim();
+}
+
+function assistantCellChannel(cell: CodexTranscriptProjection["cells"][number]) {
+  return String(cell.channel ?? "answer").trim() || "answer";
+}
+
+function assistantCellIsTransitional(cell: CodexTranscriptProjection["cells"][number]) {
+  return Boolean(
+    cell.provisional
+    || cell.status === "running"
+    || cell.status === "pending",
+  );
+}
+
+function assistantCellRank(cell: CodexTranscriptProjection["cells"][number]) {
+  return (cell.terminal ? 4 : 0)
+    + (cell.provisional ? 0 : 2)
+    + (cell.status === "completed" ? 2 : cell.status === "running" ? 1 : 0);
+}
+
+function assistantCellsOverlap(
+  left: CodexTranscriptProjection["cells"][number],
+  right: CodexTranscriptProjection["cells"][number],
+) {
+  if (
+    left.kind !== "assistant_markdown"
+    || right.kind !== "assistant_markdown"
+    || assistantCellChannel(left) !== assistantCellChannel(right)
+  ) {
+    return false;
+  }
+  const leftLegacyMarkdown = "markdown" in left && typeof left.markdown === "string" ? left.markdown : "";
+  const rightLegacyMarkdown = "markdown" in right && typeof right.markdown === "string" ? right.markdown : "";
+  const leftText = normalizedAssistantCellText(left.text || leftLegacyMarkdown);
+  const rightText = normalizedAssistantCellText(right.text || rightLegacyMarkdown);
+  if (!leftText || !rightText) {
+    return false;
+  }
+  if (leftText === rightText) {
+    return true;
+  }
+  return (assistantCellIsTransitional(left) || assistantCellIsTransitional(right))
+    && (leftText.startsWith(rightText) || rightText.startsWith(leftText));
+}
+
+function mergeCodexTranscriptCells(
+  ...cellGroups: Array<CodexTranscriptProjection["cells"] | undefined>
+) {
+  const mergedByIdentity = mergeProjectionItems(...cellGroups) ?? [];
+  const cells: CodexTranscriptProjection["cells"] = [];
+  for (const cell of mergedByIdentity) {
+    const overlappingIndex = cells.findIndex((candidate) => assistantCellsOverlap(candidate, cell));
+    if (overlappingIndex < 0) {
+      cells.push(cell);
+      continue;
+    }
+    if (assistantCellRank(cell) >= assistantCellRank(cells[overlappingIndex])) {
+      cells[overlappingIndex] = cell;
+    }
+  }
+  return cells;
+}
+
 type ConversationFeedbackEvent = NonNullable<ConversationMessage["feedbackEvents"]>[number];
 
 function mergeProjectionFeedbackEvents(
@@ -114,7 +179,7 @@ export function mergeCodexTranscripts(
     ...next,
     messageId,
     streaming: next.streaming ?? previous.streaming,
-    cells: mergeProjectionItems(previous.cells, next.cells) ?? [],
+    cells: mergeCodexTranscriptCells(previous.cells, next.cells),
     rolloutEvents: mergeProjectionItems(previous.rolloutEvents, next.rolloutEvents),
     toolCalls: mergeProjectionItems(previous.toolCalls, next.toolCalls) ?? [],
     terminalOperations: mergeProjectionItems(previous.terminalOperations, next.terminalOperations) ?? [],
