@@ -102,6 +102,15 @@ type CodexTranscriptCellEntry = {
   ephemeral: boolean;
 };
 
+function isEphemeralCodexTranscript(transcript: CodexTranscriptProjection | undefined) {
+  const messageId = String(transcript?.messageId ?? "").trim().toLowerCase();
+  return Boolean(
+    transcript?.streaming
+    || messageId.includes("-message-live-")
+    || messageId.includes("-message-active-")
+  );
+}
+
 function toolCellSemanticKey(cell: CodexTranscriptProjection["cells"][number]) {
   if (cell.kind !== "tool_call") {
     return "";
@@ -120,8 +129,14 @@ function mergeCodexTranscriptCellEntries(
   const entries: CodexTranscriptCellEntry[] = [];
   const indexes = new Map<string, number>();
   const groups = [
-    { cells: previous?.cells, ephemeral: Boolean(options.previousEphemeral) },
-    { cells: next?.cells, ephemeral: Boolean(options.nextEphemeral) },
+    {
+      cells: previous?.cells,
+      ephemeral: options.previousEphemeral ?? isEphemeralCodexTranscript(previous),
+    },
+    {
+      cells: next?.cells,
+      ephemeral: options.nextEphemeral ?? isEphemeralCodexTranscript(next),
+    },
   ];
   for (const group of groups) {
     for (const cell of group.cells ?? []) {
