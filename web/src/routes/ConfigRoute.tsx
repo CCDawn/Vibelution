@@ -3466,9 +3466,9 @@ export function ConfigRoute() {
                   eyebrow="Provider workspace"
                   actions={(
                     <VActionGroup ariaLabel="Provider 工作区模式">
-                      <VButton variant={providerWorkspaceMode === "quick" ? "primary" : "ghost"} onPress={() => setProviderWorkspaceMode("quick")}>快速配置</VButton>
-                      <VButton variant={providerWorkspaceMode === "manage" ? "primary" : "ghost"} onPress={() => setProviderWorkspaceMode("manage")}>管理已有连接</VButton>
-                      <VButton variant={providerWorkspaceMode === "advanced" ? "primary" : "ghost"} onPress={() => setProviderWorkspaceMode("advanced")}>高级设置</VButton>
+                      <VButton className={styles.providerModeButton} aria-pressed={providerWorkspaceMode === "quick"} variant={providerWorkspaceMode === "quick" ? "primary" : "ghost"} onPress={() => setProviderWorkspaceMode("quick")}>快速配置</VButton>
+                      <VButton className={styles.providerModeButton} aria-pressed={providerWorkspaceMode === "manage"} variant={providerWorkspaceMode === "manage" ? "primary" : "ghost"} onPress={() => setProviderWorkspaceMode("manage")}>管理已有连接</VButton>
+                      <VButton className={styles.providerModeButton} aria-pressed={providerWorkspaceMode === "advanced"} variant={providerWorkspaceMode === "advanced" ? "primary" : "ghost"} onPress={() => setProviderWorkspaceMode("advanced")}>高级设置</VButton>
                     </VActionGroup>
                   )}
                 >

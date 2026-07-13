@@ -4,6 +4,8 @@ import { describe, expect, it } from "vitest";
 
 import type { ConfigProviderPresetOption } from "../api/types";
 import { ConfigQuickSetupPanel, type ConfigQuickSetupPanelProps } from "./ConfigQuickSetupPanel";
+import panelSource from "./ConfigQuickSetupPanel.tsx?raw";
+import styles from "./ConfigQuickSetupPanel.styles";
 import { initialProviderQuickSetupState, initialProviderWizardState } from "./configProviderLogic";
 
 const templates: ConfigProviderPresetOption[] = [{
@@ -42,6 +44,14 @@ function props(overrides: Partial<ConfigQuickSetupPanelProps> = {}): ConfigQuick
 }
 
 describe("ConfigQuickSetupPanel", () => {
+  it("uses comfortable desktop controls and announces progressive feedback", () => {
+    expect(styles.workspace).toContain("max-w-[88rem]");
+    expect(styles.field).toContain("[&_[data-vui=select-trigger]]:!min-h-10");
+    expect(styles.primaryAction).toContain("min-h-10");
+    expect(styles.reviewActions).toContain("items-end");
+    expect(panelSource).toContain('aria-live="polite"');
+  });
+
   it("renders a compact input flow without an idle result panel", () => {
     const markup = renderToStaticMarkup(<ConfigQuickSetupPanel {...props()} />);
 
