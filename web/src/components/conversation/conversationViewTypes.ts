@@ -4,6 +4,7 @@ import type {
   ChatNextStateSignalSummary,
   ConversationMessage,
   SessionReferenceAttachment,
+  SessionLlmModelOption,
   SessionTurnError,
   SkillLibraryItem,
 } from "../../api/types";
@@ -18,6 +19,15 @@ export type ConversationComposerAttachment = {
   previewUrl: string;
   sizeBytes: number;
   contentType: string;
+};
+
+export type ConversationLlmControl = {
+  models: SessionLlmModelOption[];
+  currentModelId: string;
+  currentReasoningEffort: string;
+  disabled: boolean;
+  pending: boolean;
+  onSelectionChange: (modelId: string, reasoningEffort: string) => void;
 };
 
 export type ConversationViewProps = {
@@ -71,6 +81,7 @@ export type ConversationViewProps = {
   composerReferences?: SessionReferenceAttachment[];
   slashCommandSuggestions?: SkillLibraryItem[];
   composerAttachmentInputDisabled?: boolean;
+  llmControl?: ConversationLlmControl;
   turnError?: SessionTurnError | null;
   nextStateSignals?: ChatNextStateSignalSummary[];
   submitLabel?: string;

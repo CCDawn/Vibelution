@@ -131,6 +131,7 @@ import {
 import { shouldLoadEarlierConversationMessages } from "./conversationHistoryWindow";
 import { parseResponseSegments, ResponseSegment } from "./messageResponseSegments";
 import { ConversationMarkdownRenderer } from "./ConversationMarkdownRenderer";
+import { ConversationModelSelector } from "./ConversationModelSelector";
 import {
   addComparableConversationImageUrl,
   comparableConversationImageUrl,
@@ -469,6 +470,7 @@ export function ConversationView({
   composerReferences = [],
   slashCommandSuggestions = [],
   composerAttachmentInputDisabled,
+  llmControl,
   turnError,
   submitLabel,
   submitPendingLabel,
@@ -3499,6 +3501,19 @@ export function ConversationView({
               }
             }}
           />
+          <div className={styles.composerToolbar}>
+            <VButton
+              className={styles.attachButton}
+              isDisabled={attachmentInputDisabled || !onAddComposerAttachments}
+              type="button"
+              onClick={() => attachmentInputRef.current?.click()}
+              title={lang === "zh" ? "添加图片" : "Attach image"}
+              aria-label={lang === "zh" ? "添加图片" : "Attach image"}
+            >
+              <ImagePlus size={16} />
+            </VButton>
+            {llmControl ? <ConversationModelSelector {...llmControl} /> : null}
+          </div>
         </div>
         <VNativeInput
           ref={attachmentInputRef}
@@ -3515,16 +3530,6 @@ export function ConversationView({
           }}
         />
         <div className={styles.composerActionStack}>
-          <VButton
-            className={styles.attachButton}
-            isDisabled={attachmentInputDisabled || !onAddComposerAttachments}
-            type="button"
-            onClick={() => attachmentInputRef.current?.click()}
-            title={lang === "zh" ? "添加图片" : "Attach image"}
-            aria-label={lang === "zh" ? "添加图片" : "Attach image"}
-          >
-            <ImagePlus size={16} />
-          </VButton>
           {!runningGuidanceActionsEnabled || showSafeGuidanceAction ? (
             <VButton
               className={primaryActionClassName}

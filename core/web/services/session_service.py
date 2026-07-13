@@ -11442,6 +11442,132 @@ def default_session_llm_bindings() -> dict[str, dict[str, str]]:
     return _normalize_session_agent_llm_bindings(None)
 
 
+def _session_agent_reasoning_effort(agent: dict[str, Any] | None, slot: str = SESSION_LLM_SLOT_DIALOGUE) -> str:
+    metadata = agent.get("metadata") if isinstance(agent, dict) and isinstance(agent.get("metadata"), dict) else {}
+    by_slot = metadata.get("llmReasoningEffort") if isinstance(metadata.get("llmReasoningEffort"), dict) else {}
+    return str(by_slot.get(slot) or "").strip().lower()
+
+
+def _session_llm_model_choices() -> list[dict[str, Any]]:
+    from .agent_config_workspace_service import list_agent_model_choices
+
+    default_model_id = _default_session_dialogue_model_id()
+    choices = copy.deepcopy(list_agent_model_choices())
+    for choice in choices:
+        choice["isDefault"] = str(choice.get("modelId") or "").strip() == default_model_id
+        values = [
+            str(value or "").strip().lower()
+            for value in list(choice.get("reasoningEffortValues") or [])
+            if str(value or "").strip()
+        ]
+        choice["reasoningEffortValues"] = values
+        provided_options = choice.get("reasoningEffortOptions") if isinstance(choice.get("reasoningEffortOptions"), list) else []
+        option_by_value = {
+            str(item.get("value") or "").strip().lower(): item
+            for item in provided_options
+            if isinstance(item, dict) and str(item.get("value") or "").strip()
+        }
+        choice["reasoningEffortOptions"] = [
+            {
+                "value": value,
+                "label": str((option_by_value.get(value) or {}).get("label") or {
+                    "low": "低",
+                    "medium": "中",
+                    "high": "高",
+                }.get(value, value)).strip(),
+                "description": str((option_by_value.get(value) or {}).get("description") or {
+                    "low": "更快响应，适合直接问题",
+                    "medium": "平衡速度与推理深度",
+                    "high": "更深推理，适合复杂任务",
+                }.get(value, "")).strip(),
+            }
+            for value in values
+        ]
+        requested_default = str(choice.get("defaultReasoningEffort") or "").strip().lower()
+        choice["defaultReasoningEffort"] = requested_default if requested_default in values else "medium" if "medium" in values else (values[0] if values else "")
+    return choices
+
+
+def get_session_llm_options(session_id: str) -> dict[str, Any]:
+    detail = get_session_detail(session_id, message_limit=0, transcript_scope="none")
+    if detail is None:
+        raise SessionNotFoundError(f"Session not found: {session_id}")
+    agent_id = str(detail.get("agentId") or "").strip()
+    agent = get_agent(agent_id, include_archived=False) if agent_id else None
+    current_model_id = str(detail.get("dialogueModelId") or agent_dialogue_model_id(agent) or "").strip()
+    current_reasoning_effort = str(
+        detail.get("reasoningEffort") or _session_agent_reasoning_effort(agent)
+    ).strip().lower()
+    return {
+        "sessionId": str(session_id or "").strip(),
+        "currentModelId": current_model_id,
+        "currentReasoningEffort": current_reasoning_effort,
+        "models": _session_llm_model_choices(),
+    }
+
+
+def update_session_llm_selection(
+    session_id: str,
+    *,
+    model_id: str,
+    reasoning_effort: str = "",
+) -> dict[str, Any]:
+    normalized_session_id = str(session_id or "").strip()
+    if _is_session_running(normalized_session_id):
+        raise SessionBusyError("会话运行中，不能切换模型或推理强度。")
+    detail = get_session_detail(normalized_session_id, message_limit=0, transcript_scope="none")
+    if detail is None:
+        raise SessionNotFoundError(f"Session not found: {normalized_session_id}")
+    agent_id = str(detail.get("agentId") or "").strip()
+    agent = get_agent(agent_id, include_archived=False) if agent_id else None
+    if not agent:
+        raise SessionValidationError("当前会话没有可配置的 Agent。")
+
+    normalized_model_id = str(model_id or "").strip()
+    choices = _session_llm_model_choices()
+    selected = next(
+        (choice for choice in choices if str(choice.get("modelId") or "").strip() == normalized_model_id),
+        None,
+    )
+    if selected is None:
+        raise SessionValidationError(f"未知模型：{normalized_model_id or '-'}。")
+    if bool(selected.get("missingApiKey")):
+        raise SessionValidationError("所选模型尚未配置 API Key。")
+
+    supported_efforts = {
+        str(value or "").strip().lower()
+        for value in list(selected.get("reasoningEffortValues") or [])
+        if str(value or "").strip()
+    }
+    normalized_effort = str(reasoning_effort or "").strip().lower()
+    if normalized_effort and normalized_effort not in supported_efforts:
+        raise SessionValidationError(f"模型 {selected.get('label') or normalized_model_id} 不支持推理强度 {normalized_effort}。")
+    if not normalized_effort:
+        normalized_effort = str(selected.get("defaultReasoningEffort") or "").strip().lower()
+
+    llm_bindings = agent_directory_service.normalize_agent_llm_bindings(agent.get("llmBindings"))
+    llm_bindings[SESSION_LLM_SLOT_DIALOGUE] = {"modelId": normalized_model_id}
+    metadata = dict(agent.get("metadata") or {})
+    effort_by_slot = dict(metadata.get("llmReasoningEffort") or {}) if isinstance(metadata.get("llmReasoningEffort"), dict) else {}
+    if normalized_effort:
+        effort_by_slot[SESSION_LLM_SLOT_DIALOGUE] = normalized_effort
+    else:
+        effort_by_slot.pop(SESSION_LLM_SLOT_DIALOGUE, None)
+    metadata["llmReasoningEffort"] = effort_by_slot
+    update_agent_instance(
+        agent_id,
+        llm_bindings=llm_bindings,
+        metadata=metadata,
+    )
+    _invalidate_session_list_cache()
+    return {
+        "sessionId": normalized_session_id,
+        "currentModelId": normalized_model_id,
+        "currentReasoningEffort": normalized_effort,
+        "models": choices,
+    }
+
+
 def _normalize_session_agent_profile_id(value: Any) -> str:
     normalized = str(value or "").strip()
     return normalized or DEFAULT_SESSION_AGENT_PROFILE_ID
@@ -11464,6 +11590,13 @@ def _default_session_dialogue_model_id() -> str:
         config = get_config()
     except Exception:
         return ""
+    try:
+        profile = config.llm.get_profile(profile_id=DEFAULT_SESSION_AGENT_PROFILE_ID)
+        model_id, _entry = config.llm.get_model_library_entry_for_profile(profile)
+        if str(model_id or "").strip():
+            return str(model_id or "").strip()
+    except Exception:
+        pass
     model_library = getattr(config.llm, "model_library", {}) or {}
     if isinstance(model_library, dict):
         items = model_library.items()
@@ -11475,12 +11608,7 @@ def _default_session_dialogue_model_id() -> str:
         model = str(item.get("model") or "").strip()
         if model:
             return str(model_id or "").strip()
-    try:
-        profile = config.llm.get_profile(role=DEFAULT_SESSION_AGENT_PROFILE_ID)
-        model_id, _entry = config.llm.get_model_library_entry_for_profile(profile)
-        return str(model_id or "").strip()
-    except Exception:
-        return ""
+    return ""
 
 
 def _session_agent_config_for_llm_bindings(agent_instance: dict[str, Any] | None) -> Any:

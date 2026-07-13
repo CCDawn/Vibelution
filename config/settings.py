@@ -91,6 +91,9 @@ PROFILE_REFERENCE_OVERRIDE_FIELDS = (
     "thinking_type",
     "thinking_display",
     "reasoning_effort",
+    "reasoning_effort_values",
+    "default_reasoning_effort",
+    "reasoning_effort_descriptions",
     "supports_image_input",
     "supports_prompt_cache",
     "capability_status",
@@ -208,6 +211,18 @@ def _coerce_model_library_detail(key: str, value: Any) -> Any:
         return copy.deepcopy(value) if isinstance(value, dict) else None
     if key == "api_key_env":
         return str(value).strip()
+    if key == "reasoning_effort_values":
+        if not isinstance(value, (list, tuple)):
+            return None
+        return [str(item or "").strip().lower() for item in value if str(item or "").strip()]
+    if key == "reasoning_effort_descriptions":
+        if not isinstance(value, dict):
+            return None
+        return {
+            str(item_key or "").strip().lower(): str(item_value or "").strip()
+            for item_key, item_value in value.items()
+            if str(item_key or "").strip()
+        }
     if key in {
         "transport",
         "contract",
@@ -216,6 +231,7 @@ def _coerce_model_library_detail(key: str, value: Any) -> Any:
         "thinking_type",
         "thinking_display",
         "reasoning_effort",
+        "default_reasoning_effort",
         "capability_status",
         "capability_source",
         "capability_checked_at",

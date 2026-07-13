@@ -748,8 +748,12 @@ describe("ConversationView edit resend affordance", () => {
       conversationViewSource.indexOf("<div className={styles.composerActionStack}>"),
       conversationViewSource.indexOf("</div>\n      </div>", conversationViewSource.indexOf("<div className={styles.composerActionStack}>")),
     );
-    expect(composerActionStackSource).toContain("className={styles.attachButton}");
+    expect(composerActionStackSource).not.toContain("className={styles.attachButton}");
     expect(composerActionStackSource).toContain("className={primaryActionClassName}");
+    expect(conversationViewSource).toContain("<div className={styles.composerToolbar}>");
+    expect(conversationViewSource).toContain("className={styles.attachButton}");
+    expect(conversationViewSource).toContain("<ConversationModelSelector {...llmControl} />");
+    expect(styles.composerToolbar).toContain("items-center");
     expect(conversationViewSource).toContain("const primaryActionClassName = primaryActionIsEditSubmit");
     expect(conversationViewSource).toContain("styles.composerEditSubmitButton");
     expect(conversationViewSource).toContain("styles.composerRoundButtonPrimary");

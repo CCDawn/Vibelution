@@ -41,6 +41,7 @@ const composerNativeFieldTargets =
   "[&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-[48px] [&_textarea]:max-h-[112px] [&_textarea]:resize-none [&_input]:w-full [&_select]:w-full [&_textarea]:w-full";
 const composerFieldBase = `min-w-0 grid gap-1 text-[var(--vui-font-xs)] text-[var(--fg-secondary)] ${composerNativeFieldTargets}`;
 const composerFieldShell = cv("composerField", composerFieldBase);
+const composerToolbarShell = cv("composerToolbar", "flex min-w-0 items-center gap-1 pt-0.5");
 const composerFieldDragActiveShell = cv(
   "composerFieldDragActive",
   "border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))] text-[var(--accent-cool)]",
@@ -1019,6 +1020,7 @@ const styles: Record<string, string> = {
   sectionToggle:
     "vui-components-conversationview sectionToggle min-w-0",
   sendButton: composerSendActionButton,
+  composerToolbar: composerToolbarShell,
   sessionMeta:
     "vui-components-conversationview sessionMeta min-w-0 flex flex-wrap items-center gap-1.5",
   statPill:

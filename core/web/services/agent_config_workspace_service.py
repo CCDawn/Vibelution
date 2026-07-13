@@ -1900,6 +1900,59 @@ def _agent_llm_slots() -> list[dict[str, Any]]:
     return ordered_slots
 
 
+_REASONING_EFFORT_LABELS = {
+    "none": "无",
+    "minimal": "最小",
+    "low": "低",
+    "medium": "中",
+    "high": "高",
+    "xhigh": "超高",
+    "max": "最大",
+    "ultra": "极高",
+}
+
+
+def _model_reasoning_effort_contract(option: dict[str, Any], *, supported: bool) -> tuple[list[str], str, list[dict[str, str]]]:
+    details = option.get("details") if isinstance(option.get("details"), dict) else {}
+    capabilities = details.get("capabilities") if isinstance(details.get("capabilities"), dict) else {}
+    raw_values = (
+        details.get("reasoning_effort_values")
+        or details.get("reasoningEffortValues")
+        or capabilities.get("reasoning_effort_values")
+        or capabilities.get("reasoningEffortValues")
+        or (GPT_REASONING_EFFORT_VALUES if supported else ())
+    )
+    values: list[str] = []
+    if isinstance(raw_values, (list, tuple)):
+        for raw_value in raw_values:
+            value = str(raw_value or "").strip().lower()
+            if value and value not in values:
+                values.append(value)
+    descriptions = (
+        details.get("reasoning_effort_descriptions")
+        if isinstance(details.get("reasoning_effort_descriptions"), dict)
+        else details.get("reasoningEffortDescriptions")
+        if isinstance(details.get("reasoningEffortDescriptions"), dict)
+        else {}
+    )
+    requested_default = str(
+        details.get("default_reasoning_effort")
+        or details.get("defaultReasoningEffort")
+        or details.get("reasoning_effort")
+        or ""
+    ).strip().lower()
+    default = requested_default if requested_default in values else "medium" if "medium" in values else (values[0] if values else "")
+    options = [
+        {
+            "value": value,
+            "label": _REASONING_EFFORT_LABELS.get(value, value),
+            "description": str(descriptions.get(value) or "").strip(),
+        }
+        for value in values
+    ]
+    return values, default, options
+
+
 def _agent_model_choices(model_options: list[Any]) -> list[dict[str, Any]]:
     choices: list[dict[str, Any]] = []
     seen: set[str] = set()
@@ -1911,21 +1964,38 @@ def _agent_model_choices(model_options: list[Any]) -> list[dict[str, Any]]:
             continue
         seen.add(model_id)
         provider = option.get("provider") if isinstance(option.get("provider"), dict) else {}
+        provider_id = str(
+            option.get("provider_id")
+            or provider.get("provider_id")
+            or provider.get("id")
+            or ""
+        ).strip()
         provider_kind = str(option.get("provider_kind") or provider.get("kind") or "").strip()
         api_key_configured = bool(option.get("api_key_configured", False))
         requires_api_key = bool(provider.get("requires_api_key", provider_kind != "local"))
         supports_reasoning_effort = model_supports_gpt_reasoning_effort(
             model=option.get("model"),
-            provider_kind=provider_kind,
+            provider_kind=(
+                provider_kind
+                if provider_kind in {"openai", "openai_compatible", "relay", "azure"}
+                else provider.get("service_class") or provider.get("driver") or provider_kind
+            ),
             transport=option.get("transport"),
             compat_mode=provider.get("compat_mode"),
             provider_api=option.get("resolved_provider_api") or option.get("provider_api") or provider.get("api"),
         )
+        reasoning_effort_values, default_reasoning_effort, reasoning_effort_options = _model_reasoning_effort_contract(
+            option,
+            supported=supports_reasoning_effort,
+        )
+        supports_reasoning_effort = bool(reasoning_effort_values)
         choice = {
             "modelId": model_id,
             "label": str(option.get("label") or option.get("model") or model_id).strip() or model_id,
             "model": str(option.get("model") or "").strip(),
             "contextWindow": int(option.get("contextWindow") or 0),
+            "providerId": provider_id,
+            "providerLabel": str(provider.get("label") or provider_id or provider_kind).strip(),
             "providerKind": provider_kind,
             "transport": str(option.get("transport") or "").strip(),
             "providerBaseUrl": str(provider.get("base_url") or "").strip(),
@@ -1937,13 +2007,21 @@ def _agent_model_choices(model_options: list[Any]) -> list[dict[str, Any]]:
             "missingApiKey": requires_api_key and not api_key_configured,
             "supportsImageInput": option.get("supports_image_input"),
             "supportsReasoningEffort": supports_reasoning_effort,
-            "reasoningEffortValues": list(GPT_REASONING_EFFORT_VALUES) if supports_reasoning_effort else [],
+            "reasoningEffortValues": reasoning_effort_values,
+            "reasoningEffortOptions": reasoning_effort_options,
+            "defaultReasoningEffort": default_reasoning_effort,
             "capabilityStatus": str(option.get("capability_status") or "").strip(),
             "capabilitySource": str(option.get("capability_source") or "").strip(),
         }
         choices.append(choice)
     choices.sort(key=lambda item: (str(item.get("label") or "").lower(), str(item.get("modelId") or "").lower()))
     return choices
+
+
+def list_agent_model_choices() -> list[dict[str, Any]]:
+    """Return the canonical model picker choices without loading the full Agent workspace."""
+
+    return _agent_model_choices(list(_safe_config_workspace().get("modelOptions") or []))
 
 
 def _llm_binding_model_refs(bindings: Any, model_refs: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any] | None]:

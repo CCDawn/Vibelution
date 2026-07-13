@@ -66,6 +66,7 @@ import {
   SessionDetail,
   AgentToolGovernanceRequest,
   SessionRuntimeNotice,
+  SessionLlmOptions,
   SessionSummary,
   SessionStreamEvent,
   SessionReferenceAttachment,
@@ -2310,6 +2311,48 @@ export function ChatCodingRoute() {
       mergeSessionDetailMessageWindow(previous as SessionDetail | undefined, next as SessionDetail),
     refetchInterval: chatLiveQueryPolicy.sessionDetailRefetchInterval,
     refetchIntervalInBackground: chatLiveQueryPolicy.directRefetchIntervalInBackground,
+  });
+  const sessionLlmOptionsQuery = useQuery({
+    queryKey: queryKeys.sessionLlmOptions(activeSessionId ?? "none"),
+    enabled: Boolean(activeSessionId),
+    queryFn: () => fetchJson<SessionLlmOptions>(
+      `/api/sessions/${encodeURIComponent(activeSessionId ?? "")}/llm-options`,
+    ),
+    staleTime: 30_000,
+  });
+  const sessionLlmSelectionMutation = useMutation({
+    mutationFn: (variables: { sessionId: string; modelId: string; reasoningEffort: string }) =>
+      fetchJson<SessionLlmOptions>(`/api/sessions/${encodeURIComponent(variables.sessionId)}/llm-selection`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          modelId: variables.modelId,
+          reasoningEffort: variables.reasoningEffort,
+        }),
+      }),
+    onMutate: (variables) => {
+      setSessionComposerErrors((current) => ({ ...current, [variables.sessionId]: "" }));
+    },
+    onSuccess: (payload, variables) => {
+      queryClient.setQueryData(queryKeys.sessionLlmOptions(variables.sessionId), payload);
+      queryClient.setQueryData<SessionDetail>(queryKeys.session(variables.sessionId), (current) => current ? {
+        ...current,
+        dialogueModelId: payload.currentModelId,
+        reasoningEffort: payload.currentReasoningEffort,
+      } : current);
+      updateSessionSummaryCaches(queryClient, (sessions) => sessions?.map((session) => session.id === variables.sessionId ? {
+        ...session,
+        dialogueModelId: payload.currentModelId,
+        reasoningEffort: payload.currentReasoningEffort,
+      } : session));
+      void queryClient.invalidateQueries({ queryKey: queryKeys.agents() });
+    },
+    onError: (error, variables) => {
+      setSessionComposerErrors((current) => ({
+        ...current,
+        [variables.sessionId]: describeError(error, lang === "zh" ? "模型切换失败" : "Failed to change model"),
+      }));
+    },
   });
   const loadEarlierSessionMessagesMutation = useMutation({
     mutationFn: (variables: { sessionId: string; beforeMessageIndex: number }) =>
@@ -4642,6 +4685,21 @@ export function ChatCodingRoute() {
     ],
   );
   const composerDisabled = conversationComposer.disabled;
+  const sessionLlmOptions = sessionLlmOptionsQuery.data;
+  const sessionLlmControl = activeSessionId ? {
+    models: sessionLlmOptions?.models ?? [],
+    currentModelId: sessionLlmOptions?.currentModelId || detail?.dialogueModelId || "",
+    currentReasoningEffort: sessionLlmOptions?.currentReasoningEffort || detail?.reasoningEffort || "",
+    disabled: sessionBusy || sessionLlmOptionsQuery.isLoading,
+    pending: sessionLlmSelectionMutation.isPending,
+    onSelectionChange: (modelId: string, reasoningEffort: string) => {
+      sessionLlmSelectionMutation.mutate({
+        sessionId: activeSessionId,
+        modelId,
+        reasoningEffort,
+      });
+    },
+  } : undefined;
 
   useEffect(() => {
     if (!activeSessionId || !activeAgentImageInputUnsupported || !activeImageAttachments.length) {
@@ -7298,6 +7356,7 @@ export function ChatCodingRoute() {
                 showSessionOverview: false,
                 showMentalSnapshots: mentalModelEnabledForNextTurn,
                 composer: conversationComposer,
+                llmControl: sessionLlmControl,
                 slashCommandSuggestions,
                 cancelComposerModeLabel: t("cancelEditMessage"),
                 turnError: detail.lastTurnError,

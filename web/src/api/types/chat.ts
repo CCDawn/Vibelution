@@ -15,6 +15,7 @@ export type SessionSummary = {
   agentPromptTemplateId?: string;
   agentPromptSnapshot?: SessionAgentPromptSnapshot;
   dialogueModelId?: string;
+  reasoningEffort?: string;
   agentInboxPendingCount?: number;
   agentPrimaryDirectSessionId?: string;
   agentDirectSessionMismatch?: boolean;
@@ -49,6 +50,35 @@ export type SessionSummary = {
   conversationIndexVisibility?: ConversationIndexVisibility;
   conversationIndexKind?: ConversationIndexKind;
   conversationIndexErrors?: string[];
+};
+
+export type SessionLlmReasoningEffortOption = {
+  value: string;
+  label: string;
+  description: string;
+};
+
+export type SessionLlmModelOption = {
+  modelId: string;
+  label: string;
+  model: string;
+  providerId: string;
+  providerLabel: string;
+  providerKind: string;
+  apiKeyConfigured: boolean;
+  missingApiKey: boolean;
+  supportsReasoningEffort: boolean;
+  reasoningEffortValues: string[];
+  reasoningEffortOptions: SessionLlmReasoningEffortOption[];
+  defaultReasoningEffort: string;
+  isDefault: boolean;
+};
+
+export type SessionLlmOptions = {
+  sessionId: string;
+  currentModelId: string;
+  currentReasoningEffort: string;
+  models: SessionLlmModelOption[];
 };
 
 export type SessionAgentPromptSnapshot = {

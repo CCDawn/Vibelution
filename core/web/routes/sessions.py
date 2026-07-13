@@ -20,6 +20,7 @@ from core.web.services.session_service import (
     delete_chat_session_lightweight,
     edit_and_resubmit_session_message,
     get_session_detail,
+    get_session_llm_options,
     list_child_sessions,
     list_sessions,
     query_sessions,
@@ -34,6 +35,7 @@ from core.web.services.session_service import (
     submit_session_message_lightweight,
     update_chat_session,
     update_chat_session_title,
+    update_session_llm_selection,
 )
 from core.web.services.runtime_scene_service import record_runtime_scene_event
 
@@ -133,6 +135,11 @@ class SessionUpdatePayload(BaseModel):
     agentId: str | None = None
 
 
+class SessionLlmSelectionPayload(BaseModel):
+    modelId: str
+    reasoningEffort: str = ""
+
+
 class ChildSessionCreatePayload(BaseModel):
     userRequest: str = ""
     taskTitle: str = ""
@@ -194,6 +201,30 @@ def session_detail(
     if detail is None:
         raise HTTPException(status_code=404, detail="Session not found")
     return detail
+
+
+@router.get("/sessions/{session_id}/llm-options")
+def session_llm_options(session_id: str) -> dict:
+    try:
+        return get_session_llm_options(session_id)
+    except SessionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.patch("/sessions/{session_id}/llm-selection")
+def session_llm_selection_update(session_id: str, payload: SessionLlmSelectionPayload) -> dict:
+    try:
+        return update_session_llm_selection(
+            session_id,
+            model_id=payload.modelId,
+            reasoning_effort=payload.reasoningEffort,
+        )
+    except SessionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except SessionBusyError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except SessionValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.post("/sessions/{session_id}/select")

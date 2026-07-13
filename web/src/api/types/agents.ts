@@ -814,6 +814,14 @@ export type AgentModelChoice = {
   requiresApiKey: boolean;
   missingApiKey: boolean;
   supportsImageInput?: boolean | null;
+  supportsReasoningEffort?: boolean;
+  reasoningEffortValues?: string[];
+  reasoningEffortOptions?: Array<{
+    value: string;
+    label: string;
+    description: string;
+  }>;
+  defaultReasoningEffort?: string;
   capabilityStatus: string;
   capabilitySource: string;
 };
