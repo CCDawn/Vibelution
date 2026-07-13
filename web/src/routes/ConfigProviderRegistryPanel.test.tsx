@@ -157,6 +157,8 @@ describe("ConfigProviderRegistryPanel", () => {
     expect(panelStyles.providerList).toContain("h-full");
     expect(panelStyles.providerButton).toContain("!min-h-[58px]");
     expect(panelStyles.detailSurface).toContain("[grid-template-rows:auto_auto_auto_minmax(0,1fr)_auto]");
+    expect(panelStyles.detailSurface).toContain("overflow-y-auto");
+    expect(panelStyles.detailSurface).not.toContain("overflow-hidden");
     expect(panelStyles.detailBody).toContain("min-h-0");
     expect(panelSource).toContain('data-provider-tab={selectedTab}');
     expect(panelSource).toContain('data-provider-danger-zone="true"');

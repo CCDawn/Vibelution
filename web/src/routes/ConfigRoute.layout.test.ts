@@ -314,6 +314,7 @@ describe("ConfigRoute layout contract", () => {
     expect(providerPanelStyles.registryWorkspace).not.toContain("max-[960px]");
     expect(providerPanelStyles.providerList).toContain("h-full");
     expect(providerPanelStyles.providerList).toContain("overflow-y-auto");
+    expect(providerPanelStyles.detailSurface).toContain("overflow-y-auto");
     expect(styles.providerModelsLayout).toContain("[grid-template-rows:auto_minmax(0,1fr)]");
   });
 
