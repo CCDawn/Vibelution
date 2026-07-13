@@ -66,7 +66,6 @@ ELECTRON_SUPERVISOR_EVENT_CODES = {
     "electron.desktop_action.failed",
 }
 WORK_RUN_HIGH_FREQUENCY_SNAPSHOT_THRESHOLD = 5
-MAX_CONVERSATION_TEXT_CHARS = 20_000
 REDACTED_FIELD_VALUE = "[redacted]"
 LIFECYCLE_INDEX_PHASES = {
     "session",
@@ -1171,7 +1170,8 @@ def record_runtime_scene_conversation_event(
     role_label = _sanitize_token(role, default="message")
     event_code = f"conversation.{_sanitize_path_token(event, default='message')}"
     relative_path = f"{CONVERSATIONS_DIR}/{normalized_session_id}.jsonl"
-    text = _truncate_text(str(content or ""), MAX_CONVERSATION_TEXT_CHARS)
+    content_length = len(str(content or ""))
+    content_redacted = content_length > 0
     payload = {
         "schema_version": 1,
         "runtime_scene_id": scene_id,
@@ -1180,8 +1180,10 @@ def record_runtime_scene_conversation_event(
         "event": str(event or "message").strip() or "message",
         "role": role_label,
         "status": str(status or "").strip(),
-        "content": text,
-        "message": message if isinstance(message, dict) else {},
+        "content": "",
+        "content_length": content_length,
+        "content_redacted": content_redacted,
+        "message": _runtime_scene_conversation_message_summary(message),
         "tool_calls": tool_calls if isinstance(tool_calls, list) else [],
         "active_task": active_task if isinstance(active_task, dict) else {},
     }
@@ -1202,12 +1204,13 @@ def record_runtime_scene_conversation_event(
                 "event_code": event_code,
                 "level": "info" if str(status or "").strip().lower() != "failed" else "error",
                 "outcome": str(status or "observed").strip() or "observed",
-                "message": _truncate_text(f"{role_label}: {text}", 320),
+                "message": f"{role_label} conversation message recorded ({content_length} chars).",
                 "fields": {
                     "sessionId": str(session_id or "").strip(),
                     "role": role_label,
                     "status": str(status or "").strip(),
-                    "contentPreview": _truncate_text(text, 240),
+                    "contentLength": content_length,
+                    "contentRedacted": content_redacted,
                 },
                 "raw_refs": [
                     {
@@ -1227,6 +1230,33 @@ def record_runtime_scene_conversation_event(
     }
 
 
+def _runtime_scene_conversation_message_summary(message: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(message, dict):
+        return {}
+    summary: dict[str, Any] = {}
+    for key in ("id", "messageId", "apiId", "role", "timestamp", "createdAt", "updatedAt"):
+        value = message.get(key)
+        if isinstance(value, (str, int, float, bool)) and value not in ("", None):
+            summary[key] = value
+    metadata = message.get("metadata")
+    if isinstance(metadata, dict):
+        safe_metadata = {
+            key: metadata[key]
+            for key in (
+                "turnId",
+                "turn_id",
+                "clientSubmissionId",
+                "client_submission_id",
+                "source",
+                "kind",
+            )
+            if isinstance(metadata.get(key), (str, int, float, bool)) and metadata.get(key) not in ("", None)
+        }
+        if safe_metadata:
+            summary["metadata"] = safe_metadata
+    return summary
+
+
 def _append_agent_turn_log(scene_dir: Path, conversation_payload: dict[str, Any]) -> None:
     content = _truncate_text(str(conversation_payload.get("content") or ""), 800)
     active_task = conversation_payload.get("active_task")
@@ -1242,6 +1272,8 @@ def _append_agent_turn_log(scene_dir: Path, conversation_payload: dict[str, Any]
             "role": conversation_payload.get("role") or "",
             "status": conversation_payload.get("status") or "",
             "content_preview": content,
+            "content_length": _coerce_int(conversation_payload.get("content_length"), default=0),
+            "content_redacted": bool(conversation_payload.get("content_redacted")),
             "active_task": active_task if isinstance(active_task, dict) else {},
         },
     )
