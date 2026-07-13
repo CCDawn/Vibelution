@@ -119,6 +119,7 @@ type ConfigSettingsSidebarProps = {
   language: ConfigSettingsLanguage;
   title: string;
   subtitle: string;
+  subtitleHint?: string;
   statusLabel: string;
   groups: ConfigSettingsGroup[];
   activeGroupId: string;
@@ -130,6 +131,7 @@ export function ConfigSettingsSidebar({
   language,
   title,
   subtitle,
+  subtitleHint,
   statusLabel,
   groups,
   activeGroupId,
@@ -141,7 +143,7 @@ export function ConfigSettingsSidebar({
       <header className={styles.sidebarHeader}>
         <p className={styles.eyebrow}>{language === "zh" ? "设置" : "Settings"}</p>
         <h2 className={styles.title}>{title}</h2>
-        <p className={styles.subtitle}>{subtitle}</p>
+        <p className={styles.subtitle} title={subtitleHint}>{subtitle}</p>
         {headerAction}
       </header>
       <div className={styles.status} role="status">
