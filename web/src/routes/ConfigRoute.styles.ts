@@ -91,6 +91,32 @@ const styles = {
     "vui-routes-configroute checkboxField [&_input]:[width:auto] [&_input]:[min-height:20px] [&_input]:[justify-self:start]",
   compactButton:
     "vui-routes-configroute compactButton [min-height:27px] [padding:0_8px] [font-size:var(--vui-font-xs)]",
+  configProgressiveBody:
+    "vui-routes-configroute configProgressiveBody [display:grid] [gap:12px] [margin:var(--config-section-y)_var(--config-section-x)_var(--config-section-x)] [&_.treeFieldCardView]:[grid-template-columns:minmax(0,1fr)] [&_.treeFieldCardView]:[gap:5px] [&_.treeFieldCardView]:[min-height:92px] [&_.treeFieldHead]:[grid-column:1] [&_.treeFieldHead]:[grid-row:1] [&_.treeFieldValue]:[grid-column:1] [&_.treeFieldValue]:[grid-row:2] [&_.treeHint]:[grid-column:1] [&_.treeHint]:[grid-row:3] [&_.treeHint]:[-webkit-line-clamp:1] [&_.treeFieldLabel]:[overflow:visible] [&_.treeFieldLabel]:[text-overflow:clip] [&_.treeFieldLabel]:[white-space:normal] [&_.treeFieldCardEdit_.field]:[grid-template-columns:minmax(0,1fr)]",
+  configCommonGridPet:
+    "vui-routes-configroute configCommonGridPet ![grid-template-columns:repeat(4,minmax(0,1fr))] max-[1180px]:![grid-template-columns:repeat(2,minmax(0,1fr))]",
+  configCommonGridContext:
+    "vui-routes-configroute configCommonGridContext ![grid-template-columns:repeat(5,minmax(0,1fr))] max-[1180px]:![grid-template-columns:repeat(2,minmax(0,1fr))]",
+  configCommonGridTwo:
+    "vui-routes-configroute configCommonGridTwo ![grid-template-columns:repeat(2,minmax(0,1fr))]",
+  configCommonGridThree:
+    "vui-routes-configroute configCommonGridThree ![grid-template-columns:repeat(3,minmax(0,1fr))] max-[1180px]:![grid-template-columns:repeat(2,minmax(0,1fr))]",
+  configAdvancedGrid:
+    "vui-routes-configroute configAdvancedGrid ![grid-template-columns:repeat(3,minmax(0,1fr))] max-[1180px]:![grid-template-columns:repeat(2,minmax(0,1fr))]",
+  configTier:
+    "vui-routes-configroute configTier [display:grid] [gap:7px] [min-width:0]",
+  configTierHeader:
+    "vui-routes-configroute configTierHeader [display:flex] [align-items:center] [justify-content:space-between] [gap:12px] [min-width:0] [padding:2px_2px_0]",
+  configTierHeaderCopy:
+    "vui-routes-configroute configTierHeaderCopy [display:grid] [gap:3px] [min-width:0] [text-align:left] [&_strong]:[color:var(--fg-primary)] [&_strong]:[font-size:var(--vui-font-sm)] [&_strong]:[font-weight:700] [&_span]:[color:var(--fg-tertiary)] [&_span]:[font-size:var(--vui-font-xs)] [&_span]:[line-height:1.35] [&_span]:[overflow-wrap:anywhere]",
+  configAdvancedTier:
+    "vui-routes-configroute configAdvancedTier [padding-top:10px] [border-top:1px_solid_var(--border-hairline)]",
+  configAdvancedToggle:
+    "vui-routes-configroute configAdvancedToggle w-full [display:flex] [align-items:center] [justify-content:space-between] [gap:14px] [min-height:58px] [padding:10px_12px] [border:1px_solid_color-mix(in_srgb,var(--vui-border-subtle)_94%,transparent)] [border-radius:8px] [background:color-mix(in_srgb,var(--surface-card)_90%,var(--surface-panel))] [color:inherit] [text-align:left] hover:[border-color:color-mix(in_srgb,var(--accent-cool)_34%,var(--border-strong))] hover:[background:var(--vui-surface-row-hover)] focus-visible:[outline:2px_solid_var(--accent-cool)] focus-visible:[outline-offset:2px]",
+  configAdvancedToggleMeta:
+    "vui-routes-configroute configAdvancedToggleMeta [display:flex] [align-items:center] [justify-content:end] [gap:8px] [flex:0_0_auto]",
+  configAdvancedBody:
+    "vui-routes-configroute configAdvancedBody [display:grid] [gap:7px] [padding-top:2px]",
   configDenseSection:
     "vui-routes-configroute configDenseSection [&>_.treeGrid]:[grid-template-columns:repeat(3,minmax(220px,1fr))] [&>_.treeGrid]:[gap:7px] [&_.treeFieldCardView]:[grid-template-columns:minmax(108px,0.34fr)_minmax(0,1fr)] [&_.treeFieldCardView]:[gap:4px_7px] [&_.treeFieldCardView]:[min-height:34px] [&_.treeFieldCardView]:[padding:6px] [&_.treeFieldCardEdit]:[gap:5px] [&_.treeFieldCardEdit]:[padding:7px] [&_.treeObjectCell_.treeObjectBlock]:[min-height:38px] [&_.treeObjectCell_.treeObjectBlock]:[padding:7px] [&_.treeObjectCell_.treeNestedBlock]:[min-height:38px] [&_.treeObjectCell_.treeNestedBlock]:[padding:7px] [&_.treeObjectCell_.treeToggle]:[min-height:30px] max-[1500px]:[&>_.treeGrid]:[grid-template-columns:repeat(2,minmax(220px,1fr))] max-[860px]:[&>_.treeGrid]:[grid-template-columns:1fr]",
   configDiscoverySection:
