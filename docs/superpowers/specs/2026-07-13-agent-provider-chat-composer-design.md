@@ -1,8 +1,14 @@
 # Agent 固定模型、多模型 Provider 与 Codex Composer 设计
 
-**Status:** approved / pending-spec-review
+**Status:** original direction approved / CC Switch supplement pending written-spec review
 **Date:** 2026-07-13
 **Owner:** model-config-governance + web-workbench-surface
+**Branch:** `codex/agent-provider-chat-composer-design`
+**Worktree:** `C:\Users\17533\Desktop\Vibelution-worktrees\agent-provider-chat-composer-design`
+**Scope:** Provider 多模型目录、Agent 固定模型、Session 推理强度、Codex Composer 与 Ai-Pixel 收敛设计
+**Implementation plan:** written-spec review 通过后单独创建
+**Validation:** written-spec self-review、`git diff --check`、CC Switch 官方源码交叉核对
+**Close condition:** 用户审阅本次 CC Switch 补充后确认进入 implementation planning
 **Task tier:** HIGH_RISK
 **Version impact:** minor candidate（本设计阶段不修改版本文件）
 
@@ -21,8 +27,10 @@
 
 - 参考 OpenCode 的 `provider -> models -> variants`、`provider_id/model_id` 和 Agent 固定模型结构；
 - 参考 Hermes 对 OpenAI-compatible endpoint 的 `/models`、`/v1/models` 动态发现和短期缓存；
+- 参考 CC Switch 的 Provider 快照、结构化 common config、模型目录投影、原子写入和代理接管备份；
+- 对 Vibelution 的日常模型选择采用 CC Switch 在 OpenCode/Hermes 上的“增量注册”思路，不采用 Codex/Claude 的整套 live 配置切换；
 - 保留 Vibelution 已有 schema v2、Provider discovery、catalog、pinned model、modelRef 和引用扫描实现；
-- 不引入 OpenCode、Hermes 或新的第三方运行时依赖，不复制外部实现。
+- 不引入 OpenCode、Hermes、CC Switch 或新的第三方运行时依赖，不复制外部实现。
 
 ## 2. 与相邻设计的边界
 
@@ -94,12 +102,41 @@ Hermes 对命名 custom provider 保存 endpoint 和凭据，可从 `/models` �
 - https://github.com/NousResearch/hermes-agent/issues/6799
 - https://github.com/NousResearch/hermes-agent/blob/main/LICENSE
 
+### 4.3 CC Switch
+
+CC Switch 的配置管理分为两类：
+
+- Codex、Claude、Gemini 使用独占式 Provider 切换：切走前回填当前 live 配置，更新设备级 current Provider 和数据库默认值，再将目标 Provider 与 common config 合成为有效配置并写入应用 live 文件；
+- OpenCode、OpenClaw、Hermes 使用增量式注册：多个 Provider 同时存在于 live 配置中，不依赖全局唯一 current Provider，Hermes 的“切换”只更新顶层默认模型指向。
+
+Vibelution 的 Provider/Agent 模型管理更接近第二类：所有 Provider 与模型长期注册，Agent 保存稳定 `providerId/modelId` 绑定；普通模型选择不应切换整套 operator 配置。
+
+CC Switch 对 OpenAI-compatible 模型发现使用有序候选路径：显式 `models_url_override` 优先；版本化 Base URL 使用 `<base>/models`；未版本化 Base URL 使用 `<base>/v1/models`；已知兼容子路径还会剥离后重试。只有 `404/405` 才继续下一候选，认证、限流、超时和上游错误保持原始失败类型。成功响应只提取真实 `id` 和可选 `owned_by`，排序后进入模型目录。
+
+其新版 Codex `modelCatalog` 以数据库内容为事实源，再投影为 `cc-switch-model-catalog.json`；推理参数会根据平台和模型适配成 `reasoning_effort`、`reasoning.effort`、`thinking` 或布尔开关。Vibelution 只借鉴“目录投影”和“能力适配层”，不把模型名称启发式当作 confirmed capability。
+
+CC Switch 的独占式切换还说明了整文件替换的维护成本：它需要切换锁、live 回填、common config 剥离、备份恢复、MCP 重投影和异常自愈。因此 Vibelution 只在 Provider 合并、schema 迁移和受控 promotion 等配置事务中使用备份/回滚，不在 Agent 绑定或 Session effort 修改时重写整份 operator config。
+
+本机脱敏审查还发现设备级 current Provider、数据库默认值和历史 settings 记录可能同时存在。CC Switch 最新逻辑明确以有效设备级值优先、数据库值回退；Vibelution 当前不需要多设备 Provider current 同步，因此不得引入这类双 current 结构。
+
+参考：
+
+- https://github.com/farion1231/cc-switch#architecture-overview
+- https://github.com/farion1231/cc-switch/blob/main/src-tauri/src/services/provider/mod.rs
+- https://github.com/farion1231/cc-switch/blob/main/src-tauri/src/services/provider/live.rs
+- https://github.com/farion1231/cc-switch/blob/main/src-tauri/src/services/model_fetch.rs
+- https://github.com/farion1231/cc-switch/blob/main/src-tauri/src/codex_config.rs
+- https://github.com/farion1231/cc-switch/blob/main/docs/release-notes/v3.16.0-en.md
+- https://github.com/farion1231/cc-switch/blob/main/LICENSE
+
 ## 5. 单一事实源
 
 | 事实 | Canonical source | Writer | Readers / derived surfaces | 刷新或失效规则 | 旧来源处理 |
 | --- | --- | --- | --- | --- | --- |
 | Provider endpoint、协议、凭据引用 | operator `config.toml` 的 `llm.providers.<providerId>` | Config provider service | runtime projection、设置页、discovery | 保存后重载；endpoint/credential 变化使旧 catalog fingerprint 失效 | 重复 Provider 经迁移删除 |
+| 模型发现端点策略 | Provider discovery config 新增的 `discovery.models_url_override` + driver 默认解析规则 | Config provider service | discovery probe、设置页诊断 | override/endpoint/driver 变化时使旧 catalog fingerprint 失效 | 这是待实现的 schema 扩展；不把推导出的候选 URL 回写为 Provider base_url |
 | 动态发现目录 | model catalog state | Provider discovery service | Provider 管理、Agent candidate projection | TTL、手动刷新、fingerprint 变化 | 仅作派生目录，不能覆盖 pinned config |
+| 模型能力矩阵 | pinned model 人工确认值 + capability verification record | Provider config service / capability verifier | Agent candidate、Composer effort、runtime adapter | 模型/endpoint/driver fingerprint 变化使 probe 结果 stale | 名称启发式只作 unknown 状态下的建议，不升级为 confirmed |
 | 可运行的固定模型 | `llm.providers.<providerId>.models.<modelKey>` | Provider config service / promotion coordinator | runtime model library、Agent binding validation | operator config 保存后重载 | 不再从临时 catalog 直接运行 |
 | Agent 固定主模型 | Agent `llmBindings.dialogue.modelId` | Agent config service | Agent runtime、Agent 设置、Composer read-only label | Agent 设置保存后下一轮生效 | 会话接口不再写 modelId |
 | Agent 默认推理强度 | Agent metadata `llmReasoningEffort.dialogue` | Agent config service | 新会话初始化 | Agent 设置保存后只影响未来新会话 | 明确定义现有字段为 default，不再作为会话当前值 |
@@ -111,6 +148,8 @@ Hermes 对命名 custom provider 保存 endpoint 和凭据，可从 `/models` �
 - 会话强度变更不得同时写 Session 和 Agent；
 - Agent model binding 不得复制 Provider endpoint 或凭据；
 - catalog 不得以后台刷新方式覆盖 pinned model 的人工 label、capabilities 或 defaults；
+- discovery 不得把推导出的 `/models` URL、返回模型或能力猜测自动回写 Provider/pinned config；
+- Agent binding 与 Session effort 修改不得触发整份 operator config 的 live 回填或 profile 切换；
 - 历史回合不得根据后来修改的 Agent 配置重新标注。
 
 ## 6. Provider 与模型身份
@@ -146,6 +185,25 @@ Provider 的所有发现模型都进入 Agent 配置目录，但按当前 slot �
 - vision：需要图片输入能力；
 - image generation、audio、realtime 等非 dialogue 模型在 dialogue 列表中可见但禁用，并显示原因；
 - capability 为 unknown 时允许用户先执行模型验证；未经验证不得伪装成 confirmed。
+
+模型能力按以下优先级解析：
+
+```text
+pinned model 人工确认 override
+> 当前 endpoint/driver fingerprint 下的成功 probe
+> 可信 Provider 元数据或静态内置声明
+> 平台 + 模型名称启发式建议
+> unknown
+```
+
+每个能力字段必须携带 `value`、`source`、`verificationStatus` 和可选 `verifiedAt/fingerprint`，不能只保存一个无来源布尔值。推理强度是模型级能力，不是 Provider 级统一能力；同一中转站下 Luna、Sol、Terra 可以支持不同 effort 集合和不同请求参数形态。
+
+名称启发式只能帮助生成 probe 建议或表单初值。它不能：
+
+- 将 `high` 自动解释为 `xhigh`；
+- 将思考开关模型伪装成多档 effort 模型；
+- 因同一 Provider 的另一个模型验证成功而批量确认全部模型；
+- 覆盖用户人工确认或新 fingerprint 下的失败验证结果。
 
 ## 7. 动态目录进入 Agent 选择器
 
@@ -200,6 +258,49 @@ discovery refresh 只更新 catalog，不批量写入 `provider.models`。原因
 - pinned inventory 应表达用户实际选择或明确管理的模型；
 - 失效 catalog 不能删除仍被 Agent 引用的 pinned model。
 
+### 7.4 模型发现端点解析
+
+Provider 保留用户输入并已规范化的 runtime `base_url`，discovery 使用独立的候选解析器，不通过试探结果修改 runtime endpoint。
+
+解析顺序：
+
+1. `discovery.models_url_override` 非空时只请求该显式地址；该字段是对现有 `ProviderDiscoverySettings` 的新增项，沿用项目配置的 snake_case 命名；
+2. Base URL 已以 `/vN` 版本段结尾时优先请求 `<base>/models`；非 `/v1` 版本段可追加 `<base>/v1/models` 作为兼容候选；
+3. 未带版本段的站点根地址请求 `<base>/v1/models`；
+4. Base URL 是完整 `/responses`、`/chat/completions` 等请求地址时，从其 origin/版本根推导模型端点；
+5. 对已知 Anthropic/Coding 兼容子路径，可剥离兼容后缀后追加 `/v1/models` 和 `/models`；
+6. 所有候选去重并保持首次出现顺序，候选数量必须有界。
+
+失败策略：
+
+- `404/405` 表示当前候选路径不适用，可以继续下一候选；
+- `401/403` 表示认证或权限失败，不继续用路径猜测掩盖问题；
+- `429`、超时、网络失败、`5xx` 保留为 rate_limit、timeout、network 或 upstream 错误；是否继续候选由 driver 显式声明，默认停止；
+- HTML 404 页和上游错误正文必须截断、清洗并脱敏；
+- 最终诊断显示尝试的路径模板、状态码和停止原因，不显示 API Key、Authorization、query secret 或完整响应体。
+
+成功响应只接受结构合法、模型 ID 非空的条目。目录按 `upstreamId` 去重和稳定排序，保留可用的 `owned_by` 等来源元数据；任何返回条目最初都标记为 `observed`，不能因为 `/models` 返回了它就直接视为可调用或支持工具/推理。
+
+### 7.5 Catalog、verification 与 pinned 生命周期
+
+模型从发现到可运行的状态链是：
+
+```text
+observed
+-> compatible candidate
+-> verified（可选但推荐）
+-> pinned
+-> Agent bound
+```
+
+- `observed` 只证明当前 Key 的模型列表接口返回了该 ID；
+- `compatible candidate` 证明静态 slot 约束未排除它；
+- `verified` 证明在当前 Provider fingerprint 下通过了有界探测；
+- `pinned` 表示 operator config 明确管理该模型；
+- `Agent bound` 表示某个 Agent 的 slot 使用该 canonical modelRef。
+
+Catalog refresh 可以让 observed 模型变成 stale/unavailable，但不得逆向删除 pinned model 或 Agent binding。endpoint、credential ref、driver、protocol、`discovery.models_url_override` 任一变化都生成新 fingerprint，使旧 verification 失效；人工确认的能力继续保留，但 UI 必须提示其验证上下文已经变化。
+
 ## 8. Agent 固定模型与推理强度
 
 ### 8.1 Agent 固定模型
@@ -230,6 +331,16 @@ Agent llmReasoningEffort dialogue default
 - 运行中禁止修改；
 - 服务端验证该值属于固定模型支持的 reasoning effort values；
 - 保存失败时前端恢复已确认值，不保留 optimistic 假状态。
+
+请求适配由共享 LLM driver 根据模型 capability contract 完成：
+
+- 原生 Responses effort 模型发送 `reasoning_effort` 或 driver 声明的等价字段；
+- OpenRouter 等对象协议发送 `reasoning: { effort }`；
+- 只支持思考开关的模型将 Session effort 映射为明确的 on/off 规则，并在 UI 中只展示该模型真实拥有的选项；
+- 不支持 reasoning 的模型不发送相关字段，Composer 不显示可交互 effort control；
+- driver 可对上游枚举做显式、可测试的有损映射，例如上游没有 `max` 时映射到 `xhigh`，但必须在 capability projection 中暴露 effective value，不能静默伪装。
+
+推理参数适配属于 driver/model capability 层，不允许散落在 Composer、Agent service 或业务调用方中。真实请求日志只记录 requested/effective effort、adapter 和 reasonCode，不记录完整请求体。
 
 会话 API 收敛为只修改 `reasoningEffort`。现有通过 session endpoint 同时修改 `modelId` 和 Agent metadata 的行为必须移除。
 
@@ -346,11 +457,29 @@ Ai-Pixel · gpt-5.6-luna · 已发现/已固定 · 支持低/中/高
 
 credential ref 不能仅凭环境变量名推断为同一 secret。preview 必须明确选择 canonical credential ref；日志和 manifest 只记录 ref，不记录 secret。
 
+迁移事务必须使用显式阶段，而不是先改 live 文件再尝试修补数据库：
+
+```text
+prepared
+-> backup_created
+-> candidate_written
+-> reloaded
+-> references_migrated
+-> verified
+-> committed
+```
+
+任一阶段失败进入 `rollback_started -> rolled_back | rollback_failed`。manifest 至少保存 migrationId、输入 config hash、备份路径、candidate hash、引用计数、完成阶段、验证结果和恢复结果。candidate 写入使用同目录临时文件、解析验证和原子替换；备份必须在任何 operator config 写入前完成。
+
+promotion 与 Provider 合并共享事务基础设施，但操作范围不同：promotion 只新增一个 pinned model 并更新一个 Agent binding；Provider 合并可以迁移多条 modelRef。两者都不得使用运行时 live backfill 推测用户意图，也不得把 proxy backup 或 catalog projection 当作 operator config 的更新来源。
+
 ## 12. API 与组件边界
 
 ### 12.1 后端职责
 
 - Provider discovery：只拥有 catalog 刷新；
+- Model endpoint resolver：只拥有有界候选生成、override 和失败分类，不修改 Provider runtime base_url；
+- Model capability verifier：拥有当前 fingerprint 下的有界 probe 和 verification record；
 - Agent model candidate service：合并 pinned + catalog 并投影 slot compatibility；
 - Model promotion coordinator：拥有 discovered -> pinned + Agent binding 的受控变更与补偿；
 - Agent directory/config service：拥有固定 modelRef 与 Agent effort default；
@@ -366,32 +495,63 @@ credential ref 不能仅凭环境变量名推断为同一 secret。preview 必�
 - Chat route/bridge：只选择 `codex` variant，不复制 Composer；
 - Evolution/SelfEvolution：继续使用 compact variant。
 
+### 12.3 配置合成与写入边界
+
+运行时有效选择通过结构化解析产生，不生成第二份可编辑 Provider 配置：
+
+```text
+operator Provider + pinned model
++ Agent fixed binding
++ Session confirmed effort
+-> resolved invocation selection
+```
+
+Provider common/default 配置只能包含跨模型可共享、非机密且不改变路由身份的值。以下字段不得进入 common/default 层：
+
+- API Key、Authorization、provider-scoped bearer token；
+- Base URL、models endpoint、protocol/wire API；
+- model/provider ID、model catalog pointer；
+- Agent binding、Session effort；
+- MCP、catalog、proxy takeover 等其他事实源的投影字段。
+
+结构化合并必须保留 operator config 中无关的用户字段和注释；不能采用 parse 后无差别整文档重排。正常 Agent binding、Session effort、catalog refresh 和 capability probe 都不得重写 operator `config.toml`。只有 promotion、Provider 编辑和显式 migration 可以进入 operator config 写事务，并且必须携带输入 hash、预览、备份、重载验证和回滚信息。
+
+未来若增加本地代理或 failover，它必须是独立的显式 takeover 层：保存原有效选择、将请求路由指向本地代理、通过内部 current route 热切换，并在释放时恢复。takeover 状态不得伪装成 Provider/Agent 配置变化，也不得在代理未运行时留下无法解释的半接管状态。
+
 ## 13. 错误和恢复
 
 | 场景 | 用户可见结果 | 状态保护 |
 | --- | --- | --- |
 | discovery 失败但有旧 catalog | 显示 stale catalog 和失败原因 | 不删除 pinned models，不伪装 fresh |
 | discovery 无 catalog | Provider 显示 unavailable，允许手工 pin/重试 | Agent 原 binding 不变 |
+| models endpoint 候选全部 404/405 | 显示 endpoint_not_found 和已尝试路径模板 | 不修改 Provider base_url，不写空 catalog 覆盖旧目录 |
+| models endpoint 返回 401/403 | 显示 credential/permission 错误 | 停止路径猜测，不暴露 secret |
+| models endpoint 返回 429/timeout/5xx | 显示 rate_limit/timeout/upstream 状态 | 保留旧 catalog 为 stale，按 driver 策略决定是否继续候选 |
+| `/models` 返回模型但 probe 失败 | 模型保持 observed/unverified | 不升级 capability，不自动 pin |
 | candidate 在选择前消失 | 提示刷新目录 | 不写 config/Agent |
 | promotion config 写入失败 | 显示保存失败 | Agent binding 不变 |
 | config 成功、Agent 更新失败 | 显示 rollback 中/失败 | 自动恢复 config；失败则 partial + manifest |
 | effort 不受支持 | 服务端 4xx + capability message | Session confirmed value 不变 |
 | effort 保存失败 | Composer 恢复旧值 | 不保留 optimistic 值 |
+| effort 只支持开关或枚举不完全匹配 | 只显示/发送 effective capability | 不静默伪装更高档位 |
 | 固定模型上游失败 | 正常 provider error | 不静默切模型 |
 | Provider 迁移冲突 | preview blocked | 不写 operator config |
+| takeover/backup 状态不一致 | 显示 degraded/repair required | 禁止继续写 live，保留备份和诊断 |
 
 ## 14. 日志契约
 
 新增或补齐有界 runtime-scene 事件：
 
 - `config.provider.discovery_succeeded/failed`（复用）；
+- `config.provider.model_endpoint_resolved/failed`；
+- `config.model.capability_verification_succeeded/failed/stale`；
 - `config.model.promotion_started/completed/failed/rolled_back`；
 - `agent.llm_binding.updated/rejected`；
 - `session.reasoning_effort.updated/rejected`；
 - `llm.turn.selection_resolved`；
 - `config.provider.merge_previewed/applied/failed/rolled_back`。
 
-允许字段：providerId、modelRef、upstreamId、agentId、sessionId、turnId、slot、effort、source、status、reasonCode、elapsedMs、count、manifest path。
+允许字段：providerId、modelRef、upstreamId、agentId、sessionId、turnId、slot、requestedEffort、effectiveEffort、adapter、source、status、reasonCode、elapsedMs、candidateCount、attemptCount、statusCode、fingerprint、manifest path。模型端点只记录脱敏后的 origin/path template，不记录 query。
 
 禁止字段：API Key、Authorization、完整 prompt、完整响应、raw provider payload、完整配置文件和大模型目录。
 
@@ -402,7 +562,12 @@ credential ref 不能仅凭环境变量名推断为同一 secret。preview 必�
 至少覆盖：
 
 - discovery 返回 Luna/Sol/Terra 时 candidate projection 全部出现；
+- endpoint override 存在时只请求 override；根地址、`/v1`、其他 `/vN`、完整 `/responses` 地址和兼容子路径生成正确且有界的候选顺序；
+- discovery 在 404/405 时继续候选，在 401/403 时停止，429/timeout/5xx 按 driver 策略分类；错误正文截断且不泄漏凭据；
+- `/models` 返回只生成 observed catalog；未验证模型不会自动得到 confirmed capability；
 - pinned + discovered 同 modelRef 去重，pinned override 优先；
+- capability 优先级满足人工确认 > 当前 fingerprint probe > 可信元数据 > heuristic > unknown；fingerprint 变化使 probe stale；
+- 同一 Provider 下不同模型可以拥有不同 effort values、default 和 request adapter；
 - audio/image/realtime 模型在 dialogue slot 可见但禁用；
 - discovered model promotion 成功后写 pinned model 和 Agent binding；
 - promotion 任一步失败时无悬空 Agent reference，补偿/partial 状态正确；
@@ -410,7 +575,10 @@ credential ref 不能仅凭环境变量名推断为同一 secret。preview 必�
 - 新 Session 复制 Agent 默认 effort；Session effort 不回写 Agent，不影响已有或其他 Session；
 - Config 存在未保存草稿时 discovered model promotion 被阻断；
 - runtime 解析正确 upstreamId 和 effort，并记录 immutable snapshot；
+- Agent binding、Session effort、catalog refresh、capability probe 均不写 operator config；
+- common/default 合成剥离 credential、route、model、catalog、MCP 和 takeover 投影字段，同时保留无关用户字段与注释；
 - duplicate Provider migration preview、引用重写、历史保留、apply、rollback；
+- migration manifest 阶段、输入 hash、candidate hash、备份先行、原子替换和 rollback_failed 状态正确；
 - 凭据和错误日志无 secret 泄漏。
 
 ### 15.2 前端自动测试
@@ -452,6 +620,7 @@ Launcher refresh：前端、API、runtime/config 行为均变化，因此用户�
 
 - 对 canonical Ai-Pixel Provider 分别执行 Luna、Sol、Terra 的最小文本调用；
 - 对声明支持 reasoning effort 的模型至少验证两个 effort 值进入真实请求；
+- 对只支持思考开关或不支持 reasoning 的模型验证 effective 映射和不发送无效字段；
 - 任何 4xx/5xx 必须保留 provider/model/route 有界诊断，不以 UI 通过代替运行验收。
 
 ## 16. 逐文件预计影响面
@@ -488,13 +657,14 @@ Launcher refresh：前端、API、runtime/config 行为均变化，因此用户�
 
 推荐串行顺序：
 
-1. candidate projection 和只读 API；
-2. promotion coordinator 与回滚测试；
-3. Agent 固定模型入口；
-4. Session effort 单一所有权与 runtime snapshot；
-5. Composer codex variant 与 inference control；
-6. Ai-Pixel duplicate Provider migration preview/apply；
-7. 构建、Launcher refresh、浏览器与真实模型验收。
+1. model endpoint resolver、catalog 状态和 capability verification contract；
+2. candidate projection 和只读 API；
+3. promotion coordinator、结构化 config transaction 与回滚测试；
+4. Agent 固定模型入口；
+5. Session effort 单一所有权、driver adapter 与 runtime snapshot；
+6. Composer codex variant 与 inference control；
+7. Ai-Pixel duplicate Provider migration preview/apply；
+8. 构建、Launcher refresh、浏览器与真实模型验收。
 
 原因：Composer 必须依赖稳定的 fixed model/effort contract，Provider 合并必须等新引用路径可用后再执行。共享 config、Agent 和 Session 写路径不得并行修改后再尝试事后拼接。
 
@@ -503,12 +673,14 @@ Launcher refresh：前端、API、runtime/config 行为均变化，因此用户�
 同时满足以下条件才可报告完成：
 
 - 一个 Ai-Pixel Provider 能发现并展示完整目录；
+- 根地址、`/v1`、完整请求地址和显式 models override 均有确定、可诊断的模型发现行为；
 - Agent 设置可选择 Luna、Sol、Terra，并在首次选择时可靠固定；
 - Agent 固定模型不会被普通会话操作修改；
 - 当前会话 effort 可调、可恢复且跨会话隔离；
 - 主对话 Composer 与参考图在结构、层级、尺寸和交互上对齐；
 - 进化/自进化嵌入对话没有视觉回归；
 - duplicate Provider 合并有 manifest、备份、引用归零和回滚证据；
+- Agent/Session 普通操作没有整文件 config 切换或 live backfill；common config 不包含 secret、route、model 或投影事实；
 - 聚焦测试、前端构建、三个模型真实调用和浏览器截图全部通过；
 - Launcher 已刷新，项目 memory 已同步，claims 已释放；
 - 日志不包含 secret、完整 prompt 或大 payload。
@@ -518,10 +690,15 @@ Launcher refresh：前端、API、runtime/config 行为均变化，因此用户�
 - [x] 无 `TODO`、`TBD` 或占位字段；
 - [x] Provider、catalog、pinned model、Agent、Session、turn 的事实源唯一；
 - [x] 动态发现不会批量污染 operator config；
+- [x] discovery endpoint 候选、override、停止条件和脱敏诊断已明确；
+- [x] observed、verified、pinned、Agent bound 生命周期没有混为一谈；
+- [x] capability 来源优先级、fingerprint 失效和 effort adapter 已明确；
 - [x] discovered model 选择失败不会留下悬空 Agent binding；
 - [x] fixed model 与 session effort 没有职责混淆；
 - [x] Composer 只影响主 Chat，不影响 Evolution/SelfEvolution；
 - [x] duplicate Provider 不依靠危险的自动 endpoint 等价规则删除；
+- [x] 普通 Agent/Session 操作不采用 CC Switch 的整套 profile 切换或 live backfill；
+- [x] common config、operator config、catalog projection 和 takeover 状态的写入边界已声明；
 - [x] 错误、partial、rollback 和 stale 状态均显式；
 - [x] 自动测试、浏览器、Launcher 和真实模型验收均有明确门禁；
 - [x] 与相邻设计的 owner 边界已声明。
