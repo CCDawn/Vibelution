@@ -87,6 +87,54 @@ const contextCompressionPaths = [
   "context_compression.preservation.extract_key_decisions",
 ];
 
+const operatorSurfacePaths = [
+  "ui.language",
+  "ui.theme",
+  "ui.max_log_entries",
+  "ui.refresh_rate",
+  "ui.show_ascii_art",
+  "ui.show_welcome",
+  "ui.workbench_theme",
+  "ui.workbench_theme.background_image_path",
+  "ui.workbench_theme.background_readability",
+  "security.enabled",
+  "security.allowed_directories",
+  "security.forbidden_patterns",
+  "security.forbidden_delete_patterns",
+  "security.dangerous_commands",
+  "network.timeout",
+  "network.user_agent",
+  "network.max_retries",
+  "network.retry_delay",
+  "network.verify_ssl",
+  "network.proxy_enabled",
+  "network.proxy_url",
+  "parser.strip_tags",
+  "parser.strip_thinking_alias",
+  "log.level",
+  "log.format",
+  "log.date_format",
+  "log.file_enabled",
+  "log.file_path",
+  "log.max_file_size",
+  "log.backup_count",
+  "log.detailed_traceback",
+  "log.third_party",
+  "log.third_party.httpx",
+  "log.third_party.httpcore",
+  "log.third_party.langchain",
+  "log.third_party.openai",
+  "log.third_party.anthropic",
+  "log.third_party.urllib3",
+  "log.third_party.litellm",
+  "log.third_party.rich",
+  "debug.enabled",
+  "debug.verbose",
+  "debug.trace_llm",
+  "debug.trace_tools",
+  "debug.track_token_usage",
+];
+
 describe("progressive config section presentation", () => {
   it("keeps only everyday pet and context controls in the common tier", () => {
     expect(configSectionPresentation("pet", "zh")?.sectionTitle).toBe("陪伴体");
@@ -113,7 +161,41 @@ describe("progressive config section presentation", () => {
   it("reports collapsed advanced field counts without changing backend field totals", () => {
     expect(configSectionTierCounts("pet", 41)).toEqual({ common: 4, advanced: 37 });
     expect(configSectionTierCounts("context-compression", 20)).toEqual({ common: 5, advanced: 15 });
-    expect(configSectionTierCounts("security", 5)).toEqual({ common: 5, advanced: 0 });
+    expect(configSectionTierCounts("analysis", 4)).toEqual({ common: 4, advanced: 0 });
+  });
+
+  it("keeps everyday interface and operator controls in the common tier", () => {
+    expect(configSectionPresentation("ui", "zh")?.commonPaths).toEqual([
+      "ui.language",
+      "ui.theme",
+      "ui.show_ascii_art",
+      "ui.show_welcome",
+    ]);
+    expect(configSectionPresentation("security", "zh")?.commonPaths).toEqual([
+      "security.enabled",
+    ]);
+    expect(configSectionPresentation("network", "zh")?.commonPaths).toEqual([
+      "network.timeout",
+      "network.proxy_enabled",
+      "network.proxy_url",
+    ]);
+    expect(configSectionPresentation("log", "zh")?.commonPaths).toEqual([
+      "log.level",
+      "log.file_enabled",
+      "log.file_path",
+      "log.detailed_traceback",
+    ]);
+    expect(configSectionPresentation("debug", "zh")?.commonPaths).toEqual([
+      "debug.enabled",
+      "debug.track_token_usage",
+    ]);
+    expect(configSectionPresentation("parser", "zh")).toBeNull();
+
+    expect(configSectionTierCounts("ui", 7)).toEqual({ common: 4, advanced: 3 });
+    expect(configSectionTierCounts("security", 5)).toEqual({ common: 1, advanced: 4 });
+    expect(configSectionTierCounts("network", 7)).toEqual({ common: 3, advanced: 4 });
+    expect(configSectionTierCounts("log", 16)).toEqual({ common: 4, advanced: 12 });
+    expect(configSectionTierCounts("debug", 5)).toEqual({ common: 2, advanced: 3 });
   });
 
   it("provides Chinese labels for every visible pet and context-compression control", () => {
@@ -133,10 +215,23 @@ describe("progressive config section presentation", () => {
     expect(configSectionFieldCopy("context_compression.levels", "zh")?.label).toBe("压缩级别阈值");
   });
 
+  it("provides Chinese labels for interface, security, networking, parser, logging, and debug controls", () => {
+    for (const path of operatorSurfacePaths) {
+      const copy = configSectionFieldCopy(path, "zh");
+      expect(copy?.label, path).toMatch(/[\u3400-\u9fff]/);
+    }
+
+    expect(configSectionFieldCopy("ui.language", "zh")?.label).toBe("界面语言");
+    expect(configSectionFieldCopy("security.dangerous_commands", "zh")?.label).toBe("危险命令拦截规则");
+    expect(configSectionFieldCopy("network.proxy_url", "zh")?.label).toBe("代理地址");
+    expect(configSectionFieldCopy("log.third_party.openai", "zh")?.label).toBe("OpenAI 日志级别");
+    expect(configSectionFieldCopy("debug.track_token_usage", "zh")?.label).toBe("记录 Token 用量");
+  });
+
   it("keeps an English presentation and leaves unrelated fields untouched", () => {
     expect(configSectionPresentation("pet", "en")?.advancedTitle).toBe("Advanced settings");
     expect(configSectionFieldCopy("pet.save_interval", "en")?.label).toBe("Save interval");
-    expect(configSectionFieldCopy("security.enabled", "zh")).toBeNull();
-    expect(configSectionPresentation("security", "zh")).toBeNull();
+    expect(configSectionFieldCopy("analysis.enabled", "zh")).toBeNull();
+    expect(configSectionPresentation("analysis", "zh")).toBeNull();
   });
 });
