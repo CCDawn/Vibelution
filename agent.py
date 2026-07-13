@@ -2476,21 +2476,21 @@ class SelfEvolvingAgent:
                     iteration_decision = TurnOutcomeController.decide_llm_iteration(turn_outcome)
                 except ValueError as exc:
                     consecutive_failures = round_state.note_llm_failure()
-                    self._last_turn_failed = True
-                    self._last_llm_error_category = "protocol_error"
-                    ui.update_status("ERROR", **round_state.current_status())
-                    ui.add_log("LLM 响应缺少 canonical TurnOutcome，本轮失败收口。", "ERROR")
-                    _record_agent_scene_event(
-                        "llm",
-                        "llm.turn_outcome.missing",
-                        message="Agent rejected an LLM response without canonical TurnOutcome.",
-                        level="error",
+                    self._record_turn_failure_diagnostic(
+                        category="protocol_error",
+                        reason_code="canonical_turn_outcome_missing",
+                        reason_summary="模型响应未完成规范化",
+                        reason_detail="模型已返回，但响应适配器没有生成 canonical TurnOutcome。",
+                        chain_stage="llm_response_normalization",
+                        event_code="llm.turn_outcome.missing",
+                        exception_type=type(exc).__name__,
                         fields={
                             "iteration": iteration,
                             "consecutiveFailures": consecutive_failures,
-                            "errorType": type(exc).__name__,
                         },
                     )
+                    ui.update_status("ERROR", **round_state.current_status())
+                    ui.add_log("LLM 响应缺少 canonical TurnOutcome，本轮失败收口。", "ERROR")
                     break
                 tool_call_count = len(iteration_decision.tool_calls)
                 has_tool_calls = iteration_decision.should_execute_tools
@@ -2629,7 +2629,17 @@ class SelfEvolvingAgent:
                     break
                 if iteration_decision.should_stop_unsuccessfully:
                     round_state.note_llm_failure()
-                    self._last_turn_failed = True
+                    self._record_turn_failure_diagnostic(
+                        category="protocol_error",
+                        reason_code="canonical_turn_unsuccessful",
+                        reason_summary="模型返回了非成功 canonical 终态",
+                        reason_detail=(
+                            f"canonical TurnOutcome 以 {iteration_decision.outcome.kind} 结束，未标记完成。"
+                        ),
+                        chain_stage="agent_outcome_evaluation",
+                        event_code="llm.turn_outcome.unsuccessful",
+                        fields={"outcomeKind": iteration_decision.outcome.kind, "iteration": iteration},
+                    )
                     ui.add_log(
                         f"模型本轮以 canonical {iteration_decision.outcome.kind} 终止，未标记完成。",
                         "ERROR",
@@ -2637,7 +2647,15 @@ class SelfEvolvingAgent:
                     break
                 if not iteration_decision.should_execute_tools:
                     round_state.note_llm_failure()
-                    self._last_turn_failed = True
+                    self._record_turn_failure_diagnostic(
+                        category="protocol_error",
+                        reason_code="canonical_tool_calls_empty",
+                        reason_summary="模型返回的工具终态没有可执行调用",
+                        reason_detail="canonical tool_calls outcome 未包含可执行工具。",
+                        chain_stage="agent_tool_dispatch",
+                        event_code="llm.turn_outcome.empty_tools",
+                        fields={"iteration": iteration},
+                    )
                     ui.add_log("canonical tool_calls outcome 未包含可执行工具，本轮失败收口。", "ERROR")
                     break
                 round_state.add_tool_calls(len(tool_calls))
@@ -2727,7 +2745,15 @@ class SelfEvolvingAgent:
             }
             ui.add_log("收到网页终止请求，本轮在安全点收束。", "WARN")
         except Exception as e:
-            self._last_turn_failed = True
+            self._record_turn_failure_diagnostic(
+                category="runtime_error",
+                reason_code="agent_main_loop_exception",
+                reason_summary="Agent 主循环异常",
+                reason_detail=f"Agent 主循环发生 {type(e).__name__}，请按 Trace 定位运行场景。",
+                chain_stage="agent_main_loop",
+                event_code="agent.turn.failed_exception",
+                exception_type=type(e).__name__,
+            )
             ui.update_status(
                 "ERROR",
                 **round_state.current_status(),
@@ -2944,6 +2970,93 @@ class SelfEvolvingAgent:
                 ).strip(),
             },
         )
+
+    def _record_turn_failure_diagnostic(
+        self,
+        *,
+        category: str,
+        reason_code: str,
+        reason_summary: str,
+        reason_detail: str,
+        chain_stage: str,
+        event_code: str,
+        exception_type: str = "",
+        retryable: bool = False,
+        recovery_action: str = "inspect_runtime_scene",
+        message: str = "",
+        fields: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Persist a bounded, prompt-free failure envelope for the whole turn chain."""
+
+        def _bounded(value: Any, limit: int = 500) -> str:
+            return str(value or "").strip()[:limit]
+
+        category_value = _bounded(category, 80) or "runtime_error"
+        reason_code_value = _bounded(reason_code, 120) or category_value
+        reason_summary_value = _bounded(reason_summary, 240) or "当前轮执行失败"
+        reason_detail_value = _bounded(reason_detail, 500) or reason_summary_value
+        chain_stage_value = _bounded(chain_stage, 120) or "agent_turn"
+        event_code_value = _bounded(event_code, 160) or "agent.turn.failed"
+        exception_type_value = _bounded(exception_type, 160)
+        visible_message = _bounded(message, 500) or f"{reason_summary_value}：{reason_detail_value}"
+
+        previous_details = dict(getattr(self, "_last_llm_error_details", {}) or {})
+        details = {
+            **previous_details,
+            "reason_code": reason_code_value,
+            "reason_summary": reason_summary_value,
+            "reason_detail": reason_detail_value,
+            "chain_stage": chain_stage_value,
+            "event_code": event_code_value,
+            "exception_type": exception_type_value,
+        }
+        failure = {
+            "category": category_value,
+            "retryable": bool(retryable),
+            "recovery_action": _bounded(recovery_action, 120),
+            "message": visible_message,
+            "exception_type": exception_type_value,
+            "provider": _bounded(previous_details.get("provider"), 160),
+            "model": _bounded(previous_details.get("model"), 160),
+            "api_base": _bounded(previous_details.get("api_base"), 240),
+            "reason_code": reason_code_value,
+            "reason_summary": reason_summary_value,
+            "reason_detail": reason_detail_value,
+            "chain_stage": chain_stage_value,
+            "event_code": event_code_value,
+            "attempts": int(getattr(self, "_last_llm_failure_attempts", 0) or 0),
+            "max_attempts": int(getattr(self, "_last_llm_failure_max_attempts", 0) or 0),
+        }
+
+        self._last_turn_failed = True
+        self._last_llm_error_category = category_value
+        self._last_llm_error_retryable = bool(retryable)
+        self._last_llm_recovery_action = _bounded(recovery_action, 120)
+        self._last_llm_error_message = visible_message
+        self._last_llm_error_details = details
+        self._last_turn_metadata = {
+            **dict(getattr(self, "_last_turn_metadata", {}) or {}),
+            "llm_failure": failure,
+        }
+
+        scene_fields = {
+            "chainStage": chain_stage_value,
+            "reasonCode": reason_code_value,
+            "category": category_value,
+            "retryable": bool(retryable),
+            "exceptionType": exception_type_value,
+        }
+        for key, value in dict(fields or {}).items():
+            if isinstance(value, (str, int, float, bool)) or value is None:
+                scene_fields[str(key)[:80]] = _bounded(value, 240) if isinstance(value, str) else value
+        _record_agent_scene_event(
+            "llm",
+            event_code_value,
+            message=reason_summary_value,
+            level="error",
+            fields=scene_fields,
+        )
+        return failure
 
     def _invoke_llm(self, messages: list, *, replay_state: Any = None) -> Optional[Any]:
         """调用 LLM（带错误分类、自动重试）"""
@@ -3543,6 +3656,24 @@ class SelfEvolvingAgent:
                 status = "failed"
             elif not ok:
                 status = "stopped"
+            if status == "failed" and not isinstance(
+                getattr(self, "_last_turn_metadata", {}).get("llm_failure"),
+                dict,
+            ):
+                self._record_turn_failure_diagnostic(
+                    category=str(getattr(self, "_last_llm_error_category", "") or "runtime_error"),
+                    reason_code="agent_turn_failed_without_diagnostics",
+                    reason_summary="当前轮执行失败",
+                    reason_detail="Agent 未返回结构化失败诊断，请按 Trace 检查运行场景。",
+                    chain_stage="agent_turn_finalize",
+                    event_code="agent.turn.failed_without_diagnostics",
+                    retryable=bool(getattr(self, "_last_llm_error_retryable", False)),
+                    recovery_action=str(
+                        getattr(self, "_last_llm_recovery_action", "") or "inspect_runtime_scene"
+                    ),
+                    message=error_message,
+                )
+                error_message = str(getattr(self, "_last_llm_error_message", "") or "").strip()
             if not summary:
                 if error_message:
                     summary = error_message

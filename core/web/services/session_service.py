@@ -14367,6 +14367,7 @@ def _persist_session_turn_result(
                 error_type=error_type,
                 turn_id=turn_id,
                 llm_failure=result.get("llm_failure") if isinstance(result.get("llm_failure"), dict) else None,
+                llm_payload_trace=_current_session_live_llm_payload_trace(session_id),
             )
             failure_message = str(turn_error.get("message") or "").strip()
             context_composition = _normalize_session_context_composition(
@@ -14612,6 +14613,8 @@ def _persist_session_turn_result(
                 lang=lang,
                 error_type=error_type,
                 turn_id=turn_id,
+                llm_failure=result.get("llm_failure") if isinstance(result.get("llm_failure"), dict) else None,
+                llm_payload_trace=_current_session_live_llm_payload_trace(session_id),
             )
             assistant_entry = _make_turn_error_chat_message(
                 turn_error,
@@ -15361,6 +15364,10 @@ def _persist_session_turn_runtime_error(
             "errorType": normalized_error_type,
             "message": message,
             "rawError": raw_error,
+            "chainStage": str(turn_error.get("chain_stage") or turn_error.get("chainStage") or "").strip(),
+            "eventCode": str(turn_error.get("event_code") or turn_error.get("eventCode") or "").strip(),
+            "traceId": str(turn_error.get("trace_id") or turn_error.get("traceId") or "").strip(),
+            "protocol": str(turn_error.get("protocol") or "").strip(),
         },
         source="persist_session_turn_runtime_error",
     )
@@ -15390,6 +15397,10 @@ def _make_local_runtime_error_chat_message(turn_error: dict[str, Any], *, turn_i
             "providerErrorType": str(turn_error.get("provider_error_type") or turn_error.get("providerErrorType") or "").strip(),
             "providerErrorMessage": str(turn_error.get("provider_error_message") or turn_error.get("providerErrorMessage") or "").strip(),
             "model": str(turn_error.get("model") or "").strip(),
+            "chainStage": str(turn_error.get("chain_stage") or turn_error.get("chainStage") or "").strip(),
+            "eventCode": str(turn_error.get("event_code") or turn_error.get("eventCode") or "").strip(),
+            "traceId": str(turn_error.get("trace_id") or turn_error.get("traceId") or "").strip(),
+            "protocol": str(turn_error.get("protocol") or "").strip(),
         },
     )
     message["timestamp"] = timestamp
@@ -15450,7 +15461,13 @@ def _persist_session_turn_failure(session_id: str, context: dict[str, Any], exc:
             return
         messages = _session_ledger_visible_messages(session_id)
         if _looks_like_provider_error_text(raw_error):
-            turn_error = _make_session_turn_error(raw_error, lang=lang, error_type=error_type, turn_id=turn_id)
+            turn_error = _make_session_turn_error(
+                raw_error,
+                lang=lang,
+                error_type=error_type,
+                turn_id=turn_id,
+                llm_payload_trace=_current_session_live_llm_payload_trace(session_id),
+            )
             error_entry = _make_provider_failure_chat_message(
                 turn_error,
                 error_type=error_type,
@@ -15547,7 +15564,13 @@ def _persist_session_turn_failure(session_id: str, context: dict[str, Any], exc:
                 source="persist_session_turn_failure",
             )
             return
-        turn_error = _make_session_turn_error(raw_error, lang=lang, error_type=error_type, turn_id=turn_id)
+        turn_error = _make_session_turn_error(
+            raw_error,
+            lang=lang,
+            error_type=error_type,
+            turn_id=turn_id,
+            llm_payload_trace=_current_session_live_llm_payload_trace(session_id),
+        )
         error_entry = _make_turn_error_chat_message(
             turn_error,
             error_type=error_type,
@@ -17032,6 +17055,10 @@ def _record_session_turn_error(
                 "providerErrorType": str(turn_error.get("provider_error_type") or turn_error.get("providerErrorType") or "").strip(),
                 "providerErrorMessage": str(turn_error.get("provider_error_message") or turn_error.get("providerErrorMessage") or "").strip(),
                 "model": str(turn_error.get("model") or "").strip(),
+                "chainStage": str(turn_error.get("chain_stage") or turn_error.get("chainStage") or "").strip(),
+                "eventCode": str(turn_error.get("event_code") or turn_error.get("eventCode") or "").strip(),
+                "traceId": str(turn_error.get("trace_id") or turn_error.get("traceId") or "").strip(),
+                "protocol": str(turn_error.get("protocol") or "").strip(),
                 "recoverable": bool(turn_error.get("recoverable", True)),
                 "rawErrorPreview": trim_lines(raw_error, max_lines=2),
             },
@@ -17051,6 +17078,10 @@ def _record_session_turn_error(
                 "provider_error_type": str(turn_error.get("provider_error_type") or turn_error.get("providerErrorType") or "").strip(),
                 "provider_error_message": str(turn_error.get("provider_error_message") or turn_error.get("providerErrorMessage") or "").strip(),
                 "model": str(turn_error.get("model") or "").strip(),
+                "chain_stage": str(turn_error.get("chain_stage") or turn_error.get("chainStage") or "").strip(),
+                "event_code": str(turn_error.get("event_code") or turn_error.get("eventCode") or "").strip(),
+                "trace_id": str(turn_error.get("trace_id") or turn_error.get("traceId") or "").strip(),
+                "protocol": str(turn_error.get("protocol") or "").strip(),
                 "recoverable": bool(turn_error.get("recoverable", True)),
             },
         )
@@ -18022,6 +18053,10 @@ def _build_terminal_error_turn_item(
             "providerErrorType",
             "provider",
             "model",
+            "chainStage",
+            "eventCode",
+            "traceId",
+            "protocol",
             "retryable",
         )
         if normalized_metadata.get(key) not in (None, "")
@@ -18711,6 +18746,10 @@ def _normalize_session_turn_error(value: Any) -> dict[str, Any] | None:
         "providerErrorType": str(value.get("providerErrorType") or value.get("provider_error_type") or "").strip(),
         "providerErrorMessage": str(value.get("providerErrorMessage") or value.get("provider_error_message") or "").strip(),
         "model": str(value.get("model") or "").strip(),
+        "chainStage": str(value.get("chainStage") or value.get("chain_stage") or "").strip(),
+        "eventCode": str(value.get("eventCode") or value.get("event_code") or "").strip(),
+        "traceId": str(value.get("traceId") or value.get("trace_id") or "").strip(),
+        "protocol": str(value.get("protocol") or "").strip(),
         "recoverable": bool(value.get("recoverable", True)),
         "timestamp": str(value.get("timestamp") or value.get("createdAt") or value.get("created_at") or "").strip(),
         "turnId": str(value.get("turnId") or value.get("turn_id") or "").strip(),
@@ -18724,10 +18763,18 @@ def _make_session_turn_error(
     error_type: str = "",
     turn_id: str = "",
     llm_failure: dict[str, Any] | None = None,
+    llm_payload_trace: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     normalized_error_type = str(error_type or _failure_error_type(str(raw_error or ""))).strip() or "runtime_error"
     provider_reason = _provider_error_user_reason(raw_error, lang=lang)
     provider_diagnostics = _provider_error_diagnostics(raw_error, llm_failure=llm_failure)
+    structured_failure = dict(llm_failure or {})
+    payload_trace = dict(llm_payload_trace or {})
+
+    def _failure_text(snake_key: str, camel_key: str, *, max_lines: int = 2) -> str:
+        value = structured_failure.get(snake_key, structured_failure.get(camel_key, ""))
+        return trim_lines(value, max_lines=max_lines)
+
     if normalized_error_type == "provider_upstream_error" and provider_reason.get("code") in {"", "provider_error"}:
         provider_reason = {
             **provider_reason,
@@ -18738,19 +18785,42 @@ def _make_session_turn_error(
                 en="provider upstream service is unavailable or failed at the gateway",
             ),
         }
+    reason_code = _failure_text("reason_code", "reasonCode") or str(provider_reason.get("code") or "").strip()
+    reason_summary = _failure_text("reason_summary", "reasonSummary") or str(
+        provider_reason.get("summary") or ""
+    ).strip()
+    reason_detail = _failure_text("reason_detail", "reasonDetail", max_lines=4) or str(
+        provider_reason.get("detail") or ""
+    ).strip()
+    chain_stage = _failure_text("chain_stage", "chainStage")
+    event_code = _failure_text("event_code", "eventCode")
+    trace_id = _failure_text("trace_id", "traceId") or str(payload_trace.get("traceId") or "").strip()
+    protocol = _failure_text("protocol", "protocol") or str(
+        payload_trace.get("selectedProtocol") or payload_trace.get("transport") or ""
+    ).strip()
+    structured_message = _failure_text("message", "message", max_lines=4)
+    default_recoverable = normalized_error_type.startswith("provider_") or normalized_error_type in {
+        "server_error",
+        "network_error",
+    }
     return {
-        "message": _user_visible_failure_summary(raw_error, lang=lang, provider_reason=provider_reason),
+        "message": structured_message
+        or _user_visible_failure_summary(raw_error, lang=lang, provider_reason=provider_reason),
         "error_type": normalized_error_type,
-        "reason_code": provider_reason["code"],
-        "reason_summary": provider_reason["summary"],
-        "reason_detail": provider_reason["detail"],
+        "reason_code": reason_code,
+        "reason_summary": reason_summary,
+        "reason_detail": reason_detail,
+        "chain_stage": chain_stage,
+        "event_code": event_code,
+        "trace_id": trace_id,
+        "protocol": protocol,
         "http_status": provider_diagnostics.get("http_status") or 0,
         "provider": provider_diagnostics.get("provider") or "",
         "provider_host": provider_diagnostics.get("provider_host") or "",
         "provider_error_type": provider_diagnostics.get("provider_error_type") or "",
         "provider_error_message": provider_diagnostics.get("provider_error_message") or "",
         "model": provider_diagnostics.get("model") or "",
-        "recoverable": normalized_error_type.startswith("provider_") or normalized_error_type in {"server_error", "network_error"},
+        "recoverable": bool(structured_failure.get("retryable", default_recoverable)),
         "timestamp": _now_timestamp(),
         "turn_id": str(turn_id or "").strip(),
     }
@@ -19017,6 +19087,10 @@ def _make_turn_error_chat_message(
             "providerErrorType": str(turn_error.get("provider_error_type") or turn_error.get("providerErrorType") or "").strip(),
             "providerErrorMessage": str(turn_error.get("provider_error_message") or turn_error.get("providerErrorMessage") or "").strip(),
             "model": str(turn_error.get("model") or "").strip(),
+            "chainStage": str(turn_error.get("chain_stage") or turn_error.get("chainStage") or "").strip(),
+            "eventCode": str(turn_error.get("event_code") or turn_error.get("eventCode") or "").strip(),
+            "traceId": str(turn_error.get("trace_id") or turn_error.get("traceId") or "").strip(),
+            "protocol": str(turn_error.get("protocol") or "").strip(),
         },
     )
     message["timestamp"] = timestamp

@@ -561,6 +561,10 @@ export type SessionTurnError = {
   providerErrorType?: string;
   providerErrorMessage?: string;
   model?: string;
+  chainStage?: string;
+  eventCode?: string;
+  traceId?: string;
+  protocol?: string;
   recoverable: boolean;
   timestamp: string;
   turnId: string;
