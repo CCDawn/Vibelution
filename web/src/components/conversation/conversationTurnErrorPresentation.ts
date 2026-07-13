@@ -31,15 +31,22 @@ export function buildConversationTurnErrorReasonRows(
   message: ConversationMessage,
   lang: ConversationLanguage,
 ): TurnErrorDiagnosticRow[] {
-  const summary = metadataText(message.metadata, "reasonSummary") || metadataText(message.metadata, "reason_summary");
-  const detail = metadataText(message.metadata, "reasonDetail") || metadataText(message.metadata, "reason_detail");
-  const code = metadataText(message.metadata, "reasonCode") || metadataText(message.metadata, "reason_code");
-  const httpStatus = metadataText(message.metadata, "httpStatus") || metadataText(message.metadata, "http_status");
-  const providerErrorType = metadataText(message.metadata, "providerErrorType") || metadataText(message.metadata, "provider_error_type");
-  const providerErrorMessage = metadataText(message.metadata, "providerErrorMessage") || metadataText(message.metadata, "provider_error_message");
-  const provider = metadataText(message.metadata, "provider");
-  const providerHost = metadataText(message.metadata, "providerHost") || metadataText(message.metadata, "provider_host");
-  const model = metadataText(message.metadata, "model");
+  return buildTurnErrorDiagnosticRows(message.metadata, lang);
+}
+
+export function buildTurnErrorDiagnosticRows(
+  metadata: Record<string, unknown> | undefined,
+  lang: ConversationLanguage,
+): TurnErrorDiagnosticRow[] {
+  const summary = metadataText(metadata, "reasonSummary") || metadataText(metadata, "reason_summary");
+  const detail = metadataText(metadata, "reasonDetail") || metadataText(metadata, "reason_detail");
+  const code = metadataText(metadata, "reasonCode") || metadataText(metadata, "reason_code");
+  const httpStatus = metadataText(metadata, "httpStatus") || metadataText(metadata, "http_status");
+  const providerErrorType = metadataText(metadata, "providerErrorType") || metadataText(metadata, "provider_error_type");
+  const providerErrorMessage = metadataText(metadata, "providerErrorMessage") || metadataText(metadata, "provider_error_message");
+  const provider = metadataText(metadata, "provider");
+  const providerHost = metadataText(metadata, "providerHost") || metadataText(metadata, "provider_host");
+  const model = metadataText(metadata, "model");
 
   return [
     httpStatus ? { label: turnErrorLabel(lang, "状态码", "Status"), value: httpStatus } : null,

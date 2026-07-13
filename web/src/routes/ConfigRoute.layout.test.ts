@@ -113,8 +113,13 @@ describe("ConfigRoute layout contract", () => {
     expect(routeSource).toContain('providerWorkspaceMode === "quick"');
     expect(routeSource).toContain('providerWorkspaceMode === "manage"');
     expect(routeSource).toContain('providerWorkspaceMode === "advanced"');
-    expect(quickSetupSource).toContain("检测并生成配置");
-    expect(quickSetupSource).toContain("确认并保存");
+    expect(quickSetupSource).toContain("检测连接");
+    expect(quickSetupSource).toContain("保存并完成");
+    expect(quickSetupStyles.workspace).toContain("max-w-[72rem]");
+    expect(quickSetupStyles.inputGrid).toContain("grid-template-columns");
+    expect(quickSetupSource).toContain('state.phase !== "input"');
+    expect(quickSetupStylesSource).not.toContain("min-h-[28rem]");
+    expect(quickSetupStylesSource).not.toContain("minmax(22rem,0.9fr)_minmax(28rem,1.1fr)");
     expect(routeSource).toContain('workspace.schemaVersion === 2 && isSectionVisible("models")');
     expect(routeSource).toContain('providerWorkspaceMode === "advanced" ? (\n                  <>');
     expect(routeSource).toContain('activeSection?.id === "models-profiles" && workspace.schemaVersion !== 2');
@@ -287,11 +292,14 @@ describe("ConfigRoute layout contract", () => {
     expect(providerPanelStylesSource).not.toContain("width:100vw");
   });
 
-  it("keeps quick setup header above a stable desktop two-column workspace", () => {
+  it("keeps quick setup in a bounded progressive desktop workspace", () => {
     expect(quickSetupSource).toContain('<div className={styles.workspace}>');
     expect(quickSetupStyles.root).not.toContain("grid-template-columns");
-    expect(quickSetupStyles.workspace).toContain("[grid-template-columns:minmax(22rem,0.9fr)_minmax(28rem,1.1fr)]");
-    expect(quickSetupStyles.workspace).not.toMatch(/max-\[/);
+    expect(quickSetupStyles.workspace).toContain("max-w-[72rem]");
+    expect(quickSetupStyles.inputGrid).toContain("[grid-template-columns:minmax(15rem,1fr)_minmax(18rem,1.2fr)_max-content]");
+    expect(quickSetupStyles.field).toContain("[&_[data-vui=select-trigger]]:!h-[var(--vui-control-height-sm)]");
+    expect(quickSetupStyles.field).toContain("[&_[data-vui=select-trigger]]:!min-h-[var(--vui-control-height-sm)]");
+    expect(quickSetupStyles.resultRegion).not.toContain("min-h-");
     expect(quickSetupStylesSource).not.toContain("position:fixed");
     expect(quickSetupStylesSource).not.toContain("bottom-0");
   });

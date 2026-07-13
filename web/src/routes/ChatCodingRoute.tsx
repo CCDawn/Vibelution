@@ -129,7 +129,13 @@ import {
   resolveComposerDraftValue,
   resolveLatestEditTarget,
 } from "./chatComposerState";
-import { buildVisiblePanelRows, getPetAvatarPresetKey, getPetAvatarSymbol } from "./chatCompactPanel";
+import {
+  buildVisiblePanelRows,
+  getPetAvatarPresetKey,
+  getPetAvatarSymbol,
+  resolveChatResponsiveLayout,
+  resolveChatUserDisplayName,
+} from "./chatCompactPanel";
 import {
   tokenSpeedSampleFromMessages,
   updateTokenSpeedTracker,
@@ -1183,7 +1189,6 @@ const SESSION_DETAIL_INITIAL_MESSAGE_LIMIT = 40;
 const SESSION_DETAIL_HISTORY_PAGE_SIZE = 40;
 const SESSION_STREAM_MIN_APPLY_INTERVAL_MS = 350;
 const SESSION_STREAM_ROUTE_SWITCH_GRACE_MS = 4_000;
-const CHAT_COMPACT_DESKTOP_MEDIA_QUERY = "(max-width: 1279px)";
 
 type ResizableSide = "left" | "right";
 type PetInteractionAction = "feed" | "talk" | "care";
@@ -1772,9 +1777,11 @@ export function ChatCodingRoute() {
   const [dragState, setDragState] = useState<DragState | null>(null);
   const [leftRailCollapsed, setLeftRailCollapsed] = useState(false);
   const [rightPaneCollapsed, setRightPaneCollapsed] = useState(false);
-  const [compactDesktopLayout, setCompactDesktopLayout] = useState(false);
+  const [responsiveLayout, setResponsiveLayout] = useState(() =>
+    resolveChatResponsiveLayout(typeof window === "undefined" ? 1440 : window.innerWidth),
+  );
+  const [responsiveOverlayPane, setResponsiveOverlayPane] = useState<"left" | "right" | null>(null);
   const [cacheDetailOpen, setCacheDetailOpen] = useState(false);
-  const compactDesktopAutoCollapseRef = useRef(false);
   const imageUploadInFlightRef = useRef<Record<string, boolean>>({});
   const [sessionDrafts, setSessionDrafts] = useState<Record<string, string>>({});
   const [sessionComposerErrors, setSessionComposerErrors] = useState<Record<string, string>>({});
@@ -3795,8 +3802,15 @@ export function ChatCodingRoute() {
       fetchJson<FileContent>(`/api/files/content?path=${encodeURIComponent(activeFilePath ?? "")}`),
   });
 
-  const conversationIndexCollapsed = leftRailCollapsed;
-  const statusRailCollapsed = rightPaneCollapsed;
+  const conversationIndexCollapsed = responsiveLayout.leftVisible
+    ? leftRailCollapsed
+    : responsiveOverlayPane !== "left";
+  const statusRailCollapsed = responsiveLayout.rightVisible
+    ? rightPaneCollapsed
+    : responsiveOverlayPane !== "right";
+  const conversationIndexOverlayOpen = !responsiveLayout.leftVisible && responsiveOverlayPane === "left";
+  const statusRailOverlayOpen = !responsiveLayout.rightVisible && responsiveOverlayPane === "right";
+  const responsiveOverlayOpen = conversationIndexOverlayOpen || statusRailOverlayOpen;
   const changedFiles = new Set(sessionDetailQuery.data?.changedFiles ?? []);
   const leftPanelWidth = chatPanelWidths.leftPanelWidth;
   const rightPanelWidth = chatPanelWidths.rightPanelWidth;
@@ -3816,42 +3830,57 @@ export function ChatCodingRoute() {
   }, [leftPanelWidth, rightPanelWidth, setChatPanelWidths]);
 
   useEffect(() => {
-    syncPanelWidthsToLayout();
     const layoutElement = layoutRef.current;
     if (!layoutElement) {
       return;
     }
-
-    const observer = new ResizeObserver(() => {
-      syncPanelWidthsToLayout();
-    });
+    const syncResponsiveLayout = () => {
+      const width = layoutElement.getBoundingClientRect().width;
+      const nextLayout = resolveChatResponsiveLayout(width);
+      setResponsiveLayout((current) => (
+        current.mode === nextLayout.mode
+        && current.leftVisible === nextLayout.leftVisible
+        && current.rightVisible === nextLayout.rightVisible
+          ? current
+          : nextLayout
+      ));
+      if (nextLayout.mode === "wide" || nextLayout.mode === "compact") {
+        syncPanelWidthsToLayout();
+      }
+    };
+    syncResponsiveLayout();
+    const observer = new ResizeObserver(syncResponsiveLayout);
     observer.observe(layoutElement);
-
     return () => observer.disconnect();
   }, [syncPanelWidthsToLayout]);
 
   useEffect(() => {
-    if (typeof window === "undefined") {
+    if (!responsiveOverlayPane || typeof window === "undefined") {
       return;
     }
-    const mediaQuery = window.matchMedia(CHAT_COMPACT_DESKTOP_MEDIA_QUERY);
-    function applyCompactDesktopState(matches: boolean) {
-      setCompactDesktopLayout(matches);
-      if (matches && !compactDesktopAutoCollapseRef.current) {
-        compactDesktopAutoCollapseRef.current = true;
-        setRightPaneCollapsed(true);
+    const handleEscape = (event: globalThis.KeyboardEvent) => {
+      if (event.key !== "Escape") {
+        return;
       }
-      if (!matches) {
-        compactDesktopAutoCollapseRef.current = false;
-      }
-    }
-    applyCompactDesktopState(mediaQuery.matches);
-    const handleChange = (event: MediaQueryListEvent) => {
-      applyCompactDesktopState(event.matches);
+      const closingPane = responsiveOverlayPane;
+      setResponsiveOverlayPane(null);
+      window.requestAnimationFrame(() => {
+        document.getElementById(
+          closingPane === "left" ? "chat-conversation-index-toggle" : "chat-status-toggle",
+        )?.focus();
+      });
     };
-    mediaQuery.addEventListener("change", handleChange);
-    return () => mediaQuery.removeEventListener("change", handleChange);
-  }, []);
+    window.addEventListener("keydown", handleEscape);
+    return () => window.removeEventListener("keydown", handleEscape);
+  }, [responsiveOverlayPane]);
+
+  useEffect(() => {
+    if (responsiveOverlayPane === "left" && responsiveLayout.leftVisible) {
+      setResponsiveOverlayPane(null);
+    } else if (responsiveOverlayPane === "right" && responsiveLayout.rightVisible) {
+      setResponsiveOverlayPane(null);
+    }
+  }, [responsiveLayout.leftVisible, responsiveLayout.rightVisible, responsiveOverlayPane]);
 
   useEffect(() => {
     if (!dragState) {
@@ -4915,6 +4944,9 @@ export function ChatCodingRoute() {
       : runtimeMismatchLine || (sessionDetailErrorState.blockingError
         ? sessionDetailErrorMessage
         : activeAgentStatusMessage || detail?.taskSummary || directSessionActiveSummary?.taskSummary || (sessionDetailLoadingForActiveSession ? t("loadingSession") : t("preparingShell")));
+  const compactSessionStateLine = detail?.lastTurnError
+    ? [sessionStateLabel, detail.lastTurnError.httpStatus || detail.lastTurnError.reasonCode].filter(Boolean).join(" · ")
+    : sessionStateLine;
   const activeTask = detail?.activeTask ?? null;
   const agentDirectSessionMismatch = Boolean(detail?.agentDirectSessionMismatch);
   const agentPrimaryDirectSessionId = String(detail?.agentPrimaryDirectSessionId ?? "").trim();
@@ -6196,6 +6228,35 @@ export function ChatCodingRoute() {
   const bothSidePanesCollapsed = conversationIndexCollapsed && statusRailCollapsed;
   const rightPaneLayoutClassName = standardGroupRoomActive ? styles.rightPaneWithTabs : styles.rightPaneWithoutTabs;
   const rightPaneClassName = `${styles.rightPane} ${rightPaneLayoutClassName}`;
+  const layoutModeClassName = responsiveLayout.mode === "wide"
+    ? styles.layout
+    : responsiveLayout.mode === "compact"
+      ? `${styles.layout} ${styles.layoutCompactDesktop}`
+      : `${styles.layout} ${styles.layoutOverlay}`;
+  const centerPaneClassName = responsiveLayout.mode === "overlay" || responsiveLayout.mode === "mobile"
+    ? `${styles.centerPane} ${styles.centerPaneOverlay}`
+    : styles.centerPane;
+  const statusRailClassName = [
+    styles.leftRail,
+    statusRailCollapsed ? styles.paneCollapsed : "",
+    statusRailOverlayOpen ? `${styles.overlayPane} ${styles.overlayPaneRight}` : "",
+  ].filter(Boolean).join(" ");
+  const conversationIndexPaneClassName = [
+    rightPaneClassName,
+    conversationIndexCollapsed ? styles.paneCollapsed : "",
+    conversationIndexOverlayOpen ? `${styles.overlayPane} ${styles.overlayPaneLeft}` : "",
+  ].filter(Boolean).join(" ");
+  const closeResponsiveOverlayPane = () => {
+    const closingPane = responsiveOverlayPane;
+    setResponsiveOverlayPane(null);
+    if (closingPane && typeof window !== "undefined") {
+      window.requestAnimationFrame(() => {
+        document.getElementById(
+          closingPane === "left" ? "chat-conversation-index-toggle" : "chat-status-toggle",
+        )?.focus();
+      });
+    }
+  };
 
   const contextMenuSessionIsBusy = contextMenuSession
     ? isBusyPhase(contextMenuSession.currentPhase || contextMenuSession.status)
@@ -6320,10 +6381,27 @@ export function ChatCodingRoute() {
   return (
     <div
       ref={layoutRef}
-      className={compactDesktopLayout ? `${styles.layout} ${styles.layoutCompactDesktop}` : styles.layout}
+      className={layoutModeClassName}
       style={layoutStyle}
+      data-chat-responsive-mode={responsiveLayout.mode}
     >
-      <aside className={statusRailCollapsed ? `${styles.leftRail} ${styles.paneCollapsed}` : styles.leftRail} aria-hidden={statusRailCollapsed}>
+      {responsiveOverlayOpen ? (
+        <VButton
+          type="button"
+          className={styles.overlayBackdrop}
+          aria-label={lang === "zh" ? "关闭侧栏" : "Close side panel"}
+          onClick={closeResponsiveOverlayPane}
+        >
+          <span className="sr-only">{lang === "zh" ? "关闭侧栏" : "Close side panel"}</span>
+        </VButton>
+      ) : null}
+      <aside
+        id="chat-status-pane"
+        className={statusRailClassName}
+        aria-hidden={statusRailCollapsed}
+        role={statusRailOverlayOpen ? "dialog" : undefined}
+        aria-label={statusRailOverlayOpen ? (lang === "zh" ? "状态栏" : "Status panel") : undefined}
+      >
         {standardGroupRoomActive ? (
           <section className={`${styles.leftBlock} ${styles.groupProfileBlock}`}>
             <div className={styles.sectionHeader}>
@@ -6549,7 +6627,7 @@ export function ChatCodingRoute() {
             </span>
           </div>
           <p className={`${styles.contextLineCompact} ${styles.currentSessionLine}`} title={sessionStateLine}>
-            {sessionStateLine}
+            {compactSessionStateLine}
           </p>
           {agentDirectSessionMismatch && agentPrimaryDirectSessionId ? (
             <div className={styles.sessionBindingNotice} role="status">
@@ -6787,7 +6865,7 @@ export function ChatCodingRoute() {
         )}
       </aside>
 
-      <PaneCollapseHandle
+      {responsiveLayout.leftVisible ? <PaneCollapseHandle
         side="left"
         collapsed={conversationIndexCollapsed}
         separatorLabel={t("resizeLeftPanel")}
@@ -6799,10 +6877,36 @@ export function ChatCodingRoute() {
         onToggle={() => setLeftRailCollapsed((current) => !current)}
         onPointerDown={(event) => handleResizeStart("left", event)}
         onKeyDown={(event) => handleResizeKeyDown("left", event)}
-      />
+      /> : null}
 
-      <section className={styles.centerPane}>
+      <section className={centerPaneClassName}>
         <div className={styles.tabStrip}>
+          <div className={styles.overlayPaneControls}>
+            {!responsiveLayout.leftVisible ? (
+              <VButton
+                id="chat-conversation-index-toggle"
+                type="button"
+                className={styles.overlayPaneToggle}
+                aria-expanded={conversationIndexOverlayOpen}
+                aria-controls="chat-conversation-index-pane"
+                onClick={() => setResponsiveOverlayPane((current) => current === "left" ? null : "left")}
+              >
+                {lang === "zh" ? "会话" : "Chats"}
+              </VButton>
+            ) : null}
+            {!responsiveLayout.rightVisible ? (
+              <VButton
+                id="chat-status-toggle"
+                type="button"
+                className={styles.overlayPaneToggle}
+                aria-expanded={statusRailOverlayOpen}
+                aria-controls="chat-status-pane"
+                onClick={() => setResponsiveOverlayPane((current) => current === "right" ? null : "right")}
+              >
+                {lang === "zh" ? "状态" : "Status"}
+              </VButton>
+            ) : null}
+          </div>
           {chatReturnTarget ? (
             <Link className={styles.chatReturnLink} to={chatReturnTarget} title={chatReturnLabel}>
               <ArrowLeft size={14} aria-hidden="true" />
@@ -7347,7 +7451,7 @@ export function ChatCodingRoute() {
                 assistantAvatarImageUrl: activeAgentAvatarImageUrl,
                 assistantAvatarFallback: activeAgentAvatarFallback,
                 resolveTurnAvatar: resolveConversationTurnAvatar,
-                userDisplayName: runtime?.userName,
+                userDisplayName: resolveChatUserDisplayName(runtime?.userName),
                 userAvatarPreset: runtime?.userProfile?.avatarPreset,
                 userAvatarImageUrl: runtime?.userProfile?.avatarImageUrl,
                 taskSummary: currentTaskSummary,
@@ -7422,7 +7526,7 @@ export function ChatCodingRoute() {
         </div>
       </section>
 
-      <PaneCollapseHandle
+      {responsiveLayout.rightVisible ? <PaneCollapseHandle
         side="right"
         collapsed={statusRailCollapsed}
         separatorLabel={t("resizeRightPanel")}
@@ -7434,9 +7538,15 @@ export function ChatCodingRoute() {
         onToggle={() => setRightPaneCollapsed((current) => !current)}
         onPointerDown={(event) => handleResizeStart("right", event)}
         onKeyDown={(event) => handleResizeKeyDown("right", event)}
-      />
+      /> : null}
 
-      <aside className={conversationIndexCollapsed ? `${rightPaneClassName} ${styles.paneCollapsed}` : rightPaneClassName} aria-hidden={conversationIndexCollapsed}>
+      <aside
+        id="chat-conversation-index-pane"
+        className={conversationIndexPaneClassName}
+        aria-hidden={conversationIndexCollapsed}
+        role={conversationIndexOverlayOpen ? "dialog" : undefined}
+        aria-label={conversationIndexOverlayOpen ? (lang === "zh" ? "会话列表" : "Conversation list") : undefined}
+      >
         {standardGroupRoomActive ? (
           <div
             className={styles.rightIndexTabs}

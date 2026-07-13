@@ -163,7 +163,7 @@ def test_stream_upstream_failure_records_retryable_server_error(monkeypatch):
 
     assert raised.category == "server_error"
     assert raised.retryable is True
-    messages = [item[1]["message"] for item in recorded]
+    messages = [kwargs["message"] for _args, kwargs in recorded if "message" in kwargs]
     assert "LLM stream failed before iterator: server_error" in messages
     assert recorded[-1][0][1] == "llm.stream.failed"
     assert recorded[-1][1]["message"] == "LLM stream failed before iterator: server_error"
@@ -209,6 +209,15 @@ def test_session_failed_result_sanitizes_provider_upstream_error(tmp_path, monke
     _assert_sanitized_provider_failure(payload)
     assert payload["lastTurnError"]["recoverable"] is True
     assert payload["currentPhase"] == "failed"
+    assistant_messages = [message for message in payload["messages"] if message.get("role") == "assistant"]
+    latest_assistant = assistant_messages[-1]
+    assert latest_assistant["metadata"]["kind"] == "turn_error"
+    assert len(latest_assistant["turnItems"]) == 1
+    assert latest_assistant["turnItems"][0]["type"] == "error"
+    assert latest_assistant["turnItems"][0]["terminal"] is True
+    assert latest_assistant["turnItems"][0]["status"] == "failed"
+    assert latest_assistant["turnItems"][0]["text"] == latest_assistant["content"]
+    assert "litellm.BadGatewayError" not in str(latest_assistant["turnItems"])
 
 
 def test_session_llm_runtime_diagnostics_fill_provider_failure_metadata():
@@ -335,6 +344,12 @@ def test_session_detail_dedupes_same_turn_error_messages(tmp_path, monkeypatch):
     ]
     assert len(turn_error_messages) == 1
     assert payload["messages"][-1]["content"] == "模型服务上游暂时失败，本轮没有完成。"
+    latest_assistant = payload["messages"][-1]
+    assert len(latest_assistant["turnItems"]) == 1
+    assert latest_assistant["turnItems"][0]["type"] == "error"
+    assert latest_assistant["turnItems"][0]["terminal"] is True
+    assert latest_assistant["codexTranscript"]["cells"][0]["kind"] == "error_notice"
+    assert latest_assistant["codexTranscript"]["cells"][0]["sourceItemId"] == latest_assistant["turnItems"][0]["itemId"]
 
 
 def test_session_provider_failure_circuit_breaker_stops_continuation_and_logs_event(tmp_path, monkeypatch):

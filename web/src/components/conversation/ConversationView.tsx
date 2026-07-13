@@ -161,6 +161,7 @@ import {
 } from "./conversationComposerDropPayload";
 import {
   buildConversationTurnErrorReasonRows,
+  buildTurnErrorDiagnosticRows,
   buildCurrentTurnErrorRows,
   resolveConversationTurnErrorType,
 } from "./conversationTurnErrorPresentation";
@@ -1656,16 +1657,68 @@ export function ConversationView({
       if (!text || isNoFinalAnswerStatusContent(text) || isStreamingStatusPlaceholderContent(text)) {
         return null;
       }
+      const assistantPhaseClassName = cell.phase === "commentary"
+        ? styles.codexTranscriptCommentaryCell
+        : styles.codexTranscriptFinalCell;
       return (
         <section
           key={cell.id}
-          className={`${styles.codexTranscriptCell} ${styles.codexTranscriptAssistantCell}`}
+          className={[styles.codexTranscriptCell, styles.codexTranscriptAssistantCell, assistantPhaseClassName].filter(Boolean).join(" ")}
           data-codex-transcript-cell-kind={cell.kind}
           data-codex-transcript-cell-status={cell.status}
           data-codex-transcript-cell-tone={cell.tone}
+          data-codex-transcript-cell-phase={cell.phase ?? ""}
           data-conversation-part-key={cell.id}
         >
           {message.streaming ? renderStreamingResponseText(text) : renderResponseText(text, imageArtifactUrlsBeforeMessage.get(message.id))}
+        </section>
+      );
+    }
+    if (cell.kind === "error_notice") {
+      const errorText = cell.text?.trim() || cell.summary?.trim() || "";
+      const diagnosticRows = buildTurnErrorDiagnosticRows(cell.diagnosticSummary, lang);
+      return (
+        <section
+          key={cell.id}
+          className={[styles.codexTranscriptCell, styles.codexTranscriptProcessCell, styles.codexTranscriptCell_error].filter(Boolean).join(" ")}
+          data-codex-transcript-cell-kind={cell.kind}
+          data-codex-transcript-cell-status={cell.status}
+          data-codex-transcript-cell-tone={cell.tone}
+          data-codex-transcript-cell-phase={cell.phase ?? ""}
+          data-codex-transcript-cell-terminal={cell.terminal ? "true" : "false"}
+          data-conversation-part-key={cell.id}
+          role="status"
+        >
+          <span className={styles.codexTranscriptCellIcon} aria-hidden="true">
+            <TerminalSquare size={14} />
+          </span>
+          <span className={styles.codexTranscriptCellBody}>
+            <span className={styles.codexTranscriptCellTitleRow}>
+              <span className={styles.codexTranscriptCellTitle}>{cell.title?.trim() || (lang === "zh" ? "执行失败" : "Failed")}</span>
+            </span>
+            {errorText ? (
+              <div className={styles.codexTranscriptCellSummary}>{renderResponseText(errorText)}</div>
+            ) : null}
+            {diagnosticRows.length > 0 ? (
+              <details className={styles.operationDetailsDisclosure} data-codex-error-diagnostic="true">
+                <summary className={styles.operationDetailsSummary}>
+                  <span className={styles.codexTranscriptCellTitle}>{lang === "zh" ? "诊断详情" : "Diagnostics"}</span>
+                  <span className={styles.operationDetailsChevronButton} aria-hidden="true">
+                    <span className={styles.operationDetailsChevronClosed}>▸</span>
+                    <span className={styles.operationDetailsChevronOpen}>▾</span>
+                  </span>
+                </summary>
+                <dl className={styles.turnErrorReasonList}>
+                  {diagnosticRows.map((row) => (
+                    <div key={`${cell.id}-${row.label}-${row.value}`} className={styles.turnErrorReasonRow}>
+                      <dt>{row.label}</dt>
+                      <dd>{row.value}</dd>
+                    </div>
+                  ))}
+                </dl>
+              </details>
+            ) : null}
+          </span>
         </section>
       );
     }
@@ -1783,7 +1836,7 @@ export function ConversationView({
   }
 
   function renderCodexTranscriptToolDetails(cell: CodexTranscriptCell, title: string, meta: string) {
-    if (cell.kind !== "tool_call" && cell.kind !== "error_notice") {
+    if (cell.kind !== "tool_call") {
       return null;
     }
     const rows = codexTranscriptToolDetailRows(cell);
@@ -1796,7 +1849,6 @@ export function ConversationView({
       <details
         className={styles.operationDetailsDisclosure}
         data-codex-tool-detail="true"
-        open
       >
         <summary
           className={styles.operationDetailsSummary}
@@ -2967,6 +3019,9 @@ export function ConversationView({
             );
             const codexTranscriptSurface = agentCodexSurfacesByMessageId.get(agentMessage.id);
             const codexTranscriptCells = codexTranscriptSurface?.cells ?? [];
+            const shouldRenderLegacyTurnError = Boolean(
+              turnErrorMessage && !codexTranscriptSurface?.suppressProjectedError,
+            );
             const nativeCodexTranscriptPrimary = codexTranscriptSurface?.mode === "native";
             const nativeAssistantTranscriptHasAnswer = Boolean(
               nativeCodexTranscriptPrimary && codexTranscriptSurface?.hasAssistantMarkdown,
@@ -3250,7 +3305,7 @@ export function ConversationView({
                   {processNode}
                   {turnStatusNode}
                   {answerOnlyProcessMode ? responseSectionNode : null}
-                  {turnErrorMessage ? (
+                  {shouldRenderLegacyTurnError ? (
                     <div className={styles.turnErrorNotice} role="status" aria-live="polite">
                       <div className={styles.turnErrorNoticeIcon} aria-hidden="true">
                         <TerminalSquare size={15} />

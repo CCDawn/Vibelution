@@ -43,6 +43,7 @@ export type CodexTranscriptSurface = {
   suppressProjectedProcess: boolean;
   suppressProjectedResponse: boolean;
   suppressProjectedTurnStatus: boolean;
+  suppressProjectedError: boolean;
   projectionGap?: CodexTranscriptProjectionGap;
 };
 
@@ -71,14 +72,20 @@ export function resolveCodexTranscriptSurface(
     const hasAssistantMarkdown = cells.some((cell) => cell.kind === "assistant_markdown" && Boolean(cell.text?.trim()));
     const hasNoFinalAnswerStatus = isNoFinalAnswerStatusContent(String(message.content ?? ""));
     const hasNativeProcessProjection = hasNativeProcessCells(cells) || hasNativeLifecycleProjection(transcript);
+    const suppressProjectedError = cells.some((cell) => (
+      cell.kind === "error_notice"
+      || (cell.terminal === true && cell.status === "failed")
+    ));
     return {
       mode: "native",
       source: "message.codexTranscript",
       cells,
       hasAssistantMarkdown,
       suppressProjectedProcess: hasNativeProcessProjection,
-      suppressProjectedResponse: hasAssistantMarkdown,
-      suppressProjectedTurnStatus: hasNoFinalAnswerStatus ? false : hasAssistantMarkdown || hasNativeProcessProjection,
+      suppressProjectedResponse: hasAssistantMarkdown || suppressProjectedError,
+      suppressProjectedTurnStatus: suppressProjectedError
+        || (hasNoFinalAnswerStatus ? false : hasAssistantMarkdown || hasNativeProcessProjection),
+      suppressProjectedError,
     };
   }
   return {
@@ -89,6 +96,7 @@ export function resolveCodexTranscriptSurface(
     suppressProjectedProcess: false,
     suppressProjectedResponse: false,
     suppressProjectedTurnStatus: false,
+    suppressProjectedError: false,
     projectionGap: {
       reason: nativeTranscriptProjectionGapReason(message),
       projectedCellCount: projectedCells.length,
@@ -103,6 +111,7 @@ export function codexNativeTranscriptToCells(
   const rolloutEvents = transcript.rolloutEvents ?? [];
   return (transcript.cells ?? [])
     .map((cell) => {
+      const legacyMarkdown = "markdown" in cell && typeof cell.markdown === "string" ? cell.markdown : "";
       const operationIds = [...(cell.operationIds ?? [])];
       const cellRolloutEvents = normalizeNativeRolloutEvents(cell.rolloutTraceEvents?.length
         ? cell.rolloutTraceEvents
@@ -116,8 +125,13 @@ export function codexNativeTranscriptToCells(
         status: cell.status as CodexTranscriptCellStatus,
         tone: cell.tone as CodexTranscriptCellTone,
         title: cell.title,
-        text: cell.text,
+        text: cell.text || legacyMarkdown,
         summary: cell.summary,
+        channel: cell.channel,
+        phase: cell.phase,
+        terminal: cell.terminal,
+        provisional: cell.provisional,
+        diagnosticSummary: cell.diagnosticSummary,
         operationIds,
         rolloutTraceEvents: cellRolloutEvents,
         toolLifecycleModel: normalizeNativeToolLifecycleModel(cell.toolLifecycleModel ?? lifecycleModel),

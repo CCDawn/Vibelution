@@ -385,6 +385,11 @@ export type CodexTranscriptCell = {
   messageId: string;
   status: CodexTranscriptCellStatus;
   tone: CodexTranscriptCellTone;
+  channel?: string;
+  phase?: string;
+  terminal?: boolean;
+  provisional?: boolean;
+  diagnosticSummary?: Record<string, unknown>;
   title?: string;
   text?: string;
   summary?: string;
