@@ -137,13 +137,24 @@ const operatorSurfacePaths = [
 ];
 
 describe("progressive config section presentation", () => {
-  it("keeps only everyday pet and context controls in the common tier", () => {
-    expect(configSectionPresentation("pet", "zh")?.sectionTitle).toBe("陪伴体");
+  it("keeps only everyday avatar, pet, and context controls in the common tier", () => {
+    expect(configSectionPresentation("avatar", "zh")).toMatchObject({
+      sectionTitle: "终端形象",
+      sectionSummary: "选择终端、CLI 与陪伴体使用的内置形象；Web 用户头像请在用户资料中设置。",
+      layout: "compact_paths",
+      commonPaths: ["avatar.preset"],
+      commonTitle: "形象预设",
+    });
+    expect(configSectionPresentation("pet", "zh")).toMatchObject({
+      sectionTitle: "陪伴体",
+      layout: "compact_paths",
+      commonTitle: "快速启用",
+      advancedTitle: "行为、记忆与外观（高级）",
+    });
     expect(configSectionPresentation("pet", "zh")?.commonPaths).toEqual([
       "pet.enabled",
       "pet.name",
       "pet.auto_save",
-      "pet.save_interval",
     ]);
     expect(configSectionPresentation("context-compression", "zh")?.commonPaths).toEqual([
       "context_compression.enabled",
@@ -153,14 +164,17 @@ describe("progressive config section presentation", () => {
       "context_compression.compression_model",
     ]);
 
+    expect(isCommonConfigSectionEntry("avatar", "avatar.preset")).toBe(true);
     expect(isCommonConfigSectionEntry("pet", "pet.name")).toBe(true);
+    expect(isCommonConfigSectionEntry("pet", "pet.save_interval")).toBe(false);
     expect(isCommonConfigSectionEntry("pet", "pet.heart")).toBe(false);
     expect(isCommonConfigSectionEntry("context-compression", "context_compression.compression_model")).toBe(true);
     expect(isCommonConfigSectionEntry("context-compression", "context_compression.levels")).toBe(false);
   });
 
   it("reports collapsed advanced field counts without changing backend field totals", () => {
-    expect(configSectionTierCounts("pet", 41)).toEqual({ common: 4, advanced: 37 });
+    expect(configSectionTierCounts("avatar", 1)).toEqual({ common: 1, advanced: 0 });
+    expect(configSectionTierCounts("pet", 41)).toEqual({ common: 3, advanced: 38 });
     expect(configSectionTierCounts("context-compression", 20)).toEqual({ common: 5, advanced: 15 });
     expect(configSectionTierCounts("analysis", 4)).toEqual({ common: 2, advanced: 2 });
     expect(configSectionTierCounts("user-profile", 5)).toEqual({ common: 3, advanced: 2 });
@@ -300,7 +314,7 @@ describe("progressive config section presentation", () => {
   });
 
   it("keeps an English presentation and leaves unrelated fields untouched", () => {
-    expect(configSectionPresentation("pet", "en")?.advancedTitle).toBe("Advanced settings");
+    expect(configSectionPresentation("pet", "en")?.advancedTitle).toBe("Behavior, memory, and appearance (advanced)");
     expect(configSectionPresentation("llm-discovery", "en")?.commonPaths).toEqual([
       "llm.discovery.enabled",
       "llm.discovery.timeout",

@@ -21,7 +21,10 @@ const PET_COMMON_PATHS = [
   "pet.enabled",
   "pet.name",
   "pet.auto_save",
-  "pet.save_interval",
+] as const;
+
+const AVATAR_COMMON_PATHS = [
+  "avatar.preset",
 ] as const;
 
 const CONTEXT_COMPRESSION_COMMON_PATHS = [
@@ -91,6 +94,17 @@ const SECTION_PRESENTATION: Record<
   Record<string, ProgressiveConfigSectionPresentation>
 > = {
   zh: {
+    avatar: {
+      sectionTitle: "终端形象",
+      sectionSummary: "选择终端、CLI 与陪伴体使用的内置形象；Web 用户头像请在用户资料中设置。",
+      layout: "compact_paths",
+      commonPaths: AVATAR_COMMON_PATHS,
+      commonTitle: "形象预设",
+      commonHint: "选择一个内置形象即可完成配置。",
+      advancedTitle: "高级设置",
+      advancedHint: "此分区没有额外高级参数。",
+      advancedCountLabel: (count) => `${count} 项`,
+    },
     "user-profile": {
       sectionTitle: "用户资料与头像",
       sectionSummary: "先设置工作台显示名和头像；只有需要时再补充提供给 Agent 的背景与偏好。",
@@ -103,11 +117,13 @@ const SECTION_PRESENTATION: Record<
     },
     pet: {
       sectionTitle: "陪伴体",
+      sectionSummary: "日常只需启用陪伴体、设置名称并开启自动保存；其余行为参数保持默认即可。",
+      layout: "compact_paths",
       commonPaths: PET_COMMON_PATHS,
-      commonTitle: "常用设置",
-      commonHint: "开启陪伴体、设置名称与自动保存即可开始使用。",
-      advancedTitle: "高级设置",
-      advancedHint: "心跳、梦境、性格、健康等行为参数通常保持默认即可。",
+      commonTitle: "快速启用",
+      commonHint: "完成启用、命名与自动保存后即可开始使用。",
+      advancedTitle: "行为、记忆与外观（高级）",
+      advancedHint: "保存间隔、心跳、梦境、性格、健康、外观与声音通常保持默认。",
       advancedCountLabel: (count) => `${count} 项`,
     },
     "context-compression": {
@@ -208,6 +224,17 @@ const SECTION_PRESENTATION: Record<
     },
   },
   en: {
+    avatar: {
+      sectionTitle: "Terminal avatar",
+      sectionSummary: "Choose the built-in avatar used by the terminal, CLI, and companion. Manage the Web user avatar under User profile.",
+      layout: "compact_paths",
+      commonPaths: AVATAR_COMMON_PATHS,
+      commonTitle: "Avatar preset",
+      commonHint: "Choose one built-in avatar to finish setup.",
+      advancedTitle: "Advanced settings",
+      advancedHint: "This section has no additional advanced options.",
+      advancedCountLabel: (count) => `${count} fields`,
+    },
     "user-profile": {
       sectionTitle: "Profile and avatar",
       sectionSummary: "Set the workbench display name and avatar first; add Agent background and preferences only when needed.",
@@ -220,11 +247,13 @@ const SECTION_PRESENTATION: Record<
     },
     pet: {
       sectionTitle: "Companion",
+      sectionSummary: "For everyday use, enable the companion, choose a name, and turn on automatic saving. Keep the remaining behavior defaults.",
+      layout: "compact_paths",
       commonPaths: PET_COMMON_PATHS,
-      commonTitle: "Common settings",
-      commonHint: "Enable the companion, choose its name, and confirm automatic saving.",
-      advancedTitle: "Advanced settings",
-      advancedHint: "Heartbeat, dream, personality, and health behavior usually work with their defaults.",
+      commonTitle: "Quick start",
+      commonHint: "Enable, name, and automatically save the companion to finish setup.",
+      advancedTitle: "Behavior, memory, and appearance (advanced)",
+      advancedHint: "Save cadence, heartbeat, dream, personality, health, appearance, and sound usually work with their defaults.",
       advancedCountLabel: (count) => `${count} fields`,
     },
     "context-compression": {
