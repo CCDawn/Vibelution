@@ -470,7 +470,7 @@ describe("conversationIndexModel", () => {
     expect(classifyConversation(conversation({ conversationIndexKind: "personal_agent", title: "自进化 Agent" }))).toBe("personalAgent");
     expect(classifyConversation(conversation({ conversationIndexKind: "team_agent" }))).toBe("invalid");
     expect(classifyConversation(conversation({ conversationIndexKind: "invalid" }))).toBe("invalid");
-    expect(conversationGroupLabel("user", "zh")).toBe("普通会话");
+    expect(conversationGroupLabel("user", "zh")).toBe("个人会话");
     expect(conversationGroupLabel("personalAgent", "zh")).toBe("个人 Agent 会话");
     expect(conversationGroupLabel("invalid", "zh")).toBe("异常会话");
     expect(conversationGroupLabel("other", "zh")).toBe("其他助手");
@@ -526,7 +526,7 @@ describe("conversationIndexModel", () => {
     expect(model.filteredTeams.map((item) => item.teamId)).toEqual(["team-1"]);
   });
 
-  it("groups visible Agents by category even when their sessions are not in the current session page", () => {
+  it("merges ordinary and personal Agent chats into one personal conversation group", () => {
     const model = buildConversationIndexModel({
       agents: [
         agent({ agentId: "agent-research-1", directSessionId: "session-research-1", displayName: "许景行", primaryMode: "research" }),
@@ -540,7 +540,12 @@ describe("conversationIndexModel", () => {
           promptTemplateId: "prompt-chat",
         }),
       ],
-      conversations: [],
+      conversations: [conversation({
+        conversationId: "session-ordinary",
+        directSessionId: "session-ordinary",
+        title: "新会话",
+        updatedAt: "2026-06-10T00:00:00.000Z",
+      })],
       lang: "zh",
       linkedTeamRoomIds: new Set(),
       rawSessions: [],
@@ -550,10 +555,17 @@ describe("conversationIndexModel", () => {
       teams: [],
     });
 
-    const groups = new Map(model.groupedConversations.map((group) => [group.groupKey, group.items]));
-    expect(groups.get("personalAgent")?.map((item) => item.title)).toEqual(expect.arrayContaining(["白书遥", "周书遥", "许景行"]));
-    expect(groups.get("personalAgent")).toHaveLength(3);
+    expect(model.groupedConversations).toHaveLength(1);
+    expect(model.groupedConversations[0]).toMatchObject({
+      groupKey: "user",
+      label: "个人会话",
+    });
+    expect(model.groupedConversations[0].items.map((item) => item.title)).toEqual(
+      expect.arrayContaining(["新会话", "白书遥", "周书遥", "许景行"]),
+    );
+    expect(new Set(model.groupedConversations[0].items.map((item) => item.conversationId)).size).toBe(4);
     expect(model.filteredConversations.map((item) => item.directSessionId).sort()).toEqual([
+      "session-ordinary",
       "session-research-1",
       "session-research-2",
       "session-user",
