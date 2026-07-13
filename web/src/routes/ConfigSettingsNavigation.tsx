@@ -55,9 +55,7 @@ const PAGE_DEFINITIONS: Record<ConfigSettingsGroupId, readonly PageDefinition[]>
     { id: "workbench-interface", zh: "工作台与界面", en: "Workbench & interface", members: ["shell", "ui"] },
   ],
   "avatar-pet": [
-    { id: "identity-user", zh: "用户资料", en: "User profile", members: ["user-profile"] },
-    { id: "identity-avatar", zh: "终端形象", en: "Avatar", members: ["avatar"] },
-    { id: "identity-pet", zh: "陪伴体", en: "Companion", members: ["pet"] },
+    { id: "identity-profile", zh: "个人资料与陪伴体", en: "Profile & companion", members: ["user-profile", "avatar", "pet"] },
   ],
   "models-profiles": [
     { id: "model-connection", zh: "模型连接", en: "Connections", members: ["models"] },
