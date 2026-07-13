@@ -78,6 +78,7 @@ import {
 } from "../components/vui";
 import { safeAgentCenterReturnToPath } from "./agentCenterRoutes";
 import { ConfigDraftPanel } from "./ConfigDraftPanel";
+import { publishConfigDraftPresence } from "./configDraftPresence";
 import ConfigDiagnosisPanel from "./ConfigDiagnosisPanel";
 import { ConfigHealthDiagnosticsPanel } from "./ConfigHealthDiagnosticsPanel";
 import { ConfigModelMigrationPanel } from "./ConfigModelMigrationPanel";
@@ -2192,6 +2193,10 @@ export function ConfigRoute() {
     [draftConfig, workspace?.editorSections],
   );
   const hasUnsavedConfigChanges = Boolean(baseHash && draftHash && baseHash !== draftHash);
+  const configDraftPresenceDirty = hasUnsavedConfigChanges || hasPendingSecretChanges(draftMeta);
+  useEffect(() => {
+    publishConfigDraftPresence(configDraftPresenceDirty);
+  }, [configDraftPresenceDirty]);
   const workspaceSections = workspace?.sections ?? [];
   const editorSections = workspace?.editorSections ?? [];
   const editorMeta = workspace?.editorMeta ?? {};
@@ -2954,6 +2959,7 @@ export function ConfigRoute() {
         "PUT",
       );
       syncWorkspace(response, "success");
+      publishConfigDraftPresence(false);
       await invalidateWorkbenchQueries(nextConfig);
       return true;
     } catch (error) {

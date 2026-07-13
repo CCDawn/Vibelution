@@ -69,6 +69,10 @@ const coreConfigPanelSource = readFileSync(
   new URL("./AgentCoreConfigPanel.tsx", import.meta.url),
   "utf-8",
 );
+const modelPickerSource = readFileSync(
+  new URL("./AgentModelPicker.tsx", import.meta.url),
+  "utf-8",
+);
 const configPrimaryPanePanelSource = readFileSync(
   new URL("./AgentConfigPrimaryPanePanel.tsx", import.meta.url),
   "utf-8",
@@ -695,7 +699,9 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("function agentModelChoiceAllowed");
     expect(routeSource).toContain("!text.includes(\"image2\")");
     expect(routeSource).toContain("buildAgentModelChoices(workspace?.agentModelChoices ?? [])");
-    expect(routeSource).toContain("buildAgentSlotModelChoicesWithCurrent");
+    expect(routeSource).toContain(
+      ".filter((model) => model.runtimeSelectable && agentModelChoiceAllowed(model))",
+    );
     expect(routeSource).toContain("coreConfigLlmSlots");
     expect(routeSource).toContain("selectedModelId");
     expect(routeSource).toContain("agentLlmSlots(workspace)");
@@ -704,13 +710,19 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("agentDialogueModelDisplay(agent, lang)");
     expect(routeSource).toContain("unresolved_model_reference_dialogue");
     expect(routeSource).toContain("模型库未注册");
-    expect(routeSource).toContain("当前槽位不可选");
-    expect(routeSource).toContain("当前绑定，模型库未注册");
-    expect(routeSource).toContain("current binding, unavailable for this slot");
+    expect(modelPickerSource).toContain("模型与当前 Agent 槽位不兼容");
+    expect(modelPickerSource).toContain("上游模型当前不可用");
+    expect(modelPickerSource).toContain("请先保存或放弃未保存修改");
     expect(createPanelSource).toContain("modelChoices.map((model)");
     expect(routeSource).toContain("selectedModelId: agentLlmSlotModelId(createDraft.llmBindings, FALLBACK_AGENT_LLM_SLOTS[0])");
     expect(createPanelSource).toContain("value={selectedModelId}");
-    expect(coreConfigPanelSource).toContain("value={selectedModelId}");
+    expect(coreConfigPanelSource).toContain("<AgentModelPicker");
+    expect(routeSource).toContain(
+      "/llm-bindings/${encodeURIComponent(payload.slot.slot)}/promote",
+    );
+    expect(routeSource).toContain("expectedBaseHash");
+    expect(routeSource).toContain("expectedAgentUpdatedAt");
+    expect(routeSource).toContain("confirmed: true");
     expect(coreConfigPanelSource).toContain("styles.llmSlotGrid");
     expect(coreConfigPanelSource).toContain('from "./AgentCoreConfigPanel.styles"');
     expect(coreConfigPanelSource).not.toContain("AgentsRoute.styles");
@@ -722,8 +734,8 @@ describe("AgentsRoute layout contract", () => {
     expect(createPanelSource).toContain('from "./AgentCreatePanel.styles"');
     expect(createPanelSource).not.toContain("AgentsRoute.styles");
     expect(createPanelSource).toContain("{model.label}");
-    expect(routeSource).toContain("title: model.modelLabel || model.modelId");
-    expect(coreConfigPanelSource).toContain("title={model.title}");
+    expect(routeSource).toContain("candidates: workspace?.agentModelChoices ?? []");
+    expect(coreConfigPanelSource).toContain("candidates={candidates}");
     expect(routeSource).not.toContain("buildModelProfileChoices(workspace?.modelProfiles ?? [])");
     expect(routeSource).not.toContain("modelProfileChoices.map((profile)");
     expect(routeSource).not.toContain("value={createDraft.profileId}");

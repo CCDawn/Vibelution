@@ -1,12 +1,13 @@
 import { ExternalLink, SquarePen } from "lucide-react";
 
-import { type AgentLlmBindings, type AgentLlmSlotDefinition } from "../api/types";
+import { type AgentLlmBindings, type AgentLlmSlotDefinition, type AgentModelChoice } from "../api/types";
 import { VButton, VFieldRow, VNativeInput, VNativeSelect } from "../components/vui";
 import {
   AgentContextCompressionPanel,
   type AgentContextCompressionPanelCopy,
   type AgentContextCompressionPolicyDraft,
 } from "./AgentContextCompressionPanel";
+import { AgentModelPicker } from "./AgentModelPicker";
 import styles from "./AgentCoreConfigPanel.styles";
 
 export type AgentConfigDraft = {
@@ -26,14 +27,10 @@ export type AgentCoreConfigSelectOption = {
   title?: string;
 };
 
-export type AgentCoreConfigModelOption = AgentCoreConfigSelectOption & {
-  key: string;
-};
-
 export type AgentCoreConfigLlmSlotView = {
   slot: AgentLlmSlotDefinition;
   selectedModelId: string;
-  modelOptions: AgentCoreConfigModelOption[];
+  candidates: AgentModelChoice[];
   supportsReasoningEffort: boolean;
   reasoningEffort: string;
 };
@@ -76,12 +73,14 @@ type AgentCoreConfigPanelProps = {
   agentName: string;
   draft: AgentConfigDraft;
   dirty: boolean;
+  configDraftDirty: boolean;
   canSave: boolean;
   pending: boolean;
   notice: { tone: "success" | "error"; text: string } | null;
   title: string;
   health: AgentCoreConfigHealthView;
   llmSlots: AgentCoreConfigLlmSlotView[];
+  pendingModelRef: string;
   promptTemplateOptions: AgentCoreConfigSelectOption[];
   toolPolicyOptions: AgentCoreConfigSelectOption[];
   toolPolicyTooltip: string;
@@ -90,6 +89,7 @@ type AgentCoreConfigPanelProps = {
   contextCompressionTitle: string;
   onDraftChange: (patch: Partial<AgentConfigDraft>) => void;
   onLlmSlotModelChange: (slot: AgentLlmSlotDefinition, modelId: string) => void;
+  onPromoteModel: (slot: AgentLlmSlotDefinition, candidate: AgentModelChoice) => void;
   onReasoningEffortChange: (slot: string, reasoningEffort: string) => void;
   onContextCompressionChange: (patch: Partial<AgentContextCompressionPolicyDraft>) => void;
   onOpenModelConfig: () => void;
@@ -110,12 +110,14 @@ export function AgentCoreConfigPanel({
   agentName,
   draft,
   dirty,
+  configDraftDirty,
   canSave,
   pending,
   notice,
   title,
   health,
   llmSlots,
+  pendingModelRef,
   promptTemplateOptions,
   toolPolicyOptions,
   toolPolicyTooltip,
@@ -124,6 +126,7 @@ export function AgentCoreConfigPanel({
   contextCompressionTitle,
   onDraftChange,
   onLlmSlotModelChange,
+  onPromoteModel,
   onReasoningEffortChange,
   onContextCompressionChange,
   onOpenModelConfig,
@@ -165,8 +168,8 @@ export function AgentCoreConfigPanel({
         <section className={styles.fieldWide} title={copy.llmSlotsHint}>
           <span>{copy.llmSlots}</span>
           <div className={styles.llmSlotGrid}>
-            {llmSlots.map(({ slot, selectedModelId, modelOptions, supportsReasoningEffort, reasoningEffort }) => (
-              <label
+            {llmSlots.map(({ slot, selectedModelId, candidates, supportsReasoningEffort, reasoningEffort }) => (
+              <section
                 key={slot.slot}
                 className={styles.llmSlotField}
                 title={`${slot.required ? copy.requiredSlot : copy.optionalSlot} · ${slot.description}`}
@@ -174,17 +177,27 @@ export function AgentCoreConfigPanel({
                 <span>
                   <strong>{slot.label}</strong>
                 </span>
-                <VNativeSelect
-                  value={selectedModelId}
-                  onChange={(event) => onLlmSlotModelChange(slot, event.target.value)}
-                >
-                  {!slot.required ? <option value="">{copy.inheritDialogueModel}</option> : null}
-                  {modelOptions.map((model) => (
-                    <option key={`${slot.slot}:${model.key}`} value={model.value} title={model.title}>
-                      {model.label}
-                    </option>
-                  ))}
-                </VNativeSelect>
+                <AgentModelPicker
+                  candidates={candidates}
+                  slot={slot}
+                  selectedModelRef={selectedModelId}
+                  disabled={pending}
+                  pendingModelRef={pendingModelRef}
+                  configDraftDirty={configDraftDirty}
+                  agentDraftDirty={dirty}
+                  onSelectPinned={(modelRef) => onLlmSlotModelChange(slot, modelRef)}
+                  onPromote={(candidate) => onPromoteModel(slot, candidate)}
+                />
+                {!slot.required ? (
+                  <VButton
+                    type="button"
+                    variant="ghost"
+                    isDisabled={pending || !selectedModelId}
+                    onPress={() => onLlmSlotModelChange(slot, "")}
+                  >
+                    {copy.inheritDialogueModel}
+                  </VButton>
+                ) : null}
                 {supportsReasoningEffort ? (
                   <VNativeSelect
                     value={reasoningEffort}
@@ -197,7 +210,7 @@ export function AgentCoreConfigPanel({
                     <option value="high">{copy.reasoningEffort}: {copy.reasoningEffortHigh}</option>
                   </VNativeSelect>
                 ) : null}
-              </label>
+              </section>
             ))}
           </div>
           <div className={styles.configDeepLinkRow}>

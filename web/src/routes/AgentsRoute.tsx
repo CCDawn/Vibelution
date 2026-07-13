@@ -104,9 +104,23 @@ import {
   type AgentTeamIndexGroup,
 } from "./agentWorkspaceCache";
 import { createChatWorkspaceCache } from "./chatWorkspaceCache";
+import {
+  CONFIG_DRAFT_PRESENCE_EVENT,
+  CONFIG_DRAFT_PRESENCE_KEY,
+  readConfigDraftPresence,
+} from "./configDraftPresence";
 import styles from "./AgentsRoute.styles";
 
 type FilterId = string;
+
+type AgentModelPromotionResult = {
+  status: string;
+  modelRef: string;
+  source: "pinned" | "discovered";
+  agent: AgentConfigWorkspaceAgent;
+  operatorConfigHash: string;
+  manifestPath: string;
+};
 
 type AgentToolPolicyDraft = {
   allowedTools: string[];
@@ -563,7 +577,7 @@ function agentModelChoiceAllowed(model: AgentModelChoice) {
 
 function buildAgentModelChoices(models: AgentModelChoice[]): ModelProfileChoice[] {
   return models
-    .filter(agentModelChoiceAllowed)
+    .filter((model) => model.runtimeSelectable && agentModelChoiceAllowed(model))
     .map((model) => ({
       key: model.modelId,
       modelId: model.modelId,
@@ -571,50 +585,6 @@ function buildAgentModelChoices(models: AgentModelChoice[]): ModelProfileChoice[
       modelLabel: agentModelLabel(model),
     }))
     .sort((left, right) => left.label.localeCompare(right.label) || left.modelId.localeCompare(right.modelId));
-}
-
-function buildAgentSlotModelChoices(
-  models: AgentModelChoice[],
-  slot: AgentLlmSlotDefinition | undefined,
-): ModelProfileChoice[] {
-  const filtered = slot?.requiresImageInput
-    ? models.filter((model) => agentModelChoiceAllowed(model) && model.supportsImageInput !== false)
-    : models.filter(agentModelChoiceAllowed);
-  return filtered
-    .map((model) => ({
-      key: model.modelId,
-      modelId: model.modelId,
-      label: agentModelChoiceLabel(model),
-      modelLabel: agentModelLabel(model),
-    }))
-    .sort((left, right) => left.label.localeCompare(right.label) || left.modelId.localeCompare(right.modelId));
-}
-
-function buildAgentSlotModelChoicesWithCurrent(
-  models: AgentModelChoice[],
-  slot: AgentLlmSlotDefinition | undefined,
-  currentModelId: string,
-  lang: "zh" | "en",
-): ModelProfileChoice[] {
-  const choices = buildAgentSlotModelChoices(models, slot);
-  const normalizedCurrent = String(currentModelId || "").trim();
-  if (!normalizedCurrent || choices.some((choice) => choice.modelId === normalizedCurrent)) {
-    return choices;
-  }
-  const currentModel = models.find((model) => String(model.modelId || "").trim() === normalizedCurrent);
-  const unresolvedReason = currentModel
-    ? (lang === "zh" ? "当前绑定，当前槽位不可选" : "current binding, unavailable for this slot")
-    : (lang === "zh" ? "当前绑定，模型库未注册" : "current binding, not in model library");
-  return [
-    {
-      key: `${slot?.slot ?? "slot"}:${normalizedCurrent}:unresolved`,
-      modelId: normalizedCurrent,
-      label: lang === "zh" ? `${normalizedCurrent}（${unresolvedReason}）` : `${normalizedCurrent} (${unresolvedReason})`,
-      modelLabel: normalizedCurrent,
-      unresolved: true,
-    },
-    ...choices,
-  ];
 }
 
 function agentLlmSlots(workspace: AgentConfigWorkspace | undefined): AgentLlmSlotDefinition[] {
@@ -3591,8 +3561,26 @@ export function AgentsRoute() {
   const [bulkConfigDraft, setBulkConfigDraft] = useState<AgentBulkConfigDraft>(DEFAULT_BULK_CONFIG_DRAFT);
   const [bulkConfigApply, setBulkConfigApply] = useState<AgentBulkConfigApply>(DEFAULT_BULK_CONFIG_APPLY);
   const [bulkAgentPending, setBulkAgentPending] = useState(false);
+  const [configDraftPresenceDirty, setConfigDraftPresenceDirty] = useState(() => readConfigDraftPresence());
   const draftSyncSourceRef = useRef<AgentDraftSyncSource | null>(null);
   const appliedRouteTargetRef = useRef("");
+
+  useEffect(() => {
+    const refreshPresence = () => setConfigDraftPresenceDirty(readConfigDraftPresence());
+    const refreshStoragePresence = (event: StorageEvent) => {
+      if (!event.key || event.key === CONFIG_DRAFT_PRESENCE_KEY) {
+        refreshPresence();
+      }
+    };
+    window.addEventListener("focus", refreshPresence);
+    window.addEventListener("storage", refreshStoragePresence);
+    window.addEventListener(CONFIG_DRAFT_PRESENCE_EVENT, refreshPresence);
+    return () => {
+      window.removeEventListener("focus", refreshPresence);
+      window.removeEventListener("storage", refreshStoragePresence);
+      window.removeEventListener(CONFIG_DRAFT_PRESENCE_EVENT, refreshPresence);
+    };
+  }, []);
 
   const fullWorkspaceNeeded = Boolean(createOpen || activePane === "config" || activePane === "activity" || requestedAgentId);
   const workspaceQuery = useQuery({
@@ -4119,17 +4107,7 @@ export function AgentsRoute() {
       return {
         slot,
         selectedModelId,
-        modelOptions: buildAgentSlotModelChoicesWithCurrent(
-          workspace?.agentModelChoices ?? [],
-          slot,
-          selectedModelId,
-          lang,
-        ).map((model) => ({
-          key: model.key,
-          value: model.modelId,
-          label: model.label,
-          title: model.modelLabel || model.modelId,
-        })),
+        candidates: workspace?.agentModelChoices ?? [],
         supportsReasoningEffort: agentModelSupportsReasoningEffort(selectedModel),
         reasoningEffort: normalizeAgentReasoningEffort(configDraft.reasoningEffortBySlot[slot.slot]),
       };
@@ -4259,6 +4237,45 @@ export function AgentsRoute() {
         tone: "success",
         text: lang === "zh" ? `已保存 ${agentLabel(agent)} 的 Agent 配置` : `Saved config for ${agentLabel(agent)}`,
       });
+      void chatWorkspaceCache.afterAgentWorkspaceChanged();
+    },
+    onError: (error) => {
+      setNotice({ tone: "error", text: error instanceof Error ? error.message : String(error) });
+    },
+  });
+
+  const promoteAgentModelMutation = useMutation({
+    mutationFn: (payload: {
+      agent: AgentConfigWorkspaceAgent;
+      slot: AgentLlmSlotDefinition;
+      candidate: AgentModelChoice;
+      expectedBaseHash: string;
+    }) => fetchJson<AgentModelPromotionResult>(
+      `/api/agents/${encodeURIComponent(payload.agent.agentId)}/llm-bindings/${encodeURIComponent(payload.slot.slot)}/promote`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          modelRef: payload.candidate.modelRef,
+          expectedBaseHash: payload.expectedBaseHash,
+          expectedAgentUpdatedAt: payload.agent.updatedAt,
+          confirmed: true,
+        }),
+      },
+    ),
+    onSuccess: async (result) => {
+      setConfigDraft(draftFromAgent(result.agent));
+      draftSyncSourceRef.current = draftSyncSourceFromAgent(workspace, result.agent);
+      setNotice({
+        tone: "success",
+        text: lang === "zh"
+          ? `已固定 ${result.modelRef} 并绑定到当前 Agent`
+          : `Pinned ${result.modelRef} and bound it to this Agent`,
+      });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.agentConfigWorkspace() }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.agentSummary(true) }),
+      ]);
       void chatWorkspaceCache.afterAgentWorkspaceChanged();
     },
     onError: (error) => {
@@ -4947,6 +4964,54 @@ export function AgentsRoute() {
       agent: selectedAgent,
       draft: configDraft,
       modelChoices: workspace?.agentModelChoices ?? [],
+    });
+  };
+
+  const promoteAgentModel = (
+    slot: AgentLlmSlotDefinition,
+    candidate: AgentModelChoice,
+  ) => {
+    if (!selectedAgent || promoteAgentModelMutation.isPending) {
+      return;
+    }
+    const expectedBaseHash = String(workspace?.operatorConfigHash || "").trim();
+    if (!expectedBaseHash) {
+      setNotice({
+        tone: "error",
+        text: lang === "zh" ? "配置快照已失效，请刷新后重试。" : "The config snapshot is stale; refresh and retry.",
+      });
+      return;
+    }
+    const externalConfigDraftDirty = readConfigDraftPresence();
+    setConfigDraftPresenceDirty(externalConfigDraftDirty);
+    if (configDirty || externalConfigDraftDirty) {
+      setNotice({
+        tone: "error",
+        text: lang === "zh" ? "请先保存或放弃未保存修改。" : "Save or discard unsaved changes first.",
+      });
+      return;
+    }
+    const summary = lang === "zh"
+      ? [
+          `Provider：${candidate.providerLabel || candidate.providerId}`,
+          `upstream ID：${candidate.upstreamId}`,
+          `modelRef：${candidate.modelRef}`,
+          "此操作将修改 operator config，并只更新当前 Agent 的模型绑定。",
+        ].join("\n")
+      : [
+          `Provider: ${candidate.providerLabel || candidate.providerId}`,
+          `upstream ID: ${candidate.upstreamId}`,
+          `modelRef: ${candidate.modelRef}`,
+          "This changes operator config and only the current Agent binding.",
+        ].join("\n");
+    if (!window.confirm(summary)) {
+      return;
+    }
+    promoteAgentModelMutation.mutate({
+      agent: selectedAgent,
+      slot,
+      candidate,
+      expectedBaseHash,
     });
   };
 
@@ -5755,8 +5820,9 @@ export function AgentsRoute() {
         agentName: agentLabel(selectedAgent),
         draft: configDraft,
         dirty: configDirty,
-        canSave: canSaveConfig,
-        pending: selectedAgentConfigPending,
+        configDraftDirty: configDraftPresenceDirty,
+        canSave: canSaveConfig && !promoteAgentModelMutation.isPending,
+        pending: selectedAgentConfigPending || promoteAgentModelMutation.isPending,
         notice,
         title: copy.personaHint,
         health: {
@@ -5767,6 +5833,9 @@ export function AgentsRoute() {
           nextStep: issueNextStep(selectedAgent.health, lang),
         },
         llmSlots: coreConfigLlmSlots,
+        pendingModelRef: promoteAgentModelMutation.isPending
+          ? promoteAgentModelMutation.variables?.candidate.modelRef ?? ""
+          : "",
         promptTemplateOptions: bulkPromptTemplateOptions,
         toolPolicyOptions: coreConfigToolPolicyOptions,
         toolPolicyTooltip: coreConfigToolPolicyTooltip,
@@ -5785,6 +5854,7 @@ export function AgentsRoute() {
             ),
           });
         },
+        onPromoteModel: promoteAgentModel,
         onReasoningEffortChange: (slot, reasoningEffort) => updateDraft({
           reasoningEffortBySlot: updateAgentReasoningEffortBySlot(
             configDraft.reasoningEffortBySlot,
