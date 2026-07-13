@@ -34,7 +34,6 @@ import {
   TeamWorkflowCandidate,
   TeamWorkflowCandidateGraphBuildPayload,
   TeamWorkflowCandidateGraphPayload,
-  TeamWorkflowCoordinationStatus,
   TeamWorkflowKnowledgeCollectionIngestionPayload,
   TeamWorkflowKnowledgeIngestionWorkRun,
   TeamWorkflowKnowledgeIngestionStatus,
@@ -45,7 +44,6 @@ import {
   TeamWorkflowSourceCollectionRunStartPayload,
   TeamWorkflowSourceCollectionStageSessionTaskPayload,
   TeamWorkflowDataRecordSourceCandidateImportPayload,
-  TeamWorkflowCandidateListPayload,
   TeamWorkflowOrchestration,
   WorkRunSnapshot,
 } from "../api/types";
@@ -116,11 +114,70 @@ import { TeamSourceCollectionStorageActionsPanel, type TeamSourceCollectionStora
 import { TeamWorkflowCandidatePreviewPanel, type TeamWorkflowCandidatePreviewItem } from "./TeamWorkflowCandidatePreviewPanel";
 import { TeamsSourceCollectionPanel } from "./teams/TeamsSourceCollectionPanel";
 import {
+  SOURCE_COLLECTION_SOURCE_FILTERS,
+  deriveSourceCollectionExcludedRecoveryState,
+  evidenceLedgerText,
+  sourceCollectionCandidateEmptyStateText,
+  sourceCollectionCandidateOpenLabel,
+  sourceCollectionCandidateProvenance,
+  sourceCollectionCandidateSourceCategory,
+  sourceCollectionCandidateTrace,
+  sourceCollectionEvidenceLedgerActionLabel,
+  sourceCollectionEvidenceLedgerCardLabel,
+  sourceCollectionEvidenceLedgerSummary,
+  sourceCollectionEvidenceLedgerTone,
+  sourceCollectionFilterCounts,
+  sourceCollectionFilterMatches,
+  sourceCollectionRecordProvenance,
+  sourceCollectionRecordSourceCategory,
+  sourceCollectionSourceFilterLabel,
+  sourceCollectionSourceTypeLabel,
+  type SourceCollectionCandidateProvenance,
+  type SourceCollectionEvidenceLedgerSummary,
+  type SourceCollectionSourceFilter,
+} from "./teams/source-collection/evidenceModel";
+import {
+  deriveSourceCollectionDisplayState,
   selectDefaultSourceCollectionRun,
+  sourceCollectionActiveWorkRunFromRuntime,
   sourceCollectionRunCandidateMetric,
   sourceCollectionRunHasUsableRecords,
+  sourceCollectionRunLabel,
+  sourceCollectionRunOptionLabel,
   sourceCollectionRunRecordCount,
-} from "./teams/teamsRouteViewModel";
+  sourceCollectionRunsForTeam,
+  sourceCollectionRunTitleLabel,
+  sourceCollectionStableCountText,
+  translateResearchPhrase,
+  type SourceCollectionStepState,
+} from "./teams/source-collection/runModel";
+import {
+  sourceCollectionCompletionFlowNodeState,
+  sourceCollectionNonNegativeCount,
+  sourceCollectionStageBackendActionReadiness,
+  sourceCollectionStageProjectionCount,
+  sourceCollectionStageProjectionState,
+  sourceCollectionStageRecoveryStatusLabel,
+  sourceCollectionStageUserStatusLabel,
+  sourceCollectionStageUserSummary,
+  type ResearchStagePhaseStatus,
+  type ResearchStageRound,
+  type ResearchStageRoundStatusPayload,
+  type ResearchStageType,
+  type SourceCollectionActionReadiness,
+  type SourceCollectionStageCardProjection,
+  type SourceCollectionStageModuleId,
+} from "./teams/source-collection/stageProjection";
+import {
+  TEAM_WORKFLOW_CANDIDATE_PREVIEW_LIMIT,
+  officialModelEvidenceStatusQueryKey,
+  paperNoteChunkStatusQueryKey,
+  researchStageRoundStatusQueryKey,
+  sourceCollectionStageWritebackRefetchInterval,
+  sourceQualityStatusQueryKey,
+  useResearchWorkflowResources,
+  type TeamWorkflowSourceQualityStatus,
+} from "./teams/useResearchWorkflowResources";
 import { TeamWorkflowGraphView, workflowGraphLayout } from "./TeamWorkflowGraphView";
 import {
   TeamWorkflowCandidateGraphStatusPanel,
@@ -156,8 +213,6 @@ const RESEARCH_CANVAS_AUTO_LAYOUT_ROW_GAP = 122;
 const EVOLUTION_SYSTEM_TEAM_IDS = new Set(["self-evolution-team", "supervised-evolution-team"]);
 const LINKED_ROOM_ACTIVE_REFETCH_MS = 5_000;
 const LINKED_ROOM_IDLE_REFETCH_MS = 30_000;
-const TEAM_WORKFLOW_CANDIDATE_PREVIEW_LIMIT = 80;
-const TEAM_WORKFLOW_CANDIDATE_GRAPH_LIMIT = 20;
 const AI_SEARCH_RUN_PREVIEW_LIMIT = 6;
 const TEAM_BOOTSTRAP_ACTIVE_REFETCH_MS = 2_000;
 const TEAM_BOOTSTRAP_BACKGROUND_REFETCH_MS = 12_000;
@@ -177,13 +232,9 @@ const SOURCE_COLLECTION_PROMPT_CACHE_POLICY = {
 };
 const SOURCE_COLLECTION_PROMPT_CACHE_MODEL_LABEL = "configured prompt-cache model";
 
-const researchStageRoundStatusQueryKey = (id: string) => ["teams", id, "workflow-orchestration", "stage-rounds", "status"] as const;
 const experimentPlanningStatusQueryKey = (id: string) => ["teams", id, "workflow-orchestration", "experiments", "status"] as const;
 const researchLoopTemplatesQueryKey = (id: string) => ["teams", id, "workflow-orchestration", "research-loop", "templates"] as const;
 const researchLoopStatusQueryKey = (id: string) => ["teams", id, "workflow-orchestration", "research-loop", "status"] as const;
-const officialModelEvidenceStatusQueryKey = (id: string) => ["teams", id, "workflow-orchestration", "official-model-evidence", "status"] as const;
-const paperNoteChunkStatusQueryKey = (id: string) => ["teams", id, "workflow-orchestration", "paper-note-chunks", "status"] as const;
-const sourceQualityStatusQueryKey = (id: string) => ["teams", id, "workflow-orchestration", "source-quality", "status"] as const;
 const sourceCollectionSummaryQueryPrefix = (id: string) =>
   ["teams", id, "workflow-orchestration", "source-collection", "summary"] as const;
 const sourceCollectionSummaryQueryKey = (id: string, runId: string) =>
@@ -369,64 +420,6 @@ type DataProcessingRecordListPayload = {
   };
 };
 
-type SourceCollectionStepState = "active" | "done" | "failed" | "idle" | "pending";
-type SourceCollectionStageModuleId = "finding" | "extraction" | "relations" | "ingestion";
-
-type SourceCollectionActionReadiness = {
-  disabled: boolean;
-  loading: boolean;
-  reason: string;
-};
-
-type SourceCollectionCandidateWithSource = TeamWorkflowCandidate & {
-  sourcePath?: string;
-  sourceRef?: string;
-  sourceUrl?: string;
-};
-
-type SourceCollectionCandidateProvenance = {
-  kind: "doi" | "file" | "missing" | "ref" | "search_evidence" | "url";
-  label: string;
-  value: string;
-  href: string;
-};
-
-type SourceCollectionEvidenceLedgerSummary = {
-  status: string;
-  missingAnchor: boolean;
-  sourceRefCount: number;
-  evidenceRefCount: number;
-  claimCount: number;
-  keyFindingCount: number;
-  citationCount: number;
-  limitations: string[];
-  uncertainty: string[];
-  riskFlags: string[];
-  supportLevel: string;
-  nextAction: string;
-  claims: unknown[];
-  keyFindings: unknown[];
-  citations: unknown[];
-  sourceRefs: unknown[];
-  evidenceRefs: unknown[];
-};
-
-type SourceCollectionSourceFilter = "all" | "pdf" | "paper_web" | "dataset" | "local_file" | "missing";
-
-const SOURCE_COLLECTION_SOURCE_FILTERS: SourceCollectionSourceFilter[] = ["all", "pdf", "paper_web", "dataset", "local_file", "missing"];
-
-type SourceCollectionCandidateTrace = {
-  assignmentId: string;
-  query: string;
-  queryId: string;
-  rawLocation: string;
-  recordId: string;
-  runId: string;
-  searchProvider: string;
-  searchUrl: string;
-  sourceRef: string;
-};
-
 type SourceCollectionStageModule = {
   id: SourceCollectionStageModuleId;
   label: string;
@@ -450,119 +443,6 @@ type SourceCollectionStageModule = {
 type SourceCollectionCompletionFlowNode = NonNullable<TeamWorkflowKnowledgeIngestionWorkRun["flowVisualization"]>["nodes"][number];
 
 type SourceCollectionStageAgentChatStatus = "ready" | "loading" | "error" | "repair";
-
-type SourceCollectionCoverageSummary = {
-  applicable?: boolean;
-  coverageKind?: string;
-  complete?: boolean;
-  total?: number;
-  processed?: number;
-  missing?: number;
-  invalid?: number;
-  blocked?: number;
-  duplicate?: number;
-};
-
-type SourceCollectionStageTaskToolProgress = {
-  required?: boolean;
-  total?: number;
-  completed?: number;
-  complete?: boolean;
-  completedIds?: string[];
-  pendingIds?: string[];
-};
-
-type SourceCollectionStageChecklistItem = {
-  id?: string;
-  description?: string;
-  order?: number;
-};
-
-type SourceCollectionStageCompletionGate = {
-  requiresTaskChecklist?: boolean;
-  requiresArtifact?: boolean;
-  taskChecklistComplete?: boolean;
-  artifactComplete?: boolean;
-  passed?: boolean;
-};
-
-type SourceCollectionStageActionReadinessProjection = {
-  canStart?: boolean;
-  reasonCode?: string;
-  disabledReason?: string;
-  recommendedAction?: "start" | "continue" | "retry" | "wait" | "inspect" | string;
-  actionLabel?: string;
-};
-
-type SourceCollectionStageClosureSummary = {
-  userStatus?: "success" | "partial" | "failed" | string;
-  artifactStatus?: string;
-  agentTurnStatus?: string;
-  targetLabel?: string;
-  message?: string;
-  progressLabel?: string;
-  successCount?: number;
-  excludedSourceCount?: number;
-  failedCount?: number;
-  blockedCount?: number;
-  invalidIds?: string[];
-  retryInstruction?: string;
-  nextAction?: string;
-  artifactComplete?: boolean;
-  taskChecklistComplete?: boolean;
-  completionGatePassed?: boolean;
-  taskToolProgress?: SourceCollectionStageTaskToolProgress;
-  completionGate?: SourceCollectionStageCompletionGate;
-};
-
-type SourceCollectionStageCardProjection = {
-  stageId: SourceCollectionStageModuleId;
-  status: string;
-  isClosedLoop?: boolean;
-  userStatusLabel?: string;
-  userSummary?: string;
-  actionReadiness?: SourceCollectionStageActionReadinessProjection;
-  agentTaskStatus?: string;
-  artifactStatus?: string;
-  artifactSummary?: string;
-  currentCoverageSummary?: SourceCollectionCoverageSummary;
-  counts?: {
-    input?: number;
-    artifact?: number;
-    output?: number;
-    pending?: number;
-    task?: number;
-    historicalTask?: number;
-    excluded?: number;
-    rawRecord?: number;
-  };
-  latestTask?: {
-    taskId?: string;
-    stageId?: string;
-    agentId?: string;
-    agentRole?: string;
-    sessionId?: string;
-    status?: string;
-    summary?: string;
-    updatedAt?: string;
-    resultKeys?: string[];
-    evidenceRefCount?: number;
-    nextActionCount?: number;
-    coverageSummary?: SourceCollectionCoverageSummary;
-    invalidCandidateIds?: string[];
-    invalidRecordIds?: string[];
-    closureSummary?: SourceCollectionStageClosureSummary;
-    taskToolRequired?: boolean;
-    taskChecklist?: SourceCollectionStageChecklistItem[];
-    taskToolProgress?: SourceCollectionStageTaskToolProgress;
-    completionGate?: SourceCollectionStageCompletionGate;
-    materializedSources?: Record<string, unknown>;
-    materializedContentExtraction?: Record<string, unknown>;
-  };
-  resultKeys?: string[];
-  nextActions?: string[];
-  blockingReasons?: string[];
-};
 
 const SOURCE_COLLECTION_STAGE_AGENT_KEYS: Record<SourceCollectionStageModuleId, string[]> = {
   finding: ["source_finder"],
@@ -622,567 +502,6 @@ function parseSourceCollectionStageModuleId(value: string | null): SourceCollect
   return value === "finding" || value === "extraction" || value === "relations" || value === "ingestion"
     ? value
     : null;
-}
-
-function sourceCollectionStageProjectionState(
-  projection: SourceCollectionStageCardProjection | null | undefined,
-  fallback: SourceCollectionStepState,
-): SourceCollectionStepState {
-  if (!projection?.status) {
-    return fallback;
-  }
-  if (projection.status === "agent_running") {
-    return "active";
-  }
-  if (projection.status === "agent_interrupted") {
-    return "failed";
-  }
-  if (projection.status === "closed_loop" || projection.status === "artifact_ready_no_latest_agent_task") {
-    return "done";
-  }
-  if (projection.status === "agent_blocked") {
-    return "failed";
-  }
-  if (projection.status === "partial_current_inputs" || projection.status === "agent_done_artifact_pending" || projection.status === "pending") {
-    return "pending";
-  }
-  return projection.status === "idle" ? "idle" : fallback;
-}
-
-function sourceCollectionCompletionFlowNodeState(status: string | undefined | null): SourceCollectionStepState {
-  const normalized = String(status || "").trim().toLowerCase();
-  if (normalized === "running" || normalized === "in_progress" || normalized === "active") {
-    return "active";
-  }
-  if (normalized === "completed" || normalized === "done" || normalized === "closed_loop") {
-    return "done";
-  }
-  if (normalized === "failed" || normalized === "blocked" || normalized.includes("failed")) {
-    return "failed";
-  }
-  if (normalized === "pending" || normalized === "pending_review" || normalized === "queued") {
-    return "pending";
-  }
-  return "idle";
-}
-
-function sourceCollectionStageProjectionCount(
-  projection: SourceCollectionStageCardProjection | null | undefined,
-  key: keyof NonNullable<SourceCollectionStageCardProjection["counts"]>,
-  fallback: number,
-): number {
-  const value = projection?.counts?.[key];
-  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
-}
-
-function sourceCollectionNonNegativeCount(value: unknown): number {
-  return typeof value === "number" && Number.isFinite(value) ? Math.max(0, value) : 0;
-}
-
-function sourceCollectionCoverageMetric(
-  coverage: SourceCollectionCoverageSummary | null | undefined,
-  lang: "zh" | "en",
-  stageId?: SourceCollectionStageModuleId | string | null,
-) {
-  if (!coverage?.applicable) {
-    return "";
-  }
-  const total = typeof coverage.total === "number" ? coverage.total : 0;
-  const processed = typeof coverage.processed === "number" ? coverage.processed : 0;
-  const missing = typeof coverage.missing === "number" ? coverage.missing : 0;
-  const invalid = typeof coverage.invalid === "number" ? coverage.invalid : 0;
-  if (!total) {
-    return "";
-  }
-  if (lang === "zh") {
-    const normalizedStageId = String(stageId || "").toLowerCase();
-    const stageCopy: Record<string, { verb: string; missing: string }> = {
-      finding: { verb: "已寻找", missing: "待补找" },
-      extraction: { verb: "已提炼/审查", missing: "待补提炼" },
-      relations: { verb: "已整理", missing: "待补关系" },
-      ingestion: { verb: "已入库审核", missing: "待补入库" },
-    };
-    const copy = stageCopy[normalizedStageId] ?? { verb: "已处理", missing: "待补读" };
-    return `${copy.verb} ${processed}/${total}${missing > 0 ? ` · ${copy.missing} ${missing}` : ""}${invalid > 0 ? ` · 无效 ID ${invalid}` : ""}`;
-  }
-  return `processed ${processed}/${total}${missing > 0 ? ` · missing ${missing}` : ""}${invalid > 0 ? ` · invalid IDs ${invalid}` : ""}`;
-}
-
-function sourceCollectionTaskToolProgressMetric(
-  progress: SourceCollectionStageTaskToolProgress | null | undefined,
-  lang: "zh" | "en",
-  checklist?: SourceCollectionStageChecklistItem[] | null,
-) {
-  if (!progress?.required) {
-    return "";
-  }
-  const total = typeof progress.total === "number" ? progress.total : 0;
-  const completed = typeof progress.completed === "number" ? progress.completed : 0;
-  if (!total) {
-    return "";
-  }
-  const pendingDescriptions = sourceCollectionTaskToolPendingDescriptions(progress, checklist);
-  const pendingText = pendingDescriptions.length > 0
-    ? (lang === "zh" ? ` · 剩余 ${pendingDescriptions.length} 项` : ` · ${pendingDescriptions.length} pending`)
-    : "";
-  return lang === "zh" ? `检查项 ${completed}/${total}${pendingText}` : `checklist ${completed}/${total}${pendingText}`;
-}
-
-function sourceCollectionTaskToolPendingDescriptions(
-  progress: SourceCollectionStageTaskToolProgress | null | undefined,
-  checklist?: SourceCollectionStageChecklistItem[] | null,
-) {
-  const pendingIds = Array.isArray(progress?.pendingIds)
-    ? progress.pendingIds.map((id) => String(id || "").trim()).filter(Boolean)
-    : [];
-  if (!pendingIds.length) {
-    return [];
-  }
-  const checklistById = new Map(
-    (Array.isArray(checklist) ? checklist : [])
-      .filter((item) => item?.id)
-      .map((item) => [String(item.id), item.description || item.id || ""]),
-  );
-  return pendingIds
-    .map((id) => checklistById.get(id) || id)
-    .map((description) => String(description || "").trim())
-    .filter(Boolean);
-}
-
-function sourceCollectionTaskToolProgressDetail(
-  progress: SourceCollectionStageTaskToolProgress | null | undefined,
-  checklist: SourceCollectionStageChecklistItem[] | null | undefined,
-  lang: "zh" | "en",
-) {
-  if (!progress?.required) {
-    return "";
-  }
-  const total = typeof progress.total === "number" ? progress.total : 0;
-  const completed = typeof progress.completed === "number" ? progress.completed : 0;
-  if (!total) {
-    return "";
-  }
-  const pendingDescriptions = sourceCollectionTaskToolPendingDescriptions(progress, checklist);
-  if (lang === "zh") {
-    return pendingDescriptions.length
-      ? `检查项 ${completed}/${total}；剩余检查项：${pendingDescriptions.join("、")}`
-      : `检查项 ${completed}/${total}`;
-  }
-  return pendingDescriptions.length
-    ? `checklist ${completed}/${total}; pending: ${pendingDescriptions.join(", ")}`
-    : `checklist ${completed}/${total}`;
-}
-
-function sourceCollectionStageTaskStatusLabel(status: string | null | undefined, lang: "zh" | "en") {
-  const normalized = String(status || "").trim().toLowerCase();
-  if (lang !== "zh") {
-    return normalized || "task";
-  }
-  const labels: Record<string, string> = {
-    queued: "待执行",
-    running: "进行中",
-    completed: "已回写",
-    needs_review: "待补齐",
-    blocked: "受阻",
-    failed: "失败",
-    cancelled: "已取消",
-    interrupted: "已中断，需要继续",
-  };
-  return labels[normalized] ?? (normalized || "任务");
-}
-
-function sourceCollectionStageProjectionTaskMetric(
-  projection: SourceCollectionStageCardProjection | null | undefined,
-  lang: "zh" | "en",
-  syncing = false,
-) {
-  if (syncing) {
-    return lang === "zh" ? "等待团队页刷新最新写回" : "Waiting for latest writeback";
-  }
-  const latestTask = projection?.latestTask;
-  const historicalTaskCount = typeof projection?.counts?.historicalTask === "number" ? projection.counts.historicalTask : 0;
-  if (!latestTask?.taskId) {
-    if (historicalTaskCount > 0) {
-      return lang === "zh" ? `历史任务 ${historicalTaskCount} 已忽略` : `${historicalTaskCount} historical tasks ignored`;
-    }
-    return "";
-  }
-  const evidenceCount = typeof latestTask.evidenceRefCount === "number" ? latestTask.evidenceRefCount : 0;
-  const nextActionCount = typeof latestTask.nextActionCount === "number" ? latestTask.nextActionCount : 0;
-  const taskStatusLabel = sourceCollectionStageTaskStatusLabel(latestTask.status || projection?.agentTaskStatus, lang);
-  const currentCoverageMetric = sourceCollectionCoverageMetric(projection?.currentCoverageSummary, lang, projection?.stageId);
-  const coverageMetric = sourceCollectionCoverageMetric(latestTask.coverageSummary, lang, projection?.stageId);
-  const taskProgressMetric = sourceCollectionTaskToolProgressMetric(
-    latestTask.closureSummary?.taskToolProgress || latestTask.taskToolProgress,
-    lang,
-    latestTask.taskChecklist,
-  );
-  if (currentCoverageMetric && projection?.currentCoverageSummary?.complete === false) {
-    return `${taskStatusLabel}${taskProgressMetric ? ` · ${taskProgressMetric}` : ""} · ${currentCoverageMetric}${historicalTaskCount > 0 ? (lang === "zh" ? ` · 历史 ${historicalTaskCount}` : ` · historical ${historicalTaskCount}`) : ""}`;
-  }
-  if (coverageMetric) {
-    return `${taskStatusLabel}${taskProgressMetric ? ` · ${taskProgressMetric}` : ""} · ${coverageMetric}${historicalTaskCount > 0 ? (lang === "zh" ? ` · 历史 ${historicalTaskCount}` : ` · historical ${historicalTaskCount}`) : ""}`;
-  }
-  if (lang === "zh") {
-    return `${taskStatusLabel}${taskProgressMetric ? ` · ${taskProgressMetric}` : ""} · 证据引用 ${evidenceCount} · 后续建议 ${nextActionCount}${historicalTaskCount > 0 ? ` · 历史任务 ${historicalTaskCount}` : ""}`;
-  }
-  return `${taskStatusLabel}${taskProgressMetric ? ` · ${taskProgressMetric}` : ""} · evidence ${evidenceCount} · next ${nextActionCount}${historicalTaskCount > 0 ? ` · historical ${historicalTaskCount}` : ""}`;
-}
-
-function sourceCollectionStageArtifactSummaryLabel(
-  projection: SourceCollectionStageCardProjection | null | undefined,
-  lang: "zh" | "en",
-) {
-  if (!projection) {
-    return "";
-  }
-  if (lang !== "zh") {
-    return projection.artifactSummary || "";
-  }
-  const counts = projection.counts ?? {};
-  const input = typeof counts.input === "number" ? counts.input : 0;
-  const artifact = typeof counts.artifact === "number" ? counts.artifact : 0;
-  const output = typeof counts.output === "number" ? counts.output : 0;
-  const pending = typeof counts.pending === "number" ? counts.pending : 0;
-  const excluded = typeof counts.excluded === "number" ? counts.excluded : 0;
-  const excludedText = excluded > 0 ? `；已移出 ${excluded} 条无效来源` : "";
-  if (projection.stageId === "finding") {
-    return `${artifact} 条可处理原始资料${excludedText}；${pending} 个搜索任务待执行`;
-  }
-  if (projection.stageId === "extraction") {
-    const coverage = sourceCollectionCoverageMetric(
-      projection.currentCoverageSummary?.complete === false ? projection.currentCoverageSummary : projection.latestTask?.coverageSummary,
-      lang,
-      projection.stageId,
-    );
-    if (coverage) {
-      return `${coverage}${excludedText}`;
-    }
-    if (artifact <= 0 && excluded > 0) {
-      return `暂无候选资料；已移出 ${excluded} 条无有效内容来源`;
-    }
-    return `${artifact} 条候选资料来自本轮；通过 ${output}${excludedText}`;
-  }
-  if (projection.stageId === "relations") {
-    return `节点 ${artifact} / 关系 ${output}`;
-  }
-  if (projection.stageId === "ingestion") {
-    return `${pending} 个入库包待处理；${output} 个正式同步标记`;
-  }
-  return projection.artifactSummary || "";
-}
-
-function sourceCollectionStageBlockingReasonLabel(reason: string, lang: "zh" | "en") {
-  if (lang !== "zh") {
-    return reason;
-  }
-  const normalized = reason.trim();
-  if (normalized.startsWith("Current stage coverage is partial:")) {
-    return "当前批次还有资料未处理，需要继续本阶段补齐。";
-  }
-  if (normalized.startsWith("Agent writeback has partial candidate coverage:")) {
-    return "Agent 只处理了部分候选，需要继续分页读取并补齐逐候选结果。";
-  }
-  const labels: Record<string, string> = {
-    "Latest Agent turn was interrupted before stage writeback.":
-      "最近一次 Agent 会话在阶段写回前中断，需要继续这次任务或重试。",
-    "Agent task wrote back a structured result, but the expected stage artifact has not been created yet.":
-      "已收到 Agent 结果，但还没有生成本阶段可用资料。",
-    "Latest Agent task is blocked or failed.":
-      "最近一次 Agent 任务受阻或失败。",
-    "Inputs exist, but this stage has not produced its expected artifact yet.":
-      "上游资料已存在，但这里还没有生成可用结果。",
-  };
-  return labels[normalized] ?? normalized;
-}
-
-function sourceCollectionStageBlockingReasonsLabel(
-  reasons: string[] | undefined,
-  lang: "zh" | "en",
-) {
-  return (reasons ?? [])
-    .map((reason) => sourceCollectionStageBlockingReasonLabel(reason, lang))
-    .filter(Boolean);
-}
-
-function sourceCollectionStageRecoveryActionLabel(stageId: SourceCollectionStageModuleId | string | null | undefined, lang: "zh" | "en") {
-  const normalized = String(stageId || "").toLowerCase();
-  if (lang !== "zh") {
-    const labels: Record<string, string> = {
-      finding: "continue finding sources",
-      extraction: "continue extraction",
-      relations: "rebuild source relations",
-      ingestion: "continue ingestion",
-    };
-    return labels[normalized] ?? "continue this stage";
-  }
-  const labels: Record<string, string> = {
-    finding: "继续补充资料",
-    extraction: "继续补全提炼",
-    relations: "重新整理关系",
-    ingestion: "继续入库",
-  };
-  return labels[normalized] ?? "继续处理本阶段";
-}
-
-function sourceCollectionStageRecoveryStatusLabel(stageId: SourceCollectionStageModuleId | string | null | undefined, lang: "zh" | "en") {
-  const normalized = String(stageId || "").toLowerCase();
-  if (lang !== "zh") {
-    const labels: Record<string, string> = {
-      finding: "Needs more sources",
-      extraction: "Needs extraction",
-      relations: "Needs relation mapping",
-      ingestion: "Needs ingestion",
-    };
-    return labels[normalized] ?? "Needs follow-up";
-  }
-  const labels: Record<string, string> = {
-    finding: "待补资料",
-    extraction: "待补提炼",
-    relations: "待补关系",
-    ingestion: "待入库",
-  };
-  return labels[normalized] ?? "待继续处理";
-}
-
-function sourceCollectionStageReadableObjectLabel(stageId: SourceCollectionStageModuleId | string | null | undefined, lang: "zh" | "en") {
-  const normalized = String(stageId || "").toLowerCase();
-  if (lang !== "zh") {
-    const labels: Record<string, string> = {
-      finding: "source records",
-      extraction: "candidate sources",
-      relations: "source relationships",
-      ingestion: "ingestion pack",
-    };
-    return labels[normalized] ?? "usable results";
-  }
-  const labels: Record<string, string> = {
-    finding: "原始资料",
-    extraction: "候选资料",
-    relations: "资料关系",
-    ingestion: "入库结果",
-  };
-  return labels[normalized] ?? "可用资料";
-}
-
-function sourceCollectionStageUserStatusLabel(
-  projection: SourceCollectionStageCardProjection | null | undefined,
-  lang: "zh" | "en",
-  syncing = false,
-) {
-  if (!projection?.status) {
-    return "";
-  }
-  if (projection.status === "agent_interrupted") {
-    return lang === "zh"
-      ? (projection.userStatusLabel || "已中断，需要继续")
-      : "Interrupted; continue needed";
-  }
-  if (syncing) {
-    return lang === "zh" ? "正在同步 Agent 结果" : "Syncing Agent result";
-  }
-  if (lang === "zh" && projection.userStatusLabel) {
-    return projection.userStatusLabel;
-  }
-  const currentCoverage = projection.currentCoverageSummary;
-  if (currentCoverage?.applicable && currentCoverage.complete === false) {
-    return sourceCollectionStageRecoveryStatusLabel(projection.stageId, lang);
-  }
-  const closure = projection.latestTask?.closureSummary;
-  if (closure?.userStatus === "failed") {
-    if (projection.stageId === "extraction") {
-      return lang === "zh" ? "本轮未生成候选资料" : "No candidate sources generated";
-    }
-    return lang === "zh" ? "本轮未完成闭环" : "This attempt did not close";
-  }
-  if (closure?.userStatus === "partial") {
-    return lang === "zh" ? "本轮部分完成，待补齐" : "Partially completed";
-  }
-  if (closure?.userStatus === "success") {
-    return lang === "zh" ? "本轮已成功闭环" : "Attempt closed successfully";
-  }
-  const coverage = projection.latestTask?.coverageSummary;
-  if (coverage?.applicable && coverage.complete === false) {
-    return sourceCollectionStageRecoveryStatusLabel(projection.stageId, lang);
-  }
-  if (projection.status === "partial_current_inputs") {
-    return sourceCollectionStageRecoveryStatusLabel(projection.stageId, lang);
-  }
-  if (projection.status === "agent_done_artifact_pending") {
-    if (
-      projection.stageId === "extraction"
-      && typeof projection.counts?.excluded === "number"
-      && projection.counts.excluded > 0
-      && Number(projection.counts?.artifact ?? 0) <= 0
-    ) {
-      return lang === "zh" ? "已移出无效来源" : "Invalid sources removed";
-    }
-    return lang === "zh" ? "已收到 Agent 结果，等待生成可用资料" : "Agent result received; waiting for usable output";
-  }
-  if (projection.status === "artifact_ready_agent_blocked") {
-    return lang === "zh" ? "资料已生成，最近任务需排查" : "Output ready; latest task needs review";
-  }
-  if (projection.status === "pending" && Number(projection.counts?.artifact ?? 0) > 0) {
-    return lang === "zh" ? "已有部分资料" : "Partial output ready";
-  }
-  const labels: Record<string, string> = lang === "zh"
-    ? {
-        agent_running: "Agent 正在处理",
-        agent_interrupted: "已中断，需要继续",
-        closed_loop: "本阶段已完成",
-        artifact_ready_no_latest_agent_task: "资料已生成",
-        agent_blocked: "Agent 任务受阻",
-        pending: "等待本阶段产出",
-        idle: "未开始",
-      }
-    : {
-        agent_running: "Agent running",
-        agent_interrupted: "Interrupted; continue needed",
-        closed_loop: "Stage complete",
-        artifact_ready_no_latest_agent_task: "Output ready",
-        agent_blocked: "Agent blocked",
-        pending: "Waiting for output",
-        idle: "Not started",
-      };
-  return labels[projection.status] ?? (lang === "zh" ? "需要处理" : projection.status);
-}
-
-function sourceCollectionStageInterruptedSummary(
-  projection: SourceCollectionStageCardProjection | null | undefined,
-  lang: "zh" | "en",
-) {
-  const latestTask = projection?.latestTask;
-  const closure = latestTask?.closureSummary;
-  const progress = closure?.taskToolProgress || latestTask?.taskToolProgress;
-  const progressDetail = sourceCollectionTaskToolProgressDetail(progress, latestTask?.taskChecklist, lang);
-  const retryInstruction = closure?.retryInstruction || closure?.nextAction || (lang === "zh" ? "继续这次任务" : "continue this task");
-  if (lang === "zh") {
-    return `本轮已中断：Agent 私聊尚未完成阶段回写。${progressDetail ? `${progressDetail}。` : ""}建议：${retryInstruction}。`;
-  }
-  return `This attempt was interrupted before stage writeback.${progressDetail ? ` ${progressDetail}.` : ""} Next: ${retryInstruction}.`;
-}
-
-function sourceCollectionStageUserSummary(
-  projection: SourceCollectionStageCardProjection | null | undefined,
-  lang: "zh" | "en",
-) {
-  if (!projection) {
-    return "";
-  }
-  const objectLabel = sourceCollectionStageReadableObjectLabel(projection.stageId, lang);
-  const closure = projection.latestTask?.closureSummary;
-  const excluded = typeof projection.counts?.excluded === "number" ? projection.counts.excluded : 0;
-  const artifact = typeof projection.counts?.artifact === "number" ? projection.counts.artifact : 0;
-  if (projection.status === "agent_interrupted") {
-    return sourceCollectionStageInterruptedSummary(projection, lang);
-  }
-  if (lang === "zh" && projection.userSummary) {
-    return projection.userSummary;
-  }
-  const currentCoverage = projection.currentCoverageSummary;
-  const currentTotal = typeof currentCoverage?.total === "number" ? currentCoverage.total : 0;
-  const currentProcessed = typeof currentCoverage?.processed === "number" ? currentCoverage.processed : 0;
-  const currentMissing = typeof currentCoverage?.missing === "number" ? currentCoverage.missing : 0;
-  const currentInvalid = typeof currentCoverage?.invalid === "number" ? currentCoverage.invalid : 0;
-  if (currentCoverage?.applicable && currentCoverage.complete === false && currentTotal > 0) {
-    if (lang === "zh") {
-      const invalidText = currentInvalid > 0 ? `无效 ID ${currentInvalid} 条。` : "";
-      return `${objectLabel}当前进度 ${currentProcessed}/${currentTotal}，还有 ${currentMissing} 条需要补齐。${invalidText}建议：${sourceCollectionStageRecoveryActionLabel(projection.stageId, lang)}。`;
-    }
-    return `${currentProcessed}/${currentTotal} current inputs processed; ${currentMissing} still need work${currentInvalid > 0 ? `; ${currentInvalid} invalid IDs` : ""}.`;
-  }
-  if (closure?.userStatus === "failed" && projection.stageId === "extraction" && lang === "zh") {
-    if (excluded > 0 && artifact <= 0) {
-      return `本轮没有生成候选资料；已移出 ${excluded} 条无有效内容来源，避免后续重复处理。建议：继续搜索新资料。`;
-    }
-    const message = closure.message || "Agent 已回写，但没有生成候选资料。";
-    const retryInstruction = closure.retryInstruction || closure.nextAction || "请使用完整 recordId 重试。";
-    return `${message}建议：${retryInstruction}`;
-  }
-  if (closure?.message) {
-    const retryInstruction = closure.retryInstruction || closure.nextAction || "";
-    if (lang === "zh") {
-      return closure.userStatus === "success" || !retryInstruction
-        ? closure.message
-        : `${closure.message}建议：${retryInstruction}`;
-    }
-    return closure.userStatus === "success" || !retryInstruction
-      ? closure.message
-      : `${closure.message} Next: ${retryInstruction}`;
-  }
-  const coverage = projection.latestTask?.coverageSummary;
-  const total = typeof coverage?.total === "number" ? coverage.total : 0;
-  const processed = typeof coverage?.processed === "number" ? coverage.processed : 0;
-  const missing = typeof coverage?.missing === "number" ? coverage.missing : 0;
-  const invalid = typeof coverage?.invalid === "number" ? coverage.invalid : 0;
-  if (coverage?.applicable && coverage.complete === false && total > 0) {
-    if (lang === "zh") {
-      const invalidText = invalid > 0
-        ? (coverage.coverageKind === "record_extractions"
-          ? `Agent 返回的 recordId 没有匹配到本轮资料 ${invalid} 条。`
-          : `Agent 返回的候选 ID 没有匹配到本轮资料 ${invalid} 条。`)
-        : "";
-      const recordIdHint = coverage.coverageKind === "record_extractions" ? "请使用完整 recordId 重试。" : "";
-      return `${objectLabel}处理进度 ${processed}/${total}，还有 ${missing} 条需要补齐。${invalidText}建议：${sourceCollectionStageRecoveryActionLabel(projection.stageId, lang)}。${recordIdHint}`;
-    }
-    return `${processed}/${total} processed; ${missing} still need work${invalid > 0 ? `; ${invalid} writeback IDs did not match this run` : ""}.`;
-  }
-  if (projection.status === "agent_done_artifact_pending") {
-    if (lang === "zh") {
-      if (projection.stageId === "extraction" && excluded > 0) {
-        return `Agent 已回写，本轮已移出 ${excluded} 条无有效内容来源；还没有生成可用候选资料。建议：继续搜索或补充新来源。`;
-      }
-      return `已收到 Agent 结果，但还没有生成可用${objectLabel}。建议：${sourceCollectionStageRecoveryActionLabel(projection.stageId, lang)}。`;
-    }
-    return `Agent returned a result, but usable ${objectLabel} has not been generated yet.`;
-  }
-  if (projection.status === "artifact_ready_agent_blocked") {
-    return lang === "zh"
-      ? `${objectLabel}已经可用，但最近一次 Agent 任务受阻；可以先查看结果，再决定是否重试。`
-      : `${objectLabel} is available, but the latest Agent task is blocked.`;
-  }
-  if (projection.status === "agent_blocked") {
-    return lang === "zh"
-      ? `最近一次 Agent 任务没有完成。建议进入 Agent 私聊查看原因，或重新启动本阶段。`
-      : "The latest Agent task did not complete. Open the Agent chat or restart this stage.";
-  }
-  const firstReason = sourceCollectionStageBlockingReasonsLabel(projection.blockingReasons, lang)[0];
-  if (firstReason) {
-    return firstReason;
-  }
-  return sourceCollectionStageArtifactSummaryLabel(projection, lang);
-}
-
-function sourceCollectionCandidateEmptyStateText(input: {
-  lang: "zh" | "en";
-  loading: boolean;
-  awaitingRefresh: boolean;
-  displayedCandidateCount: number;
-  filteredCandidateCount: number;
-  rawRecordCount: number;
-  projection?: SourceCollectionStageCardProjection | null;
-}) {
-  if (input.loading) {
-    return input.lang === "zh" ? "正在加载资料提炼结果..." : "Loading extracted sources...";
-  }
-  if (input.awaitingRefresh) {
-    return input.lang === "zh"
-      ? `Agent 已生成 ${input.displayedCandidateCount} 条候选资料，列表正在同步；请刷新或稍候。`
-      : `Agent produced ${input.displayedCandidateCount} candidates; the list is syncing. Refresh or wait a moment.`;
-  }
-  if (input.displayedCandidateCount > 0) {
-    return input.lang === "zh" ? "当前过滤条件下没有候选资料。" : "No candidates match this filter.";
-  }
-  const projectionSummary = sourceCollectionStageUserSummary(input.projection, input.lang);
-  if (projectionSummary) {
-    return projectionSummary;
-  }
-  if (input.rawRecordCount > 0) {
-    return input.lang === "zh"
-      ? `已收到 ${input.rawRecordCount} 条原始资料，但本轮还没有生成候选资料。建议：继续补全提炼。`
-      : `${input.rawRecordCount} source records exist, but no candidate sources have been generated for this run yet.`;
-  }
-  return input.lang === "zh" ? "本轮还没有可提炼的资料。" : "No sources are ready for extraction in this run yet.";
 }
 
 type SourceCollectionStorageOpenTarget =
@@ -1308,8 +627,6 @@ type TeamWorkflowSourceCollectionSearchExecutionPayload = {
   };
   nextActions: string[];
 };
-
-type ResearchStageType = "knowledge_collection" | "experiment" | "iteration";
 
 type ResearchStageAgentRoleDefinition = {
   key: string;
@@ -1456,85 +773,6 @@ const KNOWLEDGE_EXPANSION_STAGE_AGENT_ROLES: Record<ResearchStageType, ResearchS
   ],
   experiment: [],
   iteration: [],
-};
-
-type ResearchStageRound = {
-  stageRoundId: string;
-  stageType: ResearchStageType;
-  roundNumber: number;
-  status: string;
-  title?: string;
-  topic: string;
-  goal: string;
-  sourceRunIds?: string[];
-  querySeeds?: string[];
-  promptCachePolicy?: TeamWorkflowSourceCollectionRunStartPayload["promptCachePolicy"];
-  sourceCollectionStageCards?: SourceCollectionStageCardProjection[];
-  sourceCollectionStageCardSummary?: {
-    stageCount?: number;
-    closedLoopCount?: number;
-    agentTaskCount?: number;
-    recordCount?: number;
-    rawRecordCount?: number;
-    excludedSourceCount?: number;
-    sourceCandidateCount?: number;
-    assessedSourceCandidateCount?: number;
-    approvedSourceCandidateCount?: number;
-    graphNodeCount?: number;
-    stewardPackCount?: number;
-    formalKnowledgeSyncCount?: number;
-  };
-  experimentPlanRef?: {
-    planId: string;
-    status: string;
-    storagePath: string;
-    updatedAt: string;
-  };
-  teamMemoryRecordId?: string;
-  coordinationContract?: {
-    linkedChatRoomId?: string;
-    autoStarted?: boolean;
-    expectedAction?: string;
-  };
-  warnings?: Array<{ code?: string; severity?: string; message?: string }>;
-};
-
-type ResearchStagePhaseStatus = {
-  stageType: ResearchStageType;
-  label: string;
-  status: string;
-  roundCount: number;
-  activeRoundId: string;
-  latestRound?: ResearchStageRound | null;
-  primaryAction: string;
-  secondaryAction: string;
-  canStart: boolean;
-  canContinue: boolean;
-  canNewRound: boolean;
-  requiresUserDecision: boolean;
-  readiness?: {
-    ready?: boolean;
-    reason?: string;
-  };
-};
-
-type ResearchStageRoundStatusPayload = {
-  schemaVersion: number;
-  teamId: string;
-  status: string;
-  currentStage: string;
-  phases: ResearchStagePhaseStatus[];
-  activeRounds: ResearchStageRound[];
-  latestRound?: ResearchStageRound | null;
-  roundCount: number;
-  boundaries: {
-    externalSearchTriggered: boolean;
-    writesFormalKnowledge: boolean;
-    writesRag: boolean;
-    writesOfficialGraph: boolean;
-    autoTransitionsNextStage: boolean;
-    stageRecordsOnly: boolean;
-  };
 };
 
 type SourceCollectionSummaryPayload = {
@@ -2104,138 +1342,6 @@ type ResearchLoopDecisionDraft = {
   nextActions: string;
 };
 
-type TeamWorkflowOfficialModelEvidenceCoverage = {
-  taskType: string;
-  workflowNode: string;
-  label: string;
-  status: "covered" | "missing" | string;
-  evidenceCount: number;
-  providers: Record<string, number>;
-  latestEvidenceId: string;
-};
-
-type TeamWorkflowOfficialModelEvidenceStatus = {
-  schemaVersion: number;
-  teamId: string;
-  workflowId: string;
-  workflowKind: string;
-  status: "empty" | "needs_evidence" | "ready" | string;
-  summary: {
-    evidenceCount: number;
-    storedEvidenceCount: number;
-    candidateOutputEvidenceCount: number;
-    requiredNodeCount: number;
-    coveredNodeCount: number;
-    missingNodeCount: number;
-    qwenEvidenceCount: number;
-    bailianEvidenceCount: number;
-    localEvidenceCount: number;
-    linkedCandidateCount: number;
-    linkedStageRoundCount: number;
-    actionItemCount: number;
-  };
-  coverage: TeamWorkflowOfficialModelEvidenceCoverage[];
-  providerCounts: Record<string, number>;
-  evidenceKindCounts: Record<string, number>;
-  recentEvidence: Array<{
-    evidenceId: string;
-    taskType: string;
-    workflowNode: string;
-    candidateId: string;
-    modelProvider: string;
-    modelId: string;
-    evidenceKind: string;
-    status: string;
-    createdAt: string;
-  }>;
-  actionItems: Array<{
-    code: string;
-    severity: string;
-    message: string;
-    nextAction: string;
-    workflowNode: string;
-    taskType: string;
-  }>;
-  officialBoundary: {
-    candidateOnly: boolean;
-    writesFormalKnowledge: boolean;
-    writesRag: boolean;
-    writesOfficialGraph: boolean;
-    requiresStewardApproval: boolean;
-    boundary: string;
-  };
-  storage: {
-    workflowPath: string;
-    candidateStorePath: string;
-    evidenceStorePath: string;
-  };
-  updatedAt: string;
-};
-
-type TeamWorkflowPaperNoteChunkStatus = {
-  schemaVersion: number;
-  teamId: string;
-  workflowId: string;
-  workflowKind: string;
-  status: "empty" | "needs_plan" | "in_progress" | "ready" | string;
-  summary: {
-    sourceCandidateCount: number;
-    readySourceCandidateCount: number;
-    plannedSourceCandidateCount: number;
-    missingPlanSourceCandidateCount: number;
-    planCount: number;
-    chunkCount: number;
-    draftedChunkCount: number;
-    needsRevisionChunkCount: number;
-    openChunkCount: number;
-    actionItemCount: number;
-  };
-  plans: Array<{
-    planId: string;
-    status: string;
-    sourceCandidateId: string;
-    sourceTitle: string;
-    chunkCount: number;
-    draftedChunkCount: number;
-    needsRevisionChunkCount: number;
-    openChunkCount: number;
-    pageScope: string;
-    chunks: Array<{
-      chunkId: string;
-      chunkIndex: number;
-      status: string;
-      pageScope: string;
-      excerptChars: number;
-      paperNoteCandidateId: string;
-      taskId: string;
-    }>;
-    createdAt: string;
-    updatedAt: string;
-  }>;
-  missingPlanSources: Array<{
-    candidateId: string;
-    title: string;
-    pageScope: string;
-  }>;
-  actionItems: Array<{
-    code: string;
-    severity: string;
-    message: string;
-    nextAction: string;
-    candidateId: string;
-  }>;
-  officialBoundary: {
-    writesFormalKnowledge: boolean;
-    writesRag: boolean;
-    writesOfficialGraph: boolean;
-    candidateOnly: boolean;
-  };
-  storage: {
-    candidateStorePath: string;
-  };
-  updatedAt: string;
-};
-
 type TeamWorkflowPaperNoteChunkPlanPayload = {
   candidate: TeamWorkflowCandidate;
   chunkPlan: {
@@ -2245,71 +1351,6 @@ type TeamWorkflowPaperNoteChunkPlanPayload = {
   };
   workflow: TeamWorkflowOrchestration;
   nextActions: string[];
-};
-
-type TeamWorkflowSourceQualityStatus = {
-  schemaVersion: number;
-  teamId: string;
-  workflowId: string;
-  workflowKind: string;
-  status: "empty" | "needs_screening" | "in_progress" | "ready" | "blocked" | string;
-  summary: {
-    sourceCandidateCount: number;
-    assessedSourceCandidateCount: number;
-    approvedSourceCandidateCount: number;
-    needsRevisionSourceCandidateCount: number;
-    rejectedSourceCandidateCount: number;
-    unassessedSourceCandidateCount: number;
-    extractionReadySourceCandidateCount: number;
-    actionItemCount: number;
-  };
-  candidates: Array<{
-    candidateId: string;
-    title: string;
-    sourceKind: string;
-    currentState: string;
-    qualityStatus: string;
-    bucket: string;
-    decision: string;
-    overallScore: number;
-    scores: {
-      relevance: number;
-      reliability: number;
-      accessibility: number;
-      extractionReadiness: number;
-    };
-    hasReadyExtraction: boolean;
-    requiredFixes: string[];
-    riskFlags: string[];
-    updatedAt: string;
-    assessedAt: string;
-  }>;
-  actionItems: Array<{
-    code: string;
-    severity: string;
-    message: string;
-    nextAction: string;
-    candidateId: string;
-  }>;
-  screeningContract: {
-    agentRole: string;
-    targetCandidateType: string;
-    decisions: string[];
-    writesCandidateStore: boolean;
-    writesFormalKnowledge: boolean;
-    writesRag: boolean;
-    writesOfficialGraph: boolean;
-  };
-  officialBoundary: {
-    writesFormalKnowledge: boolean;
-    writesRag: boolean;
-    writesOfficialGraph: boolean;
-    candidateOnly: boolean;
-  };
-  storage: {
-    candidateStorePath: string;
-  };
-  updatedAt: string;
 };
 
 type TeamWorkflowSourceQualityAssessmentPayload = {
@@ -2435,67 +1476,6 @@ function compactSourceCollectionQuerySeeds(topic: string, querySeeds: string) {
   return seeds.slice(0, 12);
 }
 
-function sourceCollectionRunsForTeam(payload: DataProcessingRunListPayload | undefined, teamId: string) {
-  return (payload?.runs ?? []).filter(
-    (run) =>
-      run.metadata?.startedFrom === "team_workflow_source_collection"
-      && run.metadata?.teamId === teamId,
-  );
-}
-
-export function sourceCollectionStableCountText(input: {
-  loading: boolean;
-  value: number;
-  lang: "zh" | "en";
-  zhUnit?: string;
-  enUnit?: string;
-  loadingText: string;
-  syncingText: string;
-}) {
-  const value = Number.isFinite(input.value) ? Math.max(0, Math.floor(input.value)) : 0;
-  const countText = input.lang === "zh"
-    ? [String(value), input.zhUnit].filter(Boolean).join(" ")
-    : input.enUnit ? `${value} ${input.enUnit}` : String(value);
-  if (!input.loading) {
-    return countText;
-  }
-  return value > 0 ? `${countText} · ${input.syncingText}` : input.loadingText;
-}
-
-function sourceCollectionRunLabel(runId: string) {
-  return runId ? `${runId.slice(0, 10)}...` : "-";
-}
-
-function translateResearchPhrase(value: string | undefined | null, lang: "zh" | "en") {
-  const text = String(value || "").trim();
-  if (!text || lang !== "zh") {
-    return text;
-  }
-  const normalized = text.toLowerCase();
-  const zh: Record<string, string> = {
-    "neural algorithm source batch": "神经算法资料搜索批次",
-    "neural predictive coding": "神经预测编码",
-    "predictive coding cortical hierarchy": "预测编码皮层层级",
-    "synaptic plasticity learning rule": "突触可塑性学习规则",
-    "neural gating attention mechanism": "神经门控注意机制",
-    "collect traceable neuroscience sources that can support neural-network algorithm hypotheses.": "搜集可追踪的神经科学资料，用来支撑神经网络算法假设。",
-  };
-  return zh[normalized] ?? text;
-}
-
-function sourceCollectionRunTitleLabel(title: string | undefined | null, lang: "zh" | "en") {
-  return translateResearchPhrase(title, lang) || (lang === "zh" ? "资料搜索批次" : "Source collection run");
-}
-
-function sourceCollectionRunOptionLabel(run: DataProcessingRunListPayload["runs"][number], lang: "zh" | "en") {
-  const recordCount = sourceCollectionRunRecordCount(run);
-  const candidateCount = sourceCollectionRunCandidateMetric(run);
-  const title = sourceCollectionRunTitleLabel(run.title, lang);
-  return lang === "zh"
-    ? `${sourceCollectionRunLabel(run.runId)} · ${title} · ${recordCount} 条资料 / ${candidateCount} 候选`
-    : `${sourceCollectionRunLabel(run.runId)} · ${title} · ${recordCount} records / ${candidateCount} candidates`;
-}
-
 function sourceCollectionStatusLabel(value: string | undefined | null, lang: "zh" | "en") {
   const normalized = String(value || "").trim().toLowerCase();
   const zh: Record<string, string> = {
@@ -2562,195 +1542,6 @@ function sourceCollectionAgentRoleLabel(value: string | undefined | null, lang: 
   return zh[normalized] ?? normalized;
 }
 
-function sourceCollectionSourceTypeLabel(value: string | undefined | null, lang: "zh" | "en") {
-  const normalized = String(value || "").trim().toLowerCase();
-  const zh: Record<string, string> = {
-    dataset: "数据集",
-    file: "本地文件",
-    manual: "手工记录",
-    note: "笔记",
-    paper: "论文",
-    review: "综述",
-    url: "网页",
-  };
-  const en: Record<string, string> = {
-    dataset: "dataset",
-    file: "file",
-    manual: "manual",
-    note: "note",
-    paper: "paper",
-    review: "review",
-    url: "url",
-  };
-  return (lang === "zh" ? zh : en)[normalized] ?? (value || "-");
-}
-
-function sourceCollectionSourceFilterLabel(value: SourceCollectionSourceFilter, lang: "zh" | "en") {
-  const zh: Record<SourceCollectionSourceFilter, string> = {
-    all: "全部",
-    dataset: "数据集",
-    local_file: "本地文件",
-    missing: "缺少来源",
-    paper_web: "论文网页/DOI",
-    pdf: "PDF",
-  };
-  const en: Record<SourceCollectionSourceFilter, string> = {
-    all: "All",
-    dataset: "Datasets",
-    local_file: "Local files",
-    missing: "Missing source",
-    paper_web: "Paper page/DOI",
-    pdf: "PDF",
-  };
-  return (lang === "zh" ? zh : en)[value];
-}
-
-function sourceCollectionLooksLikePdf(...values: Array<string | undefined | null>) {
-  return values.some((value) => {
-    const text = String(value || "").trim().toLowerCase();
-    return Boolean(text) && (/\.pdf(?:$|[?#\s])/i.test(text) || text.endsWith(".pdf") || text.includes("application/pdf"));
-  });
-}
-
-function sourceCollectionSourceCategoryFromProvenance(
-  sourceType: string | undefined | null,
-  provenance: SourceCollectionCandidateProvenance,
-  ...extraRefs: Array<string | undefined | null>
-): SourceCollectionSourceFilter {
-  const normalizedSourceType = String(sourceType || "").trim().toLowerCase();
-  const refText = [provenance.value, ...extraRefs].join(" ").toLowerCase();
-  if (provenance.kind === "missing" || provenance.kind === "search_evidence") {
-    return "missing";
-  }
-  if (normalizedSourceType.includes("dataset")) {
-    return "dataset";
-  }
-  if (normalizedSourceType.includes("pdf") || sourceCollectionLooksLikePdf(provenance.value, ...extraRefs)) {
-    return "pdf";
-  }
-  if (provenance.kind === "file" || ["file", "manual", "note"].includes(normalizedSourceType)) {
-    return "local_file";
-  }
-  if (
-    provenance.kind === "doi"
-    || provenance.kind === "url"
-    || ["paper", "review", "url", "journal-article", "proceedings-article"].some((type) => normalizedSourceType.includes(type))
-    || /\bdoi\b|doi\.org|\/abs\/|\/pdf\//i.test(refText)
-  ) {
-    return "paper_web";
-  }
-  return "missing";
-}
-
-function sourceCollectionFilterMatches(activeFilter: SourceCollectionSourceFilter, itemFilter: SourceCollectionSourceFilter) {
-  return activeFilter === "all" || activeFilter === itemFilter;
-}
-
-function sourceCollectionFilterCounts(kinds: SourceCollectionSourceFilter[]) {
-  const counts = SOURCE_COLLECTION_SOURCE_FILTERS.reduce((current, filter) => {
-    current[filter] = 0;
-    return current;
-  }, {} as Record<SourceCollectionSourceFilter, number>);
-  counts.all = kinds.length;
-  kinds.forEach((kind) => {
-    counts[kind] += 1;
-  });
-  return counts;
-}
-
-function metadataString(metadata: Record<string, unknown>, key: string) {
-  const value = metadata[key];
-  return typeof value === "string" ? value.trim() : "";
-}
-
-function evidenceLedgerArray(value: unknown): unknown[] {
-  return Array.isArray(value) ? value : [];
-}
-
-function evidenceLedgerText(value: unknown) {
-  if (typeof value === "string" || typeof value === "number") {
-    return String(value).trim();
-  }
-  if (!isRecord(value)) {
-    return "";
-  }
-  const primary = [
-    value.claim,
-    value.finding,
-    value.citation,
-    value.text,
-    value.title,
-    value.label,
-    value.id,
-  ]
-    .map((item) => (typeof item === "string" || typeof item === "number" ? String(item).trim() : ""))
-    .find(Boolean);
-  const anchors = [
-    typeof value.sourceRef === "string" ? value.sourceRef.trim() : "",
-    typeof value.page === "string" || typeof value.page === "number" ? `p.${String(value.page).trim()}` : "",
-    typeof value.evidenceRef === "string" ? value.evidenceRef.trim() : "",
-  ].filter(Boolean);
-  return [primary, anchors.length ? anchors.join(" · ") : ""].filter(Boolean).join(" · ");
-}
-
-function evidenceLedgerTextList(value: unknown): string[] {
-  return evidenceLedgerArray(value)
-    .map((item) => evidenceLedgerText(item))
-    .filter(Boolean)
-    .slice(0, 12);
-}
-
-function sourceCollectionEvidenceLedgerSummary(candidate: TeamWorkflowCandidate): SourceCollectionEvidenceLedgerSummary | null {
-  const metadata = isRecord(candidate.metadata) ? candidate.metadata : {};
-  const extraction = isRecord(metadata.contentExtraction) ? metadata.contentExtraction : {};
-  const ledger = isRecord(extraction.evidenceLedger) ? extraction.evidenceLedger : null;
-  if (!ledger) {
-    return null;
-  }
-  const claims = evidenceLedgerArray(ledger.claims);
-  const keyFindings = evidenceLedgerArray(ledger.keyFindings);
-  const citations = evidenceLedgerArray(ledger.citations);
-  const sourceRefs = evidenceLedgerArray(ledger.sourceRefs);
-  const evidenceRefs = evidenceLedgerArray(ledger.evidenceRefs);
-  const status = String(ledger.status || extraction.evidenceStatus || "").trim() || "evidence_ready";
-  return {
-    status,
-    missingAnchor: status === "missing_evidence_anchor",
-    sourceRefCount: sourceRefs.length,
-    evidenceRefCount: evidenceRefs.length,
-    claimCount: claims.length,
-    keyFindingCount: keyFindings.length,
-    citationCount: citations.length,
-    limitations: evidenceLedgerTextList(ledger.limitations),
-    uncertainty: evidenceLedgerTextList(ledger.uncertainty),
-    riskFlags: evidenceLedgerTextList(ledger.riskFlags),
-    supportLevel: typeof ledger.supportLevel === "string" ? ledger.supportLevel.trim() : "",
-    nextAction: typeof ledger.nextAction === "string" ? ledger.nextAction.trim() : "",
-    claims,
-    keyFindings,
-    citations,
-    sourceRefs,
-    evidenceRefs,
-  };
-}
-
-function sourceCollectionEvidenceLedgerCardLabel(summary: SourceCollectionEvidenceLedgerSummary, lang: "zh" | "en") {
-  const contentCount = summary.claimCount + summary.keyFindingCount + summary.citationCount;
-  const countLabel = lang === "zh" ? `${contentCount} 条` : `${contentCount} items`;
-  return `Evidence Ledger ${summary.status} · ${countLabel}`;
-}
-
-function sourceCollectionEvidenceLedgerActionLabel(summary: SourceCollectionEvidenceLedgerSummary, lang: "zh" | "en") {
-  if (summary.missingAnchor) {
-    return lang === "zh" ? "补证据锚点" : "add evidence anchor";
-  }
-  return lang === "zh" ? "证据可用" : "evidence ready";
-}
-
-function sourceCollectionEvidenceLedgerTone(summary: SourceCollectionEvidenceLedgerSummary): TeamSourceResultTone {
-  return summary.missingAnchor ? "warning" : "ready";
-}
-
 function sourceCollectionEvidenceLedgerDetailItems(
   summary: SourceCollectionEvidenceLedgerSummary,
   lang: "zh" | "en",
@@ -2814,287 +1605,6 @@ function sourceCollectionEvidenceLedgerDetailItems(
     });
   }
   return items;
-}
-
-function normalizedDoi(value: string | undefined | null) {
-  const text = String(value || "").trim();
-  if (!text) {
-    return "";
-  }
-  const doiUrl = text.match(/^https?:\/\/(?:dx\.)?doi\.org\/(.+)$/i);
-  const candidate = doiUrl ? doiUrl[1] : text.replace(/^doi:\s*/i, "");
-  const match = candidate.match(/10\.\d{4,9}\/[^\s"'<>]+/i);
-  return match ? match[0].replace(/[).,;]+$/, "") : "";
-}
-
-function compactSourceUrl(value: string) {
-  try {
-    const url = new URL(value);
-    const pathname = url.pathname.length > 42 ? `${url.pathname.slice(0, 39)}...` : url.pathname;
-    return `${url.hostname}${pathname}`;
-  } catch {
-    return value;
-  }
-}
-
-function sourceCollectionIsMachineEvidenceUrl(value: string) {
-  if (!/^https?:\/\//i.test(value)) {
-    return false;
-  }
-  try {
-    const url = new URL(value);
-    const hostname = url.hostname.toLowerCase();
-    const pathname = url.pathname.toLowerCase();
-    return (
-      hostname === "api.crossref.org"
-      || hostname === "api.openalex.org"
-      || hostname === "api.semanticscholar.org"
-      || hostname === "api.unpaywall.org"
-      || hostname === "export.arxiv.org"
-      || pathname.startsWith("/api/")
-    );
-  } catch {
-    return false;
-  }
-}
-
-function sourceCollectionCandidateProvenance(
-  candidate: TeamWorkflowCandidate,
-  lang: "zh" | "en",
-): SourceCollectionCandidateProvenance {
-  const sourceCandidate = candidate as SourceCollectionCandidateWithSource;
-  const metadata = isRecord(candidate.metadata) ? candidate.metadata : {};
-  const sourceUrl =
-    String(sourceCandidate.sourceUrl || "").trim()
-    || metadataString(metadata, "sourceUrl")
-    || metadataString(metadata, "sourceRef")
-    || metadataString(metadata, "url");
-  const sourcePath =
-    String(sourceCandidate.sourcePath || "").trim()
-    || metadataString(metadata, "sourcePath")
-    || metadataString(metadata, "path");
-  const doi =
-    normalizedDoi(metadataString(metadata, "doi"))
-    || normalizedDoi(sourceCandidate.sourceRef)
-    || normalizedDoi(sourceUrl);
-
-  if (doi) {
-    return {
-      kind: "doi",
-      label: "DOI",
-      value: doi,
-      href: `https://doi.org/${doi}`,
-    };
-  }
-
-  if (/^https?:\/\//i.test(sourceUrl) && sourceCollectionIsMachineEvidenceUrl(sourceUrl)) {
-    return {
-      kind: "search_evidence",
-      label: lang === "zh" ? "仅搜索记录" : "Search evidence only",
-      value: compactSourceUrl(sourceUrl),
-      href: "",
-    };
-  }
-
-  if (/^https?:\/\//i.test(sourceUrl)) {
-    return {
-      kind: "url",
-      label: lang === "zh" ? "网页链接" : "Web link",
-      value: compactSourceUrl(sourceUrl),
-      href: sourceUrl,
-    };
-  }
-
-  if (sourcePath) {
-    return {
-      kind: "file",
-      label: lang === "zh" ? "本地文件" : "Local file",
-      value: sourcePath,
-      href: "",
-    };
-  }
-
-  if (sourceUrl) {
-    return {
-      kind: "ref",
-      label: lang === "zh" ? "来源标识" : "Source ref",
-      value: sourceUrl,
-      href: "",
-    };
-  }
-
-  return {
-    kind: "missing",
-    label: lang === "zh" ? "缺少来源" : "Missing source",
-    value: lang === "zh" ? "没有 sourceUrl/sourcePath/DOI" : "No sourceUrl/sourcePath/DOI",
-    href: "",
-  };
-}
-
-function sourceCollectionRecordProvenance(
-  record: DataProcessingRecord,
-  lang: "zh" | "en",
-): SourceCollectionCandidateProvenance {
-  const metadata = isRecord(record.metadata) ? record.metadata : {};
-  const sourceRef =
-    String(record.sourceRef || "").trim()
-    || metadataString(metadata, "sourceRef")
-    || metadataString(metadata, "sourceUrl")
-    || metadataString(metadata, "url");
-  const rawLocation =
-    String(record.rawLocation || "").trim()
-    || metadataString(metadata, "rawLocation")
-    || metadataString(metadata, "sourcePath")
-    || metadataString(metadata, "path");
-  const doi =
-    normalizedDoi(metadataString(metadata, "doi"))
-    || normalizedDoi(sourceRef)
-    || normalizedDoi(rawLocation);
-
-  if (doi) {
-    return {
-      kind: "doi",
-      label: "DOI",
-      value: doi,
-      href: `https://doi.org/${doi}`,
-    };
-  }
-
-  if (/^https?:\/\//i.test(sourceRef) && !sourceCollectionIsMachineEvidenceUrl(sourceRef)) {
-    return {
-      kind: "url",
-      label: lang === "zh" ? "网页链接" : "Web link",
-      value: compactSourceUrl(sourceRef),
-      href: sourceRef,
-    };
-  }
-
-  if (/^https?:\/\//i.test(rawLocation) && !sourceCollectionIsMachineEvidenceUrl(rawLocation)) {
-    return {
-      kind: "url",
-      label: lang === "zh" ? "网页链接" : "Web link",
-      value: compactSourceUrl(rawLocation),
-      href: rawLocation,
-    };
-  }
-
-  if (/^https?:\/\//i.test(sourceRef) || /^https?:\/\//i.test(rawLocation)) {
-    const evidenceUrl = /^https?:\/\//i.test(sourceRef) ? sourceRef : rawLocation;
-    return {
-      kind: "search_evidence",
-      label: lang === "zh" ? "搜索证据" : "Search evidence",
-      value: compactSourceUrl(evidenceUrl),
-      href: "",
-    };
-  }
-
-  if (rawLocation) {
-    return {
-      kind: "file",
-      label: lang === "zh" ? "本地文件" : "Local file",
-      value: rawLocation,
-      href: "",
-    };
-  }
-
-  if (sourceRef) {
-    return {
-      kind: "ref",
-      label: lang === "zh" ? "来源标识" : "Source ref",
-      value: sourceRef,
-      href: "",
-    };
-  }
-
-  return {
-    kind: "missing",
-    label: lang === "zh" ? "缺少来源" : "Missing source",
-    value: lang === "zh" ? "没有 DOI、链接或本地文件" : "No DOI, URL, or local file",
-    href: "",
-  };
-}
-
-function sourceCollectionRecordSourceCategory(record: DataProcessingRecord, lang: "zh" | "en") {
-  const metadata = isRecord(record.metadata) ? record.metadata : {};
-  const provenance = sourceCollectionRecordProvenance(record, lang);
-  return sourceCollectionSourceCategoryFromProvenance(
-    record.sourceType,
-    provenance,
-    record.sourceRef,
-    record.rawLocation,
-    metadataString(metadata, "sourceType"),
-    metadataString(metadata, "contentType"),
-  );
-}
-
-function sourceCollectionCandidateSourceCategory(candidate: TeamWorkflowCandidate, lang: "zh" | "en") {
-  const metadata = isRecord(candidate.metadata) ? candidate.metadata : {};
-  const sourceCandidate = candidate as SourceCollectionCandidateWithSource;
-  const normalizedCategory = metadataString(metadata, "sourceCategory") as SourceCollectionSourceFilter;
-  if (SOURCE_COLLECTION_SOURCE_FILTERS.includes(normalizedCategory)) {
-    return normalizedCategory;
-  }
-  const provenance = sourceCollectionCandidateProvenance(candidate, lang);
-  return sourceCollectionSourceCategoryFromProvenance(
-    sourceCandidate.sourceKind || candidate.sourceKind || metadataString(metadata, "sourceType") || candidate.candidateType,
-    provenance,
-    sourceCandidate.sourceRef,
-    sourceCandidate.sourceUrl,
-    sourceCandidate.sourcePath,
-    metadataString(metadata, "contentType"),
-  );
-}
-
-function sourceCollectionCandidateOpenLabel(provenance: SourceCollectionCandidateProvenance, lang: "zh" | "en") {
-  if (provenance.kind === "doi") {
-    return lang === "zh" ? "打开论文 DOI" : "Open DOI";
-  }
-  if (provenance.kind === "url") {
-    return lang === "zh" ? "打开网页来源" : "Open source page";
-  }
-  if (provenance.kind === "file") {
-    return lang === "zh" ? "打开本地文件" : "Open local file";
-  }
-  if (provenance.kind === "search_evidence") {
-    return lang === "zh" ? "查看搜索证据" : "View search evidence";
-  }
-  if (provenance.kind === "missing") {
-    return lang === "zh" ? "缺少来源" : "Missing source";
-  }
-  return lang === "zh" ? "查看来源标识" : "View source ref";
-}
-
-function sourceCollectionCandidateEvidenceRefs(candidate: TeamWorkflowCandidate) {
-  const refs = (candidate as TeamWorkflowCandidate & { evidenceRefs?: unknown }).evidenceRefs;
-  return Array.isArray(refs) ? refs.filter(isRecord) : [];
-}
-
-function sourceCollectionCandidateTrace(candidate: TeamWorkflowCandidate): SourceCollectionCandidateTrace {
-  const sourceCandidate = candidate as SourceCollectionCandidateWithSource;
-  const metadata = isRecord(candidate.metadata) ? candidate.metadata : {};
-  const recordMetadata = isRecord(metadata.dataProcessingRecordMetadata) ? metadata.dataProcessingRecordMetadata : {};
-  const sourceTraceFromRecord = isRecord(recordMetadata.sourceCollectionTrace) ? recordMetadata.sourceCollectionTrace : {};
-  const sourceTrace = Object.keys(sourceTraceFromRecord).length
-    ? sourceTraceFromRecord
-    : isRecord(metadata.sourceCollectionTrace)
-      ? metadata.sourceCollectionTrace
-      : {};
-  const importedRecord = isRecord(metadata.importedFromDataRecord) ? metadata.importedFromDataRecord : {};
-  const collectionTrace = isRecord(metadata.dataProcessingCollectionTrace) ? metadata.dataProcessingCollectionTrace : {};
-  const evidenceRefs = sourceCollectionCandidateEvidenceRefs(candidate);
-  const dataRecordRef = evidenceRefs.find((ref) => String(ref.type || "") === "data_record");
-  const runRef = evidenceRefs.find((ref) => String(ref.type || "") === "data_processing_run");
-  return {
-    assignmentId: String(metadata.assignmentId || sourceTrace.assignmentId || collectionTrace.assignmentId || ""),
-    query: String(metadata.query || sourceTrace.query || ""),
-    queryId: String(metadata.queryId || sourceTrace.queryId || ""),
-    rawLocation: String(importedRecord.rawLocation || sourceTrace.rawLocation || sourceCandidate.sourcePath || ""),
-    recordId: String(metadata.sourceRecordId || importedRecord.recordId || dataRecordRef?.id || ""),
-    runId: String(metadata.sourceRunId || sourceTrace.runId || importedRecord.runId || runRef?.id || ""),
-    searchProvider: String(metadata.searchProvider || sourceTrace.searchProvider || recordMetadata.searchProvider || ""),
-    searchUrl: String(metadata.searchUrl || sourceTrace.searchUrl || recordMetadata.searchUrl || ""),
-    sourceRef: String(metadata.sourceRef || importedRecord.sourceRef || sourceCandidate.sourceRef || sourceCandidate.sourceUrl || metadataString(metadata, "sourceRef")),
-  };
 }
 
 function sourceCollectionLanguageLabel(value: string | undefined | null, lang: "zh" | "en") {
@@ -3749,337 +2259,6 @@ function sourceCollectionRunRefetchInterval(pageVisible: boolean, status: string
     pageVisible,
     normalized === "collecting" || normalized === "processing" ? 1500 : false,
   );
-}
-
-function sourceCollectionStageCardsFromStatus(status: ResearchStageRoundStatusPayload | SourceCollectionSummaryPayload | null | undefined) {
-  if (status && "stageCards" in status) {
-    return status.stageCards ?? [];
-  }
-  if (!status || !("phases" in status)) {
-    return [];
-  }
-  const knowledgePhase = (status?.phases ?? []).find((phase) => phase.stageType === "knowledge_collection");
-  const rounds = [
-    knowledgePhase?.latestRound ?? null,
-    status?.latestRound ?? null,
-    ...(status?.activeRounds ?? []),
-  ].filter((round): round is ResearchStageRound => Boolean(round && round.stageType === "knowledge_collection"));
-  const seen = new Set<string>();
-  return rounds.flatMap((round) => {
-    const key = round.stageRoundId || `${round.stageType}-${round.roundNumber}`;
-    if (seen.has(key)) {
-      return [];
-    }
-    seen.add(key);
-    return round.sourceCollectionStageCards ?? [];
-  });
-}
-
-function sourceCollectionStageWritebackObservedTaskIds(cards: SourceCollectionStageCardProjection[]) {
-  const taskIds = new Set<string>();
-  cards.forEach((card) => {
-    const taskId = String(card.latestTask?.taskId || "").trim();
-    if (taskId) {
-      taskIds.add(taskId);
-    }
-  });
-  return taskIds;
-}
-
-function sourceCollectionStageWritebackRefetchInterval(
-  pageVisible: boolean,
-  status: ResearchStageRoundStatusPayload | SourceCollectionSummaryPayload | null | undefined,
-  forceSync = false,
-  pendingTaskIds: readonly string[] = [],
-) {
-  const cards = sourceCollectionStageCardsFromStatus(status);
-  const observedTaskIds = sourceCollectionStageWritebackObservedTaskIds(cards);
-  const hasUnobservedPendingTask = pendingTaskIds.some((taskId) => taskId && !observedTaskIds.has(taskId));
-  const hasRunningAgentTask = cards.some((card) => {
-    const latestTaskStatus = String(card.latestTask?.status || "").toLowerCase();
-    const cardStatus = String(card.status || "").toLowerCase();
-    return cardStatus === "agent_running" || latestTaskStatus === "queued" || latestTaskStatus === "running";
-  });
-  const hasCompletedTaskAwaitingArtifact = cards.some((card) => {
-    const latestTaskStatus = String(card.latestTask?.status || "").toLowerCase();
-    return Boolean(card.latestTask?.taskId)
-      && latestTaskStatus === "completed"
-      && String(card.status || "").toLowerCase() === "agent_done_artifact_pending";
-  });
-  return resolvePollingInterval(
-    pageVisible,
-    hasRunningAgentTask || forceSync || hasUnobservedPendingTask ? 2000 : hasCompletedTaskAwaitingArtifact ? 5000 : false,
-  );
-}
-
-type SourceCollectionDisplayPhase =
-  | "done"
-  | "failed"
-  | "idle"
-  | "ingesting"
-  | "needs_continue"
-  | "needs_downstream"
-  | "needs_screening"
-  | "ready_for_experiment"
-  | "running"
-  | "screening"
-  | "starting"
-  | "waiting_for_writeback"
-  | "writing";
-
-type SourceCollectionDisplayInput = {
-  lang: "zh" | "en";
-  hasRun: boolean;
-  startPending: boolean;
-  searchPending: boolean;
-  backgroundActive: boolean;
-  recordOutputPending: boolean;
-  extractionPending: boolean;
-  sourceQualityPending: boolean;
-  graphPending: boolean;
-  knowledgeIngestionPending: boolean;
-  failed: boolean;
-  searchOpenAssignmentCount: number;
-  downstreamOpenAssignmentCount: number;
-  pendingScreeningCount: number;
-  rawRecordCount: number;
-  candidateCount: number;
-  activeWorkSummary?: string;
-};
-
-type SourceCollectionDisplayState = {
-  phase: SourceCollectionDisplayPhase;
-  active: boolean;
-  consoleState: SourceCollectionStepState;
-  searchStepState: SourceCollectionStepState;
-  statusText: string;
-  decisionText: string;
-};
-
-type SourceCollectionExcludedRecoveryInput = {
-  lang: "zh" | "en";
-  excludedCount: number;
-  missingCount: number;
-  importFailedCount: number;
-  importPendingRecordCount: number;
-};
-
-type SourceCollectionExcludedRecoveryState = {
-  blockedByExcludedSources: boolean;
-  excludedCount: number;
-  panelTitle: string;
-  panelAriaLabel: string;
-  statusLabel: string;
-  failedLabel: string;
-  recoverLabel: string;
-  tone: "danger" | "progressable";
-  summary: string;
-  recoverText: string;
-  primaryActionText: string;
-  primaryActionTitle: string;
-};
-
-export function deriveSourceCollectionExcludedRecoveryState(
-  input: SourceCollectionExcludedRecoveryInput,
-): SourceCollectionExcludedRecoveryState {
-  const excludedCount = sourceCollectionNonNegativeCount(input.excludedCount);
-  const remainingGapCount = Math.max(
-    sourceCollectionNonNegativeCount(input.missingCount),
-    sourceCollectionNonNegativeCount(input.importFailedCount),
-    sourceCollectionNonNegativeCount(input.importPendingRecordCount),
-  );
-  const blockedByExcludedSources = excludedCount > 0 && remainingGapCount > 0 && excludedCount >= remainingGapCount;
-  if (!blockedByExcludedSources) {
-    const zh = input.lang === "zh";
-    return {
-      blockedByExcludedSources: false,
-      excludedCount,
-      panelTitle: zh ? "提炼失败恢复" : "Extraction recovery",
-      panelAriaLabel: zh ? "资料提炼失败恢复工作台" : "Source extraction recovery panel",
-      statusLabel: "",
-      failedLabel: zh ? "提炼失败" : "failed extraction",
-      recoverLabel: zh ? "待补提炼" : "to recover",
-      tone: "danger",
-      summary: "",
-      recoverText: "",
-      primaryActionText: "",
-      primaryActionTitle: "",
-    };
-  }
-  const zh = input.lang === "zh";
-  return {
-    blockedByExcludedSources: true,
-    excludedCount,
-    panelTitle: zh ? "提炼排除项确认" : "Extraction exclusions review",
-    panelAriaLabel: zh ? "资料提炼排除项确认工作台" : "Source extraction exclusions review panel",
-    statusLabel: zh ? "可继续推进" : "Ready to continue",
-    failedLabel: zh ? "缺口处理" : "gap handling",
-    recoverLabel: zh ? "已排除" : "excluded",
-    tone: "progressable",
-    summary: zh
-      ? `剩余 ${remainingGapCount} 条资料已被排除，不会再次导入候选；可进入 Agent 私聊查看排除原因，或返回资料寻找补充新来源。`
-      : `${remainingGapCount} remaining sources are already excluded, so they will not be imported again. Open the Agent chat to inspect the reasons or search for new sources.`,
-    recoverText: zh ? `已排除 ${excludedCount}` : `${excludedCount} excluded`,
-    primaryActionText: zh ? "查看排除原因" : "Inspect exclusions",
-    primaryActionTitle: zh
-      ? "剩余资料已被排除，打开资料提炼 Agent 私聊查看原因"
-      : "Remaining sources are excluded; open the source extraction Agent chat to inspect why",
-  };
-}
-
-export function deriveSourceCollectionDisplayState(input: SourceCollectionDisplayInput): SourceCollectionDisplayState {
-  const lang = input.lang;
-  const materialCount = Math.max(0, input.rawRecordCount || 0, input.candidateCount || 0);
-  const zh = lang === "zh";
-  const runningSummary = input.activeWorkSummary?.trim();
-  const state = (
-    phase: SourceCollectionDisplayPhase,
-    consoleState: SourceCollectionStepState,
-    searchStepState: SourceCollectionStepState,
-    statusText: string,
-    decisionText: string,
-    active = false,
-  ): SourceCollectionDisplayState => ({ phase, active, consoleState, searchStepState, statusText, decisionText });
-
-  if (input.failed) {
-    return state(
-      "failed",
-      "failed",
-      "failed",
-      zh ? "处理失败" : "Failed",
-      zh ? "处理失败，先查看下方失败步骤，再重试当前按钮。" : "A step failed. Review the failed step below, then retry its action.",
-    );
-  }
-  if (input.searchPending || input.backgroundActive) {
-    return state(
-      "running",
-      "active",
-      "active",
-      zh ? "正在团队搜索" : "Team search running",
-      runningSummary || (zh ? "后台资料搜索正在运行，记录和候选会按批刷新。" : "Background source collection is running; records and candidates refresh in batches."),
-      true,
-    );
-  }
-  if (input.startPending) {
-    return state(
-      "starting",
-      "active",
-      "active",
-      zh ? "正在启动搜集" : "Starting collection",
-      zh ? "正在创建本轮查询计划、团队 Agent 分工和后台搜索任务。" : "Creating the query plan, team-agent assignments, and background search work.",
-      true,
-    );
-  }
-  if (input.recordOutputPending || input.extractionPending) {
-    return state(
-      "writing",
-      "active",
-      materialCount > 0 ? "done" : "active",
-      input.recordOutputPending ? (zh ? "正在写入候选" : "Writing candidates") : (zh ? "正在提炼资料" : "Extracting sources"),
-      zh ? "正在把资料记录提炼为候选资料。" : "Data records are being converted into candidate sources.",
-      true,
-    );
-  }
-  if (input.sourceQualityPending) {
-    return state(
-      "screening",
-      "active",
-      "done",
-      zh ? "正在筛选资料" : "Screening sources",
-      zh ? "资料提炼 Agent 正在复核候选资料。" : "The source extraction Agent is reviewing candidate sources.",
-      true,
-    );
-  }
-  if (input.graphPending || input.knowledgeIngestionPending) {
-    return state(
-      "ingesting",
-      "active",
-      "done",
-      input.graphPending ? (zh ? "正在生成入库关系图" : "Building ingestion map") : (zh ? "正在等待管理员审核" : "Waiting for admin review"),
-      zh ? "资料已通过搜集阶段，正在准备入库链路。" : "Source collection is ready; the ingestion path is being prepared.",
-      true,
-    );
-  }
-  if (!input.hasRun) {
-    return state(
-      "idle",
-      "idle",
-      "idle",
-      zh ? "未开始" : "Not started",
-      zh ? "点击开始搜集，生成本轮搜索任务和存储目录。" : "Start collection to create the search work and storage folder.",
-    );
-  }
-  if (input.searchOpenAssignmentCount > 0) {
-    return state(
-      "needs_continue",
-      "pending",
-      "pending",
-      materialCount > 0 ? (zh ? "已返回一批" : "Batch returned") : (zh ? "需补充资料" : "More sources needed"),
-      materialCount > 0
-        ? (zh
-          ? `已返回 ${materialCount} 条资料，还有 ${input.searchOpenAssignmentCount} 个搜索任务可继续。`
-          : `${materialCount} sources have returned; ${input.searchOpenAssignmentCount} search assignments can continue.`)
-        : (zh
-          ? `还有 ${input.searchOpenAssignmentCount} 个搜索任务未完成，点击搜索下一批推进。`
-          : `${input.searchOpenAssignmentCount} search assignments remain. Run the next search to proceed.`),
-    );
-  }
-  if (input.downstreamOpenAssignmentCount > 0) {
-    return state(
-      "needs_downstream",
-      "pending",
-      materialCount > 0 ? "done" : "pending",
-      zh ? "待提炼/审查" : "Extraction or review pending",
-      zh
-        ? `搜索已停止，还有 ${input.downstreamOpenAssignmentCount} 个后续任务等待提炼或筛选。`
-        : `Search is idle; ${input.downstreamOpenAssignmentCount} downstream tasks wait for extraction or screening.`,
-    );
-  }
-  if (input.pendingScreeningCount > 0) {
-    return state(
-      "needs_screening",
-      "pending",
-      materialCount > 0 ? "done" : "pending",
-      zh ? "待审查资料" : "Needs review",
-      zh ? "候选资料已到位，下一步执行资料提炼复核。" : "Candidate sources are ready. Run extraction review next.",
-    );
-  }
-  if (input.candidateCount > 0) {
-    return state(
-      "ready_for_experiment",
-      "done",
-      "done",
-      zh ? "可进入实验" : "Ready for experiment",
-      zh ? "资料链路已具备，可进入实验规划或继续补充资料。" : "The source chain is ready. Move to experiment planning or collect more.",
-    );
-  }
-  return state(
-    "waiting_for_writeback",
-    "pending",
-    materialCount > 0 ? "done" : "pending",
-    zh ? "待回写" : "Waiting for writeback",
-    zh ? "等待 Agent 回写搜集结果。" : "Waiting for agent writeback.",
-  );
-}
-
-export function sourceCollectionActiveWorkRunFromRuntime(
-  runtime: RuntimeSummary | null | undefined,
-  runId: string,
-): WorkRunSnapshot | null {
-  const activeItems = runtime?.workRuns?.activeItems?.source_collection_run ?? [];
-  const active = runtime?.workRuns?.active as unknown as Record<string, WorkRunSnapshot | null | undefined> | undefined;
-  const candidates = [
-    ...activeItems,
-    active?.source_collection_run,
-  ].filter((item): item is WorkRunSnapshot => Boolean(item));
-  const normalizedRunId = String(runId || "").trim();
-  return candidates.find((item) => {
-    const status = String(item.status || "").toLowerCase();
-    if (status !== "queued" && status !== "running") {
-      return false;
-    }
-    return !normalizedRunId || String(item.runId || "") === normalizedRunId;
-  }) ?? null;
 }
 
 function workRunString(snapshot: unknown, key: string) {
@@ -4973,107 +3152,36 @@ export function TeamsRoute({
       setResearchWorkspaceView(requestedResearchWorkspaceView);
     }
   }, [forcedResearchWorkspaceView, requestedResearchWorkspaceView]);
-  const teamWorkflowQuery = useQuery({
-    queryKey: queryKeys.teamWorkflow(effectiveTeamId || "none"),
-    queryFn: ({ signal }) => fetchJson<TeamWorkflowOrchestration>(`/api/teams/${encodeURIComponent(effectiveTeamId)}/workflow-orchestration`, { signal }),
-    enabled: Boolean(effectiveTeamId && researchWorkflowTeamSelected),
-  });
-  const researchStageRoundStatusQuery = useQuery({
-    queryKey: researchStageRoundStatusQueryKey(effectiveTeamId || "none"),
-    queryFn: ({ signal }) =>
-      fetchJson<ResearchStageRoundStatusPayload>(
-        `/api/teams/${encodeURIComponent(effectiveTeamId)}/workflow-orchestration/stage-rounds/status`,
-        { signal },
-      ),
-    enabled: researchStageRoundStatusEnabled,
-    refetchInterval: (query) =>
-      sourceCollectionStageWritebackRefetchInterval(
-        pageVisible,
-        query.state.data as ResearchStageRoundStatusPayload | null | undefined,
-        sourceCollectionStageWritebackSyncActive,
-        sourceCollectionPendingStageTaskIdList,
-      ),
-  });
-  const teamWorkflowCandidatesQuery = useQuery({
-    queryKey: queryKeys.teamWorkflowCandidates(effectiveTeamId || "none", TEAM_WORKFLOW_CANDIDATE_PREVIEW_LIMIT),
-    queryFn: ({ signal }) =>
-      fetchJson<TeamWorkflowCandidateListPayload>(
-        `/api/teams/${encodeURIComponent(effectiveTeamId)}/workflow-orchestration/candidates?limit=${TEAM_WORKFLOW_CANDIDATE_PREVIEW_LIMIT}&includeValidation=false&includeStore=false`,
-        { signal },
-      ),
-    enabled: teamWorkflowCandidateListEnabled,
-    refetchInterval: () => sourceCollectionStageWritebackRefetchInterval(
-      pageVisible,
-      researchStageRoundStatusQuery.data,
-      sourceCollectionStageWritebackSyncActive,
-      sourceCollectionPendingStageTaskIdList,
-    ),
-  });
-  const teamWorkflowCandidateGraphQuery = useQuery({
-    queryKey: queryKeys.teamWorkflowCandidateGraph(effectiveTeamId || "none"),
-    queryFn: ({ signal }) =>
-      fetchJson<TeamWorkflowCandidateListPayload>(
-        `/api/teams/${encodeURIComponent(effectiveTeamId)}/workflow-orchestration/candidates?candidateType=candidate_graph&limit=${TEAM_WORKFLOW_CANDIDATE_GRAPH_LIMIT}&includeStore=false`,
-        { signal },
-      ),
-    enabled: teamWorkflowGraphEnabled,
-  });
-  const teamWorkflowCoordinationStatusQuery = useQuery({
-    queryKey: queryKeys.teamWorkflowCoordinationStatus(effectiveTeamId || "none"),
-    queryFn: ({ signal }) =>
-      fetchJson<TeamWorkflowCoordinationStatus>(
-        `/api/teams/${encodeURIComponent(effectiveTeamId)}/workflow-orchestration/coordination/status`,
-        { signal },
-      ),
-    enabled: Boolean(effectiveTeamId && researchWorkflowTeamSelected && researchWorkspaceView === "coordination"),
-  });
-  const teamWorkflowKnowledgeIngestionStatusQuery = useQuery({
-    queryKey: queryKeys.teamWorkflowKnowledgeIngestionStatus(effectiveTeamId || "none"),
-    queryFn: ({ signal }) =>
-      fetchJson<TeamWorkflowKnowledgeIngestionStatus>(
-        `/api/teams/${encodeURIComponent(effectiveTeamId)}/workflow-orchestration/knowledge-ingestion/status`,
-        { signal },
-      ),
-    enabled: teamWorkflowKnowledgeIngestionEnabled,
-    // 后台入库进行中（activeWorkRun 存在）时轮询，完成后停止。
-    refetchInterval: (query) => {
-      const data = query.state.data as TeamWorkflowKnowledgeIngestionStatus | undefined;
-      return resolvePollingInterval(pageVisible, data?.activeWorkRun ? 2000 : false);
+  const {
+    workflow: teamWorkflowQuery,
+    stageRound: researchStageRoundStatusQuery,
+    candidates: teamWorkflowCandidatesQuery,
+    candidateGraph: teamWorkflowCandidateGraphQuery,
+    coordination: teamWorkflowCoordinationStatusQuery,
+    knowledgeIngestion: teamWorkflowKnowledgeIngestionStatusQuery,
+    modelEvidence: teamWorkflowOfficialModelEvidenceStatusQuery,
+    sourceQuality: teamWorkflowSourceQualityStatusQuery,
+    paperNoteChunks: teamWorkflowPaperNoteChunkStatusQuery,
+  } = useResearchWorkflowResources({
+    teamId: effectiveTeamId,
+    demand: {
+      workflow: Boolean(effectiveTeamId && researchWorkflowTeamSelected),
+      stageRound: researchStageRoundStatusEnabled,
+      candidates: teamWorkflowCandidateListEnabled,
+      candidateGraph: teamWorkflowGraphEnabled,
+      coordination: Boolean(effectiveTeamId && researchWorkflowTeamSelected && researchWorkspaceView === "coordination"),
+      knowledgeIngestion: teamWorkflowKnowledgeIngestionEnabled,
+      modelEvidence: Boolean(effectiveTeamId && researchWorkflowTeamSelected && researchWorkspaceView === "overview"),
+      sourceQuality: teamWorkflowSourceQualityEnabled,
+      paperNoteChunks: Boolean(effectiveTeamId && researchWorkflowTeamSelected && researchWorkspaceView === "overview"),
+    },
+    pageVisible,
+    stageWritebackSync: {
+      active: sourceCollectionStageWritebackSyncActive,
+      pendingTaskIds: sourceCollectionPendingStageTaskIdList,
     },
   });
-  const teamWorkflowOfficialModelEvidenceStatusQuery = useQuery({
-    queryKey: officialModelEvidenceStatusQueryKey(effectiveTeamId || "none"),
-    queryFn: ({ signal }) =>
-      fetchJson<TeamWorkflowOfficialModelEvidenceStatus>(
-        `/api/teams/${encodeURIComponent(effectiveTeamId)}/workflow-orchestration/official-model-evidence/status`,
-        { signal },
-      ),
-    enabled: Boolean(effectiveTeamId && researchWorkflowTeamSelected && researchWorkspaceView === "overview"),
-  });
-  const teamWorkflowSourceQualityStatusQuery = useQuery({
-    queryKey: sourceQualityStatusQueryKey(effectiveTeamId || "none"),
-    queryFn: ({ signal }) =>
-      fetchJson<TeamWorkflowSourceQualityStatus>(
-        `/api/teams/${encodeURIComponent(effectiveTeamId)}/workflow-orchestration/source-quality/status`,
-        { signal },
-      ),
-    enabled: teamWorkflowSourceQualityEnabled,
-    refetchInterval: () => sourceCollectionStageWritebackRefetchInterval(
-      pageVisible,
-      researchStageRoundStatusQuery.data,
-      sourceCollectionStageWritebackSyncActive,
-      sourceCollectionPendingStageTaskIdList,
-    ),
-  });
-  const teamWorkflowPaperNoteChunkStatusQuery = useQuery({
-    queryKey: paperNoteChunkStatusQueryKey(effectiveTeamId || "none"),
-    queryFn: ({ signal }) =>
-      fetchJson<TeamWorkflowPaperNoteChunkStatus>(
-        `/api/teams/${encodeURIComponent(effectiveTeamId)}/workflow-orchestration/paper-note-chunks/status`,
-        { signal },
-      ),
-    enabled: Boolean(effectiveTeamId && researchWorkflowTeamSelected && researchWorkspaceView === "overview"),
-  });
+
   const experimentPlanningStatusQuery = useQuery({
     queryKey: experimentPlanningStatusQueryKey(effectiveTeamId || "none"),
     queryFn: ({ signal }) =>
@@ -12001,23 +10109,6 @@ export function TeamsRoute({
             sourceCollectionActionBusyReason,
             selectedTeamStartSourceCollectionStageTaskPending,
           );
-  const sourceCollectionStageBackendActionReadiness = (
-    stageId: SourceCollectionStageModuleId,
-    fallback: SourceCollectionActionReadiness,
-  ): SourceCollectionActionReadiness => {
-    const backendReadiness = sourceCollectionStageCardById.get(stageId)?.actionReadiness;
-    if (!backendReadiness || typeof backendReadiness.canStart !== "boolean") {
-      return fallback;
-    }
-    if (backendReadiness.canStart) {
-      return sourceCollectionActionReady;
-    }
-    return sourceCollectionActionReadiness(
-      true,
-      backendReadiness.disabledReason || fallback.reason || sourceCollectionActionNoInputReason,
-      false,
-    );
-  };
   const sourceCollectionStageActionLabelFor = (stageId: SourceCollectionStageModuleId, fallback: string) =>
     sourceCollectionStageTaskActionLabel(
       stageId,
@@ -12027,7 +10118,11 @@ export function TeamsRoute({
     if (stageId === "finding") {
       return sourceCollectionStageTaskActionReadiness(
         "finding",
-        sourceCollectionStageBackendActionReadiness("finding", sourceCollectionCollectionActionReadiness),
+        sourceCollectionStageBackendActionReadiness(
+          sourceCollectionStageCardById.get("finding"),
+          sourceCollectionCollectionActionReadiness,
+          sourceCollectionActionNoInputReason,
+        ),
       );
     }
     if (stageId === "extraction") {
@@ -12039,20 +10134,29 @@ export function TeamsRoute({
       return sourceCollectionStageTaskActionReadiness(
         "extraction",
         sourceCollectionStageBackendActionReadiness(
-          "extraction",
+          sourceCollectionStageCardById.get("extraction"),
           sourceCollectionActionReadiness(extractionDisabled, extractionReason || sourceCollectionActionNoInputReason, extractionLoading),
+          sourceCollectionActionNoInputReason,
         ),
       );
     }
     if (stageId === "relations") {
       return sourceCollectionStageTaskActionReadiness(
         "relations",
-        sourceCollectionStageBackendActionReadiness("relations", sourceCollectionGraphActionReadiness),
+        sourceCollectionStageBackendActionReadiness(
+          sourceCollectionStageCardById.get("relations"),
+          sourceCollectionGraphActionReadiness,
+          sourceCollectionActionNoInputReason,
+        ),
       );
     }
     return sourceCollectionStageTaskActionReadiness(
       "ingestion",
-      sourceCollectionStageBackendActionReadiness("ingestion", sourceCollectionMemoryActionReadiness),
+      sourceCollectionStageBackendActionReadiness(
+        sourceCollectionStageCardById.get("ingestion"),
+        sourceCollectionMemoryActionReadiness,
+        sourceCollectionActionNoInputReason,
+      ),
     );
   };
   const sourceCollectionFindingDisplayLoading = sourceCollectionRecordsDataLoading || sourceCollectionAssignmentsDataLoading;

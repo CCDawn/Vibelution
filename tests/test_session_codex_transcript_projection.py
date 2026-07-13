@@ -455,6 +455,8 @@ def test_turn_items_projection_prefers_explicit_canonical_v2(monkeypatch):
     )
 
     assert items == [canonical]
+    assert len(items) == 1
+    assert all(item.get("text") != "legacy text" for item in items)
 
 
 def test_terminal_provider_error_builds_canonical_v2_item():

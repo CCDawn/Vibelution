@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  configSectionExpandedByDefault,
   configSectionFieldCopy,
   configSectionPresentation,
   configSectionTierCounts,
@@ -161,10 +162,20 @@ describe("progressive config section presentation", () => {
   it("reports collapsed advanced field counts without changing backend field totals", () => {
     expect(configSectionTierCounts("pet", 41)).toEqual({ common: 4, advanced: 37 });
     expect(configSectionTierCounts("context-compression", 20)).toEqual({ common: 5, advanced: 15 });
-    expect(configSectionTierCounts("analysis", 4)).toEqual({ common: 4, advanced: 0 });
+    expect(configSectionTierCounts("analysis", 4)).toEqual({ common: 2, advanced: 2 });
   });
 
   it("keeps everyday interface and operator controls in the common tier", () => {
+    expect(configSectionPresentation("analysis", "zh")).toMatchObject({
+      sectionTitle: "分析数据存储",
+      sectionSummary: "设置分析结果、反馈数据和知识资产在工作区中的存放位置。",
+      layout: "compact_paths",
+      commonPaths: [
+        "analysis.data_dir",
+        "analysis.feedback_dir",
+      ],
+      advancedTitle: "知识资产路径",
+    });
     expect(configSectionPresentation("ui", "zh")?.commonPaths).toEqual([
       "ui.language",
       "ui.theme",
@@ -191,11 +202,41 @@ describe("progressive config section presentation", () => {
     ]);
     expect(configSectionPresentation("parser", "zh")).toBeNull();
 
+    expect(configSectionPresentation("llm-discovery", "zh")).toMatchObject({
+      sectionTitle: "模型发现",
+      sectionSummary: "控制工作台如何发现模型，以及无法读取模型限制时使用的回退值。",
+      commonPaths: [
+        "llm.discovery.enabled",
+        "llm.discovery.timeout",
+        "llm.discovery.auto_adjust",
+      ],
+    });
+
     expect(configSectionTierCounts("ui", 7)).toEqual({ common: 4, advanced: 3 });
     expect(configSectionTierCounts("security", 5)).toEqual({ common: 1, advanced: 4 });
     expect(configSectionTierCounts("network", 7)).toEqual({ common: 3, advanced: 4 });
     expect(configSectionTierCounts("log", 16)).toEqual({ common: 4, advanced: 12 });
     expect(configSectionTierCounts("debug", 5)).toEqual({ common: 2, advanced: 3 });
+    expect(configSectionTierCounts("llm-discovery", 6)).toEqual({ common: 3, advanced: 3 });
+  });
+
+  it("keeps the Git model visible and the prompt template collapsed by default", () => {
+    expect(configSectionPresentation("git-commit-model", "zh")).toMatchObject({
+      sectionTitle: "Git 提交助手",
+      sectionSummary: "选择生成提交说明时使用的模型；通常只需要配置这一项。",
+      layout: "compact_paths",
+      commonPaths: ["git.commit_message_model_ref"],
+      commonTitle: "模型选择",
+    });
+    expect(configSectionPresentation("git-commit-prompt", "zh")).toMatchObject({
+      sectionTitle: "提示词模板（高级）",
+      sectionSummary: "只有默认提交说明格式不满足需要时才修改，并保留 {diff} 占位符。",
+      commonPaths: ["git.commit_message_prompt"],
+      commonTitle: "模板内容",
+    });
+    expect(configSectionExpandedByDefault("git-commit-model")).toBe(true);
+    expect(configSectionExpandedByDefault("git-commit-prompt")).toBe(false);
+    expect(configSectionExpandedByDefault("analysis")).toBe(true);
   });
 
   it("provides Chinese labels for every visible pet and context-compression control", () => {
@@ -226,12 +267,30 @@ describe("progressive config section presentation", () => {
     expect(configSectionFieldCopy("network.proxy_url", "zh")?.label).toBe("代理地址");
     expect(configSectionFieldCopy("log.third_party.openai", "zh")?.label).toBe("OpenAI 日志级别");
     expect(configSectionFieldCopy("debug.track_token_usage", "zh")?.label).toBe("记录 Token 用量");
+    expect(configSectionFieldCopy("llm.discovery.enabled", "zh")).toEqual({
+      label: "启用自动发现",
+      hint: "连接服务商后自动读取可用模型列表。",
+    });
+    expect(configSectionFieldCopy("llm.discovery.fallback_max_token_limit", "zh")?.label).toBe("默认上下文上限");
+    expect(configSectionFieldCopy("analysis.data_dir", "zh")).toEqual({
+      label: "分析数据目录",
+      hint: "保存分析结果和统计数据的工作区目录。",
+    });
+    expect(configSectionFieldCopy("analysis.knowledge_graph_path", "zh")?.label).toBe("知识图谱文件");
+    expect(configSectionFieldCopy("git.commit_message_prompt", "zh")?.label).toBe("提交说明提示词模板");
   });
 
   it("keeps an English presentation and leaves unrelated fields untouched", () => {
     expect(configSectionPresentation("pet", "en")?.advancedTitle).toBe("Advanced settings");
+    expect(configSectionPresentation("llm-discovery", "en")?.commonPaths).toEqual([
+      "llm.discovery.enabled",
+      "llm.discovery.timeout",
+      "llm.discovery.auto_adjust",
+    ]);
     expect(configSectionFieldCopy("pet.save_interval", "en")?.label).toBe("Save interval");
-    expect(configSectionFieldCopy("analysis.enabled", "zh")).toBeNull();
-    expect(configSectionPresentation("analysis", "zh")).toBeNull();
+    expect(configSectionFieldCopy("llm.discovery.output_reserve_ratio", "en")?.label).toBe("Output reserve ratio");
+    expect(configSectionFieldCopy("analysis.pattern_library_path", "en")?.label).toBe("Pattern library file");
+    expect(configSectionFieldCopy("git.commit_message_model_ref", "en")?.label).toBe("Commit message model");
+    expect(configSectionPresentation("analysis", "en")?.advancedTitle).toBe("Knowledge asset paths");
   });
 });

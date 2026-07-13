@@ -403,6 +403,18 @@ describe("ConfigRoute layout contract", () => {
     expect(routeSource).toContain("onIntakeModeChange");
   });
 
+  it("turns the single workbench behavior setting into a compact, usable action row", () => {
+    expect(runtimePanelSource).toContain("styles.behaviorRow");
+    expect(runtimePanelSource).toContain("styles.behaviorCopy");
+    expect(runtimePanelSource).toContain('aria-label={copy.intakeMode}');
+    expect(runtimePanelSource).toContain('aria-pressed={currentIntakeMode === mode}');
+    expect(runtimePanelSource).not.toContain("styles.matrixGrid");
+    expect(runtimePanelSource).not.toContain("styles.matrixCard");
+    expect(runtimePanelStyles.behaviorRow).toContain("[grid-template-columns:minmax(0,1fr)_auto]");
+    expect(runtimePanelStyles.segmentButton).toContain("min-w-28");
+    expect(runtimePanelStyles.segmentButton).toContain("min-h-10");
+  });
+
   it("keeps the config loading placeholder as a dense board with nav, metrics, and specs", () => {
     expect(placeholderPanelSource).toContain("styles.loadingNavPanel");
     expect(placeholderPanelSource).toContain("styles.loadingNavList");
@@ -452,7 +464,7 @@ describe("ConfigRoute layout contract", () => {
     expect(providerPanelSource).toContain("styles.registryWorkspace");
     expect(providerPanelSource).toContain("<VDenseTable");
     expect(routeSource).toContain("styles.configEditorSection");
-    expect(routeSource).toContain('section.id === "llm-discovery" ? styles.configDiscoverySection : ""');
+    expect(routeSource).toContain('section.id === "llm-discovery" && !presentation ? styles.configDiscoverySection : ""');
     expect(routeSource).toContain("styles.notice");
     expect(providerPanelSource).toContain("styles.tableScroll");
     expect(providerPanelSource).toContain("styles.modelIdentity");
@@ -738,17 +750,22 @@ describe("ConfigRoute layout contract", () => {
   it("progressively discloses advanced pet and context-compression settings", () => {
     expect(routeSource).toContain('from "./configSectionPresentation"');
     expect(routeSource).toContain("advancedExpanded: false");
+    expect(routeSource).toContain("expanded: configSectionExpandedByDefault(sectionId)");
+    expect(routeSource).toContain("defaultSectionUiState(section.id)");
     expect(routeSource).toContain("const presentation = configSectionPresentation(section.id, lang)");
     expect(routeSource).toContain("configSectionTierCounts(section.id, section.fieldCount)");
     expect(routeSource).toContain("isCommonConfigSectionEntry(section.id, childPath)");
     expect(routeSource).toContain("presentation.commonTitle");
     expect(routeSource).toContain("presentation.advancedTitle");
     expect(routeSource).toContain("presentation?.sectionTitle ?? section.title");
+    expect(routeSource).toContain("presentation?.sectionSummary ?? section.summary");
     expect(routeSource).toContain("aria-expanded={advancedExpanded}");
     expect(routeSource).toContain('contentLayout="plain"');
     expect(routeSource).toContain("isDenseConfigSection(section) && !presentation");
     expect(routeSource).toContain("configSectionFieldCopy(path, lang)");
+    expect(routeSource).toContain('presentation.layout === "compact_paths" ? styles.configCompactPathProgressiveBody : ""');
     expect(stylesSource).toContain("configProgressiveBody:");
+    expect(stylesSource).toContain("configCompactPathProgressiveBody:");
     expect(stylesSource).toContain("configTierHeader:");
     expect(stylesSource).toContain("configAdvancedToggle:");
     expect(stylesSource).toContain("configAdvancedBody:");
@@ -763,6 +780,9 @@ describe("ConfigRoute layout contract", () => {
     expect(styles.configProgressiveBody).toContain("[&_.treeFieldCardView]:[grid-template-columns:minmax(0,1fr)]");
     expect(styles.configProgressiveBody).toContain("[&_.treeFieldValue]:[grid-row:2]");
     expect(styles.configProgressiveBody).toContain("[&_.treeFieldLabel]:[white-space:normal]");
+    expect(styles.configCompactPathProgressiveBody).toContain("[&_.treeFieldCardView]:![grid-template-columns:minmax(150px,0.42fr)_minmax(0,1fr)]");
+    expect(styles.configCompactPathProgressiveBody).toContain("[&_.treeFieldValue]:![grid-row:1/span_2]");
+    expect(styles.configCompactPathProgressiveBody).toContain("[&_.treeFieldCardView]:![padding:8px]");
   });
 
   it("sizes progressive common grids to the number of visible controls", () => {
@@ -780,7 +800,7 @@ describe("ConfigRoute layout contract", () => {
     expect(routeSource).toContain("return false");
     expect(routeSource).toContain("Number(section.fieldCount || 0) >= 12");
     expect(routeSource).toContain("styles.configDenseSection");
-    expect(routeSource).toContain('section.id === "llm-discovery" ? styles.configDiscoverySection : ""');
+    expect(routeSource).toContain('section.id === "llm-discovery" && !presentation ? styles.configDiscoverySection : ""');
     expect(routeSource).toContain("styles.treeGrid");
     expect(routeSource).toContain("styles.treeFieldCardView");
     expect(routeSource).toContain("styles.treeFieldCardEdit");

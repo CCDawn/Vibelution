@@ -7,6 +7,8 @@ export type ConfigFieldPresentationCopy = {
 
 export type ProgressiveConfigSectionPresentation = {
   sectionTitle: string;
+  sectionSummary?: string;
+  layout?: "compact_paths";
   commonPaths: readonly string[];
   commonTitle: string;
   commonHint: string;
@@ -57,6 +59,25 @@ const LOG_COMMON_PATHS = [
 const DEBUG_COMMON_PATHS = [
   "debug.enabled",
   "debug.track_token_usage",
+] as const;
+
+const LLM_DISCOVERY_COMMON_PATHS = [
+  "llm.discovery.enabled",
+  "llm.discovery.timeout",
+  "llm.discovery.auto_adjust",
+] as const;
+
+const ANALYSIS_COMMON_PATHS = [
+  "analysis.data_dir",
+  "analysis.feedback_dir",
+] as const;
+
+const GIT_COMMIT_MODEL_COMMON_PATHS = [
+  "git.commit_message_model_ref",
+] as const;
+
+const GIT_COMMIT_PROMPT_COMMON_PATHS = [
+  "git.commit_message_prompt",
 ] as const;
 
 const SECTION_PRESENTATION: Record<
@@ -127,6 +148,48 @@ const SECTION_PRESENTATION: Record<
       advancedHint: "详细输出、LLM 和工具追踪会增加日志量，按需开启。",
       advancedCountLabel: (count) => `${count} 项`,
     },
+    "llm-discovery": {
+      sectionTitle: "模型发现",
+      sectionSummary: "控制工作台如何发现模型，以及无法读取模型限制时使用的回退值。",
+      commonPaths: LLM_DISCOVERY_COMMON_PATHS,
+      commonTitle: "常用设置",
+      commonHint: "日常只需决定是否启用、等待多久以及是否自动适配模型限制。",
+      advancedTitle: "回退参数",
+      advancedHint: "只有发现结果不准确时，才需要调整令牌上限和输出预留比例。",
+      advancedCountLabel: (count) => `${count} 项`,
+    },
+    analysis: {
+      sectionTitle: "分析数据存储",
+      sectionSummary: "设置分析结果、反馈数据和知识资产在工作区中的存放位置。",
+      layout: "compact_paths",
+      commonPaths: ANALYSIS_COMMON_PATHS,
+      commonTitle: "常用目录",
+      commonHint: "日常只需指定分析结果与反馈数据目录。",
+      advancedTitle: "知识资产路径",
+      advancedHint: "知识图谱与模式库文件位置通常保持默认。",
+      advancedCountLabel: (count) => `${count} 项`,
+    },
+    "git-commit-model": {
+      sectionTitle: "Git 提交助手",
+      sectionSummary: "选择生成提交说明时使用的模型；通常只需要配置这一项。",
+      layout: "compact_paths",
+      commonPaths: GIT_COMMIT_MODEL_COMMON_PATHS,
+      commonTitle: "模型选择",
+      commonHint: "从模型库中选择生成提交说明时使用的模型。",
+      advancedTitle: "高级设置",
+      advancedHint: "此分区没有额外高级参数。",
+      advancedCountLabel: (count) => `${count} 项`,
+    },
+    "git-commit-prompt": {
+      sectionTitle: "提示词模板（高级）",
+      sectionSummary: "只有默认提交说明格式不满足需要时才修改，并保留 {diff} 占位符。",
+      commonPaths: GIT_COMMIT_PROMPT_COMMON_PATHS,
+      commonTitle: "模板内容",
+      commonHint: "修改前确认 {diff} 占位符仍然存在。",
+      advancedTitle: "高级设置",
+      advancedHint: "此分区没有额外高级参数。",
+      advancedCountLabel: (count) => `${count} 项`,
+    },
   },
   en: {
     pet: {
@@ -192,6 +255,48 @@ const SECTION_PRESENTATION: Record<
       advancedHint: "Verbose, LLM, and tool tracing increase log volume and should be enabled only when needed.",
       advancedCountLabel: (count) => `${count} fields`,
     },
+    "llm-discovery": {
+      sectionTitle: "Model discovery",
+      sectionSummary: "Control model discovery and the fallback limits used when a provider cannot report them.",
+      commonPaths: LLM_DISCOVERY_COMMON_PATHS,
+      commonTitle: "Common settings",
+      commonHint: "Choose whether to discover models, how long to wait, and whether limits adjust automatically.",
+      advancedTitle: "Fallback parameters",
+      advancedHint: "Adjust token limits and output reserve only when discovery results are incomplete.",
+      advancedCountLabel: (count) => `${count} fields`,
+    },
+    analysis: {
+      sectionTitle: "Analysis data storage",
+      sectionSummary: "Choose where analysis results, feedback, and knowledge assets are stored in the workspace.",
+      layout: "compact_paths",
+      commonPaths: ANALYSIS_COMMON_PATHS,
+      commonTitle: "Common directories",
+      commonHint: "Everyday setup only needs the analysis and feedback directories.",
+      advancedTitle: "Knowledge asset paths",
+      advancedHint: "Knowledge graph and pattern library files usually keep their defaults.",
+      advancedCountLabel: (count) => `${count} fields`,
+    },
+    "git-commit-model": {
+      sectionTitle: "Git commit assistant",
+      sectionSummary: "Choose the model used to generate commit messages; this is normally the only setting you need.",
+      layout: "compact_paths",
+      commonPaths: GIT_COMMIT_MODEL_COMMON_PATHS,
+      commonTitle: "Model selection",
+      commonHint: "Select a model-library entry for commit message generation.",
+      advancedTitle: "Advanced settings",
+      advancedHint: "This section has no additional advanced fields.",
+      advancedCountLabel: (count) => `${count} fields`,
+    },
+    "git-commit-prompt": {
+      sectionTitle: "Prompt template (advanced)",
+      sectionSummary: "Edit only when the default commit format is insufficient, and keep the {diff} placeholder.",
+      commonPaths: GIT_COMMIT_PROMPT_COMMON_PATHS,
+      commonTitle: "Template content",
+      commonHint: "Confirm that the {diff} placeholder remains after editing.",
+      advancedTitle: "Advanced settings",
+      advancedHint: "This section has no additional advanced fields.",
+      advancedCountLabel: (count) => `${count} fields`,
+    },
   },
 };
 
@@ -241,6 +346,18 @@ const ZH_FIELD_COPY: Record<string, ConfigFieldPresentationCopy> = {
   "debug.trace_llm": { label: "追踪 LLM 调用", hint: "记录模型调用阶段与结果状态，不记录密钥。" },
   "debug.trace_tools": { label: "追踪工具调用", hint: "记录工具执行阶段与结果状态。" },
   "debug.track_token_usage": { label: "记录 Token 用量", hint: "统计模型调用消耗的 Token 数量。" },
+  "llm.discovery.enabled": { label: "启用自动发现", hint: "连接服务商后自动读取可用模型列表。" },
+  "llm.discovery.timeout": { label: "发现等待时间（秒）", hint: "服务商响应超过该时间后停止本次发现。" },
+  "llm.discovery.auto_adjust": { label: "自动适配模型限制", hint: "发现模型能力后自动校正上下文与输出上限。" },
+  "llm.discovery.fallback_max_tokens": { label: "默认输出上限", hint: "无法读取模型输出上限时使用的保守值。" },
+  "llm.discovery.fallback_max_token_limit": { label: "默认上下文上限", hint: "无法读取模型上下文窗口时使用的保守值。" },
+  "llm.discovery.output_reserve_ratio": { label: "输出预留比例", hint: "从上下文窗口中为模型回复预留的比例。" },
+  "analysis.data_dir": { label: "分析数据目录", hint: "保存分析结果和统计数据的工作区目录。" },
+  "analysis.feedback_dir": { label: "反馈数据目录", hint: "保存人工反馈与评估反馈的工作区目录。" },
+  "analysis.knowledge_graph_path": { label: "知识图谱文件", hint: "分析流程读取和更新知识图谱的文件路径。" },
+  "analysis.pattern_library_path": { label: "模式库文件", hint: "保存可复用分析模式的文件路径。" },
+  "git.commit_message_model_ref": { label: "Git 提交使用的模型", hint: "选择用于生成提交说明的模型库条目。" },
+  "git.commit_message_prompt": { label: "提交说明提示词模板", hint: "仅在需要定制格式时修改，并保留 {diff} 占位符。" },
   "pet.enabled": { label: "启用陪伴体", hint: "关闭后会暂停陪伴体相关的状态更新。" },
   "pet.name": { label: "陪伴体名称", hint: "显示在陪伴体空间和相关状态中的名称。" },
   "pet.auto_save": { label: "自动保存状态", hint: "定期保存陪伴体的长期状态。" },
@@ -332,6 +449,18 @@ const EN_FIELD_COPY: Record<string, ConfigFieldPresentationCopy> = {
   "log.detailed_traceback": { label: "Detailed traceback" },
   "debug.enabled": { label: "Enable debug mode" },
   "debug.track_token_usage": { label: "Track token usage" },
+  "llm.discovery.enabled": { label: "Enable automatic discovery", hint: "Load available models after connecting a provider." },
+  "llm.discovery.timeout": { label: "Discovery timeout", hint: "Stop the discovery request after this many seconds." },
+  "llm.discovery.auto_adjust": { label: "Adjust model limits automatically", hint: "Update context and output limits from discovered capabilities." },
+  "llm.discovery.fallback_max_tokens": { label: "Default output limit", hint: "Used when the provider does not report an output limit." },
+  "llm.discovery.fallback_max_token_limit": { label: "Default context limit", hint: "Used when the provider does not report a context window." },
+  "llm.discovery.output_reserve_ratio": { label: "Output reserve ratio", hint: "Reserve this share of the context window for the model response." },
+  "analysis.data_dir": { label: "Analysis data directory", hint: "Workspace directory for analysis results and statistics." },
+  "analysis.feedback_dir": { label: "Feedback data directory", hint: "Workspace directory for human and evaluation feedback." },
+  "analysis.knowledge_graph_path": { label: "Knowledge graph file", hint: "File read and updated by the analysis knowledge graph flow." },
+  "analysis.pattern_library_path": { label: "Pattern library file", hint: "File containing reusable analysis patterns." },
+  "git.commit_message_model_ref": { label: "Commit message model", hint: "Model-library entry used to generate commit messages." },
+  "git.commit_message_prompt": { label: "Commit message prompt template", hint: "Edit only to customize the format, and keep the {diff} placeholder." },
   "pet.enabled": { label: "Enable companion" },
   "pet.name": { label: "Companion name" },
   "pet.auto_save": { label: "Save automatically" },
@@ -348,6 +477,10 @@ export function configSectionPresentation(
   language: ConfigSectionPresentationLanguage,
 ): ProgressiveConfigSectionPresentation | null {
   return SECTION_PRESENTATION[language][sectionId] ?? null;
+}
+
+export function configSectionExpandedByDefault(sectionId: string): boolean {
+  return sectionId !== "git-commit-prompt";
 }
 
 export function isCommonConfigSectionEntry(sectionId: string, absolutePath: string): boolean {
