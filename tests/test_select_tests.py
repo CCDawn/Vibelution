@@ -158,7 +158,10 @@ def test_selector_matches_large_file_split_extracted_paths():
     assert {"web-session-chat", "teams-knowledge", "frontend-workbench"}.issubset(rule_ids)
     assert any("tests/test_web_session_routes.py" in command for command in result["commands"])
     assert any("tests/test_team_workflow_orchestration_service.py" in command for command in result["commands"])
-    assert any(command == "npm --prefix web run test" for command in result["commands"])
+    assert any(
+        command == "node web/node_modules/vitest/vitest.mjs run"
+        for command in result["commands"]
+    )
     assert any(command == "npm --prefix web run build" for command in result["commands"])
 
 

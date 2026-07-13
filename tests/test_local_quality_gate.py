@@ -293,9 +293,9 @@ def test_commit_mode_without_relevant_staged_files_passes(git_repo: Path) -> Non
             [str(gate.PROJECT_PYTHON_NAME), "tests/prompt_debugger.py"],
         ),
         (
-            "npm --prefix web run test",
+            "node web/node_modules/vitest/vitest.mjs run",
             "web-test",
-            ["npm", "--prefix", "web", "run", "test"],
+            ["node", "web/node_modules/vitest/vitest.mjs", "run"],
         ),
         (
             "npm --prefix web run build",
@@ -335,6 +335,25 @@ def test_materialize_command_resolves_windows_npm_launcher(git_repo: Path) -> No
 
     assert Path(materialized.argv[0]).name.lower() == "npm.cmd"
     assert materialized.argv[1:] == ["--prefix", "web", "run", "build"]
+    assert materialized.cwd == git_repo
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows launcher resolution")
+def test_materialize_command_resolves_windowless_vitest_launcher(git_repo: Path) -> None:
+    spec = gate.parse_allowed_command(
+        "node web/node_modules/vitest/vitest.mjs run src/example.test.ts",
+        git_repo,
+    )
+
+    materialized = gate.materialize_command(spec)
+
+    assert Path(materialized.argv[0]).name.lower() == "node.exe"
+    assert materialized.argv[1:] == [
+        "web/node_modules/vitest/vitest.mjs",
+        "run",
+        "src/example.test.ts",
+    ]
+    assert all(not argument.lower().endswith((".cmd", ".bat")) for argument in materialized.argv)
     assert materialized.cwd == git_repo
 
 
