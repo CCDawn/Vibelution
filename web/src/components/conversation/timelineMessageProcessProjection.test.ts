@@ -397,9 +397,29 @@ describe("timeline message process projection", () => {
         messageId: "session-1-message-482",
       }],
     };
+    const answerTranscript = {
+      ...liveTranscript,
+      messageId: "session-1-message-483",
+      cells: [{
+        id: "assistant-answer",
+        kind: "assistant_markdown" as const,
+        messageId: "session-1-message-483",
+        status: "completed",
+        tone: "neutral" as const,
+        text: "工作树干净",
+      }],
+    };
+    const completedOverlay = mergeCodexTranscripts(
+      liveTranscript,
+      answerTranscript,
+      "session-1-message-483",
+    );
 
-    expect(mergeCodexTranscripts(liveTranscript, persistedTranscript, "session-1-message-482")?.cells)
-      .toEqual([expect.objectContaining({ id: "persisted-tool" })]);
+    expect(mergeCodexTranscripts(persistedTranscript, completedOverlay, "session-1-message-482")?.cells)
+      .toEqual([
+        expect.objectContaining({ id: "persisted-tool" }),
+        expect.objectContaining({ id: "assistant-answer" }),
+      ]);
   });
 
   it("preserves an additional same-name tool call that only exists in the streaming layer", () => {
