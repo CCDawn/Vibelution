@@ -111,6 +111,12 @@ function isEphemeralCodexTranscript(transcript: CodexTranscriptProjection | unde
   );
 }
 
+function isEphemeralCodexTranscriptCell(cell: CodexTranscriptProjection["cells"][number]) {
+  return [cell.messageId, cell.id, cell.sourceItemId]
+    .map((value) => String(value ?? "").trim().toLowerCase())
+    .some((value) => value.includes("-message-live-") || value.includes("-message-active-"));
+}
+
 function toolCellSemanticKey(cell: CodexTranscriptProjection["cells"][number]) {
   if (cell.kind !== "tool_call") {
     return "";
@@ -144,14 +150,15 @@ function mergeCodexTranscriptCellEntries(
       const existingIndex = indexes.get(key);
       if (existingIndex === undefined) {
         indexes.set(key, entries.length);
-        entries.push({ cell, ephemeral: group.ephemeral });
+        entries.push({ cell, ephemeral: group.ephemeral || isEphemeralCodexTranscriptCell(cell) });
         continue;
       }
       const existing = entries[existingIndex];
-      if (!existing.ephemeral && group.ephemeral) {
+      const ephemeral = group.ephemeral || isEphemeralCodexTranscriptCell(cell);
+      if (!existing.ephemeral && ephemeral) {
         continue;
       }
-      entries[existingIndex] = { cell, ephemeral: group.ephemeral };
+      entries[existingIndex] = { cell, ephemeral };
     }
   }
   return entries;
