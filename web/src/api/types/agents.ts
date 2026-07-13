@@ -802,12 +802,24 @@ export type AgentConfigWorkspaceAgent = AgentInstance & {
 
 export type AgentModelChoice = {
   modelId: string;
+  modelRef: string;
+  modelKey: string;
+  upstreamId: string;
   label: string;
   model: string;
   contextWindow?: number;
+  providerId: string;
+  providerLabel: string;
   providerKind: string;
   providerBaseUrl: string;
-  source: string;
+  transport: string;
+  source: "pinned" | "discovered" | "both";
+  runtimeSelectable: boolean;
+  availability: string;
+  verificationStatus: string;
+  catalogStale: boolean;
+  slotCompatibility: Record<string, { allowed: boolean; reasonCode: string }>;
+  capabilities: Record<string, unknown>;
   apiKeyEnv: string;
   apiKeyConfigured: boolean;
   apiKeyState: string;
@@ -815,6 +827,9 @@ export type AgentModelChoice = {
   missingApiKey: boolean;
   supportsImageInput?: boolean | null;
   supportsReasoningEffort?: boolean;
+  reasoningAdapter?: string;
+  reasoningEffortMap?: Record<string, string>;
+  reasoningDefaultSource?: string;
   reasoningEffortValues?: string[];
   reasoningEffortOptions?: Array<{
     value: string;
@@ -861,6 +876,7 @@ export type AgentConfigWorkspaceGroup = {
 
 export type AgentConfigWorkspace = {
   schemaVersion: number;
+  operatorConfigHash?: string;
   generatedAt: string;
   storage: {
     agentRegistryPath: string;

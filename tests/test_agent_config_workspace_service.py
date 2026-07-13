@@ -65,6 +65,24 @@ def _use_tmp_project_root(tmp_path, monkeypatch):
     monkeypatch.setattr(supervised_agent_service, "_configured_model_library_ids", lambda *args, **kwargs: set(model_library_ids))
     monkeypatch.setattr(config_service, "get_agent_model_options_workspace", _fake_config_workspace)
 
+    def fake_agent_model_candidates():
+        model_options = list(agent_config_workspace_service._safe_config_workspace().get("modelOptions") or [])
+        choices = agent_config_workspace_service._agent_model_choices(model_options)
+        for choice in choices:
+            choice.setdefault("modelRef", choice["modelId"])
+        return {
+            "operatorConfigHash": "test-operator-config-hash",
+            "candidates": choices,
+            "modelOptions": model_options,
+        }
+
+    monkeypatch.setattr(
+        agent_config_workspace_service,
+        "list_agent_model_candidates",
+        fake_agent_model_candidates,
+        raising=False,
+    )
+
 
 def _mark_session_active(tmp_path, session_id: str):
     journal = tmp_path / "workspace" / "sessions" / session_id / "turn_journal.jsonl"
@@ -1140,30 +1158,81 @@ def test_agent_config_workspace_reports_missing_model_key_and_prompt(tmp_path, m
     assert research_choice["contextWindow"] == 64000
 
 
-def test_agent_config_workspace_uses_lightweight_model_options_without_full_config_workspace(tmp_path, monkeypatch):
+def test_agent_config_workspace_uses_one_candidate_payload_without_second_config_read(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
+
+    calls = []
 
     def fail_full_config_workspace():
         raise AssertionError("full config workspace should not be built for Agent config workspace")
 
     monkeypatch.setattr(config_service, "get_config_workspace", fail_full_config_workspace)
+    monkeypatch.setattr(agent_config_workspace_service, "_safe_config_workspace", fail_full_config_workspace)
+    candidate_payload = {
+        "operatorConfigHash": "same-snapshot-hash",
+        "candidates": [
+            {
+                "modelId": "relay/model-primary",
+                "modelRef": "relay/model-primary",
+                "modelKey": "model-primary",
+                "upstreamId": "gpt-test",
+                "label": "GPT Test",
+                "model": "gpt-test",
+                "providerId": "relay",
+                "providerLabel": "Relay",
+                "providerKind": "openai",
+                "providerBaseUrl": "https://relay.example/v1",
+                "transport": "responses",
+                "source": "pinned",
+                "runtimeSelectable": True,
+                "availability": "pinned",
+                "verificationStatus": "unverified",
+                "catalogStale": False,
+                "slotCompatibility": {"dialogue": {"allowed": True, "reasonCode": ""}},
+                "capabilities": {},
+                "apiKeyEnv": "RELAY_API_KEY",
+                "apiKeyConfigured": True,
+                "apiKeyState": "configured",
+                "requiresApiKey": True,
+                "missingApiKey": False,
+                "capabilityStatus": "unknown",
+                "capabilitySource": "unknown",
+            }
+        ],
+        "modelOptions": [
+            {
+                "model_id": "relay/model-primary",
+                "source": "provider_model",
+                "provider": {"id": "relay"},
+                "provider_kind": "openai",
+                "model": "gpt-test",
+                "label": "GPT Test",
+                "details": {},
+                "api_key_env": "RELAY_API_KEY",
+                "api_key_configured": True,
+                "api_key_state": "configured",
+            }
+        ],
+    }
     monkeypatch.setattr(
-        agent_config_workspace_service.config_service,
-        "get_agent_model_options_workspace",
-        _fake_config_workspace,
+        agent_config_workspace_service,
+        "list_agent_model_candidates",
+        lambda: calls.append("candidate_payload") or candidate_payload,
         raising=False,
     )
     agent_directory_service.create_agent_instance(
         display_name="模型轻量 Agent",
-        llm_bindings={"dialogue": {"modelId": "model-primary"}},
+        llm_bindings={"dialogue": {"modelId": "relay/model-primary"}},
     )
 
     payload = agent_config_workspace_service.get_agent_config_workspace()
 
     model_option_ids = [item["model_id"] for item in payload["modelOptions"]]
     agent_model_choice_ids = [item["modelId"] for item in payload["agentModelChoices"]]
-    assert "model-primary" in model_option_ids
-    assert "model-primary" in agent_model_choice_ids
+    assert calls == ["candidate_payload"]
+    assert payload["operatorConfigHash"] == "same-snapshot-hash"
+    assert "relay/model-primary" in model_option_ids
+    assert "relay/model-primary" in agent_model_choice_ids
 
 
 def test_agent_config_workspace_keeps_embedded_prompt_templates_lightweight(tmp_path, monkeypatch):
@@ -1374,7 +1443,14 @@ def test_agent_config_workspace_logs_stage_timings_and_reuses_loaded_agents(tmp_
     ]
     assert loaded_events
     timings = loaded_events[-1][1]["fields"]["timingsMs"]
-    assert {"list_agents", "mode_bindings", "runtime_histories", "runtime_statuses", "total"}.issubset(timings)
+    assert {
+        "list_agents",
+        "mode_bindings",
+        "agent_model_candidates",
+        "runtime_histories",
+        "runtime_statuses",
+        "total",
+    }.issubset(timings)
     assert timings["total"] >= timings["mode_bindings"]
     assert loaded_events[-1][1]["fields"]["loadModes"] == {
         "chatRooms": "compact",
