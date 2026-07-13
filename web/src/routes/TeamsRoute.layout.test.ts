@@ -7,6 +7,7 @@ import teamsSourceCollectionPanelSource from "./teams/TeamsSourceCollectionPanel
 import evidenceModelSource from "./teams/source-collection/evidenceModel.ts?raw";
 import runModelSource from "./teams/source-collection/runModel.ts?raw";
 import stageProjectionSource from "./teams/source-collection/stageProjection.ts?raw";
+import researchWorkflowResourcesSource from "./teams/useResearchWorkflowResources.ts?raw";
 import teamMemoryIndexPanelSource from "./TeamMemoryIndexPanel.tsx?raw";
 import teamMemoryIndexPanelStyles from "./TeamMemoryIndexPanel.styles";
 import teamSourceCollectionActiveStagePanelSource from "./TeamSourceCollectionActiveStagePanel.tsx?raw";
@@ -162,35 +163,36 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("fetchJson<ChatRoomDetail>(`/api/chat-rooms/${encodeURIComponent(linkedChatRoomId)}`, { signal })");
     expect(routeSource).toContain("linkedRoomRefetchInterval(pageVisible");
     expect(routeSource).toContain("latestChatRoomRound(linkedRoomDetail)");
-    expect(routeSource).toContain("fetchJson<TeamWorkflowOrchestration>(`/api/teams/${encodeURIComponent(effectiveTeamId)}/workflow-orchestration`, { signal })");
-    expect(routeSource).toContain("fetchJson<TeamWorkflowCandidateListPayload>");
+    expect(researchWorkflowResourcesSource).toContain("fetchJson<TeamWorkflowOrchestration>");
+    expect(researchWorkflowResourcesSource).toContain("/workflow-orchestration`");
+    expect(researchWorkflowResourcesSource).toContain("fetchJson<TeamWorkflowCandidateListPayload>");
     expect(routeSource).toContain("fetchJson<TeamWorkflowCandidateGraphBuildPayload>");
-    expect(routeSource).toContain("fetchJson<TeamWorkflowKnowledgeIngestionStatus>");
-    expect(routeSource).toContain("fetchJson<TeamWorkflowOfficialModelEvidenceStatus>");
-    expect(routeSource).toContain("TEAM_WORKFLOW_CANDIDATE_PREVIEW_LIMIT");
-    expect(routeSource).toContain("TEAM_WORKFLOW_CANDIDATE_GRAPH_LIMIT");
+    expect(researchWorkflowResourcesSource).toContain("fetchJson<TeamWorkflowKnowledgeIngestionStatus>");
+    expect(researchWorkflowResourcesSource).toContain("fetchJson<TeamWorkflowOfficialModelEvidenceStatus>");
+    expect(researchWorkflowResourcesSource).toContain("TEAM_WORKFLOW_CANDIDATE_PREVIEW_LIMIT");
+    expect(researchWorkflowResourcesSource).toContain("TEAM_WORKFLOW_CANDIDATE_GRAPH_LIMIT");
     expect(routeSource).toContain("isResearchWorkflowTeam(selectedTeam)");
     expect(routeSource).toContain("researchWorkflowTeamSelected");
     expect(routeSource).toContain("teamWorkflowKnowledgeIngestionStatusQuery");
-    expect(routeSource).toContain("/workflow-orchestration/knowledge-ingestion/status");
+    expect(researchWorkflowResourcesSource).toContain("/workflow-orchestration/knowledge-ingestion/status");
     expect(routeSource).toContain("teamWorkflowOfficialModelEvidenceStatusQuery");
-    expect(routeSource).toContain("/workflow-orchestration/official-model-evidence/status");
-    expect(routeSource).toContain("TeamWorkflowSourceQualityStatus");
+    expect(researchWorkflowResourcesSource).toContain("/workflow-orchestration/official-model-evidence/status");
+    expect(researchWorkflowResourcesSource).toContain("TeamWorkflowSourceQualityStatus");
     expect(routeSource).toContain("teamWorkflowSourceQualityStatusQuery");
-    expect(routeSource).toContain("/workflow-orchestration/source-quality/status");
+    expect(researchWorkflowResourcesSource).toContain("/workflow-orchestration/source-quality/status");
     expect(routeSource).toContain("/source-quality/assess");
     expect(routeSource).toContain("assessSourceQualityMutation");
     expect(routeSource).toContain("candidateSourceQualityAssessmentSummary");
-    expect(routeSource).toContain("TeamWorkflowPaperNoteChunkStatus");
+    expect(researchWorkflowResourcesSource).toContain("TeamWorkflowPaperNoteChunkStatus");
     expect(routeSource).toContain("teamWorkflowPaperNoteChunkStatusQuery");
-    expect(routeSource).toContain("/workflow-orchestration/paper-note-chunks/status");
+    expect(researchWorkflowResourcesSource).toContain("/workflow-orchestration/paper-note-chunks/status");
     expect(routeSource).toContain("/paper-note-chunks/plan");
     expect(routeSource).toContain("planPaperNoteChunksMutation");
     expect(routeSource).toContain("sourceCandidateHasCompletedExtraction");
     expect(routeSource).toContain("candidatePaperNoteChunkPlanSummary");
     expect(routeSource).toContain("ResearchStageRoundStatusPayload");
     expect(routeSource).toContain("researchStageRoundStatusQuery");
-    expect(routeSource).toContain("/workflow-orchestration/stage-rounds/status");
+    expect(researchWorkflowResourcesSource).toContain("/workflow-orchestration/stage-rounds/status");
     expect(routeSource).toContain("/workflow-orchestration/stage-rounds/start");
     expect(routeSource).toContain("startResearchStageRoundMutation");
     expect(routeSource).toContain("seedSourceCollectionAgentSessionContextMutation");
@@ -291,7 +293,7 @@ describe("TeamsRoute layout contract", () => {
     expect(teamSourceCollectionStorageActionsPanelSource).toContain("本轮产物");
     expect(teamSourceCollectionStorageActionsPanelSource).toContain("更多证据文件");
     expect(routeSource).toContain("SOURCE_COLLECTION_DEFAULT_ROLES");
-    expect(routeSource).toContain("candidateType=candidate_graph");
+    expect(researchWorkflowResourcesSource).toContain("candidateType=candidate_graph");
     expect(routeSource).toContain("/workflow-orchestration/candidate-graph");
     expect(routeSource).toContain("buildCandidateGraphMutation");
     expect(routeSource).toContain('source: "team_workspace"');
@@ -1201,24 +1203,24 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("payload.taskId");
     expect(stageProjectionSource).toContain("正在同步 Agent 结果");
     expect(stageProjectionSource).toContain("Syncing Agent result");
-    expect(routeSource).toContain("refetchInterval: (query) =>");
-    expect(routeSource).toContain("query.state.data as ResearchStageRoundStatusPayload | null | undefined");
+    expect(researchWorkflowResourcesSource).toContain("refetchInterval: (query) =>");
+    expect(researchWorkflowResourcesSource).toContain("query.state.data as ResearchStageRoundStatusPayload | null | undefined");
     expect(routeSource).toContain("sourceCollectionStageWritebackSyncActive,");
     expect(routeSource).toContain("sourceCollectionStageWritebackRefetchInterval(");
-    expect(routeSource).toContain("refetchInterval: () => sourceCollectionStageWritebackRefetchInterval(");
-    const sourceQualityStatusQuerySource = routeSource.slice(
-      routeSource.indexOf("const teamWorkflowSourceQualityStatusQuery"),
-      routeSource.indexOf("const teamWorkflowPaperNoteChunkStatusQuery"),
+    expect(researchWorkflowResourcesSource).toContain("refetchInterval: () => sourceCollectionStageWritebackRefetchInterval(");
+    const sourceQualityStatusQuerySource = researchWorkflowResourcesSource.slice(
+      researchWorkflowResourcesSource.indexOf("const sourceQuality = useQuery"),
+      researchWorkflowResourcesSource.indexOf("const paperNoteChunks = useQuery"),
     );
     expect(sourceQualityStatusQuerySource).toContain("refetchInterval");
-    expect(sourceQualityStatusQuerySource).toContain("sourceCollectionStageWritebackSyncActive");
+    expect(sourceQualityStatusQuerySource).toContain("stageWritebackSync.active");
     expect(routeSource).toContain("SourceCollectionSummaryPayload");
     expect(routeSource).toContain("sourceCollectionSummaryQueryKey");
     expect(routeSource).toContain("/workflow-orchestration/source-collection/summary");
     expect(routeSource).toContain("sourceCollectionSummaryQueryPrefix");
-    expect(routeSource).toContain("includeValidation=false&includeStore=false");
-    expect(routeSource).toContain("const TEAM_WORKFLOW_CANDIDATE_PREVIEW_LIMIT = 80;");
-    expect(routeSource).not.toContain("const TEAM_WORKFLOW_CANDIDATE_PREVIEW_LIMIT = 500;");
+    expect(researchWorkflowResourcesSource).toContain("includeValidation=false&includeStore=false");
+    expect(researchWorkflowResourcesSource).toContain("const TEAM_WORKFLOW_CANDIDATE_PREVIEW_LIMIT = 80;");
+    expect(researchWorkflowResourcesSource).not.toContain("const TEAM_WORKFLOW_CANDIDATE_PREVIEW_LIMIT = 500;");
     expect(routeSource).toContain("sourceCollectionWorkspaceSelected");
     expect(routeSource).toContain("teamWorkflowCandidateListEnabled");
     expect(routeSource).toContain("teamWorkflowGraphEnabled");
@@ -1228,7 +1230,7 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("sourceCollectionSummaryStageRound");
     expect(routeSource).toContain("sourceCollectionSummaryCounts");
     expect(routeSource).toContain("summarySourceCollectionActiveWorkRun");
-    expect(routeSource).toContain("enabled: Boolean(effectiveTeamId && researchWorkflowTeamSelected)");
+    expect(routeSource).toContain("workflow: Boolean(effectiveTeamId && researchWorkflowTeamSelected)");
     expect(routeSource).toContain("const sourceCollectionFindingDetailsVisible = Boolean(");
     const sourceCollectionFindingDetailsVisibleSource = routeSource.slice(
       routeSource.indexOf("const sourceCollectionFindingDetailsVisible = Boolean("),
@@ -1310,7 +1312,7 @@ describe("TeamsRoute layout contract", () => {
     expect(queryLayerSource).toContain("queryFn: ({ signal }) => fetchJson<Team>(`/api/teams/${encodeURIComponent(effectiveTeamId)}?detail=${teamDetailLoadMode}`, { signal })");
     expect(queryLayerSource).toContain("queryFn: ({ signal }) => fetchJson<TeamOrganizationCanvas>(`/api/teams/${encodeURIComponent(effectiveTeamId)}/canvas`, { signal })");
     expect(queryLayerSource).toContain("queryFn: ({ signal }) =>");
-    expect(queryLayerSource.match(/queryFn: \(\{ signal \}\) =>/g)?.length ?? 0).toBe(25);
+    expect(queryLayerSource.match(/queryFn: \(\{ signal \}\) =>/g)?.length ?? 0).toBe(16);
     expect(queryLayerSource.match(/queryFn: \(\) =>/g) ?? []).toEqual([]);
     const sourceCollectionStageReturnRefreshSource = routeSource.slice(
       routeSource.indexOf("if (!researchWorkflowTeamSelected || !pageVisible"),

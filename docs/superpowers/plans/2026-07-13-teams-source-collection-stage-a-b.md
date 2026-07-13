@@ -146,25 +146,25 @@ hook 内部返回按领域命名的 typed query results：`workflow`、`stageRou
 
 ### Task B1：shared query contract RED
 
-- [ ] 新增 `useResearchWorkflowResources.contract.test.ts`，先断言新模块存在且拥有精确九个 query。
-- [ ] 对每个 query 锁定原 query key、`queryFn: ({ signal })`、`{ signal }` 传递、独立 demand-enabled 条件。
-- [ ] 锁定 stage-round/candidates/source-quality/ingestion 当前 polling policy，以及 hook 不包含 `useMutation`、`useState`、navigation、draft 或 panel import。
-- [ ] 锁定 Route 只调用 shared hook，不再声明九个同 key queries；先运行得到目标 RED。
+- [x] 新增 `useResearchWorkflowResources.contract.test.ts`，先断言新模块存在且拥有精确九个 query。
+- [x] 对每个 query 锁定原 query key、`queryFn: ({ signal })`、`{ signal }` 传递、独立 demand-enabled 条件。
+- [x] 锁定 stage-round/candidates/source-quality/ingestion 当前 polling policy，以及 hook 不包含 `useMutation`、`useState`、navigation、draft 或 panel import。
+- [x] 锁定 Route 只调用 shared hook，不再声明九个同 key queries；先运行得到目标 RED。
 
 ### Task B2：实现唯一 read-query owner
 
-- [ ] 创建 typed hook，按当前顺序无条件调用九个 `useQuery`；`enabled` 只控制请求，不控制 hook mount。
-- [ ] 移入四个 custom query-key helpers 和三个 Route-local只读 status type families；Route mutation 通过 import 继续使用同一 key。
-- [ ] 内部使用 `stageRound.data` 与显式 `stageWritebackSync` 保持 candidates/source-quality polling；knowledge-ingestion 继续只在 active work run 时轮询。
-- [ ] 返回九个命名 query results，不返回 `Record<string, unknown>`，不包装 mutation 或 navigation。
+- [x] 创建 typed hook，按当前顺序无条件调用九个 `useQuery`；`enabled` 只控制请求，不控制 hook mount。
+- [x] 移入四个 custom query-key helpers 和三个 Route-local只读 status type families；Route mutation 通过 import 继续使用同一 key。
+- [x] 内部使用 `stageRound.data` 与显式 `stageWritebackSync` 保持 candidates/source-quality polling；knowledge-ingestion 继续只在 active work run 时轮询。
+- [x] 返回九个命名 query results，不返回 `Record<string, unknown>`，不包装 mutation 或 navigation。
 
 ### Task B3：Route 集成与 ownership 清理
 
-- [ ] Route 按现有 booleans 构造 exact `demand`，无条件调用 hook，并 alias 回现有 query variable names。
-- [ ] 删除 Route 中九个 `useQuery` bodies、已迁移 key/type definitions 和对应 raw-source ownership assertions。
-- [ ] 保持 `sourceCollectionRunsQuery`、summary/runtime/run details queries 和全部 mutations 原位。
-- [ ] contract/layout/logic/model tests GREEN 后运行 build；若任何 query key、enabled、polling、signal 或 invalidation diff，停止并恢复 Route declarations，不保留双 owner。
-- [ ] checkpoint：提交 `refactor(web): centralize research workflow reads`。
+- [x] Route 按现有 booleans 构造 exact `demand`，无条件调用 hook，并 alias 回现有 query variable names。
+- [x] 删除 Route 中九个 `useQuery` bodies、已迁移 key/type definitions 和对应 raw-source ownership assertions。
+- [x] 保持 `sourceCollectionRunsQuery`、summary/runtime/run details queries 和全部 mutations 原位。
+- [x] contract/layout/logic/model tests GREEN 后运行 build；若任何 query key、enabled、polling、signal 或 invalidation diff，停止并恢复 Route declarations，不保留双 owner。
+- [x] checkpoint：提交 `refactor(web): centralize research workflow reads`。
 
 ## 7. 验证命令
 
