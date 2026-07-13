@@ -92,19 +92,99 @@ function assistantCellsOverlap(
     && (leftText.startsWith(rightText) || rightText.startsWith(leftText));
 }
 
-function mergeCodexTranscriptCells(
-  ...cellGroups: Array<CodexTranscriptProjection["cells"] | undefined>
+type CodexTranscriptMergeOptions = {
+  previousEphemeral?: boolean;
+  nextEphemeral?: boolean;
+};
+
+type CodexTranscriptCellEntry = {
+  cell: CodexTranscriptProjection["cells"][number];
+  ephemeral: boolean;
+};
+
+function toolCellSemanticKey(cell: CodexTranscriptProjection["cells"][number]) {
+  if (cell.kind !== "tool_call") {
+    return "";
+  }
+  return [
+    cell.kind,
+    String(cell.title ?? "").replace(/\s+/g, " ").trim().toLowerCase(),
+  ].join("\u001f");
+}
+
+function mergeCodexTranscriptCellEntries(
+  previous: CodexTranscriptProjection | undefined,
+  next: CodexTranscriptProjection | undefined,
+  options: CodexTranscriptMergeOptions,
 ) {
-  const mergedByIdentity = mergeProjectionItems(...cellGroups) ?? [];
+  const entries: CodexTranscriptCellEntry[] = [];
+  const indexes = new Map<string, number>();
+  const groups = [
+    { cells: previous?.cells, ephemeral: Boolean(options.previousEphemeral) },
+    { cells: next?.cells, ephemeral: Boolean(options.nextEphemeral) },
+  ];
+  for (const group of groups) {
+    for (const cell of group.cells ?? []) {
+      const key = projectionItemIdentity(cell);
+      const existingIndex = indexes.get(key);
+      if (existingIndex === undefined) {
+        indexes.set(key, entries.length);
+        entries.push({ cell, ephemeral: group.ephemeral });
+        continue;
+      }
+      const existing = entries[existingIndex];
+      if (!existing.ephemeral && group.ephemeral) {
+        continue;
+      }
+      entries[existingIndex] = { cell, ephemeral: group.ephemeral };
+    }
+  }
+  return entries;
+}
+
+function mergeCodexTranscriptCells(
+  previous: CodexTranscriptProjection | undefined,
+  next: CodexTranscriptProjection | undefined,
+  options: CodexTranscriptMergeOptions,
+) {
+  const mergedEntries = mergeCodexTranscriptCellEntries(previous, next, options);
   const cells: CodexTranscriptProjection["cells"] = [];
-  for (const cell of mergedByIdentity) {
+  const cellEphemeral: boolean[] = [];
+  const matchedDurableToolCells = new Set<number>();
+  for (const entry of mergedEntries) {
+    const { cell, ephemeral } = entry;
+    const toolSemanticKey = toolCellSemanticKey(cell);
+    if (toolSemanticKey) {
+      const matchingIndex = cells.findIndex((candidate, index) => (
+        !matchedDurableToolCells.has(index)
+        && cellEphemeral[index] !== ephemeral
+        && toolCellSemanticKey(candidate) === toolSemanticKey
+      ));
+      if (matchingIndex >= 0) {
+        matchedDurableToolCells.add(matchingIndex);
+        if (!ephemeral) {
+          cells[matchingIndex] = cell;
+          cellEphemeral[matchingIndex] = false;
+        }
+        continue;
+      }
+    }
     const overlappingIndex = cells.findIndex((candidate) => assistantCellsOverlap(candidate, cell));
     if (overlappingIndex < 0) {
       cells.push(cell);
+      cellEphemeral.push(ephemeral);
       continue;
     }
-    if (assistantCellRank(cell) >= assistantCellRank(cells[overlappingIndex])) {
+    if (
+      assistantCellRank(cell) > assistantCellRank(cells[overlappingIndex])
+      || (
+        assistantCellRank(cell) === assistantCellRank(cells[overlappingIndex])
+        && cellEphemeral[overlappingIndex]
+        && !ephemeral
+      )
+    ) {
       cells[overlappingIndex] = cell;
+      cellEphemeral[overlappingIndex] = ephemeral;
     }
   }
   return cells;
@@ -167,6 +247,7 @@ export function mergeCodexTranscripts(
   previous: CodexTranscriptProjection | undefined,
   next: CodexTranscriptProjection | undefined,
   messageId: string,
+  options: CodexTranscriptMergeOptions = {},
 ): CodexTranscriptProjection | undefined {
   if (!previous) {
     return next;
@@ -179,7 +260,7 @@ export function mergeCodexTranscripts(
     ...next,
     messageId,
     streaming: next.streaming ?? previous.streaming,
-    cells: mergeCodexTranscriptCells(previous.cells, next.cells),
+    cells: mergeCodexTranscriptCells(previous, next, options),
     rolloutEvents: mergeProjectionItems(previous.rolloutEvents, next.rolloutEvents),
     toolCalls: mergeProjectionItems(previous.toolCalls, next.toolCalls) ?? [],
     terminalOperations: mergeProjectionItems(previous.terminalOperations, next.terminalOperations) ?? [],
@@ -276,7 +357,10 @@ function mergeProcessProjectionMessages(previous: ConversationMessage, next: Con
     toolCalls: undefined,
     attachments: mergeProjectionItems(previous.attachments, next.attachments),
     references: mergeProjectionItems(previous.references, next.references),
-    codexTranscript: mergeCodexTranscripts(previous.codexTranscript, next.codexTranscript, previous.id),
+    codexTranscript: mergeCodexTranscripts(previous.codexTranscript, next.codexTranscript, previous.id, {
+      previousEphemeral: isEphemeralProjectionMessage(previous),
+      nextEphemeral: isEphemeralProjectionMessage(next),
+    }),
     metadata: {
       ...(previous.metadata ?? {}),
       ...(next.metadata ?? {}),
@@ -286,6 +370,15 @@ function mergeProcessProjectionMessages(previous: ConversationMessage, next: Con
       ])],
     },
   };
+}
+
+function isEphemeralProjectionMessage(message: ConversationMessage) {
+  const kind = String(message.metadata?.kind ?? "").trim();
+  return Boolean(
+    message.streaming
+    || kind === "session_live_overlay"
+    || kind === "session_active_turn_layer"
+  );
 }
 
 export function projectTimelineProcessMessages(messages: ConversationMessage[]) {
