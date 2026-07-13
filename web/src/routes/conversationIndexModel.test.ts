@@ -470,7 +470,7 @@ describe("conversationIndexModel", () => {
     expect(classifyConversation(conversation({ conversationIndexKind: "personal_agent", title: "自进化 Agent" }))).toBe("personalAgent");
     expect(classifyConversation(conversation({ conversationIndexKind: "team_agent" }))).toBe("invalid");
     expect(classifyConversation(conversation({ conversationIndexKind: "invalid" }))).toBe("invalid");
-    expect(conversationGroupLabel("user", "zh")).toBe("用户会话");
+    expect(conversationGroupLabel("user", "zh")).toBe("普通会话");
     expect(conversationGroupLabel("personalAgent", "zh")).toBe("个人 Agent 会话");
     expect(conversationGroupLabel("invalid", "zh")).toBe("异常会话");
     expect(conversationGroupLabel("other", "zh")).toBe("其他助手");

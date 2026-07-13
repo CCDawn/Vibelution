@@ -493,12 +493,12 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.layout.split(/\s+/)).toContain("grid");
     expect(routeStyles.layout).toContain("!gap-0");
     expect(routeStyles.layout).toContain("!p-0");
-    expect(routeStyles.layout).toContain("[--chat-pane-gutter:1px]");
+    expect(routeStyles.layout).toContain("[--chat-pane-gutter:12px]");
     expect(routeStyles.layout).toContain(
       "grid-cols-[var(--chat-left-pane-width,300px)_var(--chat-pane-gutter)_minmax(0,1fr)_var(--chat-pane-gutter)_var(--chat-right-pane-width,220px)]",
     );
     expect(routeStyles.layoutCompactDesktop).toContain(
-      "grid-cols-[minmax(220px,var(--chat-left-pane-width,248px))_1px_minmax(0,1fr)]",
+      "grid-cols-[minmax(220px,var(--chat-left-pane-width,248px))_var(--chat-pane-gutter)_minmax(0,1fr)]",
     );
     expect(routeStyles.layoutOverlay).toContain("grid-cols-[minmax(0,1fr)]");
     expect(routeStyles.overlayPane).toContain("fixed");
@@ -510,7 +510,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.layout).not.toContain("_8px_");
     expect(routeStyles.layoutCompactDesktop).not.toContain("_8px_");
     expect(routeStyles.resizeHandle).toContain("h-full");
-    expect(routeStyles.resizeHandle).toContain("w-[1px]");
+    expect(routeStyles.resizeHandle).toContain("w-full");
     expect(routeStyles.resizeHandle).toContain("cursor-col-resize");
     expect(routeStyles.resizeHandle).toContain("touch-none");
     expect(routeStyles.resizeHandle).toContain("before:absolute");
