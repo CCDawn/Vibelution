@@ -82,4 +82,3 @@ Run: `node node_modules/vite/bin/vite.js build`
 Run: `git diff --check`
 
 Expected: 三条命令退出码均为 0。
-
