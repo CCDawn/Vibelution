@@ -4,7 +4,7 @@ import { resolveLegacyTeamsRedirect } from "./LegacyTeamsRedirect";
 import canvasDataSource from "./TeamsRoute.canvasData.ts?raw";
 import routeSource from "./TeamsRoute.tsx?raw";
 import teamsSourceCollectionPanelSource from "./teams/TeamsSourceCollectionPanel.tsx?raw";
-import teamsRouteViewModelSource from "./teams/teamsRouteViewModel.ts?raw";
+import runModelSource from "./teams/source-collection/runModel.ts?raw";
 import teamMemoryIndexPanelSource from "./TeamMemoryIndexPanel.tsx?raw";
 import teamMemoryIndexPanelStyles from "./TeamMemoryIndexPanel.styles";
 import teamSourceCollectionActiveStagePanelSource from "./TeamSourceCollectionActiveStagePanel.tsx?raw";
@@ -261,8 +261,8 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("selectDefaultSourceCollectionRun");
     expect(routeSource).not.toContain("function sourceCollectionRunMetric");
     expect(routeSource).not.toContain("export function sourceCollectionRunRecordCount");
-    expect(teamsRouteViewModelSource).toContain("function sourceCollectionRunMetric");
-    expect(teamsRouteViewModelSource).toContain("export function selectDefaultSourceCollectionRun");
+    expect(runModelSource).toContain("function sourceCollectionRunMetric");
+    expect(runModelSource).toContain("export function selectDefaultSourceCollectionRun");
     expect(routeSource).toContain("sourceCollectionHistoricalRunWithRecords");
     expect(routeSource).toContain("sourceCollectionLatestRunIsEmpty");
     expect(routeSource).toContain("renderSourceCollectionRunSwitcher");
@@ -631,7 +631,7 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("新一轮搜集");
     expect(routeSource).toContain("继续审查");
     expect(routeSource).toContain("准备实验");
-    expect(routeSource).toContain("正在团队搜索");
+    expect(runModelSource).toContain("正在团队搜索");
     expect(routeSource).toContain("知识搜集操作台");
     expect(routeSource).toContain("sourceCollectionDecisionText");
     expect(routeSource).toContain("下一步");
@@ -689,7 +689,7 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("assessSourceQualityBatchMutation");
     expect(routeSource).toContain("sourceCollectionExtractorAgentId");
     expect(routeSource).toContain("source-quality/assess-batch");
-    expect(routeSource).toContain("执行资料提炼复核");
+    expect(runModelSource).toContain("执行资料提炼复核");
     expect(routeSource).toContain("Agent 复核中");
     expect(routeSource).toContain("sourceCollectionExpandedPanelId");
     expect(routeSource).toContain("sourceCollectionFocusedPanelId");
@@ -837,7 +837,7 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("sourceCollectionStageLaunchActive");
     expect(routeSource).toContain("sourceCollectionStageLaunchSummary");
     expect(routeSource).toContain("Agent 已启动，正在进入私聊");
-    expect(routeSource).toContain("等待 Agent 回写");
+    expect(runModelSource).toContain("等待 Agent 回写");
     expect(routeSource).toContain("sourceCollectionStageDisplayState");
     expect(routeSource).toContain("sourceCollectionStageInterruptedSummary");
     expect(routeSource).toContain("剩余检查项");
@@ -969,7 +969,7 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("sourceCollectionDownstreamOpenAssignmentCount");
     expect(routeSource).toContain("SOURCE_COLLECTION_SEARCH_EXECUTION_ROLES");
     expect(routeSource).toContain("个搜索任务待执行");
-    expect(routeSource).toContain("搜索已停止，还有");
+    expect(runModelSource).toContain("搜索已停止，还有");
     expect(routeSource).not.toContain("sourceCollectionOpenAssignmentCount > 0 ? <Search");
     expect(routeSource).toContain("条资料通过审查");
     expect(routeSource).toContain("Agent 重新提炼复核");
