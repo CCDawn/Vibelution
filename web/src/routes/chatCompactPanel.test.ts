@@ -5,6 +5,8 @@ import {
   getPetAvatarPresetKey,
   getPetAvatarSymbol,
   isLowValuePanelText,
+  resolveChatResponsiveLayout,
+  resolveChatUserDisplayName,
 } from "./chatCompactPanel";
 
 describe("chatCompactPanel", () => {
@@ -38,5 +40,20 @@ describe("chatCompactPanel", () => {
     expect(getPetAvatarPresetKey(" Moose ")).toBe("moose");
     expect(getPetAvatarPresetKey("")).toBe("default");
     expect(getPetAvatarPresetKey(undefined)).toBe("default");
+  });
+
+  it.each([
+    [1440, "wide", true, false],
+    [1024, "compact", true, false],
+    [768, "overlay", false, false],
+    [390, "mobile", false, false],
+  ] as const)("resolves %ipx to %s without forcing persistent pane preferences", (width, mode, leftVisible, rightVisible) => {
+    expect(resolveChatResponsiveLayout(width)).toEqual({ mode, leftVisible, rightVisible });
+  });
+
+  it("does not expose an empty or numeric internal user id as the author name", () => {
+    expect(resolveChatUserDisplayName("")).toBe("操作者");
+    expect(resolveChatUserDisplayName("17533")).toBe("操作者");
+    expect(resolveChatUserDisplayName(" 闻望舒 ")).toBe("闻望舒");
   });
 });

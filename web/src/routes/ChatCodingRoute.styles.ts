@@ -238,6 +238,8 @@ const styles: Record<string, string> = {
     "vui-routes-chatcodingroute cacheDonutTrack min-w-0 fill-none stroke-[color-mix(in_srgb,var(--vui-border-subtle)_82%,transparent)] [stroke-linecap:round] [vector-effect:non-scaling-stroke]",
   centerPane:
     "vui-routes-chatcodingroute centerPane min-w-0 grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden bg-[color-mix(in_srgb,var(--surface-page)_10%,transparent)] [grid-column:3] [grid-row:1]",
+  centerPaneOverlay:
+    "vui-routes-chatcodingroute centerPaneOverlay [grid-column:1] [grid-row:1]",
   centerSurface:
     "vui-routes-chatcodingroute centerSurface grid h-full min-h-0 overflow-hidden bg-[color-mix(in_srgb,var(--vui-surface-panel)_6%,transparent)]",
   chatReturnLink:
@@ -483,9 +485,11 @@ const styles: Record<string, string> = {
   kernelTraceLink:
     "vui-routes-chatcodingroute kernelTraceLink min-w-0",
 layout:
-    "vui-routes-chatcodingroute layout min-w-0 grid !gap-0 !p-0 [--chat-workbench-gap:4px] [--chat-pane-gutter:1px] h-[calc(100dvh_-_var(--shell-topbar-height))] max-h-[calc(100dvh_-_var(--shell-topbar-height))] overflow-hidden grid-cols-[var(--chat-left-pane-width,300px)_var(--chat-pane-gutter)_minmax(0,1fr)_var(--chat-pane-gutter)_var(--chat-right-pane-width,220px)] max-[1100px]:grid-cols-[var(--chat-left-pane-width,300px)_var(--chat-pane-gutter)_minmax(0,1fr)_var(--chat-pane-gutter)_var(--chat-right-pane-width,220px)]",
+    "vui-routes-chatcodingroute layout relative min-w-0 grid !gap-0 !p-0 [--chat-workbench-gap:4px] [--chat-pane-gutter:1px] h-[calc(100dvh_-_var(--shell-topbar-height))] max-h-[calc(100dvh_-_var(--shell-topbar-height))] overflow-hidden grid-cols-[var(--chat-left-pane-width,300px)_var(--chat-pane-gutter)_minmax(0,1fr)_var(--chat-pane-gutter)_var(--chat-right-pane-width,220px)]",
   layoutCompactDesktop:
-    "vui-routes-chatcodingroute layoutCompactDesktop min-w-0 !gap-0 !p-0 !grid-cols-[var(--chat-left-pane-width,300px)_var(--chat-pane-gutter)_minmax(520px,1fr)_var(--chat-pane-gutter)_minmax(0,var(--chat-right-pane-width,0px))] max-[980px]:!grid-cols-[minmax(260px,var(--chat-left-pane-width,300px))_var(--chat-pane-gutter)_minmax(420px,1fr)_var(--chat-pane-gutter)_minmax(0,var(--chat-right-pane-width,0px))]",
+    "vui-routes-chatcodingroute layoutCompactDesktop grid min-w-0 grid-cols-[minmax(220px,var(--chat-left-pane-width,248px))_1px_minmax(0,1fr)] overflow-hidden",
+  layoutOverlay:
+    "vui-routes-chatcodingroute layoutOverlay relative grid min-w-0 grid-cols-[minmax(0,1fr)] overflow-hidden",
   leftBlock:
     "vui-routes-chatcodingroute leftBlock grid min-w-0 shrink-0 gap-1.5 border-0 border-b border-[var(--vui-border-subtle)] bg-transparent p-2 shadow-none last:border-b-0",
   leftRail:
@@ -626,6 +630,18 @@ layout:
     "vui-routes-chatcodingroute oneLineValue min-w-0 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--vui-border-subtle)_68%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-row)_42%,transparent)] px-1.5 py-1 text-[var(--vui-font-xs)] leading-tight text-[var(--fg-secondary)] [&_span]:mr-1.5 [&_span]:font-semibold [&_span]:text-[var(--fg-tertiary)]",
   paneCollapsed:
     "vui-routes-chatcodingroute paneCollapsed min-w-0 hidden invisible pointer-events-none !overflow-hidden opacity-0",
+  overlayBackdrop:
+    "vui-routes-chatcodingroute overlayBackdrop fixed inset-0 z-30 border-0 bg-black/35",
+  overlayPane:
+    "vui-routes-chatcodingroute overlayPane fixed inset-y-[var(--shell-topbar-height)] z-40 w-[min(86vw,320px)] shadow-[var(--vui-elevation-panel)]",
+  overlayPaneControls:
+    "vui-routes-chatcodingroute overlayPaneControls ml-auto flex min-w-0 items-center gap-1",
+  overlayPaneLeft:
+    "vui-routes-chatcodingroute overlayPaneLeft left-0",
+  overlayPaneRight:
+    "vui-routes-chatcodingroute overlayPaneRight right-0",
+  overlayPaneToggle:
+    "vui-routes-chatcodingroute overlayPaneToggle inline-flex min-h-[30px] items-center rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 text-[var(--vui-font-xs)] font-semibold text-[var(--fg-secondary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-cool)]",
   panelBody:
     "vui-routes-chatcodingroute panelBody min-w-0 h-full p-2 text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] min-h-0 overflow-auto [scrollbar-gutter:stable]",
   panelNotice:

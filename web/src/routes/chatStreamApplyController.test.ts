@@ -50,6 +50,10 @@ function trace(patch: Partial<SessionStreamProtocolTrace> = {}): SessionStreamPr
     turnId: "",
     itemId: "",
     turnItemCount: 0,
+    finalAnswerItemCount: 0,
+    commentaryItemCount: 0,
+    toolItemCount: 0,
+    terminalErrorItemCount: 0,
     stage: "",
     done: false,
     ...patch,
@@ -285,5 +289,53 @@ describe("chatStreamApplyController", () => {
     expect(decision.shouldInvalidateSession).toBe(false);
     expect(decision.shouldLogApplied).toBe(true);
     expect(decision.telemetry.appliedCount).toBe(50);
+  });
+
+  it("carries bounded canonical item counts through assistant delta apply telemetry", () => {
+    const decision = planAppliedAssistantDeltaDrain({
+      streamSessionId: "session-1",
+      reason: "final",
+      drain: drain([
+        {
+          payload: assistantDelta({
+            done: true,
+            turnItems: [
+              {
+                version: 2,
+                id: "error:0",
+                itemId: "error",
+                type: "error",
+                kind: "error",
+                status: "failed",
+                terminal: true,
+                provisional: false,
+                text: "上游服务暂不可用。",
+              },
+            ],
+          }),
+          payloadLength: 20,
+          receivedAtMs: 100,
+        },
+      ], {
+        reason: "final",
+        mode: "final",
+      }),
+      committedLayer: undefined,
+      stats: stats({ received: 1 }),
+      applyStartedAtMs: 120,
+      applyFinishedAtMs: 122,
+    });
+
+    expect(decision.applied).toBe(true);
+    if (!decision.applied) {
+      throw new Error("expected terminal error delta to apply");
+    }
+    expect(decision.telemetry).toMatchObject({
+      finalAnswerItemCount: 0,
+      commentaryItemCount: 0,
+      toolItemCount: 0,
+      terminalErrorItemCount: 1,
+    });
+    expect(JSON.stringify(decision.telemetry)).not.toContain("上游服务暂不可用");
   });
 });

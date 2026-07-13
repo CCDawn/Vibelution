@@ -137,6 +137,122 @@ describe("ConversationView native Codex transcript surface", () => {
     expect(html).not.toContain("responseSection");
   });
 
+  it("renders a canonical terminal error once without a legacy response or turn notice", () => {
+    const html = renderConversation([
+      {
+        id: "message-error",
+        role: "assistant",
+        content: "上游服务暂不可用。",
+        timestamp: "2026-07-13T00:00:00.000Z",
+        metadata: { kind: "turn_error", errorType: "provider_upstream_error", httpStatus: 502 },
+        codexTranscript: {
+          version: 1,
+          source: "native",
+          messageId: "message-error",
+          cells: [
+            {
+              id: "error",
+              kind: "error_notice",
+              messageId: "message-error",
+              status: "failed",
+              tone: "error",
+              phase: "turn_failed",
+              terminal: true,
+              text: "上游服务暂不可用。",
+              diagnosticSummary: { httpStatus: 502, reasonCode: "upstream_unavailable" },
+            },
+          ],
+        },
+      },
+    ]);
+
+    expect(html.match(/上游服务暂不可用。/g)).toHaveLength(1);
+    expect(html).toContain('data-codex-transcript-cell-kind="error_notice"');
+    expect(html).not.toContain("运行提示");
+    expect(html).toContain("诊断详情");
+    expect(html).toContain("upstream_unavailable");
+    expect(html).not.toContain('open=""');
+    expect(html).not.toContain("responseSection");
+  });
+
+  it("keeps commentary, tool, and final answer in canonical DOM order with tool details closed", () => {
+    const html = renderConversation([
+      {
+        id: "message-chain",
+        role: "assistant",
+        content: "legacy duplicate final",
+        timestamp: "2026-07-13T00:00:00.000Z",
+        codexTranscript: {
+          version: 1,
+          source: "native",
+          messageId: "message-chain",
+          cells: [
+            {
+              id: "commentary",
+              kind: "assistant_markdown",
+              messageId: "message-chain",
+              status: "completed",
+              tone: "neutral",
+              channel: "commentary",
+              phase: "commentary",
+              text: "我先检查文件。",
+            },
+            {
+              id: "tool",
+              kind: "tool_call",
+              messageId: "message-chain",
+              status: "completed",
+              tone: "neutral",
+              channel: "tool",
+              phase: "tool_call",
+              title: "read_file",
+              operationIds: ["read-file-op"],
+              toolLifecycleModel: {
+                toolCalls: [
+                  {
+                    toolCallId: "tool_call:read-file-op",
+                    rawOperationId: "read-file-op",
+                    status: "completed",
+                    title: "read_file",
+                    rawToolName: "read_file",
+                    runtimeKind: "tool",
+                    resultPreview: "file loaded",
+                  },
+                ],
+                terminalOperations: [],
+                terminalSessions: [],
+                modelObservations: [],
+              },
+            },
+            {
+              id: "final",
+              kind: "assistant_markdown",
+              messageId: "message-chain",
+              status: "completed",
+              tone: "neutral",
+              channel: "answer",
+              phase: "final_answer",
+              terminal: true,
+              text: "检查完成。",
+            },
+          ],
+        },
+      },
+    ]);
+
+    const commentaryIndex = html.indexOf("我先检查文件。");
+    const toolIndex = html.indexOf("read_file");
+    const finalIndex = html.indexOf("检查完成。");
+    expect(commentaryIndex).toBeGreaterThan(-1);
+    expect(toolIndex).toBeGreaterThan(commentaryIndex);
+    expect(finalIndex).toBeGreaterThan(toolIndex);
+    expect(html).toContain('data-codex-tool-detail="true"');
+    expect(html).not.toContain('open=""');
+    expect(html).not.toContain("legacy duplicate final");
+    expect(html).toContain("codexTranscriptCommentaryCell");
+    expect(html).toContain("codexTranscriptFinalCell");
+  });
+
   it("renders native transcript as the primary assistant surface without duplicating legacy process or response", () => {
     const html = renderConversation([
       {
@@ -530,7 +646,7 @@ describe("ConversationView native Codex transcript surface", () => {
     ]);
 
     expect(html).toContain("cli_tool");
-    expect(html).toContain('open=""');
+    expect(html).not.toContain('open=""');
     expect(html).toContain('data-codex-tool-detail-toggle="inline-symbol"');
     expect(html).toContain('aria-label="展开或收起工具结果：cli_tool"');
     expect(html).toContain("git status --short");
