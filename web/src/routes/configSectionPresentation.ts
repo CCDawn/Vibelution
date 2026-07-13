@@ -10,6 +10,7 @@ export type ProgressiveConfigSectionPresentation = {
   sectionSummary?: string;
   layout?: "compact_paths";
   commonPaths: readonly string[];
+  commonFieldCount?: number;
   commonTitle: string;
   commonHint: string;
   advancedTitle: string;
@@ -36,10 +37,8 @@ const CONTEXT_COMPRESSION_COMMON_PATHS = [
 ] as const;
 
 const UI_COMMON_PATHS = [
-  "ui.language",
   "ui.theme",
-  "ui.show_ascii_art",
-  "ui.show_welcome",
+  "ui.workbench_theme",
 ] as const;
 
 const SECURITY_COMMON_PATHS = [
@@ -136,12 +135,15 @@ const SECTION_PRESENTATION: Record<
       advancedCountLabel: (count) => `${count} 项`,
     },
     ui: {
-      sectionTitle: "界面显示",
+      sectionTitle: "界面外观",
+      sectionSummary: "先调整配色和工作台背景；终端显示与刷新参数按需展开。",
+      layout: "compact_paths",
       commonPaths: UI_COMMON_PATHS,
-      commonTitle: "常用设置",
-      commonHint: "先设置语言、配色和工作台欢迎内容。",
-      advancedTitle: "高级设置",
-      advancedHint: "刷新频率、日志容量和背景图片通常不需要频繁修改。",
+      commonFieldCount: 3,
+      commonTitle: "外观快速设置",
+      commonHint: "设置配色和工作台背景；语言与启动设置由 Launcher 维护。",
+      advancedTitle: "终端显示与刷新（高级）",
+      advancedHint: "ASCII、欢迎内容、刷新频率和日志容量通常保持默认。",
       advancedCountLabel: (count) => `${count} 项`,
     },
     security: {
@@ -266,12 +268,15 @@ const SECTION_PRESENTATION: Record<
       advancedCountLabel: (count) => `${count} fields`,
     },
     ui: {
-      sectionTitle: "Interface",
+      sectionTitle: "Interface appearance",
+      sectionSummary: "Adjust colors and the workbench background first; expand terminal display and refresh behavior only when needed.",
+      layout: "compact_paths",
       commonPaths: UI_COMMON_PATHS,
-      commonTitle: "Common settings",
-      commonHint: "Choose the language, color theme, and welcome content first.",
-      advancedTitle: "Advanced settings",
-      advancedHint: "Refresh cadence, log capacity, and background imagery rarely need adjustment.",
+      commonFieldCount: 3,
+      commonTitle: "Appearance quick setup",
+      commonHint: "Set colors and the workbench background. Language and startup settings stay in Launcher.",
+      advancedTitle: "Terminal display and refresh (advanced)",
+      advancedHint: "ASCII, welcome content, refresh cadence, and log capacity usually keep their defaults.",
       advancedCountLabel: (count) => `${count} fields`,
     },
     security: {
@@ -548,7 +553,7 @@ export function configSectionTierCounts(sectionId: string, fieldCount: number): 
   if (!presentation) {
     return { common: fieldCount, advanced: 0 };
   }
-  const common = Math.min(fieldCount, presentation.commonPaths.length);
+  const common = Math.min(fieldCount, presentation.commonFieldCount ?? presentation.commonPaths.length);
   return { common, advanced: Math.max(0, fieldCount - common) };
 }
 

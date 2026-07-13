@@ -38,7 +38,7 @@ const sections: ConfigSummary["sections"] = [
 
 const groupCopy: ConfigSettingsGroupCopy = {
   "overview-apply": { title: "总览与保存", summary: "状态与保存" },
-  "workbench-interface": { title: "界面与高级配置", summary: "工作台与界面" },
+  "workbench-interface": { title: "界面与工作台", summary: "工作台与界面" },
   "avatar-pet": { title: "用户、终端形象与陪伴体", summary: "用户与形象" },
   "models-profiles": { title: "模型库", summary: "模型连接与发现" },
   "runtime-context": { title: "运行时与上下文", summary: "运行时设置" },
@@ -50,6 +50,9 @@ describe("ConfigSettingsNavigation", () => {
     const groups = buildConfigSettingsGroups(sections, groupCopy, "zh");
 
     expect(groups).toHaveLength(6);
+    expect(groups.find((group) => group.id === "workbench-interface")?.pages).toEqual([
+      expect.objectContaining({ id: "workbench-interface", memberSectionIds: ["shell", "ui"] }),
+    ]);
     expect(groups.find((group) => group.id === "tooling-diagnostics")?.pages).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ id: "tooling-access", memberSectionIds: ["security", "network", "parser"] }),
@@ -59,6 +62,21 @@ describe("ConfigSettingsNavigation", () => {
         expect.objectContaining({ id: "tooling-raw", memberSectionIds: ["draft"] }),
       ]),
     );
+  });
+
+  it("omits redundant page tabs when a settings group has one combined page", () => {
+    const groups = buildConfigSettingsGroups(sections, groupCopy, "zh");
+    const workbenchGroup = groups.find((group) => group.id === "workbench-interface") ?? null;
+    const markup = renderToStaticMarkup(
+      <ConfigSettingsPageTabs
+        language="zh"
+        group={workbenchGroup}
+        activePageId="workbench-interface"
+        onSelectPage={() => undefined}
+      />,
+    );
+
+    expect(markup).toBe("");
   });
 
   it("falls back to the requested group's first page", () => {

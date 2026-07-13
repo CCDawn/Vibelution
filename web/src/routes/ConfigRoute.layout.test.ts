@@ -773,6 +773,7 @@ describe("ConfigRoute layout contract", () => {
     expect(routeSource).toContain("const presentation = configSectionPresentation(section.id, lang)");
     expect(routeSource).toContain("configSectionTierCounts(section.id, section.fieldCount)");
     expect(routeSource).toContain("isCommonConfigSectionEntry(section.id, childPath)");
+    expect(routeSource).toContain("return Boolean(metaMap[childPath])");
     expect(routeSource).toContain("presentation.commonTitle");
     expect(routeSource).toContain("presentation.advancedTitle");
     expect(routeSource).toContain("presentation?.sectionTitle ?? section.title");
@@ -783,10 +784,10 @@ describe("ConfigRoute layout contract", () => {
     expect(routeSource).toContain("isDenseConfigSection(section) && !presentation");
     expect(routeSource).toContain("configSectionFieldCopy(path, lang)");
     expect(routeSource).toContain('presentation.layout === "compact_paths" ? styles.configCompactPathProgressiveBody : ""');
-    expect(routeSource).toContain('section.id === "pet" ? styles.configCompanionProgressiveBody : ""');
+    expect(routeSource).toContain('presentation.layout === "compact_paths" && advancedEntries.length > 0 ? styles.configCompactAdvancedProgressiveBody : ""');
     expect(stylesSource).toContain("configProgressiveBody:");
     expect(stylesSource).toContain("configCompactPathProgressiveBody:");
-    expect(stylesSource).toContain("configCompanionProgressiveBody:");
+    expect(stylesSource).toContain("configCompactAdvancedProgressiveBody:");
     expect(stylesSource).toContain("configTierHeader:");
     expect(stylesSource).toContain("configAdvancedToggle:");
     expect(stylesSource).toContain("configAdvancedBody:");
@@ -806,8 +807,10 @@ describe("ConfigRoute layout contract", () => {
     expect(styles.configCompactPathProgressiveBody).toContain("[&_.treeFieldCardView]:![grid-template-columns:minmax(150px,0.42fr)_minmax(0,1fr)]");
     expect(styles.configCompactPathProgressiveBody).toContain("[&_.treeFieldValue]:![grid-row:1/span_2]");
     expect(styles.configCompactPathProgressiveBody).toContain("[&_.treeFieldCardView]:![padding:8px]");
-    expect(styles.configCompanionProgressiveBody).toContain("[&_.configAdvancedToggle]:![min-height:64px]");
-    expect(styles.configCompanionProgressiveBody).toContain("[&_.configAdvancedToggle_.configTierHeaderCopy]:![display:grid]");
+    expect(styles.configCompactPathProgressiveBody).toContain("[&_.treeObjectBlock_>_.treeToggle]:![width:100%]");
+    expect(styles.configCompactPathProgressiveBody).toContain("[&_.treeObjectBlock_>_.treeToggle]:![min-height:50px]");
+    expect(styles.configCompactAdvancedProgressiveBody).toContain("[&_.configAdvancedToggle]:![min-height:64px]");
+    expect(styles.configCompactAdvancedProgressiveBody).toContain("[&_.configAdvancedToggle_.configTierHeaderCopy]:![display:grid]");
   });
 
   it("sizes progressive common grids to the number of visible controls", () => {

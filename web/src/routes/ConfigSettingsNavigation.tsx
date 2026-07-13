@@ -52,8 +52,7 @@ const PAGE_DEFINITIONS: Record<ConfigSettingsGroupId, readonly PageDefinition[]>
     { id: "overview-changes", zh: "变更与保存", en: "Changes", members: ["diagnostics"] },
   ],
   "workbench-interface": [
-    { id: "workbench-behavior", zh: "工作台行为", en: "Workbench", members: ["shell"] },
-    { id: "workbench-ui", zh: "界面显示", en: "Interface", members: ["ui"] },
+    { id: "workbench-interface", zh: "工作台与界面", en: "Workbench & interface", members: ["shell", "ui"] },
   ],
   "avatar-pet": [
     { id: "identity-user", zh: "用户资料", en: "User profile", members: ["user-profile"] },
@@ -181,7 +180,7 @@ export function ConfigSettingsPageTabs({
   activePageId,
   onSelectPage,
 }: ConfigSettingsPageTabsProps) {
-  if (!group) return null;
+  if (!group || group.pages.length <= 1) return null;
   return (
     <nav className={styles.pageTabs} aria-label={language === "zh" ? "当前分区页面" : "Current settings pages"}>
       {group.pages.map((page) => (

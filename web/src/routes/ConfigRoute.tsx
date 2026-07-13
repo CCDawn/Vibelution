@@ -241,8 +241,8 @@ export const CONFIG_COPY = {
     intakeMode: "默认审核方式",
     groupOverviewSaveTitle: "总览与保存",
     groupOverviewSaveSummary: "查看保存状态、重新读取配置，并处理系统环境变量。",
-    groupWorkbenchTitle: "界面与高级配置",
-    groupWorkbenchSummary: "启动设置移到 Launcher；这里保留 shell、非启动类界面和配置检查。",
+    groupWorkbenchTitle: "界面与工作台",
+    groupWorkbenchSummary: "管理工作台行为、配色和背景；启动相关设置仍由 Launcher 维护。",
     groupAvatarPetTitle: "用户、终端形象与陪伴体",
     groupAvatarPetSummary: "统一管理用户信息、终端形象、宠物与陪伴体相关配置；Web 用户头像在用户信息里维护。",
     groupModelingTitle: "模型库",
@@ -490,8 +490,8 @@ export const CONFIG_COPY = {
     intakeMode: "Default review mode",
     groupOverviewSaveTitle: "Overview and Save",
     groupOverviewSaveSummary: "Review save status, reload config, and open system environment variables.",
-    groupWorkbenchTitle: "Interface and Advanced Config",
-    groupWorkbenchSummary: "Startup settings moved to Launcher; this group keeps shell, non-startup interface, and config checks.",
+    groupWorkbenchTitle: "Workbench & Interface",
+    groupWorkbenchSummary: "Manage workbench behavior, colors, and background here. Startup settings remain in Launcher.",
     groupAvatarPetTitle: "User, Terminal Avatar, and Companion",
     groupAvatarPetSummary: "Manage user info, terminal avatar, pet, and companion-facing settings together. The Web user avatar lives under User Info.",
     groupModelingTitle: "Model Library",
@@ -1842,7 +1842,11 @@ function ConfigSectionEditor({
   }
 
   function renderObjectBody(nodeValue: Record<string, unknown>, absolutePath: string, mode: "view" | "edit") {
-    const entries = Object.entries(nodeValue);
+    const entries = Object.entries(nodeValue).filter(([key]) => {
+      if (absolutePath !== section.path) return true;
+      const childPath = `${absolutePath}.${key}`;
+      return Boolean(metaMap[childPath]);
+    });
     if (!entries.length) {
       return <p className={styles.helperText}>{copy.emptyValue}</p>;
     }
@@ -1862,7 +1866,7 @@ function ConfigSectionEditor({
         <div
           className={`${styles.configProgressiveBody} ${
             presentation.layout === "compact_paths" ? styles.configCompactPathProgressiveBody : ""
-          } ${section.id === "pet" ? styles.configCompanionProgressiveBody : ""}`}
+          } ${presentation.layout === "compact_paths" && advancedEntries.length > 0 ? styles.configCompactAdvancedProgressiveBody : ""}`}
         >
           <div className={styles.configTier}>
             <div className={styles.configTierHeader}>
