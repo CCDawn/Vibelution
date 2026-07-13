@@ -78,6 +78,12 @@ describe("MemoryRoute layout contract", () => {
     expect(entryQuerySource).not.toContain("queryFn: () =>");
     expect(entryQuerySource.match(/\{ signal \}/g)?.length ?? 0).toBe(10);
   });
+
+  it("cancels stale deep queries when memory selections change", () => {
+    expect(routeSource.match(/queryFn: \(\{ signal \}\) =>/g)?.length ?? 0).toBe(21);
+    expect(routeSource).not.toContain("queryFn: () =>");
+  });
+
   it("uses shell language state without loading the full app dictionary", () => {
     expect(routeSource).toContain("useShellI18n");
     expect(routeSource).toContain("const { lang } = useShellI18n()");
@@ -511,7 +517,7 @@ describe("MemoryRoute layout contract", () => {
   it("wires the read-only 3D memory knowledge graph API and canvas shell", () => {
     expect(routeSource).toContain('queryKeys.memoryKnowledgeGraph(fallbackKnowledgeActorAgentId, "officialResearchGraph", requestedTeamId)');
     expect(routeSource).toContain('appendAgentParam(new URLSearchParams({ include: "officialResearchGraph" }), fallbackKnowledgeActorAgentId)');
-    expect(routeSource).toContain("fetchJson<MemoryKnowledgeGraphPayload>(`/api/memory/knowledge-graph?${params.toString()}`)");
+    expect(routeSource).toContain("fetchJson<MemoryKnowledgeGraphPayload>(`/api/memory/knowledge-graph?${params.toString()}`, { signal })");
     expect(routeSource).toContain("MemoryKnowledgeGraphNodeDetailPayload");
     expect(routeSource).toContain("queryKeys.memoryKnowledgeGraphNodeDetail(selectedGraphNodeId, fallbackKnowledgeActorAgentId)");
     expect(routeSource).toContain('appendAgentParam(new URLSearchParams({ nodeId: selectedGraphNodeId }), fallbackKnowledgeActorAgentId)');
@@ -703,7 +709,7 @@ describe("MemoryRoute layout contract", () => {
     expect(routeSource).toContain("queryKeys.knowledgeDashboardSnapshot(fallbackKnowledgeActorAgentId)");
     expect(routeSource).toContain("appendAgentParam(new URLSearchParams({");
     expect(routeSource).toContain('recommendationLimit: "6"');
-    expect(routeSource).toContain("fetchJson<KnowledgeDashboardSnapshotPayload>(`/api/knowledge/dashboard-snapshot?${params.toString()}`)");
+    expect(routeSource).toContain("fetchJson<KnowledgeDashboardSnapshotPayload>(`/api/knowledge/dashboard-snapshot?${params.toString()}`, { signal })");
     expect(routeSource).toContain('sourceType: "manual_user_entry"');
     expect(routeSource).not.toContain("/source-artifacts");
     expect(routeSource).toContain("KnowledgeSourceInboxPayload");

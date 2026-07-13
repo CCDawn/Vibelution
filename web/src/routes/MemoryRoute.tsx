@@ -2252,8 +2252,9 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
     || "";
   const agentMemoryDetailQuery = useQuery({
     queryKey: ["memory", "agents", selectedAgentMemoryAgentId, "detail"],
-    queryFn: () => fetchJson<AgentMemoryInventoryPayload>(
+    queryFn: ({ signal }) => fetchJson<AgentMemoryInventoryPayload>(
       `/api/memory/agents/${encodeURIComponent(selectedAgentMemoryAgentId)}?actorAgentId=${encodeURIComponent(selectedAgentMemoryAgentId)}`,
+      { signal },
     ),
     enabled: forcedView === "agents" && Boolean(selectedAgentMemoryAgentId),
     refetchInterval: false,
@@ -2261,13 +2262,13 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
 
   const knowledgeDashboardSnapshotQuery = useQuery({
     queryKey: queryKeys.knowledgeDashboardSnapshot(fallbackKnowledgeActorAgentId),
-    queryFn: () => {
+    queryFn: ({ signal }) => {
       const params = appendAgentParam(new URLSearchParams({
         recommendationLimit: "6",
         workbenchLimit: "8",
         planLimit: "8",
       }), fallbackKnowledgeActorAgentId);
-      return fetchJson<KnowledgeDashboardSnapshotPayload>(`/api/knowledge/dashboard-snapshot?${params.toString()}`);
+      return fetchJson<KnowledgeDashboardSnapshotPayload>(`/api/knowledge/dashboard-snapshot?${params.toString()}`, { signal });
     },
     refetchInterval: resolvePollingInterval(pageVisible, 45_000),
     refetchIntervalInBackground: false,
@@ -2276,12 +2277,12 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
 
   const memoryKnowledgeGraphQuery = useQuery({
     queryKey: queryKeys.memoryKnowledgeGraph(fallbackKnowledgeActorAgentId, "officialResearchGraph", requestedTeamId),
-    queryFn: () => {
+    queryFn: ({ signal }) => {
       const params = appendAgentParam(new URLSearchParams({ include: "officialResearchGraph" }), fallbackKnowledgeActorAgentId);
       if (requestedTeamId) {
         params.set("teamId", requestedTeamId);
       }
-      return fetchJson<MemoryKnowledgeGraphPayload>(`/api/memory/knowledge-graph?${params.toString()}`);
+      return fetchJson<MemoryKnowledgeGraphPayload>(`/api/memory/knowledge-graph?${params.toString()}`, { signal });
     },
     refetchInterval: resolvePollingInterval(pageVisible, 60_000),
     refetchIntervalInBackground: false,
@@ -2289,9 +2290,9 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
   });
   const memoryKnowledgeGraphNodeDetailQuery = useQuery({
     queryKey: queryKeys.memoryKnowledgeGraphNodeDetail(selectedGraphNodeId, fallbackKnowledgeActorAgentId),
-    queryFn: () => {
+    queryFn: ({ signal }) => {
       const params = appendAgentParam(new URLSearchParams({ nodeId: selectedGraphNodeId }), fallbackKnowledgeActorAgentId);
-      return fetchJson<MemoryKnowledgeGraphNodeDetailPayload>(`/api/memory/knowledge-graph/node-detail?${params.toString()}`);
+      return fetchJson<MemoryKnowledgeGraphNodeDetailPayload>(`/api/memory/knowledge-graph/node-detail?${params.toString()}`, { signal });
     },
     refetchInterval: false,
     enabled: forcedView === "graph" && Boolean(selectedGraphNodeId) && Boolean(fallbackKnowledgeActorAgentId),
@@ -2764,9 +2765,9 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
   const activeSourceInboxStatus = sourceInboxStatus === "all" ? "" : sourceInboxStatus;
   const knowledgeItemsQuery = useQuery({
     queryKey: queryKeys.knowledgeItems(activeKnowledgeBaseForItems, activeKnowledgeActorAgentId),
-    queryFn: () => {
+    queryFn: ({ signal }) => {
       const params = appendAgentParam(new URLSearchParams(), activeKnowledgeActorAgentId);
-      return fetchJson<KnowledgeItemsPayload>(`/api/knowledge-bases/${encodeURIComponent(activeKnowledgeBaseForItems)}/items?${params.toString()}`);
+      return fetchJson<KnowledgeItemsPayload>(`/api/knowledge-bases/${encodeURIComponent(activeKnowledgeBaseForItems)}/items?${params.toString()}`, { signal });
     },
     enabled: forcedView === "knowledge" && Boolean(activeKnowledgeBaseForItems) && Boolean(activeKnowledgeActorAgentId),
     refetchInterval: resolvePollingInterval(pageVisible, 45_000),
@@ -2781,7 +2782,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
       knowledgeSearchDraft.tags,
       knowledgeSearchDraft.searchMode,
     ),
-    queryFn: () => {
+    queryFn: ({ signal }) => {
       const params = new URLSearchParams();
       params.set("agentId", activeKnowledgeActorAgentId);
       if (activeKnowledgeBaseForItems) {
@@ -2793,16 +2794,16 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
       commaList(knowledgeSearchDraft.tags).forEach((tag) => params.append("tags", tag));
       params.set("searchMode", knowledgeSearchDraft.searchMode);
       params.set("limit", "12");
-      return fetchJson<KnowledgeSearchPayload>(`/api/knowledge/search?${params.toString()}`);
+      return fetchJson<KnowledgeSearchPayload>(`/api/knowledge/search?${params.toString()}`, { signal });
     },
     enabled: forcedView === "knowledge" && Boolean(activeKnowledgeBaseForItems) && Boolean(activeKnowledgeActorAgentId),
     refetchInterval: false,
   });
   const knowledgeRagHealthQuery = useQuery({
     queryKey: queryKeys.knowledgeRagHealth(activeKnowledgeActorAgentId),
-    queryFn: () => {
+    queryFn: ({ signal }) => {
       const params = appendAgentParam(new URLSearchParams(), activeKnowledgeActorAgentId);
-      return fetchJson<KnowledgeRagHealthPayload>(`/api/knowledge/rag/health?${params.toString()}`);
+      return fetchJson<KnowledgeRagHealthPayload>(`/api/knowledge/rag/health?${params.toString()}`, { signal });
     },
     enabled: forcedView === "knowledge" && Boolean(activeKnowledgeActorAgentId),
     refetchInterval: resolvePollingInterval(pageVisible, 60_000),
@@ -2818,7 +2819,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
       knowledgeSearchDraft.ragTopK,
       knowledgeSearchDraft.ragMaxContextChars,
     ),
-    queryFn: () => {
+    queryFn: ({ signal }) => {
       const params = new URLSearchParams();
       params.set("agentId", activeKnowledgeActorAgentId);
       if (activeKnowledgeBaseForItems) {
@@ -2832,7 +2833,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
       params.set("provider", "local");
       params.set("topK", String(knowledgeSearchDraft.ragTopK));
       params.set("maxContextChars", String(knowledgeSearchDraft.ragMaxContextChars));
-      return fetchJson<KnowledgeRagRetrievalPayload>(`/api/knowledge/rag/retrieve?${params.toString()}`);
+      return fetchJson<KnowledgeRagRetrievalPayload>(`/api/knowledge/rag/retrieve?${params.toString()}`, { signal });
     },
     enabled: forcedView === "knowledge" && Boolean(activeKnowledgeBaseForItems) && Boolean(activeKnowledgeActorAgentId),
     refetchInterval: false,
@@ -2844,13 +2845,14 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
       ratingSuggestionStatus,
       ratingSuggestionPriority,
     ),
-    queryFn: () => {
+    queryFn: ({ signal }) => {
       const params = appendAgentParam(new URLSearchParams(), activeKnowledgeActorAgentId);
       if (ratingSuggestionStatus !== "all") {
         params.set("status", ratingSuggestionStatus);
       }
       return fetchJson<KnowledgeRatingSuggestionsPayload>(
         `/api/knowledge-bases/${encodeURIComponent(activeKnowledgeBaseForItems)}/rating-suggestions?${params.toString()}`,
+        { signal },
       );
     },
     enabled: forcedView === "knowledge" && Boolean(activeKnowledgeBaseForItems) && Boolean(activeKnowledgeActorAgentId),
@@ -2859,30 +2861,31 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
   });
   const permissionAuditQuery = useQuery({
     queryKey: queryKeys.knowledgePermissionAudit(activeKnowledgeActorAgentId),
-    queryFn: () => fetchJson<KnowledgePermissionAuditPayload>(`/api/knowledge/permissions/audit?agentId=${encodeURIComponent(activeKnowledgeActorAgentId)}`),
+    queryFn: ({ signal }) => fetchJson<KnowledgePermissionAuditPayload>(`/api/knowledge/permissions/audit?agentId=${encodeURIComponent(activeKnowledgeActorAgentId)}`, { signal }),
     enabled: forcedView === "knowledge" && Boolean(activeKnowledgeActorAgentId),
     refetchInterval: resolvePollingInterval(pageVisible, 60_000),
     refetchIntervalInBackground: false,
   });
   const governanceTasksQuery = useQuery({
     queryKey: queryKeys.knowledgeGovernanceTasks(activeKnowledgeActorAgentId, "open"),
-    queryFn: () => fetchJson<KnowledgeGovernanceTasksPayload>(`/api/knowledge/governance/tasks?agentId=${encodeURIComponent(activeKnowledgeActorAgentId)}&status=open`),
+    queryFn: ({ signal }) => fetchJson<KnowledgeGovernanceTasksPayload>(`/api/knowledge/governance/tasks?agentId=${encodeURIComponent(activeKnowledgeActorAgentId)}&status=open`, { signal }),
     enabled: forcedView === "knowledge" && Boolean(activeKnowledgeActorAgentId),
     refetchInterval: resolvePollingInterval(pageVisible, 45_000),
     refetchIntervalInBackground: false,
   });
   const ingestionAdaptersQuery = useQuery({
     queryKey: queryKeys.knowledgeIngestionAdapters(),
-    queryFn: () => fetchJson<KnowledgeIngestionAdaptersPayload>("/api/knowledge/ingestion-adapters"),
+    queryFn: ({ signal }) => fetchJson<KnowledgeIngestionAdaptersPayload>("/api/knowledge/ingestion-adapters", { signal }),
     enabled: forcedView === "knowledge",
     refetchInterval: false,
   });
   const knowledgeTraceQuery = useQuery({
     queryKey: queryKeys.knowledgeTrace(activeKnowledgeBaseForItems, activeKnowledgeActorAgentId, traceTargetId),
-    queryFn: () => {
+    queryFn: ({ signal }) => {
       const params = appendAgentParam(new URLSearchParams(), activeKnowledgeActorAgentId);
       return fetchJson<KnowledgeTracePayload>(
         `/api/knowledge-bases/${encodeURIComponent(activeKnowledgeBaseForItems)}/trace/${encodeURIComponent(traceTargetId)}?${params.toString()}`,
+        { signal },
       );
     },
     enabled: forcedView === "knowledge" && Boolean(activeKnowledgeBaseForItems) && Boolean(activeKnowledgeActorAgentId) && Boolean(traceTargetId),
@@ -2890,7 +2893,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
   });
   const sourceInboxQuery = useQuery({
     queryKey: queryKeys.knowledgeSourceInbox(activeSourceOwnerType, activeSourceOwnerId, activeKnowledgeActorAgentId, activeSourceInboxStatus),
-    queryFn: () => {
+    queryFn: ({ signal }) => {
       const params = new URLSearchParams({
         ownerType: activeSourceOwnerType,
         ownerId: activeSourceOwnerId,
@@ -2899,7 +2902,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
       if (activeSourceInboxStatus) {
         params.set("status", activeSourceInboxStatus);
       }
-      return fetchJson<KnowledgeSourceInboxPayload>(`/api/knowledge/sources/inbox?${params.toString()}`);
+      return fetchJson<KnowledgeSourceInboxPayload>(`/api/knowledge/sources/inbox?${params.toString()}`, { signal });
     },
     enabled: forcedView === "knowledge" && Boolean(activeSourceOwnerId) && Boolean(activeKnowledgeActorAgentId),
     refetchInterval: resolvePollingInterval(pageVisible, 45_000),
@@ -2907,13 +2910,13 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
   });
   const centralSourcesQuery = useQuery({
     queryKey: queryKeys.knowledgeCentralSources(activeKnowledgeActorAgentId, activeSourceOwnerType, activeSourceOwnerId),
-    queryFn: () => {
+    queryFn: ({ signal }) => {
       const params = new URLSearchParams({
         agentId: activeKnowledgeActorAgentId,
         ownerType: activeSourceOwnerType,
         ownerId: activeSourceOwnerId,
       });
-      return fetchJson<KnowledgeCentralSourceRegistryPayload>(`/api/knowledge/sources/registry?${params.toString()}`);
+      return fetchJson<KnowledgeCentralSourceRegistryPayload>(`/api/knowledge/sources/registry?${params.toString()}`, { signal });
     },
     enabled: forcedView === "knowledge" && Boolean(activeSourceOwnerId) && Boolean(activeKnowledgeActorAgentId),
     refetchInterval: resolvePollingInterval(pageVisible, 60_000),
@@ -3263,9 +3266,10 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
   const activeSection = activePair?.section ?? null;
   const activeItemDetailQuery = useQuery({
     queryKey: queryKeys.memoryItemDetail(activeSection?.id ?? "", activeItem?.id ?? ""),
-    queryFn: () =>
+    queryFn: ({ signal }) =>
       fetchJson<MemoryItemDetailPayload>(
         `/api/memory/items/${encodeURIComponent(activeSection?.id ?? "")}/${encodeURIComponent(activeItem?.id ?? "")}`,
+        { signal },
       ),
     enabled: Boolean(activeSection?.id && activeItem?.id && activeItem.contentDeferred),
     refetchInterval: false,
