@@ -331,6 +331,18 @@ describe("ConfigRoute layout contract", () => {
     expect(routeSource).not.toContain("<section className={styles.loadingSurface}>");
   });
 
+  it("uses comfortable desktop controls and matching six-group placeholders", () => {
+    expect(styles.page).toContain("[--control-height:40px]");
+    expect(styles.page).toContain("[--vui-control-height-sm:40px]");
+    expect(styles.field).toContain("[grid-template-columns:minmax(12rem,0.34fr)_minmax(0,1fr)]");
+    expect(styles.actionButton).toContain("[min-height:40px]");
+    expect(styles.primaryButton).toContain("[min-height:40px]");
+    expect(placeholderPanelSource).toContain("总览与保存");
+    expect(placeholderPanelSource).toContain("工具与诊断");
+    expect(placeholderPanelStyles.loadingNavList).toContain("[min-height:44px]");
+    expect(placeholderPanelStyles.loadingShell).toContain("[height:100%]");
+  });
+
   it("uses fixed two-level settings navigation with one active page", () => {
     expect(routeSource).toContain("const [activeGroupId, setActiveGroupId]");
     expect(routeSource).toContain("const [activePageId, setActivePageId]");
