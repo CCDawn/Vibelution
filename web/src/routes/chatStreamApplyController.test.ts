@@ -291,6 +291,55 @@ describe("chatStreamApplyController", () => {
     expect(decision.telemetry.appliedCount).toBe(50);
   });
 
+  it("keeps the optimistic Agent shell when a frame only contains internal progress", () => {
+    const decision = planAppliedAssistantDeltaDrain({
+      streamSessionId: "session-1",
+      reason: "frame",
+      drain: drain([
+        {
+          payload: assistantDelta({
+            turnId: "turn-accepted",
+            stage: "model_thinking",
+            feedbackEvents: [
+              {
+                sequence: 1,
+                kind: "status",
+                status: "running",
+                name: "model_thinking",
+                summary: "正在思考",
+              },
+            ],
+          }),
+          payloadLength: 20,
+          receivedAtMs: 100,
+        },
+      ]),
+      committedLayer: activeLayer({
+        id: "session-1-message-active-optimistic-submit",
+        turnId: "optimistic-submit",
+        processStage: "user_submit",
+        answerContent: "",
+        ledgerSeq: 0,
+      }),
+      stats: stats({ received: 1 }),
+      applyStartedAtMs: 120,
+      applyFinishedAtMs: 122,
+    });
+
+    expect(decision.applied).toBe(true);
+    if (!decision.applied) {
+      throw new Error("expected internal progress drain to apply");
+    }
+    expect(decision.nextCommittedLayer).toMatchObject<Partial<ActiveTurnLayerState>>({
+      turnId: "turn-accepted",
+      processStage: "model_thinking",
+      streaming: true,
+      answerContent: "",
+      feedbackEvents: [],
+    });
+    expect(decision.telemetry.pendingTextLength).toBe(0);
+  });
+
   it("carries bounded canonical item counts through assistant delta apply telemetry", () => {
     const decision = planAppliedAssistantDeltaDrain({
       streamSessionId: "session-1",

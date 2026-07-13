@@ -101,6 +101,83 @@ describe("chat active turn layer", () => {
     });
   });
 
+  it("keeps the active Agent row across internal progress and later exposes ReAct operations", () => {
+    const optimistic = createOptimisticActiveTurnLayer({
+      sessionId: "session-1",
+      turnId: "optimistic-submit",
+      updatedAt: "2026-07-13T13:02:39Z",
+    });
+    const stages = ["context_prepare", "agent_prepare", "model_request", "model_thinking"];
+    const internalActive = stages.reduce<ActiveTurnLayerState | undefined>((current, stage, index) => (
+      mergeAssistantDeltaIntoActiveTurnLayer(
+        current,
+        assistantDelta({
+          turnId: "turn-accepted",
+          ledgerSeq: index + 1,
+          stage,
+          feedbackEvents: [
+            {
+              sequence: index + 1,
+              kind: "status",
+              status: "running",
+              name: stage,
+              summary: `internal progress ${stage}`,
+            },
+          ],
+        }),
+      )
+    ), optimistic);
+    const active = mergeAssistantDeltaIntoActiveTurnLayer(
+      internalActive,
+      assistantDelta({
+        turnId: "turn-accepted",
+        ledgerSeq: 5,
+        stage: "tool_running",
+        feedbackEvents: [
+          {
+            sequence: 5,
+            kind: "tool",
+            status: "running",
+            name: "project_inspection_tool",
+            summary: "正在审查项目结构",
+          },
+        ],
+      }),
+    );
+
+    const message = activeTurnLayerToConversationMessage(active);
+
+    expect(internalActive).toMatchObject<Partial<ActiveTurnLayerState>>({
+      sessionId: "session-1",
+      turnId: "turn-accepted",
+      processStage: "model_thinking",
+      streaming: true,
+      answerContent: "",
+      thoughtContent: "",
+    });
+    expect(active).toMatchObject<Partial<ActiveTurnLayerState>>({
+      sessionId: "session-1",
+      turnId: "turn-accepted",
+      processStage: "tool_running",
+      streaming: true,
+      answerContent: "",
+      thoughtContent: "",
+    });
+    expect(active?.feedbackEvents).toEqual([
+      expect.objectContaining({
+        kind: "tool",
+        status: "running",
+        name: "project_inspection_tool",
+      }),
+    ]);
+    expect(message).toMatchObject<Partial<ConversationMessage>>({
+      role: "assistant",
+      streaming: true,
+      streamStage: "tool_running",
+      content: "",
+    });
+  });
+
   it("uses replace deltas as a full active-layer recovery snapshot", () => {
     const first = mergeAssistantDeltaIntoActiveTurnLayer(undefined, assistantDelta({ contentDelta: "旧内容" }));
     const recovered = mergeAssistantDeltaIntoActiveTurnLayer(
@@ -159,7 +236,7 @@ describe("chat active turn layer", () => {
     expect(message?.codexTranscript?.cells[0]?.id).toBe("native-tool");
   });
 
-  it("keeps internal native assistant markdown snapshots out of the visible active layer", () => {
+  it("keeps the active shell without exposing internal native markdown as answer content", () => {
     const statusText = "context_prepare\n正在准备对话上下文...\n\nmodel_request\n正在请求模型，等待首个响应片段...\n\nretrying\n模型连接正在重试...\n第 1/5 次；原因：server_error。本轮仍在继续，请不要重复提交。";
     const active = mergeAssistantDeltaIntoActiveTurnLayer(
       undefined,
@@ -184,7 +261,12 @@ describe("chat active turn layer", () => {
       }),
     );
 
-    expect(active).toBeUndefined();
+    expect(active).toMatchObject<Partial<ActiveTurnLayerState>>({
+      streaming: true,
+      processStage: "model_request",
+      answerContent: "",
+      thoughtContent: "",
+    });
   });
 
   it("keeps native assistant markdown answer visible when legacy content is empty", () => {
@@ -264,7 +346,7 @@ describe("chat active turn layer", () => {
     });
   });
 
-  it("keeps internal status-only assistant deltas out of the visible active layer", () => {
+  it("keeps the active shell while hiding internal status-only feedback", () => {
     const active = mergeAssistantDeltaIntoActiveTurnLayer(
       undefined,
       assistantDelta({
@@ -283,7 +365,13 @@ describe("chat active turn layer", () => {
       }),
     );
 
-    expect(active).toBeUndefined();
+    expect(active).toMatchObject<Partial<ActiveTurnLayerState>>({
+      streaming: true,
+      processStage: "agent_prepare",
+      answerContent: "",
+      thoughtContent: "",
+      feedbackEvents: [],
+    });
   });
 
   it("keeps diagnostic status-only assistant deltas in the visible active layer", () => {
@@ -336,7 +424,16 @@ describe("chat active turn layer", () => {
       }),
     );
 
-    expect(active).toBeUndefined();
+    const message = activeTurnLayerToConversationMessage(active);
+
+    expect(active).toMatchObject<Partial<ActiveTurnLayerState>>({
+      streaming: true,
+      processStage: "agent_prepare",
+      answerContent: "",
+      feedbackEvents: [],
+    });
+    expect(message?.content).toBe("");
+    expect(message?.feedbackEvents).toBeUndefined();
   });
 
   it("keeps answer text visible without retaining internal status feedback", () => {
@@ -355,7 +452,12 @@ describe("chat active turn layer", () => {
         ],
       }),
     );
-    expect(preparing).toBeUndefined();
+    expect(preparing).toMatchObject<Partial<ActiveTurnLayerState>>({
+      streaming: true,
+      processStage: "agent_prepare",
+      answerContent: "",
+      feedbackEvents: [],
+    });
 
     const responding = mergeAssistantDeltaIntoActiveTurnLayer(
       preparing,
@@ -386,6 +488,36 @@ describe("chat active turn layer", () => {
     expect(message?.content).toBe("真正回答");
     expect(message?.metadata?.kind).toBe("session_active_turn_layer");
     expect(message?.feedbackEvents).toBeUndefined();
+  });
+
+  it("removes an empty active shell when the stream reaches a terminal delta", () => {
+    const preparing = mergeAssistantDeltaIntoActiveTurnLayer(
+      undefined,
+      assistantDelta({
+        stage: "model_thinking",
+        feedbackEvents: [
+          {
+            sequence: 1,
+            kind: "status",
+            status: "running",
+            name: "model_thinking",
+            summary: "正在思考",
+          },
+        ],
+      }),
+    );
+    const terminal = mergeAssistantDeltaIntoActiveTurnLayer(
+      preparing,
+      assistantDelta({
+        ledgerSeq: 2,
+        stage: "completed",
+        done: true,
+        feedbackEvents: [],
+      }),
+    );
+
+    expect(preparing?.streaming).toBe(true);
+    expect(terminal).toBeUndefined();
   });
 
   it("treats the active layer as settled once committed detail has the same assistant turn", () => {
