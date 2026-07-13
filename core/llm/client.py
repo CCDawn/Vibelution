@@ -268,6 +268,12 @@ def llm_status_context(**fields: str):
         _LLM_STATUS_CONTEXT.reset(token)
 
 
+def current_llm_status_context() -> Dict[str, str]:
+    """Return a copy of the active conversation identity breadcrumbs."""
+
+    return dict(_LLM_STATUS_CONTEXT.get({}) or {})
+
+
 def _record_llm_scene_event(
     phase: str,
     event_code: str,

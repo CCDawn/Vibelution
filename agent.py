@@ -90,7 +90,7 @@ from core.llm import (
     invoke_llm,
     stream_llm,
 )
-from core.llm.client import llm_cancel_context
+from core.llm.client import current_llm_status_context, llm_cancel_context
 from core.llm.invocation import invoke_llm_outcome, run_streaming_llm_outcome
 from core.llm.legacy_xml_tool_decoder import canonical_outcome_from_message, canonicalize_legacy_xml_outcome
 from core.llm.semantic_messages import InvocationScope
@@ -2899,6 +2899,7 @@ class SelfEvolvingAgent:
         route_attempt: int = 1,
     ) -> LLMInvocationContext:
         runtime = _turn_runtime_from_env()
+        status_context = current_llm_status_context()
         binding = getattr(self, "runtime_agent_binding", {}) or {}
         try:
             policy = self._get_mode_policy()
@@ -2916,7 +2917,13 @@ class SelfEvolvingAgent:
             surface=surface,
             run_kind=run_kind,
             run_id=str(runtime.get("runId") or getattr(self, "_pending_supervised_case_id", "") or "").strip(),
-            session_id=str(runtime.get("sessionId") or binding.get("directSessionId") or "").strip(),
+            session_id=str(
+                runtime.get("sessionId")
+                or status_context.get("session_id")
+                or status_context.get("sessionId")
+                or binding.get("directSessionId")
+                or ""
+            ).strip(),
             agent_id=str(runtime.get("agentId") or binding.get("agentId") or "").strip(),
             llm_slot=str(runtime.get("llmSlot") or binding.get("llmSlot") or "dialogue").strip() or "dialogue",
             model_id=str(runtime.get("modelId") or os.environ.get("VIBELUTION_AGENT_LLM_MODEL_ID") or "").strip(),
@@ -2929,6 +2936,12 @@ class SelfEvolvingAgent:
                 "orchestratorKind": orchestrator_kind,
                 "invocationId": uuid4().hex,
                 "routeAttempt": max(1, int(route_attempt)),
+                "turnId": str(
+                    status_context.get("turn_id")
+                    or status_context.get("turnId")
+                    or runtime.get("runId")
+                    or ""
+                ).strip(),
             },
         )
 
