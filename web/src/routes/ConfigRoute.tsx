@@ -6,7 +6,6 @@ import {
   Plus,
   RotateCcw,
   Save,
-  ShieldAlert,
   Upload,
   X,
 } from "lucide-react";
@@ -73,7 +72,8 @@ import {
 } from "../components/vui";
 import { safeAgentCenterReturnToPath } from "./agentCenterRoutes";
 import { ConfigDraftPanel } from "./ConfigDraftPanel";
-import { ConfigHealthDiagnosticsPanel, type ConfigHealthDiagnosticsPanelCopy } from "./ConfigHealthDiagnosticsPanel";
+import ConfigDiagnosisPanel from "./ConfigDiagnosisPanel";
+import { ConfigHealthDiagnosticsPanel } from "./ConfigHealthDiagnosticsPanel";
 import { ConfigModelMigrationPanel } from "./ConfigModelMigrationPanel";
 import { ConfigOverviewPanel } from "./ConfigOverviewPanel";
 import { ConfigQuickSetupPanel } from "./ConfigQuickSetupPanel";
@@ -177,8 +177,6 @@ type ConfigSectionUiState = {
   draftValue?: unknown;
 };
 
-type LogHelperCopy = ConfigHealthDiagnosticsPanelCopy;
-
 function defaultSectionUiState(): ConfigSectionUiState {
   return {
     expanded: true,
@@ -208,7 +206,7 @@ export const CONFIG_COPY = {
     draftTitle: "高级配置检查",
     draftBody: "检查整份当前配置；保存只写外部 operator config.toml。",
     diagnosticsTitle: "诊断与保存",
-    diagnosticsBody: "阻塞问题、警告和保存动作。",
+    diagnosticsBody: "同类问题按根因合并；先处理根因，再保存配置。",
     configPath: "配置路径",
     configStatus: "当前状态",
     rawToml: "当前外部 config.toml",
@@ -382,6 +380,12 @@ export const CONFIG_COPY = {
     blockingIssues: "阻塞问题",
     warningSignals: "警告信号",
     suggestedActions: "建议动作",
+    rootCauseMetric: "根因",
+    affectedReferenceMetric: "受影响引用",
+    warningMetric: "警告",
+    affectedReferences: "受影响的配置引用",
+    showAffectedReferences: "查看受影响引用",
+    repairProviderCredential: "设置 API Key",
     editorDirtyHint: "编辑文本有未检查改动。先检查当前修改，再继续结构化编辑或测试。",
     editorCleanHint: "当前结构化面板和编辑文本一致。",
     editorRestoreHint: "放弃编辑文本里的未检查内容，并回到当前结构化面板。",
@@ -451,7 +455,7 @@ export const CONFIG_COPY = {
     draftTitle: "Advanced Config Check",
     draftBody: "Inspect the full current config. Saves write only external operator config.toml.",
     diagnosticsTitle: "Diagnostics and Save",
-    diagnosticsBody: "Blocking issues, warnings, and save actions.",
+    diagnosticsBody: "Related issues are grouped by root cause. Fix the cause first, then save.",
     configPath: "Config path",
     configStatus: "Current status",
     rawToml: "Current external config.toml",
@@ -625,6 +629,12 @@ export const CONFIG_COPY = {
     blockingIssues: "Blocking issues",
     warningSignals: "Warnings",
     suggestedActions: "Suggested actions",
+    rootCauseMetric: "Root causes",
+    affectedReferenceMetric: "Affected references",
+    warningMetric: "Warnings",
+    affectedReferences: "Affected config references",
+    showAffectedReferences: "Show affected references",
+    repairProviderCredential: "Set API Key",
     editorDirtyHint: "The editor text has unchecked changes. Check them before more structured edits or tests.",
     editorCleanHint: "Structured controls and editor text are in sync.",
     editorRestoreHint: "Discard unchecked editor text and return to the current structured panel.",
@@ -2284,6 +2294,23 @@ export function ConfigRoute() {
     contentViewportRef.current?.scrollTo({ top: 0, behavior: "smooth" });
   }
 
+  function handleRepairProviderCredential(providerId: string) {
+    if (!providerRows.some((row) => row.providerId === providerId)) return;
+
+    setActiveGroupId("models-profiles");
+    setActivePageId("model-connection");
+    setProviderWorkspaceMode("manage");
+    setSelectedProviderId(providerId);
+    setSelectedProviderTab("connection");
+    setProviderCredentialEditId(providerId);
+    setProviderCredentialValue("");
+    setRouteEditProviderId("");
+    setRouteEditProvider({});
+    setRoutePreview(null);
+    setProviderActionFeedback(null);
+    contentViewportRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
   function restoreEditorText() {
     setJsonText(formattedDraft);
     setNotice({ tone: "neutral", text: "" });
@@ -3816,54 +3843,12 @@ export function ConfigRoute() {
         ) : null}
 
         {isSectionVisible("diagnostics") ? (
-        <VSection
-          id="config-diagnostics"
-          className={styles.sectionSurface}
-          headerClassName={styles.sectionHeader}
-          eyebrow={sectionTitle("diagnostics", copy.diagnosticsTitle)}
-          title={copy.diagnosticsTitle}
-          actions={<ShieldAlert size={16} className={styles.sectionIcon} />}
-        >
-            <p className={styles.sectionText}>{copy.diagnosticsBody}</p>
-            <div className={styles.diagnosticsGrid}>
-            <article className={styles.matrixCard}>
-              <p className={styles.matrixTitle}>{copy.blockingIssues}</p>
-              {workspace.diagnosis.blocking_issues.length ? (
-                <ul className={styles.issueList}>
-                  {workspace.diagnosis.blocking_issues.map((item) => (
-                    <li key={item}>{item}</li>
-                  ))}
-                </ul>
-              ) : (
-                <p className={styles.helperText}>{copy.noBlocking}</p>
-              )}
-            </article>
-            <article className={styles.matrixCard}>
-              <p className={styles.matrixTitle}>{copy.warningSignals}</p>
-              {workspace.diagnosis.warnings.length ? (
-                <ul className={styles.issueList}>
-                  {workspace.diagnosis.warnings.map((item) => (
-                    <li key={item}>{item}</li>
-                  ))}
-                </ul>
-              ) : (
-                <p className={styles.helperText}>{copy.noWarnings}</p>
-              )}
-            </article>
-            <article className={styles.matrixCard}>
-              <p className={styles.matrixTitle}>{copy.suggestedActions}</p>
-              {workspace.diagnosis.suggested_actions.length ? (
-                <ul className={styles.issueList}>
-                  {workspace.diagnosis.suggested_actions.map((item) => (
-                    <li key={item}>{item}</li>
-                  ))}
-                </ul>
-              ) : (
-                <p className={styles.helperText}>{copy.noSuggestions}</p>
-              )}
-            </article>
-            </div>
-        </VSection>
+          <ConfigDiagnosisPanel
+            diagnosis={workspace.diagnosis}
+            copy={copy}
+            repairableProviderIds={providerRows.map((row) => row.providerId)}
+            onRepairProvider={handleRepairProviderCredential}
+          />
         ) : null}
         </div>
       </VSurface>
