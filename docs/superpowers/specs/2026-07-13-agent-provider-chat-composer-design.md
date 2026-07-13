@@ -1,14 +1,14 @@
 # Agent 固定模型、多模型 Provider 与 Codex Composer 设计
 
-**Status:** original direction approved / CC Switch supplement pending written-spec review
+**Status:** approved / implementation plan ready for execution selection
 **Date:** 2026-07-13
 **Owner:** model-config-governance + web-workbench-surface
 **Branch:** `codex/agent-provider-chat-composer-design`
 **Worktree:** `C:\Users\17533\Desktop\Vibelution-worktrees\agent-provider-chat-composer-design`
 **Scope:** Provider 多模型目录、Agent 固定模型、Session 推理强度、Codex Composer 与 Ai-Pixel 收敛设计
-**Implementation plan:** written-spec review 通过后单独创建
-**Validation:** written-spec self-review、`git diff --check`、CC Switch 官方源码交叉核对
-**Close condition:** 用户审阅本次 CC Switch 补充后确认进入 implementation planning
+**Implementation plan:** [`2026-07-13-agent-provider-chat-composer.md`](../plans/2026-07-13-agent-provider-chat-composer.md)
+**Validation:** written-spec self-review、implementation-plan coverage/type audit、`git diff --check`、CC Switch 官方源码交叉核对
+**Close condition:** 用户选择执行模式后按九张任务卡实施、验证并完成运行时验收
 **Task tier:** HIGH_RISK
 **Version impact:** minor candidate（本设计阶段不修改版本文件）
 
@@ -705,4 +705,6 @@ Launcher refresh：前端、API、runtime/config 行为均变化，因此用户�
 
 ## 20. 下一阶段门禁
 
-本规格已按用户逐段批准的方向整理，当前只允许用户审阅和修订。用户确认书面规格后，下一步使用 `writing-plans` 生成详细 implementation plan；在此之前不修改运行代码、不执行 Provider 合并、不修改 operator config。
+本规格已获用户确认，详细 implementation plan 已生成并完成规格覆盖、接口一致性、并发补偿和验收链路自审。当前门禁是选择执行模式；在用户明确选择前，不修改运行代码、不执行 Provider 合并、不修改 operator config。
+
+推荐按“一张任务卡一个 Agent”执行：Task 1 与 Task 3 可从同一计划基线并行，其余任务严格遵守计划中的依赖和热文件串行门禁。Provider 合并即使进入 Task 9，仍需用户发送精确确认语 `确认应用 Ai-Pixel Provider 合并` 才能作用于 live operator config。
