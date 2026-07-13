@@ -35,6 +35,8 @@ from core.orchestration.response_processor import ResponseProcessor
 from core.orchestration.response_surface import ResponseSurfaceController
 from core.orchestration.turn_outcome import TurnOutcomeController
 from core.orchestration.tool_lifecycle import ToolLifecycleBridge
+from core.llm.client import llm_status_context
+from core.llm.invocation import invocation_scope_from_metadata
 from core.llm.types import CanonicalItemIdentity, CanonicalToolCall, LLMError, TurnOutcome as LLMTurnOutcome
 from tests.helpers.isolated_config import isolated_settings_config
 from tools.agent_tools import spawn_agent as spawn_agent_impl, set_subagent_stream_sink
@@ -59,6 +61,41 @@ def test_numbered_confirmation_goal_preserves_previous_assistant_context():
     assert "用户确认" in goal
     assert answer in goal
     assert goal != answer
+
+
+def test_chat_invocation_context_uses_active_status_turn_identity(monkeypatch):
+    for env_name in (
+        "VIBELUTION_TURN_RUN_ID",
+        "VIBELUTION_TURN_SESSION_ID",
+        "VIBELUTION_TURN_RUN_KIND",
+    ):
+        monkeypatch.delenv(env_name, raising=False)
+    agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+    agent.mode_policy = ModePolicy(
+        mode=AgentMode.CHAT,
+        orchestrator_kind="chat",
+        keep_multi_turn_context=True,
+        allow_auto_loop=False,
+        capture_chat_dataset_candidates=False,
+        reset_context_before_turn=False,
+        reset_context_between_cases=False,
+        allow_direct_supervised_payload=False,
+        finish_after_direct_response=False,
+        runtime_input_builder=build_chat_user_message,
+    )
+    agent.runtime_agent_binding = {
+        "agentId": "agent-live",
+        "directSessionId": "session-live",
+    }
+
+    with llm_status_context(session_id="session-live", turn_id="turn-live-42"):
+        metadata = agent._build_llm_invocation_context().to_metadata()
+        scope = invocation_scope_from_metadata(metadata)
+
+    assert metadata["sessionId"] == "session-live"
+    assert metadata["turnId"] == "turn-live-42"
+    assert scope.session_id == "session-live"
+    assert scope.turn_id == "turn-live-42"
 
 
 def test_numbered_task_list_without_confirmation_keeps_user_goal():
