@@ -34,6 +34,7 @@
 - `web/src/routes/ConfigRoute.tsx`：接入两级导航；移除可缩放/可收起侧栏；只渲染当前子页面；统一页头状态和操作；保持所有配置状态与 mutation ownership。
 - `web/src/routes/ConfigRoute.styles.ts`：全高两栏外壳、唯一滚动容器、40–44px 控件、舒适表单密度和模型工作区高度传递。
 - `web/src/routes/ConfigRoute.layout.test.ts`：新增整体结构契约并删除旧侧栏缩放、组内全量堆叠和重复操作断言。
+- `web/ConfigRoute.layout.test.ts`：让根级内容体验契约跟随抽取后的设置导航定义。
 - `web/src/routes/ConfigOverviewPanel.tsx` / `.styles.ts`：总览只显示模型、阻塞和警告摘要，不再重复配置路径、保存操作、环境变量入口或原始 TOML。
 - `web/src/routes/ConfigDraftPanel.tsx` / `.styles.ts`：原始配置子页面同时承载结构化 JSON 编辑检查和当前外部 TOML 只读参考，并填满内容高度。
 - `web/src/routes/ConfigWorkspacePlaceholderPanel.tsx` / `.styles.ts`：加载和错误占位匹配新的六分区、固定侧栏和全高主工作区。
@@ -655,7 +656,7 @@ Expected: frontend `http://127.0.0.1:8000` 与 workspace API 返回 200，运行
 检查 `.docs/project-memory/memory.json`、lane JSON、`overview.html` 和 `INDEX.md` 已出现最新记录，然后：
 
 ```powershell
-& ".\.venv\Scripts\python.exe" "C:\Users\17533\.codex\skills\ccdawn-dawn-agent-html-memory\scripts\agent_work_guard.py" "C:\Users\17533\Desktop\Vibelution" release --claim-id "claim-b035465964f7" --status completed --reason "设置控制台重构已合入本地 main，并完成测试、构建、Launcher、浏览器和项目记忆验证。"
+& ".\.venv\Scripts\python.exe" "C:\Users\17533\.codex\skills\ccdawn-dawn-agent-html-memory\scripts\agent_work_guard.py" "C:\Users\17533\Desktop\Vibelution" release --claim-id "claim-d4584ed61d84" --status completed --reason "设置控制台重构已合入本地 main，并完成测试、构建、Launcher、浏览器和项目记忆验证。"
 ```
 
 Expected: memory sync 成功，claim 状态 completed。远程 push/PR 不在本计划内。
@@ -681,7 +682,7 @@ Expected: memory sync 成功，claim 状态 completed。远程 push/PR 不在本
 
 ## 方案修正
 
-- 已修正：把错误文件名 `ConfigQuickProviderSetupPanel` 更正为 `ConfigQuickSetupPanel`；claim 已从 `claim-e1dd9d02d933` 更换为精确范围 `claim-b035465964f7`。
+- 已修正：把错误文件名 `ConfigQuickProviderSetupPanel` 更正为 `ConfigQuickSetupPanel`；收尾时因根级 `web/ConfigRoute.layout.test.ts` 需要同步抽取后的导航断言，完整 claim 更新为 `claim-d4584ed61d84`。
 - 已修正：把当前不可达的 `git-commit-model` 和 `git-commit-prompt` 纳入“工具与诊断 → Git 提交”。
 - 已修正：工具类底层配置以五个本地页面组合，避免七个以上标签挤满 1280px 视口。
 - 延后项：手机端适配、配置 schema/API 调整、Provider 新能力、应用顶部栏重构、远程 push/PR。
