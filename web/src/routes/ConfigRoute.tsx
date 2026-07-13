@@ -1097,6 +1097,13 @@ function isDenseConfigSection(section: ConfigEditorSection): boolean {
   return Number(section.fieldCount || 0) >= 12;
 }
 
+function configCommonGridClass(commonEntryCount: number): string {
+  if (commonEntryCount <= 2) return styles.configCommonGridTwo;
+  if (commonEntryCount === 3) return styles.configCommonGridThree;
+  if (commonEntryCount === 4) return styles.configCommonGridPet;
+  return styles.configCommonGridContext;
+}
+
 function ConfigSectionEditor({
   section,
   value,
@@ -1816,7 +1823,7 @@ function ConfigSectionEditor({
               <span className={styles.inlineBadge}>{presentation.advancedCountLabel(tierCounts.common)}</span>
             </div>
             <div
-              className={`${styles.treeGrid} ${section.id === "pet" ? styles.configCommonGridPet : styles.configCommonGridContext}`}
+              className={`${styles.treeGrid} ${configCommonGridClass(commonEntries.length)}`}
             >
               {commonEntries.map((entry) => renderObjectEntry(entry, absolutePath, mode))}
             </div>
