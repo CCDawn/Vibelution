@@ -26,7 +26,7 @@ from core.ui.cli_ui import get_ui
 from tools.rebirth_tools import handle_restart_request
 
 
-ToolExecuteFn = Callable[[str, dict], Tuple[Any, Optional[str]]]
+ToolExecuteFn = Callable[..., Tuple[Any, Optional[str]]]
 ToolGuardFn = Callable[[str, dict], Optional[str]]
 ToolResultObserverFn = Callable[[Dict[str, Any], Any, Optional[str]], None]
 
@@ -132,7 +132,11 @@ class ToolLifecycleBridge:
             return (result, action)
 
         ui.update_status("ACTING")
-        result, tool_action = self._tool_executor_execute(tool_name, tool_args)
+        result, tool_action = self._tool_executor_execute(
+            tool_name,
+            tool_args,
+            tool_call_id=str(tool_call_id or "").strip(),
+        )
         action = tool_action or self.derive_lifecycle_action(
             tool_name,
             result,

@@ -644,7 +644,7 @@ class ToolExecutor:
         except Exception:
             return ""
 
-    def execute(self, tool_name: str, tool_args: dict) -> tuple:
+    def execute(self, tool_name: str, tool_args: dict, *, tool_call_id: str = "") -> tuple:
         """
         执行工具
 
@@ -658,11 +658,19 @@ class ToolExecutor:
                 action: 特殊动作 (如 "restart", "hibernated", None)
         """
         tool_args = parse_tool_args(tool_args or {})
+        call_id = str(tool_call_id or "").strip()
+
+        def publish_tool_event(event_name: str, payload: dict[str, Any]) -> None:
+            event_payload = dict(payload)
+            if call_id:
+                event_payload["callId"] = call_id
+            self._event_bus.publish(event_name, event_payload)
+
         started_at = time.monotonic()
 
         policy_block = self._check_agent_tool_policy_block(tool_name, tool_args)
         if policy_block:
-            self._event_bus.publish(EventNames.TOOL_ERROR, {
+            publish_tool_event(EventNames.TOOL_ERROR, {
                 "name": tool_name,
                 "error": policy_block,
                 "result": policy_block,
@@ -689,7 +697,7 @@ class ToolExecutor:
 
         readonly_block = self._check_readonly_subagent_block(tool_name)
         if readonly_block:
-            self._event_bus.publish(EventNames.TOOL_ERROR, {
+            publish_tool_event(EventNames.TOOL_ERROR, {
                 "name": tool_name,
                 "error": readonly_block,
                 "result": readonly_block,
@@ -714,7 +722,7 @@ class ToolExecutor:
 
         blocked_message = self._check_runtime_block(tool_name, tool_args)
         if blocked_message:
-            self._event_bus.publish(EventNames.TOOL_ERROR, {
+            publish_tool_event(EventNames.TOOL_ERROR, {
                 "name": tool_name,
                 "error": blocked_message,
                 "result": blocked_message,
@@ -745,7 +753,7 @@ class ToolExecutor:
             soft_facts = tool_result_facts_payload(
                 package_tool_result_facts(soft_result, tool_name=tool_name)
             )
-            self._event_bus.publish(EventNames.TOOL_SUCCESS, {
+            publish_tool_event(EventNames.TOOL_SUCCESS, {
                 "name": tool_name,
                 "args": tool_args,
                 "result": soft_result,
@@ -772,7 +780,7 @@ class ToolExecutor:
 
         if tool_name not in self._tool_map:
             error_msg = self._unknown_tool_message_for_current_context()
-            self._event_bus.publish(EventNames.TOOL_ERROR, {
+            publish_tool_event(EventNames.TOOL_ERROR, {
                 "name": "[unknown_tool]",
                 "error": error_msg,
                 "result": error_msg,
@@ -802,7 +810,7 @@ class ToolExecutor:
             return (error_msg, None)
 
         # 发布工具开始事件。未知工具不发布 start，避免把错误工具名写入可见事件流。
-        self._event_bus.publish(EventNames.TOOL_START, {
+        publish_tool_event(EventNames.TOOL_START, {
             "name": tool_name,
             "args": tool_args,
         })
@@ -815,7 +823,7 @@ class ToolExecutor:
         call_args.pop("force", None)
         argument_error = _validate_tool_arguments(tool_name, func, call_args)
         if argument_error:
-            self._event_bus.publish(EventNames.TOOL_ERROR, {
+            publish_tool_event(EventNames.TOOL_ERROR, {
                 "name": tool_name,
                 "error": argument_error,
                 "result": argument_error,
@@ -856,7 +864,7 @@ class ToolExecutor:
             cancel_reason = self._current_cancel_reason(cancel_checker)
             if cancel_reason:
                 error_msg = f"[取消] {tool_name} 已因停止请求跳过执行：{cancel_reason}"
-                self._event_bus.publish(EventNames.TOOL_ERROR, {
+                publish_tool_event(EventNames.TOOL_ERROR, {
                     "name": tool_name,
                     "error": error_msg,
                     "result": error_msg,
@@ -894,7 +902,7 @@ class ToolExecutor:
                     future.cancel()
                     executor.shutdown(wait=False, cancel_futures=True)
                     error_msg = f"[取消] {tool_name} 已因停止请求中断：{cancel_reason}"
-                    self._event_bus.publish(EventNames.TOOL_ERROR, {
+                    publish_tool_event(EventNames.TOOL_ERROR, {
                         "name": tool_name,
                         "error": error_msg,
                         "result": error_msg,
@@ -932,7 +940,7 @@ class ToolExecutor:
                     cancel_reason = self._current_cancel_reason(cancel_checker)
                     if cancel_reason:
                         error_msg = f"[取消] {tool_name} 已因停止请求中断：{cancel_reason}"
-                        self._event_bus.publish(EventNames.TOOL_ERROR, {
+                        publish_tool_event(EventNames.TOOL_ERROR, {
                             "name": tool_name,
                             "error": error_msg,
                             "result": error_msg,
@@ -986,9 +994,9 @@ class ToolExecutor:
                 **result_facts,
             }
             if semantic_outcome in {"succeeded", "degraded", "observed"}:
-                self._event_bus.publish(EventNames.TOOL_SUCCESS, event_payload)
+                publish_tool_event(EventNames.TOOL_SUCCESS, event_payload)
             else:
-                self._event_bus.publish(EventNames.TOOL_ERROR, {
+                publish_tool_event(EventNames.TOOL_ERROR, {
                     **event_payload,
                     "error": str(result or ""),
                 })
@@ -1029,7 +1037,7 @@ class ToolExecutor:
                 future.cancel()
             executor.shutdown(wait=False, cancel_futures=True)
             error_msg = f"[超时] {tool_name} 执行超时 ({timeout}秒)"
-            self._event_bus.publish(EventNames.TOOL_ERROR, {
+            publish_tool_event(EventNames.TOOL_ERROR, {
                 "name": tool_name,
                 "error": error_msg,
                 "result": error_msg,
@@ -1066,7 +1074,7 @@ class ToolExecutor:
         except TypeError as e:
             executor.shutdown(wait=False, cancel_futures=True)
             error_msg = _format_tool_argument_error(tool_name, func, call_args, e)
-            self._event_bus.publish(EventNames.TOOL_ERROR, {
+            publish_tool_event(EventNames.TOOL_ERROR, {
                 "name": tool_name,
                 "error": error_msg,
                 "result": error_msg,
@@ -1102,7 +1110,7 @@ class ToolExecutor:
         except Exception as e:
             executor.shutdown(wait=False, cancel_futures=True)
             error_msg = f"[错误] {type(e).__name__}: {e}"
-            self._event_bus.publish(EventNames.TOOL_ERROR, {
+            publish_tool_event(EventNames.TOOL_ERROR, {
                 "name": tool_name,
                 "error": error_msg,
                 "result": error_msg,

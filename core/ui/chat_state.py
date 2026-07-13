@@ -133,6 +133,7 @@ def normalize_chat_tool_calls(value: Any) -> list[str | dict[str, Any]]:
             if name:
                 normalized: dict[str, Any] = {"name": name}
                 for key in (
+                    "callId",
                     "id",
                     "tool_call_id",
                     "toolCallId",
