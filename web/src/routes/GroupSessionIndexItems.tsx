@@ -1,4 +1,4 @@
-import { CircleDot, Clock3, MessageCircleHeart, UsersRound } from "lucide-react";
+import { CircleDot, MessageCircleHeart, UsersRound } from "lucide-react";
 
 import type { ConversationSummary, Team } from "../api/types";
 import { VChip, VNativeButton } from "../components/vui";
@@ -95,7 +95,6 @@ export function GroupConversationIndexItem({
               <UsersRound size={10} aria-hidden="true" />
               {conversation.participantCount ?? 0}
             </span>
-            <Clock3 size={10} aria-hidden="true" />
             <time>{formatTime(conversation.updatedAt)}</time>
           </span>
         </span>
