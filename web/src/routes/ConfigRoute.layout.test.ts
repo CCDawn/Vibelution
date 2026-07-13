@@ -750,6 +750,8 @@ describe("ConfigRoute layout contract", () => {
   it("progressively discloses advanced pet and context-compression settings", () => {
     expect(routeSource).toContain('from "./configSectionPresentation"');
     expect(routeSource).toContain("advancedExpanded: false");
+    expect(routeSource).toContain("expanded: configSectionExpandedByDefault(sectionId)");
+    expect(routeSource).toContain("defaultSectionUiState(section.id)");
     expect(routeSource).toContain("const presentation = configSectionPresentation(section.id, lang)");
     expect(routeSource).toContain("configSectionTierCounts(section.id, section.fieldCount)");
     expect(routeSource).toContain("isCommonConfigSectionEntry(section.id, childPath)");
@@ -761,7 +763,9 @@ describe("ConfigRoute layout contract", () => {
     expect(routeSource).toContain('contentLayout="plain"');
     expect(routeSource).toContain("isDenseConfigSection(section) && !presentation");
     expect(routeSource).toContain("configSectionFieldCopy(path, lang)");
+    expect(routeSource).toContain('presentation.layout === "compact_paths" ? styles.configCompactPathProgressiveBody : ""');
     expect(stylesSource).toContain("configProgressiveBody:");
+    expect(stylesSource).toContain("configCompactPathProgressiveBody:");
     expect(stylesSource).toContain("configTierHeader:");
     expect(stylesSource).toContain("configAdvancedToggle:");
     expect(stylesSource).toContain("configAdvancedBody:");
@@ -776,6 +780,9 @@ describe("ConfigRoute layout contract", () => {
     expect(styles.configProgressiveBody).toContain("[&_.treeFieldCardView]:[grid-template-columns:minmax(0,1fr)]");
     expect(styles.configProgressiveBody).toContain("[&_.treeFieldValue]:[grid-row:2]");
     expect(styles.configProgressiveBody).toContain("[&_.treeFieldLabel]:[white-space:normal]");
+    expect(styles.configCompactPathProgressiveBody).toContain("[&_.treeFieldCardView]:![grid-template-columns:minmax(150px,0.42fr)_minmax(0,1fr)]");
+    expect(styles.configCompactPathProgressiveBody).toContain("[&_.treeFieldValue]:![grid-row:1/span_2]");
+    expect(styles.configCompactPathProgressiveBody).toContain("[&_.treeFieldCardView]:![padding:8px]");
   });
 
   it("sizes progressive common grids to the number of visible controls", () => {

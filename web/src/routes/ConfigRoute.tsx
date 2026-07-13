@@ -57,6 +57,7 @@ import {
   type PublicConfigShape,
 } from "./configRouteLogic";
 import {
+  configSectionExpandedByDefault,
   configSectionFieldCopy,
   configSectionPresentation,
   configSectionTierCounts,
@@ -184,9 +185,9 @@ type ConfigSectionUiState = {
   draftValue?: unknown;
 };
 
-function defaultSectionUiState(): ConfigSectionUiState {
+function defaultSectionUiState(sectionId = ""): ConfigSectionUiState {
   return {
-    expanded: true,
+    expanded: configSectionExpandedByDefault(sectionId),
     editing: false,
     advancedExpanded: false,
     expandedPaths: {},
@@ -1813,7 +1814,11 @@ function ConfigSectionEditor({
         return !isCommonConfigSectionEntry(section.id, childPath);
       });
       return (
-        <div className={styles.configProgressiveBody}>
+        <div
+          className={`${styles.configProgressiveBody} ${
+            presentation.layout === "compact_paths" ? styles.configCompactPathProgressiveBody : ""
+          }`}
+        >
           <div className={styles.configTier}>
             <div className={styles.configTierHeader}>
               <div className={styles.configTierHeaderCopy}>
@@ -2377,7 +2382,7 @@ export function ConfigRoute() {
     setActivePageId(pageId);
     const page = activeGroup?.pages.find((candidate) => candidate.id === pageId);
     for (const sectionId of page?.memberSectionIds ?? []) {
-      updateSectionUiState(sectionId, resolveConfigSectionUiStateOnSelect(sectionUiState[sectionId], defaultSectionUiState()));
+      updateSectionUiState(sectionId, resolveConfigSectionUiStateOnSelect(sectionUiState[sectionId], defaultSectionUiState(sectionId)));
     }
     contentViewportRef.current?.scrollTo({ top: 0, behavior: "smooth" });
   }
@@ -3892,7 +3897,7 @@ export function ConfigRoute() {
             lang={currentLanguage}
             copy={copy}
             disabled={structuredActionsDisabled}
-            uiState={sectionUiState[section.id] ?? defaultSectionUiState()}
+            uiState={sectionUiState[section.id] ?? defaultSectionUiState(section.id)}
             onUiStateChange={updateSectionUiState}
             onSaveSection={saveConfigSection}
             onAvatarImageUpload={handleAvatarImageUpload}
