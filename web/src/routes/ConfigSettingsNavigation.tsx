@@ -64,8 +64,7 @@ const PAGE_DEFINITIONS: Record<ConfigSettingsGroupId, readonly PageDefinition[]>
     { id: "model-discovery", zh: "模型发现", en: "Discovery", members: ["llm-discovery"] },
   ],
   "runtime-context": [
-    { id: "runtime-context", zh: "上下文压缩", en: "Context", members: ["context-compression"] },
-    { id: "runtime-analysis", zh: "分析", en: "Analysis", members: ["analysis"] },
+    { id: "runtime-context", zh: "上下文与分析", en: "Context & analysis", members: ["context-compression", "analysis"] },
   ],
   "tooling-diagnostics": [
     { id: "tooling-access", zh: "日常工具", en: "Everyday tools", members: ["security", "network", "parser"] },

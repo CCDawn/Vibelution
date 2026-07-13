@@ -808,7 +808,8 @@ describe("ConfigRoute layout contract", () => {
     expect(routeSource).toContain("styles.configAdvancedGrid");
     expect(styles.configCommonGridOne).toContain("![grid-template-columns:minmax(0,1fr)]");
     expect(styles.configCommonGridFour).toContain("![grid-template-columns:repeat(4,minmax(0,1fr))]");
-    expect(styles.configCommonGridContext).toContain("![grid-template-columns:repeat(5,minmax(0,1fr))]");
+    expect(styles.configCommonGridContext).toContain("![grid-template-columns:repeat(3,minmax(0,1fr))]");
+    expect(styles.configCommonGridContext).not.toContain("repeat(5");
     expect(styles.configAdvancedGrid).toContain("![grid-template-columns:repeat(3,minmax(0,1fr))]");
     expect(styles.configAdvancedGrid).toContain("max-[1180px]:![grid-template-columns:repeat(2,minmax(0,1fr))]");
     expect(styles.configProgressiveBody).toContain("[&_.treeFieldCardView]:[grid-template-columns:minmax(0,1fr)]");

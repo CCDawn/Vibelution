@@ -53,6 +53,9 @@ describe("ConfigSettingsNavigation", () => {
     expect(groups.find((group) => group.id === "workbench-interface")?.pages).toEqual([
       expect.objectContaining({ id: "workbench-interface", memberSectionIds: ["shell", "ui"] }),
     ]);
+    expect(groups.find((group) => group.id === "runtime-context")?.pages).toEqual([
+      expect.objectContaining({ id: "runtime-context", memberSectionIds: ["context-compression", "analysis"] }),
+    ]);
     expect(groups.find((group) => group.id === "tooling-diagnostics")?.pages).toEqual(
       [
         expect.objectContaining({ id: "tooling-access", memberSectionIds: ["security", "network", "parser"] }),
@@ -75,6 +78,18 @@ describe("ConfigSettingsNavigation", () => {
     );
 
     expect(markup).toBe("");
+
+    const runtimeGroup = groups.find((group) => group.id === "runtime-context") ?? null;
+    const runtimeMarkup = renderToStaticMarkup(
+      <ConfigSettingsPageTabs
+        language="zh"
+        group={runtimeGroup}
+        activePageId="runtime-context"
+        onSelectPage={() => undefined}
+      />,
+    );
+
+    expect(runtimeMarkup).toBe("");
   });
 
   it("falls back to the requested group's first page", () => {

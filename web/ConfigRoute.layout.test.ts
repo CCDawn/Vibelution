@@ -97,9 +97,10 @@ describe("ConfigRoute content experience contract", () => {
     expect(configRouteSource).not.toContain("copy.agentConfigCenterTitle");
     expect(configRouteSource).not.toContain('memberSectionIds: ["agent"');
     expect(configNavigationSource).toContain('"runtime-context"');
-    expect(configNavigationSource).toContain('members: ["context-compression"]');
-    expect(configNavigationSource).toContain('members: ["analysis"]');
+    expect(configNavigationSource).toContain('members: ["context-compression", "analysis"]');
+    expect(configNavigationSource).not.toContain('id: "runtime-analysis"');
     expect(configRouteSource).toContain("copy.groupRuntimeContextTitle");
+    expect(configRouteSource).toContain('groupRuntimeContextTitle: "上下文与分析"');
     expect(configRouteSource).not.toContain('memberSectionIds: ["agent", "context-compression", "memory", "strategy", "analysis", "evolution"]');
     expect(configRouteSource).not.toContain("saveResearchAgent");
     expect(configRouteSource).not.toContain("deleteResearchAgent");
