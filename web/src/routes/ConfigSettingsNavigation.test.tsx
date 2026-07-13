@@ -50,6 +50,9 @@ describe("ConfigSettingsNavigation", () => {
     const groups = buildConfigSettingsGroups(sections, groupCopy, "zh");
 
     expect(groups).toHaveLength(6);
+    expect(groups.find((group) => group.id === "overview-apply")?.pages).toEqual([
+      expect.objectContaining({ id: "overview-save", memberSectionIds: ["overview", "diagnostics"] }),
+    ]);
     expect(groups.find((group) => group.id === "workbench-interface")?.pages).toEqual([
       expect.objectContaining({ id: "workbench-interface", memberSectionIds: ["shell", "ui"] }),
     ]);
@@ -105,6 +108,18 @@ describe("ConfigSettingsNavigation", () => {
     );
 
     expect(profileMarkup).toBe("");
+
+    const overviewGroup = groups.find((group) => group.id === "overview-apply") ?? null;
+    const overviewMarkup = renderToStaticMarkup(
+      <ConfigSettingsPageTabs
+        language="zh"
+        group={overviewGroup}
+        activePageId="overview-save"
+        onSelectPage={() => undefined}
+      />,
+    );
+
+    expect(overviewMarkup).toBe("");
   });
 
   it("falls back to the requested group's first page", () => {

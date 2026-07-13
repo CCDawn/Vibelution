@@ -48,8 +48,7 @@ const GROUP_ORDER: ConfigSettingsGroupId[] = [
 
 const PAGE_DEFINITIONS: Record<ConfigSettingsGroupId, readonly PageDefinition[]> = {
   "overview-apply": [
-    { id: "overview-status", zh: "状态总览", en: "Status", members: ["overview"] },
-    { id: "overview-changes", zh: "变更与保存", en: "Changes", members: ["diagnostics"] },
+    { id: "overview-save", zh: "总览与保存", en: "Overview & save", members: ["overview", "diagnostics"] },
   ],
   "workbench-interface": [
     { id: "workbench-interface", zh: "工作台与界面", en: "Workbench & interface", members: ["shell", "ui"] },

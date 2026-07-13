@@ -37,6 +37,13 @@ describe("ConfigRoute content experience contract", () => {
     expect(configRouteSource).not.toContain('sourceTitle: "配置源"');
   });
 
+  it("combines save status and diagnostics into one continuous settings page", () => {
+    expect(configNavigationSource).toContain('id: "overview-save"');
+    expect(configNavigationSource).toContain('members: ["overview", "diagnostics"]');
+    expect(configNavigationSource).not.toContain('id: "overview-status"');
+    expect(configNavigationSource).not.toContain('id: "overview-changes"');
+  });
+
   it("keeps low-value field-type badges out of read-only config cards", () => {
     const viewStart = configRouteSource.indexOf("function renderFieldView");
     const editStart = configRouteSource.indexOf("function renderFieldEditor");
