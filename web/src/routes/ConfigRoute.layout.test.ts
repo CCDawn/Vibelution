@@ -363,6 +363,8 @@ describe("ConfigRoute layout contract", () => {
     expect(styles.page).toContain("[grid-template-rows:minmax(0,1fr)]");
     expect(styles.content).toContain("[grid-template-rows:auto_auto_minmax(0,1fr)]");
     expect(styles.pageViewport).toContain("overflow-y-auto");
+    expect(styles.pageViewport).toContain("[&:has(>_.providerModelsLayout)]:[align-content:stretch]");
+    expect(styles.pageViewport).toContain("[&:has(>_.providerModelsLayout)]:[grid-template-rows:minmax(0,1fr)]");
   });
 
   it("extracts core Config sections into route-local display panels", () => {
