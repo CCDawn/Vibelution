@@ -203,6 +203,7 @@ export type SessionActiveTask = {
 };
 
 export type ToolCall = {
+  callId?: string;
   name: string;
   status: string;
   summary?: string;
@@ -226,6 +227,7 @@ export type ToolCall = {
 };
 
 export type ConversationFeedbackEvent = {
+  callId?: string;
   sequence: number;
   kind: "thought" | "mental" | "tool" | "status";
   status: string;
@@ -529,6 +531,7 @@ export type SessionTurnAcceptedResponse = {
   accepted: boolean;
   sessionId: string;
   turnId: string;
+  clientSubmissionId: string;
   status: string;
   acceptedAt: string;
 };

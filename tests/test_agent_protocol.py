@@ -2941,7 +2941,7 @@ class TestToolMessageFlow:
         messages = []
         calls = []
 
-        def fake_execute(tool_name, _tool_args):
+        def fake_execute(tool_name, _tool_args, *, tool_call_id=""):
             calls.append(tool_name)
             if tool_name == "custom_restart_tool":
                 return ("restart ok", "restart")
@@ -2970,7 +2970,7 @@ class TestToolMessageFlow:
         active = {"now": 0, "max": 0}
         lock = threading.Lock()
 
-        def fake_execute(tool_name, _tool_args):
+        def fake_execute(tool_name, _tool_args, *, tool_call_id=""):
             if tool_name in ToolLifecycleBridge.READONLY_TOOL_NAMES:
                 with lock:
                     active["now"] += 1
@@ -3011,7 +3011,7 @@ class TestToolMessageFlow:
         running_mutators = {"now": 0, "max": 0}
         lock = threading.Lock()
 
-        def fake_execute(tool_name, _tool_args):
+        def fake_execute(tool_name, _tool_args, *, tool_call_id=""):
             with lock:
                 execution_order.append(tool_name)
                 if tool_name not in ToolLifecycleBridge.READONLY_TOOL_NAMES:
@@ -3047,7 +3047,7 @@ class TestToolMessageFlow:
         assert execution_order.index("grep_search_tool") > execution_order.index("write_file_tool")
 
     def test_partition_tool_calls_groups_readonly_and_breaks_on_mutating(self):
-        bridge = ToolLifecycleBridge(tool_executor_execute=lambda _name, _args: ("ok", None))
+        bridge = ToolLifecycleBridge(tool_executor_execute=lambda _name, _args, **_kwargs: ("ok", None))
         batches = bridge._partition_tool_calls([
             {"name": "read_file_tool"},
             {"name": "grep_search_tool"},
@@ -3066,7 +3066,7 @@ class TestToolMessageFlow:
         messages = []
         calls = []
 
-        def fake_execute(tool_name, _tool_args):
+        def fake_execute(tool_name, _tool_args, *, tool_call_id=""):
             calls.append(tool_name)
             if tool_name == "close_evolution_transaction_tool":
                 return (
@@ -3092,7 +3092,7 @@ class TestToolMessageFlow:
         messages = []
         calls = []
 
-        def fake_executor(tool_name, tool_args):
+        def fake_executor(tool_name, tool_args, *, tool_call_id=""):
             calls.append((tool_name, tool_args))
             return (
                 '{"status":"success","txn_id":"txn_1","transaction_status":"success","summary":"done"}',
@@ -3117,7 +3117,7 @@ class TestToolMessageFlow:
         messages = []
         calls = []
 
-        def fake_executor(tool_name, tool_args):
+        def fake_executor(tool_name, tool_args, *, tool_call_id=""):
             calls.append((tool_name, tool_args))
             return ("should not run", None)
 
