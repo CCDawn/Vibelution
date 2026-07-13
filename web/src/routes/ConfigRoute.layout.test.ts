@@ -403,6 +403,18 @@ describe("ConfigRoute layout contract", () => {
     expect(routeSource).toContain("onIntakeModeChange");
   });
 
+  it("turns the single workbench behavior setting into a compact, usable action row", () => {
+    expect(runtimePanelSource).toContain("styles.behaviorRow");
+    expect(runtimePanelSource).toContain("styles.behaviorCopy");
+    expect(runtimePanelSource).toContain('aria-label={copy.intakeMode}');
+    expect(runtimePanelSource).toContain('aria-pressed={currentIntakeMode === mode}');
+    expect(runtimePanelSource).not.toContain("styles.matrixGrid");
+    expect(runtimePanelSource).not.toContain("styles.matrixCard");
+    expect(runtimePanelStyles.behaviorRow).toContain("[grid-template-columns:minmax(0,1fr)_auto]");
+    expect(runtimePanelStyles.segmentButton).toContain("min-w-28");
+    expect(runtimePanelStyles.segmentButton).toContain("min-h-10");
+  });
+
   it("keeps the config loading placeholder as a dense board with nav, metrics, and specs", () => {
     expect(placeholderPanelSource).toContain("styles.loadingNavPanel");
     expect(placeholderPanelSource).toContain("styles.loadingNavList");
@@ -452,7 +464,7 @@ describe("ConfigRoute layout contract", () => {
     expect(providerPanelSource).toContain("styles.registryWorkspace");
     expect(providerPanelSource).toContain("<VDenseTable");
     expect(routeSource).toContain("styles.configEditorSection");
-    expect(routeSource).toContain('section.id === "llm-discovery" ? styles.configDiscoverySection : ""');
+    expect(routeSource).toContain('section.id === "llm-discovery" && !presentation ? styles.configDiscoverySection : ""');
     expect(routeSource).toContain("styles.notice");
     expect(providerPanelSource).toContain("styles.tableScroll");
     expect(providerPanelSource).toContain("styles.modelIdentity");
@@ -744,6 +756,7 @@ describe("ConfigRoute layout contract", () => {
     expect(routeSource).toContain("presentation.commonTitle");
     expect(routeSource).toContain("presentation.advancedTitle");
     expect(routeSource).toContain("presentation?.sectionTitle ?? section.title");
+    expect(routeSource).toContain("presentation?.sectionSummary ?? section.summary");
     expect(routeSource).toContain("aria-expanded={advancedExpanded}");
     expect(routeSource).toContain('contentLayout="plain"');
     expect(routeSource).toContain("isDenseConfigSection(section) && !presentation");
@@ -780,7 +793,7 @@ describe("ConfigRoute layout contract", () => {
     expect(routeSource).toContain("return false");
     expect(routeSource).toContain("Number(section.fieldCount || 0) >= 12");
     expect(routeSource).toContain("styles.configDenseSection");
-    expect(routeSource).toContain('section.id === "llm-discovery" ? styles.configDiscoverySection : ""');
+    expect(routeSource).toContain('section.id === "llm-discovery" && !presentation ? styles.configDiscoverySection : ""');
     expect(routeSource).toContain("styles.treeGrid");
     expect(routeSource).toContain("styles.treeFieldCardView");
     expect(routeSource).toContain("styles.treeFieldCardEdit");
