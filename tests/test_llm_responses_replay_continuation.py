@@ -58,12 +58,13 @@ def test_responses_tool_continuation_uses_latest_canonical_replay_bookmark():
         }
 
     client = LLMClient(config=_config(), backend=backend)
-    assistant = client.invoke(
+    outcome = client.invoke_outcome(
         [{"role": "user", "content": "look up the moon"}],
         metadata=_metadata(iteration=0),
     )
+    assistant = client.project_outcome_message(outcome)
 
-    outcome = assistant.additional_kwargs["turn_outcome"]
+    assert "turn_outcome" not in assistant.additional_kwargs
     assert outcome.replay_state is not None
     assert outcome.replay_state.response_id == "resp_replay_1"
     assert outcome.replay_state.safe_summary()["hasResponseId"] is True
@@ -79,6 +80,7 @@ def test_responses_tool_continuation_uses_latest_canonical_replay_bookmark():
             },
         ],
         metadata=_metadata(iteration=1),
+        replay_state=outcome.replay_state,
     )
 
     assert continuation["previous_response_id"] == "resp_replay_1"

@@ -26,6 +26,7 @@ from ..semantic_messages import (
     ToolResultPart,
 )
 from ..streaming import ToolCallAccumulator, extract_text_content
+from ..usage import usage_diagnostic_summary_from_payload
 from ..types import (
     CanonicalItemIdentity,
     CanonicalToolCall,
@@ -576,11 +577,7 @@ class _ChatTurnAssembler:
             "usage_updated",
             status="observed",
             provider_event_type="chat.usage",
-            diagnostic_summary={
-                "inputTokens": int(usage.get("prompt_tokens") or usage.get("input_tokens") or 0),
-                "outputTokens": int(usage.get("completion_tokens") or usage.get("output_tokens") or 0),
-                "totalTokens": int(usage.get("total_tokens") or 0),
-            },
+            diagnostic_summary=usage_diagnostic_summary_from_payload(usage),
         )
 
     def _emit(self, kind: str, **kwargs: Any) -> LLMProtocolEvent:
