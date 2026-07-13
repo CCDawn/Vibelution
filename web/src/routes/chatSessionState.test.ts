@@ -490,6 +490,7 @@ describe("chatSessionState", () => {
 
     const nextDetail = appendOptimisticUserMessage(detail, {
       sessionId: "session-live",
+      clientSubmissionId: "submission-visible",
       content: "先展示这条消息",
       attachmentIds: ["artifact-1"],
       createdAt: "2026-05-22T10:02:00Z",
@@ -502,17 +503,19 @@ describe("chatSessionState", () => {
       timestamp: "2026-05-22T10:02:00Z",
       metadata: {
         optimisticUserMessage: true,
+        clientSubmissionId: "submission-visible",
         pending: true,
         attachmentIds: ["artifact-1"],
       },
     });
-    expect(nextDetail?.messages[1].id).toContain("optimistic-user-session-live");
+    expect(nextDetail?.messages[1].id).toBe("optimistic-user-submission-visible");
   });
 
   it("does not append the same pending user message twice", () => {
     const detail = makeDetail();
     const input = {
       sessionId: "session-live",
+      clientSubmissionId: "submission-deduplicated",
       content: "不要重复",
       createdAt: "2026-05-22T10:02:00Z",
     };
@@ -526,6 +529,7 @@ describe("chatSessionState", () => {
   it("marks an accepted optimistic user message with the backend turn id", () => {
     const input = {
       sessionId: "session-live",
+      clientSubmissionId: "submission-accepted",
       content: "按这个执行",
       createdAt: "2026-05-22T10:02:00Z",
     };
@@ -538,6 +542,7 @@ describe("chatSessionState", () => {
       content: "按这个执行",
       metadata: {
         optimisticUserMessage: true,
+        clientSubmissionId: "submission-accepted",
         pending: false,
         turnId: "turn-accepted",
       },
@@ -547,6 +552,7 @@ describe("chatSessionState", () => {
   it("removes accepted optimistic user messages when the persisted user message enters the window", () => {
     const input = {
       sessionId: "session-live",
+      clientSubmissionId: "submission-committed",
       content: "不要重复显示",
       createdAt: "2026-05-22T10:02:00Z",
     };
@@ -574,7 +580,7 @@ describe("chatSessionState", () => {
           role: "user",
           content: "不要重复显示",
           timestamp: "2026-05-22T10:02:01Z",
-          metadata: { turnId: "turn-accepted" },
+          metadata: { turnId: "turn-accepted", clientSubmissionId: "submission-committed" },
         },
       ],
       messageWindow: {
@@ -597,13 +603,14 @@ describe("chatSessionState", () => {
       id: "session-live-message-1",
       role: "user",
       content: "不要重复显示",
-      metadata: { turnId: "turn-accepted" },
+      metadata: { turnId: "turn-accepted", clientSubmissionId: "submission-committed" },
     });
   });
 
-  it("keeps a same-content optimistic user message when the committed turn id is different", () => {
+  it("keeps a same-content optimistic user message when the client submission id is different", () => {
     const input = {
       sessionId: "session-live",
+      clientSubmissionId: "submission-new",
       content: "1",
       createdAt: "2026-05-22T10:02:00Z",
     };
@@ -615,7 +622,7 @@ describe("chatSessionState", () => {
             role: "user",
             content: "1",
             timestamp: "2026-05-22T10:01:00Z",
-            metadata: { turnId: "turn-old" },
+            metadata: { turnId: "turn-old", clientSubmissionId: "submission-old" },
           },
         ],
         messageWindow: {
@@ -658,9 +665,9 @@ describe("chatSessionState", () => {
 
     const merged = mergeSessionDetailMessageWindow(current, assistantWindow);
 
-    expect(merged.messages.filter((message) => message.role === "user").map((message) => message.metadata?.turnId)).toEqual([
-      "turn-old",
-      "turn-new",
+    expect(merged.messages.filter((message) => message.role === "user").map((message) => message.metadata?.clientSubmissionId)).toEqual([
+      "submission-old",
+      "submission-new",
     ]);
   });
 
@@ -677,12 +684,14 @@ describe("chatSessionState", () => {
     });
     const withPending = appendOptimisticUserMessage(detail, {
       sessionId: "session-live",
+      clientSubmissionId: "submission-failed",
       content: "失败时撤回",
       createdAt: "2026-05-22T10:02:00Z",
     });
 
     const nextDetail = removeOptimisticUserMessage(withPending, {
       sessionId: "session-live",
+      clientSubmissionId: "submission-failed",
       content: "失败时撤回",
     });
 

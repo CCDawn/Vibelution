@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from uuid import uuid4
+
 from fastapi import APIRouter, HTTPException, Query, Request, status
 from fastapi.responses import FileResponse
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 from starlette.responses import StreamingResponse
 
 from core.web.services.session_service import (
@@ -111,7 +113,12 @@ async def _read_session_attachment_payload(session_id: str, request: Request) ->
     return b"".join(chunks)
 
 
+def _new_client_submission_id() -> str:
+    return f"submission-{uuid4().hex}"
+
+
 class SessionMessagePayload(BaseModel):
+    clientSubmissionId: str = Field(default_factory=_new_client_submission_id, max_length=128)
     content: str = ""
     contentUtf8Base64: str = ""
     attachmentIds: list[str] = []
@@ -348,11 +355,13 @@ async def session_upload_attachment(session_id: str, request: Request) -> dict:
 
 @router.post("/sessions/{session_id}/messages", status_code=status.HTTP_202_ACCEPTED)
 def session_submit_message(session_id: str, payload: SessionMessagePayload, request: Request) -> dict:
+    client_submission_id = str(payload.clientSubmissionId or "").strip() or _new_client_submission_id()
     try:
         if "respond-async" in str(request.headers.get("prefer") or "").lower():
             return submit_session_message_lightweight(
                 session_id,
                 payload.content,
+                client_submission_id=client_submission_id,
                 content_utf8_base64=payload.contentUtf8Base64,
                 attachment_ids=payload.attachmentIds,
                 references=payload.references,
@@ -363,6 +372,7 @@ def session_submit_message(session_id: str, payload: SessionMessagePayload, requ
         return submit_session_message(
             session_id,
             payload.content,
+            client_submission_id=client_submission_id,
             content_utf8_base64=payload.contentUtf8Base64,
             attachment_ids=payload.attachmentIds,
             references=payload.references,
@@ -380,11 +390,13 @@ def session_submit_message(session_id: str, payload: SessionMessagePayload, requ
 
 @router.post("/sessions/{session_id}/messages/edit-resubmit", status_code=status.HTTP_202_ACCEPTED)
 def session_edit_resubmit_message(session_id: str, payload: SessionMessageEditPayload) -> dict:
+    client_submission_id = str(payload.clientSubmissionId or "").strip() or _new_client_submission_id()
     try:
         return edit_and_resubmit_session_message(
             session_id,
             payload.messageId,
             payload.content,
+            client_submission_id=client_submission_id,
             content_utf8_base64=payload.contentUtf8Base64,
             mental_model_enabled=payload.mentalModelEnabled,
             turn_mode=payload.turnMode,

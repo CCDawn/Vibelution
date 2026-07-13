@@ -176,6 +176,46 @@ def test_session_assistant_delta_queue_updates_unsequenced_feedback_event():
     ]
 
 
+def test_session_assistant_delta_feedback_merge_keeps_parallel_same_name_tool_calls():
+    merged = session_service._merge_session_assistant_delta_feedback_events(
+        [
+            {
+                "sequence": 0,
+                "kind": "tool",
+                "status": "running",
+                "name": "read_file_tool",
+                "callId": "call-a",
+            }
+        ],
+        [
+            {
+                "sequence": 0,
+                "kind": "tool",
+                "status": "running",
+                "name": "read_file_tool",
+                "callId": "call-b",
+            }
+        ],
+    )
+
+    assert [event["callId"] for event in merged] == ["call-a", "call-b"]
+
+
+def test_session_turn_capture_correlates_parallel_same_name_tools_by_call_id():
+    capture = session_service.SessionTurnCapture(session_id="session-parallel", turn_id="turn-parallel")
+
+    capture.note_tool_event("read_file_tool", "running", "读取 A", call_id="call-a")
+    capture.note_tool_event("read_file_tool", "running", "读取 B", call_id="call-b")
+    capture.note_tool_event("read_file_tool", "done", "A 完成", call_id="call-a", result="A")
+
+    tool_calls = {item["callId"]: item for item in capture.tool_calls}
+    feedback_events = {item["callId"]: item for item in capture.feedback_events if item.get("kind") == "tool"}
+    assert tool_calls["call-a"]["status"] == "done"
+    assert tool_calls["call-b"]["status"] == "running"
+    assert feedback_events["call-a"]["status"] == "done"
+    assert feedback_events["call-b"]["status"] == "running"
+
+
 def test_session_turn_capture_summarizes_repeated_tool_loop_progress():
     capture = session_service.SessionTurnCapture(session_id="session-loop", turn_id="turn-loop")
 

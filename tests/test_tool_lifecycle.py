@@ -8,6 +8,29 @@ from core.llm.types import CanonicalItemIdentity, CanonicalToolCall, CanonicalTo
 from core.orchestration.tool_lifecycle import ToolLifecycleBridge
 
 
+def test_execute_tool_passes_call_id_to_executor_events():
+    observed: dict[str, Any] = {}
+
+    def fake_execute(tool_name, tool_args, *, tool_call_id=""):
+        observed.update(name=tool_name, args=tool_args, call_id=tool_call_id)
+        return ("ok", None)
+
+    bridge = ToolLifecycleBridge(tool_executor_execute=fake_execute)
+
+    result, action = bridge.execute_tool(
+        {"name": "read_file_tool", "args": {"path": "agent.py"}, "id": "call-identity"},
+        [],
+    )
+
+    assert result == "ok"
+    assert action is None
+    assert observed == {
+        "name": "read_file_tool",
+        "args": {"path": "agent.py"},
+        "call_id": "call-identity",
+    }
+
+
 def test_readonly_batch_isolates_worker_exception_and_preserves_success_results():
     original_messages: list[Any] = []
     worker_message_ids: list[int] = []
