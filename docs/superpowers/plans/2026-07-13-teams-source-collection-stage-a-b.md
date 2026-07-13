@@ -1,6 +1,6 @@
 # Teams Source Collection 阶段 A+B Implementation Plan
 
-- **Status:** in-progress
+- **Status:** ready-for-integration
 - **Owner:** codex-teams-source-collection-stage-a-b
 - **Approved spec:** [`2026-07-13-teams-source-collection-vertical-split-design.md`](../specs/2026-07-13-teams-source-collection-vertical-split-design.md)
 - **Planning claim:** `claim-229348c3d41b`
@@ -223,3 +223,15 @@ Challenge Cup generator 前后记录 `git status --short`；generated HTML 出�
 - **Launcher:** code integration 后 required before runtime verification；docs-only planning 不需要。
 - **Memory:** A+B 合入后同步 `web-workbench-surface` 的 durable ownership decision、commit 与验证结果；计划阶段只维护 claim，不写完成事实。
 - **Deferred:** 阶段 C controllers 与阶段 D workspace/styles 必须在 A+B 合入后重新审阅，不能顺手进入本 worktree。
+
+## 10. 实施与验证证据
+
+- 阶段 A checkpoint commits：`e85c81fd`（run）、`91f8f720`（stage）、`4de567ca`（evidence）。
+- 阶段 B checkpoint commit：`d8b3cd73`；最新 local `main` 通过 `d07cb63c` 无冲突并入任务分支。
+- `TeamsRoute.tsx` 从基线 13,525 行降至 11,629 行；Route 内 `useQuery` 从 25 个降至 16 个，新 hook 精确持有 9 个 `useQuery`，且不含 `useMutation` / `useState`。
+- focused Vitest：7 files / 84 tests passed。
+- selector-selected backend gate：357 passed in 418.87s。
+- frontend full gate：226 files / 2,179 tests passed。
+- `npm --prefix web run build` passed；`node 挑战杯/build_research_flow_site.mjs` 生成 13 页且前后 worktree clean，无 generated diff。
+- `git diff --check` passed；selector 仅命中 `teams-knowledge`、`frontend-workbench` 与计划文档的 `docs-only` 规则。
+- behavior、URL、query key、AbortSignal、enabled、polling、mutation invalidation 和 backend contract 均未扩展；Stage C/D 继续 deferred。
