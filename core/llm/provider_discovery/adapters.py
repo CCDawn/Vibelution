@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import json
+import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Callable
@@ -21,6 +22,8 @@ from .types import (
 MAX_DISCOVERY_RESPONSE_BYTES = 2 * 1024 * 1024
 MAX_DISCOVERED_MODELS = 5000
 MAX_UPSTREAM_ID_LENGTH = 512
+_REQUEST_SUFFIXES = ("/chat/completions", "/responses", "/completions")
+_VERSION_SEGMENT = re.compile(r"/v[0-9]+(?:beta)?$")
 
 
 def _utcnow_iso() -> str:
@@ -38,10 +41,37 @@ def _join_endpoint(base_url: str, suffix: str) -> str:
 
 def _service_root(base_url: str) -> str:
     value = str(base_url).rstrip("/")
-    for suffix in ("/v1beta", "/v1"):
-        if value.endswith(suffix):
-            return value[: -len(suffix)]
+    parsed = urlsplit(value)
+    path = parsed.path.rstrip("/")
+    if _VERSION_SEGMENT.search(path):
+        path = _VERSION_SEGMENT.sub("", path)
+        return urlunsplit((parsed.scheme, parsed.netloc, path, "", ""))
     return value
+
+
+def resolve_discovery_endpoints(provider: dict[str, Any], adapter_id: str) -> tuple[str, ...]:
+    discovery = provider.get("discovery") if isinstance(provider.get("discovery"), dict) else {}
+    override = str(discovery.get("models_url_override") or "").strip().rstrip("/")
+    if override:
+        return (override,)
+    base = str(provider.get("base_url") or "").strip().rstrip("/")
+    adapter = str(adapter_id or "").strip().lower()
+    if adapter == "anthropic":
+        return (_join_endpoint(_service_root(base), "v1/models"),)
+    if adapter == "gemini":
+        return (_join_endpoint(_service_root(base), "v1beta/models"),)
+    for suffix in _REQUEST_SUFFIXES:
+        if base.lower().endswith(suffix):
+            base = base[: -len(suffix)]
+            break
+    candidates: list[str]
+    if _VERSION_SEGMENT.search(urlsplit(base).path.rstrip("/")):
+        candidates = [_join_endpoint(base, "models")]
+        if not base.lower().endswith("/v1"):
+            candidates.append(_join_endpoint(_service_root(base), "v1/models"))
+    else:
+        candidates = [_join_endpoint(base, "v1/models")]
+    return tuple(dict.fromkeys(candidate for candidate in candidates if candidate))[:4]
 
 
 def _bounded_json_get(
@@ -127,6 +157,10 @@ def _model(raw: Any, *, id_field: str = "id", strip_prefix: str = "") -> Discove
     )
 
 
+def _candidate_can_fall_through(exc: Exception) -> bool:
+    return isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code in {404, 405}
+
+
 def _discover_candidates(
     request: ProviderDiscoveryRequest,
     adapter_id: str,
@@ -145,13 +179,10 @@ def _discover_candidates(
             payload = _bounded_json_get(endpoint, headers=headers, params=params, request=request)
             models = _validate_models(normalize(payload))
         except Exception as exc:
-            if (
-                isinstance(exc, httpx.HTTPStatusError)
-                and exc.response.status_code in {401, 403}
-            ):
-                raise
             last_error = exc
-            continue
+            if _candidate_can_fall_through(exc):
+                continue
+            raise
         if models:
             return ProviderDiscoveryResult(
                 provider_id=request.provider_id,
@@ -177,11 +208,7 @@ class OpenAICompatibleDiscoveryAdapter:
     adapter_id: str
 
     def discover(self, request: ProviderDiscoveryRequest) -> ProviderDiscoveryResult:
-        base = str(request.provider.get("base_url") or "").rstrip("/")
-        endpoints = [_join_endpoint(base, "models")] if base.endswith("/v1") else [
-            _join_endpoint(base, "v1/models"),
-            _join_endpoint(base, "models"),
-        ]
+        endpoints = list(resolve_discovery_endpoints(request.provider, self.adapter_id))
         headers = {"Authorization": f"Bearer {request.credential}"} if request.credential else {}
         return _discover_candidates(
             request,
@@ -297,4 +324,5 @@ __all__ = [
     "MAX_DISCOVERY_RESPONSE_BYTES",
     "MAX_UPSTREAM_ID_LENGTH",
     "get_provider_discovery_adapter",
+    "resolve_discovery_endpoints",
 ]

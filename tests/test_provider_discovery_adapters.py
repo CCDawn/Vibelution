@@ -5,10 +5,13 @@ import json
 import httpx
 import pytest
 
+from config.llm_identity import provider_discovery_fingerprint
 from config.model_catalog import load_model_catalog_state
+from config.models import ProviderDiscoverySettings
 from core.llm.provider_discovery.adapters import (
     MAX_DISCOVERED_MODELS,
     MAX_DISCOVERY_RESPONSE_BYTES,
+    resolve_discovery_endpoints,
 )
 from core.llm.provider_discovery.service import discover_provider_models
 from core.llm.provider_discovery.types import ProviderDiscoveryRequest
@@ -51,6 +54,51 @@ def test_request_repr_never_contains_credential() -> None:
     assert "super-secret" not in repr(request)
 
 
+@pytest.mark.parametrize(
+    ("base_url", "expected"),
+    [
+        ("https://relay.example", ("https://relay.example/v1/models",)),
+        ("https://relay.example/v1", ("https://relay.example/v1/models",)),
+        (
+            "https://relay.example/v2",
+            ("https://relay.example/v2/models", "https://relay.example/v1/models"),
+        ),
+        ("https://relay.example/v1/responses", ("https://relay.example/v1/models",)),
+        (
+            "https://relay.example/v1/chat/completions",
+            ("https://relay.example/v1/models",),
+        ),
+    ],
+)
+def test_openai_model_endpoint_candidates_are_ordered_and_bounded(
+    base_url: str,
+    expected: tuple[str, ...],
+) -> None:
+    provider = {"base_url": base_url, "discovery": {"adapter": "openai_compatible"}}
+    assert resolve_discovery_endpoints(provider, "openai_compatible") == expected
+
+
+def test_explicit_models_url_override_is_the_only_candidate() -> None:
+    provider = {
+        "base_url": "https://relay.example/v1/responses",
+        "discovery": {
+            "adapter": "openai_compatible",
+            "models_url_override": "https://catalog.example/custom/models",
+        },
+    }
+    assert resolve_discovery_endpoints(provider, "openai_compatible") == (
+        "https://catalog.example/custom/models",
+    )
+
+
+def test_provider_discovery_settings_exposes_typed_models_url_override() -> None:
+    settings = ProviderDiscoverySettings(
+        adapter="openai_compatible",
+        models_url_override="https://catalog.example/custom/models",
+    )
+    assert settings.models_url_override == "https://catalog.example/custom/models"
+
+
 def test_openai_compatible_adapter_normalizes_models_and_reconciles_pins(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("VIBELUTION_LLM_PROVIDER_LAB_API_KEY", "secret")
 
@@ -80,33 +128,64 @@ def test_openai_compatible_adapter_normalizes_models_and_reconciles_pins(monkeyp
     assert result.models[0].upstream_id == "gpt-a"
     assert result.models[0].limits == {"context_window": 128000}
     state = load_model_catalog_state(path)
+    provider = _config("openai_compatible")["llm"]["providers"]["lab"]
+    assert state["providers"]["lab"]["providerFingerprint"] == provider_discovery_fingerprint(provider)
     assert state["providers"]["lab"]["models"]["pinned-gone"]["availability"] == "missing_remote"
     assert state["providers"]["lab"]["models"]["gpt-a"]["capabilities"]["vision"]["source"] == (
         "provider_endpoint"
     )
 
 
-def test_openai_compatible_tries_bounded_candidates_in_order(monkeypatch, tmp_path) -> None:
+@pytest.mark.parametrize("route_mismatch_status", [404, 405])
+def test_openai_compatible_tries_bounded_candidates_in_order(
+    monkeypatch,
+    tmp_path,
+    route_mismatch_status: int,
+) -> None:
     monkeypatch.setenv("VIBELUTION_LLM_PROVIDER_LAB_API_KEY", "secret")
     seen: list[str] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
         seen.append(request.url.path)
-        if request.url.path == "/v1/models":
-            return httpx.Response(404, json={"error": "not found"})
+        if request.url.path == "/v2/models":
+            return httpx.Response(route_mismatch_status, json={"error": "route mismatch"})
         return httpx.Response(200, json={"data": [{"id": "fallback-model"}]})
 
     result = discover_provider_models(
-        _config("openai_compatible", base_url="https://models.example"),
+        _config("openai_compatible", base_url="https://models.example/v2"),
         "lab",
         catalog_path=tmp_path / "state.json",
         transport=httpx.MockTransport(handler),
     )
-    assert seen == ["/v1/models", "/models"]
+    assert seen == ["/v2/models", "/v1/models"]
     assert result.attempted_endpoints == (
+        "https://models.example/v2/models",
         "https://models.example/v1/models",
-        "https://models.example/models",
     )
+
+
+def test_explicit_models_url_override_is_validated_before_http(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("VIBELUTION_LLM_PROVIDER_LAB_API_KEY", "secret")
+    config = _config("openai_compatible")
+    config["llm"]["providers"]["lab"]["discovery"]["models_url_override"] = (
+        "https://169.254.169.254/latest/models"
+    )
+    calls = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(200, json={"data": [{"id": "must-not-run"}]})
+
+    with pytest.raises(ValueError, match="non-public network address"):
+        discover_provider_models(
+            config,
+            "lab",
+            catalog_path=tmp_path / "state.json",
+            transport=httpx.MockTransport(handler),
+        )
+
+    assert calls == 0
 
 
 def test_ollama_adapter_uses_native_tags_surface(tmp_path) -> None:
@@ -187,13 +266,13 @@ def test_successful_empty_candidate_is_reported_as_empty_discovery(monkeypatch, 
     monkeypatch.setenv("VIBELUTION_LLM_PROVIDER_LAB_API_KEY", "secret")
 
     def handler(request: httpx.Request) -> httpx.Response:
-        if request.url.path == "/v1/models":
+        if request.url.path == "/v2/models":
             return httpx.Response(404)
         return httpx.Response(200, json={"data": []})
 
     with pytest.raises(ValueError, match="no usable models"):
         discover_provider_models(
-            _config("openai_compatible", base_url="https://models.example"),
+            _config("openai_compatible", base_url="https://models.example/v2"),
             "lab",
             catalog_path=tmp_path / "state.json",
             transport=httpx.MockTransport(handler),
@@ -311,7 +390,7 @@ def test_multi_candidate_discovery_preserves_safe_auth_failure_priority(
     path = tmp_path / "state.json"
     with pytest.raises(httpx.HTTPStatusError) as raised:
         discover_provider_models(
-            _config("openai_compatible", base_url="https://models.example"),
+            _config("openai_compatible", base_url="https://models.example/v2"),
             "lab",
             catalog_path=path,
             transport=httpx.MockTransport(handler),
@@ -324,6 +403,68 @@ def test_multi_candidate_discovery_preserves_safe_auth_failure_priority(
     assert state["providers"]["lab"]["status"] == "auth_failed"
     assert state["providers"]["lab"]["lastErrorType"] == "auth_failed"
     assert "auth-secret" not in json.dumps(state)
+
+
+@pytest.mark.parametrize(
+    ("failure_kind", "expected_exception", "expected_error_type"),
+    [
+        ("rate_limit", httpx.HTTPStatusError, "other"),
+        ("server_error", httpx.HTTPStatusError, "other"),
+        ("timeout", httpx.TimeoutException, "timeout"),
+        ("network", httpx.RequestError, "network"),
+    ],
+)
+def test_non_route_failures_do_not_advance_discovery_candidates(
+    monkeypatch,
+    tmp_path,
+    failure_kind: str,
+    expected_exception: type[Exception],
+    expected_error_type: str,
+) -> None:
+    monkeypatch.setenv("VIBELUTION_LLM_PROVIDER_LAB_API_KEY", "failure-secret")
+    calls: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request.url.path)
+        if failure_kind == "rate_limit":
+            return httpx.Response(429, json={"error": "failure-secret"})
+        if failure_kind == "server_error":
+            return httpx.Response(503, json={"error": "failure-secret"})
+        if failure_kind == "timeout":
+            raise httpx.ReadTimeout("failure-secret", request=request)
+        raise httpx.ConnectError("failure-secret", request=request)
+
+    path = tmp_path / "state.json"
+    with pytest.raises(expected_exception) as raised:
+        discover_provider_models(
+            _config("openai_compatible", base_url="https://models.example/v2"),
+            "lab",
+            catalog_path=path,
+            transport=httpx.MockTransport(handler),
+        )
+
+    assert calls == ["/v2/models"]
+    assert "failure-secret" not in str(raised.value)
+    assert load_model_catalog_state(path)["providers"]["lab"]["lastErrorType"] == expected_error_type
+
+
+def test_malformed_candidate_response_does_not_fall_through(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("VIBELUTION_LLM_PROVIDER_LAB_API_KEY", "secret")
+    calls: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request.url.path)
+        return httpx.Response(200, content=b"{")
+
+    with pytest.raises(json.JSONDecodeError):
+        discover_provider_models(
+            _config("openai_compatible", base_url="https://models.example/v2"),
+            "lab",
+            catalog_path=tmp_path / "state.json",
+            transport=httpx.MockTransport(handler),
+        )
+
+    assert calls == ["/v2/models"]
 
 
 def test_discovery_include_and_exclude_filters_are_provider_scoped(monkeypatch, tmp_path) -> None:

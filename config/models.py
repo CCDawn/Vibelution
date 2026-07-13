@@ -194,6 +194,7 @@ class ProviderDiscoverySettings(BaseModel):
 
     mode: str = "manual"
     adapter: str = "manual"
+    models_url_override: str = ""
     cache_ttl_seconds: int = Field(default=3600, ge=0, le=86400)
     include: List[str] = Field(default_factory=list)
     exclude: List[str] = Field(default_factory=list)

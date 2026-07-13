@@ -10,7 +10,7 @@ from typing import Any
 import httpx
 
 from config.llm_credentials import resolve_credential_ref
-from config.llm_identity import provider_identity_fingerprint, validate_provider_id
+from config.llm_identity import provider_discovery_fingerprint, validate_provider_id
 from config.llm_security import validate_llm_provider_target
 from config.model_catalog import (
     load_model_catalog_state,
@@ -61,6 +61,15 @@ def discover_provider_models(
         raise ValueError("provider credential is missing")
     discovery = provider.get("discovery", {}) if isinstance(provider.get("discovery"), dict) else {}
     adapter_id = str(discovery.get("adapter") or "manual").strip().lower()
+    models_url_override = str(discovery.get("models_url_override") or "").strip()
+    if models_url_override:
+        override_provider = copy.deepcopy(provider)
+        override_provider["base_url"] = models_url_override
+        validate_llm_provider_target(
+            override_provider,
+            context="llm.provider.discovery.models_url_override",
+            resolve_dns=True,
+        )
     adapter = get_provider_discovery_adapter(adapter_id)
     request = ProviderDiscoveryRequest(
         provider_id=canonical_provider_id,
@@ -82,11 +91,7 @@ def discover_provider_models(
         updated = record_discovery_success(
             state,
             provider_id=canonical_provider_id,
-            provider_fingerprint=provider_identity_fingerprint(
-                str(provider.get("base_url") or ""),
-                str(provider.get("credential_ref") or "none"),
-                auth_kind=str(provider.get("auth_kind") or "api_key"),
-            ),
+            provider_fingerprint=provider_discovery_fingerprint(provider),
             discovered_at=result.discovered_at,
             observed=[dataclasses.asdict(model) for model in result.models],
             pinned=copy.deepcopy(provider.get("models", {})),
