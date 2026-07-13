@@ -10,7 +10,7 @@ This playbook is the default operating plan for future frontend refactoring roun
 
 It exists to prevent repeated small manual rounds. Future Agents should not rediscover the migration shape from scratch, stop after one tiny extraction, or mix unrelated behavior work into a componentization pass. A migration round should select a coherent batch, apply the same template, run the same checks, and leave clear evidence.
 
-The goal is not to make every page generic. The goal is to keep route files as data/state/action owners while moving repeated display composition, local DOM clusters, reusable panel grammar, and local style ownership into dedicated components.
+The goal is not to make every page generic. For ordinary componentization batches, the default is to keep route files as data/state/action owners while moving repeated display composition, local DOM clusters, reusable panel grammar, and local style ownership into dedicated components. A dedicated architecture spec may move a cohesive vertical slice under typed owners when it defines staged gates and preserves behavior explicitly.
 
 ## 2. Authority And Relationship To Other Docs
 
@@ -50,6 +50,8 @@ As of 2026-07-05 after the source collection residual ownership wave:
 - Teams source collection residual ownership has been narrowed: `TeamsRoute.styles.ts` keeps the page/grid/run-badge/step-state shell, while child panels and VUI product components own panel frames, focused panel layout, active-stage result layout, graph node list shell, result filter/pagination controls, result rows, and candidate list shells.
 - The remaining work is concentrated in large route files, large route style maps, repeated visual grammar, and product-level behavior backlogs that must be scheduled separately.
 
+> 2026-07-13 architecture note: the helper-only Teams source collection recommendation in Q3 and section 18 is superseded by [Teams source collection vertical split](2026-07-13-teams-source-collection-vertical-split-design.md). That dedicated design is a behavior-preserving architecture refactor, not a normal visual/componentization batch, and may move query/controller ownership under its stricter staged gates. All other guidance in this playbook remains active.
+
 Largest route/componentization hotspots observed:
 
 | Surface | Approximate line count | Primary remaining concern |
@@ -75,7 +77,7 @@ Known non-componentization backlog that must remain separate:
 Future componentization rounds should preserve this intent:
 
 - User-visible behavior remains unchanged unless a batch explicitly says it is a visual-only convergence pass.
-- Route files keep ownership of query state, mutations, cache reconciliation, navigation, URL state, permission decisions, and backend DTO assembly.
+- In ordinary componentization batches, route files keep ownership of query state, mutations, cache reconciliation, navigation, URL state, permission decisions, and backend DTO assembly. A dedicated approved architecture spec may move a cohesive subset under typed controllers while preserving the same external semantics.
 - Extracted components own DOM composition, local display helpers, local VUI composition, local style maps, and local empty/loading/error rendering for their cluster.
 - Common visual grammar moves upward into VUI/product compositions when reuse or consistency improves.
 - Batch size should be large enough to remove a coherent cluster or class of offenders in one pass.
@@ -93,7 +95,7 @@ Non-goals for normal componentization batches:
 
 ## 5. Target Architecture
 
-Use this ownership model:
+Use this default ownership model for componentization batches unless a dedicated architecture spec explicitly supersedes it:
 
 ```text
 Route
@@ -238,7 +240,7 @@ Classify each candidate cluster:
 | Signal | Meaning | Action |
 | --- | --- | --- |
 | Route contains cohesive JSX plus local helper functions | Good extraction target | Extract route-local panel. |
-| Route computes query/mutation/cache state inside same block as DOM | Split view-model from DOM | Keep state in route, pass props. |
+| Route computes query/mutation/cache state inside same block as DOM | Split view-model from DOM | In an ordinary batch, keep state in route and pass props; under a dedicated architecture spec, follow its staged ownership contract. |
 | Child component imports parent `Route.styles` | Ownership leak | Move to local style map unless route-local exception is intentionally documented. |
 | Style key name implies header/button/eyebrow but includes card chrome | Visual grammar conflict | Replace with VUI/product composition or layout-only class. |
 | Same class string appears in multiple style maps | Reusable VUI/product grammar | Extract composition if adoption covers enough surfaces. |
@@ -252,7 +254,7 @@ Select the largest safe batch that shares the same verification gate.
 Add or update route layout tests before implementation when practical. A good ownership test asserts:
 
 - Route imports and renders the new panel.
-- Route still owns query/mutation/cache state.
+- The ownership asserted by the active componentization playbook or dedicated architecture spec remains unique and unchanged outside the declared migration boundary.
 - Extracted panel owns specific DOM identifiers, labels, or local display helpers.
 - Extracted panel imports its own local style map when it is not an intentional route-local exception.
 - Route style map no longer owns moved style keys.
@@ -645,7 +647,7 @@ Recently completed clusters:
 
 Preferred remaining order:
 
-1. Source collection view-model split: move record/candidate/filter/pagination/provenance projection helpers from `TeamsRoute.tsx` into a route-local adapter/helper without changing query, mutation, cache, URL, or writeback semantics.
+1. Source collection architecture split: follow [Teams source collection vertical split](2026-07-13-teams-source-collection-vertical-split-design.md); its first implementation stage moves pure models and shared read-query ownership, while later controller/view stages remain separately gated.
 2. Candidate paper-note chunk actions and card toolbar cluster.
 3. Research loop evidence/status cluster.
 4. Experiment smoke/full-run result cluster.
@@ -655,7 +657,7 @@ Guardrails:
 
 - Do not alter Challenge Cup workflow semantics in a visual/componentization batch.
 - If touching `挑战杯/**`, update the Challenge Cup flow site in the same governance round.
-- Keep workflow API/state and source collection writeback behavior out of componentization rounds.
+- Keep workflow API/state and source collection writeback behavior out of normal visual/componentization rounds. The dedicated source collection architecture design is the only current exception, and it still preserves API, cache, URL, writeback, and user-visible semantics.
 
 Validation:
 
@@ -937,9 +939,9 @@ This componentization program is complete when:
 - Visual grammar checks and VUI boundary checks pass.
 - The project can continue frontend work from this playbook without asking each Agent to rediscover the migration process.
 
-## 18. Recommended Next Batch
+## 18. Superseded Teams Recommendation
 
-The next safest batch after this playbook is:
+The following block records the 2026-07-05 recommendation for historical context. It is no longer executable guidance for Teams source collection; use [Teams source collection vertical split](2026-07-13-teams-source-collection-vertical-split-design.md) instead.
 
 ```text
 Batch: Teams source collection view-model split wave

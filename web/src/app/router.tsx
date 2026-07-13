@@ -3,7 +3,7 @@ import { createBrowserRouter } from "react-router-dom";
 
 import { AppShell } from "./AppShell";
 import { LauncherShell } from "./LauncherShell";
-import { RouteLoadingShell } from "./RouteLoadingShell";
+import { RouteLoadingShell, type RouteLoadingLayout } from "./RouteLoadingShell";
 import { RouteErrorBoundary, type RouteErrorSurface } from "./RouteErrorBoundary";
 import { LegacyChatRoomsRedirect } from "../routes/LegacyChatRoomsRedirect";
 import { LegacyTeamsRedirect } from "../routes/LegacyTeamsRedirect";
@@ -86,17 +86,25 @@ function currentPathname(): string {
 }
 
 
-function lazyElement(element: ReactNode, surface: RouteErrorSurface = "workbench") {
-  return <Suspense fallback={<RouteLoadingShell surface={surface} />}>{element}</Suspense>;
+function lazyElement(
+  element: ReactNode,
+  surface: RouteErrorSurface = "workbench",
+  loadingLayout: RouteLoadingLayout = "default",
+) {
+  return <Suspense fallback={<RouteLoadingShell surface={surface} layout={loadingLayout} />}>{element}</Suspense>;
 }
 
 function routeErrorElement(surface: RouteErrorSurface = "workbench") {
   return <RouteErrorBoundary surface={surface} />;
 }
 
-function guardedLazyElement(element: ReactNode, surface: RouteErrorSurface = "workbench") {
+function guardedLazyElement(
+  element: ReactNode,
+  surface: RouteErrorSurface = "workbench",
+  loadingLayout: RouteLoadingLayout = "default",
+) {
   return {
-    element: lazyElement(element, surface),
+    element: lazyElement(element, surface, loadingLayout),
     errorElement: routeErrorElement(surface),
   };
 }
@@ -190,7 +198,7 @@ export const router = createBrowserRouter([
       { path: "memory/knowledge", ...guardedLazyElement(<MemoryRoute forcedView="knowledge" />) },
       { path: "memory/graph", ...guardedLazyElement(<MemoryRoute forcedView="graph" />) },
       { path: "memory/cleanup", ...guardedLazyElement(<MemoryRoute forcedView="cleanup" />) },
-      { path: "teams", ...guardedLazyElement(<TeamsRoute />) },
+      { path: "teams", ...guardedLazyElement(<TeamsRoute />, "workbench", "teams") },
       { path: "kernel", ...guardedLazyElement(<KernelTaskCenterRoute />) },
       { path: "git", ...guardedLazyElement(<GitRoute />) },
       { path: "usage", ...guardedLazyElement(<UsageRoute />) },
@@ -199,7 +207,7 @@ export const router = createBrowserRouter([
       { path: "research/flow-canvas", ...guardedLazyElement(<ResearchFlowCanvasRoute />) },
       { path: "pet", ...guardedLazyElement(<PetRoute />) },
       { path: "reset", ...guardedLazyElement(<ResetRoute />) },
-      { path: "config", ...guardedLazyElement(<ConfigRoute />) },
+      { path: "config", ...guardedLazyElement(<ConfigRoute />, "workbench", "config") },
     ],
   },
 ]);
