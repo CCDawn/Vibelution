@@ -6083,6 +6083,7 @@ def submit_session_message(
         "agent_id": agent_id,
         "leases": requested_leases,
         "message_metadata": dict(persisted_message_metadata),
+        "client_submission_id": normalized_client_submission_id,
         "supervised_context": dict(conversation.get("supervised_context") or {})
         if isinstance(conversation.get("supervised_context"), dict)
         else {},
@@ -6111,6 +6112,7 @@ def submit_session_message(
         _persist_session_turn_failure(conversation_id, context, exc)
         _publish_session_detail_snapshot(conversation_id)
         raise
+    _record_session_turn_accepted_event(context, submit_timing_fields)
     if lightweight_response:
         return _accepted_session_turn_payload(
             conversation_id,
@@ -16047,8 +16049,32 @@ def _record_session_turn_scheduled_event(context: dict[str, Any]) -> None:
             "mentalModelEnabled": _normalize_optional_bool(context.get("mental_model_enabled")),
             "userMessageLength": len(str(context.get("user_message") or "")),
             "userMessageSource": str(context.get("user_message_source") or "").strip(),
+            "clientSubmissionId": str(context.get("client_submission_id") or "").strip(),
             "attachmentCount": len(_normalize_message_attachments(context.get("attachments") or [])),
             **submit_timing_fields,
+        },
+    )
+
+
+def _record_session_turn_accepted_event(
+    context: dict[str, Any],
+    submit_timing_fields: dict[str, Any],
+) -> None:
+    session_id = str(context.get("session_id") or "").strip()
+    turn_id = str(context.get("turn_id") or "").strip()
+    fields = dict(submit_timing_fields or {})
+    submit_started_at = context.get("submit_started_at_monotonic")
+    if submit_started_at is not None:
+        fields["submitTotalMs"] = _elapsed_ms_between(submit_started_at)
+    _record_session_turn_lifecycle_event(
+        session_id,
+        "accepted",
+        turn_id=turn_id,
+        outcome="accepted",
+        fields={
+            "agentId": str(context.get("agent_id") or context.get("agentId") or "").strip(),
+            "clientSubmissionId": str(context.get("client_submission_id") or "").strip(),
+            **fields,
         },
     )
 

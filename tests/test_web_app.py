@@ -5333,7 +5333,10 @@ def test_submit_session_message_records_chat_turn_started_scene_event(tmp_path, 
 
     response = client.post(
         "/api/sessions/session-live/messages",
-        json={"content": "解释当前状态"},
+        json={
+            "content": "解释当前状态",
+            "clientSubmissionId": "submission-timing-1",
+        },
     )
 
     assert response.status_code == 202
@@ -5359,6 +5362,18 @@ def test_submit_session_message_records_chat_turn_started_scene_event(tmp_path, 
     assert scheduled_fields["turnId"] == active_chat["runId"]
     assert scheduled_fields["chatStateLockedMs"] >= 0
     assert scheduled_fields["submitElapsedBeforeScheduleLogMs"] >= 0
+    accepted_events = [
+        item
+        for item in recorded_scene_events
+        if item[0][:3] == ("conversation", "turn_accepted", "conversation.turn.accepted")
+    ]
+    assert accepted_events
+    accepted_fields = accepted_events[-1][1]["fields"]
+    assert accepted_fields["sessionId"] == "session-live"
+    assert accepted_fields["turnId"] == active_chat["runId"]
+    assert accepted_fields["clientSubmissionId"] == "submission-timing-1"
+    assert accepted_fields["scheduleSubmitMs"] >= 0
+    assert accepted_fields["submitTotalMs"] >= accepted_fields["scheduleSubmitMs"]
 
 
 def test_submit_session_message_prefer_async_returns_lightweight_acceptance(tmp_path, monkeypatch):
