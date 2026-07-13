@@ -1,6 +1,7 @@
 import type { SessionStreamEvent } from "../api/types";
 import { shouldAcceptSessionStreamEvent } from "./chatSessionState";
 import {
+  consolidateSessionTurnItemsV2,
   resolveAssistantTurnRenderProtocol,
   type ChatTurnRenderProtocol,
 } from "./chatTurnProtocol";
@@ -33,6 +34,10 @@ export type SessionStreamProtocolTrace = {
   turnId: string;
   itemId: string;
   turnItemCount: number;
+  finalAnswerItemCount: number;
+  commentaryItemCount: number;
+  toolItemCount: number;
+  terminalErrorItemCount: number;
   stage: string;
   done: boolean;
 };
@@ -107,6 +112,10 @@ export function sessionStreamProtocolTelemetryFields(trace: SessionStreamProtoco
     streamTurnId: trace.turnId,
     streamItemId: trace.itemId,
     streamTurnItemCount: trace.turnItemCount,
+    streamFinalAnswerItemCount: trace.finalAnswerItemCount,
+    streamCommentaryItemCount: trace.commentaryItemCount,
+    streamToolItemCount: trace.toolItemCount,
+    streamTerminalErrorItemCount: trace.terminalErrorItemCount,
     streamStage: trace.stage,
     streamDone: trace.done,
   };
@@ -144,6 +153,7 @@ function baseTrace<T extends SessionStreamEventType>(
   actualType: SessionStreamProtocolTrace["actualType"],
 ): Omit<SessionStreamProtocolTrace, "eventRoute"> {
   const assistantPayload = payload?.type === "assistant_delta" ? payload : undefined;
+  const itemCounts = canonicalItemCounts(assistantPayload?.turnItems);
   return {
     expectedType: input.expectedType,
     actualType,
@@ -153,8 +163,23 @@ function baseTrace<T extends SessionStreamEventType>(
     turnId: String(assistantPayload?.turnId ?? ""),
     itemId: String(assistantPayload?.itemId ?? ""),
     turnItemCount: Array.isArray(assistantPayload?.turnItems) ? assistantPayload.turnItems.length : 0,
+    ...itemCounts,
     stage: String(assistantPayload?.stage ?? ""),
     done: Boolean(assistantPayload?.done),
+  };
+}
+
+export function canonicalItemCounts(items: SessionAssistantDeltaStreamEvent["turnItems"]) {
+  const canonical = consolidateSessionTurnItemsV2(items);
+  return {
+    finalAnswerItemCount: canonical.filter(
+      (item) => item.channel === "answer" && item.phase === "final_answer",
+    ).length,
+    commentaryItemCount: canonical.filter((item) => item.channel === "commentary").length,
+    toolItemCount: canonical.filter((item) => item.kind === "tool_call").length,
+    terminalErrorItemCount: canonical.filter(
+      (item) => (item.kind === "error" || item.type === "error") && item.terminal === true,
+    ).length,
   };
 }
 

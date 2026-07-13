@@ -106,6 +106,10 @@ function linkClassName({ isActive }: { isActive: boolean }) {
   return isActive ? `${styles.navLink} ${styles.navLinkActive}` : styles.navLink;
 }
 
+function mobileLinkClassName({ isActive }: { isActive: boolean }) {
+  return isActive ? `${styles.mobileRouteLink} ${styles.mobileRouteLinkActive}` : styles.mobileRouteLink;
+}
+
 let chatRoutePreloadPromise: Promise<unknown> | null = null;
 
 function browserNowMs(): number {
@@ -743,6 +747,17 @@ export function AppShell() {
     }
     return lang === "en" ? "Back" : "返回";
   }, [lang, location.search, returnNavigationTarget]);
+  const activePrimaryRouteLabel = useMemo(() => {
+    const pathname = location.pathname;
+    if (pathname.startsWith("/chat")) return t("navChat");
+    if (pathname.startsWith("/supervised-evolution")) return t("navSupervisedEvolution");
+    if (pathname.startsWith("/self-evolution")) return t("navSelfEvolution");
+    if (pathname.startsWith("/teams")) return t("navTeams");
+    if (pathname.startsWith("/kernel")) return "Kernel";
+    if (pathname.startsWith("/memory")) return t("navMemory");
+    if (pathname.startsWith("/agents")) return t("navAgents");
+    return t("appTitle");
+  }, [location.pathname, t]);
   const handleReturnNavigation = useCallback(() => {
     if (!returnNavigationTarget) {
       return;
@@ -2247,6 +2262,9 @@ export function AppShell() {
             {t("navAgents")}
           </NavLink>
         </nav>
+        <div className={styles.mobileNav} data-shell-group="mobile-navigation" aria-label={activePrimaryRouteLabel}>
+          <span className={styles.mobileNavLabel}>{activePrimaryRouteLabel}</span>
+        </div>
 
         <div className={styles.topActions} data-shell-group="system-actions">
           <div
@@ -2277,6 +2295,7 @@ export function AppShell() {
               className={styles.utilityTrigger}
               aria-haspopup="menu"
               aria-expanded={utilityOpen}
+              aria-controls="shell-mobile-route-menu"
               aria-label={t("topUtilityMenu")}
               title={t("topUtilityMenu")}
               onPress={() => setUtilityOpen(true)}
@@ -2288,14 +2307,44 @@ export function AppShell() {
               <span className={`${styles.statusDot} ${styles.status_idle}`} />
             </VButton>
             {utilityOpen ? (
-              <Suspense fallback={null}>
-                <LazyAppShellUtilityMenu
-                  lang={lang}
-                  t={t}
-                  frontendVisible={frontendVisible}
-                  onClose={closeUtilityMenu}
-                />
-              </Suspense>
+              <>
+                <nav id="shell-mobile-route-menu" className={styles.mobileRouteMenu} aria-label={lang === "en" ? "Primary navigation" : "主导航"}>
+                  {chatEnabled ? (
+                    <NavLink
+                      to="/chat"
+                      className={mobileLinkClassName}
+                      onClick={() => {
+                        preloadChatRouteForNav("click");
+                        closeUtilityMenu();
+                      }}
+                    >
+                      {t("navChat")}
+                    </NavLink>
+                  ) : <span className={styles.mobileRouteLink} aria-disabled="true">{t("navChat")}</span>}
+                  {supervisedEvolutionEnabled ? (
+                    <NavLink to="/supervised-evolution" className={mobileLinkClassName} onClick={closeUtilityMenu}>
+                      {t("navSupervisedEvolution")}
+                    </NavLink>
+                  ) : <span className={styles.mobileRouteLink} aria-disabled="true">{t("navSupervisedEvolution")}</span>}
+                  {selfEvolutionEnabled ? (
+                    <NavLink to="/self-evolution" className={mobileLinkClassName} onClick={closeUtilityMenu}>
+                      {t("navSelfEvolution")}
+                    </NavLink>
+                  ) : <span className={styles.mobileRouteLink} aria-disabled="true">{t("navSelfEvolution")}</span>}
+                  <NavLink to="/teams" className={mobileLinkClassName} onClick={closeUtilityMenu}>{t("navTeams")}</NavLink>
+                  <NavLink to="/kernel" className={mobileLinkClassName} onClick={closeUtilityMenu}>Kernel</NavLink>
+                  <NavLink to="/memory" className={mobileLinkClassName} onClick={closeUtilityMenu}>{t("navMemory")}</NavLink>
+                  <NavLink to="/agents" className={mobileLinkClassName} onClick={closeUtilityMenu}>{t("navAgents")}</NavLink>
+                </nav>
+                <Suspense fallback={null}>
+                  <LazyAppShellUtilityMenu
+                    lang={lang}
+                    t={t}
+                    frontendVisible={frontendVisible}
+                    onClose={closeUtilityMenu}
+                  />
+                </Suspense>
+              </>
             ) : null}
           </div>
           <div

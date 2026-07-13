@@ -19,7 +19,7 @@ from contextvars import ContextVar
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 from urllib.parse import quote
 
 from config.llm_key_env import sync_llm_key_env_from_persisted_user_env
@@ -8041,6 +8041,35 @@ def _normalize_messages(
                 tool_calls=tool_calls,
                 streaming=bool(raw.get("streaming")),
             )
+            turn_items: list[dict[str, Any]] = []
+            is_terminal_error_message = (
+                role == "assistant"
+                and isinstance(raw_metadata, dict)
+                and (
+                    str(raw_metadata.get("kind") or "").strip() == "turn_error"
+                    or raw_metadata.get("providerFailure") is True
+                )
+            )
+            if is_terminal_error_message:
+                turn_items = _build_session_turn_items_projection(
+                    session_id=conversation_id,
+                    turn_id=turn_id,
+                    message_id=entry["id"],
+                    content=content,
+                    thought=thought,
+                    codex_transcript=codex_transcript,
+                    done=True,
+                    source="session_detail",
+                    metadata=raw_metadata,
+                )
+                if turn_items:
+                    entry["turnItems"] = turn_items
+                terminal_error_item = _terminal_error_turn_item(turn_items)
+                if terminal_error_item:
+                    codex_transcript = _build_terminal_error_codex_transcript_projection(
+                        message_id=entry["id"],
+                        error_item=terminal_error_item,
+                    )
             if codex_transcript:
                 entry["codexTranscript"] = codex_transcript
         if attachments:
@@ -17828,6 +17857,106 @@ def _session_turn_agent_message_item_id(session_id: str, turn_id: str) -> str:
     return f"{_session_turn_item_base_id(session_id, turn_id)}-agent-message"
 
 
+def _build_terminal_error_turn_item(
+    *,
+    session_id: str,
+    turn_id: str,
+    message_id: str,
+    content: Any,
+    metadata: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    normalized_metadata = dict(metadata or {})
+    normalized_turn_id = str(
+        turn_id
+        or normalized_metadata.get("turnId")
+        or normalized_metadata.get("turn_id")
+        or ""
+    ).strip()
+    item_id = f"{_session_turn_item_base_id(session_id, normalized_turn_id)}-error"
+    diagnostic_summary = {
+        key: normalized_metadata[key]
+        for key in (
+            "reasonCode",
+            "reasonSummary",
+            "reasonDetail",
+            "httpStatus",
+            "providerErrorType",
+            "provider",
+            "model",
+            "retryable",
+        )
+        if normalized_metadata.get(key) not in (None, "")
+    }
+    return {
+        "version": 2,
+        "id": f"{item_id}:0",
+        "type": "error",
+        "sessionId": str(session_id or "").strip(),
+        "turnId": normalized_turn_id,
+        "itemId": item_id,
+        "revision": 0,
+        "sequence": 1,
+        "kind": "error",
+        "phase": "turn_failed",
+        "status": "failed",
+        "provisional": False,
+        "terminal": True,
+        "messageId": str(message_id or "").strip(),
+        "source": "session_turn_error",
+        "text": str(content or "").strip(),
+        "diagnosticSummary": diagnostic_summary,
+        "metadata": {"turnId": normalized_turn_id},
+    }
+
+
+def _terminal_error_turn_item(items: Any) -> dict[str, Any] | None:
+    for item in list(items or []):
+        if not isinstance(item, dict):
+            continue
+        if (
+            str(item.get("type") or item.get("kind") or "").strip() == "error"
+            and item.get("terminal") is True
+            and item.get("provisional") is not True
+        ):
+            return item
+    return None
+
+
+def _build_terminal_error_codex_transcript_projection(
+    *,
+    message_id: str,
+    error_item: Mapping[str, Any],
+) -> dict[str, Any]:
+    normalized_message_id = str(message_id or error_item.get("messageId") or "").strip()
+    item_id = str(error_item.get("itemId") or error_item.get("id") or "terminal-error").strip()
+    diagnostic_summary = error_item.get("diagnosticSummary")
+    return {
+        "version": 1,
+        "source": "native",
+        "messageId": normalized_message_id,
+        "streaming": False,
+        "cells": [
+            {
+                "id": item_id,
+                "kind": "error_notice",
+                "messageId": normalized_message_id,
+                "status": "failed",
+                "tone": "error",
+                "text": str(error_item.get("text") or "").strip(),
+                "phase": "turn_failed",
+                "terminal": True,
+                "diagnosticSummary": dict(diagnostic_summary) if isinstance(diagnostic_summary, Mapping) else {},
+                "sourceItemId": item_id,
+            }
+        ],
+        "toolCalls": [],
+        "terminalOperations": [],
+        "terminalSessions": [],
+        "modelObservations": [],
+        "rolloutEvents": [],
+    }
+
+
 def _build_session_turn_items_projection(
     *,
     session_id: str,
@@ -17838,6 +17967,7 @@ def _build_session_turn_items_projection(
     codex_transcript: dict[str, Any] | None = None,
     done: bool = False,
     source: str = "assistant_delta",
+    metadata: Mapping[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     canonical_items = conversation_turn_items_from_events(
         _load_session_conversation_events_cached(str(session_id or "").strip()),
@@ -17845,10 +17975,29 @@ def _build_session_turn_items_projection(
     )
     if canonical_items:
         return canonical_items
+    normalized_metadata = dict(metadata or {})
+    normalized_turn_id = str(
+        turn_id
+        or normalized_metadata.get("turnId")
+        or normalized_metadata.get("turn_id")
+        or ""
+    ).strip()
+    if (
+        str(normalized_metadata.get("kind") or "").strip() == "turn_error"
+        or normalized_metadata.get("providerFailure") is True
+    ):
+        return [
+            _build_terminal_error_turn_item(
+                session_id=session_id,
+                turn_id=normalized_turn_id,
+                message_id=message_id,
+                content=content,
+                metadata=normalized_metadata,
+            )
+        ]
     normalized_message_id = str(message_id or "").strip()
     if not normalized_message_id:
         return []
-    normalized_turn_id = str(turn_id or "").strip()
     transcript_cells = list((codex_transcript or {}).get("cells") or [])
     content_text = _sanitize_message_content("assistant", content)
     assistant_markdown_text = _session_turn_assistant_markdown_text(transcript_cells)

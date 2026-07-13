@@ -85,6 +85,54 @@ describe("codexNativeTranscriptSurface", () => {
     expect(surface.suppressProjectedTurnStatus).toBe(true);
   });
 
+  it("normalizes legacy markdown and preserves terminal error metadata at the native boundary", () => {
+    const surface = resolveCodexTranscriptSurface(message({
+      codexTranscript: {
+        version: 1,
+        source: "native",
+        messageId: "message-1",
+        cells: [
+          {
+            id: "legacy-answer",
+            kind: "assistant_markdown",
+            messageId: "message-1",
+            status: "completed",
+            tone: "neutral",
+            markdown: "legacy snapshot answer",
+            channel: "answer",
+            phase: "final_answer",
+          } as never,
+          {
+            id: "terminal-error",
+            kind: "error_notice",
+            messageId: "message-1",
+            status: "failed",
+            tone: "error",
+            text: "sanitized error",
+            phase: "turn_failed",
+            terminal: true,
+            provisional: false,
+            diagnosticSummary: { httpStatus: 502, reasonCode: "upstream_unavailable" },
+          },
+        ],
+      },
+    }), []);
+
+    expect(surface.cells[0]).toMatchObject({
+      text: "legacy snapshot answer",
+      channel: "answer",
+      phase: "final_answer",
+    });
+    expect(surface.cells[1]).toMatchObject({
+      phase: "turn_failed",
+      terminal: true,
+      provisional: false,
+      diagnosticSummary: { httpStatus: 502, reasonCode: "upstream_unavailable" },
+    });
+    expect(surface.suppressProjectedError).toBe(true);
+    expect(surface.suppressProjectedResponse).toBe(true);
+  });
+
   it("removes internal runtime status cells from native transcripts while keeping the answer", () => {
     const surface = resolveCodexTranscriptSurface(message({
       content: "模型连接正在重试...\n第 1/5 次；原因：server_error。本轮仍在继续，请不要重复提交。\n\n本轮已按请求停止。",

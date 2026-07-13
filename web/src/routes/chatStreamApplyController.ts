@@ -5,6 +5,7 @@ import {
   type ActiveTurnLayerState,
 } from "./chatActiveTurnLayer";
 import {
+  canonicalItemCounts,
   sessionStreamProtocolTelemetryFields,
   type SessionStreamProtocolTrace,
 } from "./chatSessionStreamProtocol";
@@ -252,6 +253,9 @@ function assistantDeltaApplyTelemetry(input: {
   const telemetryOldestReceivedAtMs = input.drain.telemetry.oldestReceivedAtMs ?? 0;
   const telemetryNewestReceivedAtMs = input.drain.telemetry.newestReceivedAtMs ?? telemetryOldestReceivedAtMs;
   const telemetryFrameScheduledAtMs = input.drain.telemetry.frameScheduledAtMs ?? 0;
+  const itemCounts = canonicalItemCounts(
+    input.drain.entries.flatMap((entry) => entry.payload.turnItems ?? []),
+  );
   return {
     sessionId: input.streamSessionId,
     reason: input.reason,
@@ -267,6 +271,7 @@ function assistantDeltaApplyTelemetry(input: {
     batchSize: input.drain.telemetry.batchSize ?? input.appliedPayloadCount,
     done: input.drain.telemetry.done ?? false,
     turnRenderProtocol: input.drain.telemetry.turnRenderProtocol ?? "",
+    ...itemCounts,
     drainMode: input.drain.mode,
     pendingBefore: input.drain.pendingBefore,
     pendingAfter: input.drain.pendingAfter,

@@ -219,7 +219,7 @@ describe("canonical SessionTurnItem v2 rendering", () => {
     expect(surface.codexTranscript?.cells).toHaveLength(1);
     expect(surface.codexTranscript?.cells[0]).toMatchObject({
       kind: "assistant_markdown",
-      markdown: "canonical final answer",
+      text: "canonical final answer",
     });
   });
 
@@ -287,10 +287,66 @@ describe("canonical SessionTurnItem v2 rendering", () => {
     expect(projected.content).toBe("1.2.3");
     expect(projected.codexTranscript?.cells.map((cell) => cell.kind)).toEqual([
       "reasoning_summary",
-      "status",
+      "assistant_markdown",
       "tool_call",
       "assistant_markdown",
     ]);
-    expect(projected.codexTranscript?.cells.filter((cell) => cell.kind === "assistant_markdown")).toHaveLength(1);
+    expect(projected.codexTranscript?.cells[1]).toMatchObject({
+      kind: "assistant_markdown",
+      channel: "commentary",
+      phase: "commentary",
+      text: "I will inspect the file.",
+    });
+    expect(projected.codexTranscript?.cells[2]).toMatchObject({
+      kind: "tool_call",
+      channel: "tool",
+      phase: "tool_call",
+      text: "VERSION",
+    });
+    expect(projected.codexTranscript?.cells[3]).toMatchObject({
+      kind: "assistant_markdown",
+      channel: "answer",
+      phase: "final_answer",
+      terminal: true,
+      text: "1.2.3",
+    });
+    expect(JSON.stringify(projected.codexTranscript)).not.toContain('"markdown"');
+  });
+
+  it("keeps terminal errors visible without promoting them to final answer content", () => {
+    const projected = canonicalTurnProtocol.projectConversationMessageFromTurnItemsV2({
+      id: "message-error-v2",
+      role: "assistant",
+      content: "legacy fallback must not survive",
+      timestamp: "2026-07-13T00:00:00.000Z",
+      turnItems: [{
+        ...baseItem,
+        id: "error-r0",
+        itemId: "error",
+        revision: 0,
+        kind: "error",
+        channel: "answer",
+        phase: "final_answer",
+        type: "error",
+        status: "failed",
+        provisional: false,
+        terminal: true,
+        text: "Provider request failed",
+        diagnosticSummary: { code: "provider_error" },
+      }],
+    } as never);
+
+    expect(projected.content).toBe("");
+    expect(projected.codexTranscript?.cells).toEqual([
+      expect.objectContaining({
+        kind: "error_notice",
+        text: "Provider request failed",
+        tone: "error",
+        terminal: true,
+        provisional: false,
+        diagnosticSummary: { code: "provider_error" },
+      }),
+    ]);
+    expect(canonicalTurnProtocol.hasTerminalCanonicalTurnOutcome(projected)).toBe(true);
   });
 });

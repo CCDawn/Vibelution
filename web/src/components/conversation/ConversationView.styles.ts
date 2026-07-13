@@ -318,7 +318,7 @@ const styles: Record<string, string> = {
   computerUseSummary:
     "vui-components-conversationview computerUseSummary min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
   codexTranscriptAssistantCell:
-    "vui-components-conversationview codexTranscriptAssistantCell min-w-0 grid gap-1 border-l border-[color-mix(in_srgb,var(--fg-tertiary)_24%,var(--vui-border-subtle))] bg-transparent py-1 pl-2.5 pr-0 text-[var(--fg-primary)] shadow-none",
+    "vui-components-conversationview codexTranscriptAssistantCell min-w-0 grid gap-1 border-0 bg-transparent shadow-none",
   codexTranscriptCell:
     "vui-components-conversationview codexTranscriptCell min-w-0",
   codexTranscriptCellBody:
@@ -333,8 +333,14 @@ const styles: Record<string, string> = {
     "vui-components-conversationview codexTranscriptCellTitle min-w-0 whitespace-normal text-[var(--vui-font-sm)] font-semibold leading-[1.35] text-[var(--fg-secondary)] [overflow-wrap:anywhere]",
   codexTranscriptCellTitleRow:
     "vui-components-conversationview codexTranscriptCellTitleRow min-w-0 inline-flex max-w-full flex-wrap items-baseline gap-x-2 gap-y-0.5",
+  codexTranscriptCommentaryCell:
+    "vui-components-conversationview codexTranscriptCommentaryCell border-0 bg-transparent py-1 text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
+  codexTranscriptErrorCell:
+    "vui-components-conversationview codexTranscriptErrorCell border-0 border-l-2 border-l-[var(--state-error)] bg-[color-mix(in_srgb,var(--state-error)_5%,transparent)] px-3 py-2",
+  codexTranscriptFinalCell:
+    "vui-components-conversationview codexTranscriptFinalCell border-0 bg-transparent py-2 text-[var(--fg-primary)] leading-[var(--vui-line-readable)] [&_.markdownBody]:max-w-full [&_pre]:max-w-full [&_pre]:overflow-x-auto [&_table]:max-w-full [&_img]:max-w-full [&_a]:break-words",
   codexTranscriptCell_error:
-    "vui-components-conversationview codexTranscriptCell_error rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] px-2 py-2 text-[var(--state-error)] [&_.codexTranscriptCellIcon]:text-[var(--state-error)] [&_.codexTranscriptCellMeta]:text-[var(--state-error)] [&_.codexTranscriptCellSummary]:text-[var(--state-error)] [&_.codexTranscriptCellTitle]:text-[var(--state-error)]",
+    "vui-components-conversationview codexTranscriptCell_error border-0 border-l-2 border-l-[var(--state-error)] bg-[color-mix(in_srgb,var(--state-error)_5%,transparent)] px-3 py-2 text-[var(--fg-secondary)] [&_.codexTranscriptCellIcon]:text-[var(--state-error)] [&_.codexTranscriptCellMeta]:text-[var(--state-error)] [&_.codexTranscriptCellTitle]:text-[var(--state-error)]",
   codexTranscriptCell_neutral:
     "vui-components-conversationview codexTranscriptCell_neutral text-[var(--fg-secondary)]",
   codexTranscriptCell_running:
@@ -342,9 +348,9 @@ const styles: Record<string, string> = {
   codexTranscriptCell_warning:
     "vui-components-conversationview codexTranscriptCell_warning text-[var(--state-warning)] [&_.codexTranscriptCellIcon]:text-[var(--state-warning)] [&_.codexTranscriptCellMeta]:text-[var(--state-warning)] [&_.codexTranscriptCellTitle]:text-[var(--state-warning)]",
   codexTranscriptProcessCell:
-    "vui-components-conversationview codexTranscriptProcessCell grid grid-cols-[20px_minmax(0,1fr)] items-start gap-x-2 gap-y-1 bg-transparent py-1 text-[var(--vui-font-sm)] leading-[1.42]",
+    "vui-components-conversationview codexTranscriptProcessCell grid grid-cols-[20px_minmax(0,1fr)] items-start gap-x-2 gap-y-1 border-0 bg-transparent py-1 text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)]",
   codexTranscriptSurface:
-    "vui-components-conversationview codexTranscriptSurface min-w-0 grid w-[min(100%,1360px)] max-w-full content-start gap-1.5",
+    "vui-components-conversationview codexTranscriptSurface mx-auto grid w-[min(100%,1360px)] max-w-[880px] min-w-0 content-start gap-2 px-3 sm:px-5",
   conversationCellTimeline:
     "vui-components-conversationview conversationCellTimeline min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
   emptyState:
