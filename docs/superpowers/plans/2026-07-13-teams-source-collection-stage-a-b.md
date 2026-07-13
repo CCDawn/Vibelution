@@ -227,7 +227,7 @@ Challenge Cup generator 前后记录 `git status --short`；generated HTML 出�
 ## 10. 实施与验证证据
 
 - 阶段 A checkpoint commits：`e85c81fd`（run）、`91f8f720`（stage）、`4de567ca`（evidence）。
-- 阶段 B checkpoint commit：`d8b3cd73`；最新 local `main` 通过 `d07cb63c` 无冲突并入任务分支。
+- 阶段 B checkpoint commit：`d8b3cd73`；closeout 前的最新 local `main` 已无冲突并入任务分支。
 - `TeamsRoute.tsx` 从基线 13,525 行降至 11,629 行；Route 内 `useQuery` 从 25 个降至 16 个，新 hook 精确持有 9 个 `useQuery`，且不含 `useMutation` / `useState`。
 - focused Vitest：7 files / 84 tests passed。
 - selector-selected backend gate：357 passed in 418.87s。
