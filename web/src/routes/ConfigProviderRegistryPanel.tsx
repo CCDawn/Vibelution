@@ -5,6 +5,7 @@ import { fetchJson } from "../api/client";
 import {
   VActionGroup,
   VButton,
+  VCheckbox,
   VDenseTable,
   VEntityList,
   VInput,
@@ -705,15 +706,14 @@ export function ConfigProviderRegistryPanel({
                     </div>
                   ) : null}
                   {mergePreview?.status === "READY" && !mergeResult ? (
-                    <label className={styles.mergeConfirmation}>
-                      <input
-                        type="checkbox"
-                        checked={mergeConfirmed}
-                        disabled={disabled || mergeBusy}
-                        onChange={(event) => setMergeConfirmed(event.currentTarget.checked)}
-                      />
+                    <VCheckbox
+                      className={styles.mergeConfirmation}
+                      isSelected={mergeConfirmed}
+                      isDisabled={disabled || mergeBusy}
+                      onChange={setMergeConfirmed}
+                    >
                       我确认使用 {mergeCandidate.canonicalProviderId} 的连接和凭据，并允许迁移实时引用
-                    </label>
+                    </VCheckbox>
                   ) : null}
                   {mergeResult ? (
                     <p className={styles.actionFeedback} role="status">

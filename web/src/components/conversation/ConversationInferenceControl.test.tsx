@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 
 import type { SessionLlmModelOption } from "../../api/types";
 import { ConversationInferenceControl, resolveConversationInferenceEffort } from "./ConversationInferenceControl";
+import styles from "./ConversationInferenceControl.styles";
 
 const luna: SessionLlmModelOption = {
   modelId: "ai-pixel/gpt-5.6-luna",
@@ -39,8 +40,16 @@ describe("ConversationInferenceControl", () => {
 
     expect(html).toContain("Luna 5.6");
     expect(html).toContain("高");
+    expect(html).toContain('aria-hidden="true">·</span>');
+    expect(html).not.toContain('data-slot="vui-button-label"');
     expect(html).not.toContain("选择模型");
     expect(html).not.toContain("Sol");
+  });
+
+  it("keeps the reasoning menu compact and reserves a right-side selection column", () => {
+    expect(styles.menu).toContain("w-[min(288px,calc(100vw-24px))]");
+    expect(styles.option).toContain("!grid-cols-[minmax(0,1fr)_auto]");
+    expect(styles.option).not.toContain("data-slot=vui-button-content");
   });
 
   it("keeps models without reasoning as a non-interactive label", () => {

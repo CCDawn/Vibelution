@@ -268,6 +268,12 @@ def llm_status_context(**fields: str):
         _LLM_STATUS_CONTEXT.reset(token)
 
 
+def current_llm_status_context() -> Dict[str, str]:
+    """Return a copy of the active conversation identity breadcrumbs."""
+
+    return dict(_LLM_STATUS_CONTEXT.get({}) or {})
+
+
 def _record_llm_scene_event(
     phase: str,
     event_code: str,
@@ -1691,6 +1697,7 @@ class LLMClient:
                 "invocationId": outcome.identity.invocation_id,
                 "iteration": outcome.identity.iteration,
                 "outcomeKind": outcome.kind,
+                "terminalReason": str(outcome.error or "") if outcome.kind == "incomplete" else "",
                 "terminalEventSeen": bool(outcome.terminal_event_seen),
                 "toolCallCount": len(outcome.tool_calls),
                 "pendingToolCallCount": len(outcome.pending_tool_call_ids),

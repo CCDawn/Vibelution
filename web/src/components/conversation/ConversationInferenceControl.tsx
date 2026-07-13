@@ -75,6 +75,7 @@ export function ConversationInferenceControl({
       <VButton
         ref={triggerRef}
         type="button"
+        contentLayout="plain"
         className={styles.trigger}
         isDisabled={disabled || pending}
         aria-haspopup="listbox"
@@ -83,8 +84,9 @@ export function ConversationInferenceControl({
         onPress={() => setOpen((value) => !value)}
       >
         <span className={styles.triggerModel}>{model.label || model.model}</span>
+        <span className={styles.triggerSeparator} aria-hidden="true">·</span>
         <span className={styles.triggerEffort}>{current.option?.label || current.effort}</span>
-        <ChevronDown size={13} aria-hidden="true" />
+        <ChevronDown className={styles.triggerChevron} size={13} aria-hidden="true" />
       </VButton>
       {open ? (
         <div role="listbox" className={styles.menu} aria-label="选择推理强度">
@@ -92,6 +94,7 @@ export function ConversationInferenceControl({
             <VButton
               key={option.value}
               type="button"
+              contentLayout="plain"
               className={styles.option}
               role="option"
               aria-selected={option.value === current.effort}

@@ -730,21 +730,39 @@ describe("ConfigRoute layout contract", () => {
   });
 
   it("uses a dedicated user profile layout for identity, preferences, and avatar settings", () => {
+    const userProfileSource = routeSource.slice(
+      routeSource.indexOf("function renderUserProfileBody"),
+      routeSource.indexOf("function renderObjectEntry"),
+    );
     expect(routeSource).toContain("function renderUserProfileBody");
     expect(routeSource).toContain('absolutePath === "user_profile"');
     expect(routeSource).toContain("styles.userProfileLayout");
+    expect(routeSource).toContain("styles.userProfilePrimaryGrid");
     expect(routeSource).toContain("styles.userProfileIdentityFields");
-    expect(routeSource).toContain("styles.userProfilePreferencesField");
     expect(routeSource).toContain("styles.userProfileAvatarGroup");
     expect(routeSource).toContain("styles.userProfileAvatarFields");
+    expect(routeSource).toContain("styles.userProfileAdvancedFields");
     expect(routeSource).toContain("copy.userProfileAvatarGroupTitle");
     expect(routeSource).toContain("copy.userProfileAvatarGroupHint");
+    expect(userProfileSource).toContain("presentation.commonTitle");
+    expect(userProfileSource).toContain("presentation.advancedTitle");
+    expect(userProfileSource).toContain("presentation.advancedHint");
+    expect(userProfileSource).toContain("aria-expanded={advancedExpanded}");
+    expect(userProfileSource.indexOf('field("display_name")')).toBeLessThan(userProfileSource.indexOf("advancedExpanded ?"));
+    expect(userProfileSource.indexOf('field("bio")')).toBeGreaterThan(userProfileSource.indexOf("advancedExpanded ?"));
+    expect(userProfileSource.indexOf('field("preferences")')).toBeGreaterThan(userProfileSource.indexOf("advancedExpanded ?"));
     expect(stylesSource).toContain("userProfileLayout:");
+    expect(stylesSource).toContain("userProfilePrimaryGrid:");
     expect(stylesSource).toContain("userProfileIdentityFields:");
     expect(stylesSource).toContain("userProfileAvatarFields:");
+    expect(stylesSource).toContain("userProfileAdvancedFields:");
     expect(stylesSource).toContain("[display:grid]");
-    expect(stylesSource).toContain("userProfileIdentityFields:");
-    expect(stylesSource).toContain("userProfileAvatarFields:");
+    expect(styles.userProfilePrimaryGrid).toContain("[grid-template-columns:minmax(240px,0.38fr)_minmax(0,0.62fr)]");
+    expect(styles.userProfileAvatarFields).toContain("[grid-template-columns:repeat(2,minmax(0,1fr))]");
+    expect(styles.userProfileAvatarFields).toContain(
+      "[&_.treeFieldCardView]:![grid-template-columns:minmax(132px,0.44fr)_minmax(0,1fr)]",
+    );
+    expect(styles.userProfileAdvancedFields).toContain("[grid-template-columns:minmax(0,1fr)]");
   });
 
   it("progressively discloses advanced pet and context-compression settings", () => {

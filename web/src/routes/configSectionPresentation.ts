@@ -80,11 +80,27 @@ const GIT_COMMIT_PROMPT_COMMON_PATHS = [
   "git.commit_message_prompt",
 ] as const;
 
+const USER_PROFILE_COMMON_PATHS = [
+  "user_profile.display_name",
+  "user_profile.avatar_preset",
+  "user_profile.avatar_image_path",
+] as const;
+
 const SECTION_PRESENTATION: Record<
   ConfigSectionPresentationLanguage,
   Record<string, ProgressiveConfigSectionPresentation>
 > = {
   zh: {
+    "user-profile": {
+      sectionTitle: "用户资料与头像",
+      sectionSummary: "先设置工作台显示名和头像；只有需要时再补充提供给 Agent 的背景与偏好。",
+      commonPaths: USER_PROFILE_COMMON_PATHS,
+      commonTitle: "基础资料",
+      commonHint: "设置工作台显示名与头像，即可完成日常资料配置。",
+      advancedTitle: "Agent 参考信息（高级）",
+      advancedHint: "用户背景与偏好会进入 Agent 上下文，仅在需要个性化协作时补充。",
+      advancedCountLabel: (count) => `${count} 项`,
+    },
     pet: {
       sectionTitle: "陪伴体",
       commonPaths: PET_COMMON_PATHS,
@@ -192,6 +208,16 @@ const SECTION_PRESENTATION: Record<
     },
   },
   en: {
+    "user-profile": {
+      sectionTitle: "Profile and avatar",
+      sectionSummary: "Set the workbench display name and avatar first; add Agent background and preferences only when needed.",
+      commonPaths: USER_PROFILE_COMMON_PATHS,
+      commonTitle: "Basic profile",
+      commonHint: "A display name and avatar are enough for everyday use.",
+      advancedTitle: "Agent reference information (advanced)",
+      advancedHint: "Background and preferences enter the Agent context; add them only when personalized collaboration needs them.",
+      advancedCountLabel: (count) => `${count} fields`,
+    },
     pet: {
       sectionTitle: "Companion",
       commonPaths: PET_COMMON_PATHS,
