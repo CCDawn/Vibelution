@@ -61,6 +61,13 @@ function expectLazyFallback(route: RouteObject, expectedLabel: string, expectedS
   expect(markup).not.toContain("style=");
 }
 
+function lazyFallbackMarkup(route: RouteObject): string {
+  expect(isValidElement(route.element)).toBe(true);
+  const fallback = (route.element as ReactElement<{ fallback?: ReactNode }>).props.fallback;
+  expect(isValidElement(fallback)).toBe(true);
+  return renderToStaticMarkup(fallback as ReactElement);
+}
+
 describe("router route contracts", () => {
   beforeEach(() => {
     postBrowserTelemetryMock.mockClear();
@@ -98,6 +105,22 @@ describe("router route contracts", () => {
     const route = findWorkbenchRoute("usage");
     expectRouteErrorSurface(route, "workbench");
     expectLazyFallback(route, "正在打开工作台", "workbench");
+  });
+
+  it("keeps settings and Team workspace structure visible while route chunks load", () => {
+    const configMarkup = lazyFallbackMarkup(findWorkbenchRoute("config"));
+    expect(configMarkup).toContain('data-route-loading="config"');
+    expect(configMarkup).toContain('data-loading-region="settings-navigation"');
+    expect(configMarkup).toContain('data-loading-region="settings-content"');
+    expect(configMarkup).toContain("正在打开设置工作台");
+    expect(configMarkup).toContain("animate-spin");
+
+    const teamsMarkup = lazyFallbackMarkup(findWorkbenchRoute("teams"));
+    expect(teamsMarkup).toContain('data-route-loading="teams"');
+    expect(teamsMarkup).toContain('data-loading-region="team-canvas"');
+    expect(teamsMarkup).toContain('data-loading-region="team-inspector"');
+    expect(teamsMarkup).toContain("正在打开团队工作台");
+    expect(teamsMarkup).toContain("animate-spin");
   });
 
   it("guards the chat route while timing the chat chunk loader itself", async () => {
