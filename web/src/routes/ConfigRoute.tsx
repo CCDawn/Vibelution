@@ -10,7 +10,7 @@ import {
   Upload,
   X,
 } from "lucide-react";
-import { type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode, useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
+import { type CSSProperties, type ReactNode, useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { Link, type BlockerFunction, useBlocker, useSearchParams } from "react-router-dom";
 
 import { fetchJson } from "../api/client";
@@ -84,6 +84,14 @@ import {
 } from "./ConfigProviderRegistryPanel";
 import { ConfigProviderWizard } from "./ConfigProviderWizard";
 import { ConfigRuntimePanel } from "./ConfigRuntimePanel";
+import {
+  buildConfigSettingsGroups,
+  ConfigSettingsPageTabs,
+  ConfigSettingsSidebar,
+  resolveConfigSettingsSelection,
+  type ConfigSettingsGroupCopy,
+  type ConfigSettingsGroupId,
+} from "./ConfigSettingsNavigation";
 import { ConfigWorkspacePlaceholderPanel } from "./ConfigWorkspacePlaceholderPanel";
 import {
   buildProviderWizardDraft,
@@ -169,69 +177,7 @@ type ConfigSectionUiState = {
   draftValue?: unknown;
 };
 
-type ConfigSidebarGroup = {
-  id: string;
-  title: string;
-  summary: string;
-  memberSectionIds: string[];
-};
-
 type LogHelperCopy = ConfigHealthDiagnosticsPanelCopy;
-
-const SIDEBAR_WIDTH_STORAGE_KEY = "vibelution.config.sidebar.width";
-const SIDEBAR_HEIGHT_STORAGE_KEY = "vibelution.config.sidebar.height";
-const SIDEBAR_INDEX_COLLAPSED_STORAGE_KEY = "vibelution.config.sidebar.indexCollapsed";
-const SIDEBAR_WIDTH_DEFAULT = 320;
-const SIDEBAR_WIDTH_MIN = 280;
-const SIDEBAR_WIDTH_MAX = 520;
-const SIDEBAR_HEIGHT_MIN = 360;
-const SIDEBAR_VIEWPORT_OFFSET = 28;
-
-function clampValue(value: number, min: number, max: number): number {
-  return Math.min(max, Math.max(min, value));
-}
-
-function readStoredNumber(key: string): number | null {
-  if (typeof window === "undefined") {
-    return null;
-  }
-  const raw = window.localStorage.getItem(key);
-  if (!raw) {
-    return null;
-  }
-  const parsed = Number(raw);
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
-function readStoredFlag(key: string): boolean | null {
-  if (typeof window === "undefined") {
-    return null;
-  }
-  const raw = window.localStorage.getItem(key);
-  if (raw == null) {
-    return null;
-  }
-  if (raw === "1") {
-    return true;
-  }
-  if (raw === "0") {
-    return false;
-  }
-  return null;
-}
-
-function clampSidebarWidth(value: number, viewportWidth: number): number {
-  const max = Math.max(
-    SIDEBAR_WIDTH_MIN,
-    Math.min(SIDEBAR_WIDTH_MAX, Math.floor(viewportWidth * 0.42), viewportWidth - 720),
-  );
-  return clampValue(value, SIDEBAR_WIDTH_MIN, max);
-}
-
-function clampSidebarHeight(value: number, viewportHeight: number): number {
-  const max = Math.max(SIDEBAR_HEIGHT_MIN, viewportHeight - SIDEBAR_VIEWPORT_OFFSET);
-  return clampValue(value, SIDEBAR_HEIGHT_MIN, max);
-}
 
 function defaultSectionUiState(): ConfigSectionUiState {
   return {
@@ -786,47 +732,6 @@ function emptyModelEditorState(): ModelEditorState {
     provider: emptyProviderDraft(),
     details: emptyModelDetailsDraft(),
   };
-}
-
-function buildConfigSidebarGroups(copy: ConfigCopy): ConfigSidebarGroup[] {
-  return [
-    {
-      id: "overview-apply",
-      title: copy.groupOverviewSaveTitle,
-      summary: copy.groupOverviewSaveSummary,
-      memberSectionIds: ["overview", "draft", "diagnostics"],
-    },
-    {
-      id: "workbench-interface",
-      title: copy.groupWorkbenchTitle,
-      summary: copy.groupWorkbenchSummary,
-      memberSectionIds: ["shell", "ui"],
-    },
-    {
-      id: "avatar-pet",
-      title: copy.groupAvatarPetTitle,
-      summary: copy.groupAvatarPetSummary,
-      memberSectionIds: ["user-profile", "avatar", "pet"],
-    },
-    {
-      id: "models-profiles",
-      title: copy.groupModelingTitle,
-      summary: copy.groupModelingSummary,
-      memberSectionIds: ["models", "llm-discovery"],
-    },
-    {
-      id: "runtime-context",
-      title: copy.groupRuntimeContextTitle,
-      summary: copy.groupRuntimeContextSummary,
-      memberSectionIds: ["context-compression", "analysis"],
-    },
-    {
-      id: "tooling-diagnostics",
-      title: copy.groupToolingTitle,
-      summary: copy.groupToolingSummary,
-      memberSectionIds: ["health-diagnostics", "security", "network", "log", "parser", "debug"],
-    },
-  ];
 }
 
 function formatJson(value: unknown): string {
@@ -2088,9 +1993,8 @@ async function createCroppedAvatarFile(draft: AvatarCropDraft): Promise<File> {
 export function ConfigRoute() {
   const queryClient = useQueryClient();
   const [searchParams] = useSearchParams();
-  const pageRef = useRef<HTMLDivElement | null>(null);
+  const contentViewportRef = useRef<HTMLDivElement | null>(null);
   const modelEditorRef = useRef<HTMLDivElement | null>(null);
-  const sidebarResizeCleanupRef = useRef<(() => void) | null>(null);
   const lastRequestedSectionRef = useRef("");
   const autoRefreshAttemptedProviderIds = useRef(new Set<string>());
   const providerDraftRequestRef = useRef<{
@@ -2143,20 +2047,9 @@ export function ConfigRoute() {
   const [providerActionError, setProviderActionError] = useState("");
   const [providerActionFeedback, setProviderActionFeedback] = useState<ProviderActionFeedback>(null);
   const [modelEditorExpanded, setModelEditorExpanded] = useState(false);
-  const [sidebarIndexCollapsed, setSidebarIndexCollapsed] = useState(() => readStoredFlag(SIDEBAR_INDEX_COLLAPSED_STORAGE_KEY) ?? false);
-  const [activeSectionId, setActiveSectionId] = useState(() => searchParams.get("section") ?? "");
+  const [activeGroupId, setActiveGroupId] = useState(() => searchParams.get("section") ?? "");
+  const [activePageId, setActivePageId] = useState("");
   const [sectionUiState, setSectionUiState] = useState<Record<string, ConfigSectionUiState>>({});
-  const [sidebarWidth, setSidebarWidth] = useState(() => {
-    const viewportWidth = typeof window === "undefined" ? 1440 : window.innerWidth;
-    return clampSidebarWidth(readStoredNumber(SIDEBAR_WIDTH_STORAGE_KEY) ?? SIDEBAR_WIDTH_DEFAULT, viewportWidth);
-  });
-  const [sidebarHeight, setSidebarHeight] = useState(() => {
-    const viewportHeight = typeof window === "undefined" ? 960 : window.innerHeight;
-    return clampSidebarHeight(
-      readStoredNumber(SIDEBAR_HEIGHT_STORAGE_KEY) ?? viewportHeight - SIDEBAR_VIEWPORT_OFFSET,
-      viewportHeight,
-    );
-  });
 
   function syncWorkspace(workspace: ConfigWorkspace, tone: NoticeTone = "neutral", options: { resetBase?: boolean } = {}) {
     providerDraftRequestRef.current = {
@@ -2190,85 +2083,38 @@ export function ConfigRoute() {
     }
   }, [workspaceQuery.data]);
 
-  useEffect(() => {
-    if (typeof window === "undefined") {
-      return undefined;
-    }
-
-    function handleWindowResize() {
-      setSidebarWidth((current) => clampSidebarWidth(current, window.innerWidth));
-      setSidebarHeight((current) => clampSidebarHeight(current, window.innerHeight));
-    }
-
-    window.addEventListener("resize", handleWindowResize);
-    return () => {
-      window.removeEventListener("resize", handleWindowResize);
-    };
-  }, []);
-
-  useEffect(() => {
-    if (typeof window !== "undefined") {
-      window.localStorage.setItem(SIDEBAR_INDEX_COLLAPSED_STORAGE_KEY, sidebarIndexCollapsed ? "1" : "0");
-    }
-  }, [sidebarIndexCollapsed]);
-
-  useEffect(() => {
-    if (typeof window !== "undefined") {
-      window.localStorage.setItem(SIDEBAR_WIDTH_STORAGE_KEY, String(sidebarWidth));
-    }
-  }, [sidebarWidth]);
-
-  useEffect(() => {
-    if (typeof window !== "undefined") {
-      window.localStorage.setItem(SIDEBAR_HEIGHT_STORAGE_KEY, String(sidebarHeight));
-    }
-  }, [sidebarHeight]);
-
-  useEffect(() => {
-    return () => {
-      sidebarResizeCleanupRef.current?.();
-    };
-  }, []);
-
   const workspace = activeWorkspace ?? workspaceQuery.data;
   const currentLanguage = getDraftLanguage(draftConfig, workspace?.language === "en" ? "en" : "zh");
   const copy = CONFIG_COPY[currentLanguage];
   const requestedSectionId = String(searchParams.get("section") || "").trim();
   const returnToPath = safeAgentCenterReturnToPath(searchParams.get("returnTo"));
   const returnToLabel = searchParams.get("returnLabel") === "agents" ? copy.returnToAgents : copy.returnToSource;
-  const sectionIndexTitle = currentLanguage === "en" ? "Section index" : "分区索引";
-  const sectionIndexHint = currentLanguage === "en" ? "Jump directly to a config area" : "直接跳到具体配置区";
-  const sectionIndexCollapsedHint = currentLanguage === "en" ? "Index hidden for focused editing" : "目录已收起，专注右侧编辑区";
-  const sectionIndexToggleLabel = currentLanguage === "en" ? (sidebarIndexCollapsed ? "Expand index" : "Collapse index") : (sidebarIndexCollapsed ? "展开索引" : "收起索引");
-  const resizeWidthTitle = currentLanguage === "en" ? "Drag to resize sidebar width" : "左右拖动调整侧栏宽度";
-  const resizeHeightTitle = currentLanguage === "en" ? "Drag to resize sidebar height" : "上下拖动调整侧栏高度";
-  const resizeCornerTitle = currentLanguage === "en" ? "Drag to resize sidebar" : "拖动调整侧栏尺寸";
   const formattedDraft = useMemo(
     () => formatJson(pickEditableConfigView(draftConfig ?? {}, workspace?.editorSections ?? [])),
     [draftConfig, workspace?.editorSections],
   );
   const hasUnsavedConfigChanges = Boolean(baseHash && draftHash && baseHash !== draftHash);
-  const sidebarSections = workspace?.sections ?? [];
+  const workspaceSections = workspace?.sections ?? [];
   const editorSections = workspace?.editorSections ?? [];
   const editorMeta = workspace?.editorMeta ?? {};
-  const sidebarGroups = useMemo(() => buildConfigSidebarGroups(copy), [copy]);
-  const availableSectionIds = useMemo(() => new Set(sidebarSections.map((section) => section.id)), [sidebarSections]);
-  const visibleSidebarGroups = useMemo(
-    () =>
-      sidebarGroups
-        .map((group) => ({
-          ...group,
-          memberSectionIds: group.memberSectionIds.filter((sectionId) => availableSectionIds.has(sectionId)),
-        }))
-        .filter((group) => group.memberSectionIds.length),
-    [availableSectionIds, sidebarGroups],
+  const groupCopy = useMemo<ConfigSettingsGroupCopy>(() => ({
+    "overview-apply": { title: copy.groupOverviewSaveTitle, summary: copy.groupOverviewSaveSummary },
+    "workbench-interface": { title: copy.groupWorkbenchTitle, summary: copy.groupWorkbenchSummary },
+    "avatar-pet": { title: copy.groupAvatarPetTitle, summary: copy.groupAvatarPetSummary },
+    "models-profiles": { title: copy.groupModelingTitle, summary: copy.groupModelingSummary },
+    "runtime-context": { title: copy.groupRuntimeContextTitle, summary: copy.groupRuntimeContextSummary },
+    "tooling-diagnostics": { title: copy.groupToolingTitle, summary: copy.groupToolingSummary },
+  }), [copy]);
+  const settingsGroups = useMemo(
+    () => buildConfigSettingsGroups(workspaceSections, groupCopy, currentLanguage),
+    [currentLanguage, groupCopy, workspaceSections],
   );
-  const activeSection = visibleSidebarGroups.find((section) => section.id === activeSectionId) ?? visibleSidebarGroups[0] ?? null;
+  const { group: activeGroup, page: activePage } = useMemo(
+    () => resolveConfigSettingsSelection(settingsGroups, activeGroupId, activePageId),
+    [activeGroupId, activePageId, settingsGroups],
+  );
   const activeEditorSections = editorSections.filter((section) => {
-    if (activeSection?.id === "models" && workspace?.schemaVersion === 2) {
-      return false;
-    }
-    if (!activeSection?.memberSectionIds.includes(section.id)) {
+    if (!activePage?.memberSectionIds.includes(section.id)) {
       return false;
     }
     return section.id !== "agent";
@@ -2349,41 +2195,33 @@ export function ConfigRoute() {
   }, [workspaceQuery.data?.baseHash]);
 
   useEffect(() => {
-    if (!visibleSidebarGroups.length) {
-      setActiveSectionId("");
+    if (!settingsGroups.length) {
+      setActiveGroupId("");
+      setActivePageId("");
       return;
     }
+    const requestedGroup = settingsGroups.find((group) => group.id === requestedSectionId);
     if (
-      requestedSectionId
+      requestedGroup
       && requestedSectionId !== lastRequestedSectionRef.current
-      && visibleSidebarGroups.some((section) => section.id === requestedSectionId)
     ) {
       lastRequestedSectionRef.current = requestedSectionId;
-      setActiveSectionId(requestedSectionId);
+      setActiveGroupId(requestedGroup.id);
+      setActivePageId(requestedGroup.pages[0]?.id ?? "");
       return;
     }
-    if (!visibleSidebarGroups.some((section) => section.id === activeSectionId)) {
-      setActiveSectionId(visibleSidebarGroups[0].id);
+    const currentGroup = settingsGroups.find((group) => group.id === activeGroupId) ?? settingsGroups[0];
+    if (currentGroup.id !== activeGroupId) {
+      setActiveGroupId(currentGroup.id);
     }
-  }, [activeSectionId, requestedSectionId, visibleSidebarGroups]);
+    if (!currentGroup.pages.some((page) => page.id === activePageId)) {
+      setActivePageId(currentGroup.pages[0]?.id ?? "");
+    }
+  }, [activeGroupId, activePageId, requestedSectionId, settingsGroups]);
 
   const sectionMap = useMemo(() => {
     return new Map((workspace?.sections ?? []).map((section) => [section.id, section]));
   }, [workspace?.sections]);
-  const pageStyle = useMemo(
-    () =>
-      ({
-        "--sidebar-width": `${sidebarWidth}px`,
-      }) as CSSProperties,
-    [sidebarWidth],
-  );
-  const sidebarStyle = useMemo(
-    () =>
-      ({
-        height: `${sidebarHeight}px`,
-      }) as CSSProperties,
-    [sidebarHeight],
-  );
   const saveButtonLabel = busyAction === copy.applying ? copy.applying : copy.saveConfig;
   const editorSyncState = deriveConfigEditorSyncState({
     editorText: jsonText,
@@ -2427,13 +2265,23 @@ export function ConfigRoute() {
   }
 
   function isSectionVisible(sectionId: string): boolean {
-    return Boolean(activeSection?.memberSectionIds.includes(sectionId));
+    return Boolean(activePage?.memberSectionIds.includes(sectionId));
   }
 
-  function handleSelectSection(sectionId: string) {
-    setActiveSectionId(sectionId);
-    updateSectionUiState(sectionId, resolveConfigSectionUiStateOnSelect(sectionUiState[sectionId], defaultSectionUiState()));
-    pageRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+  function handleSelectGroup(groupId: ConfigSettingsGroupId) {
+    const group = settingsGroups.find((candidate) => candidate.id === groupId);
+    setActiveGroupId(groupId);
+    setActivePageId(group?.pages[0]?.id ?? "");
+    contentViewportRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  function handleSelectPage(pageId: string) {
+    setActivePageId(pageId);
+    const page = activeGroup?.pages.find((candidate) => candidate.id === pageId);
+    for (const sectionId of page?.memberSectionIds ?? []) {
+      updateSectionUiState(sectionId, resolveConfigSectionUiStateOnSelect(sectionUiState[sectionId], defaultSectionUiState()));
+    }
+    contentViewportRef.current?.scrollTo({ top: 0, behavior: "smooth" });
   }
 
   function restoreEditorText() {
@@ -2523,7 +2371,7 @@ export function ConfigRoute() {
   }, [buildProviderDraftRequest]);
 
   useEffect(() => {
-    if ((activeSectionId !== "models" && activeSectionId !== "models-profiles") || workspace?.schemaVersion !== 2) return;
+    if (activeGroup?.id !== "models-profiles" || activePage?.id !== "model-connection" || workspace?.schemaVersion !== 2) return;
     let cancelled = false;
     const refreshDueProviders = async () => {
       for (const row of providerRows.filter((row) => row.refreshDue && row.driver !== "manual")) {
@@ -2540,7 +2388,7 @@ export function ConfigRoute() {
     return () => {
       cancelled = true;
     };
-  }, [activeSectionId, handleDiscoverProvider, providerRows, workspace?.schemaVersion]);
+  }, [activeGroup?.id, activePage?.id, handleDiscoverProvider, providerRows, workspace?.schemaVersion]);
 
   async function handleSuggestProviderId(provider: Record<string, unknown>): Promise<string> {
     const response = await requestJson<{ suggestedProviderId: string }>(
@@ -3097,63 +2945,6 @@ export function ConfigRoute() {
     }
   }
 
-  function resetSidebarWidth() {
-    if (typeof window === "undefined") {
-      setSidebarWidth(SIDEBAR_WIDTH_DEFAULT);
-      return;
-    }
-    setSidebarWidth(clampSidebarWidth(SIDEBAR_WIDTH_DEFAULT, window.innerWidth));
-  }
-
-  function resetSidebarHeight() {
-    if (typeof window === "undefined") {
-      setSidebarHeight(SIDEBAR_HEIGHT_MIN);
-      return;
-    }
-    setSidebarHeight(clampSidebarHeight(window.innerHeight - SIDEBAR_VIEWPORT_OFFSET, window.innerHeight));
-  }
-
-  function beginSidebarResize(axis: "width" | "height" | "both") {
-    return (event: ReactPointerEvent<HTMLDivElement>) => {
-      if (typeof window === "undefined") {
-        return;
-      }
-      event.preventDefault();
-      sidebarResizeCleanupRef.current?.();
-
-      const startX = event.clientX;
-      const startY = event.clientY;
-      const initialWidth = sidebarWidth;
-      const initialHeight = sidebarHeight;
-      const cursor = axis === "width" ? "col-resize" : axis === "height" ? "row-resize" : "nwse-resize";
-
-      const handlePointerMove = (moveEvent: PointerEvent) => {
-        if (axis !== "height") {
-          setSidebarWidth(clampSidebarWidth(initialWidth + (moveEvent.clientX - startX), window.innerWidth));
-        }
-        if (axis !== "width") {
-          setSidebarHeight(clampSidebarHeight(initialHeight + (moveEvent.clientY - startY), window.innerHeight));
-        }
-      };
-
-      const cleanup = () => {
-        window.removeEventListener("pointermove", handlePointerMove);
-        window.removeEventListener("pointerup", cleanup);
-        window.removeEventListener("pointercancel", cleanup);
-        document.body.style.userSelect = "";
-        document.body.style.cursor = "";
-        sidebarResizeCleanupRef.current = null;
-      };
-
-      sidebarResizeCleanupRef.current = cleanup;
-      document.body.style.userSelect = "none";
-      document.body.style.cursor = cursor;
-      window.addEventListener("pointermove", handlePointerMove);
-      window.addEventListener("pointerup", cleanup);
-      window.addEventListener("pointercancel", cleanup);
-    };
-  }
-
   function applyProviderTemplate(templateId: string) {
     setModelEditorExpanded(true);
     setModelEditorError("");
@@ -3507,7 +3298,7 @@ export function ConfigRoute() {
   }
 
   return (
-    <div ref={pageRef} className={styles.page} style={pageStyle}>
+    <div className={styles.page}>
       {leaveGuardOpen ? (
         <div className={styles.leaveGuardOverlay}>
           <VSurface
@@ -3546,140 +3337,33 @@ export function ConfigRoute() {
           </VSurface>
         </div>
       ) : null}
-      <VSurface as="aside" className={styles.sidebar} style={sidebarStyle} padding="compact" tone="rail">
-        <div className={styles.sidebarIntro}>
-          <VPanelHeader
-            eyebrow="Config"
-            title={copy.pageTitle}
-            headingLevel={null}
-            actions={
-              returnToPath ? (
-                <Link to={returnToPath} className={styles.returnButton}>
-                  <ChevronRight size={14} />
-                  {returnToLabel}
-                </Link>
-              ) : null
-            }
-          />
-          <p className={styles.subtitle} title={copy.subtitleHint}>{copy.subtitle}</p>
-        </div>
-
-        <VSurface as="div" className={styles.sidebarStatusCompact} tone="row" padding="compact">
-          <div className={styles.sidebarStatusHeader}>
-            <span>{copy.settingsStatusTitle}</span>
-            <span
-              className={
-                hasPendingApply
-                  ? `${styles.statusBadge} ${styles.statusBadgePending}`
-                  : `${styles.statusBadge} ${styles.statusBadgeReady}`
-              }
-            >
-              {hasPendingApply ? copy.unsavedDraft : copy.syncedDraft}
-            </span>
-          </div>
-          <div className={styles.sidebarStatusGrid}>
-            <span>
-              <small>{copy.settingsNextStep}</small>
-              <strong>{sidebarNextStepLabel}</strong>
-            </span>
-            <span>
-              <small>{copy.settingsSections}</small>
-              <strong>{visibleSidebarGroups.length}</strong>
-            </span>
-          </div>
-          <span className={styles.helperText}>{sidebarApplyHint}</span>
-        </VSurface>
-
-        <VSurface
-          as="section"
-          className={sidebarIndexCollapsed ? `${styles.sidebarNavPanel} ${styles.sidebarNavPanelCollapsed}` : styles.sidebarNavPanel}
-          tone="row"
-          padding="compact"
-        >
-          <div className={styles.sidebarPanelHeader}>
-            <div className={styles.sidebarPanelIntro}>
-              <p className={styles.matrixTitle}>{sectionIndexTitle}</p>
-              <p className={styles.helperText}>{sidebarIndexCollapsed ? sectionIndexCollapsedHint : sectionIndexHint}</p>
-            </div>
-            <div className={styles.sidebarPanelActions}>
-              <span className={styles.inlineBadge}>{visibleSidebarGroups.length}</span>
-              <VButton
-                type="button"
-                className={`${styles.actionButton} ${styles.compactButton} ${styles.sidebarPanelToggle}`}
-                aria-expanded={!sidebarIndexCollapsed}
-                onClick={() => setSidebarIndexCollapsed((current) => !current)}
-              >
-                <ChevronRight size={14} className={sidebarIndexCollapsed ? styles.treeToggleIcon : styles.treeToggleIconExpanded} />
-                {sectionIndexToggleLabel}
-              </VButton>
-            </div>
-          </div>
-          {sidebarIndexCollapsed ? null : (
-            <nav className={styles.sectionNav} aria-label="config sections">
-                {visibleSidebarGroups.map((section) => (
-                  <VButton
-                    key={section.id}
-                    type="button"
-                    className={
-                      section.id === activeSection?.id
-                      ? `${styles.sectionLink} ${styles.sectionLinkActive}`
-                      : styles.sectionLink
-                  }
-                  aria-pressed={section.id === activeSection?.id}
-                  onClick={() => handleSelectSection(section.id)}
-                  >
-                    <span>{section.title}</span>
-                    <span className={styles.inlineBadge}>{section.memberSectionIds.length}</span>
-                  </VButton>
-                ))}
-              </nav>
-            )}
-          </VSurface>
-
-        <VStatusStrip
-          className={styles.sidebarMetaStrip}
-          aria-label={copy.developerModeReadonly}
-          items={[
-            { label: copy.runtimeProfile, value: workspace.runtimeProfile, tone: "info" },
-            { label: copy.defaultMode, value: workspace.defaultMode },
-            { label: copy.defaultRoute, value: workspace.defaultRoute },
-            { label: copy.intakeMode, value: intakeLabel(asRecord(draftConfig.evolution).intake_mode as string) },
-            { label: copy.developerModeReadonly, value: developerModeReadonlyLabel },
-          ]}
-        />
-        <div
-          className={styles.sidebarResizeX}
-          title={resizeWidthTitle}
-          onDoubleClick={resetSidebarWidth}
-          onPointerDown={beginSidebarResize("width")}
-        />
-        <div
-          className={styles.sidebarResizeY}
-          title={resizeHeightTitle}
-          onDoubleClick={resetSidebarHeight}
-          onPointerDown={beginSidebarResize("height")}
-        />
-        <div
-          className={styles.sidebarResizeCorner}
-          title={resizeCornerTitle}
-          onDoubleClick={() => {
-            resetSidebarWidth();
-            resetSidebarHeight();
-          }}
-          onPointerDown={beginSidebarResize("both")}
-        />
-      </VSurface>
+      <ConfigSettingsSidebar
+        language={currentLanguage}
+        title={copy.pageTitle}
+        subtitle={copy.subtitle}
+        subtitleHint={copy.subtitleHint}
+        statusLabel={hasPendingApply ? copy.unsavedDraft : copy.syncedDraft}
+        groups={settingsGroups}
+        activeGroupId={activeGroup?.id ?? ""}
+        onSelectGroup={handleSelectGroup}
+        headerAction={returnToPath ? (
+          <Link to={returnToPath} className={styles.returnButton}>
+            <ChevronRight size={14} />
+            {returnToLabel}
+          </Link>
+        ) : undefined}
+      />
 
       <VSurface
         as="section"
-        className={activeSection?.id === "models-profiles" && workspace.schemaVersion !== 2 ? `${styles.content} ${styles.contentModels}` : styles.content}
+        className={styles.content}
         padding="none"
       >
-        <div className={styles.configStatusBand}>
+        <div className={styles.configHeader}>
           <VRouteHeader
             className={styles.configStatusCopy}
             eyebrow="Config"
-            title={copy.pageTitle}
+            title={activeGroup?.title ?? copy.pageTitle}
             actions={
               <div className={styles.configStatusActions}>
                 <VButton
@@ -3692,21 +3376,6 @@ export function ConfigRoute() {
                 >
                   <RotateCcw size={14} />
                   {copy.refresh}
-                </VButton>
-                <VButton
-                  type="button"
-                  className={styles.actionButton}
-                  isDisabled={Boolean(busyAction)}
-                  title={copy.openEnvironmentHint}
-                  onClick={() => {
-                    void handleOpenEnvironment();
-                  }}
-                >
-                  {copy.openEnvironment}
-                </VButton>
-                <VButton type="button" className={styles.actionButton} isDisabled={!canRestoreEditorText} title={copy.editorRestoreHint} onClick={restoreEditorText}>
-                  <RotateCcw size={14} />
-                  {copy.resetDraft}
                 </VButton>
                 <VButton
                   type="button"
@@ -3738,8 +3407,16 @@ export function ConfigRoute() {
               },
             ]}
           />
-          <p className={styles.helperText}>{sidebarApplyHint}</p>
         </div>
+
+        <ConfigSettingsPageTabs
+          language={currentLanguage}
+          group={activeGroup}
+          activePageId={activePage?.id ?? ""}
+          onSelectPage={handleSelectPage}
+        />
+
+        <div ref={contentViewportRef} className={styles.pageViewport}>
 
         {notice.text ? (
           <div
@@ -3760,16 +3437,6 @@ export function ConfigRoute() {
             copy={copy}
             eyebrow={sectionTitle("overview", copy.sourceTitle)}
             workspace={workspace}
-            hasPendingApply={hasPendingApply}
-            busyAction={busyAction}
-            canRestoreEditorText={canRestoreEditorText}
-            onReloadWorkspace={() => {
-              void reloadWorkspace();
-            }}
-            onOpenEnvironment={() => {
-              void handleOpenEnvironment();
-            }}
-            onRestoreEditorText={restoreEditorText}
           />
         ) : null}
 
@@ -3799,9 +3466,9 @@ export function ConfigRoute() {
                   eyebrow="Provider workspace"
                   actions={(
                     <VActionGroup ariaLabel="Provider 工作区模式">
-                      <VButton variant={providerWorkspaceMode === "quick" ? "primary" : "ghost"} onPress={() => setProviderWorkspaceMode("quick")}>快速配置</VButton>
-                      <VButton variant={providerWorkspaceMode === "manage" ? "primary" : "ghost"} onPress={() => setProviderWorkspaceMode("manage")}>管理已有连接</VButton>
-                      <VButton variant={providerWorkspaceMode === "advanced" ? "primary" : "ghost"} onPress={() => setProviderWorkspaceMode("advanced")}>高级设置</VButton>
+                      <VButton className={styles.providerModeButton} aria-pressed={providerWorkspaceMode === "quick"} variant={providerWorkspaceMode === "quick" ? "primary" : "ghost"} onPress={() => setProviderWorkspaceMode("quick")}>快速配置</VButton>
+                      <VButton className={styles.providerModeButton} aria-pressed={providerWorkspaceMode === "manage"} variant={providerWorkspaceMode === "manage" ? "primary" : "ghost"} onPress={() => setProviderWorkspaceMode("manage")}>管理已有连接</VButton>
+                      <VButton className={styles.providerModeButton} aria-pressed={providerWorkspaceMode === "advanced"} variant={providerWorkspaceMode === "advanced" ? "primary" : "ghost"} onPress={() => setProviderWorkspaceMode("advanced")}>高级设置</VButton>
                     </VActionGroup>
                   )}
                 >
@@ -4075,6 +3742,32 @@ export function ConfigRoute() {
           </div>
         ) : null}
 
+        {activePage?.id === "tooling-access" ? (
+          <VSurface as="section" className={styles.toolingMetaPanel} padding="compact" tone="row">
+            <VStatusStrip
+              aria-label={copy.developerModeReadonly}
+              items={[
+                { label: copy.runtimeProfile, value: workspace.runtimeProfile, tone: "info" },
+                { label: copy.defaultMode, value: workspace.defaultMode },
+                { label: copy.defaultRoute, value: workspace.defaultRoute },
+                { label: copy.intakeMode, value: intakeLabel(asRecord(draftConfig.evolution).intake_mode as string) },
+                { label: copy.developerModeReadonly, value: developerModeReadonlyLabel },
+              ]}
+            />
+            <VButton
+              type="button"
+              className={styles.actionButton}
+              isDisabled={Boolean(busyAction)}
+              title={copy.openEnvironmentHint}
+              onClick={() => {
+                void handleOpenEnvironment();
+              }}
+            >
+              {busyAction === copy.openEnvironmentPending ? copy.openEnvironmentPending : copy.openEnvironment}
+            </VButton>
+          </VSurface>
+        ) : null}
+
         {workspace.schemaVersion === 2 && isSectionVisible("models") ? null : activeEditorSections.map((section) => (
           <ConfigSectionEditor
             key={section.id}
@@ -4096,6 +3789,8 @@ export function ConfigRoute() {
           <ConfigDraftPanel
             copy={copy}
             eyebrow={sectionTitle("draft", copy.draftTitle)}
+            configPath={workspace.configPath}
+            rawToml={workspace.rawToml}
             jsonText={jsonText}
             hasEditorChanges={hasEditorChanges}
             canCheckCurrentChanges={canCheckCurrentChanges}
@@ -4170,6 +3865,7 @@ export function ConfigRoute() {
             </div>
         </VSection>
         ) : null}
+        </div>
       </VSurface>
     </div>
   );

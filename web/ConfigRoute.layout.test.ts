@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import configRouteSource from "./src/routes/ConfigRoute.tsx?raw";
+import configNavigationSource from "./src/routes/ConfigSettingsNavigation.tsx?raw";
 
 const configRouteStylesSource = readFileSync(new URL("./src/routes/ConfigRoute.styles.ts", import.meta.url), "utf-8");
 
@@ -78,14 +79,13 @@ describe("ConfigRoute content experience contract", () => {
   });
 
   it("separates model assets and git model settings in the sidebar", () => {
-    expect(configRouteSource).toContain('id: "models-profiles"');
-    expect(configRouteSource).toContain('memberSectionIds: ["models", "llm-discovery"]');
-    expect(configRouteSource).toContain(
-      'memberSectionIds: ["health-diagnostics", "security", "network", "log", "parser", "debug"]',
-    );
-    expect(configRouteSource).not.toContain('memberSectionIds: ["prompt"]');
-    expect(configRouteSource).not.toContain('memberSectionIds: ["profiles", "models", "llm-profiles", "llm-discovery", "git-commit-profile"]');
-    expect(configRouteSource).not.toContain('memberSectionIds: ["health-diagnostics", "tools", "git-commit-profile"');
+    expect(configNavigationSource).toContain('"models-profiles"');
+    expect(configNavigationSource).toContain('members: ["models"]');
+    expect(configNavigationSource).toContain('members: ["llm-discovery"]');
+    expect(configNavigationSource).toContain('id: "tooling-git"');
+    expect(configNavigationSource).toContain('members: ["git-commit-model", "git-commit-prompt"]');
+    expect(configNavigationSource).not.toContain('members: ["prompt"]');
+    expect(configNavigationSource).not.toContain('members: ["profiles", "models", "llm-profiles"');
   });
 
   it("keeps Agent editing out of the config page", () => {
@@ -95,8 +95,9 @@ describe("ConfigRoute content experience contract", () => {
     expect(configRouteSource).not.toContain("copy.agentConfigActive");
     expect(configRouteSource).not.toContain("copy.agentConfigCenterTitle");
     expect(configRouteSource).not.toContain('memberSectionIds: ["agent"');
-    expect(configRouteSource).toContain('id: "runtime-context"');
-    expect(configRouteSource).toContain('memberSectionIds: ["context-compression", "analysis"]');
+    expect(configNavigationSource).toContain('"runtime-context"');
+    expect(configNavigationSource).toContain('members: ["context-compression"]');
+    expect(configNavigationSource).toContain('members: ["analysis"]');
     expect(configRouteSource).toContain("copy.groupRuntimeContextTitle");
     expect(configRouteSource).not.toContain('memberSectionIds: ["agent", "context-compression", "memory", "strategy", "analysis", "evolution"]');
     expect(configRouteSource).not.toContain("saveResearchAgent");
