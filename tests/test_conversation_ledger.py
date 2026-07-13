@@ -468,3 +468,29 @@ def test_context_compression_failure_marker_preserves_model_history(tmp_path):
     assert marker["metadata"]["title"] == "压缩失败 · 已保留原上下文"
     assert marker["metadata"]["errorType"] == "RuntimeError"
     assert "失败时仍保留的旧上下文" in model_text
+
+
+def test_conversation_turn_outcome_wrapper_is_idempotent(tmp_path):
+    from core.chat.conversation_ledger import (
+        append_conversation_turn_outcome,
+        conversation_turn_items_from_events,
+    )
+    from core.llm.types import CanonicalItemIdentity, TurnOutcome
+
+    outcome = TurnOutcome.final_answer(
+        identity=CanonicalItemIdentity(
+            session_id="session-canonical",
+            turn_id="turn-canonical",
+            invocation_id="invocation-canonical",
+            iteration=0,
+            item_id="answer-canonical",
+        ),
+        text="canonical answer",
+    )
+    append_conversation_turn_outcome(tmp_path, "session-canonical", "turn-canonical", outcome)
+    append_conversation_turn_outcome(tmp_path, "session-canonical", "turn-canonical", outcome)
+    items = conversation_turn_items_from_events(
+        load_conversation_events(tmp_path, "session-canonical"),
+        turn_id="turn-canonical",
+    )
+    assert len([item for item in items if item.get("itemId") == "answer-canonical"]) == 1

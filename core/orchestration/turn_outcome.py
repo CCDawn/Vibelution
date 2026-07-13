@@ -59,12 +59,10 @@ class TurnOutcomeController:
         self._get_attention_snapshot = get_attention_snapshot
 
     @staticmethod
-    def decide_llm_iteration(response: Any) -> LLMIterationDecision:
+    def decide_llm_iteration(outcome: LLMTurnOutcome) -> LLMIterationDecision:
         """Derive Agent control flow exclusively from the canonical outcome."""
-        additional_kwargs = getattr(response, "additional_kwargs", None) or {}
-        outcome = additional_kwargs.get("turn_outcome")
         if not isinstance(outcome, LLMTurnOutcome):
-            raise ValueError("LLM response is missing canonical TurnOutcome")
+            raise ValueError("Agent control requires canonical TurnOutcome")
         if not outcome.terminal_event_seen:
             raise ValueError("canonical TurnOutcome is missing terminal evidence")
         tool_calls = tuple(

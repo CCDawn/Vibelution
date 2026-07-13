@@ -16,6 +16,7 @@ from pathlib import Path
 
 import pytest
 
+from config import denormalize_config_dict
 from config.toml_writer import dumps_public_config
 from config.public_config import _probe_llm_runtime
 from config.models import LLMProfile, ProviderConfig
@@ -50,6 +51,7 @@ from config.paths import resolve_config_backup_dir, resolve_config_lock_path
 import config.public_config as public_config_module
 from config.llm_security import validate_llm_provider_target
 from core.web.services.config_service import summarize_model_catalog
+from tests.helpers.isolated_config import isolated_settings_config
 
 
 PROJECT_ROOT = Path(__file__).parent.parent
@@ -293,8 +295,45 @@ def _set_subagent_explorer_deepseek(public_config: dict) -> None:
     }
 
 
+def _load_schema_v1_inline_public_config() -> dict:
+    public_config = denormalize_config_dict(
+        isolated_settings_config().model_dump(
+            mode="json",
+            exclude_computed_fields=True,
+            exclude_none=True,
+        )
+    )
+    fixture_path = PROJECT_ROOT / "tests" / "fixtures" / "config" / "llm_schema_v1_inline.toml"
+    with fixture_path.open("rb") as fixture_file:
+        fixture_config = tomllib.load(fixture_file)
+
+    public_config["llm"] = copy.deepcopy(fixture_config.pop("llm"))
+
+    def merge_fixture(target: dict, source: dict) -> None:
+        for key, value in source.items():
+            if isinstance(value, dict) and isinstance(target.get(key), dict):
+                merge_fixture(target[key], value)
+            else:
+                target[key] = copy.deepcopy(value)
+
+    merge_fixture(public_config, fixture_config)
+    return public_config
+
+
+def _load_schema_v1_default_public_config() -> dict:
+    public_config = _load_schema_v1_inline_public_config()
+    for preset_id in (
+        "relay_gpt_5_6_luna",
+        "relay_image2",
+        "xiaomi_mimo_v2_5_pro_token_plan",
+    ):
+        public_config = apply_llm_model_preset(public_config, preset_id)
+    public_config["tools"]["image2"]["default_model_ref"] = "relay_image2"
+    return public_config
+
+
 def test_public_llm_shape_is_inline_provider_only():
-    public_config = load_public_config()
+    public_config = _load_schema_v1_inline_public_config()
     llm = public_config["llm"]
 
     assert "providers" not in llm
@@ -305,7 +344,7 @@ def test_public_llm_shape_is_inline_provider_only():
 
 
 def test_render_panel_html_uses_inline_provider_controls():
-    html = render_panel_html(load_public_config(), lang="zh")
+    html = render_panel_html(_load_schema_v1_inline_public_config(), lang="zh")
 
     assert "Vibelution 配置面板" in html
     assert "通用模型库" in html
@@ -321,7 +360,7 @@ def test_render_panel_html_uses_inline_provider_controls():
 
 
 def test_render_panel_html_hides_legacy_profile_clone_controls():
-    html = render_panel_html(load_public_config(), lang="zh")
+    html = render_panel_html(_load_schema_v1_inline_public_config(), lang="zh")
 
     assert 'id="add-llm-profile-card"' not in html
     assert 'data-add-profile-field="source_profile_id"' not in html
@@ -331,7 +370,7 @@ def test_render_panel_html_hides_legacy_profile_clone_controls():
 
 
 def test_render_panel_html_embeds_inline_provider_js_helpers():
-    html = render_panel_html(load_public_config(), lang="zh")
+    html = render_panel_html(_load_schema_v1_inline_public_config(), lang="zh")
 
     assert "collectProviderFields" in html
     assert "collectModelDetails" in html
@@ -340,7 +379,7 @@ def test_render_panel_html_embeds_inline_provider_js_helpers():
 
 
 def test_render_panel_html_uses_confirm_apply_flow_and_draft_routes():
-    html = render_panel_html(load_public_config(), lang="zh")
+    html = render_panel_html(_load_schema_v1_inline_public_config(), lang="zh")
 
     assert "应用配置" in html
     assert "修改已确认，等待应用" in html
@@ -353,7 +392,7 @@ def test_render_panel_html_uses_confirm_apply_flow_and_draft_routes():
 
 
 def test_render_panel_html_embeds_base_hash_for_apply_flow():
-    public_config = load_public_config()
+    public_config = _load_schema_v1_inline_public_config()
     expected_hash = public_config_hash(public_config)
 
     html = render_panel_html(public_config, lang="zh")
@@ -366,7 +405,7 @@ def test_render_panel_html_embeds_base_hash_for_apply_flow():
 
 
 def test_render_panel_html_does_not_surface_legacy_missing_profile_models():
-    public_config = load_public_config()
+    public_config = _load_schema_v1_inline_public_config()
     public_config["llm"]["profiles"]["primary"] = {
         "model_ref": UNCONFIGURED_MODEL_REF,
         "overrides": {},
@@ -384,9 +423,9 @@ def test_submitted_base_hash_reads_form_value():
 
 
 def test_assert_base_hash_matches_rejects_stale_snapshot():
-    public_config = load_public_config()
+    public_config = _load_schema_v1_inline_public_config()
     stale_hash = public_config_hash(public_config)
-    updated = load_public_config()
+    updated = _load_schema_v1_inline_public_config()
     updated["ui"]["language"] = "en"
 
     with pytest.raises(ValueError, match="重新加载"):
@@ -394,7 +433,7 @@ def test_assert_base_hash_matches_rejects_stale_snapshot():
 
 
 def test_confirm_preview_does_not_persist_config_file(tmp_path, monkeypatch):
-    public_config = load_public_config()
+    public_config = _load_schema_v1_inline_public_config()
     config_path = tmp_path / "config.toml"
     config_path.write_text(dumps_public_config(public_config, HEADER_LINES), encoding="utf-8")
     original_text = config_path.read_text(encoding="utf-8")
@@ -429,7 +468,7 @@ def test_confirm_preview_does_not_persist_config_file(tmp_path, monkeypatch):
 
 
 def test_preview_config_card_returns_html_without_persisting_config_file(tmp_path, monkeypatch):
-    public_config = load_public_config()
+    public_config = _load_schema_v1_inline_public_config()
     config_path = tmp_path / "config.toml"
     config_path.write_text(dumps_public_config(public_config, HEADER_LINES), encoding="utf-8")
     original_text = config_path.read_text(encoding="utf-8")
@@ -465,7 +504,7 @@ def test_preview_config_card_returns_html_without_persisting_config_file(tmp_pat
 
 
 def test_draft_add_llm_model_returns_preview_fragments_without_persisting_config_file(tmp_path, monkeypatch):
-    public_config = load_public_config()
+    public_config = _load_schema_v1_inline_public_config()
     config_path = tmp_path / "config.toml"
     config_path.write_text(dumps_public_config(public_config, HEADER_LINES), encoding="utf-8")
     original_text = config_path.read_text(encoding="utf-8")
@@ -510,7 +549,7 @@ def test_draft_add_llm_model_returns_preview_fragments_without_persisting_config
 
 
 def test_draft_add_llm_profile_endpoint_is_removed_without_persisting_config_file(tmp_path, monkeypatch):
-    public_config = load_public_config()
+    public_config = _load_schema_v1_inline_public_config()
     config_path = tmp_path / "config.toml"
     config_path.write_text(dumps_public_config(public_config, HEADER_LINES), encoding="utf-8")
     original_text = config_path.read_text(encoding="utf-8")
@@ -547,7 +586,7 @@ def test_draft_add_llm_profile_endpoint_is_removed_without_persisting_config_fil
 
 
 def test_draft_delete_llm_model_fragments_leave_legacy_profiles_unchanged(tmp_path, monkeypatch):
-    public_config = load_public_config()
+    public_config = _load_schema_v1_inline_public_config()
     public_config["llm"]["profiles"]["primary"] = {
         "model_ref": "relay_gpt_5_6_luna",
         "overrides": {},
@@ -589,7 +628,7 @@ def test_draft_delete_llm_model_fragments_leave_legacy_profiles_unchanged(tmp_pa
 
 
 def test_apply_requires_matching_base_hash(tmp_path, monkeypatch):
-    public_config = load_public_config()
+    public_config = _load_schema_v1_inline_public_config()
     config_path = tmp_path / "config.toml"
     config_path.write_text(dumps_public_config(public_config, HEADER_LINES), encoding="utf-8")
     stale_hash = public_config_hash(public_config)
@@ -626,7 +665,7 @@ def test_apply_requires_matching_base_hash(tmp_path, monkeypatch):
 
 
 def test_apply_with_matching_base_hash_persists_config_file(tmp_path, monkeypatch):
-    public_config = load_public_config()
+    public_config = _load_schema_v1_inline_public_config()
     config_path = tmp_path / "config.toml"
     config_path.write_text(dumps_public_config(public_config, HEADER_LINES), encoding="utf-8")
     payload = load_public_config(config_path)
@@ -657,7 +696,7 @@ def test_apply_with_matching_base_hash_persists_config_file(tmp_path, monkeypatc
 
 
 def test_render_panel_html_supports_english():
-    html = render_panel_html(load_public_config(), lang="en")
+    html = render_panel_html(_load_schema_v1_inline_public_config(), lang="en")
 
     assert "Vibelution Config Panel" in html
     assert "Model Library" in html
@@ -666,7 +705,7 @@ def test_render_panel_html_supports_english():
 
 
 def test_render_panel_html_uses_configured_language_by_default():
-    public_config = load_public_config()
+    public_config = _load_schema_v1_inline_public_config()
     public_config.setdefault("ui", {})
     public_config["ui"]["language"] = "en"
 
@@ -696,7 +735,7 @@ def test_label_localization_prefers_exact_and_fallback_rules():
 
 
 def test_network_proxy_config_is_public_and_validated():
-    public_config = load_public_config()
+    public_config = _load_schema_v1_inline_public_config()
 
     assert public_config["network"]["proxy_enabled"] is False
     assert public_config["network"]["proxy_url"] == ""
@@ -775,7 +814,7 @@ def test_model_preset_options_include_codex_preset():
 
 
 def test_list_llm_model_options_exposes_inline_provider_and_source():
-    options = list_llm_model_options(load_public_config())
+    options = list_llm_model_options(_load_schema_v1_inline_public_config())
 
     assert options
     assert all("provider" in item for item in options)
@@ -785,7 +824,7 @@ def test_list_llm_model_options_exposes_inline_provider_and_source():
 
 def test_public_config_canonicalizes_model_key_env_from_model_id(tmp_path):
     config_path = tmp_path / "config.toml"
-    public_config = load_public_config()
+    public_config = _load_schema_v1_inline_public_config()
     config_path.write_text(dumps_public_config(public_config, HEADER_LINES), encoding="utf-8")
     public_config["llm"]["model_library"]["custom_codex"] = {
         "provider": _provider("openai", "https://api.openai.com/v1", "OPENAI_API_KEY"),
@@ -804,7 +843,7 @@ def test_public_config_canonicalizes_model_key_env_from_model_id(tmp_path):
 
 
 def test_public_config_canonicalizes_repeated_model_key_env_tokens():
-    public_config = load_public_config()
+    public_config = _load_schema_v1_inline_public_config()
     public_config["llm"]["model_library"]["gpt_5_5_gpt_5_5"] = {
         "provider": _provider("openai", "https://share-api.com/v1", "OPENAI_API_KEY"),
         "model": "gpt-5.5",
@@ -818,7 +857,7 @@ def test_public_config_canonicalizes_repeated_model_key_env_tokens():
 
 
 def test_public_config_model_key_env_uses_ascii_safe_model_id_token():
-    public_config = load_public_config()
+    public_config = _load_schema_v1_inline_public_config()
     public_config["llm"]["model_library"]["小米模型"] = {
         "provider": _provider("xiaomi", "https://api.xiaomimimo.com/v1", "MIMO_API_KEY", context_window=1000000),
         "model": "mimo-v2.5",
@@ -834,7 +873,7 @@ def test_public_config_model_key_env_uses_ascii_safe_model_id_token():
 
 
 def test_public_config_promotes_inline_profile_models_to_library_entries():
-    public_config = load_public_config()
+    public_config = _load_schema_v1_inline_public_config()
     public_config["llm"]["model_library"].pop("xiaomi_mimo_v2_5_multimodal", None)
     public_config["llm"]["profiles"]["primary"] = {
         "provider": _provider("xiaomi", "https://api.xiaomimimo.com/v1", "MIMO_API_KEY", context_window=1000000),
@@ -862,7 +901,7 @@ def test_public_config_promotes_inline_profile_models_to_library_entries():
 
 
 def test_public_config_does_not_force_preset_id_for_different_provider_route():
-    public_config = load_public_config()
+    public_config = _load_schema_v1_inline_public_config()
     public_config["llm"]["model_library"].pop("xiaomi_mimo_v2_5_multimodal", None)
     public_config["llm"]["profiles"]["primary"] = {
         "provider": _provider("xiaomi", "https://token-plan-cn.xiaomimimo.com/v1", "MIMO_API_KEY", context_window=1000000),
@@ -890,7 +929,7 @@ def test_public_config_does_not_force_preset_id_for_different_provider_route():
 
 
 def test_public_config_canonicalization_does_not_backfill_legacy_role_profiles():
-    public_config = load_public_config()
+    public_config = _load_schema_v1_inline_public_config()
     public_config["llm"]["profiles"] = {
         "primary": {
             "model_ref": "xiaomi_mimo_v2_5_pro_token_plan",
@@ -907,7 +946,7 @@ def test_public_config_canonicalization_does_not_backfill_legacy_role_profiles()
 
 
 def test_apply_codex_model_preset_materializes_inline_provider():
-    updated = apply_llm_model_preset(load_public_config(), "openai_gpt_5_3_codex")
+    updated = apply_llm_model_preset(_load_schema_v1_inline_public_config(), "openai_gpt_5_3_codex")
     model = updated["llm"]["model_library"]["openai_gpt_5_3_codex"]
 
     assert model["provider"]["kind"] == "openai"
@@ -921,7 +960,7 @@ def test_apply_codex_model_preset_materializes_inline_provider():
 
 
 def test_apply_relay_model_preset_materializes_openai_compatible_provider():
-    public_config = load_public_config()
+    public_config = _load_schema_v1_inline_public_config()
     public_config["llm"]["model_library"].pop("relay_gpt_5_6_luna", None)
 
     updated = apply_llm_model_preset(public_config, "relay_gpt_5_6_luna")
@@ -941,7 +980,7 @@ def test_apply_relay_model_preset_materializes_openai_compatible_provider():
 
 
 def test_apply_relay_image2_model_preset_materializes_root_base_url_provider():
-    public_config = load_public_config()
+    public_config = _load_schema_v1_inline_public_config()
     public_config["llm"]["model_library"].pop("relay_image2", None)
 
     updated = apply_llm_model_preset(public_config, "relay_image2")
@@ -963,7 +1002,7 @@ def test_apply_relay_image2_model_preset_materializes_root_base_url_provider():
 
 
 def test_apply_xiaomi_mimo_token_plan_preset_materializes_provider():
-    public_config = load_public_config()
+    public_config = _load_schema_v1_inline_public_config()
     public_config["llm"]["model_library"].pop("xiaomi_mimo_v2_5_pro_token_plan", None)
 
     updated = apply_llm_model_preset(public_config, "xiaomi_mimo_v2_5_pro_token_plan")
@@ -985,7 +1024,7 @@ def test_apply_xiaomi_mimo_token_plan_preset_materializes_provider():
 
 
 def test_apply_xiaomi_mimo_multimodal_preset_materializes_image_support():
-    public_config = load_public_config()
+    public_config = _load_schema_v1_inline_public_config()
     public_config["llm"]["model_library"].pop("xiaomi_mimo_v2_5_multimodal", None)
 
     updated = apply_llm_model_preset(public_config, "xiaomi_mimo_v2_5_multimodal")
@@ -1003,7 +1042,7 @@ def test_apply_xiaomi_mimo_multimodal_preset_materializes_image_support():
 
 
 def test_xiaomi_mimo_multimodal_model_ref_materializes_image_support_to_profile():
-    public_config = load_public_config()
+    public_config = _load_schema_v1_inline_public_config()
     public_config["llm"]["model_library"].pop("xiaomi_mimo_v2_5_multimodal", None)
     public_config = apply_llm_model_preset(public_config, "xiaomi_mimo_v2_5_multimodal")
     public_config["llm"]["profiles"]["primary"] = {"model_ref": "xiaomi_mimo_v2_5_multimodal"}
@@ -1019,7 +1058,7 @@ def test_xiaomi_mimo_multimodal_model_ref_materializes_image_support_to_profile(
 
 
 def test_apply_custom_openai_compatible_relay_preset_accepts_user_base_url():
-    public_config = load_public_config()
+    public_config = _load_schema_v1_inline_public_config()
 
     updated = apply_llm_model_preset(
         public_config,
@@ -1048,7 +1087,7 @@ def test_apply_custom_openai_compatible_relay_preset_accepts_user_base_url():
 
 
 def test_apply_custom_relay_responses_preset_accepts_custom_public_relay_host():
-    public_config = load_public_config()
+    public_config = _load_schema_v1_inline_public_config()
 
     updated = apply_llm_model_preset(
         public_config,
@@ -1076,7 +1115,7 @@ def test_apply_custom_relay_responses_preset_accepts_custom_public_relay_host():
 
 
 def test_default_public_config_includes_new_official_model_templates():
-    public_config = load_public_config()
+    public_config = _load_schema_v1_default_public_config()
     relay_model = public_config["llm"]["model_library"]["relay_gpt_5_6_luna"]
     image_model = public_config["llm"]["model_library"]["relay_image2"]
 
@@ -1097,7 +1136,7 @@ def test_default_public_config_includes_new_official_model_templates():
     assert public_config["tools"]["image2"]["default_model_ref"] == "relay_image2"
     assert "custom_relay_responses" not in public_config["llm"]["model_library"]
 
-    with_deepseek_flash = load_public_config()
+    with_deepseek_flash = _load_schema_v1_inline_public_config()
     with_deepseek_flash["llm"]["model_library"].pop("deepseek_v4_flash", None)
     with_deepseek_flash = apply_llm_model_preset(with_deepseek_flash, "deepseek_v4_flash")
     deepseek_model = with_deepseek_flash["llm"]["model_library"]["deepseek_v4_flash"]
@@ -1123,7 +1162,7 @@ def test_default_public_config_includes_new_official_model_templates():
     assert xiaomi_model["max_output_tokens"] == 128000
     assert xiaomi_model["api_key_env"] == "VIBELUTION_LLM_MODEL_XIAOMI_MIMO_V2_5_PRO_TOKEN_PLAN_API_KEY"
 
-    with_xiaomi_multimodal = load_public_config()
+    with_xiaomi_multimodal = _load_schema_v1_inline_public_config()
     with_xiaomi_multimodal["llm"]["model_library"].pop("xiaomi_mimo_v2_5_multimodal", None)
     with_xiaomi_multimodal = apply_llm_model_preset(with_xiaomi_multimodal, "xiaomi_mimo_v2_5_multimodal")
     xiaomi_multimodal_model = with_xiaomi_multimodal["llm"]["model_library"]["xiaomi_mimo_v2_5_multimodal"]
@@ -1139,7 +1178,7 @@ def test_default_public_config_includes_new_official_model_templates():
 
 
 def test_add_update_and_delete_llm_model_with_inline_provider():
-    public_config = load_public_config()
+    public_config = _load_schema_v1_inline_public_config()
     openai = _provider("openai", "https://api.openai.com/v1", "OPENAI_API_KEY")
     local = _provider(
         "local",
@@ -1225,7 +1264,7 @@ def test_add_update_and_delete_llm_model_with_inline_provider():
 
 
 def test_update_llm_model_rejects_unknown_model_id():
-    public_config = load_public_config()
+    public_config = _load_schema_v1_inline_public_config()
     provider = _provider("openai", "https://api.openai.com/v1", "OPENAI_API_KEY")
 
     with pytest.raises(ValueError, match="unknown LLM model"):
@@ -1240,7 +1279,7 @@ def test_update_llm_model_rejects_unknown_model_id():
 
 
 def test_update_llm_model_persists_manual_image_input_support():
-    public_config = _ensure_llm_model_preset(load_public_config(), "deepseek_v4_pro")
+    public_config = _ensure_llm_model_preset(_load_schema_v1_inline_public_config(), "deepseek_v4_pro")
     target = public_config["llm"]["model_library"]["deepseek_v4_pro"]
 
     updated = update_llm_model(
@@ -1266,7 +1305,7 @@ def test_update_llm_model_persists_manual_image_input_support():
 
 def test_save_public_config_strips_runtime_probe_capability_fields(tmp_path):
     config_path = tmp_path / "config.toml"
-    base = load_public_config()
+    base = _load_schema_v1_inline_public_config()
     config_path.write_text(dumps_public_config(base, HEADER_LINES), encoding="utf-8")
 
     public_config = copy.deepcopy(base)
@@ -1303,7 +1342,7 @@ def test_save_public_config_strips_runtime_probe_capability_fields(tmp_path):
 
 def test_build_effective_config_applies_runtime_capability_cache(monkeypatch, tmp_path):
     monkeypatch.setenv("VIBELUTION_MODEL_CAPABILITY_CACHE", str(tmp_path / "model-capabilities.json"))
-    public_config = copy.deepcopy(load_public_config())
+    public_config = copy.deepcopy(_load_schema_v1_inline_public_config())
     model_ref = "local/local-vision"
     public_config["llm"]["model_library"][model_ref] = {
         "provider": _provider(
@@ -1335,7 +1374,7 @@ def test_build_effective_config_applies_runtime_capability_cache(monkeypatch, tm
 
 
 def test_delete_generated_profile_model_leaves_matching_profiles_unchanged():
-    public_config = load_public_config()
+    public_config = _load_schema_v1_inline_public_config()
     provider = _provider("openai", "https://api.openai.com/v1", "OPENAI_API_KEY")
     public_config["llm"]["profiles"]["primary"] = {
         "provider": provider.copy(),
@@ -1364,7 +1403,7 @@ def test_delete_generated_profile_model_leaves_matching_profiles_unchanged():
 
 
 def test_build_effective_config_rejects_reasoning_chat_without_supported_state_field():
-    public_config = load_public_config()
+    public_config = _load_schema_v1_inline_public_config()
     public_config["llm"]["profiles"]["primary"] = {
         "provider": _provider("openai", "https://api.openai.com/v1", "OPENAI_API_KEY"),
         "model": "gpt-5.4",
@@ -1380,7 +1419,7 @@ def test_build_effective_config_rejects_reasoning_chat_without_supported_state_f
 
 
 def test_build_effective_config_accepts_reasoning_chat_with_reasoning_content():
-    public_config = load_public_config()
+    public_config = _load_schema_v1_inline_public_config()
     public_config["llm"]["profiles"]["primary"] = {
         "provider": _provider("openai", "https://api.openai.com/v1", "OPENAI_API_KEY"),
         "model": "gpt-5.4",
@@ -1398,7 +1437,7 @@ def test_build_effective_config_accepts_reasoning_chat_with_reasoning_content():
 
 
 def test_inline_profile_provider_switch_resets_incompatible_responses_transport():
-    public_config = load_public_config()
+    public_config = _load_schema_v1_inline_public_config()
     _set_subagent_explorer_deepseek(public_config)
 
     config = build_effective_config(public_config)
@@ -1410,7 +1449,7 @@ def test_inline_profile_provider_switch_resets_incompatible_responses_transport(
 
 
 def test_runtime_llm_probe_uses_real_backend_with_small_payload(monkeypatch):
-    public_config = load_public_config()
+    public_config = _load_schema_v1_default_public_config()
     public_config["llm"]["profiles"]["primary"] = {
         "model_ref": "relay_gpt_5_6_luna",
         "overrides": {},
@@ -1486,7 +1525,7 @@ def test_runtime_llm_probe_extends_private_lan_local_timeout(monkeypatch):
 
 
 def test_legacy_profile_llm_test_endpoint_is_removed(tmp_path, monkeypatch):
-    public_config = load_public_config()
+    public_config = _load_schema_v1_inline_public_config()
     config_path = tmp_path / "config.toml"
     config_path.write_text(dumps_public_config(public_config, HEADER_LINES), encoding="utf-8")
     server, thread, base_url = _start_test_config_panel(monkeypatch, config_path)
@@ -1516,7 +1555,7 @@ def test_legacy_profile_llm_test_endpoint_is_removed(tmp_path, monkeypatch):
 
 def test_model_library_api_key_writes_user_env_without_persisting_secret(monkeypatch):
     public_config = add_llm_model(
-        load_public_config(),
+        _load_schema_v1_inline_public_config(),
         "custom_codex",
         _provider("openai", "https://api.openai.com/v1", "OPENAI_API_KEY"),
         "gpt-5.3-codex",
@@ -1581,7 +1620,7 @@ def test_delete_user_env_var_uses_windows_registry_helper(monkeypatch):
 
 def test_list_llm_model_options_detects_windows_user_scoped_model_key(monkeypatch):
     public_config = add_llm_model(
-        load_public_config(),
+        _load_schema_v1_inline_public_config(),
         "custom_codex",
         _provider("openai", "https://api.openai.com/v1", "OPENAI_API_KEY"),
         "gpt-5.3-codex",
@@ -1604,7 +1643,7 @@ def test_list_llm_model_options_detects_windows_user_scoped_model_key(monkeypatc
 
 def test_build_effective_config_prefers_model_user_env_key_on_windows(monkeypatch):
     public_config = add_llm_model(
-        load_public_config(),
+        _load_schema_v1_inline_public_config(),
         "custom_codex",
         _provider("openai", "https://api.openai.com/v1", "OPENAI_API_KEY"),
         "gpt-5.3-codex",
@@ -1660,8 +1699,15 @@ def test_preserve_secret_blanks_keeps_existing_api_key():
 
 
 def test_toml_writer_round_trip_for_public_config_uses_inline_provider_blocks():
-    public_config = _ensure_llm_model_preset(load_public_config(), "relay_gpt_5_6_luna")
+    public_config = _ensure_llm_model_preset(_load_schema_v1_inline_public_config(), "relay_gpt_5_6_luna")
     public_config["llm"]["profiles"]["primary"] = {"model_ref": "relay_gpt_5_6_luna"}
+    public_config["prompt"]["sections"] = [
+        {
+            "name": "unit",
+            "path": "workspace/prompts/UNIT.md",
+            "enabled": True,
+        }
+    ]
     dumped = dumps_public_config(public_config, HEADER_LINES)
     loaded = tomllib.loads(dumped)
 
@@ -1677,7 +1723,7 @@ def test_toml_writer_round_trip_for_public_config_uses_inline_provider_blocks():
 
 def test_toml_writer_quotes_dotted_model_library_ids(tmp_path):
     public_config = add_llm_model(
-        load_public_config(),
+        _load_schema_v1_inline_public_config(),
         "custom.gpt-5.3-codex",
         _provider("openai", "https://api.openai.com/v1", "OPENAI_API_KEY"),
         "gpt-5.3-codex",
@@ -1697,14 +1743,14 @@ def test_toml_writer_quotes_dotted_model_library_ids(tmp_path):
 
 def test_save_public_config_preserves_dotted_model_library_ids(tmp_path):
     public_config = add_llm_model(
-        load_public_config(),
+        _load_schema_v1_inline_public_config(),
         "custom.gpt-5.3-codex",
         _provider("openai", "https://api.openai.com/v1", "OPENAI_API_KEY"),
         "gpt-5.3-codex",
         "Custom Codex",
     )
     config_path = tmp_path / "config.toml"
-    config_path.write_text(dumps_public_config(load_public_config(), HEADER_LINES), encoding="utf-8")
+    config_path.write_text(dumps_public_config(_load_schema_v1_inline_public_config(), HEADER_LINES), encoding="utf-8")
 
     save_public_config(public_config, config_path)
     dumped = config_path.read_text(encoding="utf-8")
@@ -1740,7 +1786,8 @@ context_window = 400000
 
 
 def test_build_effective_config_from_public_structure_resolves_model_ref_provider():
-    public_config = load_public_config()
+    public_config = _load_schema_v1_default_public_config()
+    public_config["runtime"]["profile"] = "safe_remote"
     public_config["llm"]["profiles"]["compat_probe"] = {
         "model_ref": "xiaomi_mimo_v2_5_pro_token_plan",
         "overrides": {},
@@ -1760,7 +1807,7 @@ def test_build_effective_config_from_public_structure_resolves_model_ref_provide
 
 
 def test_inspect_public_config_summarizes_effective_state():
-    public_config = load_public_config()
+    public_config = _load_schema_v1_inline_public_config()
 
     snapshot = inspect_public_config(public_config)
     summary = snapshot["summary"]
@@ -1778,7 +1825,7 @@ def test_inspect_public_config_summarizes_effective_state():
 
 
 def test_inspect_public_config_warns_when_profiles_bypass_matching_relay_responses_route():
-    public_config = load_public_config()
+    public_config = _load_schema_v1_inline_public_config()
     public_config["llm"]["model_library"].pop("relay_gpt_5_6_luna", None)
     public_config = apply_llm_model_preset(public_config, "relay_gpt_5_6_luna")
     relay_model = public_config["llm"]["model_library"]["relay_gpt_5_6_luna"]

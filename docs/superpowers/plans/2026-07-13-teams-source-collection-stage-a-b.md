@@ -1,11 +1,12 @@
 # Teams Source Collection 阶段 A+B Implementation Plan
 
-- **Status:** blocked-precondition
+- **Status:** ready-for-integration
 - **Owner:** codex-teams-source-collection-stage-a-b
 - **Approved spec:** [`2026-07-13-teams-source-collection-vertical-split-design.md`](../specs/2026-07-13-teams-source-collection-vertical-split-design.md)
 - **Planning claim:** `claim-229348c3d41b`
-- **Target branch/worktree:** 尚未创建；待 blocker 关闭后从最新 local `main` 创建 `codex/teams-source-collection-stage-a-b` 与 `C:\Users\17533\Desktop\Vibelution-worktrees\teams-source-collection-stage-a-b`
-- **Current blocker:** `claim-6d545068f72a` 仍独占 `web/src/routes/TeamsRoute.tsx` 与 `web/src/routes/TeamsRoute.layout.test.ts`
+- **Implementation claim:** `claim-8c6da6444134`
+- **Target branch/worktree:** `codex/teams-source-collection-stage-a-b` / `C:\Users\17533\Desktop\Vibelution-worktrees\teams-source-collection-stage-a-b`
+- **Current blocker:** 已解除；`claim-6d545068f72a` 已关闭，loading commit `d86cd310` 已进入 local `main`
 - **Scope:** 只实施 spec 的阶段 A（纯模型与测试接缝）和阶段 B（共享 read-query ownership）
 - **Close condition:** 阶段 A+B 的代码、测试与 ownership 迁移完成，selector-selected gates 通过，提交合入 local `main`，claim/memory/Launcher/version decisions 收口；阶段 C/D 仍保持 deferred
 
@@ -108,62 +109,62 @@ hook 内部返回按领域命名的 typed query results：`workflow`、`stageRou
 
 ### Task 0：解除 blocker 与重建基线
 
-- [ ] 确认 `claim-6d545068f72a` 已 completed/released，且不存在 replacement claim。
-- [ ] 读取其 final commit、`git diff main...<branch>`、focused tests 和 build 证据；确认 loading ownership 已进入 local `main` 或明确取消。
-- [ ] 确认 root `main` clean；从最新 local `main` 创建目标 branch/worktree。
-- [ ] 运行 guard `status`、exact-scope `check`，认领本计划列出的 Route/tests/new files/old helper files。
-- [ ] 重新测量 `TeamsRoute.tsx` 行数、query/mutation/hooks 数量，运行当前 Teams focused baseline；若 baseline 非全绿，停止并归因。
+- [x] 确认 `claim-6d545068f72a` 已 completed/released，且不存在 replacement claim。
+- [x] 读取其 final commit、`git diff main...<branch>`、focused tests 和 build 证据；确认 loading ownership 已进入 local `main` 或明确取消。
+- [x] 确认 root `main` clean；从最新 local `main` 创建目标 branch/worktree。
+- [x] 运行 guard `status`、exact-scope `check`，认领本计划列出的 Route/tests/new files/old helper files。
+- [x] 重新测量 `TeamsRoute.tsx` 行数、query/mutation/hooks 数量，运行当前 Teams focused baseline；若 baseline 非全绿，停止并归因。
 
 ### Task A1：runModel 紧凑 TDD
 
-- [ ] RED：新增 `runModel.test.ts`，迁入旧 helper tests，并为 `deriveSourceCollectionDisplayState`、`sourceCollectionStableCountText`、`sourceCollectionActiveWorkRunFromRuntime` 建立行为用例；运行最窄 Vitest，确认因新 owner/exports 缺失而失败。
-- [ ] GREEN：移动 run metrics/default selection、run labels/count text、display state、runtime active-run projection 及其最小类型依赖。
-- [ ] 更新 Route imports 和 `TeamsRoute.logic.test.ts`；确认 Route 不再定义已迁移函数。
-- [ ] 所有旧消费者归零且新 tests GREEN 后删除 `teamsRouteViewModel.ts` 与旧 test，不保留 re-export。
-- [ ] checkpoint：focused model/logic/layout tests、`git diff --check`，提交 `refactor(web): extract source collection run model`。
+- [x] RED：新增 `runModel.test.ts`，迁入旧 helper tests，并为 `deriveSourceCollectionDisplayState`、`sourceCollectionStableCountText`、`sourceCollectionActiveWorkRunFromRuntime` 建立行为用例；运行最窄 Vitest，确认因新 owner/exports 缺失而失败。
+- [x] GREEN：移动 run metrics/default selection、run labels/count text、display state、runtime active-run projection 及其最小类型依赖。
+- [x] 更新 Route imports 和 `TeamsRoute.logic.test.ts`；确认 Route 不再定义已迁移函数。
+- [x] 所有旧消费者归零且新 tests GREEN 后删除 `teamsRouteViewModel.ts` 与旧 test，不保留 re-export。
+- [x] checkpoint：focused model/logic/layout tests、`git diff --check`，提交 `refactor(web): extract source collection run model`。
 
 ### Task A2：stageProjection 紧凑 TDD
 
-- [ ] RED：覆盖 stage state/count fallback、partial/blocked/completed、task progress、interrupted/recovery label、writeback observed task IDs。
-- [ ] GREEN：移动 stage projection types/functions；对 Route 大 payload 使用窄结构 input，不移动 mutation 或 URL logic。
-- [ ] polling interval 的 React Query adapter 留给阶段 B；纯 stage model 只提供 cards/observed-task facts。
-- [ ] 迁移对应 raw assertions，保留 loading-state 与 route shell assertions。
-- [ ] checkpoint：stage/run/logic/layout tests、`git diff --check`，提交 `refactor(web): extract source collection stage projection`。
+- [x] RED：覆盖 stage state/count fallback、partial/blocked/completed、task progress、interrupted/recovery label、writeback observed task IDs。
+- [x] GREEN：移动 stage projection types/functions；对 Route 大 payload 使用窄结构 input，不移动 mutation 或 URL logic。
+- [x] polling interval 的 React Query adapter 留给阶段 B；纯 stage model 只提供 cards/observed-task facts。
+- [x] 迁移对应 raw assertions，保留 loading-state 与 route shell assertions。
+- [x] checkpoint：stage/run/logic/layout tests、`git diff --check`，提交 `refactor(web): extract source collection stage projection`。
 
 ### Task A3：evidenceModel 紧凑 TDD
 
-- [ ] RED：覆盖 source category、PDF/web/dataset/local/missing、filter counts、candidate/record provenance、Evidence Ledger missing-anchor 与 excluded recovery。
-- [ ] GREEN：移动 provenance/filter/trace/ledger/recovery types/functions；UI-specific ReactNode、panel props 和 styles 留在 Route/view。
-- [ ] 从 Route 删除已迁移 declarations 和无消费者 imports；不得复制同一计算形成双 owner。
-- [ ] checkpoint：三个 model tests、logic/layout tests、`git diff --check`，提交 `refactor(web): extract source collection evidence model`。
+- [x] RED：覆盖 source category、PDF/web/dataset/local/missing、filter counts、candidate/record provenance、Evidence Ledger missing-anchor 与 excluded recovery。
+- [x] GREEN：移动 provenance/filter/trace/ledger/recovery types/functions；UI-specific ReactNode、panel props 和 styles 留在 Route/view。
+- [x] 从 Route 删除已迁移 declarations 和无消费者 imports；不得复制同一计算形成双 owner。
+- [x] checkpoint：三个 model tests、logic/layout tests、`git diff --check`，提交 `refactor(web): extract source collection evidence model`。
 
 ### Task A Gate
 
-- [ ] `TeamsRoute.logic.test.ts` 不再从完整 Route import source model functions。
-- [ ] Route 不包含已迁移 helper definitions；三 model 文件不依赖 React/Query/Router/styles。
-- [ ] 运行 focused Vitest 与 `npm --prefix web run build`；失败必须在进入 B 前解决或回滚 A。
+- [x] `TeamsRoute.logic.test.ts` 不再从完整 Route import source model functions。
+- [x] Route 不包含已迁移 helper definitions；三 model 文件不依赖 React/Query/Router/styles。
+- [x] 运行 focused Vitest 与 `npm --prefix web run build`；失败必须在进入 B 前解决或回滚 A。
 
 ### Task B1：shared query contract RED
 
-- [ ] 新增 `useResearchWorkflowResources.contract.test.ts`，先断言新模块存在且拥有精确九个 query。
-- [ ] 对每个 query 锁定原 query key、`queryFn: ({ signal })`、`{ signal }` 传递、独立 demand-enabled 条件。
-- [ ] 锁定 stage-round/candidates/source-quality/ingestion 当前 polling policy，以及 hook 不包含 `useMutation`、`useState`、navigation、draft 或 panel import。
-- [ ] 锁定 Route 只调用 shared hook，不再声明九个同 key queries；先运行得到目标 RED。
+- [x] 新增 `useResearchWorkflowResources.contract.test.ts`，先断言新模块存在且拥有精确九个 query。
+- [x] 对每个 query 锁定原 query key、`queryFn: ({ signal })`、`{ signal }` 传递、独立 demand-enabled 条件。
+- [x] 锁定 stage-round/candidates/source-quality/ingestion 当前 polling policy，以及 hook 不包含 `useMutation`、`useState`、navigation、draft 或 panel import。
+- [x] 锁定 Route 只调用 shared hook，不再声明九个同 key queries；先运行得到目标 RED。
 
 ### Task B2：实现唯一 read-query owner
 
-- [ ] 创建 typed hook，按当前顺序无条件调用九个 `useQuery`；`enabled` 只控制请求，不控制 hook mount。
-- [ ] 移入四个 custom query-key helpers 和三个 Route-local只读 status type families；Route mutation 通过 import 继续使用同一 key。
-- [ ] 内部使用 `stageRound.data` 与显式 `stageWritebackSync` 保持 candidates/source-quality polling；knowledge-ingestion 继续只在 active work run 时轮询。
-- [ ] 返回九个命名 query results，不返回 `Record<string, unknown>`，不包装 mutation 或 navigation。
+- [x] 创建 typed hook，按当前顺序无条件调用九个 `useQuery`；`enabled` 只控制请求，不控制 hook mount。
+- [x] 移入四个 custom query-key helpers 和三个 Route-local只读 status type families；Route mutation 通过 import 继续使用同一 key。
+- [x] 内部使用 `stageRound.data` 与显式 `stageWritebackSync` 保持 candidates/source-quality polling；knowledge-ingestion 继续只在 active work run 时轮询。
+- [x] 返回九个命名 query results，不返回 `Record<string, unknown>`，不包装 mutation 或 navigation。
 
 ### Task B3：Route 集成与 ownership 清理
 
-- [ ] Route 按现有 booleans 构造 exact `demand`，无条件调用 hook，并 alias 回现有 query variable names。
-- [ ] 删除 Route 中九个 `useQuery` bodies、已迁移 key/type definitions 和对应 raw-source ownership assertions。
-- [ ] 保持 `sourceCollectionRunsQuery`、summary/runtime/run details queries 和全部 mutations 原位。
-- [ ] contract/layout/logic/model tests GREEN 后运行 build；若任何 query key、enabled、polling、signal 或 invalidation diff，停止并恢复 Route declarations，不保留双 owner。
-- [ ] checkpoint：提交 `refactor(web): centralize research workflow reads`。
+- [x] Route 按现有 booleans 构造 exact `demand`，无条件调用 hook，并 alias 回现有 query variable names。
+- [x] 删除 Route 中九个 `useQuery` bodies、已迁移 key/type definitions 和对应 raw-source ownership assertions。
+- [x] 保持 `sourceCollectionRunsQuery`、summary/runtime/run details queries 和全部 mutations 原位。
+- [x] contract/layout/logic/model tests GREEN 后运行 build；若任何 query key、enabled、polling、signal 或 invalidation diff，停止并恢复 Route declarations，不保留双 owner。
+- [x] checkpoint：提交 `refactor(web): centralize research workflow reads`。
 
 ## 7. 验证命令
 
@@ -222,3 +223,15 @@ Challenge Cup generator 前后记录 `git status --short`；generated HTML 出�
 - **Launcher:** code integration 后 required before runtime verification；docs-only planning 不需要。
 - **Memory:** A+B 合入后同步 `web-workbench-surface` 的 durable ownership decision、commit 与验证结果；计划阶段只维护 claim，不写完成事实。
 - **Deferred:** 阶段 C controllers 与阶段 D workspace/styles 必须在 A+B 合入后重新审阅，不能顺手进入本 worktree。
+
+## 10. 实施与验证证据
+
+- 阶段 A checkpoint commits：`e85c81fd`（run）、`91f8f720`（stage）、`4de567ca`（evidence）。
+- 阶段 B checkpoint commit：`d8b3cd73`；closeout 前的最新 local `main` 已无冲突并入任务分支。
+- `TeamsRoute.tsx` 从基线 13,525 行降至 11,629 行；Route 内 `useQuery` 从 25 个降至 16 个，新 hook 精确持有 9 个 `useQuery`，且不含 `useMutation` / `useState`。
+- focused Vitest：7 files / 84 tests passed。
+- selector-selected backend gate：357 passed in 418.87s。
+- frontend full gate：226 files / 2,179 tests passed。
+- `npm --prefix web run build` passed；`node 挑战杯/build_research_flow_site.mjs` 生成 13 页且前后 worktree clean，无 generated diff。
+- `git diff --check` passed；selector 仅命中 `teams-knowledge`、`frontend-workbench` 与计划文档的 `docs-only` 规则。
+- behavior、URL、query key、AbortSignal、enabled、polling、mutation invalidation 和 backend contract 均未扩展；Stage C/D 继续 deferred。

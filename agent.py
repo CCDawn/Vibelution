@@ -91,6 +91,9 @@ from core.llm import (
     stream_llm,
 )
 from core.llm.client import llm_cancel_context
+from core.llm.invocation import invoke_llm_outcome, run_streaming_llm_outcome
+from core.llm.legacy_xml_tool_decoder import canonical_outcome_from_message, canonicalize_legacy_xml_outcome
+from core.llm.semantic_messages import InvocationScope
 from core.llm.payload_builder import prompt_cache_partition_scope
 from core.llm.agent_runtime import (
     AGENT_LLM_SLOT_MENTAL_MODEL,
@@ -142,7 +145,7 @@ from core.orchestration.runtime_goal import build_runtime_goal_packet
 from core.orchestration.round_state import RoundStateController
 from core.orchestration.response_processor import ResponseProcessor, ResponseProcessingResult
 from core.orchestration.response_surface import ResponseSurfaceController
-from core.orchestration.turn_outcome import TurnOutcomeController
+from core.orchestration.turn_outcome import LifecycleDecision, TurnOutcomeController
 from core.orchestration.tool_lifecycle import ToolLifecycleBridge
 from core.orchestration.context_engine import build_agent_context
 from core.orchestration.subagent_roles import extract_subagent_primary_goal
@@ -2302,6 +2305,7 @@ class SelfEvolvingAgent:
         round_return_ok = True
         try:
             self._raise_if_turn_stop_requested()
+            provider_replay_state = None
             for _ in range(round_state.max_iterations):
                 self._raise_if_turn_stop_requested()
                 iteration = round_state.next_iteration()
@@ -2393,8 +2397,8 @@ class SelfEvolvingAgent:
                         f"（{current_tokens} → {after_tokens} tokens）。"
                     ))
                 self._raise_if_turn_stop_requested()
-                response = self._invoke_llm(messages)
-                if response is None:
+                invocation_result = self._invoke_llm(messages, replay_state=provider_replay_state)
+                if invocation_result is None:
                     consecutive_failures = round_state.note_llm_failure()
                     self._last_turn_failed = True
                     ui.update_status(
@@ -2445,6 +2449,22 @@ class SelfEvolvingAgent:
                         )
                         break
                     continue
+                if isinstance(invocation_result, tuple) and len(invocation_result) == 2:
+                    turn_outcome, response = invocation_result
+                else:
+                    response = invocation_result
+                    compatibility_scope = InvocationScope(
+                        session_id=str(getattr(self, "session_id", "") or "agent-session"),
+                        turn_id=str(
+                            getattr(current_turn, "turn_id", "")
+                            or getattr(current_turn, "id", "")
+                            or f"turn-{iteration}"
+                        ),
+                        invocation_id=f"compatibility-{iteration}",
+                        iteration=max(0, int(iteration or 0)),
+                    )
+                    turn_outcome = canonical_outcome_from_message(response, scope=compatibility_scope)
+                provider_replay_state = turn_outcome.replay_state
 
 # 轻量预解析：先看 raw_content / tool_calls / xml_tool_calls，重活留给 finalize
                 response_preview = self._get_response_processor().preview(response)
@@ -2452,99 +2472,8 @@ class SelfEvolvingAgent:
                 _debug_logger.debug(f"content 长度={len(raw_content)}", tag="RAW")
                 tool_call_count = response_preview.tool_call_count
                 has_tool_calls = response_preview.has_tool_calls
-                # 检测 XML 格式工具调用（模型有时输出 <invoke> 标签而非标准 tool_calls）
-                if response_preview.xml_tool_calls:
-                    _debug_logger.info(
-                        f"[XML工具调用] 检测到 {len(response_preview.xml_tool_calls)} 个 XML 工具调用",
-                        tag="LLM"
-                    )
-                    round_state.add_xml_tool_calls(len(response_preview.xml_tool_calls))
-                    xml_tool_names = [
-                        str(xtc.get("name") or "").strip()
-                        for xtc in response_preview.xml_tool_calls
-                        if str(xtc.get("name") or "").strip()
-                    ]
-                    lifecycle_action: Optional[str] = None
-                    for xtc in response_preview.xml_tool_calls:
-                        tool_name = str(xtc.get("name") or "").strip()
-                        if tool_name:
-                            turn_tool_names.append(tool_name)
-                        ui.update_status(
-                            "ACTING",
-                            **round_state.current_status(),
-                        )
-                        self._raise_if_turn_stop_requested()
-                        if not self._is_tool_visible_to_current_agent(tool_name):
-                            result = self._hidden_tool_call_message(tool_name)
-                            _debug_logger.warning(
-                                f"[工具可见性] XML 工具调用被拦截: {tool_name}",
-                                tag="TOOL",
-                            )
-                            _record_agent_scene_event(
-                                "tool_visibility",
-                                "agent.hidden_xml_tool_call.blocked",
-                                message="XML fallback tool call was blocked before ToolExecutor because it is not visible to the current Agent.",
-                                fields={
-                                    "agentId": str((getattr(self, "runtime_agent_binding", {}) or {}).get("agentId") or "").strip(),
-                                    "toolName": tool_name,
-                                    "visibleToolCount": len(getattr(self, "key_tool_maps", set()) or []),
-                                },
-                            )
-                            self._remember_tool_output(xtc, result, None)
-                            self.tool_lifecycle.handle_tool_result(xtc, result, None, messages)
-                            continue
-                        result, lifecycle_action = self.tool_lifecycle.execute_tool(xtc, messages)
-                        self.tool_lifecycle.handle_tool_result(xtc, result, lifecycle_action, messages)
-                        if lifecycle_action in ("restart", "hibernated", "turn_complete"):
-                            break
-                    messages.append(AIMessage(content=raw_content))
-                    if lifecycle_action in ("restart", "hibernated", "turn_complete"):
-                        lifecycle_decision = self._get_turn_outcome_controller().handle_lifecycle_action(lifecycle_action)
-                        if lifecycle_decision.pending_action:
-                            self._pending_lifecycle_action = lifecycle_decision.pending_action
-                        if lifecycle_decision.info_log:
-                            ui.add_log(lifecycle_decision.info_log, "INFO")
-                        if not lifecycle_decision.continue_main_loop:
-                            return False
-                        if lifecycle_decision.break_round:
-                            break
-                    # 补齐 round_state 的工具使用统计与 token usage telemetry，
-                    # 防止 XML fast-path 让 convergence/命中率统计成为盲区。
-                    round_state.note_response_tools(
-                        len(response_preview.xml_tool_calls),
-                        visible_text=raw_content,
-                        tool_names=xml_tool_names,
-                    )
-                    token_usage = self._get_response_surface_controller().record_token_usage(
-                        response=response,
-                        round_state=round_state,
-                        current_turn=current_turn,
-                        messages=messages,
-                        raw_content=raw_content,
-                        estimate_output_tokens=estimate_tokens_precise,
-                    )
-                    self._record_turn_cache_diagnostics(
-                        token_usage=token_usage,
-                        response=response,
-                        messages=messages,
-                        current_turn=current_turn,
-                    )
-                    xml_stop_reason = self._get_turn_outcome_controller().should_stop_for_convergence(
-                        iteration=iteration,
-                        no_new_evidence_steps=round_state.no_new_evidence_steps,
-                        consecutive_tool_only_steps=round_state.consecutive_tool_only_steps,
-                        consecutive_bookkeeping_tool_only_steps=round_state.consecutive_bookkeeping_tool_only_steps,
-                        delegation_failures=round_state.delegation_failures,
-                        total_tool_calls=round_state.total_tool_calls,
-                        substantive_tool_calls=round_state.substantive_tool_calls,
-                    )
-                    if xml_stop_reason:
-                        ui.add_log(xml_stop_reason, "WARN")
-                        break
-                    continue
-
                 try:
-                    iteration_decision = TurnOutcomeController.decide_llm_iteration(response)
+                    iteration_decision = TurnOutcomeController.decide_llm_iteration(turn_outcome)
                 except ValueError as exc:
                     consecutive_failures = round_state.note_llm_failure()
                     self._last_turn_failed = True
@@ -2713,12 +2642,39 @@ class SelfEvolvingAgent:
                     break
                 round_state.add_tool_calls(len(tool_calls))
                 self._raise_if_turn_stop_requested()
-                lifecycle_action = self.tool_lifecycle.execute_tools(tool_calls, messages)
+                executable_tool_calls = []
+                for tool_call in tool_calls:
+                    tool_name = str(tool_call.get("name") or "").strip()
+                    if self._is_tool_visible_to_current_agent(tool_name):
+                        executable_tool_calls.append(tool_call)
+                        continue
+                    result = self._hidden_tool_call_message(tool_name)
+                    _record_agent_scene_event(
+                        "tool_visibility",
+                        "agent.hidden_tool_call.blocked",
+                        message="Canonical tool call was blocked before ToolExecutor.",
+                        fields={
+                            "agentId": str((getattr(self, "runtime_agent_binding", {}) or {}).get("agentId") or "").strip(),
+                            "toolName": tool_name,
+                            "visibleToolCount": len(getattr(self, "key_tool_maps", set()) or []),
+                        },
+                    )
+                    self._remember_tool_output(tool_call, result, None)
+                    self.tool_lifecycle.handle_tool_result(tool_call, result, None, messages)
+                lifecycle_action = (
+                    self.tool_lifecycle.execute_tools(executable_tool_calls, messages)
+                    if executable_tool_calls
+                    else None
+                )
                 self._raise_if_turn_stop_requested()
                 if lifecycle_action == "turn_complete":
                     round_state.note_lifecycle_completion()
                     get_session_state().note_scope_completion("当前事务已完成，停止当前轮继续扩散。")
-                lifecycle_decision = self._get_turn_outcome_controller().handle_lifecycle_action(lifecycle_action)
+                lifecycle_decision = (
+                    self._get_turn_outcome_controller().handle_lifecycle_action(lifecycle_action)
+                    if lifecycle_action
+                    else LifecycleDecision()
+                )
                 if lifecycle_decision.pending_action:
                     self._pending_lifecycle_action = lifecycle_decision.pending_action
                 if lifecycle_decision.info_log:
@@ -2976,7 +2932,7 @@ class SelfEvolvingAgent:
             },
         )
 
-    def _invoke_llm(self, messages: list) -> Optional[Any]:
+    def _invoke_llm(self, messages: list, *, replay_state: Any = None) -> Optional[Any]:
         """调用 LLM（带错误分类、自动重试）"""
         ui = get_ui()
         self._last_llm_error_category = None
@@ -3061,117 +3017,33 @@ class SelfEvolvingAgent:
                         self._should_stream_llm_for_turn(llm_for_turn)
                         and hasattr(llm_for_turn, "stream")
                     ):
-                        full_chunk = None
-                        streamed_text = ""
-                        streamed_reasoning = ""
-                        reasoning_seen_by_source: Dict[str, str] = {}
-                        think_tag_parser = ThinkTagStreamParser()
+                        def on_protocol_event(event: Any) -> None:
+                            self._raise_if_turn_stop_requested()
+                            if event.kind == "reasoning_delta" and event.text:
+                                ui.stream_thought(event.text, done=False)
+                            elif event.kind in {"commentary_delta", "answer_delta"} and event.text:
+                                stream_response = getattr(ui, "stream_response", None)
+                                if callable(stream_response):
+                                    stream_response(event.text, done=False)
 
-                        def normalize_reasoning_delta(source: str, text: str) -> str:
-                            source_key = str(source or "reasoning").strip() or "reasoning"
-                            current = str(text or "")
-                            if not current:
-                                return ""
-                            previous = reasoning_seen_by_source.get(source_key, "")
-                            if not previous:
-                                reasoning_seen_by_source[source_key] = current
-                                return current
-                            if current == previous:
-                                return ""
-                            if current.startswith(previous):
-                                reasoning_seen_by_source[source_key] = current
-                                return current[len(previous):]
-                            reasoning_seen_by_source[source_key] = previous + current
-                            return current
-
-                        for chunk in stream_llm(
+                        outcome = run_streaming_llm_outcome(
                             llm_for_turn,
                             clean_messages,
                             context=invocation_context,
-                        ):
-                            self._raise_if_turn_stop_requested()
-                            full_chunk = ResponseProcessor.merge_stream_chunk(full_chunk, chunk)
-                            chunk_kwargs = getattr(chunk, "additional_kwargs", None) or {}
-                            chunk_reasoning = ""
-                            reasoning = extract_reasoning_text(
-                                {"additional_kwargs": chunk_kwargs},
-                                ResponseProcessor.coerce_content_text,
-                                include_content_tags=False,
-                            )
-                            if reasoning.text:
-                                chunk_reasoning = normalize_reasoning_delta(reasoning.source, reasoning.text)
-                            chunk_text = getattr(chunk, "content", "") or ""
-                            content_split = think_tag_parser.feed(
-                                chunk_text,
-                                ResponseProcessor.coerce_content_text,
-                            )
-                            if content_split.reasoning_text:
-                                chunk_reasoning += content_split.reasoning_text
-                            chunk_text = content_split.visible_text
-                            if chunk_reasoning:
-                                streamed_reasoning += chunk_reasoning
-                                ui.stream_thought(chunk_reasoning, done=False)
-                            if chunk_text:
-                                chunk_visible_text = str(chunk_text)
-                                streamed_text += chunk_visible_text
-                                stream_response = getattr(ui, "stream_response", None)
-                                if callable(stream_response):
-                                    stream_response(chunk_visible_text, done=False)
-                                elif not streamed_reasoning:
-                                    ui.stream_thought(streamed_text, done=False)
-                        flushed_think = think_tag_parser.flush()
-                        if flushed_think.reasoning_text:
-                            streamed_reasoning += flushed_think.reasoning_text
-                            ui.stream_thought(flushed_think.reasoning_text, done=False)
-                        if flushed_think.visible_text:
-                            flushed_visible_text = str(flushed_think.visible_text)
-                            streamed_text += flushed_visible_text
-                            stream_response = getattr(ui, "stream_response", None)
-                            if callable(stream_response):
-                                stream_response(flushed_visible_text, done=False)
-                            elif not streamed_reasoning:
-                                ui.stream_thought(streamed_text, done=False)
-                        if full_chunk is not None:
-                            final_content = ResponseProcessor.coerce_content_text(
-                                getattr(full_chunk, "content", "")
-                            )
-                            final_content = strip_think_tag_reasoning(
-                                final_content,
-                                ResponseProcessor.coerce_content_text,
-                            )
-                            if not final_content.strip() and streamed_text.strip():
-                                final_content = streamed_text
-                            final_kwargs = dict(getattr(full_chunk, "additional_kwargs", None) or {})
-                            final_reasoning = extract_reasoning_text(
-                                {"additional_kwargs": final_kwargs},
-                                ResponseProcessor.coerce_content_text,
-                                include_content_tags=False,
-                            )
-                            if final_reasoning.text.strip() and not streamed_reasoning.strip():
-                                streamed_reasoning = final_reasoning.text
-                            for key in (
-                                "reasoning_content_delta",
-                                "reasoning_delta",
-                                "reasoning",
-                                "thinking",
-                                "thought",
-                            ):
-                                final_kwargs.pop(key, None)
-                            if streamed_reasoning.strip():
-                                final_kwargs["reasoning_content"] = streamed_reasoning
-                            return AIMessageChunk(
-                                content=final_content,
-                                tool_calls=list(getattr(full_chunk, "tool_calls", []) or []),
-                                additional_kwargs=final_kwargs,
-                                response_metadata=getattr(full_chunk, "response_metadata", None) or {},
-                            )
+                            on_event=on_protocol_event,
+                            replay_state=replay_state,
+                        )
+                        outcome = canonicalize_legacy_xml_outcome(outcome)
+                        return outcome, llm_for_turn.project_outcome_message(outcome)
                     self._raise_if_turn_stop_requested()
-                    invoke_response = invoke_llm(
+                    outcome = invoke_llm_outcome(
                         llm_for_turn,
                         clean_messages,
                         context=invocation_context,
+                        replay_state=replay_state,
                     )
-                    return invoke_response
+                    outcome = canonicalize_legacy_xml_outcome(outcome)
+                    return outcome, llm_for_turn.project_outcome_message(outcome)
                 except TurnStopRequested:
                     raise
                 except KeyboardInterrupt:
