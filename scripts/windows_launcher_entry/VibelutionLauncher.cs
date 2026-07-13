@@ -369,14 +369,14 @@ internal static class VibelutionLauncher
             throw new FileNotFoundException("Desktop entry Python bridge was not found.", bridgePath);
         }
 
-        string pythonPath = ResolvePython(projectDir, true);
+        string pythonPath = ResolvePython(projectDir, useNoConsole: true);
         var arguments = new List<string>
         {
             Quote(bridgePath),
             "--action",
             action,
             "--python-exe",
-            Quote(ResolvePython(projectDir, false))
+            Quote(ResolvePython(projectDir, useNoConsole: false))
         };
         if (outputJson)
         {
@@ -420,10 +420,10 @@ internal static class VibelutionLauncher
         }
     }
 
-    private static string ResolvePython(string projectDir, bool consolePython)
+    private static string ResolvePython(string projectDir, bool useNoConsole)
     {
         string scriptsDir = Path.Combine(projectDir, ".venv", "Scripts");
-        string preferred = Path.Combine(scriptsDir, consolePython ? "python.exe" : "pythonw.exe");
+        string preferred = Path.Combine(scriptsDir, useNoConsole ? "pythonw.exe" : "python.exe");
         if (File.Exists(preferred))
         {
             return preferred;
