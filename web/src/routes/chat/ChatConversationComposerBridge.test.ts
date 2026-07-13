@@ -6,6 +6,7 @@ import {
   type ChatConversationComposerBridgeLabels,
 } from "./ChatConversationComposerBridge";
 import { dictionary } from "../../i18n/dictionary";
+import bridgeSource from "./ChatConversationComposerBridge.tsx?raw";
 
 const labels: ChatConversationComposerBridgeLabels = {
   editMessageModeNotice: "editing",
@@ -114,6 +115,10 @@ describe("ChatConversationComposerBridge", () => {
     expect(dictionary.en.messageInputPlaceholder).toBe("Describe the next step...");
     expect(dictionary.zh.messageInputPlaceholder).not.toContain("当前会话");
     expect(dictionary.en.messageInputPlaceholder).not.toContain("current session");
+  });
+
+  it("marks the primary Chat composer as the Codex variant", () => {
+    expect(bridgeSource).toContain('composerVariant="codex"');
   });
 });
 

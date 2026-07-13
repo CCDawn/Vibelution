@@ -60,6 +60,7 @@ export type SessionLlmReasoningEffortOption = {
 
 export type SessionLlmModelOption = {
   modelId: string;
+  modelRef: string;
   label: string;
   model: string;
   providerId: string;
@@ -72,13 +73,15 @@ export type SessionLlmModelOption = {
   reasoningEffortOptions: SessionLlmReasoningEffortOption[];
   defaultReasoningEffort: string;
   isDefault: boolean;
+  reasoningAdapter?: string;
+  reasoningEffortMap?: Record<string, string>;
 };
 
 export type SessionLlmOptions = {
   sessionId: string;
   currentModelId: string;
   currentReasoningEffort: string;
-  models: SessionLlmModelOption[];
+  model: SessionLlmModelOption | null;
 };
 
 export type SessionAgentPromptSnapshot = {

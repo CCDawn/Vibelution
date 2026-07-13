@@ -64,6 +64,7 @@ export type ChatConversationComposerBridgeState = {
 };
 
 type BridgeManagedConversationProps =
+  | "composerVariant"
   | "composerActionDisabled"
   | "composerActionMode"
   | "composerAttachmentInputDisabled"
@@ -157,6 +158,7 @@ export function ChatConversationComposerBridge({
   return (
     <LazyConversationView
       {...props}
+      composerVariant="codex"
       slashCommandSuggestions={slashCommandSuggestions}
       composerValue={composer.value}
       composerPlaceholder={composer.placeholder}
