@@ -87,6 +87,12 @@ def _response_incomplete_reason(response: Mapping[str, Any]) -> str:
     return str(details.get("reason") or "").strip()[:160]
 
 
+def _response_event_type(value: Any) -> str:
+    """Normalize provider event enums without depending on the SDK type."""
+
+    return str(getattr(value, "value", value) or "").strip()
+
+
 class ResponsesDecodedStream:
     """Single-consumer canonical stream with an outcome available after exhaustion."""
 
@@ -313,7 +319,7 @@ class _ResponsesTurnAssembler:
 
     def feed(self, raw_event: Any) -> list[LLMProtocolEvent]:
         event = _as_dict(raw_event)
-        event_type = str(event.get("type") or "").strip()
+        event_type = _response_event_type(event.get("type"))
         emitted: list[LLMProtocolEvent] = []
         if not event_type:
             return emitted

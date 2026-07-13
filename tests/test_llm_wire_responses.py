@@ -1,4 +1,5 @@
 import json
+from enum import Enum
 from types import SimpleNamespace
 
 import pytest
@@ -262,6 +263,38 @@ def test_responses_terminal_contained_output_is_yielded_to_stream_consumers():
     events = tuple(decoded)
     assert any(event.kind == "answer_delta" and event.text == "Recovered." for event in events)
     assert decoded.outcome.final_text == "Recovered."
+
+
+def test_responses_accepts_string_enum_event_types_from_litellm():
+    class ResponsesApiStreamEvents(str, Enum):
+        RESPONSE_OUTPUT_ITEM_DONE = "response.output_item.done"
+        RESPONSE_COMPLETED = "response.completed"
+
+    decoded = ResponsesWireAdapter().decode_stream(
+        [
+            {
+                "type": ResponsesApiStreamEvents.RESPONSE_OUTPUT_ITEM_DONE,
+                "item": {
+                    "type": "message",
+                    "id": "answer-1",
+                    "role": "assistant",
+                    "phase": "final_answer",
+                    "content": [{"type": "output_text", "text": "Recovered from enum events."}],
+                },
+            },
+            {
+                "type": ResponsesApiStreamEvents.RESPONSE_COMPLETED,
+                "response": {"id": "resp-final", "status": "completed", "output": None},
+            },
+        ],
+        route=route(),
+        scope=scope(),
+    )
+
+    tuple(decoded)
+
+    assert decoded.outcome.kind == "final_answer"
+    assert decoded.outcome.final_text == "Recovered from enum events."
 
 
 @pytest.mark.parametrize(
