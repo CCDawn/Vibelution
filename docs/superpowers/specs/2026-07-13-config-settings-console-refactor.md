@@ -1,9 +1,9 @@
 # 桌面设置控制台整体重构设计
 
-**Status:** approved-direction / pending-spec-review  
-**Date:** 2026-07-13  
-**Owner:** web-workbench-surface  
-**Target:** `/config` 全部设置分区  
+**Status:** approved-direction / pending-spec-review
+**Date:** 2026-07-13
+**Owner:** web-workbench-surface
+**Target:** `/config` 全部设置分区
 **Version impact:** patch
 
 ## 1. 设计结论
@@ -117,7 +117,9 @@
 - 用户与形象：用户资料、终端形象、陪伴体；
 - 模型库：模型连接；其内部保留快速配置、管理已有连接、高级设置三种模式；
 - 运行时与上下文：运行时、上下文压缩；
-- 工具与诊断：工具权限、终端与 Shell、诊断、原始配置。
+- 工具与诊断：工具与权限、日志与调试、Git 提交、健康诊断、原始配置。
+
+一个本地子页面可以组合少量强相关的底层配置分区，例如“Git 提交”同时承载 `git-commit-model` 和 `git-commit-prompt`。这两个既有配置当前没有归属到任何一级分区，本轮必须恢复其可达入口；组合页面仍遵守“一次只显示一个设置子页面”。
 
 切换子页面不得丢失当前结构化草稿。存在未保存修改时切换分区不弹阻断对话框；全局页头持续显示“未保存”。
 
@@ -219,7 +221,7 @@
 - `ConfigRoute` 继续拥有配置查询、结构化草稿、原始编辑文本、检查、保存和 Provider workspace 刷新；
 - 本轮可以从 `ConfigRoute` 提取纯展示或局部导航组件，但不得创建新的配置事实源；
 - `ConfigProviderRegistryPanel` 继续拥有 Provider 局部选择、模型搜索筛选和标签页展示；
-- `ConfigQuickProviderSetupPanel` 继续通过 props 接收检测、保存和状态，不直接新增 API 调用；
+- `ConfigQuickSetupPanel` 继续通过 props 接收检测、保存和状态，不直接新增 API 调用；
 - `configProviderLogic.ts`、API DTO 和后端配置接口默认不变；若实现中发现必须修改，停止并重新评审范围；
 - 样式继续 Tailwind-first，并通过 VUI 组合；route 文件不得新增页面级 HeroUI 直引。
 
