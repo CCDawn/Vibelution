@@ -866,8 +866,10 @@ describe("config route copy", () => {
 
     expect(CONFIG_COPY.zh.subtitle).toContain("启动设置在 Launcher 面板维护");
     expect(CONFIG_COPY.en.subtitle).toContain("Startup settings are maintained in Launcher");
-    expect(CONFIG_COPY.zh.groupWorkbenchSummary).toContain("启动设置移到 Launcher");
-    expect(CONFIG_COPY.en.groupWorkbenchSummary).toContain("Startup settings moved to Launcher");
+    expect(CONFIG_COPY.zh.groupWorkbenchTitle).toBe("界面与工作台");
+    expect(CONFIG_COPY.en.groupWorkbenchTitle).toBe("Workbench & Interface");
+    expect(CONFIG_COPY.zh.groupWorkbenchSummary).toContain("启动相关设置仍由 Launcher 维护");
+    expect(CONFIG_COPY.en.groupWorkbenchSummary).toContain("Startup settings remain in Launcher");
     expect(zhCopy).not.toContain("唯一配置网页入口");
     expect(enCopy).not.toContain("single config web entry");
     expect(CONFIG_COPY.zh.groupWorkbenchSummary).not.toContain("前后端端口");

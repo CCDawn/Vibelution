@@ -191,12 +191,17 @@ describe("progressive config section presentation", () => {
       ],
       advancedTitle: "知识资产路径",
     });
-    expect(configSectionPresentation("ui", "zh")?.commonPaths).toEqual([
-      "ui.language",
-      "ui.theme",
-      "ui.show_ascii_art",
-      "ui.show_welcome",
-    ]);
+    expect(configSectionPresentation("ui", "zh")).toMatchObject({
+      sectionTitle: "界面外观",
+      sectionSummary: "先调整配色和工作台背景；终端显示与刷新参数按需展开。",
+      layout: "compact_paths",
+      commonPaths: ["ui.theme", "ui.workbench_theme"],
+      commonFieldCount: 3,
+      commonTitle: "外观快速设置",
+      advancedTitle: "终端显示与刷新（高级）",
+    });
+    expect(isCommonConfigSectionEntry("ui", "ui.language")).toBe(false);
+    expect(isCommonConfigSectionEntry("ui", "ui.workbench_theme")).toBe(true);
     expect(configSectionPresentation("security", "zh")?.commonPaths).toEqual([
       "security.enabled",
     ]);
@@ -227,7 +232,7 @@ describe("progressive config section presentation", () => {
       ],
     });
 
-    expect(configSectionTierCounts("ui", 7)).toEqual({ common: 4, advanced: 3 });
+    expect(configSectionTierCounts("ui", 7)).toEqual({ common: 3, advanced: 4 });
     expect(configSectionTierCounts("security", 5)).toEqual({ common: 1, advanced: 4 });
     expect(configSectionTierCounts("network", 7)).toEqual({ common: 3, advanced: 4 });
     expect(configSectionTierCounts("log", 16)).toEqual({ common: 4, advanced: 12 });
