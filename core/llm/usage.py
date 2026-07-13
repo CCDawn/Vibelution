@@ -231,3 +231,25 @@ def usage_stats_from_payload(usage: Any, *, latency_ms: int = 0) -> UsageStats:
         estimated_cost=0.0,
         latency_ms=max(0, int(latency_ms or 0)),
     )
+
+
+def usage_diagnostic_summary_from_payload(usage: Any) -> Dict[str, Any]:
+    """Normalize provider usage into the bounded canonical event contract."""
+    stats = usage_stats_from_payload(usage)
+    input_tokens = max(0, int(stats.input_tokens or 0))
+    cached_input_tokens = max(0, int(stats.cached_input_tokens or 0))
+    cache_creation_input_tokens = max(0, int(stats.cache_creation_input_tokens or 0))
+    if input_tokens:
+        cached_input_tokens = min(cached_input_tokens, input_tokens)
+        cache_creation_input_tokens = min(cache_creation_input_tokens, input_tokens)
+    return {
+        "inputTokens": input_tokens,
+        "outputTokens": max(0, int(stats.output_tokens or 0)),
+        "reasoningOutputTokens": max(0, int(stats.reasoning_output_tokens or 0)),
+        "totalTokens": max(0, int(stats.total_tokens or 0)),
+        "cachedInputTokens": cached_input_tokens,
+        "cacheReadInputTokens": cached_input_tokens,
+        "cacheCreationInputTokens": cache_creation_input_tokens,
+        "uncachedInputTokens": max(0, input_tokens - cached_input_tokens),
+        "cacheHitRate": round(cached_input_tokens / input_tokens, 4) if input_tokens else 0.0,
+    }

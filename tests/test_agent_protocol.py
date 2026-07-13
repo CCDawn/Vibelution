@@ -73,6 +73,88 @@ def test_numbered_task_list_without_confirmation_keeps_user_goal():
     assert goal == prompt
 
 
+def _canonical_agent_test_outcome(*, text="", reasoning_deltas=()):
+    from core.llm.types import LLMProtocolEvent
+
+    identity = CanonicalItemIdentity(
+        session_id="session-test",
+        turn_id="turn-test",
+        invocation_id="invocation-test",
+        iteration=0,
+        item_id="answer-test",
+    )
+    events = []
+    for sequence, delta in enumerate(reasoning_deltas, start=1):
+        events.append(
+            LLMProtocolEvent(
+                kind="reasoning_delta",
+                sequence=sequence,
+                session_id=identity.session_id,
+                turn_id=identity.turn_id,
+                invocation_id=identity.invocation_id,
+                iteration=identity.iteration,
+                item_id="reasoning-test",
+                channel="reasoning",
+                phase="reasoning",
+                text=delta,
+            )
+        )
+    if text:
+        events.append(
+            LLMProtocolEvent(
+                kind="answer_delta",
+                sequence=len(events) + 1,
+                session_id=identity.session_id,
+                turn_id=identity.turn_id,
+                invocation_id=identity.invocation_id,
+                iteration=identity.iteration,
+                item_id=identity.item_id,
+                channel="answer",
+                phase="final_answer",
+                text=text,
+            )
+        )
+    return LLMTurnOutcome.final_answer(identity=identity, text=text, events=tuple(events))
+
+
+class _CanonicalAgentTestLLM:
+    def __init__(self, outcome=None, *, captured=None, response_metadata=None):
+        self.outcome = outcome or _canonical_agent_test_outcome()
+        self.captured = captured
+        self.response_metadata = dict(response_metadata or {})
+
+    def invoke_outcome(self, messages, **_kwargs):
+        if self.captured is not None:
+            self.captured["messages"] = messages
+        return self.outcome
+
+    def stream_events(self, messages, *, protocol_event_sink=None, **_kwargs):
+        if self.captured is not None:
+            self.captured["messages"] = messages
+        for event in self.outcome.events:
+            if protocol_event_sink is not None:
+                protocol_event_sink(event)
+        if False:
+            yield None
+        return self.outcome
+
+    def stream(self, *_args, **_kwargs):
+        if False:
+            yield None
+
+    def project_outcome_message(self, outcome):
+        reasoning = "".join(
+            event.text
+            for event in outcome.events
+            if event.kind == "reasoning_delta" and event.text
+        )
+        return AIMessage(
+            content=outcome.final_text,
+            additional_kwargs={"reasoning_content": reasoning} if reasoning else {},
+            response_metadata=dict(self.response_metadata),
+        )
+
+
 class TestToolMessageFlow:
     """工具消息协议测试"""
 
@@ -296,9 +378,21 @@ class TestToolMessageFlow:
                 return None
 
         class DummyLLM:
-            def invoke(self, msgs, **_kwargs):
+            def invoke_outcome(self, msgs, **_kwargs):
                 captured["messages"] = msgs
-                return SimpleNamespace(content="", tool_calls=[])
+                return LLMTurnOutcome.final_answer(
+                    identity=CanonicalItemIdentity(
+                        session_id="session-test",
+                        turn_id="turn-test",
+                        invocation_id="invocation-test",
+                        iteration=0,
+                        item_id="answer-test",
+                    ),
+                    text="",
+                )
+
+            def project_outcome_message(self, outcome):
+                return AIMessage(content=outcome.final_text)
 
         monkeypatch.setattr(agent_module, "get_ui", lambda: DummyUI())
 
@@ -334,11 +428,9 @@ class TestToolMessageFlow:
             def add_log(self, *_args, **_kwargs):
                 return None
 
-        class DummyLLM:
-            def invoke(self, msgs, **_kwargs):
-                captured["messages"] = msgs
-                return SimpleNamespace(content="", tool_calls=[])
-
+        class DummyLLM(_CanonicalAgentTestLLM):
+            def __init__(self):
+                super().__init__(captured=captured)
         monkeypatch.setattr(agent_module, "get_ui", lambda: DummyUI())
 
         agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
@@ -374,22 +466,29 @@ class TestToolMessageFlow:
             def add_log(self, *_args, **_kwargs):
                 return None
 
-        class DummyLLM:
-            def invoke(self, _msgs, **_kwargs):
+        class DummyLLM(_CanonicalAgentTestLLM):
+            def stream_events(self, messages, *, protocol_event_sink=None, **kwargs):
                 from core.llm import client as llm_client_module
 
-                captured["cancel_reason"] = llm_client_module._current_llm_cancel_reason()
-                return SimpleNamespace(content="", tool_calls=[])
-
+                checks["inside_llm"] = True
+                try:
+                    captured["cancel_reason"] = llm_client_module._current_llm_cancel_reason()
+                finally:
+                    checks["inside_llm"] = False
+                return (yield from super().stream_events(
+                    messages,
+                    protocol_event_sink=protocol_event_sink,
+                    **kwargs,
+                ))
         monkeypatch.setattr(agent_module, "get_ui", lambda: DummyUI())
 
         agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
         agent.llm_with_tools = DummyLLM()
-        checks = {"count": 0}
+        checks = {"count": 0, "inside_llm": False}
 
         def stop_checker():
             checks["count"] += 1
-            return "操作者请求停止当前轮。" if checks["count"] >= 3 else ""
+            return "操作者请求停止当前轮。" if checks["inside_llm"] else ""
 
         agent._turn_interrupt_checker = stop_checker
 
@@ -441,7 +540,7 @@ class TestToolMessageFlow:
             def add_log(self, *_args, **_kwargs):
                 return None
 
-        class PrimaryLLM:
+        class PrimaryLLM(_CanonicalAgentTestLLM):
             profile_id = "primary"
 
             def effective_route_identity(self):
@@ -450,7 +549,7 @@ class TestToolMessageFlow:
             def effective_route_id(self):
                 return "primary-route"
 
-            def invoke(self, _msgs, **kwargs):
+            def invoke_outcome(self, _msgs, **kwargs):
                 calls.append("primary")
                 invocation_ids.append(kwargs.get("metadata", {}).get("invocationId"))
                 raise LLMError(
@@ -464,7 +563,7 @@ class TestToolMessageFlow:
                     },
                 )
 
-        class FallbackLLM:
+        class FallbackLLM(_CanonicalAgentTestLLM):
             profile_id = "fallback_backup"
 
             def effective_route_identity(self):
@@ -473,10 +572,10 @@ class TestToolMessageFlow:
             def effective_route_id(self):
                 return "fallback-route"
 
-            def invoke(self, _msgs, **kwargs):
+            def invoke_outcome(self, _msgs, **kwargs):
                 calls.append("fallback_backup")
                 invocation_ids.append(kwargs.get("metadata", {}).get("invocationId"))
-                return AIMessage(content="fallback ok")
+                return _canonical_agent_test_outcome(text="fallback ok")
 
         def fake_recovery(*_args, current_profile_id=None, **_kwargs):
             recovery_inputs.append(current_profile_id)
@@ -520,7 +619,7 @@ class TestToolMessageFlow:
 
         result = agent._invoke_llm([AIMessage(content="hello")])
 
-        assert result.content == "fallback ok"
+        assert result[1].content == "fallback ok"
         assert calls == ["primary", "fallback_backup"]
         assert recovery_inputs == ["primary"]
         assert all(invocation_ids)
@@ -546,8 +645,11 @@ class TestToolMessageFlow:
             def add_log(self, *_args, **_kwargs):
                 return None
 
-        class RouteLLM:
+        class RouteLLM(_CanonicalAgentTestLLM):
             def __init__(self, profile_id, *, succeeds=False):
+                super().__init__(
+                    outcome=_canonical_agent_test_outcome(text="must not run"),
+                )
                 self.profile_id = profile_id
                 self.succeeds = succeeds
 
@@ -557,10 +659,10 @@ class TestToolMessageFlow:
             def effective_route_id(self):
                 return f"{self.profile_id}-alias"
 
-            def invoke(self, _msgs, **_kwargs):
+            def invoke_outcome(self, _msgs, **_kwargs):
                 calls.append(self.profile_id)
                 if self.succeeds:
-                    return AIMessage(content="must not run")
+                    return self.outcome
                 raise LLMError(
                     "server_error",
                     "primary exhausted",
@@ -638,8 +740,9 @@ class TestToolMessageFlow:
             def add_log(self, *_args, **_kwargs):
                 return None
 
-        class FailingRouteLLM:
+        class FailingRouteLLM(_CanonicalAgentTestLLM):
             def __init__(self, profile_id, identity):
+                super().__init__()
                 self.profile_id = profile_id
                 self.identity = identity
 
@@ -649,7 +752,7 @@ class TestToolMessageFlow:
             def effective_route_id(self):
                 return f"{self.profile_id}-route"
 
-            def invoke(self, _msgs, **kwargs):
+            def invoke_outcome(self, _msgs, **kwargs):
                 calls.append(self.profile_id)
                 invocation_ids.append(kwargs.get("metadata", {}).get("invocationId"))
                 raise LLMError(
@@ -737,7 +840,7 @@ class TestToolMessageFlow:
             def stream_response(self, text, done=False):
                 streamed.append((text, done))
 
-        class StreamFailingLLM:
+        class StreamFailingLLM(_CanonicalAgentTestLLM):
             profile_id = "primary"
 
             def effective_route_identity(self):
@@ -746,7 +849,7 @@ class TestToolMessageFlow:
             def effective_route_id(self):
                 return "primary-route"
 
-            def stream(self, _msgs, **_kwargs):
+            def stream_events(self, _msgs, **_kwargs):
                 calls.append("stream")
                 raise LLMError(
                     "server_error",
@@ -760,9 +863,9 @@ class TestToolMessageFlow:
                 )
                 yield
 
-            def invoke(self, _msgs, **_kwargs):
+            def invoke_outcome(self, _msgs, **_kwargs):
                 calls.append("invoke")
-                return AIMessage(content="nonstream ok")
+                return _canonical_agent_test_outcome(text="nonstream ok")
 
         monkeypatch.setattr(agent_module, "get_ui", lambda: DummyUI())
         monkeypatch.setattr(agent_module.logger, "log_error", lambda *_args, **_kwargs: None)
@@ -823,8 +926,8 @@ class TestToolMessageFlow:
             def add_log(self, *_args, **_kwargs):
                 return None
 
-        class ExhaustedLLM:
-            def invoke(self, _msgs, **_kwargs):
+        class ExhaustedLLM(_CanonicalAgentTestLLM):
+            def invoke_outcome(self, _msgs, **_kwargs):
                 calls["count"] += 1
                 raise LLMError(
                     "server_error",
@@ -900,13 +1003,9 @@ class TestToolMessageFlow:
                 return None
 
         class DummyLLM:
-            def __init__(self):
-                self.profile_id = "primary"
-
-            def invoke(self, _msgs, **_kwargs):
+            def invoke_outcome(self, _messages, **_kwargs):
                 calls.append("with_tools")
-                raise LLMError("capability_error", "profile `primary` 不支持 tool calling", retryable=False)
-
+                raise LLMError("tool calling is not supported")
         monkeypatch.setattr(agent_module, "get_ui", lambda: DummyUI())
         monkeypatch.setattr(agent_module, "logger", SimpleNamespace(log_error=lambda *_args, **_kwargs: None))
         monkeypatch.setattr(
@@ -1004,12 +1103,14 @@ class TestToolMessageFlow:
             def __add__(self, other):
                 return DummyChunk((self.content or "") + (other.content or ""))
 
-        class DummyLLM:
-            def stream(self, msgs, **_kwargs):
-                captured["messages"] = msgs
-                yield DummyChunk("<think>first")
-                yield DummyChunk(" second</think>")
-
+        class DummyLLM(_CanonicalAgentTestLLM):
+            def __init__(self):
+                super().__init__(
+                    outcome=_canonical_agent_test_outcome(
+                        reasoning_deltas=("first", " second"),
+                    ),
+                    captured=captured,
+                )
         monkeypatch.setattr(agent_module, "get_ui", lambda: DummyUI())
 
         agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
@@ -1024,7 +1125,7 @@ class TestToolMessageFlow:
 
         assert result is not None
         assert captured["thoughts"] == [("first", False), (" second", False)]
-        assert result.content == ""
+        assert result[1].content == ""
 
     def test_invoke_llm_stream_falls_back_to_accumulated_text_when_merged_chunk_is_empty(self, monkeypatch):
         captured = {"thoughts": []}
@@ -1061,12 +1162,13 @@ class TestToolMessageFlow:
                     response_metadata=self.response_metadata or other.response_metadata,
                 )
 
-        class DummyLLM:
-            def stream(self, msgs, **_kwargs):
-                captured["messages"] = msgs
-                yield DummyChunk("O")
-                yield DummyChunk("K", response_metadata={"finish_reason": "stop"})
-
+        class DummyLLM(_CanonicalAgentTestLLM):
+            def __init__(self):
+                super().__init__(
+                    outcome=_canonical_agent_test_outcome(text="OK"),
+                    captured=captured,
+                    response_metadata={"finish_reason": "stop"},
+                )
         monkeypatch.setattr(agent_module, "get_ui", lambda: DummyUI())
 
         agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
@@ -1080,8 +1182,8 @@ class TestToolMessageFlow:
         result = agent._invoke_llm([AIMessage(content="hello")])
 
         assert result is not None
-        assert result.content == "OK"
-        assert result.response_metadata == {"finish_reason": "stop"}
+        assert result[1].content == "OK"
+        assert result[1].response_metadata == {"finish_reason": "stop"}
 
     def test_invoke_llm_stream_aggregates_reasoning_content_for_followup_turns(self, monkeypatch):
         captured = {"thoughts": []}
@@ -1118,13 +1220,15 @@ class TestToolMessageFlow:
                     response_metadata=self.response_metadata or other.response_metadata,
                 )
 
-        class DummyLLM:
-            def stream(self, msgs, **_kwargs):
-                captured["messages"] = msgs
-                yield DummyChunk("", additional_kwargs={"reasoning_content_delta": "先看"})
-                yield DummyChunk("", additional_kwargs={"reasoning_content_delta": "日志"})
-                yield DummyChunk("结论", response_metadata={"finish_reason": "stop"})
-
+        class DummyLLM(_CanonicalAgentTestLLM):
+            def __init__(self):
+                super().__init__(
+                    outcome=_canonical_agent_test_outcome(
+                        text="结论",
+                        reasoning_deltas=("先看", "日志"),
+                    ),
+                    captured=captured,
+                )
         monkeypatch.setattr(agent_module, "get_ui", lambda: DummyUI())
 
         agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
@@ -1138,8 +1242,8 @@ class TestToolMessageFlow:
         result = agent._invoke_llm([AIMessage(content="hello")])
 
         assert result is not None
-        assert result.content == "结论"
-        assert result.additional_kwargs["reasoning_content"] == "先看日志"
+        assert result[1].content == "结论"
+        assert result[1].additional_kwargs["reasoning_content"] == "先看日志"
         assert captured["thoughts"] == [("先看", False), ("日志", False)]
 
     def test_invoke_llm_stream_normalizes_reasoning_aliases_and_cumulative_snapshots(self, monkeypatch):
@@ -1184,13 +1288,15 @@ class TestToolMessageFlow:
                     response_metadata=metadata,
                 )
 
-        class DummyLLM:
-            def stream(self, _msgs, **_kwargs):
-                yield DummyChunk("", additional_kwargs={"reasoning": "先看"})
-                yield DummyChunk("", additional_kwargs={"reasoning": "先看日志"})
-                yield DummyChunk("", additional_kwargs={"thinking": "再查 UI"})
-                yield DummyChunk("<think>隐藏</think>可见结论")
-
+        class DummyLLM(_CanonicalAgentTestLLM):
+            def __init__(self):
+                super().__init__(
+                    outcome=_canonical_agent_test_outcome(
+                        text="可见结论",
+                        reasoning_deltas=("先看", "日志", "再查 UI", "隐藏"),
+                    ),
+                    captured=captured,
+                )
         monkeypatch.setattr(agent_module, "get_ui", lambda: DummyUI())
 
         agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
@@ -1204,8 +1310,8 @@ class TestToolMessageFlow:
         result = agent._invoke_llm([AIMessage(content="hello")])
 
         assert result is not None
-        assert result.content == "可见结论"
-        assert result.additional_kwargs["reasoning_content"] == "先看日志再查 UI隐藏"
+        assert result[1].content == "可见结论"
+        assert result[1].additional_kwargs["reasoning_content"] == "先看日志再查 UI隐藏"
         assert captured["thoughts"] == [
             ("先看", False),
             ("日志", False),
@@ -1250,11 +1356,10 @@ class TestToolMessageFlow:
                     response_metadata=metadata,
                 )
 
-        class DummyLLM:
-            def stream(self, _msgs, **_kwargs):
-                yield DummyChunk("完成")
-                yield DummyChunk(
-                    "",
+        class DummyLLM(_CanonicalAgentTestLLM):
+            def __init__(self):
+                super().__init__(
+                    outcome=_canonical_agent_test_outcome(text="完成"),
                     response_metadata={
                         "usage_observation": {
                             "input_tokens": 80,
@@ -1265,7 +1370,6 @@ class TestToolMessageFlow:
                         }
                     },
                 )
-
         monkeypatch.setattr(agent_module, "get_ui", lambda: DummyUI())
 
         agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
@@ -1279,9 +1383,9 @@ class TestToolMessageFlow:
         result = agent._invoke_llm([AIMessage(content="hello")])
 
         assert result is not None
-        assert result.content == "完成"
-        assert result.response_metadata["usage_observation"]["input_tokens"] == 80
-        assert result.response_metadata["usage_observation"]["cached_input_tokens"] == 40
+        assert result[1].content == "完成"
+        assert result[1].response_metadata["usage_observation"]["input_tokens"] == 80
+        assert result[1].response_metadata["usage_observation"]["cached_input_tokens"] == 40
 
     def test_get_llm_for_current_mode_rebinds_restart_whitelist(self):
         bound_tools = []
@@ -1416,6 +1520,10 @@ class TestToolMessageFlow:
         agent._active_goal = None
         agent._last_runtime_state_memory = ""
         agent._last_runtime_state_memory_key = ""
+        agent.event_bus = SimpleNamespace(publish=lambda *args, **kwargs: None)
+        agent.mental_model = SimpleNamespace()
+        agent._last_visible_response_text = ""
+        agent._last_response_tool_calls = []
 
         response_xml = (
             '<invoke name="read_memory_tool"><parameter name="scope">core_wisdom</parameter></invoke>'
@@ -1479,6 +1587,17 @@ class TestToolMessageFlow:
                 return None
 
         round_state = DummyRoundState()
+        round_state.note_turn_outcome = lambda kind: None
+        round_state.note_progress = lambda: setattr(round_state, "turn_had_progress", True)
+        round_state.add_tool_calls = lambda count: setattr(
+            round_state,
+            "total_tool_calls",
+            round_state.total_tool_calls + count,
+        )
+        round_state.acting_status = lambda *args, **kwargs: {}
+        round_state.note_llm_failure = lambda: 1
+        round_state.note_lifecycle_completion = lambda: None
+        DummyOutcomeController.prepare_tool_state_feedback = lambda self, **kwargs: None
         outcome_controller = DummyOutcomeController()
 
         class DummyResponseProcessor:
@@ -1533,7 +1652,9 @@ class TestToolMessageFlow:
         logger = MagicMock()
         monkeypatch.setattr(agent_module, "logger", logger)
         monkeypatch.setattr(agent_module, "get_ui", lambda: DummyUI())
-        monkeypatch.setattr(agent_module, "get_session_state", lambda: DummySessionState())
+        session_state = DummySessionState()
+        session_state.note_scope_completion = lambda *args, **kwargs: None
+        monkeypatch.setattr(agent_module, "get_session_state", lambda: session_state)
         monkeypatch.setattr(
             agent_module,
             "_record_agent_scene_event",
@@ -1618,16 +1739,25 @@ class TestToolMessageFlow:
         monkeypatch.setattr(agent_module, "to_string", lambda value: str(value))
 
         agent._get_mode_policy = lambda: policy
+        agent.is_mental_model_enabled_for_turn = lambda: False
         agent._sync_runtime_state_memory = lambda: None
         agent._seed_runtime_agent_context_for_turn = lambda run_id: None
         agent._maybe_delegate = lambda goal, iteration, total_tool_calls, messages: None
         agent._raise_if_turn_stop_requested = lambda: None
         agent._create_round_state = lambda: round_state
         agent._apply_active_components_request = lambda processed: None
-        agent._get_response_processor = lambda: DummyResponseProcessor()
-        agent._get_response_surface_controller = lambda: DummyResponseSurface()
+        agent._get_response_processor = lambda: ResponseProcessor()
+        response_surface = DummyResponseSurface()
+        response_surface.build_state_block = lambda **kwargs: ""
+        response_surface.apply_state_feedback = lambda **kwargs: None
+        response_surface.emit_visible_response = lambda **kwargs: {
+            "last_visible_response_text": "",
+            "last_response_tool_calls": [],
+        }
+        agent._get_response_surface_controller = lambda: response_surface
         agent._get_turn_outcome_controller = lambda: outcome_controller
         agent._capture_chat_dataset_candidate_if_needed = lambda *args, **kwargs: None
+        agent._record_turn_cache_diagnostics = lambda **kwargs: None
         agent._refresh_retrospective_state_memory = lambda: None
         agent._is_tool_visible_to_current_agent = lambda tool_name: True
         agent._hidden_tool_call_message = lambda tool_name: f"blocked:{tool_name}"
@@ -1636,7 +1766,22 @@ class TestToolMessageFlow:
             execute_tool=tool_executor,
             handle_tool_result=ToolLifecycleBridge.handle_tool_result,
         )
-        agent._invoke_llm = lambda messages: SimpleNamespace(
+        def execute_tools(tool_calls, messages):
+            lifecycle_action = None
+            for tool_call in tool_calls:
+                result, lifecycle_action = agent.tool_lifecycle.execute_tool(tool_call, messages)
+                agent.tool_lifecycle.handle_tool_result(
+                    tool_call,
+                    result,
+                    lifecycle_action,
+                    messages,
+                )
+                if lifecycle_action in ("restart", "hibernated", "turn_complete"):
+                    break
+            return lifecycle_action
+
+        agent.tool_lifecycle.execute_tools = execute_tools
+        agent._invoke_llm = lambda messages, replay_state=None: AIMessage(
             content=response_xml,
             tool_calls=[],
         )
@@ -1651,8 +1796,8 @@ class TestToolMessageFlow:
             and "xml tool result" in message.content
             for message in agent._active_turn_messages
         )
-        assert any(
-            isinstance(message, AIMessage) and message.content == response_xml
+        assert not any(
+            isinstance(message, AIMessage) and "<invoke" in str(message.content)
             for message in agent._active_turn_messages
         )
 
@@ -1688,6 +1833,10 @@ class TestToolMessageFlow:
         agent._active_goal = None
         agent._last_runtime_state_memory = ""
         agent._last_runtime_state_memory_key = ""
+        agent.event_bus = SimpleNamespace(publish=lambda *args, **kwargs: None)
+        agent.mental_model = SimpleNamespace()
+        agent._last_visible_response_text = ""
+        agent._last_response_tool_calls = []
 
         response_xml = '<invoke name="hidden_tool"><parameter name="scope">x</parameter></invoke>'
         executed_tools: list[str] = []
@@ -1746,6 +1895,17 @@ class TestToolMessageFlow:
                 )
 
         round_state = DummyRoundState()
+        round_state.note_turn_outcome = lambda kind: None
+        round_state.note_progress = lambda: setattr(round_state, "turn_had_progress", True)
+        round_state.add_tool_calls = lambda count: setattr(
+            round_state,
+            "total_tool_calls",
+            round_state.total_tool_calls + count,
+        )
+        round_state.acting_status = lambda *args, **kwargs: {}
+        round_state.note_llm_failure = lambda: 1
+        round_state.note_lifecycle_completion = lambda: None
+        DummyOutcomeController.prepare_tool_state_feedback = lambda self, **kwargs: None
         outcome_controller = DummyOutcomeController()
 
         class DummyResponseProcessor:
@@ -1755,7 +1915,7 @@ class TestToolMessageFlow:
                     xml_tool_calls=[
                         {
                             "name": "hidden_tool",
-                            "id": "xml_hidden",
+                            "id": "xml_0",
                             "args": {"scope": "x"},
                         }
                     ],
@@ -1800,7 +1960,9 @@ class TestToolMessageFlow:
         logger = MagicMock()
         monkeypatch.setattr(agent_module, "logger", logger)
         monkeypatch.setattr(agent_module, "get_ui", lambda: DummyUI())
-        monkeypatch.setattr(agent_module, "get_session_state", lambda: DummySessionState())
+        session_state = DummySessionState()
+        session_state.note_scope_completion = lambda *args, **kwargs: None
+        monkeypatch.setattr(agent_module, "get_session_state", lambda: session_state)
         monkeypatch.setattr(agent_module, "_record_agent_scene_event", lambda *args, **kwargs: None)
         def build_runtime_goal_packet_stub(policy, goal, **_kwargs):
             return SimpleNamespace(
@@ -1849,16 +2011,25 @@ class TestToolMessageFlow:
         monkeypatch.setattr(agent_module, "to_string", lambda value: str(value))
 
         agent._get_mode_policy = lambda: policy
+        agent.is_mental_model_enabled_for_turn = lambda: False
         agent._sync_runtime_state_memory = lambda: None
         agent._seed_runtime_agent_context_for_turn = lambda run_id: None
         agent._maybe_delegate = lambda goal, iteration, total_tool_calls, messages: None
         agent._raise_if_turn_stop_requested = lambda: None
         agent._create_round_state = lambda: round_state
         agent._apply_active_components_request = lambda processed: None
-        agent._get_response_processor = lambda: DummyResponseProcessor()
-        agent._get_response_surface_controller = lambda: DummyResponseSurface()
+        agent._get_response_processor = lambda: ResponseProcessor()
+        response_surface = DummyResponseSurface()
+        response_surface.build_state_block = lambda **kwargs: ""
+        response_surface.apply_state_feedback = lambda **kwargs: None
+        response_surface.emit_visible_response = lambda **kwargs: {
+            "last_visible_response_text": "",
+            "last_response_tool_calls": [],
+        }
+        agent._get_response_surface_controller = lambda: response_surface
         agent._get_turn_outcome_controller = lambda: outcome_controller
         agent._capture_chat_dataset_candidate_if_needed = lambda *args, **kwargs: None
+        agent._record_turn_cache_diagnostics = lambda **kwargs: None
         agent._refresh_retrospective_state_memory = lambda: None
         agent._is_tool_visible_to_current_agent = lambda tool_name: False
         agent._hidden_tool_call_message = lambda tool_name: f"blocked:{tool_name}"
@@ -1867,7 +2038,22 @@ class TestToolMessageFlow:
             execute_tool=tool_executor,
             handle_tool_result=ToolLifecycleBridge.handle_tool_result,
         )
-        agent._invoke_llm = lambda messages: SimpleNamespace(
+        def execute_tools(tool_calls, messages):
+            lifecycle_action = None
+            for tool_call in tool_calls:
+                result, lifecycle_action = agent.tool_lifecycle.execute_tool(tool_call, messages)
+                agent.tool_lifecycle.handle_tool_result(
+                    tool_call,
+                    result,
+                    lifecycle_action,
+                    messages,
+                )
+                if lifecycle_action in ("restart", "hibernated", "turn_complete"):
+                    break
+            return lifecycle_action
+
+        agent.tool_lifecycle.execute_tools = execute_tools
+        agent._invoke_llm = lambda messages, replay_state=None: AIMessage(
             content=response_xml,
             tool_calls=[],
         )
@@ -1879,7 +2065,7 @@ class TestToolMessageFlow:
         assert outcome_controller.lifecycle_actions == []
         assert any(
             isinstance(message, ToolMessage)
-            and message.tool_call_id == "xml_hidden"
+            and message.tool_call_id == "xml_0"
             and "blocked:hidden_tool" in message.content
             for message in agent._active_turn_messages
         )
@@ -1916,6 +2102,10 @@ class TestToolMessageFlow:
         agent._active_goal = None
         agent._last_runtime_state_memory = ""
         agent._last_runtime_state_memory_key = ""
+        agent.event_bus = SimpleNamespace(publish=lambda *args, **kwargs: None)
+        agent.mental_model = SimpleNamespace()
+        agent._last_visible_response_text = ""
+        agent._last_response_tool_calls = []
 
         response_xml = (
             '<invoke name="close_evolution_transaction_tool"><parameter name="status">success</parameter></invoke>'
@@ -1978,6 +2168,17 @@ class TestToolMessageFlow:
                 return None
 
         round_state = DummyRoundState()
+        round_state.note_turn_outcome = lambda kind: None
+        round_state.note_progress = lambda: setattr(round_state, "turn_had_progress", True)
+        round_state.add_tool_calls = lambda count: setattr(
+            round_state,
+            "total_tool_calls",
+            round_state.total_tool_calls + count,
+        )
+        round_state.acting_status = lambda *args, **kwargs: {}
+        round_state.note_llm_failure = lambda: 1
+        round_state.note_lifecycle_completion = lambda: None
+        DummyOutcomeController.prepare_tool_state_feedback = lambda self, **kwargs: None
         outcome_controller = DummyOutcomeController()
 
         class DummyResponseProcessor:
@@ -1987,7 +2188,7 @@ class TestToolMessageFlow:
                     xml_tool_calls=[
                         {
                             "name": "close_evolution_transaction_tool",
-                            "id": "xml_1",
+                            "id": "xml_0",
                             "args": {"status": "success"},
                         }
                     ],
@@ -2028,7 +2229,9 @@ class TestToolMessageFlow:
         logger = MagicMock()
         monkeypatch.setattr(agent_module, "logger", logger)
         monkeypatch.setattr(agent_module, "get_ui", lambda: DummyUI())
-        monkeypatch.setattr(agent_module, "get_session_state", lambda: DummySessionState())
+        session_state = DummySessionState()
+        session_state.note_scope_completion = lambda *args, **kwargs: None
+        monkeypatch.setattr(agent_module, "get_session_state", lambda: session_state)
         monkeypatch.setattr(
             agent_module,
             "_record_agent_scene_event",
@@ -2113,16 +2316,25 @@ class TestToolMessageFlow:
         monkeypatch.setattr(agent_module, "to_string", lambda value: str(value))
 
         agent._get_mode_policy = lambda: policy
+        agent.is_mental_model_enabled_for_turn = lambda: False
         agent._sync_runtime_state_memory = lambda: None
         agent._seed_runtime_agent_context_for_turn = lambda run_id: None
         agent._maybe_delegate = lambda goal, iteration, total_tool_calls, messages: None
         agent._raise_if_turn_stop_requested = lambda: None
         agent._create_round_state = lambda: round_state
         agent._apply_active_components_request = lambda processed: None
-        agent._get_response_processor = lambda: DummyResponseProcessor()
-        agent._get_response_surface_controller = lambda: DummyResponseSurface()
+        agent._get_response_processor = lambda: ResponseProcessor()
+        response_surface = DummyResponseSurface()
+        response_surface.build_state_block = lambda **kwargs: ""
+        response_surface.apply_state_feedback = lambda **kwargs: None
+        response_surface.emit_visible_response = lambda **kwargs: {
+            "last_visible_response_text": "",
+            "last_response_tool_calls": [],
+        }
+        agent._get_response_surface_controller = lambda: response_surface
         agent._get_turn_outcome_controller = lambda: outcome_controller
         agent._capture_chat_dataset_candidate_if_needed = lambda *args, **kwargs: None
+        agent._record_turn_cache_diagnostics = lambda **kwargs: None
         agent._refresh_retrospective_state_memory = lambda: None
         agent._is_tool_visible_to_current_agent = lambda tool_name: True
         agent._hidden_tool_call_message = lambda tool_name: f"blocked:{tool_name}"
@@ -2134,7 +2346,22 @@ class TestToolMessageFlow:
             ),
             handle_tool_result=ToolLifecycleBridge.handle_tool_result,
         )
-        agent._invoke_llm = lambda messages: SimpleNamespace(
+        def execute_tools(tool_calls, messages):
+            lifecycle_action = None
+            for tool_call in tool_calls:
+                result, lifecycle_action = agent.tool_lifecycle.execute_tool(tool_call, messages)
+                agent.tool_lifecycle.handle_tool_result(
+                    tool_call,
+                    result,
+                    lifecycle_action,
+                    messages,
+                )
+                if lifecycle_action in ("restart", "hibernated", "turn_complete"):
+                    break
+            return lifecycle_action
+
+        agent.tool_lifecycle.execute_tools = execute_tools
+        agent._invoke_llm = lambda messages, replay_state=None: AIMessage(
             content=response_xml,
             tool_calls=[],
         )
@@ -2146,7 +2373,7 @@ class TestToolMessageFlow:
         assert agent._pending_lifecycle_action == "restart_after_txn"
         assert any(
             isinstance(message, ToolMessage)
-            and message.tool_call_id == "xml_1"
+            and message.tool_call_id == "xml_0"
             and '"status":"success"' in message.content
             for message in agent._active_turn_messages
         )
@@ -4788,7 +5015,7 @@ class TestLocalProviderBootstrap:
         agent._compress_messages = fake_compress
         agent._maybe_delegate = lambda **_kwargs: None
 
-        def fake_invoke(messages):
+        def fake_invoke(messages, replay_state=None):
             llm_message_counts.append(len(messages))
             return None
 
@@ -5294,6 +5521,7 @@ class TestResolvedApiKeyUsage:
         monkeypatch.delenv("DASHSCOPE_API_KEY", raising=False)
         monkeypatch.delenv(model_key_env, raising=False)
         monkeypatch.delenv(provider_key_env, raising=False)
+        monkeypatch.setattr("config.models._read_env_var", lambda _name: None)
         scene_events = []
         monkeypatch.setattr(
             agent_module,
@@ -6001,7 +6229,7 @@ class TestRuntimeStateMemoryFlow:
             additional_kwargs={"turn_outcome": outcome},
         )
 
-        decision = TurnOutcomeController.decide_llm_iteration(response)
+        decision = TurnOutcomeController.decide_llm_iteration(outcome)
 
         assert decision.should_finish is False
         assert decision.should_execute_tools is True
@@ -6036,7 +6264,7 @@ class TestRuntimeStateMemoryFlow:
             additional_kwargs={"turn_outcome": outcome},
         )
 
-        decision = TurnOutcomeController.decide_llm_iteration(response)
+        decision = TurnOutcomeController.decide_llm_iteration(outcome)
 
         assert decision.should_finish is False
         assert decision.should_execute_tools is False
@@ -6053,7 +6281,7 @@ class TestRuntimeStateMemoryFlow:
         outcome = LLMTurnOutcome.final_answer(identity=identity, text="最终回答")
         response = AIMessage(content="", additional_kwargs={"turn_outcome": outcome})
 
-        decision = TurnOutcomeController.decide_llm_iteration(response)
+        decision = TurnOutcomeController.decide_llm_iteration(outcome)
 
         assert decision.should_finish is True
         assert decision.should_execute_tools is False
@@ -6083,7 +6311,7 @@ class TestRuntimeStateMemoryFlow:
         response = AIMessage(content="", additional_kwargs={"turn_outcome": outcome})
 
         with pytest.raises(ValueError, match="terminal evidence"):
-            TurnOutcomeController.decide_llm_iteration(response)
+            TurnOutcomeController.decide_llm_iteration(outcome)
 
     def test_round_success_uses_canonical_outcome_instead_of_visible_text(self):
         incomplete = RoundStateController(max_iterations=1)

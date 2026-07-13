@@ -6,11 +6,24 @@ LLM 模型模板引用结构测试
 from pathlib import Path
 
 from config import ConfigLoader
-from config.public_config import LLM_MODEL_PRESETS, build_effective_config, delete_llm_model, list_llm_model_options, load_public_config
+from config.public_config import (
+    LLM_MODEL_PRESETS,
+    apply_llm_model_preset,
+    build_effective_config,
+    delete_llm_model,
+    list_llm_model_options,
+    load_public_config,
+)
 from core.web.services.config_service import _decorate_model_options
 
 
 PROJECT_ROOT = Path(__file__).parent.parent
+
+
+def _load_schema_v1_public_config() -> dict:
+    fixture_path = PROJECT_ROOT / "tests" / "fixtures" / "config" / "llm_schema_v1_inline.toml"
+    public_config = load_public_config(fixture_path)
+    return apply_llm_model_preset(public_config, "relay_gpt_5_6_luna")
 
 
 def _openai_gpt_5_5_library_entry() -> dict:
@@ -66,7 +79,7 @@ def _anthropic_claude_opus_4_7_library_entry() -> dict:
 
 
 def test_build_effective_config_resolves_model_ref_and_overrides():
-    public_config = load_public_config()
+    public_config = _load_schema_v1_public_config()
     public_config["llm"].setdefault("model_library", {})["openai_gpt_5_5"] = _openai_gpt_5_5_library_entry()
     public_config["llm"]["profiles"]["primary"] = {
         "model_ref": "openai_gpt_5_5",
@@ -89,7 +102,7 @@ def test_build_effective_config_resolves_model_ref_and_overrides():
 
 
 def test_claude_opus_4_7_model_ref_template_omits_temperature():
-    public_config = load_public_config()
+    public_config = _load_schema_v1_public_config()
     public_config["llm"].setdefault("model_library", {})[
         "anthropic_claude_opus_4_7"
     ] = _anthropic_claude_opus_4_7_library_entry()
@@ -110,7 +123,7 @@ def test_claude_opus_4_7_model_ref_template_omits_temperature():
 
 
 def test_current_prompt_cache_modes_follow_model_library_config():
-    public_config = load_public_config()
+    public_config = _load_schema_v1_public_config()
     public_config["llm"]["profiles"]["primary"] = {
         "model_ref": "relay_gpt_5_6_luna",
         "overrides": {},
@@ -124,7 +137,7 @@ def test_current_prompt_cache_modes_follow_model_library_config():
 
 
 def test_openai_compatible_model_without_prompt_cache_defaults_to_automatic():
-    public_config = load_public_config()
+    public_config = _load_schema_v1_public_config()
     public_config["llm"].setdefault("model_library", {})["gpt_5_5_gpt_5_5"] = {
         "model": "gpt-5.5",
         "label": "gpt-5.5-share",
@@ -161,7 +174,7 @@ def test_openai_compatible_model_without_prompt_cache_defaults_to_automatic():
 
 
 def test_deepseek_model_without_prompt_cache_stays_disabled_by_default():
-    public_config = load_public_config()
+    public_config = _load_schema_v1_public_config()
     public_config["llm"].setdefault("model_library", {})["deepseek_prompt_cache_probe"] = {
         "model": "deepseek-v4-pro",
         "label": "DeepSeek V4 Pro",
@@ -190,7 +203,7 @@ def test_deepseek_model_without_prompt_cache_stays_disabled_by_default():
 
 
 def test_local_qwen_without_prompt_cache_support_stays_disabled_by_default():
-    public_config = load_public_config()
+    public_config = _load_schema_v1_public_config()
     public_config["llm"].setdefault("model_library", {})["local_qwen_no_cache_probe"] = {
         "model": "Qwen3-32B-AWQ",
         "label": "Local Qwen without cache support",
@@ -221,7 +234,7 @@ def test_local_qwen_without_prompt_cache_support_stays_disabled_by_default():
 
 
 def test_local_qwen_with_prompt_cache_support_defaults_to_explicit_cache_control():
-    public_config = load_public_config()
+    public_config = _load_schema_v1_public_config()
     public_config["llm"].setdefault("model_library", {})["local_qwen_cache_probe"] = {
         "model": "Qwen3-32B-AWQ",
         "label": "Local Qwen with cache support",
@@ -273,7 +286,7 @@ def test_main_model_presets_declare_protocol_source_of_truth():
 
 
 def test_prompt_cache_override_can_change_referenced_model_mode():
-    public_config = load_public_config()
+    public_config = _load_schema_v1_public_config()
     public_config["llm"].setdefault("model_library", {})["cache_probe_model"] = _openai_gpt_5_5_library_entry()
     public_config["llm"]["model_library"]["cache_probe_model"]["prompt_cache"] = {"mode": "automatic"}
     public_config["llm"]["profiles"]["primary"] = {
@@ -289,7 +302,7 @@ def test_prompt_cache_override_can_change_referenced_model_mode():
 
 
 def test_list_llm_model_options_exposes_protocol_route_fields():
-    public_config = load_public_config()
+    public_config = _load_schema_v1_public_config()
     entry = _openai_gpt_5_5_library_entry()
     entry["provider"]["api"] = "openai-responses"
     entry["protocol"] = "relay_responses"
@@ -307,7 +320,7 @@ def test_list_llm_model_options_exposes_protocol_route_fields():
 
 
 def test_list_llm_model_options_exposes_provider_context_window():
-    public_config = load_public_config()
+    public_config = _load_schema_v1_public_config()
     entry = _openai_gpt_5_5_library_entry()
     entry["provider"]["context_window"] = 1_050_000
     public_config["llm"].setdefault("model_library", {})["window_probe_model"] = entry
@@ -325,7 +338,7 @@ def test_list_llm_model_options_exposes_provider_context_window():
 
 
 def test_decorated_model_options_expose_resolved_protocol_route():
-    public_config = load_public_config()
+    public_config = _load_schema_v1_public_config()
     entry = _openai_gpt_5_5_library_entry()
     entry["provider"]["kind"] = "llamacpp"
     entry["provider"]["api"] = "local-openai-compatible"
@@ -391,7 +404,7 @@ max_output_tokens = 32000
 
 
 def test_delete_llm_model_leaves_legacy_profiles_unchanged():
-    public_config = load_public_config()
+    public_config = _load_schema_v1_public_config()
     public_config["llm"].setdefault("model_library", {})["openai_gpt_5_5"] = _openai_gpt_5_5_library_entry()
     public_config["llm"]["profiles"]["primary"] = {
         "model_ref": "openai_gpt_5_5",

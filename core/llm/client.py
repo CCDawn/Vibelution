@@ -34,7 +34,7 @@ from .schema import sanitize_tool_schema
 from .streaming import ResponsesStreamNormalizer, extract_message_tool_calls, extract_text_content
 from .semantic_messages import SemanticGenerationSettings
 from .semantic_projector import SemanticProjectionError, SemanticProjectionInput, project_semantic_request
-from .types import LLMCapabilities, LLMError, StreamChunk, ToolCall, TurnOutcome, UsageStats
+from .types import LLMCapabilities, LLMError, LLMProtocolEvent, StreamChunk, ToolCall, TurnOutcome, UsageStats
 from .usage import read_usage_int as _read_provider_usage_int
 from .usage import usage_stats_from_payload, usage_to_dict
 from .wire.registry import build_default_wire_adapter_registry
@@ -1404,25 +1404,22 @@ class LLMClient:
         )
 
     @staticmethod
-    def _responses_replay_context(messages: List[Any]) -> tuple[Any, List[Any]]:
+    def _responses_replay_messages(messages: List[Any], replay_state: Any = None) -> List[Any]:
         source_messages = list(messages or [])
+        if not str(getattr(replay_state, "response_id", "") or "").strip():
+            return source_messages
         for index in range(len(source_messages) - 1, -1, -1):
             message = source_messages[index]
-            additional_kwargs = (
-                message.get("additional_kwargs", {})
-                if isinstance(message, dict)
-                else getattr(message, "additional_kwargs", {})
-            )
-            if not hasattr(additional_kwargs, "get"):
-                continue
-            outcome = additional_kwargs.get("turn_outcome")
-            replay_state = getattr(outcome, "replay_state", None)
-            if replay_state is None:
-                continue
-            if str(getattr(replay_state, "response_id", "") or "").strip():
-                return replay_state, source_messages[index:]
-            return replay_state, source_messages
-        return None, source_messages
+            role = str(
+                message.get("role") if isinstance(message, dict) else getattr(message, "type", "")
+            ).strip().lower()
+            role = {"ai": "assistant", "human": "user"}.get(role, role)
+            tool_calls = (
+                message.get("tool_calls") if isinstance(message, dict) else getattr(message, "tool_calls", None)
+            ) or []
+            if role == "assistant" and tool_calls:
+                return source_messages[index:]
+        return source_messages
 
     def _build_payload(
         self,
@@ -1432,6 +1429,7 @@ class LLMClient:
         stream: bool = False,
         metadata: Optional[Dict[str, Any]] = None,
         invocation_scope: Any = None,
+        replay_state: Any = None,
     ) -> Dict[str, Any]:
         wire_adapter = self._required_wire_adapter()
         selected_tools = list(self.bound_tools)
@@ -1452,9 +1450,8 @@ class LLMClient:
                 },
             )
         projection_messages = list(messages or [])
-        replay_state = None
         if self.protocol_route.wire_protocol == WireProtocol.RESPONSES:
-            replay_state, projection_messages = self._responses_replay_context(projection_messages)
+            projection_messages = self._responses_replay_messages(projection_messages, replay_state)
         if self.protocol_route.wire_protocol == WireProtocol.RESPONSES:
             provider_messages = projection_messages
         else:
@@ -1633,7 +1630,7 @@ class LLMClient:
 
     @staticmethod
     def _canonical_compatibility_text(outcome: TurnOutcome) -> str:
-        if outcome.kind == "final_answer":
+        if outcome.final_text:
             return outcome.final_text
         completed_by_item: Dict[str, Any] = {}
         for event in outcome.events:
@@ -1655,7 +1652,64 @@ class LLMClient:
             for call in outcome.tool_calls
         ]
 
-    def invoke(self, messages: List[Any], *, tools: Optional[List[Any]] = None, metadata: Optional[Dict[str, Any]] = None) -> AIMessage:
+    @staticmethod
+    def _canonical_compatibility_reasoning(outcome: TurnOutcome) -> str:
+        order: List[str] = []
+        text_by_item: Dict[str, str] = {}
+        for event in outcome.events:
+            if event.kind != "reasoning_delta" or not event.text:
+                continue
+            item_key = event.item_id or f"reasoning:{event.sequence}"
+            current = text_by_item.get(item_key, "")
+            incoming = event.text
+            if item_key not in text_by_item:
+                order.append(item_key)
+                text_by_item[item_key] = incoming
+            elif incoming == current or current.endswith(incoming):
+                continue
+            elif incoming.startswith(current):
+                text_by_item[item_key] = incoming
+            else:
+                text_by_item[item_key] = current + incoming
+        return "".join(text_by_item[item_key] for item_key in order)
+
+    def _record_canonical_outcome(self, outcome: TurnOutcome, *, phase: str) -> None:
+        replay_summary = (
+            outcome.replay_state.safe_summary()
+            if outcome.replay_state is not None and hasattr(outcome.replay_state, "safe_summary")
+            else {}
+        )
+        _record_llm_scene_event(
+            phase,
+            "llm.canonical_outcome.finalized",
+            message="Canonical LLM outcome finalized.",
+            outcome="succeeded" if outcome.kind not in {"failed", "cancelled"} else outcome.kind,
+            fields={
+                "profileId": self.profile_id,
+                "provider": self.provider.kind,
+                "model": self.profile.model,
+                "invocationId": outcome.identity.invocation_id,
+                "iteration": outcome.identity.iteration,
+                "outcomeKind": outcome.kind,
+                "terminalEventSeen": bool(outcome.terminal_event_seen),
+                "toolCallCount": len(outcome.tool_calls),
+                "pendingToolCallCount": len(outcome.pending_tool_call_ids),
+                "hasReplayState": outcome.replay_state is not None,
+                "replayItemCount": int(replay_summary.get("itemCount") or 0),
+                "replayByteSize": int(replay_summary.get("byteSize") or 0),
+                "replayHasResponseId": bool(replay_summary.get("hasResponseId")),
+            },
+            lifecycle=False,
+        )
+
+    def invoke_outcome(
+        self,
+        messages: List[Any],
+        *,
+        tools: Optional[List[Any]] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+        replay_state: Any = None,
+    ) -> TurnOutcome:
         from .invocation import invocation_scope_from_metadata
 
         start = time.time()
@@ -1666,6 +1720,7 @@ class LLMClient:
             stream=False,
             metadata=metadata,
             invocation_scope=invocation_scope,
+            replay_state=replay_state,
         )
         provider_conversation_items = _payload_conversation_items(payload) or messages
         message_role_summary = _safe_message_role_summary(provider_conversation_items)
@@ -1739,13 +1794,8 @@ class LLMClient:
         message = self._responses_message(response) if _payload_uses_responses(payload) else self._choice_message(response)
         tool_calls = extract_message_tool_calls(message)
         usage = self._usage_from_response(response, latency_ms)
-        additional_kwargs = {"tool_calls_raw": [call.provider_payload for call in tool_calls]}
         reasoning = extract_reasoning_text(message, extract_text_content)
         reasoning_content = reasoning.text
-        if reasoning_content.strip():
-            additional_kwargs["reasoning_content"] = reasoning_content
-        if turn_outcome is not None:
-            additional_kwargs["turn_outcome"] = turn_outcome
         cache_observation_fields = _usage_cache_observation_fields(usage)
         estimated_input_tokens = 0
         estimated_output_tokens = 0
@@ -1799,35 +1849,86 @@ class LLMClient:
             },
             lifecycle=False,
         )
+        if turn_outcome is None:
+            raise LLMError(
+                "protocol_error",
+                "wire adapter did not produce canonical TurnOutcome",
+                retryable=False,
+                provider=self.provider.kind,
+                model=self.profile.model,
+            )
+        self._record_canonical_outcome(turn_outcome, phase="invoke")
+        return turn_outcome
+
+    def project_outcome_message(
+        self,
+        outcome: TurnOutcome,
+        *,
+        metadata: Optional[Dict[str, Any]] = None,
+        include_outcome: bool = False,
+    ) -> AIMessage:
+        """Project canonical facts into a one-way LangChain compatibility message."""
+        additional_kwargs: Dict[str, Any] = {}
+        reasoning_content = self._canonical_compatibility_reasoning(outcome)
+        if reasoning_content:
+            additional_kwargs["reasoning_content"] = reasoning_content
+        if include_outcome:
+            additional_kwargs["turn_outcome"] = outcome
+        response_metadata = self._response_metadata(metadata)
+        response_metadata["capabilities"] = self.capabilities.__dict__
+        usage_event = next(
+            (event for event in reversed(outcome.events) if event.kind == "usage_updated"),
+            None,
+        )
+        if usage_event is not None:
+            usage_summary = dict(usage_event.diagnostic_summary)
+            input_tokens = int(usage_summary.get("inputTokens") or 0)
+            cached_input_tokens = int(usage_summary.get("cachedInputTokens") or 0)
+            usage_observation = {
+                "input_tokens": input_tokens,
+                "output_tokens": int(usage_summary.get("outputTokens") or 0),
+                "reasoning_output_tokens": int(usage_summary.get("reasoningOutputTokens") or 0),
+                "total_tokens": int(usage_summary.get("totalTokens") or 0),
+                "cached_input_tokens": cached_input_tokens,
+                "cache_read_input_tokens": int(usage_summary.get("cacheReadInputTokens") or 0),
+                "cache_creation_input_tokens": int(usage_summary.get("cacheCreationInputTokens") or 0),
+                "uncached_input_tokens": int(
+                    usage_summary.get("uncachedInputTokens")
+                    or max(0, input_tokens - cached_input_tokens)
+                ),
+                "cache_hit_rate": float(
+                    usage_summary.get("cacheHitRate")
+                    or (cached_input_tokens / input_tokens if input_tokens else 0.0)
+                ),
+            }
+            response_metadata["usage_observation"] = usage_observation
+            response_metadata["usage"] = {
+                "input_tokens": usage_observation["input_tokens"],
+                "output_tokens": usage_observation["output_tokens"],
+                "total_tokens": usage_observation["total_tokens"],
+            }
         return AIMessage(
-            content=(
-                self._canonical_compatibility_text(turn_outcome)
-                if turn_outcome is not None
-                else strip_think_tag_reasoning(message.get("content") or "", extract_text_content)
-            ),
-            tool_calls=(
-                self._canonical_compatibility_tool_calls(turn_outcome)
-                if turn_outcome is not None
-                else [
-                    {"id": call.id, "name": call.name, "args": call.arguments}
-                    for call in tool_calls
-                ]
-            ),
-            response_metadata={
-                "role": self.role,
-                "profile_id": self.profile_id,
-                "provider": self.provider.kind,
-                "model": self.profile.model,
-                "usage": usage.provider_raw_usage,
-                "usage_observation": _usage_observation_metadata(usage),
-                "latency_ms": latency_ms,
-                "capabilities": self.capabilities.__dict__,
-                "llm_protocol": protocol_summary,
-                "llm_capability_source": capability_source_summary,
-                "metadata": metadata or {},
-            },
+            content=self._canonical_compatibility_text(outcome),
+            tool_calls=self._canonical_compatibility_tool_calls(outcome),
+            response_metadata=response_metadata,
             additional_kwargs=additional_kwargs,
         )
+
+    def invoke(
+        self,
+        messages: List[Any],
+        *,
+        tools: Optional[List[Any]] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+        replay_state: Any = None,
+    ) -> AIMessage:
+        outcome = self.invoke_outcome(
+            messages,
+            tools=tools,
+            metadata=metadata,
+            replay_state=replay_state,
+        )
+        return self.project_outcome_message(outcome, metadata=metadata, include_outcome=True)
 
     def _response_metadata(self, metadata: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         return {
@@ -2020,12 +2121,14 @@ class LLMClient:
         tool_count: int,
         metadata: Optional[Dict[str, Any]] = None,
         invocation_scope: Any = None,
-    ) -> Tuple[Iterator[StreamChunk], Callable[[], bool]]:
+        protocol_event_sink: Optional[Callable[[LLMProtocolEvent], None]] = None,
+    ) -> Tuple[Iterator[StreamChunk], Callable[[], bool], Callable[[], Optional[TurnOutcome]]]:
         _raise_if_llm_cancelled()
         emitted = False
+        turn_outcome: TurnOutcome | None = None
 
         def events() -> Iterator[StreamChunk]:
-            nonlocal emitted
+            nonlocal emitted, turn_outcome
             iterator: Any = None
             normalized_iterator: Any = None
             with _llm_provider_proxy_env(self.config, payload.get("base_url")):
@@ -2061,6 +2164,8 @@ class LLMClient:
                         canonical_usage: UsageStats | None = None
                         for event in normalized_iterator:
                             _raise_if_llm_cancelled()
+                            if protocol_event_sink is not None:
+                                protocol_event_sink(event)
                             projected: StreamChunk | None = None
                             item_key = event.item_id or f"sequence:{event.sequence}"
                             if event.kind in {"interim_text_delta", "commentary_delta", "answer_delta"}:
@@ -2080,15 +2185,21 @@ class LLMClient:
                                 )
                             elif event.kind == "usage_updated":
                                 usage_summary = dict(event.diagnostic_summary)
-                                canonical_usage = UsageStats(
-                                    input_tokens=int(usage_summary.get("inputTokens") or 0),
-                                    output_tokens=int(usage_summary.get("outputTokens") or 0),
-                                    total_tokens=int(usage_summary.get("totalTokens") or 0),
-                                    provider_raw_usage={
+                                canonical_usage = usage_stats_from_payload(
+                                    {
                                         "input_tokens": int(usage_summary.get("inputTokens") or 0),
                                         "output_tokens": int(usage_summary.get("outputTokens") or 0),
+                                        "reasoning_output_tokens": int(
+                                            usage_summary.get("reasoningOutputTokens") or 0
+                                        ),
                                         "total_tokens": int(usage_summary.get("totalTokens") or 0),
-                                    },
+                                        "cached_input_tokens": int(
+                                            usage_summary.get("cachedInputTokens") or 0
+                                        ),
+                                        "cache_creation_input_tokens": int(
+                                            usage_summary.get("cacheCreationInputTokens") or 0
+                                        ),
+                                    }
                                 )
                             if projected is not None:
                                 emitted = True
@@ -2124,7 +2235,7 @@ class LLMClient:
                         close()
                     raise
 
-        return events(), lambda: emitted
+        return events(), lambda: emitted, lambda: turn_outcome
 
     def stream_events(
         self,
@@ -2132,6 +2243,8 @@ class LLMClient:
         *,
         tools: Optional[List[Any]] = None,
         metadata: Optional[Dict[str, Any]] = None,
+        replay_state: Any = None,
+        protocol_event_sink: Optional[Callable[[LLMProtocolEvent], None]] = None,
     ) -> Iterator[StreamChunk]:
         """Yield normalized stream events independent of LangChain chunks."""
         from .invocation import invocation_scope_from_metadata
@@ -2143,6 +2256,7 @@ class LLMClient:
             stream=True,
             metadata=metadata,
             invocation_scope=invocation_scope,
+            replay_state=replay_state,
         )
         message_count = len(messages or [])
         effective_tools = tools if tools is not None else self.bound_tools
@@ -2257,12 +2371,13 @@ class LLMClient:
                     tool_count=tool_count,
                 ):
                     _raise_if_llm_cancelled()
-                    events, emitted_fn = self._stream_attempt(
+                    events, emitted_fn, outcome_fn = self._stream_attempt(
                         payload,
                         message_count=message_count,
                         tool_count=tool_count,
                         metadata=metadata,
                         invocation_scope=invocation_scope,
+                        protocol_event_sink=protocol_event_sink,
                     )
                     for event in events:
                         _raise_if_llm_cancelled()
@@ -2371,7 +2486,17 @@ class LLMClient:
                     },
                     lifecycle=False,
                 )
-                return
+                canonical_outcome = outcome_fn()
+                if canonical_outcome is None:
+                    raise LLMError(
+                        "protocol_error",
+                        "wire stream adapter did not produce canonical TurnOutcome",
+                        retryable=False,
+                        provider=self.provider.kind,
+                        model=self.profile.model,
+                    )
+                self._record_canonical_outcome(canonical_outcome, phase="stream")
+                return canonical_outcome
             except LLMCancelledError as exc:
                 llm_error = _llm_cancelled_error(exc.reason)
                 _record_llm_scene_event(
