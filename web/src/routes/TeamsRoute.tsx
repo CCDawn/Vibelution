@@ -55,6 +55,7 @@ import {
   VActionGroup,
   VButton,
   VIconButton,
+  VLoadingValue,
   VNativeButton,
   VNativeInput,
   VNativeSelect,
@@ -12297,25 +12298,27 @@ export function TeamsRoute({
   const researchCanvasVisible = researchCanvasReadOnly;
   const teamListInitialLoading = teamsQuery.isPending && !teamsQuery.data;
   const teamListUnavailable = teamsQuery.isError && !teamsQuery.data;
-  const teamListLoading = teamListInitialLoading;
-  const showTeamUnavailableSurface = teamListInitialLoading || !hasTeams;
+  const showTeamInitialLoadingSurface = teamListInitialLoading;
+  const showTeamUnavailableSurface = !teamListInitialLoading && !hasTeams;
   const selectedTeamDetailUnavailable = Boolean(
     effectiveTeamId && selectedTeamReference && !teamDetailQuery.data && teamDetailQuery.isError
   );
-  const showTeamLoadingSurface = !showTeamUnavailableSurface && selectedTeamDetailLoading;
-  const showTeamDetailUnavailableSurface = !showTeamUnavailableSurface && selectedTeamDetailUnavailable;
+  const showTeamLoadingSurface =
+    !showTeamInitialLoadingSurface && !showTeamUnavailableSurface && selectedTeamDetailLoading;
+  const showTeamDetailUnavailableSurface =
+    !showTeamInitialLoadingSurface && !showTeamUnavailableSurface && selectedTeamDetailUnavailable;
+  const teamInitialLoadingTitle = lang === "zh" ? "正在读取团队" : "Loading teams";
+  const teamInitialLoadingMessage = lang === "zh"
+    ? "正在连接团队索引；画布和检查器会在数据返回后原位补齐。"
+    : "Connecting to the team index. The canvas and inspector will fill in place when data arrives.";
   const teamUnavailableTitle = teamListUnavailable
     ? (lang === "zh" ? "团队数据不可用" : "Team data unavailable")
-    : teamListLoading
-      ? (lang === "zh" ? "正在读取团队" : "Loading teams")
-      : (lang === "zh" ? "团队尚未初始化" : "Teams are not initialized");
+    : (lang === "zh" ? "团队尚未初始化" : "Teams are not initialized");
   const teamUnavailableMessage = teamListUnavailable
     ? (lang === "zh"
       ? "当前前端没有拿到团队列表。请刷新团队数据，或通过 Launcher 恢复后端 API。"
       : "The frontend cannot read the team list. Refresh teams or restore the backend API from Launcher.")
-    : teamListLoading
-      ? (lang === "zh" ? "正在连接团队索引，页面会在数据返回后切换到工作区。" : "Connecting to the team index. The workspace opens once data is available.")
-      : (lang === "zh" ? "暂时没有可展示团队。请确认 AI 搜索范围团队、知识库扩充团队和挑战杯ai科研团队已初始化。" : "No visible teams are available. Confirm the AI search, knowledge expansion, and research teams are initialized.");
+    : (lang === "zh" ? "暂时没有可展示团队。请确认 AI 搜索范围团队、知识库扩充团队和挑战杯ai科研团队已初始化。" : "No visible teams are available. Confirm the AI search, knowledge expansion, and research teams are initialized.");
   const teamUnavailableDetail = teamsQuery.error instanceof Error ? teamsQuery.error.message : "";
   const teamWorkspaceLoadingTitle = lang === "zh" ? "正在读取团队详情" : "Loading team details";
   const teamWorkspaceLoadingMessage = selectedTeamReference
@@ -12339,6 +12342,8 @@ export function TeamsRoute({
       ? (lang === "zh" ? "正在读取团队" : "Loading teams")
       : (lang === "zh" ? "暂无团队" : "No team"));
   const teamSummaryLoadingText = lang === "zh" ? "读取中" : "loading";
+  const teamSummaryUnavailableText = lang === "zh" ? "不可用" : "unavailable";
+  const teamListMetricLoadingLabel = lang === "zh" ? "正在读取团队指标" : "Loading team metrics";
   const teamSummaryStatusItems = [
     {
       label: lang === "zh" ? "团队" : "Teams",
@@ -12690,15 +12695,47 @@ export function TeamsRoute({
         aria-label={lang === "zh" ? "团队概况" : "Team summary"}
         items={teamSummaryStatusItems}
       />
-      {showTeamUnavailableSurface ? (
+      {showTeamInitialLoadingSurface ? (
+        <main className={styles.teamUnavailableSurface} aria-label={teamInitialLoadingTitle}>
+          <VStateSurface
+            className={styles.teamUnavailableCard}
+            title={teamInitialLoadingTitle}
+            tone="loading"
+            skeletonLines={3}
+            facts={[
+              {
+                key: "teams",
+                label: lang === "zh" ? "团队" : "Teams",
+                value: <VLoadingValue label={teamListMetricLoadingLabel} />,
+              },
+              {
+                key: "members",
+                label: lang === "zh" ? "成员" : "Members",
+                value: <VLoadingValue label={teamListMetricLoadingLabel} />,
+              },
+              { key: "source", label: lang === "zh" ? "来源" : "Source", value: "Agent Center" },
+            ]}
+          >
+            {teamInitialLoadingMessage}
+          </VStateSurface>
+        </main>
+      ) : showTeamUnavailableSurface ? (
         <main className={styles.teamUnavailableSurface} aria-label={teamUnavailableTitle}>
           <VStateSurface
             className={styles.teamUnavailableCard}
             title={teamUnavailableTitle}
-            tone="unavailable"
+            tone={teamListUnavailable ? "error" : "empty"}
             facts={[
-              { key: "teams", label: lang === "zh" ? "团队" : "Teams", value: visibleTeamSummary.activeTeamCount },
-              { key: "members", label: lang === "zh" ? "成员" : "Members", value: visibleTeamSummary.memberCount },
+              {
+                key: "teams",
+                label: lang === "zh" ? "团队" : "Teams",
+                value: teamListUnavailable ? teamSummaryUnavailableText : visibleTeamSummary.activeTeamCount,
+              },
+              {
+                key: "members",
+                label: lang === "zh" ? "成员" : "Members",
+                value: teamListUnavailable ? teamSummaryUnavailableText : visibleTeamSummary.memberCount,
+              },
               { key: "source", label: lang === "zh" ? "来源" : "Source", value: "Agent Center" },
             ]}
             actions={(
