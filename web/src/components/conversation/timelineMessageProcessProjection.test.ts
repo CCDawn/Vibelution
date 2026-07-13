@@ -138,6 +138,15 @@ describe("timeline message process projection", () => {
               title: "grep_search_tool",
               summary: "未找到匹配项",
             },
+            {
+              id: "message-tool-1-streaming-answer",
+              kind: "assistant_markdown",
+              messageId: "message-tool-1",
+              status: "running",
+              tone: "running",
+              provisional: true,
+              text: "最终回答应该显示。",
+            },
           ],
           toolCalls: [],
           terminalOperations: [],
@@ -179,6 +188,8 @@ describe("timeline message process projection", () => {
       "tool_call",
       "assistant_markdown",
     ]);
+    expect(projected[0].codexTranscript?.cells.find((cell) => cell.kind === "assistant_markdown")?.id)
+      .toBe("message-answer-markdown");
   });
 
   it("replaces running canonical snapshots with the completed snapshot for the same call", () => {

@@ -10,7 +10,7 @@ function cv(key: string, ...classNames: string[]) {
 const readableMessageText = "min-w-0 text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]";
 const readableMarkdownMeasure = "max-w-[min(100%,128ch)]";
 const assistantMessageMeasure = "w-[min(100%,1360px)] max-w-full";
-const transcriptTurnRail = "w-[min(100%,1480px)] justify-self-center";
+const transcriptTurnRail = "w-full max-w-[960px] justify-self-center";
 const assistantResponseSection = cv(
   "responseSection",
   "min-w-0 grid",
@@ -1230,7 +1230,7 @@ const styles: Record<string, string> = {
     "vui-components-conversationview userCard min-w-0 rounded-[var(--radius-panel)] border border-[color-mix(in_srgb,var(--accent-cool)_18%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-cool)_5%,var(--vui-surface-panel))] p-1.5 shadow-none",
   userMessageBody: userMessageBubble,
   userTurn:
-    `vui-components-conversationview userTurn grid min-w-0 ${transcriptTurnRail} grid-cols-[minmax(0,1fr)_34px] gap-x-2.5 [&_.turnAvatar]:col-start-2 [&_.turnAvatar]:row-start-1 [&_.turnContent]:col-start-1 [&_.turnContent]:row-start-1 [&_.turnContent]:w-fit [&_.turnContent]:max-w-[min(70%,720px)] [&_.turnContent]:justify-self-end [&_.turnMeta]:justify-self-end [&_.turnMeta]:justify-end [&_.turnMeta]:text-right [&_.turnMetaActions]:justify-end [&_.turnMetaIdentity]:justify-end [&_.turnSpeaker]:hidden`,
+    `vui-components-conversationview userTurn grid min-w-0 ${transcriptTurnRail} grid-cols-[minmax(0,1fr)_34px] gap-x-2.5 [&_.turnAvatar]:col-start-2 [&_.turnAvatar]:row-start-1 [&_.turnContent]:col-start-1 [&_.turnContent]:row-start-1 [&_.turnContent]:w-fit [&_.turnContent]:max-w-[min(70%,720px)] [&_.turnContent]:justify-self-end [&_.turnMeta]:justify-self-end [&_.turnMeta]:justify-end [&_.turnMeta]:text-right [&_.turnMetaActions]:justify-end [&_.turnMetaIdentity]:justify-end [&_.turnSpeaker]:hidden max-[719px]:[&_.turnContent]:max-w-[min(88%,36rem)]`,
 };
 
 export default styles;

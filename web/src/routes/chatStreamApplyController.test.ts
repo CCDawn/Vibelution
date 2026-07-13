@@ -155,7 +155,7 @@ describe("chatStreamApplyController", () => {
     expect(decision.shouldLogQueued).toBe(false);
   });
 
-  it("applies final session detail snapshots immediately and clears active layers by reason", () => {
+  it("applies final snapshots immediately without clearing an unsettled optimistic Agent row", () => {
     const queued = planQueuedSessionDetail({
       detail: detail({ currentPhase: "completed", status: "completed" }),
       trace: trace({ ledgerSeq: 8 }),
@@ -182,8 +182,8 @@ describe("chatStreamApplyController", () => {
     });
 
     expect(applied.stats).toEqual({ received: 1, applied: 1, dropped: 0 });
-    expect(applied.clearActiveLayer).toBe(true);
-    expect(applied.clearActiveLayerReason).toBe("final_phase");
+    expect(applied.clearActiveLayer).toBe(false);
+    expect(applied.clearActiveLayerReason).toBe("");
     expect(applied.shouldLogApplied).toBe(true);
     expect(applied.telemetry).toMatchObject({
       sessionId: "session-1",
