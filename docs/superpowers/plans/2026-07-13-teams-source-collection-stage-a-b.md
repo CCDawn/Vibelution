@@ -1,6 +1,6 @@
 # Teams Source Collection 阶段 A+B Implementation Plan
 
-- **Status:** ready-for-integration
+- **Status:** completed
 - **Owner:** codex-teams-source-collection-stage-a-b
 - **Approved spec:** [`2026-07-13-teams-source-collection-vertical-split-design.md`](../specs/2026-07-13-teams-source-collection-vertical-split-design.md)
 - **Planning claim:** `claim-229348c3d41b`
@@ -220,8 +220,8 @@ Challenge Cup generator 前后记录 `git status --short`；generated HTML 出�
 
 - **Logging:** behavior-preserving ownership refactor，不新增 runtime-scene logging；若观察到运行时行为变化，停止并重新分类。
 - **Version impact:** `none`；不修改 `VERSION`、`CHANGELOG.md`、`web/package.json`、`web/package-lock.json`。
-- **Launcher:** code integration 后 required before runtime verification；docs-only planning 不需要。
-- **Memory:** A+B 合入后同步 `web-workbench-surface` 的 durable ownership decision、commit 与验证结果；计划阶段只维护 claim，不写完成事实。
+- **Launcher:** local `main` 集成后在 active-work count 为 0 时通过标准路径重启；backend healthy、Session/Frontend current，standalone/overview 浏览器 smoke 通过。
+- **Memory:** 已同步 `web-workbench-surface` 的 durable ownership decision、local-main commit、验证结果与 Stage C/D deferred 边界。
 - **Deferred:** 阶段 C controllers 与阶段 D workspace/styles 必须在 A+B 合入后重新审阅，不能顺手进入本 worktree。
 
 ## 10. 实施与验证证据
@@ -235,3 +235,5 @@ Challenge Cup generator 前后记录 `git status --short`；generated HTML 出�
 - `npm --prefix web run build` passed；`node 挑战杯/build_research_flow_site.mjs` 生成 13 页且前后 worktree clean，无 generated diff。
 - `git diff --check` passed；selector 仅命中 `teams-knowledge`、`frontend-workbench` 与计划文档的 `docs-only` 规则。
 - behavior、URL、query key、AbortSignal、enabled、polling、mutation invalidation 和 backend contract 均未扩展；Stage C/D 继续 deferred。
+- local `main` fast-forward 至 `5bb8014c`，合入后 84 个 Teams 聚焦用例通过；Launcher 标准重启后 backend healthy、Session/Frontend current。
+- 浏览器 smoke：standalone 知识搜集工作台显示 32 条资料和四阶段状态，overview 科研控制台解析到当前阶段与 28 个候选；两页 console warning/error 为 0、页面级横向溢出为 0。
