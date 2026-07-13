@@ -1,9 +1,14 @@
 from types import SimpleNamespace
 
+import pytest
+
 from core.llm.protocols import WireProtocol
+from core.llm.provider_replay_state import OpaqueReplayItem, ProviderReplayState, endpoint_fingerprint
 from core.llm.semantic_messages import (
     ImagePart,
     InvocationScope,
+    ReasoningReplayPart,
+    ReasoningTextPart,
     SemanticGenerationSettings,
     SemanticMessage,
     SemanticModelRequest,
@@ -62,6 +67,8 @@ def test_chat_encoder_owns_openai_messages_and_tool_result_shape():
             SemanticMessage(role="user", parts=(TextPart("look"), ImagePart("memory://image", "image/png"))),
             SemanticMessage(role="assistant", parts=(ToolCallPart(call),)),
             SemanticMessage(role="tool", parts=(ToolResultPart(result),)),
+            SemanticMessage(role="assistant", parts=(TextPart("done"),)),
+            SemanticMessage(role="user", parts=(TextPart("continue"),)),
         ),
         tools=(
             SemanticToolDefinition(name="lookup", input_schema={"type": "object"}, description="Lookup"),
@@ -84,6 +91,48 @@ def test_chat_encoder_owns_openai_messages_and_tool_result_shape():
         "tool_call_id": "call-1",
         "content": '{"value":42}',
     }
+    assert payload["messages"][3:] == [
+        {"role": "assistant", "content": "done"},
+        {"role": "user", "content": "continue"},
+    ]
+    assert "input" not in payload
+
+
+def test_chat_reasoning_only_message_is_not_silently_dropped():
+    request = SemanticModelRequest(
+        scope=scope(),
+        messages=(SemanticMessage(role="assistant", parts=(ReasoningTextPart("reasoning only"),)),),
+        tools=(),
+        settings=SemanticGenerationSettings(max_output_tokens=32),
+    )
+
+    payload = ChatCompletionsWireAdapter().encode_request(request, route=route()).body
+
+    assert payload["messages"] == [
+        {"role": "assistant", "content": "", "reasoning_content": "reasoning only"}
+    ]
+
+
+def test_chat_rejects_opaque_responses_replay():
+    current_route = route()
+    replay_state = ProviderReplayState(
+        issuer="responses",
+        provider_id=current_route.provider_id,
+        endpoint_fingerprint=endpoint_fingerprint(current_route.runtime_endpoint),
+        model_id=current_route.model_id,
+        wire_protocol=WireProtocol.RESPONSES,
+        opaque_items=(OpaqueReplayItem(item_id="reasoning-1", payload=b'{"type":"reasoning"}'),),
+    )
+    request = SemanticModelRequest(
+        scope=scope(),
+        messages=(SemanticMessage(role="assistant", parts=(ReasoningReplayPart("reasoning-1"),)),),
+        tools=(),
+        settings=SemanticGenerationSettings(max_output_tokens=32),
+        replay_state=replay_state,
+    )
+
+    with pytest.raises(ValueError, match="does not accept provider replay state"):
+        ChatCompletionsWireAdapter().encode_request(request, route=current_route)
 
 
 def test_chat_non_stream_and_stream_have_same_final_outcome():

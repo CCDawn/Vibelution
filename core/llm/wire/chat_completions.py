@@ -8,7 +8,6 @@ from typing import Any
 
 from ..message_projector import message_to_openai_dict
 from ..protocols import WireProtocol
-from ..provider_replay_state import OpaqueReplayItem, endpoint_fingerprint
 from ..reasoning_extractor import (
     REASONING_DELTA_FIELD_CANDIDATES,
     ThinkTagStreamParser,
@@ -24,6 +23,7 @@ from ..semantic_messages import (
     TextPart,
     ToolCallPart,
     ToolResultPart,
+    validate_provider_ready_messages,
 )
 from ..streaming import ToolCallAccumulator, extract_text_content
 from ..usage import usage_diagnostic_summary_from_payload
@@ -100,13 +100,8 @@ class ChatCompletionsWireAdapter:
 
     def encode_request(self, request: SemanticModelRequest, *, route: Any) -> BuiltPayload:
         if request.replay_state is not None:
-            request.replay_state.require_compatible(
-                issuer=self.adapter_id,
-                provider_id=str(getattr(route, "provider_id", "") or ""),
-                endpoint_fingerprint=endpoint_fingerprint(str(getattr(route, "runtime_endpoint", "") or "")),
-                model_id=str(getattr(route, "model_id", "") or ""),
-                wire_protocol=WireProtocol.CHAT_COMPLETIONS,
-            )
+            raise ValueError("standard Chat Completions does not accept provider replay state")
+        validate_provider_ready_messages(request.messages)
         payload: dict[str, Any] = {
             "model": str(getattr(route, "effective_model", "") or ""),
             "messages": self._encode_messages(request),
@@ -180,20 +175,14 @@ class ChatCompletionsWireAdapter:
         ]
 
     def _encode_messages(self, request: SemanticModelRequest) -> list[dict[str, Any]]:
-        replay_by_id = {
-            item.item_id: item
-            for item in (request.replay_state.opaque_items if request.replay_state is not None else ())
-        }
         encoded: list[dict[str, Any]] = []
         for message in request.messages:
-            encoded.extend(self._encode_message(message, replay_by_id=replay_by_id))
+            encoded.extend(self._encode_message(message))
         return encoded
 
     def _encode_message(
         self,
         message: SemanticMessage,
-        *,
-        replay_by_id: Mapping[str, OpaqueReplayItem],
     ) -> list[dict[str, Any]]:
         text_parts: list[str] = []
         content_blocks: list[dict[str, Any]] = []
@@ -226,20 +215,11 @@ class ChatCompletionsWireAdapter:
             elif isinstance(part, ToolResultPart):
                 standalone.extend(self.encode_tool_results([part.result]))
             elif isinstance(part, ReasoningReplayPart):
-                replay_item = replay_by_id.get(part.replay_item_id)
-                if replay_item is None:
-                    raise ValueError(f"reasoning replay item `{part.replay_item_id}` is unavailable")
-                try:
-                    provider_message = json.loads(replay_item.payload.decode("utf-8"))
-                except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-                    raise ValueError("reasoning replay item is not valid provider JSON") from exc
-                if not isinstance(provider_message, dict):
-                    raise ValueError("reasoning replay item must decode to an object")
-                standalone.append(provider_message)
+                raise ValueError("standard Chat Completions does not accept reasoning replay items")
             elif isinstance(part, ReasoningTextPart):
                 reasoning_text_parts.append(part.text)
         primary: list[dict[str, Any]] = []
-        if text_parts or content_blocks or tool_calls:
+        if text_parts or content_blocks or tool_calls or reasoning_text_parts:
             has_structured_content = any(
                 block.get("type") == "image_url" or block.get("cache_control")
                 for block in content_blocks

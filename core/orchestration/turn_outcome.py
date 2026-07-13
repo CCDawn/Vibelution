@@ -35,6 +35,8 @@ class TurnFinalization:
 class TurnMessageCarryover:
     messages: Optional[list]
     goal: str
+    turn_identity: str = ""
+    terminal: bool = False
 
 
 @dataclass(frozen=True)
@@ -286,6 +288,26 @@ class TurnOutcomeController:
         return bool((visible_text or "").strip())
 
     @staticmethod
+    def classify_turn_carryover(
+        payload: Optional[Dict[str, Any]],
+        *,
+        expected_turn_identity: str,
+    ) -> str:
+        if not isinstance(payload, dict) or not payload:
+            return "absent"
+        if bool(payload.get("terminal")):
+            return "terminal"
+        turn_identity = str(payload.get("turnIdentity") or "").strip()
+        expected_identity = str(expected_turn_identity or "").strip()
+        if not turn_identity or not expected_identity:
+            return "missing_identity"
+        if turn_identity != expected_identity:
+            return "identity_mismatch"
+        if not str(payload.get("goal") or "").strip() or not list(payload.get("messages") or []):
+            return "invalid"
+        return "accepted"
+
+    @staticmethod
     def can_resume_turn_messages(
         *,
         active_turn_messages: Optional[list],
@@ -316,14 +338,6 @@ class TurnOutcomeController:
         build_external_request_message: Callable[[str], Any],
         allow_append_user_message: bool = False,
     ) -> tuple[list, bool]:
-        if allow_append_user_message and active_turn_messages:
-            messages = cls.sanitize_provider_turn_carryover(list(active_turn_messages or []))
-            if messages:
-                messages[0] = build_system_message(system_prompt)
-            else:
-                messages = [build_system_message(system_prompt)]
-            messages.append(build_external_request_message(user_prompt))
-            return messages, True
         if cls.can_resume_turn_messages(
             active_turn_messages=active_turn_messages,
             active_turn_goal=active_turn_goal,
@@ -338,6 +352,14 @@ class TurnOutcomeController:
                     build_system_message(system_prompt),
                     build_external_request_message(user_prompt),
                 ]
+            return messages, True
+        if allow_append_user_message and active_turn_messages:
+            messages = cls.sanitize_provider_turn_carryover(list(active_turn_messages or []))
+            if messages:
+                messages[0] = build_system_message(system_prompt)
+            else:
+                messages = [build_system_message(system_prompt)]
+            messages.append(build_external_request_message(user_prompt))
             return messages, True
         return [
             build_system_message(system_prompt),
@@ -399,12 +421,20 @@ class TurnOutcomeController:
         messages: list,
         lifecycle_action: Optional[str],
         active_goal: str,
+        turn_identity: str = "",
     ) -> TurnMessageCarryover:
         if lifecycle_action in {"restart", "hibernated", "turn_complete"}:
-            return TurnMessageCarryover(messages=None, goal="")
+            return TurnMessageCarryover(
+                messages=None,
+                goal="",
+                turn_identity=str(turn_identity or "").strip(),
+                terminal=True,
+            )
         return TurnMessageCarryover(
             messages=TurnOutcomeController.sanitize_provider_turn_carryover(list(messages)),
             goal=active_goal,
+            turn_identity=str(turn_identity or "").strip(),
+            terminal=False,
         )
 
     @staticmethod
