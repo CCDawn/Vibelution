@@ -112,7 +112,7 @@ const styles = {
   content:
     "vui-routes-configroute content [display:grid] [grid-template-rows:auto_auto_minmax(0,1fr)] [align-content:stretch] [min-width:0] [min-height:0] [height:100%] [overflow:hidden]",
   pageViewport:
-    "vui-routes-configroute pageViewport [display:grid] [align-content:start] [gap:12px] min-w-0 min-h-0 overflow-y-auto overflow-x-hidden [padding:12px] [scrollbar-gutter:stable]",
+    "vui-routes-configroute pageViewport [display:grid] [align-content:start] [gap:12px] min-w-0 min-h-0 overflow-y-auto overflow-x-hidden [padding:12px] [scrollbar-gutter:stable] [&:has(>_.providerModelsLayout)]:[align-content:stretch] [&:has(>_.providerModelsLayout)]:[grid-template-rows:minmax(0,1fr)]",
   contentModels:
     "vui-routes-configroute contentModels [align-content:stretch] [grid-template-rows:minmax(0,1fr)_auto] [height:100%] [max-height:calc(100dvh_-_76px)] [min-width:0] [&:has(>_.notice)]:[grid-template-rows:auto_minmax(0,1fr)_auto] [&>_.configDiscoverySection:last-child]:[display:grid] [&>_.configDiscoverySection:last-child]:[grid-template-rows:auto_auto] max-[720px]:[max-height:none] max-[720px]:[height:auto] max-[720px]:[overflow:visible]",
   providerModelsLayout:
