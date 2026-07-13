@@ -300,6 +300,10 @@ def test_resolve_agent_llm_applies_reasoning_effort_for_supported_gpt_slot():
         "model": "gpt-5.5",
         "transport": "responses",
         "contract": "tool_chat",
+        "reasoning_effort_values": ["low", "high"],
+        "default_reasoning_effort": "low",
+        "reasoning_effort_adapter": "reasoning_object",
+        "reasoning_effort_map": {"high": "high"},
     })
     agent = {
         "agentId": "agent-a",
@@ -311,6 +315,31 @@ def test_resolve_agent_llm_applies_reasoning_effort_for_supported_gpt_slot():
 
     assert resolved.config.llm.profiles["primary"].reasoning_effort == "high"
     assert resolved.capabilities.supports_thinking is True
+    assert resolved.log_fields()["reasoningEffortRequested"] == "high"
+    assert resolved.log_fields()["reasoningEffortEffective"] == "high"
+
+
+def test_session_reasoning_override_wins_without_mutating_agent_default():
+    config = _config_with_agent_models()
+    config.llm.providers["default"].kind = "relay"
+    config.llm.providers["default"].compat_mode = "openai"
+    config.llm.model_library["dialogue-model"].update({
+        "model": "gpt-5.5",
+        "transport": "responses",
+        "reasoning_effort_values": ["low", "high"],
+        "default_reasoning_effort": "low",
+        "reasoning_effort_adapter": "reasoning_object",
+    })
+    agent = {
+        "agentId": "agent-a",
+        "llmBindings": {"dialogue": {"modelId": "dialogue-model"}},
+        "metadata": {"llmReasoningEffort": {"dialogue": "low"}},
+    }
+
+    resolved = resolve_agent_llm(agent, "dialogue", config=config, reasoning_effort_override="high")
+
+    assert agent["metadata"]["llmReasoningEffort"]["dialogue"] == "low"
+    assert resolved.config.llm.profiles["primary"].reasoning_effort == "high"
 
 
 def test_resolve_agent_llm_ignores_reasoning_effort_for_unsupported_slot_model():

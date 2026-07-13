@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Query, Request, status
 from fastapi.responses import FileResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from starlette.responses import StreamingResponse
 
 from core.web.services.session_service import (
@@ -35,7 +35,7 @@ from core.web.services.session_service import (
     submit_session_message_lightweight,
     update_chat_session,
     update_chat_session_title,
-    update_session_llm_selection,
+    update_session_reasoning_effort,
 )
 from core.web.services.runtime_scene_service import record_runtime_scene_event
 
@@ -135,9 +135,10 @@ class SessionUpdatePayload(BaseModel):
     agentId: str | None = None
 
 
-class SessionLlmSelectionPayload(BaseModel):
-    modelId: str
-    reasoningEffort: str = ""
+class SessionReasoningEffortPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    reasoningEffort: str
 
 
 class ChildSessionCreatePayload(BaseModel):
@@ -211,12 +212,11 @@ def session_llm_options(session_id: str) -> dict:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
-@router.patch("/sessions/{session_id}/llm-selection")
-def session_llm_selection_update(session_id: str, payload: SessionLlmSelectionPayload) -> dict:
+@router.patch("/sessions/{session_id}/reasoning-effort")
+def session_reasoning_effort_update(session_id: str, payload: SessionReasoningEffortPayload) -> dict:
     try:
-        return update_session_llm_selection(
+        return update_session_reasoning_effort(
             session_id,
-            model_id=payload.modelId,
             reasoning_effort=payload.reasoningEffort,
         )
     except SessionNotFoundError as exc:

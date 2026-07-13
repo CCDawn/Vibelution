@@ -207,6 +207,58 @@ class ProviderDeploymentConfig(BaseModel):
     artifact_path: str = ""
 
 
+_KNOWN_REASONING_EFFORT_VALUES = {"none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"}
+_REASONING_ADAPTERS = {"", "reasoning_object", "reasoning_effort", "thinking_toggle", "none"}
+
+
+def _normalize_reasoning_effort_value(value: Any) -> str:
+    normalized = str(value or "").strip().lower()
+    return normalized if normalized in _KNOWN_REASONING_EFFORT_VALUES else ""
+
+
+def _validate_model_reasoning_contract(model: Any) -> Any:
+    values = [
+        normalized
+        for value in list(getattr(model, "reasoning_effort_values", []) or [])
+        if (normalized := _normalize_reasoning_effort_value(value))
+    ]
+    values = list(dict.fromkeys(values))
+    model.reasoning_effort_values = values
+    if not values:
+        model.default_reasoning_effort = ""
+        model.reasoning_effort_adapter = "none"
+        model.reasoning_effort_map = {}
+        return model
+
+    default = _normalize_reasoning_effort_value(getattr(model, "default_reasoning_effort", ""))
+    if default and default not in values:
+        raise ValueError("default_reasoning_effort must be present in reasoning_effort_values")
+    model.default_reasoning_effort = default
+
+    adapter = str(getattr(model, "reasoning_effort_adapter", "") or "reasoning_object").strip().lower()
+    if adapter not in _REASONING_ADAPTERS:
+        raise ValueError("unsupported reasoning_effort_adapter")
+    if adapter in {"", "none"}:
+        adapter = "reasoning_object"
+    model.reasoning_effort_adapter = adapter
+
+    mapping = {
+        _normalize_reasoning_effort_value(key): str(value or "").strip().lower()
+        for key, value in dict(getattr(model, "reasoning_effort_map", {}) or {}).items()
+    }
+    mapping = {key: value for key, value in mapping.items() if key and value}
+    unknown_keys = sorted(set(mapping) - set(values))
+    if unknown_keys:
+        raise ValueError("reasoning_effort_map keys must be present in reasoning_effort_values")
+    if adapter == "thinking_toggle" and set(mapping) != set(values):
+        raise ValueError("thinking_toggle requires an on/off mapping for every reasoning effort value")
+    allowed_targets = {"on", "off"} if adapter == "thinking_toggle" else _KNOWN_REASONING_EFFORT_VALUES
+    if any(value not in allowed_targets for value in mapping.values()):
+        raise ValueError("reasoning_effort_map contains an invalid adapter target")
+    model.reasoning_effort_map = mapping
+    return model
+
+
 class PinnedModelDefaults(BaseModel):
     model_config = ConfigDict(extra="allow")
 
@@ -216,6 +268,14 @@ class PinnedModelDefaults(BaseModel):
     connect_timeout: int = Field(default=30, gt=0)
     streaming: bool = True
     tool_calling_mode: str = "auto"
+    reasoning_effort_values: List[str] = Field(default_factory=list)
+    default_reasoning_effort: str = ""
+    reasoning_effort_adapter: Literal["", "reasoning_object", "reasoning_effort", "thinking_toggle", "none"] = ""
+    reasoning_effort_map: Dict[str, str] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def validate_reasoning_contract(self) -> "PinnedModelDefaults":
+        return _validate_model_reasoning_contract(self)
 
 
 class PinnedModelConfig(BaseModel):
@@ -360,6 +420,10 @@ class LLMProfile(BaseModel):
         default="",
         description="OpenAI Responses reasoning effort for GPT reasoning-capable models.",
     )
+    reasoning_effort_values: List[str] = Field(default_factory=list)
+    default_reasoning_effort: str = ""
+    reasoning_effort_adapter: Literal["", "reasoning_object", "reasoning_effort", "thinking_toggle", "none"] = ""
+    reasoning_effort_map: Dict[str, str] = Field(default_factory=dict)
     supports_image_input: Optional[bool] = Field(
         default=None,
         description="Whether this profile is confirmed to accept image inputs in chat turns.",
@@ -423,7 +487,7 @@ class LLMProfile(BaseModel):
             self.thinking_display = ""
         if self.thinking_display and not self.thinking_type:
             raise ValueError("thinking_display requires thinking_type")
-        return self
+        return _validate_model_reasoning_contract(self)
 
 
 class LLMDiscoveryConfig(BaseModel):

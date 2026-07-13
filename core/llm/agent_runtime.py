@@ -16,7 +16,11 @@ from config import AppConfig
 from config.models import LLMProfile, PromptCacheConfig
 
 from .discovery import discover_model
-from .reasoning_effort import model_supports_gpt_reasoning_effort, normalize_reasoning_effort
+from .reasoning_effort import (
+    model_supports_gpt_reasoning_effort,
+    normalize_reasoning_effort,
+    resolve_reasoning_effort_request,
+)
 from .types import LLMCapabilities, ResolvedModelSpec
 
 
@@ -50,6 +54,9 @@ class ResolvedAgentLlm:
     provider_id: str = ""
     provider_kind: str = ""
     model: str = ""
+    reasoning_effort_requested: str = ""
+    reasoning_effort_effective: str = ""
+    reasoning_effort_adapter: str = "none"
     source: str = "agent_llm_bindings"
     fallback_chain: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
@@ -70,6 +77,9 @@ class ResolvedAgentLlm:
             "providerKind": self.provider_kind,
             "model": self.model,
             "llmBindingSource": self.source,
+            "reasoningEffortRequested": self.reasoning_effort_requested,
+            "reasoningEffortEffective": self.reasoning_effort_effective,
+            "reasoningEffortAdapter": self.reasoning_effort_adapter,
             "llmFallbackChain": list(self.fallback_chain),
             "llmWarnings": list(self.warnings),
             **capability_log_fields(self.capabilities),
@@ -123,6 +133,7 @@ def resolve_agent_llm(
     config: AppConfig,
     runtime_profile_id: str = DEFAULT_RUNTIME_PROFILE_ID,
     fallback_to_dialogue: bool | None = None,
+    reasoning_effort_override: str | None = None,
 ) -> ResolvedAgentLlm:
     requested_slot = normalize_agent_llm_slot(slot)
     should_fallback = requested_slot != DEFAULT_AGENT_LLM_SLOT if fallback_to_dialogue is None else bool(fallback_to_dialogue)
@@ -151,6 +162,9 @@ def resolve_agent_llm(
     provider = runtime_config.llm.get_provider(profile.provider_id)
     model_ref = runtime_config.llm.resolve_model_ref(requested_model_ref)
     _apply_agent_reasoning_effort_override(agent, effective_slot, profile, provider)
+    if reasoning_effort_override is not None:
+        profile.reasoning_effort = normalize_reasoning_effort(reasoning_effort_override)
+    reasoning_resolution = resolve_reasoning_effort_request(profile)
     spec = discover_model(runtime_config, runtime_profile_id)
     return ResolvedAgentLlm(
         agent_id=str((agent or {}).get("agentId") or "").strip() if isinstance(agent, dict) else "",
@@ -163,6 +177,9 @@ def resolve_agent_llm(
         provider_id=profile.provider_id,
         provider_kind=provider.kind,
         model=profile.model,
+        reasoning_effort_requested=reasoning_resolution.requested,
+        reasoning_effort_effective=reasoning_resolution.effective,
+        reasoning_effort_adapter=reasoning_resolution.adapter,
         source="agent_llm_bindings",
         fallback_chain=fallback_chain,
         warnings=warnings,
@@ -196,33 +213,35 @@ def config_for_agent_llm_model(
         raise AgentLlmResolutionError(f"Agent {slot} model provider not found: {provider_id}")
 
     current_primary = copy.deepcopy(runtime_config.llm.get_profile(role=runtime_profile_id))
-    selected = LLMProfile(
-        **{
-            **current_primary.model_dump(),
-            **{
-                key: entry[key]
-                for key in (
-                    "transport",
-                    "contract",
-                    "protocol",
-                    "compat",
-                    "reasoning_state_field",
-                    "strict_compatibility",
-                    "temperature",
-                    "max_output_tokens",
-                    "timeout",
-                    "connect_timeout",
-                    "streaming",
-                    "tool_calling_mode",
-                    "discovery_enabled",
-                    "prompt_cache",
-                    "thinking_type",
-                    "thinking_display",
-                    "reasoning_effort",
-                    "supports_image_input",
-                )
-                if key in entry
-            },
+    selected_payload = current_primary.model_dump()
+    for key in (
+        "transport",
+        "contract",
+        "protocol",
+        "compat",
+        "reasoning_state_field",
+        "strict_compatibility",
+        "temperature",
+        "max_output_tokens",
+        "timeout",
+        "connect_timeout",
+        "streaming",
+        "tool_calling_mode",
+        "discovery_enabled",
+        "prompt_cache",
+        "thinking_type",
+        "thinking_display",
+        "reasoning_effort",
+        "reasoning_effort_values",
+        "default_reasoning_effort",
+        "reasoning_effort_adapter",
+        "reasoning_effort_map",
+        "supports_image_input",
+    ):
+        if key in entry:
+            selected_payload[key] = copy.deepcopy(entry[key])
+    selected_payload.update(
+        {
             "profile_id": runtime_profile_id,
             "provider_id": provider_id,
             "model_ref": normalized_model_id,
@@ -231,6 +250,7 @@ def config_for_agent_llm_model(
             "prompt_cache": entry.get("prompt_cache") if "prompt_cache" in entry else PromptCacheConfig(),
         }
     )
+    selected = LLMProfile(**selected_payload)
     runtime_config.llm.profiles[runtime_profile_id] = selected
     return runtime_config
 

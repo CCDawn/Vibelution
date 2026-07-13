@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any
 
 
@@ -14,6 +15,35 @@ def normalize_reasoning_effort(value: Any) -> str:
     if normalized in KNOWN_REASONING_EFFORT_VALUES:
         return normalized
     return ""
+
+
+@dataclass(frozen=True)
+class ReasoningEffortResolution:
+    requested: str
+    effective: str
+    adapter: str
+    payload: dict[str, Any]
+
+
+def resolve_reasoning_effort_request(profile: Any) -> ReasoningEffortResolution:
+    requested = normalize_reasoning_effort(getattr(profile, "reasoning_effort", ""))
+    adapter = str(getattr(profile, "reasoning_effort_adapter", "") or "none").strip().lower()
+    mapping = dict(getattr(profile, "reasoning_effort_map", {}) or {})
+    effective = str(mapping.get(requested) or requested).strip().lower()
+    if not requested or adapter == "none":
+        return ReasoningEffortResolution(requested, "", "none", {})
+    if adapter == "reasoning_object":
+        return ReasoningEffortResolution(requested, effective, adapter, {"reasoning": {"effort": effective}})
+    if adapter == "reasoning_effort":
+        return ReasoningEffortResolution(requested, effective, adapter, {"reasoning_effort": effective})
+    if adapter == "thinking_toggle":
+        return ReasoningEffortResolution(
+            requested,
+            effective,
+            adapter,
+            {"enable_thinking": effective not in {"off", "none"}},
+        )
+    raise ValueError(f"unsupported reasoning effort adapter: {adapter}")
 
 
 def model_supports_gpt_reasoning_effort(
@@ -50,6 +80,8 @@ def _model_has_gpt_reasoning_family(model_name: str) -> bool:
 __all__ = [
     "GPT_REASONING_EFFORT_VALUES",
     "KNOWN_REASONING_EFFORT_VALUES",
+    "ReasoningEffortResolution",
     "model_supports_gpt_reasoning_effort",
     "normalize_reasoning_effort",
+    "resolve_reasoning_effort_request",
 ]
