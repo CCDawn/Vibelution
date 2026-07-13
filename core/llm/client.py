@@ -1697,6 +1697,7 @@ class LLMClient:
                 "invocationId": outcome.identity.invocation_id,
                 "iteration": outcome.identity.iteration,
                 "outcomeKind": outcome.kind,
+                "terminalReason": str(outcome.error or "") if outcome.kind == "incomplete" else "",
                 "terminalEventSeen": bool(outcome.terminal_event_seen),
                 "toolCallCount": len(outcome.tool_calls),
                 "pendingToolCallCount": len(outcome.pending_tool_call_ids),
