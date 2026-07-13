@@ -10,6 +10,11 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.routing import APIRoute
 from pydantic import BaseModel, ConfigDict, Field
 
+from config.provider_merge_migration import (
+    ProviderMergeConflictError,
+    ProviderMergeVerificationError,
+)
+
 from core.web.services.avatar_image_service import resolve_user_avatar_file, store_user_avatar_image
 from core.web.services.config_service import (
     ConfigConflictError,
@@ -199,6 +204,31 @@ class ConfigMigrationRollbackPayload(BaseModel):
     baseHash: str = Field(min_length=1)
 
 
+class ProviderMergePreviewPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    canonicalProviderId: str = Field(min_length=1)
+    duplicateProviderIds: list[str] = Field(min_length=1)
+    credentialDecisions: dict[
+        str, Literal["use_canonical", "keep_separate"]
+    ] = Field(default_factory=dict)
+
+
+class ProviderMergeApplyPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    previewId: str = Field(min_length=1)
+    baseHash: str = Field(min_length=1)
+    confirmed: bool
+
+
+class ProviderMergeRollbackPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    migrationId: str = Field(min_length=1)
+    baseHash: str = Field(min_length=1)
+
+
 def _raise_config_http_error(exc: Exception) -> None:
     if isinstance(exc, ModelReferenceConflictError):
         raise HTTPException(
@@ -219,6 +249,16 @@ def _raise_config_http_error(exc: Exception) -> None:
 
 def _raise_migration_http_error(exc: Exception) -> None:
     error_type = type(exc).__name__
+    if isinstance(exc, ProviderMergeConflictError):
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "provider_merge_conflict", "errorType": error_type},
+        ) from exc
+    if isinstance(exc, ProviderMergeVerificationError):
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "provider_merge_verification_failed", "errorType": error_type},
+        ) from exc
     if isinstance(exc, ModelReferenceConflictError):
         raise HTTPException(
             status_code=409,
@@ -299,6 +339,47 @@ def config_llm_v2_migration_apply(payload: ConfigMigrationApplyPayload) -> dict:
     try:
         return provider_config_service.apply_llm_v2_migration(
             preview_id=payload.previewId,
+            base_hash=payload.baseHash,
+        )
+    except Exception as exc:  # pragma: no cover - routed below
+        _raise_migration_http_error(exc)
+
+
+@migration_router.post("/config/migration/providers/merge/preview")
+def config_provider_merge_preview(payload: ProviderMergePreviewPayload) -> dict:
+    try:
+        return provider_config_service.preview_duplicate_provider_merge(
+            canonical_provider_id=payload.canonicalProviderId,
+            duplicate_provider_ids=payload.duplicateProviderIds,
+            credential_decisions=payload.credentialDecisions,
+        )
+    except Exception as exc:  # pragma: no cover - routed below
+        _raise_migration_http_error(exc)
+
+
+@migration_router.post("/config/migration/providers/merge/apply")
+def config_provider_merge_apply(payload: ProviderMergeApplyPayload) -> dict:
+    try:
+        return provider_config_service.apply_duplicate_provider_merge(
+            preview_id=payload.previewId,
+            base_hash=payload.baseHash,
+            confirmed=payload.confirmed,
+        )
+    except Exception as exc:  # pragma: no cover - routed below
+        _raise_migration_http_error(exc)
+
+
+@migration_router.post(
+    "/config/migration/providers/merge/{migration_id}/rollback"
+)
+def config_provider_merge_rollback(
+    migration_id: str, payload: ProviderMergeRollbackPayload
+) -> dict:
+    if payload.migrationId != migration_id:
+        raise HTTPException(status_code=409, detail="migration id mismatch")
+    try:
+        return provider_config_service.rollback_duplicate_provider_merge(
+            migration_id=migration_id,
             base_hash=payload.baseHash,
         )
     except Exception as exc:  # pragma: no cover - routed below

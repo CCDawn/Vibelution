@@ -156,7 +156,7 @@ describe("ConfigProviderRegistryPanel", () => {
     expect(panelStyles.registryWorkspace).toContain("[--vui-workspace-sidebar:clamp(22rem,28%,28rem)]");
     expect(panelStyles.providerList).toContain("h-full");
     expect(panelStyles.providerButton).toContain("!min-h-[58px]");
-    expect(panelStyles.detailSurface).toContain("[grid-template-rows:auto_auto_auto_minmax(0,1fr)_auto]");
+    expect(panelStyles.detailSurface).toContain("[grid-template-rows:auto_auto_auto_minmax(0,1fr)_auto_auto]");
     expect(panelStyles.detailSurface).toContain("overflow-y-auto");
     expect(panelStyles.detailSurface).not.toContain("overflow-hidden");
     expect(panelStyles.detailBody).toContain("min-h-0");
@@ -168,6 +168,21 @@ describe("ConfigProviderRegistryPanel", () => {
   it("resets local model tools from the actual rendered Provider identity", () => {
     expect(panelSource).toContain("}, [provider?.providerId]);");
     expect(panelSource).not.toContain("}, [selectedProviderId]);");
+  });
+
+  it("offers a preview-first merge only for an exact-contract duplicate", () => {
+    const duplicate = { ...provider([]), providerId: "relay_b", label: "Relay B" };
+    const markup = renderToStaticMarkup(
+      <ConfigProviderRegistryPanel {...panelProps([], { rows: [provider([]), duplicate] })} />,
+    );
+
+    expect(markup).toContain("合并重复 Provider");
+    expect(markup).toContain("生成合并预览");
+    expect(markup).toContain("历史记录不改写");
+    expect(markup).not.toContain("应用合并");
+    expect(panelSource).toContain("/api/config/migration/providers/merge/preview");
+    expect(panelSource).toContain("/api/config/migration/providers/merge/apply");
+    expect(panelSource).toContain("confirmed: true");
   });
 
   it("aligns Provider action labels, active states, and nearby feedback", () => {

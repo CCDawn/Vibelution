@@ -4082,3 +4082,60 @@ def test_updating_language_refreshes_config_summary(monkeypatch):
     assert config_response.status_code == 200
     assert update_response.json()["language"] == "en"
     assert config_response.json()["language"] == "en"
+
+
+def test_provider_merge_routes_forward_strict_payloads(monkeypatch) -> None:
+    monkeypatch.setattr(
+        provider_config_service,
+        "preview_duplicate_provider_merge",
+        lambda **kwargs: {"status": "READY", **kwargs},
+    )
+    monkeypatch.setattr(
+        provider_config_service,
+        "apply_duplicate_provider_merge",
+        lambda **kwargs: {"status": "applied", "migrationId": "merge-1", **kwargs},
+    )
+    monkeypatch.setattr(
+        provider_config_service,
+        "rollback_duplicate_provider_merge",
+        lambda **kwargs: {"status": "rolled_back", **kwargs},
+    )
+
+    preview = client.post(
+        "/api/config/migration/providers/merge/preview",
+        json={
+            "canonicalProviderId": "ai-pixel",
+            "duplicateProviderIds": ["ai-pixel-copy"],
+            "credentialDecisions": {"ai-pixel-copy": "use_canonical"},
+        },
+    )
+    applied = client.post(
+        "/api/config/migration/providers/merge/apply",
+        json={"previewId": "preview-1", "baseHash": "hash-1", "confirmed": True},
+    )
+    rolled_back = client.post(
+        "/api/config/migration/providers/merge/merge-1/rollback",
+        json={"migrationId": "merge-1", "baseHash": "hash-2"},
+    )
+
+    assert preview.status_code == 200
+    assert preview.json()["credential_decisions"] == {"ai-pixel-copy": "use_canonical"}
+    assert applied.status_code == 200
+    assert applied.json()["confirmed"] is True
+    assert rolled_back.status_code == 200
+    assert rolled_back.json()["status"] == "rolled_back"
+
+
+def test_provider_merge_preview_rejects_unknown_fields() -> None:
+    response = client.post(
+        "/api/config/migration/providers/merge/preview",
+        json={
+            "canonicalProviderId": "ai-pixel",
+            "duplicateProviderIds": ["ai-pixel-copy"],
+            "credentialDecisions": {},
+            "apiKey": "must-not-be-accepted",
+        },
+    )
+
+    assert response.status_code == 422
+    assert "must-not-be-accepted" not in response.text

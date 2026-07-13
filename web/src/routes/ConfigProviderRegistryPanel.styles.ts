@@ -12,7 +12,7 @@ const styles = {
     "vui-routes-configproviderregistrypanel providerButton !grid !min-h-[58px] !w-full min-w-0 !grid-cols-[minmax(0,1fr)_auto] !justify-stretch gap-3 px-3 py-2 text-left",
   providerIdentity: "vui-routes-configproviderregistrypanel providerIdentity grid min-w-0 gap-0.5",
   ellipsis: "vui-routes-configproviderregistrypanel ellipsis min-w-0 truncate",
-  detailSurface: "vui-routes-configproviderregistrypanel detailSurface grid h-full min-h-0 min-w-0 [grid-template-rows:auto_auto_auto_minmax(0,1fr)_auto] gap-2 overflow-y-auto overflow-x-hidden pr-1",
+  detailSurface: "vui-routes-configproviderregistrypanel detailSurface grid h-full min-h-0 min-w-0 [grid-template-rows:auto_auto_auto_minmax(0,1fr)_auto_auto] gap-2 overflow-y-auto overflow-x-hidden pr-1",
   detailHeader:
     "vui-routes-configproviderregistrypanel detailHeader flex min-w-0 flex-wrap items-start justify-between gap-2 border-b border-vui-border-hairline pb-2",
   detailIdentity: "vui-routes-configproviderregistrypanel detailIdentity grid min-w-0 gap-0.5",
@@ -47,6 +47,13 @@ const styles = {
     "vui-routes-configproviderregistrypanel actionFeedback min-w-0 rounded-md border border-vui-border-subtle bg-vui-surface-row/70 px-2 py-1.5 text-[var(--vui-font-sm)] text-vui-fg-secondary [overflow-wrap:anywhere]",
   actionFeedbackError:
     "vui-routes-configproviderregistrypanel actionFeedbackError min-w-0 rounded-md border border-[color-mix(in_srgb,var(--state-error)_38%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--state-error)_8%,var(--vui-surface-row))] px-2 py-1.5 text-[var(--vui-font-sm)] text-[var(--state-error)] [overflow-wrap:anywhere]",
+  mergeSection:
+    "vui-routes-configproviderregistrypanel mergeSection min-w-0 rounded-lg border border-vui-border-subtle bg-vui-surface-row/40 p-2",
+  mergeContent: "vui-routes-configproviderregistrypanel mergeContent grid min-w-0 gap-2",
+  mergeFacts:
+    "vui-routes-configproviderregistrypanel mergeFacts flex min-w-0 flex-wrap items-center gap-2 text-[var(--vui-font-xs)] text-vui-fg-secondary",
+  mergeConfirmation:
+    "vui-routes-configproviderregistrypanel mergeConfirmation flex min-w-0 items-start gap-2 rounded-md border border-vui-border-subtle bg-vui-surface-panel px-2 py-1.5 text-[var(--vui-font-sm)] text-vui-fg-secondary [&_input]:mt-0.5",
   dangerZone:
     "vui-routes-configproviderregistrypanel dangerZone flex min-w-0 items-center justify-between gap-3 border-t border-[color-mix(in_srgb,var(--state-error)_22%,var(--vui-border-subtle))] pt-2",
   critical:

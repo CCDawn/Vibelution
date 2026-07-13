@@ -29,6 +29,11 @@ from config.llm_provider_registry import (
 )
 from config.model_catalog import load_model_catalog_state
 from config.model_config_migration import apply_v1_to_v2, preview_v1_to_v2, rollback_v1_to_v2
+from config.provider_merge_migration import (
+    apply_provider_merge,
+    preview_provider_merge,
+    rollback_provider_merge,
+)
 from config.public_config import (
     CONFIG_PATH,
     build_effective_config,
@@ -1223,6 +1228,120 @@ def rollback_llm_v2_migration(*, migration_id: str, base_hash: str) -> dict[str,
     return result
 
 
+def preview_duplicate_provider_merge(
+    *,
+    canonical_provider_id: str,
+    duplicate_provider_ids: list[str],
+    credential_decisions: dict[str, str],
+) -> dict[str, Any]:
+    started = time.monotonic()
+    try:
+        preview = preview_provider_merge(
+            canonical_provider_id=canonical_provider_id,
+            duplicate_provider_ids=duplicate_provider_ids,
+            credential_decisions=credential_decisions,
+            config_path=CONFIG_PATH,
+            project_root=_PROJECT_ROOT,
+        )
+    except Exception as exc:
+        _record_migration_event(
+            "config.provider_merge.previewed",
+            outcome="failed",
+            fields={
+                "canonicalProviderId": str(canonical_provider_id or "")[:64],
+                "duplicateCount": len(duplicate_provider_ids),
+                "errorType": type(exc).__name__,
+                "elapsedMs": int((time.monotonic() - started) * 1000),
+            },
+        )
+        raise
+    payload = preview.to_dict()
+    _record_migration_event(
+        "config.provider_merge.previewed",
+        outcome="previewed",
+        fields={
+            "canonicalProviderId": preview.canonical_provider_id,
+            "duplicateCount": len(preview.duplicate_provider_ids),
+            "modelCount": len(preview.model_ref_map),
+            "status": preview.status,
+            "elapsedMs": int((time.monotonic() - started) * 1000),
+        },
+    )
+    return payload
+
+
+def apply_duplicate_provider_merge(
+    *, preview_id: str, base_hash: str, confirmed: bool
+) -> dict[str, Any]:
+    started = time.monotonic()
+    try:
+        result = apply_provider_merge(
+            preview_id,
+            expected_base_hash=base_hash,
+            confirmed=confirmed,
+            config_path=CONFIG_PATH,
+            project_root=_PROJECT_ROOT,
+        )
+    except Exception as exc:
+        _record_migration_event(
+            "config.provider_merge.applied",
+            outcome="failed",
+            fields={
+                "previewId": str(preview_id or "")[:96],
+                "errorType": type(exc).__name__,
+                "phase": "apply",
+                "elapsedMs": int((time.monotonic() - started) * 1000),
+            },
+        )
+        raise
+    _record_migration_event(
+        "config.provider_merge.applied",
+        outcome="applied",
+        fields={
+            "migrationId": result["migrationId"],
+            "referenceCount": int(result.get("updatedReferenceCount") or 0),
+            "phase": "apply",
+            "elapsedMs": int((time.monotonic() - started) * 1000),
+        },
+    )
+    return result
+
+
+def rollback_duplicate_provider_merge(
+    *, migration_id: str, base_hash: str
+) -> dict[str, Any]:
+    started = time.monotonic()
+    try:
+        result = rollback_provider_merge(
+            migration_id,
+            expected_current_hash=base_hash,
+            config_path=CONFIG_PATH,
+            project_root=_PROJECT_ROOT,
+        )
+    except Exception as exc:
+        _record_migration_event(
+            "config.provider_merge.rolled_back",
+            outcome="failed",
+            fields={
+                "migrationId": str(migration_id or "")[:96],
+                "errorType": type(exc).__name__,
+                "phase": "rollback",
+                "elapsedMs": int((time.monotonic() - started) * 1000),
+            },
+        )
+        raise
+    _record_migration_event(
+        "config.provider_merge.rolled_back",
+        outcome="rolled_back",
+        fields={
+            "migrationId": result["migrationId"],
+            "phase": "rollback",
+            "elapsedMs": int((time.monotonic() - started) * 1000),
+        },
+    )
+    return result
+
+
 __all__ = [
     "discover_draft_provider",
     "draft_add_provider",
@@ -1232,7 +1351,9 @@ __all__ = [
     "draft_update_provider",
     "preview_draft_provider_route",
     "apply_llm_v2_migration",
+    "apply_duplicate_provider_merge",
     "preview_llm_v2_migration",
+    "preview_duplicate_provider_merge",
     "project_llm_v2_migration_preview",
     "project_model_reference_impact",
     "project_model_reference_impacts",
@@ -1240,4 +1361,5 @@ __all__ = [
     "project_provider_route_preview_response",
     "suggest_draft_provider_id",
     "rollback_llm_v2_migration",
+    "rollback_duplicate_provider_merge",
 ]

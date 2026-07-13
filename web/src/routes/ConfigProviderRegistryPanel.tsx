@@ -1,6 +1,7 @@
 import { AlertTriangle, Database, RefreshCw, Route, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
+import { fetchJson } from "../api/client";
 import {
   VActionGroup,
   VButton,
@@ -15,9 +16,15 @@ import {
   VSurface,
   type VStatusTone,
 } from "../components/vui";
-import type { ConfigCapabilityObservation, ConfigCatalogModel } from "../api/types";
+import type {
+  ConfigCapabilityObservation,
+  ConfigCatalogModel,
+  ConfigProviderMergePreview,
+  ConfigProviderMergeResult,
+} from "../api/types";
 import {
   canTestProviderModel,
+  deriveProviderMergeCandidate,
   deriveProviderModelActionState,
   filterProviderModels,
   summarizeProviderModels,
@@ -380,7 +387,16 @@ export function ConfigProviderRegistryPanel({
 }: ConfigProviderRegistryPanelProps) {
   const [modelQuery, setModelQuery] = useState("");
   const [modelFilter, setModelFilter] = useState<ProviderModelFilter>("all");
+  const [mergePreview, setMergePreview] = useState<ConfigProviderMergePreview | null>(null);
+  const [mergeResult, setMergeResult] = useState<ConfigProviderMergeResult | null>(null);
+  const [mergeConfirmed, setMergeConfirmed] = useState(false);
+  const [mergeBusy, setMergeBusy] = useState(false);
+  const [mergeError, setMergeError] = useState("");
   const provider = rows.find((row) => row.providerId === selectedProviderId) ?? rows[0];
+  const mergeCandidate = useMemo(
+    () => deriveProviderMergeCandidate(rows, provider?.providerId ?? ""),
+    [provider?.providerId, rows],
+  );
   const items = rows.map((row) => ({ ...row, id: row.providerId }));
   const providerLiveReferenceCount = provider?.models.reduce(
     (total, model) => total + (liveReferenceCountByModelRef[model.modelRef] ?? 0),
@@ -395,7 +411,84 @@ export function ConfigProviderRegistryPanel({
   useEffect(() => {
     setModelQuery("");
     setModelFilter("all");
+    setMergePreview(null);
+    setMergeResult(null);
+    setMergeConfirmed(false);
+    setMergeError("");
   }, [provider?.providerId]);
+
+  const previewMerge = async () => {
+    if (!mergeCandidate) return;
+    setMergeBusy(true);
+    setMergeError("");
+    try {
+      const credentialDecisions = Object.fromEntries(
+        mergeCandidate.duplicateProviderIds.map((providerId) => [providerId, "use_canonical"]),
+      );
+      const preview = await fetchJson<ConfigProviderMergePreview>(
+        "/api/config/migration/providers/merge/preview",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ...mergeCandidate, credentialDecisions }),
+        },
+      );
+      setMergePreview(preview);
+      setMergeConfirmed(false);
+    } catch (error) {
+      setMergeError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setMergeBusy(false);
+    }
+  };
+
+  const applyMerge = async () => {
+    if (!mergePreview || !mergeConfirmed) return;
+    setMergeBusy(true);
+    setMergeError("");
+    try {
+      const result = await fetchJson<ConfigProviderMergeResult>(
+        "/api/config/migration/providers/merge/apply",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            previewId: mergePreview.previewId,
+            baseHash: mergePreview.baseHash,
+            confirmed: true,
+          }),
+        },
+      );
+      setMergeResult(result);
+    } catch (error) {
+      setMergeError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setMergeBusy(false);
+    }
+  };
+
+  const rollbackMerge = async () => {
+    if (!mergeResult) return;
+    setMergeBusy(true);
+    setMergeError("");
+    try {
+      const result = await fetchJson<ConfigProviderMergeResult>(
+        `/api/config/migration/providers/merge/${encodeURIComponent(mergeResult.migrationId)}/rollback`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ migrationId: mergeResult.migrationId, baseHash: mergeResult.hash }),
+        },
+      );
+      setMergeResult(result);
+      setMergePreview(null);
+      setMergeConfirmed(false);
+    } catch (error) {
+      setMergeError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setMergeBusy(false);
+    }
+  };
 
   return (
     <VSurface as="section" id="config-models" className={styles.sectionSurface} padding="none">
@@ -510,6 +603,67 @@ export function ConfigProviderRegistryPanel({
               {selectedTab === "protocols" ? <ProtocolsTab provider={provider} /> : null}
               {selectedTab === "diagnostics" ? <DiagnosticsTab provider={provider} disabled={disabled} onDiscover={onDiscover} /> : null}
             </div>
+            {mergeCandidate ? (
+              <VSection
+                className={styles.mergeSection}
+                title="合并重复 Provider"
+                meta="先验证发现与真实调用，再写入；历史记录不改写"
+              >
+                <div className={styles.mergeContent} data-provider-merge-status={mergePreview?.status ?? "idle"}>
+                  <p className={styles.muted}>
+                    保留 <strong>{mergeCandidate.canonicalProviderId}</strong>，候选重复项：{mergeCandidate.duplicateProviderIds.join("、")}。
+                    端点、驱动、协议必须完全一致；API Key 差异只通过显式使用主 Provider 解决。
+                  </p>
+                  {mergePreview ? (
+                    <div className={styles.mergeFacts}>
+                      <VStatusChip tone={mergePreview.status === "READY" ? "success" : "warning"}>{mergePreview.status}</VStatusChip>
+                      <span>新增模型 {mergePreview.modelsToAdd.length}</span>
+                      <span>实时引用 {mergePreview.liveReferenceCount}</span>
+                      <span>历史引用 {mergePreview.historicalReferenceCount}（只读）</span>
+                      {mergePreview.conflicts.length ? <span>冲突 {mergePreview.conflicts.map((item) => item.code).join("、")}</span> : null}
+                    </div>
+                  ) : null}
+                  {mergePreview?.status === "READY" && !mergeResult ? (
+                    <label className={styles.mergeConfirmation}>
+                      <input
+                        type="checkbox"
+                        checked={mergeConfirmed}
+                        disabled={disabled || mergeBusy}
+                        onChange={(event) => setMergeConfirmed(event.currentTarget.checked)}
+                      />
+                      我确认使用 {mergeCandidate.canonicalProviderId} 的连接和凭据，并允许迁移实时引用
+                    </label>
+                  ) : null}
+                  {mergeResult ? (
+                    <p className={styles.actionFeedback} role="status">
+                      {mergeResult.status === "applied" ? `合并已应用，迁移 ${mergeResult.migrationId} 可回滚。` : "合并已回滚。请重新读取配置。"}
+                    </p>
+                  ) : null}
+                  {mergeError ? <p className={styles.actionFeedbackError} role="alert">{mergeError}</p> : null}
+                  <VActionGroup ariaLabel="重复 Provider 合并操作">
+                    {!mergeResult ? (
+                      <VButton isDisabled={disabled || mergeBusy} onPress={() => void previewMerge()}>
+                        {mergeBusy ? "验证中…" : "生成合并预览"}
+                      </VButton>
+                    ) : null}
+                    {mergePreview?.status === "READY" && !mergeResult ? (
+                      <VButton
+                        variant="danger"
+                        isDisabled={disabled || mergeBusy || !mergeConfirmed}
+                        onPress={() => void applyMerge()}
+                      >
+                        应用合并
+                      </VButton>
+                    ) : null}
+                    {mergeResult?.status === "applied" ? (
+                      <VButton isDisabled={mergeBusy} onPress={() => void rollbackMerge()}>
+                        回滚本次合并
+                      </VButton>
+                    ) : null}
+                  </VActionGroup>
+                </div>
+              </VSection>
+            ) : null}
             <div className={styles.dangerZone} data-provider-danger-zone="true">
               <VButton
                 variant="danger"
