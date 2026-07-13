@@ -10,6 +10,7 @@ from fastapi import APIRouter, HTTPException, status
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict, Field
 
+from config.operator_config_transaction import OperatorConfigTransactionError
 from core.agent_kernel import KernelAdapterError, KernelError, KernelValidationError, submit_agent_message_event
 from core.orchestration.context_engine import list_agent_runs_for_agent
 from core.web.services import agent_directory_service, agent_tool_governance_service, session_service
@@ -20,6 +21,7 @@ from core.web.services.agent_directory_service import (
     AgentMemoryProposalNotFoundError,
     AgentMessageNotFoundError,
     AgentNotFoundError,
+    AgentStateConflictError,
     archive_agent_instance,
     consume_all_agent_inbox_messages,
     consume_agent_inbox_message,
@@ -39,6 +41,10 @@ from core.web.services.agent_directory_service import (
     update_agent_avatar,
     update_agent_instance,
     write_project_memory_update_proposal,
+)
+from core.web.services.agent_model_promotion_service import (
+    AgentModelPromotionConflict,
+    promote_agent_model,
 )
 from core.web.services.agent_bulk_delete_service import (
     bulk_archive_agents,
@@ -116,6 +122,15 @@ class AgentUpdatePayload(BaseModel):
     taskProfile: dict[str, Any] | None = None
     metadata: dict[str, Any] | None = None
     status: str | None = None
+
+
+class AgentModelPromotionPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    modelRef: str
+    expectedBaseHash: str
+    expectedAgentUpdatedAt: str
+    confirmed: bool = False
 
 
 class AgentAvatarUpdatePayload(BaseModel):
@@ -421,6 +436,45 @@ def agent_config_workspace(includeRuntime: bool = True) -> dict:
 def _with_agent_workspace_cache_invalidated(payload: dict[str, Any]) -> dict[str, Any]:
     invalidate_agent_config_workspace_cache()
     return payload
+
+
+@router.post("/agents/{agent_id}/llm-bindings/{slot}/promote")
+def agent_model_promote(
+    agent_id: str,
+    slot: str,
+    payload: AgentModelPromotionPayload,
+) -> dict[str, Any]:
+    try:
+        return promote_agent_model(
+            agent_id,
+            slot=slot,
+            model_ref=payload.modelRef,
+            expected_base_hash=payload.expectedBaseHash,
+            expected_agent_updated_at=payload.expectedAgentUpdatedAt,
+            confirmed=payload.confirmed,
+        )
+    except AgentNotFoundError:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "agent_not_found", "message": "Agent not found."},
+        ) from None
+    except (AgentModelPromotionConflict, AgentStateConflictError, ValueError):
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "agent_model_promotion_conflict",
+                "message": "Agent or model configuration changed; refresh and retry.",
+            },
+        ) from None
+    except OperatorConfigTransactionError as exc:
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "code": "agent_model_promotion_transaction_failed",
+                "message": "Agent model promotion failed and compensation was attempted.",
+                "status": exc.status,
+            },
+        ) from None
 
 
 @router.get("/agents/project-memory-updates")

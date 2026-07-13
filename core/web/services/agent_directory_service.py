@@ -25,7 +25,7 @@ from core.llm.agent_runtime import (
     AGENT_LLM_SLOTS,
     DEFAULT_AGENT_LLM_SLOT,
     agent_dialogue_model_id,
-    agent_llm_model_id,
+    agent_llm_model_id as agent_llm_model_id,
     normalize_agent_llm_bindings,
 )
 from core.logging import debug as _debug_logger
@@ -434,6 +434,10 @@ class AgentDirectoryError(ValueError):
 
 class AgentNotFoundError(AgentDirectoryError):
     """Raised when an AgentInstance does not exist."""
+
+
+class AgentStateConflictError(AgentDirectoryError):
+    """Raised when an Agent changes during a compare-and-swap update."""
 
 
 class AgentArchivedError(AgentDirectoryError):
@@ -1302,6 +1306,35 @@ def update_agent_instance(
     if updated_task_profile is not None:
         _record_agent_task_profile_event(agent, updated_task_profile)
     return _agent_to_api(agent)
+
+
+def replace_agent_llm_bindings_if_current(
+    agent_id: str,
+    *,
+    expected_updated_at: str,
+    llm_bindings: dict[str, Any],
+) -> dict[str, Any]:
+    """Replace one Agent's model bindings only while its revision is current."""
+
+    normalized_agent_id = str(agent_id or "").strip()
+    if not normalized_agent_id:
+        raise AgentNotFoundError("Agent not found.")
+    expected_revision = str(expected_updated_at or "").strip()
+    with _STATE_LOCK:
+        state = load_state()
+        agent = _find_agent(state, normalized_agent_id)
+        if agent is None:
+            raise AgentNotFoundError("Agent not found.")
+        if str(agent.get("updatedAt") or "").strip() != expected_revision:
+            raise AgentStateConflictError("Agent changed during model promotion.")
+        agent["llmBindings"] = normalize_agent_llm_bindings(llm_bindings)
+        agent["updatedAt"] = utc_now_iso()
+        # Project before persisting so a projection failure cannot leave a write
+        # whose revision the transaction participant never received.
+        projected = _agent_to_api(agent)
+        save_state(state)
+    _record_agent_llm_binding_updated_event(projected)
+    return projected
 
 
 def list_agent_policy_options() -> dict[str, list[dict[str, Any]]]:
@@ -7311,6 +7344,27 @@ def _record_agent_llm_binding_migration_event(agents: list[dict[str, Any]]) -> N
                 "unresolvedAgentIds": unresolved,
                 "sample": agents[:12],
             },
+        )
+    except Exception:
+        return
+
+
+def _record_agent_llm_binding_updated_event(agent: dict[str, Any]) -> None:
+    try:
+        bindings = normalize_agent_llm_bindings(agent.get("llmBindings"))
+        record_runtime_scene_event(
+            "agent_directory",
+            "agent_llm_bindings",
+            "agent.llm_binding.updated",
+            message="Agent model binding was updated.",
+            level="info",
+            outcome="updated",
+            fields={
+                "agentId": str(agent.get("agentId") or "").strip(),
+                "updatedAt": str(agent.get("updatedAt") or "").strip(),
+                "bindingSlots": sorted(bindings),
+            },
+            lifecycle=True,
         )
     except Exception:
         return
