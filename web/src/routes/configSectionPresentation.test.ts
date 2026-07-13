@@ -163,6 +163,7 @@ describe("progressive config section presentation", () => {
     expect(configSectionTierCounts("pet", 41)).toEqual({ common: 4, advanced: 37 });
     expect(configSectionTierCounts("context-compression", 20)).toEqual({ common: 5, advanced: 15 });
     expect(configSectionTierCounts("analysis", 4)).toEqual({ common: 2, advanced: 2 });
+    expect(configSectionTierCounts("user-profile", 5)).toEqual({ common: 3, advanced: 2 });
   });
 
   it("keeps everyday interface and operator controls in the common tier", () => {
@@ -239,6 +240,24 @@ describe("progressive config section presentation", () => {
     expect(configSectionExpandedByDefault("analysis")).toBe(true);
   });
 
+  it("keeps profile identity visible while treating agent reference text as advanced", () => {
+    expect(configSectionPresentation("user-profile", "zh")).toMatchObject({
+      sectionTitle: "用户资料与头像",
+      sectionSummary: "先设置工作台显示名和头像；只有需要时再补充提供给 Agent 的背景与偏好。",
+      commonPaths: [
+        "user_profile.display_name",
+        "user_profile.avatar_preset",
+        "user_profile.avatar_image_path",
+      ],
+      commonTitle: "基础资料",
+      advancedTitle: "Agent 参考信息（高级）",
+    });
+    expect(isCommonConfigSectionEntry("user-profile", "user_profile.display_name")).toBe(true);
+    expect(isCommonConfigSectionEntry("user-profile", "user_profile.avatar_preset")).toBe(true);
+    expect(isCommonConfigSectionEntry("user-profile", "user_profile.bio")).toBe(false);
+    expect(isCommonConfigSectionEntry("user-profile", "user_profile.preferences")).toBe(false);
+  });
+
   it("provides Chinese labels for every visible pet and context-compression control", () => {
     for (const path of [...petPaths, ...contextCompressionPaths]) {
       const copy = configSectionFieldCopy(path, "zh");
@@ -292,5 +311,6 @@ describe("progressive config section presentation", () => {
     expect(configSectionFieldCopy("analysis.pattern_library_path", "en")?.label).toBe("Pattern library file");
     expect(configSectionFieldCopy("git.commit_message_model_ref", "en")?.label).toBe("Commit message model");
     expect(configSectionPresentation("analysis", "en")?.advancedTitle).toBe("Knowledge asset paths");
+    expect(configSectionPresentation("user-profile", "en")?.advancedTitle).toBe("Agent reference information (advanced)");
   });
 });
