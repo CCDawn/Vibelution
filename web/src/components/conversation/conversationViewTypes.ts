@@ -22,13 +22,14 @@ export type ConversationComposerAttachment = {
 };
 
 export type ConversationLlmControl = {
-  models: SessionLlmModelOption[];
-  currentModelId: string;
+  model: SessionLlmModelOption | null;
   currentReasoningEffort: string;
   disabled: boolean;
   pending: boolean;
-  onSelectionChange: (modelId: string, reasoningEffort: string) => void;
+  onReasoningEffortChange: (reasoningEffort: string) => void;
 };
+
+export type ConversationComposerVariant = "compact" | "codex";
 
 export type ConversationViewProps = {
   sessionId: string;
@@ -38,6 +39,7 @@ export type ConversationViewProps = {
   activeTurnMessage?: ConversationMessage;
   className?: string;
   density?: "default" | "compact";
+  composerVariant?: ConversationComposerVariant;
   eyebrowLabel?: string;
   assistantDisplayName?: string;
   assistantAvatarImageUrl?: string;

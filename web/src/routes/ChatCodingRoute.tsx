@@ -2327,15 +2327,12 @@ export function ChatCodingRoute() {
     ),
     staleTime: 30_000,
   });
-  const sessionLlmSelectionMutation = useMutation({
-    mutationFn: (variables: { sessionId: string; modelId: string; reasoningEffort: string }) =>
-      fetchJson<SessionLlmOptions>(`/api/sessions/${encodeURIComponent(variables.sessionId)}/llm-selection`, {
+  const sessionReasoningEffortMutation = useMutation({
+    mutationFn: (variables: { sessionId: string; reasoningEffort: string }) =>
+      fetchJson<SessionLlmOptions>(`/api/sessions/${encodeURIComponent(variables.sessionId)}/reasoning-effort`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          modelId: variables.modelId,
-          reasoningEffort: variables.reasoningEffort,
-        }),
+        body: JSON.stringify({ reasoningEffort: variables.reasoningEffort }),
       }),
     onMutate: (variables) => {
       setSessionComposerErrors((current) => ({ ...current, [variables.sessionId]: "" }));
@@ -2344,20 +2341,17 @@ export function ChatCodingRoute() {
       queryClient.setQueryData(queryKeys.sessionLlmOptions(variables.sessionId), payload);
       queryClient.setQueryData<SessionDetail>(queryKeys.session(variables.sessionId), (current) => current ? {
         ...current,
-        dialogueModelId: payload.currentModelId,
         reasoningEffort: payload.currentReasoningEffort,
       } : current);
       updateSessionSummaryCaches(queryClient, (sessions) => sessions?.map((session) => session.id === variables.sessionId ? {
         ...session,
-        dialogueModelId: payload.currentModelId,
         reasoningEffort: payload.currentReasoningEffort,
       } : session));
-      void queryClient.invalidateQueries({ queryKey: queryKeys.agents() });
     },
     onError: (error, variables) => {
       setSessionComposerErrors((current) => ({
         ...current,
-        [variables.sessionId]: describeError(error, lang === "zh" ? "模型切换失败" : "Failed to change model"),
+        [variables.sessionId]: describeError(error, lang === "zh" ? "推理强度切换失败" : "Failed to change reasoning effort"),
       }));
     },
   });
@@ -4716,15 +4710,13 @@ export function ChatCodingRoute() {
   const composerDisabled = conversationComposer.disabled;
   const sessionLlmOptions = sessionLlmOptionsQuery.data;
   const sessionLlmControl = activeSessionId ? {
-    models: sessionLlmOptions?.models ?? [],
-    currentModelId: sessionLlmOptions?.currentModelId || detail?.dialogueModelId || "",
+    model: sessionLlmOptions?.model ?? null,
     currentReasoningEffort: sessionLlmOptions?.currentReasoningEffort || detail?.reasoningEffort || "",
     disabled: sessionBusy || sessionLlmOptionsQuery.isLoading,
-    pending: sessionLlmSelectionMutation.isPending,
-    onSelectionChange: (modelId: string, reasoningEffort: string) => {
-      sessionLlmSelectionMutation.mutate({
+    pending: sessionReasoningEffortMutation.isPending,
+    onReasoningEffortChange: (reasoningEffort: string) => {
+      sessionReasoningEffortMutation.mutate({
         sessionId: activeSessionId,
-        modelId,
         reasoningEffort,
       });
     },

@@ -37,11 +37,24 @@ const conversationComposerShell = cv(
   "composer",
   "grid flex-none grid-cols-[minmax(0,1fr)_auto] items-center gap-2 border-t border-[color-mix(in_srgb,var(--border-soft)_82%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-panel)_74%,transparent)] px-[11px] py-[7px] pb-[9px] backdrop-blur-[6px] shadow-none",
 );
+const conversationComposerCodexShell = cv(
+  "composerCodex",
+  "mx-auto grid w-full max-w-[960px] min-w-0 flex-none rounded-[24px] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] shadow-[var(--vui-shadow-soft)] max-[719px]:rounded-[18px]",
+);
 const composerNativeFieldTargets =
   "[&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-[48px] [&_textarea]:max-h-[112px] [&_textarea]:resize-none [&_input]:w-full [&_select]:w-full [&_textarea]:w-full";
 const composerFieldBase = `min-w-0 grid gap-1 text-[var(--vui-font-xs)] text-[var(--fg-secondary)] ${composerNativeFieldTargets}`;
 const composerFieldShell = cv("composerField", composerFieldBase);
+const composerFieldCodexShell = cv(
+  "composerFieldCodex",
+  composerFieldBase,
+  "grid min-h-[120px] min-w-0 grid-rows-[auto_minmax(48px,1fr)_auto] gap-2 px-4 py-3 max-[719px]:min-h-[108px] max-[719px]:px-3",
+);
 const composerToolbarShell = cv("composerToolbar", "flex min-w-0 items-center gap-1 pt-0.5");
+const composerToolbarCodexShell = cv(
+  "composerToolbarCodex",
+  "flex min-h-10 min-w-0 items-center justify-between gap-2",
+);
 const composerFieldDragActiveShell = cv(
   "composerFieldDragActive",
   "border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))] text-[var(--accent-cool)]",
@@ -284,6 +297,7 @@ const styles: Record<string, string> = {
   composerEditSubmitButton:
     "vui-components-conversationview composerEditSubmitButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-[min(100%,11rem)] items-center justify-center gap-1.5 rounded-[var(--radius-control)] border px-2 py-1 text-[var(--vui-font-xs)] font-semibold leading-tight shadow-none",
   composerField: composerFieldShell,
+  composerFieldCodex: composerFieldCodexShell,
   composerFieldDragActive: composerFieldDragActiveShell,
   composerGuidance:
     "vui-components-conversationview composerGuidance min-w-0",
@@ -1026,7 +1040,12 @@ const styles: Record<string, string> = {
   sectionToggle:
     "vui-components-conversationview sectionToggle min-w-0",
   sendButton: composerSendActionButton,
+  composerCodex: conversationComposerCodexShell,
   composerToolbar: composerToolbarShell,
+  composerToolbarCodex: composerToolbarCodexShell,
+  composerToolbarStart: "vui-components-conversationview composerToolbarStart flex min-w-0 items-center gap-2",
+  composerToolbarEnd: "vui-components-conversationview composerToolbarEnd ml-auto flex min-w-0 items-center justify-end gap-2",
+  inputCodex: "vui-components-conversationview inputCodex min-h-[48px] max-h-[220px] w-full resize-none overflow-y-auto !border-0 !bg-transparent !p-0 text-[var(--fg-primary)] !shadow-none focus:!ring-0",
   sessionMeta:
     "vui-components-conversationview sessionMeta min-w-0 flex flex-wrap items-center gap-1.5",
   statPill:

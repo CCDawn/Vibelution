@@ -131,7 +131,7 @@ import {
 import { shouldLoadEarlierConversationMessages } from "./conversationHistoryWindow";
 import { parseResponseSegments, ResponseSegment } from "./messageResponseSegments";
 import { ConversationMarkdownRenderer } from "./ConversationMarkdownRenderer";
-import { ConversationModelSelector } from "./ConversationModelSelector";
+import { ConversationInferenceControl } from "./ConversationInferenceControl";
 import {
   addComparableConversationImageUrl,
   comparableConversationImageUrl,
@@ -434,6 +434,7 @@ export function ConversationView({
   activeTurnMessage,
   className,
   density = "default",
+  composerVariant = "compact",
   eyebrowLabel,
   assistantDisplayName,
   assistantAvatarImageUrl,
@@ -2843,6 +2844,64 @@ export function ConversationView({
     return node !== null;
   }
 
+  const composerActions = (
+    <div className={styles.composerActionStack}>
+      {!runningGuidanceActionsEnabled || showSafeGuidanceAction ? (
+        <VButton
+          className={primaryActionClassName}
+          isDisabled={runningGuidanceActionsEnabled ? guidanceActionDisabled || !onSafeGuidance : resolvedActionDisabled}
+          type="button"
+          onClick={runningGuidanceActionsEnabled ? onSafeGuidance : handlePrimaryAction}
+          title={
+            runningGuidanceActionsEnabled
+              ? composerSafeGuidancePending
+                ? (safeGuidancePendingLabel ?? t("safeGuidancePending"))
+                : (safeGuidanceLabel ?? t("safeGuidance"))
+              : composerPending
+                ? resolvedPendingLabel
+                : resolvedActionLabel
+          }
+          aria-label={
+            runningGuidanceActionsEnabled
+              ? composerSafeGuidancePending
+                ? (safeGuidancePendingLabel ?? t("safeGuidancePending"))
+                : (safeGuidanceLabel ?? t("safeGuidance"))
+              : composerPending
+                ? resolvedPendingLabel
+                : resolvedActionLabel
+          }
+        >
+          {composerPending || composerSafeGuidancePending ? (
+            <LoaderCircle className={styles.statusSpinner} size={17} aria-hidden="true" />
+          ) : primaryActionIsEditSubmit ? (
+            <>
+              <RefreshCw size={15} aria-hidden="true" />
+              <span>{resolvedActionLabel}</span>
+            </>
+          ) : (
+            <ArrowUp size={18} aria-hidden="true" />
+          )}
+        </VButton>
+      ) : null}
+      {runningGuidanceActionsEnabled ? (
+        <VButton
+          className={`${styles.sendButton} ${styles.composerRoundButton} ${styles.stopButton}`}
+          isDisabled={resolvedActionDisabled}
+          type="button"
+          onClick={handlePrimaryAction}
+          title={composerPending ? resolvedPendingLabel : resolvedActionLabel}
+          aria-label={composerPending ? resolvedPendingLabel : resolvedActionLabel}
+        >
+          {composerPending ? (
+            <LoaderCircle className={styles.statusSpinner} size={17} aria-hidden="true" />
+          ) : (
+            <Square size={14} aria-hidden="true" />
+          )}
+        </VButton>
+      ) : null}
+    </div>
+  );
+
   return (
     <div
       className={[
@@ -3376,10 +3435,12 @@ export function ConversationView({
       ) : null}
 
       {showComposer ? (
-      <div className={styles.composer}>
+      <div className={composerVariant === "codex" ? styles.composerCodex : styles.composer}>
         <div
           className={
-            composerDragActive ? `${styles.composerField} ${styles.composerFieldDragActive}` : styles.composerField
+            composerDragActive
+              ? `${composerVariant === "codex" ? styles.composerFieldCodex : styles.composerField} ${styles.composerFieldDragActive}`
+              : composerVariant === "codex" ? styles.composerFieldCodex : styles.composerField
           }
           onDragEnter={handleComposerDragEnter}
           onDragOver={handleComposerDragOver}
@@ -3515,7 +3576,7 @@ export function ConversationView({
           ) : null}
           <VNativeTextarea
             ref={composerInputRef}
-            className={styles.input}
+            className={composerVariant === "codex" ? styles.inputCodex : styles.input}
             value={composerValue}
             disabled={composerDisabled && resolvedActionMode !== "stop"}
             placeholder={composerPlaceholder}
@@ -3556,18 +3617,23 @@ export function ConversationView({
               }
             }}
           />
-          <div className={styles.composerToolbar}>
-            <VButton
-              className={styles.attachButton}
-              isDisabled={attachmentInputDisabled || !onAddComposerAttachments}
-              type="button"
-              onClick={() => attachmentInputRef.current?.click()}
-              title={lang === "zh" ? "添加图片" : "Attach image"}
-              aria-label={lang === "zh" ? "添加图片" : "Attach image"}
-            >
-              <ImagePlus size={16} />
-            </VButton>
-            {llmControl ? <ConversationModelSelector {...llmControl} /> : null}
+          <div className={composerVariant === "codex" ? styles.composerToolbarCodex : styles.composerToolbar}>
+            <div className={styles.composerToolbarStart}>
+              <VButton
+                className={styles.attachButton}
+                isDisabled={attachmentInputDisabled || !onAddComposerAttachments}
+                type="button"
+                onClick={() => attachmentInputRef.current?.click()}
+                title={lang === "zh" ? "添加图片" : "Attach image"}
+                aria-label={lang === "zh" ? "添加图片" : "Attach image"}
+              >
+                <ImagePlus size={16} />
+              </VButton>
+            </div>
+            <div className={styles.composerToolbarEnd}>
+              {llmControl ? <ConversationInferenceControl {...llmControl} /> : null}
+              {composerVariant === "codex" ? composerActions : null}
+            </div>
           </div>
         </div>
         <VNativeInput
@@ -3584,61 +3650,7 @@ export function ConversationView({
             event.currentTarget.value = "";
           }}
         />
-        <div className={styles.composerActionStack}>
-          {!runningGuidanceActionsEnabled || showSafeGuidanceAction ? (
-            <VButton
-              className={primaryActionClassName}
-              isDisabled={runningGuidanceActionsEnabled ? guidanceActionDisabled || !onSafeGuidance : resolvedActionDisabled}
-              type="button"
-              onClick={runningGuidanceActionsEnabled ? onSafeGuidance : handlePrimaryAction}
-              title={
-                runningGuidanceActionsEnabled
-                  ? composerSafeGuidancePending
-                    ? (safeGuidancePendingLabel ?? t("safeGuidancePending"))
-                    : (safeGuidanceLabel ?? t("safeGuidance"))
-                  : composerPending
-                    ? resolvedPendingLabel
-                    : resolvedActionLabel
-              }
-              aria-label={
-                runningGuidanceActionsEnabled
-                  ? composerSafeGuidancePending
-                    ? (safeGuidancePendingLabel ?? t("safeGuidancePending"))
-                    : (safeGuidanceLabel ?? t("safeGuidance"))
-                  : composerPending
-                    ? resolvedPendingLabel
-                    : resolvedActionLabel
-              }
-            >
-              {composerPending || composerSafeGuidancePending ? (
-                <LoaderCircle className={styles.statusSpinner} size={17} aria-hidden="true" />
-              ) : primaryActionIsEditSubmit ? (
-                <>
-                  <RefreshCw size={15} aria-hidden="true" />
-                  <span>{resolvedActionLabel}</span>
-                </>
-              ) : (
-                <ArrowUp size={18} aria-hidden="true" />
-              )}
-            </VButton>
-          ) : null}
-          {runningGuidanceActionsEnabled ? (
-            <VButton
-              className={`${styles.sendButton} ${styles.composerRoundButton} ${styles.stopButton}`}
-              isDisabled={resolvedActionDisabled}
-              type="button"
-              onClick={handlePrimaryAction}
-              title={composerPending ? resolvedPendingLabel : resolvedActionLabel}
-              aria-label={composerPending ? resolvedPendingLabel : resolvedActionLabel}
-            >
-              {composerPending ? (
-                <LoaderCircle className={styles.statusSpinner} size={17} aria-hidden="true" />
-              ) : (
-                <Square size={14} aria-hidden="true" />
-              )}
-            </VButton>
-          ) : null}
-        </div>
+        {composerVariant === "compact" ? composerActions : null}
       </div>
       ) : null}
       {previewImage ? (

@@ -745,14 +745,16 @@ describe("ConversationView edit resend affordance", () => {
     expect(styles.composerAttachmentRemoveButton).toContain("!w-6");
 
     const composerActionStackSource = conversationViewSource.slice(
-      conversationViewSource.indexOf("<div className={styles.composerActionStack}>"),
-      conversationViewSource.indexOf("</div>\n      </div>", conversationViewSource.indexOf("<div className={styles.composerActionStack}>")),
+      conversationViewSource.indexOf("const composerActions = ("),
+      conversationViewSource.indexOf("\n\n  return (", conversationViewSource.indexOf("const composerActions = (")),
     );
     expect(composerActionStackSource).not.toContain("className={styles.attachButton}");
     expect(composerActionStackSource).toContain("className={primaryActionClassName}");
-    expect(conversationViewSource).toContain("<div className={styles.composerToolbar}>");
+    expect(conversationViewSource).toContain('composerVariant === "codex" ? styles.composerToolbarCodex : styles.composerToolbar');
     expect(conversationViewSource).toContain("className={styles.attachButton}");
-    expect(conversationViewSource).toContain("<ConversationModelSelector {...llmControl} />");
+    expect(conversationViewSource).toContain("<ConversationInferenceControl {...llmControl} />");
+    expect(conversationViewSource).toContain('composerVariant === "codex" ? composerActions : null');
+    expect(conversationViewSource).toContain('composerVariant === "compact" ? composerActions : null');
     expect(styles.composerToolbar).toContain("items-center");
     expect(conversationViewSource).toContain("const primaryActionClassName = primaryActionIsEditSubmit");
     expect(conversationViewSource).toContain("styles.composerEditSubmitButton");
