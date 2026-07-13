@@ -1640,6 +1640,105 @@ def test_config_workspace_test_llm_can_target_schema_v2_canonical_model_ref(monk
     ]
 
 
+def test_config_workspace_reasoning_probe_verifies_observed_schema_v2_model(monkeypatch):
+    public_config = {
+        "llm": {
+            "schema_version": 2,
+            "providers": {
+                "relay_a": {
+                    "label": "Relay A",
+                    "service_class": "relay",
+                    "vendor": "multi_model",
+                    "driver": "openai",
+                    "base_url": "https://relay-a.example/v1",
+                    "auth_kind": "api_key",
+                    "credential_ref": "env:VIBELUTION_LLM_PROVIDER_RELAY_A_API_KEY",
+                    "requires_credential": True,
+                    "protocols": {"default": "responses", "allowed": ["responses"]},
+                    "discovery": {"mode": "manual", "adapter": "openai_compatible", "cache_ttl_seconds": 0},
+                    "models": {
+                        "gpt-stable": {
+                            "upstream_id": "gpt-stable",
+                            "label": "GPT Stable",
+                            "enabled": True,
+                            "wire_protocol": "responses",
+                            "interaction_contract": "tool_chat",
+                            "defaults": {},
+                        }
+                    },
+                }
+            },
+            "profiles": {"primary": {"model_ref": "relay_a/gpt-stable", "overrides": {}}},
+            "model_aliases": {},
+        }
+    }
+    catalog = {
+        "schemaVersion": 2,
+        "providers": {
+            "relay_a": {
+                "providerFingerprint": provider_discovery_fingerprint(public_config["llm"]["providers"]["relay_a"]),
+                "status": "reachable",
+                "catalogStale": False,
+                "lastAttemptAt": "2026-07-13T08:00:00Z",
+                "lastSuccessAt": "2026-07-13T08:00:00Z",
+                "lastErrorType": "",
+                "models": {
+                    "gpt-a": {
+                        "upstreamId": "gpt-a",
+                        "label": "GPT A",
+                        "availability": "observed",
+                        "capabilities": {},
+                    }
+                },
+                "warnings": [],
+            }
+        },
+        "metadata": {},
+    }
+    monkeypatch.setenv("VIBELUTION_LLM_PROVIDER_RELAY_A_API_KEY", "relay-secret")
+    monkeypatch.setattr(config_service, "load_public_config", lambda: copy.deepcopy(public_config))
+    monkeypatch.setattr(config_service, "load_model_catalog_state", lambda: copy.deepcopy(catalog))
+    saved_catalogs = []
+    monkeypatch.setattr(config_service, "save_model_catalog_state", lambda state: saved_catalogs.append(copy.deepcopy(state)))
+    calls = []
+
+    def fake_runtime_probe(provider, profile, api_key=None):
+        calls.append((profile.model, profile.reasoning_effort, profile.reasoning_effort_adapter, api_key))
+        return {"ok": True, "message": "ok"}
+
+    monkeypatch.setattr("config.public_config._probe_llm_runtime", fake_runtime_probe)
+
+    response = client.post(
+        "/api/config/test-llm",
+        json={"modelId": "relay_a/gpt-a", "capability": "reasoning_effort"},
+    )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["ok"] is True
+    assert payload["capability"] == "reasoning_effort"
+    assert payload["reasoning_effort_values"] == ["low", "high"]
+    assert payload["default_reasoning_effort"] == "high"
+    assert payload["reasoning_contract_persisted"] is True
+    assert calls == [
+        ("gpt-a", "low", "reasoning_object", "relay-secret"),
+        ("gpt-a", "high", "reasoning_object", "relay-secret"),
+    ]
+    contract = saved_catalogs[-1]["providers"]["relay_a"]["models"]["gpt-a"]["reasoningContract"]
+    assert contract["verificationStatus"] == "verified"
+    assert contract["effortValues"] == ["low", "high"]
+    assert contract["default"] == "high"
+    assert contract["adapter"] == "reasoning_object"
+    summary = config_service.summarize_model_catalog(
+        saved_catalogs[-1],
+        public_config=public_config,
+    )
+    projected = summary["providers"]["relay_a"]["models"]["gpt-a"]
+    assert projected["reasoningVerificationStatus"] == "verified"
+    assert projected["reasoningEffortValues"] == ["low", "high"]
+    assert projected["defaultReasoningEffort"] == "high"
+
+
 def test_model_verification_classifies_missing_credentials_separately() -> None:
     verification = config_service._model_verification_summary(
         {"ok": False, "message": "missing API key for provider `relay_a`"}
