@@ -93,12 +93,15 @@ def test_discovery_fingerprint_change_marks_prior_evidence_stale_without_deletin
         },
     )
     for model_key in ("gpt-a", "gpt-b"):
+        failed = model_key == "gpt-b"
         state = record_model_verification(
             state,
             model_ref=f"relay/{model_key}",
             provider_fingerprint="fp-old",
             checked_at="2026-07-12T09:30:00Z",
-            ok=True,
+            ok=not failed,
+            error_type="service_unavailable" if failed else "",
+            http_status=503 if failed else None,
         )
         state["providers"]["relay"]["models"][model_key]["reasoningContract"] = {
             "verificationStatus": "verified",
@@ -120,11 +123,12 @@ def test_discovery_fingerprint_change_marks_prior_evidence_stale_without_deletin
 
     for model_key in ("gpt-a", "gpt-b"):
         model = rediscovered["providers"]["relay"]["models"][model_key]
+        failed = model_key == "gpt-b"
         assert model["verification"] == {
             "status": "stale",
             "checkedAt": "2026-07-12T09:30:00Z",
-            "errorType": "",
-            "httpStatus": None,
+            "errorType": "service_unavailable" if failed else "",
+            "httpStatus": 503 if failed else None,
             "providerFingerprint": "fp-old",
         }
         assert model["reasoningContract"] == {
@@ -132,6 +136,53 @@ def test_discovery_fingerprint_change_marks_prior_evidence_stale_without_deletin
             "providerFingerprint": "fp-old",
             "checkedAt": "2026-07-12T09:31:00Z",
         }
+
+
+def test_legacy_verification_without_fingerprint_is_stale_after_discovery() -> None:
+    state = record_discovery_success(
+        empty_model_catalog_state(),
+        provider_id="relay",
+        provider_fingerprint="fp-current",
+        discovered_at="2026-07-11T12:00:00Z",
+        observed=[{"upstream_id": "gpt-a", "label": "GPT A", "capabilities": {}}],
+        pinned={},
+    )
+    state["providers"]["relay"]["models"]["gpt-a"]["verification"] = {
+        "status": "verified",
+        "checkedAt": "2026-07-11T12:30:00Z",
+        "errorType": "",
+        "httpStatus": None,
+    }
+
+    rediscovered = record_discovery_success(
+        state,
+        provider_id="relay",
+        provider_fingerprint="fp-current",
+        discovered_at="2026-07-12T10:00:00Z",
+        observed=[{"upstream_id": "gpt-a", "label": "GPT A", "capabilities": {}}],
+        pinned={},
+    )
+
+    assert rediscovered["providers"]["relay"]["models"]["gpt-a"]["verification"] == {
+        "status": "stale",
+        "checkedAt": "2026-07-11T12:30:00Z",
+        "errorType": "",
+        "httpStatus": None,
+    }
+
+
+@pytest.mark.parametrize(
+    "error_type",
+    ["rate_limited", "service_unavailable", "upstream_unavailable"],
+)
+def test_discovery_failure_preserves_controlled_http_error_categories(error_type: str) -> None:
+    failed = record_discovery_failure(
+        empty_model_catalog_state(),
+        provider_id="relay",
+        attempted_at="2026-07-11T13:00:00Z",
+        error_type=error_type,
+    )
+    assert failed["providers"]["relay"]["lastErrorType"] == error_type
 
 
 def test_failure_keeps_last_success_and_marks_provider_stale() -> None:
