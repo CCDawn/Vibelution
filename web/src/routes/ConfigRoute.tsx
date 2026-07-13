@@ -57,6 +57,12 @@ import {
   type PublicConfigShape,
 } from "./configRouteLogic";
 import {
+  configSectionFieldCopy,
+  configSectionPresentation,
+  configSectionTierCounts,
+  isCommonConfigSectionEntry,
+} from "./configSectionPresentation";
+import {
   VButton,
   VActionGroup,
   VCheckbox,
@@ -173,6 +179,7 @@ export type ModelEditorState = {
 type ConfigSectionUiState = {
   expanded: boolean;
   editing: boolean;
+  advancedExpanded: boolean;
   expandedPaths: Record<string, boolean>;
   draftValue?: unknown;
 };
@@ -181,6 +188,7 @@ function defaultSectionUiState(): ConfigSectionUiState {
   return {
     expanded: true,
     editing: false,
+    advancedExpanded: false,
     expandedPaths: {},
   };
 }
@@ -969,12 +977,14 @@ function humanizeConfigToken(token: string): string {
     .join(" ");
 }
 
-function configLabel(metaMap: Record<string, ConfigEditorMeta>, path: string): string {
-  return metaMap[path]?.label ?? humanizeConfigToken(splitConfigPath(path).at(-1) ?? path);
+function configLabel(metaMap: Record<string, ConfigEditorMeta>, path: string, lang: ConfigLanguage): string {
+  return configSectionFieldCopy(path, lang)?.label
+    ?? metaMap[path]?.label
+    ?? humanizeConfigToken(splitConfigPath(path).at(-1) ?? path);
 }
 
-function configHint(metaMap: Record<string, ConfigEditorMeta>, path: string): string {
-  return metaMap[path]?.hint ?? "";
+function configHint(metaMap: Record<string, ConfigEditorMeta>, path: string, lang: ConfigLanguage): string {
+  return configSectionFieldCopy(path, lang)?.hint ?? metaMap[path]?.hint ?? "";
 }
 
 function formatConfigDisplayValue(value: unknown, kind: ConfigEditorMeta["kind"] | undefined, copy: ConfigCopy): string {
@@ -1102,13 +1112,16 @@ function ConfigSectionEditor({
 }: ConfigSectionEditorProps) {
   const sectionExpanded = uiState.expanded;
   const editing = uiState.editing;
+  const advancedExpanded = uiState.advancedExpanded;
   const expandedPaths = uiState.expandedPaths;
+  const presentation = configSectionPresentation(section.id, lang);
+  const tierCounts = configSectionTierCounts(section.id, section.fieldCount);
   const draftValue = editing ? clonePublicConfig(uiState.draftValue ?? value) : clonePublicConfig(value);
   const sectionClassName = [
     styles.sectionSurface,
     styles.configEditorSection,
     section.id === "llm-discovery" ? styles.configDiscoverySection : "",
-    isDenseConfigSection(section) ? styles.configDenseSection : "",
+    isDenseConfigSection(section) && !presentation ? styles.configDenseSection : "",
   ].filter(Boolean).join(" ");
   const [uploadingImagePath, setUploadingImagePath] = useState("");
   const [avatarCrop, setAvatarCrop] = useState<AvatarCropDraft | null>(null);
@@ -1268,7 +1281,7 @@ function ConfigSectionEditor({
             />
           </label>
           <div className={styles.themeBackgroundImageMeta}>
-            <strong>{configLabel(metaMap, absolutePath)}</strong>
+            <strong>{configLabel(metaMap, absolutePath, lang)}</strong>
             <span>{themeBackgroundDisplayName(fieldValue)}</span>
             <div className={styles.themeBackgroundImageActions}>
               <label className={`${styles.actionButton} ${styles.compactButton} ${styles.fileUploadButton}`}>
@@ -1337,7 +1350,7 @@ function ConfigSectionEditor({
     const meta = metaMap[absolutePath];
     const kind = configEditorFieldKind(meta);
     if (kind === "background_image") {
-      const hint = configHint(metaMap, absolutePath);
+      const hint = configHint(metaMap, absolutePath, lang);
       return (
         <article
           key={absolutePath}
@@ -1357,9 +1370,9 @@ function ConfigSectionEditor({
           className={`${styles.treeFieldCard} ${styles.treeFieldCardView} ${styles.avatarImageCard}`}
         >
           <div className={styles.treeFieldHead}>
-            <span className={styles.treeFieldLabel}>{configLabel(metaMap, absolutePath)}</span>
+            <span className={styles.treeFieldLabel}>{configLabel(metaMap, absolutePath, lang)}</span>
           </div>
-          {configHint(metaMap, absolutePath) ? <p className={styles.treeHint}>{configHint(metaMap, absolutePath)}</p> : null}
+          {configHint(metaMap, absolutePath, lang) ? <p className={styles.treeHint}>{configHint(metaMap, absolutePath, lang)}</p> : null}
           <div className={styles.avatarImageValue}>
             {previewUrl ? (
               <img src={previewUrl} alt="" className={styles.avatarImagePreview} />
@@ -1379,9 +1392,9 @@ function ConfigSectionEditor({
     return (
       <article key={absolutePath} className={`${styles.treeFieldCard} ${styles.treeFieldCardView}`}>
         <div className={styles.treeFieldHead}>
-          <span className={styles.treeFieldLabel}>{configLabel(metaMap, absolutePath)}</span>
+          <span className={styles.treeFieldLabel}>{configLabel(metaMap, absolutePath, lang)}</span>
         </div>
-        {configHint(metaMap, absolutePath) ? <p className={styles.treeHint}>{configHint(metaMap, absolutePath)}</p> : null}
+        {configHint(metaMap, absolutePath, lang) ? <p className={styles.treeHint}>{configHint(metaMap, absolutePath, lang)}</p> : null}
         <div className={styles.treeFieldValue}>{formatConfigDisplayValue(fieldValue, meta?.kind, copy)}</div>
       </article>
     );
@@ -1456,7 +1469,7 @@ function ConfigSectionEditor({
               />
             </label>
             <div className={styles.avatarImageMeta}>
-              <strong>{configLabel(metaMap, absolutePath)}</strong>
+              <strong>{configLabel(metaMap, absolutePath, lang)}</strong>
               <span>{displayName}</span>
             </div>
           </div>
@@ -1596,15 +1609,15 @@ function ConfigSectionEditor({
           isSelected={Boolean(fieldValue)}
           onChange={(isSelected) => updateSectionDraft(absolutePath, isSelected)}
         >
-          {configLabel(metaMap, absolutePath)}
+          {configLabel(metaMap, absolutePath, lang)}
         </VCheckbox>
       );
     } else if (kind === "select") {
       control = (
         <label className={styles.field}>
-          <span>{configLabel(metaMap, absolutePath)}</span>
+          <span>{configLabel(metaMap, absolutePath, lang)}</span>
           <VStringSelect
-            ariaLabel={configLabel(metaMap, absolutePath)}
+            ariaLabel={configLabel(metaMap, absolutePath, lang)}
             value={getString(fieldValue)}
             options={(meta?.options ?? []).map((option) => ({
               value: option.value,
@@ -1617,7 +1630,7 @@ function ConfigSectionEditor({
     } else if (kind === "number") {
       control = (
         <label className={styles.field}>
-          <span>{configLabel(metaMap, absolutePath)}</span>
+          <span>{configLabel(metaMap, absolutePath, lang)}</span>
           <VInput
             type="number"
             step="any"
@@ -1632,7 +1645,7 @@ function ConfigSectionEditor({
     } else if (kind === "string_list") {
       control = (
         <label className={styles.field}>
-          <span>{configLabel(metaMap, absolutePath)}</span>
+          <span>{configLabel(metaMap, absolutePath, lang)}</span>
           <VTextarea
             minRows={Math.max(4, Array.isArray(fieldValue) ? fieldValue.length + 1 : 4)}
             value={Array.isArray(fieldValue) ? fieldValue.join("\n") : getString(fieldValue)}
@@ -1651,7 +1664,7 @@ function ConfigSectionEditor({
     } else if (kind === "multiline") {
       control = (
         <label className={styles.field}>
-          <span>{configLabel(metaMap, absolutePath)}</span>
+          <span>{configLabel(metaMap, absolutePath, lang)}</span>
           <VTextarea
             minRows={10}
             value={getString(fieldValue)}
@@ -1662,7 +1675,7 @@ function ConfigSectionEditor({
     } else if (kind === "json") {
       control = (
         <label className={styles.field}>
-          <span>{configLabel(metaMap, absolutePath)}</span>
+          <span>{configLabel(metaMap, absolutePath, lang)}</span>
           <VTextarea
             minRows={6}
             value={typeof fieldValue === "string" ? fieldValue : formatJson(fieldValue)}
@@ -1680,7 +1693,7 @@ function ConfigSectionEditor({
     } else {
       control = (
         <label className={styles.field}>
-          <span>{configLabel(metaMap, absolutePath)}</span>
+          <span>{configLabel(metaMap, absolutePath, lang)}</span>
           <VInput
             type={kind === "secret" ? "password" : "text"}
             value={getString(fieldValue)}
@@ -1690,7 +1703,7 @@ function ConfigSectionEditor({
       );
     }
 
-    const hint = configHint(metaMap, absolutePath);
+    const hint = configHint(metaMap, absolutePath, lang);
     const fieldCardClassName =
       kind === "background_image"
         ? `${styles.treeFieldCard} ${styles.treeFieldCardEdit} ${styles.themeBackgroundImageCard}`
@@ -1717,8 +1730,8 @@ function ConfigSectionEditor({
           <div className={styles.treeToggleLabel}>
             <ChevronRight size={14} className={expanded ? styles.treeToggleIconExpanded : styles.treeToggleIcon} />
             <div>
-              <p className={styles.cardTitle}>{titleOverride ?? configLabel(metaMap, absolutePath)}</p>
-              {configHint(metaMap, absolutePath) ? <p className={styles.treeHint}>{configHint(metaMap, absolutePath)}</p> : null}
+              <p className={styles.cardTitle}>{titleOverride ?? configLabel(metaMap, absolutePath, lang)}</p>
+              {configHint(metaMap, absolutePath, lang) ? <p className={styles.treeHint}>{configHint(metaMap, absolutePath, lang)}</p> : null}
             </div>
           </div>
           <span className={styles.inlineBadge}>{count}</span>
@@ -1755,6 +1768,26 @@ function ConfigSectionEditor({
     );
   }
 
+  function renderObjectEntry(
+    [key, childValue]: [string, unknown],
+    absolutePath: string,
+    mode: "view" | "edit",
+  ) {
+    const childPath = `${absolutePath}.${key}`;
+    const childMetaKind = metaMap[childPath]?.kind;
+    const childIsObjectList = isConfigObjectListValue(childValue, childMetaKind);
+    const childIsObject = isPlainObject(childValue);
+    if (childIsObject || childIsObjectList) {
+      const childExpanded = Boolean(expandedPaths[childPath]);
+      return (
+        <div key={childPath} className={childExpanded ? styles.treeWide : styles.treeObjectCell}>
+          {renderNode(childValue, childPath, mode)}
+        </div>
+      );
+    }
+    return renderConfigField(childValue, childPath, mode);
+  }
+
   function renderObjectBody(nodeValue: Record<string, unknown>, absolutePath: string, mode: "view" | "edit") {
     const entries = Object.entries(nodeValue);
     if (!entries.length) {
@@ -1763,23 +1796,71 @@ function ConfigSectionEditor({
     if (absolutePath === "user_profile") {
       return renderUserProfileBody(nodeValue, absolutePath, mode);
     }
+    if (absolutePath === section.path && presentation) {
+      const commonEntries = entries.filter(([key]) => {
+        const childPath = `${absolutePath}.${key}`;
+        return isCommonConfigSectionEntry(section.id, childPath);
+      });
+      const advancedEntries = entries.filter(([key]) => {
+        const childPath = `${absolutePath}.${key}`;
+        return !isCommonConfigSectionEntry(section.id, childPath);
+      });
+      return (
+        <div className={styles.configProgressiveBody}>
+          <div className={styles.configTier}>
+            <div className={styles.configTierHeader}>
+              <div className={styles.configTierHeaderCopy}>
+                <strong>{presentation.commonTitle}</strong>
+                <span>{presentation.commonHint}</span>
+              </div>
+              <span className={styles.inlineBadge}>{presentation.advancedCountLabel(tierCounts.common)}</span>
+            </div>
+            <div
+              className={`${styles.treeGrid} ${section.id === "pet" ? styles.configCommonGridPet : styles.configCommonGridContext}`}
+            >
+              {commonEntries.map((entry) => renderObjectEntry(entry, absolutePath, mode))}
+            </div>
+          </div>
+
+          <div className={`${styles.configTier} ${styles.configAdvancedTier}`}>
+            <VButton
+              type="button"
+              contentLayout="plain"
+              className={styles.configAdvancedToggle}
+              aria-expanded={advancedExpanded}
+              onClick={() => {
+                onUiStateChange(section.id, {
+                  ...uiState,
+                  advancedExpanded: !advancedExpanded,
+                });
+              }}
+            >
+              <div className={styles.configTierHeaderCopy}>
+                <strong>{presentation.advancedTitle}</strong>
+                <span>{presentation.advancedHint}</span>
+              </div>
+              <div className={styles.configAdvancedToggleMeta}>
+                <span className={styles.inlineBadge}>{presentation.advancedCountLabel(tierCounts.advanced)}</span>
+                <ChevronRight
+                  size={16}
+                  className={advancedExpanded ? styles.treeToggleIconExpanded : styles.treeToggleIcon}
+                />
+              </div>
+            </VButton>
+            {advancedExpanded ? (
+              <div className={styles.configAdvancedBody}>
+                <div className={`${styles.treeGrid} ${styles.configAdvancedGrid}`}>
+                  {advancedEntries.map((entry) => renderObjectEntry(entry, absolutePath, mode))}
+                </div>
+              </div>
+            ) : null}
+          </div>
+        </div>
+      );
+    }
     return (
       <div className={styles.treeGrid}>
-        {entries.map(([key, childValue]) => {
-          const childPath = `${absolutePath}.${key}`;
-          const childMetaKind = metaMap[childPath]?.kind;
-          const childIsObjectList = isConfigObjectListValue(childValue, childMetaKind);
-          const childIsObject = isPlainObject(childValue);
-          if (childIsObject || childIsObjectList) {
-            const childExpanded = Boolean(expandedPaths[childPath]);
-            return (
-              <div key={childPath} className={childExpanded ? styles.treeWide : styles.treeObjectCell}>
-                {renderNode(childValue, childPath, mode)}
-              </div>
-            );
-          }
-          return renderConfigField(childValue, childPath, mode);
-        })}
+        {entries.map((entry) => renderObjectEntry(entry, absolutePath, mode))}
       </div>
     );
   }
@@ -1828,7 +1909,7 @@ function ConfigSectionEditor({
       if (isRoot) {
         return renderObjectBody(nodeValue, absolutePath, mode);
       }
-      const label = itemIndex == null ? configLabel(metaMap, absolutePath) : `${copy.itemLabel} ${itemIndex + 1}`;
+      const label = itemIndex == null ? configLabel(metaMap, absolutePath, lang) : `${copy.itemLabel} ${itemIndex + 1}`;
       return (
         <>{renderNestedBlock(absolutePath, Object.keys(nodeValue).length, renderObjectBody(nodeValue, absolutePath, mode), label)}</>
       );
@@ -1842,7 +1923,7 @@ function ConfigSectionEditor({
       <div className={styles.sectionHeader}>
         <div className={styles.sectionHeaderMain}>
           <p className={styles.eyebrow}>{section.path}</p>
-          <h2 className={styles.sectionTitle}>{section.title}</h2>
+          <h2 className={styles.sectionTitle}>{presentation?.sectionTitle ?? section.title}</h2>
           <p className={styles.sectionText}>{section.summary}</p>
         </div>
         <div className={styles.sectionHeaderActions}>
