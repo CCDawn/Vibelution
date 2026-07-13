@@ -12,7 +12,7 @@ export function ConfigWorkspacePlaceholderPanel({
   subtitle,
   tone = "loading",
 }: ConfigWorkspacePlaceholderPanelProps) {
-  const navLabels = ["Source", "Runtime", "Models", "Diagnostics", "Tools"];
+  const navLabels = ["总览与保存", "界面与高级配置", "用户与形象", "模型库", "运行时与上下文", "工具与诊断"];
   const matrixLabels = ["operator config", "providers", "models", "runtime"];
   return (
     <VSurface as="div" className={`${styles.loadingShell} ${tone === "error" ? styles.loadingShellError : ""}`} padding="none">

@@ -2,22 +2,25 @@ const panelSurface =
   "[background:color-mix(in_srgb,var(--surface-panel)_96%,var(--bg-canvas))] [border:1px_solid_var(--vui-border-subtle)] [border-radius:8px]";
 
 const styles = {
-  sectionSurface: `vui-routes-configproviderregistrypanel sectionSurface ${panelSurface} grid min-w-0 gap-3 p-3`,
+  sectionSurface: `vui-routes-configproviderregistrypanel sectionSurface ${panelSurface} grid h-full min-h-0 min-w-0 [grid-template-rows:auto_minmax(0,1fr)] gap-3 overflow-hidden p-3`,
   header: "vui-routes-configproviderregistrypanel header min-w-0",
   registryWorkspace:
-    "vui-routes-configproviderregistrypanel registryWorkspace min-w-0 [--vui-workspace-sidebar:30%] gap-3",
-  providerRail: "vui-routes-configproviderregistrypanel providerRail grid min-w-0 content-start gap-2",
-  providerList: "vui-routes-configproviderregistrypanel providerList max-h-[calc(100dvh-18rem)] min-w-0 overflow-y-auto",
+    "vui-routes-configproviderregistrypanel registryWorkspace h-full min-h-0 min-w-0 [--vui-workspace-sidebar:clamp(22rem,28%,28rem)] gap-3 overflow-hidden",
+  providerRail: "vui-routes-configproviderregistrypanel providerRail grid h-full min-h-0 min-w-0 [grid-template-rows:minmax(0,1fr)] gap-2",
+  providerList: "vui-routes-configproviderregistrypanel providerList h-full min-h-0 min-w-0 overflow-y-auto pr-1",
   providerButton:
-    "vui-routes-configproviderregistrypanel providerButton !grid !w-full min-w-0 !grid-cols-[minmax(0,1fr)_auto] !justify-stretch gap-2 text-left",
+    "vui-routes-configproviderregistrypanel providerButton !grid !min-h-[58px] !w-full min-w-0 !grid-cols-[minmax(0,1fr)_auto] !justify-stretch gap-3 px-3 py-2 text-left",
   providerIdentity: "vui-routes-configproviderregistrypanel providerIdentity grid min-w-0 gap-0.5",
   ellipsis: "vui-routes-configproviderregistrypanel ellipsis min-w-0 truncate",
-  detailSurface: "vui-routes-configproviderregistrypanel detailSurface grid min-w-0 content-start gap-2",
+  detailSurface: "vui-routes-configproviderregistrypanel detailSurface grid h-full min-h-0 min-w-0 [grid-template-rows:auto_auto_auto_minmax(0,1fr)_auto] gap-2 overflow-hidden",
   detailHeader:
     "vui-routes-configproviderregistrypanel detailHeader flex min-w-0 flex-wrap items-start justify-between gap-2 border-b border-vui-border-hairline pb-2",
   detailIdentity: "vui-routes-configproviderregistrypanel detailIdentity grid min-w-0 gap-0.5",
   tabs: "vui-routes-configproviderregistrypanel tabs flex min-w-0 flex-wrap items-center gap-1",
   tabButton: "vui-routes-configproviderregistrypanel tabButton",
+  detailBody:
+    "vui-routes-configproviderregistrypanel detailBody min-h-0 min-w-0 overflow-hidden rounded-lg border border-vui-border-subtle bg-vui-surface-row/40 p-2 [&>_*]:h-full",
+  tabSurface: "vui-routes-configproviderregistrypanel tabSurface grid h-full min-h-0 min-w-0 content-start gap-2 overflow-auto",
   detailGrid:
     "vui-routes-configproviderregistrypanel detailGrid grid min-w-0 [grid-template-columns:repeat(2,minmax(0,1fr))] gap-2 max-[640px]:[grid-template-columns:minmax(0,1fr)]",
   fact: "vui-routes-configproviderregistrypanel fact grid min-w-0 gap-0.5 rounded-md border border-vui-border-subtle bg-vui-surface-row px-2 py-1.5",
@@ -25,13 +28,13 @@ const styles = {
   factValue: "vui-routes-configproviderregistrypanel factValue min-w-0 truncate text-[var(--vui-font-sm)] font-semibold text-vui-fg-primary",
   deployment:
     "vui-routes-configproviderregistrypanel deployment grid min-w-0 gap-2 rounded-md border border-vui-border-subtle bg-vui-surface-glass p-2",
-  modelsWorkspace: "vui-routes-configproviderregistrypanel modelsWorkspace grid min-h-0 min-w-0 gap-2",
+  modelsWorkspace: "vui-routes-configproviderregistrypanel modelsWorkspace grid h-full min-h-0 min-w-0 [grid-template-rows:auto_minmax(0,1fr)] gap-2 overflow-hidden",
   modelToolbar:
     "vui-routes-configproviderregistrypanel modelToolbar grid min-w-0 [grid-template-columns:minmax(16rem,0.7fr)_minmax(0,1fr)] items-center gap-2",
   modelSearch: "vui-routes-configproviderregistrypanel modelSearch min-w-0",
   modelFilters: "vui-routes-configproviderregistrypanel modelFilters flex min-w-0 flex-wrap items-center justify-end gap-1",
   tableScroll:
-    "vui-routes-configproviderregistrypanel tableScroll min-w-0 max-h-[calc(100dvh-33rem)] overflow-auto rounded-[var(--radius-control)]",
+    "vui-routes-configproviderregistrypanel tableScroll h-full min-h-0 min-w-0 overflow-auto rounded-[var(--radius-control)]",
   table:
     "vui-routes-configproviderregistrypanel table min-w-[820px] !overflow-visible [&_thead]:sticky [&_thead]:top-0 [&_thead]:z-10",
   modelIdentity: "vui-routes-configproviderregistrypanel modelIdentity grid min-w-0 gap-0.5",
@@ -44,8 +47,8 @@ const styles = {
     "vui-routes-configproviderregistrypanel actionFeedback min-w-0 rounded-md border border-vui-border-subtle bg-vui-surface-row/70 px-2 py-1.5 text-[var(--vui-font-sm)] text-vui-fg-secondary [overflow-wrap:anywhere]",
   actionFeedbackError:
     "vui-routes-configproviderregistrypanel actionFeedbackError min-w-0 rounded-md border border-[color-mix(in_srgb,var(--state-error)_38%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--state-error)_8%,var(--vui-surface-row))] px-2 py-1.5 text-[var(--vui-font-sm)] text-[var(--state-error)] [overflow-wrap:anywhere]",
-  mobileActionGroup:
-    "vui-routes-configproviderregistrypanel mobileActionGroup grid min-w-0 [grid-template-columns:repeat(auto-fit,minmax(max-content,1fr))] gap-1.5 max-[390px]:[grid-template-columns:minmax(0,1fr)] max-[390px]:[&_[data-vui=button]]:!w-full",
+  dangerZone:
+    "vui-routes-configproviderregistrypanel dangerZone flex min-w-0 items-center justify-between gap-3 border-t border-[color-mix(in_srgb,var(--state-error)_22%,var(--vui-border-subtle))] pt-2",
   critical:
     "vui-routes-configproviderregistrypanel critical rounded-md border border-[color-mix(in_srgb,var(--state-error)_38%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--state-error)_8%,var(--vui-surface-row))] px-2 py-1.5 text-[var(--vui-font-sm)] text-[var(--state-error)]",
   muted: "vui-routes-configproviderregistrypanel muted text-[var(--vui-font-xs)] text-vui-fg-tertiary",

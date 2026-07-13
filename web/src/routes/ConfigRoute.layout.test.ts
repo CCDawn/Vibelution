@@ -115,14 +115,14 @@ describe("ConfigRoute layout contract", () => {
     expect(routeSource).toContain('providerWorkspaceMode === "advanced"');
     expect(quickSetupSource).toContain("检测连接");
     expect(quickSetupSource).toContain("保存并完成");
-    expect(quickSetupStyles.workspace).toContain("max-w-[72rem]");
+    expect(quickSetupStyles.workspace).toContain("max-w-[88rem]");
     expect(quickSetupStyles.inputGrid).toContain("grid-template-columns");
     expect(quickSetupSource).toContain('state.phase !== "input"');
     expect(quickSetupStylesSource).not.toContain("min-h-[28rem]");
     expect(quickSetupStylesSource).not.toContain("minmax(22rem,0.9fr)_minmax(28rem,1.1fr)");
     expect(routeSource).toContain('workspace.schemaVersion === 2 && isSectionVisible("models")');
     expect(routeSource).toContain('providerWorkspaceMode === "advanced" ? (\n                  <>');
-    expect(routeSource).toContain('activeSection?.id === "models-profiles" && workspace.schemaVersion !== 2');
+    expect(routeSource).toContain('activePage?.id !== "model-connection"');
   });
 
   it("keeps formal config apply outside Provider detection orchestration", () => {
@@ -295,20 +295,26 @@ describe("ConfigRoute layout contract", () => {
   it("keeps quick setup in a bounded progressive desktop workspace", () => {
     expect(quickSetupSource).toContain('<div className={styles.workspace}>');
     expect(quickSetupStyles.root).not.toContain("grid-template-columns");
-    expect(quickSetupStyles.workspace).toContain("max-w-[72rem]");
+    expect(quickSetupStyles.workspace).toContain("max-w-[88rem]");
     expect(quickSetupStyles.inputGrid).toContain("[grid-template-columns:minmax(15rem,1fr)_minmax(18rem,1.2fr)_max-content]");
-    expect(quickSetupStyles.field).toContain("[&_[data-vui=select-trigger]]:!h-[var(--vui-control-height-sm)]");
-    expect(quickSetupStyles.field).toContain("[&_[data-vui=select-trigger]]:!min-h-[var(--vui-control-height-sm)]");
+    expect(quickSetupStyles.field).toContain("[&_[data-vui=select-trigger]]:!h-10");
+    expect(quickSetupStyles.field).toContain("[&_[data-vui=select-trigger]]:!min-h-10");
+    expect(quickSetupStyles.primaryAction).toContain("min-h-10");
+    expect(styles.providerModeButton).toContain("min-h-10");
+    expect(routeSource).toContain('aria-pressed={providerWorkspaceMode === "quick"}');
+    expect(routeSource).toContain('aria-pressed={providerWorkspaceMode === "manage"}');
+    expect(routeSource).toContain('aria-pressed={providerWorkspaceMode === "advanced"}');
     expect(quickSetupStyles.resultRegion).not.toContain("min-h-");
     expect(quickSetupStylesSource).not.toContain("position:fixed");
     expect(quickSetupStylesSource).not.toContain("bottom-0");
   });
 
   it("keeps existing Provider management in a bounded desktop list-detail grid", () => {
-    expect(providerPanelStyles.registryWorkspace).toContain("[--vui-workspace-sidebar:30%]");
+    expect(providerPanelStyles.registryWorkspace).toContain("[--vui-workspace-sidebar:clamp(22rem,28%,28rem)]");
     expect(providerPanelStyles.registryWorkspace).not.toContain("max-[960px]");
-    expect(providerPanelStyles.providerList).toContain("max-h-[calc(100dvh-18rem)]");
+    expect(providerPanelStyles.providerList).toContain("h-full");
     expect(providerPanelStyles.providerList).toContain("overflow-y-auto");
+    expect(styles.providerModelsLayout).toContain("[grid-template-rows:auto_minmax(0,1fr)]");
   });
 
   it("passes the workspace schema version into legacy model account compatibility", () => {
@@ -329,6 +335,33 @@ describe("ConfigRoute layout contract", () => {
     expect(placeholderPanelStyles.loadingShell).toBeTypeOf("string");
     expect(placeholderPanelStyles.loadingBoard).toBeTypeOf("string");
     expect(routeSource).not.toContain("<section className={styles.loadingSurface}>");
+  });
+
+  it("uses comfortable desktop controls and matching six-group placeholders", () => {
+    expect(styles.page).toContain("[--control-height:40px]");
+    expect(styles.page).toContain("[--vui-control-height-sm:40px]");
+    expect(styles.field).toContain("[grid-template-columns:minmax(12rem,0.34fr)_minmax(0,1fr)]");
+    expect(styles.actionButton).toContain("[min-height:40px]");
+    expect(styles.primaryButton).toContain("[min-height:40px]");
+    expect(placeholderPanelSource).toContain("总览与保存");
+    expect(placeholderPanelSource).toContain("工具与诊断");
+    expect(placeholderPanelStyles.loadingNavList).toContain("[min-height:44px]");
+    expect(placeholderPanelStyles.loadingShell).toContain("[height:100%]");
+  });
+
+  it("uses fixed two-level settings navigation with one active page", () => {
+    expect(routeSource).toContain("const [activeGroupId, setActiveGroupId]");
+    expect(routeSource).toContain("const [activePageId, setActivePageId]");
+    expect(routeSource).toContain("<ConfigSettingsSidebar");
+    expect(routeSource).toContain("<ConfigSettingsPageTabs");
+    expect(routeSource).toContain("activePage?.memberSectionIds.includes(sectionId)");
+    expect(routeSource).not.toContain("SIDEBAR_WIDTH_STORAGE_KEY");
+    expect(routeSource).not.toContain("beginSidebarResize");
+    expect(routeSource).not.toContain("sidebarIndexCollapsed");
+    expect(routeSource).not.toContain("styles.sidebarMetaStrip");
+    expect(styles.page).toContain("[grid-template-rows:minmax(0,1fr)]");
+    expect(styles.content).toContain("[grid-template-rows:auto_auto_minmax(0,1fr)]");
+    expect(styles.pageViewport).toContain("overflow-y-auto");
   });
 
   it("extracts core Config sections into route-local display panels", () => {
@@ -378,18 +411,34 @@ describe("ConfigRoute layout contract", () => {
 
   it("moves supplemental config explanation into hover text instead of permanent helper copy", () => {
     expect(routeSource).toContain("subtitleHint");
-    expect(routeSource).toContain('title={copy.subtitleHint}');
+    expect(routeSource).toContain('subtitleHint={copy.subtitleHint}');
     expect(overviewPanelSource).toContain("sourceBodyShort");
     expect(providerPanelSource).toContain("Provider 与模型工作台");
     expect(overviewPanelSource).toContain('title={copy.sourceBody}');
     expect(providerPanelSource).toContain('title={provider.providerId}');
-    expect(overviewPanelSource).toContain('title={copy.openEnvironmentHint}');
+    expect(routeSource).toContain('title={copy.openEnvironmentHint}');
     expect(routeSource).not.toContain('<span className={styles.helperText}>{copy.openEnvironmentHint}</span>');
   });
 
+  it("keeps overview concise and moves raw configuration into tooling", () => {
+    expect(overviewPanelSource).toContain("workspace.modelLibraryCount");
+    expect(overviewPanelSource).toContain("workspace.blockingCount");
+    expect(overviewPanelSource).toContain("workspace.warningCount");
+    expect(overviewPanelSource).not.toContain("onOpenEnvironment");
+    expect(overviewPanelSource).not.toContain("workspace.rawToml");
+    expect(draftPanelSource).toContain("rawToml: string");
+    expect(draftPanelSource).toContain("configPath: string");
+    expect(draftPanelSource).toContain("<LazyJsonCodeMirror");
+    expect(draftPanelSource).toContain("<pre");
+    expect(routeSource).toContain('activePage?.id === "tooling-access"');
+    expect(routeSource).toContain("developerModeConfig.enabled");
+    expect(routeSource).toContain("aria-label={copy.developerModeReadonly}");
+  });
+
   it("keeps the model settings group dense enough to use the bottom viewport", () => {
-    expect(routeSource).toContain('activeSection?.id === "models-profiles"');
-    expect(routeSource).toContain("styles.contentModels");
+    expect(routeSource).toContain('activePage?.id !== "model-connection"');
+    expect(styles.content).toContain("[grid-template-rows:auto_auto_minmax(0,1fr)]");
+    expect(styles.pageViewport).toContain("min-h-0");
     expect(routeSource).toContain("<ConfigProviderRegistryPanel");
     expect(providerPanelSource).toContain('id="config-models"');
     expect(providerPanelSource).toContain("styles.registryWorkspace");
@@ -410,15 +459,16 @@ describe("ConfigRoute layout contract", () => {
     expect(providerPanelStylesSource).not.toMatch(/\bsurface-card\b(?!\))/);
     expect(providerPanelStylesSource).not.toContain("var(--radius-panel)");
     expect(providerPanelStyles.sectionSurface).toContain("[border-radius:8px]");
-    expect(providerPanelStyles.registryWorkspace).toContain("[--vui-workspace-sidebar:30%]");
+    expect(providerPanelStyles.registryWorkspace).toContain("[--vui-workspace-sidebar:clamp(22rem,28%,28rem)]");
     expect(providerPanelStyles.providerList).toContain("overflow-y-auto");
-    expect(providerPanelStyles.tableScroll).toContain("max-h-[calc(100dvh-33rem)]");
+    expect(providerPanelStyles.tableScroll).toContain("h-full");
+    expect(providerPanelStyles.providerButton).toContain("!min-h-[58px]");
     expect(providerPanelStyles.tableScroll).toContain("overflow-auto");
     expect(providerPanelStyles.table).toContain("[&_thead]:sticky");
     expect(providerPanelSource).toContain("filterProviderModels");
     expect(providerPanelSource).toContain("deriveProviderModelActionState");
     expect(providerPanelSource).toContain('aria-label="搜索模型"');
-    expect(providerPanelStyles.mobileActionGroup).toContain("max-[390px]:[grid-template-columns:minmax(0,1fr)]");
+    expect(providerPanelStyles.dangerZone).toContain("justify-between");
     expect(providerPanelSource).toContain("测试调用");
     expect(providerPanelSource).toContain("verificationStatus");
     expect(routeSource).toContain("handleTestProviderModel");
@@ -454,31 +504,25 @@ describe("ConfigRoute layout contract", () => {
   });
 
   it("keeps the settings workbench readable over custom backgrounds with a bounded draft editor", () => {
-    expect(routeSource).toContain("styles.configStatusBand");
+    expect(routeSource).toContain("styles.configHeader");
     expect(routeSource).toContain("styles.configStatusActions");
-    expect(routeSource).toContain("styles.sidebarMetaStrip");
-    expect(routeSource).toContain("styles.sidebarStatusCompact");
+    expect(routeSource).toContain("<ConfigSettingsSidebar");
+    expect(routeSource).not.toContain("styles.sidebarMetaStrip");
+    expect(routeSource).not.toContain("styles.sidebarStatusCompact");
     expect(routeSource).not.toContain("styles.sidebarMetrics");
 
     expect(stylesSource).toContain("const readablePanelSurface");
     expect(stylesSource).toContain("const readableRowSurface");
     expect(styles.page).toContain("[background:color-mix(in_srgb,var(--surface-page)_94%,var(--bg-canvas))]");
-    expect(stylesSource).toContain("configStatusBand:");
-    expect(stylesSource).toContain("sidebar:");
-    expect(styles.configStatusBand).toContain("color-mix(in_srgb,var(--surface-panel)_96%,var(--bg-canvas))");
-    expect(styles.sidebar).toContain("color-mix(in_srgb,var(--surface-panel)_96%,var(--bg-canvas))");
-    expect(styles.sidebarMetaStrip).toContain("[display:flex]");
-    expect(styles.sidebarMetaStrip).toContain("[flex-wrap:wrap]");
-    expect(styles.sidebarStatusCompact).toContain(
-      "[background:color-mix(in_srgb,var(--surface-card)_94%,var(--surface-panel))]",
-    );
+    expect(stylesSource).toContain("configHeader:");
+    expect(styles.configHeader).toContain("color-mix(in_srgb,var(--surface-panel)_96%,var(--bg-canvas))");
 
     expect(draftPanelSource).toContain("styles.draftWorkbench");
     expect(draftPanelSource).toContain("styles.draftActionRail");
     expect(draftPanelStylesSource).toContain("const readablePanelSurface");
-    expect(draftPanelStyles.draftWorkbench).toContain("[max-height:min(520px,_54vh)]");
-    expect(draftPanelStyles.editorWrap).toContain("[min-height:260px]");
-    expect(draftPanelStyles.editorWrap).toContain("[max-height:min(430px,_44vh)]");
+    expect(draftPanelStyles.draftWorkbench).toContain("[grid-template-rows:auto_minmax(22rem,1fr)_auto]");
+    expect(draftPanelStyles.editorWrap).toContain("[min-height:22rem]");
+    expect(draftPanelStyles.sectionSurface).toContain("[height:100%]");
     expect(draftPanelStyles.sectionSurface).not.toContain("color-mix(in_srgb,var(--vui-surface-panel)_72%,transparent)");
     expect(overviewPanelStyles.sectionSurface).not.toContain("color-mix(in_srgb,var(--vui-surface-panel)_72%,transparent)");
     expect(runtimePanelStyles.sectionSurface).not.toContain("color-mix(in_srgb,var(--vui-surface-panel)_72%,transparent)");
@@ -522,7 +566,7 @@ describe("ConfigRoute layout contract", () => {
     expect(routeSource).toContain("const returnToLabel = searchParams.get(\"returnLabel\") === \"agents\" ? copy.returnToAgents : copy.returnToSource");
     expect(routeSource).toContain("requestedSectionId !== lastRequestedSectionRef.current");
     expect(routeSource).toContain("lastRequestedSectionRef.current = requestedSectionId");
-    expect(routeSource).toContain("setActiveSectionId(requestedSectionId)");
+    expect(routeSource).toContain("setActiveGroupId(requestedGroup.id)");
     expect(routeSource).toContain("className={styles.returnButton}");
     expect(routeSource).toContain("to={returnToPath}");
     expect(stylesSource).toContain("returnButton:");
@@ -540,9 +584,8 @@ describe("ConfigRoute layout contract", () => {
   it("shows developer mode as launcher-owned read-only state", () => {
     expect(routeSource).toContain("developerModeReadonly");
     expect(routeSource).toContain("developerModeControlled");
-    expect(routeSource).toContain("developerModeConfig.enabled");
-    expect(routeSource).toContain("aria-label={copy.developerModeReadonly}");
     expect(routeSource).toContain("Launcher 控制");
+    expect(routeSource).not.toContain("styles.sidebarMetaStrip");
     expect(routeSource).not.toContain("updateLauncherDeveloperMode");
     expect(routeSource).not.toContain("developer-mode/cleanup");
   });
@@ -742,14 +785,13 @@ describe("ConfigRoute layout contract", () => {
     expect(routeSource).toContain("headerClassName={styles.sectionHeader}");
     expect((routeSource.match(/<VRouteHeader\b/g) ?? []).length).toBe(1);
     expect(routeSource).not.toMatch(/<VRouteHeader[\s\S]*?<VStatusStrip[\s\S]*?<\/VRouteHeader>/);
-    expect(styles.configStatusBand).toContain("[grid-template-columns:1fr]");
+    expect(styles.configHeader).toContain("[grid-template-columns:minmax(0,1fr)]");
   });
 
   it("keeps a canonical Config h1 across loaded and placeholder states", () => {
     expect(placeholderPanelSource).toContain("VRouteHeader");
     expect(placeholderPanelSource).not.toContain("<VPanelHeader");
-    expect(routeSource).toContain("<VPanelHeader");
-    expect(routeSource).toContain("headingLevel={null}");
+    expect(routeSource).toContain("<ConfigSettingsSidebar");
     expect((routeSource.match(/<VRouteHeader\b/g) ?? []).length).toBe(1);
   });
 

@@ -142,12 +142,25 @@ describe("ConfigProviderRegistryPanel", () => {
 
     expect(markup).toContain("未观测");
     expect(markup).not.toContain("unknown · 未观测");
-    expect(panelStyles.tableScroll).toContain("max-h-[calc(100dvh-33rem)]");
+    expect(panelStyles.tableScroll).toContain("h-full");
+    expect(panelStyles.tableScroll).not.toContain("max-h-[calc(100dvh-33rem)]");
     expect(panelStyles.tableScroll).toContain("overflow-auto");
     expect(panelStyles.table).toContain("min-w-[820px]");
     expect(panelStyles.table).toContain("[&amp;_thead]:sticky".replace("&amp;", "&"));
     const heroUiImportToken = ["@heroui", "react"].join("/");
     expect(panelSource).not.toContain(heroUiImportToken);
+  });
+
+  it("fills the desktop workspace with large Provider rows and a bottom danger zone", () => {
+    expect(panelStyles.sectionSurface).toContain("h-full");
+    expect(panelStyles.registryWorkspace).toContain("[--vui-workspace-sidebar:clamp(22rem,28%,28rem)]");
+    expect(panelStyles.providerList).toContain("h-full");
+    expect(panelStyles.providerButton).toContain("!min-h-[58px]");
+    expect(panelStyles.detailSurface).toContain("[grid-template-rows:auto_auto_auto_minmax(0,1fr)_auto]");
+    expect(panelStyles.detailBody).toContain("min-h-0");
+    expect(panelSource).toContain('data-provider-tab={selectedTab}');
+    expect(panelSource).toContain('data-provider-danger-zone="true"');
+    expect(panelSource).not.toContain("mobileActionGroup");
   });
 
   it("resets local model tools from the actual rendered Provider identity", () => {
