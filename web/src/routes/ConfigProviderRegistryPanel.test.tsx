@@ -117,9 +117,11 @@ describe("ConfigProviderRegistryPanel", () => {
   });
 
   it("renders neutral action labels instead of inapplicable danger buttons", () => {
-    expect(renderModels([model("observed", "observed")])).toContain("未固定");
-    expect(renderModels([model("observed", "observed")])).not.toContain("取消固定");
-    expect(renderModels([model("observed", "observed")])).not.toContain("测试调用");
+    const observedMarkup = renderModels([model("observed", "observed")]);
+    expect(observedMarkup).toContain("未固定");
+    expect(observedMarkup).not.toContain("取消固定");
+    expect(observedMarkup).not.toContain("测试调用");
+    expect(observedMarkup).toContain("验证推理 low / high");
     expect(renderModels([model("disabled", "disabled")])).toContain("不可用");
     expect(renderModels([model("disabled", "disabled")])).not.toContain("取消固定");
 
@@ -130,6 +132,21 @@ describe("ConfigProviderRegistryPanel", () => {
 
     expect(renderModels([pinned])).toContain("测试调用");
     expect(renderModels([pinned])).toContain("取消固定");
+  });
+
+  it("shows verified reasoning efforts as maintained model capability", () => {
+    const reasoningModel = {
+      ...model("reasoning", "observed"),
+      reasoningEffortValues: ["low", "high"],
+      reasoningVerificationStatus: "verified",
+    };
+
+    const markup = renderModels([reasoningModel]);
+
+    expect(markup).toContain("推理 low / high 已验证");
+    expect(markup).not.toContain("验证推理 low / high");
+    expect(panelSource).toContain('"/api/config/test-llm"');
+    expect(panelSource).toContain('capability: "reasoning_effort"');
   });
 
   it("distinguishes an empty directory from filtered no results", () => {

@@ -144,6 +144,12 @@ export type ConfigCatalogModel = {
   verificationCheckedAt?: string;
   verificationErrorType?: string;
   verificationHttpStatus?: number | null;
+  reasoningVerificationStatus?: "unverified" | "verified" | "failed" | "stale" | string;
+  reasoningEffortValues?: string[];
+  defaultReasoningEffort?: string;
+  reasoningAdapter?: string;
+  reasoningCapabilitySource?: string;
+  reasoningCheckedAt?: string;
 };
 
 export type ConfigCatalogWarning = {
@@ -405,6 +411,10 @@ export type ConfigLlmTestResult = {
   verification_error_type?: string;
   verification_http_status?: number | null;
   verification_persisted?: boolean;
+  reasoning_effort_values?: string[];
+  default_reasoning_effort?: string;
+  reasoning_adapter?: string;
+  reasoning_contract_persisted?: boolean;
 };
 
 export type ConfigDiscoveredModel = {
