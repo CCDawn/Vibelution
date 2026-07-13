@@ -164,13 +164,14 @@ export function mergeAssistantDeltaIntoActiveTurnLayer(
   const content = canonicalSurface?.answerContent ?? legacyContent;
   const thought = canonicalSurface?.thoughtContent ?? legacyThought;
   const codexTranscript = canonicalSurface?.codexTranscript ?? payload.codexTranscript ?? base?.codexTranscript;
-  if (!hasVisibleActiveTurnProtocolContent({
+  const hasVisibleContent = hasVisibleActiveTurnProtocolContent({
     answerContent: content,
     thoughtContent: thought,
     feedbackEventCount: feedbackEvents.length,
     codexTranscript,
     turnItems,
-  })) {
+  });
+  if (!hasVisibleContent && payload.done) {
     return undefined;
   }
   return {
