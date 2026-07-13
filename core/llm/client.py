@@ -1403,6 +1403,27 @@ class LLMClient:
             responses_backend=self._responses_backend,
         )
 
+    @staticmethod
+    def _responses_replay_context(messages: List[Any]) -> tuple[Any, List[Any]]:
+        source_messages = list(messages or [])
+        for index in range(len(source_messages) - 1, -1, -1):
+            message = source_messages[index]
+            additional_kwargs = (
+                message.get("additional_kwargs", {})
+                if isinstance(message, dict)
+                else getattr(message, "additional_kwargs", {})
+            )
+            if not hasattr(additional_kwargs, "get"):
+                continue
+            outcome = additional_kwargs.get("turn_outcome")
+            replay_state = getattr(outcome, "replay_state", None)
+            if replay_state is None:
+                continue
+            if str(getattr(replay_state, "response_id", "") or "").strip():
+                return replay_state, source_messages[index:]
+            return replay_state, source_messages
+        return None, source_messages
+
     def _build_payload(
         self,
         messages: List[Any],
@@ -1430,10 +1451,18 @@ class LLMClient:
                     "forbiddenField": "toolCalls",
                 },
             )
-        provider_messages = _normalize_semantic_messages_with_adapter(
-            normalize_messages_for_provider(list(messages or [])),
-            self.adapter,
-        )
+        projection_messages = list(messages or [])
+        replay_state = None
+        if self.protocol_route.wire_protocol == WireProtocol.RESPONSES:
+            replay_state, projection_messages = self._responses_replay_context(projection_messages)
+        if self.protocol_route.wire_protocol == WireProtocol.RESPONSES:
+            provider_messages = projection_messages
+        else:
+            provider_messages = normalize_messages_for_provider(projection_messages)
+            provider_messages = _normalize_semantic_messages_with_adapter(
+                provider_messages,
+                self.adapter,
+            )
         build_input = PayloadBuildInput(
             messages=provider_messages,
             tools=selected_tools,
@@ -1487,8 +1516,20 @@ class LLMClient:
                     system_message_policy=self.protocol_route.policy.system_message_policy,
                     allow_assistant_prefill=self.protocol_route.policy.allow_assistant_prefill,
                     reasoning_roundtrip=self.protocol_route.compat.reasoning_roundtrip,
+                    replay_state=replay_state,
                 )
             )
+            if (
+                replay_state is not None
+                and str(getattr(replay_state, "response_id", "") or "").strip()
+                and semantic_request.messages
+            ):
+                from dataclasses import replace as replace_dataclass
+
+                semantic_request = replace_dataclass(
+                    semantic_request,
+                    messages=semantic_request.messages[1:],
+                )
             wire_payload = wire_adapter.encode_request(semantic_request, route=self.protocol_route)
             built = compose_runtime_wire_payload(
                 build_input,

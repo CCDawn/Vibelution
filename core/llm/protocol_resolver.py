@@ -509,8 +509,13 @@ def resolve_model_protocol(
         try:
             protocol = ModelProtocol(explicit_protocol.strip().lower())
             source = "explicit_model"
-        except ValueError:
-            warnings.append(f"unknown explicit protocol `{explicit_protocol}`; falling back to inference")
+        except ValueError as exc:
+            raise ProtocolResolutionError(
+                "protocol_mismatch",
+                f"unknown explicit model protocol `{explicit_protocol}`",
+                provider_id=_read_optional_string(profile, "provider_id") or provider_kind,
+                model_ref=_read_optional_string(model_entry, "model_ref") or effective_model,
+            ) from exc
     if protocol is None:
         protocol = _protocol_from_provider_api(provider_api, provider_kind, profile)
         if protocol is not None:
