@@ -280,6 +280,28 @@ def test_responses_non_success_terminal_events_never_return_final_answer(termina
     assert events[-1].terminal is True
 
 
+def test_responses_incomplete_preserves_provider_reason_for_diagnostics():
+    decoded = ResponsesWireAdapter().decode_stream(
+        [
+            {
+                "type": "response.incomplete",
+                "response": {
+                    "id": "resp-incomplete",
+                    "status": "incomplete",
+                    "incomplete_details": {"reason": "max_output_tokens"},
+                },
+            }
+        ],
+        route=route(),
+        scope=scope(),
+    )
+
+    tuple(decoded)
+
+    assert decoded.outcome.kind == "incomplete"
+    assert decoded.outcome.error == "max_output_tokens"
+
+
 def test_responses_tool_result_encoder_preserves_call_id():
     result = CanonicalToolResult(
         identity=identity("tool-result-1", iteration=1),
