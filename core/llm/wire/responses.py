@@ -63,6 +63,16 @@ def _json_arguments(value: Any) -> str:
     return json.dumps(_thaw(value), ensure_ascii=False)
 
 
+def _decode_replay_item(replay_item: OpaqueReplayItem) -> dict[str, Any]:
+    try:
+        provider_item = json.loads(replay_item.payload.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError("reasoning replay item is not valid provider JSON") from exc
+    if not isinstance(provider_item, dict):
+        raise ValueError("reasoning replay item must decode to an object")
+    return provider_item
+
+
 def _item_text(item: Mapping[str, Any]) -> str:
     direct = item.get("text")
     if isinstance(direct, str):
@@ -156,8 +166,6 @@ class ResponsesWireAdapter:
             "max_output_tokens": request.settings.max_output_tokens,
             "stream": request.settings.stream,
         }
-        if request.replay_state is not None and request.replay_state.response_id:
-            payload["previous_response_id"] = request.replay_state.response_id
         if request.tools:
             payload["tools"] = [
                 {
@@ -227,17 +235,30 @@ class ResponsesWireAdapter:
             for item in (request.replay_state.opaque_items if request.replay_state is not None else ())
         }
         encoded: list[Any] = []
-        if request.replay_state is not None and request.replay_state.response_id:
-            for replay_item in request.replay_state.opaque_items:
-                try:
-                    provider_item = json.loads(replay_item.payload.decode("utf-8"))
-                except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-                    raise ValueError("reasoning replay item is not valid provider JSON") from exc
-                if not isinstance(provider_item, dict):
-                    raise ValueError("reasoning replay item must decode to an object")
-                encoded.append(provider_item)
+        has_explicit_replay_part = any(
+            isinstance(part, ReasoningReplayPart)
+            for message in request.messages
+            for part in message.parts
+        )
+        automatic_replay_items = (
+            [_decode_replay_item(item) for item in request.replay_state.opaque_items]
+            if request.replay_state is not None
+            and request.replay_state.response_id
+            and not has_explicit_replay_part
+            else []
+        )
+        automatic_replay_inserted = False
         for message in request.messages:
+            if (
+                automatic_replay_items
+                and not automatic_replay_inserted
+                and any(isinstance(part, ToolCallPart) for part in message.parts)
+            ):
+                encoded.extend(automatic_replay_items)
+                automatic_replay_inserted = True
             encoded.extend(self._encode_message(message, replay_by_id=replay_by_id))
+        if automatic_replay_items and not automatic_replay_inserted:
+            encoded[0:0] = automatic_replay_items
         return encoded
 
     def _encode_message(
@@ -281,13 +302,7 @@ class ResponsesWireAdapter:
                 replay_item = replay_by_id.get(part.replay_item_id)
                 if replay_item is None:
                     raise ValueError(f"reasoning replay item `{part.replay_item_id}` is unavailable")
-                try:
-                    provider_item = json.loads(replay_item.payload.decode("utf-8"))
-                except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-                    raise ValueError("reasoning replay item is not valid provider JSON") from exc
-                if not isinstance(provider_item, dict):
-                    raise ValueError("reasoning replay item must decode to an object")
-                encoded.append(provider_item)
+                encoded.append(_decode_replay_item(replay_item))
         flush_content()
         return encoded
 
