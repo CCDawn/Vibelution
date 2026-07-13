@@ -34,7 +34,6 @@ import {
   TeamWorkflowCandidate,
   TeamWorkflowCandidateGraphBuildPayload,
   TeamWorkflowCandidateGraphPayload,
-  TeamWorkflowCoordinationStatus,
   TeamWorkflowKnowledgeCollectionIngestionPayload,
   TeamWorkflowKnowledgeIngestionWorkRun,
   TeamWorkflowKnowledgeIngestionStatus,
@@ -45,7 +44,6 @@ import {
   TeamWorkflowSourceCollectionRunStartPayload,
   TeamWorkflowSourceCollectionStageSessionTaskPayload,
   TeamWorkflowDataRecordSourceCandidateImportPayload,
-  TeamWorkflowCandidateListPayload,
   TeamWorkflowOrchestration,
   WorkRunSnapshot,
 } from "../api/types";
@@ -157,13 +155,11 @@ import {
   sourceCollectionCompletionFlowNodeState,
   sourceCollectionNonNegativeCount,
   sourceCollectionStageBackendActionReadiness,
-  sourceCollectionStageCardsFromStatus,
   sourceCollectionStageProjectionCount,
   sourceCollectionStageProjectionState,
   sourceCollectionStageRecoveryStatusLabel,
   sourceCollectionStageUserStatusLabel,
   sourceCollectionStageUserSummary,
-  sourceCollectionStageWritebackObservedTaskIds,
   type ResearchStagePhaseStatus,
   type ResearchStageRound,
   type ResearchStageRoundStatusPayload,
@@ -172,6 +168,16 @@ import {
   type SourceCollectionStageCardProjection,
   type SourceCollectionStageModuleId,
 } from "./teams/source-collection/stageProjection";
+import {
+  TEAM_WORKFLOW_CANDIDATE_PREVIEW_LIMIT,
+  officialModelEvidenceStatusQueryKey,
+  paperNoteChunkStatusQueryKey,
+  researchStageRoundStatusQueryKey,
+  sourceCollectionStageWritebackRefetchInterval,
+  sourceQualityStatusQueryKey,
+  useResearchWorkflowResources,
+  type TeamWorkflowSourceQualityStatus,
+} from "./teams/useResearchWorkflowResources";
 import { TeamWorkflowGraphView, workflowGraphLayout } from "./TeamWorkflowGraphView";
 import {
   TeamWorkflowCandidateGraphStatusPanel,
@@ -207,8 +213,6 @@ const RESEARCH_CANVAS_AUTO_LAYOUT_ROW_GAP = 122;
 const EVOLUTION_SYSTEM_TEAM_IDS = new Set(["self-evolution-team", "supervised-evolution-team"]);
 const LINKED_ROOM_ACTIVE_REFETCH_MS = 5_000;
 const LINKED_ROOM_IDLE_REFETCH_MS = 30_000;
-const TEAM_WORKFLOW_CANDIDATE_PREVIEW_LIMIT = 80;
-const TEAM_WORKFLOW_CANDIDATE_GRAPH_LIMIT = 20;
 const AI_SEARCH_RUN_PREVIEW_LIMIT = 6;
 const TEAM_BOOTSTRAP_ACTIVE_REFETCH_MS = 2_000;
 const TEAM_BOOTSTRAP_BACKGROUND_REFETCH_MS = 12_000;
@@ -228,13 +232,9 @@ const SOURCE_COLLECTION_PROMPT_CACHE_POLICY = {
 };
 const SOURCE_COLLECTION_PROMPT_CACHE_MODEL_LABEL = "configured prompt-cache model";
 
-const researchStageRoundStatusQueryKey = (id: string) => ["teams", id, "workflow-orchestration", "stage-rounds", "status"] as const;
 const experimentPlanningStatusQueryKey = (id: string) => ["teams", id, "workflow-orchestration", "experiments", "status"] as const;
 const researchLoopTemplatesQueryKey = (id: string) => ["teams", id, "workflow-orchestration", "research-loop", "templates"] as const;
 const researchLoopStatusQueryKey = (id: string) => ["teams", id, "workflow-orchestration", "research-loop", "status"] as const;
-const officialModelEvidenceStatusQueryKey = (id: string) => ["teams", id, "workflow-orchestration", "official-model-evidence", "status"] as const;
-const paperNoteChunkStatusQueryKey = (id: string) => ["teams", id, "workflow-orchestration", "paper-note-chunks", "status"] as const;
-const sourceQualityStatusQueryKey = (id: string) => ["teams", id, "workflow-orchestration", "source-quality", "status"] as const;
 const sourceCollectionSummaryQueryPrefix = (id: string) =>
   ["teams", id, "workflow-orchestration", "source-collection", "summary"] as const;
 const sourceCollectionSummaryQueryKey = (id: string, runId: string) =>
@@ -1342,138 +1342,6 @@ type ResearchLoopDecisionDraft = {
   nextActions: string;
 };
 
-type TeamWorkflowOfficialModelEvidenceCoverage = {
-  taskType: string;
-  workflowNode: string;
-  label: string;
-  status: "covered" | "missing" | string;
-  evidenceCount: number;
-  providers: Record<string, number>;
-  latestEvidenceId: string;
-};
-
-type TeamWorkflowOfficialModelEvidenceStatus = {
-  schemaVersion: number;
-  teamId: string;
-  workflowId: string;
-  workflowKind: string;
-  status: "empty" | "needs_evidence" | "ready" | string;
-  summary: {
-    evidenceCount: number;
-    storedEvidenceCount: number;
-    candidateOutputEvidenceCount: number;
-    requiredNodeCount: number;
-    coveredNodeCount: number;
-    missingNodeCount: number;
-    qwenEvidenceCount: number;
-    bailianEvidenceCount: number;
-    localEvidenceCount: number;
-    linkedCandidateCount: number;
-    linkedStageRoundCount: number;
-    actionItemCount: number;
-  };
-  coverage: TeamWorkflowOfficialModelEvidenceCoverage[];
-  providerCounts: Record<string, number>;
-  evidenceKindCounts: Record<string, number>;
-  recentEvidence: Array<{
-    evidenceId: string;
-    taskType: string;
-    workflowNode: string;
-    candidateId: string;
-    modelProvider: string;
-    modelId: string;
-    evidenceKind: string;
-    status: string;
-    createdAt: string;
-  }>;
-  actionItems: Array<{
-    code: string;
-    severity: string;
-    message: string;
-    nextAction: string;
-    workflowNode: string;
-    taskType: string;
-  }>;
-  officialBoundary: {
-    candidateOnly: boolean;
-    writesFormalKnowledge: boolean;
-    writesRag: boolean;
-    writesOfficialGraph: boolean;
-    requiresStewardApproval: boolean;
-    boundary: string;
-  };
-  storage: {
-    workflowPath: string;
-    candidateStorePath: string;
-    evidenceStorePath: string;
-  };
-  updatedAt: string;
-};
-
-type TeamWorkflowPaperNoteChunkStatus = {
-  schemaVersion: number;
-  teamId: string;
-  workflowId: string;
-  workflowKind: string;
-  status: "empty" | "needs_plan" | "in_progress" | "ready" | string;
-  summary: {
-    sourceCandidateCount: number;
-    readySourceCandidateCount: number;
-    plannedSourceCandidateCount: number;
-    missingPlanSourceCandidateCount: number;
-    planCount: number;
-    chunkCount: number;
-    draftedChunkCount: number;
-    needsRevisionChunkCount: number;
-    openChunkCount: number;
-    actionItemCount: number;
-  };
-  plans: Array<{
-    planId: string;
-    status: string;
-    sourceCandidateId: string;
-    sourceTitle: string;
-    chunkCount: number;
-    draftedChunkCount: number;
-    needsRevisionChunkCount: number;
-    openChunkCount: number;
-    pageScope: string;
-    chunks: Array<{
-      chunkId: string;
-      chunkIndex: number;
-      status: string;
-      pageScope: string;
-      excerptChars: number;
-      paperNoteCandidateId: string;
-      taskId: string;
-    }>;
-    createdAt: string;
-    updatedAt: string;
-  }>;
-  missingPlanSources: Array<{
-    candidateId: string;
-    title: string;
-    pageScope: string;
-  }>;
-  actionItems: Array<{
-    code: string;
-    severity: string;
-    message: string;
-    nextAction: string;
-    candidateId: string;
-  }>;
-  officialBoundary: {
-    writesFormalKnowledge: boolean;
-    writesRag: boolean;
-    writesOfficialGraph: boolean;
-    candidateOnly: boolean;
-  };
-  storage: {
-    candidateStorePath: string;
-  };
-  updatedAt: string;
-};
-
 type TeamWorkflowPaperNoteChunkPlanPayload = {
   candidate: TeamWorkflowCandidate;
   chunkPlan: {
@@ -1483,71 +1351,6 @@ type TeamWorkflowPaperNoteChunkPlanPayload = {
   };
   workflow: TeamWorkflowOrchestration;
   nextActions: string[];
-};
-
-type TeamWorkflowSourceQualityStatus = {
-  schemaVersion: number;
-  teamId: string;
-  workflowId: string;
-  workflowKind: string;
-  status: "empty" | "needs_screening" | "in_progress" | "ready" | "blocked" | string;
-  summary: {
-    sourceCandidateCount: number;
-    assessedSourceCandidateCount: number;
-    approvedSourceCandidateCount: number;
-    needsRevisionSourceCandidateCount: number;
-    rejectedSourceCandidateCount: number;
-    unassessedSourceCandidateCount: number;
-    extractionReadySourceCandidateCount: number;
-    actionItemCount: number;
-  };
-  candidates: Array<{
-    candidateId: string;
-    title: string;
-    sourceKind: string;
-    currentState: string;
-    qualityStatus: string;
-    bucket: string;
-    decision: string;
-    overallScore: number;
-    scores: {
-      relevance: number;
-      reliability: number;
-      accessibility: number;
-      extractionReadiness: number;
-    };
-    hasReadyExtraction: boolean;
-    requiredFixes: string[];
-    riskFlags: string[];
-    updatedAt: string;
-    assessedAt: string;
-  }>;
-  actionItems: Array<{
-    code: string;
-    severity: string;
-    message: string;
-    nextAction: string;
-    candidateId: string;
-  }>;
-  screeningContract: {
-    agentRole: string;
-    targetCandidateType: string;
-    decisions: string[];
-    writesCandidateStore: boolean;
-    writesFormalKnowledge: boolean;
-    writesRag: boolean;
-    writesOfficialGraph: boolean;
-  };
-  officialBoundary: {
-    writesFormalKnowledge: boolean;
-    writesRag: boolean;
-    writesOfficialGraph: boolean;
-    candidateOnly: boolean;
-  };
-  storage: {
-    candidateStorePath: string;
-  };
-  updatedAt: string;
 };
 
 type TeamWorkflowSourceQualityAssessmentPayload = {
@@ -2458,32 +2261,6 @@ function sourceCollectionRunRefetchInterval(pageVisible: boolean, status: string
   );
 }
 
-function sourceCollectionStageWritebackRefetchInterval(
-  pageVisible: boolean,
-  status: ResearchStageRoundStatusPayload | SourceCollectionSummaryPayload | null | undefined,
-  forceSync = false,
-  pendingTaskIds: readonly string[] = [],
-) {
-  const cards = sourceCollectionStageCardsFromStatus(status);
-  const observedTaskIds = sourceCollectionStageWritebackObservedTaskIds(cards);
-  const hasUnobservedPendingTask = pendingTaskIds.some((taskId) => taskId && !observedTaskIds.has(taskId));
-  const hasRunningAgentTask = cards.some((card) => {
-    const latestTaskStatus = String(card.latestTask?.status || "").toLowerCase();
-    const cardStatus = String(card.status || "").toLowerCase();
-    return cardStatus === "agent_running" || latestTaskStatus === "queued" || latestTaskStatus === "running";
-  });
-  const hasCompletedTaskAwaitingArtifact = cards.some((card) => {
-    const latestTaskStatus = String(card.latestTask?.status || "").toLowerCase();
-    return Boolean(card.latestTask?.taskId)
-      && latestTaskStatus === "completed"
-      && String(card.status || "").toLowerCase() === "agent_done_artifact_pending";
-  });
-  return resolvePollingInterval(
-    pageVisible,
-    hasRunningAgentTask || forceSync || hasUnobservedPendingTask ? 2000 : hasCompletedTaskAwaitingArtifact ? 5000 : false,
-  );
-}
-
 function workRunString(snapshot: unknown, key: string) {
   if (!snapshot || typeof snapshot !== "object") {
     return "";
@@ -3375,107 +3152,36 @@ export function TeamsRoute({
       setResearchWorkspaceView(requestedResearchWorkspaceView);
     }
   }, [forcedResearchWorkspaceView, requestedResearchWorkspaceView]);
-  const teamWorkflowQuery = useQuery({
-    queryKey: queryKeys.teamWorkflow(effectiveTeamId || "none"),
-    queryFn: ({ signal }) => fetchJson<TeamWorkflowOrchestration>(`/api/teams/${encodeURIComponent(effectiveTeamId)}/workflow-orchestration`, { signal }),
-    enabled: Boolean(effectiveTeamId && researchWorkflowTeamSelected),
-  });
-  const researchStageRoundStatusQuery = useQuery({
-    queryKey: researchStageRoundStatusQueryKey(effectiveTeamId || "none"),
-    queryFn: ({ signal }) =>
-      fetchJson<ResearchStageRoundStatusPayload>(
-        `/api/teams/${encodeURIComponent(effectiveTeamId)}/workflow-orchestration/stage-rounds/status`,
-        { signal },
-      ),
-    enabled: researchStageRoundStatusEnabled,
-    refetchInterval: (query) =>
-      sourceCollectionStageWritebackRefetchInterval(
-        pageVisible,
-        query.state.data as ResearchStageRoundStatusPayload | null | undefined,
-        sourceCollectionStageWritebackSyncActive,
-        sourceCollectionPendingStageTaskIdList,
-      ),
-  });
-  const teamWorkflowCandidatesQuery = useQuery({
-    queryKey: queryKeys.teamWorkflowCandidates(effectiveTeamId || "none", TEAM_WORKFLOW_CANDIDATE_PREVIEW_LIMIT),
-    queryFn: ({ signal }) =>
-      fetchJson<TeamWorkflowCandidateListPayload>(
-        `/api/teams/${encodeURIComponent(effectiveTeamId)}/workflow-orchestration/candidates?limit=${TEAM_WORKFLOW_CANDIDATE_PREVIEW_LIMIT}&includeValidation=false&includeStore=false`,
-        { signal },
-      ),
-    enabled: teamWorkflowCandidateListEnabled,
-    refetchInterval: () => sourceCollectionStageWritebackRefetchInterval(
-      pageVisible,
-      researchStageRoundStatusQuery.data,
-      sourceCollectionStageWritebackSyncActive,
-      sourceCollectionPendingStageTaskIdList,
-    ),
-  });
-  const teamWorkflowCandidateGraphQuery = useQuery({
-    queryKey: queryKeys.teamWorkflowCandidateGraph(effectiveTeamId || "none"),
-    queryFn: ({ signal }) =>
-      fetchJson<TeamWorkflowCandidateListPayload>(
-        `/api/teams/${encodeURIComponent(effectiveTeamId)}/workflow-orchestration/candidates?candidateType=candidate_graph&limit=${TEAM_WORKFLOW_CANDIDATE_GRAPH_LIMIT}&includeStore=false`,
-        { signal },
-      ),
-    enabled: teamWorkflowGraphEnabled,
-  });
-  const teamWorkflowCoordinationStatusQuery = useQuery({
-    queryKey: queryKeys.teamWorkflowCoordinationStatus(effectiveTeamId || "none"),
-    queryFn: ({ signal }) =>
-      fetchJson<TeamWorkflowCoordinationStatus>(
-        `/api/teams/${encodeURIComponent(effectiveTeamId)}/workflow-orchestration/coordination/status`,
-        { signal },
-      ),
-    enabled: Boolean(effectiveTeamId && researchWorkflowTeamSelected && researchWorkspaceView === "coordination"),
-  });
-  const teamWorkflowKnowledgeIngestionStatusQuery = useQuery({
-    queryKey: queryKeys.teamWorkflowKnowledgeIngestionStatus(effectiveTeamId || "none"),
-    queryFn: ({ signal }) =>
-      fetchJson<TeamWorkflowKnowledgeIngestionStatus>(
-        `/api/teams/${encodeURIComponent(effectiveTeamId)}/workflow-orchestration/knowledge-ingestion/status`,
-        { signal },
-      ),
-    enabled: teamWorkflowKnowledgeIngestionEnabled,
-    // 后台入库进行中（activeWorkRun 存在）时轮询，完成后停止。
-    refetchInterval: (query) => {
-      const data = query.state.data as TeamWorkflowKnowledgeIngestionStatus | undefined;
-      return resolvePollingInterval(pageVisible, data?.activeWorkRun ? 2000 : false);
+  const {
+    workflow: teamWorkflowQuery,
+    stageRound: researchStageRoundStatusQuery,
+    candidates: teamWorkflowCandidatesQuery,
+    candidateGraph: teamWorkflowCandidateGraphQuery,
+    coordination: teamWorkflowCoordinationStatusQuery,
+    knowledgeIngestion: teamWorkflowKnowledgeIngestionStatusQuery,
+    modelEvidence: teamWorkflowOfficialModelEvidenceStatusQuery,
+    sourceQuality: teamWorkflowSourceQualityStatusQuery,
+    paperNoteChunks: teamWorkflowPaperNoteChunkStatusQuery,
+  } = useResearchWorkflowResources({
+    teamId: effectiveTeamId,
+    demand: {
+      workflow: Boolean(effectiveTeamId && researchWorkflowTeamSelected),
+      stageRound: researchStageRoundStatusEnabled,
+      candidates: teamWorkflowCandidateListEnabled,
+      candidateGraph: teamWorkflowGraphEnabled,
+      coordination: Boolean(effectiveTeamId && researchWorkflowTeamSelected && researchWorkspaceView === "coordination"),
+      knowledgeIngestion: teamWorkflowKnowledgeIngestionEnabled,
+      modelEvidence: Boolean(effectiveTeamId && researchWorkflowTeamSelected && researchWorkspaceView === "overview"),
+      sourceQuality: teamWorkflowSourceQualityEnabled,
+      paperNoteChunks: Boolean(effectiveTeamId && researchWorkflowTeamSelected && researchWorkspaceView === "overview"),
+    },
+    pageVisible,
+    stageWritebackSync: {
+      active: sourceCollectionStageWritebackSyncActive,
+      pendingTaskIds: sourceCollectionPendingStageTaskIdList,
     },
   });
-  const teamWorkflowOfficialModelEvidenceStatusQuery = useQuery({
-    queryKey: officialModelEvidenceStatusQueryKey(effectiveTeamId || "none"),
-    queryFn: ({ signal }) =>
-      fetchJson<TeamWorkflowOfficialModelEvidenceStatus>(
-        `/api/teams/${encodeURIComponent(effectiveTeamId)}/workflow-orchestration/official-model-evidence/status`,
-        { signal },
-      ),
-    enabled: Boolean(effectiveTeamId && researchWorkflowTeamSelected && researchWorkspaceView === "overview"),
-  });
-  const teamWorkflowSourceQualityStatusQuery = useQuery({
-    queryKey: sourceQualityStatusQueryKey(effectiveTeamId || "none"),
-    queryFn: ({ signal }) =>
-      fetchJson<TeamWorkflowSourceQualityStatus>(
-        `/api/teams/${encodeURIComponent(effectiveTeamId)}/workflow-orchestration/source-quality/status`,
-        { signal },
-      ),
-    enabled: teamWorkflowSourceQualityEnabled,
-    refetchInterval: () => sourceCollectionStageWritebackRefetchInterval(
-      pageVisible,
-      researchStageRoundStatusQuery.data,
-      sourceCollectionStageWritebackSyncActive,
-      sourceCollectionPendingStageTaskIdList,
-    ),
-  });
-  const teamWorkflowPaperNoteChunkStatusQuery = useQuery({
-    queryKey: paperNoteChunkStatusQueryKey(effectiveTeamId || "none"),
-    queryFn: ({ signal }) =>
-      fetchJson<TeamWorkflowPaperNoteChunkStatus>(
-        `/api/teams/${encodeURIComponent(effectiveTeamId)}/workflow-orchestration/paper-note-chunks/status`,
-        { signal },
-      ),
-    enabled: Boolean(effectiveTeamId && researchWorkflowTeamSelected && researchWorkspaceView === "overview"),
-  });
+
   const experimentPlanningStatusQuery = useQuery({
     queryKey: experimentPlanningStatusQueryKey(effectiveTeamId || "none"),
     queryFn: ({ signal }) =>
