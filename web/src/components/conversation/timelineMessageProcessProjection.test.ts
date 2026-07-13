@@ -302,6 +302,147 @@ describe("timeline message process projection", () => {
     ]);
   });
 
+  it("does not render a persisted tool result again from the same-turn streaming layer", () => {
+    const persistedToolCell = {
+      id: "session-message-474-feedback-1",
+      sourceItemId: "session-message-474-feedback-1",
+      kind: "tool_call" as const,
+      messageId: "session-message-474",
+      status: "completed",
+      tone: "neutral" as const,
+      title: "get_git_status_summary_tool",
+      summary: "工作区干净",
+    };
+    const streamingToolCell = {
+      ...persistedToolCell,
+      id: "session-message-live-turn-1-feedback-5",
+      sourceItemId: "session-message-live-turn-1-feedback-5",
+      messageId: "session-message-live-turn-1",
+    };
+    const projected = projectTimelineProcessMessages([
+      {
+        id: "session-message-474",
+        role: "assistant",
+        content: "",
+        timestamp: "2026-07-13T21:49:57Z",
+        metadata: { kind: "tool_result", turnId: "turn-1" },
+        codexTranscript: {
+          version: 1,
+          source: "native",
+          messageId: "session-message-474",
+          streaming: false,
+          cells: [persistedToolCell],
+          toolCalls: [],
+          terminalOperations: [],
+          terminalSessions: [],
+          modelObservations: [],
+        },
+      },
+      {
+        id: "session-message-live-turn-1",
+        role: "assistant",
+        content: "",
+        timestamp: "2026-07-13T21:49:58Z",
+        streaming: true,
+        metadata: { kind: "session_active_turn_layer", turnId: "turn-1" },
+        codexTranscript: {
+          version: 1,
+          source: "native",
+          messageId: "session-message-live-turn-1",
+          streaming: true,
+          cells: [streamingToolCell],
+          toolCalls: [],
+          terminalOperations: [],
+          terminalSessions: [],
+          modelObservations: [],
+        },
+      },
+    ]);
+
+    expect(projected).toHaveLength(1);
+    expect(projected[0].codexTranscript?.cells).toEqual([
+      expect.objectContaining({
+        id: "session-message-474-feedback-1",
+        title: "get_git_status_summary_tool",
+        status: "completed",
+      }),
+    ]);
+  });
+
+  it("preserves an additional same-name tool call that only exists in the streaming layer", () => {
+    const projected = projectTimelineProcessMessages([
+      {
+        id: "message-persisted-tool",
+        role: "assistant",
+        content: "",
+        timestamp: "2026-07-13T21:49:57Z",
+        metadata: { kind: "tool_result", turnId: "turn-repeat" },
+        codexTranscript: {
+          version: 1,
+          source: "native",
+          messageId: "message-persisted-tool",
+          streaming: false,
+          cells: [{
+            id: "persisted-cli-1",
+            kind: "tool_call",
+            messageId: "message-persisted-tool",
+            status: "completed",
+            tone: "neutral",
+            title: "cli_tool",
+            summary: "first result",
+          }],
+          toolCalls: [],
+          terminalOperations: [],
+          terminalSessions: [],
+          modelObservations: [],
+        },
+      },
+      {
+        id: "message-active-turn",
+        role: "assistant",
+        content: "",
+        timestamp: "2026-07-13T21:49:58Z",
+        streaming: true,
+        metadata: { kind: "session_active_turn_layer", turnId: "turn-repeat" },
+        codexTranscript: {
+          version: 1,
+          source: "native",
+          messageId: "message-active-turn",
+          streaming: true,
+          cells: [
+            {
+              id: "active-cli-1",
+              kind: "tool_call",
+              messageId: "message-active-turn",
+              status: "completed",
+              tone: "neutral",
+              title: "cli_tool",
+              summary: "first result",
+            },
+            {
+              id: "active-cli-2",
+              kind: "tool_call",
+              messageId: "message-active-turn",
+              status: "running",
+              tone: "running",
+              title: "cli_tool",
+              summary: "second command",
+            },
+          ],
+          toolCalls: [],
+          terminalOperations: [],
+          terminalSessions: [],
+          modelObservations: [],
+        },
+      },
+    ]);
+
+    expect(projected[0].codexTranscript?.cells.map((cell) => cell.id)).toEqual([
+      "persisted-cli-1",
+      "active-cli-2",
+    ]);
+  });
+
   it("does not treat legacy DTO process fields as mergeable process packets", () => {
     const projected = projectTimelineProcessMessages([
       {
