@@ -398,8 +398,23 @@ describe("ConfigRoute layout contract", () => {
     expect(providerPanelSource).toContain("Provider 与模型工作台");
     expect(overviewPanelSource).toContain('title={copy.sourceBody}');
     expect(providerPanelSource).toContain('title={provider.providerId}');
-    expect(overviewPanelSource).toContain('title={copy.openEnvironmentHint}');
+    expect(routeSource).toContain('title={copy.openEnvironmentHint}');
     expect(routeSource).not.toContain('<span className={styles.helperText}>{copy.openEnvironmentHint}</span>');
+  });
+
+  it("keeps overview concise and moves raw configuration into tooling", () => {
+    expect(overviewPanelSource).toContain("workspace.modelLibraryCount");
+    expect(overviewPanelSource).toContain("workspace.blockingCount");
+    expect(overviewPanelSource).toContain("workspace.warningCount");
+    expect(overviewPanelSource).not.toContain("onOpenEnvironment");
+    expect(overviewPanelSource).not.toContain("workspace.rawToml");
+    expect(draftPanelSource).toContain("rawToml: string");
+    expect(draftPanelSource).toContain("configPath: string");
+    expect(draftPanelSource).toContain("<LazyJsonCodeMirror");
+    expect(draftPanelSource).toContain("<pre");
+    expect(routeSource).toContain('activePage?.id === "tooling-access"');
+    expect(routeSource).toContain("developerModeConfig.enabled");
+    expect(routeSource).toContain("aria-label={copy.developerModeReadonly}");
   });
 
   it("keeps the model settings group dense enough to use the bottom viewport", () => {
@@ -486,9 +501,9 @@ describe("ConfigRoute layout contract", () => {
     expect(draftPanelSource).toContain("styles.draftWorkbench");
     expect(draftPanelSource).toContain("styles.draftActionRail");
     expect(draftPanelStylesSource).toContain("const readablePanelSurface");
-    expect(draftPanelStyles.draftWorkbench).toContain("[max-height:min(520px,_54vh)]");
-    expect(draftPanelStyles.editorWrap).toContain("[min-height:260px]");
-    expect(draftPanelStyles.editorWrap).toContain("[max-height:min(430px,_44vh)]");
+    expect(draftPanelStyles.draftWorkbench).toContain("[grid-template-rows:auto_minmax(22rem,1fr)_auto]");
+    expect(draftPanelStyles.editorWrap).toContain("[min-height:22rem]");
+    expect(draftPanelStyles.sectionSurface).toContain("[height:100%]");
     expect(draftPanelStyles.sectionSurface).not.toContain("color-mix(in_srgb,var(--vui-surface-panel)_72%,transparent)");
     expect(overviewPanelStyles.sectionSurface).not.toContain("color-mix(in_srgb,var(--vui-surface-panel)_72%,transparent)");
     expect(runtimePanelStyles.sectionSurface).not.toContain("color-mix(in_srgb,var(--vui-surface-panel)_72%,transparent)");

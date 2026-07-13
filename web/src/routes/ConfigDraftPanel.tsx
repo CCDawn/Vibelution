@@ -8,6 +8,8 @@ import styles from "./ConfigDraftPanel.styles";
 type ConfigDraftPanelProps = {
   copy: ConfigCopy;
   eyebrow: string;
+  configPath: string;
+  rawToml: string;
   jsonText: string;
   hasEditorChanges: boolean;
   canCheckCurrentChanges: boolean;
@@ -20,6 +22,8 @@ type ConfigDraftPanelProps = {
 export function ConfigDraftPanel({
   copy,
   eyebrow,
+  configPath,
+  rawToml,
   jsonText,
   hasEditorChanges,
   canCheckCurrentChanges,
@@ -59,6 +63,12 @@ export function ConfigDraftPanel({
         <div className={styles.editorWrap}>
           <LazyJsonCodeMirror value={jsonText} onChange={onJsonTextChange} />
         </div>
+        <details className={styles.rawConfigPanel}>
+          <summary>{copy.rawToml}</summary>
+          <p className={styles.helperText}>{copy.rawTomlHint}</p>
+          <code className={styles.configPath}>{configPath}</code>
+          <pre className={styles.rawToml}>{rawToml}</pre>
+        </details>
         </div>
     </VSection>
   );
