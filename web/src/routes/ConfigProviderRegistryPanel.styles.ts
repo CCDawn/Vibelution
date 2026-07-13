@@ -12,14 +12,14 @@ const styles = {
     "vui-routes-configproviderregistrypanel providerButton !grid !min-h-[58px] !w-full min-w-0 !grid-cols-[minmax(0,1fr)_auto] !justify-stretch gap-3 px-3 py-2 text-left",
   providerIdentity: "vui-routes-configproviderregistrypanel providerIdentity grid min-w-0 gap-0.5",
   ellipsis: "vui-routes-configproviderregistrypanel ellipsis min-w-0 truncate",
-  detailSurface: "vui-routes-configproviderregistrypanel detailSurface grid h-full min-h-0 min-w-0 [grid-template-rows:auto_auto_auto_minmax(0,1fr)_auto] gap-2 overflow-hidden",
+  detailSurface: "vui-routes-configproviderregistrypanel detailSurface grid h-full min-h-0 min-w-0 [grid-template-rows:auto_auto_auto_minmax(0,1fr)_auto] gap-2 overflow-y-auto overflow-x-hidden pr-1",
   detailHeader:
     "vui-routes-configproviderregistrypanel detailHeader flex min-w-0 flex-wrap items-start justify-between gap-2 border-b border-vui-border-hairline pb-2",
   detailIdentity: "vui-routes-configproviderregistrypanel detailIdentity grid min-w-0 gap-0.5",
   tabs: "vui-routes-configproviderregistrypanel tabs flex min-w-0 flex-wrap items-center gap-1",
   tabButton: "vui-routes-configproviderregistrypanel tabButton",
   detailBody:
-    "vui-routes-configproviderregistrypanel detailBody min-h-0 min-w-0 overflow-hidden rounded-lg border border-vui-border-subtle bg-vui-surface-row/40 p-2 [&>_*]:h-full",
+    "vui-routes-configproviderregistrypanel detailBody min-h-0 min-w-0 overflow-y-auto overflow-x-hidden rounded-lg border border-vui-border-subtle bg-vui-surface-row/40 p-2 [&>_*]:h-full",
   tabSurface: "vui-routes-configproviderregistrypanel tabSurface grid h-full min-h-0 min-w-0 content-start gap-2 overflow-auto",
   detailGrid:
     "vui-routes-configproviderregistrypanel detailGrid grid min-w-0 [grid-template-columns:repeat(2,minmax(0,1fr))] gap-2 max-[640px]:[grid-template-columns:minmax(0,1fr)]",
