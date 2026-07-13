@@ -478,3 +478,27 @@ def test_append_interrupted_if_open_ignores_completed_or_active_turn(tmp_path):
     assert append_interrupted_if_open(tmp_path, "session-a", active_turn_id="turn-1") is None
     assert append_interrupted_if_open(tmp_path, "session-a", reason="process_restarted") is not None
     assert append_interrupted_if_open(tmp_path, "session-a", reason="process_restarted") is None
+
+
+def test_repeated_canonical_outcome_commits_one_final_item(tmp_path):
+    from core.chat.turn_journal import append_canonical_turn_outcome, session_turn_items_from_events
+    from core.llm.types import CanonicalItemIdentity, TurnOutcome
+
+    outcome = TurnOutcome.final_answer(
+        identity=CanonicalItemIdentity(
+            session_id="session-a",
+            turn_id="turn-canonical",
+            invocation_id="invocation-a",
+            iteration=0,
+            item_id="answer-a",
+        ),
+        text="final",
+    )
+    append_canonical_turn_outcome(tmp_path, "session-a", "turn-canonical", outcome)
+    append_canonical_turn_outcome(tmp_path, "session-a", "turn-canonical", outcome)
+
+    items = session_turn_items_from_events(
+        load_turn_events(tmp_path, "session-a"),
+        turn_id="turn-canonical",
+    )
+    assert len([item for item in items if item.get("itemId") == "answer-a"]) == 1
