@@ -365,6 +365,9 @@ describe("ConfigRoute layout contract", () => {
     expect(routeSource).not.toContain("beginSidebarResize");
     expect(routeSource).not.toContain("sidebarIndexCollapsed");
     expect(routeSource).not.toContain("styles.sidebarMetaStrip");
+    expect(routeSource).toContain("const editorSectionById = new Map(editorSections.map((section) => [section.id, section]))");
+    expect(routeSource).toContain("const activeEditorSections = (activePage?.memberSectionIds ?? [])");
+    expect(routeSource).toContain(".map((sectionId) => editorSectionById.get(sectionId))");
     expect(styles.page).toContain("[grid-template-rows:minmax(0,1fr)]");
     expect(styles.content).toContain("[grid-template-rows:auto_auto_minmax(0,1fr)]");
     expect(styles.pageViewport).toContain("overflow-y-auto");

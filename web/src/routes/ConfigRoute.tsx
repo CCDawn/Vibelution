@@ -244,7 +244,7 @@ export const CONFIG_COPY = {
     groupWorkbenchTitle: "界面与工作台",
     groupWorkbenchSummary: "管理工作台行为、配色和背景；启动相关设置仍由 Launcher 维护。",
     groupAvatarPetTitle: "用户、终端形象与陪伴体",
-    groupAvatarPetSummary: "统一管理用户信息、终端形象、宠物与陪伴体相关配置；Web 用户头像在用户信息里维护。",
+    groupAvatarPetSummary: "统一设置显示名、终端形象与陪伴体；Web 用户头像在用户信息里维护，常用项直接展示，其余参数按需展开。",
     groupModelingTitle: "模型库",
     groupModelingSummary: "模型资产、服务商账号、密钥、能力检测和模型发现都在这里集中管理。",
     groupRuntimeContextTitle: "上下文与分析",
@@ -493,7 +493,7 @@ export const CONFIG_COPY = {
     groupWorkbenchTitle: "Workbench & Interface",
     groupWorkbenchSummary: "Manage workbench behavior, colors, and background here. Startup settings remain in Launcher.",
     groupAvatarPetTitle: "User, Terminal Avatar, and Companion",
-    groupAvatarPetSummary: "Manage user info, terminal avatar, pet, and companion-facing settings together. The Web user avatar lives under User Info.",
+    groupAvatarPetSummary: "Set the display name, terminal avatar, and companion in one place. The Web user avatar lives under User Info, while advanced parameters remain on demand.",
     groupModelingTitle: "Model Library",
     groupModelingSummary: "Manage model assets, provider accounts, keys, capability checks, and discovery in one place.",
     groupRuntimeContextTitle: "Context & Analysis",
@@ -2271,12 +2271,10 @@ export function ConfigRoute() {
     () => resolveConfigSettingsSelection(settingsGroups, activeGroupId, activePageId),
     [activeGroupId, activePageId, settingsGroups],
   );
-  const activeEditorSections = editorSections.filter((section) => {
-    if (!activePage?.memberSectionIds.includes(section.id)) {
-      return false;
-    }
-    return section.id !== "agent";
-  });
+  const editorSectionById = new Map(editorSections.map((section) => [section.id, section]));
+  const activeEditorSections = (activePage?.memberSectionIds ?? [])
+    .map((sectionId) => editorSectionById.get(sectionId))
+    .filter((section): section is ConfigEditorSection => Boolean(section) && section?.id !== "agent");
   const modelOptions = workspace?.modelOptions ?? [];
   const modelOptionsById = useMemo(() => new Map(modelOptions.map((option) => [option.model_id, option])), [modelOptions]);
   const providerPresetOptions = workspace?.providerPresetOptions ?? [];

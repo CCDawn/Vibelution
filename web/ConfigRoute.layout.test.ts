@@ -89,6 +89,14 @@ describe("ConfigRoute content experience contract", () => {
     expect(configNavigationSource).not.toContain('members: ["profiles", "models", "llm-profiles"');
   });
 
+  it("combines profile, terminal avatar, and companion settings into one desktop flow", () => {
+    expect(configNavigationSource).toContain('id: "identity-profile"');
+    expect(configNavigationSource).toContain('members: ["user-profile", "avatar", "pet"]');
+    expect(configNavigationSource).not.toContain('id: "identity-avatar"');
+    expect(configNavigationSource).not.toContain('id: "identity-pet"');
+    expect(configRouteSource).toContain('groupAvatarPetTitle: "用户、终端形象与陪伴体"');
+  });
+
   it("keeps Agent editing out of the config page", () => {
     expect(configRouteSource).not.toContain('id="config-agent-center"');
     expect(configRouteSource).not.toContain('to="/agents"');
