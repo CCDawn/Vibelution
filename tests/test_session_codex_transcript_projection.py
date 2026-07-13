@@ -473,6 +473,10 @@ def test_terminal_provider_error_builds_canonical_v2_item():
             "providerErrorType": "upstream_error",
             "provider": "ai-pixel_ad214f09",
             "model": "gpt-5.6-luna",
+            "chainStage": "llm_response_normalization",
+            "eventCode": "llm.turn_outcome.missing",
+            "traceId": "trace-runtime-1",
+            "protocol": "responses",
             "turnId": "turn-1",
         },
     )
@@ -501,6 +505,10 @@ def test_terminal_provider_error_builds_canonical_v2_item():
             "providerErrorType": "upstream_error",
             "provider": "ai-pixel_ad214f09",
             "model": "gpt-5.6-luna",
+            "chainStage": "llm_response_normalization",
+            "eventCode": "llm.turn_outcome.missing",
+            "traceId": "trace-runtime-1",
+            "protocol": "responses",
         },
         "metadata": {"turnId": "turn-1"},
     }

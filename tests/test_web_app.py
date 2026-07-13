@@ -9222,9 +9222,37 @@ def test_failed_runtime_turn_result_is_persisted_as_turn_error_with_trace(tmp_pa
         "thought": "Need a vision-capable model before continuing.",
         "tool_trace": [{"name": "image2_generate_tool", "status": "failed", "summary": "unsupported"}],
         "feedback_events": [{"kind": "status", "name": "model_request", "status": "failed", "summary": "模型请求失败"}],
+        "llm_failure": {
+            "category": "protocol_error",
+            "message": "模型响应未完成规范化：模型已返回，但响应适配器没有生成 canonical TurnOutcome。",
+            "reason_code": "canonical_turn_outcome_missing",
+            "reason_summary": "模型响应未完成规范化",
+            "reason_detail": "模型已返回，但响应适配器没有生成 canonical TurnOutcome。",
+            "chain_stage": "llm_response_normalization",
+            "event_code": "llm.turn_outcome.missing",
+            "retryable": False,
+        },
     }
 
+    scene_events = []
+    monkeypatch.setattr(
+        session_service,
+        "record_runtime_scene_event",
+        lambda area, category, event_code, **kwargs: scene_events.append(
+            {"area": area, "category": category, "eventCode": event_code, **kwargs}
+        ),
+    )
     session_service._set_session_running("session-live", True, turn_id="turn-runtime-failure")
+    session_service._set_session_live_output(
+        "session-live",
+        turn_id="turn-runtime-failure",
+        llm_payload_trace={
+            "traceId": "trace-runtime-1",
+            "provider": "ai-pixel",
+            "model": "gpt-5.6-terra",
+            "selectedProtocol": "responses",
+        },
+    )
     try:
         session_service._persist_session_turn_result(
             "session-live",
@@ -9238,7 +9266,11 @@ def test_failed_runtime_turn_result_is_persisted_as_turn_error_with_trace(tmp_pa
     error_message = payload["messages"][-1]
     assert error_message["metadata"]["kind"] == "turn_error"
     assert error_message["metadata"]["providerFailure"] is False
-    assert error_message["content"].startswith("网页工作台这一轮执行失败")
+    assert error_message["metadata"]["chainStage"] == "llm_response_normalization"
+    assert error_message["metadata"]["eventCode"] == "llm.turn_outcome.missing"
+    assert error_message["metadata"]["traceId"] == "trace-runtime-1"
+    assert error_message["metadata"]["protocol"] == "responses"
+    assert error_message["content"].startswith("模型响应未完成规范化")
     assert "当前模型不支持图片输入" in error_message["content"]
     assert error_message["thought"] == "Need a vision-capable model before continuing."
     assert error_message["toolCalls"] == [
@@ -9246,7 +9278,12 @@ def test_failed_runtime_turn_result_is_persisted_as_turn_error_with_trace(tmp_pa
     ]
     assert error_message["feedbackEvents"][0]["status"] == "failed"
     assert payload["lastTurnError"]["errorType"] == "runtime_error"
+    assert payload["lastTurnError"]["reasonCode"] == "canonical_turn_outcome_missing"
+    assert payload["lastTurnError"]["traceId"] == "trace-runtime-1"
     assert payload["currentPhase"] == "failed"
+    turn_error_scene = next(item for item in scene_events if item["eventCode"] == "conversation.turn_error")
+    assert turn_error_scene["fields"]["chainStage"] == "llm_response_normalization"
+    assert turn_error_scene["fields"]["traceId"] == "trace-runtime-1"
 
 
 def test_submit_session_message_surfaces_provider_http_diagnostics(tmp_path, monkeypatch):

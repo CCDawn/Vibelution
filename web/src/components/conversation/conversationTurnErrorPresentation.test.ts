@@ -46,6 +46,9 @@ describe("conversationTurnErrorPresentation", () => {
         provider_host: "www.atpify.cn",
         model: "claude-3",
         reason_code: "rate_limit",
+        chain_stage: "llm_response_normalization",
+        protocol: "responses",
+        trace_id: "trace-runtime-1",
       },
     } as unknown as ConversationMessage, "zh");
 
@@ -53,11 +56,14 @@ describe("conversationTurnErrorPresentation", () => {
       { label: "状态码", value: "429" },
       { label: "原因", value: "provider 正在限流" },
       { label: "详情", value: "每分钟请求数超限" },
+      { label: "阶段", value: "llm_response_normalization" },
+      { label: "协议", value: "responses" },
       { label: "类型", value: "rate_limit_exceeded" },
       { label: "上游", value: "group requests-per-minute limit exceeded" },
       { label: "通道", value: "anthropic · www.atpify.cn" },
       { label: "模型", value: "claude-3" },
       { label: "代码", value: "rate_limit" },
+      { label: "Trace", value: "trace-runtime-1" },
     ]);
   });
 
@@ -72,17 +78,23 @@ describe("conversationTurnErrorPresentation", () => {
       providerHost: "www.atpify.cn",
       model: "claude-3",
       reasonCode: "no_account",
+      chainStage: "agent_outcome_evaluation",
+      protocol: "chat_completions",
+      traceId: "trace-runtime-2",
     } as SessionTurnError, "en");
 
     expect(rows).toEqual([
       { label: "Status", value: "503" },
       { label: "Reason", value: "upstream unavailable" },
       { label: "Detail", value: "gateway failed" },
+      { label: "Stage", value: "agent_outcome_evaluation" },
+      { label: "Protocol", value: "chat_completions" },
       { label: "Type", value: "api_error" },
       { label: "Upstream", value: "No available accounts" },
       { label: "Provider", value: "anthropic · www.atpify.cn" },
       { label: "Model", value: "claude-3" },
       { label: "Code", value: "no_account" },
+      { label: "Trace", value: "trace-runtime-2" },
     ]);
   });
 

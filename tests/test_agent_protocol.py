@@ -3523,6 +3523,67 @@ class TestToolMessageFlow:
         assert result["raw_output"] == result["summary"]
         assert result["error"] == result["summary"]
 
+    def test_run_single_turn_preserves_structured_chain_failure(self, monkeypatch):
+        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+        agent.name = "tester"
+        agent.config = SimpleNamespace(
+            llm=SimpleNamespace(model_name="demo"),
+            agent=SimpleNamespace(max_iterations=3, awake_interval=1),
+        )
+        agent.mode_policy = ModePolicy(
+            mode=AgentMode.CHAT,
+            orchestrator_kind="chat",
+            keep_multi_turn_context=True,
+            allow_auto_loop=False,
+            capture_chat_dataset_candidates=False,
+            reset_context_before_turn=False,
+            reset_context_between_cases=False,
+            allow_direct_supervised_payload=False,
+            finish_after_direct_response=False,
+            runtime_input_builder=lambda text: text,
+        )
+        agent._effective_max_token_limit = 1024
+        agent.key_tools = [object()]
+        agent._last_turn_failed = False
+        agent._last_llm_error_details = {}
+
+        def fake_think_and_act(user_prompt=None, goal_override=None, attachments=None, **kwargs):
+            agent._last_visible_response_text = ""
+            agent._last_response_tool_calls = 0
+            agent._recent_tool_records = []
+            agent._record_turn_failure_diagnostic(
+                category="protocol_error",
+                reason_code="canonical_turn_outcome_missing",
+                reason_summary="模型响应未完成规范化",
+                reason_detail="模型已返回，但响应适配器没有生成 canonical TurnOutcome。",
+                chain_stage="llm_response_normalization",
+                event_code="llm.turn_outcome.missing",
+            )
+            return True
+
+        agent.think_and_act = fake_think_and_act
+        monkeypatch.setattr(agent_module, "_record_agent_scene_event", lambda *args, **kwargs: None)
+        monkeypatch.setattr(agent_module.logger, "start_session", lambda metadata=None, **kwargs: None)
+        monkeypatch.setattr(agent_module.logger, "end_session", lambda summary=None: None)
+        monkeypatch.setattr(agent_module._debug_logger, "start_session", lambda session_id: None)
+        monkeypatch.setattr(agent_module._debug_logger, "system", lambda *args, **kwargs: None)
+        monkeypatch.setattr(agent_module._debug_logger, "info", lambda *args, **kwargs: None)
+        monkeypatch.setattr(agent_module._debug_logger, "end_session", lambda: None)
+        monkeypatch.setattr(
+            agent_module,
+            "get_session_state",
+            lambda: SimpleNamespace(get_attention_snapshot=lambda: {}),
+        )
+
+        result = agent.run_single_turn(initial_prompt="secret prompt")
+
+        assert result["status"] == "failed"
+        assert "模型响应未完成规范化" in result["summary"]
+        assert result["llm_failure"]["reason_code"] == "canonical_turn_outcome_missing"
+        assert result["llm_failure"]["chain_stage"] == "llm_response_normalization"
+        assert result["llm_failure"]["event_code"] == "llm.turn_outcome.missing"
+        assert "secret prompt" not in str(result["llm_failure"])
+
     def test_run_single_turn_preserves_tool_progress_without_loop_guard_reply(self, monkeypatch):
         agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
         agent.name = "tester"
