@@ -1597,7 +1597,13 @@ def test_self_observation_message_source_disables_tools(tmp_path, monkeypatch):
 
     monkeypatch.setattr(session_service, "create_chat_agent", lambda **kwargs: DummyAgent())
 
-    def fake_run_existing_agent_single_turn(agent, initial_prompt=None, attachments=None, disable_tools=False):
+    def fake_run_existing_agent_single_turn(
+        agent,
+        initial_prompt=None,
+        attachments=None,
+        disable_tools=False,
+        **preparation_kwargs,
+    ):
         observed_turn_call["initial_prompt"] = initial_prompt
         observed_turn_call["disable_tools"] = disable_tools
         observed_turn_call["attachment_count"] = len(list(attachments or []))
@@ -1697,7 +1703,13 @@ def test_self_observation_message_source_does_not_route_recent_image_reference(t
 
     monkeypatch.setattr(session_service, "create_chat_agent", lambda **kwargs: DummyAgent())
 
-    def fake_run_existing_agent_single_turn(agent, initial_prompt=None, attachments=None, disable_tools=False):
+    def fake_run_existing_agent_single_turn(
+        agent,
+        initial_prompt=None,
+        attachments=None,
+        disable_tools=False,
+        **preparation_kwargs,
+    ):
         observed_turn_call["initial_prompt"] = initial_prompt
         observed_turn_call["disable_tools"] = disable_tools
         observed_turn_call["attachment_count"] = len(list(attachments or []))
