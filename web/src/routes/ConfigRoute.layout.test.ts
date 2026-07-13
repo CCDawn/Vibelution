@@ -735,6 +735,36 @@ describe("ConfigRoute layout contract", () => {
     expect(stylesSource).toContain("userProfileAvatarFields:");
   });
 
+  it("progressively discloses advanced pet and context-compression settings", () => {
+    expect(routeSource).toContain('from "./configSectionPresentation"');
+    expect(routeSource).toContain("advancedExpanded: false");
+    expect(routeSource).toContain("const presentation = configSectionPresentation(section.id, lang)");
+    expect(routeSource).toContain("configSectionTierCounts(section.id, section.fieldCount)");
+    expect(routeSource).toContain("isCommonConfigSectionEntry(section.id, childPath)");
+    expect(routeSource).toContain("presentation.commonTitle");
+    expect(routeSource).toContain("presentation.advancedTitle");
+    expect(routeSource).toContain("presentation?.sectionTitle ?? section.title");
+    expect(routeSource).toContain("aria-expanded={advancedExpanded}");
+    expect(routeSource).toContain('contentLayout="plain"');
+    expect(routeSource).toContain("isDenseConfigSection(section) && !presentation");
+    expect(routeSource).toContain("configSectionFieldCopy(path, lang)");
+    expect(stylesSource).toContain("configProgressiveBody:");
+    expect(stylesSource).toContain("configTierHeader:");
+    expect(stylesSource).toContain("configAdvancedToggle:");
+    expect(stylesSource).toContain("configAdvancedBody:");
+    expect(styles.configAdvancedToggle).toContain("w-full");
+    expect(routeSource).toContain("styles.configCommonGridPet");
+    expect(routeSource).toContain("styles.configCommonGridContext");
+    expect(routeSource).toContain("styles.configAdvancedGrid");
+    expect(styles.configCommonGridPet).toContain("![grid-template-columns:repeat(4,minmax(0,1fr))]");
+    expect(styles.configCommonGridContext).toContain("![grid-template-columns:repeat(5,minmax(0,1fr))]");
+    expect(styles.configAdvancedGrid).toContain("![grid-template-columns:repeat(3,minmax(0,1fr))]");
+    expect(styles.configAdvancedGrid).toContain("max-[1180px]:![grid-template-columns:repeat(2,minmax(0,1fr))]");
+    expect(styles.configProgressiveBody).toContain("[&_.treeFieldCardView]:[grid-template-columns:minmax(0,1fr)]");
+    expect(styles.configProgressiveBody).toContain("[&_.treeFieldValue]:[grid-row:2]");
+    expect(styles.configProgressiveBody).toContain("[&_.treeFieldLabel]:[white-space:normal]");
+  });
+
   it("uses a compact layout for large config sections with many fields", () => {
     expect(routeSource).toContain("function isDenseConfigSection");
     expect(routeSource).toContain('section.id === "llm-discovery"');
