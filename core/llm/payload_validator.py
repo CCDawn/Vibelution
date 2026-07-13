@@ -157,7 +157,11 @@ def validate_tool_result_pairing(messages: List[Dict[str, Any]]) -> PayloadValid
     return PayloadValidationResult(ok=True)
 
 
-def validate_responses_function_pairing(items: List[Dict[str, Any]]) -> PayloadValidationResult:
+def validate_responses_function_pairing(
+    items: List[Dict[str, Any]],
+    *,
+    allow_external_call_ids: bool = False,
+) -> PayloadValidationResult:
     """Validate Responses function_call/function_call_output items before provider send."""
 
     pending: list[str] = []
@@ -201,6 +205,9 @@ def validate_responses_function_pairing(items: List[Dict[str, Any]]) -> PayloadV
                     details={"messageIndex": index, "callId": call_id},
                 )
             if call_id not in pending:
+                if allow_external_call_ids:
+                    seen_output_ids.add(call_id)
+                    continue
                 return PayloadValidationResult(
                     ok=False,
                     error_type="orphan_function_call_output",
@@ -285,7 +292,10 @@ def validate_payload_against_protocol(
                 "Responses transport payload must use Responses content blocks such as input_text/input_image.",
                 invalidContentBlockTypes=invalid_blocks[:8],
             )
-        pairing_result = validate_responses_function_pairing(_input_items(payload))
+        pairing_result = validate_responses_function_pairing(
+            _input_items(payload),
+            allow_external_call_ids=bool(str(payload.get("previous_response_id") or "").strip()),
+        )
         if not pairing_result.ok:
             return fail(pairing_result.error_type, pairing_result.message, **pairing_result.details)
     else:

@@ -120,7 +120,7 @@ describe("TeamsRoute layout contract", () => {
 
   it("is mounted as the top-level Team workspace with legacy redirects", () => {
     expect(routerSource).toContain('path: "teams"');
-    expect(routerSource).toContain("guardedLazyElement(<TeamsRoute />)");
+    expect(routerSource).toContain('guardedLazyElement(<TeamsRoute />, "workbench", "teams")');
     expect(routerSource).toContain('path: "agents/teams"');
     expect(routerSource).toContain('path: "research"');
     expect(routerSource).toContain("<LegacyTeamsRedirect />");
@@ -479,9 +479,11 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("canvasPanel");
     expect(routeSource).toContain("inspector");
     expect(routeSource).toContain("hasTeams");
+    expect(routeSource).toContain("showTeamInitialLoadingSurface");
     expect(routeSource).toContain("showTeamUnavailableSurface");
     expect(routeSource).toContain("teamListInitialLoading");
-    expect(routeSource).toContain("const showTeamUnavailableSurface = teamListInitialLoading || !hasTeams");
+    expect(routeSource).toContain("const showTeamInitialLoadingSurface = teamListInitialLoading");
+    expect(routeSource).toContain("const showTeamUnavailableSurface = !teamListInitialLoading && !hasTeams");
     expect(routeSource).toContain("teamContextMeta");
     expect(routeSource).toContain("teamSummaryStatusItems");
     expect(routeSource).toContain("styles.teamUnavailableSurface");
@@ -490,7 +492,21 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("正在读取团队");
     expect(routeSource).toContain("团队尚未初始化");
     expect(routeSource).not.toContain("styles.workspaceEmpty");
+    expect(routeSource).toContain("showTeamInitialLoadingSurface ? (");
     expect(routeSource).toContain("showTeamUnavailableSurface ? (");
+    expect(routeSource).toContain('tone="loading"');
+    expect(routeSource).toContain("skeletonLines={3}");
+    expect(routeSource).toContain("<VLoadingValue");
+    expect(routeSource).toContain('tone={teamListUnavailable ? "error" : "empty"}');
+    const initialLoadingSurfaceSource = routeSource.slice(
+      routeSource.indexOf("showTeamInitialLoadingSurface ? ("),
+      routeSource.indexOf(") : showTeamUnavailableSurface ? ("),
+    );
+    expect(initialLoadingSurfaceSource).toContain('tone="loading"');
+    expect(initialLoadingSurfaceSource).toContain("skeletonLines={3}");
+    expect(initialLoadingSurfaceSource).toContain("<VLoadingValue");
+    expect(initialLoadingSurfaceSource).not.toContain("visibleTeamSummary.activeTeamCount");
+    expect(initialLoadingSurfaceSource).not.toContain("visibleTeamSummary.memberCount");
     expect(routeSource).toContain("styles.emptyCanvasPanel");
     expect(routeSource).not.toContain("选择团队后进入对应工作区");
     expect(routeSource).not.toContain("顶部只保留 AI 搜索范围团队和 挑战杯ai科研团队 两个入口");
@@ -2622,7 +2638,7 @@ describe("TeamsRoute layout contract", () => {
     expect(routeStyles.teamLoadingInlineSurface).toContain("min-h-[96px]");
 
     const mainRenderSource = routeSource.slice(
-      routeSource.indexOf("{showTeamUnavailableSurface ? ("),
+      routeSource.indexOf("showTeamUnavailableSurface ? ("),
       routeSource.indexOf("className={canvasPanelClassName}"),
     );
     expect(mainRenderSource).not.toContain("showTeamLoadingSurface ? (");

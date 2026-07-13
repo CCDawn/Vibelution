@@ -1,8 +1,8 @@
 const styles = {
   conversationAvatar:
-    "vui-routes-chatcodingroute conversationAvatar min-w-0 inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)]",
+    "vui-routes-chatcodingroute conversationAvatar min-w-0 inline-grid h-[30px] w-[30px] shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)]",
   conversationAvatarGroup:
-    "vui-routes-chatcodingroute conversationAvatarGroup min-w-0 inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)]",
+    "vui-routes-chatcodingroute conversationAvatarGroup min-w-0 inline-grid h-[30px] w-[30px] shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)]",
   conversationCopy:
     "vui-routes-chatcodingroute conversationCopy grid min-w-0 gap-0.5 overflow-hidden text-left",
   conversationKindBadge:
@@ -16,11 +16,11 @@ const styles = {
   groupSessionItem:
     "vui-routes-chatcodingroute groupSessionItem pr-0 border-transparent bg-transparent shadow-none",
   sessionItem:
-    "vui-routes-chatcodingroute sessionItem relative grid min-w-0 grid-cols-[minmax(0,1fr)] gap-0 overflow-hidden rounded-[var(--radius-control)] border border-transparent bg-transparent !px-1 !py-0 text-left transition-colors before:absolute before:inset-y-1.5 before:left-0 before:w-[2px] before:rounded-full before:bg-[var(--accent-cool)] before:opacity-0 before:transition-opacity hover:bg-[color-mix(in_srgb,var(--surface-card)_46%,transparent)] focus-within:bg-[color-mix(in_srgb,var(--surface-card)_48%,transparent)]",
+    "vui-routes-chatcodingroute sessionItem relative grid min-w-0 grid-cols-[minmax(0,1fr)] gap-0 overflow-hidden rounded-[var(--radius-control)] !border-0 [border:0] bg-transparent !px-1 !py-0 text-left transition-colors before:absolute before:inset-y-1.5 before:left-0 before:w-[2px] before:rounded-full before:bg-[var(--accent-cool)] before:opacity-0 before:transition-opacity hover:bg-[color-mix(in_srgb,var(--surface-card)_46%,transparent)] focus-within:bg-[color-mix(in_srgb,var(--surface-card)_48%,transparent)]",
   sessionItemActive:
-    "vui-routes-chatcodingroute sessionItemActive border-[color-mix(in_srgb,var(--accent-cool)_22%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_7%,var(--surface-card))] shadow-[var(--vui-shadow-inset-accent)] before:opacity-100",
+    "vui-routes-chatcodingroute sessionItemActive border-transparent bg-[color-mix(in_srgb,var(--accent-cool)_8%,var(--surface-card))] shadow-none before:opacity-100",
   sessionItemMain:
-    "vui-routes-chatcodingroute sessionItemMain !grid !w-full min-h-[50px] min-w-0 appearance-none grid-cols-[27px_minmax(0,1fr)] items-center justify-stretch gap-1.5 rounded-none border-0 [border:0] bg-transparent !px-1.5 !py-1 text-left text-[var(--fg-primary)] shadow-none hover:border-transparent hover:bg-transparent hover:shadow-none focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)]",
+    "vui-routes-chatcodingroute sessionItemMain !grid !w-full min-h-[46px] min-w-0 appearance-none grid-cols-[30px_minmax(0,1fr)] items-center justify-stretch gap-2 rounded-none border-0 [border:0] bg-transparent !px-2 !py-1.5 text-left text-[var(--fg-primary)] shadow-none hover:border-transparent hover:bg-transparent hover:shadow-none focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)]",
   sessionItemTitle:
     "vui-routes-chatcodingroute sessionItemTitle min-w-0 truncate text-[var(--vui-font-md)] font-semibold leading-tight text-[var(--fg-primary)]",
   sessionState:

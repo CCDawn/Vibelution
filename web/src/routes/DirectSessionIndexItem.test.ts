@@ -83,13 +83,14 @@ function renderDirectItem(overrides: Partial<Parameters<typeof DirectSessionInde
 }
 
 describe("DirectSessionIndexItem helpers", () => {
-  it("renders current state as a visible compact badge", () => {
+  it("keeps current state semantic and rail-based without a redundant badge", () => {
     const markup = renderDirectItem();
 
-    expect(markup).toContain("sessionStatusCluster");
-    expect(markup).toContain("sessionCurrentBadge");
-    expect(markup).toContain('data-vui="chip"');
-    expect(markup).toContain("aria-label=\"currentSession\"");
+    expect(markup).toContain('aria-current="true"');
+    expect(markup).toContain("sessionItemActive");
+    expect(markup).not.toContain("sessionStatusCluster");
+    expect(markup).not.toContain("sessionCurrentBadge");
+    expect(markup).not.toContain('data-vui="chip"');
     expect(markup).toContain("模型：mimo-v2.5");
   });
 
@@ -143,13 +144,14 @@ describe("DirectSessionIndexItem helpers", () => {
     expect(markup).not.toContain(">mimo-v2.5</span>");
   });
 
-  it("keeps unread counts as compact badges separate from the current-session badge", () => {
+  it("keeps unread counts as the only compact badge on the current session", () => {
     const markup = renderDirectItem({
       session: makeSession({ agentInboxPendingCount: 2 }),
     });
 
-    expect(markup).toContain("sessionCurrentBadge");
+    expect(markup).not.toContain("sessionCurrentBadge");
     expect(markup).toContain("sessionUnreadBadge");
+    expect(markup.match(/data-vui="chip"/g)).toHaveLength(1);
     expect(markup).toContain("未读信息：2 条");
   });
 

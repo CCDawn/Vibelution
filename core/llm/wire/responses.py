@@ -144,6 +144,8 @@ class ResponsesWireAdapter:
             "max_output_tokens": request.settings.max_output_tokens,
             "stream": request.settings.stream,
         }
+        if request.replay_state is not None and request.replay_state.response_id:
+            payload["previous_response_id"] = request.replay_state.response_id
         if request.tools:
             payload["tools"] = [
                 {
@@ -213,6 +215,15 @@ class ResponsesWireAdapter:
             for item in (request.replay_state.opaque_items if request.replay_state is not None else ())
         }
         encoded: list[Any] = []
+        if request.replay_state is not None and request.replay_state.response_id:
+            for replay_item in request.replay_state.opaque_items:
+                try:
+                    provider_item = json.loads(replay_item.payload.decode("utf-8"))
+                except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+                    raise ValueError("reasoning replay item is not valid provider JSON") from exc
+                if not isinstance(provider_item, dict):
+                    raise ValueError("reasoning replay item must decode to an object")
+                encoded.append(provider_item)
         for message in request.messages:
             encoded.extend(self._encode_message(message, replay_by_id=replay_by_id))
         return encoded
@@ -615,7 +626,7 @@ class _ResponsesTurnAssembler:
         self.replay_items.append(OpaqueReplayItem(item_id=item_id, payload=payload))
 
     def _replay_state(self) -> ProviderReplayState | None:
-        if not self.replay_items:
+        if not self.replay_items and not self.response_id:
             return None
         return ProviderReplayState(
             issuer=self.adapter_id,
@@ -624,6 +635,7 @@ class _ResponsesTurnAssembler:
             model_id=str(getattr(self.route, "model_id", "") or ""),
             wire_protocol=WireProtocol.RESPONSES,
             opaque_items=tuple(self.replay_items),
+            response_id=self.response_id,
         )
 
     def _emit(self, kind: str, **kwargs: Any) -> LLMProtocolEvent:

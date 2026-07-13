@@ -493,12 +493,12 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.layout.split(/\s+/)).toContain("grid");
     expect(routeStyles.layout).toContain("!gap-0");
     expect(routeStyles.layout).toContain("!p-0");
-    expect(routeStyles.layout).toContain("[--chat-pane-gutter:1px]");
+    expect(routeStyles.layout).toContain("[--chat-pane-gutter:12px]");
     expect(routeStyles.layout).toContain(
       "grid-cols-[var(--chat-left-pane-width,300px)_var(--chat-pane-gutter)_minmax(0,1fr)_var(--chat-pane-gutter)_var(--chat-right-pane-width,220px)]",
     );
     expect(routeStyles.layoutCompactDesktop).toContain(
-      "grid-cols-[minmax(220px,var(--chat-left-pane-width,248px))_1px_minmax(0,1fr)]",
+      "grid-cols-[minmax(220px,var(--chat-left-pane-width,248px))_var(--chat-pane-gutter)_minmax(0,1fr)]",
     );
     expect(routeStyles.layoutOverlay).toContain("grid-cols-[minmax(0,1fr)]");
     expect(routeStyles.overlayPane).toContain("fixed");
@@ -510,7 +510,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.layout).not.toContain("_8px_");
     expect(routeStyles.layoutCompactDesktop).not.toContain("_8px_");
     expect(routeStyles.resizeHandle).toContain("h-full");
-    expect(routeStyles.resizeHandle).toContain("w-[1px]");
+    expect(routeStyles.resizeHandle).toContain("w-full");
     expect(routeStyles.resizeHandle).toContain("cursor-col-resize");
     expect(routeStyles.resizeHandle).toContain("touch-none");
     expect(routeStyles.resizeHandle).toContain("before:absolute");
@@ -1541,12 +1541,12 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.sessionActionRow).toBeTypeOf("string");
     expect(routeStyles.newGroupButton).toBeTypeOf("string");
     expect(routeStyles.sessionActionRow).not.toContain("grid-cols-[auto_auto]");
-    expect(routeStyles.newSessionButton).toContain("!h-[32px]");
-    expect(routeStyles.newSessionButton).toContain("min-h-[32px]");
-    expect(routeStyles.newSessionButton).toContain("!w-auto");
-    expect(routeStyles.newGroupButton).toContain("!h-[32px]");
-    expect(routeStyles.newGroupButton).toContain("min-h-[32px]");
-    expect(routeStyles.newGroupButton).toContain("!w-auto");
+    expect(routeStyles.newSessionButton).toContain("!h-[34px]");
+    expect(routeStyles.newSessionButton).toContain("!min-h-[34px]");
+    expect(routeStyles.newSessionButton).toContain("!w-full");
+    expect(routeStyles.newGroupButton).toContain("!h-[34px]");
+    expect(routeStyles.newGroupButton).toContain("!min-h-[34px]");
+    expect(routeStyles.newGroupButton).toContain("!w-full");
     expect(routeStyles.systemEntryGroup).toBeTypeOf("string");
     expect(routeStyles.systemEntryButton).toBeTypeOf("string");
     expect(routeStyles.systemEntryIcon).toBeTypeOf("string");
@@ -2089,8 +2089,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.panelState).not.toContain("border");
     expect(routeStyles.panelState).not.toContain("bg-");
     expect(routeStyles.panelState).not.toContain("shadow");
-    expect(routeStyles.sessionActionRow).toContain("flex-wrap");
-    expect(routeStyles.newSessionButton).toContain("!w-auto");
+    expect(routeStyles.sessionActionRow).toContain("grid-cols-2");
+    expect(routeStyles.newSessionButton).toContain("!w-full");
     expect(routeStyles.panelSearchInput).toContain("w-full");
     expect(directSessionIndexItemStyles.sessionItem).not.toContain("shadow-[var(--vui-elevation-panel)]");
   });
@@ -2466,10 +2466,12 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("filteredStandaloneGroupConversations");
     expect(conversationIndexTreeSource).toContain("TeamConversationIndexItem");
     expect(conversationIndexTreeSource).toContain("GroupConversationIndexItem");
+    expect(routeSource).toContain("function formatConversationIndexTime");
+    expect(routeSource).toContain("formatTime={formatConversationIndexTime}");
     expect(groupSessionIndexItemsSource).toContain("export function teamStatusLabel");
     expect(groupSessionIndexItemsSource).toContain("teamStatusLabel(team.status, lang, statusLabel)");
     expect(groupSessionIndexItemsSource).toContain("CircleDot");
-    expect(groupSessionIndexItemsSource).toContain("Clock3");
+    expect(groupSessionIndexItemsSource).not.toContain("Clock3");
     expect(groupSessionIndexItemsSource).toContain("teamMemberPreview(team, lang)");
     expect(groupSessionIndexItemsSource).not.toContain("team.linkedChatRoom?.title");
     expect(groupSessionIndexItemsSource).not.toContain("team.members ?? []");
@@ -2584,23 +2586,32 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("<Search size={15} aria-hidden=\"true\" />");
     expect(routeStyles.newSessionButton).toContain("border-[color-mix(in_srgb,var(--accent-cool)_34%,var(--vui-border-subtle))]");
     expect(routeStyles.newGroupButton).toContain("bg-[var(--vui-control-muted)]");
-    expect(routeStyles.panelSearch).toContain("rounded-[var(--radius-control)]");
-    expect(routeStyles.panelSearch).toContain("bg-transparent");
-    expect(routeStyles.panelSearchInput).toContain("[&_[data-slot=input-wrapper]]:min-h-[34px]");
+    expect(routeStyles.panelSearch).toContain("min-h-9");
+    expect(routeStyles.panelSearch).toContain("border-[var(--vui-border-subtle)]");
+    expect(routeStyles.panelSearch).toContain("focus-within:border-");
+    expect(routeStyles.panelSearchInput).toContain("[&_[data-slot=input-wrapper]]:min-h-8");
     expect(routeStyles.panelSearchInput).toContain("[&_[data-slot=input-wrapper]]:shadow-none");
+    expect(routeStyles.panelSearchInput).toContain("[&_[data-slot=input-wrapper]]:!border-0");
     expect(routeStyles.panelSearchInput).toContain("[&_[data-slot=input]]:text-[var(--vui-font-sm)]");
-    expect(routeStyles.sessionActionRow).toContain("flex-wrap");
-    expect(routeStyles.sessionActionRow).toContain("gap-1.5");
+    expect(routeStyles.sessionActionRow).toContain("grid-cols-2");
+    expect(routeStyles.sessionActionRow).toContain("gap-2");
     expect(routeStyles.newSessionButton).toContain("!min-w-0");
+    expect(routeStyles.newSessionButton).toContain("!w-full");
     expect(routeStyles.newSessionButton).toContain("[&_[data-slot=vui-button-content]]:min-w-0");
     expect(routeStyles.newGroupButton).toContain("!min-w-0");
+    expect(routeStyles.newGroupButton).toContain("!w-full");
     expect(routeStyles.newGroupButton).toContain("[&_[data-slot=vui-button-content]]:min-w-0");
     expect(routeStyles.panelSearchInput).not.toContain("rounded-[var(--radius-panel)]");
     expect(routeStyles.panelSearchInput).not.toContain("bg-[var(--vui-surface-glass)]");
     expect(routeStyles.panelSearchInput).not.toContain("shadow-[var(--vui-shadow-hairline)]");
-    expect(routeStyles.systemEntryGroup).toContain("rounded-none");
-    expect(routeStyles.systemEntryGroup).toContain("border-0");
-    expect(routeStyles.systemEntryButton).toContain("grid-cols-[26px_minmax(0,1fr)]");
+    expect(routeStyles.conversationIndexPanelBody).toContain("!overflow-hidden");
+    expect(routeStyles.conversationIndexLayout).toContain("grid-rows-[auto_minmax(0,1fr)_auto]");
+    expect(routeStyles.conversationIndexScrollRegion).toContain("overflow-y-auto");
+    expect(routeSource).toContain("styles.conversationIndexPanelBody");
+    expect(routeSource).toContain("styles.conversationIndexLayout");
+    expect(routeSource).toContain("styles.conversationIndexScrollRegion");
+    expect(routeStyles.systemEntryGroup).toContain("border-t");
+    expect(routeStyles.systemEntryButton).toContain("grid-cols-[28px_minmax(0,1fr)]");
     expect(routeStyles.systemEntryButton).toContain("border-transparent");
     expect(routeStyles.systemEntryButtonActive).toContain("before:absolute");
   });
@@ -2608,26 +2619,36 @@ describe("ChatCodingRoute layout contract", () => {
   it("uses one lightweight Tailwind grammar for conversation index sections and rows", () => {
     expect(conversationIndexSectionStyles.conversationGroupHeader).toContain("[&_svg]:transition-transform");
     expect(conversationIndexSectionStyles.conversationGroupHeader).toContain("aria-expanded=true");
-    expect(conversationIndexSectionStyles.conversationGroupHeader).toContain("[&_strong]:rounded-full");
-    expect(conversationIndexSectionStyles.conversationGroupList).toContain("gap-1");
+    expect(conversationIndexSectionStyles.conversationGroupHeader).toContain("min-h-[34px]");
+    expect(conversationIndexSectionStyles.conversationGroupHeader).toContain("[&_strong]:tabular-nums");
+    expect(conversationIndexSectionStyles.conversationGroupHeader).toContain("[border:0]");
+    expect(conversationIndexSectionStyles.conversationGroupHeader).not.toContain("[&_strong]:rounded-full");
+    expect(conversationIndexSectionStyles.conversationGroupList).toContain("pl-1");
 
     expect(directSessionIndexItemStyles.sessionItem).toContain("overflow-hidden");
+    expect(directSessionIndexItemStyles.sessionItem).toContain("[border:0]");
     expect(directSessionIndexItemStyles.sessionItem).toContain("before:absolute");
     expect(directSessionIndexItemStyles.sessionItemActive).toContain("before:opacity-100");
-    expect(directSessionIndexItemStyles.sessionItemMain).toContain("min-h-[50px]");
+    expect(directSessionIndexItemStyles.conversationAvatar).toContain("h-[30px]");
+    expect(directSessionIndexItemStyles.sessionItemMain).toContain("min-h-[46px]");
+    expect(directSessionIndexItemStyles.sessionItemMain).toContain("grid-cols-[30px_minmax(0,1fr)]");
     expect(directSessionIndexItemStyles.sessionItemMain).toContain("[border:0]");
     expect(directSessionIndexItemStyles.sessionItemMain).toContain("appearance-none");
     expect(directSessionIndexItemStyles.sessionItem).toContain("rounded-[var(--radius-control)]");
-    expect(directSessionIndexItemSource).toContain("VChip tone=\"accent\"");
+    expect(directSessionIndexItemSource).not.toContain("VChip tone=\"accent\"");
+    expect(directSessionIndexItemSource).not.toContain("Clock3");
     expect(directSessionIndexItemSource).toContain("VChip tone=\"success\"");
     expect(directSessionIndexItemSource).toContain("VChip tone=\"warning\"");
-    expect(directSessionIndexItemStyles.sessionCurrentBadge).toContain("!h-[22px]");
+    expect(directSessionIndexItemStyles).not.toHaveProperty("sessionCurrentBadge");
     expect(directSessionIndexItemStyles.sessionRunningBadge).toContain("!h-[22px]");
     expect(directSessionIndexItemStyles.sessionUnreadBadge).toContain("!h-[22px]");
 
     expect(groupSessionIndexItemsStyles.sessionItem).toContain("overflow-hidden");
+    expect(groupSessionIndexItemsStyles.sessionItem).toContain("[border:0]");
     expect(groupSessionIndexItemsStyles.sessionItem).toContain("before:absolute");
-    expect(groupSessionIndexItemsStyles.sessionItemMain).toContain("min-h-[50px]");
+    expect(groupSessionIndexItemsStyles.conversationAvatar).toContain("h-[30px]");
+    expect(groupSessionIndexItemsStyles.sessionItemMain).toContain("min-h-[46px]");
+    expect(groupSessionIndexItemsStyles.sessionItemMain).toContain("grid-cols-[30px_minmax(0,1fr)]");
     expect(groupSessionIndexItemsStyles.sessionItemMain).toContain("[border:0]");
     expect(groupSessionIndexItemsSource).toContain("VChip tone=\"success\"");
     expect(groupSessionIndexItemsStyles.sessionState).toContain("!h-[22px]");
