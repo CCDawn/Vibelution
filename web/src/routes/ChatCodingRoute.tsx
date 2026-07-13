@@ -5342,6 +5342,10 @@ export function ChatCodingRoute() {
     return timeFormatter.format(parsed);
   }
 
+  function formatConversationIndexTime(value: string) {
+    return formatTime(value).replace(/:\d{2}$/, "");
+  }
+
   function toggleConversationGroup(groupKey: ConversationIndexDynamicGroupKey) {
     setCollapsedConversationGroups((current) => ({
       ...current,
@@ -6319,7 +6323,7 @@ export function ChatCodingRoute() {
             filteredConversationsCount={filteredConversations.length}
             filteredStandaloneGroupConversations={filteredStandaloneGroupConversations}
             filteredTeams={filteredTeams}
-            formatTime={formatTime}
+            formatTime={formatConversationIndexTime}
             groupPanelActive={groupPanelActive}
             groupedConversations={groupedConversations}
             isBusyPhase={isBusyPhase}
@@ -7598,7 +7602,13 @@ export function ChatCodingRoute() {
           </div>
         )}
 
-        <div className={styles.panelBody}>
+        <div
+          className={
+            rightIndexPanel === "members" && standardGroupRoomActive
+              ? styles.panelBody
+              : `${styles.panelBody} ${styles.conversationIndexPanelBody}`
+          }
+        >
           {rightIndexPanel === "members" && standardGroupRoomActive ? (
             <section className={styles.agentIndexRoster} aria-label={lang === "zh" ? "群成员状态索引" : "Group member status index"}>
               <div className={styles.sectionHeader}>
@@ -7748,7 +7758,7 @@ export function ChatCodingRoute() {
               )}
             </section>
           ) : (
-            <>
+            <div className={styles.conversationIndexLayout}>
             <div className={styles.sessionActionRow}>
               <VButton
                 type="button"
@@ -7770,36 +7780,8 @@ export function ChatCodingRoute() {
                 <span>{groupComposerOpen ? (lang === "zh" ? "收起" : "Close") : (lang === "zh" ? "新建群聊" : "New group")}</span>
               </VButton>
             </div>
+            <div className={styles.conversationIndexScrollRegion}>
             {conversationIndexPanel}
-            <section className={styles.systemEntryGroup} aria-label={lang === "zh" ? "系统入口" : "System entries"}>
-              <div className={styles.conversationTreeRootHeader}>
-                <span>{lang === "zh" ? "系统入口" : "System"}</span>
-                <strong>1</strong>
-              </div>
-              <VButton
-                type="button"
-                aria-current={projectBusActive ? "true" : undefined}
-                className={
-                  projectBusActive
-                    ? `${styles.systemEntryButton} ${styles.systemEntryButtonActive}`
-                    : styles.systemEntryButton
-                }
-                onClick={handleOpenProjectAgentBus}
-              >
-                <span className={styles.systemEntryIcon} aria-hidden="true">
-                  <BellRing size={16} />
-                </span>
-                <span className={styles.systemEntryCopy}>
-                  <span className={styles.systemEntryTitleRow}>
-                    <span className={styles.systemEntryTitle}>{lang === "zh" ? "助手通知流" : "Agent notice stream"}</span>
-                    {projectBusActive ? <span className={styles.sessionCurrentBadge}>{t("currentSession")}</span> : null}
-                  </span>
-                  <span className={styles.systemEntryMeta}>
-                    {lang === "zh" ? "全局广播 · 私信投递记录" : "Global broadcast · private delivery log"}
-                  </span>
-                </span>
-              </VButton>
-            </section>
             {groupComposerOpen ? (
               <section className={styles.groupComposerPanel} aria-label={lang === "zh" ? "新建群聊" : "New group chat"}>
                 <label className={styles.groupComposerField}>
@@ -7892,7 +7874,37 @@ export function ChatCodingRoute() {
                 </VButton>
               </section>
             ) : null}
-            </>
+            </div>
+            <section className={styles.systemEntryGroup} aria-label={lang === "zh" ? "系统入口" : "System entries"}>
+              <div className={styles.conversationTreeRootHeader}>
+                <span>{lang === "zh" ? "系统入口" : "System"}</span>
+                <strong>1</strong>
+              </div>
+              <VButton
+                type="button"
+                aria-current={projectBusActive ? "true" : undefined}
+                className={
+                  projectBusActive
+                    ? `${styles.systemEntryButton} ${styles.systemEntryButtonActive}`
+                    : styles.systemEntryButton
+                }
+                onClick={handleOpenProjectAgentBus}
+              >
+                <span className={styles.systemEntryIcon} aria-hidden="true">
+                  <BellRing size={16} />
+                </span>
+                <span className={styles.systemEntryCopy}>
+                  <span className={styles.systemEntryTitleRow}>
+                    <span className={styles.systemEntryTitle}>{lang === "zh" ? "助手通知流" : "Agent notice stream"}</span>
+                    {projectBusActive ? <span className={styles.sessionCurrentBadge}>{t("currentSession")}</span> : null}
+                  </span>
+                  <span className={styles.systemEntryMeta}>
+                    {lang === "zh" ? "全局广播 · 私信投递记录" : "Global broadcast · private delivery log"}
+                  </span>
+                </span>
+              </VButton>
+            </section>
+            </div>
           )}
           </div>
         </aside>
