@@ -1499,7 +1499,7 @@ describe("ChatCodingRoute layout contract", () => {
 
   it("clears the direct chat composer immediately after submit and restores only failed text", () => {
     const submitWithAttachmentsStart = routeSource.indexOf("async function submitTurnWithAttachments");
-    const optimisticAppend = routeSource.indexOf("appendOptimisticUserMessage(detail, { sessionId, content, references })", submitWithAttachmentsStart);
+    const optimisticAppend = routeSource.indexOf("appendOptimisticUserMessage(detail, { sessionId, content, references, clientSubmissionId })", submitWithAttachmentsStart);
     const immediateDraftClear = routeSource.indexOf("clearSessionDraftForSubmittedTurn(current, sessionId)", submitWithAttachmentsStart);
     const uploadFailureDraftRestore = routeSource.indexOf(
       "restoreSubmittedDraftIfComposerStillEmpty(current, sessionId, content)",
@@ -1509,6 +1509,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(immediateDraftClear).toBeGreaterThan(submitWithAttachmentsStart);
     expect(immediateDraftClear).toBeLessThan(optimisticAppend);
     expect(uploadFailureDraftRestore).toBeGreaterThan(optimisticAppend);
+    expect(routeSource).toContain("const clientSubmissionId = createClientSubmissionId(sessionId)");
+    expect(routeSource).toContain("clientSubmissionId: createClientSubmissionId(activeSessionId)");
 
     const submitMutationStart = routeSource.indexOf("const submitTurnMutation = useMutation");
     const submitSuccessStart = routeSource.indexOf("onSuccess: (acceptedTurn, variables)", submitMutationStart);

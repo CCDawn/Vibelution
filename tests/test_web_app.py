@@ -2035,13 +2035,18 @@ def test_submit_session_message_runs_turn_and_persists_reply(tmp_path, monkeypat
 
     response = client.post(
         "/api/sessions/session-live/messages",
-        json={"content": "请继续修复 web/src/routes/ChatCodingRoute.tsx 并验证", "mentalModelEnabled": True},
+        json={
+            "clientSubmissionId": "submission-web-app-1",
+            "content": "请继续修复 web/src/routes/ChatCodingRoute.tsx 并验证",
+            "mentalModelEnabled": True,
+        },
     )
 
     assert response.status_code == 202
     payload = response.json()
     assert payload["messages"][-2]["role"] == "user"
     assert payload["messages"][-2]["content"] == "请继续修复 web/src/routes/ChatCodingRoute.tsx 并验证"
+    assert payload["messages"][-2]["metadata"]["clientSubmissionId"] == "submission-web-app-1"
     assert payload["messages"][-1]["role"] == "assistant"
     assert payload["messages"][-1]["content"] == "已完成网页对话提交接线。"
     assert payload["messages"][-1]["thought"] == "先确认消息模型，再把思考与心智快照一起落盘。"
