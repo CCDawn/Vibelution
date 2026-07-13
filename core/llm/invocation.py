@@ -5,7 +5,9 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from contextlib import nullcontext
-from typing import Any
+from typing import Any, Callable
+
+from .types import LLMProtocolEvent, TurnOutcome
 
 from .invocation_context import LLMInvocationContext, prompt_purpose_cache_partition
 from .payload_builder import current_prompt_cache_partition, prompt_cache_partition_scope
@@ -93,6 +95,32 @@ def invoke_llm(
         return client.invoke(messages, tools=tools, metadata=effective_metadata)
 
 
+def invoke_llm_outcome(
+    client: Any,
+    messages: list[Any],
+    *,
+    context: LLMInvocationContext,
+    tools: list[Any] | None = None,
+    metadata: dict[str, Any] | None = None,
+    replay_state: Any = None,
+) -> TurnOutcome:
+    """Invoke an LLM and return the canonical control-plane result."""
+    effective_context = _context_with_effective_partition(context)
+    effective_metadata = _merged_metadata(effective_context, client, metadata)
+    partition = str(effective_context.cache_partition or "").strip()
+    scope = prompt_cache_partition_scope(partition) if partition else nullcontext()
+    with scope:
+        outcome = client.invoke_outcome(
+            messages,
+            tools=tools,
+            metadata=effective_metadata,
+            replay_state=replay_state,
+        )
+    if not isinstance(outcome, TurnOutcome):
+        raise TypeError("LLM client did not return canonical TurnOutcome")
+    return outcome
+
+
 def stream_llm(
     client: Any,
     messages: list[Any],
@@ -111,4 +139,42 @@ def stream_llm(
         yield from client.stream(messages, tools=tools, metadata=effective_metadata)
 
 
-__all__ = ["invoke_llm", "stream_llm"]
+def run_streaming_llm_outcome(
+    client: Any,
+    messages: list[Any],
+    *,
+    context: LLMInvocationContext,
+    on_event: Callable[[LLMProtocolEvent], None],
+    tools: list[Any] | None = None,
+    metadata: dict[str, Any] | None = None,
+    replay_state: Any = None,
+) -> TurnOutcome:
+    """Drain compatibility chunks while consuming canonical events and outcome directly."""
+    effective_context = _context_with_effective_partition(context)
+    effective_metadata = _merged_metadata(effective_context, client, metadata)
+    partition = str(effective_context.cache_partition or "").strip()
+    scope = prompt_cache_partition_scope(partition) if partition else nullcontext()
+    with scope:
+        iterator = iter(
+            client.stream_events(
+                messages,
+                tools=tools,
+                metadata=effective_metadata,
+                replay_state=replay_state,
+                protocol_event_sink=on_event,
+            )
+        )
+        while True:
+            try:
+                next(iterator)
+            except StopIteration as stop:
+                outcome = stop.value
+                break
+    if not isinstance(outcome, TurnOutcome):
+        raise TypeError("LLM stream did not return canonical TurnOutcome")
+    if not outcome.terminal_event_seen:
+        raise ValueError("canonical TurnOutcome is missing terminal evidence")
+    return outcome
+
+
+__all__ = ["invoke_llm", "invoke_llm_outcome", "run_streaming_llm_outcome", "stream_llm"]

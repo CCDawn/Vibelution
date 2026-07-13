@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import json
+from pathlib import Path
 
 import pytest
 from fastapi import HTTPException
@@ -42,6 +43,16 @@ def _public_config_with_refs(model_id: str, other_model_id: str = "model-b") -> 
         "tools": {"image2": {"default_model_ref": model_id}},
         "git": {"commit_message_model_ref": model_id},
     }
+
+
+def _schema_v1_public_config() -> dict:
+    fixture = (
+        Path(__file__).resolve().parent
+        / "fixtures"
+        / "config"
+        / "llm_schema_v1_inline.toml"
+    )
+    return load_public_config(fixture)
 
 
 @pytest.mark.parametrize(
@@ -296,9 +307,9 @@ def test_scan_can_ignore_public_config_refs_for_workspace_guard(tmp_path):
 
 
 def test_draft_delete_model_blocks_workspace_agent_reference(tmp_path, monkeypatch):
-    public_config = copy.deepcopy(load_public_config())
+    public_config = _schema_v1_public_config()
     public_config["llm"]["model_library"]["model_a"] = copy.deepcopy(
-        public_config["llm"]["model_library"]["relay_gpt_5_6_luna"]
+        public_config["llm"]["model_library"]["relay_text"]
     )
     _seed_agent_registry(tmp_path, "model_a")
     scene_events = []
@@ -320,11 +331,14 @@ def test_draft_delete_model_blocks_workspace_agent_reference(tmp_path, monkeypat
 
 
 def test_draft_delete_model_keeps_non_primary_profile_unconfigured(monkeypatch):
-    public_config = copy.deepcopy(load_public_config())
+    public_config = _schema_v1_public_config()
     public_config["llm"]["model_library"]["model_a"] = copy.deepcopy(
-        public_config["llm"]["model_library"]["relay_gpt_5_6_luna"]
+        public_config["llm"]["model_library"]["relay_text"]
     )
-    public_config["llm"]["profiles"]["mental_model"]["model_ref"] = "model_a"
+    public_config["llm"]["profiles"]["mental_model"] = {
+        "model_ref": "model_a",
+        "overrides": {},
+    }
 
     monkeypatch.setattr(config_service, "load_public_config", lambda: copy.deepcopy(public_config))
 
@@ -335,11 +349,12 @@ def test_draft_delete_model_keeps_non_primary_profile_unconfigured(monkeypatch):
 
 
 def test_apply_config_workspace_blocks_removed_model_with_workspace_reference(tmp_path, monkeypatch):
-    public_config = copy.deepcopy(load_public_config())
+    public_config = _schema_v1_public_config()
     public_config["llm"]["model_library"]["model_a"] = copy.deepcopy(
-        public_config["llm"]["model_library"]["relay_gpt_5_6_luna"]
+        public_config["llm"]["model_library"]["relay_text"]
     )
-    submitted = copy.deepcopy(public_config)
+    base_config = config_service._with_config_workspace_defaults(public_config)
+    submitted = copy.deepcopy(base_config)
     submitted["llm"]["model_library"].pop("model_a", None)
     _seed_agent_registry(tmp_path, "model_a")
 
@@ -349,8 +364,8 @@ def test_apply_config_workspace_blocks_removed_model_with_workspace_reference(tm
     with pytest.raises(ModelReferenceConflictError) as exc_info:
         config_service.apply_config_workspace(
             submitted,
-            base_config=public_config,
-            base_hash=public_config_hash(public_config),
+            base_config=base_config,
+            base_hash=public_config_hash(base_config),
         )
 
     assert exc_info.value.impact["blocking"] is True

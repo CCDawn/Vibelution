@@ -57,6 +57,7 @@ import {
   type PublicConfigShape,
 } from "./configRouteLogic";
 import {
+  configSectionExpandedByDefault,
   configSectionFieldCopy,
   configSectionPresentation,
   configSectionTierCounts,
@@ -185,9 +186,9 @@ type ConfigSectionUiState = {
   draftValue?: unknown;
 };
 
-function defaultSectionUiState(): ConfigSectionUiState {
+function defaultSectionUiState(sectionId = ""): ConfigSectionUiState {
   return {
-    expanded: true,
+    expanded: configSectionExpandedByDefault(sectionId),
     editing: false,
     advancedExpanded: false,
     expandedPaths: {},
@@ -207,8 +208,8 @@ export const CONFIG_COPY = {
     sourceTitle: "保存与生效",
     sourceBody: "这里显示当前修改是否已经保存，以及哪些系统级设置需要重启后才会生效。",
     sourceBodyShort: "保存状态、配置路径和外部环境入口。",
-    runtimeTitle: "运行时与界面",
-    runtimeBody: "非启动类界面、治理和高级配置。",
+    runtimeTitle: "进化审核方式",
+    runtimeBody: "手工操作适合逐步确认；自动审查会让进化任务直接进入审核流程。",
     modelsTitle: "模型库",
     modelsBody: "这里只管理模型资产：服务商、模型名、密钥状态、能力检测和连通性测试。每个 Agent 的具体模型选择请到 Agent 管理中维护。",
     modelsBodyShort: "模型资产、密钥状态、能力检测和连通性。",
@@ -237,7 +238,7 @@ export const CONFIG_COPY = {
     leaveGuardSaving: "保存后离开中",
     leaveGuardDiscard: "不保存离开",
     leaveGuardCancel: "取消",
-    intakeMode: "进化审核",
+    intakeMode: "默认审核方式",
     groupOverviewSaveTitle: "总览与保存",
     groupOverviewSaveSummary: "查看保存状态、重新读取配置，并处理系统环境变量。",
     groupWorkbenchTitle: "界面与高级配置",
@@ -456,8 +457,8 @@ export const CONFIG_COPY = {
     sourceTitle: "Save and Apply",
     sourceBody: "Shows whether current changes are saved and which system-level settings take effect after restart.",
     sourceBodyShort: "Save state, config path, and environment entry.",
-    runtimeTitle: "Runtime and Interface",
-    runtimeBody: "Non-startup interface, governance, and advanced config.",
+    runtimeTitle: "Evolution review mode",
+    runtimeBody: "Manual operation keeps each step under review; automatic review sends evolution tasks directly into the review flow.",
     modelsTitle: "Model Library",
     modelsBody: "This section manages model assets only: provider routes, model names, key state, capability checks, and connection tests. Edit each Agent's model choices in Agent management.",
     modelsBodyShort: "Model assets, key state, capability checks, and connectivity.",
@@ -486,7 +487,7 @@ export const CONFIG_COPY = {
     leaveGuardSaving: "Saving before leaving",
     leaveGuardDiscard: "Leave without saving",
     leaveGuardCancel: "Cancel",
-    intakeMode: "Review intake",
+    intakeMode: "Default review mode",
     groupOverviewSaveTitle: "Overview and Save",
     groupOverviewSaveSummary: "Review save status, reload config, and open system environment variables.",
     groupWorkbenchTitle: "Interface and Advanced Config",
@@ -1128,7 +1129,7 @@ function ConfigSectionEditor({
   const sectionClassName = [
     styles.sectionSurface,
     styles.configEditorSection,
-    section.id === "llm-discovery" ? styles.configDiscoverySection : "",
+    section.id === "llm-discovery" && !presentation ? styles.configDiscoverySection : "",
     isDenseConfigSection(section) && !presentation ? styles.configDenseSection : "",
   ].filter(Boolean).join(" ");
   const [uploadingImagePath, setUploadingImagePath] = useState("");
@@ -1814,7 +1815,11 @@ function ConfigSectionEditor({
         return !isCommonConfigSectionEntry(section.id, childPath);
       });
       return (
-        <div className={styles.configProgressiveBody}>
+        <div
+          className={`${styles.configProgressiveBody} ${
+            presentation.layout === "compact_paths" ? styles.configCompactPathProgressiveBody : ""
+          }`}
+        >
           <div className={styles.configTier}>
             <div className={styles.configTierHeader}>
               <div className={styles.configTierHeaderCopy}>
@@ -1932,7 +1937,7 @@ function ConfigSectionEditor({
         <div className={styles.sectionHeaderMain}>
           <p className={styles.eyebrow}>{section.path}</p>
           <h2 className={styles.sectionTitle}>{presentation?.sectionTitle ?? section.title}</h2>
-          <p className={styles.sectionText}>{section.summary}</p>
+          <p className={styles.sectionText}>{presentation?.sectionSummary ?? section.summary}</p>
         </div>
         <div className={styles.sectionHeaderActions}>
           <div className={styles.sectionHeaderMeta}>
@@ -2382,7 +2387,7 @@ export function ConfigRoute() {
     setActivePageId(pageId);
     const page = activeGroup?.pages.find((candidate) => candidate.id === pageId);
     for (const sectionId of page?.memberSectionIds ?? []) {
-      updateSectionUiState(sectionId, resolveConfigSectionUiStateOnSelect(sectionUiState[sectionId], defaultSectionUiState()));
+      updateSectionUiState(sectionId, resolveConfigSectionUiStateOnSelect(sectionUiState[sectionId], defaultSectionUiState(sectionId)));
     }
     contentViewportRef.current?.scrollTo({ top: 0, behavior: "smooth" });
   }
@@ -3898,7 +3903,7 @@ export function ConfigRoute() {
             lang={currentLanguage}
             copy={copy}
             disabled={structuredActionsDisabled}
-            uiState={sectionUiState[section.id] ?? defaultSectionUiState()}
+            uiState={sectionUiState[section.id] ?? defaultSectionUiState(section.id)}
             onUiStateChange={updateSectionUiState}
             onSaveSection={saveConfigSection}
             onAvatarImageUpload={handleAvatarImageUpload}

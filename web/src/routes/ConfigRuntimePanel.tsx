@@ -30,15 +30,17 @@ export function ConfigRuntimePanel({
       title={copy.runtimeTitle}
       actions={<SlidersHorizontal size={16} className={styles.sectionIcon} />}
     >
-        <p className={styles.sectionText}>{copy.runtimeBody}</p>
-        <div className={styles.matrixGrid}>
-        <article className={styles.matrixCard}>
-          <p className={styles.matrixTitle}>{copy.intakeMode}</p>
-          <div className={styles.segmented}>
+      <div className={styles.behaviorRow}>
+        <div className={styles.behaviorCopy}>
+          <strong>{copy.intakeMode}</strong>
+          <span>{copy.runtimeBody}</span>
+        </div>
+        <div className={styles.segmented} role="group" aria-label={copy.intakeMode}>
             {(["manual_review", "auto"] as const).map((mode) => (
               <VButton
                 key={mode}
                 type="button"
+                aria-pressed={currentIntakeMode === mode}
                 className={
                   currentIntakeMode === mode
                     ? `${styles.segmentButton} ${styles.segmentButtonActive}`
@@ -50,9 +52,8 @@ export function ConfigRuntimePanel({
                 {intakeLabel(mode)}
               </VButton>
             ))}
-          </div>
-        </article>
         </div>
+      </div>
     </VSection>
   );
 }
