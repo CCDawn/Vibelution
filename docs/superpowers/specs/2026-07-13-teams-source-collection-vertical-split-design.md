@@ -1,13 +1,13 @@
 # Teams Source Collection 垂直拆分设计
 
-- **Status:** draft
+- **Status:** approved
 - **Owner:** codex-teams-source-collection-split-design
-- **Claim:** `claim-a6c64dcaf2e1`; branch `codex/teams-source-collection-split-design`; worktree `C:\Users\17533\Desktop\Vibelution-worktrees\teams-source-collection-split-design`
+- **Claim:** design claim `claim-a6c64dcaf2e1` completed; approval/plan claim `claim-229348c3d41b`; branch `codex/teams-source-collection-split-design`; worktree `C:\Users\17533\Desktop\Vibelution-worktrees\teams-source-collection-split-design`
 - **Scope:** 在不改变用户可见行为、后端 API、React Query 契约和 Challenge Cup 工作流语义的前提下，把 `TeamsRoute.tsx` 中的 source collection 纯模型、共享读取资源、行为控制器和视图组合迁入明确的 route-local ownership boundary
 - **Supersedes:** 仅取代 [`2026-07-04-frontend-componentization-migration-playbook.md`](2026-07-04-frontend-componentization-migration-playbook.md) 中 Q3 第 1 项和第 18 节关于 Teams source collection 的 helper-only 下一批建议；该 playbook 的其余组件化与视觉规则继续有效。本设计不重新激活任何 historical large-file plan
-- **Implementation link:** 尚未创建；须先完成书面 spec 审阅，并等待 `claim-6d545068f72a` 对 `TeamsRoute.tsx` / `TeamsRoute.layout.test.ts` 的工作结束（合入、取消或释放）后，从届时最新 local `main` 重新基线化
+- **Implementation link:** [`2026-07-13-teams-source-collection-stage-a-b.md`](../plans/2026-07-13-teams-source-collection-stage-a-b.md)；代码实施仍须等待 `claim-6d545068f72a` 对 `TeamsRoute.tsx` / `TeamsRoute.layout.test.ts` 的工作结束（合入、取消或释放）后，从届时最新 local `main` 重新基线化
 - **Validation:** 当前基线 53/53 Teams focused tests 通过；实施阶段使用 selector-selected Teams backend tests、拆分后的 focused Vitest、全量 frontend Vitest、production build、Challenge Cup flow regeneration/diff check、桌面与窄屏视觉等价检查
-- **Close condition:** 用户批准书面 spec，且后续实施计划能把第一阶段映射到具体文件、依赖、回滚点和验证命令；实现完成不属于本 spec 当前状态
+- **Close condition:** 用户已于 2026-07-13 批准书面 spec；阶段 A+B 实施计划已映射具体文件、依赖、回滚点和验证命令。代码实现完成不属于本设计文档当前状态
 
 用户已通过“继续”批准进入本方向的书面设计阶段；本文件中的具体边界、契约和实施门禁仍须用户审阅后才可进入实施计划。
 
@@ -172,10 +172,14 @@ type ResearchWorkflowResourcesInput = {
   teamId: string;
   demand: ResearchWorkflowResourceDemand;
   pageVisible: boolean;
+  stageWritebackSync: {
+    active: boolean;
+    pendingTaskIds: readonly string[];
+  };
 };
 ```
 
-第一阶段由 Route 按现有 view/selected-stage 条件产生 `demand`，不得放宽任何 `enabled` 条件。后续 controller 迁移完成时，source-specific demand 由 controller 计算，但 contract 不变。
+第一阶段由 Route 按现有 view/selected-stage 条件产生 `demand`，不得放宽任何 `enabled` 条件。`stageWritebackSync` 只显式传入当前 Route 已拥有的 writeback grace 与 pending task IDs，供 candidate/source-quality polling 保持现有节奏；它不允许 hook 创建第二份 pending state 或拥有 mutation。后续 controller 迁移完成时，source-specific demand 与同步信号由 controller 计算，但 contract 不变。
 
 输出按领域命名，保留 `data`、`isPending`、`isFetching`、`error` 和必要 refetch metadata。不得把所有 query object 放进无类型的 `Record<string, unknown>`。
 
