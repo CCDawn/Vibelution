@@ -455,6 +455,16 @@ describe("ConfigRoute layout contract", () => {
     expect(routeSource).toContain("aria-label={copy.developerModeReadonly}");
   });
 
+  it("puts live health evidence before troubleshooting configuration", () => {
+    const healthPanelIndex = routeSource.indexOf("<ConfigHealthDiagnosticsPanel");
+    const editorSectionsIndex = routeSource.indexOf("activeEditorSections.map");
+
+    expect(healthPanelIndex).toBeGreaterThan(-1);
+    expect(editorSectionsIndex).toBeGreaterThan(-1);
+    expect(healthPanelIndex).toBeLessThan(editorSectionsIndex);
+    expect(routeSource).toContain("日常联网与安全、健康诊断、日志追踪和高级维护分层管理。");
+  });
+
   it("keeps the model settings group dense enough to use the bottom viewport", () => {
     expect(routeSource).toContain('activePage?.id !== "model-connection"');
     expect(styles.content).toContain("[grid-template-rows:auto_auto_minmax(0,1fr)]");
