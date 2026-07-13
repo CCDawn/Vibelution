@@ -57,6 +57,11 @@ upstream_id = "gpt-5.6-sol"
 label = "Sol"
 enabled = true
 
+[llm.providers.ai-pixel.models.image2]
+upstream_id = "image2"
+label = "Image 2"
+enabled = true
+
 [llm.profiles.primary]
 model_ref = "ai-pixel/old"
 """
@@ -122,6 +127,25 @@ def _write_catalog(config_path: Path, *, state: str = "fresh") -> Path:
             "low": "maybe",
             "high": "on",
         }
+    elif state == "reasoning_value_collision":
+        models["gpt-5.6-luna"]["reasoningContract"]["effortValues"] = [
+            "HIGH",
+            "high",
+        ]
+    elif state == "reasoning_map_key_collision":
+        models["gpt-5.6-luna"]["reasoningContract"]["map"] = {
+            "HIGH": "high",
+            "high": "low",
+        }
+    elif state == "invalid_capability_metadata":
+        models["gpt-5.6-luna"]["capabilities"]["text_output"]["value"] = {
+            "secret": "nested-capability-secret"
+        }
+        models["gpt-5.6-luna"]["capabilities"]["image_input"]["checked_at"] = {
+            "secret": "nested-checked-at-secret"
+        }
+    elif state == "verification_failed":
+        models["gpt-5.6-luna"]["verification"]["status"] = "failed"
     payload = {
         "schemaVersion": 2,
         "metadata": {"legacyCapabilityImportCompleted": True},
@@ -250,6 +274,60 @@ def test_invalid_verified_reasoning_metadata_is_not_fixed_into_operator_config(
     saved = tomllib.loads(setup["config_path"].read_text(encoding="utf-8"))
     pinned = saved["llm"]["providers"]["ai-pixel"]["models"]["gpt-5.6-luna"]
     assert pinned["capabilities"]["text_output"]["source"] == "runtime_probe"
+    assert "defaults" not in pinned
+
+
+@pytest.mark.parametrize(
+    "catalog_state",
+    ["reasoning_value_collision", "reasoning_map_key_collision"],
+)
+def test_ambiguous_normalized_reasoning_metadata_is_omitted(
+    tmp_path,
+    monkeypatch,
+    catalog_state,
+):
+    setup = _setup(tmp_path, monkeypatch, catalog_state=catalog_state)
+
+    result = _promote(setup)
+
+    assert result["status"] == "completed"
+    saved = tomllib.loads(setup["config_path"].read_text(encoding="utf-8"))
+    pinned = saved["llm"]["providers"]["ai-pixel"]["models"]["gpt-5.6-luna"]
+    assert "defaults" not in pinned
+
+
+def test_invalid_nested_capability_metadata_is_never_persisted(
+    tmp_path,
+    monkeypatch,
+):
+    setup = _setup(tmp_path, monkeypatch, catalog_state="invalid_capability_metadata")
+
+    result = _promote(setup)
+
+    assert result["status"] == "completed"
+    saved_text = setup["config_path"].read_text(encoding="utf-8")
+    pinned = tomllib.loads(saved_text)["llm"]["providers"]["ai-pixel"]["models"][
+        "gpt-5.6-luna"
+    ]
+    assert "text_output" not in pinned.get("capabilities", {})
+    assert "image_input" not in pinned.get("capabilities", {})
+    assert "nested-capability-secret" not in saved_text
+    assert "nested-checked-at-secret" not in saved_text
+
+
+def test_failed_verification_promotes_only_minimal_identity(
+    tmp_path,
+    monkeypatch,
+):
+    setup = _setup(tmp_path, monkeypatch, catalog_state="verification_failed")
+
+    result = _promote(setup)
+
+    assert result["status"] == "completed"
+    saved = tomllib.loads(setup["config_path"].read_text(encoding="utf-8"))
+    pinned = saved["llm"]["providers"]["ai-pixel"]["models"]["gpt-5.6-luna"]
+    assert pinned["upstream_id"] == "gpt-5.6-luna"
+    assert "capabilities" not in pinned
     assert "defaults" not in pinned
 
 
@@ -403,6 +481,38 @@ def test_agent_verify_failure_compensates_binding_and_exact_config_bytes(
     assert secret not in serialized
 
 
+def test_failed_transaction_emits_no_transient_binding_event(
+    tmp_path,
+    monkeypatch,
+):
+    setup = _setup(tmp_path, monkeypatch)
+    binding_events = []
+    promotion_events = []
+    monkeypatch.setattr(
+        agent_directory_service,
+        "record_runtime_scene_event",
+        lambda *args, **kwargs: binding_events.append((args, kwargs)),
+    )
+    monkeypatch.setattr(
+        promotion,
+        "record_runtime_scene_event",
+        lambda *args, **kwargs: promotion_events.append((args, kwargs)),
+    )
+    monkeypatch.setattr(
+        promotion,
+        "_assert_agent_binding",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("verify failed")),
+    )
+
+    with pytest.raises(OperatorConfigTransactionError):
+        _promote(setup)
+
+    assert [args[2] for args, _kwargs in binding_events] == []
+    assert [args[2] for args, _kwargs in promotion_events] == [
+        "config.model.promotion_failed"
+    ]
+
+
 def test_binding_rollback_failure_is_bounded_and_manifest_is_truthful(
     tmp_path, monkeypatch
 ):
@@ -470,3 +580,68 @@ def test_already_pinned_model_changes_only_agent_binding_without_config_transact
     )
     assert setup["config_path"].read_bytes() == before_config
     assert not (tmp_path / "backups").exists()
+
+
+@pytest.mark.parametrize("catalog_condition", ["corrupt", "stale", "missing_remote"])
+def test_already_pinned_binding_ignores_derived_catalog_health(
+    tmp_path,
+    monkeypatch,
+    catalog_condition,
+):
+    setup = _setup(tmp_path, monkeypatch)
+    catalog_path = resolve_model_catalog_state_path(setup["config_path"])
+    if catalog_condition == "corrupt":
+        catalog_path.write_text("{not-json", encoding="utf-8")
+    else:
+        catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
+        provider_catalog = catalog["providers"]["ai-pixel"]
+        if catalog_condition == "stale":
+            provider_catalog["catalogStale"] = True
+        else:
+            provider_catalog["models"]["gpt-5.6-sol"] = {
+                "upstreamId": "gpt-5.6-sol",
+                "availability": "missing_remote",
+                "verification": {"status": "stale"},
+            }
+        catalog_path.write_text(json.dumps(catalog), encoding="utf-8")
+
+    result = _promote(setup, model_ref="ai-pixel/gpt-5.6-sol")
+
+    assert result["status"] == "completed"
+    assert result["source"] == "pinned"
+    assert result["agent"]["llmBindings"]["dialogue"] == {
+        "modelId": "ai-pixel/gpt-5.6-sol"
+    }
+
+
+def test_already_pinned_specialized_model_remains_slot_incompatible(
+    tmp_path,
+    monkeypatch,
+):
+    setup = _setup(tmp_path, monkeypatch)
+    before_registry = setup["registry_path"].read_bytes()
+
+    with pytest.raises(promotion.AgentModelPromotionConflict, match="incompatible"):
+        _promote(setup, model_ref="ai-pixel/image2")
+
+    assert setup["registry_path"].read_bytes() == before_registry
+
+
+def test_successful_discovered_transaction_emits_one_durable_binding_event(
+    tmp_path,
+    monkeypatch,
+):
+    setup = _setup(tmp_path, monkeypatch)
+    binding_events = []
+    monkeypatch.setattr(
+        agent_directory_service,
+        "record_runtime_scene_event",
+        lambda *args, **kwargs: binding_events.append((args, kwargs)),
+    )
+
+    result = _promote(setup)
+
+    assert len(binding_events) == 1
+    assert binding_events[0][0][2] == "agent.llm_binding.updated"
+    assert binding_events[0][1]["fields"]["agentId"] == result["agent"]["agentId"]
+    assert binding_events[0][1]["fields"]["bindingSlots"] == ["dialogue"]

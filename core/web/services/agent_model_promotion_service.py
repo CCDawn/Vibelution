@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import copy
+import math
+import re
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -26,6 +29,7 @@ from .agent_directory_service import (
     AgentNotFoundError,
     AgentStateConflictError,
     get_agent,
+    record_agent_llm_binding_updated_event,
     replace_agent_llm_bindings_if_current,
 )
 from .agent_model_candidate_service import project_agent_model_candidates
@@ -39,17 +43,21 @@ _UNAVAILABLE_CANDIDATE_STATES = {
     "unavailable",
     "unknown",
 }
-_VERIFIED_CAPABILITY_FIELDS = {
-    "value",
-    "source",
-    "confidence",
-    "checked_at",
-}
 _REASONING_EFFORT_ADAPTERS = {
     "reasoning_effort",
     "reasoning_object",
     "thinking_toggle",
 }
+_CAPABILITY_KEY_PATTERN = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
+_CAPABILITY_VALUES = {"supported", "unsupported", "unknown"}
+_CAPABILITY_SOURCES = {"operator_override", "runtime_probe"}
+_CAPABILITY_PROJECTION_SOURCES = {
+    "driver_default",
+    "curated_snapshot",
+    "provider_endpoint",
+    *_CAPABILITY_SOURCES,
+}
+_CAPABILITY_CONFIDENCE_VALUES = {"low", "medium", "high"}
 
 
 class AgentModelPromotionError(RuntimeError):
@@ -114,23 +122,6 @@ def _promotion_preflight(
         raise AgentModelPromotionConflict(
             "Operator config changed after the model selection was opened."
         )
-    try:
-        catalog_state = load_model_catalog_state(
-            resolve_model_catalog_state_path(resolved_config_path)
-        )
-    except (OSError, ValueError):
-        raise AgentModelPromotionConflict("Model catalog is unavailable.") from None
-    candidate = next(
-        (
-            item
-            for item in project_agent_model_candidates(public_config, catalog_state)
-            if str(item.get("modelRef") or "") == canonical_model_ref
-        ),
-        None,
-    )
-    if not candidate:
-        raise AgentModelPromotionConflict("Model candidate is no longer available.")
-
     llm = public_config.get("llm") if isinstance(public_config.get("llm"), dict) else {}
     providers = llm.get("providers") if isinstance(llm.get("providers"), dict) else {}
     provider = providers.get(provider_id)
@@ -138,18 +129,44 @@ def _promotion_preflight(
         raise AgentModelPromotionConflict("Model Provider is no longer configured.")
     models = provider.get("models") if isinstance(provider.get("models"), dict) else {}
     pinned_model = models.get(model_key)
-    already_pinned = (
-        isinstance(pinned_model, dict)
-        and pinned_model.get("enabled", True) is not False
-    )
+    has_pinned_record = isinstance(pinned_model, dict)
+    already_pinned = has_pinned_record and pinned_model.get("enabled", True) is not False
+    if has_pinned_record and not already_pinned:
+        raise AgentModelPromotionConflict("Pinned model is disabled.")
 
-    if candidate.get("catalogStale") is True:
-        raise AgentModelPromotionConflict("Model candidate catalog is stale.")
-    availability = str(candidate.get("availability") or "unknown").strip().lower()
-    if availability in _UNAVAILABLE_CANDIDATE_STATES:
-        raise AgentModelPromotionConflict("Model candidate is unavailable.")
-    if str(candidate.get("verificationStatus") or "").strip().lower() == "stale":
-        raise AgentModelPromotionConflict("Model candidate verification is stale.")
+    if already_pinned:
+        # Operator config is authoritative for an enabled pinned model. A
+        # derived catalog cannot block a pure Agent-binding update.
+        catalog_state: dict[str, Any] = {}
+    else:
+        try:
+            catalog_state = load_model_catalog_state(
+                resolve_model_catalog_state_path(resolved_config_path)
+            )
+        except (OSError, ValueError):
+            raise AgentModelPromotionConflict("Model catalog is unavailable.") from None
+    candidate = next(
+        (
+            item
+            for item in project_agent_model_candidates(
+                public_config,
+                _catalog_state_for_candidate_projection(catalog_state),
+            )
+            if str(item.get("modelRef") or "") == canonical_model_ref
+        ),
+        None,
+    )
+    if not candidate:
+        raise AgentModelPromotionConflict("Model candidate is no longer available.")
+
+    if not already_pinned:
+        if candidate.get("catalogStale") is True:
+            raise AgentModelPromotionConflict("Model candidate catalog is stale.")
+        availability = str(candidate.get("availability") or "unknown").strip().lower()
+        if availability in _UNAVAILABLE_CANDIDATE_STATES:
+            raise AgentModelPromotionConflict("Model candidate is unavailable.")
+        if str(candidate.get("verificationStatus") or "").strip().lower() == "stale":
+            raise AgentModelPromotionConflict("Model candidate verification is stale.")
 
     source = str(candidate.get("source") or "").strip().lower()
     catalog_providers = (
@@ -167,7 +184,7 @@ def _promotion_preflight(
     catalog_model = catalog_models.get(model_key)
     if not isinstance(catalog_model, dict):
         catalog_model = {}
-    if source in {"discovered", "both"}:
+    if not already_pinned and source in {"discovered", "both"}:
         catalog_fingerprint = (
             str(provider_catalog.get("providerFingerprint") or "").strip()
             if isinstance(provider_catalog, dict)
@@ -219,67 +236,171 @@ def _pinned_model_from_candidate(
         or upstream_id,
         "enabled": True,
     }
-    if str(candidate.get("verificationStatus") or "").strip().lower() == "verified":
+    verification_status = str(candidate.get("verificationStatus") or "").strip().lower()
+    if verification_status == "verified":
         raw_capabilities = catalog_model.get("capabilities")
         confirmed: dict[str, dict[str, Any]] = {}
         if isinstance(raw_capabilities, dict):
             for key, raw_value in raw_capabilities.items():
-                if not isinstance(raw_value, dict):
-                    continue
-                if str(raw_value.get("source") or "") not in {
-                    "operator_override",
-                    "runtime_probe",
-                }:
-                    continue
-                value = {
-                    field: raw_value[field]
-                    for field in _VERIFIED_CAPABILITY_FIELDS
-                    if field in raw_value
-                }
-                if value:
-                    confirmed[str(key)] = value
+                normalized = _verified_capability_record(key, raw_value)
+                if normalized is not None:
+                    normalized_key, value = normalized
+                    confirmed[normalized_key] = value
         if confirmed:
             model["capabilities"] = confirmed
-
-    reasoning_defaults = _verified_reasoning_defaults(candidate)
-    if reasoning_defaults:
-        model["defaults"] = reasoning_defaults
+        reasoning_defaults = _verified_reasoning_defaults(candidate, catalog_model)
+        if reasoning_defaults:
+            model["defaults"] = reasoning_defaults
     return model
 
 
-def _verified_reasoning_defaults(candidate: dict[str, Any]) -> dict[str, Any]:
+def _valid_capability_timestamp(value: Any) -> str | None:
+    if value is None or value == "":
+        return ""
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip()
+    if not normalized or len(normalized) > 64:
+        return None
+    try:
+        datetime.fromisoformat(normalized.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return normalized
+
+
+def _valid_capability_confidence(value: Any) -> str | float | None:
+    if value is None or value == "":
+        return ""
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        return normalized if normalized in _CAPABILITY_CONFIDENCE_VALUES else None
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    numeric = float(value)
+    return numeric if math.isfinite(numeric) and 0.0 <= numeric <= 1.0 else None
+
+
+def _verified_capability_record(
+    key: Any,
+    raw_value: Any,
+    *,
+    allowed_sources: set[str] = _CAPABILITY_SOURCES,
+) -> tuple[str, dict[str, Any]] | None:
+    if not isinstance(key, str):
+        return None
+    normalized_key = key.strip()
+    if normalized_key != key or not _CAPABILITY_KEY_PATTERN.fullmatch(normalized_key):
+        return None
+    if not isinstance(raw_value, dict):
+        return None
+    raw_capability_value = raw_value.get("value")
+    if not isinstance(raw_capability_value, str):
+        return None
+    capability_value = raw_capability_value.strip().lower()
+    source = raw_value.get("source")
+    if not isinstance(source, str):
+        return None
+    source = source.strip()
+    if capability_value not in _CAPABILITY_VALUES or source not in allowed_sources:
+        return None
+    confidence = _valid_capability_confidence(raw_value.get("confidence"))
+    checked_at = _valid_capability_timestamp(raw_value.get("checked_at"))
+    if confidence is None or checked_at is None:
+        return None
+    normalized: dict[str, Any] = {
+        "value": capability_value,
+        "source": source,
+    }
+    if confidence != "":
+        normalized["confidence"] = confidence
+    if checked_at:
+        normalized["checked_at"] = checked_at
+    return normalized_key, normalized
+
+
+def _catalog_state_for_candidate_projection(
+    catalog_state: dict[str, Any],
+) -> dict[str, Any]:
+    """Drop malformed capability records before read-only candidate projection."""
+
+    projected = copy.deepcopy(catalog_state)
+    providers = projected.get("providers")
+    if not isinstance(providers, dict):
+        return projected
+    for provider in providers.values():
+        if not isinstance(provider, dict):
+            continue
+        models = provider.get("models")
+        if not isinstance(models, dict):
+            continue
+        for model in models.values():
+            if not isinstance(model, dict):
+                continue
+            raw_capabilities = model.get("capabilities")
+            if not isinstance(raw_capabilities, dict):
+                model.pop("capabilities", None)
+                continue
+            normalized_capabilities: dict[str, dict[str, Any]] = {}
+            for key, raw_value in raw_capabilities.items():
+                normalized = _verified_capability_record(
+                    key,
+                    raw_value,
+                    allowed_sources=_CAPABILITY_PROJECTION_SOURCES,
+                )
+                if normalized is not None:
+                    normalized_key, value = normalized
+                    normalized_capabilities[normalized_key] = value
+            model["capabilities"] = normalized_capabilities
+    return projected
+
+
+def _verified_reasoning_defaults(
+    candidate: dict[str, Any],
+    catalog_model: dict[str, Any],
+) -> dict[str, Any]:
     capability_status = str(candidate.get("capabilityStatus") or "").strip().lower()
     if capability_status not in {"confirmed", "verified"}:
         return {}
-    raw_effort_values = candidate.get("reasoningEffortValues")
+    raw_contract = catalog_model.get("reasoningContract")
+    if not isinstance(raw_contract, dict):
+        return {}
+    if str(raw_contract.get("verificationStatus") or "").strip().lower() != "verified":
+        return {}
+    if str(raw_contract.get("source") or "").strip() not in _CAPABILITY_SOURCES:
+        return {}
+    raw_effort_values = raw_contract.get("effortValues")
     if not isinstance(raw_effort_values, list):
         return {}
     effort_values: list[str] = []
     for raw_value in raw_effort_values:
-        normalized = normalize_reasoning_effort(raw_value)
-        if not normalized:
+        if not isinstance(raw_value, str):
             return {}
-        if normalized not in effort_values:
-            effort_values.append(normalized)
+        normalized = normalize_reasoning_effort(raw_value)
+        if not normalized or normalized in effort_values:
+            return {}
+        effort_values.append(normalized)
     if not effort_values:
         return {}
 
-    default_effort = normalize_reasoning_effort(candidate.get("defaultReasoningEffort"))
+    default_effort = normalize_reasoning_effort(raw_contract.get("default"))
     if default_effort not in effort_values:
         return {}
-    adapter = str(candidate.get("reasoningAdapter") or "").strip().lower()
+    adapter = str(raw_contract.get("adapter") or "").strip().lower()
     if adapter not in _REASONING_EFFORT_ADAPTERS:
         return {}
 
-    raw_mapping = candidate.get("reasoningEffortMap")
+    raw_mapping = raw_contract.get("map")
     if not isinstance(raw_mapping, dict):
         return {}
     mapping: dict[str, str] = {}
     for raw_key, raw_target in raw_mapping.items():
-        key = normalize_reasoning_effort(raw_key)
-        target = str(raw_target or "").strip().lower()
-        if not key or key not in effort_values:
+        if not isinstance(raw_key, str) or not isinstance(raw_target, str):
             return {}
+        key = normalize_reasoning_effort(raw_key)
+        if not key or key not in effort_values or key in mapping:
+            return {}
+        target = raw_target.strip().lower()
         if adapter == "thinking_toggle":
             if target not in {"on", "off"}:
                 return {}
@@ -424,6 +545,7 @@ def promote_agent_model(
                 agent_id,
                 expected_updated_at=expected_agent_updated_at,
                 llm_bindings=new_bindings,
+                emit_event=False,
             )
             binding_write["updatedAt"] = str(updated.get("updatedAt") or "")
             binding_write["agent"] = updated
@@ -436,6 +558,7 @@ def promote_agent_model(
                 agent_id,
                 expected_updated_at=applied_revision,
                 llm_bindings=old_bindings,
+                emit_event=False,
             )
 
         participant = TransactionParticipant(
@@ -475,6 +598,7 @@ def promote_agent_model(
         updated_agent = binding_write.get("agent")
         if not isinstance(updated_agent, dict):
             raise RuntimeError("Agent binding participant returned no result.")
+        record_agent_llm_binding_updated_event(updated_agent)
         invalidate_agent_config_workspace_cache()
         result = {
             "status": "completed",

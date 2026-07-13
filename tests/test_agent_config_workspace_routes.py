@@ -1,4 +1,5 @@
 import json
+import traceback
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -237,13 +238,26 @@ def test_agent_model_promotion_route_maps_errors_without_raw_exception_text(
     assert "raw-" not in response.text
 
 
-def test_agent_model_promotion_route_drops_raw_exception_cause(monkeypatch):
+@pytest.mark.parametrize(
+    "raw_error",
+    [
+        agent_directory_service.AgentNotFoundError("raw-not-found-secret"),
+        AgentModelPromotionConflict("raw-conflict-secret"),
+        OperatorConfigTransactionError(
+            status="rollback_failed",
+            operation_id="safe-operation-id",
+            manifest_path=Path("safe-manifest.json"),
+        ),
+    ],
+)
+def test_agent_model_promotion_route_drops_raw_exception_context(
+    monkeypatch,
+    raw_error,
+):
     monkeypatch.setattr(
         agents_route,
         "promote_agent_model",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(
-            AgentModelPromotionConflict("raw-conflict-secret")
-        ),
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(raw_error),
     )
 
     with pytest.raises(HTTPException) as error:
@@ -259,6 +273,12 @@ def test_agent_model_promotion_route_drops_raw_exception_cause(monkeypatch):
         )
 
     assert error.value.__cause__ is None
+    assert error.value.__context__ is None
+    rendered = "".join(
+        traceback.format_exception(type(error.value), error.value, error.value.__traceback__)
+    )
+    assert "raw-not-found-secret" not in rendered
+    assert "raw-conflict-secret" not in rendered
 
 
 def test_agent_config_workspace_surfaces_runtime_status_from_run_snapshots(tmp_path, monkeypatch):

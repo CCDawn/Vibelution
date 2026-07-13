@@ -1313,6 +1313,7 @@ def replace_agent_llm_bindings_if_current(
     *,
     expected_updated_at: str,
     llm_bindings: dict[str, Any],
+    emit_event: bool = True,
 ) -> dict[str, Any]:
     """Replace one Agent's model bindings only while its revision is current."""
 
@@ -1333,8 +1334,15 @@ def replace_agent_llm_bindings_if_current(
         # whose revision the transaction participant never received.
         projected = _agent_to_api(agent)
         save_state(state)
-    _record_agent_llm_binding_updated_event(projected)
+    if emit_event:
+        record_agent_llm_binding_updated_event(projected)
     return projected
+
+
+def record_agent_llm_binding_updated_event(agent: dict[str, Any]) -> None:
+    """Emit the bounded durable binding event after a completed write."""
+
+    _record_agent_llm_binding_updated_event(agent)
 
 
 def list_agent_policy_options() -> dict[str, list[dict[str, Any]]]:

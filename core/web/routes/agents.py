@@ -444,6 +444,7 @@ def agent_model_promote(
     slot: str,
     payload: AgentModelPromotionPayload,
 ) -> dict[str, Any]:
+    bounded_error: HTTPException | None = None
     try:
         return promote_agent_model(
             agent_id,
@@ -454,27 +455,30 @@ def agent_model_promote(
             confirmed=payload.confirmed,
         )
     except AgentNotFoundError:
-        raise HTTPException(
+        bounded_error = HTTPException(
             status_code=404,
             detail={"code": "agent_not_found", "message": "Agent not found."},
-        ) from None
+        )
     except (AgentModelPromotionConflict, AgentStateConflictError, ValueError):
-        raise HTTPException(
+        bounded_error = HTTPException(
             status_code=409,
             detail={
                 "code": "agent_model_promotion_conflict",
                 "message": "Agent or model configuration changed; refresh and retry.",
             },
-        ) from None
+        )
     except OperatorConfigTransactionError as exc:
-        raise HTTPException(
+        bounded_error = HTTPException(
             status_code=500,
             detail={
                 "code": "agent_model_promotion_transaction_failed",
                 "message": "Agent model promotion failed and compensation was attempted.",
                 "status": exc.status,
             },
-        ) from None
+        )
+    if bounded_error is not None:
+        raise bounded_error
+    raise RuntimeError("Agent model promotion ended without a result.")
 
 
 @router.get("/agents/project-memory-updates")
