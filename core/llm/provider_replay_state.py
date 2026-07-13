@@ -49,6 +49,7 @@ class ProviderReplayState:
     model_id: str
     wire_protocol: WireProtocol
     opaque_items: tuple[OpaqueReplayItem, ...] = field(repr=False)
+    response_id: str = field(default="", repr=False)
     byte_size: int = field(init=False)
 
     def __post_init__(self) -> None:
@@ -61,7 +62,11 @@ class ProviderReplayState:
         byte_size = sum(len(item.payload) for item in items)
         if byte_size > MAX_REPLAY_BYTES:
             raise ValueError("provider replay byte limit exceeded")
+        response_id = str(self.response_id or "").strip()
+        if len(response_id.encode("utf-8")) > 1024:
+            raise ValueError("provider replay response id limit exceeded")
         object.__setattr__(self, "opaque_items", items)
+        object.__setattr__(self, "response_id", response_id)
         object.__setattr__(self, "byte_size", byte_size)
 
     def require_compatible(
@@ -94,4 +99,5 @@ class ProviderReplayState:
             "wireProtocol": self.wire_protocol.value,
             "itemCount": len(self.opaque_items),
             "byteSize": self.byte_size,
+            "hasResponseId": bool(self.response_id),
         }

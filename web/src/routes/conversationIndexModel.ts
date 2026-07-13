@@ -673,7 +673,7 @@ export function classifyConversation(conversation: ConversationSummary): Convers
 
 export function conversationGroupLabel(groupKey: ConversationIndexGroupKey, lang: "zh" | "en") {
   const labels: Record<ConversationIndexGroupKey, { zh: string; en: string }> = {
-    user: { zh: "用户会话", en: "User chats" },
+    user: { zh: "个人会话", en: "Personal chats" },
     group: { zh: "群聊", en: "Group chats" },
     personalAgent: { zh: "个人 Agent 会话", en: "Personal agent chats" },
     research: { zh: "科研助手", en: "Research agents" },
@@ -827,7 +827,8 @@ export function buildConversationIndexModel({
       return;
     }
     const groupKey = classifyConversation(conversation);
-    buckets.get(groupKey)?.push(conversation);
+    const displayGroupKey = groupKey === "personalAgent" ? "user" : groupKey;
+    buckets.get(displayGroupKey)?.push(conversation);
   });
   const leadingGroupKeys: ConversationIndexGroupKey[] = ["user", "group"];
   const trailingGroupKeys = CONVERSATION_GROUP_ORDER.filter((groupKey) => !leadingGroupKeys.includes(groupKey));

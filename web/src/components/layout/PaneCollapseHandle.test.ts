@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import source from "./PaneCollapseHandle.tsx?raw";
+import stylesSource from "./PaneCollapseHandle.styles.ts?raw";
 
 describe("PaneCollapseHandle", () => {
   it("renders a separator-owned centered toggle without starting resize drag", () => {
@@ -18,5 +19,10 @@ describe("PaneCollapseHandle", () => {
     expect(source).toContain("ChevronLeft");
     expect(source).toContain("ChevronRight");
     expect(source).toContain("aria-pressed={collapsed}");
+  });
+
+  it("keeps the collapse toggle large enough to target reliably", () => {
+    expect(stylesSource).toContain("!h-7 !w-7 !max-w-none");
+    expect(stylesSource).not.toContain("!w-3.5");
   });
 });

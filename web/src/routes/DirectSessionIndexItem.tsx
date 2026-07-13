@@ -1,4 +1,4 @@
-import { Bot, Check, Clock3, LoaderCircle, MessageCircle, X } from "lucide-react";
+import { Bot, Check, LoaderCircle, MessageCircle, X } from "lucide-react";
 import type { DragEvent, KeyboardEvent, MouseEvent } from "react";
 
 import type { AgentInstance, SessionSummary } from "../api/types";
@@ -278,6 +278,11 @@ export function DirectSessionIndexItem({
   const unreadCount = sessionUnreadCount(session);
   const unreadTitle = sessionUnreadBadgeTitle(unreadCount, lang);
   const sessionRunning = sessionIsRunningStatus(sessionStatus);
+  const sessionMetaVisible = sessionIsChild
+    || Boolean(sessionAgentMeta)
+    || sessionFunctionVisible
+    || sessionRunning
+    || unreadCount > 0;
   const sessionItemClassName = [
     styles.sessionItem,
     styles.directSessionItem,
@@ -291,26 +296,16 @@ export function DirectSessionIndexItem({
   const kindLabel = sessionIsChild ? (lang === "zh" ? "子对话" : "Child") : (lang === "zh" ? "会话" : "Chat");
   const statusText = statusLabel(sessionStatus);
   const statusTitle = sessionRunningBadgeTitle(statusText, lang);
-  const currentTitle = t("currentSession");
-  const currentBadgeLabel = lang === "zh" ? "当前" : "Current";
   const runningBadgeLabel = sessionRunningBadgeLabel(lang);
   const sessionItemTitle = [sessionTitle, sessionModelTitle].filter(Boolean).join(" · ");
   const sessionUpdatedTime = (
     <span className={styles.conversationMetaTime}>
-      <Clock3 size={10} aria-hidden="true" />
       <time>{formatTime(session.updatedAt || session.lastActive)}</time>
     </span>
   );
 
   const statusCluster = (
     <span className={styles.sessionStatusCluster}>
-      {active ? (
-        <span title={currentTitle} aria-label={currentTitle}>
-          <VChip tone="accent" className={styles.sessionCurrentBadge}>
-            {currentBadgeLabel}
-          </VChip>
-        </span>
-      ) : null}
       {sessionRunning ? (
         <span title={statusTitle} aria-label={statusTitle}>
           <VChip tone="success" className={styles.sessionRunningBadge}>
@@ -373,23 +368,25 @@ export function DirectSessionIndexItem({
                 {sessionSummary}
               </span>
             ) : null}
-            <span className={styles.conversationMetaRow}>
-              <span className={styles.conversationMetaMain}>
-                {sessionIsChild ? (
-                  <span className={`${styles.conversationKindBadge} ${styles.conversationKindBadgeChild}`} title={kindLabel} aria-label={kindLabel}>
-                    <MessageCircle size={10} aria-hidden="true" />
-                  </span>
-                ) : null}
-                {sessionAgentMeta ? <span>{sessionAgentMeta}</span> : null}
-                {sessionFunctionVisible ? (
-                  <span className={`${styles.agentRoleTag} ${agentRoleToneClass(sessionDisplay.tone)}`} title={sessionDisplay.functionLabel}>
-                    <Bot size={10} aria-hidden="true" />
-                    {sessionDisplay.functionLabel}
-                  </span>
-                ) : null}
+            {sessionMetaVisible ? (
+              <span className={styles.conversationMetaRow}>
+                <span className={styles.conversationMetaMain}>
+                  {sessionIsChild ? (
+                    <span className={`${styles.conversationKindBadge} ${styles.conversationKindBadgeChild}`} title={kindLabel} aria-label={kindLabel}>
+                      <MessageCircle size={10} aria-hidden="true" />
+                    </span>
+                  ) : null}
+                  {sessionAgentMeta ? <span>{sessionAgentMeta}</span> : null}
+                  {sessionFunctionVisible ? (
+                    <span className={`${styles.agentRoleTag} ${agentRoleToneClass(sessionDisplay.tone)}`} title={sessionDisplay.functionLabel}>
+                      <Bot size={10} aria-hidden="true" />
+                      {sessionDisplay.functionLabel}
+                    </span>
+                  ) : null}
+                </span>
+                {statusCluster}
               </span>
-              {statusCluster}
-            </span>
+            ) : null}
             {missingAgentMessage ? <span className={styles.agentMissingLine}>{missingAgentMessage}</span> : null}
           </span>
         </div>
@@ -415,23 +412,25 @@ export function DirectSessionIndexItem({
                 {sessionSummary}
               </span>
             ) : null}
-            <span className={styles.conversationMetaRow}>
-              <span className={styles.conversationMetaMain}>
-                {sessionIsChild ? (
-                  <span className={`${styles.conversationKindBadge} ${styles.conversationKindBadgeChild}`} title={kindLabel} aria-label={kindLabel}>
-                    <MessageCircle size={10} aria-hidden="true" />
-                  </span>
-                ) : null}
-                {sessionAgentMeta ? <span>{sessionAgentMeta}</span> : null}
-                {sessionFunctionVisible ? (
-                  <span className={`${styles.agentRoleTag} ${agentRoleToneClass(sessionDisplay.tone)}`} title={sessionDisplay.functionLabel}>
-                    <Bot size={10} aria-hidden="true" />
-                    {sessionDisplay.functionLabel}
-                  </span>
-                ) : null}
+            {sessionMetaVisible ? (
+              <span className={styles.conversationMetaRow}>
+                <span className={styles.conversationMetaMain}>
+                  {sessionIsChild ? (
+                    <span className={`${styles.conversationKindBadge} ${styles.conversationKindBadgeChild}`} title={kindLabel} aria-label={kindLabel}>
+                      <MessageCircle size={10} aria-hidden="true" />
+                    </span>
+                  ) : null}
+                  {sessionAgentMeta ? <span>{sessionAgentMeta}</span> : null}
+                  {sessionFunctionVisible ? (
+                    <span className={`${styles.agentRoleTag} ${agentRoleToneClass(sessionDisplay.tone)}`} title={sessionDisplay.functionLabel}>
+                      <Bot size={10} aria-hidden="true" />
+                      {sessionDisplay.functionLabel}
+                    </span>
+                  ) : null}
+                </span>
+                {statusCluster}
               </span>
-              {statusCluster}
-            </span>
+            ) : null}
             {missingAgentMessage ? <span className={styles.agentMissingLine}>{missingAgentMessage}</span> : null}
           </span>
         </VNativeButton>
