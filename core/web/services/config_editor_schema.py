@@ -5,6 +5,8 @@ from __future__ import annotations
 import copy
 from typing import Any
 
+from config.public_config import list_llm_model_options
+
 from .theme_background_service import list_default_theme_background_options
 
 
@@ -434,20 +436,14 @@ def _field_options(path: str, lang: str) -> list[dict[str, str]]:
 
 def _field_options_for_config(path: str, public_config: dict[str, Any], lang: str) -> list[dict[str, str]]:
     if path == "git.commit_message_model_ref":
-        model_library = (
-            ((public_config.get("llm") or {}).get("model_library") or {})
-            if isinstance(public_config.get("llm"), dict)
-            else {}
-        )
-        if isinstance(model_library, dict):
-            return [
-                {
-                    "value": str(model_id or ""),
-                    "label": str((model.get("label") if isinstance(model, dict) else "") or model_id),
-                }
-                for model_id, model in sorted(model_library.items())
-                if str(model_id or "").strip()
-            ]
+        return [
+            {
+                "value": str(option.get("model_id") or ""),
+                "label": str(option.get("label") or option.get("model") or option.get("model_id") or ""),
+            }
+            for option in list_llm_model_options(public_config)
+            if str(option.get("model_id") or "").strip()
+        ]
     return _field_options(path, lang)
 
 
