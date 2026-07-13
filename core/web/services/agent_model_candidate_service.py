@@ -44,7 +44,7 @@ _NON_DIALOGUE_CAPABILITIES = (
     "video_generation",
 )
 _NON_DIALOGUE_MODEL_PATTERN = re.compile(
-    r"(?:^|[-_/.])(?:audio|dall-e|embedding|gpt-image|imagen|moderation|realtime|rerank|"
+    r"(?:^|[-_/.])(?:audio|dall-e|embedding|gpt-image|image[0-9]+|imagen|moderation|realtime|rerank|"
     r"sora|speech|stable-diffusion|tts|video|whisper)(?:$|[-_/.])",
     re.IGNORECASE,
 )
