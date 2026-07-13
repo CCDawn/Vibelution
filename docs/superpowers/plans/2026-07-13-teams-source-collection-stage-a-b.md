@@ -133,16 +133,16 @@ hook 内部返回按领域命名的 typed query results：`workflow`、`stageRou
 
 ### Task A3：evidenceModel 紧凑 TDD
 
-- [ ] RED：覆盖 source category、PDF/web/dataset/local/missing、filter counts、candidate/record provenance、Evidence Ledger missing-anchor 与 excluded recovery。
-- [ ] GREEN：移动 provenance/filter/trace/ledger/recovery types/functions；UI-specific ReactNode、panel props 和 styles 留在 Route/view。
-- [ ] 从 Route 删除已迁移 declarations 和无消费者 imports；不得复制同一计算形成双 owner。
-- [ ] checkpoint：三个 model tests、logic/layout tests、`git diff --check`，提交 `refactor(web): extract source collection evidence model`。
+- [x] RED：覆盖 source category、PDF/web/dataset/local/missing、filter counts、candidate/record provenance、Evidence Ledger missing-anchor 与 excluded recovery。
+- [x] GREEN：移动 provenance/filter/trace/ledger/recovery types/functions；UI-specific ReactNode、panel props 和 styles 留在 Route/view。
+- [x] 从 Route 删除已迁移 declarations 和无消费者 imports；不得复制同一计算形成双 owner。
+- [x] checkpoint：三个 model tests、logic/layout tests、`git diff --check`，提交 `refactor(web): extract source collection evidence model`。
 
 ### Task A Gate
 
-- [ ] `TeamsRoute.logic.test.ts` 不再从完整 Route import source model functions。
-- [ ] Route 不包含已迁移 helper definitions；三 model 文件不依赖 React/Query/Router/styles。
-- [ ] 运行 focused Vitest 与 `npm --prefix web run build`；失败必须在进入 B 前解决或回滚 A。
+- [x] `TeamsRoute.logic.test.ts` 不再从完整 Route import source model functions。
+- [x] Route 不包含已迁移 helper definitions；三 model 文件不依赖 React/Query/Router/styles。
+- [x] 运行 focused Vitest 与 `npm --prefix web run build`；失败必须在进入 B 前解决或回滚 A。
 
 ### Task B1：shared query contract RED
 
