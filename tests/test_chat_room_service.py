@@ -116,6 +116,23 @@ def _install_chat_room_test_llm_config(monkeypatch, model_id: str = "chat-room-t
         "tool_calling_mode": "disabled",
     }
     monkeypatch.setattr(session_service, "get_config", lambda: base_config)
+    monkeypatch.setattr(
+        session_service,
+        "_session_llm_model_choices",
+        lambda: [
+            {
+                "modelId": model_id,
+                "modelRef": model_id,
+                "providerId": provider_id,
+                "provider": provider_id,
+                "model": "chat-room-test-model",
+                "label": "Chat room test model",
+                "reasoningEffortValues": [],
+                "reasoningEffortOptions": [],
+                "defaultReasoningEffort": "",
+            }
+        ],
+    )
     return {"dialogue": {"modelId": model_id}}
 
 

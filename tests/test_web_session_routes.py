@@ -1289,6 +1289,25 @@ def test_session_summary_prefers_real_conversation_title_over_generated_agent_na
     assert session["agentDisplayName"] == "周云舒"
 
 
+def _patch_supervised_session_model_choice(monkeypatch, *, provider_id: str) -> None:
+    monkeypatch.setattr(
+        session_service,
+        "_session_llm_model_choices",
+        lambda: [
+            {
+                "modelId": "model-a",
+                "modelRef": "model-a",
+                "providerId": provider_id,
+                "provider": provider_id,
+                "model": "model-a",
+                "label": "Supervised test model",
+                "reasoningEffortValues": [],
+                "reasoningEffortOptions": [],
+                "defaultReasoningEffort": "",
+            }
+        ],
+    )
+
 def test_supervised_agent_session_is_hidden_and_preserves_prompt_with_mental_override(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path, conversations=[])
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
@@ -1301,6 +1320,7 @@ def test_supervised_agent_session_is_hidden_and_preserves_prompt_with_mental_ove
         "label": "Supervised test model",
     }
     monkeypatch.setattr(session_service, "get_config", lambda: cfg)
+    _patch_supervised_session_model_choice(monkeypatch, provider_id=primary_profile.provider_id)
     agent_directory_service.save_state(
         {
             "agents": [
@@ -1434,6 +1454,7 @@ def test_supervised_session_workspace_override_routes_tool_workspace_to_candidat
         "label": "Supervised test model",
     }
     monkeypatch.setattr(session_service, "get_config", lambda: cfg)
+    _patch_supervised_session_model_choice(monkeypatch, provider_id=primary_profile.provider_id)
     agent_directory_service.save_state(
         {
             "agents": [
@@ -1529,6 +1550,7 @@ def test_self_observation_message_source_disables_tools(tmp_path, monkeypatch):
         "label": "Observation test model",
     }
     monkeypatch.setattr(session_service, "get_config", lambda: cfg)
+    _patch_supervised_session_model_choice(monkeypatch, provider_id=primary_profile.provider_id)
     agent_directory_service.save_state(
         {
             "agents": [
@@ -1628,6 +1650,7 @@ def test_self_observation_message_source_does_not_route_recent_image_reference(t
         "label": "Observation test model",
     }
     monkeypatch.setattr(session_service, "get_config", lambda: cfg)
+    _patch_supervised_session_model_choice(monkeypatch, provider_id=primary_profile.provider_id)
     agent_directory_service.save_state(
         {
             "agents": [
