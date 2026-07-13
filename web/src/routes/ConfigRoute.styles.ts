@@ -99,6 +99,8 @@ const styles = {
     "vui-routes-configroute configEditorSection [&>_.treeGrid]:[margin:var(--config-section-y)_var(--config-section-x)_var(--config-section-x)] [&>_.treeStack]:[margin:var(--config-section-y)_var(--config-section-x)_var(--config-section-x)] [&>_.helperText]:[margin:var(--config-section-y)_var(--config-section-x)_var(--config-section-x)]",
   configStatusActions:
     "vui-routes-configroute configStatusActions [display:flex] [align-items:center] [justify-content:end] [gap:6px] [flex-wrap:wrap] max-[720px]:[justify-content:start]",
+  configHeader:
+    `vui-routes-configroute configHeader ${readablePanelSurface} [display:grid] [grid-template-columns:minmax(0,1fr)] [align-items:stretch] [gap:8px] [padding:10px_12px] [min-width:0] [border-radius:0]`,
   configStatusBand:
     `vui-routes-configroute configStatusBand ${readablePanelSurface} [display:grid] [grid-template-columns:1fr] [align-items:stretch] [gap:8px] [padding:8px_10px] [min-width:0]`,
   configStatusCopy:
@@ -108,7 +110,9 @@ const styles = {
   configStatusPath:
     "vui-routes-configroute configStatusPath [display:inline-flex] [align-items:center] [min-height:24px] [max-width:100%] [padding:0_8px] [border:1px_solid_var(--vui-border-subtle)] [border-radius:999px] [background:var(--surface-code)] [color:var(--fg-secondary)] [font-family:var(--font-mono)] [font-size:var(--vui-font-xs)] [overflow:hidden] [text-overflow:ellipsis] [white-space:nowrap]",
   content:
-    "vui-routes-configroute content [display:grid] [align-content:start] [gap:6px] [min-width:0] [min-height:0] [overflow:auto] [padding-right:2px] [scrollbar-gutter:stable]",
+    "vui-routes-configroute content [display:grid] [grid-template-rows:auto_auto_minmax(0,1fr)] [align-content:stretch] [min-width:0] [min-height:0] [height:100%] [overflow:hidden]",
+  pageViewport:
+    "vui-routes-configroute pageViewport [display:grid] [align-content:start] [gap:12px] min-w-0 min-h-0 overflow-y-auto overflow-x-hidden [padding:12px] [scrollbar-gutter:stable]",
   contentModels:
     "vui-routes-configroute contentModels [align-content:stretch] [grid-template-rows:minmax(0,1fr)_auto] [height:100%] [max-height:calc(100dvh_-_76px)] [min-width:0] [&:has(>_.notice)]:[grid-template-rows:auto_minmax(0,1fr)_auto] [&>_.configDiscoverySection:last-child]:[display:grid] [&>_.configDiscoverySection:last-child]:[grid-template-rows:auto_auto] max-[720px]:[max-height:none] max-[720px]:[height:auto] max-[720px]:[overflow:visible]",
   providerModelsLayout:
@@ -266,7 +270,7 @@ const styles = {
   noticeSuccess:
     "vui-routes-configroute noticeSuccess [color:var(--state-success)] [background:color-mix(in_srgb,var(--accent-cool)_12%,transparent)] [border-color:color-mix(in_srgb,var(--accent-cool)_24%,transparent)]",
   page:
-    "vui-routes-configroute page [--control-height:31px] [--control-radius:var(--radius-control)] [--config-row-gap:7px] [--config-section-x:10px] [--config-section-y:8px] [display:grid] [grid-template-columns:var(--sidebar-width,306px)_minmax(0,1fr)] [gap:6px] [height:100%] [min-height:0] [padding:6px] [overflow:hidden] [isolation:isolate] [background:color-mix(in_srgb,var(--surface-page)_94%,var(--bg-canvas))] max-[1120px]:[grid-template-columns:1fr] max-[720px]:[padding-inline:14px]",
+    "vui-routes-configroute page [--control-height:31px] [--control-radius:var(--radius-control)] [--config-row-gap:7px] [--config-section-x:10px] [--config-section-y:8px] [display:grid] [grid-template-columns:clamp(15.5rem,17vw,18rem)_minmax(0,1fr)] [grid-template-rows:minmax(0,1fr)] [gap:8px] [height:100%] [min-height:0] [padding:8px] [overflow:hidden] [isolation:isolate] [background:color-mix(in_srgb,var(--surface-page)_94%,var(--bg-canvas))]",
   primaryButton:
     `vui-routes-configroute primaryButton [display:inline-flex] [align-items:center] [justify-content:center] [gap:6px] [min-height:var(--control-height)] [padding:0_9px] [border-radius:var(--control-radius)] [font:inherit] [font-size:var(--vui-font-xs)] [font-weight:600] [line-height:1] [white-space:nowrap] [transition:border-color_140ms_ease,background-color_140ms_ease,color_140ms_ease] ${primaryControl} [box-shadow:none] hover:[cursor:pointer] hover:[border-color:color-mix(in_srgb,var(--accent-warm)_40%,transparent)] hover:[background:color-mix(in_srgb,var(--accent-warm)_20%,var(--vui-control-muted))] disabled:[cursor:not-allowed] disabled:[opacity:0.56]`,
   profileGroupRow:
