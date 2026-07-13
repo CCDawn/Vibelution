@@ -305,10 +305,11 @@ describe("ConfigRoute layout contract", () => {
   });
 
   it("keeps existing Provider management in a bounded desktop list-detail grid", () => {
-    expect(providerPanelStyles.registryWorkspace).toContain("[--vui-workspace-sidebar:30%]");
+    expect(providerPanelStyles.registryWorkspace).toContain("[--vui-workspace-sidebar:clamp(22rem,28%,28rem)]");
     expect(providerPanelStyles.registryWorkspace).not.toContain("max-[960px]");
-    expect(providerPanelStyles.providerList).toContain("max-h-[calc(100dvh-18rem)]");
+    expect(providerPanelStyles.providerList).toContain("h-full");
     expect(providerPanelStyles.providerList).toContain("overflow-y-auto");
+    expect(styles.providerModelsLayout).toContain("[grid-template-rows:auto_minmax(0,1fr)]");
   });
 
   it("passes the workspace schema version into legacy model account compatibility", () => {
@@ -453,15 +454,16 @@ describe("ConfigRoute layout contract", () => {
     expect(providerPanelStylesSource).not.toMatch(/\bsurface-card\b(?!\))/);
     expect(providerPanelStylesSource).not.toContain("var(--radius-panel)");
     expect(providerPanelStyles.sectionSurface).toContain("[border-radius:8px]");
-    expect(providerPanelStyles.registryWorkspace).toContain("[--vui-workspace-sidebar:30%]");
+    expect(providerPanelStyles.registryWorkspace).toContain("[--vui-workspace-sidebar:clamp(22rem,28%,28rem)]");
     expect(providerPanelStyles.providerList).toContain("overflow-y-auto");
-    expect(providerPanelStyles.tableScroll).toContain("max-h-[calc(100dvh-33rem)]");
+    expect(providerPanelStyles.tableScroll).toContain("h-full");
+    expect(providerPanelStyles.providerButton).toContain("!min-h-[58px]");
     expect(providerPanelStyles.tableScroll).toContain("overflow-auto");
     expect(providerPanelStyles.table).toContain("[&_thead]:sticky");
     expect(providerPanelSource).toContain("filterProviderModels");
     expect(providerPanelSource).toContain("deriveProviderModelActionState");
     expect(providerPanelSource).toContain('aria-label="搜索模型"');
-    expect(providerPanelStyles.mobileActionGroup).toContain("max-[390px]:[grid-template-columns:minmax(0,1fr)]");
+    expect(providerPanelStyles.dangerZone).toContain("justify-between");
     expect(providerPanelSource).toContain("测试调用");
     expect(providerPanelSource).toContain("verificationStatus");
     expect(routeSource).toContain("handleTestProviderModel");
