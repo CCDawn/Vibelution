@@ -332,6 +332,130 @@ describe("projectAgentMessageTimelineMessages", () => {
     ]);
   });
 
+  it("collapses repeated persisted copies of the same turn across history windows", () => {
+    const userMessage = (id: string): ConversationMessage => ({
+      id,
+      role: "user",
+      content: "继续前端开发",
+      timestamp: "2026-05-18T11:55:00Z",
+      metadata: { kind: "journal_user_message", turnId: "turn-user" },
+    });
+    const persistedAssistant = (id: string, cellId: string): ConversationMessage => assistantMessage(id, {
+      content: "已经接到真实状态了。",
+      timestamp: "2026-05-18T11:56:00Z",
+      toolCalls: [
+        { name: "read_file_tool", status: "done" },
+        { name: "search_code_tool", status: "done" },
+      ],
+      codexTranscript: {
+        version: 1,
+        source: "native",
+        messageId: id,
+        cells: [
+          {
+            id: cellId,
+            kind: "tool_call",
+            messageId: id,
+            status: "completed",
+            tone: "neutral",
+            title: "read_file_tool",
+          },
+        ],
+        toolCalls: [],
+        terminalOperations: [],
+        terminalSessions: [],
+        modelObservations: [],
+      },
+      metadata: { kind: "journal_assistant_message", turnId: "turn-assistant" },
+    });
+
+    const projection = projectAgentMessageTimelineMessages({
+      timelineMessages: [
+        userMessage("user-first"),
+        persistedAssistant("assistant-first", "tool-cell-first"),
+        userMessage("user-repeated"),
+        persistedAssistant("assistant-repeated", "tool-cell-repeated"),
+      ],
+    });
+
+    expect(projection.messages.map((message) => message.id)).toEqual([
+      "user-first",
+      "assistant-first",
+    ]);
+    expect(projection.messages[0].metadata?.projectedMessageIds).toEqual([
+      "user-first",
+      "user-repeated",
+    ]);
+    expect(projection.messages[1].metadata?.projectedMessageIds).toEqual([
+      "assistant-first",
+      "assistant-repeated",
+    ]);
+    expect(projection.messages[1].codexTranscript?.cells.map((cell) => cell.title)).toEqual([
+      "read_file_tool",
+    ]);
+  });
+
+  it("lets the canonical terminal error own failure status for its turn", () => {
+    const projection = projectAgentMessageTimelineMessages({
+      timelineMessages: [
+        assistantMessage("assistant-partial", {
+          content: "你好，我在。",
+          feedbackEvents: [
+            {
+              sequence: 1,
+              kind: "status",
+              status: "done",
+              name: "model_request",
+              summary: "模型请求完成",
+            },
+            {
+              sequence: 2,
+              kind: "status",
+              status: "failed",
+              name: "failed",
+              summary: "模型请求失败",
+            },
+          ],
+          metadata: { kind: "journal_assistant_message", turnId: "turn-error" },
+        }),
+        assistantMessage("terminal-error", {
+          content: "模型服务上游暂时失败，本轮没有完成。",
+          feedbackEvents: undefined,
+          codexTranscript: {
+            version: 1,
+            source: "native",
+            messageId: "terminal-error",
+            cells: [
+              {
+                id: "terminal-error-cell",
+                kind: "error_notice",
+                messageId: "terminal-error",
+                status: "failed",
+                tone: "error",
+                text: "模型服务上游暂时失败，本轮没有完成。",
+              },
+            ],
+            toolCalls: [],
+            terminalOperations: [],
+            terminalSessions: [],
+            modelObservations: [],
+          },
+          metadata: { kind: "turn_error", turnId: "turn-error", providerFailure: true },
+        }),
+      ],
+    });
+
+    expect(projection.messages.map((message) => message.id)).toEqual([
+      "assistant-partial",
+      "terminal-error",
+    ]);
+    expect(projection.messages[0].content).toBe("你好，我在。");
+    expect(projection.messages[0].feedbackEvents?.map((event) => event.name)).toEqual([
+      "model_request",
+    ]);
+    expect(projection.messages[1].metadata?.kind).toBe("turn_error");
+  });
+
   it("drops process-only legacy DTO fields when no protocol event exists", () => {
     const projection = projectAgentMessageTimelineMessages({
       timelineMessages: [

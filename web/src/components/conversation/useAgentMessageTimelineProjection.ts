@@ -7,6 +7,7 @@ import {
   shouldDisplayRuntimeStatus,
   shouldDisplayTranscriptCell,
 } from "./conversationDisplayProtocol";
+import { isTurnErrorMessage } from "./conversationMessagePredicates";
 import {
   conversationMessageMetadataText,
   conversationMessageTurnId,
@@ -112,6 +113,69 @@ function compactText(value: unknown) {
   return String(value ?? "").trim();
 }
 
+function repeatedPersistedMessageKey(message: ConversationMessage) {
+  const turnId = conversationMessageTurnId(message);
+  if (
+    !turnId
+    || message.streaming
+    || isSessionLiveOverlayMessage(message)
+    || isSessionActiveTurnLayerMessage(message)
+  ) {
+    return "";
+  }
+  const hasSemanticPayload = Boolean(
+    message.role === "user"
+    || compactText(message.content)
+    || compactText(message.thought)
+    || (message.toolCalls?.length ?? 0) > 0
+    || (message.feedbackEvents?.length ?? 0) > 0
+    || (message.attachments?.length ?? 0) > 0
+    || (message.references?.length ?? 0) > 0
+  );
+  if (!hasSemanticPayload) {
+    return "";
+  }
+  return JSON.stringify({
+    role: message.role,
+    turnId,
+    kind: conversationMessageMetadataText(message.metadata, "kind"),
+    timestamp: message.timestamp,
+    content: message.content,
+    thought: message.thought,
+    mentalSnapshot: message.mentalSnapshot,
+    streamStage: message.streamStage,
+    toolCalls: message.toolCalls ?? [],
+    feedbackEvents: message.feedbackEvents ?? [],
+    attachments: message.attachments ?? [],
+    references: message.references ?? [],
+  });
+}
+
+function consolidateRepeatedPersistedMessages(messages: ConversationMessage[]) {
+  const consolidated: ConversationMessage[] = [];
+  const indexes = new Map<string, number>();
+  for (const message of messages) {
+    const key = repeatedPersistedMessageKey(message);
+    const existingIndex = key ? indexes.get(key) : undefined;
+    if (existingIndex === undefined) {
+      if (key) {
+        indexes.set(key, consolidated.length);
+      }
+      consolidated.push(message);
+      continue;
+    }
+    const existing = consolidated[existingIndex];
+    consolidated[existingIndex] = {
+      ...existing,
+      metadata: {
+        ...(existing.metadata ?? {}),
+        projectedMessageIds: mergeProjectedMessageIds(existing, message),
+      },
+    };
+  }
+  return consolidated;
+}
+
 function hasVisibleFeedbackEvent(event: ConversationFeedbackEvent) {
   if (!shouldDisplayRuntimeStatus({
     kind: event.kind,
@@ -140,6 +204,39 @@ function hasVisibleFeedbackEvent(event: ConversationFeedbackEvent) {
 function visibleFeedbackEvents(events: ConversationFeedbackEvent[] | undefined) {
   const visible = (events ?? []).filter(hasVisibleFeedbackEvent);
   return visible.length > 0 ? visible : undefined;
+}
+
+function withoutShadowedTerminalFailureStatuses(messages: ConversationMessage[]) {
+  const terminalErrorTurnIds = new Set(
+    messages
+      .filter(isTurnErrorMessage)
+      .map(conversationMessageTurnId)
+      .filter(Boolean),
+  );
+  if (terminalErrorTurnIds.size === 0) {
+    return messages;
+  }
+  return messages.map((message) => {
+    const turnId = conversationMessageTurnId(message);
+    if (
+      message.role !== "assistant"
+      || isTurnErrorMessage(message)
+      || !turnId
+      || !terminalErrorTurnIds.has(turnId)
+    ) {
+      return message;
+    }
+    const feedbackEvents = message.feedbackEvents?.filter((event) => !(
+      event.kind === "status" && event.status === "failed"
+    ));
+    if ((feedbackEvents?.length ?? 0) === (message.feedbackEvents?.length ?? 0)) {
+      return message;
+    }
+    return {
+      ...message,
+      feedbackEvents: feedbackEvents?.length ? feedbackEvents : undefined,
+    };
+  });
 }
 
 function hasVisibleTimelineItem(item: ConversationTimelineItem) {
@@ -326,7 +423,11 @@ export function projectAgentMessageTimelineMessages({
   timelineMessages,
   activeTurnMessage,
 }: AgentMessageTimelineProjectionInput): AgentMessageTimelineProjection {
-  timelineMessages = timelineMessages.map(projectConversationMessageFromTurnItemsV2);
+  timelineMessages = withoutShadowedTerminalFailureStatuses(
+    consolidateRepeatedPersistedMessages(
+      timelineMessages.map(projectConversationMessageFromTurnItemsV2),
+    ),
+  );
   activeTurnMessage = activeTurnMessage
     ? projectConversationMessageFromTurnItemsV2(activeTurnMessage)
     : undefined;
