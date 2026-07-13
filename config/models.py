@@ -412,8 +412,8 @@ class LLMProfile(BaseModel):
     @classmethod
     def normalize_reasoning_effort(cls, v: str) -> str:
         value = (v or "").strip().lower()
-        if value not in {"", "low", "medium", "high"}:
-            raise ValueError("reasoning_effort must be one of: low, medium, high")
+        if value not in {"", "none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"}:
+            raise ValueError("reasoning_effort must be one of: none, minimal, low, medium, high, xhigh, max, ultra")
         return value
 
     @model_validator(mode="after")

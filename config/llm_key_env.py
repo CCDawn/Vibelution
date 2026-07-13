@@ -14,6 +14,11 @@ def _add_provider_key_env_names(env_names: set[str], provider: dict[str, Any]) -
     provider_env = str(provider.get("api_key_env") or "").strip()
     if provider_env:
         env_names.add(provider_env)
+    credential_ref = str(provider.get("credential_ref") or "").strip()
+    if credential_ref.lower().startswith("env:"):
+        credential_env = credential_ref.split(":", 1)[1].strip()
+        if credential_env:
+            env_names.add(credential_env)
     provider_kind = str(provider.get("kind") or "").strip().lower()
     canonical_env = get_provider_api_key_env(provider_kind)
     if canonical_env:

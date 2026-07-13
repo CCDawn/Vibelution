@@ -31,6 +31,7 @@ export const queryKeys = {
   sessionQuery: (q = "", limit = 50, cursor = "") => ["sessions", "query", q, limit, cursor] as const,
   sessionAgentTemplates: () => ["sessions", "agent-templates"] as const,
   session: (id: string) => ["sessions", id] as const,
+  sessionLlmOptions: (id: string) => ["sessions", id, "llm-options"] as const,
   sessionChildSessions: (id: string) => ["sessions", id, "child-sessions"] as const,
   chatRooms: () => ["chat-rooms"] as const,
   chatRoom: (id: string) => ["chat-rooms", id] as const,

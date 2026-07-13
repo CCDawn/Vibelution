@@ -17,6 +17,7 @@ from typing import Any
 import tomllib
 from core.llm import LLMInvocationContext, assert_llm_compatibility, invoke_llm
 from .llm_credentials import resolve_credential_ref
+from .llm_identity import make_model_ref
 from .llm_security import (
     coerce_llm_runtime_probe_timeout,
     is_llm_local_network_base_url,
@@ -1414,6 +1415,76 @@ def list_llm_model_options(public_config: dict) -> list[dict[str, object]]:
     model_library = llm.get("model_library", {}) if isinstance(llm, dict) else {}
     options: list[dict[str, object]] = []
     seen: set[tuple[str, str]] = set()
+
+    if isinstance(llm, dict) and int(llm.get("schema_version") or 1) == 2:
+        providers = llm.get("providers", {})
+        if isinstance(providers, dict):
+            for provider_id, raw_provider in providers.items():
+                if not isinstance(raw_provider, dict):
+                    continue
+                raw_models = raw_provider.get("models", {})
+                if not isinstance(raw_models, dict):
+                    continue
+                credential_ref = str(raw_provider.get("credential_ref") or "").strip()
+                service_class = str(raw_provider.get("service_class") or "").strip()
+                requires_credential = bool(
+                    raw_provider.get("requires_credential")
+                    if "requires_credential" in raw_provider
+                    else credential_ref not in {"", "none"} and service_class not in {"local_runtime", "self_hosted"}
+                )
+                provider = {
+                    **{
+                        field: copy.deepcopy(raw_provider.get(field))
+                        for field in PUBLIC_INLINE_PROVIDER_FIELDS
+                        if field in raw_provider
+                    },
+                    "id": str(provider_id),
+                    "provider_id": str(provider_id),
+                    "label": str(raw_provider.get("label") or provider_id),
+                    "service_class": service_class,
+                    "credential_ref": credential_ref,
+                    "requires_api_key": bool(raw_provider.get("requires_api_key", requires_credential)),
+                    "requires_credential": requires_credential,
+                }
+                protocols = raw_provider.get("protocols") if isinstance(raw_provider.get("protocols"), dict) else {}
+                for model_key, raw_model in raw_models.items():
+                    if not isinstance(raw_model, dict) or raw_model.get("enabled", True) is False:
+                        continue
+                    model = str(raw_model.get("upstream_id") or "").strip()
+                    if not model:
+                        continue
+                    defaults = raw_model.get("defaults") if isinstance(raw_model.get("defaults"), dict) else {}
+                    details_source = {
+                        **copy.deepcopy(raw_model),
+                        **copy.deepcopy(defaults),
+                    }
+                    compatibility = raw_model.get("compatibility")
+                    if isinstance(compatibility, dict):
+                        details_source["compat"] = copy.deepcopy(compatibility)
+                    details = _model_library_details(details_source)
+                    if isinstance(raw_model.get("capabilities"), dict):
+                        details["capabilities"] = copy.deepcopy(raw_model["capabilities"])
+                    model_ref = make_model_ref(str(provider_id), str(model_key))
+                    options.append(
+                        {
+                            "model_id": model_ref,
+                            "source": "provider_model",
+                            "provider": provider,
+                            "provider_id": str(provider_id),
+                            "contextWindow": resolve_llm_model_context_window(details_source, provider),
+                            "provider_kind": _provider_kind(provider),
+                            "provider_api": str(provider.get("api") or "").strip().lower().replace("_", "-"),
+                            "model": model,
+                            "label": str(raw_model.get("label") or model).strip() or model,
+                            "details": details,
+                            "transport": str(raw_model.get("wire_protocol") or protocols.get("default") or "").strip().lower(),
+                            "protocol": str(raw_model.get("model_protocol") or "").strip().lower(),
+                            "compat": copy.deepcopy(compatibility) if isinstance(compatibility, dict) else {},
+                            "api_key_env": str(defaults.get("api_key_env") or raw_provider.get("api_key_env") or "").strip(),
+                            "api_key_configured": False,
+                        }
+                    )
+                    seen.add((_provider_fingerprint(provider), model))
 
     if isinstance(model_library, dict):
         for model_id, item in model_library.items():

@@ -6,11 +6,12 @@ from typing import Any
 
 
 GPT_REASONING_EFFORT_VALUES = ("low", "medium", "high")
+KNOWN_REASONING_EFFORT_VALUES = ("none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra")
 
 
 def normalize_reasoning_effort(value: Any) -> str:
     normalized = str(value or "").strip().lower()
-    if normalized in GPT_REASONING_EFFORT_VALUES:
+    if normalized in KNOWN_REASONING_EFFORT_VALUES:
         return normalized
     return ""
 
@@ -48,6 +49,7 @@ def _model_has_gpt_reasoning_family(model_name: str) -> bool:
 
 __all__ = [
     "GPT_REASONING_EFFORT_VALUES",
+    "KNOWN_REASONING_EFFORT_VALUES",
     "model_supports_gpt_reasoning_effort",
     "normalize_reasoning_effort",
 ]
