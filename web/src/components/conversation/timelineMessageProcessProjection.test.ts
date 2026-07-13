@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import type { ConversationMessage } from "../../api/types";
-import { projectTimelineProcessMessages } from "./timelineMessageProcessProjection";
+import { mergeCodexTranscripts, projectTimelineProcessMessages } from "./timelineMessageProcessProjection";
 
 const timelineProcessProjectionModulePath = new URL("./timelineMessageProcessProjection.ts", import.meta.url);
 const retiredAgentMessageProjectionModulePath = new URL("./agentMessageProcessProjection.ts", import.meta.url);
@@ -367,6 +367,39 @@ describe("timeline message process projection", () => {
         status: "completed",
       }),
     ]);
+  });
+
+  it("infers the live overlay layer when a completed turn merges transcripts without message options", () => {
+    const liveTranscript = {
+      version: 1 as const,
+      source: "native" as const,
+      messageId: "session-1-message-live-turn-1",
+      streaming: false,
+      cells: [{
+        id: "live-tool",
+        kind: "tool_call" as const,
+        messageId: "session-1-message-live-turn-1",
+        status: "completed",
+        tone: "neutral" as const,
+        title: "get_git_status_summary_tool",
+      }],
+      toolCalls: [],
+      terminalOperations: [],
+      terminalSessions: [],
+      modelObservations: [],
+    };
+    const persistedTranscript = {
+      ...liveTranscript,
+      messageId: "session-1-message-482",
+      cells: [{
+        ...liveTranscript.cells[0],
+        id: "persisted-tool",
+        messageId: "session-1-message-482",
+      }],
+    };
+
+    expect(mergeCodexTranscripts(liveTranscript, persistedTranscript, "session-1-message-482")?.cells)
+      .toEqual([expect.objectContaining({ id: "persisted-tool" })]);
   });
 
   it("preserves an additional same-name tool call that only exists in the streaming layer", () => {
