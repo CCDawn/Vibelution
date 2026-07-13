@@ -1494,6 +1494,11 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("browser.chat_submit.request_failed");
     expect(routeSource).toContain("contentLength");
     expect(routeSource).toContain("guardReason");
+    expect(routeSource).toContain("fields.clientSubmissionId = options.clientSubmissionId");
+    expect(routeSource).toContain("fields.turnId = options.turnId");
+    expect(routeSource).toContain("fields.acceptedAt = options.acceptedAt");
+    expect(routeSource).toContain("requestStartedAtMs: chatStreamPerformanceNowMs()");
+    expect(routeSource).toContain("durationMs: Math.max(0, chatStreamPerformanceNowMs() - variables.requestStartedAtMs)");
     expect(routeSource).not.toContain("fields: { content,");
   });
 
@@ -1509,8 +1514,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(immediateDraftClear).toBeGreaterThan(submitWithAttachmentsStart);
     expect(immediateDraftClear).toBeLessThan(optimisticAppend);
     expect(uploadFailureDraftRestore).toBeGreaterThan(optimisticAppend);
-    expect(routeSource).toContain("const clientSubmissionId = createClientSubmissionId(sessionId)");
-    expect(routeSource).toContain("clientSubmissionId: createClientSubmissionId(activeSessionId)");
+    expect(routeSource).toContain("const clientSubmissionId = createClientSubmissionId(activeSessionId)");
+    expect(routeSource).toContain("clientSubmissionId,");
 
     const submitMutationStart = routeSource.indexOf("const submitTurnMutation = useMutation");
     const submitSuccessStart = routeSource.indexOf("onSuccess: (acceptedTurn, variables)", submitMutationStart);

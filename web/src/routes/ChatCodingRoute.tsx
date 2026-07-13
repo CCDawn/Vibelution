@@ -1368,6 +1368,10 @@ function submitTelemetryFields(
     guardReason?: string;
     imageInputModelId?: string;
     uploadedAttachmentCount?: number;
+    clientSubmissionId?: string;
+    turnId?: string;
+    acceptedAt?: string;
+    durationMs?: number;
     error?: unknown;
   } = {},
 ) {
@@ -1407,6 +1411,18 @@ function submitTelemetryFields(
   }
   if (options.imageInputModelId !== undefined) {
     fields.imageInputModelId = options.imageInputModelId;
+  }
+  if (options.clientSubmissionId !== undefined) {
+    fields.clientSubmissionId = options.clientSubmissionId;
+  }
+  if (options.turnId !== undefined) {
+    fields.turnId = options.turnId;
+  }
+  if (options.acceptedAt !== undefined) {
+    fields.acceptedAt = options.acceptedAt;
+  }
+  if (options.durationMs !== undefined) {
+    fields.durationMs = options.durationMs;
   }
   if (options.error instanceof Error) {
     fields.errorName = options.error.name;
@@ -2507,6 +2523,7 @@ export function ChatCodingRoute() {
         mentalModelEnabled,
         attachmentIds,
         references,
+        requestStartedAtMs,
       }: {
         sessionId: string;
         clientSubmissionId: string;
@@ -2514,6 +2531,7 @@ export function ChatCodingRoute() {
         mentalModelEnabled: boolean;
         attachmentIds?: string[];
         references?: SessionReferenceAttachment[];
+        requestStartedAtMs: number;
       },
     ) => {
       postSubmitTelemetry(
@@ -2525,6 +2543,7 @@ export function ChatCodingRoute() {
           attachmentCount: attachmentIds?.length ?? 0,
           referenceCount: references?.length ?? 0,
           mentalModelEnabled,
+          clientSubmissionId,
         },
       );
       return fetchJson<SessionTurnAcceptedResponse>(`/api/sessions/${sessionId}/messages`, {
@@ -2553,6 +2572,7 @@ export function ChatCodingRoute() {
           attachmentCount: variables.attachmentIds?.length ?? 0,
           referenceCount: variables.references?.length ?? 0,
           mentalModelEnabled: variables.mentalModelEnabled,
+          clientSubmissionId: variables.clientSubmissionId,
         },
       );
       const createdAt = new Date().toISOString();
@@ -2584,6 +2604,10 @@ export function ChatCodingRoute() {
           attachmentCount: variables.attachmentIds?.length ?? 0,
           referenceCount: variables.references?.length ?? 0,
           mentalModelEnabled: variables.mentalModelEnabled,
+          clientSubmissionId: variables.clientSubmissionId,
+          turnId: acceptedTurn.turnId,
+          acceptedAt: acceptedTurn.acceptedAt,
+          durationMs: Math.max(0, chatStreamPerformanceNowMs() - variables.requestStartedAtMs),
         },
       );
       setSessionComposerErrors((current) => ({
@@ -2621,6 +2645,8 @@ export function ChatCodingRoute() {
           attachmentCount: variables.attachmentIds?.length ?? 0,
           referenceCount: variables.references?.length ?? 0,
           mentalModelEnabled: variables.mentalModelEnabled,
+          clientSubmissionId: variables.clientSubmissionId,
+          durationMs: Math.max(0, chatStreamPerformanceNowMs() - variables.requestStartedAtMs),
           error,
         },
         "error",
@@ -5488,6 +5514,7 @@ export function ChatCodingRoute() {
     attachments: ComposerImageAttachment[],
     references: SessionReferenceAttachment[],
     mentalModelEnabled: boolean,
+    clientSubmissionId: string,
   ) {
     if (imageUploadInFlightRef.current[sessionId]) {
       postSubmitTelemetry(
@@ -5500,12 +5527,12 @@ export function ChatCodingRoute() {
           referenceCount: references.length,
           mentalModelEnabled,
           guardReason: "image_upload_in_flight",
+          clientSubmissionId,
         },
         "warning",
       );
       return;
     }
-    const clientSubmissionId = createClientSubmissionId(sessionId);
     imageUploadInFlightRef.current[sessionId] = true;
     setSessionImageUploadPending((current) => ({
       ...current,
@@ -5532,6 +5559,7 @@ export function ChatCodingRoute() {
             attachmentCount: attachments.length,
             referenceCount: references.length,
             mentalModelEnabled,
+            clientSubmissionId,
           },
         );
       }
@@ -5547,6 +5575,7 @@ export function ChatCodingRoute() {
             uploadedAttachmentCount: uploaded.length,
             referenceCount: references.length,
             mentalModelEnabled,
+            clientSubmissionId,
           },
         );
       }
@@ -5560,6 +5589,7 @@ export function ChatCodingRoute() {
           uploadedAttachmentCount: uploaded.length,
           referenceCount: references.length,
           mentalModelEnabled,
+          clientSubmissionId,
         },
       );
       submitTurnMutation.mutate({
@@ -5569,6 +5599,7 @@ export function ChatCodingRoute() {
         mentalModelEnabled,
         attachmentIds: uploaded.map((attachment) => attachment.artifactId).filter(Boolean),
         references,
+        requestStartedAtMs: chatStreamPerformanceNowMs(),
       });
     } catch (error) {
       postSubmitTelemetry(
@@ -5580,6 +5611,7 @@ export function ChatCodingRoute() {
           attachmentCount: attachments.length,
           referenceCount: references.length,
           mentalModelEnabled,
+          clientSubmissionId,
           error,
         },
         "error",
@@ -5608,6 +5640,7 @@ export function ChatCodingRoute() {
       return;
     }
     const content = activeDraftEffective.trim();
+    const clientSubmissionId = createClientSubmissionId(activeSessionId);
     postSubmitTelemetry(
       "browser.chat_submit.requested",
       "Direct chat submit was requested from the composer.",
@@ -5621,6 +5654,7 @@ export function ChatCodingRoute() {
         composerDisabled,
         sessionBusy,
         activePhase: detail?.currentPhase,
+        clientSubmissionId,
       },
     );
     if (activeImageAttachments.length && activeAgentImageInputUnsupported) {
@@ -5639,6 +5673,7 @@ export function ChatCodingRoute() {
           activePhase: detail?.currentPhase,
           guardReason: "image_input_unsupported",
           imageInputModelId: activeImageInputModelId,
+          clientSubmissionId,
         },
         "warning",
       );
@@ -5668,6 +5703,7 @@ export function ChatCodingRoute() {
           sessionBusy,
           activePhase: detail?.currentPhase,
           guardReason,
+          clientSubmissionId,
         },
         "warning",
       );
@@ -5687,12 +5723,13 @@ export function ChatCodingRoute() {
           composerDisabled,
           sessionBusy,
           activePhase: detail?.currentPhase,
+          clientSubmissionId,
         },
       );
       editResubmitMutation.mutate({
         sessionId: activeSessionId,
         messageId: resolvedEditTarget.messageId,
-        clientSubmissionId: createClientSubmissionId(activeSessionId),
+        clientSubmissionId,
         content,
         mentalModelEnabled: mentalModelEnabledForNextTurn,
       });
@@ -5704,6 +5741,7 @@ export function ChatCodingRoute() {
       activeImageAttachments,
       activeReferenceAttachments,
       mentalModelEnabledForNextTurn,
+      clientSubmissionId,
     );
   }
 
