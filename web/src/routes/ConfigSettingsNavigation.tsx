@@ -68,11 +68,9 @@ const PAGE_DEFINITIONS: Record<ConfigSettingsGroupId, readonly PageDefinition[]>
     { id: "runtime-analysis", zh: "分析", en: "Analysis", members: ["analysis"] },
   ],
   "tooling-diagnostics": [
-    { id: "tooling-access", zh: "工具与权限", en: "Tools & access", members: ["security", "network", "parser"] },
-    { id: "tooling-logs", zh: "日志与调试", en: "Logs & debug", members: ["log", "debug"] },
-    { id: "tooling-git", zh: "Git 提交", en: "Git commits", members: ["git-commit-model", "git-commit-prompt"] },
-    { id: "tooling-health", zh: "健康诊断", en: "Health", members: ["health-diagnostics"] },
-    { id: "tooling-raw", zh: "原始配置", en: "Raw config", members: ["draft"] },
+    { id: "tooling-access", zh: "日常工具", en: "Everyday tools", members: ["security", "network", "parser"] },
+    { id: "tooling-health", zh: "排障中心", en: "Troubleshooting", members: ["health-diagnostics", "log", "debug"] },
+    { id: "tooling-git", zh: "高级维护", en: "Advanced maintenance", members: ["git-commit-model", "git-commit-prompt", "draft"] },
   ],
 };
 
