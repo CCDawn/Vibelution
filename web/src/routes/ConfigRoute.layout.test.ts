@@ -778,20 +778,25 @@ describe("ConfigRoute layout contract", () => {
     expect(routeSource).toContain("presentation?.sectionTitle ?? section.title");
     expect(routeSource).toContain("presentation?.sectionSummary ?? section.summary");
     expect(routeSource).toContain("aria-expanded={advancedExpanded}");
+    expect(routeSource).toContain("advancedEntries.length > 0");
     expect(routeSource).toContain('contentLayout="plain"');
     expect(routeSource).toContain("isDenseConfigSection(section) && !presentation");
     expect(routeSource).toContain("configSectionFieldCopy(path, lang)");
     expect(routeSource).toContain('presentation.layout === "compact_paths" ? styles.configCompactPathProgressiveBody : ""');
+    expect(routeSource).toContain('section.id === "pet" ? styles.configCompanionProgressiveBody : ""');
     expect(stylesSource).toContain("configProgressiveBody:");
     expect(stylesSource).toContain("configCompactPathProgressiveBody:");
+    expect(stylesSource).toContain("configCompanionProgressiveBody:");
     expect(stylesSource).toContain("configTierHeader:");
     expect(stylesSource).toContain("configAdvancedToggle:");
     expect(stylesSource).toContain("configAdvancedBody:");
     expect(styles.configAdvancedToggle).toContain("w-full");
-    expect(routeSource).toContain("styles.configCommonGridPet");
+    expect(routeSource).toContain("styles.configCommonGridOne");
+    expect(routeSource).toContain("styles.configCommonGridFour");
     expect(routeSource).toContain("styles.configCommonGridContext");
     expect(routeSource).toContain("styles.configAdvancedGrid");
-    expect(styles.configCommonGridPet).toContain("![grid-template-columns:repeat(4,minmax(0,1fr))]");
+    expect(styles.configCommonGridOne).toContain("![grid-template-columns:minmax(0,1fr)]");
+    expect(styles.configCommonGridFour).toContain("![grid-template-columns:repeat(4,minmax(0,1fr))]");
     expect(styles.configCommonGridContext).toContain("![grid-template-columns:repeat(5,minmax(0,1fr))]");
     expect(styles.configAdvancedGrid).toContain("![grid-template-columns:repeat(3,minmax(0,1fr))]");
     expect(styles.configAdvancedGrid).toContain("max-[1180px]:![grid-template-columns:repeat(2,minmax(0,1fr))]");
@@ -801,11 +806,14 @@ describe("ConfigRoute layout contract", () => {
     expect(styles.configCompactPathProgressiveBody).toContain("[&_.treeFieldCardView]:![grid-template-columns:minmax(150px,0.42fr)_minmax(0,1fr)]");
     expect(styles.configCompactPathProgressiveBody).toContain("[&_.treeFieldValue]:![grid-row:1/span_2]");
     expect(styles.configCompactPathProgressiveBody).toContain("[&_.treeFieldCardView]:![padding:8px]");
+    expect(styles.configCompanionProgressiveBody).toContain("[&_.configAdvancedToggle]:![min-height:64px]");
+    expect(styles.configCompanionProgressiveBody).toContain("[&_.configAdvancedToggle_.configTierHeaderCopy]:![display:grid]");
   });
 
   it("sizes progressive common grids to the number of visible controls", () => {
     expect(routeSource).toContain("function configCommonGridClass(commonEntryCount: number)");
     expect(routeSource).toContain("configCommonGridClass(commonEntries.length)");
+    expect(styles.configCommonGridOne).toContain("![grid-template-columns:minmax(0,1fr)]");
     expect(routeSource).toContain("styles.configCommonGridTwo");
     expect(routeSource).toContain("styles.configCommonGridThree");
     expect(styles.configCommonGridTwo).toContain("![grid-template-columns:repeat(2,minmax(0,1fr))]");

@@ -1100,9 +1100,10 @@ function isDenseConfigSection(section: ConfigEditorSection): boolean {
 }
 
 function configCommonGridClass(commonEntryCount: number): string {
-  if (commonEntryCount <= 2) return styles.configCommonGridTwo;
+  if (commonEntryCount <= 1) return styles.configCommonGridOne;
+  if (commonEntryCount === 2) return styles.configCommonGridTwo;
   if (commonEntryCount === 3) return styles.configCommonGridThree;
-  if (commonEntryCount === 4) return styles.configCommonGridPet;
+  if (commonEntryCount === 4) return styles.configCommonGridFour;
   return styles.configCommonGridContext;
 }
 
@@ -1861,7 +1862,7 @@ function ConfigSectionEditor({
         <div
           className={`${styles.configProgressiveBody} ${
             presentation.layout === "compact_paths" ? styles.configCompactPathProgressiveBody : ""
-          }`}
+          } ${section.id === "pet" ? styles.configCompanionProgressiveBody : ""}`}
         >
           <div className={styles.configTier}>
             <div className={styles.configTierHeader}>
@@ -1878,39 +1879,41 @@ function ConfigSectionEditor({
             </div>
           </div>
 
-          <div className={`${styles.configTier} ${styles.configAdvancedTier}`}>
-            <VButton
-              type="button"
-              contentLayout="plain"
-              className={styles.configAdvancedToggle}
-              aria-expanded={advancedExpanded}
-              onClick={() => {
-                onUiStateChange(section.id, {
-                  ...uiState,
-                  advancedExpanded: !advancedExpanded,
-                });
-              }}
-            >
-              <div className={styles.configTierHeaderCopy}>
-                <strong>{presentation.advancedTitle}</strong>
-                <span>{presentation.advancedHint}</span>
-              </div>
-              <div className={styles.configAdvancedToggleMeta}>
-                <span className={styles.inlineBadge}>{presentation.advancedCountLabel(tierCounts.advanced)}</span>
-                <ChevronRight
-                  size={16}
-                  className={advancedExpanded ? styles.treeToggleIconExpanded : styles.treeToggleIcon}
-                />
-              </div>
-            </VButton>
-            {advancedExpanded ? (
-              <div className={styles.configAdvancedBody}>
-                <div className={`${styles.treeGrid} ${styles.configAdvancedGrid}`}>
-                  {advancedEntries.map((entry) => renderObjectEntry(entry, absolutePath, mode))}
+          {advancedEntries.length > 0 ? (
+            <div className={`${styles.configTier} ${styles.configAdvancedTier}`}>
+              <VButton
+                type="button"
+                contentLayout="plain"
+                className={styles.configAdvancedToggle}
+                aria-expanded={advancedExpanded}
+                onClick={() => {
+                  onUiStateChange(section.id, {
+                    ...uiState,
+                    advancedExpanded: !advancedExpanded,
+                  });
+                }}
+              >
+                <div className={styles.configTierHeaderCopy}>
+                  <strong>{presentation.advancedTitle}</strong>
+                  <span>{presentation.advancedHint}</span>
                 </div>
-              </div>
-            ) : null}
-          </div>
+                <div className={styles.configAdvancedToggleMeta}>
+                  <span className={styles.inlineBadge}>{presentation.advancedCountLabel(tierCounts.advanced)}</span>
+                  <ChevronRight
+                    size={16}
+                    className={advancedExpanded ? styles.treeToggleIconExpanded : styles.treeToggleIcon}
+                  />
+                </div>
+              </VButton>
+              {advancedExpanded ? (
+                <div className={styles.configAdvancedBody}>
+                  <div className={`${styles.treeGrid} ${styles.configAdvancedGrid}`}>
+                    {advancedEntries.map((entry) => renderObjectEntry(entry, absolutePath, mode))}
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
         </div>
       );
     }
