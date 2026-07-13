@@ -1409,24 +1409,6 @@ class LLMClient:
             responses_backend=self._responses_backend,
         )
 
-    @staticmethod
-    def _responses_replay_messages(messages: List[Any], replay_state: Any = None) -> List[Any]:
-        source_messages = list(messages or [])
-        if not str(getattr(replay_state, "response_id", "") or "").strip():
-            return source_messages
-        for index in range(len(source_messages) - 1, -1, -1):
-            message = source_messages[index]
-            role = str(
-                message.get("role") if isinstance(message, dict) else getattr(message, "type", "")
-            ).strip().lower()
-            role = {"ai": "assistant", "human": "user"}.get(role, role)
-            tool_calls = (
-                message.get("tool_calls") if isinstance(message, dict) else getattr(message, "tool_calls", None)
-            ) or []
-            if role == "assistant" and tool_calls:
-                return source_messages[index:]
-        return source_messages
-
     def _build_payload(
         self,
         messages: List[Any],
@@ -1456,8 +1438,6 @@ class LLMClient:
                 },
             )
         projection_messages = list(messages or [])
-        if self.protocol_route.wire_protocol == WireProtocol.RESPONSES:
-            projection_messages = self._responses_replay_messages(projection_messages, replay_state)
         if self.protocol_route.wire_protocol == WireProtocol.RESPONSES:
             provider_messages = projection_messages
         else:
@@ -1522,17 +1502,6 @@ class LLMClient:
                     replay_state=replay_state,
                 )
             )
-            if (
-                replay_state is not None
-                and str(getattr(replay_state, "response_id", "") or "").strip()
-                and semantic_request.messages
-            ):
-                from dataclasses import replace as replace_dataclass
-
-                semantic_request = replace_dataclass(
-                    semantic_request,
-                    messages=semantic_request.messages[1:],
-                )
             wire_payload = wire_adapter.encode_request(semantic_request, route=self.protocol_route)
             built = compose_runtime_wire_payload(
                 build_input,

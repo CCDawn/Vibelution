@@ -32,11 +32,24 @@ def _metadata(*, iteration: int):
     }
 
 
-def test_responses_tool_continuation_uses_latest_canonical_replay_bookmark():
+def test_responses_http_tool_continuation_replays_complete_semantic_input_without_previous_response_id():
     sent_payloads = []
 
     def backend(payload):
         sent_payloads.append(payload)
+        if len(sent_payloads) > 1:
+            return {
+                "id": "resp_replay_2",
+                "status": "completed",
+                "output": [
+                    {
+                        "id": "message_replay_2",
+                        "type": "message",
+                        "role": "assistant",
+                        "content": [{"type": "output_text", "text": "The moon is Earth's natural satellite."}],
+                    }
+                ],
+            }
         return {
             "id": "resp_replay_1",
             "status": "completed",
@@ -70,8 +83,9 @@ def test_responses_tool_continuation_uses_latest_canonical_replay_bookmark():
     assert outcome.replay_state.safe_summary()["hasResponseId"] is True
     assert "resp_replay_1" not in str(outcome.replay_state.safe_summary())
 
-    continuation = client._build_payload(
+    continuation_outcome = client.invoke_outcome(
         [
+            {"role": "user", "content": "look up the moon"},
             assistant,
             {
                 "role": "tool",
@@ -82,12 +96,17 @@ def test_responses_tool_continuation_uses_latest_canonical_replay_bookmark():
         metadata=_metadata(iteration=1),
         replay_state=outcome.replay_state,
     )
+    continuation = sent_payloads[1]
 
-    assert continuation["previous_response_id"] == "resp_replay_1"
-    assert all(item.get("role") != "assistant" for item in continuation["input"] if isinstance(item, dict))
-    assert any(item.get("type") == "reasoning" for item in continuation["input"] if isinstance(item, dict))
-    assert any(item.get("type") == "function_call_output" for item in continuation["input"] if isinstance(item, dict))
-    assert len(sent_payloads) == 1
+    assert "previous_response_id" not in continuation
+    assert continuation["input"][0] == {
+        "role": "user",
+        "content": [{"type": "input_text", "text": "look up the moon"}],
+    }
+    item_kinds = [item.get("type") or item.get("role") for item in continuation["input"] if isinstance(item, dict)]
+    assert item_kinds == ["user", "reasoning", "function_call", "function_call_output"]
+    assert continuation_outcome.final_text == "The moon is Earth's natural satellite."
+    assert len(sent_payloads) == 2
 
 
 def test_invalid_explicit_model_protocol_fails_closed():
