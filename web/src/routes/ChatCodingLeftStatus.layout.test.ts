@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import styles from "./ChatCodingRoute.styles";
+import chatCodingRouteSource from "./ChatCodingRoute.tsx?raw";
 import tokenCoreStatusPanelSource from "./chat/TokenCoreStatusPanel.tsx?raw";
 
 describe("ChatCodingRoute left status panel layout contract", () => {
@@ -57,5 +58,11 @@ describe("ChatCodingRoute left status panel layout contract", () => {
     expect(styles.petShowcaseAction).toContain("[&_span]:whitespace-normal");
     expect(styles.inlineMetaPill).not.toContain("[&_strong]:truncate");
     expect(styles.petShowcaseAction).not.toContain("[&_span]:truncate");
+  });
+
+  it("keeps provider failure status compact and hides numeric operator identities", () => {
+    expect(chatCodingRouteSource).toContain("const compactSessionStateLine = detail?.lastTurnError");
+    expect(chatCodingRouteSource).toContain("detail.lastTurnError.httpStatus || detail.lastTurnError.reasonCode");
+    expect(chatCodingRouteSource).toContain("resolveChatUserDisplayName(runtime?.userName)");
   });
 });

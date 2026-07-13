@@ -109,8 +109,18 @@ const styles = {
     "vui-app-appshell lifecycleProofName min-w-0 text-[var(--vui-font-title)] font-semibold leading-tight text-[var(--fg-primary)]",
   mainArea:
     "vui-app-appshell mainArea min-w-0",
+  mobileNav:
+    "vui-app-appshell mobileNav hidden max-[639px]:flex min-w-0 items-center rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-toolbar)] px-2 py-1",
+  mobileNavLabel:
+    "vui-app-appshell mobileNavLabel min-w-0 truncate text-[var(--vui-font-sm)] font-semibold text-[var(--fg-primary)]",
+  mobileRouteLink:
+    "vui-app-appshell mobileRouteLink min-w-0 rounded-[var(--radius-control)] px-2 py-1.5 text-[var(--vui-font-sm)] font-semibold text-[var(--fg-secondary)] hover:bg-[var(--vui-control-muted-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-cool)]",
+  mobileRouteLinkActive:
+    "vui-app-appshell mobileRouteLinkActive bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))] text-[var(--accent-cool)]",
+  mobileRouteMenu:
+    "vui-app-appshell mobileRouteMenu hidden max-[639px]:grid absolute right-0 top-[calc(100%+4px)] z-[90] w-[min(88vw,320px)] gap-1 rounded-[var(--vui-radius-panel-soft)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] p-2 shadow-[var(--vui-elevation-panel)]",
   nav:
-    "vui-app-appshell nav min-w-0 rounded-[var(--vui-radius-panel-soft)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-toolbar)] p-[3px] shadow-[var(--vui-elevation-panel)]",
+    "vui-app-appshell nav min-w-0 max-[639px]:hidden rounded-[var(--vui-radius-panel-soft)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-toolbar)] p-[3px] shadow-[var(--vui-elevation-panel)]",
   navLink:
     "vui-app-appshell navLink min-w-0",
   navLinkActive:
@@ -236,7 +246,7 @@ const styles = {
   utilityChevron:
     "vui-app-appshell utilityChevron min-w-0",
   utilityCluster:
-    "vui-app-appshell utilityCluster min-w-0 shrink-0",
+    "vui-app-appshell utilityCluster relative min-w-0 shrink-0",
   utilityClusterOpen:
     "vui-app-appshell utilityClusterOpen min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)]",
   utilityFileButton:

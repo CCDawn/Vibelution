@@ -5,6 +5,7 @@ import type { ConversationMessage, SessionTurnError } from "../../api/types";
 import {
   buildConversationTurnErrorReasonRows,
   buildCurrentTurnErrorRows,
+  buildTurnErrorDiagnosticRows,
   resolveConversationTurnErrorType,
 } from "./conversationTurnErrorPresentation";
 
@@ -82,6 +83,21 @@ describe("conversationTurnErrorPresentation", () => {
       { label: "Provider", value: "anthropic · www.atpify.cn" },
       { label: "Model", value: "claude-3" },
       { label: "Code", value: "no_account" },
+    ]);
+  });
+
+  it("builds bounded diagnostic rows directly from a canonical error cell summary", () => {
+    expect(buildTurnErrorDiagnosticRows({
+      httpStatus: 502,
+      reasonCode: "upstream_unavailable",
+      reasonSummary: "provider 上游服务不可用",
+      provider: "ai-pixel",
+      ignoredRawError: "must not render",
+    }, "zh")).toEqual([
+      { label: "状态码", value: "502" },
+      { label: "原因", value: "provider 上游服务不可用" },
+      { label: "通道", value: "ai-pixel" },
+      { label: "代码", value: "upstream_unavailable" },
     ]);
   });
 });
