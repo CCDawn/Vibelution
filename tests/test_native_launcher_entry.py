@@ -53,6 +53,17 @@ def test_native_launcher_non_default_actions_keep_hidden_vbs_fallback():
     assert "WindowStyle = ProcessWindowStyle.Hidden" in source
 
 
+def test_native_launcher_python_bridge_uses_no_console_outer_runtime():
+    source = _source()
+    bridge_source = source.split("private static void RunPythonBridge", maxsplit=1)[1].split(
+        "private static string ResolvePython", maxsplit=1
+    )[0]
+
+    assert "string pythonPath = ResolvePython(projectDir, useNoConsole: true);" in bridge_source
+    assert 'Quote(ResolvePython(projectDir, useNoConsole: false))' in bridge_source
+    assert 'useNoConsole ? "pythonw.exe" : "python.exe"' in source
+
+
 def test_native_launcher_build_references_windows_forms_and_icon():
     build_script = NATIVE_ENTRY_BUILD_SCRIPT.read_text(encoding="utf-8")
 
