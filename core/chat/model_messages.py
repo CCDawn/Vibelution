@@ -5,8 +5,8 @@ This module is the boundary between persisted/UI conversation shapes and the
 LLM-facing message chain. UI projections may keep camelCase fields such as
 ``toolCalls``.
 
-Historical model context is semantic text. Provider ``role=tool`` messages are
-reserved for the live tool-call protocol inside the current ReAct turn.
+Complete historical tool chains keep their provider structure. Orphaned or
+incomplete fragments are repaired into semantic assistant text.
 """
 
 from __future__ import annotations
@@ -28,8 +28,9 @@ class ProviderMessageChain:
 
     @classmethod
     def from_messages(cls, messages: Iterable[Any]) -> "ProviderMessageChain":
-        before = _provider_chain_fingerprint(messages)
-        normalized = _normalize_provider_turn_messages_impl(messages)
+        materialized = list(messages or [])
+        before = _provider_chain_fingerprint(materialized)
+        normalized = _normalize_provider_turn_messages_impl(materialized)
         after = _provider_chain_fingerprint(normalized)
         return cls(messages=tuple(normalized), repaired=before != after)
 
@@ -44,50 +45,9 @@ def normalize_model_messages(messages: Iterable[Any]) -> list[Any]:
 
 
 def normalize_model_history_messages(messages: Iterable[Any]) -> list[Any]:
-    """Return semantic history messages without provider-level tool roles."""
+    """Return provider-safe history while preserving complete tool chains."""
 
-    normalized: list[Any] = []
-    raw_messages = list(messages or [])
-    pending_tool_names: dict[str, str] = {}
-    for index, raw in enumerate(raw_messages):
-        if not isinstance(raw, dict):
-            if hasattr(raw, "content") and hasattr(raw, "type"):
-                normalized.append(raw)
-                continue
-            text = str(raw or "").strip()
-            if text:
-                normalized.append(_base_message("user", text, source_index=index))
-            continue
-        role = _normalize_role(raw.get("role"))
-        if role == "assistant":
-            pending_tool_names.update(_assistant_tool_call_names(raw, source_index=index))
-            normalized.extend(
-                _assistant_history_messages(
-                    raw,
-                    source_index=index,
-                    suppress_empty_tool_summaries=_assistant_tool_calls_have_following_results(
-                        raw_messages,
-                        index,
-                        raw,
-                    ),
-                )
-            )
-            continue
-        if role == "tool":
-            tool_call_id = _tool_call_id_from_message(raw)
-            tool_name = pending_tool_names.pop(tool_call_id, "") if tool_call_id else ""
-            tool_message = _tool_role_history_message(raw, source_index=index, tool_name=tool_name)
-            if tool_message:
-                normalized.append(tool_message)
-            continue
-        message = _base_message(role, _content_value(raw.get("content")), source_index=index)
-        _copy_optional(raw, message, ("attachments", "metadata", "references", "reasoning_content"))
-        if role == "assistant" and not message.get("content"):
-            continue
-        if role == "user" and not message.get("content") and not message.get("attachments") and not message.get("references"):
-            continue
-        normalized.append(message)
-    return _dedupe_adjacent_semantic_messages(normalized)
+    return ProviderMessageChain.from_messages(messages).to_provider_payload()
 
 
 def normalize_provider_turn_messages(messages: Iterable[Any]) -> list[Any]:
@@ -100,7 +60,8 @@ def _normalize_provider_turn_messages_impl(messages: Iterable[Any]) -> list[Any]
     """Internal implementation owned by ProviderMessageChain."""
 
     normalized: list[Any] = []
-    for index, raw in enumerate(list(messages or [])):
+    raw_messages = _coalesce_ledger_tool_result_messages(list(messages or []))
+    for index, raw in enumerate(raw_messages):
         if not isinstance(raw, dict):
             if hasattr(raw, "content") and hasattr(raw, "type"):
                 normalized.append(raw)
@@ -174,7 +135,10 @@ def _assistant_history_messages(
 def _assistant_provider_messages(message: dict[str, Any], *, source_index: int) -> list[dict[str, Any]]:
     content = _content_value(message.get("content"))
     tool_entries = _tool_entries(message)
-    if any(_tool_entry_has_result(entry) for entry in tool_entries):
+    if any(
+        _tool_entry_has_result(entry) and not _explicit_tool_call_id(entry)
+        for entry in tool_entries
+    ):
         return _assistant_history_messages(message, source_index=source_index)
     if not tool_entries:
         assistant = _base_message("assistant", content, source_index=source_index)
@@ -191,17 +155,12 @@ def _assistant_provider_messages(message: dict[str, Any], *, source_index: int) 
         result_content = _tool_result_content(normalized["name"], entry)
         if result_content:
             tool_messages.append(
-                {
-                    "role": "tool",
-                    "content": result_content,
-                    "tool_call_id": normalized["id"],
-                    "metadata": {
-                        "schemaVersion": MODEL_MESSAGE_SCHEMA_VERSION,
-                        "kind": "canonical_tool_result",
-                        "sourceIndex": source_index,
-                        "toolName": normalized["name"],
-                    },
-                }
+                _embedded_tool_result_message(
+                    message,
+                    normalized,
+                    result_content=result_content,
+                    source_index=source_index,
+                )
             )
     if not tool_calls and not _visible_text(content):
         return []
@@ -392,6 +351,112 @@ def _normalize_tool_call(entry: dict[str, Any], *, source_index: int, tool_index
     }
 
 
+def _explicit_tool_call_id(entry: dict[str, Any]) -> str:
+    return str(
+        entry.get("id")
+        or entry.get("tool_call_id")
+        or entry.get("toolCallId")
+        or entry.get("taskId")
+        or ""
+    ).strip()
+
+
+def _embedded_tool_result_message(
+    source_message: dict[str, Any],
+    normalized_call: dict[str, Any],
+    *,
+    result_content: str,
+    source_index: int,
+) -> dict[str, Any]:
+    metadata = {
+        "schemaVersion": MODEL_MESSAGE_SCHEMA_VERSION,
+        "kind": "canonical_tool_result",
+        "sourceIndex": source_index,
+        "toolName": str(normalized_call.get("name") or ""),
+    }
+    source_metadata = source_message.get("metadata")
+    if isinstance(source_metadata, dict):
+        metadata.update(source_metadata)
+        metadata.setdefault("schemaVersion", MODEL_MESSAGE_SCHEMA_VERSION)
+    return {
+        "role": "tool",
+        "content": result_content,
+        "tool_call_id": str(normalized_call.get("id") or ""),
+        "metadata": metadata,
+    }
+
+
+def _coalesce_ledger_tool_result_messages(messages: list[Any]) -> list[Any]:
+    """Join ledger result bundles to their preceding assistant call envelope."""
+
+    coalesced: list[Any] = []
+    pending_ids: set[str] = set()
+    pending_turn_identity = ""
+    for source_index, raw in enumerate(list(messages or [])):
+        if not isinstance(raw, dict):
+            coalesced.append(raw)
+            pending_ids = set()
+            pending_turn_identity = ""
+            continue
+        role = _normalize_role(raw.get("role"))
+        entries = _tool_entries(raw) if role == "assistant" else []
+        result_entries = [entry for entry in entries if _tool_entry_has_result(entry)]
+        result_ids = [_explicit_tool_call_id(entry) for entry in result_entries]
+        result_turn_identity = _message_turn_identity(raw)
+        same_pending_turn = (
+            not pending_turn_identity
+            or not result_turn_identity
+            or pending_turn_identity == result_turn_identity
+        )
+        if (
+            pending_ids
+            and result_entries
+            and len(result_entries) == len(entries)
+            and all(result_ids)
+            and set(result_ids).issubset(pending_ids)
+            and same_pending_turn
+        ):
+            for tool_index, entry in enumerate(result_entries, start=1):
+                normalized = _normalize_tool_call(
+                    entry,
+                    source_index=source_index,
+                    tool_index=tool_index,
+                )
+                result_content = _tool_result_content(normalized["name"], entry)
+                if result_content:
+                    coalesced.append(
+                        _embedded_tool_result_message(
+                            raw,
+                            normalized,
+                            result_content=result_content,
+                            source_index=source_index,
+                        )
+                    )
+                pending_ids.discard(normalized["id"])
+            if not pending_ids:
+                pending_turn_identity = ""
+            continue
+
+        coalesced.append(raw)
+        if role == "assistant" and entries and not result_entries:
+            pending_ids = {
+                normalized["id"]
+                for tool_index, entry in enumerate(entries, start=1)
+                for normalized in [_normalize_tool_call(entry, source_index=source_index, tool_index=tool_index)]
+                if normalized
+            }
+            pending_turn_identity = _message_turn_identity(raw)
+            continue
+        if role == "tool" and pending_ids:
+            pending_ids.discard(_tool_call_id_from_message(raw))
+            if not pending_ids:
+                pending_turn_identity = ""
+            continue
+        pending_ids = set()
+        pending_turn_identity = ""
+    return coalesced
+
+
 def _tool_call_id_from_message(message: dict[str, Any]) -> str:
     return str(message.get("tool_call_id") or message.get("toolCallId") or message.get("id") or "").strip()
 
@@ -540,27 +605,29 @@ def _first_non_empty(*values: Any) -> Any:
 
 def _dedupe_adjacent_tool_results(messages: list[Any]) -> list[Any]:
     deduped: list[Any] = []
-    previous_key: tuple[str, str, str] | None = None
+    previous_key: tuple[str, str, str, str] | None = None
     for message in messages:
         if not isinstance(message, dict):
             deduped.append(message)
             previous_key = None
             continue
+        stable_identity = _message_turn_identity(message)
         key = (
             str(message.get("role") or ""),
             str(message.get("tool_call_id") or ""),
             str(message.get("content") or ""),
+            stable_identity,
         )
-        if message.get("role") == "tool" and key == previous_key:
+        if stable_identity and message.get("role") == "tool" and key == previous_key:
             continue
         deduped.append(message)
-        previous_key = key
+        previous_key = key if stable_identity else None
     return deduped
 
 
 def _dedupe_adjacent_semantic_messages(messages: list[Any]) -> list[Any]:
     deduped: list[Any] = []
-    previous_key: tuple[str, str, str] | None = None
+    previous_key: tuple[str, str, str, str] | None = None
     for message in messages:
         if not isinstance(message, dict):
             deduped.append(message)
@@ -570,12 +637,22 @@ def _dedupe_adjacent_semantic_messages(messages: list[Any]) -> list[Any]:
         identity = ""
         if role == "tool":
             identity = str(message.get("tool_call_id") or message.get("toolCallId") or "")
-        key = (role, str(message.get("content") or ""), identity)
-        if key == previous_key:
+        stable_identity = _message_turn_identity(message)
+        key = (role, str(message.get("content") or ""), identity, stable_identity)
+        if stable_identity and key == previous_key:
             continue
         deduped.append(message)
-        previous_key = key
+        previous_key = key if stable_identity else None
     return deduped
+
+
+def _message_turn_identity(message: dict[str, Any]) -> str:
+    metadata = message.get("metadata") if isinstance(message.get("metadata"), dict) else {}
+    turn_id = str(metadata.get("turnId") or metadata.get("turn_id") or "").strip()
+    if turn_id:
+        return f"turn:{turn_id}"
+    event_id = str(metadata.get("eventId") or metadata.get("event_id") or "").strip()
+    return f"event:{event_id}" if event_id else ""
 
 
 def _repair_provider_tool_chain(messages: list[Any]) -> list[Any]:

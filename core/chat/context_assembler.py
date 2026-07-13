@@ -25,6 +25,7 @@ from .conversation_ledger import (
     conversation_model_messages_from_events,
     latest_context_compression_checkpoint,
 )
+from .model_messages import ProviderMessageChain
 
 
 DEFAULT_RECENT_MESSAGE_LIMIT = 8
@@ -114,15 +115,14 @@ def assemble_conversation_context(
         current_turn_id=current_turn_id,
     )
     ledger_messages = conversation_model_messages_from_events(ledger_replay_events)
-    normalized_messages = ledger_messages
+    normalized_messages = ProviderMessageChain.from_messages(ledger_messages).to_provider_payload()
     events = build_history_events(normalized_messages, session_id=session_id)
     bounded_recent_limit = max(1, min(int(recent_message_limit or DEFAULT_RECENT_MESSAGE_LIMIT), 40))
-    recent_start_index = max(0, len(normalized_messages) - bounded_recent_limit)
+    recent_start_index = _provider_history_tail_start_index(
+        normalized_messages,
+        message_limit=bounded_recent_limit,
+    )
     recent_raw_messages = normalized_messages[recent_start_index:]
-    recent_safe_start_offset = _provider_safe_history_tail_start_offset(recent_raw_messages)
-    if recent_safe_start_offset:
-        recent_start_index += recent_safe_start_offset
-        recent_raw_messages = recent_raw_messages[recent_safe_start_offset:]
     recent_messages = recent_raw_messages
     checkpoint = latest_checkpoint(events)
     ledger_checkpoint = latest_context_compression_checkpoint(ledger_replay_events)
@@ -338,7 +338,10 @@ def _historical_source_collection_stage_task_summary(message: dict[str, Any]) ->
     )
 def _looks_like_historical_tool_result(content: str) -> bool:
     text = str(content or "").lstrip()
-    return text.startswith("历史工具结果:") or text.startswith("历史工具证据:")
+    return any(
+        text.startswith(marker)
+        for marker in ("历史工具调用:", "历史工具结果:", "历史工具证据:")
+    )
 
 
 def _compact_historical_tool_result(content: str, *, char_limit: int) -> tuple[str, bool]:
@@ -427,16 +430,60 @@ def _historical_ledger_events(
     ]
 
 
-def _provider_safe_history_tail_start_offset(messages: list[dict[str, Any]]) -> int:
-    for index, message in enumerate(list(messages or [])):
-        if not isinstance(message, dict):
-            continue
-        role = str(message.get("role") or "").strip().lower()
-        if role in {"system", "user"}:
-            return index
-        if role == "assistant" and _is_context_seed_assistant_message(message):
-            return index
-    return len(messages)
+def _provider_history_tail_start_index(
+    messages: list[dict[str, Any]],
+    *,
+    message_limit: int,
+) -> int:
+    """Select a bounded tail without splitting an assistant/tool chain."""
+
+    atoms: list[tuple[int, int]] = []
+    index = 0
+    while index < len(messages):
+        message = messages[index]
+        call_ids = _provider_message_tool_call_ids(message)
+        if call_ids:
+            end_index = index + 1
+            seen_ids: list[str] = []
+            while end_index < len(messages):
+                result = messages[end_index]
+                if str(result.get("role") or "").strip().lower() != "tool":
+                    break
+                tool_call_id = str(result.get("tool_call_id") or result.get("toolCallId") or "").strip()
+                if tool_call_id not in call_ids or tool_call_id in seen_ids:
+                    break
+                seen_ids.append(tool_call_id)
+                end_index += 1
+            if set(seen_ids) == set(call_ids):
+                atoms.append((index, end_index))
+                index = end_index
+                continue
+        atoms.append((index, index + 1))
+        index += 1
+
+    selected_count = 0
+    start_index = len(messages)
+    bounded_limit = max(1, int(message_limit or 1))
+    for atom_start, atom_end in reversed(atoms):
+        atom_size = atom_end - atom_start
+        if selected_count + atom_size > bounded_limit:
+            break
+        start_index = atom_start
+        selected_count += atom_size
+        if selected_count == bounded_limit:
+            break
+    return start_index
+
+
+def _provider_message_tool_call_ids(message: dict[str, Any]) -> list[str]:
+    if not isinstance(message, dict) or str(message.get("role") or "").strip().lower() != "assistant":
+        return []
+    return [
+        str(call.get("id") or call.get("tool_call_id") or call.get("toolCallId") or "").strip()
+        for call in list(message.get("tool_calls") or message.get("toolCalls") or [])
+        if isinstance(call, dict)
+        and str(call.get("id") or call.get("tool_call_id") or call.get("toolCallId") or "").strip()
+    ]
 
 
 def _is_context_seed_assistant_message(message: dict[str, Any]) -> bool:

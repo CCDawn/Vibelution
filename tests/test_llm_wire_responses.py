@@ -9,14 +9,17 @@ from core.llm.provider_replay_state import OpaqueReplayItem, ProviderReplayState
 from core.llm.semantic_messages import (
     InvocationScope,
     ReasoningReplayPart,
+    ReasoningTextPart,
     SemanticGenerationSettings,
     SemanticMessage,
     SemanticModelRequest,
     SemanticToolDefinition,
     TextPart,
+    ToolCallPart,
     ToolResultPart,
 )
-from core.llm.types import CanonicalItemIdentity, CanonicalToolResult
+from core.llm.semantic_projector import SemanticProjectionInput, project_semantic_request
+from core.llm.types import CanonicalItemIdentity, CanonicalToolCall, CanonicalToolResult
 from core.llm.wire.responses import ResponsesWireAdapter
 
 
@@ -51,7 +54,7 @@ def identity(item_id: str, *, iteration: int = 0) -> CanonicalItemIdentity:
     )
 
 
-def test_responses_encoder_uses_semantic_ir_and_preserves_replay_and_tool_result_identity():
+def test_responses_stateless_history_emits_full_call_output_pairs_without_previous_response_id():
     current_route = route()
     replay_item = {"type": "reasoning", "id": "reasoning-1", "encrypted_content": "ciphertext"}
     replay_state = ProviderReplayState(
@@ -63,6 +66,13 @@ def test_responses_encoder_uses_semantic_ir_and_preserves_replay_and_tool_result
         opaque_items=(
             OpaqueReplayItem(item_id="reasoning-1", payload=json.dumps(replay_item).encode("utf-8")),
         ),
+        response_id="resp-previous",
+    )
+    call = CanonicalToolCall(
+        identity=identity("tool-call-1", iteration=0),
+        call_id="call-1",
+        name="lookup",
+        arguments={"query": "moon"},
     )
     result = CanonicalToolResult(
         identity=identity("tool-result-1", iteration=1),
@@ -73,8 +83,13 @@ def test_responses_encoder_uses_semantic_ir_and_preserves_replay_and_tool_result
     request = SemanticModelRequest(
         scope=scope(1),
         messages=(
-            SemanticMessage(role="assistant", parts=(ReasoningReplayPart("reasoning-1"),)),
+            SemanticMessage(role="user", parts=(TextPart("look up the moon"),)),
+            SemanticMessage(
+                role="assistant",
+                parts=(ReasoningReplayPart("reasoning-1"), ToolCallPart(call)),
+            ),
             SemanticMessage(role="tool", parts=(ToolResultPart(result),)),
+            SemanticMessage(role="assistant", parts=(TextPart("The value is 42."),)),
             SemanticMessage(role="user", parts=(TextPart("continue"),)),
         ),
         tools=(
@@ -93,10 +108,103 @@ def test_responses_encoder_uses_semantic_ir_and_preserves_replay_and_tool_result
     assert payload["model"] == "gpt-5.6-luna"
     assert payload["max_output_tokens"] == 128
     assert payload["stream"] is True
-    assert replay_item in payload["input"]
-    assert {"type": "function_call_output", "call_id": "call-1", "output": '{"value":42}'} in payload["input"]
+    assert "previous_response_id" not in payload
+    assert payload["input"] == [
+        {"role": "user", "content": [{"type": "input_text", "text": "look up the moon"}]},
+        replay_item,
+        {"type": "function_call", "call_id": "call-1", "name": "lookup", "arguments": '{"query": "moon"}'},
+        {"type": "function_call_output", "call_id": "call-1", "output": '{"value":42}'},
+        {"role": "assistant", "content": [{"type": "output_text", "text": "The value is 42."}]},
+        {"role": "user", "content": [{"type": "input_text", "text": "continue"}]},
+    ]
     assert payload["input"][-1] == {"role": "user", "content": [{"type": "input_text", "text": "continue"}]}
     assert payload["tools"][0]["parameters"]["properties"]["query"]["type"] == "string"
+
+
+def test_responses_rejects_unreferenced_opaque_replay_instead_of_auto_injecting_it():
+    current_route = route()
+    replay_state = ProviderReplayState(
+        issuer="responses",
+        provider_id=current_route.provider_id,
+        endpoint_fingerprint=endpoint_fingerprint(current_route.runtime_endpoint),
+        model_id=current_route.model_id,
+        wire_protocol=current_route.wire_protocol,
+        opaque_items=(
+            OpaqueReplayItem(
+                item_id="reasoning-1",
+                payload=json.dumps({"type": "reasoning", "id": "reasoning-1", "encrypted_content": "ciphertext"}).encode("utf-8"),
+            ),
+        ),
+        response_id="resp-previous",
+    )
+    request = SemanticModelRequest(
+        scope=scope(),
+        messages=(SemanticMessage(role="user", parts=(TextPart("fresh input"),)),),
+        tools=(),
+        settings=SemanticGenerationSettings(max_output_tokens=32),
+        replay_state=replay_state,
+    )
+
+    with pytest.raises(ValueError, match="opaque replay items must be explicitly referenced"):
+        ResponsesWireAdapter().encode_request(request, route=current_route)
+
+
+def test_semantic_projector_to_responses_preserves_replay_text_call_output_order():
+    current_route = route()
+    replay_item = {"type": "reasoning", "id": "reasoning-1", "encrypted_content": "ciphertext"}
+    replay_state = ProviderReplayState(
+        issuer="responses",
+        provider_id=current_route.provider_id,
+        endpoint_fingerprint=endpoint_fingerprint(current_route.runtime_endpoint),
+        model_id=current_route.model_id,
+        wire_protocol=current_route.wire_protocol,
+        opaque_items=(
+            OpaqueReplayItem(item_id="reasoning-1", payload=json.dumps(replay_item).encode("utf-8")),
+        ),
+        response_id="resp-previous",
+    )
+    request = project_semantic_request(
+        SemanticProjectionInput(
+            messages=(
+                {
+                    "role": "assistant",
+                    "content": "checking",
+                    "tool_calls": (
+                        {"id": "call-1", "name": "lookup", "args": {"query": "moon"}},
+                    ),
+                    "additional_kwargs": {"reasoning_replay_item_id": "reasoning-1"},
+                },
+                {"role": "tool", "tool_call_id": "call-1", "content": "result"},
+            ),
+            tools=(),
+            scope=scope(),
+            settings=SemanticGenerationSettings(max_output_tokens=32),
+            tool_to_schema=lambda tool: tool,
+            replay_state=replay_state,
+        )
+    )
+
+    payload = ResponsesWireAdapter().encode_request(request, route=current_route).body
+
+    assert payload["input"] == [
+        replay_item,
+        {"role": "assistant", "content": [{"type": "output_text", "text": "checking"}]},
+        {"type": "function_call", "call_id": "call-1", "name": "lookup", "arguments": '{"query": "moon"}'},
+        {"type": "function_call_output", "call_id": "call-1", "output": "result"},
+    ]
+    assert "previous_response_id" not in payload
+
+
+def test_responses_rejects_plain_reasoning_text_instead_of_silent_drop():
+    request = SemanticModelRequest(
+        scope=scope(),
+        messages=(SemanticMessage(role="assistant", parts=(ReasoningTextPart("private reasoning"),)),),
+        tools=(),
+        settings=SemanticGenerationSettings(max_output_tokens=32),
+    )
+
+    with pytest.raises(ValueError, match="reasoning text"):
+        ResponsesWireAdapter().encode_request(request, route=route())
 
 
 def test_responses_encoder_rejects_cross_route_replay_without_registry_bypass():

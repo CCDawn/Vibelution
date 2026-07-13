@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from types import MappingProxyType
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
 
 from .provider_replay_state import ProviderReplayState
 from .types import CanonicalToolCall, CanonicalToolResult
@@ -118,6 +118,93 @@ class SemanticMessage:
         object.__setattr__(self, "parts", tuple(self.parts))
 
 
+class SemanticChainValidationError(ValueError):
+    def __init__(self, code: str, message_index: int, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+        self.message_index = message_index
+
+
+def validate_provider_ready_messages(messages: Sequence[SemanticMessage]) -> None:
+    """Fail closed unless tool calls and results form one ordered complete chain."""
+
+    pending_call_ids: list[str] = []
+    seen_call_ids: set[str] = set()
+    seen_result_ids: set[str] = set()
+    for message_index, message in enumerate(messages):
+        if pending_call_ids and message.role != "tool":
+            raise SemanticChainValidationError(
+                "interrupted_tool_chain",
+                message_index,
+                "unresolved tool calls must be completed before another semantic message",
+            )
+        if message.role == "tool" and (
+            len(message.parts) != 1 or not isinstance(message.parts[0], ToolResultPart)
+        ):
+            raise SemanticChainValidationError(
+                "non_atomic_tool_message",
+                message_index,
+                "tool messages must contain exactly one tool result",
+            )
+        for part in message.parts:
+            if isinstance(part, ToolCallPart):
+                if message.role != "assistant":
+                    raise SemanticChainValidationError(
+                        "invalid_tool_call_role",
+                        message_index,
+                        "tool calls must belong to an assistant message",
+                    )
+                call_id = part.call.call_id.strip()
+                if not call_id:
+                    raise SemanticChainValidationError(
+                        "invalid_tool_call_id",
+                        message_index,
+                        "tool call requires a non-empty call id",
+                    )
+                if call_id in seen_call_ids:
+                    raise SemanticChainValidationError(
+                        "duplicate_tool_call_id",
+                        message_index,
+                        f"duplicate tool call id `{call_id}`",
+                    )
+                seen_call_ids.add(call_id)
+                pending_call_ids.append(call_id)
+            elif isinstance(part, ToolResultPart):
+                if message.role != "tool":
+                    raise SemanticChainValidationError(
+                        "invalid_tool_result_role",
+                        message_index,
+                        "tool results must belong to a tool message",
+                    )
+                call_id = part.result.call_id.strip()
+                if call_id in seen_result_ids:
+                    raise SemanticChainValidationError(
+                        "duplicate_tool_result",
+                        message_index,
+                        f"duplicate tool result for `{call_id}`",
+                    )
+                if call_id not in seen_call_ids:
+                    raise SemanticChainValidationError(
+                        "orphan_tool_result",
+                        message_index,
+                        f"tool result `{call_id}` has no preceding call",
+                    )
+                if call_id not in pending_call_ids:
+                    raise SemanticChainValidationError(
+                        "orphan_tool_result",
+                        message_index,
+                        f"tool result `{call_id}` does not match an unresolved call",
+                    )
+                pending_call_ids.remove(call_id)
+                seen_result_ids.add(call_id)
+    if pending_call_ids:
+        raise SemanticChainValidationError(
+            "unresolved_tool_call",
+            max(0, len(messages) - 1),
+            f"tool call `{pending_call_ids[0]}` has no matching result",
+        )
+
+
 @dataclass(frozen=True)
 class SemanticToolDefinition:
     name: str
@@ -154,3 +241,21 @@ class SemanticModelRequest:
     def __post_init__(self) -> None:
         object.__setattr__(self, "messages", tuple(self.messages))
         object.__setattr__(self, "tools", tuple(self.tools))
+
+
+__all__ = [
+    "CacheHint",
+    "ImagePart",
+    "InvocationScope",
+    "ReasoningReplayPart",
+    "ReasoningTextPart",
+    "SemanticChainValidationError",
+    "SemanticGenerationSettings",
+    "SemanticMessage",
+    "SemanticModelRequest",
+    "SemanticToolDefinition",
+    "TextPart",
+    "ToolCallPart",
+    "ToolResultPart",
+    "validate_provider_ready_messages",
+]

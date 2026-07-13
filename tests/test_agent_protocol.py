@@ -367,12 +367,19 @@ class TestToolMessageFlow:
 
         restored = list(agent._active_turn_messages or [])
         tool_messages = [message for message in restored if isinstance(message, ToolMessage)]
-        semantic_messages = [message for message in restored if isinstance(message, AIMessage)]
+        assistant_calls = [
+            call
+            for message in restored
+            if isinstance(message, AIMessage)
+            for call in list(getattr(message, "tool_calls", []) or [])
+        ]
 
-        assert tool_messages == []
-        assert not any(getattr(message, "tool_calls", []) for message in semantic_messages)
-        assert any("历史工具结果: cli_tool" in str(message.content) for message in semantic_messages)
-        assert any("完整 canonical 工具结果" in str(message.content) for message in semantic_messages)
+        assert [call["id"] for call in assistant_calls] == ["call_canonical"]
+        assert [call["name"] for call in assistant_calls] == ["cli_tool"]
+        assert [message.tool_call_id for message in tool_messages] == ["call_canonical"]
+        assert [message.content for message in tool_messages] == ["完整 canonical 工具结果"]
+        assert sum("完整 canonical 工具结果" in str(message.content) for message in restored) == 1
+        assert not any("历史工具结果" in str(message.content) for message in restored)
 
     def test_chat_state_normalization_preserves_camel_case_tool_calls(self):
         from core.ui.chat_state import normalize_chat_messages
@@ -1763,9 +1770,11 @@ class TestToolMessageFlow:
         monkeypatch.setattr(
             TurnOutcomeController,
             "finish_turn_message_carryover",
-            lambda messages, lifecycle_action, active_goal: SimpleNamespace(
+            lambda messages, lifecycle_action, active_goal, turn_identity="": SimpleNamespace(
                 messages=messages,
                 goal=active_goal,
+                turn_identity=turn_identity,
+                terminal=False,
             ),
         )
         policy = SimpleNamespace(
@@ -2035,9 +2044,11 @@ class TestToolMessageFlow:
         monkeypatch.setattr(
             TurnOutcomeController,
             "finish_turn_message_carryover",
-            lambda messages, lifecycle_action, active_goal: SimpleNamespace(
+            lambda messages, lifecycle_action, active_goal, turn_identity="": SimpleNamespace(
                 messages=messages,
                 goal=active_goal,
+                turn_identity=turn_identity,
+                terminal=False,
             ),
         )
         policy = SimpleNamespace(
@@ -2340,9 +2351,11 @@ class TestToolMessageFlow:
         monkeypatch.setattr(
             TurnOutcomeController,
             "finish_turn_message_carryover",
-            lambda messages, lifecycle_action, active_goal: SimpleNamespace(
+            lambda messages, lifecycle_action, active_goal, turn_identity="": SimpleNamespace(
                 messages=messages,
                 goal=active_goal,
+                turn_identity=turn_identity,
+                terminal=False,
             ),
         )
         policy = SimpleNamespace(
@@ -7080,6 +7093,103 @@ class TestRuntimeStateMemoryFlow:
 
         assert carryover.goal == ""
         assert carryover.messages is None
+
+    def test_same_turn_chat_recovery_does_not_duplicate_current_user(self):
+        current_user = build_chat_user_message("继续检查")
+        previous = [
+            SystemMessage(content="old system"),
+            current_user,
+            AIMessage(content="仍在处理中"),
+        ]
+
+        messages, resumed = TurnOutcomeController.prepare_turn_messages(
+            system_prompt="new system",
+            user_prompt="继续检查",
+            effective_goal="继续检查",
+            active_turn_messages=previous,
+            active_turn_goal="继续检查",
+            build_system_message=agent_module.build_system_message,
+            build_external_request_message=build_chat_user_message,
+            allow_append_user_message=True,
+        )
+
+        matching_users = [
+            message
+            for message in messages
+            if isinstance(message, dict)
+            and message.get("role") == "user"
+            and "继续检查" in str(message.get("content") or "")
+        ]
+        assert resumed is True
+        assert matching_users == [current_user]
+
+    def test_nonterminal_carryover_is_identity_bearing(self):
+        messages = [
+            SystemMessage(content="system"),
+            build_external_request_message("inspect"),
+            AIMessage(content="working"),
+        ]
+
+        carryover = TurnOutcomeController.finish_turn_message_carryover(
+            messages=messages,
+            lifecycle_action=None,
+            active_goal="inspect",
+            turn_identity="turn-1",
+        )
+
+        assert carryover.turn_identity == "turn-1"
+        assert carryover.terminal is False
+        assert carryover.messages == messages
+
+    def test_terminal_carryover_envelope_round_trips_and_is_rejected(self):
+        carryover = TurnOutcomeController.finish_turn_message_carryover(
+            messages=[SystemMessage(content="system")],
+            lifecycle_action="turn_complete",
+            active_goal="inspect",
+            turn_identity="turn-1",
+        )
+        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+        agent._active_turn_messages = carryover.messages
+        agent._active_turn_goal = carryover.goal
+        agent._active_turn_identity = carryover.turn_identity
+        agent._active_turn_terminal = carryover.terminal
+
+        exported = agent.export_turn_carryover()
+
+        assert exported == {
+            "messages": [],
+            "goal": "",
+            "turnIdentity": "turn-1",
+            "terminal": True,
+        }
+        assert TurnOutcomeController.classify_turn_carryover(
+            exported,
+            expected_turn_identity="turn-1",
+        ) == "terminal"
+
+    def test_goal_override_normalization_is_scoped_to_single_turn(self):
+        assert "goal_override" not in SelfEvolvingAgent.run_loop.__code__.co_names
+        assert "effective_goal_override" in SelfEvolvingAgent.run_single_turn.__code__.co_varnames
+
+    def test_agent_rejects_carryover_from_another_turn(self):
+        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+        agent._active_turn_identity = "turn-new"
+        agent._active_turn_messages = None
+        agent._active_turn_goal = ""
+
+        agent.seed_turn_carryover(
+            {
+                "turnIdentity": "turn-old",
+                "terminal": False,
+                "goal": "stale goal",
+                "messages": [
+                    {"kind": "dict", "role": "user", "content": "stale current user"},
+                ],
+            }
+        )
+
+        assert agent._active_turn_messages is None
+        assert agent._active_turn_goal == ""
 
     def test_build_delegation_request_skips_broad_autonomous_goal_without_local_symptom(self, monkeypatch):
         agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)

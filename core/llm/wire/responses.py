@@ -12,11 +12,13 @@ from ..semantic_messages import (
     ImagePart,
     InvocationScope,
     ReasoningReplayPart,
+    ReasoningTextPart,
     SemanticMessage,
     SemanticModelRequest,
     TextPart,
     ToolCallPart,
     ToolResultPart,
+    validate_provider_ready_messages,
 )
 from ..streaming import ResponsesToolCallAccumulator
 from ..usage import usage_diagnostic_summary_from_payload
@@ -160,6 +162,7 @@ class ResponsesWireAdapter:
                 model_id=str(getattr(route, "model_id", "") or ""),
                 wire_protocol=WireProtocol.RESPONSES,
             )
+        validate_provider_ready_messages(request.messages)
         payload: dict[str, Any] = {
             "model": str(getattr(route, "effective_model", "") or ""),
             "input": self._encode_messages(request),
@@ -234,31 +237,17 @@ class ResponsesWireAdapter:
             item.item_id: item
             for item in (request.replay_state.opaque_items if request.replay_state is not None else ())
         }
-        encoded: list[Any] = []
-        has_explicit_replay_part = any(
-            isinstance(part, ReasoningReplayPart)
+        referenced_replay_ids = {
+            part.replay_item_id
             for message in request.messages
             for part in message.parts
-        )
-        automatic_replay_items = (
-            [_decode_replay_item(item) for item in request.replay_state.opaque_items]
-            if request.replay_state is not None
-            and request.replay_state.response_id
-            and not has_explicit_replay_part
-            else []
-        )
-        automatic_replay_inserted = False
+            if isinstance(part, ReasoningReplayPart)
+        }
+        if any(item_id not in referenced_replay_ids for item_id in replay_by_id):
+            raise ValueError("opaque replay items must be explicitly referenced by ReasoningReplayPart")
+        encoded: list[Any] = []
         for message in request.messages:
-            if (
-                automatic_replay_items
-                and not automatic_replay_inserted
-                and any(isinstance(part, ToolCallPart) for part in message.parts)
-            ):
-                encoded.extend(automatic_replay_items)
-                automatic_replay_inserted = True
             encoded.extend(self._encode_message(message, replay_by_id=replay_by_id))
-        if automatic_replay_items and not automatic_replay_inserted:
-            encoded[0:0] = automatic_replay_items
         return encoded
 
     def _encode_message(
@@ -303,6 +292,8 @@ class ResponsesWireAdapter:
                 if replay_item is None:
                     raise ValueError(f"reasoning replay item `{part.replay_item_id}` is unavailable")
                 encoded.append(_decode_replay_item(replay_item))
+            elif isinstance(part, ReasoningTextPart):
+                raise ValueError("standard Responses cannot encode plain reasoning text")
         flush_content()
         return encoded
 
