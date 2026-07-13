@@ -673,7 +673,7 @@ export function classifyConversation(conversation: ConversationSummary): Convers
 
 export function conversationGroupLabel(groupKey: ConversationIndexGroupKey, lang: "zh" | "en") {
   const labels: Record<ConversationIndexGroupKey, { zh: string; en: string }> = {
-    user: { zh: "用户会话", en: "User chats" },
+    user: { zh: "普通会话", en: "Regular chats" },
     group: { zh: "群聊", en: "Group chats" },
     personalAgent: { zh: "个人 Agent 会话", en: "Personal agent chats" },
     research: { zh: "科研助手", en: "Research agents" },

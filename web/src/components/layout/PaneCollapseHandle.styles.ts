@@ -1,6 +1,6 @@
 const paneHandleClass = "relative";
 const paneToggleButtonClass = [
-  "absolute left-1/2 top-1/2 z-[2] !h-6 !w-3.5 !min-w-0 !aspect-auto -translate-x-1/2 -translate-y-1/2 px-0",
+  "absolute left-1/2 top-1/2 z-[2] !h-7 !w-7 !max-w-none !min-w-0 !aspect-auto -translate-x-1/2 -translate-y-1/2 px-0",
   "rounded-full border border-[color-mix(in_srgb,var(--vui-border-subtle)_36%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-glass)_58%,transparent)] text-vui-fg-secondary shadow-[var(--vui-shadow-hairline)] backdrop-blur-[2px]",
   "transition-[border-color,background-color,color,box-shadow,opacity] duration-150 opacity-70",
   "hover:opacity-100 hover:border-[color-mix(in_srgb,var(--accent-warm)_34%,transparent)] hover:bg-[color-mix(in_srgb,var(--vui-control-muted)_76%,transparent)] hover:text-[var(--accent-warm-2)] hover:shadow-[var(--vui-shadow-soft)]",
