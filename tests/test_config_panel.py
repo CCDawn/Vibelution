@@ -293,15 +293,16 @@ def _set_subagent_explorer_deepseek(public_config: dict) -> None:
     }
 
 
-def test_public_llm_shape_is_inline_provider_only():
+def test_public_llm_shape_is_schema_v2_provider_scoped():
     public_config = load_public_config()
     llm = public_config["llm"]
 
-    assert "providers" not in llm
-    assert all("provider" in profile or "model_ref" in profile for profile in llm["profiles"].values())
+    assert llm["schema_version"] == 2
+    assert isinstance(llm["providers"], dict)
+    assert llm["providers"]
+    assert all(isinstance(provider.get("models"), dict) for provider in llm["providers"].values())
+    assert all("model_ref" in profile for profile in llm["profiles"].values())
     assert all("provider_id" not in profile for profile in llm["profiles"].values())
-    assert all("provider" in item for item in llm["model_library"].values())
-    assert all("provider_id" not in item for item in llm["model_library"].values())
 
 
 def test_render_panel_html_uses_inline_provider_controls():

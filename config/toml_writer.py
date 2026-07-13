@@ -31,6 +31,11 @@ def _format_scalar(value: Any) -> str:
     return f'"{text}"'
 
 
+def format_toml_scalar(value: Any) -> str:
+    """Format one bounded TOML scalar without serializing a full document."""
+    return _format_scalar(value)
+
+
 def _format_string_list(values: List[str], indent: int = 0) -> str:
     if not values:
         return "[]"
@@ -110,6 +115,16 @@ def _write_table(lines: List[str], table_path: List[str], data: Dict[str, Any], 
             for item_key, item_value in item_nested:
                 lines.append("")
                 _write_table(lines, [*table_path, str(key), str(item_key)], item_value, indent=indent)
+
+
+def dumps_toml_table(table_path: Iterable[str], data: Dict[str, Any]) -> str:
+    """Serialize one table fragment for source-preserving document patches."""
+    parts = [str(part) for part in table_path]
+    if not parts:
+        raise ValueError("table_path is required")
+    lines: List[str] = []
+    _write_table(lines, parts, data)
+    return "\n".join(lines).rstrip() + "\n"
 
 
 def dumps_public_config(data: Dict[str, Any], header_lines: Iterable[str] | None = None) -> str:
