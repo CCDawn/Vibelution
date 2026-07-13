@@ -13391,13 +13391,13 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                 mental_override_configurer = getattr(runtime_agent, "set_mental_model_enabled_override", None)
                 if callable(mental_override_configurer):
                     mental_override_configurer(mental_model_enabled)
-                restore = getattr(runtime_agent, "seed_chat_history", None)
                 static_runtime_context_seed = getattr(runtime_agent, "seed_static_runtime_context", None)
                 runtime_context_seed = getattr(runtime_agent, "seed_runtime_context", None)
                 volatile_runtime_context_seed = getattr(runtime_agent, "seed_volatile_runtime_context", None)
                 stop_configurer = getattr(runtime_agent, "set_turn_interrupt_checker", None)
                 if callable(stop_configurer):
                     stop_configurer(lambda: _get_turn_control_stop_reason(turn_control))
+                history_assembly_started_at = _perf_counter()
                 raw_history_messages = list(context.get("history_messages") or [])
                 seedable_history_messages = _history_messages_for_agent_seed(
                     raw_history_messages,
@@ -13422,6 +13422,7 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                     tool_result_replacement_char_limit=900 if history_seed_profile == "agent_inbox" else 12_000,
                 )
                 history_messages = context_assembly.history_messages
+                history_assembly_ms = _elapsed_ms(history_assembly_started_at)
                 full_history_message_count = len(seedable_history_messages)
                 runtime_context_segments = (
                     _session_context_segments_without_prompt_template(
@@ -13460,15 +13461,10 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                 active_skill_context_included = False
                 dynamic_runtime_context_included = False
                 seed_started_at = _perf_counter()
-                history_seed_ms = 0
                 static_runtime_context_seed_ms = 0
                 runtime_context_seed_ms = 0
                 skill_context_seed_ms = 0
                 active_skill_context_seed_ms = 0
-                if callable(restore) and history_messages:
-                    stage_started_at = _perf_counter()
-                    restore(history_messages)
-                    history_seed_ms = _elapsed_ms(stage_started_at)
                 host_context_marker = getattr(runtime_agent, "mark_runtime_context_seeded_by_host", None)
                 host_seeded_agent_context = False
                 if static_runtime_context_block:
@@ -13515,13 +13511,13 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                     active_skill_context_seed_ms = _elapsed_ms(active_skill_stage_started_at)
                 _record_session_turn_lifecycle_event(
                     session_id,
-                    "history_seeded",
+                    "history_assembled",
                     turn_id=turn_id,
                     outcome="running",
                     fields={
                         "rawHistoryMessageCount": len(list(context.get("history_messages") or [])),
                         "fullSeedableHistoryMessageCount": full_history_message_count,
-                        "seededHistoryMessageCount": len(history_messages),
+                        "assembledHistoryMessageCount": len(history_messages),
                         "historyLedgerEventCount": len(context_assembly.events),
                         "historyIncludedEventCount": len(context_assembly.included_event_ids),
                         "historyOmittedEventCount": context_assembly.omitted_event_count,
@@ -13569,11 +13565,11 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                         "lightweightChatPayload": lightweight_chat_payload,
                         "lightweightChatPayloadReason": lightweight_chat_payload_reason,
                         "disableTools": lightweight_chat_payload,
-                        "restoreAvailable": callable(restore),
+                        "restoreAvailable": callable(getattr(runtime_agent, "seed_chat_history", None)),
                         "staticRuntimeContextSeedAvailable": callable(static_runtime_context_seed),
                         "runtimeContextSeedAvailable": callable(runtime_context_seed),
                         "volatileRuntimeContextSeedAvailable": callable(volatile_runtime_context_seed),
-                        "historySeedMs": history_seed_ms,
+                        "historyAssemblyMs": history_assembly_ms,
                         "staticRuntimeContextSeedMs": static_runtime_context_seed_ms,
                         "runtimeContextSeedMs": runtime_context_seed_ms,
                         "skillContextSeedMs": skill_context_seed_ms,
@@ -14116,13 +14112,15 @@ def _run_session_continuation_loop(
             session_id,
             turn_id=getattr(turn_control, "turn_id", ""),
         )
-        with prompt_cache_partition_scope(prompt_cache_partition):
-            result = run_existing_agent_single_turn(
-                agent,
-                initial_prompt=prompt,
-                attachments=turn_attachments,
-                disable_tools=disable_tools,
-            )
+        result = run_existing_agent_single_turn(
+            agent,
+            initial_prompt=prompt,
+            attachments=turn_attachments,
+            disable_tools=disable_tools,
+            prompt_cache_partition=prompt_cache_partition,
+            turn_identity=str(getattr(turn_control, "turn_id", "") or "").strip(),
+            chat_history=history_messages if turn_index == 1 else None,
+        )
         result = _attach_session_prompt_cache_metadata(
             result,
             prompt_cache_scope=prompt_cache_scope,
