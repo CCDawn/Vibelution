@@ -1472,7 +1472,11 @@ def list_llm_model_options(public_config: dict) -> list[dict[str, object]]:
                             "provider": provider,
                             "provider_id": str(provider_id),
                             "contextWindow": resolve_llm_model_context_window(details_source, provider),
-                            "provider_kind": _provider_kind(provider),
+                            "provider_kind": (
+                                service_class
+                                or str(raw_provider.get("driver") or "").strip()
+                                or _provider_kind(provider)
+                            ),
                             "provider_api": str(provider.get("api") or "").strip().lower().replace("_", "-"),
                             "model": model,
                             "label": str(raw_model.get("label") or model).strip() or model,

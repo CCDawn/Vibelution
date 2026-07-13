@@ -1142,6 +1142,15 @@ def _default_completion_backend(payload: Dict[str, Any]) -> Any:
     return completion(**payload)
 
 
+def _litellm_responses_api_base(value: Any) -> str:
+    """Translate the internal final Responses endpoint to LiteLLM's service-root contract."""
+
+    endpoint = str(value or "").strip().rstrip("/")
+    if endpoint.lower().endswith("/responses"):
+        return endpoint[: -len("/responses")]
+    return endpoint
+
+
 def _default_responses_backend(payload: Dict[str, Any]) -> Any:
     _raise_if_llm_cancelled()
     try:
@@ -1155,7 +1164,7 @@ def _default_responses_backend(payload: Dict[str, Any]) -> Any:
     _ensure_no_proxy_for_local_base_url(payload.get("base_url"))
     request_payload = dict(payload)
     if request_payload.get("base_url") and not request_payload.get("api_base"):
-        request_payload["api_base"] = request_payload["base_url"]
+        request_payload["api_base"] = _litellm_responses_api_base(request_payload["base_url"])
     request_payload.pop("base_url", None)
     return responses(**request_payload)
 
