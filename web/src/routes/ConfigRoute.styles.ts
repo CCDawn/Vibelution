@@ -449,6 +449,8 @@ const styles = {
     "vui-routes-configroute treeToggleLabel [display:flex] [align-items:center] [gap:6px] [min-width:0] [&>_div]:[display:grid] [&>_div]:[gap:2px] [&>_div]:[min-width:0]",
   treeWide:
     "vui-routes-configroute treeWide [grid-column:1/-1]",
+  toolingMetaPanel:
+    "vui-routes-configroute toolingMetaPanel [display:flex] [align-items:center] [justify-content:space-between] [gap:12px] [min-width:0] [&_[data-vui=status-strip]]:[flex:1_1_auto]",
   userProfileAvatarFields:
     "vui-routes-configroute userProfileAvatarFields [display:grid] [gap:6px] [min-width:0] [grid-template-columns:minmax(0,0.4fr)_minmax(0,0.6fr)] [&_.treeFieldCardView_.treeHint]:[display:none] max-[900px]:[grid-template-columns:1fr]",
   userProfileAvatarGroup:

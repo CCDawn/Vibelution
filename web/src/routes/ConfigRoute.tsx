@@ -2256,6 +2256,9 @@ export function ConfigRoute() {
   const leaveGuardOpen = leaveBlocker.state === "blocked";
   const leaveGuardSaveLabel = busyAction === copy.leaveGuardSaving ? copy.leaveGuardSaving : copy.leaveGuardSave;
   const sidebarNextStepLabel = hasEditorChanges ? copy.settingsNeedsCheck : hasPendingApply ? copy.settingsCanSave : copy.settingsSynced;
+  const launcherConfig = asRecord(draftConfig?.launcher);
+  const developerModeConfig = asRecord(launcherConfig.developer_mode);
+  const developerModeReadonlyLabel = developerModeConfig.enabled ? copy.developerModeEnabled : copy.developerModeDisabled;
 
   function updateSectionUiState(sectionId: string, nextState: ConfigSectionUiState) {
     setSectionUiState((current) => ({ ...current, [sectionId]: nextState }));
@@ -3434,16 +3437,6 @@ export function ConfigRoute() {
             copy={copy}
             eyebrow={sectionTitle("overview", copy.sourceTitle)}
             workspace={workspace}
-            hasPendingApply={hasPendingApply}
-            busyAction={busyAction}
-            canRestoreEditorText={canRestoreEditorText}
-            onReloadWorkspace={() => {
-              void reloadWorkspace();
-            }}
-            onOpenEnvironment={() => {
-              void handleOpenEnvironment();
-            }}
-            onRestoreEditorText={restoreEditorText}
           />
         ) : null}
 
@@ -3749,6 +3742,32 @@ export function ConfigRoute() {
           </div>
         ) : null}
 
+        {activePage?.id === "tooling-access" ? (
+          <VSurface as="section" className={styles.toolingMetaPanel} padding="compact" tone="row">
+            <VStatusStrip
+              aria-label={copy.developerModeReadonly}
+              items={[
+                { label: copy.runtimeProfile, value: workspace.runtimeProfile, tone: "info" },
+                { label: copy.defaultMode, value: workspace.defaultMode },
+                { label: copy.defaultRoute, value: workspace.defaultRoute },
+                { label: copy.intakeMode, value: intakeLabel(asRecord(draftConfig.evolution).intake_mode as string) },
+                { label: copy.developerModeReadonly, value: developerModeReadonlyLabel },
+              ]}
+            />
+            <VButton
+              type="button"
+              className={styles.actionButton}
+              isDisabled={Boolean(busyAction)}
+              title={copy.openEnvironmentHint}
+              onClick={() => {
+                void handleOpenEnvironment();
+              }}
+            >
+              {busyAction === copy.openEnvironmentPending ? copy.openEnvironmentPending : copy.openEnvironment}
+            </VButton>
+          </VSurface>
+        ) : null}
+
         {workspace.schemaVersion === 2 && isSectionVisible("models") ? null : activeEditorSections.map((section) => (
           <ConfigSectionEditor
             key={section.id}
@@ -3770,6 +3789,8 @@ export function ConfigRoute() {
           <ConfigDraftPanel
             copy={copy}
             eyebrow={sectionTitle("draft", copy.draftTitle)}
+            configPath={workspace.configPath}
+            rawToml={workspace.rawToml}
             jsonText={jsonText}
             hasEditorChanges={hasEditorChanges}
             canCheckCurrentChanges={canCheckCurrentChanges}
