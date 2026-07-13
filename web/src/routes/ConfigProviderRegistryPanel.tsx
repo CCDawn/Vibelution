@@ -19,6 +19,7 @@ import {
 import type {
   ConfigCapabilityObservation,
   ConfigCatalogModel,
+  ConfigLlmTestResult,
   ConfigProviderMergePreview,
   ConfigProviderMergeResult,
 } from "../api/types";
@@ -162,6 +163,12 @@ export type ProviderModelsTabProps = {
   onFilterChange: (filter: ProviderModelFilter) => void;
   onUnpin: (modelRef: string) => void;
   onTestModel: (modelRef: string) => void;
+  reasoningFeedbackByModelRef?: Record<string, {
+    phase: "busy" | "success" | "error";
+    values: string[];
+    message: string;
+  }>;
+  onProbeReasoning?: (modelRef: string) => void;
 };
 
 export function ProviderModelsTab({
@@ -174,6 +181,8 @@ export function ProviderModelsTab({
   onFilterChange,
   onUnpin,
   onTestModel,
+  reasoningFeedbackByModelRef = {},
+  onProbeReasoning,
 }: ProviderModelsTabProps) {
   const summary = useMemo(() => summarizeProviderModels(provider.models), [provider.models]);
   const visibleModels = useMemo(
@@ -269,8 +278,34 @@ export function ProviderModelsTab({
                 disabled,
               );
               const testAvailable = canTestProviderModel(model);
+              const reasoningFeedback = reasoningFeedbackByModelRef[model.modelRef];
+              const reasoningValues = reasoningFeedback?.phase === "success"
+                ? reasoningFeedback.values
+                : model.reasoningEffortValues ?? [];
+              const reasoningVerified = reasoningFeedback?.phase === "success"
+                || model.reasoningVerificationStatus === "verified";
+              const reasoningProbeAvailable = (
+                provider.defaultProtocol === "responses"
+                && ["observed", "pinned"].includes(model.availability)
+                && !reasoningVerified
+                && !provider.refreshDue
+              );
               return (
                 <VActionGroup ariaLabel={`${model.modelRef} 模型操作`}>
+                  {reasoningVerified ? (
+                    <span className={styles.modelActionState} data-model-reasoning="verified">
+                      推理 {reasoningValues.join(" / ")} 已验证
+                    </span>
+                  ) : reasoningProbeAvailable ? (
+                    <VButton
+                      density="compact"
+                      isDisabled={disabled || reasoningFeedback?.phase === "busy"}
+                      title="分别发送 low/high 两次最小 Responses 请求；全部成功才保存能力证据。"
+                      onPress={() => onProbeReasoning?.(model.modelRef)}
+                    >
+                      {reasoningFeedback?.phase === "busy" ? "验证推理中…" : "验证推理 low / high"}
+                    </VButton>
+                  ) : null}
                   {testAvailable ? (
                     <VButton
                       density="compact"
@@ -296,6 +331,9 @@ export function ProviderModelsTab({
                       {action.label}{action.kind === "in_use" ? ` · ${action.referenceCount} 个引用` : ""}
                     </span>
                   )}
+                  {reasoningFeedback?.phase === "error" ? (
+                    <small className={styles.critical} role="alert">{reasoningFeedback.message}</small>
+                  ) : null}
                 </VActionGroup>
               );
             },
@@ -392,6 +430,11 @@ export function ConfigProviderRegistryPanel({
   const [mergeConfirmed, setMergeConfirmed] = useState(false);
   const [mergeBusy, setMergeBusy] = useState(false);
   const [mergeError, setMergeError] = useState("");
+  const [reasoningFeedbackByModelRef, setReasoningFeedbackByModelRef] = useState<Record<string, {
+    phase: "busy" | "success" | "error";
+    values: string[];
+    message: string;
+  }>>({});
   const provider = rows.find((row) => row.providerId === selectedProviderId) ?? rows[0];
   const mergeCandidate = useMemo(
     () => deriveProviderMergeCandidate(rows, provider?.providerId ?? ""),
@@ -415,7 +458,43 @@ export function ConfigProviderRegistryPanel({
     setMergeResult(null);
     setMergeConfirmed(false);
     setMergeError("");
+    setReasoningFeedbackByModelRef({});
   }, [provider?.providerId]);
+
+  const probeReasoning = async (modelRef: string) => {
+    setReasoningFeedbackByModelRef((current) => ({
+      ...current,
+      [modelRef]: { phase: "busy", values: [], message: "正在验证 low/high…" },
+    }));
+    try {
+      const result = await fetchJson<ConfigLlmTestResult>("/api/config/test-llm", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ modelId: modelRef, capability: "reasoning_effort" }),
+      });
+      if (!result.ok || !result.reasoning_contract_persisted) {
+        throw new Error(result.message || "推理能力验证失败");
+      }
+      const values = result.reasoning_effort_values ?? [];
+      setReasoningFeedbackByModelRef((current) => ({
+        ...current,
+        [modelRef]: {
+          phase: "success",
+          values,
+          message: `已验证并保存 ${values.join(" / ")}`,
+        },
+      }));
+    } catch (error) {
+      setReasoningFeedbackByModelRef((current) => ({
+        ...current,
+        [modelRef]: {
+          phase: "error",
+          values: [],
+          message: error instanceof Error ? error.message : String(error),
+        },
+      }));
+    }
+  };
 
   const previewMerge = async () => {
     if (!mergeCandidate) return;
@@ -598,6 +677,8 @@ export function ConfigProviderRegistryPanel({
                   onFilterChange={setModelFilter}
                   onUnpin={onUnpin}
                   onTestModel={onTestModel}
+                  reasoningFeedbackByModelRef={reasoningFeedbackByModelRef}
+                  onProbeReasoning={(modelRef) => void probeReasoning(modelRef)}
                 />
               ) : null}
               {selectedTab === "protocols" ? <ProtocolsTab provider={provider} /> : null}

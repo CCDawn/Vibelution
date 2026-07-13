@@ -39,6 +39,7 @@ from config.model_catalog import (
     CAPABILITY_VALUES,
     load_model_catalog_state,
     provider_catalog_refresh_due,
+    record_model_reasoning_contract,
     record_model_verification,
     save_model_catalog_state,
 )
@@ -221,6 +222,8 @@ def _normalize_llm_test_capability(capability: str | None) -> str:
         return "text"
     if normalized in {"image", "image_input", "vision", "multimodal"}:
         return "image_input"
+    if normalized in {"reasoning", "reasoning_effort", "thinking_effort"}:
+        return "reasoning_effort"
     raise ValueError(f"Unsupported LLM test capability: {capability}")
 
 
@@ -800,6 +803,48 @@ def _v2_model_ref_test_target(
     route_id = _model_probe_route_id(normalized_ref)
     probe_config = copy.deepcopy(public_config)
     llm = probe_config.setdefault("llm", {})
+    provider_id, model_key = split_model_ref(normalized_ref)
+    providers = llm.setdefault("providers", {})
+    provider = providers.get(provider_id) if isinstance(providers, dict) else None
+    if not isinstance(provider, dict):
+        raise ValueError(f"unknown LLM provider: {provider_id}")
+    models = provider.setdefault("models", {})
+    if not isinstance(models, dict):
+        raise ValueError("provider models must be an object")
+    if model_key not in models:
+        state = load_model_catalog_state()
+        catalog_provider = state.get("providers", {}).get(provider_id, {})
+        catalog_provider = catalog_provider if isinstance(catalog_provider, dict) else {}
+        catalog_model = catalog_provider.get("models", {}).get(model_key, {})
+        catalog_model = catalog_model if isinstance(catalog_model, dict) else {}
+        availability = str(catalog_model.get("availability") or "").strip().lower()
+        current_fingerprint = provider_discovery_fingerprint(provider)
+        catalog_fingerprint = str(catalog_provider.get("providerFingerprint") or "")
+        if (
+            availability != "observed"
+            or bool(catalog_provider.get("catalogStale"))
+            or (catalog_fingerprint and catalog_fingerprint != current_fingerprint)
+        ):
+            raise ValueError(f"model is not a current observed Provider model: {normalized_ref}")
+        upstream_id = str(catalog_model.get("upstreamId") or "").strip()
+        if not upstream_id:
+            raise ValueError(f"observed model is missing upstream id: {normalized_ref}")
+        protocols = provider.get("protocols") if isinstance(provider.get("protocols"), dict) else {}
+        models[model_key] = {
+            "upstream_id": upstream_id,
+            "label": str(catalog_model.get("label") or upstream_id),
+            "enabled": True,
+            "wire_protocol": str(protocols.get("default") or ""),
+            "interaction_contract": "tool_chat",
+            "defaults": {
+                "temperature": 0.3,
+                "max_output_tokens": 32,
+                "timeout": 60,
+                "connect_timeout": 10,
+                "streaming": False,
+                "tool_calling_mode": "auto",
+            },
+        }
     profiles = llm.setdefault("profiles", {})
     if not isinstance(profiles, dict):
         raise ValueError("llm.profiles must be an object")
@@ -890,6 +935,47 @@ def _persist_saved_model_verification(
     return True
 
 
+def _persist_saved_model_reasoning_contract(
+    public_config: dict[str, Any],
+    draft_meta: dict | None,
+    model_ref: str,
+    *,
+    checked_at: str,
+    effort_values: list[str],
+    default_effort: str,
+    adapter: str,
+    mapping: dict[str, str],
+    ok: bool,
+    error_type: str = "",
+) -> bool:
+    llm = public_config.get("llm", {}) if isinstance(public_config, dict) else {}
+    if int(llm.get("schema_version") or 1) != 2:
+        return False
+    if _llm_test_config_scope(public_config, draft_meta) != "saved":
+        return False
+    try:
+        provider_id, _model_key = split_model_ref(model_ref)
+        provider = llm.get("providers", {}).get(provider_id, {})
+        state = load_model_catalog_state()
+        updated = record_model_reasoning_contract(
+            state,
+            model_ref=model_ref,
+            provider_fingerprint=provider_discovery_fingerprint(provider),
+            checked_at=checked_at,
+            effort_values=effort_values,
+            default_effort=default_effort,
+            adapter=adapter,
+            mapping=mapping,
+            source="runtime_probe",
+            ok=ok,
+            error_type=error_type,
+        )
+        save_model_catalog_state(updated)
+    except (OSError, ValueError):
+        return False
+    return True
+
+
 def _apply_image_input_capability_details_to_runtime_view(
     public_config: dict[str, Any],
     model_id: str,
@@ -965,6 +1051,115 @@ def _run_bounded_llm_runtime_probe(provider: ProviderConfig, profile: LLMProfile
     return value if isinstance(value, dict) else {"ok": False, "message": str(value)}
 
 
+def _run_draft_test_llm_reasoning_effort(
+    public_config: dict[str, Any],
+    *,
+    model_id: str,
+    route_id: str,
+    profile: LLMProfile,
+    provider: ProviderConfig,
+    api_key: str | None,
+    api_key_source: str,
+    draft_meta: dict | None,
+) -> dict[str, Any]:
+    if str(profile.transport or "").strip().lower() != "responses":
+        raise ValueError("reasoning effort verification requires the Responses transport")
+    effort_values = ["low", "high"]
+    default_effort = "high"
+    adapter = "reasoning_object"
+    mapping = {value: value for value in effort_values}
+    results: list[dict[str, Any]] = []
+    failure: dict[str, Any] | None = None
+    for effort in effort_values:
+        probe_profile = profile.model_copy(deep=True)
+        probe_profile.reasoning_effort_values = list(effort_values)
+        probe_profile.default_reasoning_effort = default_effort
+        probe_profile.reasoning_effort_adapter = adapter
+        probe_profile.reasoning_effort_map = dict(mapping)
+        probe_profile.reasoning_effort = effort
+        try:
+            result = _run_bounded_llm_runtime_probe(provider, probe_profile, api_key)
+        except Exception as exc:
+            result = {
+                "ok": False,
+                "message": public_config_module.redact_llm_probe_error(str(exc)),
+                "error": type(exc).__name__,
+            }
+        results.append({"effort": effort, "ok": bool(result.get("ok"))})
+        if not bool(result.get("ok")):
+            failure = result
+            break
+
+    checked_at = datetime.now(timezone.utc).isoformat()
+    ok = failure is None and len(results) == len(effort_values)
+    verification = _model_verification_summary(
+        {"ok": ok, "message": "ok" if ok else str((failure or {}).get("message") or "reasoning probe failed")}
+    )
+    verification["checked_at"] = checked_at
+    verification_persisted = _persist_saved_model_verification(
+        public_config,
+        draft_meta,
+        model_id,
+        verification,
+    )
+    reasoning_persisted = _persist_saved_model_reasoning_contract(
+        public_config,
+        draft_meta,
+        model_id,
+        checked_at=checked_at,
+        effort_values=effort_values,
+        default_effort=default_effort,
+        adapter=adapter,
+        mapping=mapping,
+        ok=ok,
+        error_type=verification["error_type"],
+    )
+    _record_config_scene_event(
+        "llm_test",
+        "config.llm_reasoning_effort_test.completed",
+        message="Model reasoning effort verification completed.",
+        level="info" if ok else "warning",
+        outcome="succeeded" if ok else "failed",
+        fields={
+            "routeId": route_id,
+            "modelId": model_id,
+            "providerId": provider.provider_id,
+            "configScope": _llm_test_config_scope(public_config, draft_meta),
+            "effortValues": effort_values,
+            "verifiedCount": sum(1 for item in results if item["ok"]),
+            "errorType": verification["error_type"],
+        },
+        lifecycle=True,
+    )
+    return {
+        "ok": ok,
+        "message": "reasoning low/high verified" if ok else "reasoning effort verification failed",
+        "route_id": route_id,
+        "model_id": model_id,
+        "provider_id": provider.provider_id,
+        "provider_kind": provider.kind,
+        "base_url": provider.base_url,
+        "model": profile.model,
+        "transport": profile.transport,
+        "contract": profile.contract,
+        "api_key_source": api_key_source,
+        "config_scope": _llm_test_config_scope(public_config, draft_meta),
+        "requires_api_key": bool(provider.requires_api_key),
+        "capability": "reasoning_effort",
+        "capability_status": "supported" if ok else "unknown",
+        "reasoning_effort_values": effort_values if ok else [],
+        "default_reasoning_effort": default_effort if ok else "",
+        "reasoning_adapter": adapter if ok else "none",
+        "reasoning_probe_results": results,
+        "reasoning_contract_persisted": reasoning_persisted,
+        "verification_status": verification["status"],
+        "verification_checked_at": checked_at,
+        "verification_error_type": verification["error_type"],
+        "verification_http_status": verification["http_status"],
+        "verification_persisted": verification_persisted,
+    }
+
+
 def _run_draft_test_llm_connection(
     public_config: dict[str, Any],
     *,
@@ -988,6 +1183,17 @@ def _run_draft_test_llm_connection(
             api_key,
             api_key_source,
             draft_meta,
+        )
+    if normalized_capability == "reasoning_effort":
+        return _run_draft_test_llm_reasoning_effort(
+            public_config,
+            model_id=model_id,
+            route_id=route_id,
+            profile=profile,
+            provider=provider,
+            api_key=api_key,
+            api_key_source=api_key_source,
+            draft_meta=draft_meta,
         )
     try:
         result = _run_bounded_llm_runtime_probe(provider, profile, api_key)
@@ -1430,6 +1636,41 @@ def _project_catalog_verification(value: Any) -> dict[str, Any]:
     }
 
 
+def _project_catalog_reasoning_contract(
+    value: Any,
+    *,
+    provider_fingerprint: str,
+) -> dict[str, Any]:
+    raw = value if isinstance(value, dict) else {}
+    status = str(raw.get("verificationStatus") or "unverified").strip().lower()
+    if status not in {"unverified", "verified", "failed", "stale"}:
+        status = "unverified"
+    if status == "verified" and str(raw.get("providerFingerprint") or "") != provider_fingerprint:
+        status = "stale"
+    raw_values = raw.get("effortValues") if isinstance(raw.get("effortValues"), list) else []
+    values = [
+        str(item).strip().lower()[:16]
+        for item in raw_values[:10]
+        if str(item).strip()
+    ] if status == "verified" else []
+    return {
+        "reasoningVerificationStatus": status,
+        "reasoningEffortValues": values,
+        "defaultReasoningEffort": (
+            str(raw.get("default") or "").strip().lower()[:16]
+            if status == "verified"
+            else ""
+        ),
+        "reasoningAdapter": (
+            str(raw.get("adapter") or "none").strip().lower()[:32]
+            if status == "verified"
+            else "none"
+        ),
+        "reasoningCapabilitySource": str(raw.get("source") or "")[:32],
+        "reasoningCheckedAt": str(raw.get("checkedAt") or "")[:64],
+    }
+
+
 def summarize_model_catalog(
     state: dict[str, Any],
     *,
@@ -1478,6 +1719,12 @@ def summarize_model_catalog(
             pinned_model = pinned_model if isinstance(pinned_model, dict) else {}
             catalog_model = catalog_models.get(model_key, {})
             catalog_model = catalog_model if isinstance(catalog_model, dict) else {}
+            try:
+                current_provider_fingerprint = (
+                    provider_discovery_fingerprint(configured) if configured else ""
+                )
+            except ValueError:
+                current_provider_fingerprint = ""
             protocol_status = (
                 _catalog_protocol_diagnostic(configured, pinned_model)
                 if pinned_model
@@ -1510,6 +1757,10 @@ def summarize_model_catalog(
                     catalog_model.get("capabilities")
                 ),
                 **_project_catalog_verification(catalog_model.get("verification")),
+                **_project_catalog_reasoning_contract(
+                    catalog_model.get("reasoningContract"),
+                    provider_fingerprint=current_provider_fingerprint,
+                ),
             }
         status = provider_protocol_status or str(
             catalog.get("status") or "not_discovered"
@@ -2103,7 +2354,11 @@ def run_draft_llm_test(
     capability: str | None = None,
 ) -> dict[str, Any]:
     old_public = _with_config_workspace_defaults(load_public_config())
-    submitted = _prepare_submitted_public_config(public_config, old_public)
+    submitted = (
+        copy.deepcopy(old_public)
+        if public_config is None or public_config == {}
+        else _prepare_submitted_public_config(public_config, old_public)
+    )
     validate_llm_public_config(submitted)
     normalized_model_id = str(model_id or "").strip()
     normalized_profile_id = str(profile_id or "").strip()

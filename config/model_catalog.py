@@ -52,6 +52,9 @@ _DISCOVERY_ERROR_CATEGORIES = {
 }
 _MAX_WARNINGS = 20
 _MAX_WARNING_KEYS = 20
+_REASONING_EFFORT_VALUES = {"minimal", "low", "medium", "high", "xhigh", "max", "ultra"}
+_REASONING_ADAPTERS = {"reasoning_object", "reasoning_effort", "thinking_toggle"}
+_REASONING_SOURCES = {"runtime_probe", "operator_override"}
 
 
 def empty_model_catalog_state() -> dict[str, Any]:
@@ -403,6 +406,93 @@ def record_model_verification(
     return updated
 
 
+def record_model_reasoning_contract(
+    state: dict[str, Any],
+    *,
+    model_ref: str,
+    provider_fingerprint: str,
+    checked_at: str,
+    effort_values: list[str] | tuple[str, ...],
+    default_effort: str,
+    adapter: str,
+    mapping: dict[str, str],
+    source: str,
+    ok: bool = True,
+    error_type: str = "",
+) -> dict[str, Any]:
+    provider_id, model_key = split_model_ref(model_ref)
+    _parse_utc(checked_at)
+    normalized_source = str(source or "").strip().lower()
+    if normalized_source not in _REASONING_SOURCES:
+        raise ValueError("invalid reasoning contract source")
+    normalized_values: list[str] = []
+    for raw_value in effort_values:
+        value = str(raw_value or "").strip().lower()
+        if value not in _REASONING_EFFORT_VALUES:
+            raise ValueError("invalid reasoning effort value")
+        if value not in normalized_values:
+            normalized_values.append(value)
+    normalized_default = str(default_effort or "").strip().lower()
+    normalized_adapter = str(adapter or "").strip().lower()
+    normalized_mapping = {
+        str(key or "").strip().lower(): str(value or "").strip().lower()
+        for key, value in dict(mapping or {}).items()
+    }
+    if ok:
+        if not normalized_values or normalized_default not in normalized_values:
+            raise ValueError("reasoning contract requires a valid default")
+        if normalized_adapter not in _REASONING_ADAPTERS:
+            raise ValueError("invalid reasoning contract adapter")
+        if set(normalized_mapping) != set(normalized_values):
+            raise ValueError("reasoning contract mapping must cover every effort value")
+        allowed_targets = {"on", "off"} if normalized_adapter == "thinking_toggle" else _REASONING_EFFORT_VALUES
+        if any(target not in allowed_targets for target in normalized_mapping.values()):
+            raise ValueError("invalid reasoning contract mapping target")
+
+    updated = copy.deepcopy(state)
+    providers = updated.setdefault("providers", {})
+    provider = providers.setdefault(
+        provider_id,
+        {
+            "status": "not_discovered",
+            "catalogStale": False,
+            "lastAttemptAt": "",
+            "lastSuccessAt": "",
+            "lastErrorType": "",
+            "models": {},
+            "warnings": [],
+        },
+    )
+    model = provider.setdefault("models", {}).setdefault(
+        model_key,
+        {
+            "upstreamId": model_key,
+            "label": model_key,
+            "availability": "pinned",
+            "capabilities": {},
+        },
+    )
+    contract = {
+        "verificationStatus": "verified" if ok else "failed",
+        "providerFingerprint": str(provider_fingerprint),
+        "checkedAt": str(checked_at),
+        "source": normalized_source,
+    }
+    if ok:
+        contract.update(
+            {
+                "effortValues": normalized_values,
+                "default": normalized_default,
+                "adapter": normalized_adapter,
+                "map": normalized_mapping,
+            }
+        )
+    else:
+        contract["errorType"] = str(error_type or "failed").strip().lower()[:64]
+    model["reasoningContract"] = contract
+    return updated
+
+
 def provider_catalog_refresh_due(
     state: dict[str, Any],
     provider_id: str,
@@ -508,6 +598,7 @@ __all__ = [
     "provider_catalog_refresh_due",
     "record_discovery_failure",
     "record_discovery_success",
+    "record_model_reasoning_contract",
     "record_model_verification",
     "resolve_model_capabilities",
     "save_model_catalog_state",
