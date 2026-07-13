@@ -3018,10 +3018,21 @@ def test_runtime_scene_package_records_conversation_as_child_log(tmp_path, monke
     monkeypatch.setattr(runtime_scene_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(runtime_scene_service, "LAUNCHER_STATE_PATH", launcher_state_path)
 
+    sensitive_content = "帮我分析这个周期日志"
     payload = runtime_scene_service.record_runtime_scene_conversation_event(
         "session-demo",
         "user",
-        "帮我分析这个周期日志",
+        sensitive_content,
+        message={
+            "id": "message-demo",
+            "role": "user",
+            "content": sensitive_content,
+            "thought": "不应进入诊断包的思考内容",
+            "metadata": {
+                "turnId": "turn-demo",
+                "clientSubmissionId": "submission-demo",
+            },
+        },
         event="user_message",
         status="running",
         tool_calls=[{"name": "inspect_logs", "status": "done", "summary": "read package"}],
@@ -3030,11 +3041,28 @@ def test_runtime_scene_package_records_conversation_as_child_log(tmp_path, monke
     assert payload["accepted"] is True
     conversation_log = scene_dir / "conversations" / "session-demo.jsonl"
     assert conversation_log.exists()
-    assert "帮我分析这个周期日志" in conversation_log.read_text(encoding="utf-8")
+    conversation_text = conversation_log.read_text(encoding="utf-8")
+    assert sensitive_content not in conversation_text
+    assert "不应进入诊断包的思考内容" not in conversation_text
+    conversation_event = json.loads(conversation_text)
+    assert conversation_event["content"] == ""
+    assert conversation_event["content_length"] == len(sensitive_content)
+    assert conversation_event["content_redacted"] is True
+    assert conversation_event["message"] == {
+        "id": "message-demo",
+        "role": "user",
+        "metadata": {
+            "turnId": "turn-demo",
+            "clientSubmissionId": "submission-demo",
+        },
+    }
     assert (scene_dir / "agent" / "turns.jsonl").exists()
     assert (scene_dir / "agent" / "tool_calls.jsonl").exists()
     timeline_text = (scene_dir / "timeline.jsonl").read_text(encoding="utf-8")
     assert "conversation.user_message" in timeline_text
+    assert sensitive_content not in timeline_text
+    assert "contentPreview" not in timeline_text
+    assert sensitive_content not in (scene_dir / "agent" / "turns.jsonl").read_text(encoding="utf-8")
 
     detail_response = client.get("/api/logs/runtime-scenes/scene-chat")
     assert detail_response.status_code == 200

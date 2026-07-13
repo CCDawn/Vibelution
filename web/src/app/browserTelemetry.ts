@@ -129,7 +129,18 @@ export function postBrowserTelemetry(
     return;
   }
 
-  const body = JSON.stringify(payload);
+  const clientOccurredAt = new Date().toISOString();
+  const clientMonotonicMs = typeof performance === "undefined" || typeof performance.now !== "function"
+    ? Date.now()
+    : performance.now();
+  const body = JSON.stringify({
+    ...payload,
+    fields: {
+      ...(payload.fields ?? {}),
+      clientOccurredAt,
+      clientMonotonicMs,
+    },
+  });
   void getControlToken()
     .then((control) =>
       fetch(TELEMETRY_ENDPOINT, {
