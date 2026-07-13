@@ -2380,5 +2380,28 @@ def test_semantic_failure_return_publishes_tool_error_event():
     assert error_events[-1]["result"] == result
 
 
+def test_tool_events_preserve_call_id():
+    executor = ToolExecutor()
+    bus = get_event_bus()
+    start_events = []
+    success_events = []
+    start_callback_id = "test_call_identity_start_event"
+    success_callback_id = "test_call_identity_success_event"
+    bus.subscribe(EventNames.TOOL_START, lambda event: start_events.append(event.data), callback_id=start_callback_id)
+    bus.subscribe(EventNames.TOOL_SUCCESS, lambda event: success_events.append(event.data), callback_id=success_callback_id)
+    executor.register_tool("call_identity_probe_tool", lambda: "ok", timeout=5)
+
+    try:
+        result, action = executor.execute("call_identity_probe_tool", {}, tool_call_id="call-identity")
+    finally:
+        bus.unsubscribe_by_id(start_callback_id)
+        bus.unsubscribe_by_id(success_callback_id)
+
+    assert result == "ok"
+    assert action is None
+    assert start_events[-1]["callId"] == "call-identity"
+    assert success_events[-1]["callId"] == "call-identity"
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

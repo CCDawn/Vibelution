@@ -2,6 +2,7 @@ import { ConversationMessage, SessionDetail, SessionMessageWindow, SessionRefere
 
 export type OptimisticUserMessageInput = {
   sessionId: string;
+  clientSubmissionId: string;
   content: string;
   attachmentIds?: string[];
   references?: SessionReferenceAttachment[];
@@ -9,23 +10,35 @@ export type OptimisticUserMessageInput = {
 };
 
 const OPTIMISTIC_USER_MESSAGE_METADATA_KEY = "optimisticUserMessage";
+const CLIENT_SUBMISSION_ID_METADATA_KEY = "clientSubmissionId";
+let fallbackSubmissionSequence = 0;
 
-function optimisticUserMessageId(input: OptimisticUserMessageInput, createdAt: string): string {
-  const contentHash = Array.from(input.content)
-    .reduce((hash, char) => ((hash << 5) - hash + char.charCodeAt(0)) | 0, 0)
-    .toString(16);
-  return `optimistic-user-${input.sessionId}-${createdAt}-${contentHash}`;
+export function createClientSubmissionId(sessionId: string): string {
+  const randomUuid = globalThis.crypto?.randomUUID?.();
+  if (randomUuid) {
+    return `submission-${randomUuid}`;
+  }
+  fallbackSubmissionSequence += 1;
+  const sessionToken = String(sessionId || "session").replace(/[^a-zA-Z0-9_-]/g, "_");
+  return `submission-${sessionToken}-${Date.now().toString(36)}-${fallbackSubmissionSequence.toString(36)}`;
+}
+
+function optimisticUserMessageId(input: OptimisticUserMessageInput): string {
+  return `optimistic-user-${input.clientSubmissionId}`;
+}
+
+function conversationMessageClientSubmissionId(message: ConversationMessage): string {
+  return String(message.metadata?.[CLIENT_SUBMISSION_ID_METADATA_KEY] ?? "").trim();
+}
+
+function isMatchingUserSubmission(message: ConversationMessage, input: OptimisticUserMessageInput): boolean {
+  return message.role === "user"
+    && conversationMessageClientSubmissionId(message) === input.clientSubmissionId;
 }
 
 function isMatchingOptimisticUserMessage(message: ConversationMessage, input: OptimisticUserMessageInput): boolean {
-  return message.role === "user"
-    && message.content === input.content
+  return isMatchingUserSubmission(message, input)
     && message.metadata?.[OPTIMISTIC_USER_MESSAGE_METADATA_KEY] === true;
-}
-
-function conversationMessageTurnId(message: ConversationMessage): string {
-  const metadata = message.metadata;
-  return String(metadata?.turnId ?? metadata?.turn_id ?? "").trim();
 }
 
 function isOptimisticUserMessage(message: ConversationMessage): boolean {
@@ -37,21 +50,21 @@ function isCommittedUserMessage(message: ConversationMessage): boolean {
 }
 
 function removeSettledOptimisticUserMessages(messages: ConversationMessage[]): ConversationMessage[] {
-  const committedTurnIds = new Set(
+  const committedSubmissionIds = new Set(
     messages
       .filter(isCommittedUserMessage)
-      .map(conversationMessageTurnId)
+      .map(conversationMessageClientSubmissionId)
       .filter(Boolean),
   );
-  if (committedTurnIds.size === 0) {
+  if (committedSubmissionIds.size === 0) {
     return messages;
   }
   return messages.filter((message) => {
     if (!isOptimisticUserMessage(message)) {
       return true;
     }
-    const turnId = conversationMessageTurnId(message);
-    return !turnId || !committedTurnIds.has(turnId);
+    const clientSubmissionId = conversationMessageClientSubmissionId(message);
+    return !clientSubmissionId || !committedSubmissionIds.has(clientSubmissionId);
   });
 }
 
@@ -63,18 +76,19 @@ export function appendOptimisticUserMessage(
     return detail;
   }
 
-  if (detail.messages.some((message) => isMatchingOptimisticUserMessage(message, input))) {
+  if (detail.messages.some((message) => isMatchingUserSubmission(message, input))) {
     return detail;
   }
 
   const createdAt = input.createdAt ?? new Date().toISOString();
   const optimisticMessage: ConversationMessage = {
-    id: optimisticUserMessageId(input, createdAt),
+    id: optimisticUserMessageId(input),
     role: "user",
     content: input.content,
     timestamp: createdAt,
     metadata: {
       [OPTIMISTIC_USER_MESSAGE_METADATA_KEY]: true,
+      [CLIENT_SUBMISSION_ID_METADATA_KEY]: input.clientSubmissionId,
       pending: true,
       attachmentIds: input.attachmentIds ?? [],
       references: input.references ?? [],
