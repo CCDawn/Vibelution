@@ -133,8 +133,6 @@ const styles = {
     `vui-routes-configroute dangerButton [display:inline-flex] [align-items:center] [justify-content:center] [gap:7px] [min-height:40px] [padding:0_14px] [border-radius:var(--control-radius)] [font:inherit] [font-size:var(--vui-font-sm)] [font-weight:650] [line-height:1] [white-space:nowrap] [transition:border-color_140ms_ease,background-color_140ms_ease,color_140ms_ease] ${mutedControl} [color:var(--state-error)] [border-color:color-mix(in_srgb,var(--state-error)_24%,transparent)] [background:color-mix(in_srgb,var(--state-error)_12%,var(--vui-control-muted))] hover:[cursor:pointer] hover:[border-color:color-mix(in_srgb,var(--state-error)_36%,transparent)] disabled:[cursor:not-allowed] disabled:[opacity:0.56]`,
   detailCard:
     `vui-routes-configroute detailCard ${rowSurface} [display:grid] [gap:6px] [padding:8px] [align-content:center] [min-height:48px] [&>_span]:[color:var(--fg-tertiary)] [&>_span]:[font-size:var(--vui-font-xs)] [&>_span]:[font-weight:600] [&>_strong]:[color:var(--fg-primary)] [&>_strong]:[font-size:0.98rem] [&>_strong]:[overflow-wrap:anywhere]`,
-  diagnosticsGrid:
-    "vui-routes-configroute diagnosticsGrid [display:grid] [gap:8px] [grid-template-columns:repeat(auto-fit,minmax(220px,1fr))] max-[1400px]:[grid-template-columns:repeat(auto-fit,minmax(220px,1fr))] max-[720px]:[grid-template-columns:1fr]",
   editorWrap:
     "vui-routes-configroute editorWrap [min-height:360px] [border:1px_solid_var(--border-hairline)] [border-radius:8px] [overflow:hidden] [background:var(--surface-code)] [&.cm-editor]:[height:100%] [&.cm-editor]:[min-height:360px] [&.cm-scroller]:[overflow:auto]",
   eyebrow:
@@ -199,8 +197,6 @@ const styles = {
     "vui-routes-configroute inlineError [margin:0] [color:var(--state-error)] [font-size:var(--vui-font-xs)] [line-height:1.35]",
   inlineFormError:
     "vui-routes-configroute inlineFormError [margin:0] [padding:8px_10px] [border:1px_solid_color-mix(in_srgb,var(--state-error)_28%,transparent)] [border-radius:var(--control-radius)] [background:color-mix(in_srgb,var(--state-error)_12%,transparent)] [color:var(--state-error)] [line-height:1.42] [overflow-wrap:anywhere]",
-  issueList:
-    "vui-routes-configroute issueList [margin:0] [padding-left:18px] [color:var(--fg-secondary)] [display:grid] [gap:8px]",
   keyLocationLine:
     "vui-routes-configroute keyLocationLine [display:grid] [gap:2px] [&_strong]:[color:var(--fg-tertiary)] [&_strong]:[font-size:var(--vui-font-xs)] [&_strong]:[font-weight:600] [&_span]:[overflow-wrap:anywhere]",
   leaveGuardActions:
@@ -241,12 +237,8 @@ const styles = {
     "vui-routes-configroute logHelperMetaGrid [display:grid] [grid-template-columns:repeat(4,minmax(0,1fr))] [gap:8px] [&_span]:[min-width:0] [&_span]:[padding:10px] [&_span]:[border:1px_solid_var(--border-hairline)] [&_span]:[border-radius:8px] [&_span]:[background:var(--vui-surface-row)] [&_span]:[display:grid] [&_span]:[gap:4px] [&_span]:[color:var(--fg-tertiary)] [&_span]:[font-size:var(--vui-font-xs)] [&_strong]:[color:var(--fg-primary)] [&_strong]:[font-size:0.9rem] [&_strong]:[overflow-wrap:anywhere] max-[720px]:[grid-template-columns:1fr]",
   logHelperSignal:
     "vui-routes-configroute logHelperSignal [min-width:0] [padding:10px] [border:1px_solid_var(--border-hairline)] [border-radius:8px] [background:var(--vui-surface-row)] [display:grid] [gap:6px] [&_span]:[color:var(--fg-tertiary)] [&_span]:[font-size:var(--vui-font-xs)] [&_strong]:[color:var(--fg-primary)] [&_strong]:[overflow-wrap:anywhere]",
-  matrixCard:
-    `vui-routes-configroute matrixCard ${rowSurface} [display:grid] [gap:6px] [min-width:0] [padding:8px] [&_*]:[min-width:0] [&_*]:[overflow-wrap:anywhere]`,
   matrixGrid:
     "vui-routes-configroute matrixGrid [display:grid] [gap:8px] [grid-template-columns:repeat(auto-fit,minmax(220px,1fr))] max-[1400px]:[grid-template-columns:repeat(auto-fit,minmax(220px,1fr))] max-[720px]:[grid-template-columns:1fr]",
-  matrixTitle:
-    "vui-routes-configroute matrixTitle [margin:0] [color:var(--fg-tertiary)] [font-size:var(--vui-font-xs)] [text-transform:uppercase] [letter-spacing:0.06em]",
   metricCard:
     `vui-routes-configroute metricCard ${rowSurface} [display:grid] [gap:2px] [padding:7px_8px] [&_span]:[color:var(--fg-tertiary)] [&_span]:[font-size:var(--vui-font-xs)] [&_strong]:[color:var(--fg-primary)] [&_strong]:[font-size:var(--vui-font-xs)] [&_small]:[color:var(--fg-secondary)] [&_small]:[font-size:var(--vui-font-xs)] [&_small]:[line-height:1.2]`,
   modelCard:
@@ -322,7 +314,7 @@ const styles = {
   sectionNav:
     "vui-routes-configroute sectionNav [display:grid] [align-content:start] [gap:4px] [overflow:visible] [padding-right:4px] max-[1120px]:[display:flex] max-[1120px]:[flex-wrap:wrap] max-[1120px]:[gap:6px] max-[1120px]:[padding-right:0] max-[720px]:[display:grid] max-[720px]:[grid-template-columns:1fr]",
   sectionSurface:
-    `vui-routes-configroute sectionSurface ${panelSurface} [display:grid] [gap:0] [padding:0] [scroll-margin-top:84px] [overflow:visible] [&>_.sectionText]:[padding:6px_var(--config-section-x)_0] [&>_.sectionText]:[max-width:980px] [&>_.sectionText]:[font-size:var(--vui-font-xs)] [&>_:where(_.hashGrid,.matrixGrid,.healthSummaryGrid,.diagnosticsGrid,.logHelperGrid,.toggleGrid,.healthWorkbenchGrid,.profileTableWrap,.formSurface,.actionsRow,.rawConfigPanel,.editorWrap,.agentRunPanel_)]:[margin:var(--config-section-y)_var(--config-section-x)_var(--config-section-x)] [&>_.sectionText_+_:where(_.hashGrid,.matrixGrid,.healthSummaryGrid,.diagnosticsGrid,.logHelperGrid,.toggleGrid,.healthWorkbenchGrid,.profileTableWrap,.formSurface,.actionsRow,.rawConfigPanel,.editorWrap_)]:[margin-top:6px]`,
+    `vui-routes-configroute sectionSurface ${panelSurface} [display:grid] [gap:0] [padding:0] [scroll-margin-top:84px] [overflow:visible] [&>_.sectionText]:[padding:6px_var(--config-section-x)_0] [&>_.sectionText]:[max-width:980px] [&>_.sectionText]:[font-size:var(--vui-font-xs)] [&>_:where(_.hashGrid,.matrixGrid,.healthSummaryGrid,.logHelperGrid,.toggleGrid,.healthWorkbenchGrid,.profileTableWrap,.formSurface,.actionsRow,.rawConfigPanel,.editorWrap,.agentRunPanel_)]:[margin:var(--config-section-y)_var(--config-section-x)_var(--config-section-x)] [&>_.sectionText_+_:where(_.hashGrid,.matrixGrid,.healthSummaryGrid,.logHelperGrid,.toggleGrid,.healthWorkbenchGrid,.profileTableWrap,.formSurface,.actionsRow,.rawConfigPanel,.editorWrap_)]:[margin-top:6px]`,
   sectionText:
     "vui-routes-configroute sectionText [margin:0] [color:var(--fg-secondary)] [line-height:1.38]",
   sectionTitle:
