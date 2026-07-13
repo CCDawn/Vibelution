@@ -313,6 +313,122 @@ describe("canonical SessionTurnItem v2 rendering", () => {
     expect(JSON.stringify(projected.codexTranscript)).not.toContain('"markdown"');
   });
 
+  it("keeps interim text, one canonical tool snapshot, and the final answer in first-seen order", () => {
+    const projected = canonicalTurnProtocol.projectConversationMessageFromTurnItemsV2({
+      id: "message-canonical-chain",
+      role: "assistant",
+      content: "",
+      timestamp: "2026-07-13T00:00:00.000Z",
+      turnItems: [
+        {
+          ...baseItem,
+          id: "interim-r0",
+          itemId: "interim-text",
+          sequence: 1,
+          kind: "assistant_message",
+          channel: "interim",
+          phase: "interim",
+          type: "assistant_message",
+          provisional: true,
+          terminal: false,
+          text: "I will inspect the file.",
+        },
+        {
+          ...baseItem,
+          id: "tool-live-r0",
+          itemId: "tool-live",
+          sequence: 2,
+          revision: 0,
+          kind: "tool_call",
+          channel: "tool",
+          phase: "tool_call",
+          type: "tool_call",
+          callId: "call-read-version",
+          toolName: "read_file",
+          status: "running",
+          text: "VERSION",
+        },
+        {
+          ...baseItem,
+          id: "answer-r0",
+          itemId: "answer",
+          sequence: 3,
+          kind: "assistant_message",
+          channel: "answer",
+          phase: "final_answer",
+          type: "assistant_message",
+          provisional: false,
+          terminal: true,
+          text: "1.2.3",
+        },
+        {
+          ...baseItem,
+          invocationId: "persisted-invocation",
+          id: "tool-persisted-r1",
+          itemId: "tool-persisted",
+          sequence: 4,
+          revision: 1,
+          kind: "tool_call",
+          channel: "tool",
+          phase: "tool_call",
+          type: "tool_call",
+          callId: "call-read-version",
+          toolName: "read_file",
+          status: "completed",
+          text: "VERSION -> 1.2.3",
+        },
+      ],
+    } as never);
+
+    expect(projected.turnItems?.map((item) => item.id)).toEqual([
+      "interim-r0",
+      "tool-persisted-r1",
+      "answer-r0",
+    ]);
+    expect(projected.codexTranscript?.cells).toHaveLength(3);
+    expect(projected.codexTranscript?.cells[0]).toMatchObject({
+      kind: "assistant_markdown",
+      channel: "commentary",
+      phase: "commentary",
+      text: "I will inspect the file.",
+    });
+    expect(projected.codexTranscript?.cells[1]).toMatchObject({
+      id: "call-read-version",
+      kind: "tool_call",
+      status: "completed",
+      text: "VERSION -> 1.2.3",
+    });
+    expect(projected.codexTranscript?.cells[2]).toMatchObject({
+      kind: "assistant_markdown",
+      channel: "answer",
+      phase: "final_answer",
+      text: "1.2.3",
+    });
+  });
+
+  it("does not treat streaming commentary as a committed final answer", () => {
+    const commentary = {
+      id: "assistant-commentary",
+      role: "assistant",
+      content: "I will inspect the file.",
+      timestamp: "2026-07-13T00:00:00.000Z",
+      streaming: true,
+      metadata: { kind: "journal_assistant_partial", turnId: "turn-v2" },
+      codexTranscript: nativeTranscript([{
+        id: "commentary-cell",
+        kind: "assistant_markdown",
+        messageId: "assistant-commentary",
+        status: "running",
+        tone: "running",
+        channel: "commentary",
+        phase: "commentary",
+        text: "I will inspect the file.",
+      }]),
+    } satisfies ConversationMessage;
+
+    expect(canonicalTurnProtocol.hasCommittedAssistantProtocolAnswer(commentary)).toBe(false);
+  });
+
   it("keeps terminal errors visible without promoting them to final answer content", () => {
     const projected = canonicalTurnProtocol.projectConversationMessageFromTurnItemsV2({
       id: "message-error-v2",

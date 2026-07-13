@@ -181,6 +181,116 @@ describe("timeline message process projection", () => {
     ]);
   });
 
+  it("replaces running canonical snapshots with the completed snapshot for the same call", () => {
+    const projected = projectTimelineProcessMessages([
+      {
+        ...toolMessage("message-tool-running", "reading VERSION"),
+        streaming: true,
+        feedbackEvents: [{
+          sequence: 1,
+          kind: "tool",
+          callId: "call-read-version",
+          status: "running",
+          name: "read_file_tool",
+          summary: "reading VERSION",
+        }],
+        timelineItems: [{
+          id: "timeline-call-read-version",
+          kind: "operation",
+          status: "running",
+          title: "read_file_tool",
+          summary: "reading VERSION",
+          operationIds: ["call-read-version"],
+        }],
+        codexTranscript: {
+          version: 1,
+          source: "native",
+          messageId: "message-tool-running",
+          streaming: true,
+          cells: [{
+            id: "tool-live-cell",
+            sourceItemId: "tool-call-read-version",
+            kind: "tool_call",
+            messageId: "message-tool-running",
+            status: "running",
+            tone: "running",
+            title: "read_file_tool",
+            text: "reading VERSION",
+          }],
+          toolCalls: [],
+          terminalOperations: [],
+          terminalSessions: [],
+          modelObservations: [],
+        },
+      },
+      {
+        ...toolMessage("message-tool-completed", "VERSION -> 1.2.3"),
+        timestamp: "2026-06-26T14:56:01Z",
+        streaming: false,
+        feedbackEvents: [{
+          sequence: 1,
+          kind: "tool",
+          callId: "call-read-version",
+          status: "done",
+          name: "read_file_tool",
+          summary: "VERSION -> 1.2.3",
+        }],
+        timelineItems: [{
+          id: "timeline-call-read-version",
+          kind: "operation",
+          status: "completed",
+          title: "read_file_tool",
+          summary: "VERSION -> 1.2.3",
+          operationIds: ["call-read-version"],
+        }],
+        codexTranscript: {
+          version: 1,
+          source: "native",
+          messageId: "message-tool-completed",
+          streaming: false,
+          cells: [{
+            id: "tool-persisted-cell",
+            sourceItemId: "tool-call-read-version",
+            kind: "tool_call",
+            messageId: "message-tool-completed",
+            status: "completed",
+            tone: "neutral",
+            title: "read_file_tool",
+            text: "VERSION -> 1.2.3",
+          }],
+          toolCalls: [],
+          terminalOperations: [],
+          terminalSessions: [],
+          modelObservations: [],
+        },
+      },
+    ]);
+
+    expect(projected).toHaveLength(1);
+    expect(projected[0].streaming).toBe(false);
+    expect(projected[0].feedbackEvents).toEqual([
+      expect.objectContaining({
+        callId: "call-read-version",
+        status: "done",
+        summary: "VERSION -> 1.2.3",
+      }),
+    ]);
+    expect(projected[0].timelineItems).toEqual([
+      expect.objectContaining({
+        id: "timeline-call-read-version",
+        status: "completed",
+      }),
+    ]);
+    expect(projected[0].codexTranscript?.streaming).toBe(false);
+    expect(projected[0].codexTranscript?.cells).toEqual([
+      expect.objectContaining({
+        id: "tool-persisted-cell",
+        sourceItemId: "tool-call-read-version",
+        status: "completed",
+      }),
+    ]);
+  });
+
   it("does not treat legacy DTO process fields as mergeable process packets", () => {
     const projected = projectTimelineProcessMessages([
       {

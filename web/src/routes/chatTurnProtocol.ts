@@ -79,18 +79,48 @@ export function hasVisibleActiveTurnProtocolContent(surface: ChatTurnProtocolSur
   );
 }
 
+function isNonTerminalAssistantProjection(message: ConversationMessage) {
+  const kind = compactText(message.metadata?.kind).toLowerCase();
+  return Boolean(
+    message.streaming
+    || kind === "journal_assistant_partial"
+    || kind === "session_live_overlay"
+    || kind === "session_active_turn_layer"
+  );
+}
+
 export function hasCommittedAssistantProtocolAnswer(message: ConversationMessage) {
-  if (message.role !== "assistant") {
+  if (message.role !== "assistant" || isNonTerminalAssistantProjection(message)) {
     return false;
   }
   const canonicalItems = consolidateSessionTurnItemsV2(message.turnItems);
   if (canonicalItems.length > 0) {
     return hasCommittedCanonicalAnswer(canonicalItems);
   }
-  return Boolean(
-    compactText(answerProjectionContent(message))
-    || compactText(visibleNativeAssistantMarkdownText(message.codexTranscript))
-  );
+  const nativeAssistantCells = nativeTranscriptCells(message.codexTranscript)
+    .filter((cell) => String(cell.kind ?? "").trim() === "assistant_markdown")
+    .filter((cell) => compactText(cell.text));
+  if (nativeAssistantCells.length > 0) {
+    return nativeAssistantCells.some((cell) => {
+      const phase = compactText(cell.phase).toLowerCase();
+      const status = compactText(cell.status).toLowerCase();
+      if (
+        phase === "commentary"
+        || phase === "interim"
+        || cell.provisional === true
+        || ["pending", "running", "in_progress", "streaming"].includes(status)
+      ) {
+        return false;
+      }
+      return Boolean(
+        phase === "final_answer"
+        || cell.terminal === true
+        || !status
+        || ["completed", "done"].includes(status)
+      );
+    });
+  }
+  return Boolean(compactText(answerProjectionContent(message)));
 }
 import type {
   ConversationMessage as CanonicalConversationMessage,
@@ -106,16 +136,29 @@ type CanonicalTurnRenderSurface = {
   turnItems?: CanonicalSessionTurnItem[];
 };
 
-const canonicalItemIdentity = (item: CanonicalSessionTurnItem): string => [
-  item.sessionId ?? "",
-  item.turnId ?? "",
-  item.invocationId ?? "",
-  item.iteration ?? 0,
-  item.itemId ?? item.id,
-].join("\u001f");
+const canonicalItemIdentity = (item: CanonicalSessionTurnItem): string => {
+  const callId = compactText(item.callId);
+  const itemId = compactText(item.itemId ?? item.id);
+  return [
+    item.sessionId ?? "",
+    item.turnId ?? "",
+    callId ? "call:" + callId : "item:" + itemId,
+  ].join("\u001f");
+};
 
 const canonicalItemRevision = (item: CanonicalSessionTurnItem): number => item.revision ?? 0;
 const canonicalItemSequence = (item: CanonicalSessionTurnItem): number => item.sequence ?? 0;
+
+const shouldReplaceCanonicalItem = (
+  current: CanonicalSessionTurnItem,
+  candidate: CanonicalSessionTurnItem,
+) => (
+  canonicalItemRevision(candidate) > canonicalItemRevision(current)
+  || (
+    canonicalItemRevision(candidate) === canonicalItemRevision(current)
+    && canonicalItemSequence(candidate) >= canonicalItemSequence(current)
+  )
+);
 
 export const isSessionTurnItemV2 = (item: CanonicalSessionTurnItem): boolean =>
   item.version === 2 && Boolean(item.itemId);
@@ -123,25 +166,37 @@ export const isSessionTurnItemV2 = (item: CanonicalSessionTurnItem): boolean =>
 export const consolidateSessionTurnItemsV2 = (
   ...groups: Array<readonly CanonicalSessionTurnItem[] | undefined>
 ): CanonicalSessionTurnItem[] => {
-  const byIdentity = new Map<string, CanonicalSessionTurnItem>();
-  for (const item of groups.flatMap((group) => group ?? []).filter(isSessionTurnItemV2)) {
+  const byIdentity = new Map<string, {
+    item: CanonicalSessionTurnItem;
+    firstSequence: number;
+    firstIndex: number;
+  }>();
+  const candidates = groups.flatMap((group) => group ?? []).filter(isSessionTurnItemV2);
+  candidates.forEach((item, firstIndex) => {
     const identity = canonicalItemIdentity(item);
     const current = byIdentity.get(identity);
-    if (
-      !current
-      || canonicalItemRevision(item) > canonicalItemRevision(current)
-      || (
-        canonicalItemRevision(item) === canonicalItemRevision(current)
-        && canonicalItemSequence(item) >= canonicalItemSequence(current)
-      )
-    ) {
-      byIdentity.set(identity, item);
+    if (!current) {
+      byIdentity.set(identity, {
+        item,
+        firstSequence: canonicalItemSequence(item),
+        firstIndex,
+      });
+      return;
     }
-  }
-  return [...byIdentity.values()].sort((left, right) =>
-    canonicalItemSequence(left) - canonicalItemSequence(right)
-    || canonicalItemIdentity(left).localeCompare(canonicalItemIdentity(right))
-  );
+    const firstSequence = Math.min(current.firstSequence, canonicalItemSequence(item));
+    byIdentity.set(identity, {
+      ...current,
+      item: shouldReplaceCanonicalItem(current.item, item) ? item : current.item,
+      firstSequence,
+    });
+  });
+  return [...byIdentity.entries()]
+    .sort(([leftIdentity, left], [rightIdentity, right]) =>
+      left.firstSequence - right.firstSequence
+      || left.firstIndex - right.firstIndex
+      || leftIdentity.localeCompare(rightIdentity)
+    )
+    .map(([, entry]) => entry.item);
 };
 
 const itemText = (item: CanonicalSessionTurnItem): string =>
@@ -154,6 +209,24 @@ const isCanonicalAnswer = (item: CanonicalSessionTurnItem): boolean =>
 
 const canonicalFinalAnswer = (items: readonly CanonicalSessionTurnItem[]): string =>
   items.filter(isCanonicalAnswer).map(itemText).filter(Boolean).join("\n\n");
+
+const isCanonicalCommentary = (item: CanonicalSessionTurnItem): boolean =>
+  item.kind === "commentary"
+  || item.channel === "commentary"
+  || item.channel === "interim"
+  || item.phase === "commentary"
+  || item.phase === "interim";
+
+const canonicalDisplayChannel = (item: CanonicalSessionTurnItem) =>
+  isCanonicalCommentary(item) ? "commentary" : item.channel;
+
+const canonicalDisplayPhase = (item: CanonicalSessionTurnItem) =>
+  isCanonicalCommentary(item) ? "commentary" : item.phase;
+
+const canonicalRenderItemId = (item: CanonicalSessionTurnItem) =>
+  compactText(item.callId)
+  || compactText(item.itemId)
+  || compactText(item.id);
 
 const hasCommittedCanonicalAnswer = (items: readonly CanonicalSessionTurnItem[]): boolean =>
   items.some((item) => (
@@ -190,21 +263,22 @@ const canonicalTranscript = (
 ): CanonicalConversationMessage["codexTranscript"] => ({
   version: 1,
   source: "native",
-  messageId: items[0]?.messageId ?? items[0]?.itemId ?? items[0]?.id ?? "canonical-turn-items-v2",
+  messageId: items[0]?.messageId || (items[0] ? canonicalRenderItemId(items[0]) : "canonical-turn-items-v2"),
   cells: items.flatMap<NonNullable<CanonicalConversationMessage["codexTranscript"]>["cells"][number]>((item) => {
     const text = itemText(item);
     if (!text) return [];
+    const renderItemId = canonicalRenderItemId(item);
     const cellBase = {
-      id: item.itemId ?? item.id,
-      messageId: item.messageId ?? item.itemId ?? item.id,
+      id: renderItemId,
+      messageId: item.messageId ?? renderItemId,
       status: item.status,
       tone: canonicalCellTone(item),
-      channel: item.channel,
-      phase: item.phase,
+      channel: canonicalDisplayChannel(item),
+      phase: canonicalDisplayPhase(item),
       terminal: item.terminal,
       provisional: item.provisional,
       diagnosticSummary: item.diagnosticSummary,
-      sourceItemId: item.sourceItemId ?? item.itemId ?? item.id,
+      sourceItemId: item.sourceItemId ?? renderItemId,
     };
     if (isCanonicalAnswer(item)) {
       return [{ ...cellBase, kind: "assistant_markdown", text }];
@@ -233,7 +307,7 @@ const canonicalTranscript = (
     if (item.kind === "status" || item.type === "status") {
       return [{ ...cellBase, kind: "status", text }];
     }
-    if (item.channel === "commentary") {
+    if (isCanonicalCommentary(item)) {
       return [{ ...cellBase, kind: "assistant_markdown", text }];
     }
     return [];
