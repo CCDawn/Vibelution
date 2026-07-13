@@ -300,6 +300,42 @@ export type ConfigMigrationRollbackPayload = {
   baseHash: string;
 };
 
+export type ConfigProviderMergeConflict = {
+  code: string;
+  providerId?: string;
+  detail?: string;
+};
+
+export type ConfigProviderMergePreview = {
+  previewId: string;
+  status: "READY" | "NEEDS_REVIEW";
+  baseHash: string;
+  canonicalProviderId: string;
+  duplicateProviderIds: string[];
+  modelRefMap: Record<string, string>;
+  modelsToAdd: Array<{
+    modelKey: string;
+    sourceProviderId: string;
+  }>;
+  liveReferenceCount: number;
+  historicalReferenceCount: number;
+  conflicts: ConfigProviderMergeConflict[];
+  requiredProbeModelRef: string;
+};
+
+export type ConfigProviderMergeApplyPayload = {
+  previewId: string;
+  baseHash: string;
+  confirmed: boolean;
+};
+
+export type ConfigProviderMergeResult = {
+  migrationId: string;
+  status: "applied" | "rolled_back";
+  hash: string;
+  updatedReferenceCount?: number;
+};
+
 export type ConfigModelOption = {
   model_ref?: string;
   provider_id?: string;

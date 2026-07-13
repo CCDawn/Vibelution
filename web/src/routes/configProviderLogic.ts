@@ -24,6 +24,38 @@ export type ProviderRegistryRow = {
   models: ConfigCatalogModel[];
 };
 
+export type ProviderMergeCandidate = {
+  canonicalProviderId: string;
+  duplicateProviderIds: string[];
+};
+
+function providerMergeContractKey(provider: ProviderRegistryRow): string {
+  return JSON.stringify({
+    baseUrl: provider.baseUrl.trim(),
+    driver: provider.driver.trim().toLocaleLowerCase(),
+    defaultProtocol: provider.defaultProtocol.trim().toLocaleLowerCase(),
+    serviceClass: provider.serviceClass.trim().toLocaleLowerCase(),
+  });
+}
+
+export function deriveProviderMergeCandidate(
+  rows: ProviderRegistryRow[],
+  selectedProviderId: string,
+): ProviderMergeCandidate | null {
+  const selected = rows.find((row) => row.providerId === selectedProviderId);
+  if (!selected?.baseUrl.trim() || !selected.driver.trim()) {
+    return null;
+  }
+  const duplicates = rows
+    .filter((row) => row.providerId !== selected.providerId)
+    .filter((row) => providerMergeContractKey(row) === providerMergeContractKey(selected))
+    .map((row) => row.providerId)
+    .sort();
+  return duplicates.length
+    ? { canonicalProviderId: selected.providerId, duplicateProviderIds: duplicates }
+    : null;
+}
+
 export type ProviderModelFilter = "all" | "pinned" | "discovered" | "unavailable";
 
 export type ProviderModelActionState =

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { ConfigCatalogModel, ConfigModelCatalog, ConfigProviderOption } from "../api/types";
 import {
+  deriveProviderMergeCandidate,
   buildProviderWizardDraft,
   canAdvanceProviderWizard,
   canTestProviderModel,
@@ -99,6 +100,17 @@ const catalog: ConfigModelCatalog = {
 };
 
 describe("configProviderLogic", () => {
+  it("finds exact-contract duplicate Providers without guessing endpoint equivalence", () => {
+    const rows = deriveProviderRegistryRows(providers, catalog);
+    expect(deriveProviderMergeCandidate(rows, "relay_a")).toEqual({
+      canonicalProviderId: "relay_a",
+      duplicateProviderIds: ["relay_b"],
+    });
+    const changed = rows.map((row) => row.providerId === "relay_b"
+      ? { ...row, baseUrl: "https://relay.example" }
+      : row);
+    expect(deriveProviderMergeCandidate(changed, "relay_a")).toBeNull();
+  });
   it("keeps quick setup phases deterministic without accepting credential values", () => {
     const initial = initialProviderQuickSetupState();
     expect(initial.phase).toBe("input");

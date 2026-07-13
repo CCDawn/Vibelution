@@ -34,6 +34,57 @@ def _provider(credential_ref: str) -> dict:
     }
 
 
+def test_provider_merge_preview_is_projected_without_credentials(monkeypatch) -> None:
+    preview = SimpleNamespace(
+        canonical_provider_id="ai-pixel",
+        duplicate_provider_ids=("ai-pixel-copy",),
+        model_ref_map={"ai-pixel-copy/luna": "ai-pixel/luna"},
+        status="READY",
+        to_dict=lambda: {
+            "previewId": "preview-1",
+            "baseHash": "hash-1",
+            "status": "READY",
+            "canonicalProviderId": "ai-pixel",
+            "duplicateProviderIds": ["ai-pixel-copy"],
+            "modelRefMap": {"ai-pixel-copy/luna": "ai-pixel/luna"},
+            "modelsToAdd": [],
+            "liveReferences": [],
+            "historicalReferences": [],
+            "liveReferenceCount": 0,
+            "historicalReferenceCount": 0,
+            "conflicts": [],
+            "requiredProbeModelRef": "ai-pixel/luna",
+        },
+    )
+    monkeypatch.setattr(provider_config_service, "preview_provider_merge", lambda **_kwargs: preview)
+
+    payload = provider_config_service.preview_duplicate_provider_merge(
+        canonical_provider_id="ai-pixel",
+        duplicate_provider_ids=["ai-pixel-copy"],
+        credential_decisions={"ai-pixel-copy": "use_canonical"},
+    )
+
+    assert payload["status"] == "READY"
+    assert "credential_ref" not in json.dumps(payload)
+
+
+def test_provider_merge_apply_requires_explicit_confirmation(monkeypatch) -> None:
+    captured = {}
+
+    def fake_apply(preview_id, **kwargs):
+        captured.update(preview_id=preview_id, **kwargs)
+        return {"migrationId": "merge-1", "status": "applied", "hash": "hash-2"}
+
+    monkeypatch.setattr(provider_config_service, "apply_provider_merge", fake_apply)
+
+    result = provider_config_service.apply_duplicate_provider_merge(
+        preview_id="preview-1", base_hash="hash-1", confirmed=True
+    )
+
+    assert result["migrationId"] == "merge-1"
+    assert captured["confirmed"] is True
+
+
 def _v2_config() -> dict:
     return {
         "llm": {
