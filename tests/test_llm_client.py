@@ -16,7 +16,10 @@ from core.llm.client import (
     llm_cancel_context,
 )
 from core.llm.errors import classify_exception
+from core.llm.provider_replay_state import OpaqueReplayItem, ProviderReplayState, endpoint_fingerprint
+from core.llm.semantic_messages import InvocationScope
 from core.llm.types import LLMError
+from core.llm.wire.responses import ResponsesWireAdapter
 from core.llm.recovery import plan_recovery
 from core.llm.routing import attach_recovery_fallback, select_recovery_profile
 from tests.helpers.isolated_config import isolated_settings_config
@@ -536,6 +539,223 @@ def test_responses_transport_routes_openai_compatible_model_through_responses_br
             "content": [{"type": "input_text", "text": "ping"}],
         }
     ]
+
+
+def test_responses_replays_captured_opaque_items_in_provider_order_without_message_ids():
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "relay",
+            "llm.providers.default.api_key": "test-key",
+            "llm.providers.default.base_url": "https://ai-pixel.online",
+            "llm.providers.default.compat_mode": "openai",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "gpt-5.6-terra",
+            "llm.profiles.primary.transport": "responses",
+        }
+    )
+    client = LLMClient(config=config, backend=lambda payload: payload)
+    replay_items = [
+        {
+            "id": "rs-first",
+            "type": "reasoning",
+            "encrypted_content": "opaque-first",
+            "summary": [],
+        },
+        {
+            "id": "rs-second",
+            "type": "reasoning",
+            "encrypted_content": "opaque-second",
+            "summary": [],
+        },
+    ]
+    outcome = ResponsesWireAdapter().decode_response(
+        {
+            "id": "resp-terra-1",
+            "status": "completed",
+            "output": [
+                *replay_items,
+                {
+                    "id": "msg-terra-1",
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{"type": "output_text", "text": "previous answer"}],
+                },
+            ],
+        },
+        route=client.protocol_route,
+        scope=InvocationScope(
+            session_id="session-terra",
+            turn_id="turn-terra-1",
+            invocation_id="invocation-terra-1",
+            iteration=0,
+        ),
+    )
+
+    assert [item.item_id for item in outcome.replay_state.opaque_items] == ["rs-first", "rs-second"]
+
+    payload = client._build_payload(
+        [
+            {"role": "user", "content": "first prompt"},
+            AIMessage(content="previous answer"),
+            {"role": "user", "content": "continue"},
+        ],
+        replay_state=outcome.replay_state,
+    )
+
+    assert payload["input"] == [
+        {"role": "user", "content": [{"type": "input_text", "text": "first prompt"}]},
+        *replay_items,
+        {"role": "assistant", "content": [{"type": "output_text", "text": "previous answer"}]},
+        {"role": "user", "content": [{"type": "input_text", "text": "continue"}]},
+    ]
+    assert "previous_response_id" not in payload
+
+
+def test_responses_preserves_explicit_replay_anchor_before_later_assistant():
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "relay",
+            "llm.providers.default.api_key": "test-key",
+            "llm.providers.default.base_url": "https://ai-pixel.online",
+            "llm.providers.default.compat_mode": "openai",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "gpt-5.6-terra",
+            "llm.profiles.primary.transport": "responses",
+        }
+    )
+    client = LLMClient(config=config, backend=lambda payload: payload)
+    replay_item = {
+        "id": "rs-anchored",
+        "type": "reasoning",
+        "encrypted_content": "opaque-anchored",
+        "summary": [],
+    }
+    outcome = ResponsesWireAdapter().decode_response(
+        {
+            "id": "resp-terra-anchor",
+            "status": "completed",
+            "output": [replay_item],
+        },
+        route=client.protocol_route,
+        scope=InvocationScope(
+            session_id="session-terra",
+            turn_id="turn-terra-anchor",
+            invocation_id="invocation-terra-anchor",
+            iteration=0,
+        ),
+    )
+
+    payload = client._build_payload(
+        [
+            {"role": "user", "content": "first prompt"},
+            AIMessage(
+                content="anchored answer",
+                additional_kwargs={"reasoning_replay_item_id": "rs-anchored"},
+            ),
+            {"role": "user", "content": "middle prompt"},
+            AIMessage(content="later answer"),
+            {"role": "user", "content": "continue"},
+        ],
+        replay_state=outcome.replay_state,
+    )
+
+    assert payload["input"] == [
+        {"role": "user", "content": [{"type": "input_text", "text": "first prompt"}]},
+        replay_item,
+        {"role": "assistant", "content": [{"type": "output_text", "text": "anchored answer"}]},
+        {"role": "user", "content": [{"type": "input_text", "text": "middle prompt"}]},
+        {"role": "assistant", "content": [{"type": "output_text", "text": "later answer"}]},
+        {"role": "user", "content": [{"type": "input_text", "text": "continue"}]},
+    ]
+
+
+def test_responses_rejects_partial_explicit_replay_mapping_instead_of_fallback():
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "relay",
+            "llm.providers.default.api_key": "test-key",
+            "llm.providers.default.base_url": "https://ai-pixel.online",
+            "llm.providers.default.compat_mode": "openai",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "gpt-5.6-terra",
+            "llm.profiles.primary.transport": "responses",
+        }
+    )
+    client = LLMClient(config=config, backend=lambda payload: payload)
+    opaque_items = tuple(
+        OpaqueReplayItem(
+            item_id=item_id,
+            payload=json.dumps(
+                {"id": item_id, "type": "reasoning", "encrypted_content": f"opaque-{item_id}"}
+            ).encode("utf-8"),
+        )
+        for item_id in ("rs-first", "rs-second")
+    )
+    replay_state = ProviderReplayState(
+        issuer="responses",
+        provider_id=client.protocol_route.provider_id,
+        endpoint_fingerprint=endpoint_fingerprint(client.protocol_route.runtime_endpoint),
+        model_id=client.protocol_route.model_id,
+        wire_protocol=client.protocol_route.wire_protocol,
+        opaque_items=opaque_items,
+    )
+
+    with pytest.raises(LLMError, match="rs-second.*no unique explicit assistant anchor"):
+        client._build_payload(
+            [
+                AIMessage(
+                    content="anchored answer",
+                    additional_kwargs={"reasoning_replay_item_id": "rs-first"},
+                ),
+                AIMessage(content="later answer"),
+                {"role": "user", "content": "continue"},
+            ],
+            replay_state=replay_state,
+        )
+
+
+@pytest.mark.parametrize(
+    ("provider_item", "error_match"),
+    [
+        ({"id": "rs-invalid", "type": "message", "content": []}, "type `reasoning`"),
+        (
+            {"id": "rs-other", "type": "reasoning", "encrypted_content": "opaque"},
+            "id does not match replay state",
+        ),
+    ],
+)
+def test_responses_rejects_incompatible_opaque_payload_before_adapter(provider_item, error_match):
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "relay",
+            "llm.providers.default.api_key": "test-key",
+            "llm.providers.default.base_url": "https://ai-pixel.online",
+            "llm.providers.default.compat_mode": "openai",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "gpt-5.6-terra",
+            "llm.profiles.primary.transport": "responses",
+        }
+    )
+    client = LLMClient(config=config, backend=lambda payload: payload)
+    replay_state = ProviderReplayState(
+        issuer="responses",
+        provider_id=client.protocol_route.provider_id,
+        endpoint_fingerprint=endpoint_fingerprint(client.protocol_route.runtime_endpoint),
+        model_id=client.protocol_route.model_id,
+        wire_protocol=client.protocol_route.wire_protocol,
+        opaque_items=(
+            OpaqueReplayItem(
+                item_id="rs-invalid",
+                payload=json.dumps(provider_item).encode("utf-8"),
+            ),
+        ),
+    )
+
+    with pytest.raises(LLMError, match=error_match):
+        client._build_payload(
+            [AIMessage(content="previous answer"), {"role": "user", "content": "continue"}],
+            replay_state=replay_state,
+        )
 
 
 def test_protocol_switch_reencodes_complete_history_after_private_replay_is_cleared():
