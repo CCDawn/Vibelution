@@ -50,12 +50,16 @@ def _service_root(base_url: str) -> str:
 
 
 def resolve_discovery_endpoints(provider: dict[str, Any], adapter_id: str) -> tuple[str, ...]:
+    adapter = str(adapter_id or "").strip().lower()
+    if adapter == "manual":
+        return ()
     discovery = provider.get("discovery") if isinstance(provider.get("discovery"), dict) else {}
     override = str(discovery.get("models_url_override") or "").strip().rstrip("/")
     if override:
         return (override,)
     base = str(provider.get("base_url") or "").strip().rstrip("/")
-    adapter = str(adapter_id or "").strip().lower()
+    if adapter == "ollama":
+        return (_join_endpoint(_service_root(base), "api/tags"),)
     if adapter == "anthropic":
         return (_join_endpoint(_service_root(base), "v1/models"),)
     if adapter == "gemini":
@@ -228,7 +232,7 @@ class OllamaDiscoveryAdapter:
     adapter_id = "ollama"
 
     def discover(self, request: ProviderDiscoveryRequest) -> ProviderDiscoveryResult:
-        endpoint = _join_endpoint(_service_root(str(request.provider.get("base_url") or "")), "api/tags")
+        endpoints = list(resolve_discovery_endpoints(request.provider, self.adapter_id))
 
         def normalize(payload: Any) -> list[DiscoveredProviderModel]:
             if not isinstance(payload, dict):
@@ -238,7 +242,7 @@ class OllamaDiscoveryAdapter:
         return _discover_candidates(
             request,
             self.adapter_id,
-            [endpoint],
+            endpoints,
             headers={},
             params=None,
             normalize=normalize,
@@ -249,11 +253,11 @@ class AnthropicDiscoveryAdapter:
     adapter_id = "anthropic"
 
     def discover(self, request: ProviderDiscoveryRequest) -> ProviderDiscoveryResult:
-        endpoint = _join_endpoint(_service_root(str(request.provider.get("base_url") or "")), "v1/models")
+        endpoints = list(resolve_discovery_endpoints(request.provider, self.adapter_id))
         return _discover_candidates(
             request,
             self.adapter_id,
-            [endpoint],
+            endpoints,
             headers={"x-api-key": request.credential, "anthropic-version": "2023-06-01"},
             params=None,
             normalize=lambda payload: [
@@ -268,11 +272,11 @@ class GeminiDiscoveryAdapter:
     adapter_id = "gemini"
 
     def discover(self, request: ProviderDiscoveryRequest) -> ProviderDiscoveryResult:
-        endpoint = _join_endpoint(_service_root(str(request.provider.get("base_url") or "")), "v1beta/models")
+        endpoints = list(resolve_discovery_endpoints(request.provider, self.adapter_id))
         return _discover_candidates(
             request,
             self.adapter_id,
-            [endpoint],
+            endpoints,
             headers={},
             params={"key": request.credential},
             normalize=lambda payload: [

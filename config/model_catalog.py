@@ -39,6 +39,17 @@ _PROVIDER_FAILURE_STATUSES = {
     "protocol_mismatch",
     "blocked",
 }
+_DISCOVERY_ERROR_CATEGORIES = {
+    "auth_failed",
+    "blocked",
+    "network",
+    "other",
+    "protocol_mismatch",
+    "rate_limited",
+    "service_unavailable",
+    "timeout",
+    "upstream_unavailable",
+}
 _MAX_WARNINGS = 20
 _MAX_WARNING_KEYS = 20
 
@@ -471,7 +482,7 @@ def _classify_discovery_error_type(value: Any, *, status: str) -> str:
     if status == "auth_failed":
         return "auth_failed"
     raw = str(value or "").strip().lower()
-    if raw in {"auth_failed", "blocked", "network", "other", "protocol_mismatch", "timeout"}:
+    if raw in _DISCOVERY_ERROR_CATEGORIES:
         return raw
     if "timeout" in raw or "timedout" in raw or "timed out" in raw:
         return "timeout"

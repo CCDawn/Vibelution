@@ -91,6 +91,24 @@ def test_explicit_models_url_override_is_the_only_candidate() -> None:
     )
 
 
+@pytest.mark.parametrize(
+    ("adapter", "base_url", "expected"),
+    [
+        ("ollama", "http://127.0.0.1:11434/v1", ("http://127.0.0.1:11434/api/tags",)),
+        ("anthropic", "https://models.example/v1", ("https://models.example/v1/models",)),
+        ("gemini", "https://models.example/v1beta", ("https://models.example/v1beta/models",)),
+        ("manual", "https://models.example/v1", ()),
+    ],
+)
+def test_native_model_endpoint_defaults_are_resolved_by_adapter(
+    adapter: str,
+    base_url: str,
+    expected: tuple[str, ...],
+) -> None:
+    provider = {"base_url": base_url, "discovery": {"adapter": adapter}}
+    assert resolve_discovery_endpoints(provider, adapter) == expected
+
+
 def test_provider_discovery_settings_exposes_typed_models_url_override() -> None:
     settings = ProviderDiscoverySettings(
         adapter="openai_compatible",
@@ -246,6 +264,74 @@ def test_native_adapters_use_native_auth_without_secret_in_endpoint_summary(
     assert result.models[0].upstream_id == expected_id
     assert all("native-secret" not in endpoint for endpoint in result.attempted_endpoints)
     assert "native-secret" not in repr(result)
+
+
+@pytest.mark.parametrize(
+    ("adapter", "base_url", "override", "payload", "expected_id"),
+    [
+        (
+            "anthropic",
+            "https://models.example",
+            "https://catalog.example/custom/anthropic-models",
+            {"data": [{"id": "claude-override"}]},
+            "claude-override",
+        ),
+        (
+            "gemini",
+            "https://models.example",
+            "https://catalog.example/custom/gemini-models",
+            {"models": [{"name": "models/gemini-override"}]},
+            "models/gemini-override",
+        ),
+        (
+            "ollama",
+            "http://127.0.0.1:11434",
+            "http://127.0.0.1:11434/custom/tags",
+            {"models": [{"name": "ollama-override"}]},
+            "ollama-override",
+        ),
+    ],
+)
+def test_http_native_adapters_use_override_as_the_only_real_endpoint(
+    monkeypatch,
+    tmp_path,
+    adapter: str,
+    base_url: str,
+    override: str,
+    payload: dict,
+    expected_id: str,
+) -> None:
+    monkeypatch.setenv("VIBELUTION_LLM_PROVIDER_LAB_API_KEY", "native-secret")
+    config = _config(adapter, base_url=base_url)
+    provider = config["llm"]["providers"]["lab"]
+    provider["driver"] = adapter if adapter in {"anthropic", "gemini"} else "openai"
+    provider["discovery"]["models_url_override"] = override
+    if adapter == "ollama":
+        provider.update(
+            {
+                "service_class": "local_runtime",
+                "auth_kind": "none",
+                "credential_ref": "none",
+                "requires_credential": False,
+            }
+        )
+    calls: list[tuple[str, str, str]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append((request.url.scheme, request.url.host, request.url.path))
+        return httpx.Response(200, json=payload)
+
+    result = discover_provider_models(
+        config,
+        "lab",
+        catalog_path=tmp_path / "state.json",
+        transport=httpx.MockTransport(handler),
+    )
+
+    expected_url = httpx.URL(override)
+    assert calls == [(expected_url.scheme, expected_url.host, expected_url.path)]
+    assert result.attempted_endpoints == (override,)
+    assert [model.upstream_id for model in result.models] == [expected_id]
 
 
 def test_empty_refresh_marks_stale_and_preserves_previous_catalog(monkeypatch, tmp_path) -> None:
@@ -408,8 +494,9 @@ def test_multi_candidate_discovery_preserves_safe_auth_failure_priority(
 @pytest.mark.parametrize(
     ("failure_kind", "expected_exception", "expected_error_type"),
     [
-        ("rate_limit", httpx.HTTPStatusError, "other"),
-        ("server_error", httpx.HTTPStatusError, "other"),
+        ("rate_limit", httpx.HTTPStatusError, "rate_limited"),
+        ("server_error", httpx.HTTPStatusError, "service_unavailable"),
+        ("upstream_error", httpx.HTTPStatusError, "upstream_unavailable"),
         ("timeout", httpx.TimeoutException, "timeout"),
         ("network", httpx.RequestError, "network"),
     ],
@@ -430,6 +517,8 @@ def test_non_route_failures_do_not_advance_discovery_candidates(
             return httpx.Response(429, json={"error": "failure-secret"})
         if failure_kind == "server_error":
             return httpx.Response(503, json={"error": "failure-secret"})
+        if failure_kind == "upstream_error":
+            return httpx.Response(502, json={"error": "failure-secret"})
         if failure_kind == "timeout":
             raise httpx.ReadTimeout("failure-secret", request=request)
         raise httpx.ConnectError("failure-secret", request=request)
@@ -445,7 +534,33 @@ def test_non_route_failures_do_not_advance_discovery_candidates(
 
     assert calls == ["/v2/models"]
     assert "failure-secret" not in str(raised.value)
-    assert load_model_catalog_state(path)["providers"]["lab"]["lastErrorType"] == expected_error_type
+    state = load_model_catalog_state(path)
+    assert state["providers"]["lab"]["lastErrorType"] == expected_error_type
+    assert "failure-secret" not in json.dumps(state)
+
+
+def test_exhausted_route_mismatches_are_classified_as_protocol_mismatch(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("VIBELUTION_LLM_PROVIDER_LAB_API_KEY", "secret")
+    calls: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request.url.path)
+        return httpx.Response(404 if len(calls) == 1 else 405, json={"error": "route mismatch"})
+
+    path = tmp_path / "state.json"
+    with pytest.raises(httpx.HTTPStatusError) as raised:
+        discover_provider_models(
+            _config("openai_compatible", base_url="https://models.example/v2"),
+            "lab",
+            catalog_path=path,
+            transport=httpx.MockTransport(handler),
+        )
+
+    assert calls == ["/v2/models", "/v1/models"]
+    assert raised.value.response.status_code == 405
+    provider = load_model_catalog_state(path)["providers"]["lab"]
+    assert provider["status"] == "protocol_mismatch"
+    assert provider["lastErrorType"] == "protocol_mismatch"
 
 
 def test_malformed_candidate_response_does_not_fall_through(monkeypatch, tmp_path) -> None:
@@ -538,6 +653,42 @@ def test_manual_adapter_performs_no_http_and_does_not_write_catalog(monkeypatch,
     assert result.adapter_id == "manual"
     assert result.models == ()
     assert not path.exists()
+
+
+@pytest.mark.parametrize(
+    "override",
+    ["https://169.254.169.254/latest/models", "not-a-valid-models-url"],
+)
+def test_manual_adapter_ignores_override_without_http_or_override_security_probe(
+    tmp_path,
+    override: str,
+) -> None:
+    config = _config("manual")
+    provider = config["llm"]["providers"]["lab"]
+    provider.update({"auth_kind": "none", "credential_ref": "none", "requires_credential": False})
+    provider["discovery"]["models_url_override"] = override
+    path = tmp_path / "state.json"
+
+    result = discover_provider_models(
+        config,
+        "lab",
+        catalog_path=path,
+        transport=httpx.MockTransport(lambda request: pytest.fail("manual adapter performed HTTP")),
+    )
+
+    assert result.attempted_endpoints == ()
+    assert not path.exists()
+
+
+def test_unsupported_adapter_error_precedes_unused_override_validation(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("VIBELUTION_LLM_PROVIDER_LAB_API_KEY", "secret")
+    config = _config("unsupported")
+    config["llm"]["providers"]["lab"]["discovery"]["models_url_override"] = (
+        "https://169.254.169.254/latest/models"
+    )
+
+    with pytest.raises(ValueError, match="unsupported provider discovery adapter: unsupported"):
+        discover_provider_models(config, "lab", catalog_path=tmp_path / "state.json")
 
 
 def test_discovery_rejects_non_v2_provider_identity_without_guessing(tmp_path) -> None:

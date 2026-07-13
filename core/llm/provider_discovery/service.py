@@ -20,7 +20,7 @@ from config.model_catalog import (
 )
 from config.paths import resolve_model_catalog_state_path
 
-from .adapters import get_provider_discovery_adapter
+from .adapters import get_provider_discovery_adapter, resolve_discovery_endpoints
 from .types import ProviderDiscoveryRequest, ProviderDiscoveryResult, assert_no_credential_taint
 
 
@@ -38,6 +38,26 @@ def _filter_models(result: ProviderDiscoveryResult, discovery: dict[str, Any]) -
         and not any(fnmatch.fnmatchcase(model.upstream_id, pattern) for pattern in exclude)
     )
     return dataclasses.replace(result, models=models)
+
+
+def _classify_discovery_failure(exc: Exception) -> tuple[str, str]:
+    if isinstance(exc, httpx.HTTPStatusError):
+        status_code = exc.response.status_code
+        if status_code in {401, 403}:
+            return "auth_failed", "auth_failed"
+        if status_code in {404, 405}:
+            return "protocol_mismatch", "protocol_mismatch"
+        if status_code == 429:
+            return "rate_limited", ""
+        if status_code == 503:
+            return "service_unavailable", ""
+        if 500 <= status_code <= 599:
+            return "upstream_unavailable", ""
+    if isinstance(exc, httpx.TimeoutException):
+        return "timeout", ""
+    if isinstance(exc, httpx.RequestError):
+        return "network", ""
+    return type(exc).__name__, ""
 
 
 def discover_provider_models(
@@ -61,8 +81,9 @@ def discover_provider_models(
         raise ValueError("provider credential is missing")
     discovery = provider.get("discovery", {}) if isinstance(provider.get("discovery"), dict) else {}
     adapter_id = str(discovery.get("adapter") or "manual").strip().lower()
+    adapter = get_provider_discovery_adapter(adapter_id)
     models_url_override = str(discovery.get("models_url_override") or "").strip()
-    if models_url_override:
+    if models_url_override and resolve_discovery_endpoints(provider, adapter_id):
         override_provider = copy.deepcopy(provider)
         override_provider["base_url"] = models_url_override
         validate_llm_provider_target(
@@ -70,7 +91,6 @@ def discover_provider_models(
             context="llm.provider.discovery.models_url_override",
             resolve_dns=True,
         )
-    adapter = get_provider_discovery_adapter(adapter_id)
     request = ProviderDiscoveryRequest(
         provider_id=canonical_provider_id,
         provider=copy.deepcopy(provider),
@@ -99,22 +119,12 @@ def discover_provider_models(
         save_model_catalog_state(updated, path)
         return result
     except Exception as exc:
-        status = (
-            "auth_failed"
-            if isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code in {401, 403}
-            else ""
-        )
+        error_type, status = _classify_discovery_failure(exc)
         failed = record_discovery_failure(
             state,
             provider_id=canonical_provider_id,
             attempted_at=attempted_at,
-            error_type=(
-                "timeout"
-                if isinstance(exc, httpx.TimeoutException)
-                else "network"
-                if isinstance(exc, httpx.RequestError)
-                else type(exc).__name__
-            ),
+            error_type=error_type,
             status=status,
         )
         save_model_catalog_state(failed, path)
