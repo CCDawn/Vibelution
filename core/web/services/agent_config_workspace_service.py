@@ -29,6 +29,7 @@ from .agent_directory_service import normalize_agent_llm_bindings
 from .agent_directory_service import registry_path
 from .agent_directory_service import session_agent_visibility
 from .agent_mode_binding_service import get_mode_bindings_payload, mode_binding_path
+from .agent_model_candidate_service import list_agent_model_candidates
 from .prompt_template_service import get_prompt_template, list_prompt_templates, prompt_template_path
 from .runtime_scene_service import record_runtime_scene_event
 
@@ -199,7 +200,7 @@ def _build_agent_config_workspace(
         lambda: get_mode_bindings_payload(agent_options=active_agent_options),
     )
     prompt_workspace = _timed_stage(timings, "prompt_templates", _safe_prompt_workspace)
-    config_workspace = _timed_stage(timings, "model_config", _safe_config_workspace)
+    candidate_payload = _timed_stage(timings, "agent_model_candidates", list_agent_model_candidates)
     chat_rooms = _timed_stage(timings, "chat_rooms", lambda: _safe_chat_rooms_for_agents(agents))
     teams = _timed_stage(timings, "teams", lambda: _visible_agent_config_teams(_safe_teams()))
     policy_options = _timed_stage(timings, "policy_options", lambda: _safe_policy_options(agents=agents))
@@ -215,12 +216,11 @@ def _build_agent_config_workspace(
         for item in prompt_workspace.get("templates") or []
         if str(item.get("promptTemplateId") or item.get("templateId") or "")
     }
-    model_options = list(config_workspace.get("modelOptions") or [])
-    agent_model_choices = _agent_model_choices(model_options)
+    agent_model_choices = list(candidate_payload.get("candidates") or [])
     model_refs = {
-        str(item.get("modelId") or ""): item
+        str(item.get("modelRef") or item.get("modelId") or ""): item
         for item in agent_model_choices
-        if str(item.get("modelId") or "")
+        if str(item.get("modelRef") or item.get("modelId") or "")
     }
 
     references = _timed_stage(
@@ -291,6 +291,7 @@ def _build_agent_config_workspace(
     load_modes["teams"] = "graph_references"
     payload = {
         "schemaVersion": SCHEMA_VERSION,
+        "operatorConfigHash": str(candidate_payload.get("operatorConfigHash") or ""),
         "generatedAt": _now(),
         "storage": {
             "agentRegistryPath": _relative_path(registry_path),
@@ -305,7 +306,7 @@ def _build_agent_config_workspace(
         "promptTemplates": _workspace_prompt_template_summaries(prompt_workspace.get("templates") or []),
         "agentLlmSlots": _agent_llm_slots(),
         "agentModelChoices": agent_model_choices,
-        "modelOptions": config_workspace.get("modelOptions") or [],
+        "modelOptions": candidate_payload.get("modelOptions") or [],
         "toolPolicies": policy_options.get("toolPolicies") or [],
         "memoryPolicies": policy_options.get("memoryPolicies") or [],
         "chatRooms": _compact_chat_rooms(chat_rooms),

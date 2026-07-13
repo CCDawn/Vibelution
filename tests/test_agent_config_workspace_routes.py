@@ -78,6 +78,7 @@ def test_agent_config_workspace_api_route(tmp_path, monkeypatch):
     calls = []
     route_payload = {
         "schemaVersion": 1,
+        "operatorConfigHash": "same-snapshot-hash",
         "summary": {"agentCount": 1},
         "toolPolicies": [{"policyId": "default"}],
         "memoryPolicies": [{"policyId": "default"}],
@@ -101,6 +102,7 @@ def test_agent_config_workspace_api_route(tmp_path, monkeypatch):
     assert registered_routes
     assert calls == [{"use_cache": True, "include_runtime": True}]
     assert payload["schemaVersion"] == 1
+    assert payload["operatorConfigHash"] == "same-snapshot-hash"
     assert payload["summary"]["agentCount"] >= 1
     assert any(item["policyId"] == "default" for item in payload["toolPolicies"])
     assert payload["memoryPolicies"]
