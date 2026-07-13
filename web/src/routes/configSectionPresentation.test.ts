@@ -182,14 +182,15 @@ describe("progressive config section presentation", () => {
 
   it("keeps everyday interface and operator controls in the common tier", () => {
     expect(configSectionPresentation("analysis", "zh")).toMatchObject({
-      sectionTitle: "分析数据存储",
-      sectionSummary: "设置分析结果、反馈数据和知识资产在工作区中的存放位置。",
+      sectionTitle: "分析数据路径（高级）",
+      sectionSummary: "仅在需要自定义工作区存储结构时修改；默认路径可直接使用。",
       layout: "compact_paths",
       commonPaths: [
         "analysis.data_dir",
         "analysis.feedback_dir",
       ],
-      advancedTitle: "知识资产路径",
+      commonTitle: "工作区数据目录",
+      advancedTitle: "知识资产路径（高级）",
     });
     expect(configSectionPresentation("ui", "zh")).toMatchObject({
       sectionTitle: "界面外观",
@@ -256,7 +257,7 @@ describe("progressive config section presentation", () => {
     });
     expect(configSectionExpandedByDefault("git-commit-model")).toBe(true);
     expect(configSectionExpandedByDefault("git-commit-prompt")).toBe(false);
-    expect(configSectionExpandedByDefault("analysis")).toBe(true);
+    expect(configSectionExpandedByDefault("analysis")).toBe(false);
   });
 
   it("keeps profile identity visible while treating agent reference text as advanced", () => {
@@ -329,7 +330,10 @@ describe("progressive config section presentation", () => {
     expect(configSectionFieldCopy("llm.discovery.output_reserve_ratio", "en")?.label).toBe("Output reserve ratio");
     expect(configSectionFieldCopy("analysis.pattern_library_path", "en")?.label).toBe("Pattern library file");
     expect(configSectionFieldCopy("git.commit_message_model_ref", "en")?.label).toBe("Commit message model");
-    expect(configSectionPresentation("analysis", "en")?.advancedTitle).toBe("Knowledge asset paths");
+    expect(configSectionPresentation("analysis", "en")).toMatchObject({
+      sectionTitle: "Analysis data paths (advanced)",
+      advancedTitle: "Knowledge asset paths (advanced)",
+    });
     expect(configSectionPresentation("user-profile", "en")?.advancedTitle).toBe("Agent reference information (advanced)");
   });
 });

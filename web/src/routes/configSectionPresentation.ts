@@ -193,14 +193,14 @@ const SECTION_PRESENTATION: Record<
       advancedCountLabel: (count) => `${count} 项`,
     },
     analysis: {
-      sectionTitle: "分析数据存储",
-      sectionSummary: "设置分析结果、反馈数据和知识资产在工作区中的存放位置。",
+      sectionTitle: "分析数据路径（高级）",
+      sectionSummary: "仅在需要自定义工作区存储结构时修改；默认路径可直接使用。",
       layout: "compact_paths",
       commonPaths: ANALYSIS_COMMON_PATHS,
-      commonTitle: "常用目录",
-      commonHint: "日常只需指定分析结果与反馈数据目录。",
-      advancedTitle: "知识资产路径",
-      advancedHint: "知识图谱与模式库文件位置通常保持默认。",
+      commonTitle: "工作区数据目录",
+      commonHint: "分析结果与反馈目录通常保持默认，仅在迁移数据时调整。",
+      advancedTitle: "知识资产路径（高级）",
+      advancedHint: "知识图谱与模式库文件位置通常无需修改。",
       advancedCountLabel: (count) => `${count} 项`,
     },
     "git-commit-model": {
@@ -326,14 +326,14 @@ const SECTION_PRESENTATION: Record<
       advancedCountLabel: (count) => `${count} fields`,
     },
     analysis: {
-      sectionTitle: "Analysis data storage",
-      sectionSummary: "Choose where analysis results, feedback, and knowledge assets are stored in the workspace.",
+      sectionTitle: "Analysis data paths (advanced)",
+      sectionSummary: "Change these only when customizing the workspace storage layout; the defaults are ready to use.",
       layout: "compact_paths",
       commonPaths: ANALYSIS_COMMON_PATHS,
-      commonTitle: "Common directories",
-      commonHint: "Everyday setup only needs the analysis and feedback directories.",
-      advancedTitle: "Knowledge asset paths",
-      advancedHint: "Knowledge graph and pattern library files usually keep their defaults.",
+      commonTitle: "Workspace data directories",
+      commonHint: "Keep analysis and feedback directories at their defaults unless moving workspace data.",
+      advancedTitle: "Knowledge asset paths (advanced)",
+      advancedHint: "Knowledge graph and pattern library file locations rarely need changes.",
       advancedCountLabel: (count) => `${count} fields`,
     },
     "git-commit-model": {
@@ -540,7 +540,7 @@ export function configSectionPresentation(
 }
 
 export function configSectionExpandedByDefault(sectionId: string): boolean {
-  return sectionId !== "git-commit-prompt";
+  return !["git-commit-prompt", "analysis"].includes(sectionId);
 }
 
 export function isCommonConfigSectionEntry(sectionId: string, absolutePath: string): boolean {
