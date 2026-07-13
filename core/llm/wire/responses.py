@@ -19,6 +19,7 @@ from ..semantic_messages import (
     ToolResultPart,
 )
 from ..streaming import ResponsesToolCallAccumulator
+from ..usage import usage_diagnostic_summary_from_payload
 from ..types import (
     CanonicalItemIdentity,
     CanonicalToolCall,
@@ -607,16 +608,11 @@ class _ResponsesTurnAssembler:
         usage = _as_dict(response.get("usage"))
         if not usage:
             return None
-        summary = {
-            "inputTokens": int(usage.get("input_tokens") or 0),
-            "outputTokens": int(usage.get("output_tokens") or 0),
-            "totalTokens": int(usage.get("total_tokens") or 0),
-        }
         return self._emit(
             "usage_updated",
             status="observed",
             provider_event_type=event_type,
-            diagnostic_summary=summary,
+            diagnostic_summary=usage_diagnostic_summary_from_payload(usage),
         )
 
     def _capture_replay_item(self, item_id: str, item: Mapping[str, Any]) -> None:

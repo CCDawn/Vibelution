@@ -2558,7 +2558,7 @@ def test_invoke_logs_prompt_cache_order_with_history_before_volatile_context(mon
     assert diagnostics["stableCachePrefixChars"] == len("stable-system") + len("history-user") + len("history-assistant")
     assert diagnostics["stableCachePrefixEndReason"] == "before_volatile_context"
     assert diagnostics["stableCachePrefixHash"]
-    assert fields["messageOrderProfile"][3]["role"] == "user"
+    assert fields["messageOrderProfile"][3]["role"] == "system"
     assert fields["messageOrderProfile"][3]["volatileContext"] is True
 
 
