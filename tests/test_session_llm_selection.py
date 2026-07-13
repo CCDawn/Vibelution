@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import copy
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -77,7 +79,8 @@ def test_schema_v2_credential_refs_restore_provider_key_env_names():
 def _model_choices() -> list[dict]:
     return [
         {
-            "modelId": "relay_gpt_5_6_luna",
+            "modelId": "ai-pixel/gpt-5.6-luna",
+            "modelRef": "ai-pixel/gpt-5.6-luna",
             "label": "gpt-5.6-luna",
             "model": "gpt-5.6-luna",
             "providerId": "ai-pixel",
@@ -97,6 +100,7 @@ def _model_choices() -> list[dict]:
         },
         {
             "modelId": "local_qwen",
+            "modelRef": "local/qwen",
             "label": "Qwen Local",
             "model": "qwen3.6",
             "providerId": "local",
@@ -114,32 +118,25 @@ def _model_choices() -> list[dict]:
 
 
 def test_session_llm_options_expose_current_model_and_effort(monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setattr(
-        agent_config_workspace_service,
-        "list_agent_model_choices",
-        lambda: _model_choices(),
-        raising=False,
-    )
+    monkeypatch.setattr(session_service, "_ensure_session_reasoning_effort_initialized", lambda _session_id: "high")
+    monkeypatch.setattr(session_service, "_session_fixed_model_choice", lambda _session_id: _model_choices()[0])
     monkeypatch.setattr(
         session_service,
         "get_session_detail",
         lambda _session_id, **_kwargs: {
             "id": "session-live",
             "agentId": "agent-live",
-            "dialogueModelId": "relay_gpt_5_6_luna",
+            "dialogueModelId": "ai-pixel/gpt-5.6-luna",
             "reasoningEffort": "high",
         },
     )
-    monkeypatch.setattr(session_service, "_default_session_dialogue_model_id", lambda: "relay_gpt_5_6_luna")
-
     payload = session_service.get_session_llm_options("session-live")
 
     assert payload["sessionId"] == "session-live"
-    assert payload["currentModelId"] == "relay_gpt_5_6_luna"
+    assert payload["currentModelId"] == "ai-pixel/gpt-5.6-luna"
     assert payload["currentReasoningEffort"] == "high"
-    assert payload["models"][0]["isDefault"] is True
-    assert payload["models"][0]["defaultReasoningEffort"] == "medium"
-    assert [item["value"] for item in payload["models"][0]["reasoningEffortOptions"]] == ["low", "medium", "high"]
+    assert payload["model"]["modelRef"] == "ai-pixel/gpt-5.6-luna"
+    assert "models" not in payload
 
 
 def test_agent_model_choices_preserve_model_specific_reasoning_efforts():
@@ -184,87 +181,95 @@ def test_public_agent_model_choice_loader_uses_compact_config_workspace(monkeypa
     assert agent_config_workspace_service.list_agent_model_choices()[0]["modelId"] == "local"
 
 
-def test_session_llm_selection_updates_model_and_effort_atomically(monkeypatch: pytest.MonkeyPatch):
-    original_agent = {
-        "agentId": "agent-live",
-        "llmBindings": {
-            "dialogue": {"modelId": "local_qwen"},
-            "vision": {"modelId": "vision-model"},
-        },
-        "metadata": {"llmReasoningEffort": {"summary": "low"}, "kept": True},
+def _install_chat_state(monkeypatch: pytest.MonkeyPatch, efforts: dict[str, str]) -> dict:
+    state = {
+        "conversations": [
+            {
+                "conversation_id": session_id,
+                "agent_id": "agent-live",
+                "reasoning_effort": effort,
+                "updated_at": "2026-07-13T00:00:00Z",
+            }
+            for session_id, effort in efforts.items()
+        ]
     }
-    captured: dict = {}
-    monkeypatch.setattr(agent_config_workspace_service, "list_agent_model_choices", lambda: _model_choices(), raising=False)
+
+    def save_state(_project_root, payload):
+        state.clear()
+        state.update(copy.deepcopy(payload))
+
+    monkeypatch.setattr(session_service, "load_chat_state", lambda _project_root: copy.deepcopy(state))
+    monkeypatch.setattr(session_service, "save_chat_state", save_state)
+    monkeypatch.setattr(session_service, "record_runtime_scene_event", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(
         session_service,
         "get_session_detail",
-        lambda _session_id, **_kwargs: {"id": "session-live", "agentId": "agent-live"},
+        lambda session_id, **_kwargs: {
+            "id": session_id,
+            "agentId": "agent-live",
+            "reasoningEffort": next(
+                item.get("reasoning_effort", "")
+                for item in state["conversations"]
+                if item["conversation_id"] == session_id
+            ),
+        },
     )
-    monkeypatch.setattr(session_service, "get_agent", lambda _agent_id, **_kwargs: original_agent)
+    return state
+
+
+def test_session_effort_update_never_writes_agent(monkeypatch: pytest.MonkeyPatch):
+    state = _install_chat_state(monkeypatch, {"session-live": "medium"})
+    update_agent_calls = []
+    monkeypatch.setattr(session_service, "update_agent_instance", lambda *args, **kwargs: update_agent_calls.append((args, kwargs)))
     monkeypatch.setattr(session_service, "_is_session_running", lambda _session_id: False)
+    monkeypatch.setattr(session_service, "_session_fixed_model_choice", lambda _session_id: _model_choices()[0])
     monkeypatch.setattr(session_service, "_invalidate_session_list_cache", lambda: None)
 
-    def fake_update(agent_id: str, **kwargs):
-        captured.update({"agentId": agent_id, **kwargs})
-        return {
-            **original_agent,
-            "llmBindings": kwargs["llm_bindings"],
-            "metadata": {**original_agent["metadata"], **kwargs["metadata"]},
-        }
+    payload = session_service.update_session_reasoning_effort("session-live", reasoning_effort="high")
 
-    monkeypatch.setattr(session_service, "update_agent_instance", fake_update)
-
-    payload = session_service.update_session_llm_selection(
-        "session-live",
-        model_id="relay_gpt_5_6_luna",
-        reasoning_effort="high",
-    )
-
-    assert captured["agentId"] == "agent-live"
-    assert captured["llm_bindings"] == {
-        "dialogue": {"modelId": "relay_gpt_5_6_luna"},
-        "vision": {"modelId": "vision-model"},
-    }
-    assert captured["metadata"]["llmReasoningEffort"] == {"summary": "low", "dialogue": "high"}
-    assert payload["currentModelId"] == "relay_gpt_5_6_luna"
+    assert payload["currentModelId"] == "ai-pixel/gpt-5.6-luna"
     assert payload["currentReasoningEffort"] == "high"
+    assert payload["model"]["modelRef"] == "ai-pixel/gpt-5.6-luna"
+    assert "models" not in payload
+    assert update_agent_calls == []
+    assert state["conversations"][0]["reasoning_effort"] == "high"
 
 
-def test_session_llm_selection_rejects_unsupported_effort_without_partial_update(monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setattr(agent_config_workspace_service, "list_agent_model_choices", lambda: _model_choices(), raising=False)
-    monkeypatch.setattr(
-        session_service,
-        "get_session_detail",
-        lambda _session_id, **_kwargs: {"id": "session-live", "agentId": "agent-live"},
-    )
-    monkeypatch.setattr(session_service, "get_agent", lambda _agent_id, **_kwargs: {"agentId": "agent-live"})
+def test_two_sessions_keep_independent_efforts(monkeypatch: pytest.MonkeyPatch):
+    state = _install_chat_state(monkeypatch, {"session-a": "low", "session-b": "high"})
     monkeypatch.setattr(session_service, "_is_session_running", lambda _session_id: False)
-    update_calls: list[dict] = []
-    monkeypatch.setattr(session_service, "update_agent_instance", lambda *_args, **kwargs: update_calls.append(kwargs))
+    monkeypatch.setattr(session_service, "_session_fixed_model_choice", lambda _session_id: _model_choices()[0])
+    monkeypatch.setattr(session_service, "_invalidate_session_list_cache", lambda: None)
+
+    session_service.update_session_reasoning_effort("session-a", reasoning_effort="medium")
+
+    efforts = {item["conversation_id"]: item["reasoning_effort"] for item in state["conversations"]}
+    assert efforts == {"session-a": "medium", "session-b": "high"}
+
+
+def test_session_reasoning_effort_rejects_unsupported_value_without_partial_update(monkeypatch: pytest.MonkeyPatch):
+    state = _install_chat_state(monkeypatch, {"session-live": "medium"})
+    monkeypatch.setattr(session_service, "_session_fixed_model_choice", lambda _session_id: _model_choices()[0])
 
     with pytest.raises(session_service.SessionValidationError, match="不支持推理强度"):
-        session_service.update_session_llm_selection(
-            "session-live",
-            model_id="local_qwen",
-            reasoning_effort="high",
-        )
+        session_service.update_session_reasoning_effort("session-live", reasoning_effort="xhigh")
 
-    assert update_calls == []
+    assert state["conversations"][0]["reasoning_effort"] == "medium"
 
 
-def test_session_llm_selection_routes(monkeypatch: pytest.MonkeyPatch):
+def test_session_reasoning_effort_routes(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(
         sessions_route,
         "get_session_llm_options",
-        lambda session_id: {"sessionId": session_id, "models": _model_choices()},
+        lambda session_id: {"sessionId": session_id, "model": _model_choices()[0]},
         raising=False,
     )
     monkeypatch.setattr(
         sessions_route,
-        "update_session_llm_selection",
-        lambda session_id, *, model_id, reasoning_effort: {
+        "update_session_reasoning_effort",
+        lambda session_id, *, reasoning_effort: {
             "sessionId": session_id,
-            "currentModelId": model_id,
+            "currentModelId": "ai-pixel/gpt-5.6-luna",
             "currentReasoningEffort": reasoning_effort,
         },
         raising=False,
@@ -272,11 +277,21 @@ def test_session_llm_selection_routes(monkeypatch: pytest.MonkeyPatch):
 
     options_response = client.get("/api/sessions/session-live/llm-options")
     update_response = client.patch(
+        "/api/sessions/session-live/reasoning-effort",
+        json={"reasoningEffort": "high"},
+    )
+    legacy_payload_response = client.patch(
+        "/api/sessions/session-live/reasoning-effort",
+        json={"modelId": "ai-pixel/gpt-5.6-luna", "reasoningEffort": "high"},
+    )
+    removed_route_response = client.patch(
         "/api/sessions/session-live/llm-selection",
-        json={"modelId": "relay_gpt_5_6_luna", "reasoningEffort": "high"},
+        json={"modelId": "ai-pixel/gpt-5.6-luna", "reasoningEffort": "high"},
     )
 
     assert options_response.status_code == 200
-    assert options_response.json()["models"][0]["modelId"] == "relay_gpt_5_6_luna"
+    assert options_response.json()["model"]["modelRef"] == "ai-pixel/gpt-5.6-luna"
     assert update_response.status_code == 200
     assert update_response.json()["currentReasoningEffort"] == "high"
+    assert legacy_payload_response.status_code == 422
+    assert removed_route_response.status_code in {404, 405}

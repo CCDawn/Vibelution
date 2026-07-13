@@ -1,9 +1,11 @@
 import copy
+from types import SimpleNamespace
 
 from langchain_core.messages import AIMessage, ToolMessage
 import pytest
 
 from core.llm.client import LLMClient
+from core.llm.reasoning_effort import resolve_reasoning_effort_request
 from core.llm.types import LLMError
 from tests.helpers.isolated_config import isolated_settings_config
 
@@ -40,6 +42,30 @@ def make_vllm_qwen_config(**kwargs):
     }
     values.update(kwargs)
     return make_config(**values)
+
+
+@pytest.mark.parametrize(
+    ("adapter", "mapping", "expected_payload", "expected_effective"),
+    [
+        ("reasoning_object", {"xhigh": "high"}, {"reasoning": {"effort": "high"}}, "high"),
+        ("reasoning_effort", {}, {"reasoning_effort": "xhigh"}, "xhigh"),
+        ("thinking_toggle", {"xhigh": "on"}, {"enable_thinking": True}, "on"),
+        ("none", {}, {}, ""),
+    ],
+)
+def test_reasoning_effort_request_adapter_mapping(adapter, mapping, expected_payload, expected_effective):
+    resolution = resolve_reasoning_effort_request(
+        SimpleNamespace(
+            reasoning_effort="xhigh",
+            reasoning_effort_adapter=adapter,
+            reasoning_effort_map=mapping,
+        )
+    )
+
+    assert resolution.requested == "xhigh"
+    assert resolution.effective == expected_effective
+    assert resolution.adapter == (adapter if adapter != "none" else "none")
+    assert resolution.payload == expected_payload
 
 
 def test_disabled_prompt_cache_strips_cache_control_without_mutating_messages():

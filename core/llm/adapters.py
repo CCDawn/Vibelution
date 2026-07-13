@@ -15,7 +15,12 @@ from urllib.parse import urlparse
 
 from config import LLMProfile, ProviderConfig
 
-from .reasoning_effort import model_supports_gpt_reasoning_effort, normalize_reasoning_effort
+from .reasoning_effort import (
+    ReasoningEffortResolution,
+    model_supports_gpt_reasoning_effort,
+    normalize_reasoning_effort,
+    resolve_reasoning_effort_request,
+)
 from .schema import sanitize_tool_schema
 from .streaming import LiteLLMStreamNormalizer
 from .types import LLMCapabilities
@@ -200,16 +205,38 @@ class ProviderAdapter:
         return {"temperature": self.payload_temperature()}
 
     def payload_thinking_parameters(self) -> Dict[str, Any]:
+        return self._reasoning_effort_resolution().payload
+
+    def reasoning_effort_log_fields(self) -> Dict[str, str]:
+        resolution = self._reasoning_effort_resolution()
+        return {
+            "reasoningEffortRequested": resolution.requested,
+            "reasoningEffortEffective": resolution.effective,
+            "reasoningEffortAdapter": resolution.adapter,
+        }
+
+    def _reasoning_effort_resolution(self) -> ReasoningEffortResolution:
+        resolution = resolve_reasoning_effort_request(self.profile)
         effort = normalize_reasoning_effort(getattr(self.profile, "reasoning_effort", ""))
-        if effort and model_supports_gpt_reasoning_effort(
-            model=self.profile.model,
-            provider_kind=self.kind,
-            transport=getattr(self.profile, "transport", ""),
-            compat_mode=self.compat_mode,
-            provider_api=getattr(self.provider, "api", ""),
+        if (
+            resolution.adapter == "none"
+            and effort
+            and bool(getattr(self.provider, "legacy_inference_allowed", True))
+            and model_supports_gpt_reasoning_effort(
+                model=self.profile.model,
+                provider_kind=self.kind,
+                transport=getattr(self.profile, "transport", ""),
+                compat_mode=self.compat_mode,
+                provider_api=getattr(self.provider, "api", ""),
+            )
         ):
-            return {"reasoning": {"effort": effort}}
-        return {}
+            return ReasoningEffortResolution(
+                effort,
+                effort,
+                "reasoning_object",
+                {"reasoning": {"effort": effort}},
+            )
+        return resolution
 
     def supports_explicit_tool_choice(self) -> bool:
         if self.uses_openai_gpt5_chat_constraints():
