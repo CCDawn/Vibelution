@@ -16,6 +16,11 @@ from core.llm.semantic_messages import (
     ToolCallPart,
     ToolResultPart,
 )
+from core.llm.semantic_projector import (
+    SemanticProjectionError,
+    SemanticProjectionInput,
+    project_semantic_request,
+)
 from core.llm.types import (
     CanonicalItemIdentity,
     CanonicalToolCall,
@@ -51,16 +56,16 @@ def test_semantic_request_preserves_parts_without_openai_wire_shape():
         tool_name="lookup",
         output="result",
     )
-    message = SemanticMessage(
+    assistant_message = SemanticMessage(
         role="assistant",
         parts=(
             TextPart("progress"),
             ImagePart(uri="memory://image-1", media_type="image/png"),
             ToolCallPart(tool_call),
-            ToolResultPart(tool_result),
             ReasoningReplayPart("replay-item-1"),
         ),
     )
+    tool_message = SemanticMessage(role="tool", parts=(ToolResultPart(tool_result),))
     request = SemanticModelRequest(
         scope=InvocationScope(
             session_id="session-1",
@@ -68,7 +73,7 @@ def test_semantic_request_preserves_parts_without_openai_wire_shape():
             invocation_id="invocation-1",
             iteration=2,
         ),
-        messages=(message,),
+        messages=(assistant_message, tool_message),
         tools=(
             SemanticToolDefinition(
                 name="lookup",
@@ -78,15 +83,109 @@ def test_semantic_request_preserves_parts_without_openai_wire_shape():
         settings=SemanticGenerationSettings(max_output_tokens=64, stream=True),
     )
 
-    assert request.messages[0].parts == message.parts
+    assert request.messages[0].parts == assistant_message.parts
     assert request.messages[0].parts[2].call is tool_call
-    assert request.messages[0].parts[3].result is tool_result
-    assert request.messages[0].parts[4].replay_item_id == "replay-item-1"
+    assert request.messages[0].parts[3].replay_item_id == "replay-item-1"
+    assert request.messages[1].parts[0].result is tool_result
     assert not hasattr(request.messages[0], "tool_calls")
     with pytest.raises(TypeError):
         tool_call.arguments["query"] = "changed"
     with pytest.raises(TypeError):
         request.tools[0].input_schema["properties"]["query"]["type"] = "number"
+
+
+def _project(messages):
+    return project_semantic_request(
+        SemanticProjectionInput(
+            messages=messages,
+            tools=(),
+            scope=InvocationScope(session_id="session-1", turn_id="turn-1", invocation_id="invocation-1", iteration=0),
+            settings=SemanticGenerationSettings(max_output_tokens=64),
+            tool_to_schema=lambda tool: tool,
+        )
+    )
+
+
+def test_semantic_projector_preserves_complete_parallel_tool_chain():
+    request = _project(
+        (
+            {"role": "user", "content": "look up both"},
+            {
+                "role": "assistant",
+                "content": "checking",
+                "tool_calls": (
+                    {"id": "call-a", "name": "first", "args": {"value": "a"}},
+                    {"id": "call-b", "name": "second", "args": {"value": "b"}},
+                ),
+            },
+            {"role": "tool", "tool_call_id": "call-a", "content": "A"},
+            {"role": "tool", "tool_call_id": "call-b", "content": "B"},
+            {"role": "assistant", "content": "both done"},
+            {"role": "user", "content": "continue"},
+        )
+    )
+
+    calls = [part.call.call_id for part in request.messages[1].parts if isinstance(part, ToolCallPart)]
+    results = [message.parts[0].result.call_id for message in request.messages[2:4]]
+    assert calls == ["call-a", "call-b"]
+    assert results == ["call-a", "call-b"]
+    assert [message.role for message in request.messages] == ["user", "assistant", "tool", "tool", "assistant", "user"]
+
+
+def test_semantic_projector_rejects_incomplete_tool_chain():
+    with pytest.raises(SemanticProjectionError) as error:
+        _project(
+            (
+                {"role": "assistant", "tool_calls": ({"id": "call-a", "name": "first", "args": {}},)},
+            )
+        )
+
+    assert error.value.code == "unresolved_tool_call"
+
+
+def test_semantic_projector_allows_parallel_results_in_semantic_completion_order():
+    request = _project(
+        (
+            {
+                "role": "assistant",
+                "tool_calls": (
+                    {"id": "call-a", "name": "first", "args": {}},
+                    {"id": "call-b", "name": "second", "args": {}},
+                ),
+            },
+            {"role": "tool", "tool_call_id": "call-b", "content": "B"},
+            {"role": "tool", "tool_call_id": "call-a", "content": "A"},
+            {"role": "assistant", "content": "both done"},
+        )
+    )
+
+    assert [message.parts[0].result.call_id for message in request.messages[1:3]] == ["call-b", "call-a"]
+
+
+@pytest.mark.parametrize(
+    "interruption",
+    [
+        {"role": "user", "content": "continue too early"},
+        {"role": "assistant", "content": "ordinary assistant text"},
+    ],
+)
+def test_semantic_projector_rejects_message_interrupting_unresolved_parallel_calls(interruption):
+    with pytest.raises(SemanticProjectionError) as error:
+        _project(
+            (
+                {
+                    "role": "assistant",
+                    "tool_calls": (
+                        {"id": "call-a", "name": "first", "args": {}},
+                        {"id": "call-b", "name": "second", "args": {}},
+                    ),
+                },
+                {"role": "tool", "tool_call_id": "call-b", "content": "B"},
+                interruption,
+            )
+        )
+
+    assert error.value.code == "interrupted_tool_chain"
 
 
 def test_semantic_request_requires_explicit_non_empty_invocation_scope():

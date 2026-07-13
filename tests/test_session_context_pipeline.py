@@ -8,6 +8,7 @@ import pytest
 from langchain_core.messages import ToolMessage
 
 from core.chat.context_assembler import assemble_conversation_context
+from core.chat.model_messages import ProviderMessageChain
 from core.chat.history_ledger import (
     build_history_events,
     search_history_events,
@@ -215,13 +216,140 @@ def test_context_assembler_keeps_recent_tool_results_complete_for_model_input(tm
         recent_message_limit=3,
         ledger_events=_ledger_events_from_messages(tmp_path, "session-a", messages),
     )
-    assert not any(item.get("tool_calls") for item in assembled.history_messages)
-    assert not any(item.get("role") == "tool" for item in assembled.history_messages)
-    tool_summary = next(item for item in assembled.history_messages if "历史工具结果: cli_tool" in str(item.get("content") or ""))
+    assistant_message = next(item for item in assembled.history_messages if item.get("tool_calls"))
+    tool_result = next(item for item in assembled.history_messages if item.get("role") == "tool")
 
-    assert full_result.strip() in tool_summary["content"]
-    assert "terminal-line\n" * 20 in tool_summary["content"]
-    assert "Windows detected" not in tool_summary["content"]
+    assert [call["id"] for call in assistant_message["tool_calls"]] == ["call-heavy"]
+    assert tool_result["tool_call_id"] == "call-heavy"
+    assert full_result.strip() in tool_result["content"]
+    assert "terminal-line\n" * 20 in tool_result["content"]
+    assert "Windows detected" not in tool_result["content"]
+
+
+def test_context_assembler_keeps_parallel_tool_chain_atomic_and_replacement_identity(tmp_path):
+    large_result = "parallel-result\n" * 200
+    append_conversation_event(
+        tmp_path,
+        "session-parallel",
+        "turn-parallel",
+        EVENT_ASSISTANT_MESSAGE,
+        status="completed",
+        payload={
+            "content": "",
+            "toolCalls": [
+                {"id": "call-a", "name": "read_file_tool", "arguments": {"path": "a.py"}},
+                {"id": "call-b", "name": "read_file_tool", "arguments": {"path": "b.py"}},
+            ],
+        },
+    )
+    for call_id, result in (("call-a", "result-a"), ("call-b", large_result)):
+        append_conversation_event(
+            tmp_path,
+            "session-parallel",
+            "turn-parallel",
+            EVENT_TOOL_RESULT,
+            status="done",
+            payload={
+                "toolCall": {
+                    "id": call_id,
+                    "name": "read_file_tool",
+                    "status": "done",
+                    "result": result,
+                }
+            },
+            tool_call_id=call_id,
+        )
+
+    ledger_events = load_conversation_events(tmp_path, "session-parallel")
+    assembled = assemble_conversation_context(
+        [],
+        session_id="session-parallel",
+        recent_message_limit=2,
+        ledger_events=ledger_events,
+    )
+
+    assert assembled.history_messages == []
+
+    assembled = assemble_conversation_context(
+        [],
+        session_id="session-parallel",
+        recent_message_limit=3,
+        ledger_events=ledger_events,
+    )
+
+    assert [message["role"] for message in assembled.history_messages] == ["assistant", "tool", "tool"]
+    assert [call["id"] for call in assembled.history_messages[0]["tool_calls"]] == ["call-a", "call-b"]
+    assert [message["tool_call_id"] for message in assembled.history_messages[1:]] == ["call-a", "call-b"]
+
+    compressed = assemble_conversation_context(
+        [],
+        session_id="session-parallel",
+        recent_message_limit=3,
+        ledger_events=ledger_events,
+        replace_large_tool_results_for_compression=True,
+        tool_result_replacement_char_limit=200,
+    )
+    replaced_result = next(
+        message for message in compressed.history_messages if message.get("tool_call_id") == "call-b"
+    )
+    assert replaced_result["role"] == "tool"
+    assert replaced_result["tool_call_id"] == "call-b"
+    assert "tool-result-ref:session-parallel:call-b" in replaced_result["content"]
+
+
+def test_provider_message_chain_demotes_incomplete_and_orphan_tool_fragments():
+    chain = ProviderMessageChain.from_messages(
+        [
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {"id": "call-a", "type": "function", "function": {"name": "tool_a", "arguments": "{}"}},
+                    {"id": "call-b", "type": "function", "function": {"name": "tool_b", "arguments": "{}"}},
+                ],
+            },
+            {"role": "tool", "tool_call_id": "call-a", "content": "result-a"},
+            {"role": "user", "content": "continue"},
+            {"role": "tool", "tool_call_id": "call-orphan", "content": "orphan-result"},
+        ]
+    ).to_provider_payload()
+
+    assert not any(message.get("role") == "tool" for message in chain)
+    assert not any(message.get("tool_calls") for message in chain)
+    assert any("历史工具调用未返回结果: tool_b" in str(message.get("content") or "") for message in chain)
+    assert any(
+        message.get("metadata", {}).get("kind") == "historical_orphan_tool_result"
+        and message.get("metadata", {}).get("toolCallId") == "call-orphan"
+        for message in chain
+    )
+
+
+def test_provider_message_chain_preserves_legacy_duplicates_without_stable_identity():
+    chain = ProviderMessageChain.from_messages(
+        [
+            {"role": "assistant", "content": "legacy duplicate"},
+            {"role": "assistant", "content": "legacy duplicate"},
+        ]
+    ).to_provider_payload()
+
+    assert [message["content"] for message in chain] == ["legacy duplicate", "legacy duplicate"]
+
+
+def test_provider_message_chain_materializes_generator_once():
+    source = (
+        message
+        for message in [
+            {"role": "user", "content": "generator user"},
+            {"role": "assistant", "content": "generator answer"},
+        ]
+    )
+
+    chain = ProviderMessageChain.from_messages(source).to_provider_payload()
+
+    assert [(message["role"], message["content"]) for message in chain] == [
+        ("user", "generator user"),
+        ("assistant", "generator answer"),
+    ]
 
 
 def test_context_hash_tracks_canonical_tool_call_identity(tmp_path):
@@ -293,32 +421,32 @@ def test_context_assembler_replaces_large_tool_results_only_for_compression(tmp_
     ]
 
     ledger_events = _ledger_events_from_messages(tmp_path, "session-a", messages)
-    normal = assemble_conversation_context([], session_id="session-a", recent_message_limit=4, ledger_events=ledger_events)
-    normal_tool = next(
-        item for item in normal.history_messages if "历史工具结果: cli_tool" in str(item.get("content") or "")
-    )
-    assert normal_tool["role"] == "system"
-    assert normal_tool["metadata"]["promotedFromRole"] == "assistant"
+    normal = assemble_conversation_context([], session_id="session-a", recent_message_limit=2, ledger_events=ledger_events)
+    normal_assistant = next(item for item in normal.history_messages if item.get("tool_calls"))
+    normal_tool = next(item for item in normal.history_messages if item.get("role") == "tool")
+    assert [call["id"] for call in normal_assistant["tool_calls"]] == ["call_large"]
+    assert normal_tool["tool_call_id"] == "call_large"
     assert large_result.strip() in normal_tool["content"]
     assert normal.tool_result_replacement_state["replacements"] == []
 
     compressed = assemble_conversation_context(
         [],
         session_id="session-a",
-        recent_message_limit=4,
+        recent_message_limit=2,
         ledger_events=ledger_events,
         replace_large_tool_results_for_compression=True,
         tool_result_replacement_char_limit=200,
     )
-    compressed_tool = next(
-        item for item in compressed.history_messages if "历史工具结果: cli_tool" in str(item.get("content") or "")
-    )
+    compressed_assistant = next(item for item in compressed.history_messages if item.get("tool_calls"))
+    compressed_tool = next(item for item in compressed.history_messages if item.get("role") == "tool")
 
+    assert [call["id"] for call in compressed_assistant["tool_calls"]] == ["call_large"]
+    assert compressed_tool["tool_call_id"] == "call_large"
     assert large_result not in compressed_tool["content"]
     assert "tool-result-ref:" in compressed_tool["content"]
     assert "原始工具结果仍保存在会话历史" in compressed_tool["content"]
     assert compressed.tool_result_replacement_state["replacements"][0]["toolCallId"] == "call_large"
-    assert compressed.tool_result_replacement_state["replacements"][0]["originalChars"] == len(large_result.strip())
+    assert compressed.tool_result_replacement_state["replacements"][0]["originalChars"] == len(normal_tool["content"])
 
 
 def test_context_assembler_agent_inbox_profile_compacts_old_tool_noise(tmp_path):

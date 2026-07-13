@@ -9,6 +9,8 @@ from core.llm.provider_replay_state import (
     ReplayStateMismatchError,
     endpoint_fingerprint,
 )
+from core.llm.semantic_messages import InvocationScope, ReasoningReplayPart, SemanticGenerationSettings
+from core.llm.semantic_projector import SemanticProjectionInput, project_semantic_request
 
 
 def make_state(**overrides) -> ProviderReplayState:
@@ -79,6 +81,7 @@ def test_replay_state_repr_and_summary_never_expose_opaque_payload():
         "wireProtocol": "responses",
         "itemCount": 1,
         "byteSize": len(b"opaque-secret"),
+        "hasResponseId": False,
     }
 
 
@@ -89,3 +92,29 @@ def test_replay_state_enforces_item_and_byte_limits():
 
     with pytest.raises(ValueError, match="byte limit"):
         make_state(opaque_items=(OpaqueReplayItem(item_id="large", payload=b"x" * (MAX_REPLAY_BYTES + 1)),))
+
+
+def test_route_switch_projection_clears_replay_bookmark_when_state_is_discarded():
+    request = project_semantic_request(
+        SemanticProjectionInput(
+            messages=(
+                {
+                    "role": "assistant",
+                    "content": "canonical answer",
+                    "additional_kwargs": {"reasoning_replay_item_id": "reasoning-1"},
+                },
+                {"role": "user", "content": "continue"},
+            ),
+            tools=(),
+            scope=InvocationScope(session_id="session-1", turn_id="turn-2", invocation_id="invocation-2", iteration=0),
+            settings=SemanticGenerationSettings(max_output_tokens=32),
+            tool_to_schema=lambda tool: tool,
+            replay_state=None,
+        )
+    )
+
+    assert all(
+        not isinstance(part, ReasoningReplayPart)
+        for message in request.messages
+        for part in message.parts
+    )
