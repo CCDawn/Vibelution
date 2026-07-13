@@ -947,10 +947,13 @@ describe("config route copy", () => {
   it("names evolution intake separately from runtime mode", () => {
     expect(CONFIG_COPY.zh.runtimeProfile).toBe("运行档位");
     expect(CONFIG_COPY.zh.defaultMode).toBe("默认模式");
-    expect(CONFIG_COPY.zh.intakeMode).toBe("进化审核");
+    expect(CONFIG_COPY.zh.runtimeTitle).toBe("进化审核方式");
+    expect(CONFIG_COPY.zh.runtimeBody).toBe("手工操作适合逐步确认；自动审查会让进化任务直接进入审核流程。");
+    expect(CONFIG_COPY.zh.intakeMode).toBe("默认审核方式");
     expect(CONFIG_COPY.en.runtimeProfile).toBe("Runtime mode");
     expect(CONFIG_COPY.en.defaultMode).toBe("Default mode");
-    expect(CONFIG_COPY.en.intakeMode).toBe("Review intake");
+    expect(CONFIG_COPY.en.runtimeTitle).toBe("Evolution review mode");
+    expect(CONFIG_COPY.en.intakeMode).toBe("Default review mode");
   });
 
   it("keeps agent editing copy out of generic config", () => {

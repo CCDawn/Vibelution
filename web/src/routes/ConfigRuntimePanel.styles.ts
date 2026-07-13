@@ -8,28 +8,20 @@ const sectionHeaderSurface =
   "[border-bottom:1px_solid_var(--vui-border-subtle)] [background:color-mix(in_srgb,var(--vui-surface-toolbar)_72%,transparent)]";
 
 const styles = {
-  eyebrow:
-    "vui-routes-configruntimepanel eyebrow [margin:0] [color:var(--fg-tertiary)] [font-size:var(--vui-font-xs)] [text-transform:uppercase] [letter-spacing:0.08em]",
-  matrixCard:
-    `vui-routes-configruntimepanel matrixCard ${panelSurface} [display:grid] [gap:6px] [padding:8px]`,
-  matrixGrid:
-    "vui-routes-configruntimepanel matrixGrid [display:grid] [gap:8px] [grid-template-columns:repeat(auto-fit,minmax(220px,1fr))] max-[1400px]:[grid-template-columns:repeat(auto-fit,minmax(220px,1fr))] max-[720px]:[grid-template-columns:1fr]",
-  matrixTitle:
-    "vui-routes-configruntimepanel matrixTitle [margin:0] [color:var(--fg-tertiary)] [font-size:var(--vui-font-xs)] [text-transform:uppercase] [letter-spacing:0.06em]",
+  behaviorCopy:
+    "vui-routes-configruntimepanel behaviorCopy [display:grid] [gap:4px] [min-width:0] [&_strong]:[color:var(--fg-primary)] [&_strong]:[font-size:var(--vui-font-sm)] [&_strong]:[font-weight:700] [&_span]:[color:var(--fg-secondary)] [&_span]:[font-size:var(--vui-font-xs)] [&_span]:[line-height:1.4]",
+  behaviorRow:
+    "vui-routes-configruntimepanel behaviorRow [display:grid] [grid-template-columns:minmax(0,1fr)_auto] [align-items:center] [gap:24px] [padding:14px_var(--config-section-x)] [background:color-mix(in_srgb,var(--surface-card)_76%,var(--surface-panel))]",
   sectionHeader:
     `vui-routes-configruntimepanel sectionHeader [display:flex] [align-items:start] [justify-content:space-between] [gap:8px] [min-height:40px] [padding:7px_var(--config-section-x)] ${sectionHeaderSurface}`,
   sectionIcon:
     "vui-routes-configruntimepanel sectionIcon [color:var(--accent-warm-2)] [margin-top:1px]",
   sectionSurface:
-    `vui-routes-configruntimepanel sectionSurface ${panelSurface} [display:grid] [gap:0] [padding:0] [scroll-margin-top:84px] [overflow:visible] [&>_.sectionText]:[padding:6px_var(--config-section-x)_0] [&>_.sectionText]:[max-width:980px] [&>_.sectionText]:[font-size:var(--vui-font-xs)] [&>_:where(_.matrixGrid_)]:[margin:var(--config-section-y)_var(--config-section-x)_var(--config-section-x)] [&>_.sectionText_+_:where(_.matrixGrid_)]:[margin-top:6px]`,
-  sectionText:
-    "vui-routes-configruntimepanel sectionText [margin:0] [color:var(--fg-secondary)] [line-height:1.38]",
-  sectionTitle:
-    "vui-routes-configruntimepanel sectionTitle [margin:1px_0_0] [color:var(--fg-primary)] [font-size:1rem] [font-weight:700]",
+    `vui-routes-configruntimepanel sectionSurface ${panelSurface} [display:grid] [gap:0] [padding:0] [scroll-margin-top:84px] [overflow:visible]`,
   segmented:
-    "vui-routes-configruntimepanel segmented [display:inline-flex] [align-items:center] [gap:4px] [padding:3px] [border:1px_solid_var(--vui-border-subtle)] [border-radius:999px] [background:var(--vui-surface-toolbar)] [flex-wrap:wrap]",
+    "vui-routes-configruntimepanel segmented [display:inline-flex] [align-items:center] [justify-self:end] [gap:6px] [padding:4px] [border:1px_solid_var(--vui-border-subtle)] [border-radius:var(--control-radius)] [background:var(--vui-surface-toolbar)]",
   segmentButton:
-    `vui-routes-configruntimepanel segmentButton ${mutedControl}`,
+    `vui-routes-configruntimepanel segmentButton ${mutedControl} min-w-28 min-h-10 px-4`,
   segmentButtonActive:
     `vui-routes-configruntimepanel segmentButtonActive ${activeControl}`,
 };

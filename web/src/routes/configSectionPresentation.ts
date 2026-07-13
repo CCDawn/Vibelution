@@ -7,6 +7,7 @@ export type ConfigFieldPresentationCopy = {
 
 export type ProgressiveConfigSectionPresentation = {
   sectionTitle: string;
+  sectionSummary?: string;
   commonPaths: readonly string[];
   commonTitle: string;
   commonHint: string;
@@ -57,6 +58,12 @@ const LOG_COMMON_PATHS = [
 const DEBUG_COMMON_PATHS = [
   "debug.enabled",
   "debug.track_token_usage",
+] as const;
+
+const LLM_DISCOVERY_COMMON_PATHS = [
+  "llm.discovery.enabled",
+  "llm.discovery.timeout",
+  "llm.discovery.auto_adjust",
 ] as const;
 
 const SECTION_PRESENTATION: Record<
@@ -127,6 +134,16 @@ const SECTION_PRESENTATION: Record<
       advancedHint: "详细输出、LLM 和工具追踪会增加日志量，按需开启。",
       advancedCountLabel: (count) => `${count} 项`,
     },
+    "llm-discovery": {
+      sectionTitle: "模型发现",
+      sectionSummary: "控制工作台如何发现模型，以及无法读取模型限制时使用的回退值。",
+      commonPaths: LLM_DISCOVERY_COMMON_PATHS,
+      commonTitle: "常用设置",
+      commonHint: "日常只需决定是否启用、等待多久以及是否自动适配模型限制。",
+      advancedTitle: "回退参数",
+      advancedHint: "只有发现结果不准确时，才需要调整令牌上限和输出预留比例。",
+      advancedCountLabel: (count) => `${count} 项`,
+    },
   },
   en: {
     pet: {
@@ -192,6 +209,16 @@ const SECTION_PRESENTATION: Record<
       advancedHint: "Verbose, LLM, and tool tracing increase log volume and should be enabled only when needed.",
       advancedCountLabel: (count) => `${count} fields`,
     },
+    "llm-discovery": {
+      sectionTitle: "Model discovery",
+      sectionSummary: "Control model discovery and the fallback limits used when a provider cannot report them.",
+      commonPaths: LLM_DISCOVERY_COMMON_PATHS,
+      commonTitle: "Common settings",
+      commonHint: "Choose whether to discover models, how long to wait, and whether limits adjust automatically.",
+      advancedTitle: "Fallback parameters",
+      advancedHint: "Adjust token limits and output reserve only when discovery results are incomplete.",
+      advancedCountLabel: (count) => `${count} fields`,
+    },
   },
 };
 
@@ -241,6 +268,12 @@ const ZH_FIELD_COPY: Record<string, ConfigFieldPresentationCopy> = {
   "debug.trace_llm": { label: "追踪 LLM 调用", hint: "记录模型调用阶段与结果状态，不记录密钥。" },
   "debug.trace_tools": { label: "追踪工具调用", hint: "记录工具执行阶段与结果状态。" },
   "debug.track_token_usage": { label: "记录 Token 用量", hint: "统计模型调用消耗的 Token 数量。" },
+  "llm.discovery.enabled": { label: "启用自动发现", hint: "连接服务商后自动读取可用模型列表。" },
+  "llm.discovery.timeout": { label: "发现等待时间（秒）", hint: "服务商响应超过该时间后停止本次发现。" },
+  "llm.discovery.auto_adjust": { label: "自动适配模型限制", hint: "发现模型能力后自动校正上下文与输出上限。" },
+  "llm.discovery.fallback_max_tokens": { label: "默认输出上限", hint: "无法读取模型输出上限时使用的保守值。" },
+  "llm.discovery.fallback_max_token_limit": { label: "默认上下文上限", hint: "无法读取模型上下文窗口时使用的保守值。" },
+  "llm.discovery.output_reserve_ratio": { label: "输出预留比例", hint: "从上下文窗口中为模型回复预留的比例。" },
   "pet.enabled": { label: "启用陪伴体", hint: "关闭后会暂停陪伴体相关的状态更新。" },
   "pet.name": { label: "陪伴体名称", hint: "显示在陪伴体空间和相关状态中的名称。" },
   "pet.auto_save": { label: "自动保存状态", hint: "定期保存陪伴体的长期状态。" },
@@ -332,6 +365,12 @@ const EN_FIELD_COPY: Record<string, ConfigFieldPresentationCopy> = {
   "log.detailed_traceback": { label: "Detailed traceback" },
   "debug.enabled": { label: "Enable debug mode" },
   "debug.track_token_usage": { label: "Track token usage" },
+  "llm.discovery.enabled": { label: "Enable automatic discovery", hint: "Load available models after connecting a provider." },
+  "llm.discovery.timeout": { label: "Discovery timeout", hint: "Stop the discovery request after this many seconds." },
+  "llm.discovery.auto_adjust": { label: "Adjust model limits automatically", hint: "Update context and output limits from discovered capabilities." },
+  "llm.discovery.fallback_max_tokens": { label: "Default output limit", hint: "Used when the provider does not report an output limit." },
+  "llm.discovery.fallback_max_token_limit": { label: "Default context limit", hint: "Used when the provider does not report a context window." },
+  "llm.discovery.output_reserve_ratio": { label: "Output reserve ratio", hint: "Reserve this share of the context window for the model response." },
   "pet.enabled": { label: "Enable companion" },
   "pet.name": { label: "Companion name" },
   "pet.auto_save": { label: "Save automatically" },

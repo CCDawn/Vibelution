@@ -191,11 +191,22 @@ describe("progressive config section presentation", () => {
     ]);
     expect(configSectionPresentation("parser", "zh")).toBeNull();
 
+    expect(configSectionPresentation("llm-discovery", "zh")).toMatchObject({
+      sectionTitle: "模型发现",
+      sectionSummary: "控制工作台如何发现模型，以及无法读取模型限制时使用的回退值。",
+      commonPaths: [
+        "llm.discovery.enabled",
+        "llm.discovery.timeout",
+        "llm.discovery.auto_adjust",
+      ],
+    });
+
     expect(configSectionTierCounts("ui", 7)).toEqual({ common: 4, advanced: 3 });
     expect(configSectionTierCounts("security", 5)).toEqual({ common: 1, advanced: 4 });
     expect(configSectionTierCounts("network", 7)).toEqual({ common: 3, advanced: 4 });
     expect(configSectionTierCounts("log", 16)).toEqual({ common: 4, advanced: 12 });
     expect(configSectionTierCounts("debug", 5)).toEqual({ common: 2, advanced: 3 });
+    expect(configSectionTierCounts("llm-discovery", 6)).toEqual({ common: 3, advanced: 3 });
   });
 
   it("provides Chinese labels for every visible pet and context-compression control", () => {
@@ -226,11 +237,22 @@ describe("progressive config section presentation", () => {
     expect(configSectionFieldCopy("network.proxy_url", "zh")?.label).toBe("代理地址");
     expect(configSectionFieldCopy("log.third_party.openai", "zh")?.label).toBe("OpenAI 日志级别");
     expect(configSectionFieldCopy("debug.track_token_usage", "zh")?.label).toBe("记录 Token 用量");
+    expect(configSectionFieldCopy("llm.discovery.enabled", "zh")).toEqual({
+      label: "启用自动发现",
+      hint: "连接服务商后自动读取可用模型列表。",
+    });
+    expect(configSectionFieldCopy("llm.discovery.fallback_max_token_limit", "zh")?.label).toBe("默认上下文上限");
   });
 
   it("keeps an English presentation and leaves unrelated fields untouched", () => {
     expect(configSectionPresentation("pet", "en")?.advancedTitle).toBe("Advanced settings");
+    expect(configSectionPresentation("llm-discovery", "en")?.commonPaths).toEqual([
+      "llm.discovery.enabled",
+      "llm.discovery.timeout",
+      "llm.discovery.auto_adjust",
+    ]);
     expect(configSectionFieldCopy("pet.save_interval", "en")?.label).toBe("Save interval");
+    expect(configSectionFieldCopy("llm.discovery.output_reserve_ratio", "en")?.label).toBe("Output reserve ratio");
     expect(configSectionFieldCopy("analysis.enabled", "zh")).toBeNull();
     expect(configSectionPresentation("analysis", "zh")).toBeNull();
   });
