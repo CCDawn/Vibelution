@@ -765,6 +765,15 @@ describe("ConfigRoute layout contract", () => {
     expect(styles.configProgressiveBody).toContain("[&_.treeFieldLabel]:[white-space:normal]");
   });
 
+  it("sizes progressive common grids to the number of visible controls", () => {
+    expect(routeSource).toContain("function configCommonGridClass(commonEntryCount: number)");
+    expect(routeSource).toContain("configCommonGridClass(commonEntries.length)");
+    expect(routeSource).toContain("styles.configCommonGridTwo");
+    expect(routeSource).toContain("styles.configCommonGridThree");
+    expect(styles.configCommonGridTwo).toContain("![grid-template-columns:repeat(2,minmax(0,1fr))]");
+    expect(styles.configCommonGridThree).toContain("![grid-template-columns:repeat(3,minmax(0,1fr))]");
+  });
+
   it("uses a compact layout for large config sections with many fields", () => {
     expect(routeSource).toContain("function isDenseConfigSection");
     expect(routeSource).toContain('section.id === "llm-discovery"');
