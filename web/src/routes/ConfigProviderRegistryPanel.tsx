@@ -302,7 +302,7 @@ export function ProviderModelsTab({
 
 function ProtocolsTab({ provider }: { provider: ProviderRegistryRow }) {
   return (
-    <div className={styles.detailSurface}>
+    <div className={styles.tabSurface}>
       <span className={styles.fact}>
         <small className={styles.factLabel}>默认 wire protocol</small>
         <strong className={styles.factValue}>{provider.defaultProtocol || "unknown"}</strong>
@@ -328,7 +328,7 @@ function DiagnosticsTab({
 }) {
   const isCritical = ["auth_failed", "protocol_mismatch", "blocked", "discovery_failed"].includes(provider.status);
   return (
-    <div className={styles.detailSurface}>
+    <div className={styles.tabSurface}>
       {isCritical ? (
         <p className={styles.critical} role="alert">
           当前 Provider 状态为 {provider.status}。请修复认证或协议后再用于运行路由。
@@ -492,23 +492,25 @@ export function ConfigProviderRegistryPanel({
                 </VButton>
               ))}
             </VActionGroup>
-            {selectedTab === "connection" ? <ConnectionTab provider={provider} /> : null}
-            {selectedTab === "models" ? (
-              <ProviderModelsTab
-                provider={provider}
-                disabled={disabled}
-                modelQuery={modelQuery}
-                modelFilter={modelFilter}
-                liveReferenceCountByModelRef={liveReferenceCountByModelRef}
-                onQueryChange={setModelQuery}
-                onFilterChange={setModelFilter}
-                onUnpin={onUnpin}
-                onTestModel={onTestModel}
-              />
-            ) : null}
-            {selectedTab === "protocols" ? <ProtocolsTab provider={provider} /> : null}
-            {selectedTab === "diagnostics" ? <DiagnosticsTab provider={provider} disabled={disabled} onDiscover={onDiscover} /> : null}
-            <div className={styles.mobileActionGroup}>
+            <div className={styles.detailBody} data-provider-tab={selectedTab}>
+              {selectedTab === "connection" ? <ConnectionTab provider={provider} /> : null}
+              {selectedTab === "models" ? (
+                <ProviderModelsTab
+                  provider={provider}
+                  disabled={disabled}
+                  modelQuery={modelQuery}
+                  modelFilter={modelFilter}
+                  liveReferenceCountByModelRef={liveReferenceCountByModelRef}
+                  onQueryChange={setModelQuery}
+                  onFilterChange={setModelFilter}
+                  onUnpin={onUnpin}
+                  onTestModel={onTestModel}
+                />
+              ) : null}
+              {selectedTab === "protocols" ? <ProtocolsTab provider={provider} /> : null}
+              {selectedTab === "diagnostics" ? <DiagnosticsTab provider={provider} disabled={disabled} onDiscover={onDiscover} /> : null}
+            </div>
+            <div className={styles.dangerZone} data-provider-danger-zone="true">
               <VButton
                 variant="danger"
                 icon={<Trash2 size={14} />}

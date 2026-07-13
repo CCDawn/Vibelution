@@ -116,7 +116,7 @@ const styles = {
   contentModels:
     "vui-routes-configroute contentModels [align-content:stretch] [grid-template-rows:minmax(0,1fr)_auto] [height:100%] [max-height:calc(100dvh_-_76px)] [min-width:0] [&:has(>_.notice)]:[grid-template-rows:auto_minmax(0,1fr)_auto] [&>_.configDiscoverySection:last-child]:[display:grid] [&>_.configDiscoverySection:last-child]:[grid-template-rows:auto_auto] max-[720px]:[max-height:none] max-[720px]:[height:auto] max-[720px]:[overflow:visible]",
   providerModelsLayout:
-    "vui-routes-configroute providerModelsLayout grid min-w-0 gap-3",
+    "vui-routes-configroute providerModelsLayout grid h-full min-h-0 min-w-0 [grid-template-rows:auto_minmax(0,1fr)] gap-3 overflow-hidden",
   providerRouteEditSurface:
     "vui-routes-configroute providerRouteEditSurface grid min-w-0 gap-2",
   providerRouteEditGrid:
