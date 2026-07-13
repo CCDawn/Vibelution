@@ -134,6 +134,36 @@ def test_image_and_audio_candidates_remain_visible_with_disabled_reason():
         assert by_upstream[upstream_id]["capabilitySource"] == "unknown"
 
 
+def test_numbered_image_alias_is_disabled_without_matching_image_understanding_models():
+    public_config = _public_config()
+    public_config["llm"]["providers"]["ai-pixel"]["models"]["image2"]["upstream_id"] = "image2"
+    catalog = _catalog_state()
+    models = catalog["providers"]["ai-pixel"]["models"]
+    models["image2"]["upstreamId"] = "image2"
+    models["image-understanding"] = {
+        "upstreamId": "image-understanding",
+        "label": "Image Understanding",
+        "availability": "observed",
+    }
+
+    by_ref = {
+        item["modelRef"]: item
+        for item in agent_model_candidate_service.project_agent_model_candidates(public_config, catalog)
+    }
+
+    image_alias = by_ref["ai-pixel/image2"]
+    assert image_alias["upstreamId"] == "image2"
+    assert image_alias["slotCompatibility"]
+    assert all(
+        compatibility == {"allowed": False, "reasonCode": "non_dialogue_model"}
+        for compatibility in image_alias["slotCompatibility"].values()
+    )
+    assert by_ref["ai-pixel/image-understanding"]["slotCompatibility"]["dialogue"] == {
+        "allowed": True,
+        "reasonCode": "",
+    }
+
+
 def test_reasoning_contract_accepts_only_operator_or_current_verified_evidence():
     public_config = _public_config()
     provider = public_config["llm"]["providers"]["ai-pixel"]
