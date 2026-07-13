@@ -48,12 +48,12 @@ const composerFieldShell = cv("composerField", composerFieldBase);
 const composerFieldCodexShell = cv(
   "composerFieldCodex",
   composerFieldBase,
-  "grid min-h-[120px] min-w-0 grid-rows-[auto_minmax(48px,1fr)_auto] gap-2 px-4 py-3 max-[719px]:min-h-[108px] max-[719px]:px-3",
+  "grid min-h-[112px] min-w-0 grid-rows-[auto_minmax(48px,1fr)_auto] gap-1 px-4 py-3 max-[719px]:min-h-[104px] max-[719px]:px-3 max-[719px]:py-2.5",
 );
 const composerToolbarShell = cv("composerToolbar", "flex min-w-0 items-center gap-1 pt-0.5");
 const composerToolbarCodexShell = cv(
   "composerToolbarCodex",
-  "flex min-h-10 min-w-0 items-center justify-between gap-2",
+  "flex min-h-8 min-w-0 items-center justify-between gap-2",
 );
 const composerFieldDragActiveShell = cv(
   "composerFieldDragActive",
