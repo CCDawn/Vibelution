@@ -125,11 +125,11 @@ hook 内部返回按领域命名的 typed query results：`workflow`、`stageRou
 
 ### Task A2：stageProjection 紧凑 TDD
 
-- [ ] RED：覆盖 stage state/count fallback、partial/blocked/completed、task progress、interrupted/recovery label、writeback observed task IDs。
-- [ ] GREEN：移动 stage projection types/functions；对 Route 大 payload 使用窄结构 input，不移动 mutation 或 URL logic。
-- [ ] polling interval 的 React Query adapter 留给阶段 B；纯 stage model 只提供 cards/observed-task facts。
-- [ ] 迁移对应 raw assertions，保留 loading-state 与 route shell assertions。
-- [ ] checkpoint：stage/run/logic/layout tests、`git diff --check`，提交 `refactor(web): extract source collection stage projection`。
+- [x] RED：覆盖 stage state/count fallback、partial/blocked/completed、task progress、interrupted/recovery label、writeback observed task IDs。
+- [x] GREEN：移动 stage projection types/functions；对 Route 大 payload 使用窄结构 input，不移动 mutation 或 URL logic。
+- [x] polling interval 的 React Query adapter 留给阶段 B；纯 stage model 只提供 cards/observed-task facts。
+- [x] 迁移对应 raw assertions，保留 loading-state 与 route shell assertions。
+- [x] checkpoint：stage/run/logic/layout tests、`git diff --check`，提交 `refactor(web): extract source collection stage projection`。
 
 ### Task A3：evidenceModel 紧凑 TDD
 
