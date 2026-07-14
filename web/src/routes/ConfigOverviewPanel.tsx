@@ -29,7 +29,7 @@ export function ConfigOverviewPanel({
       <div className={styles.summaryGrid}>
         <article className={styles.detailCard}>
           <span>{copy.modelCenterModels}</span>
-          <strong>{workspace.modelLibraryCount}</strong>
+          <strong>{workspace.modelOptions.length}</strong>
         </article>
         <article className={styles.detailCard} data-summary-tone={workspace.blockingCount ? "error" : "success"}>
           <span>{copy.blockingIssues}</span>
