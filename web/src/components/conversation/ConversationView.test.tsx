@@ -467,7 +467,7 @@ describe("ConversationView edit resend affordance", () => {
     expect(styles.timelineCellHeader).not.toContain("!items-center");
     expect(styles.timelineCellHeader).toContain("!grid");
     expect(styles.timelineCellHeader).toContain("!w-full");
-    expect(styles.timelineCellHeader).toContain("grid-cols-[20px_fit-content(52rem)_24px_minmax(0,1fr)]");
+    expect(styles.timelineCellHeader).toContain("grid-cols-[20px_minmax(0,1fr)_24px]");
     expect(styles.timelineCellHeader).not.toContain("_max-content_");
     expect(styles.timelineCellHeader).toContain("gap-x-2");
     expect(styles.timelineCellHeader).toContain("border-0");
@@ -1610,7 +1610,7 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).toMatch(/<span class="[^"]*operationText_success[^"]*">代码图谱<\/span>/);
     expect(html).toMatch(/<span class="[^"]*operationText_success[^"]*">\{ &quot;status&quot;: &quot;ok&quot; \}<\/span>/);
     expect(html).toContain("timelineOperationCell_failed");
-    expect(html).toMatch(/timelineOperationCell_failed[\s\S]*grep_search_tool 参数不符合当前工具签名/);
+    expect(html).toMatch(/timelineOperationCell_failed[\s\S]*搜索[\s\S]*got an unexpected keyword argument/);
   });
 
   it("does not let top-edge history loading rewrite cached response expansion defaults", () => {
@@ -4523,8 +4523,8 @@ describe("ConversationView edit resend affordance", () => {
       },
     ]);
 
-    expect(html).toContain("rolloutTraceList");
-    expect(html).toContain("data-rollout-trace-status=\"failed\"");
+    expect(html).not.toContain("rolloutTraceList");
+    expect(html).not.toContain("data-rollout-trace-status=\"failed\"");
     expect(html).toContain("exit code 1");
     expect(styles.rolloutTraceList).toContain("border-l");
     expect(styles.rolloutTraceList).toContain("bg-transparent");

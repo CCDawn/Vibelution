@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 
 import type { ConversationMessage } from "../../api/types";
 import { ConversationView } from "./ConversationView";
+import styles from "./ConversationView.styles";
 
 function renderConversation(messages: ConversationMessage[]) {
   const queryClient = new QueryClient({
@@ -70,6 +71,48 @@ describe("ConversationView process expansion defaults", () => {
     expect(html).toContain('aria-expanded="true"');
     expect(html).toContain("运行中思考详情默认展开。");
     expect(html).toContain("正在读取上下文。");
+  });
+
+  it("keeps the running fallback tool row compact and uses the mapped operation label", () => {
+    const html = renderConversation([
+      {
+        id: "message-running-cli-fallback",
+        role: "assistant",
+        content: "",
+        timestamp: "2026-07-14T08:00:00Z",
+        streaming: true,
+        feedbackEvents: [
+          {
+            sequence: 1,
+            kind: "tool",
+            status: "running",
+            name: "cli_tool",
+            summary: "正在检查工作区",
+            resultPreview: "PowerShell 命令仍在运行",
+            timestamp: "2026-07-14T08:00:01Z",
+          },
+        ],
+        timelineItems: [
+          {
+            id: "timeline-running-cli-fallback",
+            kind: "operation",
+            status: "running",
+            title: "cli_tool",
+            summary: "正在检查工作区",
+            operationIds: ["message-running-cli-fallback-feedback-1"],
+          },
+        ],
+      },
+    ]);
+
+    expect(html).toContain("命令");
+    expect(html).toContain("运行中");
+    expect(html).toContain("正在检查工作区");
+    expect(html).not.toContain(">cli_tool<");
+    expect(html).not.toContain("调用开始");
+    expect(html).not.toContain("运行开始");
+    expect(styles.timelineCellHeader).toContain("grid-cols-[20px_minmax(0,1fr)_24px]");
+    expect(styles.rolloutTraceList).not.toContain("col-start-2");
   });
 
   it("keeps completed process details collapsed by default", () => {
