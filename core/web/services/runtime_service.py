@@ -5,7 +5,9 @@ from __future__ import annotations
 import getpass
 import json
 import os
+from contextvars import ContextVar
 from datetime import datetime, timezone
+from functools import wraps
 from pathlib import Path
 import subprocess
 import threading
@@ -51,6 +53,10 @@ LAUNCHER_STATE_PATH = PROJECT_ROOT / ".runtime" / "launcher" / "state.json"
 LAUNCHER_SHUTDOWN_LOG_PATH = PROJECT_ROOT / ".runtime" / "launcher" / "shutdown-request.log"
 RUNNING_SESSION_PHASES = {"running", "stopping"}
 RESUMABLE_TERMINAL_SESSION_PHASES = {"needs_continue", "paused_limit", "stopped_by_user"}
+_RUNTIME_SUMMARY_AGENT_CACHE: ContextVar[dict[tuple[str, bool], object] | None] = ContextVar(
+    "runtime_summary_agent_cache",
+    default=None,
+)
 
 
 class RuntimeRestartActiveWorkBlocked(Exception):
@@ -62,6 +68,40 @@ class RuntimeRestartActiveWorkBlocked(Exception):
         self.active_work_runs = active_work_runs
 
 
+def _with_runtime_summary_agent_cache(func):
+    @wraps(func)
+    def wrapped(*args, **kwargs):
+        token = _RUNTIME_SUMMARY_AGENT_CACHE.set({})
+        try:
+            return func(*args, **kwargs)
+        finally:
+            _RUNTIME_SUMMARY_AGENT_CACHE.reset(token)
+
+    return wrapped
+
+
+def _runtime_summary_get_agent(agent_id: str, *, include_archived: bool = True):
+    from . import agent_directory_service
+
+    cache = _RUNTIME_SUMMARY_AGENT_CACHE.get()
+    if cache is None:
+        return agent_directory_service.get_agent(agent_id, include_archived=include_archived)
+    cache_key = (str(agent_id or "").strip(), bool(include_archived))
+    if cache_key in cache:
+        cached = cache[cache_key]
+        if isinstance(cached, BaseException):
+            raise cached
+        return cached
+    try:
+        agent = agent_directory_service.get_agent(agent_id, include_archived=include_archived)
+    except Exception as exc:
+        cache[cache_key] = exc
+        raise
+    cache[cache_key] = agent
+    return agent
+
+
+@_with_runtime_summary_agent_cache
 def get_runtime_summary() -> dict:
     """Return a light runtime summary for the global shell."""
 
@@ -706,9 +746,7 @@ def _active_session_model_identity(active_session: dict) -> dict[str, str]:
         return {}
     try:
         from core.llm.agent_runtime import agent_dialogue_model_id
-        from .agent_directory_service import get_agent
-
-        agent = get_agent(agent_id, include_archived=True)
+        agent = _runtime_summary_get_agent(agent_id, include_archived=True)
     except Exception:
         return {}
     if not isinstance(agent, dict):
@@ -1879,7 +1917,7 @@ def _active_session_context_compression_policy(
     try:
         from . import agent_directory_service
 
-        agent = agent_directory_service.get_agent(agent_id, include_archived=True)
+        agent = _runtime_summary_get_agent(agent_id, include_archived=True)
         if not isinstance(agent, dict):
             return {}
         payload = agent_directory_service.effective_agent_context_compression_policy(

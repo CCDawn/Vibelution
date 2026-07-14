@@ -524,8 +524,14 @@ def test_runtime_summary_uses_active_agent_context_compression_policy(monkeypatc
             },
         },
     }
+    agent_reads: list[str] = []
+
+    def get_agent(agent_id, include_archived=True):
+        agent_reads.append(agent_id)
+        return agent
+
     monkeypatch.setattr(runtime_service, "get_config", lambda: fake_config)
-    monkeypatch.setattr(agent_directory_service, "get_agent", lambda agent_id, include_archived=True: agent)
+    monkeypatch.setattr(agent_directory_service, "get_agent", get_agent)
 
     payload = runtime_service.get_runtime_summary()
     compression = payload["contextCompression"]
@@ -540,6 +546,11 @@ def test_runtime_summary_uses_active_agent_context_compression_policy(monkeypatc
     assert compression["strategy"]["levels"][1]["summaryMaxChars"] == 777
     assert compression["strategy"]["levels"][0]["keepAiMessages"] == 2
     assert compression["strategy"]["preserveErrors"] is False
+    assert agent_reads == ["agent-compression"]
+
+    runtime_service.get_runtime_summary()
+
+    assert agent_reads == ["agent-compression", "agent-compression"]
 
 
 def test_runtime_summary_keeps_applied_runtime_compression_snapshot_for_inherited_agent(monkeypatch):
