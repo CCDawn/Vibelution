@@ -4025,7 +4025,7 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).not.toContain("第 2 轮");
     expect(html).not.toContain("工具调用");
     expect(html).toContain("思考");
-    expect(html).toContain("命令");
+    expect(html).toContain("搜索代码");
     expect(html).toContain("running rg");
     expect(html).toContain("读取");
     expect(html).not.toContain("命令 · running rg");
