@@ -43,6 +43,44 @@ def test_runtime_scene_jsonl_reader_reuses_cache_until_file_signature_changes(tm
     assert third[0]["event_code"] == "beta"
 
 
+def test_runtime_scene_uses_active_launcher_reference_when_state_is_runtime_projection(tmp_path, monkeypatch):
+    scene_id = "scene-active-reference"
+    scene_dir = tmp_path / "logs" / "runtime_scenes" / f"20260714T030000Z__{scene_id}"
+    scene_dir.mkdir(parents=True, exist_ok=True)
+    (scene_dir / "manifest.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 2,
+                "runtime_scene_id": scene_id,
+                "started_at": "2026-07-14T03:00:00Z",
+                "status": "running",
+                "project_root": str(tmp_path),
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    launcher_state_path = tmp_path / ".runtime" / "launcher" / "state.json"
+    launcher_state_path.parent.mkdir(parents=True, exist_ok=True)
+    launcher_state_path.write_text(json.dumps({"backend": {"status": "running"}}), encoding="utf-8")
+    launcher_state_path.with_name("active-runtime-scene.json").write_text(
+        json.dumps({"runtimeSceneId": scene_id, "runtimeSceneDir": str(scene_dir)}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(runtime_scene_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(runtime_scene_service, "LAUNCHER_STATE_PATH", launcher_state_path)
+
+    assert runtime_scene_service._resolve_current_runtime_scene_dir() == scene_dir
+    recorded = runtime_scene_service.record_runtime_scene_conversation_event(
+        "session-active-reference",
+        "user",
+        "hello",
+    )
+
+    assert recorded["accepted"] is True
+    assert (scene_dir / "conversations" / "session-active-reference.jsonl").exists()
+
+
 def test_runtime_scene_event_writes_standalone_package_index(tmp_path, monkeypatch):
     scene_id = "scene-package-index"
     scene_dir = tmp_path / "logs" / "runtime_scenes" / f"20260518T120000Z__{scene_id}"
