@@ -4958,7 +4958,7 @@ class TestLocalProviderBootstrap:
     def test_runtime_agent_dialogue_binding_is_default_chat_source_of_truth(self, monkeypatch):
         monkeypatch.setenv("VIBELUTION_AGENT_ID", "agent-dialogue-default")
         monkeypatch.delenv("VIBELUTION_AGENT_LLM_SLOT", raising=False)
-        monkeypatch.setattr(agent_module.Key_Tools, "create_llm_facing_tools", lambda: [SimpleNamespace(name="read_file_tool")])
+        monkeypatch.setattr(agent_module.Key_Tools, "create_llm_facing_tools", lambda: [SimpleNamespace(name="cli_tool")])
         monkeypatch.setattr(SelfEvolvingAgent, "_init_model_discovery", lambda self: 16000)
         monkeypatch.setattr(SelfEvolvingAgent, "_init_token_compressor", lambda self: None)
         monkeypatch.setattr(agent_module, "get_prompt_manager", lambda: MagicMock())
@@ -4997,6 +4997,16 @@ class TestLocalProviderBootstrap:
             fromlist=["agent_directory_service"],
         )
         monkeypatch.setattr(directory_module, "get_agent", lambda _agent_id, include_archived=False: agent_record)
+        monkeypatch.setattr(
+            directory_module,
+            "resolve_tool_policy_for_agent",
+            lambda *_args, **_kwargs: {
+                "policyId": "tool-agent-dialogue-default",
+                "allowedTools": ["cli_tool"],
+                "preferredTools": [],
+                "blockedTools": [],
+            },
+        )
         monkeypatch.setattr(directory_module, "filter_llm_tools_for_current_agent", lambda tools: list(tools or []))
 
         class DummyClient:
