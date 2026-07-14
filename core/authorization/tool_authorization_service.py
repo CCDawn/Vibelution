@@ -12,6 +12,10 @@ from .tool_policy_evaluator import evaluate_tool_policy, normalize_legacy_tool_p
 from .tool_policy_models import AuthorizationDecision, TurnToolGrant
 
 
+class ToolAuthorizationContextError(ValueError):
+    """Raised when an enforced authorization decision lacks trusted identity facts."""
+
+
 @dataclass(frozen=True, slots=True)
 class _RegistryDescriptor:
     name: str
@@ -103,6 +107,38 @@ def resolve_shadow_authorization(
         deny_code_counts=tuple(sorted(deny_counts.items())),
         registry_fingerprint=str(payload.get("registryFingerprint") or "").strip(),
         duration_ms=max(0, int((perf_counter() - started) * 1000)),
+    )
+
+
+def resolve_enforced_authorization(
+    *,
+    runtime: Mapping[str, Any],
+    legacy_visible_tool_names: Sequence[str],
+    registry_payload: Mapping[str, Any] | None = None,
+    registry_loader: Callable[[], Mapping[str, Any]] | None = None,
+    generated_at: str = "",
+) -> ShadowAuthorizationReport:
+    """Resolve the canonical model-visible surface or fail closed.
+
+    Shadow comparison remains part of the report so cutover parity stays
+    observable, but missing Agent/turn identity can no longer broaden the
+    model-visible surface through a legacy fallback.
+    """
+
+    values = dict(runtime or {})
+    agent = values.get("agent") if isinstance(values.get("agent"), Mapping) else {}
+    agent_id = str(values.get("agentId") or agent.get("agentId") or "").strip()
+    if not agent_id:
+        raise ToolAuthorizationContextError("tool authorization requires agentId")
+    turn_id = str(values.get("turnId") or values.get("runId") or "").strip()
+    if not turn_id:
+        raise ToolAuthorizationContextError("tool authorization requires turnId")
+    return resolve_shadow_authorization(
+        runtime=values,
+        legacy_visible_tool_names=legacy_visible_tool_names,
+        registry_payload=registry_payload,
+        registry_loader=registry_loader,
+        generated_at=generated_at,
     )
 
 

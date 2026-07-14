@@ -672,8 +672,15 @@ class SelfEvolvingAgent:
 
         # 创建主要工具
         llm_facing_tools = Key_Tools.create_llm_facing_tools()
-        self.key_tools = self._filter_tools_for_current_agent(llm_facing_tools)
-        self._record_shadow_tool_authorization(llm_facing_tools, self.key_tools)
+        legacy_visible_tools = self._filter_tools_for_current_agent(llm_facing_tools)
+        authorization_report = self._record_shadow_tool_authorization(
+            llm_facing_tools,
+            legacy_visible_tools,
+        )
+        self.key_tools = self._materialize_authorized_tools(llm_facing_tools, authorization_report)
+        self._tool_authorization_decision_fingerprint = str(
+            getattr(getattr(authorization_report, "decision", None), "decision_fingerprint", "") or ""
+        ).strip()
         self.key_tool_maps = {tool.name for tool in self.key_tools}
         self._key_tool_map = {
             tool.name: tool for tool in self.key_tools if getattr(tool, "name", "")
@@ -1072,7 +1079,7 @@ class SelfEvolvingAgent:
         """初始化统一 LLM client。"""
         llm = get_llm_client(role="primary", config=self.config)
         self._base_llm = llm
-        self.llm_with_tools = llm.bind_tools(self._filter_tools_for_current_agent(self.key_tools))
+        self.llm_with_tools = llm.bind_tools(self.key_tools)
         self._bound_llm_cache = {"default": self.llm_with_tools}
 
     @staticmethod
@@ -1087,23 +1094,34 @@ class SelfEvolvingAgent:
         except Exception:
             return list(tools or [])
 
-    @staticmethod
-    def _record_shadow_tool_authorization(registered_tools: List[Any], legacy_visible_tools: List[Any]) -> None:
+    def _record_shadow_tool_authorization(self, registered_tools: List[Any], legacy_visible_tools: List[Any]) -> Any:
         started = time.perf_counter()
         runtime: Dict[str, Any] = {}
         try:
-            from core.authorization.tool_authorization_service import resolve_shadow_authorization
+            from core.authorization.tool_authorization_service import resolve_enforced_authorization
             from core.logging.tool_authorization_events import record_shadow_authorization_event
             from core.web.services.agent_directory_service import current_agent_runtime
 
             runtime = dict(current_agent_runtime() or {})
-            if not str(runtime.get("agentId") or "").strip():
-                return
             turn_runtime = _turn_runtime_from_env()
-            runtime.setdefault("turnId", str(turn_runtime.get("runId") or "").strip())
+            binding = dict(getattr(self, "runtime_agent_binding", {}) or {})
+            agent_id = str(
+                runtime.get("agentId")
+                or turn_runtime.get("agentId")
+                or binding.get("agentId")
+                or ""
+            ).strip()
+            if not str(runtime.get("agentId") or "").strip():
+                runtime["agentId"] = agent_id
+            if not str(runtime.get("turnId") or "").strip():
+                runtime["turnId"] = str(
+                    turn_runtime.get("runId")
+                    or binding.get("directSessionId")
+                    or (f"agent-bootstrap:{agent_id}" if agent_id else "")
+                ).strip()
             runtime.setdefault("runId", str(turn_runtime.get("runId") or "").strip())
             runtime.setdefault("mode", str(turn_runtime.get("mode") or "").strip())
-            report = resolve_shadow_authorization(
+            report = resolve_enforced_authorization(
                 runtime=runtime,
                 legacy_visible_tool_names=[
                     str(getattr(tool, "name", "") or "").strip()
@@ -1112,6 +1130,7 @@ class SelfEvolvingAgent:
                 ],
             )
             record_shadow_authorization_event(report)
+            return report
         except Exception as exc:
             try:
                 from core.logging.tool_authorization_events import record_shadow_authorization_failure
@@ -1122,7 +1141,24 @@ class SelfEvolvingAgent:
                     duration_ms=max(0, int((time.perf_counter() - started) * 1000)),
                 )
             except Exception:
-                return
+                pass
+            return None
+
+    @staticmethod
+    def _materialize_authorized_tools(registered_tools: List[Any], authorization_report: Any) -> List[Any]:
+        decision = getattr(authorization_report, "decision", None)
+        visible_names = {
+            str(name or "").strip()
+            for name in getattr(decision, "visible_tools", ()) or ()
+            if str(name or "").strip()
+        }
+        if not visible_names:
+            return []
+        return [
+            tool
+            for tool in registered_tools or []
+            if str(getattr(tool, "name", "") or "").strip() in visible_names
+        ]
 
     def _is_tool_visible_to_current_agent(self, tool_name: str) -> bool:
         name = str(tool_name or "").strip()
@@ -1165,7 +1201,7 @@ class SelfEvolvingAgent:
                 return self.llm_with_tools
             if base_llm is getattr(self, "_base_llm", None):
                 return self.llm_with_tools
-            return base_llm.bind_tools(self._filter_tools_for_current_agent(self.key_tools))
+            return base_llm.bind_tools(self.key_tools)
 
         if base_llm is not getattr(self, "_base_llm", None):
             allowed_tools = [
@@ -1173,7 +1209,6 @@ class SelfEvolvingAgent:
                 for name in self._restart_allowed_tool_names()
                 if name in self._key_tool_map
             ]
-            allowed_tools = self._filter_tools_for_current_agent(allowed_tools)
             return base_llm.bind_tools(allowed_tools) if allowed_tools else base_llm
         cached = self._bound_llm_cache.get("restart_focus")
         if cached is not None:
@@ -1184,7 +1219,6 @@ class SelfEvolvingAgent:
             for name in self._restart_allowed_tool_names()
             if name in self._key_tool_map
         ]
-        allowed_tools = self._filter_tools_for_current_agent(allowed_tools)
         if not allowed_tools:
             return self._base_llm
 
@@ -1209,7 +1243,7 @@ class SelfEvolvingAgent:
             llm = get_llm_client(profile_id=resolved.runtime_profile_id, config=resolved.config)
             if disable_tools:
                 return llm
-            return llm.bind_tools(self._filter_tools_for_current_agent(self.key_tools))
+            return llm.bind_tools(self.key_tools)
         except Exception:
             return None
 
@@ -3129,6 +3163,9 @@ class SelfEvolvingAgent:
                 "orchestratorKind": orchestrator_kind,
                 "invocationId": uuid4().hex,
                 "routeAttempt": max(1, int(route_attempt)),
+                "toolAuthorizationDecisionFingerprint": str(
+                    getattr(self, "_tool_authorization_decision_fingerprint", "") or ""
+                ).strip(),
                 "turnId": str(
                     status_context.get("turn_id")
                     or status_context.get("turnId")
