@@ -101,6 +101,37 @@ describe("chat active turn layer", () => {
     });
   });
 
+  it("preserves one render identity while an optimistic row binds to the server turn", () => {
+    const optimistic = createOptimisticActiveTurnLayer({
+      sessionId: "session-1",
+      turnId: "optimistic-submit",
+      updatedAt: "2026-07-14T07:30:00Z",
+    });
+    const bound = mergeAssistantDeltaIntoActiveTurnLayer(
+      optimistic,
+      assistantDelta({
+        turnId: "turn-accepted",
+        stage: "context_prepare",
+      }),
+    );
+    const accepted = createOptimisticActiveTurnLayer({
+      sessionId: "session-1",
+      turnId: "turn-accepted",
+      updatedAt: "2026-07-14T07:30:01Z",
+    });
+
+    expect(optimistic).toMatchObject({ renderKey: "session-1-active" });
+    expect(bound).toMatchObject({
+      turnId: "turn-accepted",
+      renderKey: "session-1-active",
+    });
+    expect(accepted).toMatchObject({ renderKey: "session-1-active" });
+    expect(activeTurnLayerToConversationMessage(bound)?.metadata).toMatchObject({
+      turnId: "turn-accepted",
+      renderKey: "session-1-active",
+    });
+  });
+
   it("keeps the active Agent row across internal progress and later exposes ReAct operations", () => {
     const optimistic = createOptimisticActiveTurnLayer({
       sessionId: "session-1",
