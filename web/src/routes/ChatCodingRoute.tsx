@@ -2106,12 +2106,12 @@ export function ChatCodingRoute() {
   const agentsQuery = useQuery({
     queryKey: queryKeys.agents(),
     queryFn: () => fetchJson<AgentInstance[]>("/api/agents?detail=summary"),
-    enabled: secondaryChatDataEnabled || groupComposerOpen || standardGroupRoomActive || Boolean(activeSessionId),
+    enabled: secondaryChatDataEnabled || groupComposerOpen || standardGroupRoomActive,
   });
   const skillsQuery = useQuery({
     queryKey: queryKeys.skills(),
     queryFn: () => fetchJson<SkillLibraryPayload>("/api/skills"),
-    enabled: Boolean(activeSessionId),
+    enabled: secondaryChatDataEnabled && Boolean(activeSessionId),
     staleTime: 60_000,
   });
   const slashCommandSuggestions = skillsQuery.data?.skills ?? [];
@@ -2338,7 +2338,7 @@ export function ChatCodingRoute() {
   });
   const sessionLlmOptionsQuery = useQuery({
     queryKey: queryKeys.sessionLlmOptions(activeSessionId ?? "none"),
-    enabled: Boolean(activeSessionId),
+    enabled: secondaryChatDataEnabled && Boolean(activeSessionId),
     queryFn: () => fetchJson<SessionLlmOptions>(
       `/api/sessions/${encodeURIComponent(activeSessionId ?? "")}/llm-options`,
     ),
@@ -2451,7 +2451,7 @@ export function ChatCodingRoute() {
   const childSessionsQuery = useQuery({
     queryKey: queryKeys.sessionChildSessions(activeRootSessionId || "none"),
     queryFn: () => fetchJson<SessionSummary[]>(`/api/sessions/${activeRootSessionId}/child-sessions`),
-    enabled: Boolean(activeRootSessionId) && directSessionPanelActive,
+    enabled: secondaryChatDataEnabled && Boolean(activeRootSessionId) && directSessionPanelActive,
     refetchInterval: childSessionLiveQueryPolicy.childSessionsRefetchInterval,
     refetchIntervalInBackground: childSessionLiveQueryPolicy.directRefetchIntervalInBackground,
   });

@@ -2023,7 +2023,7 @@ describe("ChatCodingRoute layout contract", () => {
   it("defers secondary chat dashboard queries until the shell is ready", () => {
     expect(routeSource).toContain("const secondaryChatDataEnabled = chatStartupDataReady");
     expect(routeSource).toContain("enabled: secondaryChatDataEnabled");
-    expect(routeSource).toContain("enabled: secondaryChatDataEnabled || groupComposerOpen || standardGroupRoomActive || Boolean(activeSessionId)");
+    expect(routeSource).toContain("enabled: secondaryChatDataEnabled || groupComposerOpen || standardGroupRoomActive");
     expect(routeSource).not.toContain("enabled: groupComposerOpen || Boolean(activeSessionId)");
   });
 
@@ -2897,4 +2897,13 @@ describe("ChatCodingRoute layout contract", () => {
     expect(onErrorSource).not.toContain("setTimeout");
     expect(onErrorSource).not.toMatch(/setActiveTurnLayersBySession[\s\S]*failed/);
   });
+});
+it("defers secondary direct-session queries until startup detail is ready", () => {
+  expect(routeSource).toContain(
+    "enabled: secondaryChatDataEnabled || groupComposerOpen || standardGroupRoomActive,",
+  );
+  expect(routeSource).toContain("enabled: secondaryChatDataEnabled && Boolean(activeSessionId),");
+  expect(routeSource).toContain(
+    "enabled: secondaryChatDataEnabled && Boolean(activeRootSessionId) && directSessionPanelActive,",
+  );
 });
