@@ -241,7 +241,7 @@ describe("ConversationView native Codex transcript surface", () => {
     ]);
 
     const commentaryIndex = html.indexOf("我先检查文件。");
-    const toolIndex = html.indexOf("read_file");
+    const toolIndex = html.indexOf("读取");
     const finalIndex = html.indexOf("检查完成。");
     expect(commentaryIndex).toBeGreaterThan(-1);
     expect(toolIndex).toBeGreaterThan(commentaryIndex);
@@ -500,7 +500,7 @@ describe("ConversationView native Codex transcript surface", () => {
       },
     ]);
 
-    expect(html).toContain("grep_search_tool");
+    expect(html).toContain(">搜索<");
     expect(html).toContain("最终回答应该显示。");
     expect(html).toContain('data-codex-transcript-cell-kind="assistant_markdown"');
   });
@@ -573,7 +573,7 @@ describe("ConversationView native Codex transcript surface", () => {
     ]);
 
     expect(html).toContain('data-codex-tool-detail="true"');
-    expect(html).toContain("code_symbol_tool");
+    expect(html).toContain(">代码图谱<");
     expect(html).toContain("完整工具结果：命中 20 个符号");
     expect(html).toContain("工具检查完成。");
   });
@@ -645,10 +645,10 @@ describe("ConversationView native Codex transcript surface", () => {
       } as ConversationMessage,
     ]);
 
-    expect(html).toContain("cli_tool");
+    expect(html).toContain(">命令<");
     expect(html).not.toContain('open=""');
     expect(html).toContain('data-codex-tool-detail-toggle="inline-symbol"');
-    expect(html).toContain('aria-label="展开或收起工具结果：cli_tool"');
+    expect(html).toContain('aria-label="展开或收起工具结果：命令"');
     expect(html).toContain("git status --short");
     expect(html).toContain("M web/src/components/conversation/ConversationView.tsx");
     expect(html).not.toContain("指令与结果");
@@ -656,6 +656,82 @@ describe("ConversationView native Codex transcript surface", () => {
     expect(html).not.toContain("dirty_summary");
     expect(html).not.toContain("工作目录");
     expect(html).not.toContain("exitCode");
+  });
+
+  it("keeps a running native tool summary on the main row and nests lifecycle trace in details", () => {
+    const html = renderConversation([
+      {
+        id: "assistant-native-running-cli",
+        role: "assistant",
+        content: "",
+        timestamp: "2026-07-14T08:10:00Z",
+        streaming: true,
+        codexTranscript: {
+          version: 1,
+          source: "native",
+          messageId: "assistant-native-running-cli",
+          cells: [
+            {
+              id: "native-running-cli-cell",
+              kind: "tool_call",
+              messageId: "assistant-native-running-cli",
+              status: "running",
+              tone: "neutral",
+              title: "cli_tool",
+              summary: "正在检查工作区",
+              operationIds: ["operation-running-cli"],
+              rolloutTraceEvents: [
+                {
+                  id: "tool-call-started",
+                  kind: "ToolCallStarted",
+                  status: "completed",
+                  toolCallId: "tool_call:operation-running-cli",
+                },
+                {
+                  id: "runtime-started",
+                  kind: "RuntimeStarted",
+                  status: "running",
+                  toolCallId: "tool_call:operation-running-cli",
+                  terminalOperationId: "terminal-running-cli",
+                },
+              ],
+              toolLifecycleModel: {
+                toolCalls: [
+                  {
+                    toolCallId: "tool_call:operation-running-cli",
+                    rawOperationId: "operation-running-cli",
+                    terminalOperationId: "terminal-running-cli",
+                    status: "running",
+                    title: "cli_tool",
+                    summary: "正在检查工作区",
+                    rawToolName: "cli_tool",
+                    runtimeKind: "terminal",
+                    resultPreview: "PowerShell 命令仍在运行",
+                  },
+                ],
+                terminalOperations: [],
+                terminalSessions: [],
+                modelObservations: [],
+              },
+            },
+          ],
+          toolCalls: [],
+          terminalOperations: [],
+          terminalSessions: [],
+          modelObservations: [],
+        },
+      } as ConversationMessage,
+    ]);
+
+    const detailsStart = html.indexOf('data-codex-tool-detail="true"');
+    const detailsEnd = html.indexOf("</details>", detailsStart);
+    const traceStart = html.indexOf('aria-label="工具生命周期"');
+    expect(html).toContain(">命令<");
+    expect(html).toContain("运行中");
+    expect(html).toContain("正在检查工作区");
+    expect(detailsStart).toBeGreaterThan(-1);
+    expect(traceStart).toBeGreaterThan(detailsStart);
+    expect(traceStart).toBeLessThan(detailsEnd);
   });
 
   it("does not repeat the tool title as an instruction when no command was sent", () => {
@@ -706,7 +782,7 @@ describe("ConversationView native Codex transcript surface", () => {
       } as ConversationMessage,
     ]);
 
-    expect(html).toContain("glob_tool");
+    expect(html).toContain(">列出文件<");
     expect(html).toContain('data-codex-tool-detail-toggle="inline-symbol"');
     expect(html).not.toContain("指令与结果");
     expect(html).toContain("web/src/components/conversation/ConversationView.tsx");

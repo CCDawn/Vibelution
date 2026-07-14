@@ -63,6 +63,7 @@ import {
 import { buildAgentMessageRenderState, type AgentMessageRenderState } from "./agentMessageRenderState";
 import {
   compactStreamingStatusPlaceholder,
+  isInternalStreamingStatusStage,
   isNoFinalAnswerStatusContent,
   isStreamingStatusPlaceholderContent,
 } from "./conversationInternalStatus";
@@ -70,6 +71,7 @@ import { isInternalRuntimeStatus } from "./conversationDisplayProtocol";
 import {
   buildAgentMessageOperationGroups,
   buildAgentMessageReActOperationGroups,
+  displayToolLabel,
   type AgentMessageOperation,
   type AgentMessageOperationGroups,
   type AgentMessageOperationKind,
@@ -240,14 +242,16 @@ function feedbackStatusPlaceholderOperation(
       const sequence = Number(event.sequence ?? 0);
       return !Number.isFinite(sequence) || sequence <= 0 || !existingSequences.has(sequence);
     })
-    .filter(shouldUseFeedbackStatusPlaceholder);
+    .filter((event) => shouldUseFeedbackStatusPlaceholder(event, Boolean(message.streaming)));
   const event = statusEvents[statusEvents.length - 1];
   if (!event) {
     return null;
   }
   const sequence = Number(event.sequence ?? 0);
   const rawName = String(event.name || "status").trim();
-  const summary = statusEventSummary(event);
+  const summary = isActiveInternalStreamingStatus(event, Boolean(message.streaming))
+    ? ""
+    : statusEventSummary(event);
   return {
     id: `${message.id}-feedback-status-placeholder-${sequence > 0 ? sequence : statusEvents.length}`,
     kind: "status",
@@ -257,7 +261,7 @@ function feedbackStatusPlaceholderOperation(
     rawStatus: String(event.status || "").trim() || undefined,
     summary,
     durationSeconds: null,
-    resultPreview: statusEventResultPreview(event) || summary,
+    resultPreview: summary || undefined,
     error: typeof event.error === "string" ? event.error : undefined,
     sequence: sequence > 0 ? sequence : undefined,
     timestamp: event.timestamp,
@@ -281,18 +285,40 @@ function operationIsVisibleStatusProgress(operation: AgentMessageOperation) {
     || combined.includes("tool loop");
 }
 
-function shouldUseFeedbackStatusPlaceholder(event: ConversationFeedbackEvent) {
+function shouldUseFeedbackStatusPlaceholder(event: ConversationFeedbackEvent, streaming: boolean) {
   if (statusEventHasDiagnostic(event)) {
     return true;
   }
-  return feedbackStatusIsLongLoopProgress(event);
+  return feedbackStatusIsLongLoopProgress(event) || isActiveInternalStreamingStatus(event, streaming);
+}
+
+function isActiveInternalStreamingStatus(event: ConversationFeedbackEvent, streaming: boolean) {
+  return streaming
+    && isRunningOperationStatus(String(event.status ?? ""))
+    && isInternalStreamingStatusStage(event.name);
 }
 
 function feedbackStatusPlaceholderLabel(event: ConversationFeedbackEvent, lang: "zh" | "en" | string) {
   const zh = lang !== "en";
+  const stage = String(event.name ?? "").trim().toLowerCase();
   const combined = statusEventCombinedText(event).toLowerCase();
   if (feedbackStatusIsLongLoopProgress(event)) {
     return zh ? "工具循环" : "Tool loop";
+  }
+  if (stage === "context_prepare") {
+    return zh ? "准备上下文" : "Preparing context";
+  }
+  if (stage === "queued") {
+    return zh ? "等待执行" : "Queued";
+  }
+  if (stage === "agent_prepare") {
+    return zh ? "准备 Agent" : "Preparing agent";
+  }
+  if (stage === "history_restore") {
+    return zh ? "恢复会话" : "Restoring session";
+  }
+  if (stage === "followup_prepare") {
+    return zh ? "准备下一步" : "Preparing next step";
   }
   if (combined.includes("model_thinking") || combined.includes("正在思考") || combined.includes("reasoning")) {
     return zh ? "模型思考" : "Model thinking";
@@ -1772,14 +1798,16 @@ export function ConversationView({
             </span>
           )}
           {summary ? <span className={styles.codexTranscriptCellSummary}>{summary}</span> : null}
-          {renderCodexTranscriptRolloutEvents(cell)}
         </span>
       </section>
     );
   }
 
   function codexTranscriptVisibleSummary(cell: CodexTranscriptCell) {
-    if (cell.kind === "tool_call" || cell.kind === "error_notice") {
+    if (cell.kind === "tool_call") {
+      return cell.status === "completed" ? "" : cell.summary || cell.text;
+    }
+    if (cell.kind === "error_notice") {
       return "";
     }
     return cell.kind === "reasoning_summary" ? cell.text || cell.summary : cell.summary || cell.text;
@@ -1802,6 +1830,11 @@ export function ConversationView({
   }
 
   function codexTranscriptCellTitle(cell: CodexTranscriptCell) {
+    if (cell.kind === "tool_call") {
+      const rawToolName = cell.toolLifecycleModel?.toolCalls?.[0]?.rawToolName?.trim();
+      const rawTitle = cell.title?.trim();
+      return displayToolLabel(rawToolName || rawTitle || "");
+    }
     if (cell.title?.trim()) {
       return cell.title.trim();
     }
@@ -1841,7 +1874,8 @@ export function ConversationView({
       return null;
     }
     const rows = codexTranscriptToolDetailRows(cell);
-    if (rows.length === 0) {
+    const rolloutEvents = renderCodexTranscriptRolloutEvents(cell);
+    if (rows.length === 0 && !rolloutEvents) {
       return null;
     }
     const detailsId = `codex-tool-detail-${cell.id}`;
@@ -1866,19 +1900,22 @@ export function ConversationView({
             <span className={styles.operationDetailsChevronOpen}>▾</span>
           </span>
         </summary>
-        <dl id={detailsId} className={styles.operationDetails}>
-          {rows.map((row, index) => {
-            const labelId = `${detailsId}-label-${index}`;
-            return (
-              <div key={`${cell.id}-${row.label}-${index}`} className={styles.operationDetailRow}>
-                <dt id={labelId} className={styles.operationDetailLabel}>{row.label}</dt>
-                <dd aria-labelledby={labelId}>
-                  <pre className={styles.operationDetailValue} tabIndex={0}>{row.value}</pre>
-                </dd>
-              </div>
-            );
-          })}
-        </dl>
+        {rows.length > 0 ? (
+          <dl id={detailsId} className={styles.operationDetails}>
+            {rows.map((row, index) => {
+              const labelId = `${detailsId}-label-${index}`;
+              return (
+                <div key={`${cell.id}-${row.label}-${index}`} className={styles.operationDetailRow}>
+                  <dt id={labelId} className={styles.operationDetailLabel}>{row.label}</dt>
+                  <dd aria-labelledby={labelId}>
+                    <pre className={styles.operationDetailValue} tabIndex={0}>{row.value}</pre>
+                  </dd>
+                </div>
+              );
+            })}
+          </dl>
+        ) : null}
+        {rolloutEvents}
       </details>
     );
   }
@@ -1937,14 +1974,6 @@ export function ConversationView({
           value: boundedCodexToolDetailText(error),
         });
       }
-    }
-    if (pushedInstructions.size === 0) {
-      pushInstruction(
-        firstNonEmptyText(
-          primaryToolCall?.rawToolName,
-          primaryToolCall?.title,
-        ),
-      );
     }
     const resultPreview = firstNonEmptyText(...toolCalls.map((toolCall) => toolCall.resultPreview));
     if (resultPreview && !rows.some((row) => row.label === operationDetailLabels.toolCallResult && row.value.includes(resultPreview.slice(0, 80)))) {
@@ -2155,6 +2184,7 @@ export function ConversationView({
     const toneStatusClassName = styles[`operationStatus_${statusTone}` as keyof typeof styles] ?? "";
     const toneIconClassName = styles[`operationIcon_${statusTone}` as keyof typeof styles] ?? "";
     const metaText = [visibleStatus, duration].filter(Boolean).join(" · ");
+    const visibleSummary = item.summary;
     const className = [
       styles.timelineOperationCell,
       timelineToneClassName,
@@ -2180,7 +2210,7 @@ export function ConversationView({
               <span className={`${styles.timelineCellTitle} ${toneTextClassName}`}>{item.title}</span>
               {metaText ? <span className={`${styles.timelineCellMeta} ${toneStatusClassName}`}>{metaText}</span> : null}
             </span>
-            {item.summary ? <span className={`${styles.timelineCellPreview} ${toneTextClassName}`}>{item.summary}</span> : null}
+            {visibleSummary ? <span className={`${styles.timelineCellPreview} ${toneTextClassName}`}>{visibleSummary}</span> : null}
           </span>
           {expanded ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
         </VButton>
@@ -2225,6 +2255,11 @@ export function ConversationView({
     isActiveTimelineItem: boolean,
   ) {
     const operation = item.operation;
+    const rawTimelineTitle = item.title.trim();
+    const rawOperationLabel = String(operation.rawLabel ?? "").trim();
+    const visibleTitle = rawTimelineTitle && rawTimelineTitle !== rawOperationLabel
+      ? rawTimelineTitle
+      : operationLabel(operation);
     const detailsId = `timeline-operation-detail-${operation.id}`;
     const detailsExpanded = getExpansionState(operation.id, "details", false);
     const canExpandDetails = hasOperationDetails(operation);
@@ -2241,6 +2276,9 @@ export function ConversationView({
     const toneStatusClassName = styles[`operationStatus_${statusTone}` as keyof typeof styles] ?? "";
     const toneIconClassName = styles[`operationIcon_${statusTone}` as keyof typeof styles] ?? "";
     const metaText = [visibleStatus, duration].filter(Boolean).join(" · ");
+    const visibleSummary = statusTone === "failed" && operation.error?.trim()
+      ? [item.summary, operation.error.trim()].filter(Boolean).join(" · ")
+      : item.summary;
     const className = [
       styles.timelineOperationCell,
       timelineToneClassName,
@@ -2257,10 +2295,10 @@ export function ConversationView({
           </span>
           <span className={styles.timelineCellBody}>
             <span className={styles.timelineCellTitleRow}>
-              <span className={`${styles.timelineCellTitle} ${toneTextClassName}`}>{item.title}</span>
+              <span className={`${styles.timelineCellTitle} ${toneTextClassName}`}>{visibleTitle}</span>
               {metaText ? <span className={`${styles.timelineCellMeta} ${toneStatusClassName}`}>{metaText}</span> : null}
             </span>
-            {item.summary ? <span className={`${styles.timelineCellPreview} ${toneTextClassName}`}>{item.summary}</span> : null}
+            {visibleSummary ? <span className={`${styles.timelineCellPreview} ${toneTextClassName}`}>{visibleSummary}</span> : null}
           </span>
           {canExpandDetails ? (
             <VButton
@@ -2275,15 +2313,17 @@ export function ConversationView({
             </VButton>
           ) : null}
         </div>
-        {renderRolloutTraceEvents(operation)}
         {canExpandDetails ? (
-          <DeferredOperationDetails
-            operation={operation}
-            expanded={detailsExpanded}
-            detailsId={detailsId}
-            kind={operationDetailsKind(operation)}
-            buildDetailRows={(detailOperation) => buildOperationDetailRows(detailOperation, operationDetailLabels)}
-          />
+          <>
+            <DeferredOperationDetails
+              operation={operation}
+              expanded={detailsExpanded}
+              detailsId={detailsId}
+              kind={operationDetailsKind(operation)}
+              buildDetailRows={(detailOperation) => buildOperationDetailRows(detailOperation, operationDetailLabels)}
+            />
+            {detailsExpanded ? renderRolloutTraceEvents(operation) : null}
+          </>
         ) : null}
         {showReadableResult ? <pre className={styles.timelineOperationResult}>{readableResult}</pre> : null}
         {computerUseResult}
