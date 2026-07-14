@@ -76,6 +76,8 @@ describe("AgentMessageTurnView", () => {
   });
 
   it("keeps turn header slots bounded on narrow conversation surfaces", () => {
+    expect(styles.turnAvatar).toContain("text-[var(--fg-primary)]");
+    expect(styles.turnAvatar).toContain("ring-[var(--vui-border-strong)]");
     expect(styles.turnMeta).toContain("max-w-full");
     expect(styles.turnMeta).toContain("inline-flex");
     expect(styles.turnMeta).toContain("w-fit");

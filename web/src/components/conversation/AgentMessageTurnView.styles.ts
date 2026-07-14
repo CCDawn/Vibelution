@@ -1,6 +1,6 @@
 const styles = {
   turnAvatar:
-    "vui-components-conversationview turnAvatar mt-0.5 grid size-8 shrink-0 place-items-center overflow-hidden rounded-full bg-[var(--vui-control-muted)] text-[var(--fg-tertiary)]",
+    "vui-components-conversationview turnAvatar mt-0.5 grid size-8 shrink-0 place-items-center overflow-hidden rounded-full bg-[var(--vui-control-muted)] text-[var(--fg-primary)] font-semibold ring-1 ring-inset ring-[var(--vui-border-strong)]",
   turnContent:
     "vui-components-conversationview turnContent grid min-w-0 gap-[5px]",
   turnMeta:
