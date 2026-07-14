@@ -181,6 +181,9 @@ function cellFromOperation(
   timelineSummary?: string,
 ): CodexTranscriptCell {
   const status = normalizeCellStatus(timelineStatus ?? operation.status);
+  const failurePresentation = status === "failed"
+    ? toolFailurePresentation(operation, timelineSummary)
+    : null;
   const kind = status === "failed"
     ? "error_notice"
     : operation.kind === "status"
@@ -193,14 +196,120 @@ function cellFromOperation(
     status,
     tone: cellTone(status),
     title: timelineTitle || operation.label,
-    summary: status === "failed"
-      ? compactText(operation.error || timelineSummary || operation.summary)
+    summary: failurePresentation
+      ? failurePresentation.summary
       : compactText(timelineSummary || operation.summary),
+    diagnosticSummary: failurePresentation?.diagnosticSummary,
     operationIds: [operation.id],
     toolLifecycleModel: operation.kind === "tool" ? buildCodexToolLifecycleModel(operation) : undefined,
     rolloutTraceEvents: buildCodexRolloutTraceEvents(operation),
     sourceItemId,
   };
+}
+
+type ToolFailurePresentation = {
+  summary: string;
+  diagnosticSummary?: Record<string, unknown>;
+};
+
+function toolFailurePresentation(
+  operation: AgentMessageOperation,
+  timelineSummary?: string,
+): ToolFailurePresentation {
+  const candidates = [operation.error, timelineSummary, operation.summary, operation.resultPreview];
+  for (const candidate of candidates) {
+    const structured = structuredToolFailurePresentation(candidate);
+    if (structured) {
+      return structured;
+    }
+  }
+  return { summary: compactFailureText(operation.error || timelineSummary || operation.summary) };
+}
+
+function structuredToolFailurePresentation(value: string | undefined): ToolFailurePresentation | null {
+  const payload = parseJsonObject(value);
+  if (!payload || recordText(payload, "status").toLowerCase() !== "error") {
+    return null;
+  }
+  const code = recordText(payload, "error");
+  const message = recordText(payload, "message");
+  if (!code && !message) {
+    return null;
+  }
+  const target = recordTarget(payload);
+  const recovery = structuredToolFailureRecovery(code);
+  const detail = [
+    target ? `目标：${target}` : "",
+    recovery ? `建议：${recovery}` : "",
+  ].filter(Boolean).join("\n");
+  return {
+    summary: structuredToolFailureSummary(code, message),
+    diagnosticSummary: {
+      ...(code ? { reasonCode: code } : {}),
+      ...(message ? { reasonSummary: message } : {}),
+      ...(detail ? { reasonDetail: detail } : {}),
+    },
+  };
+}
+
+function parseJsonObject(value: string | undefined): Record<string, unknown> | null {
+  const trimmed = String(value ?? "").trim();
+  if (!trimmed.startsWith("{") || !trimmed.endsWith("}")) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(trimmed);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function recordText(record: Record<string, unknown>, key: string) {
+  const value = record[key];
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function recordTarget(record: Record<string, unknown>) {
+  const target = record.target;
+  if (typeof target === "string") {
+    return target.trim();
+  }
+  if (!target || typeof target !== "object" || Array.isArray(target)) {
+    return "";
+  }
+  const targetRecord = target as Record<string, unknown>;
+  return recordText(targetRecord, "filePath") || recordText(targetRecord, "symbol");
+}
+
+function structuredToolFailureSummary(code: string, message: string) {
+  const summaries: Record<string, string> = {
+    target_not_indexed: "索引未就绪",
+    directory_not_indexed: "目录未建立索引",
+    target_not_found: "目标不存在",
+    target_outside_project: "目标超出项目范围",
+  };
+  return summaries[code] || compactFailureText(message || code || "执行失败");
+}
+
+function structuredToolFailureRecovery(code: string) {
+  if (code === "target_not_indexed") {
+    return "刷新索引后重试";
+  }
+  if (code === "directory_not_indexed") {
+    return "确认目录属于索引范围后重试";
+  }
+  return "";
+}
+
+function compactFailureText(value: string | undefined) {
+  const normalized = compactText(value);
+  const maxLength = 96;
+  return normalized.length > maxLength
+    ? `${normalized.slice(0, maxLength - 1).trimEnd()}…`
+    : normalized;
 }
 
 function answerTextFromMessage(message: AgentMessage) {

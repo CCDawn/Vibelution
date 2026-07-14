@@ -191,6 +191,44 @@ describe("codexTranscriptCells", () => {
     ]));
   });
 
+  it("projects structured tool failures into a compact summary and safe diagnostics", () => {
+    const rawFailure = JSON.stringify({
+      status: "error",
+      mode: "inspect",
+      error: "target_not_indexed",
+      message: "inspect 目标文件 `tools` 未在代码图谱索引中。请用 refresh=true 重试。",
+      target: { filePath: "tools" },
+      index: { fresh: false, updatedAt: "2026-07-14T05:43:01Z", fileCount: 1700 },
+    });
+    const cells = buildCodexTranscriptCells(message({ id: "structured-tool-failure" }), {
+      operations: [
+        {
+          id: "op-code-graph",
+          kind: "tool",
+          label: "代码图谱",
+          status: "failed",
+          summary: "执行失败",
+          error: rawFailure,
+          durationSeconds: null,
+        },
+      ],
+    });
+
+    expect(cells).toEqual([
+      expect.objectContaining({
+        kind: "error_notice",
+        title: "代码图谱",
+        summary: "索引未就绪",
+        diagnosticSummary: {
+          reasonCode: "target_not_indexed",
+          reasonSummary: "inspect 目标文件 `tools` 未在代码图谱索引中。请用 refresh=true 重试。",
+          reasonDetail: "目标：tools\n建议：刷新索引后重试",
+        },
+      }),
+    ]);
+    expect(cells[0]?.summary).not.toContain("{");
+  });
+
   it("filters internal runtime status operation cells from legacy transcript projections", () => {
     const cells = buildCodexTranscriptCells(message({ id: "legacy-internal-status" }), {
       operations: [

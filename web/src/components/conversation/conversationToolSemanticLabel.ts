@@ -22,6 +22,7 @@ const FRIENDLY_TOOL_LABELS: Record<string, string> = {
   code_symbol_tool: "代码图谱",
   search_code_tool: "搜索代码",
   get_git_status_summary_tool: "Git 状态",
+  get_recent_changes_tool: "查看最近改动",
   image2_generate_tool: "生成图片",
   web_search_tool: "网页搜索",
   web_fetch_tool: "网页读取",

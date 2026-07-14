@@ -360,6 +360,55 @@ describe("ConversationView Codex-like transcript adapter integration", () => {
     expect(html).toContain("诊断详情");
     expect(html).not.toContain("运行提示");
   });
+
+  it("renders a structured tool failure as one compact high-value row", () => {
+    const html = renderConversation([
+      {
+        id: "assistant-structured-tool-failure",
+        role: "assistant",
+        content: "",
+        timestamp: "2026-07-14T14:48:57",
+        codexTranscript: {
+          version: 1,
+          source: "native",
+          messageId: "assistant-structured-tool-failure",
+          cells: [
+            {
+              id: "code-graph-failure-cell",
+              kind: "error_notice",
+              messageId: "assistant-structured-tool-failure",
+              status: "failed",
+              tone: "error",
+              title: "代码图谱",
+              summary: "索引未就绪",
+              operationIds: ["op-code-graph"],
+              diagnosticSummary: {
+                reasonCode: "target_not_indexed",
+                reasonSummary: "代码图谱暂未包含目标。",
+                reasonDetail: "目标：tools\n建议：刷新索引后重试",
+              },
+            },
+            {
+              id: "recent-change-cell",
+              kind: "tool_call",
+              messageId: "assistant-structured-tool-failure",
+              status: "completed",
+              tone: "neutral",
+              title: "get_recent_changes_tool",
+            },
+          ],
+        },
+      },
+    ], { processDisplayMode: "trace" });
+
+    expect(html).toContain('data-codex-tool-error-compact="true"');
+    expect(html).toContain("代码图谱");
+    expect(html).toMatch(/代码图谱<\/span><span[^>]*>·<\/span><span[^>]*>索引未就绪/);
+    expect(html).toContain("索引未就绪");
+    expect(html).toContain("技术详情");
+    expect(html).toContain("查看最近改动");
+    expect(html).not.toContain("get_recent_changes_tool");
+  });
 });
 
 describe("ConversationView edit resend affordance", () => {
