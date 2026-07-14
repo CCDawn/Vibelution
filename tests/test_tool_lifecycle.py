@@ -10,6 +10,42 @@ from core.llm.types import CanonicalItemIdentity, CanonicalToolCall, CanonicalTo
 from core.orchestration.tool_lifecycle import ToolLifecycleBridge
 
 
+def test_restart_special_case_obeys_canonical_execution_authorization(monkeypatch):
+    from types import SimpleNamespace
+
+    from core.authorization import tool_authorization_service
+    from core.web.services import agent_directory_service
+
+    monkeypatch.setattr(
+        agent_directory_service,
+        "current_agent_runtime",
+        lambda: {"agentId": "agent-a", "turnId": "turn-a"},
+    )
+    tool_authorization_service.install_execution_authorization(
+        SimpleNamespace(
+            decision=SimpleNamespace(
+                agent_id="agent-a",
+                turn_id="turn-a",
+                decision_fingerprint="decision-a",
+                executable_tools=(),
+            )
+        )
+    )
+    executor_calls = []
+    bridge = ToolLifecycleBridge(
+        tool_executor_execute=lambda *args, **kwargs: executor_calls.append((args, kwargs)) or ("unsafe", None),
+    )
+
+    result, action = bridge.execute_tool(
+        {"id": "call-restart", "name": "trigger_self_restart_tool", "args": {}},
+        [],
+    )
+
+    assert "未被本回合授权执行" in result
+    assert action is None
+    assert executor_calls == []
+
+
 def test_execute_tool_passes_call_id_to_executor_events():
     observed: dict[str, Any] = {}
 

@@ -116,6 +116,28 @@ class ToolLifecycleBridge:
                 return (blocked_reason, None)
 
         if tool_name == "trigger_self_restart_tool":
+            from core.authorization.tool_authorization_service import authorize_tool_execution
+
+            authorization = authorize_tool_execution(
+                tool_name=tool_name,
+                tool_call_id=str(tool_call_id or "").strip(),
+            )
+            if authorization.enforced and not authorization.allowed:
+                blocked_reason = authorization.message
+                ui.update_status("ERROR")
+                logger.log_tool_call(
+                    tool_name,
+                    tool_args,
+                    blocked_reason,
+                    status="error",
+                    tool_call_id=tool_call_id,
+                )
+                _debug_logger.warning(
+                    f"[工具授权] {tool_name} 被 canonical execution authorization 拦截: {authorization.code}",
+                    tag="TOOL",
+                )
+                self._observe_tool_result(tool_call, blocked_reason, None)
+                return (blocked_reason, None)
             ui.update_status("ACTING")
             result, action = handle_restart_request(
                 tool_args=tool_args,

@@ -668,6 +668,57 @@ class ToolExecutor:
 
         started_at = time.monotonic()
 
+        execution_authorization = self._check_canonical_execution_authorization(tool_name, call_id)
+        if execution_authorization is not None and not execution_authorization.allowed:
+            authorization_error = execution_authorization.message
+            publish_tool_event(EventNames.TOOL_ERROR, {
+                "name": tool_name,
+                "error": authorization_error,
+                "result": authorization_error,
+                "args": tool_args,
+                **_tool_error_event_facts(
+                    tool_name,
+                    authorization_error,
+                    semantic_status="blocked",
+                    failure_class="authorization_denied",
+                ),
+            })
+            _record_current_agent_tool_observation(tool_name, "authorization_denied", tool_args, authorization_error)
+            _record_tool_scene_event(
+                "authorize",
+                "tool.authorization.execution_denied",
+                tool_name=tool_name,
+                message=authorization_error,
+                level="warning",
+                outcome="blocked",
+                fields={
+                    "code": execution_authorization.code,
+                    "agentId": execution_authorization.agent_id,
+                    "turnId": execution_authorization.turn_id,
+                    "callIdPresent": bool(call_id),
+                    "decisionFingerprintPresent": bool(execution_authorization.decision_fingerprint),
+                },
+                lifecycle=True,
+            )
+            return (authorization_error, None)
+        if execution_authorization is not None and execution_authorization.enforced:
+            _record_tool_scene_event(
+                "authorize",
+                "tool.authorization.execution_allowed",
+                tool_name=tool_name,
+                message="Canonical tool execution authorization passed.",
+                level="info",
+                outcome="allowed",
+                fields={
+                    "code": execution_authorization.code,
+                    "agentId": execution_authorization.agent_id,
+                    "turnId": execution_authorization.turn_id,
+                    "callIdPresent": True,
+                    "decisionFingerprintPresent": True,
+                },
+                lifecycle=True,
+            )
+
         policy_block = self._check_agent_tool_policy_block(tool_name, tool_args)
         if policy_block:
             publish_tool_event(EventNames.TOOL_ERROR, {
@@ -1270,8 +1321,6 @@ class ToolExecutor:
 
     @staticmethod
     def _check_agent_tool_policy_block(tool_name: str, tool_args: dict) -> Optional[str]:
-        if tool_name == "spawn_agent_tool" and (tool_args or {}).get("_internal_delegate") is True:
-            return None
         try:
             from core.web.services.agent_directory_service import evaluate_current_tool_policy
 
@@ -1282,6 +1331,24 @@ class ToolExecutor:
         if getattr(decision, "allowed", True):
             return None
         return str(getattr(decision, "message", "") or "[工具策略提示] 当前工具调用被该 Agent 的 ToolPolicy 拦截。")
+
+    def _check_canonical_execution_authorization(self, tool_name: str, tool_call_id: str):
+        if str(tool_name or "").strip() not in self._tool_map:
+            return None
+        try:
+            from core.authorization.tool_authorization_service import authorize_tool_execution
+
+            return authorize_tool_execution(tool_name=tool_name, tool_call_id=tool_call_id)
+        except Exception as exc:
+            _debug_logger.warning(f"[工具授权] canonical execution authorization failed: {type(exc).__name__}: {exc}")
+            from core.authorization.tool_authorization_service import ToolExecutionAuthorizationResult
+
+            return ToolExecutionAuthorizationResult(
+                enforced=True,
+                allowed=False,
+                code="authorization_error",
+                message="[工具授权] 无法验证当前工具调用，已按 fail-closed 拦截。",
+            )
 
     def _unknown_tool_message_for_current_context(self) -> str:
         fallback_context_warning = ""
