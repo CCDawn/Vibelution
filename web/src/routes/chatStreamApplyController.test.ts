@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { SessionDetail, SessionStreamEvent } from "../api/types";
-import type { ActiveTurnLayerState } from "./chatActiveTurnLayer";
+import { mergeAssistantDeltaIntoActiveTurnLayer, type ActiveTurnLayerState } from "./chatActiveTurnLayer";
 import type { SessionStreamProtocolTrace } from "./chatSessionStreamProtocol";
 import type { SessionAssistantDeltaDrainResult } from "./sessionAssistantDeltaScheduler";
 import {
@@ -289,6 +289,102 @@ describe("chatStreamApplyController", () => {
     expect(decision.shouldInvalidateSession).toBe(false);
     expect(decision.shouldLogApplied).toBe(true);
     expect(decision.telemetry.appliedCount).toBe(50);
+  });
+
+  it("handles a canonical snapshot without committing a duplicate render", () => {
+    const canonicalItems = [
+      {
+        version: 2 as const,
+        id: "tool:1",
+        itemId: "tool-1",
+        type: "tool" as const,
+        kind: "tool" as const,
+        status: "completed" as const,
+        terminal: false,
+        provisional: false,
+        text: "",
+        name: "read_file",
+        summary: "已读取文件",
+      },
+    ];
+    const committedLayer = mergeAssistantDeltaIntoActiveTurnLayer(undefined, assistantDelta({
+      ledgerSeq: 10,
+      stage: "assistant_response",
+      turnItems: canonicalItems,
+    }));
+
+    const decision = planAppliedAssistantDeltaDrain({
+      streamSessionId: "session-1",
+      reason: "frame",
+      drain: drain([
+        {
+          payload: assistantDelta({
+            ledgerSeq: 11,
+            stage: "assistant_response",
+            turnItems: canonicalItems,
+          }),
+          payloadLength: 152_550,
+          receivedAtMs: 100,
+        },
+      ]),
+      committedLayer,
+      stats: stats({ received: 100, applied: 99, dropped: 0 }),
+      applyStartedAtMs: 120,
+      applyFinishedAtMs: 122,
+    });
+
+    expect(decision.applied).toBe(true);
+    if (!decision.applied) {
+      throw new Error("expected duplicate snapshot to be handled");
+    }
+    expect(decision.shouldCommitRender).toBe(false);
+    expect(decision.nextCommittedLayer?.ledgerSeq).toBe(11);
+    expect(decision.stats).toEqual({ received: 100, applied: 99, dropped: 1 });
+    expect(decision.shouldScheduleNextFrame).toBe(false);
+    expect(decision.telemetry).toMatchObject({ renderCommitted: false });
+  });
+
+  it("commits canonical tool lifecycle changes even when text deltas stay empty", () => {
+    const toolItem = {
+      version: 2 as const,
+      id: "tool:1",
+      itemId: "tool-1",
+      type: "tool" as const,
+      kind: "tool" as const,
+      terminal: false,
+      provisional: false,
+      text: "",
+      name: "read_file",
+    };
+    const committedLayer = mergeAssistantDeltaIntoActiveTurnLayer(undefined, assistantDelta({
+      ledgerSeq: 10,
+      turnItems: [{ ...toolItem, status: "running", revision: 1 }],
+    }));
+
+    const decision = planAppliedAssistantDeltaDrain({
+      streamSessionId: "session-1",
+      reason: "frame",
+      drain: drain([{
+        payload: assistantDelta({
+          ledgerSeq: 11,
+          turnItems: [{ ...toolItem, status: "completed", revision: 2, summary: "已读取文件" }],
+        }),
+        payloadLength: 20,
+        receivedAtMs: 100,
+      }]),
+      committedLayer,
+      stats: stats({ received: 2, applied: 1 }),
+      applyStartedAtMs: 120,
+      applyFinishedAtMs: 122,
+    });
+
+    expect(decision.applied).toBe(true);
+    if (!decision.applied) {
+      throw new Error("expected tool lifecycle change to be handled");
+    }
+    expect(decision.shouldCommitRender).toBe(true);
+    expect(decision.stats).toEqual({ received: 2, applied: 2, dropped: 0 });
+    expect(decision.telemetry).toMatchObject({ renderCommitted: true });
   });
 
   it("keeps the optimistic Agent shell when a frame only contains internal progress", () => {
