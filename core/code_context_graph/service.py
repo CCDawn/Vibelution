@@ -19,7 +19,7 @@ from typing import Any
 
 from config.paths import resolve_workspace_home
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 INDEX_REL_PATH = Path("code_context_graph") / "index.json"
 
 INCLUDED_ROOTS = {
@@ -180,6 +180,10 @@ def build_index(*, force: bool = False) -> dict[str, Any]:
         text = _read_text(path)
         if text is None:
             continue
+        try:
+            stat = path.stat()
+        except OSError:
+            continue
         digest = hashlib.sha1(text.encode("utf-8", errors="ignore")).hexdigest()
         file_hashes[rel] = digest
         language = _language_for_path(path)
@@ -189,7 +193,8 @@ def build_index(*, force: bool = False) -> dict[str, Any]:
             "language": language,
             "extension": path.suffix.lower(),
             "lineCount": len(text.splitlines()),
-            "sizeBytes": path.stat().st_size,
+            "sizeBytes": stat.st_size,
+            "modifiedTimeNs": stat.st_mtime_ns,
             "hash": digest,
             "summary": _file_summary(path, text, language),
             "headings": _markdown_headings(text) if path.suffix.lower() == ".md" else [],
@@ -246,6 +251,8 @@ def load_or_build_index(*, refresh: bool = False, verify_freshness: bool = True)
         return build_index(force=True)
     payload = _read_json(path)
     if not payload:
+        return build_index(force=True)
+    if int(payload.get("schemaVersion") or 0) != SCHEMA_VERSION:
         return build_index(force=True)
     index_meta = payload.setdefault("index", {})
     if verify_freshness:
@@ -758,17 +765,22 @@ def _resolve_ts_import(source_path: Path, specifier: str, root: Path) -> str:
 
 def _is_index_fresh(payload: dict[str, Any]) -> bool:
     root = project_root()
-    hashes = payload.get("fileHashes") if isinstance(payload.get("fileHashes"), dict) else {}
+    indexed_files = _files_by_path(payload)
     current_files = iter_indexable_files(root)
-    if len(current_files) != len(hashes):
+    if len(current_files) != len(indexed_files):
         return False
     for path in current_files:
         rel = _rel(path, root)
-        text = _read_text(path)
-        if text is None:
+        indexed = indexed_files.get(rel)
+        if not indexed:
             return False
-        digest = hashlib.sha1(text.encode("utf-8", errors="ignore")).hexdigest()
-        if hashes.get(rel) != digest:
+        try:
+            stat = path.stat()
+        except OSError:
+            return False
+        if int(indexed.get("sizeBytes") or -1) != stat.st_size:
+            return False
+        if int(indexed.get("modifiedTimeNs") or -1) != stat.st_mtime_ns:
             return False
     return True
 

@@ -160,6 +160,29 @@ def test_code_symbol_tool_inspects_indexed_directory_without_freshness_scan(tmp_
     assert payload["index"]["freshnessChecked"] is False
 
 
+def test_code_symbol_tool_freshness_check_uses_file_metadata(tmp_path, monkeypatch):
+    from core.code_context_graph import service as graph_service
+
+    core_dir = tmp_path / "core"
+    core_dir.mkdir()
+    source = core_dir / "indexed.py"
+    source.write_text("def indexed():\n    return 1\n", encoding="utf-8")
+    monkeypatch.setattr(graph_service, "project_root", lambda: tmp_path)
+
+    indexed = graph_service.build_index(force=True)
+
+    def fail_if_source_is_read(_path):
+        raise AssertionError("freshness checks should not read and hash every indexed source file")
+
+    monkeypatch.setattr(graph_service, "_read_text", fail_if_source_is_read)
+    loaded = graph_service.load_or_build_index()
+
+    assert indexed["schemaVersion"] == 2
+    assert indexed["files"][0]["modifiedTimeNs"] == source.stat().st_mtime_ns
+    assert loaded["index"]["fresh"] is True
+    assert loaded["index"]["freshnessChecked"] is True
+
+
 def test_python_symbol_query_parses_jedi_results(monkeypatch, tmp_path):
     source = tmp_path / "demo.py"
     source.write_text("value = 1\nprint(value)\n", encoding="utf-8")
