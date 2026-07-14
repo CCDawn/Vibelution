@@ -1029,6 +1029,109 @@ class TestToolMessageFlow:
         assert agent._last_llm_failure_attempts == 5
         assert agent._last_llm_failure_max_attempts == 5
 
+    def test_invoke_llm_preserves_safe_semantic_projection_diagnostics(self, monkeypatch):
+        """协议投影失败应保留可定位字段，且不转存原始链路内容。"""
+        events = []
+        logged_details = []
+
+        class DummyContext:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        class DummyUI:
+            def thinking(self, _label):
+                return DummyContext()
+
+            def add_log(self, *_args, **_kwargs):
+                return None
+
+        class ProjectionFailureLLM(_CanonicalAgentTestLLM):
+            def invoke_outcome(self, _msgs, **_kwargs):
+                raise LLMError(
+                    "payload_protocol_error",
+                    "tool result has no preceding call",
+                    retryable=False,
+                    details={
+                        "attempt": 1,
+                        "max_attempts": 1,
+                        "messageIndex": 34,
+                        "payloadValidationErrorType": "orphan_tool_result",
+                        "payloadValidationResult": "blocked_before_provider",
+                        "payloadMessageAssistantToolCallCount": 19,
+                        "payloadMessageToolResultCount": 19,
+                        "payloadMessageShapeHash": "abc123def4567890",
+                        "payloadMessageShapeTail": [{"role": "tool", "toolCallCount": 0}],
+                        "rawProviderPayload": "must-not-persist",
+                        "toolCallId": "call-secret",
+                    },
+                )
+
+        monkeypatch.setattr(agent_module, "get_ui", lambda: DummyUI())
+        monkeypatch.setattr(
+            agent_module.logger,
+            "log_error",
+            lambda *_args, **kwargs: logged_details.append(kwargs["details"]),
+        )
+        monkeypatch.setattr(
+            agent_module,
+            "_record_agent_scene_event",
+            lambda phase, code, **kwargs: events.append((phase, code, kwargs.get("fields") or {})),
+        )
+        monkeypatch.setattr(
+            agent_module,
+            "plan_llm_recovery",
+            lambda *_args, **_kwargs: SimpleNamespace(
+                category="payload_protocol_error",
+                retryable=False,
+                action="inspect_runtime_scene",
+                user_message="工具调用链未通过协议校验",
+                wait_seconds=0,
+                stop_current_turn=True,
+                disable_streaming=False,
+                disable_tools=False,
+                request_context_compression=False,
+                fallback_profile_id=None,
+            ),
+        )
+
+        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+        agent.llm_with_tools = ProjectionFailureLLM()
+        agent.config = SimpleNamespace(
+            llm=SimpleNamespace(
+                model_name="gpt-5.6-terra",
+                provider="relay",
+                api_base="https://example.invalid",
+                api_timeout=30,
+            ),
+        )
+        agent._base_llm = SimpleNamespace(profile_id="primary")
+        agent._should_stream_llm = lambda: False
+
+        result = agent._invoke_llm([AIMessage(content="hello")])
+
+        assert result is None
+        expected = {
+            "messageIndex": 34,
+            "payloadValidationErrorType": "orphan_tool_result",
+            "payloadValidationResult": "blocked_before_provider",
+            "payloadMessageAssistantToolCallCount": 19,
+            "payloadMessageToolResultCount": 19,
+            "payloadMessageShapeHash": "abc123def4567890",
+        }
+        assert {key: agent._last_llm_error_details.get(key) for key in expected} == expected
+        assert logged_details and {key: logged_details[-1].get(key) for key in expected} == expected
+        exhausted_fields = next(
+            fields for _phase, code, fields in events if code == "llm_route_attempt_exhausted"
+        )
+        assert {key: exhausted_fields.get(key) for key in expected} == expected
+        serialized = json.dumps([agent._last_llm_error_details, logged_details, events], ensure_ascii=False)
+        assert "must-not-persist" not in serialized
+        assert "call-secret" not in serialized
+        assert "payloadMessageShapeTail" not in agent._last_llm_error_details
+
     def test_invoke_llm_stops_on_tool_calling_capability_error(self, monkeypatch):
         calls = []
 
