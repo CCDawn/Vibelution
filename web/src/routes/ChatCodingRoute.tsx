@@ -3514,14 +3514,18 @@ export function ChatCodingRoute() {
         return;
       }
       committedAssistantDeltaLayer = decision.nextCommittedLayer;
-      setActiveTurnLayersBySession((current) =>
-        setActiveTurnLayerForSession(current, streamSessionId, decision.nextCommittedLayer)
-      );
+      if (decision.shouldCommitRender) {
+        setActiveTurnLayersBySession((current) =>
+          setActiveTurnLayerForSession(current, streamSessionId, decision.nextCommittedLayer)
+        );
+      }
       sessionStreamApplyStatsRef.current[streamSessionId] = decision.stats;
-      lastAssistantDeltaAppliedAtRef.current = {
-        ...lastAssistantDeltaAppliedAtRef.current,
-        [streamSessionId]: decision.lastAppliedAtMs,
-      };
+      if (decision.shouldCommitRender) {
+        lastAssistantDeltaAppliedAtRef.current = {
+          ...lastAssistantDeltaAppliedAtRef.current,
+          [streamSessionId]: decision.lastAppliedAtMs,
+        };
+      }
       if (decision.shouldLogApplied) {
         postBrowserTelemetry({
           phase: "session_stream",
