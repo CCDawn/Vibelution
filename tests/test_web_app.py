@@ -2088,6 +2088,7 @@ def test_submit_session_message_runs_turn_and_persists_reply(tmp_path, monkeypat
         "conversation.turn.terminal_result",
         "conversation.turn.capture_attached",
         "conversation.turn.result_persisted",
+        "conversation.turn.user_visible_finished",
         "conversation.turn.worker_finished",
     ]:
         assert expected in event_codes
@@ -2096,6 +2097,10 @@ def test_submit_session_message_runs_turn_and_persists_reply(tmp_path, monkeypat
     assert persisted_event["fields"]["sessionId"] == "session-live"
     assert persisted_event["fields"]["assistantTextLength"] == len("已完成网页对话提交接线。")
     assert persisted_event["child_log_path"] == "conversations/session-live-turns.jsonl"
+    capture_event = next(kwargs for event_code, kwargs in turn_events if event_code == "conversation.turn.capture_attached")
+    assert capture_event["outcome"] == "recorded"
+    assert event_codes.index("conversation.turn.result_persisted") < event_codes.index("conversation.turn.user_visible_finished")
+    assert event_codes.index("conversation.turn.user_visible_finished") < event_codes.index("conversation.turn.worker_finished")
 
 
 def test_session_submit_message_routes_slash_skill_into_scheduled_context(tmp_path, monkeypatch):

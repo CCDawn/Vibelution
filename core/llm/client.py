@@ -2398,6 +2398,26 @@ class LLMClient:
                         elapsed_ms = int((now - start) * 1000)
                         if first_chunk_ms is None:
                             first_chunk_ms = elapsed_ms
+                            _record_llm_scene_event(
+                                "stream",
+                                "llm.stream.first_chunk",
+                                message="LLM stream produced its first protocol chunk.",
+                                outcome="observed",
+                                fields={
+                                    "role": self.role,
+                                    "profileId": self.profile_id,
+                                    "provider": self.provider.kind,
+                                    "model": self.profile.model,
+                                    "sessionId": event_metadata.get("sessionId", ""),
+                                    "turnId": event_metadata.get("turnId", ""),
+                                    "invocationId": event_metadata.get("invocationId", ""),
+                                    "routeAttempt": event_metadata.get("routeAttempt", 0),
+                                    "elapsedMs": elapsed_ms,
+                                    "chunkType": event.type,
+                                    "attempt": attempt,
+                                },
+                                lifecycle=False,
+                            )
                         if previous_chunk_at is not None:
                             inter_chunk_ms = int((now - previous_chunk_at) * 1000)
                             max_inter_chunk_ms = max(max_inter_chunk_ms, inter_chunk_ms)
@@ -2411,10 +2431,50 @@ class LLMClient:
                             generated_text_parts.append(event.text or "")
                             if first_text_delta_ms is None and (event.text or ""):
                                 first_text_delta_ms = elapsed_ms
+                                _record_llm_scene_event(
+                                    "stream",
+                                    "llm.stream.first_content_delta",
+                                    message="LLM stream produced its first visible content delta.",
+                                    outcome="observed",
+                                    fields={
+                                        "role": self.role,
+                                        "profileId": self.profile_id,
+                                        "provider": self.provider.kind,
+                                        "model": self.profile.model,
+                                        "sessionId": event_metadata.get("sessionId", ""),
+                                        "turnId": event_metadata.get("turnId", ""),
+                                        "invocationId": event_metadata.get("invocationId", ""),
+                                        "routeAttempt": event_metadata.get("routeAttempt", 0),
+                                        "elapsedMs": elapsed_ms,
+                                        "contentChars": len(event.text or ""),
+                                        "attempt": attempt,
+                                    },
+                                    lifecycle=False,
+                                )
                         elif event.type == "reasoning_delta":
                             reasoning_delta_count += 1
                             if first_reasoning_delta_ms is None and (event.text or ""):
                                 first_reasoning_delta_ms = elapsed_ms
+                                _record_llm_scene_event(
+                                    "stream",
+                                    "llm.stream.first_reasoning_delta",
+                                    message="LLM stream produced its first reasoning delta.",
+                                    outcome="observed",
+                                    fields={
+                                        "role": self.role,
+                                        "profileId": self.profile_id,
+                                        "provider": self.provider.kind,
+                                        "model": self.profile.model,
+                                        "sessionId": event_metadata.get("sessionId", ""),
+                                        "turnId": event_metadata.get("turnId", ""),
+                                        "invocationId": event_metadata.get("invocationId", ""),
+                                        "routeAttempt": event_metadata.get("routeAttempt", 0),
+                                        "elapsedMs": elapsed_ms,
+                                        "reasoningChars": len(event.text or ""),
+                                        "attempt": attempt,
+                                    },
+                                    lifecycle=False,
+                                )
                             reasoning_chars += len(event.text or "")
                             if isinstance(event.provider_payload, dict):
                                 source = str(event.provider_payload.get("reasoning_source") or "").strip()

@@ -13764,7 +13764,7 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                 session_id,
                 "capture_attached",
                 turn_id=turn_id,
-                outcome="running",
+                outcome="recorded",
                 fields={
                     "hasThought": bool(turn_capture.thought),
                     "hasContent": bool(turn_capture.content),
@@ -13781,6 +13781,21 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                 user_message_source=str(context.get("user_message_source") or "").strip(),
                 turn_id=turn_id,
             )
+            if _is_session_turn_current(session_id, turn_id):
+                _set_session_running(session_id, False, turn_id=turn_id)
+                _publish_session_detail_snapshot(session_id)
+                _record_session_turn_lifecycle_event(
+                    session_id,
+                    "user_visible_finished",
+                    turn_id=turn_id,
+                    outcome="completed",
+                    fields={
+                        "resultStatus": str(result.get("status") or "completed").strip()
+                        if isinstance(result, dict)
+                        else "completed",
+                        "finalDetailPublished": True,
+                    },
+                )
             if agent_id and _is_session_turn_current(session_id, turn_id):
                 record_agent_turn_result(agent_id, session_id, result if isinstance(result, dict) else {}, run_id=turn_id)
     except Exception as exc:

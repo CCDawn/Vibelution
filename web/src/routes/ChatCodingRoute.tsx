@@ -4075,6 +4075,7 @@ export function ChatCodingRoute() {
     }
     const paintedAtMs = metrics.paintedAtMs || chatStreamPerformanceNowMs();
     const lastAssistantDeltaAppliedAtMs = lastAssistantDeltaAppliedAtRef.current[sessionId] ?? 0;
+    const paintedActiveTurn = activeTurnLayersBySessionRef.current[sessionId];
     lastConversationStreamingFrameTelemetryAtRef.current = {
       ...lastConversationStreamingFrameTelemetryAtRef.current,
       [sessionId]: now,
@@ -4086,10 +4087,11 @@ export function ChatCodingRoute() {
       level: "info",
       fields: {
         sessionId,
+        turnId: paintedActiveTurn?.turnId ?? "",
         streamingMessageCount: metrics.streamingMessageCount,
         renderedTextLength: metrics.renderedTextLength,
         scrollSignalLength: metrics.scrollSignal.length,
-        activeTurnTextLength: activeTurnLayerTextLength(activeTurnLayersBySessionRef.current[sessionId]),
+        activeTurnTextLength: activeTurnLayerTextLength(paintedActiveTurn),
         paintedAtMs: Math.round(paintedAtMs),
         lastAssistantDeltaAppliedAtMs: Math.round(lastAssistantDeltaAppliedAtMs),
         applyToPaintMs: lastAssistantDeltaAppliedAtMs

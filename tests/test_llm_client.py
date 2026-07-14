@@ -1749,6 +1749,15 @@ def test_stream_records_success_event_with_safe_summary(monkeypatch):
     assert fields["maxInterChunkMs"] >= 0
     assert fields["avgInterChunkMs"] >= 0
     assert fields["interChunkCount"] == 2
+    first_chunk_event = next(item for item in recorded if item[0][1] == "llm.stream.first_chunk")
+    first_chunk_fields = first_chunk_event[1]["fields"]
+    assert first_chunk_fields["elapsedMs"] >= 0
+    assert first_chunk_fields["chunkType"] == "text_delta"
+    first_content_event = next(item for item in recorded if item[0][1] == "llm.stream.first_content_delta")
+    first_content_fields = first_content_event[1]["fields"]
+    assert first_content_fields["elapsedMs"] >= first_chunk_fields["elapsedMs"]
+    assert first_content_fields["contentChars"] == len("ok")
+    assert "content" not in first_content_fields
 
 
 def test_stream_records_usage_and_cache_hit_rate(monkeypatch):
