@@ -1,8 +1,11 @@
 import importlib
 import sys
+import threading
+import time
 import types
 
 import httpx
+import pytest
 
 from tools import web_search_tool
 
@@ -26,6 +29,16 @@ class FakeClient:
 
 def install_fake_client(monkeypatch, handler):
     monkeypatch.setattr(web_search_tool.httpx, "Client", lambda *args, **kwargs: FakeClient(handler))
+
+
+def wait_for_condition(predicate, *, description: str, timeout: float = 2.0):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        value = predicate()
+        if value:
+            return value
+        threading.Event().wait(0.01)
+    pytest.fail(f"Timed out waiting for {description}")
 
 
 def test_web_search_reports_local_token_service_connection_failure(monkeypatch):
@@ -74,6 +87,55 @@ def test_autoglm_search_tool_availability_reports_block_reason(monkeypatch):
     assert status["available"] is False
     assert status["dependency"] == "autoglm_token_service"
     assert "web_search_tool 已临时禁用" in status["blockReason"]
+
+
+def test_stale_autoglm_availability_returns_immediately_and_refreshes_in_background(monkeypatch):
+    main_thread_id = threading.get_ident()
+    web_search_tool._TOKEN_HEALTH_CACHE.clear()
+    web_search_tool._TOKEN_HEALTH_CACHE.update(
+        {
+            "checkedAt": 0.0,
+            "status": {"available": False, "status": "unavailable"},
+            "refreshing": False,
+        }
+    )
+
+    def check_in_background(*, timeout=None):
+        assert threading.get_ident() != main_thread_id
+        return {"available": True, "status": "available", "tokenPresent": True}
+
+    monkeypatch.setattr(web_search_tool, "check_autoglm_token_service", check_in_background)
+
+    status = web_search_tool.autoglm_search_tool_availability()
+
+    assert status == {"available": False, "status": "unavailable"}
+    refreshed = wait_for_condition(
+        lambda: web_search_tool._TOKEN_HEALTH_CACHE.get("status", {}).get("available") is True,
+        description="stale AutoGLM availability refresh",
+    )
+    assert refreshed is True
+
+
+def test_missing_autoglm_availability_is_provisional_and_never_blocks_first_turn(monkeypatch):
+    main_thread_id = threading.get_ident()
+    web_search_tool._TOKEN_HEALTH_CACHE.clear()
+    web_search_tool._TOKEN_HEALTH_CACHE.update({"checkedAt": 0.0, "status": None, "refreshing": False})
+
+    def check_in_background(*, timeout=None):
+        assert threading.get_ident() != main_thread_id
+        return {"available": False, "status": "unavailable"}
+
+    monkeypatch.setattr(web_search_tool, "check_autoglm_token_service", check_in_background)
+
+    status = web_search_tool.autoglm_search_tool_availability()
+
+    assert status["available"] is True
+    assert status["status"] == "checking"
+    assert status["availabilityProvisional"] is True
+    wait_for_condition(
+        lambda: web_search_tool._TOKEN_HEALTH_CACHE.get("status", {}).get("status") == "unavailable",
+        description="initial AutoGLM availability refresh",
+    )
 
 
 def test_web_search_reports_token_service_timeout(monkeypatch):

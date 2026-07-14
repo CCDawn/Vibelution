@@ -5867,7 +5867,10 @@ def submit_session_message(
         },
         source="submit_session_message",
     )
+    live_publish_started_at = _perf_counter()
     _set_session_waiting_live_output(conversation_id, turn_id=turn_control.turn_id)
+    submit_timing_fields["initialLiveDeltaPublishMs"] = _elapsed_ms(live_publish_started_at)
+    submit_timing_fields["initialLivePublishMode"] = "assistant_delta"
     _record_session_cycle_message(
         conversation_id,
         user_entry,
@@ -5896,10 +5899,6 @@ def submit_session_message(
                 "sendRequiresExplicitUserIntent": True,
             },
         )
-    publish_started_at = _perf_counter()
-    _publish_session_detail_snapshot(conversation_id)
-    submit_timing_fields["initialSnapshotPublishMs"] = _elapsed_ms(publish_started_at)
-
     if recent_image_reference_missing and normalized_message_source != "agent_inbox":
         visible = _recent_image_attachment_missing_message(lang)
         _finish_image_attachment_routed_turn(
@@ -11613,8 +11612,23 @@ def _initial_session_reasoning_effort(agent: dict[str, Any] | None, model: dict[
     )
 
 
+def _initialized_session_reasoning_effort(session_id: str) -> tuple[bool, str]:
+    normalized_session_id = str(session_id or "").strip()
+    with _CHAT_STATE_LOCK:
+        payload = load_chat_state(PROJECT_ROOT)
+        conversation = _find_conversation_entry(payload, normalized_session_id)
+        if conversation is None:
+            raise SessionNotFoundError(f"Session not found: {normalized_session_id}")
+        if "reasoning_effort" not in conversation:
+            return False, ""
+        return True, normalize_reasoning_effort(conversation.get("reasoning_effort"))
+
+
 def _ensure_session_reasoning_effort_initialized(session_id: str) -> str:
     normalized_session_id = str(session_id or "").strip()
+    initialized, current = _initialized_session_reasoning_effort(normalized_session_id)
+    if initialized:
+        return current
     model = _session_fixed_model_choice(normalized_session_id)
     detail = get_session_detail(normalized_session_id, message_limit=0, transcript_scope="none")
     if detail is None:
@@ -11637,13 +11651,10 @@ def _ensure_session_reasoning_effort_initialized(session_id: str) -> str:
 
 
 def _session_reasoning_effort_snapshot(session_id: str) -> str:
-    _ensure_session_reasoning_effort_initialized(session_id)
-    with _CHAT_STATE_LOCK:
-        payload = load_chat_state(PROJECT_ROOT)
-        conversation = _find_conversation_entry(payload, str(session_id or "").strip())
-        if conversation is None:
-            raise SessionNotFoundError(f"Session not found: {session_id}")
-        return normalize_reasoning_effort(conversation.get("reasoning_effort"))
+    initialized, current = _initialized_session_reasoning_effort(session_id)
+    if initialized:
+        return current
+    return _ensure_session_reasoning_effort_initialized(session_id)
 
 
 def get_session_llm_options(session_id: str) -> dict[str, Any]:
