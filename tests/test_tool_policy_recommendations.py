@@ -8,17 +8,22 @@ from tools.search_tools import grep_search_tool
 
 
 def _bind_visible_tools(monkeypatch, visible_tools):
+    from types import SimpleNamespace
+    from core.authorization import tool_authorization_service
     from core.web.services import agent_directory_service
 
     monkeypatch.setattr(
         agent_directory_service,
         "current_agent_runtime",
-        lambda: {"agentId": "agent-test"},
+        lambda: {"agentId": "agent-test", "turnId": "turn-test", "toolPolicy": {}},
     )
-    monkeypatch.setattr(
-        agent_directory_service,
-        "effective_visible_tool_names_for_current_agent",
-        lambda _tools=None: list(visible_tools),
+    tool_authorization_service.install_execution_authorization(
+        SimpleNamespace(decision=SimpleNamespace(
+            agent_id="agent-test",
+            turn_id="turn-test",
+            decision_fingerprint="decision-test",
+            executable_tools=tuple(visible_tools),
+        ))
     )
 
 

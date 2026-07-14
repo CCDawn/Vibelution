@@ -57,29 +57,21 @@ class _RegistryDescriptor:
 
 
 @dataclass(frozen=True, slots=True)
-class ShadowAuthorizationReport:
+class AuthorizationReport:
     decision: AuthorizationDecision
-    legacy_visible_tools: tuple[str, ...]
-    shadow_only_tools: tuple[str, ...]
-    legacy_only_tools: tuple[str, ...]
     deny_code_counts: tuple[tuple[str, int], ...]
     registry_fingerprint: str
     duration_ms: int
 
-    @property
-    def parity(self) -> bool:
-        return not self.shadow_only_tools and not self.legacy_only_tools
 
-
-def resolve_shadow_authorization(
+def _resolve_authorization(
     *,
     runtime: Mapping[str, Any],
-    legacy_visible_tool_names: Sequence[str],
     registry_payload: Mapping[str, Any] | None = None,
     registry_loader: Callable[[], Mapping[str, Any]] | None = None,
     generated_at: str = "",
-) -> ShadowAuthorizationReport:
-    """Resolve and compare a canonical decision without enforcing it."""
+) -> AuthorizationReport:
+    """Resolve one canonical decision without any legacy visibility input."""
 
     started = perf_counter()
     payload = dict(registry_payload or _load_registry_payload(registry_loader))
@@ -125,15 +117,9 @@ def resolve_shadow_authorization(
         available_tool_names=available_names,
         generated_at=generated_at or datetime.now(timezone.utc).isoformat(),
     )
-    legacy_visible = tuple(_ordered_unique(legacy_visible_tool_names))
-    shadow_visible = set(decision.visible_tools)
-    legacy_visible_set = set(legacy_visible)
     deny_counts = Counter(reason.code.value for _, reason in decision.denied)
-    return ShadowAuthorizationReport(
+    return AuthorizationReport(
         decision=decision,
-        legacy_visible_tools=legacy_visible,
-        shadow_only_tools=tuple(sorted(shadow_visible.difference(legacy_visible_set))),
-        legacy_only_tools=tuple(sorted(legacy_visible_set.difference(shadow_visible))),
         deny_code_counts=tuple(sorted(deny_counts.items())),
         registry_fingerprint=str(payload.get("registryFingerprint") or "").strip(),
         duration_ms=max(0, int((perf_counter() - started) * 1000)),
@@ -143,17 +129,11 @@ def resolve_shadow_authorization(
 def resolve_enforced_authorization(
     *,
     runtime: Mapping[str, Any],
-    legacy_visible_tool_names: Sequence[str],
     registry_payload: Mapping[str, Any] | None = None,
     registry_loader: Callable[[], Mapping[str, Any]] | None = None,
     generated_at: str = "",
-) -> ShadowAuthorizationReport:
-    """Resolve the canonical model-visible surface or fail closed.
-
-    Shadow comparison remains part of the report so cutover parity stays
-    observable, but missing Agent/turn identity can no longer broaden the
-    model-visible surface through a legacy fallback.
-    """
+) -> AuthorizationReport:
+    """Resolve the only model-visible and executable tool decision."""
 
     values = dict(runtime or {})
     agent = values.get("agent") if isinstance(values.get("agent"), Mapping) else {}
@@ -163,16 +143,15 @@ def resolve_enforced_authorization(
     turn_id = str(values.get("turnId") or values.get("runId") or "").strip()
     if not turn_id:
         raise ToolAuthorizationContextError("tool authorization requires turnId")
-    return resolve_shadow_authorization(
+    return _resolve_authorization(
         runtime=values,
-        legacy_visible_tool_names=legacy_visible_tool_names,
         registry_payload=registry_payload,
         registry_loader=registry_loader,
         generated_at=generated_at,
     )
 
 
-def install_execution_authorization(report: ShadowAuthorizationReport) -> ToolExecutionAuthorizationContext:
+def install_execution_authorization(report: AuthorizationReport) -> ToolExecutionAuthorizationContext:
     from core.web.services.agent_directory_service import current_agent_runtime
 
     decision = report.decision
@@ -203,7 +182,12 @@ def current_execution_authorization() -> ToolExecutionAuthorizationContext | Non
     return _EXECUTION_AUTHORIZATION.get(None)
 
 
-def authorize_tool_execution(*, tool_name: str, tool_call_id: str) -> ToolExecutionAuthorizationResult:
+def authorize_tool_execution(
+    *,
+    tool_name: str,
+    tool_call_id: str,
+    tool_args: Mapping[str, Any] | None = None,
+) -> ToolExecutionAuthorizationResult:
     from core.web.services.agent_directory_service import current_agent_runtime
 
     runtime = dict(current_agent_runtime() or {})
@@ -228,6 +212,10 @@ def authorize_tool_execution(*, tool_name: str, tool_call_id: str) -> ToolExecut
     normalized_tool = str(tool_name or "").strip()
     if normalized_tool not in set(context.executable_tools):
         return _execution_denial("tool_not_executable", "当前工具未被本回合授权执行。", runtime_agent_id, runtime_turn_id, context)
+    constraint_denial = _runtime_constraint_denial(runtime, normalized_tool, tool_args or {})
+    if constraint_denial:
+        code, detail = constraint_denial
+        return _execution_denial(code, detail, runtime_agent_id, runtime_turn_id, context)
     with context.call_count_lock:
         if context.max_calls_per_turn > 0 and context.call_count >= context.max_calls_per_turn:
             return _execution_denial("call_budget_exhausted", "当前回合工具调用额度已用尽。", runtime_agent_id, runtime_turn_id, context)
@@ -241,6 +229,33 @@ def authorize_tool_execution(*, tool_name: str, tool_call_id: str) -> ToolExecut
         turn_id=context.turn_id,
         decision_fingerprint=context.decision_fingerprint,
     )
+
+
+def _runtime_constraint_denial(
+    runtime: Mapping[str, Any],
+    tool_name: str,
+    tool_args: Mapping[str, Any],
+) -> tuple[str, str] | None:
+    del tool_args
+    from core.web.services.agent_directory_service import (
+        DISABLED_AGENT_DIRECT_READ_TOOL_NAMES,
+        SUBAGENT_DELEGATION_TOOL_NAMES,
+        normalize_delegation_policy,
+    )
+
+    if tool_name in DISABLED_AGENT_DIRECT_READ_TOOL_NAMES:
+        return (
+            "direct_read_tool_disabled",
+            f"当前 Agent 已关闭 `{tool_name}` 直读能力，请使用已授权的受控读取工具。",
+        )
+    if tool_name in SUBAGENT_DELEGATION_TOOL_NAMES:
+        delegation_policy = normalize_delegation_policy(runtime.get("delegationPolicy"))
+        if not bool(delegation_policy.get("allowSubagents", False)):
+            return (
+                "subagent_delegation_disabled",
+                "当前 Agent 的委托策略（DelegationPolicy）默认关闭子 agent 派发权限。",
+            )
+    return None
 
 
 def _execution_denial(
@@ -326,15 +341,3 @@ def _turn_source(runtime: Mapping[str, Any], agent: Mapping[str, Any]) -> str:
     if mode == "self_evolution":
         return "self_evolution"
     return "session"
-
-
-def _ordered_unique(values: Sequence[str]) -> list[str]:
-    result: list[str] = []
-    seen: set[str] = set()
-    for item in values:
-        value = str(item or "").strip()
-        if not value or value in seen:
-            continue
-        result.append(value)
-        seen.add(value)
-    return result

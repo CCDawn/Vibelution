@@ -159,3 +159,27 @@ def test_call_budget_is_shared_by_execution_authorization(monkeypatch):
     assert first == "ok"
     assert "调用额度已用尽" in second
     assert calls == ["called"]
+
+
+def test_delegation_constraint_is_enforced_by_canonical_authorization(monkeypatch):
+    _runtime(monkeypatch, allowed_tools=("spawn_agent_tool",))
+    monkeypatch.setattr(
+        agent_directory_service,
+        "current_agent_runtime",
+        lambda: {
+            "agentId": "agent-a",
+            "turnId": "turn-a",
+            "toolPolicy": {"allowedTools": ["spawn_agent_tool"]},
+            "delegationPolicy": {"allowSubagents": False},
+        },
+    )
+    _install(tools=("spawn_agent_tool",))
+    executor = ToolExecutor()
+    calls = []
+    executor.register_tool("spawn_agent_tool", lambda **_kwargs: calls.append("called") or "unsafe")
+
+    result, _ = executor.execute("spawn_agent_tool", {"goal": "probe"}, tool_call_id="call-delegate")
+
+    assert "DelegationPolicy" in result
+    assert "关闭子 agent 派发权限" in result
+    assert calls == []

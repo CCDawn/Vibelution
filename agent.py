@@ -672,11 +672,7 @@ class SelfEvolvingAgent:
 
         # 创建主要工具
         llm_facing_tools = Key_Tools.create_llm_facing_tools()
-        legacy_visible_tools = self._filter_tools_for_current_agent(llm_facing_tools)
-        authorization_report = self._record_shadow_tool_authorization(
-            llm_facing_tools,
-            legacy_visible_tools,
-        )
+        authorization_report = self._resolve_tool_authorization(llm_facing_tools)
         self.key_tools = self._materialize_authorized_tools(llm_facing_tools, authorization_report)
         self._tool_authorization_decision_fingerprint = str(
             getattr(getattr(authorization_report, "decision", None), "decision_fingerprint", "") or ""
@@ -1082,19 +1078,8 @@ class SelfEvolvingAgent:
         self.llm_with_tools = llm.bind_tools(self.key_tools)
         self._bound_llm_cache = {"default": self.llm_with_tools}
 
-    @staticmethod
-    def _filter_tools_for_current_agent(tools: List[Any]) -> List[Any]:
-        try:
-            from core.web.services.agent_directory_service import filter_llm_tools_for_current_agent
-            from core.web.services.agent_directory_service import current_agent_runtime
-
-            if not current_agent_runtime().get("agentId"):
-                return list(tools or [])
-            return filter_llm_tools_for_current_agent(tools)
-        except Exception:
-            return list(tools or [])
-
-    def _record_shadow_tool_authorization(self, registered_tools: List[Any], legacy_visible_tools: List[Any]) -> Any:
+    def _resolve_tool_authorization(self, registered_tools: List[Any]) -> Any:
+        del registered_tools
         started = time.perf_counter()
         runtime: Dict[str, Any] = {}
         try:
@@ -1102,7 +1087,7 @@ class SelfEvolvingAgent:
                 install_execution_authorization,
                 resolve_enforced_authorization,
             )
-            from core.logging.tool_authorization_events import record_shadow_authorization_event
+            from core.logging.tool_authorization_events import record_authorization_decision
             from core.web.services.agent_directory_service import current_agent_runtime
 
             runtime = dict(current_agent_runtime() or {})
@@ -1126,22 +1111,17 @@ class SelfEvolvingAgent:
             runtime.setdefault("mode", str(turn_runtime.get("mode") or "").strip())
             report = resolve_enforced_authorization(
                 runtime=runtime,
-                legacy_visible_tool_names=[
-                    str(getattr(tool, "name", "") or "").strip()
-                    for tool in legacy_visible_tools or []
-                    if str(getattr(tool, "name", "") or "").strip()
-                ],
             )
             install_execution_authorization(report)
-            record_shadow_authorization_event(report)
+            record_authorization_decision(report)
             return report
         except Exception as exc:
             try:
                 from core.authorization.tool_authorization_service import clear_execution_authorization
-                from core.logging.tool_authorization_events import record_shadow_authorization_failure
+                from core.logging.tool_authorization_events import record_authorization_failure
 
                 clear_execution_authorization()
-                record_shadow_authorization_failure(
+                record_authorization_failure(
                     runtime=runtime,
                     error=exc,
                     duration_ms=max(0, int((time.perf_counter() - started) * 1000)),
