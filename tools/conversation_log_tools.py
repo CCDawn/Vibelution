@@ -21,7 +21,7 @@ MAX_SCENE_CONVERSATION_FILES = 20
 MAX_CORRELATION_SUMMARIES = 12
 
 IDENTITY_ALIASES = {
-    "sessionId": ("session_id", "sessionId"),
+    "sessionId": ("sessionId", "runtimeSessionId", "runtime_session_id", "session_id"),
     "turnId": ("turn_id", "turnId"),
     "invocationId": ("invocation_id", "invocationId"),
     "submissionId": (
@@ -88,7 +88,20 @@ def inspect_conversation_logs(
         "invocationId": str(invocation_id or "").strip(),
         "submissionId": str(submission_id or "").strip(),
     }
-    candidates = _select_candidate_logs(query=query, log_path=log_path, limit=normalized_limit)
+    normalized_query = str(query or "").strip()
+    candidates = _select_candidate_logs(
+        query=normalized_query,
+        log_path=log_path,
+        limit=normalized_limit,
+        identity_filters=identity_filters,
+    )
+    has_locator = bool(normalized_query or any(identity_filters.values()))
+    if str(log_path or "").strip():
+        selection_status = "explicit"
+    elif has_locator:
+        selection_status = "matched" if candidates else "not_found"
+    else:
+        selection_status = "latest" if candidates else "not_found"
     inspections = [
         _inspect_target(
             path,
@@ -101,9 +114,11 @@ def inspect_conversation_logs(
         "status": "ok",
         "tool": "conversation_log_inspect_tool",
         "inspectedAt": datetime.now(timezone.utc).isoformat(),
-        "query": _safe_text(str(query or "").strip(), limit=120),
+        "query": _safe_text(normalized_query, limit=120),
         "logPath": str(log_path or "").strip(),
         "identityFilters": identity_filters,
+        "selectionStatus": selection_status,
+        "fallbackUsed": False,
         "candidateCount": len(candidates),
         "candidates": [
             _candidate_summary(path)
@@ -118,7 +133,13 @@ def inspect_conversation_logs(
     }
 
 
-def _select_candidate_logs(*, query: str, log_path: str, limit: int) -> list[Path]:
+def _select_candidate_logs(
+    *,
+    query: str,
+    log_path: str,
+    limit: int,
+    identity_filters: dict[str, str],
+) -> list[Path]:
     if str(log_path or "").strip():
         path = _resolve_allowed_log_path(log_path)
         return [path]
@@ -132,16 +153,20 @@ def _select_candidate_logs(*, query: str, log_path: str, limit: int) -> list[Pat
         reverse=True,
     )
     normalized_query = str(query or "").strip().lower()
-    if not normalized_query:
+    active_filters = {key: value for key, value in identity_filters.items() if value}
+    if not normalized_query and not active_filters:
         return logs[:limit]
 
     matched: list[Path] = []
     for path in logs:
-        if _log_matches_query(path, normalized_query):
-            matched.append(path)
-            if len(matched) >= limit:
-                break
-    return matched or logs[:limit]
+        if normalized_query and not _log_matches_query(path, normalized_query):
+            continue
+        if active_filters and not _log_matches_identity_filters(path, active_filters):
+            continue
+        matched.append(path)
+        if len(matched) >= limit:
+            break
+    return matched
 
 
 def _resolve_allowed_log_path(value: str) -> Path:
@@ -201,6 +226,29 @@ def _log_matches_query(path: Path, normalized_query: str) -> bool:
             for line_no, line in enumerate(handle, start=1):
                 if normalized_query in line.lower():
                     return True
+                if line_no >= MAX_CANDIDATE_SCAN_LINES:
+                    break
+    except Exception:
+        return False
+    return False
+
+
+def _log_matches_identity_filters(path: Path, identity_filters: dict[str, str]) -> bool:
+    matched = {key: False for key in identity_filters}
+    try:
+        with path.open("r", encoding="utf-8", errors="replace") as handle:
+            for line_no, line in enumerate(handle, start=1):
+                try:
+                    event = json.loads(line)
+                except json.JSONDecodeError:
+                    event = None
+                if isinstance(event, dict):
+                    identities = _event_identities(event)
+                    for key, expected in identity_filters.items():
+                        if identities.get(key) == expected:
+                            matched[key] = True
+                    if all(matched.values()):
+                        return True
                 if line_no >= MAX_CANDIDATE_SCAN_LINES:
                     break
     except Exception:
@@ -483,9 +531,13 @@ def _correlate_boundaries(
     *,
     identity_filters: dict[str, str],
 ) -> dict[str, Any]:
+    active_filters = {key: value for key, value in identity_filters.items() if value}
     boundary_records: list[dict[str, Any]] = []
+    matched_record_count = 0
     for order, record in enumerate(records):
         identities = _event_identities(record["event"])
+        if active_filters and all(identities.get(key) == value for key, value in active_filters.items()):
+            matched_record_count += 1
         if not any(identities.get(key) for key in BOUNDARY_IDENTITY_KEYS):
             continue
         boundary_records.append({**record, "order": order, "identities": identities})
@@ -521,7 +573,6 @@ def _correlate_boundaries(
         grouped.setdefault(find(index), []).append(record)
 
     boundaries = [_boundary_summary(items) for items in grouped.values()]
-    active_filters = {key: value for key, value in identity_filters.items() if value}
     if active_filters:
         boundaries = [
             boundary
@@ -535,8 +586,24 @@ def _correlate_boundaries(
     successful = [item for item in boundaries if item["state"] == "success"]
     unterminated = [item for item in boundaries if not item["terminal"]]
     current_unterminated = unterminated[0] if unterminated else None
+    diagnostics: list[dict[str, str]] = []
+    if not active_filters:
+        match_status = "not_filtered"
+    elif boundaries:
+        match_status = "matched"
+    elif matched_record_count:
+        match_status = "identity_match_without_boundary"
+        diagnostics.append({
+            "code": "identity_match_without_boundary",
+            "message": "Identity matched log records, but no turn, invocation, or submission boundary was found.",
+        })
+    else:
+        match_status = "not_found"
     return {
         "filters": active_filters,
+        "matchStatus": match_status,
+        "matchedRecordCount": matched_record_count,
+        "diagnostics": diagnostics,
         "boundaryCount": len(boundaries),
         "recentSuccessfulBoundary": _public_boundary(successful[0]) if successful else None,
         "currentUnterminatedBoundary": _public_boundary(current_unterminated) if current_unterminated else None,
@@ -555,14 +622,16 @@ def _event_identities(event: dict[str, Any]) -> dict[str, str]:
             containers.append(value)
     identities: dict[str, str] = {}
     for canonical, aliases in IDENTITY_ALIASES.items():
-        for container in containers:
-            for alias in aliases:
+        lookups = (
+            ((container, alias) for alias in aliases for container in containers)
+            if canonical == "sessionId"
+            else ((container, alias) for container in containers for alias in aliases)
+        )
+        for container, alias in lookups:
                 value = container.get(alias)
                 if value is not None and str(value).strip():
                     identities[canonical] = str(value).strip()[:240]
                     break
-            if canonical in identities:
-                break
     return identities
 
 
@@ -773,7 +842,7 @@ def _session_summary(event: dict[str, Any] | None) -> dict[str, Any]:
     raw = event or {}
     metadata = raw.get("metadata") if isinstance(raw.get("metadata"), dict) else {}
     return {
-        "sessionId": str(raw.get("session_id") or metadata.get("session_id") or "").strip(),
+        "sessionId": _event_identities(raw).get("sessionId", ""),
         "label": str(raw.get("session_label") or "").strip(),
         "agentMode": str(metadata.get("agent_mode") or "").strip(),
         "model": str(metadata.get("model") or "").strip(),
