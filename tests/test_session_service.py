@@ -944,6 +944,26 @@ def test_session_image_support_uses_shared_model_capability_rules(monkeypatch):
         )
         is False
     )
+def test_session_detail_agent_snapshot_reuses_normalized_agent(monkeypatch):
+    from core.web.services import session_service
+
+    cached_agent = {
+        "agentId": "agent-reuse",
+        "displayName": "Reuse Agent",
+    }
+
+    def fail_directory_lookup(_agent_id):
+        raise AssertionError("normalized Agent snapshot must not reload the directory")
+
+    monkeypatch.setattr(session_service, "get_agent", fail_directory_lookup)
+
+    assert session_service._session_detail_agent_snapshot(
+        {"_agent": cached_agent},
+        "agent-reuse",
+        hydrate_agent=True,
+    ) is cached_agent
+
+
 def test_messages_with_live_output_reuses_normalized_projection(monkeypatch):
     from core.web.services import session_service
 

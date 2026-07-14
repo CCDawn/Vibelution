@@ -9053,6 +9053,24 @@ def _build_lightweight_session_detail(conversation: dict[str, Any]) -> dict[str,
     return _build_session_detail_from_summary(conversation, summary, hydrate_agent=False)
 
 
+def _session_detail_agent_snapshot(
+    conversation: dict[str, Any],
+    agent_id: Any,
+    *,
+    hydrate_agent: bool,
+) -> dict[str, Any] | None:
+    normalized_agent_id = str(agent_id or "").strip()
+    if not normalized_agent_id or not hydrate_agent:
+        return None
+    cached_agent = conversation.get("_agent")
+    if (
+        isinstance(cached_agent, dict)
+        and str(cached_agent.get("agentId") or "").strip() == normalized_agent_id
+    ):
+        return cached_agent
+    return get_agent(normalized_agent_id)
+
+
 def _source_authority_ref(kind: str, source_id: str, metadata: dict[str, Any] | None = None) -> dict[str, Any]:
     from core.agent_kernel.source_authority import source_ref
 
@@ -9218,7 +9236,11 @@ def _build_session_detail_from_summary(
     )
     agent_available = _session_agent_is_available(summary)
     available_agent_id = summary.get("agentId") or "" if agent_available else ""
-    available_agent = get_agent(available_agent_id) if available_agent_id and hydrate_agent else None
+    available_agent = _session_detail_agent_snapshot(
+        conversation,
+        available_agent_id,
+        hydrate_agent=hydrate_agent,
+    )
     detail = {
         **summary,
         "ledgerSeq": _session_ledger_sequence(conversation["id"]),
