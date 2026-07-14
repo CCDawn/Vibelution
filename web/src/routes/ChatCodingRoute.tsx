@@ -1942,6 +1942,7 @@ export function ChatCodingRoute() {
   }, []);
   const pageVisible = usePageVisibility();
   const [chatStartupDataReady, setChatStartupDataReady] = useState(false);
+  const [startupDetailSettledSessionId, setStartupDetailSettledSessionId] = useState("");
   const chatStartupWarmupActive = useStartupWarmup(chatStartupDataReady);
   const chatPollingVisible = pageVisible || chatStartupWarmupActive;
   const projectBusActive = activeGroupRoomId === "__project_agent_bus__";
@@ -1951,7 +1952,9 @@ export function ChatCodingRoute() {
   const sessionQueryText = sessionFilter.trim();
   const [directSessionBackgroundSyncActive, setDirectSessionBackgroundSyncActive] = useState(false);
   const [groupBackgroundSyncActive, setGroupBackgroundSyncActive] = useState(false);
-  const secondaryChatDataEnabled = chatStartupDataReady;
+  const secondaryChatDataEnabled = chatStartupDataReady && (
+    !activeSessionId || startupDetailSettledSessionId === activeSessionId
+  );
   const sessionStreamRouteTargetMatches = Boolean(
     activeSessionId
     && !groupPanelActive
@@ -2336,6 +2339,20 @@ export function ChatCodingRoute() {
     refetchInterval: chatLiveQueryPolicy.sessionDetailRefetchInterval,
     refetchIntervalInBackground: chatLiveQueryPolicy.directRefetchIntervalInBackground,
   });
+  useEffect(() => {
+    if (!activeSessionId) {
+      setStartupDetailSettledSessionId("");
+      return;
+    }
+    if (
+      sessionDetailQuery.isFetching
+      || !sessionDetailQuery.data
+      || sessionDetailQuery.data.id !== activeSessionId
+    ) {
+      return;
+    }
+    setStartupDetailSettledSessionId((current) => current === activeSessionId ? current : activeSessionId);
+  }, [activeSessionId, sessionDetailQuery.data, sessionDetailQuery.isFetching]);
   const sessionLlmOptionsQuery = useQuery({
     queryKey: queryKeys.sessionLlmOptions(activeSessionId ?? "none"),
     enabled: secondaryChatDataEnabled && Boolean(activeSessionId),
