@@ -891,14 +891,31 @@ def record_runtime_scene_event(
         if lifecycle:
             event_payload["lifecycle"] = True
         _append_scene_event(scene_dir, component_name, event_payload)
-        _maybe_close_runtime_scene_from_reconciliation(scene_dir, manifest, event_name, normalized_fields, timestamp)
-        _update_runtime_scene_package_manifest(scene_dir, manifest)
+        reconciliation_closed = _maybe_close_runtime_scene_from_reconciliation(
+            scene_dir,
+            manifest,
+            event_name,
+            normalized_fields,
+            timestamp,
+        )
+        full_projection_refresh = _runtime_scene_event_requires_full_projection_refresh(
+            lifecycle=lifecycle,
+            level=level_name,
+            reconciliation_closed=reconciliation_closed,
+        )
+        if full_projection_refresh:
+            _update_runtime_scene_package_manifest(scene_dir, manifest)
+            projection_refresh = "full"
+        else:
+            _update_runtime_scene_package_manifest_lightweight(scene_dir, manifest)
+            projection_refresh = "lightweight"
 
     return {
         "accepted": True,
         "runtimeSceneId": scene_id,
         "recordedAt": timestamp,
         "path": normalized_child_path,
+        "projectionRefresh": projection_refresh,
     }
 
 
@@ -5638,6 +5655,19 @@ def _update_runtime_scene_package_manifest(scene_dir: Path, manifest: dict[str, 
     _save_runtime_scene_package_index(scene_dir, package_index)
     _save_runtime_scene_summary(scene_dir, manifest, package_index)
     _save_scene_manifest(scene_dir, manifest)
+
+
+def _runtime_scene_event_requires_full_projection_refresh(
+    *,
+    lifecycle: bool,
+    level: str,
+    reconciliation_closed: bool,
+) -> bool:
+    """Keep expensive diagnosis generation off the ordinary event write path."""
+
+    if lifecycle or reconciliation_closed:
+        return True
+    return str(level or "").strip().lower() in {"warning", "error", "critical", "fatal"}
 
 
 def _update_runtime_scene_package_manifest_lightweight(scene_dir: Path, manifest: dict[str, Any]) -> None:
