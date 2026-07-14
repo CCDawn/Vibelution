@@ -15,7 +15,7 @@ import re
 import time
 from collections import Counter, defaultdict
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from config.paths import resolve_workspace_home
 
@@ -90,6 +90,16 @@ MODE_RESULT_LIMITS = {
     "files": 20,
 }
 
+CancelChecker = Callable[[], str] | None
+
+
+class CodeGraphCancelled(RuntimeError):
+    """Raised when the active turn requests cooperative cancellation."""
+
+    def __init__(self, reason: str):
+        self.reason = str(reason or "").strip() or "cancelled"
+        super().__init__(self.reason)
+
 TS_IMPORT_RE = re.compile(r"\bfrom\s+['\"]([^'\"]+)['\"]|import\s+['\"]([^'\"]+)['\"]")
 TS_SYMBOL_PATTERNS = [
     ("class", re.compile(r"\bexport\s+class\s+([A-Za-z_$][\w$]*)|\bclass\s+([A-Za-z_$][\w$]*)")),
@@ -122,18 +132,53 @@ def code_context_graph_tool(
     symbol: str = "",
     max_results: int = 20,
     refresh: bool = False,
+    _cancel_checker: CancelChecker = None,
 ) -> dict[str, Any]:
     """Execute a project code graph query."""
 
     normalized_mode = str(mode or "").strip().lower()
+    try:
+        return _code_context_graph_tool_impl(
+            mode=normalized_mode,
+            query=query,
+            file_path=file_path,
+            symbol=symbol,
+            max_results=max_results,
+            refresh=refresh,
+            _cancel_checker=_cancel_checker,
+        )
+    except CodeGraphCancelled as exc:
+        return {
+            "status": "cancelled",
+            "mode": normalized_mode,
+            "error": "cancelled",
+            "reason": exc.reason[:240],
+            "message": f"代码图谱操作已取消：{exc.reason[:240]}",
+        }
+
+
+def _code_context_graph_tool_impl(
+    *,
+    mode: str,
+    query: str = "",
+    file_path: str = "",
+    symbol: str = "",
+    max_results: int = 20,
+    refresh: bool = False,
+    _cancel_checker: CancelChecker = None,
+) -> dict[str, Any]:
+    """Execute a project code graph query after cancellation normalization."""
+
+    normalized_mode = str(mode or "").strip().lower()
+    _raise_if_cancelled(_cancel_checker)
     requested_max_results = _clamp(max_results, 1, 100, default=20)
     max_results = min(requested_max_results, MODE_RESULT_LIMITS.get(normalized_mode, requested_max_results))
 
     if normalized_mode == "index":
-        return build_index(force=True)
+        return build_index(force=True, _cancel_checker=_cancel_checker)
 
     if normalized_mode == "status":
-        graph = load_or_build_index(refresh=refresh)
+        graph = load_or_build_index(refresh=refresh, _cancel_checker=_cancel_checker)
         return {
             "status": "ok",
             "mode": "status",
@@ -146,13 +191,24 @@ def code_context_graph_tool(
     graph = load_or_build_index(
         refresh=refresh,
         verify_freshness=inspect_target_kind != "directory",
+        _cancel_checker=_cancel_checker,
     )
     if normalized_mode == "files":
         result = files_view(graph, query=query, max_results=max_results)
     elif normalized_mode == "search":
-        result = search_graph(graph, query=query or symbol or file_path, max_results=max_results)
+        result = search_graph(
+            graph,
+            query=query or symbol or file_path,
+            max_results=max_results,
+            _cancel_checker=_cancel_checker,
+        )
     elif normalized_mode == "explore":
-        result = explore_graph(graph, query=query or symbol or file_path, max_results=max_results)
+        result = explore_graph(
+            graph,
+            query=query or symbol or file_path,
+            max_results=max_results,
+            _cancel_checker=_cancel_checker,
+        )
     elif normalized_mode == "inspect":
         result = inspect_graph(graph, file_path=file_path, symbol=symbol or query, max_results=max_results)
     elif normalized_mode == "references":
@@ -180,7 +236,7 @@ def code_context_graph_tool(
     }
 
 
-def build_index(*, force: bool = False) -> dict[str, Any]:
+def build_index(*, force: bool = False, _cancel_checker: CancelChecker = None) -> dict[str, Any]:
     root = project_root()
     out_path = index_path(root)
     if out_path.exists() and not force:
@@ -194,7 +250,8 @@ def build_index(*, force: bool = False) -> dict[str, Any]:
     edges: list[dict[str, Any]] = []
     file_hashes: dict[str, str] = {}
 
-    for path in iter_indexable_files(root):
+    for path in iter_indexable_files(root, _cancel_checker=_cancel_checker):
+        _raise_if_cancelled(_cancel_checker)
         rel = _rel(path, root)
         text = _read_text(path)
         if text is None:
@@ -264,18 +321,23 @@ def build_index(*, force: bool = False) -> dict[str, Any]:
     return payload
 
 
-def load_or_build_index(*, refresh: bool = False, verify_freshness: bool = True) -> dict[str, Any]:
+def load_or_build_index(
+    *,
+    refresh: bool = False,
+    verify_freshness: bool = True,
+    _cancel_checker: CancelChecker = None,
+) -> dict[str, Any]:
     path = index_path()
     if refresh or not path.exists():
-        return build_index(force=True)
+        return build_index(force=True, _cancel_checker=_cancel_checker)
     payload = _read_json(path)
     if not payload:
-        return build_index(force=True)
+        return build_index(force=True, _cancel_checker=_cancel_checker)
     if int(payload.get("schemaVersion") or 0) != SCHEMA_VERSION:
-        return build_index(force=True)
+        return build_index(force=True, _cancel_checker=_cancel_checker)
     index_meta = payload.setdefault("index", {})
     if verify_freshness:
-        index_meta["fresh"] = _is_index_fresh(payload)
+        index_meta["fresh"] = _is_index_fresh(payload, _cancel_checker=_cancel_checker)
         index_meta["freshnessChecked"] = True
     else:
         index_meta["fresh"] = None
@@ -283,9 +345,10 @@ def load_or_build_index(*, refresh: bool = False, verify_freshness: bool = True)
     return payload
 
 
-def iter_indexable_files(root: Path) -> list[Path]:
+def iter_indexable_files(root: Path, *, _cancel_checker: CancelChecker = None) -> list[Path]:
     result: list[Path] = []
     for current_root, dirnames, filenames in os.walk(root):
+        _raise_if_cancelled(_cancel_checker)
         current = Path(current_root)
         rel_dir = _rel(current, root)
         dirnames[:] = [
@@ -308,16 +371,24 @@ def iter_indexable_files(root: Path) -> list[Path]:
     return sorted(result, key=lambda item: _rel(item, root))
 
 
-def search_graph(graph: dict[str, Any], *, query: str, max_results: int = 20) -> dict[str, Any]:
+def search_graph(
+    graph: dict[str, Any],
+    *,
+    query: str,
+    max_results: int = 20,
+    _cancel_checker: CancelChecker = None,
+) -> dict[str, Any]:
     terms = _terms(query)
     if not terms:
         return _query_error("search", "query_required", "search 模式需要 query、symbol 或 file_path。")
     scored: list[tuple[int, dict[str, Any]]] = []
     for file in graph.get("files", []):
+        _raise_if_cancelled(_cancel_checker)
         score = _score_text(terms, " ".join([file.get("path", ""), file.get("summary", ""), " ".join(file.get("headings", []))]))
         if score:
             scored.append((score, {"kind": "file", **_public_file(file)}))
     for symbol in graph.get("symbols", []):
+        _raise_if_cancelled(_cancel_checker)
         score = _score_text(terms, " ".join([symbol.get("name", ""), symbol.get("qualifiedName", ""), symbol.get("path", ""), symbol.get("kind", ""), symbol.get("preview", "")]))
         if score:
             scored.append((score + 2, {"kind": "symbol", **_public_symbol(symbol)}))
@@ -335,13 +406,25 @@ def search_graph(graph: dict[str, Any], *, query: str, max_results: int = 20) ->
     }
 
 
-def explore_graph(graph: dict[str, Any], *, query: str, max_results: int = 20) -> dict[str, Any]:
-    search = search_graph(graph, query=query, max_results=max_results)
+def explore_graph(
+    graph: dict[str, Any],
+    *,
+    query: str,
+    max_results: int = 20,
+    _cancel_checker: CancelChecker = None,
+) -> dict[str, Any]:
+    search = search_graph(
+        graph,
+        query=query,
+        max_results=max_results,
+        _cancel_checker=_cancel_checker,
+    )
     if search.get("status") != "ok":
         return search
     files_by_path = _files_by_path(graph)
     symbols_by_path: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for symbol in graph.get("symbols", []):
+        _raise_if_cancelled(_cancel_checker)
         symbols_by_path[str(symbol.get("path") or "")].append(symbol)
 
     seen_paths: list[str] = []
@@ -351,6 +434,7 @@ def explore_graph(graph: dict[str, Any], *, query: str, max_results: int = 20) -
             seen_paths.append(path)
     contexts = []
     for rel in seen_paths[: min(max_results, 4)]:
+        _raise_if_cancelled(_cancel_checker)
         file = files_by_path.get(rel)
         if not file:
             continue
@@ -796,13 +880,14 @@ def _resolve_ts_import(source_path: Path, specifier: str, root: Path) -> str:
     return ""
 
 
-def _is_index_fresh(payload: dict[str, Any]) -> bool:
+def _is_index_fresh(payload: dict[str, Any], *, _cancel_checker: CancelChecker = None) -> bool:
     root = project_root()
     indexed_files = _files_by_path(payload)
-    current_files = iter_indexable_files(root)
+    current_files = iter_indexable_files(root, _cancel_checker=_cancel_checker)
     if len(current_files) != len(indexed_files):
         return False
     for path in current_files:
+        _raise_if_cancelled(_cancel_checker)
         rel = _rel(path, root)
         indexed = indexed_files.get(rel)
         if not indexed:
@@ -1054,6 +1139,17 @@ def _with_result_limit(result: dict[str, Any], *, requested: int, applied: int) 
         "capped": int(applied) < int(requested),
     }
     return payload
+
+
+def _raise_if_cancelled(checker: CancelChecker) -> None:
+    if not callable(checker):
+        return
+    try:
+        reason = str(checker() or "").strip()
+    except Exception:
+        return
+    if reason:
+        raise CodeGraphCancelled(reason)
 
 
 def _utc_like_now() -> str:
