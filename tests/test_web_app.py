@@ -893,6 +893,15 @@ def test_delete_session_switches_to_latest_remaining_session(tmp_path, monkeypat
     ]
     assert events[0]["fields"]["phase"] == "ready"
     assert events[1]["fields"]["nextActiveSessionId"] == "session-newer"
+    assert {
+        "load_state",
+        "repair_state",
+        "resolve_target",
+        "unbind_agent",
+        "save_state",
+        "runtime_cleanup",
+    }.issubset(events[1]["fields"]["timingsMs"])
+    assert events[1]["fields"]["durationMs"] >= events[1]["fields"]["timingsMs"]["save_state"]
 
 
 def test_delete_session_keeps_bound_agent_active(tmp_path, monkeypatch):

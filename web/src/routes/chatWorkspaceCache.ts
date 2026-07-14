@@ -70,6 +70,21 @@ export function createChatWorkspaceCache(queryClient: QueryClientLike) {
         ...(options.agentId ? [queryKeys.agentRuns(options.agentId)] : []),
       ]);
     },
+    afterSessionDeleted(options: {
+      deletedSessionId: string;
+      nextSessionId?: string;
+      roomId?: string;
+    }) {
+      queryClient.removeQueries?.({ queryKey: queryKeys.session(options.deletedSessionId), exact: true });
+      return invalidateAll(queryClient, [
+        queryKeys.sessions(),
+        queryKeys.conversations(),
+        queryKeys.runtimeSummary(),
+        queryKeys.chatRooms(),
+        ...(options.nextSessionId ? [queryKeys.session(options.nextSessionId)] : []),
+        ...(options.roomId ? [queryKeys.chatRoom(options.roomId)] : []),
+      ]);
+    },
     afterSessionAgentChanged(sessionId: string) {
       return invalidateAll(queryClient, [
         queryKeys.sessions(),
