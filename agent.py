@@ -671,7 +671,9 @@ class SelfEvolvingAgent:
         self.config.set_api_key(self.api_key or "")
 
         # 创建主要工具
-        self.key_tools = self._filter_tools_for_current_agent(Key_Tools.create_llm_facing_tools())
+        llm_facing_tools = Key_Tools.create_llm_facing_tools()
+        self.key_tools = self._filter_tools_for_current_agent(llm_facing_tools)
+        self._record_shadow_tool_authorization(llm_facing_tools, self.key_tools)
         self.key_tool_maps = {tool.name for tool in self.key_tools}
         self._key_tool_map = {
             tool.name: tool for tool in self.key_tools if getattr(tool, "name", "")
@@ -1084,6 +1086,43 @@ class SelfEvolvingAgent:
             return filter_llm_tools_for_current_agent(tools)
         except Exception:
             return list(tools or [])
+
+    @staticmethod
+    def _record_shadow_tool_authorization(registered_tools: List[Any], legacy_visible_tools: List[Any]) -> None:
+        started = time.perf_counter()
+        runtime: Dict[str, Any] = {}
+        try:
+            from core.authorization.tool_authorization_service import resolve_shadow_authorization
+            from core.logging.tool_authorization_events import record_shadow_authorization_event
+            from core.web.services.agent_directory_service import current_agent_runtime
+
+            runtime = dict(current_agent_runtime() or {})
+            if not str(runtime.get("agentId") or "").strip():
+                return
+            turn_runtime = _turn_runtime_from_env()
+            runtime.setdefault("turnId", str(turn_runtime.get("runId") or "").strip())
+            runtime.setdefault("runId", str(turn_runtime.get("runId") or "").strip())
+            runtime.setdefault("mode", str(turn_runtime.get("mode") or "").strip())
+            report = resolve_shadow_authorization(
+                runtime=runtime,
+                legacy_visible_tool_names=[
+                    str(getattr(tool, "name", "") or "").strip()
+                    for tool in legacy_visible_tools or []
+                    if str(getattr(tool, "name", "") or "").strip()
+                ],
+            )
+            record_shadow_authorization_event(report)
+        except Exception as exc:
+            try:
+                from core.logging.tool_authorization_events import record_shadow_authorization_failure
+
+                record_shadow_authorization_failure(
+                    runtime=runtime,
+                    error=exc,
+                    duration_ms=max(0, int((time.perf_counter() - started) * 1000)),
+                )
+            except Exception:
+                return
 
     def _is_tool_visible_to_current_agent(self, tool_name: str) -> bool:
         name = str(tool_name or "").strip()

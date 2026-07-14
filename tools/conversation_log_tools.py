@@ -367,6 +367,7 @@ def _inspect_records(
     large_results: list[dict[str, Any]] = []
     errors: list[dict[str, Any]] = []
     token_usage: list[dict[str, Any]] = []
+    authorization_events: list[dict[str, Any]] = []
     llm_calls = 0
     total_input = 0
     total_output = 0
@@ -423,6 +424,31 @@ def _inspect_records(
             if len(errors) < MAX_RESULT_ITEMS:
                 errors.append(_error_summary(event, line_no=line_no, source=source))
 
+        if event_type.startswith("tool.authorization.") and len(authorization_events) < MAX_RESULT_ITEMS:
+            fields = event.get("fields") if isinstance(event.get("fields"), dict) else {}
+            authorization_events.append(
+                {
+                    "source": source,
+                    "line": line_no,
+                    "eventCode": event_type,
+                    "outcome": str(event.get("outcome") or "").strip(),
+                    "agentId": _safe_text(str(fields.get("agentId") or ""), limit=120),
+                    "turnId": _safe_text(str(fields.get("turnId") or ""), limit=120),
+                    "policyId": _safe_text(str(fields.get("policyId") or ""), limit=120),
+                    "policyVersion": _bounded_int(fields.get("policyVersion"), default=0, minimum=0, maximum=1_000_000),
+                    "registryVersion": _bounded_int(fields.get("registryVersion"), default=0, minimum=0, maximum=1_000_000),
+                    "decisionFingerprint": _safe_text(str(fields.get("decisionFingerprint") or ""), limit=64),
+                    "parity": bool(fields.get("parity")),
+                    "legacyVisibleCount": _bounded_int(fields.get("legacyVisibleCount"), default=0, minimum=0, maximum=10_000),
+                    "shadowVisibleCount": _bounded_int(fields.get("shadowVisibleCount"), default=0, minimum=0, maximum=10_000),
+                    "shadowOnlyCount": _bounded_int(fields.get("shadowOnlyCount"), default=0, minimum=0, maximum=10_000),
+                    "legacyOnlyCount": _bounded_int(fields.get("legacyOnlyCount"), default=0, minimum=0, maximum=10_000),
+                    "denyCodeCounts": dict(fields.get("denyCodeCounts") or {}) if isinstance(fields.get("denyCodeCounts"), dict) else {},
+                    "errorType": _safe_text(str(fields.get("errorType") or ""), limit=120),
+                    "durationMs": _bounded_int(fields.get("durationMs"), default=0, minimum=0, maximum=600_000),
+                }
+            )
+
     repeated_tools = [
         {"call": key, "count": count}
         for key, count in tool_call_keys.most_common(MAX_RESULT_ITEMS)
@@ -471,6 +497,13 @@ def _inspect_records(
             "largeResults": large_results,
         },
         "errors": errors,
+        "toolAuthorization": {
+            "eventCount": len(authorization_events),
+            "parityMismatchCount": sum(1 for item in authorization_events if item["eventCode"].endswith("shadow_decision") and not item["parity"]),
+            "failureCount": sum(1 for item in authorization_events if item["eventCode"].endswith("shadow_failed")),
+            "latest": authorization_events[-1] if authorization_events else None,
+            "recent": authorization_events[-8:],
+        },
         "inefficiencies": inefficiencies,
         "correlation": _correlate_boundaries(records, identity_filters=identity_filters),
         "lastEvent": {
@@ -501,6 +534,15 @@ def _aggregate_inspections(inspections: list[dict[str, Any]]) -> dict[str, Any]:
         "outputTokens": sum(int(((item.get("tokenUsage") or {}).get("outputTokens") or 0)) for item in inspections),
         "errorCount": sum(len(item.get("errors") or []) for item in inspections),
         "inefficiencyCount": sum(len(item.get("inefficiencies") or []) for item in inspections),
+        "toolAuthorizationEventCount": sum(
+            int((item.get("toolAuthorization") or {}).get("eventCount") or 0) for item in inspections
+        ),
+        "toolAuthorizationMismatchCount": sum(
+            int((item.get("toolAuthorization") or {}).get("parityMismatchCount") or 0) for item in inspections
+        ),
+        "toolAuthorizationFailureCount": sum(
+            int((item.get("toolAuthorization") or {}).get("failureCount") or 0) for item in inspections
+        ),
     }
 
 
