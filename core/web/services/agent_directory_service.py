@@ -3277,6 +3277,18 @@ def default_session_agent_tool_policy(policy_id: str) -> dict[str, Any]:
     return payload
 
 
+def default_session_agent_tool_policy_v2(policy_id: str, *, registered_tool_names: Iterable[str]):
+    """Project the existing default session assignment into immutable ToolPolicyV2."""
+
+    from core.authorization.tool_policy_evaluator import normalize_legacy_tool_policy
+
+    return normalize_legacy_tool_policy(
+        default_session_agent_tool_policy(policy_id),
+        registered_tool_names=registered_tool_names,
+        policy_id=policy_id,
+    )
+
+
 def default_system_no_tool_policy(policy_id: str) -> dict[str, Any]:
     payload = default_tool_policy(policy_id)
     payload["networkAccess"] = "none"

@@ -724,6 +724,47 @@ def build_policy_from_role_profile(profile: dict[str, Any], policy_id: str) -> d
     }
 
 
+def build_policy_v2_from_role_profile(
+    profile: dict[str, Any],
+    policy_id: str,
+    *,
+    registered_tool_names,
+):
+    """Materialize fixed-role allow and forbid facts as one ordinary v2 policy."""
+
+    from core.authorization.tool_policy_evaluator import normalize_legacy_tool_policy
+
+    legacy = build_policy_from_role_profile(profile, policy_id)
+    blocked_tools = list(profile.get("forbiddenTools") or [])
+    if str(profile.get("mutationAccess") or "").strip() == "none":
+        blocked_tools.extend(CODE_MUTATION_TOOLS)
+    legacy["blockedTools"] = list(_unique(blocked_tools))
+    legacy["policyVersion"] = int(profile.get("profileVersion") or ROLE_TOOL_PROFILE_VERSION)
+    return normalize_legacy_tool_policy(
+        legacy,
+        registered_tool_names=registered_tool_names,
+        policy_id=policy_id,
+    )
+
+
+def resolve_role_tool_policy_v2(
+    *,
+    role_key: str,
+    primary_mode: str = "",
+    metadata: dict[str, Any] | None = None,
+    policy_id: str,
+    registered_tool_names,
+):
+    profile = role_tool_profile_for_role(role_key, primary_mode=primary_mode, metadata=metadata)
+    if not profile:
+        return None
+    return build_policy_v2_from_role_profile(
+        profile,
+        policy_id,
+        registered_tool_names=registered_tool_names,
+    )
+
+
 def resolve_role_tool_policy(
     *,
     role_key: str,
