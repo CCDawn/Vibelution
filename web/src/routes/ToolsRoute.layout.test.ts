@@ -255,6 +255,12 @@ describe("ToolsRoute layout contract", () => {
     expect(routeSource).toContain("updateToolPolicyMode(tool.name, \"allowed\")");
     expect(routeSource).toContain("updateToolPolicyMode(tool.name, \"blocked\")");
     expect(routeSource).toContain("保存工具配置");
+    expect(routeSource).toContain("/tool-policy/validate");
+    expect(routeSource).toContain('method: "PUT"');
+    expect(routeSource).toContain("expectedPolicyFingerprint: preview.policyFingerprint");
+    expect(routeSource).toContain("window.confirm(preview.confirmation.summary)");
+    expect(routeSource).toContain("服务端生效预览");
+    expect(routeSource).toContain("验证并预览");
     expect(routeSource).not.toContain("DEFAULT_SESSION_AGENT_ALLOWED_TOOLS");
     expect(routeSource).not.toContain("DEFAULT_SESSION_AGENT_PREFERRED_TOOLS");
     expect(routeSource).not.toContain("会话必备，不可移除");
