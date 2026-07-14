@@ -2275,11 +2275,12 @@ export function ConversationView({
             {isActiveTimelineItem && item.status === "running" ? <LoaderCircle className={styles.statusSpinner} size={14} /> : <TerminalSquare size={14} />}
           </span>
           <span className={styles.timelineCellBody}>
-            <span className={styles.timelineCellTitleRow}>
+            <span className={`${styles.timelineCellTitleRow} ${styles.timelineCellCompactTitleRow}`}>
               <span className={`${styles.timelineCellTitle} ${toneTextClassName}`}>{item.title}</span>
               {metaText ? <span className={`${styles.timelineCellMeta} ${toneStatusClassName}`}>{metaText}</span> : null}
+              {visibleSummary ? <span className={styles.timelineCellSeparator} aria-hidden="true">·</span> : null}
+              {visibleSummary ? <span className={styles.timelineCellInlineSummary}>{visibleSummary}</span> : null}
             </span>
-            {visibleSummary ? <span className={`${styles.timelineCellPreview} ${toneTextClassName}`}>{visibleSummary}</span> : null}
           </span>
           {expanded ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
         </VButton>
@@ -2363,11 +2364,12 @@ export function ConversationView({
             {operationStatusIcon(operation, isActiveTimelineItem)}
           </span>
           <span className={styles.timelineCellBody}>
-            <span className={styles.timelineCellTitleRow}>
+            <span className={`${styles.timelineCellTitleRow} ${styles.timelineCellCompactTitleRow}`}>
               <span className={`${styles.timelineCellTitle} ${toneTextClassName}`}>{visibleTitle}</span>
               {metaText ? <span className={`${styles.timelineCellMeta} ${toneStatusClassName}`}>{metaText}</span> : null}
+              {visibleSummary ? <span className={styles.timelineCellSeparator} aria-hidden="true">·</span> : null}
+              {visibleSummary ? <span className={styles.timelineCellInlineSummary}>{visibleSummary}</span> : null}
             </span>
-            {visibleSummary ? <span className={`${styles.timelineCellPreview} ${toneTextClassName}`}>{visibleSummary}</span> : null}
           </span>
           {canExpandDetails ? (
             <VButton
