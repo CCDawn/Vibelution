@@ -444,7 +444,9 @@ describe("ConfigRoute layout contract", () => {
   });
 
   it("keeps overview concise and moves raw configuration into tooling", () => {
-    expect(overviewPanelSource).toContain("workspace.modelLibraryCount");
+    expect(routeSource).toContain('modelCenterModels: "可选模型"');
+    expect(overviewPanelSource).toContain("workspace.modelOptions.length");
+    expect(overviewPanelSource).not.toContain("workspace.modelLibraryCount");
     expect(overviewPanelSource).toContain("workspace.blockingCount");
     expect(overviewPanelSource).toContain("workspace.warningCount");
     expect(overviewPanelSource).not.toContain("onOpenEnvironment");
