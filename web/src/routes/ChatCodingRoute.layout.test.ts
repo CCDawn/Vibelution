@@ -2734,12 +2734,20 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("conversation.type !== \"direct_agent\"");
     expect(routeSource).toContain("conversation.directSessionId !== deletedSessionId && conversation.conversationId !== deletedSessionId");
     expect(deleteMutationSource.indexOf("updateSessionSummaryCaches(queryClient")).toBeLessThan(
-      deleteMutationSource.indexOf("void chatWorkspaceCache.afterChatRoomsChanged()"),
+      deleteMutationSource.indexOf("void chatWorkspaceCache.afterSessionDeleted({"),
     );
     expect(deleteMutationSource.indexOf("queryClient.setQueryData<ConversationSummary[]>(queryKeys.conversations()")).toBeLessThan(
-      deleteMutationSource.indexOf("void chatWorkspaceCache.afterSessionChanged()"),
+      deleteMutationSource.indexOf("void chatWorkspaceCache.afterSessionDeleted({"),
     );
     expect(deleteMutationSource).toContain("Prefer\": \"respond-async\"");
+    expect(deleteMutationSource).toContain("onMutate: async (variables)");
+    expect(deleteMutationSource).toContain("captureSessionIndexCacheSnapshots(queryClient)");
+    expect(deleteMutationSource).toContain("previousConversations");
+    expect(deleteMutationSource).toContain("restoreSessionIndexCacheSnapshots(queryClient, context?.previousSessionIndexCaches)");
+    expect(deleteMutationSource).toContain("queryClient.setQueryData(queryKeys.conversations(), context.previousConversations)");
+    expect(deleteMutationSource).toContain("chatWorkspaceCache.afterSessionDeleted({");
+    expect(deleteMutationSource).not.toContain("void chatWorkspaceCache.afterChatRoomsChanged()");
+    expect(deleteMutationSource).not.toContain("void chatWorkspaceCache.afterSessionChanged()");
   });
 
   it("keeps the active direct session selected when the list is temporarily stale", () => {

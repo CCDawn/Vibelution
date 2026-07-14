@@ -86,6 +86,25 @@ describe("createChatWorkspaceCache", () => {
     expect(queryKeysFromCalls()).toEqual([queryKeys.chatRooms(), queryKeys.conversations()]);
   });
 
+  it("reconciles a deleted session with one deduplicated invalidation recipe", async () => {
+    const { cache, queryKeysFromCalls } = makeCache();
+
+    await cache.afterSessionDeleted({
+      deletedSessionId: "session-a",
+      nextSessionId: "session-b",
+      roomId: "room-a",
+    });
+
+    expect(queryKeysFromCalls()).toEqual([
+      queryKeys.sessions(),
+      queryKeys.conversations(),
+      queryKeys.runtimeSummary(),
+      queryKeys.chatRooms(),
+      queryKeys.session("session-b"),
+      queryKeys.chatRoom("room-a"),
+    ]);
+  });
+
   it("refreshes Agent chat-room membership without a route-level recipe", async () => {
     const { cache, queryKeysFromCalls } = makeCache();
 

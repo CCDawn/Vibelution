@@ -19,7 +19,7 @@ from contextvars import ContextVar
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
 from urllib.parse import quote
 
 from config.llm_key_env import sync_llm_key_env_from_persisted_user_env
@@ -4870,6 +4870,16 @@ def _release_other_direct_session_agents(session_id: str, *, keep_agent_id: str)
 def _delete_chat_session_state(session_id: str, *, activate_replacement: bool = False) -> dict[str, str]:
     """Delete one chat session and return ids needed by UI and Agent rebind callers."""
 
+    started_at = _perf_counter()
+    timings: dict[str, int] = {}
+
+    def timed(stage: str, callback: Callable[[], Any]) -> Any:
+        stage_started_at = _perf_counter()
+        try:
+            return callback()
+        finally:
+            timings[stage] = _elapsed_ms(stage_started_at)
+
     lang = get_web_language()
     conversation_id = str(session_id or "").strip()
     if not conversation_id:
@@ -4877,9 +4887,13 @@ def _delete_chat_session_state(session_id: str, *, activate_replacement: bool = 
 
     next_active_id = ""
     with _CHAT_STATE_LOCK:
-        payload = load_chat_state(PROJECT_ROOT)
-        _materialize_agent_directory_conversation_locked(payload, conversation_id, source="delete_chat_session")
-        payload = _repair_stale_running_conversations(payload)
+        payload = timed("load_state", lambda: load_chat_state(PROJECT_ROOT))
+        timed(
+            "materialize_session",
+            lambda: _materialize_agent_directory_conversation_locked(payload, conversation_id, source="delete_chat_session"),
+        )
+        payload = timed("repair_state", lambda: _repair_stale_running_conversations(payload))
+        resolve_started_at = _perf_counter()
         conversations = payload.get("conversations")
         if not isinstance(conversations, list):
             conversations = []
@@ -4903,6 +4917,8 @@ def _delete_chat_session_state(session_id: str, *, activate_replacement: bool = 
 
         normalized_target = _normalize_conversation(target_conversation) or {}
         target_phase = _conversation_phase(conversation_id, normalized_target)
+        target_message_count = len(_session_ledger_visible_messages(conversation_id))
+        timings["resolve_target"] = _elapsed_ms(resolve_started_at)
         _record_session_delete_event(
             "requested",
             session_id=conversation_id,
@@ -4910,7 +4926,7 @@ def _delete_chat_session_state(session_id: str, *, activate_replacement: bool = 
             fields={
                 "phase": target_phase,
                 "agentId": target_agent_id,
-                "messageCount": len(_session_ledger_visible_messages(conversation_id)),
+                "messageCount": target_message_count,
             },
         )
         if target_phase in {"running", "stopping"}:
@@ -4945,11 +4961,16 @@ def _delete_chat_session_state(session_id: str, *, activate_replacement: bool = 
         ]
         replacement_direct_session_id = ""
         if target_agent and target_agent_direct_session_id == conversation_id:
-            update_agent_instance(
-                target_agent_id,
-                direct_session_id="",
-                metadata={"previousDirectSessionId": conversation_id},
+            timed(
+                "unbind_agent",
+                lambda: update_agent_instance(
+                    target_agent_id,
+                    direct_session_id="",
+                    metadata={"previousDirectSessionId": conversation_id},
+                ),
             )
+        else:
+            timings["unbind_agent"] = 0
 
         current_active_id = str(payload.get("active_conversation_id") or "").strip()
         if any(item["id"] == current_active_id for item in normalized_remaining) and current_active_id != conversation_id:
@@ -4977,7 +4998,7 @@ def _delete_chat_session_state(session_id: str, *, activate_replacement: bool = 
         payload["active_conversation_id"] = next_active_id
         payload["updated_at"] = now
         payload["conversations"] = remaining
-        save_chat_state(PROJECT_ROOT, payload)
+        timed("save_state", lambda: save_chat_state(PROJECT_ROOT, payload))
 
     _invalidate_session_list_cache()
     if target_agent and target_agent_direct_session_id == conversation_id:
@@ -4990,6 +5011,11 @@ def _delete_chat_session_state(session_id: str, *, activate_replacement: bool = 
                 "previousDirectSessionId": conversation_id,
             },
         )
+    cleanup_started_at = _perf_counter()
+    _set_session_running(conversation_id, False)
+    _clear_session_turn_control(conversation_id)
+    _clear_session_live_output(conversation_id)
+    timings["runtime_cleanup"] = _elapsed_ms(cleanup_started_at)
     _record_session_delete_event(
         "deleted",
         session_id=conversation_id,
@@ -4999,11 +5025,10 @@ def _delete_chat_session_state(session_id: str, *, activate_replacement: bool = 
             "agentId": target_agent_id,
             "replacementDirectSessionId": replacement_direct_session_id,
             "remainingCount": len(remaining),
+            "durationMs": _elapsed_ms(started_at),
+            "timingsMs": timings,
         },
     )
-    _set_session_running(conversation_id, False)
-    _clear_session_turn_control(conversation_id)
-    _clear_session_live_output(conversation_id)
     return {
         "nextActiveSessionId": next_active_id,
         "replacementDirectSessionId": replacement_direct_session_id,

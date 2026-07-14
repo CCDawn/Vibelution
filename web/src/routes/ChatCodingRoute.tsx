@@ -3061,6 +3061,22 @@ export function ChatCodingRoute() {
           "Prefer": "respond-async",
         },
       }),
+    onMutate: async (variables) => {
+      await Promise.all([
+        queryClient.cancelQueries({ queryKey: queryKeys.sessions() }),
+        queryClient.cancelQueries({ queryKey: queryKeys.conversations() }),
+      ]);
+      const previousSessions = queryClient.getQueryData<SessionSummary[]>(queryKeys.sessions());
+      const previousSessionIndexCaches = captureSessionIndexCacheSnapshots(queryClient);
+      const previousConversations = queryClient.getQueryData<ConversationSummary[]>(queryKeys.conversations());
+      updateSessionSummaryCaches(queryClient, (sessions) =>
+        sessions?.filter((session) => session.id !== variables.sessionId),
+      );
+      queryClient.setQueryData<ConversationSummary[]>(queryKeys.conversations(), (conversations) =>
+        removeDeletedSessionFromConversations(conversations, variables.sessionId),
+      );
+      return { previousSessions, previousSessionIndexCaches, previousConversations };
+    },
     onSuccess: (deleteResult, variables) => {
       const nextActiveSessionId = deleteResult.nextActiveSessionId || "";
       clearSessionTransientUiState(variables.sessionId);
@@ -3072,23 +3088,21 @@ export function ChatCodingRoute() {
           [nextActiveSessionId]: "",
         }));
       }
-      updateSessionSummaryCaches(queryClient, (sessions) =>
-        sessions?.filter((session) => session.id !== variables.sessionId),
-      );
-      queryClient.setQueryData<ConversationSummary[]>(queryKeys.conversations(), (conversations) =>
-        removeDeletedSessionFromConversations(conversations, variables.sessionId),
-      );
       setGroupManageSessionIds((current) => current.filter((sessionId) => sessionId !== variables.sessionId));
-      void chatWorkspaceCache.afterChatRoomsChanged();
-      if (nextActiveSessionId) {
-        void chatWorkspaceCache.refreshSessionRuntime(nextActiveSessionId);
-      }
-      if (activeGroupRoomId) {
-        void chatWorkspaceCache.afterChatRoomChanged(activeGroupRoomId);
-      }
-      void chatWorkspaceCache.afterSessionChanged();
+      void chatWorkspaceCache.afterSessionDeleted({
+        deletedSessionId: variables.sessionId,
+        nextSessionId: nextActiveSessionId,
+        roomId: activeGroupRoomId,
+      });
     },
-    onError: (error, variables) => {
+    onError: (error, variables, context) => {
+      if (context?.previousSessions) {
+        queryClient.setQueryData(queryKeys.sessions(), context.previousSessions);
+      }
+      restoreSessionIndexCacheSnapshots(queryClient, context?.previousSessionIndexCaches);
+      if (context?.previousConversations) {
+        queryClient.setQueryData(queryKeys.conversations(), context.previousConversations);
+      }
       setSessionComposerErrors((current) => ({
         ...current,
         [variables.sessionId]: describeError(error, t("deleteSessionFailed")),
