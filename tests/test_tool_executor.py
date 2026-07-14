@@ -1239,6 +1239,12 @@ class TestToolExecutorTimeout:
 
         assert "_cancel_checker" not in schema.get("properties", {})
 
+    def test_code_symbol_tool_schema_hides_internal_cancel_checker(self):
+        code_symbol_tool = next(tool for tool in create_key_tools() if tool.name == "code_symbol_tool")
+        schema = code_symbol_tool.args_schema.model_json_schema()
+
+        assert "_cancel_checker" not in schema.get("properties", {})
+
     def test_cancel_checker_owner_prevents_stale_turn_clear(self, executor):
         owner_a = object()
         owner_b = object()

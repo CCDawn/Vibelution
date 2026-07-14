@@ -358,6 +358,7 @@ def _build_key_tools() -> List[BaseTool]:
         symbol: str = "",
         max_results: int = 20,
         refresh: bool = False,
+        _cancel_checker=None,
     ) -> str:
         """
         【代码上下文图谱】索引并查询整个 Vibelution 项目的结构、符号、引用、影响范围和候选测试。
@@ -393,6 +394,7 @@ def _build_key_tools() -> List[BaseTool]:
             symbol=symbol,
             max_results=max_results,
             refresh=refresh,
+            _cancel_checker=_cancel_checker,
         )
 
     @tool

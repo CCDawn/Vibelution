@@ -135,6 +135,51 @@ class TestTruncateResult:
         assert packaged.result_kind == "search"
         assert packaged.strategy in {"structured_compact", "annotated_truncate", "legacy_prefix_truncate"}
 
+    def test_package_tool_result_structurally_compacts_code_context_graph(self):
+        payload = {
+            "status": "ok",
+            "mode": "explore",
+            "query": "conversation chain",
+            "summary": {"resultCount": 20, "totalResultCount": 80, "hasMore": True},
+            "resultLimit": {"requested": 50, "applied": 8, "capped": True},
+            "results": [
+                {
+                    "kind": "symbol",
+                    "name": f"symbol_{index}",
+                    "qualifiedName": f"module.symbol_{index}",
+                    "path": f"core/module_{index}.py",
+                    "line": index + 1,
+                    "preview": "P" * 600,
+                }
+                for index in range(20)
+            ],
+            "contexts": [
+                {
+                    "path": f"core/module_{index}.py",
+                    "language": "python",
+                    "summary": "S" * 400,
+                    "snippet": "X" * 1200,
+                    "symbols": [{"name": f"symbol_{index}", "kind": "function", "line": 1}],
+                }
+                for index in range(8)
+            ],
+        }
+
+        packaged = package_tool_result(
+            json.dumps(payload, ensure_ascii=False),
+            tool_name="code_symbol_tool",
+            max_chars=900,
+        )
+
+        assert packaged.truncated is True
+        assert packaged.result_kind == "code_context_graph"
+        assert packaged.strategy == "structured_compact"
+        compact = json.loads(packaged.content)
+        assert compact["resultLimit"]["applied"] == 8
+        assert compact["truncationGuard"]["strategy"] == "structured_compact"
+        assert len(compact["results"]) <= 8
+        assert len(packaged.content) <= 1600
+
     def test_package_tool_result_compacts_source_collection_context_with_paging_ids(self):
         payload = {
             "status": "ok",

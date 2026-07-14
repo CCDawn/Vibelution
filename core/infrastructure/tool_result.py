@@ -589,6 +589,141 @@ def _compact_source_collection_tool_excluded_summary(summary: dict[str, Any]) ->
     }
 
 
+def _compact_code_context_graph_result(result_str: str, max_chars: int, continuation_hint: str) -> Optional[str]:
+    payload = _try_parse_json_object(result_str)
+    if not payload:
+        return None
+
+    compact = {
+        key: payload.get(key)
+        for key in (
+            "status",
+            "mode",
+            "query",
+            "target",
+            "summary",
+            "count",
+            "totalCount",
+            "hasMore",
+            "resultLimit",
+            "index",
+            "error",
+            "message",
+        )
+        if key in payload
+    }
+    omitted: dict[str, int] = {}
+
+    def compact_items(key: str, limit: int) -> list[dict[str, Any]]:
+        items = [item for item in list(payload.get(key) or []) if isinstance(item, dict)]
+        selected = []
+        for item in items[:limit]:
+            selected.append(
+                {
+                    field: (str(value)[:180] if field in {"preview", "summary", "text", "snippet"} else value)
+                    for field, value in item.items()
+                    if field in {
+                        "kind", "name", "qualifiedName", "path", "language", "line", "endLine",
+                        "lineCount", "score", "summary", "preview", "text", "snippet",
+                    }
+                }
+            )
+        if len(items) > len(selected):
+            omitted[key] = len(items) - len(selected)
+        return selected
+
+    for key, limit in (("results", 8), ("files", 8), ("symbols", 8), ("snippets", 3), ("tests", 8)):
+        selected = compact_items(key, limit)
+        if selected:
+            compact[key] = selected
+
+    contexts = [item for item in list(payload.get("contexts") or []) if isinstance(item, dict)]
+    if contexts:
+        compact["contexts"] = [
+            {
+                "path": item.get("path"),
+                "language": item.get("language"),
+                "summary": str(item.get("summary") or "")[:180],
+                "snippet": str(item.get("snippet") or "")[:300],
+                "symbols": [
+                    {
+                        field: symbol.get(field)
+                        for field in ("name", "qualifiedName", "kind", "path", "line")
+                        if field in symbol
+                    }
+                    for symbol in list(item.get("symbols") or [])[:4]
+                    if isinstance(symbol, dict)
+                ],
+            }
+            for item in contexts[:3]
+        ]
+        if len(contexts) > 3:
+            omitted["contexts"] = len(contexts) - 3
+
+    relationship_map = payload.get("relationshipMap") if isinstance(payload.get("relationshipMap"), dict) else {}
+    if relationship_map:
+        compact["relationshipMap"] = {
+            "nodes": list(relationship_map.get("nodes") or [])[:6],
+            "edges": list(relationship_map.get("edges") or [])[:8],
+        }
+    if omitted:
+        compact["omitted"] = omitted
+    if continuation_hint:
+        compact["continuationHint"] = continuation_hint
+    compact["truncationGuard"] = {
+        "originalLength": len(result_str),
+        "strategy": "structured_compact",
+    }
+
+    content = json.dumps(compact, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    if len(content) <= max_chars + 700:
+        return content
+
+    compact.pop("relationshipMap", None)
+    compact.pop("contexts", None)
+    for key in ("results", "files", "symbols", "snippets", "tests"):
+        if isinstance(compact.get(key), list):
+            compact[key] = compact[key][:4]
+    content = json.dumps(compact, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    if len(content) <= max_chars + 700:
+        return content
+
+    minimal = {
+        key: compact.get(key)
+        for key in (
+            "status",
+            "mode",
+            "query",
+            "target",
+            "summary",
+            "count",
+            "totalCount",
+            "hasMore",
+            "resultLimit",
+            "error",
+            "message",
+            "omitted",
+            "continuationHint",
+            "truncationGuard",
+        )
+        if key in compact
+    }
+    for key in ("results", "files", "symbols", "snippets", "tests"):
+        items = compact.get(key)
+        if not isinstance(items, list) or not items:
+            continue
+        minimal[key] = [
+            {
+                field: item.get(field)
+                for field in ("kind", "name", "qualifiedName", "path", "line", "score")
+                if field in item
+            }
+            for item in items[:2]
+            if isinstance(item, dict)
+        ]
+    return json.dumps(minimal, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
 def package_tool_result(
     result: Any,
     *,
@@ -635,6 +770,8 @@ def package_tool_result(
         compact_content = _compact_search_result(result_str, max_chars, continuation_hint)
     elif result_kind == "source_collection_context":
         compact_content = _compact_source_collection_context_result(result_str, max_chars, continuation_hint)
+    elif result_kind == "code_context_graph":
+        compact_content = _compact_code_context_graph_result(result_str, max_chars, continuation_hint)
     if compact_content:
         return ToolResultEnvelope(
             content=compact_content,
