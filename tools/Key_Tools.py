@@ -5,7 +5,9 @@ LangChain 工具包装模块
 所有在此注册的 Tool 都会通过 agent._tools 传递给 LLM。
 文档（SOUL.md / SPEC.md）中提到的工具必须在此注册，否则 Agent 无法调用。
 """
-from typing import Dict, List, Literal, Optional
+from copy import copy
+from functools import lru_cache
+from typing import Dict, List, Literal
 from langchain_core.tools import BaseTool, tool, StructuredTool
 from tools.rebirth_tools import trigger_self_restart_tool as _restart_impl
 from tools.memory_tools import (
@@ -174,7 +176,7 @@ Args:
 """
 
 
-def create_key_tools() -> List[BaseTool]:
+def _build_key_tools() -> List[BaseTool]:
     """
     将项目工具包装为 LangChain Tool。
 
@@ -2395,6 +2397,25 @@ def create_key_tools() -> List[BaseTool]:
         # 上下文压缩
         compress_context_tool,
     ]
+
+
+@lru_cache(maxsize=1)
+def _cached_key_tools() -> tuple[BaseTool, ...]:
+    """Build the process-stable tool definitions once."""
+
+    return tuple(_build_key_tools())
+
+
+def prewarm_key_tool_definitions() -> int:
+    """Build static tool definitions outside the first chat turn."""
+
+    return len(_cached_key_tools())
+
+
+def create_key_tools() -> List[BaseTool]:
+    """Return isolated tool objects backed by cached static definitions."""
+
+    return [copy(tool_definition) for tool_definition in _cached_key_tools()]
 
 
 def create_llm_facing_tools() -> List[BaseTool]:

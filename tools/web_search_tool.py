@@ -21,6 +21,7 @@ import base64
 import html as html_lib
 import ipaddress
 import re
+import threading
 from urllib.parse import parse_qs, quote_plus, unquote, urljoin, urlparse
 from typing import List, Dict, Any
 
@@ -48,7 +49,8 @@ _WEB_FETCH_MAX_BYTES = 2 * 1024 * 1024
 _WEB_FETCH_MAX_REDIRECTS = 5
 _USER_AGENT = "Mozilla/5.0 (compatible; Vibelution/1.0; research search tools)"
 _BLOCKED_HOST_SUFFIXES = (".localhost", ".local", ".internal")
-_TOKEN_HEALTH_CACHE: dict[str, Any] = {"checkedAt": 0.0, "status": None}
+_TOKEN_HEALTH_CACHE: dict[str, Any] = {"checkedAt": 0.0, "status": None, "refreshing": False}
+_TOKEN_HEALTH_CACHE_LOCK = threading.Lock()
 _SITE_QUERY_RE = re.compile(r"(?i)(?:^|[\s(])site:([A-Za-z0-9.-]+)")
 _PUBLIC_SEARCH_STOPWORDS = {
     "about",
@@ -164,24 +166,75 @@ def check_autoglm_token_service(*, timeout: float | None = None) -> dict[str, An
     }
 
 
-def autoglm_search_tool_availability(*, force: bool = False) -> dict[str, Any]:
-    """Return cached availability for exposing AutoGLM-backed search to LLMs."""
-    now = time.monotonic()
-    cached = _TOKEN_HEALTH_CACHE.get("status")
-    if not force and isinstance(cached, dict) and now - float(_TOKEN_HEALTH_CACHE.get("checkedAt") or 0) < _TOKEN_HEALTH_CACHE_TTL:
-        return dict(cached)
+def _autoglm_availability_with_block_reason(status: dict[str, Any]) -> dict[str, Any]:
+    normalized = dict(status)
+    if not normalized.get("available"):
+        normalized["blockReason"] = (
+            "AutoGLM token 服务不可用，web_search_tool 已临时禁用。"
+            "请启动 http://127.0.0.1:53699/get_token 或设置 AUTOGLM_TOKEN_URL 后刷新。"
+        )
+    return normalized
+
+
+def _refresh_autoglm_search_tool_availability() -> dict[str, Any]:
     status = check_autoglm_token_service(timeout=_TOKEN_HEALTH_TIMEOUT)
-    if not status.get("available"):
-        status = {
-            **status,
-            "blockReason": (
-                "AutoGLM token 服务不可用，web_search_tool 已临时禁用。"
-                "请启动 http://127.0.0.1:53699/get_token 或设置 AUTOGLM_TOKEN_URL 后刷新。"
-            ),
-        }
-    _TOKEN_HEALTH_CACHE["checkedAt"] = now
-    _TOKEN_HEALTH_CACHE["status"] = dict(status)
-    return status
+    status = _autoglm_availability_with_block_reason(status)
+    with _TOKEN_HEALTH_CACHE_LOCK:
+        _TOKEN_HEALTH_CACHE["checkedAt"] = time.monotonic()
+        _TOKEN_HEALTH_CACHE["status"] = dict(status)
+        _TOKEN_HEALTH_CACHE["refreshing"] = False
+    return dict(status)
+
+
+def _refresh_autoglm_search_tool_availability_in_background() -> None:
+    try:
+        _refresh_autoglm_search_tool_availability()
+    except Exception:
+        with _TOKEN_HEALTH_CACHE_LOCK:
+            _TOKEN_HEALTH_CACHE["refreshing"] = False
+
+
+def autoglm_search_tool_availability(*, force: bool = False) -> dict[str, Any]:
+    """Return availability without blocking normal Agent construction on a health probe."""
+
+    if force:
+        with _TOKEN_HEALTH_CACHE_LOCK:
+            _TOKEN_HEALTH_CACHE["refreshing"] = True
+        try:
+            return _refresh_autoglm_search_tool_availability()
+        except Exception:
+            with _TOKEN_HEALTH_CACHE_LOCK:
+                _TOKEN_HEALTH_CACHE["refreshing"] = False
+            raise
+
+    now = time.monotonic()
+    start_refresh = False
+    with _TOKEN_HEALTH_CACHE_LOCK:
+        cached = _TOKEN_HEALTH_CACHE.get("status")
+        cache_age = now - float(_TOKEN_HEALTH_CACHE.get("checkedAt") or 0)
+        if isinstance(cached, dict) and cache_age < _TOKEN_HEALTH_CACHE_TTL:
+            return dict(cached)
+        if not bool(_TOKEN_HEALTH_CACHE.get("refreshing")):
+            _TOKEN_HEALTH_CACHE["refreshing"] = True
+            start_refresh = True
+        if isinstance(cached, dict):
+            result = dict(cached)
+        else:
+            result = {
+                "available": True,
+                "dependency": "autoglm_token_service",
+                "stage": "token_fetch",
+                "status": "checking",
+                "tokenUrl": _TOKEN_URL,
+                "availabilityProvisional": True,
+            }
+    if start_refresh:
+        threading.Thread(
+            target=_refresh_autoglm_search_tool_availability_in_background,
+            name="autoglm-token-health-refresh",
+            daemon=True,
+        ).start()
+    return result
 
 
 def is_autoglm_search_tool_available(*, force: bool = False) -> bool:

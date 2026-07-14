@@ -5554,6 +5554,38 @@ def test_submit_session_message_prefer_async_returns_lightweight_acceptance(tmp_
     assert "messages" not in payload
 
 
+def test_submit_session_message_uses_live_delta_without_pre_schedule_detail_snapshot(tmp_path, monkeypatch):
+    _seed_chat_state(tmp_path, task_status="done")
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    _bind_live_session_agent(tmp_path)
+    scheduled_contexts = []
+    live_updates = []
+    published_details = []
+    monkeypatch.setattr(session_service, "_schedule_session_turn", scheduled_contexts.append)
+    monkeypatch.setattr(
+        session_service,
+        "_set_session_waiting_live_output",
+        lambda session_id, *, turn_id="": live_updates.append((session_id, turn_id)),
+    )
+    monkeypatch.setattr(
+        session_service,
+        "_publish_session_detail_snapshot",
+        published_details.append,
+    )
+
+    response = client.post(
+        "/api/sessions/session-live/messages",
+        headers={"Prefer": "respond-async"},
+        json={"content": "统一链路性能回归"},
+    )
+
+    assert response.status_code == 202
+    assert len(scheduled_contexts) == 1
+    assert live_updates == [("session-live", response.json()["turnId"])]
+    assert published_details == []
+
+
 def test_edit_resubmit_records_chat_turn_started_scene_event(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path, task_status="done")
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)

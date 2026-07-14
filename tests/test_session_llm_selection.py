@@ -217,6 +217,24 @@ def _install_chat_state(monkeypatch: pytest.MonkeyPatch, efforts: dict[str, str]
     return state
 
 
+def test_reasoning_effort_snapshot_uses_initialized_chat_state_without_detail_hydration(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    _install_chat_state(monkeypatch, {"session-live": "high"})
+    monkeypatch.setattr(
+        session_service,
+        "get_session_detail",
+        lambda *_args, **_kwargs: pytest.fail("initialized effort must not hydrate session detail"),
+    )
+    monkeypatch.setattr(
+        session_service,
+        "_session_fixed_model_choice",
+        lambda *_args, **_kwargs: pytest.fail("initialized effort must not resolve model catalog"),
+    )
+
+    assert session_service._session_reasoning_effort_snapshot("session-live") == "high"
+
+
 def test_session_effort_update_never_writes_agent(monkeypatch: pytest.MonkeyPatch):
     state = _install_chat_state(monkeypatch, {"session-live": "medium"})
     update_agent_calls = []
