@@ -944,3 +944,25 @@ def test_session_image_support_uses_shared_model_capability_rules(monkeypatch):
         )
         is False
     )
+def test_messages_with_live_output_reuses_normalized_projection(monkeypatch):
+    from core.web.services import session_service
+
+    normalized_messages = [
+        {
+            "id": "session-reuse-message-1",
+            "role": "user",
+            "content": "hello",
+            "timestamp": "2026-07-14T00:00:00Z",
+        }
+    ]
+
+    def fail_ledger_reload(_session_id):
+        raise AssertionError("normalized session messages must not reload the ledger")
+
+    monkeypatch.setattr(session_service, "_session_ledger_visible_messages", fail_ledger_reload)
+    monkeypatch.setattr(session_service, "_build_live_output_message", lambda _session_id: None)
+
+    assert session_service._messages_with_live_output(
+        "session-reuse",
+        normalized_messages=normalized_messages,
+    ) == normalized_messages
