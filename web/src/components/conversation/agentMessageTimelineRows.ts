@@ -43,7 +43,20 @@ function projectedMessageAnchor(message: AgentMessage) {
   return message.source.id || message.id;
 }
 
+function activeTurnRenderKey(message: AgentMessage) {
+  const kind = metadataText(message.metadata, "kind") || metadataText(message.source.metadata, "kind");
+  const renderKey = metadataText(message.metadata, "renderKey") || metadataText(message.source.metadata, "renderKey");
+  if (message.role === "assistant" && kind === "session_active_turn_layer" && renderKey) {
+    return `assistant-active:${renderKey}`;
+  }
+  return "";
+}
+
 function baseTimelineRowKey(message: AgentMessage) {
+  const renderKey = activeTurnRenderKey(message);
+  if (renderKey) {
+    return renderKey;
+  }
   const turnId = normalizedMessageTurnId(message);
   if (message.role === "assistant" && turnId) {
     return `assistant-turn:${turnId}`;
