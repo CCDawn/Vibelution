@@ -132,7 +132,11 @@ def code_context_graph_tool(
             "policy": graph.get("policy", {}),
         }
 
-    graph = load_or_build_index(refresh=refresh)
+    inspect_target_kind = _project_target_kind(file_path) if normalized_mode == "inspect" else ""
+    graph = load_or_build_index(
+        refresh=refresh,
+        verify_freshness=inspect_target_kind != "directory",
+    )
     if normalized_mode == "files":
         return files_view(graph, query=query, max_results=max_results)
     if normalized_mode == "search":
@@ -236,14 +240,20 @@ def build_index(*, force: bool = False) -> dict[str, Any]:
     return payload
 
 
-def load_or_build_index(*, refresh: bool = False) -> dict[str, Any]:
+def load_or_build_index(*, refresh: bool = False, verify_freshness: bool = True) -> dict[str, Any]:
     path = index_path()
     if refresh or not path.exists():
         return build_index(force=True)
     payload = _read_json(path)
     if not payload:
         return build_index(force=True)
-    payload.setdefault("index", {})["fresh"] = _is_index_fresh(payload)
+    index_meta = payload.setdefault("index", {})
+    if verify_freshness:
+        index_meta["fresh"] = _is_index_fresh(payload)
+        index_meta["freshnessChecked"] = True
+    else:
+        index_meta["fresh"] = None
+        index_meta["freshnessChecked"] = False
     return payload
 
 
@@ -342,6 +352,47 @@ def inspect_graph(graph: dict[str, Any], *, file_path: str = "", symbol: str = "
             "symbols": symbols,
             "snippet": _snippet_for_file(rel, max_chars=MAX_SNIPPET_CHARS),
         }
+    target_kind = _project_target_kind(file_path) if rel else ""
+    if rel and target_kind == "directory":
+        prefix = f"{rel.rstrip('/')}/"
+        matching_files = sorted(
+            (item for path, item in files_by_path.items() if path.startswith(prefix)),
+            key=lambda item: str(item.get("path") or ""),
+        )
+        if not matching_files:
+            return {
+                "status": "error",
+                "mode": "inspect",
+                "error": "directory_not_indexed",
+                "message": (
+                    f"inspect 目标目录 `{rel}` 存在，但索引中没有可查询文件。"
+                    "请确认目录属于索引范围，或用 refresh=true 刷新索引。"
+                ),
+                "target": {"filePath": rel, "kind": "directory"},
+            }
+        matching_paths = {str(item.get("path") or "") for item in matching_files}
+        matching_symbols = [
+            item for item in graph.get("symbols", [])
+            if str(item.get("path") or "") in matching_paths
+        ]
+        index_meta = graph.get("index") if isinstance(graph.get("index"), dict) else {}
+        return {
+            "status": "ok",
+            "mode": "inspect",
+            "target": {"filePath": rel, "kind": "directory"},
+            "summary": {
+                "fileCount": len(matching_files),
+                "symbolCount": len(matching_symbols),
+                "returnedFileCount": min(len(matching_files), max_results),
+            },
+            "files": [_public_file(item) for item in matching_files[:max_results]],
+            "symbols": [_public_symbol(item) for item in matching_symbols[:max_results]],
+            "index": {
+                "fresh": index_meta.get("fresh"),
+                "freshnessChecked": bool(index_meta.get("freshnessChecked")),
+                "updatedAt": str(index_meta.get("updatedAt") or ""),
+            },
+        }
     if symbol:
         matches = [
             item for item in graph.get("symbols", [])
@@ -354,6 +405,22 @@ def inspect_graph(graph: dict[str, Any], *, file_path: str = "", symbol: str = "
             "count": len(matches),
             "symbols": [_public_symbol(item) for item in matches],
             "snippets": [_snippet_for_symbol(item) for item in matches[:5]],
+        }
+    if rel and target_kind == "missing":
+        return {
+            "status": "error",
+            "mode": "inspect",
+            "error": "target_not_found",
+            "message": f"inspect 目标路径 `{rel}` 不存在。请检查路径，或先用 search/explore 定位目标。",
+            "target": {"filePath": rel},
+        }
+    if rel and target_kind == "outside_project":
+        return {
+            "status": "error",
+            "mode": "inspect",
+            "error": "target_outside_project",
+            "message": "inspect 仅支持 Vibelution 项目目录内的目标。",
+            "target": {"filePath": rel},
         }
     if rel:
         index_meta = graph.get("index") if isinstance(graph.get("index"), dict) else {}
@@ -888,6 +955,23 @@ def _normalize_rel(path: str | Path) -> str:
     except OSError:
         return raw.strip("/")
     return raw.strip("./")
+
+
+def _project_target_kind(path: str | Path) -> str:
+    rel = _normalize_rel(path)
+    if not rel:
+        return ""
+    root = project_root().resolve()
+    candidate = (root / rel).resolve()
+    try:
+        candidate.relative_to(root)
+    except ValueError:
+        return "outside_project"
+    if candidate.is_dir():
+        return "directory"
+    if candidate.is_file():
+        return "file"
+    return "missing"
 
 
 def _rel(path: Path, root: Path) -> str:
