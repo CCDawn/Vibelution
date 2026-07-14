@@ -150,6 +150,52 @@ def _tool_call(raw: Any, *, scope: InvocationScope, index: int) -> CanonicalTool
     )
 
 
+def _validated_replay_item_ids(
+    replay_state: ProviderReplayState | None,
+    *,
+    message_index: int,
+) -> tuple[str, ...]:
+    validated: list[str] = []
+    seen: set[str] = set()
+    for replay_item in replay_state.opaque_items if replay_state is not None else ():
+        try:
+            provider_item = json.loads(replay_item.payload.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise SemanticProjectionError(
+                "invalid_replay_item_payload",
+                message_index,
+                "opaque replay item payload is not valid provider JSON",
+            ) from exc
+        if not isinstance(provider_item, Mapping):
+            raise SemanticProjectionError(
+                "invalid_replay_item_payload",
+                message_index,
+                "opaque replay item payload must decode to an object",
+            )
+        if provider_item.get("type") != "reasoning":
+            raise SemanticProjectionError(
+                "unsupported_replay_item_type",
+                message_index,
+                "opaque replay item must have Responses type `reasoning`",
+            )
+        provider_item_id = provider_item.get("id")
+        if not isinstance(provider_item_id, str) or provider_item_id.strip() != replay_item.item_id:
+            raise SemanticProjectionError(
+                "replay_item_id_mismatch",
+                message_index,
+                "opaque replay item id does not match replay state",
+            )
+        if replay_item.item_id in seen:
+            raise SemanticProjectionError(
+                "duplicate_replay_item_id",
+                message_index,
+                f"opaque replay item `{replay_item.item_id}` appears more than once",
+            )
+        seen.add(replay_item.item_id)
+        validated.append(replay_item.item_id)
+    return tuple(validated)
+
+
 def _project_messages(
     messages: Sequence[Any],
     *,
@@ -161,9 +207,13 @@ def _project_messages(
 ) -> list[SemanticMessage]:
     projected: list[SemanticMessage] = []
     calls_by_id: dict[str, CanonicalToolCall] = {}
-    replay_item_ids = {
-        item.item_id for item in (replay_state.opaque_items if replay_state is not None else ())
-    }
+    replay_items = tuple(replay_state.opaque_items if replay_state is not None else ())
+    replay_item_ids_in_order = _validated_replay_item_ids(
+        replay_state,
+        message_index=max(0, len(messages) - 1),
+    )
+    replay_item_ids = set(replay_item_ids_in_order)
+    explicit_replay_anchors: dict[str, int] = {}
     system_seen = False
     for index, message in enumerate(messages):
         if isinstance(message, Mapping) and "toolCalls" in message:
@@ -190,6 +240,19 @@ def _project_messages(
                     index,
                     f"reasoning replay item `{replay_item_id}` is unavailable",
                 )
+            if role != "assistant":
+                raise SemanticProjectionError(
+                    "invalid_replay_anchor",
+                    index,
+                    "reasoning replay item must be anchored to an assistant message",
+                )
+            if replay_item_id in explicit_replay_anchors:
+                raise SemanticProjectionError(
+                    "duplicate_replay_anchor",
+                    index,
+                    f"reasoning replay item `{replay_item_id}` has multiple explicit anchors",
+                )
+            explicit_replay_anchors[replay_item_id] = len(projected)
             parts.append(ReasoningReplayPart(replay_item_id))
         parts.extend(_content_parts(_value(message, "content", ""), index))
         raw_calls = _value(message, "tool_calls", ()) or ()
@@ -225,6 +288,49 @@ def _project_messages(
         if role == "assistant" and not parts and not allow_assistant_prefill:
             continue
         projected.append(SemanticMessage(role=role, parts=tuple(parts)))
+    if replay_items:
+        if explicit_replay_anchors:
+            if set(explicit_replay_anchors) != replay_item_ids:
+                missing_item_id = next(
+                    item_id for item_id in replay_item_ids_in_order if item_id not in explicit_replay_anchors
+                )
+                raise SemanticProjectionError(
+                    "unmapped_replay_item",
+                    max(0, len(messages) - 1),
+                    f"opaque replay item `{missing_item_id}` has no unique explicit assistant anchor",
+                )
+            anchor_order = [explicit_replay_anchors[item_id] for item_id in replay_item_ids_in_order]
+            if anchor_order != sorted(anchor_order):
+                raise SemanticProjectionError(
+                    "reordered_replay_items",
+                    max(0, len(messages) - 1),
+                    "explicit reasoning replay anchors do not preserve provider item order",
+                )
+        else:
+            if not projected or projected[-1].role not in {"user", "tool"}:
+                raise SemanticProjectionError(
+                    "missing_replay_continuation",
+                    max(0, len(messages) - 1),
+                    "opaque replay fallback requires a current user or tool continuation",
+                )
+            replay_anchor = next(
+                (index for index in range(len(projected) - 2, -1, -1) if projected[index].role == "assistant"),
+                None,
+            )
+            if replay_anchor is None:
+                raise SemanticProjectionError(
+                    "missing_replay_anchor",
+                    max(0, len(messages) - 1),
+                    "opaque replay state requires an assistant message anchor",
+                )
+            anchor_message = projected[replay_anchor]
+            projected[replay_anchor] = SemanticMessage(
+                role=anchor_message.role,
+                parts=(
+                    *(ReasoningReplayPart(item_id) for item_id in replay_item_ids_in_order),
+                    *anchor_message.parts,
+                ),
+            )
     try:
         validate_provider_ready_messages(projected)
     except SemanticChainValidationError as exc:

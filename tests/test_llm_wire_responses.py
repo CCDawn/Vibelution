@@ -207,6 +207,33 @@ def test_responses_rejects_plain_reasoning_text_instead_of_silent_drop():
         ResponsesWireAdapter().encode_request(request, route=route())
 
 
+def test_responses_rejects_explicit_non_reasoning_opaque_replay_payload():
+    current_route = route()
+    replay_state = ProviderReplayState(
+        issuer="responses",
+        provider_id=current_route.provider_id,
+        endpoint_fingerprint=endpoint_fingerprint(current_route.runtime_endpoint),
+        model_id=current_route.model_id,
+        wire_protocol=current_route.wire_protocol,
+        opaque_items=(
+            OpaqueReplayItem(
+                item_id="reasoning-1",
+                payload=b'{"id":"reasoning-1","type":"message","content":[]}',
+            ),
+        ),
+    )
+    request = SemanticModelRequest(
+        scope=scope(),
+        messages=(SemanticMessage(role="assistant", parts=(ReasoningReplayPart("reasoning-1"),)),),
+        tools=(),
+        settings=SemanticGenerationSettings(max_output_tokens=32),
+        replay_state=replay_state,
+    )
+
+    with pytest.raises(ValueError, match="type `reasoning`"):
+        ResponsesWireAdapter().encode_request(request, route=current_route)
+
+
 def test_responses_encoder_rejects_cross_route_replay_without_registry_bypass():
     current_route = route()
     replay_state = ProviderReplayState(

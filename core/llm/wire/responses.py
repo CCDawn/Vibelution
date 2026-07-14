@@ -72,6 +72,11 @@ def _decode_replay_item(replay_item: OpaqueReplayItem) -> dict[str, Any]:
         raise ValueError("reasoning replay item is not valid provider JSON") from exc
     if not isinstance(provider_item, dict):
         raise ValueError("reasoning replay item must decode to an object")
+    if provider_item.get("type") != "reasoning":
+        raise ValueError("reasoning replay item must have Responses type `reasoning`")
+    provider_item_id = provider_item.get("id")
+    if not isinstance(provider_item_id, str) or provider_item_id.strip() != replay_item.item_id:
+        raise ValueError("reasoning replay item id does not match replay state")
     return provider_item
 
 
