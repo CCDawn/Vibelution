@@ -2743,6 +2743,9 @@ describe("ChatCodingRoute layout contract", () => {
     expect(deleteMutationSource).toContain("onMutate: async (variables)");
     expect(deleteMutationSource).toContain("captureSessionIndexCacheSnapshots(queryClient)");
     expect(deleteMutationSource).toContain("previousConversations");
+    expect(deleteMutationSource).toContain("previousAgents");
+    expect(deleteMutationSource).toContain("agent.directSessionId !== variables.sessionId");
+    expect(deleteMutationSource).toContain("queryClient.setQueryData(queryKeys.agents(), context.previousAgents)");
     expect(deleteMutationSource).toContain("restoreSessionIndexCacheSnapshots(queryClient, context?.previousSessionIndexCaches)");
     expect(deleteMutationSource).toContain("queryClient.setQueryData(queryKeys.conversations(), context.previousConversations)");
     expect(deleteMutationSource).toContain("chatWorkspaceCache.afterSessionDeleted({");

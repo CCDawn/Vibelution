@@ -98,6 +98,8 @@ describe("createChatWorkspaceCache", () => {
     expect(queryKeysFromCalls()).toEqual([
       queryKeys.sessions(),
       queryKeys.conversations(),
+      queryKeys.agents(),
+      queryKeys.agentConfigWorkspace(),
       queryKeys.runtimeSummary(),
       queryKeys.chatRooms(),
       queryKeys.session("session-b"),
