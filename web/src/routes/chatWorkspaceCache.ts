@@ -79,6 +79,8 @@ export function createChatWorkspaceCache(queryClient: QueryClientLike) {
       return invalidateAll(queryClient, [
         queryKeys.sessions(),
         queryKeys.conversations(),
+        queryKeys.agents(),
+        queryKeys.agentConfigWorkspace(),
         queryKeys.runtimeSummary(),
         queryKeys.chatRooms(),
         ...(options.nextSessionId ? [queryKeys.session(options.nextSessionId)] : []),
