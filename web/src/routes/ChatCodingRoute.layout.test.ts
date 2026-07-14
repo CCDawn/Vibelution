@@ -2863,4 +2863,24 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).not.toContain("/llm-selection");
     expect(routeSource).not.toContain("onSelectionChange");
   });
+
+  it("requests authoritative session refresh when the session stream errors", () => {
+    const onErrorStart = routeSource.indexOf("stream.onerror = () => {");
+    const onErrorEnd = routeSource.indexOf("function handleSessionDetail", onErrorStart);
+    const onErrorSource = routeSource.slice(onErrorStart, onErrorEnd);
+
+    expect(onErrorSource).toContain("if (!disposed)");
+    expect(onErrorSource).toContain('applyPendingAssistantDeltas("close")');
+    expect(onErrorSource).toContain("assistantDeltaScheduler.pendingCount");
+    expect(onErrorSource).toContain("queryClient.invalidateQueries({ queryKey: queryKeys.session(streamSessionId) })");
+    expect(onErrorSource).toContain('eventCode: "browser.session_stream.authoritative_refresh_requested"');
+    expect(onErrorSource).toContain("sessionId: streamSessionId");
+    expect(onErrorSource).toContain("readyState: stream.readyState");
+    expect(onErrorSource).toContain("pendingAssistantDeltaCount");
+    expect(onErrorSource.indexOf('applyPendingAssistantDeltas("close")')).toBeLessThan(
+      onErrorSource.indexOf("queryClient.invalidateQueries"),
+    );
+    expect(onErrorSource).not.toContain("setTimeout");
+    expect(onErrorSource).not.toMatch(/setActiveTurnLayersBySession[\s\S]*failed/);
+  });
 });

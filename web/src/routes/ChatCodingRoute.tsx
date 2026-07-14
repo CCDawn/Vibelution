@@ -3610,6 +3610,9 @@ export function ChatCodingRoute() {
     stream.onerror = () => {
       if (!disposed) {
         setSessionStreamConnected(false);
+        const pendingAssistantDeltaCount = assistantDeltaScheduler.pendingCount;
+        applyPendingAssistantDeltas("close");
+        void queryClient.invalidateQueries({ queryKey: queryKeys.session(streamSessionId) });
         if (!sessionStreamErrorLoggedRef.current[streamSessionId]) {
           sessionStreamErrorLoggedRef.current[streamSessionId] = true;
           postBrowserTelemetry({
@@ -3620,6 +3623,17 @@ export function ChatCodingRoute() {
             fields: {
               sessionId: streamSessionId,
               readyState: stream.readyState,
+            },
+          });
+          postBrowserTelemetry({
+            phase: "session_stream",
+            eventCode: "browser.session_stream.authoritative_refresh_requested",
+            message: "Authoritative session detail refresh was requested after a stream error.",
+            level: "warning",
+            fields: {
+              sessionId: streamSessionId,
+              readyState: stream.readyState,
+              pendingAssistantDeltaCount,
             },
           });
         }

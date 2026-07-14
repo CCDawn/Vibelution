@@ -167,8 +167,8 @@ export function mergeAssistantDeltaIntoActiveTurnLayer(
       turnItems,
     })
     : undefined;
-  const content = canonicalSurface?.answerContent ?? legacyContent;
-  const thought = canonicalSurface?.thoughtContent ?? legacyThought;
+  const content = compactText(canonicalSurface?.answerContent) ? canonicalSurface!.answerContent : legacyContent;
+  const thought = compactText(canonicalSurface?.thoughtContent) ? canonicalSurface!.thoughtContent : legacyThought;
   const codexTranscript = canonicalSurface?.codexTranscript ?? payload.codexTranscript ?? base?.codexTranscript;
   const hasVisibleContent = hasVisibleActiveTurnProtocolContent({
     answerContent: content,

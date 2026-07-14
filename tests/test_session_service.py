@@ -5,6 +5,7 @@ import threading
 
 from core.chat.conversation_ledger import (
     EVENT_ASSISTANT_MESSAGE,
+    EVENT_TURN_FAILED,
     EVENT_TURN_INTERRUPTED,
     EVENT_TURN_STARTED,
     EVENT_USER_MESSAGE,
@@ -483,6 +484,71 @@ def test_reconcile_discards_live_checkpoint_for_already_interrupted_turn(monkeyp
         EVENT_TURN_STARTED,
         EVENT_TURN_INTERRUPTED,
     ]
+
+
+def test_terminal_fallback_closes_running_turn_when_result_persistence_raises(monkeypatch, tmp_path):
+    class FakeWorkRunStore:
+        def __init__(self):
+            self.snapshots = {}
+
+        def load_snapshot(self, run_kind, run_id):
+            return self.snapshots.get((run_kind, run_id))
+
+        def persist_snapshot(self, run_kind, payload, *, active_run_id=None):
+            self.snapshots[(run_kind, payload["runId"])] = dict(payload)
+
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    work_runs = FakeWorkRunStore()
+    monkeypatch.setattr(session_service, "_WORK_RUN_STORE", work_runs)
+    monkeypatch.setattr(
+        session_service,
+        "_persist_session_turn_result",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("result persistence failed")),
+    )
+    append_conversation_event(tmp_path, "session-live", "turn-fallback", EVENT_TURN_STARTED, status="running")
+    session_service._set_session_running("session-live", True, turn_id="turn-fallback")
+    session_service._set_session_live_output("session-live", turn_id="turn-fallback", content="partial")
+
+    try:
+        session_service._persist_session_turn_result("session-live", {}, turn_id="turn-fallback")
+    except RuntimeError:
+        session_service._ensure_session_turn_terminal_fallback("session-live", "turn-fallback")
+    finally:
+        session_service._set_session_running("session-live", False, turn_id="turn-fallback")
+
+    session_service._ensure_session_turn_terminal_fallback("session-live", "turn-fallback")
+
+    events = load_conversation_events(tmp_path, "session-live")
+    terminal_events = [event for event in events if event.event_type == EVENT_TURN_FAILED]
+    assert len(terminal_events) == 1
+    assert "session-live" not in session_service._RUNNING_SESSION_IDS
+    assert session_service._snapshot_session_live_output("session-live") is None
+    work_run = work_runs.load_snapshot("chat_turn", "turn-fallback")
+    assert work_run["status"] == "failed"
+    assert work_run["finishedAt"]
+
+
+def test_terminal_fallback_does_not_block_running_cleanup_when_fallback_persistence_raises(monkeypatch):
+    monkeypatch.setattr(
+        session_service,
+        "load_conversation_events",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("journal unavailable")),
+    )
+    monkeypatch.setattr(
+        session_service,
+        "_persist_chat_turn_work_run",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("work run unavailable")),
+    )
+    session_service._set_session_running("session-live", True, turn_id="turn-fallback-errors")
+    session_service._set_session_live_output("session-live", turn_id="turn-fallback-errors", content="partial")
+
+    try:
+        session_service._ensure_session_turn_terminal_fallback("session-live", "turn-fallback-errors")
+    finally:
+        session_service._set_session_running("session-live", False, turn_id="turn-fallback-errors")
+
+    assert "session-live" not in session_service._RUNNING_SESSION_IDS
+    assert session_service._snapshot_session_live_output("session-live") is None
 
 
 def test_session_stream_full_queue_prefers_dropping_snapshots_before_assistant_delta():
