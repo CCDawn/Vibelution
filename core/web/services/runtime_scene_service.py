@@ -899,7 +899,6 @@ def record_runtime_scene_event(
             timestamp,
         )
         full_projection_refresh = _runtime_scene_event_requires_full_projection_refresh(
-            lifecycle=lifecycle,
             level=level_name,
             reconciliation_closed=reconciliation_closed,
         )
@@ -5659,13 +5658,12 @@ def _update_runtime_scene_package_manifest(scene_dir: Path, manifest: dict[str, 
 
 def _runtime_scene_event_requires_full_projection_refresh(
     *,
-    lifecycle: bool,
     level: str,
     reconciliation_closed: bool,
 ) -> bool:
     """Keep expensive diagnosis generation off the ordinary event write path."""
 
-    if lifecycle or reconciliation_closed:
+    if reconciliation_closed:
         return True
     return str(level or "").strip().lower() in {"warning", "error", "critical", "fatal"}
 
