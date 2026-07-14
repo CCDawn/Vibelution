@@ -28,6 +28,7 @@ from core.runtime_manager.state_store import load_state as load_runtime_manager_
 from core.runtime_manager.window_provider_state import window_provider_projection
 from core.runtime_manager.work_run_leases import leases_for_snapshot
 from core.chat.conversation_ledger import (
+    conversation_event_read_snapshot,
     context_compression_projection,
     load_conversation_events,
 )
@@ -73,7 +74,8 @@ def _with_runtime_summary_agent_cache(func):
     def wrapped(*args, **kwargs):
         token = _RUNTIME_SUMMARY_AGENT_CACHE.set({})
         try:
-            return func(*args, **kwargs)
+            with conversation_event_read_snapshot():
+                return func(*args, **kwargs)
         finally:
             _RUNTIME_SUMMARY_AGENT_CACHE.reset(token)
 
