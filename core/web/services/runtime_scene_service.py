@@ -1322,6 +1322,9 @@ def _runtime_scene_safe_tool_calls(tool_calls: list[dict[str, Any]] | None) -> l
         invocation_id = _runtime_scene_first_safe_id([item], ("invocationId", "invocation_id"))
         if invocation_id:
             safe_item["invocationId"] = invocation_id
+        summary = _truncate_text(str(item.get("summary") or ""), 800)
+        if summary:
+            safe_item["summary"] = summary
         safe_items.append(safe_item)
     return safe_items
 
@@ -1380,6 +1383,7 @@ def _append_agent_tool_call_logs(scene_dir: Path, conversation_payload: dict[str
                 "invocationId": invocation_id,
                 "name": str(item.get("name") or "").strip(),
                 "status": str(item.get("status") or "").strip(),
+                "summary": _truncate_text(str(item.get("summary") or ""), 800),
             },
         )
 

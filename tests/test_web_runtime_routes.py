@@ -3084,6 +3084,7 @@ def test_runtime_scene_package_records_conversation_as_child_log(tmp_path, monke
             "invocationId": "tool-invocation-demo",
             "name": "inspect_logs",
             "status": "done",
+            "summary": "read package",
         }
     ]
     assert (scene_dir / "agent" / "turns.jsonl").exists()
@@ -3112,10 +3113,11 @@ def test_runtime_scene_package_records_conversation_as_child_log(tmp_path, monke
     assert tool_call_event["invocation_id"] == "tool-invocation-demo"
     assert tool_call_event["id"] == "tool-demo"
     assert tool_call_event["callId"] == "call-demo"
-    for forbidden_key in ("summary", "arguments", "result", "prompt", "content"):
+    assert tool_call_event["summary"] == "read package"
+    for forbidden_key in ("arguments", "result", "prompt", "content"):
         assert forbidden_key not in tool_call_event
         assert forbidden_key not in conversation_event["tool_calls"][0]
-    for forbidden_text in ("read package", "secret-package", "secret-result", "secret-prompt", "secret-content"):
+    for forbidden_text in ("secret-package", "secret-result", "secret-prompt", "secret-content"):
         assert forbidden_text not in conversation_text
         assert forbidden_text not in tool_call_text
 
