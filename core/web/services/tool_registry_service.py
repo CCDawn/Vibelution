@@ -26,7 +26,19 @@ from core.infrastructure.image_model_discovery import resolve_image_model, shoul
 from core.infrastructure.llm_utils import parse_tool_args
 from core.orchestration.tool_lifecycle import ToolLifecycleBridge
 from core.logging import debug as _debug_logger
-from core.web.services.tool_catalog import bundle_ids_for_tool, explicit_allow_tool_names, list_tool_bundles, metadata_for_tool
+from core.web.services.tool_catalog import (
+    TOOL_DESCRIPTOR_SCHEMA_VERSION,
+    TOOL_REGISTRY_VERSION,
+    ToolDescriptor,
+    ToolDescriptorError,
+    build_tool_descriptor,
+    bundle_ids_for_tool,
+    explicit_allow_tool_names,
+    list_tool_bundles,
+    metadata_for_tool,
+    registry_descriptor_fingerprint,
+    validate_tool_descriptors,
+)
 from core.infrastructure.tool_result import (
     infer_tool_business_success,
     package_tool_result_facts,
@@ -125,6 +137,8 @@ def get_tool_registry() -> dict[str, Any]:
     builtins = _builtin_tool_items()
     generated = _generated_tool_items(_load_generated_tools(), builtin_names={item["name"] for item in builtins})
     tools = [*builtins, *generated]
+    descriptors = _canonical_registry_descriptors(tools)
+    descriptor_names = {descriptor.name for descriptor in descriptors}
     tools = [_with_agent_scope_states(item) for item in tools]
     counts = {
         "total": len(tools),
@@ -134,14 +148,33 @@ def get_tool_registry() -> dict[str, Any]:
         "runtimeActive": sum(1 for item in tools if item.get("runtimeActive")),
         "enabledGenerated": sum(1 for item in generated if item.get("enabled")),
         "invalidGenerated": sum(1 for item in generated if item.get("status") == "invalid"),
+        "descriptors": len(descriptors),
+        "invalidDescriptors": sum(1 for item in tools if item.get("status") == "invalid"),
+        "unavailableDescriptors": sum(
+            1
+            for item in tools
+            if item.get("name") in descriptor_names
+            and (
+                not item.get("enabled")
+                or not item.get("runtimeActive")
+                or (
+                    isinstance(item.get("dependencyStatus"), dict)
+                    and not item["dependencyStatus"].get("available")
+                )
+            )
+        ),
     }
     return {
         "schemaVersion": 1,
+        "descriptorSchemaVersion": TOOL_DESCRIPTOR_SCHEMA_VERSION,
+        "registryVersion": TOOL_REGISTRY_VERSION,
+        "registryFingerprint": registry_descriptor_fingerprint(descriptors),
         "mode": "safe_manifest_registry",
         "storagePath": _relative_project_path(_generated_tools_path()),
         "counts": counts,
         "agentScopes": _agent_scope_summaries(tools),
         "toolBundles": list_tool_bundles(available_tool_names={str(item.get("name") or "") for item in tools}),
+        "descriptors": [descriptor.public_projection() for descriptor in descriptors],
         "tools": tools,
     }
 
@@ -1225,6 +1258,34 @@ def _value_matches_schema_type(value: Any, expected: str) -> bool:
 
 def _is_tool_failure_result(result_text: Any) -> bool:
     return not infer_tool_business_success(result_text)
+
+
+def _canonical_registry_descriptors(items: list[dict[str, Any]]) -> tuple[ToolDescriptor, ...]:
+    """Build the active, secret-safe descriptor snapshot or reject ambiguity."""
+
+    descriptors: list[ToolDescriptor] = []
+    for item in items:
+        source = str(item.get("source") or "built_in").strip()
+        if source == "generated" and (item.get("status") != "validated" or not item.get("enabled")):
+            continue
+        dependency = item.get("dependencyStatus") if isinstance(item.get("dependencyStatus"), dict) else {}
+        required_config = [str(dependency.get("dependency") or "").strip()] if dependency.get("dependency") else []
+        try:
+            descriptors.append(
+                build_tool_descriptor(
+                    str(item.get("name") or ""),
+                    args_schema=item.get("argsSchema") if isinstance(item.get("argsSchema"), dict) else {},
+                    source=source,
+                    enabled=bool(item.get("enabled")),
+                    required_config=required_config,
+                )
+            )
+        except ToolDescriptorError as exc:
+            raise ToolRegistryError(str(exc)) from exc
+    try:
+        return validate_tool_descriptors(descriptors)
+    except ToolDescriptorError as exc:
+        raise ToolRegistryError(str(exc)) from exc
 
 
 def _builtin_tool_items() -> list[dict[str, Any]]:
