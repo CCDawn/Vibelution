@@ -700,18 +700,32 @@ class TestToolExecutorExecute:
         assert "read_file" not in event_data["error"].replace("read_file_tool", "")
 
     def test_unknown_tool_in_agent_runtime_lists_registered_visible_tools(self, executor, monkeypatch):
+        from types import SimpleNamespace
+
+        from core.authorization import tool_authorization_service
         from core.web.services import agent_directory_service
 
         monkeypatch.setattr(agent_directory_service, "current_agent_runtime", lambda: {
             "agentId": "agent-policy",
+            "turnId": "turn-policy",
             "toolPolicy": {
                 "policyId": "tool-agent-policy",
                 "allowedTools": ["agent_message_tool", "read_memory_tool"],
                 "blockedTools": [],
             },
         })
+        tool_authorization_service.install_execution_authorization(
+            SimpleNamespace(
+                decision=SimpleNamespace(
+                    agent_id="agent-policy",
+                    turn_id="turn-policy",
+                    decision_fingerprint="decision-policy",
+                    executable_tools=("read_memory_tool",),
+                )
+            )
+        )
 
-        result, action = executor.execute("read_memory_tool", {})
+        result, action = executor.execute("read_memory_tool", {}, tool_call_id="call-policy")
 
         assert action is None
         assert "[错误] 未知工具" not in str(result)
@@ -967,11 +981,15 @@ class TestToolExecutorTimeout:
         assert action is None
         assert str(result) == "delegated:分析重复调用"
 
-    def test_spawn_agent_tool_internal_delegate_bypasses_llm_tool_policy(self, executor, monkeypatch):
+    def test_spawn_agent_tool_internal_delegate_cannot_bypass_llm_tool_policy(self, executor, monkeypatch):
+        from types import SimpleNamespace
+
+        from core.authorization import tool_authorization_service
         from core.web.services import agent_directory_service
 
         monkeypatch.setattr(agent_directory_service, "current_agent_runtime", lambda: {
             "agentId": "agent-policy",
+            "turnId": "turn-policy",
             "toolPolicy": {
                 "policyId": "tool-agent-policy",
                 "allowedTools": ["agent_message_tool"],
@@ -985,21 +1003,37 @@ class TestToolExecutorTimeout:
                 "allowWakeMessages": True,
             },
         })
-        executor.register_tool("spawn_agent_tool", lambda **kwargs: "delegated", timeout=5)
+        tool_authorization_service.install_execution_authorization(
+            SimpleNamespace(
+                decision=SimpleNamespace(
+                    agent_id="agent-policy",
+                    turn_id="turn-policy",
+                    decision_fingerprint="decision-policy",
+                    executable_tools=("spawn_agent_tool",),
+                )
+            )
+        )
+        calls = []
+        executor.register_tool("spawn_agent_tool", lambda **kwargs: calls.append(kwargs) or "delegated", timeout=5)
 
         result, action = executor.execute(
             "spawn_agent_tool",
             {"goal": "分析重复调用", "_internal_delegate": True},
+            tool_call_id="call-policy",
         )
 
         assert action is None
-        assert str(result) == "delegated"
+        assert "不在该 Agent 的可用工具策略中" in str(result)
+        assert calls == []
 
     def test_spawn_agent_tool_respects_current_agent_delegation_policy(self, executor, monkeypatch):
+        from types import SimpleNamespace
+        from core.authorization import tool_authorization_service
         from core.web.services import agent_directory_service
 
         monkeypatch.setattr(agent_directory_service, "current_agent_runtime", lambda: {
             "agentId": "agent-policy",
+            "turnId": "turn-policy",
             "delegationPolicy": {
                 "allowSubagents": False,
                 "maxDepth": 0,
@@ -1008,40 +1042,55 @@ class TestToolExecutorTimeout:
                 "allowedContextModes": ["isolated"],
             },
         })
+        tool_authorization_service.install_execution_authorization(SimpleNamespace(decision=SimpleNamespace(
+            agent_id="agent-policy", turn_id="turn-policy", decision_fingerprint="decision-policy",
+            executable_tools=("spawn_agent_tool",),
+        )))
         executor.register_tool("spawn_agent_tool", lambda **kwargs: "should-not-run", timeout=5)
 
         result, action = executor.execute(
             "spawn_agent_tool",
             {"goal": "分析重复调用", "_internal_delegate": True},
+            tool_call_id="call-policy",
         )
 
         assert action is None
         assert "DelegationPolicy" in str(result) or "委托策略" in str(result)
-        assert "禁止派发子 Agent" in str(result)
+        assert "关闭子 agent 派发权限" in str(result)
 
     def test_tool_policy_blocks_registered_tool_not_allowed_for_current_agent(self, executor, monkeypatch):
+        from types import SimpleNamespace
+        from core.authorization import tool_authorization_service
         from core.web.services import agent_directory_service
 
         monkeypatch.setattr(agent_directory_service, "current_agent_runtime", lambda: {
             "agentId": "agent-policy",
+            "turnId": "turn-policy",
             "toolPolicy": {
                 "policyId": "tool-agent-policy",
                 "allowedTools": ["agent_message_tool"],
                 "blockedTools": ["fake_policy_probe_tool"],
             },
         })
+        tool_authorization_service.install_execution_authorization(SimpleNamespace(decision=SimpleNamespace(
+            agent_id="agent-policy", turn_id="turn-policy", decision_fingerprint="decision-policy",
+            executable_tools=("fake_policy_probe_tool",),
+        )))
         executor.register_tool("fake_policy_probe_tool", lambda **kwargs: "ran despite policy", timeout=5)
-        result, action = executor.execute("fake_policy_probe_tool", {})
+        result, action = executor.execute("fake_policy_probe_tool", {}, tool_call_id="call-policy")
 
         assert action is None
         assert "ToolPolicy" in str(result)
         assert "fake_policy_probe_tool" in str(result)
 
     def test_cli_agent_run_tool_runs_with_explicit_tool_policy_allow(self, executor, monkeypatch):
+        from types import SimpleNamespace
+        from core.authorization import tool_authorization_service
         from core.web.services import agent_directory_service
 
         monkeypatch.setattr(agent_directory_service, "current_agent_runtime", lambda: {
             "agentId": "agent-session",
+            "turnId": "turn-session",
             "toolPolicy": {
                 "policyId": "tool-agent-session-cli",
                 "allowedTools": ["cli_agent_run_tool"],
@@ -1054,22 +1103,33 @@ class TestToolExecutorTimeout:
                 "allowWakeMessages": True,
             },
         })
+        tool_authorization_service.install_execution_authorization(SimpleNamespace(decision=SimpleNamespace(
+            agent_id="agent-session", turn_id="turn-session", decision_fingerprint="decision-session",
+            executable_tools=("cli_agent_run_tool",),
+        )))
         monkeypatch.setitem(
             executor._tool_map,
             "cli_agent_run_tool",
             lambda agent_type="", task="", **_kwargs: f"ran {agent_type}: {task}",
         )
 
-        result, action = executor.execute("cli_agent_run_tool", {"agent_type": "codex_code", "task": "inspect only"})
+        result, action = executor.execute(
+            "cli_agent_run_tool",
+            {"agent_type": "codex_code", "task": "inspect only"},
+            tool_call_id="call-session",
+        )
 
         assert action is None
         assert result == "ran codex_code: inspect only"
 
     def test_cli_agent_run_tool_requires_delegation_policy_allow(self, executor, monkeypatch):
+        from types import SimpleNamespace
+        from core.authorization import tool_authorization_service
         from core.web.services import agent_directory_service
 
         monkeypatch.setattr(agent_directory_service, "current_agent_runtime", lambda: {
             "agentId": "agent-session",
+            "turnId": "turn-session",
             "toolPolicy": {
                 "policyId": "tool-agent-session-cli",
                 "allowedTools": ["cli_agent_run_tool"],
@@ -1082,13 +1142,21 @@ class TestToolExecutorTimeout:
                 "allowWakeMessages": True,
             },
         })
+        tool_authorization_service.install_execution_authorization(SimpleNamespace(decision=SimpleNamespace(
+            agent_id="agent-session", turn_id="turn-session", decision_fingerprint="decision-session",
+            executable_tools=("cli_agent_run_tool",),
+        )))
         monkeypatch.setitem(
             executor._tool_map,
             "cli_agent_run_tool",
             lambda agent_type="", task="", **_kwargs: f"ran {agent_type}: {task}",
         )
 
-        result, action = executor.execute("cli_agent_run_tool", {"agent_type": "codex_code", "task": "inspect only"})
+        result, action = executor.execute(
+            "cli_agent_run_tool",
+            {"agent_type": "codex_code", "task": "inspect only"},
+            tool_call_id="call-session",
+        )
 
         assert action is None
         assert "委托策略" in str(result)

@@ -1098,7 +1098,10 @@ class SelfEvolvingAgent:
         started = time.perf_counter()
         runtime: Dict[str, Any] = {}
         try:
-            from core.authorization.tool_authorization_service import resolve_enforced_authorization
+            from core.authorization.tool_authorization_service import (
+                install_execution_authorization,
+                resolve_enforced_authorization,
+            )
             from core.logging.tool_authorization_events import record_shadow_authorization_event
             from core.web.services.agent_directory_service import current_agent_runtime
 
@@ -1129,12 +1132,15 @@ class SelfEvolvingAgent:
                     if str(getattr(tool, "name", "") or "").strip()
                 ],
             )
+            install_execution_authorization(report)
             record_shadow_authorization_event(report)
             return report
         except Exception as exc:
             try:
+                from core.authorization.tool_authorization_service import clear_execution_authorization
                 from core.logging.tool_authorization_events import record_shadow_authorization_failure
 
+                clear_execution_authorization()
                 record_shadow_authorization_failure(
                     runtime=runtime,
                     error=exc,
