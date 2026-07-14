@@ -335,7 +335,7 @@ class TestToolMessageFlow:
         assert "Windows detected Unix shell fragment" not in semantic_tool_messages[0].content
         assert "运行相关测试验证修改：" in semantic_tool_messages[0].content
 
-    def test_seed_chat_history_demotes_canonical_tool_role_without_duplicate_result(self):
+    def test_seed_chat_history_projects_canonical_tool_pair_to_semantic_history_without_duplicate_result(self):
         agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
         agent.mode_policy = ModePolicy(
             mode=AgentMode.CHAT,
@@ -367,19 +367,16 @@ class TestToolMessageFlow:
 
         restored = list(agent._active_turn_messages or [])
         tool_messages = [message for message in restored if isinstance(message, ToolMessage)]
-        assistant_calls = [
-            call
+        semantic_tool_messages = [
+            message
             for message in restored
-            if isinstance(message, AIMessage)
-            for call in list(getattr(message, "tool_calls", []) or [])
+            if isinstance(message, AIMessage) and "历史工具结果: cli_tool" in str(message.content)
         ]
 
-        assert [call["id"] for call in assistant_calls] == ["call_canonical"]
-        assert [call["name"] for call in assistant_calls] == ["cli_tool"]
-        assert [message.tool_call_id for message in tool_messages] == ["call_canonical"]
-        assert [message.content for message in tool_messages] == ["完整 canonical 工具结果"]
+        assert tool_messages == []
+        assert len(semantic_tool_messages) == 1
+        assert "完整 canonical 工具结果" in semantic_tool_messages[0].content
         assert sum("完整 canonical 工具结果" in str(message.content) for message in restored) == 1
-        assert not any("历史工具结果" in str(message.content) for message in restored)
 
     def test_chat_state_normalization_preserves_camel_case_tool_calls(self):
         from core.ui.chat_state import normalize_chat_messages
