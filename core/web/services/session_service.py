@@ -7978,6 +7978,7 @@ def _normalize_conversation(
         "agentPrimaryDirectSessionId": agent_primary_direct_session_id,
         "workspacePath": workspace_path,
         "messages": messages,
+        "_messagesNormalized": not lightweight,
         "runtimeNotices": visible_runtime_notices,
         "lastTurnStatus": last_turn_status,
         "lastTurnError": last_turn_error,
@@ -8911,7 +8912,9 @@ def _is_default_empty_session_title(title: str) -> bool:
 def _build_session_summary(conversation: dict[str, Any], *, hydrate_agent: bool = True) -> dict[str, Any]:
     status = _conversation_phase(conversation["id"], conversation)
     summary_messages = list(conversation.get("messages") or [])
-    if summary_messages:
+    if summary_messages and bool(conversation.get("_messagesNormalized")):
+        normalized_summary_messages = summary_messages
+    elif summary_messages:
         normalized_summary_messages = _normalize_messages(conversation["id"], summary_messages)
     else:
         normalized_summary_messages = _normalize_messages(
@@ -9162,7 +9165,14 @@ def _build_session_detail_from_summary(
             fallback_items=conversation.get("messages") or [],
         )
     else:
-        detail_messages = _messages_with_live_output(conversation["id"])
+        detail_messages = _messages_with_live_output(
+            conversation["id"],
+            normalized_messages=(
+                conversation.get("messages")
+                if bool(conversation.get("_messagesNormalized"))
+                else None
+            ),
+        )
     if not detail_messages:
         detail_messages = _normalize_messages(conversation["id"], conversation.get("messages") or [])
     usage_messages = stat_messages or detail_messages
@@ -20228,8 +20238,16 @@ def _truncate_session_ledger_before_message(session_id: str, message: dict[str, 
     _invalidate_session_conversation_events_cache(session_id)
 
 
-def _messages_with_live_output(session_id: str) -> list[dict[str, Any]]:
-    detail_messages = _session_ledger_visible_messages(session_id)
+def _messages_with_live_output(
+    session_id: str,
+    *,
+    normalized_messages: Any = None,
+) -> list[dict[str, Any]]:
+    detail_messages = (
+        list(normalized_messages or [])
+        if normalized_messages is not None
+        else _session_ledger_visible_messages(session_id)
+    )
     live_message = _build_live_output_message(session_id)
     if live_message is None:
         return detail_messages
