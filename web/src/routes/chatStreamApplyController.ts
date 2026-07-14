@@ -86,6 +86,7 @@ export type AppliedAssistantDeltaDrainDecision =
   | {
     applied: true;
     nextCommittedLayer: ActiveTurnLayerState | undefined;
+    shouldCommitRender: boolean;
     stats: SessionStreamApplyStats;
     appliedPayloadCount: number;
     finalDone: boolean;
@@ -193,9 +194,11 @@ export function planAppliedAssistantDeltaDrain(
     };
   }
 
+  const shouldCommitRender = !sameActiveTurnRenderState(input.committedLayer, pendingLayer);
   const nextStats = {
     ...currentStats,
-    applied: currentStats.applied + 1,
+    applied: currentStats.applied + (shouldCommitRender ? 1 : 0),
+    dropped: currentStats.dropped + (shouldCommitRender ? 0 : appliedPayloadCount),
   };
   const applyFinishedAtMs = input.applyFinishedAtMs ?? input.nowMs?.() ?? input.applyStartedAtMs;
   const telemetry = assistantDeltaApplyTelemetry({
@@ -205,6 +208,7 @@ export function planAppliedAssistantDeltaDrain(
     stats: nextStats,
     appliedPayloadCount,
     pendingLayer,
+    shouldCommitRender,
     applyStartedAtMs: input.applyStartedAtMs,
     applyFinishedAtMs,
   });
@@ -212,15 +216,62 @@ export function planAppliedAssistantDeltaDrain(
   return {
     applied: true,
     nextCommittedLayer: pendingLayer,
+    shouldCommitRender,
     stats: nextStats,
     appliedPayloadCount,
     finalDone,
-    shouldLogApplied: nextStats.applied === 1 || nextStats.applied % 50 === 0 || input.reason === "final",
+    shouldLogApplied: input.reason === "final"
+      || (shouldCommitRender
+        ? nextStats.applied === 1 || nextStats.applied % 50 === 0
+        : nextStats.dropped === 1 || nextStats.dropped % 50 === 0),
     shouldScheduleNextFrame: input.drain.shouldContinue,
     shouldInvalidateSession: input.reason === "final" && (Boolean(input.drain.telemetry.done) || finalDone),
     lastAppliedAtMs: applyFinishedAtMs,
     telemetry,
   };
+}
+
+function activeTurnRenderState(layer: ActiveTurnLayerState | undefined) {
+  if (!layer) {
+    return undefined;
+  }
+  return {
+    sessionId: layer.sessionId,
+    turnId: layer.turnId,
+    streaming: layer.streaming,
+    processStage: layer.processStage,
+    answerContent: layer.answerContent,
+    thoughtContent: layer.thoughtContent,
+    feedbackEvents: layer.feedbackEvents,
+    timelineItems: layer.timelineItems,
+    codexTranscript: layer.codexTranscript,
+    turnItems: layer.turnItems,
+  };
+}
+
+const activeTurnRenderSignatureCache = new WeakMap<ActiveTurnLayerState, string>();
+
+function activeTurnRenderSignature(layer: ActiveTurnLayerState) {
+  const cached = activeTurnRenderSignatureCache.get(layer);
+  if (cached !== undefined) {
+    return cached;
+  }
+  const signature = JSON.stringify(activeTurnRenderState(layer));
+  activeTurnRenderSignatureCache.set(layer, signature);
+  return signature;
+}
+
+function sameActiveTurnRenderState(
+  previous: ActiveTurnLayerState | undefined,
+  next: ActiveTurnLayerState | undefined,
+) {
+  if (previous === next) {
+    return true;
+  }
+  if (!previous || !next) {
+    return false;
+  }
+  return activeTurnRenderSignature(previous) === activeTurnRenderSignature(next);
 }
 
 function sessionDetailPhase(detail: SessionDetail) {
@@ -242,6 +293,7 @@ function assistantDeltaApplyTelemetry(input: {
   stats: SessionStreamApplyStats;
   appliedPayloadCount: number;
   pendingLayer: ActiveTurnLayerState | undefined;
+  shouldCommitRender: boolean;
   applyStartedAtMs: number;
   applyFinishedAtMs: number;
 }) {
@@ -259,6 +311,7 @@ function assistantDeltaApplyTelemetry(input: {
     receivedCount: input.stats.received,
     appliedCount: input.stats.applied,
     droppedCount: input.stats.dropped,
+    renderCommitted: input.shouldCommitRender,
     payloadLength: input.drain.telemetry.payloadLength ?? 0,
     contentDeltaLength: input.drain.telemetry.contentDeltaLength ?? 0,
     thoughtDeltaLength: input.drain.telemetry.thoughtDeltaLength ?? 0,
