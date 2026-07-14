@@ -761,7 +761,7 @@ function isRunningStatus(status: string) {
   );
 }
 
-export function displayToolLabel(name: string) {
+function displayToolLabel(name: string) {
   const normalized = String(name || "").trim();
   const lower = normalized.toLowerCase();
   if (!normalized) {
