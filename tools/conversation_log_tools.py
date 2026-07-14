@@ -438,6 +438,8 @@ def _inspect_records(
                     "policyVersion": _bounded_int(fields.get("policyVersion"), default=0, minimum=0, maximum=1_000_000),
                     "registryVersion": _bounded_int(fields.get("registryVersion"), default=0, minimum=0, maximum=1_000_000),
                     "decisionFingerprint": _safe_text(str(fields.get("decisionFingerprint") or ""), limit=64),
+                    "visibleCount": _bounded_int(fields.get("visibleCount"), default=0, minimum=0, maximum=10_000),
+                    "executableCount": _bounded_int(fields.get("executableCount"), default=0, minimum=0, maximum=10_000),
                     "parity": bool(fields.get("parity")),
                     "legacyVisibleCount": _bounded_int(fields.get("legacyVisibleCount"), default=0, minimum=0, maximum=10_000),
                     "shadowVisibleCount": _bounded_int(fields.get("shadowVisibleCount"), default=0, minimum=0, maximum=10_000),
@@ -500,7 +502,7 @@ def _inspect_records(
         "toolAuthorization": {
             "eventCount": len(authorization_events),
             "parityMismatchCount": sum(1 for item in authorization_events if item["eventCode"].endswith("shadow_decision") and not item["parity"]),
-            "failureCount": sum(1 for item in authorization_events if item["eventCode"].endswith("shadow_failed")),
+            "failureCount": sum(1 for item in authorization_events if item["eventCode"].endswith("shadow_failed") or item["eventCode"].endswith(".failed")),
             "latest": authorization_events[-1] if authorization_events else None,
             "recent": authorization_events[-8:],
         },

@@ -24,15 +24,14 @@ class ReadingStrategy:
 
 def _current_agent_visible_tool_names() -> set[str] | None:
     try:
-        from core.web.services.agent_directory_service import (
-            current_agent_runtime,
-            effective_visible_tool_names_for_current_agent,
-        )
+        from core.authorization.tool_authorization_service import current_execution_authorization
+        from core.web.services.agent_directory_service import current_agent_runtime
 
         runtime = current_agent_runtime()
         if not str((runtime or {}).get("agentId") or "").strip():
             return None
-        return set(effective_visible_tool_names_for_current_agent())
+        authorization = current_execution_authorization()
+        return set(tuple(getattr(authorization, "executable_tools", ()) or ()))
     except Exception as exc:
         _debug_logger.warning(f"[阅读策略] 获取当前 Agent 可见工具失败: {type(exc).__name__}: {exc}")
         return None

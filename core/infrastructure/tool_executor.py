@@ -668,7 +668,7 @@ class ToolExecutor:
 
         started_at = time.monotonic()
 
-        execution_authorization = self._check_canonical_execution_authorization(tool_name, call_id)
+        execution_authorization = self._check_canonical_execution_authorization(tool_name, call_id, tool_args)
         if execution_authorization is not None and not execution_authorization.allowed:
             authorization_error = execution_authorization.message
             publish_tool_event(EventNames.TOOL_ERROR, {
@@ -718,33 +718,6 @@ class ToolExecutor:
                 },
                 lifecycle=True,
             )
-
-        policy_block = self._check_agent_tool_policy_block(tool_name, tool_args)
-        if policy_block:
-            publish_tool_event(EventNames.TOOL_ERROR, {
-                "name": tool_name,
-                "error": policy_block,
-                "result": policy_block,
-                "args": tool_args,
-                **_tool_error_event_facts(
-                    tool_name,
-                    policy_block,
-                    semantic_status="blocked",
-                    failure_class="policy_blocked",
-                ),
-            })
-            _record_current_agent_tool_observation(tool_name, "policy_blocked", tool_args, policy_block)
-            _record_tool_scene_event(
-                "execute",
-                "tool.policy_blocked",
-                tool_name=tool_name,
-                message=policy_block,
-                level="warning",
-                outcome="blocked",
-                fields=_summarize_tool_args(tool_args),
-                lifecycle=True,
-            )
-            return (policy_block, None)
 
         readonly_block = self._check_readonly_subagent_block(tool_name)
         if readonly_block:
@@ -1319,26 +1292,13 @@ class ToolExecutor:
             or re.match(r"^pytest(?:\.exe)?(?:\s|$)", command, flags=re.IGNORECASE)
         )
 
-    @staticmethod
-    def _check_agent_tool_policy_block(tool_name: str, tool_args: dict) -> Optional[str]:
-        try:
-            from core.web.services.agent_directory_service import evaluate_current_tool_policy
-
-            decision = evaluate_current_tool_policy(tool_name, tool_args or {})
-        except Exception as exc:
-            _debug_logger.warning(f"[工具策略] 查询当前 tool policy 失败: {type(exc).__name__}: {exc}")
-            return None
-        if getattr(decision, "allowed", True):
-            return None
-        return str(getattr(decision, "message", "") or "[工具策略提示] 当前工具调用被该 Agent 的 ToolPolicy 拦截。")
-
-    def _check_canonical_execution_authorization(self, tool_name: str, tool_call_id: str):
+    def _check_canonical_execution_authorization(self, tool_name: str, tool_call_id: str, tool_args: dict):
         if str(tool_name or "").strip() not in self._tool_map:
             return None
         try:
             from core.authorization.tool_authorization_service import authorize_tool_execution
 
-            return authorize_tool_execution(tool_name=tool_name, tool_call_id=tool_call_id)
+            return authorize_tool_execution(tool_name=tool_name, tool_call_id=tool_call_id, tool_args=tool_args)
         except Exception as exc:
             _debug_logger.warning(f"[工具授权] canonical execution authorization failed: {type(exc).__name__}: {exc}")
             from core.authorization.tool_authorization_service import ToolExecutionAuthorizationResult
@@ -1353,19 +1313,14 @@ class ToolExecutor:
     def _unknown_tool_message_for_current_context(self) -> str:
         fallback_context_warning = ""
         try:
-            from core.web.services.agent_directory_service import (
-                current_agent_runtime,
-                effective_visible_tool_names_for_current_agent,
-            )
+            from core.authorization.tool_authorization_service import current_execution_authorization
+            from core.web.services.agent_directory_service import current_agent_runtime
 
             runtime = current_agent_runtime()
             agent_id = str((runtime or {}).get("agentId") or "").strip()
             if agent_id:
-                visible_names = [
-                    name
-                    for name in effective_visible_tool_names_for_current_agent()
-                    if name in self._tool_map
-                ][:24]
+                authorization = current_execution_authorization()
+                visible_names = [name for name in tuple(getattr(authorization, "executable_tools", ()) or ()) if name in self._tool_map][:24]
                 if visible_names:
                     visible = ", ".join(visible_names)
                     return (

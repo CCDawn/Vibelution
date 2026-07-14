@@ -16,12 +16,11 @@ def _tool(name: str):
 
 def test_enforced_authorization_requires_agent_and_turn_identity():
     with pytest.raises(ToolAuthorizationContextError, match="agentId"):
-        resolve_enforced_authorization(runtime={}, legacy_visible_tool_names=[])
+        resolve_enforced_authorization(runtime={})
 
     with pytest.raises(ToolAuthorizationContextError, match="turnId"):
         resolve_enforced_authorization(
             runtime={"agentId": "agent-a"},
-            legacy_visible_tool_names=[],
         )
 
 
@@ -45,7 +44,7 @@ def test_authorized_surface_fails_closed_without_decision():
     assert SelfEvolvingAgent._materialize_authorized_tools([_tool("read_file_tool")], None) == []
 
 
-def test_shadow_resolution_failure_records_diagnostic_and_returns_no_report(monkeypatch):
+def test_authorization_resolution_failure_records_diagnostic_and_returns_no_report(monkeypatch):
     from core.authorization import tool_authorization_service
     from core.logging import tool_authorization_events
     from core.web.services import agent_directory_service
@@ -63,16 +62,13 @@ def test_shadow_resolution_failure_records_diagnostic_and_returns_no_report(monk
     )
     monkeypatch.setattr(
         tool_authorization_events,
-        "record_shadow_authorization_failure",
+        "record_authorization_failure",
         lambda **kwargs: failures.append(kwargs),
     )
 
     instance = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
     instance.runtime_agent_binding = {"agentId": "agent-a"}
-    report = instance._record_shadow_tool_authorization(
-        [_tool("read_file_tool")],
-        [_tool("read_file_tool")],
-    )
+    report = instance._resolve_tool_authorization([_tool("read_file_tool")])
 
     assert report is None
     assert len(failures) == 1

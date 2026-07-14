@@ -981,7 +981,7 @@ class TestToolExecutorTimeout:
         assert action is None
         assert str(result) == "delegated:分析重复调用"
 
-    def test_spawn_agent_tool_internal_delegate_cannot_bypass_llm_tool_policy(self, executor, monkeypatch):
+    def test_canonical_decision_is_not_overridden_by_legacy_allowed_tools(self, executor, monkeypatch):
         from types import SimpleNamespace
 
         from core.authorization import tool_authorization_service
@@ -1023,8 +1023,8 @@ class TestToolExecutorTimeout:
         )
 
         assert action is None
-        assert "不在该 Agent 的可用工具策略中" in str(result)
-        assert calls == []
+        assert result == "delegated"
+        assert calls == [{"goal": "分析重复调用"}]
 
     def test_spawn_agent_tool_respects_current_agent_delegation_policy(self, executor, monkeypatch):
         from types import SimpleNamespace
@@ -1058,7 +1058,7 @@ class TestToolExecutorTimeout:
         assert "DelegationPolicy" in str(result) or "委托策略" in str(result)
         assert "关闭子 agent 派发权限" in str(result)
 
-    def test_tool_policy_blocks_registered_tool_not_allowed_for_current_agent(self, executor, monkeypatch):
+    def test_executor_does_not_reapply_legacy_tool_policy_after_canonical_decision(self, executor, monkeypatch):
         from types import SimpleNamespace
         from core.authorization import tool_authorization_service
         from core.web.services import agent_directory_service
@@ -1080,8 +1080,7 @@ class TestToolExecutorTimeout:
         result, action = executor.execute("fake_policy_probe_tool", {}, tool_call_id="call-policy")
 
         assert action is None
-        assert "ToolPolicy" in str(result)
-        assert "fake_policy_probe_tool" in str(result)
+        assert result == "ran despite policy"
 
     def test_cli_agent_run_tool_runs_with_explicit_tool_policy_allow(self, executor, monkeypatch):
         from types import SimpleNamespace
