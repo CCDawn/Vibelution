@@ -71,10 +71,22 @@ def trim_lines(text: Any, *, max_lines: int = 4) -> str:
     value = str(text or "").strip()
     if not value:
         return ""
-    lines = [line.strip() for line in value.splitlines() if line.strip()]
+    if "\n" not in value and "\r" not in value and max_lines > 0:
+        return value
+    if max_lines <= 0:
+        lines = [line.strip() for line in value.splitlines() if line.strip()]
+        return "\n".join(lines[:max_lines]).strip()
+    lines: List[str] = []
+    for line in value.splitlines():
+        cleaned = line.strip()
+        if not cleaned:
+            continue
+        lines.append(cleaned)
+        if len(lines) >= max_lines:
+            break
     if not lines:
         return ""
-    return "\n".join(lines[:max_lines]).strip()
+    return "\n".join(lines)
 
 
 def status_label(status: str) -> str:
