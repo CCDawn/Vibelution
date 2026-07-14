@@ -1095,7 +1095,7 @@ def test_prompt_template_routes_include_inactive_and_invalidate_agent_workspace_
     assert "# 缓存刷新提示词" in refreshed_template["contentPreview"]
 
 
-def test_prompt_template_reset_route_rejects_templates_without_default_content(tmp_path, monkeypatch):
+def test_prompt_template_reset_route_restores_default_chat_role_prompt(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     monkeypatch.setattr(agents_route, "_ensure_config_agent_instances", lambda: None)
     agents_route.invalidate_agent_config_workspace_cache()
@@ -1105,9 +1105,9 @@ def test_prompt_template_reset_route_rejects_templates_without_default_content(t
 
     response = client.post("/api/prompt-templates/prompt-chat-default/reset")
 
-    assert response.status_code == 422, response.text
-    assert "built-in default content" in response.json()["detail"]
-    assert dynamic_path.read_text(encoding="utf-8") == "KEEP_DYNAMIC_PROMPT"
+    assert response.status_code == 200, response.text
+    assert response.json()["content"] == prompt_template_service.DEFAULT_CHAT_ROLE_PROMPT
+    assert dynamic_path.read_text(encoding="utf-8") == prompt_template_service.DEFAULT_CHAT_ROLE_PROMPT
 
 
 def test_prompt_template_route_rejects_deactivating_template_used_by_active_agent(tmp_path, monkeypatch):

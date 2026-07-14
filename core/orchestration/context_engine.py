@@ -253,6 +253,7 @@ def build_agent_context(agent_id: str, *, session_id: str = "", run_id: str = ""
         agent_id=normalized_agent_id,
         session_id=str(session_id or "").strip(),
         run_id=str(run_id or "").strip(),
+        include_chat_base=str(agent.get("primaryMode") or "").strip().lower() == "chat",
     )
     timings["promptTemplateContextMs"] = _elapsed_ms(stage_started_at)
     stage_started_at = _perf_counter()
@@ -703,6 +704,7 @@ def _build_prompt_template_context_block(
     agent_id: str,
     session_id: str,
     run_id: str,
+    include_chat_base: bool = False,
 ) -> str:
     normalized = str(prompt_template_id or "").strip()
     if not normalized:
@@ -712,6 +714,7 @@ def _build_prompt_template_context_block(
     result = prompt_template_service.build_agent_prompt_template_context(
         normalized,
         project_root=project_root,
+        include_chat_base=include_chat_base,
     )
     reason = str(result.get("reason") or "").strip()
     if reason == "missing_template":

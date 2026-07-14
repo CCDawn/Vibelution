@@ -11928,6 +11928,7 @@ def _agent_prompt_snapshot_matches_agent(
     agent_id: str,
     prompt_template_id: str,
     builtin_content_version: int = 0,
+    chat_base_prompt_version: int = 0,
 ) -> bool:
     if not isinstance(snapshot, dict):
         return False
@@ -11941,7 +11942,14 @@ def _agent_prompt_snapshot_matches_agent(
         snapshot_builtin_content_version = max(0, int(snapshot.get("builtinContentVersion") or 0))
     except (TypeError, ValueError):
         snapshot_builtin_content_version = 0
-    return max(0, int(builtin_content_version or 0)) <= snapshot_builtin_content_version
+    try:
+        snapshot_chat_base_prompt_version = max(0, int(snapshot.get("chatBasePromptVersion") or 0))
+    except (TypeError, ValueError):
+        snapshot_chat_base_prompt_version = 0
+    return (
+        max(0, int(builtin_content_version or 0)) <= snapshot_builtin_content_version
+        and max(0, int(chat_base_prompt_version or 0)) <= snapshot_chat_base_prompt_version
+    )
 
 
 def _ensure_session_agent_prompt_snapshot(
@@ -11967,16 +11975,22 @@ def _ensure_session_agent_prompt_snapshot(
             agent_code=str(agent.get("agentCode") or "").strip(),
             agent_display_name=str(agent.get("displayName") or "").strip(),
             project_root=PROJECT_ROOT,
+            include_chat_base=str(agent.get("primaryMode") or "").strip().lower() == "chat",
         )
         try:
             builtin_content_version = max(0, int(snapshot.get("builtinContentVersion") or 0))
         except (TypeError, ValueError):
             builtin_content_version = 0
+        try:
+            chat_base_prompt_version = max(0, int(snapshot.get("chatBasePromptVersion") or 0))
+        except (TypeError, ValueError):
+            chat_base_prompt_version = 0
         if _agent_prompt_snapshot_matches_agent(
             existing,
             agent_id=agent_id,
             prompt_template_id=prompt_template_id,
             builtin_content_version=builtin_content_version,
+            chat_base_prompt_version=chat_base_prompt_version,
         ):
             _record_session_prompt_snapshot_event(
                 normalized_session_id,

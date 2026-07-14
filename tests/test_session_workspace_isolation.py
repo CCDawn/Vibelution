@@ -498,6 +498,7 @@ def test_session_refreshes_snapshot_when_builtin_prompt_version_advances(tmp_pat
         "prompt-chat-builtin",
         agent_id=agent["agentId"],
         project_root=tmp_path,
+        include_chat_base=True,
     )
     state = load_chat_state(tmp_path)
     state["conversations"][0]["agent_id"] = agent["agentId"]
@@ -515,8 +516,40 @@ def test_session_refreshes_snapshot_when_builtin_prompt_version_advances(tmp_pat
 
     assert initial["builtinContentVersion"] == 1
     assert refreshed["builtinContentVersion"] == 2
-    assert refreshed["content"] == "内置提示词第二版。"
+    assert "## Conversation Agent Common Prompt" in refreshed["content"]
+    assert refreshed["content"].endswith("内置提示词第二版。")
     assert refreshed["contentHash"] != initial["contentHash"]
+
+
+def test_session_refreshes_chat_snapshot_when_chat_base_version_advances(tmp_path, monkeypatch):
+    _seed_session(tmp_path, "session-live")
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(prompt_template_service, "PROJECT_ROOT", tmp_path)
+    agent = agent_directory_service.create_agent_instance(
+        display_name="会话公共提示词版本 Agent",
+        llm_bindings={"dialogue": {"modelId": "model-primary"}},
+        direct_session_id="session-live",
+        primary_mode="chat",
+        prompt_template_id="prompt-chat-default",
+    )
+    initial = prompt_template_service.build_agent_prompt_snapshot(
+        "prompt-chat-default",
+        agent_id=agent["agentId"],
+        project_root=tmp_path,
+        include_chat_base=True,
+    )
+    initial["chatBasePromptVersion"] = 0
+    state = load_chat_state(tmp_path)
+    state["conversations"][0]["agent_id"] = agent["agentId"]
+    state["conversations"][0]["agentId"] = agent["agentId"]
+    state["conversations"][0]["agentPromptSnapshot"] = initial
+    save_chat_state(tmp_path, state)
+
+    refreshed = session_service._ensure_session_agent_prompt_snapshot("session-live", agent)
+
+    assert refreshed["chatBasePromptVersion"] == prompt_template_service.CHAT_AGENT_BASE_PROMPT_VERSION
+    assert "## Conversation Agent Common Prompt" in refreshed["content"]
 
 
 def test_session_detail_exposes_prompt_snapshot_metadata_without_content(tmp_path, monkeypatch):
