@@ -87,6 +87,9 @@ def test_build_chat_agent_context_skips_research_org_context(tmp_path, monkeypat
     assert packet.agent_code == agent["agentCode"]
     assert packet.dialogue_model_id == "model-primary"
     assert packet.prompt_template_id == "prompt-chat-default"
+    assert "## Conversation Agent Common Prompt" in packet.static_context_block
+    assert "## Conversation Agent Role Prompt" in packet.static_context_block
+    assert "assistant commentary -> tool call/result" in packet.static_context_block
     assert packet.role_key == ""
     assert packet.workspace_path == agent["workspacePath"]
     assert packet.memory_policy["privateMemoryRoot"].endswith("/memory")
@@ -113,7 +116,7 @@ def test_build_chat_agent_context_skips_research_org_context(tmp_path, monkeypat
     assert packet.timings["researchOrgContextSkipped"] is True
 
 
-def test_default_chat_empty_prompt_template_logs_info_fallback(tmp_path, monkeypatch):
+def test_default_chat_prompt_template_is_not_an_empty_fallback(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     recorded_events: list[tuple[tuple, dict]] = []
     monkeypatch.setattr(
@@ -131,12 +134,9 @@ def test_default_chat_empty_prompt_template_logs_info_fallback(tmp_path, monkeyp
     packet = context_engine.build_agent_context(agent["agentId"], session_id="session-chat", run_id="turn-1")
 
     assert packet.prompt_template_id == "prompt-chat-default"
-    assert any(
-        args[0] == "agent_runtime.prompt_template_empty_fallback"
-        and kwargs["level"] == "info"
-        and kwargs["outcome"] == "empty_prompt_template"
-        for args, kwargs in recorded_events
-    )
+    assert "## Conversation Agent Common Prompt" in packet.static_context_block
+    assert "## Conversation Agent Role Prompt" in packet.static_context_block
+    assert not any(args[0] == "agent_runtime.prompt_template_empty_fallback" for args, kwargs in recorded_events)
     assert not any(
         args[0] == "agent_runtime.prompt_template_missing" and kwargs["level"] == "warning"
         for args, kwargs in recorded_events
@@ -169,6 +169,7 @@ def test_build_research_agent_context_still_loads_research_org_context(tmp_path,
 
     assert calls == [agent["agentId"]]
     assert "Research Organization Context" in packet.context_block
+    assert "## Conversation Agent Common Prompt" not in packet.context_block
     assert packet.timings["researchOrgContextMs"] >= 0
     assert "researchOrgContextSkipped" not in packet.timings
 

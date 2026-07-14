@@ -557,6 +557,41 @@ def test_build_agent_prompt_snapshot_freezes_template_content(tmp_path, monkeypa
     assert "第二版提示词" not in system_block
 
 
+def test_chat_snapshot_composes_common_prompt_before_role_prompt(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    prompt_template_service.update_prompt_template(
+        "prompt-chat-custom",
+        name="自定义会话提示词",
+        category="chat",
+        content="自定义会话职责。",
+    )
+
+    snapshot = prompt_template_service.build_agent_prompt_snapshot(
+        "prompt-chat-custom",
+        agent_id="agent-chat",
+        project_root=tmp_path,
+        include_chat_base=True,
+    )
+
+    assert snapshot["chatBasePromptVersion"] == prompt_template_service.CHAT_AGENT_BASE_PROMPT_VERSION
+    assert snapshot["content"].index("## Conversation Agent Common Prompt") < snapshot["content"].index("自定义会话职责。")
+    assert "assistant commentary -> tool call/result" in snapshot["content"]
+
+
+def test_non_chat_snapshot_does_not_compose_conversation_common_prompt(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+
+    snapshot = prompt_template_service.build_agent_prompt_snapshot(
+        "prompt-research-broad",
+        agent_id="agent-research",
+        project_root=tmp_path,
+        include_chat_base=False,
+    )
+
+    assert snapshot["chatBasePromptVersion"] == 0
+    assert "## Conversation Agent Common Prompt" not in snapshot["content"]
+
+
 def test_build_agent_prompt_snapshot_reports_missing_and_empty(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     prompt_template_service.update_prompt_template(
@@ -591,18 +626,14 @@ def test_prompt_template_rejects_unsafe_source_path(tmp_path, monkeypatch):
         raise AssertionError("Expected unsafe prompt template source path to fail")
 
 
-def test_prompt_template_reset_rejects_default_records_without_builtin_content(tmp_path, monkeypatch):
+def test_prompt_template_reset_restores_default_chat_role_prompt(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     prompt_template_service.repair_prompt_templates()
     dynamic_path = tmp_path / "workspace" / "prompts" / "DYNAMIC.md"
     dynamic_path.parent.mkdir(parents=True, exist_ok=True)
     dynamic_path.write_text("KEEP_DYNAMIC_PROMPT", encoding="utf-8")
 
-    try:
-        prompt_template_service.reset_prompt_template("prompt-chat-default")
-    except prompt_template_service.PromptTemplateError as exc:
-        assert "built-in default content" in str(exc)
-    else:
-        raise AssertionError("Expected reset without built-in content to fail")
+    reset = prompt_template_service.reset_prompt_template("prompt-chat-default")
 
-    assert dynamic_path.read_text(encoding="utf-8") == "KEEP_DYNAMIC_PROMPT"
+    assert reset["content"] == prompt_template_service.DEFAULT_CHAT_ROLE_PROMPT
+    assert dynamic_path.read_text(encoding="utf-8") == prompt_template_service.DEFAULT_CHAT_ROLE_PROMPT
