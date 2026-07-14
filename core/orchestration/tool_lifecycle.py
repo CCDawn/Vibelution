@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from contextvars import copy_context
 from typing import Any, Callable, ClassVar, Dict, List, Optional, Tuple
 
 from langchain_core.messages import AIMessage, ToolMessage
@@ -355,7 +356,7 @@ class ToolLifecycleBridge:
             thread_name_prefix="readonly-tool",
         ) as pool:
             futures = {
-                pool.submit(self.execute_tool, tc, list(messages)): index
+                pool.submit(copy_context().run, self.execute_tool, tc, list(messages)): index
                 for index, tc in enumerate(batch)
             }
             for future in as_completed(futures):

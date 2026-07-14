@@ -490,3 +490,57 @@ describe("codexNativeTranscriptSurface", () => {
     });
   });
 });
+
+describe("native transcript semantic tool labels", () => {
+  it("projects a cli protocol title from its terminal command and keeps the raw name diagnostic", () => {
+    const surface = resolveCodexTranscriptSurface(message({
+      codexTranscript: {
+        version: 1,
+        source: "native",
+        messageId: "native-cli-label",
+        cells: [
+          {
+            id: "native-cli-tool",
+            kind: "tool_call",
+            messageId: "native-cli-label",
+            status: "completed",
+            tone: "neutral",
+            title: "cli_tool",
+            summary: "运行前端聚焦测试",
+            operationIds: ["native-cli-operation"],
+          },
+        ],
+        toolCalls: [
+          {
+            toolCallId: "tool_call:native-cli-operation",
+            rawOperationId: "native-cli-operation",
+            status: "completed",
+            title: "cli_tool",
+            runtimeKind: "terminal",
+            terminalOperationId: "terminal_operation:0",
+          },
+        ],
+        terminalOperations: [
+          {
+            operationId: "terminal_operation:0",
+            toolCallId: "tool_call:native-cli-operation",
+            terminalId: "terminal:native-cli-operation",
+            kind: "ExecCommand",
+            status: "completed",
+            request: {
+              displayCommand: "npx vitest run conversationToolSemanticLabel.test.ts",
+              command: ["npx vitest run conversationToolSemanticLabel.test.ts"],
+              cwd: "",
+            },
+            rawOperationId: "native-cli-operation",
+          },
+        ],
+      },
+    }), []);
+
+    expect(surface.cells[0]).toMatchObject({
+      title: "运行测试",
+      diagnosticSummary: { rawToolName: "cli_tool" },
+    });
+  });
+});

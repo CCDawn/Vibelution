@@ -5,8 +5,8 @@ This module is the boundary between persisted/UI conversation shapes and the
 LLM-facing message chain. UI projections may keep camelCase fields such as
 ``toolCalls``.
 
-Complete historical tool chains keep their provider structure. Orphaned or
-incomplete fragments are repaired into semantic assistant text.
+Complete current-turn tool chains keep their provider structure. Persisted
+history and incomplete fragments are projected into semantic assistant text.
 """
 
 from __future__ import annotations
@@ -45,9 +45,10 @@ def normalize_model_messages(messages: Iterable[Any]) -> list[Any]:
 
 
 def normalize_model_history_messages(messages: Iterable[Any]) -> list[Any]:
-    """Return provider-safe history while preserving complete tool chains."""
+    """Return provider-safe semantic history without replay-only tool roles."""
 
-    return ProviderMessageChain.from_messages(messages).to_provider_payload()
+    provider_messages = ProviderMessageChain.from_messages(messages).to_provider_payload()
+    return _provider_chain_to_semantic_history(provider_messages)
 
 
 def normalize_provider_turn_messages(messages: Iterable[Any]) -> list[Any]:
@@ -135,10 +136,7 @@ def _assistant_history_messages(
 def _assistant_provider_messages(message: dict[str, Any], *, source_index: int) -> list[dict[str, Any]]:
     content = _content_value(message.get("content"))
     tool_entries = _tool_entries(message)
-    if any(
-        _tool_entry_has_result(entry) and not _explicit_tool_call_id(entry)
-        for entry in tool_entries
-    ):
+    if any(_tool_entry_has_result(entry) for entry in tool_entries):
         return _assistant_history_messages(message, source_index=source_index)
     if not tool_entries:
         assistant = _base_message("assistant", content, source_index=source_index)
@@ -673,17 +671,18 @@ def _repair_provider_tool_chain(messages: list[Any]) -> list[Any]:
         nonlocal pending_ids, pending_assistant_index, pending_result_indices, pending_tool_names
         if 0 <= pending_assistant_index < len(repaired):
             assistant = repaired[pending_assistant_index]
-            if isinstance(assistant, dict) and assistant.get("role") == "assistant":
-                tool_calls = list(assistant.get("tool_calls") or [])
+            if _provider_message_role(assistant) == "assistant":
+                tool_calls = _provider_message_tool_calls(assistant)
                 if tool_calls:
-                    content_parts = [_visible_text(assistant.get("content"))]
+                    content_parts = [_visible_text(_provider_message_content(assistant))]
                     for call in tool_calls:
                         name = _provider_tool_call_name(call)
                         content_parts.append(f"历史工具调用未返回结果: {name}")
-                    demoted = dict(assistant)
-                    demoted.pop("tool_calls", None)
-                    demoted["content"] = _join_text_blocks(content_parts)
-                    metadata = dict(demoted.get("metadata") or {})
+                    demoted = {
+                        "role": "assistant",
+                        "content": _join_text_blocks(content_parts),
+                    }
+                    metadata = _provider_message_metadata(assistant)
                     metadata["kind"] = "historical_unresolved_tool_call"
                     metadata["repairedProviderToolChain"] = True
                     demoted["metadata"] = metadata
@@ -691,9 +690,9 @@ def _repair_provider_tool_chain(messages: list[Any]) -> list[Any]:
         for result_index in pending_result_indices:
             if 0 <= result_index < len(repaired):
                 result_message = repaired[result_index]
-                if isinstance(result_message, dict) and result_message.get("role") == "tool":
-                    result_message = dict(result_message)
-                    tool_call_id = str(result_message.get("tool_call_id") or "").strip()
+                if _provider_message_role(result_message) == "tool":
+                    result_message = _provider_tool_message_dict(result_message, source_index=result_index)
+                    tool_call_id = _provider_message_tool_call_id(result_message)
                     tool_name = pending_tool_names.get(tool_call_id, "")
                     if tool_name:
                         metadata = dict(result_message.get("metadata") or {})
@@ -703,13 +702,8 @@ def _repair_provider_tool_chain(messages: list[Any]) -> list[Any]:
         clear_pending_chain()
 
     for raw in list(messages or []):
-        if not isinstance(raw, dict):
-            if pending_ids:
-                demote_pending_chain()
-            repaired.append(raw)
-            continue
-        message = dict(raw)
-        role = str(message.get("role") or "").strip().lower()
+        message = dict(raw) if isinstance(raw, dict) else raw
+        role = _provider_message_role(message)
         if role == "assistant":
             if pending_ids:
                 demote_pending_chain()
@@ -722,7 +716,7 @@ def _repair_provider_tool_chain(messages: list[Any]) -> list[Any]:
                 pending_tool_names = _message_tool_call_names(message)
             continue
         if role == "tool":
-            tool_call_id = str(message.get("tool_call_id") or "").strip()
+            tool_call_id = _provider_message_tool_call_id(message)
             if tool_call_id and tool_call_id in pending_ids:
                 repaired.append(message)
                 pending_result_indices.append(len(repaired) - 1)
@@ -732,7 +726,14 @@ def _repair_provider_tool_chain(messages: list[Any]) -> list[Any]:
                 continue
             if pending_ids:
                 demote_pending_chain()
-            repaired.append(_tool_role_history_message(message, source_index=len(repaired)))
+            orphan_history = _tool_role_history_message(
+                _provider_tool_message_dict(message, source_index=len(repaired)),
+                source_index=len(repaired),
+            )
+            metadata = dict(orphan_history.get("metadata") or {})
+            metadata["repairedProviderToolChain"] = True
+            orphan_history["metadata"] = metadata
+            repaired.append(orphan_history)
             continue
         if pending_ids:
             demote_pending_chain()
@@ -742,21 +743,107 @@ def _repair_provider_tool_chain(messages: list[Any]) -> list[Any]:
     return _dedupe_adjacent_semantic_messages(repaired)
 
 
-def _message_tool_call_ids(message: dict[str, Any]) -> list[str]:
-    ids: list[str] = []
-    for index, call in enumerate(list(message.get("tool_calls") or [])):
-        if not isinstance(call, dict):
+def _provider_chain_to_semantic_history(messages: list[Any]) -> list[Any]:
+    semantic: list[Any] = []
+    pending_tool_names: dict[str, str] = {}
+    for source_index, message in enumerate(list(messages or [])):
+        role = _provider_message_role(message)
+        if role == "assistant":
+            tool_calls = _provider_message_tool_calls(message)
+            if tool_calls:
+                pending_tool_names = _message_tool_call_names(message)
+                content = _visible_text(_provider_message_content(message))
+                if content:
+                    semantic.append(
+                        {
+                            "role": "assistant",
+                            "content": content,
+                            "metadata": _provider_message_metadata(message),
+                        }
+                    )
+                continue
+            pending_tool_names = {}
+            semantic.append(message)
             continue
+        if role == "tool":
+            tool_message = _provider_tool_message_dict(message, source_index=source_index)
+            tool_call_id = _provider_message_tool_call_id(tool_message)
+            semantic.append(
+                _tool_role_history_message(
+                    tool_message,
+                    source_index=source_index,
+                    tool_name=pending_tool_names.get(tool_call_id, ""),
+                )
+            )
+            pending_tool_names.pop(tool_call_id, None)
+            continue
+        pending_tool_names = {}
+        semantic.append(message)
+    return _dedupe_adjacent_semantic_messages(semantic)
+
+
+def _provider_message_role(message: Any) -> str:
+    if isinstance(message, dict):
+        raw_role = message.get("role")
+    else:
+        raw_role = getattr(message, "role", None) or getattr(message, "type", None)
+    if not str(raw_role or "").strip():
+        return ""
+    return _normalize_role(raw_role)
+
+
+def _provider_message_content(message: Any) -> Any:
+    if isinstance(message, dict):
+        return message.get("content")
+    return getattr(message, "content", "")
+
+
+def _provider_message_tool_calls(message: Any) -> list[dict[str, Any]]:
+    if isinstance(message, dict):
+        raw_calls = message.get("tool_calls") or message.get("toolCalls") or []
+    else:
+        raw_calls = getattr(message, "tool_calls", None) or []
+    return [call for call in list(raw_calls or []) if isinstance(call, dict)]
+
+
+def _provider_message_tool_call_id(message: Any) -> str:
+    if isinstance(message, dict):
+        value = message.get("tool_call_id") or message.get("toolCallId") or message.get("id")
+    else:
+        value = getattr(message, "tool_call_id", None)
+    return str(value or "").strip()
+
+
+def _provider_message_metadata(message: Any) -> dict[str, Any]:
+    if not isinstance(message, dict):
+        return {}
+    metadata = message.get("metadata")
+    return dict(metadata) if isinstance(metadata, dict) else {}
+
+
+def _provider_tool_message_dict(message: Any, *, source_index: int) -> dict[str, Any]:
+    return {
+        "role": "tool",
+        "content": _provider_message_content(message),
+        "tool_call_id": _provider_message_tool_call_id(message),
+        "metadata": _provider_message_metadata(message) or {
+            "schemaVersion": MODEL_MESSAGE_SCHEMA_VERSION,
+            "sourceIndex": source_index,
+        },
+    }
+
+
+def _message_tool_call_ids(message: Any) -> list[str]:
+    ids: list[str] = []
+    for index, call in enumerate(_provider_message_tool_calls(message)):
         tool_call_id = str(call.get("id") or "").strip() or f"tool_{index}"
         ids.append(tool_call_id)
     return ids
 
 
-def _message_tool_call_names(message: dict[str, Any]) -> dict[str, str]:
+def _message_tool_call_names(message: Any) -> dict[str, str]:
     names: dict[str, str] = {}
-    for index, call in enumerate(list(message.get("tool_calls") or [])):
-        if not isinstance(call, dict):
-            continue
+    for index, call in enumerate(_provider_message_tool_calls(message)):
         tool_call_id = str(call.get("id") or "").strip() or f"tool_{index}"
         names[tool_call_id] = _provider_tool_call_name(call)
     return names

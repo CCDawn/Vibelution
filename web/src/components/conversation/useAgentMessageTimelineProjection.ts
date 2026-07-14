@@ -356,6 +356,39 @@ function mergeLiveOverlayIntoActiveTurnMessage(
   };
 }
 
+function mergeLiveOverlayIntoCanonicalActiveTurnMessage(
+  liveOverlayMessage: ConversationMessage,
+  activeTurnMessage: ConversationMessage,
+): ConversationMessage {
+  const canonicalMessage = projectConversationMessageFromTurnItemsV2(
+    mergeLiveOverlayIntoActiveTurnMessage(liveOverlayMessage, activeTurnMessage),
+  );
+  const canonicalCommentaryTexts = new Set(
+    canonicalMessage.codexTranscript?.cells
+      .filter((cell) => cell.kind === "assistant_markdown" && cell.channel === "commentary")
+      .map((cell) => compactText(cell.text))
+      .filter(Boolean),
+  );
+  if (canonicalCommentaryTexts.size === 0 || !liveOverlayMessage.codexTranscript) {
+    return canonicalMessage;
+  }
+  const fallbackTranscript = {
+    ...liveOverlayMessage.codexTranscript,
+    cells: liveOverlayMessage.codexTranscript.cells.filter((cell) => !(
+      cell.kind === "assistant_markdown"
+      && canonicalCommentaryTexts.has(compactText(cell.text))
+    )),
+  };
+  return {
+    ...canonicalMessage,
+    codexTranscript: mergeCodexTranscripts(
+      fallbackTranscript,
+      canonicalMessage.codexTranscript,
+      canonicalMessage.id,
+    ),
+  };
+}
+
 function committedAssistantAnswerForTurn(
   messages: ConversationMessage[],
   turnMessage: ConversationMessage,
@@ -442,8 +475,9 @@ export function projectAgentMessageTimelineMessages({
     let mergedActiveTurnMessage = activeTurnMessage;
     const dedupedTimelineMessages = visibleTimelineMessages.filter((message) => {
       if (isSessionLiveOverlayMessage(message) && isSameConversationTurn(message, activeTurnMessage)) {
-        mergedActiveTurnMessage = projectConversationMessageFromTurnItemsV2(
-          mergeLiveOverlayIntoActiveTurnMessage(message, mergedActiveTurnMessage),
+        mergedActiveTurnMessage = mergeLiveOverlayIntoCanonicalActiveTurnMessage(
+          message,
+          mergedActiveTurnMessage,
         );
         return false;
       }
