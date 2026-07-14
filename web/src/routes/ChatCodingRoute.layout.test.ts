@@ -1906,6 +1906,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("lastAssistantDeltaAppliedAtRef");
     expect(routeSource).toContain("const handleConversationStreamingFramePaint = useCallback");
     expect(routeSource).toContain("browser.conversation_stream.frame_painted");
+    expect(routeSource).toContain("const paintedActiveTurn = activeTurnLayersBySessionRef.current[sessionId]");
+    expect(routeSource).toContain("turnId: paintedActiveTurn?.turnId ?? \"\"");
     expect(routeSource).toContain("paintedAtMs");
     expect(routeSource).toContain("lastAssistantDeltaAppliedAtMs");
     expect(routeSource).toContain("applyToPaintMs");
