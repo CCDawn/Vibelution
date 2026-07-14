@@ -18,6 +18,7 @@ export type AssistantDeltaEvent = Extract<SessionStreamEvent, { type: "assistant
 type ConversationFeedbackEvent = NonNullable<ConversationMessage["feedbackEvents"]>[number];
 export type ActiveTurnLayerState = {
   id: string;
+  renderKey?: string;
   sessionId: string;
   turnId: string;
   updatedAt: string;
@@ -54,6 +55,10 @@ function activeTurnMessageId(sessionId: string, turnId: string) {
   return `${sessionId}-message-active-${turnId || "current"}`;
 }
 
+function activeTurnRenderKey(sessionId: string) {
+  return `${sessionId}-active`;
+}
+
 function messageTurnId(message: ConversationMessage) {
   const rawTurnId = String(message.metadata?.turnId ?? "");
   return rawTurnId.startsWith("live:") ? rawTurnId.slice("live:".length) : rawTurnId;
@@ -80,6 +85,7 @@ export function createOptimisticActiveTurnLayer(
   const summary = compactText(input.summary) || "已发送，正在连接 Agent";
   return {
     id: activeTurnMessageId(sessionId, turnId),
+    renderKey: activeTurnRenderKey(sessionId),
     sessionId,
     turnId,
     updatedAt,
@@ -176,6 +182,7 @@ export function mergeAssistantDeltaIntoActiveTurnLayer(
   }
   return {
     id: activeTurnMessageId(sessionId, turnId),
+    renderKey: base?.renderKey || activeTurnRenderKey(sessionId),
     sessionId,
     turnId,
     updatedAt: now,
@@ -213,6 +220,7 @@ export function activeTurnLayerToConversationMessage(
       kind: "session_active_turn_layer",
       sessionId: layer.sessionId,
       turnId: layer.turnId,
+      renderKey: layer.renderKey || activeTurnRenderKey(layer.sessionId),
       ledgerSeq: layer.ledgerSeq,
     },
   };
