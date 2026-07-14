@@ -164,6 +164,7 @@ import {
   buildConversationTurnErrorReasonRows,
   buildTurnErrorDiagnosticRows,
   buildCurrentTurnErrorRows,
+  summarizeCurrentTurnError,
   resolveConversationTurnErrorType,
 } from "./conversationTurnErrorPresentation";
 import {
@@ -3534,12 +3535,20 @@ export function ConversationView({
         <div className={styles.turnError} role="status" aria-live="polite">
           <div className={styles.turnErrorText}>
             <span className={styles.turnErrorLabel}>{t("turnErrorLabel")}</span>
-            <span>{turnError.message}</span>
-            {buildCurrentTurnErrorRows(turnError, lang).map((row) => (
-              <span key={`${row.label}-${row.value}`} className={styles.turnErrorDetail}>
-                {row.label}: {row.value}
-              </span>
-            ))}
+            <span>{summarizeCurrentTurnError(turnError, lang)}</span>
+            <details className={styles.turnErrorDiagnostics}>
+              <summary className={styles.turnErrorDiagnosticsSummary}>
+                {lang === "zh" ? "诊断详情" : "Diagnostics"}
+              </summary>
+              <div className={styles.turnErrorDiagnosticsBody}>
+                <span className={styles.turnErrorDetail}>{turnError.message}</span>
+                {buildCurrentTurnErrorRows(turnError, lang).map((row) => (
+                  <span key={`${row.label}-${row.value}`} className={styles.turnErrorDetail}>
+                    {row.label}: {row.value}
+                  </span>
+                ))}
+              </div>
+            </details>
           </div>
           {turnError.errorType ? <span className={styles.turnErrorType}>{turnError.errorType}</span> : null}
         </div>

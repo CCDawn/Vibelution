@@ -7,6 +7,7 @@ import {
   buildCurrentTurnErrorRows,
   buildTurnErrorDiagnosticRows,
   resolveConversationTurnErrorType,
+  summarizeCurrentTurnError,
 } from "./conversationTurnErrorPresentation";
 
 const conversationViewSource = readFileSync(
@@ -111,5 +112,20 @@ describe("conversationTurnErrorPresentation", () => {
       { label: "通道", value: "ai-pixel" },
       { label: "代码", value: "upstream_unavailable" },
     ]);
+  });
+
+  it("keeps protocol diagnostics out of the collapsed current-turn summary", () => {
+    const turnError = {
+      message: "网页工作台这一轮执行失败，请检查配置或稍后重试。 Cannot append assistant_delta_committed after terminal event for turn session-live-1.",
+      errorType: "ValueError",
+    } as SessionTurnError;
+
+    expect(summarizeCurrentTurnError(turnError, "zh")).toBe(
+      "网页工作台这一轮执行失败，请检查配置或稍后重试。",
+    );
+    expect(summarizeCurrentTurnError({
+      ...turnError,
+      reasonSummary: "活动轮次被提前终结",
+    }, "zh")).toBe("活动轮次被提前终结");
   });
 });
