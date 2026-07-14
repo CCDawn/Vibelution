@@ -53,7 +53,7 @@ def _route(protocol: WireProtocol):
     )
 
 
-def test_canonical_history_keeps_two_equal_user_submissions_and_complete_tool_results() -> None:
+def test_canonical_history_keeps_two_equal_user_submissions_and_complete_semantic_tool_results() -> None:
     fixture = _fixture()
     turns = fixture["turns"]
 
@@ -66,8 +66,11 @@ def test_canonical_history_keeps_two_equal_user_submissions_and_complete_tool_re
 
     history = normalize_model_history_messages(fixture["provider_messages"])
     users = [message for message in history if message["role"] == "user"]
-    tool_call_message = next(message for message in history if message.get("tool_calls"))
-    tool_results = [message for message in history if message["role"] == "tool"]
+    semantic_tool_results = [
+        message
+        for message in history
+        if message["role"] == "assistant" and "历史工具结果:" in str(message.get("content") or "")
+    ]
     assistant_messages = [message for message in history if message["role"] == "assistant"]
     expected_call_ids = ["call-weather-002", "call-notes-002"]
 
@@ -80,14 +83,15 @@ def test_canonical_history_keeps_two_equal_user_submissions_and_complete_tool_re
         "submission-golden-001",
         "submission-golden-002",
     ]
-    assert [call["id"] for call in tool_call_message["tool_calls"]] == expected_call_ids
-    assert [call["function"]["name"] for call in tool_call_message["tool_calls"]] == [
+    assert not any(message.get("tool_calls") for message in history)
+    assert not any(message["role"] == "tool" for message in history)
+    assert [message["metadata"]["toolCallId"] for message in semantic_tool_results] == expected_call_ids
+    assert [message["metadata"]["toolName"] for message in semantic_tool_results] == [
         "weather_lookup",
         "notes_lookup",
     ]
-    assert [message["tool_call_id"] for message in tool_results] == expected_call_ids
-    assert "Shanghai" in tool_results[0]["content"]
-    assert "semantic history" in tool_results[1]["content"]
+    assert "Shanghai" in semantic_tool_results[0]["content"]
+    assert "semantic history" in semantic_tool_results[1]["content"]
     assert assistant_messages[-1]["content"] == "第二轮完成：天气晴朗，且语义历史与 wire parity 均已确认。"
 
 
