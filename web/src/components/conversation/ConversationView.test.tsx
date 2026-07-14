@@ -1657,9 +1657,16 @@ describe("ConversationView edit resend affordance", () => {
 
     expect(html).toContain("timelineOperationCell_success");
     expect(html).toMatch(/<span class="[^"]*operationText_success[^"]*">代码图谱<\/span>/);
-    expect(html).toMatch(/<span class="[^"]*operationText_success[^"]*">\{ &quot;status&quot;: &quot;ok&quot; \}<\/span>/);
+    expect(html).toMatch(/<span class="[^"]*timelineCellInlineSummary[^"]*">\{ &quot;status&quot;: &quot;ok&quot; \}<\/span>/);
     expect(html).toContain("timelineOperationCell_failed");
     expect(html).toMatch(/timelineOperationCell_failed[\s\S]*搜索[\s\S]*got an unexpected keyword argument/);
+    expect(html).toContain("timelineCellInlineSummary");
+    expect(html).toContain("timelineCellCompactTitleRow");
+    expect(styles.timelineOperationCell_failed).toContain("border-0");
+    expect(styles.timelineOperationCell_failed).toContain("bg-transparent");
+    expect(styles.timelineOperationCell_failed).not.toContain("rounded-[var(--radius-control)]");
+    expect(styles.timelineCellInlineSummary).toContain("truncate");
+    expect(styles.timelineCellCompactTitleRow).toContain("flex-nowrap");
   });
 
   it("does not let top-edge history loading rewrite cached response expansion defaults", () => {

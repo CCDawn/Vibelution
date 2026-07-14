@@ -1111,7 +1111,13 @@ const styles: Record<string, string> = {
   timelineCellHeader:
     "vui-components-conversationview timelineCellHeader min-w-0 overflow-visible !grid !w-full grid-cols-[20px_minmax(0,1fr)_24px] !items-start !justify-start gap-x-2 gap-y-1 !border-0 !bg-transparent !p-0 !text-left !shadow-none hover:border-transparent hover:bg-transparent hover:shadow-none hover:!border-transparent hover:!bg-transparent hover:!shadow-none [&_[data-slot=vui-button-content]]:contents [&_[data-slot=vui-button-label]]:contents",
   timelineCellBody:
-    "vui-components-conversationview timelineCellBody grid min-w-0 gap-1 overflow-hidden text-left",
+    "vui-components-conversationview timelineCellBody min-w-0 overflow-hidden text-left",
+  timelineCellCompactTitleRow:
+    "vui-components-conversationview timelineCellCompactTitleRow flex-nowrap overflow-hidden [&_.timelineCellTitle]:max-w-[40%] [&_.timelineCellTitle]:shrink-0 [&_.timelineCellTitle]:truncate [&_.timelineCellTitle]:whitespace-nowrap",
+  timelineCellInlineSummary:
+    "vui-components-conversationview timelineCellInlineSummary min-w-0 flex-1 truncate text-[var(--vui-font-sm)] font-normal leading-[1.42] text-[var(--fg-tertiary)]",
+  timelineCellSeparator:
+    "vui-components-conversationview timelineCellSeparator shrink-0 text-[var(--fg-tertiary)]",
   timelineCellTitleRow:
     "vui-components-conversationview timelineCellTitleRow inline-flex min-w-0 max-w-full flex-wrap items-baseline gap-2",
   timelineCellMeta:
@@ -1139,7 +1145,7 @@ const styles: Record<string, string> = {
   timelineOperationCell_running:
     "vui-components-conversationview timelineOperationCell_running min-w-0 grid min-h-0 content-start gap-1.5 overflow-visible text-[var(--fg-secondary)]",
   timelineOperationCell_failed:
-    "vui-components-conversationview timelineOperationCell_failed min-w-0 grid min-h-0 content-start gap-1.5 overflow-visible rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] px-2 py-2 text-[var(--state-error)]",
+    "vui-components-conversationview timelineOperationCell_failed min-w-0 grid min-h-0 content-start gap-1.5 overflow-visible border-0 bg-transparent p-0 text-[var(--fg-secondary)] [&_.operationIcon]:text-[var(--state-error)] [&_.timelineCellTitle]:text-[var(--state-error)]",
   timelineOperationCell_success:
     "vui-components-conversationview timelineOperationCell_success min-w-0 grid min-h-0 content-start gap-1.5 overflow-visible text-[var(--fg-secondary)]",
   timelineOperationCell_warning:
