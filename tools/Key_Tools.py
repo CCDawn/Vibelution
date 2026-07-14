@@ -367,7 +367,7 @@ def _build_key_tools() -> List[BaseTool]:
         - mode="index": 重新构建本地项目索引。
         - mode="search": 按 query/symbol/file_path 搜索文件和符号。
         - mode="explore": 面向问题检索相关文件、符号、源码片段和关系图。
-        - mode="inspect": 查看指定 file_path 或 symbol 的结构化详情和片段。
+        - mode="inspect": 查看指定文件、目录或 symbol 的结构化详情和片段；目录结果受 max_results 限制。
         - mode="references": 查找符号、路径或关键词引用。
         - mode="impact": 分析修改某个 file_path 或 symbol 的影响范围。
         - mode="affected_tests": 推荐与目标相关的测试文件。
@@ -378,7 +378,7 @@ def _build_key_tools() -> List[BaseTool]:
         Args:
             mode: status / index / search / explore / inspect / references / impact / affected_tests / files
             query: 自然语言问题、关键词、路径片段或符号名
-            file_path: 目标文件路径；inspect/impact/affected_tests/references 可用
+            file_path: 目标文件路径；inspect 也支持项目内目录，impact/affected_tests/references 使用文件路径
             symbol: 目标符号名；inspect/search/references/impact/affected_tests 可用
             max_results: 最多返回多少条结果
             refresh: 是否在查询前重新刷新索引

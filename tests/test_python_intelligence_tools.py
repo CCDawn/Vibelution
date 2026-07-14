@@ -128,6 +128,38 @@ def test_code_symbol_tool_inspect_reports_unindexed_file_after_stale_index(tmp_p
     assert "refresh=true" in payload["message"]
 
 
+def test_code_symbol_tool_inspects_indexed_directory_without_freshness_scan(tmp_path, monkeypatch):
+    from core.code_context_graph import service as graph_service
+
+    tools_dir = tmp_path / "tools"
+    nested_dir = tools_dir / "nested"
+    core_dir = tmp_path / "core"
+    nested_dir.mkdir(parents=True)
+    core_dir.mkdir(parents=True)
+    (tools_dir / "alpha.py").write_text("def alpha():\n    return 1\n", encoding="utf-8")
+    (nested_dir / "beta.py").write_text("class Beta:\n    pass\n", encoding="utf-8")
+    (core_dir / "outside.py").write_text("def outside():\n    return 2\n", encoding="utf-8")
+
+    monkeypatch.setattr(graph_service, "project_root", lambda: tmp_path)
+    graph_service.build_index(force=True)
+
+    def fail_if_freshness_is_scanned(_payload):
+        raise AssertionError("directory inspect should use the cached index without a full freshness scan")
+
+    monkeypatch.setattr(graph_service, "_is_index_fresh", fail_if_freshness_is_scanned)
+    payload = graph_service.code_context_graph_tool(mode="inspect", file_path="tools", max_results=1)
+
+    assert payload["status"] == "ok"
+    assert payload["mode"] == "inspect"
+    assert payload["target"] == {"filePath": "tools", "kind": "directory"}
+    assert payload["summary"]["fileCount"] == 2
+    assert payload["summary"]["returnedFileCount"] == 1
+    assert len(payload["files"]) == 1
+    assert payload["files"][0]["path"].startswith("tools/")
+    assert payload["index"]["fresh"] is None
+    assert payload["index"]["freshnessChecked"] is False
+
+
 def test_python_symbol_query_parses_jedi_results(monkeypatch, tmp_path):
     source = tmp_path / "demo.py"
     source.write_text("value = 1\nprint(value)\n", encoding="utf-8")
