@@ -197,6 +197,59 @@ describe("agentMessageTimeline", () => {
     expect(items[1].kind === "operation" ? items[1].operation.rawLabel : "").toBe("grep_search_tool");
   });
 
+  it("keeps interleaved server order stable when tools finish", () => {
+    const message: AgentMessage = {
+      id: "agent-message-interleaved-timeline",
+      role: "assistant",
+      createdAt: "2026-07-14T23:36:41Z",
+      streaming: true,
+      source: { kind: "conversation-message", id: "agent-message-interleaved-timeline" },
+      parts: [
+        {
+          id: "agent-message-interleaved-tool-1",
+          type: "tool-call",
+          source: "feedback-event",
+          name: "get_git_status_summary_tool",
+          status: "running",
+          summary: "检查 Git 状态",
+          sequence: 2,
+        },
+        {
+          id: "agent-message-interleaved-tool-2",
+          type: "tool-call",
+          source: "feedback-event",
+          name: "glob_tool",
+          status: "running",
+          summary: "列出文件",
+          sequence: 4,
+        },
+      ],
+    };
+    const serverItems = (toolStatus: "running" | "completed") => [
+      { id: "intro", kind: "assistant_text", status: "completed", text: "我先检查工作区。" },
+      { id: "git", kind: "operation", status: toolStatus, title: "Git 状态", operationIds: ["agent-message-interleaved-tool-1"] },
+      { id: "progress", kind: "assistant_text", status: "completed", text: "工作区干净，继续检查文件。" },
+      { id: "files", kind: "operation", status: toolStatus, title: "列出文件", operationIds: ["agent-message-interleaved-tool-2"] },
+      { id: "answer", kind: "assistant_text", status: "completed", text: "检查完成。" },
+    ];
+
+    const runningItems = buildAgentMessageTimelineItems(
+      message,
+      buildAgentMessageOperations(message, labels),
+      { lang: "zh" },
+      serverItems("running"),
+    );
+    const completedItems = buildAgentMessageTimelineItems(
+      { ...message, streaming: false },
+      buildAgentMessageOperations({ ...message, streaming: false }, labels),
+      { lang: "zh" },
+      serverItems("completed"),
+    );
+
+    expect(runningItems.map((item) => item.id)).toEqual(["intro", "git", "progress", "files", "answer"]);
+    expect(completedItems.map((item) => item.id)).toEqual(["intro", "git", "progress", "files", "answer"]);
+  });
+
   it("keeps fallback completed operations before the unsplit final answer", () => {
     const message: AgentMessage = {
       id: "agent-message-completed-fallback",

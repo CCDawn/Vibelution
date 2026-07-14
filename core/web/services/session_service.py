@@ -751,6 +751,10 @@ def _live_output_checkpoint_payload(state: "SessionLiveOutputState") -> dict[str
         content=content,
         feedback_events=feedback_events,
         streaming=True,
+        include_assistant_text=not any(
+            str(event.get("kind") or "").strip() == "assistant_text"
+            for event in feedback_events
+        ),
     )
     if timeline_items:
         payload["timelineItems"] = timeline_items
@@ -20382,6 +20386,10 @@ def _build_live_output_message(session_id: str) -> dict[str, Any] | None:
         content=content,
         feedback_events=feedback_events,
         streaming=True,
+        include_assistant_text=not any(
+            str(event.get("kind") or "").strip() == "assistant_text"
+            for event in feedback_events
+        ),
     )
     if timeline_items:
         message["timelineItems"] = timeline_items
@@ -21183,7 +21191,13 @@ def _commit_session_capture_assistant_segment(
     segment = capture.uncommitted_content_segment()
     if not segment:
         return
-    sequence = capture.reserve_feedback_sequence()
+    sequence = capture._append_feedback_event(
+        {
+            "kind": "assistant_text",
+            "status": _normalize_tool_call_status(status, default="done"),
+            "content": segment,
+        }
+    )
     _append_session_conversation_event(
         session_id,
         capture.turn_id,
@@ -21201,6 +21215,12 @@ def _commit_session_capture_assistant_segment(
         projection_kind="assistant_timeline_segment",
     )
     capture.mark_content_committed()
+    _set_session_live_output(
+        session_id,
+        turn_id=capture.turn_id,
+        content=capture.content,
+        feedback_events=capture.feedback_events,
+    )
 
 
 @contextmanager

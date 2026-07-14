@@ -219,6 +219,51 @@ def test_session_turn_capture_correlates_parallel_same_name_tools_by_call_id():
     assert feedback_events["call-b"]["status"] == "running"
 
 
+def test_committed_assistant_segment_is_published_in_live_feedback_order(monkeypatch):
+    capture = session_service.SessionTurnCapture(session_id="session-timeline", turn_id="turn-timeline")
+    capture.content = "我先检查工作区。"
+    ledger_events = []
+    live_updates = []
+    monkeypatch.setattr(
+        session_service,
+        "_append_session_conversation_event",
+        lambda *args, **kwargs: ledger_events.append((args, kwargs)),
+    )
+    monkeypatch.setattr(
+        session_service,
+        "_set_session_live_output",
+        lambda *args, **kwargs: live_updates.append((args, kwargs)),
+    )
+
+    session_service._commit_session_capture_assistant_segment(
+        "session-timeline",
+        capture,
+        boundary="tool_event",
+    )
+    capture.note_tool_event("get_git_status_summary_tool", "running", "检查 Git 状态", call_id="call-git")
+
+    assert [(event["kind"], event["sequence"]) for event in capture.feedback_events] == [
+        ("assistant_text", 1),
+        ("tool", 2),
+    ]
+    assert capture.feedback_events[0]["content"] == "我先检查工作区。"
+    assert ledger_events[0][1]["payload"]["feedbackSequence"] == 1
+    assert live_updates[0][1]["feedback_events"][0]["kind"] == "assistant_text"
+    checkpoint = session_service._live_output_checkpoint_payload(
+        session_service.SessionLiveOutputState(
+            session_id="session-timeline",
+            turn_id="turn-timeline",
+            content=capture.content,
+            tool_calls=capture.tool_calls,
+            feedback_events=capture.feedback_events,
+        )
+    )
+    assert [item["kind"] for item in checkpoint["timelineItems"]] == ["assistant_text", "operation"]
+    assert [item.get("text") for item in checkpoint["timelineItems"] if item["kind"] == "assistant_text"] == [
+        "我先检查工作区。"
+    ]
+
+
 def test_session_turn_capture_records_parallel_same_name_tools_with_unique_sequences():
     capture = session_service.SessionTurnCapture(session_id="session-parallel", turn_id="turn-parallel")
     worker_barrier = threading.Barrier(2)
