@@ -977,6 +977,11 @@ def _reconcile_stale_session_ledger(session_id: str, *, active_turn_id: str = ""
         return
     if _is_session_running(normalized_session_id):
         return
+    # Process-local session state can briefly be absent while a submitted turn is
+    # already durable and running. The persisted WorkRun is the cross-request
+    # authority in that window; detail projection must not terminate its ledger.
+    if _active_chat_turn_work_run_for_session(normalized_session_id) is not None:
+        return
     recovered_from_checkpoint_only = False
     event_turn_id = ""
     try:
