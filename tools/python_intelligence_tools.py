@@ -146,6 +146,7 @@ def code_symbol_tool(
     symbol: str = "",
     max_results: int = 20,
     refresh: bool = False,
+    _cancel_checker=None,
 ) -> str:
     """Project-wide code context graph tool.
 
@@ -188,6 +189,7 @@ def code_symbol_tool(
         symbol=symbol,
         max_results=max_results,
         refresh=refresh,
+        _cancel_checker=_cancel_checker,
     )
     _record_code_graph_observation(result)
     return json.dumps(result, ensure_ascii=False, indent=2)

@@ -221,6 +221,37 @@ def test_code_symbol_tool_caps_explore_results_and_reports_the_applied_limit(tmp
     assert payload["summary"]["totalResultCount"] > len(payload["results"])
 
 
+def test_code_symbol_tool_cooperatively_cancels_index_build(tmp_path, monkeypatch):
+    from core.code_context_graph import service as graph_service
+
+    core_dir = tmp_path / "core"
+    core_dir.mkdir()
+    for index in range(20):
+        (core_dir / f"module_{index}.py").write_text(
+            f"def symbol_{index}():\n    return {index}\n",
+            encoding="utf-8",
+        )
+    monkeypatch.setattr(graph_service, "project_root", lambda: tmp_path)
+    checks = {"count": 0}
+
+    def cancel_checker():
+        checks["count"] += 1
+        return "操作者请求停止当前轮" if checks["count"] >= 4 else ""
+
+    payload = json.loads(
+        pit.code_symbol_tool(
+            mode="index",
+            _cancel_checker=cancel_checker,
+        )
+    )
+
+    assert payload["status"] == "cancelled"
+    assert payload["error"] == "cancelled"
+    assert payload["mode"] == "index"
+    assert payload["reason"] == "操作者请求停止当前轮"
+    assert checks["count"] >= 4
+
+
 def test_python_symbol_query_parses_jedi_results(monkeypatch, tmp_path):
     source = tmp_path / "demo.py"
     source.write_text("value = 1\nprint(value)\n", encoding="utf-8")
