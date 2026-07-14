@@ -6,6 +6,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import { fetchJson } from "../api/client";
 import { queryKeys } from "../api/queryKeys";
 import {
+  AgentToolPolicyConfiguration,
   AgentInstance,
   GeneratedToolDeleteResponse,
   ToolDependencyHealth,
@@ -822,6 +823,7 @@ export function ToolsRoute() {
   const [activeAgentScopeId, setActiveAgentScopeId] = useState(MAIN_AGENT_SCOPE_ID);
   const [activePolicyAgentId, setActivePolicyAgentId] = useState("");
   const [toolPolicyDraft, setToolPolicyDraft] = useState<AgentToolPolicyDraft>(() => toolPolicyDraftFromAgent(null));
+  const [toolPolicyPreview, setToolPolicyPreview] = useState<AgentToolPolicyConfiguration | null>(null);
   const [activeToolId, setActiveToolId] = useState<string | null>(null);
   const [selectedBundleId, setSelectedBundleId] = useState("");
   const [leftPanelWidth, setLeftPanelWidth] = useState(() =>
@@ -1169,10 +1171,10 @@ export function ToolsRoute() {
     },
   });
 
-  const updateToolPolicyMutation = useMutation({
+  const validateToolPolicyMutation = useMutation({
     mutationFn: (payload: { agentId: string; draft: AgentToolPolicyDraft; basePolicy: ToolPolicy | undefined }) =>
-      fetchJson<AgentInstance>(`/api/agents/${encodeURIComponent(payload.agentId)}`, {
-        method: "PATCH",
+      fetchJson<AgentToolPolicyConfiguration>(`/api/agents/${encodeURIComponent(payload.agentId)}/tool-policy/validate`, {
+        method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           toolPolicy: {
@@ -1186,12 +1188,61 @@ export function ToolsRoute() {
           },
         }),
       }),
-    onSuccess: (agent) => {
+    onSuccess: (preview) => {
+      setToolPolicyPreview(preview);
+      setNotice({
+        tone: preview.validation.valid ? "success" : "error",
+        text: preview.validation.valid
+          ? (lang === "zh" ? `预览完成：下一回合可见 ${preview.preview.visibleTools.length}，可执行 ${preview.preview.executableTools.length}` : `Preview ready: ${preview.preview.visibleTools.length} visible, ${preview.preview.executableTools.length} executable`)
+          : preview.validation.errors.join("; "),
+      });
+    },
+    onError: (error) => setNotice({ tone: "error", text: error instanceof Error ? error.message : String(error) }),
+  });
+
+  const updateToolPolicyMutation = useMutation({
+    mutationFn: async (payload: { agent: AgentInstance; draft: AgentToolPolicyDraft; basePolicy: ToolPolicy | undefined }) => {
+      const toolPolicy = {
+        ...defaultToolPolicy(payload.basePolicy?.policyId || "default"),
+        ...(payload.basePolicy ?? {}),
+        allowedTools: sortedIds(payload.draft.allowedTools),
+        preferredTools: sortedIds(payload.draft.preferredTools),
+        blockedTools: sortedIds(payload.draft.blockedTools),
+        readScopes: sortedIds(payload.draft.readScopes),
+        writeScopes: sortedIds(payload.draft.writeScopes),
+      };
+      const preview = await fetchJson<AgentToolPolicyConfiguration>(`/api/agents/${encodeURIComponent(payload.agent.agentId)}/tool-policy/validate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ toolPolicy }),
+      });
+      setToolPolicyPreview(preview);
+      if (!preview.validation.valid) {
+        throw new Error(preview.validation.errors.join("; "));
+      }
+      const confirmed = !preview.confirmation.required || window.confirm(preview.confirmation.summary);
+      if (!confirmed) {
+        throw new Error(lang === "zh" ? "已取消高影响工具策略变更。" : "High-impact ToolPolicy change cancelled.");
+      }
+      return fetchJson<AgentToolPolicyConfiguration>(`/api/agents/${encodeURIComponent(payload.agent.agentId)}/tool-policy`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          toolPolicy,
+          expectedAgentUpdatedAt: payload.agent.updatedAt,
+          expectedPolicyFingerprint: preview.policyFingerprint,
+          confirmed: preview.confirmation.required,
+        }),
+      });
+    },
+    onSuccess: (configuration) => {
+      const agent = { ...activePolicyAgent, ...configuration.agent, toolPolicy: configuration.currentPolicy } as AgentInstance;
       queryClient.setQueryData<AgentInstance[] | undefined>(
         queryKeys.agents(),
         (current) => current?.map((item) => item.agentId === agent.agentId ? { ...item, ...agent } : item),
       );
       setToolPolicyDraft(toolPolicyDraftFromAgent(agent));
+      setToolPolicyPreview(configuration);
       setNotice({
         tone: "success",
         text: lang === "zh"
@@ -1262,7 +1313,7 @@ export function ToolsRoute() {
     testMutation.variables?.agentScopeId,
     testMutation.variables?.agentId,
   ) === activeToolTestKey;
-  const activePolicyAgentPending = updateToolPolicyMutation.isPending && updateToolPolicyMutation.variables?.agentId === activePolicyAgent?.agentId;
+  const activePolicyAgentPending = updateToolPolicyMutation.isPending && updateToolPolicyMutation.variables?.agent.agentId === activePolicyAgent?.agentId;
   const activeCanDelete = Boolean(activeTool?.deleteAllowed) && !activeToolDeletePending;
   const activeCanToggle = Boolean(activeIsGenerated && activeTool?.validated && activeTool.status === "validated");
   const activeIsImage2Tool = activeTool?.name === IMAGE2_TOOL_NAME;
@@ -1451,8 +1502,19 @@ export function ToolsRoute() {
     }
     const saveDraft = normalizeToolPolicyDraftForAgent(toolPolicyDraft, activePolicyAgent);
     updateToolPolicyMutation.mutate({
-      agentId: activePolicyAgent.agentId,
+      agent: activePolicyAgent,
       draft: saveDraft,
+      basePolicy: activePolicyAgent.toolPolicy,
+    });
+  }
+
+  function previewToolPolicy() {
+    if (!activePolicyAgent) {
+      return;
+    }
+    validateToolPolicyMutation.mutate({
+      agentId: activePolicyAgent.agentId,
+      draft: normalizeToolPolicyDraftForAgent(toolPolicyDraft, activePolicyAgent),
       basePolicy: activePolicyAgent.toolPolicy,
     });
   }
@@ -1802,6 +1864,13 @@ export function ToolsRoute() {
                 <span>{lang === "zh" ? "高风险允许" : "High-risk allowed"} <strong>{capabilityPreview.highRiskAllowed}</strong></span>
               </div>
             </div>
+            {toolPolicyPreview ? (
+              <p className={styles.emptyState}>
+                {lang === "zh"
+                  ? `服务端生效预览：可见 ${toolPolicyPreview.preview.visibleTools.length}，可执行 ${toolPolicyPreview.preview.executableTools.length}，不可用 ${toolPolicyPreview.preview.unavailableTools.length}，需审批 ${toolPolicyPreview.preview.approvalRequiredTools.length}；影响 ${toolPolicyPreview.impact.affectedAgentCount} 个 Agent。`
+                  : `Server preview: ${toolPolicyPreview.preview.visibleTools.length} visible, ${toolPolicyPreview.preview.executableTools.length} executable, ${toolPolicyPreview.preview.unavailableTools.length} unavailable, ${toolPolicyPreview.preview.approvalRequiredTools.length} approval-required; affects ${toolPolicyPreview.impact.affectedAgentCount} Agents.`}
+              </p>
+            ) : null}
             <section className={styles.policyDraftPanel}>
               <div className={styles.policyDraftSummary}>
                 <strong>{lang === "zh" ? "实际能力预览" : "Effective capability preview"}</strong>
@@ -1948,6 +2017,15 @@ export function ToolsRoute() {
                   onPress={() => setToolPolicyDraft(toolPolicyDraftFromAgent(activePolicyAgent))}
                 >
                   {lang === "zh" ? "重置草稿" : "Reset draft"}
+                </VButton>
+                <VButton
+                  type="button"
+                  variant="secondary"
+                  className={styles.secondaryButton}
+                  isDisabled={!activePolicyAgent || validateToolPolicyMutation.isPending}
+                  onPress={previewToolPolicy}
+                >
+                  {validateToolPolicyMutation.isPending ? (lang === "zh" ? "验证中..." : "Validating...") : (lang === "zh" ? "验证并预览" : "Validate & preview")}
                 </VButton>
                 <VButton
                   type="button"

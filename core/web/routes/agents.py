@@ -13,7 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from config.operator_config_transaction import OperatorConfigTransactionError
 from core.agent_kernel import KernelAdapterError, KernelError, KernelValidationError, submit_agent_message_event
 from core.orchestration.context_engine import list_agent_runs_for_agent
-from core.web.services import agent_directory_service, agent_tool_governance_service, session_service
+from core.web.services import agent_directory_service, agent_tool_governance_service, session_service, tool_policy_configuration_service
 from core.web.services.runtime_scene_service import list_runtime_scene_evidence_for_agent, record_runtime_scene_event
 from core.web.services.agent_config_workspace_service import get_agent_config_workspace, invalidate_agent_config_workspace_cache
 from core.web.services.agent_directory_service import (
@@ -125,6 +125,18 @@ class AgentUpdatePayload(BaseModel):
     taskProfile: dict[str, Any] | None = None
     metadata: dict[str, Any] | None = None
     status: str | None = None
+
+
+class AgentToolPolicyValidatePayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    toolPolicy: dict[str, Any]
+
+
+class AgentToolPolicyUpdatePayload(AgentToolPolicyValidatePayload):
+    expectedAgentUpdatedAt: str
+    expectedPolicyFingerprint: str
+    confirmed: bool = False
 
 
 class AgentModelPromotionPayload(BaseModel):
@@ -616,6 +628,50 @@ def agent_detail(agent_id: str) -> dict:
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
     return agent
+
+
+@router.get("/agents/tool-policies/configurations")
+def agent_tool_policy_configuration_list() -> dict:
+    return tool_policy_configuration_service.list_tool_policy_configurations()
+
+
+@router.get("/agents/{agent_id}/tool-policy")
+def agent_tool_policy_configuration_detail(agent_id: str) -> dict:
+    try:
+        return tool_policy_configuration_service.get_tool_policy_configuration(agent_id)
+    except tool_policy_configuration_service.ToolPolicyConfigurationNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/agents/{agent_id}/tool-policy/validate")
+def agent_tool_policy_configuration_validate(agent_id: str, payload: AgentToolPolicyValidatePayload) -> dict:
+    try:
+        return tool_policy_configuration_service.validate_tool_policy_configuration(agent_id, payload.toolPolicy)
+    except tool_policy_configuration_service.ToolPolicyConfigurationNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.put("/agents/{agent_id}/tool-policy")
+def agent_tool_policy_configuration_update(agent_id: str, payload: AgentToolPolicyUpdatePayload) -> dict:
+    try:
+        result = tool_policy_configuration_service.update_tool_policy_configuration(
+            agent_id,
+            policy=payload.toolPolicy,
+            expected_agent_updated_at=payload.expectedAgentUpdatedAt,
+            expected_policy_fingerprint=payload.expectedPolicyFingerprint,
+            confirmed=payload.confirmed,
+        )
+        invalidate_agent_config_workspace_cache()
+        return result
+    except tool_policy_configuration_service.ToolPolicyConfigurationNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except (
+        tool_policy_configuration_service.ToolPolicyConfigurationConflictError,
+        tool_policy_configuration_service.ToolPolicyConfigurationConfirmationRequired,
+    ) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except tool_policy_configuration_service.ToolPolicyConfigurationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.get("/agents/{agent_id}/runs")

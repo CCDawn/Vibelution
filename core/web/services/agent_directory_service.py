@@ -1142,6 +1142,9 @@ def update_agent_instance(
     metadata: dict[str, Any] | None = None,
     status: str | None = None,
     preserve_generated_display_name: bool = False,
+    expected_updated_at: str = "",
+    expected_tool_policy_fingerprint: str = "",
+    confirm_shared_tool_policy: bool = False,
 ) -> dict[str, Any]:
     updated_tool_policy: dict[str, Any] | None = None
     updated_memory_policy: dict[str, Any] | None = None
@@ -1154,6 +1157,9 @@ def update_agent_instance(
         agent = _find_agent(state, agent_id)
         if agent is None:
             raise AgentNotFoundError(f"Agent not found: {agent_id}")
+        expected_agent_revision = str(expected_updated_at or "").strip()
+        if expected_agent_revision and str(agent.get("updatedAt") or "").strip() != expected_agent_revision:
+            raise AgentStateConflictError("Agent configuration changed after this editor was opened. Refresh and retry.")
         if display_name is not None:
             title = trim_lines(display_name or "", max_lines=1).strip()
             if not title:
@@ -1223,10 +1229,23 @@ def update_agent_instance(
                 policy_id = f"tool-{agent['agentId']}"
                 agent["toolPolicyId"] = policy_id
             policies = _tool_policies(state)
+            current_tool_policy = normalize_tool_policy(
+                policies.get(policy_id) or default_tool_policy(policy_id),
+                policy_id,
+            )
+            expected_policy_fingerprint = str(expected_tool_policy_fingerprint or "").strip()
+            if expected_policy_fingerprint and tool_policy_fingerprint(current_tool_policy) != expected_policy_fingerprint:
+                raise AgentStateConflictError("ToolPolicy changed after this editor was opened. Refresh and retry.")
+            affected_agent_count = _count_policy_refs(state.get("agents") or [], "toolPolicyId", policy_id)
+            if affected_agent_count > 1 and not confirm_shared_tool_policy:
+                raise AgentStateConflictError(
+                    f"ToolPolicy {policy_id} is shared by {affected_agent_count} Agents and requires explicit confirmation."
+                )
             updated_tool_policy = normalize_tool_policy(
                 {**default_tool_policy(policy_id), **dict(tool_policy or {})},
                 policy_id,
             )
+            updated_tool_policy["policyVersion"] = int(current_tool_policy.get("policyVersion") or 1) + 1
             policies[policy_id] = updated_tool_policy
             state["toolPolicies"] = policies
         if memory_policy is not None:
@@ -4008,7 +4027,20 @@ def normalize_tool_policy(policy: dict[str, Any], policy_id: str = "") -> dict[s
         payload["maxCallsPerTurn"] = max(0, int(payload.get("maxCallsPerTurn") or 0))
     except (TypeError, ValueError):
         payload["maxCallsPerTurn"] = 0
+    try:
+        payload["policyVersion"] = max(1, int(payload.get("policyVersion") or 1))
+    except (TypeError, ValueError):
+        payload["policyVersion"] = 1
     return payload
+
+
+def tool_policy_fingerprint(policy: dict[str, Any]) -> str:
+    import hashlib
+    import json
+
+    normalized = normalize_tool_policy(policy, str((policy or {}).get("policyId") or ""))
+    encoded = json.dumps(normalized, ensure_ascii=True, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
 
 
 def _normalize_tool_policy_scopes(scopes: Any) -> list[str]:

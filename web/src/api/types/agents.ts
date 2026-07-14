@@ -214,6 +214,7 @@ export type ToolImage2ModelConfig = {
 
 export type ToolPolicy = {
   policyId: string;
+  policyVersion?: number;
   allowedTools: string[];
   preferredTools: string[];
   blockedTools: string[];
@@ -225,6 +226,39 @@ export type ToolPolicy = {
   mutationAccess: string;
   maxCallsPerTurn: number;
   perToolRules: Record<string, unknown>;
+};
+
+export type AgentToolPolicyConfiguration = {
+  schemaVersion: number;
+  agent: Pick<AgentInstance, "agentId" | "agentCode" | "displayName" | "updatedAt">;
+  policyId: string;
+  policyVersion: number;
+  policyFingerprint: string;
+  proposedPolicyFingerprint: string;
+  registryVersion: string;
+  currentPolicy: ToolPolicy;
+  proposedPolicy: ToolPolicy;
+  validation: { valid: boolean; errors: string[]; warnings: string[] };
+  impact: {
+    sharedPolicy: boolean;
+    affectedAgentCount: number;
+    affectedAgents: Array<Pick<AgentInstance, "agentId" | "agentCode" | "displayName">>;
+  };
+  preview: {
+    visibleTools: string[];
+    executableTools: string[];
+    preferredTools: string[];
+    blockedTools: string[];
+    unavailableTools: string[];
+    unknownTools: string[];
+    approvalRequiredTools: string[];
+  };
+  confirmation: {
+    required: boolean;
+    reasons: string[];
+    highRiskTools: string[];
+    summary: string;
+  };
 };
 
 export type AgentToolPolicySource = {
