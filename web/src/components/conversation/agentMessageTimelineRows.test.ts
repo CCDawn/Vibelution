@@ -85,6 +85,41 @@ describe("AgentMessage timeline rows", () => {
     expect(committedRow.processKey).not.toBe(committedRow.answerKey);
   });
 
+  it("keeps an active Agent row stable while its canonical turn id is bound", () => {
+    const optimistic = assistantMessage("session-1-message-active-optimistic", {
+      streaming: true,
+      turnId: "optimistic-submit",
+      source: {
+        kind: "conversation-message",
+        id: "session-1-message-active-optimistic",
+        metadata: {
+          kind: "session_active_turn_layer",
+          renderKey: "session-1-active",
+        },
+      },
+      parts: [],
+    });
+    const bound = assistantMessage("session-1-message-active-turn-accepted", {
+      streaming: true,
+      turnId: "turn-accepted",
+      source: {
+        kind: "conversation-message",
+        id: "session-1-message-active-turn-accepted",
+        metadata: {
+          kind: "session_active_turn_layer",
+          renderKey: "session-1-active",
+        },
+      },
+      parts: [],
+    });
+
+    const [optimisticRow] = buildAgentMessageTimelineRowIdentities([optimistic]);
+    const [boundRow] = buildAgentMessageTimelineRowIdentities([bound]);
+
+    expect(optimisticRow.rowKey).toBe("assistant-active:session-1-active");
+    expect(boundRow.rowKey).toBe(optimisticRow.rowKey);
+  });
+
   it("keeps duplicate same-turn rows unique when a user boundary prevents projection merging", () => {
     const rows = buildAgentMessageTimelineRowIdentities([
       assistantMessage("tool-before-user", { turnId: "turn-shared" }),
