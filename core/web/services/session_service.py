@@ -17596,11 +17596,12 @@ def _trim_tool_detail_text(value: Any, *, max_chars: int = 1200, max_lines: int 
     text = str(value or "").strip()
     if not text:
         return ""
-    lines = [line.rstrip() for line in text.splitlines()]
-    if len(lines) > max_lines:
-        text = "\n".join(lines[:max_lines]).strip()
-    else:
-        text = "\n".join(lines).strip()
+    if "\n" not in text and "\r" not in text:
+        if len(text) > max_chars:
+            return text[: max_chars - 1].rstrip() + "…"
+        return text
+    lines = text.splitlines()
+    text = "\n".join(line.rstrip() for line in lines[:max_lines]).strip()
     if len(text) > max_chars:
         return text[: max_chars - 1].rstrip() + "…"
     return text
