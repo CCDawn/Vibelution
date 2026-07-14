@@ -2,7 +2,125 @@
 
 from __future__ import annotations
 
-from typing import Any
+from dataclasses import dataclass
+from hashlib import sha256
+import json
+import re
+from typing import Any, Literal, Sequence
+
+
+ToolCapability = str
+ToolRisk = Literal["read", "write", "execute", "network", "destructive"]
+ToolConcurrency = Literal["safe", "serialized"]
+ToolApproval = Literal["never", "on_request", "always"]
+
+TOOL_DESCRIPTOR_SCHEMA_VERSION = 1
+# Monotonic contract revision. Bump only when descriptor semantics change.
+TOOL_REGISTRY_VERSION = 1
+
+_TOOL_ID_PATTERN = re.compile(r"^[a-z][a-z0-9_]{2,63}$")
+_CAPABILITY_PATTERN = re.compile(r"^[a-z][a-z0-9_]{1,63}$")
+_VALID_RISKS = {"read", "write", "execute", "network", "destructive"}
+_VALID_CONCURRENCY = {"safe", "serialized"}
+_VALID_APPROVAL = {"never", "on_request", "always"}
+_CATEGORY_SCOPES = {
+    "workspace_read": ("workspace",),
+    "workspace_write": ("workspace",),
+    "code_quality": ("workspace",),
+    "web_research": ("network",),
+    "git_evolution": ("workspace",),
+    "task_runtime": ("runtime",),
+    "agent_collaboration": ("agent",),
+    "memory_context": ("memory",),
+    "conversation_history": ("session",),
+    "self_model": ("self_model",),
+    "runtime_control": ("runtime",),
+    "media_research": ("media",),
+    "custom_generated": ("custom",),
+}
+_DESTRUCTIVE_RISK_TAGS = {"delete_or_cleanup", "project_rollback"}
+_EXECUTE_RISK_TAGS = {
+    "background_agent",
+    "background_task",
+    "command_execution",
+    "computer_control",
+    "external_agent",
+    "external_automation",
+    "runtime_restart",
+    "test_execution",
+}
+_NETWORK_RISK_TAGS = {"model_cost", "network_access"}
+_WRITE_RISK_TAGS = {
+    "agent_creation",
+    "artifact_write",
+    "can_modify_workspace",
+    "can_start_agent",
+    "can_wake_agent",
+    "context_mutation",
+    "cross_agent_message",
+    "file_write",
+    "formal_knowledge_mutation",
+    "memory_write",
+    "organization_policy_change",
+    "permission_management",
+    "runtime_governance",
+    "self_model_write",
+    "session_state_write",
+    "session_wake",
+    "task_state_write",
+    "team_knowledge_proposal",
+    "team_knowledge_rating",
+    "team_knowledge_write",
+    "team_workflow_state_write",
+}
+
+
+class ToolDescriptorError(ValueError):
+    """Raised when canonical tool metadata is incomplete or ambiguous."""
+
+
+@dataclass(frozen=True, slots=True)
+class ToolAvailability:
+    platforms: tuple[str, ...] = ()
+    required_config: tuple[str, ...] = ()
+
+    def public_projection(self) -> dict[str, list[str]]:
+        """Return configuration names only; never include values or secrets."""
+
+        return {
+            "platforms": list(self.platforms),
+            "requiredConfig": list(self.required_config),
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class ToolDescriptor:
+    name: str
+    schema_version: int
+    schema_hash: str
+    enabled: bool
+    capabilities: tuple[ToolCapability, ...]
+    risk: ToolRisk
+    concurrency: ToolConcurrency
+    scopes: tuple[str, ...]
+    approval: ToolApproval
+    aliases: tuple[str, ...] = ()
+    availability: ToolAvailability = ToolAvailability()
+
+    def public_projection(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "schemaVersion": self.schema_version,
+            "schemaHash": self.schema_hash,
+            "enabled": self.enabled,
+            "capabilities": list(self.capabilities),
+            "risk": self.risk,
+            "concurrency": self.concurrency,
+            "scopes": list(self.scopes),
+            "approval": self.approval,
+            "aliases": list(self.aliases),
+            "availability": self.availability.public_projection(),
+        }
 
 
 LOW_PERMISSION_TIER = "low"
@@ -392,6 +510,30 @@ TOOL_CATALOG: dict[str, dict[str, Any]] = {
         "capabilityTags": ["memory_write", "context"],
         "riskTags": ["memory_write"],
         "permissionTier": HIGH_PERMISSION_TIER,
+    },
+    "read_memory_tool": {
+        "category": "memory_context",
+        "capabilityTags": ["memory_read", "context", "read_only"],
+        "riskTags": ["memory_access"],
+        "permissionTier": MEDIUM_PERMISSION_TIER,
+    },
+    "get_memory_summary_tool": {
+        "category": "memory_context",
+        "capabilityTags": ["memory_summary", "context", "read_only"],
+        "riskTags": ["memory_access"],
+        "permissionTier": MEDIUM_PERMISSION_TIER,
+    },
+    "session_reference_query_tool": {
+        "category": "memory_context",
+        "capabilityTags": ["conversation_reference", "session_history", "read_only"],
+        "riskTags": ["session_data_access"],
+        "permissionTier": MEDIUM_PERMISSION_TIER,
+    },
+    "skill_library_search_tool": {
+        "category": "memory_context",
+        "capabilityTags": ["skill_library", "skill_search", "read_only"],
+        "riskTags": ["memory_access"],
+        "permissionTier": MEDIUM_PERMISSION_TIER,
     },
     "get_core_context_tool": {
         "category": "memory_context",
@@ -927,3 +1069,140 @@ def permission_tier_for_tool(tool_name: str) -> str:
 
 def risk_tags_for_tool(tool_name: str) -> list[str]:
     return list(metadata_for_tool(tool_name).get("riskTags") or [])
+
+
+def build_tool_descriptor(
+    tool_name: str,
+    *,
+    args_schema: dict[str, Any],
+    source: str = "built_in",
+    enabled: bool = True,
+    aliases: Sequence[str] = (),
+    platforms: Sequence[str] = (),
+    required_config: Sequence[str] = (),
+) -> ToolDescriptor:
+    """Build one immutable descriptor from Registry-owned catalog facts."""
+
+    name = str(tool_name or "").strip()
+    normalized_source = str(source or "").strip() or "built_in"
+    if not _TOOL_ID_PATTERN.fullmatch(name):
+        raise ToolDescriptorError(f"Invalid canonical tool name: {name or '<empty>'}")
+    if normalized_source == "built_in" and name not in TOOL_CATALOG:
+        raise ToolDescriptorError(f"Built-in tool has no catalog metadata: {name}")
+
+    metadata = metadata_for_tool(name, source=normalized_source)
+    capabilities = _normalized_descriptor_tokens(metadata.get("capabilityTags"), field="capability")
+    if not capabilities:
+        raise ToolDescriptorError(f"Tool descriptor has no capabilities: {name}")
+    normalized_aliases = _normalized_descriptor_tokens(aliases, field="alias", pattern=_TOOL_ID_PATTERN)
+    normalized_platforms = _normalized_descriptor_tokens(platforms, field="platform")
+    normalized_required_config = _normalized_descriptor_tokens(required_config, field="required config")
+    risk = _descriptor_risk(metadata)
+    scopes = _CATEGORY_SCOPES.get(str(metadata.get("category") or ""), ("uncategorized",))
+    approval: ToolApproval = "always" if risk == "destructive" else (
+        "on_request" if str(metadata.get("permissionTier") or "") == HIGH_PERMISSION_TIER else "never"
+    )
+    concurrency: ToolConcurrency = "serialized" if risk in {"write", "execute", "destructive"} else "safe"
+    descriptor = ToolDescriptor(
+        name=name,
+        schema_version=TOOL_DESCRIPTOR_SCHEMA_VERSION,
+        schema_hash=_schema_hash(args_schema),
+        enabled=bool(enabled),
+        capabilities=capabilities,
+        risk=risk,
+        concurrency=concurrency,
+        scopes=tuple(scopes),
+        approval=approval,
+        aliases=normalized_aliases,
+        availability=ToolAvailability(
+            platforms=normalized_platforms,
+            required_config=normalized_required_config,
+        ),
+    )
+    validate_tool_descriptors((descriptor,))
+    return descriptor
+
+
+def validate_tool_descriptors(descriptors: Sequence[ToolDescriptor]) -> tuple[ToolDescriptor, ...]:
+    """Validate canonical names, aliases, capabilities, and descriptor facts."""
+
+    ordered = tuple(sorted(descriptors, key=lambda item: item.name))
+    canonical_names: set[str] = set()
+    aliases: dict[str, str] = {}
+    for descriptor in ordered:
+        if not _TOOL_ID_PATTERN.fullmatch(descriptor.name):
+            raise ToolDescriptorError(f"Invalid canonical tool name: {descriptor.name or '<empty>'}")
+        if descriptor.name in canonical_names:
+            raise ToolDescriptorError(f"Duplicate canonical tool name: {descriptor.name}")
+        canonical_names.add(descriptor.name)
+        if descriptor.schema_version != TOOL_DESCRIPTOR_SCHEMA_VERSION:
+            raise ToolDescriptorError(f"Unsupported descriptor schema version for {descriptor.name}")
+        if not re.fullmatch(r"[0-9a-f]{64}", descriptor.schema_hash):
+            raise ToolDescriptorError(f"Invalid schema hash for {descriptor.name}")
+        if not descriptor.capabilities:
+            raise ToolDescriptorError(f"Tool descriptor has no capabilities: {descriptor.name}")
+        for capability in descriptor.capabilities:
+            if not _CAPABILITY_PATTERN.fullmatch(capability):
+                raise ToolDescriptorError(f"Invalid capability `{capability}` for {descriptor.name}")
+        if descriptor.risk not in _VALID_RISKS:
+            raise ToolDescriptorError(f"Invalid risk classification for {descriptor.name}")
+        if descriptor.concurrency not in _VALID_CONCURRENCY:
+            raise ToolDescriptorError(f"Invalid concurrency classification for {descriptor.name}")
+        if descriptor.approval not in _VALID_APPROVAL:
+            raise ToolDescriptorError(f"Invalid approval mode for {descriptor.name}")
+        if not descriptor.scopes:
+            raise ToolDescriptorError(f"Tool descriptor has no scopes: {descriptor.name}")
+        for alias in descriptor.aliases:
+            previous = aliases.get(alias)
+            if previous is not None:
+                raise ToolDescriptorError(f"Duplicate tool alias `{alias}`: {previous}, {descriptor.name}")
+            aliases[alias] = descriptor.name
+
+    collisions = sorted(canonical_names.intersection(aliases))
+    if collisions:
+        alias = collisions[0]
+        raise ToolDescriptorError(f"Tool alias collides with canonical name: {alias}")
+    return ordered
+
+
+def registry_descriptor_fingerprint(descriptors: Sequence[ToolDescriptor]) -> str:
+    """Return a deterministic fingerprint for one validated Registry snapshot."""
+
+    ordered = validate_tool_descriptors(descriptors)
+    payload = [descriptor.public_projection() for descriptor in ordered]
+    return sha256(_canonical_json(payload).encode("utf-8")).hexdigest()
+
+
+def _descriptor_risk(metadata: dict[str, Any]) -> ToolRisk:
+    tags = {str(item or "").strip() for item in metadata.get("riskTags") or [] if str(item or "").strip()}
+    if tags.intersection(_DESTRUCTIVE_RISK_TAGS):
+        return "destructive"
+    if tags.intersection(_EXECUTE_RISK_TAGS):
+        return "execute"
+    if tags.intersection(_NETWORK_RISK_TAGS):
+        return "network"
+    if tags.intersection(_WRITE_RISK_TAGS):
+        return "write"
+    return "read"
+
+
+def _schema_hash(args_schema: dict[str, Any]) -> str:
+    schema = args_schema if isinstance(args_schema, dict) else {}
+    return sha256(_canonical_json(schema).encode("utf-8")).hexdigest()
+
+
+def _canonical_json(value: Any) -> str:
+    return json.dumps(value, ensure_ascii=True, separators=(",", ":"), sort_keys=True)
+
+
+def _normalized_descriptor_tokens(
+    values: Any,
+    *,
+    field: str,
+    pattern: re.Pattern[str] = _CAPABILITY_PATTERN,
+) -> tuple[str, ...]:
+    normalized = tuple(sorted({str(item or "").strip() for item in values or [] if str(item or "").strip()}))
+    for value in normalized:
+        if not pattern.fullmatch(value):
+            raise ToolDescriptorError(f"Invalid {field}: {value}")
+    return normalized
