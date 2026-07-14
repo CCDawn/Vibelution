@@ -167,12 +167,21 @@ function timelineItemsFromOperations(
   if (options.includeAssistantText !== false) {
     const text = assistantText.trim();
     if (text) {
-      items.push({
+      const assistantTextItem: AgentMessageAssistantTextTimelineItem = {
         id: `${messageId}-timeline-response`,
         kind: "assistant_text",
         status: messageStreaming ? "running" : "completed",
         text,
-      });
+      };
+      const hasActiveOperation = items.some(
+        (item) => item.kind === "operation" && ["running", "pending"].includes(item.status),
+      );
+      if (messageStreaming && hasActiveOperation) {
+        const firstOperationIndex = items.findIndex((item) => item.kind === "operation");
+        items.splice(firstOperationIndex, 0, assistantTextItem);
+      } else {
+        items.push(assistantTextItem);
+      }
     }
   }
 

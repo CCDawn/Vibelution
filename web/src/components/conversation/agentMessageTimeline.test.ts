@@ -57,7 +57,7 @@ describe("agentMessageTimeline", () => {
     expect(agentMessageTimelineSource).not.toContain("ConversationTimelineItem as");
   });
 
-  it("builds timeline items from AgentMessage parts", () => {
+  it("places fallback streaming assistant text before running operations without duplicating either", () => {
     const message: AgentMessage = {
       id: "agent-message-timeline",
       role: "assistant",
@@ -105,37 +105,39 @@ describe("agentMessageTimeline", () => {
       { lang: "zh" },
     );
 
-    expect(items.map((item) => item.kind)).toEqual(["thought", "operation", "operation", "assistant_text"]);
+    expect(items.map((item) => item.kind)).toEqual(["thought", "assistant_text", "operation", "operation"]);
     expect(items[0]).toMatchObject({
       kind: "thought",
       text: "先检查 timeline 入口",
       defaultExpanded: false,
     });
     expect(items[1]).toMatchObject({
+      kind: "assistant_text",
+      status: "running",
+      text: "正在收束 timeline 迁移",
+    });
+    expect(items[2]).toMatchObject({
       kind: "operation",
       status: "completed",
       title: "搜索",
       summary: "搜索 timeline 调用",
     });
-    expect(items[2]).toMatchObject({
+    expect(items[3]).toMatchObject({
       kind: "operation",
       status: "running",
       title: "读取文件",
       summary: "读取 agentMessageTimeline.ts",
     });
-    expect(items[3]).toMatchObject({
-      kind: "assistant_text",
-      status: "running",
-      text: "正在收束 timeline 迁移",
-    });
+    expect(items.filter((item) => item.kind === "assistant_text")).toHaveLength(1);
+    expect(items.filter((item) => item.kind === "operation")).toHaveLength(2);
   });
 
-  it("keeps backend timeline items when building from AgentMessage parts", () => {
+  it("strictly preserves backend assistant text and operation order", () => {
     const message: AgentMessage = {
       id: "agent-message-server-timeline",
       role: "assistant",
       createdAt: "2026-07-02T10:03:00Z",
-      streaming: false,
+      streaming: true,
       source: { kind: "conversation-message", id: "agent-message-server-timeline" },
       parts: [
         {
@@ -162,9 +164,15 @@ describe("agentMessageTimeline", () => {
       { lang: "zh" },
       [
         {
+          id: "server-call-intro",
+          kind: "assistant_text",
+          status: "running",
+          text: "我先检查相关配置。",
+        },
+        {
           id: "server-operation",
           kind: "operation",
-          status: "completed",
+          status: "running",
           title: "搜索",
           summary: "后端自然摘要",
           operationIds: ["agent-message-server-timeline-tool"],
@@ -172,14 +180,69 @@ describe("agentMessageTimeline", () => {
       ],
     );
 
-    expect(items).toHaveLength(1);
+    expect(items.map((item) => item.kind)).toEqual(["assistant_text", "operation"]);
     expect(items[0]).toMatchObject({
+      id: "server-call-intro",
+      kind: "assistant_text",
+      status: "running",
+      text: "我先检查相关配置。",
+    });
+    expect(items[1]).toMatchObject({
       id: "server-operation",
       kind: "operation",
+      status: "running",
       title: "搜索",
       summary: "后端自然摘要",
     });
-    expect(items[0].kind === "operation" ? items[0].operation.rawLabel : "").toBe("grep_search_tool");
+    expect(items[1].kind === "operation" ? items[1].operation.rawLabel : "").toBe("grep_search_tool");
+  });
+
+  it("keeps fallback completed operations before the unsplit final answer", () => {
+    const message: AgentMessage = {
+      id: "agent-message-completed-fallback",
+      role: "assistant",
+      createdAt: "2026-07-14T10:00:00Z",
+      streaming: false,
+      source: { kind: "conversation-message", id: "agent-message-completed-fallback" },
+      parts: [
+        {
+          id: "agent-message-completed-fallback-tool",
+          type: "tool-call",
+          source: "feedback-event",
+          name: "read_file_tool",
+          status: "done",
+          summary: "读取完成",
+          sequence: 1,
+        },
+        {
+          id: "agent-message-completed-fallback-answer",
+          type: "text",
+          channel: "answer",
+          text: "第一段结果。\n\n第二段结论。",
+        },
+      ],
+    };
+
+    const items = buildAgentMessageTimelineItems(
+      message,
+      buildAgentMessageOperations(message, labels),
+      { lang: "zh" },
+    );
+
+    expect(items.map((item) => item.kind)).toEqual(["operation", "assistant_text"]);
+    expect(items[0]).toMatchObject({
+      kind: "operation",
+      status: "completed",
+      title: "读取文件",
+      summary: "读取完成",
+    });
+    expect(items[1]).toMatchObject({
+      kind: "assistant_text",
+      status: "completed",
+      text: "第一段结果。\n\n第二段结论。",
+    });
+    expect(items.filter((item) => item.kind === "operation")).toHaveLength(1);
+    expect(items.filter((item) => item.kind === "assistant_text")).toHaveLength(1);
   });
 
   it("filters internal runtime status rows from backend timeline items", () => {
