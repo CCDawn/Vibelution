@@ -4228,25 +4228,53 @@ def get_active_session_summary() -> dict | None:
     """Return the current active conversation summary for shell-level polling."""
 
     agent_by_id = _agent_lookup_for_conversations()
-    active_id, conversations = _load_conversations(repair=False, agent_by_id=agent_by_id, lightweight=True)
-    conversations = _append_agent_directory_conversations(conversations, agent_by_id=agent_by_id)
-    if not conversations:
-        return None
-    target_id = str(active_id or "").strip()
-    target = next(
-        (
-            item
-            for item in conversations
-            if isinstance(item, dict) and str(item.get("id") or "").strip() == target_id
-        ),
-        None,
-    )
+    active_id, target = _load_active_conversation_summary_target(agent_by_id=agent_by_id)
     if target is None:
-        target = next((item for item in conversations if isinstance(item, dict)), None)
+        active_id, conversations = _load_conversations(
+            repair=False,
+            agent_by_id=agent_by_id,
+            lightweight=True,
+        )
+        conversations = _append_agent_directory_conversations(conversations, agent_by_id=agent_by_id)
+        if not conversations:
+            return None
+        target_id = str(active_id or "").strip()
+        target = next(
+            (
+                item
+                for item in conversations
+                if isinstance(item, dict) and str(item.get("id") or "").strip() == target_id
+            ),
+            None,
+        )
+        if target is None:
+            target = next((item for item in conversations if isinstance(item, dict)), None)
     if target is None:
         return None
     target = _with_direct_session_agent_for_summary(target, agent_by_id=agent_by_id)
     return _build_session_summary(target, hydrate_agent=False)
+
+
+def _load_active_conversation_summary_target(
+    *,
+    agent_by_id: dict[str, dict[str, Any]],
+) -> tuple[str, dict[str, Any] | None]:
+    """Normalize only the persisted active conversation for polling fast paths."""
+
+    with _CHAT_STATE_LOCK, chat_state_transaction(PROJECT_ROOT):
+        payload = load_chat_state(PROJECT_ROOT)
+        active_id = str(payload.get("active_conversation_id") or DEFAULT_CHAT_CONVERSATION_ID).strip()
+        raw_target = _find_conversation_entry(payload, active_id)
+        if raw_target is None:
+            return active_id, None
+        target = _normalize_conversation(
+            raw_target,
+            agent_by_id=agent_by_id,
+            hidden_team_member_agent_ids=_agent_directory_stub_hidden_team_member_ids(),
+            ensure_workspace=False,
+            lightweight=True,
+        )
+        return active_id, target
 
 
 def select_chat_session(session_id: str) -> dict:

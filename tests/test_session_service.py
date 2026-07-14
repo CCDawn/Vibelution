@@ -17,6 +17,47 @@ from core.web.services import session_service
 from core.web.services import agent_directory_service
 
 
+def test_active_session_summary_normalizes_only_the_active_conversation(tmp_path, monkeypatch):
+    save_chat_state(
+        tmp_path,
+        {
+            "version": 1,
+            "active_conversation_id": "session-active",
+            "updated_at": "2026-07-14T15:40:00",
+            "conversations": [
+                {"conversation_id": "session-inactive", "title": "旧会话"},
+                {"conversation_id": "session-active", "title": "当前会话"},
+            ],
+        },
+    )
+    normalized_ids: list[str] = []
+
+    def normalize_target(raw, **_kwargs):
+        conversation_id = str(raw.get("conversation_id") or "")
+        normalized_ids.append(conversation_id)
+        return {"id": conversation_id, "messages": []}
+
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(session_service, "_agent_lookup_for_conversations", lambda: {})
+    monkeypatch.setattr(session_service, "_agent_directory_stub_hidden_team_member_ids", lambda: set())
+    monkeypatch.setattr(session_service, "_normalize_conversation", normalize_target)
+    monkeypatch.setattr(
+        session_service,
+        "_with_direct_session_agent_for_summary",
+        lambda conversation, *, agent_by_id: conversation,
+    )
+    monkeypatch.setattr(
+        session_service,
+        "_build_session_summary",
+        lambda conversation, *, hydrate_agent: {"id": conversation["id"]},
+    )
+
+    summary = session_service.get_active_session_summary()
+
+    assert summary == {"id": "session-active"}
+    assert normalized_ids == ["session-active"]
+
+
 def test_session_stream_coalescing_preserves_assistant_delta_events():
     subscriber = queue.Queue()
     subscriber.put_nowait({"type": "assistant_delta", "contentDelta": "你"})
