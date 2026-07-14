@@ -354,6 +354,9 @@ class TestBuildAPI:
         assert len(result) > 0
         assert "## 当前运行目标包" not in result
         assert "# Vibelution 通用 Agent 基座" in result
+        assert "## 可见协作节奏" in result
+        assert "assistant commentary -> tool call/result" in result
+        assert "不得把所有中间说明压到最终回答里" in result
         assert "## SPEC 运行时摘要" in result
         assert "# SPEC 开发流程规范" in result
         assert "## 语言状态" in result
