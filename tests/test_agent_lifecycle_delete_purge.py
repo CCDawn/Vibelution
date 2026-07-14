@@ -563,6 +563,47 @@ def test_agent_purge_api_reports_workspace_delete_failure_without_server_error(t
     assert bindings["chat"]["availableAgentIds"] == [peer["agentId"]]
 
 
+def test_agent_archive_api_restores_references_when_archive_write_fails(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    agent = session_service.create_chat_session(title="Archive Rollback Agent")
+    peer = session_service.create_chat_session(title="Archive Rollback Peer")
+    room = chat_room_service.create_chat_room(
+        title="Archive Rollback Room",
+        participant_session_ids=[agent["id"], peer["id"]],
+    )
+    team = team_service.create_team(
+        name="Archive Rollback Team",
+        members=[{"agentId": agent["agentId"], "role": "lead"}],
+    )
+    agent_mode_binding_service.update_mode_binding(
+        "chat",
+        default_agent_id=agent["agentId"],
+        available_agent_ids=[agent["agentId"], peer["agentId"]],
+    )
+    original_chat_binding = agent_mode_binding_service.get_mode_bindings_payload()["modes"]["chat"]
+
+    def _fail_archive(*args, **kwargs):
+        raise agent_directory_service.AgentDirectoryError("archive write failed")
+
+    monkeypatch.setattr(agents_route, "archive_agent_instance", _fail_archive)
+
+    response = client.delete(f"/api/agents/{agent['agentId']}")
+
+    assert response.status_code == 422, response.text
+    assert agent_directory_service.get_agent(agent["agentId"])["status"] == "active"
+    team_detail = team_service.get_team(team["teamId"])
+    assert team_detail["members"][0]["agentId"] == agent["agentId"]
+    assert team_detail["members"][0]["role"] == "lead"
+    room_detail = chat_room_service.get_chat_room_detail(room["roomId"])
+    assert [participant["agentId"] for participant in room_detail["participants"]] == [
+        agent["agentId"],
+        peer["agentId"],
+    ]
+    bindings = agent_mode_binding_service.get_mode_bindings_payload()["modes"]
+    assert bindings["chat"]["defaultAgentId"] == original_chat_binding["defaultAgentId"]
+    assert bindings["chat"]["availableAgentIds"] == original_chat_binding["availableAgentIds"]
+
+
 def test_agent_purge_api_rejects_reference_cleanup_failure_without_deleting_agent(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     agent = session_service.create_chat_session(title="Cleanup Failure Agent")

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import json
 import queue
 import re
@@ -473,7 +474,13 @@ def update_agent_chat_room_membership(agent_id: str, room_ids: list[str] | None)
     }
 
 
-def remove_agent_from_chat_rooms(agent_id: str, *, allow_empty_rooms: bool = False, direct_session_id: str = "") -> dict[str, Any]:
+def remove_agent_from_chat_rooms(
+    agent_id: str,
+    *,
+    allow_empty_rooms: bool = False,
+    direct_session_id: str = "",
+    include_restore_token: bool = False,
+) -> dict[str, Any]:
     """Remove one Agent from all chat room participant lists before safe archival."""
 
     lang = get_web_language()
@@ -486,6 +493,7 @@ def remove_agent_from_chat_rooms(agent_id: str, *, allow_empty_rooms: bool = Fal
         direct_session_id = str(agent.get("directSessionId") or "").strip()
 
     changed_rooms: list[dict[str, Any]] = []
+    restore_rooms: list[dict[str, Any]] = []
     now = utc_now_iso()
     with _CHAT_ROOM_LOCK:
         state = _store().load()
@@ -511,6 +519,8 @@ def remove_agent_from_chat_rooms(agent_id: str, *, allow_empty_rooms: bool = Fal
                     )
                 )
             _raise_if_room_busy(room)
+            if include_restore_token:
+                restore_rooms.append(copy.deepcopy(room))
             room["participants"] = next_participants
             room["updatedAt"] = now
             changed_rooms.append(room)
@@ -527,11 +537,14 @@ def remove_agent_from_chat_rooms(agent_id: str, *, allow_empty_rooms: bool = Fal
                 "participantCount": len(room.get("participants") or []),
             },
         )
-    return {
+    result = {
         "agentId": normalized_agent_id,
         "changedRoomIds": [str(room.get("roomId") or "").strip() for room in changed_rooms],
         "chatRooms": list_chat_rooms(),
     }
+    if include_restore_token:
+        result["restoreToken"] = {"rooms": restore_rooms}
+    return result
 
 
 def remove_agents_from_chat_rooms(
@@ -541,6 +554,7 @@ def remove_agents_from_chat_rooms(
     direct_session_ids_by_agent_id: dict[str, str] | None = None,
     include_chat_rooms: bool = True,
     repair_participants: bool = True,
+    include_restore_token: bool = False,
 ) -> dict[str, Any]:
     """Remove multiple Agents from all room participant lists in one atomic room update."""
 
@@ -571,6 +585,7 @@ def remove_agents_from_chat_rooms(
             direct_session_ids_by_agent_id[agent_id] = ""
 
     changed_rooms: list[dict[str, Any]] = []
+    restore_rooms: list[dict[str, Any]] = []
     removed_by_agent_id: dict[str, list[str]] = {agent_id: [] for agent_id in normalized_agent_ids}
     agent_id_set = set(normalized_agent_ids)
     now = utc_now_iso()
@@ -609,6 +624,8 @@ def remove_agents_from_chat_rooms(
             _raise_if_room_busy(room)
             planned_changes.append((room, next_participants, removed_agent_ids_for_room))
         for room, next_participants, removed_agent_ids_for_room in planned_changes:
+            if include_restore_token:
+                restore_rooms.append(copy.deepcopy(room))
             room["participants"] = next_participants
             room["updatedAt"] = now
             changed_rooms.append(room)
@@ -646,7 +663,32 @@ def remove_agents_from_chat_rooms(
     }
     if include_chat_rooms:
         result["chatRooms"] = list_chat_rooms(session_summaries=session_summaries)
+    if include_restore_token:
+        result["restoreToken"] = {"rooms": restore_rooms}
     return result
+
+
+def restore_removed_agents_to_chat_rooms(restore_token: dict[str, Any] | None) -> dict[str, Any]:
+    """Restore exact room participant snapshots after a failed archive."""
+
+    snapshots = [copy.deepcopy(item) for item in list(dict(restore_token or {}).get("rooms") or []) if isinstance(item, dict)]
+    if not snapshots:
+        return {"restoredRoomIds": []}
+    restored_ids: list[str] = []
+    with _CHAT_ROOM_LOCK:
+        state = _store().load()
+        rooms = [item for item in list(state.get("rooms") or []) if isinstance(item, dict)]
+        by_id = {str(item.get("roomId") or "").strip(): index for index, item in enumerate(rooms)}
+        for snapshot in snapshots:
+            room_id = str(snapshot.get("roomId") or "").strip()
+            if not room_id or room_id not in by_id:
+                continue
+            rooms[by_id[room_id]] = snapshot
+            restored_ids.append(room_id)
+        state["rooms"] = rooms
+        if restored_ids:
+            _store().save(state)
+    return {"restoredRoomIds": restored_ids}
 
 
 def delete_chat_room(room_id: str) -> dict[str, Any]:

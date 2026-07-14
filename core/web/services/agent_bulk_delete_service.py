@@ -14,11 +14,16 @@ from .agent_directory_service import (
     ensure_agent_purge_allowed,
     ensure_agent_purge_workspace_deletable,
     purge_archived_agent_instance,
+    reactivate_agent_instance,
 )
-from .agent_mode_binding_service import remove_agents_from_mode_bindings
-from .chat_room_service import remove_agents_from_chat_rooms
+from .agent_mode_binding_service import (
+    get_mode_bindings_payload,
+    remove_agents_from_mode_bindings,
+    restore_removed_agents_to_mode_bindings,
+)
+from .chat_room_service import remove_agents_from_chat_rooms, restore_removed_agents_to_chat_rooms
 from .runtime_scene_service import record_runtime_scene_event
-from .team_service import remove_agents_from_teams
+from .team_service import remove_agents_from_teams, restore_removed_agents_to_teams
 from . import session_service
 
 
@@ -98,7 +103,7 @@ def _public_direct_session_cleanup(cleanup: dict[str, Any]) -> dict[str, Any]:
 
 
 def bulk_archive_agents(agent_ids: list[str] | None) -> dict[str, Any]:
-    """Archive many Agents while scanning shared references once."""
+    """Archive many Agents with per-Agent compensation on write failure."""
 
     requested_agent_ids = _dedupe_agent_ids(agent_ids)
     timings: dict[str, float] = {}
@@ -123,33 +128,83 @@ def bulk_archive_agents(agent_ids: list[str] | None) -> dict[str, Any]:
     room_cleanup = {"changedRoomIds": []}
     mode_cleanup = {"repairWarnings": []}
     if candidate_ids:
-        team_cleanup = _timed(timings, "remove_from_teams", lambda: remove_agents_from_teams(candidate_ids))
-        room_cleanup = _timed(timings, "remove_from_chat_rooms", lambda: remove_agents_from_chat_rooms(candidate_ids, include_chat_rooms=False))
+        snapshots_by_agent_id = {str(agent.get("agentId") or "").strip(): agent for agent in archive_candidates}
+        mode_restore_token = _timed(timings, "snapshot_mode_bindings", get_mode_bindings_payload)
+        team_cleanup = _timed(
+            timings,
+            "remove_from_teams",
+            lambda: remove_agents_from_teams(candidate_ids, include_restore_token=True),
+        )
+        room_cleanup = _timed(
+            timings,
+            "remove_from_chat_rooms",
+            lambda: remove_agents_from_chat_rooms(
+                candidate_ids,
+                include_chat_rooms=False,
+                include_restore_token=True,
+            ),
+        )
         mode_cleanup = _timed(
             timings,
             "remove_from_mode_bindings",
             lambda: remove_agents_from_mode_bindings(
                 candidate_ids,
-                agent_snapshots_by_agent_id={str(agent.get("agentId") or "").strip(): agent for agent in archive_candidates},
+                agent_snapshots_by_agent_id=snapshots_by_agent_id,
             ),
         )
+        archived_by_agent_id: dict[str, dict[str, Any]] = {}
+        archive_failure: tuple[str, Exception] | None = None
         for agent_id in candidate_ids:
             try:
-                archived = _timed(timings, "archive_agents", lambda agent_id=agent_id: archive_agent_instance(agent_id, repair_mode_bindings=False))
+                archived_by_agent_id[agent_id] = _timed(
+                    timings,
+                    "archive_agents",
+                    lambda agent_id=agent_id: archive_agent_instance(agent_id, repair_mode_bindings=False),
+                )
             except (AgentDirectoryError, AgentNotFoundError) as exc:
-                failed.append(_failed_item(agent_id, _archive_skip_reason(exc), str(exc)))
-                continue
-            success.append(
-                {
-                    **archived,
-                    "archiveSummary": {
-                        "modeBindingsRepaired": len(mode_cleanup.get("repairWarnings") or []),
-                        "removedFromRoomIds": list((room_cleanup.get("removedByAgentId") or {}).get(agent_id) or []),
-                        "removedFromTeamIds": list((team_cleanup.get("removedByAgentId") or {}).get(agent_id) or []),
-                        "dataRetention": "archived_only",
-                    },
-                }
+                archive_failure = (agent_id, exc)
+                break
+        if archive_failure is not None:
+            failed_agent_id, archive_error = archive_failure
+            for archived_agent_id in reversed(list(archived_by_agent_id)):
+                _timed(
+                    timings,
+                    "rollback_archived_agents",
+                    lambda archived_agent_id=archived_agent_id: reactivate_agent_instance(
+                        archived_agent_id,
+                        reason="bulk_archive_rollback",
+                    ),
+                )
+            _timed(timings, "rollback_mode_bindings", lambda: restore_removed_agents_to_mode_bindings(mode_restore_token))
+            _timed(
+                timings,
+                "rollback_chat_rooms",
+                lambda: restore_removed_agents_to_chat_rooms(room_cleanup.get("restoreToken")),
             )
+            _timed(
+                timings,
+                "rollback_teams",
+                lambda: restore_removed_agents_to_teams(team_cleanup.get("restoreToken")),
+            )
+            for agent_id in candidate_ids:
+                if agent_id == failed_agent_id:
+                    failed.append(_failed_item(agent_id, _archive_skip_reason(archive_error), str(archive_error)))
+                else:
+                    failed.append(_failed_item(agent_id, "batch_rolled_back", "Bulk archive was rolled back because another Agent could not be archived."))
+        else:
+            for agent_id in candidate_ids:
+                archived = archived_by_agent_id[agent_id]
+                success.append(
+                    {
+                        **archived,
+                        "archiveSummary": {
+                            "modeBindingsRepaired": len(mode_cleanup.get("repairWarnings") or []),
+                            "removedFromRoomIds": list((room_cleanup.get("removedByAgentId") or {}).get(agent_id) or []),
+                            "removedFromTeamIds": list((team_cleanup.get("removedByAgentId") or {}).get(agent_id) or []),
+                            "dataRetention": "archived_only",
+                        },
+                    }
+                )
 
     summary = _summary(len(requested_agent_ids), success, skipped, failed)
     duration_ms = round((perf_counter() - started_at) * 1000, 3)
