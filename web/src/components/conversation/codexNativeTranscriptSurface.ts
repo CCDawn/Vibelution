@@ -22,6 +22,7 @@ import type {
 } from "./codexTranscriptCells";
 import { shouldDisplayTranscriptCell } from "./conversationDisplayProtocol";
 import { isNoFinalAnswerStatusContent } from "./conversationInternalStatus";
+import { conversationToolSemanticLabel } from "./conversationToolSemanticLabel";
 
 export type CodexTranscriptSurfaceMode = "native" | "empty";
 
@@ -118,27 +119,65 @@ export function codexNativeTranscriptToCells(
         : operationIds.length > 0
           ? rolloutEvents.filter((event) => operationIds.includes(event.operationId))
           : rolloutEvents);
+      const cellLifecycleModel = normalizeNativeToolLifecycleModel(cell.toolLifecycleModel ?? lifecycleModel);
+      const commandSource = nativeCellCommandSource(operationIds, cellLifecycleModel);
+      const isToolCell = cell.kind === "tool_call" || nativeCellHasToolCall(operationIds, cellLifecycleModel);
+      const rawTitle = String(cell.title ?? "").trim();
+      const title = isToolCell
+        ? conversationToolSemanticLabel({
+            toolName: rawTitle,
+            summary: cell.summary,
+            commandSource,
+          })
+        : cell.title;
       return {
         id: cell.id,
         kind: cell.kind as CodexTranscriptCellKind,
         messageId: cell.messageId || transcript.messageId,
         status: cell.status as CodexTranscriptCellStatus,
         tone: cell.tone as CodexTranscriptCellTone,
-        title: cell.title,
+        title,
         text: cell.text || legacyMarkdown,
         summary: cell.summary,
         channel: cell.channel,
         phase: cell.phase,
         terminal: cell.terminal,
         provisional: cell.provisional,
-        diagnosticSummary: cell.diagnosticSummary,
+        diagnosticSummary: isToolCell && rawTitle && title !== rawTitle
+          ? { ...(cell.diagnosticSummary ?? {}), rawToolName: rawTitle }
+          : cell.diagnosticSummary,
         operationIds,
         rolloutTraceEvents: cellRolloutEvents,
-        toolLifecycleModel: normalizeNativeToolLifecycleModel(cell.toolLifecycleModel ?? lifecycleModel),
+        toolLifecycleModel: cellLifecycleModel,
         sourceItemId: cell.sourceItemId,
       };
     })
     .filter(shouldDisplayTranscriptCell);
+}
+
+function nativeCellHasToolCall(operationIds: string[], model: CodexToolLifecycleModel) {
+  return model.toolCalls.some((toolCall) => (
+    operationIds.includes(toolCall.rawOperationId)
+    || operationIds.includes(toolCall.toolCallId)
+  ));
+}
+
+function nativeCellCommandSource(operationIds: string[], model: CodexToolLifecycleModel) {
+  const toolCallIds = new Set(
+    model.toolCalls
+      .filter((toolCall) => (
+        operationIds.includes(toolCall.rawOperationId)
+        || operationIds.includes(toolCall.toolCallId)
+      ))
+      .map((toolCall) => toolCall.toolCallId),
+  );
+  return model.terminalOperations
+    .filter((operation) => (
+      operationIds.includes(operation.rawOperationId)
+      || operationIds.includes(operation.operationId)
+      || toolCallIds.has(operation.toolCallId)
+    ))
+    .map((operation) => operation.request);
 }
 
 function hasNativeProcessCells(cells: CodexTranscriptCell[]) {

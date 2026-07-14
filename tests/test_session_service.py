@@ -1,5 +1,7 @@
+from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
 import queue
+import threading
 
 from core.chat.conversation_ledger import (
     EVENT_ASSISTANT_MESSAGE,
@@ -214,6 +216,35 @@ def test_session_turn_capture_correlates_parallel_same_name_tools_by_call_id():
     assert tool_calls["call-b"]["status"] == "running"
     assert feedback_events["call-a"]["status"] == "done"
     assert feedback_events["call-b"]["status"] == "running"
+
+
+def test_session_turn_capture_records_parallel_same_name_tools_with_unique_sequences():
+    capture = session_service.SessionTurnCapture(session_id="session-parallel", turn_id="turn-parallel")
+    worker_barrier = threading.Barrier(2)
+
+    def record_tool(call_id: str) -> None:
+        worker_barrier.wait(timeout=5)
+        capture.note_tool_event("read_file_tool", "running", f"读取 {call_id}", call_id=call_id)
+        capture.note_tool_event(
+            "read_file_tool",
+            "done",
+            f"{call_id} 完成",
+            call_id=call_id,
+            result=call_id,
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        futures = [pool.submit(record_tool, call_id) for call_id in ("call-a", "call-b")]
+        for future in futures:
+            future.result(timeout=5)
+
+    tool_calls = {item["callId"]: item for item in capture.tool_calls}
+    feedback_events = [item for item in capture.feedback_events if item.get("kind") == "tool"]
+    assert set(tool_calls) == {"call-a", "call-b"}
+    assert {item["status"] for item in tool_calls.values()} == {"done"}
+    assert {item["callId"] for item in feedback_events} == {"call-a", "call-b"}
+    assert {item["status"] for item in feedback_events} == {"done"}
+    assert len({item["sequence"] for item in feedback_events}) == 2
 
 
 def test_session_turn_capture_summarizes_repeated_tool_loop_progress():

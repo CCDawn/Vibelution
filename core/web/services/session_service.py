@@ -2633,6 +2633,7 @@ class SessionTurnCapture:
     _tool_loop_last_failure: str = ""
     _committed_content_length: int = 0
     _latest_tool_feedback_sequence: int = 0
+    _lock: threading.RLock = field(default_factory=threading.RLock, init=False, repr=False, compare=False)
 
     def note_thought(self, text: str) -> None:
         cleaned = _sanitize_thought_delta_text(text)
@@ -2748,9 +2749,10 @@ class SessionTurnCapture:
         self._committed_content_length = len(_sanitize_message_content("assistant", self.content))
 
     def reserve_feedback_sequence(self) -> int:
-        sequence = self._next_feedback_sequence
-        self._next_feedback_sequence += 1
-        return sequence
+        with self._lock:
+            sequence = self._next_feedback_sequence
+            self._next_feedback_sequence += 1
+            return sequence
 
     def clear_content(self) -> None:
         self.content = ""
@@ -2864,38 +2866,39 @@ class SessionTurnCapture:
             },
             entry,
         )
-        related_thought_sequence = self._latest_thought_sequence or self._pending_related_thought_sequence or 0
-        for index in range(len(self.tool_calls) - 1, -1, -1):
-            existing = self.tool_calls[index]
-            if existing.get("status") != "running":
-                continue
-            existing_call_id = str(existing.get("callId") or "").strip()
-            if normalized_call_id:
-                if existing_call_id != normalized_call_id:
+        with self._lock:
+            related_thought_sequence = self._latest_thought_sequence or self._pending_related_thought_sequence or 0
+            for index in range(len(self.tool_calls) - 1, -1, -1):
+                existing = self.tool_calls[index]
+                if existing.get("status") != "running":
                     continue
-            elif existing_call_id or existing.get("name") != tool_name:
-                continue
-            if existing.get("name") == tool_name:
-                self.tool_calls[index] = entry
-                self._update_running_tool_feedback_event(entry, related_thought_sequence=related_thought_sequence)
-                self._latest_tool_feedback_sequence = self._feedback_sequence_for_tool(tool_name, normalized_call_id)
-                self._remember_tool_loop_outcome(entry)
-                self._update_long_loop_progress_event(tool_name)
-                self._latest_thought_sequence = 0
-                self._latest_thought_text = ""
-                self._pending_related_thought_sequence = 0
-                return
-        self.tool_calls.append(entry)
-        self._tool_loop_call_count += 1
-        if len(self.tool_calls) > 30:
-            self.tool_calls = self.tool_calls[-30:]
-        self._append_tool_feedback_event(entry, related_thought_sequence=related_thought_sequence)
-        self._latest_tool_feedback_sequence = self._feedback_sequence_for_tool(tool_name, normalized_call_id)
-        self._remember_tool_loop_outcome(entry)
-        self._update_long_loop_progress_event(tool_name)
-        self._latest_thought_sequence = 0
-        self._latest_thought_text = ""
-        self._pending_related_thought_sequence = 0
+                existing_call_id = str(existing.get("callId") or "").strip()
+                if normalized_call_id:
+                    if existing_call_id != normalized_call_id:
+                        continue
+                elif existing_call_id or existing.get("name") != tool_name:
+                    continue
+                if existing.get("name") == tool_name:
+                    self.tool_calls[index] = entry
+                    self._update_running_tool_feedback_event(entry, related_thought_sequence=related_thought_sequence)
+                    self._latest_tool_feedback_sequence = self._feedback_sequence_for_tool(tool_name, normalized_call_id)
+                    self._remember_tool_loop_outcome(entry)
+                    self._update_long_loop_progress_event(tool_name)
+                    self._latest_thought_sequence = 0
+                    self._latest_thought_text = ""
+                    self._pending_related_thought_sequence = 0
+                    return
+            self.tool_calls.append(entry)
+            self._tool_loop_call_count += 1
+            if len(self.tool_calls) > 30:
+                self.tool_calls = self.tool_calls[-30:]
+            self._append_tool_feedback_event(entry, related_thought_sequence=related_thought_sequence)
+            self._latest_tool_feedback_sequence = self._feedback_sequence_for_tool(tool_name, normalized_call_id)
+            self._remember_tool_loop_outcome(entry)
+            self._update_long_loop_progress_event(tool_name)
+            self._latest_thought_sequence = 0
+            self._latest_thought_text = ""
+            self._pending_related_thought_sequence = 0
 
     def _feedback_sequence_for_tool(self, tool_name: str, call_id: str = "") -> int:
         normalized = str(tool_name or "").strip()
@@ -2958,17 +2961,18 @@ class SessionTurnCapture:
         )
 
     def _append_feedback_event(self, event: dict[str, Any]) -> int:
-        sequence = self._next_feedback_sequence
-        self._next_feedback_sequence += 1
-        entry = {
-            "sequence": sequence,
-            "timestamp": _now_timestamp(),
-            **event,
-        }
-        self.feedback_events.append(entry)
-        if len(self.feedback_events) > 120:
-            self.feedback_events = self.feedback_events[-120:]
-        return sequence
+        with self._lock:
+            sequence = self._next_feedback_sequence
+            self._next_feedback_sequence += 1
+            entry = {
+                "sequence": sequence,
+                "timestamp": _now_timestamp(),
+                **event,
+            }
+            self.feedback_events.append(entry)
+            if len(self.feedback_events) > 120:
+                self.feedback_events = self.feedback_events[-120:]
+            return sequence
 
     def _append_tool_feedback_event(self, tool_call: dict[str, Any], *, related_thought_sequence: int = 0) -> None:
         entry = {
