@@ -3026,12 +3026,32 @@ def test_runtime_scene_package_records_conversation_as_child_log(tmp_path, monke
             "thought": "不应进入诊断包的思考内容",
             "metadata": {
                 "turnId": "turn-demo",
+                "turn_id": "turn-shadowed",
                 "clientSubmissionId": "submission-demo",
+                "client_submission_id": "submission-shadowed",
+                "submissionId": "submission-alias-shadowed",
+                "submission_id": "submission-alias-snake-shadowed",
+                "invocationId": "invocation-demo",
+                "invocation_id": "invocation-shadowed",
             },
         },
         event="user_message",
         status="running",
-        tool_calls=[{"name": "inspect_logs", "status": "done", "summary": "read package"}],
+        tool_calls=[
+            {
+                "id": "tool-demo",
+                "callId": "call-demo",
+                "invocationId": "tool-invocation-demo",
+                "invocation_id": "tool-invocation-shadowed",
+                "name": "inspect_logs",
+                "status": "done",
+                "summary": "read package",
+                "arguments": {"path": "secret-package"},
+                "result": "secret-result",
+                "prompt": "secret-prompt",
+                "content": "secret-content",
+            }
+        ],
     )
 
     assert payload["accepted"] is True
@@ -3044,21 +3064,62 @@ def test_runtime_scene_package_records_conversation_as_child_log(tmp_path, monke
     assert conversation_event["content"] == ""
     assert conversation_event["content_length"] == len(sensitive_content)
     assert conversation_event["content_redacted"] is True
+    assert conversation_event["session_id"] == "session-demo"
+    assert conversation_event["turn_id"] == "turn-demo"
+    assert conversation_event["client_submission_id"] == "submission-demo"
+    assert conversation_event["invocation_id"] == "invocation-demo"
     assert conversation_event["message"] == {
         "id": "message-demo",
         "role": "user",
         "metadata": {
             "turnId": "turn-demo",
             "clientSubmissionId": "submission-demo",
+            "invocationId": "invocation-demo",
         },
     }
+    assert conversation_event["tool_calls"] == [
+        {
+            "id": "tool-demo",
+            "callId": "call-demo",
+            "invocationId": "tool-invocation-demo",
+            "name": "inspect_logs",
+            "status": "done",
+            "summary": "read package",
+        }
+    ]
     assert (scene_dir / "agent" / "turns.jsonl").exists()
     assert (scene_dir / "agent" / "tool_calls.jsonl").exists()
     timeline_text = (scene_dir / "timeline.jsonl").read_text(encoding="utf-8")
     assert "conversation.user_message" in timeline_text
     assert sensitive_content not in timeline_text
     assert "contentPreview" not in timeline_text
-    assert sensitive_content not in (scene_dir / "agent" / "turns.jsonl").read_text(encoding="utf-8")
+    timeline_event = json.loads(timeline_text.splitlines()[-1])
+    assert timeline_event["fields"]["sessionId"] == "session-demo"
+    assert timeline_event["fields"]["turnId"] == "turn-demo"
+    assert timeline_event["fields"]["clientSubmissionId"] == "submission-demo"
+    assert timeline_event["fields"]["invocationId"] == "invocation-demo"
+    turn_text = (scene_dir / "agent" / "turns.jsonl").read_text(encoding="utf-8")
+    assert sensitive_content not in turn_text
+    turn_event = json.loads(turn_text)
+    assert turn_event["session_id"] == "session-demo"
+    assert turn_event["turn_id"] == "turn-demo"
+    assert turn_event["client_submission_id"] == "submission-demo"
+    assert turn_event["invocation_id"] == "invocation-demo"
+    tool_call_text = (scene_dir / "agent" / "tool_calls.jsonl").read_text(encoding="utf-8")
+    tool_call_event = json.loads(tool_call_text)
+    assert tool_call_event["session_id"] == "session-demo"
+    assert tool_call_event["turn_id"] == "turn-demo"
+    assert tool_call_event["client_submission_id"] == "submission-demo"
+    assert tool_call_event["invocation_id"] == "tool-invocation-demo"
+    assert tool_call_event["id"] == "tool-demo"
+    assert tool_call_event["callId"] == "call-demo"
+    assert tool_call_event["summary"] == "read package"
+    for forbidden_key in ("arguments", "result", "prompt", "content"):
+        assert forbidden_key not in tool_call_event
+        assert forbidden_key not in conversation_event["tool_calls"][0]
+    for forbidden_text in ("secret-package", "secret-result", "secret-prompt", "secret-content"):
+        assert forbidden_text not in conversation_text
+        assert forbidden_text not in tool_call_text
 
     detail_response = client.get("/api/logs/runtime-scenes/scene-chat")
     assert detail_response.status_code == 200
@@ -3071,6 +3132,22 @@ def test_runtime_scene_package_records_conversation_as_child_log(tmp_path, monke
     assert detail["timeline"][-1]["eventCode"] == "conversation.user_message"
     assert detail["timeline"][-1]["rawRefs"] == [{"path": "conversations/session-demo.jsonl", "tail_lines": 80}]
     assert detail["conversationLogs"][0]["path"] == "conversations/session-demo.jsonl"
+
+
+def test_runtime_scene_conversation_keeps_no_runtime_scene_behavior(tmp_path, monkeypatch):
+    monkeypatch.setattr(runtime_scene_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(runtime_scene_service, "LAUNCHER_STATE_PATH", tmp_path / "missing-launcher-state.json")
+
+    payload = runtime_scene_service.record_runtime_scene_conversation_event(
+        "session-no-scene",
+        "user",
+        "content must not be persisted",
+        message={"metadata": {"turnId": "turn-no-scene"}},
+        tool_calls=[{"name": "inspect_logs", "arguments": {"secret": True}}],
+    )
+
+    assert payload == {"accepted": False, "reason": "no_runtime_scene"}
+    assert not (tmp_path / "logs" / "runtime_scenes").exists()
 
 def test_runtime_scene_event_helper_records_structured_lifecycle_event(tmp_path, monkeypatch):
     scene_dir = _seed_runtime_scene_bundle(tmp_path, scene_id="scene-event", status="running")
