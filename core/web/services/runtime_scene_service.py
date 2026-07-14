@@ -1172,19 +1172,20 @@ def record_runtime_scene_conversation_event(
     relative_path = f"{CONVERSATIONS_DIR}/{normalized_session_id}.jsonl"
     content_length = len(str(content or ""))
     content_redacted = content_length > 0
+    correlation_ids = _runtime_scene_conversation_correlation_ids(session_id, message)
     payload = {
         "schema_version": 1,
         "runtime_scene_id": scene_id,
         "ts": timestamp,
-        "session_id": str(session_id or "").strip(),
+        **correlation_ids,
         "event": str(event or "message").strip() or "message",
         "role": role_label,
         "status": str(status or "").strip(),
         "content": "",
         "content_length": content_length,
         "content_redacted": content_redacted,
-        "message": _runtime_scene_conversation_message_summary(message),
-        "tool_calls": tool_calls if isinstance(tool_calls, list) else [],
+        "message": _runtime_scene_conversation_message_summary(message, correlation_ids),
+        "tool_calls": _runtime_scene_safe_tool_calls(tool_calls),
         "active_task": active_task if isinstance(active_task, dict) else {},
     }
     with RUNTIME_SCENE_PACKAGE_WRITE_LOCK:
@@ -1206,7 +1207,10 @@ def record_runtime_scene_conversation_event(
                 "outcome": str(status or "observed").strip() or "observed",
                 "message": f"{role_label} conversation message recorded ({content_length} chars).",
                 "fields": {
-                    "sessionId": str(session_id or "").strip(),
+                    "sessionId": correlation_ids["session_id"],
+                    "turnId": correlation_ids["turn_id"],
+                    "clientSubmissionId": correlation_ids["client_submission_id"],
+                    "invocationId": correlation_ids["invocation_id"],
                     "role": role_label,
                     "status": str(status or "").strip(),
                     "contentLength": content_length,
@@ -1230,7 +1234,51 @@ def record_runtime_scene_conversation_event(
     }
 
 
-def _runtime_scene_conversation_message_summary(message: dict[str, Any] | None) -> dict[str, Any]:
+def _runtime_scene_conversation_correlation_ids(
+    session_id: str,
+    message: dict[str, Any] | None,
+) -> dict[str, str]:
+    sources: list[dict[str, Any]] = []
+    if isinstance(message, dict):
+        sources.append(message)
+        metadata = message.get("metadata")
+        if isinstance(metadata, dict):
+            sources.append(metadata)
+
+    return {
+        "session_id": _runtime_scene_safe_id(session_id)
+        or _runtime_scene_first_safe_id(sources, ("sessionId", "session_id")),
+        "turn_id": _runtime_scene_first_safe_id(sources, ("turnId", "turn_id")),
+        "client_submission_id": _runtime_scene_first_safe_id(
+            sources,
+            ("clientSubmissionId", "submissionId", "client_submission_id", "submission_id"),
+        ),
+        "invocation_id": _runtime_scene_first_safe_id(sources, ("invocationId", "invocation_id")),
+    }
+
+
+def _runtime_scene_first_safe_id(
+    sources: list[dict[str, Any]],
+    aliases: tuple[str, ...],
+) -> str:
+    for alias in aliases:
+        for source in sources:
+            normalized = _runtime_scene_safe_id(source.get(alias))
+            if normalized:
+                return normalized
+    return ""
+
+
+def _runtime_scene_safe_id(value: Any) -> str:
+    if isinstance(value, bool) or not isinstance(value, (str, int, float)):
+        return ""
+    return _truncate_text(str(value).strip(), 320)
+
+
+def _runtime_scene_conversation_message_summary(
+    message: dict[str, Any] | None,
+    correlation_ids: dict[str, str] | None = None,
+) -> dict[str, Any]:
     if not isinstance(message, dict):
         return {}
     summary: dict[str, Any] = {}
@@ -1242,19 +1290,43 @@ def _runtime_scene_conversation_message_summary(message: dict[str, Any] | None) 
     if isinstance(metadata, dict):
         safe_metadata = {
             key: metadata[key]
-            for key in (
-                "turnId",
-                "turn_id",
-                "clientSubmissionId",
-                "client_submission_id",
-                "source",
-                "kind",
-            )
+            for key in ("source", "kind")
             if isinstance(metadata.get(key), (str, int, float, bool)) and metadata.get(key) not in ("", None)
         }
+        normalized_ids = correlation_ids or _runtime_scene_conversation_correlation_ids("", message)
+        for source_key, target_key in (
+            ("turn_id", "turnId"),
+            ("client_submission_id", "clientSubmissionId"),
+            ("invocation_id", "invocationId"),
+        ):
+            value = normalized_ids.get(source_key) or ""
+            if value:
+                safe_metadata[target_key] = value
         if safe_metadata:
             summary["metadata"] = safe_metadata
     return summary
+
+
+def _runtime_scene_safe_tool_calls(tool_calls: list[dict[str, Any]] | None) -> list[dict[str, str]]:
+    if not isinstance(tool_calls, list):
+        return []
+    safe_items: list[dict[str, str]] = []
+    for item in tool_calls:
+        if not isinstance(item, dict):
+            continue
+        safe_item: dict[str, str] = {}
+        for key in ("id", "callId", "name", "status"):
+            value = _runtime_scene_safe_id(item.get(key))
+            if value:
+                safe_item[key] = value
+        invocation_id = _runtime_scene_first_safe_id([item], ("invocationId", "invocation_id"))
+        if invocation_id:
+            safe_item["invocationId"] = invocation_id
+        summary = _truncate_text(str(item.get("summary") or ""), 800)
+        if summary:
+            safe_item["summary"] = summary
+        safe_items.append(safe_item)
+    return safe_items
 
 
 def _append_agent_turn_log(scene_dir: Path, conversation_payload: dict[str, Any]) -> None:
@@ -1268,6 +1340,9 @@ def _append_agent_turn_log(scene_dir: Path, conversation_payload: dict[str, Any]
             "runtime_scene_id": conversation_payload.get("runtime_scene_id") or "",
             "ts": conversation_payload.get("ts") or "",
             "session_id": conversation_payload.get("session_id") or "",
+            "turn_id": conversation_payload.get("turn_id") or "",
+            "client_submission_id": conversation_payload.get("client_submission_id") or "",
+            "invocation_id": conversation_payload.get("invocation_id") or "",
             "event": conversation_payload.get("event") or "",
             "role": conversation_payload.get("role") or "",
             "status": conversation_payload.get("status") or "",
@@ -1286,6 +1361,9 @@ def _append_agent_tool_call_logs(scene_dir: Path, conversation_payload: dict[str
     for index, item in enumerate(tool_calls):
         if not isinstance(item, dict):
             continue
+        invocation_id = _runtime_scene_safe_id(item.get("invocationId")) or str(
+            conversation_payload.get("invocation_id") or ""
+        )
         _append_scene_jsonl(
             scene_dir,
             f"{AGENT_DIR}/tool_calls.jsonl",
@@ -1294,9 +1372,15 @@ def _append_agent_tool_call_logs(scene_dir: Path, conversation_payload: dict[str
                 "runtime_scene_id": conversation_payload.get("runtime_scene_id") or "",
                 "ts": conversation_payload.get("ts") or "",
                 "session_id": conversation_payload.get("session_id") or "",
+                "turn_id": conversation_payload.get("turn_id") or "",
+                "client_submission_id": conversation_payload.get("client_submission_id") or "",
+                "invocation_id": invocation_id,
                 "event": conversation_payload.get("event") or "",
                 "role": conversation_payload.get("role") or "",
                 "index": index,
+                "id": _runtime_scene_safe_id(item.get("id")),
+                "callId": _runtime_scene_safe_id(item.get("callId")),
+                "invocationId": invocation_id,
                 "name": str(item.get("name") or "").strip(),
                 "status": str(item.get("status") or "").strip(),
                 "summary": _truncate_text(str(item.get("summary") or ""), 800),
