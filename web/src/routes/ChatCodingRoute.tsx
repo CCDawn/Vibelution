@@ -3065,17 +3065,22 @@ export function ChatCodingRoute() {
       await Promise.all([
         queryClient.cancelQueries({ queryKey: queryKeys.sessions() }),
         queryClient.cancelQueries({ queryKey: queryKeys.conversations() }),
+        queryClient.cancelQueries({ queryKey: queryKeys.agents() }),
       ]);
       const previousSessions = queryClient.getQueryData<SessionSummary[]>(queryKeys.sessions());
       const previousSessionIndexCaches = captureSessionIndexCacheSnapshots(queryClient);
       const previousConversations = queryClient.getQueryData<ConversationSummary[]>(queryKeys.conversations());
+      const previousAgents = queryClient.getQueryData<AgentInstance[]>(queryKeys.agents());
       updateSessionSummaryCaches(queryClient, (sessions) =>
         sessions?.filter((session) => session.id !== variables.sessionId),
       );
       queryClient.setQueryData<ConversationSummary[]>(queryKeys.conversations(), (conversations) =>
         removeDeletedSessionFromConversations(conversations, variables.sessionId),
       );
-      return { previousSessions, previousSessionIndexCaches, previousConversations };
+      queryClient.setQueryData<AgentInstance[]>(queryKeys.agents(), (agents) =>
+        agents?.filter((agent) => agent.directSessionId !== variables.sessionId),
+      );
+      return { previousSessions, previousSessionIndexCaches, previousConversations, previousAgents };
     },
     onSuccess: (deleteResult, variables) => {
       const nextActiveSessionId = deleteResult.nextActiveSessionId || "";
@@ -3102,6 +3107,9 @@ export function ChatCodingRoute() {
       restoreSessionIndexCacheSnapshots(queryClient, context?.previousSessionIndexCaches);
       if (context?.previousConversations) {
         queryClient.setQueryData(queryKeys.conversations(), context.previousConversations);
+      }
+      if (context?.previousAgents !== undefined) {
+        queryClient.setQueryData(queryKeys.agents(), context.previousAgents);
       }
       setSessionComposerErrors((current) => ({
         ...current,
