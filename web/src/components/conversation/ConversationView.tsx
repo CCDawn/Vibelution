@@ -71,7 +71,6 @@ import { isInternalRuntimeStatus } from "./conversationDisplayProtocol";
 import {
   buildAgentMessageOperationGroups,
   buildAgentMessageReActOperationGroups,
-  displayToolLabel,
   type AgentMessageOperation,
   type AgentMessageOperationGroups,
   type AgentMessageOperationKind,
@@ -1833,7 +1832,7 @@ export function ConversationView({
     if (cell.kind === "tool_call") {
       const rawToolName = cell.toolLifecycleModel?.toolCalls?.[0]?.rawToolName?.trim();
       const rawTitle = cell.title?.trim();
-      return displayToolLabel(rawToolName || rawTitle || "");
+      return codexTranscriptToolLabel(rawToolName || rawTitle || "");
     }
     if (cell.title?.trim()) {
       return cell.title.trim();
@@ -1848,6 +1847,30 @@ export function ConversationView({
       return lang === "zh" ? "执行失败" : "Failed";
     }
     return lang === "zh" ? "工具调用" : "Tool call";
+  }
+
+  function codexTranscriptToolLabel(name: string) {
+    const normalized = String(name ?? "").trim();
+    const lower = normalized.toLowerCase();
+    const exactLabels: Record<string, string> = {
+      cli_tool: lang === "zh" ? "命令" : "Command",
+      grep_search_tool: lang === "zh" ? "搜索" : "Search",
+      read_file_tool: lang === "zh" ? "读取文件" : "Read file",
+      glob_tool: lang === "zh" ? "列出文件" : "List files",
+      code_symbol_tool: lang === "zh" ? "代码图谱" : "Code graph",
+      search_code_tool: lang === "zh" ? "搜索代码" : "Search code",
+      get_git_status_summary_tool: lang === "zh" ? "Git 状态" : "Git status",
+    };
+    if (exactLabels[lower]) {
+      return exactLabels[lower];
+    }
+    if (lower.includes("read") || lower.includes("file")) {
+      return lang === "zh" ? "读取" : "Read";
+    }
+    if (lower.includes("search")) {
+      return lang === "zh" ? "搜索" : "Search";
+    }
+    return normalized || (lang === "zh" ? "工具调用" : "Tool call");
   }
 
   function codexTranscriptCellMeta(cell: CodexTranscriptCell) {
