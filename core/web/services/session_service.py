@@ -8047,6 +8047,7 @@ def _normalize_messages(
 ) -> list[dict[str, Any]]:
     ledger_events_by_turn: dict[str, list[dict[str, Any]]] | None = None
     raw_items = list(items or [])
+    timeline_lang = get_web_language() if include_timeline else ""
     normalized_start_index = max(1, int(source_start_index or 1))
     normalized_transcript_scope = _normalize_session_detail_transcript_scope(transcript_scope)
     timeline_target_indices = (
@@ -8114,6 +8115,7 @@ def _normalize_messages(
                 feedback_events=timeline_feedback_events,
                 streaming=bool(raw.get("streaming")),
                 include_assistant_text=include_assistant_text,
+                lang=timeline_lang,
             )
             if timeline_items:
                 entry["timelineItems"] = timeline_items
@@ -18057,6 +18059,7 @@ def _build_message_timeline_items(
     feedback_events: Any = None,
     streaming: bool = False,
     include_assistant_text: bool = True,
+    lang: str | None = None,
 ) -> list[dict[str, Any]]:
     normalized_message_id = str(message_id or "").strip()
     if not normalized_message_id:
@@ -18069,7 +18072,7 @@ def _build_message_timeline_items(
         content=content,
         feedback_events=normalized_feedback_events,
         streaming=streaming,
-        lang=get_web_language(),
+        lang=str(lang or "").strip() or get_web_language(),
         include_assistant_text=include_assistant_text,
     )
 
