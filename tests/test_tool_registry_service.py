@@ -1,6 +1,7 @@
 import pytest
 import json
 import time
+from dataclasses import replace
 
 from core.web.services import agent_directory_service
 from core.web.services import tool_catalog
@@ -14,6 +15,80 @@ def _isolate_data_home(tmp_path, monkeypatch):
 
 def _is_explicitly_allowed_tool(name: str) -> bool:
     return str(name or "").strip() in tool_catalog.explicit_allow_tool_names()
+
+
+def test_tool_registry_exposes_one_stable_secret_safe_descriptor_per_llm_tool(tmp_path, monkeypatch):
+    monkeypatch.setattr(registry, "GENERATED_TOOLS_PATH", tmp_path / "generated_tools.json")
+
+    first = registry.get_tool_registry()
+    second = registry.get_tool_registry()
+    descriptors = {item["name"]: item for item in first["descriptors"]}
+    llm_visible_names = {item["name"] for item in first["tools"] if item["llmVisible"]}
+
+    assert first["descriptorSchemaVersion"] == tool_catalog.TOOL_DESCRIPTOR_SCHEMA_VERSION
+    assert first["registryVersion"] == tool_catalog.TOOL_REGISTRY_VERSION
+    assert first["registryFingerprint"] == second["registryFingerprint"]
+    assert len(descriptors) == len(first["descriptors"])
+    assert llm_visible_names.issubset(descriptors)
+    assert first["counts"]["descriptors"] == len(descriptors)
+
+    grep_descriptor = descriptors["grep_search_tool"]
+    assert grep_descriptor["schemaVersion"] == tool_catalog.TOOL_DESCRIPTOR_SCHEMA_VERSION
+    assert len(grep_descriptor["schemaHash"]) == 64
+    assert grep_descriptor["schemaHash"] == {
+        item["name"]: item for item in second["descriptors"]
+    }["grep_search_tool"]["schemaHash"]
+    assert grep_descriptor["capabilities"] == ["codebase", "read_only", "search"]
+    assert grep_descriptor["risk"] == "read"
+    assert grep_descriptor["concurrency"] == "safe"
+    assert grep_descriptor["scopes"] == ["workspace"]
+    assert grep_descriptor["approval"] == "never"
+    assert grep_descriptor["availability"] == {"platforms": [], "requiredConfig": []}
+    assert "argsSchema" not in grep_descriptor
+
+
+def test_tool_descriptor_schema_hash_is_order_independent():
+    first = tool_catalog.build_tool_descriptor(
+        "grep_search_tool",
+        args_schema={
+            "type": "object",
+            "properties": {"path": {"type": "string"}, "limit": {"type": "integer"}},
+        },
+    )
+    second = tool_catalog.build_tool_descriptor(
+        "grep_search_tool",
+        args_schema={
+            "properties": {"limit": {"type": "integer"}, "path": {"type": "string"}},
+            "type": "object",
+        },
+    )
+
+    assert first.schema_hash == second.schema_hash
+    assert tool_catalog.registry_descriptor_fingerprint((first,)) == tool_catalog.registry_descriptor_fingerprint((second,))
+
+
+def test_tool_descriptor_validation_rejects_unknown_duplicate_and_ambiguous_tools():
+    descriptor = tool_catalog.build_tool_descriptor("grep_search_tool", args_schema={"type": "object"})
+    cli_descriptor = tool_catalog.build_tool_descriptor("cli_tool", args_schema={"type": "object"})
+
+    with pytest.raises(tool_catalog.ToolDescriptorError, match="no catalog metadata"):
+        tool_catalog.build_tool_descriptor("unknown_builtin_tool", args_schema={})
+    with pytest.raises(tool_catalog.ToolDescriptorError, match="Duplicate canonical tool name"):
+        tool_catalog.validate_tool_descriptors((descriptor, descriptor))
+    with pytest.raises(tool_catalog.ToolDescriptorError, match="Invalid capability"):
+        tool_catalog.validate_tool_descriptors((replace(descriptor, capabilities=("Bad Capability",)),))
+    with pytest.raises(tool_catalog.ToolDescriptorError, match="alias collides"):
+        tool_catalog.validate_tool_descriptors((replace(descriptor, aliases=("cli_tool",)), cli_descriptor))
+
+
+def test_tool_registry_rejects_duplicate_active_builtin_names(tmp_path, monkeypatch):
+    monkeypatch.setattr(registry, "GENERATED_TOOLS_PATH", tmp_path / "generated_tools.json")
+    builtins = registry._builtin_tool_items()
+    monkeypatch.setattr(registry, "_builtin_tool_items", lambda: [*builtins, dict(builtins[0])])
+    monkeypatch.setattr(registry, "_load_generated_tools", lambda: [])
+
+    with pytest.raises(registry.ToolRegistryError, match="Duplicate canonical tool name"):
+        registry.get_tool_registry()
 
 
 def test_tool_registry_lists_builtins_as_protected(tmp_path, monkeypatch):
