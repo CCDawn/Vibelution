@@ -118,17 +118,12 @@ def _model_choices() -> list[dict]:
 
 
 def test_session_llm_options_expose_current_model_and_effort(monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setattr(session_service, "_ensure_session_reasoning_effort_initialized", lambda _session_id: "high")
+    monkeypatch.setattr(session_service, "_session_reasoning_effort_snapshot", lambda _session_id: "high")
     monkeypatch.setattr(session_service, "_session_fixed_model_choice", lambda _session_id: _model_choices()[0])
     monkeypatch.setattr(
         session_service,
         "get_session_detail",
-        lambda _session_id, **_kwargs: {
-            "id": "session-live",
-            "agentId": "agent-live",
-            "dialogueModelId": "ai-pixel/gpt-5.6-luna",
-            "reasoningEffort": "high",
-        },
+        lambda *_args, **_kwargs: pytest.fail("LLM options must not hydrate full session detail"),
     )
     payload = session_service.get_session_llm_options("session-live")
 

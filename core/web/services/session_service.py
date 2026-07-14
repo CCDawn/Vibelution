@@ -11637,14 +11637,32 @@ def _session_llm_model_choices() -> list[dict[str, Any]]:
     return choices
 
 
+def _session_agent_id_snapshot(session_id: str) -> str:
+    normalized_session_id = str(session_id or "").strip()
+    with _CHAT_STATE_LOCK:
+        payload = load_chat_state(PROJECT_ROOT)
+        conversation = _find_conversation_entry(payload, normalized_session_id)
+        if conversation is None:
+            raise SessionNotFoundError(f"Session not found: {normalized_session_id}")
+        return str(conversation.get("agent_id") or conversation.get("agentId") or "").strip()
+
+
 def _session_fixed_model_choice(session_id: str) -> dict[str, Any]:
     normalized_session_id = str(session_id or "").strip()
-    detail = get_session_detail(normalized_session_id, message_limit=0, transcript_scope="none")
-    if detail is None:
-        raise SessionNotFoundError(f"Session not found: {normalized_session_id}")
-    agent_id = str(detail.get("agentId") or "").strip()
+    agent_id = _session_agent_id_snapshot(normalized_session_id)
     agent = get_agent(agent_id, include_archived=False) if agent_id else None
-    model_ref = str(detail.get("dialogueModelId") or agent_dialogue_model_id(agent) or "").strip()
+    fallback_detail: dict[str, Any] | None = None
+    if agent is None:
+        fallback_detail = get_session_detail(normalized_session_id, message_limit=0, transcript_scope="none")
+        if fallback_detail is None:
+            raise SessionNotFoundError(f"Session not found: {normalized_session_id}")
+        fallback_agent_id = str(fallback_detail.get("agentId") or "").strip()
+        agent = get_agent(fallback_agent_id, include_archived=False) if fallback_agent_id else None
+    model_ref = str(
+        agent_dialogue_model_id(agent)
+        or (fallback_detail or {}).get("dialogueModelId")
+        or ""
+    ).strip()
     if not model_ref:
         raise SessionValidationError("当前会话的 Agent 尚未绑定对话模型。")
     selected = next(
@@ -11698,11 +11716,14 @@ def _ensure_session_reasoning_effort_initialized(session_id: str) -> str:
     if initialized:
         return current
     model = _session_fixed_model_choice(normalized_session_id)
-    detail = get_session_detail(normalized_session_id, message_limit=0, transcript_scope="none")
-    if detail is None:
-        raise SessionNotFoundError(f"Session not found: {normalized_session_id}")
-    agent_id = str(detail.get("agentId") or "").strip()
+    agent_id = _session_agent_id_snapshot(normalized_session_id)
     agent = get_agent(agent_id, include_archived=False) if agent_id else None
+    if agent is None:
+        detail = get_session_detail(normalized_session_id, message_limit=0, transcript_scope="none")
+        if detail is None:
+            raise SessionNotFoundError(f"Session not found: {normalized_session_id}")
+        fallback_agent_id = str(detail.get("agentId") or "").strip()
+        agent = get_agent(fallback_agent_id, include_archived=False) if fallback_agent_id else None
     initial = _initial_session_reasoning_effort(agent, model)
     with _CHAT_STATE_LOCK:
         payload = load_chat_state(PROJECT_ROOT)
@@ -11726,15 +11747,12 @@ def _session_reasoning_effort_snapshot(session_id: str) -> str:
 
 
 def get_session_llm_options(session_id: str) -> dict[str, Any]:
-    _ensure_session_reasoning_effort_initialized(session_id)
-    detail = get_session_detail(session_id, message_limit=0, transcript_scope="none")
-    if detail is None:
-        raise SessionNotFoundError(f"Session not found: {session_id}")
+    current_reasoning_effort = _session_reasoning_effort_snapshot(session_id)
     model = _session_fixed_model_choice(session_id)
     return {
         "sessionId": str(session_id or "").strip(),
         "currentModelId": str(model.get("modelRef") or model.get("modelId") or "").strip(),
-        "currentReasoningEffort": normalize_reasoning_effort(detail.get("reasoningEffort")),
+        "currentReasoningEffort": normalize_reasoning_effort(current_reasoning_effort),
         "model": model,
     }
 
