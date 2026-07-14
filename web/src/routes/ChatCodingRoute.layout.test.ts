@@ -1931,6 +1931,17 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("mergeSessionDetailIntoConversations(conversations, detail)");
   });
 
+  it("avoids refetching the active session detail after a turn when its SSE stream owns live state", () => {
+    const submitMutationStart = routeSource.indexOf("const submitTurnMutation = useMutation");
+    const submitSuccessStart = routeSource.indexOf("onSuccess: (acceptedTurn, variables)", submitMutationStart);
+    const submitErrorStart = routeSource.indexOf("onError: (error, variables)", submitSuccessStart);
+    const submitSuccessBlock = routeSource.slice(submitSuccessStart, submitErrorStart);
+
+    expect(submitSuccessBlock).toContain("directSessionStreamOwnsLiveQueries");
+    expect(submitSuccessBlock).toContain("chatWorkspaceCache.refreshConversationIndex()");
+    expect(submitSuccessBlock).toContain("chatWorkspaceCache.afterDirectTurnAccepted(acceptedTurn.sessionId || variables.sessionId)");
+  });
+
   it("keeps active chat streams stable during direct session route switches", () => {
     const sessionStreamEffectSource = routeSource.slice(
       routeSource.indexOf("const stream = new EventSource(`/api/sessions/${streamSessionId}/events?initial=light`);"),

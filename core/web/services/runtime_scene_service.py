@@ -2739,6 +2739,17 @@ def _load_launcher_state() -> dict[str, Any]:
     return payload if isinstance(payload, dict) else {}
 
 
+def _load_active_runtime_scene_reference() -> dict[str, Any]:
+    """Read the Launcher-owned runtime-scene reference beside its state projection."""
+
+    active_scene_path = LAUNCHER_STATE_PATH.with_name("active-runtime-scene.json")
+    try:
+        payload = json.loads(active_scene_path.read_text(encoding="utf-8-sig"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
 def _list_raw_files(scene_dir: Path) -> list[dict]:
     raw_dir = scene_dir / "raw"
     items: list[dict] = []
@@ -5308,23 +5319,25 @@ def _file_timestamp(path: Path) -> str:
 
 
 def _resolve_current_runtime_scene_dir() -> Path | None:
-    launcher_state = _load_launcher_state()
-    raw_dir = str(launcher_state.get("runtimeSceneDir") or "").strip()
-    if not raw_dir:
-        return None
+    # The Launcher writes the active-scene reference directly.  state.json is a
+    # runtime projection and can legitimately omit the runtime scene fields.
+    for runtime_reference in (_load_active_runtime_scene_reference(), _load_launcher_state()):
+        raw_dir = str(runtime_reference.get("runtimeSceneDir") or "").strip()
+        if not raw_dir:
+            continue
 
-    scene_dir = Path(raw_dir).resolve()
-    try:
-        scene_dir.relative_to(_runtime_scene_root())
-    except ValueError:
-        return None
+        scene_dir = Path(raw_dir).resolve()
+        try:
+            scene_dir.relative_to(_runtime_scene_root())
+        except ValueError:
+            continue
 
-    if not scene_dir.exists() or not scene_dir.is_dir():
-        return None
-    manifest = _load_scene_manifest(scene_dir)
-    if not _is_current_runtime_scene_manifest(scene_dir, manifest, launcher_state):
-        return None
-    return scene_dir
+        if not scene_dir.exists() or not scene_dir.is_dir():
+            continue
+        manifest = _load_scene_manifest(scene_dir)
+        if _is_current_runtime_scene_manifest(scene_dir, manifest, runtime_reference):
+            return scene_dir
+    return None
 
 
 def _resolve_recent_completed_runtime_scene_dir(*, max_age_seconds: float = 180.0) -> Path | None:

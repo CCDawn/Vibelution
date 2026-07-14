@@ -2633,7 +2633,11 @@ export function ChatCodingRoute() {
             : undefined,
         )
       );
-      void chatWorkspaceCache.afterDirectTurnAccepted(acceptedTurn.sessionId || variables.sessionId);
+      if (directSessionStreamOwnsLiveQueries) {
+        void chatWorkspaceCache.refreshConversationIndex();
+      } else {
+        void chatWorkspaceCache.afterDirectTurnAccepted(acceptedTurn.sessionId || variables.sessionId);
+      }
     },
     onError: (error, variables) => {
       postSubmitTelemetry(
