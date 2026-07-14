@@ -1,0 +1,90 @@
+{
+  "schema_version": 1,
+  "fixture_id": "agent_tool_runtime_entrypoints_v1",
+  "required_run_kinds": [
+    "direct_session",
+    "chat_room",
+    "team_workflow",
+    "research",
+    "supervised",
+    "self_evolution",
+    "replay",
+    "parallel",
+    "subagent"
+  ],
+  "binding_entrypoints": [
+    {
+      "entrypoint_id": "self_evolving_agent_initial_bind",
+      "module": "agent.py",
+      "symbol": "SelfEvolvingAgent._init_llm",
+      "run_kinds": ["direct_session", "chat_room", "team_workflow", "research", "self_evolution"],
+      "current_policy_source": "filter_llm_tools_for_current_agent",
+      "target_owner": "ToolAuthorizationService.resolve_turn_tools"
+    },
+    {
+      "entrypoint_id": "agent_mode_rebind",
+      "module": "agent.py",
+      "symbol": "SelfEvolvingAgent._get_llm_for_current_mode",
+      "run_kinds": ["direct_session", "chat_room", "team_workflow", "research", "supervised", "self_evolution"],
+      "current_policy_source": "mode_and_agent_filter",
+      "target_owner": "ToolAuthorizationService.resolve_turn_tools"
+    },
+    {
+      "entrypoint_id": "session_turn_agent_call",
+      "module": "core/web/services/session_service.py",
+      "symbol": "run_existing_agent_single_turn",
+      "run_kinds": ["direct_session", "chat_room"],
+      "current_policy_source": "agent_bound_tool_surface",
+      "target_owner": "TurnToolGrant plus AuthorizationDecision"
+    },
+    {
+      "entrypoint_id": "wire_responses_projection",
+      "module": "core/llm/wire/responses.py",
+      "symbol": "Responses request tool projection",
+      "run_kinds": ["direct_session", "chat_room", "team_workflow", "research", "supervised", "self_evolution", "replay", "parallel"],
+      "current_policy_source": "bound semantic tools",
+      "target_owner": "AuthorizationDecision.visibleTools"
+    },
+    {
+      "entrypoint_id": "wire_chat_projection",
+      "module": "core/llm/wire/chat_completions.py",
+      "symbol": "Chat Completions request tool projection",
+      "run_kinds": ["direct_session", "chat_room", "team_workflow", "research", "supervised", "self_evolution", "replay", "parallel"],
+      "current_policy_source": "bound semantic tools",
+      "target_owner": "AuthorizationDecision.visibleTools"
+    },
+    {
+      "entrypoint_id": "subagent_tool_surface",
+      "module": "agent.py",
+      "symbol": "subagent runtime binding",
+      "run_kinds": ["subagent"],
+      "current_policy_source": "parent runtime plus child Agent filter",
+      "target_owner": "parent delegation grant intersect child ToolPolicy"
+    }
+  ],
+  "dispatch_entrypoints": [
+    {
+      "entrypoint_id": "agent_tool_lifecycle_dispatch",
+      "module": "core/orchestration/tool_lifecycle.py",
+      "symbol": "ToolLifecycleBridge",
+      "run_kinds": ["direct_session", "chat_room", "team_workflow", "research", "supervised", "self_evolution", "replay", "parallel", "subagent"],
+      "current_policy_source": "tool_guard plus executor guards",
+      "target_owner": "ToolAuthorizationService.authorize_tool_call"
+    },
+    {
+      "entrypoint_id": "tool_executor_dispatch",
+      "module": "core/infrastructure/tool_executor.py",
+      "symbol": "ToolExecutor.execute",
+      "run_kinds": ["direct_session", "chat_room", "team_workflow", "research", "supervised", "self_evolution", "replay", "parallel", "subagent"],
+      "current_policy_source": "distributed per-tool guards",
+      "target_owner": "ToolAuthorizationService.authorize_tool_call before implementation dispatch"
+    }
+  ],
+  "known_bypass_risks": [
+    "permission lookup exception returns the unfiltered tool list",
+    "missing runtime goal can permit selected operations",
+    "replay or direct dispatch can reach ToolExecutor without proving model visibility",
+    "subagent inheritance is not expressed as a formal parent-child policy intersection",
+    "protocol adapters do not currently carry one authorization decision fingerprint"
+  ]
+}
