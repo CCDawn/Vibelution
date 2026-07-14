@@ -357,6 +357,8 @@ class TestBuildAPI:
         assert "## 可见协作节奏" in result
         assert "assistant commentary -> tool call/result" in result
         assert "不得把所有中间说明压到最终回答里" in result
+        assert "不需要 `think` 块；若需要调用工具" in result
+        assert "先输出普通 assistant commentary，再调用工具" in result
         assert "## SPEC 运行时摘要" in result
         assert "# SPEC 开发流程规范" in result
         assert "## 语言状态" in result
