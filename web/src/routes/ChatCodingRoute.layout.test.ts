@@ -1821,6 +1821,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).not.toContain("function mergeLiveAssistantMessagesIntoSessionDetail(");
     expect(routeSource).not.toContain("kind: \"session_live_overlay\"");
     expect(routeSource).toContain("committedAssistantDeltaLayer = decision.nextCommittedLayer");
+    expect(routeSource).toContain("if (decision.shouldCommitRender)");
     expect(chatStreamApplyControllerSource).toContain("pendingTextLength: activeTurnLayerTextLength(input.pendingLayer)");
     expect(routeSource).toContain("createSessionAssistantDeltaScheduler");
     expect(routeSource).toContain("const assistantDeltaScheduler = createSessionAssistantDeltaScheduler({");
