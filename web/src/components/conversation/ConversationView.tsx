@@ -1703,6 +1703,51 @@ export function ConversationView({
     if (cell.kind === "error_notice") {
       const errorText = cell.text?.trim() || cell.summary?.trim() || "";
       const diagnosticRows = buildTurnErrorDiagnosticRows(cell.diagnosticSummary, lang);
+      const isCompactToolFailure = Boolean(cell.operationIds?.length);
+      if (isCompactToolFailure) {
+        return (
+          <section
+            key={cell.id}
+            className={[styles.codexTranscriptCell, styles.codexTranscriptProcessCell, styles.codexTranscriptCell_error].filter(Boolean).join(" ")}
+            data-codex-transcript-cell-kind={cell.kind}
+            data-codex-transcript-cell-status={cell.status}
+            data-codex-transcript-cell-tone={cell.tone}
+            data-codex-tool-error-compact="true"
+            data-conversation-part-key={cell.id}
+            role="status"
+          >
+            <span className={styles.codexTranscriptCellIcon} aria-hidden="true">
+              <TerminalSquare size={14} />
+            </span>
+            <div className={styles.codexTranscriptCellBody}>
+              <div className={styles.codexTranscriptCellTitleRow}>
+                <span className={styles.codexTranscriptCellTitle}>{cell.title?.trim() || (lang === "zh" ? "执行失败" : "Failed")}</span>
+                {errorText ? <span className={styles.codexTranscriptCellMeta} aria-hidden="true">·</span> : null}
+                {errorText ? <span className={styles.codexTranscriptCellMeta}>{errorText}</span> : null}
+                {diagnosticRows.length > 0 ? (
+                  <details className={styles.codexTranscriptCompactErrorDetails} data-codex-error-diagnostic="true">
+                    <summary className={styles.codexTranscriptCompactErrorDetailsSummary}>
+                      <span>{lang === "zh" ? "技术详情" : "Details"}</span>
+                      <span className={styles.operationDetailsChevronButton} aria-hidden="true">
+                        <span className={styles.operationDetailsChevronClosed}>▸</span>
+                        <span className={styles.operationDetailsChevronOpen}>▾</span>
+                      </span>
+                    </summary>
+                    <dl className={styles.turnErrorReasonList}>
+                      {diagnosticRows.map((row) => (
+                        <div key={`${cell.id}-${row.label}-${row.value}`} className={styles.turnErrorReasonRow}>
+                          <dt>{row.label}</dt>
+                          <dd>{row.value}</dd>
+                        </div>
+                      ))}
+                    </dl>
+                  </details>
+                ) : null}
+              </div>
+            </div>
+          </section>
+        );
+      }
       return (
         <section
           key={cell.id}
@@ -1718,7 +1763,7 @@ export function ConversationView({
           <span className={styles.codexTranscriptCellIcon} aria-hidden="true">
             <TerminalSquare size={14} />
           </span>
-          <span className={styles.codexTranscriptCellBody}>
+          <div className={styles.codexTranscriptCellBody}>
             <span className={styles.codexTranscriptCellTitleRow}>
               <span className={styles.codexTranscriptCellTitle}>{cell.title?.trim() || (lang === "zh" ? "执行失败" : "Failed")}</span>
             </span>
@@ -1744,7 +1789,7 @@ export function ConversationView({
                 </dl>
               </details>
             ) : null}
-          </span>
+          </div>
         </section>
       );
     }
@@ -1860,6 +1905,7 @@ export function ConversationView({
       code_symbol_tool: lang === "zh" ? "代码图谱" : "Code graph",
       search_code_tool: lang === "zh" ? "搜索代码" : "Search code",
       get_git_status_summary_tool: lang === "zh" ? "Git 状态" : "Git status",
+      get_recent_changes_tool: lang === "zh" ? "查看最近改动" : "Recent changes",
     };
     if (exactLabels[lower]) {
       return exactLabels[lower];

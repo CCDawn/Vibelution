@@ -337,6 +337,10 @@ const styles: Record<string, string> = {
     "vui-components-conversationview codexTranscriptCell min-w-0",
   codexTranscriptCellBody:
     "vui-components-conversationview codexTranscriptCellBody min-w-0 grid gap-0.5",
+  codexTranscriptCompactErrorDetails:
+    "vui-components-conversationview codexTranscriptCompactErrorDetails inline-block min-w-0 shrink-0 border-0 bg-transparent group",
+  codexTranscriptCompactErrorDetailsSummary:
+    "vui-components-conversationview codexTranscriptCompactErrorDetailsSummary inline-flex cursor-pointer list-none select-none items-center gap-1 [&::-webkit-details-marker]:hidden",
   codexTranscriptCellIcon:
     "vui-components-conversationview codexTranscriptCellIcon mt-[0.15rem] grid size-4 shrink-0 place-items-center text-[var(--fg-tertiary)]",
   codexTranscriptCellMeta:
