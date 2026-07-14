@@ -404,7 +404,7 @@ describe("agentMessageTimeline", () => {
     expect(items[0]).toMatchObject({
       kind: "operation",
       status: "degraded",
-      title: "命令",
+      title: "执行命令",
       summary: "使用备用路径：缺少 upstream operation id",
     });
     expect(items[0].kind === "operation" ? items[0].operation.status : "").toBe("fallback");
