@@ -13773,6 +13773,11 @@ def _run_session_turn(context: dict[str, Any]) -> None:
         if _is_session_turn_current(session_id, turn_id):
             _persist_session_turn_failure(session_id, context, exc)
     finally:
+        _ensure_session_turn_terminal_fallback(
+            session_id,
+            turn_id,
+            stop_reason=_get_turn_control_stop_reason(turn_control),
+        )
         _record_session_turn_lifecycle_event(
             session_id,
             "worker_finished",
@@ -13792,6 +13797,78 @@ def _run_session_turn(context: dict[str, Any]) -> None:
         _set_session_running(session_id, False, turn_id=turn_id)
         _clear_session_turn_control(session_id, turn_id=turn_id)
         _publish_session_detail_snapshot(session_id)
+
+
+def _ensure_session_turn_terminal_fallback(
+    session_id: str,
+    turn_id: str,
+    *,
+    stop_reason: str = "",
+) -> None:
+    """Converge an accepted turn after result/failure persistence itself fails."""
+
+    normalized_turn_id = str(turn_id or "").strip()
+    if not normalized_turn_id:
+        return
+    terminal_types = {EVENT_TURN_COMPLETED, EVENT_TURN_FAILED, EVENT_TURN_INTERRUPTED}
+    terminal_event = None
+    journal_loaded = False
+    try:
+        events = load_conversation_events(PROJECT_ROOT, session_id)
+        journal_loaded = True
+        terminal_event = next(
+            (
+                event
+                for event in reversed(events)
+                if str(event.turn_id or "").strip() == normalized_turn_id
+                and event.event_type in terminal_types
+            ),
+            None,
+        )
+    except Exception:
+        pass
+    stopped = bool(str(stop_reason or "").strip())
+    terminal_status = (
+        str(getattr(terminal_event, "status", "") or "").strip().lower()
+        if terminal_event is not None
+        else ("stopped" if stopped else "failed_runtime")
+    )
+    try:
+        if journal_loaded and terminal_event is None:
+            _append_session_conversation_event(
+                session_id,
+                normalized_turn_id,
+                EVENT_TURN_INTERRUPTED if stopped else EVENT_TURN_FAILED,
+                status=terminal_status,
+                payload={
+                    "reason": str(stop_reason or "").strip() or "turn_persistence_failed",
+                    "errorType": "turn_persistence_failed" if not stopped else "",
+                },
+                source="session_turn_terminal_fallback",
+            )
+        finished_at = _now_timestamp()
+        work_run_status = "stopped" if terminal_status in {"stopped", "interrupted", "cancelled"} else (
+            "completed" if terminal_status == "completed" else "failed"
+        )
+        try:
+            _persist_chat_turn_work_run(
+                session_id=session_id,
+                turn_id=normalized_turn_id,
+                status=work_run_status,
+                summary=str(stop_reason or "").strip() or "Turn persistence failed; terminal fallback applied.",
+                error_type="" if work_run_status != "failed" else "turn_persistence_failed",
+                finished_at=finished_at,
+                updated_at=finished_at,
+            )
+        except Exception:
+            pass
+    except Exception:
+        pass
+    finally:
+        try:
+            _clear_session_live_output(session_id, turn_id=normalized_turn_id)
+        except Exception:
+            pass
 
 
 def _create_chat_agent_for_session(

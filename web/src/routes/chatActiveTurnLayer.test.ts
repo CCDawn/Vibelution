@@ -737,6 +737,28 @@ describe("chat active turn layer", () => {
 import * as canonicalActiveTurn from "./chatActiveTurnLayer";
 
 describe("canonical SessionTurnItem v2 active turn", () => {
+  it("keeps streamed legacy answer content when the canonical answer is empty", () => {
+    const active = canonicalActiveTurn.mergeAssistantDeltaIntoActiveTurnLayer(undefined, assistantDelta({
+      contentDelta: "流式正文",
+      turnItems: [
+        {
+          version: 2,
+          id: "answer-empty",
+          itemId: "answer",
+          type: "assistant_message",
+          kind: "assistant_message",
+          channel: "answer",
+          status: "running",
+          provisional: true,
+          terminal: false,
+          text: "",
+        },
+      ],
+    } as never));
+
+    expect(active?.answerContent).toBe("流式正文");
+  });
+
   it("replaces the same item revision across streamed payloads without duplicating the answer", () => {
     const common = {
       type: "assistant_delta",
