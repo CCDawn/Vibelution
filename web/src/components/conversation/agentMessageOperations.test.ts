@@ -876,7 +876,7 @@ describe("agentMessageOperations", () => {
     expect(operations).toHaveLength(1);
     expect(operations[0]).toMatchObject({
       kind: "tool",
-      label: "命令",
+      label: "执行命令",
       status: "degraded",
       rawStatus: "degraded",
       summary: "[跨平台警告] 在 Windows 上检测到 Unix shell 片段",
@@ -989,8 +989,8 @@ describe("agentMessageOperations", () => {
       "status:准备上下文:done:failed",
       "status:绑定 Agent:done:failed",
       "thought:Deep thinking:done:failed",
-      "tool:命令:done:done",
-      "tool:命令:failed:failed",
+      "tool:执行命令:done:done",
+      "tool:执行命令:failed:failed",
     ]);
   });
 
@@ -1152,5 +1152,32 @@ describe("agentMessageOperations", () => {
     expect(operationGroupsForConversationMessage(message).mental[0]?.summary).toBe(
       "当前以规则诊断为主，认知态：稳定。",
     );
+  });
+});
+
+describe("projected cli tool semantic labels", () => {
+  it("uses command semantics for the projected operation label and keeps the protocol name diagnostic", () => {
+    const message: AgentMessage = {
+      id: "projected-cli-label",
+      role: "assistant",
+      createdAt: "2026-07-14T08:00:00Z",
+      streaming: false,
+      source: { kind: "conversation-message", id: "projected-cli-label" },
+      parts: [
+        {
+          id: "projected-cli-status",
+          type: "tool-call",
+          name: "cli_tool",
+          status: "done",
+          summary: "检查工作区",
+          arguments: { command: "git status --short --branch" },
+        },
+      ],
+    };
+
+    expect(buildAgentMessageOperations(message, labels)[0]).toMatchObject({
+      label: "检查 Git 状态",
+      rawLabel: "cli_tool",
+    });
   });
 });

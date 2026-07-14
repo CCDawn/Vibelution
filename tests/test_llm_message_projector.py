@@ -111,6 +111,117 @@ def test_llm_client_payload_repairs_orphan_tool_result_before_provider():
     assert client._last_payload_protocol_summary["payloadMessageShapeHash"]
 
 
+def test_responses_payload_repairs_orphan_tool_result_before_semantic_projection():
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "relay",
+            "llm.providers.default.api_key": "test-key",
+            "llm.providers.default.base_url": "https://relay.example.test/v1",
+            "llm.providers.default.api": "openai-responses",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "gpt-5.6-terra",
+            "llm.profiles.primary.transport": "responses",
+        }
+    )
+
+    client = LLMClient(config=config, backend=lambda payload: payload)
+    payload = client._build_payload(
+        [
+            ToolMessage(
+                content="payload_protocol_error: tool result has no preceding call",
+                tool_call_id="call_orphan",
+            ),
+            {"role": "user", "content": "继续"},
+        ]
+    )
+
+    assert "messages" not in payload
+    assert [item["role"] for item in payload["input"]] == ["assistant", "user"]
+    assert "历史工具结果: unknown_tool" in str(payload["input"][0]["content"])
+    assert "function_call_output" not in str(payload["input"])
+    assert client._last_payload_protocol_summary["payloadValidationResult"] == "passed"
+    assert client._last_payload_protocol_summary["payloadMessageOrphanToolResultCount"] == 0
+
+
+def test_responses_payload_demotes_partial_parallel_tool_chain_to_semantic_wire_history():
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "relay",
+            "llm.providers.default.api_key": "test-key",
+            "llm.providers.default.base_url": "https://relay.example.test/v1",
+            "llm.providers.default.api": "openai-responses",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "gpt-5.6-terra",
+            "llm.profiles.primary.transport": "responses",
+        }
+    )
+
+    client = LLMClient(config=config, backend=lambda payload: payload)
+    payload = client._build_payload(
+        [
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {"id": "call_ok", "name": "cli_tool", "args": {"command": "echo ok"}},
+                    {"id": "call_missing", "name": "read_file_tool", "args": {"file_path": "missing.txt"}},
+                ],
+            ),
+            ToolMessage(content="ok", tool_call_id="call_ok"),
+            {"role": "user", "content": "继续"},
+        ]
+    )
+
+    assert "messages" not in payload
+    assert [item.get("type") or item.get("role") for item in payload["input"]] == [
+        "assistant",
+        "assistant",
+        "user",
+    ]
+    assert all(item.get("type") not in {"function_call", "function_call_output"} for item in payload["input"])
+    assert "历史工具调用未返回结果: read_file_tool" in str(payload["input"][0]["content"])
+    assert "历史工具结果: cli_tool" in str(payload["input"][1]["content"])
+
+
+def test_responses_payload_preserves_complete_tool_pair_wire_shape():
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "relay",
+            "llm.providers.default.api_key": "test-key",
+            "llm.providers.default.base_url": "https://relay.example.test/v1",
+            "llm.providers.default.api": "openai-responses",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "gpt-5.6-terra",
+            "llm.profiles.primary.transport": "responses",
+        }
+    )
+
+    client = LLMClient(config=config, backend=lambda payload: payload)
+    payload = client._build_payload(
+        [
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {"id": "call_complete", "name": "lookup_tool", "args": {"query": "moon"}},
+                ],
+            ),
+            ToolMessage(content="natural satellite", tool_call_id="call_complete"),
+        ]
+    )
+
+    assert "messages" not in payload
+    assert [item.get("type") or item.get("role") for item in payload["input"]] == [
+        "function_call",
+        "function_call_output",
+    ]
+    assert payload["input"][0]["call_id"] == "call_complete"
+    assert payload["input"][0]["name"] == "lookup_tool"
+    assert payload["input"][1] == {
+        "type": "function_call_output",
+        "call_id": "call_complete",
+        "output": "natural satellite",
+    }
+
+
 def test_llm_client_payload_repairs_unresolved_tool_call_before_provider():
     config = make_config(
         **{

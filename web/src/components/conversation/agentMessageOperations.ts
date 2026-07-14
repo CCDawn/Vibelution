@@ -7,6 +7,7 @@ import type {
   AgentToolCallPart,
 } from "../../agent-thread/types";
 import { agentMessageProcessSections } from "./agentMessageSections";
+import { conversationToolSemanticLabel } from "./conversationToolSemanticLabel";
 
 export type AgentMessageOperationKind = "thought" | "mental" | "tool" | "status";
 
@@ -657,7 +658,11 @@ function normalizeOperationDisplay(operation: AgentMessageOperation): AgentMessa
     rawStatus,
     status: normalizeDisplayStatus(operation.status),
     label: operation.kind === "tool"
-      ? displayToolLabel(operation.rawLabel ?? operation.label)
+      ? conversationToolSemanticLabel({
+          toolName: operation.rawLabel ?? operation.label,
+          summary: operation.summary,
+          commandSource: operation.arguments,
+        })
       : operation.label,
   };
 }
@@ -759,49 +764,6 @@ function isRunningStatus(status: string) {
   return ["queued", "pending", "running", "thinking", "tooling", "answering"].includes(
     String(status || "").trim().toLowerCase(),
   );
-}
-
-function displayToolLabel(name: string) {
-  const normalized = String(name || "").trim();
-  const lower = normalized.toLowerCase();
-  if (!normalized) {
-    return "tool";
-  }
-  const exact: Record<string, string> = {
-    cli_tool: "命令",
-    grep_search_tool: "搜索",
-    read_file_tool: "读取文件",
-    glob_tool: "列出文件",
-    code_symbol_tool: "代码图谱",
-    search_code_tool: "搜索代码",
-    get_git_status_summary_tool: "Git 状态",
-    image2_generate_tool: "生成图片",
-    web_search_tool: "网页搜索",
-    web_fetch_tool: "网页读取",
-    computer_use_task_tool: "沙盒浏览器",
-    task_list_tool: "任务列表",
-    task_create_tool: "创建任务",
-    task_update_tool: "更新任务",
-    source_collection_context_tool: "读取资料上下文",
-    source_collection_stage_writeback_tool: "资料提炼回写",
-    rg: "搜索",
-  };
-  if (exact[lower]) {
-    return exact[lower];
-  }
-  if (lower.includes("search")) {
-    return "搜索";
-  }
-  if (lower.includes("read") || lower.includes("file")) {
-    return "读取";
-  }
-  if (lower.includes("git")) {
-    return "Git";
-  }
-  if (lower.includes("image")) {
-    return "图片";
-  }
-  return normalized;
 }
 
 function coerceAgentToolDurationSeconds(toolCall: AgentToolCallPart) {

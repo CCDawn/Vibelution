@@ -1438,10 +1438,42 @@ class LLMClient:
                 },
             )
         projection_messages = list(messages or [])
-        if self.protocol_route.wire_protocol == WireProtocol.RESPONSES:
-            provider_messages = projection_messages
-        else:
-            provider_messages = normalize_messages_for_provider(projection_messages)
+        provider_messages = normalize_messages_for_provider(projection_messages)
+        provider_tool_chain_repaired = sum(
+            1
+            for message in provider_messages
+            if isinstance(message, dict)
+            and isinstance(message.get("metadata"), dict)
+            and message["metadata"].get("repairedProviderToolChain") is True
+        )
+        has_image_content = any(
+            isinstance(message, dict) and _content_blocks_have_image(message.get("content"))
+            for message in provider_messages
+        )
+        if has_image_content and not self.capabilities.supports_image_input:
+            raise LLMError(
+                "capability_error",
+                (
+                    f"profile `{self.profile_id}` 不支持 image input；"
+                    f"provider `{self.provider.kind}` model `{self.profile.model}` "
+                    f"protocol `{self.protocol_route.protocol.value}`。请切换到支持图像理解的模型，"
+                    "或移除本轮图片输入。"
+                ),
+                retryable=False,
+                provider=str(self.provider.kind or ""),
+                model=str(self.profile.model or ""),
+                details={
+                    "profile_id": self.profile_id,
+                    "provider_kind": str(self.provider.kind or ""),
+                    "transport": str(getattr(self.profile, "transport", "") or "chat_completions"),
+                    "model": str(self.profile.model or ""),
+                    "protocol": self.protocol_route.protocol.value,
+                    "capability": "image_input",
+                    "supports_image_input": False,
+                    "payloadValidationResult": "blocked_before_provider",
+                },
+            )
+        if self.protocol_route.wire_protocol != WireProtocol.RESPONSES:
             provider_messages = _normalize_semantic_messages_with_adapter(
                 provider_messages,
                 self.adapter,
@@ -1511,6 +1543,11 @@ class LLMClient:
         else:
             raise AssertionError("registered wire adapter uses unsupported protocol")
         self._last_payload_protocol_summary = dict(built.summary or payload_protocol_summary(built.payload, self.protocol_route))
+        if provider_tool_chain_repaired:
+            self._last_payload_protocol_summary["payloadPolicyProviderToolChainRepaired"] = max(
+                provider_tool_chain_repaired,
+                int(self._last_payload_protocol_summary.get("payloadPolicyProviderToolChainRepaired") or 0),
+            )
         return built.payload
 
     def _usage_from_response(self, response: Any, latency_ms: int) -> UsageStats:

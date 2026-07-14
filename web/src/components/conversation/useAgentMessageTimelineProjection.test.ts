@@ -270,6 +270,108 @@ describe("projectAgentMessageTimelineMessages", () => {
     expect(projection.rowIdentities).toHaveLength(1);
   });
 
+  it("lets canonical v2 commentary supersede equivalent same-turn live fallback markdown", () => {
+    const liveMessageId = "session-live-message-live-turn-1";
+    const preamble = "I will inspect the projection chain first.";
+    const liveOverlay = assistantMessage(liveMessageId, {
+      content: "",
+      streaming: true,
+      codexTranscript: {
+        version: 1,
+        source: "native",
+        messageId: liveMessageId,
+        streaming: true,
+        cells: [
+          {
+            id: `${liveMessageId}-preamble`,
+            kind: "assistant_markdown",
+            messageId: liveMessageId,
+            status: "running",
+            tone: "running",
+            provisional: true,
+            text: preamble,
+          },
+          {
+            id: `${liveMessageId}-tool`,
+            kind: "tool_call",
+            messageId: liveMessageId,
+            status: "completed",
+            tone: "neutral",
+            title: "read_file_tool",
+          },
+          {
+            id: `${liveMessageId}-status`,
+            kind: "status",
+            messageId: liveMessageId,
+            status: "completed",
+            tone: "neutral",
+            text: "Projection source loaded.",
+          },
+          {
+            id: `${liveMessageId}-error`,
+            kind: "error_notice",
+            messageId: liveMessageId,
+            status: "failed",
+            tone: "error",
+            text: "A recoverable probe failed.",
+          },
+        ],
+        toolCalls: [],
+        terminalOperations: [],
+        terminalSessions: [],
+        modelObservations: [],
+      },
+      metadata: { kind: "session_live_overlay", turnId: "live:turn-1" },
+    });
+    const activeTurn = assistantMessage("session-live-message-active-turn-1", {
+      content: "",
+      streaming: true,
+      turnItems: [{
+        version: 2,
+        sessionId: "session-live",
+        turnId: "turn-1",
+        invocationId: "invocation-1",
+        iteration: 0,
+        status: "completed",
+        sequence: 1,
+        protocol: "responses",
+        id: "msg_commentary",
+        itemId: "msg_commentary",
+        revision: 0,
+        kind: "assistant_message",
+        channel: "commentary",
+        phase: "commentary",
+        type: "assistant_message",
+        provisional: false,
+        terminal: false,
+        text: preamble,
+      }] as never,
+      metadata: { kind: "session_active_turn_layer", turnId: "turn-1" },
+    });
+
+    const projection = projectAgentMessageTimelineMessages({
+      timelineMessages: [liveOverlay],
+      activeTurnMessage: activeTurn,
+    });
+
+    expect(projection.messages).toHaveLength(1);
+    expect(projection.messages[0].codexTranscript?.cells.map((cell) => cell.id)).toEqual([
+      `${liveMessageId}-tool`,
+      `${liveMessageId}-status`,
+      `${liveMessageId}-error`,
+      "msg_commentary",
+    ]);
+    expect(projection.messages[0].codexTranscript?.cells.filter((cell) => (
+      cell.kind === "assistant_markdown" && cell.text === preamble
+    ))).toEqual([
+      expect.objectContaining({
+        id: "msg_commentary",
+        channel: "commentary",
+        phase: "commentary",
+      }),
+    ]);
+  });
+
   it("keeps a live overlay visible while no committed same-turn answer exists", () => {
     const liveOverlay = assistantMessage("live-overlay", {
       content: "尚未完成的回答",
