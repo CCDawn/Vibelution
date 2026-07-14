@@ -2021,7 +2021,10 @@ describe("ChatCodingRoute layout contract", () => {
   });
 
   it("defers secondary chat dashboard queries until the shell is ready", () => {
-    expect(routeSource).toContain("const secondaryChatDataEnabled = chatStartupDataReady");
+    expect(routeSource).toContain("const secondaryChatDataEnabled = chatStartupDataReady && (");
+    expect(routeSource).toContain("startupDetailSettledSessionId === activeSessionId");
+    expect(routeSource).toContain("sessionDetailQuery.isFetching");
+    expect(routeSource).toContain("sessionDetailQuery.data.id !== activeSessionId");
     expect(routeSource).toContain("enabled: secondaryChatDataEnabled");
     expect(routeSource).toContain("enabled: secondaryChatDataEnabled || groupComposerOpen || standardGroupRoomActive");
     expect(routeSource).not.toContain("enabled: groupComposerOpen || Boolean(activeSessionId)");
