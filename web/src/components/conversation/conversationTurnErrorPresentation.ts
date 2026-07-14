@@ -84,3 +84,22 @@ export function buildCurrentTurnErrorRows(
     turnError.traceId ? { label: "Trace", value: turnError.traceId } : null,
   ].filter(isTurnErrorDiagnosticRow);
 }
+
+export function summarizeCurrentTurnError(
+  turnError: SessionTurnError,
+  lang: ConversationLanguage,
+) {
+  const reasonSummary = String(turnError.reasonSummary || "").trim();
+  if (reasonSummary) {
+    return reasonSummary;
+  }
+  const message = String(turnError.message || "").replace(/\s+/g, " ").trim();
+  if (!message) {
+    return turnErrorLabel(lang, "本轮执行失败，请展开诊断详情。", "This turn failed. Expand diagnostics for details.");
+  }
+  const firstSentence = message.match(/^.{1,180}?[。！？.!?](?=\s|$)/u)?.[0]?.trim();
+  if (firstSentence) {
+    return firstSentence;
+  }
+  return message.length > 180 ? `${message.slice(0, 177).trimEnd()}...` : message;
+}

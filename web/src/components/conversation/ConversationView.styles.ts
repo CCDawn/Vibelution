@@ -1169,7 +1169,7 @@ const styles: Record<string, string> = {
   ts:
     "vui-components-conversationview ts min-w-0",
   turnAvatar:
-    "vui-components-conversationview turnAvatar mt-0.5 grid size-8 shrink-0 place-items-center overflow-hidden rounded-full bg-[var(--vui-control-muted)] text-[var(--fg-tertiary)]",
+    "vui-components-conversationview turnAvatar mt-0.5 grid size-8 shrink-0 place-items-center overflow-hidden rounded-full bg-[var(--vui-control-muted)] text-[var(--fg-primary)] font-semibold ring-1 ring-inset ring-[var(--vui-border-strong)]",
   turnAvatarImage:
     "vui-components-conversationview turnAvatarImage block h-full w-full rounded-[inherit] object-cover",
   turnContent:
@@ -1179,7 +1179,13 @@ const styles: Record<string, string> = {
   turnEditing:
     "vui-components-conversationview turnEditing min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2",
   turnError:
-    "vui-components-conversationview turnError grid w-[min(100%,920px)] min-w-0 gap-1.5 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_7%,var(--vui-surface-row))] px-2.5 py-2 text-[var(--state-error)] shadow-none",
+    "vui-components-conversationview turnError mx-auto grid w-[min(100%,760px)] min-w-0 grid-cols-[minmax(0,1fr)_auto] items-start gap-2 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--state-error)_28%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_5%,var(--vui-surface-row))] px-3 py-2.5 text-[var(--state-error)] shadow-none",
+  turnErrorDiagnostics:
+    "vui-components-conversationview turnErrorDiagnostics min-w-0 text-[var(--vui-font-xs)] text-[var(--fg-tertiary)]",
+  turnErrorDiagnosticsBody:
+    "vui-components-conversationview turnErrorDiagnosticsBody mt-1.5 grid min-w-0 gap-1 border-t border-[color-mix(in_srgb,var(--state-error)_18%,transparent)] pt-1.5",
+  turnErrorDiagnosticsSummary:
+    "vui-components-conversationview turnErrorDiagnosticsSummary w-fit cursor-pointer select-none font-medium text-[var(--fg-tertiary)] hover:text-[var(--fg-secondary)]",
   turnErrorDetail:
     "vui-components-conversationview turnErrorDetail min-w-0 whitespace-pre-wrap break-words text-[var(--vui-font-xs)] leading-[var(--vui-line-readable)] text-[var(--fg-tertiary)] [overflow-wrap:anywhere]",
   turnErrorLabel:

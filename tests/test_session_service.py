@@ -486,6 +486,29 @@ def test_reconcile_discards_live_checkpoint_for_already_interrupted_turn(monkeyp
     ]
 
 
+def test_reconcile_preserves_open_ledger_for_durable_active_work_run(monkeypatch, tmp_path):
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        session_service,
+        "_active_chat_turn_work_run_for_session",
+        lambda session_id: {
+            "runId": "turn-active",
+            "sessionId": session_id,
+            "status": "running",
+        },
+    )
+    append_conversation_event(tmp_path, "session-live", "turn-active", EVENT_TURN_STARTED, status="running")
+
+    session_service._reconcile_stale_session_ledger(
+        "session-live",
+        reason="detail_loaded_after_restart",
+    )
+
+    assert [event.event_type for event in load_conversation_events(tmp_path, "session-live")] == [
+        EVENT_TURN_STARTED,
+    ]
+
+
 def test_terminal_fallback_closes_running_turn_when_result_persistence_raises(monkeypatch, tmp_path):
     class FakeWorkRunStore:
         def __init__(self):

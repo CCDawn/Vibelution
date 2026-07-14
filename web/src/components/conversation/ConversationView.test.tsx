@@ -1873,6 +1873,8 @@ describe("ConversationView edit resend affordance", () => {
 
     expect(html).toContain(">C</div>");
     expect(html).toContain("Vibe Owner");
+    expect(styles.turnAvatar).toContain("ring-[var(--vui-border-strong)]");
+    expect(styles.turnAvatar).toContain("text-[var(--fg-primary)]");
   });
 
   it("renders assistant turns with the configured agent avatar image", () => {
@@ -3637,11 +3639,16 @@ describe("ConversationView edit resend affordance", () => {
     });
 
     expect(html).toContain("turnErrorText");
+    expect(html).toContain("诊断详情");
+    expect(html).toContain("<details");
     expect(html).toContain("状态码: 503");
     expect(html).toContain("类型: api_error");
     expect(html).toContain("通道: anthropic · www.atpify.cn");
     expect(html).toContain("模型: claude-opus-4-7");
     expect(styles.turnError).toContain("shadow-none");
+    expect(styles.turnError).toContain("mx-auto");
+    expect(styles.turnError).toContain("w-[min(100%,760px)]");
+    expect(styles.turnErrorDiagnosticsBody).toContain("border-t");
     expect(styles.turnErrorText).toContain("[overflow-wrap:anywhere]");
     expect(styles.turnErrorText).not.toContain("border ");
     expect(styles.turnErrorDetail).toContain("[overflow-wrap:anywhere]");
