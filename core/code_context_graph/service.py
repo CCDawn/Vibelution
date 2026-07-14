@@ -80,6 +80,15 @@ INDEX_EXTENSIONS = {
 TEXT_EXTENSIONS = INDEX_EXTENSIONS
 MAX_FILE_BYTES = 512_000
 MAX_SNIPPET_CHARS = 900
+MODE_RESULT_LIMITS = {
+    "search": 12,
+    "explore": 8,
+    "inspect": 10,
+    "references": 20,
+    "impact": 20,
+    "affected_tests": 20,
+    "files": 20,
+}
 
 TS_IMPORT_RE = re.compile(r"\bfrom\s+['\"]([^'\"]+)['\"]|import\s+['\"]([^'\"]+)['\"]")
 TS_SYMBOL_PATTERNS = [
@@ -117,7 +126,8 @@ def code_context_graph_tool(
     """Execute a project code graph query."""
 
     normalized_mode = str(mode or "").strip().lower()
-    max_results = _clamp(max_results, 1, 100, default=20)
+    requested_max_results = _clamp(max_results, 1, 100, default=20)
+    max_results = min(requested_max_results, MODE_RESULT_LIMITS.get(normalized_mode, requested_max_results))
 
     if normalized_mode == "index":
         return build_index(force=True)
@@ -138,19 +148,28 @@ def code_context_graph_tool(
         verify_freshness=inspect_target_kind != "directory",
     )
     if normalized_mode == "files":
-        return files_view(graph, query=query, max_results=max_results)
-    if normalized_mode == "search":
-        return search_graph(graph, query=query or symbol or file_path, max_results=max_results)
-    if normalized_mode == "explore":
-        return explore_graph(graph, query=query or symbol or file_path, max_results=max_results)
-    if normalized_mode == "inspect":
-        return inspect_graph(graph, file_path=file_path, symbol=symbol or query, max_results=max_results)
-    if normalized_mode == "references":
-        return references_graph(graph, query=query or symbol or file_path, file_path=file_path, symbol=symbol, max_results=max_results)
-    if normalized_mode == "impact":
-        return impact_graph(graph, query=query or symbol or file_path, file_path=file_path, symbol=symbol, max_results=max_results)
-    if normalized_mode == "affected_tests":
-        return affected_tests_graph(graph, query=query or file_path or symbol, file_path=file_path, symbol=symbol, max_results=max_results)
+        result = files_view(graph, query=query, max_results=max_results)
+    elif normalized_mode == "search":
+        result = search_graph(graph, query=query or symbol or file_path, max_results=max_results)
+    elif normalized_mode == "explore":
+        result = explore_graph(graph, query=query or symbol or file_path, max_results=max_results)
+    elif normalized_mode == "inspect":
+        result = inspect_graph(graph, file_path=file_path, symbol=symbol or query, max_results=max_results)
+    elif normalized_mode == "references":
+        result = references_graph(graph, query=query or symbol or file_path, file_path=file_path, symbol=symbol, max_results=max_results)
+    elif normalized_mode == "impact":
+        result = impact_graph(graph, query=query or symbol or file_path, file_path=file_path, symbol=symbol, max_results=max_results)
+    elif normalized_mode == "affected_tests":
+        result = affected_tests_graph(graph, query=query or file_path or symbol, file_path=file_path, symbol=symbol, max_results=max_results)
+    else:
+        result = None
+
+    if result is not None:
+        return _with_result_limit(
+            result,
+            requested=requested_max_results,
+            applied=max_results,
+        )
 
     return {
         "status": "error",
@@ -303,8 +322,17 @@ def search_graph(graph: dict[str, Any], *, query: str, max_results: int = 20) ->
         if score:
             scored.append((score + 2, {"kind": "symbol", **_public_symbol(symbol)}))
     scored.sort(key=lambda item: (-item[0], str(item[1].get("path", "")), str(item[1].get("name", ""))))
+    total_count = len(scored)
     results = [{**item, "score": score} for score, item in scored[:max_results]]
-    return {"status": "ok", "mode": "search", "query": query, "count": len(results), "results": results}
+    return {
+        "status": "ok",
+        "mode": "search",
+        "query": query,
+        "count": len(results),
+        "totalCount": total_count,
+        "hasMore": total_count > len(results),
+        "results": results,
+    }
 
 
 def explore_graph(graph: dict[str, Any], *, query: str, max_results: int = 20) -> dict[str, Any]:
@@ -322,7 +350,7 @@ def explore_graph(graph: dict[str, Any], *, query: str, max_results: int = 20) -
         if path and path not in seen_paths:
             seen_paths.append(path)
     contexts = []
-    for rel in seen_paths[: min(max_results, 8)]:
+    for rel in seen_paths[: min(max_results, 4)]:
         file = files_by_path.get(rel)
         if not file:
             continue
@@ -332,17 +360,22 @@ def explore_graph(graph: dict[str, Any], *, query: str, max_results: int = 20) -
                 "language": file.get("language"),
                 "summary": file.get("summary"),
                 "symbols": [_public_symbol(item) for item in symbols_by_path.get(rel, [])[:8]],
-                "snippet": _snippet_for_file(rel),
+                "snippet": _snippet_for_file(rel, max_chars=480),
             }
         )
     return {
         "status": "ok",
         "mode": "explore",
         "query": query,
-        "summary": {"resultCount": len(search.get("results", [])), "contextCount": len(contexts)},
+        "summary": {
+            "resultCount": len(search.get("results", [])),
+            "totalResultCount": int(search.get("totalCount") or 0),
+            "contextCount": len(contexts),
+            "hasMore": bool(search.get("hasMore")),
+        },
         "results": search.get("results", [])[:max_results],
         "contexts": contexts,
-        "relationshipMap": _relationship_map(graph, seen_paths[:8]),
+        "relationshipMap": _relationship_map(graph, seen_paths[:4], max_edges=16),
     }
 
 
@@ -655,12 +688,12 @@ def _affected_tests_for_paths(graph: dict[str, Any], paths: list[str], *, max_re
     ]
 
 
-def _relationship_map(graph: dict[str, Any], paths: list[str]) -> dict[str, Any]:
+def _relationship_map(graph: dict[str, Any], paths: list[str], *, max_edges: int = 120) -> dict[str, Any]:
     ids = {_file_id(path) for path in paths}
     edges = [
         edge for edge in graph.get("edges", [])
         if str(edge.get("source")) in ids or str(edge.get("target")) in ids
-    ][:120]
+    ][:max_edges]
     return {
         "nodes": [_public_file(file) for file in graph.get("files", []) if _file_id(str(file.get("path") or "")) in ids],
         "edges": edges,
@@ -1011,6 +1044,16 @@ def _clamp(value: Any, minimum: int, maximum: int, *, default: int) -> int:
     except (TypeError, ValueError):
         parsed = default
     return max(minimum, min(maximum, parsed))
+
+
+def _with_result_limit(result: dict[str, Any], *, requested: int, applied: int) -> dict[str, Any]:
+    payload = dict(result)
+    payload["resultLimit"] = {
+        "requested": int(requested),
+        "applied": int(applied),
+        "capped": int(applied) < int(requested),
+    }
+    return payload
 
 
 def _utc_like_now() -> str:

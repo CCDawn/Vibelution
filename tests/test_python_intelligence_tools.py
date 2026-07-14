@@ -4,7 +4,17 @@
 import json
 from types import SimpleNamespace
 
+import pytest
+
 from tools import python_intelligence_tools as pit
+
+
+@pytest.fixture(autouse=True)
+def isolate_code_graph_index(tmp_path, monkeypatch):
+    from core.code_context_graph import service as graph_service
+
+    isolated_index = tmp_path / "code_context_graph" / "index.json"
+    monkeypatch.setattr(graph_service, "index_path", lambda root=None: isolated_index)
 
 
 def test_python_symbol_query_degrades_cleanly_without_jedi(monkeypatch, tmp_path):
@@ -181,6 +191,34 @@ def test_code_symbol_tool_freshness_check_uses_file_metadata(tmp_path, monkeypat
     assert indexed["files"][0]["modifiedTimeNs"] == source.stat().st_mtime_ns
     assert loaded["index"]["fresh"] is True
     assert loaded["index"]["freshnessChecked"] is True
+
+
+def test_code_symbol_tool_caps_explore_results_and_reports_the_applied_limit(tmp_path, monkeypatch):
+    from core.code_context_graph import service as graph_service
+
+    core_dir = tmp_path / "core"
+    core_dir.mkdir()
+    for index in range(20):
+        (core_dir / f"demo_{index}.py").write_text(
+            f"def shared_demo_{index}():\n    return 'shared demo'\n",
+            encoding="utf-8",
+        )
+    monkeypatch.setattr(graph_service, "project_root", lambda: tmp_path)
+    graph_service.build_index(force=True)
+
+    payload = graph_service.code_context_graph_tool(
+        mode="explore",
+        query="shared_demo",
+        max_results=50,
+    )
+
+    assert payload["status"] == "ok"
+    assert payload["resultLimit"] == {"requested": 50, "applied": 8, "capped": True}
+    assert len(payload["results"]) <= 8
+    assert len(payload["contexts"]) <= 4
+    assert len(payload["relationshipMap"]["edges"]) <= 16
+    assert payload["summary"]["hasMore"] is True
+    assert payload["summary"]["totalResultCount"] > len(payload["results"])
 
 
 def test_python_symbol_query_parses_jedi_results(monkeypatch, tmp_path):
