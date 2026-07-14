@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from langchain_core.messages import AIMessage, ToolMessage
+
 from core.chat.model_messages import normalize_model_history_messages, normalize_provider_turn_messages
 from core.llm.payload_validator import validate_tool_result_pairing
 
@@ -127,3 +129,73 @@ def test_provider_turn_messages_preserve_valid_live_tool_pair():
 
     assert [message["role"] for message in messages] == ["assistant", "tool"]
     assert validate_tool_result_pairing(messages).ok
+
+
+def test_provider_turn_messages_demote_orphan_langchain_tool_result():
+    messages = normalize_provider_turn_messages(
+        [ToolMessage(content="orphan result", tool_call_id="call_orphan")]
+    )
+
+    assert [message["role"] for message in messages] == ["assistant"]
+    assert "历史工具结果: unknown_tool" in messages[0]["content"]
+    assert "orphan result" in messages[0]["content"]
+    assert validate_tool_result_pairing(messages).ok
+
+
+def test_provider_turn_messages_demote_partial_parallel_langchain_tool_chain():
+    assistant = AIMessage(
+        content="",
+        additional_kwargs={"responsesReplayItems": [{"type": "reasoning", "id": "reasoning_partial"}]},
+        tool_calls=[
+            {"id": "call_ok", "name": "cli_tool", "args": {"command": "echo ok"}},
+            {"id": "call_missing", "name": "read_file_tool", "args": {"file_path": "missing.txt"}},
+        ],
+    )
+    messages = normalize_provider_turn_messages(
+        [assistant, ToolMessage(content="ok", tool_call_id="call_ok")]
+    )
+
+    assert [message["role"] for message in messages] == ["assistant", "assistant"]
+    assert all(isinstance(message, dict) for message in messages)
+    assert "历史工具调用未返回结果: cli_tool" in messages[0]["content"]
+    assert "历史工具调用未返回结果: read_file_tool" in messages[0]["content"]
+    assert "历史工具结果: cli_tool" in messages[1]["content"]
+    assert validate_tool_result_pairing(messages).ok
+
+
+def test_provider_turn_messages_preserve_complete_langchain_pair_and_replay_metadata():
+    replay_items = [{"type": "reasoning", "id": "reasoning_complete", "encrypted_content": "opaque"}]
+    assistant = AIMessage(
+        content="",
+        additional_kwargs={"responsesReplayItems": replay_items},
+        response_metadata={"response_id": "resp_complete"},
+        tool_calls=[
+            {"id": "call_complete", "name": "lookup_tool", "args": {"query": "moon"}},
+        ],
+    )
+    tool = ToolMessage(
+        content="The moon is Earth's natural satellite.",
+        tool_call_id="call_complete",
+        additional_kwargs={"replayMarker": "complete"},
+    )
+
+    messages = normalize_provider_turn_messages([assistant, tool])
+
+    assert messages[0] is assistant
+    assert messages[1] is tool
+    assert assistant.additional_kwargs["responsesReplayItems"] is replay_items
+    assert assistant.response_metadata["response_id"] == "resp_complete"
+    assert tool.additional_kwargs["replayMarker"] == "complete"
+
+
+def test_provider_turn_messages_preserve_structured_user_content_blocks():
+    content = [
+        {"type": "text", "text": "看图"},
+        {"type": "image_url", "image_url": {"url": "data:image/png;base64,abc"}},
+    ]
+
+    messages = normalize_provider_turn_messages([{"role": "user", "content": content}])
+
+    assert messages[0]["role"] == "user"
+    assert messages[0]["content"] == content
+    assert isinstance(messages[0]["content"], list)

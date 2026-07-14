@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import threading
+from contextvars import ContextVar
 from typing import Any
 
 from langchain_core.messages import ToolMessage
@@ -69,6 +71,49 @@ def test_readonly_batch_isolates_worker_exception_and_preserves_success_results(
     assert "worker-local mutation" not in original_messages
     assert worker_message_ids
     assert all(message_id != id(original_messages) for message_id in worker_message_ids)
+
+
+def test_readonly_batch_gives_each_future_an_independent_context_copy():
+    worker_context = ContextVar("readonly_worker_context", default="missing")
+    parent_token = worker_context.set("parent")
+    worker_barrier = threading.Barrier(3)
+    observed: list[tuple[str, str, str]] = []
+    observed_lock = threading.Lock()
+
+    class ContextCapturingBridge(ToolLifecycleBridge):
+        def execute_tool(self, tool_call, messages):  # type: ignore[override]
+            call_id = str(tool_call.get("id") or "")
+            inherited_value = worker_context.get()
+            worker_context.set(call_id)
+            worker_barrier.wait(timeout=5)
+            with observed_lock:
+                observed.append((call_id, inherited_value, worker_context.get()))
+            return (f"result:{call_id}", None)
+
+    bridge = ContextCapturingBridge(tool_executor_execute=lambda _name, _args: ("unused", None))
+    messages: list[Any] = []
+    try:
+        action = bridge.execute_tools(
+            [
+                {"name": "read_file_tool", "args": {}, "id": "call-a"},
+                {"name": "grep_search_tool", "args": {}, "id": "call-b"},
+                {"name": "list_files_tool", "args": {}, "id": "call-c"},
+            ],
+            messages,
+            max_parallel_readonly=3,
+        )
+
+        assert action is None
+        assert worker_context.get() == "parent"
+    finally:
+        worker_context.reset(parent_token)
+
+    assert {inherited for _, inherited, _ in observed} == {"parent"}
+    assert {(call_id, worker_value) for call_id, _, worker_value in observed} == {
+        ("call-a", "call-a"),
+        ("call-b", "call-b"),
+        ("call-c", "call-c"),
+    }
 
 
 def test_handle_tool_result_creates_one_canonical_result_and_one_compatibility_message():
