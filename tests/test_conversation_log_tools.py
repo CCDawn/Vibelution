@@ -239,3 +239,97 @@ def test_conversation_log_inspect_never_returns_raw_error_or_preview_text(tmp_pa
     assert prompt_only not in payload
     assert unlabeled_credential not in payload
     assert tool_result_secret not in payload
+
+
+def test_event_identities_prefers_live_session_and_keeps_legacy_aliases():
+    assert conversation_log_tools._event_identities(
+        {
+            "session_id": "20260714_010203_123456",
+            "fields": {"sessionId": "session-live"},
+        }
+    )["sessionId"] == "session-live"
+    assert conversation_log_tools._event_identities(
+        {"runtimeSessionId": "session-runtime-camel"}
+    )["sessionId"] == "session-runtime-camel"
+    assert conversation_log_tools._event_identities(
+        {"runtime_session_id": "session-runtime-snake"}
+    )["sessionId"] == "session-runtime-snake"
+    assert conversation_log_tools._event_identities(
+        {"session_id": "session-legacy"}
+    )["sessionId"] == "session-legacy"
+
+
+def test_conversation_log_inspect_query_miss_does_not_fall_back_to_latest(tmp_path, monkeypatch):
+    monkeypatch.setattr(conversation_log_tools, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(conversation_log_tools, "LOG_INFO_DIR", tmp_path / "log_info")
+    log_dir = tmp_path / "log_info"
+    log_dir.mkdir()
+    _write_jsonl(
+        log_dir / "conversation_20260714_120000__chat__latest.jsonl",
+        [{"type": "session_start", "metadata": {"conversation_topic": "latest"}}],
+    )
+
+    result = conversation_log_tools.inspect_conversation_logs(query="missing conversation")
+
+    assert result["candidateCount"] == 0
+    assert result["candidates"] == []
+    assert result["inspections"] == []
+    assert result["selectionStatus"] == "not_found"
+    assert result["fallbackUsed"] is False
+
+
+def test_conversation_log_inspect_identity_miss_does_not_return_latest(tmp_path, monkeypatch):
+    monkeypatch.setattr(conversation_log_tools, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(conversation_log_tools, "LOG_INFO_DIR", tmp_path / "log_info")
+    log_dir = tmp_path / "log_info"
+    log_dir.mkdir()
+    _write_jsonl(
+        log_dir / "conversation_20260714_120000__chat__latest.jsonl",
+        [
+            {
+                "event_code": "conversation.turn.started",
+                "fields": {"sessionId": "session-other", "turnId": "turn-other"},
+            }
+        ],
+    )
+
+    result = conversation_log_tools.inspect_conversation_logs(session_id="session-missing")
+
+    assert result["candidateCount"] == 0
+    assert result["inspections"] == []
+    assert result["selectionStatus"] == "not_found"
+    assert result["fallbackUsed"] is False
+
+
+def test_conversation_log_inspect_reports_session_match_without_boundary(tmp_path, monkeypatch):
+    monkeypatch.setattr(conversation_log_tools, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(conversation_log_tools, "LOG_INFO_DIR", tmp_path / "log_info")
+    log_dir = tmp_path / "log_info"
+    log_dir.mkdir()
+    log_path = log_dir / "conversation_20260714_120000__chat__session-live.jsonl"
+    _write_jsonl(
+        log_path,
+        [
+            {
+                "type": "session_start",
+                "session_id": "20260714_120000_123456",
+                "metadata": {"sessionId": "session-live"},
+            }
+        ],
+    )
+
+    result = conversation_log_tools.inspect_conversation_logs(session_id="session-live")
+    correlation = result["inspections"][0]["correlation"]
+
+    assert result["candidateCount"] == 1
+    assert result["selectionStatus"] == "matched"
+    assert result["fallbackUsed"] is False
+    assert correlation["boundaryCount"] == 0
+    assert correlation["matchStatus"] == "identity_match_without_boundary"
+    assert correlation["matchedRecordCount"] == 1
+    assert correlation["diagnostics"] == [
+        {
+            "code": "identity_match_without_boundary",
+            "message": "Identity matched log records, but no turn, invocation, or submission boundary was found.",
+        }
+    ]
