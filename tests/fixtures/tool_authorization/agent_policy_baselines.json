@@ -1,0 +1,178 @@
+{
+  "schema_version": 1,
+  "fixture_id": "agent_tool_policy_baselines_v1",
+  "cases": [
+    {
+      "case_id": "default_session_agent",
+      "agent_class": "session",
+      "run_kinds": ["direct_session", "chat_room"],
+      "policy_source": "default_session_private_policy",
+      "visibility_semantics": "exact",
+      "expected_allowed_tools": [
+        "grep_search_tool",
+        "glob_tool",
+        "code_symbol_tool",
+        "apply_diff_edit_tool",
+        "apply_patch_tool",
+        "write_file_tool",
+        "python_lint_tool",
+        "run_test_for_tool",
+        "cli_tool",
+        "agent_message_tool",
+        "agent_tool_permission_request_tool",
+        "get_core_context_tool",
+        "get_current_goal_tool",
+        "task_list_tool",
+        "get_git_status_summary_tool",
+        "get_recent_changes_tool",
+        "explain_current_worktree_tool",
+        "conversation_log_inspect_tool"
+      ],
+      "expected_preferred_tools": [
+        "grep_search_tool",
+        "code_symbol_tool",
+        "apply_patch_tool",
+        "run_test_for_tool",
+        "cli_tool",
+        "get_core_context_tool",
+        "conversation_log_inspect_tool"
+      ],
+      "expected_forbidden_tools": [],
+      "migration_expectation": "preserve_exact_assignment",
+      "expected_resolution": "allowed"
+    },
+    {
+      "case_id": "explicit_zero_tool_agent",
+      "agent_class": "explicit_zero_tool",
+      "run_kinds": ["supervised", "self_evolution"],
+      "policy_source": "explicit_private_policy",
+      "visibility_semantics": "exact",
+      "expected_allowed_tools": [],
+      "expected_preferred_tools": [],
+      "expected_forbidden_tools": [],
+      "migration_expectation": "preserve_zero_tools",
+      "expected_resolution": "allowed"
+    },
+    {
+      "case_id": "research_source_finder",
+      "agent_class": "research_fixed_role",
+      "role_key": "source_finder",
+      "primary_mode": "research",
+      "run_kinds": ["research", "team_workflow"],
+      "policy_source": "role_tool_profile",
+      "visibility_semantics": "role_profile",
+      "expected_required_tools": [
+        "agent_message_tool",
+        "task_list_tool",
+        "task_create_tool",
+        "task_update_tool",
+        "source_collection_context_tool",
+        "source_collection_stage_writeback_tool",
+        "batch_web_search_tool",
+        "paper_search_tool",
+        "project_search_tool",
+        "news_search_tool",
+        "web_fetch_tool"
+      ],
+      "expected_forbidden_tools": [
+        "web_search_tool",
+        "knowledge_proposal_tool",
+        "knowledge_ingestion_tool",
+        "apply_patch_tool",
+        "write_file_tool"
+      ],
+      "migration_expectation": "materialize_profile_as_policy_v2",
+      "expected_resolution": "allowed"
+    },
+    {
+      "case_id": "team_operation_agent",
+      "agent_class": "team_fixed_role",
+      "role_key": "challenge_cup_iteration_planner",
+      "primary_mode": "research",
+      "run_kinds": ["team_workflow"],
+      "policy_source": "role_tool_profile",
+      "visibility_semantics": "role_profile",
+      "expected_required_tools": [
+        "agent_message_tool",
+        "challenge_cup_iteration_context_tool",
+        "challenge_cup_iteration_writeback_tool"
+      ],
+      "expected_forbidden_tools": [
+        "web_search_tool",
+        "cli_tool",
+        "apply_patch_tool",
+        "write_file_tool",
+        "run_test_for_tool"
+      ],
+      "migration_expectation": "materialize_profile_as_policy_v2",
+      "expected_resolution": "allowed"
+    },
+    {
+      "case_id": "self_evolution_executor",
+      "agent_class": "self_evolution_executor",
+      "run_kinds": ["self_evolution"],
+      "policy_source": "self_evolution_executable_policy",
+      "visibility_semantics": "exact_default_session_contract",
+      "expected_required_tools": [
+        "grep_search_tool",
+        "code_symbol_tool",
+        "apply_patch_tool",
+        "run_test_for_tool",
+        "cli_tool"
+      ],
+      "expected_forbidden_tools": [
+        "web_search_tool",
+        "knowledge_ingestion_tool"
+      ],
+      "migration_expectation": "materialize_explicit_policy_v2",
+      "expected_resolution": "allowed"
+    },
+    {
+      "case_id": "supervised_observer",
+      "agent_class": "supervised_observer",
+      "run_kinds": ["supervised"],
+      "policy_source": "system_no_tool_role",
+      "visibility_semantics": "exact",
+      "expected_allowed_tools": [],
+      "expected_preferred_tools": [],
+      "expected_forbidden_tools": [],
+      "migration_expectation": "materialize_explicit_zero_tool_policy_v2",
+      "expected_resolution": "allowed"
+    },
+    {
+      "case_id": "legacy_wide_private_policy",
+      "agent_class": "legacy_wide",
+      "run_kinds": ["direct_session"],
+      "policy_source": "legacy_private_policy",
+      "visibility_semantics": "preserve_input",
+      "expected_required_tools": [],
+      "expected_forbidden_tools": [],
+      "migration_expectation": "preserve_and_label_for_operator_review",
+      "expected_resolution": "allowed"
+    },
+    {
+      "case_id": "missing_policy",
+      "agent_class": "invalid_policy_reference",
+      "run_kinds": ["direct_session", "team_workflow", "research"],
+      "policy_source": "missing",
+      "visibility_semantics": "deny_all",
+      "expected_allowed_tools": [],
+      "expected_preferred_tools": [],
+      "expected_forbidden_tools": [],
+      "migration_expectation": "require_operator_repair",
+      "expected_resolution": "policy_missing"
+    },
+    {
+      "case_id": "corrupt_policy",
+      "agent_class": "invalid_policy_payload",
+      "run_kinds": ["direct_session", "team_workflow", "research"],
+      "policy_source": "corrupt",
+      "visibility_semantics": "deny_all",
+      "expected_allowed_tools": [],
+      "expected_preferred_tools": [],
+      "expected_forbidden_tools": [],
+      "migration_expectation": "require_operator_repair",
+      "expected_resolution": "policy_invalid"
+    }
+  ]
+}
