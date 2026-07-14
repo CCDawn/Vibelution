@@ -118,6 +118,79 @@ def test_bulk_archive_skips_system_fixed_role_agent(tmp_path, monkeypatch):
     assert agent_directory_service.get_agent(protected["agentId"])["status"] == "active"
 
 
+def test_bulk_archive_restores_references_for_failed_agent(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    agent = session_service.create_chat_session(title="Bulk Archive Rollback Agent")
+    peer = session_service.create_chat_session(title="Bulk Archive Rollback Peer")
+    room = chat_room_service.create_chat_room(
+        title="Bulk Archive Rollback Room",
+        participant_session_ids=[agent["id"], peer["id"]],
+    )
+    team = team_service.create_team(
+        name="Bulk Archive Rollback Team",
+        members=[{"agentId": agent["agentId"], "role": "lead"}],
+    )
+    agent_mode_binding_service.update_mode_binding(
+        "chat",
+        available_agent_ids=[agent["agentId"], peer["agentId"]],
+    )
+    original_available = agent_mode_binding_service.get_mode_bindings_payload()["modes"]["chat"]["availableAgentIds"]
+
+    def fail_archive(*args, **kwargs):
+        raise agent_directory_service.AgentDirectoryError("archive write failed")
+
+    monkeypatch.setattr(agent_bulk_delete_service, "archive_agent_instance", fail_archive)
+
+    result = agent_bulk_delete_service.bulk_archive_agents([agent["agentId"]])
+
+    assert result["status"] == "failed"
+    assert result["summary"]["failedCount"] == 1
+    assert agent_directory_service.get_agent(agent["agentId"])["status"] == "active"
+    assert team_service.get_team(team["teamId"])["members"][0]["agentId"] == agent["agentId"]
+    room_detail = chat_room_service.get_chat_room_detail(room["roomId"])
+    assert [participant["agentId"] for participant in room_detail["participants"]] == [
+        agent["agentId"],
+        peer["agentId"],
+    ]
+    assert agent_mode_binding_service.get_mode_bindings_payload()["modes"]["chat"]["availableAgentIds"] == original_available
+    assert result["timingsMs"]["rollback_teams"] >= 0
+
+
+def test_bulk_archive_reactivates_earlier_success_when_later_agent_fails(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    first = session_service.create_chat_session(title="Bulk Archive First")
+    second = session_service.create_chat_session(title="Bulk Archive Second")
+    team = team_service.create_team(
+        name="Bulk Archive Atomic Team",
+        members=[
+            {"agentId": first["agentId"], "role": "lead"},
+            {"agentId": second["agentId"], "role": "reviewer"},
+        ],
+    )
+    original_archive = agent_bulk_delete_service.archive_agent_instance
+
+    def fail_second(agent_id, *args, **kwargs):
+        if agent_id == second["agentId"]:
+            raise agent_directory_service.AgentDirectoryError("second archive write failed")
+        return original_archive(agent_id, *args, **kwargs)
+
+    monkeypatch.setattr(agent_bulk_delete_service, "archive_agent_instance", fail_second)
+
+    result = agent_bulk_delete_service.bulk_archive_agents([first["agentId"], second["agentId"]])
+
+    assert result["status"] == "failed"
+    assert result["summary"]["successCount"] == 0
+    assert result["summary"]["failedCount"] == 2
+    assert {item["reason"] for item in result["failed"]} == {"invalid", "batch_rolled_back"}
+    assert agent_directory_service.get_agent(first["agentId"])["status"] == "active"
+    assert agent_directory_service.get_agent(second["agentId"])["status"] == "active"
+    assert [member["agentId"] for member in team_service.get_team(team["teamId"])["members"]] == [
+        first["agentId"],
+        second["agentId"],
+    ]
+    assert result["timingsMs"]["rollback_archived_agents"] >= 0
+
+
 def test_bulk_purge_skips_system_fixed_role_agent_even_when_legacy_archived(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     protected = agent_directory_service.create_agent_instance(display_name="Legacy Archived Fixed Role")

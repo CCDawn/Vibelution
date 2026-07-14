@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import copy
 import re
 import shutil
 import threading
@@ -1680,20 +1681,23 @@ def update_team(
     return get_team(normalized_team_id)
 
 
-def remove_agent_from_teams(agent_id: str) -> dict[str, Any]:
+def remove_agent_from_teams(agent_id: str, *, include_restore_token: bool = False) -> dict[str, Any]:
     """Remove one unavailable Agent from active Team membership and linked rooms."""
 
     normalized_agent_id = str(agent_id or "").strip()
     if not normalized_agent_id:
         raise TeamServiceError("Agent id is required.")
-    cleanup = remove_agents_from_teams([normalized_agent_id])
-    return {
+    cleanup = remove_agents_from_teams([normalized_agent_id], include_restore_token=include_restore_token)
+    result = {
         "agentId": normalized_agent_id,
         "changedTeamIds": list(cleanup.get("changedTeamIds") or []),
     }
+    if include_restore_token:
+        result["restoreToken"] = cleanup.get("restoreToken")
+    return result
 
 
-def remove_agents_from_teams(agent_ids: list[str] | None) -> dict[str, Any]:
+def remove_agents_from_teams(agent_ids: list[str] | None, *, include_restore_token: bool = False) -> dict[str, Any]:
     """Remove multiple unavailable Agents from active Team membership in one index update."""
 
     requested = [str(item or "").strip() for item in list(agent_ids or []) if str(item or "").strip()]
@@ -1707,6 +1711,8 @@ def remove_agents_from_teams(agent_ids: list[str] | None) -> dict[str, Any]:
     if not normalized_agent_ids:
         return {"agentIds": [], "changedTeamIds": [], "removedByAgentId": {}}
     changed_team_ids: list[str] = []
+    restore_teams: list[dict[str, Any]] = []
+    restore_canvases: dict[str, dict[str, Any] | None] = {}
     removed_by_agent_id: dict[str, list[str]] = {agent_id: [] for agent_id in normalized_agent_ids}
     agent_id_set = set(normalized_agent_ids)
     with _TEAM_LOCK:
@@ -1730,6 +1736,10 @@ def remove_agents_from_teams(agent_ids: list[str] | None) -> dict[str, Any]:
             if next_members == members:
                 continue
             team_id = str(team.get("teamId") or "").strip()
+            if include_restore_token:
+                restore_teams.append(copy.deepcopy(team))
+                canvas_path = _team_canvas_path(team_id)
+                restore_canvases[team_id] = copy.deepcopy(_read_json(canvas_path)) if canvas_path.exists() else None
             team["members"] = next_members
             team["updatedAt"] = now
             team["canvasPath"] = _relative_path(_team_canvas_path(team_id))
@@ -1753,7 +1763,7 @@ def remove_agents_from_teams(agent_ids: list[str] | None) -> dict[str, Any]:
             {"teamId": team_id, "status": DEFAULT_TEAM_STATUS},
             fields={"agentIds": removed_agent_ids, "agentCount": len(removed_agent_ids)},
         )
-    return {
+    result = {
         "agentIds": normalized_agent_ids,
         "changedTeamIds": changed_team_ids,
         "removedByAgentId": {
@@ -1762,6 +1772,39 @@ def remove_agents_from_teams(agent_ids: list[str] | None) -> dict[str, Any]:
             if team_ids
         },
     }
+    if include_restore_token:
+        result["restoreToken"] = {"teams": restore_teams, "canvases": restore_canvases}
+    return result
+
+
+def restore_removed_agents_to_teams(restore_token: dict[str, Any] | None) -> dict[str, Any]:
+    """Restore exact Team membership and canvas snapshots after a failed archive."""
+
+    token = dict(restore_token or {})
+    snapshots = [copy.deepcopy(item) for item in list(token.get("teams") or []) if isinstance(item, dict)]
+    if not snapshots:
+        return {"restoredTeamIds": []}
+    restored_ids: list[str] = []
+    with _TEAM_LOCK:
+        state = _load_index()
+        teams = [item for item in list(state.get("teams") or []) if isinstance(item, dict)]
+        by_id = {str(item.get("teamId") or "").strip(): index for index, item in enumerate(teams)}
+        for snapshot in snapshots:
+            team_id = str(snapshot.get("teamId") or "").strip()
+            if not team_id or team_id not in by_id:
+                continue
+            teams[by_id[team_id]] = snapshot
+            restored_ids.append(team_id)
+        state["teams"] = teams
+        if restored_ids:
+            state["updatedAt"] = utc_now_iso()
+            _save_index(state)
+            canvases = token.get("canvases") if isinstance(token.get("canvases"), dict) else {}
+            for team_id in restored_ids:
+                canvas = canvases.get(team_id)
+                if isinstance(canvas, dict):
+                    _write_json(_team_canvas_path(team_id), canvas)
+    return {"restoredTeamIds": restored_ids}
 
 
 def _remove_agent_from_team_canvas(team: dict[str, Any], agent_id: str) -> None:

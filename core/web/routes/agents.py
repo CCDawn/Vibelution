@@ -55,6 +55,7 @@ from core.web.services.agent_mode_binding_service import (
     AgentModeBindingError,
     get_mode_bindings_payload,
     remove_agent_from_mode_bindings,
+    restore_removed_agents_to_mode_bindings,
     update_agent_mode_membership,
     update_mode_binding,
 )
@@ -62,11 +63,13 @@ from core.web.services.chat_room_service import (
     ChatRoomBusyError,
     ChatRoomValidationError,
     remove_agent_from_chat_rooms,
+    restore_removed_agents_to_chat_rooms,
     update_agent_chat_room_membership,
 )
 from core.web.services.team_service import (
     TeamServiceError,
     remove_agent_from_teams,
+    restore_removed_agents_to_teams,
 )
 from core.web.services.prompt_template_service import (
     PromptTemplateError,
@@ -989,14 +992,48 @@ def agent_archive(agent_id: str) -> dict:
     started_at = perf_counter()
     try:
         _timed_agent_delete_stage(timings, "ensure_archive_allowed", lambda: ensure_agent_archive_allowed(agent_id))
-        team_cleanup = _timed_agent_delete_stage(timings, "remove_from_teams", lambda: remove_agent_from_teams(agent_id))
-        room_cleanup = _timed_agent_delete_stage(timings, "remove_from_chat_rooms", lambda: remove_agent_from_chat_rooms(agent_id))
-        mode_cleanup = _timed_agent_delete_stage(timings, "remove_from_mode_bindings", lambda: remove_agent_from_mode_bindings(agent_id))
-        agent = _timed_agent_delete_stage(
-            timings,
-            "archive_agent",
-            lambda: archive_agent_instance(agent_id, repair_mode_bindings=False),
-        )
+        mode_restore_token = _timed_agent_delete_stage(timings, "snapshot_mode_bindings", get_mode_bindings_payload)
+        team_cleanup: dict[str, Any] = {}
+        room_cleanup: dict[str, Any] = {}
+        mode_cleanup: dict[str, Any] = {}
+        try:
+            team_cleanup = _timed_agent_delete_stage(
+                timings,
+                "remove_from_teams",
+                lambda: remove_agent_from_teams(agent_id, include_restore_token=True),
+            )
+            room_cleanup = _timed_agent_delete_stage(
+                timings,
+                "remove_from_chat_rooms",
+                lambda: remove_agent_from_chat_rooms(agent_id, include_restore_token=True),
+            )
+            mode_cleanup = _timed_agent_delete_stage(
+                timings,
+                "remove_from_mode_bindings",
+                lambda: remove_agent_from_mode_bindings(agent_id),
+            )
+            agent = _timed_agent_delete_stage(
+                timings,
+                "archive_agent",
+                lambda: archive_agent_instance(agent_id, repair_mode_bindings=False),
+            )
+        except Exception:
+            _timed_agent_delete_stage(
+                timings,
+                "rollback_mode_bindings",
+                lambda: restore_removed_agents_to_mode_bindings(mode_restore_token),
+            )
+            _timed_agent_delete_stage(
+                timings,
+                "rollback_chat_rooms",
+                lambda: restore_removed_agents_to_chat_rooms(room_cleanup.get("restoreToken")),
+            )
+            _timed_agent_delete_stage(
+                timings,
+                "rollback_teams",
+                lambda: restore_removed_agents_to_teams(team_cleanup.get("restoreToken")),
+            )
+            raise
         payload = {
             **agent,
             "archiveSummary": {

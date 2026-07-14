@@ -232,7 +232,11 @@ def update_agent_mode_membership(
     return get_mode_bindings_payload()
 
 
-def remove_agent_from_mode_bindings(agent_id: str, *, agent_snapshot: dict[str, Any] | None = None) -> dict[str, Any]:
+def remove_agent_from_mode_bindings(
+    agent_id: str,
+    *,
+    agent_snapshot: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """Remove one Agent from all mode binding references before safe archival."""
 
     normalized_agent_id = str(agent_id or "").strip()
@@ -377,6 +381,33 @@ def remove_agents_from_mode_bindings(
     result = get_mode_bindings_payload()
     result["removedAgentIds"] = normalized_agent_ids
     return result
+
+
+def restore_removed_agents_to_mode_bindings(restore_token: dict[str, Any] | None) -> dict[str, Any]:
+    """Restore the exact mode-binding snapshot after a failed archive."""
+
+    token = copy.deepcopy(restore_token) if isinstance(restore_token, dict) else None
+    if not token:
+        return {"restored": False}
+    restored_modes: list[str] = []
+    for binding in list(token.get("bindings") or []):
+        if not isinstance(binding, dict):
+            continue
+        mode = str(binding.get("mode") or "").strip()
+        if not mode:
+            continue
+        update_mode_binding(
+            mode,
+            default_agent_id=str(binding.get("defaultAgentId") or "").strip(),
+            available_agent_ids=list(binding.get("availableAgentIds") or []),
+            pool=list(binding.get("pool") or []),
+            flow_bindings=dict(binding.get("flowBindings") or {}),
+            slots=dict(binding.get("slots") or {}),
+            excluded_agent_ids=list(binding.get("excludedAgentIds") or []),
+            excluded_slots=list(binding.get("excludedSlots") or []),
+        )
+        restored_modes.append(mode)
+    return {"restored": bool(restored_modes), "restoredModes": restored_modes}
 
 
 def _fixed_role_tombstone_slots(agent: dict[str, Any] | None) -> dict[str, str]:
