@@ -148,8 +148,9 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("TEAM_PICKER_TEAM_IDS");
     expect(canvasDataSource).toContain("const TEAM_PICKER_TEAM_IDS = [AI_SEARCH_TEAM_ID, KNOWLEDGE_EXPANSION_TEAM_ID, RESEARCH_TEAM_ID] as const");
     expect(routeSource).toContain("fetchJson<Team>(`/api/teams/${encodeURIComponent(effectiveTeamId)}?detail=${teamDetailLoadMode}`, { signal })");
-    expect(routeSource).toContain("queryKeys.agentSummary(true)");
-    expect(routeSource).toContain('fetchJson<AgentConfigWorkspaceAgent[]>("/api/agents?includeArchived=true&detail=summary", { signal })');
+    expect(routeSource).toContain("queryKeys.agentSummary(false)");
+    expect(routeSource).toContain('fetchJson<AgentConfigWorkspaceAgent[]>("/api/agents?detail=summary", { signal })');
+    expect(routeSource).not.toContain("includeArchived=true&detail=summary");
     expect(routeSource).not.toContain('fetchJson<AgentConfigWorkspace>("/api/agents/config-workspace")');
     expect(routeSource).toContain("fetchJson<Team>(`/api/teams/${encodeURIComponent(teamId)}`");
     expect(routeSource).toContain('method: "DELETE"');
@@ -403,6 +404,15 @@ describe("TeamsRoute layout contract", () => {
     expect(routeStyles.teamMemoryMemberHeading).toContain("hidden");
     expect(routeStyles.teamMemoryMemberActions).toContain("[&_a_span]:hidden");
     expect(routeStyles.teamMemoryActionRail).toContain("[&_a]:inline-flex");
+  });
+
+  it("distinguishes Agent-directory hydration from a missing Team binding in the memory index", () => {
+    expect(routeSource).toContain("const memoryIndexAgentHydrationPending = Boolean(");
+    expect(routeSource).toContain("const memoryIndexAgentLoadFailed = Boolean(");
+    expect(routeSource).toContain('lang === "zh" ? "正在读取 Agent 目录" : "Loading Agent directory"');
+    expect(routeSource).toContain('lang === "zh" ? "Agent 目录加载失败" : "Agent directory load failed"');
+    expect(routeSource).toContain('lang === "zh" ? "Agent 引用失效" : "Agent reference missing"');
+    expect(routeSource).not.toContain("statusLabel: researchStageAgentConfigStatusLabel(agent, lang)");
   });
 
   it("keeps the research overview on a readable workbench surface instead of a transparent card wall", () => {

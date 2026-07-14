@@ -3002,8 +3002,8 @@ export function TeamsRoute({
         : false,
   });
   const agentSummaryQuery = useQuery({
-    queryKey: queryKeys.agentSummary(true),
-    queryFn: ({ signal }) => fetchJson<AgentConfigWorkspaceAgent[]>("/api/agents?includeArchived=true&detail=summary", { signal }),
+    queryKey: queryKeys.agentSummary(false),
+    queryFn: ({ signal }) => fetchJson<AgentConfigWorkspaceAgent[]>("/api/agents?detail=summary", { signal }),
     staleTime: 10_000,
   });
   const projectBusQuery = useQuery({
@@ -8517,18 +8517,40 @@ export function TeamsRoute({
         name: member.agentName || member.agentCode || agentId,
       });
       const roleLabel = member.role || agent?.roleKey || agent?.primaryMode || "-";
+      const memoryIndexAgentHydrationPending = Boolean(
+        !agent && (agentSummaryQuery.isPending || agentSummaryQuery.isFetching),
+      );
+      const memoryIndexAgentLoadFailed = Boolean(!agent && agentSummaryQuery.isError);
       const statusTitle = agent
         ? researchStageAgentModelLabel(agent, lang)
-        : (lang === "zh" ? "未找到 Agent 目录绑定" : "Agent directory binding missing");
+        : memoryIndexAgentHydrationPending
+          ? (lang === "zh" ? "成员 Agent 正在从目录加载。" : "Member Agent is loading from the directory.")
+          : memoryIndexAgentLoadFailed
+            ? (lang === "zh" ? "无法读取 Agent 目录；请稍后刷新。" : "The Agent directory could not be read. Refresh later.")
+            : (lang === "zh"
+              ? "该成员保留了 Agent ID，但目录中未找到对应实例。"
+              : "This member retains an Agent ID that is not present in the directory.");
+      const statusLabel = agent
+        ? researchStageAgentConfigStatusLabel(agent, lang)
+        : memoryIndexAgentHydrationPending
+          ? (lang === "zh" ? "正在读取 Agent 目录" : "Loading Agent directory")
+          : memoryIndexAgentLoadFailed
+            ? (lang === "zh" ? "Agent 目录加载失败" : "Agent directory load failed")
+            : (lang === "zh" ? "Agent 引用失效" : "Agent reference missing");
+      const statusTone = agent
+        ? researchStageAgentConfigTone(agent)
+        : memoryIndexAgentHydrationPending
+          ? "warning"
+          : "blocked";
       return {
         id: `team-memory-${selectedTeam?.teamId || "team"}-${agentId}`,
         agentName: display.name || member.agentName || member.agentCode || agentId,
         agentCode: member.agentCode || agent?.agentCode || agentId,
         roleLabel,
         roleTitle: [roleLabel, member.purpose, ...(member.responsibilities ?? [])].filter(Boolean).join(" · "),
-        statusLabel: researchStageAgentConfigStatusLabel(agent, lang),
+        statusLabel,
         statusTitle,
-        statusTone: researchStageAgentConfigTone(agent),
+        statusTone,
         memoryRoute: agentCenterMemoryRoute({
           agentId,
           teamId: selectedTeam?.teamId,
