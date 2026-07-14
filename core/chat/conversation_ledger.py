@@ -11,6 +11,8 @@ this ledger API so conversation-flow code has one stable source of truth.
 
 from __future__ import annotations
 
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable
@@ -62,6 +64,9 @@ from .context_compression_ledger import (
 
 
 ConversationLedgerEvent = TurnJournalEvent
+_CONVERSATION_EVENT_READ_SNAPSHOT: ContextVar[
+    dict[tuple[Path, str], tuple[ConversationLedgerEvent, ...]] | None
+] = ContextVar("conversation_event_read_snapshot", default=None)
 
 
 @dataclass(frozen=True)
@@ -134,8 +139,27 @@ def append_conversation_turn_outcome(
     return append_canonical_turn_outcome(project_root, session_id, turn_id, outcome)
 
 
+@contextmanager
+def conversation_event_read_snapshot():
+    """Reuse ledger reads inside one explicitly bounded read-only operation."""
+
+    token = _CONVERSATION_EVENT_READ_SNAPSHOT.set({})
+    try:
+        yield
+    finally:
+        _CONVERSATION_EVENT_READ_SNAPSHOT.reset(token)
+
+
 def load_conversation_events(project_root: Path, session_id: str) -> list[ConversationLedgerEvent]:
-    return load_turn_events(project_root, session_id)
+    snapshot = _CONVERSATION_EVENT_READ_SNAPSHOT.get()
+    if snapshot is None:
+        return load_turn_events(project_root, session_id)
+    cache_key = (Path(project_root), str(session_id or "").strip())
+    cached = snapshot.get(cache_key)
+    if cached is None:
+        cached = tuple(load_turn_events(project_root, session_id))
+        snapshot[cache_key] = cached
+    return list(cached)
 
 
 def rewrite_conversation_events(

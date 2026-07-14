@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from core.infrastructure import developer_sandbox
+from core.chat import conversation_ledger
 from core.chat.conversation_ledger import (
     EVENT_ASSISTANT_MESSAGE,
     EVENT_ASSISTANT_PARTIAL,
@@ -18,6 +19,7 @@ from core.chat.conversation_ledger import (
     TURN_INTERRUPTED_MARKER,
     append_context_compression_checkpoint,
     append_conversation_event,
+    conversation_event_read_snapshot,
     conversation_ledger_path,
     conversation_model_messages_from_events,
     event_has_model_projection,
@@ -149,6 +151,31 @@ def test_conversation_ledger_load_streams_journal_without_read_text(tmp_path, mo
     events = load_conversation_events(tmp_path, "session-stream-load")
 
     assert [event.sequence for event in events] == [1, 2]
+
+
+def test_conversation_ledger_read_snapshot_reuses_one_load_and_returns_fresh_lists(tmp_path, monkeypatch):
+    append_conversation_event(tmp_path, "session-snapshot", "turn-1", EVENT_TURN_STARTED, status="running")
+    original_load = conversation_ledger.load_turn_events
+    load_count = 0
+
+    def counted_load(project_root, session_id):
+        nonlocal load_count
+        load_count += 1
+        return original_load(project_root, session_id)
+
+    monkeypatch.setattr(conversation_ledger, "load_turn_events", counted_load)
+
+    with conversation_event_read_snapshot():
+        first = load_conversation_events(tmp_path, "session-snapshot")
+        second = load_conversation_events(tmp_path, "session-snapshot")
+
+    assert load_count == 1
+    assert first == second
+    assert first is not second
+
+    load_conversation_events(tmp_path, "session-snapshot")
+
+    assert load_count == 2
 
 
 def test_conversation_ledger_preserves_interrupted_partial(tmp_path):
