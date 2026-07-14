@@ -285,6 +285,34 @@ def _compact_one_line(text: str, limit: int) -> str:
     if len(compact) <= limit:
         return compact
     return compact[: max(0, limit - 3)].rstrip() + "..."
+
+
+_SAFE_LLM_ERROR_DIAGNOSTIC_DETAIL_KEYS = (
+    "messageIndex",
+    "payloadValidationErrorType",
+    "payloadValidationResult",
+    "payloadMessageAssistantToolCallCount",
+    "payloadMessageToolResultCount",
+    "payloadMessageShapeHash",
+)
+
+
+def _safe_llm_error_diagnostic_details(details: Any) -> Dict[str, Any]:
+    """Keep only prompt-free scalar projection diagnostics from an LLM error."""
+    if not isinstance(details, dict):
+        return {}
+    safe: Dict[str, Any] = {}
+    for key in _SAFE_LLM_ERROR_DIAGNOSTIC_DETAIL_KEYS:
+        value = details.get(key)
+        if isinstance(value, str):
+            compact = _compact_one_line(value, 160)
+            if compact:
+                safe[key] = compact
+        elif isinstance(value, (bool, int, float)):
+            safe[key] = value
+    return safe
+
+
 _TOOL_SURFACE_GROUPS: Dict[str, str] = {
     "grep_search_tool": "locate",
     "glob_tool": "locate",
@@ -2514,6 +2542,7 @@ class SelfEvolvingAgent:
                     if stop_reason:
                         ui.add_log(stop_reason, "WARN")
                         llm_error_details = dict(getattr(self, "_last_llm_error_details", {}) or {})
+                        safe_projection_details = _safe_llm_error_diagnostic_details(llm_error_details)
                         self._last_turn_metadata = {
                             **dict(getattr(self, "_last_turn_metadata", {}) or {}),
                             "llm_failure": {
@@ -2530,6 +2559,7 @@ class SelfEvolvingAgent:
                                 "attempts": self._last_llm_failure_attempts,
                                 "max_attempts": self._last_llm_failure_max_attempts,
                                 "stop_reason": stop_reason,
+                                "payload_validation": safe_projection_details,
                             },
                         }
                         break
@@ -3274,6 +3304,7 @@ class SelfEvolvingAgent:
                     raise
                 except Exception as e:
                     llm_error_details = dict(getattr(e, "details", {}) or {}) if isinstance(e, LLMError) else {}
+                    safe_projection_details = _safe_llm_error_diagnostic_details(llm_error_details)
                     reported_attempt = int(llm_error_details.get("attempt") or 1)
                     reported_max_attempts = int(
                         llm_error_details.get("max_attempts") or reported_attempt or 1
@@ -3315,6 +3346,7 @@ class SelfEvolvingAgent:
                     exception_message = str(e)
                     llm_error_traceback = traceback.format_exc()
                     error_details = {
+                        **safe_projection_details,
                         "exception_type": exception_type,
                         "exception_message": exception_message[:4000],
                         "retryable": is_retryable,
@@ -3384,6 +3416,7 @@ class SelfEvolvingAgent:
                             "maxTransportAttempts": reported_max_attempts,
                             "errorCategory": category,
                             "retryable": bool(is_retryable),
+                            **safe_projection_details,
                         },
                         level="warning" if is_retryable else "error",
                         outcome="failed",
@@ -3477,6 +3510,7 @@ class SelfEvolvingAgent:
                             "routeId": failed_route_id,
                             "errorCategory": category,
                             "reasonCode": "no_distinct_fallback",
+                            **safe_projection_details,
                         },
                         level="error",
                         outcome="failed",
