@@ -48,9 +48,6 @@ export type AgentDenseListProps = {
   onToggleBulk: (rowId: string, checked: boolean, shiftKey: boolean) => void;
 };
 
-const GRID_TEMPLATE =
-  "grid-cols-[minmax(180px,1.3fr)_minmax(120px,0.86fr)_minmax(110px,0.82fr)_minmax(88px,0.48fr)_minmax(104px,0.72fr)_minmax(128px,0.68fr)]";
-
 const PILL_BASE =
   "inline-flex items-center justify-center min-h-[26px] px-[7px] border rounded-full text-[0.76rem] font-bold whitespace-nowrap";
 
@@ -117,14 +114,12 @@ function AgentRow({
   onToggleBulk: AgentDenseListProps["onToggleBulk"];
 }) {
   const rowClass = [
-    "w-full min-h-[44px] px-2 py-[var(--agent-row-pad-y)] border-0 border-b border-l-2 border-b-[var(--vui-border-hairline)] border-l-transparent rounded-none bg-transparent text-[var(--fg-primary)] text-left items-center gap-2 min-w-0 grid",
-    GRID_TEMPLATE,
-    "max-[860px]:grid-cols-[1fr] max-[860px]:items-start",
+    "w-full min-h-[64px] p-2 border border-[var(--vui-border-hairline)] rounded-[var(--radius-control)] bg-[var(--vui-surface-row)] text-[var(--fg-primary)] text-left min-w-0 grid grid-cols-[minmax(0,1fr)_auto] items-start gap-x-2 gap-y-1.5",
     "transition-[border-color,background] duration-150 hover:bg-[var(--vui-surface-row-hover)]",
     row.active
-      ? "border-l-[var(--accent-warm)] bg-[color-mix(in_srgb,var(--accent-warm)_9%,transparent)]"
+      ? "border-[color-mix(in_srgb,var(--accent-warm)_48%,var(--vui-border-hairline))] bg-[color-mix(in_srgb,var(--accent-warm)_9%,var(--vui-surface-row))]"
       : "",
-    row.bulkSelected ? "bg-[color-mix(in_srgb,var(--accent-cool)_10%,transparent)]" : "",
+    row.bulkSelected ? "border-[color-mix(in_srgb,var(--accent-cool)_42%,var(--vui-border-hairline))] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]" : "",
   ]
     .filter(Boolean)
     .join(" ");
@@ -166,20 +161,17 @@ function AgentRow({
             <em className={[ROLE_TAG_BASE, roleToneClass(row.roleTone)].join(" ")}>{row.roleLabel}</em>
           </span>
         </span>
-        <span className="min-w-0 overflow-hidden text-ellipsis" title={row.modelDetail}>
-          {row.modelLabel}
-        </span>
-        <span className="min-w-0 overflow-hidden text-ellipsis">{row.promptLabel}</span>
-        <span className={[PILL_BASE, runtimeToneClass(row.runtimeTone)].join(" ")}>{row.runtimeLabel}</span>
-        <span className="flex flex-wrap gap-[3px] min-w-0 overflow-hidden">
-          {row.modes.map((mode, index) => (
-            <em key={`${row.id}:mode:${index}`} className={MODE_PILL}>
-              {mode}
-            </em>
-          ))}
-        </span>
-        <span className="flex items-center justify-items-start min-w-0" title={row.issueSummary}>
+        <span className="flex items-center justify-items-end min-w-0" title={row.issueSummary}>
           <span className={[PILL_BASE, issueToneClass(row.issueTone)].join(" ")}>{row.issueLabel}</span>
+        </span>
+        <span className="col-span-2 flex flex-wrap items-center gap-x-2 gap-y-1 min-w-0 text-[0.72rem] text-[var(--fg-secondary)]">
+          <span className="min-w-0 max-w-full overflow-hidden text-ellipsis whitespace-nowrap" title={row.modelDetail}>
+            {row.modelLabel}
+          </span>
+          <span className={[PILL_BASE, runtimeToneClass(row.runtimeTone)].join(" ")}>{row.runtimeLabel}</span>
+          <span className="sr-only">
+            {row.promptLabel} {row.modes.map((mode) => String(mode)).join(" ")}
+          </span>
         </span>
       </VNativeButton>
     </div>
@@ -187,6 +179,9 @@ function AgentRow({
 }
 
 export function AgentDenseList({ columns, columnLabels, onSelectRow, onToggleBulk }: AgentDenseListProps) {
+  // Card rows carry their own visible hierarchy; keep the shared label contract for callers.
+  void columnLabels;
+
   return (
     <div data-vui-product="agent-dense-list" className="grid content-start gap-2 min-h-0 overflow-auto pr-1">
       {columns.map((column, index) => (
@@ -213,20 +208,6 @@ export function AgentDenseList({ columns, columnLabels, onSelectRow, onToggleBul
             </em>
           </div>
           <div className="grid content-start gap-1 min-h-0">
-            <div
-              className={[
-                "grid items-center gap-2 min-w-0 sticky top-0 z-[1] px-2 pb-[5px] text-[var(--fg-tertiary)] text-[0.72rem] uppercase bg-[var(--vui-surface-panel)]",
-                GRID_TEMPLATE,
-                "max-[860px]:hidden",
-              ].join(" ")}
-            >
-              <span>{columnLabels.agent}</span>
-              <span>{columnLabels.model}</span>
-              <span>{columnLabels.prompt}</span>
-              <span>{columnLabels.runtime}</span>
-              <span>{columnLabels.modes}</span>
-              <span>{columnLabels.reminders}</span>
-            </div>
             {column.rows.map((row) => (
               <AgentRow key={row.id} row={row} onSelectRow={onSelectRow} onToggleBulk={onToggleBulk} />
             ))}
