@@ -6393,6 +6393,7 @@ def test_source_collection_stage_task_continue_inherits_contract_and_tool_gate(t
         "agentId": "agent-source-extractor",
         "agentRole": "source_extractor",
         "sourceCollectionStageTaskId": "stagetask-1",
+        "sourceContextMode": "retry_evidence",
         "writebackContract": {"taskChecklist": checklist},
         "taskChecklist": checklist,
     }
@@ -6424,12 +6425,34 @@ def test_source_collection_stage_task_continue_inherits_contract_and_tool_gate(t
     assert "stage_id: extraction" in captured[1]["initial_prompt"]
     assert "task_id: stagetask-1" in captured[1]["initial_prompt"]
     assert "source_collection_stage_writeback_tool" in captured[1]["initial_prompt"]
-    assert "不要调用 web_fetch_tool" in captured[1]["initial_prompt"]
-    assert "现有证据不足的候选直接标记 needs_more_info" in captured[1]["initial_prompt"]
+    assert "checklist 已由后端绑定" in captured[1]["initial_prompt"]
+    assert "先调用 task_list_tool" not in captured[1]["initial_prompt"]
+    assert "不要调用通用 task_list_tool" in captured[1]["initial_prompt"]
+    assert "仅抓取上下文已给出的 sourceUrl 或 DOI" in captured[1]["initial_prompt"]
+    assert "不要扩展检索方向" in captured[1]["initial_prompt"]
+    assert "不要调用 web_fetch_tool" not in captured[1]["initial_prompt"]
     continued_user_message = [item for item in detail["messages"] if item.get("role") == "user"][-1]
     assert continued_user_message["metadata"]["kind"] == "source_collection_stage_session_task"
     assert continued_user_message["metadata"]["sourceCollectionStageTaskId"] == "stagetask-1"
+    assert continued_user_message["metadata"]["sourceContextMode"] == "retry_evidence"
     assert continued_user_message["metadata"]["sourceCollectionStageContinuation"] is True
+
+
+def test_source_collection_finding_continuation_keeps_external_fetch_disabled():
+    prompt = session_service._source_collection_stage_task_continuation_prompt(
+        {
+            "kind": "source_collection_stage_session_task",
+            "sourceCollectionStageContinuation": True,
+            "teamId": "research-team",
+            "runId": "dprun-1",
+            "stageId": "finding",
+            "agentRole": "source_finder",
+            "sourceCollectionStageTaskId": "stagetask-finding",
+            "sourceContextMode": "compact",
+        }
+    )
+
+    assert "不要调用 web_fetch_tool" in prompt
 
 
 def test_source_collection_stage_task_ack_only_result_does_not_finish_before_required_tools(tmp_path, monkeypatch):

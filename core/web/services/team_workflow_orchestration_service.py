@@ -1521,6 +1521,7 @@ def start_source_collection_stage_session_task(
             "agentRole": agent_role,
             "sourceCollectionStageTaskId": task_id,
             "sourceCollectionStageTaskKey": task_idempotency_key,
+            "sourceContextMode": source_context_mode,
             "writebackContract": writeback_contract,
             "taskToolRequired": False,
             "taskChecklist": task_checklist,
@@ -20267,6 +20268,12 @@ def _source_collection_stage_session_task_message(
             "- 可以分批调用 `source_collection_stage_writeback_tool`，系统会按真实 `candidateId` / `recordId` 累计上一批结果；不要因为 compact 返回未展开完整数组而重复提交同一大包。",
             "- 资料提炼采用宽松保留：只要有可用内容或有价值线索，就写 `decision=keep` 或 `needs_more_info`，并填写 `valueSummary`、`defects`、`followUpSuggestion`；不要因为缺 DOI/缺全文直接丢弃。",
             "- 对摘要或元数据足以支持的范围，可把 `candidates[].evidenceRefs` 原样写入对应 extraction；不得据此虚构页码、直接引语或全文结论。",
+            (
+                "- 资料提炼阶段若受控摘要不足，但 `candidates[].sourceUrl` 或 `doi` 存在，可用 `web_fetch_tool` 仅抓取该既有定位符补证；"
+                "不要扩展检索方向、生成新候选或调用搜索工具。抓取失败后再标记 `needs_more_info`。"
+                if stage_id == "extraction" and context_mode in {"evidence", "retry_evidence"}
+                else ""
+            ),
             "- 只有确认没有摘要、正文、可验证内容或明显跑题时，才写 `decision=exclude` 和 `excludeReason=no_effective_content/out_of_scope/unobtainable`；这些来源会被移出后续流程并记录，避免下次重复搜到。",
             "- 如果上下文返回 `excludedSourceSummary.excludedCount>0`，表示这些资料已从本轮活跃流程移出，不要再次处理或把它们算作待补资料。",
             "- 不要推断截断或隐藏资料；不要把 `remaining_11_candidates`、短 ID 或聚合占位符当作 recordId/candidateId。",

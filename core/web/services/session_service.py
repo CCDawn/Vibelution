@@ -13150,6 +13150,7 @@ _SOURCE_COLLECTION_STAGE_TASK_CONTINUATION_METADATA_KEYS = (
     "agentRole",
     "sourceCollectionStageTaskId",
     "sourceCollectionStageTaskKey",
+    "sourceContextMode",
     "writebackContract",
     "taskToolRequired",
     "taskChecklist",
@@ -13200,10 +13201,20 @@ def _source_collection_stage_task_continuation_prompt(metadata: dict[str, Any]) 
     ]
     if required_tools:
         lines.append(f"- required_tools: {', '.join(required_tools)}")
+    source_context_mode = str(metadata.get("sourceContextMode") or "").strip().lower()
+    extraction_evidence_continuation = (
+        stage_id == "extraction"
+        and source_context_mode in {"evidence", "retry_evidence"}
+    )
     lines.extend(
         [
-            "先调用 task_list_tool；只补尚未完成的分页或指定缺口，不要重复读取已完成页。",
-            "续跑阶段不要调用 web_fetch_tool、research_knowledge_query_tool 或通用记忆搜索；现有证据不足的候选直接标记 needs_more_info。",
+            "本阶段 checklist 已由后端绑定；直接沿用阶段上下文，只补尚未完成的分页或指定缺口，不要调用通用 task_list_tool、task_create_tool 或 task_update_tool 复制清单。",
+            (
+                "证据补全时可使用 web_fetch_tool，但仅抓取上下文已给出的 sourceUrl 或 DOI；"
+                "不要扩展检索方向、搜索新候选或抓取 file:///localhost。单条抓取失败才标记 needs_more_info，并继续处理其他候选。"
+                if extraction_evidence_continuation
+                else "续跑阶段不要调用 web_fetch_tool、research_knowledge_query_tool 或通用记忆搜索；现有证据不足的候选直接标记 needs_more_info。"
+            ),
             "优先分批调用 source_collection_stage_writeback_tool 产生可累计结果，再更新 checklist；以服务端 coverageSummary 和 completionGate 为准。",
         ]
     )
