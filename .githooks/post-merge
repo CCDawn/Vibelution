@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+set -u
+
+# The installed native launcher lives outside Git. Keep it synchronized only
+# after local main integration; task worktrees must never overwrite it.
+if [ "$(git branch --show-current 2>/dev/null)" != "main" ]; then
+  exit 0
+fi
+
+repo_root=$(git rev-parse --show-toplevel 2>/dev/null || true)
+if [ -z "$repo_root" ]; then
+  exit 0
+fi
+
+powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden \
+  -File "$repo_root/scripts/windows_launcher_entry/sync_vibelution_launcher_entry.ps1" \
+  -ProjectDir "$repo_root" -Quiet >/dev/null 2>&1 || true
+
+exit 0
