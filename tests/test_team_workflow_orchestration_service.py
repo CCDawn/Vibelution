@@ -2375,6 +2375,17 @@ def test_memory_steward_context_returns_approved_candidate_action_packet_without
     assert action_packet["deferredCandidateCounts"]["pending"] == 14
     assert action_packet["doNotInferHiddenOrTruncatedCandidates"] is True
     assert action_packet["writebackResultSkeleton"]["approvedCandidateIds"] == [approved["candidateId"]]
+    assert context["fieldMode"] == "evidence_source"
+    assert context["candidateFieldsTruncated"] is False
+    assert context["doNotUsePreviewAsEvidence"] is False
+    assert context["candidates"][0]["evidenceRefs"] == [
+        {
+            "type": "doi",
+            "id": "10.0000/steward-context-approved",
+            "label": "Predictive coding cortical hierarchy neural network paper",
+        }
+    ]
+    assert "summaryPreview" not in context["candidates"][0]
     assert context["candidates"] == [
         item for item in context["candidates"] if item["qualityBucket"] == "approved"
     ]
