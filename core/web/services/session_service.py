@@ -13200,7 +13200,13 @@ def _source_collection_stage_task_continuation_prompt(metadata: dict[str, Any]) 
     ]
     if required_tools:
         lines.append(f"- required_tools: {', '.join(required_tools)}")
-    lines.append("继续处理未完成项；完成后必须调用 source_collection_stage_writeback_tool，并以服务端 coverageSummary 和 completionGate 为准。")
+    lines.extend(
+        [
+            "先调用 task_list_tool；只补尚未完成的分页或指定缺口，不要重复读取已完成页。",
+            "续跑阶段不要调用 web_fetch_tool、research_knowledge_query_tool 或通用记忆搜索；现有证据不足的候选直接标记 needs_more_info。",
+            "优先分批调用 source_collection_stage_writeback_tool 产生可累计结果，再更新 checklist；以服务端 coverageSummary 和 completionGate 为准。",
+        ]
+    )
     return "\n".join(lines)
 
 
