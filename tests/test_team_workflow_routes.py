@@ -499,6 +499,7 @@ def test_team_workflow_route_executes_source_collection_search(tmp_path, monkeyp
 
     assert start_response.status_code == 201, start_response.text
     assert response.status_code == 201, response.text
+    assert response.json()["attemptedQueryCount"] == 1
     assert response.json()["executedQueryCount"] == 1
     assert response.json()["recordCount"] == 1
     assert response.json()["createdUniqueRecordCount"] == 1

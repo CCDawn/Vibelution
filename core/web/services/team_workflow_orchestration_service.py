@@ -2260,6 +2260,7 @@ def execute_source_collection_search(team_id: str, run_id: str, payload: dict[st
         summary=terminal_summary,
         active=False,
         extra={
+            "attemptedQueryCount": _source_collection_count(result.get("attemptedQueryCount")),
             "executedQueryCount": _source_collection_count(result.get("executedQueryCount")),
             "failedQueryCount": _source_collection_count(result.get("failedQueryCount")),
             "recordCount": _source_collection_count(result.get("recordCount")),
@@ -2637,6 +2638,7 @@ def _execute_source_collection_search_impl(team_id: str, run_id: str, payload: d
     created_records: list[dict[str, Any]] = []
     imported: list[dict[str, Any]] = []
     storage_artifacts = _source_collection_storage_artifacts(normalized_team_id, normalized_run_id)
+    attempted_query_count = 0
     executed_query_count = 0
     skipped_query_count = 0
     failed_query_count = 0
@@ -2648,7 +2650,7 @@ def _execute_source_collection_search_impl(team_id: str, run_id: str, payload: d
     excluded_source_keys: list[str] = []
 
     for assignment in assignments:
-        if executed_query_count >= max_queries:
+        if attempted_query_count >= max_queries:
             break
         assignment_id = _trim_text(assignment.get("assignmentId"), max_length=128)
         agent_role = _normalize_source_collection_agent_role(assignment.get("agentRole"))
@@ -2683,7 +2685,7 @@ def _execute_source_collection_search_impl(team_id: str, run_id: str, payload: d
             if _trim_text(item.get("queryId"), max_length=160)
         }
         for query in assigned_queries:
-            if executed_query_count >= max_queries:
+            if attempted_query_count >= max_queries:
                 break
             query_id = _trim_text(query.get("queryId"), max_length=160)
             query_text = _trim_text(query.get("query"), max_length=1000)
@@ -2693,6 +2695,7 @@ def _execute_source_collection_search_impl(team_id: str, run_id: str, payload: d
                 skipped_query_count += 1
                 continue
             search_response = _execute_source_collection_query(query, max_results=max_results_per_query, provider=provider)
+            attempted_query_count += 1
             attempted_query_ids.append(query_id)
             query_records: list[dict[str, Any]] = []
             query_skipped_duplicate_count = 0
@@ -3010,6 +3013,7 @@ def _execute_source_collection_search_impl(team_id: str, run_id: str, payload: d
         fields={
             "runId": normalized_run_id,
             "provider": provider,
+            "attemptedQueryCount": attempted_query_count,
             "executedQueryCount": executed_query_count,
             "skippedQueryCount": skipped_query_count,
             "failedQueryCount": failed_query_count,
@@ -3032,6 +3036,7 @@ def _execute_source_collection_search_impl(team_id: str, run_id: str, payload: d
             "provider": provider,
             "queryEvents": _source_collection_query_event_summaries(execution_events),
             "summary": {
+                "attemptedQueryCount": attempted_query_count,
                 "executedQueryCount": executed_query_count,
                 "skippedQueryCount": skipped_query_count,
                 "failedQueryCount": failed_query_count,
@@ -3051,6 +3056,7 @@ def _execute_source_collection_search_impl(team_id: str, run_id: str, payload: d
         "runId": normalized_run_id,
         "status": status_label,
         "provider": provider,
+        "attemptedQueryCount": attempted_query_count,
         "executedQueryCount": executed_query_count,
         "skippedQueryCount": skipped_query_count,
         "failedQueryCount": failed_query_count,
@@ -3077,7 +3083,7 @@ def _execute_source_collection_search_impl(team_id: str, run_id: str, payload: d
         "imported": imported,
         "executionEvents": execution_events,
         "boundaries": {
-            "externalSearchTriggered": executed_query_count > 0,
+            "externalSearchTriggered": attempted_query_count > 0,
             "metadataOnlyDownload": True,
             "writesFormalKnowledge": False,
             "writesRag": False,

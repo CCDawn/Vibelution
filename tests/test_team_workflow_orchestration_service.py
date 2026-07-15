@@ -7089,6 +7089,7 @@ def test_execute_source_collection_search_writes_records_and_imports_candidates(
 
     assert execution["status"] == "executed"
     assert execution["provider"] == "crossref_rest_api"
+    assert execution["attemptedQueryCount"] == 1
     assert execution["executedQueryCount"] == 1
     assert execution["recordCount"] == 2
     assert execution["createdUniqueRecordCount"] == 2
@@ -7238,7 +7239,9 @@ def test_execute_source_collection_search_publishes_runtime_work_run(tmp_path, m
     assert summary["latest"]["recordCount"] == 1
     assert summary["latest"]["importedCount"] == 1
     search_event = next(kwargs for args, kwargs in events if args[2] == "source_collection.search_executed")
+    assert search_event["fields"]["attemptedQueryCount"] == 1
     assert search_event["child_log_path"].startswith("artifacts/source-collection-")
+    assert search_event["child_log_payload"]["summary"]["attemptedQueryCount"] == 1
     assert search_event["child_log_payload"]["summary"]["executedQueryCount"] == 1
     assert search_event["child_log_payload"]["queryEvents"]
     assert search_event["child_log_payload"]["queryEvents"][0]["assignmentId"]
@@ -7322,6 +7325,46 @@ def test_execute_source_collection_search_skips_existing_query_without_force(tmp
     assert second["status"] == "no_open_assignment"
     assert calls == [run_response["searchPlan"]["queries"][0]["queryId"]]
     assert data_processing_service.list_records(run_response["run"]["runId"])["summary"]["recordCount"] == 2
+
+
+def test_execute_source_collection_search_limits_failed_provider_attempt_to_max_queries(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    calls = []
+
+    def fake_search(query, *, max_results, provider):
+        calls.append(query["queryId"])
+        return {"error": "provider throttled"}
+
+    monkeypatch.setattr(team_workflow_orchestration_service, "_execute_source_collection_query", fake_search)
+    team = team_service.create_team(name="ai科学研究团队")
+    run_response = team_workflow_orchestration_service.start_source_collection_run(
+        team["teamId"],
+        {
+            "topic": "predictive coding cortical hierarchy",
+            "querySeeds": ["predictive coding cortical hierarchy", "predictive coding neural algorithm"],
+            "searchLanguages": ["en"],
+            "sourceTypes": ["paper"],
+            "agentRoles": ["source_finder"],
+        },
+    )
+    first_query_id = run_response["searchPlan"]["queries"][0]["queryId"]
+    second_query_id = run_response["searchPlan"]["queries"][1]["queryId"]
+
+    execution = team_workflow_orchestration_service.execute_source_collection_search(
+        team["teamId"],
+        run_response["run"]["runId"],
+        {"maxQueries": 1, "maxResultsPerQuery": 1},
+    )
+
+    assert execution["attemptedQueryCount"] == 1
+    assert execution["executedQueryCount"] == 0
+    assert execution["failedQueryCount"] == 1
+    assert execution["recordCount"] == 0
+    assert execution["status"] == "partial"
+    assert calls == [first_query_id]
+    assert second_query_id in execution["nextRunnableQueryIds"]
+    assert [event["eventType"] for event in execution["executionEvents"]] == ["search.failed"]
+    assert execution["boundaries"]["externalSearchTriggered"] is True
 
 
 def test_execute_source_collection_search_advances_after_no_record_output(tmp_path, monkeypatch):
