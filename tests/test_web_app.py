@@ -6360,6 +6360,71 @@ def test_source_collection_stage_task_enables_bounded_internal_auto_continue(tmp
     assert captured["max_internal_auto_continue_turns"] == session_service.SOURCE_COLLECTION_STAGE_TASK_AUTO_CONTINUE_MAX_TURNS
 
 
+def test_source_collection_stage_task_continue_inherits_contract_and_tool_gate(tmp_path, monkeypatch):
+    _seed_chat_state(tmp_path)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        session_service,
+        "_SESSION_EXECUTOR",
+        SimpleNamespace(submit=lambda fn, context: fn(context)),
+    )
+    monkeypatch.setattr(session_service, "create_chat_agent", lambda **_kwargs: object())
+    captured: list[dict[str, object]] = []
+
+    def fake_run_session_continuation_loop(agent, **kwargs):
+        captured.append(dict(kwargs))
+        return {
+            "status": "completed",
+            "summary": "阶段任务仍在推进。",
+            "raw_output": "阶段任务仍在推进。",
+            "outcome": "progress",
+        }
+
+    monkeypatch.setattr(session_service, "_run_session_continuation_loop", fake_run_session_continuation_loop)
+    checklist = [
+        {"id": "read_candidates", "requiredTool": "source_collection_context_tool"},
+        {"id": "write_extractions", "requiredTool": "source_collection_stage_writeback_tool"},
+    ]
+    metadata = {
+        "kind": "source_collection_stage_session_task",
+        "teamId": "research-team",
+        "runId": "dprun-1",
+        "stageId": "extraction",
+        "agentId": "agent-source-extractor",
+        "agentRole": "source_extractor",
+        "sourceCollectionStageTaskId": "stagetask-1",
+        "writebackContract": {"taskChecklist": checklist},
+        "taskChecklist": checklist,
+    }
+
+    session_service.submit_session_message(
+        "session-live",
+        "资料提炼阶段任务",
+        turn_mode="task",
+        write_intent=False,
+        message_source="agent_inbox",
+        message_metadata=metadata,
+    )
+    detail = session_service.submit_session_message(
+        "session-live",
+        "继续",
+        turn_mode="task",
+        write_intent=False,
+    )
+
+    assert len(captured) == 2
+    assert captured[1]["allow_internal_auto_continue"] is True
+    assert captured[1]["require_tool_progress"] is True
+    assert captured[1]["required_tool_names"] == [
+        "source_collection_context_tool",
+        "source_collection_stage_writeback_tool",
+    ]
+    continued_user_message = [item for item in detail["messages"] if item.get("role") == "user"][-1]
+    assert continued_user_message["metadata"]["kind"] == "source_collection_stage_session_task"
+    assert continued_user_message["metadata"]["sourceCollectionStageTaskId"] == "stagetask-1"
+    assert continued_user_message["metadata"]["sourceCollectionStageContinuation"] is True
+
+
 def test_source_collection_stage_task_ack_only_result_does_not_finish_before_required_tools(tmp_path, monkeypatch):
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(session_service, "_publish_session_detail_snapshot", lambda _session_id: None)
