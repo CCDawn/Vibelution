@@ -1583,7 +1583,7 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("<AgentWorkspaceLayoutPanel");
     expect(routeSource).not.toContain("styles.workspace");
     expect(workspaceLayoutPanelSource).toContain("styles.workspace");
-    expect(denseListSource).toContain("max-[860px]:hidden");
+    expect(denseListSource).toContain("grid-cols-[minmax(0,1fr)_auto]");
     expect(denseListSource).toContain('data-vui="agent-row"');
     expect(detailWorkspacePanelSource).toContain("styles.detailPanel");
     expect(workspaceLayoutStyles.workspace).toBeTruthy();
