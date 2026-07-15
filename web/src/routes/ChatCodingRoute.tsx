@@ -3147,13 +3147,14 @@ export function ChatCodingRoute() {
   });
 
   const clearSessionHistoryMutation = useMutation({
-    mutationFn: async ({ agentId }: { sessionId: string; agentId: string }) =>
+    mutationFn: async ({ sessionId, agentId }: { sessionId: string; agentId: string }) =>
       fetchJson<AgentDirectSessionResetResponse>(`/api/agents/${encodeURIComponent(agentId)}/reset`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           clearRuntimeState: false,
           resetDirectSession: true,
+          directSessionId: sessionId,
           resetPersonaProfile: false,
           resetTaskProfile: false,
           resetToolPolicy: false,

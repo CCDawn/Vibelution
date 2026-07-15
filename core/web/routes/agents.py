@@ -156,6 +156,7 @@ class AgentAvatarUpdatePayload(BaseModel):
 class AgentResetPayload(BaseModel):
     clearRuntimeState: bool = True
     resetDirectSession: bool = True
+    directSessionId: str = ""
     resetPersonaProfile: bool = False
     resetTaskProfile: bool = False
     resetToolPolicy: bool = False
@@ -989,6 +990,7 @@ def agent_reset(agent_id: str, payload: AgentResetPayload) -> dict:
             agent_id,
             clear_runtime_state=payload.clearRuntimeState,
             reset_direct_session=payload.resetDirectSession,
+            direct_session_id=payload.directSessionId,
             reset_persona_profile=payload.resetPersonaProfile,
             reset_task_profile=payload.resetTaskProfile,
             reset_tool_policy=payload.resetToolPolicy,
