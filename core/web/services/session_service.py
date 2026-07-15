@@ -13394,6 +13394,18 @@ def _run_session_turn(context: dict[str, Any]) -> None:
         session_workspace=session_workspace,
         default_workspace=tool_workspace,
     )
+    task_workspace_context = (
+        _session_tool_workspace_override(
+            tool_workspace,
+            memory_workspace=agent_workspace_path if agent_instance else tool_workspace,
+            task_workspace=task_workspace,
+        )
+        if task_workspace != Path(tool_workspace)
+        else _session_tool_workspace_override(
+            tool_workspace,
+            memory_workspace=agent_workspace_path if agent_instance else tool_workspace,
+        )
+    )
     allow_internal_auto_continue = _session_context_allows_internal_auto_continue(context)
     internal_auto_continue_max_turns = _session_context_internal_auto_continue_max_turns(context)
     prompt_cache_partition = _session_prompt_cache_partition(
@@ -13536,11 +13548,7 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                 supervised_role=supervised_runtime_role,
             ),
             mental_model_enabled_override(mental_model_enabled),
-            _session_tool_workspace_override(
-                tool_workspace,
-                memory_workspace=agent_workspace_path if agent_instance else tool_workspace,
-                task_workspace=task_workspace,
-            ),
+            task_workspace_context,
         ):
             initial_stop_reason = _get_turn_control_stop_reason(turn_control)
             if initial_stop_reason:
