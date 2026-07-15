@@ -4537,16 +4537,22 @@ def test_source_collection_context_retry_evidence_returns_only_missing_anchor_ca
         for index in range(2)
     ]
     submitted_messages: list[str] = []
-    monkeypatch.setattr(
-        session_service,
-        "submit_session_message",
-        lambda session_id, content, **kwargs: submitted_messages.append(content)
-        or {
+    submitted_metadata: list[dict[str, object]] = []
+
+    def fake_submit_session_message(session_id, content, **kwargs):
+        submitted_messages.append(content)
+        submitted_metadata.append(dict(kwargs.get("message_metadata") or {}))
+        return {
             "accepted": True,
             "sessionId": session_id,
             "turnId": f"turn-retry-evidence-{len(submitted_messages)}",
             "status": "running",
-        },
+        }
+
+    monkeypatch.setattr(
+        session_service,
+        "submit_session_message",
+        fake_submit_session_message,
     )
     task = team_workflow_orchestration_service.start_source_collection_stage_session_task(
         team["teamId"],
@@ -4617,6 +4623,9 @@ def test_source_collection_context_retry_evidence_returns_only_missing_anchor_ca
     assert retry_task["task"]["retrySourceTaskId"] == task["taskId"]
     assert '"context_mode": "retry_evidence"' in submitted_messages[-1]
     assert "只返回 `retryFocus.evidenceGapCandidateIds`" in submitted_messages[-1]
+    assert "仅抓取该既有定位符补证" in submitted_messages[-1]
+    assert "不要扩展检索方向" in submitted_messages[-1]
+    assert submitted_metadata[-1]["sourceContextMode"] == "retry_evidence"
     new_task_context = team_workflow_orchestration_service.get_source_collection_stage_task_context(
         team["teamId"],
         task_id=retry_task["taskId"],
