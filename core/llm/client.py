@@ -1885,6 +1885,13 @@ class LLMClient:
         reasoning_content = self._canonical_compatibility_reasoning(outcome)
         if reasoning_content:
             additional_kwargs["reasoning_content"] = reasoning_content
+        replay_items = tuple(
+            getattr(getattr(outcome, "replay_state", None), "opaque_items", ()) or ()
+        )
+        if len(replay_items) == 1:
+            replay_item_id = str(getattr(replay_items[0], "item_id", "") or "").strip()
+            if replay_item_id:
+                additional_kwargs["reasoning_replay_item_id"] = replay_item_id
         if include_outcome:
             additional_kwargs["turn_outcome"] = outcome
         response_metadata = self._response_metadata(metadata)
