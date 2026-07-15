@@ -6171,6 +6171,10 @@ def submit_session_message(
         )
         if effective_user_message == message and normalized_message_source != "raw":
             user_message_source = normalized_message_source
+    stage_task_continuation_prompt = _source_collection_stage_task_continuation_prompt(persisted_message_metadata)
+    if stage_task_continuation_prompt:
+        effective_user_message = stage_task_continuation_prompt
+        user_message_source = "source_collection_stage_task_continue"
     reference_prompt_block = _session_reference_prompt_block(session_references)
     if reference_prompt_block:
         effective_user_message = "\n\n".join(part for part in [effective_user_message or message, reference_prompt_block] if part).strip()
@@ -13173,6 +13177,31 @@ def _source_collection_stage_task_continuation_metadata(messages: list[dict[str,
             continue
         return {}
     return {}
+
+
+def _source_collection_stage_task_continuation_prompt(metadata: dict[str, Any]) -> str:
+    if not isinstance(metadata, dict) or metadata.get("sourceCollectionStageContinuation") is not True:
+        return ""
+    if str(metadata.get("kind") or "").strip() != SOURCE_COLLECTION_STAGE_SESSION_TASK_KIND:
+        return ""
+    team_id = str(metadata.get("teamId") or "").strip()
+    run_id = str(metadata.get("runId") or "").strip()
+    stage_id = str(metadata.get("stageId") or "").strip()
+    task_id = str(metadata.get("sourceCollectionStageTaskId") or "").strip()
+    if not team_id or not task_id:
+        return ""
+    required_tools = _source_collection_stage_task_required_tool_names({"message_metadata": metadata})
+    lines = [
+        "用户请求继续当前资料搜集阶段任务。请沿用现有 checklist 和已完成进度，不要新建或切换任务。",
+        f"- team_id: {team_id}",
+        f"- run_id: {run_id}",
+        f"- stage_id: {stage_id}",
+        f"- task_id: {task_id}",
+    ]
+    if required_tools:
+        lines.append(f"- required_tools: {', '.join(required_tools)}")
+    lines.append("继续处理未完成项；完成后必须调用 source_collection_stage_writeback_tool，并以服务端 coverageSummary 和 completionGate 为准。")
+    return "\n".join(lines)
 
 
 def _session_task_workspace_for_turn(
