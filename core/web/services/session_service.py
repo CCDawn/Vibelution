@@ -5022,15 +5022,16 @@ def _delete_chat_session_state(session_id: str, *, activate_replacement: bool = 
             if item is not None
         ]
         replacement_direct_session_id = ""
+        agent_unbound = False
         if target_agent and target_agent_direct_session_id == conversation_id:
             timed(
                 "unbind_agent",
                 lambda: update_agent_instance(
                     target_agent_id,
                     direct_session_id="",
-                    metadata={"previousDirectSessionId": conversation_id},
                 ),
             )
+            agent_unbound = True
         else:
             timings["unbind_agent"] = 0
 
@@ -5060,7 +5061,41 @@ def _delete_chat_session_state(session_id: str, *, activate_replacement: bool = 
         payload["active_conversation_id"] = next_active_id
         payload["updated_at"] = now
         payload["conversations"] = remaining
-        timed("save_state", lambda: save_chat_state(PROJECT_ROOT, payload))
+        try:
+            timed("save_state", lambda: save_chat_state(PROJECT_ROOT, payload))
+        except Exception as exc:
+            if agent_unbound:
+                try:
+                    timed(
+                        "rollback_agent_unbind",
+                        lambda: update_agent_instance(
+                            target_agent_id,
+                            direct_session_id=conversation_id,
+                        ),
+                    )
+                    _record_session_delete_event(
+                        "agent_unbind_rolled_back",
+                        session_id=conversation_id,
+                        outcome="rolled_back",
+                        level="warning",
+                        fields={
+                            "agentId": target_agent_id,
+                            "reason": type(exc).__name__,
+                        },
+                    )
+                except Exception as rollback_exc:
+                    _record_session_delete_event(
+                        "agent_unbind_rollback_failed",
+                        session_id=conversation_id,
+                        outcome="rollback_failed",
+                        level="error",
+                        fields={
+                            "agentId": target_agent_id,
+                            "reason": type(exc).__name__,
+                            "rollbackError": type(rollback_exc).__name__,
+                        },
+                    )
+            raise
 
     _invalidate_session_list_cache()
     if target_agent and target_agent_direct_session_id == conversation_id:

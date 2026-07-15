@@ -15,6 +15,7 @@ from core.chat.conversation_ledger import (
 from core.ui.chat_state import load_chat_state, save_chat_state
 from core.web.services import session_service
 from core.web.services import agent_directory_service
+from tests.helpers.web_chat_state import _seed_chat_state
 
 
 def test_session_event_cache_coalesces_concurrent_misses(monkeypatch):
@@ -99,6 +100,41 @@ def test_active_session_summary_normalizes_only_the_active_conversation(tmp_path
 
     assert summary == {"id": "session-active"}
     assert normalized_ids == ["session-active"]
+
+
+def test_delete_session_restores_direct_agent_binding_when_chat_save_fails(tmp_path, monkeypatch):
+    _seed_chat_state(tmp_path)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    agent = agent_directory_service.ensure_agent_for_session(
+        "session-live",
+        display_name="删除回滚 Agent",
+        primary_mode="chat",
+        role_key="chat-default",
+        prompt_template_id="prompt-chat-default",
+    )
+    state = load_chat_state(tmp_path)
+    state["conversations"][0]["agent_id"] = agent["agentId"]
+    state["conversations"][0]["agentId"] = agent["agentId"]
+    save_chat_state(tmp_path, state)
+
+    def fail_chat_save(*_args, **_kwargs):
+        raise OSError("simulated chat persistence failure")
+
+    monkeypatch.setattr(session_service, "save_chat_state", fail_chat_save)
+
+    try:
+        session_service.delete_chat_session_lightweight("session-live")
+    except OSError as exc:
+        assert "simulated chat persistence failure" in str(exc)
+    else:
+        raise AssertionError("delete must surface the chat persistence failure")
+
+    restored_agent = agent_directory_service.get_agent(agent["agentId"], include_archived=True)
+    assert restored_agent is not None
+    assert restored_agent["directSessionId"] == "session-live"
+    persisted_state = load_chat_state(tmp_path)
+    assert {item["conversation_id"] for item in persisted_state["conversations"]} == {"session-live"}
 
 
 def test_session_stream_coalescing_preserves_assistant_delta_events():
