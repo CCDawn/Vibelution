@@ -65,7 +65,7 @@ import {
   type AgentConfigDraft,
   type AgentCoreConfigLlmSlotView,
 } from "./AgentCoreConfigPanel";
-import { type AgentCreateDraft } from "./AgentCreatePanel";
+import { type AgentCreateDraft, type AgentCreatePreset } from "./AgentCreatePanel";
 import { type AgentResetOptions } from "./AgentDebugResetPanel";
 import { type AgentMemoryPolicyDraft } from "./AgentMemoryPolicyPanel";
 import { type AgentModeMembershipDraft } from "./AgentModeMembershipPanel";
@@ -222,6 +222,9 @@ type ModelProfileChoice = {
   modelId: string;
   label: string;
   modelLabel: string;
+  providerId: string;
+  providerLabel: string;
+  providerKind: string;
   unresolved?: boolean;
 };
 type RuntimeFocusEvidenceResult = {
@@ -583,6 +586,9 @@ function buildAgentModelChoices(models: AgentModelChoice[]): ModelProfileChoice[
       modelId: model.modelId,
       label: agentModelChoiceLabel(model),
       modelLabel: agentModelLabel(model),
+      providerId: model.providerId,
+      providerLabel: model.providerLabel,
+      providerKind: model.providerKind,
     }))
     .sort((left, right) => left.label.localeCompare(right.label) || left.modelId.localeCompare(right.modelId));
 }
@@ -1992,13 +1998,19 @@ function taskDraftEqualsDraft(left: AgentTaskDraft, right: AgentTaskDraft) {
   );
 }
 
-function createDraftFromWorkspace(workspace: AgentConfigWorkspace | undefined, bundles: ToolBundle[] = []): AgentCreateDraft {
+function createDraftFromWorkspace(
+  workspace: AgentConfigWorkspace | undefined,
+  bundles: ToolBundle[] = [],
+  lang: "zh" | "en" = "zh",
+): AgentCreateDraft {
   const firstModel = buildAgentModelChoices(workspace?.agentModelChoices ?? [])[0]?.modelId
     ?? workspace?.agentModelChoices?.[0]?.modelId
     ?? "";
-  const firstPrompt = workspace?.promptTemplates?.find((item) => item.category === "chat") ?? workspace?.promptTemplates?.[0];
+  const firstPrompt = workspace?.promptTemplates?.find((item) => item.promptTemplateId === "prompt-chat-default")
+    ?? workspace?.promptTemplates?.find((item) => item.category === "chat")
+    ?? workspace?.promptTemplates?.[0];
   return {
-    displayName: "",
+    displayName: lang === "zh" ? "新会话 Agent" : "New chat Agent",
     llmBindings: firstModel ? { dialogue: { modelId: firstModel } } : {},
     primaryMode: "chat",
     roleKey: "",
@@ -2010,11 +2022,16 @@ function createDraftFromWorkspace(workspace: AgentConfigWorkspace | undefined, b
   };
 }
 
-function normalizeCreateDraftForWorkspace(draft: AgentCreateDraft, workspace: AgentConfigWorkspace | undefined, bundles: ToolBundle[] = []) {
+function normalizeCreateDraftForWorkspace(
+  draft: AgentCreateDraft,
+  workspace: AgentConfigWorkspace | undefined,
+  bundles: ToolBundle[] = [],
+  lang: "zh" | "en" = "zh",
+) {
   if (!workspace) {
     return draft;
   }
-  const defaults = createDraftFromWorkspace(workspace, bundles);
+  const defaults = createDraftFromWorkspace(workspace, bundles, lang);
   const modelIds = new Set(buildAgentModelChoices(workspace.agentModelChoices ?? []).map((choice) => choice.modelId));
   const promptIds = new Set((workspace.promptTemplates ?? []).map((template) => template.promptTemplateId || template.templateId || ""));
   const dialogueModelId = agentLlmSlotModelId(draft.llmBindings, FALLBACK_AGENT_LLM_SLOTS[0]);
@@ -2025,9 +2042,91 @@ function normalizeCreateDraftForWorkspace(draft: AgentCreateDraft, workspace: Ag
     : defaults.promptTemplateId;
   return {
     ...draft,
+    displayName: draft.displayName || defaults.displayName,
     llmBindings: updateAgentLlmSlotBinding(draft.llmBindings, FALLBACK_AGENT_LLM_SLOTS[0], nextDialogueModelId || defaultDialogueModelId),
     promptTemplateId,
   };
+}
+
+function selectAvailableToolBundles(bundles: ToolBundle[], preferred: string[], fallback: string[]) {
+  const available = new Set(bundles.map((bundle) => bundle.bundleId));
+  const selected = preferred.filter((bundleId) => available.has(bundleId));
+  return selected.length ? selected : fallback;
+}
+
+function createAgentPresets(
+  workspace: AgentConfigWorkspace | undefined,
+  bundles: ToolBundle[],
+  lang: "zh" | "en",
+): AgentCreatePreset[] {
+  const base = createDraftFromWorkspace(workspace, bundles, lang);
+  const prompts = workspace?.promptTemplates ?? [];
+  const promptId = (category: string, preferredIds: string[]) => {
+    const exact = prompts.find((prompt) => preferredIds.includes(prompt.promptTemplateId || prompt.templateId || ""));
+    const categoryMatch = prompts.find((prompt) => prompt.category === category);
+    return exact?.promptTemplateId || exact?.templateId || categoryMatch?.promptTemplateId || categoryMatch?.templateId || base.promptTemplateId;
+  };
+  const workDefaults = defaultCreateToolBundleIds(true, bundles);
+  const teamDefaults = defaultCreateToolBundleIds(false, bundles);
+  const copy = lang === "zh" ? {
+    recommendedLabel: "推荐配置",
+    recommendedDescription: "通用会话、默认提示词与核心工具",
+    recommendedName: "新会话 Agent",
+    codingLabel: "代码开发",
+    codingDescription: "面向实现、调试和测试的工作配置",
+    codingName: "代码开发 Agent",
+    researchLabel: "研究协作",
+    researchDescription: "研究提示词、检索与协作工具",
+    researchName: "研究协作 Agent",
+    researchPersona: "严谨、证据优先，能够区分事实、推断和待验证结论。",
+    researchMission: "完成研究、资料核验与协作交付，并明确证据来源和下一步。",
+  } : {
+    recommendedLabel: "Recommended",
+    recommendedDescription: "General chat, default prompt, and core tools",
+    recommendedName: "New chat Agent",
+    codingLabel: "Code development",
+    codingDescription: "A work setup for implementation, debugging, and testing",
+    codingName: "Code development Agent",
+    researchLabel: "Research collaboration",
+    researchDescription: "Research prompt with search and collaboration tools",
+    researchName: "Research collaboration Agent",
+    researchPersona: "Rigorous and evidence-first, clearly separating facts, inference, and open questions.",
+    researchMission: "Deliver research, source verification, and collaboration outputs with evidence and explicit next steps.",
+  };
+  return [
+    {
+      id: "recommended",
+      label: copy.recommendedLabel,
+      description: copy.recommendedDescription,
+      draft: { ...base, displayName: copy.recommendedName },
+    },
+    {
+      id: "coding",
+      label: copy.codingLabel,
+      description: copy.codingDescription,
+      draft: {
+        ...base,
+        displayName: copy.codingName,
+        promptTemplateId: promptId("chat", ["prompt-chat-operation-default", "prompt-chat-default"]),
+        selectedToolBundleIds: selectAvailableToolBundles(bundles, ["core", "coding", "development"], workDefaults),
+      },
+    },
+    {
+      id: "research",
+      label: copy.researchLabel,
+      description: copy.researchDescription,
+      draft: {
+        ...base,
+        displayName: copy.researchName,
+        primaryMode: "research",
+        roleKey: "research_assistant",
+        promptTemplateId: promptId("research", ["prompt-research-default"]),
+        personaSummary: copy.researchPersona,
+        taskMission: copy.researchMission,
+        selectedToolBundleIds: selectAvailableToolBundles(bundles, ["core", "research", "collaboration"], teamDefaults),
+      },
+    },
+  ];
 }
 
 function commonBulkConfigValue(
@@ -3539,7 +3638,7 @@ export function AgentsRoute() {
   const [selectedAgentId, setSelectedAgentId] = useState("");
   const [activePane, setActivePane] = useState<AgentConfigPaneId>("overview");
   const [createOpen, setCreateOpen] = useState(false);
-  const [createDraft, setCreateDraft] = useState<AgentCreateDraft>(() => createDraftFromWorkspace(undefined, []));
+  const [createDraft, setCreateDraft] = useState<AgentCreateDraft>(() => createDraftFromWorkspace(undefined, [], lang));
   const [configDraft, setConfigDraft] = useState<AgentConfigDraft>(() => draftFromAgent(null));
   const [membershipDraft, setMembershipDraft] = useState<AgentModeMembershipDraft>(() => membershipDraftFromWorkspace(undefined, null));
   const [personaDraft, setPersonaDraft] = useState<AgentPersonaDraft>(() => personaDraftFromAgent(null));
@@ -3654,6 +3753,10 @@ export function AgentsRoute() {
   const agentModelChoices = useMemo(
     () => buildAgentModelChoices(workspace?.agentModelChoices ?? []),
     [workspace?.agentModelChoices],
+  );
+  const createPresets = useMemo(
+    () => createAgentPresets(workspace, toolBundles, lang),
+    [lang, toolBundles, workspace],
   );
   const llmSlots = useMemo(() => agentLlmSlots(workspace), [workspace?.agentLlmSlots]);
   const groups = workspace?.groups ?? EMPTY_AGENT_CONFIG_GROUPS;
@@ -4024,7 +4127,7 @@ export function AgentsRoute() {
   useEffect(() => {
     setCreateDraft((current) => {
       if (agentLlmSlotModelId(current.llmBindings, FALLBACK_AGENT_LLM_SLOTS[0]) || current.promptTemplateId) {
-        const normalized = normalizeCreateDraftForWorkspace(current, workspace, toolBundles);
+        const normalized = normalizeCreateDraftForWorkspace(current, workspace, toolBundles, lang);
         if (normalized.selectedToolBundleIds.length || !toolBundles.length) {
           return normalized;
         }
@@ -4033,9 +4136,9 @@ export function AgentsRoute() {
           selectedToolBundleIds: defaultCreateToolBundleIds(isWorkSessionCreateDraft(normalized), toolBundles),
         };
       }
-      return createDraftFromWorkspace(workspace, toolBundles);
+      return createDraftFromWorkspace(workspace, toolBundles, lang);
     });
-  }, [toolBundles, workspace]);
+  }, [lang, toolBundles, workspace]);
 
   useEffect(() => {
     setSelectedBulkAgentIds((current) => {
@@ -4200,7 +4303,7 @@ export function AgentsRoute() {
       setSelectedAgentId(agent.agentId);
       setActivePane("config");
       setCreateOpen(false);
-      setCreateDraft(createDraftFromWorkspace(workspace, toolBundles));
+      setCreateDraft(createDraftFromWorkspace(workspace, toolBundles, lang));
       setNotice({
         tone: "success",
         text: lang === "zh" ? `已新增 ${agentLabel(agent)}` : `Created ${agentLabel(agent)}`,
@@ -6187,7 +6290,10 @@ export function AgentsRoute() {
             toolBundles,
             toolBundleSummary: createToolBundleSummaryValue,
             toolBundleMeta: (bundle) => toolBundleMeta(bundle, lang),
+            presets: createPresets,
+            lang,
             onDraftChange: updateCreateDraft,
+            onApplyPreset: (draft) => setCreateDraft(draft),
             onModelChange: (modelId) => updateCreateDraft({
               llmBindings: updateAgentLlmSlotBinding(createDraft.llmBindings, FALLBACK_AGENT_LLM_SLOTS[0], modelId),
             }),
@@ -6206,7 +6312,7 @@ export function AgentsRoute() {
             },
             onCancel: () => {
               setCreateOpen(false);
-              setCreateDraft(createDraftFromWorkspace(workspace, toolBundles));
+              setCreateDraft(createDraftFromWorkspace(workspace, toolBundles, lang));
             },
             onCreate: createAgent,
           },
