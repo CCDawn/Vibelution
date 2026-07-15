@@ -46,8 +46,8 @@ export function AgentSelectedDetailContentPanel({
   return (
     <>
       <AgentDetailHeaderPanel {...header} />
-      <AgentManagementBriefPanel {...brief} />
       {activePane === "overview" && overview ? <AgentOverviewPanel {...overview} /> : null}
+      {activePane === "overview" ? <AgentManagementBriefPanel {...brief} /> : null}
       {activePane === "config" ? (
         <>
           <AgentConfigPrimaryPanePanel {...configPrimary} />
