@@ -458,7 +458,13 @@ def test_runtime_summary_prefers_ledger_context_compression_checkpoint(monkeypat
         "get_active_session_summary",
         lambda: {"id": "session-ledger-compression", "agentId": ""},
     )
-    monkeypatch.setattr(runtime_service, "load_conversation_events", lambda _root, _session_id: events)
+    loaded_session_ids: list[str] = []
+
+    def load_events(session_id):
+        loaded_session_ids.append(session_id)
+        return events
+
+    monkeypatch.setattr(runtime_service, "load_session_conversation_events_snapshot", load_events)
     monkeypatch.setattr(
         runtime_service,
         "_load_runtime_state",
@@ -481,6 +487,7 @@ def test_runtime_summary_prefers_ledger_context_compression_checkpoint(monkeypat
     assert compression["lastCompression"]["savedTokens"] == 21000
     assert compression["lastCompression"]["effectivenessRatio"] == pytest.approx(0.7)
     assert compression["strategy"]["summaryStorage"] == "conversation_ledger"
+    assert loaded_session_ids == ["session-ledger-compression"]
 
 
 def test_runtime_summary_uses_active_agent_context_compression_policy(monkeypatch):

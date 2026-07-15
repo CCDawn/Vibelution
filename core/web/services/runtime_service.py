@@ -30,7 +30,6 @@ from core.runtime_manager.work_run_leases import leases_for_snapshot
 from core.chat.conversation_ledger import (
     conversation_event_read_snapshot,
     context_compression_projection,
-    load_conversation_events,
 )
 from core.orchestration.cache_diagnostics import normalize_runtime_llm_usage
 
@@ -40,6 +39,7 @@ from .runtime_manager_control_service import current_runtime_manager_pid
 from .session_service import (
     get_active_session_summary,
     list_active_session_work_runs,
+    load_session_conversation_events_snapshot,
     load_chat_turn_work_run_summary,
     request_stop_session_turn,
 )
@@ -1902,7 +1902,7 @@ def _active_session_context_compression_projection(active_session: dict | None) 
     if not session_id:
         return {}
     try:
-        return context_compression_projection(load_conversation_events(PROJECT_ROOT, session_id))
+        return context_compression_projection(load_session_conversation_events_snapshot(session_id))
     except Exception:
         return {}
 

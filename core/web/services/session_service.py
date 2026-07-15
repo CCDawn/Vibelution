@@ -540,6 +540,12 @@ def _load_session_conversation_events_cached(session_id: str) -> list[Any]:
     return list(events)
 
 
+def load_session_conversation_events_snapshot(session_id: str) -> list[Any]:
+    """Return the current session ledger snapshot through the shared signature cache."""
+
+    return _load_session_conversation_events_cached(session_id)
+
+
 def _elapsed_ms(started_at: float) -> int:
     return max(0, int(round((_perf_counter() - started_at) * 1000)))
 
