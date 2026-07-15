@@ -128,6 +128,59 @@ def test_agent_reset_api_can_keep_existing_direct_session_when_requested(tmp_pat
     assert direct_session["id"] in {item["id"] for item in session_service.list_sessions()}
 
 
+def test_agent_reset_api_uses_verified_direct_session_when_legacy_agent_binding_is_empty(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    direct_session = session_service.create_chat_session(title="Legacy Agent Session")
+    agent = agent_directory_service.get_agent(direct_session["agentId"])
+    agent_directory_service.update_agent_instance(agent["agentId"], direct_session_id="")
+
+    response = client.post(
+        f"/api/agents/{agent['agentId']}/reset",
+        json={
+            "clearRuntimeState": False,
+            "resetDirectSession": True,
+            "directSessionId": direct_session["id"],
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    replacement_session_id = payload["resetSummary"]["replacementDirectSessionId"]
+    assert payload["resetSummary"]["resetDirectSession"] is True
+    assert payload["resetSummary"]["previousDirectSessionId"] == direct_session["id"]
+    assert replacement_session_id
+    assert payload["agent"]["directSessionId"] == replacement_session_id
+    session_ids = {item["id"] for item in session_service.list_sessions()}
+    assert direct_session["id"] not in session_ids
+    assert replacement_session_id in session_ids
+    assert session_service.get_session_detail(replacement_session_id)["agentId"] == agent["agentId"]
+
+
+def test_agent_reset_api_rejects_direct_session_owned_by_another_agent(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    source_session = session_service.create_chat_session(title="Source Agent Session")
+    source_agent = agent_directory_service.get_agent(source_session["agentId"])
+    target_session = session_service.create_chat_session(title="Target Agent Session")
+    target_agent = agent_directory_service.get_agent(target_session["agentId"])
+    agent_directory_service.update_agent_instance(source_agent["agentId"], direct_session_id="")
+
+    response = client.post(
+        f"/api/agents/{source_agent['agentId']}/reset",
+        json={
+            "clearRuntimeState": False,
+            "resetDirectSession": True,
+            "directSessionId": target_session["id"],
+        },
+    )
+
+    assert response.status_code == 422, response.text
+    assert "not owned by this Agent" in response.json()["detail"]
+    session_ids = {item["id"] for item in session_service.list_sessions()}
+    assert source_session["id"] in session_ids
+    assert target_session["id"] in session_ids
+    assert agent_directory_service.get_agent(target_agent["agentId"])["directSessionId"] == target_session["id"]
+
+
 def test_agent_reset_api_can_reset_session_agent_advanced_policies_without_profiles(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     agent = agent_directory_service.create_agent_instance(display_name="Advanced Reset Agent")

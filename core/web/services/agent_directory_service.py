@@ -1590,6 +1590,7 @@ def reset_agent_instance(
     *,
     clear_runtime_state: bool = True,
     reset_direct_session: bool = True,
+    direct_session_id: str = "",
     reset_persona_profile: bool = False,
     reset_task_profile: bool = False,
     reset_tool_policy: bool = False,
@@ -1599,6 +1600,7 @@ def reset_agent_instance(
     """Reset a single Agent for debugging without changing team, room, or mode membership."""
 
     normalized_agent_id = str(agent_id or "").strip()
+    normalized_direct_session_id = str(direct_session_id or "").strip()
     if not normalized_agent_id:
         raise AgentDirectoryError("Agent id is required.")
 
@@ -1631,6 +1633,13 @@ def reset_agent_instance(
         if str(agent.get("status") or "active").strip() == "archived":
             raise AgentDirectoryError("Archived Agent cannot be reset. Restore or purge archived data instead.")
         agent_snapshot = dict(agent)
+        stored_direct_session_id = str(agent_snapshot.get("directSessionId") or "").strip()
+        if normalized_direct_session_id:
+            if stored_direct_session_id and stored_direct_session_id != normalized_direct_session_id:
+                raise AgentDirectoryError(
+                    "Requested direct session does not match the Agent's active direct session."
+                )
+            agent_snapshot["directSessionId"] = normalized_direct_session_id
         reset_summary["previousDirectSessionId"] = str(agent_snapshot.get("directSessionId") or "").strip()
         now = utc_now_iso()
         profileless_session_agent = _is_profileless_session_agent(agent)
@@ -6723,9 +6732,19 @@ def _reset_agent_direct_session(agent: dict[str, Any]) -> dict[str, Any]:
     try:
         from . import session_service
 
+        session_detail = session_service.get_session_detail(session_id)
+        agent_id = str(agent.get("agentId") or "").strip()
+        session_agent_id = str(session_detail.get("agentId") or "").strip()
+        parent_session_id = str(session_detail.get("parentSessionId") or "").strip()
+        root_session_id = str(session_detail.get("rootSessionId") or "").strip()
+        if session_agent_id != agent_id:
+            raise AgentDirectoryError("Requested direct session is not owned by this Agent.")
+        if parent_session_id or (root_session_id and root_session_id != session_id):
+            raise AgentDirectoryError("Only an Agent root direct session can be reset.")
+
         result = session_service.reset_agent_direct_session_lightweight(
             session_id,
-            agent_id=str(agent.get("agentId") or "").strip(),
+            agent_id=agent_id,
             title=str(agent.get("displayName") or "").strip(),
         )
     except Exception as exc:

@@ -2746,6 +2746,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(clearMutationSource).toContain("/api/agents/${encodeURIComponent(agentId)}/reset");
     expect(clearMutationSource).toContain("clearRuntimeState: false");
     expect(clearMutationSource).toContain("resetDirectSession: true");
+    expect(clearMutationSource).toContain("directSessionId: sessionId");
     expect(clearMutationSource).toContain("resetPersonaProfile: false");
     expect(clearMutationSource).toContain("resetTaskProfile: false");
     expect(clearMutationSource).toContain("resetToolPolicy: false");
