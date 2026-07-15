@@ -548,6 +548,44 @@ def test_session_turn_progress_live_output_closes_previous_statuses(monkeypatch,
     assert [event["status"] for event in progress_events] == ["done", "done", "running"]
 
 
+def test_session_turn_prepare_timing_log_fields_are_bounded_and_non_sensitive():
+    fields = session_service._session_turn_prepare_timing_log_fields(
+        {
+            "totalPrepareMs": 9123,
+            "sessionWorkspaceMs": 17,
+            "agentDirectorySyncMs": 23,
+            "agentLookupMs": 31,
+            "promptSnapshotMs": 47,
+            "lightweightChatDecisionMs": 53,
+            "agentContextBuildMs": 61,
+            "workspacePolicyMs": 71,
+            "llmKeyEnvSyncMs": 83,
+            "agentLlmResolveMs": 97,
+            "llmKeyEnvSyncedCount": 1,
+            "llmKeyEnvAlreadyPresentCount": 2,
+            "llmKeyEnvMissingCount": 3,
+            "syncedEnvNames": ["DO_NOT_LOG"],
+            "unrelated": "not part of the bounded timing event",
+        }
+    )
+
+    assert fields == {
+        "totalPrepareMs": 9123,
+        "sessionWorkspaceMs": 17,
+        "agentDirectorySyncMs": 23,
+        "agentLookupMs": 31,
+        "promptSnapshotMs": 47,
+        "lightweightChatDecisionMs": 53,
+        "agentContextBuildMs": 61,
+        "workspacePolicyMs": 71,
+        "llmKeyEnvSyncMs": 83,
+        "agentLlmResolveMs": 97,
+        "llmKeyEnvSyncedCount": 1,
+        "llmKeyEnvAlreadyPresentCount": 2,
+        "llmKeyEnvMissingCount": 3,
+    }
+
+
 def test_running_snapshot_throttle_skips_detail_hydration(monkeypatch):
     subscriber = queue.Queue()
     session_id = "session-throttled"
