@@ -20517,13 +20517,16 @@ def _set_session_live_output(
     checkpoint_snapshot: SessionLiveOutputState | None = None
     delete_checkpoint = False
     feedback_events_changed = feedback_events is not _UNSET
-    publish_full_snapshot = not (
-        stage is _UNSET
-        and mental_snapshot is _UNSET
-        and tool_calls is _UNSET
-        and context_composition is _UNSET
-        and llm_payload_trace is _UNSET
-        and (content is not _UNSET or thought is not _UNSET or feedback_events is not _UNSET)
+    # Live progress, assistant text, and tool updates already have a bounded
+    # assistant_delta projection. Rebuilding the full session detail for each
+    # of those updates blocks the Agent worker before the next LLM invocation.
+    # Keep full snapshots for diagnostic structures that are not part of the
+    # public delta contract; terminal persistence and stream reconnects still
+    # publish an authoritative detail snapshot through their own paths.
+    publish_full_snapshot = (
+        mental_snapshot is not _UNSET
+        or context_composition is not _UNSET
+        or llm_payload_trace is not _UNSET
     )
     with _RUNNING_SESSIONS_LOCK:
         current_turn_id = _SESSION_ACTIVE_TURN_IDS.get(session_id, "")
@@ -22756,6 +22759,34 @@ def _publish_session_detail_snapshot(session_id: str, *, detail: dict[str, Any] 
         subscribers = list(_SESSION_STREAM_SUBSCRIBERS.get(session_id) or [])
     if not subscribers:
         return
+    # Running turns can emit progress updates much faster than a full detail
+    # projection can be assembled. Reserve or skip the busy snapshot interval
+    # before hydrating detail, otherwise a throttled publication still pays the
+    # expensive get_session_detail() cost.
+    pre_reserved_busy_snapshot = False
+    pre_throttled_count = 0
+    if detail is None and _is_session_running(session_id):
+        interval_seconds = _SESSION_STREAM_MIN_BUSY_SNAPSHOT_INTERVAL_SECONDS
+        now = _perf_counter()
+        with _SESSION_STREAM_LAST_SNAPSHOT_LOCK:
+            last_snapshot_at = _SESSION_STREAM_LAST_SNAPSHOT_AT.get(session_id, 0.0)
+            if last_snapshot_at and now - last_snapshot_at < interval_seconds:
+                pre_throttled_count = _SESSION_STREAM_THROTTLED_COUNTS.get(session_id, 0) + 1
+                _SESSION_STREAM_THROTTLED_COUNTS[session_id] = pre_throttled_count
+            else:
+                pre_throttled_count = _SESSION_STREAM_THROTTLED_COUNTS.pop(session_id, 0)
+                _SESSION_STREAM_LAST_SNAPSHOT_AT[session_id] = now
+                pre_reserved_busy_snapshot = True
+        if not pre_reserved_busy_snapshot:
+            if pre_throttled_count % 10 == 1:
+                _record_session_detail_snapshot_throttled_event(
+                    session_id=session_id,
+                    subscriber_count=len(subscribers),
+                    skipped_count=pre_throttled_count,
+                    current_phase="running",
+                    interval_ms=int(round(interval_seconds * 1000)),
+                )
+            return
     detail = detail if detail is not None else get_session_detail(
         session_id,
         message_limit=_SESSION_STREAM_DETAIL_MESSAGE_LIMIT,
@@ -22769,7 +22800,17 @@ def _publish_session_detail_snapshot(session_id: str, *, detail: dict[str, Any] 
     interval_seconds = _SESSION_STREAM_MIN_BUSY_SNAPSHOT_INTERVAL_SECONDS
     now = _perf_counter()
     should_throttle = False
-    if is_busy_snapshot:
+    if pre_reserved_busy_snapshot:
+        skipped_count = pre_throttled_count
+        if skipped_count:
+            _record_session_detail_snapshot_throttled_event(
+                session_id=session_id,
+                subscriber_count=len(subscribers),
+                skipped_count=skipped_count,
+                current_phase=current_phase,
+                interval_ms=int(round(interval_seconds * 1000)),
+            )
+    elif is_busy_snapshot:
         with _SESSION_STREAM_LAST_SNAPSHOT_LOCK:
             last_snapshot_at = _SESSION_STREAM_LAST_SNAPSHOT_AT.get(session_id, 0.0)
             if last_snapshot_at and now - last_snapshot_at < interval_seconds:
