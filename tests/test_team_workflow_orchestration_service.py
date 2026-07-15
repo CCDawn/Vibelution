@@ -458,30 +458,16 @@ def _capture_workflow_events(monkeypatch):
 def _append_stage_task_tool_trace(project_root: Path, task: dict, *, complete: bool = True, turn_id: str = "") -> None:
     session_id = task["sessionId"]
     turn_id = turn_id or task["turn"]["turnId"]
-    checklist = list(task.get("taskChecklist") or [])
-    append_conversation_event(
-        project_root,
-        session_id,
-        turn_id,
-        "tool_result",
-        status="done",
-        payload={
-            "toolCall": {
-                "name": "task_create_tool",
-                "status": "done",
-                "args": {
-                    "goal": task.get("title") or "知识搜集阶段任务",
-                    "task_list": [
-                        {"description": item["description"]}
-                        for item in checklist
-                    ],
-                },
-                "result": "task list created",
-            }
-        },
+    tool_names = list(
+        dict.fromkeys(
+            str(item.get("requiredTool") or "").strip()
+            for item in list(task.get("taskChecklist") or [])
+            if str(item.get("requiredTool") or "").strip()
+        )
     )
-    update_items = checklist if complete else checklist[: max(0, len(checklist) - 1)]
-    for item in update_items:
+    if not complete:
+        tool_names = [name for name in tool_names if name != "source_collection_stage_writeback_tool"]
+    for tool_name in tool_names:
         append_conversation_event(
             project_root,
             session_id,
@@ -490,51 +476,35 @@ def _append_stage_task_tool_trace(project_root: Path, task: dict, *, complete: b
             status="done",
             payload={
                 "toolCall": {
-                    "name": "task_update_tool",
+                    "name": tool_name,
                     "status": "done",
-                    "args": {
-                        "task_id": item["order"],
-                        "is_completed": True,
-                        "result_summary": item["description"],
-                    },
-                    "result": "task updated",
+                    "args": {"task_id": task.get("taskId")},
+                    "result": "stage tool completed",
                 }
             },
         )
 
 
 def _stage_task_feedback_events(task: dict, *, complete: bool = True) -> list[dict]:
-    checklist = list(task.get("taskChecklist") or [])
-    events: list[dict] = [
-        {
-            "sequence": 1,
-            "kind": "tool",
-            "status": "done",
-            "name": "task_create_tool",
-            "arguments": {
-                "goal": task.get("title") or "知识搜集阶段任务",
-                "task_list": [
-                    {"description": item["description"]}
-                    for item in checklist
-                ],
-            },
-            "resultPreview": "task list created",
-        }
-    ]
-    update_items = checklist if complete else checklist[: max(0, len(checklist) - 1)]
-    for sequence, item in enumerate(update_items, start=2):
+    tool_names = list(
+        dict.fromkeys(
+            str(item.get("requiredTool") or "").strip()
+            for item in list(task.get("taskChecklist") or [])
+            if str(item.get("requiredTool") or "").strip()
+        )
+    )
+    if not complete:
+        tool_names = [name for name in tool_names if name != "source_collection_stage_writeback_tool"]
+    events: list[dict] = []
+    for sequence, tool_name in enumerate(tool_names, start=1):
         events.append(
             {
                 "sequence": sequence,
                 "kind": "tool",
                 "status": "done",
-                "name": "task_update_tool",
-                "arguments": {
-                    "task_id": item["order"],
-                    "is_completed": True,
-                    "result_summary": item["description"],
-                },
-                "resultPreview": "task updated",
+                "name": tool_name,
+                "arguments": {"task_id": task.get("taskId")},
+                "resultPreview": "stage tool completed",
             }
         )
     return events
@@ -1907,7 +1877,13 @@ def test_start_source_collection_stage_session_task_submits_direct_session_task(
     assert task["task"]["status"] == "running"
     assert task["task"]["writebackContract"]["writesFormalKnowledge"] is False
     assert task["task"]["writebackContract"]["endpoint"].endswith(f"/stage-session-tasks/{task['taskId']}/writeback")
-    assert task["task"]["taskToolRequired"] is True
+    assert task["task"]["taskToolRequired"] is False
+    assert task["task"]["checklistBinding"] == {
+        "mode": "stage_task",
+        "bound": True,
+        "boundAt": task["task"]["createdAt"],
+        "source": "backend",
+    }
     assert task["task"]["completionGate"]["requiresTaskChecklist"] is True
     assert task["task"]["completionGate"]["requiresArtifact"] is True
     assert [item["id"] for item in task["task"]["taskChecklist"]] == [
@@ -1921,12 +1897,10 @@ def test_start_source_collection_stage_session_task_submits_direct_session_task(
     assert submitted[0]["sessionId"] == direct_session["id"]
     assert "资料搜集阶段任务" in submitted[0]["content"]
     assert "会立即要求当前 Agent 在本会话执行" in submitted[0]["content"]
-    assert "第一步必须调用 `task_list_tool`" in submitted[0]["content"]
-    assert "调用 `task_create_tool` 创建或绑定本阶段 checklist" in submitted[0]["content"]
-    assert "完成每个检查项后调用 `task_update_tool`" in submitted[0]["content"]
+    assert "checklist 已由后端绑定" in submitted[0]["content"]
+    assert "不要调用通用 `task_list_tool`、`task_create_tool` 或 `task_update_tool`" in submitted[0]["content"]
     assert "candidateLeads[]" in submitted[0]["content"]
-    assert "第一动作必须是 `task_list_tool`" in submitted[0]["content"]
-    assert "不要先输出“已接收”" in submitted[0]["content"]
+    assert "第一动作必须是 `task_list_tool`" not in submitted[0]["content"]
     assert "先用一句简短状态回应已接收任务" not in submitted[0]["content"]
     assert "source_collection_context_tool" in submitted[0]["content"]
     assert "source_collection_stage_writeback_tool" in submitted[0]["content"]
@@ -1940,6 +1914,8 @@ def test_start_source_collection_stage_session_task_submits_direct_session_task(
     assert metadata["sourceSurface"] == "team_workflow_stage_task"
     assert metadata["sourceCollectionStageTaskId"] == task["taskId"]
     assert metadata["writebackContract"]["taskId"] == task["taskId"]
+    assert metadata["taskToolRequired"] is False
+    assert metadata["checklistBinding"]["mode"] == "stage_task"
     assert second["created"] is True
     assert second["alreadyPresent"] is False
     assert second["taskId"] != task["taskId"]

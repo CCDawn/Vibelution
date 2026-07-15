@@ -1412,7 +1412,7 @@ def start_source_collection_stage_session_task(
         agent_role=agent_role,
     )
     task_checklist = _source_collection_stage_task_checklist(stage_id, agent_role)
-    writeback_contract["taskToolRequired"] = True
+    writeback_contract["taskToolRequired"] = False
     writeback_contract["taskChecklist"] = task_checklist
     previous_stage_task = _latest_source_collection_stage_task(
         [
@@ -1467,8 +1467,14 @@ def start_source_collection_stage_session_task(
         "matchingAssignmentCount": len(matching_assignments),
         "storageArtifacts": storage_artifacts,
         "writebackContract": writeback_contract,
-        "taskToolRequired": True,
+        "taskToolRequired": False,
         "taskChecklist": task_checklist,
+        "checklistBinding": {
+            "mode": "stage_task",
+            "bound": True,
+            "boundAt": now,
+            "source": "backend",
+        },
         "taskToolProgress": _source_collection_stage_task_tool_progress(task_checklist),
         "completionGate": _source_collection_stage_completion_gate(
             task_checklist=task_checklist,
@@ -1504,8 +1510,9 @@ def start_source_collection_stage_session_task(
             "sourceCollectionStageTaskId": task_id,
             "sourceCollectionStageTaskKey": task_idempotency_key,
             "writebackContract": writeback_contract,
-            "taskToolRequired": True,
+            "taskToolRequired": False,
             "taskChecklist": task_checklist,
+            "checklistBinding": task_record["checklistBinding"],
         },
         include_started_turn_id=True,
         lightweight_response=True,
@@ -4656,8 +4663,7 @@ def _source_collection_stage_writeback_closure_summary(
         success_count = max(created_count, imported_count, duplicate_count)
         artifact_status = "source_records_ready" if success_count else "no_effect"
         retry_instruction = (
-            "重试时请先调用 task_create_tool 创建检查清单，再调用 "
-            "source_collection_context_tool(context_mode=compact, record_offset=0, record_limit=5)，"
+            "重试时请调用 source_collection_context_tool(context_mode=compact, record_offset=0, record_limit=5)，"
             "新资料必须用 candidateLeads[] 写回；无效来源写入 invalidSources[]。"
         )
     elif stage_id == "extraction" or agent_role == "source_extractor":
@@ -4695,7 +4701,11 @@ def _source_collection_stage_writeback_closure_summary(
         item for item in list(task.get("taskChecklist") or [])
         if isinstance(item, dict)
     ]
-    task_tool_progress = _source_collection_stage_task_tool_progress_from_trace(task, task_checklist)
+    task_tool_progress = _source_collection_stage_task_tool_progress_from_trace(
+        task,
+        task_checklist,
+        artifact_complete=artifact_complete,
+    )
     task_checklist_complete = bool(task_tool_progress.get("complete"))
     completion_gate = _source_collection_stage_completion_gate(
         task_checklist=task_checklist,
@@ -19359,6 +19369,8 @@ def _source_collection_stage_task_idempotency_key(
 def _source_collection_stage_task_tool_progress_from_trace(
     task: dict[str, Any],
     task_checklist: list[dict[str, Any]] | None,
+    *,
+    artifact_complete: bool = False,
 ) -> dict[str, Any]:
     checklist = [item for item in list(task_checklist or []) if isinstance(item, dict)]
     progress = _source_collection_stage_task_tool_progress(checklist)
@@ -19398,6 +19410,86 @@ def _source_collection_stage_task_tool_progress_from_trace(
             if turn_id and event_turn_id and event_turn_id != turn_id:
                 continue
         tool_calls.extend(_source_collection_stage_tool_calls_from_event(event))
+
+    checklist_binding = task.get("checklistBinding") if isinstance(task.get("checklistBinding"), dict) else {}
+    if _trim_text(checklist_binding.get("mode"), max_length=80) == "stage_task":
+        successful_tool_names = {
+            _source_collection_stage_tool_call_name(tool_call)
+            for tool_call in tool_calls
+            if _source_collection_stage_tool_call_succeeded(tool_call)
+        }
+        writeback_observed = "source_collection_stage_writeback_tool" in successful_tool_names
+        task_create_observed = False
+        completed_ids: set[str] = set()
+        checklist_by_id = {
+            _trim_text(item.get("id"), max_length=120): item
+            for item in checklist
+            if _trim_text(item.get("id"), max_length=120)
+        }
+        checklist_by_order = {
+            _normalize_int(item.get("order"), default=index, minimum=1, maximum=1000): item
+            for index, item in enumerate(checklist, start=1)
+        }
+        for tool_call in tool_calls:
+            name = _source_collection_stage_tool_call_name(tool_call)
+            if not _source_collection_stage_tool_call_succeeded(tool_call):
+                continue
+            if name == "task_create_tool":
+                task_create_observed = True
+                continue
+            if name != "task_update_tool":
+                continue
+            args = _source_collection_stage_tool_call_args(tool_call)
+            if _normalize_optional_bool(args.get("is_completed") or args.get("isCompleted")) is not True:
+                continue
+            item_id = _source_collection_stage_task_tool_item_id(args, checklist_by_id, checklist_by_order)
+            if item_id:
+                completed_ids.add(item_id)
+        for item in checklist:
+            item_id = _trim_text(item.get("id"), max_length=120)
+            required_tool = _trim_text(item.get("requiredTool"), max_length=160)
+            if not item_id:
+                continue
+            if required_tool == "source_collection_stage_writeback_tool":
+                item_complete = bool(writeback_observed and artifact_complete)
+            elif required_tool:
+                item_complete = required_tool in successful_tool_names
+                if (
+                    not item_complete
+                    and required_tool == "batch_web_search_tool"
+                    and writeback_observed
+                    and artifact_complete
+                ):
+                    item_complete = True
+                if item_complete and "page" in item_id:
+                    item_complete = bool(artifact_complete)
+            else:
+                item_complete = bool(writeback_observed and artifact_complete)
+            if item_complete:
+                completed_ids.add(item_id)
+        progress = _source_collection_stage_task_tool_progress(checklist, completed_ids=completed_ids)
+        progress.update(
+            {
+                "traceAvailable": True,
+                "bindingMode": "stage_task",
+                "taskCreateObserved": task_create_observed,
+                "toolCallCount": len(tool_calls),
+                "completedByEvidence": progress.get("completed", 0),
+                "artifactComplete": bool(artifact_complete),
+            }
+        )
+        call_sources = {
+            _trim_text(tool_call.get("__source"), max_length=80)
+            for tool_call in tool_calls
+            if _trim_text(tool_call.get("__source"), max_length=80)
+        }
+        if call_sources:
+            progress["sources"] = sorted(call_sources)
+            if call_sources == {"feedback_events"}:
+                progress["source"] = "feedback_events"
+        if not progress.get("complete"):
+            progress["pendingReason"] = "stage_evidence_incomplete"
+        return progress
 
     task_create_observed = False
     completed_ids: set[str] = set()
@@ -19836,6 +19928,9 @@ def _source_collection_stage_task_needs_writeback_resume(task: dict[str, Any] | 
         for item in list(progress.get("completedIds") or [])
         if _trim_text(item, max_length=120)
     }
+    checklist_binding = task.get("checklistBinding") if isinstance(task.get("checklistBinding"), dict) else {}
+    if _trim_text(checklist_binding.get("mode"), max_length=80) == "stage_task":
+        return bool(completed_ids)
     stage_id = _normalize_source_collection_stage_id(task.get("stageId"), default="")
     writeback_checkpoint_by_stage = {
         "finding": "write_candidate_leads",
@@ -19958,16 +20053,13 @@ def _source_collection_stage_session_task_message(
             context,
             "",
             *previous_attempt_block,
-            "## Task 工具检查清单",
-            "- 第一步必须调用 `task_list_tool` 查看当前清单状态，然后调用 `task_create_tool` 创建或绑定本阶段 checklist。清单必须使用下方 JSON 的 id 和 description，不要自行改顺序或合并项。",
-            f"- 固定 checklist JSON：`{task_tool_json}`。",
+            "## 阶段检查清单",
+            "- 本阶段 checklist 已由后端绑定，系统会根据阶段工具结果和结构化写回证据自动更新；不要调用通用 `task_list_tool`、`task_create_tool` 或 `task_update_tool` 复制清单。",
             *task_checklist_lines,
-            "- 完成每个检查项后调用 `task_update_tool` 打勾，参数为 task_id=<对应编号或工具返回编号>, is_completed=true, result_summary=...。",
-            "- 最后一项必须在 `source_collection_stage_writeback_tool` 返回后再调用 `task_update_tool` 打勾；系统会在下一次状态同步后把 `closureSummary.completionGatePassed` 刷新为 true，如果仍未通过，请写明未通过原因。",
+            "- 最后一项只会在 `source_collection_stage_writeback_tool` 成功且产物门禁通过后完成；如果仍未通过，请在写回中说明缺失证据。",
             "- 如果任一检查项无法完成，不要自然语言声称完成；调用 `source_collection_stage_writeback_tool` 写入 blocked/failed/needs_review 和失败原因。",
             "",
             "## 执行要求",
-            "- 在输出任何可见文字前，第一动作必须是 `task_list_tool`；随后调用 `task_create_tool` 绑定 checklist。不要先输出“已接收”、计划或等待说明来替代工具执行。",
             f"- 先调用 `source_collection_context_tool` 读取本轮受控资料上下文，参数如下：`{context_tool_json}`。",
             "- 资料寻找阶段的新资料首选写入 `candidateLeads[]`；兼容字段只用于历史回写，不要把自然语言表格当作唯一结果。",
             "- 资料寻找阶段的无效来源写入 `invalidSources[]`，每条包含 title/sourceRef 或 DOI/url、reason，系统会记录并从后续流程过滤。",
