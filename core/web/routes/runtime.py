@@ -14,7 +14,7 @@ from fastapi.responses import StreamingResponse
 from core.runtime_manager.command_queue import cancel_lifecycle_command
 from core.web.services.runtime_service import (
     RuntimeRestartActiveWorkBlocked,
-    get_runtime_summary,
+    get_runtime_summary_http_future,
     request_runtime_restart,
     request_runtime_shutdown,
 )
@@ -39,8 +39,8 @@ class RuntimeLifecycleCancelPayload(BaseModel):
 
 
 @router.get("/runtime/summary")
-def runtime_summary() -> dict:
-    return get_runtime_summary()
+async def runtime_summary() -> dict:
+    return await asyncio.wrap_future(get_runtime_summary_http_future())
 
 
 @router.post("/runtime/shutdown", status_code=202)
