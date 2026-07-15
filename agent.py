@@ -2491,12 +2491,18 @@ class SelfEvolvingAgent:
             for _ in range(round_state.max_iterations):
                 self._raise_if_turn_stop_requested()
                 iteration = round_state.next_iteration()
+                pre_llm_started = time.perf_counter()
                 ui.update_status(
                     "THINKING",
                     **round_state.thinking_status(user_prompt),
                 )
+                git_refresh_started = time.perf_counter()
                 self.git_memory.refresh_git_memory()
+                git_refresh_ms = max(0, int((time.perf_counter() - git_refresh_started) * 1000))
+                runtime_sync_started = time.perf_counter()
                 self._sync_runtime_state_memory()
+                runtime_sync_ms = max(0, int((time.perf_counter() - runtime_sync_started) * 1000))
+                prompt_build_started = time.perf_counter()
                 current_sp = self.prompt_manager.build()
                 current_prompt = to_string(current_sp)
                 if current_prompt != self._cached_system_prompt:
@@ -2519,6 +2525,8 @@ class SelfEvolvingAgent:
                         if cacheable_prefix_merged:
                             messages[0] = merged_message
                     self._cached_system_prompt = current_prompt
+                prompt_build_ms = max(0, int((time.perf_counter() - prompt_build_started) * 1000))
+                context_estimate_started = time.perf_counter()
                 try:
                     ui.note_context_window(
                         estimate_messages_tokens(messages),
@@ -2526,7 +2534,9 @@ class SelfEvolvingAgent:
                     )
                 except Exception:
                     pass
+                context_estimate_ms = max(0, int((time.perf_counter() - context_estimate_started) * 1000))
 
+                delegation_started = time.perf_counter()
                 if bool(getattr(self, "_force_disable_tools_for_turn", False)):
                     delegated = None
                 else:
@@ -2536,6 +2546,7 @@ class SelfEvolvingAgent:
                         total_tool_calls=round_state.total_tool_calls,
                         messages=messages,
                     )
+                delegation_ms = max(0, int((time.perf_counter() - delegation_started) * 1000))
                 self._raise_if_turn_stop_requested()
                 if delegated:
                     delegated_this_turn = True
@@ -2579,6 +2590,21 @@ class SelfEvolvingAgent:
                         f"（{current_tokens} → {after_tokens} tokens）。"
                     ))
                 self._raise_if_turn_stop_requested()
+                _record_agent_scene_event(
+                    "llm",
+                    "agent.llm_preflight.completed",
+                    message="Agent LLM preflight completed.",
+                    fields={
+                        "iteration": iteration,
+                        "messageCount": len(messages),
+                        "gitRefreshMs": git_refresh_ms,
+                        "runtimeStateSyncMs": runtime_sync_ms,
+                        "promptBuildMs": prompt_build_ms,
+                        "contextEstimateMs": context_estimate_ms,
+                        "delegationMs": delegation_ms,
+                        "totalPreflightMs": max(0, int((time.perf_counter() - pre_llm_started) * 1000)),
+                    },
+                )
                 invocation_result = self._invoke_llm(messages, replay_state=provider_replay_state)
                 if invocation_result is None:
                     consecutive_failures = round_state.note_llm_failure()

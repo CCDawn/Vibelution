@@ -5177,6 +5177,7 @@ class TestLocalProviderBootstrap:
 
         compress_calls = []
         llm_message_counts = []
+        scene_events = []
 
         def fake_compress(messages, iteration, reason=""):
             compress_calls.append((iteration, reason, len(messages)))
@@ -5232,7 +5233,11 @@ class TestLocalProviderBootstrap:
             get_attention_snapshot=lambda: {},
             get_active_evolution_txn=lambda: None,
         ))
-        monkeypatch.setattr(agent_module, "_record_agent_scene_event", lambda *_args, **_kwargs: None)
+        monkeypatch.setattr(
+            agent_module,
+            "_record_agent_scene_event",
+            lambda *args, **kwargs: scene_events.append((args, kwargs)),
+        )
         agent._compress_messages = fake_compress
         agent._maybe_delegate = lambda **_kwargs: None
 
@@ -5247,6 +5252,20 @@ class TestLocalProviderBootstrap:
         assert compress_calls
         assert "上下文" in compress_calls[0][1]
         assert llm_message_counts[0] == 3
+        preflight = next(item for item in scene_events if item[0][1] == "agent.llm_preflight.completed")
+        fields = preflight[1]["fields"]
+        assert fields["iteration"] == 1
+        assert fields["messageCount"] == 3
+        assert fields["totalPreflightMs"] >= 0
+        assert {
+            "gitRefreshMs",
+            "runtimeStateSyncMs",
+            "promptBuildMs",
+            "contextEstimateMs",
+            "delegationMs",
+        } <= fields.keys()
+        assert "prompt" not in fields
+        assert "content" not in fields
 
     def test_runtime_agent_llm_slot_binding_maps_subagent_execution_to_primary(self, monkeypatch):
         monkeypatch.setenv("VIBELUTION_AGENT_ID", "agent-subagent-slot")
