@@ -1724,7 +1724,7 @@ export function ConversationView({
               <div className={styles.codexTranscriptCellTitleRow}>
                 <span className={styles.codexTranscriptCellTitle}>{cell.title?.trim() || (lang === "zh" ? "执行失败" : "Failed")}</span>
                 {errorText ? <span className={styles.codexTranscriptCellMeta} aria-hidden="true">·</span> : null}
-                {errorText ? <span className={styles.codexTranscriptCellMeta}>{errorText}</span> : null}
+                {errorText ? <span className={styles.codexTranscriptCompactErrorSummary}>{errorText}</span> : null}
                 {diagnosticRows.length > 0 ? (
                   <details className={styles.codexTranscriptCompactErrorDetails} data-codex-error-diagnostic="true">
                     <summary className={styles.codexTranscriptCompactErrorDetailsSummary}>
