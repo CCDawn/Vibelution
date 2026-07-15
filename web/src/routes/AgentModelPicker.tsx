@@ -1,5 +1,6 @@
 import { Check, ChevronDown, X } from "lucide-react";
 import { type KeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
 import type { AgentLlmSlotDefinition, AgentModelChoice } from "../api/types";
 import { VButton, VNativeInput } from "../components/vui";
@@ -131,7 +132,6 @@ export function AgentModelPicker({
   onSelectPinned,
   onPromote,
 }: AgentModelPickerProps) {
-  const rootRef = useRef<HTMLDivElement | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const searchRef = useRef<HTMLInputElement | null>(null);
   const optionRefs = useRef(new Map<string, HTMLButtonElement>());
@@ -166,17 +166,6 @@ export function AgentModelPicker({
     setActiveModelRef((current) => enabledCandidates.some((item) => item.modelRef === current) ? current : first);
     requestAnimationFrame(() => searchRef.current?.focus());
   }, [enabledCandidates, open]);
-
-  useEffect(() => {
-    if (!open) return;
-    function closeOnOutsidePointer(event: PointerEvent) {
-      if (event.target instanceof Node && !rootRef.current?.contains(event.target)) {
-        setOpen(false);
-      }
-    }
-    window.addEventListener("pointerdown", closeOnOutsidePointer);
-    return () => window.removeEventListener("pointerdown", closeOnOutsidePointer);
-  }, [open]);
 
   function choose(candidate: AgentModelChoice) {
     if (disabled || disabledReason(candidate)) return;
@@ -222,36 +211,20 @@ export function AgentModelPicker({
     }
   }
 
-  return (
-    <div ref={rootRef} className={styles.root}>
-      <VButton
-        ref={triggerRef}
-        type="button"
-        className={styles.trigger}
-        isDisabled={disabled}
-        aria-haspopup="dialog"
-        aria-expanded={open}
-        onPress={() => setOpen((value) => !value)}
-      >
-        <span className={styles.triggerCopy}>
-          <span className={styles.triggerLabel}>
-            {selected?.label || selectedModelRef || "选择模型"}
-          </span>
-          <span className={styles.triggerMeta}>{selected?.providerLabel || ""}</span>
-        </span>
-        <ChevronDown size={14} aria-hidden="true" />
-      </VButton>
+  const dialog = (
+    <div className={styles.dialogLayer} role="presentation" hidden={!open} onMouseDown={() => closeAndRestoreFocus(setOpen, triggerRef.current)}>
       <div
         className={styles.panel}
         role="dialog"
+        aria-modal="true"
         aria-label={`选择 ${slot.label} 模型`}
-        hidden={!open}
+        onMouseDown={(event) => event.stopPropagation()}
         onKeyDown={handlePanelKeyDown}
       >
         <div className={styles.panelHeader}>
           <div className={styles.panelTitle}>
-            <strong className={styles.panelTitleText}>选择 Agent 模型</strong>
-            <span className={styles.panelHint}>按 Provider 分组；未固定模型会先写入 operator config，再绑定当前 Agent。</span>
+            <strong className={styles.panelTitleText}>选择 {slot.label}</strong>
+            <span className={styles.panelHint}>按 Provider 分组。未固定模型会先加入模型库，再绑定当前 Agent。</span>
           </div>
           <VButton
             type="button"
@@ -296,6 +269,7 @@ export function AgentModelPicker({
                     isDisabled={disabled || Boolean(reason)}
                     aria-selected={selectedRow}
                     data-reason-code={compatibility.reasonCode || undefined}
+                    title={candidate.modelRef}
                     onFocus={() => setActiveModelRef(candidate.modelRef)}
                     onPress={() => choose(candidate)}
                   >
@@ -305,16 +279,15 @@ export function AgentModelPicker({
                         <span className={styles.badge}>{candidateStatus(candidate)}</span>
                         {selectedRow ? <Check className={styles.check} size={14} aria-hidden="true" /> : null}
                       </span>
-                      <span className={styles.optionIdentity}>{candidate.modelRef} · upstream: {candidate.upstreamId}</span>
                       <span className={styles.optionMeta}>
                         {candidate.reasoningEffortValues?.length
                           ? <span>{candidate.reasoningEffortValues.join(" / ")}</span>
-                          : <span>无推理强度选项</span>}
+                          : <span>标准推理</span>}
                         <span>{candidate.transport || candidate.providerKind}</span>
                       </span>
                     </span>
                     <span className={styles.action}>
-                      {pending ? "处理中…" : candidate.runtimeSelectable ? "选择" : "固定并选择"}
+                      {pending ? "处理中…" : candidate.runtimeSelectable ? "使用" : "固定后使用"}
                     </span>
                     {reason ? <span className={styles.reason}>{reason}</span> : null}
                   </VButton>
@@ -325,6 +298,29 @@ export function AgentModelPicker({
           {!groups.length ? <p className={styles.empty}>没有匹配的模型。</p> : null}
         </div>
       </div>
+    </div>
+  );
+
+  return (
+    <div className={styles.root}>
+      <VButton
+        ref={triggerRef}
+        type="button"
+        className={styles.trigger}
+        isDisabled={disabled}
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        onPress={() => setOpen((value) => !value)}
+      >
+        <span className={styles.triggerCopy}>
+          <span className={styles.triggerLabel}>
+            {selected?.label || selectedModelRef || "选择模型"}
+          </span>
+          <span className={styles.triggerMeta}>{selected?.providerLabel || ""}</span>
+        </span>
+        <ChevronDown size={14} aria-hidden="true" />
+      </VButton>
+      {typeof document === "undefined" ? dialog : createPortal(dialog, document.body)}
     </div>
   );
 }
