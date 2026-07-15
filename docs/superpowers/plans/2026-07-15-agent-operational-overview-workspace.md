@@ -1,6 +1,6 @@
 # Agent Operational Overview Workspace Plan
 
-> Status: in progress
+> Status: implemented
 >
 > Owner: agent-codex-agent-operational-overview
 >
@@ -10,11 +10,11 @@
 >
 > Supersedes: the summary-only overview layout introduced before local main `7e0df9f9`; retains the fluid-width correction from `a46e7e86`
 >
-> Implementation link: pending
+> Implementation link: local main `7158735f` (`feat(agent): add operational overview workspace`)
 >
-> Validation: plan review only; implementation verification is defined below
+> Validation: 83 focused frontend tests, production build, claim-bound quality closeout, and browser inspection passed
 >
-> Close condition: user approves this plan or replaces its information-architecture direction
+> Close condition: implemented and merged locally; runtime refresh is required before user-facing verification
 
 ## Goal
 
