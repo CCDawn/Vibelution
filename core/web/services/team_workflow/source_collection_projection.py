@@ -58,20 +58,12 @@ def source_collection_stage_card_projection(
         source_collection_count(output_count) + effective_pending_count,
     )
     current_processed = max(0, current_total - effective_pending_count) if current_total else 0
-    current_coverage_summary = (
-        {
-            "applicable": True,
-            "coverageKind": f"{stage_id}_current_inputs",
-            "complete": effective_pending_count <= 0,
-            "total": current_total,
-            "processed": min(current_processed, current_total),
-            "missing": max(0, effective_pending_count),
-            "invalid": 0,
-            "blocked": 0,
-            "duplicate": 0,
-        }
-        if current_total > 0
-        else {}
+    current_coverage_summary = source_collection_stage_current_coverage_summary(
+        stage_id,
+        coverage_summary,
+        current_total=current_total,
+        current_processed=current_processed,
+        effective_pending_count=effective_pending_count,
     )
     task_completed = agent_status == "completed"
     task_interrupted = agent_status == "interrupted"
@@ -163,6 +155,55 @@ def source_collection_stage_card_projection(
     }
 
 
+def source_collection_stage_current_coverage_summary(
+    stage_id: str,
+    task_coverage_summary: dict[str, Any],
+    *,
+    current_total: int,
+    current_processed: int,
+    effective_pending_count: int,
+) -> dict[str, Any]:
+    if current_total <= 0:
+        return {}
+    task_coverage = task_coverage_summary if isinstance(task_coverage_summary, dict) else {}
+    task_total = source_collection_count(task_coverage.get("total"))
+    task_processed = source_collection_count(task_coverage.get("processed"))
+    task_missing = source_collection_count(task_coverage.get("missing"))
+    task_invalid = source_collection_count(task_coverage.get("invalid"))
+    task_covers_current_inputs = (
+        bool(task_coverage.get("applicable"))
+        and bool(task_coverage.get("complete"))
+        and task_total == current_total
+        and task_processed >= current_total
+        and task_missing <= 0
+        and task_invalid <= 0
+    )
+    if task_covers_current_inputs:
+        return {
+            "applicable": True,
+            "coverageKind": trim_text(task_coverage.get("coverageKind"), max_length=120)
+            or f"{stage_id}_current_inputs",
+            "complete": True,
+            "total": current_total,
+            "processed": current_total,
+            "missing": 0,
+            "invalid": 0,
+            "blocked": source_collection_count(task_coverage.get("blocked")),
+            "duplicate": source_collection_count(task_coverage.get("duplicate")),
+        }
+    return {
+        "applicable": True,
+        "coverageKind": f"{stage_id}_current_inputs",
+        "complete": effective_pending_count <= 0,
+        "total": current_total,
+        "processed": min(current_processed, current_total),
+        "missing": max(0, effective_pending_count),
+        "invalid": 0,
+        "blocked": 0,
+        "duplicate": 0,
+    }
+
+
 def latest_source_collection_stage_task(tasks: list[dict[str, Any]]) -> dict[str, Any] | None:
     valid = [item for item in tasks if isinstance(item, dict)]
     if not valid:
@@ -246,11 +287,20 @@ def source_collection_stage_card_blocking_reasons(
     coverage = coverage_summary if isinstance(coverage_summary, dict) else {}
     current_coverage = current_coverage_summary if isinstance(current_coverage_summary, dict) else {}
     if card_status == "partial_current_inputs" and bool(current_coverage.get("applicable")):
-        reasons.append(
-            "当前阶段覆盖不足："
-            f"已处理 {source_collection_count(current_coverage.get('processed'))}/{source_collection_count(current_coverage.get('total'))}，"
-            f"{source_collection_count(current_coverage.get('missing'))} 条待补。"
-        )
+        processed = source_collection_count(current_coverage.get("processed"))
+        total = source_collection_count(current_coverage.get("total"))
+        blocked = source_collection_count(current_coverage.get("blocked"))
+        if bool(current_coverage.get("complete")):
+            reasons.append(
+                f"当前批次已处理 {processed}/{total}，"
+                + (f"其中 {blocked} 条需要补充证据。" if blocked > 0 else "但结果尚未全部转为可用阶段产物。")
+            )
+        else:
+            reasons.append(
+                "当前阶段覆盖不足："
+                f"已处理 {processed}/{total}，"
+                f"{source_collection_count(current_coverage.get('missing'))} 条待补。"
+            )
     if bool(coverage.get("applicable")) and not bool(coverage.get("complete")):
         reasons.append(
             "Agent 回写覆盖不完整："
@@ -409,6 +459,17 @@ def source_collection_stage_user_summary(
         next_action = trim_text(action.get("actionLabel"), max_length=120) or "继续这次任务"
         detail = latest_summary or "Agent 会话已停止，尚未调用阶段写回工具。"
         return f"{detail} 本阶段已中断，尚未回写最终产物。建议：{next_action}。"
+    if (
+        card_status == "partial_current_inputs"
+        and bool(current_coverage.get("applicable"))
+        and bool(current_coverage.get("complete"))
+    ):
+        processed = source_collection_count(current_coverage.get("processed"))
+        total = source_collection_count(current_coverage.get("total"))
+        blocked = source_collection_count(current_coverage.get("blocked"))
+        next_action = trim_text(action.get("actionLabel"), max_length=120) or source_collection_stage_action_label(stage_id, "continue")
+        pending_detail = f"其中 {blocked} 条需要补充证据。" if blocked > 0 else "当前结果仍待复核并转为可用阶段产物。"
+        return f"{source_collection_stage_readable_object_label(stage_id)}已处理 {processed}/{total}，{pending_detail}建议：{next_action}。"
     if bool(current_coverage.get("applicable")) and current_coverage.get("complete") is False:
         processed = source_collection_count(current_coverage.get("processed"))
         total = source_collection_count(current_coverage.get("total"))
