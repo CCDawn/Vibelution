@@ -17292,6 +17292,12 @@ def _record_session_turn_tool_calls(
             "tool_calls.jsonl",
             {
                 "index": index,
+                "toolCallId": str(
+                    tool_call.get("id")
+                    or tool_call.get("toolCallId")
+                    or tool_call.get("tool_call_id")
+                    or ""
+                ).strip(),
                 "name": str(tool_call.get("name") or "").strip(),
                 "status": str(tool_call.get("status") or "").strip(),
                 "summary": trim_lines(tool_call.get("summary") or "", max_lines=3),
