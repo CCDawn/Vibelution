@@ -6690,6 +6690,25 @@ def test_restart_build_preflight_skips_when_frontend_build_is_current(monkeypatc
     ]
 
 
+@pytest.mark.parametrize(
+    "observation",
+    [
+        {"observedState": "closed", "backendAlive": False, "browserWindowAlive": False},
+        {"observedState": "open", "backendAlive": False, "browserWindowAlive": True},
+        {"observedState": "open", "backendAlive": True, "browserWindowAlive": False},
+    ],
+)
+def test_restart_build_preflight_does_not_depend_on_runtime_health(observation):
+    assert daemon._restart_should_preflight_frontend_build(observation, args={}) is True
+    assert (
+        daemon._restart_should_preflight_frontend_build(
+            observation,
+            args={"skipFrontendBuildPreflight": True},
+        )
+        is False
+    )
+
+
 def test_restart_build_preflight_restores_missing_frontend_dependencies(monkeypatch):
     calls: list[list[str]] = []
     events: list[tuple[str, dict]] = []
