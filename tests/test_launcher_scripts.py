@@ -4171,6 +4171,7 @@ foreach ($name in @(
 $script:NoBrowser = $false
 $script:launcherControlUrl = "http://127.0.0.1:8765"
 $script:openCalls = 0
+$script:headlessOpenCalls = 0
 $script:releaseCalls = 0
 $script:sourceCurrent = $true
 $script:events = @()
@@ -4179,7 +4180,13 @@ function Acquire-LauncherMutex {}
 function Release-LauncherMutex { $script:releaseCalls += 1 }
 function Repair-StaleLauncherControlState {}
 function Sync-LauncherEndpointFromState {}
-function Open-LauncherControlSurface { $script:openCalls += 1 }
+function Open-LauncherControlSurface {
+    param([switch]$Headless)
+    $script:openCalls += 1
+    if ($Headless) {
+        $script:headlessOpenCalls += 1
+    }
+}
 function Get-State {
     return [pscustomobject]@{
         launcherBackendPid = 111
@@ -4227,6 +4234,9 @@ $script:sourceCurrent = $false
 Ensure-LauncherControlSurfaceForRuntimeCommand -RequestedAction "stop"
 if ($script:openCalls -ne 1) {
     throw "Stale control source should fall back to full Open-LauncherControlSurface."
+}
+if ($script:headlessOpenCalls -ne 1) {
+    throw "Runtime commands should restore a stale control backend without opening its browser window."
 }
 if ($script:releaseCalls -ne 2) {
     throw "Launcher mutex was not released after fallback path."
@@ -5352,8 +5362,6 @@ if ($parseErrors -and $parseErrors.Count -gt 0) {
 
 foreach ($functionName in @(
     "Get-ObjectPropertyValue",
-    "Get-LauncherStatusActiveWorkCount",
-    "Get-LauncherRestartActiveWorkProbeUrls",
     "Test-LauncherRestartActiveWorkBlocked"
 )) {
     $functionAst = $ast.Find({
@@ -5373,20 +5381,14 @@ $script:notes = @()
 $script:events = @()
 function Test-WebHealthy { return $true }
 function Test-LauncherControlHealthy { return $true }
+function Get-LauncherLocalActiveWorkRunCount { return 1 }
 function Write-Note { param([string]$Message) $script:notes += $Message }
 function Write-LauncherControlLog {
     param([string]$Event, [string]$Message, [string]$Level = "info", [hashtable]$Fields = @{})
     $script:events += ,@{ event = $Event; message = $Message; level = $Level; fields = $Fields }
 }
 function Invoke-WebRequest {
-    param([string]$Uri, [int]$TimeoutSec, [switch]$UseBasicParsing)
-    if ($Uri -ne "http://127.0.0.1:8765/api/launcher/status") {
-        throw "unexpected status uri $Uri"
-    }
-    return [pscustomobject]@{
-        StatusCode = 200
-        Content = '{"lifecycleProof":{"activeWorkRuns":{"count":1,"items":[{"kind":"chat_turn","runId":"chat-live"}]}}}'
-    }
+    throw "restart guard should not query HTTP status."
 }
 
 $blocked = Test-LauncherRestartActiveWorkBlocked
@@ -5435,6 +5437,10 @@ if ($null -eq $functionAst) {
 $script:url = "http://127.0.0.1:8000"
 function Test-LauncherControlHealthy { return $false }
 function Test-WebHealthy { return $false }
+function Get-LauncherLocalActiveWorkRunCount { return 0 }
+function Write-LauncherControlLog {
+    param([string]$Event, [string]$Message, [string]$Level = "info", [hashtable]$Fields = @{})
+}
 function Invoke-WebRequest { throw "status endpoint should not be queried when backend is unhealthy." }
 
 if (Test-LauncherRestartActiveWorkBlocked) {
@@ -5477,8 +5483,6 @@ foreach ($functionName in @(
     "Get-ObjectPropertyValue",
     "Test-LauncherWorkRunStatusBlocksLifecycle",
     "Get-LauncherLocalActiveWorkRunCount",
-    "Get-LauncherStatusActiveWorkCount",
-    "Get-LauncherRestartActiveWorkProbeUrls",
     "Test-LauncherRestartActiveWorkBlocked"
 )) {
     $functionAst = $ast.Find({
@@ -5519,9 +5523,9 @@ function Invoke-WebRequest {
 $blocked = Test-LauncherRestartActiveWorkBlocked
 if (-not $blocked) { throw "healthy backend with failed probe and local active work should block restart." }
 if ($script:notes[0] -notmatch "有进行中的任务，无法重启 Vibelution") { throw "probe failure block message was not user-readable." }
-if ($script:events[0].event -ne "launcher.restart.blocked_active_work_probe_failed") { throw "probe failure block event was not logged." }
-if ($script:events[0].fields.error -notmatch "status timeout") { throw "probe failure error was not logged." }
-if ($script:events[0].fields.local_active_work_count -ne 1) { throw "local active work count was not logged." }
+if ($script:events[0].event -ne "launcher.restart.blocked_active_work") { throw "local active-work block event was not logged." }
+if ($script:events[0].fields.active_work_count -ne 1) { throw "local active work count was not logged." }
+if ($script:events[0].fields.source -ne "local_work_runs") { throw "local active-work source was not logged." }
 Write-Output "ok"
 """,
     )
@@ -5554,8 +5558,6 @@ foreach ($functionName in @(
     "Get-ObjectPropertyValue",
     "Test-LauncherWorkRunStatusBlocksLifecycle",
     "Get-LauncherLocalActiveWorkRunCount",
-    "Get-LauncherStatusActiveWorkCount",
-    "Get-LauncherRestartActiveWorkProbeUrls",
     "Test-LauncherRestartActiveWorkBlocked"
 )) {
     $functionAst = $ast.Find({
@@ -5595,8 +5597,8 @@ function Invoke-WebRequest {
 $blocked = Test-LauncherRestartActiveWorkBlocked
 if ($blocked) { throw "healthy backend with failed probe but clear local work should not block restart." }
 if ($script:notes.Count -ne 0) { throw "clear local work should not show active-work block note." }
-if ($script:events[0].event -ne "launcher.restart.active_work_probe_failed_local_clear") { throw "local clear event was not logged." }
-if ($script:events[0].fields.error -notmatch "status timeout") { throw "probe failure error was not logged." }
+if ($script:events[0].event -ne "launcher.restart.active_work_local_clear") { throw "local clear event was not logged." }
+if ($script:events[0].fields.source -ne "local_work_runs") { throw "local clear source was not logged." }
 Write-Output "ok"
 """,
     )
@@ -5629,8 +5631,6 @@ foreach ($functionName in @(
     "Get-ObjectPropertyValue",
     "Test-LauncherWorkRunStatusBlocksLifecycle",
     "Get-LauncherLocalActiveWorkRunCount",
-    "Get-LauncherStatusActiveWorkCount",
-    "Get-LauncherRestartActiveWorkProbeUrls",
     "Test-LauncherRestartActiveWorkBlocked"
 )) {
     $functionAst = $ast.Find({
@@ -5671,8 +5671,8 @@ function Invoke-WebRequest {
 $blocked = Test-LauncherRestartActiveWorkBlocked
 if ($blocked) { throw "stale source_collection_run local snapshot should not block restart when launcher status probes fail." }
 if ($script:notes.Count -ne 0) { throw "stale source_collection_run should not show active-work block note." }
-if ($script:events[0].event -ne "launcher.restart.active_work_probe_failed_local_clear") { throw "local clear event was not logged." }
-if ($script:events[0].fields.error -notmatch "status timeout") { throw "probe failure error was not logged." }
+if ($script:events[0].event -ne "launcher.restart.active_work_local_clear") { throw "local clear event was not logged." }
+if ($script:events[0].fields.source -ne "local_work_runs") { throw "local clear source was not logged." }
 Write-Output "ok"
 """,
     )
