@@ -17,6 +17,49 @@ from core.web.services import session_service
 from core.web.services import agent_directory_service
 
 
+def test_session_event_cache_coalesces_concurrent_misses(monkeypatch):
+    session_id = "session-singleflight"
+    loader_started = threading.Event()
+    second_signature_computed = threading.Event()
+    release_loader = threading.Event()
+    signature_calls = 0
+    load_calls = 0
+    call_lock = threading.Lock()
+
+    def signature(_session_id):
+        nonlocal signature_calls
+        with call_lock:
+            signature_calls += 1
+            if signature_calls >= 2:
+                second_signature_computed.set()
+        return ("ledger.jsonl", 1, 1, 1)
+
+    def load_events(_project_root, _session_id):
+        nonlocal load_calls
+        with call_lock:
+            load_calls += 1
+        loader_started.set()
+        assert release_loader.wait(timeout=5)
+        return ["event-1"]
+
+    monkeypatch.setattr(session_service, "_session_conversation_events_signature", signature)
+    monkeypatch.setattr(session_service, "load_conversation_events", load_events)
+    session_service._invalidate_session_conversation_events_cache(session_id)
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        first = executor.submit(session_service._load_session_conversation_events_cached, session_id)
+        assert loader_started.wait(timeout=5)
+        second = executor.submit(session_service._load_session_conversation_events_cached, session_id)
+        assert second_signature_computed.wait(timeout=5)
+        release_loader.set()
+
+        assert first.result(timeout=5) == ["event-1"]
+        assert second.result(timeout=5) == ["event-1"]
+
+    assert load_calls == 1
+    session_service._invalidate_session_conversation_events_cache(session_id)
+
+
 def test_active_session_summary_normalizes_only_the_active_conversation(tmp_path, monkeypatch):
     save_chat_state(
         tmp_path,

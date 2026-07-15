@@ -192,8 +192,10 @@ _SESSION_LIST_INFLIGHT_STALE_SECONDS = 2.0
 _SESSION_LIST_INFLIGHT_WAIT_SECONDS = 0.2
 _SESSION_LIST_CACHE: dict[str, Any] = {}
 _SESSION_CONVERSATION_EVENTS_CACHE_LOCK = threading.Lock()
+_SESSION_CONVERSATION_EVENTS_CACHE_CONDITION = threading.Condition(_SESSION_CONVERSATION_EVENTS_CACHE_LOCK)
 _SESSION_CONVERSATION_EVENTS_CACHE_MAX_ENTRIES = 64
 _SESSION_CONVERSATION_EVENTS_CACHE: dict[str, dict[str, Any]] = {}
+_SESSION_CONVERSATION_EVENTS_INFLIGHT: dict[str, object] = {}
 _SESSION_DETAIL_MESSAGE_WINDOW_MAX_LIMIT = 200
 _AGENT_DIRECTORY_STUB_HIDDEN_TEAM_SOURCES = {
     "ai_search",
@@ -510,34 +512,51 @@ def _prune_session_conversation_events_cache_locked() -> None:
 
 def _invalidate_session_conversation_events_cache(session_id: str = "") -> None:
     normalized_session_id = str(session_id or "").strip()
-    with _SESSION_CONVERSATION_EVENTS_CACHE_LOCK:
+    with _SESSION_CONVERSATION_EVENTS_CACHE_CONDITION:
         if normalized_session_id:
             _SESSION_CONVERSATION_EVENTS_CACHE.pop(normalized_session_id, None)
         else:
             _SESSION_CONVERSATION_EVENTS_CACHE.clear()
+        _SESSION_CONVERSATION_EVENTS_CACHE_CONDITION.notify_all()
 
 
 def _load_session_conversation_events_cached(session_id: str) -> list[Any]:
     normalized_session_id = str(session_id or "").strip()
     if not normalized_session_id:
         return []
-    signature = _session_conversation_events_signature(normalized_session_id)
-    now = _perf_counter()
-    with _SESSION_CONVERSATION_EVENTS_CACHE_LOCK:
-        cached = _SESSION_CONVERSATION_EVENTS_CACHE.get(normalized_session_id)
-        if cached and cached.get("signature") == signature:
-            cached["last_access"] = now
-            return list(cached.get("events") or ())
+    owner = object()
+    while True:
+        signature = _session_conversation_events_signature(normalized_session_id)
+        now = _perf_counter()
+        with _SESSION_CONVERSATION_EVENTS_CACHE_CONDITION:
+            cached = _SESSION_CONVERSATION_EVENTS_CACHE.get(normalized_session_id)
+            if cached and cached.get("signature") == signature:
+                cached["last_access"] = now
+                return list(cached.get("events") or ())
+            if normalized_session_id not in _SESSION_CONVERSATION_EVENTS_INFLIGHT:
+                _SESSION_CONVERSATION_EVENTS_INFLIGHT[normalized_session_id] = owner
+                break
+            _SESSION_CONVERSATION_EVENTS_CACHE_CONDITION.wait()
 
-    events = list(load_conversation_events(PROJECT_ROOT, normalized_session_id) or [])
-    with _SESSION_CONVERSATION_EVENTS_CACHE_LOCK:
-        _SESSION_CONVERSATION_EVENTS_CACHE[normalized_session_id] = {
-            "signature": signature,
-            "events": tuple(events),
-            "last_access": now,
-        }
-        _prune_session_conversation_events_cache_locked()
-    return list(events)
+    try:
+        events = list(load_conversation_events(PROJECT_ROOT, normalized_session_id) or [])
+    except Exception:
+        with _SESSION_CONVERSATION_EVENTS_CACHE_CONDITION:
+            if _SESSION_CONVERSATION_EVENTS_INFLIGHT.get(normalized_session_id) is owner:
+                _SESSION_CONVERSATION_EVENTS_INFLIGHT.pop(normalized_session_id, None)
+            _SESSION_CONVERSATION_EVENTS_CACHE_CONDITION.notify_all()
+        raise
+    with _SESSION_CONVERSATION_EVENTS_CACHE_CONDITION:
+        if _SESSION_CONVERSATION_EVENTS_INFLIGHT.get(normalized_session_id) is owner:
+            _SESSION_CONVERSATION_EVENTS_CACHE[normalized_session_id] = {
+                "signature": signature,
+                "events": tuple(events),
+                "last_access": now,
+            }
+            _SESSION_CONVERSATION_EVENTS_INFLIGHT.pop(normalized_session_id, None)
+            _prune_session_conversation_events_cache_locked()
+        _SESSION_CONVERSATION_EVENTS_CACHE_CONDITION.notify_all()
+        return list(events)
 
 
 def load_session_conversation_events_snapshot(session_id: str) -> list[Any]:
