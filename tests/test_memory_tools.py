@@ -306,6 +306,17 @@ class TestMemoryToolsIntegration:
 
         assert "已创建 2 个任务" in result
 
+    def test_task_create_tool_accepts_tuple_payload(self):
+        result = task_create_tool(
+            task_list=(
+                {"id": "read_context", "description": "读取本轮 compact 上下文"},
+                {"id": "write_candidate_leads", "description": "回写新资料"},
+            ),
+            goal="资料寻找阶段闭环",
+        )
+
+        assert "已创建 2 个任务" in result
+
     def test_task_update_tool_coerces_string_task_id_and_bool(self):
         task_create_tool(
             task_list=[{"description": "验证当前工作区状态"}],
