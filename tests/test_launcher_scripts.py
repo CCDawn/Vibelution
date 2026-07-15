@@ -20,6 +20,7 @@ DESKTOP_ENTRY_VBS = PROJECT_ROOT / "scripts" / "vibelution_desktop_entry.vbs"
 DESKTOP_ENTRY_PY = PROJECT_ROOT / "scripts" / "vibelution_desktop_entry.py"
 NATIVE_ENTRY_SOURCE = PROJECT_ROOT / "scripts" / "windows_launcher_entry" / "VibelutionLauncher.cs"
 NATIVE_ENTRY_BUILD_SCRIPT = PROJECT_ROOT / "scripts" / "windows_launcher_entry" / "build_vibelution_launcher_entry.ps1"
+PYTHON_LAUNCHER_SCRIPT = PROJECT_ROOT / "scripts" / "vibelution_launcher.py"
 
 pytestmark = [pytest.mark.slow, pytest.mark.serial]
 
@@ -181,6 +182,104 @@ def _load_desktop_entry_py():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def _load_python_launcher():
+    module_name = f"vibelution_launcher_under_test_{time.time_ns()}"
+    spec = importlib.util.spec_from_file_location(module_name, PYTHON_LAUNCHER_SCRIPT)
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_python_launcher_stop_reconciles_stale_state_with_real_project_port_owner(monkeypatch):
+    launcher = _load_python_launcher()
+    terminated: list[int] = []
+    written: list[dict] = []
+    monkeypatch.setattr(launcher, "_read_state", lambda: {"backendPid": 111, "backendPort": 8000, "browserWindowPid": 0})
+    monkeypatch.setattr(launcher, "_listening_pid_for_port", lambda port: 222 if not terminated else 0)
+    monkeypatch.setattr(launcher, "_is_project_workbench_pid", lambda pid: pid == 222)
+    monkeypatch.setattr(launcher, "_terminate_pid", lambda pid: terminated.append(pid))
+    monkeypatch.setattr(launcher, "_wait_for_port_release", lambda port: True)
+    monkeypatch.setattr(launcher, "_write_state", lambda state: written.append(state))
+
+    launcher._stop_backend()
+
+    assert {111, 222} <= set(terminated)
+    assert written[-1]["backendPid"] == 0
+
+
+def test_python_launcher_start_rejects_an_existing_port_owner(monkeypatch):
+    launcher = _load_python_launcher()
+    monkeypatch.setattr(launcher, "_read_state", lambda: {})
+    monkeypatch.setattr(launcher, "_listening_pid_for_port", lambda port: 222)
+
+    with pytest.raises(RuntimeError, match="already occupied by pid 222"):
+        launcher._start_backend(8000, "127.0.0.1", no_browser=True)
+
+
+def test_python_launcher_stop_preserves_state_when_a_foreign_port_owner_remains(monkeypatch):
+    launcher = _load_python_launcher()
+    written: list[dict] = []
+    monkeypatch.setattr(launcher, "_read_state", lambda: {"backendPid": 111, "backendPort": 8000})
+    monkeypatch.setattr(launcher, "_listening_pid_for_port", lambda port: 333)
+    monkeypatch.setattr(launcher, "_is_project_workbench_pid", lambda pid: False)
+    monkeypatch.setattr(launcher, "_terminate_pid", lambda pid: None)
+    monkeypatch.setattr(launcher, "_wait_for_port_release", lambda port: False)
+    monkeypatch.setattr(launcher, "_write_state", lambda state: written.append(state))
+
+    with pytest.raises(RuntimeError, match="state was preserved"):
+        launcher._stop_backend()
+
+    assert written == []
+
+
+def test_python_launcher_does_not_accept_a_healthy_listener_owned_by_another_process(monkeypatch):
+    launcher = _load_python_launcher()
+
+    class Process:
+        pid = 111
+
+        @staticmethod
+        def poll():
+            return None
+
+    clock = iter((0.0, 0.0, 1.0))
+    monkeypatch.setattr(launcher.time, "monotonic", lambda: next(clock))
+    monkeypatch.setattr(launcher.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(launcher, "_listening_pid_for_port", lambda port: 222)
+    monkeypatch.setattr(launcher, "_pid_belongs_to_process_tree", lambda owner_pid, root_pid: False)
+    monkeypatch.setattr(launcher, "_backend_healthy", lambda port, host: True)
+
+    assert launcher._wait_for_started_backend(Process(), 8000, "127.0.0.1", timeout_seconds=0.1) == 0
+
+
+def test_python_launcher_rebuilds_when_sources_are_newer_than_dist(monkeypatch, tmp_path):
+    launcher = _load_python_launcher()
+    web_dir = tmp_path / "web"
+    source = web_dir / "src" / "App.tsx"
+    dist_index = web_dir / "dist" / "index.html"
+    node_modules = web_dir / "node_modules"
+    source.parent.mkdir(parents=True)
+    dist_index.parent.mkdir(parents=True)
+    node_modules.mkdir(parents=True)
+    source.write_text("export {};", encoding="utf-8")
+    dist_index.write_text("old build", encoding="utf-8")
+    now = time.time()
+    os.utime(dist_index, (now - 10, now - 10))
+    os.utime(source, (now, now))
+    commands: list[tuple[list[str], str]] = []
+    monkeypatch.setattr(launcher, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(launcher, "_frontend_package_manager", lambda: "npm")
+    monkeypatch.setattr(launcher, "_frontend_build_commands", lambda package_manager, directory: [(["npm", "run", "build"], "npm build")])
+    monkeypatch.setattr(launcher, "_run_checked", lambda args, cwd, label: commands.append((args, label)))
+    monkeypatch.setattr(launcher, "_append_frontend_build_log", lambda payload: None)
+
+    launcher._ensure_frontend_build()
+
+    assert commands == [(["npm", "run", "build"], "npm build")]
 
 
 def test_web_workbench_access_log_filter_suppresses_polling_noise_only():

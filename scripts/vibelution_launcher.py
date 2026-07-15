@@ -9,6 +9,7 @@ import ctypes
 import ctypes.wintypes
 import json
 import os
+import re
 import shutil
 import signal
 import socket
@@ -32,6 +33,7 @@ FRONTEND_BUILD_LOG_PATH = RUNTIME_DIR / "frontend-build.log"
 WORKBENCH_BROWSER_PROFILE_DIR = RUNTIME_DIR / "workbench-app-profile"
 LAUNCHER_ICON_PATH = PROJECT_ROOT / "assets" / "icons" / "vibelution.ico"
 DEFAULT_HOST = "127.0.0.1"
+DEFAULT_PORT = 8000
 TRUSTED_WEB_HOSTS_ENV = "VIBELUTION_TRUSTED_WEB_HOSTS"
 FRONTEND_PACKAGE_MANAGER_ENV = "VIBELUTION_FRONTEND_PM"
 INTERNAL_LAUNCHER_ENV = "VIBELUTION_RUNTIME_MANAGER_INTERNAL_LAUNCHER"
@@ -114,6 +116,97 @@ def _wait_for_health(port: int, host: str, timeout_seconds: float = 45.0) -> boo
             return True
         time.sleep(0.35)
     return False
+
+
+def _listening_pid_for_port(port: int) -> int:
+    """Return the listening TCP owner without trusting launcher state."""
+
+    if int(port or 0) <= 0:
+        return 0
+    try:
+        import psutil
+
+        for connection in psutil.net_connections(kind="tcp"):
+            local = getattr(connection, "laddr", None)
+            if not local or int(getattr(local, "port", 0) or 0) != int(port):
+                continue
+            if str(getattr(connection, "status", "") or "").upper() != "LISTEN":
+                continue
+            pid = int(getattr(connection, "pid", 0) or 0)
+            if pid > 0:
+                return pid
+    except Exception:
+        pass
+    if os.name != "nt":
+        return 0
+    try:
+        result = subprocess.run(
+            ["netstat", "-ano", "-p", "tcp"],
+            capture_output=True,
+            text=True,
+            timeout=3,
+            check=False,
+            creationflags=_windows_creation_flags(),
+            startupinfo=_hidden_startup_info(),
+        )
+    except (OSError, subprocess.SubprocessError):
+        return 0
+    pattern = re.compile(rf"^\s*TCP\s+\S+:{int(port)}\s+\S+\s+LISTENING\s+(\d+)\s*$", re.IGNORECASE)
+    for line in str(result.stdout or "").splitlines():
+        match = pattern.match(line)
+        if match:
+            return int(match.group(1))
+    return 0
+
+
+def _pid_belongs_to_process_tree(pid: int, root_pid: int) -> bool:
+    if pid <= 0 or root_pid <= 0:
+        return False
+    if pid == root_pid:
+        return True
+    try:
+        import psutil
+
+        process = psutil.Process(pid)
+        return any(int(parent.pid) == root_pid for parent in process.parents())
+    except Exception:
+        return False
+
+
+def _is_project_workbench_pid(pid: int) -> bool:
+    if pid <= 0:
+        return False
+    try:
+        import psutil
+
+        command_line = " ".join(psutil.Process(pid).cmdline())
+    except Exception:
+        return False
+    expected_script = str(PROJECT_ROOT / "scripts" / "web_workbench.py")
+    return expected_script.lower() in command_line.lower()
+
+
+def _wait_for_port_release(port: int, timeout_seconds: float = 8.0) -> bool:
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        if _listening_pid_for_port(port) <= 0:
+            return True
+        time.sleep(0.2)
+    return _listening_pid_for_port(port) <= 0
+
+
+def _wait_for_started_backend(process: subprocess.Popen[bytes], port: int, host: str, timeout_seconds: float = 45.0) -> int:
+    """Wait for health only when this launch owns the listening port."""
+
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        if process.poll() is not None:
+            return 0
+        owner_pid = _listening_pid_for_port(port)
+        if owner_pid > 0 and _pid_belongs_to_process_tree(owner_pid, int(process.pid)) and _backend_healthy(port, host):
+            return owner_pid
+        time.sleep(0.35)
+    return 0
 
 
 def _windows_creation_flag_names() -> tuple[str, ...]:
@@ -650,7 +743,7 @@ def _ensure_frontend_build() -> None:
     node_modules = web_dir / "node_modules"
     needs_install = not node_modules.exists()
     dist_index = web_dir / "dist" / "index.html"
-    needs_build = not dist_index.exists()
+    needs_build = not dist_index.exists() or _frontend_sources_are_newer_than_dist(web_dir, dist_index)
     _append_frontend_build_log(
         {
             "event": "frontend_build.ensure",
@@ -670,9 +763,35 @@ def _ensure_frontend_build() -> None:
             _run_checked(build_command, cwd=web_dir, label=build_label)
 
 
+def _frontend_sources_are_newer_than_dist(web_dir: Path, dist_index: Path) -> bool:
+    if not dist_index.exists():
+        return True
+    try:
+        newest_source_mtime = 0.0
+        for source in (web_dir / "src", web_dir / "public"):
+            if source.is_dir():
+                newest_source_mtime = max(
+                    newest_source_mtime,
+                    *(path.stat().st_mtime for path in source.rglob("*") if path.is_file()),
+                )
+        for name in ("index.html", "package.json", "package-lock.json", "tsconfig.json", "vite.config.ts"):
+            candidate = web_dir / name
+            if candidate.is_file():
+                newest_source_mtime = max(newest_source_mtime, candidate.stat().st_mtime)
+        return newest_source_mtime > dist_index.stat().st_mtime
+    except OSError:
+        return True
+
+
 def _start_backend(port: int, host: str, *, no_browser: bool) -> dict:
     RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
     previous_state = _read_state()
+    existing_owner_pid = _listening_pid_for_port(port)
+    if existing_owner_pid > 0:
+        raise RuntimeError(
+            f"Workbench port {int(port)} is already occupied by pid {existing_owner_pid}; "
+            "refusing to treat an existing service as this launch."
+        )
     _ensure_frontend_build()
     stdout = BACKEND_STDOUT_PATH.open("ab")
     stderr = BACKEND_STDERR_PATH.open("ab")
@@ -701,9 +820,10 @@ def _start_backend(port: int, host: str, *, no_browser: bool) -> dict:
     )
     stdout.close()
     stderr.close()
-    if not _wait_for_health(port, host):
+    backend_pid = _wait_for_started_backend(process, port, host)
+    if backend_pid <= 0:
         _terminate_pid(process.pid)
-        raise RuntimeError(f"Backend did not become healthy at {_health_url(port, host)}.")
+        raise RuntimeError(f"New backend did not own a healthy listener at {_health_url(port, host)}.")
     url = f"http://{host}:{int(port)}"
     browser_info: dict[str, object] = {
         "browserManaged": False,
@@ -727,7 +847,7 @@ def _start_backend(port: int, host: str, *, no_browser: bool) -> dict:
         "phase": "steady",
         "sessionRole": "workbench",
         "sessionId": str(uuid.uuid4()),
-        "backendPid": int(process.pid),
+        "backendPid": int(backend_pid),
         "backendLaunchPid": int(process.pid),
         "browserLaunchPid": int(browser_info["browserLaunchPid"]),
         "browserWindowPid": int(browser_info["browserWindowPid"]),
@@ -780,9 +900,22 @@ def _terminate_pid(pid: int) -> None:
 def _stop_backend() -> dict:
     state = _read_state()
     pid = int(state.get("backendPid") or 0)
+    port = int(state.get("backendPort") or state.get("port") or DEFAULT_PORT)
     browser_pid = int(state.get("browserWindowPid") or state.get("browserLaunchPid") or 0)
-    _terminate_pid(pid)
+    port_owner_pid = _listening_pid_for_port(port)
+    managed_pids: set[int] = set()
+    if pid > 0:
+        managed_pids.add(pid)
+    if port_owner_pid > 0 and _is_project_workbench_pid(port_owner_pid):
+        managed_pids.add(port_owner_pid)
+    for managed_pid in sorted(managed_pids, reverse=True):
+        _terminate_pid(managed_pid)
     _terminate_pid(browser_pid)
+    if _listening_pid_for_port(port) > 0 and not _wait_for_port_release(port):
+        owner_pid = _listening_pid_for_port(port)
+        raise RuntimeError(
+            f"Workbench stop left port {port} occupied by pid {owner_pid}; state was preserved for recovery."
+        )
     next_state = {
         **state,
         "desiredState": "closed",
