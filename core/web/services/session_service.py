@@ -5895,6 +5895,14 @@ def submit_session_message(
             else _active_skill_contract_from_conversation(conversation)
         )
         persisted_message_metadata = dict(message_metadata or {}) if isinstance(message_metadata, dict) else {}
+        if _is_continue_request(message) and not str(persisted_message_metadata.get("kind") or "").strip():
+            inherited_stage_task_metadata = _source_collection_stage_task_continuation_metadata(previous_messages)
+            if inherited_stage_task_metadata:
+                persisted_message_metadata = {
+                    **inherited_stage_task_metadata,
+                    **persisted_message_metadata,
+                    "sourceCollectionStageContinuation": True,
+                }
         if normalized_client_submission_id:
             persisted_message_metadata["clientSubmissionId"] = normalized_client_submission_id
         persisted_message_metadata.setdefault("turnId", turn_control.turn_id)
@@ -13128,6 +13136,45 @@ def _source_collection_stage_task_context_metadata(context: dict[str, Any]) -> d
     }
 
 
+_SOURCE_COLLECTION_STAGE_TASK_CONTINUATION_METADATA_KEYS = (
+    "kind",
+    "sourceSurface",
+    "teamId",
+    "runId",
+    "stageId",
+    "agentId",
+    "agentRole",
+    "sourceCollectionStageTaskId",
+    "sourceCollectionStageTaskKey",
+    "writebackContract",
+    "taskToolRequired",
+    "taskChecklist",
+)
+
+
+def _source_collection_stage_task_continuation_metadata(messages: list[dict[str, Any]]) -> dict[str, Any]:
+    """Carry a stage-task contract across a bounded chain of explicit continue turns."""
+
+    for message in reversed(list(messages or [])):
+        if not isinstance(message, dict) or str(message.get("role") or "").strip().lower() != "user":
+            continue
+        metadata = message.get("metadata") if isinstance(message.get("metadata"), dict) else {}
+        if str(metadata.get("kind") or "").strip() == SOURCE_COLLECTION_STAGE_SESSION_TASK_KIND:
+            team_id = str(metadata.get("teamId") or "").strip()
+            task_id = str(metadata.get("sourceCollectionStageTaskId") or "").strip()
+            if team_id and task_id:
+                return {
+                    key: copy.deepcopy(metadata[key])
+                    for key in _SOURCE_COLLECTION_STAGE_TASK_CONTINUATION_METADATA_KEYS
+                    if key in metadata
+                }
+            return {}
+        if _is_continue_request(message.get("content")):
+            continue
+        return {}
+    return {}
+
+
 def _session_task_workspace_for_turn(
     context: dict[str, Any],
     *,
@@ -13164,9 +13211,12 @@ def _session_context_allows_internal_auto_continue(context: dict[str, Any]) -> b
     explicit = _normalize_optional_bool(context.get("allow_internal_auto_continue"))
     if explicit is not None:
         return bool(explicit)
-    if str(context.get("user_message_source") or "").strip() != "agent_inbox":
+    if not _source_collection_stage_task_context_metadata(context):
         return False
-    return bool(_source_collection_stage_task_context_metadata(context))
+    if str(context.get("user_message_source") or "").strip() == "agent_inbox":
+        return True
+    metadata = context.get("message_metadata") if isinstance(context.get("message_metadata"), dict) else {}
+    return metadata.get("sourceCollectionStageContinuation") is True
 
 
 def _session_context_internal_auto_continue_max_turns(context: dict[str, Any]) -> int:
