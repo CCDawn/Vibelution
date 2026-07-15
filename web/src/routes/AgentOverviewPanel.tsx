@@ -93,42 +93,29 @@ function AgentOverviewIconView({ icon }: { icon: AgentOverviewIcon }) {
   return <Icon size={16} />;
 }
 
+const TECHNICAL_FACT_IDS = new Set(["system-ids", "tools", "memory", "territory"]);
+
+function FactGrid({ facts }: { facts: AgentOverviewFact[] }) {
+  return (
+    <div className={styles.factGrid}>
+      {facts.map((fact) => (
+        <section key={fact.id} title={fact.title}>
+          <AgentOverviewIconView icon={fact.icon} />
+          <span>{fact.label}</span>
+          <strong>{fact.value}</strong>
+        </section>
+      ))}
+    </div>
+  );
+}
+
 export function AgentOverviewPanel({ facts, territory, modeMembership, policies }: AgentOverviewPanelProps) {
+  const primaryFacts = facts.filter((fact) => !TECHNICAL_FACT_IDS.has(fact.id));
+  const technicalFacts = facts.filter((fact) => TECHNICAL_FACT_IDS.has(fact.id));
+
   return (
     <>
-      <div className={styles.factGrid}>
-        {facts.map((fact) => (
-          <section key={fact.id} title={fact.title}>
-            <AgentOverviewIconView icon={fact.icon} />
-            <span>{fact.label}</span>
-            <strong>{fact.value}</strong>
-          </section>
-        ))}
-      </div>
-
-      <section className={styles.detailSection}>
-        <div className={styles.panelHeader}>
-          <div>
-            <p className={styles.panelEyebrow}>{territory.eyebrow}</p>
-            <h3>{territory.title}</h3>
-          </div>
-          <FolderTree size={16} />
-        </div>
-        <div className={styles.boundarySummaryGrid}>
-          <span>
-            <strong>{territory.privateLabel}</strong>
-            <small>{territory.privateValue}</small>
-          </span>
-          <span>
-            <strong>{territory.sharedLabel}</strong>
-            <small>{territory.sharedValue}</small>
-          </span>
-          <span>
-            <strong>{territory.writeBoundaryLabel}</strong>
-            <small>{territory.writeBoundaryValue}</small>
-          </span>
-        </div>
-      </section>
+      <FactGrid facts={primaryFacts} />
 
       <section className={styles.detailSection}>
         <div className={styles.panelHeader}>
@@ -154,6 +141,40 @@ export function AgentOverviewPanel({ facts, territory, modeMembership, policies 
           </div>
         ))}
       </section>
+
+      <details className={styles.technicalDetails}>
+        <summary>
+          <FolderTree size={15} />
+          <span>技术信息</span>
+          <small>工作空间、策略与系统标识</small>
+        </summary>
+        <div className={styles.technicalContent}>
+          <FactGrid facts={technicalFacts} />
+          <section className={styles.detailSection}>
+            <div className={styles.panelHeader}>
+              <div>
+                <p className={styles.panelEyebrow}>{territory.eyebrow}</p>
+                <h3>{territory.title}</h3>
+              </div>
+              <FolderTree size={16} />
+            </div>
+            <div className={styles.boundarySummaryGrid}>
+              <span>
+                <strong>{territory.privateLabel}</strong>
+                <small>{territory.privateValue}</small>
+              </span>
+              <span>
+                <strong>{territory.sharedLabel}</strong>
+                <small>{territory.sharedValue}</small>
+              </span>
+              <span>
+                <strong>{territory.writeBoundaryLabel}</strong>
+                <small>{territory.writeBoundaryValue}</small>
+              </span>
+            </div>
+          </section>
+        </div>
+      </details>
     </>
   );
 }
