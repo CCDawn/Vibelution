@@ -15,6 +15,7 @@
 设计原则：详细档案只在 Agent 主动读取时才加载，不增加常规运行的 Token 负担。
 """
 
+import ast
 import json
 import os
 import re
@@ -475,6 +476,11 @@ def _normalize_task_list_input(task_list: Any) -> List[Dict[str, Any]]:
         raise TypeError("task_list 必须是任务对象列表")
     coerced: List[Dict[str, Any]] = []
     for item in normalized:
+        if isinstance(item, str):
+            try:
+                item = json.loads(item)
+            except json.JSONDecodeError:
+                item = ast.literal_eval(item)
         if not isinstance(item, dict):
             raise TypeError("task_list 中的每一项都必须是对象")
         coerced.append(item)
