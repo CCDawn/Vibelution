@@ -232,8 +232,8 @@ def test_research_team_sync_applies_challenge_cup_agent_tool_profiles(tmp_path, 
         assert agent["metadata"]["researchTeamRoleKey"] == role_key
         assert agent["toolPolicy"]["allowedTools"] == expected_policy["allowedTools"]
         assert agent["toolPolicy"]["preferredTools"] == expected_policy["preferredTools"]
-        assert agent["toolPolicy"]["writeScopes"] == []
-        assert agent["toolPolicy"]["mutationAccess"] == "none"
+        assert agent["toolPolicy"]["writeScopes"] == expected_policy["writeScopes"]
+        assert agent["toolPolicy"]["mutationAccess"] == expected_policy["mutationAccess"]
 
 
 def test_research_team_repair_applies_challenge_cup_agent_tool_profiles(tmp_path, monkeypatch):
@@ -267,8 +267,8 @@ def test_research_team_repair_applies_challenge_cup_agent_tool_profiles(tmp_path
     assert agent["roleKey"] == "source_finder"
     assert agent["toolPolicy"]["allowedTools"] == expected_policy["allowedTools"]
     assert agent["toolPolicy"]["preferredTools"] == expected_policy["preferredTools"]
-    assert agent["toolPolicy"]["mutationAccess"] == "none"
-    assert agent["toolPolicy"]["writeScopes"] == []
+    assert agent["toolPolicy"]["mutationAccess"] == expected_policy["mutationAccess"]
+    assert agent["toolPolicy"]["writeScopes"] == expected_policy["writeScopes"]
 
 
 def test_challenge_cup_research_team_uses_source_ingestor_for_governed_ingestion(tmp_path, monkeypatch):
