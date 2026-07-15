@@ -295,9 +295,66 @@ class ToolLifecycleBridge:
             )
         else:
             messages.append(AIMessage(content=result_str))
+        ToolLifecycleBridge._record_tool_result_binding(
+            tool_call=tool_call,
+            canonical_call=canonical_call,
+            canonical_result=canonical_result,
+            action=action,
+            model_message_written=bool(tool_call_id),
+        )
         if facts.truncated:
             _debug_logger.warning(f"[工具] {tool_call['name']} 结果过长，已截断", tag="TOOL")
         return canonical_result
+
+    @staticmethod
+    def _record_tool_result_binding(
+        *,
+        tool_call: Dict[str, Any],
+        canonical_call: Any,
+        canonical_result: Optional[CanonicalToolResult],
+        action: Optional[str],
+        model_message_written: bool,
+    ) -> None:
+        """Emit one content-free proof that a tool result entered model history."""
+        try:
+            from core.web.services.runtime_scene_service import record_runtime_scene_event
+
+            identity = getattr(canonical_result, "identity", None) or getattr(canonical_call, "identity", None)
+            fields: dict[str, Any] = {
+                "toolCallId": str(tool_call.get("id") or "").strip(),
+                "toolName": str(tool_call.get("name") or "").strip(),
+                "resultBound": bool(model_message_written),
+                "canonicalResult": canonical_result is not None,
+                "semanticStatus": str(
+                    getattr(canonical_result, "status", "")
+                    or ("completed" if model_message_written else "missing_call_id")
+                ).strip(),
+            }
+            if action:
+                fields["action"] = str(action).strip()
+            for source_name, field_name in (
+                ("session_id", "sessionId"),
+                ("turn_id", "turnId"),
+                ("invocation_id", "invocationId"),
+            ):
+                value = str(getattr(identity, source_name, "") or "").strip()
+                if value:
+                    fields[field_name] = value
+            record_runtime_scene_event(
+                "tool_lifecycle",
+                "result_binding",
+                "tool.result.bound",
+                message="Tool result binding to model history recorded.",
+                level="info" if model_message_written else "warning",
+                outcome="completed" if model_message_written else "missing_call_id",
+                fields=fields,
+                lifecycle=not model_message_written,
+            )
+        except Exception as exc:
+            _debug_logger.warning(
+                f"[工具生命周期] 记录工具结果绑定失败: {type(exc).__name__}: {exc}",
+                tag="TOOL",
+            )
 
     def execute_tools(
         self,

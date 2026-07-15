@@ -746,7 +746,16 @@ def _agent_turn_trace(records: list[dict[str, Any]], *, correlation: dict[str, A
             "currentStage": "unknown",
             "durationMs": 0,
             "llm": {"attemptCount": 0, "eventCount": 0, "retryCount": 0},
-            "tools": {"callCount": 0, "names": []},
+            "tools": {
+                "callCount": 0,
+                "names": [],
+                "resultBinding": {
+                    "observed": False,
+                    "boundCount": 0,
+                    "unboundCallCount": 0,
+                    "unknownCallIdCount": 0,
+                },
+            },
             "delivery": {"publishedDeltaCount": 0, "appliedDeltaCount": 0, "snapshotApplied": False},
             "stall": {"detected": False, "idleMs": 0, "lastEventCode": ""},
             "anomalies": ["identity_not_found"],
@@ -789,6 +798,38 @@ def _agent_turn_trace(records: list[dict[str, Any]], *, correlation: dict[str, A
         for record in tool_records
         if _agent_trace_tool_name(record["event"])
     })
+    binding_records = [
+        record
+        for record, code in zip(matched, event_codes)
+        if code == "tool.result.bound"
+    ]
+    tool_call_ids = {
+        str(
+            ((record["event"].get("fields") or {}) if isinstance(record["event"].get("fields"), dict) else {}).get("toolCallId")
+            or ""
+        ).strip()
+        for record in tool_records
+    }
+    tool_call_ids.discard("")
+    bound_call_ids = {
+        str(
+            ((record["event"].get("fields") or {}) if isinstance(record["event"].get("fields"), dict) else {}).get("toolCallId")
+            or ""
+        ).strip()
+        for record in binding_records
+        if bool(
+            ((record["event"].get("fields") or {}) if isinstance(record["event"].get("fields"), dict) else {}).get("resultBound")
+        )
+    }
+    bound_call_ids.discard("")
+    binding_observed = bool(binding_records)
+    unbound_call_ids = tool_call_ids - bound_call_ids if binding_observed else set()
+    result_binding = {
+        "observed": binding_observed,
+        "boundCount": len(bound_call_ids),
+        "unboundCallCount": len(unbound_call_ids),
+        "unknownCallIdCount": max(0, len(tool_records) - len(tool_call_ids)),
+    }
     published_delta_count = sum(code == "session.assistant_delta.published" for code in event_codes)
     applied_delta_count = sum(code == "browser.session_stream.assistant_delta_applied" for code in event_codes)
     snapshot_applied = any(code == "browser.session_stream.snapshot_applied" for code in event_codes)
@@ -799,6 +840,8 @@ def _agent_turn_trace(records: list[dict[str, Any]], *, correlation: dict[str, A
         anomalies.append("runtime_error")
     if status == "completed" and published_delta_count and not applied_delta_count:
         anomalies.append("delivery_evidence_missing")
+    if binding_observed and unbound_call_ids:
+        anomalies.append("tool_result_binding_missing")
     missing_identity = [
         key
         for key in ((boundary or {}).get("missingIdentity") or [])
@@ -822,7 +865,11 @@ def _agent_turn_trace(records: list[dict[str, Any]], *, correlation: dict[str, A
             "eventCount": len(llm_codes),
             "retryCount": sum("retry" in code for code in llm_codes),
         },
-        "tools": {"callCount": len(tool_records), "names": tool_names},
+        "tools": {
+            "callCount": len(tool_records),
+            "names": tool_names,
+            "resultBinding": result_binding,
+        },
         "delivery": {
             "publishedDeltaCount": published_delta_count,
             "appliedDeltaCount": applied_delta_count,

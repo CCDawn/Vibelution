@@ -152,7 +152,7 @@ def test_readonly_batch_gives_each_future_an_independent_context_copy():
     }
 
 
-def test_handle_tool_result_creates_one_canonical_result_and_one_compatibility_message():
+def test_handle_tool_result_creates_one_canonical_result_and_one_compatibility_message(monkeypatch):
     identity = CanonicalItemIdentity(
         session_id="session-1",
         turn_id="turn-1",
@@ -167,6 +167,16 @@ def test_handle_tool_result_creates_one_canonical_result_and_one_compatibility_m
         arguments={"path": "agent.py"},
     )
     messages: list[Any] = []
+    events: list[dict[str, Any]] = []
+    from core.web.services import runtime_scene_service
+
+    monkeypatch.setattr(
+        runtime_scene_service,
+        "record_runtime_scene_event",
+        lambda _component, _phase, event_code, **kwargs: events.append(
+            {"eventCode": event_code, **kwargs}
+        ),
+    )
 
     canonical_result = ToolLifecycleBridge.handle_tool_result(
         {
@@ -186,6 +196,25 @@ def test_handle_tool_result_creates_one_canonical_result_and_one_compatibility_m
     assert isinstance(messages[0], ToolMessage)
     assert messages[0].tool_call_id == "call-1"
     assert messages[0].additional_kwargs["canonical_tool_result"] is canonical_result
+    assert events == [
+        {
+            "eventCode": "tool.result.bound",
+            "message": "Tool result binding to model history recorded.",
+            "level": "info",
+            "outcome": "completed",
+            "lifecycle": False,
+            "fields": {
+                "toolCallId": "call-1",
+                "toolName": "read_file_tool",
+                "resultBound": True,
+                "canonicalResult": True,
+                "semanticStatus": "completed",
+                "sessionId": "session-1",
+                "turnId": "turn-1",
+                "invocationId": "invocation-1",
+            },
+        }
+    ]
 
 
 def test_handle_tool_result_uses_business_failure_semantics_for_canonical_status():
