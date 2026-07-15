@@ -13,6 +13,7 @@ from core.llm.client import (
     _default_responses_backend,
     _llm_provider_proxy_env,
     _ensure_no_proxy_for_local_base_url,
+    _retry_policy_max_attempts,
     llm_cancel_context,
 )
 from core.llm.errors import classify_exception
@@ -31,6 +32,13 @@ def make_config(**kwargs):
     kwargs.setdefault("llm.profiles.primary.tool_calling_mode", "auto")
     kwargs.setdefault("llm.profiles.primary.transport", "chat_completions")
     return isolated_settings_config(**kwargs)
+
+
+def test_compression_role_disables_provider_retry_amplification() -> None:
+    profile = SimpleNamespace(retry_policy=SimpleNamespace(max_attempts=5))
+
+    assert _retry_policy_max_attempts(profile) == 5
+    assert _retry_policy_max_attempts(profile, role="compression") == 1
 
 
 def supported_relay_chat_config():

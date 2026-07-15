@@ -326,7 +326,9 @@ def _publish_llm_status_event(status: str, **fields: Any) -> None:
         return
 
 
-def _retry_policy_max_attempts(profile: Any) -> int:
+def _retry_policy_max_attempts(profile: Any, *, role: str = "") -> int:
+    if str(role or "").strip().lower() == "compression":
+        return 1
     retry_policy = getattr(profile, "retry_policy", None)
     try:
         return max(1, min(5, int(getattr(retry_policy, "max_attempts", 5) or 5)))
@@ -2057,7 +2059,7 @@ class LLMClient:
         tool_count: int,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> Any:
-        max_attempts = _retry_policy_max_attempts(self.profile)
+        max_attempts = _retry_policy_max_attempts(self.profile, role=self.role)
         last_error: LLMError | None = None
         route_key = _llm_route_concurrency_key(self.provider, self.profile, profile_id=self.profile_id)
         for attempt in range(1, max_attempts + 1):
@@ -2398,7 +2400,7 @@ class LLMClient:
         )
         payload_summary_ms = max(0, int((time.perf_counter() - payload_summary_started) * 1000))
         payload_prepare_ms = max(0, int((time.perf_counter() - payload_prepare_started) * 1000))
-        max_attempts = _retry_policy_max_attempts(self.profile)
+        max_attempts = _retry_policy_max_attempts(self.profile, role=self.role)
         last_error: LLMError | None = None
         stream_usage_options_downgraded = False
         route_key = _llm_route_concurrency_key(self.provider, self.profile, profile_id=self.profile_id)

@@ -313,6 +313,25 @@ def _safe_llm_error_diagnostic_details(details: Any) -> Dict[str, Any]:
     return safe
 
 
+def _provider_rejected_responses_continuation(
+    *,
+    category: Any,
+    message: Any,
+    details: Any,
+) -> bool:
+    diagnostic_text = " ".join(
+        [
+            str(category or ""),
+            str(message or ""),
+            str(dict(details or {}) if isinstance(details, dict) else details or ""),
+        ]
+    ).lower()
+    return "previous_response_id" in diagnostic_text and any(
+        marker in diagnostic_text
+        for marker in ("unsupported", "unknown", "invalid", "not found", "not_found")
+    )
+
+
 _TOOL_SURFACE_GROUPS: Dict[str, str] = {
     "grep_search_tool": "locate",
     "glob_tool": "locate",
@@ -2488,6 +2507,7 @@ class SelfEvolvingAgent:
         try:
             self._raise_if_turn_stop_requested()
             provider_replay_state = None
+            responses_continuation_disabled = False
             for _ in range(round_state.max_iterations):
                 self._raise_if_turn_stop_requested()
                 iteration = round_state.next_iteration()
@@ -2606,6 +2626,30 @@ class SelfEvolvingAgent:
                     },
                 )
                 invocation_result = self._invoke_llm(messages, replay_state=provider_replay_state)
+                if (
+                    invocation_result is None
+                    and provider_replay_state is not None
+                    and bool(getattr(provider_replay_state, "response_id", ""))
+                    and not responses_continuation_disabled
+                ):
+                    continuation_rejected = _provider_rejected_responses_continuation(
+                        category=getattr(self, "_last_llm_error_category", ""),
+                        message=getattr(self, "_last_llm_error_message", ""),
+                        details=getattr(self, "_last_llm_error_details", {}),
+                    )
+                    if continuation_rejected:
+                        responses_continuation_disabled = True
+                        provider_replay_state = provider_replay_state.without_response_id()
+                        _record_agent_scene_event(
+                            "llm",
+                            "agent.responses_continuation.fallback",
+                            message="Responses continuation rejected; retrying once with stateless replay.",
+                            fields={
+                                "iteration": iteration,
+                                "reason": "provider_rejected_previous_response_id",
+                            },
+                        )
+                        invocation_result = self._invoke_llm(messages, replay_state=provider_replay_state)
                 if invocation_result is None:
                     consecutive_failures = round_state.note_llm_failure()
                     self._last_turn_failed = True
@@ -2675,6 +2719,8 @@ class SelfEvolvingAgent:
                     )
                     turn_outcome = canonical_outcome_from_message(response, scope=compatibility_scope)
                 provider_replay_state = turn_outcome.replay_state
+                if responses_continuation_disabled and provider_replay_state is not None:
+                    provider_replay_state = provider_replay_state.without_response_id()
 
 # 轻量预解析：先看 raw_content / tool_calls / xml_tool_calls，重活留给 finalize
                 response_preview = self._get_response_processor().preview(response)

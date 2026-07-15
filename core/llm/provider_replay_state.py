@@ -50,6 +50,7 @@ class ProviderReplayState:
     wire_protocol: WireProtocol
     opaque_items: tuple[OpaqueReplayItem, ...] = field(repr=False)
     response_id: str = field(default="", repr=False)
+    pending_call_ids: tuple[str, ...] = field(default=(), repr=False)
     byte_size: int = field(init=False)
 
     def __post_init__(self) -> None:
@@ -65,8 +66,18 @@ class ProviderReplayState:
         response_id = str(self.response_id or "").strip()
         if len(response_id.encode("utf-8")) > 1024:
             raise ValueError("provider replay response id limit exceeded")
+        pending_call_ids = tuple(str(item or "").strip() for item in self.pending_call_ids)
+        if any(not item for item in pending_call_ids):
+            raise ValueError("provider replay pending call ids must be non-empty")
+        if len(set(pending_call_ids)) != len(pending_call_ids):
+            raise ValueError("provider replay pending call ids must be unique")
+        if len(pending_call_ids) > MAX_REPLAY_ITEMS:
+            raise ValueError("provider replay pending call id limit exceeded")
+        if any(len(item.encode("utf-8")) > 1024 for item in pending_call_ids):
+            raise ValueError("provider replay pending call id byte limit exceeded")
         object.__setattr__(self, "opaque_items", items)
         object.__setattr__(self, "response_id", response_id)
+        object.__setattr__(self, "pending_call_ids", pending_call_ids)
         object.__setattr__(self, "byte_size", byte_size)
 
     def require_compatible(
@@ -90,6 +101,18 @@ class ProviderReplayState:
                 raise ReplayStateMismatchError(f"provider replay route identity mismatch: {field_name}")
         return self
 
+    def without_response_id(self) -> ProviderReplayState:
+        return ProviderReplayState(
+            issuer=self.issuer,
+            provider_id=self.provider_id,
+            endpoint_fingerprint=self.endpoint_fingerprint,
+            model_id=self.model_id,
+            wire_protocol=self.wire_protocol,
+            opaque_items=self.opaque_items,
+            response_id="",
+            pending_call_ids=(),
+        )
+
     def safe_summary(self) -> dict[str, object]:
         return {
             "issuer": self.issuer,
@@ -100,4 +123,5 @@ class ProviderReplayState:
             "itemCount": len(self.opaque_items),
             "byteSize": self.byte_size,
             "hasResponseId": bool(self.response_id),
+            "pendingCallCount": len(self.pending_call_ids),
         }

@@ -23,7 +23,7 @@ from core.llm.types import CanonicalItemIdentity, CanonicalToolCall, CanonicalTo
 from core.llm.wire.responses import ResponsesWireAdapter
 
 
-def route():
+def route(*, responses_continuation: bool = False):
     return SimpleNamespace(
         adapter_id="responses",
         wire_protocol=WireProtocol.RESPONSES,
@@ -31,6 +31,7 @@ def route():
         model_id="relay_gpt_5_6_luna",
         effective_model="gpt-5.6-luna",
         runtime_endpoint="https://relay.example.test/v1",
+        compat=SimpleNamespace(responses_continuation=responses_continuation),
     )
 
 
@@ -119,6 +120,74 @@ def test_responses_stateless_history_emits_full_call_output_pairs_without_previo
     ]
     assert payload["input"][-1] == {"role": "user", "content": [{"type": "input_text", "text": "continue"}]}
     assert payload["tools"][0]["parameters"]["properties"]["query"]["type"] == "string"
+
+
+def test_responses_stateful_continuation_sends_only_pending_call_outputs():
+    current_route = route(responses_continuation=True)
+    replay_state = ProviderReplayState(
+        issuer="responses",
+        provider_id=current_route.provider_id,
+        endpoint_fingerprint=endpoint_fingerprint(current_route.runtime_endpoint),
+        model_id=current_route.model_id,
+        wire_protocol=current_route.wire_protocol,
+        opaque_items=(),
+        response_id="resp-previous",
+        pending_call_ids=("call-1",),
+    )
+    call = CanonicalToolCall(
+        identity=identity("tool-call-1", iteration=0),
+        call_id="call-1",
+        name="lookup",
+        arguments={"query": "moon"},
+    )
+    result = CanonicalToolResult(
+        identity=identity("tool-result-1", iteration=1),
+        call_id="call-1",
+        tool_name="lookup",
+        output={"value": 42},
+    )
+    request = SemanticModelRequest(
+        scope=scope(1),
+        messages=(
+            SemanticMessage(role="user", parts=(TextPart("look up the moon"),)),
+            SemanticMessage(role="assistant", parts=(ToolCallPart(call),)),
+            SemanticMessage(role="tool", parts=(ToolResultPart(result),)),
+        ),
+        tools=(),
+        settings=SemanticGenerationSettings(max_output_tokens=128),
+        replay_state=replay_state,
+    )
+
+    payload = ResponsesWireAdapter().encode_request(request, route=current_route).body
+
+    assert payload["previous_response_id"] == "resp-previous"
+    assert payload["input"] == [
+        {"type": "function_call_output", "call_id": "call-1", "output": '{"value":42}'}
+    ]
+
+
+def test_responses_stateful_continuation_requires_every_pending_call_output():
+    current_route = route(responses_continuation=True)
+    replay_state = ProviderReplayState(
+        issuer="responses",
+        provider_id=current_route.provider_id,
+        endpoint_fingerprint=endpoint_fingerprint(current_route.runtime_endpoint),
+        model_id=current_route.model_id,
+        wire_protocol=current_route.wire_protocol,
+        opaque_items=(),
+        response_id="resp-previous",
+        pending_call_ids=("call-missing",),
+    )
+    request = SemanticModelRequest(
+        scope=scope(1),
+        messages=(SemanticMessage(role="user", parts=(TextPart("continue"),)),),
+        tools=(),
+        settings=SemanticGenerationSettings(max_output_tokens=128),
+        replay_state=replay_state,
+    )
+
+    with pytest.raises(ValueError, match="missing function_call_output"):
+        ResponsesWireAdapter().encode_request(request, route=current_route)
 
 
 def test_responses_rejects_unreferenced_opaque_replay_instead_of_auto_injecting_it():
