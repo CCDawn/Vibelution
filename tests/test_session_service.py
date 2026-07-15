@@ -5,6 +5,7 @@ import threading
 
 from core.chat.conversation_ledger import (
     EVENT_ASSISTANT_MESSAGE,
+    EVENT_TURN_COMPLETED,
     EVENT_TURN_FAILED,
     EVENT_TURN_INTERRUPTED,
     EVENT_TURN_STARTED,
@@ -813,6 +814,44 @@ def test_terminal_fallback_closes_running_turn_when_result_persistence_raises(mo
     work_run = work_runs.load_snapshot("chat_turn", "turn-fallback")
     assert work_run["status"] == "failed"
     assert work_run["finishedAt"]
+
+
+def test_terminal_fallback_preserves_completed_turn_work_run(monkeypatch, tmp_path):
+    class FakeWorkRunStore:
+        def __init__(self):
+            self.snapshots = {}
+
+        def load_snapshot(self, run_kind, run_id):
+            return self.snapshots.get((run_kind, run_id))
+
+        def persist_snapshot(self, run_kind, payload, *, active_run_id=None):
+            self.snapshots[(run_kind, payload["runId"])] = dict(payload)
+
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    work_runs = FakeWorkRunStore()
+    monkeypatch.setattr(session_service, "_WORK_RUN_STORE", work_runs)
+    append_conversation_event(tmp_path, "session-live", "turn-completed", EVENT_TURN_STARTED, status="running")
+    append_conversation_event(tmp_path, "session-live", "turn-completed", EVENT_TURN_COMPLETED, status="completed")
+    work_runs.persist_snapshot(
+        "chat_turn",
+        {
+            "runId": "turn-completed",
+            "sessionId": "session-live",
+            "status": "completed",
+            "summary": "正常完成摘要",
+            "finishedAt": "2026-07-15T16:00:55",
+        },
+    )
+    session_service._set_session_live_output("session-live", turn_id="turn-completed", content="final")
+
+    session_service._ensure_session_turn_terminal_fallback("session-live", "turn-completed")
+
+    events = load_conversation_events(tmp_path, "session-live")
+    assert [event.event_type for event in events] == [EVENT_TURN_STARTED, EVENT_TURN_COMPLETED]
+    work_run = work_runs.load_snapshot("chat_turn", "turn-completed")
+    assert work_run["status"] == "completed"
+    assert work_run["summary"] == "正常完成摘要"
+    assert session_service._snapshot_session_live_output("session-live") is None
 
 
 def test_terminal_fallback_does_not_block_running_cleanup_when_fallback_persistence_raises(monkeypatch):
