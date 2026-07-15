@@ -288,72 +288,45 @@ def _runtime_manager_active_work_runs() -> list[dict[str, str]]:
 
     items: list[dict[str, str]] = []
     seen: set[tuple[str, str]] = set()
-
-    try:
-        summary = build_evolution_summary()
-    except Exception as exc:
-        source = "evolution_summary"
-        _append_event(
-            "workbench.lifecycle.active_work_probe_failed",
-            {"source": source, "errorType": type(exc).__name__, "message": str(exc)},
-        )
-        raise ActiveWorkProbeFailed(source=source, error_type=type(exc).__name__, message=str(exc)) from exc
-    if isinstance(summary, dict):
-        for kind, payload in (
-            ("self_evolution_run", summary.get("self") if isinstance(summary.get("self"), dict) else {}),
-            ("supervised_evolution_run", summary.get("supervised") if isinstance(summary.get("supervised"), dict) else {}),
-        ):
-            active_run_id = str(payload.get("activeRunId") or "").strip()
+    store = work_run_store.WorkRunStore(root=work_run_store.WORK_RUNS_DIR)
+    for kind in (
+        "self_evolution_run",
+        "supervised_evolution_run",
+        "chat_turn",
+        "chat_room_round",
+        "supervised_worktree_evolution_run",
+    ):
+        source = f"work_run_store:{kind}"
+        try:
+            active_run_id = str(store.load_run_index(kind).get("activeRunId") or "").strip()
             if not active_run_id:
                 continue
-            _append_active_work_run(
-                items,
-                seen,
-                kind=kind,
-                payload={"runId": active_run_id, "status": payload.get("activeStatus") or "running"},
-            )
-
-    for source_name, kind, loader_name in (
-        ("chat_turn", "chat_turn", "list_active_session_work_runs"),
-        ("chat_room_round", "chat_room_round", "list_active_chat_room_work_runs"),
-    ):
-        try:
-            if source_name == "chat_turn":
-                from core.web.services.session_service import list_active_session_work_runs as loader
-            else:
-                from core.web.services.chat_room_service import list_active_chat_room_work_runs as loader
-            payloads = loader()
+            payload = store.load_snapshot(kind, active_run_id)
         except Exception as exc:
-            source = loader_name
             _append_event(
                 "workbench.lifecycle.active_work_probe_failed",
-                {
-                    "source": source,
-                    "errorType": type(exc).__name__,
-                    "message": str(exc),
-                },
+                {"source": source, "errorType": type(exc).__name__, "message": str(exc)},
             )
             raise ActiveWorkProbeFailed(source=source, error_type=type(exc).__name__, message=str(exc)) from exc
-        for payload in payloads if isinstance(payloads, list) else []:
-            _append_active_work_run(items, seen, kind=kind, payload=payload)
-
-    try:
-        from core.web.services.supervised_worktree_evolution_service import get_active_supervised_worktree_run
-
-        worktree_run = get_active_supervised_worktree_run()
-    except Exception as exc:
-        source = "get_active_supervised_worktree_run"
-        _append_event(
-            "workbench.lifecycle.active_work_probe_failed",
-            {"source": source, "errorType": type(exc).__name__, "message": str(exc)},
+        if not isinstance(payload, dict):
+            message = f"Active work-run snapshot is missing: {kind}/{active_run_id}"
+            _append_event(
+                "workbench.lifecycle.active_work_probe_failed",
+                {"source": source, "errorType": "MissingActiveWorkSnapshot", "message": message},
+            )
+            raise ActiveWorkProbeFailed(
+                source=source,
+                error_type="MissingActiveWorkSnapshot",
+                message=message,
+            )
+        if str(payload.get("finishedAt") or payload.get("endedAt") or "").strip():
+            continue
+        _append_active_work_run(
+            items,
+            seen,
+            kind=kind,
+            payload={**payload, "runId": str(payload.get("runId") or active_run_id)},
         )
-        raise ActiveWorkProbeFailed(source=source, error_type=type(exc).__name__, message=str(exc)) from exc
-    _append_active_work_run(
-        items,
-        seen,
-        kind="supervised_worktree_evolution_run",
-        payload=worktree_run,
-    )
     return items
 
 

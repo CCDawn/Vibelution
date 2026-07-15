@@ -2659,112 +2659,25 @@ function Get-LauncherLocalActiveWorkRunCount {
     return $count
 }
 
-function Get-LauncherStatusActiveWorkCount {
-    param($Payload)
-
-    $lifecycleProof = Get-ObjectPropertyValue -Object $Payload -Name "lifecycleProof" -Default $null
-    $activeWorkRuns = Get-ObjectPropertyValue -Object $lifecycleProof -Name "activeWorkRuns" -Default $null
-    $activeCount = Get-ObjectPropertyValue -Object $activeWorkRuns -Name "count" -Default 0
-    $count = 0
-    if (-not [int]::TryParse([string]$activeCount, [ref]$count)) {
-        $items = @(Get-ObjectPropertyValue -Object $activeWorkRuns -Name "items" -Default @())
-        $count = $items.Count
-    }
-    return $count
-}
-
-function Get-LauncherRestartActiveWorkProbeUrls {
-    param(
-        [bool]$IncludeLauncherControl = $true,
-        [bool]$IncludeWorkbench = $true
-    )
-
-    $urls = @()
-    $controlUrl = ""
-    try {
-        $controlUrl = [string]$launcherControlUrl
-    } catch {
-        $controlUrl = ""
-    }
-    $workbenchUrl = ""
-    try {
-        $workbenchUrl = [string]$url
-    } catch {
-        $workbenchUrl = ""
-    }
-
-    if ($IncludeLauncherControl -and $controlUrl) {
-        $urls += "$controlUrl/api/launcher/status"
-    }
-    if ($IncludeWorkbench -and $workbenchUrl) {
-        $workbenchStatusUrl = "$workbenchUrl/api/launcher/status"
-        if (@($urls | Where-Object { $_ -eq $workbenchStatusUrl }).Count -eq 0) {
-            $urls += $workbenchStatusUrl
-        }
-    }
-    return @($urls)
-}
-
 function Test-LauncherRestartActiveWorkBlocked {
-    $launcherControlHealthy = Test-LauncherControlHealthy
-    $webHealthy = Test-WebHealthy
-    if (-not $launcherControlHealthy -and -not $webHealthy) {
+    $localActiveCount = Get-LauncherLocalActiveWorkRunCount
+    if ($localActiveCount -le 0) {
+        Write-LauncherControlLog `
+            -Event "launcher.restart.active_work_local_clear" `
+            -Message "Local runtime-manager work-run state has no lifecycle-blocking work." `
+            -Level "info" `
+            -Fields @{ active_work_count = 0; source = "local_work_runs" }
         return $false
     }
 
-    $probeErrors = @()
-    $probeUrls = @(Get-LauncherRestartActiveWorkProbeUrls -IncludeLauncherControl:$launcherControlHealthy -IncludeWorkbench:$webHealthy)
-    try {
-        foreach ($statusUrl in $probeUrls) {
-            try {
-                $response = Invoke-WebRequest -UseBasicParsing -Uri $statusUrl -TimeoutSec 3
-                if ($response.StatusCode -lt 200 -or $response.StatusCode -ge 300) {
-                    $probeErrors += "$statusUrl returned HTTP $($response.StatusCode)"
-                    continue
-                }
-                $payload = $response.Content | ConvertFrom-Json -ErrorAction Stop
-                $count = Get-LauncherStatusActiveWorkCount -Payload $payload
-                if ($count -le 0) {
-                    return $false
-                }
-
-                $message = "有进行中的任务，无法重启 Vibelution。请等待任务完成或先停止任务。"
-                Write-Note $message
-                Write-LauncherControlLog `
-                    -Event "launcher.restart.blocked_active_work" `
-                    -Message $message `
-                    -Level "warning" `
-                    -Fields @{ active_work_count = $count; status_url = $statusUrl; probe_urls = $probeUrls; launcher_control_healthy = [bool]$launcherControlHealthy; web_healthy = [bool]$webHealthy }
-                return $true
-            } catch {
-                $probeErrors += "$statusUrl :: $($_.Exception.Message)"
-                continue
-            }
-        }
-
-        if ($probeErrors.Count -eq 0) {
-            $probeErrors += "No Launcher status probe URLs were available."
-        }
-        throw ($probeErrors -join " | ")
-    } catch {
-        $localActiveCount = Get-LauncherLocalActiveWorkRunCount
-        if ($localActiveCount -le 0) {
-            Write-LauncherControlLog `
-                -Event "launcher.restart.active_work_probe_failed_local_clear" `
-                -Message "Launcher control active-work probe failed, but local runtime-manager work-run state has no active work." `
-                -Level "warning" `
-                -Fields @{ probe_urls = $probeUrls; error = $_.Exception.Message; launcher_control_healthy = [bool]$launcherControlHealthy; web_healthy = [bool]$webHealthy }
-            return $false
-        }
-        $message = "有进行中的任务，无法重启 Vibelution。请等待任务完成或先停止任务。"
-        Write-Note $message
-        Write-LauncherControlLog `
-            -Event "launcher.restart.blocked_active_work_probe_failed" `
-            -Message "Launcher restart active-work probe failed while backend was healthy; blocking restart conservatively because local work-run state is active." `
-            -Level "warning" `
-            -Fields @{ probe_urls = $probeUrls; error = $_.Exception.Message; local_active_work_count = $localActiveCount; launcher_control_healthy = [bool]$launcherControlHealthy; web_healthy = [bool]$webHealthy }
-        return $true
-    }
+    $message = "有进行中的任务，无法重启 Vibelution。请等待任务完成或先停止任务。"
+    Write-Note $message
+    Write-LauncherControlLog `
+        -Event "launcher.restart.blocked_active_work" `
+        -Message $message `
+        -Level "warning" `
+        -Fields @{ active_work_count = $localActiveCount; source = "local_work_runs" }
+    return $true
 }
 
 function Resolve-NpmCommand {
@@ -7109,7 +7022,10 @@ function Complete-HeadlessSessionWithBrowser {
 }
 
 function Open-LauncherControlSurface {
+    param([switch]$Headless)
+
     Ensure-Directories
+    $effectiveNoBrowser = [bool]($NoBrowser -or $Headless)
     $controlSurfaceUrl = "$launcherControlUrl/launcher"
     $launcherSnapshot = Get-SessionSnapshot -BrowserRole "launcher_control_surface" -ProfileDir $launcherBrowserProfileDir
     $snapshot = Get-SessionSnapshot
@@ -7165,7 +7081,7 @@ function Open-LauncherControlSurface {
     Initialize-RuntimeScene -Trigger "launcher" -BrowserManaged $true
 
     try {
-        Assert-LauncherSystemPrerequisites -BrowserRequired (-not $NoBrowser)
+        Assert-LauncherSystemPrerequisites -BrowserRequired (-not $effectiveNoBrowser)
         Ensure-ProjectPythonDependencies
         Ensure-WebBuild
 
@@ -7218,7 +7134,7 @@ function Open-LauncherControlSurface {
         $stateSessionId = [string](Get-ObjectPropertyValue -Object $snapshot.State -Name "sessionId" -Default "")
         $managedSessionId = if ($stateSessionId) { $stateSessionId } else { [guid]::NewGuid().ToString() }
 
-        if ($NoBrowser) {
+        if ($effectiveNoBrowser) {
             Save-LauncherControlWindowState `
                 -ManagedSessionId $managedSessionId `
                 -BackendPid $backendPid `
@@ -8506,7 +8422,7 @@ function Ensure-LauncherControlSurfaceForRuntimeCommand {
         if (Test-ExistingLauncherControlSurfaceReadyForRuntimeCommand -RequestedAction $RequestedAction) {
             return
         }
-        Open-LauncherControlSurface
+        Open-LauncherControlSurface -Headless
     } finally {
         Release-LauncherMutex
     }
