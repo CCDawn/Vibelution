@@ -402,6 +402,24 @@ def test_v2_provider_default_beats_driver_default() -> None:
     assert route.wire_source == "provider_default"
 
 
+def test_v2_model_compat_enables_responses_continuation() -> None:
+    provider = _v2_provider()
+    profile = LLMProfile(profile_id="primary", provider_id="relay", model="gpt-a")
+
+    route = resolve_model_protocol(
+        profile,
+        provider,
+        model_entry={
+            "model_ref": "relay/gpt-a",
+            "model": "gpt-a",
+            "compat": {"responsesContinuation": True},
+        },
+    )
+
+    assert route.compat.responses_continuation is True
+    assert route.log_summary()["responsesContinuation"] is True
+
+
 def test_v2_driver_declaration_is_used_when_provider_default_is_empty() -> None:
     provider = _v2_provider(
         driver="anthropic",

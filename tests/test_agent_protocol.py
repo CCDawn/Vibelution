@@ -63,6 +63,29 @@ def test_numbered_confirmation_goal_preserves_previous_assistant_context():
     assert goal != answer
 
 
+@pytest.mark.parametrize(
+    ("message", "details"),
+    [
+        ("unknown parameter: previous_response_id", {}),
+        ("provider request failed", {"error": "previous_response_id not_found"}),
+    ],
+)
+def test_provider_rejected_responses_continuation_detects_unsupported_anchor(message, details):
+    assert agent_module._provider_rejected_responses_continuation(
+        category="protocol_error",
+        message=message,
+        details=details,
+    ) is True
+
+
+def test_provider_rejected_responses_continuation_does_not_mask_unrelated_failure():
+    assert agent_module._provider_rejected_responses_continuation(
+        category="server_error",
+        message="upstream unavailable",
+        details={"status": 503},
+    ) is False
+
+
 def test_chat_invocation_context_uses_active_status_turn_identity(monkeypatch):
     for env_name in (
         "VIBELUTION_TURN_RUN_ID",

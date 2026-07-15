@@ -82,6 +82,7 @@ def test_replay_state_repr_and_summary_never_expose_opaque_payload():
         "itemCount": 1,
         "byteSize": len(b"opaque-secret"),
         "hasResponseId": False,
+        "pendingCallCount": 0,
     }
 
 
@@ -92,6 +93,23 @@ def test_replay_state_enforces_item_and_byte_limits():
 
     with pytest.raises(ValueError, match="byte limit"):
         make_state(opaque_items=(OpaqueReplayItem(item_id="large", payload=b"x" * (MAX_REPLAY_BYTES + 1)),))
+
+    with pytest.raises(ValueError, match="pending call ids must be unique"):
+        make_state(pending_call_ids=("call-1", "call-1"))
+
+    with pytest.raises(ValueError, match="pending call id byte limit"):
+        make_state(pending_call_ids=("x" * 1025,))
+
+
+def test_without_response_id_preserves_opaque_replay_but_clears_stateful_continuation():
+    state = make_state(response_id="resp-1", pending_call_ids=("call-1",))
+
+    stateless = state.without_response_id()
+
+    assert stateless.response_id == ""
+    assert stateless.pending_call_ids == ()
+    assert stateless.opaque_items == state.opaque_items
+    assert stateless.safe_summary()["pendingCallCount"] == 0
 
 
 def test_route_switch_projection_clears_replay_bookmark_when_state_is_discarded():

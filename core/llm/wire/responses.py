@@ -168,12 +168,44 @@ class ResponsesWireAdapter:
                 wire_protocol=WireProtocol.RESPONSES,
             )
         validate_provider_ready_messages(request.messages)
+        replay_state = request.replay_state
+        compat = getattr(route, "compat", None)
+        use_stateful_continuation = bool(
+            replay_state is not None
+            and replay_state.response_id
+            and replay_state.pending_call_ids
+            and bool(getattr(compat, "responses_continuation", False))
+        )
+        encoded_input = self._encode_messages(request)
+        if use_stateful_continuation:
+            pending_call_ids = tuple(replay_state.pending_call_ids)
+            pending_call_id_set = set(pending_call_ids)
+            outputs_by_call_id: dict[str, dict[str, Any]] = {}
+            for item in encoded_input:
+                item_dict = _as_dict(item)
+                if str(item_dict.get("type") or "") != "function_call_output":
+                    continue
+                call_id = str(item_dict.get("call_id") or "").strip()
+                if call_id not in pending_call_id_set:
+                    continue
+                if call_id in outputs_by_call_id:
+                    raise ValueError(f"duplicate function_call_output for previous response call_id: {call_id}")
+                outputs_by_call_id[call_id] = item_dict
+            missing_call_ids = [call_id for call_id in pending_call_ids if call_id not in outputs_by_call_id]
+            if missing_call_ids:
+                raise ValueError(
+                    "missing function_call_output for previous response call_id(s): "
+                    + ", ".join(missing_call_ids)
+                )
+            encoded_input = [outputs_by_call_id[call_id] for call_id in pending_call_ids]
         payload: dict[str, Any] = {
             "model": str(getattr(route, "effective_model", "") or ""),
-            "input": self._encode_messages(request),
+            "input": encoded_input,
             "max_output_tokens": request.settings.max_output_tokens,
             "stream": request.settings.stream,
         }
+        if use_stateful_continuation:
+            payload["previous_response_id"] = replay_state.response_id
         if request.tools:
             payload["tools"] = [
                 {
@@ -660,6 +692,7 @@ class _ResponsesTurnAssembler:
             wire_protocol=WireProtocol.RESPONSES,
             opaque_items=tuple(self.replay_items),
             response_id=self.response_id,
+            pending_call_ids=tuple(self.pending_call_ids),
         )
 
     def _emit(self, kind: str, **kwargs: Any) -> LLMProtocolEvent:

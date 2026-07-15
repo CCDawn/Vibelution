@@ -72,6 +72,7 @@ class ResolvedProtocolRoute:
             "strictMessageKeys": self.compat.strict_message_keys,
             "requiresStringContent": self.compat.requires_string_content,
             "allowAssistantPrefill": self.compat.allow_assistant_prefill,
+            "responsesContinuation": self.compat.responses_continuation,
         }
 
 
