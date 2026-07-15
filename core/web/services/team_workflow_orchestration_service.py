@@ -4665,6 +4665,7 @@ def _source_collection_stage_writeback_closure_summary(
     materialized_source_quality: dict[str, Any],
     materialized_candidate_graph: dict[str, Any],
     materialized_knowledge_ingestion: dict[str, Any],
+    conversation_events_by_session: dict[str, list[Any]] | None = None,
 ) -> dict[str, Any]:
     stage_id = _trim_text(task.get("stageId"), max_length=80)
     agent_role = _trim_text(task.get("agentRole"), max_length=80)
@@ -4738,6 +4739,7 @@ def _source_collection_stage_writeback_closure_summary(
         task,
         task_checklist,
         artifact_complete=artifact_complete,
+        conversation_events_by_session=conversation_events_by_session,
     )
     task_checklist_complete = bool(task_tool_progress.get("complete"))
     completion_gate = _source_collection_stage_completion_gate(
@@ -17719,11 +17721,20 @@ def _reconcile_source_collection_stage_session_tasks_for_run(team_id: str, run_i
     changed = _repair_missing_source_collection_stage_round(team_id, normalized_run_id, tasks)
     next_tasks: list[dict[str, Any]] = []
     store_changed = False
+    conversation_events_by_session: dict[str, list[Any]] = {}
     for task in tasks:
         reconciled = _reconcile_source_collection_stage_session_task_turn_status(task)
-        reconciled = _reconcile_source_collection_stage_session_task_from_turn_result(reconciled)
+        reconciled = _reconcile_source_collection_stage_session_task_from_turn_result(
+            reconciled,
+            conversation_events_by_session=conversation_events_by_session,
+        )
         reconciled = _reconcile_source_collection_stage_session_task_sources(team_id, normalized_run_id, reconciled)
-        reconciled = _reconcile_source_collection_stage_session_task_completion_gate(team_id, normalized_run_id, reconciled)
+        reconciled = _reconcile_source_collection_stage_session_task_completion_gate(
+            team_id,
+            normalized_run_id,
+            reconciled,
+            conversation_events_by_session=conversation_events_by_session,
+        )
         next_tasks.append(reconciled)
         store_changed = store_changed or reconciled is not task
     if store_changed:
@@ -17737,10 +17748,19 @@ def _reconcile_source_collection_stage_session_tasks_for_run(team_id: str, run_i
 
 
 def _reconcile_source_collection_stage_session_task(team_id: str, run_id: str, task: dict[str, Any]) -> dict[str, Any]:
+    conversation_events_by_session: dict[str, list[Any]] = {}
     reconciled = _reconcile_source_collection_stage_session_task_turn_status(task)
-    reconciled = _reconcile_source_collection_stage_session_task_from_turn_result(reconciled)
+    reconciled = _reconcile_source_collection_stage_session_task_from_turn_result(
+        reconciled,
+        conversation_events_by_session=conversation_events_by_session,
+    )
     reconciled = _reconcile_source_collection_stage_session_task_sources(team_id, run_id, reconciled)
-    reconciled = _reconcile_source_collection_stage_session_task_completion_gate(team_id, run_id, reconciled)
+    reconciled = _reconcile_source_collection_stage_session_task_completion_gate(
+        team_id,
+        run_id,
+        reconciled,
+        conversation_events_by_session=conversation_events_by_session,
+    )
     if reconciled == task:
         return task
     _upsert_source_collection_stage_session_task(team_id, run_id, reconciled)
@@ -18739,7 +18759,13 @@ def _reconcile_source_collection_stage_session_task_sources(team_id: str, run_id
     return next_task
 
 
-def _reconcile_source_collection_stage_session_task_completion_gate(team_id: str, run_id: str, task: dict[str, Any]) -> dict[str, Any]:
+def _reconcile_source_collection_stage_session_task_completion_gate(
+    team_id: str,
+    run_id: str,
+    task: dict[str, Any],
+    *,
+    conversation_events_by_session: dict[str, list[Any]] | None = None,
+) -> dict[str, Any]:
     writeback = task.get("writeback") if isinstance(task.get("writeback"), dict) else {}
     if not writeback:
         return task
@@ -18795,6 +18821,7 @@ def _reconcile_source_collection_stage_session_task_completion_gate(team_id: str
         materialized_source_quality=materialized_source_quality,
         materialized_candidate_graph=materialized_candidate_graph,
         materialized_knowledge_ingestion=materialized_knowledge_ingestion,
+        conversation_events_by_session=conversation_events_by_session,
     )
     task_checklist = [
         item for item in list(task.get("taskChecklist") or [])
@@ -18874,7 +18901,11 @@ def _reconcile_source_collection_stage_session_task_completion_gate(team_id: str
     return next_task
 
 
-def _reconcile_source_collection_stage_session_task_from_turn_result(task: dict[str, Any]) -> dict[str, Any]:
+def _reconcile_source_collection_stage_session_task_from_turn_result(
+    task: dict[str, Any],
+    *,
+    conversation_events_by_session: dict[str, list[Any]] | None = None,
+) -> dict[str, Any]:
     status = _trim_text(task.get("status"), max_length=80).lower()
     if status not in {"running", "queued"}:
         return task
@@ -18884,7 +18915,12 @@ def _reconcile_source_collection_stage_session_task_from_turn_result(task: dict[
     agent_id = _trim_text(task.get("agentId"), max_length=160)
     if not turn_id or not session_id or not agent_id:
         return task
-    turn_result = _source_collection_stage_session_task_turn_result(agent_id, session_id, turn_id)
+    turn_result = _source_collection_stage_session_task_turn_result(
+        agent_id,
+        session_id,
+        turn_id,
+        conversation_events_by_session=conversation_events_by_session,
+    )
     if not turn_result:
         return task
     next_status = _source_collection_stage_task_status_from_turn_result(turn_result)
@@ -18929,7 +18965,13 @@ def _reconcile_source_collection_stage_session_task_from_turn_result(task: dict[
     return next_task
 
 
-def _source_collection_stage_session_task_turn_result(agent_id: str, session_id: str, turn_id: str) -> dict[str, Any]:
+def _source_collection_stage_session_task_turn_result(
+    agent_id: str,
+    session_id: str,
+    turn_id: str,
+    *,
+    conversation_events_by_session: dict[str, list[Any]] | None = None,
+) -> dict[str, Any]:
     events_path = developer_sandbox.seeded_sandbox_workspace_path(
         _project_root(),
         "agents",
@@ -18943,9 +18985,13 @@ def _source_collection_stage_session_task_turn_result(agent_id: str, session_id:
         if _trim_text(item.get("sessionId"), max_length=160) != session_id:
             continue
         return item
-    if _source_collection_stage_session_task_turn_had_failing_tool_result(session_id, turn_id):
+    events = _source_collection_stage_conversation_events(
+        session_id,
+        conversation_events_by_session=conversation_events_by_session,
+    )
+    if _source_collection_stage_session_task_turn_had_failing_tool_result(session_id, turn_id, events=events):
         return {}
-    ledger_result = _source_collection_stage_session_task_turn_journal_result(session_id, turn_id)
+    ledger_result = _source_collection_stage_session_task_turn_journal_result(session_id, turn_id, events=events)
     if ledger_result:
         return ledger_result
     snapshot_result = _source_collection_stage_session_task_completion_snapshot_result(session_id, turn_id)
@@ -18954,15 +19000,37 @@ def _source_collection_stage_session_task_turn_result(agent_id: str, session_id:
     return {}
 
 
-def _source_collection_stage_session_task_turn_had_failing_tool_result(session_id: str, turn_id: str) -> bool:
+def _source_collection_stage_conversation_events(
+    session_id: str,
+    *,
+    conversation_events_by_session: dict[str, list[Any]] | None = None,
+) -> list[Any]:
+    normalized_session_id = _trim_text(session_id, max_length=160)
+    if not normalized_session_id:
+        return []
+    if conversation_events_by_session is not None and normalized_session_id in conversation_events_by_session:
+        return conversation_events_by_session[normalized_session_id]
+    try:
+        events = load_conversation_events(_project_root(), normalized_session_id)
+    except Exception:
+        events = []
+    if conversation_events_by_session is not None:
+        conversation_events_by_session[normalized_session_id] = events
+    return events
+
+
+def _source_collection_stage_session_task_turn_had_failing_tool_result(
+    session_id: str,
+    turn_id: str,
+    *,
+    events: list[Any] | None = None,
+) -> bool:
     normalized_session_id = _trim_text(session_id, max_length=160)
     normalized_turn_id = _trim_text(turn_id, max_length=200)
     if not normalized_session_id or not normalized_turn_id:
         return False
-    try:
-        events = load_conversation_events(_project_root(), normalized_session_id)
-    except Exception:
-        return False
+    if events is None:
+        events = _source_collection_stage_conversation_events(normalized_session_id)
     failing_statuses = {
         "failed",
         "failure",
@@ -19007,11 +19075,14 @@ def _source_collection_stage_session_task_turn_had_failing_tool_result(session_i
     return False
 
 
-def _source_collection_stage_session_task_turn_journal_result(session_id: str, turn_id: str) -> dict[str, Any]:
-    try:
-        events = load_conversation_events(_project_root(), session_id)
-    except Exception:
-        return {}
+def _source_collection_stage_session_task_turn_journal_result(
+    session_id: str,
+    turn_id: str,
+    *,
+    events: list[Any] | None = None,
+) -> dict[str, Any]:
+    if events is None:
+        events = _source_collection_stage_conversation_events(session_id)
     normalized_turn_id = _trim_text(turn_id, max_length=200)
     if not normalized_turn_id:
         return {}
@@ -19447,6 +19518,7 @@ def _source_collection_stage_task_tool_progress_from_trace(
     task_checklist: list[dict[str, Any]] | None,
     *,
     artifact_complete: bool = False,
+    conversation_events_by_session: dict[str, list[Any]] | None = None,
 ) -> dict[str, Any]:
     checklist = [item for item in list(task_checklist or []) if isinstance(item, dict)]
     progress = _source_collection_stage_task_tool_progress(checklist)
@@ -19460,7 +19532,10 @@ def _source_collection_stage_task_tool_progress_from_trace(
         progress.update({"traceAvailable": False, "taskCreateObserved": False, "toolCallCount": 0})
         return progress
     try:
-        events = load_conversation_events(_project_root(), session_id)
+        events = _source_collection_stage_conversation_events(
+            session_id,
+            conversation_events_by_session=conversation_events_by_session,
+        )
     except Exception as exc:  # pragma: no cover - defensive for corrupt ledgers
         progress.update(
             {

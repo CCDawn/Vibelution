@@ -6123,6 +6123,38 @@ def test_source_collection_stage_task_progress_counts_later_turn_tool_updates(tm
     assert context["task"]["completionGate"]["passed"] is True
 
 
+def test_source_collection_stage_reconciliation_reuses_session_event_snapshot(monkeypatch):
+    load_calls: list[str] = []
+
+    def fake_load_conversation_events(project_root, session_id):
+        load_calls.append(session_id)
+        return []
+
+    monkeypatch.setattr(
+        team_workflow_orchestration_service,
+        "load_conversation_events",
+        fake_load_conversation_events,
+    )
+    checklist = team_workflow_orchestration_service._source_collection_stage_task_checklist(
+        "extraction",
+        "source_extractor",
+    )
+    event_snapshots: dict[str, list] = {}
+
+    for turn_id in ("turn-shared-session-1", "turn-shared-session-2"):
+        team_workflow_orchestration_service._source_collection_stage_task_tool_progress_from_trace(
+            {
+                "sessionId": "session-shared-stage-reconciliation",
+                "turn": {"turnId": turn_id},
+                "checklistBinding": {"mode": "stage_task"},
+            },
+            checklist,
+            conversation_events_by_session=event_snapshots,
+        )
+
+    assert load_calls == ["session-shared-stage-reconciliation"]
+
+
 def test_source_collection_writeback_recovers_fenced_structured_result_text(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)
