@@ -82,8 +82,8 @@ def test_prompt_template_registry_repairs_research_defaults(tmp_path, monkeypatc
     assert _contains_tool_name(source_finder["content"], "source_collection_stage_writeback_tool")
     assert "搜索、获取、下载到本地" in source_finder["content"]
     assert "无效来源" in source_finder["content"]
-    assert _contains_tool_name(source_finder["content"], "task_create_tool")
-    assert _contains_tool_name(source_finder["content"], "task_update_tool")
+    assert "本阶段检查清单由后端绑定" in source_finder["content"]
+    assert "不要调用通用 task_list_tool、task_create_tool 或 task_update_tool" in source_finder["content"]
     assert "candidateLeads[]" in source_finder["content"]
     assert "invalidSources[]" in source_finder["content"]
     source_extractor = prompt_template_service.get_prompt_template("prompt-source-extractor")
@@ -385,7 +385,7 @@ def test_source_extractor_prompt_requires_candidate_paging_and_structured_decisi
     assert "无有效内容" in detail["content"]
 
 
-def test_source_collection_stage_prompts_align_tool_first_protocol(tmp_path, monkeypatch):
+def test_source_collection_stage_prompts_align_backend_bound_checklist_protocol(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     prompt_template_service.repair_prompt_templates()
 
@@ -397,9 +397,9 @@ def test_source_collection_stage_prompts_align_tool_first_protocol(tmp_path, mon
     ):
         detail = prompt_template_service.get_prompt_template(template_id)
 
-        assert "第一动作必须调用 task_list_tool" in detail["content"]
-        assert "随后调用 task_create_tool" in detail["content"]
-        assert "第一动作必须调用 task_create_tool" not in detail["content"]
+        assert "本阶段检查清单由后端绑定" in detail["content"]
+        assert "不要调用通用 task_list_tool、task_create_tool 或 task_update_tool" in detail["content"]
+        assert "第一动作必须调用 task_list_tool" not in detail["content"]
 
 
 def test_challenge_cup_source_collection_contract_names_source_ingestor_as_ingestion_owner():
