@@ -323,6 +323,62 @@ class TestTruncateResult:
         assert "latestAssessment" not in compact["candidates"][0]
         assert "excluded-49" not in packaged.content
 
+    def test_package_tool_result_preserves_governed_evidence_context_when_long(self):
+        payload = {
+            "status": "ok",
+            "contextKind": "source_collection_stage_task_context",
+            "contextMode": "retry_evidence",
+            "counts": {"candidateCount": 10, "returnedCandidateCount": 5},
+            "candidatePage": {
+                "offset": 0,
+                "limit": 5,
+                "returned": 5,
+                "total": 10,
+                "hasMore": True,
+                "nextOffset": 5,
+            },
+            "candidates": [
+                {
+                    "candidateId": f"candidate-evidence-{index}",
+                    "title": f"Predictive coding evidence candidate {index}",
+                    "sourceKind": "paper",
+                    "doi": f"10.0000/evidence-{index}",
+                    "summary": "Governed source-collection abstract metadata. " * 40,
+                    "evidenceRefs": [
+                        {"type": "doi", "id": f"10.0000/evidence-{index}", "label": f"Evidence {index}"}
+                    ],
+                    "evidenceScope": "collected_summary_metadata",
+                }
+                for index in range(5)
+            ],
+            "usage": {
+                "readTool": "source_collection_context_tool",
+                "writebackTool": "source_collection_stage_writeback_tool",
+                "retryInstruction": "只补这些候选的证据锚点。",
+                "evidenceInstruction": "摘要不等于全文，不得虚构页码、引语或全文结论。",
+            },
+        }
+
+        packaged = package_tool_result(
+            json.dumps(payload, ensure_ascii=False),
+            tool_name="source_collection_context_tool",
+            max_chars=4000,
+        )
+
+        assert packaged.truncated is True
+        assert packaged.strategy == "structured_compact"
+        compact = json.loads(packaged.content)
+        assert compact["contextMode"] == "retry_evidence_from_tool_result"
+        assert compact["fieldMode"] == "evidence_source"
+        assert compact["doNotUsePreviewAsEvidence"] is False
+        assert compact["candidateIds"] == [f"candidate-evidence-{index}" for index in range(5)]
+        assert "summary" in compact["candidates"][0]
+        assert "summaryPreview" not in compact["candidates"][0]
+        assert compact["candidates"][0]["evidenceRefs"][0]["id"] == "10.0000/evidence-0"
+        assert compact["usage"]["evidenceInstruction"].startswith("摘要不等于全文")
+        assert "context_mode=retry_evidence" in compact["usage"]["continuationHint"]
+        assert "context_mode=retry_evidence" in packaged.continuation_hint
+
     def test_package_tool_result_compacts_source_collection_context_with_record_paging_ids(self):
         payload = {
             "status": "ok",

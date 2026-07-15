@@ -1426,6 +1426,11 @@ def start_source_collection_stage_session_task(
             )
         ]
     )
+    source_context_mode = _source_collection_stage_task_context_mode(
+        stage_id=stage_id,
+        agent_role=agent_role,
+        previous_task=previous_stage_task,
+    )
     task_message = _source_collection_stage_session_task_message(
         team=team,
         agent=agent,
@@ -1442,6 +1447,7 @@ def start_source_collection_stage_session_task(
         writeback_contract=writeback_contract,
         task_checklist=task_checklist,
         previous_task=previous_stage_task,
+        context_mode=source_context_mode,
     )
     now = utc_now_iso()
     task_record = {
@@ -1487,6 +1493,12 @@ def start_source_collection_stage_session_task(
         "turn": {},
         "result": {},
         "writeback": {},
+        "sourceContextMode": source_context_mode,
+        "retrySourceTaskId": (
+            _trim_text(previous_stage_task.get("taskId"), max_length=160)
+            if source_context_mode in {"retry_missing", "retry_evidence"} and isinstance(previous_stage_task, dict)
+            else ""
+        ),
         "sessionIsolation": session_isolation,
         "createdAt": now,
         "updatedAt": now,
@@ -1887,8 +1899,17 @@ def get_source_collection_stage_task_context(
         item for item in source_candidates if _source_quality_bucket(item) == "approved"
     ] if memory_steward_mode else source_candidates
     retry_focus = {}
+    retry_source_task = task
+    retry_source_task_id = _trim_text(task.get("retrySourceTaskId"), max_length=160)
+    if retry_source_task_id:
+        found_retry_task, found_retry_run_id = _find_source_collection_stage_session_task_by_id(
+            normalized_team_id,
+            retry_source_task_id,
+        )
+        if found_retry_task is not None and found_retry_run_id == normalized_run_id:
+            retry_source_task = found_retry_task
     if normalized_context_mode == "retry_missing":
-        retry_focus = _source_collection_stage_retry_focus(task, pageable_candidates, records)
+        retry_focus = _source_collection_stage_retry_focus(retry_source_task, pageable_candidates, records)
         missing_candidate_ids = set(_normalize_text_list(retry_focus.get("missingCandidateIds"), max_items=500, max_length=160))
         if missing_candidate_ids:
             pageable_candidates = [
@@ -1906,6 +1927,16 @@ def get_source_collection_stage_task_context(
             selected_records = records[record_page_offset:record_page_offset + record_page_limit]
             next_record_offset = record_page_offset + len(selected_records)
             record_has_more = next_record_offset < len(records)
+    elif normalized_context_mode == "retry_evidence":
+        retry_focus = _source_collection_stage_evidence_retry_focus(retry_source_task, pageable_candidates)
+        evidence_gap_ids = set(
+            _normalize_text_list(retry_focus.get("evidenceGapCandidateIds"), max_items=500, max_length=160)
+        )
+        pageable_candidates = [
+            item
+            for item in pageable_candidates
+            if _trim_text(item.get("candidateId"), max_length=160) in evidence_gap_ids
+        ]
     candidate_page_offset = _normalize_int(candidate_offset, default=0, minimum=0, maximum=10000)
     candidate_page_limit = _normalize_int(
         candidate_limit if candidate_limit is not None else limit,
@@ -1982,9 +2013,11 @@ def get_source_collection_stage_task_context(
     }
     if retry_focus:
         context["retryFocus"] = retry_focus
-        context["usage"]["retryInstruction"] = (
-            "本轮是缺口重试：只补 retryFocus.missingCandidateIds / missingRecordIds，"
-            "不要重做已处理 ID；回写时继续使用完整真实 ID。"
+        context["usage"]["retryInstruction"] = _trim_text(retry_focus.get("retryInstruction"), max_length=1000)
+    if normalized_context_mode in {"evidence", "retry_missing", "retry_evidence"}:
+        context["usage"]["evidenceInstruction"] = (
+            "candidates[].summary 是搜集阶段保存的摘要或元数据，不等于全文；"
+            "只可对该摘要支持的判断使用 candidates[].evidenceRefs，不能虚构页码、原文引语或全文结论。"
         )
     context["usage"]["continuationHint"] = _source_collection_context_continuation_hint(
         context["candidatePage"],
@@ -19303,6 +19336,49 @@ def _source_collection_stage_retry_focus(
     }
 
 
+def _source_collection_stage_evidence_retry_focus(
+    task: dict[str, Any],
+    candidates: list[dict[str, Any]],
+) -> dict[str, Any]:
+    if not isinstance(task, dict) or not task:
+        return {}
+    writeback = task.get("writeback") if isinstance(task.get("writeback"), dict) else {}
+    materialized = (
+        writeback.get("materializedContentExtraction")
+        if isinstance(writeback.get("materializedContentExtraction"), dict)
+        else {}
+    )
+    missing_anchor_count = _source_collection_count(materialized.get("missingEvidenceAnchorCount"))
+    coverage = _source_collection_stage_task_coverage_summary(task)
+    blocked_ids = set(
+        _normalize_text_list(coverage.get("blockedCandidateIds"), max_items=500, max_length=160)
+        if isinstance(coverage, dict)
+        else []
+    )
+    explicit_gap_ids: list[str] = []
+    for candidate in candidates:
+        candidate_id = _trim_text(candidate.get("candidateId"), max_length=160)
+        metadata = candidate.get("metadata") if isinstance(candidate.get("metadata"), dict) else {}
+        extraction = metadata.get("contentExtraction") if isinstance(metadata.get("contentExtraction"), dict) else {}
+        if candidate_id and _trim_text(extraction.get("evidenceStatus"), max_length=80) == "missing_evidence_anchor":
+            explicit_gap_ids.append(candidate_id)
+    evidence_gap_ids = explicit_gap_ids or [
+        _trim_text(item.get("candidateId"), max_length=160)
+        for item in candidates
+        if _trim_text(item.get("candidateId"), max_length=160) in blocked_ids
+    ]
+    if not evidence_gap_ids:
+        return {}
+    missing_anchor_count = missing_anchor_count or len(evidence_gap_ids)
+    return {
+        "mode": "missing_evidence_anchor",
+        "sourceTaskId": _trim_text(task.get("taskId"), max_length=160),
+        "missingEvidenceAnchorCount": missing_anchor_count,
+        "evidenceGapCandidateIds": evidence_gap_ids[:120],
+        "retryInstruction": "只补这些候选的证据锚点；不要重做已有 evidence_ready 结果，也不要把摘要元数据写成全文证据。",
+    }
+
+
 def _find_source_collection_stage_session_task(team_id: str, run_id: str, *, idempotency_key: str) -> dict[str, Any] | None:
     key = _trim_text(idempotency_key, max_length=240)
     if not key:
@@ -19899,6 +19975,26 @@ def _source_collection_stage_task_has_missing_coverage(task: dict[str, Any] | No
     return bool(_source_collection_count(coverage.get("missing")) or coverage.get("missingCandidateIds") or coverage.get("missingRecordIds"))
 
 
+def _source_collection_stage_task_has_evidence_gaps(task: dict[str, Any] | None) -> bool:
+    if not isinstance(task, dict) or not task:
+        return False
+    writeback = task.get("writeback") if isinstance(task.get("writeback"), dict) else {}
+    materialized = (
+        writeback.get("materializedContentExtraction")
+        if isinstance(writeback.get("materializedContentExtraction"), dict)
+        else {}
+    )
+    if _source_collection_count(materialized.get("missingEvidenceAnchorCount")) > 0:
+        return True
+    coverage = _source_collection_stage_task_coverage_summary(task)
+    return bool(
+        isinstance(coverage, dict)
+        and bool(coverage.get("applicable"))
+        and bool(coverage.get("complete"))
+        and coverage.get("blockedCandidateIds")
+    )
+
+
 def _source_collection_stage_task_needs_writeback_resume(task: dict[str, Any] | None) -> bool:
     if not isinstance(task, dict) or not task:
         return False
@@ -19945,6 +20041,24 @@ def _source_collection_stage_task_needs_writeback_resume(task: dict[str, Any] | 
     )
 
 
+def _source_collection_stage_task_context_mode(
+    *,
+    stage_id: str,
+    agent_role: str,
+    previous_task: dict[str, Any] | None,
+) -> str:
+    can_materialize_formal_knowledge = _source_collection_stage_can_materialize_formal_knowledge(stage_id, agent_role)
+    if stage_id == "extraction" and not can_materialize_formal_knowledge:
+        if _source_collection_stage_task_has_missing_coverage(previous_task):
+            return "retry_missing"
+        if _source_collection_stage_task_has_evidence_gaps(previous_task):
+            return "retry_evidence"
+        return "evidence"
+    if stage_id == "relations":
+        return "minimal"
+    return "compact"
+
+
 def _source_collection_stage_session_task_message(
     *,
     team: dict[str, Any],
@@ -19962,6 +20076,7 @@ def _source_collection_stage_session_task_message(
     writeback_contract: dict[str, Any],
     task_checklist: list[dict[str, Any]],
     previous_task: dict[str, Any] | None = None,
+    context_mode: str = "",
 ) -> str:
     can_materialize_formal_knowledge = _source_collection_stage_can_materialize_formal_knowledge(stage_id, agent_role)
     boundary_text = (
@@ -19993,11 +20108,11 @@ def _source_collection_stage_session_task_message(
     task_title = _source_collection_stage_task_title(stage_id)
     contract_json = json.dumps(writeback_contract, ensure_ascii=False, sort_keys=True)
     writeback_resume = _source_collection_stage_task_needs_writeback_resume(previous_task)
-    context_mode = "compact"
-    if stage_id == "extraction" and not can_materialize_formal_knowledge:
-        context_mode = "retry_missing" if _source_collection_stage_task_has_missing_coverage(previous_task) else "minimal"
-    elif stage_id == "relations":
-        context_mode = "minimal"
+    context_mode = _trim_text(context_mode, max_length=40) or _source_collection_stage_task_context_mode(
+        stage_id=stage_id,
+        agent_role=agent_role,
+        previous_task=previous_task,
+    )
     context_tool_payload = {
         "team_id": writeback_contract.get("teamId", ""),
         "run_id": writeback_contract.get("runId", ""),
@@ -20065,15 +20180,18 @@ def _source_collection_stage_session_task_message(
             "- 资料寻找阶段的无效来源写入 `invalidSources[]`，每条包含 title/sourceRef 或 DOI/url、reason，系统会记录并从后续流程过滤。",
             "- 在本会话里完成当前阶段任务，并把可审查的结论、证据引用和下一步写清楚。",
             (
-                "- 本轮是缺口重试：`context_mode=retry_missing` 只返回上一轮未覆盖 ID；只补 `retryFocus.missingCandidateIds` / `missingRecordIds`，不要重做已处理资料。"
+                "- 本轮是覆盖缺口重试：`context_mode=retry_missing` 只返回上一轮未覆盖 ID；只补 `retryFocus.missingCandidateIds` / `missingRecordIds`，不要重做已处理资料。"
                 if context_mode == "retry_missing"
-                else "- 本轮默认使用最小上下文：先拿真实 ID、标题和 locator，必要时分页读取；不要把旧提炼摘要当作本轮证据。"
+                else "- 本轮是证据缺口重试：`context_mode=retry_evidence` 只返回 `retryFocus.evidenceGapCandidateIds`；保留原决定，仅补真实证据锚点。"
+                if context_mode == "retry_evidence"
+                else "- 本轮使用证据上下文：逐页读取真实 ID、受控摘要和 `evidenceRefs`；摘要只代表搜集阶段保存的摘要/元数据，不等于全文。"
             ),
             *pagination_lines,
             "- 资料提炼阶段如果 `candidatePage.total=0`，输入就是原始 DataRecord：请用 `recordExtractions[]` 回写，并绑定完整 `recordId`；已有候选后优先用 `candidateExtractions[]` 绑定完整 `candidateId`，可直接在每项里写 `decision=keep/needs_more_info/exclude`。",
             "- 资料提炼阶段不需要额外提交一份 `candidateDecisions[]`；只有专门做资料审查/质检时才单独回写 `candidateDecisions[]`。",
             "- 可以分批调用 `source_collection_stage_writeback_tool`，系统会按真实 `candidateId` / `recordId` 累计上一批结果；不要因为 compact 返回未展开完整数组而重复提交同一大包。",
             "- 资料提炼采用宽松保留：只要有可用内容或有价值线索，就写 `decision=keep` 或 `needs_more_info`，并填写 `valueSummary`、`defects`、`followUpSuggestion`；不要因为缺 DOI/缺全文直接丢弃。",
+            "- 对摘要或元数据足以支持的范围，可把 `candidates[].evidenceRefs` 原样写入对应 extraction；不得据此虚构页码、直接引语或全文结论。",
             "- 只有确认没有摘要、正文、可验证内容或明显跑题时，才写 `decision=exclude` 和 `excludeReason=no_effective_content/out_of_scope/unobtainable`；这些来源会被移出后续流程并记录，避免下次重复搜到。",
             "- 如果上下文返回 `excludedSourceSummary.excludedCount>0`，表示这些资料已从本轮活跃流程移出，不要再次处理或把它们算作待补资料。",
             "- 不要推断截断或隐藏资料；不要把 `remaining_11_candidates`、短 ID 或聚合占位符当作 recordId/candidateId。",

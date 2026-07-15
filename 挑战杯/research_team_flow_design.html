@@ -2479,6 +2479,12 @@
               <span>候选 writeback 会统计 evidenceLedgerCandidateCount、evidenceReadyCandidateCount 和 missingEvidenceAnchorCount；Teams 资料卡、资料提炼详情和资料关系整理节点会显示 evidence_ready / missing_evidence_anchor，缺锚点结构化证据降级为 needs_review，避免无来源结论进入 paper_note、机制提取或资料关系整理。</span>
             </div>
 <div class="blueprint-row">
+              <b>M6.70</b>
+              <strong>资料提炼证据上下文与定向补证</strong>
+              <span>source_extractor 首轮使用 source_collection_context_tool 的 evidence 模式，分页读取真实 candidateId、搜集阶段保存的受控摘要和可复制 evidenceRefs；覆盖缺口使用 retry_missing，覆盖完整但存在 blocked 或 missing_evidence_anchor 时使用 retry_evidence。</span>
+              <span>retry_evidence 只返回 evidenceGapCandidateIds，避免重新处理 evidence_ready 候选；摘要或元数据只能支撑其明确范围，不能据此虚构全文、页码或直接引语，跨站 web_fetch 安全边界保持不变。</span>
+            </div>
+<div class="blueprint-row">
               <b>M7</b>
               <strong>实验计划账本首切</strong>
               <span>新增 experiments/status 与 experiments/plan：聚合实验阶段轮次、algorithm_hypothesis 候选、计划草稿和 baseline/metric/dataset/smoke 缺口，并把草稿写入 experiment_plans/index.json。</span>

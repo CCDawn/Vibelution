@@ -4361,11 +4361,269 @@ def test_source_collection_context_retry_missing_returns_only_uncovered_candidat
     )
 
     assert retry_task["created"] is True
+    assert retry_task["task"]["sourceContextMode"] == "retry_missing"
+    assert retry_task["task"]["retrySourceTaskId"] == task["taskId"]
     assert len(submitted_messages) == 2
     assert '"context_mode": "retry_missing"' in submitted_messages[-1]
     assert "只补" in submitted_messages[-1]
     assert candidates[0]["candidateId"] not in submitted_messages[-1]
     assert candidates[2]["candidateId"] in submitted_messages[-1]
+    new_task_context = team_workflow_orchestration_service.get_source_collection_stage_task_context(
+        team["teamId"],
+        task_id=retry_task["taskId"],
+        candidate_limit=5,
+        context_mode="retry_missing",
+    )
+    assert [item["candidateId"] for item in new_task_context["candidates"]] == expected_missing_ids
+
+
+def test_source_collection_context_evidence_mode_returns_bounded_summary_and_source_anchor(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
+    agent = agent_directory_service.create_agent_instance(display_name="资料提炼")
+    session_service.ensure_agent_direct_session(agent_id=agent["agentId"], title="资料提炼")
+    team = team_service.create_team(
+        name="挑战杯科研团队",
+        members=[{"agentId": agent["agentId"], "role": "source_extractor", "agentName": "资料提炼"}],
+    )
+    run_response = team_workflow_orchestration_service.start_source_collection_run(
+        team["teamId"],
+        {
+            "topic": "神经预测编码资料提炼",
+            "agentRoles": ["source_extractor"],
+            "agentIds": {"source_extractor": agent["agentId"]},
+            "querySeeds": ["predictive coding neural algorithm"],
+            "promptCachePolicy": {"requirement": "disabled"},
+        },
+    )
+    run_id = run_response["run"]["runId"]
+    summary = "Predictive coding evidence retained from the governed source-collection record. " * 8
+    candidate = team_workflow_orchestration_service.register_candidate_source(
+        team["teamId"],
+        {
+            "title": "Predictive coding evidence source",
+            "sourceUrl": "https://doi.org/10.0000/evidence-context",
+            "sourceKind": "paper",
+            "summary": summary,
+            "allowedForAnalysis": True,
+            "metadata": {"sourceCollectionRunId": run_id, "doi": "10.0000/evidence-context"},
+            "createdByAgent": "content-extraction-agent",
+        },
+    )["candidate"]
+    monkeypatch.setattr(
+        session_service,
+        "submit_session_message",
+        lambda session_id, content, **kwargs: {
+            "accepted": True,
+            "sessionId": session_id,
+            "turnId": "turn-evidence-context",
+            "status": "running",
+        },
+    )
+    task = team_workflow_orchestration_service.start_source_collection_stage_session_task(
+        team["teamId"],
+        run_id,
+        {"stageId": "extraction", "agentId": agent["agentId"], "agentRole": "source_extractor"},
+    )
+
+    context = team_workflow_orchestration_service.get_source_collection_stage_task_context(
+        team["teamId"],
+        task_id=task["taskId"],
+        candidate_limit=5,
+        context_mode="evidence",
+    )
+
+    assert context["contextMode"] == "evidence"
+    assert context["fieldMode"] == "evidence_source"
+    assert context["candidateFieldsTruncated"] is False
+    assert context["doNotUsePreviewAsEvidence"] is False
+    assert context["candidates"][0]["candidateId"] == candidate["candidateId"]
+    assert context["candidates"][0]["summary"] == summary.strip()
+    assert "summaryPreview" not in context["candidates"][0]
+    assert context["candidates"][0]["evidenceRefs"] == [
+        {"type": "doi", "id": "10.0000/evidence-context", "label": "Predictive coding evidence source"}
+    ]
+    assert context["candidates"][0]["evidenceScope"] == "collected_summary_metadata"
+    assert "不等于全文" in context["usage"]["evidenceInstruction"]
+
+
+def test_source_collection_context_evidence_mode_anchors_raw_records_when_candidates_are_absent(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
+    team = team_service.create_team(name="挑战杯科研团队")
+    run_response = team_workflow_orchestration_service.start_source_collection_run(
+        team["teamId"],
+        {
+            "topic": "预测编码原始资料提炼",
+            "agentRoles": ["source_extractor"],
+            "agentIds": {"source_extractor": "extraction-agent"},
+            "querySeeds": ["predictive coding"],
+            "promptCachePolicy": {"requirement": "disabled"},
+        },
+    )
+    run_id = run_response["run"]["runId"]
+    record = data_processing_service.add_record(
+        run_id,
+        {
+            "sourceType": "paper",
+            "sourceRef": "https://doi.org/10.0000/raw-evidence-context",
+            "title": "Predictive coding raw evidence source",
+            "summary": "A governed abstract retained on the raw DataRecord before candidate import.",
+            "metadata": {"doi": "10.0000/raw-evidence-context"},
+        },
+    )
+    task = {
+        "taskId": "stagetask-raw-evidence-context",
+        "runId": run_id,
+        "stageId": "extraction",
+        "agentId": "extraction-agent",
+        "agentRole": "source_extractor",
+        "sessionId": "session-extraction",
+        "status": "running",
+        "title": "资料提炼任务",
+        "writebackContract": {"taskId": "stagetask-raw-evidence-context"},
+    }
+    team_workflow_orchestration_service._upsert_source_collection_stage_session_task(team["teamId"], run_id, task)
+
+    context = team_workflow_orchestration_service.get_source_collection_stage_task_context(
+        team["teamId"],
+        task_id=task["taskId"],
+        record_limit=5,
+        context_mode="evidence",
+    )
+
+    assert context["candidatePage"]["total"] == 0
+    assert context["records"][0]["recordId"] == record["recordId"]
+    assert context["records"][0]["summary"].startswith("A governed abstract")
+    assert context["records"][0]["evidenceRefs"] == [
+        {"type": "data_record", "id": record["recordId"], "label": "Predictive coding raw evidence source"}
+    ]
+    assert context["records"][0]["evidenceScope"] == "collected_summary_metadata"
+
+
+def test_source_collection_context_retry_evidence_returns_only_missing_anchor_candidates(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
+    agent = agent_directory_service.create_agent_instance(display_name="资料提炼")
+    session_service.ensure_agent_direct_session(agent_id=agent["agentId"], title="资料提炼")
+    team = team_service.create_team(
+        name="挑战杯科研团队",
+        members=[{"agentId": agent["agentId"], "role": "source_extractor", "agentName": "资料提炼"}],
+    )
+    run_response = team_workflow_orchestration_service.start_source_collection_run(
+        team["teamId"],
+        {
+            "topic": "神经预测编码资料提炼",
+            "agentRoles": ["source_extractor"],
+            "agentIds": {"source_extractor": agent["agentId"]},
+            "querySeeds": ["predictive coding neural algorithm"],
+            "promptCachePolicy": {"requirement": "disabled"},
+        },
+    )
+    run_id = run_response["run"]["runId"]
+    candidates = [
+        team_workflow_orchestration_service.register_candidate_source(
+            team["teamId"],
+            {
+                "title": f"Predictive coding evidence retry {index}",
+                "sourceUrl": f"https://doi.org/10.0000/retry-evidence-{index}",
+                "sourceKind": "paper",
+                "summary": "Predictive coding summary retained by the source collection stage.",
+                "allowedForAnalysis": True,
+                "metadata": {"sourceCollectionRunId": run_id, "doi": f"10.0000/retry-evidence-{index}"},
+                "createdByAgent": "content-extraction-agent",
+            },
+        )["candidate"]
+        for index in range(2)
+    ]
+    submitted_messages: list[str] = []
+    monkeypatch.setattr(
+        session_service,
+        "submit_session_message",
+        lambda session_id, content, **kwargs: submitted_messages.append(content)
+        or {
+            "accepted": True,
+            "sessionId": session_id,
+            "turnId": f"turn-retry-evidence-{len(submitted_messages)}",
+            "status": "running",
+        },
+    )
+    task = team_workflow_orchestration_service.start_source_collection_stage_session_task(
+        team["teamId"],
+        run_id,
+        {"stageId": "extraction", "agentId": agent["agentId"], "agentRole": "source_extractor"},
+    )
+    _append_stage_task_tool_trace(tmp_path, task["task"])
+    response = team_workflow_orchestration_service.writeback_source_collection_stage_session_task(
+        team["teamId"],
+        task["taskId"],
+        {
+            "status": "completed",
+            "summary": "两条资料均已覆盖，但第二条尚缺证据锚点。",
+            "result": {
+                "candidateExtractions": [
+                    {
+                        "candidateId": candidates[0]["candidateId"],
+                        "decision": "keep",
+                        "summary": "已有摘要证据。",
+                        "evidenceRefs": [{"type": "doi", "id": "10.0000/retry-evidence-0"}],
+                    },
+                    {
+                        "candidateId": candidates[1]["candidateId"],
+                        "decision": "needs_more_info",
+                        "summary": "内容有价值，但没有写入锚点。",
+                    },
+                ]
+            },
+            "recordedByAgent": agent["agentId"],
+        },
+    )
+
+    assert response["writeback"]["coverageSummary"]["complete"] is True
+    assert response["writeback"]["materializedContentExtraction"]["missingEvidenceAnchorCount"] == 0
+    assert response["writeback"]["coverageSummary"]["blockedCandidateIds"] == [candidates[1]["candidateId"]]
+    retry_context = team_workflow_orchestration_service.get_source_collection_stage_task_context(
+        team["teamId"],
+        task_id=task["taskId"],
+        candidate_limit=5,
+        context_mode="retry_evidence",
+    )
+
+    assert retry_context["contextMode"] == "retry_evidence"
+    assert retry_context["fieldMode"] == "evidence_source"
+    assert [item["candidateId"] for item in retry_context["candidates"]] == [candidates[1]["candidateId"]]
+    assert retry_context["retryFocus"]["evidenceGapCandidateIds"] == [candidates[1]["candidateId"]]
+    assert retry_context["candidates"][0]["evidenceRefs"] == [
+        {
+            "type": "doi",
+            "id": "10.0000/retry-evidence-1",
+            "label": "Predictive coding evidence retry 1",
+        }
+    ]
+
+    retry_task = team_workflow_orchestration_service.start_source_collection_stage_session_task(
+        team["teamId"],
+        run_id,
+        {
+            "stageId": "extraction",
+            "agentId": agent["agentId"],
+            "agentRole": "source_extractor",
+            "idempotencyKey": "retry-missing-evidence-anchor",
+        },
+    )
+
+    assert retry_task["created"] is True
+    assert retry_task["task"]["sourceContextMode"] == "retry_evidence"
+    assert retry_task["task"]["retrySourceTaskId"] == task["taskId"]
+    assert '"context_mode": "retry_evidence"' in submitted_messages[-1]
+    assert "只返回 `retryFocus.evidenceGapCandidateIds`" in submitted_messages[-1]
+    new_task_context = team_workflow_orchestration_service.get_source_collection_stage_task_context(
+        team["teamId"],
+        task_id=retry_task["taskId"],
+        candidate_limit=5,
+        context_mode="retry_evidence",
+    )
+    assert [item["candidateId"] for item in new_task_context["candidates"]] == [candidates[1]["candidateId"]]
 
 
 def test_source_collection_extraction_resume_after_interrupted_reading_prioritizes_writeback(tmp_path, monkeypatch):

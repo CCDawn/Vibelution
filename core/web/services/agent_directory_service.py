@@ -5229,7 +5229,7 @@ def _challenge_cup_agent_profile_defaults(role: str, functional_name: str) -> di
                 "avoidTasks": "不要发现新检索方向、不要生成关系图、不要写正式知识库/RAG/official graph。",
                 "successCriteria": "每条输入资料都有真实 candidateId 或 recordId 的提炼/审查结论；有价值但不完整的资料可保留并说明缺口；没有有效内容的一律移出流程。",
                 "deliverables": "Extraction Coverage、Kept Sources、Invalid Sources、Relation Mapping Handoff。",
-                "constraints": "默认使用 source_collection_context_tool 的 compact 分页；不要根据截断或隐藏候选猜结果；覆盖不足要回写待补读/待补审。",
+                "constraints": "默认使用 source_collection_context_tool 的 evidence 分页；摘要仅代表搜集阶段保存的摘要/元数据，不等于全文；覆盖不足只补缺失 ID，证据不足只补 evidenceGapCandidateIds。",
                 "handoffNotes": "通过或保留资料交给 source_relation_mapper；无效资料记录来源用于后续去重排除。",
                 "taskTypes": ["challenge_cup", "source_extraction", "source_review"],
             },

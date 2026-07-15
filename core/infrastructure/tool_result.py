@@ -332,13 +332,14 @@ def _extract_continuation_hint(result_kind: str, result_str: str) -> str:
     if result_kind == "source_collection_context":
         payload = _try_parse_json_object(result_str)
         if payload:
+            context_mode = str(payload.get("contextMode") or "compact").strip().lower() or "compact"
             record_page = payload.get("recordPage") if isinstance(payload.get("recordPage"), dict) else {}
             if record_page.get("hasMore"):
                 next_offset = record_page.get("nextOffset")
                 limit = record_page.get("limit") or 5
                 return (
                     "继续调用 source_collection_context_tool，"
-                    f"record_offset={next_offset}, record_limit={limit}, context_mode=compact。"
+                    f"record_offset={next_offset}, record_limit={limit}, context_mode={context_mode}。"
                 )
             page = payload.get("candidatePage") if isinstance(payload.get("candidatePage"), dict) else {}
             if page.get("hasMore"):
@@ -346,7 +347,7 @@ def _extract_continuation_hint(result_kind: str, result_str: str) -> str:
                 limit = page.get("limit") or 5
                 return (
                     "继续调用 source_collection_context_tool，"
-                    f"candidate_offset={next_offset}, candidate_limit={limit}, context_mode=compact。"
+                    f"candidate_offset={next_offset}, candidate_limit={limit}, context_mode={context_mode}。"
                 )
     return ""
 
@@ -435,8 +436,9 @@ def _compact_source_collection_context_result(result_str: str, max_chars: int, c
     if not payload:
         return None
     raw_context_mode = str(payload.get("contextMode") or "compact").strip().lower() or "compact"
-    if raw_context_mode not in {"compact", "minimal", "retry_missing", "full"}:
+    if raw_context_mode not in {"compact", "minimal", "evidence", "retry_missing", "retry_evidence", "full"}:
         raw_context_mode = "compact"
+    evidence_mode = raw_context_mode in {"evidence", "retry_missing", "retry_evidence"}
     record_page = payload.get("recordPage") if isinstance(payload.get("recordPage"), dict) else {}
     page = payload.get("candidatePage") if isinstance(payload.get("candidatePage"), dict) else {}
     records = [
@@ -446,15 +448,22 @@ def _compact_source_collection_context_result(result_str: str, max_chars: int, c
     ]
     compact_records = []
     for item in records[:12]:
-        compact_records.append(
-            {
-                "recordId": str(item.get("recordId") or item.get("id") or "")[:160],
-                "title": str(item.get("title") or "")[:80],
-                "sourceType": str(item.get("sourceType") or "")[:80],
-                "locator": str(item.get("doi") or item.get("sourceUrl") or item.get("sourceRef") or "")[:120],
-                "summaryPreview": str(item.get("summary") or "")[:48],
-            }
-        )
+        compact_record = {
+            "recordId": str(item.get("recordId") or item.get("id") or "")[:160],
+            "title": str(item.get("title") or "")[:120 if evidence_mode else 80],
+            "sourceType": str(item.get("sourceType") or "")[:80],
+            "locator": str(item.get("doi") or item.get("sourceUrl") or item.get("sourceRef") or "")[:120],
+        }
+        if evidence_mode:
+            compact_record["summary"] = str(item.get("summary") or "")[:420]
+            evidence_refs = [ref for ref in list(item.get("evidenceRefs") or []) if isinstance(ref, dict)][:3]
+            if evidence_refs:
+                compact_record["evidenceRefs"] = evidence_refs
+            if item.get("evidenceScope"):
+                compact_record["evidenceScope"] = str(item.get("evidenceScope"))[:80]
+        else:
+            compact_record["summaryPreview"] = str(item.get("summary") or "")[:48]
+        compact_records.append(compact_record)
     candidates = [
         item
         for item in list(payload.get("candidates") or [])
@@ -465,16 +474,25 @@ def _compact_source_collection_context_result(result_str: str, max_chars: int, c
         doi = str(item.get("doi") or "")[:120]
         source_url = str(item.get("sourceUrl") or "")[:120]
         source_path = str(item.get("sourcePath") or "")[:120]
-        compact_candidates.append(
-            {
-                "candidateId": str(item.get("candidateId") or item.get("id") or "")[:160],
-                "title": str(item.get("title") or "")[:80],
-                "sourceKind": str(item.get("sourceKind") or "")[:80],
-                "locator": doi or source_url or source_path,
-                "qualityBucket": str(item.get("qualityBucket") or "")[:80],
-                "summaryPreview": str(item.get("summary") or item.get("summaryPreview") or "")[:48],
-            }
-        )
+        compact_candidate = {
+            "candidateId": str(item.get("candidateId") or item.get("id") or "")[:160],
+            "title": str(item.get("title") or "")[:120 if evidence_mode else 80],
+            "sourceKind": str(item.get("sourceKind") or "")[:80],
+            "locator": doi or source_url or source_path or str(item.get("locator") or "")[:120],
+            "qualityBucket": str(item.get("qualityBucket") or "")[:80],
+        }
+        if evidence_mode:
+            compact_candidate["summary"] = str(item.get("summary") or "")[:420]
+            evidence_refs = [ref for ref in list(item.get("evidenceRefs") or []) if isinstance(ref, dict)][:3]
+            if evidence_refs:
+                compact_candidate["evidenceRefs"] = evidence_refs
+            if item.get("evidenceScope"):
+                compact_candidate["evidenceScope"] = str(item.get("evidenceScope"))[:80]
+        else:
+            compact_candidate["summaryPreview"] = str(item.get("summary") or item.get("summaryPreview") or "")[:48]
+        compact_candidates.append(compact_candidate)
+    if evidence_mode and compact_candidates:
+        compact_records = []
     compact_usage = {
         "readTool": "source_collection_context_tool",
         "writebackTool": "source_collection_stage_writeback_tool",
@@ -492,13 +510,17 @@ def _compact_source_collection_context_result(result_str: str, max_chars: int, c
         )
     elif continuation_hint:
         compact_usage["continuationHint"] = continuation_hint[:180]
+    raw_usage = payload.get("usage") if isinstance(payload.get("usage"), dict) else {}
+    for key in ("retryInstruction", "evidenceInstruction"):
+        if raw_usage.get(key):
+            compact_usage[key] = str(raw_usage.get(key))[:1000]
     compact = {
         "status": payload.get("status"),
         "contextKind": payload.get("contextKind"),
         "contextMode": f"{raw_context_mode}_from_tool_result",
-        "fieldMode": "preview_only",
+        "fieldMode": "evidence_source" if evidence_mode else "preview_only",
         "candidateFieldsTruncated": True,
-        "doNotUsePreviewAsEvidence": True,
+        "doNotUsePreviewAsEvidence": not evidence_mode,
         "visibleCandidateCount": len(compact_candidates),
         "omittedReturnedCandidateCount": max(0, int(page.get("returned") or len(compact_candidates)) - len(compact_candidates)),
         "counts": payload.get("counts") if isinstance(payload.get("counts"), dict) else {},
@@ -511,7 +533,7 @@ def _compact_source_collection_context_result(result_str: str, max_chars: int, c
         "usage": compact_usage,
         "truncationGuard": {
             "originalLength": len(result_str),
-            "message": "structured_compact; previews_not_evidence",
+            "message": "structured_compact; governed_evidence_summary" if evidence_mode else "structured_compact; previews_not_evidence",
         },
     }
     if compact_records or record_page.get("hasMore") or record_page.get("total"):
@@ -527,6 +549,49 @@ def _compact_source_collection_context_result(result_str: str, max_chars: int, c
     content = json.dumps(compact, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     if len(content) <= max_chars + 500:
         return content
+    if evidence_mode:
+        compact["candidates"] = [
+            {
+                key: value
+                for key, value in {
+                    "candidateId": str(item.get("candidateId") or "")[:160],
+                    "title": str(item.get("title") or "")[:80],
+                    "locator": str(item.get("locator") or "")[:120],
+                    "summary": str(item.get("summary") or "")[:220],
+                    "evidenceRefs": list(item.get("evidenceRefs") or [])[:1],
+                    "evidenceScope": item.get("evidenceScope"),
+                }.items()
+                if value not in ("", [], None)
+            }
+            for item in compact_candidates[:12]
+        ]
+        compact["candidateIds"] = [item.get("candidateId") for item in compact["candidates"] if item.get("candidateId")]
+        if compact_records:
+            compact["records"] = [
+                {
+                    key: value
+                    for key, value in {
+                        "recordId": str(item.get("recordId") or "")[:160],
+                        "title": str(item.get("title") or "")[:80],
+                        "locator": str(item.get("locator") or "")[:120],
+                        "summary": str(item.get("summary") or "")[:220],
+                        "evidenceRefs": list(item.get("evidenceRefs") or [])[:1],
+                        "evidenceScope": item.get("evidenceScope"),
+                    }.items()
+                    if value not in ("", [], None)
+                }
+                for item in compact_records[:12]
+            ]
+            compact["recordIds"] = [item.get("recordId") for item in compact["records"] if item.get("recordId")]
+        compact["usage"] = {
+            key: value
+            for key, value in compact_usage.items()
+            if key in {"readTool", "writebackTool", "continuationHint", "recordContinuationHint", "retryInstruction", "evidenceInstruction"}
+            and value
+        }
+        content = json.dumps(compact, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        if len(content) <= max_chars + 700:
+            return content
     compact["candidates"] = [
         {
             "candidateId": str(item.get("candidateId") or "")[:160],

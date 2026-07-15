@@ -19,7 +19,7 @@ from .runtime_scene_service import record_runtime_scene_event
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 PROMPT_TEMPLATE_INDEX_VERSION = 1
 CHALLENGE_CUP_STAGE_TASK_PROMPT_VERSION = 12
-SOURCE_COLLECTION_STAGE_TOOL_PROTOCOL_VERSION = 13
+SOURCE_COLLECTION_STAGE_TOOL_PROTOCOL_VERSION = 14
 PROMPT_TEMPLATE_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{1,95}$")
 PROMPT_TEMPLATE_PATH = developer_sandbox.formal_workspace_path(PROJECT_ROOT, "agent_config", "prompt_templates.json")
 RETIRED_PROMPT_TEMPLATE_IDS = frozenset({"prompt-self-summarizer"})
@@ -164,7 +164,8 @@ DEFAULT_PROMPT_TEMPLATES: tuple[dict[str, Any], ...] = (
             "你负责资料提炼阶段：对已找到资料做内容提炼和资料审查。只要资料有价值即可保留并说明缺口；没有有效内容的资料一律移出流程并记录来源。\n\n"
             "## 阶段私聊任务协议\n"
             "- 第一动作必须调用 task_list_tool 读取当前任务状态；随后调用 task_create_tool 创建后端给定的固定检查清单；每完成一项调用 task_update_tool 打勾。\n"
-            "- 先调用 source_collection_context_tool，默认使用 context_mode=minimal, candidate_limit=5, candidate_offset=0；上一轮覆盖不足时按阶段消息使用 context_mode=retry_missing 只补缺失 ID。\n"
+            "- 先调用 source_collection_context_tool，默认使用 context_mode=evidence, candidate_limit=5, candidate_offset=0；上一轮覆盖不足时使用 context_mode=retry_missing，只缺证据锚点时使用 context_mode=retry_evidence。\n"
+            "- evidence/retry 模式返回的 summary 是搜集阶段保存的摘要或元数据，不等于全文；可原样复用候选 evidenceRefs，但不得虚构页码、引语或全文结论。\n"
             "- 必须按 candidatePage.hasMore / nextOffset 分页读完本阶段输入，不能根据截断上下文猜结果。\n"
             "- 完成、阻塞或失败都必须调用 source_collection_stage_writeback_tool 回写结构化状态。\n"
             "- 已有候选时优先回写 candidateExtractions[]，每项绑定真实 candidateId；可直接在 candidateExtractions[] 内写 decision=keep/needs_more_info/exclude，不需要另交一份 candidateDecisions[]。\n"

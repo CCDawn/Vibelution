@@ -9,7 +9,7 @@ from .source_collection_common import normalize_metadata, normalize_text_list, s
 
 def normalize_source_collection_context_mode(value: Any) -> str:
     normalized = trim_text(value, max_length=40).lower()
-    if normalized in {"full", "compact", "minimal", "retry_missing"}:
+    if normalized in {"full", "compact", "minimal", "evidence", "retry_missing", "retry_evidence"}:
         return normalized
     return "compact"
 
@@ -34,7 +34,8 @@ def source_collection_context_record_continuation_hint(record_page: dict[str, An
 
 def compact_source_collection_stage_task_context(context: dict[str, Any]) -> dict[str, Any]:
     context_mode = normalize_source_collection_context_mode(context.get("contextMode"))
-    minimal_mode = context_mode in {"minimal", "retry_missing"}
+    minimal_mode = context_mode == "minimal"
+    evidence_mode = context_mode in {"evidence", "retry_missing", "retry_evidence"}
     candidate_page = context.get("candidatePage") if isinstance(context.get("candidatePage"), dict) else {}
     record_page = context.get("recordPage") if isinstance(context.get("recordPage"), dict) else {}
     usage = context.get("usage") if isinstance(context.get("usage"), dict) else {}
@@ -48,13 +49,15 @@ def compact_source_collection_stage_task_context(context: dict[str, Any]) -> dic
         compact_usage["doNotUse"] = usage.get("doNotUse") if isinstance(usage.get("doNotUse"), list) else []
     if trim_text(usage.get("retryInstruction"), max_length=1000):
         compact_usage["retryInstruction"] = trim_text(usage.get("retryInstruction"), max_length=1000)
+    if trim_text(usage.get("evidenceInstruction"), max_length=1000):
+        compact_usage["evidenceInstruction"] = trim_text(usage.get("evidenceInstruction"), max_length=1000)
     records = [
-        compact_source_collection_context_record(item)
+        compact_source_collection_context_record(item, evidence=evidence_mode)
         for item in list(context.get("records") or [])
         if isinstance(item, dict)
     ] if not minimal_mode or not list(context.get("candidates") or []) else []
     candidates = [
-        compact_source_collection_context_candidate(item, minimal=minimal_mode)
+        compact_source_collection_context_candidate(item, minimal=minimal_mode, evidence=evidence_mode)
         for item in list(context.get("candidates") or [])
         if isinstance(item, dict)
     ]
@@ -64,9 +67,9 @@ def compact_source_collection_stage_task_context(context: dict[str, Any]) -> dic
         "status": context.get("status"),
         "contextKind": context.get("contextKind"),
         "contextMode": context_mode,
-        "fieldMode": "id_and_locator_only" if minimal_mode else "preview_only",
-        "candidateFieldsTruncated": True,
-        "doNotUsePreviewAsEvidence": True,
+        "fieldMode": "id_and_locator_only" if minimal_mode else "evidence_source" if evidence_mode else "preview_only",
+        "candidateFieldsTruncated": not evidence_mode,
+        "doNotUsePreviewAsEvidence": not evidence_mode,
         "teamId": trim_text(context.get("teamId"), max_length=128),
         "runId": trim_text(context.get("runId"), max_length=128),
         "stageId": trim_text(context.get("stageId"), max_length=80),
@@ -122,13 +125,15 @@ def compact_source_collection_excluded_summary(summary: dict[str, Any]) -> dict[
     }
 
 
-def compact_source_collection_context_record(record: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "recordId": trim_text(record.get("recordId"), max_length=128),
-        "title": trim_text(record.get("title"), max_length=180),
-        "summary": trim_text(record.get("summary"), max_length=260),
+def compact_source_collection_context_record(record: dict[str, Any], *, evidence: bool = False) -> dict[str, Any]:
+    record_id = trim_text(record.get("recordId"), max_length=128)
+    title = trim_text(record.get("title"), max_length=240 if evidence else 180)
+    compact = {
+        "recordId": record_id,
+        "title": title,
+        "summary": trim_text(record.get("summary"), max_length=1200 if evidence else 260),
         "sourceType": trim_text(record.get("sourceType"), max_length=80),
-        "sourceUrl": trim_text(record.get("sourceUrl"), max_length=320),
+        "sourceUrl": trim_text(record.get("sourceUrl"), max_length=1000 if evidence else 320),
         "doi": trim_text(record.get("doi"), max_length=160),
         "containerTitle": trim_text(record.get("containerTitle"), max_length=160),
         "issued": trim_text(record.get("issued"), max_length=80),
@@ -136,25 +141,54 @@ def compact_source_collection_context_record(record: dict[str, Any]) -> dict[str
         "assignmentId": trim_text(record.get("assignmentId"), max_length=128),
         "identityKey": trim_text(record.get("identityKey"), max_length=180),
     }
+    if evidence:
+        compact["sourceRef"] = trim_text(record.get("sourceRef"), max_length=1000)
+        compact["rawLocation"] = trim_text(record.get("rawLocation"), max_length=1000)
+        if record_id:
+            compact["evidenceRefs"] = [{"type": "data_record", "id": record_id, "label": title or record_id}]
+            compact["evidenceScope"] = "collected_summary_metadata"
+    return {key: value for key, value in compact.items() if value not in ("", [], {})}
 
 
-def compact_source_collection_context_candidate(candidate: dict[str, Any], *, minimal: bool = False) -> dict[str, Any]:
+def compact_source_collection_context_candidate(
+    candidate: dict[str, Any],
+    *,
+    minimal: bool = False,
+    evidence: bool = False,
+) -> dict[str, Any]:
     latest_assessment = candidate.get("latestAssessment") if isinstance(candidate.get("latestAssessment"), dict) else {}
     content_extraction = candidate.get("contentExtraction") if isinstance(candidate.get("contentExtraction"), dict) else {}
     doi = trim_text(candidate.get("doi"), max_length=160)
-    source_url = trim_text(candidate.get("sourceUrl"), max_length=120 if minimal else 180)
-    source_path = trim_text(candidate.get("sourcePath"), max_length=120 if minimal else 180)
+    source_url = trim_text(candidate.get("sourceUrl"), max_length=120 if minimal else 1000 if evidence else 180)
+    source_path = trim_text(candidate.get("sourcePath"), max_length=120 if minimal else 1000 if evidence else 180)
+    source_record_id = trim_text(candidate.get("sourceRecordId"), max_length=128)
     locator = doi or source_url or source_path
     compact: dict[str, Any] = {
         "candidateId": trim_text(candidate.get("candidateId"), max_length=128),
-        "title": trim_text(candidate.get("title"), max_length=80 if minimal else 120),
-        "summaryPreview": trim_text(candidate.get("summary"), max_length=48 if minimal else 24),
+        "title": trim_text(candidate.get("title"), max_length=80 if minimal else 240 if evidence else 120),
         "sourceKind": trim_text(candidate.get("sourceKind"), max_length=80),
         "locator": locator,
-        "sourceRecordId": trim_text(candidate.get("sourceRecordId"), max_length=128),
+        "sourceRecordId": source_record_id,
         "qualityStatus": trim_text(candidate.get("qualityStatus"), max_length=80),
         "qualityBucket": trim_text(candidate.get("qualityBucket"), max_length=80),
     }
+    if evidence:
+        compact["summary"] = trim_text(candidate.get("summary"), max_length=1200)
+        compact["sourceUrl"] = source_url
+        compact["sourcePath"] = source_path
+        compact["doi"] = doi
+        evidence_ref = _source_collection_candidate_evidence_ref(
+            source_record_id=source_record_id,
+            doi=doi,
+            source_url=source_url,
+            source_path=source_path,
+            label=trim_text(candidate.get("title"), max_length=240),
+        )
+        if evidence_ref:
+            compact["evidenceRefs"] = [evidence_ref]
+            compact["evidenceScope"] = "collected_summary_metadata"
+    else:
+        compact["summaryPreview"] = trim_text(candidate.get("summary"), max_length=48 if minimal else 24)
     if latest_assessment and not minimal:
         compact["latestAssessment"] = {
             "decision": trim_text(latest_assessment.get("decision"), max_length=80),
@@ -172,6 +206,29 @@ def compact_source_collection_context_candidate(candidate: dict[str, Any], *, mi
         for key, value in compact.items()
         if value not in ("", [], {})
     }
+
+
+def _source_collection_candidate_evidence_ref(
+    *,
+    source_record_id: str,
+    doi: str,
+    source_url: str,
+    source_path: str,
+    label: str,
+) -> dict[str, str]:
+    ref_type = ""
+    ref_id = ""
+    if source_record_id:
+        ref_type, ref_id = "data_record", source_record_id
+    elif doi:
+        ref_type, ref_id = "doi", doi
+    elif source_url:
+        ref_type, ref_id = "source_url", source_url
+    elif source_path:
+        ref_type, ref_id = "source_path", source_path
+    if not ref_id:
+        return {}
+    return {"type": ref_type, "id": ref_id, "label": label or ref_id}
 
 
 def compact_source_collection_context_run(run: dict[str, Any]) -> dict[str, Any]:
