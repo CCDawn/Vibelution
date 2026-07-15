@@ -1867,7 +1867,9 @@ def get_source_collection_stage_task_context(
     task_context_mode_raw = _trim_text(task.get("sourceContextMode"), max_length=40)
     if task_context_mode_raw:
         task_context_mode = _normalize_source_collection_context_mode(task_context_mode_raw)
-        if task_context_mode in {"retry_missing", "retry_evidence"}:
+        if task_context_mode in {"retry_missing", "retry_evidence"} or (
+            normalized_stage_id == "relations" and task_context_mode == "evidence"
+        ):
             normalized_context_mode = task_context_mode
     run_bundle = _source_collection_run_context_bundle(normalized_team_id, normalized_run_id)
     task_agent_id = _trim_text(task.get("agentId"), max_length=160)
@@ -4051,6 +4053,7 @@ def _materialize_source_collection_stage_writeback_content_extraction(
             metadata = candidate.get("metadata") if isinstance(candidate.get("metadata"), dict) else {}
             normalized_extraction = {
                 "status": _trim_text(extraction.get("status") or "extracted", max_length=80),
+                "decision": _source_collection_stage_writeback_record_extraction_decision(extraction),
                 "summary": _trim_text(
                     extraction.get("summary")
                     or extraction.get("finding")
@@ -20136,7 +20139,7 @@ def _source_collection_stage_task_context_mode(
             return "retry_evidence"
         return "evidence"
     if stage_id == "relations":
-        return "minimal"
+        return "evidence"
     return "compact"
 
 

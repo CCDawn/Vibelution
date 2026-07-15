@@ -4811,6 +4811,85 @@ def test_source_collection_context_minimal_strips_stale_candidate_artifacts(tmp_
     assert len(json.dumps(context, ensure_ascii=False)) < 2600
 
 
+def test_source_relation_task_keeps_extraction_evidence_when_model_requests_minimal_context(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
+    agent = agent_directory_service.create_agent_instance(display_name="资料关系整理")
+    session_service.ensure_agent_direct_session(agent_id=agent["agentId"], title="资料关系整理")
+    team = team_service.create_team(
+        name="挑战杯科研团队",
+        members=[{"agentId": agent["agentId"], "role": "source_relation_mapper", "agentName": "资料关系整理"}],
+    )
+    run_response = team_workflow_orchestration_service.start_source_collection_run(
+        team["teamId"],
+        {
+            "topic": "预测编码资料关系",
+            "agentRoles": ["source_relation_mapper"],
+            "agentIds": {"source_relation_mapper": agent["agentId"]},
+            "querySeeds": ["predictive coding relations"],
+            "promptCachePolicy": {"requirement": "disabled"},
+        },
+    )
+    run_id = run_response["run"]["runId"]
+    candidate = team_workflow_orchestration_service.register_candidate_source(
+        team["teamId"],
+        {
+            "title": "Predictive coding evidence candidate",
+            "sourceUrl": "https://doi.org/10.0000/relation-evidence",
+            "sourceKind": "paper",
+            "summary": "Predictive coding hierarchy supports relation mapping.",
+            "allowedForAnalysis": True,
+            "metadata": {
+                "sourceCollectionRunId": run_id,
+                "doi": "10.0000/relation-evidence",
+                "contentExtraction": {
+                    "status": "extracted",
+                    "decision": "keep",
+                    "summary": "层级预测误差支持跨层关系。",
+                    "evidenceStatus": "evidence_ready",
+                    "evidenceRefs": [{"type": "doi", "id": "10.0000/relation-evidence"}],
+                    "evidenceLedger": {
+                        "status": "evidence_ready",
+                        "evidenceRefs": [{"type": "doi", "id": "10.0000/relation-evidence"}],
+                    },
+                },
+            },
+            "createdByAgent": "content-extraction-agent",
+        },
+    )["candidate"]
+    monkeypatch.setattr(
+        session_service,
+        "submit_session_message",
+        lambda session_id, content, **kwargs: {
+            "accepted": True,
+            "sessionId": session_id,
+            "turnId": "turn-relation-evidence-context",
+            "status": "running",
+        },
+    )
+
+    task = team_workflow_orchestration_service.start_source_collection_stage_session_task(
+        team["teamId"],
+        run_id,
+        {"stageId": "relations", "agentId": agent["agentId"], "agentRole": "source_relation_mapper"},
+    )
+    context = team_workflow_orchestration_service.get_source_collection_stage_task_context(
+        team["teamId"],
+        task_id=task["taskId"],
+        candidate_limit=5,
+        context_mode="minimal",
+    )
+
+    assert task["task"]["sourceContextMode"] == "evidence"
+    assert context["contextMode"] == "evidence"
+    relation_candidate = next(item for item in context["candidates"] if item["candidateId"] == candidate["candidateId"])
+    assert relation_candidate["contentExtraction"]["decision"] == "keep"
+    assert relation_candidate["contentExtraction"]["evidenceStatus"] == "evidence_ready"
+    assert relation_candidate["contentExtraction"]["evidenceRefs"] == [
+        {"type": "doi", "id": "10.0000/relation-evidence"}
+    ]
+
+
 def test_source_quality_stage_writeback_materializes_candidate_decisions(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)

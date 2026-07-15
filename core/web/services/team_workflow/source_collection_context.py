@@ -198,8 +198,24 @@ def compact_source_collection_context_candidate(
     if content_extraction and not minimal:
         compact["contentExtraction"] = {
             "status": trim_text(content_extraction.get("status"), max_length=80),
+            "decision": trim_text(content_extraction.get("decision"), max_length=80),
             "summary": trim_text(content_extraction.get("summary"), max_length=140),
+            "evidenceStatus": trim_text(content_extraction.get("evidenceStatus"), max_length=80),
             "taskId": trim_text(content_extraction.get("taskId"), max_length=160),
+        }
+        if evidence:
+            compact["contentExtraction"]["evidenceRefs"] = [
+                normalize_metadata(item)
+                for item in list(content_extraction.get("evidenceRefs") or [])[:24]
+                if isinstance(item, dict)
+            ]
+            compact["contentExtraction"]["evidenceLedger"] = normalize_metadata(
+                content_extraction.get("evidenceLedger") or {}
+            )
+        compact["contentExtraction"] = {
+            key: value
+            for key, value in compact["contentExtraction"].items()
+            if value not in ("", [], {})
         }
     return {
         key: value
