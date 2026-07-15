@@ -30,6 +30,7 @@ STATE_PATH = RUNTIME_DIR / "state.json"
 BACKEND_STDOUT_PATH = RUNTIME_DIR / "backend.stdout.log"
 BACKEND_STDERR_PATH = RUNTIME_DIR / "backend.stderr.log"
 FRONTEND_BUILD_LOG_PATH = RUNTIME_DIR / "frontend-build.log"
+FRONTEND_BUILD_PROVENANCE_NAME = ".vibelution-build.json"
 WORKBENCH_BROWSER_PROFILE_DIR = RUNTIME_DIR / "workbench-app-profile"
 LAUNCHER_ICON_PATH = PROJECT_ROOT / "assets" / "icons" / "vibelution.ico"
 DEFAULT_HOST = "127.0.0.1"
@@ -263,6 +264,102 @@ def _run_checked(args: list[str], *, cwd: Path, label: str) -> None:
             }
         )
         raise RuntimeError(f"{label} failed with exit code {result.returncode}.")
+
+
+def _run_capture(args: list[str], *, cwd: Path, label: str, timeout: float = 15.0) -> str:
+    result = subprocess.run(
+        args,
+        cwd=str(cwd),
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+        creationflags=_windows_creation_flags(),
+        startupinfo=_hidden_startup_info(),
+        check=False,
+    )
+    if result.returncode != 0:
+        detail = _process_output_tail(result.stderr or result.stdout, max_lines=8, max_chars=1200)
+        raise RuntimeError(f"{label} failed with exit code {result.returncode}{f': {detail}' if detail else '.'}")
+    return str(result.stdout or "").strip()
+
+
+def _runtime_source_identity() -> dict[str, object]:
+    git_command = shutil.which("git.exe" if os.name == "nt" else "git") or shutil.which("git") or "git"
+    root_text = _run_capture(
+        [git_command, "rev-parse", "--show-toplevel"],
+        cwd=PROJECT_ROOT,
+        label="git root identity",
+    )
+    resolved_root = Path(root_text).resolve()
+    if resolved_root != PROJECT_ROOT.resolve():
+        raise RuntimeError(
+            f"Launcher project root mismatch: expected {PROJECT_ROOT.resolve()}, got {resolved_root}."
+        )
+
+    branch = _run_capture(
+        [git_command, "branch", "--show-current"],
+        cwd=PROJECT_ROOT,
+        label="git branch identity",
+    )
+    if branch != "main":
+        raise RuntimeError(f"Launcher restart requires local main, but current branch is {branch or '<detached>'}.")
+
+    commit = _run_capture(
+        [git_command, "rev-parse", "HEAD"],
+        cwd=PROJECT_ROOT,
+        label="git commit identity",
+    )
+    worktree_status = _run_capture(
+        [git_command, "status", "--porcelain", "--untracked-files=all"],
+        cwd=PROJECT_ROOT,
+        label="git worktree identity",
+    )
+    if worktree_status:
+        preview = " | ".join(worktree_status.splitlines()[:8])
+        raise RuntimeError(
+            "Launcher restart requires a clean local main so runtime code cannot drift from HEAD"
+            f": {preview}"
+        )
+
+    frontend_tree = _run_capture(
+        [git_command, "rev-parse", "HEAD:web"],
+        cwd=PROJECT_ROOT,
+        label="frontend tree identity",
+    )
+    return {
+        "projectRoot": str(resolved_root),
+        "branch": branch,
+        "commit": commit,
+        "frontendTree": frontend_tree,
+        "trackedClean": True,
+    }
+
+
+def _assert_runtime_source_identity(expected: dict[str, object]) -> dict[str, object]:
+    current = _runtime_source_identity()
+    for field in ("projectRoot", "branch", "commit", "frontendTree"):
+        if str(current.get(field) or "") != str(expected.get(field) or ""):
+            raise RuntimeError(
+                "Local main changed while Launcher was refreshing; refusing to start a mixed runtime"
+                f" ({field}: {expected.get(field)!r} -> {current.get(field)!r})."
+            )
+    return current
+
+
+def _read_frontend_build_provenance(path: Path) -> dict[str, object]:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _write_frontend_build_provenance(path: Path, payload: dict[str, object]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = path.with_suffix(path.suffix + ".tmp")
+    tmp_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    tmp_path.replace(path)
 
 
 def _append_frontend_build_log(payload: dict) -> None:
@@ -735,21 +832,35 @@ def _select_background_python(executable: str) -> dict[str, object]:
     return result
 
 
-def _ensure_frontend_build() -> None:
+def _ensure_frontend_build(source_identity: dict[str, object] | None = None) -> dict[str, object]:
     web_dir = PROJECT_ROOT / "web"
     if not web_dir.exists():
-        return
+        return {}
+    identity = source_identity or _runtime_source_identity()
     package_manager = _frontend_package_manager()
     node_modules = web_dir / "node_modules"
     needs_install = not node_modules.exists()
     dist_index = web_dir / "dist" / "index.html"
-    needs_build = not dist_index.exists() or _frontend_sources_are_newer_than_dist(web_dir, dist_index)
+    provenance_path = web_dir / "dist" / FRONTEND_BUILD_PROVENANCE_NAME
+    previous_provenance = _read_frontend_build_provenance(provenance_path)
+    tree_matches = (
+        bool(previous_provenance)
+        and str(previous_provenance.get("frontendTree") or "") == str(identity.get("frontendTree") or "")
+    )
+    needs_build = (
+        not dist_index.exists()
+        or not tree_matches
+        or _frontend_sources_are_newer_than_dist(web_dir, dist_index)
+    )
     _append_frontend_build_log(
         {
             "event": "frontend_build.ensure",
             "packageManager": package_manager,
             "needsInstall": needs_install,
             "needsBuild": needs_build,
+            "sourceCommit": identity.get("commit"),
+            "frontendTree": identity.get("frontendTree"),
+            "previousFrontendTree": previous_provenance.get("frontendTree"),
         }
     )
     if needs_install:
@@ -761,6 +872,30 @@ def _ensure_frontend_build() -> None:
     if needs_build:
         for build_command, build_label in _frontend_build_commands(package_manager, web_dir):
             _run_checked(build_command, cwd=web_dir, label=build_label)
+    _assert_runtime_source_identity(identity)
+    provenance: dict[str, object] = {
+        "schemaVersion": 1,
+        "projectRoot": identity.get("projectRoot"),
+        "sourceBranch": identity.get("branch"),
+        "sourceCommit": identity.get("commit"),
+        "frontendTree": identity.get("frontendTree"),
+        "builtFromCommit": (
+            identity.get("commit") if needs_build else previous_provenance.get("builtFromCommit")
+        ),
+        "rebuilt": needs_build,
+        "validatedAt": _now_iso(),
+    }
+    _write_frontend_build_provenance(provenance_path, provenance)
+    _append_frontend_build_log(
+        {
+            "event": "frontend_build.verified",
+            "sourceCommit": provenance["sourceCommit"],
+            "frontendTree": provenance["frontendTree"],
+            "builtFromCommit": provenance["builtFromCommit"],
+            "rebuilt": needs_build,
+        }
+    )
+    return provenance
 
 
 def _frontend_sources_are_newer_than_dist(web_dir: Path, dist_index: Path) -> bool:
@@ -792,7 +927,9 @@ def _start_backend(port: int, host: str, *, no_browser: bool) -> dict:
             f"Workbench port {int(port)} is already occupied by pid {existing_owner_pid}; "
             "refusing to treat an existing service as this launch."
         )
-    _ensure_frontend_build()
+    source_identity = _runtime_source_identity()
+    frontend_provenance = _ensure_frontend_build(source_identity)
+    _assert_runtime_source_identity(source_identity)
     stdout = BACKEND_STDOUT_PATH.open("ab")
     stderr = BACKEND_STDERR_PATH.open("ab")
     python_runtime = _select_background_python(sys.executable)
@@ -824,6 +961,11 @@ def _start_backend(port: int, host: str, *, no_browser: bool) -> dict:
     if backend_pid <= 0:
         _terminate_pid(process.pid)
         raise RuntimeError(f"New backend did not own a healthy listener at {_health_url(port, host)}.")
+    try:
+        _assert_runtime_source_identity(source_identity)
+    except Exception:
+        _terminate_pid(process.pid)
+        raise
     url = f"http://{host}:{int(port)}"
     browser_info: dict[str, object] = {
         "browserManaged": False,
@@ -838,6 +980,12 @@ def _start_backend(port: int, host: str, *, no_browser: bool) -> dict:
         except Exception:
             _terminate_pid(process.pid)
             raise
+    try:
+        _assert_runtime_source_identity(source_identity)
+    except Exception:
+        _terminate_pid(int(browser_info.get("browserLaunchPid") or 0))
+        _terminate_pid(process.pid)
+        raise
     state = {
         **_preserved_launcher_control_state(previous_state),
         "schemaVersion": 1,
@@ -873,6 +1021,14 @@ def _start_backend(port: int, host: str, *, no_browser: bool) -> dict:
         "consoleFallbackReason": str(python_runtime["consoleFallbackReason"]),
         "pythonLaunchPolicy": str(python_runtime["pythonLaunchPolicy"]),
         "creationFlagNames": list(python_runtime["creationFlagNames"]),
+        "runtimeProjectRoot": str(source_identity["projectRoot"]),
+        "runtimeSourceBranch": str(source_identity["branch"]),
+        "runtimeSourceCommit": str(source_identity["commit"]),
+        "runtimeSourceTrackedClean": bool(source_identity["trackedClean"]),
+        "frontendSourceCommit": str(frontend_provenance.get("sourceCommit") or ""),
+        "frontendTree": str(frontend_provenance.get("frontendTree") or ""),
+        "frontendBuiltFromCommit": str(frontend_provenance.get("builtFromCommit") or ""),
+        "frontendRebuilt": bool(frontend_provenance.get("rebuilt")),
         "updatedAt": _now_iso(),
     }
     _write_state(state)

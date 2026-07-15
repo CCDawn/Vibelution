@@ -19,6 +19,8 @@ import time
 from pathlib import Path
 from typing import Optional
 
+from scripts.windowless_subprocess import no_window_subprocess_kwargs
+
 # 跨平台支持
 PLATFORM = sys.platform
 IS_WINDOWS = PLATFORM == "win32"
@@ -141,7 +143,9 @@ def is_process_alive(pid: int) -> bool:
             try:
                 result = subprocess.run(
                     ['taskkill', '/FI', f'PID eq {pid}', '/NR', 'FALSE'],
-                    capture_output=True, text=True
+                    capture_output=True,
+                    text=True,
+                    **no_window_subprocess_kwargs(),
                 )
                 return 'SUCCESS' in result.stdout or result.returncode == 0
             except Exception:

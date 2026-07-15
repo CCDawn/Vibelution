@@ -21,6 +21,22 @@ def test_pre_commit_is_thin_adapter() -> None:
     assert "ruff" not in hook
 
 
+def test_pre_commit_self_test_environment_removes_repository_local_git_variables(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("GIT_DIR", "shared/.git")
+    monkeypatch.setenv("GIT_WORK_TREE", "shared")
+    monkeypatch.setenv("GIT_INDEX_FILE", "shared/.git/index")
+    monkeypatch.setenv("UNRELATED_SETTING", "preserved")
+
+    env = gate.git_hook_isolated_environment()
+
+    assert "GIT_DIR" not in env
+    assert "GIT_WORK_TREE" not in env
+    assert "GIT_INDEX_FILE" not in env
+    assert env["UNRELATED_SETTING"] == "preserved"
+
+
 def git(root: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         ["git", *args],

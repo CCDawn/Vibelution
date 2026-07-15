@@ -22,6 +22,8 @@ from pathlib import Path
 from typing import Dict, Optional, Any
 from concurrent.futures import ThreadPoolExecutor, Future
 
+from scripts.windowless_subprocess import no_window_subprocess_kwargs
+
 
 class BackgroundTaskManager:
     """后台任务管理器 — 基于 ThreadPoolExecutor"""
@@ -45,6 +47,7 @@ class BackgroundTaskManager:
                 text=True,
                 timeout=timeout,
                 cwd=os.getcwd(),
+                **no_window_subprocess_kwargs(),
             )
             with self._lock:
                 if task_id in self._tasks:

@@ -8,6 +8,7 @@ from typing import Tuple
 
 from core.infrastructure.agent_session import get_session_state
 from core.infrastructure.event_bus import EventNames, get_event_bus
+from scripts.windowless_subprocess import no_window_subprocess_kwargs
 
 
 def _resolve_project_root() -> Path:
@@ -39,6 +40,7 @@ def check_evolution_ready(timeout: int = 120) -> Tuple[bool, str]:
             capture_output=True,
             text=True,
             timeout=timeout,
+            **no_window_subprocess_kwargs(),
         )
         if result.returncode == 0:
             message = "All tests passed"
@@ -76,6 +78,7 @@ def check_environment_ready(timeout: int = 90) -> Tuple[bool, str]:
             capture_output=True,
             text=True,
             timeout=timeout,
+            **no_window_subprocess_kwargs(),
         )
         if result.returncode == 0:
             message = "Environment smoke passed"
