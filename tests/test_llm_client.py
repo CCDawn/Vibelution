@@ -2091,6 +2091,10 @@ def test_stream_records_started_event_before_first_provider_chunk(monkeypatch):
     assert fields["baseUrlHost"] == "localhost"
     assert fields["stream"] is True
     assert fields["maxTokens"] == config.llm.get_profile("primary").max_output_tokens
+    assert fields["payloadBuildMs"] >= 0
+    assert fields["payloadSummaryMs"] >= 0
+    assert fields["payloadPrepareMs"] >= fields["payloadBuildMs"]
+    assert fields["payloadPrepareMs"] >= fields["payloadSummaryMs"]
 
 
 def test_stream_records_safe_message_role_summary(monkeypatch):

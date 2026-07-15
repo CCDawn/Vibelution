@@ -2262,7 +2262,9 @@ class LLMClient:
         """Yield normalized stream events independent of LangChain chunks."""
         from .invocation import invocation_scope_from_metadata
 
+        payload_prepare_started = time.perf_counter()
         invocation_scope = invocation_scope_from_metadata(metadata)
+        payload_build_started = time.perf_counter()
         payload = self._build_payload(
             messages,
             tools=tools,
@@ -2271,6 +2273,8 @@ class LLMClient:
             invocation_scope=invocation_scope,
             replay_state=replay_state,
         )
+        payload_build_ms = max(0, int((time.perf_counter() - payload_build_started) * 1000))
+        payload_summary_started = time.perf_counter()
         message_count = len(messages or [])
         effective_tools = tools if tools is not None else self.bound_tools
         tool_count = len(effective_tools or [])
@@ -2327,6 +2331,8 @@ class LLMClient:
             traceId=llm_payload_trace.get("traceId"),
             llmPayloadTrace=llm_payload_trace,
         )
+        payload_summary_ms = max(0, int((time.perf_counter() - payload_summary_started) * 1000))
+        payload_prepare_ms = max(0, int((time.perf_counter() - payload_prepare_started) * 1000))
         max_attempts = _retry_policy_max_attempts(self.profile)
         last_error: LLMError | None = None
         stream_usage_options_downgraded = False
@@ -2366,6 +2372,9 @@ class LLMClient:
                         "model": self.profile.model,
                         "messageCount": message_count,
                         "toolCount": tool_count,
+                        "payloadBuildMs": payload_build_ms,
+                        "payloadSummaryMs": payload_summary_ms,
+                        "payloadPrepareMs": payload_prepare_ms,
                         **event_metadata,
                         "llmPayloadTraceId": llm_payload_trace.get("traceId", ""),
                         "attempt": attempt,
