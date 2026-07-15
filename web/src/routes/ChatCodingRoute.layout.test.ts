@@ -35,6 +35,7 @@ import chatFilePreviewPanelStyles from "./chat/ChatFilePreviewPanel.styles";
 import chatFilePreviewPanelSource from "./chat/ChatFilePreviewPanel.tsx?raw";
 import chatFileWorkspaceTabsStyles from "./chat/ChatFileWorkspaceTabs.styles";
 import chatFileWorkspaceTabsSource from "./chat/ChatFileWorkspaceTabs.tsx?raw";
+import chatLoadingShellStyles from "./chat/ChatLoadingShell.styles";
 import chatRuntimeNoticeStackStyles from "./chat/ChatRuntimeNoticeStack.styles";
 import chatRuntimeNoticeStackSource from "./chat/ChatRuntimeNoticeStack.tsx?raw";
 import chatSessionWorkspacePanelStyles from "./chat/ChatSessionWorkspacePanel.styles";
@@ -177,10 +178,9 @@ describe("ChatCodingRoute layout contract", () => {
     expect(chatSessionWorkspacePanelStyles.emptySurface).toContain("min-h-[min(420px,calc(100dvh_-_190px))]");
     expect(chatSessionWorkspacePanelStyles.emptySurface).toContain("place-items-center");
     expect(chatSessionWorkspacePanelStyles.emptySurface).toContain("text-center");
-    expect(chatSessionWorkspacePanelStyles.loadingSurface).toBeTypeOf("string");
-    expect(chatSessionWorkspacePanelStyles.loadingSurface).toContain("min-h-[120px]");
-    expect(chatSessionWorkspacePanelStyles.loadingSurface).not.toContain("min-h-[min(420px,calc(100dvh_-_190px))]");
-    expect(chatSessionWorkspacePanelStyles.loadingSurface).not.toContain("h-full");
+    expect(chatLoadingShellStyles.workspaceShell).toContain("h-full");
+    expect(chatLoadingShellStyles.workspaceShell).toContain("min-h-0");
+    expect(chatLoadingShellStyles.workspaceShell).toContain("grid-rows-[minmax(0,1fr)_auto]");
     expect(routeStyles.rightPane).toContain("h-full");
     expect(routeStyles.rightPane).toContain("overflow-hidden");
     expect(routeStyles.rightPaneWithTabs).toContain("grid-rows-[auto_auto_minmax(0,1fr)]");
@@ -205,9 +205,10 @@ describe("ChatCodingRoute layout contract", () => {
     expect(chatSessionWorkspacePanelStyles.emptyConversationSurface).not.toContain("min-h-[min(420px,calc(100dvh_-_190px))]");
   });
 
-  it("uses VStateSurface for center loading, empty, error, and unavailable states", () => {
+  it("uses a structural shell for loading and VStateSurface for terminal center states", () => {
     expect(chatSessionWorkspacePanelSource).toContain('import { VStateSurface } from "../../components/vui"');
-    expect(chatSessionWorkspacePanelSource).toContain('tone="loading"');
+    expect(chatSessionWorkspacePanelSource).toContain("ConversationWorkspaceLoadingShell");
+    expect(chatSessionWorkspacePanelSource).not.toContain('tone="loading"');
     expect(chatSessionWorkspacePanelSource).toContain('tone="empty"');
     expect(chatSessionWorkspacePanelSource).toContain('tone="error"');
     expect(chatSessionWorkspacePanelSource).toContain('tone="unavailable"');
@@ -215,11 +216,9 @@ describe("ChatCodingRoute layout contract", () => {
     expect(chatSessionWorkspacePanelSource).not.toContain("<div className={styles.emptySurface}");
     expect(chatSessionWorkspacePanelStyles.emptySurface).toContain("!content-center");
     expect(chatSessionWorkspacePanelStyles.emptySurface).toContain("!text-center");
-    expect(chatSessionWorkspacePanelStyles.loadingSurface).not.toContain("!content-center");
     for (const geometryClass of [
       chatSessionWorkspacePanelStyles.emptyConversationSurface,
       chatSessionWorkspacePanelStyles.emptySurface,
-      chatSessionWorkspacePanelStyles.loadingSurface,
     ]) {
       expect(geometryClass).not.toContain("border");
       expect(geometryClass).not.toContain("bg-");
@@ -2102,6 +2101,13 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.sessionStatusCluster).toContain("justify-end");
     expect(routeStyles.agentModelTag).toContain("max-w-[96px]");
     expect(routeStyles.agentModelTag).toContain("[&_span]:truncate");
+  });
+
+  it("renders structural index and workspace shells while conversation data loads", () => {
+    expect(routeSource).toContain("ConversationIndexLoadingShell");
+    expect(routeSource).toContain('<ConversationIndexLoadingShell label={t("loadingSession")} />');
+    expect(chatSessionWorkspacePanelSource).toContain("ConversationWorkspaceLoadingShell");
+    expect(chatSessionWorkspacePanelSource).not.toContain("skeletonLines={2}");
   });
 
   it("renders the conversation index as one soft panel with flat rows and compact actions", () => {

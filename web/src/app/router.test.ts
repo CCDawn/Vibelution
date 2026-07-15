@@ -126,7 +126,11 @@ describe("router route contracts", () => {
   it("guards the chat route while timing the chat chunk loader itself", async () => {
     const chatRoute = findWorkbenchRoute("chat");
     expectRouteErrorSurface(chatRoute, "workbench");
-    expectLazyFallback(chatRoute, "正在打开工作台", "workbench");
+    expectLazyFallback(chatRoute, "正在打开对话工作台", "workbench");
+    const chatMarkup = lazyFallbackMarkup(chatRoute);
+    expect(chatMarkup).toContain('data-route-loading="chat"');
+    expect(chatMarkup).toContain('data-loading-region="chat-index"');
+    expect(chatMarkup).toContain('data-loading-region="chat-workspace"');
 
     const ChatRoute: ComponentType = () => null;
     const loaded = await loadChatCodingRouteChunk(

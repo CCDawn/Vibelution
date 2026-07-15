@@ -130,6 +130,8 @@ export const router = createBrowserRouter([
           <WorkbenchDomainRoute domain="chat">
             <ChatCodingRoute />
           </WorkbenchDomainRoute>,
+          "workbench",
+          "chat",
         ),
       },
       {

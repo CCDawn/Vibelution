@@ -4,6 +4,7 @@ import type { FileContent, SessionRuntimeNotice } from "../../api/types";
 import { VStateSurface } from "../../components/vui";
 import { ChatConversationComposerBridge } from "./ChatConversationComposerBridge";
 import { ChatFilePreviewPanel } from "./ChatFilePreviewPanel";
+import { ConversationWorkspaceLoadingShell } from "./ChatLoadingShell";
 import { ChatRuntimeNoticeStack } from "./ChatRuntimeNoticeStack";
 import { ChatToolApprovalDialog, type ChatToolApprovalLabel } from "./ChatToolApprovalDialog";
 import styles from "./ChatSessionWorkspacePanel.styles";
@@ -70,14 +71,7 @@ export function ChatSessionWorkspacePanel({
   workspaceActiveTab,
 }: ChatSessionWorkspacePanelProps) {
   const conversationLoadingFallback = (
-    <VStateSurface
-      className={styles.loadingSurface}
-      tone="loading"
-      title={loadingSessionLabel}
-      skeletonLines={2}
-      role="status"
-      aria-live="polite"
-    />
+    <ConversationWorkspaceLoadingShell label={loadingSessionLabel} />
   );
 
   if (!activeSessionId && !sessionsPending) {
