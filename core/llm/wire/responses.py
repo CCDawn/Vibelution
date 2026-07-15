@@ -181,7 +181,8 @@ class ResponsesWireAdapter:
             pending_call_ids = tuple(replay_state.pending_call_ids)
             pending_call_id_set = set(pending_call_ids)
             outputs_by_call_id: dict[str, dict[str, Any]] = {}
-            for item in encoded_input:
+            output_positions: list[int] = []
+            for position, item in enumerate(encoded_input):
                 item_dict = _as_dict(item)
                 if str(item_dict.get("type") or "") != "function_call_output":
                     continue
@@ -191,13 +192,23 @@ class ResponsesWireAdapter:
                 if call_id in outputs_by_call_id:
                     raise ValueError(f"duplicate function_call_output for previous response call_id: {call_id}")
                 outputs_by_call_id[call_id] = item_dict
+                output_positions.append(position)
             missing_call_ids = [call_id for call_id in pending_call_ids if call_id not in outputs_by_call_id]
             if missing_call_ids:
                 raise ValueError(
                     "missing function_call_output for previous response call_id(s): "
                     + ", ".join(missing_call_ids)
                 )
-            encoded_input = [outputs_by_call_id[call_id] for call_id in pending_call_ids]
+            latest_output_position = max(output_positions)
+            new_user_input = [
+                _as_dict(item)
+                for item in encoded_input[latest_output_position + 1 :]
+                if str(_as_dict(item).get("role") or "") == "user"
+            ]
+            encoded_input = [
+                *(outputs_by_call_id[call_id] for call_id in pending_call_ids),
+                *new_user_input,
+            ]
         payload: dict[str, Any] = {
             "model": str(getattr(route, "effective_model", "") or ""),
             "input": encoded_input,
