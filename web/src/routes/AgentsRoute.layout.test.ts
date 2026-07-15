@@ -1308,8 +1308,12 @@ describe("AgentsRoute layout contract", () => {
     expect(managementBriefStyles.nextActionButton.split(/\s+/)).not.toContain("w-full");
     expect(overviewStyles.boundarySummaryGrid).toBeTruthy();
     expect(detailHeaderStyles.detailTabs).toBeTruthy();
-    expect(selectedDetailContentStyles.selectedDetailFrame).toContain("max-w-[1280px]");
-    expect(selectedDetailContentStyles.overviewLayout).toContain("minmax(280px,_320px)");
+    expect(selectedDetailContentStyles.selectedDetailFrame).toContain("w-full");
+    expect(selectedDetailContentStyles.selectedDetailFrame).not.toContain("max-w-[1280px]");
+    expect(selectedDetailContentStyles.overviewLayout).toContain("minmax(0,_4fr)_minmax(300px,_1fr)");
+    expect(selectedDetailContentStyles.overviewLayout).toContain("max-[1040px]:[grid-template-columns:1fr]");
+    expect(overviewStyles.factGrid).toContain("min-[1540px]:[grid-template-columns:repeat(3,_minmax(0,_1fr))]");
+    expect(overviewStyles.policyGrid).toContain("min-[1540px]:[grid-template-columns:repeat(4,_minmax(0,_1fr))]");
     expect(selectedDetailContentPanelSource).toContain("styles.overviewMain");
     expect(selectedDetailContentPanelSource).toContain("styles.overviewAside");
   });
