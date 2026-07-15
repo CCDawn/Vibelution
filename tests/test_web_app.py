@@ -6510,6 +6510,61 @@ def test_source_collection_stage_task_ack_only_result_does_not_finish_before_req
     assert "source_collection_context_tool" in prompts[1]
 
 
+def test_source_collection_stage_task_waits_for_all_required_tools_across_continuations(tmp_path, monkeypatch):
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(session_service, "_publish_session_detail_snapshot", lambda _session_id: None)
+    prompts: list[str] = []
+
+    def fake_run_existing_agent_single_turn(agent, **kwargs):
+        prompts.append(str(kwargs.get("initial_prompt") or ""))
+        if len(prompts) == 1:
+            return {
+                "status": "completed",
+                "summary": "已读取候选并抓取证据，随后立即回写。",
+                "raw_output": "已读取候选并抓取证据，随后立即回写。",
+                "outcome": "done",
+                "tool_call_count": 2,
+                "tool_trace": [
+                    {"name": "source_collection_context_tool", "status": "done"},
+                    {"name": "web_fetch_tool", "status": "done"},
+                ],
+            }
+        return {
+            "status": "completed",
+            "summary": "已完成阶段回写。",
+            "raw_output": "已完成阶段回写。",
+            "outcome": "done",
+            "tool_call_count": 1,
+            "tool_trace": [
+                {"name": "source_collection_stage_writeback_tool", "status": "done"},
+            ],
+        }
+
+    monkeypatch.setattr(session_service, "run_existing_agent_single_turn", fake_run_existing_agent_single_turn)
+
+    turn_control = session_service._create_session_turn_control("session-stage-partial-tools")
+    try:
+        result = session_service._run_session_continuation_loop(
+            object(),
+            session_id="session-stage-partial-tools",
+            turn_control=turn_control,
+            initial_prompt="继续资料提炼阶段任务",
+            history_messages=[],
+            allow_internal_auto_continue=True,
+            max_internal_auto_continue_turns=2,
+            require_tool_progress=True,
+            required_tool_names=["source_collection_context_tool", "source_collection_stage_writeback_tool"],
+        )
+    finally:
+        session_service._clear_session_turn_control("session-stage-partial-tools", turn_id=turn_control.turn_id)
+
+    assert len(prompts) == 2
+    assert isinstance(result, dict)
+    assert result["status"] == "completed"
+    assert result["raw_output"] == "已完成阶段回写。"
+    assert "source_collection_stage_writeback_tool" in prompts[1]
+
+
 def test_session_continuation_auto_continue_pauses_at_bounded_limit(tmp_path, monkeypatch):
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(session_service, "_publish_session_detail_snapshot", lambda _session_id: None)

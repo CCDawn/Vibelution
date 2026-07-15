@@ -14476,6 +14476,7 @@ def _run_session_continuation_loop(
 
     result: Any = None
     last_visible_result: dict[str, Any] | None = None
+    observed_required_tool_names: set[str] = set()
     turn_index = 0
     while True:
         turn_index += 1
@@ -14578,9 +14579,16 @@ def _run_session_continuation_loop(
         result_status = str(result.get("status") or "").strip().lower() if isinstance(result, dict) else type(result).__name__
         result_visible_reply = _visible_reply_candidate(result) if isinstance(result, dict) else ""
         result_contract = build_chat_coding_result_contract(result) if isinstance(result, dict) else {}
+        observed_required_tool_names.update(
+            name
+            for name in _result_tool_names(result)
+            if name in normalized_required_tool_names
+        )
         required_tool_progress_missing = _required_tool_progress_missing(
             result,
             require_tool_progress=bool(require_tool_progress),
+            required_tool_names=normalized_required_tool_names,
+            observed_tool_names=observed_required_tool_names,
         )
         _record_session_turn_lifecycle_event(
             session_id,
@@ -22363,20 +22371,44 @@ def _build_resume_goal_from_conversation_context(
     return "\n".join(lines)
 
 
-def _required_tool_progress_missing(result: Any, *, require_tool_progress: bool) -> bool:
+def _result_tool_names(result: Any) -> set[str]:
+    if not isinstance(result, dict):
+        return set()
+    tool_trace = result.get("tool_trace") or result.get("tool_calls") or []
+    return {
+        name
+        for item in list(tool_trace or [])
+        if (name := _tool_call_name(item))
+    }
+
+
+def _required_tool_progress_missing(
+    result: Any,
+    *,
+    require_tool_progress: bool,
+    required_tool_names: list[str] | None = None,
+    observed_tool_names: set[str] | None = None,
+) -> bool:
     if not require_tool_progress or not isinstance(result, dict):
         return False
     if bool(result.get("stop_requested")) or _is_provider_failed_result(result):
         return False
     if _explicit_chat_result_outcome(result) == "progress":
         return False
-    if _coerce_nonnegative_int(result.get("tool_call_count") or 0) > 0:
-        return False
-    tool_trace = result.get("tool_trace") or result.get("tool_calls") or []
-    if list(tool_trace or []):
-        return False
     visible = _visible_reply_candidate(result)
     if not visible or _raw_visible_payload_is_control_marker_only(result):
+        return False
+    required_names = {
+        str(item or "").strip()
+        for item in list(required_tool_names or [])
+        if str(item or "").strip()
+    }
+    if required_names:
+        observed_names = set(observed_tool_names or set()) | _result_tool_names(result)
+        return not required_names.issubset(observed_names)
+    if _coerce_nonnegative_int(result.get("tool_call_count") or 0) > 0:
+        return False
+    if _result_tool_names(result):
         return False
     return True
 
