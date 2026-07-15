@@ -56,8 +56,9 @@ def test_four_stage_source_roles_have_expected_tool_boundaries():
                 "web_fetch_tool",
             },
             "forbidden": {"knowledge_proposal_tool", "knowledge_ingestion_tool", "web_search_tool"},
-            "mutationAccess": "none",
+            "mutationAccess": "restricted",
             "networkAccess": "controlled",
+            "writeScopes": {"private", "team_workflow_ledger"},
         },
         "source_extractor": {
             "required": {
@@ -78,8 +79,9 @@ def test_four_stage_source_roles_have_expected_tool_boundaries():
                 "news_search_tool",
                 "web_search_tool",
             },
-            "mutationAccess": "none",
+            "mutationAccess": "restricted",
             "networkAccess": "controlled",
+            "writeScopes": {"private", "team_workflow_ledger"},
         },
         "source_relation_mapper": {
             "required": {
@@ -100,8 +102,9 @@ def test_four_stage_source_roles_have_expected_tool_boundaries():
                 "web_fetch_tool",
                 "web_search_tool",
             },
-            "mutationAccess": "none",
+            "mutationAccess": "restricted",
             "networkAccess": "none",
+            "writeScopes": {"private", "team_workflow_ledger"},
         },
         "source_ingestor": {
             "required": {
@@ -124,6 +127,7 @@ def test_four_stage_source_roles_have_expected_tool_boundaries():
             },
             "mutationAccess": "restricted",
             "networkAccess": "none",
+            "writeScopes": {"private", "team_workflow_ledger"},
         },
     }
 
@@ -143,6 +147,7 @@ def test_four_stage_source_roles_have_expected_tool_boundaries():
         )
         assert policy["mutationAccess"] == expected["mutationAccess"]
         assert policy["networkAccess"] == expected["networkAccess"]
+        assert expected["writeScopes"].issubset(set(policy["writeScopes"]))
         assert policy["roleToolProfileFingerprint"]
 
 
