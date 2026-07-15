@@ -73,11 +73,9 @@ async def web_workbench_lifespan(_: FastAPI):
 
 
 async def prewarm_ui_caches_on_startup() -> None:
-    from .services import session_service
     from tools import Key_Tools, web_search_tool
 
     await asyncio.gather(
         asyncio.to_thread(Key_Tools.prewarm_key_tool_definitions),
         asyncio.to_thread(web_search_tool.autoglm_search_tool_availability, force=True),
-        asyncio.to_thread(session_service.prewarm_session_list_cache, reason="startup"),
     )

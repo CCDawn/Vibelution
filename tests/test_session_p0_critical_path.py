@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 
 from core.web import lifecycle
-from core.web.services import session_service
 from tools import Key_Tools, web_search_tool
 
 
@@ -46,11 +45,9 @@ def test_startup_cache_prewarm_moves_tool_definition_build_out_of_first_turn(mon
         "autoglm_search_tool_availability",
         lambda **_kwargs: calls.append("web_search_availability"),
     )
-    monkeypatch.setattr(session_service, "prewarm_session_list_cache", lambda **_kwargs: calls.append("sessions"))
     asyncio.run(lifecycle.prewarm_ui_caches_on_startup())
 
     assert sorted(calls) == [
-        "sessions",
         "tool_definitions",
         "web_search_availability",
     ]
