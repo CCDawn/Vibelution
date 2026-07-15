@@ -29,6 +29,8 @@ import teamSourceCollectionManualWritebackPanelSource from "./TeamSourceCollecti
 import teamSourceCollectionManualWritebackPanelStyles from "./TeamSourceCollectionManualWritebackPanel.styles";
 import teamSourceCollectionMemoryPanelSource from "./TeamSourceCollectionMemoryPanel.tsx?raw";
 import teamSourceCollectionMemoryPanelStyles from "./TeamSourceCollectionMemoryPanel.styles";
+import teamSourceCollectionPhaseCloseGatePanelSource from "./TeamSourceCollectionPhaseCloseGatePanel.tsx?raw";
+import teamSourceCollectionPhaseCloseGatePanelStyles from "./TeamSourceCollectionPhaseCloseGatePanel.styles";
 import teamSourceCollectionOverviewPanelSource from "./TeamSourceCollectionOverviewPanel.tsx?raw";
 import teamSourceCollectionOverviewPanelStyles from "./TeamSourceCollectionOverviewPanel.styles";
 import teamSourceCollectionOverviewPanelStylesSource from "./TeamSourceCollectionOverviewPanel.styles.ts?raw";
@@ -78,6 +80,7 @@ const sourceCollectionLocalStyles = {
   ...teamSourceCollectionExtractionRecoveryPanelStyles,
   ...teamSourceCollectionGraphPanelStyles,
   ...teamSourceCollectionMemoryPanelStyles,
+  ...teamSourceCollectionPhaseCloseGatePanelStyles,
   ...teamSourceCollectionPanelFrameStyles,
   ...teamSourceCollectionRunSwitcherPanelStyles,
   ...teamSourceCollectionScreeningPanelStyles,
@@ -2683,5 +2686,23 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).not.toContain("知识库管理员入库审核");
     expect(routeSource).not.toContain("共享记忆前审");
     expect(routeSource).not.toContain('ingestion: ["source_ingestor", "source_relation_mapper"]');
+  });
+
+  it("shows only the selected run's close gate and lets users locate its unfinished stage", () => {
+    expect(stageProjectionSource).toContain("sourceCollectionPhaseCloseGateForRun");
+    expect(stageProjectionSource).toContain('scope.kind !== "source_run"');
+    expect(stageProjectionSource).toContain("scope.includesHistorical === true");
+    expect(routeSource).toContain("const sourceCollectionPhaseCloseGate = sourceCollectionPhaseCloseGateForRun(");
+    expect(routeSource).toContain("<TeamSourceCollectionPhaseCloseGatePanel");
+    expect(routeSource).toContain("onOpenStage={selectSourceCollectionStage}");
+    expect(teamSourceCollectionStandaloneStagePanelSource).toContain("phaseCloseGate?: ReactNode");
+    expect(teamSourceCollectionStandaloneStagePanelSource).toContain("styles.sourceCollectionRunContext");
+    expect(teamSourceCollectionOverviewPanelSource).toContain("phaseCloseGate?: ReactNode");
+    expect(teamSourceCollectionOverviewPanelSource).toContain("{phaseCloseGate}");
+    expect(teamSourceCollectionPhaseCloseGatePanelSource).toContain('data-vui-product="source-collection-phase-close-gate"');
+    expect(teamSourceCollectionPhaseCloseGatePanelSource).toContain("不会用全局历史统计替代");
+    expect(teamSourceCollectionPhaseCloseGatePanelSource).toContain("onOpenStage(nextStage)");
+    expect(teamSourceCollectionPhaseCloseGatePanelStyles.phaseCloseGateAction).toContain("w-fit");
+    expect(teamSourceCollectionPhaseCloseGatePanelStyles.phaseCloseGateHeader).toContain("max-[640px]");
   });
 });

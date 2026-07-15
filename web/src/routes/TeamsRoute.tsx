@@ -77,6 +77,7 @@ import { agentDisplayInfo } from "./agentDisplay";
 import { createChatWorkspaceCache } from "./chatWorkspaceCache";
 import { TeamMemoryIndexPanel, type TeamMemoryIndexMember } from "./TeamMemoryIndexPanel";
 import { TeamSourceCollectionActiveStagePanel } from "./TeamSourceCollectionActiveStagePanel";
+import { TeamSourceCollectionPhaseCloseGatePanel } from "./TeamSourceCollectionPhaseCloseGatePanel";
 import { TeamSourceCollectionStageAgentsPanel, type TeamSourceCollectionStageAgentCard, type TeamSourceCollectionStageAgentTone } from "./TeamSourceCollectionStageAgentsPanel";
 import { TeamSourceCollectionRunSwitcherPanel, type TeamSourceCollectionRunSwitcherRun } from "./TeamSourceCollectionRunSwitcherPanel";
 import { TeamSourceCollectionFindingDetailsPanel } from "./TeamSourceCollectionFindingDetailsPanel";
@@ -154,6 +155,7 @@ import {
 import {
   sourceCollectionCompletionFlowNodeState,
   sourceCollectionNonNegativeCount,
+  sourceCollectionPhaseCloseGateForRun,
   sourceCollectionStageBackendActionReadiness,
   sourceCollectionStageProjectionCount,
   sourceCollectionStageProjectionState,
@@ -165,6 +167,7 @@ import {
   type ResearchStageRoundStatusPayload,
   type ResearchStageType,
   type SourceCollectionActionReadiness,
+  type SourceCollectionPhaseCloseGate,
   type SourceCollectionStageCardProjection,
   type SourceCollectionStageModuleId,
 } from "./teams/source-collection/stageProjection";
@@ -782,6 +785,12 @@ type SourceCollectionSummaryPayload = {
   status: string;
   run?: DataProcessingRunListPayload["runs"][number] | Record<string, unknown>;
   runStatus?: DataProcessingStatus;
+  scope?: {
+    kind?: string;
+    runId?: string;
+    includesHistorical?: boolean;
+    eligibleForPhaseCloseGate?: boolean;
+  };
   summary?: {
     recordCount?: number;
     rawRecordCount?: number;
@@ -798,6 +807,7 @@ type SourceCollectionSummaryPayload = {
   };
   stageCards?: SourceCollectionStageCardProjection[];
   stageCardSummary?: ResearchStageRound["sourceCollectionStageCardSummary"];
+  phaseCloseGate?: SourceCollectionPhaseCloseGate;
   latestTasks?: Record<string, SourceCollectionStageCardProjection["latestTask"]>;
   stageRound?: Partial<ResearchStageRound>;
   activeWorkRun?: WorkRunSnapshot | Record<string, unknown>;
@@ -8619,6 +8629,10 @@ export function TeamsRoute({
   const sourceCollectionSummaryRun = isRecord(sourceCollectionSummary?.run) ? sourceCollectionSummary.run : null;
   const sourceCollectionSummaryRunId = String(sourceCollectionSummaryRun?.runId || sourceCollectionSummary?.runId || "");
   const sourceCollectionActionRunId = selectedSourceCollectionRunEffectiveId || sourceCollectionSummaryRunId;
+  const sourceCollectionPhaseCloseGate = sourceCollectionPhaseCloseGateForRun(
+    sourceCollectionSummary,
+    selectedSourceCollectionRunEffectiveId,
+  );
   const sourceCollectionSummaryStageRound = useMemo<ResearchStageRound | null>(() => {
     if (!sourceCollectionSummary?.runId && !sourceCollectionSummary?.stageCards?.length) {
       return null;
@@ -10740,6 +10754,19 @@ export function TeamsRoute({
               { key: "sources", label: lang === "zh" ? "资料" : "sources", value: sourceCollectionCollectedCountLabel },
             ]}
             runSwitcher={renderSourceCollectionRunSwitcher()}
+            phaseCloseGate={(
+              <TeamSourceCollectionPhaseCloseGatePanel
+                lang={lang}
+                selectedRunId={selectedSourceCollectionRunEffectiveId}
+                gate={sourceCollectionPhaseCloseGate}
+                loading={Boolean(
+                  selectedSourceCollectionRunEffectiveId
+                  && sourceCollectionSummaryQuery.isPending
+                  && !sourceCollectionSummaryQuery.data,
+                )}
+                onOpenStage={selectSourceCollectionStage}
+              />
+            )}
             stagePipelineId="source-collection-stage-status"
             stagePipelineAriaLabel={lang === "zh" ? "知识搜集内部模块" : "Knowledge collection modules"}
             modules={sourceCollectionStandaloneStageModules}
@@ -11302,6 +11329,19 @@ export function TeamsRoute({
                         assignments={sourceCollectionFindingAssignments}
                         assignmentEmptyMessage={sourceCollectionOverviewAssignmentEmptyMessage}
                         queries={sourceCollectionFindingQueries}
+                        phaseCloseGate={(
+                          <TeamSourceCollectionPhaseCloseGatePanel
+                            lang={lang}
+                            selectedRunId={selectedSourceCollectionRunEffectiveId}
+                            gate={sourceCollectionPhaseCloseGate}
+                            loading={Boolean(
+                              selectedSourceCollectionRunEffectiveId
+                              && sourceCollectionSummaryQuery.isPending
+                              && !sourceCollectionSummaryQuery.data,
+                            )}
+                            onOpenStage={selectSourceCollectionStage}
+                          />
+                        )}
                         storageActions={renderSourceCollectionStorageActions()}
                         plan={sourceCollectionOverviewPlan}
                         manualWriteback={renderSourceCollectionManualWritebackPanel({

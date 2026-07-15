@@ -7,6 +7,8 @@ const styles = {
     "sourceCollectionPageGrid min-w-0 grid h-full min-h-0 max-w-full content-stretch gap-[var(--team-workbench-gap)] grid-cols-[minmax(0,1fr)] max-[760px]:!flex max-[760px]:!h-auto max-[760px]:flex-col max-[760px]:content-start max-[760px]:overflow-visible",
   sourceCollectionPageGridCompact:
     "sourceCollectionPageGrid sourceCollectionPageGridCompact min-w-0 !flex h-auto min-h-0 shrink-0 max-w-full flex-col content-start gap-[var(--team-workbench-gap)] overflow-visible",
+  sourceCollectionRunContext:
+    "sourceCollectionRunContext min-w-0 grid content-start gap-2",
 } as const;
 
 export default styles;

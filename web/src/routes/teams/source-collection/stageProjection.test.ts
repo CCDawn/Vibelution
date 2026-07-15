@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   sourceCollectionCompletionFlowNodeState,
+  sourceCollectionPhaseCloseGateForRun,
+  sourceCollectionPhaseCloseGateNextStage,
   sourceCollectionStageBackendActionReadiness,
   sourceCollectionStageCardsFromStatus,
   sourceCollectionStageProjectionCount,
@@ -154,5 +156,49 @@ describe("source collection stage projection", () => {
     const card = stageCard("closed_loop", { latestTask: { taskId: "task-summary" } });
 
     expect(sourceCollectionStageCardsFromStatus({ stageCards: [card] })).toEqual([card]);
+  });
+
+  it("accepts a phase-close gate only when it belongs to the selected source run", () => {
+    const gate = {
+      runId: "run-current",
+      status: "needs_continue",
+      passed: false,
+      stageCount: 4,
+      closedLoopCount: 1,
+      stages: [
+        { stageId: "finding", passed: true },
+        { stageId: "extraction", passed: false },
+      ],
+      blockingReasons: ["提炼阶段尚未形成闭环。"],
+    };
+
+    expect(sourceCollectionPhaseCloseGateForRun({
+      scope: {
+        kind: "source_run",
+        runId: "run-current",
+        includesHistorical: false,
+        eligibleForPhaseCloseGate: true,
+      },
+      phaseCloseGate: gate,
+    }, "run-current")).toEqual(gate);
+    expect(sourceCollectionPhaseCloseGateNextStage(gate)).toBe("extraction");
+    expect(sourceCollectionPhaseCloseGateForRun({
+      scope: {
+        kind: "team_aggregate",
+        runId: "",
+        includesHistorical: true,
+        eligibleForPhaseCloseGate: false,
+      },
+      phaseCloseGate: { ...gate, status: "closed_loop", passed: true },
+    }, "run-current")).toBeNull();
+    expect(sourceCollectionPhaseCloseGateForRun({
+      scope: {
+        kind: "source_run",
+        runId: "run-historical",
+        includesHistorical: false,
+        eligibleForPhaseCloseGate: true,
+      },
+      phaseCloseGate: { ...gate, runId: "run-historical", status: "closed_loop", passed: true },
+    }, "run-current")).toBeNull();
   });
 });
