@@ -2,7 +2,7 @@ import { Bot, Check, ChevronLeft, ChevronRight, Plus, Sparkles } from "lucide-re
 import { useMemo, useState } from "react";
 
 import { type AgentLlmBindings, type ToolBundle } from "../api/types";
-import { VButton, VFieldRow, VNativeInput, VNativeSelect, VNativeTextarea } from "../components/vui";
+import { VButton, VFieldRow, VNativeButton, VNativeInput, VNativeSelect, VNativeTextarea } from "../components/vui";
 import styles from "./AgentCreatePanel.styles";
 
 export type AgentCreateDraft = {
@@ -173,10 +173,10 @@ export function AgentCreatePanel({
         </div>
         <div className={styles.presetGrid}>
           {presets.map((preset) => (
-            <button key={preset.id} type="button" className={styles.presetButton} disabled={pending} onClick={() => applyPreset(preset)}>
+            <VNativeButton key={preset.id} type="button" className={styles.presetButton} disabled={pending} onClick={() => applyPreset(preset)}>
               <strong>{preset.label}</strong>
               <span>{preset.description}</span>
-            </button>
+            </VNativeButton>
           ))}
         </div>
       </section>
@@ -187,7 +187,7 @@ export function AgentCreatePanel({
           const reachable = index === 0 || stepReady.slice(0, index).every(Boolean);
           return (
             <li key={label}>
-              <button
+              <VNativeButton
                 type="button"
                 className={index === activeStep ? styles.wizardStepActive : complete ? styles.wizardStepComplete : styles.wizardStep}
                 aria-current={index === activeStep ? "step" : undefined}
@@ -196,7 +196,7 @@ export function AgentCreatePanel({
               >
                 <span>{complete ? <Check size={13} /> : index + 1}</span>
                 {label}
-              </button>
+              </VNativeButton>
             </li>
           );
         })}

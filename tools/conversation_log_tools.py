@@ -18,7 +18,10 @@ MAX_CANDIDATE_SCAN_LINES = 120
 MAX_RESULT_ITEMS = 40
 MAX_TOOL_SEQUENCE = 80
 MAX_SCENE_CONVERSATION_FILES = 20
+MAX_SCENE_EVENT_FILES = 24
 MAX_CORRELATION_SUMMARIES = 12
+MAX_AGENT_TRACE_EVIDENCE_REFS = 16
+AGENT_TRACE_STALL_THRESHOLD_MS = 20_000
 
 IDENTITY_ALIASES = {
     "sessionId": ("sessionId", "runtimeSessionId", "runtime_session_id", "session_id"),
@@ -292,6 +295,14 @@ def _inspect_scene_package(
             reverse=True,
         )[:MAX_SCENE_CONVERSATION_FILES]
         source_files.extend(conversation_files)
+    events = path / "events"
+    if events.is_dir():
+        source_files.extend(
+            sorted(
+                events.glob("*.jsonl"),
+                key=lambda item: item.stat().st_mtime,
+            )[:MAX_SCENE_EVENT_FILES]
+        )
 
     records: list[dict[str, Any]] = []
     malformed_lines = 0
@@ -472,6 +483,7 @@ def _inspect_records(
         if path.is_dir()
         else stat.st_size
     )
+    correlation = _correlate_boundaries(records, identity_filters=identity_filters)
     return {
         "path": _relative(path),
         "kind": kind,
@@ -507,7 +519,8 @@ def _inspect_records(
             "recent": authorization_events[-8:],
         },
         "inefficiencies": inefficiencies,
-        "correlation": _correlate_boundaries(records, identity_filters=identity_filters),
+        "correlation": correlation,
+        "agentTrace": _agent_turn_trace(records, correlation=correlation),
         "lastEvent": {
             "type": str((last_event or {}).get("type") or ""),
             "line": int(records[-1]["line"]) if records else 0,
@@ -713,6 +726,242 @@ def _public_boundary(boundary: dict[str, Any] | None) -> dict[str, Any] | None:
     if boundary is None:
         return None
     return {key: value for key, value in boundary.items() if key != "lastOrder"}
+
+
+def _agent_turn_trace(records: list[dict[str, Any]], *, correlation: dict[str, Any]) -> dict[str, Any]:
+    boundary = (
+        (correlation.get("terminalSummary") or [None])[0]
+        or correlation.get("currentUnterminatedBoundary")
+        or correlation.get("recentSuccessfulBoundary")
+    )
+    identity = dict((boundary or {}).get("identity") or {})
+    turn_id = str(identity.get("turnId") or "").strip()
+    session_id = str(identity.get("sessionId") or "").strip()
+    invocation_id = str(identity.get("invocationId") or "").strip()
+    trace_id = str(identity.get("traceId") or turn_id or invocation_id or "").strip()
+    if not trace_id:
+        return {
+            "status": "not_found",
+            "traceId": "",
+            "currentStage": "unknown",
+            "durationMs": 0,
+            "llm": {"attemptCount": 0, "eventCount": 0, "retryCount": 0},
+            "tools": {"callCount": 0, "names": []},
+            "delivery": {"publishedDeltaCount": 0, "appliedDeltaCount": 0, "snapshotApplied": False},
+            "stall": {"detected": False, "idleMs": 0, "lastEventCode": ""},
+            "anomalies": ["identity_not_found"],
+            "evidenceRefs": [],
+        }
+
+    matched = [
+        record
+        for record in records
+        if _agent_trace_record_matches(
+            _event_identities(record["event"]),
+            turn_id=turn_id,
+            session_id=session_id,
+            invocation_id=invocation_id,
+        )
+    ]
+    matched = _agent_trace_deduplicate(matched)
+    event_codes = [_agent_trace_event_code(record["event"]) for record in matched]
+    state = str((boundary or {}).get("state") or "open").strip().lower()
+    status = {
+        "success": "completed",
+        "error": "failed",
+        "stopped": "stopped",
+        "open": "running",
+    }.get(state, "running")
+    llm_codes = [code for code in event_codes if code.startswith("llm.") or code.startswith("llm_")]
+    invocation_ids = {
+        str(_event_identities(record["event"]).get("invocationId") or "").strip()
+        for record, code in zip(matched, event_codes)
+        if code in llm_codes and str(_event_identities(record["event"]).get("invocationId") or "").strip()
+    }
+    attempt_starts = sum(1 for code in llm_codes if code.endswith(("attempt_started", ".stream.started", ".invoke.started")))
+    tool_records = [
+        record
+        for record, code in zip(matched, event_codes)
+        if code.endswith(".tool_call") or code == "tool_call"
+    ]
+    tool_names = sorted({
+        _agent_trace_tool_name(record["event"])
+        for record in tool_records
+        if _agent_trace_tool_name(record["event"])
+    })
+    published_delta_count = sum(code == "session.assistant_delta.published" for code in event_codes)
+    applied_delta_count = sum(code == "browser.session_stream.assistant_delta_applied" for code in event_codes)
+    snapshot_applied = any(code == "browser.session_stream.snapshot_applied" for code in event_codes)
+    anomalies: list[str] = []
+    if status == "running":
+        anomalies.append("open_turn")
+    if any(_event_looks_like_error(record["event"]) for record in matched):
+        anomalies.append("runtime_error")
+    if status == "completed" and published_delta_count and not applied_delta_count:
+        anomalies.append("delivery_evidence_missing")
+    missing_identity = [
+        key
+        for key in ((boundary or {}).get("missingIdentity") or [])
+        if key in {"sessionId", "turnId"}
+    ]
+    if missing_identity:
+        anomalies.append("identity_gap")
+    stall = _agent_trace_stall(matched, status=status)
+    if stall["detected"]:
+        anomalies.append("stall")
+
+    return {
+        "status": status,
+        "traceId": trace_id,
+        "sessionId": session_id,
+        "turnId": turn_id,
+        "currentStage": _agent_trace_stage(status, event_codes),
+        "durationMs": _agent_trace_duration_ms(matched),
+        "llm": {
+            "attemptCount": max(len(invocation_ids), attempt_starts),
+            "eventCount": len(llm_codes),
+            "retryCount": sum("retry" in code for code in llm_codes),
+        },
+        "tools": {"callCount": len(tool_records), "names": tool_names},
+        "delivery": {
+            "publishedDeltaCount": published_delta_count,
+            "appliedDeltaCount": applied_delta_count,
+            "snapshotApplied": snapshot_applied,
+        },
+        "stall": stall,
+        "anomalies": anomalies,
+        "evidenceRefs": [
+            {
+                "source": str(record["source"]),
+                "line": int(record["line"]),
+                "eventCode": _agent_trace_event_code(record["event"]),
+            }
+            for record in matched[:MAX_AGENT_TRACE_EVIDENCE_REFS]
+        ],
+    }
+
+
+def _agent_trace_record_matches(
+    identities: dict[str, str],
+    *,
+    turn_id: str,
+    session_id: str,
+    invocation_id: str,
+) -> bool:
+    if turn_id:
+        return identities.get("turnId") == turn_id
+    if invocation_id:
+        return identities.get("invocationId") == invocation_id
+    return bool(session_id and identities.get("sessionId") == session_id)
+
+
+def _agent_trace_deduplicate(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    unique: dict[tuple[str, ...], dict[str, Any]] = {}
+    for record in sorted(records, key=_agent_trace_dedup_order):
+        key = _agent_trace_dedup_key(record)
+        if key not in unique:
+            unique[key] = record
+    return sorted(unique.values(), key=_agent_trace_record_order)
+
+
+def _agent_trace_dedup_order(record: dict[str, Any]) -> tuple[datetime, int, int]:
+    source = str(record["source"]).replace("\\", "/")
+    source_priority = 0 if "/events/" in source else 1 if "/conversations/" in source else 2
+    timestamp, line = _agent_trace_record_order(record)
+    return timestamp, source_priority, line
+
+
+def _agent_trace_dedup_key(record: dict[str, Any]) -> tuple[str, ...]:
+    event = record["event"]
+    fields = event.get("fields") if isinstance(event.get("fields"), dict) else {}
+    code = _agent_trace_event_code(event)
+    identities = _event_identities(event)
+    stable_sequence = next(
+        (
+            str(value).strip()
+            for value in (
+                fields.get("ledgerSeq"),
+                fields.get("deltaSeq"),
+                fields.get("toolCallId"),
+                fields.get("messageId"),
+                event.get("seq"),
+                event.get("event_id"),
+            )
+            if value is not None and str(value).strip()
+        ),
+        "",
+    )
+    if "delta" in code and not stable_sequence:
+        return (code, str(record["source"]), str(record["line"]))
+    timestamp = str(event.get("ts") or event.get("timestamp") or "").strip()
+    return (
+        code,
+        timestamp,
+        identities.get("sessionId", ""),
+        identities.get("turnId", ""),
+        identities.get("invocationId", ""),
+        identities.get("submissionId", ""),
+        stable_sequence,
+        str(event.get("outcome") or event.get("status") or "").strip(),
+    )
+
+
+def _agent_trace_event_code(event: dict[str, Any]) -> str:
+    return str(event.get("event_code") or event.get("type") or "unknown").strip().lower()
+
+
+def _agent_trace_record_order(record: dict[str, Any]) -> tuple[datetime, int]:
+    event = record["event"]
+    timestamp = str(event.get("ts") or event.get("timestamp") or "").strip()
+    if timestamp.endswith("Z"):
+        timestamp = f"{timestamp[:-1]}+00:00"
+    try:
+        parsed = datetime.fromisoformat(timestamp)
+    except ValueError:
+        parsed = datetime.min.replace(tzinfo=timezone.utc)
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc), int(record["line"])
+
+
+def _agent_trace_duration_ms(records: list[dict[str, Any]]) -> int:
+    if len(records) < 2:
+        return 0
+    first, last = _agent_trace_record_order(records[0])[0], _agent_trace_record_order(records[-1])[0]
+    return max(0, int((last - first).total_seconds() * 1000))
+
+
+def _agent_trace_stall(records: list[dict[str, Any]], *, status: str) -> dict[str, Any]:
+    if status != "running" or not records:
+        return {"detected": False, "idleMs": 0, "lastEventCode": ""}
+    last_record = records[-1]
+    last_at = _agent_trace_record_order(last_record)[0]
+    idle_ms = max(0, int((datetime.now(timezone.utc) - last_at).total_seconds() * 1000))
+    return {
+        "detected": idle_ms >= AGENT_TRACE_STALL_THRESHOLD_MS,
+        "idleMs": idle_ms,
+        "lastEventCode": _agent_trace_event_code(last_record["event"]),
+    }
+
+
+def _agent_trace_stage(status: str, event_codes: list[str]) -> str:
+    if status in {"completed", "failed", "stopped"}:
+        return status
+    last_code = event_codes[-1] if event_codes else ""
+    if "tool" in last_code:
+        return "executing_tools"
+    if "stream" in last_code or "delta" in last_code:
+        return "streaming"
+    if "llm" in last_code or "model" in last_code:
+        return "waiting_for_model"
+    if "context" in last_code:
+        return "preparing_context"
+    return "accepted"
+
+
+def _agent_trace_tool_name(event: dict[str, Any]) -> str:
+    fields = event.get("fields") if isinstance(event.get("fields"), dict) else {}
+    return str(event.get("tool_name") or event.get("toolName") or fields.get("toolName") or "").strip()[:160]
 
 
 def _terminal_state(event: dict[str, Any]) -> str:

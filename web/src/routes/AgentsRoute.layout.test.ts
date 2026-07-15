@@ -45,6 +45,7 @@ import taskProfileStyles from "./AgentTaskProfilePanel.styles";
 import toolGovernanceStyles from "./AgentToolGovernancePanel.styles";
 import toolSummaryStyles from "./AgentToolSummaryPanel.styles";
 import returnBannerStyles from "./AgentReturnBannerPanel.styles";
+import selectedDetailContentStyles from "./AgentSelectedDetailContentPanel.styles";
 import workspaceLayoutStyles from "./AgentWorkspaceLayoutPanel.styles";
 import routerSource from "../app/router.tsx?raw";
 import shellSource from "../app/AppShell.tsx?raw";
@@ -658,7 +659,7 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("copy.references");
     expect(overviewPanelSource).toContain('from "./AgentOverviewPanel.styles"');
     expect(overviewPanelSource).not.toContain("AgentsRoute.styles");
-    expect(overviewStyles.factGrid).toContain("[grid-template-columns:repeat(auto-fit,_minmax(190px,_1fr))]");
+    expect(overviewStyles.factGrid).toContain("[grid-template-columns:repeat(2,_minmax(0,_1fr))]");
     expect(overviewStyles.factGrid).toContain("[&_section]:[grid-template-columns:18px_minmax(0,_1fr)]");
     expect(overviewStyles.factGrid).toContain("[&_strong]:[text-overflow:ellipsis]");
   });
@@ -1301,9 +1302,16 @@ describe("AgentsRoute layout contract", () => {
     expect(managementBriefStyles.managementBriefPanel).toBeTruthy();
     expect(managementBriefStyles.managementChecklist).toBeTruthy();
     expect(managementBriefStyles.nextActionList).toBeTruthy();
-    expect(managementBriefStyles.nextActionButton).toBe("w-full");
+    expect(managementBriefStyles.managementChecklist).toContain("[flex-wrap:wrap]");
+    expect(managementBriefStyles.managementChecklistDone).not.toContain("w-full");
+    expect(managementBriefStyles.nextActionButton).toContain("w-fit");
+    expect(managementBriefStyles.nextActionButton.split(/\s+/)).not.toContain("w-full");
     expect(overviewStyles.boundarySummaryGrid).toBeTruthy();
     expect(detailHeaderStyles.detailTabs).toBeTruthy();
+    expect(selectedDetailContentStyles.selectedDetailFrame).toContain("max-w-[1280px]");
+    expect(selectedDetailContentStyles.overviewLayout).toContain("minmax(280px,_320px)");
+    expect(selectedDetailContentPanelSource).toContain("styles.overviewMain");
+    expect(selectedDetailContentPanelSource).toContain("styles.overviewAside");
   });
 
   it("includes work-session Agent setup copy for model instructions and workspace boundaries", () => {
@@ -1588,7 +1596,7 @@ describe("AgentsRoute layout contract", () => {
     expect(detailWorkspacePanelSource).toContain("styles.detailPanel");
     expect(workspaceLayoutStyles.workspace).toBeTruthy();
     expect(workspaceLayoutPanelSource).toContain("styles.directory");
-    expect(workspaceLayoutStyles.workspace).toContain("[grid-template-columns:minmax(238px,_300px)_minmax(0,_1fr)]");
+    expect(workspaceLayoutStyles.workspace).toContain("[grid-template-columns:clamp(320px,_18vw,_360px)_minmax(0,_1fr)]");
     expect(workspaceLayoutStyles.directory).toContain("[grid-template-rows:minmax(158px,_0.34fr)_minmax(280px,_0.66fr)]");
     expect(workspaceLayoutStyles.workspace).toContain("max-[860px]:[grid-template-columns:1fr]");
     expect(listWorkspaceStyles.agentPanel).toContain("[grid-template-rows:auto_auto_minmax(0,_1fr)]");
@@ -1596,7 +1604,8 @@ describe("AgentsRoute layout contract", () => {
     expect(detailWorkspaceStyles.detailPanel).toContain("max-[860px]:[min-height:420px]");
     expect(detailWorkspaceStyles.detailPanel).not.toContain("max-[860px]:hidden");
     expect(detailWorkspaceStyles.detailPanelCreating).toContain("max-[860px]:hidden");
-    expect(selectedDetailContentPanelSource).toContain('{activePane === "overview" ? <AgentManagementBriefPanel {...brief} /> : null}');
+    expect(selectedDetailContentPanelSource).toContain("styles.overviewLayout");
+    expect(selectedDetailContentPanelSource).toContain("<aside className={styles.overviewAside}>");
   });
 
   it("keeps Agent Center route chrome background-aware instead of restacking opaque page surfaces", () => {
@@ -1740,9 +1749,10 @@ describe("AgentsRoute layout contract", () => {
     expect(styles.returnBannerButton).not.toContain("max-[860px]:[width:100%]");
   });
 
-  it("keeps Agent detail actions content-sized while preserving full-row tabs", () => {
-    expect(detailHeaderStyles.detailTabs).toContain("[grid-template-columns:repeat(3,_minmax(0,_1fr))]");
-    expect(detailHeaderStyles.detailTabs).toContain("max-[860px]:[grid-template-columns:1fr]");
+  it("keeps Agent detail actions content-sized while preserving bounded tabs", () => {
+    expect(detailHeaderStyles.detailTabs).toContain("[grid-auto-columns:minmax(104px,_max-content)]");
+    expect(detailHeaderStyles.detailTabs).toContain("w-fit");
+    expect(detailHeaderStyles.detailTabs).toContain("max-[860px]:[grid-template-columns:repeat(3,_minmax(0,_1fr))]");
     expect(detailHeaderStyles.detailTab.split(/\s+/)).toContain("w-full");
     expect(detailHeaderStyles.detailTabActive.split(/\s+/)).toContain("w-full");
 
