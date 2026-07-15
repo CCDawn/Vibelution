@@ -1,10 +1,10 @@
 # Agent Operational Overview Workspace Plan
 
-> Status: draft
+> Status: in progress
 >
-> Owner: agent-codex-agent-operational-overview-plan
+> Owner: agent-codex-agent-operational-overview
 >
-> Claim: claim-f4699bd2d437 (planning artifact only)
+> Claim: claim-fd604e2acfc6
 >
 > Scope: Agent Center selected-Agent overview information architecture, existing activity/reference projections, and desktop layout validation
 >

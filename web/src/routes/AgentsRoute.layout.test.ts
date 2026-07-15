@@ -39,6 +39,8 @@ import modeMembershipStyles from "./AgentModeMembershipPanel.styles";
 import personaProfileStyles from "./AgentPersonaProfilePanel.styles";
 import referencesPanelStyles from "./AgentReferencesPanel.styles";
 import overviewStyles from "./AgentOverviewPanel.styles";
+import overviewOperationsStyles from "./AgentOverviewOperationsPanel.styles";
+import overviewResourcesStyles from "./AgentOverviewResourcesPanel.styles";
 import runtimeFocusStyles from "./AgentRuntimeFocusPanel.styles";
 import runtimePolicyStyles from "./AgentRuntimePolicyPanel.styles";
 import taskProfileStyles from "./AgentTaskProfilePanel.styles";
@@ -172,6 +174,14 @@ const selectedDetailContentPanelSource = readFileSync(
 );
 const overviewPanelSource = readFileSync(
   new URL("./AgentOverviewPanel.tsx", import.meta.url),
+  "utf-8",
+);
+const overviewOperationsPanelSource = readFileSync(
+  new URL("./AgentOverviewOperationsPanel.tsx", import.meta.url),
+  "utf-8",
+);
+const overviewResourcesPanelSource = readFileSync(
+  new URL("./AgentOverviewResourcesPanel.tsx", import.meta.url),
   "utf-8",
 );
 const emptySelectionPanelSource = readFileSync(
@@ -1441,6 +1451,22 @@ describe("AgentsRoute layout contract", () => {
     expect(activityHistoryPanelSource).toContain("styles.runHistoryList");
     expect(activityHistoryPanelSource).toContain("styles.inboxMessageItemFocused");
     expect(activityHistoryPanelSource).toContain("activityTimelineItem_${item.kind}");
+  });
+
+  it("keeps a compact operational preview in the overview while Activity owns live polling", () => {
+    expect(routeSource).toContain('activePane === "overview" || activePane === "activity"');
+    expect(routeSource).toContain('refetchInterval: activePane === "activity" ? resolvePollingInterval(pageVisible, 12_000) : false');
+    expect(routeSource).toContain('refetchInterval: activePane === "activity" ? resolvePollingInterval(pageVisible, 20_000) : false');
+    expect(routeSource).toContain("overviewOperations");
+    expect(selectedDetailContentPanelSource).toContain('from "./AgentOverviewOperationsPanel"');
+    expect(selectedDetailContentPanelSource).toContain("<AgentOverviewOperationsPanel");
+    expect(selectedDetailContentPanelSource).toContain('from "./AgentOverviewResourcesPanel"');
+    expect(selectedDetailContentPanelSource).toContain("<AgentOverviewResourcesPanel");
+    expect(overviewOperationsPanelSource).toContain("copy.noActivity");
+    expect(overviewOperationsPanelSource).toContain('role="alert"');
+    expect(overviewOperationsStyles.state).toContain("min-h-[184px]");
+    expect(overviewResourcesPanelSource).toContain("resources.slice(0, 4)");
+    expect(overviewResourcesStyles.item).toBeTruthy();
   });
 
   it("edits Agent runtime delegation and supervision policies from the activity pane", () => {

@@ -25,7 +25,9 @@ describe("AgentOverviewPanel", () => {
         }}
         modeMembership={{ eyebrow: "使用位置", title: "会话", modes: [{ id: "chat", label: "会话" }] }}
         policies={[]}
-      />,
+      >
+        <div>运营内容</div>
+      </AgentOverviewPanel>,
     );
 
     expect(markup).toContain("GPT-5.6");
@@ -35,5 +37,7 @@ describe("AgentOverviewPanel", () => {
     expect(markup).not.toContain("<details open");
     expect(markup).toContain("A050");
     expect(markup).toContain("workspace/agents/a050");
+    expect(markup).toContain("运营内容");
+    expect(markup.indexOf("运营内容")).toBeLessThan(markup.indexOf("技术信息"));
   });
 });

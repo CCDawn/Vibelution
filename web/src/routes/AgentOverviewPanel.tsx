@@ -1,3 +1,5 @@
+import { type ReactNode } from "react";
+
 import {
   Bot,
   Brain,
@@ -70,6 +72,7 @@ export type AgentOverviewPanelProps = {
   territory: AgentOverviewTerritory;
   modeMembership: AgentOverviewModeMembership;
   policies: AgentOverviewPanelPolicy[];
+  children?: ReactNode;
 };
 
 const overviewIcons: Record<AgentOverviewIcon, LucideIcon> = {
@@ -109,7 +112,7 @@ function FactGrid({ facts }: { facts: AgentOverviewFact[] }) {
   );
 }
 
-export function AgentOverviewPanel({ facts, territory, modeMembership, policies }: AgentOverviewPanelProps) {
+export function AgentOverviewPanel({ facts, territory, modeMembership, policies, children }: AgentOverviewPanelProps) {
   const primaryFacts = facts.filter((fact) => !TECHNICAL_FACT_IDS.has(fact.id));
   const technicalFacts = facts.filter((fact) => TECHNICAL_FACT_IDS.has(fact.id));
 
@@ -131,6 +134,8 @@ export function AgentOverviewPanel({ facts, territory, modeMembership, policies 
           ))}
         </div>
       </section>
+
+      {children}
 
       <section className={styles.policyGrid}>
         {policies.map((policy) => (

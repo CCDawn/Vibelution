@@ -10,6 +10,8 @@ import {
 } from "./AgentDetailHeaderPanel";
 import { AgentManagementBriefPanel } from "./AgentManagementBriefPanel";
 import { AgentOverviewPanel } from "./AgentOverviewPanel";
+import { AgentOverviewOperationsPanel } from "./AgentOverviewOperationsPanel";
+import { AgentOverviewResourcesPanel } from "./AgentOverviewResourcesPanel";
 import styles from "./AgentSelectedDetailContentPanel.styles";
 
 export type AgentSelectedDetailPaneId = "overview" | "config" | "activity";
@@ -28,6 +30,8 @@ export type AgentSelectedDetailContentPanelProps = {
   header: AgentSelectedDetailHeaderProps;
   brief: ComponentProps<typeof AgentManagementBriefPanel>;
   overview: ComponentProps<typeof AgentOverviewPanel> | null;
+  operations: ComponentProps<typeof AgentOverviewOperationsPanel> | null;
+  resources: ComponentProps<typeof AgentOverviewResourcesPanel> | null;
   configPrimary: ComponentProps<typeof AgentConfigPrimaryPanePanel>;
   configPolicies: ComponentProps<typeof AgentConfigPolicyPanePanel>;
   configReferences: ComponentProps<typeof AgentConfigReferencesPanePanel>;
@@ -39,6 +43,8 @@ export function AgentSelectedDetailContentPanel({
   header,
   brief,
   overview,
+  operations,
+  resources,
   configPrimary,
   configPolicies,
   configReferences,
@@ -50,10 +56,13 @@ export function AgentSelectedDetailContentPanel({
       {activePane === "overview" && overview ? (
         <div className={styles.overviewLayout}>
           <div className={styles.overviewMain}>
-            <AgentOverviewPanel {...overview} />
+            <AgentOverviewPanel {...overview}>
+              {operations ? <AgentOverviewOperationsPanel {...operations} /> : null}
+            </AgentOverviewPanel>
           </div>
           <aside className={styles.overviewAside}>
             <AgentManagementBriefPanel {...brief} />
+            {resources ? <AgentOverviewResourcesPanel {...resources} /> : null}
           </aside>
         </div>
       ) : null}
