@@ -13211,7 +13211,8 @@ def _source_collection_stage_task_continuation_prompt(metadata: dict[str, Any]) 
             "本阶段 checklist 已由后端绑定；直接沿用阶段上下文，只补尚未完成的分页或指定缺口，不要调用通用 task_list_tool、task_create_tool 或 task_update_tool 复制清单。",
             (
                 "证据补全时可使用 web_fetch_tool，但仅抓取上下文已给出的 sourceUrl 或 DOI；"
-                "不要扩展检索方向、搜索新候选或抓取 file:///localhost。单条抓取失败才标记 needs_more_info，并继续处理其他候选。"
+                "不要扩展检索方向、搜索新候选或抓取 file:///localhost。每页先补证并分批回写，再读取下一页；"
+                "单条抓取失败才标记 needs_more_info，并继续处理其他候选。"
                 if extraction_evidence_continuation
                 else "续跑阶段不要调用 web_fetch_tool、research_knowledge_query_tool 或通用记忆搜索；现有证据不足的候选直接标记 needs_more_info。"
             ),

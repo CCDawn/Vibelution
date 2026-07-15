@@ -6430,6 +6430,7 @@ def test_source_collection_stage_task_continue_inherits_contract_and_tool_gate(t
     assert "不要调用通用 task_list_tool" in captured[1]["initial_prompt"]
     assert "仅抓取上下文已给出的 sourceUrl 或 DOI" in captured[1]["initial_prompt"]
     assert "不要扩展检索方向" in captured[1]["initial_prompt"]
+    assert "每页先补证并分批回写，再读取下一页" in captured[1]["initial_prompt"]
     assert "不要调用 web_fetch_tool" not in captured[1]["initial_prompt"]
     continued_user_message = [item for item in detail["messages"] if item.get("role") == "user"][-1]
     assert continued_user_message["metadata"]["kind"] == "source_collection_stage_session_task"
