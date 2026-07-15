@@ -4141,10 +4141,36 @@ export function ChatCodingRoute() {
     loadEarlierSessionMessagesMutation,
   ]);
   const activeTurnLayer = activeSessionId ? activeTurnLayersBySession[activeSessionId] : undefined;
+  const activeTurnSettledByDetail = isActiveTurnSettledByDetail(activeTurnLayer, detail);
   const activeTurnMessage = useMemo(
-    () => activeTurnLayerToConversationMessage(activeTurnLayer),
-    [activeTurnLayer],
+    () => activeTurnSettledByDetail ? undefined : activeTurnLayerToConversationMessage(activeTurnLayer),
+    [activeTurnLayer, activeTurnSettledByDetail],
   );
+  useEffect(() => {
+    if (!activeSessionId || !activeTurnLayer || !activeTurnSettledByDetail || !detail) {
+      return;
+    }
+    const settledTurnId = activeTurnLayer.turnId;
+    setActiveTurnLayersBySession((current) => {
+      const currentLayer = current[activeSessionId];
+      if (!isActiveTurnSettledByDetail(currentLayer, detail)) {
+        return current;
+      }
+      return setActiveTurnLayerForSession(current, activeSessionId, undefined);
+    });
+    postBrowserTelemetry({
+      phase: "session_stream",
+      eventCode: "browser.session_stream.active_layer_reconciled",
+      message: "Active turn layer was cleared after authoritative session detail committed the turn.",
+      level: "info",
+      fields: {
+        sessionId: activeSessionId,
+        turnId: settledTurnId,
+        source: "session_detail_query",
+        ledgerSeq: detail.ledgerSeq ?? 0,
+      },
+    });
+  }, [activeSessionId, activeTurnLayer, activeTurnSettledByDetail, detail]);
   const handleConversationStreamingFramePaint = useCallback((metrics: ConversationStreamingFramePaintMetrics) => {
     const sessionId = String(metrics.sessionId || "").trim();
     if (!sessionId || sessionId !== activeSessionId) {
