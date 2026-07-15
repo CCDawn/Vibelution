@@ -168,6 +168,73 @@ def test_responses_projection_anchors_opaque_reasoning_before_runtime_notice():
     )
 
 
+def test_responses_projection_anchors_multiple_reasoning_items_from_one_outcome():
+    replay_items = [
+        {
+            "id": "reasoning_replay_multi_1",
+            "type": "reasoning",
+            "encrypted_content": "opaque-reasoning-state-1",
+            "summary": [],
+        },
+        {
+            "id": "reasoning_replay_multi_2",
+            "type": "reasoning",
+            "encrypted_content": "opaque-reasoning-state-2",
+            "summary": [],
+        },
+    ]
+
+    def backend(_payload):
+        return {
+            "id": "resp_replay_multi",
+            "status": "completed",
+            "output": [
+                *replay_items,
+                {
+                    "id": "function_replay_multi",
+                    "type": "function_call",
+                    "call_id": "call_replay_multi",
+                    "name": "lookup",
+                    "arguments": '{"query":"moon"}',
+                },
+            ],
+        }
+
+    client = LLMClient(config=_config(), backend=backend)
+    outcome = client.invoke_outcome(
+        [{"role": "user", "content": "look up the moon"}],
+        metadata=_metadata(iteration=0),
+    )
+    assistant = client.project_outcome_message(outcome)
+
+    assert assistant.additional_kwargs["reasoning_replay_item_ids"] == [
+        "reasoning_replay_multi_1",
+        "reasoning_replay_multi_2",
+    ]
+
+    continuation = client._build_payload(
+        [
+            {"role": "user", "content": "look up the moon"},
+            assistant,
+            {
+                "role": "tool",
+                "tool_call_id": "call_replay_multi",
+                "content": "The moon orbits Earth.",
+            },
+            SystemMessage(content="Runtime context refreshed after the tool result."),
+        ],
+        metadata=_metadata(iteration=1),
+        replay_state=outcome.replay_state,
+    )
+
+    reasoning_ids = [
+        item.get("id")
+        for item in continuation["input"]
+        if isinstance(item, dict) and item.get("type") == "reasoning"
+    ]
+    assert reasoning_ids == ["reasoning_replay_multi_1", "reasoning_replay_multi_2"]
+
+
 def test_responses_projection_drops_stale_anchor_when_replay_state_advances():
     responses = [
         {

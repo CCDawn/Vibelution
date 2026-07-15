@@ -448,19 +448,40 @@ def _scope_reasoning_replay_anchors(messages: List[Any], replay_state: Any) -> L
             replay_item_id = str(additional_kwargs.get("reasoning_replay_item_id") or "").strip()
             if replay_item_id and replay_item_id not in active_ids:
                 additional_kwargs.pop("reasoning_replay_item_id", None)
-                message = message.model_copy(update={"additional_kwargs": additional_kwargs})
+            replay_item_ids = additional_kwargs.get("reasoning_replay_item_ids")
+            if isinstance(replay_item_ids, (list, tuple)):
+                scoped_ids = [str(item_id).strip() for item_id in replay_item_ids if str(item_id).strip() in active_ids]
+                if scoped_ids:
+                    additional_kwargs["reasoning_replay_item_ids"] = scoped_ids
+                else:
+                    additional_kwargs.pop("reasoning_replay_item_ids", None)
+            message = message.model_copy(update={"additional_kwargs": additional_kwargs})
         elif isinstance(message, dict):
             message = dict(message)
             replay_item_id = str(message.get("reasoning_replay_item_id") or "").strip()
             if replay_item_id and replay_item_id not in active_ids:
                 message.pop("reasoning_replay_item_id", None)
+            replay_item_ids = message.get("reasoning_replay_item_ids")
+            if isinstance(replay_item_ids, (list, tuple)):
+                scoped_ids = [str(item_id).strip() for item_id in replay_item_ids if str(item_id).strip() in active_ids]
+                if scoped_ids:
+                    message["reasoning_replay_item_ids"] = scoped_ids
+                else:
+                    message.pop("reasoning_replay_item_ids", None)
             additional_kwargs = message.get("additional_kwargs")
             if isinstance(additional_kwargs, dict):
                 additional_kwargs = dict(additional_kwargs)
                 nested_item_id = str(additional_kwargs.get("reasoning_replay_item_id") or "").strip()
                 if nested_item_id and nested_item_id not in active_ids:
                     additional_kwargs.pop("reasoning_replay_item_id", None)
-                    message["additional_kwargs"] = additional_kwargs
+                nested_item_ids = additional_kwargs.get("reasoning_replay_item_ids")
+                if isinstance(nested_item_ids, (list, tuple)):
+                    scoped_ids = [str(item_id).strip() for item_id in nested_item_ids if str(item_id).strip() in active_ids]
+                    if scoped_ids:
+                        additional_kwargs["reasoning_replay_item_ids"] = scoped_ids
+                    else:
+                        additional_kwargs.pop("reasoning_replay_item_ids", None)
+                message["additional_kwargs"] = additional_kwargs
         scoped.append(message)
     return scoped
 
@@ -1920,10 +1941,15 @@ class LLMClient:
         replay_items = tuple(
             getattr(getattr(outcome, "replay_state", None), "opaque_items", ()) or ()
         )
-        if len(replay_items) == 1:
-            replay_item_id = str(getattr(replay_items[0], "item_id", "") or "").strip()
-            if replay_item_id:
-                additional_kwargs["reasoning_replay_item_id"] = replay_item_id
+        replay_item_ids = [
+            str(getattr(replay_item, "item_id", "") or "").strip()
+            for replay_item in replay_items
+            if str(getattr(replay_item, "item_id", "") or "").strip()
+        ]
+        if len(replay_item_ids) == 1:
+            additional_kwargs["reasoning_replay_item_id"] = replay_item_ids[0]
+        elif replay_item_ids:
+            additional_kwargs["reasoning_replay_item_ids"] = replay_item_ids
         if include_outcome:
             additional_kwargs["turn_outcome"] = outcome
         response_metadata = self._response_metadata(metadata)

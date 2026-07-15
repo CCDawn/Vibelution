@@ -233,27 +233,54 @@ def _project_messages(
             or _value(_value(message, "additional_kwargs", {}), "reasoning_replay_item_id", "")
             or ""
         ).strip()
-        if replay_item_id and replay_state is not None:
-            if replay_item_id not in replay_item_ids:
+        raw_replay_item_ids = _value(message, "reasoning_replay_item_ids", None)
+        if raw_replay_item_ids is None:
+            raw_replay_item_ids = _value(_value(message, "additional_kwargs", {}), "reasoning_replay_item_ids", None)
+        message_replay_item_ids: list[str] = []
+        if raw_replay_item_ids is not None:
+            if isinstance(raw_replay_item_ids, (str, bytes, Mapping)) or not isinstance(raw_replay_item_ids, Sequence):
                 raise SemanticProjectionError(
-                    "missing_replay_item",
+                    "invalid_replay_anchor",
                     index,
-                    f"reasoning replay item `{replay_item_id}` is unavailable",
+                    "reasoning replay item ids must be an ordered sequence",
                 )
+            message_replay_item_ids = [str(item_id or "").strip() for item_id in raw_replay_item_ids]
+            if not message_replay_item_ids or any(not item_id for item_id in message_replay_item_ids):
+                raise SemanticProjectionError(
+                    "invalid_replay_anchor",
+                    index,
+                    "reasoning replay item ids must be non-empty",
+                )
+        if replay_item_id:
+            if message_replay_item_ids:
+                raise SemanticProjectionError(
+                    "invalid_replay_anchor",
+                    index,
+                    "reasoning replay item anchor must use either singular or ordered plural form",
+                )
+            message_replay_item_ids = [replay_item_id]
+        if message_replay_item_ids and replay_state is not None:
             if role != "assistant":
                 raise SemanticProjectionError(
                     "invalid_replay_anchor",
                     index,
                     "reasoning replay item must be anchored to an assistant message",
                 )
-            if replay_item_id in explicit_replay_anchors:
-                raise SemanticProjectionError(
-                    "duplicate_replay_anchor",
-                    index,
-                    f"reasoning replay item `{replay_item_id}` has multiple explicit anchors",
-                )
-            explicit_replay_anchors[replay_item_id] = len(projected)
-            parts.append(ReasoningReplayPart(replay_item_id))
+            for anchored_item_id in message_replay_item_ids:
+                if anchored_item_id not in replay_item_ids:
+                    raise SemanticProjectionError(
+                        "missing_replay_item",
+                        index,
+                        f"reasoning replay item `{anchored_item_id}` is unavailable",
+                    )
+                if anchored_item_id in explicit_replay_anchors:
+                    raise SemanticProjectionError(
+                        "duplicate_replay_anchor",
+                        index,
+                        f"reasoning replay item `{anchored_item_id}` has multiple explicit anchors",
+                    )
+                explicit_replay_anchors[anchored_item_id] = len(projected)
+                parts.append(ReasoningReplayPart(anchored_item_id))
         parts.extend(_content_parts(_value(message, "content", ""), index))
         raw_calls = _value(message, "tool_calls", ()) or ()
         for raw_call in raw_calls:
