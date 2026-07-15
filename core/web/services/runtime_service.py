@@ -5,6 +5,7 @@ from __future__ import annotations
 import getpass
 import json
 import os
+from concurrent.futures import Future, ThreadPoolExecutor
 from contextvars import ContextVar
 from datetime import datetime, timezone
 from functools import wraps
@@ -58,6 +59,15 @@ _RUNTIME_SUMMARY_AGENT_CACHE: ContextVar[dict[tuple[str, bool], object] | None] 
     "runtime_summary_agent_cache",
     default=None,
 )
+_RUNTIME_SUMMARY_HTTP_CACHE_TTL_SECONDS = 1.0
+_RUNTIME_SUMMARY_HTTP_CACHE_LOCK = threading.Lock()
+_RUNTIME_SUMMARY_HTTP_EXECUTOR = ThreadPoolExecutor(
+    max_workers=1,
+    thread_name_prefix="runtime-summary",
+)
+_RUNTIME_SUMMARY_HTTP_INFLIGHT: Future[dict] | None = None
+_RUNTIME_SUMMARY_HTTP_SNAPSHOT: dict | None = None
+_RUNTIME_SUMMARY_HTTP_SNAPSHOT_AT = 0.0
 
 
 class RuntimeRestartActiveWorkBlocked(Exception):
@@ -101,6 +111,65 @@ def _runtime_summary_get_agent(agent_id: str, *, include_archived: bool = True):
         raise
     cache[cache_key] = agent
     return agent
+
+
+def get_runtime_summary_http_future() -> Future[dict]:
+    """Share expensive HTTP summary work without occupying FastAPI's worker pool.
+
+    The first request computes on a dedicated worker. Concurrent requests await the
+    same future; after the first snapshot exists, callers receive it immediately
+    while an expired snapshot is refreshed in the background.
+    """
+
+    global _RUNTIME_SUMMARY_HTTP_INFLIGHT
+    now = time.monotonic()
+    with _RUNTIME_SUMMARY_HTTP_CACHE_LOCK:
+        snapshot = _RUNTIME_SUMMARY_HTTP_SNAPSHOT
+        fresh = snapshot is not None and (
+            now - _RUNTIME_SUMMARY_HTTP_SNAPSHOT_AT
+        ) <= _RUNTIME_SUMMARY_HTTP_CACHE_TTL_SECONDS
+        inflight = _RUNTIME_SUMMARY_HTTP_INFLIGHT
+        if inflight is None or inflight.done():
+            if snapshot is None or not fresh:
+                inflight = _RUNTIME_SUMMARY_HTTP_EXECUTOR.submit(get_runtime_summary)
+                _RUNTIME_SUMMARY_HTTP_INFLIGHT = inflight
+                inflight.add_done_callback(_commit_runtime_summary_http_snapshot)
+        if snapshot is not None:
+            completed: Future[dict] = Future()
+            completed.set_result(snapshot)
+            return completed
+        assert inflight is not None
+        return inflight
+
+
+def _commit_runtime_summary_http_snapshot(future: Future[dict]) -> None:
+    global _RUNTIME_SUMMARY_HTTP_INFLIGHT
+    global _RUNTIME_SUMMARY_HTTP_SNAPSHOT
+    global _RUNTIME_SUMMARY_HTTP_SNAPSHOT_AT
+    try:
+        payload = future.result()
+    except BaseException:
+        with _RUNTIME_SUMMARY_HTTP_CACHE_LOCK:
+            if _RUNTIME_SUMMARY_HTTP_INFLIGHT is future:
+                _RUNTIME_SUMMARY_HTTP_INFLIGHT = None
+        return
+    with _RUNTIME_SUMMARY_HTTP_CACHE_LOCK:
+        if _RUNTIME_SUMMARY_HTTP_INFLIGHT is future:
+            _RUNTIME_SUMMARY_HTTP_SNAPSHOT = payload
+            _RUNTIME_SUMMARY_HTTP_SNAPSHOT_AT = time.monotonic()
+            _RUNTIME_SUMMARY_HTTP_INFLIGHT = None
+
+
+def _reset_runtime_summary_http_cache() -> None:
+    """Reset process-local HTTP summary state for focused tests."""
+
+    global _RUNTIME_SUMMARY_HTTP_INFLIGHT
+    global _RUNTIME_SUMMARY_HTTP_SNAPSHOT
+    global _RUNTIME_SUMMARY_HTTP_SNAPSHOT_AT
+    with _RUNTIME_SUMMARY_HTTP_CACHE_LOCK:
+        _RUNTIME_SUMMARY_HTTP_INFLIGHT = None
+        _RUNTIME_SUMMARY_HTTP_SNAPSHOT = None
+        _RUNTIME_SUMMARY_HTTP_SNAPSHOT_AT = 0.0
 
 
 @_with_runtime_summary_agent_cache
