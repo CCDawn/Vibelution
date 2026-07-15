@@ -3,7 +3,7 @@ import { LoaderCircle } from "lucide-react";
 import { type RouteErrorSurface } from "./RouteErrorBoundary";
 import styles from "./RouteLoadingShell.styles";
 
-export type RouteLoadingLayout = "config" | "default" | "teams";
+export type RouteLoadingLayout = "chat" | "config" | "default" | "teams";
 
 export type RouteLoadingShellProps = {
   label?: string;
@@ -64,6 +64,58 @@ function ConfigLoadingLayout() {
             </span>
           ))}
         </div>
+      </section>
+    </div>
+  );
+}
+
+function ChatLoadingLayout() {
+  return (
+    <div className={styles.chatGrid}>
+      <aside data-loading-region="chat-index" className={styles.chatIndexPanel} aria-hidden="true">
+        <span className={styles.chatSearch} />
+        <span className={styles.chatActions}>
+          <span />
+          <span />
+        </span>
+        {[2, 1, 1].map((rowCount, groupIndex) => (
+          <span key={groupIndex} className={styles.chatIndexGroup}>
+            <span className={styles.chatGroupHeading}>
+              <SkeletonLine compact />
+              <span className={styles.chatGroupCount} />
+            </span>
+            {Array.from({ length: rowCount }, (_, rowIndex) => (
+              <span key={rowIndex} className={styles.chatIndexRow}>
+                <span className={styles.chatAvatar} />
+                <span className={styles.chatIndexCopy}>
+                  <SkeletonLine compact />
+                  <SkeletonLine />
+                </span>
+              </span>
+            ))}
+          </span>
+        ))}
+      </aside>
+      <section data-loading-region="chat-workspace" className={styles.chatWorkspace} aria-hidden="true">
+        <span className={styles.chatTranscript}>
+          {[0, 1].map((index) => (
+            <span key={index} className={styles.chatMessage}>
+              <span className={styles.chatAvatar} />
+              <span className={styles.chatMessageCopy}>
+                <SkeletonLine compact />
+                <SkeletonLine />
+                <SkeletonLine compact />
+              </span>
+            </span>
+          ))}
+        </span>
+        <span className={styles.chatComposer}>
+          <span className={styles.chatComposerInput} />
+          <span className={styles.chatComposerToolbar}>
+            <span />
+            <span />
+          </span>
+        </span>
       </section>
     </div>
   );
@@ -132,6 +184,8 @@ export function RouteLoadingShell({
   const resolvedLabel = label ?? (
     layout === "config"
       ? "正在打开设置工作台"
+      : layout === "chat"
+        ? "正在打开对话工作台"
       : layout === "teams"
         ? "正在打开团队工作台"
         : surface === "launcher"
@@ -154,6 +208,7 @@ export function RouteLoadingShell({
     >
       <div className={structured ? styles.structuredPanel : styles.panel}>
         <LoadingHeader label={resolvedLabel} meta={resolvedMeta} />
+        {layout === "chat" ? <ChatLoadingLayout /> : null}
         {layout === "config" ? <ConfigLoadingLayout /> : null}
         {layout === "teams" ? <TeamsLoadingLayout /> : null}
       </div>

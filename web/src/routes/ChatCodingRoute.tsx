@@ -204,6 +204,7 @@ import {
   buildConversationComposerBridgeState,
 } from "./chat/ChatConversationComposerBridge";
 import { ChatFileWorkspaceTabs } from "./chat/ChatFileWorkspaceTabs";
+import { ConversationIndexLoadingShell } from "./chat/ChatLoadingShell";
 import { ChatSessionWorkspacePanel } from "./chat/ChatSessionWorkspacePanel";
 import { LlmPayloadTracePanel } from "./chat/LlmPayloadTracePanel";
 import { TokenCoreStatusPanel, type TokenCoreStatusMetric } from "./chat/TokenCoreStatusPanel";
@@ -6499,12 +6500,7 @@ export function ChatCodingRoute() {
       {sessionsErrorState.blockingError ? (
         <VStateSurface className={styles.panelState} tone="error" title={sessionsErrorMessage} />
       ) : conversationsQuery.isPending && !conversationsQuery.data && sessionsQuery.isPending && !sessionsQuery.data ? (
-        <VStateSurface
-          className={styles.panelState}
-          tone="loading"
-          title={t("loadingSession")}
-          skeletonLines={2}
-        />
+        <ConversationIndexLoadingShell label={t("loadingSession")} />
       ) : filteredConversations.length === 0 && filteredTeams.length === 0 && filteredStandaloneGroupConversations.length === 0 ? (
         <VStateSurface
           className={styles.panelState}
