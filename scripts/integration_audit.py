@@ -8,6 +8,21 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Iterable
 
+try:
+    from scripts.windowless_subprocess import no_window_subprocess_kwargs
+except ModuleNotFoundError:  # Direct execution sets sys.path[0] to scripts/.
+    import importlib.util
+
+    _windowless_spec = importlib.util.spec_from_file_location(
+        "vibelution_windowless_subprocess",
+        Path(__file__).with_name("windowless_subprocess.py"),
+    )
+    if _windowless_spec is None or _windowless_spec.loader is None:
+        raise RuntimeError("Unable to load the windowless subprocess policy.")
+    _windowless_module = importlib.util.module_from_spec(_windowless_spec)
+    _windowless_spec.loader.exec_module(_windowless_module)
+    no_window_subprocess_kwargs = _windowless_module.no_window_subprocess_kwargs
+
 
 CONFIG_SENSITIVE_BASENAMES = {
     "config.toml",
@@ -207,6 +222,7 @@ def run_git(root: Path, *args: str, check: bool = False) -> GitResult:
         text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
+        **no_window_subprocess_kwargs(),
     )
     if check and completed.returncode != 0:
         raise RuntimeError(
@@ -447,6 +463,7 @@ def stash_absorption_state(root: Path, ref: str, paths: list[str], *, kind: str)
         text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
+        **no_window_subprocess_kwargs(),
     )
     return "absorbed_by_main" if completed.returncode == 0 else "not_absorbed"
 

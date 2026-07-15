@@ -15,6 +15,21 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal, Sequence
 
+try:
+    from scripts.windowless_subprocess import no_window_subprocess_kwargs
+except ModuleNotFoundError:  # Direct execution sets sys.path[0] to scripts/.
+    import importlib.util
+
+    _windowless_spec = importlib.util.spec_from_file_location(
+        "vibelution_windowless_subprocess",
+        Path(__file__).with_name("windowless_subprocess.py"),
+    )
+    if _windowless_spec is None or _windowless_spec.loader is None:
+        raise RuntimeError("Unable to load the windowless subprocess policy.")
+    _windowless_module = importlib.util.module_from_spec(_windowless_spec)
+    _windowless_spec.loader.exec_module(_windowless_module)
+    no_window_subprocess_kwargs = _windowless_module.no_window_subprocess_kwargs
+
 Outcome = Literal[
     "passed",
     "failed",
@@ -175,6 +190,7 @@ def run_process(
     cwd: Path,
     *,
     input_text: str | None = None,
+    env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         list(argv),
@@ -183,7 +199,33 @@ def run_process(
         capture_output=True,
         text=True,
         check=False,
+        env=env,
+        **no_window_subprocess_kwargs(),
     )
+
+
+def git_hook_isolated_environment() -> dict[str, str]:
+    """Remove repository-local Git variables before tests create fixture repos."""
+
+    env = os.environ.copy()
+    repository_local_names = {
+        "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+        "GIT_COMMON_DIR",
+        "GIT_DIR",
+        "GIT_GRAFT_FILE",
+        "GIT_IMPLICIT_WORK_TREE",
+        "GIT_INDEX_FILE",
+        "GIT_INTERNAL_SUPER_PREFIX",
+        "GIT_NO_REPLACE_OBJECTS",
+        "GIT_OBJECT_DIRECTORY",
+        "GIT_PREFIX",
+        "GIT_REPLACE_REF_BASE",
+        "GIT_SHALLOW_FILE",
+        "GIT_WORK_TREE",
+    }
+    for name in repository_local_names:
+        env.pop(name, None)
+    return env
 
 
 def repository_root(start: Path) -> Path:
@@ -206,6 +248,7 @@ def git_paths(root: Path, *args: str) -> list[str]:
         cwd=root,
         capture_output=True,
         check=False,
+        **no_window_subprocess_kwargs(),
     )
     if completed.returncode != 0:
         error = completed.stderr.decode("utf-8", errors="replace").strip()
@@ -246,10 +289,11 @@ def measured(
     cwd: Path,
     *,
     input_text: str | None = None,
+    env: dict[str, str] | None = None,
     subject: str,
 ) -> ProcessResult:
     started = time.monotonic()
-    completed = run_process(argv, cwd, input_text=input_text)
+    completed = run_process(argv, cwd, input_text=input_text, env=env)
     duration_ms = round((time.monotonic() - started) * 1000)
     return ProcessResult(
         kind=kind,
@@ -792,6 +836,7 @@ def run_commit_gate(root: Path) -> GateResult:
                 "commit_mode or pre_commit",
             ],
             root,
+            env=git_hook_isolated_environment(),
             subject="gate self-test",
         )
         commands.append(self_test)
