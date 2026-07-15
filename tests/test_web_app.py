@@ -6419,6 +6419,11 @@ def test_source_collection_stage_task_continue_inherits_contract_and_tool_gate(t
         "source_collection_context_tool",
         "source_collection_stage_writeback_tool",
     ]
+    assert "team_id: research-team" in captured[1]["initial_prompt"]
+    assert "run_id: dprun-1" in captured[1]["initial_prompt"]
+    assert "stage_id: extraction" in captured[1]["initial_prompt"]
+    assert "task_id: stagetask-1" in captured[1]["initial_prompt"]
+    assert "source_collection_stage_writeback_tool" in captured[1]["initial_prompt"]
     continued_user_message = [item for item in detail["messages"] if item.get("role") == "user"][-1]
     assert continued_user_message["metadata"]["kind"] == "source_collection_stage_session_task"
     assert continued_user_message["metadata"]["sourceCollectionStageTaskId"] == "stagetask-1"
