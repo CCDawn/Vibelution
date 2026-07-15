@@ -4625,6 +4625,7 @@ def test_source_collection_context_retry_evidence_returns_only_missing_anchor_ca
     assert "只返回 `retryFocus.evidenceGapCandidateIds`" in submitted_messages[-1]
     assert "仅抓取该既有定位符补证" in submitted_messages[-1]
     assert "不要扩展检索方向" in submitted_messages[-1]
+    assert "每页先补证并分批回写，再读取下一页" in submitted_messages[-1]
     assert submitted_metadata[-1]["sourceContextMode"] == "retry_evidence"
     new_task_context = team_workflow_orchestration_service.get_source_collection_stage_task_context(
         team["teamId"],
@@ -4633,6 +4634,14 @@ def test_source_collection_context_retry_evidence_returns_only_missing_anchor_ca
         context_mode="retry_evidence",
     )
     assert [item["candidateId"] for item in new_task_context["candidates"]] == [candidates[1]["candidateId"]]
+    authoritative_context = team_workflow_orchestration_service.get_source_collection_stage_task_context(
+        team["teamId"],
+        task_id=retry_task["taskId"],
+        candidate_limit=5,
+        context_mode="retry_missing",
+    )
+    assert authoritative_context["contextMode"] == "retry_evidence"
+    assert [item["candidateId"] for item in authoritative_context["candidates"]] == [candidates[1]["candidateId"]]
 
 
 def test_source_collection_extraction_resume_after_interrupted_reading_prioritizes_writeback(tmp_path, monkeypatch):

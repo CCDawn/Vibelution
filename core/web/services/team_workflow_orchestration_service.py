@@ -1864,6 +1864,11 @@ def get_source_collection_stage_task_context(
     if normalized_stage_id not in SOURCE_COLLECTION_AGENT_CONTEXT_STAGE_ROLES:
         raise TeamWorkflowOrchestrationError(f"Unsupported source collection stage: {normalized_stage_id}")
     normalized_context_mode = _normalize_source_collection_context_mode(context_mode)
+    task_context_mode_raw = _trim_text(task.get("sourceContextMode"), max_length=40)
+    if task_context_mode_raw:
+        task_context_mode = _normalize_source_collection_context_mode(task_context_mode_raw)
+        if task_context_mode in {"retry_missing", "retry_evidence"}:
+            normalized_context_mode = task_context_mode
     run_bundle = _source_collection_run_context_bundle(normalized_team_id, normalized_run_id)
     task_agent_id = _trim_text(task.get("agentId"), max_length=160)
     task_agent_role = _normalize_source_collection_agent_role(task.get("agentRole"))
@@ -20270,7 +20275,7 @@ def _source_collection_stage_session_task_message(
             "- 对摘要或元数据足以支持的范围，可把 `candidates[].evidenceRefs` 原样写入对应 extraction；不得据此虚构页码、直接引语或全文结论。",
             (
                 "- 资料提炼阶段若受控摘要不足，但 `candidates[].sourceUrl` 或 `doi` 存在，可用 `web_fetch_tool` 仅抓取该既有定位符补证；"
-                "不要扩展检索方向、生成新候选或调用搜索工具。抓取失败后再标记 `needs_more_info`。"
+                "不要扩展检索方向、生成新候选或调用搜索工具。每页先补证并分批回写，再读取下一页；抓取失败后再标记 `needs_more_info`。"
                 if stage_id == "extraction" and context_mode in {"evidence", "retry_evidence"}
                 else ""
             ),
