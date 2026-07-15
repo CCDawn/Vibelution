@@ -510,6 +510,46 @@ def _stage_task_feedback_events(task: dict, *, complete: bool = True) -> list[di
     return events
 
 
+def test_source_collection_stage_turn_failure_uses_terminal_snapshot(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    session_id = "session-stage-tool-blocked"
+    turn_id = "turn-stage-tool-blocked"
+    blocked_tool_event = SimpleNamespace(
+        turn_id=turn_id,
+        event_type="tool_result",
+        status="blocked",
+        payload={
+            "toolCall": {
+                "name": "source_collection_stage_writeback_tool",
+                "status": "blocked",
+            }
+        },
+    )
+    monkeypatch.setattr(
+        team_workflow_orchestration_service,
+        "_source_collection_stage_session_task_completion_snapshot_result",
+        lambda current_session_id, current_turn_id: {
+            "eventId": "session_completion_snapshot",
+            "runId": current_turn_id,
+            "sessionId": current_session_id,
+            "status": "interrupted",
+            "summary": "工具额度耗尽，阶段写回未完成。",
+            "createdAt": "",
+            "source": "session_completion_snapshot",
+        },
+    )
+
+    result = team_workflow_orchestration_service._source_collection_stage_session_task_turn_result(
+        "agent-source-finder",
+        session_id,
+        turn_id,
+        conversation_events_by_session={session_id: [blocked_tool_event]},
+    )
+
+    assert result["status"] == "interrupted"
+    assert result["summary"] == "工具额度耗尽，阶段写回未完成。"
+
+
 def _workflow_scene_events_by_code(events, event_code):
     return [
         kwargs
