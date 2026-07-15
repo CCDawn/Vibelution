@@ -1265,6 +1265,11 @@
             </div>
 <div class="blueprint-row compact">
               <b>GET</b>
+              <strong>/api/teams/{team_id}/workflow-orchestration/source-collection/summary?runId={runId}</strong>
+              <span>当前资料搜集批次的唯一闭环投影：scope=source_run，返回四阶段 phaseCloseGate；status=ready 只表示可继续操作，不能替代 gate 的 closed_loop。</span>
+            </div>
+<div class="blueprint-row compact">
+              <b>GET</b>
               <strong>/api/teams/{team_id}/workflow-orchestration/knowledge-ingestion/status</strong>
               <span>只读聚合知识入库漏斗：stages、summary、actionItems、CandidateGraphSummary、Team Knowledge stats 和 officialBoundary；不会生成新的 candidate_graph 快照。</span>
             </div>
@@ -1908,6 +1913,11 @@
               <b>候选校验</b>
               <strong>/api/teams/{teamId}/workflow-orchestration/candidates/validation</strong>
               <span>统计 CandidateStore valid/invalid/error/warning，并报告每个候选的结构化校验问题。</span>
+            </div>
+<div class="blueprint-row compact">
+              <b>第一阶段闭环门</b>
+              <strong>/api/teams/{teamId}/workflow-orchestration/source-collection/summary?runId={runId}</strong>
+              <span>以当前 source_run 的四张阶段卡生成 phaseCloseGate；只有 finding/extraction/relations/ingestion 全部 closed_loop 且阶段轮次已收口时才通过。knowledge-ingestion、source-quality、coordination 和 model-evidence 的全局状态均标记 team_aggregate，不可替代本轮 gate。</span>
             </div>
 <div class="blueprint-row compact">
               <b>Team 前端入口</b>
