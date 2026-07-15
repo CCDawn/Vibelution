@@ -435,6 +435,36 @@ def _payload_conversation_items(payload: Dict[str, Any]) -> List[Any]:
     return []
 
 
+def _scope_reasoning_replay_anchors(messages: List[Any], replay_state: Any) -> List[Any]:
+    active_ids = {
+        str(getattr(item, "item_id", "") or "").strip()
+        for item in tuple(getattr(replay_state, "opaque_items", ()) or ())
+        if str(getattr(item, "item_id", "") or "").strip()
+    }
+    scoped: List[Any] = []
+    for message in list(messages or []):
+        if isinstance(message, AIMessage):
+            additional_kwargs = dict(getattr(message, "additional_kwargs", None) or {})
+            replay_item_id = str(additional_kwargs.get("reasoning_replay_item_id") or "").strip()
+            if replay_item_id and replay_item_id not in active_ids:
+                additional_kwargs.pop("reasoning_replay_item_id", None)
+                message = message.model_copy(update={"additional_kwargs": additional_kwargs})
+        elif isinstance(message, dict):
+            message = dict(message)
+            replay_item_id = str(message.get("reasoning_replay_item_id") or "").strip()
+            if replay_item_id and replay_item_id not in active_ids:
+                message.pop("reasoning_replay_item_id", None)
+            additional_kwargs = message.get("additional_kwargs")
+            if isinstance(additional_kwargs, dict):
+                additional_kwargs = dict(additional_kwargs)
+                nested_item_id = str(additional_kwargs.get("reasoning_replay_item_id") or "").strip()
+                if nested_item_id and nested_item_id not in active_ids:
+                    additional_kwargs.pop("reasoning_replay_item_id", None)
+                    message["additional_kwargs"] = additional_kwargs
+        scoped.append(message)
+    return scoped
+
+
 def _message_role_and_content(message: Any) -> tuple[str, Any]:
     def normalize_role(value: str) -> str:
         role = str(value or "user").strip().lower() or "user"
@@ -1439,6 +1469,8 @@ class LLMClient:
             )
         projection_messages = list(messages or [])
         provider_messages = normalize_messages_for_provider(projection_messages)
+        if replay_state is not None:
+            provider_messages = _scope_reasoning_replay_anchors(provider_messages, replay_state)
         provider_tool_chain_repaired = sum(
             1
             for message in provider_messages

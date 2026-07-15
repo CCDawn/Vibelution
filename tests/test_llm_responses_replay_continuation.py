@@ -168,6 +168,98 @@ def test_responses_projection_anchors_opaque_reasoning_before_runtime_notice():
     )
 
 
+def test_responses_projection_drops_stale_anchor_when_replay_state_advances():
+    responses = [
+        {
+            "id": "resp_replay_old",
+            "status": "completed",
+            "output": [
+                {
+                    "id": "reasoning_replay_old",
+                    "type": "reasoning",
+                    "encrypted_content": "opaque-old",
+                    "summary": [],
+                },
+                {
+                    "id": "function_replay_old",
+                    "type": "function_call",
+                    "call_id": "call_replay_old",
+                    "name": "lookup",
+                    "arguments": '{"query":"moon"}',
+                },
+            ],
+        },
+        {
+            "id": "resp_replay_current",
+            "status": "completed",
+            "output": [
+                {
+                    "id": "reasoning_replay_current",
+                    "type": "reasoning",
+                    "encrypted_content": "opaque-current",
+                    "summary": [],
+                },
+                {
+                    "id": "function_replay_current",
+                    "type": "function_call",
+                    "call_id": "call_replay_current",
+                    "name": "lookup",
+                    "arguments": '{"query":"orbit"}',
+                },
+            ],
+        },
+    ]
+
+    def backend(_payload):
+        return responses.pop(0)
+
+    client = LLMClient(config=_config(), backend=backend)
+    first = client.invoke_outcome(
+        [{"role": "user", "content": "look up the moon"}],
+        metadata=_metadata(iteration=0),
+    )
+    first_assistant = client.project_outcome_message(first)
+    first_tool = {
+        "role": "tool",
+        "tool_call_id": "call_replay_old",
+        "content": "The moon orbits Earth.",
+    }
+    second = client.invoke_outcome(
+        [
+            {"role": "user", "content": "look up the moon"},
+            first_assistant,
+            first_tool,
+        ],
+        metadata=_metadata(iteration=1),
+        replay_state=first.replay_state,
+    )
+    second_assistant = client.project_outcome_message(second)
+
+    continuation = client._build_payload(
+        [
+            {"role": "user", "content": "look up the moon"},
+            first_assistant,
+            first_tool,
+            second_assistant,
+            {
+                "role": "tool",
+                "tool_call_id": "call_replay_current",
+                "content": "The orbit is elliptical.",
+            },
+            SystemMessage(content="Runtime context refreshed after the second tool result."),
+        ],
+        metadata=_metadata(iteration=2),
+        replay_state=second.replay_state,
+    )
+
+    reasoning_ids = [
+        item.get("id")
+        for item in continuation["input"]
+        if isinstance(item, dict) and item.get("type") == "reasoning"
+    ]
+    assert reasoning_ids == ["reasoning_replay_current"]
+
+
 def test_invalid_explicit_model_protocol_fails_closed():
     client = LLMClient(config=_config())
 
