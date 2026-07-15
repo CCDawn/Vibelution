@@ -14037,14 +14037,16 @@ def _ensure_session_turn_terminal_fallback(
         )
     except Exception:
         pass
-    stopped = bool(str(stop_reason or "").strip())
-    terminal_status = (
-        str(getattr(terminal_event, "status", "") or "").strip().lower()
-        if terminal_event is not None
-        else ("stopped" if stopped else "failed_runtime")
-    )
     try:
-        if journal_loaded and terminal_event is None:
+        # This helper is always called from the turn's finally block.  A normal
+        # result has already written a terminal ledger event and its work-run
+        # summary, so treating that completed turn as a persistence fallback
+        # would overwrite the correct completed summary with a false failure.
+        if terminal_event is not None:
+            return
+        stopped = bool(str(stop_reason or "").strip())
+        terminal_status = "stopped" if stopped else "failed_runtime"
+        if journal_loaded:
             _append_session_conversation_event(
                 session_id,
                 normalized_turn_id,
