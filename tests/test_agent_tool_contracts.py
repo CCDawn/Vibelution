@@ -252,10 +252,13 @@ def test_runtime_memory_learning_tools_persist_and_search_through_executor(monke
 
 def test_source_collection_stage_tools_execute_current_service_contract(monkeypatch):
     from core.web.services import team_workflow_orchestration_service as workflow_service
+    from tools import source_collection_stage_tools as stage_tools
 
     seen: dict[str, dict] = {}
+    stage_tools._SOURCE_CONTEXT_CACHE.clear()
 
     def fake_context(team_id, **kwargs):
+        seen["context_count"] = int(seen.get("context_count") or 0) + 1
         seen["context"] = {"team_id": team_id, **kwargs}
         return {
             "contextKind": "source_collection_stage_task_context",
@@ -291,6 +294,18 @@ def test_source_collection_stage_tools_execute_current_service_contract(monkeypa
             "context_mode": "compact",
         },
     )
+    cached_context_result, cached_context_action = _executor_result(
+        "source_collection_context_tool",
+        {
+            "team_id": "team-1",
+            "run_id": "run-1",
+            "stage_id": "stage-1",
+            "task_id": "task-1",
+            "record_limit": 3,
+            "candidate_limit": 2,
+            "context_mode": "compact",
+        },
+    )
     writeback_result, writeback_action = _executor_result(
         "source_collection_stage_writeback_tool",
         {
@@ -308,6 +323,9 @@ def test_source_collection_stage_tools_execute_current_service_contract(monkeypa
     context_payload = json.loads(context_result)
     writeback_payload = json.loads(writeback_result)
     assert context_action is None
+    assert cached_context_action is None
+    assert json.loads(cached_context_result)["taskId"] == "task-1"
+    assert seen["context_count"] == 1
     assert writeback_action is None
     assert context_payload["contextKind"] == "source_collection_stage_task_context"
     assert seen["context"]["team_id"] == "team-1"
@@ -317,6 +335,20 @@ def test_source_collection_stage_tools_execute_current_service_contract(monkeypa
     assert seen["writeback"]["payload"]["result"] == {"candidateCount": 2}
     assert seen["writeback"]["payload"]["evidenceRefs"] == [{"type": "source", "id": "s1"}]
     assert seen["writeback"]["payload"]["nextActions"] == ["review"]
+
+    _executor_result(
+        "source_collection_context_tool",
+        {
+            "team_id": "team-1",
+            "run_id": "run-1",
+            "stage_id": "stage-1",
+            "task_id": "task-1",
+            "record_limit": 3,
+            "candidate_limit": 2,
+            "context_mode": "compact",
+        },
+    )
+    assert seen["context_count"] == 2
 
 
 class _FakeGitWorkspace:

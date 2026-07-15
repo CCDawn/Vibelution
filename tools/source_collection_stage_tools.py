@@ -5,7 +5,54 @@ from __future__ import annotations
 
 import json
 import re
+import time
+from collections import OrderedDict
+from threading import RLock
 from typing import Any
+
+
+_SOURCE_CONTEXT_CACHE_TTL_SECONDS = 60.0
+_SOURCE_CONTEXT_CACHE_MAX_ENTRIES = 128
+_SOURCE_CONTEXT_CACHE_LOCK = RLock()
+_SOURCE_CONTEXT_CACHE: OrderedDict[tuple[Any, ...], tuple[float, str]] = OrderedDict()
+
+
+def _source_context_cache_get(key: tuple[Any, ...]) -> dict[str, Any] | None:
+    now = time.monotonic()
+    with _SOURCE_CONTEXT_CACHE_LOCK:
+        cached = _SOURCE_CONTEXT_CACHE.get(key)
+        if cached is None:
+            return None
+        stored_at, serialized = cached
+        if now - stored_at > _SOURCE_CONTEXT_CACHE_TTL_SECONDS:
+            _SOURCE_CONTEXT_CACHE.pop(key, None)
+            return None
+        _SOURCE_CONTEXT_CACHE.move_to_end(key)
+    payload = json.loads(serialized)
+    return payload if isinstance(payload, dict) else None
+
+
+def _source_context_cache_put(key: tuple[Any, ...], payload: dict[str, Any]) -> None:
+    serialized = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+    with _SOURCE_CONTEXT_CACHE_LOCK:
+        _SOURCE_CONTEXT_CACHE[key] = (time.monotonic(), serialized)
+        _SOURCE_CONTEXT_CACHE.move_to_end(key)
+        while len(_SOURCE_CONTEXT_CACHE) > _SOURCE_CONTEXT_CACHE_MAX_ENTRIES:
+            _SOURCE_CONTEXT_CACHE.popitem(last=False)
+
+
+def _invalidate_source_context_cache(*, team_id: str, task_id: str) -> None:
+    normalized_team_id = _text(team_id)
+    normalized_task_id = _text(task_id)
+    with _SOURCE_CONTEXT_CACHE_LOCK:
+        stale_keys = [
+            key
+            for key in _SOURCE_CONTEXT_CACHE
+            if (not normalized_team_id or key[0] == normalized_team_id)
+            and (not normalized_task_id or key[3] == normalized_task_id)
+        ]
+        for key in stale_keys:
+            _SOURCE_CONTEXT_CACHE.pop(key, None)
 
 
 def _text(value: Any) -> str:
@@ -38,19 +85,37 @@ def source_collection_context_tool(
             run_id=run_id,
             task_id=task_id,
         )
-        payload = workflow_service.get_source_collection_stage_task_context(
-            resolved_team_id,
-            run_id=run_id,
-            stage_id=stage_id,
-            task_id=task_id,
-            max_records=max_records,
-            include_candidates=include_candidates,
-            record_offset=record_offset,
-            record_limit=record_limit or None,
-            candidate_offset=candidate_offset,
-            candidate_limit=candidate_limit or None,
-            context_mode=context_mode,
+        cache_key = (
+            _text(resolved_team_id),
+            _text(run_id),
+            _text(stage_id),
+            _text(task_id),
+            int(max_records),
+            bool(include_candidates),
+            int(record_offset),
+            int(record_limit),
+            int(candidate_offset),
+            int(candidate_limit),
+            _text(context_mode).lower(),
         )
+        payload = _source_context_cache_get(cache_key)
+        cache_hit = payload is not None
+        if payload is None:
+            payload = workflow_service.get_source_collection_stage_task_context(
+                resolved_team_id,
+                run_id=run_id,
+                stage_id=stage_id,
+                task_id=task_id,
+                max_records=max_records,
+                include_candidates=include_candidates,
+                record_offset=record_offset,
+                record_limit=record_limit or None,
+                candidate_offset=candidate_offset,
+                candidate_limit=candidate_limit or None,
+                context_mode=context_mode,
+            )
+            if isinstance(payload, dict):
+                _source_context_cache_put(cache_key, payload)
         if isinstance(payload, dict) and resolution:
             payload.setdefault("toolResolution", resolution)
         _record_stage_tool_event(
@@ -72,6 +137,7 @@ def source_collection_context_tool(
                 "candidateLimit": _safe_count(((payload.get("candidatePage") or {}) if isinstance(payload, dict) else {}).get("limit")),
                 "contextMode": _text(payload.get("contextMode")) if isinstance(payload, dict) else _text(context_mode),
                 "teamIdSource": _text(resolution.get("teamIdSource")) if resolution else "",
+                "cacheHit": cache_hit,
             },
         )
     except Exception as exc:
@@ -141,6 +207,7 @@ def source_collection_stage_writeback_tool(
             metadata.setdefault("toolResolution", resolution)
             payload["metadata"] = metadata
         response = workflow_service.writeback_source_collection_stage_session_task(resolved_team_id, task_id, payload)
+        _invalidate_source_context_cache(team_id=resolved_team_id, task_id=task_id)
         compact_response = _compact_source_collection_stage_writeback_response(response, payload)
         _record_stage_tool_event(
             "tool.source_collection_stage_writeback.completed",
