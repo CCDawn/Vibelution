@@ -761,6 +761,30 @@ describe("AgentsRoute layout contract", () => {
     expect(coreConfigPanelSource).toContain("<option value=\"high\">{copy.reasoningEffort}: {copy.reasoningEffortHigh}</option>");
   });
 
+  it("guides Agent creation through defaults, provider-model linkage, and a final review", () => {
+    expect(routeSource).toContain('item.promptTemplateId === "prompt-chat-default"');
+    expect(routeSource).toContain("createAgentPresets(workspace, toolBundles, lang)");
+    expect(routeSource).toContain('id: "recommended"');
+    expect(routeSource).toContain('id: "coding"');
+    expect(routeSource).toContain('id: "research"');
+    expect(routeSource).toContain('providerId: model.providerId');
+    expect(routeSource).toContain('providerLabel: model.providerLabel');
+    expect(routeSource).toContain('selectedToolBundleIds: selectAvailableToolBundles');
+    expect(createPanelSource).toContain("const [activeStep, setActiveStep] = useState(0)");
+    expect(createPanelSource).toContain('aria-current={index === activeStep ? "step" : undefined}');
+    expect(createPanelSource).toContain("const providerChoices = useMemo");
+    expect(createPanelSource).toContain("model.providerId === event.target.value");
+    expect(createPanelSource).toContain("onApplyPreset(preset.draft)");
+    expect(createPanelSource).toContain("setActiveStep(1)");
+    expect(createPanelSource).toContain("stepReady.slice(0, index).every(Boolean)");
+    expect(createPanelSource).toContain("isDisabled={!stepReady[activeStep] || pending}");
+    expect(createPanelSource).toContain("isDisabled={!canCreate || pending}");
+    expect(createPanelSource).toContain("summaryItems.map");
+    expect(createPanelStyles).toHaveProperty("quickFill");
+    expect(createPanelStyles).toHaveProperty("wizardSteps");
+    expect(createPanelStyles).toHaveProperty("createSummary");
+  });
+
   it("keeps permanent Agent deletion behind the archived-state safety gate", () => {
     expect(routeSource).toContain('const canPurgeAgent = Boolean(selectedAgent?.agentId && selectedAgent.status === "archived" && !selectedAgentProtected)');
     expect(routeSource).toContain('agent.status !== "archived"');
