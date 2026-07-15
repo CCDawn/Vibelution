@@ -13892,16 +13892,9 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                     },
                 )
                 _set_session_live_context_composition(session_id, context_composition, turn_id=turn_id)
-                _touch_chat_turn_work_run(
-                    session_id=session_id,
-                    turn_id=turn_id,
-                    stage="context_composition_recorded",
-                    summary=text_for(
-                        get_web_language(),
-                        zh=f"已组装当前轮上下文：约 {_coerce_nonnegative_int(context_composition.get('totalTokens') or 0)} tokens。",
-                        en=f"Assembled this turn's context: about {_coerce_nonnegative_int(context_composition.get('totalTokens') or 0)} tokens.",
-                    ),
-                )
+                # Context composition is already available through live output and the
+                # conversation journal.  A durable WorkRun rewrite here blocks the
+                # imminent model request and is immediately superseded by model_request.
                 with session_reference_context(context.get("session_references") or []):
                     result = _run_session_continuation_loop(
                         runtime_agent,
@@ -20898,7 +20891,8 @@ def _set_session_turn_progress_live_output(session_id: str, stage: str, *, turn_
         stage=stage_key,
         feedback_events=feedback_events,
     )
-    _touch_chat_turn_work_run(session_id=session_id, turn_id=turn_id, stage=stage_key, summary=trim_lines(content, max_lines=1))
+    # Cosmetic progress is already checkpointed by the live-output channel.  Keep
+    # durable WorkRun writes for retry/failure/tool-error and terminal transitions.
     _record_session_turn_lifecycle_event(
         session_id,
         f"ui_progress_{stage_key or 'waiting'}",
