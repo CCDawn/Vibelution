@@ -14218,12 +14218,17 @@ def _create_chat_agent_for_session(
     mode: str = "chat",
 ) -> Any:
     agent_config = getattr(resolved_llm, "config", None) or _session_agent_config_for_llm_slot(agent_instance, llm_slot)
-    return call_agent_factory_with_supported_kwargs(
+    runtime_agent = call_agent_factory_with_supported_kwargs(
         create_chat_agent,
         mode=mode,
         workspace_path=session_workspace,
         config=agent_config,
     )
+    try:
+        runtime_agent._allow_session_subagent_auto_delegation = False
+    except (AttributeError, TypeError):
+        pass
+    return runtime_agent
 
 
 def create_chat_agent(workspace_path: str | Path | None = None, config: Any | None = None, mode: str = "chat") -> Any:

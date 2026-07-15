@@ -4787,6 +4787,29 @@ class TestToolMessageFlow:
         assert outcome == {"delegated": True, "useful": False}
         governor.maybe_delegate.assert_called_once()
 
+    def test_explicit_session_override_closes_specialized_agent_auto_delegation(self, monkeypatch):
+        from core.web.services import agent_directory_service
+
+        monkeypatch.setattr(
+            agent_directory_service,
+            "current_agent_runtime",
+            lambda: {"agentId": "source-finder", "agent": {"primaryMode": "research"}},
+        )
+        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+        agent.prompt_manager = SimpleNamespace(get_runtime_goal_packet=lambda: None)
+        agent._allow_session_subagent_auto_delegation = False
+        agent._get_delegation_governor = MagicMock(side_effect=AssertionError("delegation should be closed"))
+
+        outcome = agent._maybe_delegate(
+            goal="继续完成 source_finder 阶段任务",
+            iteration=1,
+            total_tool_calls=0,
+            messages=[],
+        )
+
+        assert outcome is None
+        agent._get_delegation_governor.assert_not_called()
+
     def test_apply_delegation_result_surfaces_timeout_instead_of_parse_failure(self, monkeypatch):
         captured = {"finish": []}
 

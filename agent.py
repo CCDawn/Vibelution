@@ -1449,9 +1449,12 @@ class SelfEvolvingAgent:
         return primary_mode in {"", "chat"}
 
     def _session_agent_auto_delegation_enabled(self) -> bool:
+        explicit_override = getattr(self, "_allow_session_subagent_auto_delegation", None)
+        if explicit_override is not None:
+            return bool(explicit_override)
         if not self._is_session_agent_runtime():
             return True
-        return bool(getattr(self, "_allow_session_subagent_auto_delegation", False))
+        return False
 
     def _record_session_agent_auto_delegation_disabled(self) -> None:
         if bool(getattr(self, "_session_agent_auto_delegation_disabled_logged", False)):
