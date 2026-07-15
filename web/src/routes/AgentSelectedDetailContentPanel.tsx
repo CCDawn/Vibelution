@@ -10,6 +10,7 @@ import {
 } from "./AgentDetailHeaderPanel";
 import { AgentManagementBriefPanel } from "./AgentManagementBriefPanel";
 import { AgentOverviewPanel } from "./AgentOverviewPanel";
+import styles from "./AgentSelectedDetailContentPanel.styles";
 
 export type AgentSelectedDetailPaneId = "overview" | "config" | "activity";
 
@@ -44,18 +45,30 @@ export function AgentSelectedDetailContentPanel({
   activity,
 }: AgentSelectedDetailContentPanelProps) {
   return (
-    <>
+    <div className={styles.selectedDetailFrame}>
       <AgentDetailHeaderPanel {...header} />
-      {activePane === "overview" && overview ? <AgentOverviewPanel {...overview} /> : null}
-      {activePane === "overview" ? <AgentManagementBriefPanel {...brief} /> : null}
+      {activePane === "overview" && overview ? (
+        <div className={styles.overviewLayout}>
+          <div className={styles.overviewMain}>
+            <AgentOverviewPanel {...overview} />
+          </div>
+          <aside className={styles.overviewAside}>
+            <AgentManagementBriefPanel {...brief} />
+          </aside>
+        </div>
+      ) : null}
       {activePane === "config" ? (
-        <>
+        <div className={styles.paneContent}>
           <AgentConfigPrimaryPanePanel {...configPrimary} />
           <AgentConfigPolicyPanePanel {...configPolicies} />
           <AgentConfigReferencesPanePanel {...configReferences} />
-        </>
+        </div>
       ) : null}
-      {activePane === "activity" ? <AgentActivityPanePanel {...activity} /> : null}
-    </>
+      {activePane === "activity" ? (
+        <div className={styles.paneContent}>
+          <AgentActivityPanePanel {...activity} />
+        </div>
+      ) : null}
+    </div>
   );
 }
