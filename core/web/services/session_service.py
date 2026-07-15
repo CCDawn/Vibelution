@@ -13353,6 +13353,13 @@ def _run_session_turn(context: dict[str, Any]) -> None:
             return
         prepare_timings["agentLlmResolveMs"] = _elapsed_ms(stage_started_at)
     prepare_timings["totalPrepareMs"] = _elapsed_ms(prepare_started_at)
+    _record_session_turn_lifecycle_event(
+        session_id,
+        "prepare_completed",
+        turn_id=turn_id,
+        outcome="completed",
+        fields=_session_turn_prepare_timing_log_fields(prepare_timings),
+    )
     llm_model_id_for_turn = str(getattr(resolved_agent_llm, "model_id", "") or "") or _session_agent_llm_slot_model_id(
         agent_instance or historical_agent,
         llm_slot,
@@ -16444,6 +16451,36 @@ def _record_session_turn_lifecycle_event(
             f"runtime scene turn lifecycle log skipped: {type(exc).__name__}: {exc}",
             tag="LOGS",
         )
+
+
+def _session_turn_prepare_timing_log_fields(timings: dict[str, Any]) -> dict[str, Any]:
+    """Keep turn-start telemetry below the runtime-scene field cap.
+
+    ``worker_started`` already has enough identity and runtime fields to hit the
+    telemetry field limit. Emit preparation timings in a dedicated event rather
+    than silently dropping the measurements that explain pre-LLM latency.
+    """
+
+    keys = (
+        "totalPrepareMs",
+        "sessionWorkspaceMs",
+        "agentDirectorySyncMs",
+        "agentLookupMs",
+        "promptSnapshotMs",
+        "lightweightChatDecisionMs",
+        "agentContextBuildMs",
+        "workspacePolicyMs",
+        "llmKeyEnvSyncMs",
+        "agentLlmResolveMs",
+        "llmKeyEnvSyncedCount",
+        "llmKeyEnvAlreadyPresentCount",
+        "llmKeyEnvMissingCount",
+    )
+    return {
+        key: timings[key]
+        for key in keys
+        if key in timings and isinstance(timings[key], (bool, int, float))
+    }
 
 
 def _record_session_llm_usage_event(
