@@ -380,7 +380,7 @@ describe("ConversationView Codex-like transcript adapter integration", () => {
               status: "failed",
               tone: "error",
               title: "代码图谱",
-              summary: "索引未就绪",
+              summary: "索引未就绪 directory_not_indexed_workspace_tools_refresh=true",
               operationIds: ["op-code-graph"],
               diagnosticSummary: {
                 reasonCode: "target_not_indexed",
@@ -403,8 +403,11 @@ describe("ConversationView Codex-like transcript adapter integration", () => {
 
     expect(html).toContain('data-codex-tool-error-compact="true"');
     expect(html).toContain("代码图谱");
-    expect(html).toMatch(/代码图谱<\/span><span[^>]*>·<\/span><span[^>]*>索引未就绪/);
+    expect(html).toMatch(/代码图谱<\/span><span[^>]*>·<\/span><span[^>]*codexTranscriptCompactErrorSummary[^>]*>索引未就绪/);
     expect(html).toContain("索引未就绪");
+    expect(styles.codexTranscriptCompactErrorSummary).toContain("whitespace-normal");
+    expect(styles.codexTranscriptCompactErrorSummary).toContain("break-words");
+    expect(styles.codexTranscriptCompactErrorSummary).toContain("[overflow-wrap:anywhere]");
     expect(html).toContain("技术详情");
     expect(html).toContain("查看最近改动");
     expect(html).not.toContain("get_recent_changes_tool");
