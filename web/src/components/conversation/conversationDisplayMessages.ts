@@ -1,4 +1,5 @@
 import type { ConversationMessage } from "../../api/types";
+import { projectConversationMessageFromTurnItemsV2 } from "../../routes/chatTurnProtocol";
 import {
   isRuntimeNoticeMessage,
   isTurnErrorMessage,
@@ -39,7 +40,8 @@ function mergeAdjacentTurnErrorMessages(previous: ConversationMessage, next: Con
 
 export function projectConversationDisplayMessages(messages: ConversationMessage[]) {
   const projected: ConversationMessage[] = [];
-  for (const message of chronologicalConversationMessages(messages)) {
+  const canonicalMessages = messages.map(projectConversationMessageFromTurnItemsV2);
+  for (const message of chronologicalConversationMessages(canonicalMessages)) {
     if (isRuntimeNoticeMessage(message)) {
       continue;
     }
