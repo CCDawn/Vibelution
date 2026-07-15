@@ -131,6 +131,20 @@ def _bind_live_session_agent(project_root: Path, *, display_name: str = "真实�
     return agent
 
 
+def test_session_agent_factory_explicitly_disables_auto_delegation(tmp_path, monkeypatch):
+    runtime_agent = SimpleNamespace()
+    monkeypatch.setattr(session_service, "create_chat_agent", lambda **_kwargs: runtime_agent)
+
+    created = session_service._create_chat_agent_for_session(
+        tmp_path,
+        agent_instance=None,
+        resolved_llm=SimpleNamespace(config=object()),
+    )
+
+    assert created is runtime_agent
+    assert created._allow_session_subagent_auto_delegation is False
+
+
 def _capture_session_lifecycle_events(monkeypatch):
     events = []
     condition = threading.Condition()
