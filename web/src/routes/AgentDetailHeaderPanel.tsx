@@ -78,28 +78,30 @@ export function AgentDetailHeaderPanel<TPane extends string>({
   return (
     <>
       <section className={styles.detailHeader} title={title}>
-        <AgentAvatarEditorPanel
-          copy={copy}
-          lang={lang}
-          isOpen={isAvatarEditorOpen}
-          avatarImageUrl={avatarImageUrl}
-          avatarImagePath={avatarImagePath}
-          avatarInitials={avatarInitials}
-          avatarOptions={avatarOptions}
-          avatarOptionsPending={avatarOptionsPending}
-          uploadPending={avatarUploadPending}
-          updatePending={avatarUpdatePending}
-          onOpenChange={onAvatarEditorOpenChange}
-          onUploadAvatar={onUploadAvatar}
-          onResetAvatar={onResetAvatar}
-          onSelectAvatar={onSelectAvatar}
-        />
-        <div>
-          <p className={styles.panelEyebrow}>{roleLabel}</p>
-          <h2>{agentName}</h2>
-          <span className={`${styles.agentRoleTag} ${roleToneClass(roleTone)}`}>
-            {roleLabel}
-          </span>
+        <div className={styles.detailIdentity}>
+          <AgentAvatarEditorPanel
+            copy={copy}
+            lang={lang}
+            isOpen={isAvatarEditorOpen}
+            avatarImageUrl={avatarImageUrl}
+            avatarImagePath={avatarImagePath}
+            avatarInitials={avatarInitials}
+            avatarOptions={avatarOptions}
+            avatarOptionsPending={avatarOptionsPending}
+            uploadPending={avatarUploadPending}
+            updatePending={avatarUpdatePending}
+            onOpenChange={onAvatarEditorOpenChange}
+            onUploadAvatar={onUploadAvatar}
+            onResetAvatar={onResetAvatar}
+            onSelectAvatar={onSelectAvatar}
+          />
+          <div className={styles.detailIdentityCopy}>
+            <p className={styles.panelEyebrow}>{roleLabel}</p>
+            <h2>{agentName}</h2>
+            <span className={`${styles.agentRoleTag} ${roleToneClass(roleTone)}`}>
+              {roleLabel}
+            </span>
+          </div>
         </div>
         <div className={styles.detailHeaderActions}>
           <span className={styles.detailHealthStatus} title={healthTitle}>
