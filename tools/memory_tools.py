@@ -465,10 +465,12 @@ def _get_task_manager_impl():
 
 
 def _normalize_task_list_input(task_list: Any) -> List[Dict[str, Any]]:
-    """容忍 LLM 把 task_list 作为 JSON 字符串传入。"""
+    """容忍 LLM 把 task_list 作为 JSON 字符串或等价元组传入。"""
     normalized = task_list
     if isinstance(normalized, str):
         normalized = json.loads(normalized)
+    if isinstance(normalized, tuple):
+        normalized = list(normalized)
     if not isinstance(normalized, list):
         raise TypeError("task_list 必须是任务对象列表")
     coerced: List[Dict[str, Any]] = []
