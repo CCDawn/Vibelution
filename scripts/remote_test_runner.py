@@ -23,6 +23,21 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Iterable, Sequence
 
+try:
+    from scripts.windowless_subprocess import no_window_subprocess_kwargs
+except ModuleNotFoundError:  # Direct execution sets sys.path[0] to scripts/.
+    import importlib.util
+
+    _windowless_spec = importlib.util.spec_from_file_location(
+        "vibelution_windowless_subprocess",
+        Path(__file__).with_name("windowless_subprocess.py"),
+    )
+    if _windowless_spec is None or _windowless_spec.loader is None:
+        raise RuntimeError("Unable to load the windowless subprocess policy.")
+    _windowless_module = importlib.util.module_from_spec(_windowless_spec)
+    _windowless_spec.loader.exec_module(_windowless_module)
+    no_window_subprocess_kwargs = _windowless_module.no_window_subprocess_kwargs
+
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_HOST = "bossai-server-b"
@@ -534,7 +549,12 @@ class RemoteTestRunner:
         self._run = run or self._subprocess_run
 
     def _subprocess_run(self, command: Sequence[str]) -> int:
-        completed = subprocess.run(command, cwd=str(self.project_root), check=False)
+        completed = subprocess.run(
+            command,
+            cwd=str(self.project_root),
+            check=False,
+            **no_window_subprocess_kwargs(),
+        )
         return completed.returncode
 
     def _execute(self, command: Sequence[str]) -> None:
@@ -565,6 +585,7 @@ class RemoteTestRunner:
             stdout=stdout,
             stderr=stderr,
             text=text,
+            **no_window_subprocess_kwargs(),
         )
 
     def run(self) -> int:

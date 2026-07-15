@@ -45,7 +45,10 @@ def test_python_lint_tool_parses_ruff_json(monkeypatch, tmp_path):
     monkeypatch.setattr(pit, "_module_available", lambda name: True)
     monkeypatch.setattr(pit, "_project_root", lambda: tmp_path)
 
-    def fake_run(command, cwd, capture_output, text, timeout):
+    captured_kwargs = {}
+
+    def fake_run(command, cwd, capture_output, text, timeout, **kwargs):
+        captured_kwargs.update(kwargs)
         return SimpleNamespace(
             returncode=1,
             stdout=json.dumps(
@@ -69,6 +72,9 @@ def test_python_lint_tool_parses_ruff_json(monkeypatch, tmp_path):
     assert payload["status"] == "ok"
     assert payload["issue_count"] == 1
     assert payload["issues"][0]["code"] == "F401"
+    if pit.sys.platform == "win32":
+        assert captured_kwargs["creationflags"]
+        assert captured_kwargs["startupinfo"] is not None
 
 
 def test_code_symbol_tool_v2_rejects_deprecated_modes():

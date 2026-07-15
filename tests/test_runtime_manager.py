@@ -734,15 +734,24 @@ def test_python_launcher_frontend_build_defaults_to_direct_node_build(monkeypatc
         "_run_checked",
         lambda args, *, cwd, label: calls.append((list(args), label)),
     )
+    source_identity = {
+        "projectRoot": str(project_root),
+        "branch": "main",
+        "commit": "a" * 40,
+        "frontendTree": "frontend-tree",
+        "trackedClean": True,
+    }
+    monkeypatch.setattr(launcher, "_assert_runtime_source_identity", lambda expected: None)
 
-    launcher._ensure_frontend_build()
+    launcher._ensure_frontend_build(source_identity)
 
     assert calls == [
         ([r"C:\node\node.exe", r"C:\node\node_modules\npm\bin\npm-cli.js", "install"], "node npm-cli.js install"),
         ([r"C:\node\node.exe", str(web_dir / "node_modules" / "typescript" / "bin" / "tsc"), "-b"], "node tsc -b"),
         ([r"C:\node\node.exe", str(web_dir / "node_modules" / "vite" / "bin" / "vite.js"), "build"], "node vite build"),
     ]
-    event = json.loads(log_path.read_text(encoding="utf-8").splitlines()[-1])
+    events = [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines()]
+    event = next(item for item in events if item["event"] == "frontend_build.ensure")
     assert event["event"] == "frontend_build.ensure"
     assert event["packageManager"] == "npm"
     assert event["needsInstall"] is True
@@ -772,14 +781,23 @@ def test_python_launcher_frontend_build_can_opt_into_bun(monkeypatch, tmp_path):
         "_run_checked",
         lambda args, *, cwd, label: calls.append((list(args), label)),
     )
+    source_identity = {
+        "projectRoot": str(project_root),
+        "branch": "main",
+        "commit": "a" * 40,
+        "frontendTree": "frontend-tree",
+        "trackedClean": True,
+    }
+    monkeypatch.setattr(launcher, "_assert_runtime_source_identity", lambda expected: None)
 
-    launcher._ensure_frontend_build()
+    launcher._ensure_frontend_build(source_identity)
 
     assert calls == [
         (["bun", "install"], "bun install"),
         (["bun", "run", "bun:build"], "bun run bun:build"),
     ]
-    event = json.loads(log_path.read_text(encoding="utf-8").splitlines()[-1])
+    events = [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines()]
+    event = next(item for item in events if item["event"] == "frontend_build.ensure")
     assert event["event"] == "frontend_build.ensure"
     assert event["packageManager"] == "bun"
     assert event["needsInstall"] is True

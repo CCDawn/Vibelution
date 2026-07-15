@@ -19,6 +19,8 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List
 
+from scripts.windowless_subprocess import no_window_subprocess_kwargs
+
 
 def _project_root() -> Path:
     return Path(__file__).resolve().parent.parent
@@ -356,6 +358,7 @@ def python_lint_tool(target: str = ".", max_issues: int = 100) -> str:
             capture_output=True,
             text=True,
             timeout=60,
+            **no_window_subprocess_kwargs(),
         )
     except Exception as exc:
         return json.dumps(

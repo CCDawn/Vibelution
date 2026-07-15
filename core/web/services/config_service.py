@@ -47,6 +47,7 @@ from core.chat.chat_task_types import trim_lines
 from core.llm import LLMInvocationContext, invoke_llm
 from core.llm.provider_discovery.service import discover_provider_models
 from core.llm.protocol_resolver import resolve_model_protocol
+from scripts.windowless_subprocess import no_window_subprocess_kwargs
 from config.public_config import (
     CONFIG_PATH,
     SCHEMA_V2_LEGACY_MODEL_WRITE_ERROR,
@@ -3078,6 +3079,7 @@ def _run_schtasks(command: list[str]) -> subprocess.CompletedProcess[str]:
         text=True,
         timeout=10,
         check=False,
+        **no_window_subprocess_kwargs(),
     )
 
 

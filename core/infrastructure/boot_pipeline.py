@@ -12,6 +12,7 @@ from typing import Any, Callable
 from config import AppConfig
 from core.evaluation.supervised_cli import run_supervised_cli_from_args, should_handle_supervised_cli
 from core.infrastructure.cli_utils import resolve_agent_mode_from_args
+from scripts.windowless_subprocess import no_window_subprocess_kwargs
 
 
 def configure_console_encoding() -> None:
@@ -99,6 +100,7 @@ def run_preflight_doctor(config: AppConfig, *, project_root: Path | None = None)
         text=True,
         cwd=str(root),
         timeout=30,
+        **no_window_subprocess_kwargs(),
     )
     if result.returncode != 0:
         detail = result.stderr.strip() or result.stdout.strip() or "doctor 检查失败"
