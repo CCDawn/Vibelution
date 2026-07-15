@@ -19,7 +19,7 @@ from .runtime_scene_service import record_runtime_scene_event
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 PROMPT_TEMPLATE_INDEX_VERSION = 1
 CHALLENGE_CUP_STAGE_TASK_PROMPT_VERSION = 12
-SOURCE_COLLECTION_STAGE_TOOL_PROTOCOL_VERSION = 14
+SOURCE_COLLECTION_STAGE_TOOL_PROTOCOL_VERSION = 15
 PROMPT_TEMPLATE_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{1,95}$")
 PROMPT_TEMPLATE_PATH = developer_sandbox.formal_workspace_path(PROJECT_ROOT, "agent_config", "prompt_templates.json")
 RETIRED_PROMPT_TEMPLATE_IDS = frozenset({"prompt-self-summarizer"})
@@ -139,7 +139,7 @@ DEFAULT_PROMPT_TEMPLATES: tuple[dict[str, Any], ...] = (
             "# 资料寻找 Agent\n\n"
             "你负责资料寻找阶段：搜索、获取、下载到本地或登记可追溯来源记录。你不做资料提炼、关系整理或正式入库。\n\n"
             "## 阶段私聊任务协议\n"
-            "- 第一动作必须调用 task_list_tool 读取当前任务状态；随后调用 task_create_tool 创建后端给定的固定检查清单；每完成一项调用 task_update_tool 打勾。\n"
+            "- 本阶段检查清单由后端绑定，并根据阶段工具结果与结构化写回证据自动更新；不要调用通用 task_list_tool、task_create_tool 或 task_update_tool 复制清单。\n"
             "- 接收 source_collection_stage_session_task 后，先调用 source_collection_context_tool，默认使用 context_mode=compact, candidate_limit=5, candidate_offset=0。\n"
             "- 需要继续读取时按 candidatePage.nextOffset 或工具返回的下一页参数分页，不根据隐藏数量猜结果。\n"
             "- 完成、阻塞或失败都用 source_collection_stage_writeback_tool 回写。\n"
@@ -163,7 +163,7 @@ DEFAULT_PROMPT_TEMPLATES: tuple[dict[str, Any], ...] = (
             "# 资料提炼 Agent\n\n"
             "你负责资料提炼阶段：对已找到资料做内容提炼和资料审查。只要资料有价值即可保留并说明缺口；没有有效内容的资料一律移出流程并记录来源。\n\n"
             "## 阶段私聊任务协议\n"
-            "- 第一动作必须调用 task_list_tool 读取当前任务状态；随后调用 task_create_tool 创建后端给定的固定检查清单；每完成一项调用 task_update_tool 打勾。\n"
+            "- 本阶段检查清单由后端绑定，并根据阶段工具结果与结构化写回证据自动更新；不要调用通用 task_list_tool、task_create_tool 或 task_update_tool 复制清单。\n"
             "- 先调用 source_collection_context_tool，默认使用 context_mode=evidence, candidate_limit=5, candidate_offset=0；上一轮覆盖不足时使用 context_mode=retry_missing，只缺证据锚点时使用 context_mode=retry_evidence。\n"
             "- evidence/retry 模式返回的 summary 是搜集阶段保存的摘要或元数据，不等于全文；可原样复用候选 evidenceRefs，但不得虚构页码、引语或全文结论。\n"
             "- 必须按 candidatePage.hasMore / nextOffset 分页读完本阶段输入，不能根据截断上下文猜结果。\n"
@@ -188,7 +188,7 @@ DEFAULT_PROMPT_TEMPLATES: tuple[dict[str, Any], ...] = (
             "# 资料关系整理 Agent\n\n"
             "你负责资料关系整理阶段：把已保留资料整理成候选级主题、来源和证据关系。你不搜索新资料，也不写正式知识库或 official graph。\n\n"
             "## 阶段私聊任务协议\n"
-            "- 第一动作必须调用 task_list_tool 读取当前任务状态；随后调用 task_create_tool 创建后端给定的固定检查清单；每完成一项调用 task_update_tool 打勾。\n"
+            "- 本阶段检查清单由后端绑定，并根据阶段工具结果与结构化写回证据自动更新；不要调用通用 task_list_tool、task_create_tool 或 task_update_tool 复制清单。\n"
             "- 先用 source_collection_context_tool 读取 minimal 上下文，必要时分页读取候选。\n"
             "- 只处理已提炼/已保留资料，输出候选关系、缺失关系和证据断点。\n"
             "- 用 source_collection_stage_writeback_tool 回写关系整理状态；如果证据不足，写明缺口和应退回的阶段。\n\n"
@@ -209,7 +209,7 @@ DEFAULT_PROMPT_TEMPLATES: tuple[dict[str, Any], ...] = (
             "# 资料入库 Agent\n\n"
             "你负责资料入库阶段：最终审核资料寻找、资料提炼和资料关系整理的结果，并将通过资料写入正式 Team Knowledge。其他阶段不能替你入库。\n\n"
             "## 阶段私聊任务协议\n"
-            "- 第一动作必须调用 task_list_tool 读取当前任务状态；随后调用 task_create_tool 创建后端给定的固定检查清单；每完成一项调用 task_update_tool 打勾。\n"
+            "- 本阶段检查清单由后端绑定，并根据阶段工具结果与结构化写回证据自动更新；不要调用通用 task_list_tool、task_create_tool 或 task_update_tool 复制清单。\n"
             "- 先用 source_collection_context_tool 读取本轮 approved/kept 候选、关系预览和 writebackContract。\n"
             "- 只处理本轮已保留且具备来源追溯的资料；证据不足时退回并说明原因。\n"
             "- 通过入库时用 source_collection_stage_writeback_tool 回写 autoIngestDecision、approvedCandidateIds 或 stewardPackDraft。\n"

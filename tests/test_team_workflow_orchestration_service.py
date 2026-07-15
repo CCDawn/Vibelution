@@ -6118,7 +6118,7 @@ def test_source_collection_stage_task_progress_counts_later_turn_tool_updates(tm
     )
 
     assert context["task"]["status"] == "completed"
-    assert context["task"]["taskToolProgress"]["taskCreateObserved"] is True
+    assert context["task"]["taskToolProgress"]["taskCreateObserved"] is False
     assert context["task"]["taskToolProgress"]["completed"] == len(response["task"]["taskChecklist"])
     assert context["task"]["completionGate"]["passed"] is True
 
