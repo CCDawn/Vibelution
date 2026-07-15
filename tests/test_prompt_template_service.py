@@ -91,8 +91,10 @@ def test_prompt_template_registry_repairs_research_defaults(tmp_path, monkeypatc
     assert source_extractor["metadata"]["roleKey"] == "source_extractor"
     assert "candidate_offset" in source_extractor["content"]
     assert "candidate_limit" in source_extractor["content"]
-    assert "context_mode=minimal" in source_extractor["content"]
+    assert "context_mode=evidence" in source_extractor["content"]
     assert "context_mode=retry_missing" in source_extractor["content"]
+    assert "context_mode=retry_evidence" in source_extractor["content"]
+    assert "不等于全文" in source_extractor["content"]
     assert "candidateExtractions" in source_extractor["content"]
     assert "candidateDecisions" in source_extractor["content"]
     assert "不能根据截断上下文猜结果" in source_extractor["content"]
