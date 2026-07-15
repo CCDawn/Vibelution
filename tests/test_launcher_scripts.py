@@ -271,7 +271,15 @@ def test_python_launcher_rebuilds_when_sources_are_newer_than_dist(monkeypatch, 
     os.utime(dist_index, (now - 10, now - 10))
     os.utime(source, (now, now))
     commands: list[tuple[list[str], str]] = []
+    source_identity = {
+        "projectRoot": str(tmp_path.resolve()),
+        "branch": "main",
+        "commit": "a" * 40,
+        "frontendTree": "tree-new",
+        "trackedClean": True,
+    }
     monkeypatch.setattr(launcher, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(launcher, "_runtime_source_identity", lambda: source_identity)
     monkeypatch.setattr(launcher, "_frontend_package_manager", lambda: "npm")
     monkeypatch.setattr(launcher, "_frontend_build_commands", lambda package_manager, directory: [(["npm", "run", "build"], "npm build")])
     monkeypatch.setattr(launcher, "_run_checked", lambda args, cwd, label: commands.append((args, label)))
@@ -280,6 +288,108 @@ def test_python_launcher_rebuilds_when_sources_are_newer_than_dist(monkeypatch, 
     launcher._ensure_frontend_build()
 
     assert commands == [(["npm", "run", "build"], "npm build")]
+
+
+def test_python_launcher_reuses_build_when_frontend_tree_matches_main(monkeypatch, tmp_path):
+    launcher = _load_python_launcher()
+    web_dir = tmp_path / "web"
+    source = web_dir / "src" / "App.tsx"
+    dist_index = web_dir / "dist" / "index.html"
+    provenance_path = web_dir / "dist" / launcher.FRONTEND_BUILD_PROVENANCE_NAME
+    node_modules = web_dir / "node_modules"
+    source.parent.mkdir(parents=True)
+    dist_index.parent.mkdir(parents=True)
+    node_modules.mkdir(parents=True)
+    source.write_text("export {};", encoding="utf-8")
+    dist_index.write_text("current build", encoding="utf-8")
+    provenance_path.write_text(
+        json.dumps(
+            {
+                "schemaVersion": 1,
+                "sourceCommit": "1" * 40,
+                "frontendTree": "same-tree",
+                "builtFromCommit": "1" * 40,
+            }
+        ),
+        encoding="utf-8",
+    )
+    now = time.time()
+    os.utime(source, (now - 20, now - 20))
+    os.utime(dist_index, (now - 10, now - 10))
+    commands: list[tuple[list[str], str]] = []
+    source_identity = {
+        "projectRoot": str(tmp_path.resolve()),
+        "branch": "main",
+        "commit": "2" * 40,
+        "frontendTree": "same-tree",
+        "trackedClean": True,
+    }
+    monkeypatch.setattr(launcher, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(launcher, "_runtime_source_identity", lambda: source_identity)
+    monkeypatch.setattr(launcher, "_frontend_package_manager", lambda: "npm")
+    monkeypatch.setattr(launcher, "_run_checked", lambda args, cwd, label: commands.append((args, label)))
+    monkeypatch.setattr(launcher, "_append_frontend_build_log", lambda payload: None)
+
+    result = launcher._ensure_frontend_build()
+
+    assert commands == []
+    assert result["sourceCommit"] == "2" * 40
+    assert result["builtFromCommit"] == "1" * 40
+    assert result["rebuilt"] is False
+
+
+def test_python_launcher_runtime_identity_requires_clean_main(monkeypatch, tmp_path):
+    launcher = _load_python_launcher()
+    monkeypatch.setattr(launcher, "PROJECT_ROOT", tmp_path)
+
+    def fake_capture(args, *, cwd, label, timeout=15.0):
+        values = {
+            "git root identity": str(tmp_path),
+            "git branch identity": "codex/task",
+        }
+        return values[label]
+
+    monkeypatch.setattr(launcher, "_run_capture", fake_capture)
+
+    with pytest.raises(RuntimeError, match="requires local main"):
+        launcher._runtime_source_identity()
+
+
+def test_python_launcher_runtime_identity_rejects_dirty_main(monkeypatch, tmp_path):
+    launcher = _load_python_launcher()
+    monkeypatch.setattr(launcher, "PROJECT_ROOT", tmp_path)
+
+    def fake_capture(args, *, cwd, label, timeout=15.0):
+        values = {
+            "git root identity": str(tmp_path),
+            "git branch identity": "main",
+            "git commit identity": "a" * 40,
+            "git worktree identity": " M core/app.py",
+        }
+        return values[label]
+
+    monkeypatch.setattr(launcher, "_run_capture", fake_capture)
+
+    with pytest.raises(RuntimeError, match="requires a clean local main"):
+        launcher._runtime_source_identity()
+
+
+def test_python_launcher_rejects_main_change_during_refresh(monkeypatch):
+    launcher = _load_python_launcher()
+    expected = {
+        "projectRoot": "C:/repo",
+        "branch": "main",
+        "commit": "a" * 40,
+        "frontendTree": "tree-a",
+    }
+    monkeypatch.setattr(
+        launcher,
+        "_runtime_source_identity",
+        lambda: {**expected, "commit": "b" * 40},
+    )
+
+    with pytest.raises(RuntimeError, match="changed while Launcher was refreshing"):
+        launcher._assert_runtime_source_identity(expected)
 
 
 def test_web_workbench_access_log_filter_suppresses_polling_noise_only():
