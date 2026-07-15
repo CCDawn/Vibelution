@@ -549,6 +549,62 @@ def test_session_turn_progress_live_output_closes_previous_statuses(monkeypatch,
     assert [event["status"] for event in progress_events] == ["done", "done", "running"]
 
 
+def test_session_turn_progress_live_output_does_not_block_on_durable_work_run(monkeypatch, tmp_path):
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(session_service, "_publish_session_detail_snapshot", lambda _session_id: None)
+
+    durable_updates = []
+    monkeypatch.setattr(
+        session_service,
+        "_touch_chat_turn_work_run",
+        lambda **kwargs: durable_updates.append(kwargs),
+    )
+
+    session_service._set_session_running("session-live", True, turn_id="turn-progress")
+    try:
+        session_service._set_session_turn_progress_live_output(
+            "session-live",
+            "context_prepare",
+            turn_id="turn-progress",
+        )
+        live_state = session_service._snapshot_session_live_output("session-live")
+    finally:
+        session_service._clear_session_live_output("session-live", turn_id="turn-progress")
+        session_service._set_session_running("session-live", False, turn_id="turn-progress")
+
+    assert live_state is not None
+    assert live_state.stage == "context_prepare"
+    assert durable_updates == []
+
+
+def test_session_llm_retry_status_still_updates_durable_work_run(monkeypatch, tmp_path):
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(session_service, "_publish_session_detail_snapshot", lambda _session_id: None)
+
+    durable_updates = []
+    monkeypatch.setattr(
+        session_service,
+        "_touch_chat_turn_work_run",
+        lambda **kwargs: durable_updates.append(kwargs),
+    )
+
+    session_service._set_session_running("session-live", True, turn_id="turn-retry")
+    try:
+        session_service._set_session_llm_status_live_output(
+            "session-live",
+            "retrying",
+            turn_id="turn-retry",
+            fields={"attempt": 1, "max_attempts": 2, "category": "timeout"},
+        )
+    finally:
+        session_service._clear_session_live_output("session-live", turn_id="turn-retry")
+        session_service._set_session_running("session-live", False, turn_id="turn-retry")
+
+    assert len(durable_updates) == 1
+    assert durable_updates[0]["stage"] == "model_retry"
+    assert durable_updates[0]["turn_id"] == "turn-retry"
+
+
 def test_session_turn_prepare_timing_log_fields_are_bounded_and_non_sensitive():
     fields = session_service._session_turn_prepare_timing_log_fields(
         {
