@@ -1408,36 +1408,30 @@ def test_handle_start_supervised_run_blocks_stale_supervised_source(monkeypatch)
     ]
 
 
-def test_runtime_manager_active_work_runs_collects_destructive_guard_sources(monkeypatch):
-    from core.web.services import chat_room_service, session_service, supervised_worktree_evolution_service
-
+def test_runtime_manager_active_work_runs_collects_destructive_guard_sources(tmp_path, monkeypatch):
     events: list[tuple[str, dict]] = []
-    monkeypatch.setattr(
-        daemon,
-        "build_evolution_summary",
-        lambda: {
-            "self": {"activeRunId": "self-live", "activeStatus": "running"},
-            "supervised": {"activeRunId": "supervised-done", "activeStatus": "completed"},
-        },
+    store = daemon.work_run_store.WorkRunStore(root=tmp_path)
+    store.persist_snapshot(
+        "self_evolution_run",
+        {"runId": "self-live", "runKind": "self_evolution_run", "status": "running"},
+        active_run_id="self-live",
     )
-    monkeypatch.setattr(
-        session_service,
-        "list_active_session_work_runs",
-        lambda: [
-            {"runId": "chat-live", "runKind": "chat_turn", "sessionId": "session-a", "status": "running"},
-            {"runId": "chat-done", "runKind": "chat_turn", "sessionId": "session-b", "status": "completed"},
-        ],
+    store.persist_snapshot(
+        "chat_turn",
+        {"runId": "chat-live", "runKind": "chat_turn", "sessionId": "session-a", "status": "running"},
+        active_run_id="chat-live",
     )
-    monkeypatch.setattr(
-        chat_room_service,
-        "list_active_chat_room_work_runs",
-        lambda: [{"roundId": "round-live", "runKind": "chat_room_round", "status": "running"}],
+    store.persist_snapshot(
+        "chat_room_round",
+        {"runId": "round-live", "roundId": "round-live", "runKind": "chat_room_round", "status": "running"},
+        active_run_id="round-live",
     )
-    monkeypatch.setattr(
-        supervised_worktree_evolution_service,
-        "get_active_supervised_worktree_run",
-        lambda: {"runId": "worktree-live", "runKind": "supervised_worktree_evolution_run", "status": "queued"},
+    store.persist_snapshot(
+        "supervised_worktree_evolution_run",
+        {"runId": "worktree-live", "runKind": "supervised_worktree_evolution_run", "status": "queued"},
+        active_run_id="worktree-live",
     )
+    monkeypatch.setattr(daemon.work_run_store, "WORK_RUNS_DIR", tmp_path)
     monkeypatch.setattr(daemon, "_append_event", lambda event_type, payload: events.append((event_type, payload)))
 
     active = daemon._runtime_manager_active_work_runs()
@@ -1456,44 +1450,30 @@ def test_runtime_manager_active_work_runs_collects_destructive_guard_sources(mon
     assert events == []
 
 
-def test_runtime_manager_active_work_runs_ignores_needs_continue_chat_turn(monkeypatch):
-    from core.web.services import chat_room_service, session_service, supervised_worktree_evolution_service
-
-    monkeypatch.setattr(daemon, "build_evolution_summary", lambda: {"self": {}, "supervised": {}})
-    monkeypatch.setattr(
-        session_service,
-        "list_active_session_work_runs",
-        lambda: [
-            {
-                "runId": "chat-waiting",
-                "runKind": "chat_turn",
-                "sessionId": "session-a",
-                "status": "needs_continue",
-                "finishedAt": "2026-06-05T11:30:33Z",
-            },
-            {
-                "runId": "chat-finished-running",
-                "runKind": "chat_turn",
-                "sessionId": "session-c",
-                "status": "running",
-                "finishedAt": "2026-06-05T11:30:34Z",
-            },
-            {
-                "runId": "chat-live",
-                "runKind": "chat_turn",
-                "sessionId": "session-b",
-                "status": "running",
-            },
-        ],
+def test_runtime_manager_active_work_runs_ignores_needs_continue_chat_turn(tmp_path, monkeypatch):
+    store = daemon.work_run_store.WorkRunStore(root=tmp_path)
+    store.persist_snapshot(
+        "chat_turn",
+        {"runId": "chat-waiting", "runKind": "chat_turn", "sessionId": "session-a", "status": "needs_continue"},
+        active_run_id="chat-waiting",
     )
-    monkeypatch.setattr(chat_room_service, "list_active_chat_room_work_runs", lambda: [])
-    monkeypatch.setattr(supervised_worktree_evolution_service, "get_active_supervised_worktree_run", lambda: None)
+    monkeypatch.setattr(daemon.work_run_store, "WORK_RUNS_DIR", tmp_path)
 
     active = daemon._runtime_manager_active_work_runs()
 
-    assert active == [
-        {"kind": "chat_turn", "runId": "chat-live", "status": "running", "sessionId": "session-b"}
-    ]
+    assert active == []
+
+
+def test_runtime_manager_active_work_runs_fails_closed_for_missing_active_snapshot(tmp_path, monkeypatch):
+    store = daemon.work_run_store.WorkRunStore(root=tmp_path)
+    store.save_run_index("chat_turn", active_run_id="chat-missing", latest_run_id="chat-missing")
+    monkeypatch.setattr(daemon.work_run_store, "WORK_RUNS_DIR", tmp_path)
+
+    with pytest.raises(daemon.ActiveWorkProbeFailed) as error:
+        daemon._runtime_manager_active_work_runs()
+
+    assert error.value.source == "work_run_store:chat_turn"
+    assert error.value.error_type == "MissingActiveWorkSnapshot"
 
 
 def test_handle_retry_supervised_run_returns_new_snapshot(monkeypatch):
