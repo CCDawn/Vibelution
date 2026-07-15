@@ -942,11 +942,7 @@ def _restart_should_preserve_visible_browser(observation: dict[str, Any]) -> boo
 def _restart_should_preflight_frontend_build(observation: dict[str, Any], *, args: dict[str, Any]) -> bool:
     if bool(args.get("skipFrontendBuildPreflight")):
         return False
-    return (
-        str(observation.get("observedState") or "closed") == "open"
-        and bool(observation.get("backendAlive"))
-        and bool(observation.get("browserWindowAlive"))
-    )
+    return True
 
 
 def _open_verification_failure_message(observation: dict[str, Any], *, no_browser: bool) -> str:
