@@ -293,7 +293,10 @@ def measured(
     subject: str,
 ) -> ProcessResult:
     started = time.monotonic()
-    completed = run_process(argv, cwd, input_text=input_text, env=env)
+    if env is None:
+        completed = run_process(argv, cwd, input_text=input_text)
+    else:
+        completed = run_process(argv, cwd, input_text=input_text, env=env)
     duration_ms = round((time.monotonic() - started) * 1000)
     return ProcessResult(
         kind=kind,
