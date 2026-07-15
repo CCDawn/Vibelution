@@ -3579,6 +3579,57 @@ def test_source_collection_stage_card_projection_does_not_close_partial_needs_re
     assert card["blockingReasons"]
 
 
+def test_source_collection_stage_card_projection_reports_processed_inputs_that_need_evidence():
+    card = team_workflow_orchestration_service._source_collection_stage_card_projection(
+        "extraction",
+        [
+            {
+                "taskId": "stagetask-extraction-needs-evidence",
+                "stageId": "extraction",
+                "agentId": "source-extractor-agent",
+                "agentRole": "source_extractor",
+                "sessionId": "session-source-extractor",
+                "status": "needs_review",
+                "summary": "34 条候选资料均已提炼，但缺少可核验的证据锚点。",
+                "updatedAt": "2026-07-15T15:20:36+00:00",
+                "result": {
+                    "coverageSummary": {
+                        "applicable": True,
+                        "coverageKind": "candidate_extractions",
+                        "complete": True,
+                        "total": 34,
+                        "processed": 34,
+                        "missing": 0,
+                        "invalid": 0,
+                        "blocked": 34,
+                    },
+                    "closureSummary": {
+                        "userStatus": "success",
+                        "message": "已生成 34 个候选资料，本阶段闭环成功。",
+                    },
+                },
+            }
+        ],
+        artifact_count=34,
+        input_count=34,
+        output_count=0,
+        pending_count=34,
+        artifact_status="partial",
+        artifact_summary="34 source_manifest candidates; 0/34 assessed; 0 approved.",
+    )
+
+    assert card["status"] == "partial_current_inputs"
+    assert card["isClosedLoop"] is False
+    assert card["currentCoverageSummary"]["processed"] == 34
+    assert card["currentCoverageSummary"]["total"] == 34
+    assert card["currentCoverageSummary"]["missing"] == 0
+    assert card["currentCoverageSummary"]["blocked"] == 34
+    assert "已处理 34/34" in card["userSummary"]
+    assert "34 条需要补充证据" in card["userSummary"]
+    assert "闭环成功" not in card["userSummary"]
+    assert any("34 条需要补充证据" in reason for reason in card["blockingReasons"])
+
+
 def test_source_collection_stage_card_projection_marks_stale_success_as_partial_current_inputs():
     card = team_workflow_orchestration_service._source_collection_stage_card_projection(
         "extraction",
