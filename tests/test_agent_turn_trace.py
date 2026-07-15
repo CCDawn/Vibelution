@@ -125,3 +125,43 @@ def test_runtime_scene_inspection_returns_one_compact_agent_trace_for_a_turn(tmp
     }
     assert len(trace["evidenceRefs"]) == 8
     assert "content" not in json.dumps(trace, ensure_ascii=False).lower()
+
+
+def test_agent_trace_marks_only_stale_running_turns_without_calling_them_failures(tmp_path, monkeypatch):
+    monkeypatch.setattr(conversation_log_tools, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(conversation_log_tools, "LOG_INFO_DIR", tmp_path / "log_info")
+    scene = tmp_path / "logs" / "runtime_scenes" / "scene-stalled"
+    (scene / "manifest.json").parent.mkdir(parents=True)
+    (scene / "manifest.json").write_text(json.dumps({"runtime_scene_id": "scene-stalled"}), encoding="utf-8")
+    _write_jsonl(
+        scene / "events" / "conversation.jsonl",
+        [
+            {
+                "event_code": "conversation.turn.started",
+                "outcome": "started",
+                "ts": "2020-01-01T00:00:00Z",
+                "fields": {"sessionId": "session-stalled", "turnId": "turn-stalled"},
+            },
+            {
+                "event_code": "conversation.turn.llm_status_server_thinking",
+                "outcome": "observed",
+                "ts": "2020-01-01T00:00:01Z",
+                "fields": {"sessionId": "session-stalled", "turnId": "turn-stalled"},
+            },
+        ],
+    )
+
+    result = conversation_log_tools.inspect_conversation_logs(
+        log_path=str(scene),
+        session_id="session-stalled",
+        turn_id="turn-stalled",
+    )
+
+    trace = result["inspections"][0]["agentTrace"]
+    assert trace["status"] == "running"
+    assert trace["currentStage"] == "waiting_for_model"
+    assert trace["stall"]["detected"] is True
+    assert trace["stall"]["lastEventCode"] == "conversation.turn.llm_status_server_thinking"
+    assert trace["stall"]["idleMs"] >= 20_000
+    assert "stall" in trace["anomalies"]
+    assert "runtime_error" not in trace["anomalies"]

@@ -21,6 +21,7 @@ MAX_SCENE_CONVERSATION_FILES = 20
 MAX_SCENE_EVENT_FILES = 24
 MAX_CORRELATION_SUMMARIES = 12
 MAX_AGENT_TRACE_EVIDENCE_REFS = 16
+AGENT_TRACE_STALL_THRESHOLD_MS = 20_000
 
 IDENTITY_ALIASES = {
     "sessionId": ("sessionId", "runtimeSessionId", "runtime_session_id", "session_id"),
@@ -747,6 +748,7 @@ def _agent_turn_trace(records: list[dict[str, Any]], *, correlation: dict[str, A
             "llm": {"attemptCount": 0, "eventCount": 0, "retryCount": 0},
             "tools": {"callCount": 0, "names": []},
             "delivery": {"publishedDeltaCount": 0, "appliedDeltaCount": 0, "snapshotApplied": False},
+            "stall": {"detected": False, "idleMs": 0, "lastEventCode": ""},
             "anomalies": ["identity_not_found"],
             "evidenceRefs": [],
         }
@@ -804,6 +806,9 @@ def _agent_turn_trace(records: list[dict[str, Any]], *, correlation: dict[str, A
     ]
     if missing_identity:
         anomalies.append("identity_gap")
+    stall = _agent_trace_stall(matched, status=status)
+    if stall["detected"]:
+        anomalies.append("stall")
 
     return {
         "status": status,
@@ -823,6 +828,7 @@ def _agent_turn_trace(records: list[dict[str, Any]], *, correlation: dict[str, A
             "appliedDeltaCount": applied_delta_count,
             "snapshotApplied": snapshot_applied,
         },
+        "stall": stall,
         "anomalies": anomalies,
         "evidenceRefs": [
             {
@@ -923,6 +929,19 @@ def _agent_trace_duration_ms(records: list[dict[str, Any]]) -> int:
         return 0
     first, last = _agent_trace_record_order(records[0])[0], _agent_trace_record_order(records[-1])[0]
     return max(0, int((last - first).total_seconds() * 1000))
+
+
+def _agent_trace_stall(records: list[dict[str, Any]], *, status: str) -> dict[str, Any]:
+    if status != "running" or not records:
+        return {"detected": False, "idleMs": 0, "lastEventCode": ""}
+    last_record = records[-1]
+    last_at = _agent_trace_record_order(last_record)[0]
+    idle_ms = max(0, int((datetime.now(timezone.utc) - last_at).total_seconds() * 1000))
+    return {
+        "detected": idle_ms >= AGENT_TRACE_STALL_THRESHOLD_MS,
+        "idleMs": idle_ms,
+        "lastEventCode": _agent_trace_event_code(last_record["event"]),
+    }
 
 
 def _agent_trace_stage(status: str, event_codes: list[str]) -> str:
