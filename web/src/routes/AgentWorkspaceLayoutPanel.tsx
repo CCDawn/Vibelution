@@ -20,8 +20,10 @@ export function AgentWorkspaceLayoutPanel({
 }: AgentWorkspaceLayoutPanelProps) {
   return (
     <div className={createOpen ? `${styles.workspace} ${styles.workspaceCreating}` : styles.workspace}>
-      <AgentFilterRail {...filterRail} />
-      <AgentListWorkspacePanel {...listWorkspace} />
+      <div className={styles.directory}>
+        <AgentFilterRail {...filterRail} />
+        <AgentListWorkspacePanel {...listWorkspace} />
+      </div>
       <AgentDetailWorkspacePanel {...detailWorkspace} />
     </div>
   );
