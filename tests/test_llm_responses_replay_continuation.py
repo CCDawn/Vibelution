@@ -1,4 +1,5 @@
 import pytest
+from langchain_core.messages import SystemMessage
 
 from core.llm.client import LLMClient
 from core.llm.protocol_resolver import ProtocolResolutionError, resolve_model_protocol
@@ -107,6 +108,64 @@ def test_responses_http_tool_continuation_replays_complete_semantic_input_withou
     assert item_kinds == ["user", "reasoning", "function_call", "function_call_output"]
     assert continuation_outcome.final_text == "The moon is Earth's natural satellite."
     assert len(sent_payloads) == 2
+
+
+def test_responses_projection_anchors_opaque_reasoning_before_runtime_notice():
+    replay_item = {
+        "id": "reasoning_replay_notice",
+        "type": "reasoning",
+        "encrypted_content": "opaque-reasoning-state",
+        "summary": [],
+    }
+
+    def backend(_payload):
+        return {
+            "id": "resp_replay_notice",
+            "status": "completed",
+            "output": [
+                replay_item,
+                {
+                    "id": "function_replay_notice",
+                    "type": "function_call",
+                    "call_id": "call_replay_notice",
+                    "name": "lookup",
+                    "arguments": '{"query":"moon"}',
+                },
+            ],
+        }
+
+    client = LLMClient(config=_config(), backend=backend)
+    outcome = client.invoke_outcome(
+        [{"role": "user", "content": "look up the moon"}],
+        metadata=_metadata(iteration=0),
+    )
+    assistant = client.project_outcome_message(outcome)
+
+    assert assistant.additional_kwargs["reasoning_replay_item_id"] == "reasoning_replay_notice"
+
+    continuation = client._build_payload(
+        [
+            {"role": "user", "content": "look up the moon"},
+            assistant,
+            {
+                "role": "tool",
+                "tool_call_id": "call_replay_notice",
+                "content": "The moon is Earth's natural satellite.",
+            },
+            SystemMessage(content="Runtime context refreshed after the tool result."),
+        ],
+        metadata=_metadata(iteration=1),
+        replay_state=outcome.replay_state,
+    )
+
+    assert "previous_response_id" not in continuation
+    assert replay_item in continuation["input"]
+    assert any(
+        item.get("type") == "function_call_output"
+        and item.get("call_id") == "call_replay_notice"
+        for item in continuation["input"]
+        if isinstance(item, dict)
+    )
 
 
 def test_invalid_explicit_model_protocol_fails_closed():
