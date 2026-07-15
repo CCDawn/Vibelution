@@ -35,7 +35,8 @@ def source_collection_context_record_continuation_hint(record_page: dict[str, An
 def compact_source_collection_stage_task_context(context: dict[str, Any]) -> dict[str, Any]:
     context_mode = normalize_source_collection_context_mode(context.get("contextMode"))
     minimal_mode = context_mode == "minimal"
-    evidence_mode = context_mode in {"evidence", "retry_missing", "retry_evidence"}
+    steward_mode = isinstance(context.get("stewardActionPacket"), dict)
+    evidence_mode = context_mode in {"evidence", "retry_missing", "retry_evidence"} or steward_mode
     candidate_page = context.get("candidatePage") if isinstance(context.get("candidatePage"), dict) else {}
     record_page = context.get("recordPage") if isinstance(context.get("recordPage"), dict) else {}
     usage = context.get("usage") if isinstance(context.get("usage"), dict) else {}

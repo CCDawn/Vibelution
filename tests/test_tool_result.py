@@ -379,6 +379,67 @@ class TestTruncateResult:
         assert "context_mode=retry_evidence" in compact["usage"]["continuationHint"]
         assert "context_mode=retry_evidence" in packaged.continuation_hint
 
+    def test_package_tool_result_preserves_ingestion_steward_packet_when_long(self):
+        approved_ids = ["candidate-approved-1", "candidate-approved-2"]
+        payload = {
+            "status": "ok",
+            "contextKind": "source_collection_stage_task_context",
+            "contextMode": "compact",
+            "stageId": "ingestion",
+            "counts": {"candidateCount": 39, "returnedCandidateCount": 2},
+            "candidatePage": {"offset": 0, "limit": 80, "returned": 2, "total": 2, "hasMore": False},
+            "candidates": [
+                {
+                    "candidateId": candidate_id,
+                    "title": f"Approved evidence {index}",
+                    "sourceKind": "paper",
+                    "sourceRecordId": f"record-approved-{index}",
+                    "summary": "Governed source-collection abstract metadata. " * 80,
+                }
+                for index, candidate_id in enumerate(approved_ids, start=1)
+            ],
+            "stewardActionPacket": {
+                "schemaVersion": 1,
+                "packetKind": "knowledge_steward_approved_candidate_action",
+                "action": "writeback_approved_candidates",
+                "recommendedStatus": "completed",
+                "approvedCandidateIds": approved_ids,
+                "approvedCandidateCount": 2,
+                "deferredCandidateCounts": {"pending": 0, "rejected": 5, "needs_revision": 32},
+                "writebackTool": "source_collection_stage_writeback_tool",
+                "writebackResultSkeleton": {
+                    "approvedCandidateIds": approved_ids,
+                    "candidate_summary": {
+                        "approved": {"count": 2, "candidateIds": approved_ids, "candidates": [{"noise": "x" * 4000}]},
+                        "deferredCounts": {"pending": 0, "rejected": 5, "needs_revision": 32},
+                    },
+                    "steward_assessment": {"decision": "approved", "reason": "quality gate passed"},
+                },
+                "instructions": ["Use approvedCandidateIds and write back immediately."],
+            },
+            "usage": {
+                "readTool": "source_collection_context_tool",
+                "writebackTool": "source_collection_stage_writeback_tool",
+            },
+        }
+
+        packaged = package_tool_result(
+            json.dumps(payload, ensure_ascii=False),
+            tool_name="source_collection_context_tool",
+            max_chars=2400,
+        )
+
+        assert packaged.truncated is True
+        assert packaged.strategy == "structured_compact"
+        compact = json.loads(packaged.content)
+        assert compact["fieldMode"] == "evidence_source"
+        assert compact["doNotUsePreviewAsEvidence"] is False
+        assert compact["stewardActionPacket"]["approvedCandidateIds"] == approved_ids
+        assert compact["stewardActionPacket"]["writebackResultSkeleton"]["approvedCandidateIds"] == approved_ids
+        assert "candidates" not in compact["stewardActionPacket"]["writebackResultSkeleton"]["candidate_summary"]["approved"]
+        assert compact["candidates"][0]["evidenceRefs"][0]["id"] == "record-approved-1"
+        assert "summaryPreview" not in compact["candidates"][0]
+
     def test_package_tool_result_compacts_source_collection_context_with_record_paging_ids(self):
         payload = {
             "status": "ok",

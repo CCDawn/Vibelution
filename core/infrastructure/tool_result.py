@@ -438,7 +438,9 @@ def _compact_source_collection_context_result(result_str: str, max_chars: int, c
     raw_context_mode = str(payload.get("contextMode") or "compact").strip().lower() or "compact"
     if raw_context_mode not in {"compact", "minimal", "evidence", "retry_missing", "retry_evidence", "full"}:
         raw_context_mode = "compact"
-    evidence_mode = raw_context_mode in {"evidence", "retry_missing", "retry_evidence"}
+    steward_packet = payload.get("stewardActionPacket") if isinstance(payload.get("stewardActionPacket"), dict) else {}
+    steward_mode = str(steward_packet.get("packetKind") or "") == "knowledge_steward_approved_candidate_action"
+    evidence_mode = raw_context_mode in {"evidence", "retry_missing", "retry_evidence"} or steward_mode
     record_page = payload.get("recordPage") if isinstance(payload.get("recordPage"), dict) else {}
     page = payload.get("candidatePage") if isinstance(payload.get("candidatePage"), dict) else {}
     records = [
@@ -484,6 +486,15 @@ def _compact_source_collection_context_result(result_str: str, max_chars: int, c
         if evidence_mode:
             compact_candidate["summary"] = str(item.get("summary") or "")[:420]
             evidence_refs = [ref for ref in list(item.get("evidenceRefs") or []) if isinstance(ref, dict)][:3]
+            source_record_id = str(item.get("sourceRecordId") or "")[:160]
+            if not evidence_refs and source_record_id:
+                evidence_refs = [
+                    {
+                        "type": "data_record",
+                        "id": source_record_id,
+                        "label": str(item.get("title") or source_record_id)[:120],
+                    }
+                ]
             if evidence_refs:
                 compact_candidate["evidenceRefs"] = evidence_refs
             if item.get("evidenceScope"):
@@ -543,6 +554,8 @@ def _compact_source_collection_context_result(result_str: str, max_chars: int, c
     unassessed_candidate_ids = payload.get("unassessedCandidateIds") if isinstance(payload.get("unassessedCandidateIds"), list) else []
     if unassessed_candidate_ids:
         compact["unassessedCandidateIds"] = unassessed_candidate_ids[:40]
+    if steward_mode:
+        compact["stewardActionPacket"] = _compact_source_collection_steward_action_packet(steward_packet)
     if compact_records:
         compact["recordIds"] = [item.get("recordId") for item in compact_records if item.get("recordId")]
         compact["records"] = compact_records
@@ -644,6 +657,58 @@ def _compact_source_collection_context_result(result_str: str, max_chars: int, c
     compact["visibleCandidateCount"] = len(compact["candidates"])
     compact["omittedReturnedCandidateCount"] = max(0, int(page.get("returned") or len(compact_candidates)) - len(compact["candidates"]))
     return json.dumps(compact, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def _compact_source_collection_steward_action_packet(packet: dict[str, Any]) -> dict[str, Any]:
+    approved_ids = [
+        str(item)[:160]
+        for item in list(packet.get("approvedCandidateIds") or [])[:80]
+        if str(item).strip()
+    ]
+    skeleton = packet.get("writebackResultSkeleton") if isinstance(packet.get("writebackResultSkeleton"), dict) else {}
+    candidate_summary = skeleton.get("candidate_summary") if isinstance(skeleton.get("candidate_summary"), dict) else {}
+    approved = candidate_summary.get("approved") if isinstance(candidate_summary.get("approved"), dict) else {}
+    deferred_counts = candidate_summary.get("deferredCounts") if isinstance(candidate_summary.get("deferredCounts"), dict) else {}
+    steward_assessment = skeleton.get("steward_assessment") if isinstance(skeleton.get("steward_assessment"), dict) else {}
+    skeleton_approved_ids = [
+        str(item)[:160]
+        for item in list(skeleton.get("approvedCandidateIds") or approved.get("candidateIds") or approved_ids)[:80]
+        if str(item).strip()
+    ]
+    compact_skeleton = {
+        "approvedCandidateIds": skeleton_approved_ids,
+        "candidate_summary": {
+            "approved": {
+                "count": int(approved.get("count") or len(skeleton_approved_ids)),
+                "candidateIds": skeleton_approved_ids,
+            },
+            "deferredCounts": deferred_counts,
+        },
+        "steward_assessment": {
+            key: value
+            for key, value in steward_assessment.items()
+            if key in {"decision", "reason", "targetDomain", "confidence"}
+        },
+    }
+    return {
+        key: value
+        for key, value in {
+            "schemaVersion": packet.get("schemaVersion"),
+            "packetKind": str(packet.get("packetKind") or "")[:120],
+            "action": str(packet.get("action") or "")[:120],
+            "recommendedStatus": str(packet.get("recommendedStatus") or "")[:80],
+            "approvedCandidateIds": approved_ids,
+            "approvedCandidateCount": int(packet.get("approvedCandidateCount") or len(approved_ids)),
+            "deferredCandidateCounts": packet.get("deferredCandidateCounts")
+            if isinstance(packet.get("deferredCandidateCounts"), dict)
+            else {},
+            "writebackTool": str(packet.get("writebackTool") or "")[:120],
+            "writebackContractTaskId": str(packet.get("writebackContractTaskId") or "")[:160],
+            "writebackResultSkeleton": compact_skeleton,
+            "instructions": [str(item)[:240] for item in list(packet.get("instructions") or [])[:4]],
+        }.items()
+        if value not in ("", [], {}, None)
+    }
 
 
 def _compact_source_collection_tool_excluded_summary(summary: dict[str, Any]) -> dict[str, Any]:
