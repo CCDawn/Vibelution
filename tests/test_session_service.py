@@ -548,6 +548,67 @@ def test_session_turn_progress_live_output_closes_previous_statuses(monkeypatch,
     assert [event["status"] for event in progress_events] == ["done", "done", "running"]
 
 
+def test_running_snapshot_throttle_skips_detail_hydration(monkeypatch):
+    subscriber = queue.Queue()
+    session_id = "session-throttled"
+
+    def unexpected_detail_hydration(*_args, **_kwargs):
+        raise AssertionError("throttled snapshot must not hydrate session detail")
+
+    session_service._register_session_stream_subscriber(session_id, subscriber)
+    monkeypatch.setattr(session_service, "_is_session_running", lambda _session_id: True)
+    monkeypatch.setattr(session_service, "get_session_detail", unexpected_detail_hydration)
+    with session_service._SESSION_STREAM_LAST_SNAPSHOT_LOCK:
+        session_service._SESSION_STREAM_LAST_SNAPSHOT_AT[session_id] = session_service._perf_counter()
+    try:
+        session_service._publish_session_detail_snapshot(session_id)
+    finally:
+        session_service._unregister_session_stream_subscriber(session_id, subscriber)
+        with session_service._SESSION_STREAM_LAST_SNAPSHOT_LOCK:
+            session_service._SESSION_STREAM_LAST_SNAPSHOT_AT.pop(session_id, None)
+            session_service._SESSION_STREAM_THROTTLED_COUNTS.pop(session_id, None)
+
+    assert subscriber.empty()
+
+
+def test_session_live_progress_and_tool_updates_do_not_publish_full_snapshot(monkeypatch, tmp_path):
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    snapshot_calls = []
+    monkeypatch.setattr(
+        session_service,
+        "_publish_session_detail_snapshot",
+        lambda session_id: snapshot_calls.append(session_id),
+    )
+    monkeypatch.setattr(session_service, "_write_session_live_output_checkpoint", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(session_service, "_delete_session_live_output_checkpoint", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(session_service, "_session_ledger_sequence", lambda _session_id: 11)
+    subscriber = queue.Queue()
+    session_id = "session-delta-only"
+    turn_id = "turn-delta-only"
+    session_service._set_session_running(session_id, True, turn_id=turn_id)
+    session_service._register_session_stream_subscriber(session_id, subscriber)
+    try:
+        session_service._set_session_turn_progress_live_output(session_id, "model_request", turn_id=turn_id)
+        session_service._set_session_live_output(
+            session_id,
+            turn_id=turn_id,
+            tool_calls=[{"id": "tool-1", "name": "git_status", "status": "running"}],
+        )
+    finally:
+        session_service._unregister_session_stream_subscriber(session_id, subscriber)
+        session_service._clear_session_live_output(session_id, turn_id=turn_id)
+        session_service._set_session_running(session_id, False, turn_id=turn_id)
+
+    events = []
+    while not subscriber.empty():
+        events.append(subscriber.get_nowait())
+    assert snapshot_calls == []
+    assert len(events) == 1
+    assert all(event["type"] == "assistant_delta" for event in events)
+    assert events[-1]["turnId"] == turn_id
+    assert events[-1]["ledgerSeq"] == 11
+
+
 def test_interrupted_snapshot_finalizes_running_feedback_events(monkeypatch, tmp_path):
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     save_chat_state(
