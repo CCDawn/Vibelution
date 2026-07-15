@@ -104,6 +104,69 @@ function healthGuideToneClass(tone: AgentCoreConfigHealthView["tone"]) {
   return styles[toneKey] || styles.healthGuide_info;
 }
 
+function AgentLlmSlotField({
+  slot,
+  selectedModelId,
+  candidates,
+  supportsReasoningEffort,
+  reasoningEffort,
+  copy,
+  pending,
+  pendingModelRef,
+  configDraftDirty,
+  dirty,
+  onLlmSlotModelChange,
+  onPromoteModel,
+  onReasoningEffortChange,
+}: {
+  slot: AgentCoreConfigLlmSlotView["slot"];
+  selectedModelId: string;
+  candidates: AgentModelChoice[];
+  supportsReasoningEffort: boolean;
+  reasoningEffort: string;
+  copy: AgentCoreConfigPanelCopy;
+  pending: boolean;
+  pendingModelRef: string;
+  configDraftDirty: boolean;
+  dirty: boolean;
+  onLlmSlotModelChange: AgentCoreConfigPanelProps["onLlmSlotModelChange"];
+  onPromoteModel: AgentCoreConfigPanelProps["onPromoteModel"];
+  onReasoningEffortChange: AgentCoreConfigPanelProps["onReasoningEffortChange"];
+}) {
+  return (
+    <section
+      className={styles.llmSlotField}
+      title={`${slot.required ? copy.requiredSlot : copy.optionalSlot} · ${slot.description}`}
+    >
+      <span><strong>{slot.label}</strong></span>
+      <AgentModelPicker
+        candidates={candidates}
+        slot={slot}
+        selectedModelRef={selectedModelId}
+        disabled={pending}
+        pendingModelRef={pendingModelRef}
+        configDraftDirty={configDraftDirty}
+        agentDraftDirty={dirty}
+        onSelectPinned={(modelRef) => onLlmSlotModelChange(slot, modelRef)}
+        onPromote={(candidate) => onPromoteModel(slot, candidate)}
+      />
+      {!slot.required ? (
+        <VButton type="button" variant="ghost" isDisabled={pending || !selectedModelId} onPress={() => onLlmSlotModelChange(slot, "")}>
+          {copy.inheritDialogueModel}
+        </VButton>
+      ) : null}
+      {supportsReasoningEffort ? (
+        <VNativeSelect value={reasoningEffort} aria-label={`${slot.label} ${copy.reasoningEffort}`} onChange={(event) => onReasoningEffortChange(slot.slot, event.target.value)}>
+          <option value="">{copy.reasoningEffort}: {copy.reasoningEffortDefault}</option>
+          <option value="low">{copy.reasoningEffort}: {copy.reasoningEffortLow}</option>
+          <option value="medium">{copy.reasoningEffort}: {copy.reasoningEffortMedium}</option>
+          <option value="high">{copy.reasoningEffort}: {copy.reasoningEffortHigh}</option>
+        </VNativeSelect>
+      ) : null}
+    </section>
+  );
+}
+
 export function AgentCoreConfigPanel({
   copy,
   lang,
@@ -135,6 +198,10 @@ export function AgentCoreConfigPanel({
   onReset,
   onSave,
 }: AgentCoreConfigPanelProps) {
+  const primaryLlmSlot = llmSlots.find(({ slot }) => slot.slot === "dialogue") ?? llmSlots[0];
+  const advancedLlmSlots = llmSlots.filter((item) => item !== primaryLlmSlot);
+  const advancedLabel = lang === "zh" ? "高级模型与上下文" : "Advanced models and context";
+  const primaryModelLabel = lang === "zh" ? "主要对话模型" : "Primary conversation model";
   return (
     <section className={styles.configEditor} title={title}>
       <div className={styles.panelHeader}>
@@ -146,13 +213,15 @@ export function AgentCoreConfigPanel({
           {dirty ? (lang === "zh" ? "未保存" : "Unsaved") : (lang === "zh" ? "已同步" : "Synced")}
         </span>
       </div>
-      <section className={`${styles.healthGuidePanel} ${healthGuideToneClass(health.tone)}`}>
-        <div>
-          <span>{health.label}</span>
-          <strong>{health.headline}</strong>
-        </div>
-        <p><strong>{health.nextStepLabel}</strong>{health.nextStep}</p>
-      </section>
+      {health.tone === "blocking" ? (
+        <section className={`${styles.healthGuidePanel} ${healthGuideToneClass(health.tone)}`}>
+          <div>
+            <span>{health.label}</span>
+            <strong>{health.headline}</strong>
+          </div>
+          <p><strong>{health.nextStepLabel}</strong>{health.nextStep}</p>
+        </section>
+      ) : null}
       <div className={styles.editorGrid}>
         <VFieldRow label="Agent">
           <VNativeInput
@@ -165,53 +234,10 @@ export function AgentCoreConfigPanel({
             <option value="active">{lang === "zh" ? "活跃" : "Active"}</option>
           </VNativeSelect>
         </VFieldRow>
-        <section className={styles.fieldWide} title={copy.llmSlotsHint}>
-          <span>{copy.llmSlots}</span>
-          <div className={styles.llmSlotGrid}>
-            {llmSlots.map(({ slot, selectedModelId, candidates, supportsReasoningEffort, reasoningEffort }) => (
-              <section
-                key={slot.slot}
-                className={styles.llmSlotField}
-                title={`${slot.required ? copy.requiredSlot : copy.optionalSlot} · ${slot.description}`}
-              >
-                <span>
-                  <strong>{slot.label}</strong>
-                </span>
-                <AgentModelPicker
-                  candidates={candidates}
-                  slot={slot}
-                  selectedModelRef={selectedModelId}
-                  disabled={pending}
-                  pendingModelRef={pendingModelRef}
-                  configDraftDirty={configDraftDirty}
-                  agentDraftDirty={dirty}
-                  onSelectPinned={(modelRef) => onLlmSlotModelChange(slot, modelRef)}
-                  onPromote={(candidate) => onPromoteModel(slot, candidate)}
-                />
-                {!slot.required ? (
-                  <VButton
-                    type="button"
-                    variant="ghost"
-                    isDisabled={pending || !selectedModelId}
-                    onPress={() => onLlmSlotModelChange(slot, "")}
-                  >
-                    {copy.inheritDialogueModel}
-                  </VButton>
-                ) : null}
-                {supportsReasoningEffort ? (
-                  <VNativeSelect
-                    value={reasoningEffort}
-                    aria-label={`${slot.label} ${copy.reasoningEffort}`}
-                    onChange={(event) => onReasoningEffortChange(slot.slot, event.target.value)}
-                  >
-                    <option value="">{copy.reasoningEffort}: {copy.reasoningEffortDefault}</option>
-                    <option value="low">{copy.reasoningEffort}: {copy.reasoningEffortLow}</option>
-                    <option value="medium">{copy.reasoningEffort}: {copy.reasoningEffortMedium}</option>
-                    <option value="high">{copy.reasoningEffort}: {copy.reasoningEffortHigh}</option>
-                  </VNativeSelect>
-                ) : null}
-              </section>
-            ))}
+        {primaryLlmSlot ? <section className={styles.fieldWide} title={copy.llmSlotsHint}>
+          <span>{primaryModelLabel}</span>
+          <div className={styles.primaryLlmSlot}>
+            <AgentLlmSlotField {...primaryLlmSlot} copy={copy} pending={pending} pendingModelRef={pendingModelRef} configDraftDirty={configDraftDirty} dirty={dirty} onLlmSlotModelChange={onLlmSlotModelChange} onPromoteModel={onPromoteModel} onReasoningEffortChange={onReasoningEffortChange} />
           </div>
           <div className={styles.configDeepLinkRow}>
             <VButton
@@ -223,7 +249,7 @@ export function AgentCoreConfigPanel({
               {lang === "zh" ? "去模型库配置" : "Open model library"}
             </VButton>
           </div>
-        </section>
+        </section> : null}
         <section className={`${styles.fieldWide} ${styles.promptConfigField}`}>
           <span>{copy.prompt}</span>
           <div className={styles.promptConfigRow}>
@@ -266,14 +292,25 @@ export function AgentCoreConfigPanel({
             ))}
           </VNativeSelect>
         </VFieldRow>
-        <AgentContextCompressionPanel
-          copy={copy}
-          lang={lang}
-          policy={draft.contextCompressionPolicy}
-          title={contextCompressionTitle}
-          onPolicyChange={onContextCompressionChange}
-          onOpenContextConfig={onOpenContextConfig}
-        />
+        <details className={styles.advancedConfig}>
+          <summary>
+            <span>{advancedLabel}</span>
+            <small>{advancedLlmSlots.length}</small>
+          </summary>
+          <div className={styles.advancedConfigBody}>
+            {advancedLlmSlots.length ? <div className={styles.llmSlotGrid}>
+              {advancedLlmSlots.map((slotView) => <AgentLlmSlotField key={slotView.slot.slot} {...slotView} copy={copy} pending={pending} pendingModelRef={pendingModelRef} configDraftDirty={configDraftDirty} dirty={dirty} onLlmSlotModelChange={onLlmSlotModelChange} onPromoteModel={onPromoteModel} onReasoningEffortChange={onReasoningEffortChange} />)}
+            </div> : null}
+            <AgentContextCompressionPanel
+              copy={copy}
+              lang={lang}
+              policy={draft.contextCompressionPolicy}
+              title={contextCompressionTitle}
+              onPolicyChange={onContextCompressionChange}
+              onOpenContextConfig={onOpenContextConfig}
+            />
+          </div>
+        </details>
       </div>
       {notice ? (
         <p className={notice.tone === "error" ? styles.errorText : styles.successText}>{notice.text}</p>

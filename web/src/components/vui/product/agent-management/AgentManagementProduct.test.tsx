@@ -114,7 +114,7 @@ describe("Agent Management VUI product components", () => {
     expect(markup).toContain("<strong>Filters</strong>");
   });
 
-  it("keeps repeated Agent filters and entities flat inside the raised workspace panels", () => {
+  it("keeps filters flat and turns narrow Agent directories into scan-friendly cards", () => {
     const filterSource = readFileSync(resolve(import.meta.dirname, "AgentFilterRail.tsx"), "utf8");
     const denseListSource = readFileSync(resolve(import.meta.dirname, "AgentDenseList.tsx"), "utf8");
 
@@ -122,8 +122,10 @@ describe("Agent Management VUI product components", () => {
     expect(filterSource).toContain("bg-transparent");
     expect(filterSource).not.toContain("rounded-[var(--radius-control)] border border-[var(--border-soft)] bg-[var(--vui-surface-row)]");
     expect(denseListSource).toContain('data-vui="agent-row"');
-    expect(denseListSource).toContain("border-b-[var(--vui-border-hairline)]");
-    expect(denseListSource).toContain("rounded-none");
+    expect(denseListSource).toContain("grid-cols-[minmax(0,1fr)_auto]");
+    expect(denseListSource).toContain("rounded-[var(--radius-control)]");
+    expect(denseListSource).toContain("col-span-2 flex flex-wrap");
+    expect(denseListSource).not.toContain("grid-cols-[minmax(180px,1.3fr)");
   });
 
   it("renders bulk actions as a dense product toolbar without inline prose", () => {

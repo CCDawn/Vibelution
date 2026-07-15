@@ -78,7 +78,9 @@ describe("AgentModelPicker", () => {
     expect(html).toContain("Luna");
     expect(html).toContain("Sol");
     expect(html).toContain("Terra");
-    expect(html).toContain("固定并选择");
+    expect(html).toContain("固定后使用");
+    expect(html).toContain('role="dialog"');
+    expect(html).toContain('aria-modal="true"');
     expect(html).toContain('data-reason-code="non_dialogue_model"');
     expect(html).toContain("low / high");
   });
