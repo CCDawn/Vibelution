@@ -316,6 +316,7 @@ ROLE_TOOL_PROFILES: dict[str, dict[str, Any]] = {
         forbidden_tools=(*RESEARCH_FORBIDDEN_TOOLS, *CODE_MUTATION_TOOLS, *SEARCH_DISABLED_TOOLS),
         write_scopes=("private", "team_workflow_ledger"),
         mutation_access="restricted",
+        max_calls_per_turn=32,
         description="Find, fetch, download, and register traceable source records for a source collection run.",
     ),
     "source_extractor": _profile(
@@ -344,6 +345,7 @@ ROLE_TOOL_PROFILES: dict[str, dict[str, Any]] = {
         ),
         write_scopes=("private", "team_workflow_ledger"),
         mutation_access="restricted",
+        max_calls_per_turn=32,
         description="Extract useful source content and make source-quality decisions in one pass.",
     ),
     "source_relation_mapper": _profile(
@@ -369,6 +371,7 @@ ROLE_TOOL_PROFILES: dict[str, dict[str, Any]] = {
         write_scopes=("private", "team_workflow_ledger"),
         network_access="none",
         mutation_access="restricted",
+        max_calls_per_turn=32,
         description="Build candidate-only topic, source, and evidence relationships without writing the official graph.",
     ),
     "source_ingestor": _profile(
@@ -400,7 +403,7 @@ ROLE_TOOL_PROFILES: dict[str, dict[str, Any]] = {
         write_scopes=("private", "team_workflow_ledger"),
         network_access="none",
         mutation_access="restricted",
-        max_calls_per_turn=12,
+        max_calls_per_turn=32,
         role_family="knowledge",
         description="Perform governed final source review and formal Team Knowledge ingestion.",
     ),

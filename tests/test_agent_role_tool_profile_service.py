@@ -59,6 +59,7 @@ def test_four_stage_source_roles_have_expected_tool_boundaries():
             "mutationAccess": "restricted",
             "networkAccess": "controlled",
             "writeScopes": {"private", "team_workflow_ledger"},
+            "maxCallsPerTurn": 32,
         },
         "source_extractor": {
             "required": {
@@ -82,6 +83,7 @@ def test_four_stage_source_roles_have_expected_tool_boundaries():
             "mutationAccess": "restricted",
             "networkAccess": "controlled",
             "writeScopes": {"private", "team_workflow_ledger"},
+            "maxCallsPerTurn": 32,
         },
         "source_relation_mapper": {
             "required": {
@@ -105,6 +107,7 @@ def test_four_stage_source_roles_have_expected_tool_boundaries():
             "mutationAccess": "restricted",
             "networkAccess": "none",
             "writeScopes": {"private", "team_workflow_ledger"},
+            "maxCallsPerTurn": 32,
         },
         "source_ingestor": {
             "required": {
@@ -128,6 +131,7 @@ def test_four_stage_source_roles_have_expected_tool_boundaries():
             "mutationAccess": "restricted",
             "networkAccess": "none",
             "writeScopes": {"private", "team_workflow_ledger"},
+            "maxCallsPerTurn": 32,
         },
     }
 
@@ -148,6 +152,7 @@ def test_four_stage_source_roles_have_expected_tool_boundaries():
         assert policy["mutationAccess"] == expected["mutationAccess"]
         assert policy["networkAccess"] == expected["networkAccess"]
         assert expected["writeScopes"].issubset(set(policy["writeScopes"]))
+        assert policy["maxCallsPerTurn"] == expected["maxCallsPerTurn"]
         assert policy["roleToolProfileFingerprint"]
 
 
