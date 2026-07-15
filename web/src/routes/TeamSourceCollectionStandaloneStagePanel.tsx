@@ -37,6 +37,7 @@ type TeamSourceCollectionStandaloneStagePanelProps = {
   commandSubtitle: ReactNode;
   commandStats: TeamStageStat[];
   runSwitcher: ReactNode;
+  phaseCloseGate?: ReactNode;
   stagePipelineId: string;
   stagePipelineAriaLabel: string;
   modules: TeamSourceCollectionStandaloneStageModule[];
@@ -67,6 +68,7 @@ export function TeamSourceCollectionStandaloneStagePanel({
   commandSubtitle,
   commandStats,
   runSwitcher,
+  phaseCloseGate,
   stagePipelineId,
   stagePipelineAriaLabel,
   modules,
@@ -82,7 +84,12 @@ export function TeamSourceCollectionStandaloneStagePanel({
         subtitle={commandSubtitle}
         stats={commandStats}
       />
-      {runSwitcher}
+      {runSwitcher || phaseCloseGate ? (
+        <div className={styles.sourceCollectionRunContext}>
+          {runSwitcher}
+          {phaseCloseGate}
+        </div>
+      ) : null}
       <TeamStagePipeline id={stagePipelineId} ariaLabel={stagePipelineAriaLabel}>
         {modules.map((module, index) => (
           <TeamStageCard

@@ -221,11 +221,70 @@ export type SourceCollectionStageCardsStatus = {
   activeRounds?: SourceCollectionStageRoundCards[];
 };
 
+export type SourceCollectionPhaseCloseGateStage = {
+  stageId: SourceCollectionStageModuleId;
+  status?: string;
+  passed?: boolean;
+  blockingReasons?: string[];
+};
+
+export type SourceCollectionPhaseCloseGate = {
+  runId: string;
+  stageRoundId?: string;
+  stageRoundStatus?: string;
+  status: "idle" | "needs_continue" | "ready_to_close" | "closed_loop" | string;
+  passed?: boolean;
+  stageGatePassed?: boolean;
+  stateReconciliationRequired?: boolean;
+  stageCount?: number;
+  closedLoopCount?: number;
+  stages?: SourceCollectionPhaseCloseGateStage[];
+  blockingReasons?: string[];
+};
+
+export type SourceCollectionPhaseCloseGateSummary = {
+  scope?: {
+    kind?: string;
+    runId?: string;
+    includesHistorical?: boolean;
+    eligibleForPhaseCloseGate?: boolean;
+  };
+  phaseCloseGate?: SourceCollectionPhaseCloseGate;
+};
+
 const SOURCE_COLLECTION_ACTION_READY: SourceCollectionActionReadiness = {
   disabled: false,
   loading: false,
   reason: "",
 };
+
+export function sourceCollectionPhaseCloseGateForRun(
+  summary: SourceCollectionPhaseCloseGateSummary | null | undefined,
+  selectedRunId: string | null | undefined,
+) {
+  const runId = String(selectedRunId || "").trim();
+  const scope = summary?.scope;
+  const gate = summary?.phaseCloseGate;
+  if (
+    !runId
+    || !scope
+    || scope.kind !== "source_run"
+    || scope.runId !== runId
+    || scope.includesHistorical === true
+    || scope.eligibleForPhaseCloseGate !== true
+    || !gate
+    || gate.runId !== runId
+  ) {
+    return null;
+  }
+  return gate;
+}
+
+export function sourceCollectionPhaseCloseGateNextStage(
+  gate: SourceCollectionPhaseCloseGate | null | undefined,
+) {
+  return gate?.stages?.find((stage) => stage?.passed !== true)?.stageId ?? null;
+}
 
 export function sourceCollectionStageProjectionState(
   projection: SourceCollectionStageCardProjection | null | undefined,

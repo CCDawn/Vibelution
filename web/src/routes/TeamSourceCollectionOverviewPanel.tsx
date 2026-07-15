@@ -48,6 +48,7 @@ type TeamSourceCollectionOverviewPanelProps = {
   assignments: TeamSourceCollectionFindingAssignment[];
   assignmentEmptyMessage: string;
   queries: TeamSourceCollectionFindingQuery[];
+  phaseCloseGate?: ReactNode;
   storageActions: ReactNode;
   plan: TeamSourceCollectionOverviewPlan | null;
   manualWriteback: ReactNode;
@@ -76,6 +77,7 @@ export function TeamSourceCollectionOverviewPanel({
   assignments,
   assignmentEmptyMessage,
   queries,
+  phaseCloseGate,
   storageActions,
   plan,
   manualWriteback,
@@ -130,6 +132,7 @@ export function TeamSourceCollectionOverviewPanel({
         onRunChange={onRunChange}
         onAssignmentSelect={onAssignmentSelect}
       />
+      {phaseCloseGate}
       {plan ? (
         <div className={styles.workflowSourceCollectionPlan}>
           <div>
