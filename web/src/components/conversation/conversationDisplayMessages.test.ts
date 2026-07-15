@@ -83,6 +83,68 @@ describe("conversation display message projection", () => {
     ]);
   });
 
+  it("makes canonical turn items authoritative before display compatibility rules", async () => {
+    const projected = await projectConversationDisplayMessages([
+      message({
+        id: "canonical-answer",
+        content: "stale legacy answer",
+        thought: "stale legacy thought",
+        codexTranscript: {
+          version: 1,
+          source: "native",
+          messageId: "legacy-transcript",
+          cells: [{
+            id: "legacy-answer",
+            kind: "assistant_markdown",
+            messageId: "legacy-transcript",
+            status: "completed",
+            tone: "neutral",
+            text: "stale legacy answer",
+          }],
+          toolCalls: [],
+          terminalOperations: [],
+          terminalSessions: [],
+          modelObservations: [],
+        },
+        turnItems: [{
+          version: 2,
+          sessionId: "session-1",
+          turnId: "turn-1",
+          invocationId: "invocation-1",
+          iteration: 0,
+          status: "completed",
+          sequence: 1,
+          protocol: "responses",
+          id: "final-answer-1",
+          itemId: "final-answer-1",
+          revision: 0,
+          kind: "assistant_message",
+          channel: "answer",
+          phase: "final_answer",
+          type: "assistant_message",
+          provisional: false,
+          terminal: true,
+          text: "canonical final answer",
+        }] as never,
+      }),
+    ]);
+
+    expect(projected).toHaveLength(1);
+    expect(projected[0].content).toBe("canonical final answer");
+    expect(projected[0].thought).toBeUndefined();
+    expect(projected[0].codexTranscript?.messageId).toBe("final-answer-1");
+    expect(projected[0].codexTranscript?.cells).toEqual([
+      expect.objectContaining({
+        id: "final-answer-1",
+        kind: "assistant_markdown",
+        phase: "final_answer",
+        status: "completed",
+        terminal: true,
+        text: "canonical final answer",
+      }),
+    ]);
+  });
+
   it("merges adjacent duplicate turn errors without carrying legacy process fields", async () => {
     const projected = await projectConversationDisplayMessages([
       message({
