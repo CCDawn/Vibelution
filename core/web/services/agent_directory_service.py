@@ -3457,9 +3457,16 @@ def _ensure_fixed_role_tool_policy(state: dict[str, Any], agent: dict[str, Any])
         desired_policy = default_system_no_tool_policy(policy_id)
     current_policy_id = str(agent.get("toolPolicyId") or DEFAULT_TOOL_POLICY_ID).strip() or DEFAULT_TOOL_POLICY_ID
     current_policy = normalize_tool_policy(policies.get(current_policy_id) or default_tool_policy(current_policy_id), current_policy_id)
+    versioned_runtime_overrides: dict[str, Any] = {}
+    if int(current_policy.get("policyVersion") or 1) > int(desired_policy.get("policyVersion") or 1):
+        versioned_runtime_overrides = {
+            "maxCallsPerTurn": int(current_policy.get("maxCallsPerTurn") or 0),
+            "policyVersion": int(current_policy.get("policyVersion") or 1),
+        }
     next_policy = normalize_tool_policy(
         {
             **desired_policy,
+            **versioned_runtime_overrides,
             "perToolRules": dict(current_policy.get("perToolRules") or {}),
         },
         policy_id,

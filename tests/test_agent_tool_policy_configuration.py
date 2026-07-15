@@ -76,3 +76,42 @@ def test_shared_or_high_risk_policy_requires_explicit_confirmation(configured_ag
     assert applied.status_code == 200, applied.json()
     assert applied.json()["impact"]["affectedAgentCount"] == 2
     assert "dangerous_tool" in applied.json()["preview"]["visibleTools"]
+
+
+def test_fixed_research_role_preserves_versioned_call_budget_update(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _mark_config_agent_instances_present()
+    agent = agent_directory_service.create_agent_instance(
+        display_name="Source Finder",
+        primary_mode="research",
+        role_key="source_finder",
+    )
+    policy = agent_directory_service.resolve_tool_policy_for_agent(agent["agentId"])
+    monkeypatch.setattr(
+        tool_policy_configuration_service.tool_registry_service,
+        "get_tool_registry",
+        lambda: {
+            "registryVersion": "test-registry-v1",
+            "tools": [
+                {"name": name, "enabled": True, "runtimeActive": True, "status": "validated"}
+                for name in policy["allowedTools"]
+            ],
+        },
+    )
+    detail = client.get(f"/api/agents/{agent['agentId']}/tool-policy").json()
+
+    response = client.put(
+        f"/api/agents/{agent['agentId']}/tool-policy",
+        json={
+            "toolPolicy": {**detail["currentPolicy"], "maxCallsPerTurn": 64},
+            "expectedAgentUpdatedAt": detail["agent"]["updatedAt"],
+            "expectedPolicyFingerprint": detail["policyFingerprint"],
+            "confirmed": True,
+        },
+    )
+
+    assert response.status_code == 200, response.json()
+    assert response.json()["currentPolicy"]["maxCallsPerTurn"] == 64
+    assert response.json()["policyVersion"] == detail["policyVersion"] + 1
+    persisted = client.get(f"/api/agents/{agent['agentId']}/tool-policy").json()
+    assert persisted["currentPolicy"]["maxCallsPerTurn"] == 64
