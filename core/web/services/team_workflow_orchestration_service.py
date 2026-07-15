@@ -8957,6 +8957,7 @@ def get_source_quality_status(team_id: str) -> dict[str, Any]:
         "teamId": normalized_team_id,
         "workflowId": workflow["workflowId"],
         "workflowKind": workflow["workflowKind"],
+        "scope": _team_aggregate_workflow_scope(),
         "status": status,
         "summary": {
             "sourceCandidateCount": len(source_candidates),
@@ -9077,6 +9078,11 @@ def get_source_collection_summary(team_id: str, *, run_id: str = "") -> dict[str
         }
     projection_summary = projection.get("summary") if isinstance(projection.get("summary"), dict) else {}
     stage_round_ref = _source_collection_stage_round_ref_for_run(normalized_team_id, normalized_run_id) if normalized_run_id else {}
+    phase_close_gate = _source_collection_phase_close_gate(
+        normalized_run_id,
+        projection=projection,
+        stage_round_ref=stage_round_ref,
+    )
     active_snapshot = _source_collection_work_run_store().load_active_snapshot(SOURCE_COLLECTION_WORK_RUN_KIND) if normalized_run_id else {}
     active_snapshot = (
         _decorate_source_collection_work_run_snapshot(
@@ -9105,6 +9111,13 @@ def get_source_collection_summary(team_id: str, *, run_id: str = "") -> dict[str
         ),
         "run": selected_run or {},
         "runStatus": run_status,
+        "scope": {
+            "kind": "source_run",
+            "runId": normalized_run_id,
+            "stageRoundId": _trim_text(stage_round_ref.get("stageRoundId"), max_length=160),
+            "includesHistorical": False,
+            "eligibleForPhaseCloseGate": bool(normalized_run_id),
+        },
         "summary": {
             "recordCount": _source_collection_count(run_summary.get("recordCount")),
             "assignmentCount": _source_collection_count(run_summary.get("assignmentCount")),
@@ -9119,6 +9132,7 @@ def get_source_collection_summary(team_id: str, *, run_id: str = "") -> dict[str
         },
         "stageCards": projection.get("cards", []),
         "stageCardSummary": projection_summary,
+        "phaseCloseGate": phase_close_gate,
         "latestTasks": projection.get("latestTasks", {}),
         "stageRound": stage_round_ref,
         "activeWorkRun": active_work_run,
@@ -9128,6 +9142,87 @@ def get_source_collection_summary(team_id: str, *, run_id: str = "") -> dict[str
     }
     _record_source_collection_summary_timing(normalized_team_id, normalized_run_id, payload, started_at)
     return payload
+
+
+def _source_collection_phase_close_gate(
+    run_id: str,
+    *,
+    projection: dict[str, Any],
+    stage_round_ref: dict[str, Any],
+) -> dict[str, Any]:
+    normalized_run_id = _trim_text(run_id, max_length=160)
+    cards_by_stage = {
+        _normalize_source_collection_stage_id(item.get("stageId"), default=""): item
+        for item in list(projection.get("cards") or [])
+        if isinstance(item, dict) and _normalize_source_collection_stage_id(item.get("stageId"), default="")
+    }
+    stages: list[dict[str, Any]] = []
+    blocking_reasons: list[str] = []
+    for stage_id in SOURCE_COLLECTION_AGENT_CONTEXT_STAGE_ROLES:
+        card = cards_by_stage.get(stage_id, {})
+        passed = bool(card.get("isClosedLoop"))
+        card_reasons = [
+            _trim_text(item, max_length=500)
+            for item in list(card.get("blockingReasons") or [])
+            if _trim_text(item, max_length=500)
+        ]
+        if not passed and not card_reasons:
+            card_reasons = [f"{stage_id} 阶段尚未形成闭环。"]
+        blocking_reasons.extend(card_reasons)
+        stages.append(
+            {
+                "stageId": stage_id,
+                "status": _trim_text(card.get("status"), max_length=80) or "not_started",
+                "passed": passed,
+                "artifactStatus": _trim_text(card.get("artifactStatus"), max_length=80),
+                "agentTaskStatus": _trim_text(card.get("agentTaskStatus"), max_length=80) or "not_started",
+                "currentCoverageSummary": card.get("currentCoverageSummary")
+                if isinstance(card.get("currentCoverageSummary"), dict)
+                else {},
+                "blockingReasons": card_reasons,
+            }
+        )
+    stage_count = len(stages)
+    closed_loop_count = sum(1 for stage in stages if stage["passed"])
+    stage_gate_passed = (
+        bool(normalized_run_id)
+        and stage_count == len(SOURCE_COLLECTION_AGENT_CONTEXT_STAGE_ROLES)
+        and closed_loop_count == stage_count
+    )
+    stage_round_status = _trim_text(stage_round_ref.get("status"), max_length=80).lower()
+    state_reconciliation_required = stage_gate_passed and stage_round_status not in {"completed", "closed_loop"}
+    if not normalized_run_id:
+        gate_status = "idle"
+        blocking_reasons = ["尚未选择资料搜集运行批次。"]
+    elif not stage_gate_passed:
+        gate_status = "needs_continue"
+    elif state_reconciliation_required:
+        gate_status = "ready_to_close"
+        blocking_reasons.append("四个阶段产物已齐备，等待阶段轮次状态收口。")
+    else:
+        gate_status = "closed_loop"
+    return {
+        "runId": normalized_run_id,
+        "stageRoundId": _trim_text(stage_round_ref.get("stageRoundId"), max_length=160),
+        "stageRoundStatus": stage_round_status,
+        "status": gate_status,
+        "passed": gate_status == "closed_loop",
+        "stageGatePassed": stage_gate_passed,
+        "stateReconciliationRequired": state_reconciliation_required,
+        "stageCount": stage_count,
+        "closedLoopCount": closed_loop_count,
+        "stages": stages,
+        "blockingReasons": list(dict.fromkeys(blocking_reasons)),
+    }
+
+
+def _team_aggregate_workflow_scope() -> dict[str, Any]:
+    return {
+        "kind": "team_aggregate",
+        "runId": "",
+        "includesHistorical": True,
+        "eligibleForPhaseCloseGate": False,
+    }
 
 
 def _record_source_collection_summary_timing(
@@ -9140,6 +9235,7 @@ def _record_source_collection_summary_timing(
     if duration_ms < SOURCE_COLLECTION_SUMMARY_SLOW_EVENT_MS:
         return
     summary = payload.get("summary") if isinstance(payload.get("summary"), dict) else {}
+    phase_close_gate = payload.get("phaseCloseGate") if isinstance(payload.get("phaseCloseGate"), dict) else {}
     _record_workflow_event(
         "source_collection.summary.slow",
         team_id,
@@ -9151,6 +9247,8 @@ def _record_source_collection_summary_timing(
             "recordCount": _source_collection_count(summary.get("recordCount")),
             "sourceCandidateCount": _source_collection_count(summary.get("sourceCandidateCount")),
             "stageCardCount": len(list(payload.get("stageCards") or [])),
+            "phaseCloseGateStatus": _trim_text(phase_close_gate.get("status"), max_length=80),
+            "phaseCloseGatePassed": bool(phase_close_gate.get("passed")),
             "activeWorkRun": bool(payload.get("activeWorkRun")),
         },
     )
@@ -9346,6 +9444,7 @@ def get_knowledge_ingestion_status(team_id: str) -> dict[str, Any]:
         "teamId": normalized_team_id,
         "workflowId": workflow["workflowId"],
         "workflowKind": workflow["workflowKind"],
+        "scope": _team_aggregate_workflow_scope(),
         "status": overall_status,
         "summary": summary,
         "stages": stages,
@@ -9438,6 +9537,7 @@ def get_official_model_evidence_status(team_id: str) -> dict[str, Any]:
         "teamId": normalized_team_id,
         "workflowId": workflow["workflowId"],
         "workflowKind": workflow["workflowKind"],
+        "scope": _team_aggregate_workflow_scope(),
         "status": status,
         "summary": {**summary, "actionItemCount": len(action_items)},
         "coverage": coverage,
@@ -9535,6 +9635,7 @@ def get_team_workflow_coordination_status(team_id: str) -> dict[str, Any]:
         "teamId": normalized_team_id,
         "workflowId": workflow["workflowId"],
         "workflowKind": workflow["workflowKind"],
+        "scope": _team_aggregate_workflow_scope(),
         "status": status,
         "ownerAgentId": workflow.get("ownerAgentId") or DEFAULT_OWNER_AGENT_ID,
         "summary": summary,

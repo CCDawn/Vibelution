@@ -9175,6 +9175,105 @@ def test_source_collection_summary_uses_lightweight_team_existence(tmp_path, mon
     assert payload["stageCardSummary"]["sourceCandidateCount"] == 1
 
 
+def test_source_collection_summary_exposes_run_scoped_phase_close_gate(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
+    team = team_service.create_team(name="挑战杯科研团队")
+    run_response = team_workflow_orchestration_service.start_source_collection_run(
+        team["teamId"],
+        {
+            "topic": "predictive coding",
+            "agentRoles": ["source_finder"],
+            "querySeeds": ["predictive coding"],
+            "promptCachePolicy": {"requirement": "disabled"},
+        },
+    )
+    run_id = run_response["run"]["runId"]
+    record = data_processing_service.add_record(
+        run_id,
+        {
+            "sourceType": "paper",
+            "sourceRef": "https://doi.org/10.1038/4581",
+            "title": "Predictive coding source",
+            "summary": "A source for the current run.",
+            "metadata": {"allowedForAnalysis": True},
+        },
+    )
+    team_workflow_orchestration_service.import_data_record_as_source_candidate(
+        team["teamId"],
+        run_id,
+        record["recordId"],
+        {"createdByAgent": "Content Extraction Agent"},
+    )
+
+    payload = team_workflow_orchestration_service.get_source_collection_summary(team["teamId"], run_id=run_id)
+
+    assert payload["scope"] == {
+        "kind": "source_run",
+        "runId": run_id,
+        "stageRoundId": payload["stageRound"].get("stageRoundId", ""),
+        "includesHistorical": False,
+        "eligibleForPhaseCloseGate": True,
+    }
+    gate = payload["phaseCloseGate"]
+    assert gate["runId"] == run_id
+    assert gate["status"] == "needs_continue"
+    assert gate["passed"] is False
+    assert gate["stageCount"] == 4
+    assert gate["closedLoopCount"] == 0
+    assert {item["stageId"] for item in gate["stages"]} == {"finding", "extraction", "relations", "ingestion"}
+    assert gate["blockingReasons"]
+
+
+def test_team_aggregate_status_views_declare_non_gate_scope(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
+    team = team_service.create_team(name="挑战杯科研团队")
+
+    payloads = [
+        team_workflow_orchestration_service.get_source_quality_status(team["teamId"]),
+        team_workflow_orchestration_service.get_knowledge_ingestion_status(team["teamId"]),
+        team_workflow_orchestration_service.get_official_model_evidence_status(team["teamId"]),
+        team_workflow_orchestration_service.get_team_workflow_coordination_status(team["teamId"]),
+    ]
+
+    expected_scope = {
+        "kind": "team_aggregate",
+        "runId": "",
+        "includesHistorical": True,
+        "eligibleForPhaseCloseGate": False,
+    }
+    assert [payload["scope"] for payload in payloads] == [expected_scope] * len(payloads)
+
+
+def test_source_collection_phase_close_gate_waits_for_stage_round_reconciliation():
+    projection = {
+        "cards": [
+            {"stageId": stage_id, "status": "closed_loop", "isClosedLoop": True}
+            for stage_id in ("finding", "extraction", "relations", "ingestion")
+        ]
+    }
+
+    pending = team_workflow_orchestration_service._source_collection_phase_close_gate(
+        "run-close-gate",
+        projection=projection,
+        stage_round_ref={"stageRoundId": "round-close-gate", "status": "needs_continue"},
+    )
+    completed = team_workflow_orchestration_service._source_collection_phase_close_gate(
+        "run-close-gate",
+        projection=projection,
+        stage_round_ref={"stageRoundId": "round-close-gate", "status": "completed"},
+    )
+
+    assert pending["status"] == "ready_to_close"
+    assert pending["stageGatePassed"] is True
+    assert pending["passed"] is False
+    assert pending["stateReconciliationRequired"] is True
+    assert completed["status"] == "closed_loop"
+    assert completed["passed"] is True
+    assert completed["stateReconciliationRequired"] is False
+
+
 def test_research_stage_round_status_uses_lightweight_team_snapshot(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     team = team_service.create_team(name="挑战杯科研团队")
