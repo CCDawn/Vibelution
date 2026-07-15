@@ -43,6 +43,49 @@ from tools.agent_tools import spawn_agent as spawn_agent_impl, set_subagent_stre
 from tools.Key_Tools import create_key_tools, create_llm_facing_tools
 
 
+def test_initial_prompt_reuse_requires_unchanged_git_and_runtime_state():
+    initial_git_state = SimpleNamespace(
+        available=True,
+        head_rev="abc",
+        indexed_head_rev="abc",
+        dirty=False,
+        snapshot_id="snapshot-1",
+        error=None,
+    )
+    same_git_state = SimpleNamespace(**vars(initial_git_state))
+    changed_git_state = SimpleNamespace(**{**vars(initial_git_state), "head_rev": "def"})
+    dirty_git_state = SimpleNamespace(**{**vars(initial_git_state), "dirty": True})
+
+    assert agent_module._can_reuse_initial_prompt(
+        pending=True,
+        initial_git_state=initial_git_state,
+        current_git_state=same_git_state,
+        initial_runtime_state_memory_key="runtime-1",
+        current_runtime_state_memory_key="runtime-1",
+    )
+    assert not agent_module._can_reuse_initial_prompt(
+        pending=True,
+        initial_git_state=initial_git_state,
+        current_git_state=changed_git_state,
+        initial_runtime_state_memory_key="runtime-1",
+        current_runtime_state_memory_key="runtime-1",
+    )
+    assert not agent_module._can_reuse_initial_prompt(
+        pending=True,
+        initial_git_state=dirty_git_state,
+        current_git_state=dirty_git_state,
+        initial_runtime_state_memory_key="runtime-1",
+        current_runtime_state_memory_key="runtime-1",
+    )
+    assert not agent_module._can_reuse_initial_prompt(
+        pending=True,
+        initial_git_state=initial_git_state,
+        current_git_state=same_git_state,
+        initial_runtime_state_memory_key="runtime-1",
+        current_runtime_state_memory_key="runtime-2",
+    )
+
+
 def test_numbered_confirmation_goal_preserves_previous_assistant_context():
     history = [
         SystemMessage(content=""),
@@ -5144,6 +5187,12 @@ class TestLocalProviderBootstrap:
 
     def test_think_and_act_auto_compresses_at_standard_context_threshold(self, monkeypatch):
         agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+        prompt_build_calls = []
+
+        def build_prompt():
+            prompt_build_calls.append(True)
+            return "stable system prompt"
+
         agent.name = "compression-threshold-tester"
         agent.config = SimpleNamespace(
             llm=SimpleNamespace(get_profile=lambda role="primary": SimpleNamespace(model="demo-model")),
@@ -5158,9 +5207,16 @@ class TestLocalProviderBootstrap:
             update_current_goal=lambda _goal: None,
             set_runtime_goal_packet=lambda _packet: None,
             clear_state_memory=lambda persist=True: None,
-            build=lambda: "stable system prompt",
+            build=build_prompt,
         )
-        agent.git_memory = SimpleNamespace(refresh_git_memory=lambda force=False: None)
+        stable_git_state = SimpleNamespace(
+            available=True,
+            head_rev="abc",
+            indexed_head_rev="abc",
+            dirty=False,
+            error=None,
+        )
+        agent.git_memory = SimpleNamespace(refresh_git_memory=lambda force=False: stable_git_state)
         agent._active_turn_messages = []
         agent._active_turn_goal = None
         agent._pending_lifecycle_action = None
@@ -5275,11 +5331,13 @@ class TestLocalProviderBootstrap:
         assert compress_calls
         assert "上下文" in compress_calls[0][1]
         assert llm_message_counts[0] == 3
+        assert len(prompt_build_calls) == 1
         preflight = next(item for item in scene_events if item[0][1] == "agent.llm_preflight.completed")
         fields = preflight[1]["fields"]
         assert fields["iteration"] == 1
         assert fields["messageCount"] == 3
         assert fields["totalPreflightMs"] >= 0
+        assert fields["promptBuildReused"] is True
         assert {
             "gitRefreshMs",
             "runtimeStateSyncMs",

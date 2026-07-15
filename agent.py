@@ -443,6 +443,38 @@ def _record_agent_scene_event(
         return
 
 
+def _git_memory_state_signature(state: Any) -> tuple[Any, ...]:
+    if state is None:
+        return ()
+    return (
+        getattr(state, "available", None),
+        getattr(state, "head_rev", None),
+        getattr(state, "indexed_head_rev", None),
+        getattr(state, "dirty", None),
+        getattr(state, "error", None),
+    )
+
+
+def _can_reuse_initial_prompt(
+    *,
+    pending: bool,
+    initial_git_state: Any,
+    current_git_state: Any,
+    initial_runtime_state_memory_key: str,
+    current_runtime_state_memory_key: str,
+) -> bool:
+    return bool(
+        pending
+        and bool(getattr(initial_git_state, "available", False))
+        and bool(getattr(current_git_state, "available", False))
+        and not bool(getattr(initial_git_state, "dirty", False))
+        and not bool(getattr(current_git_state, "dirty", False))
+        and _git_memory_state_signature(current_git_state)
+        == _git_memory_state_signature(initial_git_state)
+        and current_runtime_state_memory_key == initial_runtime_state_memory_key
+    )
+
+
 def _llm_effective_route_identity(client: Any) -> tuple[str, ...]:
     identity_builder = getattr(client, "effective_route_identity", None)
     if callable(identity_builder):
@@ -2378,8 +2410,9 @@ class SelfEvolvingAgent:
         self._last_runtime_state_memory = ""
         self._last_runtime_state_memory_key = ""
         self.prompt_manager.clear_state_memory(persist=False)
-        self.git_memory.refresh_git_memory(force=True)
+        initial_git_state = self.git_memory.refresh_git_memory(force=True)
         self._sync_runtime_state_memory()
+        initial_runtime_state_memory_key = self._last_runtime_state_memory_key
         sp = self.prompt_manager.build()
         self._cached_system_prompt = to_string(sp)
         dynamic_system_context_message = build_dynamic_system_context_message(sp)
@@ -2508,6 +2541,7 @@ class SelfEvolvingAgent:
             self._raise_if_turn_stop_requested()
             provider_replay_state = None
             responses_continuation_disabled = False
+            initial_prompt_reuse_pending = True
             for _ in range(round_state.max_iterations):
                 self._raise_if_turn_stop_requested()
                 iteration = round_state.next_iteration()
@@ -2517,13 +2551,24 @@ class SelfEvolvingAgent:
                     **round_state.thinking_status(user_prompt),
                 )
                 git_refresh_started = time.perf_counter()
-                self.git_memory.refresh_git_memory()
+                current_git_state = self.git_memory.refresh_git_memory()
                 git_refresh_ms = max(0, int((time.perf_counter() - git_refresh_started) * 1000))
                 runtime_sync_started = time.perf_counter()
                 self._sync_runtime_state_memory()
                 runtime_sync_ms = max(0, int((time.perf_counter() - runtime_sync_started) * 1000))
                 prompt_build_started = time.perf_counter()
-                current_sp = self.prompt_manager.build()
+                prompt_build_reused = _can_reuse_initial_prompt(
+                    pending=initial_prompt_reuse_pending,
+                    initial_git_state=initial_git_state,
+                    current_git_state=current_git_state,
+                    initial_runtime_state_memory_key=initial_runtime_state_memory_key,
+                    current_runtime_state_memory_key=self._last_runtime_state_memory_key,
+                )
+                if prompt_build_reused:
+                    current_sp = sp
+                else:
+                    current_sp = self.prompt_manager.build()
+                initial_prompt_reuse_pending = False
                 current_prompt = to_string(current_sp)
                 if current_prompt != self._cached_system_prompt:
                     messages[0] = build_cacheable_system_prefix_message(current_sp)
@@ -2620,6 +2665,7 @@ class SelfEvolvingAgent:
                         "gitRefreshMs": git_refresh_ms,
                         "runtimeStateSyncMs": runtime_sync_ms,
                         "promptBuildMs": prompt_build_ms,
+                        "promptBuildReused": prompt_build_reused,
                         "contextEstimateMs": context_estimate_ms,
                         "delegationMs": delegation_ms,
                         "totalPreflightMs": max(0, int((time.perf_counter() - pre_llm_started) * 1000)),
