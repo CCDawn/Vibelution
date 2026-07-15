@@ -3939,15 +3939,15 @@ export function AgentsRoute() {
   const agentRunsQuery = useQuery({
     queryKey: queryKeys.agentRuns(selectedAgent?.agentId ?? ""),
     queryFn: () => fetchJson<AgentRunHistory>(`/api/agents/${encodeURIComponent(selectedAgent?.agentId ?? "")}/runs?limit=12`),
-    enabled: Boolean(selectedAgent?.agentId && activePane === "activity"),
-    refetchInterval: resolvePollingInterval(pageVisible, 12_000),
+    enabled: Boolean(selectedAgent?.agentId && (activePane === "overview" || activePane === "activity")),
+    refetchInterval: activePane === "activity" ? resolvePollingInterval(pageVisible, 12_000) : false,
     refetchIntervalInBackground: false,
   });
   const agentMessagesQuery = useQuery({
     queryKey: queryKeys.agentMessages(selectedAgent?.agentId ?? "", "pending"),
     queryFn: () => fetchJson<AgentInboxMessage[]>(`/api/agents/${encodeURIComponent(selectedAgent?.agentId ?? "")}/messages?status=pending&limit=8`),
-    enabled: Boolean(selectedAgent?.agentId && activePane === "activity"),
-    refetchInterval: resolvePollingInterval(pageVisible, 12_000),
+    enabled: Boolean(selectedAgent?.agentId && (activePane === "overview" || activePane === "activity")),
+    refetchInterval: activePane === "activity" ? resolvePollingInterval(pageVisible, 12_000) : false,
     refetchIntervalInBackground: false,
   });
   const selectedAgentInboxPendingCount = selectedAgent?.agentInboxPendingCount ?? agentMessagesQuery.data?.length ?? 0;
@@ -3956,8 +3956,8 @@ export function AgentsRoute() {
     queryFn: () => fetchJson<AgentRuntimeEvidence>(
       `/api/agents/${encodeURIComponent(selectedAgent?.agentId ?? "")}/runtime-evidence?sessionId=${encodeURIComponent(selectedAgent?.directSessionId ?? "")}&limit=5`,
     ),
-    enabled: Boolean(selectedAgent?.agentId && activePane === "activity"),
-    refetchInterval: resolvePollingInterval(pageVisible, 20_000),
+    enabled: Boolean(selectedAgent?.agentId && (activePane === "overview" || activePane === "activity")),
+    refetchInterval: activePane === "activity" ? resolvePollingInterval(pageVisible, 20_000) : false,
     refetchIntervalInBackground: false,
   });
   const activityTimeline = useMemo(
@@ -5874,6 +5874,93 @@ export function AgentsRoute() {
     };
   })() : null;
 
+  const overviewOperations = selectedAgent ? {
+    copy: {
+      currentFocus: copy.runtimeFocus,
+      recentActivity: copy.activityTimeline,
+      loading: copy.loading,
+      noActivity: copy.activityTimelineEmpty,
+      noActivityDetail: lang === "zh"
+        ? "可从会话开始使用此 Agent，或先检查配置。"
+        : "Start a session with this Agent or check its configuration first.",
+      activityUnavailable: lang === "zh" ? "活动摘要暂不可用" : "Activity preview is unavailable",
+      latestRun: copy.runtimeLatestRun,
+      updated: copy.runtimeUpdated,
+      nextStep: copy.runtimeNextStep,
+      openSession: copy.openSession,
+      openLogs: copy.openLogs,
+      checkConfig: lang === "zh" ? "检查配置" : "Check configuration",
+      viewActivity: lang === "zh" ? "查看完整活动" : "View full activity",
+    },
+    state: (agentRunsQuery.isError || agentMessagesQuery.isError || agentRuntimeEvidenceQuery.isError)
+      ? "error" as const
+      : (agentRunsQuery.isPending || agentMessagesQuery.isPending || agentRuntimeEvidenceQuery.isPending)
+        ? "loading" as const
+        : "ready" as const,
+    errorMessage: lang === "zh" ? "请在完整活动页重试。" : "Open the full activity view to retry.",
+    runtime: {
+      statusLabel: runtimeStatusLabel(selectedAgent, lang),
+      statusReason: selectedAgent.runtimeStatus?.reason || selectedAgent.status || "-",
+      summary: selectedAgent.runtimeStatus?.summary || selectedAgent.directSessionId || selectedAgent.workspacePath || "-",
+      latestRunId: selectedAgent.runtimeStatus?.runId || "-",
+      updatedAt: formatTimestamp(selectedAgent.runtimeStatus?.updatedAt || selectedAgent.updatedAt, lang),
+      nextStep: runtimeNextStep(selectedAgent, lang),
+      onOpenSession: runtimeFocusSessionId ? () => openAgentSession(runtimeFocusSessionId) : undefined,
+      onOpenLogs: () => openAgentLogs(runtimeFocusEvidence.match),
+    },
+    activities: activityTimeline.slice(0, 5).map((item) => ({
+      id: item.id,
+      title: item.title,
+      body: item.body,
+      meta: item.meta,
+      onOpenLogs: item.canOpenLogs ? () => openAgentLogs(item.evidence) : undefined,
+    })),
+    onOpenActivity: () => setActivePane("activity"),
+    onOpenConfig: () => setActivePane("config"),
+    onOpenSession: runtimeFocusSessionId ? () => openAgentSession(runtimeFocusSessionId) : undefined,
+  } : null;
+
+  const overviewResources = selectedAgent ? {
+    title: lang === "zh" ? "关联资源" : "Related resources",
+    emptyLabel: lang === "zh" ? "暂无可直接打开的关联资源。" : "No related resource can be opened yet.",
+    openLabel: lang === "zh" ? "打开" : "Open",
+    resources: [
+      {
+        id: "prompt",
+        label: copy.prompt,
+        value: configDraft.promptTemplateId || selectedAgent.promptTemplateId || "-",
+        route: selectedAgentPromptConfigRoute,
+      },
+      {
+        id: "tools",
+        label: copy.tools,
+        value: selectedAgent.toolPolicyId || "-",
+        route: selectedAgentToolConfigRoute,
+      },
+      {
+        id: "memory",
+        label: copy.memory,
+        value: selectedAgent.memoryPolicyId || "-",
+        route: selectedAgentMemoryConfigRoute,
+      },
+      ...(selectedAgentReferencesPanel?.chatRooms.filter((room) => room.statusTone === "active").slice(0, 1).map((room) => ({
+        id: `room:${room.id}`,
+        label: lang === "zh" ? "群聊" : "Group room",
+        value: room.title,
+        route: room.route,
+      })) ?? []),
+      ...(selectedAgentReferencesPanel?.references.slice(0, 1).map((reference) => ({
+        id: `reference:${reference.id}`,
+        label: reference.label,
+        value: reference.sourceLabel || reference.meta,
+        route: reference.route,
+      })) ?? []),
+    ].filter((resource) => resource.value !== "-" && resource.route),
+    onOpenRoute: (route: string) => {
+      void navigate(route);
+    },
+  } : null;
+
   const selectedAgentDetailContent: AgentSelectedDetailContentPanelProps | null = selectedAgent ? {
     activePane,
     header: {
@@ -5916,6 +6003,8 @@ export function AgentsRoute() {
       onSelectPane: setActivePane,
     },
     overview: selectedAgentOverviewPanel,
+    operations: overviewOperations,
+    resources: overviewResources,
     configPrimary: {
       coreConfig: {
         copy,
