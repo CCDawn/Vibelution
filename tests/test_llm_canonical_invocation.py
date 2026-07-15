@@ -1,9 +1,11 @@
 import inspect
+import json
 
-from config.settings import AppConfig
+import pytest
+
 from core.llm.client import LLMClient
 from core.llm.invocation import run_streaming_llm_outcome
-from core.llm.types import CanonicalItemIdentity, LLMProtocolEvent, StreamChunk, TurnOutcome
+from core.llm.types import CanonicalItemIdentity, CanonicalToolCall, LLMProtocolEvent, StreamChunk, TurnOutcome
 from core.orchestration.turn_outcome import TurnOutcomeController
 
 
@@ -54,6 +56,36 @@ def test_control_and_replay_sources_do_not_read_compatibility_metadata():
     assert "additional_kwargs" not in inspect.getsource(TurnOutcomeController.decide_llm_iteration)
     assert "provider_payload" not in inspect.getsource(run_streaming_llm_outcome)
     assert "invoke_outcome" in inspect.getsource(LLMClient.invoke)
+
+
+def test_canonical_tool_call_nested_arguments_stay_immutable_and_json_serializable():
+    call = CanonicalToolCall(
+        identity=CanonicalItemIdentity(
+            session_id="session-tools",
+            turn_id="turn-tools",
+            invocation_id="invocation-tools",
+            iteration=0,
+            item_id="tool-call-tools",
+        ),
+        call_id="call-tools",
+        name="grep_search_tool",
+        arguments={
+            "search": {
+                "patterns": ["activeClusterCount", "llm.invoke.failed"],
+                "options": {"caseSensitive": False},
+            }
+        },
+    )
+
+    with pytest.raises(TypeError):
+        call.arguments["search"]["options"]["caseSensitive"] = True
+
+    assert json.loads(json.dumps(dict(call.arguments), ensure_ascii=False)) == {
+        "search": {
+            "patterns": ["activeClusterCount", "llm.invoke.failed"],
+            "options": {"caseSensitive": False},
+        }
+    }
 
 
 def test_streaming_bridge_uses_event_sink_and_generator_return(monkeypatch):

@@ -14,7 +14,7 @@ import threading
 import hashlib
 import time
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import contextmanager, nullcontext
+from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -24,7 +24,6 @@ from urllib.parse import quote
 
 from config.llm_key_env import sync_llm_key_env_from_persisted_user_env
 from config.settings import get_config
-from config.settings import get_web_chat_config
 from core.context.segments import (
     build_context_manifest,
     build_context_segment,
@@ -70,7 +69,6 @@ from core.chat.slash_commands import SkillSlashCommand, parse_skill_slash_comman
 from core.infrastructure import developer_sandbox
 from core.infrastructure.event_bus import EventNames, get_event_bus
 from core.llm.client import llm_status_context
-from core.llm.payload_builder import prompt_cache_partition_scope
 from core.llm.agent_runtime import (
     AgentLlmResolutionError,
     resolve_agent_llm,
@@ -2560,7 +2558,11 @@ def _empty_direct_agent_session_hidden_from_index(
 
 
 @contextmanager
-def _session_tool_workspace_override(session_workspace: str | Path, memory_workspace: str | Path | None = None):
+def _session_tool_workspace_override(
+    session_workspace: str | Path,
+    memory_workspace: str | Path | None = None,
+    task_workspace: str | Path | None = None,
+):
     try:
         from core.infrastructure.mental_model import active_mental_workspace
         from core.orchestration.task_planner import task_storage_override
@@ -2570,11 +2572,12 @@ def _session_tool_workspace_override(session_workspace: str | Path, memory_works
         yield
         return
     memory_root = memory_workspace or session_workspace
+    task_root = task_workspace or session_workspace
     with (
         active_mental_workspace(session_workspace),
         workspace_root_override(session_workspace),
         memory_storage_override(memory_root),
-        task_storage_override(session_workspace),
+        task_storage_override(task_root),
     ):
         yield
 
@@ -6658,7 +6661,7 @@ def edit_and_resubmit_session_message(
 
         _ensure_conversation_agent_metadata(conversation)
         agent_id = str(conversation.get("agent_id") or conversation.get("agentId") or "").strip()
-        agent = _resolve_active_agent_for_turn(conversation_id, agent_id, lang=lang)
+        _resolve_active_agent_for_turn(conversation_id, agent_id, lang=lang)
         original_entry = dict(previous_messages[target_index])
         history_before_target = previous_messages[:target_index]
         _truncate_session_ledger_before_message(conversation_id, original_entry)
@@ -13125,6 +13128,21 @@ def _source_collection_stage_task_context_metadata(context: dict[str, Any]) -> d
     }
 
 
+def _session_task_workspace_for_turn(
+    context: dict[str, Any],
+    *,
+    session_workspace: str | Path,
+    default_workspace: str | Path,
+) -> Path:
+    """Keep stage-task checklists fresh without clearing an Agent's durable task state."""
+
+    stage_task = _source_collection_stage_task_context_metadata(context)
+    task_id = str(stage_task.get("taskId") or "").strip()
+    if not task_id:
+        return Path(default_workspace)
+    return Path(session_workspace) / "stage_tasks" / _safe_session_workspace_token(task_id)
+
+
 def _source_collection_stage_task_required_tool_names(context: dict[str, Any]) -> list[str]:
     metadata = context.get("message_metadata") if isinstance(context.get("message_metadata"), dict) else {}
     contract = metadata.get("writebackContract") if isinstance(metadata.get("writebackContract"), dict) else {}
@@ -13371,6 +13389,11 @@ def _run_session_turn(context: dict[str, Any]) -> None:
     )
     source_collection_stage_task_auto_continue = _source_collection_stage_task_context_metadata(context)
     source_collection_stage_task_required_tools = _source_collection_stage_task_required_tool_names(context)
+    task_workspace = _session_task_workspace_for_turn(
+        context,
+        session_workspace=session_workspace,
+        default_workspace=tool_workspace,
+    )
     allow_internal_auto_continue = _session_context_allows_internal_auto_continue(context)
     internal_auto_continue_max_turns = _session_context_internal_auto_continue_max_turns(context)
     prompt_cache_partition = _session_prompt_cache_partition(
@@ -13399,6 +13422,8 @@ def _run_session_turn(context: dict[str, Any]) -> None:
             "agentWorkspacePath": agent_workspace,
             "agentMemoryRoot": memory_root,
             "toolWorkspacePath": str(tool_workspace),
+            "taskWorkspacePath": str(task_workspace),
+            "taskWorkspaceIsolated": task_workspace != Path(tool_workspace),
             "toolWorkspaceScope": str(getattr(workspace_decision, "scope", "") or ""),
             "supervisedRuntimeRole": supervised_runtime_role,
             "supervisedRuntimeToolSource": "supervised_conversation_harness" if supervised_runtime_role else "",
@@ -13511,7 +13536,11 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                 supervised_role=supervised_runtime_role,
             ),
             mental_model_enabled_override(mental_model_enabled),
-            _session_tool_workspace_override(tool_workspace, memory_workspace=agent_workspace_path if agent_instance else tool_workspace),
+            _session_tool_workspace_override(
+                tool_workspace,
+                memory_workspace=agent_workspace_path if agent_instance else tool_workspace,
+                task_workspace=task_workspace,
+            ),
         ):
             initial_stop_reason = _get_turn_control_stop_reason(turn_control)
             if initial_stop_reason:
@@ -15286,7 +15315,6 @@ def _agent_message_tool_sent_to_source(
             continue
         if str(tool_call.get("name") or "").strip() != "agent_message_tool":
             continue
-        arguments = tool_call.get("arguments") if isinstance(tool_call.get("arguments"), dict) else {}
         result_payload = _parse_agent_message_tool_result(tool_call)
         if not _agent_message_tool_result_succeeded(result_payload):
             continue
@@ -15744,7 +15772,6 @@ def _persist_session_turn_failure(session_id: str, context: dict[str, Any], exc:
     raw_error = str(exc or "").strip()
     error_type = _failure_error_type(raw_error, exc=exc)
     turn_id = str(context.get("turn_id") or "")
-    summary = _user_visible_failure_summary(raw_error, lang=lang, exc=exc)
     work_run_summary = text_for(
         lang,
         zh="网页工作台这一轮执行失败，完整错误已写入运行日志。",
@@ -19636,7 +19663,6 @@ def _provider_error_reason_detail(raw_error: Any) -> str:
 
 def _provider_error_diagnostics(raw_error: Any, *, llm_failure: dict[str, Any] | None = None) -> dict[str, Any]:
     value = str(raw_error or "").strip()
-    lower = value.lower()
     llm_failure = llm_failure if isinstance(llm_failure, dict) else {}
     diagnostics: dict[str, Any] = {
         "http_status": _coerce_nonnegative_int(
@@ -22472,7 +22498,6 @@ def _chat_turn_result_status(result_status: str, result: Any, *, stop_requested:
     if stop_requested:
         return "stopped_by_user"
     normalized = str(result_status or "").strip().lower()
-    metadata = dict(result.get("metadata") or {}) if isinstance(result, dict) and isinstance(result.get("metadata"), dict) else {}
     if isinstance(result, dict):
         contract = build_chat_coding_result_contract(result)
         outcome = str(contract.get("outcome") or result.get("outcome") or result.get("task_outcome") or "").strip().lower()

@@ -11,6 +11,23 @@ if TYPE_CHECKING:
     from .provider_replay_state import ProviderReplayState
 
 
+class _FrozenJsonDict(dict[str, Any]):
+    """JSON-serializable mapping that preserves canonical immutability."""
+
+    @staticmethod
+    def _immutable(*_args: Any, **_kwargs: Any) -> None:
+        raise TypeError("canonical JSON mappings are immutable")
+
+    __setitem__ = _immutable
+    __delitem__ = _immutable
+    clear = _immutable
+    pop = _immutable
+    popitem = _immutable
+    setdefault = _immutable
+    update = _immutable
+    __ior__ = _immutable
+
+
 def _freeze_value(value: Any) -> Any:
     if isinstance(value, Mapping):
         return MappingProxyType({str(key): _freeze_value(item) for key, item in value.items()})
@@ -18,6 +35,18 @@ def _freeze_value(value: Any) -> Any:
         return tuple(_freeze_value(item) for item in value)
     if isinstance(value, (set, frozenset)):
         return frozenset(_freeze_value(item) for item in value)
+    return value
+
+
+def _freeze_json_value(value: Any) -> Any:
+    """Freeze provider JSON without introducing non-serializable mapping proxies."""
+
+    if isinstance(value, Mapping):
+        return _FrozenJsonDict({str(key): _freeze_json_value(item) for key, item in value.items()})
+    if isinstance(value, (list, tuple)):
+        return tuple(_freeze_json_value(item) for item in value)
+    if isinstance(value, (set, frozenset)):
+        return tuple(_freeze_json_value(item) for item in value)
     return value
 
 
@@ -127,7 +156,7 @@ class CanonicalToolCall:
     def __post_init__(self) -> None:
         if not self.call_id.strip() or not self.name.strip():
             raise ValueError("canonical tool call requires call_id and name")
-        object.__setattr__(self, "arguments", _freeze_value(self.arguments))
+        object.__setattr__(self, "arguments", _freeze_json_value(self.arguments))
 
 
 @dataclass(frozen=True)

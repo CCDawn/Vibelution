@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from config.settings import AppConfig
 from core.infrastructure.mental_model import (
     active_mental_workspace,
     get_mental_model,
@@ -35,6 +36,22 @@ def _seed_session(project_root: Path, session_id: str = "session-live") -> None:
                 }
             ],
         },
+    )
+
+
+def _allow_session_model_choice(monkeypatch, model_id: str) -> None:
+    monkeypatch.setattr(
+        session_service,
+        "_session_llm_model_choices",
+        lambda: [
+            {
+                "modelId": model_id,
+                "modelRef": model_id,
+                "reasoningEffortValues": [],
+                "reasoningEffortOptions": [],
+                "defaultReasoningEffort": "",
+            }
+        ],
     )
 
 
@@ -177,7 +194,9 @@ def test_run_session_turn_ignores_legacy_profile_and_uses_agent_binding(tmp_path
     base_config.llm.profiles["subagent_explorer"] = base_config.llm.profiles["primary"].model_copy(deep=True)
     base_config.llm.profiles["subagent_explorer"].profile_id = "subagent_explorer"
     base_config.llm.profiles["subagent_explorer"].model = "explorer-model"
+    base_config = AppConfig.model_validate(base_config.model_dump(mode="python"))
     monkeypatch.setattr(session_service, "get_config", lambda: base_config)
+    _allow_session_model_choice(monkeypatch, "agent-dialogue-model")
     monkeypatch.setattr(session_service, "create_chat_agent", ProfileAwareAgent)
     monkeypatch.setattr(session_service, "_schedule_session_turn", lambda context: session_service._run_session_turn(context))
 
@@ -233,7 +252,9 @@ def test_run_session_turn_prefers_agent_instance_profile_over_legacy_profile(tmp
         "streaming": False,
         "tool_calling_mode": "disabled",
     }
+    base_config = AppConfig.model_validate(base_config.model_dump(mode="python"))
     monkeypatch.setattr(session_service, "get_config", lambda: base_config)
+    _allow_session_model_choice(monkeypatch, "model-subagent-explorer")
     monkeypatch.setattr(session_service, "create_chat_agent", ProfileAwareAgent)
     monkeypatch.setattr(session_service, "_schedule_session_turn", lambda context: session_service._run_session_turn(context))
 
@@ -279,7 +300,9 @@ def test_run_session_turn_restores_persisted_llm_key_env_before_agent_create(tmp
         "streaming": False,
         "tool_calling_mode": "disabled",
     }
+    base_config = AppConfig.model_validate(base_config.model_dump(mode="python"))
     monkeypatch.setattr(session_service, "get_config", lambda: base_config)
+    _allow_session_model_choice(monkeypatch, "agent-dialogue-model")
     from config import llm_key_env
 
     monkeypatch.setattr(
@@ -605,3 +628,50 @@ def test_tool_storage_overrides_are_context_local(tmp_path):
         assert (session_workspace / "mental_model" / "self_model.json").exists()
     finally:
         reset_mental_model()
+
+
+def test_source_collection_stage_task_uses_task_specific_checklist_workspace(tmp_path):
+    session_workspace = tmp_path / "workspace" / "sessions" / "session-source-finder"
+    agent_workspace = tmp_path / "workspace" / "agents" / "agent-source-finder"
+    context = {
+        "message_metadata": {
+            "kind": session_service.SOURCE_COLLECTION_STAGE_SESSION_TASK_KIND,
+            "teamId": "research-team",
+            "runId": "run-source-finder",
+            "stageId": "finding",
+            "sourceCollectionStageTaskId": "stagetask-source-finder",
+            "agentId": "agent-source-finder",
+            "agentRole": "source_finder",
+        }
+    }
+
+    task_workspace = session_service._session_task_workspace_for_turn(
+        context,
+        session_workspace=session_workspace,
+        default_workspace=agent_workspace,
+    )
+
+    assert task_workspace == session_workspace / "stage_tasks" / "stagetask-source-finder"
+
+    with session_service._session_tool_workspace_override(
+        agent_workspace,
+        memory_workspace=agent_workspace,
+        task_workspace=task_workspace,
+    ):
+        task_create_tool([{"description": "fresh stage checklist"}], goal="source finder stage")
+
+    task_payload = json.loads((task_workspace / "memory" / "tasks.json").read_text(encoding="utf-8"))
+    assert task_payload["goal"] == "source finder stage"
+    assert not (agent_workspace / "memory" / "tasks.json").exists()
+
+
+def test_non_stage_turn_keeps_default_agent_task_workspace(tmp_path):
+    agent_workspace = tmp_path / "workspace" / "agents" / "agent-chat"
+
+    task_workspace = session_service._session_task_workspace_for_turn(
+        {"message_metadata": {"kind": "ordinary_chat"}},
+        session_workspace=tmp_path / "workspace" / "sessions" / "session-chat",
+        default_workspace=agent_workspace,
+    )
+
+    assert task_workspace == agent_workspace
