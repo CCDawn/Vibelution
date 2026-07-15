@@ -1218,6 +1218,15 @@ type SessionContextMenuState = {
   y: number;
 };
 
+type AgentDirectSessionResetResponse = {
+  agent: AgentInstance;
+  resetSummary: {
+    resetDirectSession?: boolean;
+    previousDirectSessionId?: string;
+    replacementDirectSessionId?: string;
+  };
+};
+
 const CHAT_FEATURE_PRESETS: Array<{
   key: FeaturePresetKey;
   labelKey: TranslationKey;
@@ -3133,6 +3142,60 @@ export function ChatCodingRoute() {
         [variables.sessionId]: describeError(error, t("deleteSessionFailed")),
       }));
       void chatWorkspaceCache.refreshSessionRuntime(variables.sessionId);
+    },
+  });
+
+  const clearSessionHistoryMutation = useMutation({
+    mutationFn: async ({ agentId }: { sessionId: string; agentId: string }) =>
+      fetchJson<AgentDirectSessionResetResponse>(`/api/agents/${encodeURIComponent(agentId)}/reset`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          clearRuntimeState: false,
+          resetDirectSession: true,
+          resetPersonaProfile: false,
+          resetTaskProfile: false,
+          resetToolPolicy: false,
+          resetMemoryPolicy: false,
+          resetRuntimePolicy: false,
+        }),
+      }),
+    onSuccess: (result, variables) => {
+      const previousDirectSessionId = String(
+        result.resetSummary.previousDirectSessionId || variables.sessionId,
+      ).trim();
+      const replacementDirectSessionId = String(result.resetSummary.replacementDirectSessionId || "").trim();
+      if (!result.resetSummary.resetDirectSession || !replacementDirectSessionId) {
+        setSessionComposerErrors((current) => ({
+          ...current,
+          [variables.sessionId]: t("clearSessionHistoryFailed"),
+        }));
+        void chatWorkspaceCache.afterChatWorkspaceReset();
+        return;
+      }
+      if (previousDirectSessionId) {
+        clearSessionTransientUiState(previousDirectSessionId);
+        queryClient.removeQueries({ queryKey: queryKeys.session(previousDirectSessionId), exact: true });
+        removeSessionWorkspace(previousDirectSessionId, replacementDirectSessionId);
+      }
+      queryClient.setQueryData<AgentInstance[]>(queryKeys.agents(), (agents) =>
+        agents?.map((agent) => (agent.agentId === result.agent.agentId ? result.agent : agent)),
+      );
+      setActiveSession(replacementDirectSessionId);
+      setSessionComposerErrors((current) => ({
+        ...current,
+        [variables.sessionId]: "",
+        [replacementDirectSessionId]: "",
+        __sessions__: "",
+      }));
+      void chatWorkspaceCache.afterChatWorkspaceReset();
+    },
+    onError: (error, variables) => {
+      setSessionComposerErrors((current) => ({
+        ...current,
+        [variables.sessionId]: describeError(error, t("clearSessionHistoryFailed")),
+      }));
+      void chatWorkspaceCache.afterChatWorkspaceReset();
     },
   });
 
@@ -6178,6 +6241,32 @@ export function ChatCodingRoute() {
     deleteSessionMutation.mutate({ sessionId: session.id });
   }
 
+  function handleClearSessionHistory(session: SessionSummary) {
+    setSessionContextMenu(null);
+    if (!session.agentId || !isAgentRootSession(session)) {
+      return;
+    }
+    if (isBusyPhase(session.currentPhase || session.status)) {
+      setSessionComposerErrors((current) => ({
+        ...current,
+        [session.id]: t("clearSessionHistoryBusy"),
+        __sessions__: "",
+      }));
+      return;
+    }
+    const sessionTitle = (session.agentDisplayName || session.title || session.id).trim();
+    const confirmMessage = t("clearSessionHistoryConfirm").replace("{title}", sessionTitle || session.id);
+    if (!window.confirm(confirmMessage)) {
+      return;
+    }
+    setSessionComposerErrors((current) => ({
+      ...current,
+      [session.id]: "",
+      __sessions__: "",
+    }));
+    clearSessionHistoryMutation.mutate({ sessionId: session.id, agentId: session.agentId });
+  }
+
   function handleAddSessionToReview(session: SessionSummary) {
     setSessionContextMenu(null);
     if (isBusyPhase(session.currentPhase || session.status)) {
@@ -6383,8 +6472,18 @@ export function ChatCodingRoute() {
     && addSessionToReviewMutation.isPending
     && addSessionToReviewMutation.variables?.sessionId === contextMenuSession.id,
   );
+  const contextMenuClearHistoryPending = Boolean(
+    contextMenuSession
+    && clearSessionHistoryMutation.isPending
+    && clearSessionHistoryMutation.variables?.sessionId === contextMenuSession.id
+  );
+  const contextMenuClearHistoryVisible = Boolean(
+    contextMenuSession?.agentId
+    && isAgentRootSession(contextMenuSession)
+  );
   const contextMenuDeleteDisabled = contextMenuDeletePending || contextMenuSessionIsBusy;
   const contextMenuAddToReviewDisabled = contextMenuAddToReviewPending || contextMenuSessionIsBusy;
+  const contextMenuClearHistoryDisabled = contextMenuClearHistoryPending || contextMenuSessionIsBusy;
   const conversationIndexPanel = (
     <>
       {sessionComposerErrors.__sessions__ ? (
@@ -6474,12 +6573,16 @@ export function ChatCodingRoute() {
             <SessionContextMenu
               addToReviewDisabled={contextMenuAddToReviewDisabled}
               addToReviewPending={contextMenuAddToReviewPending}
+              clearHistoryDisabled={contextMenuClearHistoryDisabled}
+              clearHistoryPending={contextMenuClearHistoryPending}
+              clearHistoryVisible={contextMenuClearHistoryVisible}
               deleteDisabled={contextMenuDeleteDisabled}
               lang={lang}
               position={sessionContextMenu}
               session={contextMenuSession}
               t={t}
               onAddToReview={handleAddSessionToReview}
+              onClearHistory={handleClearSessionHistory}
               onDelete={handleDeleteSession}
               onOpenAgentConfig={openSessionAgentConfig}
               onRename={beginRenameSession}

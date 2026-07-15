@@ -2731,6 +2731,28 @@ describe("ChatCodingRoute layout contract", () => {
     );
   });
 
+  it("reuses the Agent direct-session reset contract for quick history clearing", () => {
+    const clearMutationSource = routeSource.slice(
+      routeSource.indexOf("const clearSessionHistoryMutation"),
+      routeSource.indexOf("const renameSessionMutation"),
+    );
+    expect(clearMutationSource).toContain("/api/agents/${encodeURIComponent(agentId)}/reset");
+    expect(clearMutationSource).toContain("clearRuntimeState: false");
+    expect(clearMutationSource).toContain("resetDirectSession: true");
+    expect(clearMutationSource).toContain("resetPersonaProfile: false");
+    expect(clearMutationSource).toContain("resetTaskProfile: false");
+    expect(clearMutationSource).toContain("resetToolPolicy: false");
+    expect(clearMutationSource).toContain("resetMemoryPolicy: false");
+    expect(clearMutationSource).toContain("resetRuntimePolicy: false");
+    expect(clearMutationSource).toContain("removeSessionWorkspace(previousDirectSessionId, replacementDirectSessionId)");
+    expect(clearMutationSource).toContain("setActiveSession(replacementDirectSessionId)");
+    expect(clearMutationSource).toContain("chatWorkspaceCache.afterChatWorkspaceReset()");
+    expect(routeSource).toContain("t(\"clearSessionHistoryConfirm\").replace(\"{title}\"");
+    expect(routeSource).toContain("clearSessionHistoryMutation.mutate({ sessionId: session.id, agentId: session.agentId })");
+    expect(routeSource).toContain("contextMenuSession?.agentId");
+    expect(routeSource).toContain("isAgentRootSession(contextMenuSession)");
+  });
+
   it("removes deleted direct sessions from cached lists before refetch", () => {
     const deleteMutationSource = routeSource.slice(routeSource.indexOf("const deleteSessionMutation"));
     expect(routeSource).toContain("removeDeletedSessionFromConversations");

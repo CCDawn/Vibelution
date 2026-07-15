@@ -1,4 +1,4 @@
-import { BookPlus, Pencil, Settings2, Trash2 } from "lucide-react";
+import { BookPlus, Eraser, Pencil, Settings2, Trash2 } from "lucide-react";
 import type { CSSProperties, PointerEvent } from "react";
 
 import type { SessionSummary } from "../api/types";
@@ -7,7 +7,7 @@ import type { TranslationKey } from "../i18n/dictionary";
 import styles from "./SessionContextMenu.styles";
 
 const MENU_WIDTH = 188;
-const MENU_HEIGHT = 164;
+const MENU_HEIGHT = 204;
 const MENU_MARGIN = 12;
 
 export type SessionContextMenuPosition = {
@@ -34,12 +34,16 @@ export function sessionContextMenuStyle(
 type SessionContextMenuProps = {
   addToReviewDisabled: boolean;
   addToReviewPending: boolean;
+  clearHistoryDisabled: boolean;
+  clearHistoryPending: boolean;
+  clearHistoryVisible: boolean;
   deleteDisabled: boolean;
   lang: "zh" | "en";
   position: SessionContextMenuPosition;
   session: SessionSummary;
   t: (key: TranslationKey) => string;
   onAddToReview: (session: SessionSummary) => void;
+  onClearHistory: (session: SessionSummary) => void;
   onDelete: (session: SessionSummary) => void;
   onOpenAgentConfig?: (session: SessionSummary) => void;
   onRename: (session: SessionSummary) => void;
@@ -52,12 +56,16 @@ function sessionContextMenuIdPart(value: string): string {
 export function SessionContextMenu({
   addToReviewDisabled,
   addToReviewPending,
+  clearHistoryDisabled,
+  clearHistoryPending,
+  clearHistoryVisible,
   deleteDisabled,
   lang,
   position,
   session,
   t,
   onAddToReview,
+  onClearHistory,
   onDelete,
   onOpenAgentConfig,
   onRename,
@@ -79,6 +87,14 @@ export function SessionContextMenu({
   const deleteDescriptionId = deleteDisabled
     ? `session-context-menu-${idPart}-delete-reason`
     : undefined;
+  const clearHistoryTitle = clearHistoryPending
+    ? t("clearingSessionHistory")
+    : clearHistoryDisabled
+      ? t("clearSessionHistoryBusy")
+      : t("clearSessionHistory");
+  const clearHistoryDescriptionId = clearHistoryDisabled
+    ? `session-context-menu-${idPart}-clear-history-reason`
+    : undefined;
 
   function stopPointerPropagation(event: PointerEvent<HTMLDivElement>) {
     event.stopPropagation();
@@ -90,7 +106,7 @@ export function SessionContextMenu({
       style={style}
       role="menu"
       aria-label={lang === "zh" ? "会话操作" : "Session actions"}
-      aria-busy={addToReviewPending ? true : undefined}
+      aria-busy={addToReviewPending || clearHistoryPending ? true : undefined}
       aria-orientation="vertical"
       onPointerDown={stopPointerPropagation}
     >
@@ -102,6 +118,11 @@ export function SessionContextMenu({
       {deleteDescriptionId ? (
         <span id={deleteDescriptionId} className="sr-only">
           {deleteTitle}
+        </span>
+      ) : null}
+      {clearHistoryDescriptionId ? (
+        <span id={clearHistoryDescriptionId} className="sr-only">
+          {clearHistoryTitle}
         </span>
       ) : null}
       <VButton
@@ -136,6 +157,21 @@ export function SessionContextMenu({
           title={lang === "zh" ? "打开当前 Agent 配置" : "Open current Agent configuration"}
         >
           {lang === "zh" ? "打开 Agent 配置" : "Open Agent config"}
+        </VButton>
+      ) : null}
+      {clearHistoryVisible ? (
+        <VButton
+          type="button"
+          role="menuitem"
+          className={styles.sessionContextMenuItem}
+          onPress={() => onClearHistory(session)}
+          isDisabled={clearHistoryDisabled}
+          aria-describedby={clearHistoryDescriptionId}
+          aria-disabled={clearHistoryDisabled ? true : undefined}
+          icon={<Eraser size={14} />}
+          title={clearHistoryTitle}
+        >
+          {clearHistoryPending ? t("clearingSessionHistory") : t("clearSessionHistory")}
         </VButton>
       ) : null}
       <VButton

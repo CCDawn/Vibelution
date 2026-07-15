@@ -13,6 +13,9 @@ function t(key: string) {
     addingSessionToReview: "添加中",
     deleteSession: "移除会话记录",
     deleteSessionBusy: "会话运行中，先停止后再删除",
+    clearSessionHistory: "清空会话内容",
+    clearingSessionHistory: "清空中...",
+    clearSessionHistoryBusy: "会话运行中，先停止后再清空",
     renameSession: "重命名",
   };
   return labels[key] ?? key;
@@ -44,12 +47,16 @@ describe("SessionContextMenu", () => {
       <SessionContextMenu
         addToReviewDisabled={false}
         addToReviewPending={false}
+        clearHistoryDisabled={false}
+        clearHistoryPending={false}
+        clearHistoryVisible={false}
         deleteDisabled={false}
         lang="zh"
         position={{ x: 24, y: 32 }}
         session={session()}
         t={t}
         onAddToReview={() => undefined}
+        onClearHistory={() => undefined}
         onDelete={() => undefined}
         onRename={() => undefined}
       />,
@@ -71,12 +78,16 @@ describe("SessionContextMenu", () => {
       <SessionContextMenu
         addToReviewDisabled={false}
         addToReviewPending={false}
+        clearHistoryDisabled={false}
+        clearHistoryPending={false}
+        clearHistoryVisible
         deleteDisabled={false}
         lang="zh"
         position={{ x: 24, y: 32 }}
         session={agentSession()}
         t={t}
         onAddToReview={() => undefined}
+        onClearHistory={() => undefined}
         onDelete={() => undefined}
         onOpenAgentConfig={() => undefined}
         onRename={() => undefined}
@@ -85,6 +96,8 @@ describe("SessionContextMenu", () => {
 
     expect(markup).toContain("打开 Agent 配置");
     expect(markup).toContain("title=\"打开当前 Agent 配置\"");
+    expect(markup).toContain("清空会话内容");
+    expect(markup.match(/data-vui="button"/g)?.length).toBe(5);
   });
 
   it("shows pending and busy states without changing the menu structure", () => {
@@ -92,12 +105,16 @@ describe("SessionContextMenu", () => {
       <SessionContextMenu
         addToReviewDisabled
         addToReviewPending
+        clearHistoryDisabled
+        clearHistoryPending
+        clearHistoryVisible
         deleteDisabled
         lang="en"
         position={{ x: 24, y: 32 }}
         session={session()}
         t={t}
         onAddToReview={() => undefined}
+        onClearHistory={() => undefined}
         onDelete={() => undefined}
         onRename={() => undefined}
       />,
@@ -106,20 +123,23 @@ describe("SessionContextMenu", () => {
     expect(markup).toContain("aria-label=\"Session actions\"");
     expect(markup).toContain("添加中");
     expect(markup).toContain("aria-busy=\"true\"");
-    expect(markup.match(/aria-disabled="true"/g)?.length).toBe(2);
+    expect(markup.match(/aria-disabled="true"/g)?.length).toBe(3);
     expect(markup).toContain("id=\"session-context-menu-session-1-add-to-review-reason\"");
     expect(markup).toContain("aria-describedby=\"session-context-menu-session-1-add-to-review-reason\"");
     expect(markup).toContain("id=\"session-context-menu-session-1-delete-reason\"");
     expect(markup).toContain("aria-describedby=\"session-context-menu-session-1-delete-reason\"");
-    expect(markup.match(/class=\"sr-only\"/g)?.length).toBe(2);
+    expect(markup).toContain("id=\"session-context-menu-session-1-clear-history-reason\"");
+    expect(markup).toContain("aria-describedby=\"session-context-menu-session-1-clear-history-reason\"");
+    expect(markup.match(/class=\"sr-only\"/g)?.length).toBe(3);
     expect(markup).toContain("title=\"会话运行中，先停止后再删除\"");
-    expect(markup.match(/disabled=""/g)?.length).toBe(2);
+    expect(markup).toContain("title=\"清空中...\"");
+    expect(markup.match(/disabled=""/g)?.length).toBe(3);
   });
 
   it("clamps the menu inside the visible viewport", () => {
     expect(sessionContextMenuStyle({ x: 900, y: 700 }, { width: 960, height: 720 })).toEqual({
       left: 772,
-      top: 556,
+      top: 516,
     });
     expect(sessionContextMenuStyle({ x: 24, y: 32 }, undefined)).toEqual({
       left: 24,
