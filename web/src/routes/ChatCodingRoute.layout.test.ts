@@ -525,9 +525,9 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.resizeHandleActive).toContain("before:shadow");
   });
 
-  it("centers the direct conversation reading track when both side panes are collapsed", () => {
-    expect(routeSource).toContain("const bothSidePanesCollapsed = conversationIndexCollapsed && statusRailCollapsed;");
-    expect(routeSource).toContain("conversationFocused={bothSidePanesCollapsed}");
+  it("centers the direct conversation reading track whenever the optional status rail is closed", () => {
+    expect(routeSource).toContain('data-chat-status-rail={statusRailCollapsed ? "collapsed" : "visible"}');
+    expect(routeSource).toContain("conversationFocused={statusRailCollapsed}");
     expect(chatSessionWorkspacePanelSource).toContain("conversationFocused");
     expect(chatSessionWorkspacePanelSource).toContain("styles.conversationFrameFocus");
     expect(chatSessionWorkspacePanelStyles.conversationFrameFocus).toBeTypeOf("string");
@@ -535,6 +535,12 @@ describe("ChatCodingRoute layout contract", () => {
     expect(chatSessionWorkspacePanelStyles.conversationFrameFocus).toContain("w-[min(calc(100%_-_48px),1480px)]");
     expect(chatSessionWorkspacePanelStyles.conversationFrameFocus).toContain("max-w-full");
     expect(chatSessionWorkspacePanelStyles.conversationFrameFocus).toContain("max-[980px]:w-full");
+  });
+
+  it("reclaims the status rail grid track on wide desktops while retaining the conversation index", () => {
+    expect(routeSource).toContain("responsiveLayout.mode === \"wide\" && statusRailCollapsed ? styles.layoutStatusRailCollapsed : \"\"");
+    expect(routeSource).toContain("className={chatLayoutClassName}");
+    expect(routeStyles.layoutStatusRailCollapsed).toContain("!grid-cols-[var(--chat-left-pane-width,300px)_var(--chat-pane-gutter)_minmax(0,1fr)]");
   });
 
   it("defaults Chat to a wider left conversation column and narrower right status rail", () => {
