@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from core.research.evidence import ClaimEvidenceStore
+from core.research.question_tree import ResearchQuestionTreeStore
 
 from . import team_service
 
@@ -89,8 +90,43 @@ def reconcile_claim_evidence_source(team_id: str, payload: dict[str, Any]) -> di
     }
 
 
+def create_research_question_tree(team_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    team = team_service.get_team(team_id)
+    tree = _question_tree_store().create(
+        team_id,
+        research_question=str(payload.get("researchQuestion") or ""),
+        created_by_agent=str(payload.get("createdByAgent") or ""),
+        custom_perspectives=list(payload.get("customPerspectives") or []),
+    )
+    return {
+        "schemaVersion": 1,
+        "team": _team_ref(team),
+        "questionTree": tree,
+        "boundaries": tree["boundaries"],
+    }
+
+
+def list_research_question_trees(team_id: str) -> dict[str, Any]:
+    team = team_service.get_team(team_id)
+    trees = _question_tree_store().list(team_id)
+    return {
+        "schemaVersion": 1,
+        "team": _team_ref(team),
+        "questionTrees": trees,
+        "summary": {"count": len(trees)},
+        "boundaries": {
+            "externalSearchTriggered": False,
+            "writesFormalKnowledge": False,
+        },
+    }
+
+
 def _store() -> ClaimEvidenceStore:
     return ClaimEvidenceStore(Path(PROJECT_ROOT))
+
+
+def _question_tree_store() -> ResearchQuestionTreeStore:
+    return ResearchQuestionTreeStore(Path(PROJECT_ROOT))
 
 
 def _team_ref(team: dict[str, Any]) -> dict[str, str]:

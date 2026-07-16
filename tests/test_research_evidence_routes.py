@@ -91,3 +91,26 @@ def test_research_evidence_routes_reject_invalid_or_missing_team(tmp_path, monke
     assert missing.status_code == 404
     assert invalid.status_code == 422
     assert "sourceRevision" in invalid.text
+
+
+def test_research_question_tree_routes_create_and_list(tmp_path, monkeypatch):
+    monkeypatch.setattr(team_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(research_evidence_service, "PROJECT_ROOT", tmp_path)
+    client = _client()
+    team = client.post("/api/teams", json={"name": "科研问题树团队"}).json()
+    team_id = team["teamId"]
+
+    created = client.post(
+        f"/api/teams/{team_id}/research-question-trees",
+        json={
+            "researchQuestion": "Can predictive coding improve masked reconstruction?",
+            "createdByAgent": "agent-source-finder",
+        },
+    )
+    listed = client.get(f"/api/teams/{team_id}/research-question-trees")
+
+    assert created.status_code == 201, created.text
+    assert created.json()["questionTree"]["coverage"]["requiredPerspectiveCoverage"] == 1.0
+    assert created.json()["boundaries"]["externalSearchTriggered"] is False
+    assert listed.status_code == 200, listed.text
+    assert listed.json()["summary"]["count"] == 1
