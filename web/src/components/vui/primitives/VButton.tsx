@@ -95,7 +95,7 @@ export function VButton({
 }: VButtonProps) {
   const tooltipContent = props.isDisabled && disabledReason ? disabledReason : tooltip ?? title;
   const hasTooltip = tooltipContent !== undefined && tooltipContent !== null && tooltipContent !== "";
-  const titleProps = title && !hasTooltip ? ({ title } as Record<string, string>) : undefined;
+  const titleProps = title ? ({ title } as Record<string, string>) : undefined;
   const isIconOnly = Boolean(props.isIconOnly);
 
   const button = (
@@ -122,7 +122,7 @@ export function VButton({
       ) : (
         <span
           data-slot="vui-button-content"
-          title={hasTooltip ? undefined : title}
+          title={title}
           className="inline-flex min-w-0 max-w-full items-center justify-center gap-1.5"
         >
           {icon ? (
