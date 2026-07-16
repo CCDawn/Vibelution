@@ -19371,38 +19371,37 @@ def _source_collection_stage_evidence_retry_focus(
 ) -> dict[str, Any]:
     if not isinstance(task, dict) or not task:
         return {}
-    writeback = task.get("writeback") if isinstance(task.get("writeback"), dict) else {}
-    materialized = (
-        writeback.get("materializedContentExtraction")
-        if isinstance(writeback.get("materializedContentExtraction"), dict)
-        else {}
-    )
-    missing_anchor_count = _source_collection_count(materialized.get("missingEvidenceAnchorCount"))
     coverage = _source_collection_stage_task_coverage_summary(task)
     blocked_ids = set(
         _normalize_text_list(coverage.get("blockedCandidateIds"), max_items=500, max_length=160)
         if isinstance(coverage, dict)
         else []
     )
-    explicit_gap_ids: list[str] = []
+    evidence_gap_ids: list[str] = []
     for candidate in candidates:
         candidate_id = _trim_text(candidate.get("candidateId"), max_length=160)
         metadata = candidate.get("metadata") if isinstance(candidate.get("metadata"), dict) else {}
         extraction = metadata.get("contentExtraction") if isinstance(metadata.get("contentExtraction"), dict) else {}
-        if candidate_id and _trim_text(extraction.get("evidenceStatus"), max_length=80) == "missing_evidence_anchor":
-            explicit_gap_ids.append(candidate_id)
-    evidence_gap_ids = explicit_gap_ids or [
-        _trim_text(item.get("candidateId"), max_length=160)
-        for item in candidates
-        if _trim_text(item.get("candidateId"), max_length=160) in blocked_ids
-    ]
+        evidence_ledger = (
+            extraction.get("evidenceLedger")
+            if isinstance(extraction.get("evidenceLedger"), dict)
+            else {}
+        )
+        evidence_ready = (
+            _trim_text(extraction.get("evidenceStatus"), max_length=80) == "evidence_ready"
+            or _trim_text(evidence_ledger.get("status"), max_length=80) == "evidence_ready"
+            or _source_collection_extraction_has_evidence_anchor(extraction)
+            or _source_collection_extraction_has_evidence_anchor(evidence_ledger)
+        )
+        explicit_gap = _trim_text(extraction.get("evidenceStatus"), max_length=80) == "missing_evidence_anchor"
+        if candidate_id and not evidence_ready and (explicit_gap or candidate_id in blocked_ids):
+            evidence_gap_ids.append(candidate_id)
     if not evidence_gap_ids:
         return {}
-    missing_anchor_count = missing_anchor_count or len(evidence_gap_ids)
     return {
         "mode": "missing_evidence_anchor",
         "sourceTaskId": _trim_text(task.get("taskId"), max_length=160),
-        "missingEvidenceAnchorCount": missing_anchor_count,
+        "missingEvidenceAnchorCount": len(evidence_gap_ids),
         "evidenceGapCandidateIds": evidence_gap_ids[:120],
         "retryInstruction": "只补这些候选的证据锚点；不要重做已有 evidence_ready 结果，也不要把摘要元数据写成全文证据。",
     }

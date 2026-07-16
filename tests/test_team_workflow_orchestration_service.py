@@ -4650,6 +4650,7 @@ def test_source_collection_context_retry_evidence_returns_only_missing_anchor_ca
     assert retry_context["fieldMode"] == "evidence_source"
     assert [item["candidateId"] for item in retry_context["candidates"]] == [candidates[1]["candidateId"]]
     assert retry_context["retryFocus"]["evidenceGapCandidateIds"] == [candidates[1]["candidateId"]]
+    assert retry_context["retryFocus"]["missingEvidenceAnchorCount"] == 1
     assert retry_context["candidates"][0]["evidenceRefs"] == [
         {
             "type": "doi",
@@ -4693,6 +4694,36 @@ def test_source_collection_context_retry_evidence_returns_only_missing_anchor_ca
     )
     assert authoritative_context["contextMode"] == "retry_evidence"
     assert [item["candidateId"] for item in authoritative_context["candidates"]] == [candidates[1]["candidateId"]]
+
+    team_workflow_orchestration_service.writeback_source_collection_stage_session_task(
+        team["teamId"],
+        retry_task["taskId"],
+        {
+            "status": "needs_review",
+            "summary": "已为剩余候选补入受控 DOI 锚点。",
+            "result": {
+                "candidateExtractions": [
+                    {
+                        "candidateId": candidates[1]["candidateId"],
+                        "decision": "needs_more_info",
+                        "summary": "仅登记 DOI 元数据，不扩展全文结论。",
+                        "evidenceRefs": [{"type": "doi", "id": "10.0000/retry-evidence-1"}],
+                    }
+                ]
+            },
+            "recordedByAgent": agent["agentId"],
+        },
+    )
+    completed_retry_context = team_workflow_orchestration_service.get_source_collection_stage_task_context(
+        team["teamId"],
+        task_id=retry_task["taskId"],
+        candidate_limit=5,
+        context_mode="retry_evidence",
+    )
+
+    assert completed_retry_context["candidatePage"]["total"] == 0
+    assert completed_retry_context["candidates"] == []
+    assert completed_retry_context.get("retryFocus") in (None, {})
 
 
 def test_source_collection_extraction_resume_after_interrupted_reading_prioritizes_writeback(tmp_path, monkeypatch):
