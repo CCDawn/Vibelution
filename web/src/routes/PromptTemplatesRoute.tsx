@@ -18,6 +18,7 @@ import {
   VStatusChip,
   VStatusStrip,
   VSurface,
+  VTooltip,
 } from "../components/vui";
 import { useShellI18n } from "../i18n/useShellI18n";
 import { AgentManagementNav } from "./AgentManagementNav";
@@ -503,7 +504,7 @@ export function PromptTemplatesRoute() {
         actions={(
           <div className={styles.headerActionsClass}>
             {returnToPath ? (
-              <Link className={styles.returnButtonClass} to={returnToPath} title={copy.returnToAgents}>
+              <Link className={styles.returnButtonClass} to={returnToPath}>
                 <ArrowLeft size={15} />
                 <span>{copy.returnToAgents}</span>
               </Link>
@@ -572,6 +573,7 @@ export function PromptTemplatesRoute() {
               className={styles.secondaryButtonClass}
               icon={allVisibleTemplatesSelected ? <Square size={14} /> : <CheckSquare size={14} />}
               isDisabled={!filteredTemplates.length || bulkPromptPending}
+              disabledReason={bulkPromptPending ? copy.bulkWorking : copy.emptyList}
               onPress={allVisibleTemplatesSelected ? clearSelectedTemplates : selectVisibleTemplates}
             >
               {allVisibleTemplatesSelected ? copy.bulkClear : copy.bulkSelectVisible}
@@ -592,6 +594,7 @@ export function PromptTemplatesRoute() {
               className={styles.primaryButtonClass}
               icon={<CheckCircle2 size={14} />}
               isDisabled={!selectedTemplates.length || bulkPromptPending}
+              disabledReason={bulkPromptPending ? copy.bulkWorking : copy.bulkNoSelection}
               onPress={() => bulkPatchTemplates({ category: bulkCategory }, copy.bulkCategoryResult)}
             >
               {bulkPromptPending ? copy.bulkWorking : copy.bulkApplyCategory}
@@ -601,6 +604,7 @@ export function PromptTemplatesRoute() {
               className={styles.secondaryButtonClass}
               icon={<RotateCcw size={14} />}
               isDisabled={!selectedTemplates.length || bulkPromptPending}
+              disabledReason={bulkPromptPending ? copy.bulkWorking : copy.bulkNoSelection}
               onPress={bulkResetTemplates}
             >
               {bulkPromptPending ? copy.bulkWorking : copy.bulkReset}
@@ -610,6 +614,7 @@ export function PromptTemplatesRoute() {
               className={styles.secondaryButtonClass}
               icon={<Archive size={14} />}
               isDisabled={!selectedTemplates.length || bulkPromptPending}
+              disabledReason={bulkPromptPending ? copy.bulkWorking : copy.bulkNoSelection}
               onPress={() => bulkPatchTemplates({ status: "inactive" }, copy.bulkDeactivateResult)}
             >
               {bulkPromptPending ? copy.bulkWorking : copy.bulkDeactivate}
@@ -631,16 +636,18 @@ export function PromptTemplatesRoute() {
                   || Boolean(linkedAgentId && agentsByTemplate.get(template.promptTemplateId)?.some((agent) => agent.agentId === linkedAgentId));
                 return (
                   <div key={template.promptTemplateId} className={`${styles.selectableRowClass} ${linkedTarget ? styles.selectableRowLinkedClass : ""}`}>
-                    <label className={`${styles.rowSelectClass} ${linkedTarget ? styles.linkedBorderClass : ""}`} title={`${copy.bulkSelected}: ${template.name || template.promptTemplateId}`}>
-                      <VNativeInput
-                        className={styles.hiddenCheckboxClass}
-                        type="checkbox"
-                        checked={selected}
-                        aria-label={`${copy.bulkSelected}: ${template.name || template.promptTemplateId}`}
-                        onChange={(event) => toggleTemplateSelection(template.promptTemplateId, event.target.checked)}
-                      />
-                      {selected ? <CheckSquare size={15} /> : <Square size={15} />}
-                    </label>
+                    <VTooltip content={`${copy.bulkSelected}: ${template.name || template.promptTemplateId}`} width="compact">
+                      <label className={`${styles.rowSelectClass} ${linkedTarget ? styles.linkedBorderClass : ""}`}>
+                        <VNativeInput
+                          className={styles.hiddenCheckboxClass}
+                          type="checkbox"
+                          checked={selected}
+                          aria-label={`${copy.bulkSelected}: ${template.name || template.promptTemplateId}`}
+                          onChange={(event) => toggleTemplateSelection(template.promptTemplateId, event.target.checked)}
+                        />
+                        {selected ? <CheckSquare size={15} /> : <Square size={15} />}
+                      </label>
+                    </VTooltip>
                     <VButton
                       type="button"
                       className={[
@@ -747,7 +754,6 @@ export function PromptTemplatesRoute() {
               </div>
 
               <div className={styles.actionsClass}>
-                <p className={styles.helperTextClass}>{copy.snapshotNotice}</p>
                 {notice ? <p className={styles.noticeClass}>{notice}</p> : null}
                 {saveMutation.error ? <p className={styles.errorTextClass}>{errorMessage(saveMutation.error)}</p> : null}
                 {resetMutation.error ? <p className={styles.errorTextClass}>{errorMessage(resetMutation.error)}</p> : null}
@@ -756,6 +762,8 @@ export function PromptTemplatesRoute() {
                   className={styles.secondaryButtonClass}
                   icon={<RotateCcw size={15} />}
                   isDisabled={busy || !hasDefault}
+                  disabledReason={busy ? copy.bulkWorking : copy.resetUnavailable}
+                  tooltip={copy.snapshotNotice}
                   onPress={() => resetMutation.mutate(editor.templateId)}
                 >
                   {copy.reset}
@@ -765,6 +773,8 @@ export function PromptTemplatesRoute() {
                   className={styles.primaryButtonClass}
                   icon={<Save size={15} />}
                   isDisabled={busy}
+                  disabledReason={copy.saving}
+                  tooltip={copy.snapshotNotice}
                   onPress={() => saveMutation.mutate(editor)}
                 >
                   {busy ? copy.saving : copy.save}

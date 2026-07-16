@@ -127,23 +127,26 @@ describe("LauncherRoute layout contract", () => {
     expect(routeSource).toContain("const startDisabledReason = launcherStatusDisconnected");
     expect(routeSource).toContain("startDisabledReason");
     expect(routeSource).toContain("startDisabledBusy");
-    expect(routeSource).toContain("title={startDisabled ? startDisabledReason : copy.start}");
-    expect(routeSource).toContain("projectIsClosed\n        ? copy.noActiveWork\n      : copy.restartClear");
+    expect(routeSource).toContain("disabledReason={startDisabledReason}");
+    expect(routeSource).toContain("tooltip={copy.start}");
     expect(routeSource).toContain("const destructiveActionDisabled = busy || !controlPlaneIdle || activeWorkCount > 0 || projectIsChanging || projectIsClosed");
     expect(routeSource).toContain("lifecycleActionDisabledActiveWork");
     expect(routeSource).toContain("const stopDisabled = destructiveActionDisabled || closeCommandInFlight");
     expect(routeSource).toContain("const stopDisabledReason = projectIsClosed");
     expect(routeSource).toContain("stopDisabledClosed");
     expect(routeSource).toContain("stopDisabledInFlight");
-    expect(routeSource).toContain("title={stopDisabled ? stopDisabledReason : copy.stop}");
-    expect(routeSource).toContain("title={destructiveActionDisabled ? destructiveActionDisabledReason : copy.restart}");
+    expect(routeSource).toContain("disabledReason={stopDisabledReason}");
+    expect(routeSource).toContain("disabledReason={destructiveActionDisabledReason}");
+    expect(routeSource).toContain("tooltip={copy.stop}");
+    expect(routeSource).toContain("tooltip={copy.restart}");
     expect(routeSource).toContain("restartDisabledClosed");
     expect(routeSource).toContain("actionsStartOnly");
     expect(routeSource).toContain("controlPlaneHasCommandType(evidence, [\"close_workbench\", \"force_close_workbench\"])");
     expect(routeSource).toContain("const forceStopDisabled = busy || projectIsClosed || closeCommandInFlight");
     expect(routeSource).toContain("forceStopDisabledReason");
     expect(routeSource).toContain("forceStopDisabledInFlight");
-    expect(routeSource).toContain("title={forceStopDisabled ? forceStopDisabledReason : copy.forceStop}");
+    expect(routeSource).toContain("disabledReason={forceStopDisabledReason}");
+    expect(routeSource).toContain("tooltip={copy.forceStopHint}");
   });
 
   it("renders a dense lifecycle console rather than a landing page", () => {
@@ -250,7 +253,7 @@ describe("LauncherRoute layout contract", () => {
     expect(routeSource).toContain("advancedDetails");
     expect(routeSource).toContain("advancedDiagnostics");
     expect(routeSource).toContain("internalMigrationDetails");
-    expect(routeSource).toContain("title={row.technical}");
+    expect(routeSource).toContain("<VTooltip key={row.id} content={row.technical} width=\"wide\">");
     expect(routeSource).not.toContain("部分接管");
     expect(routeSource).not.toContain("Partially owned");
     expect(routeSource).not.toContain("<span role=\"columnheader\">{copy.pid}</span>");
@@ -265,20 +268,20 @@ describe("LauncherRoute layout contract", () => {
     expect(routeSource).toContain("backendPortUnavailableSummary");
     expect(routeSource).toContain("technicalDetailAvailable");
     expect(routeSource).toContain("lifecycleDetailShort");
-    expect(routeSource).toContain("userGuideDetailShort");
     expect(routeSource).toContain("noticeTextShort");
     expect(routeSource).toContain("helperTitle={lifecycleDisplay.detail}");
     expect(routeSource).toContain("aria-label={lifecycleDisplay.detail || copy.subtitle}");
-    expect(routeSource).toContain("title={notice.text}");
-    expect(routeSource).toContain("title={row.technical}");
+    expect(routeSource).toContain("<VTooltip content={notice.text}");
+    expect(routeSource).toContain("<VTooltip key={row.id} content={row.technical} width=\"wide\">");
     expect(routeSource).not.toContain("<p className={styles.subtitle}>{lifecycleDisplay.detail || copy.subtitle}</p>");
     expect(routeSource).not.toContain("<small>{userGuideDetail}</small>");
     expect(routeSource).not.toContain("{notice.text !== noticeTextShort ? <span>{copy.technicalDetailAvailable}</span> : null}");
   });
 
-  it("keeps guidance terse while preserving detail in hover titles", () => {
-    expect(routeSource).toContain('className={styles.userGuide} data-tone={userGuideTone} title={userGuideDetail}');
-    expect(routeSource).not.toContain("<small title={userGuideDetail}>{userGuideDetailShort}</small>");
+  it("keeps guidance terse while preserving detail in the shared hover surface", () => {
+    expect(routeSource).toContain('<VTooltip content={userGuideDetail}');
+    expect(routeSource).toContain('className={styles.userGuide} data-tone={userGuideTone} tabIndex={0}');
+    expect(routeSource).not.toContain('title={userGuideDetail}');
     expect(routeStylesSource).toContain("userGuide:");
     expect(routeStylesSource).toContain("overflow-wrap-anywhere");
     expect(routeStylesSource).toContain("whitespace-normal");
@@ -487,13 +490,13 @@ describe("LauncherRoute layout contract", () => {
     expect(routeSource).toContain("lifecycleControls");
     expect(routeSource).toContain("const statusBarBlockerReason =");
     expect(routeSource).toContain("const statusBarReasonText =");
-    expect(routeSource).toContain("title={statusBarBlockerReason}");
+    expect(routeSource).toContain('<VTooltip content={statusBarBlockerReason}');
 
-    const statusBarActions = sourceSlice(
-      routeSource,
-      '<div className={styles.statusBarActions} aria-label={copy.lifecycleControls}>',
-      "\n              {bundle?.url ? (",
-    );
+    const statusBarStart = routeSource.indexOf('<div className={styles.statusBarActions} aria-label={copy.lifecycleControls}>');
+    const statusBarEnd = routeSource.indexOf('<div className={styles.summaryStrip}', statusBarStart);
+    expect(statusBarStart).toBeGreaterThanOrEqual(0);
+    expect(statusBarEnd).toBeGreaterThan(statusBarStart);
+    const statusBarActions = routeSource.slice(statusBarStart, statusBarEnd);
     const refreshIndex = statusBarActions.indexOf("statusQuery.refetch()");
     const startIndex = statusBarActions.indexOf('controlMutation.mutate("start")');
     const restartIndex = statusBarActions.indexOf('controlMutation.mutate("restart")');
@@ -506,11 +509,11 @@ describe("LauncherRoute layout contract", () => {
     expect(statusBarActions).not.toContain("copy.forceStop");
     expect(statusBarActions).not.toContain("dangerButton");
 
-    const dangerActions = sourceSlice(
-      routeSource,
-      '<div className={styles.dangerActions}>',
-      "\n        </div>\n      </div>\n\n      <LauncherStartupSettingsPanel",
-    );
+    const dangerStart = routeSource.indexOf('<div className={styles.dangerActions}>');
+    const dangerEnd = routeSource.indexOf('<LauncherStartupSettingsPanel', dangerStart);
+    expect(dangerStart).toBeGreaterThanOrEqual(0);
+    expect(dangerEnd).toBeGreaterThan(dangerStart);
+    const dangerActions = routeSource.slice(dangerStart, dangerEnd);
     expect(dangerActions).toContain('controlMutation.mutate("force-stop")');
     expect(dangerActions).toContain("copy.forceStop");
     expect(dangerActions).toContain("dangerButton");
@@ -526,7 +529,9 @@ describe("LauncherRoute layout contract", () => {
     expect(launcherApiSource).toContain("baseHash: setting.configHash");
     expect(launcherApiSource).toContain("WorkbenchWindowModeUpdateRequest");
     expect(startupSettingsPanelSource).toContain("onWindowModeChange({ mode, baseHash: current.configHash })");
-    expect(routeSource).toContain('onError: (error) => {\n      setNotice({ tone: "error", text: error instanceof Error ? error.message : String(error), source: "window-mode" });\n      void queryClient.invalidateQueries({ queryKey: queryKeys.launcherStatus() });');
+    expect(routeSource).toContain("const workbenchWindowSaveMutation = useMutation({");
+    expect(routeSource).toContain('source: "window-mode"');
+    expect(routeSource).toContain("queryKeys.launcherStatus()");
     expect(startupSettingsPanelSource).toContain("configHash");
     expect(startupSettingsPanelSource).toContain("runtimeProfile");
     expect(startupSettingsPanelSource).toContain("launcherControlPort");

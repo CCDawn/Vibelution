@@ -43,7 +43,7 @@ import {
   shouldArmBrowserProjectCloseGuard,
   shouldBlockProjectWindowClose,
 } from "../app/projectCloseGuard";
-import { VButton, VRouteHeader } from "../components/vui";
+import { VButton, VRouteHeader, VTooltip } from "../components/vui";
 import { useShellI18n } from "../i18n/useShellI18n";
 import { LauncherDeveloperModePanel } from "./LauncherDeveloperModePanel";
 import { LauncherDiagnosticsPanel } from "./LauncherDiagnosticsPanel";
@@ -1727,7 +1727,6 @@ export function LauncherRoute() {
         : projectIsClosed
           ? copy.userGuideClosedDetail
           : lifecycleDisplay.detail || copy.userGuideProblemDetail;
-  const userGuideDetailShort = summarizeLauncherMessage(userGuideDetail, copy, uiLang) || userGuideDetail;
   const statusBarBlockerReason = activeWorkCount > 0
     ? activeWorkDetail
     : restartQueuePending || restartQueueActive
@@ -2055,29 +2054,33 @@ export function LauncherRoute() {
         meta={lifecycleDetailShort || copy.subtitle}
         actions={(
           <div className={styles.statusBar}>
-            <div className={styles.statusBarReason} data-tone={userGuideTone} title={statusBarBlockerReason}>
-              <span>{copy.lifecycleStatus}</span>
-              <strong>{projectSummary}</strong>
-              <small>{statusBarReasonText}</small>
-            </div>
+            <VTooltip content={statusBarBlockerReason} tone={userGuideTone === "warning" ? "warning" : "neutral"} width="wide">
+              <div className={styles.statusBarReason} data-tone={userGuideTone} tabIndex={0}>
+                <span>{copy.lifecycleStatus}</span>
+                <strong>{projectSummary}</strong>
+                {activeWorkCount > 0 || restartQueueActive || launcherControlLimited || launcherStatusDisconnected ? <small>{statusBarReasonText}</small> : null}
+              </div>
+            </VTooltip>
             <div className={styles.statusBarActions} aria-label={copy.lifecycleControls}>
-              <VButton type="button" variant="secondary" className={styles.statusBarButton} onPress={() => void statusQuery.refetch()} isDisabled={statusQuery.isFetching} title={copy.refresh} icon={statusQuery.isFetching ? <LoaderCircle size={15} className={styles.spin} /> : <RefreshCw size={15} />}>
+              <VButton type="button" variant="secondary" className={styles.statusBarButton} onPress={() => void statusQuery.refetch()} isDisabled={statusQuery.isFetching} disabledReason={copy.loading} tooltip={copy.refresh} icon={statusQuery.isFetching ? <LoaderCircle size={15} className={styles.spin} /> : <RefreshCw size={15} />}>
                 <span>{copy.refresh}</span>
               </VButton>
-              <VButton type="button" variant="primary" className={`${styles.statusBarButton} ${styles.primaryButton}`} onPress={() => controlMutation.mutate("start")} isDisabled={startDisabled} title={startDisabled ? startDisabledReason : copy.start} icon={<Play size={15} />}>
+              <VButton type="button" variant="primary" className={`${styles.statusBarButton} ${styles.primaryButton}`} onPress={() => controlMutation.mutate("start")} isDisabled={startDisabled} disabledReason={startDisabledReason} tooltip={copy.start} icon={<Play size={15} />}>
                 <span>{copy.start}</span>
               </VButton>
-              <VButton type="button" variant="secondary" className={styles.statusBarButton} onPress={() => controlMutation.mutate("restart")} isDisabled={destructiveActionDisabled} title={destructiveActionDisabled ? destructiveActionDisabledReason : copy.restart} icon={<RefreshCw size={15} />}>
+              <VButton type="button" variant="secondary" className={styles.statusBarButton} onPress={() => controlMutation.mutate("restart")} isDisabled={destructiveActionDisabled} disabledReason={destructiveActionDisabledReason} tooltip={copy.restart} icon={<RefreshCw size={15} />}>
                 <span>{copy.restart}</span>
               </VButton>
-              <VButton type="button" variant="secondary" className={styles.statusBarButton} onPress={() => controlMutation.mutate("stop")} isDisabled={stopDisabled} title={stopDisabled ? stopDisabledReason : copy.stop} icon={<Square size={15} />}>
+              <VButton type="button" variant="secondary" className={styles.statusBarButton} onPress={() => controlMutation.mutate("stop")} isDisabled={stopDisabled} disabledReason={stopDisabledReason} tooltip={copy.stop} icon={<Square size={15} />}>
                 <span>{copy.stop}</span>
               </VButton>
               {bundle?.url ? (
-                <a className={styles.statusBarButton} href={bundle.url} target="_blank" rel="noreferrer" title={copy.open}>
-                  <ExternalLink size={15} />
-                  <span>{copy.open}</span>
-                </a>
+                <VTooltip content={copy.open} width="compact">
+                  <a className={styles.statusBarButton} href={bundle.url} target="_blank" rel="noreferrer">
+                    <ExternalLink size={15} />
+                    <span>{copy.open}</span>
+                  </a>
+                </VTooltip>
               ) : null}
             </div>
           </div>
@@ -2097,17 +2100,19 @@ export function LauncherRoute() {
         />
       </div>
 
-      <div className={styles.userGuide} data-tone={userGuideTone} title={userGuideDetail}>
-        <span>{copy.userGuide}</span>
-        <strong>{userGuideTitle}</strong>
-        <em>{actionLockLabel}</em>
-      </div>
+      <VTooltip content={userGuideDetail} tone={userGuideTone === "warning" ? "warning" : "neutral"} width="wide">
+        <div className={styles.userGuide} data-tone={userGuideTone} tabIndex={0}>
+          <span>{copy.userGuide}</span>
+          <strong>{userGuideTitle}</strong>
+          <em>{actionLockLabel}</em>
+        </div>
+      </VTooltip>
 
       <div className={styles.dangerZone}>
         <span>{copy.forceStop}</span>
         <small>{forceStopDisabled ? forceStopDisabledReason : copy.forceStopHint}</small>
         <div className={styles.dangerActions}>
-          <VButton type="button" variant="danger" className={`${styles.iconButton} ${styles.dangerButton}`} onPress={() => controlMutation.mutate("force-stop")} isDisabled={forceStopDisabled} title={forceStopDisabled ? forceStopDisabledReason : copy.forceStop} icon={<Power size={15} />}>
+          <VButton type="button" variant="danger" className={`${styles.iconButton} ${styles.dangerButton}`} onPress={() => controlMutation.mutate("force-stop")} isDisabled={forceStopDisabled} disabledReason={forceStopDisabledReason} tooltip={copy.forceStopHint} icon={<Power size={15} />}>
             <span>{copy.forceStop}</span>
           </VButton>
         </div>
@@ -2172,9 +2177,11 @@ export function LauncherRoute() {
         </p>
       ) : null}
       {notice.text ? (
-        <p className={styles.notice} data-tone={notice.tone} title={notice.text}>
-          {noticeTextShort}
-        </p>
+        <VTooltip content={notice.text} tone={notice.tone === "error" ? "danger" : notice.tone === "warning" ? "warning" : "neutral"} width="wide">
+          <p className={styles.notice} data-tone={notice.tone} tabIndex={0}>
+            {noticeTextShort}
+          </p>
+        </VTooltip>
       ) : null}
       {statusQuery.isPending && !status ? <p className={styles.notice} data-tone="neutral">{copy.loading}</p> : null}
 
@@ -2201,12 +2208,14 @@ export function LauncherRoute() {
               <span role="columnheader">{copy.detail}</span>
             </div>
             {keyStatusRows.map((row) => (
-              <div key={row.id} className={styles.statusRow} role="row" data-tone={stateTone(row.status, row.ok)} title={row.technical}>
-                <span role="cell"><strong>{row.label}</strong></span>
-                <span role="cell">{row.status}</span>
-                <span role="cell">{row.role}</span>
-                <span role="cell" title={row.technical}>{row.detail}</span>
-              </div>
+              <VTooltip key={row.id} content={row.technical} width="wide">
+                <div className={styles.statusRow} role="row" data-tone={stateTone(row.status, row.ok)} tabIndex={0}>
+                  <span role="cell"><strong>{row.label}</strong></span>
+                  <span role="cell">{row.status}</span>
+                  <span role="cell">{row.role}</span>
+                  <span role="cell">{row.detail}</span>
+                </div>
+              </VTooltip>
             ))}
           </div>
         </section>
@@ -2249,11 +2258,11 @@ function Metric({
   helperTitle?: string;
   tone?: "neutral" | "success" | "warning" | "error";
 }) {
-  return (
-    <div className={styles.metric} data-tone={tone || "neutral"}>
+  const metric = (
+    <div className={styles.metric} data-tone={tone || "neutral"} tabIndex={helper ? 0 : undefined}>
       <span>{label}</span>
       <strong>{value}</strong>
-      {helper ? <small title={helperTitle || helper}>{helper}</small> : null}
     </div>
   );
+  return helper ? <VTooltip content={helperTitle || helper} width="wide">{metric}</VTooltip> : metric;
 }

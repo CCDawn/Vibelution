@@ -83,8 +83,10 @@ describe("LogsRoute layout contract", () => {
 
   it("keeps log root guidance in hover text instead of a permanent card row", () => {
     expect(routeSource).toContain("logsCompactSubtitle");
-    expect(routeSource).toContain('title={t("logsSubtitle")}');
-    expect(routeSource).toContain("title={root.summary.userGuide || root.path}");
+    expect(routeSource).toContain("VTooltip");
+    expect(routeSource).toContain('content={t("logsSubtitle")}');
+    expect(routeSource).toContain("tooltip={`${root.summary.userGuide || root.path} · ${root.path} · ${latestLabel}`}");
+    expect(routeSource).not.toContain('title={root.summary.userGuide || root.path}');
     expect(routeSource).not.toContain("rootButtonGuide");
   });
 

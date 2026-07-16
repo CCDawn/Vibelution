@@ -1,6 +1,6 @@
 import { LoaderCircle, RefreshCw } from "lucide-react";
 
-import { VButton } from "../components/vui";
+import { VButton, VTooltip } from "../components/vui";
 import styles from "./LauncherDiagnosticsPanel.styles";
 
 export type LauncherDiagnosticsSpecItem = {
@@ -73,7 +73,9 @@ function Spec({ label, value }: LauncherDiagnosticsSpecItem) {
   return (
     <>
       <dt>{label}</dt>
-      <dd title={value}>{value}</dd>
+      <VTooltip content={value} width="wide">
+        <dd tabIndex={0}>{value}</dd>
+      </VTooltip>
     </>
   );
 }
@@ -174,7 +176,8 @@ export function LauncherDiagnosticsPanel({
               className={styles.iconButton}
               onPress={onReattachSupervisor}
               isDisabled={busy || !canRequestSupervisorReattach}
-              title={copy.reattachSupervisor}
+              disabledReason={busy ? copy.reattachSupervisor : copy.diagnosticsCollapsedHint}
+              tooltip={copy.reattachSupervisor}
               icon={supervisorPending ? <LoaderCircle size={15} className={styles.spin} /> : <RefreshCw size={15} />}
             >
               <span>{copy.reattachSupervisor}</span>
