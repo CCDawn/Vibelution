@@ -22566,11 +22566,17 @@ def _local_research_llm_client(model_id: str, *, llm_client_factory: Any = None)
     profiles = llm.setdefault("profiles", {})
     if not isinstance(profiles, dict):
         raise TeamWorkflowOrchestrationError("llm.profiles must be an object.")
-    model_library = llm.get("model_library")
-    if not isinstance(model_library, dict) or normalized_model_id not in model_library:
-        raise TeamWorkflowOrchestrationError(f"Local research model is not configured: {normalized_model_id}")
     profiles[LOCAL_RESEARCH_INVOKE_PROFILE_ID] = {"label": "Challenge Cup Local Research Model", "model_ref": normalized_model_id}
-    config = build_effective_config(public_config)
+    try:
+        # schema-v2 keeps canonical models under llm.providers.*.models and only
+        # materializes llm.model_library while building the effective runtime
+        # config.  Let the shared projection resolve canonical refs and aliases
+        # instead of rejecting every v2 model against the legacy public field.
+        config = build_effective_config(public_config)
+    except (KeyError, TypeError, ValueError) as exc:
+        raise TeamWorkflowOrchestrationError(
+            f"Local research model is not configured: {normalized_model_id}"
+        ) from exc
     factory = llm_client_factory or LLMClient
     return factory(config=config, profile_id=LOCAL_RESEARCH_INVOKE_PROFILE_ID)
 

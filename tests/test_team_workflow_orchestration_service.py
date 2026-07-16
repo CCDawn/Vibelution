@@ -12575,6 +12575,52 @@ def test_local_research_model_invoke_records_candidate_from_json_content(tmp_pat
     assert _FakeLocalResearchClient.captured_messages[0]["metadata"]["taskType"] == "paper_note_draft"
 
 
+def test_local_research_model_client_resolves_schema_v2_canonical_model_ref(monkeypatch):
+    model_ref = "pixel_relay/gpt-5.6-terra"
+    monkeypatch.setattr(
+        team_workflow_orchestration_service,
+        "load_public_config",
+        lambda: {
+            "llm": {
+                "schema_version": 2,
+                "providers": {
+                    "pixel_relay": {
+                        "label": "Pixel Relay",
+                        "service_class": "relay",
+                        "vendor": "multi_model",
+                        "driver": "openai",
+                        "base_url": "https://relay.example/v1",
+                        "auth_kind": "api_key",
+                        "credential_ref": "env:VIBELUTION_LLM_PROVIDER_PIXEL_RELAY_API_KEY",
+                        "requires_credential": True,
+                        "protocols": {"default": "responses", "allowed": ["responses"]},
+                        "discovery": {"mode": "manual", "adapter": "openai_compatible"},
+                        "models": {
+                            "gpt-5.6-terra": {
+                                "upstream_id": "gpt-5.6-terra",
+                                "label": "GPT-5.6 Terra",
+                                "enabled": True,
+                                "defaults": {"max_output_tokens": 32000, "timeout": 120},
+                            }
+                        },
+                    }
+                },
+                "profiles": {},
+            }
+        },
+    )
+
+    client = team_workflow_orchestration_service._local_research_llm_client(
+        model_ref,
+        llm_client_factory=_FakeLocalResearchClient,
+    )
+
+    profile = client.config.llm.get_profile("__challenge_cup_local_research_model")
+    assert profile.model_ref == model_ref
+    assert profile.model == "gpt-5.6-terra"
+    assert model_ref in client.config.llm.model_library
+
+
 def test_local_research_model_invoke_rejects_unparseable_output_without_candidate(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)
