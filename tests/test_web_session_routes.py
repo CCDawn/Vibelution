@@ -1,4 +1,7 @@
+import asyncio
+import inspect
 import json
+import threading
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -95,6 +98,51 @@ def test_active_session_route_returns_empty_id_without_persisted_selection(monke
 
     assert response.status_code == 200
     assert response.json() == {"activeSessionId": ""}
+
+
+def test_session_events_runs_initial_and_iterator_on_dedicated_executor(monkeypatch):
+    thread_names: list[str] = []
+    closed = threading.Event()
+
+    class SingleEventIterator:
+        def __init__(self):
+            self.sent = False
+
+        def __iter__(self):
+            return self
+
+        def __next__(self):
+            thread_names.append(threading.current_thread().name)
+            if self.sent:
+                raise StopIteration
+            self.sent = True
+            return "event: session_initial\ndata: {}\n\n"
+
+        def close(self):
+            thread_names.append(threading.current_thread().name)
+            closed.set()
+
+    def resolve_initial(session_id: str, initial: str):
+        thread_names.append(threading.current_thread().name)
+        return initial, None, {"type": "session_initial", "sessionId": session_id}
+
+    iterator = SingleEventIterator()
+    monkeypatch.setattr(session_routes, "resolve_session_stream_initial_payload", resolve_initial)
+    monkeypatch.setattr(session_routes, "stream_session_events", lambda *args, **kwargs: iterator)
+
+    async def consume_first_event():
+        response = await session_routes.session_events("session-active", "light")
+        event = await anext(response.body_iterator)
+        await response.body_iterator.aclose()
+        return event
+
+    event = asyncio.run(consume_first_event())
+
+    assert inspect.iscoroutinefunction(session_routes.session_events)
+    assert event == "event: session_initial\ndata: {}\n\n"
+    assert closed.wait(timeout=1)
+    assert thread_names
+    assert all(name.startswith("session-stream") for name in thread_names)
 
 
 def test_session_detail_exists(tmp_path, monkeypatch):
