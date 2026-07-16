@@ -1293,6 +1293,26 @@ def test_run_experiment_smoke_run_executes_records_and_reproducible(tmp_path, mo
     assert res2["runnerResult"]["artifactHash"] == res["runnerResult"]["artifactHash"]
 
 
+def test_run_experiment_proxy_smoke_cannot_promote_plan_to_passed(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = team_service.create_team(name="挑战杯科研团队")
+    team_workflow_orchestration_service.ensure_team_workflow_orchestration(team["teamId"])
+    plan_id = _seed_experiment_plan(team["teamId"], plan_id="exp_reconstruction_proxy")
+
+    response = team_workflow_orchestration_service.run_experiment_smoke_run(
+        team["teamId"],
+        plan_id,
+        {"adapter": "predictive_coding_reconstruction_proxy", "seed": 42},
+    )
+
+    assert response["runnerResult"]["decisionHint"] == "accept"
+    assert response["runnerResult"]["proxyOnly"] is True
+    assert response["status"] == "needs_review"
+    assert response["experimentStatus"] == "smoke_needs_review"
+    assert response["smokeRun"]["proxyOnly"] is True
+    assert "no_full_run_promotion_from_proxy_only" in response["smokeRun"]["boundaries"]
+
+
 def test_run_experiment_smoke_run_blocks_missing_baseline(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     team = team_service.create_team(name="挑战杯科研团队")
