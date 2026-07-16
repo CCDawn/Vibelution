@@ -637,7 +637,7 @@ layout:
   oneLineValue:
     "vui-routes-chatcodingroute oneLineValue min-w-0 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--vui-border-subtle)_68%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-row)_42%,transparent)] px-1.5 py-1 text-[var(--vui-font-xs)] leading-tight text-[var(--fg-secondary)] [&_span]:mr-1.5 [&_span]:font-semibold [&_span]:text-[var(--fg-tertiary)]",
   paneCollapsed:
-    "vui-routes-chatcodingroute paneCollapsed min-w-0 hidden invisible pointer-events-none !overflow-hidden opacity-0",
+    "vui-routes-chatcodingroute paneCollapsed min-w-0 !hidden invisible pointer-events-none !overflow-hidden opacity-0",
   overlayBackdrop:
     "vui-routes-chatcodingroute overlayBackdrop fixed inset-0 z-30 border-0 bg-black/35",
   overlayPane:
