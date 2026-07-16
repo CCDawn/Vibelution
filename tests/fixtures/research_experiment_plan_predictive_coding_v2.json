@@ -1,0 +1,106 @@
+{
+  "schemaVersion": 2,
+  "planId": "exp-plan-predictive-coding-fashion-mnist-v1",
+  "revision": 1,
+  "teamId": "research-team",
+  "researchProfileId": "challenge-cup-predictive-coding",
+  "researchMode": "full_research_loop",
+  "purpose": {
+    "primaryPurpose": "baseline_comparison",
+    "secondaryPurposes": ["ablation", "robustness"]
+  },
+  "experimentMethod": "model_training_inference",
+  "adapterSelection": {
+    "requestedAdapterId": "builtin.pytorch_supervised_experiment",
+    "resolvedAdapterId": "",
+    "resolvedAdapterVersion": "",
+    "selectionSource": "unresolved",
+    "unavailableReason": "Target full-run Adapter is part of Task 4 and is not registered yet."
+  },
+  "recommendation": {
+    "researchMode": "full_research_loop",
+    "primaryPurpose": "baseline_comparison",
+    "experimentMethod": "model_training_inference",
+    "reason": "当前假设比较预测编码启发机制与标准反向传播基线，需要在相同数据和预算下真实训练并执行消融。",
+    "confidence": 0.93,
+    "missingConditions": [],
+    "generatedByAgentId": "research-coordination-agent"
+  },
+  "researchQuestion": "预测编码启发的局部迭代推理机制，在相同数据、模型容量与训练预算下，能否改善 FashionMNIST 分类或重构表现，并保持可接受的计算成本？",
+  "objective": "公平比较标准 backprop baseline、预测编码候选和关键组件消融，记录结果对下一轮实验计划的影响。",
+  "hypothesisRefs": ["hypothesis-predictive-coding-v1"],
+  "evidenceRefs": ["paper-note-predictive-coding-001", "review-predictive-coding-001"],
+  "constraints": [
+    "baseline、candidate 与 ablation 使用相同数据 split、seed 集和训练预算",
+    "synthetic smoke proxy 不得作为正式实验结果",
+    "负结果或统计不充分时结论必须为 refute 或 inconclusive"
+  ],
+  "methodConfig": {
+    "dataset": "FashionMNIST pinned source/version/split/checksum/license",
+    "model": "capacity-matched baseline classifier and predictive-coding-inspired candidate",
+    "baseline": "standard backpropagation model under the same optimization budget",
+    "seeds": [17, 42, 101],
+    "budget": "same epochs, sample order policy, parameter-count tolerance and tuning budget",
+    "smokePlan": "run one bounded batch and one evaluation batch to validate shapes, loss, logging and artifact persistence",
+    "hyperparameters": {
+      "epochs": 20,
+      "batchSize": 128,
+      "optimizer": "Adam",
+      "learningRate": 0.001
+    },
+    "ablations": [
+      "remove iterative inference",
+      "remove prediction-error feedback path"
+    ]
+  },
+  "metricContract": {
+    "primaryMetric": "test_accuracy",
+    "metrics": [
+      { "name": "test_accuracy", "direction": "maximize", "unit": "ratio", "target": null },
+      { "name": "prediction_error", "direction": "minimize", "unit": "loss", "target": null },
+      { "name": "convergence_epoch", "direction": "minimize", "unit": "epoch", "target": null },
+      { "name": "wall_time", "direction": "minimize", "unit": "second", "target": null },
+      { "name": "seed_variance", "direction": "minimize", "unit": "variance", "target": null }
+    ]
+  },
+  "decisionContract": {
+    "successCriteria": [
+      "candidate improves the primary metric under the declared fair budget or offers an explicitly justified accuracy-cost tradeoff",
+      "the improvement is not eliminated by the required seed and ablation checks"
+    ],
+    "failureCriteria": [
+      "candidate is consistently worse than baseline without an offsetting measured benefit",
+      "the proposed mechanism contribution disappears in the targeted ablation"
+    ],
+    "inconclusiveCriteria": [
+      "seed variance or budget mismatch prevents a fair conclusion",
+      "the run completes but the measured scope cannot distinguish the hypothesis from its alternatives"
+    ]
+  },
+  "artifactContract": {
+    "requiredArtifacts": [
+      "dataset manifest and checksum",
+      "resolved configuration",
+      "baseline/candidate/ablation metrics",
+      "model checkpoints or bounded result artifacts",
+      "plan revision diff"
+    ],
+    "requiredLogTypes": ["environment", "training", "evaluation", "decision"],
+    "retentionPolicy": "retain all artifacts referenced by the competition case and its reproducibility package"
+  },
+  "reproducibilityContract": {
+    "seeds": [17, 42, 101],
+    "captureEnvironment": true,
+    "captureInputHash": true,
+    "captureConfigHash": true,
+    "reproductionCommand": "python experiments/challenge_cup_predictive_coding/run_experiment.py --config <resolved-config>"
+  },
+  "iterationContract": {
+    "requiresResultConclusion": true,
+    "requiresFeedbackSignals": true,
+    "requiresPlanDiff": true,
+    "maxIterations": 5
+  },
+  "supersedesPlanId": "",
+  "status": "draft"
+}

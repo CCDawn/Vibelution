@@ -785,11 +785,74 @@ def test_team_workflow_routes_create_experiment_plan_draft(tmp_path, monkeypatch
     assert plan_response.status_code == 201, plan_response.text
     payload = plan_response.json()
     assert payload["plan"]["experimentPlan"]["baseline"] == "standard MoE router"
+    assert payload["plan"]["experimentContract"]["schemaVersion"] == 2
+    assert payload["plan"]["experimentContract"]["experimentMethod"] == "model_training_inference"
+    assert payload["plan"]["contractValidation"]["valid"] is False
     assert payload["plan"]["readiness"]["readyForPlanReview"] is True
     assert payload["plan"]["readiness"]["readyForFullRun"] is False
     assert payload["status"]["summary"]["planCount"] == 1
     assert payload["stageRoundStatus"]["phases"][1]["latestRound"]["experimentPlanRef"]["planId"] == payload["plan"]["planId"]
     assert payload["boundaries"]["autoExecution"] is False
+
+
+def test_team_workflow_routes_accept_generic_simulation_experiment_contract(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    client = _client()
+    team = client.post("/api/teams", json={"name": "通用科研团队"}).json()
+    stage_response = client.post(
+        f"/api/teams/{team['teamId']}/workflow-orchestration/stage-rounds/start",
+        json={"stageType": "experiment", "topic": "robustness simulation"},
+    )
+    catalog_response = client.get(
+        f"/api/teams/{team['teamId']}/workflow-orchestration/experiments/methods",
+    )
+
+    response = client.post(
+        f"/api/teams/{team['teamId']}/workflow-orchestration/experiments/plan",
+        json={
+            "stageRoundId": stage_response.json()["stageRound"]["stageRoundId"],
+            "researchProfileId": "generic-simulation",
+            "researchQuestion": "How robust is the policy under scenario changes?",
+            "researchMode": "experiment_feedback",
+            "experimentPurpose": {"primaryPurpose": "robustness", "secondaryPurposes": []},
+            "experimentMethod": "numerical_simulation",
+            "methodConfig": {
+                "simulator": "controllable-agent-simulator",
+                "scenario": "resource-constrained adaptation",
+                "parameters": {"temperature": [0.1, 0.5, 1.0]},
+                "replicates": 5,
+            },
+            "metricContract": {
+                "primaryMetric": "task_success_rate",
+                "metrics": [{"name": "task_success_rate", "direction": "maximize"}],
+            },
+            "decisionContract": {
+                "successCriteria": ["task success remains above the reviewed threshold across scenarios"],
+                "failureCriteria": ["task success falls below the reviewed failure threshold"],
+                "inconclusiveCriteria": ["replicate variance prevents a stable comparison"],
+            },
+        },
+    )
+
+    assert catalog_response.status_code == 200, catalog_response.text
+    assert len(catalog_response.json()["methods"]) == 6
+    assert "environment_probe" not in {item["methodId"] for item in catalog_response.json()["methods"]}
+    simulation_method = next(item for item in catalog_response.json()["methods"] if item["methodId"] == "numerical_simulation")
+    assert simulation_method["adapterAvailability"]["experiment_feedback"]["resolvedAdapterId"] == ""
+    assert {item["modeId"] for item in catalog_response.json()["researchModes"]} == {
+        "hypothesis_and_plan",
+        "experiment_feedback",
+        "full_research_loop",
+    }
+    assert response.status_code == 201, response.text
+    contract = response.json()["plan"]["experimentContract"]
+    assert contract["schemaVersion"] == 2
+    assert contract["researchProfileId"] == "generic-simulation"
+    assert contract["researchMode"] == "experiment_feedback"
+    assert contract["purpose"]["primaryPurpose"] == "robustness"
+    assert contract["experimentMethod"] == "numerical_simulation"
+    assert contract["methodConfig"]["replicates"] == 5
+    assert response.json()["plan"]["contractValidation"]["valid"] is True
 
 
 def test_team_workflow_routes_register_experiment_baseline_artifact(tmp_path, monkeypatch):
