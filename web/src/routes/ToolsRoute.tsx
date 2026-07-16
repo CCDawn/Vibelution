@@ -21,7 +21,7 @@ import {
 } from "../api/types";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
 import { PaneCollapseHandle } from "../components/layout/PaneCollapseHandle";
-import { VButton, VIconButton, VNativeInput, VNativeSelect, VRouteHeader } from "../components/vui";
+import { VButton, VContextualHint, VIconButton, VNativeInput, VNativeSelect, VRouteHeader, VTooltip } from "../components/vui";
 import type { TranslationKey } from "../i18n/dictionary";
 import { useAppI18n } from "../i18n/useAppI18n";
 import { safeAgentCenterReturnToPath } from "./agentCenterRoutes";
@@ -1668,10 +1668,12 @@ export function ToolsRoute() {
         actions={(
           <div className={styles.headerActions}>
             {returnToPath ? (
-              <Link className={styles.returnButton} to={returnToPath} title={returnToLabel}>
-                <ArrowLeft size={15} />
-                <span>{returnToLabel}</span>
-              </Link>
+              <VTooltip content={returnToLabel} width="compact">
+                <Link className={styles.returnButton} to={returnToPath}>
+                  <ArrowLeft size={15} />
+                  <span>{returnToLabel}</span>
+                </Link>
+              </VTooltip>
             ) : null}
             <VIconButton
               type="button"
@@ -1752,27 +1754,32 @@ export function ToolsRoute() {
               variant="secondary"
               className={styles.secondaryButton}
               isDisabled={!visibleTools.length || bulkToolPending}
+              tooltip={allVisibleToolsSelected ? bulkCopy.clear : bulkCopy.selectVisible}
+              disabledReason={!visibleTools.length ? t("toolsNoMatches") : bulkCopy.working}
               onPress={allVisibleToolsSelected ? clearBulkTools : selectVisibleBulkTools}
               icon={allVisibleToolsSelected ? <Square size={14} /> : <CheckSquare size={14} />}
             >
               <span>{allVisibleToolsSelected ? bulkCopy.clear : bulkCopy.selectVisible}</span>
             </VButton>
-            <VButton type="button" variant="primary" className={styles.primaryButton} isDisabled={!selectedTools.length || bulkToolPending} onPress={() => bulkSetToolsEnabled(true)} icon={<Power size={14} />}>
+            <VButton type="button" variant="primary" className={styles.primaryButton} isDisabled={!selectedTools.length || bulkToolPending} disabledReason={!selectedTools.length ? bulkCopy.selectVisible : bulkCopy.working} onPress={() => bulkSetToolsEnabled(true)} icon={<Power size={14} />}>
               <span>{bulkToolPending ? bulkCopy.working : bulkCopy.enable}</span>
             </VButton>
-            <VButton type="button" variant="secondary" className={styles.secondaryButton} isDisabled={!selectedTools.length || bulkToolPending} onPress={() => bulkSetToolsEnabled(false)} icon={<CircleSlash size={14} />}>
+            <VButton type="button" variant="secondary" className={styles.secondaryButton} isDisabled={!selectedTools.length || bulkToolPending} disabledReason={!selectedTools.length ? bulkCopy.selectVisible : bulkCopy.working} onPress={() => bulkSetToolsEnabled(false)} icon={<CircleSlash size={14} />}>
               <span>{bulkToolPending ? bulkCopy.working : bulkCopy.disable}</span>
             </VButton>
-            <VButton type="button" variant="secondary" className={styles.secondaryButton} isDisabled={!selectedTools.length || bulkToolPending} onPress={bulkDeleteTools} icon={<Trash2 size={14} />}>
+            <VButton type="button" variant="secondary" className={styles.secondaryButton} isDisabled={!selectedTools.length || bulkToolPending} disabledReason={!selectedTools.length ? bulkCopy.selectVisible : bulkCopy.working} onPress={bulkDeleteTools} icon={<Trash2 size={14} />}>
               <span>{bulkToolPending ? bulkCopy.working : bulkCopy.delete}</span>
             </VButton>
           </section>
           <div className={styles.toolList}>
             {visibleToolBundleGroups.map((group) => (
-              <section key={group.bundleId} className={styles.toolBundleGroup} title={group.description || group.label}>
+              <section key={group.bundleId} className={styles.toolBundleGroup}>
                 <header className={styles.toolBundleHeader}>
                   <div>
-                    <strong>{group.label}</strong>
+                    <strong className="inline-flex items-center gap-1.5">
+                      {group.label}
+                      <VContextualHint content={group.description || group.label} label={`${group.label}说明`} width="wide" />
+                    </strong>
                     <span>{group.tools.length} {lang === "zh" ? "个工具" : "tools"}</span>
                   </div>
                   <small>
@@ -1786,29 +1793,32 @@ export function ToolsRoute() {
                     const bulkSelected = selectedToolIds.has(tool.id);
                     return (
                       <div key={`${group.bundleId}-${tool.source}-${tool.id}`} className={styles.selectableToolRow}>
-                        <label className={styles.rowSelect} title={`${bulkCopy.selected}: ${tool.name}`}>
-                          <VNativeInput
-                            type="checkbox"
-                            checked={bulkSelected}
-                            aria-label={`${bulkCopy.selected}: ${tool.name}`}
-                            onChange={(event) => toggleBulkTool(
-                              tool.id,
-                              event.target.checked,
-                              Boolean((event.nativeEvent as globalThis.MouseEvent).shiftKey),
-                            )}
-                          />
-                          {bulkSelected ? <CheckSquare size={15} /> : <Square size={15} />}
-                        </label>
+                        <VTooltip content={`${bulkCopy.selected}: ${tool.name}`} width="compact">
+                          <label className={styles.rowSelect}>
+                            <VNativeInput
+                              type="checkbox"
+                              checked={bulkSelected}
+                              aria-label={`${bulkCopy.selected}: ${tool.name}`}
+                              onChange={(event) => toggleBulkTool(
+                                tool.id,
+                                event.target.checked,
+                                Boolean((event.nativeEvent as globalThis.MouseEvent).shiftKey),
+                              )}
+                            />
+                            {bulkSelected ? <CheckSquare size={15} /> : <Square size={15} />}
+                          </label>
+                        </VTooltip>
                         <VButton
                           type="button"
                           variant="ghost"
                           className={isActive ? styles.toolButtonActive : styles.toolButton}
+                          tooltip={tool.description || t("toolsNoDescription")}
                           onClick={(event) => handleToolRowClick(tool, event)}
                         >
                           <span className={`${styles.statusDot} ${styles[`status_${statusTone(tool)}`]}`} />
                           <span className={styles.toolCopy}>
                             <strong>{tool.name}</strong>
-                            <span title={tool.description || t("toolsNoDescription")}>
+                            <span>
                             {toolCategoryLabel(tool.category, tool.categoryLabel, lang)} · {toolTierLabel(tool.permissionTier, lang)}
                           </span>
                         </span>
@@ -1911,9 +1921,11 @@ export function ToolsRoute() {
                       ))}
                     </VNativeSelect>
                   </label>
-                  <span className={styles.toolBundleSummary} title={selectedBundle?.description || ""}>
-                    {selectedBundle ? toolBundleMeta(selectedBundle, lang) : "-"}
-                  </span>
+                  <VTooltip content={selectedBundle?.description || (lang === "zh" ? "先选择工具包。" : "Choose a package first.")} width="wide">
+                    <span className={styles.toolBundleSummary} tabIndex={0}>
+                      {selectedBundle ? toolBundleMeta(selectedBundle, lang) : "-"}
+                    </span>
+                  </VTooltip>
                   <div className={styles.toolBundleApplyActions}>
                     <VButton
                       type="button"
@@ -1965,7 +1977,9 @@ export function ToolsRoute() {
                             <div key={`${tool.source}:${tool.id}`} className={styles.toolPermissionRow}>
                               <span>
                                 <strong>{tool.name}</strong>
-                                <small title={tool.description || tool.source}>{displaySource(tool.source, lang)}</small>
+                                <VTooltip content={tool.description || tool.source} width="wide">
+                                  <small tabIndex={0}>{displaySource(tool.source, lang)}</small>
+                                </VTooltip>
                                 <span className={styles.toolPermissionMeta}>
                                   <em>{toolTierLabel(tool.permissionTier, lang)}</em>
                                   <small>{toolCategoryLabel(tool.category, tool.categoryLabel, lang)}</small>
@@ -2264,7 +2278,8 @@ export function ToolsRoute() {
                     }
                     enableMutation.mutate({ toolId: activeTool.id, enabled: !activeTool.enabled });
                   }}
-                  title={activeCanToggle ? undefined : activeTool.blockReason || t("toolsEnableBlocked")}
+                  tooltip={activeTool.enabled ? t("toolsDisable") : t("toolsEnable")}
+                  disabledReason={!activeCanToggle ? activeTool.blockReason || t("toolsEnableBlocked") : activeToolEnablePending ? (lang === "zh" ? "工具状态正在更新。" : "Tool state is updating.") : undefined}
                   icon={activeTool.enabled ? <CircleSlash size={15} /> : <Power size={15} />}
                 >
                   {activeTool.enabled ? t("toolsDisable") : t("toolsEnable")}
@@ -2287,7 +2302,8 @@ export function ToolsRoute() {
                       deleteMutation.mutate(activeTool.id);
                     }
                   }}
-                  title={activeTool.deleteAllowed ? undefined : activeTool.blockReason || t("toolsBuiltInProtected")}
+                  tooltip={lang === "zh" ? "永久删除当前生成工具。" : "Permanently delete the current generated tool."}
+                  disabledReason={!activeTool.deleteAllowed ? activeTool.blockReason || t("toolsBuiltInProtected") : activeToolDeletePending ? (lang === "zh" ? "工具正在删除。" : "Tool deletion is in progress.") : undefined}
                   icon={<Trash2 size={15} />}
                 >
                   {activeToolDeletePending ? t("deletingSelectedLogs") : t("deleteSelected")}

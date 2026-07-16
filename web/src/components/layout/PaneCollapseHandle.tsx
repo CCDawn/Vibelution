@@ -47,6 +47,7 @@ export function PaneCollapseHandle({
     ? collapsed ? "right" : "left"
     : collapsed ? "left" : "right";
   const Icon = iconDirection === "left" ? ChevronLeft : ChevronRight;
+  const tooltip = `${separatorLabel} · ${label}`;
   const rootClassName = [
     styles.paneHandleClass,
     className,
@@ -58,7 +59,6 @@ export function PaneCollapseHandle({
       role="separator"
       aria-orientation="vertical"
       aria-label={separatorLabel}
-      title={separatorLabel}
       tabIndex={0}
       className={rootClassName}
       onPointerDown={onPointerDown}
@@ -70,7 +70,7 @@ export function PaneCollapseHandle({
         type="button"
         className={styles.paneToggleButtonClass}
         label={label}
-        title={label}
+        tooltip={tooltip}
         aria-pressed={collapsed}
         onPointerDown={stopHandleDrag}
         onMouseDown={stopHandleDrag}

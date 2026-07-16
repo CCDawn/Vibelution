@@ -2,7 +2,7 @@ import { ArrowUpRight, CheckCircle2, LoaderCircle, Sparkles, Trash2 } from "luci
 import type { CSSProperties, ReactNode } from "react";
 
 import type { EvolutionLibraryEntry, EvolutionRun } from "../api/types";
-import { VButton, VCheckbox } from "../components/vui";
+import { VButton, VCheckbox, VTooltip } from "../components/vui";
 import type { Language, TranslationKey } from "../i18n/dictionary";
 import { buildSupervisedRunRecordDisplay, supervisedDecisionLabel } from "./supervisedRunRecordLabel";
 import styles from "./EvolutionRunRecordsPanel.styles";
@@ -197,6 +197,8 @@ export function EvolutionRunRecordsPanel({
           variant="danger"
           className={styles.inlineAction}
           isDisabled={!item.canDelete || deleteProposalPending}
+          tooltip={lang === "zh" ? "删除这条提案记录。" : "Delete this proposal record."}
+          disabledReason={!item.canDelete ? item.deleteBlockReason || (lang === "zh" ? "当前提案不可删除。" : "This proposal cannot be deleted.") : deleteProposalPending ? (lang === "zh" ? "提案正在删除。" : "Proposal deletion is in progress.") : undefined}
           onClick={() => onDeleteProposal(item.sourceRun)}
         >
           <Trash2 size={15} />
@@ -230,6 +232,7 @@ export function EvolutionRunRecordsPanel({
                 type="button"
                 className={styles.inlineAction}
                 isDisabled={visibleDeletableRunCount === 0 || allVisibleDeletableRunsSelected}
+                disabledReason={visibleDeletableRunCount === 0 ? (lang === "zh" ? "当前列表没有可删除的运行记录。" : "There are no deletable run records in this list.") : (lang === "zh" ? "当前可删除记录已全部选中。" : "All deletable records are already selected.")}
                 onClick={onSelectVisibleRunRecords}
               >
                 <CheckCircle2 size={15} />
@@ -239,6 +242,7 @@ export function EvolutionRunRecordsPanel({
                 type="button"
                 className={styles.inlineAction}
                 isDisabled={selectedRunIds.length === 0}
+                disabledReason={lang === "zh" ? "当前没有已选运行记录。" : "No run records are selected."}
                 onClick={onClearRunSelection}
               >
                 {t("clearSelection")}
@@ -248,6 +252,8 @@ export function EvolutionRunRecordsPanel({
                 variant="danger"
                 className={styles.inlineAction}
                 isDisabled={selectedRunIds.length === 0 || bulkDeleteRunRecordsPending}
+                tooltip={t("runBatchDeleteHint")}
+                disabledReason={selectedRunIds.length === 0 ? (lang === "zh" ? "先选择运行记录。" : "Select run records first.") : bulkDeleteRunRecordsPending ? (lang === "zh" ? "批量删除正在进行。" : "Bulk deletion is in progress.") : undefined}
                 onClick={onBulkDeleteRunRecords}
               >
                 {bulkDeleteRunRecordsPending ? <LoaderCircle size={15} /> : <Trash2 size={15} />}
@@ -324,6 +330,7 @@ export function EvolutionRunRecordsPanel({
                     type="button"
                     contentLayout="plain"
                     className={styles.runCardButton}
+                    tooltip={run.nextAction || undefined}
                     onClick={() => onSelectRun(run.id)}
                   >
                     <div className={`${styles.listRowTop} ${styles.runRecordTitleRow}`}>
@@ -344,7 +351,7 @@ export function EvolutionRunRecordsPanel({
                     <p>{displaySupervisedRunSummary(run, lang, decisionLabel)}</p>
                     <div className={styles.cardFooter}>
                       <span>{riskLabel(run.riskLevel)}</span>
-                      <span title={run.nextAction || ""}>
+                      <span>
                         {displaySupervisedTechnicalText(run.nextAction, run.decision, lang, decisionLabel) || "--"}
                       </span>
                     </div>
@@ -435,9 +442,11 @@ export function EvolutionRunRecordsPanel({
                   </article>
                   <article className={styles.compactFact}>
                     <span>{t("nextRecommendedAction")}</span>
-                    <strong title={selectedRun.runSemantics.nextAction || ""}>
-                      {displaySupervisedTechnicalText(selectedRun.runSemantics.nextAction, selectedRun.decision, lang, decisionLabel) || "--"}
-                    </strong>
+                    <VTooltip content={selectedRun.runSemantics.nextAction || "--"} width="wide">
+                      <strong tabIndex={0}>
+                        {displaySupervisedTechnicalText(selectedRun.runSemantics.nextAction, selectedRun.decision, lang, decisionLabel) || "--"}
+                      </strong>
+                    </VTooltip>
                   </article>
                   <article className={styles.compactFact}>
                     <span>{t("riskLevel")}</span>
@@ -449,13 +458,17 @@ export function EvolutionRunRecordsPanel({
 
             <div className={`${styles.detailSection} ${styles.detailSectionCompact}`}>
               <div className={styles.runRuntimeNote}>
-                <p title={selectedRun.outcomeSemantics.runtimeExplanation}>
-                  {displaySupervisedTechnicalText(selectedRun.outcomeSemantics.runtimeExplanation, selectedRun.decision, lang, decisionLabel)}
-                </p>
-                {selectedRun.riskReasons.length > 0 ? (
-                  <p title={selectedRun.riskReasons.join(" / ")}>
-                    {displaySupervisedTechnicalText(selectedRun.riskReasons.join(" / "), selectedRun.decision, lang, decisionLabel)}
+                <VTooltip content={selectedRun.outcomeSemantics.runtimeExplanation} width="wide">
+                  <p tabIndex={0}>
+                    {displaySupervisedTechnicalText(selectedRun.outcomeSemantics.runtimeExplanation, selectedRun.decision, lang, decisionLabel)}
                   </p>
+                </VTooltip>
+                {selectedRun.riskReasons.length > 0 ? (
+                  <VTooltip content={selectedRun.riskReasons.join(" / ")} width="wide">
+                    <p tabIndex={0}>
+                      {displaySupervisedTechnicalText(selectedRun.riskReasons.join(" / "), selectedRun.decision, lang, decisionLabel)}
+                    </p>
+                  </VTooltip>
                 ) : null}
               </div>
               {selectedRun.availableActions.length > 0 ? (
@@ -466,6 +479,7 @@ export function EvolutionRunRecordsPanel({
                       type="button"
                       className={styles.inlineAction}
                       isDisabled={runLocked || actionPending}
+                      disabledReason={runLocked ? (lang === "zh" ? "运行仍被锁定，暂不能执行提案动作。" : "The run is locked, so proposal actions are unavailable.") : actionPending ? (lang === "zh" ? "提案动作正在执行。" : "A proposal action is in progress.") : undefined}
                       onClick={() => onRunAction(selectedRun.id, action)}
                     >
                       <Sparkles size={15} />
@@ -536,6 +550,8 @@ export function EvolutionRunRecordsPanel({
                   variant="danger"
                   className={styles.inlineAction}
                   isDisabled={!selectedRun.canDelete || deleteRunRecordPending}
+                  tooltip={t("runDeleteImpact")}
+                  disabledReason={!selectedRun.canDelete ? selectedRun.deleteBlockReason || (lang === "zh" ? "当前运行记录不可删除。" : "This run record cannot be deleted.") : deleteRunRecordPending ? (lang === "zh" ? "运行记录正在删除。" : "Run record deletion is in progress.") : undefined}
                   onClick={() => onDeleteRunRecord(selectedRun.id)}
                 >
                   {deleteRunRecordPending ? <LoaderCircle size={15} /> : <Trash2 size={15} />}

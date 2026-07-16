@@ -131,6 +131,17 @@ describe("ToolsRoute layout contract", () => {
     expect(routeSource).not.toMatch(/<textarea\b/);
   });
 
+  it("moves tool and package explanations into the shared contextual-help contract", () => {
+    expect(routeSource).toContain("<VContextualHint");
+    expect(routeSource).toContain("<VTooltip");
+    expect(routeSource).toContain('tooltip={tool.description || t("toolsNoDescription")}');
+    expect(routeSource).toContain("disabledReason={!activeCanToggle");
+    expect(routeSource).toContain("disabledReason={!activeTool.deleteAllowed");
+    expect(routeSource).not.toContain("title={group.description || group.label}");
+    expect(routeSource).not.toContain('title={activeCanToggle ? undefined : activeTool.blockReason || t("toolsEnableBlocked")}');
+    expect(routeSource).not.toContain('title={activeTool.deleteAllowed ? undefined : activeTool.blockReason || t("toolsBuiltInProtected")}');
+  });
+
   it("lives inside Agent management navigation", () => {
     expect(routerSource).toContain('path: "agents/tools"');
     expect(routerSource).toContain("<ToolsRoute />");

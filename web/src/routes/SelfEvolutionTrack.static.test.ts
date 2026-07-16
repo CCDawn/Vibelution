@@ -340,6 +340,15 @@ describe("SelfEvolutionTrack static assets", () => {
     expect(centerSurface).toContain("onSubmit={activeConversationSurface.onSubmit}");
   });
 
+  it("exposes workflow and disabled action explanations through VUI tooltips", () => {
+    expect(selfEvolutionSource).toContain("tooltip={step.livePreview || step.summary || stepName}");
+    expect(selfEvolutionSource).toContain("disabledReason={topTerminateReason || undefined}");
+    expect(selfEvolutionSource).toContain("disabledReason={observationPrimaryActionDisabledReason || undefined}");
+    expect(selfEvolutionSource).toContain('tooltip={t("batchDeleteHint")}');
+    expect(selfEvolutionSource).not.toContain("title={step.livePreview || step.summary || stepName}");
+    expect(selfEvolutionSource).not.toContain("title={observationPrimaryActionDisabledReason}");
+  });
+
   it("does not split observation into a dedicated center workspace shell", () => {
     expect(selfEvolutionSource).toContain("observationConversationSessionId");
     expect(selfEvolutionSource).toContain("observationConversationReady");
