@@ -161,7 +161,7 @@ export function AgentCreatePanel({
       <div className={styles.panelHeader}>
         <div>
           <p className={styles.panelEyebrow}>{copy.createAgentTitle}</p>
-          <div className="flex min-w-0 items-center gap-1.5">
+          <div className={styles.contextualHintRow}>
             <h3>{copy.createAgent}</h3>
             <VContextualHint
               label={lang === "zh" ? "新建 Agent 说明" : "New Agent details"}
@@ -284,7 +284,7 @@ export function AgentCreatePanel({
               </VNativeSelect>
             </VFieldRow>
             <section className={styles.fieldWide}>
-              <span className="inline-flex items-center gap-1.5">
+              <span className={styles.contextualHintRow}>
                 {copy.createAgentToolBundles}
                 <VContextualHint
                   label={lang === "zh" ? "工具能力包说明" : "Tool bundle details"}

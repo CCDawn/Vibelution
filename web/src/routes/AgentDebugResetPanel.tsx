@@ -92,7 +92,7 @@ export function AgentDebugResetPanel({
       <div className={styles.panelHeader}>
         <div>
           <p className={styles.panelEyebrow}>{copy.resetAgentTitle}</p>
-          <h3 className="inline-flex items-center gap-1.5">
+          <h3 className={styles.contextualHintRow}>
             {copy.resetAgent}
             <VContextualHint content={copy.resetAgentHint} label={`${copy.resetAgentTitle}说明`} tone="danger" />
           </h3>
@@ -108,7 +108,7 @@ export function AgentDebugResetPanel({
               onChange={(event) => onOptionChange(row.key, event.target.checked)}
             />
             <span>
-              <strong className="inline-flex items-center gap-1.5">
+              <strong className={styles.contextualHintRow}>
                 {copy[row.label]}
                 <VContextualHint content={copy[row.hint]} label={`${copy[row.label]}说明`} tone="warning" />
               </strong>

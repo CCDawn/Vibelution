@@ -1068,7 +1068,8 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).toContain("工具调用 1");
     expect(html).toContain("最终回答已经完成。");
     expect(html.indexOf("answerOnlyProcessGroup")).toBeLessThan(html.indexOf("responseSection"));
-    expect(html).toContain('title="展开执行明细"');
+    expect(html).toContain('data-slot="tooltip-trigger"');
+    expect(html).not.toContain('title="展开执行明细"');
     expect(html).not.toContain("先分析缓存链路");
     expect(html).not.toContain("opened session_service.py");
   });
@@ -3936,9 +3937,9 @@ describe("ConversationView edit resend affordance", () => {
       },
     ]);
 
-    expect(html).toContain("思考过程");
+    expect(html).toContain(">思考</span>");
     expect(html).toContain("先确认后端是否捕获 thought，再看前端是否把它渲染出来。");
-    expect(html).toContain('title="展开思考过程"');
+    expect(html).not.toContain('title="展开思考过程"');
   });
 
   it("renders ordered feedback events as a collapsed execution package without counts", () => {
@@ -3983,7 +3984,7 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).not.toContain("2 轮");
     expect(html).not.toContain("3/3");
     expect(html).not.toContain("执行过程");
-    expect(html).toContain('title="展开思考过程"');
+    expect(html).not.toContain('title="展开思考过程"');
     expect(html).not.toContain('title="展开工具调用"');
     expect(html).toContain("先看日志");
     expect(html).toContain("opened latest log");
@@ -4624,7 +4625,7 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).toContain("搜索");
     expect(html).not.toContain("1 步");
     expect(html).not.toContain("1/1");
-    expect(html).toContain('title="展开工具详情"');
+    expect(html).not.toContain('title="展开工具详情"');
     expect(html).not.toContain("grep_search_tool raw result");
   });
 
@@ -4702,7 +4703,7 @@ describe("ConversationView edit resend affordance", () => {
     ]);
 
     expect(html).toContain("生成图片");
-    expect(html).toContain('title="展开工具详情"');
+    expect(html).not.toContain('title="展开工具详情"');
     expect(html).not.toContain("生成美女图片");
   });
 
@@ -4740,7 +4741,7 @@ describe("ConversationView edit resend affordance", () => {
     ]);
 
     expect(html).toContain("搜索");
-    expect(html).toContain('title="展开工具详情"');
+    expect(html).not.toContain('title="展开工具详情"');
     expect(html).not.toContain("predictive coding backpropagation equivalent implementation PyTorch");
     expect(html).not.toContain("very long line of result text");
   });
@@ -4910,7 +4911,7 @@ describe("ConversationView edit resend affordance", () => {
       },
     ]);
 
-    expect(html).toContain("思考过程");
+    expect(html).toContain(">思考</span>");
     expect(html).toContain("生成图片");
     expect(html).toContain("delegation policy blocked");
     expect(html.match(/statusSpinner/g)?.length).toBe(1);
