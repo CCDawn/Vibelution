@@ -3152,7 +3152,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                   <div className={styles.formGrid}>
                     <div className={sourceKind === "dataset" ? styles.compactFieldGrid : styles.formGrid}>
                       <div className={styles.formField}>
-                        <div className="inline-flex items-center gap-1.5">
+                        <div className={styles.formLabelWithHint}>
                           <label>{lang === "zh" ? "评测来源" : "Evaluation source"}</label>
                           <VContextualHint
                             content={lang === "zh" ? "数据集会先物化，评测包可直接运行。" : "A dataset is materialized first; a bundle runs directly."}
@@ -3184,7 +3184,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                       </div>
                       {sourceKind === "dataset" ? (
                         <div className={styles.formField}>
-                          <div className="inline-flex items-center gap-1.5">
+                          <div className={styles.formLabelWithHint}>
                             <label htmlFor="supervised-limit">{t("caseLimit")}</label>
                             <VContextualHint content={t("caseLimitHint")} label={`${t("caseLimit")}说明`} />
                           </div>
@@ -3231,7 +3231,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                       <span className={styles.checkboxLabel}>{lang === "zh" ? "保留 worktree" : "Keep worktree"}</span>
                     </VCheckbox>
                     <div className={styles.formField}>
-                      <div className="inline-flex items-center gap-1.5">
+                      <div className={styles.formLabelWithHint}>
                         <label>{t("supervisedMentalMode")}</label>
                         <VContextualHint content={t("supervisedMentalModeHint")} label={`${t("supervisedMentalMode")}说明`} />
                       </div>
@@ -3274,7 +3274,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                     <div className={styles.closedLoopLaunchBlock}>
                       <div>
                         <div className={styles.closedLoopTitleRow}>
-                          <strong className="inline-flex items-center gap-1.5">
+                          <strong className={styles.formLabelWithHint}>
                             {t("closedLoopLaunchPanelTitle")}
                             <VContextualHint content={t("closedLoopLaunchPanelHint")} label={`${t("closedLoopLaunchPanelTitle")}说明`} />
                           </strong>
@@ -3318,7 +3318,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                       <p className={styles.eyebrow}>
                         {supervisedMembersSource === "run" ? lang === "zh" ? "运行步骤" : "Run steps" : lang === "zh" ? "当前步骤" : "Current steps"}
                       </p>
-                      <h3 className={`${styles.sectionTitle} inline-flex items-center gap-1.5`}>
+                      <h3 className={`${styles.sectionTitle} ${styles.formLabelWithHint}`}>
                         {supervisedWorkflowStepLabel(supervisedSelectedWorkflowStep, lang)}
                         {supervisedMembersHint ? (
                           <VContextualHint content={supervisedMembersHint} label={lang === "zh" ? "监督成员绑定说明" : "Supervised member binding help"} width="wide" />

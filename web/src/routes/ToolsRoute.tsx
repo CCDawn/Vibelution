@@ -1776,7 +1776,7 @@ export function ToolsRoute() {
               <section key={group.bundleId} className={styles.toolBundleGroup}>
                 <header className={styles.toolBundleHeader}>
                   <div>
-                    <strong className="inline-flex items-center gap-1.5">
+                    <strong className={styles.toolBundleTitle}>
                       {group.label}
                       <VContextualHint content={group.description || group.label} label={`${group.label}说明`} width="wide" />
                     </strong>

@@ -419,6 +419,8 @@ const styles = {
     "toolBundleGroup min-w-0 max-w-full rounded-[var(--radius-control)] border border-[color:color-mix(in_srgb,var(--accent-warm)_16%,transparent)] bg-[color:color-mix(in_srgb,var(--accent-warm)_4%,transparent)] p-[5px]",
   toolBundleHeader:
     "toolBundleHeader min-w-0 flex flex-wrap items-center justify-between gap-1 px-1 pb-[3px] text-[var(--vui-font-xs)]",
+  toolBundleTitle:
+    "inline-flex items-center gap-1.5",
   toolBundleItems:
     "toolBundleItems min-w-0 grid min-h-0 content-start gap-1 overflow-auto",
   toolBundleSelect:
