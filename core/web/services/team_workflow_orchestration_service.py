@@ -1497,7 +1497,12 @@ def start_source_collection_stage_session_task(
         "sourceContextMode": source_context_mode,
         "retrySourceTaskId": (
             _trim_text(previous_stage_task.get("taskId"), max_length=160)
-            if source_context_mode in {"retry_missing", "retry_evidence"} and isinstance(previous_stage_task, dict)
+            if (
+                source_context_mode in {"retry_missing", "retry_evidence"}
+                or _source_collection_stage_task_needs_writeback_resume(previous_stage_task)
+                or stage_id == "extraction"
+            )
+            and isinstance(previous_stage_task, dict)
             else ""
         ),
         "sessionIsolation": session_isolation,

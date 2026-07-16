@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
+from concurrent.futures import Future, ThreadPoolExecutor
+from typing import AsyncIterator, Iterator
 from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException, Query, Request, status
@@ -21,6 +24,7 @@ from core.web.services.session_service import (
     delete_chat_session,
     delete_chat_session_lightweight,
     edit_and_resubmit_session_message,
+    get_active_session_summary,
     get_session_detail,
     get_session_llm_options,
     list_child_sessions,
@@ -43,6 +47,52 @@ from core.web.services.runtime_scene_service import record_runtime_scene_event
 
 
 router = APIRouter(tags=["sessions"])
+_SESSION_STREAM_EXECUTOR = ThreadPoolExecutor(max_workers=4, thread_name_prefix="session-stream")
+_SESSION_STREAM_END = object()
+
+
+def _next_session_stream_item(iterator: Iterator[str]) -> str | object:
+    try:
+        return next(iterator)
+    except StopIteration:
+        return _SESSION_STREAM_END
+
+
+def _close_session_stream_iterator(iterator: Iterator[str]) -> None:
+    close = getattr(iterator, "close", None)
+    if not callable(close):
+        return
+    try:
+        close()
+    except ValueError:
+        # A disconnect can race the worker finishing queue.get(); the pending
+        # future callback retries close after next() leaves the generator.
+        return
+
+
+def _close_session_stream_after_pending(iterator: Iterator[str], _future: Future[object]) -> None:
+    _SESSION_STREAM_EXECUTOR.submit(_close_session_stream_iterator, iterator)
+
+
+async def _iterate_session_stream(iterator: Iterator[str]) -> AsyncIterator[str]:
+    pending: Future[object] | None = None
+    try:
+        while True:
+            pending = _SESSION_STREAM_EXECUTOR.submit(_next_session_stream_item, iterator)
+            item = await asyncio.wrap_future(pending)
+            pending = None
+            if item is _SESSION_STREAM_END:
+                break
+            yield str(item)
+    finally:
+        if pending is not None and not pending.done():
+            pending.add_done_callback(lambda future: _close_session_stream_after_pending(iterator, future))
+        else:
+            await asyncio.get_running_loop().run_in_executor(
+                _SESSION_STREAM_EXECUTOR,
+                _close_session_stream_iterator,
+                iterator,
+            )
 
 
 def _record_session_attachment_upload_rejected(
@@ -165,6 +215,12 @@ class ChildSessionCreatePayload(BaseModel):
 @router.get("/sessions")
 def sessions() -> list[dict]:
     return list_sessions()
+
+
+@router.get("/sessions/active")
+def active_session() -> dict[str, str]:
+    summary = get_active_session_summary() or {}
+    return {"activeSessionId": str(summary.get("id") or "").strip()}
 
 
 @router.get("/sessions/query")
@@ -301,18 +357,24 @@ def session_delete(session_id: str, request: Request) -> dict:
 
 
 @router.get("/sessions/{session_id}/events")
-def session_events(session_id: str, initial: str = Query("light")) -> StreamingResponse:
+async def session_events(session_id: str, initial: str = Query("light")) -> StreamingResponse:
     try:
-        initial_mode, detail, initial_state = resolve_session_stream_initial_payload(session_id, initial)
+        initial_mode, detail, initial_state = await asyncio.get_running_loop().run_in_executor(
+            _SESSION_STREAM_EXECUTOR,
+            resolve_session_stream_initial_payload,
+            session_id,
+            initial,
+        )
     except SessionNotFoundError as exc:
         raise HTTPException(status_code=404, detail="Session not found") from exc
+    iterator = stream_session_events(
+        session_id,
+        initial_detail=detail,
+        initial=initial_mode,
+        initial_state=initial_state,
+    )
     return StreamingResponse(
-        stream_session_events(
-            session_id,
-            initial_detail=detail,
-            initial=initial_mode,
-            initial_state=initial_state,
-        ),
+        _iterate_session_stream(iterator),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
