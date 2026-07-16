@@ -8112,11 +8112,12 @@ def _research_review_checklist(candidate: dict[str, Any]) -> tuple[dict[str, boo
     candidate_type = str(candidate.get("candidateType") or "")
     cpayload = candidate.get("payload") if isinstance(candidate.get("payload"), dict) else {}
     cmeta = candidate.get("metadata") if isinstance(candidate.get("metadata"), dict) else {}
+    model_output = cmeta.get("output") if isinstance(cmeta.get("output"), dict) else {}
 
     def field(name: str) -> Any:
-        return candidate.get(name) or cpayload.get(name) or cmeta.get(name)
+        return candidate.get(name) or cpayload.get(name) or model_output.get(name) or cmeta.get(name)
 
-    evidence = candidate.get("evidenceRefs") or cpayload.get("evidenceRefs")
+    evidence = candidate.get("evidenceRefs") or cpayload.get("evidenceRefs") or model_output.get("evidenceRefs")
     over_analogy = str(field("overAnalogyRisk") or "").strip().lower()
     has_experiment = bool(field("experimentPlan"))
     needs_fact_boundary = candidate_type in ("mechanism_mapping", "algorithm_hypothesis")
