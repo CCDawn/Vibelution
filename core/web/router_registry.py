@@ -23,6 +23,7 @@ from .routes.memory import router as memory_router
 from .routes.pet import router as pet_router
 from .routes.project_agent_bus import router as project_agent_bus_router
 from .routes.research import router as research_router
+from .routes.research_evidence import router as research_evidence_router
 from .routes.research_loop import router as research_loop_router
 from .routes.reset import router as reset_router
 from .routes.runtime import router as runtime_router
@@ -61,6 +62,7 @@ def register_web_routers(app: FastAPI) -> None:
     app.include_router(memory_router, prefix="/api")
     app.include_router(user_content_router, prefix="/api")
     app.include_router(research_router, prefix="/api")
+    app.include_router(research_evidence_router, prefix="/api")
     app.include_router(research_loop_router, prefix="/api")
     app.include_router(diagnostics_router, prefix="/api")
     app.include_router(evolution_router, prefix="/api")
