@@ -1248,13 +1248,20 @@ def record_runtime_scene_conversation_event(
                 ],
             },
         )
-        _update_runtime_scene_package_manifest(scene_dir, manifest)
+        # Conversation breadcrumbs are emitted from the chat turn hot path (or
+        # its ordered projection worker). A complete diagnosis rebuild can hold
+        # the GIL and package lock for seconds, delaying turn scheduling even
+        # when the caller uses a background executor. Persist the bounded event
+        # and lightweight sidecars here; runtime-scene detail reads rebuild the
+        # full diagnosis on demand.
+        _update_runtime_scene_package_manifest_lightweight(scene_dir, manifest)
 
     return {
         "accepted": True,
         "runtimeSceneId": scene_id,
         "recordedAt": timestamp,
         "path": relative_path,
+        "projectionRefresh": "lightweight",
     }
 
 
