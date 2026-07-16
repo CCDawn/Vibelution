@@ -25,7 +25,7 @@ from config.public_config import build_effective_config, load_public_config
 from core.chat.conversation_ledger import load_conversation_events
 from core.infrastructure import developer_sandbox
 from core.llm import LLMClient, LLMInvocationContext, invoke_llm
-from core.research import smoke_runner
+from core.research import experiment_contract, smoke_runner
 from core.runtime_manager import work_run_store
 from core.web.services import agent_directory_service, candidate_schema_registry, chat_room_service, data_processing_service, session_service, team_knowledge_service, team_service
 from core.web.services.runtime_scene_service import record_runtime_scene_event
@@ -6800,6 +6800,32 @@ def get_experiment_planning_status(team_id: str) -> dict[str, Any]:
     return _experiment_planning_status(normalized_team_id, rounds, candidate_store, plan_store)
 
 
+def get_experiment_method_catalog(team_id: str) -> dict[str, Any]:
+    normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
+    team_service.get_team(normalized_team_id)
+    methods = experiment_contract.list_experiment_methods()
+    for method in methods:
+        method_id = str(method.get("methodId") or "")
+        method["adapterAvailability"] = {
+            mode: experiment_contract.resolve_adapter_selection(method_id, mode)
+            for mode in experiment_contract.RESEARCH_MODES
+        }
+    return {
+        "schemaVersion": experiment_contract.SCHEMA_VERSION,
+        "teamId": normalized_team_id,
+        "researchModes": experiment_contract.list_research_modes(),
+        "experimentPurposes": experiment_contract.list_experiment_purposes(),
+        "methods": methods,
+        "adapters": experiment_contract.list_experiment_adapters(),
+        "boundaries": {
+            "methodCatalogSource": "backend_registry",
+            "environmentProbeRole": "adapter_preflight",
+            "evidenceReviewRole": "upstream_research_stage",
+            "llmSelectsAdapterId": False,
+        },
+    }
+
+
 def create_experiment_plan(team_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
     normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
     team = team_service.get_team(normalized_team_id)
@@ -6862,6 +6888,11 @@ def create_experiment_plan(team_id: str, payload: dict[str, Any] | None = None) 
             "stageRoundId": stage_round["stageRoundId"],
             "planId": plan["planId"],
             "selectedHypothesisCount": len(plan.get("selectedHypotheses") or []),
+            "experimentContractSchemaVersion": int((plan.get("experimentContract") or {}).get("schemaVersion") or 0),
+            "researchMode": str((plan.get("experimentContract") or {}).get("researchMode") or ""),
+            "experimentMethod": str((plan.get("experimentContract") or {}).get("experimentMethod") or ""),
+            "adapterAvailable": bool((plan.get("contractValidation") or {}).get("adapterAvailable")),
+            "contractValid": bool((plan.get("contractValidation") or {}).get("valid")),
             "readyForPlanReview": bool((plan.get("readiness") or {}).get("readyForPlanReview")),
             "readyForFullRun": False,
             "createdByAgent": created_by_agent,
@@ -15359,7 +15390,7 @@ def _load_experiment_plan_store(team_id: str) -> dict[str, Any]:
     if path.exists():
         payload = _read_json(path)
         if payload.get("storeKind") == EXPERIMENT_PLAN_STORE_KIND and isinstance(payload.get("plans"), list):
-            return payload
+            return experiment_contract.project_plan_store_contracts(payload)
     now = utc_now_iso()
     payload = {
         "schemaVersion": SCHEMA_VERSION,
@@ -21519,6 +21550,38 @@ def _build_experiment_plan_record(
     metric = _first_non_empty_text(payload.get("metric"), payload_plan.get("metric"), *[item.get("experimentPlan", {}).get("metric") for item in hypothesis_summaries])
     baseline = _first_non_empty_text(payload.get("baseline"), payload_plan.get("baseline"), *[item.get("experimentPlan", {}).get("baseline") for item in hypothesis_summaries], *[item.get("baseline") for item in hypothesis_summaries])
     smoke_plan = _first_non_empty_text(payload.get("smokePlan"), payload_plan.get("smokePlan"), *[item.get("experimentPlan", {}).get("smokePlan") for item in hypothesis_summaries])
+    plan_id = _new_record_id("exp-plan")
+    hypothesis_refs = [str(item.get("candidateId") or "") for item in selected_hypotheses if item.get("candidateId")]
+    evidence_refs = _dedupe_text_values(
+        [
+            _first_non_empty_text(ref.get("id"), ref.get("evidenceRef"), ref.get("sourceRef"))
+            for item in hypothesis_summaries
+            for ref in list(item.get("evidenceRefs") or [])
+            if isinstance(ref, dict)
+        ],
+    )
+    research_question = _first_non_empty_text(
+        payload.get("researchQuestion"),
+        stage_round.get("goal"),
+        stage_round.get("topic"),
+        *[item.get("hypothesis") for item in hypothesis_summaries],
+    )
+    legacy_experiment_plan = {
+        "dataset": dataset,
+        "metric": metric,
+        "baseline": baseline,
+        "smokePlan": smoke_plan,
+    }
+    contract = experiment_contract.build_experiment_contract(
+        plan_id=plan_id,
+        team_id=team_id,
+        research_question=research_question,
+        payload=payload,
+        legacy_plan=legacy_experiment_plan,
+        hypothesis_refs=hypothesis_refs,
+        evidence_refs=evidence_refs,
+    )
+    contract_validation = experiment_contract.validate_experiment_contract(contract)
     checklist = _experiment_plan_checklist(
         stage_round=stage_round,
         hypothesis_summaries=hypothesis_summaries,
@@ -21532,7 +21595,7 @@ def _build_experiment_plan_record(
     blockers = [item["item"] for item in checklist if item["status"] != "pass"]
     return {
         "schemaVersion": SCHEMA_VERSION,
-        "planId": _new_record_id("exp-plan"),
+        "planId": plan_id,
         "teamId": team_id,
         "workflowId": workflow.get("workflowId", DEFAULT_WORKFLOW_ID),
         "stageRoundId": stage_round.get("stageRoundId", ""),
@@ -21542,14 +21605,22 @@ def _build_experiment_plan_record(
         "topic": stage_round.get("topic", ""),
         "goal": stage_round.get("goal", ""),
         "selectedHypotheses": hypothesis_summaries,
-        "hypothesisCandidateIds": [str(item.get("candidateId") or "") for item in selected_hypotheses if item.get("candidateId")],
+        "hypothesisCandidateIds": hypothesis_refs,
         "upstreamRoundIds": list(stage_round.get("upstreamRoundIds") or []),
-        "experimentPlan": {
-            "dataset": dataset,
-            "metric": metric,
-            "baseline": baseline,
-            "smokePlan": smoke_plan,
+        "experimentContract": contract,
+        "contractValidation": contract_validation,
+        "contractMigration": {
+            "status": "native_v2",
+            "sourceSchemaVersion": experiment_contract.SCHEMA_VERSION,
+            "targetSchemaVersion": experiment_contract.SCHEMA_VERSION,
+            "missingFields": list(contract_validation.get("missingFields") or []),
+            "persistOnNextMutation": False,
         },
+        "compatibility": {
+            "legacyExperimentPlanProjection": "read_only_derived",
+            "removalTrigger": "Teams experiment card and all API clients consume experimentContract schema v2",
+        },
+        "experimentPlan": legacy_experiment_plan,
         "baselineSelection": {
             "baseline": baseline,
             "status": "planned_not_validated" if baseline else "missing",
@@ -22028,6 +22099,7 @@ def _refresh_experiment_plan_readiness(plan: dict[str, Any]) -> None:
     risk_controls["knowledgeIngestionBlockedUntil"] = knowledge_blockers
     risk_controls["activeFullRunResultStatus"] = active_full_run_status
     plan["riskControls"] = risk_controls
+    experiment_contract.sync_plan_record_contract_status(plan)
 
 
 def _active_experiment_smoke_evidence(plan: dict[str, Any] | None) -> dict[str, Any] | None:

@@ -1059,18 +1059,13 @@ def _reconcile_stale_session_ledger(session_id: str, *, active_turn_id: str = ""
                     },
                     source="recover_live_output_checkpoint",
                 )
-        event = append_conversation_event(
-            PROJECT_ROOT,
+        event = _append_stale_turn_interruption_if_session_inactive(
             normalized_session_id,
             turn_id,
-            EVENT_TURN_INTERRUPTED,
-            status="interrupted",
-            payload={
-                "reason": str(reason or "process_restarted").strip() or "process_restarted",
-                "marker": TURN_INTERRUPTED_MARKER,
-            },
-            source="session_service",
+            reason=reason,
         )
+        if event is None:
+            return
         event_turn_id = str(event.turn_id or turn_id)
         _invalidate_session_conversation_events_cache(normalized_session_id)
         _discard_session_live_output_state(normalized_session_id, turn_id=turn_id)
@@ -1094,6 +1089,42 @@ def _reconcile_stale_session_ledger(session_id: str, *, active_turn_id: str = ""
         )
     except Exception:
         return
+
+
+def _append_stale_turn_interruption_if_session_inactive(
+    session_id: str,
+    turn_id: str,
+    *,
+    reason: str,
+) -> Any | None:
+    """Close a stale ledger turn only while no live turn can become active.
+
+    Session detail hydration may start reconciliation just before a new submit
+    marks the same session active.  Serialize the final liveness check with the
+    running-session transition so reconciliation can never terminate that new
+    turn after observing an older process-local snapshot.
+    """
+
+    normalized_session_id = str(session_id or "").strip()
+    normalized_turn_id = str(turn_id or "").strip()
+    with _RUNNING_SESSIONS_LOCK:
+        if (
+            normalized_session_id in _RUNNING_SESSION_IDS
+            or str(_SESSION_ACTIVE_TURN_IDS.get(normalized_session_id) or "").strip()
+        ):
+            return None
+        return append_conversation_event(
+            PROJECT_ROOT,
+            normalized_session_id,
+            normalized_turn_id,
+            EVENT_TURN_INTERRUPTED,
+            status="interrupted",
+            payload={
+                "reason": str(reason or "process_restarted").strip() or "process_restarted",
+                "marker": TURN_INTERRUPTED_MARKER,
+            },
+            source="session_service",
+        )
 
 
 def _session_ledger_sequence(session_id: str) -> int:
