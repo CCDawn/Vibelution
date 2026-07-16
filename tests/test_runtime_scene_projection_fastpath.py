@@ -99,3 +99,57 @@ def test_backend_api_telemetry_never_rebuilds_full_projection_on_request_path(
     ]
     assert backend_events[-1]["level"] == expected_level
     assert backend_events[-1]["fields"]["statusCode"] == status_code
+
+
+@pytest.mark.parametrize(
+    ("status", "expected_level"),
+    [
+        ("running", "info"),
+        ("failed", "error"),
+    ],
+)
+def test_conversation_telemetry_never_rebuilds_full_projection_on_turn_path(
+    tmp_path,
+    monkeypatch,
+    status: str,
+    expected_level: str,
+) -> None:
+    scene_dir = _point_runtime_scene_at(tmp_path, monkeypatch, scene_id=f"scene-conversation-{status}")
+    full_calls: list[tuple] = []
+    lightweight_calls: list[tuple] = []
+    monkeypatch.setattr(
+        runtime_scene_service,
+        "_update_runtime_scene_package_manifest",
+        lambda scene, manifest: full_calls.append((scene, manifest)),
+    )
+    monkeypatch.setattr(
+        runtime_scene_service,
+        "_update_runtime_scene_package_manifest_lightweight",
+        lambda scene, manifest: lightweight_calls.append((scene, manifest)),
+    )
+
+    result = runtime_scene_service.record_runtime_scene_conversation_event(
+        "session-hotpath",
+        "user",
+        "redacted by the telemetry writer",
+        message={
+            "id": "message-hotpath",
+            "role": "user",
+            "metadata": {"turnId": "turn-hotpath"},
+        },
+        event="user_message",
+        status=status,
+    )
+
+    assert result["projectionRefresh"] == "lightweight"
+    assert len(lightweight_calls) == 1
+    assert lightweight_calls[0][0] == scene_dir
+    assert full_calls == []
+    conversation_events = [
+        json.loads(line)
+        for line in (scene_dir / "events" / "conversation.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    assert conversation_events[-1]["level"] == expected_level
+    assert conversation_events[-1]["fields"]["contentRedacted"] is True
+    assert conversation_events[-1]["fields"]["turnId"] == "turn-hotpath"
