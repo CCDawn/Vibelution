@@ -1430,6 +1430,7 @@ def start_source_collection_stage_session_task(
         stage_id=stage_id,
         agent_role=agent_role,
         previous_task=previous_stage_task,
+        source_candidates=source_candidates,
     )
     task_message = _source_collection_stage_session_task_message(
         team=team,
@@ -20273,12 +20274,16 @@ def _source_collection_stage_task_context_mode(
     stage_id: str,
     agent_role: str,
     previous_task: dict[str, Any] | None,
+    source_candidates: list[dict[str, Any]] | None = None,
 ) -> str:
     can_materialize_formal_knowledge = _source_collection_stage_can_materialize_formal_knowledge(stage_id, agent_role)
     if stage_id == "extraction" and not can_materialize_formal_knowledge:
         if _source_collection_stage_task_has_missing_coverage(previous_task):
             return "retry_missing"
-        if _source_collection_stage_task_has_evidence_gaps(previous_task):
+        if _source_collection_stage_evidence_retry_focus(
+            previous_task or {},
+            list(source_candidates or []),
+        ):
             return "retry_evidence"
         return "evidence"
     if stage_id == "relations":
@@ -20339,6 +20344,7 @@ def _source_collection_stage_session_task_message(
         stage_id=stage_id,
         agent_role=agent_role,
         previous_task=previous_task,
+        source_candidates=source_candidates,
     )
     context_tool_payload = {
         "team_id": writeback_contract.get("teamId", ""),

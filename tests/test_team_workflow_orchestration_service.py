@@ -4770,6 +4770,20 @@ def test_source_collection_context_retry_evidence_returns_only_missing_anchor_ca
     assert completed_retry_context["candidates"] == []
     assert completed_retry_context.get("retryFocus") in (None, {})
 
+    follow_up_task = team_workflow_orchestration_service.start_source_collection_stage_session_task(
+        team["teamId"],
+        run_id,
+        {
+            "stageId": "extraction",
+            "agentId": agent["agentId"],
+            "agentRole": "source_extractor",
+            "idempotencyKey": "review-after-evidence-retry-settled",
+        },
+    )
+
+    assert follow_up_task["task"]["sourceContextMode"] == "evidence"
+    assert follow_up_task["task"]["retrySourceTaskId"] == ""
+
 
 def test_source_collection_extraction_resume_after_interrupted_reading_prioritizes_writeback(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
