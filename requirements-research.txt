@@ -1,0 +1,2 @@
+# Optional research adapters. Install in an isolated environment until T0 compatibility gates pass.
+paper-qa==2026.3.18
