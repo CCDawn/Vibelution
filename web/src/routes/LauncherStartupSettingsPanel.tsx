@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 
 import type { LauncherStartupSettings } from "../api/launcher";
 import type { WorkbenchWindowMode, WorkbenchWindowModeUpdateRequest } from "../api/types";
-import { VButton, VNativeInput, VNativeSelect } from "../components/vui";
+import { VButton, VNativeInput, VNativeSelect, VTooltip } from "../components/vui";
 import styles from "./LauncherStartupSettingsPanel.styles";
 
 type LauncherStartupSettingsCopy = {
@@ -200,10 +200,12 @@ export function LauncherStartupSettingsPanel({
 
   return (
     <div className={styles.settingsStrip} aria-label={copy.startupSettings}>
-      <div className={styles.settingsHeader} title={windowModeDetail}>
-        <span>{copy.startupSettings}</span>
-        <strong>{effectiveWindowModeLabel}</strong>
-      </div>
+      <VTooltip content={windowModeDetail} width="wide">
+        <div className={styles.settingsHeader} tabIndex={0}>
+          <span>{copy.startupSettings}</span>
+          <strong>{effectiveWindowModeLabel}</strong>
+        </div>
+      </VTooltip>
       <label className={styles.settingField}>
         <span>{copy.runtimeProfile}</span>
         <VNativeSelect
@@ -261,7 +263,7 @@ export function LauncherStartupSettingsPanel({
           data-active={draft.workbench.windowMode === "fullscreen"}
           isDisabled={controlsDisabled}
           onPress={() => saveWindowMode({ windowMode: "fullscreen" })}
-          title={copy.windowModeFullscreen}
+          tooltip={copy.windowModeFullscreen}
           icon={pendingWindowMode === "fullscreen" ? <LoaderCircle size={14} className={styles.spin} /> : <Maximize2 size={14} />}
         >
           <span>{copy.windowModeFullscreen}</span>
@@ -272,7 +274,7 @@ export function LauncherStartupSettingsPanel({
           data-active={draft.workbench.windowMode === "windowed"}
           isDisabled={controlsDisabled}
           onPress={() => saveWindowMode({ windowMode: "windowed" })}
-          title={copy.windowModeWindowed}
+          tooltip={copy.windowModeWindowed}
           icon={pendingWindowMode === "windowed" ? <LoaderCircle size={14} className={styles.spin} /> : <Minimize2 size={14} />}
         >
           <span>{copy.windowModeWindowed}</span>

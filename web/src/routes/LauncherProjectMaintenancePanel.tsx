@@ -5,7 +5,7 @@ import type {
   LauncherMaintenanceProfileId,
   LauncherMaintenanceSummary,
 } from "../api/types";
-import { VButton } from "../components/vui";
+import { VButton, VTooltip } from "../components/vui";
 import styles from "./LauncherProjectMaintenancePanel.styles";
 
 type LauncherProjectMaintenanceCopy = {
@@ -100,14 +100,16 @@ export function LauncherProjectMaintenancePanel({
       data-endpoint-apply="maintenance/reset/apply"
     >
       <div className={styles.developerPanelHeader}>
-        <div title={copy.maintenanceHint}>
-          <p className={styles.panelEyebrow}>Launcher 维护中心</p>
-          <strong>{copy.maintenanceTitle}</strong>
-        </div>
-        <VButton type="button" variant="secondary" className={styles.iconButton} onPress={onPreview} isDisabled={!canPreview} title={copy.maintenancePreview} icon={previewPending ? <LoaderCircle size={15} className={styles.spin} /> : <Trash2 size={15} />}>
+        <VTooltip content={copy.maintenanceHint} width="wide">
+          <div tabIndex={0}>
+            <p className={styles.panelEyebrow}>Launcher 维护中心</p>
+            <strong>{copy.maintenanceTitle}</strong>
+          </div>
+        </VTooltip>
+        <VButton type="button" variant="secondary" className={styles.iconButton} onPress={onPreview} isDisabled={!canPreview} disabledReason={loading ? copy.maintenanceLoading : copy.maintenanceHint} tooltip={copy.maintenancePreview} icon={previewPending ? <LoaderCircle size={15} className={styles.spin} /> : <Trash2 size={15} />}>
           <span>{copy.maintenancePreview}</span>
         </VButton>
-        <VButton type="button" variant="primary" className={styles.primaryButton} onPress={onApply} isDisabled={!canApply} title={canApply ? copy.maintenanceApply : applyTitle} icon={applyPending ? <LoaderCircle size={15} className={styles.spin} /> : <ShieldCheck size={15} />}>
+        <VButton type="button" variant="primary" className={styles.primaryButton} onPress={onApply} isDisabled={!canApply} disabledReason={applyTitle} tooltip={copy.maintenanceApply} icon={applyPending ? <LoaderCircle size={15} className={styles.spin} /> : <ShieldCheck size={15} />}>
           <span>{copy.maintenanceApply}</span>
         </VButton>
       </div>

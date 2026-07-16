@@ -66,6 +66,8 @@ describe("PromptTemplatesRoute layout contract", () => {
   it("keeps prompt edits coherent with Agent workspace cache and frozen session snapshots", () => {
     expect(routeSource).toContain("queryKeys.agentConfigWorkspace()");
     expect(routeSource).toContain("copy.snapshotNotice");
+    expect(routeSource).toContain("tooltip={copy.snapshotNotice}");
+    expect(routeSource).not.toContain('<p className={styles.helperTextClass}>{copy.snapshotNotice}</p>');
     expect(routeSource).toContain("editableTemplate?.hasDefault");
     expect(routeSource).toContain("if (!template.hasDefault)");
     expect(routeSource).not.toContain("if (!template.defaultContent?.trim())");
@@ -120,6 +122,8 @@ describe("PromptTemplatesRoute layout contract", () => {
     expect(routeSource).toContain("window.confirm(copy.bulkResetConfirm)");
     expect(routeSource).toContain("bulkActionBarClass");
     expect(routeSource).toContain("selectableRowClass");
+    expect(routeSource).toContain("<VTooltip content={`${copy.bulkSelected}:");
+    expect(routeSource).toContain("disabledReason={bulkPromptPending ? copy.bulkWorking : copy.bulkNoSelection}");
     expect(routeSource).toContain('method: "PATCH"');
     expect(routeSource).toContain('method: "POST"');
     expect(routeSource).toContain("/reset`");

@@ -6,7 +6,7 @@ import type {
   LauncherDeveloperModeSetting,
   LauncherDeveloperNoiseOverview,
 } from "../api/types";
-import { VButton, VNativeSelect } from "../components/vui";
+import { VButton, VNativeSelect, VTooltip } from "../components/vui";
 import styles from "./LauncherDeveloperModePanel.styles";
 
 type LauncherDeveloperModeCopy = {
@@ -139,17 +139,20 @@ export function LauncherDeveloperModePanel({
   return (
     <section className={styles.developerPanel} data-enabled={enabled}>
       <div className={styles.developerPanelHeader}>
-        <div title={copy.developerModeHint}>
-          <p className={styles.panelEyebrow}>{copy.developerModeControlled}</p>
-          <strong>{copy.developerModeTitle}</strong>
-        </div>
+        <VTooltip content={copy.developerModeHint} width="wide">
+          <div tabIndex={0}>
+            <p className={styles.panelEyebrow}>{copy.developerModeControlled}</p>
+            <strong>{copy.developerModeTitle}</strong>
+          </div>
+        </VTooltip>
         <VButton
           type="button"
           variant={enabled ? "danger" : "primary"}
           className={enabled ? `${styles.iconButton} ${styles.dangerButton}` : styles.primaryButton}
           isDisabled={controlsDisabled}
+          disabledReason={pending ? copy.developerModeControlled : copy.developerModeSettingsReadonly}
           onPress={() => onToggle(!enabled, setting?.configHash ?? "")}
-          title={enabled ? copy.developerModeDisable : copy.developerModeEnable}
+          tooltip={enabled ? copy.developerModeDisable : copy.developerModeEnable}
           icon={pending ? <LoaderCircle size={15} className={styles.spin} /> : <ShieldCheck size={15} />}
         >
           <span>{enabled ? copy.developerModeDisable : copy.developerModeEnable}</span>
@@ -159,8 +162,9 @@ export function LauncherDeveloperModePanel({
           variant="secondary"
           className={styles.iconButton}
           isDisabled={!enabled || controlsDisabled || resetPending}
+          disabledReason={!enabled ? copy.cleanupDisabledOff : resetPending ? copy.developerModeControlled : copy.developerModeSettingsReadonly}
           onPress={onReset}
-          title={copy.developerModeResetSandbox}
+          tooltip={copy.developerModeResetSandbox}
           icon={resetPending ? <LoaderCircle size={15} className={styles.spin} /> : <RefreshCw size={15} />}
         >
           <span>{copy.developerModeResetSandbox}</span>
@@ -175,7 +179,7 @@ export function LauncherDeveloperModePanel({
         <div className={styles.developerNoise}>
           <div className={styles.developerNoiseHeader}>
             <span>{copy.developerModeNoiseOverview}</span>
-            <VButton type="button" variant="secondary" className={styles.compactButton} onPress={onRefreshNoise} isDisabled={noiseLoading} icon={noiseLoading ? <LoaderCircle size={13} className={styles.spin} /> : <RefreshCw size={13} />}>
+            <VButton type="button" variant="secondary" className={styles.compactButton} onPress={onRefreshNoise} isDisabled={noiseLoading} disabledReason={copy.developerModeNoiseLoading} tooltip={copy.developerModeRefreshNoise} icon={noiseLoading ? <LoaderCircle size={13} className={styles.spin} /> : <RefreshCw size={13} />}>
               <span>{copy.developerModeRefreshNoise}</span>
             </VButton>
           </div>
@@ -191,23 +195,25 @@ export function LauncherDeveloperModePanel({
           </div>
         </div>
         <div className={styles.cleanupConsole}>
-          <label className={styles.settingField} title={selectedOption.detail}>
-            <span>{copy.developerModeAction}</span>
-            <VNativeSelect value={selectedAction} disabled={previewPending || applyPending} onChange={(event) => onSelectAction(event.target.value as LauncherDeveloperCleanupAction)}>
-              {actionOptions.map((option) => (
-                <option key={option.action} value={option.action}>{option.label}</option>
-              ))}
-            </VNativeSelect>
-          </label>
+          <VTooltip content={selectedOption.detail} width="wide">
+            <label className={styles.settingField}>
+              <span>{copy.developerModeAction}</span>
+              <VNativeSelect value={selectedAction} disabled={previewPending || applyPending} onChange={(event) => onSelectAction(event.target.value as LauncherDeveloperCleanupAction)}>
+                {actionOptions.map((option) => (
+                  <option key={option.action} value={option.action}>{option.label}</option>
+                ))}
+              </VNativeSelect>
+            </label>
+          </VTooltip>
           <div className={styles.cleanupMetrics}>
             <span>{copy.cleanupEstimated}: <strong>{formatBytes(matchingOverview?.sizeBytes ?? plan?.estimatedBytes ?? 0)}</strong></span>
             <span>{copy.cleanupTargets}: <strong>{matchingOverview?.targetCount ?? plan?.targetCount ?? 0}</strong></span>
           </div>
           <div className={styles.cleanupActions}>
-            <VButton type="button" variant="secondary" className={styles.iconButton} isDisabled={!canPreview} onPress={onPreview} title={!enabled ? copy.cleanupDisabledOff : copy.cleanupPreview} icon={previewPending ? <LoaderCircle size={14} className={styles.spin} /> : <Trash2 size={14} />}>
+            <VButton type="button" variant="secondary" className={styles.iconButton} isDisabled={!canPreview} disabledReason={!enabled ? copy.cleanupDisabledOff : copy.developerModeSettingsReadonly} onPress={onPreview} tooltip={copy.cleanupPreview} icon={previewPending ? <LoaderCircle size={14} className={styles.spin} /> : <Trash2 size={14} />}>
               <span>{copy.cleanupPreview}</span>
             </VButton>
-            <VButton type="button" variant="primary" className={styles.primaryButton} isDisabled={!canApply} onPress={onApply} title={!enabled ? copy.cleanupDisabledOff : copy.cleanupApply} icon={applyPending ? <LoaderCircle size={14} className={styles.spin} /> : selectedAction === "db_compact" ? <Database size={14} /> : <HardDrive size={14} />}>
+            <VButton type="button" variant="primary" className={styles.primaryButton} isDisabled={!canApply} disabledReason={!enabled ? copy.cleanupDisabledOff : copy.cleanupPlanEmpty} onPress={onApply} tooltip={copy.cleanupApply} icon={applyPending ? <LoaderCircle size={14} className={styles.spin} /> : selectedAction === "db_compact" ? <Database size={14} /> : <HardDrive size={14} />}>
               <span>{copy.cleanupApply}</span>
             </VButton>
           </div>

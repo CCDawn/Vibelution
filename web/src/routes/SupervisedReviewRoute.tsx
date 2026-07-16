@@ -16,7 +16,7 @@ import {
 } from "../api/types";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
 import { PaneCollapseHandle } from "../components/layout/PaneCollapseHandle";
-import { VButton, VNativeInput, VNativeSelect, VNativeTextarea } from "../components/vui";
+import { VButton, VNativeInput, VNativeSelect, VNativeTextarea, VTooltip } from "../components/vui";
 import { useAppI18n } from "../i18n/useAppI18n";
 import { createEvolutionWorkspaceCache } from "./evolutionWorkspaceCache";
 import { SupervisedWorkspaceControls } from "./SupervisedWorkspaceControls";
@@ -520,6 +520,9 @@ export function SupervisedReviewRoute() {
                   key={value}
                   type="button"
                   className={filter === value ? `${styles.filterButton} ${styles.filterButtonActive}` : styles.filterButton}
+                  tooltip={value === "pending"
+                    ? (lang === "zh" ? "待审样本默认排在前面，便于连续裁决。" : "Pending items stay at the front for continuous review.")
+                    : undefined}
                   onClick={() => setFilter(value)}
                 >
                   {filterLabel(value)}
@@ -538,7 +541,7 @@ export function SupervisedReviewRoute() {
           </div>
 
           <div className={styles.queueMeta}>
-            <span>{lang === "zh" ? "默认先处理待审样本" : "Pending items stay at the front"}</span>
+            <span>{lang === "zh" ? "待审" : "Pending"}</span>
             <strong>{pendingOnlyCount}</strong>
           </div>
 
@@ -553,6 +556,7 @@ export function SupervisedReviewRoute() {
                   type="button"
                   className={styles.compactAction}
                   isDisabled={visiblePendingCount === 0}
+                  disabledReason={lang === "zh" ? "当前筛选结果里没有待审样本。" : "There are no pending items in the current result."}
                   onClick={selectVisiblePendingItems}
                 >
                   <SquareCheckBig size={14} />
@@ -562,6 +566,7 @@ export function SupervisedReviewRoute() {
                   type="button"
                   className={styles.compactAction}
                   isDisabled={selectedCount === 0}
+                  disabledReason={lang === "zh" ? "当前没有已选样本。" : "No samples are selected."}
                   onClick={() => setSelectedCandidateIds([])}
                 >
                   {lang === "zh" ? "清空" : "Clear"}
@@ -570,6 +575,10 @@ export function SupervisedReviewRoute() {
                   type="button"
                   className={`${styles.compactAction} ${styles.dangerAction}`}
                   isDisabled={selectedCount === 0 || bulkDeleteMutation.isPending}
+                  disabledReason={bulkDeleteMutation.isPending
+                    ? (lang === "zh" ? "正在丢弃所选样本。" : "Discarding selected samples.")
+                    : (lang === "zh" ? "请先选择待审样本。" : "Select pending samples first.")}
+                  tooltip={lang === "zh" ? "将所选待审样本标记为丢弃。" : "Mark the selected pending samples as discarded."}
                   onClick={() => bulkDeleteMutation.mutate()}
                 >
                   {bulkDeleteMutation.isPending ? <LoaderCircle size={14} className={styles.spin} /> : <Trash2 size={14} />}
@@ -620,7 +629,8 @@ export function SupervisedReviewRoute() {
                             : styles.selectionButton
                         }
                         isDisabled={!selectable}
-                        title={selectable ? (lang === "zh" ? "加入批量丢弃" : "Select for bulk discard") : (lang === "zh" ? "已处理样本不可批量丢弃" : "Reviewed samples cannot be bulk discarded")}
+                        tooltip={selectable ? (lang === "zh" ? "加入批量丢弃" : "Select for bulk discard") : undefined}
+                        disabledReason={!selectable ? (lang === "zh" ? "已处理样本不可批量丢弃" : "Reviewed samples cannot be bulk discarded") : undefined}
                         aria-label={selectable ? (lang === "zh" ? "选择样本" : "Select sample") : (lang === "zh" ? "样本已处理" : "Sample already reviewed")}
                         onClick={(event) => {
                           event.stopPropagation();
@@ -772,6 +782,12 @@ export function SupervisedReviewRoute() {
                       type="button"
                       className={draftDecision === value ? `${styles.decisionButton} ${styles.decisionButtonActive}` : styles.decisionButton}
                       isDisabled={detailCandidate.status !== "pending"}
+                      disabledReason={lang === "zh" ? "该样本已经完成裁决。" : "This sample has already been reviewed."}
+                      tooltip={value === "positive"
+                        ? (lang === "zh" ? "收录为可复用的正向训练样本。" : "Keep as a reusable positive training sample.")
+                        : value === "negative"
+                          ? (lang === "zh" ? "收录为带错误归因的反向训练样本。" : "Keep as a negative sample with error attribution.")
+                          : (lang === "zh" ? "不进入正例或负例数据集。" : "Exclude from positive and negative datasets.")}
                       onClick={() => setDraftDecision(value)}
                     >
                       {value === "positive" ? <CheckCircle2 size={15} /> : value === "negative" ? <TriangleAlert size={15} /> : <Trash2 size={15} />}
@@ -850,28 +866,30 @@ export function SupervisedReviewRoute() {
                     type="button"
                     className={styles.primaryAction}
                     isDisabled={detailCandidate.status !== "pending" || decisionMutation.isPending}
+                    disabledReason={decisionMutation.isPending
+                      ? (lang === "zh" ? "正在保存当前裁决。" : "Saving the current decision.")
+                      : (lang === "zh" ? "该样本已经完成裁决。" : "This sample has already been reviewed.")}
                     onClick={submitCurrentDecision}
                   >
                     {decisionMutation.isPending ? <LoaderCircle size={15} className={styles.spin} /> : <LibraryBig size={15} />}
                     {lang === "zh" ? "保存裁决" : "Save decision"}
                   </VButton>
-                  <NavLink to={consoleTarget} className={styles.secondaryAction}>
-                    <ArrowUpRight size={15} />
-                    {positiveDatasetVisible
-                      ? (lang === "zh" ? "回控制台并预选正例集" : "Return with positive dataset")
-                      : (lang === "zh" ? "回到监督控制台" : "Back to supervised console")}
-                  </NavLink>
+                  <VTooltip
+                    content={positiveDatasetVisible
+                      ? (lang === "zh" ? "正例数据集已可用；返回后可直接基于它发起下一轮监督运行。" : "The positive dataset is ready and can be used for the next supervised run.")
+                      : (lang === "zh" ? "返回监督运行与数据集控制台。" : "Return to the supervised run and dataset console.")}
+                  >
+                    <NavLink to={consoleTarget} className={styles.secondaryAction}>
+                      <ArrowUpRight size={15} />
+                      {positiveDatasetVisible
+                        ? (lang === "zh" ? "回控制台并预选正例集" : "Return with positive dataset")
+                        : (lang === "zh" ? "回到监督控制台" : "Back to supervised console")}
+                    </NavLink>
+                  </VTooltip>
                 </div>
 
                 {actionFeedback ? <p className={styles.feedbackText}>{actionFeedback}</p> : null}
                 {decisionError ? <p className={styles.errorText}>{decisionError}</p> : null}
-                {positiveDatasetVisible ? (
-                  <p className={styles.hintText}>
-                    {lang === "zh"
-                      ? "当前正例数据集已经可用，回到监督控制台后可以直接基于它发起下一轮监督运行。"
-                      : "The positive dataset is already available. Return to the supervised console to launch the next run with it."}
-                  </p>
-                ) : null}
               </section>
 
               <details className={styles.transcriptSection}>

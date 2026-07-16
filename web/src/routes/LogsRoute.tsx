@@ -35,7 +35,7 @@ import {
   LogRoot,
   LogTreeResponse,
 } from "../api/types";
-import { VActionGroup, VButton, VIconButton, VNativeInput, VRouteHeader, VStateSurface, VStatusStrip, VSurface } from "../components/vui";
+import { VActionGroup, VButton, VIconButton, VNativeInput, VRouteHeader, VStateSurface, VStatusStrip, VSurface, VTooltip } from "../components/vui";
 import { PaneCollapseHandle } from "../components/layout/PaneCollapseHandle";
 import { LazyFilePreview } from "../components/preview/LazyFilePreview";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
@@ -1046,7 +1046,8 @@ export function LogsRoute() {
           className={styles.clearButton}
           onPress={handleClearCurrent}
           isDisabled={!activeFilePath || clearLogMutation.isPending}
-          title={!activeFilePath ? t("clearCurrentDisabled") : undefined}
+          disabledReason={clearLogMutation.isPending ? t("clearingCurrentLog") : t("clearCurrentDisabled")}
+          tooltip={t("clearCurrentLog")}
           icon={<Eraser size={15} />}
         >
           <span>{clearLogMutation.isPending ? t("clearingCurrentLog") : t("clearCurrentLog")}</span>
@@ -1098,9 +1099,11 @@ export function LogsRoute() {
                 <div>
                   <p className={styles.sidebarEyebrow}>{activeRootLabelKey ? t(activeRootLabelKey) : t("navLogs")}</p>
                   <h2 className={styles.sidebarTitle}>{packageIndexLabel}</h2>
-                  <p className={styles.sidebarPath} title={activeRoot?.path}>
-                    {activeRoot?.path ?? t("loading")}
-                  </p>
+                  <VTooltip content={activeRoot?.path ?? t("loading")} width="wide">
+                    <p className={styles.sidebarPath} tabIndex={0}>
+                      {activeRoot?.path ?? t("loading")}
+                    </p>
+                  </VTooltip>
                 </div>
                 <div className={styles.selectionToolbar}>
                   <span className={styles.selectionPill}>{selectedCountLabel}</span>
@@ -1111,6 +1114,7 @@ export function LogsRoute() {
                       className={styles.toolbarButton}
                       onPress={handleSelectVisible}
                       isDisabled={visibleFilePaths.length === 0}
+                      disabledReason={lang === "zh" ? "当前筛选结果里没有可选日志文件。" : "There are no selectable log files in the current result."}
                       icon={<CheckSquare size={15} />}
                     >
                       <span>{t("selectVisibleLogs")}</span>
@@ -1121,6 +1125,7 @@ export function LogsRoute() {
                       className={styles.toolbarButton}
                       onPress={handleClearSelection}
                       isDisabled={selectedLogPaths.length === 0}
+                      disabledReason={lang === "zh" ? "当前没有已选日志文件。" : "No log files are selected."}
                       icon={<X size={15} />}
                     >
                       <span>{t("clearSelection")}</span>
@@ -1132,7 +1137,8 @@ export function LogsRoute() {
                         className={styles.deleteButton}
                         onPress={handleDeleteSelected}
                         isDisabled={selectedLogPaths.length === 0 || destructiveBusy}
-                        title={selectedLogPaths.length === 0 ? t("deleteSelectedDisabled") : undefined}
+                        disabledReason={destructiveBusy ? t("deletingSelectedLogs") : t("deleteSelectedDisabled")}
+                        tooltip={t("deleteSelectedLogs")}
                         icon={<Trash2 size={15} />}
                       >
                         <span>{destructiveBusy ? t("deletingSelectedLogs") : t("deleteSelectedLogs")}</span>
@@ -1235,6 +1241,7 @@ export function LogsRoute() {
                         }
                         onPress={() => handleOpenPackage(item)}
                         aria-pressed={isActive}
+                        tooltip={item.path || rootPathLabel}
                       >
                         <span className={styles.packageButtonHeader}>
                           <span className={styles.packageButtonTitle}>
@@ -1244,7 +1251,7 @@ export function LogsRoute() {
                             {item.fileCount} {lang === "zh" ? "个文件" : "files"}
                           </span>
                         </span>
-                        <span className={styles.packageButtonPath} title={item.path || rootPathLabel}>
+                        <span className={styles.packageButtonPath}>
                           {item.path || rootPathLabel}
                         </span>
                       </VButton>
@@ -1351,7 +1358,7 @@ export function LogsRoute() {
                                   : styles.packageSelectButton
                               }
                               onPress={() => handleToggleSelection(file.path)}
-                              title={isSelected ? deselectPackageFileLabel : selectPackageFileLabel}
+                              tooltip={isSelected ? deselectPackageFileLabel : selectPackageFileLabel}
                               label={`${isSelected ? deselectPackageFileLabel : selectPackageFileLabel} ${file.name}`}
                               icon={isSelected ? <CheckSquare size={16} /> : <Square size={16} />}
                             />
@@ -1364,6 +1371,7 @@ export function LogsRoute() {
                                   : styles.packageFileButton
                               }
                               onPress={() => handleOpenFile(file.path)}
+                              tooltip={file.path}
                             >
                               <span className={styles.packageFileName}>{file.name}</span>
                               <span className={styles.packageFilePath}>{file.path}</span>
@@ -1426,7 +1434,9 @@ export function LogsRoute() {
           <div className={styles.railHeader}>
             <p className={styles.sidebarEyebrow}>{t("logsRootNavigation")}</p>
             <h2 className={styles.railTitle}>{t("navLogs")}</h2>
-            <p className={styles.railText} title={t("logsSubtitle")}>{logsCompactSubtitle}</p>
+            <VTooltip content={t("logsSubtitle")} width="wide">
+              <p className={styles.railText} tabIndex={0}>{logsCompactSubtitle}</p>
+            </VTooltip>
           </div>
 
           <nav className={styles.rootNav} aria-label={t("logsRootNavigation")}>
@@ -1449,7 +1459,7 @@ export function LogsRoute() {
                   className={isActive ? `${styles.rootButton} ${styles.rootButtonActive}` : styles.rootButton}
                   onPress={() => setActiveRootId(root.id)}
                   aria-pressed={isActive}
-                  title={root.summary.userGuide || root.path}
+                  tooltip={`${root.summary.userGuide || root.path} · ${root.path} · ${latestLabel}`}
                 >
                   <span className={styles.rootButtonHeader}>
                     <span className={styles.rootButtonLabel}>{rootLabel}</span>
@@ -1457,7 +1467,7 @@ export function LogsRoute() {
                       {stateLabel}
                     </span>
                   </span>
-                  <span className={styles.rootButtonPath} title={root.path}>
+                  <span className={styles.rootButtonPath}>
                     {root.path}
                   </span>
                   <span className={styles.rootButtonFooter}>
@@ -1466,7 +1476,7 @@ export function LogsRoute() {
                     </span>
                     {timestampLabel ? <span className={styles.rootButtonTime}>{timestampLabel}</span> : null}
                   </span>
-                  <span className={styles.rootButtonLatest} title={latestLabel}>
+                  <span className={styles.rootButtonLatest}>
                     {latestLabel}
                   </span>
                 </VButton>

@@ -27,6 +27,7 @@ describe("SupervisedReviewRoute layout contract", () => {
     expect(routeSource).toContain("<VNativeInput");
     expect(routeSource).toContain("<VNativeSelect");
     expect(routeSource).toContain("<VNativeTextarea");
+    expect(routeSource).toContain("VTooltip");
     expect(routeSource).not.toMatch(/<button\b/);
     expect(routeSource).not.toMatch(/<input\b/);
     expect(routeSource).not.toMatch(/<select\b/);
@@ -34,6 +35,15 @@ describe("SupervisedReviewRoute layout contract", () => {
     expect(worktreePanelSource).toContain('from "../components/vui"');
     expect(worktreePanelSource).toContain("<VButton");
     expect(worktreePanelSource).not.toMatch(/<button\b/);
+  });
+
+  it("keeps routine review guidance on the relevant controls while preserving visible decisions and errors", () => {
+    expect(routeSource).toContain('tooltip={value === "pending"');
+    expect(routeSource).toContain("disabledReason={bulkDeleteMutation.isPending");
+    expect(routeSource).toContain("disabledReason={decisionMutation.isPending");
+    expect(routeSource).toContain("content={positiveDatasetVisible");
+    expect(routeSource).not.toContain('className={styles.hintText}');
+    expect(routeSource).toContain('className={styles.errorText}');
   });
 
   it("keeps the review workspace in split-pane layout at common desktop widths", () => {
