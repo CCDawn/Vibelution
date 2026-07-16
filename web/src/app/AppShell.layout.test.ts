@@ -437,8 +437,10 @@ describe("AppShell layout contract", () => {
     expect(shellSource).toContain("const shellPollingVisible = frontendVisible || shellStartupWarmupActive");
     expect(shellSource).toMatch(/resolvePollingInterval\(\s+shellPollingVisible/);
     expect(shellSource).toContain("refetchIntervalInBackground: shellStartupWarmupActive");
-    expect(shellSource).toContain("if (configQuery.data && runtimeQuery.data && backendHealthQuery.data)");
+    expect(shellSource).toContain("if (configQuery.data && backendHealthQuery.data)");
+    expect(shellSource).not.toContain("if (configQuery.data && runtimeQuery.data && backendHealthQuery.data)");
     expect(shellSource).toContain("setShellStartupDataReady(true)");
+    expect(shellSource).toContain("enabled: shellStartupDataReady");
     expect(shellSource).toContain("browser.startup_background_warmup.active");
     expect(shellSource).toContain("browser.startup_background_warmup.inactive");
     expect(shellSource).toContain("const startupWarmupTelemetryStateRef = useRef<\"active\" | \"inactive\" | null>(null)");
