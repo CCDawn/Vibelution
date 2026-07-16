@@ -6143,6 +6143,61 @@ class TestRuntimeStateMemoryFlow:
         assert attempt.call_args.kwargs["summary"] == "压缩摘要收益不足。"
         agent.prompt_manager.update_state_memory.assert_not_called()
 
+    def test_chat_emergency_compression_continues_to_llm(self, monkeypatch, tmp_path):
+        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+        agent.project_root = str(tmp_path)
+        agent.prompt_manager = MagicMock()
+        agent._last_compression_iteration = 0
+        agent._compression_min_iteration_gap = 0
+        agent._compression_count_this_turn = 0
+        agent._effective_max_token_limit = 10000
+        agent.config = SimpleNamespace(
+            context_compression=SimpleNamespace(
+                enabled=True,
+                max_compressions_per_session=3,
+                effectiveness_threshold=0.1,
+            )
+        )
+        agent._get_mode_policy = lambda: ModePolicy(
+            mode=AgentMode.CHAT,
+            orchestrator_kind="chat",
+            keep_multi_turn_context=True,
+            allow_auto_loop=False,
+            capture_chat_dataset_candidates=True,
+            reset_context_before_turn=False,
+            reset_context_between_cases=False,
+            allow_direct_supervised_payload=False,
+            finish_after_direct_response=False,
+            runtime_input_builder=lambda value: value,
+        )
+        compressed = [{"role": "user", "content": "kept"}]
+        agent.token_compressor = SimpleNamespace(
+            compress=lambda *_args, **_kwargs: (compressed, "")
+        )
+        agent._compression_strategy = SimpleNamespace(
+            determine_level_with_iteration=lambda *_args: agent_module.CompressionLevel.EMERGENCY,
+            get_config=lambda *_args: SimpleNamespace(
+                summary_max_chars=1000,
+                keep_ai_messages=2,
+                preserve_errors=True,
+            ),
+        )
+        messages = [{"role": "user", "content": "旧上下文"}] * 5
+        monkeypatch.setattr(
+            agent_module,
+            "estimate_messages_tokens",
+            lambda value: 20000 if value is messages else 3000,
+        )
+        ui = SimpleNamespace(add_log=MagicMock(), note_context_compression_event=MagicMock())
+        monkeypatch.setattr(agent_module, "get_ui", lambda: ui)
+        monkeypatch.setattr(agent_module, "get_state_manager", lambda: SimpleNamespace(set_state=MagicMock()))
+
+        result, should_break = agent._compress_messages(messages, iteration=1, reason="context_pressure")
+
+        assert result is compressed
+        assert should_break is False
+        assert not any("提前结束当前轮次" in str(call.args[0]) for call in ui.add_log.call_args_list)
+
     def test_chat_checkpoint_failure_records_failed_preserved_attempt(
         self,
         monkeypatch,

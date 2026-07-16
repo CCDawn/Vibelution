@@ -1802,7 +1802,7 @@ class SelfEvolvingAgent:
 
         # 提前结束判断
         should_break = False
-        if level == CompressionLevel.EMERGENCY:
+        if level == CompressionLevel.EMERGENCY and self._get_mode_policy().mode != AgentMode.CHAT:
             should_break = True
             ui.add_log("紧急压缩触发，提前结束当前轮次", "WARN")
         elif iteration > 30:
