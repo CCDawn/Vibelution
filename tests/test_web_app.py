@@ -5562,12 +5562,44 @@ def test_submit_session_message_records_chat_turn_started_scene_event(tmp_path, 
         "turnStartedJournalMs",
         "userMessageJournalMs",
         "initialLiveDeltaPublishMs",
-        "cycleMessageLogMs",
+        "cycleMessageDispatchMs",
         "turnStartedSceneLogMs",
         "userPromptResolveMs",
         "scheduledSceneLogMs",
     ):
         assert accepted_fields[timing_field] >= 0
+    assert accepted_fields["cycleMessageProjectionMode"] == "background_ordered"
+
+
+def test_session_cycle_message_projection_is_dispatched_without_inline_logging(monkeypatch):
+    submitted: list[tuple] = []
+    recorded: list[tuple] = []
+
+    monkeypatch.setattr(
+        session_service,
+        "_SESSION_CYCLE_PROJECTION_EXECUTOR",
+        SimpleNamespace(submit=lambda *args, **kwargs: submitted.append((args, kwargs))),
+    )
+    monkeypatch.setattr(
+        session_service,
+        "_record_session_cycle_message",
+        lambda *args, **kwargs: recorded.append((args, kwargs)),
+    )
+
+    session_service._submit_session_cycle_message_projection(
+        "session-live",
+        {"role": "user", "content": "not inspected by the dispatcher"},
+        event="user_message",
+        status="running",
+        turn_id="turn-1",
+    )
+
+    assert len(submitted) == 1
+    assert recorded == []
+    submitted_args, submitted_kwargs = submitted[0]
+    assert submitted_args[0] is session_service._run_session_cycle_message_projection
+    assert submitted_args[1] == "session-live"
+    assert submitted_kwargs["turn_id"] == "turn-1"
 
 
 def test_submit_session_message_prefer_async_returns_lightweight_acceptance(tmp_path, monkeypatch):
