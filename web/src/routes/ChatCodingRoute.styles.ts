@@ -495,7 +495,7 @@ layout:
   layoutCompactDesktop:
     "vui-routes-chatcodingroute layoutCompactDesktop grid min-w-0 grid-cols-[minmax(220px,var(--chat-left-pane-width,248px))_var(--chat-pane-gutter)_minmax(0,1fr)] overflow-hidden",
   layoutStatusRailCollapsed:
-    "vui-routes-chatcodingroute layoutStatusRailCollapsed !grid-cols-[var(--chat-left-pane-width,300px)_var(--chat-pane-gutter)_minmax(0,1fr)]",
+    "vui-routes-chatcodingroute layoutStatusRailCollapsed grid !grid-cols-[var(--chat-left-pane-width,300px)_var(--chat-pane-gutter)_minmax(0,1fr)]",
   layoutOverlay:
     "vui-routes-chatcodingroute layoutOverlay relative grid min-w-0 grid-cols-[minmax(0,1fr)] overflow-hidden",
   leftBlock:

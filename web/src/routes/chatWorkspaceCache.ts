@@ -34,6 +34,9 @@ function invalidateAll(queryClient: QueryClientLike, keys: QueryKey[]) {
 
 export function createChatWorkspaceCache(queryClient: QueryClientLike) {
   return {
+    afterSessionSelected() {
+      return invalidateAll(queryClient, [queryKeys.runtimeSummary()]);
+    },
     refreshConversationIndex() {
       return invalidateAll(queryClient, [queryKeys.sessions(), queryKeys.conversations()]);
     },

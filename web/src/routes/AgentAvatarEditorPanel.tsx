@@ -78,7 +78,7 @@ export function AgentAvatarEditorPanel({
           <div className={styles.avatarEditorHeader}>
             <div>
               <p className={styles.panelEyebrow}>{copy.avatarEditorTitle}</p>
-              <strong className="inline-flex items-center gap-1.5">
+              <strong className={styles.contextualHintRow}>
                 {copy.editAvatar}
                 <VContextualHint content={copy.avatarEditorHint} label={`${copy.avatarEditorTitle}说明`} />
               </strong>

@@ -1,4 +1,5 @@
 const styles = {
+  contextualHintRow: "inline-flex [align-items:center] [gap:6px]",
   resetZone: "grid [gap:8px] min-w-0 [padding:10px] [border:1px_solid_color-mix(in_srgb,_var(--state-warning)_28%,_var(--vui-border-subtle))] [border-radius:var(--radius-panel)] [background:color-mix(in_srgb,_var(--state-warning)_7%,_transparent)] [&_svg]:[color:var(--state-warning)]",
   panelHeader: "flex [align-items:flex-start] [justify-content:space-between] [gap:8px] min-w-0 [&_div]:min-w-0",
   panelEyebrow: "[margin:0_0_1px] [color:var(--fg-tertiary)] [font-size:var(--vui-font-xs)] [letter-spacing:0.07em] [text-transform:uppercase]",

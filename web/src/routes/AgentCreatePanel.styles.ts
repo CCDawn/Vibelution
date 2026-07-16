@@ -1,4 +1,5 @@
 const styles = {
+  contextualHintRow: "flex min-w-0 [align-items:center] [gap:6px]",
   createAgentPanel: "grid [align-content:start] [gap:8px] min-w-0 min-h-0 [padding:10px] [border:1px_solid_color-mix(in_srgb,_var(--accent-cool)_26%,_var(--vui-border-subtle))] [border-radius:var(--radius-panel)] [background:color-mix(in_srgb,_var(--accent-cool)_7%,_transparent)] [overflow:auto] [&_p]:[margin:0] [&_p]:[color:var(--fg-secondary)] [&_p]:[font-size:var(--vui-font-xs)] [&_p]:[line-height:1.42] [&_p]:[overflow-wrap:anywhere]",
   panelHeader: "flex [align-items:flex-start] [justify-content:space-between] [gap:8px] min-w-0 [&_div]:min-w-0",
   panelEyebrow: "[margin:0_0_1px] [color:var(--fg-tertiary)] [font-size:var(--vui-font-xs)] [letter-spacing:0.07em] [text-transform:uppercase]",
