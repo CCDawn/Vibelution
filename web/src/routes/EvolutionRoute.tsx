@@ -53,6 +53,7 @@ import { LazyConversationView } from "../components/conversation/LazyConversatio
 import {
   VButton,
   VCheckbox,
+  VContextualHint,
   VInput,
   VMetricStrip,
   VRouteHeader,
@@ -61,6 +62,7 @@ import {
   VStringSelect,
   VSurface,
   VTextarea,
+  VTooltip,
 } from "../components/vui";
 import { useAppI18n } from "../i18n/useAppI18n";
 import { useShellStore } from "../store/shellStore";
@@ -1696,6 +1698,31 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   const hiddenDatasetCount = Math.max(0, datasetCatalog.length - primaryDatasets.length);
   const availableBundles = workbenchControl?.bundles ?? [];
   const selectedBundleExists = availableBundles.some((item) => item.name === bundleNameInput);
+  const supervisedStartDisabledReason = runLocked || worktreeRunLocked
+    ? t("runningLockHint")
+    : !workbenchControl
+      ? (lang === "zh" ? "监督运行控制暂不可用。" : "Supervised run controls are unavailable.")
+      : startWorktreeRunMutation.isPending
+        ? (lang === "zh" ? "监督运行正在启动。" : "The supervised run is starting.")
+        : sourceKind === "dataset" && !datasetName
+          ? (lang === "zh" ? "先选择数据集。" : "Choose a dataset first.")
+          : sourceKind === "bundle" && !selectedBundleExists
+            ? (lang === "zh" ? "先选择有效的评测包。" : "Choose a valid evaluation bundle first.")
+            : undefined;
+  const simulationStartDisabledReason = runLocked || worktreeRunLocked
+    ? t("runningLockHint")
+    : !workbenchControl
+      ? (lang === "zh" ? "监督运行控制暂不可用。" : "Supervised run controls are unavailable.")
+      : startSimulationWorktreeRunMutation.isPending
+        ? (lang === "zh" ? "模拟闭环正在启动。" : "The simulated loop is starting.")
+        : sourceKind === "dataset" && !datasetName
+          ? (lang === "zh" ? "先选择数据集。" : "Choose a dataset first.")
+          : sourceKind === "bundle" && !selectedBundleExists
+            ? (lang === "zh" ? "先选择有效的评测包。" : "Choose a valid evaluation bundle first.")
+            : undefined;
+  const supervisedMembersHint = supervisedMembersSource === "current_config"
+    ? (lang === "zh" ? "当前 Agent 配置；启动后锁定为本轮绑定。" : "Current Agent config; a run locks its own bindings after start.")
+    : undefined;
   const workbenchCatalogLoading = supervisedTrackQueriesEnabled && !workbenchControl && workbenchCatalogQuery.isFetching;
   const workbenchCatalogUnavailable = supervisedTrackQueriesEnabled && !workbenchControl && workbenchCatalogQuery.isError;
   const sourceCatalogCountLabel = workbenchCatalogLoading
@@ -2777,9 +2804,11 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
         <div className={styles.detailSection}>
           <h3>{t("reviewHeadline")}</h3>
           <p className={styles.reviewLead}>{item.headline || item.summary}</p>
-          <p title={item.reason || item.outcomeSemantics.runtimeExplanation}>
-            {displaySupervisedTechnicalText(item.reason || item.outcomeSemantics.runtimeExplanation, item.decision, lang, decisionLabel)}
-          </p>
+          <VTooltip content={item.reason || item.outcomeSemantics.runtimeExplanation} width="wide">
+            <p tabIndex={0}>
+              {displaySupervisedTechnicalText(item.reason || item.outcomeSemantics.runtimeExplanation, item.decision, lang, decisionLabel)}
+            </p>
+          </VTooltip>
         </div>
 
         <div className={styles.detailSection}>
@@ -2814,9 +2843,11 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
               <span>{formatAvailableActions(item.availableActions)}</span>
             </article>
           </div>
-          <p className={styles.noticeText} title={item.outcomeSemantics.runtimeExplanation}>
-            {displaySupervisedTechnicalText(item.outcomeSemantics.runtimeExplanation, item.decision, lang, decisionLabel)}
-          </p>
+          <VTooltip content={item.outcomeSemantics.runtimeExplanation} width="wide">
+            <p className={styles.noticeText} tabIndex={0}>
+              {displaySupervisedTechnicalText(item.outcomeSemantics.runtimeExplanation, item.decision, lang, decisionLabel)}
+            </p>
+          </VTooltip>
         </div>
 
         <div className={styles.detailSection}>
@@ -3089,7 +3120,9 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                         return (
                           <article key={item.name} className={styles.datasetCatalogItem}>
                             <div className={styles.datasetCatalogItemMain}>
-                              <strong title={item.name}>{item.name}</strong>
+                              <VTooltip content={item.name} width="wide">
+                                <strong tabIndex={0}>{item.name}</strong>
+                              </VTooltip>
                               <span>{item.benchmarkFamily || item.taskType || item.bundleName || "--"}</span>
                             </div>
                             <span className={styles.datasetCatalogStatus}>{statusText}</span>
@@ -3118,13 +3151,14 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                 <div className={styles.supervisedRunSetup}>
                   <div className={styles.formGrid}>
                     <div className={sourceKind === "dataset" ? styles.compactFieldGrid : styles.formGrid}>
-                      <div
-                        className={styles.formField}
-                        title={lang === "zh"
-                          ? "数据集会先物化，评测包可直接运行。"
-                          : "A dataset is materialized first; a bundle runs directly."}
-                      >
-                        <label>{lang === "zh" ? "评测来源" : "Evaluation source"}</label>
+                      <div className={styles.formField}>
+                        <div className="inline-flex items-center gap-1.5">
+                          <label>{lang === "zh" ? "评测来源" : "Evaluation source"}</label>
+                          <VContextualHint
+                            content={lang === "zh" ? "数据集会先物化，评测包可直接运行。" : "A dataset is materialized first; a bundle runs directly."}
+                            label={lang === "zh" ? "评测来源说明" : "Evaluation source help"}
+                          />
+                        </div>
                         <VStringSelect
                           ariaLabel={lang === "zh" ? "评测来源" : "Evaluation source"}
                           className={styles.selectInput}
@@ -3149,8 +3183,11 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                         />
                       </div>
                       {sourceKind === "dataset" ? (
-                        <div className={styles.formField} title={t("caseLimitHint")}>
-                          <label htmlFor="supervised-limit">{t("caseLimit")}</label>
+                        <div className={styles.formField}>
+                          <div className="inline-flex items-center gap-1.5">
+                            <label htmlFor="supervised-limit">{t("caseLimit")}</label>
+                            <VContextualHint content={t("caseLimitHint")} label={`${t("caseLimit")}说明`} />
+                          </div>
                           <VInput
                             id="supervised-limit"
                             className={styles.textInput}
@@ -3193,8 +3230,11 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                     >
                       <span className={styles.checkboxLabel}>{lang === "zh" ? "保留 worktree" : "Keep worktree"}</span>
                     </VCheckbox>
-                    <div className={styles.formField} title={t("supervisedMentalModeHint")}>
-                      <label>{t("supervisedMentalMode")}</label>
+                    <div className={styles.formField}>
+                      <div className="inline-flex items-center gap-1.5">
+                        <label>{t("supervisedMentalMode")}</label>
+                        <VContextualHint content={t("supervisedMentalModeHint")} label={`${t("supervisedMentalMode")}说明`} />
+                      </div>
                       <VStringSelect
                         ariaLabel={t("supervisedMentalMode")}
                         className={styles.selectInput}
@@ -3224,16 +3264,20 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                           || (sourceKind === "bundle" && !selectedBundleExists)
                         }
                         onClick={() => startWorktreeRunMutation.mutate()}
-                        title={t("launchSupervisedRunHint")}
+                        tooltip={t("launchSupervisedRunHint")}
+                        disabledReason={supervisedStartDisabledReason}
                       >
                         {supervisedStartSubmitting || supervisedPrimaryRunning ? <LoaderCircle size={15} /> : <Play size={15} />}
                         {supervisedStartButtonLabel}
                       </VButton>
                     </div>
-                    <div className={styles.closedLoopLaunchBlock} title={t("closedLoopLaunchPanelHint")}>
+                    <div className={styles.closedLoopLaunchBlock}>
                       <div>
                         <div className={styles.closedLoopTitleRow}>
-                          <strong>{t("closedLoopLaunchPanelTitle")}</strong>
+                          <strong className="inline-flex items-center gap-1.5">
+                            {t("closedLoopLaunchPanelTitle")}
+                            <VContextualHint content={t("closedLoopLaunchPanelHint")} label={`${t("closedLoopLaunchPanelTitle")}说明`} />
+                          </strong>
                           <span className={styles.closedLoopModeBadge}>{lang === "zh" ? "模拟" : "Simulation"}</span>
                         </div>
                         <span>
@@ -3254,7 +3298,8 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                           || (sourceKind === "bundle" && !selectedBundleExists)
                         }
                         onClick={() => startSimulationWorktreeRunMutation.mutate()}
-                        title={t("startClosedLoopHint")}
+                        tooltip={t("startClosedLoopHint")}
+                        disabledReason={simulationStartDisabledReason}
                       >
                         {startSimulationWorktreeRunMutation.isPending ? <LoaderCircle size={15} /> : <Sparkles size={15} />}
                         {t("startClosedLoopRun")}
@@ -3267,20 +3312,18 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                   </div>
                 </div>
 
-                <aside
-                  className={styles.supervisedWorkflowPanel}
-                  title={
-                    supervisedMembersSource === "current_config"
-                      ? lang === "zh" ? "当前 Agent 配置；启动后锁定为本轮绑定。" : "Current Agent config; a run locks its own bindings after start."
-                      : undefined
-                  }
-                >
+                <aside className={styles.supervisedWorkflowPanel}>
                   <div className={styles.supervisedMembersHeader}>
                     <div>
                       <p className={styles.eyebrow}>
                         {supervisedMembersSource === "run" ? lang === "zh" ? "运行步骤" : "Run steps" : lang === "zh" ? "当前步骤" : "Current steps"}
                       </p>
-                      <h3 className={styles.sectionTitle}>{supervisedWorkflowStepLabel(supervisedSelectedWorkflowStep, lang)}</h3>
+                      <h3 className={`${styles.sectionTitle} inline-flex items-center gap-1.5`}>
+                        {supervisedWorkflowStepLabel(supervisedSelectedWorkflowStep, lang)}
+                        {supervisedMembersHint ? (
+                          <VContextualHint content={supervisedMembersHint} label={lang === "zh" ? "监督成员绑定说明" : "Supervised member binding help"} width="wide" />
+                        ) : null}
+                      </h3>
                     </div>
                     <div className={styles.supervisedMembersHeaderActions}>
                       {supervisedWorkflowManualSelection ? (
@@ -3288,7 +3331,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                           type="button"
                           className={styles.supervisedWorkflowFollowButton}
                           onClick={() => setSelectedSupervisedWorkflowStepId(null)}
-                          title={lang === "zh" ? "回到当前执行阶段" : "Follow the current run stage"}
+                          tooltip={lang === "zh" ? "回到当前执行阶段" : "Follow the current run stage"}
                         >
                           {lang === "zh" ? "跟随现场" : "Follow live"}
                         </VButton>
@@ -3319,7 +3362,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                             className={selected ? `${styles.workflowStepButton} ${styles.workflowStepButtonActive}` : styles.workflowStepButton}
                             aria-pressed={selected}
                             onClick={() => setSelectedSupervisedWorkflowStepId(step.id)}
-                            title={lang === "zh" ? `查看${supervisedWorkflowStepLabel(step, lang)}` : `View ${supervisedWorkflowStepLabel(step, lang)}`}
+                            tooltip={lang === "zh" ? `查看${supervisedWorkflowStepLabel(step, lang)}` : `View ${supervisedWorkflowStepLabel(step, lang)}`}
                           >
                             <span className={styles.workflowStepMeta}>
                               <span>{current ? (lang === "zh" ? "当前" : "Live") : stepMetric}</span>
@@ -3331,32 +3374,31 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                             </span>
                           </VButton>
                           {stepRoute ? (
-                            <Link
-                              className={styles.supervisedWorkflowSessionLink}
-                              to={stepRoute}
-                              title={
+                            <VTooltip content={
+                              member?.chatRoute
+                                ? lang === "zh" ? `打开监督成员 ${member.name} 的会话` : `Open supervised member session for ${member.name}`
+                                : lang === "zh" ? "打开监督会话" : "Open supervised session"
+                            }>
+                              <Link
+                                className={styles.supervisedWorkflowSessionLink}
+                                to={stepRoute}
+                                aria-label={
                                 member?.chatRoute
                                   ? lang === "zh" ? `打开监督成员 ${member.name} 的会话` : `Open supervised member session for ${member.name}`
                                   : lang === "zh" ? "打开监督会话" : "Open supervised session"
-                              }
-                              aria-label={
-                                member?.chatRoute
-                                  ? lang === "zh" ? `打开监督成员 ${member.name} 的会话` : `Open supervised member session for ${member.name}`
-                                  : lang === "zh" ? "打开监督会话" : "Open supervised session"
-                              }
-                            >
-                              <span>{lang === "zh" ? "会话" : "Session"}</span>
-                              <ArrowUpRight size={13} aria-hidden="true" />
-                            </Link>
+                                }
+                              >
+                                <span>{lang === "zh" ? "会话" : "Session"}</span>
+                                <ArrowUpRight size={13} aria-hidden="true" />
+                              </Link>
+                            </VTooltip>
                           ) : member?.configRoute ? (
-                            <Link
-                              className={styles.supervisedWorkflowSessionLink}
-                              to={member.configRoute}
-                              title={lang === "zh" ? `配置 ${member.name}` : `Configure ${member.name}`}
-                            >
-                              <span>{lang === "zh" ? "配置" : "Config"}</span>
-                              <ArrowUpRight size={13} aria-hidden="true" />
-                            </Link>
+                            <VTooltip content={lang === "zh" ? `配置 ${member.name}` : `Configure ${member.name}`}>
+                              <Link className={styles.supervisedWorkflowSessionLink} to={member.configRoute}>
+                                <span>{lang === "zh" ? "配置" : "Config"}</span>
+                                <ArrowUpRight size={13} aria-hidden="true" />
+                              </Link>
+                            </VTooltip>
                           ) : null}
                         </div>
                       );
@@ -3438,9 +3480,17 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
               <div className={styles.surfaceHeaderCompact}>
                 <div>
                   <p className={styles.eyebrow}>{supervisedWorkflowStepLabel(supervisedSelectedWorkflowStep, lang)}</p>
-                  <h2 className={`${styles.sectionTitle} ${styles.truncateText}`} title={selectedWorkflowTaskSummary || undefined}>
-                    {supervisedSelectedWorkflowStep.label || t("currentCaseOutput")}
-                  </h2>
+                  {selectedWorkflowTaskSummary ? (
+                    <VTooltip content={selectedWorkflowTaskSummary} width="wide">
+                      <h2 className={`${styles.sectionTitle} ${styles.truncateText}`} tabIndex={0}>
+                        {supervisedSelectedWorkflowStep.label || t("currentCaseOutput")}
+                      </h2>
+                    </VTooltip>
+                  ) : (
+                    <h2 className={`${styles.sectionTitle} ${styles.truncateText}`}>
+                      {supervisedSelectedWorkflowStep.label || t("currentCaseOutput")}
+                    </h2>
+                  )}
                 </div>
                 <div className={styles.liveStatusRow}>
                   {supervisedSelectedWorkflowStep.role ? (
@@ -3471,6 +3521,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                           type="button"
                           className={styles.inlineAction}
                           isDisabled={approvalWorktreeActionMutation.isPending}
+                          disabledReason={lang === "zh" ? "审批动作正在执行。" : "Approval action is in progress."}
                           onClick={() => approvalWorktreeActionMutation.mutate({ runId: reviewCandidateWorktree.runId, action: "approve_review" })}
                         >
                           {approvalWorktreeActionMutation.isPending ? <LoaderCircle size={15} /> : <CheckCircle2 size={15} />}
@@ -3482,6 +3533,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                           type="button"
                           className={styles.inlineAction}
                           isDisabled={approvalWorktreeActionMutation.isPending}
+                          disabledReason={lang === "zh" ? "入库动作正在执行。" : "Store action is in progress."}
                           onClick={() => approvalWorktreeActionMutation.mutate({ runId: reviewCandidateWorktree.runId, action: "merge" })}
                         >
                           {approvalWorktreeActionMutation.isPending ? <LoaderCircle size={15} /> : <Save size={15} />}
@@ -3569,7 +3621,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                 type="button"
                 className={styles.liveIoResizeHandle}
                 aria-label={resizeLiveIoLabel}
-                title={resizeLiveIoLabel}
+                tooltip={resizeLiveIoLabel}
                 onPointerDown={handleLiveIoResizeStart}
                 onKeyDown={handleLiveIoResizeKeyDown}
               >
@@ -4262,31 +4314,37 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                           <span>{riskLabel(proposalDetailQuery.data.supervised.riskLevel)}</span>
                         </article>
                       </div>
-                      <p className={styles.noticeText} title={proposalDetailQuery.data.outcomeSemantics.runtimeExplanation}>
-                        {displaySupervisedTechnicalText(
-                          proposalDetailQuery.data.outcomeSemantics.runtimeExplanation,
-                          proposalDetailQuery.data.decision,
-                          lang,
-                          decisionLabel,
-                        )}
-                      </p>
-                      <p title={proposalDetailQuery.data.supervised.decisionReason}>
-                        {displaySupervisedTechnicalText(
-                          proposalDetailQuery.data.supervised.decisionReason,
-                          proposalDetailQuery.data.decision,
-                          lang,
-                          decisionLabel,
-                        )}
-                      </p>
-                      {proposalDetailQuery.data.supervised.riskReasons.length > 0 ? (
-                        <p title={proposalDetailQuery.data.supervised.riskReasons.join(" / ")}>
+                      <VTooltip content={proposalDetailQuery.data.outcomeSemantics.runtimeExplanation} width="wide">
+                        <p className={styles.noticeText} tabIndex={0}>
                           {displaySupervisedTechnicalText(
-                            proposalDetailQuery.data.supervised.riskReasons.join(" / "),
+                            proposalDetailQuery.data.outcomeSemantics.runtimeExplanation,
                             proposalDetailQuery.data.decision,
                             lang,
                             decisionLabel,
                           )}
                         </p>
+                      </VTooltip>
+                      <VTooltip content={proposalDetailQuery.data.supervised.decisionReason} width="wide">
+                        <p tabIndex={0}>
+                          {displaySupervisedTechnicalText(
+                            proposalDetailQuery.data.supervised.decisionReason,
+                            proposalDetailQuery.data.decision,
+                            lang,
+                            decisionLabel,
+                          )}
+                        </p>
+                      </VTooltip>
+                      {proposalDetailQuery.data.supervised.riskReasons.length > 0 ? (
+                        <VTooltip content={proposalDetailQuery.data.supervised.riskReasons.join(" / ")} width="wide">
+                          <p tabIndex={0}>
+                            {displaySupervisedTechnicalText(
+                              proposalDetailQuery.data.supervised.riskReasons.join(" / "),
+                              proposalDetailQuery.data.decision,
+                              lang,
+                              decisionLabel,
+                            )}
+                          </p>
+                        </VTooltip>
                       ) : null}
                       {proposalDetailQuery.data.supervised.caseDiagnostics.length > 0 ? (
                         <div className={styles.relatedList}>

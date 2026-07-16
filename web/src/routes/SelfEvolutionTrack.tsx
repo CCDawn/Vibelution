@@ -1591,7 +1591,8 @@ export function SelfEvolutionTrack({
                   type="button"
                   className={styles.dangerAction}
                   isDisabled={topTerminateDisabled}
-                  title={topTerminateReason || undefined}
+                  tooltip={lang === "zh" ? "请求终止当前自进化运行。" : "Request termination of the current self-evolution run."}
+                  disabledReason={topTerminateReason || undefined}
                   onClick={() => {
                     if (worktreeRun) {
                       onWorktreeAction(worktreeRun.runId, "terminate");
@@ -1606,7 +1607,8 @@ export function SelfEvolutionTrack({
                   type="button"
                   className={styles.primaryAction}
                   isDisabled={runLocked || worktreeRunLocked || startPending || !startSelfAction?.enabled}
-                  title={disabledReason(startSelfAction) || undefined}
+                  tooltip={t("startSelfWorktreeRun")}
+                  disabledReason={disabledReason(startSelfAction) || (startPending ? (lang === "zh" ? "自进化运行正在启动。" : "The self-evolution run is starting.") : runLocked || worktreeRunLocked ? (lang === "zh" ? "当前已有运行占用工作区。" : "Another run currently owns the workspace.") : undefined)}
                   onClick={onStartRun}
                 >
                   {startPending ? <LoaderCircle size={15} className={styles.spinning} /> : <ArrowUpRight size={15} />}
@@ -1713,7 +1715,8 @@ export function SelfEvolutionTrack({
                         type="button"
                         className={observationRunActive ? styles.dangerAction : styles.primaryAction}
                         isDisabled={observationPrimaryActionDisabled}
-                        title={observationPrimaryActionDisabledReason}
+                        tooltip={observationRunActive ? (lang === "zh" ? "终止这一轮自主观察。" : "Stop this observation run.") : (lang === "zh" ? "使用当前提示词开始自主观察。" : "Start an observation run with the current prompt.")}
+                        disabledReason={observationPrimaryActionDisabledReason || undefined}
                         onClick={() => {
                           if (observationRunActive && observationRun?.runId) {
                             onTerminateObservation(observationRun.runId);
@@ -1830,7 +1833,7 @@ export function SelfEvolutionTrack({
                           type="button"
                           className={selected ? `${styles.workflowCard} ${styles.workflowCardActive}` : styles.workflowCard}
                           aria-pressed={selected}
-                          title={step.livePreview || step.summary || stepName}
+                          tooltip={step.livePreview || step.summary || stepName}
                           onClick={() => setSelectedWorkflowStepId(step.id as SelfEvolutionWorkflowStepId)}
                         >
                           <span>{stepName}</span>
@@ -1866,7 +1869,8 @@ export function SelfEvolutionTrack({
                           type="button"
                           className={styles.secondaryAction}
                           isDisabled={!worktreeRun || worktreeActionPending || !approveReviewAction?.enabled}
-                          title={disabledReason(approveReviewAction) || undefined}
+                          tooltip={lang === "zh" ? "通过人工审批并允许进入后续步骤。" : "Approve the review and allow the next step."}
+                          disabledReason={disabledReason(approveReviewAction) || (worktreeActionPending ? (lang === "zh" ? "工作树动作正在执行。" : "A worktree action is in progress.") : !worktreeRun ? (lang === "zh" ? "当前没有可审批的工作树运行。" : "There is no worktree run to approve.") : undefined)}
                           onClick={() => worktreeRun && onWorktreeAction(worktreeRun.runId, "approve_review")}
                         >
                           {worktreeActionPending ? <LoaderCircle size={15} className={styles.spinning} /> : <CheckSquare size={15} />}
@@ -1876,7 +1880,8 @@ export function SelfEvolutionTrack({
                           type="button"
                           className={styles.secondaryAction}
                           isDisabled={!worktreeRun || worktreeActionPending || !mergeAction?.enabled}
-                          title={disabledReason(mergeAction) || undefined}
+                          tooltip={lang === "zh" ? "把已审批候选合并入本地 main。" : "Merge the approved candidate into local main."}
+                          disabledReason={disabledReason(mergeAction) || (worktreeActionPending ? (lang === "zh" ? "工作树动作正在执行。" : "A worktree action is in progress.") : !worktreeRun ? (lang === "zh" ? "当前没有可合并的工作树运行。" : "There is no worktree run to merge.") : undefined)}
                           onClick={() => worktreeRun && onWorktreeAction(worktreeRun.runId, "merge")}
                         >
                           {worktreeActionPending ? <LoaderCircle size={15} className={styles.spinning} /> : <ShieldCheck size={15} />}
@@ -1886,7 +1891,8 @@ export function SelfEvolutionTrack({
                           type="button"
                           className={styles.secondaryAction}
                           isDisabled={!worktreeRun || worktreeActionPending || !discardAction?.enabled}
-                          title={disabledReason(discardAction) || undefined}
+                          tooltip={lang === "zh" ? "丢弃当前候选，不合并其更改。" : "Discard the current candidate without merging its changes."}
+                          disabledReason={disabledReason(discardAction) || (worktreeActionPending ? (lang === "zh" ? "工作树动作正在执行。" : "A worktree action is in progress.") : !worktreeRun ? (lang === "zh" ? "当前没有可丢弃的工作树运行。" : "There is no worktree run to discard.") : undefined)}
                           onClick={() => worktreeRun && onWorktreeAction(worktreeRun.runId, "discard")}
                         >
                           {worktreeActionPending ? <LoaderCircle size={15} className={styles.spinning} /> : <X size={15} />}
@@ -2014,7 +2020,8 @@ export function SelfEvolutionTrack({
                         className={styles.paginationButton}
                         isDisabled={clampedWorktreePage <= 1}
                         onClick={() => setWorktreePage((current) => Math.max(1, current - 1))}
-                        title={t("pagePrevious")}
+                        tooltip={t("pagePrevious")}
+                        disabledReason={t("pagePrevious")}
                       >
                         <ChevronLeft size={15} />
                       </VButton>
@@ -2033,7 +2040,8 @@ export function SelfEvolutionTrack({
                         className={styles.paginationButton}
                         isDisabled={clampedWorktreePage >= totalWorktreePages}
                         onClick={() => setWorktreePage((current) => Math.min(totalWorktreePages, current + 1))}
-                        title={t("pageNext")}
+                        tooltip={t("pageNext")}
+                        disabledReason={t("pageNext")}
                       >
                         <ChevronRight size={15} />
                       </VButton>
@@ -2254,7 +2262,8 @@ export function SelfEvolutionTrack({
                       type="button"
                       className={styles.secondaryAction}
                       isDisabled={selectedHistoryTxnIds.length === 0 || deleteHistoryPending}
-                      title={selectedHistoryTxnIds.length === 0 ? t("deleteSelectedDisabledHistory") : undefined}
+                      tooltip={t("batchDeleteHint")}
+                      disabledReason={selectedHistoryTxnIds.length === 0 ? t("deleteSelectedDisabledHistory") : deleteHistoryPending ? t("deletingSelectedHistory") : undefined}
                       onClick={() => onDeleteHistoryGroups(selectedHistoryTxnIds)}
                     >
                       {deleteHistoryPending ? <LoaderCircle size={15} className={styles.spinning} /> : <ScrollText size={15} />}

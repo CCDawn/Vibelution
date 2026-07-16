@@ -433,6 +433,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("const clearSessionTransientUiState = useCallback(");
     expect(routeSource).toContain("setActiveTurnLayersBySession((current) =>");
     expect(routeSource).toContain("setActiveTurnLayerForSession(current, normalizedSessionId, undefined)");
+    expect(routeSource).toContain("queryClient.cancelQueries({ queryKey: queryKeys.session(normalizedSessionId), exact: true })");
     expect(routeSource).toContain("queryClient.removeQueries({ queryKey: queryKeys.session(normalizedSessionId), exact: true })");
 
     const staleCleanupIndex = routeSource.indexOf("clearSessionTransientUiState(activeSessionId");
@@ -472,6 +473,9 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("latestDirectSessionSelectionRef.current = normalizedSessionId");
     expect(routeSource).toContain("selectDirectSessionMutation.mutate(normalizedSessionId)");
     expect(routeSource).toContain("if (latestSessionId && latestSessionId !== nextDetail.id)");
+    expect(routeSource).toContain("syncSessionDetail(nextDetail)");
+    expect(routeSource).toContain("chatWorkspaceCache.afterSessionSelected()");
+    expect(routeSource).not.toContain("afterSessionChanged({\n        sessionId: nextDetail.id");
     expect(routeSource.indexOf("selectDirectSessionMutation.mutate(normalizedSessionId)")).toBeLessThan(
       routeSource.indexOf("navigate(`/chat?session=${encodeURIComponent(normalizedSessionId)}`"),
     );
@@ -1938,7 +1942,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("const { directSessionStreamOwnsLiveQueries, groupStreamOwnsLiveQueries } = chatLiveQueryPolicy");
     expect(routeSource).toContain("refetchInterval: chatLiveQueryPolicy.sessionsRefetchInterval");
     expect(routeSource).toContain("refetchInterval: chatLiveQueryPolicy.conversationsRefetchInterval");
-    expect(routeSource).toContain("refetchInterval: chatLiveQueryPolicy.sessionDetailRefetchInterval");
+    expect(routeSource).toContain("? chatLiveQueryPolicy.sessionDetailRefetchInterval");
+    expect(routeSource).toContain("startupDetailSettledSessionId === activeSessionId");
     expect(routeSource).toContain("refetchInterval: childSessionLiveQueryPolicy.childSessionsRefetchInterval");
     expect(routeSource).toContain("mergeSessionDetailIntoConversations(conversations, detail)");
   });
@@ -2712,7 +2717,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(requestedSessionBranch).toContain("setActiveGroupRoomId(\"\")");
     expect(requestedSessionBranch).toContain("setActiveSession(requestedSessionId)");
     expect(requestedSessionBranch).not.toContain("sessionsQuery.data?.some");
-    expect(routeSource).toContain("queryFn: () => fetchSessionDetailWindow(activeSessionId)");
+    expect(routeSource).toContain("queryFn: ({ signal }) => fetchSessionDetailWindow(activeSessionId, { signal })");
     expect(routeSource).toContain("enabled: Boolean(activeSessionId)");
   });
 
