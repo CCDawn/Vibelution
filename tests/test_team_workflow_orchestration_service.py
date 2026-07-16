@@ -5851,6 +5851,88 @@ def test_source_collection_context_reconciles_checklist_updates_after_writeback(
     assert stored_task["completionGate"]["passed"] is True
 
 
+def test_stage_checklist_accepts_persisted_writeback_recorded_after_interrupted_turn(monkeypatch):
+    context_event = SimpleNamespace(
+        sequence=1,
+        turn_id="turn-delayed-writeback",
+        event_type="tool_call",
+        payload={
+            "toolCall": {
+                "name": "source_collection_context_tool",
+                "status": "done",
+            }
+        },
+    )
+    monkeypatch.setattr(
+        team_workflow_orchestration_service,
+        "_source_collection_stage_conversation_events",
+        lambda session_id, **kwargs: [context_event],
+    )
+    checklist = [
+        {
+            "id": "read_approved_candidates",
+            "order": 1,
+            "requiredTool": "source_collection_context_tool",
+        },
+        {
+            "id": "build_candidate_relations",
+            "order": 2,
+            "requiredTool": "",
+        },
+        {
+            "id": "write_candidate_graph",
+            "order": 3,
+            "requiredTool": "source_collection_stage_writeback_tool",
+        },
+        {
+            "id": "confirm_graph_materialized",
+            "order": 4,
+            "requiredTool": "source_collection_stage_writeback_tool",
+        },
+    ]
+    task = {
+        "taskId": "stagetask-delayed-writeback",
+        "sessionId": "session-delayed-writeback",
+        "turn": {"turnId": "turn-delayed-writeback"},
+        "checklistBinding": {"mode": "stage_task"},
+        "reconciledFromTurn": {
+            "status": "interrupted",
+            "reconciledAt": "2026-07-16T06:33:59+08:00",
+        },
+        "writeback": {
+            "recordedAt": "2026-07-16T06:34:57+08:00",
+            "result": {"candidateGraph": {"nodes": [{"id": "topic:one"}], "edges": []}},
+        },
+    }
+
+    progress = team_workflow_orchestration_service._source_collection_stage_task_tool_progress_from_trace(
+        task,
+        checklist,
+        artifact_complete=True,
+    )
+
+    assert progress["complete"] is True
+    assert progress["completedIds"] == [
+        "read_approved_candidates",
+        "build_candidate_relations",
+        "write_candidate_graph",
+        "confirm_graph_materialized",
+    ]
+    assert progress["persistedWritebackAfterTurn"] is True
+    assert progress["source"] == "persisted_writeback_after_turn"
+
+    task["writeback"]["recordedAt"] = "2026-07-16T06:32:00+08:00"
+    stale_progress = team_workflow_orchestration_service._source_collection_stage_task_tool_progress_from_trace(
+        task,
+        checklist,
+        artifact_complete=True,
+    )
+
+    assert stale_progress["complete"] is False
+    assert stale_progress["completedIds"] == ["read_approved_candidates"]
+    assert stale_progress.get("persistedWritebackAfterTurn") is not True
+
+
 def test_source_collection_stage_turn_completion_reconciles_post_writeback_checklist(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)
@@ -8180,6 +8262,57 @@ def test_start_research_stage_round_creates_knowledge_collection_round(tmp_path,
     assert response["searchPlan"]["promptCachePolicy"]["requirement"] == "required_for_llm_execution"
     assert status_payload["phases"][0]["activeRoundId"] == stage_round["stageRoundId"]
     assert status_payload["phases"][0]["roundCount"] == 1
+
+
+def test_research_stage_status_supersedes_older_active_round_when_newer_round_exists(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    events = _capture_workflow_events(monkeypatch)
+    team = team_service.create_team(name="ai科学研究团队")
+    now = "2026-07-16T08:00:00+08:00"
+    older_round = {
+        "schemaVersion": 1,
+        "stageRoundId": "stage-round-older",
+        "teamId": team["teamId"],
+        "stageType": "knowledge_collection",
+        "roundNumber": 1,
+        "status": "needs_attention",
+        "sourceRunIds": [],
+        "createdAt": "2026-07-15T08:00:00+08:00",
+        "updatedAt": "2026-07-15T08:00:00+08:00",
+    }
+    newer_round = {
+        "schemaVersion": 1,
+        "stageRoundId": "stage-round-newer",
+        "teamId": team["teamId"],
+        "stageType": "knowledge_collection",
+        "roundNumber": 2,
+        "status": "needs_continue",
+        "sourceRunIds": [],
+        "createdAt": now,
+        "updatedAt": now,
+    }
+    store = team_workflow_orchestration_service._load_stage_round_store(team["teamId"])
+    store["rounds"] = [older_round, newer_round]
+    team_workflow_orchestration_service._write_json(
+        team_workflow_orchestration_service._stage_round_store_path(team["teamId"]),
+        store,
+    )
+
+    status = team_workflow_orchestration_service.get_research_stage_round_status(team["teamId"])
+    persisted_store = team_workflow_orchestration_service._load_stage_round_store(team["teamId"])
+    persisted_older = next(item for item in persisted_store["rounds"] if item["stageRoundId"] == "stage-round-older")
+
+    assert persisted_older["status"] == "superseded"
+    assert persisted_older["supersededByStageRoundId"] == "stage-round-newer"
+    assert status["latestRound"]["stageRoundId"] == "stage-round-newer"
+    assert status["activeRounds"] == []
+    assert status["phases"][0]["activeRoundId"] == ""
+    event = next(
+        item
+        for item in events
+        if len(item[0]) >= 3 and item[0][2] == "research_stage_round.superseded_by_newer_round"
+    )
+    assert event[1]["fields"]["stageRoundId"] == "stage-round-older"
 
 
 def test_source_collection_search_syncs_stage_round_terminal_state(tmp_path, monkeypatch):
