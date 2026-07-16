@@ -2,7 +2,7 @@ import { Bot, Check, LoaderCircle, MessageCircle, X } from "lucide-react";
 import type { DragEvent, KeyboardEvent, MouseEvent } from "react";
 
 import type { AgentInstance, SessionSummary } from "../api/types";
-import { VChip, VIconButton, VNativeButton, VNativeInput } from "../components/vui";
+import { VChip, VIconButton, VNativeButton, VNativeInput, VTooltip } from "../components/vui";
 import type { TranslationKey } from "../i18n/dictionary";
 import {
   sessionAgentDisplayInfo,
@@ -297,7 +297,16 @@ export function DirectSessionIndexItem({
   const statusText = statusLabel(sessionStatus);
   const statusTitle = sessionRunningBadgeTitle(statusText, lang);
   const runningBadgeLabel = sessionRunningBadgeLabel(lang);
-  const sessionItemTitle = [sessionTitle, sessionModelTitle].filter(Boolean).join(" · ");
+  const sessionItemTooltip = (
+    <span className="grid min-w-0 gap-1">
+      <strong className="text-vui-fg-primary">{sessionTitle}</strong>
+      {sessionModelTitle ? <span>{sessionModelTitle}</span> : null}
+      {sessionSummaryVisible ? <span>{sessionSummary}</span> : null}
+      {sessionFunctionVisible ? <span>{sessionDisplay.functionLabel}</span> : null}
+      {sessionRunning ? <span>{statusTitle}</span> : null}
+      {unreadTitle ? <span>{unreadTitle}</span> : null}
+    </span>
+  );
   const sessionUpdatedTime = (
     <span className={styles.conversationMetaTime}>
       <time>{formatTime(session.updatedAt || session.lastActive)}</time>
@@ -307,7 +316,7 @@ export function DirectSessionIndexItem({
   const statusCluster = (
     <span className={styles.sessionStatusCluster}>
       {sessionRunning ? (
-        <span title={statusTitle} aria-label={statusTitle}>
+        <span aria-label={statusTitle}>
           <VChip tone="success" className={styles.sessionRunningBadge}>
             <LoaderCircle size={10} aria-hidden="true" />
             <span>{runningBadgeLabel}</span>
@@ -315,7 +324,7 @@ export function DirectSessionIndexItem({
         </span>
       ) : null}
       {unreadCount > 0 ? (
-        <span title={unreadTitle} aria-label={unreadTitle}>
+        <span aria-label={unreadTitle}>
           <VChip tone="warning" className={styles.sessionUnreadBadge}>
             {unreadCount}
           </VChip>
@@ -364,9 +373,11 @@ export function DirectSessionIndexItem({
               {sessionUpdatedTime}
             </span>
             {sessionSummaryVisible ? (
-              <span className={styles.sessionItemSummary} title={sessionSummary}>
-                {sessionSummary}
-              </span>
+              <VTooltip content={sessionSummary} width="wide">
+                <span className={styles.sessionItemSummary} tabIndex={0}>
+                  {sessionSummary}
+                </span>
+              </VTooltip>
             ) : null}
             {sessionMetaVisible ? (
               <span className={styles.conversationMetaRow}>
@@ -391,49 +402,48 @@ export function DirectSessionIndexItem({
           </span>
         </div>
       ) : (
-        <VNativeButton
-          type="button"
-          className={styles.sessionItemMain}
-          {...dragSessionProps}
-          onClick={() => onOpen(session.id)}
-          aria-current={active ? "true" : undefined}
-          title={sessionItemTitle || undefined}
-        >
-          {renderSessionAvatar(avatarClassName, sessionAvatarImageUrl, sessionAvatarFallback)}
-          <span className={styles.conversationCopy}>
-            <span className={styles.conversationTitleRow}>
-              <span className={styles.conversationTitleMain}>
-                <span className={styles.sessionItemTitle}>{sessionTitle}</span>
-              </span>
-              {sessionUpdatedTime}
-            </span>
-            {sessionSummaryVisible ? (
-              <span className={styles.sessionItemSummary} title={sessionSummary}>
-                {sessionSummary}
-              </span>
-            ) : null}
-            {sessionMetaVisible ? (
-              <span className={styles.conversationMetaRow}>
-                <span className={styles.conversationMetaMain}>
-                  {sessionIsChild ? (
-                    <span className={`${styles.conversationKindBadge} ${styles.conversationKindBadgeChild}`} title={kindLabel} aria-label={kindLabel}>
-                      <MessageCircle size={10} aria-hidden="true" />
-                    </span>
-                  ) : null}
-                  {sessionAgentMeta ? <span>{sessionAgentMeta}</span> : null}
-                  {sessionFunctionVisible ? (
-                    <span className={`${styles.agentRoleTag} ${agentRoleToneClass(sessionDisplay.tone)}`} title={sessionDisplay.functionLabel}>
-                      <Bot size={10} aria-hidden="true" />
-                      {sessionDisplay.functionLabel}
-                    </span>
-                  ) : null}
+        <VTooltip content={sessionItemTooltip} width="wide">
+          <VNativeButton
+            type="button"
+            className={styles.sessionItemMain}
+            {...dragSessionProps}
+            onClick={() => onOpen(session.id)}
+            aria-current={active ? "true" : undefined}
+          >
+            {renderSessionAvatar(avatarClassName, sessionAvatarImageUrl, sessionAvatarFallback)}
+            <span className={styles.conversationCopy}>
+              <span className={styles.conversationTitleRow}>
+                <span className={styles.conversationTitleMain}>
+                  <span className={styles.sessionItemTitle}>{sessionTitle}</span>
                 </span>
-                {statusCluster}
+                {sessionUpdatedTime}
               </span>
-            ) : null}
-            {missingAgentMessage ? <span className={styles.agentMissingLine}>{missingAgentMessage}</span> : null}
-          </span>
-        </VNativeButton>
+              {sessionSummaryVisible ? (
+                <span className={styles.sessionItemSummary}>{sessionSummary}</span>
+              ) : null}
+              {sessionMetaVisible ? (
+                <span className={styles.conversationMetaRow}>
+                  <span className={styles.conversationMetaMain}>
+                    {sessionIsChild ? (
+                      <span className={`${styles.conversationKindBadge} ${styles.conversationKindBadgeChild}`} aria-label={kindLabel}>
+                        <MessageCircle size={10} aria-hidden="true" />
+                      </span>
+                    ) : null}
+                    {sessionAgentMeta ? <span>{sessionAgentMeta}</span> : null}
+                    {sessionFunctionVisible ? (
+                      <span className={`${styles.agentRoleTag} ${agentRoleToneClass(sessionDisplay.tone)}`}>
+                        <Bot size={10} aria-hidden="true" />
+                        {sessionDisplay.functionLabel}
+                      </span>
+                    ) : null}
+                  </span>
+                  {statusCluster}
+                </span>
+              ) : null}
+              {missingAgentMessage ? <span className={styles.agentMissingLine}>{missingAgentMessage}</span> : null}
+            </span>
+          </VNativeButton>
+        </VTooltip>
       )}
       {editing ? (
         <div className={styles.sessionActionStack}>

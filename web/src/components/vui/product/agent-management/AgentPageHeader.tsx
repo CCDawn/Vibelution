@@ -1,6 +1,6 @@
 import { type ReactNode } from "react";
 
-import { VButton, VIconButton, VHStack, VToolbar } from "../../index";
+import { VButton, VContextualHint, VIconButton, VHStack, VToolbar } from "../../index";
 
 export type AgentPageHeaderAction = {
   id: string;
@@ -8,17 +8,23 @@ export type AgentPageHeaderAction = {
   icon?: ReactNode;
   onPress?: () => void;
   disabled?: boolean;
+  disabledReason?: ReactNode;
+  tooltip?: ReactNode;
 };
 
 export type AgentPageHeaderProps = {
   eyebrow: string;
   title: string;
+  tooltip?: ReactNode;
+  tooltipLabel?: string;
   actions?: AgentPageHeaderAction[];
 };
 
 export function AgentPageHeader({
   eyebrow,
   title,
+  tooltip,
+  tooltipLabel,
   actions = [],
 }: AgentPageHeaderProps) {
   return (
@@ -30,9 +36,18 @@ export function AgentPageHeader({
         <span className="truncate text-[0.64rem] font-semibold uppercase tracking-[0.06em] text-vui-fg-tertiary">
           {eyebrow}
         </span>
-        <h1 className="m-0 truncate text-[0.95rem] font-bold leading-tight text-vui-fg-primary">
-          {title}
-        </h1>
+        <div className="flex min-w-0 items-center gap-1.5">
+          <h1 className="m-0 truncate text-[0.95rem] font-bold leading-tight text-vui-fg-primary">
+            {title}
+          </h1>
+          {tooltip ? (
+            <VContextualHint
+              label={tooltipLabel ?? `${title} details`}
+              content={tooltip}
+              width="wide"
+            />
+          ) : null}
+        </div>
       </div>
       <VToolbar ariaLabel={`${title} actions`} className="justify-end">
         {actions.map((action) => (
@@ -43,9 +58,16 @@ export function AgentPageHeader({
                 icon={action.icon}
                 onPress={action.onPress}
                 isDisabled={action.disabled}
+                tooltip={action.tooltip ?? action.label}
+                disabledReason={action.disabledReason}
               />
             ) : (
-              <VButton onPress={action.onPress} isDisabled={action.disabled}>
+              <VButton
+                onPress={action.onPress}
+                isDisabled={action.disabled}
+                tooltip={action.tooltip}
+                disabledReason={action.disabledReason}
+              >
                 {action.label}
               </VButton>
             )}

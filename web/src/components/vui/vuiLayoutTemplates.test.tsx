@@ -19,17 +19,28 @@ import {
 describe("VUI workbench layout templates", () => {
   it("keeps panel-header text without rendering a heading when requested", () => {
     const markup = renderToStaticMarkup(
-      <VPanelHeader headingLevel={null} title="Sidebar navigation" />,
+      <VPanelHeader
+        headingLevel={null}
+        title="Sidebar navigation"
+        tooltip="Choose a workspace section"
+        tooltipLabel="Sidebar navigation details"
+      />,
     );
 
     expect(markup).toContain('data-vui="panel-header"');
     expect(markup).toContain("Sidebar navigation");
+    expect(markup).toContain('data-vui="contextual-hint"');
     expect(markup).not.toContain("<h2");
   });
 
   it("places a public section header class on the direct header before its direct body", () => {
     const markup = renderToStaticMarkup(
-      <VSection headerClassName="config-section-header-contract" title="Config section">
+      <VSection
+        headerClassName="config-section-header-contract"
+        title="Config section"
+        tooltip="Settings in this card"
+        tooltipLabel="Config section details"
+      >
         <div data-layout-marker="section-body">Body</div>
       </VSection>,
     );
@@ -37,6 +48,7 @@ describe("VUI workbench layout templates", () => {
     expect(markup).toMatch(
       /<section[^>]*><header[^>]*config-section-header-contract[^>]*>.*<\/header><div data-layout-marker="section-body">Body<\/div><\/section>/,
     );
+    expect(markup).toContain('aria-label="Config section details"');
   });
 
   it("renders reusable route-level layout slots with stable data attributes", () => {

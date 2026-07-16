@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 
 import type { ConfigSummary } from "../api/types";
-import { VButton } from "../components/vui";
+import { VButton, VContextualHint } from "../components/vui";
 import styles from "./ConfigSettingsNavigation.styles";
 
 export type ConfigSettingsLanguage = "zh" | "en";
@@ -131,12 +131,21 @@ export function ConfigSettingsSidebar({
   onSelectGroup,
   headerAction,
 }: ConfigSettingsSidebarProps) {
+  const sidebarHelp = subtitleHint || subtitle;
   return (
     <aside className={styles.sidebar}>
       <header className={styles.sidebarHeader}>
         <p className={styles.eyebrow}>{language === "zh" ? "设置" : "Settings"}</p>
-        <h2 className={styles.title}>{title}</h2>
-        <p className={styles.subtitle} title={subtitleHint}>{subtitle}</p>
+        <div className={styles.titleRow}>
+          <h2 className={styles.title}>{title}</h2>
+          {sidebarHelp ? (
+            <VContextualHint
+              label={language === "zh" ? "设置工作台说明" : "Settings workspace details"}
+              content={sidebarHelp}
+              width="wide"
+            />
+          ) : null}
+        </div>
         {headerAction}
       </header>
       <div className={styles.status} role="status">
@@ -150,6 +159,7 @@ export function ConfigSettingsSidebar({
             className={group.id === activeGroupId ? `${styles.groupButton} ${styles.groupButtonActive}` : styles.groupButton}
             contentLayout="plain"
             variant={group.id === activeGroupId ? "primary" : "ghost"}
+            tooltip={group.summary}
             aria-pressed={group.id === activeGroupId}
             onPress={() => onSelectGroup(group.id)}
           >
@@ -182,6 +192,7 @@ export function ConfigSettingsPageTabs({
           key={page.id}
           className={page.id === activePageId ? `${styles.pageButton} ${styles.pageButtonActive}` : styles.pageButton}
           variant={page.id === activePageId ? "primary" : "ghost"}
+          tooltip={page.summary}
           aria-current={page.id === activePageId ? "page" : undefined}
           onPress={() => onSelectPage(page.id)}
         >
