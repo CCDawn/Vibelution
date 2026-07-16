@@ -138,6 +138,7 @@ describe("ConfigSettingsNavigation", () => {
         language="zh"
         title="设置"
         subtitle="统一配置工作台"
+        subtitleHint="配置按使用场景分组，修改后统一保存"
         statusLabel="已同步"
         groups={groups}
         activeGroupId="tooling-diagnostics"
@@ -155,6 +156,9 @@ describe("ConfigSettingsNavigation", () => {
 
     expect(sidebarMarkup).toContain("总览与保存");
     expect(sidebarMarkup).toContain("工具与诊断");
+    expect(sidebarMarkup).toContain('data-vui="contextual-hint"');
+    expect(sidebarMarkup).not.toContain('title="配置按使用场景分组，修改后统一保存"');
+    expect(sidebarMarkup.match(/data-slot="tooltip-trigger"/g)?.length ?? 0).toBeGreaterThanOrEqual(groups.length + 1);
     expect(sidebarMarkup).toMatch(/aria-pressed="true"[^>]*><span>工具与诊断<\/span>/);
     expect(tabsMarkup).toContain("日常工具");
     expect(tabsMarkup).toContain("排障中心");
@@ -162,6 +166,7 @@ describe("ConfigSettingsNavigation", () => {
     expect(tabsMarkup).not.toContain("日志与调试");
     expect(tabsMarkup).not.toContain("原始配置");
     expect(tabsMarkup).toContain('aria-current="page"');
+    expect(tabsMarkup).toContain('data-slot="tooltip-trigger"');
     expect(styles.groupButton).toContain("min-h-11");
     expect(styles.pageButton).toContain("min-h-10");
     expect(styles.sidebar).toContain("clamp(15.5rem,17vw,18rem)");

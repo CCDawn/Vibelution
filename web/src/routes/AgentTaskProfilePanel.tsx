@@ -1,5 +1,5 @@
 import { AgentTaskProfile } from "../api/types";
-import { VButton, VNativeInput, VNativeTextarea } from "../components/vui";
+import { VButton, VContextualHint, VNativeInput, VNativeTextarea } from "../components/vui";
 import styles from "./AgentTaskProfilePanel.styles";
 
 export type AgentTaskDraft = Omit<AgentTaskProfile, "taskTypes"> & {
@@ -50,11 +50,14 @@ export function AgentTaskProfilePanel({
   onSave,
 }: AgentTaskProfilePanelProps) {
   return (
-    <section className={styles.configEditor} title={copy.taskHint}>
+    <section className={styles.configEditor}>
       <div className={styles.panelHeader}>
         <div>
           <p className={styles.panelEyebrow}>{copy.taskTitle}</p>
-          <h3>{summary}</h3>
+          <h3 className="inline-flex items-center gap-1.5">
+            {summary}
+            <VContextualHint content={copy.taskHint} label={`${copy.taskTitle}说明`} />
+          </h3>
         </div>
         <span className={dirty ? styles.dirtyPill : styles.cleanPill}>
           {dirty ? (lang === "zh" ? "未保存" : "Unsaved") : (lang === "zh" ? "已同步" : "Synced")}
@@ -107,6 +110,8 @@ export function AgentTaskProfilePanel({
           type="button"
           variant="secondary"
           isDisabled={!dirty || pending}
+          tooltip={lang === "zh" ? "放弃本次未保存的任务档案修改。" : "Discard unsaved task profile changes."}
+          disabledReason={!dirty ? (lang === "zh" ? "当前没有未保存修改。" : "There are no unsaved changes.") : (lang === "zh" ? "正在保存，请稍候。" : "Saving is in progress.")}
           onPress={onReset}
         >
           {copy.resetConfig}
@@ -115,6 +120,8 @@ export function AgentTaskProfilePanel({
           type="button"
           variant="primary"
           isDisabled={!canSave || pending}
+          tooltip={lang === "zh" ? "保存当前任务档案。" : "Save the current task profile."}
+          disabledReason={!canSave ? (lang === "zh" ? "请先完成任务档案的必填内容。" : "Complete the required task profile fields first.") : (lang === "zh" ? "正在保存，请稍候。" : "Saving is in progress.")}
           onPress={onSave}
         >
           {pending ? copy.savingTask : copy.saveTask}

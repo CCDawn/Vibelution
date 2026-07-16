@@ -5,6 +5,8 @@ import {
   type ReactNode,
 } from "react";
 
+import { VTooltip } from "../../primitives/VTooltip";
+
 export type TeamStageTone = "active" | "done" | "failed" | "idle" | "pending";
 
 /** Stage state drives the border/text custom properties used by the card. */
@@ -112,7 +114,7 @@ export function TeamStageCard({
     onActivate();
   };
 
-  return (
+  const card = (
     <article
       data-vui-product="team-stage-card"
       data-tone={tone}
@@ -121,7 +123,6 @@ export function TeamStageCard({
       role="button"
       tabIndex={0}
       aria-pressed={selected}
-      title={title}
       onClick={handleClick}
       onKeyDown={handleKeyDown}
     >
@@ -147,4 +148,8 @@ export function TeamStageCard({
       {actions ? <div className={ACTION_ROW}>{actions}</div> : null}
     </article>
   );
+
+  return title ? (
+    <VTooltip content={title} width="wide">{card}</VTooltip>
+  ) : card;
 }

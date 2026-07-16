@@ -5,7 +5,7 @@ const styles = {
   eyebrow:
     "vui-routes-configsettingsnavigation eyebrow m-0 text-[var(--vui-font-xs)] font-bold uppercase tracking-[0.08em] text-vui-fg-tertiary",
   title: "vui-routes-configsettingsnavigation title m-0 text-lg font-extrabold text-vui-fg-primary",
-  subtitle: "vui-routes-configsettingsnavigation subtitle m-0 text-[var(--vui-font-sm)] leading-relaxed text-vui-fg-secondary",
+  titleRow: "vui-routes-configsettingsnavigation titleRow flex min-w-0 items-center gap-1.5",
   status:
     "vui-routes-configsettingsnavigation status flex min-h-10 items-center justify-between gap-3 rounded-lg border border-vui-border-subtle bg-vui-surface-row px-3 text-[var(--vui-font-sm)] font-semibold text-vui-fg-secondary",
   statusValue: "vui-routes-configsettingsnavigation statusValue text-vui-fg-primary",

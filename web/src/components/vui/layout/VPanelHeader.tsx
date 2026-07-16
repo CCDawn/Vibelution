@@ -1,11 +1,15 @@
 import { type ReactNode } from "react";
 
+import { VContextualHint } from "../primitives/VContextualHint";
+
 export type VPanelHeaderProps = {
   title: ReactNode;
   eyebrow?: ReactNode;
   actions?: ReactNode;
   className?: string;
   headingLevel?: 2 | 3 | 4 | null;
+  tooltip?: ReactNode;
+  tooltipLabel?: string;
   "data-vui"?: string;
 };
 
@@ -18,6 +22,8 @@ export function VPanelHeader({
   actions,
   className,
   headingLevel = 2,
+  tooltip,
+  tooltipLabel,
   "data-vui": dataVui,
 }: VPanelHeaderProps) {
   return (
@@ -33,15 +39,24 @@ export function VPanelHeader({
             {eyebrow}
           </p>
         ) : null}
-        {headingLevel === null ? (
-          <div className={titleClassName}>{title}</div>
-        ) : headingLevel === 3 ? (
-          <h3 className={titleClassName}>{title}</h3>
-        ) : headingLevel === 4 ? (
-          <h4 className={titleClassName}>{title}</h4>
-        ) : (
-          <h2 className={titleClassName}>{title}</h2>
-        )}
+        <div className="flex min-w-0 items-center gap-1.5">
+          {headingLevel === null ? (
+            <div className={titleClassName}>{title}</div>
+          ) : headingLevel === 3 ? (
+            <h3 className={titleClassName}>{title}</h3>
+          ) : headingLevel === 4 ? (
+            <h4 className={titleClassName}>{title}</h4>
+          ) : (
+            <h2 className={titleClassName}>{title}</h2>
+          )}
+          {tooltip ? (
+            <VContextualHint
+              label={tooltipLabel ?? "Section details"}
+              content={tooltip}
+              width="wide"
+            />
+          ) : null}
+        </div>
       </div>
       {actions ? (
         <div className="inline-flex items-center justify-end gap-2 min-w-0">{actions}</div>
