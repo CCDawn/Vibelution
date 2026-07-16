@@ -4185,7 +4185,7 @@ def _wake_agent_for_cli_agent_task_result(
             return "guided_running"
         _ensure_conversation_agent_metadata(conversation)
         agent_id = str(conversation.get("agent_id") or conversation.get("agentId") or "").strip()
-        _resolve_active_agent_for_turn(session_id, agent_id, lang=lang)
+        agent = _resolve_active_agent_for_turn(session_id, agent_id, lang=lang)
         history_messages = _session_ledger_visible_messages(session_id)
         active_task = _normalize_session_active_task(conversation.get("active_task") or conversation.get("activeTask"))
         if not _is_task_tool_backed_active_task(active_task):
@@ -4227,6 +4227,10 @@ def _wake_agent_for_cli_agent_task_result(
         "mental_model_enabled": None,
         "active_task": active_task,
         "agent_id": agent_id,
+        "agent_snapshot": dict(agent) if isinstance(agent, dict) else {},
+        "agent_prompt_snapshot": dict(conversation.get("agentPromptSnapshot") or {})
+        if isinstance(conversation.get("agentPromptSnapshot"), dict)
+        else {},
         "leases": requested_leases,
         "llm_slot": SESSION_LLM_SLOT_DIALOGUE,
         "submit_timing_fields": {"source": "cli_agent_result", "signalId": signal_id, "wakeReason": str(wake_reason or "").strip()},
@@ -6245,6 +6249,10 @@ def submit_session_message(
         "mental_model_enabled": mental_model_enabled,
         "active_task": active_task,
         "agent_id": agent_id,
+        "agent_snapshot": dict(agent) if isinstance(agent, dict) else {},
+        "agent_prompt_snapshot": dict(conversation.get("agentPromptSnapshot") or {})
+        if isinstance(conversation.get("agentPromptSnapshot"), dict)
+        else {},
         "leases": requested_leases,
         "message_metadata": dict(persisted_message_metadata),
         "client_submission_id": normalized_client_submission_id,
@@ -12088,6 +12096,8 @@ def _agent_prompt_snapshot_matches_agent(
 def _ensure_session_agent_prompt_snapshot(
     session_id: str,
     agent: dict[str, Any] | None,
+    *,
+    snapshot_hint: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     normalized_session_id = str(session_id or "").strip()
     if not normalized_session_id or not isinstance(agent, dict):
@@ -12096,18 +12106,32 @@ def _ensure_session_agent_prompt_snapshot(
     prompt_template_id = str(agent.get("promptTemplateId") or "").strip()
     if not agent_id or not prompt_template_id:
         return {}
+    include_chat_base = str(agent.get("primaryMode") or "").strip().lower() == "chat"
+    required_versions = prompt_template_service.get_agent_prompt_snapshot_versions(
+        prompt_template_id,
+        project_root=PROJECT_ROOT,
+        include_chat_base=include_chat_base,
+    )
+    if _agent_prompt_snapshot_matches_agent(
+        snapshot_hint,
+        agent_id=agent_id,
+        prompt_template_id=prompt_template_id,
+        builtin_content_version=required_versions.get("builtinContentVersion", 0),
+        chat_base_prompt_version=required_versions.get("chatBasePromptVersion", 0),
+    ):
+        _record_session_prompt_snapshot_event(
+            normalized_session_id,
+            agent_id=agent_id,
+            snapshot=snapshot_hint,
+            outcome="reused",
+        )
+        return dict(snapshot_hint)
     with _CHAT_STATE_LOCK, chat_state_transaction(PROJECT_ROOT):
         payload = load_chat_state(PROJECT_ROOT)
         conversation = _find_conversation_entry(payload, normalized_session_id)
         if conversation is None:
             return {}
         existing = conversation.get("agentPromptSnapshot")
-        include_chat_base = str(agent.get("primaryMode") or "").strip().lower() == "chat"
-        required_versions = prompt_template_service.get_agent_prompt_snapshot_versions(
-            prompt_template_id,
-            project_root=PROJECT_ROOT,
-            include_chat_base=include_chat_base,
-        )
         if _agent_prompt_snapshot_matches_agent(
             existing,
             agent_id=agent_id,
@@ -13331,12 +13355,28 @@ def _run_session_turn(context: dict[str, Any]) -> None:
     prepare_timings["agentDirectorySyncMs"] = _elapsed_ms(stage_started_at)
     agent_id = str(context.get("agent_id") or context.get("agentId") or "").strip()
     stage_started_at = _perf_counter()
-    agent_instance = get_agent(agent_id, include_archived=False) if agent_id else None
+    supplied_agent = context.get("agent_snapshot") if isinstance(context.get("agent_snapshot"), dict) else None
+    if supplied_agent and str(supplied_agent.get("agentId") or "").strip() != agent_id:
+        supplied_agent = None
+    agent_instance = supplied_agent or (get_agent(agent_id, include_archived=False) if agent_id else None)
     historical_agent = None if agent_instance else (get_agent(agent_id, include_archived=True) if agent_id else None)
     supervised_runtime_role = _supervised_role_for_runtime_context(context, agent_instance)
     prepare_timings["agentLookupMs"] = _elapsed_ms(stage_started_at)
     stage_started_at = _perf_counter()
-    agent_prompt_snapshot = _ensure_session_agent_prompt_snapshot(session_id, agent_instance) if agent_instance else {}
+    prompt_snapshot_hint = (
+        context.get("agent_prompt_snapshot")
+        if isinstance(context.get("agent_prompt_snapshot"), dict)
+        else None
+    )
+    agent_prompt_snapshot = (
+        _ensure_session_agent_prompt_snapshot(
+            session_id,
+            agent_instance,
+            snapshot_hint=prompt_snapshot_hint,
+        )
+        if agent_instance
+        else {}
+    )
     agent_prompt_snapshot_block = _render_agent_prompt_snapshot_block(agent_prompt_snapshot)
     prepare_timings["promptSnapshotMs"] = _elapsed_ms(stage_started_at)
     prepare_timings["promptSnapshotIncluded"] = bool(agent_prompt_snapshot_block)
@@ -13352,7 +13392,12 @@ def _run_session_turn(context: dict[str, Any]) -> None:
     prepare_timings["lightweightChatPayloadReason"] = lightweight_chat_payload_reason
     stage_started_at = _perf_counter()
     agent_context_packet = (
-        build_agent_context(agent_id, session_id=session_id, run_id=turn_id)
+        build_agent_context(
+            agent_id,
+            session_id=session_id,
+            run_id=turn_id,
+            agent_snapshot=agent_instance,
+        )
         if agent_id
         else None
     )

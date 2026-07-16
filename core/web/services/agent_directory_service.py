@@ -3202,18 +3202,38 @@ def list_group_context_events_for_agent(agent_id: str, *, limit: int = 8, prompt
     return events[-max(1, int(limit or 1)) :]
 
 
-def build_agent_runtime_context_block(agent_id: str, *, limit: int = 6) -> str:
-    agent = get_agent(agent_id)
+def build_agent_runtime_context_block(
+    agent_id: str,
+    *,
+    limit: int = 6,
+    agent_snapshot: dict[str, Any] | None = None,
+    group_events_snapshot: list[dict[str, Any]] | None = None,
+    inbox_messages_snapshot: list[dict[str, Any]] | None = None,
+    memory_policy_snapshot: dict[str, Any] | None = None,
+) -> str:
+    agent = dict(agent_snapshot) if isinstance(agent_snapshot, dict) else get_agent(agent_id)
     if not agent:
         return ""
-    events = list_group_context_events_for_agent(agent_id, limit=limit, prompt_eligible_only=True)
-    inbox_messages = list_agent_inbox_messages_for_agent(
-        agent_id,
-        limit=limit,
-        status="pending",
-        prompt_eligible_only=True,
+    events = (
+        list(group_events_snapshot)
+        if group_events_snapshot is not None
+        else list_group_context_events_for_agent(agent_id, limit=limit, prompt_eligible_only=True)
     )
-    memory_policy = resolve_memory_policy_for_agent(agent_id)
+    inbox_messages = (
+        list(inbox_messages_snapshot)
+        if inbox_messages_snapshot is not None
+        else list_agent_inbox_messages_for_agent(
+            agent_id,
+            limit=limit,
+            status="pending",
+            prompt_eligible_only=True,
+        )
+    )
+    memory_policy = (
+        dict(memory_policy_snapshot)
+        if isinstance(memory_policy_snapshot, dict)
+        else resolve_memory_policy_for_agent(agent_id)
+    )
     lines = [
         "## Agent Runtime Context",
         f"AgentId: {agent.get('agentId') or ''}",

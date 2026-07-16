@@ -19,6 +19,49 @@ from core.web.services import agent_directory_service
 from tests.helpers.web_chat_state import _seed_chat_state
 
 
+def test_prompt_snapshot_hint_skips_chat_state_reload(monkeypatch):
+    agent = {
+        "agentId": "agent-primary",
+        "primaryMode": "chat",
+        "promptTemplateId": "prompt-chat-default",
+    }
+    snapshot = {
+        "agentId": "agent-primary",
+        "promptTemplateId": "prompt-chat-default",
+        "builtinContentVersion": 4,
+        "chatBasePromptVersion": 3,
+        "content": "stable prompt",
+        "contentHash": "prompt-v4",
+    }
+    recorded = []
+
+    monkeypatch.setattr(
+        session_service.prompt_template_service,
+        "get_agent_prompt_snapshot_versions",
+        lambda *_args, **_kwargs: {"builtinContentVersion": 4, "chatBasePromptVersion": 3},
+    )
+    monkeypatch.setattr(
+        session_service,
+        "chat_state_transaction",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("chat state must not be reloaded")),
+    )
+    monkeypatch.setattr(
+        session_service,
+        "_record_session_prompt_snapshot_event",
+        lambda *args, **kwargs: recorded.append((args, kwargs)),
+    )
+
+    result = session_service._ensure_session_agent_prompt_snapshot(
+        "session-live",
+        agent,
+        snapshot_hint=snapshot,
+    )
+
+    assert result == snapshot
+    assert result is not snapshot
+    assert recorded[0][1]["outcome"] == "reused"
+
+
 def test_session_agent_runtime_cache_reuses_transport_and_invalidates_on_prompt_change(tmp_path, monkeypatch):
     session_service._invalidate_session_agent_runtime_cache()
     created = []

@@ -168,7 +168,14 @@ class SubAgentContextPacket:
     parent_context: AgentContextPacket | None = None
 
 
-def build_agent_context(agent_id: str, *, session_id: str = "", run_id: str = "", limit: int = 6) -> AgentContextPacket:
+def build_agent_context(
+    agent_id: str,
+    *,
+    session_id: str = "",
+    run_id: str = "",
+    limit: int = 6,
+    agent_snapshot: dict[str, Any] | None = None,
+) -> AgentContextPacket:
     """Build the bounded context packet used by a persistent Agent turn."""
 
     from core.web.services import agent_directory_service
@@ -177,7 +184,10 @@ def build_agent_context(agent_id: str, *, session_id: str = "", run_id: str = ""
     timings: dict[str, Any] = {}
     normalized_agent_id = str(agent_id or "").strip()
     stage_started_at = _perf_counter()
-    agent = agent_directory_service.get_agent(normalized_agent_id, include_archived=False)
+    supplied_agent = dict(agent_snapshot) if isinstance(agent_snapshot, dict) else None
+    if supplied_agent and str(supplied_agent.get("agentId") or "").strip() != normalized_agent_id:
+        supplied_agent = None
+    agent = supplied_agent or agent_directory_service.get_agent(normalized_agent_id, include_archived=False)
     historical_agent = (
         None
         if agent
@@ -228,7 +238,17 @@ def build_agent_context(agent_id: str, *, session_id: str = "", run_id: str = ""
     )
     timings["inboxMessagesMs"] = _elapsed_ms(stage_started_at)
     stage_started_at = _perf_counter()
-    raw_runtime_context_block = agent_directory_service.build_agent_runtime_context_block(normalized_agent_id, limit=limit)
+    memory_policy = agent_directory_service.resolve_memory_policy_for_agent(normalized_agent_id)
+    timings["memoryPolicyMs"] = _elapsed_ms(stage_started_at)
+    stage_started_at = _perf_counter()
+    raw_runtime_context_block = agent_directory_service.build_agent_runtime_context_block(
+        normalized_agent_id,
+        limit=limit,
+        agent_snapshot=agent,
+        group_events_snapshot=group_events,
+        inbox_messages_snapshot=inbox_messages,
+        memory_policy_snapshot=memory_policy,
+    )
     timings["runtimeContextBlockMs"] = _elapsed_ms(stage_started_at)
     agent_static_context_block, agent_dynamic_context_block = _split_agent_runtime_context_block(raw_runtime_context_block)
     research_org_context_block = ""
@@ -323,9 +343,6 @@ def build_agent_context(agent_id: str, *, session_id: str = "", run_id: str = ""
     static_context_block = _join_context_segments(context_segments, "cache_prefix")
     dynamic_context_block = _join_context_segments(context_segments, "volatile_turn")
     runtime_context_block = _join_context_blocks(static_context_block, dynamic_context_block)
-    stage_started_at = _perf_counter()
-    memory_policy = agent_directory_service.resolve_memory_policy_for_agent(normalized_agent_id)
-    timings["memoryPolicyMs"] = _elapsed_ms(stage_started_at)
     stage_started_at = _perf_counter()
     tool_policy = agent_directory_service.resolve_tool_policy_for_agent(normalized_agent_id)
     timings["toolPolicyMs"] = _elapsed_ms(stage_started_at)
