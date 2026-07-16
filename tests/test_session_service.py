@@ -931,6 +931,41 @@ def test_reconcile_preserves_open_ledger_for_durable_active_work_run(monkeypatch
     ]
 
 
+def test_reconcile_does_not_interrupt_turn_activated_during_ledger_read(monkeypatch, tmp_path):
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(session_service, "_active_chat_turn_work_run_for_session", lambda _session_id: None)
+    append_conversation_event(tmp_path, "session-live", "turn-new", EVENT_TURN_STARTED, status="running")
+
+    ledger_read = threading.Event()
+    allow_reconcile = threading.Event()
+    original_latest_open_turn_id = session_service.latest_open_turn_id
+
+    def delayed_latest_open_turn_id(events):
+        ledger_read.set()
+        assert allow_reconcile.wait(2.0)
+        return original_latest_open_turn_id(events)
+
+    monkeypatch.setattr(session_service, "latest_open_turn_id", delayed_latest_open_turn_id)
+    reconcile = threading.Thread(
+        target=session_service._reconcile_stale_session_ledger,
+        args=("session-live",),
+        kwargs={"reason": "detail_loaded_after_restart"},
+    )
+    reconcile.start()
+    assert ledger_read.wait(2.0)
+    session_service._set_session_running("session-live", True, turn_id="turn-new")
+    allow_reconcile.set()
+    reconcile.join(timeout=2.0)
+
+    try:
+        assert not reconcile.is_alive()
+        assert [event.event_type for event in load_conversation_events(tmp_path, "session-live")] == [
+            EVENT_TURN_STARTED,
+        ]
+    finally:
+        session_service._set_session_running("session-live", False, turn_id="turn-new")
+
+
 def test_terminal_fallback_closes_running_turn_when_result_persistence_raises(monkeypatch, tmp_path):
     class FakeWorkRunStore:
         def __init__(self):

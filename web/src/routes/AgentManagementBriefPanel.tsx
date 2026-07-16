@@ -44,7 +44,7 @@ export function AgentManagementBriefPanel({ brief, copy, onOpenRoute, onSelectPa
       <div className={styles.managementBriefHeader}>
         <div>
           <p className={styles.panelEyebrow}>{copy.managementBriefTitle}</p>
-          <h3 className="inline-flex items-center gap-1.5">
+          <h3 className={styles.contextualHintRow}>
             {brief.statusLabel}
             <VContextualHint content={copy.managementBriefHint} label={`${copy.managementBriefTitle}说明`} />
           </h3>

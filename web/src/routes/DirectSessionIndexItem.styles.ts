@@ -1,4 +1,8 @@
 const styles = {
+  disabledReason:
+    "vui-routes-chatcodingroute disabledReason grid min-w-0 gap-1",
+  disabledReasonTitle:
+    "vui-routes-chatcodingroute disabledReasonTitle text-vui-fg-primary",
   agentAvatarImage:
     "vui-routes-chatcodingroute agentAvatarImage min-w-0 inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
   agentMissingLine:

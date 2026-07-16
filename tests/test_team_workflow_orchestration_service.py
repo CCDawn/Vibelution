@@ -8762,6 +8762,18 @@ def test_experiment_plan_draft_uses_ready_algorithm_hypotheses_and_blocks_full_r
     assert draft["plan"]["status"] == "draft"
     assert draft["plan"]["experimentPlan"]["dataset"] == "synthetic task-switch benchmark"
     assert draft["plan"]["experimentPlan"]["metric"] == "validation accuracy and routing entropy"
+    assert draft["plan"]["experimentContract"]["schemaVersion"] == 2
+    assert draft["plan"]["experimentContract"]["researchMode"] == "full_research_loop"
+    assert draft["plan"]["experimentContract"]["experimentMethod"] == "model_training_inference"
+    assert draft["plan"]["contractValidation"]["valid"] is False
+    assert draft["plan"]["contractValidation"]["missingFields"] == [
+        "decisionContract.failureCriteria",
+        "decisionContract.inconclusiveCriteria",
+        "decisionContract.successCriteria",
+        "methodConfig.budget",
+        "methodConfig.model",
+        "methodConfig.seeds",
+    ]
     assert draft["plan"]["baselineSelection"]["activeBaselineReady"] is False
     assert draft["plan"]["readiness"]["readyForPlanReview"] is True
     assert draft["plan"]["readiness"]["readyForSmoke"] is False
@@ -8832,6 +8844,7 @@ def test_experiment_baseline_artifact_registration_unlocks_smoke_gate(tmp_path, 
 
     assert registered["baselineArtifact"]["artifactPath"].endswith("standard-moe-router.json")
     assert registered["plan"]["status"] == "baseline_ready"
+    assert registered["plan"]["experimentContract"]["status"] == "ready_for_prepare"
     assert registered["plan"]["baselineSelection"]["activeBaselineReady"] is True
     assert registered["plan"]["baselineSelection"]["activeBaselineArtifactId"] == registered["baselineArtifact"]["artifactId"]
     assert registered["plan"]["readiness"]["readyForSmoke"] is True
@@ -8908,6 +8921,7 @@ def test_experiment_smoke_result_registration_unlocks_full_run_gate(tmp_path, mo
     assert registered["smokeResult"]["status"] == "passed"
     assert registered["smokeResult"]["gateDecision"] == "promote_to_full_run"
     assert registered["plan"]["status"] == "smoke_passed"
+    assert registered["plan"]["experimentContract"]["status"] == "ready_for_full_run"
     assert registered["plan"]["activeSmokeResultId"] == registered["smokeResult"]["smokeResultId"]
     assert registered["plan"]["readiness"]["readyForSmoke"] is True
     assert registered["plan"]["readiness"]["readyForFullRun"] is True
@@ -9007,6 +9021,7 @@ def test_experiment_full_run_result_registration_tracks_ledger_without_official_
     assert registered["fullRunResult"]["gateDecision"] == "ready_for_knowledge_review"
     assert registered["fullRunResult"]["smokeResultId"] == smoke["smokeResult"]["smokeResultId"]
     assert registered["plan"]["status"] == "full_run_passed"
+    assert registered["plan"]["experimentContract"]["status"] == "result_review"
     assert registered["plan"]["activeFullRunResultId"] == registered["fullRunResult"]["fullRunResultId"]
     assert registered["plan"]["readiness"]["readyForFullRun"] is True
     assert registered["plan"]["readiness"]["readyForKnowledgeIngestion"] is True

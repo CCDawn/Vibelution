@@ -95,7 +95,8 @@ describe("SessionContextMenu", () => {
     );
 
     expect(markup).toContain("打开 Agent 配置");
-    expect(markup).toContain("title=\"打开当前 Agent 配置\"");
+    expect(markup).toContain('data-slot="tooltip-trigger"');
+    expect(markup).not.toContain("title=\"打开当前 Agent 配置\"");
     expect(markup).toContain("清空会话内容");
     expect(markup.match(/data-vui="button"/g)?.length).toBe(5);
   });
@@ -131,8 +132,8 @@ describe("SessionContextMenu", () => {
     expect(markup).toContain("id=\"session-context-menu-session-1-clear-history-reason\"");
     expect(markup).toContain("aria-describedby=\"session-context-menu-session-1-clear-history-reason\"");
     expect(markup.match(/class=\"sr-only\"/g)?.length).toBe(3);
-    expect(markup).toContain("title=\"会话运行中，先停止后再删除\"");
-    expect(markup).toContain("title=\"清空中...\"");
+    expect(markup).not.toContain("title=\"会话运行中，先停止后再删除\"");
+    expect(markup).not.toContain("title=\"清空中...\"");
     expect(markup.match(/disabled=""/g)?.length).toBe(3);
   });
 
