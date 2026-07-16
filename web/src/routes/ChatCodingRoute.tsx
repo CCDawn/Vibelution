@@ -2078,6 +2078,10 @@ export function ChatCodingRoute() {
     queryFn: ({ signal }) => fetchJson<{ activeSessionId: string }>("/api/sessions/active", { signal }),
     staleTime: 5_000,
   });
+  // Prefer URL targets immediately; otherwise wait for active-session bootstrap (empty id still settles).
+  const sessionIndexQueryEnabled =
+    Boolean(requestedSessionId || requestedRoomId)
+    || activeSessionBootstrapQuery.isFetched;
   const modelLabelsById = useMemo(
     () => new Map(Object.entries(configSummaryQuery.data?.modelLabels ?? {})),
     [configSummaryQuery.data?.modelLabels],
@@ -2093,6 +2097,7 @@ export function ChatCodingRoute() {
   const rawSessionsQuery = useSessionIndexQuery({
     queryClient,
     queryText: sessionQueryText,
+    enabled: sessionIndexQueryEnabled,
     refetchInterval: chatLiveQueryPolicy.sessionsRefetchInterval,
     refetchIntervalInBackground: chatLiveQueryPolicy.directRefetchIntervalInBackground,
   });
