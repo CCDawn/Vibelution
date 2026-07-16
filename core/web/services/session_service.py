@@ -198,6 +198,9 @@ _SESSION_CONVERSATION_EVENTS_CACHE_CONDITION = threading.Condition(_SESSION_CONV
 _SESSION_CONVERSATION_EVENTS_CACHE_MAX_ENTRIES = 64
 _SESSION_CONVERSATION_EVENTS_CACHE: dict[str, dict[str, Any]] = {}
 _SESSION_CONVERSATION_EVENTS_INFLIGHT: dict[str, object] = {}
+_SESSION_AGENT_RUNTIME_CACHE_LOCK = threading.Lock()
+_SESSION_AGENT_RUNTIME_CACHE_MAX_ENTRIES = 16
+_SESSION_AGENT_RUNTIME_CACHE: dict[str, dict[str, Any]] = {}
 _SESSION_DETAIL_MESSAGE_WINDOW_MAX_LIMIT = 200
 _AGENT_DIRECTORY_STUB_HIDDEN_TEAM_SOURCES = {
     "ai_search",
@@ -5120,6 +5123,7 @@ def _delete_chat_session_state(session_id: str, *, activate_replacement: bool = 
     _set_session_running(conversation_id, False)
     _clear_session_turn_control(conversation_id)
     _clear_session_live_output(conversation_id)
+    removed_runtime_cache_entries = _invalidate_session_agent_runtime_cache(conversation_id)
     timings["runtime_cleanup"] = _elapsed_ms(cleanup_started_at)
     _record_session_delete_event(
         "deleted",
@@ -5130,6 +5134,7 @@ def _delete_chat_session_state(session_id: str, *, activate_replacement: bool = 
             "agentId": target_agent_id,
             "replacementDirectSessionId": replacement_direct_session_id,
             "remainingCount": len(remaining),
+            "removedAgentRuntimeCacheEntries": removed_runtime_cache_entries,
             "durationMs": _elapsed_ms(started_at),
             "timingsMs": timings,
         },
@@ -12095,28 +12100,18 @@ def _ensure_session_agent_prompt_snapshot(
         if conversation is None:
             return {}
         existing = conversation.get("agentPromptSnapshot")
-        snapshot = prompt_template_service.build_agent_prompt_snapshot(
+        include_chat_base = str(agent.get("primaryMode") or "").strip().lower() == "chat"
+        required_versions = prompt_template_service.get_agent_prompt_snapshot_versions(
             prompt_template_id,
-            agent_id=agent_id,
-            agent_code=str(agent.get("agentCode") or "").strip(),
-            agent_display_name=str(agent.get("displayName") or "").strip(),
             project_root=PROJECT_ROOT,
-            include_chat_base=str(agent.get("primaryMode") or "").strip().lower() == "chat",
+            include_chat_base=include_chat_base,
         )
-        try:
-            builtin_content_version = max(0, int(snapshot.get("builtinContentVersion") or 0))
-        except (TypeError, ValueError):
-            builtin_content_version = 0
-        try:
-            chat_base_prompt_version = max(0, int(snapshot.get("chatBasePromptVersion") or 0))
-        except (TypeError, ValueError):
-            chat_base_prompt_version = 0
         if _agent_prompt_snapshot_matches_agent(
             existing,
             agent_id=agent_id,
             prompt_template_id=prompt_template_id,
-            builtin_content_version=builtin_content_version,
-            chat_base_prompt_version=chat_base_prompt_version,
+            builtin_content_version=required_versions.get("builtinContentVersion", 0),
+            chat_base_prompt_version=required_versions.get("chatBasePromptVersion", 0),
         ):
             _record_session_prompt_snapshot_event(
                 normalized_session_id,
@@ -12125,6 +12120,14 @@ def _ensure_session_agent_prompt_snapshot(
                 outcome="reused",
             )
             return dict(existing)
+        snapshot = prompt_template_service.build_agent_prompt_snapshot(
+            prompt_template_id,
+            agent_id=agent_id,
+            agent_code=str(agent.get("agentCode") or "").strip(),
+            agent_display_name=str(agent.get("displayName") or "").strip(),
+            project_root=PROJECT_ROOT,
+            include_chat_base=include_chat_base,
+        )
         if str(snapshot.get("reason") or "").strip():
             _record_session_prompt_snapshot_event(
                 normalized_session_id,
@@ -13700,12 +13703,16 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                 )
                 agent_prompt_template_id = str((agent_instance or {}).get("promptTemplateId") or "").strip()
                 stage_started_at = _perf_counter()
-                runtime_agent = _create_chat_agent_for_session(
+                runtime_agent, runtime_agent_cache = _acquire_chat_agent_for_session(
+                    session_id,
                     tool_workspace,
                     agent_instance=agent_instance,
                     llm_slot=llm_slot,
                     resolved_llm=resolved_agent_llm,
                     mode="supervised_evolution" if supervised_runtime_role else "chat",
+                    prompt_snapshot_hash=str((agent_prompt_snapshot or {}).get("contentHash") or "").strip()
+                    if isinstance(agent_prompt_snapshot, dict)
+                    else "",
                 )
                 agent_create_ms = _elapsed_ms(stage_started_at)
                 attachments = _normalize_message_attachments(context.get("attachments") or [])
@@ -13745,6 +13752,11 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                         **_session_prompt_cache_log_fields(scope=prompt_cache_scope, partition=prompt_cache_partition),
                         "attachmentCount": len(attachments),
                         "agentCreateMs": agent_create_ms,
+                        "agentRuntimeCacheStatus": str(runtime_agent_cache.get("status") or ""),
+                        "agentRuntimeCacheHit": bool(runtime_agent_cache.get("hit")),
+                        "agentRuntimeCacheEntryCount": _coerce_nonnegative_int(
+                            runtime_agent_cache.get("entryCount") or 0
+                        ),
                         "lightweightChatPayload": lightweight_chat_payload,
                         "lightweightChatPayloadReason": lightweight_chat_payload_reason,
                         "disableTools": lightweight_chat_payload,
@@ -14229,6 +14241,155 @@ def _ensure_session_turn_terminal_fallback(
             pass
 
 
+def _session_agent_runtime_cache_fingerprint(
+    *,
+    session_workspace: Path,
+    agent_instance: dict[str, Any] | None,
+    llm_slot: str,
+    resolved_llm: Any | None,
+    mode: str,
+    prompt_snapshot_hash: str,
+) -> str:
+    agent = agent_instance if isinstance(agent_instance, dict) else {}
+    config = getattr(resolved_llm, "config", None) or _session_agent_config_for_llm_slot(agent_instance, llm_slot)
+    if hasattr(config, "model_dump"):
+        try:
+            config_payload: Any = config.model_dump(mode="json")
+        except (TypeError, ValueError):
+            config_payload = config.model_dump()
+    elif hasattr(config, "dict"):
+        config_payload = config.dict()
+    else:
+        config_payload = repr(config)
+    semantic_agent_fields = {
+        key: agent.get(key)
+        for key in (
+            "agentId",
+            "updatedAt",
+            "status",
+            "primaryMode",
+            "promptTemplateId",
+            "profileId",
+            "roleKey",
+            "llmBindings",
+            "toolPolicy",
+            "capabilities",
+            "memoryPolicy",
+            "workspacePolicy",
+        )
+        if key in agent
+    }
+    raw = json.dumps(
+        {
+            "workspacePath": str(Path(session_workspace).resolve()),
+            "agent": semantic_agent_fields,
+            "llmSlot": str(llm_slot or "").strip(),
+            "llmModelId": str(getattr(resolved_llm, "model_id", "") or "").strip(),
+            "mode": str(mode or "chat").strip(),
+            "promptSnapshotHash": str(prompt_snapshot_hash or "").strip(),
+            "config": config_payload,
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    )
+    return hashlib.sha256(raw.encode("utf-8", errors="replace")).hexdigest()
+
+
+def _invalidate_session_agent_runtime_cache(session_id: str = "") -> int:
+    normalized_session_id = str(session_id or "").strip()
+    removed = 0
+    with _SESSION_AGENT_RUNTIME_CACHE_LOCK:
+        if not normalized_session_id:
+            removed = len(_SESSION_AGENT_RUNTIME_CACHE)
+            _SESSION_AGENT_RUNTIME_CACHE.clear()
+            return removed
+        prefix = f"{normalized_session_id}|"
+        for cache_key in [key for key in _SESSION_AGENT_RUNTIME_CACHE if key.startswith(prefix)]:
+            _SESSION_AGENT_RUNTIME_CACHE.pop(cache_key, None)
+            removed += 1
+    return removed
+
+
+def _acquire_chat_agent_for_session(
+    session_id: str,
+    session_workspace: Path,
+    agent_instance: dict[str, Any] | None,
+    llm_slot: str = SESSION_LLM_SLOT_DIALOGUE,
+    resolved_llm: Any | None = None,
+    mode: str = "chat",
+    prompt_snapshot_hash: str = "",
+) -> tuple[Any, dict[str, Any]]:
+    normalized_session_id = str(session_id or "").strip()
+    normalized_slot = str(llm_slot or SESSION_LLM_SLOT_DIALOGUE).strip() or SESSION_LLM_SLOT_DIALOGUE
+    normalized_mode = str(mode or "chat").strip() or "chat"
+    cache_allowed = bool(normalized_session_id and isinstance(agent_instance, dict) and normalized_mode == "chat")
+    if not cache_allowed:
+        with _SESSION_AGENT_RUNTIME_CACHE_LOCK:
+            entry_count = len(_SESSION_AGENT_RUNTIME_CACHE)
+        return (
+            _create_chat_agent_for_session(
+                session_workspace,
+                agent_instance,
+                llm_slot=normalized_slot,
+                resolved_llm=resolved_llm,
+                mode=normalized_mode,
+            ),
+            {"status": "bypassed", "hit": False, "entryCount": entry_count},
+        )
+
+    fingerprint = _session_agent_runtime_cache_fingerprint(
+        session_workspace=session_workspace,
+        agent_instance=agent_instance,
+        llm_slot=normalized_slot,
+        resolved_llm=resolved_llm,
+        mode=normalized_mode,
+        prompt_snapshot_hash=prompt_snapshot_hash,
+    )
+    cache_key = f"{normalized_session_id}|{normalized_slot}"
+    with _SESSION_AGENT_RUNTIME_CACHE_LOCK:
+        cached = _SESSION_AGENT_RUNTIME_CACHE.get(cache_key)
+        if cached and str(cached.get("fingerprint") or "") == fingerprint:
+            cached["lastAccess"] = _perf_counter()
+            runtime_agent = cached.get("agent")
+            entry_count = len(_SESSION_AGENT_RUNTIME_CACHE)
+        else:
+            runtime_agent = None
+            entry_count = len(_SESSION_AGENT_RUNTIME_CACHE)
+    if runtime_agent is not None:
+        prepare_reuse = getattr(runtime_agent, "prepare_for_session_turn_reuse", None)
+        if callable(prepare_reuse):
+            prepare_reuse()
+        return runtime_agent, {
+            "status": "hit",
+            "hit": True,
+            "entryCount": entry_count,
+        }
+
+    runtime_agent = _create_chat_agent_for_session(
+        session_workspace,
+        agent_instance,
+        llm_slot=normalized_slot,
+        resolved_llm=resolved_llm,
+        mode=normalized_mode,
+    )
+    with _SESSION_AGENT_RUNTIME_CACHE_LOCK:
+        _SESSION_AGENT_RUNTIME_CACHE[cache_key] = {
+            "agent": runtime_agent,
+            "fingerprint": fingerprint,
+            "lastAccess": _perf_counter(),
+        }
+        while len(_SESSION_AGENT_RUNTIME_CACHE) > _SESSION_AGENT_RUNTIME_CACHE_MAX_ENTRIES:
+            oldest_key = min(
+                _SESSION_AGENT_RUNTIME_CACHE,
+                key=lambda key: float(_SESSION_AGENT_RUNTIME_CACHE.get(key, {}).get("lastAccess") or 0.0),
+            )
+            _SESSION_AGENT_RUNTIME_CACHE.pop(oldest_key, None)
+        entry_count = len(_SESSION_AGENT_RUNTIME_CACHE)
+    return runtime_agent, {"status": "miss", "hit": False, "entryCount": entry_count}
+
+
 def _create_chat_agent_for_session(
     session_workspace: Path,
     agent_instance: dict[str, Any] | None,
@@ -14501,6 +14662,10 @@ def _run_session_continuation_loop(
     result: Any = None
     last_visible_result: dict[str, Any] | None = None
     observed_required_tool_names: set[str] = set()
+    if not history_messages:
+        clear_provider_replay = getattr(agent, "clear_chat_provider_replay_state", None)
+        if callable(clear_provider_replay):
+            clear_provider_replay()
     turn_index = 0
     while True:
         turn_index += 1

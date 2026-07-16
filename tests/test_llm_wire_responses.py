@@ -212,6 +212,74 @@ def test_responses_stateful_continuation_preserves_new_user_input_after_pending_
     ]
 
 
+def test_responses_stateful_turn_continuation_sends_only_context_after_previous_assistant():
+    current_route = route(responses_continuation=True)
+    replay_state = ProviderReplayState(
+        issuer="responses",
+        provider_id=current_route.provider_id,
+        endpoint_fingerprint=endpoint_fingerprint(current_route.runtime_endpoint),
+        model_id=current_route.model_id,
+        wire_protocol=current_route.wire_protocol,
+        opaque_items=(
+            OpaqueReplayItem(
+                item_id="reasoning-previous",
+                payload=json.dumps(
+                    {"type": "reasoning", "id": "reasoning-previous", "encrypted_content": "ciphertext"}
+                ).encode("utf-8"),
+            ),
+        ),
+        response_id="resp-previous",
+    )
+    request = SemanticModelRequest(
+        scope=scope(2),
+        messages=(
+            SemanticMessage(role="system", parts=(TextPart("stable instructions"),)),
+            SemanticMessage(role="user", parts=(TextPart("first question"),)),
+            SemanticMessage(role="assistant", parts=(TextPart("first answer"),)),
+            SemanticMessage(role="system", parts=(TextPart("current runtime context"),)),
+            SemanticMessage(role="user", parts=(TextPart("follow up"),)),
+        ),
+        tools=(),
+        settings=SemanticGenerationSettings(max_output_tokens=128),
+        replay_state=replay_state,
+    )
+
+    payload = ResponsesWireAdapter().encode_request(request, route=current_route).body
+
+    assert payload["previous_response_id"] == "resp-previous"
+    assert payload["input"] == [
+        {"role": "system", "content": [{"type": "input_text", "text": "current runtime context"}]},
+        {"role": "user", "content": [{"type": "input_text", "text": "follow up"}]},
+    ]
+
+
+def test_responses_turn_continuation_without_assistant_boundary_falls_back_to_full_input():
+    current_route = route(responses_continuation=True)
+    replay_state = ProviderReplayState(
+        issuer="responses",
+        provider_id=current_route.provider_id,
+        endpoint_fingerprint=endpoint_fingerprint(current_route.runtime_endpoint),
+        model_id=current_route.model_id,
+        wire_protocol=current_route.wire_protocol,
+        opaque_items=(),
+        response_id="resp-stale",
+    )
+    request = SemanticModelRequest(
+        scope=scope(1),
+        messages=(SemanticMessage(role="user", parts=(TextPart("fresh conversation"),)),),
+        tools=(),
+        settings=SemanticGenerationSettings(max_output_tokens=128),
+        replay_state=replay_state,
+    )
+
+    payload = ResponsesWireAdapter().encode_request(request, route=current_route).body
+
+    assert "previous_response_id" not in payload
+    assert payload["input"] == [
+        {"role": "user", "content": [{"type": "input_text", "text": "fresh conversation"}]}
+    ]
+
+
 def test_responses_stateful_continuation_requires_every_pending_call_output():
     current_route = route(responses_continuation=True)
     replay_state = ProviderReplayState(
