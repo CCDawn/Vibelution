@@ -145,6 +145,37 @@ def test_build_agent_context_reuses_supplied_agent_snapshot(tmp_path, monkeypatc
     assert packet.timings["agentLookupMs"] >= 0
 
 
+def test_build_agent_context_skips_prompt_template_when_session_snapshot_owns_it(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    agent = agent_directory_service.create_agent_instance(
+        display_name="冻结提示词 Agent",
+        llm_bindings={"dialogue": {"modelId": "model-primary"}},
+        primary_mode="chat",
+        direct_session_id="session-snapshot",
+    )
+
+    monkeypatch.setattr(
+        context_engine,
+        "_build_prompt_template_context_block",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("validated session snapshot should own the prompt segment")
+        ),
+    )
+
+    packet = context_engine.build_agent_context(
+        agent["agentId"],
+        session_id="session-snapshot",
+        run_id="turn-1",
+        agent_snapshot=agent,
+        include_prompt_template_context=False,
+    )
+
+    assert packet.prompt_template_id == agent["promptTemplateId"]
+    assert packet.timings["promptTemplateContextMs"] == 0
+    assert packet.timings["promptTemplateContextSkipped"] is True
+    assert all(segment["key"] != "prompt_template" for segment in packet.context_segments)
+
+
 def test_default_chat_prompt_template_is_not_an_empty_fallback(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     recorded_events: list[tuple[tuple, dict]] = []

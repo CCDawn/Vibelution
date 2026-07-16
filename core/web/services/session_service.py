@@ -13397,6 +13397,7 @@ def _run_session_turn(context: dict[str, Any]) -> None:
             session_id=session_id,
             run_id=turn_id,
             agent_snapshot=agent_instance,
+            include_prompt_template_context=not bool(agent_prompt_snapshot_block),
         )
         if agent_id
         else None
