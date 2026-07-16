@@ -8,6 +8,7 @@ from fastapi import APIRouter, HTTPException, Query, status
 from pydantic import BaseModel, Field
 
 from core.research.evidence import ClaimEvidenceError
+from core.research.question_tree import ResearchQuestionTreeError
 from core.web.services import research_evidence_service
 from core.web.services.team_service import TeamNotFoundError
 
@@ -44,6 +45,12 @@ class LegacyEvidenceProjectionPayload(BaseModel):
 class SourceRevisionPayload(BaseModel):
     sourceId: str
     currentSourceRevision: str
+
+
+class ResearchQuestionTreePayload(BaseModel):
+    researchQuestion: str
+    createdByAgent: str
+    customPerspectives: list[dict[str, Any]] = Field(default_factory=list, max_length=8)
 
 
 @router.post("/teams/{team_id}/research-evidence/claims", status_code=status.HTTP_201_CREATED)
@@ -93,10 +100,20 @@ def reconcile_source_revision(team_id: str, payload: SourceRevisionPayload) -> d
     return _route_call(research_evidence_service.reconcile_claim_evidence_source, team_id, payload.model_dump())
 
 
+@router.post("/teams/{team_id}/research-question-trees", status_code=status.HTTP_201_CREATED)
+def create_research_question_tree(team_id: str, payload: ResearchQuestionTreePayload) -> dict:
+    return _route_call(research_evidence_service.create_research_question_tree, team_id, payload.model_dump())
+
+
+@router.get("/teams/{team_id}/research-question-trees")
+def list_research_question_trees(team_id: str) -> dict:
+    return _route_call(research_evidence_service.list_research_question_trees, team_id)
+
+
 def _route_call(function, *args, **kwargs):
     try:
         return function(*args, **kwargs)
     except TeamNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except ClaimEvidenceError as exc:
+    except (ClaimEvidenceError, ResearchQuestionTreeError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
