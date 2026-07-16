@@ -170,14 +170,28 @@ class ResponsesWireAdapter:
         validate_provider_ready_messages(request.messages)
         replay_state = request.replay_state
         compat = getattr(route, "compat", None)
-        use_stateful_continuation = bool(
+        continuation_supported = bool(getattr(compat, "responses_continuation", False))
+        use_tool_continuation = bool(
             replay_state is not None
             and replay_state.response_id
             and replay_state.pending_call_ids
-            and bool(getattr(compat, "responses_continuation", False))
+            and continuation_supported
         )
-        encoded_input = self._encode_messages(request)
-        if use_stateful_continuation:
+        use_turn_continuation = bool(
+            replay_state is not None
+            and replay_state.response_id
+            and not replay_state.pending_call_ids
+            and continuation_supported
+        )
+        encoded_input = (
+            self._encode_messages_after_previous_assistant(request)
+            if use_turn_continuation
+            else None
+        )
+        if encoded_input is None:
+            use_turn_continuation = False
+            encoded_input = self._encode_messages(request)
+        if use_tool_continuation:
             pending_call_ids = tuple(replay_state.pending_call_ids)
             pending_call_id_set = set(pending_call_ids)
             outputs_by_call_id: dict[str, dict[str, Any]] = {}
@@ -215,7 +229,7 @@ class ResponsesWireAdapter:
             "max_output_tokens": request.settings.max_output_tokens,
             "stream": request.settings.stream,
         }
-        if use_stateful_continuation:
+        if use_tool_continuation or use_turn_continuation:
             payload["previous_response_id"] = replay_state.response_id
         if request.tools:
             payload["tools"] = [
@@ -297,6 +311,18 @@ class ResponsesWireAdapter:
         for message in request.messages:
             encoded.extend(self._encode_message(message, replay_by_id=replay_by_id))
         return encoded
+
+    def _encode_messages_after_previous_assistant(self, request: SemanticModelRequest) -> list[Any] | None:
+        previous_assistant_index = -1
+        for index, message in enumerate(request.messages):
+            if message.role == "assistant":
+                previous_assistant_index = index
+        if previous_assistant_index < 0 or previous_assistant_index >= len(request.messages) - 1:
+            return None
+        encoded: list[Any] = []
+        for message in request.messages[previous_assistant_index + 1 :]:
+            encoded.extend(self._encode_message(message, replay_by_id={}))
+        return encoded or None
 
     def _encode_message(
         self,

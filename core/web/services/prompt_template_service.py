@@ -809,6 +809,71 @@ def build_agent_prompt_template_context(
     }
 
 
+def get_agent_prompt_snapshot_versions(
+    template_id: str,
+    *,
+    project_root: Path | None = None,
+    include_chat_base: bool = False,
+) -> dict[str, int]:
+    """Return only the version fields needed to validate a frozen snapshot.
+
+    Snapshot validation is on the chat hot path.  It must not call
+    ``repair_prompt_templates`` because that resolves every template and may
+    repair/write unrelated source files before an already-valid snapshot can
+    be reused.
+    """
+
+    try:
+        normalized = _normalize_template_id(template_id)
+    except PromptTemplateError:
+        normalized = ""
+    default_record = next(
+        (
+            item
+            for item in DEFAULT_PROMPT_TEMPLATES
+            if str(item.get("templateId") or "").strip() == normalized
+        ),
+        {},
+    )
+    default_metadata = (
+        default_record.get("metadata")
+        if isinstance(default_record.get("metadata"), dict)
+        else {}
+    )
+    stored_metadata: dict[str, Any] = {}
+    if normalized:
+        global PROJECT_ROOT
+        previous_root = PROJECT_ROOT
+        if project_root is not None:
+            PROJECT_ROOT = Path(project_root)
+        try:
+            payload = _load_prompt_templates()
+        finally:
+            PROJECT_ROOT = previous_root
+        for item in payload.get("templates") or []:
+            if not isinstance(item, dict):
+                continue
+            if str(item.get("templateId") or item.get("id") or "").strip() != normalized:
+                continue
+            stored_metadata = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+            break
+
+    def nonnegative_version(value: Any) -> int:
+        try:
+            return max(0, int(value or 0))
+        except (TypeError, ValueError):
+            return 0
+
+    builtin_content_version = max(
+        nonnegative_version(default_metadata.get("builtinContentVersion")),
+        nonnegative_version(stored_metadata.get("builtinContentVersion")),
+    )
+    return {
+        "builtinContentVersion": builtin_content_version,
+        "chatBasePromptVersion": CHAT_AGENT_BASE_PROMPT_VERSION if include_chat_base else 0,
+    }
+
+
 def build_agent_prompt_snapshot(
     template_id: str,
     *,

@@ -575,6 +575,44 @@ def test_session_refreshes_chat_snapshot_when_chat_base_version_advances(tmp_pat
     assert "## Conversation Agent Common Prompt" in refreshed["content"]
 
 
+def test_session_reuses_valid_prompt_snapshot_without_rebuilding_template_registry(tmp_path, monkeypatch):
+    _seed_session(tmp_path, "session-live")
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(prompt_template_service, "PROJECT_ROOT", tmp_path)
+    prompt_template_service.update_prompt_template(
+        "prompt-chat-custom",
+        name="固定会话提示词",
+        category="chat",
+        content="保持当前会话快照。",
+    )
+    agent = agent_directory_service.create_agent_instance(
+        display_name="快照复用 Agent",
+        llm_bindings={"dialogue": {"modelId": "model-primary"}},
+        direct_session_id="session-live",
+        primary_mode="chat",
+        prompt_template_id="prompt-chat-custom",
+    )
+    snapshot = prompt_template_service.build_agent_prompt_snapshot(
+        "prompt-chat-custom",
+        agent_id=agent["agentId"],
+        project_root=tmp_path,
+        include_chat_base=True,
+    )
+    state = load_chat_state(tmp_path)
+    state["conversations"][0]["agentPromptSnapshot"] = snapshot
+    save_chat_state(tmp_path, state)
+    monkeypatch.setattr(
+        prompt_template_service,
+        "build_agent_prompt_snapshot",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("valid snapshot must not rebuild")),
+    )
+
+    reused = session_service._ensure_session_agent_prompt_snapshot("session-live", agent)
+
+    assert reused == snapshot
+
+
 def test_session_detail_exposes_prompt_snapshot_metadata_without_content(tmp_path, monkeypatch):
     _seed_session(tmp_path, "session-live")
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)

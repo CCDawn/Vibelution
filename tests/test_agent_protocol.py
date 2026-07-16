@@ -4796,7 +4796,9 @@ class TestToolMessageFlow:
             lambda: {"agentId": "source-finder", "agent": {"primaryMode": "research"}},
         )
         agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
-        agent.prompt_manager = SimpleNamespace(get_runtime_goal_packet=lambda: None)
+        agent.prompt_manager = SimpleNamespace(
+            get_runtime_goal_packet=MagicMock(side_effect=AssertionError("disabled delegation must not inspect goal packet"))
+        )
         agent._allow_session_subagent_auto_delegation = False
         agent._get_delegation_governor = MagicMock(side_effect=AssertionError("delegation should be closed"))
 
@@ -4808,6 +4810,7 @@ class TestToolMessageFlow:
         )
 
         assert outcome is None
+        agent.prompt_manager.get_runtime_goal_packet.assert_not_called()
         agent._get_delegation_governor.assert_not_called()
 
     def test_apply_delegation_result_surfaces_timeout_instead_of_parse_failure(self, monkeypatch):
@@ -6336,6 +6339,71 @@ class TestRuntimeStateMemoryFlow:
         assert captured["packet_seen_during_build"].objective_type == "self_improvement"
         assert scene_events[0][0:2] == ("prompt", "agent.runtime_goal.bound")
         assert scene_events[0][2]["fields"]["objectiveType"] == "self_improvement"
+
+    def test_direct_session_chat_keeps_user_text_out_of_system_prompt_goal(self, monkeypatch):
+        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+        captured = {}
+
+        class DummyPromptManager:
+            def __init__(self):
+                self.current_goal = ""
+                self.runtime_goal_packet = None
+
+            def update_current_goal(self, goal):
+                self.current_goal = goal
+
+            def get_runtime_goal_packet(self):
+                return self.runtime_goal_packet
+
+            def set_runtime_goal_packet(self, packet):
+                self.runtime_goal_packet = packet
+
+            def clear_state_memory(self, persist=True):
+                return None
+
+            def build(self):
+                captured["goal_seen_during_build"] = self.current_goal
+                captured["packet_seen_during_build"] = self.runtime_goal_packet
+                raise RuntimeError("stop_after_build")
+
+        agent.mode_policy = ModePolicy(
+            mode=AgentMode.CHAT,
+            orchestrator_kind="chat",
+            keep_multi_turn_context=True,
+            allow_auto_loop=False,
+            capture_chat_dataset_candidates=False,
+            reset_context_before_turn=False,
+            reset_context_between_cases=False,
+            allow_direct_supervised_payload=False,
+            finish_after_direct_response=False,
+            runtime_input_builder=build_chat_user_message,
+        )
+        agent._allow_session_subagent_auto_delegation = False
+        agent.prompt_manager = DummyPromptManager()
+        agent.git_memory = SimpleNamespace(refresh_git_memory=lambda force=False: None)
+        agent._sync_runtime_state_memory = lambda: None
+        agent._system_prompt_written = False
+        raw_user_message = "分析项目里为什么每次发送都很慢"
+
+        monkeypatch.setattr(agent_module, "get_ui", lambda: SimpleNamespace())
+        monkeypatch.setattr(agent_module, "_record_agent_scene_event", lambda *args, **kwargs: None)
+        monkeypatch.setattr(
+            agent_module,
+            "get_session_state",
+            lambda: SimpleNamespace(
+                reset_runtime_constraints=lambda: None,
+                set_runtime_goal_packet=lambda _packet: None,
+            ),
+        )
+
+        with pytest.raises(RuntimeError, match="stop_after_build"):
+            agent.think_and_act(raw_user_message)
+
+        assert agent._active_goal == raw_user_message
+        assert captured["goal_seen_during_build"] == agent_module._SESSION_CHAT_PROMPT_GOAL
+        assert captured["packet_seen_during_build"].goal == agent_module._SESSION_CHAT_PROMPT_GOAL
+        assert captured["packet_seen_during_build"].allow_subagents is False
+        assert raw_user_message not in captured["packet_seen_during_build"].render()
 
     def test_think_and_act_uses_goal_override_before_first_prompt_build(self, monkeypatch):
         agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)

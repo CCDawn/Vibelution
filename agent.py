@@ -7,6 +7,7 @@ import time
 import traceback
 import re
 from contextlib import nullcontext
+from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, List, Dict, Any
@@ -168,6 +169,7 @@ _INTERNAL_TOOL_PROTOCOL_MARKERS = (
     "_internal_delegate",
 )
 _SESSION_AGENT_DELEGATION_REPLACEMENT_TOOL = "cli_agent_run_tool"
+_SESSION_CHAT_PROMPT_GOAL = "处理当前会话中的用户请求"
 _TOOL_POLICY_FAILURE_RE = re.compile(
     r"\[工具策略提示\]\s*`[^`]+`\s*不在该 Agent 的可见工具策略中。?",
 )
@@ -829,6 +831,7 @@ class SelfEvolvingAgent:
         self._pending_runtime_context_blocks: List[str] = []
         self._pending_volatile_context_blocks: List[str] = []
         self._runtime_context_seeded_by_host: bool = False
+        self._chat_provider_replay_state = None
         self._single_turn_mode_active: bool = False
         self._last_turn_metadata: Dict[str, Any] = {}
         self._turn_interrupt_checker = None
@@ -1483,6 +1486,8 @@ class SelfEvolvingAgent:
         total_tool_calls: int,
         messages: list,
     ) -> Optional[Dict[str, Any]]:
+        if getattr(self, "_allow_session_subagent_auto_delegation", None) is False:
+            return None
         get_packet = getattr(getattr(self, "prompt_manager", None), "get_runtime_goal_packet", None)
         if callable(get_packet):
             try:
@@ -2086,6 +2091,25 @@ class SelfEvolvingAgent:
         self._active_turn_goal = ""
         self._active_turn_terminal = False
 
+    def prepare_for_session_turn_reuse(self) -> None:
+        """Reset turn-local state while retaining the model transport/session anchor."""
+
+        self.clear_turn_preparation_state()
+        self._pending_static_context_blocks = []
+        self._pending_runtime_context_blocks = []
+        self._pending_volatile_context_blocks = []
+        self._runtime_context_seeded_by_host = False
+        self._last_turn_metadata = {}
+        self._last_visible_response_text = ""
+        self._last_response_tool_calls = 0
+        self._recent_tool_outputs = []
+        self._recent_tool_records = []
+        self._pending_lifecycle_action = None
+        self._turn_interrupt_checker = None
+
+    def clear_chat_provider_replay_state(self) -> None:
+        self._chat_provider_replay_state = None
+
     def record_turn_preparation_diagnostic(self, fields: Dict[str, Any]) -> None:
         """Record bounded preparation shape without prompt or credential content."""
         allowed_paths = {"fresh", "history", "carryover"}
@@ -2351,7 +2375,12 @@ class SelfEvolvingAgent:
         self._last_turn_metadata = {}
         self._last_llm_failure_attempts = 0
         self._last_llm_failure_max_attempts = 0
-        self.prompt_manager.update_current_goal(effective_goal)
+        stable_session_prompt = (
+            policy.mode == AgentMode.CHAT
+            and getattr(self, "_allow_session_subagent_auto_delegation", None) is False
+        )
+        prompt_goal = _SESSION_CHAT_PROMPT_GOAL if stable_session_prompt else effective_goal
+        self.prompt_manager.update_current_goal(prompt_goal)
         agent_tool_policy = None
         try:
             from core.web.services import agent_directory_service
@@ -2363,15 +2392,22 @@ class SelfEvolvingAgent:
             agent_tool_policy = None
         runtime_goal_packet = build_runtime_goal_packet(
             policy,
-            effective_goal,
+            prompt_goal,
             agent_tool_policy=agent_tool_policy if isinstance(agent_tool_policy, dict) else None,
         )
+        if stable_session_prompt and runtime_goal_packet.allow_subagents:
+            runtime_goal_packet = replace(runtime_goal_packet, allow_subagents=False)
         try:
             get_session_state().set_runtime_goal_packet(runtime_goal_packet)
         except Exception:
             pass
         set_goal_packet = getattr(self.prompt_manager, "set_runtime_goal_packet", None)
-        if callable(set_goal_packet):
+        get_goal_packet = getattr(self.prompt_manager, "get_runtime_goal_packet", None)
+        try:
+            current_goal_packet = get_goal_packet() if callable(get_goal_packet) else None
+        except Exception:
+            current_goal_packet = None
+        if callable(set_goal_packet) and current_goal_packet != runtime_goal_packet:
             set_goal_packet(runtime_goal_packet)
         try:
             logger.log_action("runtime_goal_packet", {
@@ -2398,6 +2434,8 @@ class SelfEvolvingAgent:
                 "allowGitCommit": runtime_goal_packet.allow_git_commit,
                 "allowEvolutionTransaction": runtime_goal_packet.allow_evolution_transaction,
                 "allowSubagents": runtime_goal_packet.allow_subagents,
+                "stableSessionPrompt": stable_session_prompt,
+                "userRequestPlacement": "user_message" if stable_session_prompt else "runtime_goal",
             },
         )
         self._pending_lifecycle_action = None
@@ -2413,11 +2451,30 @@ class SelfEvolvingAgent:
         self._last_runtime_state_memory = ""
         self._last_runtime_state_memory_key = ""
         self.prompt_manager.clear_state_memory(persist=False)
+        initial_context_started = time.perf_counter()
+        initial_git_started = time.perf_counter()
         initial_git_state = self.git_memory.refresh_git_memory(force=True)
+        initial_git_ms = max(0, int((time.perf_counter() - initial_git_started) * 1000))
+        initial_runtime_sync_started = time.perf_counter()
         self._sync_runtime_state_memory()
+        initial_runtime_sync_ms = max(0, int((time.perf_counter() - initial_runtime_sync_started) * 1000))
         initial_runtime_state_memory_key = self._last_runtime_state_memory_key
+        initial_prompt_build_started = time.perf_counter()
         sp = self.prompt_manager.build()
+        initial_prompt_build_ms = max(0, int((time.perf_counter() - initial_prompt_build_started) * 1000))
         self._cached_system_prompt = to_string(sp)
+        _record_agent_scene_event(
+            "prompt",
+            "agent.initial_context.completed",
+            message="Agent initial context prepared.",
+            fields={
+                "gitRefreshMs": initial_git_ms,
+                "runtimeStateSyncMs": initial_runtime_sync_ms,
+                "promptBuildMs": initial_prompt_build_ms,
+                "totalMs": max(0, int((time.perf_counter() - initial_context_started) * 1000)),
+                "stableSessionPrompt": stable_session_prompt,
+            },
+        )
         dynamic_system_context_message = build_dynamic_system_context_message(sp)
         runtime_input_builder_for_turn = policy.runtime_input_builder
         if policy.mode == AgentMode.CHAT and attachments:
@@ -2542,7 +2599,11 @@ class SelfEvolvingAgent:
         round_return_ok = True
         try:
             self._raise_if_turn_stop_requested()
-            provider_replay_state = None
+            provider_replay_state = (
+                getattr(self, "_chat_provider_replay_state", None)
+                if policy.mode == AgentMode.CHAT
+                else None
+            )
             responses_continuation_disabled = False
             initial_prompt_reuse_pending = True
             for _ in range(round_state.max_iterations):
@@ -2553,9 +2614,13 @@ class SelfEvolvingAgent:
                     "THINKING",
                     **round_state.thinking_status(user_prompt),
                 )
-                git_refresh_started = time.perf_counter()
-                current_git_state = self.git_memory.refresh_git_memory()
-                git_refresh_ms = max(0, int((time.perf_counter() - git_refresh_started) * 1000))
+                if initial_prompt_reuse_pending:
+                    current_git_state = initial_git_state
+                    git_refresh_ms = 0
+                else:
+                    git_refresh_started = time.perf_counter()
+                    current_git_state = self.git_memory.refresh_git_memory()
+                    git_refresh_ms = max(0, int((time.perf_counter() - git_refresh_started) * 1000))
                 runtime_sync_started = time.perf_counter()
                 self._sync_runtime_state_memory()
                 runtime_sync_ms = max(0, int((time.perf_counter() - runtime_sync_started) * 1000))
@@ -2770,6 +2835,8 @@ class SelfEvolvingAgent:
                 provider_replay_state = turn_outcome.replay_state
                 if responses_continuation_disabled and provider_replay_state is not None:
                     provider_replay_state = provider_replay_state.without_response_id()
+                if policy.mode == AgentMode.CHAT:
+                    self._chat_provider_replay_state = provider_replay_state
 
 # 轻量预解析：先看 raw_content / tool_calls / xml_tool_calls，重活留给 finalize
                 response_preview = self._get_response_processor().preview(response)

@@ -19,6 +19,64 @@ from core.web.services import agent_directory_service
 from tests.helpers.web_chat_state import _seed_chat_state
 
 
+def test_session_agent_runtime_cache_reuses_transport_and_invalidates_on_prompt_change(tmp_path, monkeypatch):
+    session_service._invalidate_session_agent_runtime_cache()
+    created = []
+
+    class RuntimeAgent:
+        def __init__(self):
+            self.reuse_preparations = 0
+
+        def prepare_for_session_turn_reuse(self):
+            self.reuse_preparations += 1
+
+    def create_runtime(*_args, **_kwargs):
+        runtime = RuntimeAgent()
+        created.append(runtime)
+        return runtime
+
+    monkeypatch.setattr(session_service, "_create_chat_agent_for_session", create_runtime)
+    resolved = SimpleNamespace(config={"provider": "local-test"}, model_id="model-primary")
+    agent = {
+        "agentId": "agent-primary",
+        "updatedAt": "2026-07-16T10:00:00Z",
+        "primaryMode": "chat",
+        "promptTemplateId": "prompt-chat-default",
+        "llmBindings": {"dialogue": {"modelId": "model-primary"}},
+    }
+
+    first, first_cache = session_service._acquire_chat_agent_for_session(
+        "session-live",
+        tmp_path,
+        agent,
+        resolved_llm=resolved,
+        prompt_snapshot_hash="prompt-v1",
+    )
+    second, second_cache = session_service._acquire_chat_agent_for_session(
+        "session-live",
+        tmp_path,
+        agent,
+        resolved_llm=resolved,
+        prompt_snapshot_hash="prompt-v1",
+    )
+    third, third_cache = session_service._acquire_chat_agent_for_session(
+        "session-live",
+        tmp_path,
+        agent,
+        resolved_llm=resolved,
+        prompt_snapshot_hash="prompt-v2",
+    )
+
+    assert first_cache["status"] == "miss"
+    assert second_cache["status"] == "hit"
+    assert second is first
+    assert first.reuse_preparations == 1
+    assert third_cache["status"] == "miss"
+    assert third is not first
+    assert len(created) == 2
+    session_service._invalidate_session_agent_runtime_cache()
+
+
 def test_session_event_cache_coalesces_concurrent_misses(monkeypatch):
     session_id = "session-singleflight"
     loader_started = threading.Event()
