@@ -4877,6 +4877,7 @@ def test_source_collection_extraction_resume_after_interrupted_reading_prioritiz
     assert "上一轮结果" in retry_message
     assert "状态：已中断，需要继续" in retry_message
     assert "优先直接调用 `source_collection_stage_writeback_tool`" in retry_message
+    assert "写回恢复阶段禁止调用 `web_fetch_tool`" in retry_message
     assert '"candidate_limit": 80' in retry_message
     assert "如果返回的 `candidatePage.hasMore=true`，必须继续按 `candidate_offset=candidatePage.nextOffset` 分页读取" not in retry_message
 

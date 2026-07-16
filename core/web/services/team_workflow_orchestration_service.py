@@ -20393,6 +20393,7 @@ def _source_collection_stage_session_task_message(
         pagination_lines = [
             "- 本轮是写回恢复：如果当前会话上下文中已有完整结论和真实 ID，优先直接调用 `source_collection_stage_writeback_tool` 回写，不要先重读全部资料。",
             "- 只有缺少真实 recordId/candidateId 或证据时，才调用上面的 `source_collection_context_tool` 做一次性 ID 核对；不要因为 `candidatePage.hasMore=true` 自动翻完整批次。",
+            "- 写回恢复阶段禁止调用 `web_fetch_tool` 或搜索工具；既有链接抓取失败应保留原决定并标记 `needs_more_info`，随后立即结构化写回。",
         ]
     else:
         pagination_lines = [
@@ -20433,7 +20434,7 @@ def _source_collection_stage_session_task_message(
             (
                 "- 资料提炼阶段若受控摘要不足，但 `candidates[].sourceUrl` 或 `doi` 存在，可用 `web_fetch_tool` 仅抓取该既有定位符补证；"
                 "不要扩展检索方向、生成新候选或调用搜索工具。每页先补证并分批回写，再读取下一页；抓取失败后再标记 `needs_more_info`。"
-                if stage_id == "extraction" and context_mode in {"evidence", "retry_evidence"}
+                if stage_id == "extraction" and context_mode in {"evidence", "retry_evidence"} and not writeback_resume
                 else ""
             ),
             "- 只有确认没有摘要、正文、可验证内容或明显跑题时，才写 `decision=exclude` 和 `excludeReason=no_effective_content/out_of_scope/unobtainable`；这些来源会被移出后续流程并记录，避免下次重复搜到。",
