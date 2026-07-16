@@ -175,6 +175,7 @@ def build_agent_context(
     run_id: str = "",
     limit: int = 6,
     agent_snapshot: dict[str, Any] | None = None,
+    include_prompt_template_context: bool = True,
 ) -> AgentContextPacket:
     """Build the bounded context packet used by a persistent Agent turn."""
 
@@ -266,16 +267,21 @@ def build_agent_context(
         timings["researchOrgContextMs"] = 0
         timings["researchOrgContextSkipped"] = True
     prompt_template_id = str(agent.get("promptTemplateId") or "").strip()
-    stage_started_at = _perf_counter()
-    prompt_context_block = _build_prompt_template_context_block(
-        prompt_template_id,
-        project_root=agent_directory_service.PROJECT_ROOT,
-        agent_id=normalized_agent_id,
-        session_id=str(session_id or "").strip(),
-        run_id=str(run_id or "").strip(),
-        include_chat_base=str(agent.get("primaryMode") or "").strip().lower() == "chat",
-    )
-    timings["promptTemplateContextMs"] = _elapsed_ms(stage_started_at)
+    prompt_context_block = ""
+    if include_prompt_template_context:
+        stage_started_at = _perf_counter()
+        prompt_context_block = _build_prompt_template_context_block(
+            prompt_template_id,
+            project_root=agent_directory_service.PROJECT_ROOT,
+            agent_id=normalized_agent_id,
+            session_id=str(session_id or "").strip(),
+            run_id=str(run_id or "").strip(),
+            include_chat_base=str(agent.get("primaryMode") or "").strip().lower() == "chat",
+        )
+        timings["promptTemplateContextMs"] = _elapsed_ms(stage_started_at)
+    else:
+        timings["promptTemplateContextMs"] = 0
+        timings["promptTemplateContextSkipped"] = True
     stage_started_at = _perf_counter()
     project_rules_context_block = _build_project_rules_context_block(
         agent_directory_service.PROJECT_ROOT,
@@ -382,6 +388,7 @@ def build_agent_context(
             "runId": packet.run_id,
             "dialogueModelId": packet.dialogue_model_id,
             "promptTemplateId": packet.prompt_template_id,
+            "promptTemplateContextSkipped": bool(timings.get("promptTemplateContextSkipped")),
             "roleKey": packet.role_key,
             "groupContextEventCount": len(packet.group_context_events),
             "inboxMessageCount": len(packet.inbox_messages),
