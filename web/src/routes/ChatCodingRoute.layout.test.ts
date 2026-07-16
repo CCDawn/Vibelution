@@ -2597,6 +2597,10 @@ describe("ChatCodingRoute layout contract", () => {
   it("loads session index pages through the paginated query endpoint", () => {
     expect(routeSource).toContain("useSessionIndexQuery");
     expect(routeSource).toContain("queryText: sessionQueryText");
+    expect(routeSource).toContain("enabled: sessionIndexQueryEnabled");
+    expect(routeSource).toContain("const sessionIndexQueryEnabled =");
+    expect(routeSource).toContain("Boolean(requestedSessionId || requestedRoomId)");
+    expect(routeSource).toContain("activeSessionBootstrapQuery.isFetched");
     expect(routeSource).toContain("sessionIndexHasMore");
     expect(routeSource).toContain("加载更多会话");
     expect(routeSource).toContain("已加载全部会话");
@@ -2711,6 +2715,13 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain(
       'fetchJson<{ activeSessionId: string }>("/api/sessions/active", { signal })',
     );
+    const bootstrapQueryStart = routeSource.indexOf('queryKey: ["sessions", "active-bootstrap"]');
+    const sessionIndexCallStart = routeSource.indexOf("const rawSessionsQuery = useSessionIndexQuery");
+    expect(bootstrapQueryStart).toBeGreaterThan(0);
+    expect(sessionIndexCallStart).toBeGreaterThan(bootstrapQueryStart);
+    expect(routeSource).toContain("const sessionIndexQueryEnabled =");
+    expect(routeSource).toContain("|| activeSessionBootstrapQuery.isFetched");
+    expect(routeSource).toContain("enabled: sessionIndexQueryEnabled");
     const bootstrapEffectStart = routeSource.indexOf(
       "const bootstrapSessionId = activeSessionBootstrapQuery.data?.activeSessionId?.trim()",
     );

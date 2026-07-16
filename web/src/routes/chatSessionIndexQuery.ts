@@ -10,6 +10,7 @@ export const SESSION_INDEX_PAGE_SIZE = 50;
 type UseSessionIndexQueryOptions = {
   queryClient: QueryClient;
   queryText: string;
+  enabled: boolean;
   refetchInterval: false | number;
   refetchIntervalInBackground: boolean;
 };
@@ -113,6 +114,7 @@ export function updateSessionSummaryCaches(queryClient: QueryClient, updater: Se
 export function useSessionIndexQuery({
   queryClient,
   queryText,
+  enabled,
   refetchInterval,
   refetchIntervalInBackground,
 }: UseSessionIndexQueryOptions) {
@@ -120,6 +122,7 @@ export function useSessionIndexQuery({
   const query = useInfiniteQuery({
     queryKey: queryKeys.sessionQuery(normalizedQueryText, SESSION_INDEX_PAGE_SIZE),
     initialPageParam: "",
+    enabled,
     queryFn: async ({ pageParam }) => {
       const payload = await fetchJson<SessionQueryResponse>(sessionQueryUrl(normalizedQueryText, String(pageParam || "")));
       const existing = queryClient.getQueryData<SessionSummary[]>(queryKeys.sessions()) ?? [];
