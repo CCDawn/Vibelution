@@ -26,6 +26,9 @@ import {
   DataProcessingRecord,
   DataProcessingRunListPayload,
   DataProcessingStatus,
+  ExperimentContractV2,
+  ExperimentContractValidation,
+  ExperimentMethodCatalogPayload,
   RuntimeSummary,
   Team,
   TeamCanvasNode,
@@ -76,6 +79,7 @@ import { agentCenterMemoryRoute, teamMemoryRoute } from "./agentCenterRoutes";
 import { agentDisplayInfo } from "./agentDisplay";
 import { createChatWorkspaceCache } from "./chatWorkspaceCache";
 import { TeamMemoryIndexPanel, type TeamMemoryIndexMember } from "./TeamMemoryIndexPanel";
+import { TeamExperimentMethodPanel, type ExperimentPlanMethodRequest } from "./TeamExperimentMethodPanel";
 import { TeamSourceCollectionActiveStagePanel } from "./TeamSourceCollectionActiveStagePanel";
 import { TeamSourceCollectionPhaseCloseGatePanel } from "./TeamSourceCollectionPhaseCloseGatePanel";
 import { TeamSourceCollectionStageAgentsPanel, type TeamSourceCollectionStageAgentCard, type TeamSourceCollectionStageAgentTone } from "./TeamSourceCollectionStageAgentsPanel";
@@ -236,6 +240,7 @@ const SOURCE_COLLECTION_PROMPT_CACHE_POLICY = {
 const SOURCE_COLLECTION_PROMPT_CACHE_MODEL_LABEL = "configured prompt-cache model";
 
 const experimentPlanningStatusQueryKey = (id: string) => ["teams", id, "workflow-orchestration", "experiments", "status"] as const;
+const experimentMethodCatalogQueryKey = (id: string) => ["teams", id, "workflow-orchestration", "experiments", "methods"] as const;
 const researchLoopTemplatesQueryKey = (id: string) => ["teams", id, "workflow-orchestration", "research-loop", "templates"] as const;
 const researchLoopStatusQueryKey = (id: string) => ["teams", id, "workflow-orchestration", "research-loop", "status"] as const;
 const sourceCollectionSummaryQueryPrefix = (id: string) =>
@@ -975,6 +980,8 @@ type ExperimentPlanRecord = {
   goal: string;
   selectedHypotheses: ExperimentHypothesisCandidateSummary[];
   hypothesisCandidateIds: string[];
+  experimentContract?: ExperimentContractV2;
+  contractValidation?: ExperimentContractValidation;
   experimentPlan: {
     dataset: string;
     metric: string;
@@ -3201,6 +3208,15 @@ export function TeamsRoute({
       ),
     enabled: Boolean(effectiveTeamId && researchWorkflowTeamSelected && researchWorkspaceView !== "source_collection" && !sourceCollectionStandalone),
   });
+  const experimentMethodCatalogQuery = useQuery({
+    queryKey: experimentMethodCatalogQueryKey(effectiveTeamId || "none"),
+    queryFn: ({ signal }) =>
+      fetchJson<ExperimentMethodCatalogPayload>(
+        `/api/teams/${encodeURIComponent(effectiveTeamId)}/workflow-orchestration/experiments/methods`,
+        { signal },
+      ),
+    enabled: Boolean(effectiveTeamId && researchWorkflowTeamSelected && researchWorkspaceView === "experiment" && !sourceCollectionStandalone),
+  });
   const researchLoopTemplatesQuery = useQuery({
     queryKey: researchLoopTemplatesQueryKey(effectiveTeamId || "none"),
     queryFn: ({ signal }) =>
@@ -3889,7 +3905,7 @@ export function TeamsRoute({
   });
 
   const createExperimentPlanMutation = useMutation({
-    mutationFn: (payload: { teamId: string; stageRoundId?: string; title?: string }) =>
+    mutationFn: (payload: { teamId: string; stageRoundId?: string; title?: string; methodRequest?: ExperimentPlanMethodRequest }) =>
       fetchJson<ExperimentPlanCreatePayload>(
         `/api/teams/${encodeURIComponent(payload.teamId)}/workflow-orchestration/experiments/plan`,
         {
@@ -3899,6 +3915,7 @@ export function TeamsRoute({
             stageRoundId: payload.stageRoundId || "",
             title: payload.title || "",
             createdByAgent: sourceCollectionOwnerAgentId,
+            ...(payload.methodRequest ?? {}),
             notes: "Created from the experiment planning workspace. No training execution was triggered.",
           }),
         },
@@ -4659,7 +4676,7 @@ export function TeamsRoute({
     });
   }
 
-  function createExperimentPlanFromWorkspace() {
+  function createExperimentPlanFromWorkspace(methodRequest?: ExperimentPlanMethodRequest) {
     if (!selectedTeam?.teamId || selectedTeamCreateExperimentPlanPending) {
       return;
     }
@@ -4669,6 +4686,7 @@ export function TeamsRoute({
       teamId: selectedTeam.teamId,
       stageRoundId,
       title: sourceCollectionDraft.title.trim() || experimentPhase?.latestRound?.title || "",
+      methodRequest,
     });
   }
 
@@ -7612,6 +7630,16 @@ export function TeamsRoute({
     const activeSmokeResult = activePlan?.activeSmokeResult ?? null;
     const activeFullRunResult = activePlan?.activeFullRunResult ?? null;
     const knowledgeIngestion = activePlan?.knowledgeIngestion ?? null;
+    const activeExperimentContract = activePlan?.experimentContract ?? null;
+    const activeMethodDescriptor = experimentMethodCatalogQuery.data?.methods.find(
+      (method) => method.methodId === activeExperimentContract?.experimentMethod,
+    );
+    const activeResearchModeDescriptor = experimentMethodCatalogQuery.data?.researchModes.find(
+      (mode) => mode.modeId === activeExperimentContract?.researchMode,
+    );
+    const activePurposeDescriptor = experimentMethodCatalogQuery.data?.experimentPurposes.find(
+      (purpose) => purpose.purposeId === activeExperimentContract?.purpose.primaryPurpose,
+    );
     const hypotheses = statusPayload?.readyHypothesisCandidates?.length
       ? statusPayload.readyHypothesisCandidates
       : statusPayload?.hypothesisCandidates ?? [];
@@ -7662,12 +7690,7 @@ export function TeamsRoute({
                   : (lang === "zh" ? "等待实验阶段状态" : "Waiting for experiment status"))}
             </span>
           </div>
-          <VNativeButton type="button" onClick={createExperimentPlanFromWorkspace} disabled={!canDraftPlan}>
-            <Save size={13} />
-            {selectedTeamCreateExperimentPlanPending
-              ? (lang === "zh" ? "生成中" : "Drafting")
-              : (lang === "zh" ? "生成计划草稿" : "Draft plan")}
-          </VNativeButton>
+          <span>{activePlan ? `${lang === "zh" ? "当前计划" : "Active plan"} · ${activePlan.planId}` : (lang === "zh" ? "尚未保存实验配置" : "Experiment setup not saved")}</span>
         </div>
         <div className={styles.experimentLedgerStats}>
           <span>
@@ -7687,6 +7710,28 @@ export function TeamsRoute({
             <strong>{summary?.gapCount ?? 0}</strong>
           </span>
         </div>
+        <TeamExperimentMethodPanel
+          lang={lang}
+          catalog={experimentMethodCatalogQuery.data}
+          activeContract={activeExperimentContract}
+          activePlanStatus={activePlan?.status ?? ""}
+          fallbackResearchQuestion={
+            activePlan?.goal
+            || activePlan?.topic
+            || statusPayload?.latestExperimentRound?.goal
+            || statusPayload?.latestExperimentRound?.topic
+            || ""
+          }
+          loading={experimentMethodCatalogQuery.isFetching}
+          errorMessage={
+            experimentMethodCatalogQuery.error instanceof Error
+              ? experimentMethodCatalogQuery.error.message
+              : selectedTeamCreateExperimentPlanError?.message
+          }
+          submitting={selectedTeamCreateExperimentPlanPending}
+          canCreatePlan={canDraftPlan}
+          onSubmit={createExperimentPlanFromWorkspace}
+        />
         {activePlan ? (
           <>
             <div className={styles.experimentPlanGrid}>
@@ -7697,10 +7742,13 @@ export function TeamsRoute({
                 </div>
                 <p>{activePlan.goal || activePlan.topic || (lang === "zh" ? "实验目标待补齐" : "Experiment goal pending")}</p>
                 <div className={styles.experimentPlanFields}>
-                  <span title={activePlan.experimentPlan.dataset}>{lang === "zh" ? "数据" : "Data"} · {activePlan.experimentPlan.dataset || "-"}</span>
-                  <span title={activePlan.experimentPlan.metric}>{lang === "zh" ? "指标" : "Metric"} · {activePlan.experimentPlan.metric || "-"}</span>
-                  <span title={activePlan.experimentPlan.baseline}>Baseline · {activePlan.experimentPlan.baseline || "-"}</span>
-                  <span title={activePlan.experimentPlan.smokePlan}>Smoke · {activePlan.experimentPlan.smokePlan || "-"}</span>
+                  {activeExperimentContract ? <span>{lang === "zh" ? "科研闭环" : "Research loop"} · {(lang === "zh" ? activeResearchModeDescriptor?.labelZh : activeResearchModeDescriptor?.labelEn) || activeExperimentContract.researchMode}</span> : null}
+                  {activeExperimentContract ? <span>{lang === "zh" ? "实验目的" : "Purpose"} · {(lang === "zh" ? activePurposeDescriptor?.labelZh : activePurposeDescriptor?.labelEn) || activeExperimentContract.purpose.primaryPurpose}</span> : null}
+                  {activeExperimentContract ? <span>{lang === "zh" ? "实验方法" : "Method"} · {(lang === "zh" ? activeMethodDescriptor?.labelZh : activeMethodDescriptor?.labelEn) || activeExperimentContract.experimentMethod}</span> : null}
+                  {activePlan.experimentPlan.dataset ? <span title={activePlan.experimentPlan.dataset}>{lang === "zh" ? "数据" : "Data"} · {activePlan.experimentPlan.dataset}</span> : null}
+                  {activePlan.experimentPlan.metric ? <span title={activePlan.experimentPlan.metric}>{lang === "zh" ? "指标" : "Metric"} · {activePlan.experimentPlan.metric}</span> : null}
+                  {activePlan.experimentPlan.baseline ? <span title={activePlan.experimentPlan.baseline}>Baseline · {activePlan.experimentPlan.baseline}</span> : null}
+                  {activePlan.experimentPlan.smokePlan ? <span title={activePlan.experimentPlan.smokePlan}>Smoke · {activePlan.experimentPlan.smokePlan}</span> : null}
                 </div>
               </article>
               <div className={styles.experimentChecklist}>

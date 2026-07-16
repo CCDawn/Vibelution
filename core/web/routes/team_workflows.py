@@ -254,6 +254,7 @@ class ExperimentPlanCreatePayload(BaseModel):
     reproducibilityContract: dict[str, Any] = Field(default_factory=dict)
     iterationContract: dict[str, Any] = Field(default_factory=dict)
     recommendation: dict[str, Any] = Field(default_factory=dict)
+    revision: int = Field(1, ge=1)
     supersedesPlanId: str = Field("", max_length=200)
     notes: str = Field("", max_length=4000)
 
