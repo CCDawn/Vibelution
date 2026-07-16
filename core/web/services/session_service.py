@@ -5916,6 +5916,7 @@ def submit_session_message(
         if normalized_client_submission_id:
             persisted_message_metadata["clientSubmissionId"] = normalized_client_submission_id
         persisted_message_metadata.setdefault("turnId", turn_control.turn_id)
+        kernel_trace_started_at = _perf_counter()
         kernel_trace = _create_direct_session_submit_kernel_trace(
             conversation,
             agent=agent,
@@ -5923,6 +5924,7 @@ def submit_session_message(
             message=message,
             source=normalized_message_source,
         )
+        submit_timing_fields["kernelTraceMs"] = _elapsed_ms(kernel_trace_started_at)
         if kernel_trace:
             persisted_message_metadata["kernel"] = kernel_trace
             if str(kernel_trace.get("status") or "").strip() == "recorded":

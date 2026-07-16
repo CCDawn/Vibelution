@@ -5559,6 +5559,7 @@ def test_submit_session_message_records_chat_turn_started_scene_event(tmp_path, 
     assert accepted_fields["scheduleSubmitMs"] >= 0
     assert accepted_fields["submitTotalMs"] >= accepted_fields["scheduleSubmitMs"]
     for timing_field in (
+        "kernelTraceMs",
         "turnStartedJournalMs",
         "userMessageJournalMs",
         "initialLiveDeltaPublishMs",

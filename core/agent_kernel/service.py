@@ -77,13 +77,14 @@ def handle_kernel_event(payload: dict[str, Any]) -> dict[str, Any]:
                 "proposals": _outcome_proposals(index, outcome),
             }
 
-        _persist_event(store, index, event)
+        persist_each_transition = not trace_only
+        _persist_event(store, index, event, persist_index=persist_each_transition)
         task = _create_task(event)
-        _persist_task_transition(store, index, task, "queued")
-        _persist_task_transition(store, index, task, "running")
+        _persist_task_transition(store, index, task, "queued", persist_index=persist_each_transition)
+        _persist_task_transition(store, index, task, "running", persist_index=persist_each_transition)
         execution = _create_execution(task, event)
-        _persist_execution_transition(store, index, execution, "created")
-        _persist_execution_transition(store, index, execution, "running")
+        _persist_execution_transition(store, index, execution, "created", persist_index=persist_each_transition)
+        _persist_execution_transition(store, index, execution, "running", persist_index=persist_each_transition)
 
         deliveries = [] if trace_only else _deliver_event_to_recipients(event, task)
         failed_deliveries = [item for item in deliveries if str(item.get("status") or "") != "delivered"]
@@ -103,13 +104,28 @@ def handle_kernel_event(payload: dict[str, Any]) -> dict[str, Any]:
             final_task_status = "succeeded"
             final_execution_status = "succeeded"
 
-        _persist_execution_transition(store, index, execution, final_execution_status, deliveries=deliveries)
+        _persist_execution_transition(
+            store,
+            index,
+            execution,
+            final_execution_status,
+            deliveries=deliveries,
+            persist_index=persist_each_transition,
+        )
         outcome = _create_outcome(task, execution, event, status=outcome_status, result_summary=result_summary, deliveries=deliveries)
-        _persist_outcome(store, index, outcome)
+        _persist_outcome(store, index, outcome, persist_index=persist_each_transition)
         task["workRunId"] = execution["workRunId"]
         task["outcomeId"] = outcome["outcomeId"]
-        _persist_task_transition(store, index, task, final_task_status)
-        proposals = _create_proposal_stubs_from_outcome(store, index, event, outcome)
+        _persist_task_transition(store, index, task, final_task_status, persist_index=persist_each_transition)
+        proposals = _create_proposal_stubs_from_outcome(
+            store,
+            index,
+            event,
+            outcome,
+            persist_index=persist_each_transition,
+        )
+        if trace_only:
+            store.save_index(index)
         _record_kernel_scene_event(
             "kernel.event.completed",
             event,
@@ -395,12 +411,19 @@ def _recipient_agent_ids(payload: dict[str, Any]) -> list[str]:
     return result
 
 
-def _persist_event(store: KernelJsonlStore, index: dict[str, Any], event: dict[str, Any]) -> None:
+def _persist_event(
+    store: KernelJsonlStore,
+    index: dict[str, Any],
+    event: dict[str, Any],
+    *,
+    persist_index: bool = True,
+) -> None:
     event["updatedAt"] = utc_now_iso()
     store.append("events", event)
     index.setdefault("eventsById", {})[event["eventId"]] = deepcopy(event)
     index["recentEventIds"] = _bounded_recent([event["eventId"], *list(index.get("recentEventIds") or [])])
-    store.save_index(index)
+    if persist_index:
+        store.save_index(index)
 
 
 def _create_task(event: dict[str, Any]) -> dict[str, Any]:
@@ -424,7 +447,14 @@ def _create_task(event: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _persist_task_transition(store: KernelJsonlStore, index: dict[str, Any], task: dict[str, Any], status: str) -> None:
+def _persist_task_transition(
+    store: KernelJsonlStore,
+    index: dict[str, Any],
+    task: dict[str, Any],
+    status: str,
+    *,
+    persist_index: bool = True,
+) -> None:
     current = dict(index.get("tasksById", {}).get(task["taskId"]) or task)
     if str(current.get("status") or "") in _TERMINAL_TASK_STATUSES and status not in _TERMINAL_TASK_STATUSES:
         raise KernelValidationError("Terminal kernel task cannot return to a running state.")
@@ -435,7 +465,8 @@ def _persist_task_transition(store: KernelJsonlStore, index: dict[str, Any], tas
     index.setdefault("tasksById", {})[current["taskId"]] = deepcopy(current)
     index.setdefault("taskIdsByIdempotencyKey", {})[current["idempotencyKey"]] = current["taskId"]
     index["recentTaskIds"] = _bounded_recent([current["taskId"], *list(index.get("recentTaskIds") or [])])
-    store.save_index(index)
+    if persist_index:
+        store.save_index(index)
 
 
 def _create_execution(task: dict[str, Any], event: dict[str, Any]) -> dict[str, Any]:
@@ -461,6 +492,7 @@ def _persist_execution_transition(
     status: str,
     *,
     deliveries: list[dict[str, Any]] | None = None,
+    persist_index: bool = True,
 ) -> None:
     current = dict(index.get("executionsById", {}).get(execution["workRunId"]) or execution)
     current.update(execution)
@@ -480,7 +512,8 @@ def _persist_execution_transition(
         ]
     store.append("executions", current)
     index.setdefault("executionsById", {})[current["workRunId"]] = deepcopy(current)
-    store.save_index(index)
+    if persist_index:
+        store.save_index(index)
 
 
 def _deliver_event_to_recipients(event: dict[str, Any], task: dict[str, Any]) -> list[dict[str, Any]]:
@@ -670,10 +703,17 @@ def _create_outcome(
     }
 
 
-def _persist_outcome(store: KernelJsonlStore, index: dict[str, Any], outcome: dict[str, Any]) -> None:
+def _persist_outcome(
+    store: KernelJsonlStore,
+    index: dict[str, Any],
+    outcome: dict[str, Any],
+    *,
+    persist_index: bool = True,
+) -> None:
     store.append("outcomes", outcome)
     index.setdefault("outcomesById", {})[outcome["outcomeId"]] = deepcopy(outcome)
-    store.save_index(index)
+    if persist_index:
+        store.save_index(index)
 
 
 def _create_proposal_stubs_from_outcome(
@@ -681,6 +721,8 @@ def _create_proposal_stubs_from_outcome(
     index: dict[str, Any],
     event: dict[str, Any],
     outcome: dict[str, Any],
+    *,
+    persist_index: bool = True,
 ) -> list[dict[str, Any]]:
     semantic = event.get("semanticPayload") if isinstance(event.get("semanticPayload"), dict) else {}
     payload = semantic.get("payload") if isinstance(semantic.get("payload"), dict) else {}
@@ -708,7 +750,8 @@ def _create_proposal_stubs_from_outcome(
     stored_outcome["proposalRefs"] = refs
     outcome["proposalRefs"] = refs
     index["outcomesById"][outcome["outcomeId"]] = stored_outcome
-    store.save_index(index)
+    if persist_index:
+        store.save_index(index)
     return [proposal]
 
 
