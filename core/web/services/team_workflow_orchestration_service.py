@@ -6992,10 +6992,16 @@ def run_experiment_smoke_run(team_id: str, plan_id: str, payload: dict[str, Any]
         if plan is None:
             raise TeamWorkflowOrchestrationError("Experiment plan not found.")
         plan_snapshot = dict(plan)
-    missing = [field for field in EXPERIMENT_PLAN_REQUIRED_FIELDS if not _has_value(plan_snapshot.get(field))]
+    experiment_plan = plan_snapshot.get("experimentPlan") if isinstance(plan_snapshot.get("experimentPlan"), dict) else {}
+    missing = [
+        field
+        for field in EXPERIMENT_PLAN_REQUIRED_FIELDS
+        if not _has_value(plan_snapshot.get(field) or experiment_plan.get(field))
+    ]
     if missing:
         raise TeamWorkflowOrchestrationError(f"Experiment plan missing required fields for smoke run: {missing}.")
-    smoke_plan = plan_snapshot.get("smokePlan") if isinstance(plan_snapshot.get("smokePlan"), dict) else {}
+    smoke_plan_value = plan_snapshot.get("smokePlan") or experiment_plan.get("smokePlan")
+    smoke_plan = smoke_plan_value if isinstance(smoke_plan_value, dict) else {}
     adapter = (
         _trim_text(payload.get("adapter") or smoke_plan.get("adapter"), max_length=120)
         or "synthetic_classification_baseline_vs_variant"
