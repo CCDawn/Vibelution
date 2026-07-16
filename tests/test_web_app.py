@@ -5558,6 +5558,16 @@ def test_submit_session_message_records_chat_turn_started_scene_event(tmp_path, 
     assert accepted_fields["clientSubmissionId"] == "submission-timing-1"
     assert accepted_fields["scheduleSubmitMs"] >= 0
     assert accepted_fields["submitTotalMs"] >= accepted_fields["scheduleSubmitMs"]
+    for timing_field in (
+        "turnStartedJournalMs",
+        "userMessageJournalMs",
+        "initialLiveDeltaPublishMs",
+        "cycleMessageLogMs",
+        "turnStartedSceneLogMs",
+        "userPromptResolveMs",
+        "scheduledSceneLogMs",
+    ):
+        assert accepted_fields[timing_field] >= 0
 
 
 def test_submit_session_message_prefer_async_returns_lightweight_acceptance(tmp_path, monkeypatch):

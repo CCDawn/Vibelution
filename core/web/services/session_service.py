@@ -1520,6 +1520,7 @@ def append_session_assistant_artifact_message(
         payload["updated_at"] = assistant_entry["timestamp"]
         save_chat_state(PROJECT_ROOT, payload)
     turn_id = str((metadata or {}).get("turnId") or (metadata or {}).get("turn_id") or f"artifact:{assistant_entry['timestamp']}").strip()
+    stage_started_at = _perf_counter()
     _append_session_conversation_event(
         normalized_session_id,
         turn_id,
@@ -5978,6 +5979,7 @@ def submit_session_message(
             updated_at=user_entry["timestamp"],
         )
         submit_timing_fields["chatStateLockedMs"] = _elapsed_ms_between(lock_acquired_at)
+    stage_started_at = _perf_counter()
     _append_session_conversation_event(
         conversation_id,
         turn_control.turn_id,
@@ -5990,6 +5992,8 @@ def submit_session_message(
         },
         source="submit_session_message",
     )
+    submit_timing_fields["turnStartedJournalMs"] = _elapsed_ms(stage_started_at)
+    stage_started_at = _perf_counter()
     _append_session_conversation_event(
         conversation_id,
         turn_control.turn_id,
@@ -6004,16 +6008,20 @@ def submit_session_message(
         },
         source="submit_session_message",
     )
+    submit_timing_fields["userMessageJournalMs"] = _elapsed_ms(stage_started_at)
     live_publish_started_at = _perf_counter()
     _set_session_waiting_live_output(conversation_id, turn_id=turn_control.turn_id)
     submit_timing_fields["initialLiveDeltaPublishMs"] = _elapsed_ms(live_publish_started_at)
     submit_timing_fields["initialLivePublishMode"] = "assistant_delta"
+    stage_started_at = _perf_counter()
     _record_session_cycle_message(
         conversation_id,
         user_entry,
         event="user_message",
         status="running",
     )
+    submit_timing_fields["cycleMessageLogMs"] = _elapsed_ms(stage_started_at)
+    stage_started_at = _perf_counter()
     _record_session_turn_started_event(
         conversation_id,
         turn_id=turn_control.turn_id,
@@ -6023,6 +6031,7 @@ def submit_session_message(
         user_message_source=normalized_message_source,
         attachments=attachments,
     )
+    submit_timing_fields["turnStartedSceneLogMs"] = _elapsed_ms(stage_started_at)
     if session_references:
         _record_session_turn_lifecycle_event(
             conversation_id,
@@ -6151,6 +6160,7 @@ def submit_session_message(
                 fields=image_route_log_fields,
             )
 
+    prompt_resolve_started_at = _perf_counter()
     if normalized_message_source == "agent_inbox":
         effective_user_message, user_message_source = message, normalized_message_source
     elif attachments:
@@ -6188,6 +6198,7 @@ def submit_session_message(
             message=message,
             source=user_message_source,
         )
+    submit_timing_fields["userPromptResolveMs"] = _elapsed_ms(prompt_resolve_started_at)
     if _is_continue_request(message):
         _record_chat_next_state_signal(
             session_id=conversation_id,
@@ -6233,7 +6244,9 @@ def submit_session_message(
         "submit_timing_fields": dict(submit_timing_fields),
         "submit_started_at_monotonic": submit_started_at,
     }
+    stage_started_at = _perf_counter()
     _record_session_turn_scheduled_event(context)
+    submit_timing_fields["scheduledSceneLogMs"] = _elapsed_ms(stage_started_at)
     try:
         schedule_started_at = _perf_counter()
         _schedule_session_turn(context)
