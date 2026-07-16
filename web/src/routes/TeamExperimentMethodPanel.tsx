@@ -71,6 +71,7 @@ export type ExperimentMethodFormDraft = {
   researchMode: ExperimentResearchModeId;
   primaryPurpose: ExperimentPurposeId;
   experimentMethod: ExperimentMethodId;
+  requestedAdapterId: string;
   researchQuestion: string;
   objective: string;
   primaryMetric: string;
@@ -87,6 +88,7 @@ export type ExperimentPlanMethodRequest = {
   researchMode: ExperimentResearchModeId;
   experimentPurpose: { primaryPurpose: ExperimentPurposeId; secondaryPurposes: ExperimentPurposeId[] };
   experimentMethod: ExperimentMethodId;
+  requestedAdapterId: string;
   methodConfig: Record<string, unknown>;
   metricContract: { primaryMetric: string; metrics: Array<{ name: string; direction: string }> };
   decisionContract: { successCriteria: string[]; failureCriteria: string[]; inconclusiveCriteria: string[] };
@@ -144,6 +146,7 @@ export function createExperimentMethodFormDraft(
     researchMode: activeContract?.researchMode ?? "full_research_loop",
     primaryPurpose: activeContract?.purpose.primaryPurpose ?? "baseline_comparison",
     experimentMethod: method,
+    requestedAdapterId: activeContract?.adapterSelection.requestedAdapterId ?? "",
     researchQuestion: activeContract?.researchQuestion ?? fallbackResearchQuestion,
     objective: activeContract?.objective ?? "",
     primaryMetric: activeContract?.metricContract.primaryMetric ?? "",
@@ -159,7 +162,11 @@ export function selectExperimentMethod(
   draft: ExperimentMethodFormDraft,
   experimentMethod: ExperimentMethodId,
 ): ExperimentMethodFormDraft {
-  return { ...draft, experimentMethod };
+  return {
+    ...draft,
+    experimentMethod,
+    requestedAdapterId: experimentMethod === draft.experimentMethod ? draft.requestedAdapterId : "",
+  };
 }
 
 function parseMethodConfigValue(value: string, definition: MethodFieldDefinition): unknown {
@@ -195,6 +202,7 @@ export function buildExperimentPlanMethodRequest(
     researchMode: draft.researchMode,
     experimentPurpose: { primaryPurpose: draft.primaryPurpose, secondaryPurposes: [] },
     experimentMethod: draft.experimentMethod,
+    requestedAdapterId: draft.requestedAdapterId,
     methodConfig,
     metricContract: {
       primaryMetric: draft.primaryMetric.trim(),
@@ -297,6 +305,8 @@ export function TeamExperimentMethodPanel({
 
   const selectedMethod = catalog?.methods.find((item) => item.methodId === draft.experimentMethod);
   const adapterSelection = selectedMethod?.adapterAvailability[draft.researchMode];
+  const adaptersForMethod = catalog?.adapters.filter((adapter) => adapter.method === draft.experimentMethod) ?? [];
+  const selectedAdapter = adaptersForMethod.find((adapter) => adapter.adapterId === draft.requestedAdapterId);
   const locked = disabled || submitting || /running/i.test(activePlanStatus);
   const complete = isExperimentMethodDraftComplete(draft, selectedMethod);
   const isZh = lang === "zh";
@@ -377,11 +387,28 @@ export function TeamExperimentMethodPanel({
         </div>
       ) : null}
 
-      <div className={[styles.adapterStatus, adapterSelection?.resolvedAdapterId ? styles.adapterStatusReady : styles.adapterStatusBlocked].join(" ")} aria-live="polite">
-        {adapterSelection?.resolvedAdapterId ? <CheckCircle2 size={14} /> : <AlertTriangle size={14} />}
+      <label className={styles.fieldWide}>
+        <span>{isZh ? "执行器" : "Execution adapter"}</span>
+        <VNativeSelect
+          value={draft.requestedAdapterId}
+          onChange={(event) => setDraft((current) => ({ ...current, requestedAdapterId: event.target.value }))}
+          disabled={locked}
+          aria-label={isZh ? "执行器选择" : "Execution adapter selection"}
+        >
+          <option value="">{isZh ? "自动选择（仅使用默认可用执行器）" : "Automatic selection (default available adapters only)"}</option>
+          {adaptersForMethod.map((adapter) => (
+            <option key={adapter.adapterId} value={adapter.adapterId}>
+              {adapter.adapterId}{adapter.requiresExplicitSelection ? (isZh ? "（需显式选择）" : " (explicit selection required)") : ""}
+            </option>
+          ))}
+        </VNativeSelect>
+      </label>
+
+      <div className={[styles.adapterStatus, (selectedAdapter || adapterSelection?.resolvedAdapterId) ? styles.adapterStatusReady : styles.adapterStatusBlocked].join(" ")} aria-live="polite">
+        {(selectedAdapter || adapterSelection?.resolvedAdapterId) ? <CheckCircle2 size={14} /> : <AlertTriangle size={14} />}
         <div>
-          <strong>{adapterSelection?.resolvedAdapterId || (isZh ? "执行器尚未就绪" : "Execution Adapter unavailable")}</strong>
-          <span>{adapterSelection?.resolvedAdapterId ? `${adapterSelection.resolvedAdapterVersion} · ${adapterSelection.selectionSource}` : adapterSelection?.unavailableReason || (isZh ? "可以保存计划，但不能开始真实执行。" : "The plan can be saved, but a real run cannot start.")}</span>
+          <strong>{selectedAdapter?.adapterId || adapterSelection?.resolvedAdapterId || (isZh ? "执行器尚未就绪" : "Execution Adapter unavailable")}</strong>
+          <span>{selectedAdapter ? `${selectedAdapter.adapterVersion} · ${selectedAdapter.requiresExplicitSelection ? (isZh ? "用户显式选择；仍需通过环境预检" : "user-selected; environment preflight still required") : (isZh ? "用户选择" : "user-selected")}` : adapterSelection?.resolvedAdapterId ? `${adapterSelection.resolvedAdapterVersion} · ${adapterSelection.selectionSource}` : adapterSelection?.unavailableReason || (isZh ? "可以保存计划，但不能开始真实执行。" : "The plan can be saved, but a real run cannot start.")}</span>
         </div>
       </div>
 

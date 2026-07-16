@@ -1089,6 +1089,48 @@ def test_team_workflow_routes_register_experiment_full_run_result(tmp_path, monk
     assert payload["boundaries"]["writesFormalKnowledge"] is False
 
 
+def test_team_workflow_routes_delegate_explicit_formal_run_prepare_and_execute(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    client = _client()
+    team = client.post("/api/teams", json={"name": "挑战杯科研团队"}).json()
+    calls = []
+
+    def fake_prepare(team_id, plan_id, payload):
+        calls.append(("prepare", team_id, plan_id, payload))
+        return {"preparation": {"status": "prepared"}, "boundaries": {"startsFullRun": False}}
+
+    def fake_execute(team_id, plan_id, payload):
+        calls.append(("execute", team_id, plan_id, payload))
+        return {"execution": {"status": "completed"}, "boundaries": {"requiresResultReview": True}}
+
+    monkeypatch.setattr(team_workflows, "prepare_experiment_full_run", fake_prepare)
+    monkeypatch.setattr(team_workflows, "execute_experiment_full_run", fake_execute)
+    payload = {
+        "recordedByAgent": "Experiment Runner Agent",
+        "executionConfig": {
+            "pythonExecutable": "C:/experiments/.venv/Scripts/python.exe",
+            "dataRoot": "C:/experiments/data",
+            "outputRoot": "C:/experiments/runs",
+        },
+    }
+
+    prepare = client.post(
+        f"/api/teams/{team['teamId']}/workflow-orchestration/experiments/plans/exp-formal/full-run/prepare",
+        json=payload,
+    )
+    execute = client.post(
+        f"/api/teams/{team['teamId']}/workflow-orchestration/experiments/plans/exp-formal/full-run/execute",
+        json=payload,
+    )
+
+    assert prepare.status_code == 201, prepare.text
+    assert execute.status_code == 201, execute.text
+    assert prepare.json()["boundaries"]["startsFullRun"] is False
+    assert execute.json()["boundaries"]["requiresResultReview"] is True
+    assert [call[0] for call in calls] == ["prepare", "execute"]
+    assert calls[0][3]["executionConfig"]["outputRoot"] == "C:/experiments/runs"
+
+
 def test_team_workflow_routes_request_experiment_result_knowledge_ingestion(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     client = _client()
