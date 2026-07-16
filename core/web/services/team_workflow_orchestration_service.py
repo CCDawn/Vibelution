@@ -3560,11 +3560,13 @@ def _source_collection_stage_writeback_candidate_coverage(
         if _trim_text(item.get("recordId"), max_length=160)
     ]
     if stage_id == "extraction" or agent_role == "source_extractor":
+        candidate_extraction_entries = _source_collection_stage_writeback_candidate_extractions(result)
+        candidate_decision_entries = _source_collection_stage_writeback_candidate_decisions(result)
         record_entries = _source_collection_stage_writeback_record_extractions(
             result,
             include_candidate_fallback=not bool(source_candidate_ids),
         )
-        if record_entries or not source_candidate_ids:
+        if not source_candidate_ids and (record_entries or not candidate_extraction_entries):
             coverage_kind = "record_extractions"
             processed_ids: list[str] = []
             invalid_ids: list[str] = []
@@ -3616,8 +3618,6 @@ def _source_collection_stage_writeback_candidate_coverage(
                 "duplicateRecordIds": duplicate_ids[:80],
                 "recordIdAliasWarnings": alias_warnings[:80],
             }
-        candidate_extraction_entries = _source_collection_stage_writeback_candidate_extractions(result)
-        candidate_decision_entries = _source_collection_stage_writeback_candidate_decisions(result)
         if candidate_decision_entries and not candidate_extraction_entries:
             coverage_kind = "candidate_decisions"
             entries = candidate_decision_entries
