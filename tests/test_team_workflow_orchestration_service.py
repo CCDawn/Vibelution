@@ -4782,7 +4782,7 @@ def test_source_collection_context_retry_evidence_returns_only_missing_anchor_ca
     )
 
     assert follow_up_task["task"]["sourceContextMode"] == "evidence"
-    assert follow_up_task["task"]["retrySourceTaskId"] == ""
+    assert follow_up_task["task"]["retrySourceTaskId"] == retry_task["taskId"]
 
 
 def test_source_collection_extraction_resume_after_interrupted_reading_prioritizes_writeback(tmp_path, monkeypatch):
