@@ -298,8 +298,8 @@ export function DirectSessionIndexItem({
   const statusTitle = sessionRunningBadgeTitle(statusText, lang);
   const runningBadgeLabel = sessionRunningBadgeLabel(lang);
   const sessionItemTooltip = (
-    <span className="grid min-w-0 gap-1">
-      <strong className="text-vui-fg-primary">{sessionTitle}</strong>
+    <span className={styles.disabledReason}>
+      <strong className={styles.disabledReasonTitle}>{sessionTitle}</strong>
       {sessionModelTitle ? <span>{sessionModelTitle}</span> : null}
       {sessionSummaryVisible ? <span>{sessionSummary}</span> : null}
       {sessionFunctionVisible ? <span>{sessionDisplay.functionLabel}</span> : null}

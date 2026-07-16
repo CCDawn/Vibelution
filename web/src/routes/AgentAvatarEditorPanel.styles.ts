@@ -1,4 +1,5 @@
 const styles = {
+  contextualHintRow: "inline-flex [align-items:center] [gap:6px]",
   avatarEditorAnchor: "[position:relative] [flex:0_0_auto]",
   detailAvatarButton: "grid w-[46px] h-[46px] [place-items:center] [width:46px] [height:46px] [padding:0] [border:0] [border-radius:50%] [background:transparent] [color:inherit] [cursor:pointer] focus-visible:[outline:none]",
   detailAvatar: "grid [place-items:center] [flex:0_0_auto] [border-radius:50%] [color:var(--fg-primary)] [background:color-mix(in_srgb,_var(--accent-cool)_12%,_transparent)] [font-family:var(--font-display)] [font-weight:800] [overflow:hidden] [width:46px] [height:46px] [font-size:var(--vui-font-xs)] [outline:1px_solid_color-mix(in_srgb,_var(--accent-cool)_24%,_transparent)]",
