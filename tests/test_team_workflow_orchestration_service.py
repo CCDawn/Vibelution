@@ -1180,6 +1180,50 @@ def test_decide_research_review_approves_clean_hypothesis(tmp_path, monkeypatch)
     assert res["riskFlags"] == []
 
 
+def test_decide_research_review_reads_local_model_output_experiment_plan(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = team_service.create_team(name="挑战杯科研团队")
+    hypothesis = team_workflow_orchestration_service.record_local_research_model_output(
+        team["teamId"],
+        {
+            "taskType": "algorithm_hypothesis_draft",
+            "output": {
+                "candidateType": "algorithm_hypothesis",
+                "sourceRefs": [{"type": "paper", "id": "paper-1", "label": "Paper 1"}],
+                "evidenceRefs": [{"type": "mapping", "id": "mapping-1", "label": "Mapping 1"}],
+                "claims": [{"claim": "Iterative correction may help.", "sourceRef": "mapping-1"}],
+                "mechanismMappingIds": ["mapping-1"],
+                "hypothesis": "Iterative correction improves reconstruction under corruption.",
+                "baseline": "matched feedforward autoencoder",
+                "expectedBenefit": "lower reconstruction loss",
+                "expectedComputeCost": "three extra correction steps",
+                "experimentPlan": {
+                    "dataset": "controlled corruption benchmark",
+                    "metric": "reconstruction NLL",
+                    "baseline": "matched feedforward autoencoder",
+                    "smokePlan": "single seed, two epochs",
+                },
+                "factLayer": ["The source describes a hierarchical generative framing."],
+                "inferenceLayer": ["The iterative correction module is a project hypothesis."],
+                "uncertainty": ["not experimentally validated"],
+                "riskFlags": [],
+                "confidence": 0.3,
+                "nextAction": "send_to_research_review",
+                "requiresReview": True,
+            },
+        },
+    )["candidate"]
+
+    response = team_workflow_orchestration_service.decide_research_review(
+        team["teamId"],
+        {"candidateIds": [hypothesis["candidateId"]], "decision": "approve"},
+    )
+
+    assert response["decision"] == "approve"
+    assert response["riskFlags"] == []
+    assert response["checklist"][hypothesis["candidateId"]]["testability"] is True
+
+
 def test_decide_research_review_blocks_approve_on_high_over_analogy(tmp_path, monkeypatch):
     """N-05 硬门禁：high_over_analogy → 自动 needs_human；显式 approve 被拦截。"""
     _use_tmp_project_root(tmp_path, monkeypatch)
