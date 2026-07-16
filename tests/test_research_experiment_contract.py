@@ -127,6 +127,22 @@ def test_smoke_only_adapter_cannot_satisfy_full_research_loop():
     assert "full_run" in full_loop["unavailableReason"]
 
 
+def test_explicit_fashion_mnist_multi_seed_adapter_can_satisfy_full_research_loop_without_becoming_a_default():
+    default_full_loop = experiment_contract.resolve_adapter_selection(
+        "model_training_inference",
+        "full_research_loop",
+    )
+    explicit_full_loop = experiment_contract.resolve_adapter_selection(
+        "model_training_inference",
+        "full_research_loop",
+        requested_adapter_id="fashion_mnist_predictive_coding_multi_seed",
+    )
+
+    assert default_full_loop["resolvedAdapterId"] == ""
+    assert explicit_full_loop["resolvedAdapterId"] == "fashion_mnist_predictive_coding_multi_seed"
+    assert explicit_full_loop["selectionSource"] == "user_override"
+
+
 def test_legacy_plan_record_projection_is_idempotent_and_preserves_legacy_fields():
     legacy = {
         "schemaVersion": 1,

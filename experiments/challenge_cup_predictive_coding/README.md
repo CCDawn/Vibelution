@@ -25,3 +25,24 @@ Download FashionMNIST once through `torchvision.datasets.FashionMNIST`, then run
 ```
 
 Artifacts are written outside the repository under the supplied output directory.
+
+## Formal multi-seed adapter
+
+The Teams experiment card exposes `fashion_mnist_predictive_coding_multi_seed` as an explicit option for a bounded multi-seed run. It is intentionally not the automatic default for every model-training plan.
+
+Before it can run, the plan must have a passing smoke result and the operator must provide all three absolute paths:
+
+- `pythonExecutable`: the isolated CPU environment's `python.exe`;
+- `dataRoot`: the existing FashionMNIST data directory; and
+- `outputRoot`: an artifact directory outside this repository.
+
+The formal API is user-triggered only:
+
+```text
+POST /api/teams/{teamId}/workflow-orchestration/experiments/plans/{planId}/full-run/prepare
+POST /api/teams/{teamId}/workflow-orchestration/experiments/plans/{planId}/full-run/execute
+```
+
+`prepare` only checks the trusted repository script and environment. `execute` runs the fixed script once per declared seed without a shell or console window and writes aggregate artifacts under `outputRoot`. Execution completion does **not** mark a research claim as passed or ingest knowledge automatically: review the aggregate artifact, then use the existing `full-run-result` registration endpoint to make a human-reviewed result record.
+
+This remains a bounded FashionMNIST evaluation, not an official Challenge Cup submission and not evidence of biological neural realism.

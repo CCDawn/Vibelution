@@ -16,6 +16,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
+from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
@@ -25,7 +26,7 @@ from config.public_config import build_effective_config, load_public_config
 from core.chat.conversation_ledger import load_conversation_events
 from core.infrastructure import developer_sandbox
 from core.llm import LLMClient, LLMInvocationContext, invoke_llm
-from core.research import experiment_contract, smoke_runner
+from core.research import experiment_contract, formal_runner, smoke_runner
 from core.runtime_manager import work_run_store
 from core.web.services import agent_directory_service, candidate_schema_registry, chat_room_service, data_processing_service, session_service, team_knowledge_service, team_service
 from core.web.services.runtime_scene_service import record_runtime_scene_event
@@ -7120,6 +7121,266 @@ def run_experiment_smoke_run(team_id: str, plan_id: str, payload: dict[str, Any]
         "experimentStatus": plan_status,
         "workflowId": workflow["workflowId"],
     }
+
+
+def prepare_experiment_full_run(team_id: str, plan_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Validate a user-selected formal runner without starting model training.
+
+    The preparation record is auditable but deliberately does not advance the
+    research result state.  A separate explicit full-run request is required.
+    """
+
+    normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
+    normalized_plan_id = _normalize_required_id(plan_id, "Experiment plan id is required.")
+    team = team_service.get_team(normalized_team_id)
+    request_payload = payload if isinstance(payload, dict) else {}
+    recorded_by_agent = _trim_text(request_payload.get("recordedByAgent"), max_length=160) or DEFAULT_OWNER_AGENT_ID
+    with _WORKFLOW_LOCK:
+        plan_store = _load_experiment_plan_store(normalized_team_id)
+        plan = _find_experiment_plan(plan_store, normalized_plan_id)
+        if plan is None:
+            raise TeamWorkflowOrchestrationError("Experiment plan not found.")
+        plan_snapshot = deepcopy(plan)
+
+    adapter_id, method_config = _require_formal_full_run_ready(plan_snapshot)
+    try:
+        preparation = formal_runner.prepare_full_run(
+            adapter_id,
+            method_config=method_config,
+            execution_config=request_payload.get("executionConfig"),
+            project_root=PROJECT_ROOT,
+        )
+    except formal_runner.FormalRunnerError as exc:
+        raise TeamWorkflowOrchestrationError(str(exc)) from exc
+    now = utc_now_iso()
+    preparation_record = {
+        **preparation,
+        "preparationId": _new_record_id("full-run-preparation"),
+        "recordedByAgent": recorded_by_agent,
+        "preparedAt": now,
+    }
+    with _WORKFLOW_LOCK:
+        plan_store = _load_experiment_plan_store(normalized_team_id)
+        plan = _find_experiment_plan(plan_store, normalized_plan_id)
+        if plan is None:
+            raise TeamWorkflowOrchestrationError("Experiment plan not found.")
+        preparations = [item for item in list(plan.get("fullRunPreparations") or []) if isinstance(item, dict)]
+        preparations.append(preparation_record)
+        plan["fullRunPreparations"] = preparations[-12:]
+        plan["activeFullRunPreparationId"] = preparation_record["preparationId"]
+        plan["activeFullRunPreparation"] = preparation_record
+        plan["updatedAt"] = now
+        plan_store["activePlanId"] = plan["planId"]
+        plan_store["updatedAt"] = now
+        _write_json(_experiment_plan_store_path(normalized_team_id), plan_store)
+        workflow = _load_or_create_workflow(normalized_team_id)
+    _record_workflow_event(
+        "experiment.full_run_prepared",
+        normalized_team_id,
+        fields={
+            "workflowId": workflow["workflowId"],
+            "planId": normalized_plan_id,
+            "preparationId": preparation_record["preparationId"],
+            "adapter": adapter_id,
+            "seedCount": preparation.get("seedCount"),
+            "recordedByAgent": recorded_by_agent,
+        },
+    )
+    return {
+        "preparation": preparation_record,
+        "plan": plan,
+        "team": {"teamId": team.get("teamId", normalized_team_id), "name": team.get("name", "")},
+        "boundaries": {
+            "startsFullRun": False,
+            "autoExecution": False,
+            "requiresExplicitExecute": True,
+            "requiresResultReview": True,
+        },
+    }
+
+
+def execute_experiment_full_run(team_id: str, plan_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Run an explicitly selected formal adapter and store review-only artifacts.
+
+    The runner is synchronous by design for this bounded CPU lane.  It uses no
+    shell and cannot execute a user-supplied script.  Completion keeps the
+    plan at the full-run review gate; only ``register_experiment_full_run_result``
+    can promote a conclusion downstream.
+    """
+
+    normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
+    normalized_plan_id = _normalize_required_id(plan_id, "Experiment plan id is required.")
+    team = team_service.get_team(normalized_team_id)
+    request_payload = payload if isinstance(payload, dict) else {}
+    recorded_by_agent = _trim_text(request_payload.get("recordedByAgent"), max_length=160) or DEFAULT_OWNER_AGENT_ID
+    with _WORKFLOW_LOCK:
+        plan_store = _load_experiment_plan_store(normalized_team_id)
+        plan = _find_experiment_plan(plan_store, normalized_plan_id)
+        if plan is None:
+            raise TeamWorkflowOrchestrationError("Experiment plan not found.")
+        plan_snapshot = deepcopy(plan)
+
+    adapter_id, method_config = _require_formal_full_run_ready(plan_snapshot)
+    started_at = utc_now_iso()
+    execution_id = _new_record_id("full-run-execution")
+    with _WORKFLOW_LOCK:
+        plan_store = _load_experiment_plan_store(normalized_team_id)
+        plan = _find_experiment_plan(plan_store, normalized_plan_id)
+        if plan is None:
+            raise TeamWorkflowOrchestrationError("Experiment plan not found.")
+        plan["status"] = "full_run_running"
+        plan["activeFullRunExecution"] = {
+            "executionId": execution_id,
+            "status": "running",
+            "adapterId": adapter_id,
+            "recordedByAgent": recorded_by_agent,
+            "startedAt": started_at,
+        }
+        plan["updatedAt"] = started_at
+        plan_store["activePlanId"] = plan["planId"]
+        plan_store["updatedAt"] = started_at
+        _write_json(_experiment_plan_store_path(normalized_team_id), plan_store)
+        workflow = _load_or_create_workflow(normalized_team_id)
+    _record_workflow_event(
+        "experiment.full_run_started",
+        normalized_team_id,
+        fields={
+            "workflowId": workflow["workflowId"],
+            "planId": normalized_plan_id,
+            "executionId": execution_id,
+            "adapter": adapter_id,
+            "recordedByAgent": recorded_by_agent,
+        },
+    )
+
+    try:
+        runner_result = formal_runner.run_full_run(
+            adapter_id,
+            method_config=method_config,
+            execution_config=request_payload.get("executionConfig"),
+            project_root=PROJECT_ROOT,
+        )
+    except formal_runner.FormalRunnerError as exc:
+        _record_formal_full_run_execution(
+            normalized_team_id,
+            normalized_plan_id,
+            execution_id=execution_id,
+            adapter_id=adapter_id,
+            recorded_by_agent=recorded_by_agent,
+            started_at=started_at,
+            status="failed",
+            result={"error": str(exc)},
+        )
+        raise TeamWorkflowOrchestrationError(str(exc)) from exc
+
+    execution_record = _record_formal_full_run_execution(
+        normalized_team_id,
+        normalized_plan_id,
+        execution_id=execution_id,
+        adapter_id=adapter_id,
+        recorded_by_agent=recorded_by_agent,
+        started_at=started_at,
+        status="completed",
+        result=runner_result,
+    )
+    with _WORKFLOW_LOCK:
+        plan_store = _load_experiment_plan_store(normalized_team_id)
+        plan = _find_experiment_plan(plan_store, normalized_plan_id)
+        if plan is None:
+            raise TeamWorkflowOrchestrationError("Experiment plan not found.")
+        workflow = _load_or_create_workflow(normalized_team_id)
+    return {
+        "execution": execution_record,
+        "plan": plan,
+        "team": {"teamId": team.get("teamId", normalized_team_id), "name": team.get("name", "")},
+        "workflowId": workflow["workflowId"],
+        "boundaries": {
+            "autoResultRegistration": False,
+            "autoKnowledgeIngestion": False,
+            "requiresResultReview": True,
+            "requiresExplicitFullRunResultRegistration": True,
+        },
+    }
+
+
+def _require_formal_full_run_ready(plan: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+    contract = plan.get("experimentContract") if isinstance(plan.get("experimentContract"), dict) else {}
+    validation = plan.get("contractValidation") if isinstance(plan.get("contractValidation"), dict) else {}
+    readiness = plan.get("readiness") if isinstance(plan.get("readiness"), dict) else {}
+    selection = contract.get("adapterSelection") if isinstance(contract.get("adapterSelection"), dict) else {}
+    adapter_id = _trim_text(selection.get("resolvedAdapterId"), max_length=200)
+    if adapter_id != formal_runner.FASHION_MNIST_MULTI_SEED_ADAPTER:
+        raise TeamWorkflowOrchestrationError("Experiment plan does not select the formal FashionMNIST multi-seed adapter.")
+    if not bool(validation.get("valid")):
+        raise TeamWorkflowOrchestrationError("Experiment plan contract must be valid before formal full-run preparation.")
+    if not bool(readiness.get("readyForFullRun")):
+        raise TeamWorkflowOrchestrationError("Record a passing smoke result before formal full-run preparation.")
+    method_config = contract.get("methodConfig") if isinstance(contract.get("methodConfig"), dict) else {}
+    return adapter_id, method_config
+
+
+def _record_formal_full_run_execution(
+    team_id: str,
+    plan_id: str,
+    *,
+    execution_id: str,
+    adapter_id: str,
+    recorded_by_agent: str,
+    started_at: str,
+    status: str,
+    result: dict[str, Any],
+) -> dict[str, Any]:
+    finished_at = utc_now_iso()
+    execution_record = {
+        "executionId": execution_id,
+        "status": status,
+        "adapterId": adapter_id,
+        "recordedByAgent": recorded_by_agent,
+        "startedAt": started_at,
+        "finishedAt": finished_at,
+        "result": result,
+        "requiresResultReview": True,
+        "automaticPromotion": False,
+    }
+    with _WORKFLOW_LOCK:
+        plan_store = _load_experiment_plan_store(team_id)
+        plan = _find_experiment_plan(plan_store, plan_id)
+        if plan is None:
+            raise TeamWorkflowOrchestrationError("Experiment plan not found.")
+        executions = [item for item in list(plan.get("fullRunExecutions") or []) if isinstance(item, dict)]
+        executions.append(execution_record)
+        plan["fullRunExecutions"] = executions[-12:]
+        plan["activeFullRunExecutionId"] = execution_id
+        plan["activeFullRunExecution"] = execution_record
+        plan["status"] = "smoke_passed"
+        plan["updatedAt"] = finished_at
+        _refresh_experiment_plan_readiness(plan)
+        plan_store["activePlanId"] = plan["planId"]
+        plan_store["updatedAt"] = finished_at
+        _write_json(_experiment_plan_store_path(team_id), plan_store)
+        workflow = _load_or_create_workflow(team_id)
+        workflow["updatedAt"] = finished_at
+        workflow["activeWorkflowItems"] = _upsert_active_item(
+            workflow.get("activeWorkflowItems"),
+            candidate_id=str(plan.get("stageRoundId") or plan["planId"]),
+            current_node=RESEARCH_STAGE_DEFAULTS["experiment"]["currentNode"],
+            status=f"full_run_execution_{status}",
+            transfer_id="",
+        )
+        _write_json(_workflow_path(team_id), workflow)
+    _record_workflow_event(
+        f"experiment.full_run_{status}",
+        team_id,
+        fields={
+            "workflowId": workflow["workflowId"],
+            "planId": plan_id,
+            "executionId": execution_id,
+            "adapter": adapter_id,
+            "status": status,
+            "resultPath": _trim_text(result.get("resultPath"), max_length=500),
+        },
+    )
+    return execution_record
 
 
 def register_experiment_smoke_result(team_id: str, plan_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:

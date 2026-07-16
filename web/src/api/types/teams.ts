@@ -917,6 +917,7 @@ export type ExperimentMethodCatalogPayload = {
     availability: string;
     unavailableReason: string;
     formalResult: boolean;
+    requiresExplicitSelection?: boolean;
     priority: number;
   }>;
   boundaries: {

@@ -122,6 +122,18 @@ _METHODS_BY_ID = {item["methodId"]: item for item in _METHODS}
 # available.
 _ADAPTERS: tuple[dict[str, Any], ...] = (
     {
+        "adapterId": "fashion_mnist_predictive_coding_multi_seed",
+        "adapterVersion": "1.0.0",
+        "method": "model_training_inference",
+        "executionMode": "local_process",
+        "capabilities": ["validate", "prepare", "smoke", "full_run", "collect"],
+        "availability": "available",
+        "unavailableReason": "Requires an explicit local CPU environment, existing FashionMNIST data, and a multi-seed run configuration.",
+        "formalResult": True,
+        "requiresExplicitSelection": True,
+        "priority": 110,
+    },
+    {
         "adapterId": "synthetic_classification_baseline_vs_variant",
         "adapterVersion": "1.0.0",
         "method": "model_training_inference",
@@ -232,7 +244,11 @@ def resolve_adapter_selection(
     if research_mode == "hypothesis_and_plan" and not requested_adapter_id:
         return _unresolved_adapter("", "Execution Adapter is not required until experiment-feedback execution is selected.")
     required = _required_adapter_capabilities(research_mode)
-    candidates = [item for item in _ADAPTERS if item.get("method") == method_id]
+    candidates = [
+        item
+        for item in _ADAPTERS
+        if item.get("method") == method_id and not item.get("requiresExplicitSelection")
+    ]
     requested = _ADAPTERS_BY_ID.get(requested_adapter_id) if requested_adapter_id else None
     if requested_adapter_id:
         if requested is None:

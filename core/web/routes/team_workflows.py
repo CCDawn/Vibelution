@@ -20,6 +20,7 @@ from core.web.services.team_workflow_orchestration_service import (
     decide_transfer_request,
     ensure_team_workflow_orchestration,
     execute_source_collection_search,
+    execute_experiment_full_run,
     export_deliverables,
     extract_neuro_mechanism_from_paper_note,
     extract_source_collection_candidates,
@@ -56,6 +57,7 @@ from core.web.services.team_workflow_orchestration_service import (
     retry_research_stage_round_memory_record,
     rollback_official_research_graph,
     run_experiment_smoke_run,
+    prepare_experiment_full_run,
     run_knowledge_collection_ingestion,
     run_knowledge_ingestion_precheck,
     seed_source_collection_agent_session_context,
@@ -315,6 +317,11 @@ class ExperimentFullRunResultPayload(BaseModel):
     evidenceRefs: list[dict[str, Any]] = Field(default_factory=list, max_length=12)
     notes: str = Field("", max_length=4000)
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class ExperimentFullRunExecutionPayload(BaseModel):
+    executionConfig: dict[str, Any] = Field(default_factory=dict)
+    recordedByAgent: str = Field("", max_length=160)
 
 
 class ExperimentResultKnowledgeIngestionPayload(BaseModel):
@@ -938,6 +945,42 @@ def team_workflow_experiment_full_run_result_register(team_id: str, plan_id: str
             exc,
             status_code=422,
             fields={"planId": plan_id, "recordedByAgent": payload.recordedByAgent, "status": payload.status},
+        )
+
+
+@router.post("/teams/{team_id}/workflow-orchestration/experiments/plans/{plan_id}/full-run/prepare", status_code=status.HTTP_201_CREATED)
+def team_workflow_experiment_full_run_prepare(team_id: str, plan_id: str, payload: ExperimentFullRunExecutionPayload) -> dict:
+    try:
+        return prepare_experiment_full_run(team_id, plan_id, payload.model_dump())
+    except TeamNotFoundError as exc:
+        _raise_team_workflow_route_error(
+            "experiment_full_run.prepare", team_id, exc, status_code=404, fields={"planId": plan_id}
+        )
+    except (TeamServiceError, TeamWorkflowOrchestrationError) as exc:
+        _raise_team_workflow_route_error(
+            "experiment_full_run.prepare",
+            team_id,
+            exc,
+            status_code=422,
+            fields={"planId": plan_id, "recordedByAgent": payload.recordedByAgent},
+        )
+
+
+@router.post("/teams/{team_id}/workflow-orchestration/experiments/plans/{plan_id}/full-run/execute", status_code=status.HTTP_201_CREATED)
+def team_workflow_experiment_full_run_execute(team_id: str, plan_id: str, payload: ExperimentFullRunExecutionPayload) -> dict:
+    try:
+        return execute_experiment_full_run(team_id, plan_id, payload.model_dump())
+    except TeamNotFoundError as exc:
+        _raise_team_workflow_route_error(
+            "experiment_full_run.execute", team_id, exc, status_code=404, fields={"planId": plan_id}
+        )
+    except (TeamServiceError, TeamWorkflowOrchestrationError) as exc:
+        _raise_team_workflow_route_error(
+            "experiment_full_run.execute",
+            team_id,
+            exc,
+            status_code=422,
+            fields={"planId": plan_id, "recordedByAgent": payload.recordedByAgent},
         )
 
 
