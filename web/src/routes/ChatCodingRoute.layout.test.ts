@@ -2706,6 +2706,25 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("enabled: Boolean(activeSessionId)");
   });
 
+  it("bootstraps the persisted active session before the full session index resolves", () => {
+    expect(routeSource).toContain('queryKey: ["sessions", "active-bootstrap"]');
+    expect(routeSource).toContain(
+      'fetchJson<{ activeSessionId: string }>("/api/sessions/active", { signal })',
+    );
+    const bootstrapEffectStart = routeSource.indexOf(
+      "const bootstrapSessionId = activeSessionBootstrapQuery.data?.activeSessionId?.trim()",
+    );
+    expect(bootstrapEffectStart).toBeGreaterThan(0);
+    const bootstrapEffect = routeSource.slice(
+      routeSource.lastIndexOf("useEffect(() => {", bootstrapEffectStart),
+      routeSource.indexOf("useEffect(() => {", bootstrapEffectStart),
+    );
+    expect(bootstrapEffect).toContain("requestedSessionId || requestedRoomId || activeSessionId");
+    expect(bootstrapEffect).toContain('setActiveGroupRoomId("")');
+    expect(bootstrapEffect).toContain("setActiveSession(bootstrapSessionId)");
+    expect(bootstrapEffect).not.toContain("sessionsQuery.data");
+  });
+
   it("loads direct session details as a window and wires top-edge history paging", () => {
     expect(routeSource).toContain("const SESSION_DETAIL_INITIAL_MESSAGE_LIMIT = 40");
     expect(routeSource).toContain("function fetchSessionDetailWindow(");

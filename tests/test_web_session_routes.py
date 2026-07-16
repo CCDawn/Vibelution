@@ -13,6 +13,7 @@ from core.chat.conversation_ledger import (
 from core.ui.chat_state import load_chat_state, save_chat_state
 from core.web.app import create_app
 from core.web.control import CONTROL_TOKEN_HEADER, get_control_token
+from core.web.routes import sessions as session_routes
 from core.web.services import (
     agent_directory_service,
     agent_mode_binding_service,
@@ -67,6 +68,33 @@ def isolate_evolution_live_state():
         self_evolution_control_service._ACTIVE_RUN_ID = None
     with self_evolution_control_service._RUN_SUBSCRIBERS_LOCK:
         self_evolution_control_service._RUN_SUBSCRIBERS.clear()
+
+
+def test_active_session_route_returns_lightweight_persisted_selection(monkeypatch):
+    monkeypatch.setattr(
+        session_routes,
+        "get_active_session_summary",
+        lambda: {"id": "session-active", "messages": ["must-not-be-returned"]},
+    )
+    monkeypatch.setattr(
+        session_routes,
+        "list_sessions",
+        lambda: pytest.fail("active session bootstrap must not build the full session index"),
+    )
+
+    response = client.get("/api/sessions/active")
+
+    assert response.status_code == 200
+    assert response.json() == {"activeSessionId": "session-active"}
+
+
+def test_active_session_route_returns_empty_id_without_persisted_selection(monkeypatch):
+    monkeypatch.setattr(session_routes, "get_active_session_summary", lambda: None)
+
+    response = client.get("/api/sessions/active")
+
+    assert response.status_code == 200
+    assert response.json() == {"activeSessionId": ""}
 
 
 def test_session_detail_exists(tmp_path, monkeypatch):
