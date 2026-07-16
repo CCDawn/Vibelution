@@ -4782,7 +4782,7 @@ def test_source_collection_context_retry_evidence_returns_only_missing_anchor_ca
     )
 
     assert follow_up_task["task"]["sourceContextMode"] == "evidence"
-    assert follow_up_task["task"]["retrySourceTaskId"] == ""
+    assert follow_up_task["task"]["retrySourceTaskId"] == retry_task["taskId"]
 
 
 def test_source_collection_extraction_resume_after_interrupted_reading_prioritizes_writeback(tmp_path, monkeypatch):
@@ -4871,6 +4871,7 @@ def test_source_collection_extraction_resume_after_interrupted_reading_prioritiz
     )
 
     assert retry_task["created"] is True
+    assert retry_task["task"]["retrySourceTaskId"] == task["taskId"]
     assert len(submitted_messages) == 2
     retry_message = submitted_messages[-1]
     assert "上一轮结果" in retry_message
