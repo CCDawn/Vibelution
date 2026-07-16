@@ -4695,7 +4695,7 @@ def test_source_collection_context_retry_evidence_returns_only_missing_anchor_ca
     assert authoritative_context["contextMode"] == "retry_evidence"
     assert [item["candidateId"] for item in authoritative_context["candidates"]] == [candidates[1]["candidateId"]]
 
-    team_workflow_orchestration_service.writeback_source_collection_stage_session_task(
+    retry_writeback = team_workflow_orchestration_service.writeback_source_collection_stage_session_task(
         team["teamId"],
         retry_task["taskId"],
         {
@@ -4714,6 +4714,40 @@ def test_source_collection_context_retry_evidence_returns_only_missing_anchor_ca
             "recordedByAgent": agent["agentId"],
         },
     )
+    assert retry_writeback["writeback"]["coverageSummary"]["total"] == 2
+    assert retry_writeback["writeback"]["coverageSummary"]["processed"] == 2
+    assert retry_writeback["writeback"]["coverageSummary"]["missing"] == 0
+    assert retry_writeback["writeback"]["coverageSummary"]["complete"] is True
+    assert {
+        item["candidateId"]
+        for item in retry_writeback["task"]["result"]["candidateExtractions"]
+    } == {candidate["candidateId"] for candidate in candidates}
+    legacy_retry_task = dict(retry_writeback["task"])
+    legacy_retry_result = {
+        "candidateExtractions": [retry_writeback["task"]["result"]["candidateExtractions"][-1]],
+    }
+    legacy_retry_writeback = dict(legacy_retry_task["writeback"])
+    legacy_retry_writeback["result"] = legacy_retry_result
+    legacy_retry_writeback["coverageSummary"] = {
+        "applicable": True,
+        "coverageKind": "candidate_extractions",
+        "total": 2,
+        "processed": 1,
+        "missing": 1,
+        "invalid": 0,
+        "complete": False,
+    }
+    legacy_retry_task["writeback"] = legacy_retry_writeback
+    legacy_retry_task["result"] = dict(legacy_retry_result)
+    reconciled_retry_task = (
+        team_workflow_orchestration_service._reconcile_source_collection_stage_session_task_retry_coverage(
+            team["teamId"],
+            run_id,
+            legacy_retry_task,
+        )
+    )
+    assert reconciled_retry_task["writeback"]["coverageSummary"]["processed"] == 2
+    assert reconciled_retry_task["writeback"]["coverageSummary"]["complete"] is True
     completed_retry_context = team_workflow_orchestration_service.get_source_collection_stage_task_context(
         team["teamId"],
         task_id=retry_task["taskId"],

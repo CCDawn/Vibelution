@@ -17323,12 +17323,65 @@ def _merge_source_collection_stage_writeback_result_payload(
 ) -> dict[str, Any]:
     if not isinstance(incoming, dict) or not incoming:
         return {}
+    merged_previous: dict[str, Any] = {}
+    for ancestor_result in _source_collection_stage_retry_ancestor_results(team_id, run_id, task):
+        merged_previous = _merge_source_collection_stage_writeback_result_pair(
+            team_id,
+            run_id,
+            merged_previous,
+            ancestor_result,
+        )
     previous_writeback = task.get("writeback") if isinstance(task.get("writeback"), dict) else {}
     previous_result = previous_writeback.get("result") if isinstance(previous_writeback.get("result"), dict) else {}
     if not previous_result and isinstance(task.get("result"), dict):
         previous_result = task["result"]
+    if previous_result:
+        merged_previous = _merge_source_collection_stage_writeback_result_pair(
+            team_id,
+            run_id,
+            merged_previous,
+            previous_result,
+        )
+    return _merge_source_collection_stage_writeback_result_pair(
+        team_id,
+        run_id,
+        merged_previous,
+        incoming,
+    )
+
+
+def _source_collection_stage_retry_ancestor_results(
+    team_id: str,
+    run_id: str,
+    task: dict[str, Any],
+) -> list[dict[str, Any]]:
+    task_id = _trim_text(task.get("taskId"), max_length=160)
+    parent_task_id = _trim_text(task.get("retrySourceTaskId"), max_length=160)
+    seen = {task_id} if task_id else set()
+    results: list[dict[str, Any]] = []
+    while parent_task_id and parent_task_id not in seen and len(results) < 24:
+        seen.add(parent_task_id)
+        parent_task, parent_run_id = _find_source_collection_stage_session_task_by_id(team_id, parent_task_id)
+        if parent_task is None or parent_run_id != run_id:
+            break
+        parent_writeback = parent_task.get("writeback") if isinstance(parent_task.get("writeback"), dict) else {}
+        parent_result = parent_writeback.get("result") if isinstance(parent_writeback.get("result"), dict) else {}
+        if not parent_result and isinstance(parent_task.get("result"), dict):
+            parent_result = parent_task["result"]
+        if parent_result:
+            results.append(parent_result)
+        parent_task_id = _trim_text(parent_task.get("retrySourceTaskId"), max_length=160)
+    return list(reversed(results))
+
+
+def _merge_source_collection_stage_writeback_result_pair(
+    team_id: str,
+    run_id: str,
+    previous_result: dict[str, Any],
+    incoming: dict[str, Any],
+) -> dict[str, Any]:
     if not previous_result:
-        return incoming
+        previous_result = {}
 
     merged = dict(previous_result)
     merged.update(incoming)
@@ -17705,6 +17758,55 @@ def _reconcile_source_collection_stage_session_task_turn_status(task: dict[str, 
     return next_task
 
 
+def _reconcile_source_collection_stage_session_task_retry_coverage(
+    team_id: str,
+    run_id: str,
+    task: dict[str, Any],
+) -> dict[str, Any]:
+    if not _trim_text(task.get("retrySourceTaskId"), max_length=160):
+        return task
+    writeback = task.get("writeback") if isinstance(task.get("writeback"), dict) else {}
+    current_result = writeback.get("result") if isinstance(writeback.get("result"), dict) else {}
+    if not current_result and isinstance(task.get("result"), dict):
+        current_result = task["result"]
+    if not current_result:
+        return task
+    merged_result = _merge_source_collection_stage_writeback_result_payload(
+        team_id,
+        run_id,
+        task,
+        current_result,
+    )
+    coverage_writeback = dict(writeback)
+    coverage_writeback["result"] = merged_result
+    coverage_summary = _source_collection_stage_writeback_candidate_coverage(
+        team_id,
+        run_id,
+        task,
+        coverage_writeback,
+    )
+    existing_coverage = (
+        writeback.get("coverageSummary")
+        if isinstance(writeback.get("coverageSummary"), dict)
+        else {}
+    )
+    if merged_result == current_result and coverage_summary == existing_coverage:
+        return task
+    next_task = dict(task)
+    next_writeback = dict(writeback)
+    next_result = dict(task.get("result")) if isinstance(task.get("result"), dict) else {}
+    next_writeback["result"] = merged_result
+    next_writeback["coverageSummary"] = coverage_summary
+    next_writeback["invalidCandidateIds"] = list(coverage_summary.get("invalidCandidateIds") or [])
+    next_writeback["invalidRecordIds"] = list(coverage_summary.get("invalidRecordIds") or [])
+    next_result.update(merged_result)
+    next_result["coverageSummary"] = coverage_summary
+    next_task["writeback"] = next_writeback
+    next_task["result"] = next_result
+    next_task["updatedAt"] = utc_now_iso()
+    return next_task
+
+
 def _reconcile_source_collection_stage_session_tasks(team_id: str) -> bool:
     runs_root = _team_workflow_root(team_id) / "source_collection_runs"
     if not runs_root.exists():
@@ -17737,6 +17839,11 @@ def _reconcile_source_collection_stage_session_tasks_for_run(team_id: str, run_i
             reconciled,
             conversation_events_by_session=conversation_events_by_session,
         )
+        reconciled = _reconcile_source_collection_stage_session_task_retry_coverage(
+            team_id,
+            normalized_run_id,
+            reconciled,
+        )
         reconciled = _reconcile_source_collection_stage_session_task_sources(team_id, normalized_run_id, reconciled)
         reconciled = _reconcile_source_collection_stage_session_task_completion_gate(
             team_id,
@@ -17763,6 +17870,7 @@ def _reconcile_source_collection_stage_session_task(team_id: str, run_id: str, t
         reconciled,
         conversation_events_by_session=conversation_events_by_session,
     )
+    reconciled = _reconcile_source_collection_stage_session_task_retry_coverage(team_id, run_id, reconciled)
     reconciled = _reconcile_source_collection_stage_session_task_sources(team_id, run_id, reconciled)
     reconciled = _reconcile_source_collection_stage_session_task_completion_gate(
         team_id,
