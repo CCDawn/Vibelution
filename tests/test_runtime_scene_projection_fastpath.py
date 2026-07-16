@@ -46,6 +46,49 @@ def _point_runtime_scene_at(tmp_path, monkeypatch, *, scene_id: str):
     return scene_dir
 
 
+def test_ordinary_runtime_event_is_append_only_and_keeps_incremental_sequence(tmp_path, monkeypatch) -> None:
+    scene_dir = _point_runtime_scene_at(tmp_path, monkeypatch, scene_id="scene-append-only")
+    event_path = scene_dir / "events" / "conversation.jsonl"
+    event_path.parent.mkdir(parents=True, exist_ok=True)
+    event_path.write_text(json.dumps({"seq": 41, "event_code": "seed"}) + "\n", encoding="utf-8")
+    full_calls: list[tuple] = []
+    lightweight_calls: list[tuple] = []
+    monkeypatch.setattr(
+        runtime_scene_service,
+        "_update_runtime_scene_package_manifest",
+        lambda scene, manifest: full_calls.append((scene, manifest)),
+    )
+    monkeypatch.setattr(
+        runtime_scene_service,
+        "_update_runtime_scene_package_manifest_lightweight",
+        lambda scene, manifest: lightweight_calls.append((scene, manifest)),
+    )
+
+    first = runtime_scene_service.record_runtime_scene_event(
+        "conversation",
+        "turn",
+        "conversation.turn.started",
+        fields={"sessionId": "session-fast", "turnId": "turn-1"},
+    )
+    second = runtime_scene_service.record_runtime_scene_event(
+        "conversation",
+        "turn",
+        "conversation.turn.scheduled",
+        fields={"sessionId": "session-fast", "turnId": "turn-1"},
+    )
+
+    assert first["projectionRefresh"] == "deferred"
+    assert second["projectionRefresh"] == "deferred"
+    assert full_calls == []
+    assert lightweight_calls == []
+    rows = [
+        json.loads(line)
+        for line in event_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    assert [row["seq"] for row in rows[-2:]] == [42, 43]
+
+
 @pytest.mark.parametrize(
     ("status_code", "exception_type", "expected_level"),
     [
