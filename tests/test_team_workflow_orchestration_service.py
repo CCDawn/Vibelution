@@ -4709,7 +4709,17 @@ def test_source_collection_context_retry_evidence_returns_only_missing_anchor_ca
                         "summary": "仅登记 DOI 元数据，不扩展全文结论。",
                         "evidenceRefs": [{"type": "doi", "id": "10.0000/retry-evidence-1"}],
                     }
-                ]
+                ],
+                # A retry can retain record-oriented output from an earlier pre-candidate pass.
+                # Once canonical source candidates exist, that legacy array must not replace
+                # candidate coverage as the authoritative completion basis.
+                "recordExtractions": [
+                    {
+                        "recordId": "legacy-record-before-candidate-materialization",
+                        "decision": "keep",
+                        "summary": "Legacy pre-candidate extraction retained for audit only.",
+                    }
+                ],
             },
             "recordedByAgent": agent["agentId"],
         },
@@ -4718,6 +4728,7 @@ def test_source_collection_context_retry_evidence_returns_only_missing_anchor_ca
     assert retry_writeback["writeback"]["coverageSummary"]["processed"] == 2
     assert retry_writeback["writeback"]["coverageSummary"]["missing"] == 0
     assert retry_writeback["writeback"]["coverageSummary"]["complete"] is True
+    assert retry_writeback["writeback"]["coverageSummary"]["coverageKind"] == "candidate_extractions"
     assert {
         item["candidateId"]
         for item in retry_writeback["task"]["result"]["candidateExtractions"]
