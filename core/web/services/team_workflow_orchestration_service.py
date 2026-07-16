@@ -7059,6 +7059,7 @@ def run_experiment_smoke_run(team_id: str, plan_id: str, payload: dict[str, Any]
         plan["activeSmokeRun"] = smoke_record
         plan["status"] = "smoke_passed" if status == "passed" else f"smoke_{status}"
         plan["updatedAt"] = now
+        _refresh_experiment_plan_readiness(plan)
         plan_status = plan["status"]
         plan_store["activePlanId"] = plan["planId"]
         plan_store["updatedAt"] = now
@@ -21993,7 +21994,7 @@ def _refresh_experiment_plan_readiness(plan: dict[str, Any]) -> None:
         active_baseline_artifact=active_baseline_artifact,
     )
     smoke_blockers = [item["item"] for item in checklist if item["status"] != "pass"]
-    active_smoke_result = plan.get("activeSmokeResult") if isinstance(plan.get("activeSmokeResult"), dict) else None
+    active_smoke_result = _active_experiment_smoke_evidence(plan)
     active_smoke_status = _trim_text((active_smoke_result or {}).get("status"), max_length=80).lower()
     active_full_run_result = plan.get("activeFullRunResult") if isinstance(plan.get("activeFullRunResult"), dict) else None
     active_full_run_status = _trim_text((active_full_run_result or {}).get("status"), max_length=80).lower()
@@ -22019,9 +22020,24 @@ def _refresh_experiment_plan_readiness(plan: dict[str, Any]) -> None:
     risk_controls["smokeGateRequired"] = True
     risk_controls["fullRunBlockedUntil"] = full_run_blockers
     risk_controls["activeSmokeResultStatus"] = active_smoke_status
+    risk_controls["activeSmokeEvidenceKind"] = (
+        "registered_result" if isinstance(plan.get("activeSmokeResult"), dict) else "runner_result"
+        if isinstance(plan.get("activeSmokeRun"), dict)
+        else ""
+    )
     risk_controls["knowledgeIngestionBlockedUntil"] = knowledge_blockers
     risk_controls["activeFullRunResultStatus"] = active_full_run_status
     plan["riskControls"] = risk_controls
+
+
+def _active_experiment_smoke_evidence(plan: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not isinstance(plan, dict):
+        return None
+    registered = plan.get("activeSmokeResult")
+    if isinstance(registered, dict):
+        return registered
+    runner = plan.get("activeSmokeRun")
+    return runner if isinstance(runner, dict) else None
 
 
 def _experiment_plan_checklist(
@@ -22084,7 +22100,7 @@ def _experiment_planning_gaps(
     if active_plan and not bool((active_plan.get("baselineSelection") or {}).get("activeBaselineReady")):
         gaps.append({"code": "active_baseline_not_registered", "severity": "needs_attention", "message": "已有计划草稿，但 active baseline artifact 仍未登记，不能进入 full run。"})
     elif active_plan and bool((active_plan.get("readiness") or {}).get("readyForSmoke")) and not bool((active_plan.get("readiness") or {}).get("readyForFullRun")):
-        active_smoke_result = active_plan.get("activeSmokeResult") if isinstance(active_plan.get("activeSmokeResult"), dict) else None
+        active_smoke_result = _active_experiment_smoke_evidence(active_plan)
         if active_smoke_result:
             gaps.append({"code": "smoke_result_not_passed", "severity": "needs_attention", "message": "smoke 结果已登记但尚未通过，full run 继续阻塞。"})
         else:
@@ -22107,6 +22123,8 @@ def _experiment_planning_readiness_reason(
 ) -> str:
     if not latest_experiment:
         return "需要先启动实验规划轮次。"
+    active_smoke_result = _active_experiment_smoke_evidence(active_plan)
+    active_smoke_status = _trim_text((active_smoke_result or {}).get("status"), max_length=80).lower()
     knowledge_ingestion = active_plan.get("knowledgeIngestion") if isinstance((active_plan or {}).get("knowledgeIngestion"), dict) else None
     if active_plan and knowledge_ingestion:
         return "实验结果包已进入知识库管理员入库请求链路；正式知识仍等待知识治理门禁。"
@@ -22118,6 +22136,8 @@ def _experiment_planning_readiness_reason(
         return "full-run evidence 已登记但尚未通过；需要复核或修复后再进入知识入库。"
     if active_plan and bool((active_plan.get("readiness") or {}).get("readyForFullRun")):
         return "smoke evidence 已通过；可以进入显式 full-run 决策，但本接口不自动训练。"
+    if active_plan and active_smoke_status:
+        return "smoke result 已登记但尚未通过；需要复核、修订或重跑，full run 继续阻塞。"
     if active_plan and bool((active_plan.get("readiness") or {}).get("readyForSmoke")):
         return "active baseline artifact 已登记；可进入 smoke gate，但 full run 仍等待 smoke 结果。"
     if active_plan:

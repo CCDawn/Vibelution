@@ -8845,6 +8845,18 @@ def test_experiment_baseline_artifact_registration_unlocks_smoke_gate(tmp_path, 
     assert any(gap["code"] == "smoke_result_not_recorded" for gap in status["gaps"])
     assert status["boundaries"]["createsExperimentAttempt"] is False
 
+    proxy = team_workflow_orchestration_service.run_experiment_smoke_run(
+        team["teamId"],
+        draft["plan"]["planId"],
+        {"adapter": "predictive_coding_reconstruction_proxy", "seed": 42},
+    )
+    status_after_proxy = team_workflow_orchestration_service.get_experiment_planning_status(team["teamId"])
+
+    assert proxy["status"] == "needs_review"
+    assert any(gap["code"] == "smoke_result_not_passed" for gap in status_after_proxy["gaps"])
+    assert not any(gap["code"] == "smoke_result_not_recorded" for gap in status_after_proxy["gaps"])
+    assert "smoke result 已登记但尚未通过" in status_after_proxy["readiness"]["reason"]
+
 
 def test_experiment_baseline_artifact_requires_artifact_path(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
