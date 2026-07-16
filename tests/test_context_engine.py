@@ -116,6 +116,35 @@ def test_build_chat_agent_context_skips_research_org_context(tmp_path, monkeypat
     assert packet.timings["researchOrgContextSkipped"] is True
 
 
+def test_build_agent_context_reuses_supplied_agent_snapshot(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    agent = agent_directory_service.create_agent_instance(
+        display_name="静态快照 Agent",
+        llm_bindings={"dialogue": {"modelId": "model-primary"}},
+        primary_mode="chat",
+        direct_session_id="session-snapshot",
+    )
+    original_get_agent = agent_directory_service.get_agent
+
+    def reject_duplicate_agent_lookup(agent_id, *, include_archived=False):
+        if agent_id == agent["agentId"] and not include_archived:
+            raise AssertionError("supplied Agent snapshot should avoid duplicate get_agent")
+        return original_get_agent(agent_id, include_archived=include_archived)
+
+    monkeypatch.setattr(agent_directory_service, "get_agent", reject_duplicate_agent_lookup)
+
+    packet = context_engine.build_agent_context(
+        agent["agentId"],
+        session_id="session-snapshot",
+        run_id="turn-1",
+        agent_snapshot=agent,
+    )
+
+    assert packet.agent_id == agent["agentId"]
+    assert packet.display_name == agent["displayName"]
+    assert packet.timings["agentLookupMs"] >= 0
+
+
 def test_default_chat_prompt_template_is_not_an_empty_fallback(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     recorded_events: list[tuple[tuple, dict]] = []
