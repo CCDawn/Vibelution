@@ -155,6 +155,10 @@ _RUNNING_SESSION_IDS: set[str] = set()
 _SESSION_ACTIVE_TURN_IDS: dict[str, str] = {}
 _SESSION_ACTIVE_TURN_LEASES: dict[str, list[str]] = {}
 _SESSION_EXECUTOR = ThreadPoolExecutor(max_workers=4, thread_name_prefix="web-chat-turn")
+_SESSION_CYCLE_PROJECTION_EXECUTOR = ThreadPoolExecutor(
+    max_workers=1,
+    thread_name_prefix="web-chat-cycle-projection",
+)
 _SESSION_AGENT_MAX_ACTIVE_TURNS = 4
 SOURCE_COLLECTION_STAGE_SESSION_TASK_KIND = "source_collection_stage_session_task"
 INTERNAL_AUTO_CONTINUE_MAX_TURNS = 3
@@ -6014,13 +6018,15 @@ def submit_session_message(
     submit_timing_fields["initialLiveDeltaPublishMs"] = _elapsed_ms(live_publish_started_at)
     submit_timing_fields["initialLivePublishMode"] = "assistant_delta"
     stage_started_at = _perf_counter()
-    _record_session_cycle_message(
+    _submit_session_cycle_message_projection(
         conversation_id,
         user_entry,
         event="user_message",
         status="running",
+        turn_id=turn_control.turn_id,
     )
-    submit_timing_fields["cycleMessageLogMs"] = _elapsed_ms(stage_started_at)
+    submit_timing_fields["cycleMessageDispatchMs"] = _elapsed_ms(stage_started_at)
+    submit_timing_fields["cycleMessageProjectionMode"] = "background_ordered"
     stage_started_at = _perf_counter()
     _record_session_turn_started_event(
         conversation_id,
@@ -16284,6 +16290,65 @@ def _record_session_cycle_message(
             f"runtime scene conversation log skipped: {type(exc).__name__}: {exc}",
             tag="LOGS",
         )
+
+
+def _run_session_cycle_message_projection(
+    session_id: str,
+    message: dict[str, Any],
+    *,
+    event: str,
+    status: str,
+    turn_id: str,
+    active_task: dict[str, Any] | None = None,
+) -> None:
+    started_at = _perf_counter()
+    outcome = "completed"
+    try:
+        _record_session_cycle_message(
+            session_id,
+            message,
+            event=event,
+            status=status,
+            active_task=active_task,
+        )
+    except Exception as exc:
+        outcome = "failed"
+        _debug_logger.warning(
+            f"background session cycle projection failed: {type(exc).__name__}: {exc}",
+            tag="CHAT",
+        )
+    _record_session_turn_lifecycle_event(
+        session_id,
+        "cycle_message_projection_finished",
+        turn_id=turn_id,
+        outcome=outcome,
+        fields={
+            "durationMs": _elapsed_ms(started_at),
+            "projectionMode": "background_ordered",
+            "messageRole": str(message.get("role") or "").strip(),
+            "event": str(event or "").strip(),
+        },
+    )
+
+
+def _submit_session_cycle_message_projection(
+    session_id: str,
+    message: dict[str, Any],
+    *,
+    event: str,
+    status: str,
+    turn_id: str,
+    active_task: dict[str, Any] | None = None,
+) -> None:
+    _SESSION_CYCLE_PROJECTION_EXECUTOR.submit(
+        _run_session_cycle_message_projection,
+        str(session_id or "").strip(),
+        copy.deepcopy(message),
+        event=str(event or "").strip(),
+        status=str(status or "").strip(),
+        turn_id=str(turn_id or "").strip(),
+        active_task=copy.deepcopy(active_task) if isinstance(active_task, dict) else None,
+    )
 
 
 def _record_cli_agent_lifecycle_event(
