@@ -7,6 +7,7 @@ import pytest
 from core.research import smoke_runner
 
 ADAPTER = "synthetic_classification_baseline_vs_variant"
+RECONSTRUCTION_ADAPTER = "predictive_coding_reconstruction_proxy"
 
 
 def test_run_smoke_adapter_result_shape():
@@ -53,3 +54,31 @@ def test_decision_hint_threshold_logic():
     # 极低阈值 → 只要 variant 不劣于 baseline 即 accept/iterate
     low = smoke_runner.run_smoke_adapter(ADAPTER, seed=42, threshold=0.0)
     assert low["decisionHint"] in {"accept", "iterate", "reject"}
+
+
+def test_predictive_coding_reconstruction_proxy_is_bounded_and_traceable():
+    result = smoke_runner.run_smoke_adapter(RECONSTRUCTION_ADAPTER, seed=42)
+
+    assert result["status"] == "completed"
+    assert result["executable"] is True
+    assert result["proxyOnly"] is True
+    assert result["config"]["dataset"] == "synthetic_structured_8x8_proxy"
+    assert result["config"]["targetDataset"] == "MNIST/Fashion-MNIST"
+    assert result["config"]["variantConfig"]["correctionSteps"] == 3
+    assert result["metrics"]["baseline"]["reconstruction_mse"] >= 0
+    assert result["metrics"]["variant"]["reconstruction_mse"] >= 0
+    assert result["metrics"]["delta"]["mse_improvement"] == pytest.approx(
+        result["metrics"]["baseline"]["reconstruction_mse"]
+        - result["metrics"]["variant"]["reconstruction_mse"],
+        abs=1e-6,
+    )
+    assert result["artifactHash"].startswith("sha256:")
+    assert "does_not_replace_target_dataset_evaluation" in result["boundaries"]
+
+
+def test_predictive_coding_reconstruction_proxy_is_deterministic():
+    first = smoke_runner.run_smoke_adapter(RECONSTRUCTION_ADAPTER, seed=42)
+    second = smoke_runner.run_smoke_adapter(RECONSTRUCTION_ADAPTER, seed=42)
+
+    assert first["metrics"] == second["metrics"]
+    assert first["artifactHash"] == second["artifactHash"]

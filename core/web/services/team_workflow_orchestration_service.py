@@ -7017,7 +7017,12 @@ def run_experiment_smoke_run(team_id: str, plan_id: str, payload: dict[str, Any]
     except smoke_runner.SmokeRunnerError as exc:
         raise TeamWorkflowOrchestrationError(str(exc)) from exc
     decision = str(runner_result.get("decisionHint") or "needs_full_run")
-    status = "needs_review" if runner_result.get("status") == "non_executable" else _SMOKE_DECISION_TO_STATUS.get(decision, "needs_review")
+    proxy_only = runner_result.get("proxyOnly") is True
+    status = (
+        "needs_review"
+        if runner_result.get("status") == "non_executable" or proxy_only
+        else _SMOKE_DECISION_TO_STATUS.get(decision, "needs_review")
+    )
     now = utc_now_iso()
     smoke_run_id = _new_record_id("smokerun")
     smoke_record = {
@@ -7030,6 +7035,8 @@ def run_experiment_smoke_run(team_id: str, plan_id: str, payload: dict[str, Any]
         "metrics": runner_result.get("metrics"),
         "artifactHash": runner_result.get("artifactHash"),
         "logs": runner_result.get("logs"),
+        "proxyOnly": proxy_only,
+        "boundaries": list(runner_result.get("boundaries") or []),
         "recordedByAgent": _trim_text(payload.get("recordedByAgent"), max_length=160) or "Smoke Runner Service",
         "recordedAt": now,
     }
