@@ -1,5 +1,6 @@
 export { VButton, type VButtonProps } from "./primitives/VButton";
 export { VChip, type VChipProps } from "./primitives/VChip";
+export { VContextualHint, type VContextualHintProps } from "./primitives/VContextualHint";
 export { VIconButton, type VIconButtonProps } from "./primitives/VIconButton";
 export { VNativeButton, type VNativeButtonProps } from "./primitives/VNativeButton";
 export { VPanel, type VPanelProps } from "./primitives/VPanel";
@@ -12,7 +13,9 @@ export {
 export {
   VTooltip,
   type VTooltipProps,
+  type VTooltipTone,
   type VTooltipTriggerRender,
+  type VTooltipWidth,
 } from "./primitives/VTooltip";
 export { VDenseTable, type VDenseTableColumn, type VDenseTableProps } from "./display/VDenseTable";
 export { VLoadingValue, type VLoadingValueProps } from "./display/VLoadingValue";

@@ -2,7 +2,7 @@ import { Bot, Check, ChevronLeft, ChevronRight, Plus, Sparkles } from "lucide-re
 import { useMemo, useState } from "react";
 
 import { type AgentLlmBindings, type ToolBundle } from "../api/types";
-import { VButton, VFieldRow, VNativeButton, VNativeInput, VNativeSelect, VNativeTextarea } from "../components/vui";
+import { VButton, VContextualHint, VFieldRow, VNativeButton, VNativeInput, VNativeSelect, VNativeTextarea, VTooltip } from "../components/vui";
 import styles from "./AgentCreatePanel.styles";
 
 export type AgentCreateDraft = {
@@ -157,26 +157,40 @@ export function AgentCreatePanel({
   };
 
   return (
-    <section className={styles.createAgentPanel} title={copy.createAgentHint}>
+    <section className={styles.createAgentPanel}>
       <div className={styles.panelHeader}>
         <div>
           <p className={styles.panelEyebrow}>{copy.createAgentTitle}</p>
-          <h3>{copy.createAgent}</h3>
+          <div className="flex min-w-0 items-center gap-1.5">
+            <h3>{copy.createAgent}</h3>
+            <VContextualHint
+              label={lang === "zh" ? "新建 Agent 说明" : "New Agent details"}
+              content={copy.createAgentHint}
+              width="wide"
+            />
+          </div>
         </div>
         <Bot size={16} />
       </div>
 
       <section className={styles.quickFill} aria-label={quickFillTitle}>
         <div className={styles.quickFillHeader}>
-          <span><Sparkles size={14} /> {quickFillTitle}</span>
-          <small>{quickFillHint}</small>
+          <span>
+            <Sparkles size={14} /> {quickFillTitle}
+            <VContextualHint
+              label={lang === "zh" ? "快速填写说明" : "Quick fill details"}
+              content={quickFillHint}
+              width="wide"
+            />
+          </span>
         </div>
         <div className={styles.presetGrid}>
           {presets.map((preset) => (
-            <VNativeButton key={preset.id} type="button" className={styles.presetButton} disabled={pending} onClick={() => applyPreset(preset)}>
-              <strong>{preset.label}</strong>
-              <span>{preset.description}</span>
-            </VNativeButton>
+            <VTooltip key={preset.id} content={preset.description} width="wide">
+              <VNativeButton type="button" className={styles.presetButton} disabled={pending} onClick={() => applyPreset(preset)}>
+                <strong>{preset.label}</strong>
+              </VNativeButton>
+            </VTooltip>
           ))}
         </div>
       </section>
@@ -269,8 +283,15 @@ export function AgentCreatePanel({
                 {promptTemplateOptions.map((template) => <option key={template.value || template.label} value={template.value}>{template.label}</option>)}
               </VNativeSelect>
             </VFieldRow>
-            <section className={styles.fieldWide} title={copy.createAgentToolBundlesHint}>
-              <span>{copy.createAgentToolBundles}</span>
+            <section className={styles.fieldWide}>
+              <span className="inline-flex items-center gap-1.5">
+                {copy.createAgentToolBundles}
+                <VContextualHint
+                  label={lang === "zh" ? "工具能力包说明" : "Tool bundle details"}
+                  content={copy.createAgentToolBundlesHint}
+                  width="wide"
+                />
+              </span>
               {toolBundles.length ? (
                 <div className={styles.createToolBundleGrid}>
                   {toolBundles.map((bundle) => {
@@ -287,10 +308,17 @@ export function AgentCreatePanel({
                 <VNativeInput value={draft.allowedTools} placeholder={copy.createAgentAllowedToolsPlaceholder} onChange={(event) => onDraftChange({ allowedTools: event.target.value })} />
               )}
             </section>
-            <section className={`${styles.fieldWide} ${styles.createToolBundlePreview}`} title={toolBundleSummary.meta || copy.createAgentToolBundleEmpty}>
-              <span>{copy.createAgentToolBundlePreview}</span>
-              <strong>{toolBundleSummary.label}</strong>
-            </section>
+            <VTooltip content={toolBundleSummary.meta || copy.createAgentToolBundleEmpty} width="wide">
+              <section
+                className={`${styles.fieldWide} ${styles.createToolBundlePreview}`}
+                role="group"
+                tabIndex={0}
+                aria-label={`${copy.createAgentToolBundlePreview}：${toolBundleSummary.label}`}
+              >
+                <span>{copy.createAgentToolBundlePreview}</span>
+                <strong>{toolBundleSummary.label}</strong>
+              </section>
+            </VTooltip>
             <section className={`${styles.fieldWide} ${styles.createSummary}`} aria-label={summaryTitle}>
               <strong>{summaryTitle}</strong>
               <dl>{summaryItems.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>

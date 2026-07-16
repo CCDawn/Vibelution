@@ -1,6 +1,6 @@
 import { AlertTriangle, CheckCircle2 } from "lucide-react";
 
-import { VNativeButton } from "../components/vui";
+import { VContextualHint, VNativeButton, VTooltip } from "../components/vui";
 import styles from "./AgentManagementBriefPanel.styles";
 
 export type AgentManagementBriefPanelPane = "overview" | "config" | "activity";
@@ -40,11 +40,14 @@ export type AgentManagementBriefPanelProps = {
 
 export function AgentManagementBriefPanel({ brief, copy, onOpenRoute, onSelectPane }: AgentManagementBriefPanelProps) {
   return (
-    <section className={styles.managementBriefPanel} title={copy.managementBriefHint}>
+    <section className={styles.managementBriefPanel}>
       <div className={styles.managementBriefHeader}>
         <div>
           <p className={styles.panelEyebrow}>{copy.managementBriefTitle}</p>
-          <h3>{brief.statusLabel}</h3>
+          <h3 className="inline-flex items-center gap-1.5">
+            {brief.statusLabel}
+            <VContextualHint content={copy.managementBriefHint} label={`${copy.managementBriefTitle}说明`} />
+          </h3>
           <span>{brief.statusDetail}</span>
         </div>
         <strong>{brief.score}</strong>
@@ -66,21 +69,21 @@ export function AgentManagementBriefPanel({ brief, copy, onOpenRoute, onSelectPa
         <span>{copy.nextActionsTitle}</span>
         {brief.actions.length ? (
           brief.actions.map((action) => (
-            <VNativeButton
-              key={action.id}
-              type="button"
-              className={styles.nextActionButton}
-              title={action.detail}
-              onClick={() => {
-                if (action.route) {
-                  onOpenRoute(action.route);
-                  return;
-                }
-                onSelectPane(action.pane);
-              }}
-            >
-              <strong>{action.label}</strong>
-            </VNativeButton>
+            <VTooltip key={action.id} content={action.detail} width="wide">
+              <VNativeButton
+                type="button"
+                className={styles.nextActionButton}
+                onClick={() => {
+                  if (action.route) {
+                    onOpenRoute(action.route);
+                    return;
+                  }
+                  onSelectPane(action.pane);
+                }}
+              >
+                <strong>{action.label}</strong>
+              </VNativeButton>
+            </VTooltip>
           ))
         ) : (
           <p>{copy.nextAllReady}</p>

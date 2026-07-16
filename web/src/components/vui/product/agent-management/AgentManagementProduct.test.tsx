@@ -33,6 +33,8 @@ describe("Agent Management VUI product components", () => {
         <AgentPageHeader
           eyebrow="Agent Center"
           title="Agent Management"
+          tooltip="Create, configure, and monitor agents"
+          tooltipLabel="Agent management details"
           actions={[
             {
               id: "refresh",
@@ -48,6 +50,8 @@ describe("Agent Management VUI product components", () => {
     expect(markup).toContain("Agent Management");
     expect(markup).toContain('role="toolbar"');
     expect(markup).toContain('aria-label="Refresh"');
+    expect(markup).toContain('data-vui="contextual-hint"');
+    expect(markup).toContain('aria-label="Agent management details"');
     expect(markup).not.toContain("<p>");
   });
 
@@ -70,7 +74,9 @@ describe("Agent Management VUI product components", () => {
     expect(markup).toContain('data-vui-product="agent-summary-strip"');
     expect(markup).toContain("Agents");
     expect(markup).toContain("11");
-    expect(markup).toContain('title="Total agents"');
+    expect(markup).toContain('aria-label="Agents：Total agents"');
+    expect(markup).toContain('data-slot="tooltip-trigger"');
+    expect(markup).not.toContain('title="Total agents"');
     expect(markup).not.toContain("overflow-hidden");
     expect(markup).not.toContain("overflow-x-auto");
     expect(markup).toContain("repeat(auto-fit,minmax(88px,1fr))");
@@ -90,7 +96,8 @@ describe("Agent Management VUI product components", () => {
     );
 
     expect(markup).toContain("Warning");
-    expect(markup).toContain('title="Needs review"');
+    expect(markup).toContain('data-slot="tooltip-trigger"');
+    expect(markup).not.toContain('title="Needs review"');
     expect(markup).toContain('aria-label="Workspace health status: Warning. Needs review"');
   });
 

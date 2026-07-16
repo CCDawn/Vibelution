@@ -199,7 +199,11 @@ describe("ConfigRoute layout contract", () => {
     expect(routeSource).toContain('`/api/config/draft/providers/${encodeURIComponent(providerId)}`');
     expect(routeSource).toContain("buildProviderDraftRequest({ providerId, provider, credentialValue: providerCredentialValue })");
     expect(routeSource).toContain('"PUT"');
-    expect(routeSource).toContain("最终保存会写入用户环境变量，不会写入 config.toml。");
+    expect(routeSource).toContain("最终保存会写入用户环境变量，不会把密钥写入 config.toml。");
+    expect(routeSource).toContain('tooltipLabel="API Key 保存说明"');
+    expect(routeSource).toContain("disabledReason={");
+    expect(routeSource).toContain('structuredActionsDisabled');
+    expect(routeSource).toContain('"先完成当前配置检查。"');
     expect(routeSource).toContain("if (structuredActionsDisabled || !providerCredentialValue.trim()) return;");
     expect(routeSource).toContain('credentialProvider.credentialState === "not_required"');
     expect(routeSource).toContain("structuredActionsDisabled || Boolean(busyAction) || !providerCredentialValue.trim()");

@@ -3638,16 +3638,16 @@ export function ConfigRoute() {
                 <VSection
                   title="模型连接"
                   eyebrow="Provider workspace"
+                  tooltip="快速配置只需要服务商和凭据；管理已有连接与高级参数按需进入。"
+                  tooltipLabel="模型连接工作台说明"
                   actions={(
                     <VActionGroup ariaLabel="Provider 工作区模式">
-                      <VButton className={styles.providerModeButton} aria-pressed={providerWorkspaceMode === "quick"} variant={providerWorkspaceMode === "quick" ? "primary" : "ghost"} onPress={() => setProviderWorkspaceMode("quick")}>快速配置</VButton>
-                      <VButton className={styles.providerModeButton} aria-pressed={providerWorkspaceMode === "manage"} variant={providerWorkspaceMode === "manage" ? "primary" : "ghost"} onPress={() => setProviderWorkspaceMode("manage")}>管理已有连接</VButton>
-                      <VButton className={styles.providerModeButton} aria-pressed={providerWorkspaceMode === "advanced"} variant={providerWorkspaceMode === "advanced" ? "primary" : "ghost"} onPress={() => setProviderWorkspaceMode("advanced")}>高级设置</VButton>
+                      <VButton tooltip="用服务商和凭据完成自动检测与模型推荐。" className={styles.providerModeButton} aria-pressed={providerWorkspaceMode === "quick"} variant={providerWorkspaceMode === "quick" ? "primary" : "ghost"} onPress={() => setProviderWorkspaceMode("quick")}>快速配置</VButton>
+                      <VButton tooltip="查看已连接 Provider、模型目录、凭据和诊断状态。" className={styles.providerModeButton} aria-pressed={providerWorkspaceMode === "manage"} variant={providerWorkspaceMode === "manage" ? "primary" : "ghost"} onPress={() => setProviderWorkspaceMode("manage")}>管理已有连接</VButton>
+                      <VButton tooltip="编辑 Provider 模板、路由与底层参数。" className={styles.providerModeButton} aria-pressed={providerWorkspaceMode === "advanced"} variant={providerWorkspaceMode === "advanced" ? "primary" : "ghost"} onPress={() => setProviderWorkspaceMode("advanced")}>高级设置</VButton>
                     </VActionGroup>
                   )}
-                >
-                  <p className={styles.helperText}>快速配置只需要服务商和凭据；管理与高级参数按需进入。</p>
-                </VSection>
+                />
                 {providerWorkspaceMode === "quick" ? (
                   <ConfigQuickSetupPanel
                     state={providerQuickSetupState}
@@ -3723,6 +3723,8 @@ export function ConfigRoute() {
                   <VSurface as="section" padding="compact" tone="row" className={styles.providerRouteEditSurface}>
                     <VSection
                       title={`设置 ${providerCredentialEditId} 的 API Key`}
+                      tooltip="最终保存会写入用户环境变量，不会把密钥写入 config.toml。"
+                      tooltipLabel="API Key 保存说明"
                       actions={(
                         <VActionGroup ariaLabel="Provider API Key 编辑操作">
                           <VButton
@@ -3740,6 +3742,20 @@ export function ConfigRoute() {
                             isDisabled={
                               structuredActionsDisabled || Boolean(busyAction) || !providerCredentialValue.trim()
                               || !credentialProvider || credentialProvider.credentialState === "not_required"
+                            }
+                            tooltip="保存到配置草稿；最终保存时写入用户环境变量。"
+                            disabledReason={
+                              structuredActionsDisabled
+                                ? "先完成当前配置检查。"
+                                : busyAction
+                                  ? "当前有配置操作正在进行。"
+                                  : !providerCredentialValue.trim()
+                                    ? "先填写 API Key。"
+                                    : !credentialProvider
+                                      ? "当前 Provider 不可用。"
+                                      : credentialProvider.credentialState === "not_required"
+                                        ? "此 Provider 无需凭据。"
+                                        : undefined
                             }
                             onPress={() => {
                               void handleUpdateProviderCredential(providerCredentialEditId);
@@ -3762,7 +3778,6 @@ export function ConfigRoute() {
                           onChange={(event) => setProviderCredentialValue(event.target.value)}
                         />
                       </label>
-                      <p className={styles.helperText}>最终保存会写入用户环境变量，不会写入 config.toml。</p>
                     </VSection>
                   </VSurface>
                 ) : null}

@@ -1,6 +1,6 @@
 import { AlertTriangle, CheckCircle2, MessageSquare } from "lucide-react";
 
-import { VButton } from "../components/vui";
+import { VButton, VContextualHint } from "../components/vui";
 import styles from "./AgentHealthMaintenancePanel.styles";
 
 export type AgentHealthMaintenanceIssueView = {
@@ -42,11 +42,14 @@ export function AgentHealthMaintenancePanel({
 }: AgentHealthMaintenancePanelProps) {
   return (
     <>
-      <section className={styles.detailSection} title={health.title}>
+      <section className={styles.detailSection}>
         <div className={styles.panelHeader}>
           <div>
             <p className={styles.panelEyebrow}>{health.label}</p>
-            <h3>{health.headline}</h3>
+            <h3 className="inline-flex items-center gap-1.5">
+              {health.headline}
+              <VContextualHint content={health.title} label={`${health.label}说明`} />
+            </h3>
           </div>
           {health.hasIssues ? <AlertTriangle size={16} /> : <CheckCircle2 size={16} />}
         </div>
@@ -74,10 +77,13 @@ export function AgentHealthMaintenancePanel({
         )}
       </section>
 
-      <section className={styles.maintenanceIntro} title={copy.maintenanceHint}>
+      <section className={styles.maintenanceIntro}>
         <div>
           <p className={styles.panelEyebrow}>{copy.maintenanceTitle}</p>
-          <h3>{copy.maintenanceTitle}</h3>
+          <h3 className="inline-flex items-center gap-1.5">
+            {copy.maintenanceTitle}
+            <VContextualHint content={copy.maintenanceHint} label={`${copy.maintenanceTitle}说明`} />
+          </h3>
         </div>
       </section>
     </>
