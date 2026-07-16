@@ -1,6 +1,6 @@
 import { Search } from "lucide-react";
 
-import { VNativeButton, VNativeSelect } from "../components/vui";
+import { VNativeButton, VNativeSelect, VTooltip } from "../components/vui";
 import styles from "./TeamSourceCollectionRunSwitcherPanel.styles";
 
 type TeamSourceCollectionRunSwitcherLang = "zh" | "en";
@@ -44,14 +44,15 @@ export function TeamSourceCollectionRunSwitcherPanel({
     <section className={styles.sourceCollectionRunSwitcher} aria-label={isZh ? "资料批次选择" : "Source collection run selector"}>
       <label className={styles.sourceCollectionRunSwitcherMain}>
         <span>{isZh ? "当前批次" : "Run"}</span>
-        <VNativeSelect value={selectedRunId} onChange={(event) => onRunChange(event.target.value)} disabled={!runs.length}>
-          {runs.map((run) => (
-            <option key={run.runId} value={run.runId}>
-              {run.label}
-            </option>
-          ))}
-        </VNativeSelect>
-        <small>{hint}</small>
+        <VTooltip content={hint} width="wide">
+          <VNativeSelect value={selectedRunId} onChange={(event) => onRunChange(event.target.value)} disabled={!runs.length}>
+            {runs.map((run) => (
+              <option key={run.runId} value={run.runId}>
+                {run.label}
+              </option>
+            ))}
+          </VNativeSelect>
+        </VTooltip>
       </label>
       <div className={styles.sourceCollectionRunSwitcherStats}>
         <span>

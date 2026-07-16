@@ -235,7 +235,8 @@ export function ConfigModelMigrationPanel({
         <VButton
           variant="danger"
           isDisabled={applyDisabled}
-          title={!preview ? "先生成预览" : preview.status !== "READY" ? "仍有未解决冲突" : "修改外部 operator config"}
+          tooltip="应用迁移会修改外部 operator config。"
+          disabledReason={!preview ? "先生成预览" : preview.status !== "READY" ? "仍有未解决冲突" : busy ? "迁移操作正在进行" : undefined}
           onPress={() => {
             if (!preview || preview.status !== "READY") return;
             onApply(preview.previewId, preview.baseHash);

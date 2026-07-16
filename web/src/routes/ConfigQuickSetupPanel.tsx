@@ -8,6 +8,7 @@ import {
   VStateSurface,
   VStatusChip,
   VStringSelect,
+  VTooltip,
 } from "../components/vui";
 import {
   initialProviderWizardState,
@@ -141,6 +142,16 @@ export function ConfigQuickSetupPanel({
       : state.phase === "success"
         ? "当前模型连接已经保存并同步。"
         : "保持当前页面，完成后会在这里显示结果。";
+  const credentialHint = "凭据只用于本次本地检测；确认前不会写入正式配置。";
+  const detectDisabledReason = disabled
+    ? "当前配置暂不可编辑。"
+    : !state.provider.templateId
+      ? "先选择服务商。"
+      : state.provider.authKind !== "none" && !credentialValue.trim()
+        ? "先填写 API Key。"
+        : state.phase === "checking" || state.phase === "saving"
+          ? "当前检测或保存仍在进行。"
+          : undefined;
 
   return (
     <VSection
@@ -149,6 +160,8 @@ export function ConfigQuickSetupPanel({
       eyebrow="Model connection"
       title="连接一个模型服务"
       meta="约 1 分钟"
+      tooltip="选择服务商并填写凭据，系统会自动发现模型并给出默认推荐。"
+      tooltipLabel="快速模型连接说明"
     >
       <div className={styles.workspace}>
         <div className={styles.inputPanel}>
@@ -183,14 +196,16 @@ export function ConfigQuickSetupPanel({
             ) : (
               <label className={styles.field}>
                 <span>API Key</span>
-                <VInput
-                  type="password"
-                  autoComplete="new-password"
-                  value={credentialValue}
-                  disabled={disabled || state.phase === "checking" || state.phase === "saving"}
-                  placeholder="仅用于本次本地配置请求"
-                  onChange={(event) => onCredentialChange(event.target.value)}
-                />
+                <VTooltip content={credentialHint} width="wide">
+                  <VInput
+                    type="password"
+                    autoComplete="new-password"
+                    value={credentialValue}
+                    disabled={disabled || state.phase === "checking" || state.phase === "saving"}
+                    placeholder="仅用于本次本地配置请求"
+                    onChange={(event) => onCredentialChange(event.target.value)}
+                  />
+                </VTooltip>
               </label>
             )}
 
@@ -200,14 +215,14 @@ export function ConfigQuickSetupPanel({
                 variant="primary"
                 icon={<Search size={14} />}
                 isDisabled={!canDetect}
+                tooltip="自动检测服务端点、协议和模型目录，不会直接写入正式配置。"
+                disabledReason={detectDisabledReason}
                 onPress={() => onDetect({ provider: state.provider, credentialValue })}
               >
                 {detectLabel}
               </VButton>
             ) : null}
           </div>
-
-          <small className={styles.hint}>凭据只用于本次本地检测；确认前不会写入正式配置。</small>
 
           <details className={styles.advanced}>
             <summary className={styles.advancedSummary}>高级参数</summary>
