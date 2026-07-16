@@ -2073,6 +2073,11 @@ export function ChatCodingRoute() {
     queryFn: () => fetchJson<ConfigSummary>("/api/config/public"),
     staleTime: 30_000,
   });
+  const activeSessionBootstrapQuery = useQuery({
+    queryKey: ["sessions", "active-bootstrap"],
+    queryFn: ({ signal }) => fetchJson<{ activeSessionId: string }>("/api/sessions/active", { signal }),
+    staleTime: 5_000,
+  });
   const modelLabelsById = useMemo(
     () => new Map(Object.entries(configSummaryQuery.data?.modelLabels ?? {})),
     [configSummaryQuery.data?.modelLabels],
@@ -2293,6 +2298,25 @@ export function ChatCodingRoute() {
       && isBusyPhase(activeGroupRoomQuery.data?.status),
     ));
   }, [activeGroupRoomQuery.data?.status, standardGroupRoomActive]);
+  useEffect(() => {
+    if (requestedSessionId || requestedRoomId || activeSessionId) {
+      return;
+    }
+    const bootstrapSessionId = activeSessionBootstrapQuery.data?.activeSessionId?.trim() ?? "";
+    if (!bootstrapSessionId) {
+      return;
+    }
+    setActiveGroupRoomId("");
+    setActiveSession(bootstrapSessionId);
+  }, [
+    activeSessionBootstrapQuery.data?.activeSessionId,
+    activeSessionId,
+    requestedRoomId,
+    requestedSessionId,
+    setActiveGroupRoomId,
+    setActiveSession,
+  ]);
+
   useEffect(() => {
     if (requestedRoomId && activeGroupRoomId !== requestedRoomId) {
       setActiveGroupRoomId(requestedRoomId);

@@ -21,6 +21,7 @@ from core.web.services.session_service import (
     delete_chat_session,
     delete_chat_session_lightweight,
     edit_and_resubmit_session_message,
+    get_active_session_summary,
     get_session_detail,
     get_session_llm_options,
     list_child_sessions,
@@ -165,6 +166,12 @@ class ChildSessionCreatePayload(BaseModel):
 @router.get("/sessions")
 def sessions() -> list[dict]:
     return list_sessions()
+
+
+@router.get("/sessions/active")
+def active_session() -> dict[str, str]:
+    summary = get_active_session_summary() or {}
+    return {"activeSessionId": str(summary.get("id") or "").strip()}
 
 
 @router.get("/sessions/query")
