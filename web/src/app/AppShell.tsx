@@ -670,12 +670,6 @@ export function AppShell() {
       force: lifecycleControlActive,
     },
   );
-  const runtimeQuery = useQuery({
-    queryKey: queryKeys.runtimeSummary(),
-    queryFn: ({ signal }) => fetchJson<RuntimeSummary>("/api/runtime/summary", { signal }),
-    refetchInterval: runtimeRefetchInterval,
-    refetchIntervalInBackground: shellStartupWarmupActive,
-  });
   const backendHealthQuery = useQuery({
     queryKey: queryKeys.backendHealth(),
     queryFn: ({ signal }) =>
@@ -688,13 +682,21 @@ export function AppShell() {
     staleTime: 0,
     retry: false,
   });
-
-  useEffect(() => syncWorkbenchThemeRoot(theme), [theme]);
+  // Phase-1 shell ready depends only on config + health; runtime summary is a phase-2 enhancement.
   useEffect(() => {
-    if (configQuery.data && runtimeQuery.data && backendHealthQuery.data) {
+    if (configQuery.data && backendHealthQuery.data) {
       setShellStartupDataReady(true);
     }
-  }, [backendHealthQuery.data, configQuery.data, runtimeQuery.data]);
+  }, [backendHealthQuery.data, configQuery.data]);
+  const runtimeQuery = useQuery({
+    queryKey: queryKeys.runtimeSummary(),
+    queryFn: ({ signal }) => fetchJson<RuntimeSummary>("/api/runtime/summary", { signal }),
+    enabled: shellStartupDataReady,
+    refetchInterval: runtimeRefetchInterval,
+    refetchIntervalInBackground: shellStartupWarmupActive,
+  });
+
+  useEffect(() => syncWorkbenchThemeRoot(theme), [theme]);
 
   useEffect(() => {
     const previous = previousReturnLocationRef.current;
