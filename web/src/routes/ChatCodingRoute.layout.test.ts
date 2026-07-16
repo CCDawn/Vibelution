@@ -728,7 +728,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("closeResponsiveOverlayPane");
     expect(routeStyles.paneCollapsed).toContain("!overflow-hidden");
     expect(routeStyles.paneCollapsed).toContain("invisible");
-    expect(routeStyles.paneCollapsed).not.toContain("!hidden");
+    expect(routeStyles.paneCollapsed).toContain("!hidden");
   });
 
   it("compresses the left rail into primary controls plus auxiliary status groups", () => {
