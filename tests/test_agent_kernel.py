@@ -194,6 +194,14 @@ def test_kernel_event_rejects_missing_recipient_but_keeps_audit_event(tmp_path, 
 def test_kernel_trace_only_event_creates_task_without_recipient_delivery(tmp_path, monkeypatch):
     _isolate_kernel(tmp_path, monkeypatch)
     client = _client()
+    original_save_index = agent_kernel_service.KernelJsonlStore.save_index
+    save_index_calls = []
+
+    def count_save_index(store, index):
+        save_index_calls.append(1)
+        return original_save_index(store, index)
+
+    monkeypatch.setattr(agent_kernel_service.KernelJsonlStore, "save_index", count_save_index)
     event = {
         "eventId": "event-trace-only-room-round",
         "sender": {"type": "system", "id": "chat_room_service"},
@@ -206,6 +214,7 @@ def test_kernel_trace_only_event_creates_task_without_recipient_delivery(tmp_pat
     }
 
     first = client.post("/api/kernel/events", json=event)
+    assert len(save_index_calls) == 1
     second = client.post("/api/kernel/events", json=event)
 
     assert first.status_code == 202
@@ -220,6 +229,7 @@ def test_kernel_trace_only_event_creates_task_without_recipient_delivery(tmp_pat
     assert first_payload["outcome"]["deliveries"] == []
     assert first_payload["outcome"]["resultSummary"] == "Kernel trace event recorded without recipient delivery."
     assert second.status_code == 202
+    assert len(save_index_calls) == 2
     second_payload = second.json()
     assert second_payload["reused"] is True
     assert second_payload["task"]["taskId"] == first_payload["task"]["taskId"]
