@@ -97,6 +97,8 @@ SENSITIVE_FIELD_KEYWORDS = (
 )
 _JSONL_FILE_CACHE_LOCK = Lock()
 _JSONL_FILE_CACHE: dict[tuple[str, bool, int, int], list[dict[str, Any]]] = {}
+_SCENE_EVENT_SEQ_CACHE_LOCK = Lock()
+_SCENE_EVENT_SEQ_CACHE: dict[str, tuple[int, int, int]] = {}
 NON_PROBLEM_NEXT_STATE_KINDS = {
     "assistant_output_edited",
     "user_continues",
@@ -914,8 +916,11 @@ def record_runtime_scene_event(
             _update_runtime_scene_package_manifest(scene_dir, manifest)
             projection_refresh = "full"
         else:
-            _update_runtime_scene_package_manifest_lightweight(scene_dir, manifest)
-            projection_refresh = "lightweight"
+            # Ordinary runtime events are already durable in component/timeline
+            # JSONL. Rewriting manifest and package_index for every progress
+            # signal turns chat latency into a function of global log volume.
+            # Detail/list reads derive or repair sidecars on demand.
+            projection_refresh = "deferred"
 
     return {
         "accepted": True,
@@ -5471,6 +5476,7 @@ def _append_scene_event(scene_dir: Path, component: str, payload: dict[str, Any]
     with event_path.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
         handle.write("\n")
+    _remember_scene_event_seq(event_path, int(payload.get("seq") or 0))
     if not _should_promote_scene_event_to_timeline(payload):
         return
     _append_scene_jsonl(scene_dir, TIMELINE_PATH, payload)
@@ -5701,13 +5707,56 @@ def _update_runtime_scene_package_manifest_lightweight(scene_dir: Path, manifest
 
 def _next_scene_event_seq(scene_dir: Path, component: str) -> int:
     event_path = scene_dir / "events" / f"{component}.jsonl"
-    last_seq = 0
-    for row in _read_jsonl_file(event_path):
-        try:
-            last_seq = max(last_seq, int(row.get("seq") or 0))
-        except (TypeError, ValueError):
-            continue
+    signature = _scene_event_file_signature(event_path)
+    cache_key = str(event_path.resolve())
+    with _SCENE_EVENT_SEQ_CACHE_LOCK:
+        cached = _SCENE_EVENT_SEQ_CACHE.get(cache_key)
+    if cached is not None and cached[:2] == signature:
+        return cached[2] + 1
+
+    last_seq = _read_last_scene_event_seq(event_path)
+    with _SCENE_EVENT_SEQ_CACHE_LOCK:
+        _SCENE_EVENT_SEQ_CACHE[cache_key] = (*signature, last_seq)
     return last_seq + 1
+
+
+def _remember_scene_event_seq(event_path: Path, seq: int) -> None:
+    signature = _scene_event_file_signature(event_path)
+    cache_key = str(event_path.resolve())
+    with _SCENE_EVENT_SEQ_CACHE_LOCK:
+        if len(_SCENE_EVENT_SEQ_CACHE) > JSONL_FILE_CACHE_LIMIT:
+            _SCENE_EVENT_SEQ_CACHE.clear()
+        _SCENE_EVENT_SEQ_CACHE[cache_key] = (*signature, max(0, int(seq)))
+
+
+def _scene_event_file_signature(event_path: Path) -> tuple[int, int]:
+    try:
+        stat = event_path.stat()
+    except OSError:
+        return (0, 0)
+    return (int(stat.st_size), int(stat.st_mtime_ns))
+
+
+def _read_last_scene_event_seq(event_path: Path) -> int:
+    """Read only the bounded tail needed to recover a component sequence."""
+
+    try:
+        with event_path.open("rb") as handle:
+            handle.seek(0, 2)
+            size = handle.tell()
+            handle.seek(max(0, size - MAX_TEXT_CHARS))
+            tail = handle.read().decode("utf-8", errors="replace")
+    except OSError:
+        return 0
+    for line in reversed(tail.splitlines()):
+        if not line.strip():
+            continue
+        try:
+            payload = json.loads(line)
+            return max(0, int(payload.get("seq") or 0)) if isinstance(payload, dict) else 0
+        except (json.JSONDecodeError, TypeError, ValueError):
+            continue
+    return 0
 
 
 def _update_browser_manifest(
