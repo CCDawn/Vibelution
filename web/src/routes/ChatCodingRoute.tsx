@@ -6483,7 +6483,6 @@ export function ChatCodingRoute() {
       }) as CSSProperties,
     [conversationIndexCollapsed, leftPanelWidth, rightPanelWidth, statusRailCollapsed],
   );
-  const bothSidePanesCollapsed = conversationIndexCollapsed && statusRailCollapsed;
   const rightPaneLayoutClassName = standardGroupRoomActive ? styles.rightPaneWithTabs : styles.rightPaneWithoutTabs;
   const rightPaneClassName = `${styles.rightPane} ${rightPaneLayoutClassName}`;
   const layoutModeClassName = responsiveLayout.mode === "wide"
@@ -6491,6 +6490,10 @@ export function ChatCodingRoute() {
     : responsiveLayout.mode === "compact"
       ? `${styles.layout} ${styles.layoutCompactDesktop}`
       : `${styles.layout} ${styles.layoutOverlay}`;
+  const chatLayoutClassName = [
+    layoutModeClassName,
+    responsiveLayout.mode === "wide" && statusRailCollapsed ? styles.layoutStatusRailCollapsed : "",
+  ].filter(Boolean).join(" ");
   const centerPaneClassName = responsiveLayout.mode === "overlay" || responsiveLayout.mode === "mobile"
     ? `${styles.centerPane} ${styles.centerPaneOverlay}`
     : styles.centerPane;
@@ -6648,9 +6651,10 @@ export function ChatCodingRoute() {
   return (
     <div
       ref={layoutRef}
-      className={layoutModeClassName}
+      className={chatLayoutClassName}
       style={layoutStyle}
       data-chat-responsive-mode={responsiveLayout.mode}
+      data-chat-status-rail={statusRailCollapsed ? "collapsed" : "visible"}
     >
       {responsiveOverlayOpen ? (
         <VButton
@@ -7751,7 +7755,7 @@ export function ChatCodingRoute() {
                 onSafeGuidance: () => handleSubmitGuidance("safe"),
                 onInterruptGuidance: () => handleSubmitGuidance("interrupt"),
               } : null}
-              conversationFocused={bothSidePanesCollapsed}
+              conversationFocused={statusRailCollapsed}
               filePreview={{
                 changed: fileContentQuery.data ? changedFiles.has(fileContentQuery.data.path) : false,
                 errorMessage: fileContentQuery.isError ? describeError(fileContentQuery.error, t("loadFailed")) : "",
