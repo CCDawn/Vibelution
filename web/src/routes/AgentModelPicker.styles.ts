@@ -1,4 +1,5 @@
 const styles = {
+  contextualHintRow: "flex min-w-0 items-center gap-1.5",
   root: "relative grid min-w-0 gap-1.5",
   trigger: "!flex !min-h-9 !w-full !justify-between !rounded-[10px] !border !border-[var(--vui-border-subtle)] !bg-[var(--vui-surface-panel)] !px-2.5 !text-left !shadow-none hover:!bg-[var(--vui-control-muted)] [&_[data-slot=vui-button-content]]:!w-full [&_[data-slot=vui-button-content]]:!justify-between",
   triggerCopy: "flex min-w-0 flex-1 items-center gap-2",

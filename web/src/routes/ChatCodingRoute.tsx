@@ -1167,6 +1167,7 @@ type SessionDetailWindowOptions = {
   messageLimit?: number;
   beforeMessageIndex?: number;
   transcriptScope?: "all" | "window" | "none";
+  signal?: AbortSignal;
 };
 
 function fetchSessionDetailWindow(
@@ -1180,7 +1181,10 @@ function fetchSessionDetailWindow(
   if (options.beforeMessageIndex && options.beforeMessageIndex > 0) {
     params.set("beforeMessageIndex", String(options.beforeMessageIndex));
   }
-  return fetchJson<SessionDetail>(`/api/sessions/${encodeURIComponent(normalizedSessionId)}?${params.toString()}`);
+  return fetchJson<SessionDetail>(
+    `/api/sessions/${encodeURIComponent(normalizedSessionId)}?${params.toString()}`,
+    { signal: options.signal },
+  );
 }
 
 const KEYBOARD_RESIZE_STEP = 24;
@@ -2240,6 +2244,7 @@ export function ChatCodingRoute() {
         const { [normalizedSessionId]: _removed, ...remaining } = current;
         return remaining;
       });
+      void queryClient.cancelQueries({ queryKey: queryKeys.session(normalizedSessionId), exact: true });
       queryClient.removeQueries({ queryKey: queryKeys.session(normalizedSessionId), exact: true });
     },
     [queryClient],
@@ -2261,10 +2266,7 @@ export function ChatCodingRoute() {
         __sessions__: "",
       }));
       syncSessionDetail(nextDetail);
-      void chatWorkspaceCache.afterSessionChanged({
-        sessionId: nextDetail.id,
-        agentId: nextDetail.agentId,
-      });
+      void chatWorkspaceCache.afterSessionSelected();
     },
     onError: (error, sessionId) => {
       if (latestDirectSessionSelectionRef.current !== sessionId) {
@@ -2372,10 +2374,12 @@ export function ChatCodingRoute() {
   const sessionDetailQuery = useQuery({
     queryKey: queryKeys.session(activeSessionId ?? "none"),
     enabled: Boolean(activeSessionId),
-    queryFn: () => fetchSessionDetailWindow(activeSessionId),
+    queryFn: ({ signal }) => fetchSessionDetailWindow(activeSessionId, { signal }),
     structuralSharing: (previous, next) =>
       mergeSessionDetailMessageWindow(previous as SessionDetail | undefined, next as SessionDetail),
-    refetchInterval: chatLiveQueryPolicy.sessionDetailRefetchInterval,
+    refetchInterval: startupDetailSettledSessionId === activeSessionId
+      ? chatLiveQueryPolicy.sessionDetailRefetchInterval
+      : false,
     refetchIntervalInBackground: chatLiveQueryPolicy.directRefetchIntervalInBackground,
   });
   useEffect(() => {

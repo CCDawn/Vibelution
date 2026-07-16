@@ -46,7 +46,7 @@ export function AgentHealthMaintenancePanel({
         <div className={styles.panelHeader}>
           <div>
             <p className={styles.panelEyebrow}>{health.label}</p>
-            <h3 className="inline-flex items-center gap-1.5">
+            <h3 className={styles.contextualHintRow}>
               {health.headline}
               <VContextualHint content={health.title} label={`${health.label}说明`} />
             </h3>
@@ -80,7 +80,7 @@ export function AgentHealthMaintenancePanel({
       <section className={styles.maintenanceIntro}>
         <div>
           <p className={styles.panelEyebrow}>{copy.maintenanceTitle}</p>
-          <h3 className="inline-flex items-center gap-1.5">
+          <h3 className={styles.contextualHintRow}>
             {copy.maintenanceTitle}
             <VContextualHint content={copy.maintenanceHint} label={`${copy.maintenanceTitle}说明`} />
           </h3>

@@ -223,7 +223,7 @@ export function AgentModelPicker({
       >
         <div className={styles.panelHeader}>
           <div className={styles.panelTitle}>
-            <div className="flex min-w-0 items-center gap-1.5">
+            <div className={styles.contextualHintRow}>
               <strong className={styles.panelTitleText}>选择 {slot.label}</strong>
               <VContextualHint
                 label="模型选择说明"

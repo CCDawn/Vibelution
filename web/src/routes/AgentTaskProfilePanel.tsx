@@ -54,7 +54,7 @@ export function AgentTaskProfilePanel({
       <div className={styles.panelHeader}>
         <div>
           <p className={styles.panelEyebrow}>{copy.taskTitle}</p>
-          <h3 className="inline-flex items-center gap-1.5">
+          <h3 className={styles.contextualHintRow}>
             {summary}
             <VContextualHint content={copy.taskHint} label={`${copy.taskTitle}说明`} />
           </h3>

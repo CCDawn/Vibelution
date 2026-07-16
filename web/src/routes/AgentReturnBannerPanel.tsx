@@ -18,7 +18,7 @@ export function AgentReturnBannerPanel({ copy, returnToLabel, onReturn }: AgentR
   return (
     <section className={styles.returnBanner} aria-label={copy.returnBannerTitle}>
       <div className={styles.returnBannerCopy}>
-        <strong className="inline-flex items-center gap-1.5">
+        <strong className={styles.contextualHintRow}>
           {copy.returnBannerTitle}
           <VContextualHint content={copy.returnBannerHint} label={`${copy.returnBannerTitle}说明`} />
         </strong>
