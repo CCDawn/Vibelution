@@ -1365,6 +1365,88 @@ def test_run_experiment_smoke_run_rejects_non_whitelisted_adapter(tmp_path, monk
         )
 
 
+def _seed_formal_full_run_plan(team_id, plan_id="exp_formal_full_run"):
+    from core.research import formal_runner
+
+    store = team_workflow_orchestration_service._load_experiment_plan_store(team_id)
+    plan = {
+        "planId": plan_id,
+        "status": "smoke_passed",
+        "experimentContract": {
+            "schemaVersion": 2,
+            "adapterSelection": {"resolvedAdapterId": formal_runner.FASHION_MNIST_MULTI_SEED_ADAPTER},
+            "methodConfig": {"seeds": [17, 42, 101]},
+        },
+        "contractValidation": {"valid": True},
+        "readiness": {"readyForFullRun": True},
+        "updatedAt": "2026-06-25T00:00:00+00:00",
+    }
+    store.setdefault("plans", []).append(plan)
+    store["activePlanId"] = plan_id
+    team_workflow_orchestration_service._write_json(
+        team_workflow_orchestration_service._experiment_plan_store_path(team_id), store
+    )
+    return plan_id
+
+
+def test_prepare_experiment_full_run_records_preflight_without_starting_execution(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = team_service.create_team(name="挑战杯科研团队")
+    team_workflow_orchestration_service.ensure_team_workflow_orchestration(team["teamId"])
+    plan_id = _seed_formal_full_run_plan(team["teamId"])
+
+    monkeypatch.setattr(
+        team_workflow_orchestration_service.formal_runner,
+        "prepare_full_run",
+        lambda *args, **kwargs: {
+            "adapterId": args[0],
+            "status": "prepared",
+            "seedCount": 3,
+            "boundaries": ["user_triggered_only", "manual_result_review_required"],
+        },
+    )
+
+    response = team_workflow_orchestration_service.prepare_experiment_full_run(
+        team["teamId"], plan_id, {"executionConfig": {"pythonExecutable": "C:/runner/python.exe"}}
+    )
+
+    assert response["preparation"]["status"] == "prepared"
+    assert response["plan"]["status"] == "smoke_passed"
+    assert response["boundaries"]["startsFullRun"] is False
+    assert response["boundaries"]["requiresResultReview"] is True
+
+
+def test_execute_experiment_full_run_stores_review_only_artifacts_without_auto_promotion(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = team_service.create_team(name="挑战杯科研团队")
+    team_workflow_orchestration_service.ensure_team_workflow_orchestration(team["teamId"])
+    plan_id = _seed_formal_full_run_plan(team["teamId"])
+
+    monkeypatch.setattr(
+        team_workflow_orchestration_service.formal_runner,
+        "run_full_run",
+        lambda *args, **kwargs: {
+            "adapterId": args[0],
+            "status": "completed",
+            "seedCount": 3,
+            "resultPath": "C:/experiments/formal-run-result.json",
+            "logRef": "C:/experiments/formal-run-log.json",
+            "requiresResultReview": True,
+            "automaticPromotion": False,
+        },
+    )
+
+    response = team_workflow_orchestration_service.execute_experiment_full_run(
+        team["teamId"], plan_id, {"executionConfig": {"pythonExecutable": "C:/runner/python.exe"}}
+    )
+
+    assert response["execution"]["status"] == "completed"
+    assert response["execution"]["requiresResultReview"] is True
+    assert response["plan"]["status"] == "smoke_passed"
+    assert response["plan"]["activeFullRunExecution"]["automaticPromotion"] is False
+    assert response["plan"].get("activeFullRunResult") is None
+
+
 def test_challenge_cup_workflow_registers_candidate_and_decides_transfer(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     team = team_service.create_team(name="挑战杯科研团队")

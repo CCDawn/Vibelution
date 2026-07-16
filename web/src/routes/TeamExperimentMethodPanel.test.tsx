@@ -49,7 +49,20 @@ const catalog: ExperimentMethodCatalogPayload = {
       },
     },
   ],
-  adapters: [],
+  adapters: [
+    {
+      adapterId: "fashion_mnist_predictive_coding_multi_seed",
+      adapterVersion: "1.0.0",
+      method: "model_training_inference",
+      executionMode: "local_process",
+      capabilities: ["validate", "prepare", "smoke", "full_run", "collect"],
+      availability: "available",
+      unavailableReason: "Requires an explicit local CPU environment.",
+      formalResult: true,
+      requiresExplicitSelection: true,
+      priority: 110,
+    },
+  ],
   boundaries: {
     methodCatalogSource: "backend_registry",
     environmentProbeRole: "adapter_preflight",
@@ -114,7 +127,31 @@ describe("TeamExperimentMethodPanel", () => {
     expect(markup).toContain("公平基线");
     expect(markup).toContain("随机种子");
     expect(markup).toContain("执行器尚未就绪");
+    expect(markup).toContain("执行器选择");
+    expect(markup).toContain("fashion_mnist_predictive_coding_multi_seed");
     expect(markup).toContain("预测编码是否改善基线？");
+  });
+
+  it("keeps an explicit adapter selection in the plan request", () => {
+    const draft = createExperimentMethodFormDraft(null, "预测编码是否改善基线？");
+    draft.requestedAdapterId = "fashion_mnist_predictive_coding_multi_seed";
+    draft.methodConfigs.model_training_inference = {
+      dataset: "FashionMNIST pinned split",
+      model: "shared autoencoder",
+      baseline: "one-pass reconstruction",
+      seeds: "17, 42, 101",
+      budget: "8 epochs per seed",
+      smokePlan: "single-seed artifact review before multi-seed full run",
+    };
+    draft.primaryMetric = "masked reconstruction mse";
+    draft.successCriteria = "mean improvement is positive";
+    draft.failureCriteria = "mean improvement is negative";
+    draft.inconclusiveCriteria = "seed variance is too high";
+
+    const request = buildExperimentPlanMethodRequest(draft, catalog.methods[0]);
+
+    expect(request.requestedAdapterId).toBe("fashion_mnist_predictive_coding_multi_seed");
+    expect(request.methodConfig.seeds).toEqual([17, 42, 101]);
   });
 
   it("restores the active simulation method and renders its dynamic fields", () => {
