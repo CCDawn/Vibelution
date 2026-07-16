@@ -52,7 +52,8 @@ export function ConfigDraftPanel({
             type="button"
             className={styles.actionButton}
             isDisabled={!canRestoreEditorText}
-            title={copy.editorRestoreHint}
+            tooltip={copy.editorRestoreHint}
+            disabledReason={copy.editorRestoreHint}
             onClick={onRestoreEditorText}
           >
             <RotateCcw size={14} />

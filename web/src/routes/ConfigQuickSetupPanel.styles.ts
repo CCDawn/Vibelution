@@ -7,7 +7,6 @@ const styles = {
   inputPanel: `vui-routes-configquicksetuppanel inputPanel ${panelSurface} grid min-w-0 gap-3 p-4`,
   inputGrid: "vui-routes-configquicksetuppanel inputGrid grid min-w-0 items-end [grid-template-columns:minmax(15rem,1fr)_minmax(18rem,1.2fr)_max-content] gap-3",
   field: "vui-routes-configquicksetuppanel field grid min-w-0 gap-1 text-[var(--vui-font-xs)] font-semibold text-vui-fg-secondary [&_[data-vui=select-trigger]]:!h-10 [&_[data-vui=select-trigger]]:!min-h-10 [&_input]:!min-h-10",
-  hint: "vui-routes-configquicksetuppanel hint text-[var(--vui-font-xs)] leading-relaxed text-vui-fg-tertiary",
   noCredential: "vui-routes-configquicksetuppanel noCredential flex min-h-8 min-w-0 items-center gap-1.5 rounded-md border border-vui-border-subtle bg-vui-surface-row px-2 text-[var(--vui-font-sm)] font-semibold text-vui-fg-secondary",
   advanced: "vui-routes-configquicksetuppanel advanced grid min-w-0 gap-2 rounded-md border border-vui-border-subtle bg-vui-surface-row p-2",
   advancedSummary: "vui-routes-configquicksetuppanel advancedSummary cursor-pointer text-[var(--vui-font-sm)] font-semibold text-vui-fg-secondary",

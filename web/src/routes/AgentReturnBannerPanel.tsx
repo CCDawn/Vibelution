@@ -1,6 +1,6 @@
 import { ArrowLeft } from "lucide-react";
 
-import { VNativeButton } from "../components/vui";
+import { VContextualHint, VNativeButton } from "../components/vui";
 import styles from "./AgentReturnBannerPanel.styles";
 
 export type AgentReturnBannerPanelCopy = {
@@ -16,15 +16,17 @@ type AgentReturnBannerPanelProps = {
 
 export function AgentReturnBannerPanel({ copy, returnToLabel, onReturn }: AgentReturnBannerPanelProps) {
   return (
-    <section className={styles.returnBanner} aria-label={copy.returnBannerTitle} title={copy.returnBannerHint}>
+    <section className={styles.returnBanner} aria-label={copy.returnBannerTitle}>
       <div className={styles.returnBannerCopy}>
-        <strong>{copy.returnBannerTitle}</strong>
+        <strong className="inline-flex items-center gap-1.5">
+          {copy.returnBannerTitle}
+          <VContextualHint content={copy.returnBannerHint} label={`${copy.returnBannerTitle}说明`} />
+        </strong>
       </div>
       <VNativeButton
         type="button"
         className={styles.returnBannerButton}
         onClick={onReturn}
-        title={returnToLabel}
       >
         <ArrowLeft size={16} />
         <span>{returnToLabel}</span>

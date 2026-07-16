@@ -4,6 +4,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 import type { SessionSummary } from "../api/types";
 import type { AgentDisplayInfo } from "./agentDisplay";
+import directSessionIndexItemSource from "./DirectSessionIndexItem.tsx?raw";
 import {
   buildDirectSessionIndexViewModel,
   DirectSessionIndexItem,
@@ -91,7 +92,8 @@ describe("DirectSessionIndexItem helpers", () => {
     expect(markup).not.toContain("sessionStatusCluster");
     expect(markup).not.toContain("sessionCurrentBadge");
     expect(markup).not.toContain('data-vui="chip"');
-    expect(markup).toContain("模型：mimo-v2.5");
+    expect(markup).toContain('data-slot="tooltip-trigger"');
+    expect(markup).not.toContain('title="新会话 · 模型：mimo-v2.5"');
   });
 
   it("places the timestamp in the title row instead of vertically centering it beside the whole copy block", () => {
@@ -138,7 +140,9 @@ describe("DirectSessionIndexItem helpers", () => {
   it("keeps the model name in the row tooltip instead of rendering a narrow inline badge", () => {
     const markup = renderDirectItem();
 
-    expect(markup).toContain("模型：mimo-v2.5");
+    expect(markup).toContain('data-slot="tooltip-trigger"');
+    expect(directSessionIndexItemSource).toContain("content={sessionItemTooltip}");
+    expect(directSessionIndexItemSource).toContain("{sessionModelTitle ? <span>{sessionModelTitle}</span> : null}");
     expect(markup).not.toContain("agentModelTitleTag");
     expect(markup).not.toContain("agentModelTag");
     expect(markup).not.toContain(">mimo-v2.5</span>");

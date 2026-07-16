@@ -1,6 +1,6 @@
 import { RefreshCw } from "lucide-react";
 
-import { VButton, VNativeInput } from "../components/vui";
+import { VButton, VContextualHint, VNativeInput } from "../components/vui";
 import styles from "./AgentDebugResetPanel.styles";
 
 export type AgentResetOptions = {
@@ -88,24 +88,30 @@ export function AgentDebugResetPanel({
   onReset,
 }: AgentDebugResetPanelProps) {
   return (
-    <section className={styles.resetZone} title={copy.resetAgentHint}>
+    <section className={styles.resetZone}>
       <div className={styles.panelHeader}>
         <div>
           <p className={styles.panelEyebrow}>{copy.resetAgentTitle}</p>
-          <h3>{copy.resetAgent}</h3>
+          <h3 className="inline-flex items-center gap-1.5">
+            {copy.resetAgent}
+            <VContextualHint content={copy.resetAgentHint} label={`${copy.resetAgentTitle}说明`} tone="danger" />
+          </h3>
         </div>
         <RefreshCw size={16} />
       </div>
       <div className={styles.resetOptionGrid}>
         {resetOptionRows.map((row) => (
-          <label key={row.key} className={styles.resetOptionField} title={copy[row.hint]}>
+          <label key={row.key} className={styles.resetOptionField}>
             <VNativeInput
               type="checkbox"
               checked={options[row.key]}
               onChange={(event) => onOptionChange(row.key, event.target.checked)}
             />
             <span>
-              <strong>{copy[row.label]}</strong>
+              <strong className="inline-flex items-center gap-1.5">
+                {copy[row.label]}
+                <VContextualHint content={copy[row.hint]} label={`${copy[row.label]}说明`} tone="warning" />
+              </strong>
             </span>
           </label>
         ))}
@@ -116,6 +122,8 @@ export function AgentDebugResetPanel({
           variant="secondary"
           icon={<RefreshCw size={15} />}
           isDisabled={!canReset || pending}
+          tooltip={copy.resetAgentHint}
+          disabledReason={!canReset ? copy.resetAgentHint : copy.resettingAgent}
           onPress={onReset}
         >
           {pending ? copy.resettingAgent : copy.resetAgent}
