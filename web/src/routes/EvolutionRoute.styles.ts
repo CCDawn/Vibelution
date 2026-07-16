@@ -259,6 +259,8 @@ const styles = {
     "inline-flex [align-items:center] [gap:6px] [padding:3px] [border-radius:var(--radius-panel)] [border:1px_solid_var(--border-soft)] [background:var(--vui-surface-panel)]",
   formField:
     "grid [gap:3px] min-w-0 [&_label]:[color:var(--fg-tertiary)] [&_label]:[font-size:var(--vui-font-xs)]",
+  formLabelWithHint:
+    "inline-flex [align-items:center] [gap:6px]",
   formGrid:
     "grid [gap:7px]",
   formHint:
