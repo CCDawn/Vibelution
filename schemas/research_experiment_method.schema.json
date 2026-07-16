@@ -1,0 +1,338 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://vibelution.local/schemas/research_experiment_method.schema.json",
+  "title": "Vibelution Research Experiment Plan v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "planId",
+    "revision",
+    "teamId",
+    "researchProfileId",
+    "researchMode",
+    "purpose",
+    "experimentMethod",
+    "adapterSelection",
+    "researchQuestion",
+    "hypothesisRefs",
+    "evidenceRefs",
+    "methodConfig",
+    "metricContract",
+    "decisionContract",
+    "artifactContract",
+    "reproducibilityContract",
+    "iterationContract",
+    "status"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 2 },
+    "planId": { "$ref": "#/$defs/nonEmptyId" },
+    "revision": { "type": "integer", "minimum": 1 },
+    "teamId": { "$ref": "#/$defs/nonEmptyId" },
+    "researchProfileId": { "$ref": "#/$defs/nonEmptyId" },
+    "researchMode": {
+      "enum": ["hypothesis_and_plan", "experiment_feedback", "full_research_loop"]
+    },
+    "purpose": { "$ref": "#/$defs/purpose" },
+    "experimentMethod": {
+      "enum": [
+        "model_training_inference",
+        "dataset_analysis_benchmark",
+        "numerical_simulation",
+        "statistical_causal_test",
+        "theoretical_symbolic_validation",
+        "external_instrument_experiment"
+      ]
+    },
+    "adapterSelection": { "$ref": "#/$defs/adapterSelection" },
+    "recommendation": { "$ref": "#/$defs/recommendation" },
+    "researchQuestion": { "type": "string", "minLength": 1, "maxLength": 4000 },
+    "objective": { "type": "string", "maxLength": 4000 },
+    "hypothesisRefs": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/nonEmptyId" },
+      "uniqueItems": true
+    },
+    "evidenceRefs": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/nonEmptyId" },
+      "uniqueItems": true
+    },
+    "constraints": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1, "maxLength": 1000 },
+      "uniqueItems": true
+    },
+    "methodConfig": { "type": "object" },
+    "metricContract": { "$ref": "#/$defs/metricContract" },
+    "decisionContract": { "$ref": "#/$defs/decisionContract" },
+    "artifactContract": { "$ref": "#/$defs/artifactContract" },
+    "reproducibilityContract": { "$ref": "#/$defs/reproducibilityContract" },
+    "iterationContract": { "$ref": "#/$defs/iterationContract" },
+    "supersedesPlanId": { "type": "string" },
+    "migratedFromSchemaVersion": { "type": "integer", "minimum": 1, "maximum": 1 },
+    "status": {
+      "enum": [
+        "draft",
+        "validating",
+        "needs_input",
+        "adapter_unavailable",
+        "ready_for_prepare",
+        "prepared",
+        "smoke_running",
+        "smoke_review",
+        "ready_for_full_run",
+        "full_run_running",
+        "result_review",
+        "needs_revision",
+        "rejected",
+        "iteration_proposed",
+        "superseded",
+        "archived"
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "experimentMethod": { "const": "model_training_inference" } } },
+      "then": { "properties": { "methodConfig": { "$ref": "#/$defs/modelTrainingConfig" } } }
+    },
+    {
+      "if": { "properties": { "experimentMethod": { "const": "dataset_analysis_benchmark" } } },
+      "then": { "properties": { "methodConfig": { "$ref": "#/$defs/datasetBenchmarkConfig" } } }
+    },
+    {
+      "if": { "properties": { "experimentMethod": { "const": "numerical_simulation" } } },
+      "then": { "properties": { "methodConfig": { "$ref": "#/$defs/simulationConfig" } } }
+    },
+    {
+      "if": { "properties": { "experimentMethod": { "const": "statistical_causal_test" } } },
+      "then": { "properties": { "methodConfig": { "$ref": "#/$defs/statisticalConfig" } } }
+    },
+    {
+      "if": { "properties": { "experimentMethod": { "const": "theoretical_symbolic_validation" } } },
+      "then": { "properties": { "methodConfig": { "$ref": "#/$defs/theoreticalConfig" } } }
+    },
+    {
+      "if": { "properties": { "experimentMethod": { "const": "external_instrument_experiment" } } },
+      "then": { "properties": { "methodConfig": { "$ref": "#/$defs/externalExperimentConfig" } } }
+    }
+  ],
+  "$defs": {
+    "nonEmptyId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200,
+      "pattern": "^[A-Za-z0-9_.:-]+$"
+    },
+    "nonEmptyText": { "type": "string", "minLength": 1, "maxLength": 4000 },
+    "stringArray": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1, "maxLength": 2000 },
+      "uniqueItems": true
+    },
+    "nonEmptyStringArray": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string", "minLength": 1, "maxLength": 2000 },
+      "uniqueItems": true
+    },
+    "purpose": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["primaryPurpose", "secondaryPurposes"],
+      "properties": {
+        "primaryPurpose": { "$ref": "#/$defs/purposeValue" },
+        "secondaryPurposes": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/purposeValue" },
+          "uniqueItems": true
+        }
+      }
+    },
+    "purposeValue": {
+      "enum": ["feasibility", "baseline_comparison", "falsification", "ablation", "replication", "robustness"]
+    },
+    "adapterSelection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["requestedAdapterId", "resolvedAdapterId", "resolvedAdapterVersion", "selectionSource"],
+      "properties": {
+        "requestedAdapterId": { "type": "string", "maxLength": 200 },
+        "resolvedAdapterId": { "type": "string", "maxLength": 200 },
+        "resolvedAdapterVersion": { "type": "string", "maxLength": 80 },
+        "selectionSource": { "enum": ["system_priority", "user_override", "unresolved"] },
+        "unavailableReason": { "type": "string", "maxLength": 1000 }
+      }
+    },
+    "recommendation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["researchMode", "primaryPurpose", "experimentMethod", "reason", "confidence", "generatedByAgentId"],
+      "properties": {
+        "researchMode": { "enum": ["hypothesis_and_plan", "experiment_feedback", "full_research_loop"] },
+        "primaryPurpose": { "$ref": "#/$defs/purposeValue" },
+        "experimentMethod": {
+          "enum": [
+            "model_training_inference",
+            "dataset_analysis_benchmark",
+            "numerical_simulation",
+            "statistical_causal_test",
+            "theoretical_symbolic_validation",
+            "external_instrument_experiment"
+          ]
+        },
+        "reason": { "$ref": "#/$defs/nonEmptyText" },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+        "missingConditions": { "$ref": "#/$defs/stringArray" },
+        "generatedByAgentId": { "$ref": "#/$defs/nonEmptyId" }
+      }
+    },
+    "metricContract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["primaryMetric", "metrics"],
+      "properties": {
+        "primaryMetric": { "$ref": "#/$defs/nonEmptyText" },
+        "metrics": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "direction"],
+            "properties": {
+              "name": { "$ref": "#/$defs/nonEmptyText" },
+              "direction": { "enum": ["maximize", "minimize", "target", "descriptive"] },
+              "unit": { "type": "string", "maxLength": 120 },
+              "target": { "type": ["number", "string", "null"] }
+            }
+          }
+        }
+      }
+    },
+    "decisionContract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["successCriteria", "failureCriteria", "inconclusiveCriteria"],
+      "properties": {
+        "successCriteria": { "$ref": "#/$defs/nonEmptyStringArray" },
+        "failureCriteria": { "$ref": "#/$defs/nonEmptyStringArray" },
+        "inconclusiveCriteria": { "$ref": "#/$defs/nonEmptyStringArray" }
+      }
+    },
+    "artifactContract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["requiredArtifacts", "requiredLogTypes"],
+      "properties": {
+        "requiredArtifacts": { "$ref": "#/$defs/stringArray" },
+        "requiredLogTypes": { "$ref": "#/$defs/stringArray" },
+        "retentionPolicy": { "type": "string", "maxLength": 1000 }
+      }
+    },
+    "reproducibilityContract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["seeds", "captureEnvironment", "captureInputHash", "captureConfigHash"],
+      "properties": {
+        "seeds": { "type": "array", "items": { "type": "integer" }, "uniqueItems": true },
+        "captureEnvironment": { "const": true },
+        "captureInputHash": { "const": true },
+        "captureConfigHash": { "const": true },
+        "reproductionCommand": { "type": "string", "maxLength": 4000 }
+      }
+    },
+    "iterationContract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["requiresResultConclusion", "requiresFeedbackSignals", "requiresPlanDiff"],
+      "properties": {
+        "requiresResultConclusion": { "const": true },
+        "requiresFeedbackSignals": { "const": true },
+        "requiresPlanDiff": { "const": true },
+        "maxIterations": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "modelTrainingConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["dataset", "model", "baseline", "seeds", "budget", "smokePlan"],
+      "properties": {
+        "dataset": { "$ref": "#/$defs/nonEmptyText" },
+        "model": { "$ref": "#/$defs/nonEmptyText" },
+        "baseline": { "$ref": "#/$defs/nonEmptyText" },
+        "seeds": { "type": "array", "minItems": 1, "items": { "type": "integer" }, "uniqueItems": true },
+        "budget": { "$ref": "#/$defs/nonEmptyText" },
+        "smokePlan": { "$ref": "#/$defs/nonEmptyText" },
+        "hyperparameters": { "type": "object" },
+        "ablations": { "$ref": "#/$defs/stringArray" }
+      }
+    },
+    "datasetBenchmarkConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sources", "dataSchema", "transform", "split"],
+      "properties": {
+        "sources": { "$ref": "#/$defs/stringArray" },
+        "dataSchema": { "$ref": "#/$defs/nonEmptyText" },
+        "transform": { "$ref": "#/$defs/nonEmptyText" },
+        "split": { "$ref": "#/$defs/nonEmptyText" },
+        "benchmark": { "type": "string", "maxLength": 4000 }
+      }
+    },
+    "simulationConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["simulator", "scenario", "parameters", "replicates"],
+      "properties": {
+        "simulator": { "$ref": "#/$defs/nonEmptyText" },
+        "scenario": { "$ref": "#/$defs/nonEmptyText" },
+        "parameters": { "type": "object" },
+        "sweep": { "type": "object" },
+        "replicates": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "statisticalConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["nullHypothesis", "alternativeHypothesis", "sample", "test", "alpha", "effectMeasure", "confounders"],
+      "properties": {
+        "nullHypothesis": { "$ref": "#/$defs/nonEmptyText" },
+        "alternativeHypothesis": { "$ref": "#/$defs/nonEmptyText" },
+        "sample": { "$ref": "#/$defs/nonEmptyText" },
+        "test": { "$ref": "#/$defs/nonEmptyText" },
+        "alpha": { "type": "number", "exclusiveMinimum": 0, "exclusiveMaximum": 1 },
+        "effectMeasure": { "$ref": "#/$defs/nonEmptyText" },
+        "confounders": { "$ref": "#/$defs/stringArray" }
+      }
+    },
+    "theoreticalConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["assumptions", "derivationTarget", "boundaryConditions", "counterexamplePlan"],
+      "properties": {
+        "assumptions": { "$ref": "#/$defs/stringArray" },
+        "derivationTarget": { "$ref": "#/$defs/nonEmptyText" },
+        "boundaryConditions": { "$ref": "#/$defs/stringArray" },
+        "counterexamplePlan": { "$ref": "#/$defs/nonEmptyText" },
+        "symbolicTool": { "type": "string", "maxLength": 400 }
+      }
+    },
+    "externalExperimentConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocol", "instrumentOrFacility", "samplingPlan", "approvalStatus", "operator", "resultImportContract"],
+      "properties": {
+        "protocol": { "$ref": "#/$defs/nonEmptyText" },
+        "instrumentOrFacility": { "$ref": "#/$defs/nonEmptyText" },
+        "samplingPlan": { "$ref": "#/$defs/nonEmptyText" },
+        "approvalStatus": { "enum": ["not_required", "pending", "approved", "rejected"] },
+        "operator": { "$ref": "#/$defs/nonEmptyText" },
+        "resultImportContract": { "$ref": "#/$defs/nonEmptyText" },
+        "calibrationPlan": { "type": "string", "maxLength": 4000 }
+      }
+    }
+  }
+}

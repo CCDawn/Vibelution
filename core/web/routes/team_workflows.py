@@ -24,6 +24,7 @@ from core.web.services.team_workflow_orchestration_service import (
     extract_neuro_mechanism_from_paper_note,
     extract_source_collection_candidates,
     generate_algorithm_hypothesis_from_mechanism_mapping,
+    get_experiment_method_catalog,
     get_experiment_planning_status,
     get_knowledge_ingestion_status,
     get_official_model_evidence_status,
@@ -238,6 +239,22 @@ class ExperimentPlanCreatePayload(BaseModel):
     baseline: str = Field("", max_length=500)
     smokePlan: str = Field("", max_length=1200)
     experimentPlan: dict[str, Any] = Field(default_factory=dict)
+    researchProfileId: str = Field("", max_length=200)
+    researchQuestion: str = Field("", max_length=4000)
+    researchMode: str = Field("", max_length=80)
+    experimentPurpose: dict[str, Any] = Field(default_factory=dict)
+    experimentMethod: str = Field("", max_length=120)
+    requestedAdapterId: str = Field("", max_length=200)
+    objective: str = Field("", max_length=4000)
+    constraints: list[str] = Field(default_factory=list, max_length=40)
+    methodConfig: dict[str, Any] = Field(default_factory=dict)
+    metricContract: dict[str, Any] = Field(default_factory=dict)
+    decisionContract: dict[str, Any] = Field(default_factory=dict)
+    artifactContract: dict[str, Any] = Field(default_factory=dict)
+    reproducibilityContract: dict[str, Any] = Field(default_factory=dict)
+    iterationContract: dict[str, Any] = Field(default_factory=dict)
+    recommendation: dict[str, Any] = Field(default_factory=dict)
+    supersedesPlanId: str = Field("", max_length=200)
     notes: str = Field("", max_length=4000)
 
 
@@ -801,6 +818,16 @@ def team_workflow_research_stage_round_start(team_id: str, payload: ResearchStag
 def team_workflow_experiment_planning_status(team_id: str) -> dict:
     try:
         return get_experiment_planning_status(team_id)
+    except TeamNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except (TeamServiceError, TeamWorkflowOrchestrationError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.get("/teams/{team_id}/workflow-orchestration/experiments/methods")
+def team_workflow_experiment_method_catalog(team_id: str) -> dict:
+    try:
+        return get_experiment_method_catalog(team_id)
     except TeamNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except (TeamServiceError, TeamWorkflowOrchestrationError) as exc:
