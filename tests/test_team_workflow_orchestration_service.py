@@ -4871,6 +4871,7 @@ def test_source_collection_extraction_resume_after_interrupted_reading_prioritiz
     )
 
     assert retry_task["created"] is True
+    assert retry_task["task"]["retrySourceTaskId"] == task["taskId"]
     assert len(submitted_messages) == 2
     retry_message = submitted_messages[-1]
     assert "上一轮结果" in retry_message
