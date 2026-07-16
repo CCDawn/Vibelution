@@ -50,6 +50,9 @@ describe("ConfigQuickSetupPanel", () => {
     expect(styles.primaryAction).toContain("min-h-10");
     expect(styles.reviewActions).toContain("items-end");
     expect(panelSource).toContain('aria-live="polite"');
+    expect(panelSource).toContain("<VTooltip content={credentialHint}");
+    expect(panelSource).toContain("disabledReason={detectDisabledReason}");
+    expect(panelSource).not.toContain("<small className={styles.hint}>{credentialHint}</small>");
   });
 
   it("renders a compact input flow without an idle result panel", () => {

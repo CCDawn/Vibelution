@@ -1,12 +1,16 @@
 import { type ComponentPropsWithoutRef, type ReactNode } from "react";
 
+import { VContextualHint } from "../primitives/VContextualHint";
+
 export type VSectionProps = ComponentPropsWithoutRef<"section"> & {
   actions?: ReactNode;
-  children: ReactNode;
+  children?: ReactNode;
   eyebrow?: ReactNode;
   headerClassName?: string;
   meta?: ReactNode;
   title: ReactNode;
+  tooltip?: ReactNode;
+  tooltipLabel?: string;
 };
 
 export function VSection({
@@ -17,6 +21,8 @@ export function VSection({
   headerClassName,
   meta,
   title,
+  tooltip,
+  tooltipLabel,
   ...props
 }: VSectionProps) {
   return (
@@ -43,6 +49,13 @@ export function VSection({
             <h2 className="m-0 min-w-0 truncate text-[var(--vui-font-md)] font-bold leading-tight text-vui-fg-primary">
               {title}
             </h2>
+            {tooltip ? (
+              <VContextualHint
+                label={tooltipLabel ?? "Section details"}
+                content={tooltip}
+                width="wide"
+              />
+            ) : null}
             {meta ? (
               <span className="min-w-0 truncate text-[var(--vui-font-xs)] font-semibold text-vui-fg-tertiary">
                 {meta}

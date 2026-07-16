@@ -3,6 +3,8 @@ import {
   type ReactNode,
 } from "react";
 
+import { VTooltip } from "../../primitives/VTooltip";
+
 import {
   type TeamSourceResultMetaEntry,
   type TeamSourceResultProvenance,
@@ -101,7 +103,17 @@ export function TeamCandidateCard({
       }
     : undefined;
 
-  return (
+  const statusBadge = (
+    <span
+      className={`${CHIP_BASE} ${CHIP_TONE[tone]}`}
+      tabIndex={statusTitle && !activateTitle ? 0 : undefined}
+      role={statusTitle ? "status" : undefined}
+      aria-label={statusTitle}
+    >
+      {statusLabel}
+    </span>
+  );
+  const card = (
     <article
       data-vui-product="team-candidate-card"
       data-tone={tone}
@@ -111,15 +123,12 @@ export function TeamCandidateCard({
       role={onActivate ? "button" : undefined}
       tabIndex={onActivate ? 0 : undefined}
       aria-pressed={onActivate ? selected : undefined}
-      title={activateTitle}
       onClick={handleClick}
       onKeyDown={handleKeyDown}
     >
       <div className="col-start-1 flex flex-wrap items-center gap-1.5 min-w-0 [&>strong]:min-w-0 [&>strong]:truncate [&>strong]:text-[var(--fg-primary)]">
         <strong>{title}</strong>
-        <span className={`${CHIP_BASE} ${CHIP_TONE[tone]}`} title={statusTitle}>
-          {statusLabel}
-        </span>
+        {statusTitle && !activateTitle ? <VTooltip content={statusTitle}>{statusBadge}</VTooltip> : statusBadge}
       </div>
       {summary ? (
         <p className="col-start-1 m-0 min-w-0 truncate text-[var(--vui-font-xs)] text-[var(--fg-tertiary)]">{summary}</p>
@@ -155,4 +164,18 @@ export function TeamCandidateCard({
       {actions ? <div className={ACTIONS}>{actions}</div> : null}
     </article>
   );
+
+  return activateTitle ? (
+    <VTooltip
+      content={statusTitle ? (
+        <span className="grid gap-1">
+          <span>{activateTitle}</span>
+          <span>{statusTitle}</span>
+        </span>
+      ) : activateTitle}
+      width="wide"
+    >
+      {card}
+    </VTooltip>
+  ) : card;
 }

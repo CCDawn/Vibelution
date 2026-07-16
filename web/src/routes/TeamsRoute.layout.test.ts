@@ -280,6 +280,8 @@ describe("TeamsRoute layout contract", () => {
     expect(teamSourceCollectionRunSwitcherPanelSource).toContain("sourceCollectionRunSwitcher");
     expect(teamSourceCollectionRunSwitcherPanelSource).toContain("sourceCollectionRunSwitcherMain");
     expect(teamSourceCollectionRunSwitcherPanelSource).toContain("sourceCollectionRunSwitcherStats");
+    expect(teamSourceCollectionRunSwitcherPanelSource).toContain("VTooltip");
+    expect(teamSourceCollectionRunSwitcherPanelSource).not.toContain("<small>{hint}</small>");
     expect(routeSource).toContain("TeamSourceEmptyState");
     expect(routeSource).toContain("rawRecordEmptyFacts");
     expect(routeSource).toContain("rawRecordEmptyActions");
@@ -1558,7 +1560,8 @@ describe("TeamsRoute layout contract", () => {
     );
     expect(teamSourceResultListSource).not.toContain("minmax(120px,220px)");
     expect(teamSourceCollectionRunSwitcherPanelStyles.sourceCollectionRunSwitcher).toContain("grid-cols-[minmax(0,1fr)_auto]");
-    expect(teamSourceCollectionRunSwitcherPanelStyles.sourceCollectionRunSwitcherMain).toContain("grid-cols-[max-content_minmax(220px,360px)_minmax(0,1fr)]");
+    expect(teamSourceCollectionRunSwitcherPanelStyles.sourceCollectionRunSwitcherMain).toContain("grid-cols-[max-content_minmax(220px,360px)]");
+    expect(teamSourceCollectionRunSwitcherPanelStyles.sourceCollectionRunSwitcherMain).not.toContain("[&_small]");
     expect(teamSourceCollectionRunSwitcherPanelStyles.sourceCollectionRunSwitcherStats).toContain("flex flex-wrap items-center justify-end");
     expect(teamSourceResultListSource).toContain("min-h-[36px]");
     expect(teamSourceResultListSource).toContain("whitespace-nowrap");
@@ -1745,7 +1748,11 @@ describe("TeamsRoute layout contract", () => {
     expect(teamSourcePaginationSource).not.toContain("VNativeButton");
     expect(teamCandidateCardSource).toContain("minmax(9rem,16rem)");
     expect(teamCandidateCardSource).toContain("row-span-3");
+    expect(teamCandidateCardSource).toContain("VTooltip");
+    expect(teamCandidateCardSource).not.toContain("title={activateTitle}");
     expect(teamStageCardSource).toContain("grid-cols-[minmax(0,1fr)_auto]");
+    expect(teamStageCardSource).toContain("VTooltip");
+    expect(teamStageCardSource).not.toContain("title={title}");
     expect(teamStageCardSource).toContain("ACTION_ROW");
     expect(teamStageCardSource).toContain("ACTION_BUTTON");
     expect(teamStageCardSource).toContain("text-[0.72rem]");

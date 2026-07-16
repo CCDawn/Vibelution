@@ -9,7 +9,6 @@ const styles = {
   panelHeader: "flex items-start justify-between gap-3 px-1 pt-0.5",
   panelTitle: "grid min-w-0 gap-0.5",
   panelTitleText: "text-[var(--vui-font-sm)] font-semibold text-[var(--fg-primary)]",
-  panelHint: "text-[var(--vui-font-xs)] leading-5 text-[var(--fg-tertiary)]",
   search: "w-full",
   list: "grid min-h-0 min-w-0 gap-2 overflow-y-auto overflow-x-hidden pr-0.5",
   group: "grid min-w-0 gap-1",

@@ -46,20 +46,21 @@ export function AgentManagementHeaderPanel({
 }: AgentManagementHeaderPanelProps) {
   return (
     <>
-      <div title={copy.subtitle}>
-        <AgentPageHeader
-          eyebrow={copy.eyebrow}
-          title={copy.title}
-          actions={[
-            {
-              id: "refresh",
-              label: copy.refresh,
-              icon: <RefreshCw size={14} />,
-              onPress: onRefresh,
-            },
-          ]}
-        />
-      </div>
+      <AgentPageHeader
+        eyebrow={copy.eyebrow}
+        title={copy.title}
+        tooltip={copy.subtitle}
+        tooltipLabel={`${copy.title} · ${copy.subtitle}`}
+        actions={[
+          {
+            id: "refresh",
+            label: copy.refresh,
+            tooltip: copy.refresh,
+            icon: <RefreshCw size={14} />,
+            onPress: onRefresh,
+          },
+        ]}
+      />
 
       <div className={styles.controlStrip}>
         <AgentManagementNav active="agents" className={styles.managementNav} />

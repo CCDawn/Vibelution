@@ -12,6 +12,7 @@ import {
   type VuiDensity,
   vuiControlHeight,
 } from "../renderers/heroui/heroVariants";
+import { VTooltip } from "./VTooltip";
 
 export type VButtonProps = Omit<
   ButtonProps,
@@ -23,6 +24,8 @@ export type VButtonProps = Omit<
   icon?: ReactNode;
   trailingIcon?: ReactNode;
   children?: ReactNode;
+  disabledReason?: ReactNode;
+  tooltip?: ReactNode;
   "data-vui"?: string;
   role?: string;
   title?: string;
@@ -54,6 +57,15 @@ function hasExplicitRootWidth(className: VButtonProps["className"]): boolean {
   });
 }
 
+function hasFullRootWidth(className: VButtonProps["className"]): boolean {
+  return classNameTokens(className).some((token) => {
+    if (token.startsWith("[&")) {
+      return false;
+    }
+    return /(?:^|:)!?w-full$/.test(token);
+  });
+}
+
 function buttonGeometryClass(
   className: VButtonProps["className"],
   contentLayout: NonNullable<VButtonProps["contentLayout"]>,
@@ -75,14 +87,18 @@ export function VButton({
   trailingIcon,
   className,
   children,
+  disabledReason,
+  tooltip,
   "data-vui": dataVui,
   title,
   ...props
 }: VButtonProps) {
-  const titleProps = title ? ({ title } as Record<string, string>) : undefined;
+  const tooltipContent = props.isDisabled && disabledReason ? disabledReason : tooltip ?? title;
+  const hasTooltip = tooltipContent !== undefined && tooltipContent !== null && tooltipContent !== "";
+  const titleProps = title && !hasTooltip ? ({ title } as Record<string, string>) : undefined;
   const isIconOnly = Boolean(props.isIconOnly);
 
-  return (
+  const button = (
     <Button
       {...props}
       {...titleProps}
@@ -106,7 +122,7 @@ export function VButton({
       ) : (
         <span
           data-slot="vui-button-content"
-          title={title}
+          title={hasTooltip ? undefined : title}
           className="inline-flex min-w-0 max-w-full items-center justify-center gap-1.5"
         >
           {icon ? (
@@ -132,4 +148,35 @@ export function VButton({
       )}
     </Button>
   );
+
+  if (!hasTooltip) {
+    return button;
+  }
+
+  if (props.isDisabled) {
+    const actionLabel = typeof props["aria-label"] === "string"
+      ? props["aria-label"]
+      : typeof children === "string"
+        ? children
+        : undefined;
+    const reasonLabel = typeof tooltipContent === "string" ? tooltipContent : undefined;
+    return (
+      <VTooltip content={tooltipContent} tone={disabledReason ? "warning" : "neutral"}>
+        <span
+          data-vui="disabled-tooltip-trigger"
+          role="note"
+          tabIndex={0}
+          aria-label={[actionLabel, reasonLabel].filter(Boolean).join("：") || undefined}
+          className={[
+            "inline-flex max-w-full shrink-0 justify-self-start rounded-[var(--radius-control)] focus-visible:outline-none focus-visible:shadow-[var(--vui-shadow-focus)]",
+            hasFullRootWidth(className) ? "w-full" : "w-fit",
+          ].join(" ")}
+        >
+          {button}
+        </span>
+      </VTooltip>
+    );
+  }
+
+  return <VTooltip content={tooltipContent}>{button}</VTooltip>;
 }

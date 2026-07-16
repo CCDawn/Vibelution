@@ -3,7 +3,7 @@ import { type KeyboardEvent, useEffect, useMemo, useRef, useState } from "react"
 import { createPortal } from "react-dom";
 
 import type { AgentLlmSlotDefinition, AgentModelChoice } from "../api/types";
-import { VButton, VNativeInput } from "../components/vui";
+import { VButton, VContextualHint, VNativeInput } from "../components/vui";
 import styles from "./AgentModelPicker.styles";
 
 export type AgentModelCandidateGroup = {
@@ -223,14 +223,21 @@ export function AgentModelPicker({
       >
         <div className={styles.panelHeader}>
           <div className={styles.panelTitle}>
-            <strong className={styles.panelTitleText}>选择 {slot.label}</strong>
-            <span className={styles.panelHint}>按 Provider 分组。未固定模型会先加入模型库，再绑定当前 Agent。</span>
+            <div className="flex min-w-0 items-center gap-1.5">
+              <strong className={styles.panelTitleText}>选择 {slot.label}</strong>
+              <VContextualHint
+                label="模型选择说明"
+                content="按 Provider 分组。未固定模型会先加入模型库，再绑定当前 Agent。"
+                width="wide"
+              />
+            </div>
           </div>
           <VButton
             type="button"
             variant="ghost"
             isIconOnly
             aria-label="关闭模型选择"
+            tooltip="关闭模型选择"
             onPress={() => closeAndRestoreFocus(setOpen, triggerRef.current)}
           >
             <X size={15} aria-hidden="true" />

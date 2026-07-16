@@ -3,19 +3,18 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { Search } from "lucide-react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 
 import {
   VButton,
-  type VButtonProps,
   VChip,
+  VContextualHint,
   VIconButton,
   VNativeButton,
   VPanel,
   VSurface,
   VToolbar,
   VTooltip,
-  type VTooltipTriggerRender,
 } from "./index";
 import { VibelutionHeroProvider } from "./renderers/heroui/HeroProvider";
 
@@ -108,12 +107,13 @@ describe("VUI foundation primitives", () => {
     expect(markup).not.toMatch(/<div[^>]*role="button"[^>]*>[\s\S]*<button/);
   });
 
-  it("does not leave a focusable tooltip wrapper around a disabled icon button", () => {
+  it("keeps a disabled action reason focusable without creating a second button", () => {
     const markup = renderToStaticMarkup(
       <VibelutionHeroProvider>
         <VIconButton
           label="Refresh"
           tooltip="Refresh frontend data"
+          disabledReason="A refresh is already running"
           icon={<Search size={14} />}
           isDisabled
         />
@@ -122,47 +122,40 @@ describe("VUI foundation primitives", () => {
 
     expect(markup.match(/<button\b/g)).toHaveLength(1);
     expect(markup).toContain('disabled=""');
-    expect(markup).not.toContain('tabindex="0"');
-    expect(markup).not.toMatch(/<div[^>]*role="button"[^>]*>[\s\S]*<button/);
+    expect(markup.match(/tabindex="0"/g)).toHaveLength(1);
+    expect(markup).toContain('data-vui="disabled-tooltip-trigger"');
+    expect(markup).toContain('role="note"');
+    expect(markup).toContain('aria-label="Refresh：A refresh is already running"');
   });
 
-  it("composes icon button caller and tooltip trigger handlers and refs", () => {
-    const callerClick = vi.fn();
-    const tooltipClick = vi.fn();
-    const callerRef = vi.fn();
-    const tooltipRef = vi.fn();
-    const tooltipElement = VIconButton({
-      label: "Refresh",
-      icon: <Search size={14} />,
-      className: "caller-icon-class",
-      onClick: callerClick,
-      ref: callerRef,
-    });
-    const renderTrigger = tooltipElement.props.renderTrigger as VTooltipTriggerRender;
-    const buttonElement = renderTrigger(
-      {
-        className: "tooltip-trigger-class",
-        onClick: tooltipClick,
-        ref: tooltipRef,
-      },
-      undefined,
-    ) as React.ReactElement<VButtonProps>;
+  it("keeps disabled full-width actions full width without a duplicate native title", () => {
+    const markup = renderToStaticMarkup(
+      <VButton
+        className="w-full"
+        isDisabled
+        title="Native help"
+        tooltip="Action help"
+        disabledReason="Complete the required fields first"
+      >
+        Save
+      </VButton>,
+    );
 
-    buttonElement.props.onClick?.({} as never);
+    expect(markup).toContain('data-vui="disabled-tooltip-trigger"');
+    expect(markup).toContain("w-full");
+    expect(markup).not.toContain('title="Native help"');
+  });
 
-    expect(callerClick).toHaveBeenCalledTimes(1);
-    expect(tooltipClick).toHaveBeenCalledTimes(1);
-    expect(buttonElement.props.className).toContain("tooltip-trigger-class");
-    expect(buttonElement.props.className).toContain("caller-icon-class");
-    expect(buttonElement.props.ref).toEqual(expect.any(Function));
+  it("attaches contextual help directly to regular buttons without a wrapper button", () => {
+    const markup = renderToStaticMarkup(
+      <VibelutionHeroProvider>
+        <VButton tooltip="Runs a fresh provider discovery">Discover</VButton>
+      </VibelutionHeroProvider>,
+    );
 
-    const buttonNode = {} as HTMLButtonElement;
-    (buttonElement.props.ref as React.RefCallback<HTMLButtonElement>)(buttonNode);
-
-    expect(callerRef).toHaveBeenCalledTimes(1);
-    expect(callerRef).toHaveBeenCalledWith(buttonNode);
-    expect(tooltipRef).toHaveBeenCalledTimes(1);
-    expect(tooltipRef).toHaveBeenCalledWith(buttonNode);
+    expect(markup.match(/<button\b/g)).toHaveLength(1);
+    expect(markup).toMatch(/<button(?=[^>]*data-slot="tooltip-trigger")[^>]*>/);
+    expect(markup).not.toMatch(/<div[^>]*role="button"[^>]*>[\s\S]*<button/);
   });
 
   it("renders VButton content in explicit compact inline slots", () => {
@@ -180,7 +173,8 @@ describe("VUI foundation primitives", () => {
     expect(markup).toContain('data-slot="vui-button-icon"');
     expect(markup).toContain('data-slot="vui-button-label"');
     expect(markup).toContain('data-slot="vui-button-trailing-icon"');
-    expect(markup).toContain('title="Search docs"');
+    expect(markup).toContain('data-slot="tooltip-trigger"');
+    expect(markup).not.toContain('title="Search docs"');
     expect(markup).toContain(
       'class="inline-flex min-w-0 max-w-full items-center justify-center gap-1.5"',
     );
@@ -259,6 +253,29 @@ describe("VUI foundation primitives", () => {
 
     expect(markup).toContain('data-slot="tooltip-trigger"');
     expect(markup).toContain('aria-describedby=');
-    expect(markup).toContain('<button type="button">Hover</button>');
+    expect(markup).toMatch(/<button(?=[^>]*data-slot="tooltip-trigger")[^>]*>Hover<\/button>/);
+  });
+
+  it("renders polished bounded tooltip content and a reusable contextual hint trigger", () => {
+    const tooltipMarkup = renderToStaticMarkup(
+      <VTooltip content="Long contextual explanation" width="wide" tone="warning" isOpen>
+        <button type="button">Hover</button>
+      </VTooltip>,
+    );
+    const hintMarkup = renderToStaticMarkup(
+      <VContextualHint label="Card details" content="Why this card exists" />,
+    );
+    const tooltipSource = readFileSync(
+      resolve(import.meta.dirname, "primitives/VTooltip.tsx"),
+      "utf8",
+    );
+
+    expect(tooltipMarkup).toContain('data-slot="tooltip-trigger"');
+    expect(tooltipSource).toContain('data-vui="tooltip-content"');
+    expect(tooltipSource).toContain("max-w-[min(26rem,calc(100vw-1.5rem))]");
+    expect(tooltipSource).toContain("shadow-[var(--vui-elevation-overlay)]");
+    expect(tooltipSource).toContain("backdrop-blur-xl");
+    expect(hintMarkup).toContain('data-vui="contextual-hint"');
+    expect(hintMarkup).toContain('aria-label="Card details"');
   });
 });
