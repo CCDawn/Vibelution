@@ -801,6 +801,132 @@ export type TeamWorkflowOrchestration = {
   updatedAt: string;
 };
 
+export type ExperimentResearchModeId =
+  | "hypothesis_and_plan"
+  | "experiment_feedback"
+  | "full_research_loop";
+
+export type ExperimentPurposeId =
+  | "feasibility"
+  | "baseline_comparison"
+  | "falsification"
+  | "ablation"
+  | "replication"
+  | "robustness";
+
+export type ExperimentMethodId =
+  | "model_training_inference"
+  | "dataset_analysis_benchmark"
+  | "numerical_simulation"
+  | "statistical_causal_test"
+  | "theoretical_symbolic_validation"
+  | "external_instrument_experiment";
+
+export type ExperimentAdapterSelection = {
+  requestedAdapterId: string;
+  resolvedAdapterId: string;
+  resolvedAdapterVersion: string;
+  selectionSource: "system_priority" | "user_override" | "unresolved" | string;
+  unavailableReason?: string;
+};
+
+export type ExperimentContractV2 = {
+  schemaVersion: 2;
+  planId: string;
+  revision: number;
+  teamId: string;
+  researchProfileId: string;
+  researchMode: ExperimentResearchModeId;
+  purpose: {
+    primaryPurpose: ExperimentPurposeId;
+    secondaryPurposes: ExperimentPurposeId[];
+  };
+  experimentMethod: ExperimentMethodId;
+  adapterSelection: ExperimentAdapterSelection;
+  recommendation?: {
+    researchMode: ExperimentResearchModeId;
+    primaryPurpose: ExperimentPurposeId;
+    experimentMethod: ExperimentMethodId;
+    reason: string;
+    confidence: number;
+    missingConditions?: string[];
+    generatedByAgentId: string;
+  };
+  researchQuestion: string;
+  objective?: string;
+  hypothesisRefs: string[];
+  evidenceRefs: string[];
+  constraints?: string[];
+  methodConfig: Record<string, unknown>;
+  metricContract: {
+    primaryMetric: string;
+    metrics: Array<{
+      name: string;
+      direction: "maximize" | "minimize" | "target" | "descriptive" | string;
+      unit?: string;
+      target?: number | string | null;
+    }>;
+  };
+  decisionContract: {
+    successCriteria: string[];
+    failureCriteria: string[];
+    inconclusiveCriteria: string[];
+  };
+  supersedesPlanId?: string;
+  status: string;
+};
+
+export type ExperimentContractValidation = {
+  valid: boolean;
+  errors: string[];
+  missingFields: string[];
+  methodId: ExperimentMethodId | string;
+  adapterAvailable: boolean;
+  readyForExecution?: boolean;
+  adapterUnavailableReason: string;
+};
+
+export type ExperimentMethodDescriptor = {
+  methodId: ExperimentMethodId;
+  labelZh: string;
+  labelEn: string;
+  requiredConfigFields: string[];
+  adapterAvailability: Record<ExperimentResearchModeId, ExperimentAdapterSelection>;
+};
+
+export type ExperimentMethodCatalogPayload = {
+  schemaVersion: 2;
+  teamId: string;
+  researchModes: Array<{
+    modeId: ExperimentResearchModeId;
+    labelZh: string;
+    labelEn: string;
+  }>;
+  experimentPurposes: Array<{
+    purposeId: ExperimentPurposeId;
+    labelZh: string;
+    labelEn: string;
+  }>;
+  methods: ExperimentMethodDescriptor[];
+  adapters: Array<{
+    adapterId: string;
+    adapterVersion: string;
+    method: ExperimentMethodId;
+    executionMode: string;
+    capabilities: string[];
+    availability: string;
+    unavailableReason: string;
+    formalResult: boolean;
+    priority: number;
+  }>;
+  boundaries: {
+    methodCatalogSource: string;
+    environmentProbeRole: string;
+    evidenceReviewRole: string;
+    llmSelectsAdapterId: boolean;
+  };
+};
+
 export type DataProcessingRecord = {
   schemaVersion: number;
   recordId: string;

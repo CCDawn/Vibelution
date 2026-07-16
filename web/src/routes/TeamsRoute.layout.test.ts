@@ -10,6 +10,8 @@ import stageProjectionSource from "./teams/source-collection/stageProjection.ts?
 import researchWorkflowResourcesSource from "./teams/useResearchWorkflowResources.ts?raw";
 import teamMemoryIndexPanelSource from "./TeamMemoryIndexPanel.tsx?raw";
 import teamMemoryIndexPanelStyles from "./TeamMemoryIndexPanel.styles";
+import teamExperimentMethodPanelSource from "./TeamExperimentMethodPanel.tsx?raw";
+import teamExperimentMethodPanelStyles from "./TeamExperimentMethodPanel.styles";
 import teamSourceCollectionActiveStagePanelSource from "./TeamSourceCollectionActiveStagePanel.tsx?raw";
 import teamSourceCollectionActiveStagePanelStyles from "./TeamSourceCollectionActiveStagePanel.styles";
 import teamSourceCollectionCandidatePanelSource from "./TeamSourceCollectionCandidatePanel.tsx?raw";
@@ -1327,7 +1329,7 @@ describe("TeamsRoute layout contract", () => {
     expect(queryLayerSource).toContain("queryFn: ({ signal }) => fetchJson<Team>(`/api/teams/${encodeURIComponent(effectiveTeamId)}?detail=${teamDetailLoadMode}`, { signal })");
     expect(queryLayerSource).toContain("queryFn: ({ signal }) => fetchJson<TeamOrganizationCanvas>(`/api/teams/${encodeURIComponent(effectiveTeamId)}/canvas`, { signal })");
     expect(queryLayerSource).toContain("queryFn: ({ signal }) =>");
-    expect(queryLayerSource.match(/queryFn: \(\{ signal \}\) =>/g)?.length ?? 0).toBe(16);
+    expect(queryLayerSource.match(/queryFn: \(\{ signal \}\) =>/g)?.length ?? 0).toBe(17);
     expect(queryLayerSource.match(/queryFn: \(\) =>/g) ?? []).toEqual([]);
     const sourceCollectionStageReturnRefreshSource = routeSource.slice(
       routeSource.indexOf("if (!researchWorkflowTeamSelected || !pageVisible"),
@@ -1383,7 +1385,20 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("experimentPlanningStatusQueryKey");
     expect(routeSource).toContain("renderExperimentPlanningLedgerPanel");
     expect(routeSource).toContain("实验计划账本");
-    expect(routeSource).toContain("生成计划草稿");
+    expect(routeSource).toContain("TeamExperimentMethodPanel");
+    expect(routeSource).toContain("experimentMethodCatalogQueryKey");
+    expect(routeSource).toContain("/workflow-orchestration/experiments/methods");
+    expect(routeSource).toContain("activeContract={activeExperimentContract}");
+    expect(routeSource).toContain("onSubmit={createExperimentPlanFromWorkspace}");
+    expect(teamExperimentMethodPanelSource).toContain("catalog.researchModes.map");
+    expect(teamExperimentMethodPanelSource).toContain("实验方式");
+    expect(teamExperimentMethodPanelSource).toContain("实验目的");
+    expect(teamExperimentMethodPanelSource).toContain("验证方法");
+    expect(teamExperimentMethodPanelSource).toContain("buildExperimentPlanMethodRequest");
+    expect(teamExperimentMethodPanelSource).toContain("保存为新版本");
+    expect(teamExperimentMethodPanelSource).toContain("执行器尚未就绪");
+    expect(teamExperimentMethodPanelStyles.methodGrid).toContain("max-[560px]:grid-cols-[minmax(0,1fr)]");
+    expect(teamExperimentMethodPanelStyles.form).toContain("min-h-[18rem]");
     expect(routeSource).toContain("baseline-artifact");
     expect(routeSource).toContain("登记基线工件");
     expect(routeSource).toContain("reproductionCommand");

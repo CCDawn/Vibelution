@@ -816,6 +816,8 @@ def test_team_workflow_routes_accept_generic_simulation_experiment_contract(tmp_
             "researchMode": "experiment_feedback",
             "experimentPurpose": {"primaryPurpose": "robustness", "secondaryPurposes": []},
             "experimentMethod": "numerical_simulation",
+            "revision": 2,
+            "supersedesPlanId": "exp-plan-sim-v1",
             "methodConfig": {
                 "simulator": "controllable-agent-simulator",
                 "scenario": "resource-constrained adaptation",
@@ -852,6 +854,8 @@ def test_team_workflow_routes_accept_generic_simulation_experiment_contract(tmp_
     assert contract["purpose"]["primaryPurpose"] == "robustness"
     assert contract["experimentMethod"] == "numerical_simulation"
     assert contract["methodConfig"]["replicates"] == 5
+    assert contract["revision"] == 2
+    assert contract["supersedesPlanId"] == "exp-plan-sim-v1"
     assert response.json()["plan"]["contractValidation"]["valid"] is True
 
 
