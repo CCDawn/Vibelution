@@ -86,6 +86,22 @@ def test_initial_prompt_reuse_requires_unchanged_git_and_runtime_state():
     )
 
 
+def test_direct_chat_prompt_build_excludes_global_runtime_log_index():
+    agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+    build_calls: list[dict[str, object]] = []
+    agent.prompt_manager = SimpleNamespace(
+        build=lambda **kwargs: build_calls.append(dict(kwargs)) or "session system prompt"
+    )
+
+    assert agent._build_system_prompt_for_turn(stable_session_prompt=True) == "session system prompt"
+    assert agent._build_system_prompt_for_turn(stable_session_prompt=False) == "session system prompt"
+
+    assert build_calls == [
+        {"exclude": ["RUNTIME_LOG_INDEX"]},
+        {},
+    ]
+
+
 def test_numbered_confirmation_goal_preserves_previous_assistant_context():
     history = [
         SystemMessage(content=""),
@@ -6361,9 +6377,10 @@ class TestRuntimeStateMemoryFlow:
             def clear_state_memory(self, persist=True):
                 return None
 
-            def build(self):
+            def build(self, *, exclude=None):
                 captured["goal_seen_during_build"] = self.current_goal
                 captured["packet_seen_during_build"] = self.runtime_goal_packet
+                captured["excluded_sections"] = list(exclude or [])
                 raise RuntimeError("stop_after_build")
 
         agent.mode_policy = ModePolicy(
@@ -6403,6 +6420,7 @@ class TestRuntimeStateMemoryFlow:
         assert captured["goal_seen_during_build"] == agent_module._SESSION_CHAT_PROMPT_GOAL
         assert captured["packet_seen_during_build"].goal == agent_module._SESSION_CHAT_PROMPT_GOAL
         assert captured["packet_seen_during_build"].allow_subagents is False
+        assert captured["excluded_sections"] == ["RUNTIME_LOG_INDEX"]
         assert raw_user_message not in captured["packet_seen_during_build"].render()
 
     def test_think_and_act_uses_goal_override_before_first_prompt_build(self, monkeypatch):

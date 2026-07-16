@@ -2107,6 +2107,12 @@ class SelfEvolvingAgent:
         self._pending_lifecycle_action = None
         self._turn_interrupt_checker = None
 
+    def _build_system_prompt_for_turn(self, *, stable_session_prompt: bool):
+        """Build a prompt without unrelated global diagnostics for direct chat."""
+        if stable_session_prompt:
+            return self.prompt_manager.build(exclude=["RUNTIME_LOG_INDEX"])
+        return self.prompt_manager.build()
+
     def clear_chat_provider_replay_state(self) -> None:
         self._chat_provider_replay_state = None
 
@@ -2460,7 +2466,7 @@ class SelfEvolvingAgent:
         initial_runtime_sync_ms = max(0, int((time.perf_counter() - initial_runtime_sync_started) * 1000))
         initial_runtime_state_memory_key = self._last_runtime_state_memory_key
         initial_prompt_build_started = time.perf_counter()
-        sp = self.prompt_manager.build()
+        sp = self._build_system_prompt_for_turn(stable_session_prompt=stable_session_prompt)
         initial_prompt_build_ms = max(0, int((time.perf_counter() - initial_prompt_build_started) * 1000))
         self._cached_system_prompt = to_string(sp)
         _record_agent_scene_event(
@@ -2473,6 +2479,7 @@ class SelfEvolvingAgent:
                 "promptBuildMs": initial_prompt_build_ms,
                 "totalMs": max(0, int((time.perf_counter() - initial_context_started) * 1000)),
                 "stableSessionPrompt": stable_session_prompt,
+                "excludedPromptSections": ["RUNTIME_LOG_INDEX"] if stable_session_prompt else [],
             },
         )
         dynamic_system_context_message = build_dynamic_system_context_message(sp)
@@ -2635,7 +2642,9 @@ class SelfEvolvingAgent:
                 if prompt_build_reused:
                     current_sp = sp
                 else:
-                    current_sp = self.prompt_manager.build()
+                    current_sp = self._build_system_prompt_for_turn(
+                        stable_session_prompt=stable_session_prompt
+                    )
                 initial_prompt_reuse_pending = False
                 current_prompt = to_string(current_sp)
                 if current_prompt != self._cached_system_prompt:
