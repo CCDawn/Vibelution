@@ -796,13 +796,21 @@ def record_backend_api_event(payload: dict[str, Any]) -> dict[str, Any]:
             ],
         }
         _append_scene_event(scene_dir, BACKEND_COMPONENT, event_payload)
-        _update_runtime_scene_package_manifest(scene_dir, manifest)
+        # API telemetry runs inline with the request middleware. Rebuilding the
+        # complete diagnosis here can turn one slow request into a feedback loop:
+        # the rebuild blocks other requests, which then cross the slow-request
+        # threshold and trigger more rebuilds. Keep the request path append-only
+        # plus lightweight sidecars. Runtime-scene detail reads rebuild the full
+        # diagnosis on demand through get_runtime_scene_detail().
+        _update_runtime_scene_package_manifest_lightweight(scene_dir, manifest)
+        projection_refresh = "lightweight"
         _update_backend_api_manifest(scene_dir, manifest, timestamp, level, fields)
 
     return {
         "accepted": True,
         "runtimeSceneId": scene_id,
         "recordedAt": timestamp,
+        "projectionRefresh": projection_refresh,
     }
 
 
