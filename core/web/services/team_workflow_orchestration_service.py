@@ -6491,6 +6491,7 @@ def get_research_stage_round_status(team_id: str) -> dict[str, Any]:
     normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
     team = _source_collection_team_identity_snapshot(normalized_team_id)
     _reconcile_source_collection_stage_session_tasks(normalized_team_id)
+    _reconcile_superseded_research_stage_rounds(normalized_team_id)
     with _WORKFLOW_LOCK:
         workflow = _load_or_create_workflow(normalized_team_id)
         store = _load_stage_round_store(normalized_team_id)
@@ -6534,6 +6535,67 @@ def get_research_stage_round_status(team_id: str) -> dict[str, Any]:
         "boundaries": _research_stage_boundaries(),
         "updatedAt": str(store.get("updatedAt") or ""),
     }
+
+
+def _reconcile_superseded_research_stage_rounds(team_id: str) -> bool:
+    now = utc_now_iso()
+    superseded_pairs: list[tuple[str, str]] = []
+    with _WORKFLOW_LOCK:
+        store = _load_stage_round_store(team_id)
+        rounds = _stage_rounds(store)
+        for stage_type in RESEARCH_STAGE_TYPES:
+            stage_rounds = [
+                item
+                for item in rounds
+                if _trim_text(item.get("stageType"), max_length=80) == stage_type
+            ]
+            if len(stage_rounds) < 2:
+                continue
+            latest_round = max(
+                stage_rounds,
+                key=lambda item: (
+                    _source_collection_count(item.get("roundNumber")),
+                    _trim_text(item.get("createdAt"), max_length=120),
+                    _trim_text(item.get("updatedAt"), max_length=120),
+                ),
+            )
+            latest_round_id = _trim_text(latest_round.get("stageRoundId"), max_length=160)
+            for stage_round in stage_rounds:
+                stage_round_id = _trim_text(stage_round.get("stageRoundId"), max_length=160)
+                if stage_round is latest_round or not stage_round_id:
+                    continue
+                if _trim_text(stage_round.get("status"), max_length=80) not in RESEARCH_STAGE_ACTIVE_STATUSES:
+                    continue
+                stage_round["status"] = "superseded"
+                stage_round["supersededByStageRoundId"] = latest_round_id
+                stage_round["supersededAt"] = now
+                stage_round["updatedAt"] = now
+                warnings = [item for item in list(stage_round.get("warnings") or []) if isinstance(item, dict)]
+                if not any(_trim_text(item.get("code"), max_length=120) == "stage_round_superseded" for item in warnings):
+                    warnings.append(
+                        {
+                            "code": "stage_round_superseded",
+                            "severity": "info",
+                            "message": "A newer round of the same research stage superseded this active round.",
+                        }
+                    )
+                stage_round["warnings"] = warnings
+                superseded_pairs.append((stage_round_id, latest_round_id))
+        if superseded_pairs:
+            store["updatedAt"] = now
+            _write_json(_stage_round_store_path(team_id), store)
+    for stage_round_id, latest_round_id in superseded_pairs:
+        _record_workflow_event(
+            "research_stage_round.superseded_by_newer_round",
+            team_id,
+            fields={
+                "stageRoundId": stage_round_id,
+                "supersededByStageRoundId": latest_round_id,
+            },
+            outcome="reconciled",
+            lifecycle=True,
+        )
+    return bool(superseded_pairs)
 
 
 def _attach_source_collection_stage_card_projections(team_id: str, rounds: list[dict[str, Any]]) -> None:
@@ -19634,7 +19696,11 @@ def _source_collection_stage_task_tool_progress_from_trace(
             for tool_call in tool_calls
             if _source_collection_stage_tool_call_succeeded(tool_call)
         }
-        writeback_observed = "source_collection_stage_writeback_tool" in successful_tool_names
+        persisted_writeback_after_turn = _source_collection_stage_persisted_writeback_after_turn(task)
+        writeback_observed = (
+            "source_collection_stage_writeback_tool" in successful_tool_names
+            or persisted_writeback_after_turn
+        )
         task_create_observed = False
         completed_ids: set[str] = set()
         checklist_by_id = {
@@ -19703,6 +19769,10 @@ def _source_collection_stage_task_tool_progress_from_trace(
             progress["sources"] = sorted(call_sources)
             if call_sources == {"feedback_events"}:
                 progress["source"] = "feedback_events"
+        if persisted_writeback_after_turn:
+            progress["persistedWritebackAfterTurn"] = True
+            progress["source"] = "persisted_writeback_after_turn"
+            progress["sources"] = sorted({*progress.get("sources", []), "persisted_writeback_after_turn"})
         if not progress.get("complete"):
             progress["pendingReason"] = "stage_evidence_incomplete"
         return progress
@@ -19758,6 +19828,23 @@ def _source_collection_stage_task_tool_progress_from_trace(
     elif not progress["complete"]:
         progress["pendingReason"] = "task_update_tool_items_pending"
     return progress
+
+
+def _source_collection_stage_persisted_writeback_after_turn(task: dict[str, Any]) -> bool:
+    writeback = task.get("writeback") if isinstance(task.get("writeback"), dict) else {}
+    reconciled_from_turn = (
+        task.get("reconciledFromTurn")
+        if isinstance(task.get("reconciledFromTurn"), dict)
+        else {}
+    )
+    if not writeback or not reconciled_from_turn:
+        return False
+    reconciled_status = _trim_text(reconciled_from_turn.get("status"), max_length=80).lower()
+    if reconciled_status not in {"completed", "interrupted", "needs_continue", "needs_review"}:
+        return False
+    recorded_at = _trim_text(writeback.get("recordedAt"), max_length=120)
+    reconciled_at = _trim_text(reconciled_from_turn.get("reconciledAt"), max_length=120)
+    return bool(recorded_at and reconciled_at and recorded_at >= reconciled_at)
 
 
 def _source_collection_stage_task_trace_start_sequence(events: list[Any], task: dict[str, Any]) -> int:
