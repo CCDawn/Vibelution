@@ -6,6 +6,7 @@ import stylesSource from "./PaneCollapseHandle.styles.ts?raw";
 describe("PaneCollapseHandle", () => {
   it("renders a separator-owned centered toggle without starting resize drag", () => {
     expect(source).toContain('role="separator"');
+    expect(source).not.toContain("title={separatorLabel}");
     expect(source).toContain("stopHandleDrag");
     expect(source).toContain("event.stopPropagation()");
     expect(source).toContain("onToggle()");
@@ -19,6 +20,8 @@ describe("PaneCollapseHandle", () => {
     expect(source).toContain("ChevronLeft");
     expect(source).toContain("ChevronRight");
     expect(source).toContain("aria-pressed={collapsed}");
+    expect(source).toContain('const tooltip = `${separatorLabel} · ${label}`');
+    expect(source).toContain("tooltip={tooltip}");
   });
 
   it("keeps the collapse toggle large enough to target reliably", () => {

@@ -57,7 +57,10 @@ describe("SkillsRoute layout contract", () => {
     expect(routeSource).not.toMatch(/<input\b/);
     expect(routeSource).not.toMatch(/<select\b/);
     expect(routeSource).not.toMatch(/<textarea\b/);
-    expect(routeSource).toContain("bulkReadOnlyNoteClass");
+    expect(routeSource).toContain("disabledReason={copy.bulkReadOnlyReason}");
+    expect(routeSource).toContain("<VTooltip content={`${copy.bulkSelected}: ${skill.name}`}");
+    expect(routeSource).not.toContain("bulkReadOnlyNoteClass");
+    expect(routeSource).not.toContain("title={copy.bulkReadOnlyReason}");
     expect(routeSource).toContain("<VDenseToolbar");
     expect(routeSource).toContain("selectableRowClass");
     expect(routeSource).not.toContain('method: "POST"');

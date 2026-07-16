@@ -15,6 +15,7 @@ import {
   VStatusChip,
   VStatusStrip,
   VSurface,
+  VTooltip,
 } from "../components/vui";
 import { useShellI18n } from "../i18n/useShellI18n";
 import { AgentManagementNav } from "./AgentManagementNav";
@@ -305,6 +306,7 @@ export function SkillsRoute() {
               className={styles.primaryButtonClass}
               icon={<Copy size={14} />}
               isDisabled={!selectedSkills.length}
+              disabledReason={copy.bulkSelectVisible}
               onPress={copySelectedSkillCommands}
             >
               {copy.bulkCopyCommands}
@@ -314,17 +316,18 @@ export function SkillsRoute() {
               className={styles.filterButtonClass}
               icon={allVisibleSkillsSelected ? <Square size={14} /> : <CheckSquare size={14} />}
               isDisabled={!filteredSkills.length}
+              disabledReason={copy.emptyList}
               onPress={allVisibleSkillsSelected ? clearSelectedSkills : selectVisibleSkills}
             >
               {allVisibleSkillsSelected ? copy.bulkClear : copy.bulkSelectVisible}
             </VButton>
-            <span className={styles.bulkReadOnlyNoteClass}>{copy.bulkReadOnlyReason}</span>
             <VButton
               type="button"
               className={styles.filterButtonClass}
               icon={<Ban size={14} />}
               isDisabled
-              title={copy.bulkReadOnlyReason}
+              tooltip={copy.bulkReadOnlyReason}
+              disabledReason={copy.bulkReadOnlyReason}
             >
               {copy.bulkEdit}
             </VButton>
@@ -333,7 +336,8 @@ export function SkillsRoute() {
               className={styles.filterButtonClass}
               icon={<Ban size={14} />}
               isDisabled
-              title={copy.bulkReadOnlyReason}
+              tooltip={copy.bulkReadOnlyReason}
+              disabledReason={copy.bulkReadOnlyReason}
             >
               {copy.bulkDelete}
             </VButton>
@@ -351,16 +355,18 @@ export function SkillsRoute() {
                 const selected = selectedSkillCommands.has(skill.command);
                 return (
                   <div key={`${skill.path}-${skill.hash}`} className={styles.selectableRowClass}>
-                    <label className={styles.rowSelectClass} title={`${copy.bulkSelected}: ${skill.name}`}>
-                      <VNativeInput
-                        className={styles.hiddenCheckboxClass}
-                        type="checkbox"
-                        checked={selected}
-                        aria-label={`${copy.bulkSelected}: ${skill.name}`}
-                        onChange={(event) => toggleSkillSelection(skill.command, event.target.checked)}
-                      />
-                      {selected ? <CheckSquare size={15} /> : <Square size={15} />}
-                    </label>
+                    <VTooltip content={`${copy.bulkSelected}: ${skill.name}`} width="compact">
+                      <label className={styles.rowSelectClass}>
+                        <VNativeInput
+                          className={styles.hiddenCheckboxClass}
+                          type="checkbox"
+                          checked={selected}
+                          aria-label={`${copy.bulkSelected}: ${skill.name}`}
+                          onChange={(event) => toggleSkillSelection(skill.command, event.target.checked)}
+                        />
+                        {selected ? <CheckSquare size={15} /> : <Square size={15} />}
+                      </label>
+                    </VTooltip>
                     <VButton
                       type="button"
                       className={activeCommand === skill.command ? `${styles.skillButtonBaseClass} ${styles.skillButtonActiveClass}` : styles.skillButtonBaseClass}
@@ -415,7 +421,9 @@ export function SkillsRoute() {
                 <span className={styles.metaLabelClass}>{copy.aliases}</span>
                 <strong className={styles.metaValueClass}>{activeSkill.aliases.join(", ") || "-"}</strong>
                 <span className={styles.metaLabelClass}>{copy.path}</span>
-                <strong className={styles.metaValueClass} title={activeSkill.path}>{activeSkill.path}</strong>
+                <VTooltip content={activeSkill.path} width="wide">
+                  <strong className={styles.metaValueClass} tabIndex={0}>{activeSkill.path}</strong>
+                </VTooltip>
                 <span className={styles.metaLabelClass}>{copy.hash}</span>
                 <strong className={styles.metaValueClass}>{activeSkill.hash}</strong>
                 <span className={styles.metaLabelClass}>{copy.size}</span>

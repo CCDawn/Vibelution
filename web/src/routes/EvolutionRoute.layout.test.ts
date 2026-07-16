@@ -212,9 +212,12 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).toContain("decision\\s*=\\s*REJECT");
     expect(routeSource).toContain("agent_judgment\\s+fail");
     expect(routeSource).toContain("风险 gate");
-    expect(runRecordsPanelSource).toContain('title={run.nextAction || ""}');
-    expect(runRecordsPanelSource).toContain('title={selectedRun.outcomeSemantics.runtimeExplanation}');
-    expect(runRecordsPanelSource).toContain('title={selectedRun.riskReasons.join(" / ")}');
+    expect(runRecordsPanelSource).toContain("tooltip={run.nextAction || undefined}");
+    expect(runRecordsPanelSource).not.toContain('title={run.nextAction || ""}');
+    expect(runRecordsPanelSource).toContain('content={selectedRun.outcomeSemantics.runtimeExplanation}');
+    expect(runRecordsPanelSource).toContain('content={selectedRun.riskReasons.join(" / ")}');
+    expect(runRecordsPanelSource).not.toContain('title={selectedRun.outcomeSemantics.runtimeExplanation}');
+    expect(runRecordsPanelSource).not.toContain('title={selectedRun.riskReasons.join(" / ")}');
     expect(routeSource).toContain("proposalDetailQuery.data.supervised.riskReasons.join");
     expect(dictionarySource).toContain('supervisedFlowRunsHint: "同一改良 Agent 提建议并改候选"');
     expect(dictionarySource).toContain('decision: "治理结论"');
@@ -633,6 +636,10 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).toContain("styles.closedLoopLaunchBlock");
     expect(routeSource).toContain('t("closedLoopLaunchPanelTitle")');
     expect(routeSource).toContain('t("closedLoopLaunchPanelHint")');
+    expect(routeSource).toContain("disabledReason={supervisedStartDisabledReason}");
+    expect(routeSource).toContain("disabledReason={simulationStartDisabledReason}");
+    expect(routeSource).not.toContain('title={t("caseLimitHint")}');
+    expect(routeSource).not.toContain('title={t("closedLoopLaunchPanelHint")}');
     expect(routeSource).toContain("styles.closedLoopModeBadge");
     expect(routeSource).toContain("当前只演练编排链路，不调用真实 LLM 自改。");
     expect(dictionarySource).toContain("结果会进入下方候选审核，不会自动合并。");
