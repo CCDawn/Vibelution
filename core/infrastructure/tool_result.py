@@ -605,6 +605,63 @@ def _compact_source_collection_context_result(result_str: str, max_chars: int, c
         content = json.dumps(compact, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
         if len(content) <= max_chars + 700:
             return content
+        # An evidence-mode result must never fall through to the generic
+        # preview-only fallback below.  In particular, relation mapping needs
+        # the anchor for every model-visible candidate to create reviewable
+        # edges.  Reduce the visible page before removing that anchor.
+        for candidate_count in range(len(compact_candidates), 0, -1):
+            evidence_candidates = [
+                {
+                    key: value
+                    for key, value in {
+                        "candidateId": str(item.get("candidateId") or "")[:160],
+                        "title": str(item.get("title") or "")[:80],
+                        "locator": str(item.get("locator") or "")[:120],
+                        "evidenceRefs": list(item.get("evidenceRefs") or [])[:1],
+                        "evidenceScope": item.get("evidenceScope"),
+                    }.items()
+                    if value not in ("", [], None)
+                }
+                for item in compact_candidates[:candidate_count]
+            ]
+            visible_page = dict(page)
+            page_offset = int(page.get("offset") or 0)
+            page_total = int(page.get("total") or len(compact_candidates))
+            next_offset = page_offset + len(evidence_candidates)
+            visible_page["returned"] = len(evidence_candidates)
+            visible_page["hasMore"] = next_offset < page_total
+            visible_page["nextOffset"] = next_offset if visible_page["hasMore"] else None
+            evidence_usage = {
+                "readTool": "source_collection_context_tool",
+                "writebackTool": "source_collection_stage_writeback_tool",
+                "evidenceInstruction": str(raw_usage.get("evidenceInstruction") or "")[:320],
+            }
+            if visible_page["hasMore"]:
+                evidence_usage["continuationHint"] = (
+                    "source_collection_context_tool("
+                    f"candidate_offset={next_offset},candidate_limit={candidate_count},context_mode={raw_context_mode})"
+                )
+            evidence_only = {
+                "status": payload.get("status"),
+                "contextKind": payload.get("contextKind"),
+                "contextMode": f"{raw_context_mode}_evidence_anchor_only",
+                "fieldMode": "evidence_source",
+                "candidateFieldsTruncated": True,
+                "doNotUsePreviewAsEvidence": False,
+                "visibleCandidateCount": len(evidence_candidates),
+                "omittedReturnedCandidateCount": max(0, int(page.get("returned") or 0) - len(evidence_candidates)),
+                "candidatePage": visible_page,
+                "candidateIds": [item.get("candidateId") for item in evidence_candidates if item.get("candidateId")],
+                "candidates": evidence_candidates,
+                "usage": {key: value for key, value in evidence_usage.items() if value},
+                "truncationGuard": {
+                    "originalLength": len(result_str),
+                    "message": "structured_compact; evidence anchors retained while the visible candidate page was reduced",
+                },
+            }
+            content = json.dumps(evidence_only, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+            if len(content) <= max_chars + 700:
+                return content
     compact["candidates"] = [
         {
             "candidateId": str(item.get("candidateId") or "")[:160],
