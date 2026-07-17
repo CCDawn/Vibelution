@@ -16,6 +16,7 @@ from core.logging.setup import (
     setup_logging,
     print_evolution_time,
 )
+from core.logging.pipeline_metrics import LoggingPipelineMetrics, pipeline_metrics
 
 # 向后兼容别名。部分基础设施模块仍使用 `from core.logging import debug`。
 from core.logging.logger import debug
