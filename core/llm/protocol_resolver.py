@@ -73,6 +73,7 @@ class ResolvedProtocolRoute:
             "requiresStringContent": self.compat.requires_string_content,
             "allowAssistantPrefill": self.compat.allow_assistant_prefill,
             "responsesContinuation": self.compat.responses_continuation,
+            "responsesWebsocket": self.compat.responses_websocket,
         }
 
 

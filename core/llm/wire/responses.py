@@ -157,6 +157,7 @@ class ResponsesDecodedStream:
 class ResponsesWireAdapter:
     adapter_id = "responses"
     wire_protocol = WireProtocol.RESPONSES
+    _WEBSOCKET_TRANSPORT_KEY = "_vibelution_responses_websocket"
 
     def encode_request(self, request: SemanticModelRequest, *, route: Any) -> BuiltPayload:
         if request.replay_state is not None:
@@ -171,32 +172,41 @@ class ResponsesWireAdapter:
         replay_state = request.replay_state
         compat = getattr(route, "compat", None)
         continuation_supported = bool(getattr(compat, "responses_continuation", False))
+        websocket_enabled = bool(getattr(compat, "responses_websocket", False))
+        continuation_input_supported = continuation_supported or websocket_enabled
         use_tool_continuation = bool(
             replay_state is not None
             and replay_state.response_id
             and replay_state.pending_call_ids
-            and continuation_supported
+            and continuation_input_supported
         )
         use_turn_continuation = bool(
             replay_state is not None
             and replay_state.response_id
             and not replay_state.pending_call_ids
-            and continuation_supported
+            and continuation_input_supported
         )
-        encoded_input = (
+        full_input = (
+            self._encode_messages(request, require_all_replay_referenced=False)
+            if websocket_enabled
+            else None
+        )
+        continuation_input = (
             self._encode_messages_after_previous_assistant(request)
             if use_turn_continuation
             else None
         )
-        if encoded_input is None:
+        if continuation_input is None:
             use_turn_continuation = False
-            encoded_input = self._encode_messages(request)
+            continuation_input = full_input or self._encode_messages(request)
+        if full_input is None:
+            full_input = continuation_input
         if use_tool_continuation:
             pending_call_ids = tuple(replay_state.pending_call_ids)
             pending_call_id_set = set(pending_call_ids)
             outputs_by_call_id: dict[str, dict[str, Any]] = {}
             output_positions: list[int] = []
-            for position, item in enumerate(encoded_input):
+            for position, item in enumerate(full_input):
                 item_dict = _as_dict(item)
                 if str(item_dict.get("type") or "") != "function_call_output":
                     continue
@@ -216,21 +226,32 @@ class ResponsesWireAdapter:
             latest_output_position = max(output_positions)
             new_user_input = [
                 _as_dict(item)
-                for item in encoded_input[latest_output_position + 1 :]
+                for item in full_input[latest_output_position + 1 :]
                 if str(_as_dict(item).get("role") or "") == "user"
             ]
-            encoded_input = [
+            continuation_input = [
                 *(outputs_by_call_id[call_id] for call_id in pending_call_ids),
                 *new_user_input,
             ]
+        encoded_input = full_input if websocket_enabled else continuation_input
         payload: dict[str, Any] = {
             "model": str(getattr(route, "effective_model", "") or ""),
             "input": encoded_input,
             "max_output_tokens": request.settings.max_output_tokens,
             "stream": request.settings.stream,
         }
-        if use_tool_continuation or use_turn_continuation:
+        if continuation_supported and not websocket_enabled and (use_tool_continuation or use_turn_continuation):
             payload["previous_response_id"] = replay_state.response_id
+        if websocket_enabled:
+            websocket_options: dict[str, Any] = {"enabled": True}
+            if use_tool_continuation or use_turn_continuation:
+                websocket_options.update(
+                    {
+                        "previous_response_id": replay_state.response_id,
+                        "input": continuation_input,
+                    }
+                )
+            payload[self._WEBSOCKET_TRANSPORT_KEY] = websocket_options
         if request.tools:
             payload["tools"] = [
                 {
@@ -294,7 +315,12 @@ class ResponsesWireAdapter:
             for result in results
         ]
 
-    def _encode_messages(self, request: SemanticModelRequest) -> list[Any]:
+    def _encode_messages(
+        self,
+        request: SemanticModelRequest,
+        *,
+        require_all_replay_referenced: bool = True,
+    ) -> list[Any]:
         replay_by_id = {
             item.item_id: item
             for item in (request.replay_state.opaque_items if request.replay_state is not None else ())
@@ -305,7 +331,9 @@ class ResponsesWireAdapter:
             for part in message.parts
             if isinstance(part, ReasoningReplayPart)
         }
-        if any(item_id not in referenced_replay_ids for item_id in replay_by_id):
+        if require_all_replay_referenced and any(
+            item_id not in referenced_replay_ids for item_id in replay_by_id
+        ):
             raise ValueError("opaque replay items must be explicitly referenced by ReasoningReplayPart")
         encoded: list[Any] = []
         for message in request.messages:
