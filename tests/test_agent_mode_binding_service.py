@@ -106,6 +106,45 @@ def test_mode_binding_payload_reuses_loaded_agent_options_without_per_reference_
     assert "profileId" not in payload["agentRefs"][research_agent["agentId"]]
 
 
+def test_agent_options_uses_summary_projection(monkeypatch):
+    calls = []
+
+    def _list_agents(**kwargs):
+        calls.append(kwargs)
+        return [
+            {
+                "agentId": "agent-chat",
+                "agentCode": "chat",
+                "displayName": "对话 Agent",
+                "primaryMode": "chat",
+                "roleKey": "assistant",
+                "llmBindings": {"dialogue": {"modelId": "model-primary"}},
+                "promptTemplateId": "prompt-chat",
+                "directSessionId": "session-chat",
+                "metadata": {"source": "test"},
+            }
+        ]
+
+    monkeypatch.setattr(agent_mode_binding_service, "list_agents", _list_agents)
+
+    options = agent_mode_binding_service._agent_options()
+
+    assert calls == [{"include_archived": False, "detail": "summary"}]
+    assert options == [
+        {
+            "agentId": "agent-chat",
+            "agentCode": "chat",
+            "displayName": "对话 Agent",
+            "primaryMode": "chat",
+            "roleKey": "assistant",
+            "llmBindings": {"dialogue": {"modelId": "model-primary"}},
+            "promptTemplateId": "prompt-chat",
+            "directSessionId": "session-chat",
+            "metadata": {"source": "test"},
+        }
+    ]
+
+
 def test_mode_binding_repair_removes_ineligible_chat_references(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     chat_agent = agent_directory_service.create_agent_instance(
