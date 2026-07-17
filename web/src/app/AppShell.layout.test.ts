@@ -65,11 +65,14 @@ describe("AppShell layout contract", () => {
     expect(statusGuideSource).toContain("lifecycleProofCard");
     expect(statusGuideSource).toContain("lifecycleStateLabel");
     expect(statusGuideSource).toContain("systemFrontendPossible_connected");
-    expect(statusGuideSource).toContain('title={t("systemStatusGuideHint")}');
-    expect(statusGuideSource).toContain("title={item.note}");
+    expect(statusGuideSource).toContain('import { VTooltip } from "../components/vui"');
+    expect(statusGuideSource).toContain('<VTooltip content={t("systemStatusGuideHint")} width="wide">');
+    expect(statusGuideSource).toContain('<VTooltip content={item.note} width="wide">');
     expect(statusGuideSource).toContain("data-current={state.label === item.value ? \"true\" : undefined}");
-    expect(statusGuideSource).toContain("title={state.detail}");
-    expect(statusGuideSource).toContain("title={component.detail}");
+    expect(statusGuideSource).toContain("content={state.detail}");
+    expect(statusGuideSource).toContain("content={component.detail}");
+    expect(statusGuideSource).toContain("tabIndex={0}");
+    expect(statusGuideSource).not.toContain("title=");
     expect(statusGuideSource).not.toContain("statusGuideNote");
     expect(statusGuideStyles.statusGuidePanel).toBeTypeOf("string");
     expect(statusGuideStyles.lifecycleProofCard).toBeTypeOf("string");
