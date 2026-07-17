@@ -165,6 +165,44 @@ describe("projectAgentMessageTimelineMessages", () => {
     expect(projection.rowIdentities[0].rowKey).toBe("assistant-turn:turn-1");
   });
 
+  it("keeps the first active Agent frame after its optimistic user boundary", () => {
+    const optimisticUser: ConversationMessage = {
+      id: "optimistic-user-submission-1",
+      role: "user",
+      content: "继续",
+      timestamp: "2026-06-29T10:00:01Z",
+      metadata: {
+        clientSubmissionId: "submission-1",
+        optimisticUserMessage: true,
+      },
+    };
+    const activeTurn = assistantMessage("active-turn", {
+      content: "",
+      streaming: true,
+      timestamp: "2026-06-29T10:00:00Z",
+      streamStage: "agent_prepare",
+      metadata: {
+        kind: "session_active_turn_layer",
+        renderKey: "session-1-active",
+        turnId: "optimistic-submit",
+      },
+    });
+
+    const projection = projectAgentMessageTimelineMessages({
+      timelineMessages: [optimisticUser],
+      activeTurnMessage: activeTurn,
+    });
+
+    expect(projection.messages.map((message) => message.id)).toEqual([
+      "optimistic-user-submission-1",
+      "active-turn",
+    ]);
+    expect(projection.rowIdentities.map((row) => row.rowKey)).toEqual([
+      "user-submission:submission-1",
+      "assistant-active:session-1-active",
+    ]);
+  });
+
   it("drops a stale live overlay after a committed same-turn answer arrives", () => {
     const liveOverlay = assistantMessage("live-overlay", {
       content: "你好！我在。需要我帮你做什么？",

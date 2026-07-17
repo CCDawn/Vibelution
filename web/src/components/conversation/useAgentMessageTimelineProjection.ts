@@ -418,6 +418,40 @@ function hasCommittedAssistantAnswerForActiveTurn(
   return Boolean(committedAssistantAnswerForTurn(messages, activeTurnMessage));
 }
 
+function keepActiveTurnAfterLatestUserBoundary(
+  messages: ConversationMessage[],
+  activeTurnMessage: ConversationMessage,
+) {
+  function latestUserMessageIndex(items: ConversationMessage[]) {
+    for (let index = items.length - 1; index >= 0; index -= 1) {
+      if (items[index].role === "user") {
+        return index;
+      }
+    }
+    return -1;
+  }
+
+  const chronologicalMessages = chronologicalConversationMessages([
+    ...messages,
+    activeTurnMessage,
+  ]);
+  const activeTurnIndex = chronologicalMessages.indexOf(activeTurnMessage);
+  const latestUserIndex = latestUserMessageIndex(chronologicalMessages);
+  if (
+    activeTurnIndex < 0
+    || latestUserIndex < 0
+    || activeTurnIndex > latestUserIndex
+  ) {
+    return chronologicalMessages;
+  }
+  const reorderedMessages = chronologicalMessages.filter(
+    (message) => message !== activeTurnMessage,
+  );
+  const userBoundaryIndex = latestUserMessageIndex(reorderedMessages);
+  reorderedMessages.splice(userBoundaryIndex + 1, 0, activeTurnMessage);
+  return reorderedMessages;
+}
+
 function withoutSupersededAssistantAnswer(message: ConversationMessage): ConversationMessage {
   return {
     ...message,
@@ -492,12 +526,13 @@ export function projectAgentMessageTimelineMessages({
     if (!hasVisibleProjectionMessageContent(mergedActiveTurnMessage) && !keepStreamingActiveTurnPlaceholder) {
       return projectTimelineProcessMessages(dedupedTimelineMessages);
     }
-    return projectTimelineProcessMessages(chronologicalConversationMessages([
-      ...dedupedTimelineMessages,
-      keepStreamingActiveTurnPlaceholder
-        ? compactStreamingActiveTurnPlaceholderMessage(mergedActiveTurnMessage)
-        : mergedActiveTurnMessage,
-    ]));
+    const visibleActiveTurnMessage = keepStreamingActiveTurnPlaceholder
+      ? compactStreamingActiveTurnPlaceholderMessage(mergedActiveTurnMessage)
+      : mergedActiveTurnMessage;
+    return projectTimelineProcessMessages(keepActiveTurnAfterLatestUserBoundary(
+      dedupedTimelineMessages,
+      visibleActiveTurnMessage,
+    ));
   })();
   const projectedAgentMessages = projectedMessages.map(conversationMessageToAgentMessage);
 
