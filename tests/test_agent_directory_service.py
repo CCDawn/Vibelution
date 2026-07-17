@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from core.web.services import agent_directory_service
@@ -117,3 +119,37 @@ def test_repair_reuses_shared_workspace_and_avatar_inventory(tmp_path, monkeypat
     assert avatar_inventory_calls == 1
     assert tool_policy_normalization_calls <= 5
     assert tool_policy_normalization_calls < len(repaired["agents"])
+
+
+def test_ensure_agent_workspace_only_creates_missing_directories(tmp_path, monkeypatch):
+    agents_root = tmp_path / "workspace" / "agents"
+    workspace = agents_root / "agent-test"
+    workspace.mkdir(parents=True)
+    for subdir in agent_directory_service.AGENT_WORKSPACE_SUBDIRS:
+        (workspace / subdir).mkdir()
+
+    monkeypatch.setattr(agent_directory_service, "_resolve_project_path", lambda _value: workspace)
+    monkeypatch.setattr(
+        agent_directory_service,
+        "_workspace_path",
+        lambda *_parts, **_kwargs: agents_root,
+    )
+    mkdir_calls: list[Path] = []
+    real_mkdir = Path.mkdir
+
+    def tracked_mkdir(path, *args, **kwargs):
+        mkdir_calls.append(path)
+        return real_mkdir(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "mkdir", tracked_mkdir)
+
+    agent_directory_service._ensure_agent_workspace("workspace/agents/agent-test", ensure_shared=False)
+
+    assert mkdir_calls == []
+
+    missing = workspace / agent_directory_service.AGENT_WORKSPACE_SUBDIRS[0]
+    missing.rmdir()
+    agent_directory_service._ensure_agent_workspace("workspace/agents/agent-test", ensure_shared=False)
+
+    assert mkdir_calls == [missing]
+    assert missing.is_dir()
