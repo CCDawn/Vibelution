@@ -95,11 +95,13 @@ function assistantCellsOverlap(
 type CodexTranscriptMergeOptions = {
   previousEphemeral?: boolean;
   nextEphemeral?: boolean;
+  dedupeDurableToolReplays?: boolean;
 };
 
 type CodexTranscriptCellEntry = {
   cell: CodexTranscriptProjection["cells"][number];
   ephemeral: boolean;
+  groupIndex: number;
 };
 
 function isEphemeralCodexTranscript(transcript: CodexTranscriptProjection | undefined) {
@@ -127,6 +129,25 @@ function toolCellSemanticKey(cell: CodexTranscriptProjection["cells"][number]) {
   ].join("\u001f");
 }
 
+function toolCellReplayKey(cell: CodexTranscriptProjection["cells"][number]) {
+  const semanticKey = toolCellSemanticKey(cell);
+  if (!semanticKey) {
+    return "";
+  }
+  const lifecycleDetails = (cell.toolLifecycleModel?.toolCalls ?? [])
+    .map((toolCall) => [
+      normalizedAssistantCellText(toolCall.rawToolName ?? toolCall.title),
+      normalizedAssistantCellText(toolCall.summary),
+      normalizedAssistantCellText(toolCall.resultPreview),
+    ].join("\u001e"))
+    .join("\u001d");
+  return [
+    semanticKey,
+    normalizedAssistantCellText(cell.summary ?? cell.text),
+    lifecycleDetails,
+  ].join("\u001f");
+}
+
 function mergeCodexTranscriptCellEntries(
   previous: CodexTranscriptProjection | undefined,
   next: CodexTranscriptProjection | undefined,
@@ -144,13 +165,17 @@ function mergeCodexTranscriptCellEntries(
       ephemeral: options.nextEphemeral ?? isEphemeralCodexTranscript(next),
     },
   ];
-  for (const group of groups) {
+  for (const [groupIndex, group] of groups.entries()) {
     for (const cell of group.cells ?? []) {
       const key = projectionItemIdentity(cell);
       const existingIndex = indexes.get(key);
       if (existingIndex === undefined) {
         indexes.set(key, entries.length);
-        entries.push({ cell, ephemeral: group.ephemeral || isEphemeralCodexTranscriptCell(cell) });
+        entries.push({
+          cell,
+          ephemeral: group.ephemeral || isEphemeralCodexTranscriptCell(cell),
+          groupIndex,
+        });
         continue;
       }
       const existing = entries[existingIndex];
@@ -158,7 +183,7 @@ function mergeCodexTranscriptCellEntries(
       if (!existing.ephemeral && ephemeral) {
         continue;
       }
-      entries[existingIndex] = { cell, ephemeral };
+      entries[existingIndex] = { cell, ephemeral, groupIndex };
     }
   }
   return entries;
@@ -172,21 +197,30 @@ function mergeCodexTranscriptCells(
   const mergedEntries = mergeCodexTranscriptCellEntries(previous, next, options);
   const cells: CodexTranscriptProjection["cells"] = [];
   const cellEphemeral: boolean[] = [];
-  const matchedDurableToolCells = new Set<number>();
+  const cellGroupIndexes: number[] = [];
+  const matchedToolCells = new Set<number>();
   for (const entry of mergedEntries) {
-    const { cell, ephemeral } = entry;
+    const { cell, ephemeral, groupIndex } = entry;
     const toolSemanticKey = toolCellSemanticKey(cell);
     if (toolSemanticKey) {
       const matchingIndex = cells.findIndex((candidate, index) => (
-        !matchedDurableToolCells.has(index)
-        && cellEphemeral[index] !== ephemeral
+        !matchedToolCells.has(index)
         && toolCellSemanticKey(candidate) === toolSemanticKey
+        && (
+          cellEphemeral[index] !== ephemeral
+          || (
+            options.dedupeDurableToolReplays
+            && cellGroupIndexes[index] !== groupIndex
+            && toolCellReplayKey(candidate) === toolCellReplayKey(cell)
+          )
+        )
       ));
       if (matchingIndex >= 0) {
-        matchedDurableToolCells.add(matchingIndex);
-        if (!ephemeral) {
+        matchedToolCells.add(matchingIndex);
+        if (!ephemeral && cellEphemeral[matchingIndex]) {
           cells[matchingIndex] = cell;
           cellEphemeral[matchingIndex] = false;
+          cellGroupIndexes[matchingIndex] = groupIndex;
         }
         continue;
       }
@@ -195,6 +229,7 @@ function mergeCodexTranscriptCells(
     if (overlappingIndex < 0) {
       cells.push(cell);
       cellEphemeral.push(ephemeral);
+      cellGroupIndexes.push(groupIndex);
       continue;
     }
     if (
@@ -207,6 +242,7 @@ function mergeCodexTranscriptCells(
     ) {
       cells[overlappingIndex] = cell;
       cellEphemeral[overlappingIndex] = ephemeral;
+      cellGroupIndexes[overlappingIndex] = groupIndex;
     }
   }
   return cells;
@@ -382,6 +418,7 @@ function mergeProcessProjectionMessages(previous: ConversationMessage, next: Con
     codexTranscript: mergeCodexTranscripts(previous.codexTranscript, next.codexTranscript, previous.id, {
       previousEphemeral: isEphemeralProjectionMessage(previous),
       nextEphemeral: isEphemeralProjectionMessage(next),
+      dedupeDurableToolReplays: isDurableToolReplayBoundary(previous, next),
     }),
     metadata: {
       ...(previous.metadata ?? {}),
@@ -392,6 +429,16 @@ function mergeProcessProjectionMessages(previous: ConversationMessage, next: Con
       ])],
     },
   };
+}
+
+function isDurableToolReplayBoundary(previous: ConversationMessage, next: ConversationMessage) {
+  return Boolean(
+    !isEphemeralProjectionMessage(previous)
+    && !isEphemeralProjectionMessage(next)
+    && String(previous.metadata?.kind ?? "").trim() === "tool_result"
+    && String(next.metadata?.kind ?? "").trim() === "assistant_item_committed"
+    && String(answerProjectionContent(next) ?? "").trim(),
+  );
 }
 
 function isEphemeralProjectionMessage(message: ConversationMessage) {
