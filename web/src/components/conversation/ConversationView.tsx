@@ -1866,49 +1866,14 @@ export function ConversationView({
 
   function codexTranscriptCompletedToolSummary(cell: CodexTranscriptCell) {
     const toolCall = cell.toolLifecycleModel?.toolCalls?.[0];
-    const candidates = [
-      toolCall?.resultPreview,
-      toolCall?.summary,
-      cell.summary,
-      cell.text,
-    ];
-    for (const candidate of candidates) {
-      const summary = compactCodexTranscriptResult(candidate, toolCall?.rawToolName || cell.title);
-      if (summary) {
-        return summary;
-      }
-    }
-    return "";
-  }
-
-  function compactCodexTranscriptResult(value: string | undefined, toolName: string | undefined) {
-    const normalized = String(value ?? "").replace(/\s+/g, " ").trim();
-    if (!normalized || normalized === String(toolName ?? "").trim()) {
-      return "";
-    }
-    if (normalized.startsWith("{") || normalized.startsWith("[")) {
-      try {
-        const parsed = JSON.parse(normalized) as Record<string, unknown>;
-        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-          const semantic = [parsed.message, parsed.summary, parsed.result, parsed.status]
-            .find((item) => typeof item === "string" && item.trim());
-          if (typeof semantic === "string") {
-            return compactCodexTranscriptText(semantic);
-          }
-        }
-        return lang === "zh" ? "已返回结构化结果" : "Structured result returned";
-      } catch {
-        return compactCodexTranscriptText(normalized);
-      }
-    }
-    return compactCodexTranscriptText(normalized);
-  }
-
-  function compactCodexTranscriptText(value: string) {
-    const maxLength = 180;
-    return value.length > maxLength
-      ? `${value.slice(0, maxLength - 1).trimEnd()}…`
-      : value;
+    return completedToolPresentationSummary({
+      toolSummary: toolCall?.summary,
+      cellSummary: cell.summary,
+      resultPreview: toolCall?.resultPreview,
+      cellText: cell.text,
+      toolName: toolCall?.rawToolName || cell.title,
+      language: lang,
+    });
   }
 
   function codexTranscriptCellIcon(cell: CodexTranscriptCell) {
@@ -1949,28 +1914,7 @@ export function ConversationView({
   }
 
   function codexTranscriptToolLabel(name: string) {
-    const normalized = String(name ?? "").trim();
-    const lower = normalized.toLowerCase();
-    const exactLabels: Record<string, string> = {
-      cli_tool: lang === "zh" ? "命令" : "Command",
-      grep_search_tool: lang === "zh" ? "搜索" : "Search",
-      read_file_tool: lang === "zh" ? "读取文件" : "Read file",
-      glob_tool: lang === "zh" ? "列出文件" : "List files",
-      code_symbol_tool: lang === "zh" ? "代码图谱" : "Code graph",
-      search_code_tool: lang === "zh" ? "搜索代码" : "Search code",
-      get_git_status_summary_tool: lang === "zh" ? "Git 状态" : "Git status",
-      get_recent_changes_tool: lang === "zh" ? "查看最近改动" : "Recent changes",
-    };
-    if (exactLabels[lower]) {
-      return exactLabels[lower];
-    }
-    if (lower.includes("read") || lower.includes("file")) {
-      return lang === "zh" ? "读取" : "Read";
-    }
-    if (lower.includes("search")) {
-      return lang === "zh" ? "搜索" : "Search";
-    }
-    return normalized || (lang === "zh" ? "工具调用" : "Tool call");
+    return conversationToolPresentationLabel(name, lang);
   }
 
   function codexTranscriptCellMeta(cell: CodexTranscriptCell) {
@@ -3873,3 +3817,7 @@ function formattedCodeBlockContent(content: string, language?: string) {
     return raw;
   }
 }
+import {
+  completedToolPresentationSummary,
+  conversationToolPresentationLabel,
+} from "./conversationToolPresentation";
