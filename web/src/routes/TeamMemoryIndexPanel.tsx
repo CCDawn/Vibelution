@@ -63,7 +63,11 @@ export function TeamMemoryIndexPanel({
           </div>
         ) : null}
         {members.map((member) => (
-          <section key={member.id} className={styles.teamMemoryMemberCard}>
+          <section
+            key={member.id}
+            className={styles.teamMemoryMemberCard}
+            aria-label={`${member.agentName} · ${member.roleLabel} · ${member.statusLabel}`}
+          >
             <div className={styles.teamMemoryMemberIdentity}>
               <strong>{member.agentName}</strong>
               <span>{member.agentCode}</span>
