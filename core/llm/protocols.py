@@ -60,6 +60,7 @@ class CompatPolicy:
     tool_choice_mode: str = "auto"
     stream_usage_options: bool = False
     responses_continuation: bool = False
+    responses_websocket: bool = False
 
     @classmethod
     def from_raw(cls, raw: Any) -> "CompatPolicy":
@@ -75,6 +76,7 @@ class CompatPolicy:
             tool_choice_mode=str(raw.get("toolChoiceMode", raw.get("tool_choice_mode", default.tool_choice_mode)) or "auto").strip().lower(),
             stream_usage_options=bool(raw.get("streamUsageOptions", raw.get("stream_usage_options", default.stream_usage_options))),
             responses_continuation=bool(raw.get("responsesContinuation", raw.get("responses_continuation", default.responses_continuation))),
+            responses_websocket=bool(raw.get("responsesWebsocket", raw.get("responses_websocket", default.responses_websocket))),
         )
 
     def merged(self, override: "CompatPolicy", *, override_fields: set[str] | None = None) -> "CompatPolicy":
@@ -88,6 +90,7 @@ class CompatPolicy:
             tool_choice_mode=override.tool_choice_mode if "tool_choice_mode" in explicit else self.tool_choice_mode,
             stream_usage_options=override.stream_usage_options if "stream_usage_options" in explicit else self.stream_usage_options,
             responses_continuation=override.responses_continuation if "responses_continuation" in explicit else self.responses_continuation,
+            responses_websocket=override.responses_websocket if "responses_websocket" in explicit else self.responses_websocket,
         )
 
     def to_log_dict(self) -> Dict[str, Any]:
@@ -100,6 +103,7 @@ class CompatPolicy:
             "toolChoiceMode": self.tool_choice_mode,
             "streamUsageOptions": self.stream_usage_options,
             "responsesContinuation": self.responses_continuation,
+            "responsesWebsocket": self.responses_websocket,
         }
 
 
@@ -123,6 +127,8 @@ def compat_override_fields(raw: Any) -> set[str]:
         "stream_usage_options": "stream_usage_options",
         "responsesContinuation": "responses_continuation",
         "responses_continuation": "responses_continuation",
+        "responsesWebsocket": "responses_websocket",
+        "responses_websocket": "responses_websocket",
     }
     return {mapping[key] for key in raw if key in mapping}
 

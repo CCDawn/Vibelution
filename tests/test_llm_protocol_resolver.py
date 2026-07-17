@@ -420,6 +420,24 @@ def test_v2_model_compat_enables_responses_continuation() -> None:
     assert route.log_summary()["responsesContinuation"] is True
 
 
+def test_v2_model_compat_enables_responses_websocket() -> None:
+    provider = _v2_provider()
+    profile = LLMProfile(profile_id="primary", provider_id="relay", model="gpt-a")
+
+    route = resolve_model_protocol(
+        profile,
+        provider,
+        model_entry={
+            "model_ref": "relay/gpt-a",
+            "model": "gpt-a",
+            "compat": {"responsesWebsocket": True},
+        },
+    )
+
+    assert route.compat.responses_websocket is True
+    assert route.log_summary()["responsesWebsocket"] is True
+
+
 def test_v2_driver_declaration_is_used_when_provider_default_is_empty() -> None:
     provider = _v2_provider(
         driver="anthropic",

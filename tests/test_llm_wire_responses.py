@@ -23,7 +23,7 @@ from core.llm.types import CanonicalItemIdentity, CanonicalToolCall, CanonicalTo
 from core.llm.wire.responses import ResponsesWireAdapter
 
 
-def route(*, responses_continuation: bool = False):
+def route(*, responses_continuation: bool = False, responses_websocket: bool = False):
     return SimpleNamespace(
         adapter_id="responses",
         wire_protocol=WireProtocol.RESPONSES,
@@ -31,7 +31,10 @@ def route(*, responses_continuation: bool = False):
         model_id="relay_gpt_5_6_luna",
         effective_model="gpt-5.6-luna",
         runtime_endpoint="https://relay.example.test/v1",
-        compat=SimpleNamespace(responses_continuation=responses_continuation),
+        compat=SimpleNamespace(
+            responses_continuation=responses_continuation,
+            responses_websocket=responses_websocket,
+        ),
     )
 
 
@@ -251,6 +254,51 @@ def test_responses_stateful_turn_continuation_sends_only_context_after_previous_
         {"role": "system", "content": [{"type": "input_text", "text": "current runtime context"}]},
         {"role": "user", "content": [{"type": "input_text", "text": "follow up"}]},
     ]
+
+
+def test_responses_websocket_keeps_full_http_payload_and_sidecars_incremental_input():
+    current_route = route(responses_websocket=True)
+    replay_state = ProviderReplayState(
+        issuer="responses",
+        provider_id=current_route.provider_id,
+        endpoint_fingerprint=endpoint_fingerprint(current_route.runtime_endpoint),
+        model_id=current_route.model_id,
+        wire_protocol=current_route.wire_protocol,
+        opaque_items=(),
+        response_id="resp-previous",
+    )
+    request = SemanticModelRequest(
+        scope=scope(2),
+        messages=(
+            SemanticMessage(role="system", parts=(TextPart("stable instructions"),)),
+            SemanticMessage(role="user", parts=(TextPart("first question"),)),
+            SemanticMessage(role="assistant", parts=(TextPart("first answer"),)),
+            SemanticMessage(role="system", parts=(TextPart("current runtime context"),)),
+            SemanticMessage(role="user", parts=(TextPart("follow up"),)),
+        ),
+        tools=(),
+        settings=SemanticGenerationSettings(max_output_tokens=128, stream=True),
+        replay_state=replay_state,
+    )
+
+    payload = ResponsesWireAdapter().encode_request(request, route=current_route).body
+
+    assert "previous_response_id" not in payload
+    assert [item["role"] for item in payload["input"]] == [
+        "system",
+        "user",
+        "assistant",
+        "system",
+        "user",
+    ]
+    assert payload["_vibelution_responses_websocket"] == {
+        "enabled": True,
+        "previous_response_id": "resp-previous",
+        "input": [
+            {"role": "system", "content": [{"type": "input_text", "text": "current runtime context"}]},
+            {"role": "user", "content": [{"type": "input_text", "text": "follow up"}]},
+        ],
+    }
 
 
 def test_responses_turn_continuation_without_assistant_boundary_falls_back_to_full_input():
