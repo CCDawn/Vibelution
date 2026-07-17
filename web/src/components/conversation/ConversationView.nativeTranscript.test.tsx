@@ -248,6 +248,10 @@ describe("ConversationView native Codex transcript surface", () => {
     expect(finalIndex).toBeGreaterThan(toolIndex);
     expect(html).toContain('data-codex-tool-detail="true"');
     expect(html).not.toContain('open=""');
+    expect(html).toContain('data-codex-transcript-cell-channel="commentary"');
+    expect(html).toContain('data-codex-transcript-cell-phase="tool_call"');
+    expect(html).toContain("file loaded");
+    expect(html).toContain("完成");
     expect(html).not.toContain("legacy duplicate final");
     expect(html).toContain("codexTranscriptCommentaryCell");
     expect(html).toContain("codexTranscriptFinalCell");
@@ -310,7 +314,7 @@ describe("ConversationView native Codex transcript surface", () => {
     expect(html).toContain('data-codex-transcript-cell-kind="tool_call"');
     expect(html).toContain('data-codex-transcript-cell-kind="assistant_markdown"');
     expect(html).toContain("native_tool");
-    expect(html).not.toContain("native process renders");
+    expect(html).toContain("native process renders");
     expect(html).toContain("native answer renders");
     expect(html).not.toContain("legacy process should not render");
     expect(html).not.toContain("legacy response should not duplicate");
@@ -539,7 +543,21 @@ describe("ConversationView native Codex transcript surface", () => {
                     resultPreview: "完整工具结果：命中 20 个符号",
                   },
                 ],
-                terminalOperations: [],
+                terminalOperations: [
+                  {
+                    operationId: "terminal-code-symbol",
+                    rawOperationId: "operation-code-symbol",
+                    toolCallId: "tool_call:operation-code-symbol",
+                    terminalId: "terminal-code-symbol",
+                    kind: "ExecCommand",
+                    status: "completed",
+                    request: {
+                      displayCommand: "inspect symbols",
+                      cwd: "C:/Users/17533/Desktop/Vibelution",
+                    },
+                    durationSeconds: 2.9,
+                  },
+                ],
                 terminalSessions: [],
                 modelObservations: [],
               },
@@ -575,6 +593,7 @@ describe("ConversationView native Codex transcript surface", () => {
     expect(html).toContain('data-codex-tool-detail="true"');
     expect(html).toContain(">代码图谱<");
     expect(html).toContain("完整工具结果：命中 20 个符号");
+    expect(html).toContain("完成 2.9s");
     expect(html).toContain("工具检查完成。");
   });
 

@@ -1694,6 +1694,7 @@ export function ConversationView({
           data-codex-transcript-cell-kind={cell.kind}
           data-codex-transcript-cell-status={cell.status}
           data-codex-transcript-cell-tone={cell.tone}
+          data-codex-transcript-cell-channel={cell.channel || undefined}
           data-codex-transcript-cell-phase={cell.phase ?? ""}
           data-conversation-part-key={cell.id}
         >
@@ -1756,6 +1757,7 @@ export function ConversationView({
           data-codex-transcript-cell-kind={cell.kind}
           data-codex-transcript-cell-status={cell.status}
           data-codex-transcript-cell-tone={cell.tone}
+          data-codex-transcript-cell-channel={cell.channel || undefined}
           data-codex-transcript-cell-phase={cell.phase ?? ""}
           data-codex-transcript-cell-terminal={cell.terminal ? "true" : "false"}
           data-conversation-part-key={cell.id}
@@ -1828,6 +1830,8 @@ export function ConversationView({
         data-codex-transcript-cell-kind={cell.kind}
         data-codex-transcript-cell-status={cell.status}
         data-codex-transcript-cell-tone={cell.tone}
+        data-codex-transcript-cell-channel={cell.channel || undefined}
+        data-codex-transcript-cell-phase={cell.phase || undefined}
         data-conversation-part-key={cell.id}
         role={cell.status === "running" || cell.status === "pending" ? "status" : undefined}
         aria-live={cell.status === "running" || cell.status === "pending" ? "polite" : undefined}
@@ -1850,12 +1854,61 @@ export function ConversationView({
 
   function codexTranscriptVisibleSummary(cell: CodexTranscriptCell) {
     if (cell.kind === "tool_call") {
-      return cell.status === "completed" ? "" : cell.summary || cell.text;
+      return cell.status === "completed"
+        ? codexTranscriptCompletedToolSummary(cell)
+        : cell.summary || cell.text;
     }
     if (cell.kind === "error_notice") {
       return "";
     }
     return cell.kind === "reasoning_summary" ? cell.text || cell.summary : cell.summary || cell.text;
+  }
+
+  function codexTranscriptCompletedToolSummary(cell: CodexTranscriptCell) {
+    const toolCall = cell.toolLifecycleModel?.toolCalls?.[0];
+    const candidates = [
+      toolCall?.resultPreview,
+      toolCall?.summary,
+      cell.summary,
+      cell.text,
+    ];
+    for (const candidate of candidates) {
+      const summary = compactCodexTranscriptResult(candidate, toolCall?.rawToolName || cell.title);
+      if (summary) {
+        return summary;
+      }
+    }
+    return "";
+  }
+
+  function compactCodexTranscriptResult(value: string | undefined, toolName: string | undefined) {
+    const normalized = String(value ?? "").replace(/\s+/g, " ").trim();
+    if (!normalized || normalized === String(toolName ?? "").trim()) {
+      return "";
+    }
+    if (normalized.startsWith("{") || normalized.startsWith("[")) {
+      try {
+        const parsed = JSON.parse(normalized) as Record<string, unknown>;
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+          const semantic = [parsed.message, parsed.summary, parsed.result, parsed.status]
+            .find((item) => typeof item === "string" && item.trim());
+          if (typeof semantic === "string") {
+            return compactCodexTranscriptText(semantic);
+          }
+        }
+        return lang === "zh" ? "已返回结构化结果" : "Structured result returned";
+      } catch {
+        return compactCodexTranscriptText(normalized);
+      }
+    }
+    return compactCodexTranscriptText(normalized);
+  }
+
+  function compactCodexTranscriptText(value: string) {
+    const maxLength = 180;
+    return value.length > maxLength
+      ? `${value.slice(0, maxLength - 1).trimEnd()}…`
+      : value;
   }
 
   function codexTranscriptCellIcon(cell: CodexTranscriptCell) {
@@ -1922,7 +1975,9 @@ export function ConversationView({
 
   function codexTranscriptCellMeta(cell: CodexTranscriptCell) {
     if (cell.status === "completed") {
-      return "";
+      const duration = codexTranscriptToolDurationSeconds(cell);
+      const completedLabel = lang === "zh" ? "完成" : "Completed";
+      return duration === null ? completedLabel : `${completedLabel} ${formatCodexTranscriptDuration(duration)}`;
     }
     if (cell.status === "failed") {
       return lang === "zh" ? "失败" : "Failed";
@@ -1937,6 +1992,27 @@ export function ConversationView({
       return lang === "zh" ? "运行中" : "Running";
     }
     return "";
+  }
+
+  function codexTranscriptToolDurationSeconds(cell: CodexTranscriptCell) {
+    const terminalDuration = cell.toolLifecycleModel?.terminalOperations
+      ?.map((operation) => operation.durationSeconds)
+      .find((duration): duration is number => typeof duration === "number" && Number.isFinite(duration) && duration >= 0);
+    if (terminalDuration !== undefined) {
+      return terminalDuration;
+    }
+    const rolloutDuration = cell.rolloutTraceEvents
+      ?.filter((event) => event.kind === "RuntimeEnded" || event.kind === "ToolCallEnded")
+      .map((event) => event.durationSeconds)
+      .find((duration): duration is number => typeof duration === "number" && Number.isFinite(duration) && duration >= 0);
+    return rolloutDuration ?? null;
+  }
+
+  function formatCodexTranscriptDuration(seconds: number) {
+    if (seconds < 1) {
+      return `${Math.max(1, Math.round(seconds * 1000))}ms`;
+    }
+    return `${Number(seconds.toFixed(seconds < 10 ? 1 : 0))}s`;
   }
 
   function renderCodexTranscriptToolDetails(cell: CodexTranscriptCell, title: string, meta: string) {
