@@ -7769,6 +7769,95 @@ def test_candidate_graph_stage_writeback_materializes_agent_relation_edges(tmp_p
     assert graph_projection["counts"]["output"] == 3
 
 
+def test_candidate_graph_stage_writeback_materializes_root_graph_payload_on_reuse(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
+    team = team_service.create_team(name="挑战杯科研团队")
+    run_id = "run-root-relation-graph"
+    source_one = team_workflow_orchestration_service.register_candidate_source(
+        team["teamId"],
+        {
+            "title": "Predictive coding framework",
+            "sourceUrl": "https://doi.org/10.0000/root-graph-one",
+            "sourceKind": "paper",
+            "summary": "Predictive coding provides a framework for neural computation.",
+            "allowedForAnalysis": True,
+            "metadata": {"sourceCollectionRunId": run_id, "doi": "10.0000/root-graph-one"},
+            "createdByAgent": "content-extraction-agent",
+        },
+    )["candidate"]
+    source_two = team_workflow_orchestration_service.register_candidate_source(
+        team["teamId"],
+        {
+            "title": "Prediction error evidence",
+            "sourceUrl": "https://doi.org/10.0000/root-graph-two",
+            "sourceKind": "paper",
+            "summary": "Prediction error is observed in sensory mismatch paradigms.",
+            "allowedForAnalysis": True,
+            "metadata": {"sourceCollectionRunId": run_id, "doi": "10.0000/root-graph-two"},
+            "createdByAgent": "content-extraction-agent",
+        },
+    )["candidate"]
+    initial = team_workflow_orchestration_service.build_candidate_graph(
+        team["teamId"],
+        {"createdByAgent": "Source Relation Mapper Agent"},
+    )
+    assert initial["reusedCandidateGraph"] is False
+    assert initial["graph"]["summary"]["edgeCount"] == 0
+
+    materialized = team_workflow_orchestration_service._materialize_source_collection_stage_writeback_candidate_graph(
+        team["teamId"],
+        run_id,
+        {
+            "taskId": "stage-task-root-graph",
+            "runId": run_id,
+            "stageId": "relations",
+            "agentId": "source-relation-agent",
+            "agentRole": "source_relation_mapper",
+        },
+        {
+            "status": "needs_review",
+            "summary": "根据已收集资料补充预测处理与预测误差的候选关系。",
+            "recordedByAgent": "source-relation-agent",
+            "result": {
+                "artifactType": "candidate_relation_graph",
+                "nodes": [
+                    {"id": "predictive_processing_framework", "label": "预测处理框架"},
+                    {"id": "prediction_error_mismatch", "label": "预测误差与失配响应"},
+                ],
+                "edges": [
+                    {
+                        "from": "predictive_processing_framework",
+                        "to": "prediction_error_mismatch",
+                        "relation": "provides_candidate_theoretical_account_of",
+                        "support": [source_one["candidateId"], source_two["candidateId"]],
+                    }
+                ],
+            },
+        },
+    )
+
+    graph_candidate = team_workflow_orchestration_service.list_candidate_store(
+        team["teamId"],
+        candidate_type="candidate_graph",
+    )["candidates"][0]
+    graph = graph_candidate["metadata"]["graph"]
+
+    assert materialized["reusedCandidateGraph"] is True
+    assert materialized["edgeCount"] == 1
+    assert graph["summary"]["edgeCount"] == 1
+    assert {
+        (edge["sourceCandidateId"], edge["targetCandidateId"], edge["relation"])
+        for edge in graph["edges"]
+    } == {
+        (
+            "predictive_processing_framework",
+            "prediction_error_mismatch",
+            "provides_candidate_theoretical_account_of",
+        )
+    }
+
+
 def test_stage_writeback_result_metadata_preserves_relation_edge_batches():
     result = {
         "sourceThemeEdges": [

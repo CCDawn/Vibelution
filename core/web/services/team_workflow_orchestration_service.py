@@ -5350,6 +5350,12 @@ def _source_collection_stage_writeback_agent_graph_payload(result: dict[str, Any
     explicit_graph = result.get("candidateGraph") if isinstance(result.get("candidateGraph"), dict) else {}
     if not explicit_graph and isinstance(result.get("candidate_graph"), dict):
         explicit_graph = result["candidate_graph"]
+    if not explicit_graph and any(isinstance(result.get(key), list) for key in ("nodes", "edges", "missingLinks", "unreviewedNodes")):
+        explicit_graph = {
+            key: result[key]
+            for key in ("nodes", "edges", "missingLinks", "unreviewedNodes", "clusters", "gaps", "qualityNotes", "scope")
+            if result.get(key) is not None
+        }
     relation_payload = {
         "relationCoverage": result.get("relationCoverage") or result.get("relation_coverage"),
         "themeNodes": result.get("themeNodes") or result.get("theme_nodes") or result.get("topicNodes") or result.get("topic_nodes"),
