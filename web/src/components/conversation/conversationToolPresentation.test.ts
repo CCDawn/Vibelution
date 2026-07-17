@@ -30,6 +30,25 @@ describe("conversation tool presentation", () => {
     ).toBe("工作区干净");
   });
 
+  it("extracts a semantic value from a truncated structured preview", () => {
+    expect(
+      completedToolPresentationSummary({
+        resultPreview:
+          '{"dirty_summary":"工作区干净","modified_paths":[',
+        language: "zh",
+      }),
+    ).toBe("工作区干净");
+  });
+
+  it("does not render an unreadable fragment for truncated structured arrays", () => {
+    expect(
+      completedToolPresentationSummary({
+        resultPreview: '[{"commit_sha":"4533db9c6367',
+        language: "zh",
+      }),
+    ).toBe("已返回结构化结果");
+  });
+
   it.each([
     ["explain_current_worktree_tool", "工作树详情"],
     ["get_core_context_tool", "核心上下文"],

@@ -17,6 +17,24 @@ function compactToolPresentationText(value: string) {
     : value;
 }
 
+function extractTruncatedStructuredSummary(value: string) {
+  const match = value.match(
+    /"(?:dirty_summary|message|summary|result|status)"\s*:\s*"((?:\\.|[^"\\])*)/i,
+  );
+  if (!match?.[1]) {
+    return "";
+  }
+  try {
+    return JSON.parse(`"${match[1]}"`) as string;
+  } catch {
+    return match[1]
+      .replace(/\\"/g, '"')
+      .replace(/\\n/g, " ")
+      .replace(/\\t/g, " ")
+      .trim();
+  }
+}
+
 function compactToolPresentationCandidate(
   value: string | undefined,
   toolName: string | undefined,
@@ -45,7 +63,13 @@ function compactToolPresentationCandidate(
         ? "已返回结构化结果"
         : "Structured result returned";
     } catch {
-      return compactToolPresentationText(normalized);
+      const semantic = extractTruncatedStructuredSummary(normalized);
+      if (semantic) {
+        return compactToolPresentationText(semantic);
+      }
+      return language === "zh"
+        ? "已返回结构化结果"
+        : "Structured result returned";
     }
   }
   return compactToolPresentationText(normalized);
