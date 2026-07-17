@@ -559,7 +559,11 @@ def list_agents(*, include_archived: bool = False, detail: str = "full") -> list
     if normalized_detail == "summary":
         timings["hydrate"] = 0.0
         stage_started = time.perf_counter()
-        agents = [_agent_to_api_summary(item) for item in raw_agents]
+        avatar_url_cache: dict[str, str] = {}
+        agents = [
+            _agent_to_api_summary(item, avatar_url_cache=avatar_url_cache)
+            for item in raw_agents
+        ]
         timings["to_api"] = round((time.perf_counter() - stage_started) * 1000, 1)
     elif normalized_detail == "config":
         stage_started = time.perf_counter()
@@ -5645,7 +5649,11 @@ def _agent_to_api(
     }
 
 
-def _agent_to_api_summary(agent: dict[str, Any]) -> dict[str, Any]:
+def _agent_to_api_summary(
+    agent: dict[str, Any],
+    *,
+    avatar_url_cache: dict[str, str] | None = None,
+) -> dict[str, Any]:
     workspace = str(agent.get("workspacePath") or "").strip()
     metadata = dict(agent.get("metadata") or {})
     avatar_path = _agent_avatar_path_from_metadata(metadata)
@@ -5659,6 +5667,11 @@ def _agent_to_api_summary(agent: dict[str, Any]) -> dict[str, Any]:
     conversation_index_classification = agent_conversation_index_classification({**agent, "metadata": metadata})
     conversation_index_visibility = agent_conversation_index_visibility({**agent, "metadata": metadata})
     prompt_binding = _agent_prompt_template_binding({**agent, "metadata": metadata})
+    avatar_image_url = avatar_url_cache.get(avatar_path) if avatar_url_cache is not None else None
+    if avatar_image_url is None:
+        avatar_image_url = agent_avatar_image_url(avatar_path)
+        if avatar_url_cache is not None:
+            avatar_url_cache[avatar_path] = avatar_image_url
     return {
         "agentId": agent_id,
         "agentCode": _normalize_agent_code(agent.get("agentCode"))
@@ -5687,7 +5700,7 @@ def _agent_to_api_summary(agent: dict[str, Any]) -> dict[str, Any]:
         "toolPolicyId": str(agent.get("toolPolicyId") or DEFAULT_TOOL_POLICY_ID).strip() or DEFAULT_TOOL_POLICY_ID,
         "memoryPolicyId": str(agent.get("memoryPolicyId") or "").strip(),
         "avatarImagePath": avatar_path,
-        "avatarImageUrl": agent_avatar_image_url(avatar_path),
+        "avatarImageUrl": avatar_image_url,
         "personaProfile": {} if profileless_session_agent else _persona_profile_for_agent({**agent, "metadata": metadata}),
         "taskProfile": {} if profileless_session_agent else _task_profile_for_agent({**agent, "metadata": metadata}),
         "createdBy": str(agent.get("createdBy") or "").strip(),
