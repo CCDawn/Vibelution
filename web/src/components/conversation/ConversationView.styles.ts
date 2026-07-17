@@ -8,7 +8,7 @@ function cv(key: string, ...classNames: string[]) {
 }
 
 const readableMessageText = "min-w-0 text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]";
-const readableMarkdownMeasure = "max-w-[min(100%,128ch)]";
+const readableMarkdownMeasure = "max-w-[min(100%,76ch)]";
 const assistantMessageMeasure = "w-[min(100%,1360px)] max-w-full";
 const transcriptTurnRail = "w-full max-w-[960px] justify-self-center";
 const assistantResponseSection = cv(
@@ -336,7 +336,7 @@ const styles: Record<string, string> = {
   codexTranscriptCell:
     "vui-components-conversationview codexTranscriptCell min-w-0",
   codexTranscriptCellBody:
-    "vui-components-conversationview codexTranscriptCellBody min-w-0 grid gap-0.5",
+    "vui-components-conversationview codexTranscriptCellBody min-w-0 flex flex-wrap items-baseline gap-x-2 gap-y-0.5",
   codexTranscriptCompactErrorDetails:
     "vui-components-conversationview codexTranscriptCompactErrorDetails inline-block min-w-0 shrink-0 border-0 bg-transparent group",
   codexTranscriptCompactErrorDetailsSummary:
@@ -348,17 +348,17 @@ const styles: Record<string, string> = {
   codexTranscriptCellMeta:
     "vui-components-conversationview codexTranscriptCellMeta inline-flex min-w-0 shrink-0 align-baseline whitespace-nowrap text-[var(--vui-font-xs)] leading-[var(--vui-line-tight)] text-[var(--fg-tertiary)]",
   codexTranscriptCellSummary:
-    "vui-components-conversationview codexTranscriptCellSummary min-w-0 max-w-[min(100%,128ch)] text-[var(--vui-font-sm)] leading-[1.42] text-[var(--fg-secondary)] whitespace-normal break-words [overflow-wrap:anywhere]",
+    "vui-components-conversationview codexTranscriptCellSummary min-w-0 max-w-[min(100%,76ch)] text-[var(--vui-font-xs)] leading-[1.42] text-[var(--fg-tertiary)] whitespace-normal break-words [overflow-wrap:anywhere]",
   codexTranscriptCellTitle:
     "vui-components-conversationview codexTranscriptCellTitle min-w-0 whitespace-normal text-[var(--vui-font-sm)] font-semibold leading-[1.35] text-[var(--fg-secondary)] [overflow-wrap:anywhere]",
   codexTranscriptCellTitleRow:
     "vui-components-conversationview codexTranscriptCellTitleRow min-w-0 inline-flex max-w-full flex-wrap items-baseline gap-x-2 gap-y-0.5",
   codexTranscriptCommentaryCell:
-    "vui-components-conversationview codexTranscriptCommentaryCell border-0 bg-transparent py-1 text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
+    "vui-components-conversationview codexTranscriptCommentaryCell max-w-[min(100%,76ch)] border-0 bg-transparent py-1 text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
   codexTranscriptErrorCell:
     "vui-components-conversationview codexTranscriptErrorCell border-0 border-l-2 border-l-[var(--state-error)] bg-[color-mix(in_srgb,var(--state-error)_5%,transparent)] px-3 py-2",
   codexTranscriptFinalCell:
-    "vui-components-conversationview codexTranscriptFinalCell border-0 bg-transparent py-2 text-[var(--fg-primary)] leading-[var(--vui-line-readable)] [&_.markdownBody]:max-w-full [&_pre]:max-w-full [&_pre]:overflow-x-auto [&_table]:max-w-full [&_img]:max-w-full [&_a]:break-words",
+    "vui-components-conversationview codexTranscriptFinalCell border-0 bg-transparent py-2 text-[var(--fg-primary)] leading-[var(--vui-line-readable)] [&_.markdownBody]:max-w-full [&_.markdownBody]:text-[var(--fg-primary)] [&_pre]:max-w-full [&_pre]:overflow-x-auto [&_table]:max-w-full [&_img]:max-w-full [&_a]:break-words",
   codexTranscriptCell_error:
     "vui-components-conversationview codexTranscriptCell_error border-0 border-l-2 border-l-[var(--state-error)] bg-[color-mix(in_srgb,var(--state-error)_5%,transparent)] px-3 py-2 text-[var(--fg-secondary)] [&_.codexTranscriptCellIcon]:text-[var(--state-error)] [&_.codexTranscriptCellMeta]:text-[var(--state-error)] [&_.codexTranscriptCellTitle]:text-[var(--state-error)]",
   codexTranscriptCell_neutral:
@@ -419,30 +419,30 @@ const styles: Record<string, string> = {
   imagePreviewToolbar:
     "vui-components-conversationview imagePreviewToolbar min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 flex flex-wrap items-center gap-1.5",
   inlineCode:
-    "vui-components-conversationview inlineCode min-w-0 font-mono text-[var(--vui-font-xs)] whitespace-normal break-words",
+    "vui-components-conversationview inlineCode min-w-0 rounded-[0.3rem] bg-[color-mix(in_srgb,var(--fg-primary)_7%,transparent)] px-1 py-0.5 font-mono text-[var(--vui-font-xs)] text-[var(--fg-primary)] whitespace-normal break-words [box-decoration-break:clone]",
   inlineLink:
-    "vui-components-conversationview inlineLink min-w-0",
+    "vui-components-conversationview inlineLink min-w-0 text-[var(--accent-cool)] underline decoration-[color-mix(in_srgb,var(--accent-cool)_42%,transparent)] underline-offset-2 hover:decoration-[var(--accent-cool)]",
   inlineStrong:
-    "vui-components-conversationview inlineStrong min-w-0",
+    "vui-components-conversationview inlineStrong min-w-0 font-semibold text-[var(--fg-primary)]",
   input: composerGenericInputField,
   markdownBlockquote:
-    "vui-components-conversationview markdownBlockquote min-w-0",
+    `vui-components-conversationview markdownBlockquote my-2 min-w-0 border-l-2 border-l-[var(--vui-border-strong)] pl-3 text-[var(--fg-secondary)] ${readableMarkdownMeasure}`,
   markdownBody:
-    `vui-components-conversationview markdownBody min-w-0 text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] ${readableMarkdownMeasure}`,
+    "vui-components-conversationview markdownBody min-w-0 max-w-full text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
   markdownBodyWithTable:
     "vui-components-conversationview markdownBodyWithTable min-w-0 text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] max-w-full",
   markdownDivider:
-    "vui-components-conversationview markdownDivider min-w-0",
+    `vui-components-conversationview markdownDivider my-4 min-w-0 border-0 border-t border-t-[var(--vui-border-subtle)] ${readableMarkdownMeasure}`,
   markdownHeading:
-    "vui-components-conversationview markdownHeading min-w-0",
+    `vui-components-conversationview markdownHeading min-w-0 font-semibold leading-tight text-[var(--fg-primary)] ${readableMarkdownMeasure}`,
   markdownHeading1:
-    "vui-components-conversationview markdownHeading1 min-w-0",
+    "vui-components-conversationview markdownHeading1 mb-2 mt-5 text-[1.12em]",
   markdownHeading2:
-    "vui-components-conversationview markdownHeading2 min-w-0",
+    "vui-components-conversationview markdownHeading2 mb-2 mt-4 text-[1.08em]",
   markdownHeading3:
-    "vui-components-conversationview markdownHeading3 min-w-0",
+    "vui-components-conversationview markdownHeading3 mb-1.5 mt-3 text-[1.04em]",
   markdownHeading4:
-    "vui-components-conversationview markdownHeading4 min-w-0",
+    "vui-components-conversationview markdownHeading4 mb-1.5 mt-3 text-[1em]",
   markdownHeadingactive:
     "vui-components-conversationview markdownHeadingactive min-w-0",
   markdownHeadinganswer:
@@ -514,9 +514,9 @@ const styles: Record<string, string> = {
   markdownImageLink:
     "vui-components-conversationview markdownImageLink min-w-0",
   markdownTable:
-    "vui-components-conversationview markdownTable min-w-full table-fixed",
+    "vui-components-conversationview markdownTable w-max min-w-full table-auto border-separate border-spacing-0 text-left [&_th]:whitespace-nowrap [&_th]:border-b [&_th]:border-b-[var(--vui-border-strong)] [&_th]:bg-[var(--vui-surface-row)] [&_th]:px-3 [&_th]:py-2 [&_th]:align-top [&_th]:text-[var(--fg-primary)] [&_th]:font-semibold [&_td]:max-w-[52ch] [&_td]:border-b [&_td]:border-b-[var(--vui-border-subtle)] [&_td]:px-3 [&_td]:py-2 [&_td]:align-top [&_td]:text-[var(--fg-secondary)] [&_td]:whitespace-normal [&_td]:break-words [&_td]:[overflow-wrap:anywhere]",
   markdownTableWrap:
-    "vui-components-conversationview markdownTableWrap max-w-full overflow-x-auto overflow-y-hidden [scrollbar-gutter:stable]",
+    "vui-components-conversationview markdownTableWrap my-3 max-w-full overflow-x-auto overflow-y-hidden rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] [scrollbar-gutter:stable]",
   mentalBodyList:
     "vui-components-conversationview mentalBodyList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
   mentalBodyRow:
@@ -948,11 +948,11 @@ const styles: Record<string, string> = {
   responseSegmentLabel:
     "vui-components-conversationview responseSegmentLabel min-w-0 text-[var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
   responseSegmentList:
-    "vui-components-conversationview responseSegmentList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
+    `vui-components-conversationview responseSegmentList my-2 ml-5 min-w-0 min-h-0 content-start space-y-1 overflow-visible marker:text-[var(--fg-tertiary)] [&:is(ul)]:list-disc [&:is(ol)]:list-decimal [&>li]:pl-1 [&>li]:leading-[var(--vui-line-readable)] ${readableMarkdownMeasure}`,
   responseSegmentMeta:
     "vui-components-conversationview responseSegmentMeta min-w-0 flex flex-wrap items-center gap-1.5",
   responseSegmentPre:
-    "vui-components-conversationview responseSegmentPre min-w-0 max-w-full whitespace-pre-wrap break-words [overflow-wrap:anywhere]",
+    "vui-components-conversationview responseSegmentPre my-3 min-w-0 max-w-full overflow-x-auto rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[color-mix(in_srgb,var(--fg-primary)_4%,var(--vui-surface-row))] p-3 font-mono text-[var(--vui-font-xs)] leading-[1.55] text-[var(--fg-primary)] whitespace-pre",
   responseSegment_active:
     "vui-components-conversationview responseSegment_active min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
   responseSegment_answer:
