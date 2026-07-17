@@ -89,6 +89,61 @@ def test_ordinary_runtime_event_is_append_only_and_keeps_incremental_sequence(tm
     assert [row["seq"] for row in rows[-2:]] == [42, 43]
 
 
+def test_ordinary_runtime_event_does_not_wait_for_package_projection_lock(tmp_path, monkeypatch) -> None:
+    scene_dir = _point_runtime_scene_at(tmp_path, monkeypatch, scene_id="scene-package-lock-isolation")
+
+    class BusyPackageLock:
+        def __enter__(self):
+            raise AssertionError("ordinary event path must not acquire the package projection lock")
+
+        def __exit__(self, exc_type, exc, traceback):
+            return False
+
+    monkeypatch.setattr(runtime_scene_service, "RUNTIME_SCENE_PACKAGE_WRITE_LOCK", BusyPackageLock())
+
+    result = runtime_scene_service.record_runtime_scene_event(
+        "agent",
+        "prompt",
+        "agent.initial_context.completed",
+        fields={"gitRefreshMs": 12, "promptBuildMs": 3},
+    )
+
+    assert result["projectionRefresh"] == "deferred"
+    rows = [
+        json.loads(line)
+        for line in (scene_dir / "events" / "agent.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    assert rows[-1]["event_code"] == "agent.initial_context.completed"
+
+
+def test_warning_runtime_event_appends_before_full_projection(tmp_path, monkeypatch) -> None:
+    _point_runtime_scene_at(tmp_path, monkeypatch, scene_id="scene-warning-projection")
+    projection_calls: list[str] = []
+
+    def record_projection(scene, manifest) -> None:
+        rows = [
+            json.loads(line)
+            for line in (scene / "events" / "agent_directory.jsonl").read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+        assert rows[-1]["event_code"] == "agent_directory.list_agents.slow"
+        projection_calls.append(rows[-1]["event_code"])
+
+    monkeypatch.setattr(runtime_scene_service, "_update_runtime_scene_package_manifest", record_projection)
+
+    result = runtime_scene_service.record_runtime_scene_event(
+        "agent_directory",
+        "agent",
+        "agent_directory.list_agents.slow",
+        level="warning",
+        fields={"elapsedMs": 9000},
+    )
+
+    assert result["projectionRefresh"] == "full"
+    assert projection_calls == ["agent_directory.list_agents.slow"]
+
+
 @pytest.mark.parametrize(
     ("status_code", "exception_type", "expected_level"),
     [
