@@ -971,7 +971,13 @@ describe("AgentsRoute layout contract", () => {
     expect(managementHeaderPanelSource).not.toContain("<div title={copy.subtitle}>");
     expect(routeSource).not.toContain("<p className={styles.subtitle}>{copy.subtitle}</p>");
     expect(routeSource).toContain("issueSummary: issueSummary(agent.health, lang)");
-    expect(denseListSource).toContain("title={row.issueSummary}");
+    expect(denseListSource).toContain("VTooltip");
+    expect(denseListSource).toContain("const rowTooltip");
+    expect(denseListSource).toContain("content={rowTooltip}");
+    expect(denseListSource).toContain("content={row.selectLabel}");
+    expect(denseListSource).not.toContain("title={row.issueSummary}");
+    expect(denseListSource).not.toContain("title={row.modelDetail}");
+    expect(denseListSource).not.toContain("title={row.selectLabel}");
     expect(routeSource).not.toContain("<small>{issueSummary(agent.health, lang)}</small>");
     expect(denseListSource).toContain("title={column.description}");
     expect(routeSource).not.toContain("<span>{column.description}</span>");
