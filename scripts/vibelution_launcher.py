@@ -27,6 +27,8 @@ import tomllib
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 RUNTIME_DIR = PROJECT_ROOT / ".runtime" / "launcher"
 STATE_PATH = RUNTIME_DIR / "state.json"
+ACTIVE_RUNTIME_SCENE_PATH = RUNTIME_DIR / "active-runtime-scene.json"
+RUNTIME_SCENE_ROOT = PROJECT_ROOT / "logs" / "runtime_scenes"
 BACKEND_STDOUT_PATH = RUNTIME_DIR / "backend.stdout.log"
 BACKEND_STDERR_PATH = RUNTIME_DIR / "backend.stderr.log"
 FRONTEND_BUILD_LOG_PATH = RUNTIME_DIR / "frontend-build.log"
@@ -86,6 +88,28 @@ def _write_state(state: dict) -> None:
     tmp_path = STATE_PATH.with_suffix(".json.tmp")
     tmp_path.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
     tmp_path.replace(STATE_PATH)
+
+
+def _start_runtime_scene(trigger: str) -> dict[str, str]:
+    started_at = datetime.now(timezone.utc)
+    scene_id = uuid.uuid4().hex[:12]
+    directory_name = f"{started_at.strftime('%Y%m%dT%H%M%SZ')}__{scene_id}"
+    scene_dir = RUNTIME_SCENE_ROOT / directory_name
+    for relative_dir in ("events", "raw", "conversations", "agent", "artifacts"):
+        (scene_dir / relative_dir).mkdir(parents=True, exist_ok=True)
+
+    reference = {
+        "runtimeSceneId": scene_id,
+        "runtimeSceneDir": str(scene_dir.resolve()),
+        "startedAt": started_at.isoformat(),
+        "launcherPid": os.getpid(),
+        "trigger": str(trigger or "python_launcher"),
+    }
+    RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
+    tmp_path = ACTIVE_RUNTIME_SCENE_PATH.with_suffix(".json.tmp")
+    tmp_path.write_text(json.dumps(reference, ensure_ascii=False, indent=2), encoding="utf-8")
+    tmp_path.replace(ACTIVE_RUNTIME_SCENE_PATH)
+    return reference
 
 
 def _pid_alive(pid: int) -> bool:
@@ -930,6 +954,7 @@ def _start_backend(port: int, host: str, *, no_browser: bool) -> dict:
     source_identity = _runtime_source_identity()
     frontend_provenance = _ensure_frontend_build(source_identity)
     _assert_runtime_source_identity(source_identity)
+    runtime_scene = _start_runtime_scene("python_launcher_start")
     stdout = BACKEND_STDOUT_PATH.open("ab")
     stderr = BACKEND_STDERR_PATH.open("ab")
     python_runtime = _select_background_python(sys.executable)
@@ -995,6 +1020,9 @@ def _start_backend(port: int, host: str, *, no_browser: bool) -> dict:
         "phase": "steady",
         "sessionRole": "workbench",
         "sessionId": str(uuid.uuid4()),
+        "runtimeSceneId": str(runtime_scene["runtimeSceneId"]),
+        "runtimeSceneDir": str(runtime_scene["runtimeSceneDir"]),
+        "runtimeSceneStartedAt": str(runtime_scene["startedAt"]),
         "backendPid": int(backend_pid),
         "backendLaunchPid": int(process.pid),
         "browserLaunchPid": int(browser_info["browserLaunchPid"]),
