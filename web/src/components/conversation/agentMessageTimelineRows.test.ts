@@ -25,7 +25,7 @@ function assistantMessage(
   };
 }
 
-function userMessage(id: string): AgentMessage {
+function userMessage(id: string, patch: Partial<AgentMessage> = {}): AgentMessage {
   return {
     id,
     role: "user",
@@ -33,6 +33,7 @@ function userMessage(id: string): AgentMessage {
     streaming: false,
     source: { kind: "conversation-message", id },
     parts: [{ id: `${id}-text`, type: "text", channel: "user", text: "继续" }],
+    ...patch,
   };
 }
 
@@ -118,6 +119,25 @@ describe("AgentMessage timeline rows", () => {
 
     expect(optimisticRow.rowKey).toBe("assistant-active:session-1-active");
     expect(boundRow.rowKey).toBe(optimisticRow.rowKey);
+  });
+
+  it("keeps an optimistic user row stable when its authoritative message arrives", () => {
+    const optimistic = userMessage("optimistic-user-submission-1", {
+      metadata: { clientSubmissionId: "submission-1" },
+    });
+    const committed = userMessage("session-1-message-9", {
+      source: {
+        kind: "conversation-message",
+        id: "session-1-message-9",
+        metadata: { clientSubmissionId: "submission-1" },
+      },
+    });
+
+    const [optimisticRow] = buildAgentMessageTimelineRowIdentities([optimistic]);
+    const [committedRow] = buildAgentMessageTimelineRowIdentities([committed]);
+
+    expect(optimisticRow.rowKey).toBe("user-submission:submission-1");
+    expect(committedRow.rowKey).toBe(optimisticRow.rowKey);
   });
 
   it("keeps duplicate same-turn rows unique when a user boundary prevents projection merging", () => {

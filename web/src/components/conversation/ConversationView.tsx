@@ -926,6 +926,20 @@ export function ConversationView({
     }
   }
 
+  function scheduleTimelineScrollToBottom() {
+    if (streamingScrollFrameRef.current !== null) {
+      return;
+    }
+    streamingScrollFrameRef.current = window.requestAnimationFrame(() => {
+      streamingScrollFrameRef.current = null;
+      const timeline = timelineRef.current;
+      if (!timeline || !followLatestRef.current) {
+        return;
+      }
+      scrollTimelineToBottom(timeline);
+    });
+  }
+
   useLayoutEffect(() => {
     const anchor = historyScrollAnchorRef.current;
     if (!anchor) {
@@ -951,7 +965,7 @@ export function ConversationView({
       return;
     }
     if (autoScrollToLatest && followLatestRef.current) {
-      scrollTimelineToBottom(timeline);
+      scheduleTimelineScrollToBottom();
     }
   }, [autoScrollToLatest, sessionId, timelineScrollSignal]);
 
@@ -959,17 +973,7 @@ export function ConversationView({
     if (!streamingTimelineScrollSignal || !autoScrollToLatest || !followLatestRef.current) {
       return undefined;
     }
-    if (streamingScrollFrameRef.current !== null) {
-      return undefined;
-    }
-    streamingScrollFrameRef.current = window.requestAnimationFrame(() => {
-      streamingScrollFrameRef.current = null;
-      const timeline = timelineRef.current;
-      if (!timeline || !followLatestRef.current) {
-        return;
-      }
-      scrollTimelineToBottom(timeline);
-    });
+    scheduleTimelineScrollToBottom();
     return undefined;
   }, [autoScrollToLatest, sessionId, streamingTimelineScrollSignal]);
 
