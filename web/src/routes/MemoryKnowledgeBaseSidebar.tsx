@@ -1,6 +1,6 @@
 import { Database } from "lucide-react";
 
-import { VButton } from "../components/vui";
+import { VButton, VTooltip } from "../components/vui";
 import styles from "./MemoryKnowledgeBaseSidebar.styles";
 
 export type MemoryKnowledgeBaseSidebarCopy = {
@@ -47,6 +47,11 @@ export function MemoryKnowledgeBaseSidebar({
 }: MemoryKnowledgeBaseSidebarProps) {
   const visibleTools = permissionTools.filter((tool) => tool.visible);
   const hiddenTools = permissionTools.filter((tool) => !tool.visible);
+  const toolVisibilityTooltip = [
+    copy.knowledgeHint,
+    `${copy.yes}: ${visibleTools.map((tool) => tool.toolName).join(", ") || "-"}`,
+    `${copy.missing}: ${hiddenTools.map((tool) => `${tool.toolName}: ${tool.reason}`).join("\n") || "-"}`,
+  ].join("\n");
 
   return (
     <aside className={styles.sourcePanel}>
@@ -57,18 +62,17 @@ export function MemoryKnowledgeBaseSidebar({
         </div>
         <span className={styles.countPill}>{bases.length}</span>
       </div>
-      <section className={styles.governanceMiniPanel} aria-label={copy.toolVisibility} title={copy.knowledgeHint}>
-        <strong>{copy.toolVisibility}</strong>
-        <span className={styles.statusPill} title={visibleTools.map((tool) => tool.toolName).join("\n")}>
-          {copy.yes}: {visibleTools.length}
-        </span>
-        <span
-          className={hiddenTools.length ? styles.statusPillMuted : styles.statusPill}
-          title={hiddenTools.map((tool) => `${tool.toolName}: ${tool.reason}`).join("\n")}
-        >
-          {copy.missing}: {hiddenTools.length}
-        </span>
-      </section>
+      <VTooltip content={toolVisibilityTooltip} width="wide">
+        <section className={styles.governanceMiniPanel} tabIndex={0} aria-label={`${copy.toolVisibility}说明`}>
+          <strong>{copy.toolVisibility}</strong>
+          <span className={styles.statusPill}>
+            {copy.yes}: {visibleTools.length}
+          </span>
+          <span className={hiddenTools.length ? styles.statusPillMuted : styles.statusPill}>
+            {copy.missing}: {hiddenTools.length}
+          </span>
+        </section>
+      </VTooltip>
       {isLoading ? <div className={styles.emptyState}>{copy.loading}</div> : null}
       {!isLoading && !bases.length ? (
         <section className={styles.emptyDetail}>
