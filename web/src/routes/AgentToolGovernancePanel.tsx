@@ -1,7 +1,7 @@
 import { ShieldCheck, Wrench } from "lucide-react";
 
 import { AgentToolGovernanceRequest } from "../api/types";
-import { VButton } from "../components/vui";
+import { VButton, VContextualHint } from "../components/vui";
 import styles from "./AgentToolGovernancePanel.styles";
 
 export type AgentToolGovernancePanelCopy = {
@@ -74,20 +74,23 @@ export function AgentToolGovernancePanel({
   onConfigure,
 }: AgentToolGovernancePanelProps) {
   const pendingCount = requests.filter((item) => item.status === "pending_review").length;
+  const governanceHint = lang === "zh"
+    ? "工具治理变更从工具页发起；这里保留最近记录和待审批处理。"
+    : "Tool governance changes start from the Tools page. Recent records and approvals remain visible here.";
 
   return (
-    <section
-      className={styles.configEditor}
-      title={
-        lang === "zh"
-          ? "工具治理变更从工具页发起；这里保留最近记录和待审批处理。"
-          : "Tool governance changes start from the Tools page. Recent records and approvals remain visible here."
-      }
-    >
+    <section className={styles.configEditor}>
       <div className={styles.panelHeader}>
         <div>
           <p className={styles.panelEyebrow}>{copy.toolGovernanceTitle}</p>
-          <h3>{copy.toolGovernancePending}: {pendingCount}</h3>
+          <div className={styles.titleRow}>
+            <h3>{copy.toolGovernancePending}: {pendingCount}</h3>
+            <VContextualHint
+              label={lang === "zh" ? "工具治理说明" : "Tool governance details"}
+              content={governanceHint}
+              width="wide"
+            />
+          </div>
         </div>
         <ShieldCheck size={16} />
       </div>
