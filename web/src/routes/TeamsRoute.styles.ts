@@ -262,8 +262,6 @@ const styles: Record<string, string> = {
     "nodeSourceAuthority min-w-0 !grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 p-2 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] [&>div]:grid [&>div]:gap-0.5 [&>div]:min-w-0 [&_a]:inline-flex [&_a]:items-center [&_a]:justify-center [&_a]:gap-1.5 [&_a]:min-h-[28px] [&_a]:px-2.5 [&_a]:rounded-[7px] [&_a]:border [&_a]:border-[color:color-mix(in_srgb,var(--accent-cool)_32%,var(--border-soft))] [&_a]:bg-[color:color-mix(in_srgb,var(--accent-cool)_8%,var(--vui-surface-panel))] [&_a]:text-[var(--fg-primary)] [&_a]:font-[780] [&_a]:no-underline [&_a]:whitespace-nowrap [&_[data-vui=native-button]]:inline-flex [&_[data-vui=native-button]]:items-center [&_[data-vui=native-button]]:justify-center [&_[data-vui=native-button]]:gap-1.5 [&_[data-vui=native-button]]:min-h-[28px] [&_[data-vui=native-button]]:px-2.5 [&_[data-vui=native-button]]:rounded-[7px] [&_[data-vui=native-button]]:border [&_[data-vui=native-button]]:border-[color:color-mix(in_srgb,var(--accent-cool)_32%,var(--border-soft))] [&_[data-vui=native-button]]:bg-[color:color-mix(in_srgb,var(--accent-cool)_8%,var(--vui-surface-panel))] [&_[data-vui=native-button]]:text-[var(--fg-primary)] [&_[data-vui=native-button]]:font-[780]",
   nodeStale:
     "nodeStale min-w-0 border-[color-mix(in_srgb,var(--state-error)_48%,var(--vui-border-subtle))]",
-  researchCanvasIndex:
-    "researchCanvasIndex min-w-0 grid min-h-0 gap-2 p-2 !flex min-w-0 items-center justify-between gap-2.5 px-3 py-2.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] [&>div]:grid [&>div]:min-w-0 [&>div]:gap-0.5 [&>div_span]:truncate [&>div_span]:text-[var(--fg-muted)] [&>div_span]:font-[760] [&>div_small]:truncate [&>div_small]:text-[var(--fg-muted)] [&>div_small]:font-[760] [&>div_strong]:truncate [&>div_strong]:text-[var(--fg-primary)] [&_a]:inline-flex [&_a]:shrink-0 [&_a]:min-h-[30px] [&_a]:items-center [&_a]:justify-center [&_a]:gap-[5px] [&_a]:px-[9px] [&_a]:rounded-[7px] [&_a]:border [&_a]:border-[color:color-mix(in_srgb,var(--accent-cool)_34%,var(--border-soft))] [&_a]:bg-[color:color-mix(in_srgb,var(--vui-surface-panel)_82%,transparent)] [&_a]:text-[var(--fg-primary)] [&_a]:font-[820] [&_a]:no-underline [&_a]:whitespace-nowrap",
   researchCanvasPanelHidden:
     "researchCanvasPanelHidden min-w-0 grid min-h-0 gap-2 p-2 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] hidden !hidden",
   researchDiscussionPanel:
@@ -295,7 +293,7 @@ const styles: Record<string, string> = {
   researchStageActionPanel:
     "researchStageActionPanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] p-2 flex flex-wrap items-center gap-1.5",
   researchStageActions:
-    "researchStageActions min-w-0 flex flex-wrap items-center gap-1.5 !flex flex-wrap items-center gap-[7px] [&_a]:inline-flex [&_a]:items-center [&_a]:justify-center [&_a]:gap-1.5 [&_a]:min-h-[28px] [&_a]:px-2.5 [&_a]:rounded-[7px] [&_a]:border [&_a]:border-[color:color-mix(in_srgb,var(--accent-cool)_32%,var(--border-soft))] [&_a]:bg-[color:color-mix(in_srgb,var(--accent-cool)_8%,var(--vui-surface-panel))] [&_a]:text-[var(--fg-primary)] [&_a]:font-[780] [&_a]:no-underline [&_a]:whitespace-nowrap [&_[data-vui=native-button]]:inline-flex [&_[data-vui=native-button]]:items-center [&_[data-vui=native-button]]:justify-center [&_[data-vui=native-button]]:gap-1.5 [&_[data-vui=native-button]]:min-h-[28px] [&_[data-vui=native-button]]:px-2.5 [&_[data-vui=native-button]]:rounded-[7px] [&_[data-vui=native-button]]:border [&_[data-vui=native-button]]:border-[color:color-mix(in_srgb,var(--accent-cool)_32%,var(--border-soft))] [&_[data-vui=native-button]]:bg-[color:color-mix(in_srgb,var(--accent-cool)_8%,var(--vui-surface-panel))] [&_[data-vui=native-button]]:text-[var(--fg-primary)] [&_[data-vui=native-button]]:font-[780] [&_a]:min-w-[104px] [&_[data-vui=native-button]]:min-w-[104px]",
+    "researchStageActions min-w-0 mt-auto flex flex-wrap items-center gap-2 border-t border-[var(--vui-border-subtle)] pt-2 [&_a]:inline-flex [&_a]:items-center [&_a]:justify-center [&_a]:gap-1.5 [&_a]:min-h-8 [&_a]:px-2.5 [&_a]:rounded-[var(--radius-control)] [&_a]:border [&_a]:border-[color:color-mix(in_srgb,var(--accent-cool)_32%,var(--border-soft))] [&_a]:bg-[color:color-mix(in_srgb,var(--accent-cool)_8%,var(--vui-surface-panel))] [&_a]:text-[var(--fg-primary)] [&_a]:font-[780] [&_a]:no-underline [&_a]:whitespace-nowrap [&_[data-vui=native-button]]:inline-flex [&_[data-vui=native-button]]:items-center [&_[data-vui=native-button]]:justify-center [&_[data-vui=native-button]]:gap-1.5 [&_[data-vui=native-button]]:min-h-8 [&_[data-vui=native-button]]:px-2.5 [&_[data-vui=native-button]]:rounded-[var(--radius-control)] [&_[data-vui=native-button]]:border [&_[data-vui=native-button]]:border-[color:color-mix(in_srgb,var(--accent-cool)_32%,var(--border-soft))] [&_[data-vui=native-button]]:bg-[color:color-mix(in_srgb,var(--accent-cool)_8%,var(--vui-surface-panel))] [&_[data-vui=native-button]]:text-[var(--fg-primary)] [&_[data-vui=native-button]]:font-[780]",
   researchStageAgentActions:
     "researchStageAgentActions min-w-0 flex flex-wrap items-center gap-1.5 text-[var(--fg-secondary)] !flex min-w-0 items-center justify-between gap-2 [&_a]:inline-flex [&_a]:shrink-0 [&_a]:min-h-[28px] [&_a]:items-center [&_a]:justify-center [&_a]:gap-[5px] [&_a]:px-[9px] [&_a]:rounded-[7px] [&_a]:border [&_a]:border-[color:color-mix(in_srgb,var(--accent-cool)_28%,var(--border-soft))] [&_a]:bg-[color:color-mix(in_srgb,var(--vui-surface-row)_74%,transparent)] [&_a]:text-[var(--fg-primary)] [&_a]:font-[780] [&_a]:no-underline [&_a]:whitespace-nowrap",
   researchStageAgentCard:
@@ -369,33 +367,51 @@ const styles: Record<string, string> = {
   researchStageAgentRole:
     "researchStageAgentRole min-w-0 text-[var(--fg-primary)]",
   researchStageAgentSummary:
-    "researchStageAgentSummary min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-1.5 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] text-[var(--accent-cool)]",
+    "researchStageAgentSummary min-w-0 inline-flex w-fit max-w-full items-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 text-[var(--fg-secondary)]",
   researchStageAgentSummaryBlocked:
     "researchStageAgentSummaryBlocked min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] text-[var(--state-error)]",
   researchStageAgentSummaryMissing:
     "researchStageAgentSummaryMissing min-w-0 border-[color-mix(in_srgb,var(--state-warning)_36%,transparent)] text-[var(--state-warning)]",
   researchStageAgentSummaryReady:
     "researchStageAgentSummaryReady min-w-0 border-[color-mix(in_srgb,var(--state-success)_32%,transparent)] text-[var(--state-success)]",
+  researchStageAgentSummaryLoading:
+    "researchStageAgentSummaryLoading min-w-0 border-[var(--vui-border-subtle)] text-[var(--fg-muted)]",
   researchStageBoundaryPanel:
     "researchStageBoundaryPanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] p-2",
   researchStageCard:
-    "researchStageCard min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] p-2",
+    "researchStageCard min-w-0 flex h-full flex-col gap-2 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-3",
   researchStageCardActive:
-    "researchStageCardActive min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] p-2 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
+    "researchStageCardActive min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_44%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
   researchStageCardHead:
-    "researchStageCardHead min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] p-2 !grid grid-cols-[auto_1fr] items-start gap-2.5",
+    "researchStageCardHead min-w-0 !grid grid-cols-[auto_minmax(0,1fr)] items-center gap-2.5 [&>small]:inline-flex [&>small]:h-7 [&>small]:w-7 [&>small]:items-center [&>small]:justify-center [&>small]:rounded-full [&>small]:bg-[var(--vui-control-muted)] [&>small]:font-[820] [&>small]:text-[var(--fg-muted)] [&>div]:grid [&>div]:gap-1",
   researchStageCardMetrics:
-    "researchStageCardMetrics min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] p-2 grid gap-2 !grid grid-cols-[repeat(4,minmax(0,1fr))] gap-[5px]",
+    "researchStageCardMetrics min-w-0 !grid grid-cols-[repeat(3,minmax(0,1fr))] gap-x-2 gap-y-1 rounded-[var(--radius-control)] bg-[var(--vui-control-muted)] px-2 py-1.5 text-[var(--vui-font-xs)] text-[var(--fg-secondary)]",
   researchStageGrid:
-    "researchStageGrid min-w-0 grid items-start gap-2 grid-cols-[repeat(auto-fit,minmax(280px,1fr))]",
+    "researchStageGrid min-w-0 grid items-stretch gap-3 grid-cols-[repeat(auto-fit,minmax(280px,1fr))]",
   researchStageHeroPanel:
     "researchStageHeroPanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] p-2",
   researchStageHeroStats:
     "researchStageHeroStats min-w-0 grid gap-2 !grid grid-cols-[repeat(3,minmax(0,1fr))] gap-2",
   researchStageLauncher:
-    "researchStageLauncher min-w-0 grid content-start gap-2 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] p-2",
+    "researchStageLauncher min-w-0 grid content-start gap-3 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] p-3",
   researchStageLauncherHeader:
-    "researchStageLauncherHeader min-w-0 flex flex-wrap items-center gap-1.5",
+    "researchStageLauncherHeader min-w-0 !flex flex-wrap items-center justify-between gap-3",
+  researchStageHeaderActions:
+    "researchStageHeaderActions min-w-0 flex flex-wrap items-center justify-end gap-1.5 [&_a]:inline-flex [&_a]:min-h-8 [&_a]:items-center [&_a]:justify-center [&_a]:gap-1.5 [&_a]:rounded-[var(--radius-control)] [&_a]:border [&_a]:border-[var(--vui-border-subtle)] [&_a]:bg-[var(--vui-control-muted)] [&_a]:px-2.5 [&_a]:font-[760] [&_a]:text-[var(--fg-primary)] [&_a]:no-underline [&_[data-vui=native-button]]:inline-flex [&_[data-vui=native-button]]:min-h-8 [&_[data-vui=native-button]]:items-center [&_[data-vui=native-button]]:justify-center [&_[data-vui=native-button]]:rounded-[var(--radius-control)] [&_[data-vui=native-button]]:border [&_[data-vui=native-button]]:border-[var(--vui-border-subtle)] [&_[data-vui=native-button]]:bg-[var(--vui-control-muted)] [&_[data-vui=native-button]]:px-2",
+  researchStageDegradedNotice:
+    "researchStageDegradedNotice min-w-0 !flex flex-wrap items-center justify-between gap-2 rounded-[var(--radius-control)] border border-[color:color-mix(in_srgb,var(--state-warning)_40%,var(--vui-border-subtle))] bg-[color:color-mix(in_srgb,var(--state-warning)_8%,var(--vui-surface-panel))] px-3 py-2 text-[var(--vui-font-sm)] text-[var(--fg-secondary)] [&_[data-vui=native-button]]:inline-flex [&_[data-vui=native-button]]:min-h-8 [&_[data-vui=native-button]]:items-center [&_[data-vui=native-button]]:justify-center [&_[data-vui=native-button]]:gap-1.5 [&_[data-vui=native-button]]:rounded-[var(--radius-control)] [&_[data-vui=native-button]]:border [&_[data-vui=native-button]]:border-[var(--vui-border-subtle)] [&_[data-vui=native-button]]:bg-[var(--vui-surface-panel)] [&_[data-vui=native-button]]:px-2.5",
+  researchStageStatus:
+    "researchStageStatus inline-flex w-fit max-w-full items-center rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-0.5 text-[var(--vui-font-xs)] font-[760] leading-tight text-[var(--fg-secondary)]",
+  researchStageStatusActive:
+    "researchStageStatusActive border-[color-mix(in_srgb,var(--accent-cool)_42%,var(--vui-border-subtle))] bg-[color:color-mix(in_srgb,var(--accent-cool)_12%,var(--vui-control-muted))] text-[var(--accent-cool)]",
+  researchStageStatusPending:
+    "researchStageStatusPending text-[var(--fg-muted)]",
+  researchStageStatusRecorded:
+    "researchStageStatusRecorded border-[color-mix(in_srgb,var(--state-success)_32%,var(--vui-border-subtle))] text-[var(--state-success)]",
+  researchStageStatusLoading:
+    "researchStageStatusLoading text-[var(--fg-muted)]",
+  researchStageStatusUnavailable:
+    "researchStageStatusUnavailable border-[color-mix(in_srgb,var(--state-warning)_42%,var(--vui-border-subtle))] text-[var(--state-warning)]",
   researchStageModuleCard:
     "researchStageModuleCard min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] p-2",
   researchStageModuleGrid:
@@ -465,21 +481,21 @@ const styles: Record<string, string> = {
   teamHistoryPanel:
     "teamHistoryPanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] p-2",
   teamMemoryActionRail:
-    "teamMemoryActionRail min-w-0 flex flex-wrap items-center gap-1.5 grid min-h-0 content-start overflow-auto !flex min-w-0 items-center justify-end gap-[5px] [&_a]:inline-flex [&_a]:min-h-[24px] [&_a]:items-center [&_a]:justify-center [&_a]:gap-1 [&_a]:px-[7px] [&_a]:rounded-[7px] [&_a]:border [&_a]:border-[color:color-mix(in_srgb,var(--accent-cool)_30%,var(--border-soft))] [&_a]:bg-[color:color-mix(in_srgb,var(--vui-surface-panel)_88%,transparent)] [&_a]:text-[var(--fg-primary)] [&_a]:font-[820] [&_a]:no-underline [&_a]:whitespace-nowrap [&_a:hover]:border-[color:color-mix(in_srgb,var(--accent-cool)_46%,var(--border-soft))] [&_a:hover]:bg-[color:color-mix(in_srgb,var(--accent-cool)_8%,var(--vui-surface-panel))]",
+    "teamMemoryActionRail min-w-0 flex flex-wrap items-center justify-end gap-1.5 [&_a]:inline-flex [&_a]:min-h-8 [&_a]:items-center [&_a]:justify-center [&_a]:gap-1.5 [&_a]:px-2.5 [&_a]:rounded-[var(--radius-control)] [&_a]:border [&_a]:border-[color:color-mix(in_srgb,var(--accent-cool)_30%,var(--border-soft))] [&_a]:bg-[color:color-mix(in_srgb,var(--vui-surface-panel)_88%,transparent)] [&_a]:text-[var(--fg-primary)] [&_a]:font-[820] [&_a]:no-underline [&_a]:whitespace-nowrap [&_a:hover]:border-[color:color-mix(in_srgb,var(--accent-cool)_46%,var(--border-soft))] [&_a:hover]:bg-[color:color-mix(in_srgb,var(--accent-cool)_8%,var(--vui-surface-panel))]",
   teamMemoryIndex:
-    "teamMemoryIndex min-w-0 !flex-none min-h-0 grid max-h-[36vh] gap-2 grid-rows-[auto_minmax(0,1fr)] grid-cols-[minmax(0,1fr)] overflow-hidden rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] p-2",
+    "teamMemoryIndex min-w-0 !flex-none grid gap-3 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] p-3",
   teamMemoryIndexHeader:
     "teamMemoryIndexHeader min-w-0 flex flex-wrap items-center gap-1.5 !flex min-w-0 items-center justify-between gap-2 [&>div]:grid [&>div]:min-w-0 [&>div]:gap-0.5 [&>div_strong]:truncate [&>div_strong]:text-[var(--fg-primary)] [&>div_span]:truncate [&>div_span]:text-[var(--fg-muted)] [&>div_span]:font-[760]",
   teamMemoryMemberActions:
-    "teamMemoryMemberActions min-w-0 flex flex-wrap items-center gap-1.5 !flex items-center justify-end gap-[5px] min-w-0 [&_a_span]:hidden [&_a]:inline-flex [&_a]:items-center [&_a]:justify-center [&_a]:w-[26px] [&_a]:min-w-[26px] [&_a]:min-h-[24px] [&_a]:rounded-[7px] [&_a]:border [&_a]:border-[color:color-mix(in_srgb,var(--accent-cool)_30%,var(--border-soft))] [&_a]:bg-[color:color-mix(in_srgb,var(--vui-surface-panel)_88%,transparent)] [&_a]:text-[var(--fg-primary)] [&_a]:no-underline",
+    "teamMemoryMemberActions min-w-0 flex flex-wrap items-center justify-end gap-1.5 [&_a]:inline-flex [&_a]:min-h-8 [&_a]:items-center [&_a]:justify-center [&_a]:gap-1.5 [&_a]:rounded-[var(--radius-control)] [&_a]:border [&_a]:border-[color:color-mix(in_srgb,var(--accent-cool)_30%,var(--border-soft))] [&_a]:bg-[color:color-mix(in_srgb,var(--vui-surface-panel)_88%,transparent)] [&_a]:px-2 [&_a]:text-[var(--fg-primary)] [&_a]:font-[760] [&_a]:no-underline",
   teamMemoryMemberCard:
-    "teamMemoryMemberCard min-w-0 grid grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_max-content_auto] items-center gap-2 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] px-2 py-1.5 max-[720px]:grid-cols-[minmax(0,1fr)_auto]",
+    "teamMemoryMemberCard min-w-0 grid grid-cols-[minmax(10rem,1.1fr)_minmax(11rem,1.4fr)_max-content_auto] items-center gap-3 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] px-3 py-2 max-[720px]:grid-cols-[minmax(0,1fr)_auto] max-[720px]:gap-2",
   teamMemoryMemberHeading:
-    "teamMemoryMemberHeading min-w-0 hidden",
+    "teamMemoryMemberHeading min-w-0 grid grid-cols-[minmax(10rem,1.1fr)_minmax(11rem,1.4fr)_max-content_auto] gap-3 px-3 text-[var(--vui-font-xs)] font-[760] text-[var(--fg-muted)] max-[720px]:hidden",
   teamMemoryMemberIdentity:
     "teamMemoryMemberIdentity min-w-0 grid gap-1",
   teamMemoryMemberTable:
-    "teamMemoryMemberTable min-w-0 min-h-0 !grid grid-cols-[minmax(0,1fr)] content-start auto-rows-max gap-1.5 overflow-auto pr-1 [scrollbar-gutter:stable]",
+    "teamMemoryMemberTable min-w-0 !grid grid-cols-[minmax(0,1fr)] content-start auto-rows-max gap-1.5",
   teamMemoryRole:
     "teamMemoryRole min-w-0",
   teamMemoryStatusBadge:
