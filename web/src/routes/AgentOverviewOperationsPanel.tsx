@@ -1,6 +1,6 @@
 import { Activity, ExternalLink, FileSearch, PlayCircle } from "lucide-react";
 
-import { VButton } from "../components/vui";
+import { VButton, VTooltip } from "../components/vui";
 import styles from "./AgentOverviewOperationsPanel.styles";
 
 export type AgentOverviewOperationsCopy = {
@@ -75,7 +75,9 @@ export function AgentOverviewOperationsPanel({
         <div className={styles.runtimeMeta}>
           <span>
             <strong>{copy.latestRun}</strong>
-            <small title={runtime.latestRunId}>{runtime.latestRunId}</small>
+            <VTooltip content={runtime.latestRunId} width="wide">
+              <small tabIndex={0} aria-label={`${copy.latestRun}完整值`}>{runtime.latestRunId}</small>
+            </VTooltip>
           </span>
           <span>
             <strong>{copy.updated}</strong>

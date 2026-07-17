@@ -82,7 +82,7 @@ import type { ConversationStreamingFramePaintMetrics } from "../components/conve
 import { shouldShowNextStateSignalInConversation } from "../components/conversation/conversationNextStateSignal";
 import type { TurnAvatarResolution } from "../components/conversation/conversationTurnAvatar";
 import { isAgentInboxMessage, isTurnErrorMessage } from "../components/conversation/conversationMessagePredicates";
-import { VButton, VInput, VNativeInput, VNativeSelect, VStateSurface, VTooltip, type VButtonProps } from "../components/vui";
+import { VButton, VContextualHint, VInput, VNativeInput, VNativeSelect, VStateSurface, VTooltip, type VButtonProps } from "../components/vui";
 import { collectBrowserPageSnapshot, postBrowserTelemetry } from "../app/browserTelemetry";
 import { getPageInstanceId } from "../app/pageInstance";
 import { resolvePollingInterval, usePageVisibility, useStartupWarmup } from "../app/pollingPolicy";
@@ -6681,22 +6681,26 @@ export function ChatCodingRoute() {
           <section className={`${styles.leftBlock} ${styles.groupProfileBlock}`}>
             <div className={styles.sectionHeader}>
               <div className={styles.sectionIdentity}>
-                <p className={styles.blockEyebrow}>{lang === "zh" ? "群资料与设置" : "Group profile"}</p>
+                <div className={styles.sectionEyebrowRow}>
+                  <p className={styles.blockEyebrow}>{lang === "zh" ? "群资料与设置" : "Group profile"}</p>
+                  <VContextualHint
+                    content={activeGroupTeamOwned
+                      ? (lang === "zh"
+                        ? "这是团队关联群聊；成员、角色和同步关系由团队页维护，这里只负责讨论运行与成员状态观察。"
+                        : "This room is owned by a Team. Membership, roles, and sync stay in Teams; Chat only runs discussion and shows member status.")
+                      : (lang === "zh"
+                        ? "这里管理当前普通群聊的资料、成员和调度；成员状态索引放在左侧会话列。"
+                        : "Manage this standalone group's info, members, and scheduling here. Member status lives in the left conversation column.")}
+                    label={lang === "zh" ? "群资料与设置说明" : "Group profile details"}
+                    width="wide"
+                  />
+                </div>
                 <h3 className={styles.sectionTitle}>{activeGroupRoom?.title ?? (lang === "zh" ? "群聊加载中" : "Loading group")}</h3>
               </div>
               <span className={`${styles.sessionStatePill} ${styles[`sessionStatePill_${String(activeGroupRoom?.status ?? "ready").trim().toLowerCase()}`]}`}>
                 {statusLabel(activeGroupRoom?.status ?? "ready")}
               </span>
             </div>
-            <p className={styles.contextLineCompact}>
-              {activeGroupTeamOwned
-                ? (lang === "zh"
-                  ? "这是团队关联群聊；成员、角色和同步关系由团队页维护，这里只负责讨论运行与成员状态观察。"
-                  : "This room is owned by a Team. Membership, roles, and sync stay in Teams; Chat only runs discussion and shows member status.")
-                : (lang === "zh"
-                  ? "这里管理当前普通群聊的资料、成员和调度；成员状态索引放在左侧会话列。"
-                  : "Manage this standalone group's info, members, and scheduling here. Member status lives in the left conversation column.")}
-            </p>
             <div className={styles.resourceSplit}>
               <div className={styles.resourceMetric}>
                 <span>{lang === "zh" ? "可用成员" : "Available"}</span>
@@ -6714,7 +6718,18 @@ export function ChatCodingRoute() {
             <section className={styles.groupManagementPanel} aria-label={lang === "zh" ? "群聊管理" : "Group management"}>
               <div className={styles.groupManagementHeader}>
                 <div>
-                  <strong>{activeGroupTeamOwned ? (lang === "zh" ? "团队群聊引用" : "Team room reference") : (lang === "zh" ? "群设置" : "Group settings")}</strong>
+                  <span className={styles.groupManagementTitleRow}>
+                    <strong>{activeGroupTeamOwned ? (lang === "zh" ? "团队群聊引用" : "Team room reference") : (lang === "zh" ? "群设置" : "Group settings")}</strong>
+                    {activeGroupTeamOwned ? (
+                      <VContextualHint
+                        content={lang === "zh"
+                          ? "团队关联群聊的成员来自团队组织画布；如需调整成员、角色或同步关系，请打开团队页。"
+                          : "Team-owned room members come from the Team canvas. Open Teams to change members, roles, or sync."}
+                        label={lang === "zh" ? "团队群聊引用说明" : "Team room reference details"}
+                        width="wide"
+                      />
+                    ) : null}
+                  </span>
                   <span title={activeGroupRoom?.title ?? ""}>
                     {activeGroupRoom?.title ?? (lang === "zh" ? "群聊加载中" : "Loading group")}
                   </span>
@@ -6872,13 +6887,7 @@ export function ChatCodingRoute() {
                   })}
                 </div>
               </div>
-              {activeGroupTeamOwned ? (
-                <p className={styles.groupManagementHint}>
-                  {lang === "zh"
-                    ? "团队关联群聊的成员来自团队组织画布；如需调整成员、角色或同步关系，请打开团队页。"
-                    : "Team-owned room members come from the Team canvas. Open Teams to change members, roles, or sync."}
-                </p>
-              ) : groupRoundActive ? (
+              {groupRoundActive ? (
                 <p className={styles.groupManagementHint}>
                   {lang === "zh" ? "群聊运行中，成员和模式会在本轮结束后允许修改。" : "The group is running. Members and mode can be changed after this round finishes."}
                 </p>
@@ -7303,7 +7312,16 @@ export function ChatCodingRoute() {
                     {" · "}
                     {activeGroupRoom?.purpose ?? "discussion"}
                   </p>
-                  <h2>{lang === "zh" ? "助手通知流" : "Agent notice stream"}</h2>
+                  <div className={styles.groupConversationTitleRow}>
+                    <h2>{lang === "zh" ? "助手通知流" : "Agent notice stream"}</h2>
+                    <VContextualHint
+                      content={lang === "zh"
+                        ? "助手通知流会显示用户引导、助手私信和广播投递结果；它不是团队群聊。"
+                        : "The Agent notice stream shows guidance, private messages, broadcasts, and delivery results. It is not a team room."}
+                      label={lang === "zh" ? "助手通知流说明" : "Agent notice stream details"}
+                      width="wide"
+                    />
+                  </div>
                   <span>
                     {projectBusTimeline?.activeAgentCount ?? availableGroupParticipantCount} {lang === "zh" ? "位 active Agent" : "active agents"}
                     {" · "}
@@ -7482,7 +7500,7 @@ export function ChatCodingRoute() {
                 ) : (
                   <div className={styles.groupEmptyState}>
                     <BellRing size={28} />
-                    <p>{lang === "zh" ? "助手通知流会显示用户引导、助手私信和广播投递结果；它不是团队群聊。" : "The Agent notice stream shows guidance, private messages, broadcasts, and delivery results. It is not a team room."}</p>
+                    <p>{lang === "zh" ? "暂无通知。" : "No notices yet."}</p>
                   </div>
                 )}
               </div>
@@ -7884,15 +7902,19 @@ export function ChatCodingRoute() {
             <section className={styles.agentIndexRoster} aria-label={lang === "zh" ? "群成员状态索引" : "Group member status index"}>
               <div className={styles.sectionHeader}>
                 <div className={styles.sectionIdentity}>
-                  <p className={styles.blockEyebrow}>{lang === "zh" ? "成员状态" : "Member status"}</p>
+                  <div className={styles.sectionEyebrowRow}>
+                    <p className={styles.blockEyebrow}>{lang === "zh" ? "成员状态" : "Member status"}</p>
+                    <VContextualHint
+                      content={lang === "zh"
+                        ? "只展示可用成员；已归档或断链的历史成员保留在日志里，不在这里打扰。"
+                        : "Only available members are shown here; archived or broken historical members stay in diagnostics."}
+                      label={lang === "zh" ? "成员状态筛选说明" : "Member status filter details"}
+                      width="wide"
+                    />
+                  </div>
                   <h3 className={styles.sectionTitle}>{activeGroupRoom?.title ?? (lang === "zh" ? "群聊加载中" : "Loading group")}</h3>
                 </div>
               </div>
-              <p className={styles.contextLineCompact}>
-                {lang === "zh"
-                  ? "只展示可用成员；已归档或断链的历史成员保留在日志里，不在这里打扰。"
-                  : "Only available members are shown here; archived or broken historical members stay in diagnostics."}
-              </p>
               {availableGroupParticipants.length ? (
                 <div className={styles.agentIndexList}>
                   {availableGroupParticipants.map((participant: ChatRoomParticipant) => {
@@ -7943,7 +7965,9 @@ export function ChatCodingRoute() {
                           className={styles.agentIndexOpenButton}
                           onClick={() => handleOpenDirectSession(participant.sessionId)}
                           aria-label={lang === "zh" ? `打开 ${participantDisplay.name} 单聊` : `Open direct chat with ${participantDisplay.name}`}
-                          title={lang === "zh" ? "打开该助手的单聊" : "Open this Agent direct chat"}
+                          tooltip={lang === "zh"
+                            ? "打开该助手的单聊。群聊成员由群聊调度驱动；需要单独调整下一轮功能时，请在单聊中完成。"
+                            : "Open this Agent direct chat. Group members are driven by group scheduling; tune next-turn features in the direct chat."}
                         >
                           {renderAgentAvatar(
                             styles.agentIndexAvatar,
@@ -8004,11 +8028,6 @@ export function ChatCodingRoute() {
                                 </div>
                                 <p className={styles.contextLineCompact}>{memberMentalSummary}</p>
                               </div>
-                              <p className={styles.featurePresetNote}>
-                                {lang === "zh"
-                                  ? "群聊成员由群聊调度驱动；需要单独调整下一轮功能时，请打开该助手的单聊。"
-                                  : "Group members are driven by group scheduling. Open the direct chat to tune next-turn features."}
-                              </p>
                             </>
                           )}
                         </div>

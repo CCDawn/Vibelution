@@ -1,6 +1,6 @@
 import { Boxes } from "lucide-react";
 
-import { VButton } from "../components/vui";
+import { VButton, VTooltip } from "../components/vui";
 import styles from "./AgentOverviewResourcesPanel.styles";
 
 export type AgentOverviewResourceView = {
@@ -31,7 +31,9 @@ export function AgentOverviewResourcesPanel({ title, emptyLabel, openLabel, reso
             <div key={resource.id} className={styles.item}>
               <div className={styles.itemText}>
                 <span>{resource.label}</span>
-                <strong title={resource.value}>{resource.value}</strong>
+                <VTooltip content={resource.value} width="wide">
+                  <strong tabIndex={0} aria-label={`${resource.label}完整值`}>{resource.value}</strong>
+                </VTooltip>
               </div>
               <VButton type="button" variant="ghost" onPress={() => onOpenRoute(resource.route)}>{openLabel}</VButton>
             </div>

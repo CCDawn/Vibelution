@@ -32,7 +32,10 @@ describe("AgentOverviewPanel", () => {
 
     expect(markup).toContain("GPT-5.6");
     expect(markup).toContain("技术信息");
-    expect(markup).toContain("工作空间、策略与系统标识");
+    expect(markup).toContain('data-vui="contextual-hint"');
+    expect(markup).toContain('aria-label="技术信息说明"');
+    expect(markup).not.toContain("工作空间、策略与系统标识");
+    expect(markup).not.toContain("<small>工作空间、策略与系统标识</small>");
     expect(markup).toContain("<details");
     expect(markup).not.toContain("<details open");
     expect(markup).toContain("A050");

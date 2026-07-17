@@ -128,6 +128,8 @@ const styles: Record<string, string> = {
     "vui-routes-chatcodingroute agentSessionTabTitleInput min-w-0 grid gap-1 text-[var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full text-[var(--vui-font-title)] font-semibold leading-tight text-[var(--fg-primary)] border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
   blockEyebrow:
     "vui-routes-chatcodingroute blockEyebrow min-w-0 text-[var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-tertiary)]",
+  sectionEyebrowRow:
+    "vui-routes-chatcodingroute sectionEyebrowRow flex min-w-0 items-center gap-1",
   cacheDetailBody:
     "vui-routes-chatcodingroute cacheDetailBody min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] max-h-[min(620px,calc(100dvh_-_238px))] overflow-auto [scrollbar-gutter:stable]",
   cacheDetailBoundary:
@@ -378,8 +380,6 @@ const styles: Record<string, string> = {
     "vui-routes-chatcodingroute featureChipRow grid min-w-0 grid-cols-2 gap-1.5 overflow-visible rounded-none border-0 bg-transparent p-0",
   featurePresetBlock:
     "vui-routes-chatcodingroute featurePresetBlock min-w-0",
-  featurePresetNote:
-    "vui-routes-chatcodingroute featurePresetNote min-w-0",
   featurePresetScope:
     "vui-routes-chatcodingroute featurePresetScope min-w-0",
   groupAgentOption:
@@ -438,6 +438,10 @@ const styles: Record<string, string> = {
     "vui-routes-chatcodingroute groupManagementHeader min-w-0 flex flex-wrap items-center gap-1.5",
   groupManagementHint:
     "vui-routes-chatcodingroute groupManagementHint min-w-0 text-[var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
+  groupManagementTitleRow:
+    "vui-routes-chatcodingroute groupManagementTitleRow inline-flex min-w-0 items-center gap-1",
+  groupConversationTitleRow:
+    "vui-routes-chatcodingroute groupConversationTitleRow flex min-w-0 items-center gap-1",
   groupManagementPanel:
     "vui-routes-chatcodingroute groupManagementPanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
   groupMemberChip:

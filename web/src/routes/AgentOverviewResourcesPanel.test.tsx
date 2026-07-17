@@ -25,5 +25,6 @@ describe("AgentOverviewResourcesPanel", () => {
     expect(markup).toContain("research-toolkit");
     expect(markup).toContain("科研讨论组");
     expect(markup).toContain("打开");
+    expect(markup).toContain('aria-label="提示词完整值"');
   });
 });
