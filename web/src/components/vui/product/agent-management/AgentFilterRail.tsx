@@ -1,7 +1,7 @@
 import { ChevronDown, Search } from "lucide-react";
 import { type ReactNode } from "react";
 
-import { VNativeButton, VNativeInput } from "../../index";
+import { VNativeButton, VNativeInput, VTooltip } from "../../index";
 import { AgentWorkspacePanel } from "./AgentWorkspacePanel";
 
 export type AgentFilterGroupView = {
@@ -68,7 +68,7 @@ function FilterSection({
       <div className="grid gap-[5px] min-w-0">
         {section.groups.map((group) => {
           const active = activeGroupId === group.id;
-          return (
+          const button = (
             <VNativeButton
               key={group.id}
               type="button"
@@ -80,16 +80,20 @@ function FilterSection({
               onClick={() => onSelectGroup(group.id)}
               aria-label={group.ariaLabel}
               aria-pressed={active}
-              title={group.title}
             >
               <span className={GROUP_LABEL}>
-              {group.icon}
+                {group.icon}
                 {group.label}
               </span>
               <strong className={COUNT_BADGE}>{group.count}</strong>
               {group.healthLabel ? <em className={HEALTH_BADGE}>{group.healthLabel}</em> : null}
             </VNativeButton>
           );
+          return group.title ? (
+            <VTooltip key={group.id} content={group.title} width="wide">
+              {button}
+            </VTooltip>
+          ) : button;
         })}
       </div>
     </section>
