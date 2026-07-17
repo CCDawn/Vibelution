@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import time
 from contextlib import asynccontextmanager, suppress
 from typing import Any
 
@@ -72,10 +73,39 @@ async def web_workbench_lifespan(_: FastAPI):
         loop.set_exception_handler(previous_handler)
 
 
+def _prewarm_git_memory_on_startup() -> tuple[Any, int]:
+    from core.infrastructure import git_memory
+
+    started = time.perf_counter()
+    state = git_memory.refresh_git_memory(force=True)
+    return state, max(0, int((time.perf_counter() - started) * 1000))
+
+
 async def prewarm_ui_caches_on_startup() -> None:
     from tools import Key_Tools, web_search_tool
 
-    await asyncio.gather(
+    started = time.perf_counter()
+    results = await asyncio.gather(
         asyncio.to_thread(Key_Tools.prewarm_key_tool_definitions),
         asyncio.to_thread(web_search_tool.autoglm_search_tool_availability, force=True),
+        asyncio.to_thread(_prewarm_git_memory_on_startup),
+    )
+    git_state, git_duration_ms = results[2]
+    from .services.runtime_scene_service import record_runtime_scene_event
+
+    record_runtime_scene_event(
+        "runtime_manager",
+        "startup_prewarm",
+        "runtime.startup.git_memory_prewarmed",
+        message="Git memory was prewarmed before the first chat turn.",
+        outcome="completed",
+        fields={
+            "durationMs": git_duration_ms,
+            "totalPrewarmMs": max(0, int((time.perf_counter() - started) * 1000)),
+            "available": bool(getattr(git_state, "available", False)),
+            "dirty": bool(getattr(git_state, "dirty", False)),
+            "headPresent": bool(getattr(git_state, "head_rev", None)),
+            "indexedHeadPresent": bool(getattr(git_state, "indexed_head_rev", None)),
+        },
+        lifecycle=True,
     )
