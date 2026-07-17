@@ -177,6 +177,9 @@ TIMELINE_DIAGNOSTIC_ONLY_COMPONENT_PHASES = {
     ("conversation_service", "session_index"),
     ("runtime_manager", "runtime"),
 }
+from core.logging import pipeline_metrics
+
+
 BROWSER_TELEMETRY_WRITE_LOCK = Lock()
 BACKEND_API_WRITE_LOCK = Lock()
 RUNTIME_SCENE_PACKAGE_WRITE_LOCK = Lock()
@@ -908,22 +911,23 @@ def record_runtime_scene_event(
         # Full diagnosis generation is intentionally isolated from the append
         # lock. A slow warning projection must not queue ordinary Agent events
         # ahead of the provider request.
-        with RUNTIME_SCENE_PACKAGE_WRITE_LOCK:
-            manifest = _load_scene_manifest(scene_dir)
-            reconciliation_closed = _maybe_close_runtime_scene_from_reconciliation(
-                scene_dir,
-                manifest,
-                event_name,
-                normalized_fields,
-                timestamp,
-            )
-            full_projection_refresh = _runtime_scene_event_requires_full_projection_refresh(
-                level=level_name,
-                reconciliation_closed=reconciliation_closed,
-            )
-            if full_projection_refresh:
-                _update_runtime_scene_package_manifest(scene_dir, manifest)
-                projection_refresh = "full"
+        with pipeline_metrics.measure("projection", priority="high"):
+            with RUNTIME_SCENE_PACKAGE_WRITE_LOCK:
+                manifest = _load_scene_manifest(scene_dir)
+                reconciliation_closed = _maybe_close_runtime_scene_from_reconciliation(
+                    scene_dir,
+                    manifest,
+                    event_name,
+                    normalized_fields,
+                    timestamp,
+                )
+                full_projection_refresh = _runtime_scene_event_requires_full_projection_refresh(
+                    level=level_name,
+                    reconciliation_closed=reconciliation_closed,
+                )
+                if full_projection_refresh:
+                    _update_runtime_scene_package_manifest(scene_dir, manifest)
+                    projection_refresh = "full"
 
     return {
         "accepted": True,
@@ -5471,18 +5475,19 @@ def _append_scene_jsonl(scene_dir: Path, relative_path: str, payload: dict[str, 
 
 
 def _append_scene_event(scene_dir: Path, component: str, payload: dict[str, Any]) -> None:
-    with RUNTIME_SCENE_EVENT_WRITE_LOCK:
-        sequenced_payload = dict(payload)
-        sequenced_payload["seq"] = _next_scene_event_seq(scene_dir, component)
-        events_dir = scene_dir / "events"
-        events_dir.mkdir(parents=True, exist_ok=True)
-        event_path = events_dir / f"{component}.jsonl"
-        with event_path.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(sequenced_payload, ensure_ascii=False, separators=(",", ":")))
-            handle.write("\n")
-        _remember_scene_event_seq(event_path, int(sequenced_payload.get("seq") or 0))
-        if not _should_promote_scene_event_to_timeline(sequenced_payload):
-            return
+    with pipeline_metrics.measure("append", priority="normal"):
+        with RUNTIME_SCENE_EVENT_WRITE_LOCK:
+            sequenced_payload = dict(payload)
+            sequenced_payload["seq"] = _next_scene_event_seq(scene_dir, component)
+            events_dir = scene_dir / "events"
+            events_dir.mkdir(parents=True, exist_ok=True)
+            event_path = events_dir / f"{component}.jsonl"
+            with event_path.open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(sequenced_payload, ensure_ascii=False, separators=(",", ":")))
+                handle.write("\n")
+            _remember_scene_event_seq(event_path, int(sequenced_payload.get("seq") or 0))
+            if not _should_promote_scene_event_to_timeline(sequenced_payload):
+                return
         _append_scene_jsonl(scene_dir, TIMELINE_PATH, sequenced_payload)
         if _is_lifecycle_event(sequenced_payload):
             _append_scene_jsonl(scene_dir, LIFECYCLE_PATH, sequenced_payload)
