@@ -87,6 +87,110 @@ def test_normalized_assistant_message_exposes_native_codex_transcript():
     ]
 
 
+def test_normalized_transcript_preserves_commentary_before_tool_and_final_answer():
+    messages = session_service._normalize_messages(
+        "session-commentary",
+        [
+            {
+                "role": "assistant",
+                "content": "当前工作区干净，适合开始新任务。",
+                "timestamp": "2026-07-17T11:00:02Z",
+                "feedback_events": [
+                    {
+                        "sequence": 1,
+                        "kind": "assistant_text",
+                        "status": "done",
+                        "content": "我会先读取当前 Git 状态。",
+                    },
+                    {
+                        "sequence": 2,
+                        "kind": "tool",
+                        "status": "done",
+                        "name": "get_git_status_summary_tool",
+                        "summary": "工作区干净",
+                    },
+                ],
+            }
+        ],
+    )
+
+    transcript = messages[0]["codexTranscript"]
+
+    assert [cell["kind"] for cell in transcript["cells"]] == [
+        "assistant_markdown",
+        "tool_call",
+        "assistant_markdown",
+    ]
+    assert transcript["cells"][0]["phase"] == "commentary"
+    assert transcript["cells"][0]["text"] == "我会先读取当前 Git 状态。"
+    assert transcript["cells"][2]["text"] == "当前工作区干净，适合开始新任务。"
+
+
+def test_canonical_commentary_suppresses_legacy_assistant_suffix(monkeypatch):
+    class Event:
+        def __init__(
+            self,
+            *,
+            event_type,
+            sequence,
+            payload,
+            projection_kind="",
+            source="",
+        ):
+            self.event_type = event_type
+            self.turn_id = "turn-commentary"
+            self.sequence = sequence
+            self.payload = payload
+            self.projection_kind = projection_kind
+            self.source = source
+            self.status = "done"
+
+    monkeypatch.setattr(
+        session_service,
+        "_load_session_conversation_events_cached",
+        lambda _session_id: [
+            Event(
+                event_type="assistant_item_committed",
+                sequence=10,
+                payload={
+                    "kind": "commentary",
+                    "text": "我会先读取当前 Git 状态，再判断是否适合开始新任务。",
+                },
+            ),
+            Event(
+                event_type=session_service.EVENT_ASSISTANT_DELTA_COMMITTED,
+                sequence=11,
+                payload={"content": "务。"},
+                projection_kind="assistant_timeline_segment",
+            ),
+        ],
+    )
+
+    projected = session_service._assistant_timeline_events_by_turn("session-commentary")
+
+    assert [item["content"] for item in projected["turn-commentary"]] == [
+        "我会先读取当前 Git 状态，再判断是否适合开始新任务。",
+    ]
+    assert projected["turn-commentary"][0]["source"] == "assistant_item_committed"
+
+
+def test_empty_canonical_reasoning_is_not_projected(monkeypatch):
+    class Event:
+        event_type = "assistant_item_committed"
+        turn_id = "turn-reasoning"
+        sequence = 1
+        payload = {"kind": "reasoning", "text": ""}
+        status = "done"
+
+    monkeypatch.setattr(
+        session_service,
+        "_load_session_conversation_events_cached",
+        lambda _session_id: [Event()],
+    )
+
+    assert session_service._assistant_timeline_events_by_turn("session-reasoning") == {}
+
+
 def test_native_codex_transcript_omits_internal_runtime_status_cells():
     messages = session_service._normalize_messages(
         "session-codex",
