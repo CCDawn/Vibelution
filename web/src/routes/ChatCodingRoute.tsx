@@ -2051,7 +2051,7 @@ export function ChatCodingRoute() {
     activeRootSessionId: "",
   };
   const chatLiveQueryPolicy = resolveChatLiveQueryPolicy(chatLiveQueryPolicyInput);
-  const { directSessionStreamOwnsLiveQueries, groupStreamOwnsLiveQueries } = chatLiveQueryPolicy;
+  const { groupStreamOwnsLiveQueries } = chatLiveQueryPolicy;
   useEffect(() => {
     if (!standardGroupRoomActive && rightIndexPanel === "members") {
       setRightIndexPanel("conversations");
@@ -2693,11 +2693,9 @@ export function ChatCodingRoute() {
             : undefined,
         )
       );
-      if (directSessionStreamOwnsLiveQueries) {
-        void chatWorkspaceCache.refreshConversationIndex();
-      } else {
-        void chatWorkspaceCache.afterDirectTurnAccepted(acceptedTurn.sessionId || variables.sessionId);
-      }
+      // The optimistic detail/index updates above already expose the accepted turn.
+      // SSE owns authoritative reconciliation when available; the existing polling
+      // fallback does the same without competing with the first model request.
     },
     onError: (error, variables) => {
       postSubmitTelemetry(

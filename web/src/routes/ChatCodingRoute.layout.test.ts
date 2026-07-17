@@ -1945,7 +1945,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("standardGroupRoomActive,");
     expect(routeSource).not.toContain("legacyGroupRoomActive");
     expect(routeSource).toContain("const chatLiveQueryPolicy = resolveChatLiveQueryPolicy(chatLiveQueryPolicyInput)");
-    expect(routeSource).toContain("const { directSessionStreamOwnsLiveQueries, groupStreamOwnsLiveQueries } = chatLiveQueryPolicy");
+    expect(routeSource).toContain("const { groupStreamOwnsLiveQueries } = chatLiveQueryPolicy");
     expect(routeSource).toContain("refetchInterval: chatLiveQueryPolicy.sessionsRefetchInterval");
     expect(routeSource).toContain("refetchInterval: chatLiveQueryPolicy.conversationsRefetchInterval");
     expect(routeSource).toContain("? chatLiveQueryPolicy.sessionDetailRefetchInterval");
@@ -1954,15 +1954,16 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("mergeSessionDetailIntoConversations(conversations, detail)");
   });
 
-  it("avoids refetching the active session detail after a turn when its SSE stream owns live state", () => {
+  it("does not refetch chat indexes or detail immediately after an accepted direct turn", () => {
     const submitMutationStart = routeSource.indexOf("const submitTurnMutation = useMutation");
     const submitSuccessStart = routeSource.indexOf("onSuccess: (acceptedTurn, variables)", submitMutationStart);
     const submitErrorStart = routeSource.indexOf("onError: (error, variables)", submitSuccessStart);
     const submitSuccessBlock = routeSource.slice(submitSuccessStart, submitErrorStart);
 
-    expect(submitSuccessBlock).toContain("directSessionStreamOwnsLiveQueries");
-    expect(submitSuccessBlock).toContain("chatWorkspaceCache.refreshConversationIndex()");
-    expect(submitSuccessBlock).toContain("chatWorkspaceCache.afterDirectTurnAccepted(acceptedTurn.sessionId || variables.sessionId)");
+    expect(submitSuccessBlock).toContain("markOptimisticUserMessageAccepted");
+    expect(submitSuccessBlock).not.toContain("invalidateQueries");
+    expect(submitSuccessBlock).not.toContain("chatWorkspaceCache.refreshConversationIndex()");
+    expect(submitSuccessBlock).not.toContain("chatWorkspaceCache.afterDirectTurnAccepted");
   });
 
   it("keeps active chat streams stable during direct session route switches", () => {
