@@ -1282,6 +1282,51 @@ def _default_responses_backend(payload: Dict[str, Any]) -> Any:
     return responses(**request_payload)
 
 
+_default_responses_backend._vibelution_default_responses_backend = True
+
+
+def _new_cancellable_responses_http_handler(payload: Dict[str, Any]) -> Any:
+    """Create one reusable LiteLLM HTTP client whose active request can be aborted."""
+
+    from litellm import HTTPHandler
+
+    timeout = payload.get("timeout")
+    ssl_verify = payload.get("ssl_verify")
+    return HTTPHandler(timeout=timeout, ssl_verify=ssl_verify)
+
+
+class _CancellableProviderStream:
+    """Finalize a cancellable provider request when its iterator ends or is closed."""
+
+    def __init__(self, iterator: Any, finish: Callable[[], None]) -> None:
+        self._iterator = iter(iterator)
+        self._finish = finish
+
+    def __iter__(self) -> "_CancellableProviderStream":
+        return self
+
+    def __next__(self) -> Any:
+        try:
+            return next(self._iterator)
+        except StopIteration:
+            self._finish()
+            raise
+        except Exception as exc:
+            self._finish()
+            reason = _current_llm_cancel_reason()
+            if reason:
+                raise LLMCancelledError(reason) from exc
+            raise
+
+    def close(self) -> None:
+        try:
+            close = getattr(self._iterator, "close", None)
+            if callable(close):
+                close()
+        finally:
+            self._finish()
+
+
 def _payload_uses_responses(payload: Dict[str, Any]) -> bool:
     return "input" in payload and "messages" not in payload
 
@@ -1420,6 +1465,9 @@ class LLMClient:
         self.bound_tools = list(bound_tools or [])
         self._backend = backend or _default_completion_backend
         self._responses_backend = responses_backend or backend or _default_responses_backend
+        self._cancellable_responses_http_handler: Any = None
+        self._cancellable_responses_http_handler_lock = threading.Lock()
+        self._cancellable_responses_stream_lock = threading.Lock()
         self.adapter = get_provider_adapter(self.provider, self.profile)
         self._resolved_spec = discover_model(self.config, self.profile_id)
         _model_id, model_entry = self.config.llm.get_model_library_entry_for_profile(self.profile)
@@ -1487,6 +1535,102 @@ class LLMClient:
             },
             lifecycle=False,
         )
+
+    def _prepare_cancellable_responses_stream(
+        self,
+        payload: Dict[str, Any],
+    ) -> tuple[Dict[str, Any], Callable[[], None]]:
+        checker = _LLM_CANCEL_CHECKER_CONTEXT.get(None)
+        if not (
+            callable(checker)
+            and _payload_uses_responses(payload)
+            and bool(
+                getattr(
+                    self._responses_backend,
+                    "_vibelution_default_responses_backend",
+                    False,
+                )
+            )
+        ):
+            return payload, lambda: None
+
+        while not self._cancellable_responses_stream_lock.acquire(timeout=0.05):
+            try:
+                reason = str(checker() or "").strip()
+            except Exception:
+                reason = ""
+            if reason:
+                raise LLMCancelledError(reason)
+        try:
+            with self._cancellable_responses_http_handler_lock:
+                handler = self._cancellable_responses_http_handler
+                if handler is None:
+                    handler = _new_cancellable_responses_http_handler(payload)
+                    self._cancellable_responses_http_handler = handler
+        except Exception:
+            self._cancellable_responses_stream_lock.release()
+            raise
+
+        request_payload = dict(payload)
+        request_payload["client"] = handler
+        watcher_finished = threading.Event()
+        cleanup_lock = threading.Lock()
+        cleaned_up = False
+
+        def watch_for_cancellation() -> None:
+            while not watcher_finished.wait(0.05):
+                try:
+                    reason = str(checker() or "").strip()
+                except Exception:
+                    reason = ""
+                if not reason:
+                    continue
+                try:
+                    handler.close()
+                except Exception:
+                    pass
+                with self._cancellable_responses_http_handler_lock:
+                    if self._cancellable_responses_http_handler is handler:
+                        self._cancellable_responses_http_handler = None
+                return
+
+        watcher = threading.Thread(
+            target=watch_for_cancellation,
+            name="vibelution-llm-cancel-watch",
+            daemon=True,
+        )
+        try:
+            watcher.start()
+        except Exception:
+            self._cancellable_responses_stream_lock.release()
+            raise
+
+        def finish() -> None:
+            nonlocal cleaned_up
+            with cleanup_lock:
+                if cleaned_up:
+                    return
+                cleaned_up = True
+            watcher_finished.set()
+            watcher.join(timeout=0.2)
+            self._cancellable_responses_stream_lock.release()
+
+        return request_payload, finish
+
+    def _open_provider_stream(self, payload: Dict[str, Any]) -> Any:
+        request_payload, finish_cancel_watch = self._prepare_cancellable_responses_stream(payload)
+        backend = self._backend_for_payload(request_payload)
+        if request_payload is payload:
+            return backend(payload)
+        try:
+            iterator = backend(request_payload)
+            return _CancellableProviderStream(iterator, finish_cancel_watch)
+        except Exception as exc:
+            finish_cancel_watch()
+            reason = _current_llm_cancel_reason()
+            if reason:
+                raise LLMCancelledError(reason) from exc
+            raise
 
     @property
     def capabilities(self) -> LLMCapabilities:
@@ -2363,7 +2507,7 @@ class LLMClient:
             iterator: Any = None
             normalized_iterator: Any = None
             with _llm_provider_proxy_env(self.config, payload.get("base_url")):
-                iterator = self._backend_for_payload(payload)(payload)
+                iterator = self._open_provider_stream(payload)
                 wire_adapter = self._required_wire_adapter()
                 if wire_adapter is None:
                     raise AssertionError("required wire adapter returned None")
