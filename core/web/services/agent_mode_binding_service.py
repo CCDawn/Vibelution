@@ -782,7 +782,7 @@ def _agent_options() -> list[dict[str, Any]]:
             "directSessionId": str(agent.get("directSessionId") or "").strip(),
             "metadata": dict(agent.get("metadata") or {}) if isinstance(agent.get("metadata"), dict) else {},
         }
-        for agent in list_agents(include_archived=False)
+        for agent in list_agents(include_archived=False, detail="summary")
     ]
 
 
