@@ -1,6 +1,6 @@
 import { Wrench } from "lucide-react";
 
-import { VButton } from "../components/vui";
+import { VButton, VContextualHint } from "../components/vui";
 import styles from "./AgentToolSummaryPanel.styles";
 
 export type AgentToolSummaryPanelCopy = {
@@ -38,11 +38,18 @@ export function AgentToolSummaryPanel({
   const actionLabel = lang === "zh" ? "配置工具能力" : "Configure tools";
 
   return (
-    <section className={styles.configEditor} title={title}>
+    <section className={styles.configEditor}>
       <div className={styles.panelHeader}>
         <div>
           <p className={styles.panelEyebrow}>{copy.toolPolicyTitle}</p>
-          <h3>{policyId || "-"}</h3>
+          <div className={styles.titleRow}>
+            <h3>{policyId || "-"}</h3>
+            <VContextualHint
+              label={lang === "zh" ? "工具能力摘要说明" : "Tool capability summary details"}
+              content={title}
+              width="wide"
+            />
+          </div>
         </div>
         <Wrench size={16} />
       </div>

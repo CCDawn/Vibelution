@@ -64,6 +64,8 @@ describe("GroupSessionIndexItems helpers", () => {
     expect(markup).toContain('data-vui="native-button"');
     expect(markup).toContain('data-vui="chip"');
     expect(markup).not.toContain('data-vui="button"');
+    expect(markup).toContain('aria-label="团队群聊 · 启用中 · 群聊 · 成员：3"');
+    expect(markup).not.toContain('title=');
   });
 
   it("keeps active group semantics on the native row button and falls back when the title is empty", () => {
@@ -113,6 +115,8 @@ describe("GroupSessionIndexItems helpers", () => {
     expect(markup).toContain('data-vui="native-button"');
     expect(markup).toContain('data-vui="chip"');
     expect(markup).not.toContain('data-vui="button"');
+    expect(markup).toContain('aria-label="科研团队 · 启用中 · 成员：2人 · 团队群聊已同步"');
+    expect(markup).not.toContain('title=');
   });
 
   it("keeps active Team semantics on the native row button", () => {
