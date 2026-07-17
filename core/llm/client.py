@@ -1583,22 +1583,38 @@ class LLMClient:
         provider_message_roles = list(
             _safe_message_role_summary(provider_messages).get("messageRoles") or []
         )
+        replay_has_response_id = bool(
+            str(getattr(replay_state, "response_id", "") or "").strip()
+        )
+        replay_response_id_usable = bool(
+            replay_has_response_id
+            and (
+                self.protocol_route.compat.responses_continuation
+                or self.protocol_route.compat.responses_websocket
+            )
+        )
         if (
             replay_items
             and provider_message_roles
             and provider_message_roles[-1] == "user"
             and "assistant" not in provider_message_roles
-            and not str(getattr(replay_state, "response_id", "") or "").strip()
         ):
             replay_summary = (
                 replay_state.safe_summary()
                 if hasattr(replay_state, "safe_summary")
                 else {}
             )
+            continuation_mode = (
+                "stateful_previous_response_id_replay_items_dropped"
+                if replay_response_id_usable
+                else "unsupported_previous_response_id_replay_dropped"
+                if replay_has_response_id
+                else "stateless_replay_dropped"
+            )
             _record_llm_scene_event(
                 "projection",
                 "llm.replay_state.degraded",
-                message="Unanchored stateless replay was discarded before semantic projection.",
+                message="Unanchored opaque replay items were discarded before semantic projection.",
                 level="warning",
                 outcome="degraded",
                 fields={
@@ -1607,16 +1623,21 @@ class LLMClient:
                     "model": self.profile.model,
                     "protocol": self.protocol_route.protocol.value,
                     "reason": "missing_assistant_anchor",
-                    "continuationMode": "stateless_replay_dropped",
+                    "continuationMode": continuation_mode,
                     "replayItemCount": int(replay_summary.get("itemCount") or len(replay_items)),
                     "replayByteSize": int(replay_summary.get("byteSize") or 0),
-                    "hasResponseId": False,
+                    "hasResponseId": replay_has_response_id,
+                    "previousResponseIdUsable": replay_response_id_usable,
                     "messageCount": len(provider_messages),
                     "finalMessageRole": provider_message_roles[-1],
                 },
                 lifecycle=False,
             )
-            replay_state = None
+            replay_state = (
+                replay_state.without_opaque_items()
+                if replay_response_id_usable
+                else None
+            )
         if replay_state is not None:
             provider_messages = _scope_reasoning_replay_anchors(provider_messages, replay_state)
         provider_tool_chain_repaired = sum(

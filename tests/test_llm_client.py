@@ -657,9 +657,71 @@ def test_responses_discards_unanchored_stateless_replay_for_user_only_request(mo
         "replayItemCount": 1,
         "replayByteSize": replay_state.byte_size,
         "hasResponseId": False,
+        "previousResponseIdUsable": False,
         "messageCount": 1,
         "finalMessageRole": "user",
     }
+
+
+def test_responses_discards_unusable_stateful_bookmark_when_continuation_is_disabled(monkeypatch):
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "relay",
+            "llm.providers.default.api_key": "test-key",
+            "llm.providers.default.base_url": "https://ai-pixel.online",
+            "llm.providers.default.compat_mode": "openai",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "gpt-5.6-terra",
+            "llm.profiles.primary.transport": "responses",
+        }
+    )
+    client = LLMClient(config=config, backend=lambda payload: payload)
+    replay_state = ProviderReplayState(
+        issuer="responses",
+        provider_id=client.protocol_route.provider_id,
+        endpoint_fingerprint=endpoint_fingerprint(client.protocol_route.runtime_endpoint),
+        model_id=client.protocol_route.model_id,
+        wire_protocol=client.protocol_route.wire_protocol,
+        opaque_items=(
+            OpaqueReplayItem(
+                item_id="rs-stateful",
+                payload=json.dumps(
+                    {
+                        "id": "rs-stateful",
+                        "type": "reasoning",
+                        "encrypted_content": "opaque-stateful",
+                    }
+                ).encode("utf-8"),
+            ),
+        ),
+        response_id="resp-stateful",
+    )
+    recorded = []
+    monkeypatch.setattr(
+        "core.llm.client._record_llm_scene_event",
+        lambda *args, **kwargs: recorded.append((args, kwargs)),
+    )
+
+    payload = client._build_payload(
+        [{"role": "user", "content": "继续"}],
+        replay_state=replay_state,
+    )
+
+    assert "previous_response_id" not in payload
+    assert payload["input"] == [
+        {"role": "user", "content": [{"type": "input_text", "text": "继续"}]},
+    ]
+    replay_event = next(
+        (args, kwargs)
+        for args, kwargs in recorded
+        if len(args) > 1 and args[1] == "llm.replay_state.degraded"
+    )
+    assert replay_event[1]["fields"]["continuationMode"] == (
+        "unsupported_previous_response_id_replay_dropped"
+    )
+    assert replay_event[1]["fields"]["hasResponseId"] is True
+    assert replay_event[1]["fields"]["previousResponseIdUsable"] is False
+    assert replay_event[1]["fields"]["replayItemCount"] == 1
 
 
 def test_responses_replays_captured_opaque_items_in_provider_order_without_message_ids():

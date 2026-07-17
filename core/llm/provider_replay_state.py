@@ -113,6 +113,18 @@ class ProviderReplayState:
             pending_call_ids=(),
         )
 
+    def without_opaque_items(self) -> ProviderReplayState:
+        return ProviderReplayState(
+            issuer=self.issuer,
+            provider_id=self.provider_id,
+            endpoint_fingerprint=self.endpoint_fingerprint,
+            model_id=self.model_id,
+            wire_protocol=self.wire_protocol,
+            opaque_items=(),
+            response_id=self.response_id,
+            pending_call_ids=self.pending_call_ids,
+        )
+
     def safe_summary(self) -> dict[str, object]:
         return {
             "issuer": self.issuer,
