@@ -379,6 +379,54 @@ class TestTruncateResult:
         assert "context_mode=retry_evidence" in compact["usage"]["continuationHint"]
         assert "context_mode=retry_evidence" in packaged.continuation_hint
 
+    def test_package_tool_result_keeps_evidence_anchors_when_evidence_context_exceeds_budget(self):
+        payload = {
+            "status": "ok",
+            "contextKind": "source_collection_stage_task_context",
+            "contextMode": "evidence",
+            "counts": {"candidateCount": 5, "returnedCandidateCount": 5},
+            "candidatePage": {
+                "offset": 0,
+                "limit": 5,
+                "returned": 5,
+                "total": 5,
+                "hasMore": False,
+                "nextOffset": None,
+            },
+            "candidates": [
+                {
+                    "candidateId": f"candidate-evidence-budget-{index}",
+                    "title": f"Predictive coding evidence candidate {index}",
+                    "sourceKind": "paper",
+                    "doi": f"10.0000/evidence-budget-{index}",
+                    "summary": "Governed source-collection abstract metadata. " * 80,
+                    "evidenceRefs": [
+                        {"type": "doi", "id": f"10.0000/evidence-budget-{index}", "label": f"Evidence {index}"}
+                    ],
+                    "evidenceScope": "collected_summary_metadata",
+                }
+                for index in range(5)
+            ],
+            "usage": {
+                "readTool": "source_collection_context_tool",
+                "writebackTool": "source_collection_stage_writeback_tool",
+                "evidenceInstruction": "摘要不等于全文，不得虚构页码、引语或全文结论。",
+            },
+        }
+
+        packaged = package_tool_result(
+            json.dumps(payload, ensure_ascii=False),
+            tool_name="source_collection_context_tool",
+            max_chars=1600,
+        )
+
+        compact = json.loads(packaged.content)
+        assert compact["fieldMode"] == "evidence_source"
+        assert compact["doNotUsePreviewAsEvidence"] is False
+        assert compact["candidates"]
+        assert all(item.get("evidenceRefs") for item in compact["candidates"])
+        assert all("summaryPreview" not in item for item in compact["candidates"])
+
     def test_package_tool_result_preserves_ingestion_steward_packet_when_long(self):
         approved_ids = ["candidate-approved-1", "candidate-approved-2"]
         payload = {

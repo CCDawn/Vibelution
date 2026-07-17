@@ -76,6 +76,33 @@ def test_v2_toml_round_trip_preserves_provider_scoped_models(tmp_path) -> None:
     assert effective.llm.model_library["lab_llamacpp_a/qwen3.6-35b-a3b"]["model"] == "qwen3.6-35b-a3b"
 
 
+def test_v2_responses_relay_defaults_prompt_cache_without_enabling_local_cache() -> None:
+    source = _fixture("llm_schema_v2_provider.toml")
+
+    effective = build_effective_config(source)
+
+    assert effective.llm.model_library["pixel_relay/gpt-5.6-luna"]["prompt_cache"] == {
+        "mode": "automatic"
+    }
+    assert effective.llm.get_profile("primary").prompt_cache.mode == "automatic"
+    assert "prompt_cache" not in effective.llm.model_library["lab_llamacpp_a/qwen3.6-35b-a3b"]
+    assert effective.llm.get_profile("local").prompt_cache.mode == "disabled"
+
+
+def test_v2_responses_relay_preserves_explicit_disabled_prompt_cache() -> None:
+    source = _fixture("llm_schema_v2_provider.toml")
+    source["llm"]["providers"]["pixel_relay"]["models"]["gpt-5.6-luna"]["defaults"]["prompt_cache"] = {
+        "mode": "disabled"
+    }
+
+    effective = build_effective_config(source)
+
+    assert effective.llm.model_library["pixel_relay/gpt-5.6-luna"]["prompt_cache"] == {
+        "mode": "disabled"
+    }
+    assert effective.llm.get_profile("primary").prompt_cache.mode == "disabled"
+
+
 def test_config_load_never_calls_discovery(monkeypatch, tmp_path) -> None:
     source = _fixture("llm_schema_v2_provider.toml")
     path = tmp_path / "config.toml"

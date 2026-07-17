@@ -90,6 +90,25 @@ def _runtime_provider(provider_id: str, provider: dict[str, Any]) -> dict[str, A
     }
 
 
+def _default_v2_prompt_cache(
+    provider: dict[str, Any],
+    raw_model: dict[str, Any],
+    defaults: dict[str, Any],
+) -> dict[str, str] | None:
+    if "prompt_cache" in raw_model or "prompt_cache" in defaults:
+        return None
+    service_class = str(provider.get("service_class") or "").strip().lower()
+    driver = str(provider.get("driver") or "").strip().lower()
+    default_wire = str(provider.get("protocols", {}).get("default") or "").strip().lower().replace("-", "_")
+    if (
+        service_class in {"official_api", "aggregator", "relay"}
+        and driver == "openai"
+        and default_wire == "responses"
+    ):
+        return {"mode": "automatic"}
+    return None
+
+
 def project_v2_llm_for_runtime(public_config: dict[str, Any]) -> dict[str, Any]:
     projected = copy.deepcopy(public_config)
     llm = projected.setdefault("llm", {})
@@ -133,7 +152,7 @@ def project_v2_llm_for_runtime(public_config: dict[str, Any]) -> dict[str, Any]:
                 raise ValueError(f"pinned model {model_ref} requires upstream_id")
             defaults = raw_model.get("defaults", {}) if isinstance(raw_model.get("defaults"), dict) else {}
             _validate_runtime_overrides(defaults, "defaults")
-            runtime_models[model_ref] = {
+            runtime_model = {
                 **copy.deepcopy(raw_model),
                 **copy.deepcopy(defaults),
                 "provider_id": str(provider_id),
@@ -147,6 +166,10 @@ def project_v2_llm_for_runtime(public_config: dict[str, Any]) -> dict[str, Any]:
                 "compat": copy.deepcopy(raw_model.get("compatibility", {})),
                 "model_ref": model_ref,
             }
+            prompt_cache_default = _default_v2_prompt_cache(raw_provider, raw_model, defaults)
+            if prompt_cache_default is not None:
+                runtime_model["prompt_cache"] = prompt_cache_default
+            runtime_models[model_ref] = runtime_model
     runtime_profiles: dict[str, dict[str, Any]] = {}
     aliases = llm.get("model_aliases", {}) if isinstance(llm.get("model_aliases"), dict) else {}
     from .models import LLMConfig
