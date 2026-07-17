@@ -616,6 +616,14 @@ describe("AgentsRoute layout contract", () => {
     expect(filterRailSource).toContain("agent-filter-advanced");
   });
 
+  it("keeps Agent filter explanations in accessible VUI tooltips", () => {
+    expect(filterRailSource).toContain("VTooltip");
+    expect(filterRailSource).toContain("content={group.title}");
+    expect(filterRailSource).toContain('width="wide"');
+    expect(filterRailSource).toContain("aria-label={group.ariaLabel}");
+    expect(filterRailSource).not.toContain("title={group.title}");
+  });
+
   it("keeps archived Agents out of lightweight mode filter counts", () => {
     expect(routeSource).toContain('lightweightAgentGroup("active", "可用 Agent", "status"');
     expect(routeSource).toContain('lightweightAgentGroup("archived", "已归档", "status"');
