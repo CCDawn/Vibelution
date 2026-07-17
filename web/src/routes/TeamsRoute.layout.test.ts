@@ -137,6 +137,20 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("Team Workspace / Canvas");
   });
 
+  it("keeps canvas action labels compact and exposes non-critical explanations through VUI tooltips", () => {
+    expect(routeSource).toContain("VTooltip,");
+    expect(routeSource).toContain('content={lang === "zh" ? "自动排版只改变当前显示，不保存坐标"');
+    expect(routeSource).toContain('content={lang === "zh" ? "显示画布文件中的原始坐标"');
+    expect(routeSource).toContain("<VTooltip content={communicationEdgeHint}>");
+    expect(routeSource).toContain('content={lang === "zh" ? "当前阶段 Agent 配置"');
+    expect(routeSource).toContain('content={lang === "zh" ? "到 AgentDirectory 源配置修改"');
+    expect(routeSource).not.toContain("title={communicationEdgeHint}");
+    expect(routeSource).not.toContain('title={lang === "zh" ? "自动排版只改变当前显示，不保存坐标"');
+    expect(routeSource).not.toContain('title={lang === "zh" ? "当前阶段 Agent 配置"');
+    expect(routeSource).not.toContain('title={lang === "zh" ? "到 AgentDirectory 源配置修改"');
+    expect(routeSource).not.toContain('{" · "}\n                  {communicationEdgeHint}');
+  });
+
   it("preserves selected Team deep links from legacy routes", () => {
     expect(resolveLegacyTeamsRedirect("")).toBe("/teams");
     expect(resolveLegacyTeamsRedirect("?team=research-core")).toBe("/teams?team=research-core");

@@ -66,6 +66,7 @@ import {
   VStateSurface,
   VStatusStrip,
   VSurface,
+  VTooltip,
 } from "../components/vui";
 import {
   TeamCandidateCard,
@@ -7310,10 +7311,12 @@ export function TeamsRoute({
           </VNativeButton>
         )}
         agentConfigAction={(
-          <Link to={primaryStageAgentConfigRoute} title={lang === "zh" ? "当前阶段 Agent 配置" : "Current stage Agent configuration"}>
-            <Link2 size={13} />
-            {primaryStageAgentConfigLabel}
-          </Link>
+          <VTooltip content={lang === "zh" ? "当前阶段 Agent 配置" : "Current stage Agent configuration"}>
+            <Link to={primaryStageAgentConfigRoute}>
+              <Link2 size={13} />
+              {primaryStageAgentConfigLabel}
+            </Link>
+          </VTooltip>
         )}
         errors={(
           <>
@@ -11034,8 +11037,6 @@ export function TeamsRoute({
                   {lang === "zh" ? "组织线" : "Org lines"} {organizationEdges.length}
                   {" · "}
                   {lang === "zh" ? "信息线" : "Info lines"} {communicationEdges.length}
-                  {" · "}
-                  {communicationEdgeHint}
                 </small>
               ) : null}
               {selectedTeam?.linkedChatRoom ? (
@@ -11071,35 +11072,38 @@ export function TeamsRoute({
               ) : null}
               {researchCanvasReadOnly ? (
                 <div className={styles.canvasLayoutModeSwitch} role="group" aria-label={lang === "zh" ? "画布排版模式" : "Canvas layout mode"}>
-                  <VNativeButton
-                    type="button"
-                    className={researchCanvasAutoLayoutActive ? styles.layerButtonActive : ""}
-                    onClick={() => setResearchCanvasLayoutMode("auto")}
-                    title={lang === "zh" ? "自动排版只改变当前显示，不保存坐标" : "Auto layout only changes the current view and does not save coordinates"}
-                  >
-                    <RefreshCw size={14} />
-                    {lang === "zh" ? "自动排版" : "Auto layout"}
-                  </VNativeButton>
-                  <VNativeButton
-                    type="button"
-                    className={!researchCanvasAutoLayoutActive ? styles.layerButtonActive : ""}
-                    onClick={() => setResearchCanvasLayoutMode("source")}
-                    title={lang === "zh" ? "显示画布文件中的原始坐标" : "Show the original coordinates from the canvas file"}
-                  >
-                    {lang === "zh" ? "原始坐标" : "Original"}
-                  </VNativeButton>
+                  <VTooltip content={lang === "zh" ? "自动排版只改变当前显示，不保存坐标" : "Auto layout only changes the current view and does not save coordinates"}>
+                    <VNativeButton
+                      type="button"
+                      className={researchCanvasAutoLayoutActive ? styles.layerButtonActive : ""}
+                      onClick={() => setResearchCanvasLayoutMode("auto")}
+                    >
+                      <RefreshCw size={14} />
+                      {lang === "zh" ? "自动排版" : "Auto layout"}
+                    </VNativeButton>
+                  </VTooltip>
+                  <VTooltip content={lang === "zh" ? "显示画布文件中的原始坐标" : "Show the original coordinates from the canvas file"}>
+                    <VNativeButton
+                      type="button"
+                      className={!researchCanvasAutoLayoutActive ? styles.layerButtonActive : ""}
+                      onClick={() => setResearchCanvasLayoutMode("source")}
+                    >
+                      {lang === "zh" ? "原始坐标" : "Original"}
+                    </VNativeButton>
+                  </VTooltip>
                 </div>
               ) : null}
-              <VNativeButton
-                type="button"
-                className={showCommunicationEdges ? styles.layerButtonActive : ""}
-                onClick={() => setShowCommunicationEdges((current) => !current)}
-                disabled={!canvas || communicationEdges.length === 0}
-                title={communicationEdgeHint}
-              >
-                <Link2 size={14} />
-                {communicationEdgeButtonLabel}
-              </VNativeButton>
+              <VTooltip content={communicationEdgeHint}>
+                <VNativeButton
+                  type="button"
+                  className={showCommunicationEdges ? styles.layerButtonActive : ""}
+                  onClick={() => setShowCommunicationEdges((current) => !current)}
+                  disabled={!canvas || communicationEdges.length === 0}
+                >
+                  <Link2 size={14} />
+                  {communicationEdgeButtonLabel}
+                </VNativeButton>
+              </VTooltip>
               {researchCanvasReadOnly ? (
                 <Link className={styles.toolbarLink} to={teamWorkspaceRoute(selectedTeam?.teamId || RESEARCH_TEAM_ID)}>
                   <ArrowLeft size={14} />
@@ -11277,10 +11281,12 @@ export function TeamsRoute({
                     <strong>{lang === "zh" ? "Agent 身份只读投影" : "Read-only Agent identity"}</strong>
                     <span>{selectedNode.agentSourceRef?.owner || "AgentDirectory"} · {selectedNode.agentCode || selectedNode.agentName || selectedNode.agentId}</span>
                   </div>
-                  <Link to={teamCanvasNodeAgentSourceRoute(selectedNode)} title={lang === "zh" ? "到 AgentDirectory 源配置修改" : "Edit in the AgentDirectory source"}>
-                    <Link2 size={14} />
-                    {lang === "zh" ? "源配置" : "Source"}
-                  </Link>
+                  <VTooltip content={lang === "zh" ? "到 AgentDirectory 源配置修改" : "Edit in the AgentDirectory source"}>
+                    <Link to={teamCanvasNodeAgentSourceRoute(selectedNode)}>
+                      <Link2 size={14} />
+                      {lang === "zh" ? "源配置" : "Source"}
+                    </Link>
+                  </VTooltip>
                 </div>
               ) : null}
               <label>
