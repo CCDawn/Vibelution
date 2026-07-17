@@ -11,6 +11,7 @@ import {
   type RuntimeControllerState,
   type SystemStatusTone,
 } from "./systemStatus";
+import { VTooltip } from "../components/vui";
 import styles from "./AppShellStatusGuidePanel.styles";
 
 export type AppShellStatusSummaryCard = {
@@ -134,65 +135,99 @@ export function AppShellStatusGuidePanel({
 
   return (
     <div className={styles.statusGuidePanel} role="note" aria-live="polite">
-      <div className={styles.statusGuideHeader} title={t("systemStatusGuideHint")}>
-        <strong>{t("systemStatusGuide")}</strong>
-      </div>
+      <VTooltip content={t("systemStatusGuideHint")} width="wide">
+        <div
+          className={styles.statusGuideHeader}
+          tabIndex={0}
+          aria-label={`${t("systemStatusGuide")}: ${t("systemStatusGuideHint")}`}
+        >
+          <strong>{t("systemStatusGuide")}</strong>
+        </div>
+      </VTooltip>
       <div className={styles.statusGuideGrid}>
         {detailCards.map((item) => (
-          <section key={item.id} className={styles.statusGuideCard} title={item.note}>
-            <div className={styles.statusGuideCardHeader}>
-              <span>{item.label}</span>
-              <strong>{item.value}</strong>
-            </div>
+          <section key={item.id} className={styles.statusGuideCard}>
+            <VTooltip content={item.note} width="wide">
+              <div
+                className={styles.statusGuideCardHeader}
+                tabIndex={0}
+                aria-label={`${item.label}: ${item.value}. ${item.note}`}
+              >
+                <span>{item.label}</span>
+                <strong>{item.value}</strong>
+              </div>
+            </VTooltip>
             <ul className={styles.statusGuideList}>
               {item.states.map((state) => (
-                <li
-                  key={`${item.id}-${state.label}`}
-                  className={styles.statusGuideListItem}
-                  data-current={state.label === item.value ? "true" : undefined}
-                  title={state.detail}
-                >
-                  <span className={`${styles.statusDot} ${styles[`status_${state.tone}`]}`} />
-                  <span className={styles.statusGuideStateLabel}>{state.label}</span>
-                </li>
+                <VTooltip key={`${item.id}-${state.label}`} content={state.detail} width="wide">
+                  <li
+                    className={styles.statusGuideListItem}
+                    data-current={state.label === item.value ? "true" : undefined}
+                    tabIndex={0}
+                    aria-label={`${state.label}: ${state.detail}`}
+                  >
+                    <span className={`${styles.statusDot} ${styles[`status_${state.tone}`]}`} />
+                    <span className={styles.statusGuideStateLabel}>{state.label}</span>
+                  </li>
+                </VTooltip>
               ))}
             </ul>
           </section>
         ))}
       </div>
-      <section className={styles.lifecycleProofCard} title={lifecycleProof?.summary || t("lifecycleProofUnavailable")}>
-        <div className={styles.lifecycleProofHeader}>
-          <span>{t("lifecycleProofTitle")}</span>
-          <strong>
-            <span
-              className={`${styles.statusDot} ${styles[`status_${lifecycleStateTone(lifecycleProof?.overallState)}`]}`}
-            />
-            {lifecycleProof?.overallLabel || t("lifecycleProofUnavailable")}
-          </strong>
-        </div>
+      <section className={styles.lifecycleProofCard}>
+        <VTooltip content={lifecycleProof?.summary || t("lifecycleProofUnavailable")} width="wide">
+          <div
+            className={styles.lifecycleProofHeader}
+            tabIndex={0}
+            aria-label={`${t("lifecycleProofTitle")}: ${lifecycleProof?.overallLabel || t("lifecycleProofUnavailable")}. ${
+              lifecycleProof?.summary || t("lifecycleProofUnavailable")
+            }`}
+          >
+            <span>{t("lifecycleProofTitle")}</span>
+            <strong>
+              <span
+                className={`${styles.statusDot} ${styles[`status_${lifecycleStateTone(lifecycleProof?.overallState)}`]}`}
+              />
+              {lifecycleProof?.overallLabel || t("lifecycleProofUnavailable")}
+            </strong>
+          </div>
+        </VTooltip>
         {lifecycleProof ? (
           <>
             <div className={styles.lifecycleProofMeta}>
-              <span title={`${t("lifecycleProofDesiredObserved")}: ${lifecycleProof.desiredState} / ${lifecycleProof.observedState}`}>
-                {t("lifecycleProofDesiredObserved")}
-                <strong>
-                  {lifecycleProof.desiredState} / {lifecycleProof.observedState}
-                </strong>
-              </span>
-              <span title={`${t("lifecycleProofVerifiedAt")}: ${lifecycleProof.verifiedAt || "-"}`}>
-                {t("lifecycleProofVerifiedAt")}
-                <strong>{lifecycleProof.verifiedAt || "-"}</strong>
-              </span>
+              <VTooltip
+                content={`${t("lifecycleProofDesiredObserved")}: ${lifecycleProof.desiredState} / ${lifecycleProof.observedState}`}
+              >
+                <span tabIndex={0} aria-label={`${t("lifecycleProofDesiredObserved")}: ${lifecycleProof.desiredState} / ${lifecycleProof.observedState}`}>
+                  {t("lifecycleProofDesiredObserved")}
+                  <strong>
+                    {lifecycleProof.desiredState} / {lifecycleProof.observedState}
+                  </strong>
+                </span>
+              </VTooltip>
+              <VTooltip content={`${t("lifecycleProofVerifiedAt")}: ${lifecycleProof.verifiedAt || "-"}`}>
+                <span tabIndex={0} aria-label={`${t("lifecycleProofVerifiedAt")}: ${lifecycleProof.verifiedAt || "-"}`}>
+                  {t("lifecycleProofVerifiedAt")}
+                  <strong>{lifecycleProof.verifiedAt || "-"}</strong>
+                </span>
+              </VTooltip>
             </div>
             <ul className={styles.lifecycleProofList}>
               {lifecycleProof.components.map((component) => (
-                <li key={component.id} className={styles.lifecycleProofItem} title={component.detail}>
-                  <span
-                    className={`${styles.statusDot} ${styles[`status_${lifecycleStateTone(component.state)}`]}`}
-                  />
-                  <span className={styles.lifecycleProofName}>{component.label}</span>
-                  <strong>{lifecycleStateLabel(component.state, lang)}</strong>
-                </li>
+                <VTooltip key={component.id} content={component.detail} width="wide">
+                  <li
+                    className={styles.lifecycleProofItem}
+                    tabIndex={0}
+                    aria-label={`${component.label}: ${lifecycleStateLabel(component.state, lang)}. ${component.detail}`}
+                  >
+                    <span
+                      className={`${styles.statusDot} ${styles[`status_${lifecycleStateTone(component.state)}`]}`}
+                    />
+                    <span className={styles.lifecycleProofName}>{component.label}</span>
+                    <strong>{lifecycleStateLabel(component.state, lang)}</strong>
+                  </li>
+                </VTooltip>
               ))}
             </ul>
           </>
