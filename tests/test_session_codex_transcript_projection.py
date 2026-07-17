@@ -163,14 +163,27 @@ def test_canonical_commentary_suppresses_legacy_assistant_suffix(monkeypatch):
                 payload={"content": "务。"},
                 projection_kind="assistant_timeline_segment",
             ),
+            Event(
+                event_type=session_service.EVENT_TOOL_RESULT,
+                sequence=12,
+                payload={
+                    "toolCall": {
+                        "name": "get_git_status_summary_tool",
+                        "status": "done",
+                        "feedbackSequence": 6,
+                        "callId": "call-1",
+                        "summary": "工作区干净",
+                    }
+                },
+            ),
         ],
     )
 
     projected = session_service._assistant_timeline_events_by_turn("session-commentary")
 
-    assert [item["content"] for item in projected["turn-commentary"]] == [
-        "我会先读取当前 Git 状态，再判断是否适合开始新任务。",
-    ]
+    assert [item["kind"] for item in projected["turn-commentary"]] == ["assistant_text", "tool"]
+    assert [item["sequence"] for item in projected["turn-commentary"]] == [10, 12]
+    assert projected["turn-commentary"][0]["content"] == "我会先读取当前 Git 状态，再判断是否适合开始新任务。"
     assert projected["turn-commentary"][0]["source"] == "assistant_item_committed"
 
 
