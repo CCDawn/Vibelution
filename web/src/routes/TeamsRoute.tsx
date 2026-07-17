@@ -4802,11 +4802,15 @@ export function TeamsRoute({
 
   function renderResearchStageAgentSummary(stageType: ResearchStageType) {
     const bindings = researchStageAgentBindingsByStage[stageType] ?? [];
+    const agentDirectoryHydrating = bindings.some((binding) => binding.agentId && !binding.agent)
+      && (agentSummaryQuery.isPending || agentSummaryQuery.isFetching);
     const readyCount = bindings.filter((binding) => binding.agent && researchStageAgentConfigTone(binding.agent) === "ready").length;
     const blockedCount = bindings.filter((binding) => binding.agentId && !binding.agent).length
       + bindings.filter((binding) => binding.agent && researchStageAgentConfigTone(binding.agent) === "blocked").length;
     const missingCount = bindings.filter((binding) => !binding.agentId).length;
-    const toneStyle = blockedCount > 0
+    const toneStyle = agentDirectoryHydrating
+      ? styles.researchStageAgentSummaryLoading
+      : blockedCount > 0
       ? styles.researchStageAgentSummaryBlocked
       : missingCount > 0
         ? styles.researchStageAgentSummaryMissing
@@ -4814,8 +4818,11 @@ export function TeamsRoute({
     return (
       <div className={`${styles.researchStageAgentSummary} ${toneStyle}`}>
         <Bot size={13} />
-        <span>{lang === "zh" ? "阶段 Agent" : "Stage Agents"}</span>
-        <strong>{readyCount}/{bindings.length}</strong>
+        <span>{agentDirectoryHydrating
+          ? (lang === "zh" ? "正在读取成员配置" : "Loading member setup")
+          : (lang === "zh" ? "阶段成员" : "Stage members")}
+        </span>
+        <strong>{agentDirectoryHydrating ? "…" : `${readyCount}/${bindings.length}`}</strong>
       </div>
     );
   }
@@ -5299,9 +5306,17 @@ export function TeamsRoute({
       }
       return fallback;
     };
+    const stageStatusLoading = !researchStageRoundStatus && researchStageRoundStatusQuery.isPending;
+    const stageStatusUnavailable = !researchStageRoundStatus && researchStageRoundStatusQuery.isError;
     const stageStatusLabel = (stageType: ResearchStageType, active: boolean, latestRound: ResearchStagePhaseStatus["latestRound"] | null | undefined) => {
       if (stageType === "knowledge_collection") {
         return knowledgeCollectionStatusLabel;
+      }
+      if (stageStatusLoading) {
+        return lang === "zh" ? "状态同步中" : "Syncing status";
+      }
+      if (stageStatusUnavailable) {
+        return lang === "zh" ? "状态暂不可用" : "Status unavailable";
       }
       if (active) {
         return lang === "zh" ? "运行中" : "running";
@@ -5311,11 +5326,26 @@ export function TeamsRoute({
       }
       return lang === "zh" ? "未启动" : "not started";
     };
+    const stageStatusStyle = (stageType: ResearchStageType, active: boolean, latestRound: ResearchStagePhaseStatus["latestRound"] | null | undefined) => {
+      if (stageType !== "knowledge_collection" && stageStatusLoading) {
+        return styles.researchStageStatusLoading;
+      }
+      if (stageType !== "knowledge_collection" && stageStatusUnavailable) {
+        return styles.researchStageStatusUnavailable;
+      }
+      if (active) {
+        return styles.researchStageStatusActive;
+      }
+      if (latestRound || (stageType === "knowledge_collection" && selectedSourceCollectionRun)) {
+        return styles.researchStageStatusRecorded;
+      }
+      return styles.researchStageStatusPending;
+    };
     const stagePrimaryDisabled = (stageType: ResearchStageType) => {
       if (stageType === "knowledge_collection") {
         return knowledgeCollectionPrimaryDisabled;
       }
-      return selectedTeamStartResearchStagePending;
+      return stageStatusLoading || stageStatusUnavailable || selectedTeamStartResearchStagePending;
     };
     const runStagePrimaryAction = (stageType: ResearchStageType) => {
       if (stageType === "knowledge_collection") {
@@ -5374,10 +5404,28 @@ export function TeamsRoute({
                 : (lang === "zh" ? "选择一个阶段开始" : "Choose a stage to start")}
             </span>
           </div>
-          <VNativeButton type="button" onClick={() => void researchStageRoundStatusQuery.refetch()} disabled={researchStageRoundStatusQuery.isFetching}>
-            <RefreshCw size={13} />
-          </VNativeButton>
+          <div className={styles.researchStageHeaderActions}>
+            <Link to={researchCanvasRoute(selectedTeam?.teamId || RESEARCH_TEAM_ID)}>
+              <Eye size={13} />
+              {lang === "zh" ? "研究关系图" : "Research graph"}
+            </Link>
+            <VNativeButton type="button" onClick={() => void researchStageRoundStatusQuery.refetch()} disabled={researchStageRoundStatusQuery.isFetching} title={lang === "zh" ? "刷新阶段状态" : "Refresh stage status"}>
+              <RefreshCw size={13} />
+            </VNativeButton>
+          </div>
         </div>
+        {researchTeamDetailDegraded ? (
+          <div className={styles.researchStageDegradedNotice} role="status">
+            <span>{selectedTeamDetailLoading
+              ? (lang === "zh" ? "正在补齐团队详情；科研阶段状态仍可独立读取。" : "Loading team details; research stage status remains available.")
+              : (lang === "zh" ? "团队详情暂时不可用；当前保留已读取的科研状态。" : "Team details are temporarily unavailable; loaded research state is retained.")}
+            </span>
+            <VNativeButton type="button" onClick={() => void teamDetailQuery.refetch()} disabled={teamDetailQuery.isFetching}>
+              <RefreshCw size={13} />
+              {lang === "zh" ? "重试详情" : "Retry details"}
+            </VNativeButton>
+          </div>
+        ) : null}
         <label className={styles.researchStageTopicInput}>
           <span>{lang === "zh" ? "研究主题" : "Research topic"}</span>
           <VNativeInput
@@ -5396,12 +5444,17 @@ export function TeamsRoute({
             const navItem = RESEARCH_WORKSPACE_NAV_ITEMS.find((item) => item.view === stageType);
             const primaryLabel = stagePrimaryLabel(stageType, phase?.primaryAction || fallback.primaryAction);
             return (
-              <article key={stageType} className={active ? `${styles.researchStageCard} ${styles.researchStageCardActive}` : styles.researchStageCard}>
+              <article
+                key={stageType}
+                className={active ? `${styles.researchStageCard} ${styles.researchStageCardActive}` : styles.researchStageCard}
+                aria-busy={stageType !== "knowledge_collection" && stageStatusLoading}
+                aria-current={active ? "step" : undefined}
+              >
                 <div className={styles.researchStageCardHead}>
                   <small>{String(phaseOrder.indexOf(stageType) + 1).padStart(2, "0")}</small>
                   <div>
                     <strong>{phase?.label || fallback.label}</strong>
-                    <span>{stageStatusLabel(stageType, active, latestRound)}</span>
+                    <span className={`${styles.researchStageStatus} ${stageStatusStyle(stageType, active, latestRound)}`}>{stageStatusLabel(stageType, active, latestRound)}</span>
                   </div>
                 </div>
                 <p>{stageHint(stageType, active, latestRound)}</p>
@@ -5450,17 +5503,6 @@ export function TeamsRoute({
               </article>
             );
           })}
-        </div>
-        <div className={styles.researchCanvasIndex}>
-          <div>
-            <span>{lang === "zh" ? "结构索引" : "Structure index"}</span>
-            <strong>{lang === "zh" ? "组织画布" : "Organization canvas"}</strong>
-            <small>{lang === "zh" ? "只读查看科研团队节点关系" : "Read-only node relationship view"}</small>
-          </div>
-          <Link to={researchCanvasRoute(selectedTeam?.teamId || RESEARCH_TEAM_ID)}>
-            <Eye size={13} />
-            {lang === "zh" ? "查看关系图" : "View graph"}
-          </Link>
         </div>
         {selectedTeamStartResearchStageError ? (
           <div className={styles.workflowError}>{selectedTeamStartResearchStageError.message}</div>
@@ -10491,10 +10533,13 @@ export function TeamsRoute({
   const selectedTeamDetailUnavailable = Boolean(
     effectiveTeamId && selectedTeamReference && !teamDetailQuery.data && teamDetailQuery.isError
   );
+  const researchTeamDetailDegraded = Boolean(
+    researchWorkflowTeamSelected && (selectedTeamDetailLoading || selectedTeamDetailUnavailable)
+  );
   const showTeamLoadingSurface =
-    !showTeamInitialLoadingSurface && !showTeamUnavailableSurface && selectedTeamDetailLoading;
+    !showTeamInitialLoadingSurface && !showTeamUnavailableSurface && selectedTeamDetailLoading && !researchWorkflowTeamSelected;
   const showTeamDetailUnavailableSurface =
-    !showTeamInitialLoadingSurface && !showTeamUnavailableSurface && selectedTeamDetailUnavailable;
+    !showTeamInitialLoadingSurface && !showTeamUnavailableSurface && selectedTeamDetailUnavailable && !researchWorkflowTeamSelected;
   const teamInitialLoadingTitle = lang === "zh" ? "正在读取团队" : "Loading teams";
   const teamInitialLoadingMessage = lang === "zh"
     ? "正在连接团队索引；画布和检查器会在数据返回后原位补齐。"
