@@ -1764,6 +1764,12 @@ describe("TeamsRoute layout contract", () => {
     expect(teamCandidateCardSource).toContain("row-span-3");
     expect(teamCandidateCardSource).toContain("VTooltip");
     expect(teamCandidateCardSource).not.toContain("title={activateTitle}");
+    expect(teamCandidateCardSource).not.toContain("title={source.title}");
+    expect(teamSourceResultListSource).toContain("VTooltip");
+    expect(teamSourceResultListSource).not.toContain("title={activateTitle}");
+    expect(teamSourceResultListSource).not.toContain("title={statusTitle}");
+    expect(teamSourceResultListSource).not.toContain("title={titleTooltip}");
+    expect(teamSourceResultListSource).not.toContain("title={source.title}");
     expect(teamStageCardSource).toContain("grid-cols-[minmax(0,1fr)_auto]");
     expect(teamStageCardSource).toContain("VTooltip");
     expect(teamStageCardSource).not.toContain("title={title}");
