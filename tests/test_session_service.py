@@ -805,6 +805,65 @@ def test_session_live_progress_and_tool_updates_do_not_publish_full_snapshot(mon
     assert events[-1]["ledgerSeq"] == 11
 
 
+def test_session_diagnostics_do_not_block_on_full_snapshot(monkeypatch, tmp_path):
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    snapshot_calls = []
+    monkeypatch.setattr(
+        session_service,
+        "_publish_session_detail_snapshot",
+        lambda session_id: snapshot_calls.append(session_id),
+    )
+    monkeypatch.setattr(session_service, "_write_session_live_output_checkpoint", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(session_service, "_delete_session_live_output_checkpoint", lambda *_args, **_kwargs: None)
+    session_id = "session-payload-trace-fastpath"
+    turn_id = "turn-payload-trace-fastpath"
+    session_service._set_session_running(session_id, True, turn_id=turn_id)
+    try:
+        session_service._set_session_live_context_composition(
+            session_id,
+            {
+                "turnId": turn_id,
+                "recordedAt": "2026-07-17T09:27:03",
+                "source": "runtime_assembly",
+                "segments": [
+                    {
+                        "key": "current_user",
+                        "label": "current user",
+                        "chars": 10,
+                        "tokens": 5,
+                        "itemCount": 1,
+                    }
+                ],
+            },
+            turn_id=turn_id,
+        )
+        session_service._set_session_llm_payload_trace_live_output(
+            session_id,
+            {
+                "schemaVersion": 1,
+                "traceId": "trace-fastpath",
+                "sessionId": session_id,
+                "turnId": turn_id,
+                "provider": "test-provider",
+                "model": "test-model",
+            },
+            turn_id=turn_id,
+        )
+
+        composition = session_service._current_session_live_context_composition(session_id)
+        trace = session_service._current_session_live_llm_payload_trace(session_id)
+    finally:
+        session_service._clear_session_live_output(session_id, turn_id=turn_id)
+        session_service._set_session_running(session_id, False, turn_id=turn_id)
+
+    assert snapshot_calls == []
+    assert composition is not None
+    assert composition["turnId"] == turn_id
+    assert trace is not None
+    assert trace["traceId"] == "trace-fastpath"
+    assert trace["turnId"] == turn_id
+
+
 def test_interrupted_snapshot_finalizes_running_feedback_events(monkeypatch, tmp_path):
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     save_chat_state(
