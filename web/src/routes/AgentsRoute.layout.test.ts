@@ -744,7 +744,8 @@ describe("AgentsRoute layout contract", () => {
     expect(coreConfigPanelSource).toContain("copy.llmSlotsHint");
     expect(routeSource).toContain("按 Agent 自己配置对话、心智模型、摘要、子 Agent 和视觉等 LLM 槽位");
     expect(routeSource).toContain("设置页只维护模型库资产");
-    expect(createPanelSource).toContain("title={model.modelLabel || model.modelId}");
+    expect(createPanelSource).toContain("aria-label={model.modelLabel || model.modelId}");
+    expect(createPanelSource).not.toContain("title={model.modelLabel || model.modelId}");
     expect(createPanelSource).toContain('from "./AgentCreatePanel.styles"');
     expect(createPanelSource).not.toContain("AgentsRoute.styles");
     expect(createPanelSource).toContain("{model.label}");
@@ -974,6 +975,15 @@ describe("AgentsRoute layout contract", () => {
     expect(createPanelSource).toContain("content={copy.createAgentToolBundlesHint}");
     expect(createPanelSource).not.toContain("title={copy.createAgentHint}");
     expect(createPanelSource).not.toContain("title={copy.createAgentToolBundlesHint}");
+    expect(createPanelSource).toContain("const bundleHint = [toolBundleMeta(bundle), bundle.description].filter(Boolean).join");
+    expect(createPanelSource).toContain('label={`${bundle.label} ${lang === "zh" ? "说明" : "details"}`}');
+    expect(createPanelSource).not.toContain("title={[bundle.label, toolBundleMeta(bundle), bundle.description]");
+    expect(toolSummaryPanelSource).toContain("VContextualHint");
+    expect(toolSummaryPanelSource).toContain('label={lang === "zh" ? "工具能力摘要说明" : "Tool capability summary details"}');
+    expect(toolSummaryPanelSource).not.toContain('<section className={styles.configEditor} title={title}>');
+    expect(toolGovernancePanelSource).toContain("VContextualHint");
+    expect(toolGovernancePanelSource).toContain('label={lang === "zh" ? "工具治理说明" : "Tool governance details"}');
+    expect(toolGovernancePanelSource).not.toContain('className={styles.configEditor}\n      title=');
     expect(returnBannerPanelSource).toContain("content={copy.returnBannerHint}");
     expect(avatarEditorPanelSource).toContain("content={copy.avatarEditorHint}");
     expect(routeSource).toContain("title: copy.routeHint");

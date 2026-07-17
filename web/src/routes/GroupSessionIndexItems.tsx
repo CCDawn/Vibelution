@@ -1,7 +1,7 @@
 import { CircleDot, MessageCircleHeart, UsersRound } from "lucide-react";
 
 import type { ConversationSummary, Team } from "../api/types";
-import { VChip, VNativeButton } from "../components/vui";
+import { VChip, VNativeButton, VTooltip } from "../components/vui";
 import type { ConversationIndexTeam } from "./conversationIndexModel";
 import { conversationIndexTeamMemberCount } from "./conversationIndexModel";
 import styles from "./GroupSessionIndexItems.styles";
@@ -37,6 +37,15 @@ export function teamCategoryLabel(team: Pick<Team, "teamCategory" | "teamKind">,
   return team.teamCategory || team.teamKind || (lang === "zh" ? "自定义团队" : "Custom team");
 }
 
+function indexItemTooltip(title: string, details: string[]) {
+  return (
+    <span className={styles.sessionItemTooltip}>
+      <strong>{title}</strong>
+      {details.filter(Boolean).map((detail) => <span key={detail}>{detail}</span>)}
+    </span>
+  );
+}
+
 type GroupConversationIndexItemProps = {
   active: boolean;
   conversation: ConversationSummary;
@@ -66,39 +75,43 @@ export function GroupConversationIndexItem({
     : `${styles.sessionItem} ${styles.groupSessionItem}`;
   const groupStatus = statusLabel(conversation.status);
   const memberLabel = lang === "zh" ? `成员：${conversation.participantCount ?? 0}` : `Members: ${conversation.participantCount ?? 0}`;
+  const tooltip = indexItemTooltip(title, [groupStatus, `${kindLabel} · ${memberLabel}`]);
 
   return (
     <div className={itemClassName}>
-      <VNativeButton
-        type="button"
-        className={styles.sessionItemMain}
-        aria-current={active ? "true" : undefined}
-        onClick={() => onOpen(roomId)}
-      >
-        <span className={`${styles.conversationAvatar} ${styles.conversationAvatarGroup}`} aria-hidden="true">
-          <UsersRound size={18} />
-        </span>
-        <span className={styles.conversationCopy}>
-          <span className={styles.conversationTitleRow}>
-            <span className={styles.sessionItemTitle}>{title}</span>
-            <span title={groupStatus} aria-label={groupStatus}>
-              <VChip tone="success" className={styles.sessionState}>
-                <CircleDot size={10} aria-hidden="true" />
-              </VChip>
+      <VTooltip content={tooltip} width="wide">
+        <VNativeButton
+          type="button"
+          className={styles.sessionItemMain}
+          aria-current={active ? "true" : undefined}
+          aria-label={[title, groupStatus, kindLabel, memberLabel].join(" · ")}
+          onClick={() => onOpen(roomId)}
+        >
+          <span className={`${styles.conversationAvatar} ${styles.conversationAvatarGroup}`} aria-hidden="true">
+            <UsersRound size={18} />
+          </span>
+          <span className={styles.conversationCopy}>
+            <span className={styles.conversationTitleRow}>
+              <span className={styles.sessionItemTitle}>{title}</span>
+              <span aria-label={groupStatus}>
+                <VChip tone="success" className={styles.sessionState}>
+                  <CircleDot size={10} aria-hidden="true" />
+                </VChip>
+              </span>
+            </span>
+            <span className={styles.conversationMetaRow}>
+              <span className={`${styles.conversationKindBadge} ${styles.conversationKindBadgeGroup}`} aria-label={kindLabel}>
+                <MessageCircleHeart size={10} aria-hidden="true" />
+              </span>
+              <span aria-label={memberLabel}>
+                <UsersRound size={10} aria-hidden="true" />
+                {conversation.participantCount ?? 0}
+              </span>
+              <time>{formatTime(conversation.updatedAt)}</time>
             </span>
           </span>
-          <span className={styles.conversationMetaRow}>
-            <span className={`${styles.conversationKindBadge} ${styles.conversationKindBadgeGroup}`} title={kindLabel} aria-label={kindLabel}>
-              <MessageCircleHeart size={10} aria-hidden="true" />
-            </span>
-            <span title={memberLabel} aria-label={memberLabel}>
-              <UsersRound size={10} aria-hidden="true" />
-              {conversation.participantCount ?? 0}
-            </span>
-            <time>{formatTime(conversation.updatedAt)}</time>
-          </span>
-        </span>
-      </VNativeButton>
+        </VNativeButton>
+      </VTooltip>
     </div>
   );
 }
@@ -134,51 +147,56 @@ export function TeamConversationIndexItem({
     ? `已合并 ${duplicateCount} 个同名团队记录`
     : `${duplicateCount} same-name Team records merged`;
   const disabledReasonId = roomId ? undefined : `team-row-disabled-reason-${team.teamId}`;
+  const tooltip = indexItemTooltip(team.name, [teamStatus, memberTitle, roomTitle, duplicateCount > 1 ? duplicateTitle : ""]);
+  const row = (
+    <VNativeButton
+      type="button"
+      className={styles.sessionItemMain}
+      disabled={!roomId}
+      aria-current={active ? "true" : undefined}
+      aria-describedby={disabledReasonId}
+      aria-label={[team.name, teamStatus, memberTitle, roomTitle, duplicateCount > 1 ? duplicateTitle : ""].filter(Boolean).join(" · ")}
+      onClick={() => onOpen(roomId)}
+    >
+      <span className={`${styles.conversationAvatar} ${styles.conversationAvatarGroup}`} aria-hidden="true">
+        <UsersRound size={18} />
+      </span>
+      <span className={styles.conversationCopy}>
+        <span className={styles.conversationTitleRow}>
+          <span className={styles.sessionItemTitle}>{team.name}</span>
+          <span aria-label={teamStatus}>
+            <VChip tone="success" className={styles.sessionState}>
+              <CircleDot size={10} aria-hidden="true" />
+            </VChip>
+          </span>
+        </span>
+        <span className={styles.conversationMetaRow}>
+          <span className={`${styles.conversationKindBadge} ${styles.conversationKindBadgeGroup}`} aria-label={lang === "zh" ? "团队" : "Team"}>
+            <UsersRound size={10} aria-hidden="true" />
+          </span>
+          <span aria-label={memberTitle}>
+            <UsersRound size={10} aria-hidden="true" />
+            {teamMemberPreview(team, lang)}
+          </span>
+          <span aria-label={roomTitle}>
+            <MessageCircleHeart size={10} aria-hidden="true" />
+          </span>
+          {duplicateCount > 1 ? (
+            <span aria-label={duplicateTitle}>
+              {lang === "zh" ? `合并${duplicateCount}` : `merged ${duplicateCount}`}
+            </span>
+          ) : null}
+        </span>
+      </span>
+      {disabledReasonId ? (
+        <span id={disabledReasonId} className="sr-only">{roomTitle}</span>
+      ) : null}
+    </VNativeButton>
+  );
 
   return (
     <div className={itemClassName}>
-      <VNativeButton
-        type="button"
-        className={styles.sessionItemMain}
-        disabled={!roomId}
-        aria-current={active ? "true" : undefined}
-        aria-describedby={disabledReasonId}
-        onClick={() => onOpen(roomId)}
-      >
-        <span className={`${styles.conversationAvatar} ${styles.conversationAvatarGroup}`} aria-hidden="true">
-          <UsersRound size={18} />
-        </span>
-        <span className={styles.conversationCopy}>
-          <span className={styles.conversationTitleRow}>
-            <span className={styles.sessionItemTitle}>{team.name}</span>
-            <span title={teamStatus} aria-label={teamStatus}>
-              <VChip tone="success" className={styles.sessionState}>
-                <CircleDot size={10} aria-hidden="true" />
-              </VChip>
-            </span>
-          </span>
-          <span className={styles.conversationMetaRow}>
-            <span className={`${styles.conversationKindBadge} ${styles.conversationKindBadgeGroup}`} title={lang === "zh" ? "团队" : "Team"} aria-label={lang === "zh" ? "团队" : "Team"}>
-              <UsersRound size={10} aria-hidden="true" />
-            </span>
-            <span title={memberTitle} aria-label={memberTitle}>
-              <UsersRound size={10} aria-hidden="true" />
-              {teamMemberPreview(team, lang)}
-            </span>
-            <span title={roomTitle} aria-label={roomTitle}>
-              <MessageCircleHeart size={10} aria-hidden="true" />
-            </span>
-            {duplicateCount > 1 ? (
-              <span title={duplicateTitle} aria-label={duplicateTitle}>
-                {lang === "zh" ? `合并${duplicateCount}` : `merged ${duplicateCount}`}
-              </span>
-            ) : null}
-          </span>
-        </span>
-        {disabledReasonId ? (
-          <span id={disabledReasonId} className="sr-only">{roomTitle}</span>
-        ) : null}
-      </VNativeButton>
+      {roomId ? <VTooltip content={tooltip} width="wide">{row}</VTooltip> : row}
     </div>
   );
 }
