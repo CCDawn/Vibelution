@@ -382,9 +382,14 @@ function mergeLiveOverlayIntoCanonicalActiveTurnMessage(
   return {
     ...canonicalMessage,
     codexTranscript: mergeCodexTranscripts(
-      fallbackTranscript,
       canonicalMessage.codexTranscript,
+      fallbackTranscript,
       canonicalMessage.id,
+      {
+        previousEphemeral: false,
+        nextEphemeral: true,
+        dedupeDurableToolReplays: true,
+      },
     ),
   };
 }

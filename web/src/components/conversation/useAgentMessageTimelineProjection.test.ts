@@ -270,7 +270,7 @@ describe("projectAgentMessageTimelineMessages", () => {
     expect(projection.rowIdentities).toHaveLength(1);
   });
 
-  it("lets canonical v2 commentary supersede equivalent same-turn live fallback markdown", () => {
+  it("keeps canonical v2 commentary ahead of same-turn live fallback process cells", () => {
     const liveMessageId = "session-live-message-live-turn-1";
     const preamble = "I will inspect the projection chain first.";
     const liveOverlay = assistantMessage(liveMessageId, {
@@ -356,10 +356,10 @@ describe("projectAgentMessageTimelineMessages", () => {
 
     expect(projection.messages).toHaveLength(1);
     expect(projection.messages[0].codexTranscript?.cells.map((cell) => cell.id)).toEqual([
+      "msg_commentary",
       `${liveMessageId}-tool`,
       `${liveMessageId}-status`,
       `${liveMessageId}-error`,
-      "msg_commentary",
     ]);
     expect(projection.messages[0].codexTranscript?.cells.filter((cell) => (
       cell.kind === "assistant_markdown" && cell.text === preamble
