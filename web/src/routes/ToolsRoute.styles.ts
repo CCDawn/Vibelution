@@ -53,6 +53,8 @@ const styles = {
     "bulkSummary min-w-0 max-w-full rounded-[var(--radius-control)] border border-[color:color-mix(in_srgb,var(--border-soft)_58%,transparent)] bg-[color:color-mix(in_srgb,var(--vui-surface-row)_50%,transparent)] px-2 py-[4px] text-[var(--vui-font-xs)]",
   controlStrip:
     "controlStrip min-w-0 flex flex-wrap items-center gap-1.5",
+  contextualHint:
+    "contextualHint ml-1 align-text-bottom",
   countPill:
     `countPill min-w-0 ${pillBase}`,
   dangerButton:

@@ -135,6 +135,10 @@ describe("ToolsRoute layout contract", () => {
     expect(routeSource).toContain("<VContextualHint");
     expect(routeSource).toContain("<VTooltip");
     expect(routeSource).toContain('tooltip={tool.description || t("toolsNoDescription")}');
+    expect(routeSource).toContain('label={lang === "zh" ? "测试边界说明" : "Test boundary details"}');
+    expect(routeSource).toContain('label={lang === "zh" ? "模型解析说明" : "Model resolution details"}');
+    expect(routeSource).toContain('label={lang === "zh" ? "搜索依赖说明" : "Search dependency details"}');
+    expect(routeSource).not.toContain("styles.policyHint");
     expect(routeSource).toContain("disabledReason={!activeCanToggle");
     expect(routeSource).toContain("disabledReason={!activeTool.deleteAllowed");
     expect(routeSource).not.toContain("title={group.description || group.label}");
@@ -344,6 +348,7 @@ describe("ToolsRoute layout contract", () => {
     expect(routeSource).toContain("enabled: activeIsWebSearchTool");
     expect(routeSource).toContain("styles.dependencyHealthPanel");
     expect(routeSource).toContain("AUTOGLM_TOKEN_URL");
+    expect(routeSource).toContain("Token 服务不可用，搜索请求不会发送至外网 API");
     expect(routeSource).not.toContain("fetchJson<ToolRegistryPayload>(\"/api/tools/web-search/health\")");
   });
 
