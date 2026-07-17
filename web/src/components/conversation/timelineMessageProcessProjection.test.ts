@@ -475,7 +475,7 @@ describe("timeline message process projection", () => {
     expect(projected).toHaveLength(1);
     expect(projected[0].codexTranscript?.cells).toEqual([
       expect.objectContaining({
-        id: "session-message-46-feedback-1",
+        id: "session-message-47-feedback-5",
         title: "get_git_status_summary_tool",
       }),
       expect.objectContaining({
