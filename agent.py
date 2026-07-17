@@ -2106,6 +2106,14 @@ class SelfEvolvingAgent:
         self._recent_tool_records = []
         self._pending_lifecycle_action = None
         self._turn_interrupt_checker = None
+        # Tool authorization is scoped to one turn.  A cached chat Agent keeps
+        # its model transport and tool surface, but must never keep the prior
+        # turn's execution decision or every tool call will fail closed with a
+        # turn_mismatch denial.
+        authorization_report = self._resolve_tool_authorization(self.key_tools)
+        self._tool_authorization_decision_fingerprint = str(
+            getattr(getattr(authorization_report, "decision", None), "decision_fingerprint", "") or ""
+        ).strip()
 
     def _build_system_prompt_for_turn(self, *, stable_session_prompt: bool):
         """Build a prompt without unrelated global diagnostics for direct chat."""
