@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import asyncio
 
+from core.infrastructure import git_memory
 from core.web import lifecycle
+from core.web.services import runtime_scene_service
 from tools import Key_Tools, web_search_tool
 
 
@@ -34,6 +36,7 @@ def test_llm_tool_filter_rechecks_runtime_availability_with_cached_definitions(m
 
 def test_startup_cache_prewarm_moves_tool_definition_build_out_of_first_turn(monkeypatch):
     calls = []
+    recorded_events = []
     monkeypatch.setattr(
         Key_Tools,
         "prewarm_key_tool_definitions",
@@ -45,9 +48,29 @@ def test_startup_cache_prewarm_moves_tool_definition_build_out_of_first_turn(mon
         "autoglm_search_tool_availability",
         lambda **_kwargs: calls.append("web_search_availability"),
     )
+    monkeypatch.setattr(
+        git_memory,
+        "refresh_git_memory",
+        lambda **kwargs: calls.append(f"git_memory:{kwargs.get('force')}"),
+    )
+    monkeypatch.setattr(
+        runtime_scene_service,
+        "record_runtime_scene_event",
+        lambda *args, **kwargs: recorded_events.append((args, kwargs)),
+    )
     asyncio.run(lifecycle.prewarm_ui_caches_on_startup())
 
     assert sorted(calls) == [
+        "git_memory:True",
         "tool_definitions",
         "web_search_availability",
     ]
+    args, kwargs = recorded_events[-1]
+    assert args == (
+        "runtime_manager",
+        "startup_prewarm",
+        "runtime.startup.git_memory_prewarmed",
+    )
+    assert kwargs["outcome"] == "completed"
+    assert kwargs["fields"]["durationMs"] >= 0
+    assert kwargs["fields"]["totalPrewarmMs"] >= kwargs["fields"]["durationMs"]
