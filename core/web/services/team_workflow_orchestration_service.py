@@ -21352,7 +21352,19 @@ def _active_stage_round(rounds: list[dict[str, Any]], stage_type: str) -> dict[s
 def _latest_stage_round(rounds: list[dict[str, Any]]) -> dict[str, Any] | None:
     if not rounds:
         return None
-    return sorted(rounds, key=lambda item: str(item.get("updatedAt") or item.get("createdAt") or ""), reverse=True)[0]
+    # Reconciliation deliberately records a fresh ``updatedAt`` when an older
+    # round is superseded.  That audit update must not make the historical
+    # round become the current stage projection again.
+    return max(
+        rounds,
+        key=lambda item: (
+            _trim_text(item.get("status"), max_length=80).lower() != "superseded",
+            _source_collection_count(item.get("roundNumber")),
+            _workflow_timestamp_sort_key(item.get("createdAt")),
+            _workflow_timestamp_sort_key(item.get("updatedAt")),
+            _trim_text(item.get("stageRoundId"), max_length=160),
+        ),
+    )
 
 
 def _stage_round_number(rounds: list[dict[str, Any]], stage_type: str) -> int:
