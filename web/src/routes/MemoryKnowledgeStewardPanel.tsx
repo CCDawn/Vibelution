@@ -2,7 +2,7 @@ import { CheckCircle2, Eye, Link2 } from "lucide-react";
 import { NavLink } from "react-router-dom";
 
 import type { KnowledgeStewardOverview, KnowledgeStewardRecommendation, KnowledgeStewardWorkbenchPayload } from "../api/types";
-import { VButton } from "../components/vui";
+import { VButton, VTooltip } from "../components/vui";
 import styles from "./MemoryKnowledgeStewardPanel.styles";
 
 export type MemoryKnowledgeStewardPanelCopy = {
@@ -139,24 +139,26 @@ export function MemoryKnowledgeStewardPanel({
               {recommendationsOnly ? copy.recommendationsOnly : copy.stewardRecommendationHint}
             </small>
           </div>
-          {recommendations.map((recommendation) => (
-            <section
-              key={recommendation.recommendationId}
-              className={styles.stewardRecommendationRow}
-              title={[recommendation.reason, recommendation.recommendedAction, recommendation.knowledgeBaseName].filter(Boolean).join("\n")}
-            >
-              <span className={styles.statusPill}>{recommendation.priority}</span>
-              <strong>{recommendation.title}</strong>
-              <span>{recommendation.reason}</span>
-              <small>
-                {copy.recommendedAction}: {recommendation.recommendedAction} · {recommendation.knowledgeBaseName}
-              </small>
-              <VButton type="button" className={styles.detailActionButton} onClick={() => onTraceTarget(recommendation.targetId)}>
-                <Eye size={14} />
-                <span>{copy.traceability}</span>
-              </VButton>
-            </section>
-          ))}
+          {recommendations.map((recommendation) => {
+            const recommendationTooltip = [
+              recommendation.reason,
+              `${copy.recommendedAction}: ${recommendation.recommendedAction}`,
+              recommendation.knowledgeBaseName,
+            ].filter(Boolean).join("\n");
+
+            return (
+              <VTooltip key={recommendation.recommendationId} content={recommendationTooltip} width="wide">
+                <section className={styles.stewardRecommendationRow} tabIndex={0} aria-label={`${recommendation.title}说明`}>
+                  <span className={styles.statusPill}>{recommendation.priority}</span>
+                  <strong>{recommendation.title}</strong>
+                  <VButton type="button" className={styles.detailActionButton} onClick={() => onTraceTarget(recommendation.targetId)}>
+                    <Eye size={14} />
+                    <span>{copy.traceability}</span>
+                  </VButton>
+                </section>
+              </VTooltip>
+            );
+          })}
         </div>
       ) : null}
       <div className={styles.stewardWorkbench}>
@@ -165,30 +167,40 @@ export function MemoryKnowledgeStewardPanel({
           <small>{copy.reviewerRequired}</small>
         </div>
         <div className={styles.stewardStageGrid} aria-label={copy.stewardStages}>
-          {(knowledgeStewardWorkbench?.stages ?? []).slice(0, 2).map((stage) => (
-            <section key={stage.stageId} className={styles.stewardStageCard} title={[stage.title, stage.description, stage.nextTool].filter(Boolean).join("\n")}>
-              <div>
-                <span className={stage.status === "clear" ? styles.statusPillMuted : styles.statusPill} title={stage.status}>
-                  {formatPolicyToken(stage.status)}
-                </span>
-                <strong>{stewardStageDisplayTitle(stage.stageId, stage.title, lang)}</strong>
-              </div>
-              <p title={stage.description}>{stage.description}</p>
-              <small>
-                {copy.openGovernanceTasks}: {stage.openCount} · {copy.executable}: {stage.executableCount}
-              </small>
-              <code title={stage.nextTool}>{stage.nextTool}</code>
-            </section>
-          ))}
+          {(knowledgeStewardWorkbench?.stages ?? []).slice(0, 2).map((stage) => {
+            const stageTitle = stewardStageDisplayTitle(stage.stageId, stage.title, lang);
+            const stageTooltip = [stageTitle, stage.description, stage.nextTool].filter(Boolean).join("\n");
+
+            return (
+              <VTooltip key={stage.stageId} content={stageTooltip} width="wide">
+                <section className={styles.stewardStageCard} tabIndex={0} aria-label={`${stageTitle}说明`}>
+                  <div>
+                    <span className={stage.status === "clear" ? styles.statusPillMuted : styles.statusPill}>
+                      {formatPolicyToken(stage.status)}
+                    </span>
+                    <strong>{stageTitle}</strong>
+                  </div>
+                  <small>
+                    {copy.openGovernanceTasks}: {stage.openCount} · {copy.executable}: {stage.executableCount}
+                  </small>
+                </section>
+              </VTooltip>
+            );
+          })}
         </div>
         <div className={styles.stewardActionGrid} aria-label={copy.stewardNextActions}>
-          {(knowledgeStewardWorkbench?.nextActions ?? []).slice(0, 4).map((action) => (
-            <VButton key={action.actionId} type="button" className={styles.stewardActionRow} onClick={() => onTraceTarget(action.targetId)}>
-              <span className={styles.statusPill}>{action.priority}</span>
-              <strong>{action.title}</strong>
-              <small>{action.nextStep}</small>
-            </VButton>
-          ))}
+          {(knowledgeStewardWorkbench?.nextActions ?? []).slice(0, 4).map((action) => {
+            const actionTooltip = [action.title, action.nextStep].filter(Boolean).join("\n");
+
+            return (
+              <VTooltip key={action.actionId} content={actionTooltip} width="wide">
+                <VButton type="button" className={styles.stewardActionRow} onClick={() => onTraceTarget(action.targetId)}>
+                  <span className={styles.statusPill}>{action.priority}</span>
+                  <strong>{action.title}</strong>
+                </VButton>
+              </VTooltip>
+            );
+          })}
         </div>
         <div className={styles.stewardChecklist} aria-label={copy.acceptanceChecklist}>
           <span title={(knowledgeStewardWorkbench?.acceptanceChecklist ?? []).map((item) => item.label).join("\n")}>

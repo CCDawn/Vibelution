@@ -934,6 +934,18 @@ describe("MemoryRoute layout contract", () => {
     expect(knowledgeStewardPanelSource).toContain("styles.stewardRecommendations");
     expect(knowledgeStewardPanelSource).toContain("styles.stewardWorkbench");
     expect(knowledgeStewardPanelSource).toContain("styles.stewardStageGrid");
+    expect(knowledgeStewardPanelSource).toContain('import { VButton, VTooltip } from "../components/vui"');
+    expect(knowledgeStewardPanelSource).toContain("const recommendationTooltip");
+    expect(knowledgeStewardPanelSource).toContain("content={recommendationTooltip}");
+    expect(knowledgeStewardPanelSource).toContain("const stageTooltip");
+    expect(knowledgeStewardPanelSource).toContain("content={stageTooltip}");
+    expect(knowledgeStewardPanelSource).toContain("const actionTooltip");
+    expect(knowledgeStewardPanelSource).toContain("content={actionTooltip}");
+    expect(knowledgeStewardPanelSource).not.toContain("title={[recommendation.reason");
+    expect(knowledgeStewardPanelSource).not.toContain("title={[stage.title");
+    expect(knowledgeStewardPanelSource).not.toContain("title={stage.status}");
+    expect(knowledgeStewardPanelSource).not.toContain("title={stage.description}");
+    expect(knowledgeStewardPanelSource).not.toContain("title={stage.nextTool}");
     expect(knowledgeStewardPanelSource).not.toContain("useQuery");
     expect(knowledgeStewardPanelSource).not.toContain("useMutation");
     expect(knowledgeStewardPanelSource).not.toContain("fetchJson");
