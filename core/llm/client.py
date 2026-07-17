@@ -2709,9 +2709,14 @@ class LLMClient:
                         "totalTokens": usage_observation.total_tokens,
                         **cache_observation_fields,
                         "latencyMs": usage_observation.latency_ms,
+                        **{
+                            key: event_metadata[key]
+                            for key in ("turnId", "sessionId", "invocationId")
+                            if event_metadata.get(key)
+                        },
+                        **responses_continuation_summary,
                         "messageCount": message_count,
                         "toolCount": tool_count,
-                        **responses_continuation_summary,
                         **event_metadata,
                         "llmPayloadTraceId": llm_payload_trace.get("traceId", ""),
                         "chunkCount": chunk_count,

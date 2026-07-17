@@ -1002,7 +1002,16 @@ def test_responses_transport_streams_with_responses_normalizer(monkeypatch):
     )
     client = LLMClient(config=config)
 
-    events = list(client.stream_events([{"role": "user", "content": "ping"}]))
+    events = list(
+        client.stream_events(
+            [{"role": "user", "content": "ping"}],
+            metadata={
+                "turnId": "turn-safe",
+                "sessionId": "session-safe",
+                "invocationId": "invocation-safe",
+            },
+        )
+    )
 
     assert [event.type for event in events] == ["text_delta", "text_delta", "done"]
     assert [event.text for event in events[:2]] == ["res", "ponses"]
@@ -1018,6 +1027,9 @@ def test_responses_transport_streams_with_responses_normalizer(monkeypatch):
         assert fields["functionCallOutputCount"] == 0
         field_keys = list(fields)
         for key in (
+            "turnId",
+            "sessionId",
+            "invocationId",
             "previousResponseIdPresent",
             "continuationMode",
             "responseInputItemCount",
