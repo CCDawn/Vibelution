@@ -15,6 +15,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 
+import { VContextualHint, VTooltip } from "../components/vui";
 import styles from "./AgentOverviewPanel.styles";
 
 export type AgentOverviewIcon =
@@ -102,11 +103,13 @@ function FactGrid({ facts }: { facts: AgentOverviewFact[] }) {
   return (
     <div className={styles.factGrid}>
       {facts.map((fact) => (
-        <section key={fact.id} title={fact.title}>
-          <AgentOverviewIconView icon={fact.icon} />
-          <span>{fact.label}</span>
-          <strong>{fact.value}</strong>
-        </section>
+        <VTooltip key={fact.id} content={fact.title} width="wide">
+          <section tabIndex={0} aria-label={`${fact.label}说明`}>
+            <AgentOverviewIconView icon={fact.icon} />
+            <span>{fact.label}</span>
+            <strong>{fact.value}</strong>
+          </section>
+        </VTooltip>
       ))}
     </div>
   );
@@ -151,7 +154,10 @@ export function AgentOverviewPanel({ facts, territory, modeMembership, policies,
         <summary>
           <FolderTree size={15} />
           <span>技术信息</span>
-          <small>工作空间、策略与系统标识</small>
+          <VContextualHint
+            content="工作空间、策略与系统标识"
+            label="技术信息说明"
+          />
         </summary>
         <div className={styles.technicalContent}>
           <FactGrid facts={technicalFacts} />

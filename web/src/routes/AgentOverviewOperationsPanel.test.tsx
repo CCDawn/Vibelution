@@ -57,6 +57,7 @@ describe("AgentOverviewOperationsPanel", () => {
     expect(markup).toContain("查看完整活动");
     expect(markup).toContain("查看日志");
     expect(markup).toContain("最近运行");
+    expect(markup).toContain('aria-label="最近运行完整值"');
   });
 
   it("turns an idle Agent into a task-oriented empty state", () => {

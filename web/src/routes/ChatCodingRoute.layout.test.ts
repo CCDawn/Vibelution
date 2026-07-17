@@ -853,6 +853,12 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).not.toContain('<p className={styles.sectionMetaLine}>{mentalCompactLine || mentalSourceLabel}</p>');
     expect(routeSource).toContain("content={mentalCompactLine || mentalSourceLabel}");
     expect(routeSource).toContain('aria-label={`${mentalStateLabel}. ${mentalCompactLine || mentalSourceLabel}`}');
+    expect(routeSource).toContain("VContextualHint");
+    expect(routeSource).toContain("styles.sectionEyebrowRow");
+    expect(routeSource).toContain("styles.groupManagementTitleRow");
+    expect(routeSource).toContain("styles.groupConversationTitleRow");
+    expect(routeSource).toContain("暂无通知。");
+    expect(routeSource).not.toContain("className={styles.featurePresetNote}");
     expect(routeSource).toContain("groupManagementHint");
     expect(routeSource).toContain("sessionBindingNotice");
   });
