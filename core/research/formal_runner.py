@@ -72,7 +72,41 @@ def prepare_full_run(
         "batchSize": _bounded_int(execution.get("batchSize", 64), "batchSize", minimum=1, maximum=2048),
         "correctionSteps": _bounded_int(execution.get("correctionSteps", 3), "correctionSteps", minimum=1, maximum=64),
         "correctionRate": _bounded_float(execution.get("correctionRate", 0.8), "correctionRate", minimum=0.0, maximum=10.0),
+        "candidateMechanism": str(
+            execution.get("candidateMechanism")
+            or method.get("candidateMechanism")
+            or "inference_latent_correction"
+        ).strip(),
+        "candidateMaskedLossWeight": _bounded_float(
+            execution.get("candidateMaskedLossWeight", method.get("candidateMaskedLossWeight", 4.0)),
+            "candidateMaskedLossWeight",
+            minimum=0.0,
+            maximum=100.0,
+        ),
+        "minimumMseImprovement": _bounded_float(
+            execution.get("minimumMseImprovement", method.get("minimumMseImprovement", 0.001)),
+            "minimumMseImprovement",
+            minimum=0.0,
+            maximum=1.0,
+        ),
+        "maximumLatencyMultiplier": _bounded_float(
+            execution.get("maximumLatencyMultiplier", method.get("maximumLatencyMultiplier", 5.0)),
+            "maximumLatencyMultiplier",
+            minimum=0.01,
+            maximum=100.0,
+        ),
+        "maximumGlobalMseRegression": _bounded_float(
+            execution.get("maximumGlobalMseRegression", method.get("maximumGlobalMseRegression", 0.0005)),
+            "maximumGlobalMseRegression",
+            minimum=0.0,
+            maximum=1.0,
+        ),
     }
+    if run_options["candidateMechanism"] not in {
+        "inference_latent_correction",
+        "masked_prediction_error_training",
+    }:
+        raise FormalRunnerError("candidateMechanism is not supported by the formal adapter.")
 
     self_check = _run_process(
         [str(python_executable), str(script_path), "--self-check"],
@@ -316,6 +350,16 @@ def _experiment_command(
         str(options["correctionSteps"]),
         "--correction-rate",
         str(options["correctionRate"]),
+        "--candidate-mechanism",
+        str(options["candidateMechanism"]),
+        "--candidate-masked-loss-weight",
+        str(options["candidateMaskedLossWeight"]),
+        "--minimum-mse-improvement",
+        str(options["minimumMseImprovement"]),
+        "--maximum-latency-multiplier",
+        str(options["maximumLatencyMultiplier"]),
+        "--maximum-global-mse-regression",
+        str(options["maximumGlobalMseRegression"]),
     ]
 
 

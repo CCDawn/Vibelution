@@ -35,6 +35,40 @@ def test_negligible_improvement_remains_inconclusive() -> None:
     assert decision["latencyPassed"] is True
 
 
+def test_masked_prediction_error_gate_uses_masked_gain_and_global_regression_guard() -> None:
+    module = _load_experiment_module()
+    config = module.ExperimentConfig(
+        candidate_mechanism=module.MASKED_PREDICTION_ERROR_TRAINING,
+        maximum_latency_multiplier=1.25,
+    )
+    decision = module.classify_decision(
+        {
+            "delta": {
+                "mse_improvement": -0.0002,
+                "masked_mse_improvement": 0.002,
+                "latency_multiplier": 1.05,
+            }
+        },
+        config,
+    )
+    assert decision["status"] == "support"
+    assert decision["primaryImprovementMetric"] == "masked_mse_improvement"
+    assert decision["globalRegressionPassed"] is True
+
+    regressed = module.classify_decision(
+        {
+            "delta": {
+                "mse_improvement": -0.001,
+                "masked_mse_improvement": 0.002,
+                "latency_multiplier": 1.05,
+            }
+        },
+        config,
+    )
+    assert regressed["status"] == "inconclusive"
+    assert regressed["globalRegressionPassed"] is False
+
+
 def test_stable_metric_payload_excludes_runtime_timing() -> None:
     module = _load_experiment_module()
     metrics = {
