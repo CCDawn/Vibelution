@@ -187,6 +187,59 @@ def test_warning_runtime_event_records_append_and_projection_pipeline_durations(
     assert metrics.operations == [("append", "normal"), ("projection", "high")]
 
 
+def test_recovered_replay_degradation_warning_is_append_only(tmp_path, monkeypatch) -> None:
+    scene_dir = _point_runtime_scene_at(tmp_path, monkeypatch, scene_id="scene-replay-degraded")
+    metrics = _RecordingPipelineMetrics()
+
+    class BusyPackageLock:
+        def __enter__(self):
+            raise AssertionError("recovered replay degradation must not acquire the projection lock")
+
+        def __exit__(self, exc_type, exc, traceback):
+            return False
+
+    monkeypatch.setattr(runtime_scene_service, "pipeline_metrics", metrics)
+    monkeypatch.setattr(runtime_scene_service, "RUNTIME_SCENE_PACKAGE_WRITE_LOCK", BusyPackageLock())
+    monkeypatch.setattr(
+        runtime_scene_service,
+        "_update_runtime_scene_package_manifest",
+        lambda scene, manifest: (_ for _ in ()).throw(
+            AssertionError("recovered replay degradation must not rebuild the package projection")
+        ),
+    )
+
+    result = runtime_scene_service.record_runtime_scene_event(
+        "llm",
+        "projection",
+        "llm.replay_state.degraded",
+        level="warning",
+        outcome="degraded",
+        fields={
+            "reason": "missing_assistant_anchor",
+            "continuationMode": "unsupported_previous_response_id_replay_dropped",
+            "replayItemCount": 1,
+            "hasResponseId": True,
+            "previousResponseIdUsable": False,
+        },
+    )
+
+    assert result["projectionRefresh"] == "deferred"
+    assert metrics.operations == [("append", "normal")]
+    rows = [
+        json.loads(line)
+        for line in (scene_dir / "events" / "llm.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    assert rows[-1]["event_code"] == "llm.replay_state.degraded"
+    assert rows[-1]["level"] == "warning"
+    assert rows[-1]["outcome"] == "degraded"
+    assert rows[-1]["fields"]["continuationMode"] == (
+        "unsupported_previous_response_id_replay_dropped"
+    )
+    assert rows[-1]["fields"]["hasResponseId"] is True
+    assert rows[-1]["fields"]["previousResponseIdUsable"] is False
+
+
 @pytest.mark.parametrize(
     ("status_code", "exception_type", "expected_level"),
     [
