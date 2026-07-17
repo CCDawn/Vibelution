@@ -1084,7 +1084,13 @@ describe("MemoryRoute layout contract", () => {
     expect(projectMemoryQueuePanelSource).toContain('title={copy.projectMemoryQueueHint}');
     expect(overviewPanelSource).toContain('title={copy.reviewQueueHint}');
     expect(knowledgePipelinePanelSource).toContain('title={copy.knowledgeSubtitle}');
-    expect(knowledgeBaseSidebarSource).toContain('title={copy.knowledgeHint}');
+    expect(knowledgeBaseSidebarSource).toContain('import { VButton, VTooltip } from "../components/vui"');
+    expect(knowledgeBaseSidebarSource).toContain("const toolVisibilityTooltip");
+    expect(knowledgeBaseSidebarSource).toContain("content={toolVisibilityTooltip}");
+    expect(knowledgeBaseSidebarSource).not.toContain("title=");
+    expect(knowledgeModeTabsSource).toContain('import { VButton, VTooltip } from "../components/vui"');
+    expect(knowledgeModeTabsSource).toContain("content={mode.hint}");
+    expect(knowledgeModeTabsSource).not.toContain("title={mode.hint}");
     expect(knowledgeRagPanelSource).toContain('title={copy.ragRetrievalHint}');
     expect(cleanupPanelSource).toContain('title={copy.cleanupNoBackup}');
     expect(cleanupPanelSource).toContain('title={copy.cleanupCentralSourceBoundary}');

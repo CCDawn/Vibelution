@@ -1,4 +1,4 @@
-import { VButton } from "../components/vui";
+import { VButton, VTooltip } from "../components/vui";
 import styles from "./MemoryKnowledgeModeTabs.styles";
 
 export type MemoryKnowledgeWorkspaceMode = "sources" | "search" | "review" | "governance" | "permissions";
@@ -86,18 +86,18 @@ export function MemoryKnowledgeModeTabs({
   return (
     <div className={styles.knowledgeModeTabs} role="tablist" aria-label={copy.governance}>
       {modes.map((mode) => (
-        <VButton
-          key={mode.key}
-          type="button"
-          role="tab"
-          aria-selected={activeMode === mode.key}
-          className={activeMode === mode.key ? styles.knowledgeModeTabActive : styles.knowledgeModeTab}
-          title={mode.hint}
-          onClick={() => onModeChange(mode.key)}
-        >
-          <span>{mode.label}</span>
-          <strong>{mode.count}</strong>
-        </VButton>
+        <VTooltip key={mode.key} content={mode.hint} width="wide">
+          <VButton
+            type="button"
+            role="tab"
+            aria-selected={activeMode === mode.key}
+            className={activeMode === mode.key ? styles.knowledgeModeTabActive : styles.knowledgeModeTab}
+            onClick={() => onModeChange(mode.key)}
+          >
+            <span>{mode.label}</span>
+            <strong>{mode.count}</strong>
+          </VButton>
+        </VTooltip>
       ))}
     </div>
   );
