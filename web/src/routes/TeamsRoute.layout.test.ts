@@ -408,8 +408,8 @@ describe("TeamsRoute layout contract", () => {
     expect(routeStylesSource).toContain(".teamMemoryMemberTable");
     expect(routeStylesSource).toContain(".teamMemoryMemberHeading");
     expect(routeStylesSource).toContain(".teamMemoryActionRail");
-    expect(routeStyles.teamMemoryMemberHeading).toContain("hidden");
-    expect(routeStyles.teamMemoryMemberActions).toContain("[&_a_span]:hidden");
+    expect(routeStyles.teamMemoryMemberHeading).toContain("max-[720px]:hidden");
+    expect(routeStyles.teamMemoryMemberActions).toContain("[&_a]:min-h-8");
     expect(routeStyles.teamMemoryActionRail).toContain("[&_a]:inline-flex");
   });
 
@@ -431,13 +431,13 @@ describe("TeamsRoute layout contract", () => {
     expect(routeStyles.researchStageLauncher).toContain("bg-[var(--vui-surface-panel)]");
     expect(routeStyles.researchStageLauncher).toContain("rounded-[var(--radius-panel)]");
     expect(routeStyles.researchStageLauncher).toContain("grid");
-    expect(routeStyles.researchStageLauncher).toContain("gap-2");
+    expect(routeStyles.researchStageLauncher).toContain("gap-3");
 
     expect(routeStyles.teamMemoryIndex).toContain("bg-[var(--vui-surface-panel)]");
     expect(routeStyles.teamMemoryIndex).toContain("rounded-[var(--radius-panel)]");
     expect(routeStyles.teamMemoryMemberTable).toContain("grid-cols-[minmax(0,1fr)]");
     expect(routeStyles.teamMemoryMemberTable).not.toContain("repeat(auto-fit");
-    expect(routeStyles.teamMemoryMemberCard).toContain("grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_max-content_auto]");
+    expect(routeStyles.teamMemoryMemberCard).toContain("grid-cols-[minmax(10rem,1.1fr)_minmax(11rem,1.4fr)_max-content_auto]");
     expect(teamMemoryIndexPanelStyles.teamMemoryMemberTable).toContain("grid-cols-[minmax(0,1fr)]");
     expect(teamMemoryIndexPanelStyles.teamMemoryMemberTable).not.toContain("repeat(auto-fit");
   });
@@ -1124,9 +1124,8 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).not.toContain("{renderResearchWorkspaceNav()}");
     expect(routeSource).toContain("{renderResearchStageLauncher()}");
     expect(routeSource).toContain("researchWorkflowTeamSelected && !researchCanvasVisible");
-    expect(routeSource).toContain("结构索引");
-    expect(routeSource).toContain("只读查看科研团队节点关系");
-    expect(routeSource).toContain("查看关系图");
+    expect(routeSource).toContain("研究关系图");
+    expect(routeSource).toContain("researchStageHeaderActions");
     expect(routeSource).toContain("researchCanvasRoute(selectedTeam?.teamId || RESEARCH_TEAM_ID)");
     expect(routeSource).toContain("搜索、提炼、审查与入库");
     expect(routeSource).toContain("资料寻找 / 资料提炼 / 资料关系整理 / 资料入库");
@@ -1854,11 +1853,16 @@ describe("TeamsRoute layout contract", () => {
     expect(routeStyles.workspaceResearch).toBeTypeOf("string");
     expect(routeStyles.workspaceResearchCanvas).toBeTypeOf("string");
     expect(routeStyles.researchStageLauncher).toBeTypeOf("string");
-    expect(routeStyles.researchCanvasIndex).toBeTypeOf("string");
+    expect(routeStyles.researchStageHeaderActions).toBeTypeOf("string");
+    expect(routeStyles.researchStageDegradedNotice).toBeTypeOf("string");
+    expect(routeStyles.researchStageStatus).toBeTypeOf("string");
+    expect(routeStyles.researchStageStatusLoading).toBeTypeOf("string");
+    expect(routeStyles.researchStageStatusUnavailable).toBeTypeOf("string");
     expect(routeStyles.researchStageCard).toBeTypeOf("string");
     expect(routeStyles.researchStageCardHead).toBeTypeOf("string");
     expect(routeStyles.researchStageCardMetrics).toBeTypeOf("string");
     expect(routeStyles.researchStageAgentSummary).toBeTypeOf("string");
+    expect(routeStyles.researchStageAgentSummaryLoading).toBeTypeOf("string");
     expect(routeStyles.researchStageAgentSummaryReady).toBeTypeOf("string");
     expect(routeStyles.researchStageAgentSummaryMissing).toBeTypeOf("string");
     expect(routeStyles.researchStageAgentSummaryBlocked).toBeTypeOf("string");
@@ -1972,9 +1976,6 @@ describe("TeamsRoute layout contract", () => {
       "researchLoopTemplateSummary",
       "researchStageActionPanel",
       "researchStageBoundaryPanel",
-      "researchStageCard",
-      "researchStageCardHead",
-      "researchStageCardMetrics",
       "researchStageHeroPanel",
       "researchStageModuleCard",
       "teamRoundCard",
@@ -1993,7 +1994,7 @@ describe("TeamsRoute layout contract", () => {
       "aiSearchRunCardReview",
       "researchStageAgentCard",
       "researchStageAgentPanel",
-      "researchStageAgentSummary",
+      "researchStageCard",
     ] as const;
 
     for (const key of routeRowKeys) {
@@ -2030,7 +2031,7 @@ describe("TeamsRoute layout contract", () => {
 
     for (const key of researchAgentSummaryToneKeys) {
       const composedClassName = `${routeStyles.researchStageAgentSummary} ${routeStyles[key]}`;
-      expectOperationalSurface(composedClassName, "bg-[var(--vui-surface-row)]");
+      expectOperationalSurface(composedClassName, "bg-[var(--vui-control-muted)]");
       expect(topLevelBackgroundTokenCount(composedClassName)).toBe(1);
       expect(composedClassName).not.toContain("bg-[color-mix");
     }
@@ -2108,8 +2109,8 @@ describe("TeamsRoute layout contract", () => {
   it("keeps restored TeamsRoute grids from the CSS module migration", () => {
     const restoredGridExpectations: Array<[string, string]> = [
       [routeStyles.aiSearchRunCards, "grid-cols-[repeat(auto-fit,minmax(220px,1fr))]"],
-      [routeStyles.researchStageCardHead, "grid-cols-[auto_1fr]"],
-      [routeStyles.researchStageCardMetrics, "grid-cols-[repeat(4,minmax(0,1fr))]"],
+      [routeStyles.researchStageCardHead, "grid-cols-[auto_minmax(0,1fr)]"],
+      [routeStyles.researchStageCardMetrics, "grid-cols-[repeat(3,minmax(0,1fr))]"],
       [routeStyles.researchStageAgentGrid, "grid-cols-[repeat(auto-fit,minmax(210px,1fr))]"],
       [teamSourceCollectionStageAgentsPanelStyles.sourceCollectionStageAgentCard, "grid-cols-[minmax(0,1fr)_auto]"],
       [teamSourceCollectionStageAgentsPanelStyles.sourceCollectionStageAgentCardBody, "grid-cols-[repeat(3,minmax(0,1fr))]"],
@@ -2670,6 +2671,15 @@ describe("TeamsRoute layout contract", () => {
   it("keeps Team detail loading inside the workspace shell during cold loading", () => {
     expect(routeSource).toContain("const selectedTeamReference = visibleTeams.find((team) => team.teamId === effectiveTeamId) ?? null");
     expect(routeSource).toContain("const selectedTeamDetailLoading = Boolean(");
+    expect(routeSource).toContain("const researchTeamDetailDegraded = Boolean(");
+    expect(routeSource).toContain("selectedTeamDetailLoading && !researchWorkflowTeamSelected");
+    expect(routeSource).toContain("selectedTeamDetailUnavailable && !researchWorkflowTeamSelected");
+    expect(routeSource).toContain("researchStageDegradedNotice");
+    expect(routeSource).toContain("团队详情暂时不可用；当前保留已读取的科研状态。");
+    expect(routeSource).toContain("const agentDirectoryHydrating = bindings.some(");
+    expect(routeSource).toContain("正在读取成员配置");
+    expect(routeSource).toContain("状态同步中");
+    expect(routeSource).toContain("状态暂不可用");
     expect(routeSource).toContain("const showTeamLoadingSurface =");
     expect(routeSource).toContain("const showTeamDetailUnavailableSurface =");
     expect(routeSource).toContain("VStateSurface");
