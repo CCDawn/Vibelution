@@ -3,7 +3,10 @@ from __future__ import annotations
 import pytest
 
 from core.web.services import agent_directory_service
-from tests.test_agent_config_workspace_service import _use_tmp_project_root
+from tests.test_agent_config_workspace_service import (
+    _seed_agent_avatars,
+    _use_tmp_project_root,
+)
 
 
 def test_replace_agent_llm_bindings_if_current_updates_under_current_timestamp(
@@ -61,3 +64,42 @@ def test_replace_agent_llm_bindings_if_current_rejects_stale_timestamp_without_o
     current = agent_directory_service.get_agent(agent["agentId"])
     assert current["updatedAt"] == concurrent["updatedAt"]
     assert current["llmBindings"]["dialogue"]["modelId"] == "ai-pixel/concurrent"
+
+
+def test_repair_reuses_shared_workspace_and_avatar_inventory(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _seed_agent_avatars(tmp_path)
+    agent_directory_service.create_agent_instance(display_name="Alpha")
+    agent_directory_service.create_agent_instance(display_name="Beta")
+
+    shared_workspace_calls = 0
+    avatar_inventory_calls = 0
+    real_ensure_shared_workspace = agent_directory_service.ensure_agent_shared_workspace
+    real_available_avatar_filenames = agent_directory_service._available_agent_avatar_filenames
+
+    def tracked_ensure_shared_workspace():
+        nonlocal shared_workspace_calls
+        shared_workspace_calls += 1
+        return real_ensure_shared_workspace()
+
+    def tracked_available_avatar_filenames():
+        nonlocal avatar_inventory_calls
+        avatar_inventory_calls += 1
+        return real_available_avatar_filenames()
+
+    monkeypatch.setattr(
+        agent_directory_service,
+        "ensure_agent_shared_workspace",
+        tracked_ensure_shared_workspace,
+    )
+    monkeypatch.setattr(
+        agent_directory_service,
+        "_available_agent_avatar_filenames",
+        tracked_available_avatar_filenames,
+    )
+
+    repaired = agent_directory_service.repair_agent_directory()
+
+    assert len(repaired["agents"]) >= 2
+    assert shared_workspace_calls == 1
+    assert avatar_inventory_calls == 1

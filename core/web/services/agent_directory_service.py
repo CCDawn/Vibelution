@@ -1804,7 +1804,13 @@ def repair_agent_directory() -> dict[str, Any]:
         state = load_state()
         state_signature = _agent_directory_storage_signature(state)
         changed = False
-        knowledge_steward_result = _ensure_knowledge_steward_agent(state)
+        ensure_agent_shared_workspace()
+        available_agent_avatar_filenames = _available_agent_avatar_filenames()
+        knowledge_steward_result = _ensure_knowledge_steward_agent(
+            state,
+            ensure_shared_workspace=False,
+            available_avatar_filenames=available_agent_avatar_filenames,
+        )
         if knowledge_steward_result.get("changed"):
             changed = True
         display_name_repaired_agents: list[dict[str, Any]] = []
@@ -1910,7 +1916,10 @@ def repair_agent_directory() -> dict[str, Any]:
                 )
                 agent["metadata"] = _mark_display_name_generated(metadata)
                 changed = True
-            avatar_result = _ensure_agent_default_avatar(agent)
+            avatar_result = _ensure_agent_default_avatar(
+                agent,
+                available_avatar_filenames=available_agent_avatar_filenames,
+            )
             if avatar_result:
                 avatar_defaulted_agents.append(dict(agent))
                 changed = True
@@ -1939,7 +1948,7 @@ def repair_agent_directory() -> dict[str, Any]:
                 agent["workspacePath"] = workspace_path
                 changed = True
                 territory_changed = True
-            _ensure_agent_workspace(workspace_path)
+            _ensure_agent_workspace(workspace_path, ensure_shared=False)
             memory_policy_id = str(agent.get("memoryPolicyId") or "").strip() or f"memory-{agent.get('agentId')}"
             if str(agent.get("memoryPolicyId") or "").strip() != memory_policy_id:
                 agent["memoryPolicyId"] = memory_policy_id
@@ -4737,7 +4746,12 @@ def agent_avatar_filename(avatar_image_path: object) -> str:
     return filename
 
 
-def _ensure_knowledge_steward_agent(state: dict[str, Any]) -> dict[str, Any]:
+def _ensure_knowledge_steward_agent(
+    state: dict[str, Any],
+    *,
+    ensure_shared_workspace: bool = True,
+    available_avatar_filenames: list[str] | None = None,
+) -> dict[str, Any]:
     agents = list(state.get("agents") or [])
     tool_policies = _tool_policies(state)
     memory_policies = _memory_policies(state)
@@ -4777,7 +4791,10 @@ def _ensure_knowledge_steward_agent(state: dict[str, Any]) -> dict[str, Any]:
             "createdAt": now,
             "updatedAt": now,
         }
-        _ensure_agent_default_avatar(agent)
+        _ensure_agent_default_avatar(
+            agent,
+            available_avatar_filenames=available_avatar_filenames,
+        )
         agents.append(agent)
         state["agents"] = agents
         created = True
@@ -4832,12 +4849,18 @@ def _ensure_knowledge_steward_agent(state: dict[str, Any]) -> dict[str, Any]:
         changed = True
         repaired_fields.append("displayName")
 
-    avatar_changed = _ensure_agent_default_avatar(agent)
+    avatar_changed = _ensure_agent_default_avatar(
+        agent,
+        available_avatar_filenames=available_avatar_filenames,
+    )
     if avatar_changed:
         changed = True
         repaired_fields.append("avatar")
 
-    _ensure_agent_workspace(workspace_path)
+    _ensure_agent_workspace(
+        workspace_path,
+        ensure_shared=ensure_shared_workspace,
+    )
     tool_policy = _knowledge_steward_tool_policy()
     memory_policy = _knowledge_steward_memory_policy(workspace_path)
     if tool_policies.get(KNOWLEDGE_STEWARD_TOOL_POLICY_ID) != tool_policy:
@@ -5488,11 +5511,18 @@ def _validate_agent_avatar_signature(payload: bytes, content_type: str) -> None:
     raise AgentDirectoryError("Agent avatar image format does not match its content.")
 
 
-def _ensure_agent_default_avatar(agent: dict[str, Any]) -> bool:
+def _ensure_agent_default_avatar(
+    agent: dict[str, Any],
+    *,
+    available_avatar_filenames: list[str] | None = None,
+) -> bool:
     metadata = dict(agent.get("metadata") or {})
     current_path = _agent_avatar_path_from_metadata(metadata)
     current_source = str(metadata.get("avatarImageSource") or metadata.get("agentAvatarImageSource") or "").strip()
-    default_path = _default_agent_avatar_path(agent)
+    default_path = _default_agent_avatar_path(
+        agent,
+        available_avatar_filenames=available_avatar_filenames,
+    )
     if not default_path:
         return False
     if current_path and current_source != "default":
@@ -5505,13 +5535,28 @@ def _ensure_agent_default_avatar(agent: dict[str, Any]) -> bool:
     return True
 
 
-def _default_agent_avatar_path(agent: dict[str, Any]) -> str:
-    filename = _default_agent_avatar_filename(agent)
+def _default_agent_avatar_path(
+    agent: dict[str, Any],
+    *,
+    available_avatar_filenames: list[str] | None = None,
+) -> str:
+    filename = _default_agent_avatar_filename(
+        agent,
+        available_avatar_filenames=available_avatar_filenames,
+    )
     return str(AGENT_AVATAR_RELATIVE_DIR / filename) if filename else ""
 
 
-def _default_agent_avatar_filename(agent: dict[str, Any]) -> str:
-    available = _available_agent_avatar_filenames()
+def _default_agent_avatar_filename(
+    agent: dict[str, Any],
+    *,
+    available_avatar_filenames: list[str] | None = None,
+) -> str:
+    available = (
+        list(available_avatar_filenames)
+        if available_avatar_filenames is not None
+        else _available_agent_avatar_filenames()
+    )
     if not available:
         return ""
     key = _agent_avatar_match_key(agent)
@@ -6682,7 +6727,7 @@ def _is_agent_private_workspace_path(path_value: str, agent_id: str) -> bool:
     return actual == expected
 
 
-def _ensure_agent_workspace(path_value: str) -> Path:
+def _ensure_agent_workspace(path_value: str, *, ensure_shared: bool = True) -> Path:
     path = _resolve_project_path(path_value)
     agents_root = _workspace_path("agents").resolve()
     if not path.is_relative_to(agents_root):
@@ -6690,7 +6735,8 @@ def _ensure_agent_workspace(path_value: str) -> Path:
     path.mkdir(parents=True, exist_ok=True)
     for subdir in AGENT_WORKSPACE_SUBDIRS:
         (path / subdir).mkdir(parents=True, exist_ok=True)
-    ensure_agent_shared_workspace()
+    if ensure_shared:
+        ensure_agent_shared_workspace()
     return path
 
 
