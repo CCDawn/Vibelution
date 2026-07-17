@@ -2494,6 +2494,127 @@ def test_stream_cancellation_closes_provider_iterator():
     assert cancelled["closed"] is True
 
 
+def test_responses_stream_cancellation_interrupts_blocked_backend_request(monkeypatch):
+    import litellm
+
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "relay",
+            "llm.providers.default.api_key": "test-key",
+            "llm.providers.default.base_url": "https://pixel.try-chatapi.com/v1",
+            "llm.providers.default.compat_mode": "openai",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "gpt-5.6-terra",
+            "llm.profiles.primary.transport": "responses",
+            "llm.profiles.primary.retry_policy.max_attempts": 5,
+        }
+    )
+    backend_entered = threading.Event()
+    backend_released = threading.Event()
+    stream_finished = threading.Event()
+    cancelled = {"reason": ""}
+    observed = {"calls": 0, "error": None}
+
+    class FakeHTTPHandler:
+        def close(self):
+            backend_released.set()
+
+    handler = FakeHTTPHandler()
+
+    def responses(**kwargs):
+        observed["calls"] += 1
+        assert kwargs["client"] is handler
+        backend_entered.set()
+        assert backend_released.wait(2.0)
+        raise OSError("provider request interrupted")
+
+    monkeypatch.setattr(litellm, "responses", responses, raising=False)
+    monkeypatch.setattr(
+        "core.llm.client._new_cancellable_responses_http_handler",
+        lambda _payload: handler,
+        raising=False,
+    )
+
+    def cancel_checker():
+        return cancelled["reason"]
+
+    def run_stream():
+        try:
+            client = LLMClient(config=config)
+            with llm_cancel_context(cancel_checker):
+                list(client.stream_events([{"role": "user", "content": "ping"}]))
+        except Exception as exc:
+            observed["error"] = exc
+        finally:
+            stream_finished.set()
+
+    thread = threading.Thread(target=run_stream)
+    thread.start()
+    try:
+        assert backend_entered.wait(1.0), repr(observed["error"])
+        cancelled["reason"] = "操作者请求停止当前轮。"
+        assert stream_finished.wait(1.0)
+    finally:
+        backend_released.set()
+        thread.join(timeout=2.0)
+
+    assert isinstance(observed["error"], LLMError)
+    assert observed["error"].category == "cancelled"
+    assert observed["calls"] == 1
+
+
+def test_responses_stream_reuses_cancellable_http_handler(monkeypatch):
+    import litellm
+
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "relay",
+            "llm.providers.default.api_key": "test-key",
+            "llm.providers.default.base_url": "https://pixel.try-chatapi.com/v1",
+            "llm.providers.default.compat_mode": "openai",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "gpt-5.6-terra",
+            "llm.profiles.primary.transport": "responses",
+        }
+    )
+    created_handlers = []
+    observed_clients = []
+
+    class FakeHTTPHandler:
+        def close(self):
+            raise AssertionError("successful streams must not close the reusable client")
+
+    def new_handler(_payload):
+        handler = FakeHTTPHandler()
+        created_handlers.append(handler)
+        return handler
+
+    def responses(**kwargs):
+        observed_clients.append(kwargs["client"])
+        return iter(
+            [
+                {"type": "response.output_text.delta", "delta": "ok"},
+                {"type": "response.completed", "response": {"usage": {}}},
+            ]
+        )
+
+    monkeypatch.setattr(litellm, "responses", responses, raising=False)
+    monkeypatch.setattr(
+        "core.llm.client._new_cancellable_responses_http_handler",
+        new_handler,
+    )
+
+    client = LLMClient(config=config)
+    with llm_cancel_context(lambda: ""):
+        first = list(client.stream_events([{"role": "user", "content": "first"}]))
+        second = list(client.stream_events([{"role": "user", "content": "second"}]))
+
+    assert [event.type for event in first] == ["text_delta", "done"]
+    assert [event.type for event in second] == ["text_delta", "done"]
+    assert len(created_handlers) == 1
+    assert observed_clients == [created_handlers[0], created_handlers[0]]
+
+
 def test_stream_does_not_replay_after_partial_output(monkeypatch):
     config = make_config(
         **{
