@@ -403,6 +403,11 @@ function canMergeProcessProjection(previous: ConversationMessage | undefined, ne
 }
 
 function mergeProcessProjectionMessages(previous: ConversationMessage, next: ConversationMessage): ConversationMessage {
+  const durableToolReplayBoundary = isDurableToolReplayBoundary(previous, next);
+  const previousTranscript = durableToolReplayBoundary ? next.codexTranscript : previous.codexTranscript;
+  const nextTranscript = durableToolReplayBoundary ? previous.codexTranscript : next.codexTranscript;
+  const previousTranscriptMessage = durableToolReplayBoundary ? next : previous;
+  const nextTranscriptMessage = durableToolReplayBoundary ? previous : next;
   return {
     ...previous,
     content: mergeText(answerProjectionContent(previous), answerProjectionContent(next)),
@@ -415,10 +420,10 @@ function mergeProcessProjectionMessages(previous: ConversationMessage, next: Con
     toolCalls: undefined,
     attachments: mergeProjectionItems(previous.attachments, next.attachments),
     references: mergeProjectionItems(previous.references, next.references),
-    codexTranscript: mergeCodexTranscripts(previous.codexTranscript, next.codexTranscript, previous.id, {
-      previousEphemeral: isEphemeralProjectionMessage(previous),
-      nextEphemeral: isEphemeralProjectionMessage(next),
-      dedupeDurableToolReplays: isDurableToolReplayBoundary(previous, next),
+    codexTranscript: mergeCodexTranscripts(previousTranscript, nextTranscript, previous.id, {
+      previousEphemeral: isEphemeralProjectionMessage(previousTranscriptMessage),
+      nextEphemeral: isEphemeralProjectionMessage(nextTranscriptMessage),
+      dedupeDurableToolReplays: durableToolReplayBoundary,
     }),
     metadata: {
       ...(previous.metadata ?? {}),
