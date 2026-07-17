@@ -105,6 +105,13 @@ import {
 } from "./agentMessageTimeline";
 import { buildCodexTranscriptCells, type CodexTranscriptCell } from "./codexTranscriptCells";
 import { resolveCodexTranscriptSurface, type CodexTranscriptSurface } from "./codexNativeTranscriptSurface";
+import {
+  buildCodexTranscriptTimelineNodes,
+  codexTranscriptToolDurationSeconds,
+  createCodexTranscriptToolActivity,
+  formatCodexTranscriptDuration,
+} from "./conversationToolActivityModel";
+import { ConversationToolActivity } from "./ConversationToolActivity";
 import { buildCodexRolloutTraceEvents, type CodexRolloutTraceEvent } from "./codexRolloutTrace";
 import {
   preserveConversationExpansionDefaults,
@@ -1654,7 +1661,14 @@ export function ConversationView({
         data-codex-transcript-surface="true"
         data-conversation-part-key={`${rowIdentity.messageKey}:codex-transcript`}
       >
-        {visibleCells.map((cell) => renderCodexTranscriptCell(message, cell))}
+        {buildCodexTranscriptTimelineNodes(visibleCells).map((node) => node.kind === "tool_activity" ? (
+          <ConversationToolActivity
+            key={node.activity.id}
+            activity={node.activity}
+            language={lang === "en" ? "en" : "zh"}
+            renderToolDetails={renderCodexTranscriptToolDetailContent}
+          />
+        ) : renderCodexTranscriptCell(message, node.cell))}
       </div>
     );
   }
@@ -1821,12 +1835,21 @@ export function ConversationView({
         </section>
       );
     }
+    if (cell.kind === "tool_call") {
+      return (
+        <ConversationToolActivity
+          key={cell.id}
+          activity={createCodexTranscriptToolActivity([cell])}
+          language={lang === "en" ? "en" : "zh"}
+          renderToolDetails={renderCodexTranscriptToolDetailContent}
+        />
+      );
+    }
     const toneClassName = styles[`codexTranscriptCell_${cell.tone}` as keyof typeof styles] ?? "";
     const icon = codexTranscriptCellIcon(cell);
     const title = codexTranscriptCellTitle(cell);
     const meta = codexTranscriptCellMeta(cell);
     const summary = codexTranscriptVisibleSummary(cell);
-    const toolDetails = renderCodexTranscriptToolDetails(cell, title, meta);
     return (
       <section
         key={cell.id}
@@ -1844,12 +1867,10 @@ export function ConversationView({
           {icon}
         </span>
         <span className={styles.codexTranscriptCellBody}>
-          {toolDetails ?? (
-            <span className={styles.codexTranscriptCellTitleRow}>
-              <span className={styles.codexTranscriptCellTitle}>{title}</span>
-              {meta ? <span className={styles.codexTranscriptCellMeta}>{meta}</span> : null}
-            </span>
-          )}
+          <span className={styles.codexTranscriptCellTitleRow}>
+            <span className={styles.codexTranscriptCellTitle}>{title}</span>
+            {meta ? <span className={styles.codexTranscriptCellMeta}>{meta}</span> : null}
+          </span>
           {summary ? <span className={styles.codexTranscriptCellSummary}>{summary}</span> : null}
         </span>
       </section>
@@ -1942,28 +1963,7 @@ export function ConversationView({
     return "";
   }
 
-  function codexTranscriptToolDurationSeconds(cell: CodexTranscriptCell) {
-    const terminalDuration = cell.toolLifecycleModel?.terminalOperations
-      ?.map((operation) => operation.durationSeconds)
-      .find((duration): duration is number => typeof duration === "number" && Number.isFinite(duration) && duration >= 0);
-    if (terminalDuration !== undefined) {
-      return terminalDuration;
-    }
-    const rolloutDuration = cell.rolloutTraceEvents
-      ?.filter((event) => event.kind === "RuntimeEnded" || event.kind === "ToolCallEnded")
-      .map((event) => event.durationSeconds)
-      .find((duration): duration is number => typeof duration === "number" && Number.isFinite(duration) && duration >= 0);
-    return rolloutDuration ?? null;
-  }
-
-  function formatCodexTranscriptDuration(seconds: number) {
-    if (seconds < 1) {
-      return `${Math.max(1, Math.round(seconds * 1000))}ms`;
-    }
-    return `${Number(seconds.toFixed(seconds < 10 ? 1 : 0))}s`;
-  }
-
-  function renderCodexTranscriptToolDetails(cell: CodexTranscriptCell, title: string, meta: string) {
+  function renderCodexTranscriptToolDetailContent(cell: CodexTranscriptCell, detailsId: string): ReactNode {
     if (cell.kind !== "tool_call") {
       return null;
     }
@@ -1972,28 +1972,8 @@ export function ConversationView({
     if (rows.length === 0 && !rolloutEvents) {
       return null;
     }
-    const detailsId = `codex-tool-detail-${cell.id}`;
-    const toggleLabel = lang === "zh" ? `展开或收起工具结果：${title}` : `Expand or collapse tool results: ${title}`;
     return (
-      <details
-        className={styles.operationDetailsDisclosure}
-        data-codex-tool-detail="true"
-      >
-        <summary
-          className={styles.operationDetailsSummary}
-          aria-label={toggleLabel}
-        >
-          <span className={styles.codexTranscriptCellTitle}>{title}</span>
-          {meta ? <span className={styles.codexTranscriptCellMeta}>{meta}</span> : null}
-          <span
-            className={styles.operationDetailsChevronButton}
-            data-codex-tool-detail-toggle="inline-symbol"
-            aria-hidden="true"
-          >
-            <span className={styles.operationDetailsChevronClosed}>▸</span>
-            <span className={styles.operationDetailsChevronOpen}>▾</span>
-          </span>
-        </summary>
+      <>
         {rows.length > 0 ? (
           <dl id={detailsId} className={styles.operationDetails}>
             {rows.map((row, index) => {
@@ -2010,7 +1990,7 @@ export function ConversationView({
           </dl>
         ) : null}
         {rolloutEvents}
-      </details>
+      </>
     );
   }
 

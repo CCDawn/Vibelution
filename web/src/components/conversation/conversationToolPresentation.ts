@@ -174,6 +174,12 @@ export function conversationToolPresentationLabel(
       zh: "检查会话日志",
       en: "Inspect conversation log",
     },
+    apply_patch_tool: { zh: "修改文件", en: "Apply patch" },
+    apply_diff_edit_tool: { zh: "修改文件", en: "Edit file" },
+    write_file_tool: { zh: "写入文件", en: "Write file" },
+    python_lint_tool: { zh: "代码检查", en: "Lint" },
+    run_test_for_tool: { zh: "运行测试", en: "Run tests" },
+    computer_use: { zh: "浏览器操作", en: "Computer use" },
   };
   if (labels[lower]) {
     return labels[lower][language];
