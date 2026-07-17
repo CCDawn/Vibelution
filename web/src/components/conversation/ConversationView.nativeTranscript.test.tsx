@@ -677,6 +677,72 @@ describe("ConversationView native Codex transcript surface", () => {
     expect(html).not.toContain("exitCode");
   });
 
+  it("collapses long native tool sequences without moving commentary or final answer", () => {
+    const html = renderConversation([
+      {
+        id: "assistant-native-tool-activity",
+        role: "assistant",
+        content: "",
+        timestamp: "2026-07-18T01:00:00Z",
+        codexTranscript: {
+          version: 1,
+          source: "native",
+          messageId: "assistant-native-tool-activity",
+          cells: [
+            {
+              id: "commentary-before-tools",
+              kind: "assistant_markdown",
+              messageId: "assistant-native-tool-activity",
+              status: "completed",
+              tone: "neutral",
+              phase: "commentary",
+              text: "先检查当前实现。",
+            },
+            ...[1, 2, 3].map((index) => ({
+              id: `code-tool-${index}`,
+              kind: "tool_call" as const,
+              messageId: "assistant-native-tool-activity",
+              status: "completed" as const,
+              tone: "neutral" as const,
+              title: "code_symbol_tool",
+              summary: index === 3 ? "定位 ConversationLogger" : '{"status":"ok",',
+            })),
+            {
+              id: "commentary-after-tools",
+              kind: "assistant_markdown",
+              messageId: "assistant-native-tool-activity",
+              status: "completed",
+              tone: "neutral",
+              phase: "commentary",
+              text: "已定位关键调用。",
+            },
+            {
+              id: "final-after-tools",
+              kind: "assistant_markdown",
+              messageId: "assistant-native-tool-activity",
+              status: "completed",
+              tone: "neutral",
+              phase: "final",
+              text: "最终回答保持在最后。",
+            },
+          ],
+        },
+      } as ConversationMessage,
+    ]);
+
+    const before = html.indexOf("先检查当前实现。");
+    const group = html.indexOf('data-codex-tool-activity-group="true"');
+    const after = html.indexOf("已定位关键调用。");
+    const final = html.indexOf("最终回答保持在最后。");
+    expect(html).toContain("代码分析");
+    expect(html).toContain("3 次调用");
+    expect(html).not.toContain('{&quot;status&quot;:&quot;ok&quot;,');
+    expect(before).toBeGreaterThan(-1);
+    expect(group).toBeGreaterThan(before);
+    expect(after).toBeGreaterThan(group);
+    expect(final).toBeGreaterThan(after);
+  });
+
   it("keeps a running native tool summary on the main row and nests lifecycle trace in details", () => {
     const html = renderConversation([
       {
