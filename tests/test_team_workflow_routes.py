@@ -1228,7 +1228,14 @@ def test_team_workflow_routes_request_experiment_result_knowledge_ingestion(tmp_
     assert payload["experimentResultPack"]["officialBoundary"]["currentWritesOfficialKnowledge"] is False
     assert payload["knowledgeStewardActivation"]["status"] == "agent_wake_started"
     assert payload["knowledgeStewardActivation"]["delivery"]["turnId"] == "route-turn-experiment-ingest"
+    assert payload["knowledgeStewardActivation"]["inboxSourceId"]
     assert deliveries and deliveries[0]["metadata"]["experimentResultPackId"] == payload["experimentResultPack"]["packId"]
+    assert (
+        payload["knowledgeStewardActivation"]["inboxSourceId"]
+        in deliveries[0]["metadata"]["agentToolMetadataJson"]
+    )
+    assert "experimentResultPack JSON:" in deliveries[0]["content"]
+    assert "knowledge_ingestion_tool" in deliveries[0]["content"]
 
 
 def test_team_workflow_route_resolves_stale_prompt_cache_model_for_stage_round(tmp_path, monkeypatch):

@@ -22270,6 +22270,72 @@ def _notify_knowledge_steward_for_experiment_result(
         return activation
 
     source_agent_id = requester_agent_id if requester_agent_id and agent_directory_service.get_agent(requester_agent_id, include_archived=True) else ""
+    controlled_pack = {
+        "packId": pack_id,
+        "kind": str(experiment_result_pack.get("kind") or ""),
+        "teamId": team_id,
+        "planId": plan_id,
+        "fullRunResultId": full_run_result_id,
+        "knowledgeBaseId": knowledge_base_id,
+        "targetDomain": target_domain,
+        "title": str(experiment_result_pack.get("title") or ""),
+        "summary": str(experiment_result_pack.get("summary") or ""),
+        "selectedHypotheses": list(experiment_result_pack.get("selectedHypotheses") or []),
+        "experimentPlan": dict(experiment_result_pack.get("experimentPlan") or {}),
+        "metrics": dict(experiment_result_pack.get("metrics") or {}),
+        "artifactRefs": list(experiment_result_pack.get("artifactRefs") or []),
+        "sourceRefs": list(experiment_result_pack.get("sourceRefs") or []),
+        "evidenceRefs": list(experiment_result_pack.get("evidenceRefs") or []),
+        "notes": str(experiment_result_pack.get("notes") or ""),
+        "officialBoundary": dict(experiment_result_pack.get("officialBoundary") or {}),
+    }
+    controlled_pack_json = json.dumps(
+        controlled_pack,
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    try:
+        inbox_source = team_knowledge_service.collect_source_to_inbox(
+            "team",
+            team_id,
+            source_type="runtime_evidence_refinement",
+            source_ref={
+                "kind": "challenge_cup_experiment_result_pack",
+                "teamId": team_id,
+                "planId": plan_id,
+                "experimentResultPackId": pack_id,
+                "fullRunResultId": full_run_result_id,
+                "artifactRefs": list(controlled_pack["artifactRefs"]),
+            },
+            original_content=controlled_pack_json,
+            original_filename=(
+                f"{_safe_token(pack_id, default='experiment-result-pack', max_length=96)}.json"
+            ),
+            source_created_at=str(experiment_result_pack.get("createdAt") or ""),
+            captured_by=requester_agent_id or "team_workflow",
+            evidence_range={
+                "kind": "experiment_result_pack",
+                "fullRunResultId": full_run_result_id,
+                "artifactCount": len(controlled_pack["artifactRefs"]),
+                "evidenceRefCount": len(controlled_pack["evidenceRefs"]),
+            },
+            title=str(experiment_result_pack.get("title") or "Challenge Cup experiment result"),
+            summary=str(experiment_result_pack.get("summary") or ""),
+            actor_agent_id=steward_agent_id,
+        )
+    except (
+        team_knowledge_service.TeamKnowledgeError,
+        team_knowledge_service.TeamKnowledgeNotFoundError,
+    ) as exc:
+        activation["status"] = "source_staging_failed"
+        activation["error"] = str(exc)
+        return activation
+    inbox_source_id = str(inbox_source.get("inboxSourceId") or "")
+    activation["inboxSourceId"] = inbox_source_id
+    activation["metadata"]["inboxSourceId"] = inbox_source_id
+    activation["metadata"]["ownerType"] = "team"
+    activation["metadata"]["ownerId"] = team_id
+    activation["metadata"]["requiredTool"] = "knowledge_ingestion_tool"
     content = "\n".join(
         [
             "[挑战杯实验结果入库请求]",
@@ -22277,14 +22343,44 @@ def _notify_knowledge_steward_for_experiment_result(
             f"实验计划: {plan_id}",
             f"实验结果包: {pack_id}",
             f"Full-run 结果: {full_run_result_id}",
+            f"Team source inbox: {inbox_source_id}",
             f"目标知识库: {knowledge_base_id}",
             f"知识域: {target_domain}",
             "",
-            "请作为知识库管理员 Agent 处理这个已复核实验结果包：",
-            "1. 读取 Team workflow experiment_plans/index.json 中的 knowledgeIngestion.experimentResultPack。",
-            "2. 复核 hypothesis、experimentPlan、metrics、artifactRefs、sourceRefs 和 evidenceRefs。",
-            "3. 只把整理后的实验结论写入正式 Team Knowledge/RAG；原始日志和大文件保持路径引用。",
-            "4. 无法确认时标记 needs_revision，不要把 raw logs 直接写入正式知识库。",
+            (
+                "受控 experimentResultPack 已在本消息末尾完整提供；"
+                "不要读取本地 workflow 文件，也不要向其他 Agent 索要同一上下文。"
+            ),
+            (
+                "请复核 hypothesis、experimentPlan、metrics、artifactRefs、"
+                "sourceRefs、evidenceRefs 和 officialBoundary。"
+            ),
+            "证据充分时，调用 knowledge_ingestion_tool，并传入：",
+            f'- knowledge_base_id="{knowledge_base_id}"',
+            '- source_type="runtime_evidence_refinement"',
+            (
+                f'- inbox_source_id="{inbox_source_id}", owner_type="team", '
+                f'owner_id="{team_id}", review_decision="accepted"'
+            ),
+            (
+                "- proposal_title/proposal_summary/proposal_content "
+                "仅写入带适用范围和限制的整理结论"
+            ),
+            (
+                "- resolution_note 记录证据审查结论；"
+                "原始日志和大文件只保留 artifactRefs 路径引用"
+            ),
+            (
+                "证据不足时仍调用 knowledge_ingestion_tool，将 review_decision 设为 rejected，"
+                "并在 resolution_note 说明缺口。"
+            ),
+            (
+                "本任务无需调用 agent_message_tool；最终回复必须报告 ingestion status、"
+                "inboxSourceId、KnowledgeItem 或拒绝原因。"
+            ),
+            "",
+            "experimentResultPack JSON:",
+            controlled_pack_json,
         ]
     )
     thread_id = f"challenge-cup-experiment-ingestion:{team_id}:{pack_id}"

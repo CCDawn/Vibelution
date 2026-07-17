@@ -9275,7 +9275,20 @@ def test_experiment_result_knowledge_ingestion_request_notifies_steward_agent(tm
     assert requested["knowledgeStewardActivation"]["delivery"]["turnId"] == "turn-experiment-ingest"
     assert requested["knowledgeStewardActivation"]["kernel"]["taskId"]
     assert requested["knowledgeStewardActivation"]["kernel"]["outcomeStatus"] == "succeeded"
+    assert requested["knowledgeStewardActivation"]["inboxSourceId"]
     assert deliveries and deliveries[0]["kind"] == "challenge_cup_experiment_result_ingestion_request"
+    assert "experimentResultPack JSON:" in deliveries[0]["content"]
+    assert "knowledge_ingestion_tool" in deliveries[0]["content"]
+    assert "不要读取本地 workflow 文件" in deliveries[0]["content"]
+    assert (
+        requested["knowledgeStewardActivation"]["inboxSourceId"]
+        in deliveries[0]["content"]
+    )
+    tool_metadata = json.loads(deliveries[0]["metadata"]["agentToolMetadataJson"])
+    assert (
+        tool_metadata["inboxSourceId"]
+        == requested["knowledgeStewardActivation"]["inboxSourceId"]
+    )
     assert deliveries[0]["metadata"]["sourceSurface"] == "team_workflow"
     assert deliveries[0]["metadata"]["kernelTaskId"] == requested["knowledgeStewardActivation"]["kernel"]["taskId"]
     assert inbox_messages[0]["messageId"] == requested["knowledgeStewardActivation"]["messageId"]
@@ -9283,6 +9296,22 @@ def test_experiment_result_knowledge_ingestion_request_notifies_steward_agent(tm
     assert inbox_messages[0]["metadata"]["kernelTaskId"] == requested["knowledgeStewardActivation"]["kernel"]["taskId"]
     assert inbox_messages[0]["metadata"]["experimentResultPackId"] == requested["experimentResultPack"]["packId"]
     assert inbox_messages[0]["metadata"]["fullRunResultId"] == full_run["fullRunResult"]["fullRunResultId"]
+    assert json.loads(inbox_messages[0]["metadata"]["agentToolMetadataJson"])[
+        "inboxSourceId"
+    ] == requested["knowledgeStewardActivation"]["inboxSourceId"]
+    staged_sources = team_knowledge_service.list_owner_source_inbox(
+        "team",
+        team["teamId"],
+        agent_id=agent_directory_service.KNOWLEDGE_STEWARD_AGENT_ID,
+        status="pending",
+    )
+    assert (
+        staged_sources["sources"][0]["inboxSourceId"]
+        == requested["knowledgeStewardActivation"]["inboxSourceId"]
+    )
+    assert staged_sources["sources"][0]["sourceRef"]["experimentResultPackId"] == (
+        requested["experimentResultPack"]["packId"]
+    )
     notification_events = _workflow_scene_events_by_code(scene_events, "experiment_plan.steward_notification_completed")
     assert notification_events
     assert notification_events[-1]["fields"]["status"] == "agent_wake_started"
