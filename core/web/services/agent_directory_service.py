@@ -6766,9 +6766,12 @@ def _ensure_agent_workspace(path_value: str, *, ensure_shared: bool = True) -> P
     agents_root = _workspace_path("agents").resolve()
     if not path.is_relative_to(agents_root):
         raise AgentDirectoryError(f"Invalid agent workspace path: {path}")
-    path.mkdir(parents=True, exist_ok=True)
+    if not path.is_dir():
+        path.mkdir(parents=True, exist_ok=True)
     for subdir in AGENT_WORKSPACE_SUBDIRS:
-        (path / subdir).mkdir(parents=True, exist_ok=True)
+        target = path / subdir
+        if not target.is_dir():
+            target.mkdir(parents=True, exist_ok=True)
     if ensure_shared:
         ensure_agent_shared_workspace()
     return path
