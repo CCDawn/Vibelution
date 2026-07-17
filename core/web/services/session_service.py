@@ -18652,6 +18652,8 @@ def _assistant_timeline_events_by_turn(conversation_id: str) -> dict[str, list[d
             continue
         tool_event = _feedback_event_from_conversation_tool_event(event)
         if tool_event:
+            if turn_id in canonical_commentary_turn_ids:
+                tool_event["sequence"] = _coerce_nonnegative_int(getattr(event, "sequence", 0))
             items = events_by_turn.setdefault(turn_id, [])
             tool_key = _conversation_tool_timeline_key(event)
             previous_index = tool_event_keys.setdefault(turn_id, {}).get(tool_key) if tool_key else None
