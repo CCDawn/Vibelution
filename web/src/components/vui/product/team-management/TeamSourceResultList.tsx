@@ -3,6 +3,8 @@ import {
   type ReactNode,
 } from "react";
 
+import { VTooltip } from "../../primitives/VTooltip";
+
 export type TeamSourceResultTone = "ready" | "warning" | "danger" | "neutral";
 
 export type TeamSourceResultMetaEntry = {
@@ -86,7 +88,32 @@ export function TeamSourceResultItem({
       }
     : undefined;
 
-  return (
+  const statusBadge = (
+    <span
+      className={`${CHIP_BASE} ${CHIP_TONE[tone]}`}
+      tabIndex={statusTitle && !activateTitle ? 0 : undefined}
+      role={statusTitle ? "status" : undefined}
+      aria-label={statusTitle}
+    >
+      {statusLabel}
+    </span>
+  );
+  const titleValue = <strong tabIndex={titleTooltip && !activateTitle ? 0 : undefined} aria-label={titleTooltip}>{title}</strong>;
+  const sourceValue = source.href ? (
+    <a
+      href={source.href}
+      target="_blank"
+      rel="noreferrer"
+      aria-label={source.title}
+      onClick={(event) => event.stopPropagation()}
+    >
+      {source.value}
+    </a>
+  ) : (
+    <code tabIndex={source.title && !activateTitle ? 0 : undefined} aria-label={source.title}>{source.value}</code>
+  );
+
+  const row = (
     <article
       data-vui-product="team-source-result-item"
       data-tone={tone}
@@ -96,15 +123,13 @@ export function TeamSourceResultItem({
       role={onActivate ? "button" : undefined}
       tabIndex={onActivate ? 0 : -1}
       aria-pressed={onActivate ? selected : undefined}
-      title={activateTitle}
+      aria-label={activateTitle}
       onClick={onActivate}
       onKeyDown={handleKeyDown}
     >
-      <span className={`${CHIP_BASE} ${CHIP_TONE[tone]}`} title={statusTitle}>
-        {statusLabel}
-      </span>
+      {statusTitle && !activateTitle ? <VTooltip content={statusTitle}>{statusBadge}</VTooltip> : statusBadge}
       <div className="min-w-0 text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] [&_strong]:block [&_strong]:truncate">
-        <strong title={titleTooltip}>{title}</strong>
+        {titleTooltip && !activateTitle ? <VTooltip content={titleTooltip} width="wide">{titleValue}</VTooltip> : titleValue}
       </div>
       <div className="flex min-w-[76px] flex-nowrap items-center gap-1 whitespace-nowrap text-[var(--vui-font-xs)] text-[var(--fg-tertiary)] [&_span:first-child]:text-[var(--fg-secondary)] max-[820px]:hidden">
         {meta.map((entry) => (
@@ -116,22 +141,32 @@ export function TeamSourceResultItem({
         className="grid min-w-0 max-w-full grid-cols-[max-content_minmax(0,1fr)] items-center gap-1 overflow-hidden text-[var(--vui-font-xs)] [&_a]:truncate [&_code]:truncate [&_a]:text-[var(--accent-cool)] [&_code]:text-[var(--fg-tertiary)] max-[980px]:col-span-2 data-[missing=true]:text-[var(--state-warning)]"
       >
         <span className="text-[var(--fg-tertiary)]">{source.label}</span>
-        {source.href ? (
-          <a
-            href={source.href}
-            target="_blank"
-            rel="noreferrer"
-            title={source.title}
-            onClick={(event) => event.stopPropagation()}
-          >
-            {source.value}
-          </a>
+        {source.title && !activateTitle ? (
+          <VTooltip content={source.title} width="wide">
+            {sourceValue}
+          </VTooltip>
         ) : (
-          <code title={source.title}>{source.value}</code>
+          sourceValue
         )}
       </div>
     </article>
   );
+
+  return activateTitle ? (
+    <VTooltip
+      content={(
+        <span className="grid gap-1">
+          <span>{activateTitle}</span>
+          {statusTitle ? <span>{statusTitle}</span> : null}
+          {titleTooltip ? <span>{titleTooltip}</span> : null}
+          {source.title ? <span>{source.title}</span> : null}
+        </span>
+      )}
+      width="wide"
+    >
+      {row}
+    </VTooltip>
+  ) : row;
 }
 
 export type TeamSourceResultListProps = {

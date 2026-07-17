@@ -2110,23 +2110,38 @@ export function ToolsRoute() {
               </section>
               <section className={styles.toolAgentFitPanel}>
                 <div>
-                  <p className={styles.panelEyebrow}>{lang === "zh" ? "当前测试边界" : "Current test boundary"}</p>
+                  <p className={styles.panelEyebrow}>
+                    {lang === "zh" ? "当前测试边界" : "Current test boundary"}
+                    <VContextualHint
+                      content={lang === "zh" ? "工具测试使用该 Agent 已保存的 ToolPolicy。" : "Tool tests use this Agent's saved ToolPolicy."}
+                      label={lang === "zh" ? "测试边界说明" : "Test boundary details"}
+                      className={styles.contextualHint}
+                      width="wide"
+                    />
+                  </p>
                   <h3>{activePolicyAgent ? `${activePolicyAgent.agentCode || ""} ${activePolicyAgent.displayName || activePolicyAgent.agentId}`.trim() : "-"}</h3>
                   <span>{activePolicy.policyId || activePolicyAgent?.toolPolicyId || "-"}</span>
                 </div>
                 <strong className={`${styles.policyStatePill} ${styles[`policy_${activePolicyMode}`]}`}>
                   {toolPolicyModeLabel(activePolicyMode, lang)}
                 </strong>
-                <span className={styles.policyHint}>
-                  {lang === "zh" ? "工具测试使用该 Agent 已保存的 ToolPolicy。" : "Tool tests use this Agent's saved ToolPolicy."}
-                </span>
               </section>
               {activeIsImage2Tool ? (
                 <section className={styles.image2ModelPanel}>
                   <div className={styles.panelHeader}>
                     <div>
                       <p className={styles.panelEyebrow}>{lang === "zh" ? "模型选择" : "Model selection"}</p>
-                      <h3>{lang === "zh" ? "image2 工具模型" : "image2 tool model"}</h3>
+                      <h3>
+                        {lang === "zh" ? "image2 工具模型" : "image2 tool model"}
+                        <VContextualHint
+                          content={lang === "zh"
+                            ? "这里只选择设置页模型库条目；生成请求仍使用配置的根 base_url，模型名会在调用前按远端 /v1/models 发现结果解析。"
+                            : "This selects a Settings model entry. Generation still uses the configured root base_url, while the request model is resolved from remote /v1/models when needed."}
+                          label={lang === "zh" ? "模型解析说明" : "Model resolution details"}
+                          className={styles.contextualHint}
+                          width="wide"
+                        />
+                      </h3>
                     </div>
                     <span className={styles.countPill}>
                       {image2ModelConfig?.models.length ?? 0}
@@ -2182,11 +2197,6 @@ export function ToolsRoute() {
                       <strong>{image2DiscoveryStateLabel(image2ModelConfig, lang)}</strong>
                     </span>
                   </div>
-                  <p>
-                    {lang === "zh"
-                      ? "这里只选择设置页模型库条目；生成请求仍使用配置的根 base_url，模型名会在调用前按远端 /v1/models 发现结果解析。"
-                      : "This selects a Settings model entry. Generation still uses the configured root base_url, while the request model is resolved from remote /v1/models when needed."}
-                  </p>
                   {image2ModelConfig?.selectedModel.modelDiscoveryError ? (
                     <p className={styles.noticeError}>{image2ModelConfig.selectedModel.modelDiscoveryError}</p>
                   ) : null}
@@ -2204,7 +2214,21 @@ export function ToolsRoute() {
                       <p className={styles.panelEyebrow}>
                         {lang === "zh" ? "外部依赖" : "External dependency"}
                       </p>
-                      <h3>{lang === "zh" ? "AutoGLM token 服务" : "AutoGLM token service"}</h3>
+                      <h3>
+                        {lang === "zh" ? "AutoGLM token 服务" : "AutoGLM token service"}
+                        <VContextualHint
+                          content={webSearchHealth?.available
+                            ? lang === "zh"
+                              ? "搜索工具取得本地 token 后，调用才会进入 AutoGLM 搜索 API。"
+                              : "The search tool calls the AutoGLM search API only after it obtains a local token."
+                            : lang === "zh"
+                              ? "搜索工具先依赖本地 token 服务；端口变化可用 AUTOGLM_TOKEN_URL 覆盖。"
+                              : "The search tool depends on the local token service first. Use AUTOGLM_TOKEN_URL if its port changed."}
+                          label={lang === "zh" ? "搜索依赖说明" : "Search dependency details"}
+                          className={styles.contextualHint}
+                          width="wide"
+                        />
+                      </h3>
                     </div>
                     <span className={webSearchHealth?.available ? styles.countPill : styles.stateBadge}>
                       {webSearchHealthQuery.isPending
@@ -2229,15 +2253,11 @@ export function ToolsRoute() {
                       <strong>{webSearchHealth?.searchApiCalled === undefined ? "-" : String(webSearchHealth.searchApiCalled)}</strong>
                     </span>
                   </div>
-                  <p>
-                    {webSearchHealth?.available
-                      ? lang === "zh"
-                        ? "搜索工具已能取得本地 token，后续调用才会进入 AutoGLM 搜索 API。"
-                        : "The search tool can obtain a local token, so calls may proceed to the AutoGLM search API."
-                      : lang === "zh"
-                        ? "搜索工具会先依赖这个本地 token 服务；这里不可用时，外网搜索 API 不会被调用。端口变化可用 AUTOGLM_TOKEN_URL 覆盖。"
-                        : "The search tool depends on this local token service first. When it is unavailable, the external search API is not called. Use AUTOGLM_TOKEN_URL if the port changed."}
-                  </p>
+                  {webSearchHealth && !webSearchHealth.available ? (
+                    <p className={styles.notice}>
+                      {lang === "zh" ? "Token 服务不可用，搜索请求不会发送至外网 API。" : "The token service is unavailable, so the search request will not reach the external API."}
+                    </p>
+                  ) : null}
                   {webSearchHealthQuery.isError ? (
                     <p className={styles.noticeError}>
                       {webSearchHealthQuery.error instanceof Error ? webSearchHealthQuery.error.message : String(webSearchHealthQuery.error)}

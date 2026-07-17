@@ -113,6 +113,21 @@ export function TeamCandidateCard({
       {statusLabel}
     </span>
   );
+  const sourceValue = source ? (
+    source.href ? (
+      <a
+        href={source.href}
+        target="_blank"
+        rel="noreferrer"
+        aria-label={source.title}
+        onClick={(event) => event.stopPropagation()}
+      >
+        {source.value}
+      </a>
+    ) : (
+      <code tabIndex={source.title && !activateTitle ? 0 : undefined} aria-label={source.title}>{source.value}</code>
+    )
+  ) : null;
   const card = (
     <article
       data-vui-product="team-candidate-card"
@@ -146,18 +161,12 @@ export function TeamCandidateCard({
           className="col-start-2 row-start-1 row-span-3 grid min-w-0 max-w-full grid-cols-[max-content_minmax(0,1fr)] items-center self-center gap-1 overflow-hidden text-[var(--vui-font-xs)] [&_a]:truncate [&_code]:truncate [&_a]:text-[var(--accent-cool)] [&_code]:text-[var(--fg-tertiary)] max-[820px]:col-start-1 max-[820px]:row-start-auto max-[820px]:row-span-1 data-[missing=true]:text-[var(--state-warning)]"
         >
           <span className="text-[var(--fg-tertiary)]">{source.label}</span>
-          {source.href ? (
-            <a
-              href={source.href}
-              target="_blank"
-              rel="noreferrer"
-              title={source.title}
-              onClick={(event) => event.stopPropagation()}
-            >
-              {source.value}
-            </a>
+          {source.title && !activateTitle ? (
+            <VTooltip content={source.title} width="wide">
+              {sourceValue}
+            </VTooltip>
           ) : (
-            <code title={source.title}>{source.value}</code>
+            sourceValue
           )}
         </div>
       ) : null}
@@ -171,6 +180,12 @@ export function TeamCandidateCard({
         <span className="grid gap-1">
           <span>{activateTitle}</span>
           <span>{statusTitle}</span>
+          {source?.title ? <span>{source.title}</span> : null}
+        </span>
+      ) : source?.title ? (
+        <span className="grid gap-1">
+          <span>{activateTitle}</span>
+          <span>{source.title}</span>
         </span>
       ) : activateTitle}
       width="wide"
