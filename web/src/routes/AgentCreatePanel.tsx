@@ -267,7 +267,7 @@ export function AgentCreatePanel({
               <VNativeSelect value={selectedModelId} disabled={!providerModels.length} onChange={(event) => onModelChange(event.target.value)}>
                 {!providerModels.length ? <option value="">{lang === "zh" ? "该服务商没有可用模型" : "No model available for this provider"}</option> : null}
                 {providerModels.map((model) => (
-                  <option key={model.key} value={model.modelId} title={model.modelLabel || model.modelId}>{model.label}</option>
+                  <option key={model.key} value={model.modelId} aria-label={model.modelLabel || model.modelId}>{model.label}</option>
                 ))}
               </VNativeSelect>
             </VFieldRow>
@@ -296,11 +296,19 @@ export function AgentCreatePanel({
                 <div className={styles.createToolBundleGrid}>
                   {toolBundles.map((bundle) => {
                     const selected = draft.selectedToolBundleIds.includes(bundle.bundleId);
+                    const bundleHint = [toolBundleMeta(bundle), bundle.description].filter(Boolean).join("\n") || bundle.label;
                     return (
-                      <label key={bundle.bundleId} className={selected ? styles.createToolBundleSelected : styles.createToolBundleOption} title={[bundle.label, toolBundleMeta(bundle), bundle.description].filter(Boolean).join("\n")}>
-                        <VNativeInput type="checkbox" checked={selected} onChange={(event) => onToolBundleToggle(bundle.bundleId, event.target.checked)} />
-                        <span><strong>{bundle.label}</strong></span>
-                      </label>
+                      <div key={bundle.bundleId} className={selected ? styles.createToolBundleSelected : styles.createToolBundleOption}>
+                        <label>
+                          <VNativeInput type="checkbox" checked={selected} onChange={(event) => onToolBundleToggle(bundle.bundleId, event.target.checked)} />
+                          <strong>{bundle.label}</strong>
+                        </label>
+                        <VContextualHint
+                          label={`${bundle.label} ${lang === "zh" ? "说明" : "details"}`}
+                          content={bundleHint}
+                          width="wide"
+                        />
+                      </div>
                     );
                   })}
                 </div>
