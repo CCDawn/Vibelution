@@ -1016,6 +1016,14 @@ def test_responses_transport_streams_with_responses_normalizer(monkeypatch):
         assert fields["continuationMode"] == "initial"
         assert fields["responseInputItemCount"] == 1
         assert fields["functionCallOutputCount"] == 0
+        field_keys = list(fields)
+        for key in (
+            "previousResponseIdPresent",
+            "continuationMode",
+            "responseInputItemCount",
+            "functionCallOutputCount",
+        ):
+            assert field_keys.index(key) < 24
 
 
 def test_responses_transport_streams_completed_output_blocks_when_no_delta(monkeypatch):
