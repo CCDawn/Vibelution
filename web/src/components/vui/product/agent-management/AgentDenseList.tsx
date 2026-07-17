@@ -1,7 +1,7 @@
 import { CheckSquare, Square } from "lucide-react";
 import { type ReactNode } from "react";
 
-import { VNativeButton, VNativeInput } from "../../index";
+import { VNativeButton, VNativeInput, VTooltip } from "../../index";
 
 export type AgentDenseRow = {
   id: string;
@@ -113,6 +113,7 @@ function AgentRow({
   onSelectRow: AgentDenseListProps["onSelectRow"];
   onToggleBulk: AgentDenseListProps["onToggleBulk"];
 }) {
+  const rowTooltip = [row.issueSummary, row.modelDetail].filter(Boolean).join("\n");
   const rowClass = [
     "w-full min-h-[64px] p-2 border border-[var(--vui-border-hairline)] rounded-[var(--radius-control)] bg-[var(--vui-surface-row)] text-[var(--fg-primary)] text-left min-w-0 grid grid-cols-[minmax(0,1fr)_auto] items-start gap-x-2 gap-y-1.5",
     "transition-[border-color,background] duration-150 hover:bg-[var(--vui-surface-row-hover)]",
@@ -124,56 +125,63 @@ function AgentRow({
     .filter(Boolean)
     .join(" ");
 
+  const selectionControl = (
+    <label
+      className="relative grid place-items-center w-[28px] h-[36px] border border-[var(--border-soft)] rounded-[var(--radius-control)] bg-[var(--vui-surface-row)] text-[var(--fg-secondary)] cursor-pointer hover:border-[var(--border-strong)] hover:text-[var(--accent-warm-2)]"
+    >
+      <VNativeInput
+        type="checkbox"
+        checked={row.bulkSelected}
+        aria-label={row.selectLabel}
+        className="absolute !w-px !h-px opacity-0 pointer-events-none"
+        onChange={(event) =>
+          onToggleBulk(
+            row.id,
+            event.target.checked,
+            Boolean((event.nativeEvent as globalThis.MouseEvent).shiftKey),
+          )
+        }
+      />
+      {row.bulkSelected ? <CheckSquare size={15} /> : <Square size={15} />}
+    </label>
+  );
+
+  const agentCard = (
+    <VNativeButton type="button" data-vui="agent-row" className={rowClass} onClick={(event) => onSelectRow(row.id, event)}>
+      <span className="grid grid-cols-[30px_minmax(0,1fr)] items-center gap-2 min-w-0 overflow-hidden text-ellipsis">
+        <span className={AVATAR} aria-hidden="true">
+          {row.avatarUrl ? (
+            <img src={row.avatarUrl} alt="" className="block w-full h-full rounded-[inherit] object-cover" />
+          ) : (
+            row.avatarInitials
+          )}
+        </span>
+        <span className="grid min-w-0 gap-1">
+          <strong className="min-w-0 overflow-hidden text-[color-mix(in_srgb,var(--fg-primary)_88%,var(--accent-cool))] text-[0.82rem] text-ellipsis whitespace-nowrap">
+            {row.name}
+          </strong>
+          <em className={[ROLE_TAG_BASE, roleToneClass(row.roleTone)].join(" ")}>{row.roleLabel}</em>
+        </span>
+      </span>
+      <span className="flex items-center justify-items-end min-w-0">
+        <span className={[PILL_BASE, issueToneClass(row.issueTone)].join(" ")}>{row.issueLabel}</span>
+      </span>
+      <span className="col-span-2 flex flex-wrap items-center gap-x-2 gap-y-1 min-w-0 text-[0.72rem] text-[var(--fg-secondary)]">
+        <span className="min-w-0 max-w-full overflow-hidden text-ellipsis whitespace-nowrap">
+          {row.modelLabel}
+        </span>
+        <span className={[PILL_BASE, runtimeToneClass(row.runtimeTone)].join(" ")}>{row.runtimeLabel}</span>
+        <span className="sr-only">
+          {row.promptLabel} {row.modes.map((mode) => String(mode)).join(" ")}
+        </span>
+      </span>
+    </VNativeButton>
+  );
+
   return (
     <div className="grid grid-cols-[28px_minmax(0,1fr)] items-center gap-[5px] min-w-0">
-      <label
-        className="relative grid place-items-center w-[28px] h-[36px] border border-[var(--border-soft)] rounded-[var(--radius-control)] bg-[var(--vui-surface-row)] text-[var(--fg-secondary)] cursor-pointer hover:border-[var(--border-strong)] hover:text-[var(--accent-warm-2)]"
-        title={row.selectLabel}
-      >
-        <VNativeInput
-          type="checkbox"
-          checked={row.bulkSelected}
-          aria-label={row.selectLabel}
-          className="absolute !w-px !h-px opacity-0 pointer-events-none"
-          onChange={(event) =>
-            onToggleBulk(
-              row.id,
-              event.target.checked,
-              Boolean((event.nativeEvent as globalThis.MouseEvent).shiftKey),
-            )
-          }
-        />
-        {row.bulkSelected ? <CheckSquare size={15} /> : <Square size={15} />}
-      </label>
-      <VNativeButton type="button" data-vui="agent-row" className={rowClass} onClick={(event) => onSelectRow(row.id, event)}>
-        <span className="grid grid-cols-[30px_minmax(0,1fr)] items-center gap-2 min-w-0 overflow-hidden text-ellipsis">
-          <span className={AVATAR} aria-hidden="true">
-            {row.avatarUrl ? (
-              <img src={row.avatarUrl} alt="" className="block w-full h-full rounded-[inherit] object-cover" />
-            ) : (
-              row.avatarInitials
-            )}
-          </span>
-          <span className="grid min-w-0 gap-1">
-            <strong className="min-w-0 overflow-hidden text-[color-mix(in_srgb,var(--fg-primary)_88%,var(--accent-cool))] text-[0.82rem] text-ellipsis whitespace-nowrap">
-              {row.name}
-            </strong>
-            <em className={[ROLE_TAG_BASE, roleToneClass(row.roleTone)].join(" ")}>{row.roleLabel}</em>
-          </span>
-        </span>
-        <span className="flex items-center justify-items-end min-w-0" title={row.issueSummary}>
-          <span className={[PILL_BASE, issueToneClass(row.issueTone)].join(" ")}>{row.issueLabel}</span>
-        </span>
-        <span className="col-span-2 flex flex-wrap items-center gap-x-2 gap-y-1 min-w-0 text-[0.72rem] text-[var(--fg-secondary)]">
-          <span className="min-w-0 max-w-full overflow-hidden text-ellipsis whitespace-nowrap" title={row.modelDetail}>
-            {row.modelLabel}
-          </span>
-          <span className={[PILL_BASE, runtimeToneClass(row.runtimeTone)].join(" ")}>{row.runtimeLabel}</span>
-          <span className="sr-only">
-            {row.promptLabel} {row.modes.map((mode) => String(mode)).join(" ")}
-          </span>
-        </span>
-      </VNativeButton>
+      <VTooltip content={row.selectLabel}>{selectionControl}</VTooltip>
+      {rowTooltip ? <VTooltip content={rowTooltip} width="wide">{agentCard}</VTooltip> : agentCard}
     </div>
   );
 }
