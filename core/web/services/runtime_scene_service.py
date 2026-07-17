@@ -903,9 +903,10 @@ def record_runtime_scene_event(
     _append_scene_event(scene_dir, component_name, event_payload)
 
     projection_refresh = "deferred"
-    requires_projection_lock = (
-        event_name == "runtime.snapshot.reconciled"
-        or str(level_name or "").strip().lower() in {"warning", "error", "critical", "fatal"}
+    requires_projection_lock = _runtime_scene_event_requires_immediate_projection(
+        event_code=event_name,
+        level=level_name,
+        outcome=outcome_name,
     )
     if requires_projection_lock:
         # Full diagnosis generation is intentionally isolated from the append
@@ -5696,6 +5697,24 @@ def _runtime_scene_event_requires_full_projection_refresh(
     if reconciliation_closed:
         return True
     return str(level or "").strip().lower() in {"warning", "error", "critical", "fatal"}
+
+
+def _runtime_scene_event_requires_immediate_projection(
+    *,
+    event_code: str,
+    level: str,
+    outcome: str,
+) -> bool:
+    """Keep recovered hot-path telemetry append-only until an on-demand refresh."""
+
+    normalized_event = str(event_code or "").strip()
+    normalized_outcome = str(outcome or "").strip().lower()
+    if normalized_event == "llm.replay_state.degraded" and normalized_outcome == "degraded":
+        return False
+    return (
+        normalized_event == "runtime.snapshot.reconciled"
+        or str(level or "").strip().lower() in {"warning", "error", "critical", "fatal"}
+    )
 
 
 def _update_runtime_scene_package_manifest_lightweight(scene_dir: Path, manifest: dict[str, Any]) -> None:
