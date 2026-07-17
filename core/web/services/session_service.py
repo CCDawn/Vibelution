@@ -21018,14 +21018,13 @@ def _set_session_live_output(
     # Live progress, assistant text, and tool updates already have a bounded
     # assistant_delta projection. Rebuilding the full session detail for each
     # of those updates blocks the Agent worker before the next LLM invocation.
-    # Keep full snapshots for diagnostic structures that are not part of the
-    # public delta contract; terminal persistence and stream reconnects still
-    # publish an authoritative detail snapshot through their own paths.
-    publish_full_snapshot = (
-        mental_snapshot is not _UNSET
-        or context_composition is not _UNSET
-        or llm_payload_trace is not _UNSET
-    )
+    # Keep full snapshots for diagnostic structures that must immediately
+    # reshape the visible session.  LLM payload trace is already available
+    # from the in-memory live state and is persisted in the bounded checkpoint;
+    # hydrating a full session detail here blocks the Agent worker before each
+    # provider request.  Terminal persistence and reconnect paths still publish
+    # the authoritative detail snapshot.
+    publish_full_snapshot = mental_snapshot is not _UNSET
     with _RUNNING_SESSIONS_LOCK:
         current_turn_id = _SESSION_ACTIVE_TURN_IDS.get(session_id, "")
     if requested_turn_id and current_turn_id and requested_turn_id != current_turn_id:
