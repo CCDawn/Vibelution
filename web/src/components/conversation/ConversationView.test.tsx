@@ -1730,6 +1730,14 @@ describe("ConversationView edit resend affordance", () => {
     expect(conversationViewSource).not.toContain("setAllMessagesVisible(true)");
   });
 
+  it("coalesces canonical and streaming timeline scroll requests into one frame", () => {
+    expect(conversationViewSource).toContain("function scheduleTimelineScrollToBottom()");
+    expect(conversationViewSource).toContain("scheduleTimelineScrollToBottom();");
+    expect(conversationViewSource).not.toContain(
+      "if (autoScrollToLatest && followLatestRef.current) {\n      scrollTimelineToBottom(timeline);",
+    );
+  });
+
   it("can render the opt-in compact workbench density", () => {
     const html = renderConversation([], { density: "compact" });
 
