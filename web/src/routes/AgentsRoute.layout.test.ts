@@ -936,7 +936,14 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).not.toContain("copy.configGuideBoundaryHint");
     expect(routeSource).not.toContain("styles.configGuidePanel");
     expect(routeSource).not.toContain("这页先回答三个问题");
-    expect(coreConfigPanelSource).toContain("title={copy.llmSlotsHint}");
+    expect(coreConfigPanelSource).toContain("VContextualHint");
+    expect(coreConfigPanelSource).toContain("const slotHint");
+    expect(coreConfigPanelSource).toContain("content={slotHint}");
+    expect(coreConfigPanelSource).toContain("content={title}");
+    expect(coreConfigPanelSource).toContain("content={copy.llmSlotsHint}");
+    expect(coreConfigPanelSource).not.toContain("title={copy.llmSlotsHint}");
+    expect(coreConfigPanelSource).not.toContain("title={`${slot.required ? copy.requiredSlot : copy.optionalSlot} · ${slot.description}`}");
+    expect(coreConfigPanelSource).not.toContain("className={styles.configEditor} title={title}");
     expect(routeSource).toContain("memoryPolicyTooltip: copy.memoryPolicyPickerHint");
     expect(coreConfigPanelSource).toContain("tooltip={memoryPolicyTooltip}");
     expect(routeSource).toContain("displayName: payload.draft.displayName");
@@ -966,7 +973,8 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("healthTitle: issueSummary(selectedAgent.health, lang)");
     expect(detailHeaderPanelSource).toContain("className={styles.detailHealthStatus}");
     expect(routeSource).not.toContain("<small>{issueSummary(selectedAgent.health, lang)}</small>");
-    expect(coreConfigPanelSource).toContain("title={`${slot.required ? copy.requiredSlot : copy.optionalSlot} · ${slot.description}`}");
+    expect(coreConfigPanelSource).toContain("content={slotHint}");
+    expect(coreConfigPanelSource).not.toContain("title={`${slot.required ? copy.requiredSlot : copy.optionalSlot} · ${slot.description}`}");
     expect(routeSource).not.toContain("<small>{slot.required ? copy.requiredSlot : copy.optionalSlot}</small>");
     expect(routeSource).toContain("const coreConfigToolPolicyTooltip = [");
     expect(coreConfigPanelSource).toContain("tooltip={toolPolicyTooltip}");
