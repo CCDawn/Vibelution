@@ -50,6 +50,31 @@ def _normalize_worktree_snapshot_retention_limit(value: Optional[int]) -> int:
     return max(1, min(parsed, _MAX_WORKTREE_SNAPSHOT_RETENTION_LIMIT))
 
 
+def _worktree_snapshot_signature(snapshot: Optional["WorkingTreeSnapshot"]) -> tuple[Any, ...]:
+    if snapshot is None:
+        return ()
+    return (
+        snapshot.available,
+        snapshot.error,
+        snapshot.base_rev,
+        snapshot.has_staged,
+        snapshot.has_unstaged,
+        snapshot.has_untracked,
+        tuple(
+            (
+                item.path,
+                item.status,
+                item.staged,
+                item.unstaged,
+                item.untracked,
+                item.deleted,
+                item.old_path,
+            )
+            for item in snapshot.files
+        ),
+    )
+
+
 @dataclass
 class WorkingTreeFile:
     path: str
@@ -260,6 +285,16 @@ class GitMemoryService:
             )
             row = cursor.fetchone()
             return row["commit_sha"] if row else None
+
+    def _is_commit_indexed(self, commit_sha: Optional[str]) -> bool:
+        if not commit_sha:
+            return False
+        with self._workspace.get_db_connection() as conn:
+            row = conn.cursor().execute(
+                "SELECT 1 FROM GitCommit WHERE commit_sha = ? LIMIT 1",
+                (commit_sha,),
+            ).fetchone()
+            return row is not None
 
     def _list_commits_to_index(self, base_rev: Optional[str]) -> List[str]:
         if base_rev:
@@ -636,9 +671,9 @@ class GitMemoryService:
 
     def refresh_git_memory(self, force: bool = False) -> GitMemoryState:
         with self._lock:
-            available, error = self.is_git_available()
             now = _utcnow_iso()
-            if not available:
+            snapshot = self.scan_working_tree(store=False)
+            if not snapshot.available:
                 self._last_state = GitMemoryState(
                     available=False,
                     head_rev=None,
@@ -646,13 +681,22 @@ class GitMemoryService:
                     dirty=False,
                     snapshot_id=None,
                     refreshed_at=now,
-                    error=error,
+                    error=snapshot.error,
                 )
                 return self._last_state
 
-            index_result = self.index_recent_changes()
-            snapshot = self.scan_working_tree(store=True)
-            head_rev = self._git_head_rev()
+            head_rev = snapshot.base_rev
+            last_indexed_head_rev = self._get_last_indexed_commit()
+            if head_rev and not self._is_commit_indexed(head_rev):
+                index_result = self.index_recent_changes(base_rev=last_indexed_head_rev)
+            else:
+                index_result = {"available": True, "indexed_commits": [], "error": None}
+
+            if _worktree_snapshot_signature(snapshot) == _worktree_snapshot_signature(self._last_snapshot):
+                snapshot = self._last_snapshot or snapshot
+            else:
+                self._store_worktree_snapshot(snapshot)
+                self._last_snapshot = snapshot
             self._last_state = GitMemoryState(
                 available=True,
                 head_rev=head_rev,

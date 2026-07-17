@@ -150,6 +150,48 @@ class TestGitMemoryService:
         assert any(change.path == "sample.py" for change in changes)
         assert any(event[0] == EventNames.GIT_INDEX_UPDATED for event in published)
 
+    def test_refresh_reuses_index_and_identical_clean_snapshot(self, tmp_path, monkeypatch):
+        repo = _init_git_repo(tmp_path)
+        db_path = tmp_path / "brain.db"
+        fake_workspace = FakeWorkspace(repo, db_path)
+
+        class FakeBus:
+            def publish(self, name, data=None, source=None):
+                return None
+
+            def subscribe(self, name, handler, priority=0):
+                return True
+
+        monkeypatch.setattr("core.infrastructure.git_memory.get_workspace", lambda: fake_workspace)
+        monkeypatch.setattr("core.infrastructure.git_memory.get_event_bus", lambda: FakeBus())
+
+        service = GitMemoryService()
+        service.refresh_git_memory(force=True)
+
+        git_calls = []
+        original_run_git = service._run_git
+
+        def tracked_run_git(args):
+            git_calls.append(args)
+            return original_run_git(args)
+
+        stored_snapshots = []
+        original_store_snapshot = service._store_worktree_snapshot
+
+        def tracked_store_snapshot(snapshot):
+            stored_snapshots.append(snapshot)
+            return original_store_snapshot(snapshot)
+
+        monkeypatch.setattr(service, "_run_git", tracked_run_git)
+        monkeypatch.setattr(service, "_store_worktree_snapshot", tracked_store_snapshot)
+
+        state = service.refresh_git_memory(force=True)
+
+        assert state.available is True
+        assert state.dirty is False
+        assert git_calls == [["status", "--porcelain=1"], ["rev-parse", "HEAD"]]
+        assert stored_snapshots == []
+
     def test_worktree_snapshot_retention_prunes_old_worktree_rows(self, tmp_path, monkeypatch):
         repo = _init_git_repo(tmp_path)
         db_path = tmp_path / "brain.db"
