@@ -18589,13 +18589,50 @@ def _assistant_timeline_events_by_turn(conversation_id: str) -> dict[str, list[d
         return {}
     events_by_turn: dict[str, list[dict[str, Any]]] = {}
     tool_event_keys: dict[str, dict[str, int]] = {}
-    for event in _load_session_conversation_events_cached(normalized_session_id):
+    journal_events = list(_load_session_conversation_events_cached(normalized_session_id))
+    canonical_commentary_turn_ids: set[str] = set()
+    for event in journal_events:
+        if str(getattr(event, "event_type", "") or "").strip() != "assistant_item_committed":
+            continue
+        payload = dict(getattr(event, "payload", {}) or {})
+        item_payload = dict(payload.get("item") or {})
+        item_kind = str(payload.get("kind") or item_payload.get("kind") or "").strip().lower()
+        item_text = _sanitize_message_content(
+            "assistant",
+            payload.get("text") or item_payload.get("text") or "",
+        )
+        turn_id = str(getattr(event, "turn_id", "") or "").strip()
+        if turn_id and item_kind == "commentary" and item_text:
+            canonical_commentary_turn_ids.add(turn_id)
+    for event in journal_events:
         turn_id = str(getattr(event, "turn_id", "") or "").strip()
         if not turn_id:
             continue
         event_type = str(getattr(event, "event_type", "") or "").strip()
         payload = dict(getattr(event, "payload", {}) or {})
+        if event_type == "assistant_item_committed":
+            item_payload = dict(payload.get("item") or {})
+            item_kind = str(payload.get("kind") or item_payload.get("kind") or "").strip().lower()
+            content = _sanitize_message_content(
+                "assistant",
+                payload.get("text") or item_payload.get("text") or "",
+            )
+            sequence = _coerce_nonnegative_int(getattr(event, "sequence", 0))
+            if item_kind not in {"commentary", "reasoning"} or sequence <= 0 or not content:
+                continue
+            events_by_turn.setdefault(turn_id, []).append(
+                {
+                    "sequence": sequence,
+                    "kind": "assistant_text" if item_kind == "commentary" else "thought",
+                    "status": _normalize_tool_call_status(getattr(event, "status", ""), default="done"),
+                    "content": content,
+                    "source": "assistant_item_committed",
+                }
+            )
+            continue
         if event_type == EVENT_ASSISTANT_DELTA_COMMITTED:
+            if turn_id in canonical_commentary_turn_ids:
+                continue
             sequence = _coerce_nonnegative_int(payload.get("feedbackSequence") or payload.get("feedback_sequence"))
             if sequence <= 0 and _is_assistant_timeline_segment_event(event):
                 sequence = _coerce_nonnegative_int(getattr(event, "sequence", 0))
@@ -18627,7 +18664,7 @@ def _assistant_timeline_events_by_turn(conversation_id: str) -> dict[str, list[d
     return {
         turn_id: sorted(items, key=lambda item: _coerce_nonnegative_int(item.get("sequence")))
         for turn_id, items in events_by_turn.items()
-        if any(str(item.get("kind") or "") == "assistant_text" for item in items)
+        if any(str(item.get("kind") or "") in {"assistant_text", "thought"} for item in items)
     }
 
 
@@ -19118,9 +19155,6 @@ def _codex_transcript_operation_sources(
 ) -> list[dict[str, Any]]:
     sources: list[dict[str, Any]] = []
     for event in feedback_events:
-        kind = str(event.get("kind") or "").strip().lower()
-        if kind == "assistant_text":
-            continue
         source = dict(event)
         if _is_non_diagnostic_runtime_status_source(source):
             continue
@@ -19181,6 +19215,26 @@ def _codex_transcript_cell_from_operation_source(
     operation_id = str(source.get("_operationId") or "").strip()
     status = _codex_lifecycle_status(source.get("status") or source.get("semanticStatus"))
     kind = str(source.get("kind") or "tool").strip().lower()
+    if kind == "assistant_text":
+        text = _sanitize_message_content("assistant", source.get("content") or source.get("text") or "")
+        if not text:
+            return None, _empty_codex_tool_lifecycle_projection(), []
+        return (
+            _compact_codex_record(
+                {
+                    "id": f"{message_id}-{operation_id}",
+                    "kind": "assistant_markdown",
+                    "messageId": message_id,
+                    "status": status,
+                    "tone": _codex_cell_tone(status),
+                    "phase": "commentary",
+                    "text": text,
+                    "sourceItemId": operation_id,
+                }
+            ),
+            _empty_codex_tool_lifecycle_projection(),
+            [],
+        )
     title = str(source.get("name") or source.get("label") or "").strip()
     summary = _codex_operation_summary(source, failed=status == "failed")
     cell_kind = _codex_cell_kind(kind, status)
