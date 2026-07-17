@@ -112,6 +112,17 @@ def test_without_response_id_preserves_opaque_replay_but_clears_stateful_continu
     assert stateless.safe_summary()["pendingCallCount"] == 0
 
 
+def test_without_opaque_items_preserves_stateful_continuation_bookmark():
+    state = make_state(response_id="resp-1", pending_call_ids=("call-1",))
+
+    stateful = state.without_opaque_items()
+
+    assert stateful.response_id == "resp-1"
+    assert stateful.pending_call_ids == ("call-1",)
+    assert stateful.opaque_items == ()
+    assert stateful.byte_size == 0
+
+
 def test_route_switch_projection_clears_replay_bookmark_when_state_is_discarded():
     request = project_semantic_request(
         SemanticProjectionInput(
