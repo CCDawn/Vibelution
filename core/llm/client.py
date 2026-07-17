@@ -1579,6 +1579,44 @@ class LLMClient:
             )
         projection_messages = list(messages or [])
         provider_messages = normalize_messages_for_provider(projection_messages)
+        replay_items = tuple(getattr(replay_state, "opaque_items", ()) or ())
+        provider_message_roles = list(
+            _safe_message_role_summary(provider_messages).get("messageRoles") or []
+        )
+        if (
+            replay_items
+            and provider_message_roles
+            and provider_message_roles[-1] == "user"
+            and "assistant" not in provider_message_roles
+            and not str(getattr(replay_state, "response_id", "") or "").strip()
+        ):
+            replay_summary = (
+                replay_state.safe_summary()
+                if hasattr(replay_state, "safe_summary")
+                else {}
+            )
+            _record_llm_scene_event(
+                "projection",
+                "llm.replay_state.degraded",
+                message="Unanchored stateless replay was discarded before semantic projection.",
+                level="warning",
+                outcome="degraded",
+                fields={
+                    "profileId": self.profile_id,
+                    "provider": self.provider.kind,
+                    "model": self.profile.model,
+                    "protocol": self.protocol_route.protocol.value,
+                    "reason": "missing_assistant_anchor",
+                    "continuationMode": "stateless_replay_dropped",
+                    "replayItemCount": int(replay_summary.get("itemCount") or len(replay_items)),
+                    "replayByteSize": int(replay_summary.get("byteSize") or 0),
+                    "hasResponseId": False,
+                    "messageCount": len(provider_messages),
+                    "finalMessageRole": provider_message_roles[-1],
+                },
+                lifecycle=False,
+            )
+            replay_state = None
         if replay_state is not None:
             provider_messages = _scope_reasoning_replay_anchors(provider_messages, replay_state)
         provider_tool_chain_repaired = sum(

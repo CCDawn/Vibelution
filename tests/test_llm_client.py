@@ -595,6 +595,73 @@ def test_responses_transport_routes_openai_compatible_model_through_responses_br
     ]
 
 
+def test_responses_discards_unanchored_stateless_replay_for_user_only_request(monkeypatch):
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "relay",
+            "llm.providers.default.api_key": "test-key",
+            "llm.providers.default.base_url": "https://ai-pixel.online",
+            "llm.providers.default.compat_mode": "openai",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "gpt-5.6-terra",
+            "llm.profiles.primary.transport": "responses",
+        }
+    )
+    client = LLMClient(config=config, backend=lambda payload: payload)
+    replay_state = ProviderReplayState(
+        issuer="responses",
+        provider_id=client.protocol_route.provider_id,
+        endpoint_fingerprint=endpoint_fingerprint(client.protocol_route.runtime_endpoint),
+        model_id=client.protocol_route.model_id,
+        wire_protocol=client.protocol_route.wire_protocol,
+        opaque_items=(
+            OpaqueReplayItem(
+                item_id="rs-orphaned",
+                payload=json.dumps(
+                    {
+                        "id": "rs-orphaned",
+                        "type": "reasoning",
+                        "encrypted_content": "opaque-orphaned",
+                    }
+                ).encode("utf-8"),
+            ),
+        ),
+    )
+    recorded = []
+    monkeypatch.setattr(
+        "core.llm.client._record_llm_scene_event",
+        lambda *args, **kwargs: recorded.append((args, kwargs)),
+    )
+
+    payload = client._build_payload(
+        [{"role": "user", "content": "你有什么工具"}],
+        replay_state=replay_state,
+    )
+
+    assert payload["input"] == [
+        {"role": "user", "content": [{"type": "input_text", "text": "你有什么工具"}]},
+    ]
+    assert "previous_response_id" not in payload
+    replay_event = next(
+        (args, kwargs)
+        for args, kwargs in recorded
+        if len(args) > 1 and args[1] == "llm.replay_state.degraded"
+    )
+    assert replay_event[1]["fields"] == {
+        "profileId": "primary",
+        "provider": "relay",
+        "model": "gpt-5.6-terra",
+        "protocol": "relay_responses",
+        "reason": "missing_assistant_anchor",
+        "continuationMode": "stateless_replay_dropped",
+        "replayItemCount": 1,
+        "replayByteSize": replay_state.byte_size,
+        "hasResponseId": False,
+        "messageCount": 1,
+        "finalMessageRole": "user",
+    }
+
+
 def test_responses_replays_captured_opaque_items_in_provider_order_without_message_ids():
     config = make_config(
         **{
