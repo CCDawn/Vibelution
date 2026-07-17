@@ -14,6 +14,7 @@ from core.llm.client import (
     _llm_provider_proxy_env,
     _ensure_no_proxy_for_local_base_url,
     _retry_policy_max_attempts,
+    _safe_responses_continuation_summary,
     llm_cancel_context,
 )
 from core.llm.errors import classify_exception
@@ -39,6 +40,51 @@ def test_compression_role_disables_provider_retry_amplification() -> None:
 
     assert _retry_policy_max_attempts(profile) == 5
     assert _retry_policy_max_attempts(profile, role="compression") == 1
+
+
+def test_responses_continuation_summary_uses_websocket_delta_without_exposing_id() -> None:
+    summary = _safe_responses_continuation_summary(
+        {
+            "model": "openai/gpt-test",
+            "input": [
+                {"role": "assistant", "content": [{"type": "output_text", "text": "full"}]},
+                {"role": "user", "content": [{"type": "input_text", "text": "full"}]},
+            ],
+            "_vibelution_responses_websocket": {
+                "enabled": True,
+                "previous_response_id": "resp-secret",
+                "input": [
+                    {"type": "function_call_output", "call_id": "call-1", "output": "bounded"},
+                    {"role": "user", "content": [{"type": "input_text", "text": "delta"}]},
+                ],
+            },
+        }
+    )
+
+    assert summary == {
+        "previousResponseIdPresent": True,
+        "continuationMode": "stateful_previous_response_id",
+        "responseInputItemCount": 2,
+        "functionCallOutputCount": 1,
+    }
+    assert "resp-secret" not in str(summary)
+
+
+def test_responses_continuation_summary_classifies_stateless_replay() -> None:
+    summary = _safe_responses_continuation_summary(
+        {
+            "model": "openai/gpt-test",
+            "input": [
+                {"role": "assistant", "content": [{"type": "output_text", "text": "prior"}]},
+                {"role": "user", "content": [{"type": "input_text", "text": "next"}]},
+            ],
+        }
+    )
+
+    assert summary["previousResponseIdPresent"] is False
+    assert summary["continuationMode"] == "stateless_replay"
+    assert summary["responseInputItemCount"] == 2
+    assert summary["functionCallOutputCount"] == 0
 
 
 def supported_relay_chat_config():
@@ -934,6 +980,7 @@ def test_responses_transport_streams_with_responses_normalizer(monkeypatch):
         }
     )
     calls = []
+    recorded = []
 
     def default_responses_backend(payload):
         calls.append(payload)
@@ -949,6 +996,10 @@ def test_responses_transport_streams_with_responses_normalizer(monkeypatch):
         )
 
     monkeypatch.setattr("core.llm.client._default_responses_backend", default_responses_backend)
+    monkeypatch.setattr(
+        "core.llm.client._record_llm_scene_event",
+        lambda *args, **kwargs: recorded.append((args, kwargs)),
+    )
     client = LLMClient(config=config)
 
     events = list(client.stream_events([{"role": "user", "content": "ping"}]))
@@ -958,6 +1009,13 @@ def test_responses_transport_streams_with_responses_normalizer(monkeypatch):
     assert events[-1].usage.total_tokens == 5
     assert "input" in calls[0]
     assert "messages" not in calls[0]
+    started_fields = next(item for item in recorded if item[0][1] == "llm.stream.started")[1]["fields"]
+    succeeded_fields = next(item for item in recorded if item[0][1] == "llm.stream.succeeded")[1]["fields"]
+    for fields in (started_fields, succeeded_fields):
+        assert fields["previousResponseIdPresent"] is False
+        assert fields["continuationMode"] == "initial"
+        assert fields["responseInputItemCount"] == 1
+        assert fields["functionCallOutputCount"] == 0
 
 
 def test_responses_transport_streams_completed_output_blocks_when_no_delta(monkeypatch):

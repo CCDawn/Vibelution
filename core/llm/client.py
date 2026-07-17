@@ -30,6 +30,10 @@ from .payload_validator import payload_protocol_summary
 from .protocol_resolver import ProtocolResolutionError, resolve_model_protocol
 from .protocols import WireProtocol
 from .reasoning_extractor import extract_reasoning_text, strip_think_tag_reasoning
+from .responses_websocket import (
+    RESPONSES_WEBSOCKET_TRANSPORT_KEY,
+    ResponsesWebSocketBackend,
+)
 from .schema import sanitize_tool_schema
 from .streaming import ResponsesStreamNormalizer, extract_message_tool_calls, extract_text_content
 from .semantic_messages import SemanticGenerationSettings
@@ -1047,6 +1051,55 @@ def _safe_payload_route_summary(payload: Dict[str, Any], profile: Any, provider:
     }
 
 
+def _safe_responses_continuation_summary(payload: Dict[str, Any]) -> Dict[str, Any]:
+    if not _payload_uses_responses(payload):
+        return {}
+    websocket_options = payload.get(RESPONSES_WEBSOCKET_TRANSPORT_KEY)
+    websocket_options = websocket_options if isinstance(websocket_options, dict) else {}
+    previous_response_id_present = bool(
+        str(
+            websocket_options.get("previous_response_id")
+            or payload.get("previous_response_id")
+            or ""
+        ).strip()
+    )
+    response_input = (
+        websocket_options.get("input")
+        if previous_response_id_present and isinstance(websocket_options.get("input"), list)
+        else payload.get("input")
+    )
+    response_items = response_input if isinstance(response_input, list) else []
+    response_input_item_count = len(response_items) if response_items else int(response_input not in (None, "", []))
+    function_call_output_count = sum(
+        1
+        for item in response_items
+        if isinstance(item, dict)
+        and str(item.get("type") or "").strip().lower() == "function_call_output"
+    )
+    has_stateless_replay = any(
+        isinstance(item, dict)
+        and (
+            str(item.get("role") or "").strip().lower() == "assistant"
+            or str(item.get("type") or "").strip().lower()
+            in {"function_call", "function_call_output", "reasoning"}
+        )
+        for item in response_items
+    )
+    continuation_mode = (
+        "stateful_previous_response_id"
+        if previous_response_id_present
+        else "stateless_replay"
+        if has_stateless_replay
+        else "initial"
+    )
+    return {
+        "previousResponseIdPresent": previous_response_id_present,
+        "continuationMode": continuation_mode,
+        "responseInputItemCount": response_input_item_count,
+        "functionCallOutputCount": function_call_output_count,
+    }
+
+
 def _safe_timeout_summary(timeout: Any) -> Any:
     if timeout is None or isinstance(timeout, (bool, int, float, str)):
         return timeout
@@ -1222,6 +1275,7 @@ def _default_responses_backend(payload: Dict[str, Any]) -> Any:
         ) from exc
     _ensure_no_proxy_for_local_base_url(payload.get("base_url"))
     request_payload = dict(payload)
+    request_payload.pop(RESPONSES_WEBSOCKET_TRANSPORT_KEY, None)
     if request_payload.get("base_url") and not request_payload.get("api_base"):
         request_payload["api_base"] = _litellm_responses_api_base(request_payload["base_url"])
     request_payload.pop("base_url", None)
@@ -1399,7 +1453,40 @@ class LLMClient:
             outcome="succeeded",
             fields=self.protocol_route.log_summary(),
         )
+        self._responses_websocket_backend: ResponsesWebSocketBackend | None = None
+        if (
+            self._responses_backend is _default_responses_backend
+            and bool(getattr(self.protocol_route.compat, "responses_websocket", False))
+        ):
+            self._responses_websocket_backend = ResponsesWebSocketBackend(
+                self._responses_backend,
+                state_sink=self._record_responses_websocket_state,
+            )
         self._last_payload_protocol_summary: Dict[str, Any] = {}
+
+    def _record_responses_websocket_state(self, state: str, fields: Dict[str, Any]) -> None:
+        outcomes = {
+            "connected": "succeeded",
+            "reused": "observed",
+            "fallback": "fallback",
+            "disconnected": "failed",
+        }
+        levels = {"fallback": "warning", "disconnected": "warning"}
+        _record_llm_scene_event(
+            "transport",
+            f"llm.responses_websocket.{state}",
+            message=f"Responses WebSocket transport {state}.",
+            level=levels.get(state, "info"),
+            outcome=outcomes.get(state, "observed"),
+            fields={
+                "providerId": self.provider.provider_id,
+                "providerKind": self.provider.kind,
+                "model": self.profile.model,
+                "profileId": self.profile_id,
+                **fields,
+            },
+            lifecycle=False,
+        )
 
     @property
     def capabilities(self) -> LLMCapabilities:
@@ -1794,6 +1881,7 @@ class LLMClient:
         message_role_summary = _safe_message_role_summary(provider_conversation_items)
         message_order_summary = _safe_message_order_cache_summary(provider_conversation_items)
         route_summary = _safe_payload_route_summary(payload, self.profile, self.provider)
+        responses_continuation_summary = _safe_responses_continuation_summary(payload)
         payload_shape_summary = _safe_payload_shape_summary(payload)
         prompt_cache_design_summary = _safe_prompt_cache_design_summary(
             messages,
@@ -1810,6 +1898,7 @@ class LLMClient:
             **message_role_summary,
             **message_order_summary,
             **route_summary,
+            **responses_continuation_summary,
             **payload_shape_summary,
             **prompt_cache_design_summary,
             **prompt_cache_payload_summary,
@@ -1832,6 +1921,7 @@ class LLMClient:
                 message_role_summary,
                 message_order_summary,
                 route_summary,
+                responses_continuation_summary,
                 payload_shape_summary,
                 prompt_cache_design_summary,
                 prompt_cache_payload_summary,
@@ -2047,6 +2137,8 @@ class LLMClient:
             return self._backend_for_payload(payload)(payload)
 
     def _backend_for_payload(self, payload: Dict[str, Any]):
+        if _payload_uses_responses(payload) and self._responses_websocket_backend is not None:
+            return self._responses_websocket_backend
         return self._responses_backend if _payload_uses_responses(payload) else self._backend
 
     def _invoke_backend_with_retry(
@@ -2349,6 +2441,7 @@ class LLMClient:
         message_role_summary = _safe_message_role_summary(provider_conversation_items)
         message_order_summary = _safe_message_order_cache_summary(provider_conversation_items)
         route_summary = _safe_payload_route_summary(payload, self.profile, self.provider)
+        responses_continuation_summary = _safe_responses_continuation_summary(payload)
         payload_shape_summary = _safe_payload_shape_summary(payload)
         prompt_cache_design_summary = _safe_prompt_cache_design_summary(
             messages,
@@ -2363,6 +2456,7 @@ class LLMClient:
             **message_role_summary,
             **message_order_summary,
             **route_summary,
+            **responses_continuation_summary,
             **payload_shape_summary,
             **prompt_cache_design_summary,
             **prompt_cache_payload_summary,
@@ -2385,6 +2479,7 @@ class LLMClient:
                 message_role_summary,
                 message_order_summary,
                 route_summary,
+                responses_continuation_summary,
                 payload_shape_summary,
                 prompt_cache_design_summary,
                 prompt_cache_payload_summary,
@@ -2710,10 +2805,12 @@ class LLMClient:
                     payload = dict(payload)
                     payload.pop("stream_options", None)
                     route_summary = _safe_payload_route_summary(payload, self.profile, self.provider)
+                    responses_continuation_summary = _safe_responses_continuation_summary(payload)
                     payload_shape_summary = _safe_payload_shape_summary(payload)
                     event_metadata = {
                         **message_role_summary,
                         **route_summary,
+                        **responses_continuation_summary,
                         **payload_shape_summary,
                         **prompt_cache_design_summary,
                         **_safe_prompt_cache_payload_summary(payload),
