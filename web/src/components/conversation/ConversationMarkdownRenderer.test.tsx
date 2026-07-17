@@ -69,6 +69,28 @@ describe("ConversationMarkdownRenderer", () => {
     expect(html).toContain("<tbody");
     expect(html).toContain('type="checkbox"');
     expect(html).toContain("checked");
+    expect(html).toContain("table-auto");
+    expect(html).toContain("overflow-x-auto");
+    expect(html).toContain("list-disc");
+  });
+
+  it("keeps ordered and unordered lists visually distinct", async () => {
+    const { ConversationMarkdownRenderer } = await import("./ConversationMarkdownRenderer");
+    const html = renderToStaticMarkup(
+      <ConversationMarkdownRenderer
+        content={[
+          "- first",
+          "- second",
+          "",
+          "1. one",
+          "2. two",
+        ].join("\n")}
+        classNames={styles}
+      />,
+    );
+
+    expect(html).toMatch(/<ul[^>]*list-disc/);
+    expect(html).toMatch(/<ol[^>]*list-decimal/);
   });
 
   it("keeps unsafe markdown inert while allowing safe links", async () => {
