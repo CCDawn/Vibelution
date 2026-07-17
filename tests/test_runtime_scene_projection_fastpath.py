@@ -1,11 +1,22 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
 import json
 
 import pytest
 
 from core.web.services import runtime_scene_service
 from tests.helpers.web_runtime_scene import _seed_runtime_scene_bundle
+
+
+class _RecordingPipelineMetrics:
+    def __init__(self) -> None:
+        self.operations: list[tuple[str, str]] = []
+
+    @contextmanager
+    def measure(self, operation: str, *, priority: str = "normal"):
+        self.operations.append((operation, priority))
+        yield
 
 
 @pytest.mark.parametrize(
@@ -117,6 +128,21 @@ def test_ordinary_runtime_event_does_not_wait_for_package_projection_lock(tmp_pa
     assert rows[-1]["event_code"] == "agent.initial_context.completed"
 
 
+def test_ordinary_runtime_event_records_append_pipeline_duration(tmp_path, monkeypatch) -> None:
+    _point_runtime_scene_at(tmp_path, monkeypatch, scene_id="scene-append-metrics")
+    metrics = _RecordingPipelineMetrics()
+    monkeypatch.setattr(runtime_scene_service, "pipeline_metrics", metrics)
+
+    runtime_scene_service.record_runtime_scene_event(
+        "conversation",
+        "turn",
+        "conversation.turn.started",
+        fields={"sessionId": "session-fast", "turnId": "turn-metrics"},
+    )
+
+    assert metrics.operations == [("append", "normal")]
+
+
 def test_warning_runtime_event_appends_before_full_projection(tmp_path, monkeypatch) -> None:
     _point_runtime_scene_at(tmp_path, monkeypatch, scene_id="scene-warning-projection")
     projection_calls: list[str] = []
@@ -142,6 +168,23 @@ def test_warning_runtime_event_appends_before_full_projection(tmp_path, monkeypa
 
     assert result["projectionRefresh"] == "full"
     assert projection_calls == ["agent_directory.list_agents.slow"]
+
+
+def test_warning_runtime_event_records_append_and_projection_pipeline_durations(tmp_path, monkeypatch) -> None:
+    _point_runtime_scene_at(tmp_path, monkeypatch, scene_id="scene-projection-metrics")
+    metrics = _RecordingPipelineMetrics()
+    monkeypatch.setattr(runtime_scene_service, "pipeline_metrics", metrics)
+    monkeypatch.setattr(runtime_scene_service, "_update_runtime_scene_package_manifest", lambda scene, manifest: None)
+
+    runtime_scene_service.record_runtime_scene_event(
+        "agent_directory",
+        "agent",
+        "agent_directory.list_agents.slow",
+        level="warning",
+        fields={"elapsedMs": 9000},
+    )
+
+    assert metrics.operations == [("append", "normal"), ("projection", "high")]
 
 
 @pytest.mark.parametrize(
