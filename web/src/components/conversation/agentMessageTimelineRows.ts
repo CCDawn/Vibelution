@@ -52,10 +52,23 @@ function activeTurnRenderKey(message: AgentMessage) {
   return "";
 }
 
+function userSubmissionRenderKey(message: AgentMessage) {
+  const clientSubmissionId = metadataText(message.metadata, "clientSubmissionId")
+    || metadataText(message.source.metadata, "clientSubmissionId");
+  if (message.role === "user" && clientSubmissionId) {
+    return `user-submission:${clientSubmissionId}`;
+  }
+  return "";
+}
+
 function baseTimelineRowKey(message: AgentMessage) {
   const renderKey = activeTurnRenderKey(message);
   if (renderKey) {
     return renderKey;
+  }
+  const userRenderKey = userSubmissionRenderKey(message);
+  if (userRenderKey) {
+    return userRenderKey;
   }
   const turnId = normalizedMessageTurnId(message);
   if (message.role === "assistant" && turnId) {
