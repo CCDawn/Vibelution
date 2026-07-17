@@ -369,6 +369,122 @@ describe("timeline message process projection", () => {
     ]);
   });
 
+  it("deduplicates a durable tool result replayed by the same-turn final assistant item", () => {
+    const turnId = "session-turn-terra-tool-replay";
+    const resultPreview = JSON.stringify({
+      dirty_summary: "工作区干净",
+      modified_paths: [],
+    });
+    const persistedToolCell = {
+      id: "session-message-46-feedback-1",
+      sourceItemId: "session-message-46-feedback-1",
+      kind: "tool_call" as const,
+      messageId: "session-message-46",
+      status: "completed" as const,
+      tone: "neutral" as const,
+      title: "get_git_status_summary_tool",
+      summary: "工作区干净",
+      toolLifecycleModel: {
+        toolCalls: [{
+          toolCallId: "tool_call:session-message-46-feedback-1",
+          rawOperationId: "session-message-46-feedback-1",
+          status: "completed" as const,
+          title: "get_git_status_summary_tool",
+          summary: "工作区干净",
+          rawToolName: "get_git_status_summary_tool",
+          runtimeKind: "tool" as const,
+          sequence: 1,
+          resultPreview,
+        }],
+        terminalOperations: [],
+        terminalSessions: [],
+        modelObservations: [],
+      },
+    };
+    const finalReplayToolCell = {
+      ...persistedToolCell,
+      id: "session-message-47-feedback-5",
+      sourceItemId: "session-message-47-feedback-5",
+      messageId: "session-message-47",
+      toolLifecycleModel: {
+        ...persistedToolCell.toolLifecycleModel,
+        toolCalls: [{
+          ...persistedToolCell.toolLifecycleModel.toolCalls[0],
+          toolCallId: "tool_call:session-message-47-feedback-5",
+          rawOperationId: "session-message-47-feedback-5",
+          sequence: 5,
+        }],
+      },
+    };
+    const projected = projectTimelineProcessMessages([
+      {
+        id: "session-message-46",
+        role: "assistant",
+        content: "",
+        timestamp: "2026-07-17T10:28:08Z",
+        metadata: {
+          kind: "tool_result",
+          turnId,
+          correlationId: "call_56qsyNjZH9c3dQlRlDTTqIIc",
+        },
+        codexTranscript: {
+          version: 1,
+          source: "native",
+          messageId: "session-message-46",
+          streaming: false,
+          cells: [persistedToolCell],
+          toolCalls: persistedToolCell.toolLifecycleModel.toolCalls,
+          terminalOperations: [],
+          terminalSessions: [],
+          modelObservations: [],
+        },
+      },
+      {
+        id: "session-message-47",
+        role: "assistant",
+        content: "已检查：工作树干净。",
+        timestamp: "2026-07-17T10:30:19Z",
+        metadata: {
+          kind: "assistant_item_committed",
+          turnId,
+        },
+        codexTranscript: {
+          version: 1,
+          source: "native",
+          messageId: "session-message-47",
+          streaming: false,
+          cells: [
+            finalReplayToolCell,
+            {
+              id: "session-message-47-assistant-markdown",
+              kind: "assistant_markdown",
+              messageId: "session-message-47",
+              status: "completed",
+              tone: "neutral",
+              text: "已检查：工作树干净。",
+            },
+          ],
+          toolCalls: finalReplayToolCell.toolLifecycleModel.toolCalls,
+          terminalOperations: [],
+          terminalSessions: [],
+          modelObservations: [],
+        },
+      },
+    ]);
+
+    expect(projected).toHaveLength(1);
+    expect(projected[0].codexTranscript?.cells).toEqual([
+      expect.objectContaining({
+        id: "session-message-46-feedback-1",
+        title: "get_git_status_summary_tool",
+      }),
+      expect.objectContaining({
+        kind: "assistant_markdown",
+        text: "已检查：工作树干净。",
+      }),
+    ]);
+  });
+
   it("infers the live overlay layer when a completed turn merges transcripts without message options", () => {
     const liveTranscript = {
       version: 1 as const,
