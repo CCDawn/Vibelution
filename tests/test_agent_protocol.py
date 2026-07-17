@@ -43,6 +43,40 @@ from tools.agent_tools import spawn_agent as spawn_agent_impl, set_subagent_stre
 from tools.Key_Tools import create_key_tools, create_llm_facing_tools
 
 
+def test_session_turn_reuse_refreshes_turn_scoped_tool_authorization(monkeypatch):
+    agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+    agent.key_tools = [SimpleNamespace(name="git_status")]
+    agent._tool_authorization_decision_fingerprint = "prior-turn"
+    agent._active_turn_messages = ["old"]
+    agent._active_turn_goal = "old goal"
+    agent._active_turn_terminal = True
+    agent._pending_static_context_blocks = ["old"]
+    agent._pending_runtime_context_blocks = ["old"]
+    agent._pending_volatile_context_blocks = ["old"]
+    agent._runtime_context_seeded_by_host = True
+    agent._last_turn_metadata = {"old": True}
+    agent._last_visible_response_text = "old"
+    agent._last_response_tool_calls = 1
+    agent._recent_tool_outputs = ["old"]
+    agent._recent_tool_records = [{"old": True}]
+    agent._pending_lifecycle_action = "old"
+    agent._turn_interrupt_checker = lambda: "old"
+    resolved_with = []
+
+    def resolve_authorization(tools):
+        resolved_with.append(tools)
+        return SimpleNamespace(decision=SimpleNamespace(decision_fingerprint="current-turn"))
+
+    monkeypatch.setattr(agent, "_resolve_tool_authorization", resolve_authorization)
+
+    agent.prepare_for_session_turn_reuse()
+
+    assert resolved_with == [agent.key_tools]
+    assert agent._tool_authorization_decision_fingerprint == "current-turn"
+    assert agent._active_turn_messages is None
+    assert agent._pending_runtime_context_blocks == []
+
+
 def test_initial_prompt_reuse_requires_unchanged_git_and_runtime_state():
     initial_git_state = SimpleNamespace(
         available=True,
