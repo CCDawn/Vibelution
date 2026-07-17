@@ -1547,6 +1547,35 @@ def test_agent_directory_summary_list_skips_heavy_hydration(tmp_path, monkeypatc
     assert "agentInboxPendingCount" not in agent
 
 
+def test_agent_directory_summary_list_reuses_avatar_urls_within_request(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    shared_avatar = "workspace/avatars/shared-agent.png"
+    agent_directory_service.create_agent_instance(
+        display_name="Shared Avatar A",
+        primary_mode="chat",
+        metadata={"avatarImagePath": shared_avatar},
+    )
+    agent_directory_service.create_agent_instance(
+        display_name="Shared Avatar B",
+        primary_mode="chat",
+        metadata={"avatarImagePath": shared_avatar},
+    )
+    resolved_paths: list[str] = []
+
+    def fake_avatar_image_url(path):
+        normalized = str(path or "")
+        resolved_paths.append(normalized)
+        return f"/api/agents/avatar-image/{normalized}"
+
+    monkeypatch.setattr(agent_directory_service, "agent_avatar_image_url", fake_avatar_image_url)
+
+    agents = agent_directory_service.list_agents(detail="summary")
+
+    assert len(agents) >= 2
+    assert resolved_paths.count(shared_avatar) == 1
+    assert len(resolved_paths) == len(set(resolved_paths))
+
+
 def test_agent_directory_config_list_skips_chat_and_inbox_activity_hydration(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     created = agent_directory_service.create_agent_instance(display_name="Config Agent", primary_mode="chat")
