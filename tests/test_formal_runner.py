@@ -26,7 +26,12 @@ def _execution_config(tmp_path: Path, project_root: Path) -> dict[str, object]:
 
 
 def _method_config() -> dict[str, object]:
-    return {"seeds": [17, 42, 101]}
+    return {
+        "seeds": [17, 42, 101],
+        "candidateMechanism": "masked_prediction_error_training",
+        "candidateMaskedLossWeight": 4.0,
+        "maximumLatencyMultiplier": 1.25,
+    }
 
 
 def test_prepare_full_run_requires_explicit_external_environment_and_builds_fixed_commands(tmp_path, monkeypatch):
@@ -55,6 +60,8 @@ def test_prepare_full_run_requires_explicit_external_environment_and_builds_fixe
     assert prepared["seedCount"] == 3
     assert [item["seed"] for item in prepared["commands"]] == [17, 42, 101]
     assert all("--seed" in item["args"] for item in prepared["commands"])
+    assert all("masked_prediction_error_training" in item["args"] for item in prepared["commands"])
+    assert prepared["runOptions"]["maximumLatencyMultiplier"] == 1.25
     assert calls == [[str(tmp_path / "python.exe"), str(script_path), "--self-check"]]
     assert "user_triggered_only" in prepared["boundaries"]
     assert "manual_result_review_required" in prepared["boundaries"]

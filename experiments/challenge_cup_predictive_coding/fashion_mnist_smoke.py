@@ -13,6 +13,10 @@ from pathlib import Path
 from typing import Any
 
 
+INFERENCE_LATENT_CORRECTION = "inference_latent_correction"
+MASKED_PREDICTION_ERROR_TRAINING = "masked_prediction_error_training"
+
+
 @dataclass(frozen=True)
 class ExperimentConfig:
     seed: int = 42
@@ -26,8 +30,11 @@ class ExperimentConfig:
     correction_rate: float = 0.8
     mask_size: int = 8
     num_workers: int = 0
+    candidate_mechanism: str = INFERENCE_LATENT_CORRECTION
+    candidate_masked_loss_weight: float = 4.0
     minimum_mse_improvement: float = 0.001
     maximum_latency_multiplier: float = 5.0
+    maximum_global_mse_regression: float = 0.0005
 
 
 def _torch_modules():
@@ -137,7 +144,13 @@ def load_data(config: ExperimentConfig, data_root: Path):
     return train_loader, test_loader
 
 
-def train(model, train_loader, config: ExperimentConfig) -> list[float]:
+def train(
+    model,
+    train_loader,
+    config: ExperimentConfig,
+    *,
+    masked_loss_weight: float = 0.0,
+) -> list[float]:
     torch, nn, *_ = _torch_modules()
     optimizer = torch.optim.Adam(model.parameters(), lr=config.learning_rate)
     loss_fn = nn.MSELoss()
@@ -148,10 +161,19 @@ def train(model, train_loader, config: ExperimentConfig) -> list[float]:
         total_loss = 0.0
         total_samples = 0
         for clean, _ in train_loader:
-            corrupted, _ = structured_mask(clean, generator=corruption_generator, mask_size=config.mask_size)
+            corrupted, observed_mask = structured_mask(
+                clean,
+                generator=corruption_generator,
+                mask_size=config.mask_size,
+            )
             optimizer.zero_grad(set_to_none=True)
             reconstruction = model(corrupted)
-            loss = loss_fn(reconstruction, clean)
+            if masked_loss_weight > 0:
+                missing_mask = 1.0 - observed_mask
+                pixel_weights = 1.0 + (masked_loss_weight * missing_mask)
+                loss = ((reconstruction - clean).pow(2) * pixel_weights).sum() / pixel_weights.sum()
+            else:
+                loss = loss_fn(reconstruction, clean)
             loss.backward()
             optimizer.step()
             total_loss += float(loss.detach()) * len(clean)
@@ -160,7 +182,61 @@ def train(model, train_loader, config: ExperimentConfig) -> list[float]:
     return epoch_losses
 
 
+def _evaluate_models(baseline_model, candidate_model, test_loader, config: ExperimentConfig) -> dict[str, Any]:
+    torch, *_ = _torch_modules()
+    corruption_generator = torch.Generator().manual_seed(config.seed + 20)
+    totals = {key: 0.0 for key in ("baseline", "variant", "baseline_masked", "variant_masked")}
+    sample_count = 0
+    masked_pixel_count = 0.0
+    baseline_seconds = 0.0
+    variant_seconds = 0.0
+    baseline_model.eval()
+    candidate_model.eval()
+    for clean, _ in test_loader:
+        corrupted, observed_mask = structured_mask(clean, generator=corruption_generator, mask_size=config.mask_size)
+        missing_mask = 1.0 - observed_mask
+        start = time.perf_counter()
+        with torch.no_grad():
+            baseline = baseline_model(corrupted)
+        baseline_seconds += time.perf_counter() - start
+        start = time.perf_counter()
+        with torch.no_grad():
+            variant = candidate_model(corrupted)
+        variant_seconds += time.perf_counter() - start
+        totals["baseline"] += float((baseline - clean).pow(2).sum())
+        totals["variant"] += float((variant - clean).pow(2).sum())
+        totals["baseline_masked"] += float(((baseline - clean).pow(2) * missing_mask).sum())
+        totals["variant_masked"] += float(((variant - clean).pow(2) * missing_mask).sum())
+        sample_count += len(clean)
+        masked_pixel_count += float(missing_mask.sum())
+    all_pixels = sample_count * 28 * 28
+    baseline_mse = totals["baseline"] / all_pixels
+    variant_mse = totals["variant"] / all_pixels
+    baseline_masked_mse = totals["baseline_masked"] / masked_pixel_count
+    variant_masked_mse = totals["variant_masked"] / masked_pixel_count
+    return {
+        "baseline": {
+            "reconstruction_mse": round(baseline_mse, 8),
+            "masked_region_mse": round(baseline_masked_mse, 8),
+            "seconds": round(baseline_seconds, 6),
+        },
+        "variant": {
+            "reconstruction_mse": round(variant_mse, 8),
+            "masked_region_mse": round(variant_masked_mse, 8),
+            "seconds": round(variant_seconds, 6),
+        },
+        "delta": {
+            "mse_improvement": round(baseline_mse - variant_mse, 8),
+            "masked_mse_improvement": round(baseline_masked_mse - variant_masked_mse, 8),
+            "latency_multiplier": round(variant_seconds / max(baseline_seconds, 1e-9), 4),
+        },
+        "test_samples": sample_count,
+    }
+
+
 def evaluate(model, test_loader, config: ExperimentConfig) -> dict[str, Any]:
+    if config.candidate_mechanism == MASKED_PREDICTION_ERROR_TRAINING:
+        raise ValueError("masked prediction-error evaluation requires separate baseline and candidate models")
     torch, *_ = _torch_modules()
     corruption_generator = torch.Generator().manual_seed(config.seed + 20)
     totals = {key: 0.0 for key in ("baseline", "variant", "baseline_masked", "variant_masked")}
@@ -254,17 +330,28 @@ def stable_metric_payload(metrics: dict[str, Any]) -> dict[str, Any]:
 
 def classify_decision(metrics: dict[str, Any], config: ExperimentConfig) -> dict[str, Any]:
     delta = metrics.get("delta") if isinstance(metrics.get("delta"), dict) else {}
-    improvement = float(delta.get("mse_improvement") or 0.0)
+    metric_name = (
+        "masked_mse_improvement"
+        if config.candidate_mechanism == MASKED_PREDICTION_ERROR_TRAINING
+        else "mse_improvement"
+    )
+    improvement = float(delta.get(metric_name) or 0.0)
+    global_improvement = float(delta.get("mse_improvement") or 0.0)
     latency_multiplier = float(delta.get("latency_multiplier") or float("inf"))
     improvement_passed = improvement >= config.minimum_mse_improvement
     latency_passed = latency_multiplier <= config.maximum_latency_multiplier
+    global_regression_passed = global_improvement >= -config.maximum_global_mse_regression
     return {
-        "status": "support" if improvement_passed and latency_passed else "inconclusive",
+        "status": "support" if improvement_passed and latency_passed and global_regression_passed else "inconclusive",
+        "primaryImprovementMetric": metric_name,
         "improvementPassed": improvement_passed,
         "latencyPassed": latency_passed,
+        "globalRegressionPassed": global_regression_passed,
         "minimumMseImprovement": config.minimum_mse_improvement,
         "maximumLatencyMultiplier": config.maximum_latency_multiplier,
+        "maximumGlobalMseRegression": config.maximum_global_mse_regression,
         "observedMseImprovement": improvement,
+        "observedGlobalMseImprovement": global_improvement,
         "observedLatencyMultiplier": latency_multiplier,
     }
 
@@ -273,19 +360,53 @@ def run(config: ExperimentConfig, *, data_root: Path, output_dir: Path) -> dict[
     torch, *_ = _torch_modules()
     set_determinism(config.seed)
     train_loader, test_loader = load_data(config, data_root)
-    model = build_model(config.latent_dim)
+    baseline_model = build_model(config.latent_dim)
+    initial_state = {
+        name: tensor.detach().clone()
+        for name, tensor in baseline_model.state_dict().items()
+    }
+    candidate_model = baseline_model
     started = time.perf_counter()
-    epoch_losses = train(model, train_loader, config)
-    training_seconds = time.perf_counter() - started
-    metrics = evaluate(model, test_loader, config)
+    baseline_epoch_losses = train(baseline_model, train_loader, config)
+    baseline_training_seconds = time.perf_counter() - started
+    candidate_epoch_losses: list[float] = []
+    candidate_training_seconds = 0.0
+    shared_weights = True
+    if config.candidate_mechanism == MASKED_PREDICTION_ERROR_TRAINING:
+        candidate_model = build_model(config.latent_dim)
+        candidate_model.load_state_dict(initial_state)
+        candidate_train_loader, _ = load_data(config, data_root)
+        started = time.perf_counter()
+        candidate_epoch_losses = train(
+            candidate_model,
+            candidate_train_loader,
+            config,
+            masked_loss_weight=config.candidate_masked_loss_weight,
+        )
+        candidate_training_seconds = time.perf_counter() - started
+        metrics = _evaluate_models(baseline_model, candidate_model, test_loader, config)
+        shared_weights = False
+    elif config.candidate_mechanism == INFERENCE_LATENT_CORRECTION:
+        metrics = evaluate(baseline_model, test_loader, config)
+    else:
+        raise ValueError(f"unsupported candidate mechanism: {config.candidate_mechanism}")
     decision = classify_decision(metrics, config)
     output_dir.mkdir(parents=True, exist_ok=True)
     checkpoint_path = output_dir / "fashion_mnist_autoencoder.pt"
-    torch.save({"model_state": model.state_dict(), "config": asdict(config)}, checkpoint_path)
+    torch.save({"model_state": baseline_model.state_dict(), "config": asdict(config)}, checkpoint_path)
+    candidate_checkpoint_path = output_dir / "fashion_mnist_candidate.pt"
+    if candidate_model is not baseline_model:
+        torch.save({"model_state": candidate_model.state_dict(), "config": asdict(config)}, candidate_checkpoint_path)
     checkpoint_hash = _sha256_file(checkpoint_path)
-    model_state_hash = _state_dict_hash(model)
+    candidate_checkpoint_hash = (
+        _sha256_file(candidate_checkpoint_path)
+        if candidate_checkpoint_path.is_file()
+        else checkpoint_hash
+    )
+    model_state_hash = _state_dict_hash(baseline_model)
+    candidate_model_state_hash = _state_dict_hash(candidate_model)
     result = {
-        "schemaVersion": 1,
+        "schemaVersion": 2,
         "status": "completed",
         "dataset": "FashionMNIST",
         "datasetProtocol": {
@@ -298,12 +419,27 @@ def run(config: ExperimentConfig, *, data_root: Path, output_dir: Path) -> dict[
         "config": asdict(config),
         "model": {
             "name": "SmallAutoencoder",
-            "parameterCount": sum(parameter.numel() for parameter in model.parameters()),
-            "sharedWeightsBetweenBaselineAndVariant": True,
+            "parameterCount": sum(parameter.numel() for parameter in baseline_model.parameters()),
+            "sharedWeightsBetweenBaselineAndVariant": shared_weights,
+            "matchedArchitectureAndParameterCount": True,
+            "candidateMechanism": config.candidate_mechanism,
         },
-        "training": {"epochLosses": epoch_losses, "seconds": round(training_seconds, 6)},
+        "training": {
+            "baselineEpochLosses": baseline_epoch_losses,
+            "candidateEpochLosses": candidate_epoch_losses,
+            "baselineSeconds": round(baseline_training_seconds, 6),
+            "candidateSeconds": round(candidate_training_seconds, 6),
+            "matchedEpochAndBatchBudget": True,
+        },
         "metrics": metrics,
-        "checkpoint": {"path": str(checkpoint_path), "sha256": checkpoint_hash, "modelStateSha256": model_state_hash},
+        "checkpoint": {
+            "path": str(checkpoint_path),
+            "sha256": checkpoint_hash,
+            "modelStateSha256": model_state_hash,
+            "candidatePath": str(candidate_checkpoint_path) if candidate_checkpoint_path.is_file() else str(checkpoint_path),
+            "candidateSha256": candidate_checkpoint_hash,
+            "candidateModelStateSha256": candidate_model_state_hash,
+        },
         "decision": decision,
         "boundaries": [
             "single_seed_smoke_only",
@@ -314,7 +450,12 @@ def run(config: ExperimentConfig, *, data_root: Path, output_dir: Path) -> dict[
         "versions": {"python": sys.version.split()[0], "torch": torch.__version__},
     }
     hash_payload = json.dumps(
-        {"config": result["config"], "metrics": stable_metric_payload(result["metrics"]), "modelStateSha256": model_state_hash},
+        {
+            "config": result["config"],
+            "metrics": stable_metric_payload(result["metrics"]),
+            "modelStateSha256": model_state_hash,
+            "candidateModelStateSha256": candidate_model_state_hash,
+        },
         ensure_ascii=False,
         sort_keys=True,
         separators=(",", ":"),
@@ -350,6 +491,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--batch-size", type=int, default=64)
     parser.add_argument("--correction-steps", type=int, default=3)
     parser.add_argument("--correction-rate", type=float, default=0.8)
+    parser.add_argument(
+        "--candidate-mechanism",
+        choices=(INFERENCE_LATENT_CORRECTION, MASKED_PREDICTION_ERROR_TRAINING),
+        default=INFERENCE_LATENT_CORRECTION,
+    )
+    parser.add_argument("--candidate-masked-loss-weight", type=float, default=4.0)
+    parser.add_argument("--minimum-mse-improvement", type=float, default=0.001)
+    parser.add_argument("--maximum-latency-multiplier", type=float, default=5.0)
+    parser.add_argument("--maximum-global-mse-regression", type=float, default=0.0005)
     parser.add_argument("--self-check", action="store_true")
     return parser.parse_args()
 
@@ -369,6 +519,11 @@ def main() -> None:
         batch_size=args.batch_size,
         correction_steps=args.correction_steps,
         correction_rate=args.correction_rate,
+        candidate_mechanism=args.candidate_mechanism,
+        candidate_masked_loss_weight=args.candidate_masked_loss_weight,
+        minimum_mse_improvement=args.minimum_mse_improvement,
+        maximum_latency_multiplier=args.maximum_latency_multiplier,
+        maximum_global_mse_regression=args.maximum_global_mse_regression,
     )
     result = run(config, data_root=args.data_root, output_dir=args.output_dir)
     print(json.dumps(result, ensure_ascii=False))
