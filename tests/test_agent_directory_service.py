@@ -69,13 +69,15 @@ def test_replace_agent_llm_bindings_if_current_rejects_stale_timestamp_without_o
 def test_repair_reuses_shared_workspace_and_avatar_inventory(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _seed_agent_avatars(tmp_path)
-    agent_directory_service.create_agent_instance(display_name="Alpha")
-    agent_directory_service.create_agent_instance(display_name="Beta")
+    for index in range(8):
+        agent_directory_service.create_agent_instance(display_name=f"Agent {index}")
 
     shared_workspace_calls = 0
     avatar_inventory_calls = 0
+    tool_policy_normalization_calls = 0
     real_ensure_shared_workspace = agent_directory_service.ensure_agent_shared_workspace
     real_available_avatar_filenames = agent_directory_service._available_agent_avatar_filenames
+    real_tool_policies = agent_directory_service._tool_policies
 
     def tracked_ensure_shared_workspace():
         nonlocal shared_workspace_calls
@@ -87,6 +89,11 @@ def test_repair_reuses_shared_workspace_and_avatar_inventory(tmp_path, monkeypat
         avatar_inventory_calls += 1
         return real_available_avatar_filenames()
 
+    def tracked_tool_policies(state):
+        nonlocal tool_policy_normalization_calls
+        tool_policy_normalization_calls += 1
+        return real_tool_policies(state)
+
     monkeypatch.setattr(
         agent_directory_service,
         "ensure_agent_shared_workspace",
@@ -97,9 +104,16 @@ def test_repair_reuses_shared_workspace_and_avatar_inventory(tmp_path, monkeypat
         "_available_agent_avatar_filenames",
         tracked_available_avatar_filenames,
     )
+    monkeypatch.setattr(
+        agent_directory_service,
+        "_tool_policies",
+        tracked_tool_policies,
+    )
 
     repaired = agent_directory_service.repair_agent_directory()
 
-    assert len(repaired["agents"]) >= 2
+    assert len(repaired["agents"]) >= 8
     assert shared_workspace_calls == 1
     assert avatar_inventory_calls == 1
+    assert tool_policy_normalization_calls <= 5
+    assert tool_policy_normalization_calls < len(repaired["agents"])

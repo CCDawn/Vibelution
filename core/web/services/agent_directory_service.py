@@ -1806,10 +1806,12 @@ def repair_agent_directory() -> dict[str, Any]:
         changed = False
         ensure_agent_shared_workspace()
         available_agent_avatar_filenames = _available_agent_avatar_filenames()
+        normalized_tool_policies = _tool_policies(state)
         knowledge_steward_result = _ensure_knowledge_steward_agent(
             state,
             ensure_shared_workspace=False,
             available_avatar_filenames=available_agent_avatar_filenames,
+            normalized_tool_policies=normalized_tool_policies,
         )
         if knowledge_steward_result.get("changed"):
             changed = True
@@ -1965,13 +1967,26 @@ def repair_agent_directory() -> dict[str, Any]:
                 territory_changed = True
             if territory_changed:
                 territory_repaired_agents.append(dict(agent))
-            if _ensure_session_agent_tool_policy(state, agent):
+            if _ensure_session_agent_tool_policy(
+                state,
+                agent,
+                normalized_tool_policies=normalized_tool_policies,
+            ):
                 changed = True
-            fixed_role_policy = _ensure_fixed_role_tool_policy(state, agent)
+            fixed_role_policy = _ensure_fixed_role_tool_policy(
+                state,
+                agent,
+                normalized_tool_policies=normalized_tool_policies,
+            )
             if fixed_role_policy is not None:
                 tool_policy_repaired_agents.append((dict(agent), dict(fixed_role_policy)))
                 changed = True
-            _refresh_agent_onboarding_metadata(state, agent)
+            _refresh_agent_onboarding_metadata(
+                state,
+                agent,
+                normalized_tool_policies=normalized_tool_policies,
+                normalized_memory_policies=policies,
+            )
         state["memoryPolicies"] = policies
         if changed and _agent_directory_storage_signature(state) != state_signature:
             save_state(state)
@@ -3440,13 +3455,18 @@ def _is_profileless_session_agent(agent: dict[str, Any]) -> bool:
     return _is_session_agent_primary_mode(primary_mode) and not role_key
 
 
-def _ensure_session_agent_tool_policy(state: dict[str, Any], agent: dict[str, Any]) -> bool:
+def _ensure_session_agent_tool_policy(
+    state: dict[str, Any],
+    agent: dict[str, Any],
+    *,
+    normalized_tool_policies: dict[str, Any] | None = None,
+) -> bool:
     if not _is_session_agent_primary_mode(str(agent.get("primaryMode") or "")):
         return False
     agent_id = str(agent.get("agentId") or "").strip()
     if not agent_id:
         return False
-    policies = _tool_policies(state)
+    policies = normalized_tool_policies if normalized_tool_policies is not None else _tool_policies(state)
     current_policy_id = str(agent.get("toolPolicyId") or DEFAULT_TOOL_POLICY_ID).strip() or DEFAULT_TOOL_POLICY_ID
     policy_missing = current_policy_id not in policies
     if current_policy_id != DEFAULT_TOOL_POLICY_ID and not policy_missing:
@@ -3459,7 +3479,12 @@ def _ensure_session_agent_tool_policy(state: dict[str, Any], agent: dict[str, An
     return True
 
 
-def _ensure_fixed_role_tool_policy(state: dict[str, Any], agent: dict[str, Any]) -> dict[str, Any] | None:
+def _ensure_fixed_role_tool_policy(
+    state: dict[str, Any],
+    agent: dict[str, Any],
+    *,
+    normalized_tool_policies: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
     desired_kind = _fixed_role_tool_policy_kind(agent)
     if not desired_kind:
         return None
@@ -3471,7 +3496,7 @@ def _ensure_fixed_role_tool_policy(state: dict[str, Any], agent: dict[str, Any])
         policy_id = KNOWLEDGE_STEWARD_TOOL_POLICY_ID
     else:
         policy_id = f"tool-{agent_id}"
-    policies = _tool_policies(state)
+    policies = normalized_tool_policies if normalized_tool_policies is not None else _tool_policies(state)
     if desired_kind == "research_source":
         desired_policy = default_research_source_tool_policy(policy_id, role_key=str(agent.get("roleKey") or ""))
     elif desired_kind == "research_role":
@@ -3744,15 +3769,23 @@ def _with_agent_creation_spec(
     return payload
 
 
-def _refresh_agent_onboarding_metadata(state: dict[str, Any], agent: dict[str, Any]) -> None:
+def _refresh_agent_onboarding_metadata(
+    state: dict[str, Any],
+    agent: dict[str, Any],
+    *,
+    normalized_tool_policies: dict[str, Any] | None = None,
+    normalized_memory_policies: dict[str, Any] | None = None,
+) -> None:
     metadata = dict(agent.get("metadata") or {})
     if not isinstance(metadata.get("creationSpec"), dict):
         return
     agent_id = str(agent.get("agentId") or "").strip()
     tool_policy_id = str(agent.get("toolPolicyId") or DEFAULT_TOOL_POLICY_ID).strip() or DEFAULT_TOOL_POLICY_ID
     memory_policy_id = str(agent.get("memoryPolicyId") or "").strip()
-    tool_policies = _tool_policies(state)
-    memory_policies = _memory_policies(state)
+    tool_policies = normalized_tool_policies if normalized_tool_policies is not None else _tool_policies(state)
+    memory_policies = (
+        normalized_memory_policies if normalized_memory_policies is not None else _memory_policies(state)
+    )
     missing = _agent_creation_missing_fields(
         display_name=str(agent.get("displayName") or "").strip(),
         llm_bindings=normalize_agent_llm_bindings(agent.get("llmBindings")),
@@ -4751,9 +4784,10 @@ def _ensure_knowledge_steward_agent(
     *,
     ensure_shared_workspace: bool = True,
     available_avatar_filenames: list[str] | None = None,
+    normalized_tool_policies: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     agents = list(state.get("agents") or [])
-    tool_policies = _tool_policies(state)
+    tool_policies = normalized_tool_policies if normalized_tool_policies is not None else _tool_policies(state)
     memory_policies = _memory_policies(state)
     now = utc_now_iso()
     agent = _find_agent(state, KNOWLEDGE_STEWARD_AGENT_ID)
