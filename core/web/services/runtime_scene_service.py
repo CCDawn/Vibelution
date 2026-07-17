@@ -180,6 +180,7 @@ TIMELINE_DIAGNOSTIC_ONLY_COMPONENT_PHASES = {
 BROWSER_TELEMETRY_WRITE_LOCK = Lock()
 BACKEND_API_WRITE_LOCK = Lock()
 RUNTIME_SCENE_PACKAGE_WRITE_LOCK = Lock()
+RUNTIME_SCENE_EVENT_WRITE_LOCK = Lock()
 RAW_LABELS = {
     "raw/desktop-entry.log": "Desktop entry log",
     "raw/desktop-entry-vbs.log": "Desktop entry VBS log",
@@ -665,7 +666,6 @@ def record_browser_telemetry(payload: dict[str, Any]) -> dict[str, Any]:
             "schema_version": 1,
             "runtime_scene_id": scene_id,
             "ts": timestamp,
-            "seq": _next_scene_event_seq(scene_dir, BROWSER_TELEMETRY_COMPONENT),
             "component": BROWSER_TELEMETRY_COMPONENT,
             "phase": phase,
             "event_code": event_code,
@@ -782,7 +782,6 @@ def record_backend_api_event(payload: dict[str, Any]) -> dict[str, Any]:
             "schema_version": 1,
             "runtime_scene_id": scene_id,
             "ts": timestamp,
-            "seq": _next_scene_event_seq(scene_dir, BACKEND_COMPONENT),
             "component": BACKEND_COMPONENT,
             "phase": "api",
             "event_code": event_code,
@@ -862,65 +861,69 @@ def record_runtime_scene_event(
             },
         ]
 
-    with RUNTIME_SCENE_PACKAGE_WRITE_LOCK:
-        manifest = _load_scene_manifest(scene_dir)
-        scene_id = _scene_id(scene_dir, manifest)
-        if normalized_child_path:
-            child_payload = developer_sandbox.enrich_debug_fields(
-                _normalize_telemetry_fields(child_log_payload or {}),
-                project_root=PROJECT_ROOT,
-            )
-            child_payload.update(
-                {
-                    "schema_version": 1,
-                    "runtime_scene_id": scene_id,
-                    "ts": timestamp,
-                    "component": component_name,
-                    "phase": phase_name,
-                    "event_code": event_name,
-                    "level": level_name,
-                    "outcome": outcome_name,
-                    "message": message_text,
-                }
-            )
-            _append_scene_jsonl(scene_dir, normalized_child_path, child_payload)
-        event_payload = {
-            "schema_version": 1,
-            "runtime_scene_id": scene_id,
-            "ts": timestamp,
-            "seq": _next_scene_event_seq(scene_dir, component_name),
-            "component": component_name,
-            "phase": phase_name,
-            "event_code": event_name,
-            "level": level_name,
-            "outcome": outcome_name,
-            "message": message_text,
-            "fields": normalized_fields,
-            "raw_refs": normalized_raw_refs,
-        }
-        if lifecycle:
-            event_payload["lifecycle"] = True
-        _append_scene_event(scene_dir, component_name, event_payload)
-        reconciliation_closed = _maybe_close_runtime_scene_from_reconciliation(
-            scene_dir,
-            manifest,
-            event_name,
-            normalized_fields,
-            timestamp,
+    manifest = _load_scene_manifest(scene_dir)
+    scene_id = _scene_id(scene_dir, manifest)
+    if normalized_child_path:
+        child_payload = developer_sandbox.enrich_debug_fields(
+            _normalize_telemetry_fields(child_log_payload or {}),
+            project_root=PROJECT_ROOT,
         )
-        full_projection_refresh = _runtime_scene_event_requires_full_projection_refresh(
-            level=level_name,
-            reconciliation_closed=reconciliation_closed,
+        child_payload.update(
+            {
+                "schema_version": 1,
+                "runtime_scene_id": scene_id,
+                "ts": timestamp,
+                "component": component_name,
+                "phase": phase_name,
+                "event_code": event_name,
+                "level": level_name,
+                "outcome": outcome_name,
+                "message": message_text,
+            }
         )
-        if full_projection_refresh:
-            _update_runtime_scene_package_manifest(scene_dir, manifest)
-            projection_refresh = "full"
-        else:
-            # Ordinary runtime events are already durable in component/timeline
-            # JSONL. Rewriting manifest and package_index for every progress
-            # signal turns chat latency into a function of global log volume.
-            # Detail/list reads derive or repair sidecars on demand.
-            projection_refresh = "deferred"
+        _append_scene_jsonl(scene_dir, normalized_child_path, child_payload)
+    event_payload = {
+        "schema_version": 1,
+        "runtime_scene_id": scene_id,
+        "ts": timestamp,
+        "component": component_name,
+        "phase": phase_name,
+        "event_code": event_name,
+        "level": level_name,
+        "outcome": outcome_name,
+        "message": message_text,
+        "fields": normalized_fields,
+        "raw_refs": normalized_raw_refs,
+    }
+    if lifecycle:
+        event_payload["lifecycle"] = True
+    _append_scene_event(scene_dir, component_name, event_payload)
+
+    projection_refresh = "deferred"
+    requires_projection_lock = (
+        event_name == "runtime.snapshot.reconciled"
+        or str(level_name or "").strip().lower() in {"warning", "error", "critical", "fatal"}
+    )
+    if requires_projection_lock:
+        # Full diagnosis generation is intentionally isolated from the append
+        # lock. A slow warning projection must not queue ordinary Agent events
+        # ahead of the provider request.
+        with RUNTIME_SCENE_PACKAGE_WRITE_LOCK:
+            manifest = _load_scene_manifest(scene_dir)
+            reconciliation_closed = _maybe_close_runtime_scene_from_reconciliation(
+                scene_dir,
+                manifest,
+                event_name,
+                normalized_fields,
+                timestamp,
+            )
+            full_projection_refresh = _runtime_scene_event_requires_full_projection_refresh(
+                level=level_name,
+                reconciliation_closed=reconciliation_closed,
+            )
+            if full_projection_refresh:
+                _update_runtime_scene_package_manifest(scene_dir, manifest)
+                projection_refresh = "full"
 
     return {
         "accepted": True,
@@ -1020,7 +1023,6 @@ def record_research_scene_event(
                 "schema_version": 1,
                 "runtime_scene_id": scene_id,
                 "ts": timestamp,
-                "seq": _next_scene_event_seq(scene_dir, "research"),
                 "component": "research",
                 "phase": phase_name,
                 "event_code": event_name,
@@ -1228,7 +1230,6 @@ def record_runtime_scene_conversation_event(
                 "schema_version": 1,
                 "runtime_scene_id": scene_id,
                 "ts": timestamp,
-                "seq": _next_scene_event_seq(scene_dir, "conversation"),
                 "component": "conversation",
                 "phase": str(event or "message").strip() or "message",
                 "event_code": event_code,
@@ -5470,18 +5471,21 @@ def _append_scene_jsonl(scene_dir: Path, relative_path: str, payload: dict[str, 
 
 
 def _append_scene_event(scene_dir: Path, component: str, payload: dict[str, Any]) -> None:
-    events_dir = scene_dir / "events"
-    events_dir.mkdir(parents=True, exist_ok=True)
-    event_path = events_dir / f"{component}.jsonl"
-    with event_path.open("a", encoding="utf-8") as handle:
-        handle.write(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
-        handle.write("\n")
-    _remember_scene_event_seq(event_path, int(payload.get("seq") or 0))
-    if not _should_promote_scene_event_to_timeline(payload):
-        return
-    _append_scene_jsonl(scene_dir, TIMELINE_PATH, payload)
-    if _is_lifecycle_event(payload):
-        _append_scene_jsonl(scene_dir, LIFECYCLE_PATH, payload)
+    with RUNTIME_SCENE_EVENT_WRITE_LOCK:
+        sequenced_payload = dict(payload)
+        sequenced_payload["seq"] = _next_scene_event_seq(scene_dir, component)
+        events_dir = scene_dir / "events"
+        events_dir.mkdir(parents=True, exist_ok=True)
+        event_path = events_dir / f"{component}.jsonl"
+        with event_path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(sequenced_payload, ensure_ascii=False, separators=(",", ":")))
+            handle.write("\n")
+        _remember_scene_event_seq(event_path, int(sequenced_payload.get("seq") or 0))
+        if not _should_promote_scene_event_to_timeline(sequenced_payload):
+            return
+        _append_scene_jsonl(scene_dir, TIMELINE_PATH, sequenced_payload)
+        if _is_lifecycle_event(sequenced_payload):
+            _append_scene_jsonl(scene_dir, LIFECYCLE_PATH, sequenced_payload)
 
 
 def _should_promote_scene_event_to_timeline(payload: dict[str, Any]) -> bool:
