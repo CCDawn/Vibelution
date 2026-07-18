@@ -81,9 +81,10 @@ Renderer+tokens  →  唯一视觉实现（今日 HeroUI，可换 shadcn/Radix�
 | **1** | Agents 工作区列宽/详情填满；config 宽屏并排；空状态；Chat gutter/密度；对话区 0 缝 | 布局测试 + build；浏览器可选 |
 | **2** | `VErrorSummary` + `summarizeErrorText`；Chat 运行时错误/长 notice 一行摘要可展开 | 组件/layout 测试 |
 | **3** | Teams/Memory/Config 同构：主区 `minmax(0,1fr)` 吃满，侧栏 `clamp` 弹性；Config 去 max-width 与过重 elevation | layout 测试 |
-| **R** | HeroUI → shadcn/Radix renderer（按 primitive） | 进行中：Button / Tooltip / Chip / Input / Textarea / Select / Checkbox |
+| **R** | HeroUI → shadcn/Radix renderer（按 primitive） | 完成：Button / Tooltip / Chip / Input / Textarea / Select / Checkbox |
+| **4** | Logs / Evolution / Launcher 同构吃满：去状态条 max-width、侧栏 clamp、library 摘要弹性列 | layout 测试 + build |
 
-### Wave R（进行中）
+### Wave R（完成）
 
 - `web/src/components/vui/renderers/shared/buttonSlots.ts` / `buttonVariants.ts` / `chipSlots.ts`
 - `web/src/components/vui/renderers/shadcn/ShadcnButton.tsx`
@@ -94,7 +95,15 @@ Renderer+tokens  →  唯一视觉实现（今日 HeroUI，可换 shadcn/Radix�
 - `web/src/components/vui/renderers/shadcn/ShadcnSelect.tsx`（原生 select，保留 selectedKey API）
 - `web/src/components/vui/renderers/shadcn/ShadcnCheckbox.tsx`（原生 checkbox，保留 isSelected / onChange(boolean)）
 - `web/src/components/vui/forms/VSelect.tsx` / `VStringSelect.tsx` / `VCheckbox.tsx`
-- 核心 form primitive 切换完成；后续可按需补 Radix 富交互或页级视觉细修
+- 核心 form primitive 切换完成
+
+### Wave 4 文件范围
+
+- `web/src/routes/LauncherRoute.styles.ts`（statusBar 全宽；workspace / developerGrid 侧栏 clamp）
+- `web/src/routes/LauncherDeveloperModePanel.styles.ts` / `LauncherProjectMaintenancePanel.styles.ts`
+- `web/src/routes/EvolutionRoute.styles.ts`（library 摘要与 overview 弹性列；页边距密度）
+- `web/src/routes/LogsRoute.styles.ts`（右轨 fallback 改为 clamp）
+- 对应 `*.layout.test.ts`
 
 ### Wave 2 文件范围
 

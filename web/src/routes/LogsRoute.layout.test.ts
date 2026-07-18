@@ -91,7 +91,7 @@ describe("LogsRoute layout contract", () => {
   });
 
   it("keeps the resizable logs workspace as a three-column grid", () => {
-    expect(styles.workspace).toContain("grid-cols-[minmax(0,1fr)_10px_minmax(220px,var(--logs-right-rail-width,250px))]");
+    expect(styles.workspace).toContain("grid-cols-[minmax(0,1fr)_10px_minmax(220px,var(--logs-right-rail-width,280px))]");
     expect(styles.workspace).toContain("grid-rows-[minmax(0,1fr)]");
     expect(styles.workspace).toContain("overflow-hidden");
   });
