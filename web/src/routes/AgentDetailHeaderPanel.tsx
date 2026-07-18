@@ -1,5 +1,5 @@
 import type { AgentAvatarOptionsPayload } from "../api/types";
-import { VNativeButton } from "../components/vui";
+import { VNativeButton, VTooltip } from "../components/vui";
 import {
   AgentAvatarEditorPanel,
   type AgentAvatarEditorPanelCopy,
@@ -77,40 +77,44 @@ export function AgentDetailHeaderPanel<TPane extends string>({
 }: AgentDetailHeaderPanelProps<TPane>) {
   return (
     <>
-      <section className={styles.detailHeader} title={title}>
-        <div className={styles.detailIdentity}>
-          <AgentAvatarEditorPanel
-            copy={copy}
-            lang={lang}
-            isOpen={isAvatarEditorOpen}
-            avatarImageUrl={avatarImageUrl}
-            avatarImagePath={avatarImagePath}
-            avatarInitials={avatarInitials}
-            avatarOptions={avatarOptions}
-            avatarOptionsPending={avatarOptionsPending}
-            uploadPending={avatarUploadPending}
-            updatePending={avatarUpdatePending}
-            onOpenChange={onAvatarEditorOpenChange}
-            onUploadAvatar={onUploadAvatar}
-            onResetAvatar={onResetAvatar}
-            onSelectAvatar={onSelectAvatar}
-          />
-          <div className={styles.detailIdentityCopy}>
-            <p className={styles.panelEyebrow}>{roleLabel}</p>
-            <h2>{agentName}</h2>
-            <span className={`${styles.agentRoleTag} ${roleToneClass(roleTone)}`}>
-              {roleLabel}
-            </span>
+      <VTooltip content={title} width="wide">
+        <section className={styles.detailHeader} tabIndex={0} aria-label={`${agentName} · ${title}`}>
+          <div className={styles.detailIdentity}>
+            <AgentAvatarEditorPanel
+              copy={copy}
+              lang={lang}
+              isOpen={isAvatarEditorOpen}
+              avatarImageUrl={avatarImageUrl}
+              avatarImagePath={avatarImagePath}
+              avatarInitials={avatarInitials}
+              avatarOptions={avatarOptions}
+              avatarOptionsPending={avatarOptionsPending}
+              uploadPending={avatarUploadPending}
+              updatePending={avatarUpdatePending}
+              onOpenChange={onAvatarEditorOpenChange}
+              onUploadAvatar={onUploadAvatar}
+              onResetAvatar={onResetAvatar}
+              onSelectAvatar={onSelectAvatar}
+            />
+            <div className={styles.detailIdentityCopy}>
+              <p className={styles.panelEyebrow}>{roleLabel}</p>
+              <h2>{agentName}</h2>
+              <span className={`${styles.agentRoleTag} ${roleToneClass(roleTone)}`}>
+                {roleLabel}
+              </span>
+            </div>
           </div>
-        </div>
-        <div className={styles.detailHeaderActions}>
-          <span className={styles.detailHealthStatus} title={healthTitle}>
-            <span className={`${styles.issuePill} ${issueToneClass(healthTone)}`}>
-              {healthLabel}
-            </span>
-          </span>
-        </div>
-      </section>
+          <div className={styles.detailHeaderActions}>
+            <VTooltip content={healthTitle} width="wide">
+              <span className={styles.detailHealthStatus} tabIndex={0} aria-label={`${healthLabel} · ${healthTitle}`}>
+                <span className={`${styles.issuePill} ${issueToneClass(healthTone)}`}>
+                  {healthLabel}
+                </span>
+              </span>
+            </VTooltip>
+          </div>
+        </section>
+      </VTooltip>
 
       <nav className={styles.detailTabs} aria-label={title}>
         {panes.map((pane) => (
