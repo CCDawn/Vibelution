@@ -81,16 +81,16 @@ Renderer+tokens  →  唯一视觉实现（今日 HeroUI，可换 shadcn/Radix�
 | **1** | Agents 工作区列宽/详情填满；config 宽屏并排；空状态；Chat gutter/密度；对话区 0 缝 | 布局测试 + build；浏览器可选 |
 | **2** | `VErrorSummary` + `summarizeErrorText`；Chat 运行时错误/长 notice 一行摘要可展开 | 组件/layout 测试 |
 | **3** | Teams/Memory/Config 同构：主区 `minmax(0,1fr)` 吃满，侧栏 `clamp` 弹性；Config 去 max-width 与过重 elevation | layout 测试 |
-| **R** | HeroUI → shadcn/Radix renderer（按 primitive） | 进行中：`VButton` + `VTooltip` 已切 shadcn renderer |
+| **R** | HeroUI → shadcn/Radix renderer（按 primitive） | 进行中：`VButton` + `VTooltip` + `VChip` |
 
 ### Wave R（进行中）
 
-- `web/src/components/vui/renderers/shared/buttonSlots.ts`
-- `web/src/components/vui/renderers/shared/buttonVariants.ts`
+- `web/src/components/vui/renderers/shared/buttonSlots.ts` / `buttonVariants.ts` / `chipSlots.ts`
 - `web/src/components/vui/renderers/shadcn/ShadcnButton.tsx`
 - `web/src/components/vui/renderers/shadcn/ShadcnTooltip.tsx`（`@radix-ui/react-tooltip`）
-- `web/src/components/vui/primitives/VButton.tsx` / `VTooltip.tsx`（页面 API 不变）
-- 下一步候选：`VChip` / forms 仍走 HeroUI
+- `web/src/components/vui/renderers/shadcn/ShadcnChip.tsx`
+- `web/src/components/vui/primitives/VButton.tsx` / `VTooltip.tsx` / `VChip.tsx`（页面 API 不变）
+- 下一步候选：forms（Input/Select/…）仍走 HeroUI
 
 ### Wave 2 文件范围
 
