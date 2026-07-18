@@ -20,17 +20,28 @@ import { VibelutionHeroProvider } from "./renderers/heroui/HeroProvider";
 
 describe("VUI foundation primitives", () => {
   it("keeps VUI button hover behavior owned by shared semantic slots", () => {
+    const sharedSlotsSource = readFileSync(
+      resolve(import.meta.dirname, "renderers/shared/buttonSlots.ts"),
+      "utf8",
+    );
     const heroSlotsSource = readFileSync(
       resolve(import.meta.dirname, "renderers/heroui/heroSlots.ts"),
       "utf8",
     );
+    const buttonSource = readFileSync(
+      resolve(import.meta.dirname, "primitives/VButton.tsx"),
+      "utf8",
+    );
 
-    expect(heroSlotsSource).toContain("vuiButtonHoverClass");
-    expect(heroSlotsSource).toContain("hover:border-[var(--vui-control-hover-border)]");
-    expect(heroSlotsSource).toContain("hover:bg-[var(--vui-control-hover-bg)]");
-    expect(heroSlotsSource).toContain("hover:text-[var(--vui-control-hover-fg)]");
-    expect(heroSlotsSource).not.toContain("hover:border-[var(--border-strong)]");
-    expect(heroSlotsSource).not.toContain("hover:bg-[var(--vui-control-muted-hover)]");
+    expect(sharedSlotsSource).toContain("vuiButtonHoverClass");
+    expect(sharedSlotsSource).toContain("hover:border-[var(--vui-control-hover-border)]");
+    expect(sharedSlotsSource).toContain("hover:bg-[var(--vui-control-hover-bg)]");
+    expect(sharedSlotsSource).toContain("hover:text-[var(--vui-control-hover-fg)]");
+    expect(sharedSlotsSource).not.toContain("hover:border-[var(--border-strong)]");
+    expect(sharedSlotsSource).not.toContain("hover:bg-[var(--vui-control-muted-hover)]");
+    expect(heroSlotsSource).toContain('from "../shared/buttonSlots"');
+    expect(buttonSource).toContain('from "../renderers/shadcn/ShadcnButton"');
+    expect(buttonSource).toContain("ShadcnButton");
   });
 
   it("scans Tailwind classes from the TSX surfaces replacing CSS modules", () => {

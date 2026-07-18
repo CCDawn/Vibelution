@@ -27,6 +27,8 @@ const rawControlAllowedFiles = new Set([
   "components/vui/forms/VNativeSelect.tsx",
   "components/vui/forms/VNativeTextarea.tsx",
   "components/vui/primitives/VNativeButton.tsx",
+  // Path B Wave R: shadcn-style native button is the VButton renderer, not a page control.
+  "components/vui/renderers/shadcn/ShadcnButton.tsx",
 ]);
 
 const migrationTargets = [
