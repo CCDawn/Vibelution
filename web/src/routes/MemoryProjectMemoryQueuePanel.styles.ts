@@ -20,7 +20,7 @@ const styles = {
   projectMemoryProposalFiles:
     "projectMemoryProposalFiles min-w-0",
   projectMemoryProposalList:
-    "projectMemoryProposalList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
+    "projectMemoryProposalList min-w-0 grid min-h-0 content-start gap-1.5 overflow-y-auto overflow-x-hidden",
   projectMemoryProposalMain:
     "projectMemoryProposalMain min-w-0",
   projectMemoryProposalMeta:
@@ -34,11 +34,11 @@ const styles = {
   projectMemoryProposalTitleLine:
     "projectMemoryProposalTitleLine min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2 text-[var(--vui-font-title)] font-semibold leading-tight text-[var(--fg-primary)] !grid grid-cols-[minmax(0,1fr)_auto] items-center gap-1.5",
   projectMemoryQueueControls:
-    "projectMemoryQueueControls min-w-0 flex flex-wrap items-center gap-1.5 grid min-h-0 content-start overflow-auto",
+    "projectMemoryQueueControls min-w-0 flex flex-wrap items-center gap-1.5",
   projectMemoryQueuePanel:
-    "projectMemoryQueuePanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] p-2 grid min-h-0 content-start gap-1.5 overflow-auto",
+    "projectMemoryQueuePanel relative z-[1] min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] p-2 grid min-h-0 max-h-[min(220px,28vh)] grid-rows-[auto_auto_minmax(0,1fr)] content-start gap-1.5 overflow-hidden",
   projectMemoryQueueStats:
-    "projectMemoryQueueStats min-w-0 grid gap-2 grid-cols-[repeat(auto-fit,minmax(9rem,1fr))] min-h-0 content-start gap-1.5 overflow-auto",
+    "projectMemoryQueueStats min-w-0 grid gap-2 grid-cols-[repeat(auto-fit,minmax(9rem,1fr))] min-h-0 content-start gap-1.5",
 } as const;
 
 export default styles;
