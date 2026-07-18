@@ -6,7 +6,6 @@ from core.infrastructure.agent_session import (
     reset_session_state,
     is_probable_language_drift,
 )
-from core.infrastructure.tool_recommender import decide_next_tools
 
 
 def test_runtime_constraints_render_and_reset():
@@ -70,19 +69,16 @@ def test_reading_sufficiency_changes_with_evidence():
     assert "已足够" in session.evaluate_reading_sufficiency()
 
 
-def test_clear_reading_guidance_clears_sufficiency_and_decision():
+def test_clear_reading_guidance_clears_sufficiency():
     session = reset_session_state()
     session.set_reading_strategy("verify", "grep_search_tool -> read_file_tool")
     session.set_reading_sufficiency("验证证据已具备，可继续修复或复测。")
-    session.set_tool_decision("inspect_entity", ["code_symbol_tool"], ["cli_tool"])
 
-    session.clear_reading_guidance(clear_decision=True)
+    session.clear_reading_guidance()
     snapshot = session.get_attention_snapshot()
 
     assert snapshot["reading_sufficiency"] == ""
     assert snapshot["reading_recommendation"] == ""
-    assert snapshot["next_tool_intent"] == ""
-    assert snapshot["recommended_tools"] == []
 
 
 def test_duplicate_read_and_search_detection():
@@ -151,19 +147,22 @@ def test_get_overlapping_ranges_and_latest_continuation():
     assert latest["path"] == "core/demo.py"
 
 
-def test_tool_decision_and_deviation_render():
+def test_dialogue_runtime_observations_exclude_tool_decision_and_convergence_state():
     session = reset_session_state()
-    session.set_tool_decision("inspect_entity", ["code_symbol_tool", "read_file_tool"], ["cli_tool"])
-    session.record_tool_deviation("cli_tool", "当前存在更合适的主通道工具。")
+    session.freeze_scope("core/demo.py", "已锁定当前范围")
+    session.note_scope_completion("工具循环应停止")
+    session.record_validation_result("pytest 通过", True, kind="tests")
 
-    summary = session.render_runtime_constraints()
+    summary = session.render_dialogue_runtime_observations()
 
-    assert "下一步意图：精读实体" in summary
-    assert "代码图谱 -> 读局部片段" in summary
-    assert "命令兜底" in summary
+    assert "pytest 通过" in summary
+    assert "下一步意图" not in summary
+    assert "推荐工具" not in summary
+    assert "范围已冻结" not in summary
+    assert "收束状态" not in summary
 
 
-def test_duplicate_read_sufficiency_drives_synthesis_decision():
+def test_duplicate_read_sufficiency_remains_telemetry_not_a_dialogue_route():
     session = reset_session_state()
     session.set_reading_strategy("analyze", "grep_search_tool -> read_file_tool")
     session.record_search_query("Demo", "core")
@@ -177,14 +176,11 @@ def test_duplicate_read_sufficiency_drives_synthesis_decision():
 
     sufficiency = session.evaluate_reading_sufficiency()
     session.set_reading_sufficiency(sufficiency)
-    decision = decide_next_tools(session.get_attention_snapshot())
-    session.set_tool_decision(decision.next_intent, decision.recommended_tools, decision.avoid_tools)
-    summary = session.render_runtime_constraints()
+    summary = session.render_dialogue_runtime_observations()
 
     assert "没有新增证据" in sufficiency
-    assert "下一步意图：综合结论" in summary
-    assert "推荐工具：读局部片段" not in summary
-    assert "避免工具：读局部片段" in summary
+    assert "下一步意图" not in summary
+    assert "推荐工具" not in summary
 
 
 def test_delegation_state_is_rendered_and_deduplicated():

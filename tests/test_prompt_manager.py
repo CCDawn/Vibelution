@@ -354,11 +354,6 @@ class TestBuildAPI:
         assert len(result) > 0
         assert "## 当前运行目标包" not in result
         assert "# Vibelution 通用 Agent 基座" in result
-        assert "## 可见协作节奏" in result
-        assert "assistant commentary -> tool call/result" in result
-        assert "不得把所有中间说明压到最终回答里" in result
-        assert "不需要 `think` 块；若需要调用工具" in result
-        assert "先输出普通 assistant commentary，再调用工具" in result
         assert "## SPEC 运行时摘要" in result
         assert "# SPEC 开发流程规范" in result
         assert "## 语言状态" in result
@@ -1211,7 +1206,7 @@ class TestCurrentGoal:
         pm.update_current_goal("")  # 空字符串不应覆盖
         assert pm.get_current_goal() == "有效目标"
 
-    def test_infer_prompt_mode_from_diagnostic_runtime(self):
+    def test_diagnostic_runtime_does_not_route_prompt_mode(self):
         pm = PromptManager()
         with patch("core.infrastructure.agent_session.get_session_state") as mock_get_session_state:
             mock_get_session_state.return_value.get_attention_snapshot.return_value = {
@@ -1224,7 +1219,7 @@ class TestCurrentGoal:
             result = to_string(sp)
 
         assert "定位阻塞" in result
-        assert pm.get_status()["prompt_mode"] == "diagnose"
+        assert pm.get_status()["prompt_mode"] == "orient"
 
 
 class TestSectionPriority:

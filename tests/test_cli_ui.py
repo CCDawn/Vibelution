@@ -340,7 +340,6 @@ def test_pet_status_panel_keeps_context_near_top_when_runtime_rows_grow():
     ui.set_pet_mental_state(mood="专注", feeling="顺畅推进", whisper="继续")
     ui.update_status("THINKING")
     session.set_reading_strategy("inspect_file", "先读局部，再决定是否扩散")
-    session.set_tool_decision("read_file", ["read_file_tool", "grep_search_tool"], ["cli_tool"])
     session.set_reading_sufficiency("enough")
     session.feedback_loop_ready = True
     session.feedback_loop_type = "active"
@@ -496,23 +495,16 @@ def test_pet_panel_renders_reading_sufficiency():
     assert "验证证据已具备" in rendered
 
 
-def test_runtime_metrics_include_tool_decision():
+def test_runtime_metrics_leave_tool_selection_to_model():
     reset_session_state()
-    from core.infrastructure.agent_session import get_session_state
-
-    session = get_session_state()
-    session.set_tool_decision("inspect_entity", ["code_symbol_tool", "read_file_tool"], ["cli_tool"])
 
     ui = UIManager()
     ui.reset_workspace()
     metrics = ui._derive_runtime_metrics(ui._get_pet_snapshot())
 
-    assert metrics["next_tool_intent"] == "inspect_entity"
-    assert metrics["next_tool_intent_label"] == "精读实体"
-    assert metrics["recommended_tools"][0] == "code_symbol_tool"
-    assert metrics["recommended_tools_label"].startswith("代码图谱")
-    assert "cli_tool" in metrics["avoid_tools"]
-    assert "命令兜底" in metrics["avoid_tools_label"]
+    assert metrics["next_tool_intent"] == ""
+    assert metrics["recommended_tools"] == []
+    assert metrics["avoid_tools"] == []
 
 
 def test_runtime_metrics_ignore_hint_only_continuation_from_blocker_penalty():
@@ -535,12 +527,11 @@ def test_runtime_metrics_ignore_hint_only_continuation_from_blocker_penalty():
     assert not any(label == "阻塞堆积" for label, _ in metrics["energy_explain"])
 
 
-def test_pet_panel_renders_tool_decision():
+def test_pet_panel_omits_tool_routing_hints():
     reset_session_state()
     from core.infrastructure.agent_session import get_session_state
 
     session = get_session_state()
-    session.set_tool_decision("inspect_entity", ["code_symbol_tool", "read_file_tool"], ["cli_tool"])
     session.set_reading_sufficiency("理解上下文已基本够用，可开始归纳实现或准备修改。")
 
     ui = UIManager()
@@ -550,9 +541,9 @@ def test_pet_panel_renders_tool_decision():
     console.print(panel)
     rendered = console.export_text()
 
-    assert "精读实体" in rendered
-    assert "代码图谱 -> 读局部片段" in rendered
-    assert "命令兜底" in rendered
+    assert "精读实体" not in rendered
+    assert "代码图谱 -> 读局部片段" not in rendered
+    assert "命令兜底" not in rendered
 
 
 def test_pet_panel_renders_turn_cycle_and_age():
