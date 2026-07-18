@@ -12485,8 +12485,6 @@ def _resolve_image_attachment_turn_route(
     supports_image_input = _session_agent_supports_image_input(agent_instance, slot=route_llm_slot)
     model_id = _session_agent_llm_slot_model_id(agent_instance, route_llm_slot)
     model_name = _session_agent_llm_model_name(agent_instance, slot=route_llm_slot)
-    if supports_image_input is None:
-        supports_image_input = False
     if intent in {"image2_edit", "vision_analysis"} and supports_image_input is True:
         route = "vision"
     elif intent in {"image2_edit", "vision_analysis"}:
@@ -12503,15 +12501,50 @@ def _resolve_image_attachment_turn_route(
     }
 
 
-def _session_agent_supports_image_input(agent_instance: dict[str, Any] | None, *, slot: str = SESSION_LLM_SLOT_DIALOGUE) -> bool | None:
+def _session_agent_supports_image_input(
+    agent_instance: dict[str, Any] | None,
+    *,
+    slot: str = SESSION_LLM_SLOT_DIALOGUE,
+) -> bool | None:
     model_id = _session_agent_llm_slot_model_id(agent_instance, slot)
     if not model_id:
         return None
     try:
-        llm_config = get_config().llm
-        entry = llm_config.model_library.get(model_id)
+        config = get_config()
+        resolved = resolve_agent_llm(
+            agent_instance,
+            slot,
+            config=config,
+            fallback_to_dialogue=slot != SESSION_LLM_SLOT_DIALOGUE,
+        )
+        capability_records = (
+            resolved.resolved_spec.provider_details.get("capabilities", {})
+            if resolved.resolved_spec is not None
+            and isinstance(resolved.resolved_spec.provider_details, dict)
+            else {}
+        )
+        image_input_record = (
+            capability_records.get("image_input")
+            if isinstance(capability_records, dict)
+            else None
+        )
+        if isinstance(image_input_record, dict):
+            capability_value = str(image_input_record.get("value") or "").strip().lower()
+            if capability_value == "supported":
+                return True
+            if capability_value == "unsupported":
+                return False
+            if capability_value == "unknown":
+                return None
+        if resolved.capabilities is not None:
+            return bool(resolved.capabilities.supports_image_input)
+        llm_config = config.llm
     except Exception:
-        return None
+        try:
+            llm_config = get_config().llm
+        except Exception:
+            return None
+    entry = llm_config.model_library.get(model_id)
     if not isinstance(entry, dict):
         return None
     provider_id = str(entry.get("provider_id") or "").strip()
