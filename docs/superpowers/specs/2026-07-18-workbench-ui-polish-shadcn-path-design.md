@@ -78,10 +78,21 @@ Renderer+tokens  →  唯一视觉实现（今日 HeroUI，可换 shadcn/Radix�
 | Wave | 内容 | 完成证据 |
 | --- | --- | --- |
 | **0** | 本契约 | 文档合入 |
-| **1** | Agents 工作区列宽/详情填满；config 宽屏并排；空状态；Chat gutter/密度 | 布局测试 + build；浏览器可选 |
-| **2** | 补 VUI 布局原语缺口；错误摘要组件 | 组件测试 |
+| **1** | Agents 工作区列宽/详情填满；config 宽屏并排；空状态；Chat gutter/密度；对话区 0 缝 | 布局测试 + build；浏览器可选 |
+| **2** | `VErrorSummary` + `summarizeErrorText`；Chat 运行时错误/长 notice 一行摘要可展开 | 组件/layout 测试 |
 | **3** | Teams/Memory/Config 同构 | 分批 |
 | **R** | HeroUI → shadcn renderer（按 primitive） | 单组件替换 + 视觉回归 |
+
+### Wave 2 文件范围
+
+- `web/src/components/vui/layout/VErrorSummary.tsx`
+- `web/src/components/vui/layout/VErrorSummary.test.tsx`
+- `web/src/components/vui/index.ts`
+- `web/src/routes/chat/ChatRuntimeNoticeStack.tsx`
+- `web/src/routes/chat/ChatRuntimeNoticeStack.styles.ts`
+- `web/src/routes/chat/ChatRuntimeNoticeStack.layout.test.ts`
+
+**仍不改：** `ConversationView.styles.ts`（active claim）。
 
 ## 5. 后续 shadcn 重构检查清单
 
