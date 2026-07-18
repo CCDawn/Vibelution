@@ -60,7 +60,10 @@ export function VStringSelect({
       selectedKey={resolveStringSelectSelectedKey(value, options)}
       onSelectionChange={(key) => {
         const nextValue = resolveStringSelectChange(key, options);
-        if (nextValue !== null && nextValue !== value) onValueChange(nextValue);
+        // Empty-string options are valid selections.
+        if (nextValue !== null && nextValue !== value) {
+          onValueChange(nextValue);
+        }
       }}
     />
   );
