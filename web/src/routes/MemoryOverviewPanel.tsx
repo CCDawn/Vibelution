@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 
-import { VChip, VMetricStrip, VPanelHeader, VSurface } from "../components/vui";
+import { VChip, VMetricStrip, VPanelHeader, VSurface, VTooltip } from "../components/vui";
 import styles from "./MemoryOverviewPanel.styles";
 
 export type MemoryOverviewPanelCopy = {
@@ -75,7 +75,11 @@ export function MemoryOverviewPanel({
           title={copy.reviewQueue}
           actions={<VChip tone="neutral">{priorityReviewCount}</VChip>}
         />
-        <div title={copy.reviewQueueHint}>{reviewQueue}</div>
+        <VTooltip content={copy.reviewQueueHint} width="wide">
+          <div tabIndex={0} aria-label={`${copy.reviewQueue} · ${copy.reviewQueueHint}`}>
+            {reviewQueue}
+          </div>
+        </VTooltip>
       </VSurface>
 
       {projectMemoryQueue}

@@ -1,6 +1,6 @@
 import { CheckCircle2, Pencil, Trash2, TriangleAlert, Undo2 } from "lucide-react";
 
-import { VButton } from "../components/vui";
+import { VButton, VTooltip } from "../components/vui";
 import styles from "./MemorySelectedConfigPanel.styles";
 
 export type MemorySelectedConfigItem = {
@@ -81,51 +81,59 @@ export function MemorySelectedConfigPanel({
     return null;
   }
 
+  const managementHint = item.managedState?.actionHint || copy.managementHint;
+
   return (
-    <section className={styles.managementPanel} aria-label={copy.management} title={item.managedState?.actionHint || copy.managementHint}>
-      <div className={styles.managementHeader}>
-        <div>
-          <p className={styles.panelEyebrow}>{sectionTitle}</p>
-          <h2>{selectedConfigTitle(copy, item)}</h2>
+    <VTooltip content={managementHint} width="wide">
+      <section
+        className={styles.managementPanel}
+        aria-label={`${copy.management} · ${managementHint}`}
+        tabIndex={0}
+      >
+        <div className={styles.managementHeader}>
+          <div>
+            <p className={styles.panelEyebrow}>{sectionTitle}</p>
+            <h2>{selectedConfigTitle(copy, item)}</h2>
+          </div>
+          <span className={styles.countPill}>{selectedConfigStatus(copy, item)}</span>
         </div>
-        <span className={styles.countPill}>{selectedConfigStatus(copy, item)}</span>
-      </div>
-      <div className={styles.selectedConfigSummary}>
-        <strong>{item.title}</strong>
-        <p>{item.summary || item.content || copy.noContent}</p>
-      </div>
-      <div className={styles.managementActions}>
-        <VButton
-          type="button"
-          className={styles.detailActionButton}
-          onClick={onEdit}
-          isDisabled={!item.managedState?.editable || mutationBusy}
-        >
-          <Pencil size={15} />
-          <span>{copy.editMemory}</span>
-        </VButton>
-        {item.managedState?.restorable ? (
-          <VButton type="button" className={styles.detailActionButton} onClick={onRestore} isDisabled={mutationBusy}>
-            <Undo2 size={15} />
-            <span>{copy.restoreMemory}</span>
+        <div className={styles.selectedConfigSummary}>
+          <strong>{item.title}</strong>
+          <p>{item.summary || item.content || copy.noContent}</p>
+        </div>
+        <div className={styles.managementActions}>
+          <VButton
+            type="button"
+            className={styles.detailActionButton}
+            onClick={onEdit}
+            isDisabled={!item.managedState?.editable || mutationBusy}
+          >
+            <Pencil size={15} />
+            <span>{copy.editMemory}</span>
           </VButton>
+          {item.managedState?.restorable ? (
+            <VButton type="button" className={styles.detailActionButton} onClick={onRestore} isDisabled={mutationBusy}>
+              <Undo2 size={15} />
+              <span>{copy.restoreMemory}</span>
+            </VButton>
+          ) : null}
+          <VButton
+            type="button"
+            className={styles.detailActionButton}
+            onClick={onDisableOrDelete}
+            isDisabled={!item.managedState?.deletable || mutationBusy}
+          >
+            <Trash2 size={15} />
+            <span>{item.managedState?.userManaged ? copy.deleteMemory : copy.disableMemory}</span>
+          </VButton>
+        </div>
+        {mutationFeedback.tone !== "idle" ? (
+          <p className={styles.copyNotice} data-tone={mutationFeedback.tone}>
+            {mutationFeedback.tone === "success" ? <CheckCircle2 size={14} /> : <TriangleAlert size={14} />}
+            <span>{mutationFeedback.text}</span>
+          </p>
         ) : null}
-        <VButton
-          type="button"
-          className={styles.detailActionButton}
-          onClick={onDisableOrDelete}
-          isDisabled={!item.managedState?.deletable || mutationBusy}
-        >
-          <Trash2 size={15} />
-          <span>{item.managedState?.userManaged ? copy.deleteMemory : copy.disableMemory}</span>
-        </VButton>
-      </div>
-      {mutationFeedback.tone !== "idle" ? (
-        <p className={styles.copyNotice} data-tone={mutationFeedback.tone}>
-          {mutationFeedback.tone === "success" ? <CheckCircle2 size={14} /> : <TriangleAlert size={14} />}
-          <span>{mutationFeedback.text}</span>
-        </p>
-      ) : null}
-    </section>
+      </section>
+    </VTooltip>
   );
 }

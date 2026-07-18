@@ -999,7 +999,8 @@ describe("MemoryRoute layout contract", () => {
     expect(routeSource).toContain("reasonInPrompt");
     expect(routeSource).toContain("reasonAgentVisible");
     expect(routeSource).toContain("reasonUserManaged");
-    expect(overviewPanelSource).toContain('title={copy.reviewQueueHint}');
+    expect(overviewPanelSource).toContain('<VTooltip content={copy.reviewQueueHint} width="wide">');
+    expect(overviewPanelSource).not.toContain('title={copy.reviewQueueHint}');
     expect(routeSource).not.toContain("<p className={styles.panelLead}>{copy.reviewQueueHint}</p>");
   });
 
@@ -1091,8 +1092,14 @@ describe("MemoryRoute layout contract", () => {
 
   it("keeps explanatory Memory platform copy out of persistent paragraphs", () => {
     expect(routeSource).toContain("meta={memoryViewSubtitle(copy, forcedView)}");
-    expect(projectMemoryQueuePanelSource).toContain('title={copy.projectMemoryQueueHint}');
-    expect(overviewPanelSource).toContain('title={copy.reviewQueueHint}');
+    expect(projectMemoryQueuePanelSource).toContain('<VTooltip content={copy.projectMemoryQueueHint} width="wide">');
+    expect(projectMemoryQueuePanelSource).not.toContain('title={copy.projectMemoryQueueHint}');
+    expect(overviewPanelSource).toContain('<VTooltip content={copy.reviewQueueHint} width="wide">');
+    expect(overviewPanelSource).not.toContain('title={copy.reviewQueueHint}');
+    expect(selectedConfigPanelSource).toContain('<VTooltip content={managementHint} width="wide">');
+    expect(selectedConfigPanelSource).not.toContain('title={item.managedState?.actionHint || copy.managementHint}');
+    expect(managementEditorSource).toContain('<VTooltip content={copy.managementHint} width="wide">');
+    expect(managementEditorSource).not.toContain('title={copy.managementHint}');
     expect(knowledgePipelinePanelSource).toContain('<VTooltip content={copy.knowledgeSubtitle} width="wide">');
     expect(knowledgePipelinePanelSource).not.toContain('title={copy.knowledgeSubtitle}');
     expect(knowledgeBaseSidebarSource).toContain('import { VButton, VTooltip } from "../components/vui"');
