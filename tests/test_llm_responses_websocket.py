@@ -13,7 +13,17 @@ class _FakeConnection:
         self._events: list[SimpleNamespace] = []
         self.response = SimpleNamespace(create=self._create)
 
-    def _create(self, **payload) -> None:
+    def _create(
+        self,
+        *,
+        model: str,
+        input: list[dict],
+        stream: bool,
+        previous_response_id: str | None = None,
+    ) -> None:
+        payload = {"model": model, "input": input, "stream": stream}
+        if previous_response_id is not None:
+            payload["previous_response_id"] = previous_response_id
         self.sent.append(payload)
         response_id = f"resp-{len(self.sent)}"
         self._events.extend(
@@ -44,6 +54,18 @@ class _RejectedConnection(_FakeConnection):
         error = RuntimeError("provider unavailable")
         error.code = 1013
         raise error
+
+
+class _PreSendTypeErrorConnection(_FakeConnection):
+    def _create(
+        self,
+        *,
+        model: str,
+        input: list[dict],
+        stream: bool,
+        previous_response_id: str | None = None,
+    ) -> None:
+        raise TypeError("unexpected keyword argument 'future_option'")
 
 
 def _payload(*, previous_response_id: str = "") -> dict:
@@ -106,6 +128,61 @@ def test_responses_websocket_reuses_connection_and_sends_incremental_payload(mon
         for key in ("api_key", "base_url", "extra_headers", "timeout", "_vibelution_responses_websocket")
     )
     assert [state for state, _fields in states] == ["connected", "reused"]
+
+
+def test_responses_websocket_never_sends_internal_client_callback_to_sdk(monkeypatch):
+    connection = _FakeConnection()
+
+    class _FakeOpenAI:
+        def __init__(self, **_kwargs) -> None:
+            self.responses = SimpleNamespace(
+                connect=lambda **_options: _FakeManager(connection)
+            )
+
+    monkeypatch.setattr(openai, "OpenAI", _FakeOpenAI)
+    backend = ResponsesWebSocketBackend(lambda _payload: ())
+    payload = _payload()
+    payload["client"] = object()
+
+    events = list(backend(payload))
+
+    assert [event.type for event in events] == ["response.created", "response.completed"]
+    assert "client" not in connection.sent[0]
+
+
+def test_responses_websocket_pre_send_type_error_falls_back_once(monkeypatch):
+    connection = _PreSendTypeErrorConnection()
+
+    class _FakeOpenAI:
+        def __init__(self, **_kwargs) -> None:
+            self.responses = SimpleNamespace(
+                connect=lambda **_options: _FakeManager(connection)
+            )
+
+    monkeypatch.setattr(openai, "OpenAI", _FakeOpenAI)
+    http_payloads: list[dict] = []
+    states: list[tuple[str, dict]] = []
+
+    def http_backend(payload):
+        http_payloads.append(payload)
+        return iter(({"type": "response.completed", "response": {"id": "http-1"}},))
+
+    backend = ResponsesWebSocketBackend(
+        http_backend,
+        state_sink=lambda state, fields: states.append((state, fields)),
+    )
+    result = list(backend(_payload()))
+
+    assert result[0]["type"] == "response.completed"
+    assert len(http_payloads) == 1
+    assert states[-1] == (
+        "fallback",
+        {
+            "reasonType": "TypeError",
+            "fallbackTransport": "http",
+            "preSendValidationFailure": True,
+        },
+    )
 
 
 def test_responses_websocket_connect_failure_falls_back_with_full_http_payload(monkeypatch):

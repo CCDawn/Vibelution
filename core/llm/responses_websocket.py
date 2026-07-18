@@ -55,7 +55,7 @@ def _websocket_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
             clean["previous_response_id"] = previous_response_id
             clean["input"] = incremental_input
     clean["model"] = _provider_model_name(clean.get("model"))
-    for key in ("api_key", "base_url", "extra_headers", "timeout"):
+    for key in ("api_key", "base_url", "extra_headers", "timeout", "client"):
         clean.pop(key, None)
     return clean
 
@@ -184,6 +184,21 @@ class ResponsesWebSocketBackend:
                 emitted = False
                 try:
                     connection.response.create(**_websocket_payload(payload))
+                except TypeError as exc:
+                    # An explicit SDK keyword binding error happens before a
+                    # request can be sent.  HTTP can therefore take over once
+                    # without risking a duplicated provider turn.
+                    self._disabled = True
+                    self._close_locked()
+                    self._emit(
+                        "fallback",
+                        reasonType=type(exc).__name__,
+                        fallbackTransport="http",
+                        preSendValidationFailure=True,
+                    )
+                    yield from self._http_backend(_clean_http_payload(payload))
+                    return
+                try:
                     while True:
                         event = connection.recv()
                         emitted = True
