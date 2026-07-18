@@ -486,7 +486,7 @@ const styles = {
   wideField:
     "wideField min-w-0 grid gap-1 text-[var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full",
   workspace:
-    "workspace min-w-0 grid h-full min-h-0 flex-1 gap-2 p-2 grid-cols-[minmax(190px,240px)_minmax(0,1fr)_minmax(240px,0.4fr)] grid-rows-[minmax(0,1fr)] overflow-hidden max-[1120px]:grid-cols-[minmax(190px,240px)_minmax(0,1fr)] max-[1120px]:[&_.detailPanel]:col-span-2 max-[780px]:grid-cols-1 max-[780px]:overflow-auto max-[780px]:[&_.detailPanel]:col-span-1",
+    "workspace min-w-0 grid h-full min-h-0 flex-1 gap-2 p-2 grid-cols-[clamp(200px,18vw,260px)_minmax(0,1fr)_clamp(280px,24vw,380px)] grid-rows-[minmax(0,1fr)] overflow-hidden max-[1120px]:grid-cols-[clamp(190px,18vw,240px)_minmax(0,1fr)] max-[1120px]:[&_.detailPanel]:col-span-2 max-[780px]:grid-cols-1 max-[780px]:overflow-auto max-[780px]:[&_.detailPanel]:col-span-1",
 } as const;
 
 export default styles;
