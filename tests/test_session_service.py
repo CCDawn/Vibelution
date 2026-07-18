@@ -1417,7 +1417,7 @@ def test_get_session_detail_materializes_legacy_workspace_less_session(tmp_path,
     assert state["active_conversation_id"] == "session-active"
 
 
-def test_image_attachment_with_concrete_prompt_defaults_to_vision_route(monkeypatch):
+def test_image_attachment_capability_uses_dialogue_llm(monkeypatch):
     monkeypatch.setattr(
         session_service,
         "_session_agent_supports_image_input",
@@ -1434,31 +1434,30 @@ def test_image_attachment_with_concrete_prompt_defaults_to_vision_route(monkeypa
         lambda agent_instance, *, slot: "mimo-v2.5-pro",
     )
 
-    route = session_service._resolve_image_attachment_turn_route(
-        "这里为什么有三个cli,能关闭吗",
+    capability = session_service._resolve_image_attachment_capability(
         agent_instance={"agentId": "agent-vision"},
     )
 
-    assert route["intent"] == "vision_analysis"
-    assert route["route"] == "vision"
-    assert route["llm_slot"] == session_service.SESSION_LLM_SLOT_VISION
-    assert route["supports_image_input"] is True
+    assert capability["llm_slot"] == session_service.SESSION_LLM_SLOT_DIALOGUE
+    assert capability["supports_image_input"] is True
+    assert "route" not in capability
+    assert "intent" not in capability
 
 
-def test_image_attachment_empty_prompt_still_asks_for_clarification(monkeypatch):
+def test_image_attachment_capability_remains_dialogue_without_model_binding(monkeypatch):
     monkeypatch.setattr(
         session_service,
         "_session_agent_supports_image_input",
         lambda agent_instance, *, slot: True,
     )
 
-    route = session_service._resolve_image_attachment_turn_route("", agent_instance={})
+    capability = session_service._resolve_image_attachment_capability(agent_instance={})
 
-    assert route["intent"] == "clarify"
-    assert route["route"] == "clarify"
+    assert capability["llm_slot"] == session_service.SESSION_LLM_SLOT_DIALOGUE
+    assert capability["supports_image_input"] is True
 
 
-def test_image_attachment_unknown_capability_remains_unknown_and_blocks(monkeypatch):
+def test_image_attachment_unknown_capability_is_preserved_for_fail_open(monkeypatch):
     monkeypatch.setattr(
         session_service,
         "_session_agent_supports_image_input",
@@ -1475,13 +1474,12 @@ def test_image_attachment_unknown_capability_remains_unknown_and_blocks(monkeypa
         lambda agent_instance, *, slot: "gpt-5.6-terra",
     )
 
-    route = session_service._resolve_image_attachment_turn_route(
-        "分析这张图片",
+    capability = session_service._resolve_image_attachment_capability(
         agent_instance={"agentId": "agent-terra"},
     )
 
-    assert route["route"] == "block_vision"
-    assert route["supports_image_input"] is None
+    assert capability["llm_slot"] == session_service.SESSION_LLM_SLOT_DIALOGUE
+    assert capability["supports_image_input"] is None
 
 
 def test_session_image_support_uses_resolved_runtime_probe_tristate(monkeypatch):
@@ -1525,6 +1523,7 @@ def test_session_image_support_uses_resolved_runtime_probe_tristate(monkeypatch)
 def test_contextual_image_retry_still_requires_explicit_image_intent():
     assert session_service._is_retriable_image_request_prompt("继续") is False
     assert session_service._is_retriable_image_request_prompt("再看一下刚才那张图") is True
+    assert session_service._is_retriable_image_request_prompt("我刚才点击了测试，还是显示不支持图像为什么") is False
 
 
 def test_session_image_support_uses_shared_model_capability_rules(monkeypatch):
