@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 
-import { VChip, VMetricStrip, VPanelHeader, VSurface, VTooltip } from "../components/vui";
+import { VChip, VMetricStrip, VPanelHeader, VSurface } from "../components/vui";
 import styles from "./MemoryOverviewPanel.styles";
 
 export type MemoryOverviewPanelCopy = {
@@ -54,7 +54,7 @@ export function MemoryOverviewPanel({
   reviewMemoryList,
 }: MemoryOverviewPanelProps) {
   return (
-    <>
+    <div className={styles.overviewStack}>
       <VMetricStrip
         ariaLabel={copy.healthOverview}
         metrics={[
@@ -69,20 +69,18 @@ export function MemoryOverviewPanel({
 
       {warningStrip}
 
-      <VSurface className={styles.reviewQueuePanel} elevation="panel" tone="rail">
+      <VSurface className={styles.reviewQueuePanel} elevation="panel" tone="rail" padding="compact">
         <VPanelHeader
           eyebrow={copy.healthOverview}
           title={copy.reviewQueue}
+          tooltip={copy.reviewQueueHint}
+          tooltipLabel={`${copy.reviewQueue} details`}
           actions={<VChip tone="neutral">{priorityReviewCount}</VChip>}
         />
-        <VTooltip content={copy.reviewQueueHint} width="wide">
-          <div tabIndex={0} aria-label={`${copy.reviewQueue} · ${copy.reviewQueueHint}`}>
-            {reviewQueue}
-          </div>
-        </VTooltip>
+        <div className={styles.reviewQueueScroll}>{reviewQueue}</div>
       </VSurface>
 
-      {projectMemoryQueue}
+      <div className={styles.projectMemorySlot}>{projectMemoryQueue}</div>
 
       <div className={styles.overviewGrid}>
         <VSurface className={styles.overviewPanel} elevation="panel" tone="rail">
@@ -91,7 +89,7 @@ export function MemoryOverviewPanel({
             title={copy.affectedRuntimeMemory}
             actions={<VChip tone="neutral">{runtimeMemoryCount}</VChip>}
           />
-          {runtimeMemoryList}
+          <div className={styles.reviewQueueScroll}>{runtimeMemoryList}</div>
         </VSurface>
 
         <VSurface className={styles.overviewPanel} elevation="panel" tone="rail">
@@ -100,9 +98,9 @@ export function MemoryOverviewPanel({
             title={copy.needsReview}
             actions={<VChip tone="neutral">{reviewMemoryCount}</VChip>}
           />
-          {reviewMemoryList}
+          <div className={styles.reviewQueueScroll}>{reviewMemoryList}</div>
         </VSurface>
       </div>
-    </>
+    </div>
   );
 }
