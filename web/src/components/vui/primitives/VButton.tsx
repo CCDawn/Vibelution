@@ -1,22 +1,20 @@
-import { Button, type ButtonProps } from "@heroui/react";
-import { type ReactNode } from "react";
-
 import {
-  vuiButtonBaseClass,
-  vuiButtonDangerClass,
-  vuiButtonHoverClass,
-  vuiButtonPrimaryClass,
-} from "../renderers/heroui/heroSlots";
+  forwardRef,
+  type ButtonHTMLAttributes,
+  type MouseEvent,
+  type ReactNode,
+} from "react";
+
+import { ShadcnButton } from "../renderers/shadcn/ShadcnButton";
 import {
   type VuiButtonVariant,
   type VuiDensity,
-  vuiControlHeight,
-} from "../renderers/heroui/heroVariants";
+} from "../renderers/shared/buttonVariants";
 import { VTooltip } from "./VTooltip";
 
 export type VButtonProps = Omit<
-  ButtonProps,
-  "variant" | "color" | "size" | "startContent" | "endContent"
+  ButtonHTMLAttributes<HTMLButtonElement>,
+  "disabled" | "children"
 > & {
   contentLayout?: "label" | "plain";
   variant?: VuiButtonVariant;
@@ -29,20 +27,13 @@ export type VButtonProps = Omit<
   "data-vui"?: string;
   role?: string;
   title?: string;
+  /** HeroUI-era disabled flag — mapped to native disabled. */
+  isDisabled?: boolean;
+  /** Square icon layout flag (VIconButton). */
+  isIconOnly?: boolean;
+  /** HeroUI-era press handler — still supported, fires after onClick. */
+  onPress?: (event: MouseEvent<HTMLButtonElement>) => void;
 };
-
-function variantClass(variant: VuiButtonVariant | undefined): string {
-  if (variant === "primary") {
-    return `${vuiButtonBaseClass} ${vuiButtonHoverClass} ${vuiButtonPrimaryClass}`;
-  }
-  if (variant === "danger") {
-    return `${vuiButtonBaseClass} ${vuiButtonHoverClass} ${vuiButtonDangerClass}`;
-  }
-  if (variant === "ghost") {
-    return `border border-transparent bg-transparent text-vui-fg-secondary shadow-none ${vuiButtonHoverClass}`;
-  }
-  return `${vuiButtonBaseClass} ${vuiButtonHoverClass}`;
-}
 
 function classNameTokens(className: VButtonProps["className"]): string[] {
   return typeof className === "string" ? className.trim().split(/\s+/).filter(Boolean) : [];
@@ -71,7 +62,7 @@ function buttonGeometryClass(
   contentLayout: NonNullable<VButtonProps["contentLayout"]>,
 ): string {
   return [
-    "inline-flex max-w-full shrink-0 justify-self-start",
+    "max-w-full shrink-0 justify-self-start",
     contentLayout === "label" ? "whitespace-nowrap" : null,
     hasExplicitRootWidth(className) ? null : "w-fit",
   ]
@@ -79,35 +70,45 @@ function buttonGeometryClass(
     .join(" ");
 }
 
-export function VButton({
-  contentLayout = "label",
-  variant = "secondary",
-  density = "compact",
-  icon,
-  trailingIcon,
-  className,
-  children,
-  disabledReason,
-  tooltip,
-  "data-vui": dataVui,
-  title,
-  ...props
-}: VButtonProps) {
-  const tooltipContent = props.isDisabled && disabledReason ? disabledReason : tooltip ?? title;
+export const VButton = forwardRef<HTMLButtonElement, VButtonProps>(function VButton(
+  {
+    contentLayout = "label",
+    variant = "secondary",
+    density = "compact",
+    icon,
+    trailingIcon,
+    className,
+    children,
+    disabledReason,
+    tooltip,
+    "data-vui": dataVui,
+    title,
+    isDisabled,
+    isIconOnly,
+    onPress,
+    ...props
+  },
+  ref,
+) {
+  const tooltipContent = isDisabled && disabledReason ? disabledReason : tooltip ?? title;
   const hasTooltip = tooltipContent !== undefined && tooltipContent !== null && tooltipContent !== "";
   const titleProps = title && !hasTooltip ? ({ title } as Record<string, string>) : undefined;
-  const isIconOnly = Boolean(props.isIconOnly);
+  const iconOnly = Boolean(isIconOnly);
 
   const button = (
-    <Button
+    <ShadcnButton
       {...props}
       {...titleProps}
+      ref={ref}
       data-vui={dataVui ?? "button"}
-      size={vuiControlHeight(density)}
+      variant={variant}
+      density={density}
+      isDisabled={isDisabled}
+      isIconOnly={iconOnly}
+      onPress={onPress}
       className={[
-        variantClass(variant),
         buttonGeometryClass(className, contentLayout),
-        "min-w-0 px-2 text-[var(--vui-font-sm)] font-semibold",
+        "min-w-0",
         className,
       ]
         .filter(Boolean)
@@ -130,7 +131,7 @@ export function VButton({
               {icon}
             </span>
           ) : null}
-          {isIconOnly && children ? (
+          {iconOnly && children ? (
             <span data-slot="vui-button-icon" className="inline-grid shrink-0 place-items-center">
               {children}
             </span>
@@ -146,14 +147,14 @@ export function VButton({
           ) : null}
         </span>
       )}
-    </Button>
+    </ShadcnButton>
   );
 
   if (!hasTooltip) {
     return button;
   }
 
-  if (props.isDisabled) {
+  if (isDisabled) {
     const actionLabel = typeof props["aria-label"] === "string"
       ? props["aria-label"]
       : typeof children === "string"
@@ -179,4 +180,4 @@ export function VButton({
   }
 
   return <VTooltip content={tooltipContent}>{button}</VTooltip>;
-}
+});
