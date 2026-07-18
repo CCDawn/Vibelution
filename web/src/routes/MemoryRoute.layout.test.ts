@@ -300,7 +300,10 @@ describe("MemoryRoute layout contract", () => {
     expect(styles.refreshButton).toContain("shrink-0");
     expect(styles.returnButton).toContain("shrink-0");
     expect(overviewPanelStyles.overviewGrid).toContain("grid-cols-[repeat(2,minmax(0,1fr))]");
-    expect(overviewPanelStyles.reviewQueuePanel).toContain("max-h-[min(280px,34vh)]");
+    expect(overviewPanelStyles.reviewQueuePanel).toContain("overflow-hidden");
+    expect(overviewPanelStyles.reviewQueuePanel).toContain("grid-rows-[auto_minmax(0,1fr)]");
+    expect(overviewPanelStyles.reviewQueueScroll).toContain("overflow-y-auto");
+    expect(overviewPanelStyles.overviewStack).toContain("overviewStack");
     expect(overviewPanelStyles.overviewPanel).not.toContain("bg-[var(--vui-surface-glass)]");
     expect(overviewPanelStyles.reviewQueuePanel).not.toContain("bg-[var(--vui-surface-glass)]");
     expect(styles.reviewQueueList).toContain("overflow-auto");
@@ -308,7 +311,7 @@ describe("MemoryRoute layout contract", () => {
     expect(styles.compactItemPrimary).not.toContain("rounded-[var(--radius-control)]");
     expect(styles.compactItemSummary).toContain("line-clamp-2");
     expect(overviewPanelStyles.overviewPanel).toContain("grid-rows-[auto_minmax(0,1fr)]");
-    expect(overviewPanelStyles.overviewPanel).toContain("overflow-auto");
+    expect(overviewPanelStyles.overviewPanel).toContain("overflow-hidden");
     expect(matrixPanelStyles.matrixPanel).toContain("bg-[var(--vui-surface-panel)]");
     expect(matrixPanelStyles.matrixPanel).not.toContain("bg-[var(--vui-surface-glass)]");
     expect(matrixPanelStyles.matrixPanel).not.toContain("shadow-[var(--vui-shadow-hairline)]");
@@ -999,7 +1002,7 @@ describe("MemoryRoute layout contract", () => {
     expect(routeSource).toContain("reasonInPrompt");
     expect(routeSource).toContain("reasonAgentVisible");
     expect(routeSource).toContain("reasonUserManaged");
-    expect(overviewPanelSource).toContain('<VTooltip content={copy.reviewQueueHint} width="wide">');
+    expect(overviewPanelSource).toContain('tooltip={copy.reviewQueueHint}');
     expect(overviewPanelSource).not.toContain('title={copy.reviewQueueHint}');
     expect(routeSource).not.toContain("<p className={styles.panelLead}>{copy.reviewQueueHint}</p>");
   });
@@ -1094,7 +1097,7 @@ describe("MemoryRoute layout contract", () => {
     expect(routeSource).toContain("meta={memoryViewSubtitle(copy, forcedView)}");
     expect(projectMemoryQueuePanelSource).toContain('<VTooltip content={copy.projectMemoryQueueHint} width="wide">');
     expect(projectMemoryQueuePanelSource).not.toContain('title={copy.projectMemoryQueueHint}');
-    expect(overviewPanelSource).toContain('<VTooltip content={copy.reviewQueueHint} width="wide">');
+    expect(overviewPanelSource).toContain('tooltip={copy.reviewQueueHint}');
     expect(overviewPanelSource).not.toContain('title={copy.reviewQueueHint}');
     expect(selectedConfigPanelSource).toContain('<VTooltip content={managementHint} width="wide">');
     expect(selectedConfigPanelSource).not.toContain('title={item.managedState?.actionHint || copy.managementHint}');
