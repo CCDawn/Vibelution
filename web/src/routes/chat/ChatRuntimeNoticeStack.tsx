@@ -1,6 +1,7 @@
 import { CircleDot } from "lucide-react";
 
 import type { SessionRuntimeNotice } from "../../api/types";
+import { VErrorSummary, summarizeErrorText } from "../../components/vui";
 import styles from "./ChatRuntimeNoticeStack.styles";
 
 type ChatRuntimeNoticeStackProps = {
@@ -32,6 +33,19 @@ export function runtimeNoticeIsAlert(level: string | undefined) {
   return ["blocked", "danger", "error", "failed"].includes(String(level || "").toLowerCase());
 }
 
+function runtimeNoticeSummaryTone(
+  level: string | undefined,
+): "error" | "warning" | "info" {
+  const normalized = String(level || "info").toLowerCase();
+  if (["danger", "error", "failed"].includes(normalized)) {
+    return "error";
+  }
+  if (["blocked", "warn", "warning"].includes(normalized)) {
+    return "warning";
+  }
+  return "info";
+}
+
 export function ChatRuntimeNoticeStack({ lang, notices }: ChatRuntimeNoticeStackProps) {
   if (!notices.length) {
     return null;
@@ -40,22 +54,42 @@ export function ChatRuntimeNoticeStack({ lang, notices }: ChatRuntimeNoticeStack
   return (
     <div className={styles.stack} role="status" aria-live="polite">
       <div className={styles.list} role="list">
-        {notices.map((notice) => (
-          <div
-            key={notice.id || `${notice.kind}-${notice.timestamp}-${notice.message}`}
-            className={[styles.notice, runtimeNoticeToneClassName(notice.level)].join(" ")}
-            role={runtimeNoticeIsAlert(notice.level) ? "alert" : "listitem"}
-          >
-            <CircleDot size={13} aria-hidden="true" />
-            <div className={styles.body}>
-              <span className={styles.label}>
-                {lang === "zh" ? "运行状态" : "Runtime"}
-                {notice.source ? ` · ${notice.source}` : ""}
-              </span>
-              <span className={styles.message}>{notice.message}</span>
+        {notices.map((notice) => {
+          const label = `${lang === "zh" ? "运行状态" : "Runtime"}${notice.source ? ` · ${notice.source}` : ""}`;
+          const isAlert = runtimeNoticeIsAlert(notice.level);
+          const message = String(notice.message || "").trim();
+          const { summary, details } = summarizeErrorText(message, isAlert ? 88 : 120);
+          const key = notice.id || `${notice.kind}-${notice.timestamp}-${notice.message}`;
+
+          if (isAlert || details) {
+            return (
+              <div key={key} className={styles.summaryItem} role="listitem">
+                <VErrorSummary
+                  tone={runtimeNoticeSummaryTone(notice.level)}
+                  label={label}
+                  summary={summary || (lang === "zh" ? "运行异常" : "Runtime issue")}
+                  details={details ?? undefined}
+                  openLabel={lang === "zh" ? "详情" : "Details"}
+                  closeLabel={lang === "zh" ? "收起" : "Hide"}
+                />
+              </div>
+            );
+          }
+
+          return (
+            <div
+              key={key}
+              className={[styles.notice, runtimeNoticeToneClassName(notice.level)].join(" ")}
+              role="listitem"
+            >
+              <CircleDot size={13} aria-hidden="true" />
+              <div className={styles.body}>
+                <span className={styles.label}>{label}</span>
+                <span className={styles.message}>{message}</span>
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
