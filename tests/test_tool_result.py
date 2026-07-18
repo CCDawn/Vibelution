@@ -638,6 +638,28 @@ class TestFormatToolMessage:
         assert "安装依赖后重试" not in rendered
         assert "continuationHint" not in tool_result_facts_payload(facts)
 
+    def test_model_render_strips_inline_recovery_and_structured_action_routes(self):
+        payload = {
+            "status": "error",
+            "message": "参数校验失败。请按工具描述修正参数名和类型后重试。",
+            "nextActions": ["调用 source_collection_context_tool"],
+            "replacement": {"mode": "inspect", "file_path": "core/demo.py"},
+            "recovery": "请使用 inspect 模式重新查询。",
+        }
+
+        rendered = render_tool_result_for_model(
+            package_tool_result_facts(payload, tool_name="probe_tool")
+        )
+
+        assert "参数校验失败" in rendered
+        assert "请按工具描述" not in rendered
+        assert "nextActions" not in rendered
+        assert "source_collection_context_tool" not in rendered
+        assert "replacement" not in rendered
+        assert "core/demo.py" not in rendered
+        assert "recovery" not in rendered
+        assert "请使用 inspect" not in rendered
+
     def test_model_render_keeps_file_read_range_but_not_reading_navigation(self):
         raw = (
             "[文件] demo.py\n"

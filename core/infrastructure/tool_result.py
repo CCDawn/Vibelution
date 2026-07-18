@@ -51,10 +51,19 @@ MODEL_HIDDEN_RESULT_KEYS = frozenset(
         "nextaction",
         "recommendednext",
         "recommendednextaction",
+        "recommendednextactions",
         "recommendedtools",
         "avoidtools",
         "suggestedaction",
         "nextstep",
+        "nextactions",
+        "replacement",
+        "recovery",
+        "recoveryhint",
+        "recoveryinstruction",
+        "retry",
+        "retryaction",
+        "retryhint",
         "instructions",
         "guidance",
     }
@@ -71,6 +80,17 @@ MODEL_HIDDEN_TEXT_PREFIXES = (
     "nextaction:",
     "recommendednext:",
     "recommendednextaction:",
+)
+
+MODEL_HIDDEN_SENTENCE_PREFIX = re.compile(
+    r"^\s*(?:"
+    r"\[(?:建议|阅读导航|续读)\]|"
+    r"(?:请|建议|下一步(?:建议)?|后续|如需)|"
+    r"继续(?:调用|使用|执行|读取)|"
+    r"调用\s+(?!成功|失败|结果)|"
+    r"(?:next\s*(?:step)?|please|recommended|retry|use|call)\b"
+    r")",
+    re.IGNORECASE,
 )
 
 
@@ -499,7 +519,26 @@ def _project_structured_result_for_model(value: Any) -> Any:
         }
     if isinstance(value, list):
         return [_project_structured_result_for_model(item) for item in value]
+    if isinstance(value, str):
+        return _project_text_for_model(value)
     return value
+
+
+def _project_text_for_model(text: str) -> str:
+    """保留文本事实，剥离同一行中附带的下一步执行指令。"""
+    visible_lines: list[str] = []
+    for line in str(text or "").splitlines():
+        if line.lstrip().lower().startswith(MODEL_HIDDEN_TEXT_PREFIXES):
+            continue
+        visible_segments = [
+            segment
+            for segment in re.split(r"(?<=[。！？!?])", line)
+            if not MODEL_HIDDEN_SENTENCE_PREFIX.match(segment)
+        ]
+        projected = "".join(visible_segments).strip()
+        if projected:
+            visible_lines.append(projected)
+    return "\n".join(visible_lines)
 
 
 def project_tool_result_for_model(content: str) -> str:
@@ -518,12 +557,7 @@ def project_tool_result_for_model(content: str) -> str:
             separators=(",", ":"),
         )
 
-    visible_lines = []
-    for line in normalized.splitlines():
-        if line.lstrip().lower().startswith(MODEL_HIDDEN_TEXT_PREFIXES):
-            continue
-        visible_lines.append(line)
-    return "\n".join(visible_lines)
+    return _project_text_for_model(normalized)
 
 
 def _compact_source_collection_context_result(result_str: str, max_chars: int, continuation_hint: str) -> Optional[str]:
