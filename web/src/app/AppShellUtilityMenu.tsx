@@ -6,7 +6,7 @@ import { Activity, ExternalLink, FolderTree, GitBranch, ScrollText, Search } fro
 import { fetchJson } from "../api/client";
 import { queryKeys } from "../api/queryKeys";
 import type { FileTreeNode, GitStatusSummary } from "../api/types";
-import { VButton, VNativeInput } from "../components/vui";
+import { VButton, VNativeInput, VTooltip } from "../components/vui";
 import type { Language, ShellTranslationKey } from "../i18n/shellDictionary";
 import { useChatWorkbenchStore } from "../store/chatWorkbenchStore";
 import { resolvePollingInterval } from "./pollingPolicy";
@@ -64,7 +64,7 @@ function renderUtilityFileTree(
         type="button"
         className={active ? `${styles.utilityFileButton} ${styles.utilityFileButtonActive}` : styles.utilityFileButton}
         onPress={() => onOpenFile(node.path)}
-        title={node.path}
+        tooltip={node.path}
       >
         <span>{node.name}</span>
         <small>{node.path}</small>
@@ -153,6 +153,9 @@ export function AppShellUtilityMenu({ lang, t, frontendVisible, onClose }: AppSh
   const gitTitle = gitAvailable
     ? `${t("gitStatus")}: ${gitStatus?.summary ?? ""}`
     : gitStatus?.error || t("gitUnavailable");
+  const utilityFileNavigatorHint = activeSessionId
+    ? (lang === "zh" ? "点击文件会在当前会话工作区打开预览。" : "Click a file to open it in the current chat workspace.")
+    : (lang === "zh" ? "先进入会话后可打开文件预览。" : "Open a chat first to preview files.");
   const requestUtilityFileTree = useCallback(() => {
     setFileTreeRequested(true);
   }, []);
@@ -173,19 +176,26 @@ export function AppShellUtilityMenu({ lang, t, frontendVisible, onClose }: AppSh
       role="menu"
       aria-label={t("topUtilityMenu")}
     >
-      <div className={styles.utilityPanelHeader}>
-        <strong>{t("topUtilityMenu")}</strong>
-        <span>{t("topUtilityMenuHint")}</span>
-      </div>
+      <VTooltip content={t("topUtilityMenuHint")} width="wide">
+        <div
+          className={styles.utilityPanelHeader}
+          tabIndex={0}
+          aria-label={`${t("topUtilityMenu")}: ${t("topUtilityMenuHint")}`}
+        >
+          <strong>{t("topUtilityMenu")}</strong>
+        </div>
+      </VTooltip>
       <div className={styles.utilityButtonGrid}>
         <a href="/launcher" target="_blank" rel="noreferrer" className={styles.utilityButton} role="menuitem" onClick={onClose}>
           <ExternalLink size={16} />
           <span>{lang === "zh" ? "启动器" : "Launcher"}</span>
         </a>
-        <NavLink to="/usage" className={({ isActive }) => isActive ? `${styles.utilityButton} ${styles.utilityButtonActive}` : styles.utilityButton} role="menuitem" onClick={onClose} title={t("usageUtilityTitle")}>
-          <Activity size={16} />
-          <span>{t("navUsage")}</span>
-        </NavLink>
+        <VTooltip content={t("usageUtilityTitle")}>
+          <NavLink to="/usage" className={({ isActive }) => isActive ? `${styles.utilityButton} ${styles.utilityButtonActive}` : styles.utilityButton} role="menuitem" onClick={onClose}>
+            <Activity size={16} />
+            <span>{t("navUsage")}</span>
+          </NavLink>
+        </VTooltip>
         <NavLink to="/logs" className={({ isActive }) => isActive ? `${styles.utilityButton} ${styles.utilityButtonActive}` : styles.utilityButton} role="menuitem" onClick={onClose}>
           <ScrollText size={16} />
           <span>{t("navLogs")}</span>
@@ -207,120 +217,119 @@ export function AppShellUtilityMenu({ lang, t, frontendVisible, onClose }: AppSh
           <span>{t("files")}</span>
         </VButton>
       </div>
-      <section className={styles.gitMiniPanel} aria-label={t("gitStatusGuide")} title={gitTitle}>
-        <div className={styles.gitMiniHeader}>
-          <div className={styles.gitChip}>
-            <GitBranch size={14} />
-            <span className={`${styles.statusDot} ${styles[`status_${gitTone}`]}`} />
-            <span className={styles.gitBranchName}>{gitBranch}</span>
-            <strong className={styles.gitCount}>{gitValue}</strong>
+      <VTooltip content={gitTitle} width="wide">
+        <section className={styles.gitMiniPanel} aria-label={`${t("gitStatusGuide")}: ${gitTitle}`} tabIndex={0}>
+          <div className={styles.gitMiniHeader}>
+            <div className={styles.gitChip}>
+              <GitBranch size={14} />
+              <span className={`${styles.statusDot} ${styles[`status_${gitTone}`]}`} />
+              <span className={styles.gitBranchName}>{gitBranch}</span>
+              <strong className={styles.gitCount}>{gitValue}</strong>
+            </div>
+            <div className={styles.gitHeadline}>
+              <strong>{gitHeroLabel}</strong>
+              <span>{gitStatus?.summary || t("gitStatusGuideHint")}</span>
+            </div>
           </div>
-          <div className={styles.gitHeadline}>
-            <strong>{gitHeroLabel}</strong>
-            <span>{gitStatus?.summary || t("gitStatusGuideHint")}</span>
-          </div>
-        </div>
-        <div className={styles.gitSignalGrid}>
-          <span>
-            <strong>{gitLocalCommits}</strong>
-            {t("gitLocalAhead")}
-          </span>
-          <span>
-            <strong>{gitBehind}</strong>
-            {t("gitRemoteBehind")}
-          </span>
-          <span>
-            <strong>{gitWorktreeCommits}</strong>
-            {t("gitWorktreesPending")}
-          </span>
-          <span>
-            <strong>{gitDirtyCount}</strong>
-            {t("gitWorkingTree")}
-          </span>
-        </div>
-        <div className={styles.gitMetaGrid}>
-          <span>{t("gitBranch")}</span>
-          <strong>{gitBranch}</strong>
-          <span>{t("gitUpstream")}</span>
-          <strong>{gitStatus?.upstream?.name || gitStatus?.upstream?.remote || t("gitNoUpstream")}</strong>
-          <span>{t("gitWorktrees")}</span>
-          <strong>{gitWorktreeCommits} / {gitStatus?.worktrees?.total ?? 0}</strong>
-        </div>
-        {gitStatus?.localCommits?.commits?.length ? (
-          <section className={styles.gitSection} aria-label={t("gitLocalCommits")}>
-            <div className={styles.gitSectionHeader}>
-              <strong>{t("gitLocalCommits")}</strong>
-              <span>{gitStatus.localCommits.truncated ? t("gitListTruncated") : `${gitStatus.localCommits.total}`}</span>
-            </div>
-            <div className={styles.gitCommitList}>
-              {gitStatus.localCommits.commits.slice(0, 4).map((commit) => (
-                <div key={commit.sha} className={styles.gitCommitItem}>
-                  <code>{commit.shortSha}</code>
-                  <span>{commit.subject}</span>
-                </div>
-              ))}
-            </div>
-          </section>
-        ) : null}
-        <div className={styles.gitCountGrid}>
-          <span>
-            <strong>{gitStatus?.counts.staged ?? 0}</strong>
-            {t("gitStaged")}
-          </span>
-          <span>
-            <strong>{gitStatus?.counts.unstaged ?? 0}</strong>
-            {t("gitUnstaged")}
-          </span>
-          <span>
-            <strong>{gitStatus?.counts.untracked ?? 0}</strong>
-            {t("gitUntracked")}
-          </span>
-          <span>
-            <strong>{gitStatus?.counts.deleted ?? 0}</strong>
-            {t("gitDeleted")}
-          </span>
-        </div>
-        <div className={styles.gitFileList}>
-          {(gitStatus?.files ?? []).slice(0, 6).map((file) => (
-            <div key={`${file.status}-${file.path}`} className={styles.gitFileItem}>
-              <code>{file.status}</code>
-              <span>{file.path}</span>
-            </div>
-          ))}
-          {gitStatus?.truncated ? <p>{t("gitTruncated")}</p> : null}
-          {gitStatus && gitStatus.available && !gitStatus.requiresAttention ? <p>{t("gitNoChanges")}</p> : null}
-          {gitStatus && !gitStatus.available ? <p>{gitStatus.error || t("gitUnavailable")}</p> : null}
-        </div>
-        <section className={styles.gitSection} aria-label={t("gitWorktrees")}>
-          <div className={styles.gitSectionHeader}>
-            <strong>{t("gitWorktrees")}</strong>
-            <span>{gitStatus?.worktrees?.truncated ? t("gitListTruncated") : `${gitWorktreeCommits} / ${gitStatus?.worktrees?.total ?? 0}`}</span>
-          </div>
-          {gitPendingWorktrees.length ? (
-            <div className={styles.gitWorktreeList}>
-              {gitPendingWorktrees.slice(0, 5).map((item) => (
-                <div key={`${item.path}-${item.branch}`} className={styles.gitWorktreeItem}>
-                  <strong>{item.branch || item.headRevShort}</strong>
-                  <span>{`+${item.aheadMain} / -${item.behindMain}`}</span>
-                  <small>{compactWorktreePath(item.path)}</small>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <p className={styles.gitQuietState}>{t("gitNoWorktreeCommits")}</p>
-          )}
-        </section>
-      </section>
-      <section id="utility-file-navigator" className={styles.utilityFilePanel} aria-label={t("files")}>
-        <div className={styles.utilityFileHeader}>
-          <div>
-            <strong>{t("files")}</strong>
+          <div className={styles.gitSignalGrid}>
             <span>
-              {activeSessionId
-                ? (lang === "zh" ? "点击文件会在当前会话工作区打开预览。" : "Click a file to open it in the current chat workspace.")
-                : (lang === "zh" ? "先进入会话后可打开文件预览。" : "Open a chat first to preview files.")}
+              <strong>{gitLocalCommits}</strong>
+              {t("gitLocalAhead")}
+            </span>
+            <span>
+              <strong>{gitBehind}</strong>
+              {t("gitRemoteBehind")}
+            </span>
+            <span>
+              <strong>{gitWorktreeCommits}</strong>
+              {t("gitWorktreesPending")}
+            </span>
+            <span>
+              <strong>{gitDirtyCount}</strong>
+              {t("gitWorkingTree")}
             </span>
           </div>
+          <div className={styles.gitMetaGrid}>
+            <span>{t("gitBranch")}</span>
+            <strong>{gitBranch}</strong>
+            <span>{t("gitUpstream")}</span>
+            <strong>{gitStatus?.upstream?.name || gitStatus?.upstream?.remote || t("gitNoUpstream")}</strong>
+            <span>{t("gitWorktrees")}</span>
+            <strong>{gitWorktreeCommits} / {gitStatus?.worktrees?.total ?? 0}</strong>
+          </div>
+          {gitStatus?.localCommits?.commits?.length ? (
+            <section className={styles.gitSection} aria-label={t("gitLocalCommits")}>
+              <div className={styles.gitSectionHeader}>
+                <strong>{t("gitLocalCommits")}</strong>
+                <span>{gitStatus.localCommits.truncated ? t("gitListTruncated") : `${gitStatus.localCommits.total}`}</span>
+              </div>
+              <div className={styles.gitCommitList}>
+                {gitStatus.localCommits.commits.slice(0, 4).map((commit) => (
+                  <div key={commit.sha} className={styles.gitCommitItem}>
+                    <code>{commit.shortSha}</code>
+                    <span>{commit.subject}</span>
+                  </div>
+                ))}
+              </div>
+            </section>
+          ) : null}
+          <div className={styles.gitCountGrid}>
+            <span>
+              <strong>{gitStatus?.counts.staged ?? 0}</strong>
+              {t("gitStaged")}
+            </span>
+            <span>
+              <strong>{gitStatus?.counts.unstaged ?? 0}</strong>
+              {t("gitUnstaged")}
+            </span>
+            <span>
+              <strong>{gitStatus?.counts.untracked ?? 0}</strong>
+              {t("gitUntracked")}
+            </span>
+            <span>
+              <strong>{gitStatus?.counts.deleted ?? 0}</strong>
+              {t("gitDeleted")}
+            </span>
+          </div>
+          <div className={styles.gitFileList}>
+            {(gitStatus?.files ?? []).slice(0, 6).map((file) => (
+              <div key={`${file.status}-${file.path}`} className={styles.gitFileItem}>
+                <code>{file.status}</code>
+                <span>{file.path}</span>
+              </div>
+            ))}
+            {gitStatus?.truncated ? <p>{t("gitTruncated")}</p> : null}
+            {gitStatus && gitStatus.available && !gitStatus.requiresAttention ? <p>{t("gitNoChanges")}</p> : null}
+            {gitStatus && !gitStatus.available ? <p>{gitStatus.error || t("gitUnavailable")}</p> : null}
+          </div>
+          <section className={styles.gitSection} aria-label={t("gitWorktrees")}>
+            <div className={styles.gitSectionHeader}>
+              <strong>{t("gitWorktrees")}</strong>
+              <span>{gitStatus?.worktrees?.truncated ? t("gitListTruncated") : `${gitWorktreeCommits} / ${gitStatus?.worktrees?.total ?? 0}`}</span>
+            </div>
+            {gitPendingWorktrees.length ? (
+              <div className={styles.gitWorktreeList}>
+                {gitPendingWorktrees.slice(0, 5).map((item) => (
+                  <div key={`${item.path}-${item.branch}`} className={styles.gitWorktreeItem}>
+                    <strong>{item.branch || item.headRevShort}</strong>
+                    <span>{`+${item.aheadMain} / -${item.behindMain}`}</span>
+                    <small>{compactWorktreePath(item.path)}</small>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className={styles.gitQuietState}>{t("gitNoWorktreeCommits")}</p>
+            )}
+          </section>
+        </section>
+      </VTooltip>
+      <section id="utility-file-navigator" className={styles.utilityFilePanel} aria-label={t("files")}>
+        <div className={styles.utilityFileHeader}>
+          <VTooltip content={utilityFileNavigatorHint} width="wide">
+            <div tabIndex={0} aria-label={`${t("files")}: ${utilityFileNavigatorHint}`}>
+              <strong>{t("files")}</strong>
+            </div>
+          </VTooltip>
         </div>
         <div className={styles.utilityFileSearch}>
           <Search size={14} />
