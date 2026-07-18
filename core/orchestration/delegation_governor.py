@@ -797,10 +797,6 @@ class DelegationGovernor:
             result["status"] = status
             result.setdefault("message", "子 agent 未返回可用结论")
         if status in useful_statuses and summary_effective:
-            should_stop_round = self.should_stop_after_useful_delegation(
-                task_type=str(payload.get("task_type") or "inspect"),
-                goal=str(payload.get("root_goal") or payload.get("goal") or ""),
-            )
             session.record_delegation_result(
                 payload.get("task_type", "inspect"),
                 payload.get("goal", ""),
@@ -810,11 +806,6 @@ class DelegationGovernor:
                 confidence=confidence,
                 recommended_next_action=recommended_next,
             )
-            if should_stop_round:
-                session.note_scope_completion(
-                    recommended_next
-                    or "子 agent 已返回足够证据，主 agent 应直接收束。"
-                )
             ui.add_log(f"委派完成: {summary_effective}", "INFO")
             ui.add_content(f"[bold cyan]子 agent 证据[/bold cyan] {summary_effective}")
             ui.add_delegation_evidence(summary_effective, next_action=recommended_next, confidence=confidence)
@@ -832,16 +823,12 @@ class DelegationGovernor:
                     else ""
                 ),
             )
-            if recommended_next:
-                ui.add_content(f"[dim]下一步建议:[/dim] {recommended_next}")
-            messages.append(build_delegation_evidence_message(
-                f"{summary_effective}\n下一步建议: {recommended_next or '主 agent 自行裁决'}"
-            ))
+            messages.append(build_delegation_evidence_message(summary_effective))
             outcome = {
                 "delegated": True,
                 "useful": True,
                 "summary": summary_effective,
-                "break_round": should_stop_round,
+                "break_round": False,
             }
         else:
             reason = summary or str(result.get("message") or "子 agent 未返回可用结论").strip()

@@ -19,6 +19,8 @@ from core.infrastructure.tool_result import (
     truncate_result,
     package_tool_result,
     package_tool_result_facts,
+    project_runtime_tool_metadata,
+    tool_result_facts_payload,
     render_tool_result_for_model,
     format_tool_message,
     infer_tool_business_success,
@@ -605,6 +607,70 @@ class TestFormatToolMessage:
         assert "exitCode: 255" in rendered
         assert "failureClass: process_exit" in rendered
         assert "summary:" not in rendered.lower()
+
+    def test_model_render_strips_tool_continuation_and_workflow_directives(self):
+        payload = {
+            "status": "ok",
+            "records": [{"recordId": "paper-1", "title": "Fact record"}],
+            "usage": {
+                "continuationHint": "继续调用 source_collection_context_tool(candidate_offset=5)",
+                "retryInstruction": "请改用 retry_missing 模式重试",
+                "evidenceInstruction": "下一步必须补齐证据",
+            },
+            "nextAction": "调用 writeback_tool",
+            "suggested_action": "安装依赖后重试",
+        }
+
+        facts = package_tool_result_facts(
+            payload,
+            tool_name="source_collection_context_tool",
+        )
+        rendered = render_tool_result_for_model(facts)
+
+        assert "paper-1" in rendered
+        assert "continuationHint" not in rendered
+        assert "retryInstruction" not in rendered
+        assert "evidenceInstruction" not in rendered
+        assert "nextAction" not in rendered
+        assert "suggested_action" not in rendered
+        assert "继续调用" not in rendered
+        assert "retry_missing" not in rendered
+        assert "安装依赖后重试" not in rendered
+        assert "continuationHint" not in tool_result_facts_payload(facts)
+
+    def test_model_render_keeps_file_read_range_but_not_reading_navigation(self):
+        raw = (
+            "[文件] demo.py\n"
+            "[区间] 第 1-20 行 | 已显示 20 行 | 剩余 80 行\n"
+            "[阅读导航] 继续调用 read_file_tool(offset=20, max_lines=20)。\n\n"
+            "--- Content ---\n"
+            "def factual_result():\n    return 1\n"
+        )
+
+        rendered = render_tool_result_for_model(
+            package_tool_result_facts(raw, tool_name="read_file_tool")
+        )
+
+        assert "第 1-20 行" in rendered
+        assert "阅读导航" not in rendered
+        assert "继续调用 read_file_tool" not in rendered
+
+    def test_runtime_metadata_keeps_navigation_outside_model_projection(self):
+        raw = (
+            "[文件] demo.py\n"
+            "[区间] 第 1-20 行 | 已显示 20 行 | 剩余 80 行\n"
+            "[阅读导航] 继续调用 read_file_tool(offset=20, max_lines=20)。\n\n"
+            "--- Content ---\n"
+            "def factual_result():\n    return 1\n"
+        )
+
+        runtime = project_runtime_tool_metadata(raw, tool_name="read_file_tool")
+        rendered = render_tool_result_for_model(
+            package_tool_result_facts(raw, tool_name="read_file_tool")
+        )
+
+        assert "offset=20" in runtime.continuation_hint
+        assert "offset=20" not in rendered
 
 
 class TestInferToolBusinessSuccess:

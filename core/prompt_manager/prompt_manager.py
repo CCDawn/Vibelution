@@ -919,18 +919,11 @@ class PromptManager:
         if snapshot.get("active_delegation"):
             return "delegate"
 
-        diagnostic_phase = str(snapshot.get("diagnostic_phase") or "idle")
-        if snapshot.get("feedback_loop_ready") or diagnostic_phase in {"build_loop", "reproduce", "observe", "inspect", "infer"}:
-            return "diagnose"
-
-        convergence_state = str(snapshot.get("convergence_state") or "open")
-        if convergence_state in {"ready_to_verify"} or snapshot.get("last_validation_summary"):
+        if snapshot.get("last_validation_summary"):
             return "verify"
 
         if (
-            snapshot.get("scope_frozen")
-            or convergence_state in {"ready_to_fix", "ready_to_stop"}
-            or snapshot.get("active_evolution_txn_id")
+            snapshot.get("active_evolution_txn_id")
             or (snapshot.get("modified_paths") or [])
         ):
             return "execute"

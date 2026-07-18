@@ -40,6 +40,39 @@ BUSINESS_FAILURE_STATUSES = {
     "timed_out",
 }
 
+# 这些字段描述的是某个工作流下一步应如何编排，而不是工具已经观察到的事实。
+# 它们可以留在原始结果或运行时遥测中，但绝不能作为 ToolMessage 回灌给对话模型。
+MODEL_HIDDEN_RESULT_KEYS = frozenset(
+    {
+        "continuationhint",
+        "recordcontinuationhint",
+        "retryinstruction",
+        "evidenceinstruction",
+        "nextaction",
+        "recommendednext",
+        "recommendednextaction",
+        "recommendedtools",
+        "avoidtools",
+        "suggestedaction",
+        "nextstep",
+        "instructions",
+        "guidance",
+    }
+)
+
+MODEL_HIDDEN_TEXT_PREFIXES = (
+    "[阅读导航]",
+    "[续读]",
+    "[截断信息] 阅读导航=",
+    "continuationhint:",
+    "recordcontinuationhint:",
+    "retryinstruction:",
+    "evidenceinstruction:",
+    "nextaction:",
+    "recommendednext:",
+    "recommendednextaction:",
+)
+
 
 def _normalize_text_payload(text: str) -> str:
     """去除常见包装噪音：前后空白与 UTF-8 BOM。"""
@@ -65,7 +98,7 @@ class ToolResultEnvelope:
 
 
 @dataclass
-class ToolResultFacts:
+class ModelVisibleToolResult:
     """模型可见的工具结果事实，不承载二次摘要。"""
 
     tool_name: str
@@ -82,6 +115,27 @@ class ToolResultFacts:
     timed_out: bool = False
     failure_class: str = ""
     action: str = ""
+
+
+# 保留旧导入名，避免外部调用方在投影切换期失效。
+ToolResultFacts = ModelVisibleToolResult
+
+
+@dataclass(frozen=True)
+class RuntimeToolMetadata:
+    """只供运行时/UI/审计使用的工具元数据，不得回灌到 ToolMessage。"""
+
+    result_kind: str
+    strategy: str
+    range_info: str
+    continuation_hint: str
+    truncated: bool
+    original_length: int
+    transport_status: str
+    semantic_status: str
+    exit_code: int | None
+    timed_out: bool
+    failure_class: str
 
 
 def extract_tool_result_semantics(result: Any) -> dict[str, Any]:
@@ -429,6 +483,47 @@ def _try_parse_json_object(result_str: str) -> dict[str, Any] | None:
     except Exception:
         return None
     return payload if isinstance(payload, dict) else None
+
+
+def _normalize_result_key(key: Any) -> str:
+    return re.sub(r"[^a-z0-9]", "", str(key or "").lower())
+
+
+def _project_structured_result_for_model(value: Any) -> Any:
+    """删除结构化结果里指挥下一步工具调用的工作流字段。"""
+    if isinstance(value, dict):
+        return {
+            str(key): _project_structured_result_for_model(item)
+            for key, item in value.items()
+            if _normalize_result_key(key) not in MODEL_HIDDEN_RESULT_KEYS
+        }
+    if isinstance(value, list):
+        return [_project_structured_result_for_model(item) for item in value]
+    return value
+
+
+def project_tool_result_for_model(content: str) -> str:
+    """将工具原始结果投影为只含观察事实的模型可见内容。
+
+    运行时可保留 continuation/retry 等元数据用于 UI、审计或 Team 工作流；
+    对话 Agent 的 ToolMessage 只收到本次调用已经发生的结果。
+    """
+    normalized = str(content or "")
+    parsed = _try_parse_json_object(normalized)
+    if parsed is not None:
+        return json.dumps(
+            _project_structured_result_for_model(parsed),
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+
+    visible_lines = []
+    for line in normalized.splitlines():
+        if line.lstrip().lower().startswith(MODEL_HIDDEN_TEXT_PREFIXES):
+            continue
+        visible_lines.append(line)
+    return "\n".join(visible_lines)
 
 
 def _compact_source_collection_context_result(result_str: str, max_chars: int, continuation_hint: str) -> Optional[str]:
@@ -927,6 +1022,11 @@ def package_tool_result(
                 tag="TOOL_RESULT",
             )
             result_str = str(result)
+    elif isinstance(result, (dict, list)):
+        try:
+            result_str = json.dumps(result, ensure_ascii=False, default=str)
+        except (TypeError, ValueError):
+            result_str = str(result)
     else:
         result_str = str(result)
     result_kind = _infer_result_kind(tool_name, result_str)
@@ -1034,6 +1134,29 @@ def truncate_result(result: Any, max_chars: int = DEFAULT_MAX_CHARS) -> tuple:
     return packaged.content, packaged.truncated
 
 
+def project_runtime_tool_metadata(
+    result: Any,
+    *,
+    tool_name: str = "",
+    max_chars: int = DEFAULT_MAX_CHARS,
+) -> RuntimeToolMetadata:
+    """投影运行时元数据；调用方不得将其序列化进模型消息。"""
+    packaged = package_tool_result(result, tool_name=tool_name, max_chars=max_chars)
+    return RuntimeToolMetadata(
+        result_kind=packaged.result_kind,
+        strategy=packaged.strategy,
+        range_info=packaged.range_info,
+        continuation_hint=packaged.continuation_hint,
+        truncated=packaged.truncated,
+        original_length=packaged.original_length,
+        transport_status=packaged.transport_status,
+        semantic_status=packaged.semantic_status,
+        exit_code=packaged.exit_code,
+        timed_out=packaged.timed_out,
+        failure_class=packaged.failure_class,
+    )
+
+
 def package_tool_result_facts(
     result: Any,
     *,
@@ -1041,17 +1164,17 @@ def package_tool_result_facts(
     action: Optional[str] = None,
     max_chars: int = DEFAULT_MAX_CHARS,
 ) -> ToolResultFacts:
-    """将工具原始返回值封装为模型与 UI 共享的事实载荷。"""
+    """将工具原始返回值封装为模型可见的事实载荷。"""
     packaged = package_tool_result(result, tool_name=tool_name, max_chars=max_chars)
     return ToolResultFacts(
         tool_name=str(tool_name or "").strip(),
-        content=packaged.content,
+        content=project_tool_result_for_model(packaged.content),
         truncated=packaged.truncated,
         original_length=packaged.original_length,
         result_kind=packaged.result_kind,
         strategy=packaged.strategy,
         range_info=packaged.range_info,
-        continuation_hint=packaged.continuation_hint,
+        continuation_hint="",
         transport_status=packaged.transport_status,
         semantic_status=packaged.semantic_status,
         exit_code=packaged.exit_code,
@@ -1080,8 +1203,6 @@ def tool_result_facts_payload(facts: ToolResultFacts) -> dict[str, Any]:
         payload["failureClass"] = facts.failure_class
     if facts.range_info:
         payload["rangeInfo"] = facts.range_info
-    if facts.continuation_hint:
-        payload["continuationHint"] = facts.continuation_hint
     if facts.action:
         payload["action"] = facts.action
     return payload
@@ -1106,8 +1227,6 @@ def render_tool_result_for_model(facts: ToolResultFacts) -> str:
         lines.append(f"action: {facts.action}")
     if facts.range_info:
         lines.append(f"rangeInfo: {facts.range_info}")
-    if facts.continuation_hint:
-        lines.append(f"continuationHint: {facts.continuation_hint}")
     lines.extend(["", "Result:", facts.content])
     return "\n".join(lines)
 
@@ -1214,9 +1333,13 @@ __all__ = [
     "package_tool_result_facts",
     "tool_result_facts_payload",
     "render_tool_result_for_model",
+    "project_tool_result_for_model",
     "extract_tool_result_semantics",
     "ToolResultEnvelope",
+    "ModelVisibleToolResult",
     "ToolResultFacts",
+    "RuntimeToolMetadata",
+    "project_runtime_tool_metadata",
     "format_tool_message",
     "compact_tool_output_for_diagnosis",
     "infer_result_from_tool_outputs",
