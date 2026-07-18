@@ -228,6 +228,58 @@ def test_knowledge_ingestion_tool_directly_ingests_reviewed_inbox_source(tmp_pat
     assert result["ok"] is True
     assert result["status"] == "ingested"
     assert result["directIngestion"]["item"]["title"] == "Tool direct source becomes memory"
+    assert result["workflowReconciliation"]["status"] == "not_applicable"
+    assert result["workflowReconciliation"]["updated"] is False
+    assert items["summary"]["itemCount"] == 1
+
+
+def test_knowledge_ingestion_tool_reports_partial_when_experiment_reconciliation_fails(tmp_path, monkeypatch):
+    env = _seed_team_knowledge(tmp_path, monkeypatch)
+    inbox_source = team_knowledge_service.collect_source_to_inbox(
+        "team",
+        env["team"]["teamId"],
+        source_type="runtime_evidence_refinement",
+        source_ref={
+            "planId": "exp-plan-partial",
+            "experimentResultPackId": "experiment-pack-partial",
+        },
+        original_content="Bounded experiment evidence.",
+        original_filename="experiment-pack-partial.json",
+        title="Experiment result source",
+        actor_agent_id=env["member"]["agentId"],
+    )
+    from core.web.services import team_workflow_orchestration_service
+
+    monkeypatch.setattr(
+        team_workflow_orchestration_service,
+        "reconcile_experiment_knowledge_ingestion",
+        lambda *args, **kwargs: (_ for _ in ()).throw(OSError("ledger unavailable")),
+    )
+
+    with agent_directory_service.active_agent_runtime(env["lead"]["agentId"], session_id="session-knowledge-lead"):
+        result = json.loads(
+            team_knowledge_tools.knowledge_ingestion_tool(
+                knowledge_base_id=_kb_ref(env),
+                source_type="runtime_evidence_refinement",
+                source_ref_json='{"planId":"exp-plan-partial"}',
+                proposal_title="Experiment result becomes memory",
+                proposal_content="The reviewed experiment conclusion is still formal knowledge.",
+                inbox_source_id=inbox_source["inboxSourceId"],
+                owner_type="team",
+                owner_id=env["team"]["teamId"],
+                resolution_note="Knowledge accepted; ledger reconciliation is tested as unavailable.",
+            )
+        )
+
+    items = team_knowledge_service.list_knowledge_items(_kb_ref(env), agent_id=env["member"]["agentId"])
+    assert result["ok"] is True
+    assert result["status"] == "ingested"
+    assert result["workflowReconciliation"] == {
+        "status": "failed",
+        "updated": False,
+        "reason": "experiment_workflow_reconciliation_failed",
+        "errorType": "OSError",
+    }
     assert items["summary"]["itemCount"] == 1
 
 

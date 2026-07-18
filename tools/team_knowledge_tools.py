@@ -275,6 +275,59 @@ def knowledge_ingestion_tool(
                 tags=_split_tags(tags),
             )
             direct_ingestion = review.get("directIngestion") if isinstance(review.get("directIngestion"), dict) else {}
+            workflow_reconciliation = {
+                "status": "not_applicable",
+                "updated": False,
+                "reason": "source_is_not_an_experiment_result_pack",
+            }
+            reviewed_source = review.get("source") if isinstance(review.get("source"), dict) else {}
+            reviewed_source_ref = (
+                reviewed_source.get("sourceRef")
+                if isinstance(reviewed_source.get("sourceRef"), dict)
+                else {}
+            )
+            if (
+                str(owner_type or "").strip().lower() == "team"
+                and reviewed_source_ref.get("planId")
+                and reviewed_source_ref.get("experimentResultPackId")
+            ):
+                try:
+                    from core.web.services import team_workflow_orchestration_service
+
+                    workflow_reconciliation = (
+                        team_workflow_orchestration_service.reconcile_experiment_knowledge_ingestion(
+                            owner_id,
+                            inbox_source_id=normalized_inbox_source_id,
+                            source_ref=reviewed_source_ref,
+                            direct_ingestion=direct_ingestion,
+                            reconciled_by_agent_id=agent_id,
+                        )
+                    )
+                except Exception as exc:
+                    workflow_reconciliation = {
+                        "status": "failed",
+                        "updated": False,
+                        "reason": "experiment_workflow_reconciliation_failed",
+                        "errorType": type(exc).__name__,
+                    }
+                    _record_event(
+                        "knowledge.tool.ingestion.workflow_reconciliation_failed",
+                        runtime=runtime,
+                        level="error",
+                        outcome="failed",
+                        fields={
+                            "knowledgeBaseId": base_id,
+                            "ownerType": owner_type,
+                            "ownerId": owner_id,
+                            "inboxSourceId": normalized_inbox_source_id,
+                            "knowledgeItemId": (
+                                (direct_ingestion.get("item") or {})
+                                if isinstance(direct_ingestion.get("item"), dict)
+                                else {}
+                            ).get("knowledgeItemId", ""),
+                            "errorType": type(exc).__name__,
+                        },
+                    )
             _record_event(
                 "knowledge.tool.ingestion.direct_ingested",
                 runtime=runtime,
@@ -285,6 +338,8 @@ def knowledge_ingestion_tool(
                     "ownerId": owner_id,
                     "inboxSourceId": normalized_inbox_source_id,
                     "knowledgeItemId": ((direct_ingestion.get("item") or {}) if isinstance(direct_ingestion.get("item"), dict) else {}).get("knowledgeItemId", ""),
+                    "workflowReconciliationStatus": str(workflow_reconciliation.get("status") or ""),
+                    "workflowReconciliationUpdated": bool(workflow_reconciliation.get("updated")),
                 },
             )
             return _json_result(
@@ -294,6 +349,7 @@ def knowledge_ingestion_tool(
                     "agentId": agent_id,
                     "review": review,
                     "directIngestion": direct_ingestion,
+                    "workflowReconciliation": workflow_reconciliation,
                 }
             )
 
