@@ -15,6 +15,7 @@ const styles = {
     "grid min-w-0 cursor-pointer grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-x-2 px-3 py-2 text-left [&::-webkit-details-marker]:hidden focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_42%,transparent)] focus-visible:ring-inset",
   ),
   groupIcon: cx("groupIcon", "mt-0.5 shrink-0 text-[var(--fg-tertiary)]"),
+  groupIconRunning: cx("groupIconRunning", "text-[var(--accent-cool)]"),
   groupBody: cx("groupBody", "grid min-w-0 gap-0.5"),
   groupTitleLine: cx("groupTitleLine", "flex min-w-0 flex-wrap items-baseline gap-x-1.5 gap-y-0.5"),
   groupTitle: cx("groupTitle", "font-semibold text-[var(--vui-font-sm)] leading-5 text-[var(--fg-primary)]"),
