@@ -15,6 +15,8 @@ from typing import Any
 
 INFERENCE_LATENT_CORRECTION = "inference_latent_correction"
 MASKED_PREDICTION_ERROR_TRAINING = "masked_prediction_error_training"
+ALIGNED_LOSS_MASK = "aligned"
+SPATIALLY_SHIFTED_LOSS_MASK = "spatially_shifted"
 
 
 @dataclass(frozen=True)
@@ -32,6 +34,7 @@ class ExperimentConfig:
     num_workers: int = 0
     candidate_mechanism: str = INFERENCE_LATENT_CORRECTION
     candidate_masked_loss_weight: float = 4.0
+    candidate_loss_mask_mode: str = ALIGNED_LOSS_MASK
     minimum_mse_improvement: float = 0.001
     maximum_latency_multiplier: float = 5.0
     maximum_global_mse_regression: float = 0.0005
@@ -106,6 +109,15 @@ def structured_mask(images, *, generator, mask_size: int):
     return images * mask, mask
 
 
+def loss_weight_mask(observed_mask, *, mode: str, mask_size: int):
+    missing_mask = 1.0 - observed_mask
+    if mode == ALIGNED_LOSS_MASK:
+        return missing_mask
+    if mode == SPATIALLY_SHIFTED_LOSS_MASK:
+        return missing_mask.roll(shifts=(mask_size, mask_size), dims=(-2, -1))
+    raise ValueError(f"unsupported candidate loss mask mode: {mode}")
+
+
 def corrected_reconstruction(model, corrupted, observed_mask, *, steps: int, correction_rate: float):
     torch, *_ = _torch_modules()
     latent = model.encode(corrupted).detach()
@@ -169,8 +181,12 @@ def train(
             optimizer.zero_grad(set_to_none=True)
             reconstruction = model(corrupted)
             if masked_loss_weight > 0:
-                missing_mask = 1.0 - observed_mask
-                pixel_weights = 1.0 + (masked_loss_weight * missing_mask)
+                weight_mask = loss_weight_mask(
+                    observed_mask,
+                    mode=config.candidate_loss_mask_mode,
+                    mask_size=config.mask_size,
+                )
+                pixel_weights = 1.0 + (masked_loss_weight * weight_mask)
                 loss = ((reconstruction - clean).pow(2) * pixel_weights).sum() / pixel_weights.sum()
             else:
                 loss = loss_fn(reconstruction, clean)
@@ -423,6 +439,7 @@ def run(config: ExperimentConfig, *, data_root: Path, output_dir: Path) -> dict[
             "sharedWeightsBetweenBaselineAndVariant": shared_weights,
             "matchedArchitectureAndParameterCount": True,
             "candidateMechanism": config.candidate_mechanism,
+            "candidateLossMaskMode": config.candidate_loss_mask_mode,
         },
         "training": {
             "baselineEpochLosses": baseline_epoch_losses,
@@ -473,11 +490,24 @@ def self_check() -> None:
     model = build_model(8)
     clean = torch.linspace(0.0, 1.0, steps=2 * 28 * 28).reshape(2, 1, 28, 28)
     corrupted, mask = structured_mask(clean, generator=torch.Generator().manual_seed(7), mask_size=6)
+    missing_mask = loss_weight_mask(mask, mode=ALIGNED_LOSS_MASK, mask_size=6)
+    shifted_mask = loss_weight_mask(mask, mode=SPATIALLY_SHIFTED_LOSS_MASK, mask_size=6)
     baseline = model(corrupted)
     variant = corrected_reconstruction(model, corrupted, mask, steps=2, correction_rate=0.5)
     assert baseline.shape == clean.shape == variant.shape
     assert torch.isfinite(variant).all()
-    print(json.dumps({"status": "ok", "baselineShape": list(baseline.shape), "torch": torch.__version__}))
+    assert float(missing_mask.sum()) == float(shifted_mask.sum())
+    assert float((missing_mask * shifted_mask).sum()) == 0.0
+    print(
+        json.dumps(
+            {
+                "status": "ok",
+                "baselineShape": list(baseline.shape),
+                "lossMaskControl": "ok",
+                "torch": torch.__version__,
+            }
+        )
+    )
 
 
 def parse_args() -> argparse.Namespace:
@@ -497,6 +527,11 @@ def parse_args() -> argparse.Namespace:
         default=INFERENCE_LATENT_CORRECTION,
     )
     parser.add_argument("--candidate-masked-loss-weight", type=float, default=4.0)
+    parser.add_argument(
+        "--candidate-loss-mask-mode",
+        choices=(ALIGNED_LOSS_MASK, SPATIALLY_SHIFTED_LOSS_MASK),
+        default=ALIGNED_LOSS_MASK,
+    )
     parser.add_argument("--minimum-mse-improvement", type=float, default=0.001)
     parser.add_argument("--maximum-latency-multiplier", type=float, default=5.0)
     parser.add_argument("--maximum-global-mse-regression", type=float, default=0.0005)
@@ -521,6 +556,7 @@ def main() -> None:
         correction_rate=args.correction_rate,
         candidate_mechanism=args.candidate_mechanism,
         candidate_masked_loss_weight=args.candidate_masked_loss_weight,
+        candidate_loss_mask_mode=args.candidate_loss_mask_mode,
         minimum_mse_improvement=args.minimum_mse_improvement,
         maximum_latency_multiplier=args.maximum_latency_multiplier,
         maximum_global_mse_regression=args.maximum_global_mse_regression,

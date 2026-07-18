@@ -83,6 +83,11 @@ def prepare_full_run(
             minimum=0.0,
             maximum=100.0,
         ),
+        "candidateLossMaskMode": str(
+            execution.get("candidateLossMaskMode")
+            or method.get("candidateLossMaskMode")
+            or "aligned"
+        ).strip(),
         "minimumMseImprovement": _bounded_float(
             execution.get("minimumMseImprovement", method.get("minimumMseImprovement", 0.001)),
             "minimumMseImprovement",
@@ -107,6 +112,8 @@ def prepare_full_run(
         "masked_prediction_error_training",
     }:
         raise FormalRunnerError("candidateMechanism is not supported by the formal adapter.")
+    if run_options["candidateLossMaskMode"] not in {"aligned", "spatially_shifted"}:
+        raise FormalRunnerError("candidateLossMaskMode is not supported by the formal adapter.")
 
     self_check = _run_process(
         [str(python_executable), str(script_path), "--self-check"],
@@ -354,6 +361,8 @@ def _experiment_command(
         str(options["candidateMechanism"]),
         "--candidate-masked-loss-weight",
         str(options["candidateMaskedLossWeight"]),
+        "--candidate-loss-mask-mode",
+        str(options["candidateLossMaskMode"]),
         "--minimum-mse-improvement",
         str(options["minimumMseImprovement"]),
         "--maximum-latency-multiplier",

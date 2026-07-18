@@ -30,6 +30,7 @@ def _method_config() -> dict[str, object]:
         "seeds": [17, 42, 101],
         "candidateMechanism": "masked_prediction_error_training",
         "candidateMaskedLossWeight": 4.0,
+        "candidateLossMaskMode": "spatially_shifted",
         "maximumLatencyMultiplier": 1.25,
     }
 
@@ -61,10 +62,30 @@ def test_prepare_full_run_requires_explicit_external_environment_and_builds_fixe
     assert [item["seed"] for item in prepared["commands"]] == [17, 42, 101]
     assert all("--seed" in item["args"] for item in prepared["commands"])
     assert all("masked_prediction_error_training" in item["args"] for item in prepared["commands"])
+    assert all("--candidate-loss-mask-mode" in item["args"] for item in prepared["commands"])
+    assert all("spatially_shifted" in item["args"] for item in prepared["commands"])
+    assert prepared["runOptions"]["candidateLossMaskMode"] == "spatially_shifted"
     assert prepared["runOptions"]["maximumLatencyMultiplier"] == 1.25
     assert calls == [[str(tmp_path / "python.exe"), str(script_path), "--self-check"]]
     assert "user_triggered_only" in prepared["boundaries"]
     assert "manual_result_review_required" in prepared["boundaries"]
+
+
+def test_prepare_full_run_rejects_unknown_candidate_loss_mask_mode(tmp_path, monkeypatch):
+    project_root = tmp_path / "project"
+    script_path = project_root / "experiments" / "challenge_cup_predictive_coding" / "fashion_mnist_smoke.py"
+    script_path.parent.mkdir(parents=True)
+    script_path.write_text("# trusted runner placeholder", encoding="utf-8")
+    method_config = _method_config()
+    method_config["candidateLossMaskMode"] = "random"
+
+    with pytest.raises(formal_runner.FormalRunnerError, match="candidateLossMaskMode"):
+        formal_runner.prepare_full_run(
+            formal_runner.FASHION_MNIST_MULTI_SEED_ADAPTER,
+            method_config=method_config,
+            execution_config=_execution_config(tmp_path, project_root),
+            project_root=project_root,
+        )
 
 
 def test_prepare_full_run_rejects_repository_local_artifacts_before_spawning_a_process(tmp_path):

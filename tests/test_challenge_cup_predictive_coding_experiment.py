@@ -96,3 +96,4 @@ def test_fashion_mnist_experiment_self_check() -> None:
     assert completed.returncode == 0, completed.stderr
     assert '"status": "ok"' in completed.stdout
     assert '"baselineShape": [2, 1, 28, 28]' in completed.stdout
+    assert '"lossMaskControl": "ok"' in completed.stdout
