@@ -7,11 +7,11 @@ const styles = {
     "reviewQueueActions min-w-0 flex flex-wrap items-center gap-1.5",
   reviewQueueBody:
     "reviewQueueBody min-w-0 grid min-w-0 content-start gap-1 text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
-  // Single card, single column — no nested panel chrome that collides with title/summary.
+  // Single card, single column — solid background so nothing paints through from the next section.
   reviewQueueItem:
-    "reviewQueueItem min-w-0 grid grid-cols-[auto_minmax(0,1fr)] items-start gap-x-2 gap-y-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2.5",
+    "reviewQueueItem relative z-0 min-w-0 grid grid-cols-[auto_minmax(0,1fr)] items-start gap-x-2 gap-y-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2.5 shadow-none",
   reviewQueueList:
-    "reviewQueueList min-w-0 grid content-start gap-2 overflow-auto",
+    "reviewQueueList min-w-0 grid content-start gap-2",
   // Plain body text; do not re-introduce nested bordered cards.
   reviewQueueSummary:
     "reviewQueueSummary m-0 min-w-0 max-w-full text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] [overflow-wrap:anywhere] [word-break:break-word]",
