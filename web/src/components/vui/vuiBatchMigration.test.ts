@@ -30,6 +30,7 @@ const rawControlAllowedFiles = new Set([
   // Path B Wave R: shadcn-style native controls are VUI renderers, not page controls.
   "components/vui/renderers/shadcn/ShadcnButton.tsx",
   "components/vui/renderers/shadcn/ShadcnInput.tsx",
+  "components/vui/renderers/shadcn/ShadcnTextarea.tsx",
 ]);
 
 const migrationTargets = [
