@@ -27,7 +27,6 @@ from core.infrastructure.event_bus import get_event_bus, EventNames
 from core.infrastructure.agent_session import get_session_state
 from core.infrastructure.evolution_governor import get_evolution_governor
 from core.infrastructure.llm_utils import parse_tool_args
-from core.infrastructure.tool_recommender import decide_next_tools
 from core.infrastructure.tool_result import (
     extract_tool_result_semantics,
     infer_tool_business_success,
@@ -768,8 +767,6 @@ class ToolExecutor:
                 fields=_summarize_tool_args(tool_args),
             )
             return (blocked_message, None)
-
-        self._track_tool_decision_alignment(tool_name)
 
         soft_result = self._check_codex_style_reading_governance(tool_name, tool_args)
         if soft_result:
@@ -1585,17 +1582,6 @@ class ToolExecutor:
             session.note_diagnostic_inspection()
             session.note_diagnostic_observation()
 
-        if session.get_attention_snapshot().get("feedback_loop_ready"):
-            if tool_name in {"read_file_tool", "code_symbol_tool", "grep_search_tool", "python_lint_tool", "run_test_for_tool"}:
-                anchor = ""
-                if tool_name in {"read_file_tool", "python_lint_tool"}:
-                    anchor = str((tool_args or {}).get("file_path") or "")
-                elif tool_name == "code_symbol_tool":
-                    anchor = str((tool_args or {}).get("query") or (tool_args or {}).get("symbol") or (tool_args or {}).get("file_path") or "")
-                elif tool_name == "grep_search_tool":
-                    anchor = str((tool_args or {}).get("regex_pattern") or "")
-                session.freeze_scope(anchor or session.get_attention_snapshot().get("feedback_loop_target") or "当前诊断锚点")
-
         if tool_name == "read_file_tool":
             self._record_file_read(session, tool_args, result_text, tool_name)
         elif tool_name == "code_symbol_tool" and str((tool_args or {}).get("mode") or "").lower() == "inspect":
@@ -1612,20 +1598,13 @@ class ToolExecutor:
                 query,
                 scope,
             )
-            self._record_search_continuation(session, result_text, tool_name)
 
         if tool_name in reading_signal_tools:
             sufficiency = session.evaluate_reading_sufficiency()
             if sufficiency:
                 session.set_reading_sufficiency(sufficiency)
-                if session.get_attention_snapshot().get("scope_frozen") and any(
-                    keyword in sufficiency for keyword in ["已足够", "已具备", "可继续修复", "可形成分析结论"]
-                ):
-                    session.set_convergence_state("ready_to_fix")
-            decision = decide_next_tools(session.get_attention_snapshot())
-            session.set_tool_decision(decision.next_intent, decision.recommended_tools, decision.avoid_tools)
         elif tool_name in action_phase_tools:
-            session.clear_reading_guidance(clear_decision=True)
+            session.clear_reading_guidance()
 
     def _detect_tool_pattern(self, tool_name: str, tool_args: dict) -> Optional[str]:
         """识别高价值重复失败模式。"""
@@ -1662,41 +1641,6 @@ class ToolExecutor:
                 start_line = offset + 1
                 end_line = offset + max_lines
                 session.record_read_range(file_path, start_line, end_line, source=tool_name)
-
-    @staticmethod
-    def _track_tool_decision_alignment(tool_name: str):
-        session = get_session_state()
-        snapshot = session.get_attention_snapshot()
-        recommended = snapshot.get("recommended_tools") or []
-        avoid = snapshot.get("avoid_tools") or []
-        if tool_name in avoid:
-            session.record_tool_deviation(tool_name, "当前工具在避免列表中，说明本轮选择偏离了推荐路径。")
-            session.record_blocker(
-                "tool_deviation",
-                f"{tool_name} 当前处于避免列表中。",
-                f"优先改用：{' -> '.join(recommended)}" if recommended else "请回到主通道工具"
-            )
-            if snapshot.get("scope_frozen"):
-                session.mark_scope_expansion_denied(f"{tool_name} 偏离了已冻结的当前工具路径。")
-        elif recommended and tool_name not in recommended and tool_name == "cli_tool":
-            session.record_tool_deviation(tool_name, "当前存在更合适的主通道工具，不应默认回退到 cli_tool。")
-            session.record_blocker(
-                "tool_deviation",
-                "当前已存在推荐工具链，cli_tool 仅应作为兜底。",
-                f"优先改用：{' -> '.join(recommended)}"
-            )
-            if snapshot.get("scope_frozen"):
-                session.mark_scope_expansion_denied("已冻结当前范围，但仍尝试回退到 cli_tool。")
-
-    @staticmethod
-    def _record_search_continuation(session, result_text: str, tool_name: str):
-        continuation_match = re.search(r"\[续读\]\s*(.+)", result_text)
-        if not continuation_match:
-            return
-        hint = continuation_match.group(1).strip()
-        path_match = re.search(r'file_path="([^"]+)"', hint)
-        path = path_match.group(1) if path_match else ""
-        session.record_pending_continuation(tool_name, hint, path, strength="weak")
 
     def _try_auto_update_map(self, tool_name: str, tool_args: dict):
         """文件修改工具执行成功后，自动触发代码库地图和 Git 注意力刷新。"""

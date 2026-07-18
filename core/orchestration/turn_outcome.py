@@ -113,43 +113,6 @@ class TurnOutcomeController:
             return f"LLM 连续失败达到 {stop_limit} 次，当前轮次结束。"
         return None
 
-    def should_stop_for_convergence(
-        self,
-        *,
-        iteration: int,
-        no_new_evidence_steps: int,
-        consecutive_tool_only_steps: int = 0,
-        consecutive_bookkeeping_tool_only_steps: int = 0,
-        delegation_failures: int,
-        total_tool_calls: int,
-        substantive_tool_calls: int = 0,
-    ) -> Optional[str]:
-        snapshot = self._get_attention_snapshot() or {}
-        if snapshot.get("convergence_state") == "ready_to_stop":
-            return snapshot.get("stop_reason") or "当前轮已满足停止条件，直接收束。"
-        if delegation_failures >= 1 and snapshot.get("diagnostic_drift") and iteration >= 2:
-            return "委派未带来新证据，且当前仍处于诊断漂移，直接结束本轮并等待下一轮重规划。"
-        if (
-            snapshot.get("scope_frozen")
-            and snapshot.get("feedback_loop_ready")
-            and no_new_evidence_steps >= 2
-            and iteration >= 2
-        ):
-            detail = snapshot.get("stop_reason") or "当前锚点已完成主要收窄。"
-            return f"当前轮范围已冻结，且连续没有新增证据，直接收束。{detail}"
-        if (
-            not snapshot.get("feedback_loop_ready")
-            and total_tool_calls >= 4
-            and no_new_evidence_steps >= 2
-            and iteration >= 2
-        ):
-            return "当前仍未形成最小反馈环，且工具调用已开始堆积，本轮先停止并等待下一轮重建观测闭环。"
-        if no_new_evidence_steps >= 3 and iteration >= 3:
-            return "连续多步没有新增证据，本轮直接收束，避免继续空转。"
-        if total_tool_calls >= 6 and not snapshot.get("last_validation_summary") and no_new_evidence_steps >= 2:
-            return "工具调用已明显堆积但没有形成验证闭环，本轮直接结束。"
-        return None
-
     @staticmethod
     def is_readonly_platform_judgment_complete(goal: str, visible_text: str) -> bool:
         """识别只读平台兼容性判断已给出明确结论，可直接收束。"""
@@ -258,17 +221,6 @@ class TurnOutcomeController:
                 restart_seen = True
 
         return close_seen and not restart_seen
-
-    @classmethod
-    def should_skip_convergence_stop_for_pending_restart(
-        cls,
-        *,
-        expects_restart_after_transaction_close: bool,
-        messages: list,
-    ) -> bool:
-        if not expects_restart_after_transaction_close:
-            return False
-        return cls.has_successful_close_without_restart(messages)
 
     @staticmethod
     def should_finish_single_turn_after_direct_response(
