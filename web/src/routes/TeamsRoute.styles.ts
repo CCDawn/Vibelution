@@ -569,11 +569,11 @@ const styles: Record<string, string> = {
   workflowValidation:
     "workflowValidation min-w-0",
   workspace:
-    "workspace min-w-0 flex-1 grid min-h-0 gap-[var(--team-workbench-gap)] p-[var(--team-workbench-gap)] !grid min-h-0 grid-cols-[minmax(520px,1fr)_minmax(300px,380px)] gap-[var(--team-workbench-gap)] overflow-hidden max-[760px]:h-auto max-[760px]:grid-cols-[minmax(0,1fr)] max-[760px]:content-start max-[760px]:overflow-auto",
+    "workspace min-w-0 flex-1 grid min-h-0 gap-[var(--team-workbench-gap)] p-[var(--team-workbench-gap)] !grid min-h-0 grid-cols-[minmax(0,1fr)_clamp(320px,26vw,420px)] gap-[var(--team-workbench-gap)] overflow-hidden max-[760px]:h-auto max-[760px]:grid-cols-[minmax(0,1fr)] max-[760px]:content-start max-[760px]:overflow-auto",
   workspaceResearch:
-    "workspaceResearch min-w-0 grid min-h-0 !grid-cols-[minmax(0,1fr)] !gap-2 !overflow-auto rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] p-2 [scrollbar-gutter:stable]",
+    "workspaceResearch min-w-0 grid min-h-0 !grid-cols-[minmax(0,1fr)] !gap-2 !overflow-auto rounded-none border-0 border-t border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] p-2 [scrollbar-gutter:stable]",
   workspaceResearchCanvas:
-    "workspaceResearchCanvas min-w-0 grid min-h-0 gap-[var(--team-workbench-gap)] p-[var(--team-workbench-gap)] !grid h-full grid-cols-[minmax(520px,1fr)_minmax(300px,380px)] overflow-hidden max-[760px]:h-auto max-[760px]:grid-cols-[minmax(0,1fr)] max-[760px]:content-start max-[760px]:overflow-auto",
+    "workspaceResearchCanvas min-w-0 grid min-h-0 gap-[var(--team-workbench-gap)] p-[var(--team-workbench-gap)] !grid h-full grid-cols-[minmax(0,1fr)_clamp(320px,26vw,420px)] overflow-hidden max-[760px]:h-auto max-[760px]:grid-cols-[minmax(0,1fr)] max-[760px]:content-start max-[760px]:overflow-auto",
 };
 
 export default styles;

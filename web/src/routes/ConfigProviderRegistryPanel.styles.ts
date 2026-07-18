@@ -5,7 +5,7 @@ const styles = {
   sectionSurface: `vui-routes-configproviderregistrypanel sectionSurface ${panelSurface} grid h-full min-h-0 min-w-0 [grid-template-rows:auto_minmax(0,1fr)] gap-3 overflow-hidden p-3`,
   header: "vui-routes-configproviderregistrypanel header min-w-0",
   registryWorkspace:
-    "vui-routes-configproviderregistrypanel registryWorkspace h-full min-h-0 min-w-0 [--vui-workspace-sidebar:clamp(22rem,28%,28rem)] gap-3 overflow-hidden",
+    "vui-routes-configproviderregistrypanel registryWorkspace h-full min-h-0 min-w-0 [--vui-workspace-sidebar:clamp(18rem,26vw,24rem)] gap-2 overflow-hidden",
   providerRail: "vui-routes-configproviderregistrypanel providerRail grid h-full min-h-0 min-w-0 [grid-template-rows:minmax(0,1fr)] gap-2",
   providerList: "vui-routes-configproviderregistrypanel providerList h-full min-h-0 min-w-0 overflow-y-auto pr-1",
   providerButton:

@@ -3,7 +3,7 @@ const panelSurface =
 
 const styles = {
   root: "vui-routes-configquicksetuppanel root min-w-0",
-  workspace: "vui-routes-configquicksetuppanel workspace grid w-full max-w-[88rem] min-w-0 gap-4",
+  workspace: "vui-routes-configquicksetuppanel workspace grid w-full max-w-none min-w-0 gap-3",
   inputPanel: `vui-routes-configquicksetuppanel inputPanel ${panelSurface} grid min-w-0 gap-3 p-4`,
   inputGrid: "vui-routes-configquicksetuppanel inputGrid grid min-w-0 items-end [grid-template-columns:minmax(15rem,1fr)_minmax(18rem,1.2fr)_max-content] gap-3",
   field: "vui-routes-configquicksetuppanel field grid min-w-0 gap-1 text-[var(--vui-font-xs)] font-semibold text-vui-fg-secondary [&_[data-vui=select-trigger]]:!h-10 [&_[data-vui=select-trigger]]:!min-h-10 [&_input]:!min-h-10",

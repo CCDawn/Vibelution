@@ -438,7 +438,7 @@ describe("TeamsRoute layout contract", () => {
 
   it("keeps the research overview on a readable workbench surface instead of a transparent card wall", () => {
     expect(routeStyles.workspaceResearch).toContain("bg-[var(--vui-surface-panel)]");
-    expect(routeStyles.workspaceResearch).toContain("rounded-[var(--radius-panel)]");
+    expect(routeStyles.workspaceResearch).toContain("rounded-none");
     expect(routeStyles.workspaceResearch).toContain("gap-2");
     expect(routeStyles.workspaceResearch).not.toContain("gap-[var(--team-workbench-gap)]");
 
@@ -1630,7 +1630,7 @@ describe("TeamsRoute layout contract", () => {
     expect(routeStylesSource).not.toContain("grid-cols-[58px_minmax(0,1fr)]");
     expect(routeStylesSource).not.toMatch(/\.sourceCollectionTraceBody p \{[\s\S]*?-webkit-line-clamp: 3/);
     expect(teamSourceCollectionPanelFrameStyles.sourceCollectionFocusedPanel).toContain(
-      "grid-cols-[minmax(0,1fr)_minmax(320px,380px)]",
+      "grid-cols-[minmax(0,1fr)_clamp(320px,26vw,420px)]",
     );
     expect(teamSourceCollectionPanelFrameStyles.sourceCollectionFocusedPanel).toContain("isolate");
     expect(routeStyles.route).toContain("[--team-workbench-gap:4px]");
@@ -1923,14 +1923,14 @@ describe("TeamsRoute layout contract", () => {
     expect(routeStyles.teamUnavailableSurface).toContain("content-start");
     expect(routeStyles.teamUnavailableSurface).toContain("grid-cols-[minmax(0,720px)]");
     expect(routeStyles.teamUnavailableCard).toContain("max-w-[720px]");
-    expect(routeStyles.workspace).toContain("grid-cols-[minmax(520px,1fr)_minmax(300px,380px)]");
+    expect(routeStyles.workspace).toContain("grid-cols-[minmax(0,1fr)_clamp(320px,26vw,420px)]");
     expect(routeStyles.workspace).toContain("overflow-hidden");
     expect(routeStyles.workspace).toContain("max-[760px]:h-auto");
     expect(routeStyles.workspace).toContain("max-[760px]:grid-cols-[minmax(0,1fr)]");
     expect(routeStyles.workspace).toContain("max-[760px]:content-start");
     expect(routeStyles.workspace).toContain("max-[760px]:overflow-auto");
     expect(routeStyles.workspaceResearchCanvas).toContain("h-full");
-    expect(routeStyles.workspaceResearchCanvas).toContain("grid-cols-[minmax(520px,1fr)_minmax(300px,380px)]");
+    expect(routeStyles.workspaceResearchCanvas).toContain("grid-cols-[minmax(0,1fr)_clamp(320px,26vw,420px)]");
     expect(routeStyles.workspaceResearchCanvas).toContain("overflow-hidden");
     expect(routeStyles.workspaceResearchCanvas).toContain("max-[760px]:h-auto");
     expect(routeStyles.workspaceResearchCanvas).toContain("max-[760px]:grid-cols-[minmax(0,1fr)]");
