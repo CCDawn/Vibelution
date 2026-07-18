@@ -10,5 +10,4 @@ export {
   vuiButtonPrimaryClass,
 } from "../shared/buttonSlots";
 
-export const vuiChipBaseClass =
-  "border border-vui-border-subtle bg-vui-control-muted text-vui-fg-secondary";
+export { vuiChipBaseClass } from "../shared/chipSlots";

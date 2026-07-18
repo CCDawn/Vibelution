@@ -1,33 +1,32 @@
-import { Chip, type ChipProps } from "@heroui/react";
+import { type HTMLAttributes, type ReactNode } from "react";
 
-import { vuiChipBaseClass } from "../renderers/heroui/heroSlots";
-import { type VuiTone, vuiToneClass } from "../renderers/heroui/heroVariants";
+import { type VuiTone } from "../renderers/shared/buttonVariants";
+import { ShadcnChip } from "../renderers/shadcn/ShadcnChip";
 
-export type VChipProps = Omit<ChipProps, "variant" | "color" | "size"> & {
+export type VChipProps = Omit<HTMLAttributes<HTMLSpanElement>, "children"> & {
   tone?: VuiTone;
+  children?: ReactNode;
+  "data-vui"?: string;
 };
 
+/**
+ * Product chip API. Implementation is the shadcn-style native renderer.
+ */
 export function VChip({
   tone = "neutral",
   className,
   children,
+  "data-vui": dataVui,
   ...props
 }: VChipProps) {
   return (
-    <Chip
+    <ShadcnChip
       {...props}
-      data-vui="chip"
-      size="sm"
-      className={[
-        vuiChipBaseClass,
-        vuiToneClass(tone),
-        "h-[24px] max-w-full px-1.5 text-[var(--vui-font-xs)] font-semibold",
-        className,
-      ]
-        .filter(Boolean)
-        .join(" ")}
+      tone={tone}
+      data-vui={dataVui ?? "chip"}
+      className={className}
     >
       {children}
-    </Chip>
+    </ShadcnChip>
   );
 }
