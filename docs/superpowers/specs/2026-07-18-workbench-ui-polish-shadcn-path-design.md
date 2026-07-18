@@ -81,7 +81,7 @@ Renderer+tokens  →  唯一视觉实现（今日 HeroUI，可换 shadcn/Radix�
 | **1** | Agents 工作区列宽/详情填满；config 宽屏并排；空状态；Chat gutter/密度；对话区 0 缝 | 布局测试 + build；浏览器可选 |
 | **2** | `VErrorSummary` + `summarizeErrorText`；Chat 运行时错误/长 notice 一行摘要可展开 | 组件/layout 测试 |
 | **3** | Teams/Memory/Config 同构：主区 `minmax(0,1fr)` 吃满，侧栏 `clamp` 弹性；Config 去 max-width 与过重 elevation | layout 测试 |
-| **R** | HeroUI → shadcn/Radix renderer（按 primitive） | 进行中：Button / Tooltip / Chip / Input / Textarea / Select |
+| **R** | HeroUI → shadcn/Radix renderer（按 primitive） | 进行中：Button / Tooltip / Chip / Input / Textarea / Select / Checkbox |
 
 ### Wave R（进行中）
 
@@ -92,8 +92,9 @@ Renderer+tokens  →  唯一视觉实现（今日 HeroUI，可换 shadcn/Radix�
 - `web/src/components/vui/renderers/shadcn/ShadcnInput.tsx`
 - `web/src/components/vui/renderers/shadcn/ShadcnTextarea.tsx`
 - `web/src/components/vui/renderers/shadcn/ShadcnSelect.tsx`（原生 select，保留 selectedKey API）
-- `web/src/components/vui/forms/VSelect.tsx` / `VStringSelect.tsx`
-- 下一步候选：`VCheckbox` 仍可走 HeroUI
+- `web/src/components/vui/renderers/shadcn/ShadcnCheckbox.tsx`（原生 checkbox，保留 isSelected / onChange(boolean)）
+- `web/src/components/vui/forms/VSelect.tsx` / `VStringSelect.tsx` / `VCheckbox.tsx`
+- 核心 form primitive 切换完成；后续可按需补 Radix 富交互或页级视觉细修
 
 ### Wave 2 文件范围
 
