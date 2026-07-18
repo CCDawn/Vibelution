@@ -1,4 +1,4 @@
-import { type VuiDensity } from "../renderers/heroui/heroVariants";
+import { type VuiDensity } from "../renderers/shared/buttonVariants";
 
 export function vuiFormControlClass(density: VuiDensity | undefined): string {
   const heightClass = density === "normal" ? "min-h-9" : "min-h-8";
