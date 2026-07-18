@@ -97,3 +97,4 @@ def test_fashion_mnist_experiment_self_check() -> None:
     assert '"status": "ok"' in completed.stdout
     assert '"baselineShape": [2, 1, 28, 28]' in completed.stdout
     assert '"lossMaskControl": "ok"' in completed.stdout
+    assert '"deterministically_permuted"' in completed.stdout
