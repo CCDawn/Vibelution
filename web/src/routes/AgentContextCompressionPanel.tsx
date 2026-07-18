@@ -1,6 +1,6 @@
 import { ExternalLink } from "lucide-react";
 
-import { VButton, VCheckbox, VFieldRow, VNativeInput, VNativeSelect } from "../components/vui";
+import { VButton, VCheckbox, VFieldRow, VNativeInput, VNativeSelect, VTooltip } from "../components/vui";
 import styles from "./AgentContextCompressionPanel.styles";
 
 export type AgentContextCompressionPolicyDraft = {
@@ -55,9 +55,14 @@ export function AgentContextCompressionPanel({
   const custom = policy.mode === "custom";
 
   return (
-    <section className={styles.fieldWide} title={title}>
-      <span>{copy.contextCompressionPolicy}</span>
-      <div className={styles.compressionPolicyGrid}>
+    <VTooltip content={title} width="wide">
+      <section
+        className={styles.fieldWide}
+        tabIndex={0}
+        aria-label={`${copy.contextCompressionPolicy} · ${title}`}
+      >
+        <span>{copy.contextCompressionPolicy}</span>
+        <div className={styles.compressionPolicyGrid}>
         <VFieldRow label={copy.contextCompressionPolicy}>
           <VNativeSelect
             value={policy.mode}
@@ -95,7 +100,7 @@ export function AgentContextCompressionPanel({
           />
         </VFieldRow>
       </div>
-      <div className={styles.compressionPolicySubgrid}>
+        <div className={styles.compressionPolicySubgrid}>
         <VFieldRow label={`${copy.contextCompressionThresholds} · ${lang === "zh" ? "轻量" : "Light"}`}>
           <VNativeInput
             type="number"
@@ -173,7 +178,7 @@ export function AgentContextCompressionPanel({
           />
         </VFieldRow>
       </div>
-      <div className={styles.compressionPolicyFooter}>
+        <div className={styles.compressionPolicyFooter}>
         <VFieldRow label={copy.contextCompressionKeepAi}>
           <VNativeInput
             type="number"
@@ -198,16 +203,17 @@ export function AgentContextCompressionPanel({
           {copy.contextCompressionExtractDecisions}
         </VCheckbox>
       </div>
-      <div className={styles.configDeepLinkRow}>
-        <VButton
-          type="button"
-          variant="secondary"
-          icon={<ExternalLink size={15} />}
-          onPress={onOpenContextConfig}
-        >
-          {lang === "zh" ? "去上下文配置" : "Open context config"}
-        </VButton>
-      </div>
-    </section>
+        <div className={styles.configDeepLinkRow}>
+          <VButton
+            type="button"
+            variant="secondary"
+            icon={<ExternalLink size={15} />}
+            onPress={onOpenContextConfig}
+          >
+            {lang === "zh" ? "去上下文配置" : "Open context config"}
+          </VButton>
+        </div>
+      </section>
+    </VTooltip>
   );
 }

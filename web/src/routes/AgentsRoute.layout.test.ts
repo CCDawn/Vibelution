@@ -707,6 +707,10 @@ describe("AgentsRoute layout contract", () => {
     expect(contextCompressionPanelSource).toContain("styles.compressionPolicyGrid");
     expect(contextCompressionPanelSource).toContain("styles.compressionPolicySubgrid");
     expect(contextCompressionPanelSource).toContain("styles.compressionPolicyFooter");
+    expect(contextCompressionPanelSource).toContain("VTooltip");
+    expect(contextCompressionPanelSource).toContain('<VTooltip content={title} width="wide">');
+    expect(contextCompressionPanelSource).not.toContain('className={styles.fieldWide} title={title}');
+    expect(contextCompressionPanelSource).toContain('aria-label={`${copy.contextCompressionPolicy} · ${title}`}');
     expect(contextCompressionPanelSource).toContain('from "./AgentContextCompressionPanel.styles"');
     expect(contextCompressionPanelSource).not.toContain("AgentsRoute.styles");
     expect(contextCompressionStyles.compressionPolicyGrid).toBeTruthy();
@@ -818,6 +822,10 @@ describe("AgentsRoute layout contract", () => {
     expect(archiveZonePanelSource).toContain("onPress={onArchive}");
     expect(archiveZonePanelSource).toContain("onPress={onPurge}");
     expect(archiveZonePanelSource).toContain('variant="danger"');
+    expect(archiveZonePanelSource).toContain("VTooltip");
+    expect(archiveZonePanelSource).toContain('<VTooltip content={title} width="wide">');
+    expect(archiveZonePanelSource).not.toContain('title={title}');
+    expect(archiveZonePanelSource).toContain('aria-label={`${heading} · ${title}`}');
     expect(archiveZonePanelSource).toContain('from "./AgentArchiveZonePanel.styles"');
     expect(archiveZonePanelSource).not.toContain("AgentsRoute.styles");
     expect(archiveZoneStyles.dangerZone).toBeTruthy();
@@ -986,6 +994,11 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).not.toContain("<small>{toolBundleMeta(bundle, lang)}</small>");
     expect(routeSource).toContain("healthTitle: issueSummary(selectedAgent.health, lang)");
     expect(detailHeaderPanelSource).toContain("className={styles.detailHealthStatus}");
+    expect(detailHeaderPanelSource).toContain("VTooltip");
+    expect(detailHeaderPanelSource).toContain('<VTooltip content={title} width="wide">');
+    expect(detailHeaderPanelSource).toContain('<VTooltip content={healthTitle} width="wide">');
+    expect(detailHeaderPanelSource).not.toContain('title={healthTitle}');
+    expect(detailHeaderPanelSource).toContain('aria-label={`${healthLabel} · ${healthTitle}`}');
     expect(routeSource).not.toContain("<small>{issueSummary(selectedAgent.health, lang)}</small>");
     expect(coreConfigPanelSource).toContain("content={slotHint}");
     expect(coreConfigPanelSource).not.toContain("title={`${slot.required ? copy.requiredSlot : copy.optionalSlot} · ${slot.description}`}");
