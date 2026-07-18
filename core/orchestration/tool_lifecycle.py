@@ -19,7 +19,9 @@ from core.infrastructure.llm_utils import parse_tool_args
 from core.infrastructure.tool_result import (
     infer_tool_business_success,
     package_tool_result_facts,
+    project_runtime_tool_metadata,
     render_tool_result_for_model,
+    RuntimeToolMetadata,
 )
 from core.logging.logger import debug as _debug_logger
 from core.logging.unified_logger import logger
@@ -30,6 +32,7 @@ from tools.rebirth_tools import handle_restart_request
 ToolExecuteFn = Callable[..., Tuple[Any, Optional[str]]]
 ToolGuardFn = Callable[[str, dict], Optional[str]]
 ToolResultObserverFn = Callable[[Dict[str, Any], Any, Optional[str]], None]
+ToolRuntimeMetadataObserverFn = Callable[[Dict[str, Any], RuntimeToolMetadata], None]
 
 
 def _coerce_result_status(value: Any) -> str:
@@ -80,12 +83,14 @@ class ToolLifecycleBridge:
         tool_executor_execute: ToolExecuteFn,
         tool_guard: Optional[ToolGuardFn] = None,
         tool_result_observer: Optional[ToolResultObserverFn] = None,
+        runtime_metadata_observer: Optional[ToolRuntimeMetadataObserverFn] = None,
         post_close_action_pending: Optional[Callable[[], bool]] = None,
         self_modified: bool = False,
     ) -> None:
         self._tool_executor_execute = tool_executor_execute
         self._tool_guard = tool_guard
         self._tool_result_observer = tool_result_observer
+        self._runtime_metadata_observer = runtime_metadata_observer
         self._post_close_action_pending = post_close_action_pending
         self._self_modified = self_modified
 
@@ -193,13 +198,21 @@ class ToolLifecycleBridge:
         return (result, action)
 
     def _observe_tool_result(self, tool_call: Dict[str, Any], result: Any, action: Optional[str]) -> None:
-        if self._tool_result_observer is None:
-            return
-        try:
-            self._tool_result_observer(tool_call, result, action)
-        except Exception as exc:
-            _debug_logger.warning(f"[工具生命周期] 工具结果观察器回调失败: {type(exc).__name__}: {exc}")
-            pass
+        if self._tool_result_observer is not None:
+            try:
+                self._tool_result_observer(tool_call, result, action)
+            except Exception as exc:
+                _debug_logger.warning(f"[工具生命周期] 工具结果观察器回调失败: {type(exc).__name__}: {exc}")
+
+        if self._runtime_metadata_observer is not None:
+            try:
+                runtime_metadata = project_runtime_tool_metadata(
+                    result,
+                    tool_name=str(tool_call.get("name") or "").strip(),
+                )
+                self._runtime_metadata_observer(tool_call, runtime_metadata)
+            except Exception as exc:
+                _debug_logger.warning(f"[工具生命周期] 运行时元数据观察器回调失败: {type(exc).__name__}: {exc}")
 
     def _has_post_close_action_pending(self) -> bool:
         if self._post_close_action_pending is None:

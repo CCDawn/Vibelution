@@ -1856,7 +1856,7 @@ class TestToolExecutorErrorHandling:
         assert "[文件读取] 错误" not in str(result)
         assert "第     2 行" in str(result)
 
-    def test_duplicate_read_returns_compact_governance_without_body(self, executor, tmp_path):
+    def test_duplicate_read_executes_and_returns_requested_body(self, executor, tmp_path):
         reset_session_state()
         file_path = tmp_path / "demo_repeat.txt"
         file_path.write_text("a\nb\nc\nd\ne\n", encoding="utf-8")
@@ -1866,12 +1866,11 @@ class TestToolExecutorErrorHandling:
 
         snapshot = get_session_state().get_attention_snapshot()
         assert "[短路]" not in str(second)
-        assert "[阅读治理]" in str(second)
-        assert "未重复返回正文" in str(second)
-        assert "第     1 行" not in str(second)
-        assert any(item["kind"] == "duplicate_read_soft_redirect" for item in snapshot["recent_blockers"])
+        assert "[阅读治理]" not in str(second)
+        assert "第     1 行" in str(second)
+        assert not any(item["kind"] == "duplicate_read_soft_redirect" for item in snapshot["recent_blockers"])
 
-    def test_duplicate_read_force_does_not_bypass_governance(self, executor, tmp_path):
+    def test_duplicate_read_force_does_not_change_execution(self, executor, tmp_path):
         reset_session_state()
         file_path = tmp_path / "demo_repeat_force.txt"
         file_path.write_text("a\nb\nc\nd\ne\n", encoding="utf-8")
@@ -1879,12 +1878,11 @@ class TestToolExecutorErrorHandling:
         executor.execute("read_file_tool", {"file_path": str(file_path), "offset": 0, "max_lines": 2})
         second, _ = executor.execute("read_file_tool", {"file_path": str(file_path), "offset": 0, "max_lines": 2, "force": True})
 
-        assert "[阅读治理]" in str(second)
-        assert "未重复返回正文" in str(second)
-        assert "第     1 行" not in str(second)
+        assert "[阅读治理]" not in str(second)
+        assert "第     1 行" in str(second)
         assert "force=true" not in str(second)
 
-    def test_full_file_read_requires_force(self, executor, tmp_path):
+    def test_full_file_read_executes_within_file_size_contract(self, executor, tmp_path):
         reset_session_state()
         file_path = tmp_path / "demo_full_file.txt"
         file_path.write_text("a\nb\nc\n", encoding="utf-8")
@@ -1892,11 +1890,11 @@ class TestToolExecutorErrorHandling:
         result, action = executor.execute("read_file_tool", {"file_path": str(file_path), "max_lines": 0})
 
         assert action is None
-        assert "[阅读治理]" in str(result)
-        assert "全文件读取" in str(result)
-        assert "force=true" not in str(result)
+        assert "[阅读治理]" not in str(result)
+        assert "第     1 行" in str(result)
+        assert "第     3 行" in str(result)
         snapshot = get_session_state().get_attention_snapshot()
-        assert any(item["kind"] == "read_file_full_file_redirect" for item in snapshot["recent_blockers"])
+        assert not any(item["kind"] == "read_file_full_file_redirect" for item in snapshot["recent_blockers"])
 
     def test_read_file_records_hint_when_continuation_is_ignored(self, executor, tmp_path):
         session = reset_session_state()
@@ -1937,7 +1935,7 @@ class TestToolExecutorErrorHandling:
         snapshot = get_session_state().get_attention_snapshot()
         assert not any(item["kind"] == "continuation_focus" for item in snapshot["recent_blockers"])
 
-    def test_read_file_returns_navigation_instead_of_executable_continuation(self, executor, tmp_path):
+    def test_read_file_returns_pagination_facts_without_navigation_instruction(self, executor, tmp_path):
         reset_session_state()
         file_path = tmp_path / "demo_weak_continuation.txt"
         file_path.write_text("\n".join(f"line {i}" for i in range(1, 120)), encoding="utf-8")
@@ -1945,8 +1943,9 @@ class TestToolExecutorErrorHandling:
         result, action = executor.execute("read_file_tool", {"file_path": str(file_path), "offset": 0, "max_lines": 40})
 
         assert action is None
-        assert "[阅读导航]" in str(result)
-        assert "不要因为存在剩余内容就默认顺序翻页" in str(result)
+        assert "[阅读导航]" not in str(result)
+        assert "不要因为存在剩余内容就默认顺序翻页" not in str(result)
+        assert "[剩余] 还有" in str(result)
         assert "read_file_tool(" not in str(result)
         snapshot = get_session_state().get_attention_snapshot()
         assert not snapshot["pending_continuations"]
@@ -1968,7 +1967,7 @@ class TestToolExecutorErrorHandling:
         snapshot = get_session_state().get_attention_snapshot()
         assert not any(item["kind"] == "read_navigation_redirect" for item in snapshot["recent_blockers"])
 
-    def test_read_file_high_overlap_returns_governance(self, executor, tmp_path):
+    def test_read_file_high_overlap_executes_without_governance_redirect(self, executor, tmp_path):
         session = reset_session_state()
         file_path = tmp_path / "demo_overlap.txt"
         file_path.write_text("\n".join(f"line {i}" for i in range(1, 160)), encoding="utf-8")
@@ -1978,10 +1977,10 @@ class TestToolExecutorErrorHandling:
 
         assert action is None
         assert "[短路]" not in str(result)
-        assert "[阅读治理]" in str(result)
-        assert "未重复返回正文" in str(result)
+        assert "[阅读治理]" not in str(result)
+        assert "第    31 行" in str(result) or "第     31 行" in str(result)
         snapshot = get_session_state().get_attention_snapshot()
-        assert any(item["kind"] == "duplicate_read_soft_redirect" for item in snapshot["recent_blockers"])
+        assert not any(item["kind"] == "duplicate_read_soft_redirect" for item in snapshot["recent_blockers"])
 
     def test_duplicate_search_does_not_record_executable_continuation(self, executor):
         reset_session_state()

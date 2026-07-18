@@ -1104,7 +1104,7 @@ def _build_key_tools() -> List[BaseTool]:
             file_path: 文件路径（相对或绝对）
             max_lines: 最大读取行数，默认分页读取 80 行；0 表示读取全部
             offset: 从第几行开始读取，0 表示从头开始
-            force: 兼容旧参数；不能用于绕过本轮重复读取或全文件治理
+            force: 兼容旧参数；不影响工具授权、文件大小或结果截断边界
 
         Returns:
             带行号的文件内容

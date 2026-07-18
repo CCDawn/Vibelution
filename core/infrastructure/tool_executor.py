@@ -768,37 +768,6 @@ class ToolExecutor:
             )
             return (blocked_message, None)
 
-        soft_result = self._check_codex_style_reading_governance(tool_name, tool_args)
-        if soft_result:
-            soft_duration_ms = int((time.monotonic() - started_at) * 1000)
-            soft_facts = tool_result_facts_payload(
-                package_tool_result_facts(soft_result, tool_name=tool_name)
-            )
-            publish_tool_event(EventNames.TOOL_SUCCESS, {
-                "name": tool_name,
-                "args": tool_args,
-                "result": soft_result,
-                "durationMs": soft_duration_ms,
-                "timeoutSeconds": 0,
-                **soft_facts,
-            })
-            self._record_runtime_signals(tool_name, tool_args, soft_result)
-            _record_current_agent_tool_observation(tool_name, "reading_governed", tool_args, soft_result)
-            _record_tool_scene_event(
-                "execute",
-                "tool.reading_governance.soft_redirected",
-                tool_name=tool_name,
-                message="Codex-style reading governance returned a compact redirect.",
-                level="info",
-                outcome="observed",
-                fields={
-                    **_summarize_tool_args(tool_args),
-                    "durationMs": soft_duration_ms,
-                    "resultPreview": soft_result[:320],
-                },
-            )
-            return (soft_result, None)
-
         if tool_name not in self._tool_map:
             error_msg = self._unknown_tool_message_for_current_context()
             publish_tool_event(EventNames.TOOL_ERROR, {
@@ -1388,61 +1357,6 @@ class ToolExecutor:
         if packet is None:
             return True
         return bool(getattr(packet, "allow_evolution_transaction", False))
-
-    def _check_codex_style_reading_governance(self, tool_name: str, tool_args: dict) -> Optional[str]:
-        """Return a compact redirect for avoidable rereads on structured read tools."""
-        args = tool_args or {}
-        if tool_name == "read_file_tool":
-            return self._govern_read_file_call(args)
-        return None
-
-    @staticmethod
-    def _govern_read_file_call(tool_args: dict) -> Optional[str]:
-        file_path = str((tool_args or {}).get("file_path") or "").strip()
-        if not file_path:
-            return None
-        try:
-            offset = int(_coerce_int((tool_args or {}).get("offset")))
-        except Exception:
-            offset = 0
-        try:
-            max_lines = int(_coerce_int((tool_args or {}).get("max_lines", 80)))
-        except Exception:
-            max_lines = 80
-        session = get_session_state()
-        if max_lines <= 0:
-            session.record_blocker(
-                "read_file_full_file_redirect",
-                f"{file_path} 请求全文件读取。",
-                "先定位再精读；不要把大文件整段塞入上下文。",
-                severity="hint",
-            )
-            return (
-                "[阅读治理] 本次没有直接全文件读取，避免把大文件整段塞入上下文。\n"
-                f"[目标] {file_path}\n"
-                "[建议] 先定位目标符号、调用点或文本命中，再读取必要的局部片段。"
-            )
-        start_line = max(1, offset + 1)
-        end_line = max(start_line, offset + max_lines)
-        overlaps = session.get_overlapping_read_ranges(file_path, start_line, end_line)
-        if not overlaps:
-            return None
-        overlap_text = ", ".join(
-            f"{int(item.get('start_line', 0))}-{int(item.get('end_line', 0))}"
-            for item in overlaps[:4]
-        )
-        session.record_blocker(
-            "duplicate_read_soft_redirect",
-            f"{file_path} 第 {start_line}-{end_line} 行与已读范围重叠。",
-            "优先使用已有证据综合结论；若确有缺口，先说明缺口再定位新片段。",
-            severity="hint",
-        )
-        return (
-            "[阅读治理] 该范围本轮已读过，未重复返回正文。\n"
-            f"[目标] {file_path} 第 {start_line}-{end_line} 行\n"
-            f"[已读重叠] {overlap_text}\n"
-            "[建议] 直接使用已有证据综合结论；若仍缺证据，先说明具体缺口并重新定位未读目标。"
-        )
 
     @staticmethod
     def _check_spawn_agent_permission(tool_name: str, tool_args: dict) -> Optional[str]:

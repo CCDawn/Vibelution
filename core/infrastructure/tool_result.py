@@ -119,7 +119,7 @@ class ToolResultEnvelope:
 
 @dataclass
 class ModelVisibleToolResult:
-    """模型可见的工具结果事实，不承载二次摘要。"""
+    """模型可见的工具结果事实，不承载运行时续读/重试指令。"""
 
     tool_name: str
     content: str
@@ -128,7 +128,6 @@ class ModelVisibleToolResult:
     result_kind: str = "text"
     strategy: str = "passthrough"
     range_info: str = ""
-    continuation_hint: str = ""
     transport_status: str = "returned"
     semantic_status: str = "succeeded"
     exit_code: int | None = None
@@ -452,9 +451,6 @@ def _compact_file_read(result_str: str, max_chars: int, continuation_hint: str) 
         compact_lines.extend(tail_excerpt)
     compact_lines.append("--- End Preview ---")
     compact_lines.append(f"[...结果已截断，原长度 {len(result_str)} 字符...]")
-    if continuation_hint:
-        compact_lines.append(f"[截断信息] 阅读导航={continuation_hint}")
-
     compact = "\n".join(compact_lines)
     if len(compact) <= max_chars + 180:
         return compact
@@ -489,8 +485,6 @@ def _compact_search_result(result_str: str, max_chars: int, continuation_hint: s
 
     compact_lines = summary_lines + preview_lines
     compact_lines.append(f"[...结果已截断，原长度 {len(result_str)} 字符...]")
-    if continuation_hint:
-        compact_lines.append(f"[截断信息] 阅读导航={continuation_hint}")
     compact = "\n".join(line for line in compact_lines if line is not None)
     if len(compact) <= max_chars + 200:
         return compact
@@ -1115,8 +1109,6 @@ def package_tool_result(
     ]
     if range_info:
         suffix_lines.append(f"[截断信息] 当前范围={range_info}")
-    if continuation_hint:
-        suffix_lines.append(f"[截断信息] 阅读导航={continuation_hint}")
     suffix = "\n" + "\n".join(suffix_lines)
     budget = max(0, max_chars - len(suffix) - 1)
     if budget < max(8, max_chars // 3):
@@ -1208,7 +1200,6 @@ def package_tool_result_facts(
         result_kind=packaged.result_kind,
         strategy=packaged.strategy,
         range_info=packaged.range_info,
-        continuation_hint="",
         transport_status=packaged.transport_status,
         semantic_status=packaged.semantic_status,
         exit_code=packaged.exit_code,

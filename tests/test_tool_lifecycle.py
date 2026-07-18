@@ -69,6 +69,37 @@ def test_execute_tool_passes_call_id_to_executor_events():
     }
 
 
+def test_execute_tool_projects_runtime_metadata_without_leaking_navigation_to_model_history():
+    captured = []
+    raw = (
+        "[文件] demo.py\n"
+        "[区间] 第 1-20 行 | 已显示 20 行 | 剩余 80 行\n"
+        "[阅读导航] 继续调用 read_file_tool(offset=20, max_lines=20)。\n\n"
+        "--- Content ---\n"
+        "def factual_result():\n    return 1\n"
+    )
+    bridge = ToolLifecycleBridge(
+        tool_executor_execute=lambda *_args, **_kwargs: (raw, None),
+        runtime_metadata_observer=lambda _call, metadata: captured.append(metadata),
+    )
+    messages: list[Any] = []
+
+    result, action = bridge.execute_tool(
+        {"name": "read_file_tool", "args": {"path": "demo.py"}, "id": "call-meta"},
+        messages,
+    )
+    ToolLifecycleBridge.handle_tool_result(
+        {"name": "read_file_tool", "id": "call-meta"},
+        result,
+        action,
+        messages,
+    )
+
+    assert "offset=20" in captured[0].continuation_hint
+    assert "阅读导航" not in messages[0].content
+    assert "offset=20" not in messages[0].content
+
+
 def test_readonly_batch_isolates_worker_exception_and_preserves_success_results():
     original_messages: list[Any] = []
     worker_message_ids: list[int] = []
