@@ -1790,7 +1790,7 @@ describe("ConversationView edit resend affordance", () => {
     expect(lineItemStyles).not.toContain("shadow-[var(--vui-shadow-hairline)]");
   });
 
-  it("keeps streamed execution rows readable instead of squeezed into micro columns", () => {
+  it("keeps streamed execution rows readable without forcing a wide reading measure", () => {
     expect(conversationViewStylesSource).not.toMatch(/font-size:\s*0\.(?:[0-6]\d?|7(?:0|1)?)rem/);
     expect(styles.operationItem).not.toContain("w-fit");
     expect(styles.operationItem).not.toContain("max-content");
@@ -1798,16 +1798,16 @@ describe("ConversationView edit resend affordance", () => {
     expect(styles.operationText).toContain("max-w-full");
     expect(styles.messageBody).toContain("whitespace-pre-wrap");
     expect(styles.messageBody).toContain("[overflow-wrap:anywhere]");
-    expect(styles.messageBody).toContain("max-w-[min(100%,128ch)]");
-    expect(styles.markdownBody).toContain("max-w-[min(100%,128ch)]");
+    expect(styles.messageBody).toContain("max-w-[min(100%,76ch)]");
+    expect(styles.markdownBody).toContain("max-w-full");
     expect(styles.responseSegment_answer).toContain("[&_.markdownBody]:max-w-[min(100%,128ch)]");
     expect(styles.assistantTurn).toContain("[&_.turnContent]:w-[min(100%,1360px)]");
     expect(styles.agentInboxTurn).toContain("[&_.turnContent]:w-[min(100%,1360px)]");
     expect(styles.groupTranscriptTurn).toContain("[&_.turnContent]:w-[min(100%,1360px)]");
     expect(styles.timelineAssistantTextCell).toContain("max-w-[min(100%,1360px)]");
     expect(styles.codexTranscriptSurface).toContain("w-[min(100%,1360px)]");
-    expect(styles.codexTranscriptCellSummary).toContain("max-w-[min(100%,128ch)]");
-    expect(styles.markdownBody).not.toContain("max-w-[min(100%,96ch)]");
+    expect(styles.codexTranscriptCellSummary).toContain("max-w-[min(100%,76ch)]");
+    expect(styles.messageBody).not.toContain("max-w-[min(100%,128ch)]");
   });
 
   it("can render a read-only transcript without the composer", () => {
@@ -2756,7 +2756,7 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).not.toContain("[点击下载]");
   });
 
-  it("keeps wide markdown tables within the conversation content width", () => {
+  it("keeps wide markdown tables contained in a local horizontal scroll surface", () => {
     const html = renderConversation([
       {
         id: "assistant-wide-table",
@@ -2780,8 +2780,10 @@ describe("ConversationView edit resend affordance", () => {
     expect(styles.markdownBodyWithTable).toContain("max-w-full");
     expect(styles.markdownTableWrap).toContain("max-w-full");
     expect(styles.markdownTableWrap).toContain("overflow-x-auto");
-    expect(styles.markdownTable).toContain("table-fixed");
+    expect(styles.markdownTable).toContain("table-auto");
+    expect(styles.markdownTable).toContain("w-max");
     expect(styles.markdownTable).toContain("min-w-full");
+    expect(styles.markdownTable).not.toContain("table-fixed");
     expect(styles.inlineCode).toContain("whitespace-normal");
   });
 
@@ -3337,7 +3339,7 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).not.toContain("responseSegment_verification");
   });
 
-  it("formats compact json code blocks without forcing horizontal conversation overflow", () => {
+  it("keeps compact json code blocks inside their own horizontal scroll surface", () => {
     const compactWritebackContract = "{\"acceptedStatuses\":[\"blocked\",\"cancelled\",\"completed\",\"failed\",\"interrupted\",\"needs_review\",\"queued\",\"running\"],\"agentId\":\"agent-20260629-201556-388028\",\"endpoint\":\"/api/teams/research-team/workflow-orchestration/stage-session-tasks/stagetask-1/writeback\",\"resultAuthority\":\"source_collection_stage_writeback_tool\"}";
     const html = renderConversation([
       {
@@ -3359,9 +3361,9 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).toContain("\n  &quot;endpoint&quot;: &quot;/api/teams/research-team");
     expect(html).not.toContain("{&quot;acceptedStatuses&quot;:[");
     expect(styles.responseSegmentPre).toContain("max-w-full");
-    expect(styles.responseSegmentPre).toContain("whitespace-pre-wrap");
-    expect(styles.responseSegmentPre).toContain("[overflow-wrap:anywhere]");
-    expect(styles.responseSegmentPre).toContain("break-words");
+    expect(styles.responseSegmentPre).toContain("overflow-x-auto");
+    expect(styles.responseSegmentPre).toContain("whitespace-pre");
+    expect(styles.responseSegmentPre).not.toContain("whitespace-pre-wrap");
   });
 
   it("renders markdown in user messages with the same safe renderer", () => {
