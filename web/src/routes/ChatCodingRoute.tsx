@@ -66,8 +66,9 @@ import {
   SessionDetail,
   AgentToolGovernanceRequest,
   SessionRuntimeNotice,
-  SessionLlmOptions,
-  SessionSummary,
+    SessionLlmOptions,
+    SessionQueryResponse,
+    SessionSummary,
   SessionStreamEvent,
   SessionReferenceAttachment,
   SessionTurnAcceptedResponse,
@@ -156,6 +157,7 @@ import {
   sessionAgentDisplayInfo,
 } from "./agentDisplay";
 import { AgentSessionTabStrip, type CliAgentRunTab } from "./AgentSessionTabStrip";
+import { AgentConversationDirectory } from "./AgentConversationDirectory";
 import { ConversationIndexTree } from "./ConversationIndexTree";
 import {
   DEFAULT_COLLAPSED_CONVERSATION_GROUPS,
@@ -2077,6 +2079,7 @@ export function ChatCodingRoute() {
     queryFn: () => fetchJson<ConfigSummary>("/api/config/public"),
     staleTime: 30_000,
   });
+  const [selectedAgentId, setSelectedAgentId] = useState("");
   const activeSessionBootstrapQuery = useQuery({
     queryKey: ["sessions", "active-bootstrap"],
     queryFn: ({ signal }) => fetchJson<{ activeSessionId: string }>("/api/sessions/active", { signal }),
@@ -2883,20 +2886,28 @@ export function ChatCodingRoute() {
   });
 
   const createSessionMutation = useMutation({
-    mutationFn: async () =>
+    mutationFn: async ({ agentId }: { agentId: string }) =>
       fetchJson<SessionDetail>("/api/sessions", {
         method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ agentId }),
       }),
-    onSuccess: (nextDetail) => {
+    onSuccess: (nextDetail, variables) => {
       setActiveGroupRoomId("");
       setRightIndexPanel("conversations");
       setActiveSession(nextDetail.id);
+      setSelectedAgentId(String(nextDetail.agentId || variables.agentId || "").trim());
       setSessionFilter("");
       setSessionComposerErrors((current) => ({
         ...current,
         [nextDetail.id]: "",
       }));
       syncSessionDetail(nextDetail);
+      if (nextDetail.agentId || variables.agentId) {
+        void queryClient.invalidateQueries({ queryKey: ["sessions", "agent", String(nextDetail.agentId || variables.agentId).trim()] });
+      }
       void chatWorkspaceCache.afterSessionChanged();
     },
     onError: (error) => {
@@ -5417,6 +5428,40 @@ export function ChatCodingRoute() {
     return new Map(allVisibleSessions.map((session) => [session.id, session]));
   }, [allVisibleSessions]);
 
+  const visibleChatAgents = useMemo(() => {
+    return (agentsQuery.data ?? []).filter((agent) => {
+      const visibility = String(agent.conversationIndexVisibility || "").trim();
+      const kind = String(agent.conversationIndexKind || "").trim();
+      return String(agent.kind || "").trim() === "persistent"
+        && String(agent.status || "").trim() !== "archived"
+        && visibility !== "hidden"
+        && kind !== "team_agent";
+    });
+  }, [agentsQuery.data]);
+  const activeSessionAgentId = useMemo(() => {
+    return String(
+      sessionDetailQuery.data?.agentId
+      || directSessionActiveSummary?.agentId
+      || sessionsById.get(activeSessionId || "")?.agentId
+      || "",
+    ).trim();
+  }, [activeSessionId, directSessionActiveSummary?.agentId, sessionDetailQuery.data?.agentId, sessionsById]);
+  useEffect(() => {
+    if (activeSessionAgentId) {
+      setSelectedAgentId(activeSessionAgentId);
+    }
+  }, [activeSessionAgentId]);
+  const selectedChatAgentId = selectedAgentId || activeSessionAgentId || visibleChatAgents[0]?.agentId || "";
+  const selectedAgentSessionsQuery = useQuery({
+    queryKey: ["sessions", "agent", selectedChatAgentId],
+    queryFn: () => fetchJson<SessionQueryResponse>(
+      `/api/sessions/query?agentId=${encodeURIComponent(selectedChatAgentId)}&limit=100`,
+    ),
+    enabled: secondaryChatDataEnabled && Boolean(selectedChatAgentId),
+    refetchInterval: chatLiveQueryPolicy.sessionsRefetchInterval,
+    refetchIntervalInBackground: chatLiveQueryPolicy.directRefetchIntervalInBackground,
+  });
+
   const contextMenuSession = useMemo(() => {
     if (!sessionContextMenu) {
       return undefined;
@@ -5430,19 +5475,19 @@ export function ChatCodingRoute() {
   }, [allVisibleSessions]);
 
   const agentSessionTabs = useMemo(() => {
-    if (!activeRootSessionId) {
-      return [];
-    }
-    const rootSession = sessionsById.get(activeRootSessionId);
-    const childSessions = allVisibleSessions
-      .filter((session) => isChildSession(session) && rootSessionIdFor(session) === activeRootSessionId)
-      .sort((left, right) =>
-        String(left.updatedAt || left.lastActive || "").localeCompare(String(right.updatedAt || right.lastActive || "")),
-      );
-    return [rootSession, ...childSessions]
+    const sessions = selectedAgentSessionsQuery.data?.items ?? [];
+    return sessions
       .filter((session): session is SessionSummary => Boolean(session))
-      .filter((session, index, sessions) => sessions.findIndex((item) => item.id === session.id) === index);
-  }, [activeRootSessionId, allVisibleSessions, sessionsById]);
+      .filter((session, index, items) => items.findIndex((item) => item.id === session.id) === index)
+      .sort((left, right) => {
+        const leftPriority = left.id === agentsById.get(selectedChatAgentId)?.directSessionId ? 0 : isChildSession(left) ? 2 : 1;
+        const rightPriority = right.id === agentsById.get(selectedChatAgentId)?.directSessionId ? 0 : isChildSession(right) ? 2 : 1;
+        if (leftPriority !== rightPriority) {
+          return leftPriority - rightPriority;
+        }
+        return String(right.updatedAt || right.lastActive || "").localeCompare(String(left.updatedAt || left.lastActive || ""));
+      });
+  }, [agentsById, selectedAgentSessionsQuery.data?.items, selectedChatAgentId]);
 
   const groupCandidateAgents = useMemo(() => {
     return (agentsQuery.data ?? []).filter((agent) => {
@@ -5533,6 +5578,15 @@ export function ChatCodingRoute() {
     sessionsById,
     teams,
   });
+  const groupedGroupConversations = useMemo(() => {
+    return groupedConversations
+      .map((group) => ({ ...group, items: group.items.filter((conversation) => conversation.type === "group_room") }))
+      .filter((group) => group.items.length > 0);
+  }, [groupedConversations]);
+  const groupedGroupConversationCount = useMemo(
+    () => groupedGroupConversations.reduce((count, group) => count + group.items.length, 0),
+    [groupedGroupConversations],
+  );
   const sessionIndexLoadedCount = rawSessionsQuery.loadedCount;
   const sessionIndexTotalEstimate = rawSessionsQuery.totalEstimate;
   const sessionIndexHasMore = rawSessionsQuery.hasMore;
@@ -6022,7 +6076,17 @@ export function ChatCodingRoute() {
       ...current,
       __sessions__: "",
     }));
-    createSessionMutation.mutate();
+    createSessionMutation.mutate({ agentId: selectedChatAgentId });
+  }
+
+  function handleCreateAgent() {
+    setActiveGroupRoomId("");
+    setRightIndexPanel("conversations");
+    setSessionComposerErrors((current) => ({
+      ...current,
+      __sessions__: "",
+    }));
+    createSessionMutation.mutate({ agentId: "" });
   }
 
   function handleOpenProjectAgentBus() {
@@ -6053,6 +6117,16 @@ export function ChatCodingRoute() {
     }));
     selectDirectSessionMutation.mutate(normalizedSessionId);
     navigate(`/chat?session=${encodeURIComponent(normalizedSessionId)}`, { replace: false });
+  }
+
+  function handleOpenAgent(agent: AgentInstance) {
+    const agentId = String(agent.agentId || "").trim();
+    const primarySessionId = String(agent.directSessionId || "").trim();
+    if (!agentId || !primarySessionId) {
+      return;
+    }
+    setSelectedAgentId(agentId);
+    handleOpenDirectSession(primarySessionId);
   }
 
   function handleOpenMentionTarget(target: ChatMentionTarget) {
@@ -6562,7 +6636,7 @@ export function ChatCodingRoute() {
         <VStateSurface className={styles.panelState} tone="error" title={sessionsErrorMessage} />
       ) : conversationsQuery.isPending && !conversationsQuery.data && sessionsQuery.isPending && !sessionsQuery.data ? (
         <ConversationIndexLoadingShell label={t("loadingSession")} />
-      ) : filteredConversations.length === 0 && filteredTeams.length === 0 && filteredStandaloneGroupConversations.length === 0 ? (
+      ) : filteredConversations.length === 0 && visibleChatAgents.length === 0 && filteredTeams.length === 0 && filteredStandaloneGroupConversations.length === 0 ? (
         <VStateSurface
           className={styles.panelState}
           tone="empty"
@@ -6570,6 +6644,17 @@ export function ChatCodingRoute() {
         />
       ) : (
         <>
+          <AgentConversationDirectory
+            activeAgentId={selectedChatAgentId}
+            agents={visibleChatAgents}
+            avatarInitials={avatarInitials}
+            filterText={sessionFilter}
+            formatTime={formatConversationIndexTime}
+            lang={lang}
+            resolveModelLabel={resolveModelLabel}
+            sessions={allVisibleSessions}
+            onOpenAgent={handleOpenAgent}
+          />
           <ConversationIndexTree
             activeGroupRoomId={activeGroupRoomId}
             activeSessionId={activeSessionId}
@@ -6584,12 +6669,12 @@ export function ChatCodingRoute() {
             deleteBusyLabel={t("deleteSessionBusy")}
             editingSessionId={editingSessionId}
             editingSessionTitle={editingSessionTitle}
-            filteredConversationsCount={filteredConversations.length}
+            filteredConversationsCount={groupedGroupConversationCount}
             filteredStandaloneGroupConversations={filteredStandaloneGroupConversations}
             filteredTeams={filteredTeams}
             formatTime={formatConversationIndexTime}
             groupPanelActive={groupPanelActive}
-            groupedConversations={groupedConversations}
+            groupedConversations={groupedGroupConversations}
             isBusyPhase={isBusyPhase}
             lang={lang}
             renamePending={renameSessionMutation.isPending}
@@ -7204,6 +7289,7 @@ export function ChatCodingRoute() {
               {projectBusActive ? (lang === "zh" ? "通知流" : "Notice stream") : (lang === "zh" ? "群聊" : "Group")}
             </VButton>
           ) : agentSessionTabs.length > 0 || cliAgentRunTabs.length > 0 ? (
+            <>
             <AgentSessionTabStrip
               activeSessionId={activeSessionId}
               activeCliAgentRunId={activeCliAgentRunId}
@@ -7240,6 +7326,17 @@ export function ChatCodingRoute() {
               onSetActiveTab={setActiveTab}
               onSubmitRename={submitRenameSession}
             />
+            <VButton
+              type="button"
+              className={styles.tab}
+              icon={<Plus size={14} />}
+              onClick={handleCreateSession}
+              isDisabled={createSessionMutation.isPending || !selectedChatAgentId}
+              title={lang === "zh" ? "在当前 Agent 下新建会话" : "New session for current Agent"}
+            >
+              <span>{lang === "zh" ? "新建会话" : "New session"}</span>
+            </VButton>
+            </>
           ) : (
             <VButton
               type="button"
@@ -8052,10 +8149,10 @@ export function ChatCodingRoute() {
                 type="button"
                 className={styles.newSessionButton}
                 icon={<Plus size={15} />}
-                onClick={handleCreateSession}
+                onClick={handleCreateAgent}
                 isDisabled={createSessionMutation.isPending}
               >
-                <span>{createSessionMutation.isPending ? t("creatingSession") : t("newSession")}</span>
+                <span>{createSessionMutation.isPending ? t("creatingSession") : (lang === "zh" ? "新建 Agent" : "New Agent")}</span>
               </VButton>
               <VButton
                 type="button"
