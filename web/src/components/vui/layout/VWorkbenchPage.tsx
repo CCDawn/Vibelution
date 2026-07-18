@@ -18,7 +18,7 @@ export function VWorkbenchPage({
       aria-label={ariaLabel}
       className={[
         "grid min-h-0 min-w-0 content-start gap-2 text-vui-fg-primary",
-        "bg-transparent [--vui-workspace-sidebar:280px] [--vui-workspace-aside:300px]",
+        "bg-transparent [--vui-workspace-sidebar:320px] [--vui-workspace-aside:320px]",
         className,
       ]
         .filter(Boolean)
