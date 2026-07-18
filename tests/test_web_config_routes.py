@@ -1640,6 +1640,87 @@ def test_config_workspace_test_llm_can_target_schema_v2_canonical_model_ref(monk
     ]
 
 
+def test_model_option_capability_probe_preserves_schema_v2_responses_route(monkeypatch):
+    public_config = {
+        "llm": {
+            "schema_version": 2,
+            "providers": {
+                "relay_a": {
+                    "label": "Relay A",
+                    "service_class": "relay",
+                    "vendor": "multi_model",
+                    "driver": "openai",
+                    "base_url": "https://relay-a.example/v1",
+                    "auth_kind": "api_key",
+                    "credential_ref": "env:VIBELUTION_LLM_PROVIDER_RELAY_A_API_KEY",
+                    "requires_credential": True,
+                    "protocols": {"default": "responses", "allowed": ["responses"]},
+                    "discovery": {"mode": "manual", "adapter": "openai_compatible", "cache_ttl_seconds": 0},
+                    "models": {
+                        "gpt-a": {
+                            "upstream_id": "gpt-a",
+                            "label": "GPT A",
+                            "enabled": True,
+                            "wire_protocol": "responses",
+                            "interaction_contract": "tool_chat",
+                            "defaults": {
+                                "temperature": 0.3,
+                                "max_output_tokens": 32,
+                                "timeout": 20,
+                                "connect_timeout": 5,
+                                "streaming": False,
+                                "tool_calling_mode": "auto",
+                            },
+                        }
+                    },
+                }
+            },
+            "profiles": {"primary": {"model_ref": "relay_a/gpt-a", "overrides": {}}},
+            "model_aliases": {},
+        }
+    }
+    monkeypatch.setenv("VIBELUTION_LLM_PROVIDER_RELAY_A_API_KEY", "relay-secret")
+
+    target = config_service._model_option_test_target(
+        public_config,
+        {
+            "model_id": "relay_a/gpt-a",
+            "model": "gpt-a",
+            "provider": {"kind": "openai"},
+            "details": {},
+        },
+    )
+
+    assert target["profile"].transport == "responses"
+    assert target["profile"].contract == "tool_chat"
+    assert target["provider"].provider_id == "relay_a"
+    assert target["api_key"] == "relay-secret"
+
+
+def test_image_capability_runtime_view_does_not_add_legacy_library_to_schema_v2():
+    public_config = {
+        "llm": {
+            "schema_version": 2,
+            "providers": {},
+            "profiles": {},
+            "model_aliases": {},
+        }
+    }
+
+    config_service._apply_image_input_capability_details_to_runtime_view(
+        public_config,
+        "relay_a/gpt-a",
+        {
+            "supports_image_input": True,
+            "capability_status": "supported",
+            "capability_source": "runtime_probe",
+            "capability_checked_at": "2026-07-18T00:00:00Z",
+        },
+    )
+
+    assert "model_library" not in public_config["llm"]
+
+
 def test_config_workspace_reasoning_probe_verifies_observed_schema_v2_model(monkeypatch):
     public_config = {
         "llm": {

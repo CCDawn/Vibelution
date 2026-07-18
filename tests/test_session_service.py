@@ -1458,6 +1458,70 @@ def test_image_attachment_empty_prompt_still_asks_for_clarification(monkeypatch)
     assert route["route"] == "clarify"
 
 
+def test_image_attachment_unknown_capability_remains_unknown_and_blocks(monkeypatch):
+    monkeypatch.setattr(
+        session_service,
+        "_session_agent_supports_image_input",
+        lambda agent_instance, *, slot: None,
+    )
+    monkeypatch.setattr(
+        session_service,
+        "_session_agent_llm_slot_model_id",
+        lambda agent_instance, slot: "ai-pixel/gpt-5.6-terra",
+    )
+    monkeypatch.setattr(
+        session_service,
+        "_session_agent_llm_model_name",
+        lambda agent_instance, *, slot: "gpt-5.6-terra",
+    )
+
+    route = session_service._resolve_image_attachment_turn_route(
+        "分析这张图片",
+        agent_instance={"agentId": "agent-terra"},
+    )
+
+    assert route["route"] == "block_vision"
+    assert route["supports_image_input"] is None
+
+
+def test_session_image_support_uses_resolved_runtime_probe_tristate(monkeypatch):
+    def resolved(value):
+        return SimpleNamespace(
+            resolved_spec=SimpleNamespace(
+                provider_details={
+                    "capabilities": {
+                        "image_input": {
+                            "value": value,
+                            "source": "runtime_probe",
+                        }
+                    }
+                }
+            ),
+            capabilities=SimpleNamespace(supports_image_input=False),
+        )
+
+    monkeypatch.setattr(session_service, "get_config", lambda: SimpleNamespace(llm=SimpleNamespace()))
+    monkeypatch.setattr(session_service, "resolve_agent_llm", lambda *args, **kwargs: resolved("supported"))
+    agent = {"llmBindings": {"vision": {"modelId": "ai-pixel/gpt-5.6-terra"}}}
+
+    assert (
+        session_service._session_agent_supports_image_input(
+            agent,
+            slot=session_service.SESSION_LLM_SLOT_VISION,
+        )
+        is True
+    )
+
+    monkeypatch.setattr(session_service, "resolve_agent_llm", lambda *args, **kwargs: resolved("unknown"))
+    assert (
+        session_service._session_agent_supports_image_input(
+            agent,
+            slot=session_service.SESSION_LLM_SLOT_VISION,
+        )
+        is None
+    )
+
+
 def test_contextual_image_retry_still_requires_explicit_image_intent():
     assert session_service._is_retriable_image_request_prompt("继续") is False
     assert session_service._is_retriable_image_request_prompt("再看一下刚才那张图") is True

@@ -735,6 +735,9 @@ def _model_option_test_target(
     model_id = str(option.get("model_id") or "").strip()
     if not model_id:
         raise ValueError("modelId is required")
+    llm = public_config.get("llm", {}) if isinstance(public_config, dict) else {}
+    if int(llm.get("schema_version") or 1) == 2 and "/" in model_id:
+        return _v2_model_ref_test_target(public_config, model_id, draft_meta)
     provider_input = option.get("provider") if isinstance(option.get("provider"), dict) else {}
     details = option.get("details") if isinstance(option.get("details"), dict) else {}
     provider_id = _model_option_provider_id(model_id)
@@ -984,6 +987,8 @@ def _apply_image_input_capability_details_to_runtime_view(
 ) -> None:
     model_id = str(model_id or "").strip()
     llm = public_config.setdefault("llm", {})
+    if int(llm.get("schema_version") or 1) == 2:
+        return
     model_library = llm.setdefault("model_library", {})
     if not isinstance(model_library, dict) or not isinstance(model_library.get(model_id), dict):
         return
