@@ -1,10 +1,11 @@
 const styles = {
   stack:
-    "min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[color-mix(in_srgb,var(--vui-surface-panel)_72%,transparent)] p-2 shadow-none",
+    "min-w-0 rounded-none border-0 bg-transparent p-0 shadow-none",
   list:
-    "min-w-0 space-y-2",
+    "min-w-0 grid content-start gap-1.5",
+  summaryItem: "min-w-0",
   notice:
-    "min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[color-mix(in_srgb,var(--vui-surface-panel)_54%,transparent)] p-2 shadow-none !grid grid-cols-[16px_minmax(0,1fr)] items-start gap-[7px]",
+    "min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[color-mix(in_srgb,var(--vui-surface-panel)_54%,transparent)] px-2 py-1.5 shadow-none !grid grid-cols-[16px_minmax(0,1fr)] items-start gap-[7px]",
   body:
     "min-w-0 text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
   label:
