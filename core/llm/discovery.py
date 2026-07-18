@@ -244,7 +244,11 @@ def _capabilities_from_resolution(
         runtime_field = _CATALOG_TO_RUNTIME_CAPABILITY.get(field, field)
         if runtime_field not in values or not isinstance(record, dict):
             continue
-        values[runtime_field] = str(record.get("value") or "unknown") == "supported"
+        capability_value = str(record.get("value") or "unknown")
+        if runtime_field == "supports_image_input" and capability_value == "unknown":
+            values[runtime_field] = None
+        else:
+            values[runtime_field] = capability_value == "supported"
     return LLMCapabilities(**values)
 
 

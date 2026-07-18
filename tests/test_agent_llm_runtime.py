@@ -207,6 +207,54 @@ def test_discover_model_layers_operator_over_runtime_probe_and_exposes_canonical
     assert details["capabilities"]["image_input"]["source"] == "operator_override"
 
 
+def test_discover_model_preserves_unknown_image_capability(monkeypatch) -> None:
+    config = _config_with_agent_models()
+    config.llm.model_library["default/gpt-unknown"] = {
+        "model_ref": "default/gpt-unknown",
+        "provider_id": "default",
+        "upstream_id": "gpt-unknown",
+        "model": "gpt-unknown",
+    }
+    monkeypatch.setattr(
+        "core.llm.discovery.load_model_catalog_state",
+        lambda: {
+            "schemaVersion": 2,
+            "metadata": {},
+            "providers": {
+                "default": {
+                    "status": "reachable",
+                    "catalogStale": False,
+                    "models": {
+                        "gpt-unknown": {
+                            "upstreamId": "gpt-unknown",
+                            "availability": "observed",
+                            "capabilities": {
+                                "image_input": {
+                                    "value": "unknown",
+                                    "source": "provider_endpoint",
+                                }
+                            },
+                        }
+                    },
+                }
+            },
+        },
+    )
+    agent = {
+        "agentId": "agent-a",
+        "llmBindings": {"dialogue": {"modelId": "default/gpt-unknown"}},
+    }
+
+    resolved = resolve_agent_llm(agent, "dialogue", config=config)
+
+    assert resolved.capabilities.supports_image_input is None
+    assert resolved.log_fields()["supportsImageInput"] is None
+    assert (
+        resolved.resolved_spec.provider_details["capabilities"]["image_input"]["value"]
+        == "unknown"
+    )
+
+
 def test_llm_client_emits_bounded_protocol_resolution_event_without_sensitive_payload(monkeypatch) -> None:
     config = _config_with_agent_models()
     provider = config.llm.providers["default"]

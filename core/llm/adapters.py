@@ -163,9 +163,10 @@ class ProviderAdapter:
             compat_mode=self.compat_mode,
             provider_api=getattr(self.provider, "api", ""),
         )
+        image_input_support = getattr(self.profile, "supports_image_input", None)
         return replace(
             base,
-            supports_image_input=bool(getattr(self.profile, "supports_image_input", None) is True),
+            supports_image_input=image_input_support if isinstance(image_input_support, bool) else None,
             supports_prompt_cache=prompt_cache_mode not in {"", "disabled", "unsupported"},
             supports_thinking=bool(str(getattr(self.profile, "thinking_type", "") or "").strip()) or supports_reasoning_effort,
             supports_reasoning_roundtrip=bool(self.should_preserve_reasoning_content()),

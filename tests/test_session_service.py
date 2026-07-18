@@ -1498,7 +1498,11 @@ def test_session_image_support_uses_resolved_runtime_probe_tristate(monkeypatch)
             capabilities=SimpleNamespace(supports_image_input=False),
         )
 
-    monkeypatch.setattr(session_service, "get_config", lambda: SimpleNamespace(llm=SimpleNamespace()))
+    monkeypatch.setattr(
+        session_service,
+        "get_config",
+        lambda: SimpleNamespace(llm=SimpleNamespace()),
+    )
     monkeypatch.setattr(session_service, "resolve_agent_llm", lambda *args, **kwargs: resolved("supported"))
     agent = {"llmBindings": {"vision": {"modelId": "ai-pixel/gpt-5.6-terra"}}}
 
@@ -1518,6 +1522,18 @@ def test_session_image_support_uses_resolved_runtime_probe_tristate(monkeypatch)
         )
         is None
     )
+
+
+def test_session_image_support_preserves_unknown_resolved_capability(monkeypatch):
+    resolved = SimpleNamespace(
+        resolved_spec=SimpleNamespace(provider_details={"capabilities": {}}),
+        capabilities=SimpleNamespace(supports_image_input=None),
+    )
+    monkeypatch.setattr(session_service, "get_config", lambda: SimpleNamespace(llm=SimpleNamespace()))
+    monkeypatch.setattr(session_service, "resolve_agent_llm", lambda *args, **kwargs: resolved)
+    agent = {"llmBindings": {"dialogue": {"modelId": "ai-pixel/gpt-5.6-terra"}}}
+
+    assert session_service._session_agent_supports_image_input(agent) is None
 
 
 def test_contextual_image_retry_still_requires_explicit_image_intent():

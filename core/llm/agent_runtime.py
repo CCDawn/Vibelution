@@ -287,7 +287,7 @@ def capability_log_fields(capabilities: LLMCapabilities | None) -> dict[str, Any
     return {
         "supportsStreaming": bool(capabilities.supports_streaming),
         "supportsToolCalling": bool(capabilities.supports_tool_calling),
-        "supportsImageInput": bool(capabilities.supports_image_input),
+        "supportsImageInput": capabilities.supports_image_input,
         "supportsPromptCache": bool(capabilities.supports_prompt_cache),
         "supportsThinking": bool(capabilities.supports_thinking),
         "supportsReasoningRoundtrip": bool(capabilities.supports_reasoning_roundtrip),
