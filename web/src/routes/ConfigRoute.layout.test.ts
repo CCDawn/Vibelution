@@ -120,7 +120,7 @@ describe("ConfigRoute layout contract", () => {
     expect(routeSource).toContain('providerWorkspaceMode === "advanced"');
     expect(quickSetupSource).toContain("检测连接");
     expect(quickSetupSource).toContain("保存并完成");
-    expect(quickSetupStyles.workspace).toContain("max-w-[88rem]");
+    expect(quickSetupStyles.workspace).toContain("max-w-none");
     expect(quickSetupStyles.inputGrid).toContain("grid-template-columns");
     expect(quickSetupSource).toContain('state.phase !== "input"');
     expect(quickSetupStylesSource).not.toContain("min-h-[28rem]");
@@ -304,7 +304,7 @@ describe("ConfigRoute layout contract", () => {
   it("keeps quick setup in a bounded progressive desktop workspace", () => {
     expect(quickSetupSource).toContain('<div className={styles.workspace}>');
     expect(quickSetupStyles.root).not.toContain("grid-template-columns");
-    expect(quickSetupStyles.workspace).toContain("max-w-[88rem]");
+    expect(quickSetupStyles.workspace).toContain("max-w-none");
     expect(quickSetupStyles.inputGrid).toContain("[grid-template-columns:minmax(15rem,1fr)_minmax(18rem,1.2fr)_max-content]");
     expect(quickSetupStyles.field).toContain("[&_[data-vui=select-trigger]]:!h-10");
     expect(quickSetupStyles.field).toContain("[&_[data-vui=select-trigger]]:!min-h-10");
@@ -319,7 +319,7 @@ describe("ConfigRoute layout contract", () => {
   });
 
   it("keeps existing Provider management in a bounded desktop list-detail grid", () => {
-    expect(providerPanelStyles.registryWorkspace).toContain("[--vui-workspace-sidebar:clamp(22rem,28%,28rem)]");
+    expect(providerPanelStyles.registryWorkspace).toContain("[--vui-workspace-sidebar:clamp(18rem,26vw,24rem)]");
     expect(providerPanelStyles.registryWorkspace).not.toContain("max-[960px]");
     expect(providerPanelStyles.providerList).toContain("h-full");
     expect(providerPanelStyles.providerList).toContain("overflow-y-auto");
@@ -348,8 +348,8 @@ describe("ConfigRoute layout contract", () => {
   });
 
   it("uses comfortable desktop controls and matching six-group placeholders", () => {
-    expect(styles.page).toContain("[--control-height:40px]");
-    expect(styles.page).toContain("[--vui-control-height-sm:40px]");
+    expect(styles.page).toContain("[--control-height:36px]");
+    expect(styles.page).toContain("[--vui-control-height-sm:36px]");
     expect(styles.field).toContain("[grid-template-columns:minmax(12rem,0.34fr)_minmax(0,1fr)]");
     expect(styles.actionButton).toContain("[min-height:40px]");
     expect(styles.primaryButton).toContain("[min-height:40px]");
@@ -498,7 +498,7 @@ describe("ConfigRoute layout contract", () => {
     expect(providerPanelStylesSource).not.toMatch(/\bsurface-card\b(?!\))/);
     expect(providerPanelStylesSource).not.toContain("var(--radius-panel)");
     expect(providerPanelStyles.sectionSurface).toContain("[border-radius:8px]");
-    expect(providerPanelStyles.registryWorkspace).toContain("[--vui-workspace-sidebar:clamp(22rem,28%,28rem)]");
+    expect(providerPanelStyles.registryWorkspace).toContain("[--vui-workspace-sidebar:clamp(18rem,26vw,24rem)]");
     expect(providerPanelStyles.providerList).toContain("overflow-y-auto");
     expect(providerPanelStyles.tableScroll).toContain("h-full");
     expect(providerPanelStyles.providerButton).toContain("!min-h-[58px]");
@@ -566,7 +566,7 @@ describe("ConfigRoute layout contract", () => {
 
     expect(stylesSource).toContain("const readablePanelSurface");
     expect(stylesSource).toContain("const readableRowSurface");
-    expect(styles.page).toContain("[background:color-mix(in_srgb,var(--surface-page)_94%,var(--bg-canvas))]");
+    expect(styles.page).toContain("[background:var(--surface-page)]");
     expect(stylesSource).toContain("configHeader:");
     expect(styles.configHeader).toContain("color-mix(in_srgb,var(--surface-panel)_96%,var(--bg-canvas))");
 
@@ -876,7 +876,7 @@ describe("ConfigRoute layout contract", () => {
   });
 
   it("keeps operational settings readable over custom workbench backgrounds", () => {
-    expect(styles.page).toContain("[background:color-mix(in_srgb,var(--surface-page)_94%,var(--bg-canvas))]");
+    expect(styles.page).toContain("[background:var(--surface-page)]");
     expect(styles.page).toContain("[isolation:isolate]");
     expect(stylesSource).toContain("color-mix(in_srgb,var(--surface-panel)_96%,var(--bg-canvas))");
     expect(styles.sidebar).toContain("color-mix(in_srgb,var(--surface-panel)_96%,var(--bg-canvas))");

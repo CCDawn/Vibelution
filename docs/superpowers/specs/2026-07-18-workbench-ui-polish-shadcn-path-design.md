@@ -80,7 +80,7 @@ Renderer+tokens  →  唯一视觉实现（今日 HeroUI，可换 shadcn/Radix�
 | **0** | 本契约 | 文档合入 |
 | **1** | Agents 工作区列宽/详情填满；config 宽屏并排；空状态；Chat gutter/密度；对话区 0 缝 | 布局测试 + build；浏览器可选 |
 | **2** | `VErrorSummary` + `summarizeErrorText`；Chat 运行时错误/长 notice 一行摘要可展开 | 组件/layout 测试 |
-| **3** | Teams/Memory/Config 同构 | 分批 |
+| **3** | Teams/Memory/Config 同构：主区 `minmax(0,1fr)` 吃满，侧栏 `clamp` 弹性；Config 去 max-width 与过重 elevation | layout 测试 |
 | **R** | HeroUI → shadcn renderer（按 primitive） | 单组件替换 + 视觉回归 |
 
 ### Wave 2 文件范围
@@ -91,6 +91,16 @@ Renderer+tokens  →  唯一视觉实现（今日 HeroUI，可换 shadcn/Radix�
 - `web/src/routes/chat/ChatRuntimeNoticeStack.tsx`
 - `web/src/routes/chat/ChatRuntimeNoticeStack.styles.ts`
 - `web/src/routes/chat/ChatRuntimeNoticeStack.layout.test.ts`
+
+### Wave 3 文件范围
+
+- `web/src/routes/TeamsRoute.styles.ts`
+- `web/src/routes/TeamSourceCollectionPanelFrame.styles.ts`
+- `web/src/routes/MemoryRoute.styles.ts`
+- `web/src/routes/ConfigRoute.styles.ts`
+- `web/src/routes/ConfigQuickSetupPanel.styles.ts`
+- `web/src/routes/ConfigProviderRegistryPanel.styles.ts`
+- 对应 layout 契约测试
 
 **仍不改：** `ConversationView.styles.ts`（active claim）。
 
