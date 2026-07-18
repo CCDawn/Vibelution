@@ -269,8 +269,10 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStylesModuleSource).not.toContain("runtimeNoticeMessage:");
     expect(chatRuntimeNoticeStackSource).toContain("role=\"status\"");
     expect(chatRuntimeNoticeStackSource).toContain("runtimeNoticeToneClassName");
+    expect(chatRuntimeNoticeStackSource).toContain("VErrorSummary");
+    expect(chatRuntimeNoticeStackSource).toContain("summarizeErrorText");
     expect(chatRuntimeNoticeStackStyles.stack).toBeTypeOf("string");
-    expect(chatRuntimeNoticeStackStyles.stack).toContain("bg-[color-mix(in_srgb,var(--vui-surface-panel)_72%,transparent)]");
+    expect(chatRuntimeNoticeStackStyles.stack).toContain("bg-transparent");
     expect(chatRuntimeNoticeStackStyles.stack).toContain("shadow-none");
     expect(chatRuntimeNoticeStackStyles.stack).not.toContain("vui-surface-glass");
     expect(chatRuntimeNoticeStackStyles.stack).not.toContain("vui-shadow-hairline");
