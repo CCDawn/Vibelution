@@ -363,7 +363,7 @@ class TestToolMessageFlow:
         assert isinstance(messages[0], ToolMessage)
         assert messages[0].tool_call_id == "call_123"
 
-    def test_handle_tool_result_preserves_continuation_hint_when_truncated(self):
+    def test_handle_tool_result_preserves_range_facts_without_continuation_hint(self):
         messages = []
         long_result = (
             "[文件] demo.py\n"
@@ -381,8 +381,9 @@ class TestToolMessageFlow:
         )
 
         assert len(messages) == 1
-        assert "阅读导航" in messages[0].content or "建议" in messages[0].content
-        assert "offset=120" in messages[0].content
+        assert "第 1-120 行" in messages[0].content
+        assert "阅读导航" not in messages[0].content
+        assert "offset=120" not in messages[0].content
 
     def test_handle_tool_result_decodes_binary_failure_result(self):
         messages = []
@@ -6036,30 +6037,28 @@ class TestRuntimeStateMemoryFlow:
         agent._carryover_state_memory = "## 延续约束\n- 先补观测，再继续推理。"
 
         fake_session = SimpleNamespace(
-            render_runtime_constraints=lambda: "### 当前轮强约束\n- `cli_tool:pipe` 已被阻塞"
+            render_dialogue_runtime_observations=lambda: "### 运行时限制\n- `cli_tool:pipe` 已被阻塞"
         )
         monkeypatch.setattr(agent_module, "get_session_state", lambda: fake_session)
 
         agent._sync_runtime_state_memory()
 
         memory_text = agent.prompt_manager.update_state_memory.call_args[0][0]
-        assert memory_text.index("### 当前轮强约束") < memory_text.index("## 延续约束")
-        assert "### 当前轮强约束" in memory_text
+        assert memory_text.index("### 运行时限制") < memory_text.index("## 延续约束")
+        assert "### 运行时限制" in memory_text
         assert "## 延续约束" in memory_text
         assert agent.prompt_manager.update_state_memory.call_args.kwargs["persist"] is False
 
-    def test_sync_runtime_state_memory_keeps_read_navigation_prominent(self, monkeypatch):
+    def test_sync_runtime_state_memory_keeps_incomplete_result_as_observation(self, monkeypatch):
         agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
         agent.prompt_manager = MagicMock()
         agent._last_runtime_state_memory = ""
         agent._carryover_state_memory = ""
 
         fake_session = SimpleNamespace(
-            render_runtime_constraints=lambda: (
-                "### 当前轮强约束\n"
-                "- 存在未显示完的内容 `core/demo.py`；先判断缺少哪类证据，不要默认顺序续读。\n"
-                "### 阅读导航\n"
-                "- 读局部片段（core/demo.py）：围绕目标行号、符号或关键词读取"
+            render_dialogue_runtime_observations=lambda: (
+                "### 工具结果范围\n"
+                "- `core/demo.py` 的已返回内容不完整。"
             )
         )
         monkeypatch.setattr(agent_module, "get_session_state", lambda: fake_session)
@@ -6067,8 +6066,9 @@ class TestRuntimeStateMemoryFlow:
         agent._sync_runtime_state_memory()
 
         memory_text = agent.prompt_manager.update_state_memory.call_args[0][0]
-        assert memory_text.splitlines()[0] == "### 当前轮强约束"
-        assert "不要默认顺序续读" in memory_text
+        assert memory_text.splitlines()[0] == "### 工具结果范围"
+        assert "已返回内容不完整" in memory_text
+        assert "阅读导航" not in memory_text
         assert agent.prompt_manager.update_state_memory.call_args.kwargs["persist"] is False
 
     def test_refresh_retrospective_state_memory_updates_carryover(self, monkeypatch, tmp_path):
@@ -6094,7 +6094,7 @@ class TestRuntimeStateMemoryFlow:
         monkeypatch.setattr(
             agent_module,
             "get_session_state",
-            lambda: SimpleNamespace(render_runtime_constraints=lambda: ""),
+            lambda: SimpleNamespace(render_dialogue_runtime_observations=lambda: ""),
         )
 
         agent._refresh_retrospective_state_memory()
@@ -6116,7 +6116,7 @@ class TestRuntimeStateMemoryFlow:
             "### 语言纠偏\n- 本轮已出现 1 次英文自然语言漂移；后续说明默认回到中文。",
             "### 当前诊断纪律\n- 当前阶段：观测\n### 语言纠偏\n- 本轮已出现 2 次英文自然语言漂移；后续说明默认回到中文。",
         ])
-        fake_session = SimpleNamespace(render_runtime_constraints=lambda: next(summaries))
+        fake_session = SimpleNamespace(render_dialogue_runtime_observations=lambda: next(summaries))
         monkeypatch.setattr(agent_module, "get_session_state", lambda: fake_session)
 
         agent._sync_runtime_state_memory()
@@ -6329,7 +6329,7 @@ class TestRuntimeStateMemoryFlow:
         agent._carryover_state_memory = ""
         agent._active_goal = "制定重启任务，然后对重启任务打勾，然后运行 `trigger_self_restart_tool` 重启你自己。"
 
-        fake_session = SimpleNamespace(render_runtime_constraints=lambda: "")
+        fake_session = SimpleNamespace(render_dialogue_runtime_observations=lambda: "")
         monkeypatch.setattr(agent_module, "get_session_state", lambda: fake_session)
 
         agent._sync_runtime_state_memory()
@@ -6565,106 +6565,8 @@ class TestRuntimeStateMemoryFlow:
             iteration=1,
         ) is None
 
-    def test_should_stop_for_convergence_when_no_new_evidence_accumulates(self):
-        agent_snapshot = {"diagnostic_drift": False, "last_validation_summary": "", "recent_blockers": []}
-        controller = TurnOutcomeController(
-            max_consecutive_failures=3,
-            get_attention_snapshot=lambda: agent_snapshot,
-        )
-
-        reason = controller.should_stop_for_convergence(
-            iteration=3,
-            no_new_evidence_steps=3,
-            delegation_failures=0,
-            total_tool_calls=2,
-        )
-
-        assert reason is not None
-        assert "没有新增证据" in reason
-
-    def test_should_stop_for_convergence_when_scope_frozen_without_new_evidence(self):
-        agent_snapshot = {
-            "diagnostic_drift": False,
-            "last_validation_summary": "ruff lint 通过",
-            "recent_blockers": [],
-            "feedback_loop_ready": True,
-            "scope_frozen": True,
-            "convergence_state": "ready_to_fix",
-            "stop_reason": "已锁定当前锚点",
-        }
-        controller = TurnOutcomeController(
-            max_consecutive_failures=3,
-            get_attention_snapshot=lambda: agent_snapshot,
-        )
-
-        reason = controller.should_stop_for_convergence(
-            iteration=2,
-            no_new_evidence_steps=2,
-            delegation_failures=0,
-            total_tool_calls=3,
-        )
-
-        assert reason is not None
-        assert "范围已冻结" in reason
-
-    def test_should_stop_for_convergence_when_feedback_loop_never_forms(self):
-        agent_snapshot = {
-            "diagnostic_drift": False,
-            "last_validation_summary": "",
-            "recent_blockers": [],
-            "feedback_loop_ready": False,
-            "scope_frozen": False,
-            "convergence_state": "open",
-        }
-        controller = TurnOutcomeController(
-            max_consecutive_failures=3,
-            get_attention_snapshot=lambda: agent_snapshot,
-        )
-
-        reason = controller.should_stop_for_convergence(
-            iteration=2,
-            no_new_evidence_steps=2,
-            delegation_failures=0,
-            total_tool_calls=4,
-        )
-
-        assert reason is not None
-        assert "未形成最小反馈环" in reason
-
-    def test_consecutive_tool_only_responses_do_not_force_stop(self):
-        controller = TurnOutcomeController(
-            max_consecutive_failures=3,
-            get_attention_snapshot=lambda: {"convergence_state": "open"},
-        )
-
-        reason = controller.should_stop_for_convergence(
-            iteration=3,
-            no_new_evidence_steps=0,
-            consecutive_tool_only_steps=3,
-            delegation_failures=0,
-            total_tool_calls=3,
-            substantive_tool_calls=3,
-        )
-
-        assert reason is None
-
-    def test_bookkeeping_only_responses_do_not_force_stop(self):
-        controller = TurnOutcomeController(
-            max_consecutive_failures=3,
-            get_attention_snapshot=lambda: {"convergence_state": "open"},
-        )
-
-        reason = controller.should_stop_for_convergence(
-            iteration=2,
-            no_new_evidence_steps=2,
-            consecutive_tool_only_steps=0,
-            consecutive_bookkeeping_tool_only_steps=2,
-            delegation_failures=0,
-            total_tool_calls=2,
-            substantive_tool_calls=0,
-        )
-
-        assert reason is None
+    def test_turn_outcome_controller_does_not_own_semantic_convergence_stop(self):
+        assert not hasattr(TurnOutcomeController, "should_stop_for_convergence")
 
     def test_readonly_platform_judgment_completion_is_detected(self):
         goal = (
@@ -6922,10 +6824,7 @@ class TestRuntimeStateMemoryFlow:
             )
         ]
 
-        assert TurnOutcomeController.should_skip_convergence_stop_for_pending_restart(
-            expects_restart_after_transaction_close=DelegationGovernor.is_full_evolution_goal(active_goal),
-            messages=messages,
-        ) is True
+        assert TurnOutcomeController.has_successful_close_without_restart(messages) is True
 
         messages.append(
             ToolMessage(
@@ -6935,10 +6834,7 @@ class TestRuntimeStateMemoryFlow:
             )
         )
 
-        assert TurnOutcomeController.should_skip_convergence_stop_for_pending_restart(
-            expects_restart_after_transaction_close=DelegationGovernor.is_full_evolution_goal(active_goal),
-            messages=messages,
-        ) is False
+        assert TurnOutcomeController.has_successful_close_without_restart(messages) is False
 
     def test_full_evolution_goal_detects_bom_prefixed_successful_close_without_restart(self):
         active_goal = (
@@ -6954,10 +6850,7 @@ class TestRuntimeStateMemoryFlow:
             )
         ]
 
-        assert TurnOutcomeController.should_skip_convergence_stop_for_pending_restart(
-            expects_restart_after_transaction_close=DelegationGovernor.is_full_evolution_goal(active_goal),
-            messages=messages,
-        ) is True
+        assert TurnOutcomeController.has_successful_close_without_restart(messages) is True
 
     def test_full_evolution_goal_detects_ok_successful_close_without_restart(self):
         active_goal = (
@@ -6973,10 +6866,7 @@ class TestRuntimeStateMemoryFlow:
             )
         ]
 
-        assert TurnOutcomeController.should_skip_convergence_stop_for_pending_restart(
-            expects_restart_after_transaction_close=DelegationGovernor.is_full_evolution_goal(active_goal),
-            messages=messages,
-        ) is True
+        assert TurnOutcomeController.has_successful_close_without_restart(messages) is True
 
     def test_full_evolution_goal_does_not_skip_convergence_when_close_transaction_failed(self):
         active_goal = (
@@ -6992,25 +6882,10 @@ class TestRuntimeStateMemoryFlow:
             )
         ]
 
-        assert TurnOutcomeController.should_skip_convergence_stop_for_pending_restart(
-            expects_restart_after_transaction_close=DelegationGovernor.is_full_evolution_goal(active_goal),
-            messages=messages,
-        ) is False
+        assert TurnOutcomeController.has_successful_close_without_restart(messages) is False
 
-    def test_pending_restart_skip_is_disabled_without_full_evolution_goal(self):
-        active_goal = "执行非重启事务探针，不要调用 trigger_self_restart_tool。"
-        messages = [
-            ToolMessage(
-                content='{"status":"success","transaction_status":"success","txn_id":"demo"}',
-                tool_call_id="call_close",
-                name="close_evolution_transaction_tool",
-            )
-        ]
-
-        assert TurnOutcomeController.should_skip_convergence_stop_for_pending_restart(
-            expects_restart_after_transaction_close=DelegationGovernor.is_full_evolution_goal(active_goal),
-            messages=messages,
-        ) is False
+    def test_pending_restart_skip_is_not_a_turn_outcome_api(self):
+        assert not hasattr(TurnOutcomeController, "should_skip_convergence_stop_for_pending_restart")
 
     def test_prepare_turn_messages_resumes_same_unfinished_goal(self):
         previous = [
@@ -8329,7 +8204,7 @@ class TestRuntimeStateMemoryFlow:
         assert payload["status"] == "error"
         assert payload["code"] == "UNSUPPORTED_SUBAGENT_TASK_TYPE"
 
-    def test_apply_delegation_result_treats_partial_readonly_diagnosis_as_useful_and_stops(self):
+    def test_apply_delegation_result_treats_partial_diagnosis_as_evidence_without_stopping(self):
         events = {"logs": [], "contents": [], "finished": []}
 
         class DummyUI:
@@ -8387,13 +8262,15 @@ class TestRuntimeStateMemoryFlow:
 
         assert outcome["delegated"] is True
         assert outcome["useful"] is True
-        assert outcome["break_round"] is True
+        assert outcome["break_round"] is False
         assert messages
         assert isinstance(messages[-1], SystemMessage)
         assert "委派证据" in messages[-1].content
+        assert "下一步建议" not in messages[-1].content
+        assert "直接收束" not in messages[-1].content
         assert events["finished"]
         assert "observation" not in events
-        assert events["scope_completion"]
+        assert "scope_completion" not in events
 
     def test_apply_delegation_result_marks_fast_path_ui_hint(self):
         events = {"finished": []}

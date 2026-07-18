@@ -3782,6 +3782,8 @@ def _snapshot_signature(payload: dict[str, Any]) -> str:
 
 
 def _decorate_self_snapshot_fields(payload: dict[str, Any]) -> dict[str, Any]:
+    # Legacy surface remains stable, but dialogue routing no longer supplies a next-tool decision.
+    payload["nextToolIntent"] = ""
     lang = get_web_language()
     rollback = payload.get("rollback") if isinstance(payload.get("rollback"), dict) else {}
     rollback_status = str(rollback.get("status") or "unavailable").strip().lower() or "unavailable"
@@ -3946,7 +3948,6 @@ def _decorate_runtime_snapshot(payload: dict[str, Any]) -> dict[str, Any]:
     reading_hint = str(attention.get("reading_recommendation") or "").strip()
     reading_sufficiency = str(attention.get("reading_sufficiency") or "").strip()
     convergence_state = str(attention.get("convergence_state") or "").strip().lower()
-    next_tool_intent = str(attention.get("next_tool_intent") or "").strip()
     stop_reason = str(attention.get("stop_reason") or "").strip()
 
     if current_goal:
@@ -3973,7 +3974,6 @@ def _decorate_runtime_snapshot(payload: dict[str, Any]) -> dict[str, Any]:
         latest_message=str(payload.get("latestMessage") or "").strip(),
         reading_task=reading_task,
         reading_hint=reading_hint,
-        next_tool_intent=next_tool_intent,
         last_tool_name=last_tool_name,
         stop_reason=stop_reason,
     )
@@ -3987,8 +3987,6 @@ def _decorate_runtime_snapshot(payload: dict[str, Any]) -> dict[str, Any]:
         payload["readingSufficiency"] = reading_sufficiency
     if convergence_state:
         payload["convergenceState"] = convergence_state
-    if next_tool_intent:
-        payload["nextToolIntent"] = next_tool_intent
     if stop_reason and not str(payload.get("stopReason") or "").strip():
         payload["stopReason"] = stop_reason
     return _decorate_self_snapshot_fields(payload)
@@ -4208,7 +4206,6 @@ def _derive_self_current_task(
     latest_message: str,
     reading_task: str,
     reading_hint: str,
-    next_tool_intent: str,
     last_tool_name: str,
     stop_reason: str,
 ) -> str:
@@ -4217,16 +4214,16 @@ def _derive_self_current_task(
     if phase == "reading":
         return reading_task or reading_hint or latest_message
     if phase == "tooling":
-        return next_tool_intent or (f"tool:{last_tool_name}" if last_tool_name else latest_message)
+        return f"tool:{last_tool_name}" if last_tool_name else latest_message
     if phase == "verifying":
-        return next_tool_intent or latest_message or "Verifying the latest changes."
+        return latest_message or "Verifying the latest changes."
     if phase == "editing":
-        return next_tool_intent or latest_message or "Editing the current implementation."
+        return latest_message or "Editing the current implementation."
     if phase == "thinking":
-        return next_tool_intent or reading_hint or latest_message or "Thinking through the next step."
+        return reading_hint or latest_message or "Thinking through the next step."
     if phase == "answering":
-        return next_tool_intent or latest_message or "Preparing the current conclusion."
-    return next_tool_intent or latest_message or reading_hint or reading_task
+        return latest_message or "Preparing the current conclusion."
+    return latest_message or reading_hint or reading_task
 
 
 def _capture_preflight_state(run_id: str) -> dict[str, Any]:

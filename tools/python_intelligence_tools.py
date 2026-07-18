@@ -169,7 +169,7 @@ def code_symbol_tool(
                 "status": "error",
                 "error": "deprecated_mode",
                 "mode": normalized_mode,
-                "message": "code_symbol_tool v2 不再支持 outline/entity/definition/hover。请使用 inspect/search/references/explore/impact/affected_tests。",
+                "message": "code_symbol_tool v2 不支持 outline/entity/definition/hover。supportedModes: inspect/search/references/explore/impact/affected_tests。",
                 "replacement": {
                     "outline": {"mode": "inspect", "file_path": file_path or "<file_path>"},
                     "entity": {"mode": "inspect", "symbol": symbol or "<symbol>"},
