@@ -7763,6 +7763,247 @@ def request_experiment_result_knowledge_ingestion(team_id: str, plan_id: str, pa
     }
 
 
+def reconcile_experiment_knowledge_ingestion(
+    team_id: str,
+    *,
+    inbox_source_id: str,
+    source_ref: dict[str, Any] | None,
+    direct_ingestion: dict[str, Any] | None,
+    reconciled_by_agent_id: str = "",
+) -> dict[str, Any]:
+    """Idempotently project a completed direct ingestion into its experiment ledger."""
+
+    normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
+    normalized_inbox_source_id = _normalize_required_id(inbox_source_id, "Inbox source id is required.")
+    normalized_source_ref = source_ref if isinstance(source_ref, dict) else {}
+    normalized_direct_ingestion = direct_ingestion if isinstance(direct_ingestion, dict) else {}
+    plan_id = _trim_text(normalized_source_ref.get("planId"), max_length=160)
+    pack_id = _trim_text(normalized_source_ref.get("experimentResultPackId"), max_length=160)
+    item = normalized_direct_ingestion.get("item") if isinstance(normalized_direct_ingestion.get("item"), dict) else {}
+    batch = normalized_direct_ingestion.get("batch") if isinstance(normalized_direct_ingestion.get("batch"), dict) else {}
+    source_artifact = (
+        normalized_direct_ingestion.get("sourceArtifact")
+        if isinstance(normalized_direct_ingestion.get("sourceArtifact"), dict)
+        else {}
+    )
+    knowledge_item_id = _trim_text(item.get("knowledgeItemId"), max_length=160)
+    batch_id = _trim_text(batch.get("batchId"), max_length=160)
+    source_artifact_id = _trim_text(source_artifact.get("sourceArtifactId"), max_length=160)
+    if not source_artifact_id:
+        source_artifact_ids = item.get("sourceArtifactIds") if isinstance(item.get("sourceArtifactIds"), list) else []
+        source_artifact_id = _trim_text(source_artifact_ids[0] if source_artifact_ids else "", max_length=160)
+    central_source_id = _trim_text(source_artifact.get("centralSourceId"), max_length=160)
+    if not central_source_id:
+        central_source_ids = item.get("centralSourceIds") if isinstance(item.get("centralSourceIds"), list) else []
+        central_source_id = _trim_text(central_source_ids[0] if central_source_ids else "", max_length=160)
+    direct_status = _trim_text(normalized_direct_ingestion.get("status"), max_length=80).lower()
+    required_evidence = {
+        "planId": plan_id,
+        "experimentResultPackId": pack_id,
+        "knowledgeItemId": knowledge_item_id,
+        "centralSourceId": central_source_id,
+        "sourceArtifactId": source_artifact_id,
+        "batchId": batch_id,
+    }
+    if direct_status != "ingested" or any(not value for value in required_evidence.values()):
+        return {
+            "schemaVersion": SCHEMA_VERSION,
+            "status": "ignored",
+            "updated": False,
+            "reason": "incomplete_direct_ingestion_evidence",
+            "teamId": normalized_team_id,
+            "inboxSourceId": normalized_inbox_source_id,
+        }
+    direct_owner_type = _trim_text(normalized_direct_ingestion.get("ownerType"), max_length=40).lower()
+    direct_owner_id = _trim_text(normalized_direct_ingestion.get("ownerId"), max_length=160)
+    if (direct_owner_type and direct_owner_type != "team") or (
+        direct_owner_id and direct_owner_id != normalized_team_id
+    ):
+        return {
+            "schemaVersion": SCHEMA_VERSION,
+            "status": "ignored",
+            "updated": False,
+            "reason": "direct_ingestion_owner_mismatch",
+            "teamId": normalized_team_id,
+            "inboxSourceId": normalized_inbox_source_id,
+        }
+
+    updated = False
+    reason = "reconciled"
+    now = (
+        _trim_text(normalized_direct_ingestion.get("updatedAt"), max_length=80)
+        or _trim_text(batch.get("appliedAt"), max_length=80)
+        or _trim_text(item.get("appliedAt"), max_length=80)
+        or utc_now_iso()
+    )
+    result_evidence = {
+        "status": "ingested",
+        "inboxSourceId": normalized_inbox_source_id,
+        "experimentResultPackId": pack_id,
+        "planId": plan_id,
+        "knowledgeItemId": knowledge_item_id,
+        "centralSourceId": central_source_id,
+        "sourceArtifactId": source_artifact_id,
+        "batchId": batch_id,
+        "knowledgeBaseId": _trim_text(
+            normalized_direct_ingestion.get("scopedKnowledgeBaseId")
+            or normalized_direct_ingestion.get("knowledgeBaseId"),
+            max_length=200,
+        ),
+        "reconciledByAgentId": _trim_text(reconciled_by_agent_id, max_length=160),
+        "ingestedAt": now,
+    }
+    with _WORKFLOW_LOCK:
+        workflow = _load_or_create_workflow(normalized_team_id)
+        stage_store = _load_stage_round_store(normalized_team_id)
+        rounds = _stage_rounds(stage_store)
+        candidate_store = _load_candidate_store(normalized_team_id)
+        plan_store = _load_experiment_plan_store(normalized_team_id)
+        plan = _find_experiment_plan(plan_store, plan_id)
+        if plan is None:
+            return {
+                "schemaVersion": SCHEMA_VERSION,
+                "status": "ignored",
+                "updated": False,
+                "reason": "experiment_plan_not_found",
+                "teamId": normalized_team_id,
+                "inboxSourceId": normalized_inbox_source_id,
+                "planId": plan_id,
+            }
+        knowledge_ingestion = plan.get("knowledgeIngestion") if isinstance(plan.get("knowledgeIngestion"), dict) else {}
+        stored_pack = (
+            knowledge_ingestion.get("experimentResultPack")
+            if isinstance(knowledge_ingestion.get("experimentResultPack"), dict)
+            else {}
+        )
+        stored_activation = (
+            knowledge_ingestion.get("knowledgeStewardActivation")
+            if isinstance(knowledge_ingestion.get("knowledgeStewardActivation"), dict)
+            else {}
+        )
+        if (
+            _trim_text(stored_pack.get("packId"), max_length=160) != pack_id
+            or _trim_text(stored_activation.get("inboxSourceId"), max_length=160) != normalized_inbox_source_id
+        ):
+            return {
+                "schemaVersion": SCHEMA_VERSION,
+                "status": "ignored",
+                "updated": False,
+                "reason": "experiment_ingestion_reference_mismatch",
+                "teamId": normalized_team_id,
+                "inboxSourceId": normalized_inbox_source_id,
+                "planId": plan_id,
+            }
+        existing_result = knowledge_ingestion.get("result") if isinstance(knowledge_ingestion.get("result"), dict) else {}
+        if _trim_text(knowledge_ingestion.get("status"), max_length=80).lower() == "ingested":
+            stable_keys = (
+                "inboxSourceId",
+                "experimentResultPackId",
+                "planId",
+                "knowledgeItemId",
+                "centralSourceId",
+                "sourceArtifactId",
+                "batchId",
+            )
+            if all(str(existing_result.get(key) or "") == str(result_evidence.get(key) or "") for key in stable_keys):
+                reason = "already_reconciled"
+            else:
+                return {
+                    "schemaVersion": SCHEMA_VERSION,
+                    "status": "ignored",
+                    "updated": False,
+                    "reason": "conflicting_ingestion_evidence",
+                    "teamId": normalized_team_id,
+                    "inboxSourceId": normalized_inbox_source_id,
+                    "planId": plan_id,
+                }
+        else:
+            allowed_statuses = {
+                "knowledge_steward_notified",
+                "knowledge_steward_wake_pending",
+            }
+            if _trim_text(knowledge_ingestion.get("status"), max_length=80).lower() not in allowed_statuses:
+                return {
+                    "schemaVersion": SCHEMA_VERSION,
+                    "status": "ignored",
+                    "updated": False,
+                    "reason": "experiment_ingestion_not_awaiting_steward",
+                    "teamId": normalized_team_id,
+                    "inboxSourceId": normalized_inbox_source_id,
+                    "planId": plan_id,
+                }
+            knowledge_ingestion["status"] = "ingested"
+            knowledge_ingestion["result"] = result_evidence
+            knowledge_ingestion["updatedAt"] = now
+            plan["knowledgeIngestion"] = knowledge_ingestion
+            plan["status"] = "ingested"
+            plan["updatedAt"] = now
+            plan_store["activePlanId"] = plan["planId"]
+            plan_store["updatedAt"] = now
+            _write_json(_experiment_plan_store_path(normalized_team_id), plan_store)
+
+            stage_round = _find_stage_round(rounds, str(plan.get("stageRoundId") or ""))
+            if stage_round is not None:
+                experiment_plan_ref = (
+                    stage_round.get("experimentPlanRef")
+                    if isinstance(stage_round.get("experimentPlanRef"), dict)
+                    else {}
+                )
+                experiment_plan_ref["planId"] = plan["planId"]
+                experiment_plan_ref["status"] = "ingested"
+                experiment_plan_ref["knowledgeIngestionResultRef"] = result_evidence
+                experiment_plan_ref["updatedAt"] = now
+                stage_round["experimentPlanRef"] = experiment_plan_ref
+                planning_contract = (
+                    stage_round.get("planningContract")
+                    if isinstance(stage_round.get("planningContract"), dict)
+                    else {}
+                )
+                planning_contract["currentPlanId"] = plan["planId"]
+                planning_contract["knowledgeIngestionStatus"] = "ingested"
+                planning_contract["knowledgeItemId"] = knowledge_item_id
+                planning_contract["requiresUserDecision"] = False
+                stage_round["planningContract"] = planning_contract
+                stage_round["updatedAt"] = now
+                stage_store["rounds"] = rounds
+                stage_store["updatedAt"] = now
+                _write_json(_stage_round_store_path(normalized_team_id), stage_store)
+            workflow["updatedAt"] = now
+            workflow["activeWorkflowItems"] = _upsert_active_item(
+                workflow.get("activeWorkflowItems"),
+                candidate_id=str(plan.get("stageRoundId") or plan["planId"]),
+                current_node=RESEARCH_STAGE_DEFAULTS["experiment"]["currentNode"],
+                status="ingested",
+                transfer_id="",
+            )
+            _write_json(_workflow_path(normalized_team_id), workflow)
+            updated = True
+        status_payload = _experiment_planning_status(normalized_team_id, rounds, candidate_store, plan_store)
+
+    if updated:
+        _record_workflow_event(
+            "experiment_plan.knowledge_ingestion_reconciled",
+            normalized_team_id,
+            fields={
+                "workflowId": workflow["workflowId"],
+                "stageRoundId": str(plan.get("stageRoundId") or ""),
+                **result_evidence,
+            },
+            outcome="completed",
+        )
+    return {
+        "schemaVersion": SCHEMA_VERSION,
+        "status": "ingested",
+        "updated": updated,
+        "reason": reason,
+        "teamId": normalized_team_id,
+        "planId": plan_id,
+        "inboxSourceId": normalized_inbox_source_id,
+        "result": result_evidence,
+        "projectionStatus": status_payload["status"],
+    }
+
+
 def retry_research_stage_round_coordination(team_id: str, stage_round_id: str) -> dict[str, Any]:
     normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
     normalized_round_id = _normalize_required_id(stage_round_id, "Stage round id is required.")
@@ -21724,6 +21965,7 @@ def _experiment_planning_status(
     knowledge_ingestion = active_plan.get("knowledgeIngestion") if isinstance((active_plan or {}).get("knowledgeIngestion"), dict) else None
     knowledge_ingestion_status = str((knowledge_ingestion or {}).get("status") or "").strip().lower()
     if latest_experiment and active_plan and knowledge_ingestion_status in {
+        "ingested",
         "knowledge_steward_notified",
         "knowledge_steward_wake_pending",
         "knowledge_steward_notification_failed",
@@ -22573,6 +22815,8 @@ def _experiment_planning_readiness_reason(
     active_smoke_result = _active_experiment_smoke_evidence(active_plan)
     active_smoke_status = _trim_text((active_smoke_result or {}).get("status"), max_length=80).lower()
     knowledge_ingestion = active_plan.get("knowledgeIngestion") if isinstance((active_plan or {}).get("knowledgeIngestion"), dict) else None
+    if active_plan and _trim_text((knowledge_ingestion or {}).get("status"), max_length=80).lower() == "ingested":
+        return "实验结论已完成正式知识入库，实验账本与知识证据已对齐。"
     if active_plan and knowledge_ingestion:
         return "实验结果包已进入知识库管理员入库请求链路；正式知识仍等待知识治理门禁。"
     active_full_run = active_plan.get("activeFullRunResult") if isinstance((active_plan or {}).get("activeFullRunResult"), dict) else None
@@ -22596,6 +22840,13 @@ def _experiment_planning_readiness_reason(
 
 def _experiment_planning_next_actions(*, active_plan: dict[str, Any] | None, gaps: list[dict[str, str]]) -> list[str]:
     gap_codes = {item.get("code") for item in gaps}
+    knowledge_ingestion = (
+        active_plan.get("knowledgeIngestion")
+        if isinstance((active_plan or {}).get("knowledgeIngestion"), dict)
+        else {}
+    )
+    if _trim_text(knowledge_ingestion.get("status"), max_length=80).lower() == "ingested":
+        return ["实验结论已完成正式知识入库；后续迭代应引用该 KnowledgeItem 与证据锚点。"]
     if active_plan and isinstance(active_plan.get("knowledgeIngestion"), dict):
         return ["等待知识库管理员复核实验结果入库包。", "在知识库管理员批准精炼知识项之前，原始日志保持在 RAG 之外。"]
     if "missing_experiment_stage_round" in gap_codes:

@@ -20,6 +20,7 @@ from core.web.services import (
     team_service,
     team_workflow_orchestration_service,
 )
+from tools import team_knowledge_tools
 
 pytestmark = pytest.mark.serial
 
@@ -9319,6 +9320,185 @@ def test_experiment_result_knowledge_ingestion_request_notifies_steward_agent(tm
     assert notification_events[-1]["child_log_payload"]["kind"] == "experiment_result_steward_notification"
     assert notification_events[-1]["child_log_payload"]["turnId"] == "turn-experiment-ingest"
     assert notification_events[-1]["child_log_payload"]["fullRunResultId"] == full_run["fullRunResult"]["fullRunResultId"]
+
+
+def test_direct_experiment_ingestion_reconciles_plan_ledger_once(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    scene_events = _capture_workflow_events(monkeypatch)
+    requester = agent_directory_service.create_agent_instance(display_name="Experiment Planning Agent")
+    steward = agent_directory_service.create_agent_instance(display_name="Knowledge Steward")
+    team = team_service.create_team(
+        name="ai科学研究团队",
+        members=[
+            {"agentId": requester["agentId"], "role": "member"},
+            {"agentId": steward["agentId"], "role": "lead"},
+        ],
+    )
+    knowledge_base = team_knowledge_service.create_knowledge_base(
+        team["teamId"],
+        name="Experiment Results",
+        actor_agent_id=steward["agentId"],
+    )
+    knowledge_base_ref = knowledge_base.get("scopedKnowledgeBaseId") or knowledge_base["knowledgeBaseId"]
+    agent_directory_service.update_agent_instance(
+        steward["agentId"],
+        tool_policy={"allowedTools": ["knowledge_ingestion_tool"]},
+        memory_policy={"proposeKnowledgeBaseIds": [knowledge_base_ref]},
+    )
+    monkeypatch.setattr(
+        session_service,
+        "wake_agent_for_inbox_message",
+        lambda message: {
+            "wakeRequested": True,
+            "wakeStatus": "started",
+            "messageId": message["messageId"],
+            "targetAgentId": message["targetAgentId"],
+            "targetSessionId": message["targetSessionId"],
+            "turnId": "turn-experiment-ingest",
+            "reason": "",
+        },
+    )
+    prepared = _create_experiment_plan_with_active_baseline(team["teamId"])
+    smoke = team_workflow_orchestration_service.register_experiment_smoke_result(
+        team["teamId"],
+        prepared["baseline"]["plan"]["planId"],
+        {"status": "passed", "metricValue": "0.75", "resultPath": "workspace/experiments/smoke/result.json"},
+    )
+    full_run = team_workflow_orchestration_service.register_experiment_full_run_result(
+        team["teamId"],
+        smoke["plan"]["planId"],
+        {"status": "passed", "metricValue": "0.79", "resultPath": "workspace/experiments/full_run/result.json"},
+    )
+    requested = team_workflow_orchestration_service.request_experiment_result_knowledge_ingestion(
+        team["teamId"],
+        full_run["plan"]["planId"],
+        {
+            "requestedByAgent": requester["agentId"],
+            "stewardAgentId": steward["agentId"],
+            "knowledgeBaseId": knowledge_base_ref,
+            "targetDomain": "挑战杯实验结果",
+        },
+    )
+    inbox_source_id = requested["knowledgeStewardActivation"]["inboxSourceId"]
+
+    with agent_directory_service.active_agent_runtime(steward["agentId"], session_id="session-experiment-ingestion"):
+        result = json.loads(
+            team_knowledge_tools.knowledge_ingestion_tool(
+                knowledge_base_id=knowledge_base_ref,
+                source_type="runtime_evidence_refinement",
+                source_ref_json=json.dumps(
+                    {
+                        "experimentResultPackId": requested["experimentResultPack"]["packId"],
+                        "planId": requested["plan"]["planId"],
+                    }
+                ),
+                proposal_title="Bounded experiment result",
+                proposal_content="Only the reviewed and bounded experiment conclusion enters formal knowledge.",
+                inbox_source_id=inbox_source_id,
+                owner_type="team",
+                owner_id=team["teamId"],
+                review_decision="accepted",
+                resolution_note="Evidence is complete and bounded.",
+            )
+        )
+
+    status = team_workflow_orchestration_service.get_experiment_planning_status(team["teamId"])
+    reconciliation = result["workflowReconciliation"]
+    ingestion = status["activePlan"]["knowledgeIngestion"]
+    direct_ingestion = result["directIngestion"]
+    assert result["ok"] is True
+    assert result["status"] == "ingested"
+    assert reconciliation["status"] == "ingested"
+    assert reconciliation["updated"] is True
+    assert status["status"] == "ingested"
+    assert status["activePlan"]["status"] == "ingested"
+    assert ingestion["status"] == "ingested"
+    assert ingestion["result"]["inboxSourceId"] == inbox_source_id
+    assert ingestion["result"]["knowledgeItemId"] == direct_ingestion["item"]["knowledgeItemId"]
+    assert ingestion["result"]["centralSourceId"] == direct_ingestion["item"]["centralSourceIds"][0]
+    assert ingestion["result"]["sourceArtifactId"] == direct_ingestion["item"]["sourceArtifactIds"][0]
+    assert ingestion["result"]["batchId"] == direct_ingestion["batch"]["batchId"]
+    assert status["nextActions"] == ["实验结论已完成正式知识入库；后续迭代应引用该 KnowledgeItem 与证据锚点。"]
+
+    replay = team_workflow_orchestration_service.reconcile_experiment_knowledge_ingestion(
+        team["teamId"],
+        inbox_source_id=inbox_source_id,
+        source_ref=result["review"]["source"]["sourceRef"],
+        direct_ingestion=direct_ingestion,
+        reconciled_by_agent_id=steward["agentId"],
+    )
+    items = team_knowledge_service.list_knowledge_items(knowledge_base_ref, agent_id=steward["agentId"])
+    assert replay["status"] == "ingested"
+    assert replay["updated"] is False
+    assert replay["reason"] == "already_reconciled"
+    assert items["summary"]["itemCount"] == 1
+    assert len(_workflow_scene_events_by_code(scene_events, "experiment_plan.knowledge_ingestion_reconciled")) == 1
+
+    conflicting_direct_ingestion = {
+        **direct_ingestion,
+        "item": {
+            **direct_ingestion["item"],
+            "knowledgeItemId": "kitem-conflicting-replay",
+        },
+    }
+    conflict = team_workflow_orchestration_service.reconcile_experiment_knowledge_ingestion(
+        team["teamId"],
+        inbox_source_id=inbox_source_id,
+        source_ref=result["review"]["source"]["sourceRef"],
+        direct_ingestion=conflicting_direct_ingestion,
+        reconciled_by_agent_id=steward["agentId"],
+    )
+    status_after_conflict = team_workflow_orchestration_service.get_experiment_planning_status(team["teamId"])
+    assert conflict["status"] == "ignored"
+    assert conflict["updated"] is False
+    assert conflict["reason"] == "conflicting_ingestion_evidence"
+    assert (
+        status_after_conflict["activePlan"]["knowledgeIngestion"]["result"]["knowledgeItemId"]
+        == direct_ingestion["item"]["knowledgeItemId"]
+    )
+
+
+def test_experiment_ingestion_reconciliation_rejects_partial_evidence(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = team_service.create_team(name="ai科学研究团队")
+    prepared = _create_experiment_plan_with_active_baseline(team["teamId"])
+    smoke = team_workflow_orchestration_service.register_experiment_smoke_result(
+        team["teamId"],
+        prepared["baseline"]["plan"]["planId"],
+        {"status": "passed", "metricValue": "0.75", "resultPath": "workspace/experiments/smoke/result.json"},
+    )
+    full_run = team_workflow_orchestration_service.register_experiment_full_run_result(
+        team["teamId"],
+        smoke["plan"]["planId"],
+        {"status": "passed", "metricValue": "0.79", "resultPath": "workspace/experiments/full_run/result.json"},
+    )
+    requested = team_workflow_orchestration_service.request_experiment_result_knowledge_ingestion(
+        team["teamId"],
+        full_run["plan"]["planId"],
+        {"wakeStewardAgent": False},
+    )
+    inbox_source_id = requested["knowledgeStewardActivation"]["inboxSourceId"]
+
+    reconciliation = team_workflow_orchestration_service.reconcile_experiment_knowledge_ingestion(
+        team["teamId"],
+        inbox_source_id=inbox_source_id,
+        source_ref={
+            "experimentResultPackId": requested["experimentResultPack"]["packId"],
+            "planId": requested["plan"]["planId"],
+        },
+        direct_ingestion={
+            "status": "ingested",
+            "item": {"knowledgeItemId": "kitem-partial"},
+        },
+        reconciled_by_agent_id="Knowledge Steward",
+    )
+    status = team_workflow_orchestration_service.get_experiment_planning_status(team["teamId"])
+
+    assert reconciliation["status"] == "ignored"
+    assert reconciliation["updated"] is False
+    assert reconciliation["reason"] == "incomplete_direct_ingestion_evidence"
+    assert status["status"] == requested["plan"]["status"]
+    assert status["activePlan"]["knowledgeIngestion"]["status"] != "ingested"
 
 
 def test_experiment_plan_requires_experiment_stage_round(tmp_path, monkeypatch):
