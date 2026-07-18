@@ -18,7 +18,7 @@ export const launcherRouteStyles = {
     "mx-2 mt-2 min-w-0 border-[var(--vui-border-subtle)] !bg-transparent !shadow-none !backdrop-blur-none",
   panelEyebrow: "m-0 text-[var(--vui-font-xs)] uppercase tracking-[0.08em] text-vui-fg-tertiary",
   statusBar:
-    "grid w-[min(760px,58vw)] min-w-0 grid-cols-[minmax(220px,1fr)_max-content] items-center gap-2 max-[1200px]:w-full max-[1200px]:max-w-none max-[1200px]:grid-cols-[minmax(0,1fr)] max-[1200px]:justify-items-stretch",
+    "grid w-full max-w-none min-w-0 grid-cols-[minmax(0,1fr)_max-content] items-center gap-2 max-[1200px]:grid-cols-[minmax(0,1fr)] max-[1200px]:justify-items-stretch",
   statusBarReason:
     `grid min-h-7 min-w-0 grid-cols-[minmax(76px,max-content)_minmax(94px,max-content)_minmax(0,1fr)] items-center gap-1.5 ${rowSurface} px-2 data-[tone=success]:border-[color-mix(in_srgb,var(--state-success)_34%,transparent)] data-[tone=warning]:border-[color-mix(in_srgb,var(--state-warning)_38%,transparent)] data-[tone=error]:border-[color-mix(in_srgb,var(--state-error)_38%,transparent)] max-[860px]:grid-cols-[minmax(0,1fr)] ${panelHeaderText} [&_span]:whitespace-nowrap [&_small]:min-w-0 [&_small]:truncate [&_small]:text-[var(--vui-font-xs)] [&_small]:text-vui-fg-secondary max-[860px]:[&_span]:whitespace-normal max-[860px]:[&_span]:overflow-visible max-[860px]:[&_span]:overflow-wrap-anywhere max-[860px]:[&_strong]:whitespace-normal max-[860px]:[&_strong]:overflow-visible max-[860px]:[&_strong]:overflow-wrap-anywhere max-[860px]:[&_small]:whitespace-normal max-[860px]:[&_small]:overflow-visible max-[860px]:[&_small]:overflow-wrap-anywhere`,
   statusBarActions:
@@ -50,7 +50,7 @@ export const launcherRouteStyles = {
     `mx-2 mt-1.5 grid min-h-0 min-w-0 max-w-full gap-1.5 overflow-hidden ${panelSurface} px-2 py-1.5 data-[enabled=true]:border-[color-mix(in_srgb,var(--state-warning)_42%,transparent)]`,
   developerPanelHeader:
     "flex min-w-0 items-center justify-between gap-2 max-[860px]:flex-col max-[860px]:items-start [&>div]:grid [&>div]:min-w-0 [&>div]:gap-0.5 [&_strong]:text-[var(--vui-font-xs)] [&_strong]:text-[var(--fg-primary)]",
-  developerGrid: "grid min-h-0 min-w-0 grid-cols-[minmax(132px,0.36fr)_minmax(0,1fr)_minmax(250px,0.72fr)] gap-1.5 max-[1200px]:grid-cols-[minmax(0,1fr)]",
+  developerGrid: "grid min-h-0 min-w-0 grid-cols-[clamp(120px,14vw,160px)_minmax(0,1fr)_clamp(240px,22vw,360px)] gap-1.5 max-[1200px]:grid-cols-[minmax(0,1fr)]",
   developerStatus:
     `grid min-w-0 content-start gap-1 ${rowSurface} p-[7px] data-[tone=warning]:border-[color-mix(in_srgb,var(--state-warning)_42%,transparent)] ${panelHeaderText} [&_small]:min-w-0 [&_small]:truncate [&_small]:text-[var(--vui-font-xs)] [&_small]:text-vui-fg-secondary`,
   developerNoise: `grid min-h-0 min-w-0 gap-1.5 overflow-hidden ${rowSurface} p-[7px]`,
@@ -71,7 +71,7 @@ export const launcherRouteStyles = {
   notice:
     `mx-2 mt-1.5 grid gap-0.5 ${panelSurface} px-2 py-1.5 text-[var(--vui-font-xs)] text-vui-fg-secondary data-[tone=success]:border-[color-mix(in_srgb,var(--state-success)_34%,transparent)] data-[tone=success]:text-[var(--state-success)] data-[tone=warning]:border-[color-mix(in_srgb,var(--state-warning)_34%,transparent)] data-[tone=warning]:text-[var(--state-warning)] data-[tone=error]:border-[color-mix(in_srgb,var(--state-error)_34%,transparent)] data-[tone=error]:text-[var(--state-error)] [&_span]:min-w-0 [&_span]:truncate [&_span]:text-[var(--vui-font-xs)] [&_span]:text-vui-fg-tertiary`,
   workspace:
-    "grid min-h-0 grid-cols-[minmax(0,1fr)_minmax(320px,0.72fr)] auto-rows-min gap-1.5 overflow-visible px-2 pb-[max(14px,env(safe-area-inset-bottom))] pt-1.5 max-[1200px]:grid-cols-[minmax(0,1fr)]",
+    "grid min-h-0 grid-cols-[minmax(0,1fr)_clamp(300px,26vw,420px)] auto-rows-min gap-1.5 overflow-visible px-2 pb-[max(14px,env(safe-area-inset-bottom))] pt-1.5 max-[1200px]:grid-cols-[minmax(0,1fr)]",
   panel: `block min-h-0 min-w-0 overflow-hidden ${panelSurface} px-2 py-[7px]`,
   matrixPanel: "col-auto min-h-0",
   panelHeader:
