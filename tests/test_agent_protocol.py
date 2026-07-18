@@ -44,6 +44,21 @@ from tools.agent_tools import spawn_agent as spawn_agent_impl, set_subagent_stre
 from tools.Key_Tools import create_key_tools, create_llm_facing_tools
 
 
+def _build_operator_delegation_request(*, goal: str, iteration: int, total_tool_calls: int):
+    """保留对独立治理器的契约覆盖，不经由对话 Agent 私有入口。"""
+    governor = DelegationGovernor(
+        spawn_execute=lambda *_args, **_kwargs: ("{}", None),
+        sync_runtime_state_memory=lambda: None,
+        ui_getter=lambda: None,
+        session_getter=agent_module.get_session_state,
+    )
+    return governor.build_request(
+        goal=goal,
+        iteration=iteration,
+        total_tool_calls=total_tool_calls,
+    )
+
+
 def test_session_turn_reuse_refreshes_turn_scoped_tool_authorization(monkeypatch):
     agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
     agent.key_tools = [SimpleNamespace(name="git_status")]
@@ -415,6 +430,19 @@ class TestToolMessageFlow:
         assert "runtime_metadata" in agent._recent_tool_records[0]
         assert "runtime_metadata" not in agent._recent_tool_records[1]
         assert "continuation_hint" not in agent._recent_tool_records[0]["runtime_metadata"]
+
+    def test_dialogue_agent_exposes_no_legacy_auto_delegation_entrypoints(self):
+        legacy_entrypoints = (
+            "_build_delegation_request",
+            "_apply_delegation_result",
+            "_is_session_agent_runtime",
+            "_session_agent_auto_delegation_enabled",
+            "_record_session_agent_auto_delegation_disabled",
+            "_maybe_delegate",
+            "_get_delegation_governor",
+        )
+
+        assert all(not hasattr(SelfEvolvingAgent, entrypoint) for entrypoint in legacy_entrypoints)
 
     def test_handle_tool_result_decodes_binary_failure_result(self):
         messages = []
@@ -2036,7 +2064,6 @@ class TestToolMessageFlow:
         agent.is_mental_model_enabled_for_turn = lambda: False
         agent._sync_runtime_state_memory = lambda: None
         agent._seed_runtime_agent_context_for_turn = lambda run_id: None
-        agent._maybe_delegate = lambda goal, iteration, total_tool_calls, messages: None
         agent._raise_if_turn_stop_requested = lambda: None
         agent._create_round_state = lambda: round_state
         agent._apply_active_components_request = lambda processed: None
@@ -2310,7 +2337,6 @@ class TestToolMessageFlow:
         agent.is_mental_model_enabled_for_turn = lambda: False
         agent._sync_runtime_state_memory = lambda: None
         agent._seed_runtime_agent_context_for_turn = lambda run_id: None
-        agent._maybe_delegate = lambda goal, iteration, total_tool_calls, messages: None
         agent._raise_if_turn_stop_requested = lambda: None
         agent._create_round_state = lambda: round_state
         agent._apply_active_components_request = lambda processed: None
@@ -2617,7 +2643,6 @@ class TestToolMessageFlow:
         agent.is_mental_model_enabled_for_turn = lambda: False
         agent._sync_runtime_state_memory = lambda: None
         agent._seed_runtime_agent_context_for_turn = lambda run_id: None
-        agent._maybe_delegate = lambda goal, iteration, total_tool_calls, messages: None
         agent._raise_if_turn_stop_requested = lambda: None
         agent._create_round_state = lambda: round_state
         agent._apply_active_components_request = lambda processed: None
@@ -4646,54 +4671,6 @@ class TestToolMessageFlow:
         assert "OSError" in result["summary"]
         assert result["fast_path"] == "conversation_log_scan"
 
-    def test_apply_delegation_result_feeds_subagent_ui_blocks(self, monkeypatch):
-        captured = {"start": [], "finish": []}
-
-        class DummyUI:
-            def add_log(self, *_args, **_kwargs):
-                return None
-
-            def add_content(self, *_args, **_kwargs):
-                return None
-
-            def add_delegation_evidence(self, *_args, **_kwargs):
-                return None
-
-            def start_subagent_activity(self, *args, **kwargs):
-                captured["start"].append((args, kwargs))
-
-            def finish_subagent_activity(self, *args, **kwargs):
-                captured["finish"].append((args, kwargs))
-
-        session = MagicMock()
-        session.get_attention_snapshot.return_value = {}
-        monkeypatch.setattr(agent_module, "get_ui", lambda: DummyUI())
-        monkeypatch.setattr(agent_module, "get_session_state", lambda: session)
-
-        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
-        agent._sync_runtime_state_memory = lambda: None
-
-        payload = {"task_type": "diagnose", "goal": "分析重复调用", "scope": {"log": "a.jsonl"}}
-        result = {
-            "status": "completed",
-            "summary": "已定位根因",
-            "findings": ["重复调用 read_file_tool"],
-            "evidence": ["recent_blockers"],
-            "recommended_next_action": "主 agent 收束",
-            "confidence": "high",
-            "process_output": "子 agent 先读取 attention snapshot，再比对工具轨迹。",
-        }
-
-        ui = agent_module.get_ui()
-        ui.start_subagent_activity(payload["task_type"], payload["goal"], payload["scope"])
-        outcome = agent._apply_delegation_result(payload, __import__("json").dumps(result, ensure_ascii=False), [])
-
-        assert outcome["useful"] is True
-        assert captured["finish"]
-        finish_kwargs = captured["finish"][0][1]
-        assert finish_kwargs["summary"] == "已定位根因"
-        assert "attention snapshot" in finish_kwargs["thought"]
-
     def test_maybe_delegate_passes_turn_stop_checker_to_spawn_tool(self):
         captured = {}
 
@@ -4786,147 +4763,6 @@ class TestToolMessageFlow:
         assert captured["_cancel_checker"]() == "操作者请求停止当前轮。"
         assert outcome["delegated"] is True
         assert outcome["useful"] is False
-
-    def test_maybe_delegate_respects_runtime_goal_subagent_boundary(self, monkeypatch):
-        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
-        packet = RuntimeGoalPacket(
-            goal="运行监督评测 case",
-            source="监督进化入口",
-            objective_type="evaluation_case",
-            allow_auto_continue=False,
-            allow_file_writes=True,
-            allow_git_commit=False,
-            allow_evolution_transaction=True,
-            allow_subagents=False,
-            completion_standard="按给定 case 产生可比较证据。",
-        )
-        agent.prompt_manager = SimpleNamespace(get_runtime_goal_packet=lambda: packet)
-        agent._get_delegation_governor = MagicMock(side_effect=AssertionError("delegation should be blocked"))
-        scene_events = []
-        monkeypatch.setattr(
-            agent_module,
-            "_record_agent_scene_event",
-            lambda phase, event_code, **kwargs: scene_events.append((phase, event_code, kwargs)),
-        )
-
-        outcome = agent._maybe_delegate(
-            goal="分析监督 case 中的日志差异",
-            iteration=2,
-            total_tool_calls=4,
-            messages=[],
-        )
-
-        assert outcome is None
-        agent._get_delegation_governor.assert_not_called()
-        assert scene_events == []
-
-    def test_session_agent_auto_delegation_is_closed_by_default(self, monkeypatch):
-        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
-        agent.prompt_manager = SimpleNamespace(get_runtime_goal_packet=lambda: None)
-        agent._get_delegation_governor = MagicMock(side_effect=AssertionError("delegation should be closed"))
-        scene_events = []
-        monkeypatch.setattr(
-            agent_module,
-            "_record_agent_scene_event",
-            lambda phase, event_code, **kwargs: scene_events.append((phase, event_code, kwargs)),
-        )
-
-        outcome = agent._maybe_delegate(
-            goal="让外部代码 Agent 检查 CLI 页面",
-            iteration=1,
-            total_tool_calls=0,
-            messages=[],
-        )
-
-        assert outcome is None
-        agent._get_delegation_governor.assert_not_called()
-        assert scene_events == []
-
-    def test_non_session_agent_runtime_does_not_auto_delegate(self, monkeypatch):
-        from core.web.services import agent_directory_service
-
-        monkeypatch.setattr(
-            agent_directory_service,
-            "current_agent_runtime",
-            lambda: {"agentId": "research-agent", "agent": {"primaryMode": "research"}},
-        )
-        governor = MagicMock()
-        governor.maybe_delegate.return_value = {"delegated": True, "useful": False}
-        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
-        agent.prompt_manager = SimpleNamespace(get_runtime_goal_packet=lambda: None)
-        agent._get_delegation_governor = MagicMock(return_value=governor)
-
-        outcome = agent._maybe_delegate(
-            goal="分析资料",
-            iteration=1,
-            total_tool_calls=0,
-            messages=[],
-        )
-
-        assert outcome is None
-        governor.maybe_delegate.assert_not_called()
-
-    def test_explicit_session_override_closes_specialized_agent_auto_delegation(self, monkeypatch):
-        from core.web.services import agent_directory_service
-
-        monkeypatch.setattr(
-            agent_directory_service,
-            "current_agent_runtime",
-            lambda: {"agentId": "source-finder", "agent": {"primaryMode": "research"}},
-        )
-        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
-        agent.prompt_manager = SimpleNamespace(
-            get_runtime_goal_packet=MagicMock(side_effect=AssertionError("disabled delegation must not inspect goal packet"))
-        )
-        agent._allow_session_subagent_auto_delegation = False
-        agent._get_delegation_governor = MagicMock(side_effect=AssertionError("delegation should be closed"))
-
-        outcome = agent._maybe_delegate(
-            goal="继续完成 source_finder 阶段任务",
-            iteration=1,
-            total_tool_calls=0,
-            messages=[],
-        )
-
-        assert outcome is None
-        agent.prompt_manager.get_runtime_goal_packet.assert_not_called()
-        agent._get_delegation_governor.assert_not_called()
-
-    def test_apply_delegation_result_surfaces_timeout_instead_of_parse_failure(self, monkeypatch):
-        captured = {"finish": []}
-
-        class DummyUI:
-            def add_log(self, *_args, **_kwargs):
-                return None
-
-            def add_content(self, *_args, **_kwargs):
-                return None
-
-            def add_delegation_evidence(self, *_args, **_kwargs):
-                return None
-
-            def finish_subagent_activity(self, *args, **kwargs):
-                captured["finish"].append((args, kwargs))
-
-        session = MagicMock()
-        monkeypatch.setattr(agent_module, "get_ui", lambda: DummyUI())
-        monkeypatch.setattr(agent_module, "get_session_state", lambda: session)
-
-        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
-        agent._sync_runtime_state_memory = lambda: None
-
-        payload = {"task_type": "diagnose", "goal": "分析重复调用", "scope": {"log": "a.jsonl"}}
-        outcome = agent._apply_delegation_result(
-            payload,
-            "[超时] spawn_agent_tool 执行超时 (30秒)",
-            [],
-        )
-
-        assert outcome["useful"] is False
-        assert captured["finish"]
-        finish_kwargs = captured["finish"][0][1]
-        assert finish_kwargs["status"] == "timeout"
-        assert "超时" in finish_kwargs["summary"]
 
     def test_infer_result_from_tool_outputs_extracts_oserror(self):
         payload = infer_result_from_tool_outputs(
@@ -5423,7 +5259,6 @@ class TestLocalProviderBootstrap:
             lambda *args, **kwargs: scene_events.append((args, kwargs)),
         )
         agent._compress_messages = fake_compress
-        agent._maybe_delegate = lambda **_kwargs: None
 
         def fake_invoke(messages, replay_state=None):
             llm_message_counts.append(len(messages))
@@ -7517,7 +7352,7 @@ class TestRuntimeStateMemoryFlow:
         )
         monkeypatch.setattr(agent_module, "get_session_state", lambda: session)
 
-        payload = agent._build_delegation_request(
+        payload = _build_operator_delegation_request(
             goal="开始自主进化",
             iteration=2,
             total_tool_calls=4,
@@ -7544,7 +7379,7 @@ class TestRuntimeStateMemoryFlow:
         )
         monkeypatch.setattr(agent_module, "get_session_state", lambda: session)
 
-        payload = agent._build_delegation_request(
+        payload = _build_operator_delegation_request(
             goal="开始自主进化",
             iteration=2,
             total_tool_calls=4,
@@ -7574,7 +7409,7 @@ class TestRuntimeStateMemoryFlow:
         )
         monkeypatch.setattr(agent_module, "get_session_state", lambda: session)
 
-        payload = agent._build_delegation_request(
+        payload = _build_operator_delegation_request(
             goal="开始自主进化",
             iteration=2,
             total_tool_calls=4,
@@ -7607,7 +7442,7 @@ class TestRuntimeStateMemoryFlow:
         )
         monkeypatch.setattr(agent_module, "get_session_state", lambda: session)
 
-        payload = agent._build_delegation_request(
+        payload = _build_operator_delegation_request(
             goal="开始自主进化",
             iteration=2,
             total_tool_calls=5,
@@ -7647,7 +7482,7 @@ class TestRuntimeStateMemoryFlow:
         )
         monkeypatch.setattr(agent_module, "get_session_state", lambda: session)
 
-        payload = agent._build_delegation_request(
+        payload = _build_operator_delegation_request(
             goal="开始自主进化",
             iteration=2,
             total_tool_calls=5,
@@ -7675,7 +7510,7 @@ class TestRuntimeStateMemoryFlow:
         )
         monkeypatch.setattr(agent_module, "get_session_state", lambda: session)
 
-        payload = agent._build_delegation_request(
+        payload = _build_operator_delegation_request(
             goal="开始自主进化",
             iteration=2,
             total_tool_calls=5,
@@ -7700,7 +7535,7 @@ class TestRuntimeStateMemoryFlow:
         )
         monkeypatch.setattr(agent_module, "get_session_state", lambda: session)
 
-        payload = agent._build_delegation_request(
+        payload = _build_operator_delegation_request(
             goal="制定重启任务，然后对重启任务打勾，然后运行 `trigger_self_restart_tool` 重启你自己。",
             iteration=2,
             total_tool_calls=4,
@@ -7725,7 +7560,7 @@ class TestRuntimeStateMemoryFlow:
         )
         monkeypatch.setattr(agent_module, "get_session_state", lambda: session)
 
-        payload = agent._build_delegation_request(
+        payload = _build_operator_delegation_request(
             goal="分析 log_info/conversation_20260511_162502.jsonl 中子 agent 为什么会超时，只做诊断，不要修改代码。",
             iteration=1,
             total_tool_calls=0,
@@ -7754,7 +7589,7 @@ class TestRuntimeStateMemoryFlow:
         )
         monkeypatch.setattr(agent_module, "get_session_state", lambda: session)
 
-        payload = agent._build_delegation_request(
+        payload = _build_operator_delegation_request(
             goal="请总结一下当前已有证据，只做摘要，不要修改代码。",
             iteration=2,
             total_tool_calls=5,
@@ -7784,7 +7619,7 @@ class TestRuntimeStateMemoryFlow:
         )
         monkeypatch.setattr(agent_module, "get_session_state", lambda: session)
 
-        payload = agent._build_delegation_request(
+        payload = _build_operator_delegation_request(
             goal="请总结一下当前状态，只做摘要，不要修改代码。",
             iteration=2,
             total_tool_calls=5,
@@ -7812,7 +7647,7 @@ class TestRuntimeStateMemoryFlow:
         )
         monkeypatch.setattr(agent_module, "get_session_state", lambda: session)
 
-        payload = agent._build_delegation_request(
+        payload = _build_operator_delegation_request(
             goal="请总结一下当前证据，然后修改代码。",
             iteration=2,
             total_tool_calls=5,
@@ -7840,7 +7675,7 @@ class TestRuntimeStateMemoryFlow:
         )
         monkeypatch.setattr(agent_module, "get_session_state", lambda: session)
 
-        payload = agent._build_delegation_request(
+        payload = _build_operator_delegation_request(
             goal="检查当前配置链路是否一致，只做查看，不要修改代码。",
             iteration=2,
             total_tool_calls=2,
@@ -7870,7 +7705,7 @@ class TestRuntimeStateMemoryFlow:
         )
         monkeypatch.setattr(agent_module, "get_session_state", lambda: session)
 
-        payload = agent._build_delegation_request(
+        payload = _build_operator_delegation_request(
             goal="检查一下当前文件，只做查看，不要修改代码。",
             iteration=2,
             total_tool_calls=2,
@@ -7898,7 +7733,7 @@ class TestRuntimeStateMemoryFlow:
         )
         monkeypatch.setattr(agent_module, "get_session_state", lambda: session)
 
-        payload = agent._build_delegation_request(
+        payload = _build_operator_delegation_request(
             goal="检查为什么最近测试失败并出现 traceback，只做诊断，不要修改代码。",
             iteration=2,
             total_tool_calls=3,
@@ -7934,7 +7769,7 @@ class TestRuntimeStateMemoryFlow:
         )
         monkeypatch.setattr(agent_module, "get_session_state", lambda: session)
 
-        payload = agent._build_delegation_request(
+        payload = _build_operator_delegation_request(
             goal="开始自主进化",
             iteration=2,
             total_tool_calls=4,
@@ -7982,7 +7817,7 @@ class TestRuntimeStateMemoryFlow:
         )
         monkeypatch.setattr(agent_module, "get_session_state", lambda: session)
 
-        payload = agent._build_delegation_request(
+        payload = _build_operator_delegation_request(
             goal="开始自主进化",
             iteration=2,
             total_tool_calls=4,
@@ -8029,7 +7864,7 @@ class TestRuntimeStateMemoryFlow:
         )
         monkeypatch.setattr(agent_module, "get_session_state", lambda: session)
 
-        payload = agent._build_delegation_request(
+        payload = _build_operator_delegation_request(
             goal="开始自主进化",
             iteration=2,
             total_tool_calls=4,
@@ -8063,7 +7898,7 @@ class TestRuntimeStateMemoryFlow:
         )
         monkeypatch.setattr(agent_module, "get_session_state", lambda: session)
 
-        payload = agent._build_delegation_request(
+        payload = _build_operator_delegation_request(
             goal="分析 log_info/conversation_20260511_162502.jsonl 中子 agent 为什么会超时，只做诊断，不要修改代码。",
             iteration=2,
             total_tool_calls=0,
@@ -8403,7 +8238,7 @@ class TestRuntimeStateMemoryFlow:
 
         monkeypatch.setattr(agent_module, "get_session_state", lambda: DummySession())
 
-        payload = agent._build_delegation_request(
+        payload = _build_operator_delegation_request(
             goal="继续完成同一个用户目标：继续吧\n上一内部回合仍未完成用户目标（第 1 轮）。",
             iteration=3,
             total_tool_calls=8,

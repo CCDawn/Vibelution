@@ -122,8 +122,6 @@ from tools.memory_tools import get_current_goal
 from tools.rebirth_tools import handle_restart_request  # noqa: F401
 
 
-from tools.agent_tools import set_subagent_stream_sink  # noqa: F401
-
 # 导入 CLI UI
 from core.ui.cli_ui import get_ui, ui_error
 from core.ui.workbench import AgentWorkbenchShell
@@ -140,8 +138,6 @@ from core.orchestration.evolution_lifecycle import (
     is_full_evolution_goal,
     is_restart_focused_goal,
 )
-# 兼容旧的外部管理接口；通用对话主循环不再创建或调用该治理器。
-from core.orchestration.delegation_governor import DelegationGovernor
 from core.orchestration.agent_modes import (
     AgentMode,
     ModePolicy,
@@ -174,7 +170,6 @@ _INTERNAL_TOOL_PROTOCOL_MARKERS = (
     "spawn_agent_tool",
     "_internal_delegate",
 )
-_SESSION_AGENT_DELEGATION_REPLACEMENT_TOOL = "cli_agent_run_tool"
 _SESSION_CHAT_PROMPT_GOAL = "处理当前会话中的用户请求"
 _TOOL_POLICY_FAILURE_RE = re.compile(
     r"\[工具策略提示\]\s*`[^`]+`\s*不在该 Agent 的可见工具策略中。?",
@@ -1455,104 +1450,6 @@ class SelfEvolvingAgent:
             "failure_class": metadata.failure_class,
         }
 
-    def _build_delegation_request(
-        self,
-        *,
-        goal: str,
-        iteration: int,
-        total_tool_calls: int,
-    ) -> Optional[Dict[str, Any]]:
-        governor = self._get_delegation_governor()
-        return governor.build_request(
-            goal=goal,
-            iteration=iteration,
-            total_tool_calls=total_tool_calls,
-        )
-
-    def _apply_delegation_result(
-        self,
-        payload: Dict[str, Any],
-        result_text: str,
-        messages: list,
-    ) -> Dict[str, Any]:
-        governor = self._get_delegation_governor()
-        return governor.apply_result(payload, result_text, messages)
-
-    def _is_session_agent_runtime(self) -> bool:
-        try:
-            from core.web.services import agent_directory_service
-            runtime = agent_directory_service.current_agent_runtime()
-        except Exception:
-            runtime = {}
-        if not isinstance(runtime, dict) or not runtime:
-            return True
-        agent = runtime.get("agent") if isinstance(runtime.get("agent"), dict) else {}
-        primary_mode = str(
-            agent.get("primaryMode")
-            or runtime.get("primaryMode")
-            or ""
-        ).strip().lower()
-        return primary_mode in {"", "chat"}
-
-    def _session_agent_auto_delegation_enabled(self) -> bool:
-        explicit_override = getattr(self, "_allow_session_subagent_auto_delegation", None)
-        if explicit_override is not None:
-            return bool(explicit_override)
-        if not self._is_session_agent_runtime():
-            return True
-        return False
-
-    def _record_session_agent_auto_delegation_disabled(self) -> None:
-        if bool(getattr(self, "_session_agent_auto_delegation_disabled_logged", False)):
-            return
-        self._session_agent_auto_delegation_disabled_logged = True
-        _debug_logger.info(
-            "[Delegation] 会话 Agent 自动子 Agent 派遣已关闭，外部代码 Agent 工作改走 cli_agent_run_tool。",
-            tag="DELEGATE",
-        )
-        _record_agent_scene_event(
-            "delegation",
-            "agent.delegation.blocked",
-            message="会话 Agent 自动子 Agent 派遣已关闭，外部代码 Agent 工作改走 cli_agent_run_tool。",
-            fields={
-                "reason": "session_agent_auto_delegation_disabled",
-                "replacementTool": _SESSION_AGENT_DELEGATION_REPLACEMENT_TOOL,
-                "autoDelegationEnabled": False,
-            },
-        )
-
-    def _maybe_delegate(
-        self,
-        *,
-        goal: str,
-        iteration: int,
-        total_tool_calls: int,
-        messages: list,
-    ) -> Optional[Dict[str, Any]]:
-        """通用对话不自动委派；Team/operator 域拥有显式子 Agent 编排。"""
-        return None
-
-    def _get_delegation_governor(self) -> DelegationGovernor:
-        governor = getattr(self, "delegation_governor", None)
-        if governor is not None:
-            return governor
-
-        tool_executor = getattr(self, "tool_executor", None)
-        spawn_execute = getattr(tool_executor, "execute", None)
-        if spawn_execute is None:
-            def spawn_execute(_tool_name: str, _tool_args: dict):
-                return ("[错误] delegation governor 未初始化", None)
-
-        governor = DelegationGovernor(
-            spawn_execute=spawn_execute,
-            sync_runtime_state_memory=self._sync_runtime_state_memory,
-            ui_getter=get_ui,
-            session_getter=get_session_state,
-            turn_stop_checker=self._current_turn_stop_reason,
-        )
-        self.delegation_governor = governor
-        return governor
-
     def _get_turn_outcome_controller(self) -> TurnOutcomeController:
         controller = getattr(self, "turn_outcome_controller", None)
         if controller is not None:
@@ -2619,8 +2516,6 @@ class SelfEvolvingAgent:
         logger.log_llm_request(messages, model=model_name)
         self._compression_count_this_turn = 0
         self._last_compression_iteration = 0
-        self._session_agent_auto_delegation_disabled_logged = False
-
         round_state = self._create_round_state()
         lifecycle_action: Optional[str] = None
         turn_tool_names: List[str] = []
