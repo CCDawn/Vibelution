@@ -1,14 +1,14 @@
-export const vuiButtonBaseClass =
-  "border border-vui-border-subtle bg-vui-control-muted text-vui-fg-secondary shadow-none";
-
-export const vuiButtonHoverClass =
-  "transition-colors duration-150 hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] hover:shadow-[var(--vui-control-hover-shadow)]";
-
-export const vuiButtonPrimaryClass =
-  "border-vui-accent-cool bg-vui-surface-panel text-vui-fg-primary";
-
-export const vuiButtonDangerClass =
-  "border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[var(--vui-status-danger-bg)] text-[var(--vui-status-danger-fg)]";
+/**
+ * Backward-compatible re-exports.
+ * Visual slots live in `renderers/shared/buttonSlots.ts` so shadcn/HeroUI
+ * renderers share one token contract.
+ */
+export {
+  vuiButtonBaseClass,
+  vuiButtonDangerClass,
+  vuiButtonHoverClass,
+  vuiButtonPrimaryClass,
+} from "../shared/buttonSlots";
 
 export const vuiChipBaseClass =
   "border border-vui-border-subtle bg-vui-control-muted text-vui-fg-secondary";
