@@ -581,53 +581,6 @@ def _elapsed_ms_between(started_at: Any, ended_at: float | None = None) -> int:
         return 0
     end_value = _perf_counter() if ended_at is None else float(ended_at)
     return max(0, int(round((end_value - start_value) * 1000)))
-_IMAGE_ATTACHMENT_VISION_PATTERNS = (
-    "分析",
-    "识别",
-    "看看",
-    "看一下",
-    "看下",
-    "看图",
-    "这是什么",
-    "是什么",
-    "有什么",
-    "描述",
-    "解释",
-    "读图",
-    "提取",
-    "文字",
-    "ocr",
-    "identify",
-    "analyze",
-    "analyse",
-    "describe",
-    "what is",
-    "what's",
-    "read",
-    "extract",
-)
-_IMAGE_ATTACHMENT_IMAGE2_EXPLICIT_PATTERNS = (
-    "生成",
-    "画一张",
-    "帮我画",
-    "画成",
-    "绘制",
-    "重绘",
-    "改成",
-    "改为",
-    "修改",
-    "改一下",
-    "调整",
-    "换风格",
-    "做头像",
-    "create",
-    "generate",
-    "draw",
-    "redraw",
-    "edit",
-    "restyle",
-    "make",
-)
 _RECENT_IMAGE_REFERENCE_EXACT_PATTERNS = (
     "这张图",
     "这张图片",
@@ -1415,10 +1368,10 @@ def _has_recent_image_attachment_reference(message: str) -> bool:
     normalized = str(message or "").strip().lower()
     if not normalized:
         return False
-    if _contains_any_image_attachment_intent_pattern(normalized, _RECENT_IMAGE_REFERENCE_EXACT_PATTERNS):
+    if _contains_any_attachment_reference_pattern(normalized, _RECENT_IMAGE_REFERENCE_EXACT_PATTERNS):
         return True
-    has_reference = _contains_any_image_attachment_intent_pattern(normalized, _RECENT_IMAGE_REFERENCE_WORDS)
-    has_image_target = _contains_any_image_attachment_intent_pattern(normalized, _RECENT_IMAGE_TARGET_WORDS)
+    has_reference = _contains_any_attachment_reference_pattern(normalized, _RECENT_IMAGE_REFERENCE_WORDS)
+    has_image_target = _contains_any_attachment_reference_pattern(normalized, _RECENT_IMAGE_TARGET_WORDS)
     return has_reference and has_image_target
 
 
@@ -1471,8 +1424,7 @@ def _image_context_request_from_user_message(message: dict[str, Any]) -> dict[st
 
 
 def _is_retriable_image_request_prompt(prompt: Any) -> bool:
-    intent = _classify_image_attachment_intent(str(prompt or ""))
-    return intent in {"image2_edit", "vision_analysis"}
+    return _looks_like_image_retry_context(prompt)
 
 
 def _image_context_prompt_for_retry(
@@ -1490,10 +1442,21 @@ def _looks_like_image_retry_context(text: Any) -> bool:
     compact = re.sub(r"\s+", "", value)
     if not compact:
         return False
-    if _has_recent_image_attachment_reference(value):
-        return True
-    image_terms = ("原图", "原来的图片", "原来的图", "图片", "图像", "画面", "image", "picture")
-    retry_terms = ("逼近", "调整提示词", "继续调整", "重绘", "生成的图片", "完全不一样", "参考", "match", "reference", "retry")
+    image_terms = ("原图", "原来的图片", "原来的图", "图片", "图像", "画面", "图", "image", "picture")
+    retry_terms = (
+        "再看",
+        "重新看",
+        "逼近",
+        "调整提示词",
+        "继续调整",
+        "重绘",
+        "生成的图片",
+        "完全不一样",
+        "参考",
+        "match",
+        "reference",
+        "retry",
+    )
     return any(term in compact for term in image_terms) and any(term in compact for term in retry_terms)
 
 
@@ -6135,7 +6098,7 @@ def submit_session_message(
         )
     if recent_image_reference_missing and normalized_message_source != "agent_inbox":
         visible = _recent_image_attachment_missing_message(lang)
-        _finish_image_attachment_routed_turn(
+        _finish_image_attachment_preflight_turn(
             conversation_id,
             turn_control.turn_id,
             {
@@ -6144,12 +6107,11 @@ def submit_session_message(
                 "raw_output": visible,
                 "outcome": "needs_input",
                 "metadata": {
-                    "imageAttachmentRoute": "missing_recent_image",
-                    "imageAttachmentIntent": "recent_image_reference",
+                    "imageAttachmentPreflight": "missing_recent_image",
                 },
             },
-            route="missing_recent_image",
-            intent="recent_image_reference",
+            decision="blocked",
+            reason="missing_recent_image",
             agent_id=agent_id,
             attachments=[],
             leases=requested_leases,
@@ -6165,49 +6127,24 @@ def submit_session_message(
             detail["startedTurnId"] = turn_control.turn_id
         return detail
     if attachments and normalized_message_source != "agent_inbox":
-        image_route_prompt = recent_image_reference_prompt or message
-        image_route = _resolve_image_attachment_turn_route(image_route_prompt, agent_instance=agent)
-        image_route_llm_slot = str(image_route.get("llm_slot") or "").strip() or SESSION_LLM_SLOT_DIALOGUE
-        image_route_log_fields = {
-            "supportsImageInput": image_route.get("supports_image_input"),
-            "llmSlot": image_route_llm_slot,
-            "llmModelId": str(image_route.get("model_id") or "").strip(),
+        image_capability = _resolve_image_attachment_capability(agent_instance=agent)
+        image_capability_log_fields = {
+            "supportsImageInput": image_capability.get("supports_image_input"),
+            "llmSlot": SESSION_LLM_SLOT_DIALOGUE,
+            "llmModelId": str(image_capability.get("model_id") or "").strip(),
             "dialogueModelId": agent_dialogue_model_id(agent),
             "visionModelId": agent_llm_model_id(agent, SESSION_LLM_SLOT_VISION),
-            "modelName": image_route.get("model_name") or "",
+            "modelName": image_capability.get("model_name") or "",
             "recentImageReference": bool(recent_image_reference_requested),
             "resolvedRecentImageReference": bool(recent_image_reference_requested and not recent_image_reference_missing),
             "recentImageReferenceSource": "explicit" if explicit_recent_image_reference else "contextual_retry" if recent_image_reference_requested else "",
         }
-        if image_route["route"] == "clarify":
-            _finish_image_attachment_routed_turn(
-                conversation_id,
-                turn_control.turn_id,
-                {
-                    "status": "completed",
-                    "summary": _image_attachment_clarification_message(lang),
-                    "raw_output": _image_attachment_clarification_message(lang),
-                    "outcome": "needs_input",
-                    "metadata": {
-                        "imageAttachmentRoute": "clarify",
-                        "imageAttachmentIntent": image_route["intent"],
-                    },
-                },
-                route="clarify",
-                intent=image_route["intent"],
-                agent_id=agent_id,
-                attachments=attachments,
-                leases=requested_leases,
-                raw_user_message=message,
-                fields=image_route_log_fields,
+        if image_capability["supports_image_input"] is False:
+            visible = _image_input_unsupported_message(
+                lang,
+                model_name=str(image_capability.get("model_name") or "").strip(),
             )
-            detail = get_session_detail(conversation_id) or {}
-            if include_started_turn_id:
-                detail["startedTurnId"] = turn_control.turn_id
-            return detail
-        if image_route["route"] == "block_vision":
-            visible = _image_input_unsupported_message(lang, model_name=str(image_route.get("model_name") or "").strip())
-            _finish_image_attachment_routed_turn(
+            _finish_image_attachment_preflight_turn(
                 conversation_id,
                 turn_control.turn_id,
                 {
@@ -6217,18 +6154,17 @@ def submit_session_message(
                     "error": visible,
                     "outcome": "blocked",
                     "metadata": {
-                        "imageAttachmentRoute": "block_vision",
-                        "imageAttachmentIntent": image_route["intent"],
-                        "supportsImageInput": image_route["supports_image_input"],
+                        "imageAttachmentPreflight": "unsupported_image_input",
+                        "supportsImageInput": False,
                     },
                 },
-                route="block_vision",
-                intent=image_route["intent"],
+                decision="blocked",
+                reason="unsupported_image_input",
                 agent_id=agent_id,
                 attachments=attachments,
                 leases=requested_leases,
                 raw_user_message=message,
-                fields=image_route_log_fields,
+                fields=image_capability_log_fields,
                 outcome="blocked",
                 level="warning",
             )
@@ -6236,27 +6172,22 @@ def submit_session_message(
             if include_started_turn_id:
                 detail["startedTurnId"] = turn_control.turn_id
             return detail
-        if image_route["route"] == "vision":
-            _record_image_attachment_router_event(
-                conversation_id,
-                turn_id=turn_control.turn_id,
-                route="vision",
-                intent=image_route["intent"],
-                outcome="scheduled",
-                agent_id=agent_id,
-                attachments=attachments,
-                fields=image_route_log_fields,
-            )
+        _record_image_attachment_capability_event(
+            conversation_id,
+            turn_id=turn_control.turn_id,
+            decision="forwarded",
+            reason="supported" if image_capability["supports_image_input"] is True else "unknown_fail_open",
+            outcome="scheduled",
+            agent_id=agent_id,
+            attachments=attachments,
+            fields=image_capability_log_fields,
+        )
 
     prompt_resolve_started_at = _perf_counter()
     if normalized_message_source == "agent_inbox":
         effective_user_message, user_message_source = message, normalized_message_source
     elif attachments:
-        effective_user_message = recent_image_reference_prompt or message or text_for(
-            lang,
-            zh="请查看本轮图片附件并回答。",
-            en="Please inspect the image attachment(s) from this turn and respond.",
-        )
+        effective_user_message = recent_image_reference_prompt or message
         user_message_source = "raw_with_attachments" if message else "attachments_only"
     elif normalized_message_source == "supervised_evolution":
         effective_user_message, user_message_source = message, normalized_message_source
@@ -6332,7 +6263,7 @@ def submit_session_message(
         else {},
         "skill_invocation": skill_invocation,
         "active_skill_contract": active_skill_contract,
-        "llm_slot": SESSION_LLM_SLOT_VISION if attachments else SESSION_LLM_SLOT_DIALOGUE,
+        "llm_slot": SESSION_LLM_SLOT_DIALOGUE,
         "submit_timing_fields": dict(submit_timing_fields),
         "submit_started_at_monotonic": submit_started_at,
     }
@@ -12481,7 +12412,7 @@ def _localize_lease_conflict(reason: str, *, lang: str) -> str:
     ).strip()
 
 
-def _matches_attachment_intent_pattern(normalized: str, pattern: str) -> bool:
+def _matches_attachment_reference_pattern(normalized: str, pattern: str) -> bool:
     if not pattern:
         return False
     if re.fullmatch(r"[a-z0-9][a-z0-9 _'-]*", pattern):
@@ -12489,56 +12420,28 @@ def _matches_attachment_intent_pattern(normalized: str, pattern: str) -> bool:
     return pattern in normalized
 
 
-def _contains_any_image_attachment_intent_pattern(normalized: str, patterns: tuple[str, ...]) -> bool:
-    return any(_matches_attachment_intent_pattern(normalized, pattern) for pattern in patterns)
+def _contains_any_attachment_reference_pattern(normalized: str, patterns: tuple[str, ...]) -> bool:
+    return any(_matches_attachment_reference_pattern(normalized, pattern) for pattern in patterns)
 
 
-def _has_explicit_image_generation_or_edit_intent(normalized: str) -> bool:
-    return _contains_any_image_attachment_intent_pattern(normalized, _IMAGE_ATTACHMENT_IMAGE2_EXPLICIT_PATTERNS)
-
-
-def _has_vision_analysis_intent(normalized: str) -> bool:
-    return _contains_any_image_attachment_intent_pattern(normalized, _IMAGE_ATTACHMENT_VISION_PATTERNS)
-
-
-def _classify_image_attachment_intent(message: str, *, default_nonempty_to_vision: bool = False) -> str:
-    normalized = str(message or "").strip().lower()
-    if not normalized:
-        return "clarify"
-    if _has_explicit_image_generation_or_edit_intent(normalized):
-        return "image2_edit"
-    if _has_vision_analysis_intent(normalized):
-        return "vision_analysis"
-    return "vision_analysis" if default_nonempty_to_vision else "clarify"
-
-
-def _resolve_image_attachment_turn_route(
-    message: str,
+def _resolve_image_attachment_capability(
     *,
     agent_instance: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    intent = _classify_image_attachment_intent(message, default_nonempty_to_vision=True)
-    route_llm_slot = (
-        SESSION_LLM_SLOT_VISION
-        if intent in {"image2_edit", "vision_analysis"}
-        else SESSION_LLM_SLOT_DIALOGUE
+    supports_image_input = _session_agent_supports_image_input(
+        agent_instance,
+        slot=SESSION_LLM_SLOT_DIALOGUE,
     )
-    supports_image_input = _session_agent_supports_image_input(agent_instance, slot=route_llm_slot)
-    model_id = _session_agent_llm_slot_model_id(agent_instance, route_llm_slot)
-    model_name = _session_agent_llm_model_name(agent_instance, slot=route_llm_slot)
-    if intent in {"image2_edit", "vision_analysis"} and supports_image_input is True:
-        route = "vision"
-    elif intent in {"image2_edit", "vision_analysis"}:
-        route = "block_vision"
-    else:
-        route = "clarify"
+    model_id = _session_agent_llm_slot_model_id(agent_instance, SESSION_LLM_SLOT_DIALOGUE)
+    model_name = _session_agent_llm_model_name(
+        agent_instance,
+        slot=SESSION_LLM_SLOT_DIALOGUE,
+    )
     return {
-        "intent": intent,
-        "route": route,
         "supports_image_input": supports_image_input,
         "model_name": model_name,
         "model_id": model_id,
-        "llm_slot": route_llm_slot if model_id else "",
+        "llm_slot": SESSION_LLM_SLOT_DIALOGUE,
     }
 
 
@@ -12623,14 +12526,6 @@ def _session_agent_llm_model_name(agent_instance: dict[str, Any] | None, *, slot
     return str(entry.get("model") or entry.get("label") or model_id).strip()
 
 
-def _image_attachment_clarification_message(lang: str) -> str:
-    return text_for(
-        lang,
-        zh="我看到你发送了图片。你想让我分析这张图片，还是基于它生成/调整图片？请补一句你的目标。",
-        en="I received your image. Do you want me to analyze it, or generate/edit an image based on it? Please add your goal.",
-    )
-
-
 def _recent_image_attachment_missing_message(lang: str) -> str:
     return text_for(
         lang,
@@ -12643,18 +12538,18 @@ def _image_input_unsupported_message(lang: str, *, model_name: str = "") -> str:
     model_label = str(model_name or "").strip() or text_for(lang, zh="当前模型", en="current model")
     return text_for(
         lang,
-        zh=f"当前 Agent 使用的对话模型 `{model_label}` 未确认支持图像输入，所以我没有把图片发送给模型。请在 Agent 管理中切换到支持图像输入的对话模型；需要生成/调整图片时，由对话模型理解上下文后再按工具协议调用 image2 工具。",
-        en=f"The current Agent dialogue model `{model_label}` is not confirmed to support image input, so I did not send the image to the model. Switch this Agent to a vision-capable dialogue model; image generation/editing should be invoked by the dialogue model through the image2 tool protocol after it understands the context.",
+        zh=f"当前 Agent 使用的对话模型 `{model_label}` 明确不支持图像输入，所以我没有把图片发送给模型。请在 Agent 管理中切换到支持图像输入的对话模型；需要生成/调整图片时，由对话模型理解上下文后再按工具协议调用 image2 工具。",
+        en=f"The current Agent dialogue model `{model_label}` does not support image input, so I did not send the image to the model. Switch this Agent to a vision-capable dialogue model; image generation/editing should be invoked by the dialogue model through the image2 tool protocol after it understands the context.",
     )
 
 
-def _finish_image_attachment_routed_turn(
+def _finish_image_attachment_preflight_turn(
     session_id: str,
     turn_id: str,
     result: dict[str, Any],
     *,
-    route: str,
-    intent: str,
+    decision: str,
+    reason: str,
     agent_id: str,
     attachments: list[dict[str, Any]],
     leases: list[str] | None,
@@ -12663,11 +12558,11 @@ def _finish_image_attachment_routed_turn(
     level: str = "info",
     fields: dict[str, Any] | None = None,
 ) -> None:
-    _record_image_attachment_router_event(
+    _record_image_attachment_capability_event(
         session_id,
         turn_id=turn_id,
-        route=route,
-        intent=intent,
+        decision=decision,
+        reason=reason,
         outcome=outcome,
         level=level,
         agent_id=agent_id,
@@ -12694,12 +12589,12 @@ def _finish_image_attachment_routed_turn(
     _publish_session_detail_snapshot(session_id)
 
 
-def _record_image_attachment_router_event(
+def _record_image_attachment_capability_event(
     session_id: str,
     *,
     turn_id: str,
-    route: str,
-    intent: str,
+    decision: str,
+    reason: str,
     outcome: str,
     agent_id: str,
     attachments: list[dict[str, Any]],
@@ -12709,27 +12604,27 @@ def _record_image_attachment_router_event(
     try:
         record_runtime_scene_event(
             "conversation",
-            "image_attachment_router",
-            "conversation.image_attachment_router.routed",
+            "image_attachment_capability",
+            "conversation.image_attachment.capability_checked",
             level=level,
             outcome=outcome,
-            message="Conversation image attachment routed before LLM execution.",
+            message="Image input capability checked without semantic intent routing.",
             fields={
                 "sessionId": str(session_id or "").strip(),
                 "turnId": str(turn_id or "").strip(),
-                "route": str(route or "").strip(),
-                "intent": str(intent or "").strip(),
+                "decision": str(decision or "").strip(),
+                "reason": str(reason or "").strip(),
                 "agentId": str(agent_id or "").strip(),
                 "attachmentCount": len(_normalize_message_attachments(attachments or [])),
                 "attachments": _safe_attachment_log_summary(attachments or []),
                 **(fields or {}),
             },
-            child_log_path=f"conversations/{_safe_session_workspace_token(session_id)}-image-router.jsonl",
+            child_log_path=f"conversations/{_safe_session_workspace_token(session_id)}-image-capability.jsonl",
             child_log_payload={
                 "session_id": str(session_id or "").strip(),
                 "turn_id": str(turn_id or "").strip(),
-                "route": str(route or "").strip(),
-                "intent": str(intent or "").strip(),
+                "decision": str(decision or "").strip(),
+                "reason": str(reason or "").strip(),
                 "agent_id": str(agent_id or "").strip(),
                 "attachment_count": len(_normalize_message_attachments(attachments or [])),
                 "attachments": _safe_attachment_log_summary(attachments or []),
@@ -12739,7 +12634,7 @@ def _record_image_attachment_router_event(
         )
     except Exception as exc:
         _debug_logger.warning(
-            f"runtime scene image attachment router log skipped: {type(exc).__name__}: {exc}",
+            f"runtime scene image attachment capability log skipped: {type(exc).__name__}: {exc}",
             tag="LOGS",
         )
 

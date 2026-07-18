@@ -2654,7 +2654,7 @@ def test_session_user_image_attachment_vision_intent_blocks_unsupported_agent(tm
     assert response.status_code == 202
     payload = response.json()
     assert payload["currentPhase"] == "failed"
-    assert "未确认支持图像输入" in payload["messages"][-1]["content"]
+    assert "明确不支持图像输入" in payload["messages"][-1]["content"]
     state = load_chat_state(tmp_path)
     assert state["conversations"][0]["last_turn_status"] == "failed"
 
@@ -2699,7 +2699,7 @@ def test_session_user_image_attachment_picture_content_phrase_stays_vision_inten
     )
 
     assert response.status_code == 202
-    assert "未确认支持图像输入" in response.json()["messages"][-1]["content"]
+    assert "明确不支持图像输入" in response.json()["messages"][-1]["content"]
 
 
 def test_session_user_image_attachment_vision_intent_reaches_supported_agent(tmp_path, monkeypatch):
@@ -2844,20 +2844,6 @@ def test_session_recent_image_reference_reuses_last_user_attachment_for_vision(t
     assert latest_user["metadata"]["resolvedRecentImageReference"]["status"] == "resolved"
 
 
-@pytest.mark.parametrize(
-    ("message", "expected"),
-    [
-        ("基于这张图描述一下", "vision_analysis"),
-        ("参考这张图分析风格", "vision_analysis"),
-        ("基于这张图生成一张海报", "image2_edit"),
-        ("照着这个图片改成二次元", "image2_edit"),
-        ("参考这张图", "clarify"),
-    ],
-)
-def test_session_user_image_attachment_intent_uses_explicit_rules(message, expected):
-    assert session_service._classify_image_attachment_intent(message) == expected
-
-
 def test_session_user_image_attachment_vision_support_inherits_model_library(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path, task_status="done")
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
@@ -2938,15 +2924,16 @@ def test_session_user_image_attachment_vision_support_inherits_model_library(tmp
     assert seen["attachments"][0]["dataUrl"].startswith("data:image/png;base64,")
     router_events = [
         kwargs for args, kwargs in recorded_scene_events
-        if args[:3] == ("conversation", "image_attachment_router", "conversation.image_attachment_router.routed")
+        if args[:3] == ("conversation", "image_attachment_capability", "conversation.image_attachment.capability_checked")
     ]
     assert router_events
-    assert router_events[-1]["fields"]["route"] == "vision"
+    assert router_events[-1]["fields"]["decision"] == "forwarded"
+    assert router_events[-1]["fields"]["reason"] == "supported"
     assert router_events[-1]["fields"]["supportsImageInput"] is True
     assert router_events[-1]["fields"]["modelName"] == "mimo-v2.5"
 
 
-def test_session_user_image_attachment_vision_slot_overrides_dialogue_model(tmp_path, monkeypatch):
+def test_session_user_image_attachment_uses_dialogue_slot_not_vision_slot(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path, task_status="done")
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
@@ -2959,16 +2946,16 @@ def test_session_user_image_attachment_vision_slot_overrides_dialogue_model(tmp_
     base_config.llm.model_library[dialogue_model_id] = {
         **dict(dialogue_model_entry or {}),
         "provider_id": provider_id,
-        "model": "dialogue-no-vision",
-        "label": "dialogue-no-vision",
-        "supports_image_input": False,
+        "model": "dialogue-multimodal",
+        "label": "dialogue-multimodal",
+        "supports_image_input": True,
     }
     vision_model_id = "vision-slot-model-test"
     base_config.llm.model_library[vision_model_id] = {
         "provider_id": provider_id,
-        "model": "mimo-v2.5",
-        "label": "vision-slot-model",
-        "supports_image_input": True,
+        "model": "vision-slot-unused",
+        "label": "vision-slot-unused",
+        "supports_image_input": False,
     }
     monkeypatch.setattr(session_service, "get_config", lambda: base_config)
     _bind_seeded_session_agent(
@@ -3025,16 +3012,17 @@ def test_session_user_image_attachment_vision_slot_overrides_dialogue_model(tmp_
     )
 
     assert response.status_code == 202
-    assert seen["runtime_model"] == "mimo-v2.5"
+    assert seen["runtime_model"] == "dialogue-multimodal"
     assert seen["attachments"][0]["dataUrl"].startswith("data:image/png;base64,")
     router_events = [
         kwargs for args, kwargs in recorded_scene_events
-        if args[:3] == ("conversation", "image_attachment_router", "conversation.image_attachment_router.routed")
+        if args[:3] == ("conversation", "image_attachment_capability", "conversation.image_attachment.capability_checked")
     ]
     assert router_events
-    assert router_events[-1]["fields"]["route"] == "vision"
-    assert router_events[-1]["fields"]["llmSlot"] == "vision"
-    assert router_events[-1]["fields"]["llmModelId"] == vision_model_id
+    assert router_events[-1]["fields"]["decision"] == "forwarded"
+    assert router_events[-1]["fields"]["reason"] == "supported"
+    assert router_events[-1]["fields"]["llmSlot"] == "dialogue"
+    assert router_events[-1]["fields"]["llmModelId"] == dialogue_model_id
     assert router_events[-1]["fields"]["dialogueModelId"] == dialogue_model_id
     assert router_events[-1]["fields"]["visionModelId"] == vision_model_id
 
@@ -3126,12 +3114,12 @@ def test_session_user_image_attachment_edit_intent_reaches_supported_multimodal_
     assert seen["attachments"][0]["dataUrl"].startswith("data:image/png;base64,")
     router_events = [
         kwargs for args, kwargs in recorded_scene_events
-        if args[:3] == ("conversation", "image_attachment_router", "conversation.image_attachment_router.routed")
+        if args[:3] == ("conversation", "image_attachment_capability", "conversation.image_attachment.capability_checked")
     ]
     assert router_events
-    assert router_events[-1]["fields"]["route"] == "vision"
-    assert router_events[-1]["fields"]["intent"] == "image2_edit"
-    assert router_events[-1]["fields"]["llmSlot"] == "vision"
+    assert router_events[-1]["fields"]["decision"] == "forwarded"
+    assert router_events[-1]["fields"]["reason"] == "supported"
+    assert router_events[-1]["fields"]["llmSlot"] == "dialogue"
     assert router_events[-1]["fields"]["supportsImageInput"] is True
 
 
@@ -3198,14 +3186,14 @@ def test_session_user_image_attachment_edit_intent_blocks_when_agent_cannot_read
     assert response.status_code == 202
     payload = response.json()
     assert payload["currentPhase"] == "failed"
-    assert "未确认支持图像输入" in payload["messages"][-1]["content"]
+    assert "明确不支持图像输入" in payload["messages"][-1]["content"]
     router_events = [
         kwargs for args, kwargs in recorded_scene_events
-        if args[:3] == ("conversation", "image_attachment_router", "conversation.image_attachment_router.routed")
+        if args[:3] == ("conversation", "image_attachment_capability", "conversation.image_attachment.capability_checked")
     ]
     assert router_events
-    assert router_events[-1]["fields"]["route"] == "block_vision"
-    assert router_events[-1]["fields"]["intent"] == "image2_edit"
+    assert router_events[-1]["fields"]["decision"] == "blocked"
+    assert router_events[-1]["fields"]["reason"] == "unsupported_image_input"
     state = load_chat_state(tmp_path)
     assert state["conversations"][0]["last_turn_status"] == "failed"
 
@@ -3273,14 +3261,14 @@ def test_session_recent_image_reference_blocks_when_agent_cannot_read_images(tmp
     assert response.status_code == 202
     payload = response.json()
     assert payload["currentPhase"] == "failed"
-    assert "未确认支持图像输入" in payload["messages"][-1]["content"]
+    assert "明确不支持图像输入" in payload["messages"][-1]["content"]
     router_events = [
         kwargs for args, kwargs in recorded_scene_events
-        if args[:3] == ("conversation", "image_attachment_router", "conversation.image_attachment_router.routed")
+        if args[:3] == ("conversation", "image_attachment_capability", "conversation.image_attachment.capability_checked")
     ]
     assert router_events
-    assert router_events[-1]["fields"]["route"] == "block_vision"
-    assert router_events[-1]["fields"]["intent"] == "image2_edit"
+    assert router_events[-1]["fields"]["decision"] == "blocked"
+    assert router_events[-1]["fields"]["reason"] == "unsupported_image_input"
     latest_user = [message for message in response.json()["messages"] if message["role"] == "user"][-1]
     assert latest_user["metadata"]["resolvedRecentImageReference"]["status"] == "resolved"
     assert latest_user["metadata"]["resolvedRecentImageReference"]["artifactIds"] == [artifact_id]
@@ -3500,7 +3488,7 @@ def test_session_recent_image_reference_without_history_asks_for_image(tmp_path,
     assert "没有在当前会话里找到" in payload["messages"][-1]["content"]
 
 
-def test_session_user_image_attachment_empty_text_asks_for_clarification(tmp_path, monkeypatch):
+def test_session_user_image_attachment_empty_text_with_unknown_capability_reaches_dialogue_llm(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path, task_status="done")
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
@@ -3508,7 +3496,29 @@ def test_session_user_image_attachment_empty_text_asks_for_clarification(tmp_pat
         tmp_path,
         agent_directory_service.ensure_agent_for_session("session-live", display_name="真实会话"),
     )
-    monkeypatch.setattr(session_service, "_schedule_session_turn", lambda context: pytest.fail("LLM turn should not be scheduled"))
+    seen: dict[str, object] = {}
+    monkeypatch.setattr(
+        session_service,
+        "_session_agent_supports_image_input",
+        lambda agent_instance, *, slot: None,
+    )
+
+    class DummyAgent:
+        def seed_chat_history(self, messages):
+            pass
+
+        def run_single_turn(self, initial_prompt=None, attachments=None):
+            seen["initial_prompt"] = initial_prompt
+            seen["attachments"] = list(attachments or [])
+            return {
+                "status": "completed",
+                "summary": "LLM 已查看图片。",
+                "raw_output": "LLM 已查看图片。",
+                "outcome": "done",
+            }
+
+    monkeypatch.setattr(session_service, "create_chat_agent", lambda **_kwargs: DummyAgent())
+    monkeypatch.setattr(session_service, "_SESSION_EXECUTOR", SimpleNamespace(submit=lambda fn, context: fn(context)))
 
     upload_response = client.post(
         "/api/sessions/session-live/attachments",
@@ -3530,7 +3540,13 @@ def test_session_user_image_attachment_empty_text_asks_for_clarification(tmp_pat
     assert response.status_code == 202
     payload = response.json()
     assert payload["currentPhase"] == "ready"
-    assert "分析这张图片" in payload["messages"][-1]["content"]
+    assert seen["initial_prompt"] == ""
+    assert seen["attachments"][0]["dataUrl"].startswith("data:image/png;base64,")
+    assert payload["messages"][-1]["content"] == "LLM 已查看图片。"
+    assert all(
+        "你想让我分析这张图片" not in str(message.get("content") or "")
+        for message in payload["messages"]
+    )
 
 
 def test_session_user_image_attachment_rejects_unsupported_type(tmp_path, monkeypatch):
