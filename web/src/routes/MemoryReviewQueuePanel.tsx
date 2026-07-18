@@ -56,39 +56,41 @@ export function MemoryReviewQueuePanel({ copy, isLoading, errorText, items, onOp
               <strong>{item.title}</strong>
               <span>{item.origin}</span>
             </div>
-          </div>
-          <span className={styles.reviewQueueSummary}>{item.summary}</span>
-          <div className={styles.reviewReasonList} aria-label={copy.reviewReason}>
-            {item.reasons.map((reason) => (
-              <span key={`${item.id}:${reason}`} className={styles.reviewReasonPill}>
-                {reason}
-              </span>
-            ))}
-          </div>
-          <span className={styles.reviewQueueTime}>{item.updatedAt}</span>
-          <div className={styles.reviewQueueActions}>
-            <NavLink
-              className={styles.detailActionButton}
-              to={item.auditHref}
-              onClick={() => onOpenItem(item.id)}
-              title={copy.auditMemory}
-              aria-label={`${copy.auditMemory}: ${item.title}`}
-            >
-              <FileText size={14} />
-              <span>{copy.auditMemory}</span>
-            </NavLink>
-            {item.manageHref ? (
+            <p className={styles.reviewQueueSummary}>{item.summary}</p>
+            {item.reasons.length ? (
+              <div className={styles.reviewReasonList} aria-label={copy.reviewReason}>
+                {item.reasons.map((reason) => (
+                  <span key={`${item.id}:${reason}`} className={styles.reviewReasonPill}>
+                    {reason}
+                  </span>
+                ))}
+              </div>
+            ) : null}
+            <span className={styles.reviewQueueTime}>{item.updatedAt}</span>
+            <div className={styles.reviewQueueActions}>
               <NavLink
                 className={styles.detailActionButton}
-                to={item.manageHref}
+                to={item.auditHref}
                 onClick={() => onOpenItem(item.id)}
-                title={copy.manageMemoryAction}
-                aria-label={`${copy.manageMemoryAction}: ${item.title}`}
+                title={copy.auditMemory}
+                aria-label={`${copy.auditMemory}: ${item.title}`}
               >
-                <Pencil size={14} />
-                <span>{copy.manageMemoryAction}</span>
+                <FileText size={14} />
+                <span>{copy.auditMemory}</span>
               </NavLink>
-            ) : null}
+              {item.manageHref ? (
+                <NavLink
+                  className={styles.detailActionButton}
+                  to={item.manageHref}
+                  onClick={() => onOpenItem(item.id)}
+                  title={copy.manageMemoryAction}
+                  aria-label={`${copy.manageMemoryAction}: ${item.title}`}
+                >
+                  <Pencil size={14} />
+                  <span>{copy.manageMemoryAction}</span>
+                </NavLink>
+              ) : null}
+            </div>
           </div>
         </article>
       ))}

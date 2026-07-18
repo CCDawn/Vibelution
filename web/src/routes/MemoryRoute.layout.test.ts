@@ -492,7 +492,7 @@ describe("MemoryRoute layout contract", () => {
     const restoredGridExpectations: Array<[string, string]> = [
       [styles.matrixCard, "grid-cols-[minmax(0,1fr)_auto]"],
       [styles.projectMemoryProposalTitleLine, "grid-cols-[minmax(0,1fr)_auto]"],
-      [styles.reviewQueueTitleLine, "grid-cols-[minmax(0,0.62fr)_minmax(82px,0.38fr)]"],
+      [styles.reviewQueueTitleLine, "grid-cols-[minmax(0,1fr)_auto]"],
       [styles.manageSourceFilters, "grid-cols-[repeat(auto-fit,minmax(82px,1fr))]"],
       [styles.sourceButton, "grid-cols-[24px_minmax(0,1fr)_auto]"],
       [styles.contractDomainRow, "grid-cols-[minmax(116px,1fr)_minmax(96px,0.8fr)_auto]"],
