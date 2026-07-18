@@ -795,7 +795,7 @@ def build_llm_payload(
         isinstance(item, dict) and content_blocks_have_image(item.get("content"))
         for item in messages
     )
-    if has_image_content and not build_input.capabilities.supports_image_input:
+    if has_image_content and build_input.capabilities.supports_image_input is False:
         raise LLMError(
             "capability_error",
             (

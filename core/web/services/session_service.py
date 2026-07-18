@@ -12481,7 +12481,8 @@ def _session_agent_supports_image_input(
             if capability_value == "unknown":
                 return None
         if resolved.capabilities is not None:
-            return bool(resolved.capabilities.supports_image_input)
+            supports_image_input = resolved.capabilities.supports_image_input
+            return supports_image_input if isinstance(supports_image_input, bool) else None
         llm_config = config.llm
     except Exception:
         try:

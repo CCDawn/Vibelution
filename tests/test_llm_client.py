@@ -3328,6 +3328,37 @@ def test_responses_transport_converts_image_blocks_to_input_image():
     ]
 
 
+def test_responses_transport_forwards_images_when_capability_is_unknown():
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "relay",
+            "llm.providers.default.api_key": "test-key",
+            "llm.providers.default.base_url": "https://ai-pixel.online",
+            "llm.providers.default.compat_mode": "openai",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "custom-multimodal-model",
+            "llm.profiles.primary.transport": "responses",
+        }
+    )
+
+    client = LLMClient(config=config, backend=lambda payload: payload)
+    payload = client._build_payload(
+        [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAAA"}},
+                ],
+            }
+        ]
+    )
+
+    assert client.capabilities.supports_image_input is None
+    assert payload["input"][0]["content"] == [
+        {"type": "input_image", "image_url": "data:image/png;base64,AAAA"},
+    ]
+
+
 def test_openai_codex_model_uses_known_context_window():
     config = make_config(
         **{

@@ -1795,7 +1795,7 @@ class LLMClient:
             isinstance(message, dict) and _content_blocks_have_image(message.get("content"))
             for message in provider_messages
         )
-        if has_image_content and not self.capabilities.supports_image_input:
+        if has_image_content and self.capabilities.supports_image_input is False:
             raise LLMError(
                 "capability_error",
                 (

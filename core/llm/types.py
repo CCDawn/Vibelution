@@ -58,7 +58,7 @@ class LLMCapabilities:
     supports_system_messages: bool = True
     supports_json_mode: bool = False
     supports_model_discovery: bool = True
-    supports_image_input: bool = False
+    supports_image_input: bool | None = None
     supports_prompt_cache: bool = False
     supports_thinking: bool = False
     supports_reasoning_roundtrip: bool = False
