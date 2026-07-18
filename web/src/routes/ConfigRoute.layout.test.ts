@@ -682,6 +682,19 @@ describe("ConfigRoute layout contract", () => {
     expect(healthDiagnosticsPanelSource).toContain("function LogHelperCard");
   });
 
+  it("keeps full diagnostic timestamps and migration model identifiers in VUI tooltips", () => {
+    expect(healthDiagnosticsPanelSource).toContain('import { VButton, VSection, VTooltip } from "../components/vui"');
+    expect(healthDiagnosticsPanelSource).toContain("<VTooltip content={helper.updatedAt}>");
+    expect(healthDiagnosticsPanelSource).toContain("<VTooltip content={helper.lastModifiedAt}>");
+    expect(healthDiagnosticsPanelSource).not.toContain("title={helper.updatedAt}");
+    expect(healthDiagnosticsPanelSource).not.toContain("title={helper.lastModifiedAt}");
+    expect(migrationPanelSource).toContain("VTooltip,");
+    expect(migrationPanelSource).toContain("<VTooltip content={row.legacyModelId}>");
+    expect(migrationPanelSource).toContain("<VTooltip content={row.modelRef}>");
+    expect(migrationPanelSource).not.toContain("title={row.legacyModelId}");
+    expect(migrationPanelSource).not.toContain("title={row.modelRef}");
+  });
+
   it("keeps health diagnostics cleanup and reset hints routed to Launcher maintenance", () => {
     expect(healthDiagnosticsPanelSource).toContain("healthOpenLauncher");
     expect(healthDiagnosticsPanelSource).toContain('href="/launcher"');

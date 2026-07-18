@@ -19,6 +19,7 @@ import {
   VStatusChip,
   VStringSelect,
   VSurface,
+  VTooltip,
 } from "../components/vui";
 import {
   buildArtifactResolutions,
@@ -124,8 +125,28 @@ export function ConfigModelMigrationPanel({
               getRowKey={(row) => row.legacyModelId}
               emptyText="预览未返回模型映射。"
               columns={[
-                { id: "old", header: "v1 model ID", render: (row) => <span title={row.legacyModelId}>{row.legacyModelId}</span> },
-                { id: "new", header: "Canonical modelRef", render: (row) => <strong title={row.modelRef}>{row.modelRef}</strong> },
+                {
+                  id: "old",
+                  header: "v1 model ID",
+                  render: (row) => (
+                    <VTooltip content={row.legacyModelId}>
+                      <span tabIndex={0} aria-label={`v1 model ID · ${row.legacyModelId}`}>
+                        {row.legacyModelId}
+                      </span>
+                    </VTooltip>
+                  ),
+                },
+                {
+                  id: "new",
+                  header: "Canonical modelRef",
+                  render: (row) => (
+                    <VTooltip content={row.modelRef}>
+                      <strong tabIndex={0} aria-label={`Canonical modelRef · ${row.modelRef}`}>
+                        {row.modelRef}
+                      </strong>
+                    </VTooltip>
+                  ),
+                },
               ]}
             />
           </div>
