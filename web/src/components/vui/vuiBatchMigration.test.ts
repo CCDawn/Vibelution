@@ -32,6 +32,7 @@ const rawControlAllowedFiles = new Set([
   "components/vui/renderers/shadcn/ShadcnInput.tsx",
   "components/vui/renderers/shadcn/ShadcnTextarea.tsx",
   "components/vui/renderers/shadcn/ShadcnSelect.tsx",
+  "components/vui/renderers/shadcn/ShadcnCheckbox.tsx",
 ]);
 
 const migrationTargets = [
