@@ -1,6 +1,6 @@
 import { Archive, ShieldCheck, Trash2 } from "lucide-react";
 
-import { VButton } from "../components/vui";
+import { VButton, VTooltip } from "../components/vui";
 import styles from "./AgentArchiveZonePanel.styles";
 
 export type AgentArchiveZonePanelCopy = {
@@ -47,40 +47,46 @@ export function AgentArchiveZonePanel({
   const heading = isProtected ? copy.archiveProtection : isArchived ? copy.purgeAgent : copy.archiveAgent;
 
   return (
-    <section className={isProtected ? styles.protectedZone : styles.dangerZone} title={title}>
-      <div className={styles.panelHeader}>
-        <div>
-          <p className={styles.panelEyebrow}>{eyebrow}</p>
-          <h3>{heading}</h3>
+    <VTooltip content={title} width="wide">
+      <section
+        className={isProtected ? styles.protectedZone : styles.dangerZone}
+        tabIndex={0}
+        aria-label={`${heading} · ${title}`}
+      >
+        <div className={styles.panelHeader}>
+          <div>
+            <p className={styles.panelEyebrow}>{eyebrow}</p>
+            <h3>{heading}</h3>
+          </div>
+          {isProtected ? <ShieldCheck size={16} /> : <Trash2 size={16} />}
         </div>
-        {isProtected ? <ShieldCheck size={16} /> : <Trash2 size={16} />}
-      </div>
-      {isProtected ? (
-        <span className={styles.cleanPill}>{copy.protectedAgent}</span>
-      ) : (
-        <div className={styles.editorActions}>
-          {!isArchived ? (
+        {isProtected ? (
+          <span className={styles.cleanPill}>{copy.protectedAgent}</span>
+        ) : (
+          <div className={styles.editorActions}>
+            {!isArchived ? (
+              <VButton
+                type="button"
+                variant="secondary"
+                icon={<Archive size={15} />}
+                isDisabled={!canArchive || isArchivePending}
+                onPress={onArchive}
+              >
+                {isArchivePending ? copy.archivingAgent : copy.archiveAgent}
+              </VButton>
+            ) : null}
             <VButton
               type="button"
-              variant="secondary"
-              icon={<Archive size={15} />}
-              isDisabled={!canArchive || isArchivePending}
-              onPress={onArchive}
+              variant="danger"
+              icon={<Trash2 size={15} />}
+              isDisabled={!canPurge || isPurgePending}
+              onPress={onPurge}
             >
-              {isArchivePending ? copy.archivingAgent : copy.archiveAgent}
+              {isPurgePending ? copy.purgingAgent : copy.purgeAgent}
             </VButton>
-          ) : null}
-          <VButton
-            type="button"
-            variant="danger"
-            icon={<Trash2 size={15} />}
-            isDisabled={!canPurge || isPurgePending}
-            onPress={onPurge}
-          >
-            {isPurgePending ? copy.purgingAgent : copy.purgeAgent}
-          </VButton>
-        </div>
-      )}
-    </section>
+          </div>
+        )}
+      </section>
+    </VTooltip>
   );
 }
