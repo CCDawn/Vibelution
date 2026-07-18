@@ -1,3 +1,4 @@
+import { VTooltip } from "../components/vui";
 import styles from "./MemoryKnowledgePipelinePanel.styles";
 
 export type MemoryKnowledgePipelinePanelCopy = {
@@ -65,28 +66,34 @@ export function MemoryKnowledgePipelinePanel({
           <strong>{sourceArtifactCount}</strong>
         </section>
       </div>
-      <section className={styles.pipelinePanel} aria-label={copy.platformPipeline} title={copy.knowledgeSubtitle}>
-        <div className={styles.pipelineHeader}>
-          <div>
-            <p className={styles.panelEyebrow}>{copy.platformPipeline}</p>
-            <h2>{copy.teamKnowledgeDomain}</h2>
-          </div>
-          <div className={styles.pipelineBoundary}>
-            <span>{copy.toolReadableOnly}</span>
-            <span>{copy.promptBoundary}</span>
-            <span>{copy.governance}</span>
-          </div>
-        </div>
-        <div className={styles.pipelineSteps}>
-          {pipelineSteps.map((step, index) => (
-            <div key={step.label} className={styles.pipelineStep}>
-              <span className={styles.pipelineIndex}>{index + 1}</span>
-              <strong>{step.value}</strong>
-              <span>{step.label}</span>
+      <VTooltip content={copy.knowledgeSubtitle} width="wide">
+        <section
+          className={styles.pipelinePanel}
+          aria-label={`${copy.platformPipeline} · ${copy.knowledgeSubtitle}`}
+          tabIndex={0}
+        >
+          <div className={styles.pipelineHeader}>
+            <div>
+              <p className={styles.panelEyebrow}>{copy.platformPipeline}</p>
+              <h2>{copy.teamKnowledgeDomain}</h2>
             </div>
-          ))}
-        </div>
-      </section>
+            <div className={styles.pipelineBoundary}>
+              <span>{copy.toolReadableOnly}</span>
+              <span>{copy.promptBoundary}</span>
+              <span>{copy.governance}</span>
+            </div>
+          </div>
+          <div className={styles.pipelineSteps}>
+            {pipelineSteps.map((step, index) => (
+              <div key={step.label} className={styles.pipelineStep}>
+                <span className={styles.pipelineIndex}>{index + 1}</span>
+                <strong>{step.value}</strong>
+                <span>{step.label}</span>
+              </div>
+            ))}
+          </div>
+        </section>
+      </VTooltip>
     </>
   );
 }

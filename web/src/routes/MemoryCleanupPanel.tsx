@@ -1,7 +1,7 @@
 import { CheckCircle2, Eye, Trash2, TriangleAlert } from "lucide-react";
 
 import type { MemoryCleanupExecuteResponse, MemoryCleanupPreviewResponse } from "../api/types";
-import { VButton, VNativeInput } from "../components/vui";
+import { VButton, VNativeInput, VTooltip } from "../components/vui";
 import styles from "./MemoryCleanupPanel.styles";
 
 export type MemoryCleanupTargetOptionView = {
@@ -105,16 +105,26 @@ export function MemoryCleanupPanel({
         </section>
       </div>
 
-      <section className={styles.cleanupWarning} title={copy.cleanupNoBackup}>
-        <TriangleAlert size={16} />
-        <strong>{copy.cleanupHardDelete}</strong>
-      </section>
+      <VTooltip content={copy.cleanupNoBackup} tone="warning" width="wide">
+        <section
+          className={styles.cleanupWarning}
+          tabIndex={0}
+          aria-label={`${copy.cleanupHardDelete} · ${copy.cleanupNoBackup}`}
+        >
+          <TriangleAlert size={16} />
+          <strong>{copy.cleanupHardDelete}</strong>
+        </section>
+      </VTooltip>
 
       <div className={styles.cleanupWorkspace}>
         <section className={styles.cleanupTargetPanel}>
           <div className={styles.panelHeader}>
             <div>
-              <h2 title={copy.cleanupSelectTargets}>{copy.cleanupTargets}</h2>
+              <VTooltip content={copy.cleanupSelectTargets} width="wide">
+                <h2 tabIndex={0} aria-label={`${copy.cleanupTargets} · ${copy.cleanupSelectTargets}`}>
+                  {copy.cleanupTargets}
+                </h2>
+              </VTooltip>
             </div>
             <span className={styles.countPill}>{selectedTargetCount}</span>
           </div>
@@ -144,7 +154,11 @@ export function MemoryCleanupPanel({
         <section className={styles.cleanupPreviewPanel}>
           <div className={styles.panelHeader}>
             <div>
-              <h2 title={copy.cleanupCentralSourceBoundary}>{copy.cleanupPreview}</h2>
+              <VTooltip content={copy.cleanupCentralSourceBoundary} width="wide">
+                <h2 tabIndex={0} aria-label={`${copy.cleanupPreview} · ${copy.cleanupCentralSourceBoundary}`}>
+                  {copy.cleanupPreview}
+                </h2>
+              </VTooltip>
             </div>
             <VButton
               type="button"
