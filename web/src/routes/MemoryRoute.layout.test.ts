@@ -688,6 +688,12 @@ describe("MemoryRoute layout contract", () => {
     expect(cleanupPanelSource).toContain("styles.cleanupPreviewPanel");
     expect(cleanupPanelSource).toContain("styles.cleanupExecutePanel");
     expect(cleanupPanelSource).toContain("styles.cleanupExecuteButton");
+    expect(cleanupPanelSource).toContain("VTooltip");
+    expect(cleanupPanelSource).toContain('<VTooltip content={copy.cleanupNoBackup} tone="warning" width="wide">');
+    expect(cleanupPanelSource).not.toContain('className={styles.cleanupWarning} title={copy.cleanupNoBackup}');
+    expect(cleanupPanelSource).toContain('aria-label={`${copy.cleanupHardDelete} · ${copy.cleanupNoBackup}`}');
+    expect(cleanupPanelSource).toContain('aria-label={`${copy.cleanupTargets} · ${copy.cleanupSelectTargets}`}');
+    expect(cleanupPanelSource).toContain('aria-label={`${copy.cleanupPreview} · ${copy.cleanupCentralSourceBoundary}`}');
     expect(cleanupPanelSource).not.toContain("useQuery");
     expect(cleanupPanelSource).not.toContain("useMutation");
     expect(cleanupPanelSource).not.toContain("fetchJson");
@@ -821,6 +827,10 @@ describe("MemoryRoute layout contract", () => {
     expect(knowledgeRagPanelSource).toContain("copy.ragNoPromptInjection");
     expect(knowledgeRagPanelSource).toContain("copy.ragCitations");
     expect(knowledgeRagPanelSource).toContain("styles.ragPreviewPanel");
+    expect(knowledgeRagPanelSource).toContain("VTooltip");
+    expect(knowledgeRagPanelSource).toContain('<VTooltip content={copy.ragRetrievalHint} width="wide">');
+    expect(knowledgeRagPanelSource).not.toContain('title={copy.ragRetrievalHint}');
+    expect(knowledgeRagPanelSource).toContain('aria-label={`${copy.ragRetrieval} · ${copy.ragRetrievalHint}`}');
     expect(knowledgeRagPanelSource).toContain("styles.ragHealthStrip");
     expect(knowledgeRagPanelSource).toContain("styles.ragPolicyStrip");
     expect(knowledgeRagPanelSource).toContain("styles.ragContextCard");
@@ -1083,7 +1093,8 @@ describe("MemoryRoute layout contract", () => {
     expect(routeSource).toContain("meta={memoryViewSubtitle(copy, forcedView)}");
     expect(projectMemoryQueuePanelSource).toContain('title={copy.projectMemoryQueueHint}');
     expect(overviewPanelSource).toContain('title={copy.reviewQueueHint}');
-    expect(knowledgePipelinePanelSource).toContain('title={copy.knowledgeSubtitle}');
+    expect(knowledgePipelinePanelSource).toContain('<VTooltip content={copy.knowledgeSubtitle} width="wide">');
+    expect(knowledgePipelinePanelSource).not.toContain('title={copy.knowledgeSubtitle}');
     expect(knowledgeBaseSidebarSource).toContain('import { VButton, VTooltip } from "../components/vui"');
     expect(knowledgeBaseSidebarSource).toContain("const toolVisibilityTooltip");
     expect(knowledgeBaseSidebarSource).toContain("content={toolVisibilityTooltip}");
@@ -1091,9 +1102,12 @@ describe("MemoryRoute layout contract", () => {
     expect(knowledgeModeTabsSource).toContain('import { VButton, VTooltip } from "../components/vui"');
     expect(knowledgeModeTabsSource).toContain("content={mode.hint}");
     expect(knowledgeModeTabsSource).not.toContain("title={mode.hint}");
-    expect(knowledgeRagPanelSource).toContain('title={copy.ragRetrievalHint}');
-    expect(cleanupPanelSource).toContain('title={copy.cleanupNoBackup}');
-    expect(cleanupPanelSource).toContain('title={copy.cleanupCentralSourceBoundary}');
+    expect(knowledgeRagPanelSource).toContain('<VTooltip content={copy.ragRetrievalHint} width="wide">');
+    expect(knowledgeRagPanelSource).not.toContain('title={copy.ragRetrievalHint}');
+    expect(cleanupPanelSource).toContain('<VTooltip content={copy.cleanupNoBackup} tone="warning" width="wide">');
+    expect(cleanupPanelSource).not.toContain('title={copy.cleanupNoBackup}');
+    expect(cleanupPanelSource).toContain('content={copy.cleanupCentralSourceBoundary}');
+    expect(cleanupPanelSource).not.toContain('title={copy.cleanupCentralSourceBoundary}');
     expect(graphViewPanelSource).toContain('title={copy.graphInteractionHint}');
 
     expect(routeSource).not.toContain("className={styles.subtitle}>{memoryViewSubtitle");
@@ -1302,6 +1316,10 @@ describe("MemoryRoute layout contract", () => {
     expect(knowledgePipelinePanelSource).toContain("copy.toolReadableOnly");
     expect(knowledgePipelinePanelSource).toContain("copy.promptBoundary");
     expect(knowledgePipelinePanelSource).toContain("styles.pipelinePanel");
+    expect(knowledgePipelinePanelSource).toContain("VTooltip");
+    expect(knowledgePipelinePanelSource).toContain('<VTooltip content={copy.knowledgeSubtitle} width="wide">');
+    expect(knowledgePipelinePanelSource).not.toContain('title={copy.knowledgeSubtitle}');
+    expect(knowledgePipelinePanelSource).toContain('aria-label={`${copy.platformPipeline} · ${copy.knowledgeSubtitle}`}');
     expect(knowledgePipelinePanelSource).toContain("styles.pipelineSteps");
     expect(knowledgePipelinePanelStyles.pipelinePanel).toBeTruthy();
     expect(knowledgePipelinePanelStyles.pipelineSteps).toBeTruthy();
