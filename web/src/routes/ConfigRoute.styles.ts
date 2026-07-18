@@ -2,7 +2,7 @@
 // Generated from the legacy ConfigRoute stylesheet during the CSS-module retirement wave;
 // edit values directly as named Tailwind/arbitrary-property utilities.
 const panelSurface =
-  "[border:1px_solid_color-mix(in_srgb,var(--vui-border-subtle)_94%,var(--fg-primary)_6%)] [border-radius:var(--radius-panel)] [background:color-mix(in_srgb,var(--surface-panel)_96%,var(--bg-canvas))] [box-shadow:0_10px_28px_color-mix(in_srgb,var(--fg-primary)_8%,transparent)]";
+  "[border:1px_solid_color-mix(in_srgb,var(--vui-border-subtle)_94%,var(--fg-primary)_6%)] [border-radius:var(--radius-panel)] [background:color-mix(in_srgb,var(--surface-panel)_96%,var(--bg-canvas))] [box-shadow:var(--vui-elevation-1)]";
 const rowSurface =
   "[border:1px_solid_color-mix(in_srgb,var(--vui-border-subtle)_96%,var(--fg-primary)_4%)] [border-radius:8px] [background:color-mix(in_srgb,var(--surface-card)_94%,var(--surface-panel))]";
 const readablePanelSurface = panelSurface;
@@ -296,7 +296,7 @@ const styles = {
   noticeSuccess:
     "vui-routes-configroute noticeSuccess [color:var(--state-success)] [background:color-mix(in_srgb,var(--accent-cool)_12%,transparent)] [border-color:color-mix(in_srgb,var(--accent-cool)_24%,transparent)]",
   page:
-    "vui-routes-configroute page [--control-height:40px] [--vui-control-height-sm:40px] [--control-radius:var(--radius-control)] [--config-row-gap:12px] [--config-section-x:16px] [--config-section-y:14px] [display:grid] [grid-template-columns:clamp(15.5rem,17vw,18rem)_minmax(0,1fr)] [grid-template-rows:minmax(0,1fr)] [gap:8px] [height:100%] [min-height:0] [padding:8px] [overflow:hidden] [isolation:isolate] [background:color-mix(in_srgb,var(--surface-page)_94%,var(--bg-canvas))]",
+    "vui-routes-configroute page [--control-height:36px] [--vui-control-height-sm:36px] [--control-radius:var(--radius-control)] [--config-row-gap:10px] [--config-section-x:12px] [--config-section-y:10px] [display:grid] [grid-template-columns:clamp(15rem,16vw,17.5rem)_minmax(0,1fr)] [grid-template-rows:minmax(0,1fr)] [gap:0] [height:100%] [min-height:0] [padding:0] [overflow:hidden] [isolation:isolate] [background:var(--surface-page)]",
   primaryButton:
     `vui-routes-configroute primaryButton [display:inline-flex] [align-items:center] [justify-content:center] [gap:7px] [min-height:40px] [padding:0_16px] [border-radius:var(--control-radius)] [font:inherit] [font-size:var(--vui-font-sm)] [font-weight:700] [line-height:1] [white-space:nowrap] [transition:border-color_140ms_ease,background-color_140ms_ease,color_140ms_ease] ${primaryControl} [box-shadow:none] hover:[cursor:pointer] hover:[border-color:color-mix(in_srgb,var(--accent-warm)_40%,transparent)] hover:[background:color-mix(in_srgb,var(--accent-warm)_20%,var(--vui-control-muted))] disabled:[cursor:not-allowed] disabled:[opacity:0.56]`,
   profileGroupRow:

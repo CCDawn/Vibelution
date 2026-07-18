@@ -281,9 +281,9 @@ describe("MemoryRoute layout contract", () => {
     expect(styles.workspace).toContain("h-full");
     expect(styles.workspace).toContain("min-h-0");
     expect(styles.workspace).toContain("grid-rows-[minmax(0,1fr)]");
-    expect(styles.workspace).toContain("grid-cols-[minmax(190px,240px)_minmax(0,1fr)_minmax(240px,0.4fr)]");
+    expect(styles.workspace).toContain("grid-cols-[clamp(200px,18vw,260px)_minmax(0,1fr)_clamp(280px,24vw,380px)]");
     expect(styles.workspace).toContain("overflow-hidden");
-    expect(styles.workspace).toContain("max-[1120px]:grid-cols-[minmax(190px,240px)_minmax(0,1fr)]");
+    expect(styles.workspace).toContain("max-[1120px]:grid-cols-[clamp(190px,18vw,240px)_minmax(0,1fr)]");
     expect(styles.workspace).toContain("max-[1120px]:[&_.detailPanel]:col-span-2");
     expect(styles.workspace).toContain("max-[780px]:grid-cols-1");
     expect(styles.workspace).toContain("max-[780px]:overflow-auto");
