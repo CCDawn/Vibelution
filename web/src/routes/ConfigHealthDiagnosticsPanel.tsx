@@ -1,7 +1,7 @@
 import { ExternalLink, RefreshCw } from "lucide-react";
 
 import { type HealthDiagnostics, type HealthFinding, type HealthQuickAction, type LogHelper, type SessionHelper } from "../api/types";
-import { VButton, VSection } from "../components/vui";
+import { VButton, VSection, VTooltip } from "../components/vui";
 import styles from "./ConfigHealthDiagnosticsPanel.styles";
 
 export type ConfigLanguage = "zh" | "en";
@@ -313,10 +313,12 @@ function SessionHelperCard({ helper, lang, copy }: { helper: SessionHelper; lang
           <strong>{helper.staleCount.toLocaleString()}</strong>
           {copy.healthStale}
         </span>
-        <span title={helper.updatedAt}>
-          <strong>{updatedLabel}</strong>
-          {copy.healthUpdated}
-        </span>
+        <VTooltip content={helper.updatedAt}>
+          <span tabIndex={0} aria-label={`${copy.healthUpdated} · ${helper.updatedAt}`}>
+            <strong>{updatedLabel}</strong>
+            {copy.healthUpdated}
+          </span>
+        </VTooltip>
       </div>
       <div className={styles.logHelperSignal}>
         <span>{copy.healthLatest}</span>
@@ -374,10 +376,12 @@ function LogHelperCard({ helper, lang, copy }: { helper: LogHelper; lang: Config
           <strong>{formatBytes(helper.sizeBytes)}</strong>
           {copy.healthSize}
         </span>
-        <span title={helper.lastModifiedAt}>
-          <strong>{updatedLabel}</strong>
-          {copy.healthUpdated}
-        </span>
+        <VTooltip content={helper.lastModifiedAt}>
+          <span tabIndex={0} aria-label={`${copy.healthUpdated} · ${helper.lastModifiedAt}`}>
+            <strong>{updatedLabel}</strong>
+            {copy.healthUpdated}
+          </span>
+        </VTooltip>
       </div>
       <div className={styles.logHelperSignal}>
         <span>{copy.healthLatest}</span>
