@@ -817,7 +817,9 @@ describe("EvolutionRoute library user flow contract", () => {
   });
 
   it("keeps the proposal library summary in three columns at common desktop widths", () => {
-    expect(routeStyles.librarySummaryBar).toContain("max-[1360px]:[grid-template-columns:minmax(300px,_1fr)_minmax(260px,_0.8fr)_minmax(300px,_0.9fr)]");
+    expect(routeStyles.librarySummaryBar).toContain("[grid-template-columns:minmax(0,_1.1fr)_minmax(0,_0.9fr)_minmax(0,_1fr)]");
+    expect(routeStyles.librarySummaryBar).toContain("max-[1360px]:[grid-template-columns:minmax(0,_1fr)_minmax(0,_0.85fr)_minmax(0,_0.95fr)]");
+    expect(routeStyles.librarySummaryBar).toContain("max-[1100px]:[grid-template-columns:1fr]");
   });
 
   it("keeps restored EvolutionRoute grids from the CSS module migration", () => {

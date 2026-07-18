@@ -310,7 +310,7 @@ const styles = {
   libraryFilters:
     "grid [gap:10px]",
   librarySummaryBar:
-    "grid [grid-template-columns:minmax(340px,_1fr)_minmax(300px,_0.82fr)_minmax(340px,_0.92fr)] [gap:8px] [align-items:stretch] min-h-0 max-[1360px]:[grid-template-columns:minmax(300px,_1fr)_minmax(260px,_0.8fr)_minmax(300px,_0.9fr)]",
+    "grid [grid-template-columns:minmax(0,_1.1fr)_minmax(0,_0.9fr)_minmax(0,_1fr)] [gap:8px] [align-items:stretch] min-h-0 max-[1360px]:[grid-template-columns:minmax(0,_1fr)_minmax(0,_0.85fr)_minmax(0,_0.95fr)] max-[1100px]:[grid-template-columns:1fr]",
   libraryViewStack:
     "[grid-template-rows:auto_minmax(0,_1fr)] [height:100%] [overflow:hidden] [&_strong]:min-w-0 [&_strong]:[overflow:hidden] [&_strong]:[text-overflow:ellipsis] [&_span]:min-w-0 [&_span]:[overflow:hidden] [&_span]:[text-overflow:ellipsis] max-[1200px]:[height:auto] max-[1200px]:[overflow:auto]",
   listEmptyState:
@@ -382,11 +382,11 @@ const styles = {
   overviewGrid:
     "grid [grid-template-columns:minmax(300px,_var(--evolution-live-launch-width,_348px))_12px_minmax(360px,_1fr)_12px_minmax(300px,_var(--evolution-live-run-width,_360px))] [grid-template-rows:minmax(0,_1fr)] [grid-auto-rows:minmax(0,_1fr)] [align-items:stretch] [align-content:stretch] min-h-0 [height:100%] [overflow:hidden] [padding-right:4px] max-[1360px]:[grid-template-columns:minmax(292px,_0.92fr)_12px_minmax(360px,_1.32fr)_12px_minmax(292px,_0.9fr)] max-[1360px]:[grid-template-rows:minmax(0,_1fr)] max-[1360px]:[gap:0] max-[1360px]:[overflow:hidden] max-[1200px]:[grid-template-columns:minmax(0,_1fr)_minmax(292px,_0.82fr)] max-[1200px]:[grid-template-rows:minmax(180px,_0.58fr)_minmax(300px,_1fr)] max-[1200px]:[overflow:auto] max-[1200px]:[gap:10px] max-[900px]:[grid-template-columns:1fr] max-[900px]:[grid-template-rows:max-content_max-content_max-content] max-[900px]:[align-content:start] max-[900px]:[height:auto] max-[900px]:[min-height:100%] max-[900px]:[overflow:auto]",
   overviewSecondaryGrid:
-    "grid [grid-template-columns:minmax(300px,_0.92fr)_minmax(0,_1.28fr)] [gap:10px] [align-items:start] max-[1360px]:[grid-template-columns:repeat(2,_minmax(0,_1fr))] max-[1200px]:[grid-template-columns:1fr]",
+    "grid [grid-template-columns:minmax(0,_0.92fr)_minmax(0,_1.28fr)] [gap:10px] [align-items:start] max-[1360px]:[grid-template-columns:repeat(2,_minmax(0,_1fr))] max-[1200px]:[grid-template-columns:1fr]",
   overviewWorkspace:
-    "grid [grid-template-columns:minmax(360px,_1.15fr)_minmax(340px,_1fr)_minmax(300px,_0.92fr)] [gap:10px] [align-items:start] max-[1360px]:[grid-template-columns:minmax(0,_1.2fr)_minmax(320px,_1fr)] max-[1200px]:[grid-template-columns:1fr]",
+    "grid [grid-template-columns:minmax(0,_1.15fr)_minmax(0,_1fr)_minmax(0,_0.92fr)] [gap:10px] [align-items:start] max-[1360px]:[grid-template-columns:minmax(0,_1.2fr)_minmax(0,_1fr)] max-[1200px]:[grid-template-columns:1fr]",
   page:
-    "grid [grid-template-rows:auto_minmax(0,_1fr)] [gap:8px] [height:calc(100dvh_-_var(--shell-topbar-height))] [max-height:calc(100dvh_-_var(--shell-topbar-height))] min-h-0 [padding:8px_12px_12px] [overflow:hidden] max-[900px]:[gap:6px] max-[640px]:[padding-inline:14px]",
+    "grid [grid-template-rows:auto_minmax(0,_1fr)] [gap:6px] [height:calc(100dvh_-_var(--shell-topbar-height))] [max-height:calc(100dvh_-_var(--shell-topbar-height))] min-h-0 [padding:6px_10px_10px] [overflow:hidden] max-[900px]:[gap:6px] max-[640px]:[padding-inline:10px]",
   paneCollapsed:
     "[padding:0] [border:0] [overflow:hidden] [visibility:hidden]",
   panelHeader:
