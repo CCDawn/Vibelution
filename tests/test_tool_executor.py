@@ -1778,7 +1778,7 @@ class TestToolExecutorErrorHandling:
         finally:
             bus.unsubscribe_by_id(callback_id)
 
-    def test_lint_validation_establishes_feedback_loop_and_freezes_scope(self, executor):
+    def test_lint_validation_records_feedback_without_freezing_dialogue_scope(self, executor):
         reset_session_state()
 
         def fake_lint_tool(file_path=""):
@@ -1793,8 +1793,8 @@ class TestToolExecutorErrorHandling:
         snapshot = get_session_state().get_attention_snapshot()
         assert snapshot["feedback_loop_ready"] is True
         assert snapshot["feedback_loop_type"] == "lint"
-        assert snapshot["scope_frozen"] is True
-        assert snapshot["scope_anchor"] == "agent.py"
+        assert snapshot["scope_frozen"] is False
+        assert snapshot["scope_anchor"] == ""
 
     def test_cli_command_chain_executes_again_after_security_feedback(self, executor):
         """同轮同类命令链不再二次短路，由工具自身继续返回安全反馈。"""
@@ -1983,7 +1983,7 @@ class TestToolExecutorErrorHandling:
         snapshot = get_session_state().get_attention_snapshot()
         assert any(item["kind"] == "duplicate_read_soft_redirect" for item in snapshot["recent_blockers"])
 
-    def test_duplicate_search_records_state_without_blocker(self, executor):
+    def test_duplicate_search_does_not_record_executable_continuation(self, executor):
         reset_session_state()
 
         def fake_grep_search_tool(regex_pattern="", include_ext=".py", search_dir=".", case_sensitive=True, max_results=50, max_output_chars=8000):
@@ -2004,7 +2004,7 @@ class TestToolExecutorErrorHandling:
 
         snapshot = get_session_state().get_attention_snapshot()
         assert not any(item["kind"] == "duplicate_search" for item in snapshot["recent_blockers"])
-        assert snapshot["pending_continuations"][-1]["path"] == "core/demo.py"
+        assert snapshot["pending_continuations"] == []
 
     def test_duplicate_search_executes_again(self, executor):
         session = reset_session_state()
@@ -2090,9 +2090,8 @@ class TestToolExecutorErrorHandling:
         snapshot = get_session_state().get_attention_snapshot()
         assert not any(item["kind"] == "duplicate_entity_guard" for item in snapshot["recent_blockers"])
 
-    def test_cli_tool_records_deviation_when_recommendation_exists(self, executor):
-        session = reset_session_state()
-        session.set_tool_decision("inspect_entity", ["code_symbol_tool", "read_file_tool"], ["cli_tool"])
+    def test_cli_tool_execution_does_not_enforce_recommender_deviation(self, executor):
+        reset_session_state()
 
         def fake_cli_tool(command="", timeout=60):
             return "[命令执行完成，无输出]"
@@ -2101,8 +2100,7 @@ class TestToolExecutorErrorHandling:
         executor.execute("cli_tool", {"command": "echo ok"})
 
         snapshot = get_session_state().get_attention_snapshot()
-        assert any(item["tool_name"] == "cli_tool" for item in snapshot["tool_deviations"])
-        assert any(item["kind"] == "tool_deviation" for item in snapshot["recent_blockers"])
+        assert not any(item["kind"] == "tool_deviation" for item in snapshot["recent_blockers"])
 
     def test_cli_tool_file_read_command_executes_normally(self, executor):
         reset_session_state()

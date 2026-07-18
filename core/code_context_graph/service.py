@@ -467,13 +467,19 @@ def inspect_graph(graph: dict[str, Any], *, file_path: str = "", symbol: str = "
     rel = _normalize_rel(file_path)
     files_by_path = _files_by_path(graph)
     if rel and rel in files_by_path:
-        symbols = [_public_symbol(item) for item in graph.get("symbols", []) if item.get("path") == rel][:max_results]
+        matching_symbols = [
+            item for item in graph.get("symbols", [])
+            if item.get("path") == rel and (not symbol or _symbol_matches(item, symbol))
+        ][:max_results]
+        target = {"filePath": rel}
+        if symbol:
+            target["symbol"] = symbol
         return {
             "status": "ok",
             "mode": "inspect",
-            "target": {"filePath": rel},
+            "target": target,
             "file": _public_file(files_by_path[rel]),
-            "symbols": symbols,
+            "symbols": [_public_symbol(item) for item in matching_symbols],
             "snippet": _snippet_for_file(rel, max_chars=MAX_SNIPPET_CHARS),
         }
     target_kind = _project_target_kind(file_path) if rel else ""
@@ -488,10 +494,7 @@ def inspect_graph(graph: dict[str, Any], *, file_path: str = "", symbol: str = "
                 "status": "error",
                 "mode": "inspect",
                 "error": "directory_not_indexed",
-                "message": (
-                    f"inspect 目标目录 `{rel}` 存在，但索引中没有可查询文件。"
-                    "请确认目录属于索引范围，或用 refresh=true 刷新索引。"
-                ),
+                "message": f"inspect 目标目录 `{rel}` 存在，但索引中没有可查询文件。",
                 "target": {"filePath": rel, "kind": "directory"},
             }
         matching_paths = {str(item.get("path") or "") for item in matching_files}
@@ -535,7 +538,7 @@ def inspect_graph(graph: dict[str, Any], *, file_path: str = "", symbol: str = "
             "status": "error",
             "mode": "inspect",
             "error": "target_not_found",
-            "message": f"inspect 目标路径 `{rel}` 不存在。请检查路径，或先用 search/explore 定位目标。",
+            "message": f"inspect 目标路径 `{rel}` 不存在。",
             "target": {"filePath": rel},
         }
     if rel and target_kind == "outside_project":
@@ -553,10 +556,7 @@ def inspect_graph(graph: dict[str, Any], *, file_path: str = "", symbol: str = "
             "status": "error",
             "mode": "inspect",
             "error": "target_not_indexed",
-            "message": (
-                f"inspect 目标文件 `{rel}` 未在代码图谱索引中。"
-                "请用 refresh=true 重试，或先调用 mode=\"index\" 刷新索引。"
-            ),
+            "message": f"inspect 目标文件 `{rel}` 未在代码图谱索引中。",
             "target": {"filePath": rel},
             "index": {
                 "fresh": bool(index_meta.get("fresh")),

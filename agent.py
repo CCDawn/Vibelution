@@ -1312,7 +1312,7 @@ class SelfEvolvingAgent:
     def _sync_runtime_state_memory(self):
         """将会话级短期约束同步到 MEMORY/state_memory。"""
         try:
-            runtime_summary = get_session_state().render_runtime_constraints()
+            runtime_summary = get_session_state().render_dialogue_runtime_observations()
             restart_focus = (
                 build_restart_focus_state_memory(self._restart_allowed_tool_names())
                 if self._is_restart_focus_mode()
@@ -2701,21 +2701,6 @@ class SelfEvolvingAgent:
                 if delegated:
                     delegated_this_turn = True
                     round_state.note_delegation(bool(delegated.get("useful")))
-                    if delegated.get("break_round"):
-                        ui.add_log("只读委派已返回结构化结论，本轮直接收束。", "INFO")
-                        break
-                    stop_reason = self._get_turn_outcome_controller().should_stop_for_convergence(
-                        iteration=iteration,
-                        no_new_evidence_steps=round_state.no_new_evidence_steps,
-                        consecutive_tool_only_steps=round_state.consecutive_tool_only_steps,
-                        consecutive_bookkeeping_tool_only_steps=round_state.consecutive_bookkeeping_tool_only_steps,
-                        delegation_failures=round_state.delegation_failures,
-                        total_tool_calls=round_state.total_tool_calls,
-                        substantive_tool_calls=round_state.substantive_tool_calls,
-                    )
-                    if stop_reason:
-                        ui.add_log(stop_reason, "WARN")
-                        break
                     continue
 
                 # 硬限制：超出最大上下文时强制压缩
@@ -3102,28 +3087,6 @@ class SelfEvolvingAgent:
                     _debug_logger.info(f"[压缩] 感知层请求压缩: {reason}", tag="STATE")
                     messages, _ = self._compress_messages(messages, iteration, reason=reason)
                     self._raise_if_turn_stop_requested()
-
-                stop_reason = self._get_turn_outcome_controller().should_stop_for_convergence(
-                    iteration=iteration,
-                    no_new_evidence_steps=round_state.no_new_evidence_steps,
-                    consecutive_tool_only_steps=round_state.consecutive_tool_only_steps,
-                    consecutive_bookkeeping_tool_only_steps=round_state.consecutive_bookkeeping_tool_only_steps,
-                    delegation_failures=round_state.delegation_failures,
-                    total_tool_calls=round_state.total_tool_calls,
-                    substantive_tool_calls=round_state.substantive_tool_calls,
-                )
-                if stop_reason:
-                    if TurnOutcomeController.should_skip_convergence_stop_for_pending_restart(
-                        expects_restart_after_transaction_close=self._expects_restart_after_transaction_close(),
-                        messages=messages,
-                    ):
-                        ui.add_log(
-                            "full_evolution 已成功关账但尚未触发重启，跳过本次收敛停止。",
-                            "INFO",
-                        )
-                    else:
-                        ui.add_log(stop_reason, "WARN")
-                        break
 
         except TurnStopRequested as stop_request:
             self._last_turn_metadata = {

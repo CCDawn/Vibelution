@@ -42,9 +42,6 @@ from rich.tree import Tree
 from core.pet_system import get_pet_system as get_pet
 from core.infrastructure.tool_intents import (
     humanize_reading_task,
-    humanize_tool_intent,
-    humanize_tool_name,
-    humanize_tool_chain,
 )
 from core.logging.logger import debug as _debug_logger
 from core.ui.ascii_art import get_avatar_manager
@@ -1734,9 +1731,6 @@ class UIManager:
             "convergence_state": convergence_state,
             "stop_reason": stop_reason,
             "reading_task_label": humanize_reading_task(reading_task),
-            "next_tool_intent_label": humanize_tool_intent(next_tool_intent),
-            "recommended_tools_label": humanize_tool_chain(recommended_tools, limit=3),
-            "avoid_tools_label": " / ".join(humanize_tool_name(name) for name in avoid_tools[:2]),
         }
 
     def _format_metric_explain(self, label: str, items: List[tuple[str, int]]) -> str:
@@ -1814,9 +1808,9 @@ class UIManager:
         )
 
     def _build_stage_caption(self, runtime_metrics: Dict[str, Any]) -> List[str]:
-        focus = runtime_metrics["next_tool_intent_label"] or runtime_metrics["reading_task_label"] or "等待下一步"
+        focus = runtime_metrics["reading_task_label"] or "等待模型决策"
         anchor = self._compact_sentence(runtime_metrics["scope_anchor"], 26) or "未固定"
-        tool_hint = runtime_metrics["recommended_tools_label"] or "按上下文选择"
+        tool_hint = "模型按当前上下文选择"
         return [
             f"[cyan]焦点[/cyan]  [white]{self._compact_sentence(focus, 28)}[/white]",
             f"[magenta]锚点[/magenta]  [white]{anchor}[/white]",
@@ -2699,13 +2693,7 @@ class UIManager:
             runtime_focus.append(
                 f"[grey70]充分性[/grey70]  [green]{self._compact_sentence(runtime_metrics['reading_sufficiency'], 28)}[/green]"
             )
-        if runtime_metrics["next_tool_intent"]:
-            runtime_focus.append(f"[grey70]决策[/grey70]  [yellow]{runtime_metrics['next_tool_intent_label']}[/yellow]")
-        tool_line = runtime_metrics["recommended_tools_label"] or "按当前上下文选择"
-        if runtime_metrics["avoid_tools"]:
-            tool_line = f"{tool_line}  | 避免 {runtime_metrics['avoid_tools_label']}"
-        if runtime_metrics["recommended_tools"] or runtime_metrics["avoid_tools"]:
-            runtime_focus.append(f"[grey70]工具[/grey70]  [dim]{tool_line}[/dim]")
+        tool_line = "模型按当前上下文选择"
         if runtime_metrics["feedback_loop_ready"]:
             loop_type = runtime_metrics["feedback_loop_type"] or "active"
             runtime_focus.append(f"[grey70]反馈环[/grey70]  [green]{loop_type}[/green]")

@@ -3,7 +3,6 @@
 
 from core.infrastructure.reading_strategy import build_reading_strategy
 from core.infrastructure.tool_intents import get_tool_intent
-from core.infrastructure.tool_recommender import decide_next_tools
 from tools.search_tools import grep_search_tool
 
 
@@ -45,27 +44,6 @@ def test_reading_strategy_filters_tools_hidden_by_current_agent(monkeypatch):
 
     assert strategy.task_type == "verify"
     assert strategy.recommended_tools == ["python_lint_tool"]
-
-
-def test_tool_recommender_filters_recommendations_and_fallbacks(monkeypatch):
-    _bind_visible_tools(monkeypatch, ["run_test_for_tool", "python_lint_tool", "cli_tool"])
-
-    decision = decide_next_tools(
-        {
-            "reading_task": "verify",
-            "reading_sufficiency": "",
-            "read_ranges": {},
-            "read_entities": {},
-            "read_searches": [],
-            "recent_blockers": [],
-            "recent_validation_results": [{"status": "failed"}],
-            "pending_continuations": [],
-        }
-    )
-
-    assert decision.recommended_tools == ["run_test_for_tool"]
-    assert decision.avoid_tools == ["cli_tool"]
-    assert decision.fallback_if_failed == ["python_lint_tool"]
 
 
 def test_tool_intent_filters_hidden_range_reader(monkeypatch):
