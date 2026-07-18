@@ -17,6 +17,7 @@ INFERENCE_LATENT_CORRECTION = "inference_latent_correction"
 MASKED_PREDICTION_ERROR_TRAINING = "masked_prediction_error_training"
 ALIGNED_LOSS_MASK = "aligned"
 SPATIALLY_SHIFTED_LOSS_MASK = "spatially_shifted"
+DETERMINISTICALLY_PERMUTED_LOSS_MASK = "deterministically_permuted"
 
 
 @dataclass(frozen=True)
@@ -109,12 +110,23 @@ def structured_mask(images, *, generator, mask_size: int):
     return images * mask, mask
 
 
-def loss_weight_mask(observed_mask, *, mode: str, mask_size: int):
+def loss_weight_mask(observed_mask, *, mode: str, mask_size: int, generator=None, torch_module=None):
     missing_mask = 1.0 - observed_mask
     if mode == ALIGNED_LOSS_MASK:
         return missing_mask
     if mode == SPATIALLY_SHIFTED_LOSS_MASK:
         return missing_mask.roll(shifts=(mask_size, mask_size), dims=(-2, -1))
+    if mode == DETERMINISTICALLY_PERMUTED_LOSS_MASK:
+        if generator is None:
+            raise ValueError("deterministically_permuted loss mask requires a generator")
+        flattened = missing_mask.flatten(1)
+        torch = torch_module or _torch_modules()[0]
+        permutation = torch.randperm(
+            flattened.shape[1],
+            generator=generator,
+            device=flattened.device,
+        )
+        return flattened[:, permutation].reshape_as(missing_mask)
     raise ValueError(f"unsupported candidate loss mask mode: {mode}")
 
 
@@ -167,6 +179,7 @@ def train(
     optimizer = torch.optim.Adam(model.parameters(), lr=config.learning_rate)
     loss_fn = nn.MSELoss()
     corruption_generator = torch.Generator().manual_seed(config.seed + 10)
+    loss_mask_generator = torch.Generator().manual_seed(config.seed + 30)
     epoch_losses: list[float] = []
     model.train()
     for _ in range(config.epochs):
@@ -185,6 +198,8 @@ def train(
                     observed_mask,
                     mode=config.candidate_loss_mask_mode,
                     mask_size=config.mask_size,
+                    generator=loss_mask_generator,
+                    torch_module=torch,
                 )
                 pixel_weights = 1.0 + (masked_loss_weight * weight_mask)
                 loss = ((reconstruction - clean).pow(2) * pixel_weights).sum() / pixel_weights.sum()
@@ -492,18 +507,40 @@ def self_check() -> None:
     corrupted, mask = structured_mask(clean, generator=torch.Generator().manual_seed(7), mask_size=6)
     missing_mask = loss_weight_mask(mask, mode=ALIGNED_LOSS_MASK, mask_size=6)
     shifted_mask = loss_weight_mask(mask, mode=SPATIALLY_SHIFTED_LOSS_MASK, mask_size=6)
+    permuted_mask = loss_weight_mask(
+        mask,
+        mode=DETERMINISTICALLY_PERMUTED_LOSS_MASK,
+        mask_size=6,
+        generator=torch.Generator().manual_seed(11),
+        torch_module=torch,
+    )
+    repeated_permuted_mask = loss_weight_mask(
+        mask,
+        mode=DETERMINISTICALLY_PERMUTED_LOSS_MASK,
+        mask_size=6,
+        generator=torch.Generator().manual_seed(11),
+        torch_module=torch,
+    )
     baseline = model(corrupted)
     variant = corrected_reconstruction(model, corrupted, mask, steps=2, correction_rate=0.5)
     assert baseline.shape == clean.shape == variant.shape
     assert torch.isfinite(variant).all()
     assert float(missing_mask.sum()) == float(shifted_mask.sum())
     assert float((missing_mask * shifted_mask).sum()) == 0.0
+    assert float(missing_mask.sum()) == float(permuted_mask.sum())
+    assert torch.equal(permuted_mask, repeated_permuted_mask)
+    assert not torch.equal(missing_mask, permuted_mask)
     print(
         json.dumps(
             {
                 "status": "ok",
                 "baselineShape": list(baseline.shape),
                 "lossMaskControl": "ok",
+                "lossMaskModes": [
+                    ALIGNED_LOSS_MASK,
+                    SPATIALLY_SHIFTED_LOSS_MASK,
+                    DETERMINISTICALLY_PERMUTED_LOSS_MASK,
+                ],
                 "torch": torch.__version__,
             }
         )
@@ -529,7 +566,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--candidate-masked-loss-weight", type=float, default=4.0)
     parser.add_argument(
         "--candidate-loss-mask-mode",
-        choices=(ALIGNED_LOSS_MASK, SPATIALLY_SHIFTED_LOSS_MASK),
+        choices=(
+            ALIGNED_LOSS_MASK,
+            SPATIALLY_SHIFTED_LOSS_MASK,
+            DETERMINISTICALLY_PERMUTED_LOSS_MASK,
+        ),
         default=ALIGNED_LOSS_MASK,
     )
     parser.add_argument("--minimum-mse-improvement", type=float, default=0.001)

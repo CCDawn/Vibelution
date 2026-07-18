@@ -30,7 +30,7 @@ def _method_config() -> dict[str, object]:
         "seeds": [17, 42, 101],
         "candidateMechanism": "masked_prediction_error_training",
         "candidateMaskedLossWeight": 4.0,
-        "candidateLossMaskMode": "spatially_shifted",
+        "candidateLossMaskMode": "deterministically_permuted",
         "maximumLatencyMultiplier": 1.25,
     }
 
@@ -63,8 +63,8 @@ def test_prepare_full_run_requires_explicit_external_environment_and_builds_fixe
     assert all("--seed" in item["args"] for item in prepared["commands"])
     assert all("masked_prediction_error_training" in item["args"] for item in prepared["commands"])
     assert all("--candidate-loss-mask-mode" in item["args"] for item in prepared["commands"])
-    assert all("spatially_shifted" in item["args"] for item in prepared["commands"])
-    assert prepared["runOptions"]["candidateLossMaskMode"] == "spatially_shifted"
+    assert all("deterministically_permuted" in item["args"] for item in prepared["commands"])
+    assert prepared["runOptions"]["candidateLossMaskMode"] == "deterministically_permuted"
     assert prepared["runOptions"]["maximumLatencyMultiplier"] == 1.25
     assert calls == [[str(tmp_path / "python.exe"), str(script_path), "--self-check"]]
     assert "user_triggered_only" in prepared["boundaries"]

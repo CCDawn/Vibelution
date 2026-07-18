@@ -112,7 +112,11 @@ def prepare_full_run(
         "masked_prediction_error_training",
     }:
         raise FormalRunnerError("candidateMechanism is not supported by the formal adapter.")
-    if run_options["candidateLossMaskMode"] not in {"aligned", "spatially_shifted"}:
+    if run_options["candidateLossMaskMode"] not in {
+        "aligned",
+        "spatially_shifted",
+        "deterministically_permuted",
+    }:
         raise FormalRunnerError("candidateLossMaskMode is not supported by the formal adapter.")
 
     self_check = _run_process(
