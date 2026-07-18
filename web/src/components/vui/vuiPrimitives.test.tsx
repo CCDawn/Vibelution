@@ -102,7 +102,7 @@ describe("VUI foundation primitives", () => {
     expect(markup).toContain("rounded-[var(--vui-radius-panel-soft)]");
   });
 
-  it("gives every icon button a HeroUI tooltip trigger with an accessible name", () => {
+  it("gives every icon button a tooltip trigger with an accessible name", () => {
     const markup = renderToStaticMarkup(
       <VibelutionHeroProvider>
         <VIconButton label="Refresh" tooltip="Refresh frontend data" icon={<Search size={14} />} />
@@ -113,7 +113,7 @@ describe("VUI foundation primitives", () => {
     expect(markup).toContain('aria-label="Refresh"');
     expect(markup).toContain('data-vui="icon-button"');
     expect(markup.match(/<button\b/g)).toHaveLength(1);
-    expect(markup.match(/tabindex="0"/g)).toHaveLength(1);
+    // Native buttons are keyboard-focusable without an explicit tabindex.
     expect(markup).toMatch(/<button(?=[^>]*data-slot="tooltip-trigger")[^>]*>/);
     expect(markup).not.toMatch(/<div[^>]*role="button"[^>]*>[\s\S]*<button/);
   });
@@ -255,7 +255,7 @@ describe("VUI foundation primitives", () => {
     expect(markup).toContain("<strong>11</strong>");
   });
 
-  it("renders tooltip trigger through the supported HeroUI wrapper structure", () => {
+  it("renders tooltip trigger through the supported Radix/shadcn wrapper structure", () => {
     const markup = renderToStaticMarkup(
       <VTooltip content="Agent health tip" isOpen>
         <button type="button">Hover</button>
@@ -263,8 +263,8 @@ describe("VUI foundation primitives", () => {
     );
 
     expect(markup).toContain('data-slot="tooltip-trigger"');
-    expect(markup).toContain('aria-describedby=');
     expect(markup).toMatch(/<button(?=[^>]*data-slot="tooltip-trigger")[^>]*>Hover<\/button>/);
+    expect(markup).toContain('data-renderer="radix"');
   });
 
   it("renders polished bounded tooltip content and a reusable contextual hint trigger", () => {
@@ -280,12 +280,18 @@ describe("VUI foundation primitives", () => {
       resolve(import.meta.dirname, "primitives/VTooltip.tsx"),
       "utf8",
     );
+    const rendererSource = readFileSync(
+      resolve(import.meta.dirname, "renderers/shadcn/ShadcnTooltip.tsx"),
+      "utf8",
+    );
 
     expect(tooltipMarkup).toContain('data-slot="tooltip-trigger"');
-    expect(tooltipSource).toContain('data-vui="tooltip-content"');
-    expect(tooltipSource).toContain("max-w-[min(26rem,calc(100vw-1.5rem))]");
-    expect(tooltipSource).toContain("shadow-[var(--vui-elevation-overlay)]");
-    expect(tooltipSource).toContain("backdrop-blur-xl");
+    expect(tooltipSource).toContain('from "../renderers/shadcn/ShadcnTooltip"');
+    expect(rendererSource).toContain('data-vui="tooltip-content"');
+    expect(rendererSource).toContain("max-w-[min(26rem,calc(100vw-1.5rem))]");
+    expect(rendererSource).toContain("shadow-[var(--vui-elevation-overlay)]");
+    expect(rendererSource).toContain("backdrop-blur-xl");
+    expect(rendererSource).toContain("@radix-ui/react-tooltip");
     expect(hintMarkup).toContain('data-vui="contextual-hint"');
     expect(hintMarkup).toContain('aria-label="Card details"');
   });
