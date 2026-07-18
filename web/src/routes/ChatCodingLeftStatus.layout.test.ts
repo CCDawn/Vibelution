@@ -6,9 +6,10 @@ import tokenCoreStatusPanelSource from "./chat/TokenCoreStatusPanel.tsx?raw";
 
 describe("ChatCodingRoute left status panel layout contract", () => {
   it("uses one raised status rail with flat separator-based groups", () => {
-    expect(styles.leftRail).toContain("rounded-[var(--vui-radius-panel-soft)]");
+    expect(styles.leftRail).toContain("rounded-none");
+    expect(styles.leftRail).toContain("border-l");
     expect(styles.leftRail).toContain("bg-[var(--vui-surface-rail)]");
-    expect(styles.leftRail).toContain("shadow-[var(--vui-elevation-panel)]");
+    expect(styles.leftRail).toContain("shadow-none");
     expect(styles.leftBlock).toContain("border-b");
     expect(styles.leftBlock).toContain("bg-transparent");
     expect(styles.leftBlock).toContain("shadow-none");

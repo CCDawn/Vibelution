@@ -239,7 +239,7 @@ const styles: Record<string, string> = {
   cacheDonutTrack:
     "vui-routes-chatcodingroute cacheDonutTrack min-w-0 fill-none stroke-[color-mix(in_srgb,var(--vui-border-subtle)_82%,transparent)] [stroke-linecap:round] [vector-effect:non-scaling-stroke]",
   centerPane:
-    "vui-routes-chatcodingroute centerPane min-w-0 grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden bg-[color-mix(in_srgb,var(--surface-page)_10%,transparent)] [grid-column:3] [grid-row:1]",
+    "vui-routes-chatcodingroute centerPane min-w-0 grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden bg-[var(--vui-surface-chat)] [grid-column:3] [grid-row:1]",
   centerPaneOverlay:
     "vui-routes-chatcodingroute centerPaneOverlay [grid-column:1] [grid-row:1]",
   centerSurface:
@@ -495,7 +495,7 @@ const styles: Record<string, string> = {
   kernelTraceLink:
     "vui-routes-chatcodingroute kernelTraceLink min-w-0",
 layout:
-    "vui-routes-chatcodingroute layout relative min-w-0 grid !gap-0 !p-0 [--chat-workbench-gap:4px] [--chat-pane-gutter:8px] h-[calc(100dvh_-_var(--shell-topbar-height))] max-h-[calc(100dvh_-_var(--shell-topbar-height))] overflow-hidden grid-cols-[var(--chat-left-pane-width,300px)_var(--chat-pane-gutter)_minmax(0,1fr)_var(--chat-pane-gutter)_var(--chat-right-pane-width,240px)]",
+    "vui-routes-chatcodingroute layout relative min-w-0 grid !gap-0 !p-0 [--chat-workbench-gap:4px] [--chat-pane-gutter:0px] h-[calc(100dvh_-_var(--shell-topbar-height))] max-h-[calc(100dvh_-_var(--shell-topbar-height))] overflow-hidden grid-cols-[var(--chat-left-pane-width,300px)_var(--chat-pane-gutter)_minmax(0,1fr)_var(--chat-pane-gutter)_var(--chat-right-pane-width,240px)]",
   layoutCompactDesktop:
     "vui-routes-chatcodingroute layoutCompactDesktop grid min-w-0 grid-cols-[minmax(220px,var(--chat-left-pane-width,248px))_var(--chat-pane-gutter)_minmax(0,1fr)] overflow-hidden",
   layoutStatusRailCollapsed:
@@ -505,7 +505,7 @@ layout:
   leftBlock:
     "vui-routes-chatcodingroute leftBlock grid min-w-0 shrink-0 gap-1.5 border-0 border-b border-[var(--vui-border-subtle)] bg-transparent p-2 shadow-none last:border-b-0",
   leftRail:
-    "vui-routes-chatcodingroute leftRail min-w-0 !flex h-full min-h-0 !flex-col overflow-auto rounded-[var(--vui-radius-panel-soft)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-rail)] p-1 shadow-[var(--vui-elevation-panel)] [scrollbar-gutter:stable] [grid-column:5] [grid-row:1]",
+    "vui-routes-chatcodingroute leftRail min-w-0 !flex h-full min-h-0 !flex-col overflow-auto rounded-none border-0 border-l border-[var(--vui-border-subtle)] bg-[var(--vui-surface-rail)] p-1 shadow-none [scrollbar-gutter:stable] [grid-column:5] [grid-row:1]",
   memberIndexSummary:
     "vui-routes-chatcodingroute memberIndexSummary min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 !grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-1.5",
   mentalStateBadge:
@@ -830,13 +830,15 @@ layout:
     "vui-routes-chatcodingroute projectBusEventRevoked min-w-0",
   projectBusInterruptToggle:
     "vui-routes-chatcodingroute projectBusInterruptToggle min-w-0",
+  // Zero-width seam: no reserved gutter strip; hit target expands via absolute inset.
   resizeHandle:
-    "vui-routes-chatcodingroute resizeHandle relative z-10 h-full w-full cursor-col-resize touch-none border-0 bg-transparent p-0 outline-none before:absolute before:inset-y-2 before:left-1/2 before:w-px before:-translate-x-1/2 before:rounded-full before:bg-[color-mix(in_srgb,var(--vui-surface-row)_12%,transparent)] before:transition before:content-[''] hover:before:bg-[color-mix(in_srgb,var(--accent-warm)_38%,transparent)] hover:before:shadow-[var(--vui-shadow-soft)] focus-visible:before:bg-[color-mix(in_srgb,var(--accent-warm)_38%,transparent)] focus-visible:before:shadow-[var(--vui-shadow-soft)] [&_button[data-vui=icon-button]]:[--tw-translate-x:var(--chat-resize-handle-button-x,-50%)]",
+    "vui-routes-chatcodingroute resizeHandle relative z-20 h-full w-full min-w-0 cursor-col-resize touch-none border-0 bg-transparent p-0 outline-none after:absolute after:inset-y-0 after:left-1/2 after:z-0 after:w-3 after:-translate-x-1/2 after:content-[''] before:pointer-events-none before:absolute before:inset-y-0 before:left-1/2 before:z-[1] before:w-px before:-translate-x-1/2 before:bg-transparent before:opacity-0 before:transition before:content-[''] hover:before:bg-[color-mix(in_srgb,var(--accent-warm)_38%,transparent)] hover:before:opacity-100 focus-visible:before:bg-[color-mix(in_srgb,var(--accent-warm)_38%,transparent)] focus-visible:before:opacity-100 [&_button[data-vui=icon-button]]:absolute [&_button[data-vui=icon-button]]:left-1/2 [&_button[data-vui=icon-button]]:top-1/2 [&_button[data-vui=icon-button]]:z-[2] [&_button[data-vui=icon-button]]:opacity-55 [&_button[data-vui=icon-button]]:transition-opacity hover:[&_button[data-vui=icon-button]]:opacity-100 focus-within:[&_button[data-vui=icon-button]]:opacity-100 [&_button[data-vui=icon-button]]:[--tw-translate-x:var(--chat-resize-handle-button-x,-50%)]",
   resizeHandleLeft:
-    "vui-routes-chatcodingroute resizeHandleLeft [grid-column:2] [grid-row:1] [--chat-resize-handle-button-x:calc(50%_+_var(--vui-control-height-sm)/2)]",
+    "vui-routes-chatcodingroute resizeHandleLeft [grid-column:2] [grid-row:1] [--chat-resize-handle-button-x:-50%]",
   resizeHandleRight:
-    "vui-routes-chatcodingroute resizeHandleRight [grid-column:4] [grid-row:1] [--chat-resize-handle-button-x:calc(-50%_-_var(--vui-control-height-sm)/2)]",
-  resizeHandleActive:    "vui-routes-chatcodingroute resizeHandleActive before:bg-[color-mix(in_srgb,var(--accent-warm)_62%,transparent)] before:shadow-[var(--vui-shadow-accent)]",
+    "vui-routes-chatcodingroute resizeHandleRight [grid-column:4] [grid-row:1] [--chat-resize-handle-button-x:-50%]",
+  resizeHandleActive:
+    "vui-routes-chatcodingroute resizeHandleActive before:bg-[color-mix(in_srgb,var(--accent-warm)_62%,transparent)] before:opacity-100 before:shadow-[var(--vui-shadow-accent)] [&_button[data-vui=icon-button]]:opacity-100",
   resourceMetric:
     "vui-routes-chatcodingroute resourceMetric min-w-0",
   resourceSplit:
@@ -848,7 +850,7 @@ layout:
   rightIndexTabs:
     "vui-routes-chatcodingroute rightIndexTabs min-w-0 !grid grid-cols-[repeat(2,minmax(0,1fr))] gap-1",
   rightPane:
-    "vui-routes-chatcodingroute rightPane min-w-0 grid h-full min-h-0 gap-[var(--chat-workbench-gap)] overflow-hidden rounded-[var(--vui-radius-panel-soft)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-rail)] p-[var(--chat-workbench-gap)] shadow-[var(--vui-elevation-panel)] [grid-column:1] [grid-row:1]",
+    "vui-routes-chatcodingroute rightPane min-w-0 grid h-full min-h-0 gap-[var(--chat-workbench-gap)] overflow-hidden rounded-none border-0 border-r border-[var(--vui-border-subtle)] bg-[var(--vui-surface-rail)] p-[var(--chat-workbench-gap)] shadow-none [grid-column:1] [grid-row:1]",
   rightPaneWithTabs:
     "vui-routes-chatcodingroute rightPaneWithTabs grid-rows-[auto_auto_minmax(0,1fr)]",
   rightPaneWithoutTabs:

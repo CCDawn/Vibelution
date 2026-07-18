@@ -181,7 +181,7 @@
   --vui-workspace-list-ideal: 26vw;
   --vui-workspace-list-max: 420px;
   --vui-workspace-detail-min: 0;
-  --vui-chat-pane-gutter: 8px;
+  --vui-chat-pane-gutter: 0px;
   --vui-chat-status-rail-default: 240px;
 }
 

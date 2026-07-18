@@ -138,7 +138,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(appShellCssSource).toContain("--theme-background-overlay-mid: color-mix(in srgb, var(--bg-canvas) 18%, transparent);");
     expect(appShellCssSource).toContain("--theme-background-overlay-mid: color-mix(in srgb, var(--bg-canvas) 44%, transparent);");
     expect(appShellCssSource).toContain("--theme-background-overlay-mid: color-mix(in srgb, var(--bg-canvas) 60%, transparent);");
-    expect(routeStyles.centerPane).toContain("bg-[color-mix(in_srgb,var(--surface-page)_10%,transparent)]");
+    expect(routeStyles.centerPane).toContain("bg-[var(--vui-surface-chat)]");
     expect(routeStyles.centerSurface).toContain("bg-[color-mix(in_srgb,var(--vui-surface-panel)_6%,transparent)]");
     expect(conversationStyles.timeline).toContain("bg-[var(--vui-surface-chat)]");
     expect(conversationStyles.surfaceCompact).toContain("[&_.timeline]:bg-[var(--vui-surface-chat)]");
@@ -496,7 +496,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.layout.split(/\s+/)).toContain("grid");
     expect(routeStyles.layout).toContain("!gap-0");
     expect(routeStyles.layout).toContain("!p-0");
-    expect(routeStyles.layout).toContain("[--chat-pane-gutter:8px]");
+    expect(routeStyles.layout).toContain("[--chat-pane-gutter:0px]");
     expect(routeStyles.layout).toContain(
       "grid-cols-[var(--chat-left-pane-width,300px)_var(--chat-pane-gutter)_minmax(0,1fr)_var(--chat-pane-gutter)_var(--chat-right-pane-width,240px)]",
     );
@@ -522,11 +522,13 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.resizeHandle).toContain("focus-visible:before:bg");
     expect(routeStyles.resizeHandle).toContain("[&_button[data-vui=icon-button]]:[--tw-translate-x:var(--chat-resize-handle-button-x,-50%)]");
     expect(routeStyles.resizeHandleLeft).toContain("[grid-column:2]");
-    expect(routeStyles.resizeHandleLeft).toContain("[--chat-resize-handle-button-x:calc(50%_+_var(--vui-control-height-sm)/2)]");
+    expect(routeStyles.resizeHandleLeft).toContain("[--chat-resize-handle-button-x:-50%]");
     expect(routeStyles.resizeHandleRight).toContain("[grid-column:4]");
-    expect(routeStyles.resizeHandleRight).toContain("[--chat-resize-handle-button-x:calc(-50%_-_var(--vui-control-height-sm)/2)]");
+    expect(routeStyles.resizeHandleRight).toContain("[--chat-resize-handle-button-x:-50%]");
+    expect(routeStyles.resizeHandle).toContain("before:opacity-0");
+    expect(routeStyles.resizeHandle).toContain("hover:before:opacity-100");
     expect(routeStyles.resizeHandleActive).toContain("before:bg");
-    expect(routeStyles.resizeHandleActive).toContain("before:shadow");
+    expect(routeStyles.resizeHandleActive).toContain("before:opacity-100");
   });
 
   it("centers the direct conversation reading track whenever the optional status rail is closed", () => {
@@ -798,9 +800,10 @@ describe("ChatCodingRoute layout contract", () => {
   });
 
   it("keeps the left rail status stack soft and non-nested", () => {
-    expect(routeStyles.leftRail).toContain("rounded-[var(--vui-radius-panel-soft)]");
+    expect(routeStyles.leftRail).toContain("rounded-none");
+    expect(routeStyles.leftRail).toContain("border-l");
     expect(routeStyles.leftRail).toContain("bg-[var(--vui-surface-rail)]");
-    expect(routeStyles.leftRail).toContain("shadow-[var(--vui-elevation-panel)]");
+    expect(routeStyles.leftRail).toContain("shadow-none");
     expect(routeStyles.leftBlock).toContain("border-b");
     expect(routeStyles.leftBlock).toContain("bg-transparent");
     expect(routeStyles.leftBlock).toContain("shadow-none");
@@ -2133,9 +2136,10 @@ describe("ChatCodingRoute layout contract", () => {
   });
 
   it("renders the conversation index as one soft panel with flat rows and compact actions", () => {
-    expect(routeStyles.rightPane).toContain("rounded-[var(--vui-radius-panel-soft)]");
+    expect(routeStyles.rightPane).toContain("rounded-none");
+    expect(routeStyles.rightPane).toContain("border-r");
     expect(routeStyles.rightPane).toContain("bg-[var(--vui-surface-rail)]");
-    expect(routeStyles.rightPane).toContain("shadow-[var(--vui-elevation-panel)]");
+    expect(routeStyles.rightPane).toContain("shadow-none");
     expect(routeStyles.panelState).toContain("!content-center");
     expect(routeStyles.panelState).toContain("!text-center");
     expect(routeStyles.panelState).not.toContain("border");
