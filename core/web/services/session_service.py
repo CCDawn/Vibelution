@@ -1913,6 +1913,8 @@ def _conversation_agent_direct_session_is_allowed(
 ) -> bool:
     if not direct_session_id or direct_session_id == conversation_id:
         return True
+    if str(conversation.get("session_role") or conversation.get("sessionRole") or "").strip() == "workspace":
+        return True
     session_kind = _raw_conversation_session_kind(conversation)
     if session_kind == "child":
         root_id = _raw_conversation_root_session_id(conversation, conversation_id)
@@ -4440,6 +4442,7 @@ def _with_direct_session_agent_for_summary(
 def create_chat_session(
     *,
     title: str = "",
+    agent_id: str = "",
     llm_bindings: dict[str, Any] | None = None,
     created_by: str = "user",
     conversation_index_kind: str = agent_directory_service.CONVERSATION_INDEX_KIND_USER_CHAT,
@@ -4447,7 +4450,14 @@ def create_chat_session(
     """Create a new empty chat session and make it active."""
 
     lang = get_web_language()
+    normalized_agent_id = str(agent_id or "").strip()
     normalized_llm_bindings = _normalize_session_agent_llm_bindings(llm_bindings)
+    bound_agent: dict[str, Any] | None = None
+    if normalized_agent_id:
+        _sync_agent_directory_project_root()
+        bound_agent = get_agent(normalized_agent_id, include_archived=False)
+        if not bound_agent:
+            raise SessionValidationError(_session_agent_unavailable_message("missing_agent", lang=lang))
     with _CHAT_STATE_LOCK:
         payload = load_chat_state(PROJECT_ROOT)
         conversations = payload.get("conversations")
@@ -4468,19 +4478,31 @@ def create_chat_session(
             conversation_index_kind=conversation_index_kind,
         )
         _ensure_conversation_workspace_metadata(conversation)
-        _sync_agent_directory_project_root()
-        agent = ensure_agent_for_session(
-            session_id,
-            display_name=normalized_title,
-            llm_bindings=normalized_llm_bindings,
-            session_workspace_path=str(conversation.get("workspace_path") or _session_workspace_relative_path(session_id)),
-            created_by=created_by,
-            conversation_index_kind=conversation_index_kind,
-        )
-        agent_id = str(agent.get("agentId") or "").strip()
-        if agent_id:
-            conversation["agent_id"] = agent_id
-            conversation["agentId"] = agent_id
+        if bound_agent is not None:
+            conversation.update(
+                {
+                    "agent_id": normalized_agent_id,
+                    "agentId": normalized_agent_id,
+                    "session_role": "workspace",
+                    "sessionRole": "workspace",
+                }
+            )
+        else:
+            _sync_agent_directory_project_root()
+            agent = ensure_agent_for_session(
+                session_id,
+                display_name=normalized_title,
+                llm_bindings=normalized_llm_bindings,
+                session_workspace_path=str(conversation.get("workspace_path") or _session_workspace_relative_path(session_id)),
+                created_by=created_by,
+                conversation_index_kind=conversation_index_kind,
+            )
+            normalized_agent_id = str(agent.get("agentId") or "").strip()
+            if normalized_agent_id:
+                conversation["agent_id"] = normalized_agent_id
+                conversation["agentId"] = normalized_agent_id
+                conversation["session_role"] = "primary"
+                conversation["sessionRole"] = "primary"
         conversations.append(conversation)
         payload["version"] = int(payload.get("version") or CHAT_STATE_VERSION)
         payload["active_conversation_id"] = session_id
@@ -4488,6 +4510,24 @@ def create_chat_session(
         payload["conversations"] = conversations
         save_chat_state(PROJECT_ROOT, payload)
     _invalidate_session_list_cache()
+    try:
+        record_runtime_scene_event(
+            "conversation",
+            "session_lifecycle",
+            "conversation.session.created",
+            level="info",
+            outcome="succeeded",
+            message="Chat session created.",
+            fields={
+                "sessionId": session_id,
+                "agentId": normalized_agent_id,
+                "sessionRole": "workspace" if bound_agent is not None else "primary",
+                "createdAgent": bound_agent is None,
+            },
+            lifecycle=True,
+        )
+    except Exception:
+        pass
     return get_session_detail(session_id) or {}
 
 
@@ -9172,6 +9212,7 @@ def _build_session_summary(conversation: dict[str, Any], *, hydrate_agent: bool 
         "agentMissingId": agent_missing_id,
         "agentDirectSessionMismatch": agent_direct_session_mismatch,
         "agentPrimaryDirectSessionId": agent_primary_direct_session_id,
+        "sessionRole": str(conversation.get("session_role") or conversation.get("sessionRole") or "").strip(),
         "dialogueModelId": dialogue_model_id,
         "reasoningEffort": normalize_reasoning_effort(conversation.get("reasoningEffort")),
         "workspacePath": str(conversation.get("workspacePath") or _session_workspace_relative_path(conversation["id"])),

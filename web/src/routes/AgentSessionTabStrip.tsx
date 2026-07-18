@@ -131,7 +131,7 @@ export function AgentSessionTabStrip({
         const sessionDisplay = sessionAgentDisplayInfo(session, sessionAgent, lang, resolveModelLabel);
         const sessionStatus = sessionIsChild ? (session.childStatus || session.currentPhase || session.status) : session.status;
         const sessionTitle =
-          (sessionIsChild ? (session.taskTitle || session.resultCard?.title || session.title) : sessionDisplay.name)
+          (sessionIsChild ? (session.taskTitle || session.resultCard?.title || session.title) : session.title)
           || sessionDisplay.name
           || t("agentSession");
         const sessionSummary =

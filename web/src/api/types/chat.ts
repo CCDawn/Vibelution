@@ -31,6 +31,7 @@ export type SessionSummary = {
   updatedAt: string;
   currentPhase: string;
   sessionKind?: "main" | "child" | string;
+  sessionRole?: "primary" | "workspace" | "supervised" | string;
   parentSessionId?: string;
   rootSessionId?: string;
   childSessionIds?: string[];

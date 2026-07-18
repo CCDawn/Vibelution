@@ -1,0 +1,19 @@
+import { describe, expect, it } from "vitest";
+
+import routeSource from "./ChatCodingRoute.tsx?raw";
+import tabStripSource from "./AgentSessionTabStrip.tsx?raw";
+
+describe("ChatCodingRoute Agent-session hierarchy", () => {
+  it("uses Agent navigation on the left and queries tabs by the selected Agent", () => {
+    expect(routeSource).toContain('import { AgentConversationDirectory } from "./AgentConversationDirectory"');
+    expect(routeSource).toContain('queryKey: ["sessions", "agent", selectedChatAgentId]');
+    expect(routeSource).toContain('`/api/sessions/query?agentId=${encodeURIComponent(selectedChatAgentId)}&limit=100`');
+    expect(routeSource).toContain("<AgentConversationDirectory");
+    expect(routeSource).toContain("onClick={handleCreateAgent}");
+    expect(routeSource).toContain("在当前 Agent 下新建会话");
+  });
+
+  it("uses the session title, not the Agent name, for root session tabs", () => {
+    expect(tabStripSource).toContain("sessionIsChild ? (session.taskTitle || session.resultCard?.title || session.title) : session.title");
+  });
+});

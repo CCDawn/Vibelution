@@ -192,6 +192,13 @@ class SessionUpdatePayload(BaseModel):
     agentId: str | None = None
 
 
+class SessionCreatePayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    agentId: str = ""
+    title: str = ""
+
+
 class SessionReasoningEffortPayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -245,8 +252,11 @@ def session_query(
 
 
 @router.post("/sessions", status_code=status.HTTP_201_CREATED)
-def session_create() -> dict:
-    return create_chat_session()
+def session_create(payload: SessionCreatePayload | None = None) -> dict:
+    return create_chat_session(
+        agent_id=str(payload.agentId or "").strip() if payload is not None else "",
+        title=str(payload.title or "").strip() if payload is not None else "",
+    )
 
 
 @router.get("/sessions/{session_id}")
