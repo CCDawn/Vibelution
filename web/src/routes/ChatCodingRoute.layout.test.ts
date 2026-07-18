@@ -496,9 +496,9 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.layout.split(/\s+/)).toContain("grid");
     expect(routeStyles.layout).toContain("!gap-0");
     expect(routeStyles.layout).toContain("!p-0");
-    expect(routeStyles.layout).toContain("[--chat-pane-gutter:12px]");
+    expect(routeStyles.layout).toContain("[--chat-pane-gutter:8px]");
     expect(routeStyles.layout).toContain(
-      "grid-cols-[var(--chat-left-pane-width,300px)_var(--chat-pane-gutter)_minmax(0,1fr)_var(--chat-pane-gutter)_var(--chat-right-pane-width,220px)]",
+      "grid-cols-[var(--chat-left-pane-width,300px)_var(--chat-pane-gutter)_minmax(0,1fr)_var(--chat-pane-gutter)_var(--chat-right-pane-width,240px)]",
     );
     expect(routeStyles.layoutCompactDesktop).toContain(
       "grid-cols-[minmax(220px,var(--chat-left-pane-width,248px))_var(--chat-pane-gutter)_minmax(0,1fr)]",

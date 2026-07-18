@@ -1680,7 +1680,7 @@ describe("AgentsRoute layout contract", () => {
     expect(detailWorkspacePanelSource).toContain("styles.detailPanel");
     expect(workspaceLayoutStyles.workspace).toBeTruthy();
     expect(workspaceLayoutPanelSource).toContain("styles.directory");
-    expect(workspaceLayoutStyles.workspace).toContain("[grid-template-columns:clamp(320px,_18vw,_360px)_minmax(0,_1fr)]");
+    expect(workspaceLayoutStyles.workspace).toContain("[grid-template-columns:clamp(340px,_26vw,_420px)_minmax(0,_1fr)]");
     expect(workspaceLayoutStyles.directory).toContain("[grid-template-rows:minmax(158px,_0.34fr)_minmax(280px,_0.66fr)]");
     expect(workspaceLayoutStyles.workspace).toContain("max-[860px]:[grid-template-columns:1fr]");
     expect(listWorkspaceStyles.agentPanel).toContain("[grid-template-rows:auto_auto_minmax(0,_1fr)]");
@@ -1962,15 +1962,16 @@ describe("AgentsRoute layout contract", () => {
     expect(detailWorkspaceStyles.detailPanel).toContain("max-[860px]:[min-height:420px]");
   });
 
-  it("keeps Agent empty states compact and left-aligned for dense workbench scanning", () => {
+  it("fills the Agent detail empty state so the right pane does not look abandoned", () => {
     expect(emptySelectionPanelSource).toContain('from "./AgentEmptySelectionPanel.styles"');
     expect(emptySelectionPanelSource).not.toContain("AgentsRoute.styles");
     expect(emptySelectionStyles.emptyState).toBeTruthy();
     expect(detailWorkspacePanelSource).toContain("AgentEmptySelectionPanel");
     expect(emptySelectionPanelSource).toContain("className={styles.emptyState}");
-    expect(emptySelectionStyles.emptyState).toContain("[place-items:start]");
-    expect(emptySelectionStyles.emptyState).toContain("[min-height:72px]");
-    expect(emptySelectionStyles.emptyState).toContain("[text-align:left]");
+    expect(emptySelectionStyles.emptyState).toContain("[place-content:center]");
+    expect(emptySelectionStyles.emptyState).toContain("[place-items:center]");
+    expect(emptySelectionStyles.emptyState).toContain("h-full");
+    expect(emptySelectionStyles.emptyState).toContain("[text-align:center]");
   });
 
   it("renders every Agent as a person name plus colored functional role tag", () => {

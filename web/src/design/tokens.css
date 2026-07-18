@@ -173,6 +173,16 @@
   --route-summary-gap: 6px;
   --route-summary-padding: 6px 8px;
   --route-workspace-padding: 10px 12px 12px;
+
+  /* Workbench layout density (Path B Wave1). Additive semantic tokens for
+     master-detail pages; renderer/shadcn swaps should map onto these. */
+  --vui-workspace-gap: 8px;
+  --vui-workspace-list-min: 340px;
+  --vui-workspace-list-ideal: 26vw;
+  --vui-workspace-list-max: 420px;
+  --vui-workspace-detail-min: 0;
+  --vui-chat-pane-gutter: 8px;
+  --vui-chat-status-rail-default: 240px;
 }
 
 [data-theme="light"] {
