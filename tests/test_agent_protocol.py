@@ -26,6 +26,7 @@ from core.infrastructure.llm_utils import (
     parse_xml_tool_calls,
 )
 from core.infrastructure.runtime_input import build_chat_user_message, build_external_request_message
+from core.infrastructure.tool_result import RuntimeToolMetadata
 from core.prompt_manager import build_restart_focus_state_memory
 from core.orchestration.agent_modes import AgentMode, ModePolicy
 from core.orchestration.delegation_governor import DelegationGovernor
@@ -384,6 +385,36 @@ class TestToolMessageFlow:
         assert "第 1-120 行" in messages[0].content
         assert "阅读导航" not in messages[0].content
         assert "offset=120" not in messages[0].content
+
+    def test_runtime_metadata_is_bound_to_its_tool_call_without_storing_navigation(self):
+        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+        agent._recent_tool_records = []
+        agent._recent_tool_outputs = []
+        first_call = {"id": "call-first", "name": "read_file_tool", "args": {"path": "first.py"}}
+        second_call = {"id": "call-second", "name": "read_file_tool", "args": {"path": "second.py"}}
+
+        agent._remember_tool_output(first_call, "first result", None)
+        agent._remember_tool_output(second_call, "second result", None)
+        agent._remember_runtime_tool_metadata(
+            first_call,
+            RuntimeToolMetadata(
+                result_kind="file_read",
+                strategy="passthrough",
+                range_info="第 1-20 行",
+                continuation_hint="继续调用 read_file_tool(offset=20, max_lines=20)。",
+                truncated=True,
+                original_length=120,
+                transport_status="returned",
+                semantic_status="succeeded",
+                exit_code=None,
+                timed_out=False,
+                failure_class="",
+            ),
+        )
+
+        assert "runtime_metadata" in agent._recent_tool_records[0]
+        assert "runtime_metadata" not in agent._recent_tool_records[1]
+        assert "continuation_hint" not in agent._recent_tool_records[0]["runtime_metadata"]
 
     def test_handle_tool_result_decodes_binary_failure_result(self):
         messages = []
@@ -4787,8 +4818,7 @@ class TestToolMessageFlow:
 
         assert outcome is None
         agent._get_delegation_governor.assert_not_called()
-        assert scene_events[0][0:2] == ("delegation", "agent.delegation.blocked")
-        assert scene_events[0][2]["fields"]["reason"] == "runtime_goal_disallows_subagents"
+        assert scene_events == []
 
     def test_session_agent_auto_delegation_is_closed_by_default(self, monkeypatch):
         agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
@@ -4810,11 +4840,9 @@ class TestToolMessageFlow:
 
         assert outcome is None
         agent._get_delegation_governor.assert_not_called()
-        assert scene_events[0][0:2] == ("delegation", "agent.delegation.blocked")
-        assert scene_events[0][2]["fields"]["reason"] == "session_agent_auto_delegation_disabled"
-        assert scene_events[0][2]["fields"]["replacementTool"] == "cli_agent_run_tool"
+        assert scene_events == []
 
-    def test_non_session_agent_runtime_keeps_governor_delegation_path(self, monkeypatch):
+    def test_non_session_agent_runtime_does_not_auto_delegate(self, monkeypatch):
         from core.web.services import agent_directory_service
 
         monkeypatch.setattr(
@@ -4835,8 +4863,8 @@ class TestToolMessageFlow:
             messages=[],
         )
 
-        assert outcome == {"delegated": True, "useful": False}
-        governor.maybe_delegate.assert_called_once()
+        assert outcome is None
+        governor.maybe_delegate.assert_not_called()
 
     def test_explicit_session_override_closes_specialized_agent_auto_delegation(self, monkeypatch):
         from core.web.services import agent_directory_service

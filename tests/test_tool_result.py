@@ -85,7 +85,7 @@ class TestTruncateResult:
         assert isinstance(result, str)
         assert "1" in result
 
-    def test_package_tool_result_keeps_reading_navigation_for_file_reads(self):
+    def test_package_tool_result_keeps_navigation_only_in_runtime_metadata(self):
         raw = (
             "[文件] demo.py\n"
             "[编码] utf-8 | [行数] 400 (已截断) | [大小] 10.0 KB\n"
@@ -100,6 +100,7 @@ class TestTruncateResult:
         assert packaged.truncated is True
         assert packaged.result_kind == "file_read"
         assert "offset=120" in packaged.continuation_hint
+        assert "阅读导航=" not in packaged.content
         assert "[截断信息]" in packaged.content or "[...结果已截断" in packaged.content
 
     def test_package_tool_result_compacts_file_read_with_preview(self):

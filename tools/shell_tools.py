@@ -1057,11 +1057,7 @@ def read_file(
 
         if truncated and adaptive_max_lines is not None:
             result_lines.extend([
-                f"[剩余] 还有 {remaining_lines} 行未显示；不要因为存在剩余内容就默认顺序翻页。",
-                (
-                    "[阅读导航] 后续内容未返回，这不是续读指令。若当前片段已能回答，请先综合；"
-                    "若仍缺证据，请先说明具体缺口，再定位新的目标片段。"
-                ),
+                f"[剩余] 还有 {remaining_lines} 行未显示。",
             ])
 
         result_lines.extend([

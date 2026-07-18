@@ -37,6 +37,7 @@ from core.infrastructure.tool_result import truncate_result  # noqa: F401
 from core.infrastructure.tool_result import (
     compact_tool_output_for_diagnosis,
     infer_result_from_tool_outputs,
+    RuntimeToolMetadata,
 )
 from core.infrastructure.security import get_security_validator
 from core.infrastructure.agent_session import get_session_state
@@ -135,6 +136,11 @@ from core.prompt_manager import (
     to_string,
 )
 from core.prompt_manager.task_analyzer import get_task_analyzer
+from core.orchestration.evolution_lifecycle import (
+    is_full_evolution_goal,
+    is_restart_focused_goal,
+)
+# 兼容旧的外部管理接口；通用对话主循环不再创建或调用该治理器。
 from core.orchestration.delegation_governor import DelegationGovernor
 from core.orchestration.agent_modes import (
     AgentMode,
@@ -790,14 +796,9 @@ class SelfEvolvingAgent:
             tool_executor_execute=self.tool_executor.execute,
             tool_guard=self._guard_tool_execution,
             tool_result_observer=self._remember_tool_output,
+            runtime_metadata_observer=self._remember_runtime_tool_metadata,
             post_close_action_pending=self._expects_restart_after_transaction_close,
             self_modified=self._self_modified,
-        )
-        self.delegation_governor = DelegationGovernor(
-            spawn_execute=self.tool_executor.execute,
-            sync_runtime_state_memory=self._sync_runtime_state_memory,
-            ui_getter=get_ui,
-            session_getter=get_session_state,
         )
         self.response_processor = ResponseProcessor()
 
@@ -1394,11 +1395,13 @@ class SelfEvolvingAgent:
     def _remember_tool_output(self, _tool_call: Dict[str, Any], result: Any, _action: Optional[str]) -> None:
         text = str(result or "").strip()
         tool_name = str((_tool_call or {}).get("name") or "").strip()
+        tool_call_id = str((_tool_call or {}).get("id") or "").strip()
         tool_args = parse_tool_args(
             (_tool_call or {}).get("args") or (_tool_call or {}).get("arguments") or {}
         )
         record = {
             "name": tool_name,
+            "tool_call_id": tool_call_id,
             "args": tool_args,
             "action": str(_action or "").strip(),
             "result_preview": compact_tool_output_for_diagnosis(text, max_chars=1200) if text else "",
@@ -1411,6 +1414,46 @@ class SelfEvolvingAgent:
         self._recent_tool_outputs.append(compact_tool_output_for_diagnosis(text, max_chars=6000))
         if len(self._recent_tool_outputs) > 6:
             self._recent_tool_outputs = self._recent_tool_outputs[-6:]
+
+    def _remember_runtime_tool_metadata(
+        self,
+        _tool_call: Dict[str, Any],
+        metadata: RuntimeToolMetadata,
+    ) -> None:
+        """保存审计/UI 所需的有界事实，不把续读建议回灌进模型历史。"""
+        if not self._recent_tool_records:
+            return
+        tool_call_id = str((_tool_call or {}).get("id") or "").strip()
+        tool_name = str((_tool_call or {}).get("name") or "").strip()
+        target = next(
+            (
+                record
+                for record in reversed(self._recent_tool_records)
+                if (
+                    tool_call_id
+                    and str(record.get("tool_call_id") or "").strip() == tool_call_id
+                )
+                or (
+                    not tool_call_id
+                    and str(record.get("name") or "").strip() == tool_name
+                )
+            ),
+            None,
+        )
+        if target is None:
+            return
+        target["runtime_metadata"] = {
+            "result_kind": metadata.result_kind,
+            "strategy": metadata.strategy,
+            "range_info": metadata.range_info,
+            "truncated": metadata.truncated,
+            "original_length": metadata.original_length,
+            "transport_status": metadata.transport_status,
+            "semantic_status": metadata.semantic_status,
+            "exit_code": metadata.exit_code,
+            "timed_out": metadata.timed_out,
+            "failure_class": metadata.failure_class,
+        }
 
     def _build_delegation_request(
         self,
@@ -1486,37 +1529,8 @@ class SelfEvolvingAgent:
         total_tool_calls: int,
         messages: list,
     ) -> Optional[Dict[str, Any]]:
-        if getattr(self, "_allow_session_subagent_auto_delegation", None) is False:
-            return None
-        get_packet = getattr(getattr(self, "prompt_manager", None), "get_runtime_goal_packet", None)
-        if callable(get_packet):
-            try:
-                packet = get_packet()
-            except Exception:
-                packet = None
-            if packet is not None and getattr(packet, "allow_subagents", True) is False:
-                _debug_logger.info("[Delegation] 当前运行目标包禁止子 agent，跳过委派。", tag="DELEGATE")
-                _record_agent_scene_event(
-                    "delegation",
-                    "agent.delegation.blocked",
-                    message="运行目标包禁止子 agent，已跳过委派。",
-                    fields={
-                        "source": str(getattr(packet, "source", "") or ""),
-                        "objectiveType": str(getattr(packet, "objective_type", "") or ""),
-                        "reason": "runtime_goal_disallows_subagents",
-                    },
-                )
-                return None
-        if not self._session_agent_auto_delegation_enabled():
-            self._record_session_agent_auto_delegation_disabled()
-            return None
-        governor = self._get_delegation_governor()
-        return governor.maybe_delegate(
-            goal=goal,
-            iteration=iteration,
-            total_tool_calls=total_tool_calls,
-            messages=messages,
-        )
+        """通用对话不自动委派；Team/operator 域拥有显式子 Agent 编排。"""
+        return None
 
     def _get_delegation_governor(self) -> DelegationGovernor:
         governor = getattr(self, "delegation_governor", None)
@@ -1570,7 +1584,7 @@ class SelfEvolvingAgent:
     def _expects_restart_after_transaction_close(self) -> bool:
         """当前目标是否明确要求关账成功后继续触发自我重启。"""
         goal = getattr(self, "_active_goal", "") or ""
-        return DelegationGovernor.is_full_evolution_goal(goal)
+        return is_full_evolution_goal(goal)
 
     def _init_token_compressor(self):
         """初始化 Token 压缩器"""
@@ -2686,22 +2700,9 @@ class SelfEvolvingAgent:
                     pass
                 context_estimate_ms = max(0, int((time.perf_counter() - context_estimate_started) * 1000))
 
-                delegation_started = time.perf_counter()
-                if bool(getattr(self, "_force_disable_tools_for_turn", False)):
-                    delegated = None
-                else:
-                    delegated = self._maybe_delegate(
-                        goal=user_prompt,
-                        iteration=iteration,
-                        total_tool_calls=round_state.total_tool_calls,
-                        messages=messages,
-                    )
-                delegation_ms = max(0, int((time.perf_counter() - delegation_started) * 1000))
+                delegated = None
+                delegation_ms = 0
                 self._raise_if_turn_stop_requested()
-                if delegated:
-                    delegated_this_turn = True
-                    round_state.note_delegation(bool(delegated.get("useful")))
-                    continue
 
                 # 硬限制：超出最大上下文时强制压缩
                 current_tokens = estimate_messages_tokens(messages)
@@ -3799,7 +3800,7 @@ class SelfEvolvingAgent:
     def _is_restart_focus_mode(self) -> bool:
         if self._expects_restart_after_transaction_close():
             return False
-        return DelegationGovernor.is_restart_focused_goal(getattr(self, "_active_goal", ""))
+        return is_restart_focused_goal(getattr(self, "_active_goal", ""))
 
     def _guard_tool_execution(self, tool_name: str, tool_args: Dict[str, Any]) -> Optional[str]:
         if not self._is_restart_focus_mode():
