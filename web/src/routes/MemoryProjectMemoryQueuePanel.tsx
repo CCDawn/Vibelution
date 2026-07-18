@@ -2,7 +2,7 @@ import { CheckCircle2, Square, TriangleAlert, XCircle } from "lucide-react";
 import type { ReactNode } from "react";
 
 import type { AgentProjectMemoryUpdateProposal } from "../api/types";
-import { VButton, VNativeInput } from "../components/vui";
+import { VButton, VNativeInput, VTooltip } from "../components/vui";
 import styles from "./MemoryProjectMemoryQueuePanel.styles";
 
 export type MemoryProjectMemoryResolveStatus = "applied" | "rejected" | "conflict" | "superseded";
@@ -97,20 +97,26 @@ export function MemoryProjectMemoryQueuePanel({
           </VButton>
         </div>
       </div>
-      <div className={styles.projectMemoryQueueStats} title={copy.projectMemoryQueueHint}>
-        <span>
-          <strong>{pendingProposalCount}</strong>
-          {copy.pendingProposals}
-        </span>
-        <span>
-          <strong>{proposalCount}</strong>
-          {isPendingOnly ? copy.projectMemoryQueuePendingOnly : copy.projectMemoryQueueAll}
-        </span>
-        <span>
-          <strong>{laneCount}</strong>
-          {copy.projectMemoryQueueLane}
-        </span>
-      </div>
+      <VTooltip content={copy.projectMemoryQueueHint} width="wide">
+        <div
+          className={styles.projectMemoryQueueStats}
+          tabIndex={0}
+          aria-label={`${copy.projectMemoryQueue} · ${copy.projectMemoryQueueHint}`}
+        >
+          <span>
+            <strong>{pendingProposalCount}</strong>
+            {copy.pendingProposals}
+          </span>
+          <span>
+            <strong>{proposalCount}</strong>
+            {isPendingOnly ? copy.projectMemoryQueuePendingOnly : copy.projectMemoryQueueAll}
+          </span>
+          <span>
+            <strong>{laneCount}</strong>
+            {copy.projectMemoryQueueLane}
+          </span>
+        </div>
+      </VTooltip>
       {mutationFeedback.tone !== "idle" ? (
         <p className={styles.copyNotice} data-tone={mutationFeedback.tone}>
           {mutationFeedback.tone === "success" ? <CheckCircle2 size={14} /> : <TriangleAlert size={14} />}
