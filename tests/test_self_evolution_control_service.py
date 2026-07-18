@@ -155,7 +155,7 @@ def test_latest_self_evolution_run_decorates_runtime_attention(monkeypatch):
     assert payload["currentGoal"] == "inspect guidance"
     assert payload["currentTask"] == "Read supervised control flow"
     assert payload["readingHint"] == "Check the latest pause event first"
-    assert payload["nextToolIntent"] == "Open the control service module"
+    assert payload["nextToolIntent"] == ""
 
 
 def _seed_terminal_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, current_text: str = "after\n") -> dict:

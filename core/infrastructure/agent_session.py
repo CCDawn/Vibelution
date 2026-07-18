@@ -27,7 +27,6 @@ from typing import List, Optional, Any, Dict
 
 from core.infrastructure.tool_intents import (
     humanize_reading_task,
-    humanize_tool_intent,
     humanize_tool_name,
     humanize_tool_chain,
 )
@@ -69,6 +68,7 @@ class AgentSessionState:
     reading_task: str = "locate"
     reading_recommendation: str = ""
     reading_sufficiency: str = ""
+    # 兼容旧 UI/API；对话执行器不再写入这些路由字段。
     next_tool_intent: str = ""
     recommended_tools: List[str] = field(default_factory=list)
     avoid_tools: List[str] = field(default_factory=list)
@@ -239,36 +239,14 @@ class AgentSessionState:
             self.reading_recommendation = recommendation or ""
             self.reading_sufficiency = ""
 
-    def set_tool_decision(self, next_intent: str, recommended_tools: List[str], avoid_tools: List[str]):
-        with self._lock:
-            self.next_tool_intent = next_intent or ""
-            self.recommended_tools = list(recommended_tools or [])
-            self.avoid_tools = list(avoid_tools or [])
-
     def set_reading_sufficiency(self, summary: str = ""):
         with self._lock:
             self.reading_sufficiency = summary or ""
 
-    def clear_reading_guidance(self, *, clear_decision: bool = False):
+    def clear_reading_guidance(self):
         with self._lock:
             self.reading_recommendation = ""
             self.reading_sufficiency = ""
-            if clear_decision:
-                self.next_tool_intent = ""
-                self.recommended_tools = []
-                self.avoid_tools = []
-
-    def record_tool_deviation(self, tool_name: str, reason: str):
-        if not tool_name:
-            return
-        with self._lock:
-            self.tool_deviations.append({
-                "tool_name": tool_name,
-                "reason": reason,
-                "timestamp": datetime.now().isoformat(),
-            })
-            if len(self.tool_deviations) > 10:
-                self.tool_deviations = self.tool_deviations[-10:]
 
     def record_read_range(self, path: str, start_line: int, end_line: int, source: str = "read_file_tool"):
         """记录本轮已读取的文件区间。"""
@@ -851,18 +829,6 @@ class AgentSessionState:
                 if self.delegation_failures:
                     latest_failure = self.delegation_failures[-1]
                     lines.append(f"- 最近失败：{latest_failure.get('reason', '')}")
-            if self.next_tool_intent or self.recommended_tools:
-                lines.append("### 工具决策")
-                if self.next_tool_intent:
-                    lines.append(f"- 下一步意图：{humanize_tool_intent(self.next_tool_intent)}")
-                if self.recommended_tools:
-                    lines.append(f"- 推荐工具：{humanize_tool_chain(self.recommended_tools)}")
-                if self.avoid_tools:
-                    lines.append(f"- 避免工具：{' / '.join(humanize_tool_name(name) for name in self.avoid_tools)}")
-            if self.tool_deviations:
-                latest = self.tool_deviations[-1]
-                lines.append("### 工具偏离")
-                lines.append(f"- {humanize_tool_name(latest.get('tool_name', ''))}: {latest.get('reason', '')}")
             if self.recent_validation_results:
                 lines.append("### 最近验证")
                 for item in self.recent_validation_results[-2:]:
@@ -883,6 +849,39 @@ class AgentSessionState:
                 for line in reversed(recent_unique):
                     lines.append(line)
             rendered = "\n".join(lines).strip()
+            if len(rendered) > 900:
+                rendered = rendered[:897].rstrip() + "..."
+            return rendered
+
+    def render_dialogue_runtime_observations(self) -> str:
+        """渲染可回灌给对话模型的运行时观察，不包含语义路由建议。"""
+        with self._lock:
+            lines: List[str] = []
+            if self.blocked_tool_patterns:
+                lines.append("### 运行时限制")
+                for pattern, meta in self.blocked_tool_patterns.items():
+                    lines.append(f"- `{pattern}` 已被阻塞：{meta.get('reason', '')}")
+            if self.pending_continuations:
+                latest = self.pending_continuations[-1]
+                target = latest.get("path") or "上一段工具结果"
+                lines.append("### 工具结果范围")
+                lines.append(f"- `{target}` 的已返回内容不完整。")
+            if self.delegation_findings or self.delegation_failures:
+                lines.append("### 委派观察")
+                if self.delegation_findings:
+                    lines.append(f"- 最近证据：{self.delegation_findings[-1].get('summary', '')}")
+                if self.delegation_failures:
+                    lines.append(f"- 最近失败：{self.delegation_failures[-1].get('reason', '')}")
+            if self.recent_validation_results:
+                lines.append("### 最近验证")
+                for item in self.recent_validation_results[-2:]:
+                    verdict = "通过" if item.get("passed") else "失败"
+                    lines.append(f"- {item.get('kind', 'validation')}: {verdict} | {item.get('summary', '')}")
+            if self.recent_blockers:
+                lines.append("### 最近阻塞")
+                for item in self.recent_blockers[-3:]:
+                    lines.append(f"- {item.get('kind', 'blocker')}: {item.get('summary', '')}")
+            rendered = "\n".join(line for line in lines if line.strip()).strip()
             if len(rendered) > 900:
                 rendered = rendered[:897].rstrip() + "..."
             return rendered

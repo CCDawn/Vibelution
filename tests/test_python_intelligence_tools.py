@@ -83,6 +83,7 @@ def test_code_symbol_tool_v2_rejects_deprecated_modes():
     assert payload["status"] == "error"
     assert payload["error"] == "deprecated_mode"
     assert "inspect/search/references/explore/impact/affected_tests" in payload["message"]
+    assert "请使用" not in payload["message"]
 
 
 def test_code_symbol_tool_v2_indexes_searches_and_inspects_project(tmp_path, monkeypatch):
@@ -141,7 +142,34 @@ def test_code_symbol_tool_inspect_reports_unindexed_file_after_stale_index(tmp_p
     assert payload["error"] == "target_not_indexed"
     assert payload["target"]["filePath"] == "core/missing_from_index.py"
     assert "未在代码图谱索引中" in payload["message"]
-    assert "refresh=true" in payload["message"]
+    assert "refresh=true" not in payload["message"]
+    assert "调用" not in payload["message"]
+
+
+def test_code_symbol_tool_inspects_symbol_within_file_when_both_targets_are_supplied(tmp_path, monkeypatch):
+    from core.code_context_graph import service as graph_service
+
+    core_dir = tmp_path / "core"
+    core_dir.mkdir()
+    (core_dir / "demo.py").write_text(
+        "def target_symbol():\n    return 1\n\n"
+        "def unrelated_symbol():\n    return 2\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(graph_service, "project_root", lambda: tmp_path)
+    graph_service.build_index(force=True)
+
+    payload = json.loads(
+        pit.code_symbol_tool(
+            mode="inspect",
+            file_path="core/demo.py",
+            symbol="target_symbol",
+        )
+    )
+
+    assert payload["status"] == "ok"
+    assert payload["target"] == {"filePath": "core/demo.py", "symbol": "target_symbol"}
+    assert [item["qualifiedName"] for item in payload["symbols"]] == ["target_symbol"]
 
 
 def test_code_symbol_tool_inspects_indexed_directory_without_freshness_scan(tmp_path, monkeypatch):
