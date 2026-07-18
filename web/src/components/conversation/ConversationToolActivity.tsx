@@ -254,7 +254,7 @@ export function ConversationToolActivity({
     >
       <summary className={styles.groupSummary} aria-label={groupLabel}>
         {isRunning
-          ? <LoaderCircle className={`${styles.groupIcon} animate-spin text-[var(--accent-cool)]`} size={16} />
+          ? <LoaderCircle className={`${styles.groupIcon} ${styles.groupIconRunning} animate-spin`} size={16} />
           : <GroupIcon className={styles.groupIcon} size={16} />}
         <span className={styles.groupBody}>
           <span className={styles.groupTitleLine}>
