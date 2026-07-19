@@ -2,19 +2,19 @@
 
 **Date:** 2026-07-19
 
-**Status:** draft
+**Status:** implemented
 
 **Owner:** `agent-root-agent-create-dialog`
 
-**Claim:** implementation 时重新申请；本计划 claim `claim-54924db73f6a`
+**Claim:** `claim-a7718cc39fdb`
 
 **Scope:** 对话页与 Agent 管理页的新建 Agent 入口、共享创建控制器、悬浮向导及其验证
 
 **Replaces:** `51b54ce1` 引入的 Agent 管理页全宽创建工作区
 
-**Implementation link:** pending
+**Implementation link:** `feat(chat): add floating Agent creation wizard`
 
-**Validation:** 聚焦组件/路由测试、完整 web suite、生产 build、桌面与窄视口浏览器验收
+**Validation:** 87 项聚焦组件/路由测试通过；生产 build 通过；浏览器验证确认 `/chat` 原地打开/关闭 dialog、三步切换和 option 加载。完整 web suite 为 2226/2227 通过；唯一失败是基线中 `ConversationView.styles.ts` 与旧 layout assertion 已不一致（本任务未修改该文件/断言）。
 **Close condition:** 两个入口复用同一向导；对话页不再跳转；创建、失败、取消、成功和继续配置路径均通过验证
 
 **Mode:** `COMPACT_PLAN`
@@ -62,7 +62,7 @@ Agent 管理页的“新增 Agent”入口复用同一个 dialog，不再维护�
 
 ### 2. 共享创建控制器
 
-新增 `web/src/routes/agent-create/useAgentCreateWizard.ts`，单一管理：
+`AgentCreateWizardDialog.tsx` 作为唯一共享 controller，单一管理：
 
 - `open` 生命周期、初始 draft、当前步骤和 dirty 状态；
 - 懒加载 `/api/agents/config-workspace?includeRuntime=false` 与 `/api/tools`；
@@ -70,6 +70,8 @@ Agent 管理页的“新增 Agent”入口复用同一个 dialog，不再维护�
 - 创建 mutation、pending/error/success 状态；
 - `chatWorkspaceCache.afterAgentWorkspaceChanged()` 及相关 query invalidation；
 - 创建成功返回精确的 `agentId`，由入口决定后续动作。
+
+实现时没有再增加一个只被 Dialog 自身调用的 `useAgentCreateWizard.ts` 包装层：所有跨入口的领域逻辑已在纯 `agentCreateContract.ts` 中复用，而 controller 与它唯一的视图消费者保持同文件，避免引入无收益的 state forwarding。
 
 数据加载契约：
 
