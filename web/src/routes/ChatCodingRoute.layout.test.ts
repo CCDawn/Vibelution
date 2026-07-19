@@ -18,6 +18,8 @@ import cliAgentRunModelSource from "./chat/cliAgentRunModel.ts?raw";
 import sessionCacheCompositionSource from "./chat/sessionCacheComposition.ts?raw";
 import chatSubmitTelemetrySource from "./chat/chatSubmitTelemetry.ts?raw";
 import chatComposerSubmitModelSource from "./chat/chatComposerSubmitModel.ts?raw";
+import chatComposerSubmitHookSource from "./chat/useChatComposerSubmit.ts?raw";
+import chatActiveTurnLayerSource from "./chatActiveTurnLayer.ts?raw";
 import chatStreamApplyControllerSource from "./chatStreamApplyController.ts?raw";
 import terminalPanelSource from "./chat/CliAgentRunTerminalPanel.tsx?raw";
 import conversationIndexModelSource from "./conversationIndexModel.ts?raw";
@@ -126,7 +128,7 @@ const tokenCoreStatusMetrics: TokenCoreStatusMetric[] = [
 
 const routeAndIndexRailSource = `${routeSource}\n${conversationIndexRailSource}\n${chatStatusRailSource}`;
 const routeAndLayoutSource = `${routeSource}\n${chatWorkbenchLayoutSource}`;
-const routeAndComposerSource = `${routeSource}\n${chatComposerSubmitModelSource}`;
+const routeAndComposerSource = `${routeSource}\n${chatComposerSubmitModelSource}\n${chatComposerSubmitHookSource}\n${chatActiveTurnLayerSource}`;
 
 describe("ChatCodingRoute layout contract", () => {
   it("keeps the center conversation readable and the composer as a stable bottom layer", () => {
@@ -417,7 +419,9 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("editResubmitMutation");
     expect(routeSource).toContain("stopTurnMutation");
     expect(routeSource).toContain("sessionGuidanceMutation");
-    expect(routeSource).toContain("submitTurnWithAttachments");
+    expect(routeAndComposerSource).toContain("submitTurnWithAttachments");
+    expect(routeSource).toContain("useChatComposerTurnMutations");
+    expect(routeSource).toContain("useChatComposerSubmitActions");
     expect(routeSource).not.toContain("composerActionDisabled={composerActionDisabled}");
     expect(routeSource).not.toContain("composerActionMode={composerStopMode ? \"stop\" : \"send\"}");
     expect(routeSource).not.toContain("composerAttachments={activeImageAttachments.map");
@@ -929,16 +933,16 @@ describe("ChatCodingRoute layout contract", () => {
   });
 
   it("optimistically renders the agent turn while submitted chat content is waiting for backend stream", () => {
-    expect(routeSource).toContain("createOptimisticActiveTurnLayer");
-    expect(routeSource).toContain("optimisticTurnIdForSubmission");
+    expect(routeAndComposerSource).toContain("createOptimisticActiveTurnLayer");
+    expect(routeAndComposerSource).toContain("optimisticTurnIdForSubmission");
 
-    const submitMutationStart = routeSource.indexOf("const submitTurnMutation = useMutation");
-    const submitMutateStart = routeSource.indexOf("onMutate: async (variables)", submitMutationStart);
-    const submitSuccessStart = routeSource.indexOf("onSuccess: (acceptedTurn, variables)", submitMutateStart);
-    const submitErrorStart = routeSource.indexOf("onError: (error, variables)", submitSuccessStart);
-    const submitMutateBlock = routeSource.slice(submitMutateStart, submitSuccessStart);
-    const submitSuccessBlock = routeSource.slice(submitSuccessStart, submitErrorStart);
-    const submitErrorBlock = routeSource.slice(submitErrorStart, routeSource.indexOf("const editResubmitMutation", submitErrorStart));
+    const submitMutationStart = routeAndComposerSource.indexOf("const submitTurnMutation = useMutation");
+    const submitMutateStart = routeAndComposerSource.indexOf("onMutate: async (variables)", submitMutationStart);
+    const submitSuccessStart = routeAndComposerSource.indexOf("onSuccess: (acceptedTurn, variables)", submitMutateStart);
+    const submitErrorStart = routeAndComposerSource.indexOf("onError: (error, variables)", submitSuccessStart);
+    const submitMutateBlock = routeAndComposerSource.slice(submitMutateStart, submitSuccessStart);
+    const submitSuccessBlock = routeAndComposerSource.slice(submitSuccessStart, submitErrorStart);
+    const submitErrorBlock = routeAndComposerSource.slice(submitErrorStart, routeAndComposerSource.indexOf("const editResubmitMutation", submitErrorStart));
 
     expect(submitMutateBlock).toContain("setActiveTurnLayersBySession((current) =>");
     expect(submitMutateBlock).toContain("createOptimisticActiveTurnLayer({");
@@ -948,13 +952,13 @@ describe("ChatCodingRoute layout contract", () => {
     expect(submitSuccessBlock).toContain("turnId: acceptedTurn.turnId");
     expect(submitErrorBlock).toContain("setActiveTurnLayerForSession(current, variables.sessionId, undefined)");
 
-    const editMutationStart = routeSource.indexOf("const editResubmitMutation = useMutation");
-    const editMutateStart = routeSource.indexOf("onMutate: async (variables)", editMutationStart);
-    const editSuccessStart = routeSource.indexOf("onSuccess: (nextDetail, variables)", editMutateStart);
-    const editErrorStart = routeSource.indexOf("onError: (error, variables)", editSuccessStart);
-    const editMutateBlock = routeSource.slice(editMutateStart, editSuccessStart);
-    const editSuccessBlock = routeSource.slice(editSuccessStart, editErrorStart);
-    const editErrorBlock = routeSource.slice(editErrorStart, routeSource.indexOf("const stopTurnMutation", editErrorStart));
+    const editMutationStart = routeAndComposerSource.indexOf("const editResubmitMutation = useMutation");
+    const editMutateStart = routeAndComposerSource.indexOf("onMutate: async (variables)", editMutationStart);
+    const editSuccessStart = routeAndComposerSource.indexOf("onSuccess: (nextDetail, variables)", editMutateStart);
+    const editErrorStart = routeAndComposerSource.indexOf("onError: (error, variables)", editSuccessStart);
+    const editMutateBlock = routeAndComposerSource.slice(editMutateStart, editSuccessStart);
+    const editSuccessBlock = routeAndComposerSource.slice(editSuccessStart, editErrorStart);
+    const editErrorBlock = routeAndComposerSource.slice(editErrorStart, routeAndComposerSource.indexOf("const stopTurnMutation", editErrorStart));
 
     expect(editMutateBlock).toContain("setActiveTurnLayersBySession((current) =>");
     expect(editMutateBlock).toContain("createOptimisticActiveTurnLayer({");
@@ -1535,30 +1539,33 @@ describe("ChatCodingRoute layout contract", () => {
   });
 
   it("records direct chat submit lifecycle telemetry before backend acceptance", () => {
-    expect(routeSource).toContain("postSubmitTelemetry");
-    expect(routeSource).toContain("browser.chat_submit.requested");
-    expect(routeSource).toContain("browser.chat_submit.blocked");
-    expect(routeSource).toContain("browser.chat_submit.upload_started");
-    expect(routeSource).toContain("browser.chat_submit.upload_failed");
-    expect(routeSource).toContain("browser.chat_submit.mutate_called");
-    expect(routeSource).toContain("browser.chat_submit.request_started");
-    expect(routeSource).toContain("browser.chat_submit.accepted");
-    expect(routeSource).toContain("browser.chat_submit.request_failed");
-    expect(routeSource).toContain("contentLength");
-    expect(routeSource).toContain("guardReason");
+    expect(routeAndComposerSource).toContain("postSubmitTelemetry");
+    expect(routeAndComposerSource).toContain("browser.chat_submit.requested");
+    expect(routeAndComposerSource).toContain("browser.chat_submit.blocked");
+    expect(routeAndComposerSource).toContain("browser.chat_submit.upload_started");
+    expect(routeAndComposerSource).toContain("browser.chat_submit.upload_failed");
+    expect(routeAndComposerSource).toContain("browser.chat_submit.mutate_called");
+    expect(routeAndComposerSource).toContain("browser.chat_submit.request_started");
+    expect(routeAndComposerSource).toContain("browser.chat_submit.accepted");
+    expect(routeAndComposerSource).toContain("browser.chat_submit.request_failed");
+    expect(routeAndComposerSource).toContain("contentLength");
+    expect(routeAndComposerSource).toContain("guardReason");
     expect(chatSubmitTelemetrySource).toContain("fields.clientSubmissionId = options.clientSubmissionId");
     expect(chatSubmitTelemetrySource).toContain("fields.turnId = options.turnId");
     expect(chatSubmitTelemetrySource).toContain("fields.acceptedAt = options.acceptedAt");
-    expect(routeSource).toContain("requestStartedAtMs: chatStreamPerformanceNowMs()");
-    expect(routeSource).toContain("durationMs: Math.max(0, chatStreamPerformanceNowMs() - variables.requestStartedAtMs)");
-    expect(routeSource).not.toContain("fields: { content,");
+    expect(routeAndComposerSource).toContain("requestStartedAtMs: chatStreamPerformanceNowMs()");
+    expect(routeAndComposerSource).toContain("durationMs: Math.max(0, chatStreamPerformanceNowMs() - variables.requestStartedAtMs)");
+    expect(routeAndComposerSource).not.toContain("fields: { content,");
   });
 
   it("clears the direct chat composer immediately after submit and restores only failed text", () => {
-    const submitWithAttachmentsStart = routeSource.indexOf("async function submitTurnWithAttachments");
-    const optimisticAppend = routeSource.indexOf("appendOptimisticUserMessage(detail, { sessionId, content, references, clientSubmissionId })", submitWithAttachmentsStart);
-    const immediateDraftClear = routeSource.indexOf("clearSessionDraftForSubmittedTurn(current, sessionId)", submitWithAttachmentsStart);
-    const uploadFailureDraftRestore = routeSource.indexOf(
+    const submitWithAttachmentsStart = routeAndComposerSource.indexOf("const submitTurnWithAttachments = useCallback(async (");
+    const optimisticAppend = routeAndComposerSource.indexOf(
+      "appendOptimisticUserMessage(detailState, { sessionId, content, references, clientSubmissionId })",
+      submitWithAttachmentsStart,
+    );
+    const immediateDraftClear = routeAndComposerSource.indexOf("clearSessionDraftForSubmittedTurn(current, sessionId)", submitWithAttachmentsStart);
+    const uploadFailureDraftRestore = routeAndComposerSource.indexOf(
       "restoreSubmittedDraftIfComposerStillEmpty(current, sessionId, content)",
       submitWithAttachmentsStart,
     );
@@ -1566,14 +1573,14 @@ describe("ChatCodingRoute layout contract", () => {
     expect(immediateDraftClear).toBeGreaterThan(submitWithAttachmentsStart);
     expect(immediateDraftClear).toBeLessThan(optimisticAppend);
     expect(uploadFailureDraftRestore).toBeGreaterThan(optimisticAppend);
-    expect(routeSource).toContain("const clientSubmissionId = createClientSubmissionId(activeSessionId)");
-    expect(routeSource).toContain("clientSubmissionId,");
+    expect(routeAndComposerSource).toContain("const clientSubmissionId = createClientSubmissionId(activeSessionId)");
+    expect(routeAndComposerSource).toContain("clientSubmissionId,");
 
-    const submitMutationStart = routeSource.indexOf("const submitTurnMutation = useMutation");
-    const submitSuccessStart = routeSource.indexOf("onSuccess: (acceptedTurn, variables)", submitMutationStart);
-    const submitErrorStart = routeSource.indexOf("onError: (error, variables)", submitSuccessStart);
-    const submitSuccessBlock = routeSource.slice(submitSuccessStart, submitErrorStart);
-    const submitErrorBlock = routeSource.slice(submitErrorStart, routeSource.indexOf("const editResubmitMutation", submitErrorStart));
+    const submitMutationStart = routeAndComposerSource.indexOf("const submitTurnMutation = useMutation");
+    const submitSuccessStart = routeAndComposerSource.indexOf("onSuccess: (acceptedTurn, variables)", submitMutationStart);
+    const submitErrorStart = routeAndComposerSource.indexOf("onError: (error, variables)", submitSuccessStart);
+    const submitSuccessBlock = routeAndComposerSource.slice(submitSuccessStart, submitErrorStart);
+    const submitErrorBlock = routeAndComposerSource.slice(submitErrorStart, routeAndComposerSource.indexOf("const editResubmitMutation", submitErrorStart));
     expect(submitSuccessBlock).not.toContain("setSessionDrafts");
     expect(submitErrorBlock).toContain("restoreSubmittedDraftIfComposerStillEmpty(current, variables.sessionId, variables.content)");
   });
@@ -1582,7 +1589,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("readStoredMentalModelToggle() ?? false");
     expect(routeSource).not.toContain("const defaultEnabled = String(runtime.mentalState?.source");
     expect(routeSource).toContain("showMentalSnapshots: mentalModelEnabledForNextTurn");
-    expect(routeSource).toContain("mentalModelEnabled: mentalModelEnabledForNextTurn");
+    expect(routeAndComposerSource).toContain("mentalModelEnabled: mentalModelEnabledForNextTurn");
     expect(routeAndIndexRailSource).toContain("const memberMental = mentalModelEnabledForNextTurn ? latestMentalSnapshot(memberDetail?.messages) : undefined");
   });
 
@@ -1989,10 +1996,10 @@ describe("ChatCodingRoute layout contract", () => {
   });
 
   it("does not refetch chat indexes or detail immediately after an accepted direct turn", () => {
-    const submitMutationStart = routeSource.indexOf("const submitTurnMutation = useMutation");
-    const submitSuccessStart = routeSource.indexOf("onSuccess: (acceptedTurn, variables)", submitMutationStart);
-    const submitErrorStart = routeSource.indexOf("onError: (error, variables)", submitSuccessStart);
-    const submitSuccessBlock = routeSource.slice(submitSuccessStart, submitErrorStart);
+    const submitMutationStart = routeAndComposerSource.indexOf("const submitTurnMutation = useMutation");
+    const submitSuccessStart = routeAndComposerSource.indexOf("onSuccess: (acceptedTurn, variables)", submitMutationStart);
+    const submitErrorStart = routeAndComposerSource.indexOf("onError: (error, variables)", submitSuccessStart);
+    const submitSuccessBlock = routeAndComposerSource.slice(submitSuccessStart, submitErrorStart);
 
     expect(submitSuccessBlock).toContain("markOptimisticUserMessageAccepted");
     expect(submitSuccessBlock).not.toContain("invalidateQueries");

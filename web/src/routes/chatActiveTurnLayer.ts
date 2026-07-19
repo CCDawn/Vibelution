@@ -106,6 +106,47 @@ export function createOptimisticActiveTurnLayer(
   };
 }
 
+export function setActiveTurnLayerForSession(
+  current: Record<string, ActiveTurnLayerState>,
+  sessionId: string,
+  layer: ActiveTurnLayerState | undefined,
+) {
+  const normalizedSessionId = String(sessionId || "").trim();
+  if (!normalizedSessionId) {
+    return current;
+  }
+  if (!layer) {
+    if (!current[normalizedSessionId]) {
+      return current;
+    }
+    const next = { ...current };
+    delete next[normalizedSessionId];
+    return next;
+  }
+  if (current[normalizedSessionId] === layer) {
+    return current;
+  }
+  return {
+    ...current,
+    [normalizedSessionId]: layer,
+  };
+}
+
+export function latestUserTurnId(detail: SessionDetail | undefined) {
+  const messages = detail?.messages ?? [];
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message?.role !== "user") {
+      continue;
+    }
+    const turnId = String(message.metadata?.turnId ?? message.metadata?.turn_id ?? "").trim();
+    if (turnId) {
+      return turnId.startsWith("live:") ? turnId.slice("live:".length) : turnId;
+    }
+  }
+  return "";
+}
+
 function hasVisibleFeedbackEvent(event: ConversationFeedbackEvent) {
   if (!shouldDisplayRuntimeStatus({
     kind: event.kind,
