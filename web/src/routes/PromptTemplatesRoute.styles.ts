@@ -1,5 +1,5 @@
 const routeClass = "grid h-full min-h-0 min-w-0 grid-rows-[auto_auto_minmax(0,1fr)] overflow-hidden";
-const headerClass = "mx-2.5 mt-2 min-h-9 min-w-0 border-[var(--vui-border-subtle)] !bg-transparent !shadow-none !backdrop-blur-none";
+const headerClass = "mx-2 mt-1.5 min-h-9 min-w-0 border-[var(--vui-border-subtle)] !bg-transparent !shadow-none !backdrop-blur-none";
 const headerActionsClass = "inline-flex min-w-0 items-center justify-end gap-1.5";
 const controlButtonClass =
   "inline-flex min-h-[26px] w-fit max-w-full items-center justify-center gap-1.5 whitespace-nowrap rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--vui-border-soft)_76%,transparent)] bg-[color-mix(in_srgb,var(--vui-control-muted)_72%,transparent)] px-2 py-[3px] text-[var(--vui-font-xs)] text-vui-fg-secondary hover:border-[color-mix(in_srgb,var(--border-strong)_78%,transparent)] hover:bg-[var(--vui-control-muted-hover)] hover:text-vui-fg-primary disabled:opacity-55";
@@ -16,7 +16,7 @@ const managementNavClass = "m-0";
 const summaryStripClass = "min-w-0 overflow-hidden rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--border-soft)_70%,transparent)] bg-vui-surface-toolbar p-1 [&_[data-vui=status-strip-item]]:min-w-0 [&_[data-vui=status-strip-item]]:grid-cols-[auto_minmax(0,1fr)] [&_[data-vui=status-strip-item]]:rounded-[var(--radius-control)] [&_[data-vui=status-strip-item]]:bg-transparent [&_[data-vui=status-strip-item]]:font-normal [&_[data-vui=status-strip-item]]:shadow-none [&_[data-vui=status-strip-item]_span:last-child]:min-w-0 [&_[data-vui=status-strip-item]_span:last-child]:truncate";
 const summaryLabelClass = "text-[var(--vui-font-xs)] text-vui-fg-tertiary";
 const summaryValueClass = "min-w-0 truncate text-[var(--vui-font-xs)] text-vui-fg-primary";
-const workspaceClass = "grid h-full min-h-0 min-w-0 grid-cols-[minmax(300px,392px)_minmax(500px,1fr)] gap-1.5 overflow-hidden px-2.5 pb-2 pt-1.5 max-[980px]:grid-cols-1 max-[980px]:content-start max-[980px]:overflow-auto";
+const workspaceClass = "grid h-full min-h-0 min-w-0 grid-cols-[clamp(260px,26vw,380px)_minmax(0,1fr)] gap-1.5 overflow-hidden px-2 pb-2 pt-1.5 max-[980px]:grid-cols-1 max-[980px]:content-start max-[980px]:overflow-auto";
 const panelBaseClass = "grid min-h-0 min-w-0 content-start gap-2 overflow-hidden";
 const listPanelClass = `${panelBaseClass} grid-rows-[auto_auto_auto_auto_minmax(0,1fr)] max-[980px]:max-h-[44vh]`;
 const editorPanelClass = `${panelBaseClass} grid-rows-[auto_auto_auto_minmax(260px,1fr)_minmax(112px,auto)_auto] content-stretch max-[980px]:grid-rows-[auto_auto_auto_minmax(180px,0.8fr)_auto_auto] max-[980px]:overflow-auto`;
@@ -64,7 +64,7 @@ const fieldInputClass = `min-h-8 w-full min-w-0 ${fieldSurfaceClass} px-2 text-v
 const nameFieldClass = "self-start";
 const contentFieldClass = "grid min-h-0 content-stretch grid-rows-[auto_minmax(0,1fr)] overflow-hidden";
 const contentTextareaClass = `h-full min-h-0 w-full min-w-0 resize-none self-stretch ${fieldSurfaceClass} p-2.5 font-[var(--font-mono)] text-[var(--vui-font-xs)] leading-[1.5] text-vui-fg-primary`;
-const bottomGridClass = "grid min-h-0 grid-cols-[minmax(0,1fr)_minmax(260px,0.58fr)] gap-2 max-[980px]:grid-cols-1";
+const bottomGridClass = "grid min-h-0 grid-cols-[minmax(0,1fr)_clamp(240px,22vw,340px)] gap-2 max-[980px]:grid-cols-1";
 const detailCardClass = "grid min-h-0 min-w-0 content-start gap-1.5 rounded-[var(--radius-panel)] border border-[color-mix(in_srgb,var(--border-soft)_64%,transparent)] bg-transparent p-2 grid-rows-[auto_minmax(0,1fr)_auto]";
 const agentListClass = "grid min-h-0 min-w-0 content-start gap-1.5 rounded-[var(--radius-panel)] border border-[color-mix(in_srgb,var(--border-soft)_64%,transparent)] bg-transparent p-2";
 const contentHeaderClass = "flex min-w-0 items-center justify-between gap-3";
