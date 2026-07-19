@@ -534,7 +534,6 @@ export function ConversationView({
   onSafeGuidance,
   onInterruptGuidance,
 }: ConversationViewProps) {
-  void composerGuidance;
   void interruptGuidanceLabel;
   void interruptGuidancePendingLabel;
   void onInterruptGuidance;
@@ -3572,6 +3571,12 @@ export function ConversationView({
           onDrop={handleComposerDrop}
         >
           {composerError ? <p className={styles.composerError}>{composerError}</p> : null}
+          {composerGuidance ? (
+            <div className={styles.composerGuidance} role="status" aria-live="polite" data-composer-guidance>
+              <span className={styles.composerGuidanceIcon} aria-hidden="true">i</span>
+              <span>{composerGuidance}</span>
+            </div>
+          ) : null}
           {composerModeNotice ? (
             <div
               className={styles.composerEditModeBar}
