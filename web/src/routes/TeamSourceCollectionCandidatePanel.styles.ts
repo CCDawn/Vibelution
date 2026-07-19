@@ -1,6 +1,6 @@
 const styles = {
   empty:
-    "empty min-w-0 text-[var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
+    "empty min-w-0 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
   sourceCollectionCandidateListShell:
     "sourceCollectionCandidateListShell min-w-0 grid max-h-[44vh] min-h-[220px] content-start gap-1.5 overflow-auto rounded-[var(--radius-control)] border border-[color:var(--border-soft)] bg-[color:var(--source-workbench-card)] p-1.5 text-[var(--fg-primary)] items-start self-start [scrollbar-gutter:stable] max-[860px]:max-h-none",
   sourceCollectionCandidateSkeletonList:
@@ -12,7 +12,7 @@ const styles = {
   sourceCollectionCandidateSkeletonMeta:
     "sourceCollectionCandidateSkeletonMeta mt-3 block h-2.5 w-1/3 rounded-[var(--radius-control)] bg-[color:var(--border-soft)]",
   sourceCollectionScreeningScrollHint:
-    "sourceCollectionScreeningScrollHint min-w-0 text-[var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
+    "sourceCollectionScreeningScrollHint min-w-0 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
   workflowCandidateList:
     "workflowCandidateList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
   workflowSourceQualityStats:

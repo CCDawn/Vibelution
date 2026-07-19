@@ -5,7 +5,7 @@ const navClass = [
 ].join(" ");
 const linkClass = [
   "inline-flex min-h-6 min-w-[84px] items-center justify-center whitespace-nowrap rounded-[var(--radius-control)] px-[9px]",
-  "text-[var(--vui-font-xs)] font-bold text-vui-fg-secondary no-underline transition-[background,color,box-shadow] duration-150",
+  "[font-size:var(--vui-font-xs)] font-bold text-vui-fg-secondary no-underline transition-[background,color,box-shadow] duration-150",
   "hover:bg-[color-mix(in_srgb,var(--vui-surface-row-hover)_84%,transparent)] hover:text-vui-fg-primary max-[720px]:min-w-max",
 ].join(" ");
 const linkActiveClass = [

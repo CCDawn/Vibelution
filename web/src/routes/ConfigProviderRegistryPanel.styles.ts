@@ -24,8 +24,8 @@ const styles = {
   detailGrid:
     "vui-routes-configproviderregistrypanel detailGrid grid min-w-0 [grid-template-columns:repeat(2,minmax(0,1fr))] gap-2 max-[640px]:[grid-template-columns:minmax(0,1fr)]",
   fact: "vui-routes-configproviderregistrypanel fact grid min-w-0 gap-0.5 rounded-md border border-vui-border-subtle bg-vui-surface-row px-2 py-1.5",
-  factLabel: "vui-routes-configproviderregistrypanel factLabel text-[var(--vui-font-xs)] font-semibold text-vui-fg-tertiary",
-  factValue: "vui-routes-configproviderregistrypanel factValue min-w-0 truncate text-[var(--vui-font-sm)] font-semibold text-vui-fg-primary",
+  factLabel: "vui-routes-configproviderregistrypanel factLabel [font-size:var(--vui-font-xs)] font-semibold text-vui-fg-tertiary",
+  factValue: "vui-routes-configproviderregistrypanel factValue min-w-0 truncate [font-size:var(--vui-font-sm)] font-semibold text-vui-fg-primary",
   deployment:
     "vui-routes-configproviderregistrypanel deployment grid min-w-0 gap-2 rounded-md border border-vui-border-subtle bg-vui-surface-glass p-2",
   modelsWorkspace: "vui-routes-configproviderregistrypanel modelsWorkspace grid h-full min-h-0 min-w-0 [grid-template-rows:auto_minmax(0,1fr)] gap-2 overflow-hidden",
@@ -39,26 +39,26 @@ const styles = {
     "vui-routes-configproviderregistrypanel table min-w-[820px] !overflow-visible [&_thead]:sticky [&_thead]:top-0 [&_thead]:z-10",
   modelIdentity: "vui-routes-configproviderregistrypanel modelIdentity grid min-w-0 gap-0.5",
   modelActionState:
-    "vui-routes-configproviderregistrypanel modelActionState inline-flex min-h-6 items-center rounded-full border border-vui-border-subtle bg-vui-surface-row/70 px-2 text-[var(--vui-font-xs)] font-semibold text-vui-fg-tertiary",
+    "vui-routes-configproviderregistrypanel modelActionState inline-flex min-h-6 items-center rounded-full border border-vui-border-subtle bg-vui-surface-row/70 px-2 [font-size:var(--vui-font-xs)] font-semibold text-vui-fg-tertiary",
   capabilityList: "vui-routes-configproviderregistrypanel capabilityList flex min-w-0 flex-wrap gap-1",
-  capabilityUnknown: "vui-routes-configproviderregistrypanel capabilityUnknown text-[var(--vui-font-xs)] text-vui-fg-tertiary",
+  capabilityUnknown: "vui-routes-configproviderregistrypanel capabilityUnknown [font-size:var(--vui-font-xs)] text-vui-fg-tertiary",
   actions: "vui-routes-configproviderregistrypanel actions flex min-w-0 flex-wrap items-center gap-1.5",
   actionFeedback:
-    "vui-routes-configproviderregistrypanel actionFeedback min-w-0 rounded-md border border-vui-border-subtle bg-vui-surface-row/70 px-2 py-1.5 text-[var(--vui-font-sm)] text-vui-fg-secondary [overflow-wrap:anywhere]",
+    "vui-routes-configproviderregistrypanel actionFeedback min-w-0 rounded-md border border-vui-border-subtle bg-vui-surface-row/70 px-2 py-1.5 [font-size:var(--vui-font-sm)] text-vui-fg-secondary [overflow-wrap:anywhere]",
   actionFeedbackError:
-    "vui-routes-configproviderregistrypanel actionFeedbackError min-w-0 rounded-md border border-[color-mix(in_srgb,var(--state-error)_38%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--state-error)_8%,var(--vui-surface-row))] px-2 py-1.5 text-[var(--vui-font-sm)] text-[var(--state-error)] [overflow-wrap:anywhere]",
+    "vui-routes-configproviderregistrypanel actionFeedbackError min-w-0 rounded-md border border-[color-mix(in_srgb,var(--state-error)_38%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--state-error)_8%,var(--vui-surface-row))] px-2 py-1.5 [font-size:var(--vui-font-sm)] text-[var(--state-error)] [overflow-wrap:anywhere]",
   mergeSection:
     "vui-routes-configproviderregistrypanel mergeSection min-w-0 rounded-lg border border-vui-border-subtle bg-vui-surface-row/40 p-2",
   mergeContent: "vui-routes-configproviderregistrypanel mergeContent grid min-w-0 gap-2",
   mergeFacts:
-    "vui-routes-configproviderregistrypanel mergeFacts flex min-w-0 flex-wrap items-center gap-2 text-[var(--vui-font-xs)] text-vui-fg-secondary",
+    "vui-routes-configproviderregistrypanel mergeFacts flex min-w-0 flex-wrap items-center gap-2 [font-size:var(--vui-font-xs)] text-vui-fg-secondary",
   mergeConfirmation:
-    "vui-routes-configproviderregistrypanel mergeConfirmation flex min-w-0 items-start gap-2 rounded-md border border-vui-border-subtle bg-vui-surface-panel px-2 py-1.5 text-[var(--vui-font-sm)] text-vui-fg-secondary [&_input]:mt-0.5",
+    "vui-routes-configproviderregistrypanel mergeConfirmation flex min-w-0 items-start gap-2 rounded-md border border-vui-border-subtle bg-vui-surface-panel px-2 py-1.5 [font-size:var(--vui-font-sm)] text-vui-fg-secondary [&_input]:mt-0.5",
   dangerZone:
     "vui-routes-configproviderregistrypanel dangerZone flex min-w-0 items-center justify-between gap-3 border-t border-[color-mix(in_srgb,var(--state-error)_22%,var(--vui-border-subtle))] pt-2",
   critical:
-    "vui-routes-configproviderregistrypanel critical rounded-md border border-[color-mix(in_srgb,var(--state-error)_38%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--state-error)_8%,var(--vui-surface-row))] px-2 py-1.5 text-[var(--vui-font-sm)] text-[var(--state-error)]",
-  muted: "vui-routes-configproviderregistrypanel muted text-[var(--vui-font-xs)] text-vui-fg-tertiary",
+    "vui-routes-configproviderregistrypanel critical rounded-md border border-[color-mix(in_srgb,var(--state-error)_38%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--state-error)_8%,var(--vui-surface-row))] px-2 py-1.5 [font-size:var(--vui-font-sm)] text-[var(--state-error)]",
+  muted: "vui-routes-configproviderregistrypanel muted [font-size:var(--vui-font-xs)] text-vui-fg-tertiary",
 };
 
 export default styles;

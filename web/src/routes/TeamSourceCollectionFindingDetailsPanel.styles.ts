@@ -1,6 +1,6 @@
 const styles = {
   empty:
-    "empty min-w-0 text-[var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
+    "empty min-w-0 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
   workflowSourceCollectionAssignmentActive:
     "workflowSourceCollectionAssignmentActive min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))] text-[var(--accent-cool)]",
   workflowSourceCollectionAssignments:
