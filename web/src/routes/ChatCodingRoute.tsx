@@ -3,7 +3,6 @@ import {
   Apple,
   ArrowLeft,
   ArrowUpRight,
-  BellRing,
   Check,
   ChevronRight,
   HeartHandshake,
@@ -12,14 +11,11 @@ import {
   RotateCcw,
   Search,
   Sparkles,
-  Square,
   Trash2,
-  UsersRound,
 } from "lucide-react";
 import {
   useCallback,
   useEffect,
-  Suspense,
   lazy,
   useMemo,
   useRef,
@@ -29,18 +25,15 @@ import {
 import { Link, useLocation, useNavigate } from "react-router-dom";
 
 import { fetchJson } from "../api/client";
-import { kernelTaskCenterHref } from "../api/kernel";
 import { createChatWorkspaceCache } from "./chatWorkspaceCache";
 import { AgentCreateWizardDialog } from "./agent-create/AgentCreateWizardDialog";
 import {
-  isProjectAgentBusEventRevoked,
   listProjectAgentBusTimeline,
 } from "../api/projectAgentBus";
 import { queryKeys } from "../api/queryKeys";
 import {
   AgentInstance,
   ChatRoomDetail,
-  ChatRoomMessage,
   ChatRoomParticipant,
   ChatRoomMode,
   ChatRoomPurpose,
@@ -199,7 +192,8 @@ import { useChatSessionSelection } from "./chat/useChatSessionSelection";
 import { useChatWorkspaceLifecycle } from "./chat/useChatWorkspaceLifecycle";
 import { useChatSessionDetailMutations } from "./chat/useChatSessionDetailMutations";
 import { useChatWorkspaceActions } from "./chat/useChatWorkspaceActions";
-import { ChatGroupMessageBody, ChatMentionedText } from "./chat/ChatGroupMessagePresentation";
+import { ChatGroupCenterSurface } from "./chat/ChatGroupCenterSurface";
+import { ChatCliAgentTerminalStack } from "./chat/ChatCliAgentTerminalStack";
 import {
   useChatSessionRenameMenu,
   type SessionContextMenuState,
@@ -2745,513 +2739,67 @@ export function ChatCodingRoute() {
         </div>
 
         <div className={styles.centerSurface}>
-          {mountedCliAgentRuns.map((run) => (
-            <Suspense
-              key={run.id}
-              fallback={(
-                <section
-                  className={
-                    !groupPanelActive && activeCliAgentRunId === run.id
-                      ? styles.cliAgentRunPanel
-                      : `${styles.cliAgentRunPanel} ${styles.cliAgentRunPanelHidden}`
-                  }
-                  aria-hidden={!(!groupPanelActive && activeCliAgentRunId === run.id)}
-                  aria-label={`${run.title} ${lang === "zh" ? "终端加载中" : "terminal loading"}`}
-                  data-active={!groupPanelActive && activeCliAgentRunId === run.id ? "true" : "false"}
-                  data-cli-agent-run-id={run.id}
-                >
-                  <div className={styles.cliAgentTerminalFrame}>
-                    <div className={styles.cliAgentTerminalCommand} title={run.commandLine}>
-                      <span className={styles.cliAgentTerminalStatus}>
-                        {lang === "zh" ? "加载终端" : "Loading terminal"}
-                      </span>
-                      <code>{run.commandLine}</code>
-                    </div>
-                  </div>
-                </section>
-              )}
-            >
-              <CliAgentRunTerminalPanel
-                run={run}
-                sourceSessionId={activeSessionId || ""}
-                active={!groupPanelActive && activeCliAgentRunId === run.id}
-                lang={lang}
-                onTerminalSessionChange={handleCliAgentTerminalSessionChange}
-              />
-            </Suspense>
-          ))}
-          {projectBusActive ? (
-            <div className={styles.groupConversationFrame}>
-              <header className={styles.groupConversationHeader}>
-                <div>
-                  <p>
-                    {activeGroupRoom?.mode ?? "round_robin"}
-                    {" · "}
-                    {activeGroupRoom?.purpose ?? "discussion"}
-                  </p>
-                  <div className={styles.groupConversationTitleRow}>
-                    <h2>{lang === "zh" ? "助手通知流" : "Agent notice stream"}</h2>
-                    <VContextualHint
-                      content={lang === "zh"
-                        ? "助手通知流会显示用户引导、助手私信和广播投递结果；它不是团队群聊。"
-                        : "The Agent notice stream shows guidance, private messages, broadcasts, and delivery results. It is not a team room."}
-                      label={lang === "zh" ? "助手通知流说明" : "Agent notice stream details"}
-                      width="wide"
-                    />
-                  </div>
-                  <span>
-                    {projectBusTimeline?.activeAgentCount ?? availableGroupParticipantCount} {lang === "zh" ? "位 active Agent" : "active agents"}
-                    {" · "}
-                    {lang === "zh" ? "全局广播与投递观察" : "broadcasts and delivery observation"}
-                  </span>
-                </div>
-                <VButton
-                  type="button"
-                  className={styles.groupRefreshButton}
-                  onClick={() => void projectAgentBusQuery.refetch()}
-                  isDisabled={projectAgentBusQuery.isFetching}
-                >
-                  {lang === "zh" ? "刷新" : "Refresh"}
-                </VButton>
-              </header>
-              {projectAgentBusQuery.isError ? (
-                <div className={styles.inlineNotice}>
-                  {describeError(projectAgentBusQuery.error, t("loadFailed"))}
-                </div>
-              ) : null}
-              {groupRoomActionError ? (
-                <div className={styles.inlineNotice}>{groupRoomActionError}</div>
-              ) : null}
-              <div className={styles.groupMessageTimeline} aria-live={sendProjectBusMessageMutation.isPending ? "polite" : undefined}>
-                {projectBusEvents.length ? (
-                  projectBusEvents.map((event) => {
-                    const revoked = isProjectAgentBusEventRevoked(event);
-                    const targetLabel = event.targetScope === "all"
-                      ? (lang === "zh" ? "全体成员" : "All agents")
-                      : event.targetAgentNames.length
-                        ? event.targetAgentNames.join(", ")
-                        : (lang === "zh" ? "仅观察" : "Observe only");
-                    const deliveryLabel = event.deliveries.length
-                      ? `${event.deliveries.length} ${lang === "zh" ? "次投递" : "deliveries"}`
-                      : (lang === "zh" ? "未投递" : "no delivery");
-                    const interruptionLabel = event.interruptions.length
-                      ? `${event.interruptions.filter((item) => item.status === "interrupted").length}/${event.interruptions.length} ${lang === "zh" ? "已打断" : "interrupted"}`
-                      : "";
-                    return (
-                      <article key={event.eventId} className={revoked ? `${styles.projectBusEvent} ${styles.projectBusEventRevoked}` : styles.projectBusEvent}>
-                        <header className={styles.projectBusEventHeader}>
-                          <div>
-                            <strong>{event.createdBy === "user" ? runtime?.userName || (lang === "zh" ? "我" : "Me") : event.createdBy}</strong>
-                            <span>{targetLabel}</span>
-                          </div>
-                          <div className={styles.projectBusEventActions}>
-                            <time>{formatTime(event.createdAt)}</time>
-                            {event.createdBy === "user" && !revoked ? (
-                              <VButton
-                                type="button"
-                                onClick={() => handleRevokeProjectBusMessage(event.eventId)}
-                                isDisabled={revokeProjectBusMessageMutation.isPending}
-                              >
-                                {lang === "zh" ? "撤回" : "Recall"}
-                              </VButton>
-                            ) : null}
-                          </div>
-                        </header>
-                        <p className={styles.projectBusEventBody}>
-                          {revoked
-                            ? (lang === "zh" ? "这条消息已撤回，相关 Agent 已请求停止。" : "This message was recalled. Target agents were asked to stop.")
-                            : (
-                              <ChatMentionedText
-                                content={event.content}
-                                lang={lang}
-                                mentionTargets={chatMentionTargets}
-                                onOpenMentionTarget={handleOpenMentionTarget}
-                              />
-                            )}
-                        </p>
-                        <div className={styles.projectBusEventMeta}>
-                          <span>{revoked ? (lang === "zh" ? "已撤回" : "revoked") : event.messageType}</span>
-                          <span>{deliveryLabel}</span>
-                          {interruptionLabel ? <span>{interruptionLabel}</span> : null}
-                          {event.kernel?.taskId ? (
-                            <Link className={styles.kernelTraceLink} to={kernelTaskCenterHref(event.kernel.taskId)}>
-                              {lang === "zh" ? "Kernel 任务" : "Kernel Task"}
-                            </Link>
-                          ) : null}
-                          {event.unresolvedMentions.length ? (
-                            <span>{lang === "zh" ? "未识别" : "unresolved"} @{event.unresolvedMentions.join(", @")}</span>
-                          ) : null}
-                        </div>
-                      </article>
-                    );
-                  })
-                ) : (activeGroupRoom?.rounds ?? []).length ? (
-                  (activeGroupRoom?.rounds ?? []).map((round, roundIndex) => {
-                    const roundRunning = String(round.status ?? "").trim().toLowerCase() === "running";
-                    const deliveredParticipantIds = new Set(
-                      (round.messages ?? []).map((message) => String(message.participantId ?? "").trim()),
-                    );
-                    const nextSpeakerId = (round.speakerOrder ?? []).find(
-                      (participantId) => !deliveredParticipantIds.has(String(participantId ?? "").trim()),
-                    );
-                    const nextParticipant = nextSpeakerId ? activeGroupParticipantById.get(nextSpeakerId) : undefined;
-                    return (
-                    <section key={round.roundId} className={styles.groupRoundBlock}>
-                      <div className={styles.groupRoundDivider}>
-                        <span>
-                          {lang === "zh" ? `第 ${roundIndex + 1} 轮` : `Round ${roundIndex + 1}`}
-                          {" · "}
-                          {round.mode}
-                          {" · "}
-                          {round.purpose ?? activeGroupRoom?.purpose ?? "discussion"}
-                          {" · "}
-                          {statusLabel(round.status)}
-                        </span>
-                        <time>{formatTime(round.updatedAt || round.startedAt)}</time>
-                      </div>
-                      <article className={styles.groupTopicMessage}>
-                        <div className={styles.groupTopicBubble}>
-                          <span>{runtime?.userName || (lang === "zh" ? "我" : "Me")}</span>
-                          <p>{(
-                            <ChatMentionedText
-                              content={round.topic}
-                              lang={lang}
-                              mentionTargets={chatMentionTargets}
-                              onOpenMentionTarget={handleOpenMentionTarget}
-                            />
-                          )}</p>
-                        </div>
-                      </article>
-                      <div className={styles.groupMessageList}>
-                        {(round.messages ?? []).map((message: ChatRoomMessage) => {
-                          const speakerParticipant = activeGroupParticipantById.get(String(message.participantId ?? "").trim());
-                          const speakerIdentity = groupParticipantIdentity(speakerParticipant, {
-                            agentId: message.agentId,
-                            agentCode: message.speakerCode,
-                            title: message.speakerTitle,
-                            participantId: message.participantId,
-                          });
-                          return (
-                          <article
-                            key={message.messageId}
-                            className={
-                              message.status === "failed"
-                                ? `${styles.groupBubbleRow} ${styles.groupBubbleRowFailed}`
-                                : styles.groupBubbleRow
-                            }
-                          >
-                            {renderAgentAvatar(
-                              styles.groupBubbleAvatar,
-                              speakerIdentity.avatarImageUrl,
-                              avatarInitials(message.speakerCode, speakerIdentity.name, "AI"),
-                            )}
-                            <div className={styles.groupBubble}>
-                              <header className={styles.groupBubbleHeader}>
-                                <strong title={speakerIdentity.fullIdentityLabel}>{speakerIdentity.identityLabel}</strong>
-                                {message.status !== "completed" ? <span>{statusLabel(message.status)}</span> : null}
-                              </header>
-                              {/* group message body */}
-                              <ChatGroupMessageBody
-                                message={message}
-                                identityName={speakerIdentity.name}
-                                lang={lang}
-                                expandedMessageIds={expandedGroupMessageIds}
-                                mentionTargets={chatMentionTargets}
-                                onOpenMentionTarget={handleOpenMentionTarget}
-                                onToggleExpanded={(messageId) =>
-                                  setExpandedGroupMessageIds((current) =>
-                                    current.includes(messageId)
-                                      ? current.filter((id) => id !== messageId)
-                                      : [...current, messageId],
-                                  )
-                                }
-                              />
-                              <time className={styles.groupBubbleMeta}>{formatTime(message.timestamp || round.updatedAt)}</time>
-                            </div>
-                          </article>
-                          );
-                        })}
-                        {roundRunning && nextParticipant ? (
-                          <article className={`${styles.groupBubbleRow} ${styles.groupBubbleRowPending}`}>
-                            {(() => {
-                              const nextIdentity = groupParticipantIdentity(nextParticipant);
-                              return (
-                              <>
-                            {renderAgentAvatar(
-                              styles.groupBubbleAvatar,
-                              nextIdentity.avatarImageUrl,
-                              avatarInitials(nextParticipant.agentCode, nextIdentity.name, "AI"),
-                            )}
-                            <div className={styles.groupBubble}>
-                              <header className={styles.groupBubbleHeader}>
-                                <strong title={nextIdentity.fullIdentityLabel}>{nextIdentity.identityLabel}</strong>
-                                <span>{lang === "zh" ? "正在输入" : "typing"}</span>
-                              </header>
-                              <div className={styles.groupTypingDots} aria-label={lang === "zh" ? "正在输入" : "Typing"}>
-                                <span />
-                                <span />
-                                <span />
-                              </div>
-                            </div>
-                              </>
-                              );
-                            })()}
-                          </article>
-                        ) : null}
-                      </div>
-                      {round.summary && !roundRunning ? <p className={styles.groupRoundSummary}>{round.summary}</p> : null}
-                    </section>
-                    );
-                  })
-                ) : (
-                  <div className={styles.groupEmptyState}>
-                    <BellRing size={28} />
-                    <p>{lang === "zh" ? "暂无通知。" : "No notices yet."}</p>
-                  </div>
-                )}
-              </div>
-              <div className={styles.groupComposerBar}>
-                <VNativeInput
-                  value={projectBusDraft}
-                  onChange={(event) => setProjectBusDraft(event.target.value)}
-                  disabled={sendProjectBusMessageMutation.isPending}
-                  placeholder={lang === "zh" ? "输入广播；不带 @ 默认投递全体，可用 @AgentCode 指定" : "Write a broadcast; no @ sends to all, @AgentCode targets one"}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter" && !event.shiftKey) {
-                      event.preventDefault();
-                      handleSendProjectBusMessage();
-                    }
-                  }}
-                />
-                <label className={styles.projectBusInterruptToggle}>
-                  <VNativeInput
-                    type="checkbox"
-                    checked={projectBusInterruptTargets}
-                    onChange={(event) => setProjectBusInterruptTargets(event.target.checked)}
-                  />
-                  <span>{lang === "zh" ? "打断目标助手" : "Interrupt targets"}</span>
-                </label>
-                <VButton
-                  type="button"
-                  onClick={handleSendProjectBusMessage}
-                  isDisabled={
-                    !projectBusDraft.trim()
-                    || sendProjectBusMessageMutation.isPending
-                  }
-                >
-                  <UsersRound size={15} />
-                  <span>
-                    {sendProjectBusMessageMutation.isPending
-                      ? (lang === "zh" ? "发送中" : "Sending")
-                      : (lang === "zh" ? "发送广播" : "Send")}
-                  </span>
-                </VButton>
-              </div>
-            </div>
-          ) : standardGroupRoomActive ? (
-            <div className={styles.groupConversationFrame}>
-              <header className={styles.groupConversationHeader}>
-                <div>
-                  <p>
-                    {activeGroupRoom?.mode ?? "round_robin"}
-                    {" · "}
-                    {activeGroupRoom?.purpose ?? "discussion"}
-                  </p>
-                  <h2>{activeGroupRoom?.title ?? (lang === "zh" ? "群聊加载中" : "Loading group")}</h2>
-                  <span>
-                    {availableGroupParticipantCount} {lang === "zh" ? "位可用助手" : "available agents"}
-                    {" · "}
-                    {statusLabel(activeGroupRoom?.status ?? "ready")}
-                  </span>
-                </div>
-                <VButton
-                  type="button"
-                  className={styles.groupRefreshButton}
-                  onClick={() => activeGroupRoomId && void activeGroupRoomQuery.refetch()}
-                  isDisabled={activeGroupRoomQuery.isFetching}
-                >
-                  {lang === "zh" ? "刷新" : "Refresh"}
-                </VButton>
-              </header>
-              {activeGroupRoomQuery.isError ? (
-                <div className={styles.inlineNotice}>
-                  {describeError(activeGroupRoomQuery.error, t("loadFailed"))}
-                </div>
-              ) : null}
-              <div className={styles.groupMessageTimeline} aria-live={groupRoundActive ? "polite" : undefined}>
-                {(activeGroupRoom?.rounds ?? []).length ? (
-                  (activeGroupRoom?.rounds ?? []).map((round, roundIndex) => {
-                    const roundRunning = String(round.status ?? "").trim().toLowerCase() === "running";
-                    const deliveredParticipantIds = new Set(
-                      (round.messages ?? []).map((message) => String(message.participantId ?? "").trim()),
-                    );
-                    const nextSpeakerId = (round.speakerOrder ?? []).find(
-                      (participantId) => !deliveredParticipantIds.has(String(participantId ?? "").trim()),
-                    );
-                    const nextParticipant = nextSpeakerId ? activeGroupParticipantById.get(nextSpeakerId) : undefined;
-                    return (
-                    <section key={round.roundId} className={styles.groupRoundBlock}>
-                      <div className={styles.groupRoundDivider}>
-                        <span>
-                          {lang === "zh" ? `第 ${roundIndex + 1} 轮` : `Round ${roundIndex + 1}`}
-                          {" · "}
-                          {round.mode}
-                          {" · "}
-                          {round.purpose ?? activeGroupRoom?.purpose ?? "discussion"}
-                          {" · "}
-                          {statusLabel(round.status)}
-                        </span>
-                        <time>{formatTime(round.updatedAt || round.startedAt)}</time>
-                      </div>
-                      <article className={styles.groupTopicMessage}>
-                        <div className={styles.groupTopicBubble}>
-                          <span>{runtime?.userName || (lang === "zh" ? "我" : "Me")}</span>
-                          <p>{(
-                            <ChatMentionedText
-                              content={round.topic}
-                              lang={lang}
-                              mentionTargets={chatMentionTargets}
-                              onOpenMentionTarget={handleOpenMentionTarget}
-                            />
-                          )}</p>
-                        </div>
-                      </article>
-                      <div className={styles.groupMessageList}>
-                        {(round.messages ?? []).map((message: ChatRoomMessage) => {
-                          const speakerParticipant = activeGroupParticipantById.get(String(message.participantId ?? "").trim());
-                          const speakerIdentity = groupParticipantIdentity(speakerParticipant, {
-                            agentId: message.agentId,
-                            agentCode: message.speakerCode,
-                            title: message.speakerTitle,
-                            participantId: message.participantId,
-                          });
-                          return (
-                          <article
-                            key={message.messageId}
-                            className={
-                              message.status === "failed"
-                                ? `${styles.groupBubbleRow} ${styles.groupBubbleRowFailed}`
-                                : styles.groupBubbleRow
-                            }
-                          >
-                            {renderAgentAvatar(
-                              styles.groupBubbleAvatar,
-                              speakerIdentity.avatarImageUrl,
-                              avatarInitials(message.speakerCode, speakerIdentity.name, "AI"),
-                            )}
-                            <div className={styles.groupBubble}>
-                              <header className={styles.groupBubbleHeader}>
-                                <strong title={speakerIdentity.fullIdentityLabel}>{speakerIdentity.identityLabel}</strong>
-                                {message.status !== "completed" ? <span>{statusLabel(message.status)}</span> : null}
-                              </header>
-                              {/* group message body */}
-                              <ChatGroupMessageBody
-                                message={message}
-                                identityName={speakerIdentity.name}
-                                lang={lang}
-                                expandedMessageIds={expandedGroupMessageIds}
-                                mentionTargets={chatMentionTargets}
-                                onOpenMentionTarget={handleOpenMentionTarget}
-                                onToggleExpanded={(messageId) =>
-                                  setExpandedGroupMessageIds((current) =>
-                                    current.includes(messageId)
-                                      ? current.filter((id) => id !== messageId)
-                                      : [...current, messageId],
-                                  )
-                                }
-                              />
-                              <time className={styles.groupBubbleMeta}>{formatTime(message.timestamp || round.updatedAt)}</time>
-                            </div>
-                          </article>
-                          );
-                        })}
-                        {roundRunning && nextParticipant ? (
-                          <article className={`${styles.groupBubbleRow} ${styles.groupBubbleRowPending}`}>
-                            {(() => {
-                              const nextIdentity = groupParticipantIdentity(nextParticipant);
-                              return (
-                              <>
-                            {renderAgentAvatar(
-                              styles.groupBubbleAvatar,
-                              nextIdentity.avatarImageUrl,
-                              avatarInitials(nextParticipant.agentCode, nextIdentity.name, "AI"),
-                            )}
-                            <div className={styles.groupBubble}>
-                              <header className={styles.groupBubbleHeader}>
-                                <strong title={nextIdentity.fullIdentityLabel}>{nextIdentity.identityLabel}</strong>
-                                <span>{lang === "zh" ? "正在输入" : "typing"}</span>
-                              </header>
-                              <div className={styles.groupTypingDots} aria-label={lang === "zh" ? "正在输入" : "Typing"}>
-                                <span />
-                                <span />
-                                <span />
-                              </div>
-                            </div>
-                              </>
-                              );
-                            })()}
-                          </article>
-                        ) : null}
-                      </div>
-                      {round.summary && !roundRunning ? <p className={styles.groupRoundSummary}>{round.summary}</p> : null}
-                    </section>
-                    );
-                  })
-                ) : (
-                  <div className={styles.groupEmptyState}>
-                    <UsersRound size={28} />
-                    <p>{lang === "zh" ? "群聊已创建，输入议题后开始第一轮讨论。" : "The group is ready. Enter a topic to start the first round."}</p>
-                  </div>
-                )}
-              </div>
-              <div className={styles.groupComposerBar}>
-                <VNativeInput
-                  value={groupTopicDraft}
-                  onChange={(event) => setGroupTopicDraft(event.target.value)}
-                  disabled={startGroupRoundMutation.isPending}
-                  placeholder={lang === "zh" ? "输入下一轮群聊议题" : "Topic for the next group round"}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter" && !event.shiftKey) {
-                      event.preventDefault();
-                      handleStartGroupRound();
-                    }
-                  }}
-                />
-                <VButton
-                  type="button"
-                  onClick={handleStartGroupRound}
-                  isDisabled={
-                    !groupTopicDraft.trim()
-                    || startGroupRoundMutation.isPending
-                    || groupRoundActive
-                    || !activeGroupRoom
-                  }
-                >
-                  <UsersRound size={15} />
-                  <span>
-                    {startGroupRoundMutation.isPending || groupRoundActive
-                      ? (groupRoundStopping ? (lang === "zh" ? "停止中" : "Stopping") : (lang === "zh" ? "讨论中" : "Running"))
-                      : (lang === "zh" ? "启动一轮" : "Run round")}
-                  </span>
-                </VButton>
-                {groupRoundActive ? (
-                  <VButton
-                    type="button"
-                    className={styles.groupStopButton}
-                    onClick={handleStopGroupRound}
-                    isDisabled={groupStopDisabled}
-                    title={lang === "zh" ? "停止当前群聊轮次" : "Stop current group round"}
-                  >
-                    <Square size={15} />
-                    <span>
-                      {stopGroupRoundMutation.isPending
-                        ? (lang === "zh" ? "停止中" : "Stopping")
-                        : (lang === "zh" ? "停止" : "Stop")}
-                    </span>
-                  </VButton>
-                ) : null}
-              </div>
-            </div>
+          <ChatCliAgentTerminalStack
+            runs={mountedCliAgentRuns}
+            activeCliAgentRunId={activeCliAgentRunId}
+            activeSessionId={activeSessionId}
+            groupPanelActive={groupPanelActive}
+            lang={lang}
+            TerminalPanel={CliAgentRunTerminalPanel}
+            onTerminalSessionChange={handleCliAgentTerminalSessionChange}
+          />
+          {groupPanelActive ? (
+            <ChatGroupCenterSurface
+              lang={lang}
+              projectBusActive={projectBusActive}
+              standardGroupRoomActive={standardGroupRoomActive}
+              activeGroupRoom={activeGroupRoom}
+              activeGroupRoomId={activeGroupRoomId}
+              availableGroupParticipantCount={availableGroupParticipantCount}
+              activeGroupParticipantById={activeGroupParticipantById}
+              projectBusTimeline={projectBusTimeline}
+              projectBusEvents={projectBusEvents}
+              projectBusDraft={projectBusDraft}
+              projectBusInterruptTargets={projectBusInterruptTargets}
+              groupTopicDraft={groupTopicDraft}
+              groupRoomActionError={groupRoomActionError}
+              groupRoundActive={groupRoundActive}
+              groupRoundStopping={groupRoundStopping}
+              groupStopDisabled={groupStopDisabled}
+              expandedGroupMessageIds={expandedGroupMessageIds}
+              chatMentionTargets={chatMentionTargets}
+              userDisplayName={runtime?.userName || (lang === "zh" ? "我" : "Me")}
+              projectBusRefreshing={projectAgentBusQuery.isFetching}
+              projectBusRefreshError={projectAgentBusQuery.isError ? describeError(projectAgentBusQuery.error, t("loadFailed")) : ""}
+              projectBusSendPending={sendProjectBusMessageMutation.isPending}
+              projectBusRevokePending={revokeProjectBusMessageMutation.isPending}
+              groupRoomRefreshing={activeGroupRoomQuery.isFetching}
+              groupRoomRefreshError={activeGroupRoomQuery.isError ? describeError(activeGroupRoomQuery.error, t("loadFailed")) : ""}
+              startGroupRoundPending={startGroupRoundMutation.isPending}
+              stopGroupRoundPending={stopGroupRoundMutation.isPending}
+              formatTime={formatTime}
+              statusLabel={statusLabel}
+              groupParticipantIdentity={groupParticipantIdentity}
+              renderAgentAvatar={renderAgentAvatar}
+              avatarInitials={avatarInitials}
+              onProjectBusDraftChange={setProjectBusDraft}
+              onProjectBusInterruptTargetsChange={setProjectBusInterruptTargets}
+              onGroupTopicDraftChange={setGroupTopicDraft}
+              onRefreshProjectBus={() => { void projectAgentBusQuery.refetch(); }}
+              onRefreshGroupRoom={() => { if (activeGroupRoomId) void activeGroupRoomQuery.refetch(); }}
+              onSendProjectBusMessage={handleSendProjectBusMessage}
+              onRevokeProjectBusMessage={handleRevokeProjectBusMessage}
+              onStartGroupRound={handleStartGroupRound}
+              onStopGroupRound={handleStopGroupRound}
+              onOpenMentionTarget={handleOpenMentionTarget}
+              onToggleExpandedGroupMessage={(messageId) =>
+                setExpandedGroupMessageIds((current) =>
+                  current.includes(messageId)
+                    ? current.filter((id) => id !== messageId)
+                    : [...current, messageId],
+                )
+              }
+            />
           ) : (
             <ChatSessionWorkspacePanel
               activeCliAgentRunAvailable={Boolean(activeCliAgentRun)}
