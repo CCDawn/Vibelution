@@ -139,6 +139,8 @@ describe("PromptTemplatesRoute layout contract", () => {
 
   it("keeps the narrow prompt workspace scrollable without oversized editor panels", () => {
     expect(routeSource).toContain("workspaceClass");
+    expect(stylesSource).toContain("clamp(260px,26vw,380px)");
+    expect(stylesSource).toContain("minmax(0,1fr)");
     expect(stylesSource).toContain("max-[980px]:grid-cols-1");
     expect(stylesSource).toContain("max-[980px]:content-start");
     expect(stylesSource).toContain("max-[980px]:overflow-auto");
