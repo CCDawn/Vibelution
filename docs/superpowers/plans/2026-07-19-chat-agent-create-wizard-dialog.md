@@ -6,7 +6,7 @@
 
 **Owner:** `agent-root-agent-create-dialog`
 
-**Claim:** `claim-db13f039f4f0`
+**Claim:** `claim-c81c22f89af7`
 
 **Scope:** 对话页与 Agent 管理页的新建 Agent 入口、共享创建控制器、悬浮向导及其验证
 
