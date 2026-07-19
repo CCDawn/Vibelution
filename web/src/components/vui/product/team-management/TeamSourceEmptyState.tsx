@@ -21,7 +21,7 @@ const PANEL =
 
 const COPY = "grid min-w-0 gap-0.5";
 const TITLE = "min-w-0 text-[0.78rem] font-[840] leading-tight text-[var(--fg-primary)]";
-const DESCRIPTION = "min-w-0 text-[var(--vui-font-xs)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]";
+const DESCRIPTION = "min-w-0 [font-size:var(--vui-font-xs)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]";
 const FACTS = "grid min-w-0 grid-cols-[repeat(auto-fit,minmax(9rem,1fr))] gap-1.5 max-[560px]:grid-cols-[repeat(2,minmax(0,1fr))]";
 const FACT =
   "grid min-w-0 gap-0.5 rounded-[7px] border border-[color:var(--border-soft)] " +

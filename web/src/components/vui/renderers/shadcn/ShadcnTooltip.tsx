@@ -107,7 +107,7 @@ export function ShadcnTooltip({
             className={[
               "z-[100] select-none whitespace-normal break-words rounded-[10px] border",
               "bg-[color-mix(in_srgb,var(--vui-surface-panel)_96%,transparent)] px-3 py-2",
-              "text-[var(--vui-font-xs)] font-medium leading-[1.5]",
+              "[font-size:var(--vui-font-xs)] font-medium leading-[1.5]",
               "shadow-[var(--vui-elevation-overlay)] backdrop-blur-xl [text-wrap:pretty]",
               widthClassName[width],
               toneClassName[tone],

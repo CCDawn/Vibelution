@@ -719,7 +719,7 @@ describe("ChatCodingRoute layout contract", () => {
   it("does not ship micro typography in the chat workbench surface", () => {
     expect(routeCssSource).not.toMatch(/font-size:\s*0\.(?:6\d|7[0-7])rem/);
     expect(routeStyles.agentModelTag).toBeTypeOf("string");
-    expect(routeStyles.agentModelTag).toContain("text-[var(--vui-font-xs)]");
+    expect(routeStyles.agentModelTag).toContain("[font-size:var(--vui-font-xs)]");
   });
 
   it("uses overlay drawers instead of fixed compatibility floors below 960px", () => {
@@ -811,7 +811,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.leftBlock).toContain("shadow-none");
     expect(routeStyles.leftBlock).not.toContain("rounded-[var(--radius-panel)]");
     expect(routeStyles.leftBlock).not.toContain("!bg-[var(--vui-surface-rail)]");
-    expect(routeStyles.blockEyebrow).toContain("text-[var(--vui-font-xs)]");
+    expect(routeStyles.blockEyebrow).toContain("[font-size:var(--vui-font-xs)]");
     expect(routeStyles.blockEyebrow).toContain("font-semibold");
 
     expect(routeStyles.tokenCompressionCard).toBe("vui-routes-chatcodingroute tokenCompressionCard min-w-0");
@@ -836,14 +836,14 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.companionCompact).toContain("bg-[var(--vui-surface-raised)]");
     expect(routeStyles.companionCompact).not.toContain("white)");
     expect(routeStyles.companionCompact).toContain("shadow-none");
-    expect(routeStyles.companionCopy).toContain("text-[var(--vui-font-sm)]");
-    expect(routeStyles.petShowcaseFeedback).toContain("text-[var(--vui-font-sm)]");
+    expect(routeStyles.companionCopy).toContain("[font-size:var(--vui-font-sm)]");
+    expect(routeStyles.petShowcaseFeedback).toContain("[font-size:var(--vui-font-sm)]");
     expect(routeStyles.companionTopLine).not.toContain("bg-[var(--vui-surface-row)]");
     expect(routeStyles.compactDetails).toContain("max-h-[220px]");
     expect(routeStyles.compactDetails).toContain("overflow-auto");
     expect(routeStyles.inlineMetaPill).toContain("min-h-[24px]");
     expect(routeStyles.petShowcaseAction).toContain("min-h-[30px]");
-    expect(routeStyles.petShowcaseAction).toContain("text-[var(--vui-font-sm)]");
+    expect(routeStyles.petShowcaseAction).toContain("[font-size:var(--vui-font-sm)]");
   });
 
   it("compresses repeated status prose while keeping critical guidance visible", () => {
@@ -2659,7 +2659,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.panelSearchInput).toContain("[&_[data-slot=input-wrapper]]:min-h-8");
     expect(routeStyles.panelSearchInput).toContain("[&_[data-slot=input-wrapper]]:shadow-none");
     expect(routeStyles.panelSearchInput).toContain("[&_[data-slot=input-wrapper]]:!border-0");
-    expect(routeStyles.panelSearchInput).toContain("[&_[data-slot=input]]:text-[var(--vui-font-sm)]");
+    expect(routeStyles.panelSearchInput).toContain("[&_[data-slot=input]]:[font-size:var(--vui-font-sm)]");
     expect(routeStyles.sessionActionRow).toContain("grid-cols-2");
     expect(routeStyles.sessionActionRow).toContain("gap-2");
     expect(routeStyles.newSessionButton).toContain("!min-w-0");

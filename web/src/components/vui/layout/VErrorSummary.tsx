@@ -18,7 +18,7 @@ export type VErrorSummaryProps = Omit<ComponentPropsWithoutRef<"div">, "title"> 
 
 const ROOT =
   "grid min-w-0 w-full content-start gap-1 rounded-[var(--radius-control)] border px-2 py-1.5 " +
-  "text-left text-[var(--vui-font-xs)] leading-[var(--vui-line-readable)]";
+  "text-left [font-size:var(--vui-font-xs)] leading-[var(--vui-line-readable)]";
 
 const TONE: Record<VErrorSummaryTone, string> = {
   error:
@@ -33,17 +33,17 @@ const TONE: Record<VErrorSummaryTone, string> = {
 };
 
 const LABEL =
-  "min-w-0 truncate text-[var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-tertiary)]";
+  "min-w-0 truncate [font-size:var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-tertiary)]";
 const SUMMARY =
-  "min-w-0 text-[var(--vui-font-sm)] font-semibold leading-snug text-[var(--fg-primary)] " +
+  "min-w-0 [font-size:var(--vui-font-sm)] font-semibold leading-snug text-[var(--fg-primary)] " +
   "[overflow-wrap:anywhere] [word-break:break-word]";
 const DETAILS =
   "min-w-0 mt-1 border-t border-[color-mix(in_srgb,currentColor_18%,var(--vui-border-subtle))] " +
-  "pt-1.5 text-[var(--vui-font-xs)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] " +
+  "pt-1.5 [font-size:var(--vui-font-xs)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] " +
   "[overflow-wrap:anywhere] [word-break:break-word] whitespace-pre-wrap";
 const TOGGLE =
   "inline-flex min-h-[var(--vui-control-height-sm)] w-fit items-center rounded-[var(--radius-control)] " +
-  "border border-transparent px-1.5 text-[var(--vui-font-xs)] font-semibold text-[var(--fg-tertiary)] " +
+  "border border-transparent px-1.5 [font-size:var(--vui-font-xs)] font-semibold text-[var(--fg-tertiary)] " +
   "hover:border-[var(--vui-border-subtle)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--fg-primary)] " +
   "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_40%,transparent)]";
 const ACTIONS = "flex min-w-0 flex-wrap items-center gap-1.5 pt-0.5";
