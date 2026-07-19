@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import queue
 import shutil
@@ -664,6 +665,26 @@ def _execute_flow(
             candidate_path,
             baseline_untracked=candidate_worktree.get("untrackedFiles"),
         )
+        if snapshot["candidateWorktree"]["changedFiles"]:
+            candidate_variant = _build_candidate_variant(
+                candidate_path,
+                checkpoint_commit=str(candidate_worktree.get("checkpointCommit") or ""),
+                changed_files=snapshot["candidateWorktree"]["changedFiles"],
+                baseline_untracked=candidate_worktree.get("untrackedFiles"),
+            )
+            snapshot["candidateWorktree"]["variant"] = candidate_variant
+            _record_worktree_scene_event(
+                "candidate_variant",
+                "supervised_worktree_run.candidate_variant_bound",
+                run_id=run_id,
+                outcome="succeeded",
+                fields={
+                    "variantId": candidate_variant["variantId"],
+                    "checkpointCommit": candidate_variant["checkpointCommit"],
+                    "patchSha256": candidate_variant["patchSha256"],
+                    "changedFileCount": candidate_variant["changedFileCount"],
+                },
+            )
         _persist_snapshot(snapshot, active_run_id=run_id if _ACTIVE_RUN_ID == run_id else "")
         modifier_terminal_status = _candidate_modifier_terminal_status(modification)
         if modifier_terminal_status:
@@ -686,6 +707,7 @@ def _execute_flow(
                 "cancelChecker": cancel_checker,
                 "workflowStepId": "rerun_score",
                 "candidateConversationSessionId": _candidate_conversation_session_id(snapshot),
+                "candidateVariant": snapshot["candidateWorktree"].get("variant"),
                 "progressCallback": _workflow_progress_callback(snapshot, "candidate", "rerun_score"),
             },
         )
@@ -1061,7 +1083,7 @@ def _real_evaluation_runner(project_root: Path, bundle_name: str, role: str, con
     successes = sum(1 for item in results if item.get("status") == "success")
     total = len(results)
     score = round((successes / total) * 100, 3) if total else 0.0
-    return {
+    evaluation = {
         "role": role,
         "status": "success" if successes == total else "failed",
         "score": score,
@@ -1072,6 +1094,10 @@ def _real_evaluation_runner(project_root: Path, bundle_name: str, role: str, con
         "summary": f"{role} score {score}",
         "cases": results,
     }
+    candidate_variant = context.get("candidateVariant")
+    if role == "candidate" and isinstance(candidate_variant, dict):
+        evaluation["candidateVariant"] = _clone(candidate_variant)
+    return evaluation
 
 
 def _harness_result_payload(result: HarnessResult, *, case_id: str, role: str) -> dict[str, Any]:
@@ -1498,6 +1524,7 @@ def _build_decision(snapshot: dict[str, Any], options: dict[str, Any]) -> dict[s
     candidate_score = float(candidate.get("score") or 0.0)
     delta = round(candidate_score - baseline_score, 3)
     changed_files = list(worktree.get("changedFiles") or [])
+    candidate_variant = worktree.get("variant") if isinstance(worktree.get("variant"), dict) else {}
     high_risk_files = [item for item in changed_files if bool(item.get("highRisk"))]
     gates = [
         {
@@ -1509,6 +1536,16 @@ def _build_decision(snapshot: dict[str, Any], options: dict[str, Any]) -> dict[s
             "name": "candidate_modified",
             "status": "pass" if changed_files else "fail",
             "reason": f"候选工作树改动文件数：{len(changed_files)}",
+        },
+        {
+            "name": "candidate_variant_bound",
+            "status": "pass" if _candidate_variant_is_bound(candidate_variant) else "fail",
+            "reason": (
+                f"候选已绑定 checkpoint={candidate_variant.get('checkpointCommit')}，"
+                f"patch={candidate_variant.get('patchSha256')}。"
+                if _candidate_variant_is_bound(candidate_variant)
+                else "候选缺少可验证的 checkpoint/补丁绑定，禁止自动保留。"
+            ),
         },
         {
             "name": "self_edit_finished",
@@ -2374,6 +2411,135 @@ def _candidate_changed_files(
         for item in files
         if not _is_baseline_untracked_noise(item, baseline_noise)
     ]
+
+
+def _build_candidate_variant(
+    candidate_path: Path,
+    *,
+    checkpoint_commit: str,
+    changed_files: list[dict[str, Any]],
+    baseline_untracked: Any = None,
+) -> dict[str, Any]:
+    normalized_checkpoint = str(checkpoint_commit or "").strip()
+    if not normalized_checkpoint:
+        raise SupervisedWorktreeRunValidationError("候选工作树缺少 checkpointCommit，无法绑定评测版本。")
+
+    try:
+        diff_proc = git_process.run_git(
+            ["diff", "--binary", "HEAD", "--"],
+            cwd=str(candidate_path),
+            capture_output=True,
+            check=False,
+        )
+    except OSError as exc:
+        raise SupervisedWorktreeRunValidationError(f"无法读取候选补丁：{exc}") from exc
+    if diff_proc.returncode != 0:
+        stderr = _decode_git_output(diff_proc.stderr).strip()
+        raise SupervisedWorktreeRunValidationError(f"无法读取候选补丁：{stderr or 'git diff failed'}")
+
+    digest = hashlib.sha256()
+    digest.update(b"tracked-diff\0")
+    digest.update(_git_output_bytes(diff_proc.stdout))
+    baseline_noise = _baseline_untracked_paths(baseline_untracked)
+    for relative_path in _candidate_untracked_files(candidate_path, baseline_noise=baseline_noise):
+        digest.update(b"\0untracked-path\0")
+        digest.update(relative_path.encode("utf-8"))
+        digest.update(b"\0untracked-content\0")
+        try:
+            digest.update((candidate_path / relative_path).read_bytes())
+        except OSError as exc:
+            raise SupervisedWorktreeRunValidationError(
+                f"无法读取候选未跟踪文件 {relative_path}：{exc}"
+            ) from exc
+
+    patch_sha256 = digest.hexdigest()
+    binding_payload = json.dumps(
+        {"checkpointCommit": normalized_checkpoint, "patchSha256": patch_sha256},
+        ensure_ascii=True,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    changed_paths = sorted(
+        {
+            str(item.get("path") or "").replace("\\", "/").strip()
+            for item in changed_files
+            if str(item.get("path") or "").strip()
+        }
+    )
+    return {
+        "schemaVersion": 1,
+        "bindingStatus": "verified",
+        "variantId": f"swte-variant-{hashlib.sha256(binding_payload).hexdigest()}",
+        "checkpointCommit": normalized_checkpoint,
+        "patchSha256": patch_sha256,
+        "changedFileCount": len(changed_paths),
+        "changedPaths": changed_paths,
+        "source": "worktree_patch",
+    }
+
+
+def _candidate_untracked_files(candidate_path: Path, *, baseline_noise: set[str]) -> list[str]:
+    try:
+        proc = git_process.run_git(
+            ["ls-files", "--others", "--exclude-standard"],
+            cwd=str(candidate_path),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
+        )
+    except OSError as exc:
+        raise SupervisedWorktreeRunValidationError(f"无法枚举候选未跟踪文件：{exc}") from exc
+    if proc.returncode != 0:
+        raise SupervisedWorktreeRunValidationError(
+            f"无法枚举候选未跟踪文件：{str(proc.stderr or '').strip() or 'git ls-files failed'}"
+        )
+    return sorted(
+        path
+        for path in {
+            str(raw or "").replace("\\", "/").strip().lstrip("/")
+            for raw in proc.stdout.splitlines()
+        }
+        if path and not _is_baseline_untracked_noise({"path": path, "status": "??"}, baseline_noise)
+    )
+
+
+def _git_output_bytes(value: Any) -> bytes:
+    if isinstance(value, bytes):
+        return value
+    return str(value or "").encode("utf-8", errors="surrogatepass")
+
+
+def _decode_git_output(value: Any) -> str:
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return str(value or "")
+
+
+def _candidate_variant_is_bound(candidate_variant: dict[str, Any]) -> bool:
+    checkpoint_commit = str(candidate_variant.get("checkpointCommit") or "").strip()
+    patch_sha256 = str(candidate_variant.get("patchSha256") or "").strip().lower()
+    try:
+        changed_file_count = int(candidate_variant.get("changedFileCount") or 0)
+    except (TypeError, ValueError):
+        return False
+    if (
+        candidate_variant.get("bindingStatus") != "verified"
+        or not checkpoint_commit
+        or len(patch_sha256) != 64
+        or any(character not in "0123456789abcdef" for character in patch_sha256)
+        or changed_file_count <= 0
+    ):
+        return False
+    binding_payload = json.dumps(
+        {"checkpointCommit": checkpoint_commit, "patchSha256": patch_sha256},
+        ensure_ascii=True,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    expected_variant_id = f"swte-variant-{hashlib.sha256(binding_payload).hexdigest()}"
+    return str(candidate_variant.get("variantId") or "").strip() == expected_variant_id
 
 
 def _baseline_untracked_paths(raw: Any) -> set[str]:
