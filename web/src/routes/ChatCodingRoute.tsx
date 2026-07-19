@@ -7068,6 +7068,7 @@ export function ChatCodingRoute() {
           <div className={styles.featureChipRow}>
             <VButton
               type="button"
+              contentLayout="plain"
               className={
                 mentalModelEnabledForNextTurn
                   ? `${styles.featureChip} ${styles.featureChipPrimary} ${styles.featureChipActive}`
@@ -7088,6 +7089,7 @@ export function ChatCodingRoute() {
                 <VButton
                   key={item.key}
                   type="button"
+                  contentLayout="plain"
                   className={enabled ? `${styles.featureChip} ${styles.featureChipActive}` : styles.featureChip}
                   aria-pressed={enabled}
                   onClick={() => toggleFeaturePreset(item.key)}
@@ -7212,6 +7214,7 @@ export function ChatCodingRoute() {
             <div className={styles.petShowcaseActions} aria-label={petInteractionLabels.group}>
               <VButton
                 type="button"
+                contentLayout="plain"
                 className={styles.petShowcaseAction}
                 onClick={() => handlePetInteraction("feed")}
                 isDisabled={petActionMutation.isPending}
@@ -7222,6 +7225,7 @@ export function ChatCodingRoute() {
               </VButton>
               <VButton
                 type="button"
+                contentLayout="plain"
                 className={styles.petShowcaseAction}
                 onClick={() => handlePetInteraction("talk")}
                 isDisabled={petActionMutation.isPending}
@@ -7232,6 +7236,7 @@ export function ChatCodingRoute() {
               </VButton>
               <VButton
                 type="button"
+                contentLayout="plain"
                 className={styles.petShowcaseAction}
                 onClick={() => handlePetInteraction("care")}
                 isDisabled={petActionMutation.isPending}
