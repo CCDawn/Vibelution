@@ -601,8 +601,10 @@ export function GitRoute() {
             {formatGitDateTime(commit.authoredAt, locale)}
           </span>
         </div>
-        <strong>{commit.subject}</strong>
-        <p>{t("gitCommitBy")}: {commit.author}</p>
+        <span className={styles.commitSubject}>{commit.subject}</span>
+        <span className={styles.commitAuthor}>
+          {t("gitCommitBy")}: {commit.author}
+        </span>
       </VNativeButton>
     );
   }
