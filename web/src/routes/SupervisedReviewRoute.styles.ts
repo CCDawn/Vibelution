@@ -23,9 +23,9 @@ const reviewTextAreaField = [reviewFormLabel, reviewTextAreaTargets].join(" ");
 
 const styles = {
   page:
-    "flex h-full min-h-0 min-w-0 max-w-full flex-col gap-1.5 overflow-hidden overflow-x-hidden px-3 py-2 pb-3 text-[var(--fg-primary)] max-[980px]:overflow-y-auto max-[980px]:overflow-x-hidden max-[980px]:pb-[18px]",
+    "flex h-full min-h-0 min-w-0 max-w-full flex-col gap-1.5 overflow-hidden overflow-x-hidden px-2 py-1.5 pb-2.5 text-[var(--fg-primary)] max-[980px]:overflow-y-auto max-[980px]:overflow-x-hidden max-[980px]:pb-[18px]",
   toolbar: "flex min-w-0 flex-wrap items-center justify-between gap-[var(--route-topbar-gap)]",
-  toolbarIntro: "grid min-w-[260px] max-w-[760px] gap-0.5",
+  toolbarIntro: "grid min-w-0 max-w-none flex-1 gap-0.5",
   toolbarControls: "flex flex-wrap items-center justify-end gap-3",
   eyebrow: "m-0 mb-0.5 text-[var(--vui-font-xs)] uppercase tracking-[0.08em] text-[var(--accent-warm-2)]",
   title: "m-0 whitespace-nowrap text-[length:var(--route-topbar-title-size)] leading-[1.08]",
