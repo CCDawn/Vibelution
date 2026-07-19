@@ -15,7 +15,7 @@ const styles = {
   summaryCard:
     `grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-baseline gap-[5px] ${rowSurface} px-2 py-[4px] [&>span]:truncate [&>span]:text-[var(--vui-font-xs)] [&>span]:font-semibold [&>span]:text-vui-fg-tertiary [&>strong]:truncate [&>strong]:text-[var(--vui-font-sm)] [&>strong]:font-extrabold [&>strong]:leading-tight [&>strong]:text-vui-fg-primary`,
   agentScopeBar:
-    `grid min-w-0 grid-cols-[minmax(150px,1fr)_minmax(170px,220px)_minmax(140px,180px)_fit-content(18rem)] items-center gap-[7px] ${coolSurface} max-[1180px]:grid-cols-[minmax(0,1fr)_minmax(170px,220px)_minmax(140px,180px)] max-[880px]:grid-cols-[minmax(0,1fr)_minmax(170px,220px)] max-[640px]:grid-cols-[1fr]`,
+    `grid min-w-0 grid-cols-[minmax(0,1fr)_clamp(160px,16vw,220px)_clamp(130px,14vw,180px)_fit-content(18rem)] items-center gap-[7px] ${coolSurface} max-[1180px]:grid-cols-[minmax(0,1fr)_clamp(160px,18vw,220px)_clamp(130px,14vw,180px)] max-[880px]:grid-cols-[minmax(0,1fr)_clamp(160px,22vw,220px)] max-[640px]:grid-cols-[1fr]`,
   scopeCopy:
     "grid min-w-0 gap-[2px] [&>strong]:truncate [&>strong]:text-[var(--vui-font-sm)] [&>strong]:font-extrabold [&>strong]:text-vui-fg-primary [&>span]:truncate [&>span]:text-[var(--vui-font-xs)] [&>span]:font-semibold [&>span]:text-vui-fg-tertiary",
   panelEyebrow:

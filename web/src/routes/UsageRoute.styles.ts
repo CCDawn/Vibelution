@@ -1,5 +1,5 @@
 const readablePanelSurface =
-  "!bg-[color:color-mix(in_srgb,var(--surface-panel-strong)_98%,var(--surface-page)_2%)] shadow-[0_1px_0_color-mix(in_srgb,var(--surface-page)_70%,transparent)]";
+  "!bg-[color:color-mix(in_srgb,var(--surface-panel-strong)_98%,var(--surface-page)_2%)] shadow-none";
 const readableRowSurface =
   "!bg-[color:color-mix(in_srgb,var(--surface-panel-strong)_96%,var(--surface-page)_4%)]";
 const panelSurface =
@@ -13,15 +13,15 @@ const styles = {
   page:
     "grid h-full min-h-0 min-w-0 max-w-full grid-rows-[auto_auto_minmax(0,1fr)] overflow-hidden overflow-x-hidden text-vui-fg-primary max-[860px]:overflow-y-auto max-[860px]:overflow-x-hidden",
   header:
-    `mx-2.5 mt-2 min-w-0 max-w-full overflow-hidden border-[var(--vui-border-subtle)] ${readablePanelSurface} max-[720px]:grid-cols-[minmax(0,1fr)] max-[720px]:[&>div:last-child]:w-full max-[720px]:[&>div:last-child]:justify-self-start max-[720px]:[&>div:last-child]:justify-start`,
+    `mx-2 mt-1.5 min-w-0 max-w-full overflow-hidden border-[var(--vui-border-subtle)] ${readablePanelSurface} max-[720px]:grid-cols-[minmax(0,1fr)] max-[720px]:[&>div:last-child]:w-full max-[720px]:[&>div:last-child]:justify-self-start max-[720px]:[&>div:last-child]:justify-start`,
   headerMeta:
     "min-w-0 max-w-full flex flex-wrap items-center gap-1 max-[720px]:w-full [&_[data-vui=\"status-strip-item\"]]:max-w-full [&_[data-vui=\"status-strip-item\"]]:grid-cols-[auto_minmax(0,1fr)] [&_[data-vui=\"status-strip-item\"]_span]:min-w-0 [&_[data-vui=\"status-strip-item\"]_span]:overflow-hidden [&_[data-vui=\"status-strip-item\"]_span]:text-ellipsis [&_[data-vui=\"status-strip-item\"]_span]:whitespace-nowrap",
   overviewBand:
-    "mx-3 mt-2 min-h-[58px] min-w-0 max-w-full overflow-x-auto",
+    "mx-2 mt-1.5 min-h-[52px] min-w-0 max-w-full overflow-x-auto",
   emptyState:
-    "mx-3 mt-2 min-w-0 max-w-full",
+    "mx-2 mt-1.5 min-w-0 max-w-full",
   metricBand:
-    "grid min-h-0 min-w-0 max-w-full grid-cols-[minmax(0,1fr)_minmax(280px,360px)] gap-1.5 overflow-hidden overflow-x-hidden p-[var(--route-workspace-padding)] max-[980px]:grid-cols-[minmax(0,1fr)] max-[980px]:grid-rows-none max-[860px]:gap-2 max-[860px]:overflow-y-visible max-[860px]:overflow-x-hidden max-[520px]:px-2",
+    "grid min-h-0 min-w-0 max-w-full grid-cols-[minmax(0,1fr)_clamp(260px,24vw,360px)] gap-1.5 overflow-hidden overflow-x-hidden p-[var(--route-workspace-padding)] max-[980px]:grid-cols-[minmax(0,1fr)] max-[980px]:grid-rows-none max-[860px]:gap-2 max-[860px]:overflow-y-visible max-[860px]:overflow-x-hidden max-[520px]:px-2",
   primaryColumn:
     "grid min-h-0 min-w-0 max-w-full grid-rows-[minmax(0,1fr)_auto] gap-1.5 overflow-hidden max-[980px]:grid-rows-none max-[980px]:overflow-y-visible max-[980px]:overflow-x-hidden",
   compositionPanel:
