@@ -136,7 +136,15 @@ def _assistant_history_messages(
 def _assistant_provider_messages(message: dict[str, Any], *, source_index: int) -> list[dict[str, Any]]:
     content = _content_value(message.get("content"))
     tool_entries = _tool_entries(message)
-    if any(_tool_entry_has_result(entry) for entry in tool_entries):
+    interrupted_tool_call_ids = _interrupted_tool_call_ids(
+        message,
+        tool_entries,
+        source_index=source_index,
+    )
+    if any(_tool_entry_has_result(entry) for entry in tool_entries) and not (
+        interrupted_tool_call_ids
+        and not any(_tool_entry_has_material_result(entry) for entry in tool_entries)
+    ):
         return _assistant_history_messages(message, source_index=source_index)
     if not tool_entries:
         assistant = _base_message("assistant", content, source_index=source_index)
@@ -166,7 +174,79 @@ def _assistant_provider_messages(message: dict[str, Any], *, source_index: int) 
     if tool_calls:
         assistant["tool_calls"] = [_provider_tool_call(item) for item in tool_calls]
     _copy_optional(message, assistant, ("metadata", "reasoning_content", "mental_snapshot", "mentalSnapshot"))
+    if interrupted_tool_call_ids:
+        metadata = dict(assistant.get("metadata") or {})
+        metadata["interrupted"] = True
+        metadata["interruptedToolCallIds"] = sorted(interrupted_tool_call_ids)
+        assistant["metadata"] = metadata
     return [assistant, *tool_messages]
+
+
+_INTERRUPTED_TOOL_STATUSES = frozenset(
+    {"aborted", "cancelled", "canceled", "interrupted", "stopped", "stopped_by_user"}
+)
+
+
+def _normalized_interruption_status(value: Any) -> str:
+    return str(value or "").strip().lower().replace("-", "_")
+
+
+def _message_is_explicitly_interrupted(message: dict[str, Any]) -> bool:
+    metadata = message.get("metadata") if isinstance(message.get("metadata"), dict) else {}
+    if message.get("interrupted") is True or metadata.get("interrupted") is True:
+        return True
+    for source in (message, metadata):
+        for key in ("status", "turnStatus", "turn_status", "stopReason", "stop_reason"):
+            if _normalized_interruption_status(source.get(key)) in _INTERRUPTED_TOOL_STATUSES:
+                return True
+    return False
+
+
+def _interrupted_tool_call_ids(
+    message: dict[str, Any],
+    tool_entries: list[dict[str, Any]],
+    *,
+    source_index: int,
+) -> set[str]:
+    interrupted_ids: set[str] = set()
+    all_ids: set[str] = set()
+    for tool_index, entry in enumerate(tool_entries, start=1):
+        normalized = _normalize_tool_call(entry, source_index=source_index, tool_index=tool_index)
+        tool_call_id = str(normalized.get("id") or "").strip() if normalized else ""
+        if not tool_call_id:
+            continue
+        all_ids.add(tool_call_id)
+        status = _normalized_interruption_status(
+            entry.get("status")
+            or entry.get("semanticStatus")
+            or entry.get("semantic_status")
+            or entry.get("transportStatus")
+            or entry.get("transport_status")
+        )
+        if status in _INTERRUPTED_TOOL_STATUSES:
+            interrupted_ids.add(tool_call_id)
+    metadata = message.get("metadata") if isinstance(message.get("metadata"), dict) else {}
+    declared_ids = metadata.get("interruptedToolCallIds") or metadata.get("interrupted_tool_call_ids") or []
+    interrupted_ids.update(str(item or "").strip() for item in list(declared_ids or []) if str(item or "").strip())
+    if _message_is_explicitly_interrupted(message):
+        interrupted_ids.update(all_ids)
+    return interrupted_ids
+
+
+def _tool_entry_has_material_result(entry: dict[str, Any]) -> bool:
+    return any(
+        key in entry and entry.get(key) not in (None, "", [], {})
+        for key in (
+            "result",
+            "error",
+            "resultSegments",
+            "stdoutPreview",
+            "stderrPreview",
+            "summary",
+            "resultPreview",
+            "result_preview",
+        )
+    )
 
 
 def _tool_role_history_message(
@@ -659,16 +739,35 @@ def _repair_provider_tool_chain(messages: list[Any]) -> list[Any]:
     pending_assistant_index = -1
     pending_result_indices: list[int] = []
     pending_tool_names: dict[str, str] = {}
+    pending_interrupted_ids: set[str] = set()
 
     def clear_pending_chain() -> None:
-        nonlocal pending_ids, pending_assistant_index, pending_result_indices, pending_tool_names
+        nonlocal pending_ids, pending_assistant_index, pending_result_indices, pending_tool_names, pending_interrupted_ids
         pending_ids = []
         pending_assistant_index = -1
         pending_result_indices = []
         pending_tool_names = {}
+        pending_interrupted_ids = set()
 
     def demote_pending_chain() -> None:
         nonlocal pending_ids, pending_assistant_index, pending_result_indices, pending_tool_names
+        if pending_ids and set(pending_ids).issubset(pending_interrupted_ids):
+            for tool_call_id in pending_ids:
+                repaired.append(
+                    {
+                        "role": "tool",
+                        "content": "aborted",
+                        "tool_call_id": tool_call_id,
+                        "metadata": {
+                            "schemaVersion": MODEL_MESSAGE_SCHEMA_VERSION,
+                            "kind": "interrupted_tool_result",
+                            "status": "aborted",
+                            "toolName": pending_tool_names.get(tool_call_id, "unknown_tool"),
+                        },
+                    }
+                )
+            clear_pending_chain()
+            return
         if 0 <= pending_assistant_index < len(repaired):
             assistant = repaired[pending_assistant_index]
             if _provider_message_role(assistant) == "assistant":
@@ -714,6 +813,15 @@ def _repair_provider_tool_chain(messages: list[Any]) -> list[Any]:
                 pending_assistant_index = len(repaired) - 1
                 pending_result_indices = []
                 pending_tool_names = _message_tool_call_names(message)
+                metadata = _provider_message_metadata(message)
+                interrupted_ids = metadata.get("interruptedToolCallIds") or metadata.get(
+                    "interrupted_tool_call_ids"
+                ) or []
+                pending_interrupted_ids = {
+                    str(item or "").strip()
+                    for item in list(interrupted_ids or [])
+                    if str(item or "").strip()
+                }
             continue
         if role == "tool":
             tool_call_id = _provider_message_tool_call_id(message)
