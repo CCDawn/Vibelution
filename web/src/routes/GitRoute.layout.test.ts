@@ -100,9 +100,10 @@ describe("GitRoute layout contract", () => {
     expect(gitRouteStyles.workspace).toContain("max-[860px]:grid-cols-[minmax(0,1fr)]");
     expect(gitRouteStyles.workspace).toContain("max-[860px]:content-start");
     expect(gitRouteStyles.workspaceOverview).toContain("minmax(0,1fr)");
-    expect(gitRouteStyles.workspaceOverview).toContain("minmax(0,0.9fr)");
+    expect(gitRouteStyles.workspaceOverview).toContain("minmax(360px,1fr)");
+    expect(gitRouteStyles.workspaceOverview).toContain("!grid-cols-");
     expect(gitRouteStyles.workspaceOverview).not.toMatch(/minmax\((500|520)px/);
-    expect(gitRouteStyles.workspaceOverview).toContain("max-[860px]:grid-cols-[minmax(0,1fr)]");
+    expect(gitRouteStyles.workspaceOverview).toContain("max-[860px]:!grid-cols-[minmax(0,1fr)]");
     expect(gitRouteStyles.diffPanel).toContain("min-w-0");
     expect(gitRouteStyles.objectDetailPanel).toContain("min-w-0");
   });
@@ -349,8 +350,9 @@ describe("GitRoute layout contract", () => {
     expect(routeSource).toContain('kind: "worktree"');
     expect(routeSource).toContain('kind: "commit"');
     expect(routeSource).toContain("objectDetailQuery");
-    expect(stylesSource).toContain("grid-cols-[minmax(0,0.9fr)_minmax(0,1.18fr)_minmax(0,0.62fr)]");
+    expect(stylesSource).toContain("!grid-cols-[minmax(360px,1fr)_minmax(0,1.2fr)_minmax(300px,0.85fr)]");
     expect(stylesSource).toContain("clamp(250px,22vw,360px)");
+    expect(stylesSource).toContain("max-[1200px]:grid-cols-1");
     expect(stylesSource).toContain("objectDetailPanel:");
     expect(stylesSource).toContain("objectItemActive:");
   });
@@ -378,7 +380,8 @@ describe("GitRoute layout contract", () => {
   });
 
   it("keeps Git workspaces from forcing tall empty mobile stacks", () => {
-    expect(stylesSource).toContain("max-[860px]:grid-cols-1");
+    expect(stylesSource).toContain("max-[1200px]:grid-cols-1");
+    expect(stylesSource).toContain("max-[860px]:!grid-cols-[minmax(0,1fr)]");
     expect(stylesSource).toContain("min-h-0");
     expect(stylesSource).not.toContain("min-height: 720px");
   });

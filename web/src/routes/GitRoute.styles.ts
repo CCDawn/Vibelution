@@ -23,8 +23,11 @@ export const gitRouteStyles = {
     "mx-2 mt-1.5 rounded-[var(--radius-panel)] border border-[color-mix(in_srgb,var(--state-error)_32%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_12%,transparent)] px-2.5 py-2 text-[var(--vui-font-xs)] text-[var(--state-error)]",
   workspace:
     "grid min-h-0 min-w-0 grid-cols-[var(--git-change-panel-width,320px)_10px_minmax(0,1fr)_clamp(250px,22vw,360px)] p-1.5 max-[1200px]:grid-cols-[minmax(240px,var(--git-change-panel-width,300px))_8px_minmax(0,1fr)] max-[1200px]:grid-rows-[minmax(0,1fr)_minmax(200px,34vh)] max-[1200px]:gap-y-1.5 max-[860px]:grid-cols-[minmax(0,1fr)] max-[860px]:grid-rows-none max-[860px]:content-start max-[860px]:gap-1.5",
+  // Clean overview must fully override the dirty-mode 4-column change-list template
+  // (workspace + workspaceOverview are combined). Without !grid-cols, left rail stays
+  // ~320px and nested 本地提交|WORKTREE cards crush/overlap text.
   workspaceOverview:
-    "grid-cols-[minmax(0,0.9fr)_minmax(0,1.18fr)_minmax(0,0.62fr)] gap-1.5 max-[1200px]:grid-cols-[minmax(0,1fr)_clamp(260px,28vw,340px)] max-[1200px]:grid-rows-[minmax(240px,0.92fr)_minmax(220px,0.8fr)] max-[860px]:grid-cols-[minmax(0,1fr)] max-[860px]:grid-rows-none",
+    "!grid-cols-[minmax(360px,1fr)_minmax(0,1.2fr)_minmax(300px,0.85fr)] !gap-2 max-[1400px]:!grid-cols-[minmax(0,1fr)_minmax(300px,0.9fr)] max-[1400px]:!grid-rows-[minmax(240px,0.95fr)_minmax(220px,0.85fr)] max-[1400px]:!gap-y-2 max-[860px]:!grid-cols-[minmax(0,1fr)] max-[860px]:!grid-rows-none max-[860px]:!content-start max-[860px]:!gap-1.5",
   resizeHandle:
     "relative min-w-2.5 cursor-col-resize touch-none border-0 bg-transparent p-0 outline-none before:absolute before:inset-y-0 before:left-1/2 before:w-[3px] before:-translate-x-1/2 before:rounded-full before:bg-[color-mix(in_srgb,var(--vui-surface-row)_18%,transparent)] before:transition before:content-[''] hover:before:bg-[color-mix(in_srgb,var(--accent-warm)_52%,transparent)] hover:before:shadow-none focus-visible:before:bg-[color-mix(in_srgb,var(--accent-warm)_52%,transparent)] focus-visible:before:shadow-none max-[860px]:hidden",
   changePanel:
@@ -34,14 +37,15 @@ export const gitRouteStyles = {
   gitOverviewPanel:
     "grid min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)] gap-2 max-[1200px]:[.workspaceOverview_&]:col-start-1 max-[1200px]:[.workspaceOverview_&]:row-start-1 max-[860px]:[.workspaceOverview_&]:col-auto max-[860px]:[.workspaceOverview_&]:row-auto",
   cleanStateStrip:
-    `grid w-full min-w-0 cursor-pointer grid-cols-[minmax(170px,auto)_minmax(0,1fr)] items-center gap-3 ${panelSurface} px-3 py-2.5 text-left text-inherit hover:border-[color-mix(in_srgb,var(--accent-cool)_30%,transparent)] hover:bg-[color-mix(in_srgb,var(--accent-cool)_8%,var(--vui-surface-panel))] max-[860px]:grid-cols-[minmax(0,1fr)] [&_h2]:m-0 [&_h2]:text-[0.98rem] [&_h2]:text-vui-fg-primary [&>span]:min-w-0 [&>span]:overflow-hidden [&>span]:text-ellipsis [&>span]:whitespace-nowrap [&>span]:text-[var(--vui-font-xs)] [&>span]:leading-tight [&>span]:text-vui-fg-secondary`,
-  gitSituationGrid: "grid min-h-0 min-w-0 grid-cols-[minmax(0,0.92fr)_minmax(0,1.08fr)] gap-2 max-[860px]:grid-cols-1",
+    `grid w-full min-w-0 cursor-pointer grid-cols-[minmax(140px,auto)_minmax(0,1fr)] items-center gap-3 ${panelSurface} px-3 py-2.5 text-left text-inherit hover:border-[color-mix(in_srgb,var(--accent-cool)_30%,transparent)] hover:bg-[color-mix(in_srgb,var(--accent-cool)_8%,var(--vui-surface-panel))] max-[860px]:grid-cols-[minmax(0,1fr)] [&_h2]:m-0 [&_h2]:text-[0.98rem] [&_h2]:text-vui-fg-primary [&>span]:min-w-0 [&>span]:[overflow-wrap:anywhere] [&>span]:[white-space:normal] [&>span]:text-[var(--vui-font-xs)] [&>span]:leading-tight [&>span]:text-vui-fg-secondary`,
+  gitSituationGrid:
+    "grid min-h-0 min-w-0 grid-cols-[minmax(0,0.92fr)_minmax(0,1.08fr)] gap-2 max-[1200px]:grid-cols-1",
   gitSituationCard:
-    `grid min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)] gap-2 ${panelSurface} p-2.5 [&_h2]:m-0 [&_h2]:text-[0.98rem] [&_h2]:text-vui-fg-primary`,
+    `grid min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)] gap-2 ${panelSurface} p-2.5 [&_h2]:m-0 [&_h2]:min-w-0 [&_h2]:text-[0.98rem] [&_h2]:text-vui-fg-primary`,
   situationList: "grid min-h-0 content-start gap-1.5 overflow-auto pr-1",
   worktreeList: "grid min-h-0 content-start gap-1.5 overflow-auto pr-1",
   worktreeItem:
-    `grid w-full min-w-0 cursor-pointer grid-cols-[minmax(0,1fr)_auto] items-center gap-2.5 ${rowSurface} px-[9px] py-2 text-left text-inherit ${rowSurfaceHover} [&_div]:grid [&_div]:min-w-0 [&_div]:gap-1 [&_strong]:min-w-0 [&_strong]:overflow-hidden [&_strong]:text-ellipsis [&_strong]:whitespace-nowrap [&_strong]:text-[var(--vui-font-xs)] [&_strong]:text-vui-fg-primary [&_span]:min-w-0 [&_span]:overflow-hidden [&_span]:text-ellipsis [&_span]:whitespace-nowrap [&_span]:text-[var(--vui-font-xs)] [&_span]:text-vui-fg-tertiary [&_code]:whitespace-nowrap [&_code]:font-mono [&_code]:text-[var(--vui-font-xs)] [&_code]:text-[var(--accent-warm-2)]`,
+    `grid w-full min-w-0 cursor-pointer grid-cols-[minmax(0,1fr)_auto] items-start gap-2 ${rowSurface} px-[9px] py-2 text-left text-inherit ${rowSurfaceHover} max-[520px]:grid-cols-[minmax(0,1fr)] [&_div]:grid [&_div]:min-w-0 [&_div]:gap-0.5 [&_strong]:min-w-0 [&_strong]:overflow-hidden [&_strong]:text-ellipsis [&_strong]:whitespace-nowrap [&_strong]:text-[var(--vui-font-xs)] [&_strong]:text-vui-fg-primary [&_span]:min-w-0 [&_span]:overflow-hidden [&_span]:text-ellipsis [&_span]:whitespace-nowrap [&_span]:text-[var(--vui-font-xs)] [&_span]:text-vui-fg-tertiary [&_code]:shrink-0 [&_code]:whitespace-nowrap [&_code]:font-mono [&_code]:text-[var(--vui-font-xs)] [&_code]:text-[var(--accent-warm-2)]`,
   historyPanel:
     "grid-rows-[auto_minmax(0,1fr)] max-[1200px]:[.workspaceOverview_&]:col-start-2 max-[1200px]:[.workspaceOverview_&]:row-[1/span_2] max-[1200px]:[.workspaceOverview_&]:grid-cols-1 max-[1200px]:[.workspaceOverview_&]:grid-rows-[auto_minmax(0,1fr)] max-[860px]:[.workspaceOverview_&]:col-auto max-[860px]:[.workspaceOverview_&]:row-auto",
   paneCollapsed: "overflow-hidden p-0 invisible",
@@ -83,7 +87,7 @@ export const gitRouteStyles = {
     `grid h-full content-start justify-items-start gap-[7px] ${panelSurface} p-3.5 text-vui-fg-secondary [&_p]:m-0 [&_p]:text-[var(--vui-font-xs)] [&_p]:leading-tight [&_p]:text-vui-fg-secondary [&_strong]:text-[0.98rem] [&_strong]:text-vui-fg-primary [&_svg]:h-[18px] [&_svg]:w-[18px] [&_svg]:text-[var(--accent-cool)]`,
   emptyState: "m-0 text-[var(--vui-font-xs)] leading-tight text-[var(--fg-secondary)]",
   commitItem:
-    `grid h-auto min-h-[62px] w-full min-w-0 cursor-pointer items-start justify-start gap-1 ${rowSurface} p-2 text-left text-inherit ${rowSurfaceHover} [&_code]:leading-tight [&_strong]:block [&_strong]:min-w-0 [&_strong]:max-w-full [&_strong]:overflow-hidden [&_strong]:text-ellipsis [&_strong]:whitespace-nowrap [&_strong]:leading-snug [&_p]:m-0 [&_p]:text-[var(--vui-font-xs)] [&_p]:leading-tight [&_p]:text-vui-fg-secondary`,
+    `grid h-auto min-h-[62px] w-full min-w-0 cursor-pointer items-start justify-start gap-1 ${rowSurface} p-2 text-left text-inherit ${rowSurfaceHover} [&_code]:leading-tight [&_strong]:block [&_strong]:min-w-0 [&_strong]:max-w-full [&_strong]:overflow-hidden [&_strong]:text-ellipsis [&_strong]:whitespace-nowrap [&_strong]:leading-snug [&_p]:m-0 [&_p]:min-w-0 [&_p]:overflow-hidden [&_p]:text-ellipsis [&_p]:whitespace-nowrap [&_p]:text-[var(--vui-font-xs)] [&_p]:leading-tight [&_p]:text-vui-fg-secondary`,
   objectItemActive:
     "border-[color-mix(in_srgb,var(--accent-cool)_40%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))] shadow-[var(--vui-shadow-inset-accent)]",
   manualCommitPanel:
@@ -117,5 +121,5 @@ export const gitRouteStyles = {
   commitBlockReason: "m-0 text-[var(--vui-font-xs)] leading-snug text-[var(--accent-warm-2)]",
   commitReady: "m-0 text-[var(--vui-font-xs)] leading-snug text-[var(--state-success)]",
   commitHeader:
-    "flex min-w-0 items-center justify-between gap-2 leading-tight [&_code]:min-w-0 [&_code]:text-[var(--vui-font-xs)] [&_code]:text-[var(--accent-warm-2)] [&_span]:inline-flex [&_span]:min-w-0 [&_span]:items-center [&_span]:gap-[5px] [&_span]:overflow-hidden [&_span]:text-ellipsis [&_span]:whitespace-nowrap [&_span]:text-[var(--vui-font-xs)] [&_span]:leading-tight [&_span]:text-[var(--fg-tertiary)]",
+    "flex min-w-0 flex-wrap items-center justify-between gap-x-2 gap-y-0.5 leading-tight [&_code]:shrink-0 [&_code]:text-[var(--vui-font-xs)] [&_code]:text-[var(--accent-warm-2)] [&_span]:inline-flex [&_span]:min-w-0 [&_span]:max-w-full [&_span]:items-center [&_span]:gap-[5px] [&_span]:overflow-hidden [&_span]:text-ellipsis [&_span]:whitespace-nowrap [&_span]:text-[var(--vui-font-xs)] [&_span]:leading-tight [&_span]:text-[var(--fg-tertiary)]",
 } as const;
