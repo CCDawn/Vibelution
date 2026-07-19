@@ -24,6 +24,7 @@ const productSharedParentStyleConsumers = [
   "routes/chat/ChatConversationIndexRail.tsx",
   "routes/chat/ChatStatusRail.tsx",
   "routes/chat/TokenCoreStatusPanel.tsx",
+  "routes/chat/useChatWorkbenchLayout.ts",
 ] as const;
 
 function walkFiles(dir: string): string[] {
