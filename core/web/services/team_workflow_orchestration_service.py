@@ -21940,6 +21940,182 @@ def _stage_planning_contract(stage_type: str, stage_round: dict[str, Any]) -> di
     }
 
 
+def _experiment_plan_revision(plan: dict[str, Any] | None) -> int:
+    contract = plan.get("experimentContract") if isinstance((plan or {}).get("experimentContract"), dict) else {}
+    try:
+        return max(0, int(contract.get("revision") or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _experiment_design_is_frozen(plan: dict[str, Any] | None) -> bool:
+    if not isinstance(plan, dict):
+        return False
+    validation = plan.get("contractValidation") if isinstance(plan.get("contractValidation"), dict) else {}
+    readiness = plan.get("readiness") if isinstance(plan.get("readiness"), dict) else {}
+    return validation.get("valid") is True and readiness.get("readyForPlanReview") is True
+
+
+def _latest_frozen_experiment_design(plans: list[dict[str, Any]]) -> dict[str, Any] | None:
+    frozen = [plan for plan in plans if _experiment_design_is_frozen(plan)]
+    if not frozen:
+        return None
+    return max(
+        frozen,
+        key=lambda plan: (
+            _experiment_plan_revision(plan),
+            str(plan.get("updatedAt") or plan.get("createdAt") or ""),
+        ),
+    )
+
+
+def _active_research_loop_projection(team_id: str) -> dict[str, Any] | None:
+    store = _read_json(_team_workflow_root(team_id) / "research_loops" / "index.json")
+    loops = [item for item in list(store.get("loops") or []) if isinstance(item, dict)]
+    active_loop_id = str(store.get("activeLoopId") or "")
+    for loop in loops:
+        if str(loop.get("loopId") or "") == active_loop_id:
+            return loop
+    return loops[-1] if loops else None
+
+
+def _best_research_loop_evidence_id(loop: dict[str, Any] | None) -> str:
+    evidence_records = [item for item in list((loop or {}).get("evidenceRecords") or []) if isinstance(item, dict)]
+    for evidence_type in ("benchmark_result", "full_run_result", "metric_report"):
+        for evidence in reversed(evidence_records):
+            if (
+                str(evidence.get("evidenceType") or "") == evidence_type
+                and str(evidence.get("status") or "").lower() == "passed"
+            ):
+                return str(evidence.get("evidenceId") or evidence.get("resultId") or "")
+    return ""
+
+
+def _best_validated_experiment_plan(
+    plans: list[dict[str, Any]],
+    active_loop: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    linked_experiment = (
+        active_loop.get("linkedExperiment")
+        if isinstance((active_loop or {}).get("linkedExperiment"), dict)
+        else {}
+    )
+    linked_plan_id = str(linked_experiment.get("planId") or "")
+    if linked_plan_id:
+        linked_plan = next((plan for plan in plans if str(plan.get("planId") or "") == linked_plan_id), None)
+        if linked_plan is not None:
+            return linked_plan
+    validated: list[dict[str, Any]] = []
+    for plan in plans:
+        full_run = plan.get("activeFullRunResult") if isinstance(plan.get("activeFullRunResult"), dict) else {}
+        ingestion = plan.get("knowledgeIngestion") if isinstance(plan.get("knowledgeIngestion"), dict) else {}
+        if str(full_run.get("status") or "").lower() == "passed" or str(ingestion.get("status") or "").lower() == "ingested":
+            validated.append(plan)
+    if not validated:
+        return None
+    return max(
+        validated,
+        key=lambda plan: (
+            _experiment_plan_revision(plan),
+            str(plan.get("updatedAt") or plan.get("createdAt") or ""),
+        ),
+    )
+
+
+def _experiment_lifecycle_projection(
+    *,
+    team_id: str,
+    latest_collection: dict[str, Any] | None,
+    candidate_store: dict[str, Any],
+    plans: list[dict[str, Any]],
+    active_plan: dict[str, Any] | None,
+) -> dict[str, Any]:
+    candidates = [item for item in list(candidate_store.get("candidates") or []) if isinstance(item, dict)]
+    source_candidates = [item for item in candidates if str(item.get("candidateType") or "") == "source_manifest"]
+    hypothesis_candidates = [item for item in candidates if str(item.get("candidateType") or "") == "algorithm_hypothesis"]
+    frozen_design = _latest_frozen_experiment_design(plans)
+    design_plan = frozen_design or active_plan
+    active_loop = _active_research_loop_projection(team_id)
+    best_plan = _best_validated_experiment_plan(plans, active_loop)
+    linked_experiment = (
+        active_loop.get("linkedExperiment")
+        if isinstance((active_loop or {}).get("linkedExperiment"), dict)
+        else {}
+    )
+    linked_candidate_ids = [
+        str(item)
+        for item in list(linked_experiment.get("candidateIds") or [])
+        if str(item).strip()
+    ]
+    best_plan_candidate_ids = [
+        str(item)
+        for item in list((best_plan or {}).get("hypothesisCandidateIds") or [])
+        if str(item).strip()
+    ]
+    best_candidate_id = (linked_candidate_ids or best_plan_candidate_ids or [""])[0]
+    loop_result_id = _best_research_loop_evidence_id(active_loop)
+    best_validated_result_id = loop_result_id or str((best_plan or {}).get("activeFullRunResultId") or "")
+    latest_plan = max(
+        plans,
+        key=lambda plan: (
+            _experiment_plan_revision(plan),
+            str(plan.get("updatedAt") or plan.get("createdAt") or ""),
+        ),
+        default=None,
+    )
+    stage2_status = "not_started"
+    if design_plan is not None:
+        stage2_status = "frozen" if _experiment_design_is_frozen(design_plan) else "draft"
+    stage3_status = str((active_loop or {}).get("status") or "")
+    if not stage3_status:
+        stage3_status = "validated" if best_validated_result_id else "not_started"
+    latest_diagnostic_status = {
+        "planId": str((latest_plan or {}).get("planId") or ""),
+        "revision": _experiment_plan_revision(latest_plan),
+        "status": str((latest_plan or {}).get("status") or ""),
+        "title": str((latest_plan or {}).get("title") or ""),
+    }
+    knowledge_item_ids = [
+        str(((plan.get("knowledgeIngestion") or {}).get("result") or {}).get("knowledgeItemId") or "")
+        for plan in plans
+        if isinstance(plan.get("knowledgeIngestion"), dict)
+        and isinstance((plan.get("knowledgeIngestion") or {}).get("result"), dict)
+    ]
+    knowledge_item_ids = [item for item in knowledge_item_ids if item]
+    return {
+        "schemaVersion": 1,
+        "migrationMode": "derived_from_append_only_history",
+        "stage1": {
+            "status": "ready_for_hypothesis" if latest_collection and hypothesis_candidates else "collecting",
+            "latestRoundId": str((latest_collection or {}).get("stageRoundId") or ""),
+            "sourceCandidateCount": len(source_candidates),
+            "hypothesisCandidateCount": len(hypothesis_candidates),
+            "linkedExperimentKnowledgeItemCount": len(set(knowledge_item_ids)),
+        },
+        "stage2": {
+            "status": stage2_status,
+            "activeDesignPlanId": str((design_plan or {}).get("planId") or ""),
+            "frozenDesignRevision": _experiment_plan_revision(design_plan) if stage2_status == "frozen" else 0,
+            "readyForExecution": stage2_status == "frozen",
+            "completionDefinition": "frozen_executable_experiment_design",
+        },
+        "stage3": {
+            "status": stage3_status,
+            "activeIterationId": str((active_loop or {}).get("loopId") or ""),
+            "bestCandidateId": best_candidate_id,
+            "bestValidatedResultId": best_validated_result_id,
+            "bestValidatedPlanId": str((best_plan or {}).get("planId") or ""),
+            "latestDiagnosticStatus": latest_diagnostic_status,
+            "completionDefinition": "executed_evaluated_and_governed_result",
+        },
+        "compatibility": {
+            "legacyActivePlanId": str((active_plan or {}).get("planId") or ""),
+            "historyRewritten": False,
+            "appendOnlyEvidencePreserved": True,
+        },
+    }
+
+
 def _experiment_planning_status(
     team_id: str,
     rounds: list[dict[str, Any]],
@@ -21953,6 +22129,13 @@ def _experiment_planning_status(
     ready_hypotheses = [item for item in hypothesis_candidates if item.get("valid") and not item.get("missingExperimentPlanFields")]
     plans = _experiment_plans(plan_store)
     active_plan = _active_experiment_plan(plan_store)
+    lifecycle_projection = _experiment_lifecycle_projection(
+        team_id=team_id,
+        latest_collection=latest_collection,
+        candidate_store=candidate_store,
+        plans=plans,
+        active_plan=active_plan,
+    )
     gaps = _experiment_planning_gaps(
         latest_experiment=latest_experiment,
         hypothesis_candidates=hypothesis_candidates,
@@ -21993,6 +22176,7 @@ def _experiment_planning_status(
         "latestKnowledgeCollectionRound": latest_collection,
         "activePlan": active_plan,
         "plans": plans[-12:],
+        "lifecycleProjection": lifecycle_projection,
         "hypothesisCandidates": hypothesis_candidates[:24],
         "readyHypothesisCandidates": ready_hypotheses[:24],
         "gaps": gaps,
@@ -22005,6 +22189,12 @@ def _experiment_planning_status(
             "activePlanId": str(active_plan.get("planId") or "") if active_plan else "",
             "activeFullRunResultId": str((active_plan or {}).get("activeFullRunResultId") or "") if active_plan else "",
             "knowledgeIngestionStatus": str(((active_plan or {}).get("knowledgeIngestion") or {}).get("status") or "") if active_plan and isinstance(active_plan.get("knowledgeIngestion"), dict) else "",
+            "activeDesignPlanId": lifecycle_projection["stage2"]["activeDesignPlanId"],
+            "frozenDesignRevision": lifecycle_projection["stage2"]["frozenDesignRevision"],
+            "activeIterationId": lifecycle_projection["stage3"]["activeIterationId"],
+            "bestCandidateId": lifecycle_projection["stage3"]["bestCandidateId"],
+            "bestValidatedResultId": lifecycle_projection["stage3"]["bestValidatedResultId"],
+            "latestDiagnosticStatus": lifecycle_projection["stage3"]["latestDiagnosticStatus"],
         },
         "readiness": {
             "readyToPlan": bool(latest_experiment and ready_hypotheses),

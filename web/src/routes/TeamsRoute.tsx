@@ -306,29 +306,29 @@ const RESEARCH_WORKSPACE_NAV_ITEMS: Array<{
   },
   {
     view: "experiment",
-    zh: "实验",
-    en: "Experiment",
-    zhDetail: "规划、执行、指标与结果对比",
-    enDetail: "Planning, execution, metrics, and comparison",
-    zhModules: "实验规划 / Baseline / 指标 / 结果记录",
-    enModules: "Experiment plan / baseline / metrics / results",
+    zh: "实验设计",
+    en: "Experiment design",
+    zhDetail: "可证伪假设、变量、控制组与冻结协议",
+    enDetail: "Falsifiable hypothesis, variables, controls, and frozen protocol",
+    zhModules: "研究问题 / 假设 / 控制变量 / 冻结设计",
+    enModules: "Question / hypothesis / controls / frozen design",
   },
   {
     view: "iteration",
-    zh: "迭代",
-    en: "Iteration",
-    zhDetail: "复盘、版本、优化与交付",
-    enDetail: "Review, versions, optimization, and delivery",
-    zhModules: "复盘 / 版本化 / 改进计划 / 交付门禁",
-    enModules: "Review / versioning / improvements / delivery gate",
+    zh: "执行迭代",
+    en: "Execution & iteration",
+    zhDetail: "执行、评估、消融、归因与版本晋升",
+    enDetail: "Execution, evaluation, ablation, diagnosis, and promotion",
+    zhModules: "执行批次 / 结果评估 / 消融归因 / 优化迭代",
+    enModules: "Runs / evaluation / ablation / controlled iteration",
   },
 ];
 
 const RESEARCH_WORKSPACE_LABELS: Record<ResearchWorkspaceView, { zh: string; en: string }> = {
   overview: { zh: "科研总览", en: "Overview" },
   knowledge_collection: { zh: "知识搜集", en: "Knowledge collection" },
-  experiment: { zh: "实验", en: "Experiment" },
-  iteration: { zh: "迭代", en: "Iteration" },
+  experiment: { zh: "实验设计", en: "Experiment design" },
+  iteration: { zh: "执行迭代", en: "Execution & iteration" },
   source_collection: { zh: "搜索资料", en: "Source search" },
   coordination: { zh: "团队协调", en: "Coordination" },
   ingestion: { zh: "入库审核", en: "Ingestion review" },
@@ -1025,6 +1025,43 @@ type ExperimentPlanningStatusPayload = {
   latestKnowledgeCollectionRound?: ResearchStageRound | null;
   activePlan?: ExperimentPlanRecord | null;
   plans: ExperimentPlanRecord[];
+  lifecycleProjection?: {
+    schemaVersion: number;
+    migrationMode: string;
+    stage1: {
+      status: string;
+      latestRoundId: string;
+      sourceCandidateCount: number;
+      hypothesisCandidateCount: number;
+      linkedExperimentKnowledgeItemCount: number;
+    };
+    stage2: {
+      status: string;
+      activeDesignPlanId: string;
+      frozenDesignRevision: number;
+      readyForExecution: boolean;
+      completionDefinition: string;
+    };
+    stage3: {
+      status: string;
+      activeIterationId: string;
+      bestCandidateId: string;
+      bestValidatedResultId: string;
+      bestValidatedPlanId: string;
+      latestDiagnosticStatus: {
+        planId: string;
+        revision: number;
+        status: string;
+        title: string;
+      };
+      completionDefinition: string;
+    };
+    compatibility: {
+      legacyActivePlanId: string;
+      historyRewritten: boolean;
+      appendOnlyEvidencePreserved: boolean;
+    };
+  };
   hypothesisCandidates: ExperimentHypothesisCandidateSummary[];
   readyHypothesisCandidates: ExperimentHypothesisCandidateSummary[];
   gaps: Array<{ code: string; severity: string; message: string }>;
@@ -1037,6 +1074,17 @@ type ExperimentPlanningStatusPayload = {
     activePlanId: string;
     activeFullRunResultId?: string;
     knowledgeIngestionStatus?: string;
+    activeDesignPlanId?: string;
+    frozenDesignRevision?: number;
+    activeIterationId?: string;
+    bestCandidateId?: string;
+    bestValidatedResultId?: string;
+    latestDiagnosticStatus?: {
+      planId: string;
+      revision: number;
+      status: string;
+      title: string;
+    };
   };
   readiness: {
     readyToPlan: boolean;
@@ -5215,12 +5263,12 @@ export function TeamsRoute({
         primaryAction: lang === "zh" ? "开始知识搜集" : "Start knowledge",
       },
       experiment: {
-        label: lang === "zh" ? "实验" : "Experiment",
-        primaryAction: lang === "zh" ? "启动实验规划" : "Plan experiment",
+        label: lang === "zh" ? "实验设计" : "Experiment design",
+        primaryAction: lang === "zh" ? "启动设计" : "Start design",
       },
       iteration: {
-        label: lang === "zh" ? "迭代" : "Iteration",
-        primaryAction: lang === "zh" ? "启动迭代" : "Start iteration",
+        label: lang === "zh" ? "执行与迭代" : "Execution & iteration",
+        primaryAction: lang === "zh" ? "启动执行迭代" : "Start execution",
       },
     };
     const knowledgeCollectionStatusLabel = sourceCollectionDisplayState.statusText;
@@ -5309,9 +5357,31 @@ export function TeamsRoute({
     };
     const stageStatusLoading = !researchStageRoundStatus && researchStageRoundStatusQuery.isPending;
     const stageStatusUnavailable = !researchStageRoundStatus && researchStageRoundStatusQuery.isError;
+    const experimentLifecycleProjection = experimentPlanningStatus?.lifecycleProjection;
     const stageStatusLabel = (stageType: ResearchStageType, active: boolean, latestRound: ResearchStagePhaseStatus["latestRound"] | null | undefined) => {
       if (stageType === "knowledge_collection") {
         return knowledgeCollectionStatusLabel;
+      }
+      if (stageType === "experiment" && experimentLifecycleProjection?.stage2) {
+        if (experimentLifecycleProjection.stage2.status === "frozen") {
+          return lang === "zh" ? "已设计 · 待执行" : "designed · ready";
+        }
+        if (experimentLifecycleProjection.stage2.status === "draft") {
+          return lang === "zh" ? "设计中" : "designing";
+        }
+      }
+      if (stageType === "iteration" && experimentLifecycleProjection?.stage3) {
+        const executionStatus = experimentLifecycleProjection.stage3.status;
+        if (executionStatus === "accepted_for_writeup") {
+          return lang === "zh" ? "已晋升" : "promoted";
+        }
+        if (executionStatus === "not_started") {
+          return lang === "zh" ? "待执行" : "not started";
+        }
+        if (["needs_review", "ready_for_iteration", "repair_and_repeat"].includes(executionStatus)) {
+          return lang === "zh" ? "待优化" : "needs iteration";
+        }
+        return lang === "zh" ? "执行中" : "executing";
       }
       if (stageStatusLoading) {
         return lang === "zh" ? "状态同步中" : "Syncing status";
@@ -5375,19 +5445,29 @@ export function TeamsRoute({
         return lang === "zh" ? "本轮可补充搜集，或由用户决定进入实验。" : "Add another collection round or move to experiments.";
       }
       if (stageType === "experiment") {
+        if (experimentLifecycleProjection?.stage2.status === "frozen") {
+          return lang === "zh"
+            ? "实验设计已冻结；训练结果不参与本阶段完成判定。"
+            : "The design is frozen; training results do not determine Stage 2 completion.";
+        }
         if (active) {
-          return lang === "zh" ? "实验规划已启动，补齐 baseline、指标和记录。" : "Planning is active. Fill baselines, metrics, and records.";
+          return lang === "zh" ? "补齐假设、变量、控制组、预算、指标与执行门禁。" : "Complete hypotheses, variables, controls, budget, metrics, and gates.";
         }
         return latestRound
           ? (lang === "zh" ? "可重新规划实验，或查看上一轮计划。" : "Replan or review the latest plan.")
           : (lang === "zh" ? "知识搜集后，由用户决定启动实验规划。" : "Start experiment planning after collection.");
       }
+      if (experimentLifecycleProjection?.stage3.status === "accepted_for_writeup") {
+        return lang === "zh"
+          ? "最佳版本已通过评估；最近诊断单独展示，不覆盖主线结果。"
+          : "The best version passed review; diagnostics remain separate from the main result.";
+      }
       if (active) {
-        return lang === "zh" ? "迭代已启动，围绕结果复盘和版本化推进。" : "Iteration is active for review and versioning.";
+        return lang === "zh" ? "按冻结设计执行、评估、归因并受控迭代。" : "Execute the frozen design, evaluate, diagnose, and iterate under control.";
       }
       return latestRound
         ? (lang === "zh" ? "可开启新一轮优化，沉淀交付计划。" : "Start another optimization round and prepare delivery.")
-        : (lang === "zh" ? "实验完成后再进入迭代优化。" : "Enter iteration after experiments are complete.");
+        : (lang === "zh" ? "冻结实验设计后进入执行、优化和迭代。" : "Enter execution and iteration after the design is frozen.");
     };
     const currentStageLabel = researchStageRoundStatus?.currentStage
       ? researchWorkspaceViewLabel(researchStageRoundStatus.currentStage as ResearchStageWorkspaceView, lang)
@@ -5467,6 +5547,26 @@ export function TeamsRoute({
                     <span>{lang === "zh" ? `原始 ${sourceCollectionCollectedCountText}` : `raw ${sourceCollectionCollectedCountText}`}</span>
                     <span>{lang === "zh" ? `候选 ${sourceCollectionDisplayedCandidateCountText}` : `candidates ${sourceCollectionDisplayedCandidateCountText}`}</span>
                     <span>{lang === "zh" ? `查询 ${sourceCollectionQueryCountText}` : `queries ${sourceCollectionQueryCountText}`}</span>
+                  </div>
+                ) : stageType === "experiment" && experimentLifecycleProjection?.stage2 ? (
+                  <div className={styles.researchStageCardMetrics}>
+                    <span>{lang === "zh" ? `冻结设计 v${experimentLifecycleProjection.stage2.frozenDesignRevision || "-"}` : `frozen v${experimentLifecycleProjection.stage2.frozenDesignRevision || "-"}`}</span>
+                    <span title={experimentLifecycleProjection.stage2.activeDesignPlanId}>
+                      {lang === "zh" ? "当前设计" : "design"} {experimentLifecycleProjection.stage2.activeDesignPlanId || "-"}
+                    </span>
+                    <span>{experimentLifecycleProjection.stage2.readyForExecution ? (lang === "zh" ? "可执行" : "executable") : (lang === "zh" ? "待冻结" : "not frozen")}</span>
+                  </div>
+                ) : stageType === "iteration" && experimentLifecycleProjection?.stage3 ? (
+                  <div className={styles.researchStageCardMetrics}>
+                    <span title={experimentLifecycleProjection.stage3.bestCandidateId}>
+                      {lang === "zh" ? "最佳候选" : "best"} {experimentLifecycleProjection.stage3.bestCandidateId || "-"}
+                    </span>
+                    <span title={experimentLifecycleProjection.stage3.bestValidatedResultId}>
+                      {lang === "zh" ? "最佳结果" : "result"} {experimentLifecycleProjection.stage3.bestValidatedResultId || "-"}
+                    </span>
+                    <span title={experimentLifecycleProjection.stage3.latestDiagnosticStatus.title}>
+                      {lang === "zh" ? "最近诊断" : "diagnostic"} {experimentLifecycleProjection.stage3.latestDiagnosticStatus.status || "-"}
+                    </span>
                   </div>
                 ) : (
                   <em>{navItem ? (lang === "zh" ? navItem.zhModules : navItem.enModules) : ""}</em>
