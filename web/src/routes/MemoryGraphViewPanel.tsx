@@ -165,6 +165,7 @@ export function MemoryGraphViewPanel({
               <VButton
                 key={node.id}
                 type="button"
+                contentLayout="plain"
                 className={selectedGraphNode?.id === node.id ? `${styles.itemButton} ${styles.itemButtonActive}` : styles.itemButton}
                 data-node-type={node.type}
                 data-agent-category={String(node.visual?.agentCategory || node.metadata?.agentCategory || "")}

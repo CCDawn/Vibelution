@@ -107,6 +107,7 @@ export function TokenCoreStatusPanel({
                       <VButton
                         {...(triggerProps as unknown as VButtonProps)}
                         type="button"
+                        contentLayout="plain"
                         className={[triggerClassName, styles.tokenStatusMetricButton].filter(Boolean).join(" ")}
                         isDisabled={!cacheDetailAvailable}
                         onClick={cacheDetailAvailable ? onOpenCacheDetail : undefined}
@@ -143,6 +144,7 @@ export function TokenCoreStatusPanel({
                     <VButton
                       {...(triggerProps as unknown as VButtonProps)}
                       type="button"
+                      contentLayout="plain"
                       className={[triggerClassName, styles.tokenStatusMetricButton].filter(Boolean).join(" ")}
                       aria-label={`${metric.label} ${metric.value}. ${metric.meta}`}
                     >

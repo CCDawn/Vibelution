@@ -30,6 +30,23 @@ describe("conversationDisplayProtocol", () => {
     })).toBe(true);
   });
 
+  it("keeps degraded and recovered model transport statuses visible", () => {
+    expect(shouldDisplayRuntimeStatus({
+      kind: "status",
+      name: "model_transport",
+      status: "degraded",
+      summary: "WebSocket 暂时不可用，正在切换到 HTTP。",
+      error: "no available account",
+      failureClass: "provider_transport_unavailable",
+    })).toBe(true);
+    expect(shouldDisplayRuntimeStatus({
+      kind: "status",
+      name: "model_transport",
+      status: "recovered",
+      summary: "连接已恢复，已切换到 HTTP。",
+    })).toBe(true);
+  });
+
   it("keeps recoverable long-loop progress visible", () => {
     expect(shouldDisplayRuntimeStatus({
       kind: "status",

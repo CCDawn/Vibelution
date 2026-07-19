@@ -534,9 +534,9 @@ describe("ConversationView edit resend affordance", () => {
     expect(styles.timelineCellPreview).toContain("whitespace-normal");
     expect(styles.timelineCellPreview).toContain("[overflow-wrap:anywhere]");
     expect(styles.timelineCellPreview).toContain("line-clamp-2");
-    expect(styles.timelineCellPreview).toContain("text-[var(--vui-font-sm)]");
-    expect(styles.timelineCellPreview).not.toContain("text-[var(--vui-font-xs)]");
-    expect(styles.timelineCellTitle).toContain("text-[var(--vui-font-sm)]");
+    expect(styles.timelineCellPreview).toContain("[font-size:var(--vui-font-sm)]");
+    expect(styles.timelineCellPreview).not.toContain("[font-size:var(--vui-font-xs)]");
+    expect(styles.timelineCellTitle).toContain("[font-size:var(--vui-font-sm)]");
     expect(styles.timelineCellTitle).toContain("font-semibold");
     expect(styles.operationItem).not.toContain("860px");
     expect(styles.operationItem).toContain("w-[min(100%,72ch)]");

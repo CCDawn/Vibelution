@@ -18135,6 +18135,7 @@ def _normalize_tool_call_status(value: Any, *, default: str = "done") -> str:
         "finished",
         "ready",
         "degraded",
+        "recovered",
         "observed",
         "failed",
         "error",
@@ -18146,7 +18147,7 @@ def _normalize_tool_call_status(value: Any, *, default: str = "done") -> str:
         "timeout",
         "timed_out",
     }:
-        if status in {"success", "succeeded", "completed", "finished", "ready", "degraded", "observed"}:
+        if status in {"success", "succeeded", "completed", "finished", "ready", "observed"}:
             return "done"
         if status == "error":
             return "failed"
@@ -21434,6 +21435,14 @@ def _set_session_llm_status_live_output(
     attempt = _coerce_nonnegative_int(data.get("attempt"))
     max_attempts = _coerce_nonnegative_int(data.get("max_attempts") or data.get("maxAttempts"))
     category = str(data.get("category") or data.get("reason") or "").strip()
+    close_code = _coerce_nonnegative_int(data.get("closeCode") or data.get("close_code"))
+    close_reason = trim_lines(str(data.get("closeReason") or data.get("close_reason") or "").strip(), max_lines=1)
+    fallback_transport = str(data.get("fallbackTransport") or data.get("fallback_transport") or "").strip()
+    transport_detail = close_reason or (f"WebSocket {close_code}" if close_code else "")
+    feedback_status = "running"
+    feedback_name = status_key or "status"
+    feedback_error = ""
+    failure_class = ""
 
     if status_key == "retrying":
         attempt_line = (
@@ -21448,6 +21457,39 @@ def _set_session_llm_status_live_output(
             en=f"Retrying the model connection...\n{attempt_line}; reason: {reason_line}. This turn is still running.",
         )
         stage = "model_retry"
+    elif status_key == "transport_degraded":
+        content = text_for(
+            language,
+            zh=f"模型连接中断，正在恢复。{f'\\n{transport_detail}' if transport_detail else ''}",
+            en=f"The model connection was interrupted and is recovering.{f'\\n{transport_detail}' if transport_detail else ''}",
+        )
+        stage = "model_transport"
+        feedback_status = "degraded"
+        feedback_name = "model_transport"
+        feedback_error = transport_detail or category
+        failure_class = category or "provider_transport_unavailable"
+    elif status_key == "transport_fallback":
+        target = fallback_transport.upper() if fallback_transport else "HTTP"
+        content = text_for(
+            language,
+            zh=f"WebSocket 暂时不可用，正在切换到 {target}。{f'\\n{transport_detail}' if transport_detail else ''}",
+            en=f"WebSocket is temporarily unavailable; switching to {target}.{f'\\n{transport_detail}' if transport_detail else ''}",
+        )
+        stage = "model_transport"
+        feedback_status = "degraded"
+        feedback_name = "model_transport"
+        feedback_error = transport_detail or category
+        failure_class = category or "provider_transport_unavailable"
+    elif status_key == "transport_recovered":
+        target = fallback_transport.upper() if fallback_transport else "HTTP"
+        content = text_for(
+            language,
+            zh=f"连接已恢复。\n已从 WebSocket 切换到 {target}。",
+            en=f"Connection recovered.\nSwitched from WebSocket to {target}.",
+        )
+        stage = "model_transport"
+        feedback_status = "recovered"
+        feedback_name = "model_transport"
     elif status_key == "failed":
         reason_line = category or text_for(language, zh="模型调用失败", en="model call failed")
         hint_line = (
@@ -21461,23 +21503,37 @@ def _set_session_llm_status_live_output(
             en=f"The model request failed.\nReason: {reason_line}.{hint_line}",
         )
         stage = "model_failed"
+        feedback_status = "failed"
     else:
         return
 
+    feedback_event = {
+        "kind": "status",
+        "status": feedback_status if status_key != "failed" else "failed",
+        "name": feedback_name,
+        "summary": trim_lines(content, max_lines=2),
+        "resultPreview": content,
+        "error": feedback_error,
+        "failureClass": failure_class,
+        "transportStatus": status_key if status_key.startswith("transport_") else "",
+    }
     feedback_events = _append_session_live_feedback_event(
         session_id,
-        {
-            "kind": "status",
-            "status": "failed" if status_key == "failed" else "running",
-            "name": status_key or stage,
-            "summary": trim_lines(content, max_lines=2),
-            "resultPreview": content,
-        },
+        feedback_event,
         turn_id=turn_id,
     )
     capture = _active_session_turn_capture(session_id, turn_id)
     if capture is not None:
-        capture.note_status_event(status_key or stage, content, status="failed" if status_key == "failed" else "running", name=status_key or stage)
+        capture.note_status_event(
+            status_key or stage,
+            content,
+            status="failed" if status_key == "failed" else "running",
+            name=feedback_name,
+        )
+        for existing in capture.feedback_events:
+            if existing.get("kind") == "status" and str(existing.get("name") or "").strip() == feedback_name:
+                existing.update(feedback_event)
+                break
         feedback_events = list(capture.feedback_events)
     _set_session_live_output(
         session_id,
@@ -21497,6 +21553,9 @@ def _set_session_llm_status_live_output(
             "attempt": attempt,
             "maxAttempts": max_attempts,
             "category": trim_lines(category, max_lines=1),
+            "closeCode": close_code,
+            "closeReason": close_reason,
+            "fallbackTransport": fallback_transport,
             "messageLength": len(content),
         },
     )

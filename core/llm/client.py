@@ -1518,6 +1518,7 @@ class LLMClient:
             "reused": "observed",
             "fallback": "fallback",
             "disconnected": "failed",
+            "recovered": "recovered",
         }
         levels = {"fallback": "warning", "disconnected": "warning"}
         _record_llm_scene_event(
@@ -1535,6 +1536,23 @@ class LLMClient:
             },
             lifecycle=False,
         )
+        status_names = {
+            "disconnected": "transport_degraded",
+            "fallback": "transport_fallback",
+            "recovered": "transport_recovered",
+        }
+        status_name = status_names.get(state)
+        if status_name:
+            _publish_llm_status_event(
+                status_name,
+                providerId=self.provider.provider_id,
+                providerKind=self.provider.kind,
+                model=self.profile.model,
+                profileId=self.profile_id,
+                transport="websocket",
+                category="provider_transport_unavailable",
+                **fields,
+            )
 
     def _prepare_cancellable_responses_stream(
         self,

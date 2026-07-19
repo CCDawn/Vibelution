@@ -15,7 +15,7 @@ const styles = {
   group: "grid min-w-0 gap-1",
   groupHeader: "sticky top-0 z-[1] flex min-w-0 items-center justify-between gap-2 bg-[var(--vui-surface-panel)] px-1 py-1 [font-size:var(--vui-font-xs)] font-semibold text-[var(--fg-secondary)]",
   groupCount: "font-normal text-[var(--fg-tertiary)]",
-  option: "!grid !min-h-[54px] !w-full !min-w-0 !grid-cols-[minmax(0,1fr)_auto] !items-center !gap-3 !rounded-[10px] !border !border-transparent !bg-transparent !px-2.5 !py-2 !text-left !shadow-none hover:!border-[var(--vui-border-subtle)] hover:!bg-[var(--vui-control-muted)] focus-visible:!border-[var(--accent-cool)] [&_[data-slot=vui-button-content]]:contents",
+  option: "!grid !h-auto !min-h-[54px] !w-full !min-w-0 !grid-cols-[minmax(0,1fr)_auto] !items-center !gap-3 !rounded-[10px] !border !border-transparent !bg-transparent !px-2.5 !py-2 !text-left !shadow-none hover:!border-[var(--vui-border-subtle)] hover:!bg-[var(--vui-control-muted)] focus-visible:!border-[var(--accent-cool)] [&_[data-slot=vui-button-content]]:contents",
   optionSelected: "!border-[color-mix(in_srgb,var(--accent-cool)_42%,transparent)] !bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)]",
   optionDisabled: "opacity-60",
   optionCopy: "grid min-w-0 gap-1",
