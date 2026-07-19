@@ -42,8 +42,8 @@ export const gitRouteStyles = {
     "grid min-h-0 min-w-0 grid-cols-[minmax(0,0.92fr)_minmax(0,1.08fr)] gap-2 max-[1200px]:grid-cols-1",
   gitSituationCard:
     `grid min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)] gap-2 ${panelSurface} p-2.5 [&_h2]:m-0 [&_h2]:min-w-0 [&_h2]:text-[0.98rem] [&_h2]:text-vui-fg-primary`,
-  situationList: "grid min-h-0 content-start gap-1.5 overflow-auto pr-1",
-  worktreeList: "grid min-h-0 content-start gap-1.5 overflow-auto pr-1",
+  situationList: "grid min-h-0 content-start gap-2.5 overflow-auto pr-1",
+  worktreeList: "grid min-h-0 content-start gap-2.5 overflow-auto pr-1",
   worktreeItem:
     `grid w-full min-w-0 cursor-pointer grid-cols-[minmax(0,1fr)_auto] items-start gap-2 ${rowSurface} px-[9px] py-2 text-left text-inherit ${rowSurfaceHover} max-[520px]:grid-cols-[minmax(0,1fr)] [&_div]:grid [&_div]:min-w-0 [&_div]:gap-0.5 [&_strong]:min-w-0 [&_strong]:overflow-hidden [&_strong]:text-ellipsis [&_strong]:whitespace-nowrap [&_strong]:text-[var(--vui-font-xs)] [&_strong]:text-vui-fg-primary [&_span]:min-w-0 [&_span]:overflow-hidden [&_span]:text-ellipsis [&_span]:whitespace-nowrap [&_span]:text-[var(--vui-font-xs)] [&_span]:text-vui-fg-tertiary [&_code]:shrink-0 [&_code]:whitespace-nowrap [&_code]:font-mono [&_code]:text-[var(--vui-font-xs)] [&_code]:text-[var(--accent-warm-2)]`,
   historyPanel:
@@ -62,7 +62,7 @@ export const gitRouteStyles = {
   selectionButton:
     mutedControl,
   fileList: "grid min-h-0 content-start gap-1.5 overflow-auto pr-1",
-  commitList: "grid min-h-0 content-start gap-1.5 overflow-auto pr-1",
+  commitList: "grid min-h-0 content-start gap-2.5 overflow-auto pr-1",
   fileButton:
     `grid w-full grid-cols-[22px_34px_minmax(0,1fr)] items-start gap-1.5 ${rowSurface} p-[6px] text-left text-vui-fg-primary ${rowSurfaceHover}`,
   fileButtonActive:
@@ -86,15 +86,14 @@ export const gitRouteStyles = {
   emptyPreview:
     `grid h-full content-start justify-items-start gap-[7px] ${panelSurface} p-3.5 text-vui-fg-secondary [&_p]:m-0 [&_p]:text-[var(--vui-font-xs)] [&_p]:leading-tight [&_p]:text-vui-fg-secondary [&_strong]:text-[0.98rem] [&_strong]:text-vui-fg-primary [&_svg]:h-[18px] [&_svg]:w-[18px] [&_svg]:text-[var(--accent-cool)]`,
   emptyState: "m-0 text-[var(--vui-font-xs)] leading-tight text-[var(--fg-secondary)]",
-  // Single-column card. Prefer [font-size]/[color:] arbitrary props so
-  // Tailwind never maps font-size CSS vars into the text-* color channel
-  // (that made subject/author paint as near-invisible).
+  // Single-column card with readable vertical rhythm: roomy padding, clear
+  // inter-card gap (commitList), and distinct header / title / author rows.
   commitItem:
-    `!grid h-auto min-h-0 w-full min-w-0 grid-cols-1 auto-rows-auto content-start items-stretch justify-items-stretch gap-1 whitespace-normal ${rowSurface} p-2 text-left [color:var(--fg-primary)] ${rowSurfaceHover}`,
+    `!grid h-auto min-h-[4.5rem] w-full min-w-0 grid-cols-1 auto-rows-auto content-start items-stretch justify-items-stretch gap-1.5 whitespace-normal ${rowSurface} px-2.5 py-2.5 text-left [color:var(--fg-primary)] ${rowSurfaceHover}`,
   commitSubject:
-    "block m-0 min-h-[1.25em] min-w-0 max-w-full overflow-hidden text-ellipsis whitespace-nowrap font-semibold leading-snug [font-size:var(--vui-font-sm)] [color:var(--fg-primary)]",
+    "block m-0 min-h-[1.35em] min-w-0 max-w-full overflow-hidden text-ellipsis whitespace-nowrap font-semibold leading-snug [font-size:var(--vui-font-sm)] [color:var(--fg-primary)]",
   commitAuthor:
-    "block m-0 min-h-[1.15em] min-w-0 max-w-full overflow-hidden text-ellipsis whitespace-nowrap font-normal leading-tight [font-size:var(--vui-font-xs)] [color:var(--fg-secondary)]",
+    "block m-0 mt-0.5 min-h-[1.2em] min-w-0 max-w-full overflow-hidden text-ellipsis whitespace-nowrap font-normal leading-tight [font-size:var(--vui-font-xs)] [color:var(--fg-secondary)]",
   objectItemActive:
     "border-[color-mix(in_srgb,var(--accent-cool)_40%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))] shadow-[var(--vui-shadow-inset-accent)]",
   manualCommitPanel:
@@ -128,5 +127,5 @@ export const gitRouteStyles = {
   commitBlockReason: "m-0 text-[var(--vui-font-xs)] leading-snug text-[var(--accent-warm-2)]",
   commitReady: "m-0 text-[var(--vui-font-xs)] leading-snug text-[var(--state-success)]",
   commitHeader:
-    "flex w-full min-w-0 items-center justify-between gap-2 leading-tight [&_code]:shrink-0 [&_code]:font-mono [&_code]:[font-size:var(--vui-font-xs)] [&_code]:[color:var(--accent-warm-2)] [&_span]:inline-flex [&_span]:min-w-0 [&_span]:shrink-0 [&_span]:items-center [&_span]:gap-[5px] [&_span]:[font-size:var(--vui-font-xs)] [&_span]:leading-tight [&_span]:[color:var(--fg-tertiary)]",
+    "mb-0.5 flex w-full min-w-0 items-center justify-between gap-2 leading-tight [&_code]:shrink-0 [&_code]:font-mono [&_code]:[font-size:var(--vui-font-xs)] [&_code]:[color:var(--accent-warm-2)] [&_span]:inline-flex [&_span]:min-w-0 [&_span]:shrink-0 [&_span]:items-center [&_span]:gap-[5px] [&_span]:[font-size:var(--vui-font-xs)] [&_span]:leading-tight [&_span]:[color:var(--fg-tertiary)]",
 } as const;
