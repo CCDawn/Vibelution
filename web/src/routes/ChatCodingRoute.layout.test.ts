@@ -57,6 +57,7 @@ import chatSessionSelectionSource from "./chat/useChatSessionSelection.ts?raw";
 import chatSessionDetailHelpersSource from "./chat/chatSessionDetailHelpers.ts?raw";
 import chatRoutePresentationSource from "./chat/chatRoutePresentation.tsx?raw";
 import chatWorkspaceLifecycleSource from "./chat/useChatWorkspaceLifecycle.ts?raw";
+import chatSessionDetailMutationsSource from "./chat/useChatSessionDetailMutations.ts?raw";
 import chatToolApprovalDialogStyles from "./chat/ChatToolApprovalDialog.styles";
 import chatToolApprovalDialogSource from "./chat/ChatToolApprovalDialog.tsx?raw";
 import { ChatToolApprovalDialog } from "./chat/ChatToolApprovalDialog";
@@ -140,6 +141,7 @@ const routeAndStreamSource = `${routeSource}\n${sessionDetailStreamSource}\n${gr
 const routeAndSelectionSource = `${routeSource}\n${chatSessionSelectionSource}`;
 const routeAndHelpersSource = `${routeSource}\n${chatSessionDetailHelpersSource}\n${chatRoutePresentationSource}`;
 const routeAndLifecycleSource = `${routeSource}\n${chatWorkspaceLifecycleSource}\n${chatSessionDetailHelpersSource}`;
+const routeAndDetailMutationsSource = `${routeSource}\n${chatSessionDetailMutationsSource}`;
 
 describe("ChatCodingRoute layout contract", () => {
   it("keeps the center conversation readable and the composer as a stable bottom layer", () => {
@@ -312,7 +314,7 @@ describe("ChatCodingRoute layout contract", () => {
   it("surfaces pending tool approvals as an in-session dialog", () => {
     expect(routeSource).toContain("pendingToolGovernanceRequests");
     expect(routeSource).toContain("resolveToolApprovalMutation");
-    expect(routeSource).toContain("/tool-governance-requests/");
+    expect(routeAndDetailMutationsSource).toContain("/tool-governance-requests/");
     expect(routeSource).toContain("onApproveToolApproval={() => {");
     expect(routeSource).toContain("if (!pendingToolApproval) {");
     expect(routeSource).toContain("resolveToolApprovalMutation.mutate({ request: pendingToolApproval, decision: \"approve\" })");
@@ -2818,7 +2820,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeAndHelpersSource).toContain("params.set(\"messageLimit\", String(options.messageLimit ?? SESSION_DETAIL_INITIAL_MESSAGE_LIMIT))");
     expect(routeAndHelpersSource).toContain("params.set(\"transcriptScope\", options.transcriptScope ?? \"window\")");
     expect(routeSource).toContain("structuralSharing: (previous, next) =>");
-    expect(routeSource).toContain("mergeSessionDetailMessageWindow(current, page)");
+    expect(routeAndDetailMutationsSource).toContain("mergeSessionDetailMessageWindow(current, page)");
     expect(routeSource).toContain("const nextDetail = mergeSessionDetailMessageWindow(previous, detail)");
     expect(routeSource).toContain("hasEarlierMessages: Boolean(detail.messageWindow?.hasEarlier)");
     expect(routeSource).toContain("earlierMessagesLoading: loadEarlierSessionMessagesMutation.isPending");
@@ -3015,9 +3017,9 @@ describe("ChatCodingRoute layout contract", () => {
   });
 
   it("keeps the Agent model fixed while mutating only Session reasoning effort", () => {
-    expect(routeSource).toContain("const sessionReasoningEffortMutation = useMutation");
-    expect(routeSource).toContain("/reasoning-effort");
-    expect(routeSource).toContain("JSON.stringify({ reasoningEffort: variables.reasoningEffort })");
+    expect(routeAndDetailMutationsSource).toContain("const sessionReasoningEffortMutation = useMutation");
+    expect(routeAndDetailMutationsSource).toContain("/reasoning-effort");
+    expect(routeAndDetailMutationsSource).toContain("JSON.stringify({ reasoningEffort: variables.reasoningEffort })");
     expect(routeSource).toContain("model: sessionLlmOptions?.model ?? null");
     expect(routeSource).toContain("onReasoningEffortChange");
     expect(routeSource).not.toContain("/llm-selection");
