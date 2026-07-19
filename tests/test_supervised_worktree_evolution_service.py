@@ -405,6 +405,12 @@ def test_real_worktree_flow_uses_supervised_conversation_chain_for_candidate_bra
     assert snapshot["candidateWorktree"]["path"]
     candidate_path = Path(snapshot["candidateWorktree"]["path"]).resolve()
     assert "# improved by candidate" in (candidate_path / "agent.py").read_text(encoding="utf-8")
+    variant = snapshot["candidateWorktree"]["variant"]
+    assert variant["bindingStatus"] == "verified"
+    assert variant["checkpointCommit"] == "base"
+    assert variant["variantId"].startswith("swte-variant-")
+    assert len(variant["patchSha256"]) == 64
+    assert variant["changedPaths"] == ["agent.py"]
     assert [str(call["agent_binding"]["role"]) for call in calls] == [
         "baseline",
         "baseline",
@@ -419,8 +425,63 @@ def test_real_worktree_flow_uses_supervised_conversation_chain_for_candidate_bra
     candidate_eval_calls = calls[3:]
     assert all(Path(call["repo_root"]).resolve() == candidate_path for call in candidate_eval_calls)
     assert all(Path(call["workspace_override"]).resolve() == candidate_path for call in candidate_eval_calls)
+    assert snapshot["candidate"]["candidateVariant"] == variant
     assert snapshot["agentBindings"]["candidate"]["agentId"] == "agent-candidate"
     assert snapshot["mentalModelMode"] == "enabled"
+
+
+def test_candidate_variant_changes_when_untracked_content_changes(tmp_path):
+    candidate = tmp_path / "candidate"
+    _init_repo(candidate)
+    (candidate / "tracked.txt").write_text("base\n", encoding="utf-8")
+    _run_git(candidate, "add", ".")
+    _run_git(candidate, "commit", "-m", "base")
+    (candidate / "candidate.txt").write_text("first\n", encoding="utf-8")
+    changed_files = service._candidate_changed_files(candidate)
+
+    first = service._build_candidate_variant(
+        candidate,
+        checkpoint_commit="checkpoint-a",
+        changed_files=changed_files,
+    )
+    (candidate / "candidate.txt").write_text("second\n", encoding="utf-8")
+    second = service._build_candidate_variant(
+        candidate,
+        checkpoint_commit="checkpoint-a",
+        changed_files=changed_files,
+    )
+
+    assert first["patchSha256"] != second["patchSha256"]
+    assert first["variantId"] != second["variantId"]
+
+
+def test_decision_fails_closed_without_candidate_variant_binding():
+    snapshot = {
+        "baseline": {"score": 50},
+        "candidate": {"score": 100},
+        "candidateModification": {"status": "success", "summary": "done"},
+        "candidateWorktree": {
+            "changedFiles": [{"path": "agent.py", "status": "M", "highRisk": False}],
+        },
+    }
+
+    decision = service._build_decision(snapshot, {"mode": "auto"})
+
+    variant_gate = next(gate for gate in decision["gates"] if gate["name"] == "candidate_variant_bound")
+    assert variant_gate["status"] == "fail"
+    assert decision["recommendedAction"] == "discard"
+
+
+def test_candidate_variant_gate_rejects_mismatched_variant_id():
+    candidate_variant = {
+        "bindingStatus": "verified",
+        "variantId": "swte-variant-" + ("0" * 64),
+        "checkpointCommit": "checkpoint-a",
+        "patchSha256": "1" * 64,
+        "changedFileCount": 1,
+    }
+
+    assert service._candidate_variant_is_bound(candidate_variant) is False
 
 
 def test_supervised_worktree_flow_stops_when_baseline_provider_transport_fails(tmp_path):
