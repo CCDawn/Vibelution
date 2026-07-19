@@ -59,6 +59,8 @@ import chatRoutePresentationSource from "./chat/chatRoutePresentation.tsx?raw";
 import chatWorkspaceLifecycleSource from "./chat/useChatWorkspaceLifecycle.ts?raw";
 import chatSessionDetailMutationsSource from "./chat/useChatSessionDetailMutations.ts?raw";
 import chatWorkspaceActionsSource from "./chat/useChatWorkspaceActions.ts?raw";
+import chatGroupMessagePresentationSource from "./chat/ChatGroupMessagePresentation.tsx?raw";
+import chatSessionRenameMenuSource from "./chat/useChatSessionRenameMenu.ts?raw";
 import chatToolApprovalDialogStyles from "./chat/ChatToolApprovalDialog.styles";
 import chatToolApprovalDialogSource from "./chat/ChatToolApprovalDialog.tsx?raw";
 import { ChatToolApprovalDialog } from "./chat/ChatToolApprovalDialog";
@@ -144,6 +146,8 @@ const routeAndHelpersSource = `${routeSource}\n${chatSessionDetailHelpersSource}
 const routeAndLifecycleSource = `${routeSource}\n${chatWorkspaceLifecycleSource}\n${chatSessionDetailHelpersSource}`;
 const routeAndDetailMutationsSource = `${routeSource}\n${chatSessionDetailMutationsSource}`;
 const routeAndActionsSource = `${routeSource}\n${chatWorkspaceActionsSource}`;
+const routeAndGroupPresentationSource = `${routeSource}\n${chatGroupMessagePresentationSource}\n${chatRoutePresentationSource}`;
+const routeAndRenameMenuSource = `${routeSource}\n${chatSessionRenameMenuSource}`;
 
 describe("ChatCodingRoute layout contract", () => {
   it("keeps the center conversation readable and the composer as a stable bottom layer", () => {
@@ -1711,16 +1715,17 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeAndIndexRailSource).toContain("styles.groupManagementPanel");
     expect(routeSource).toContain("styles.groupConversationFrame");
     expect(routeSource).toContain("compactAgentRoleLabel");
-    expect(routeSource).toContain("shouldCollapseGroupMessage");
-    expect(routeSource).toContain("shouldDefaultCollapseGroupMessage");
+    expect(routeAndGroupPresentationSource).toContain("shouldCollapseGroupMessage");
+    expect(routeAndGroupPresentationSource).toContain("shouldDefaultCollapseGroupMessage");
     expect(routeAndHelpersSource).toContain("message.audience === \"internal\"");
-    expect(routeSource).toContain("展开讨论");
+    expect(routeAndGroupPresentationSource).toContain("展开讨论");
     expect(routeSource).toContain("expandedGroupMessageIds");
-    expect(routeSource).toContain("stripGroupSpeakerPrefix(message, identityName)");
-    expect(routeSource).toContain("renderGroupMessageBody(message, speakerIdentity.name)");
+    expect(routeAndGroupPresentationSource).toContain("stripGroupSpeakerPrefix(message, identityName)");
+    expect(routeSource).toContain("<ChatGroupMessageBody");
+    expect(routeSource).toContain("identityName={speakerIdentity.name}");
     expect(routeSource).toContain("title={speakerIdentity.fullIdentityLabel}");
-    expect(routeSource).toContain("展开全文");
-    expect(routeSource).toContain("收起");
+    expect(routeAndGroupPresentationSource).toContain("展开全文");
+    expect(routeAndGroupPresentationSource).toContain("收起");
     expect(routeSource).toContain("message.status !== \"completed\" ? <span>{statusLabel(message.status)}</span> : null");
     expect(routeAndHelpersSource).toContain("numericTail.slice(-2)");
     expect(routeSource).not.toContain("navigate(`/chat-rooms");
@@ -1842,12 +1847,12 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("不带 @ 默认投递全体");
     expect(routeSource).toContain("打断目标助手");
     expect(routeSource).toContain("buildChatMentionTargets(agentsQuery.data ?? [])");
-    expect(routeSource).toContain("tokenizeChatMentions(text, chatMentionTargets)");
-    expect(routeSource).toContain("handleOpenMentionTarget(segment.target)");
+    expect(routeAndGroupPresentationSource).toContain("tokenizeChatMentions(text, mentionTargets)");
+    expect(routeAndGroupPresentationSource).toContain("onOpenMentionTarget(segment.target)");
     expect(routeSource).toContain("styles.projectBusEvent");
     expect(routeSource).toContain("styles.projectBusEventRevoked");
     expect(routeSource).toContain("styles.projectBusEventActions");
-    expect(routeSource).toContain("styles.agentMention");
+    expect(routeAndGroupPresentationSource).toContain("styles.agentMention");
     expect(routeSource).toContain("styles.projectBusInterruptToggle");
 
     expect(routeStyles.projectBusEvent).toBeTypeOf("string");
@@ -2211,7 +2216,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("type SessionContextMenuState");
     expect(routeSource).toContain("const [sessionContextMenu, setSessionContextMenu]");
     expect(routeSource).toContain("const contextMenuSessionId = sessionContextMenu?.sessionId ?? \"\"");
-    expect(routeSource).toContain("function openSessionContextMenu");
+    expect(routeAndRenameMenuSource).toContain("const openSessionContextMenu = useCallback");
     expect(routeSource).toContain("onContextMenu={openSessionContextMenu}");
     expect(routeSource).toContain("contextMenuSessionId={contextMenuSessionId}");
     expect(conversationIndexTreeSource).toContain("contextMenuSessionId");
@@ -2222,9 +2227,9 @@ describe("ChatCodingRoute layout contract", () => {
     expect(agentSessionTabStripSource).toContain("onContextMenu={(event) => onContextMenu(event, session)}");
     expect(routeSource).toContain("contextMenuSession");
     expect(routeSource).toContain("agentCenterConfigRoute");
-    expect(routeSource).toContain("function openSessionAgentConfig");
-    expect(routeSource).toContain("returnLabel: \"chat\"");
-    expect(routeSource).toContain("returnTo: `/chat?session=${encodeURIComponent(session.id)}`");
+    expect(routeAndRenameMenuSource).toContain("const openSessionAgentConfig = useCallback");
+    expect(routeAndRenameMenuSource).toContain("returnLabel: \"chat\"");
+    expect(routeAndRenameMenuSource).toContain("returnTo: `/chat?session=${encodeURIComponent(session.id)}`");
     expect(routeSource).toContain("<SessionContextMenu");
     expect(routeSource).toContain("onAddToReview={handleAddSessionToReview}");
     expect(routeSource).toContain("onOpenAgentConfig={openSessionAgentConfig}");
