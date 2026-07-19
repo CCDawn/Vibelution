@@ -95,6 +95,31 @@ describe("VUI dual-theme foundation", () => {
     expect(lightThemeBlock).toContain("--vui-status-info-bg");
     expect(lightThemeBlock).toContain("--accent-cool-contrast");
     expect(lightThemeBlock).toContain("--surface-elevated");
+    expect(tokensSource).toContain("--vui-select-chevron");
+    expect(lightThemeBlock).toContain("--vui-select-chevron");
+  });
+
+  it("keeps shadcn-native form renderers dual-theme safe", () => {
+    const selectSource = readFileSync(
+      resolve(import.meta.dirname, "renderers/shadcn/ShadcnSelect.tsx"),
+      "utf8",
+    );
+    const formClassesSource = readFileSync(
+      resolve(import.meta.dirname, "forms/formClasses.ts"),
+      "utf8",
+    );
+    const nativeControlsSource = readFileSync(
+      resolve(designRoot, "vui-native-controls.css"),
+      "utf8",
+    );
+
+    expect(selectSource).toContain("bg-[image:var(--vui-select-chevron)]");
+    expect(selectSource).not.toContain("%237d8796");
+    expect(formClassesSource).toContain("[color-scheme:inherit]");
+    expect(nativeControlsSource).toContain('select[data-renderer="shadcn"] option');
+    expect(nativeControlsSource).toContain("color-scheme: inherit");
+    expect(nativeControlsSource).toContain("background-color: var(--surface-input)");
+    expect(nativeControlsSource).toContain("color: var(--fg-primary)");
   });
 
   it("keeps the app readable without relying on browser zoom", () => {

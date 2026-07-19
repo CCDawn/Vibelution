@@ -183,6 +183,9 @@
   --vui-workspace-detail-min: 0;
   --vui-chat-pane-gutter: 0px;
   --vui-chat-status-rail-default: 240px;
+
+  /* Theme-aware form chrome (Path B Wave 7). Select chevron fill follows tertiary fg. */
+  --vui-select-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%237d8796' d='M2.5 4.5 6 8l3.5-3.5'/%3E%3C/svg%3E");
 }
 
 [data-theme="light"] {
@@ -320,4 +323,7 @@
   --border-soft: rgba(15, 23, 42, 0.1);
   --border-strong: rgba(15, 23, 42, 0.16);
   --border-hairline: rgba(15, 23, 42, 0.07);
+
+  /* Light-theme chevron uses light tertiary gray for contrast on white fields. */
+  --vui-select-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%237a8494' d='M2.5 4.5 6 8l3.5-3.5'/%3E%3C/svg%3E");
 }
