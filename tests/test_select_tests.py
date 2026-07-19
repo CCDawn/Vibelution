@@ -15,7 +15,10 @@ def test_matrix_loads_with_builtin_subset_parser():
     matrix = select_tests._parse_yaml_subset(select_tests.DEFAULT_MATRIX.read_text(encoding="utf-8"))
 
     assert matrix["version"] == 1
-    assert matrix["always"]["commands"] == ["git diff --check"]
+    assert matrix["always"]["commands"] == [
+        "git diff --check",
+        ".\\.venv\\Scripts\\python.exe -m pytest tests/test_tool_authorization_test_contract.py -q",
+    ]
     assert any(rule["id"] == "web-session-chat" for rule in matrix["rules"])
 
 
@@ -307,6 +310,7 @@ def test_selector_uses_default_when_no_rule_matches():
     assert result["matchedRules"] == []
     assert result["commands"] == [
         "git diff --check",
+        ".\\.venv\\Scripts\\python.exe -m pytest tests/test_tool_authorization_test_contract.py -q",
         ".\\.venv\\Scripts\\python.exe -m pytest tests/test_runner.py -q",
         ".\\.venv\\Scripts\\python.exe -m pytest tests/ --collect-only -q",
     ]

@@ -65,6 +65,9 @@ import chatCliAgentTerminalSource from "./chat/useChatCliAgentTerminal.ts?raw";
 import chatCacheDetailModelSource from "./chat/chatCacheDetailModel.ts?raw";
 import chatCacheDetailDialogSource from "./chat/useChatCacheDetailDialog.ts?raw";
 import chatTokenStatusModelSource from "./chat/chatTokenStatusModel.ts?raw";
+import chatGroupCenterSurfaceSource from "./chat/ChatGroupCenterSurface.tsx?raw";
+import chatCliAgentTerminalStackSource from "./chat/ChatCliAgentTerminalStack.tsx?raw";
+import chatSessionSurfaceModelSource from "./chat/chatSessionSurfaceModel.ts?raw";
 import chatToolApprovalDialogStyles from "./chat/ChatToolApprovalDialog.styles";
 import chatToolApprovalDialogSource from "./chat/ChatToolApprovalDialog.tsx?raw";
 import { ChatToolApprovalDialog } from "./chat/ChatToolApprovalDialog";
@@ -155,6 +158,9 @@ const routeAndRenameMenuSource = `${routeSource}\n${chatSessionRenameMenuSource}
 const routeAndCliTerminalSource = `${routeSource}\n${chatCliAgentTerminalSource}\n${cliAgentRunModelSource}`;
 const routeAndCacheDetailSource = `${routeSource}\n${chatCacheDetailModelSource}\n${chatCacheDetailDialogSource}\n${sessionCacheCompositionSource}\n${chatRoutePresentationSource}`;
 const routeAndTokenStatusSource = `${routeSource}\n${chatTokenStatusModelSource}`;
+const routeAndGroupCenterSource = `${routeSource}\n${chatGroupCenterSurfaceSource}\n${chatGroupMessagePresentationSource}\n${chatRoutePresentationSource}`;
+const routeAndCliStackSource = `${routeSource}\n${chatCliAgentTerminalStackSource}\n${chatCliAgentTerminalSource}\n${cliAgentRunModelSource}`;
+const routeAndSessionSurfaceSource = `${routeSource}\n${chatSessionSurfaceModelSource}`;
 
 describe("ChatCodingRoute layout contract", () => {
   it("keeps the center conversation readable and the composer as a stable bottom layer", () => {
@@ -910,8 +916,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeAndIndexRailSource).toContain("VContextualHint");
     expect(routeAndIndexRailSource).toContain("styles.sectionEyebrowRow");
     expect(routeAndIndexRailSource).toContain("styles.groupManagementTitleRow");
-    expect(routeSource).toContain("styles.groupConversationTitleRow");
-    expect(routeSource).toContain("暂无通知。");
+    expect(routeAndGroupCenterSource).toContain("styles.groupConversationTitleRow");
+    expect(routeAndGroupCenterSource).toContain("暂无通知。");
     expect(routeSource).not.toContain("className={styles.featurePresetNote}");
     expect(routeAndIndexRailSource).toContain("groupManagementHint");
     expect(routeAndIndexRailSource).toContain("sessionBindingNotice");
@@ -1420,14 +1426,14 @@ describe("ChatCodingRoute layout contract", () => {
   });
 
   it("shows the active skill contract before the context status cards", () => {
-    expect(routeSource).toContain("type ActiveSkillContract = {");
+    expect(routeAndSessionSurfaceSource).toContain("export type ActiveSkillContract = {");
     expect(routeSource).toContain("type SessionDetailWithActiveSkill = SessionDetail &");
-    expect(routeSource).toContain("const activeSkillContract = (detail as SessionDetailWithActiveSkill | undefined)?.activeSkillContract ?? null");
-    expect(routeAndIndexRailSource).toContain("const activeSkillStatusLabel = activeSkillStatus === \"stale\"");
+    expect(routeSource).toContain("contract: (detail as SessionDetailWithActiveSkill | undefined)?.activeSkillContract");
+    expect(routeAndSessionSurfaceSource).toContain("const activeSkillStatusLabel = activeSkillStatus === \"stale\"");
     expect(routeAndIndexRailSource).toContain("styles.activeSkillStatus_stale");
     expect(routeAndIndexRailSource).toContain("styles.activeSkillStatus_missing");
-    expect(routeSource).toContain("const activeSkillTitle = activeSkillContract");
-    expect(routeAndIndexRailSource).toContain("const activeSkillStatusStyle = activeSkillStatus === \"stale\"");
+    expect(routeAndSessionSurfaceSource).toContain("const activeSkillTitle = activeSkillContract");
+    expect(routeSource).toContain("const activeSkillStatusStyle = activeSkillStatus === \"stale\"");
     expect(routeAndIndexRailSource).toContain("className={`${styles.activeSkillStatus} ${activeSkillStatusStyle}`}");
     expect(routeAndIndexRailSource).toContain("styles.activeSkillIdentity");
     expect(routeAndIndexRailSource).toContain("styles.activeSkillMeta");
@@ -1502,23 +1508,24 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("const runtimeMatchesSelectedSession = Boolean(");
     expect(routeSource).toContain("runtimeActiveChatTurnSessionIds.has(activeSessionId)");
     expect(routeSource).toContain("const runtimeMismatchLine = runtimeActiveChatTurnSessionId && !runtimeMatchesSelectedSession");
-    expect(routeSource).toContain("const noActiveDirectSessionTitle =");
-    expect(routeSource).toMatch(/!\s*activeSessionId\s*\?\s*noActiveDirectSessionTitle/);
+    expect(routeAndSessionSurfaceSource).toContain("const noActiveDirectSessionTitle =");
+    expect(routeAndSessionSurfaceSource).toMatch(/!\s*activeSessionId\s*\?\s*noActiveDirectSessionTitle/);
     expect(routeAndTokenStatusSource).toContain("lastContextComposition?.totalTokens ?? sessionContextUsage?.used ?? 0");
     expect(routeAndTokenStatusSource).toContain("lastContextComposition?.limitTokens ?? sessionContextUsage?.limit ?? 0");
     expect(routeSource).toContain("const compression = runtimeMatchesSelectedSession ? runtime?.contextCompression : undefined");
-    expect(routeSource).toContain("runtimeMatchesSelectedSession && runtime?.sessionStateLine");
-    expect(routeSource).toMatch(/!\s*activeSessionId\s*\?\s*noActiveDirectSessionLine/);
-    expect(routeSource).toContain("runtimeMismatchLine || (sessionDetailErrorState.blockingError");
-    expect(routeSource).toContain("(runtimeMatchesSelectedSession ? runtime?.taskSummary : \"\")");
-    expect(routeSource).toContain("detail?.defaultFileContext ?? (runtimeMatchesSelectedSession ? runtime?.defaultRoute : undefined) ?? \"workspace\"");
+    expect(routeAndSessionSurfaceSource).toContain("runtimeMatchesSelectedSession && runtimeSessionStateLine");
+    expect(routeAndSessionSurfaceSource).toMatch(/!\s*activeSessionId\s*\?\s*noActiveDirectSessionLine/);
+    expect(routeAndSessionSurfaceSource).toContain("runtimeMismatchLine || (sessionDetailBlockingError");
+    expect(routeAndSessionSurfaceSource).toContain("(runtimeMatchesSelectedSession ? runtimeTaskSummary : \"\")");
+    expect(routeAndSessionSurfaceSource).toContain("detail?.defaultFileContext ?? (runtimeMatchesSelectedSession ? runtimeDefaultRoute : undefined) ?? \"workspace\"");
+    expect(routeSource).toContain("buildChatSessionStateViewModel");
 
     expect(routeSource).not.toContain("detail?.title ?? runtime?.sessionTitle");
     expect(routeSource).not.toContain("directSessionActiveSummary?.title ?? t(\"loadingSession\")");
     expect(routeSource).not.toContain("sessionContextUsage?.used ?? runtime?.contextUsage.used");
     expect(routeSource).not.toContain("sessionContextUsage?.limit ?? runtime?.contextUsage.limit");
-    expect(routeSource).not.toContain(": runtime?.sessionStateLine");
-    expect(routeSource).not.toContain("|| runtime?.taskSummary");
+    expect(routeSource).not.toContain("runtimeMatchesSelectedSession && runtime?.sessionStateLine");
+    expect(routeSource).not.toContain("|| (runtimeMatchesSelectedSession ? runtime?.taskSummary : \"\")");
     expect(routeSource).not.toContain("detail?.defaultFileContext ?? runtime?.defaultRoute");
   });
 
@@ -1535,9 +1542,9 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("const latestControlSignalLine = latestControlSignal");
     expect(routeSource).toContain("return lang === \"zh\" ? \"工具失败\" : \"Tool failed\"");
     expect(routeSource).toContain("latestControlSignalTitle");
-    expect(routeSource).toContain("label: t(\"nextStateSignalsLabel\")");
-    expect(routeSource).toContain("value: latestControlSignalLine");
-    expect(routeSource).toContain("title: latestControlSignalTitle");
+    expect(routeAndSessionSurfaceSource).toContain("label: t(\"nextStateSignalsLabel\")");
+    expect(routeAndSessionSurfaceSource).toContain("value: latestControlSignalLine");
+    expect(routeAndSessionSurfaceSource).toContain("title: latestControlSignalTitle");
     expect(routeSource).not.toContain("nextStateSignals={detail.nextStateSignals ?? []}");
     expect(routeStyles.inlineMetaPill).toContain("[&_strong]:whitespace-normal");
     expect(routeStyles.inlineMetaPill).toContain("[overflow-wrap:anywhere]");
@@ -1559,10 +1566,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeAndIndexRailSource).toContain("sessionBindingNotice");
     expect(routeAndIndexRailSource).toContain("sessionBindingMismatchLine");
     expect(routeAndIndexRailSource).toContain("onOpenDirectSession(agentPrimaryDirectSessionId)");
-    expect(routeSource).toContain("label: t(\"sessionBinding\")");
-    expect(routeSource.indexOf("label: t(\"sessionBinding\")")).toBeLessThan(
-      routeAndIndexRailSource.indexOf("<TokenCoreStatusPanel"),
-    );
+    expect(routeAndSessionSurfaceSource).toContain("label: t(\"sessionBinding\")");
+    expect(routeAndIndexRailSource).toContain("<TokenCoreStatusPanel");
     expect(routeSource).not.toContain("label: t(\"currentTask\")");
   });
 
@@ -1721,7 +1726,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeAndActionsSource).toContain("groupManageSessionIds");
     expect(routeAndLifecycleSource).toContain("setGroupManageSessionIds((current) => current.filter((sessionId) => sessionId !== variables.sessionId))");
     expect(routeAndIndexRailSource).toContain("styles.groupManagementPanel");
-    expect(routeSource).toContain("styles.groupConversationFrame");
+    expect(routeAndGroupCenterSource).toContain("styles.groupConversationFrame");
     expect(routeSource).toContain("compactAgentRoleLabel");
     expect(routeAndGroupPresentationSource).toContain("shouldCollapseGroupMessage");
     expect(routeAndGroupPresentationSource).toContain("shouldDefaultCollapseGroupMessage");
@@ -1729,12 +1734,13 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeAndGroupPresentationSource).toContain("展开讨论");
     expect(routeSource).toContain("expandedGroupMessageIds");
     expect(routeAndGroupPresentationSource).toContain("stripGroupSpeakerPrefix(message, identityName)");
-    expect(routeSource).toContain("<ChatGroupMessageBody");
-    expect(routeSource).toContain("identityName={speakerIdentity.name}");
-    expect(routeSource).toContain("title={speakerIdentity.fullIdentityLabel}");
+    expect(routeAndGroupCenterSource).toContain("<ChatGroupMessageBody");
+    expect(routeAndGroupCenterSource).toContain("identityName={speakerIdentity.name}");
+    expect(routeAndGroupCenterSource).toContain("title={speakerIdentity.fullIdentityLabel}");
     expect(routeAndGroupPresentationSource).toContain("展开全文");
     expect(routeAndGroupPresentationSource).toContain("收起");
-    expect(routeSource).toContain("message.status !== \"completed\" ? <span>{statusLabel(message.status)}</span> : null");
+    expect(routeAndGroupCenterSource).toContain("message.status !== \"completed\" ? <span>{statusLabel(message.status)}</span> : null");
+    expect(routeSource).toContain("<ChatGroupCenterSurface");
     expect(routeAndHelpersSource).toContain("numericTail.slice(-2)");
     expect(routeSource).not.toContain("navigate(`/chat-rooms");
     expect(routeStyles.leftRail).toContain("[grid-column:5]");
@@ -1844,24 +1850,24 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("queryFn: ({ signal }) => listProjectAgentBusTimeline(undefined, { signal })");
     expect(routeAndLifecycleSource).toContain("sendProjectAgentBusMessage({ content, interruptTargets })");
     expect(routeAndLifecycleSource).toContain("revokeProjectAgentBusMessage({");
-    expect(routeSource).toContain("isProjectAgentBusEventRevoked(event)");
-    expect(routeSource).toContain("kernelTaskCenterHref");
-    expect(routeSource).toContain("event.kernel?.taskId");
-    expect(routeSource).toContain("handleRevokeProjectBusMessage(event.eventId)");
+    expect(routeAndGroupCenterSource).toContain("isProjectAgentBusEventRevoked(event)");
+    expect(routeAndGroupCenterSource).toContain("kernelTaskCenterHref");
+    expect(routeAndGroupCenterSource).toContain("event.kernel?.taskId");
+    expect(routeAndGroupCenterSource).toContain("onRevokeProjectBusMessage(event.eventId)");
     expect(routeSource).toContain("projectBusInterruptTargets");
-    expect(routeSource).toContain("助手通知流");
-    expect(routeSource).toContain("它不是团队群聊");
-    expect(routeSource).toContain("全局广播/私信投递记录");
-    expect(routeSource).toContain("不带 @ 默认投递全体");
-    expect(routeSource).toContain("打断目标助手");
+    expect(routeAndGroupCenterSource).toContain("助手通知流");
+    expect(routeAndGroupCenterSource).toContain("它不是团队群聊");
+    expect(routeAndSessionSurfaceSource).toContain("全局广播/私信投递记录");
+    expect(routeAndGroupCenterSource).toContain("不带 @ 默认投递全体");
+    expect(routeAndGroupCenterSource).toContain("打断目标助手");
     expect(routeSource).toContain("buildChatMentionTargets(agentsQuery.data ?? [])");
     expect(routeAndGroupPresentationSource).toContain("tokenizeChatMentions(text, mentionTargets)");
     expect(routeAndGroupPresentationSource).toContain("onOpenMentionTarget(segment.target)");
-    expect(routeSource).toContain("styles.projectBusEvent");
-    expect(routeSource).toContain("styles.projectBusEventRevoked");
-    expect(routeSource).toContain("styles.projectBusEventActions");
+    expect(routeAndGroupCenterSource).toContain("styles.projectBusEvent");
+    expect(routeAndGroupCenterSource).toContain("styles.projectBusEventRevoked");
+    expect(routeAndGroupCenterSource).toContain("styles.projectBusEventActions");
     expect(routeAndGroupPresentationSource).toContain("styles.agentMention");
-    expect(routeSource).toContain("styles.projectBusInterruptToggle");
+    expect(routeAndGroupCenterSource).toContain("styles.projectBusInterruptToggle");
 
     expect(routeStyles.projectBusEvent).toBeTypeOf("string");
     expect(routeStyles.projectBusEventRevoked).toBeTypeOf("string");
@@ -2340,8 +2346,9 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("const rightIndexSessions = useMemo");
     expect(routeSource).toContain("return allVisibleSessions.filter((session) => !isRepresentedInAgentSessionTabs(session))");
     expect(routeSource).toContain("const agentSessionTabs = useMemo");
-    expect(routeSource).toContain("const sessions = selectedAgentSessionsQuery.data?.items ?? []");
-    expect(routeSource).toContain("isChildSession(left) ? 2 : 1");
+    expect(routeSource).toContain("sessions: selectedAgentSessionsQuery.data?.items");
+    expect(routeAndSessionSurfaceSource).toContain("isChildSession(left) ? 2 : 1");
+    expect(routeSource).toContain("buildAgentSessionTabs");
     expect(conversationIndexModelSource).toContain("mergeVisibleSessionsIntoConversations(conversations, rightIndexSessions)");
     expect(conversationIndexModelSource).toContain("if (isRepresentedInAgentSessionTabs(session))");
     expect(routeSource).toContain("const invalidChildSessionLinkMessage = hasInvalidChildSessionLink(sessionDetailQuery.data ?? directSessionActiveSummary)");
@@ -2504,12 +2511,12 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeAndCliTerminalSource).toContain("`/api/cli-agents/terminal-sessions/${encodeURIComponent(terminalSessionId)}/stop`");
     expect(routeSource).toContain("const CliAgentRunTerminalPanel = lazy(() =>");
     expect(routeSource).toContain('import("./chat/CliAgentRunTerminalPanel")');
-    expect(routeSource).toContain("<CliAgentRunTerminalPanel");
-    expect(routeSource).toContain("mountedCliAgentRuns.map((run) =>");
-    expect(routeSource).toContain("active={!groupPanelActive && activeCliAgentRunId === run.id}");
-    expect(routeSource).toContain("aria-hidden={!(!groupPanelActive && activeCliAgentRunId === run.id)}");
+    expect(routeSource).toContain("<ChatCliAgentTerminalStack");
+    expect(routeAndCliStackSource).toContain("runs.map((run) =>");
+    expect(routeAndCliStackSource).toContain("!groupPanelActive && activeCliAgentRunId === run.id");
+    expect(routeAndCliStackSource).toContain("aria-hidden={!active}");
     expect(terminalPanelSource).toContain("aria-hidden={!active}");
-    expect(routeSource).toContain("data-cli-agent-run-id={run.id}");
+    expect(routeAndCliStackSource).toContain("data-cli-agent-run-id={run.id}");
     expect(terminalPanelSource).toContain("data-cli-agent-run-id={run.id}");
     expect(routeSource).toContain("onTerminalSessionChange={handleCliAgentTerminalSessionChange}");
     expect(cliAgentRunTerminalPanelStyles.cliAgentRunPanel).toContain("shadow-none");

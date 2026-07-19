@@ -131,6 +131,11 @@ def create_passed_manifest(
         "read_guard_status",
         lambda root: active_claim("claim-test", ["docs/note.md"]),
     )
+    monkeypatch.setattr(
+        gate,
+        "selected_validation",
+        lambda changed: {"commands": ["git diff --check"]},
+    )
 
     result = gate.run_closeout(git_repo, "main", "claim-test")
 

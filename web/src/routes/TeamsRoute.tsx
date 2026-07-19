@@ -1041,15 +1041,7 @@ type ExperimentPlanningStatusPayload = {
       frozenDesignRevision: number;
       readyForExecution: boolean;
       completionDefinition: string;
-      memoryContextSummary?: {
-        contextId: string;
-        knowledgeItemCount: number;
-        reviewedSourceCount: number;
-        negativeExperimentCount: number;
-        successfulRunCount: number;
-        forbiddenDuplicateExperimentCount: number;
-        missingEvidence: string[];
-      };
+      memoryContextSummary?: ResearchMemoryContextSummary;
     };
     stage3: {
       status: string;
@@ -1064,15 +1056,7 @@ type ExperimentPlanningStatusPayload = {
         title: string;
       };
       completionDefinition: string;
-      memoryContextSummary?: {
-        contextId: string;
-        knowledgeItemCount: number;
-        reviewedSourceCount: number;
-        negativeExperimentCount: number;
-        successfulRunCount: number;
-        forbiddenDuplicateExperimentCount: number;
-        missingEvidence: string[];
-      };
+      memoryContextSummary?: ResearchMemoryContextSummary;
     };
     compatibility: {
       legacyActivePlanId: string;
@@ -1123,6 +1107,30 @@ type ExperimentPlanningStatusPayload = {
   storagePath: string;
   nextActions: string[];
   updatedAt: string;
+};
+
+type ResearchMemoryContextSummary = {
+  contextId: string;
+  knowledgeItemCount: number;
+  reviewedSourceCount: number;
+  negativeExperimentCount: number;
+  successfulRunCount: number;
+  forbiddenDuplicateExperimentCount: number;
+  claimCount: number;
+  claimStatusCounts: {
+    qualified: number;
+    unsupported: number;
+    rejected: number;
+    not_established: number;
+  };
+  allowedVariableCount: number;
+  allowedVariables: string[];
+  claimMapPreview: Array<{
+    claimId: string;
+    claim: string;
+    status: "qualified" | "unsupported" | "rejected" | "not_established" | string;
+  }>;
+  missingEvidence: string[];
 };
 
 type ExperimentPlanCreatePayload = {
@@ -5289,6 +5297,64 @@ export function TeamsRoute({
         primaryAction: lang === "zh" ? "启动执行迭代" : "Start execution",
       },
     };
+    const claimStatusLabel = (status: string) => {
+      if (lang !== "zh") {
+        return status.replace("_", " ");
+      }
+      return {
+        qualified: "有边界支持",
+        unsupported: "暂不支持",
+        rejected: "已否定",
+        not_established: "尚未建立",
+      }[status] || status;
+    };
+    const renderResearchMemoryContextDetails = (
+      summary: ResearchMemoryContextSummary | undefined,
+    ) => {
+      if (!summary || (summary.claimCount === 0 && summary.allowedVariableCount === 0)) {
+        return null;
+      }
+      return (
+        <details
+          className="group min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] px-2 py-1.5 [font-size:var(--vui-font-xs)]"
+          data-memory-context-id={summary.contextId}
+        >
+          <summary className="cursor-pointer select-none font-semibold text-[var(--fg-secondary)]">
+            {lang === "zh" ? "查看 Claim Map 与变量边界" : "View claim map and variable bounds"}
+          </summary>
+          <div className="mt-2 grid min-w-0 gap-2 border-t border-[var(--vui-border-subtle)] pt-2">
+            <div className="flex min-w-0 flex-wrap gap-x-3 gap-y-1 text-[var(--fg-secondary)]">
+              <span>{lang === "zh" ? "有边界支持" : "qualified"} {summary.claimStatusCounts.qualified}</span>
+              <span>{lang === "zh" ? "暂不支持" : "unsupported"} {summary.claimStatusCounts.unsupported}</span>
+              <span>{lang === "zh" ? "已否定" : "rejected"} {summary.claimStatusCounts.rejected}</span>
+              <span>{lang === "zh" ? "尚未建立" : "not established"} {summary.claimStatusCounts.not_established}</span>
+            </div>
+            {summary.allowedVariables.length > 0 ? (
+              <div className="grid min-w-0 gap-1">
+                <strong className="text-[var(--fg-secondary)]">{lang === "zh" ? "本轮允许变化" : "Allowed changes"}</strong>
+                <div className="flex min-w-0 flex-wrap gap-1">
+                  {summary.allowedVariables.map((path) => (
+                    <code key={path} className="max-w-full break-all rounded bg-[var(--vui-control-muted)] px-1.5 py-0.5 text-[var(--fg-primary)]">
+                      {path}
+                    </code>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+            {summary.claimMapPreview.length > 0 ? (
+              <ul className="grid min-w-0 gap-1">
+                {summary.claimMapPreview.map((claim) => (
+                  <li key={claim.claimId} className="grid min-w-0 grid-cols-[max-content_minmax(0,1fr)] gap-2">
+                    <span className="text-[var(--fg-tertiary)]">{claimStatusLabel(claim.status)}</span>
+                    <span className="min-w-0 break-words text-[var(--fg-primary)]" title={claim.claim}>{claim.claim}</span>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+          </div>
+        </details>
+      );
+    };
     const knowledgeCollectionStatusLabel = sourceCollectionDisplayState.statusText;
     const knowledgeCollectionPrimaryActionLabel = !selectedSourceCollectionRun
       ? knowledgeExpansionWorkflowTeamSelected
@@ -5567,33 +5633,39 @@ export function TeamsRoute({
                     <span>{lang === "zh" ? `查询 ${sourceCollectionQueryCountText}` : `queries ${sourceCollectionQueryCountText}`}</span>
                   </div>
                 ) : stageType === "experiment" && experimentLifecycleProjection?.stage2 ? (
-                  <div className={styles.researchStageCardMetrics}>
-                    <span>{lang === "zh" ? `冻结设计 v${experimentLifecycleProjection.stage2.frozenDesignRevision || "-"}` : `frozen v${experimentLifecycleProjection.stage2.frozenDesignRevision || "-"}`}</span>
-                    <span title={experimentLifecycleProjection.stage2.activeDesignPlanId}>
-                      {lang === "zh" ? "当前设计" : "design"} {experimentLifecycleProjection.stage2.activeDesignPlanId || "-"}
-                    </span>
-                    <span>{experimentLifecycleProjection.stage2.readyForExecution ? (lang === "zh" ? "可执行" : "executable") : (lang === "zh" ? "待冻结" : "not frozen")}</span>
-                    <span title={experimentLifecycleProjection.stage2.memoryContextSummary?.missingEvidence.join(" / ") || ""}>
-                      {lang === "zh" ? "团队记忆" : "memory"} {experimentLifecycleProjection.stage2.memoryContextSummary?.knowledgeItemCount ?? 0}
-                      {" · "}{lang === "zh" ? "负向" : "negative"} {experimentLifecycleProjection.stage2.memoryContextSummary?.negativeExperimentCount ?? 0}
-                    </span>
-                  </div>
+                  <>
+                    <div className={styles.researchStageCardMetrics}>
+                      <span>{lang === "zh" ? `冻结设计 v${experimentLifecycleProjection.stage2.frozenDesignRevision || "-"}` : `frozen v${experimentLifecycleProjection.stage2.frozenDesignRevision || "-"}`}</span>
+                      <span title={experimentLifecycleProjection.stage2.activeDesignPlanId}>
+                        {lang === "zh" ? "当前设计" : "design"} {experimentLifecycleProjection.stage2.activeDesignPlanId || "-"}
+                      </span>
+                      <span>{experimentLifecycleProjection.stage2.readyForExecution ? (lang === "zh" ? "可执行" : "executable") : (lang === "zh" ? "待冻结" : "not frozen")}</span>
+                      <span title={experimentLifecycleProjection.stage2.memoryContextSummary?.missingEvidence.join(" / ") || ""}>
+                        {lang === "zh" ? "团队记忆" : "memory"} {experimentLifecycleProjection.stage2.memoryContextSummary?.knowledgeItemCount ?? 0}
+                        {" · "}{lang === "zh" ? "负向" : "negative"} {experimentLifecycleProjection.stage2.memoryContextSummary?.negativeExperimentCount ?? 0}
+                      </span>
+                    </div>
+                    {renderResearchMemoryContextDetails(experimentLifecycleProjection.stage2.memoryContextSummary)}
+                  </>
                 ) : stageType === "iteration" && experimentLifecycleProjection?.stage3 ? (
-                  <div className={styles.researchStageCardMetrics}>
-                    <span title={experimentLifecycleProjection.stage3.bestCandidateId}>
-                      {lang === "zh" ? "最佳候选" : "best"} {experimentLifecycleProjection.stage3.bestCandidateId || "-"}
-                    </span>
-                    <span title={experimentLifecycleProjection.stage3.bestValidatedResultId}>
-                      {lang === "zh" ? "最佳结果" : "result"} {experimentLifecycleProjection.stage3.bestValidatedResultId || "-"}
-                    </span>
-                    <span title={experimentLifecycleProjection.stage3.latestDiagnosticStatus.title}>
-                      {lang === "zh" ? "最近诊断" : "diagnostic"} {experimentLifecycleProjection.stage3.latestDiagnosticStatus.status || "-"}
-                    </span>
-                    <span title={experimentLifecycleProjection.stage3.memoryContextSummary?.missingEvidence.join(" / ") || ""}>
-                      {lang === "zh" ? "已用记忆" : "memory used"} {experimentLifecycleProjection.stage3.memoryContextSummary?.knowledgeItemCount ?? 0}
-                      {" · "}{lang === "zh" ? "禁重" : "blocked repeats"} {experimentLifecycleProjection.stage3.memoryContextSummary?.forbiddenDuplicateExperimentCount ?? 0}
-                    </span>
-                  </div>
+                  <>
+                    <div className={styles.researchStageCardMetrics}>
+                      <span title={experimentLifecycleProjection.stage3.bestCandidateId}>
+                        {lang === "zh" ? "最佳候选" : "best"} {experimentLifecycleProjection.stage3.bestCandidateId || "-"}
+                      </span>
+                      <span title={experimentLifecycleProjection.stage3.bestValidatedResultId}>
+                        {lang === "zh" ? "最佳结果" : "result"} {experimentLifecycleProjection.stage3.bestValidatedResultId || "-"}
+                      </span>
+                      <span title={experimentLifecycleProjection.stage3.latestDiagnosticStatus.title}>
+                        {lang === "zh" ? "最近诊断" : "diagnostic"} {experimentLifecycleProjection.stage3.latestDiagnosticStatus.status || "-"}
+                      </span>
+                      <span title={experimentLifecycleProjection.stage3.memoryContextSummary?.missingEvidence.join(" / ") || ""}>
+                        {lang === "zh" ? "已用记忆" : "memory used"} {experimentLifecycleProjection.stage3.memoryContextSummary?.knowledgeItemCount ?? 0}
+                        {" · "}{lang === "zh" ? "禁重" : "blocked repeats"} {experimentLifecycleProjection.stage3.memoryContextSummary?.forbiddenDuplicateExperimentCount ?? 0}
+                      </span>
+                    </div>
+                    {renderResearchMemoryContextDetails(experimentLifecycleProjection.stage3.memoryContextSummary)}
+                  </>
                 ) : (
                   <em>{navItem ? (lang === "zh" ? navItem.zhModules : navItem.enModules) : ""}</em>
                 )}
