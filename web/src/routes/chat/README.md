@@ -14,6 +14,7 @@ Agent-oriented map for Chat workbench development. Prefer editing a **module** o
 | Composer bridge UI | `ChatConversationComposerBridge.tsx` | CLI model |
 | Center workspace shell | `ChatSessionWorkspacePanel.tsx` | index rail |
 | Layout width math | `chatCodingRouteViewModel.ts` | session protocol |
+| Left index / new Agent / group / system entry UI | `ChatConversationIndexRail.tsx` | stream/submit |
 | Orchestration / wiring only | `../ChatCodingRoute.tsx` | — |
 
 ## Phase A (done)
@@ -26,9 +27,12 @@ Pure helpers extracted from `ChatCodingRoute.tsx`:
 - `toolApprovalLabels.ts` — governance tool display labels
 - `chatSubmitTelemetry.ts` — submit browser telemetry fields
 
+## Phase B (done)
+
+- `ChatConversationIndexRail.tsx` — left conversation index pane (tabs, member status, new Agent/group, system entry)
+
 ## Next (planned)
 
-- Left-rail JSX shell (`ChatConversationIndexRail`)
 - Hooks: selection/detail+stream, composer submit, group room
 - Status rail shell
 - Thin `ChatCodingRoute` composition + layout test split
