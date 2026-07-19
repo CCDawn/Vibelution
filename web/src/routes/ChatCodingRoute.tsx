@@ -8083,6 +8083,7 @@ export function ChatCodingRoute() {
                         </VButton>
                         <VButton
                           type="button"
+                          contentLayout="plain"
                           className={styles.agentIndexOpenButton}
                           onClick={() => handleOpenDirectSession(participant.sessionId)}
                           aria-label={lang === "zh" ? `打开 ${participantDisplay.name} 单聊` : `Open direct chat with ${participantDisplay.name}`}
@@ -8293,6 +8294,7 @@ export function ChatCodingRoute() {
               </div>
               <VButton
                 type="button"
+                contentLayout="plain"
                 aria-current={projectBusActive ? "true" : undefined}
                 className={
                   projectBusActive
