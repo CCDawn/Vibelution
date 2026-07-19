@@ -1731,6 +1731,60 @@ def test_agent_inbox_startup_recovery_wakes_persisted_message_once(tmp_path, mon
     assert summaries[0]["startedCount"] == 1
 
 
+def test_agent_inbox_wake_redirects_stale_target_session_to_current_agent_session(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    alpha = session_service.create_chat_session(title="Alpha Agent")
+    beta = session_service.create_chat_session(title="Beta Agent")
+    original_session_id = beta["id"]
+    current_session_id = "session-beta-rebound"
+    message = agent_directory_service.write_agent_inbox_message(
+        beta["agentId"],
+        source_agent_id=alpha["agentId"],
+        content="Beta，请在会话重建后继续处理。",
+        metadata={"wakeRequested": True},
+    )
+    agent_directory_service.update_agent_instance(
+        beta["agentId"],
+        direct_session_id=current_session_id,
+        metadata={"previousDirectSessionId": original_session_id},
+    )
+    submitted_session_ids: list[str] = []
+    runtime_events: list[tuple[tuple, dict]] = []
+    monkeypatch.setattr(
+        session_service,
+        "submit_session_message",
+        lambda session_id, *_args, **_kwargs: (
+            submitted_session_ids.append(session_id) or {"startedTurnId": "turn-rebound"}
+        ),
+    )
+    monkeypatch.setattr(
+        session_service,
+        "record_runtime_scene_event",
+        lambda *args, **kwargs: runtime_events.append((args, kwargs)),
+    )
+
+    delivery = session_service.wake_agent_for_inbox_message(message)
+
+    assert submitted_session_ids == [current_session_id]
+    assert delivery["wakeStatus"] == "started"
+    assert delivery["targetSessionId"] == current_session_id
+    assert delivery["persistedTargetSessionId"] == original_session_id
+    assert delivery["targetSessionRedirected"] is True
+    wake_started = next(
+        kwargs["fields"]
+        for args, kwargs in runtime_events
+        if args[2] == "agent_inbox.wake_started"
+    )
+    assert wake_started["targetSessionId"] == current_session_id
+    assert wake_started["persistedTargetSessionId"] == original_session_id
+    assert wake_started["targetSessionRedirected"] is True
+    consumed = agent_directory_service.list_agent_inbox_messages_for_agent(
+        beta["agentId"],
+        status="consumed",
+    )
+    assert consumed[0]["consumedBySessionId"] == current_session_id
+
+
 def test_agent_inbox_startup_recovery_leaves_mailbox_only_message_pending(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     alpha = session_service.create_chat_session(title="Alpha Agent")

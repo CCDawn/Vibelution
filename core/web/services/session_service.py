@@ -6522,15 +6522,25 @@ def wake_agent_for_inbox_message(message: dict[str, Any]) -> dict[str, Any]:
     target_agent_id = str(message.get("targetAgentId") or "").strip()
     target_agent = get_agent(target_agent_id, include_archived=False) if target_agent_id else None
     archived_target_agent = None if target_agent else (get_agent(target_agent_id, include_archived=True) if target_agent_id else None)
-    target_session_id = str(
-        message.get("targetSessionId") or (target_agent or archived_target_agent or {}).get("directSessionId") or ""
-    ).strip()
+    persisted_target_session_id = str(message.get("targetSessionId") or "").strip()
+    current_target_session_id = str((target_agent or {}).get("directSessionId") or "").strip()
+    target_session_id = (
+        current_target_session_id
+        if target_agent
+        else persisted_target_session_id or str((archived_target_agent or {}).get("directSessionId") or "").strip()
+    )
     delivery = {
         "wakeRequested": True,
         "wakeStatus": "skipped",
         "messageId": message_id,
         "targetAgentId": target_agent_id,
         "targetSessionId": target_session_id,
+        "persistedTargetSessionId": persisted_target_session_id,
+        "targetSessionRedirected": bool(
+            target_agent
+            and persisted_target_session_id
+            and persisted_target_session_id != target_session_id
+        ),
         "turnId": "",
         "reason": "",
     }
@@ -16582,6 +16592,8 @@ def _record_agent_inbox_wake_event(
                 "sourceAgentId": str(message.get("sourceAgentId") or "").strip(),
                 "targetAgentId": str(message.get("targetAgentId") or "").strip(),
                 "targetSessionId": str(delivery.get("targetSessionId") or "").strip(),
+                "persistedTargetSessionId": str(delivery.get("persistedTargetSessionId") or "").strip(),
+                "targetSessionRedirected": bool(delivery.get("targetSessionRedirected")),
                 "turnId": str(delivery.get("turnId") or "").strip(),
                 "wakeStatus": str(delivery.get("wakeStatus") or "").strip(),
                 "reason": str(delivery.get("reason") or "").strip(),
