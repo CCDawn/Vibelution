@@ -39,7 +39,7 @@ const conversationComposerShell = cv(
 );
 const conversationComposerCodexShell = cv(
   "composerCodex",
-  "mx-auto grid w-full max-w-[960px] min-w-0 flex-none rounded-[24px] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] shadow-[var(--vui-shadow-soft)] max-[719px]:rounded-[18px]",
+  "mx-auto grid w-full max-w-[960px] min-w-0 flex-none overflow-hidden rounded-[20px] border border-[color-mix(in_srgb,var(--border-soft)_88%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-panel)_96%,var(--surface-page))] shadow-[0_8px_26px_color-mix(in_srgb,var(--fg-primary)_7%,transparent)] max-[719px]:rounded-[16px]",
 );
 const composerNativeFieldTargets =
   "[&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-[48px] [&_textarea]:max-h-[112px] [&_textarea]:resize-none [&_input]:w-full [&_select]:w-full [&_textarea]:w-full";
@@ -48,12 +48,12 @@ const composerFieldShell = cv("composerField", composerFieldBase);
 const composerFieldCodexShell = cv(
   "composerFieldCodex",
   composerFieldBase,
-  "grid min-h-[112px] min-w-0 grid-rows-[auto_minmax(48px,1fr)_auto] gap-1 px-4 py-3 max-[719px]:min-h-[104px] max-[719px]:px-3 max-[719px]:py-2.5",
+  "grid min-h-[88px] min-w-0 grid-rows-[auto_minmax(36px,1fr)_auto] gap-1 px-3.5 py-2.5 max-[719px]:min-h-[84px] max-[719px]:px-3 max-[719px]:py-2",
 );
 const composerToolbarShell = cv("composerToolbar", "flex min-w-0 items-center gap-1 pt-0.5");
 const composerToolbarCodexShell = cv(
   "composerToolbarCodex",
-  "flex min-h-8 min-w-0 items-center justify-between gap-2",
+  "flex min-h-8 min-w-0 items-center justify-between gap-2 border-t border-[color-mix(in_srgb,var(--border-soft)_44%,transparent)] pt-1.5",
 );
 const composerFieldDragActiveShell = cv(
   "composerFieldDragActive",
@@ -69,7 +69,7 @@ const composerRoundActionButton = cv(
   "composerRoundButton",
   "min-w-0 inline-grid",
   compactIconButtonSize,
-  "place-items-center rounded-[var(--radius-control)] border p-0",
+  "place-items-center rounded-full border p-0",
   composerQuietActionState,
 );
 const composerPrimaryActionButton = cv(
@@ -80,7 +80,7 @@ const composerPrimaryActionButton = cv(
 const composerSendActionButton = cv(
   "sendButton",
   compactIconButtonSize,
-  "inline-grid place-items-center rounded-[var(--radius-control)] border p-0 !border-[color-mix(in_srgb,var(--accent-cool)_42%,transparent)] !bg-[color-mix(in_srgb,var(--accent-cool)_16%,var(--vui-surface-row))] !text-[var(--accent-cool)] shadow-none transition-colors duration-150 hover:translate-y-0 hover:!border-[color-mix(in_srgb,var(--accent-cool)_56%,transparent)] hover:!bg-[color-mix(in_srgb,var(--accent-cool)_19%,var(--vui-control-muted-hover))] hover:!text-[var(--accent-cool)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] focus-visible:ring-offset-1 focus-visible:ring-offset-[var(--vui-surface-panel)] active:!bg-[color-mix(in_srgb,var(--accent-cool)_22%,var(--vui-surface-row))] disabled:!border-[color-mix(in_srgb,var(--border-soft)_70%,transparent)] disabled:!bg-[color-mix(in_srgb,var(--vui-control-muted)_62%,transparent)] disabled:!text-[var(--fg-tertiary)] disabled:hover:!border-[color-mix(in_srgb,var(--border-soft)_70%,transparent)] disabled:hover:!bg-[color-mix(in_srgb,var(--vui-control-muted)_62%,transparent)] disabled:hover:!text-[var(--fg-tertiary)]",
+  "inline-grid place-items-center rounded-full border p-0 !border-[var(--fg-primary)] !bg-[var(--fg-primary)] !text-[var(--surface-page)] shadow-none transition-colors duration-150 hover:translate-y-0 hover:!border-[color-mix(in_srgb,var(--fg-primary)_82%,var(--accent-cool))] hover:!bg-[color-mix(in_srgb,var(--fg-primary)_82%,var(--accent-cool))] hover:!text-[var(--surface-page)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] focus-visible:ring-offset-1 focus-visible:ring-offset-[var(--vui-surface-panel)] active:!bg-[color-mix(in_srgb,var(--fg-primary)_72%,var(--accent-cool))] disabled:!border-[color-mix(in_srgb,var(--border-soft)_70%,transparent)] disabled:!bg-[color-mix(in_srgb,var(--vui-control-muted)_62%,transparent)] disabled:!text-[var(--fg-tertiary)] disabled:hover:!border-[color-mix(in_srgb,var(--border-soft)_70%,transparent)] disabled:hover:!bg-[color-mix(in_srgb,var(--vui-control-muted)_62%,transparent)] disabled:hover:!text-[var(--fg-tertiary)]",
 );
 const composerHiddenAttachmentField = cv("hiddenAttachmentInput", composerFieldBase, "hidden");
 const composerGenericInputField = cv("input", composerFieldBase);
@@ -1049,9 +1049,9 @@ const styles: Record<string, string> = {
   composerCodex: conversationComposerCodexShell,
   composerToolbar: composerToolbarShell,
   composerToolbarCodex: composerToolbarCodexShell,
-  composerToolbarStart: "vui-components-conversationview composerToolbarStart flex min-w-0 items-center gap-2",
-  composerToolbarEnd: "vui-components-conversationview composerToolbarEnd ml-auto flex min-w-0 items-center justify-end gap-2",
-  inputCodex: "vui-components-conversationview inputCodex min-h-[48px] max-h-[220px] w-full resize-none overflow-y-auto !border-0 !bg-transparent !p-0 text-[var(--fg-primary)] !shadow-none focus:!ring-0",
+  composerToolbarStart: "vui-components-conversationview composerToolbarStart flex min-w-0 items-center gap-1.5",
+  composerToolbarEnd: "vui-components-conversationview composerToolbarEnd ml-auto flex min-w-0 items-center justify-end gap-1",
+  inputCodex: "vui-components-conversationview inputCodex min-h-[36px] max-h-[180px] w-full resize-none overflow-y-auto !border-0 !bg-transparent !p-0 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-primary)] !shadow-none placeholder:text-[var(--fg-tertiary)] focus:!ring-0",
   sessionMeta:
     "vui-components-conversationview sessionMeta min-w-0 flex flex-wrap items-center gap-1.5",
   statPill:

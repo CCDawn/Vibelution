@@ -50,6 +50,10 @@ describe("ConversationInferenceControl", () => {
     expect(styles.menu).toContain("w-[min(288px,calc(100vw-24px))]");
     expect(styles.option).toContain("!grid-cols-[minmax(0,1fr)_auto]");
     expect(styles.option).not.toContain("data-slot=vui-button-content");
+    expect(styles.trigger).toContain("!px-1.5");
+    expect(styles.trigger).toContain("!tracking-[-0.01em]");
+    expect(styles.triggerSeparator).toContain("opacity-55");
+    expect(styles.triggerChevron).toContain("opacity-70");
   });
 
   it("keeps models without reasoning as a non-interactive label", () => {

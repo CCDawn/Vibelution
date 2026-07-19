@@ -822,9 +822,20 @@ describe("ConversationView edit resend affordance", () => {
     expect(styles.composerField).toContain("[&_textarea]:max-h-[112px]");
     expect(styles.composerField).toContain("[&_textarea]:resize-none");
     expect(styles.composerField).not.toContain("[&_textarea]:min-h-20");
-    expect(styles.composerFieldCodex).toContain("min-h-[112px]");
+    expect(styles.composerCodex).toContain("rounded-[20px]");
+    expect(styles.composerCodex).toContain("overflow-hidden");
+    expect(styles.composerFieldCodex).toContain("min-h-[88px]");
+    expect(styles.composerFieldCodex).toContain("grid-rows-[auto_minmax(36px,1fr)_auto]");
     expect(styles.composerFieldCodex).toContain("gap-1");
     expect(styles.composerToolbarCodex).toContain("min-h-8");
+    expect(styles.composerToolbarCodex).toContain("border-t");
+    expect(styles.inputCodex).toContain("min-h-[36px]");
+    expect(styles.inputCodex).toContain("max-h-[180px]");
+    expect(styles.inputCodex).toContain("[font-size:var(--vui-font-sm)]");
+    expect(styles.inputCodex).toContain("placeholder:text-[var(--fg-tertiary)]");
+    expect(styles.composerRoundButton).toContain("rounded-full");
+    expect(styles.sendButton).toContain("rounded-full");
+    expect(styles.sendButton).toContain("!bg-[var(--fg-primary)]");
 
     for (const actionClass of [styles.attachButton, styles.composerRoundButton, styles.composerRoundButtonPrimary]) {
       expect(actionClass).toContain("h-[var(--vui-control-height-sm)]");
