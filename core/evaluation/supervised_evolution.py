@@ -1635,7 +1635,138 @@ def _format_difference_issue_parts(metrics: Dict[str, Any]) -> List[str]:
     return parts
 
 
+def _normalize_comparison_prompt(prompt: str) -> str:
+    normalized = re.sub(r"\b(?:baseline|candidate)\b|基线|候选", " ", str(prompt or ""), flags=re.IGNORECASE)
+    return re.sub(r"\s+", " ", normalized).strip().casefold()
+
+
+def _comparison_fingerprint(value: Any) -> str:
+    encoded = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()[:16]
+
+
+def _comparison_agent_binding(run: Optional[SupervisedEvolutionRun]) -> Dict[str, Any]:
+    binding = dict((run.agent_binding if run is not None else {}) or {})
+    for key in ("role", "roleKey", "roleLabel"):
+        binding.pop(key, None)
+
+    def normalize(value: Any) -> Any:
+        if isinstance(value, dict):
+            return {key: normalize(item) for key, item in sorted(value.items())}
+        if isinstance(value, list):
+            return [normalize(item) for item in value]
+        if isinstance(value, str):
+            return _normalize_comparison_prompt(value)
+        return value
+
+    return normalize(binding)
+
+
+def _build_differentiation_gate(
+    *,
+    cases: List[Dict[str, Any]],
+    baseline_runs: List[SupervisedEvolutionRun],
+    candidate_runs: List[SupervisedEvolutionRun],
+) -> DecisionGate:
+    baseline_by_case = {item.case_id: item for item in baseline_runs}
+    candidate_by_case = {item.case_id: item for item in candidate_runs}
+    evidence: List[Dict[str, Any]] = []
+    indistinguishable: List[str] = []
+    for case in cases:
+        case_id = str(case.get("case_id") or "").strip() or "case"
+        baseline_prompt = _normalize_comparison_prompt(
+            str(case.get("baseline_prompt") or case.get("prompt") or "")
+        )
+        candidate_prompt = _normalize_comparison_prompt(
+            str(case.get("candidate_prompt") or case.get("baseline_prompt") or case.get("prompt") or "")
+        )
+        prompt_changed = baseline_prompt != candidate_prompt
+        baseline_binding = _comparison_agent_binding(baseline_by_case.get(case_id))
+        candidate_binding = _comparison_agent_binding(candidate_by_case.get(case_id))
+        binding_changed = baseline_binding != candidate_binding
+        variant = case.get("candidate_variant") if isinstance(case.get("candidate_variant"), dict) else {}
+        variant_id = str(variant.get("variant_id") or "").strip()
+        baseline_ref = str(variant.get("baseline_ref") or "").strip()
+        candidate_ref = str(variant.get("candidate_ref") or "").strip()
+        declared_variant = bool(
+            variant_id
+            and baseline_ref
+            and candidate_ref == variant_id
+            and baseline_ref != candidate_ref
+        )
+        differentiated_by = [
+            name
+            for name, present in (
+                ("prompt", prompt_changed),
+                ("agent_binding", binding_changed),
+                ("candidate_variant", declared_variant),
+            )
+            if present
+        ]
+        if not differentiated_by:
+            indistinguishable.append(case_id)
+        evidence.append(
+            {
+                "case_id": case_id,
+                "differentiated": bool(differentiated_by),
+                "differentiated_by": differentiated_by,
+                "baseline_prompt_fingerprint": _comparison_fingerprint(baseline_prompt),
+                "candidate_prompt_fingerprint": _comparison_fingerprint(candidate_prompt),
+                "baseline_binding_fingerprint": _comparison_fingerprint(baseline_binding),
+                "candidate_binding_fingerprint": _comparison_fingerprint(candidate_binding),
+                "candidate_variant_id": variant_id,
+            }
+        )
+    status = "pass" if cases and not indistinguishable else "fail"
+    reason = (
+        "每个 case 都具备可追溯的 baseline/candidate 差异证据"
+        if status == "pass"
+        else "baseline 与 candidate 缺少可区分的 prompt、Agent 绑定或候选变体证据"
+    )
+    return DecisionGate(
+        name="differentiation",
+        status=status,
+        reason=reason,
+        metrics={
+            "case_count": len(cases),
+            "differentiated_case_count": len(cases) - len(indistinguishable),
+            "indistinguishable_case_ids": indistinguishable,
+            "case_evidence": evidence,
+        },
+    )
+
+
 def _evaluate_gates(
+    baseline_runs: List[SupervisedEvolutionRun],
+    candidate_runs: List[SupervisedEvolutionRun],
+    *,
+    case_summaries: Optional[List[CaseDecisionSummary]] = None,
+    evaluation_mode: str = "",
+    cases: Optional[List[Dict[str, Any]]] = None,
+) -> tuple[List[DecisionGate], str, str, float]:
+    gates, decision, reason, score_delta = _evaluate_outcome_gates(
+        baseline_runs,
+        candidate_runs,
+        case_summaries=case_summaries,
+        evaluation_mode=evaluation_mode,
+    )
+    differentiation = _build_differentiation_gate(
+        cases=list(cases or []),
+        baseline_runs=baseline_runs,
+        candidate_runs=candidate_runs,
+    )
+    gates.append(differentiation)
+    if differentiation.status == "fail" and decision in {"HOLD", "PROMOTE"}:
+        return (
+            gates,
+            "INCONCLUSIVE",
+            "baseline 与 candidate 缺少可区分的干预证据，评测结果不可用于观察或晋升",
+            score_delta,
+        )
+    return gates, decision, reason, score_delta
+
+
+def _evaluate_outcome_gates(
     baseline_runs: List[SupervisedEvolutionRun],
     candidate_runs: List[SupervisedEvolutionRun],
     *,
@@ -2708,6 +2839,7 @@ def run_supervised_evolution_session(
         candidate_runs,
         case_summaries=case_summaries,
         evaluation_mode=str(evaluation_metadata.get("evaluation_mode") or ""),
+        cases=cases,
     )
     decision, reason, gates = _apply_promotion_gate(
         decision=decision,
@@ -2791,6 +2923,18 @@ def run_supervised_evolution_session(
             "reason": payload.reason,
             "decision_path": payload.decision_path,
             "policy_action": payload.policy_action.get("action"),
+            "differentiation_status": next(
+                (gate.status for gate in payload.gates if gate.name == "differentiation"),
+                "missing",
+            ),
+            "indistinguishable_case_ids": next(
+                (
+                    list(gate.metrics.get("indistinguishable_case_ids") or [])
+                    for gate in payload.gates
+                    if gate.name == "differentiation"
+                ),
+                [],
+            ),
             "active_advisory_count": advisory_context.get("active_count", 0),
             "mental_model_mode": normalized_mental_model_mode,
             "mental_model_enabled": mental_model_enabled,
