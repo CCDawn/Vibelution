@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import routeSource from "./ChatCodingRoute.tsx?raw";
 import tabStripSource from "./AgentSessionTabStrip.tsx?raw";
+import lifecycleSource from "./chat/useChatWorkspaceLifecycle.ts?raw";
 
 describe("ChatCodingRoute Agent-session hierarchy", () => {
   it("uses Agent navigation on the left and queries tabs by the selected Agent", () => {
@@ -24,9 +25,9 @@ describe("ChatCodingRoute Agent-session hierarchy", () => {
   });
 
   it("optimistically removes deleted sessions from Agent tab caches with rollback", () => {
-    expect(routeSource).toContain("captureAgentSessionCacheSnapshots(queryClient)");
-    expect(routeSource).toContain("removeSessionFromAgentSessionCaches(queryClient, variables.sessionId)");
-    expect(routeSource).toContain(
+    expect(lifecycleSource).toContain("captureAgentSessionCacheSnapshots(queryClient)");
+    expect(lifecycleSource).toContain("removeSessionFromAgentSessionCaches(queryClient, variables.sessionId)");
+    expect(lifecycleSource).toContain(
       "restoreAgentSessionCacheSnapshots(queryClient, context?.previousAgentSessionCaches)",
     );
   });
