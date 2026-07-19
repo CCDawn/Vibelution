@@ -190,7 +190,7 @@ describe("ResearchFlowCanvasRoute layout contract", () => {
     expect(styles.body).toContain("grid");
     expect(styles.body).toContain("h-full");
     expect(styles.body).toContain("min-h-0");
-    expect(styles.body).toContain("grid-cols-[minmax(0,1fr)_minmax(320px,380px)]");
+    expect(styles.body).toContain("grid-cols-[minmax(0,1fr)_clamp(300px,26vw,400px)]");
     expect(styles.body).toContain("overflow-hidden");
     expect(styles.canvasShell).toBeTypeOf("string");
     expect(styles.canvasShell).toContain("grid-rows-[auto_auto_minmax(0,1fr)]");

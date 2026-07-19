@@ -67,22 +67,23 @@ describe("ResetRoute layout contract", () => {
   });
 
   it("lays out the retired state, action entry, and risk notes as a compact workbench", () => {
-    expect(styleValue("workspaceClass")).toContain("grid-cols-[minmax(320px,560px)_minmax(260px,420px)]");
+    expect(styleValue("workspaceClass")).toContain("grid-cols-[minmax(0,1.2fr)_clamp(260px,28vw,420px)]");
+    expect(styleValue("primaryColumnClass")).toContain("max-w-none");
     expect(styleValue("workspaceClass")).toContain("items-start");
     expect(styleValue("workspaceClass")).toContain("justify-start");
     expect(styleValue("workspaceClass")).toContain("overflow-y-auto");
     expect(styleValue("workspaceClass")).toContain("max-[760px]:grid-cols-[minmax(0,1fr)]");
 
     expect(styleValue("statusStripClass")).toContain("grid-cols-[auto_minmax(0,1fr)]");
-    expect(styleValue("statusStripClass")).toContain("max-w-[560px]");
+    expect(styleValue("statusStripClass")).toContain("max-w-none");
     expect(styleValue("statusStripClass")).toContain("overflow-hidden");
     expectBackgroundAware(styleValue("statusStripClass"));
 
-    expect(styleValue("launcherPanelClass")).toContain("max-w-[560px]");
+    expect(styleValue("launcherPanelClass")).toContain("max-w-none");
     expect(styleValue("launcherPanelClass")).toContain("content-start");
     expectBackgroundAware(styleValue("launcherPanelClass"));
 
-    expect(styleValue("riskPanelClass")).toContain("max-w-[420px]");
+    expect(styleValue("riskPanelClass")).toContain("max-w-none");
     expect(styleValue("riskPanelClass")).toContain("content-start");
     expect(styleValue("riskListClass")).toContain("max-h-[220px]");
     expect(styleValue("riskListClass")).toContain("overflow-auto");
