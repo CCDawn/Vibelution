@@ -9,7 +9,11 @@ describe("ChatCodingRoute Agent-session hierarchy", () => {
     expect(routeSource).toContain('queryKey: ["sessions", "agent", selectedChatAgentId]');
     expect(routeSource).toContain('`/api/sessions/query?agentId=${encodeURIComponent(selectedChatAgentId)}&limit=100`');
     expect(routeSource).toContain("<AgentConversationDirectory");
-    expect(routeSource).toContain('navigate("/agents?create=1")');
+    expect(routeSource).toContain('import { AgentCreateWizardDialog } from "./agent-create/AgentCreateWizardDialog"');
+    expect(routeSource).toContain("setAgentCreateWizardOpen(true)");
+    expect(routeSource).toContain("<AgentCreateWizardDialog");
+    expect(routeSource).toContain("triggerRef={agentCreateTriggerRef}");
+    expect(routeSource).toContain("await createSessionMutation.mutateAsync({ agentId: agent.agentId })");
     expect(routeSource).not.toContain('createSessionMutation.mutate({ agentId: "" })');
     expect(routeSource).toContain("在当前 Agent 下新建会话");
   });

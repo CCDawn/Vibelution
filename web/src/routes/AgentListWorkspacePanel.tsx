@@ -1,5 +1,5 @@
 import { Plus } from "lucide-react";
-import { type ComponentProps } from "react";
+import { type ComponentProps, type Ref } from "react";
 
 import { AgentWorkspacePanel } from "../components/vui/product/agent-management";
 import { VButton, VChip, VPanelHeader } from "../components/vui";
@@ -13,6 +13,8 @@ type AgentListWorkspacePanelProps = {
   headerTitle: string;
   createAgentLabel: string;
   visibleAgentCount: number;
+  createAgentButtonRef?: Ref<HTMLButtonElement>;
+  createAgentButtonId?: string;
   bulkOperations: ComponentProps<typeof AgentBulkOperationsPanel>;
   listState: ComponentProps<typeof AgentListStatePanel>;
   onToggleCreate: () => void;
@@ -24,6 +26,8 @@ export function AgentListWorkspacePanel({
   headerTitle,
   createAgentLabel,
   visibleAgentCount,
+  createAgentButtonRef,
+  createAgentButtonId,
   bulkOperations,
   listState,
   onToggleCreate,
@@ -40,6 +44,8 @@ export function AgentListWorkspacePanel({
         actions={
           <>
             <VButton
+              ref={createAgentButtonRef}
+              id={createAgentButtonId}
               type="button"
               variant="secondary"
               icon={<Plus size={15} />}

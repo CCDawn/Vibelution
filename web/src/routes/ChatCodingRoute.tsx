@@ -35,6 +35,7 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import { fetchJson } from "../api/client";
 import { kernelTaskCenterHref } from "../api/kernel";
 import { createChatWorkspaceCache } from "./chatWorkspaceCache";
+import { AgentCreateWizardDialog } from "./agent-create/AgentCreateWizardDialog";
 import {
   isProjectAgentBusEventRevoked,
   listProjectAgentBusTimeline,
@@ -988,6 +989,8 @@ export function ChatCodingRoute() {
     DEFAULT_COLLAPSED_CONVERSATION_GROUPS,
   );
   const [rightIndexPanel, setRightIndexPanel] = useState<RightIndexPanel>("conversations");
+  const [agentCreateWizardOpen, setAgentCreateWizardOpen] = useState(false);
+  const agentCreateTriggerRef = useRef<HTMLButtonElement | null>(null);
   const [activeGroupRoomId, setActiveGroupRoomId] = useState("");
   const [expandedGroupAgentSessionIds, setExpandedGroupAgentSessionIds] = useState<string[]>([]);
   const [expandedGroupMessageIds, setExpandedGroupMessageIds] = useState<string[]>([]);
@@ -5246,7 +5249,7 @@ export function ChatCodingRoute() {
   }
 
   function handleCreateAgent() {
-    navigate("/agents?create=1");
+    setAgentCreateWizardOpen(true);
   }
 
   function handleOpenProjectAgentBus() {
@@ -7312,6 +7315,8 @@ export function ChatCodingRoute() {
             <div className={styles.conversationIndexLayout}>
             <div className={styles.sessionActionRow}>
               <VButton
+                ref={agentCreateTriggerRef}
+                id="chat-agent-create-trigger"
                 type="button"
                 className={styles.newSessionButton}
                 icon={<Plus size={15} />}
@@ -7488,6 +7493,28 @@ export function ChatCodingRoute() {
           upperBoundCacheInputTokens={upperBoundCacheInputTokens}
         />
       ) : null}
+      <AgentCreateWizardDialog
+        open={agentCreateWizardOpen}
+        triggerRef={agentCreateTriggerRef}
+        triggerId="chat-agent-create-trigger"
+        onClose={() => setAgentCreateWizardOpen(false)}
+        onCreated={(agent) => {
+          setSelectedAgentId(agent.agentId);
+          setRightIndexPanel("conversations");
+        }}
+        onStartConversation={async (agent) => {
+          try {
+            await createSessionMutation.mutateAsync({ agentId: agent.agentId });
+            return true;
+          } catch {
+            return false;
+          }
+        }}
+        onOpenAdvancedConfig={(agent) => {
+          setAgentCreateWizardOpen(false);
+          navigate(`/agents?agent=${encodeURIComponent(agent.agentId)}&pane=config&returnTo=${encodeURIComponent("/chat")}`);
+        }}
+      />
     </div>
   );
 }
