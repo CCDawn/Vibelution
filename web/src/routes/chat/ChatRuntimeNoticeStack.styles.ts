@@ -7,11 +7,11 @@ const styles = {
   notice:
     "min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[color-mix(in_srgb,var(--vui-surface-panel)_54%,transparent)] px-2 py-1.5 shadow-none !grid grid-cols-[16px_minmax(0,1fr)] items-start gap-[7px]",
   body:
-    "min-w-0 text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
+    "min-w-0 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
   label:
-    "block text-[var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
+    "block [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
   message:
-    "block min-w-0 break-words text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] [overflow-wrap:anywhere]",
+    "block min-w-0 break-words [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] [overflow-wrap:anywhere]",
   toneError:
     "border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
   toneInfo:
