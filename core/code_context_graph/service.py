@@ -335,6 +335,9 @@ def load_or_build_index(
         return build_index(force=True, _cancel_checker=_cancel_checker)
     if int(payload.get("schemaVersion") or 0) != SCHEMA_VERSION:
         return build_index(force=True, _cancel_checker=_cancel_checker)
+    indexed_root = str((payload.get("index") or {}).get("root") or "").strip()
+    if not indexed_root or Path(indexed_root).resolve() != project_root().resolve():
+        return build_index(force=True, _cancel_checker=_cancel_checker)
     index_meta = payload.setdefault("index", {})
     if verify_freshness:
         index_meta["fresh"] = _is_index_fresh(payload, _cancel_checker=_cancel_checker)
