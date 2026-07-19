@@ -1160,6 +1160,9 @@ def main(argv: list[str] | None = None) -> int:
             print("Workbench already running.")
             return 0
         if action == "restart":
+            restart_source_identity = _runtime_source_identity()
+            _ensure_frontend_build(restart_source_identity)
+            _assert_runtime_source_identity(restart_source_identity)
             _stop_backend()
             _start_backend(args.port, args.host, no_browser=bool(args.no_browser))
             print("Workbench restarted.")
