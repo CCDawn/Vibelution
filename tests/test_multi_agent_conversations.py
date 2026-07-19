@@ -1613,6 +1613,136 @@ def test_agent_inbox_message_wake_skips_busy_target_without_consuming(tmp_path, 
     assert detail["messages"] == []
 
 
+def test_agent_inbox_busy_message_wakes_once_after_session_release(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    alpha = session_service.create_chat_session(title="Alpha Agent")
+    beta = session_service.create_chat_session(title="Beta Agent")
+    captured_prompts: list[str] = []
+    runtime_event_codes: list[str] = []
+
+    class ReplyingAgent:
+        def seed_chat_history(self, messages):
+            return None
+
+        def seed_runtime_context(self, context):
+            return None
+
+        def run_single_turn(self, initial_prompt=None):
+            prompt = str(initial_prompt or "")
+            captured_prompts.append(prompt)
+            return {
+                "status": "completed",
+                "raw_output": "Beta 已处理排队私信。",
+                "summary": "Beta handled queued inbox message",
+                "outcome": "done",
+            }
+
+    monkeypatch.setattr(session_service, "create_chat_agent", lambda **kwargs: ReplyingAgent())
+    monkeypatch.setattr(
+        session_service,
+        "_SESSION_EXECUTOR",
+        SimpleNamespace(submit=lambda fn, context: fn(context)),
+    )
+    monkeypatch.setattr(
+        session_service,
+        "record_runtime_scene_event",
+        lambda _category, _surface, event_code, **_kwargs: runtime_event_codes.append(event_code),
+    )
+
+    session_service._set_session_running(beta["id"], True, turn_id="turn-busy")
+    try:
+        response = client.post(
+            f"/api/agents/{beta['agentId']}/messages",
+            json={
+                "sourceAgentId": alpha["agentId"],
+                "content": "Beta，空闲后自动处理这条私信。",
+                "wakeTarget": True,
+            },
+        )
+    finally:
+        session_service._set_session_running(beta["id"], False, turn_id="turn-busy")
+
+    assert response.status_code == 201, response.text
+    payload = response.json()
+    assert payload["delivery"]["wakeStatus"] == "skipped_busy"
+    pending = agent_directory_service.list_agent_inbox_messages_for_agent(beta["agentId"], status="pending")
+    assert pending[0]["metadata"]["wakeRequested"] is True
+
+    released_context = {
+        "session_id": beta["id"],
+        "turn_id": "turn-busy",
+        "agent_id": beta["agentId"],
+    }
+    session_service._release_scheduled_session_turn(released_context)
+    session_service._release_scheduled_session_turn(released_context)
+
+    matching_prompts = [
+        prompt for prompt in captured_prompts
+        if "Beta，空闲后自动处理这条私信。" in prompt
+    ]
+    assert len(matching_prompts) == 1
+    assert agent_directory_service.list_agent_inbox_messages_for_agent(beta["agentId"], status="pending") == []
+    consumed = agent_directory_service.list_agent_inbox_messages_for_agent(beta["agentId"], status="consumed")
+    assert [item["messageId"] for item in consumed] == [payload["messageId"]]
+    assert "agent_inbox.idle_drain_started" in runtime_event_codes
+
+
+def test_agent_inbox_idle_release_does_not_wake_mailbox_only_message(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    alpha = session_service.create_chat_session(title="Alpha Agent")
+    beta = session_service.create_chat_session(title="Beta Agent")
+    captured_prompts: list[str] = []
+
+    class ReplyingAgent:
+        def seed_chat_history(self, messages):
+            return None
+
+        def seed_runtime_context(self, context):
+            return None
+
+        def run_single_turn(self, initial_prompt=None):
+            captured_prompts.append(str(initial_prompt or ""))
+            return {
+                "status": "completed",
+                "raw_output": "unexpected",
+                "summary": "unexpected",
+                "outcome": "done",
+            }
+
+    monkeypatch.setattr(session_service, "create_chat_agent", lambda **kwargs: ReplyingAgent())
+    monkeypatch.setattr(
+        session_service,
+        "_SESSION_EXECUTOR",
+        SimpleNamespace(submit=lambda fn, context: fn(context)),
+    )
+
+    response = client.post(
+        f"/api/agents/{beta['agentId']}/messages",
+        json={
+            "sourceAgentId": alpha["agentId"],
+            "content": "Beta，这条消息只进入 mailbox。",
+            "wakeTarget": False,
+        },
+    )
+
+    assert response.status_code == 201, response.text
+    payload = response.json()
+    pending = agent_directory_service.list_agent_inbox_messages_for_agent(beta["agentId"], status="pending")
+    assert pending[0]["metadata"]["wakeRequested"] is False
+
+    session_service._release_scheduled_session_turn(
+        {
+            "session_id": beta["id"],
+            "turn_id": "turn-finished",
+            "agent_id": beta["agentId"],
+        }
+    )
+
+    assert captured_prompts == []
+    remaining = agent_directory_service.list_agent_inbox_messages_for_agent(beta["agentId"], status="pending")
+    assert [item["messageId"] for item in remaining] == [payload["messageId"]]
+
+
 def test_agent_message_tool_sends_persistent_message_by_agent_code(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     alpha = session_service.create_chat_session(title="Alpha Agent")

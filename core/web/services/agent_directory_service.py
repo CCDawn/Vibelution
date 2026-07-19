@@ -3078,6 +3078,23 @@ def list_agent_inbox_messages_for_agent(
     return messages[-max(1, int(limit or 1)) :]
 
 
+def next_wakeable_agent_inbox_message_for_agent(agent_id: str) -> dict[str, Any] | None:
+    """Return the oldest pending inbox message that requested an automatic wake."""
+
+    state = load_state()
+    agent = _find_agent(state, agent_id)
+    if not agent:
+        return None
+    path = _agent_workspace_event_path(agent, "agent_inbox_messages.jsonl")
+    for item in _read_jsonl(path):
+        if str(item.get("status") or "pending").strip().lower() != "pending":
+            continue
+        metadata = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+        if bool(metadata.get("wakeRequested")):
+            return item
+    return None
+
+
 def count_agent_inbox_messages_for_agent(agent_id: str, *, status: str = "pending") -> int:
     state = load_state()
     agent = _find_agent(state, agent_id)
