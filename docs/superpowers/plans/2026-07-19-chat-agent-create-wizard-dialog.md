@@ -6,7 +6,7 @@
 
 **Owner:** `agent-root-agent-create-dialog`
 
-**Claim:** `claim-a7718cc39fdb`
+**Claim:** `claim-db13f039f4f0`
 
 **Scope:** 对话页与 Agent 管理页的新建 Agent 入口、共享创建控制器、悬浮向导及其验证
 
@@ -14,7 +14,7 @@
 
 **Implementation link:** `feat(chat): add floating Agent creation wizard`
 
-**Validation:** 87 项聚焦组件/路由测试通过；生产 build 通过；浏览器验证确认 `/chat` 原地打开/关闭 dialog、三步切换和 option 加载。完整 web suite 为 2226/2227 通过；唯一失败是基线中 `ConversationView.styles.ts` 与旧 layout assertion 已不一致（本任务未修改该文件/断言）。
+**Validation:** 191 项聚焦组件/路由测试通过；生产 build 通过；浏览器验证确认 `/chat` 原地打开/关闭 dialog、三步切换和 option 加载。合入最新 Chat route 拆分后，完整 web suite 为 2231/2233 通过；两项失败均来自主线拆分基线：`RouteStyleDisplayContract` 仍断言被提取的 `ChatCodingRoute` layout 组合，`vuiImportBoundary` 尚未允许 `useChatWorkbenchLayout.ts` 共享 parent styles。本任务未修改这两个基线面。
 **Close condition:** 两个入口复用同一向导；对话页不再跳转；创建、失败、取消、成功和继续配置路径均通过验证
 
 **Mode:** `COMPACT_PLAN`
