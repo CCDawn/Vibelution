@@ -65,6 +65,20 @@ def prepare_full_run(
         minimum=_MIN_TIMEOUT_SECONDS,
         maximum=_MAX_TIMEOUT_SECONDS,
     )
+    training_mask_size = _bounded_int(
+        execution.get("trainingMaskSize", method.get("trainingMaskSize", 8)),
+        "trainingMaskSize",
+        minimum=1,
+        maximum=28,
+    )
+    candidate_loss_mask_modes = _validated_mask_modes(
+        execution.get("candidateLossMaskModes"),
+        fallback=str(
+            execution.get("candidateLossMaskMode")
+            or method.get("candidateLossMaskMode")
+            or "aligned"
+        ).strip(),
+    )
     run_options = {
         "trainSamples": _bounded_int(execution.get("trainSamples", 4096), "trainSamples", minimum=1, maximum=60000),
         "testSamples": _bounded_int(execution.get("testSamples", 1024), "testSamples", minimum=1, maximum=10000),
@@ -88,6 +102,12 @@ def prepare_full_run(
             or method.get("candidateLossMaskMode")
             or "aligned"
         ).strip(),
+        "candidateLossMaskModes": candidate_loss_mask_modes,
+        "trainingMaskSize": training_mask_size,
+        "evaluationMaskSizes": _validated_mask_sizes(
+            execution.get("evaluationMaskSizes"),
+            fallback=training_mask_size,
+        ),
         "minimumMseImprovement": _bounded_float(
             execution.get("minimumMseImprovement", method.get("minimumMseImprovement", 0.001)),
             "minimumMseImprovement",
@@ -107,6 +127,8 @@ def prepare_full_run(
             maximum=1.0,
         ),
     }
+    if execution.get("candidateLossMaskModes"):
+        run_options["candidateLossMaskMode"] = candidate_loss_mask_modes[0]
     if run_options["candidateMechanism"] not in {
         "inference_latent_correction",
         "masked_prediction_error_training",
@@ -118,6 +140,11 @@ def prepare_full_run(
         "deterministically_permuted",
     }:
         raise FormalRunnerError("candidateLossMaskMode is not supported by the formal adapter.")
+    if (
+        len(run_options["candidateLossMaskModes"]) > 1
+        and run_options["candidateMechanism"] != "masked_prediction_error_training"
+    ):
+        raise FormalRunnerError("candidateLossMaskModes matrix requires masked_prediction_error_training.")
 
     self_check = _run_process(
         [str(python_executable), str(script_path), "--self-check"],
@@ -225,10 +252,17 @@ def run_full_run(
                 "artifactHash": str(seed_result.get("artifactHash") or ""),
                 "decision": seed_result.get("decision") if isinstance(seed_result.get("decision"), dict) else {},
                 "metrics": seed_result.get("metrics") if isinstance(seed_result.get("metrics"), dict) else {},
+                "comparisonMatrix": (
+                    seed_result.get("comparisonMatrix")
+                    if isinstance(seed_result.get("comparisonMatrix"), list)
+                    else []
+                ),
+                "sharedBaseline": seed_result.get("sharedBaseline") is True,
             }
         )
 
     aggregate = _aggregate_records(records)
+    benchmark_matrix = _aggregate_benchmark_matrix(records)
     output_root = Path(str(prepared["environment"]["outputRoot"]))
     output_root.mkdir(parents=True, exist_ok=True)
     log_path = output_root / "formal-run-log.json"
@@ -245,6 +279,8 @@ def run_full_run(
         "seeds": list(prepared["seeds"]),
         "runs": records,
         "aggregate": aggregate,
+        "benchmarkMatrix": benchmark_matrix,
+        "sharedBaseline": bool(benchmark_matrix) and all(record.get("sharedBaseline") is True for record in records),
         "resultPath": str(result_path),
         "logRef": str(log_path),
         "requiresResultReview": True,
@@ -331,6 +367,29 @@ def _bounded_float(value: Any, label: str, *, minimum: float, maximum: float) ->
     return normalized
 
 
+def _validated_mask_modes(value: Any, *, fallback: str) -> list[str]:
+    raw_modes = value if isinstance(value, (list, tuple)) and value else [fallback]
+    supported = {"aligned", "spatially_shifted", "deterministically_permuted"}
+    modes: list[str] = []
+    for item in raw_modes:
+        mode = str(item or "").strip()
+        if mode not in supported:
+            raise FormalRunnerError("candidateLossMaskModes contains an unsupported mode.")
+        if mode not in modes:
+            modes.append(mode)
+    return modes
+
+
+def _validated_mask_sizes(value: Any, *, fallback: int) -> list[int]:
+    raw_sizes = value if isinstance(value, (list, tuple)) and value else [fallback]
+    sizes: list[int] = []
+    for item in raw_sizes:
+        size = _bounded_int(item, "evaluationMaskSizes", minimum=1, maximum=28)
+        if size not in sizes:
+            sizes.append(size)
+    return sizes
+
+
 def _experiment_command(
     *,
     python_executable: Path,
@@ -340,7 +399,7 @@ def _experiment_command(
     seed: int,
     options: dict[str, Any],
 ) -> list[str]:
-    return [
+    command = [
         str(python_executable),
         str(script_path),
         "--data-root",
@@ -361,6 +420,8 @@ def _experiment_command(
         str(options["correctionSteps"]),
         "--correction-rate",
         str(options["correctionRate"]),
+        "--mask-size",
+        str(options["trainingMaskSize"]),
         "--candidate-mechanism",
         str(options["candidateMechanism"]),
         "--candidate-masked-loss-weight",
@@ -374,6 +435,11 @@ def _experiment_command(
         "--maximum-global-mse-regression",
         str(options["maximumGlobalMseRegression"]),
     ]
+    if len(options["candidateLossMaskModes"]) > 1:
+        command.extend(["--candidate-loss-mask-modes", *[str(mode) for mode in options["candidateLossMaskModes"]]])
+    if options["evaluationMaskSizes"] != [options["trainingMaskSize"]]:
+        command.extend(["--evaluation-mask-sizes", *[str(size) for size in options["evaluationMaskSizes"]]])
+    return command
 
 
 def _run_process(args: list[str], *, cwd: Path, timeout_seconds: int) -> subprocess.CompletedProcess[str]:
@@ -408,6 +474,85 @@ def _aggregate_records(records: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def _aggregate_benchmark_matrix(records: list[dict[str, Any]]) -> dict[str, Any]:
+    grouped: dict[tuple[str, int], list[dict[str, Any]]] = {}
+    per_seed: dict[int, dict[tuple[str, int], dict[str, Any]]] = {}
+    for record in records:
+        seed = int(record["seed"])
+        seed_cells: dict[tuple[str, int], dict[str, Any]] = {}
+        for raw_cell in record.get("comparisonMatrix") or []:
+            if not isinstance(raw_cell, dict):
+                continue
+            mode = str(raw_cell.get("candidateLossMaskMode") or "")
+            try:
+                mask_size = int(raw_cell.get("maskSize"))
+            except (TypeError, ValueError) as exc:
+                raise FormalRunnerError("Benchmark matrix cell has an invalid maskSize.") from exc
+            key = (mode, mask_size)
+            if key in seed_cells:
+                raise FormalRunnerError(f"Benchmark matrix contains duplicate cell for seed {seed}: {key}.")
+            seed_cells[key] = raw_cell
+            grouped.setdefault(key, []).append(raw_cell)
+        per_seed[seed] = seed_cells
+    if not grouped:
+        return {}
+    if any(set(seed_cells) != set(grouped) for seed_cells in per_seed.values()):
+        raise FormalRunnerError("Benchmark matrix is incomplete across seeds.")
+    cells = []
+    for (mode, mask_size), entries in sorted(grouped.items()):
+        cells.append(
+            {
+                "candidateLossMaskMode": mode,
+                "maskSize": mask_size,
+                "mseImprovement": _summary([_cell_metric(entry, "mse_improvement") for entry in entries]),
+                "maskedMseImprovement": _summary(
+                    [_cell_metric(entry, "masked_mse_improvement") for entry in entries]
+                ),
+                "latencyMultiplier": _summary([_cell_metric(entry, "latency_multiplier") for entry in entries]),
+                "supportCount": sum(
+                    1
+                    for entry in entries
+                    if isinstance(entry.get("decision"), dict) and entry["decision"].get("status") == "support"
+                ),
+                "inconclusiveCount": sum(
+                    1
+                    for entry in entries
+                    if not isinstance(entry.get("decision"), dict) or entry["decision"].get("status") != "support"
+                ),
+            }
+        )
+    contrast_sizes = sorted(
+        {
+            mask_size
+            for mode, mask_size in grouped
+            if mode == "aligned" and ("deterministically_permuted", mask_size) in grouped
+        }
+    )
+    contrasts = []
+    for mask_size in contrast_sizes:
+        values = [
+            _cell_metric(seed_cells[("aligned", mask_size)], "masked_mse_improvement")
+            - _cell_metric(seed_cells[("deterministically_permuted", mask_size)], "masked_mse_improvement")
+            for seed_cells in per_seed.values()
+        ]
+        contrasts.append({"maskSize": mask_size, "maskedMseImprovement": _summary(values)})
+    return {
+        "cells": cells,
+        "alignedMinusPermuted": contrasts,
+        "seedCount": len(records),
+        "complete": True,
+    }
+
+
+def _cell_metric(cell: dict[str, Any], name: str) -> float:
+    metrics = cell.get("metrics") if isinstance(cell.get("metrics"), dict) else {}
+    delta = metrics.get("delta") if isinstance(metrics.get("delta"), dict) else {}
+    try:
+        return float(delta[name])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise FormalRunnerError(f"Benchmark matrix cell is missing metrics.delta.{name}.") from exc
+
+
 def _metric_value(record: dict[str, Any], name: str) -> float:
     metrics = record.get("metrics") if isinstance(record.get("metrics"), dict) else {}
     delta = metrics.get("delta") if isinstance(metrics.get("delta"), dict) else {}
@@ -417,12 +562,21 @@ def _metric_value(record: dict[str, Any], name: str) -> float:
         raise FormalRunnerError(f"Formal-run artifact is missing metrics.delta.{name}.") from exc
 
 
-def _summary(values: list[float]) -> dict[str, float]:
+def _summary(values: list[float]) -> dict[str, Any]:
+    mean = statistics.mean(values)
+    stddev = statistics.pstdev(values)
+    half_width = 1.96 * stddev / (len(values) ** 0.5)
     return {
-        "mean": round(statistics.mean(values), 10),
-        "stddev": round(statistics.pstdev(values), 10),
+        "count": len(values),
+        "mean": round(mean, 10),
+        "stddev": round(stddev, 10),
         "minimum": round(min(values), 10),
         "maximum": round(max(values), 10),
+        "confidenceInterval95": {
+            "method": "normal_approximation",
+            "lower": round(mean - half_width, 10),
+            "upper": round(mean + half_width, 10),
+        },
     }
 
 

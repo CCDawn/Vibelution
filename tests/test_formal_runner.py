@@ -168,3 +168,127 @@ def test_run_full_run_aggregates_fixed_seed_artifacts_without_promoting_a_resear
     assert result["requiresResultReview"] is True
     assert result["automaticPromotion"] is False
     assert len(executions) == 4
+
+
+def test_prepare_full_run_builds_one_shared_baseline_matrix_command_per_seed(tmp_path, monkeypatch):
+    project_root = tmp_path / "project"
+    script_path = project_root / "experiments" / "challenge_cup_predictive_coding" / "fashion_mnist_smoke.py"
+    script_path.parent.mkdir(parents=True)
+    script_path.write_text("# trusted runner placeholder", encoding="utf-8")
+
+    monkeypatch.setattr(
+        formal_runner.subprocess,
+        "run",
+        lambda args, **kwargs: subprocess.CompletedProcess(args, 0, stdout='{"status":"ok"}', stderr=""),
+    )
+    method_config = _method_config()
+    method_config["seeds"] = [211, 487, 809, 1201, 1879]
+    execution_config = _execution_config(tmp_path, project_root)
+    execution_config.update(
+        {
+            "trainingMaskSize": 8,
+            "evaluationMaskSizes": [4, 8, 12],
+            "candidateLossMaskModes": ["aligned", "deterministically_permuted"],
+        }
+    )
+
+    prepared = formal_runner.prepare_full_run(
+        formal_runner.FASHION_MNIST_MULTI_SEED_ADAPTER,
+        method_config=method_config,
+        execution_config=execution_config,
+        project_root=project_root,
+    )
+
+    assert prepared["seedCount"] == 5
+    assert len(prepared["commands"]) == 5
+    assert prepared["runOptions"]["trainingMaskSize"] == 8
+    assert prepared["runOptions"]["evaluationMaskSizes"] == [4, 8, 12]
+    assert prepared["runOptions"]["candidateLossMaskModes"] == ["aligned", "deterministically_permuted"]
+    for command in prepared["commands"]:
+        assert command["args"].count("--candidate-loss-mask-modes") == 1
+        modes_index = command["args"].index("--candidate-loss-mask-modes")
+        assert command["args"][modes_index + 1 : modes_index + 3] == ["aligned", "deterministically_permuted"]
+        sizes_index = command["args"].index("--evaluation-mask-sizes")
+        assert command["args"][sizes_index + 1 : sizes_index + 4] == ["4", "8", "12"]
+
+
+def test_run_full_run_aggregates_severity_and_control_matrix(tmp_path, monkeypatch):
+    project_root = tmp_path / "project"
+    script_path = project_root / "experiments" / "challenge_cup_predictive_coding" / "fashion_mnist_smoke.py"
+    script_path.parent.mkdir(parents=True)
+    script_path.write_text("# trusted runner placeholder", encoding="utf-8")
+    executions: list[list[str]] = []
+
+    def fake_run(args, **kwargs):
+        command = list(args)
+        executions.append(command)
+        if "--self-check" in command:
+            return subprocess.CompletedProcess(command, 0, stdout='{"status":"ok"}', stderr="")
+        output_dir = Path(command[command.index("--output-dir") + 1])
+        seed = int(command[command.index("--seed") + 1])
+        output_dir.mkdir(parents=True, exist_ok=True)
+        matrix = []
+        for mode, offset in (("aligned", 0.002), ("deterministically_permuted", 0.001)):
+            for mask_size in (4, 8, 12):
+                masked_gain = offset + seed / 1_000_000 + mask_size / 100_000
+                matrix.append(
+                    {
+                        "candidateLossMaskMode": mode,
+                        "maskSize": mask_size,
+                        "metrics": {
+                            "delta": {
+                                "mse_improvement": 0.0001,
+                                "masked_mse_improvement": masked_gain,
+                                "latency_multiplier": 0.9,
+                            }
+                        },
+                        "decision": {"status": "support"},
+                    }
+                )
+        result = {
+            "artifactHash": f"sha256:seed-{seed}",
+            "metrics": matrix[1]["metrics"],
+            "decision": matrix[1]["decision"],
+            "comparisonMatrix": matrix,
+            "sharedBaseline": True,
+        }
+        (output_dir / "result.json").write_text(json.dumps(result), encoding="utf-8")
+        return subprocess.CompletedProcess(command, 0, stdout=json.dumps(result), stderr="")
+
+    monkeypatch.setattr(formal_runner.subprocess, "run", fake_run)
+    method_config = _method_config()
+    method_config["seeds"] = [211, 487, 809]
+    execution_config = _execution_config(tmp_path, project_root)
+    execution_config.update(
+        {
+            "trainingMaskSize": 8,
+            "evaluationMaskSizes": [4, 8, 12],
+            "candidateLossMaskModes": ["aligned", "deterministically_permuted"],
+        }
+    )
+
+    result = formal_runner.run_full_run(
+        formal_runner.FASHION_MNIST_MULTI_SEED_ADAPTER,
+        method_config=method_config,
+        execution_config=execution_config,
+        project_root=project_root,
+    )
+
+    assert len(executions) == 4
+    assert result["sharedBaseline"] is True
+    cells = {
+        (cell["candidateLossMaskMode"], cell["maskSize"]): cell
+        for cell in result["benchmarkMatrix"]["cells"]
+    }
+    assert set(cells) == {
+        ("aligned", 4),
+        ("aligned", 8),
+        ("aligned", 12),
+        ("deterministically_permuted", 4),
+        ("deterministically_permuted", 8),
+        ("deterministically_permuted", 12),
+    }
+    assert cells[("aligned", 8)]["maskedMseImprovement"]["count"] == 3
+    assert cells[("aligned", 8)]["maskedMseImprovement"]["confidenceInterval95"]["method"] == "normal_approximation"
+    contrasts = {item["maskSize"]: item for item in result["benchmarkMatrix"]["alignedMinusPermuted"]}
+    assert contrasts[8]["maskedMseImprovement"]["mean"] == pytest.approx(0.001)
