@@ -1,4 +1,4 @@
-import { AlertTriangle, Database, RefreshCw, Route, Trash2 } from "lucide-react";
+import { AlertTriangle, Database, Image as ImageIcon, RefreshCw, Route, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 import { fetchJson } from "../api/client";
@@ -53,6 +53,7 @@ export type ConfigProviderRegistryPanelProps = {
   disabled: boolean;
   activeCredentialProviderId: string;
   activeRouteProviderId: string;
+  imageCapabilityBusy: boolean;
   actionFeedback: ProviderActionFeedback;
   liveReferenceCountByModelRef: Record<string, number>;
   onSelectProvider: (providerId: string) => void;
@@ -62,6 +63,7 @@ export type ConfigProviderRegistryPanelProps = {
   onEditRoute: (providerId: string) => void;
   onUnpin: (modelRef: string) => void;
   onTestModel: (modelRef: string) => void;
+  onProbeImageInput: (modelRef: string) => void;
   onDeleteProvider: (providerId: string) => void;
 };
 
@@ -164,6 +166,8 @@ export type ProviderModelsTabProps = {
   onFilterChange: (filter: ProviderModelFilter) => void;
   onUnpin: (modelRef: string) => void;
   onTestModel: (modelRef: string) => void;
+  imageCapabilityBusy?: boolean;
+  onProbeImageInput?: (modelRef: string) => void;
   reasoningFeedbackByModelRef?: Record<string, {
     phase: "busy" | "success" | "error";
     values: string[];
@@ -182,6 +186,8 @@ export function ProviderModelsTab({
   onFilterChange,
   onUnpin,
   onTestModel,
+  imageCapabilityBusy = false,
+  onProbeImageInput,
   reasoningFeedbackByModelRef = {},
   onProbeReasoning,
 }: ProviderModelsTabProps) {
@@ -279,6 +285,11 @@ export function ProviderModelsTab({
                 disabled,
               );
               const testAvailable = canTestProviderModel(model);
+              const imageCapability = model.capabilities?.image_input;
+              const imageProbeAvailable = (
+                ["observed", "pinned"].includes(model.availability)
+                && !provider.refreshDue
+              );
               const reasoningFeedback = reasoningFeedbackByModelRef[model.modelRef];
               const reasoningValues = reasoningFeedback?.phase === "success"
                 ? reasoningFeedback.values
@@ -293,6 +304,22 @@ export function ProviderModelsTab({
               );
               return (
                 <VActionGroup ariaLabel={`${model.modelRef} 模型操作`}>
+                  {imageProbeAvailable ? (
+                    <VButton
+                      data-model-capability-action="image_input"
+                      density="compact"
+                      icon={<ImageIcon size={14} />}
+                      isDisabled={disabled || imageCapabilityBusy}
+                      title="发送一张最小有效图片，验证当前模型路由是否支持图像输入，并保存运行时能力证据。"
+                      onPress={() => onProbeImageInput?.(model.modelRef)}
+                    >
+                      {imageCapabilityBusy
+                        ? "验证图片中…"
+                        : imageCapability?.value === "supported" || imageCapability?.value === "unsupported"
+                          ? "重新验证图片"
+                          : "验证图片输入"}
+                    </VButton>
+                  ) : null}
                   {reasoningVerified ? (
                     <span className={styles.modelActionState} data-model-reasoning="verified">
                       推理 {reasoningValues.join(" / ")} 已验证
@@ -413,6 +440,7 @@ export function ConfigProviderRegistryPanel({
   disabled,
   activeCredentialProviderId,
   activeRouteProviderId,
+  imageCapabilityBusy,
   actionFeedback,
   liveReferenceCountByModelRef,
   onSelectProvider,
@@ -422,6 +450,7 @@ export function ConfigProviderRegistryPanel({
   onEditRoute,
   onUnpin,
   onTestModel,
+  onProbeImageInput,
   onDeleteProvider,
 }: ConfigProviderRegistryPanelProps) {
   const [modelQuery, setModelQuery] = useState("");
@@ -678,6 +707,8 @@ export function ConfigProviderRegistryPanel({
                   onFilterChange={setModelFilter}
                   onUnpin={onUnpin}
                   onTestModel={onTestModel}
+                  imageCapabilityBusy={imageCapabilityBusy}
+                  onProbeImageInput={onProbeImageInput}
                   reasoningFeedbackByModelRef={reasoningFeedbackByModelRef}
                   onProbeReasoning={(modelRef) => void probeReasoning(modelRef)}
                 />
