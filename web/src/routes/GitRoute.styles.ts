@@ -13,20 +13,20 @@ export const gitRouteStyles = {
   route:
     "grid h-full min-h-0 min-w-0 max-w-full grid-rows-[auto_auto_auto_minmax(0,1fr)] overflow-hidden overflow-x-hidden text-vui-fg-primary max-[860px]:overflow-auto",
   header:
-    "mx-2.5 mt-2 min-w-0 border-[var(--vui-border-subtle)] !bg-transparent !shadow-none !backdrop-blur-none",
+    "mx-2 mt-1.5 min-w-0 border-[var(--vui-border-subtle)] !bg-transparent !shadow-none !backdrop-blur-none",
   panelEyebrow: "m-0 mb-0.5 text-[var(--vui-font-xs)] uppercase tracking-[0.08em] text-[var(--fg-tertiary)]",
   refreshButton:
     "h-[var(--vui-control-height-sm)] min-h-8 w-[var(--vui-control-height-sm)] flex-none p-0",
   summaryGrid:
-    "mx-3 mt-1.5 min-h-[52px] min-w-0 max-w-full overflow-x-auto",
+    "mx-2 mt-1 min-h-[48px] min-w-0 max-w-full overflow-x-auto",
   notice:
-    "mx-3.5 mt-2 rounded-[var(--radius-panel)] border border-[color-mix(in_srgb,var(--state-error)_32%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_12%,transparent)] px-2.5 py-2 text-[var(--vui-font-xs)] text-[var(--state-error)]",
+    "mx-2 mt-1.5 rounded-[var(--radius-panel)] border border-[color-mix(in_srgb,var(--state-error)_32%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_12%,transparent)] px-2.5 py-2 text-[var(--vui-font-xs)] text-[var(--state-error)]",
   workspace:
-    "grid min-h-0 min-w-0 grid-cols-[var(--git-change-panel-width,330px)_10px_minmax(0,1fr)_minmax(250px,310px)] p-2 max-[1200px]:grid-cols-[minmax(250px,var(--git-change-panel-width,310px))_8px_minmax(0,1fr)] max-[1200px]:grid-rows-[minmax(0,1fr)_minmax(220px,36vh)] max-[1200px]:gap-y-2 max-[860px]:grid-cols-[minmax(0,1fr)] max-[860px]:grid-rows-none max-[860px]:content-start max-[860px]:gap-2",
+    "grid min-h-0 min-w-0 grid-cols-[var(--git-change-panel-width,320px)_10px_minmax(0,1fr)_clamp(250px,22vw,360px)] p-1.5 max-[1200px]:grid-cols-[minmax(240px,var(--git-change-panel-width,300px))_8px_minmax(0,1fr)] max-[1200px]:grid-rows-[minmax(0,1fr)_minmax(200px,34vh)] max-[1200px]:gap-y-1.5 max-[860px]:grid-cols-[minmax(0,1fr)] max-[860px]:grid-rows-none max-[860px]:content-start max-[860px]:gap-1.5",
   workspaceOverview:
-    "grid-cols-[minmax(260px,0.9fr)_minmax(0,1.18fr)_minmax(240px,0.62fr)] gap-2 max-[1200px]:grid-cols-[minmax(0,1fr)_minmax(260px,320px)] max-[1200px]:grid-rows-[minmax(260px,0.92fr)_minmax(240px,0.8fr)] max-[860px]:grid-cols-[minmax(0,1fr)] max-[860px]:grid-rows-none",
+    "grid-cols-[minmax(0,0.9fr)_minmax(0,1.18fr)_minmax(0,0.62fr)] gap-1.5 max-[1200px]:grid-cols-[minmax(0,1fr)_clamp(260px,28vw,340px)] max-[1200px]:grid-rows-[minmax(240px,0.92fr)_minmax(220px,0.8fr)] max-[860px]:grid-cols-[minmax(0,1fr)] max-[860px]:grid-rows-none",
   resizeHandle:
-    "relative min-w-2.5 cursor-col-resize touch-none border-0 bg-transparent p-0 outline-none before:absolute before:inset-y-0 before:left-1/2 before:w-[3px] before:-translate-x-1/2 before:rounded-full before:bg-[color-mix(in_srgb,var(--vui-surface-row)_18%,transparent)] before:transition before:content-[''] hover:before:bg-[color-mix(in_srgb,var(--accent-warm)_52%,transparent)] hover:before:shadow-[var(--vui-shadow-soft)] focus-visible:before:bg-[color-mix(in_srgb,var(--accent-warm)_52%,transparent)] focus-visible:before:shadow-[var(--vui-shadow-soft)] max-[860px]:hidden",
+    "relative min-w-2.5 cursor-col-resize touch-none border-0 bg-transparent p-0 outline-none before:absolute before:inset-y-0 before:left-1/2 before:w-[3px] before:-translate-x-1/2 before:rounded-full before:bg-[color-mix(in_srgb,var(--vui-surface-row)_18%,transparent)] before:transition before:content-[''] hover:before:bg-[color-mix(in_srgb,var(--accent-warm)_52%,transparent)] hover:before:shadow-none focus-visible:before:bg-[color-mix(in_srgb,var(--accent-warm)_52%,transparent)] focus-visible:before:shadow-none max-[860px]:hidden",
   changePanel:
     `grid min-h-0 grid-rows-[auto_auto_auto_minmax(0,1fr)] gap-1.5 ${panelSurface} p-2`,
   commitPanel:
