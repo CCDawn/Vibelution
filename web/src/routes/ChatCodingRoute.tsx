@@ -24,7 +24,6 @@ import {
   useMemo,
   useRef,
   useState,
-  type DragEvent,
   type MouseEvent as ReactMouseEvent,
 } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
@@ -72,10 +71,8 @@ import {
   SkillLibraryPayload,
   TeamListPayload,
   ConversationMessage,
-  ConversationAttachment,
   ToolCall,
 } from "../api/types";
-import { COMPOSER_SESSION_REFERENCE_MIME } from "../components/conversation/conversationConstants";
 import type { ConversationStreamingFramePaintMetrics } from "../components/conversation/conversationStreamingMetrics";
 import { shouldShowNextStateSignalInConversation } from "../components/conversation/conversationNextStateSignal";
 import type { TurnAvatarResolution } from "../components/conversation/conversationTurnAvatar";
@@ -225,7 +222,6 @@ import {
   buildCliAgentRunViews,
   canInputTerminal,
   cliAgentRunCloseToken,
-  stableCliHash,
   cliAgentRunIdFromTabId,
   cliAgentRunTabId,
   isCliAgentRunActiveForClose,
@@ -248,6 +244,26 @@ import {
   toolApprovalScopeLabel,
 } from "./chat/toolApprovalLabels";
 import { postSubmitTelemetry } from "./chat/chatSubmitTelemetry";
+import {
+  MAX_COMPOSER_IMAGE_ATTACHMENTS,
+  buildSessionReferencePayload,
+  classifyComposerImageFiles,
+  clearSessionDraftForSubmittedTurn,
+  clearSessionImageAttachments,
+  clearSessionReferenceAttachments,
+  encodeUtf8Base64,
+  mergeComposerImageAttachments,
+  optimisticTurnIdForSubmission,
+  readStoredMentalModelToggle,
+  removeSessionImageAttachment,
+  resolveComposerSubmitGuard,
+  restoreSubmittedDraftIfComposerStillEmpty,
+  sessionReferenceId,
+  startSessionReferenceDrag,
+  uploadSessionImageAttachment,
+  writeStoredMentalModelToggle,
+  type ComposerImageAttachment,
+} from "./chat/chatComposerSubmitModel";
 import styles from "./ChatCodingRoute.styles";
 
 export type { CliAgentRunView, CliAgentTerminalSession } from "./chat/cliAgentRunModel";
@@ -276,93 +292,6 @@ type ActiveSkillContract = {
 type SessionDetailWithActiveSkill = SessionDetail & {
   activeSkillContract?: ActiveSkillContract | null;
 };
-
-function encodeUtf8Base64(value: string): string {
-  const bytes = new TextEncoder().encode(value);
-  let binary = "";
-  bytes.forEach((byte) => {
-    binary += String.fromCharCode(byte);
-  });
-  return btoa(binary);
-}
-
-function clearSessionImageAttachments(
-  current: Record<string, ComposerImageAttachment[]>,
-  sessionId: string,
-) {
-  const attachments = current[sessionId] ?? [];
-  attachments.forEach((attachment) => URL.revokeObjectURL(attachment.previewUrl));
-  const { [sessionId]: _removed, ...remaining } = current;
-  return remaining;
-}
-
-function clearSessionReferenceAttachments(
-  current: Record<string, SessionReferenceAttachment[]>,
-  sessionId: string,
-) {
-  const { [sessionId]: _removed, ...remaining } = current;
-  return remaining;
-}
-
-function sessionReferenceId(reference: SessionReferenceAttachment) {
-  return String(reference.referenceId || reference.sessionId || "").trim();
-}
-
-function buildSessionReferencePayload(
-  session: SessionSummary,
-  displayName: string,
-  summary: string,
-): SessionReferenceAttachment {
-  const sessionId = String(session.id || "").trim();
-  return {
-    referenceId: `session:${sessionId}`,
-    kind: "session",
-    sessionId,
-    title: String(session.taskTitle || session.resultCard?.title || session.title || sessionId).trim(),
-    agentId: String(session.agentId || "").trim(),
-    agentCode: String(session.agentCode || "").trim(),
-    agentDisplayName: String(displayName || session.agentDisplayName || "").trim(),
-    summary: String(summary || session.taskSummary || "").trim(),
-    createdAt: new Date().toISOString(),
-  };
-}
-
-function startSessionReferenceDrag(
-  event: DragEvent<HTMLElement>,
-  reference: SessionReferenceAttachment,
-) {
-  const payload = JSON.stringify(reference);
-  event.dataTransfer.setData(COMPOSER_SESSION_REFERENCE_MIME, payload);
-  event.dataTransfer.setData("text/plain", `[Session Reference] ${reference.title || reference.sessionId}`);
-  event.dataTransfer.effectAllowed = "copy";
-}
-
-function clearSessionDraftForSubmittedTurn(
-  current: Record<string, string>,
-  sessionId: string,
-) {
-  if ((current[sessionId] ?? "") === "") {
-    return current;
-  }
-  return {
-    ...current,
-    [sessionId]: "",
-  };
-}
-
-function restoreSubmittedDraftIfComposerStillEmpty(
-  current: Record<string, string>,
-  sessionId: string,
-  content: string,
-) {
-  if (!content || (current[sessionId] ?? "") !== "") {
-    return current;
-  }
-  return {
-    ...current,
-    [sessionId]: content,
-  };
-}
 
 function chatRoomModeLabel(mode: ChatRoomMode, lang: "zh" | "en") {
   if (mode.id === "round_robin") {
@@ -501,33 +430,6 @@ function cacheCalibrationSummaryLabel(
 }
 
 
-function removeSessionImageAttachment(
-  current: Record<string, ComposerImageAttachment[]>,
-  sessionId: string,
-  attachmentId: string,
-) {
-  const attachments = current[sessionId] ?? [];
-  const removed = attachments.find((attachment) => attachment.id === attachmentId);
-  if (removed) {
-    URL.revokeObjectURL(removed.previewUrl);
-  }
-  return {
-    ...current,
-    [sessionId]: attachments.filter((attachment) => attachment.id !== attachmentId),
-  };
-}
-
-async function uploadSessionImageAttachment(sessionId: string, attachment: ComposerImageAttachment) {
-  return fetchJson<ConversationAttachment>(`/api/sessions/${sessionId}/attachments`, {
-    method: "POST",
-    headers: {
-      "Content-Type": attachment.contentType || "application/octet-stream",
-      "X-Vibelution-Filename": encodeURIComponent(attachment.filename),
-    },
-    body: attachment.file,
-  });
-}
-
 type SessionDetailWindowOptions = {
   messageLimit?: number;
   beforeMessageIndex?: number;
@@ -552,9 +454,6 @@ function fetchSessionDetailWindow(
   );
 }
 
-const MENTAL_MODEL_TOGGLE_STORAGE_KEY = "vibelution.chat.mentalModelEnabled";
-const MAX_COMPOSER_IMAGE_ATTACHMENTS = 4;
-const MAX_COMPOSER_IMAGE_BYTES = 8 * 1024 * 1024;
 const SESSION_DETAIL_INITIAL_MESSAGE_LIMIT = 40;
 const SESSION_DETAIL_HISTORY_PAGE_SIZE = 40;
 const SESSION_STREAM_MIN_APPLY_INTERVAL_MS = 350;
@@ -562,14 +461,6 @@ const SESSION_STREAM_ROUTE_SWITCH_GRACE_MS = 4_000;
 
 type PetInteractionAction = "feed" | "talk" | "care";
 type RightIndexPanel = "conversations" | "members";
-type ComposerImageAttachment = {
-  id: string;
-  file: File;
-  filename: string;
-  previewUrl: string;
-  sizeBytes: number;
-  contentType: string;
-};
 
 type SessionContextMenuState = {
   sessionId: string;
@@ -597,27 +488,6 @@ function isSessionNotFoundError(error: unknown) {
 function latestVisibleTurnErrorMessage(messages: ConversationMessage[] | undefined) {
   const latestMessage = messages?.[messages.length - 1];
   return latestMessage && isTurnErrorMessage(latestMessage) ? String(latestMessage.content ?? "") : "";
-}
-
-function readStoredMentalModelToggle(): boolean | null {
-  if (typeof window === "undefined") {
-    return null;
-  }
-  const raw = window.localStorage.getItem(MENTAL_MODEL_TOGGLE_STORAGE_KEY);
-  if (raw === "true") {
-    return true;
-  }
-  if (raw === "false") {
-    return false;
-  }
-  return null;
-}
-
-function writeStoredMentalModelToggle(enabled: boolean) {
-  if (typeof window === "undefined") {
-    return;
-  }
-  window.localStorage.setItem(MENTAL_MODEL_TOGGLE_STORAGE_KEY, enabled ? "true" : "false");
 }
 
 function formatAgentIdentityWithRole(name: string, role: string, fallback = "Agent") {
@@ -888,10 +758,6 @@ function setActiveTurnLayerForSession(
     ...current,
     [normalizedSessionId]: layer,
   };
-}
-
-function optimisticTurnIdForSubmission(kind: "submit" | "edit", sessionId: string, createdAt: string) {
-  return `optimistic-${kind}-${stableCliHash([kind, sessionId, createdAt].join("\n"))}`;
 }
 
 function latestUserTurnId(detail: SessionDetail | undefined) {
@@ -4683,38 +4549,19 @@ export function ChatCodingRoute() {
       }));
       return;
     }
-    const incoming = Array.from(files || []).filter((file) => file.type.startsWith("image/"));
-    if (!incoming.length) {
+    const { accepted, rejected } = classifyComposerImageFiles(files);
+    if (!accepted.length && !rejected.length) {
       return;
     }
-    const accepted: ComposerImageAttachment[] = [];
-    const rejected: string[] = [];
-    for (const file of incoming) {
-      if (!["image/png", "image/jpeg", "image/webp"].includes(file.type)) {
-        rejected.push(file.name);
-        continue;
-      }
-      if (file.size > MAX_COMPOSER_IMAGE_BYTES) {
-        rejected.push(file.name);
-        continue;
-      }
-      accepted.push({
-        id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
-        file,
-        filename: file.name || "image",
-        previewUrl: URL.createObjectURL(file),
-        sizeBytes: file.size,
-        contentType: file.type,
+    if (accepted.length) {
+      setSessionImageAttachments((current) => {
+        const existing = current[activeSessionId] ?? [];
+        return {
+          ...current,
+          [activeSessionId]: mergeComposerImageAttachments(existing, accepted, MAX_COMPOSER_IMAGE_ATTACHMENTS),
+        };
       });
     }
-    setSessionImageAttachments((current) => {
-      const existing = current[activeSessionId] ?? [];
-      const merged = [...existing, ...accepted].slice(0, MAX_COMPOSER_IMAGE_ATTACHMENTS);
-      return {
-        ...current,
-        [activeSessionId]: merged,
-      };
-    });
     setSessionComposerErrors((current) => ({
       ...current,
       [activeSessionId]: rejected.length
@@ -4953,11 +4800,12 @@ export function ChatCodingRoute() {
       }));
       return;
     }
-    const guardReason = composerDisabled
-      ? "composer_disabled"
-      : !content && !activeImageAttachments.length && !activeReferenceAttachments.length
-        ? "empty_content"
-        : "";
+    const guardReason = resolveComposerSubmitGuard({
+      composerDisabled,
+      content,
+      imageAttachmentCount: activeImageAttachments.length,
+      referenceAttachmentCount: activeReferenceAttachments.length,
+    });
     if (guardReason) {
       postSubmitTelemetry(
         "browser.chat_submit.blocked",
