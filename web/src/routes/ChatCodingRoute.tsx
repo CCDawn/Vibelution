@@ -203,6 +203,7 @@ import { useGroupRoomStream } from "./chat/useGroupRoomStream";
 import { useChatSessionSelection } from "./chat/useChatSessionSelection";
 import { useChatWorkspaceLifecycle } from "./chat/useChatWorkspaceLifecycle";
 import { useChatSessionDetailMutations } from "./chat/useChatSessionDetailMutations";
+import { useChatWorkspaceActions } from "./chat/useChatWorkspaceActions";
 import {
   chatRoomModeLabel,
   chatRoomPurposeLabel,
@@ -2729,86 +2730,87 @@ export function ChatCodingRoute() {
     }));
   }
 
-  function handlePetInteraction(action: PetInteractionAction) {
-    setPetActionFeedback("");
-    petActionMutation.mutate({ action });
-  }
-
-  function handleCreateSession() {
-    setActiveGroupRoomId("");
-    setRightIndexPanel("conversations");
-    setSessionComposerErrors((current) => ({
-      ...current,
-      __sessions__: "",
-    }));
-    createSessionMutation.mutate({ agentId: selectedChatAgentId });
-  }
+  const {
+    handlePetInteraction,
+    handleCreateSession,
+    handleOpenProjectAgentBus,
+    handleOpenDirectSession,
+    handleOpenAgent,
+    handleOpenMentionTarget,
+    handleOpenGroupRoom,
+    handleToggleGroupManageSession,
+    handleToggleGroupComposer,
+    handleToggleGroupAgent,
+    handleCreateGroupRoom,
+    handleStartGroupRound,
+    handleStopGroupRound,
+    handleSendProjectBusMessage,
+    handleRevokeProjectBusMessage,
+    handleApplyGroupRoomManagement,
+    handleDeleteActiveGroupRoom,
+    handleResetActiveGroupRoom,
+    handleDeleteSession,
+    handleClearSessionHistory,
+    handleAddSessionToReview,
+  } = useChatWorkspaceActions({
+    lang,
+    t,
+    navigate,
+    chatWorkspaceCache,
+    latestDirectSessionSelectionRef,
+    setActiveSession,
+    activeGroupRoomId,
+    setActiveGroupRoomId,
+    setRightIndexPanel,
+    setRightPaneCollapsed,
+    setSelectedAgentId,
+    setSessionFilter,
+    setSessionComposerErrors,
+    setSessionContextMenu,
+    setGroupRoomActionError,
+    setGroupComposerOpen,
+    setGroupTitleDraft,
+    groupTitleDraft,
+    groupModeDraft,
+    groupPurposeDraft,
+    groupSelectedAgentIds,
+    setGroupSelectedAgentIds,
+    groupTopicDraft,
+    projectBusDraft,
+    projectBusInterruptTargets,
+    setGroupManageSessionIds,
+    groupManageTitleDraft,
+    groupManageSessionIds,
+    groupManageModeDraft,
+    groupManagePurposeDraft,
+    selectedChatAgentId,
+    standardGroupRoomActive,
+    activeGroupTeamOwned,
+    groupRoundActive,
+    groupRoundRunning,
+    groupManageDisabled,
+    groupDeleteDisabled,
+    groupResetDisabled,
+    activeGroupRoom,
+    setPetActionFeedback,
+    createSessionMutation,
+    createGroupRoomMutation,
+    startGroupRoundMutation,
+    stopGroupRoundMutation,
+    sendProjectBusMessageMutation,
+    revokeProjectBusMessageMutation,
+    updateGroupRoomMutation,
+    deleteGroupRoomMutation,
+    resetGroupRoomMutation,
+    deleteSessionMutation,
+    clearSessionHistoryMutation,
+    addSessionToReviewMutation,
+    selectDirectSessionMutation,
+    petActionMutation,
+  });
 
   function handleCreateAgent() {
     setAgentCreateWizardOpen(true);
-  }
-
-  function handleOpenProjectAgentBus() {
-    setSessionContextMenu(null);
-    navigate("/chat", { replace: false });
-    setActiveGroupRoomId("__project_agent_bus__");
-    setRightIndexPanel("conversations");
-    setRightPaneCollapsed(false);
-    setGroupRoomActionError("");
-    void chatWorkspaceCache.afterProjectBusFailed();
-  }
-
-  function handleOpenDirectSession(sessionId: string) {
-    const normalizedSessionId = String(sessionId || "").trim();
-    if (!normalizedSessionId) {
-      return;
-    }
-    setSessionContextMenu(null);
-    latestDirectSessionSelectionRef.current = normalizedSessionId;
-    setActiveSession(normalizedSessionId);
-    setActiveGroupRoomId("");
-    setRightIndexPanel("conversations");
-    setGroupRoomActionError("");
-    setSessionComposerErrors((current) => ({
-      ...current,
-      [normalizedSessionId]: "",
-      __sessions__: "",
-    }));
-    selectDirectSessionMutation.mutate(normalizedSessionId);
-    navigate(`/chat?session=${encodeURIComponent(normalizedSessionId)}`, { replace: false });
-  }
-
-  function handleOpenAgent(agent: AgentInstance) {
-    const agentId = String(agent.agentId || "").trim();
-    const primarySessionId = String(agent.directSessionId || "").trim();
-    if (!agentId || !primarySessionId) {
-      return;
-    }
-    setSelectedAgentId(agentId);
-    handleOpenDirectSession(primarySessionId);
-  }
-
-  function handleOpenMentionTarget(target: ChatMentionTarget) {
-    setRightPaneCollapsed(false);
-    setGroupRoomActionError("");
-    if (target.kind === "all") {
-      setActiveGroupRoomId("__project_agent_bus__");
-      setRightIndexPanel("conversations");
-      setSessionFilter("");
-      void chatWorkspaceCache.afterProjectBusFailed();
-      return;
-    }
-    if (target.directSessionId) {
-      setSessionFilter("");
-      handleOpenDirectSession(target.directSessionId);
-      return;
-    }
-    const fallbackFilter = target.agentCode || target.displayName || target.agentId || "";
-    if (fallbackFilter) {
-      setActiveGroupRoomId("");
-      setRightIndexPanel("conversations");
-      setSessionFilter(fallbackFilter);
-    }
   }
 
   function renderMentionedText(content: string, fallback = "") {
@@ -2865,216 +2867,6 @@ export function ChatCodingRoute() {
         ) : null}
       </>
     );
-  }
-
-  function handleOpenGroupRoom(roomId: string) {
-    if (!roomId) {
-      return;
-    }
-    navigate(`/chat?room=${encodeURIComponent(roomId)}`, { replace: false });
-    setActiveGroupRoomId(roomId);
-    setRightIndexPanel("members");
-    setRightPaneCollapsed(false);
-    setGroupRoomActionError("");
-    void chatWorkspaceCache.afterChatRoomChanged(roomId);
-  }
-
-  function handleToggleGroupManageSession(sessionId: string) {
-    if (!sessionId || activeGroupTeamOwned || groupRoundActive || updateGroupRoomMutation.isPending) {
-      return;
-    }
-    setGroupRoomActionError("");
-    setGroupManageSessionIds((current) =>
-      current.includes(sessionId)
-        ? current.filter((item) => item !== sessionId)
-        : [...current, sessionId],
-    );
-  }
-
-  function handleToggleGroupComposer() {
-    setSessionComposerErrors((current) => ({
-      ...current,
-      __sessions__: "",
-    }));
-    setGroupComposerOpen((open) => {
-      const nextOpen = !open;
-      if (nextOpen && !groupTitleDraft.trim()) {
-        setGroupTitleDraft(lang === "zh" ? "Agent 群聊" : "Agent group");
-      }
-      return nextOpen;
-    });
-  }
-
-  function handleToggleGroupAgent(agentId: string) {
-    setSessionComposerErrors((current) => ({
-      ...current,
-      __sessions__: "",
-    }));
-    setGroupSelectedAgentIds((current) =>
-      current.includes(agentId) ? current.filter((item) => item !== agentId) : [...current, agentId],
-    );
-  }
-
-  function handleCreateGroupRoom() {
-    const title = groupTitleDraft.trim();
-    const agentIds = groupSelectedAgentIds.filter(Boolean);
-    if (!title || agentIds.length < 2 || createGroupRoomMutation.isPending) {
-      setSessionComposerErrors((current) => ({
-        ...current,
-        __sessions__: lang === "zh" ? "请输入群聊名称，并至少选择两个 Agent。" : "Enter a group name and choose at least two agents.",
-      }));
-      return;
-    }
-    createGroupRoomMutation.mutate({
-      title,
-      agentIds,
-      mode: groupModeDraft || "round_robin",
-      purpose: groupPurposeDraft || "discussion",
-    });
-  }
-
-  function handleStartGroupRound() {
-    const topic = groupTopicDraft.trim();
-    if (!standardGroupRoomActive || !activeGroupRoomId || !topic || startGroupRoundMutation.isPending || groupRoundActive) {
-      return;
-    }
-    startGroupRoundMutation.mutate({
-      roomId: activeGroupRoomId,
-      topic,
-      mode: activeGroupRoom?.mode || "round_robin",
-      purpose: activeGroupRoom?.purpose || "discussion",
-    });
-  }
-
-  function handleStopGroupRound() {
-    if (!standardGroupRoomActive || !activeGroupRoomId || !groupRoundRunning || stopGroupRoundMutation.isPending) {
-      return;
-    }
-    stopGroupRoundMutation.mutate({
-      roomId: activeGroupRoomId,
-    });
-  }
-
-  function handleSendProjectBusMessage() {
-    const content = projectBusDraft.trim();
-    if (!content || sendProjectBusMessageMutation.isPending) {
-      return;
-    }
-    sendProjectBusMessageMutation.mutate({
-      content,
-      interruptTargets: projectBusInterruptTargets,
-    });
-  }
-
-  function handleRevokeProjectBusMessage(eventId: string) {
-    if (!eventId || revokeProjectBusMessageMutation.isPending) {
-      return;
-    }
-    revokeProjectBusMessageMutation.mutate({ eventId });
-  }
-
-  function handleApplyGroupRoomManagement() {
-    if (!standardGroupRoomActive || activeGroupTeamOwned || !activeGroupRoomId || groupManageDisabled) {
-      return;
-    }
-    updateGroupRoomMutation.mutate({
-      roomId: activeGroupRoomId,
-      title: groupManageTitleDraft.trim(),
-      sessionIds: groupManageSessionIds,
-      mode: groupManageModeDraft || "round_robin",
-      purpose: groupManagePurposeDraft || "discussion",
-    });
-  }
-
-  function handleDeleteActiveGroupRoom() {
-    if (!standardGroupRoomActive || activeGroupTeamOwned || !activeGroupRoomId || groupDeleteDisabled) {
-      return;
-    }
-    const roomTitle = (activeGroupRoom?.title || activeGroupRoomId).trim();
-    const groupConfirmMessage = t("deleteGroupConfirm").replace("{title}", roomTitle || activeGroupRoomId);
-    if (!window.confirm(groupConfirmMessage)) {
-      return;
-    }
-    deleteGroupRoomMutation.mutate({ roomId: activeGroupRoomId });
-  }
-
-  function handleResetActiveGroupRoom() {
-    if (!standardGroupRoomActive || !activeGroupRoomId || groupResetDisabled) {
-      return;
-    }
-    const roomTitle = (activeGroupRoom?.title || activeGroupRoomId).trim();
-    const groupConfirmMessage = t("resetGroupConfirm").replace("{title}", roomTitle || activeGroupRoomId);
-    if (!window.confirm(groupConfirmMessage)) {
-      return;
-    }
-    resetGroupRoomMutation.mutate({ roomId: activeGroupRoomId });
-  }
-
-  function handleDeleteSession(session: SessionSummary) {
-    setSessionContextMenu(null);
-    if (isBusyPhase(session.currentPhase || session.status)) {
-      setSessionComposerErrors((current) => ({
-        ...current,
-        [session.id]: t("deleteSessionBusy"),
-        __sessions__: "",
-      }));
-      return;
-    }
-    const sessionTitle = (session.agentDisplayName || session.title || session.id).trim();
-    const sessionConfirmMessage = t("deleteSessionConfirm").replace("{title}", sessionTitle || session.id);
-    if (!window.confirm(sessionConfirmMessage)) {
-      return;
-    }
-    setSessionComposerErrors((current) => ({
-      ...current,
-      [session.id]: "",
-      __sessions__: "",
-    }));
-    deleteSessionMutation.mutate({ sessionId: session.id });
-  }
-
-  function handleClearSessionHistory(session: SessionSummary) {
-    setSessionContextMenu(null);
-    if (!session.agentId || !isAgentRootSession(session)) {
-      return;
-    }
-    if (isBusyPhase(session.currentPhase || session.status)) {
-      setSessionComposerErrors((current) => ({
-        ...current,
-        [session.id]: t("clearSessionHistoryBusy"),
-        __sessions__: "",
-      }));
-      return;
-    }
-    const sessionTitle = (session.agentDisplayName || session.title || session.id).trim();
-    const confirmMessage = t("clearSessionHistoryConfirm").replace("{title}", sessionTitle || session.id);
-    if (!window.confirm(confirmMessage)) {
-      return;
-    }
-    setSessionComposerErrors((current) => ({
-      ...current,
-      [session.id]: "",
-      __sessions__: "",
-    }));
-    clearSessionHistoryMutation.mutate({ sessionId: session.id, agentId: session.agentId });
-  }
-
-  function handleAddSessionToReview(session: SessionSummary) {
-    setSessionContextMenu(null);
-    if (isBusyPhase(session.currentPhase || session.status)) {
-      setSessionComposerErrors((current) => ({
-        ...current,
-        [session.id]: t("addSessionToReviewBusy"),
-        __sessions__: "",
-      }));
-      return;
-    }
-    setSessionComposerErrors((current) => ({
-      ...current,
-      [session.id]: "",
-      __sessions__: "",
-    }));
-    addSessionToReviewMutation.mutate({ sessionId: session.id });
   }
 
   function beginRenameSession(session: SessionSummary) {
