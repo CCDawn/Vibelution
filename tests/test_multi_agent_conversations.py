@@ -1687,6 +1687,121 @@ def test_agent_inbox_busy_message_wakes_once_after_session_release(tmp_path, mon
     assert "agent_inbox.idle_drain_started" in runtime_event_codes
 
 
+def test_agent_inbox_startup_recovery_wakes_persisted_message_once(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    alpha = session_service.create_chat_session(title="Alpha Agent")
+    beta = session_service.create_chat_session(title="Beta Agent")
+    started: list[tuple[tuple, dict]] = []
+    runtime_events: list[tuple[tuple, dict]] = []
+    monkeypatch.setattr(
+        session_service,
+        "submit_session_message",
+        lambda *args, **kwargs: started.append((args, kwargs)) or {"startedTurnId": "turn-startup"},
+    )
+    monkeypatch.setattr(
+        session_service,
+        "record_runtime_scene_event",
+        lambda *args, **kwargs: runtime_events.append((args, kwargs)) or {"accepted": True},
+    )
+    message = agent_directory_service.write_agent_inbox_message(
+        beta["agentId"],
+        source_agent_id=alpha["agentId"],
+        content="Beta，请在后端恢复后继续处理。",
+        metadata={"wakeRequested": True},
+    )
+
+    first = session_service.recover_wakeable_agent_inbox_messages_on_startup()
+    second = session_service.recover_wakeable_agent_inbox_messages_on_startup()
+
+    assert len(started) == 1
+    assert started[0][0][0] == beta["id"]
+    assert "Beta，请在后端恢复后继续处理。" in started[0][0][1]
+    assert first["startedCount"] == 1
+    assert second["startedCount"] == 0
+    assert agent_directory_service.list_agent_inbox_messages_for_agent(beta["agentId"], status="pending") == []
+    consumed = agent_directory_service.list_agent_inbox_messages_for_agent(beta["agentId"], status="consumed")
+    assert [item["messageId"] for item in consumed] == [message["messageId"]]
+    summaries = [
+        kwargs["fields"]
+        for args, kwargs in runtime_events
+        if args[2] == "agent_inbox.startup_recovery_completed"
+    ]
+    assert summaries[0]["trigger"] == "backend_startup"
+    assert summaries[0]["startedCount"] == 1
+
+
+def test_agent_inbox_startup_recovery_leaves_mailbox_only_message_pending(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    alpha = session_service.create_chat_session(title="Alpha Agent")
+    beta = session_service.create_chat_session(title="Beta Agent")
+    started = []
+    monkeypatch.setattr(
+        session_service,
+        "submit_session_message",
+        lambda *args, **kwargs: started.append((args, kwargs)) or {"startedTurnId": "unexpected"},
+    )
+    message = agent_directory_service.write_agent_inbox_message(
+        beta["agentId"],
+        source_agent_id=alpha["agentId"],
+        content="只进入邮箱，不应在启动时唤醒。",
+        metadata={"wakeRequested": False},
+    )
+
+    summary = session_service.recover_wakeable_agent_inbox_messages_on_startup()
+
+    assert started == []
+    assert summary["eligibleAgentCount"] == 0
+    pending = agent_directory_service.list_agent_inbox_messages_for_agent(beta["agentId"], status="pending")
+    assert [item["messageId"] for item in pending] == [message["messageId"]]
+
+
+def test_agent_inbox_startup_recovery_leaves_busy_target_pending(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    alpha = session_service.create_chat_session(title="Alpha Agent")
+    beta = session_service.create_chat_session(title="Beta Agent")
+    started = []
+    monkeypatch.setattr(
+        session_service,
+        "submit_session_message",
+        lambda *args, **kwargs: started.append((args, kwargs)) or {"startedTurnId": "unexpected"},
+    )
+    message = agent_directory_service.write_agent_inbox_message(
+        beta["agentId"],
+        source_agent_id=alpha["agentId"],
+        content="目标忙碌时继续留在持久化邮箱。",
+        metadata={"wakeRequested": True},
+    )
+    session_service._set_session_running(beta["id"], True, turn_id="turn-busy")
+    try:
+        summary = session_service.recover_wakeable_agent_inbox_messages_on_startup()
+    finally:
+        session_service._set_session_running(beta["id"], False, turn_id="turn-busy")
+
+    assert started == []
+    assert summary["wakeStatusCounts"] == {"skipped_busy": 1}
+    pending = agent_directory_service.list_agent_inbox_messages_for_agent(beta["agentId"], status="pending")
+    assert [item["messageId"] for item in pending] == [message["messageId"]]
+
+
+def test_agent_inbox_startup_recovery_does_not_consume_archived_target(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    alpha = session_service.create_chat_session(title="Alpha Agent")
+    beta = session_service.create_chat_session(title="Beta Agent")
+    message = agent_directory_service.write_agent_inbox_message(
+        beta["agentId"],
+        source_agent_id=alpha["agentId"],
+        content="目标归档后不能消费。",
+        metadata={"wakeRequested": True},
+    )
+    agent_directory_service.archive_agent_instance(beta["agentId"])
+
+    summary = session_service.recover_wakeable_agent_inbox_messages_on_startup()
+
+    assert summary["eligibleAgentCount"] == 0
+    pending = agent_directory_service.list_agent_inbox_messages_for_agent(beta["agentId"], status="pending")
+    assert [item["messageId"] for item in pending] == [message["messageId"]]
+
+
 def test_agent_inbox_idle_release_does_not_wake_mailbox_only_message(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     alpha = session_service.create_chat_session(title="Alpha Agent")
