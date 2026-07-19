@@ -14,6 +14,7 @@ Agent-oriented map for Chat workbench development. Prefer editing a **module** o
 | Composer bridge UI | `ChatConversationComposerBridge.tsx` | CLI model |
 | Center workspace shell | `ChatSessionWorkspacePanel.tsx` | index rail |
 | Layout width math | `chatCodingRouteViewModel.ts` | session protocol |
+| Shell layout / resize / responsive panes | `useChatWorkbenchLayout.ts` | stream/submit |
 | Left index / new Agent / group / system entry UI | `ChatConversationIndexRail.tsx` | stream/submit |
 | Right status / run modes / token / pet / group settings | `ChatStatusRail.tsx` | left index, stream apply |
 | Orchestration / wiring only | `../ChatCodingRoute.tsx` | — |
@@ -35,6 +36,10 @@ Pure helpers extracted from `ChatCodingRoute.tsx`:
 ## Phase C (done)
 
 - `ChatStatusRail.tsx` — right status pane (group profile/settings, current session, run modes, token/LLM panels, companion/pet)
+
+## Phase D (in progress)
+
+- `useChatWorkbenchLayout.ts` — panel widths, resize drag/keyboard, responsive collapse/overlay, layout CSS vars/class names
 
 ## Next (planned)
 
