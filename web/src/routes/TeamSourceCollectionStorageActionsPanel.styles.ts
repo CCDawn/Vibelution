@@ -1,6 +1,6 @@
 const styles = {
   workflowSourceCollectionStorageActions:
-    "workflowSourceCollectionStorageActions min-w-0 !grid grid-cols-[minmax(0,1fr)_auto] items-start gap-2 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[color:var(--source-workbench-card)] p-1.5 text-[var(--vui-font-xs)] max-[760px]:grid-cols-[1fr] [&>div:first-child]:min-w-0 [&>div:first-child_strong]:text-[var(--fg-primary)]",
+    "workflowSourceCollectionStorageActions min-w-0 !grid grid-cols-[minmax(0,1fr)_auto] items-start gap-2 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[color:var(--source-workbench-card)] p-1.5 [font-size:var(--vui-font-xs)] max-[760px]:grid-cols-[1fr] [&>div:first-child]:min-w-0 [&>div:first-child_strong]:text-[var(--fg-primary)]",
   workflowSourceCollectionStorageButtons:
     "workflowSourceCollectionStorageButtons min-w-0 flex flex-wrap items-center justify-end gap-1.5 max-[760px]:justify-start [&_[data-vui=native-button]]:w-fit [&_[data-vui=native-button]]:max-w-full [&_[data-vui=native-button]]:min-h-[26px] [&_[data-vui=native-button]]:px-2",
   workflowSourceCollectionStorageDetails:

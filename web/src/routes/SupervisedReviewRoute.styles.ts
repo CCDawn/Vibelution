@@ -27,13 +27,13 @@ const styles = {
   toolbar: "flex min-w-0 flex-wrap items-center justify-between gap-[var(--route-topbar-gap)]",
   toolbarIntro: "grid min-w-0 max-w-none flex-1 gap-0.5",
   toolbarControls: "flex flex-wrap items-center justify-end gap-3",
-  eyebrow: "m-0 mb-0.5 text-[var(--vui-font-xs)] uppercase tracking-[0.08em] text-[var(--accent-warm-2)]",
+  eyebrow: "m-0 mb-0.5 [font-size:var(--vui-font-xs)] uppercase tracking-[0.08em] text-[var(--accent-warm-2)]",
   title: "m-0 whitespace-nowrap text-[length:var(--route-topbar-title-size)] leading-[1.08]",
   subtitle:
     "m-0 max-w-none overflow-hidden text-ellipsis whitespace-nowrap text-[length:var(--route-topbar-subtitle-size)] leading-tight text-[var(--fg-secondary)]",
   summaryStrip: "grid grid-cols-5 gap-[var(--route-summary-gap)] max-[980px]:grid-cols-2 max-[720px]:grid-cols-1",
   summaryCard:
-    `grid min-h-7 min-w-0 grid-cols-[auto_minmax(0,1fr)] items-baseline gap-1.5 px-2 py-1 ${reviewRowSurfaceSoft} [&_span]:whitespace-nowrap [&_span]:text-[var(--vui-font-xs)] [&_span]:uppercase [&_span]:tracking-[0.06em] [&_span]:text-vui-fg-tertiary [&_strong]:min-w-0 [&_strong]:overflow-hidden [&_strong]:text-ellipsis [&_strong]:whitespace-nowrap [&_strong]:text-[var(--vui-font-xs)]`,
+    `grid min-h-7 min-w-0 grid-cols-[auto_minmax(0,1fr)] items-baseline gap-1.5 px-2 py-1 ${reviewRowSurfaceSoft} [&_span]:whitespace-nowrap [&_span]:[font-size:var(--vui-font-xs)] [&_span]:uppercase [&_span]:tracking-[0.06em] [&_span]:text-vui-fg-tertiary [&_strong]:min-w-0 [&_strong]:overflow-hidden [&_strong]:text-ellipsis [&_strong]:whitespace-nowrap [&_strong]:[font-size:var(--vui-font-xs)]`,
   lifecyclePanel:
     `flex min-h-[34px] min-w-0 items-center justify-between gap-2 px-2 py-1.5 max-[980px]:flex-col max-[980px]:items-start ${reviewRowSurfaceSoft}`,
   lifecyclePills: "flex flex-wrap justify-end gap-2 max-[980px]:justify-start",
