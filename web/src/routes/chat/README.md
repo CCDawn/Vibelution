@@ -8,6 +8,7 @@ Agent-oriented map for Chat workbench development. Prefer editing a **module** o
 |-----------|-------------------|--------|
 | CLI terminal tabs / lifecycle | `cliAgentRunModel.ts`, `useChatCliAgentTerminal.ts`, `CliAgentRunTerminalPanel.tsx` | composer submit |
 | Cache / token donut pure math | `sessionCacheComposition.ts`, `chatCacheDetailModel.ts`, `useChatCacheDetailDialog.ts`, `CacheDetailDialog.tsx`, `TokenCoreStatusPanel.tsx` | stream apply |
+| Token status metrics (cache/input/compression/speed) | `chatTokenStatusModel.ts`, `TokenCoreStatusPanel.tsx` | stream apply |
 | Feature presets labels | `chatFeaturePresets.ts` | detail stream |
 | Tool approval copy | `toolApprovalLabels.ts`, `ChatToolApprovalDialog.tsx` | left rail JSX |
 | Submit telemetry fields | `chatSubmitTelemetry.ts` | layout resize |
@@ -69,10 +70,11 @@ Plan: `docs/superpowers/plans/2026-07-19-chat-coding-route-stream-selection-spli
 - **E4d done:** `useChatWorkspaceActions.ts` — open/create/delete/reset group/session and project-bus UI handlers
 - **E4e done:** `ChatGroupMessagePresentation.tsx` + `useChatSessionRenameMenu.ts`
 - **E4f done:** `useChatCliAgentTerminal.ts` + `chatCacheDetailModel.ts` + `useChatCacheDetailDialog.ts`
+- **E4g done:** `chatTokenStatusModel.ts` — Token core status metrics pure view-model
 
 ## Next (planned)
 
-- Extract remaining derived view-model / JSX blocks
+- Extract remaining derived view-model / center JSX blocks
 - Thin `ChatCodingRoute` composition toward ~800–1500 LOC
 
 ## Rules
