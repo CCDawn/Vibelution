@@ -4815,6 +4815,20 @@ export function ChatCodingRoute() {
   const activeImageInputModelId = imageInputModelIdForAgent(activeSessionAgent, detail?.dialogueModelId);
   const activeAgentImageInputSupported = modelImageInputSupport(modelImageInputSupportById, activeImageInputModelId);
   const activeAgentImageInputUnsupported = activeAgentImageInputSupported === false;
+  const activeImageInputModelLabel = activeImageInputModelId || (lang === "zh" ? "当前模型" : "the current model");
+  const activeImageInputGuidance = !activeImageAttachments.length
+    ? ""
+    : activeAgentImageInputSupported === true
+      ? (lang === "zh"
+        ? `图片将发送给已验证支持图像输入的 ${activeImageInputModelLabel}。`
+        : `The image will be sent to ${activeImageInputModelLabel}, which has verified image-input support.`)
+      : activeAgentImageInputSupported === false
+        ? (lang === "zh"
+          ? `${activeImageInputModelLabel} 明确不支持图像输入，无法发送图片。`
+          : `${activeImageInputModelLabel} explicitly does not support image input, so the image cannot be sent.`)
+        : (lang === "zh"
+          ? `${activeImageInputModelLabel} 的图像输入能力尚未验证；将尝试发送，失败时会保留诊断。`
+          : `${activeImageInputModelLabel}'s image-input capability is not verified yet. Vibelution will try the request and retain diagnostics if it fails.`);
   const activeAgentDisplay = detail
     ? sessionAgentDisplayInfo(detail, activeSessionAgent, lang, resolveModelLabel)
     : { name: pet?.name || "Agent", functionLabel: "", tone: "chat" as const, meta: "" };
@@ -4903,7 +4917,7 @@ export function ChatCodingRoute() {
       editTargetMessageId: resolvedEditTarget?.messageId,
       editTargetPreview: resolvedEditTarget?.original,
       error: activeComposerError,
-      guidance: "",
+      guidance: activeImageInputGuidance,
       imageAttachments: activeImageAttachments,
       imageInputUnsupported: activeAgentImageInputUnsupported,
       interruptGuidancePending: composerInterruptGuidancePending,
