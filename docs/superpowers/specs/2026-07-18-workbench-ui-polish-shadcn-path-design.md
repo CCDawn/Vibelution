@@ -86,6 +86,8 @@ Renderer+tokens  →  唯一视觉实现（今日 HeroUI，可换 shadcn/Radix�
 | **5** | Git 工作区同构：commit 侧栏 clamp、overview 弹性列、顶栏边距对齐、resize 去 soft shadow | layout 测试 + build |
 | **6** | Tools / Skills / Usage / Kernel 同构：列表轨 clamp、主区 minmax(0,1fr)、Usage 去 elevation、边距密度 | layout 测试 + build |
 | **7** | 双主题加固：shadcn form 的 color-scheme / option 色 / select chevron token | foundation 测试 + build |
+| **8** | 剩余工具页：PromptTemplates / ResearchFlow / Reset / SupervisedReview 吃满 + clamp | layout 测试 + build |
+| **D** | ConversationView 对话区本体 | **延期**：claim-1ded3aed8d30 仍标 active（已过期、worktree 已失），释放前不改 styles |
 
 ### Wave R（完成）
 
@@ -127,6 +129,14 @@ Renderer+tokens  →  唯一视觉实现（今日 HeroUI，可换 shadcn/Radix�
 - `web/src/components/vui/forms/formClasses.ts`
 - `web/src/components/vui/renderers/shadcn/ShadcnSelect.tsx`
 - `web/src/components/vui/vuiThemeFoundation.test.tsx`
+
+### Wave 8 文件范围
+
+- `web/src/routes/PromptTemplatesRoute.styles.ts` + layout test
+- `web/src/routes/ResearchFlowCanvasRoute.styles.ts` + layout test
+- `web/src/routes/ResetRoute.styles.ts` + layout test
+- `web/src/routes/SupervisedReviewRoute.styles.ts`
+- 明确不改：`ConversationView.styles.ts`（claim-1ded3aed8d30）
 
 ### Wave 2 文件范围
 

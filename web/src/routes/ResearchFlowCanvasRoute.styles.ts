@@ -27,7 +27,7 @@ const styles: Record<string, string> = {
   agentRoleTag_tool:
     "agentRoleTag_tool min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
   body:
-    "body min-w-0 max-w-full grid h-full min-h-0 grid-cols-[minmax(0,1fr)_minmax(320px,380px)] gap-2 overflow-hidden overflow-x-hidden text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] max-[1080px]:grid-cols-1 max-[1080px]:grid-rows-[minmax(420px,1fr)_minmax(260px,0.48fr)]",
+    "body min-w-0 max-w-full grid h-full min-h-0 grid-cols-[minmax(0,1fr)_clamp(300px,26vw,400px)] gap-2 overflow-hidden overflow-x-hidden text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] max-[1080px]:grid-cols-1 max-[1080px]:grid-rows-[minmax(420px,1fr)_minmax(240px,0.48fr)]",
   canvas:
     "canvas min-w-0 grid min-h-0 gap-2 p-2 w-[var(--research-flow-canvas-width)] h-[var(--research-flow-canvas-height)] [transform:translate(var(--research-flow-canvas-offset-x),var(--research-flow-canvas-offset-y))_scale(var(--research-flow-canvas-zoom))]",
   canvasLocked:
