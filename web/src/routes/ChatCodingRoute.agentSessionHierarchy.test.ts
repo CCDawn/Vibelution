@@ -15,7 +15,9 @@ describe("ChatCodingRoute Agent-session hierarchy", () => {
     expect(routeSource).toContain("<AgentCreateWizardDialog");
     expect(routeSource).toContain("triggerRef={agentCreateTriggerRef}");
     expect(routeSource).toContain("createAgentButtonRef={agentCreateTriggerRef}");
-    expect(routeSource).toContain("await createSessionMutation.mutateAsync({ agentId: agent.agentId })");
+    expect(routeSource).toContain("if (!agent.directSessionId) return false");
+    expect(routeSource).toContain("handleOpenAgent(agent)");
+    expect(routeSource).not.toContain("await createSessionMutation.mutateAsync({ agentId: agent.agentId })");
     expect(routeSource).not.toContain('createSessionMutation.mutate({ agentId: "" })');
     expect(routeSource).toContain("在当前 Agent 下新建会话");
   });

@@ -58,6 +58,12 @@ def test_agent_create_api_adds_direct_agent_with_safe_defaults(tmp_path, monkeyp
     assert agent["roleKey"] == "research_broad"
     assert agent["promptTemplateId"] == "prompt-research-broad"
     assert agent["directSessionId"]
+    assert agent["conversationIndexKind"] == agent_directory_service.CONVERSATION_INDEX_KIND_PERSONAL_AGENT
+    direct_session = session_service.get_session_detail(agent["directSessionId"])
+    assert direct_session["title"] == agent["displayName"]
+    assert direct_session["conversationIndexKind"] == agent_directory_service.CONVERSATION_INDEX_KIND_PERSONAL_AGENT
+    assert direct_session["conversationIndexVisibility"] == agent_directory_service.CONVERSATION_INDEX_VISIBILITY_USER_VISIBLE
+    assert agent["directSessionId"] in {item["id"] for item in session_service.list_sessions()}
     workspace = agent_config_workspace_service.get_agent_config_workspace()
     assert agent["agentId"] in {item["agentId"] for item in workspace["agents"]}
     created = next(item for item in workspace["agents"] if item["agentId"] == agent["agentId"])
@@ -66,6 +72,31 @@ def test_agent_create_api_adds_direct_agent_with_safe_defaults(tmp_path, monkeyp
     assert created["metadata"]["onboardingMissing"] == []
     assert not any(item["code"] == "agent_onboarding_incomplete" for item in created["health"])
     assert created["toolPolicy"]["allowedTools"] == ["agent_message_tool"]
+
+
+def test_agent_index_repair_promotes_legacy_api_agent_to_personal_conversation(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+
+    legacy = session_service.create_chat_session(
+        title="遗留会话 Agent",
+        created_by="api_agents",
+    )
+    agent_id = legacy["agentId"]
+
+    assert session_service.get_session_detail(legacy["id"])["conversationIndexKind"] == (
+        agent_directory_service.CONVERSATION_INDEX_KIND_USER_CHAT
+    )
+
+    repair = session_service.repair_conversation_index_records()
+
+    assert repair["changed"] is True
+    assert repair["agentCount"] == 1
+    assert repair["conversationCount"] == 1
+    repaired = session_service.get_session_detail(legacy["id"])
+    assert repaired["conversationIndexKind"] == agent_directory_service.CONVERSATION_INDEX_KIND_PERSONAL_AGENT
+    assert repaired["conversationIndexVisibility"] == agent_directory_service.CONVERSATION_INDEX_VISIBILITY_USER_VISIBLE
+    stored_agent = agent_directory_service.get_agent(agent_id)
+    assert stored_agent["conversationIndexKind"] == agent_directory_service.CONVERSATION_INDEX_KIND_PERSONAL_AGENT
 
 
 def test_agent_create_api_allows_work_session_without_persona_task_or_role(tmp_path, monkeypatch):

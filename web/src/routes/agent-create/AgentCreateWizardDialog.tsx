@@ -8,6 +8,7 @@ import { queryKeys } from "../../api/queryKeys";
 import {
   type AgentConfigWorkspace,
   type AgentConfigWorkspaceAgent,
+  type AgentInstance,
   type ToolRegistryPayload,
 } from "../../api/types";
 import { VButton } from "../../components/vui";
@@ -209,6 +210,10 @@ export function AgentCreateWizardDialog({
     onSuccess: (agent) => {
       setCreatedAgent(agent);
       setStartConversationError("");
+      queryClient.setQueryData<AgentInstance[]>(queryKeys.agents(), (current) => [
+        agent,
+        ...(current ?? []).filter((item) => item.agentId !== agent.agentId),
+      ]);
       onCreated?.(agent);
       void Promise.all([
         queryClient.invalidateQueries({ queryKey: queryKeys.agentSummary(true) }),
@@ -282,9 +287,9 @@ export function AgentCreateWizardDialog({
     try {
       const started = await onStartConversation(createdAgent);
       if (started !== false) closeNow();
-      else setStartConversationError(lang === "zh" ? "会话创建失败，Agent 已保留。可以重试。" : "The Agent was created, but the session could not be created. Try again.");
+      else setStartConversationError(lang === "zh" ? "打开会话失败，Agent 已保留。可以重试。" : "The Agent was created, but its session could not be opened. Try again.");
     } catch {
-      setStartConversationError(lang === "zh" ? "会话创建失败，Agent 已保留。可以重试。" : "The Agent was created, but the session could not be created. Try again.");
+      setStartConversationError(lang === "zh" ? "打开会话失败，Agent 已保留。可以重试。" : "The Agent was created, but its session could not be opened. Try again.");
     } finally {
       setStartingConversation(false);
     }
@@ -335,7 +340,7 @@ export function AgentCreateWizardDialog({
               </div>
               {startConversationError ? <p className={styles.error}>{startConversationError}</p> : null}
               <div className={styles.successActions}>
-                {onStartConversation ? <VButton type="button" variant="primary" icon={<MessageSquare size={15} />} isDisabled={startingConversation} onPress={() => { void startConversation(); }}>{startingConversation ? (lang === "zh" ? "正在创建会话…" : "Creating session…") : (lang === "zh" ? "开始对话" : "Start conversation")}</VButton> : null}
+                {onStartConversation ? <VButton type="button" variant="primary" icon={<MessageSquare size={15} />} isDisabled={startingConversation} onPress={() => { void startConversation(); }}>{startingConversation ? (lang === "zh" ? "正在打开会话…" : "Opening session…") : (lang === "zh" ? "开始对话" : "Start conversation")}</VButton> : null}
                 {onOpenAdvancedConfig ? <VButton type="button" variant="secondary" icon={<Settings2 size={15} />} isDisabled={startingConversation} onPress={() => onOpenAdvancedConfig(createdAgent)}>{lang === "zh" ? "继续高级配置" : "Advanced configuration"}</VButton> : null}
                 <VButton type="button" variant="secondary" isDisabled={startingConversation} onPress={closeNow}>{lang === "zh" ? "完成" : "Done"}</VButton>
               </div>

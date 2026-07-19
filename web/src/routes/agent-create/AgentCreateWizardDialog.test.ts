@@ -28,4 +28,9 @@ describe("AgentCreateWizardDialog contract", () => {
     expect(dialogSource).toContain("onStartConversation(createdAgent)");
     expect(dialogSource).not.toContain('fetchJson<SessionDetail>("/api/sessions"');
   });
+
+  it("adds the newly created Agent to the chat directory cache before reconciliation", () => {
+    expect(dialogSource).toContain("setQueryData<AgentInstance[]>(queryKeys.agents()");
+    expect(dialogSource).toContain("afterAgentWorkspaceChanged()");
+  });
 });

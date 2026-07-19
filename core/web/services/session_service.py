@@ -1715,13 +1715,31 @@ def repair_conversation_index_records() -> dict[str, Any]:
 
     if repaired_agents or repaired_conversations:
         _invalidate_session_list_cache()
-    return {
+    result = {
         "changed": bool(repaired_agents or repaired_conversations),
         "agentCount": len(repaired_agents),
         "conversationCount": len(repaired_conversations),
         "agents": repaired_agents,
         "conversations": repaired_conversations,
     }
+    if result["changed"]:
+        try:
+            record_runtime_scene_event(
+                "conversation",
+                "session_lifecycle",
+                "conversation.index.repaired",
+                level="info",
+                outcome="succeeded",
+                message="Conversation index records repaired.",
+                fields={
+                    "agentCount": result["agentCount"],
+                    "conversationCount": result["conversationCount"],
+                },
+                lifecycle=True,
+            )
+        except Exception:
+            pass
+    return result
 
 
 def _legacy_agent_conversation_index_repair_kind(
@@ -1731,11 +1749,19 @@ def _legacy_agent_conversation_index_repair_kind(
 ) -> str:
     metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
     raw_kind = str(agent.get("conversationIndexKind") or metadata.get("conversationIndexKind") or "").strip()
-    if raw_kind:
-        return ""
     agent_id = str(agent.get("agentId") or "").strip()
     creation_spec = metadata.get("creationSpec") if isinstance(metadata.get("creationSpec"), dict) else {}
     created_by = str(agent.get("createdBy") or creation_spec.get("source") or "").strip()
+    if raw_kind:
+        # API-created direct Agents used to inherit the generic user_chat
+        # default. That classification is invalid for a direct Agent and hid
+        # the record from the personal-Agent directory. Other explicit kinds
+        # remain authoritative and are never rewritten by this repair.
+        if not (
+            raw_kind == agent_directory_service.CONVERSATION_INDEX_KIND_USER_CHAT
+            and created_by == "api_agents"
+        ):
+            return ""
     if created_by in agent_directory_service.INTERNAL_RECOVERY_DIRECT_SESSION_CREATED_BY:
         return agent_directory_service.CONVERSATION_INDEX_KIND_HIDDEN
     if created_by == "session_repair":
@@ -1755,6 +1781,8 @@ def _legacy_agent_conversation_index_repair_kind(
     )
     if looks_team_owned:
         return agent_directory_service.CONVERSATION_INDEX_KIND_TEAM_AGENT
+    if created_by == "api_agents" and str(agent.get("directSessionId") or "").strip():
+        return agent_directory_service.CONVERSATION_INDEX_KIND_PERSONAL_AGENT
     return ""
 
 

@@ -2847,12 +2847,9 @@ export function ChatCodingRoute() {
           setRightIndexPanel("conversations");
         }}
         onStartConversation={async (agent) => {
-          try {
-            await createSessionMutation.mutateAsync({ agentId: agent.agentId });
-            return true;
-          } catch {
-            return false;
-          }
+          if (!agent.directSessionId) return false;
+          handleOpenAgent(agent);
+          return true;
         }}
         onOpenAdvancedConfig={(agent) => {
           setAgentCreateWizardOpen(false);
