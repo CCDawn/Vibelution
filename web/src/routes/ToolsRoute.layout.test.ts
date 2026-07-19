@@ -400,7 +400,7 @@ describe("ToolsRoute layout contract", () => {
 
   it("keeps long tool descriptions readable in the dense tool browser", () => {
     expect(routeSource).toContain("styles.toolCopy");
-    expect(styles.toolCopy).toContain("text-[var(--vui-font-xs)]");
+    expect(styles.toolCopy).toContain("[font-size:var(--vui-font-xs)]");
     expect(styles.toolCopy).toContain("[&>span]:truncate");
     expect(styles.toolList).toContain("overflow-auto");
   });
