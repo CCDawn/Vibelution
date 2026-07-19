@@ -3916,6 +3916,20 @@ def test_connection_refused_wrapped_as_internal_server_error_is_network_error():
     assert normalized.retryable is True
 
 
+def test_bad_gateway_html_with_css_400_percent_is_retryable_server_error():
+    error = Exception(
+        "provider_protocol_error: litellm.BadGatewayError: BadGatewayError: "
+        "OpenAIException - <html><head><title>网站请求超时</title>"
+        "<style>body{background-size:400% 400%}</style></head>"
+        "<body><p>502</p><h1>回源请求被中断</h1></body></html>"
+    )
+
+    normalized = classify_exception(error)
+
+    assert normalized.category == "server_error"
+    assert normalized.retryable is True
+
+
 def test_llm_provider_proxy_env_disables_environment_proxy_when_project_proxy_off(monkeypatch):
     config = make_config(
         **{
