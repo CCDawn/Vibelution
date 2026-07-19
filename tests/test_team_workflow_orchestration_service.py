@@ -9000,6 +9000,123 @@ def test_start_experiment_stage_builds_bounded_memory_context_with_negative_shie
     }
 
 
+def test_experiment_lifecycle_projection_derives_memory_summary_for_legacy_plans_without_rewriting_history(
+    tmp_path,
+    monkeypatch,
+):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    agent = agent_directory_service.create_agent_instance(
+        display_name="Coordinator",
+        direct_session_id="session-coordinator",
+    )
+    team = team_service.create_team(
+        name="ai科学研究团队",
+        members=[{"agentId": agent["agentId"], "role": "research_coordination"}],
+    )
+    candidate_store = team_workflow_orchestration_service._load_candidate_store(team["teamId"])
+    candidate_store["candidates"] = [
+        {
+            "candidateId": "source-reviewed-legacy",
+            "candidateType": "source_manifest",
+            "title": "Reviewed legacy source",
+            "currentState": "source_quality_approved",
+            "sourceRef": "doi:10.1000/legacy",
+        },
+        {
+            "candidateId": "candidate-legacy-best",
+            "candidateType": "algorithm_hypothesis",
+            "title": "Legacy bounded candidate",
+            "currentState": "hypothesis_candidate",
+            "claims": [{"claim": "The bounded candidate may improve the masked metric.", "sourceRef": "source-reviewed-legacy"}],
+        },
+    ]
+    team_workflow_orchestration_service._write_json(
+        team_workflow_orchestration_service._candidate_store_path(team["teamId"]),
+        candidate_store,
+    )
+    plan_store = team_workflow_orchestration_service._load_experiment_plan_store(team["teamId"])
+    plan_store["plans"] = [
+        {
+            "planId": "plan-legacy-negative",
+            "title": "Legacy weight 1.0 regression",
+            "status": "full_run_needs_review",
+            "hypothesisCandidateIds": ["candidate-legacy-negative"],
+            "experimentContract": {
+                "schemaVersion": 2,
+                "revision": 3,
+                "researchQuestion": "Does the bounded candidate improve masked reconstruction?",
+                "methodConfig": {"candidateMaskedLossWeight": 1.0},
+                "decisionContract": {"failureCriteria": ["global regression exceeds 0.0005"]},
+            },
+            "activeFullRunResult": {
+                "fullRunResultId": "full-legacy-negative",
+                "status": "needs_review",
+                "logRef": "artifact:sha256:legacy-negative",
+            },
+        },
+        {
+            "planId": "plan-legacy-best",
+            "title": "Legacy bounded result",
+            "status": "ingested",
+            "hypothesisCandidateIds": ["candidate-legacy-best"],
+            "experimentContract": {
+                "schemaVersion": 2,
+                "revision": 4,
+                "researchQuestion": "Does the bounded candidate improve masked reconstruction?",
+                "methodConfig": {"candidateMaskedLossWeight": 0.875},
+            },
+            "contractValidation": {"valid": True},
+            "readiness": {"readyForPlanReview": True},
+            "activeFullRunResultId": "full-legacy-best",
+            "activeFullRunResult": {"fullRunResultId": "full-legacy-best", "status": "passed"},
+            "knowledgeIngestion": {
+                "status": "ingested",
+                "result": {"knowledgeItemId": "kitem-legacy-best"},
+            },
+        },
+    ]
+    plan_store["activePlanId"] = "plan-legacy-best"
+    team_workflow_orchestration_service._write_json(
+        team_workflow_orchestration_service._experiment_plan_store_path(team["teamId"]),
+        plan_store,
+    )
+    knowledge_search_calls: list[dict] = []
+    monkeypatch.setattr(
+        team_workflow_orchestration_service.team_knowledge_service,
+        "search_knowledge_items",
+        lambda **kwargs: knowledge_search_calls.append(kwargs)
+        or {
+            "results": [
+                {
+                    "knowledgeItemId": "kitem-legacy-best",
+                    "title": "Legacy bounded result",
+                    "summary": "Supported under the frozen protocol.",
+                    "sourceArtifactIds": ["artifact-legacy-best"],
+                    "centralSourceIds": ["source-legacy-best"],
+                }
+            ]
+        },
+    )
+
+    status = team_workflow_orchestration_service.get_experiment_planning_status(team["teamId"])
+
+    assert status["lifecycleProjection"]["stage2"]["memoryContextSummary"] == {
+        "contextId": status["lifecycleProjection"]["stage2"]["memoryContextSummary"]["contextId"],
+        "knowledgeItemCount": 1,
+        "reviewedSourceCount": 1,
+        "negativeExperimentCount": 1,
+        "successfulRunCount": 1,
+        "forbiddenDuplicateExperimentCount": 1,
+        "missingEvidence": ["explicit_allowed_variable_changes"],
+    }
+    assert status["lifecycleProjection"]["stage2"]["memoryContextSummary"]["contextId"]
+    assert status["lifecycleProjection"]["stage3"]["memoryContextSummary"]["knowledgeItemCount"] == 1
+    assert status["lifecycleProjection"]["stage3"]["memoryContextSummary"]["negativeExperimentCount"] == 1
+    assert len(knowledge_search_calls) == 1
+    persisted_store = team_workflow_orchestration_service._load_experiment_plan_store(team["teamId"])
+    assert all("memoryContext" not in plan for plan in persisted_store["plans"])
+
+
 def test_start_research_stage_round_keeps_experiment_plan_when_coordination_busy(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _stub_source_collection_search_background(monkeypatch)
