@@ -3625,11 +3625,15 @@ export function AgentsRoute() {
   const queryClient = useQueryClient();
   const chatWorkspaceCache = useMemo(() => createChatWorkspaceCache(queryClient), [queryClient]);
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const pageVisible = usePageVisibility();
   const copy = useMemo(() => agentsRouteCopy(lang), [lang]);
   const numberFormatter = useMemo(() => new Intl.NumberFormat(lang === "zh" ? "zh-CN" : "en-US"), [lang]);
   const requestedAgentId = useMemo(() => String(searchParams.get("agent") || "").trim(), [searchParams]);
+  const requestedCreate = useMemo(
+    () => !requestedAgentId && searchParams.get("create") === "1",
+    [requestedAgentId, searchParams],
+  );
   const requestedPane = useMemo(() => normalizeAgentConfigPane(searchParams.get("pane")), [searchParams]);
   const returnToPath = useMemo(() => safeAgentCenterReturnTo(searchParams.get("returnTo")), [searchParams]);
   const returnToLabel = useMemo(() => agentCenterReturnLabel(searchParams.get("returnLabel"), lang), [lang, searchParams]);
@@ -4073,6 +4077,15 @@ export function AgentsRoute() {
   }, [lang, requestedAgentId, requestedPane, workspace, workspaceQuery.data]);
 
   useEffect(() => {
+    if (!requestedCreate) {
+      return;
+    }
+    setSelectedAgentId("");
+    setActivePane("overview");
+    setCreateOpen(true);
+  }, [requestedCreate]);
+
+  useEffect(() => {
     setBulkConfigDraft(bulkConfigDraftFromAgents(selectedBulkAgents));
     setBulkConfigApply(DEFAULT_BULK_CONFIG_APPLY);
   }, [selectedBulkAgentKey]);
@@ -4302,7 +4315,7 @@ export function AgentsRoute() {
     onSuccess: (agent) => {
       setSelectedAgentId(agent.agentId);
       setActivePane("config");
-      setCreateOpen(false);
+      setCreateWizardOpen(false);
       setCreateDraft(createDraftFromWorkspace(workspace, toolBundles, lang));
       setNotice({
         tone: "success",
@@ -4314,6 +4327,19 @@ export function AgentsRoute() {
       setNotice({ tone: "error", text: error instanceof Error ? error.message : String(error) });
     },
   });
+
+  function setCreateWizardOpen(open: boolean) {
+    setCreateOpen(open);
+    setSearchParams((current) => {
+      const next = new URLSearchParams(current);
+      if (open) {
+        next.set("create", "1");
+      } else {
+        next.delete("create");
+      }
+      return next;
+    }, { replace: true });
+  }
 
   const updateAgentMutation = useMutation({
     mutationFn: (payload: { agentId: string; agent: AgentConfigWorkspaceAgent; draft: AgentConfigDraft; modelChoices: AgentModelChoice[] }) =>
@@ -6364,7 +6390,7 @@ export function AgentsRoute() {
           headerTitle: activeGroupLabel,
           createAgentLabel: copy.createAgent,
           visibleAgentCount: visibleAgents.length,
-          onToggleCreate: () => setCreateOpen((value) => !value),
+          onToggleCreate: () => setCreateWizardOpen(!createOpen),
           createPanel: {
             copy,
             draft: createDraft,
@@ -6400,7 +6426,7 @@ export function AgentsRoute() {
               updateCreateDraft({ selectedToolBundleIds: sortedIds(Array.from(next)) });
             },
             onCancel: () => {
-              setCreateOpen(false);
+              setCreateWizardOpen(false);
               setCreateDraft(createDraftFromWorkspace(workspace, toolBundles, lang));
             },
             onCreate: createAgent,

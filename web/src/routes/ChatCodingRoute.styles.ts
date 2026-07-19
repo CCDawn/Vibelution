@@ -11,7 +11,7 @@
 // literal-keyed map; tightening is a follow-up, not Phase 0.
 const styles: Record<string, string> = {
   activeSkillEyebrow:
-    "vui-routes-chatcodingroute activeSkillEyebrow min-w-0 text-[var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)] border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
+    "vui-routes-chatcodingroute activeSkillEyebrow min-w-0 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)] border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
   activeSkillIdentity:
     "vui-routes-chatcodingroute activeSkillIdentity grid min-w-0 gap-1 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))] [&_strong]:min-w-0 [&_strong]:whitespace-normal [&_strong]:leading-tight [overflow-wrap:anywhere]",
   activeSkillMeta:
@@ -33,13 +33,13 @@ const styles: Record<string, string> = {
   agentIndexCard:
     "vui-routes-chatcodingroute agentIndexCard min-w-0 overflow-hidden rounded-[var(--radius-panel)] border border-[color-mix(in_srgb,var(--accent-cool)_24%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-cool)_7%,var(--vui-surface-glass))] p-1.5 shadow-[var(--vui-shadow-hairline)]",
   agentIndexCopy:
-    "vui-routes-chatcodingroute agentIndexCopy grid min-w-0 gap-0.5 overflow-hidden text-left text-[var(--vui-font-xs)] leading-tight text-[var(--fg-secondary)]",
+    "vui-routes-chatcodingroute agentIndexCopy grid min-w-0 gap-0.5 overflow-hidden text-left [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-secondary)]",
   agentIndexDetails:
     "vui-routes-chatcodingroute agentIndexDetails min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
   agentIndexEmptyState:
-    "vui-routes-chatcodingroute agentIndexEmptyState min-w-0 text-[var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)] border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    "vui-routes-chatcodingroute agentIndexEmptyState min-w-0 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)] border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
   agentIndexExpandButton:
-    "vui-routes-chatcodingroute agentIndexExpandButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 text-[var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    "vui-routes-chatcodingroute agentIndexExpandButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
   agentIndexHeader:
     "vui-routes-chatcodingroute agentIndexHeader min-w-0 !grid grid-cols-[18px_minmax(0,1fr)_fit-content(72px)] items-center gap-1.5",
   agentIndexList:
@@ -63,7 +63,7 @@ const styles: Record<string, string> = {
   agentModelLine:
     "vui-routes-chatcodingroute agentModelLine block min-w-0 truncate text-[10px] font-medium leading-tight text-[var(--fg-tertiary)]",
   agentModelTag:
-    "vui-routes-chatcodingroute agentModelTag inline-flex min-h-[18px] min-w-0 max-w-[96px] shrink items-center gap-0.5 overflow-hidden rounded-full border border-[color-mix(in_srgb,var(--accent-cool)_24%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-cool)_7%,transparent)] px-1.5 py-0 text-[var(--vui-font-xs)] font-semibold leading-none text-[var(--accent-cool)] [&_span]:min-w-0 [&_span]:truncate [&_svg]:shrink-0",
+    "vui-routes-chatcodingroute agentModelTag inline-flex min-h-[18px] min-w-0 max-w-[96px] shrink items-center gap-0.5 overflow-hidden rounded-full border border-[color-mix(in_srgb,var(--accent-cool)_24%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-cool)_7%,transparent)] px-1.5 py-0 [font-size:var(--vui-font-xs)] font-semibold leading-none text-[var(--accent-cool)] [&_span]:min-w-0 [&_span]:truncate [&_svg]:shrink-0",
   agentModelTitleTag:
     "vui-routes-chatcodingroute agentModelTitleTag max-w-[96px]",
   agentOptionAvatar:
@@ -71,7 +71,7 @@ const styles: Record<string, string> = {
   agentOptionMeta:
     "vui-routes-chatcodingroute agentOptionMeta min-w-0 flex flex-wrap items-center gap-1.5 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
   agentRoleTag:
-    "vui-routes-chatcodingroute agentRoleTag min-w-0 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 text-[var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)] border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    "vui-routes-chatcodingroute agentRoleTag min-w-0 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 [font-size:var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)] border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
   agentRoleTag_chat:
     "vui-routes-chatcodingroute agentRoleTag_chat min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
   agentRoleTag_general:
@@ -87,7 +87,7 @@ const styles: Record<string, string> = {
   agentRoleTag_tool:
     "vui-routes-chatcodingroute agentRoleTag_tool min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
   agentSessionTab:
-    "vui-routes-chatcodingroute agentSessionTab min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 text-[var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    "vui-routes-chatcodingroute agentSessionTab min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
   agentSessionTabActive:
     "vui-routes-chatcodingroute agentSessionTabActive min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
   agentSessionTabContextTarget:
@@ -99,15 +99,15 @@ const styles: Record<string, string> = {
   agentSessionTabClosable:
     "vui-routes-chatcodingroute agentSessionTabClosable min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
   agentSessionTabCloseButton:
-    "vui-routes-chatcodingroute agentSessionTabCloseButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 text-[var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    "vui-routes-chatcodingroute agentSessionTabCloseButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
   agentSessionTabCopy:
-    "vui-routes-chatcodingroute agentSessionTabCopy min-w-0 text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    "vui-routes-chatcodingroute agentSessionTabCopy min-w-0 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
   agentSessionTabCopyCompact:
-    "vui-routes-chatcodingroute agentSessionTabCopyCompact min-w-0 text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    "vui-routes-chatcodingroute agentSessionTabCopyCompact min-w-0 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
   agentSessionTabEditActions:
     "vui-routes-chatcodingroute agentSessionTabEditActions min-w-0 flex flex-wrap items-center gap-1.5 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
   agentSessionTabEditButton:
-    "vui-routes-chatcodingroute agentSessionTabEditButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 text-[var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    "vui-routes-chatcodingroute agentSessionTabEditButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
   agentSessionTabEditing:
     "vui-routes-chatcodingroute agentSessionTabEditing min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
   agentSessionTabGroup:
@@ -123,15 +123,15 @@ const styles: Record<string, string> = {
   agentSessionTabRoot:
     "vui-routes-chatcodingroute agentSessionTabRoot min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
   agentSessionTabTitle:
-    "vui-routes-chatcodingroute agentSessionTabTitle min-w-0 text-[var(--vui-font-title)] font-semibold leading-tight text-[var(--fg-primary)] border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    "vui-routes-chatcodingroute agentSessionTabTitle min-w-0 [font-size:var(--vui-font-title)] font-semibold leading-tight text-[var(--fg-primary)] border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
   agentSessionTabTitleInput:
-    "vui-routes-chatcodingroute agentSessionTabTitleInput min-w-0 grid gap-1 text-[var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full text-[var(--vui-font-title)] font-semibold leading-tight text-[var(--fg-primary)] border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    "vui-routes-chatcodingroute agentSessionTabTitleInput min-w-0 grid gap-1 [font-size:var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full [font-size:var(--vui-font-title)] font-semibold leading-tight text-[var(--fg-primary)] border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
   blockEyebrow:
-    "vui-routes-chatcodingroute blockEyebrow min-w-0 text-[var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-tertiary)]",
+    "vui-routes-chatcodingroute blockEyebrow min-w-0 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-tertiary)]",
   sectionEyebrowRow:
     "vui-routes-chatcodingroute sectionEyebrowRow flex min-w-0 items-center gap-1",
   cacheDetailBody:
-    "vui-routes-chatcodingroute cacheDetailBody min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] max-h-[min(620px,calc(100dvh_-_238px))] overflow-auto [scrollbar-gutter:stable]",
+    "vui-routes-chatcodingroute cacheDetailBody min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] max-h-[min(620px,calc(100dvh_-_238px))] overflow-auto [scrollbar-gutter:stable]",
   cacheDetailBoundary:
     "vui-routes-chatcodingroute cacheDetailBoundary min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
   cacheDetailBoundaryHit:
@@ -147,7 +147,7 @@ const styles: Record<string, string> = {
   cacheDetailCalibrationNote:
     "vui-routes-chatcodingroute cacheDetailCalibrationNote min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 !grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-[7px]",
   cacheDetailCloseButton:
-    "vui-routes-chatcodingroute cacheDetailCloseButton min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] bg-[var(--vui-control-muted)] px-2 py-1 text-[var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55",
+    "vui-routes-chatcodingroute cacheDetailCloseButton min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] bg-[var(--vui-control-muted)] px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55",
   cacheDetailDialog:
     "vui-routes-chatcodingroute cacheDetailDialog min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 w-[min(1120px,calc(100vw_-_44px))] max-h-[min(860px,calc(100dvh_-_52px))]",
   cacheDetailDonutCenter:
@@ -161,7 +161,7 @@ const styles: Record<string, string> = {
   cacheDetailDonutSvg:
     "vui-routes-chatcodingroute cacheDetailDonutSvg min-w-0 size-full rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
   cacheDetailEmpty:
-    "vui-routes-chatcodingroute cacheDetailEmpty min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 text-[var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
+    "vui-routes-chatcodingroute cacheDetailEmpty min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
   cacheDetailHeader:
     "vui-routes-chatcodingroute cacheDetailHeader min-w-0 flex flex-wrap items-center gap-1.5 px-0.5 pb-1",
   cacheDetailOverlay:
@@ -179,7 +179,7 @@ const styles: Record<string, string> = {
   cacheDetailSegmentSource:
     "vui-routes-chatcodingroute cacheDetailSegmentSource min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
   cacheDetailSegmentText:
-    "vui-routes-chatcodingroute cacheDetailSegmentText min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
+    "vui-routes-chatcodingroute cacheDetailSegmentText min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
   cacheDetailSummaryGrid:
     "vui-routes-chatcodingroute cacheDetailSummaryGrid min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 grid gap-2 grid-cols-[repeat(auto-fit,minmax(9rem,1fr))]",
   cacheDetailSwatch:
@@ -225,7 +225,7 @@ const styles: Record<string, string> = {
   cacheDonutSegmentToolDescriptions:
     "vui-routes-chatcodingroute cacheDonutSegmentToolDescriptions min-w-0 border-[color-mix(in_srgb,var(--accent-warm)_24%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_8%,transparent)] text-[var(--accent-warm)] stroke-[var(--accent-warm)]",
   cacheDonutSegmentToolSchema:
-    "vui-routes-chatcodingroute cacheDonutSegmentToolSchema min-w-0 font-mono text-[var(--vui-font-xs)] border-[color-mix(in_srgb,var(--accent-warm)_24%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_8%,transparent)] text-[var(--accent-warm)] stroke-[var(--accent-warm)]",
+    "vui-routes-chatcodingroute cacheDonutSegmentToolSchema min-w-0 font-mono [font-size:var(--vui-font-xs)] border-[color-mix(in_srgb,var(--accent-warm)_24%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_8%,transparent)] text-[var(--accent-warm)] stroke-[var(--accent-warm)]",
   cacheDonutSegmentUncached:
     "vui-routes-chatcodingroute cacheDonutSegmentUncached min-w-0 text-[var(--state-warning)] stroke-[currentColor]",
   cacheDonutSegmentUser:
@@ -267,19 +267,19 @@ const styles: Record<string, string> = {
   cliAgentTerminalStatus:
     "vui-routes-chatcodingroute cliAgentTerminalStatus min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
   compactDetails:
-    "vui-routes-chatcodingroute compactDetails grid min-w-0 max-h-[220px] gap-1 overflow-auto rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--vui-border-subtle)_70%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-row)_34%,transparent)] px-1.5 py-1 text-[var(--vui-font-xs)] text-[var(--fg-secondary)] [scrollbar-gutter:stable] [&>summary]:grid [&>summary]:cursor-pointer [&>summary]:list-none [&>summary]:grid-cols-[14px_minmax(0,1fr)] [&>summary]:items-center [&>summary]:gap-1 [&>summary]:font-semibold [&>summary::-webkit-details-marker]:hidden [&>summary_svg]:transition-transform [&[open]>summary_svg]:rotate-90 [&_.compactDetailsOpenLabel]:hidden [&[open]_.compactDetailsOpenLabel]:inline [&[open]_.compactDetailsClosedLabel]:hidden",
+    "vui-routes-chatcodingroute compactDetails grid min-w-0 max-h-[220px] gap-1 overflow-auto rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--vui-border-subtle)_70%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-row)_34%,transparent)] px-1.5 py-1 [font-size:var(--vui-font-xs)] text-[var(--fg-secondary)] [scrollbar-gutter:stable] [&>summary]:grid [&>summary]:cursor-pointer [&>summary]:list-none [&>summary]:grid-cols-[14px_minmax(0,1fr)] [&>summary]:items-center [&>summary]:gap-1 [&>summary]:font-semibold [&>summary::-webkit-details-marker]:hidden [&>summary_svg]:transition-transform [&[open]>summary_svg]:rotate-90 [&_.compactDetailsOpenLabel]:hidden [&[open]_.compactDetailsOpenLabel]:inline [&[open]_.compactDetailsClosedLabel]:hidden",
   compactDetailsClosedLabel:
-    "vui-routes-chatcodingroute compactDetailsClosedLabel min-w-0 text-[var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
+    "vui-routes-chatcodingroute compactDetailsClosedLabel min-w-0 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
   compactDetailsOpenLabel:
-    "vui-routes-chatcodingroute compactDetailsOpenLabel min-w-0 text-[var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)] border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)]",
+    "vui-routes-chatcodingroute compactDetailsOpenLabel min-w-0 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)] border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)]",
   companionBlock:
     "vui-routes-chatcodingroute companionBlock min-w-0 content-start overflow-visible",
   companionCompact:
     "vui-routes-chatcodingroute companionCompact !grid min-w-0 grid-cols-[32px_minmax(0,1fr)] items-start gap-2 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--vui-border-strong)_64%,transparent)] bg-[var(--vui-surface-raised)] px-1.5 py-1.5 shadow-none",
   companionCopy:
-    "vui-routes-chatcodingroute companionCopy grid min-w-0 gap-1 text-[var(--vui-font-sm)] leading-snug text-[var(--fg-secondary)] [&>p]:min-w-0 [&>p]:whitespace-normal [&>p]:leading-snug [&>p]:[overflow-wrap:anywhere]",
+    "vui-routes-chatcodingroute companionCopy grid min-w-0 gap-1 [font-size:var(--vui-font-sm)] leading-snug text-[var(--fg-secondary)] [&>p]:min-w-0 [&>p]:whitespace-normal [&>p]:leading-snug [&>p]:[overflow-wrap:anywhere]",
   companionTopLine:
-    "vui-routes-chatcodingroute companionTopLine !grid min-w-0 grid-cols-[minmax(0,1fr)] items-start gap-0.5 text-[var(--vui-font-xs)] leading-tight [&_strong]:min-w-0 [&_strong]:whitespace-normal [&_span]:min-w-0 [&_span]:whitespace-normal [&_span]:text-[var(--fg-tertiary)] [overflow-wrap:anywhere]",
+    "vui-routes-chatcodingroute companionTopLine !grid min-w-0 grid-cols-[minmax(0,1fr)] items-start gap-0.5 [font-size:var(--vui-font-xs)] leading-tight [&_strong]:min-w-0 [&_strong]:whitespace-normal [&_span]:min-w-0 [&_span]:whitespace-normal [&_span]:text-[var(--fg-tertiary)] [overflow-wrap:anywhere]",
   contextCompositionSegmentAgent:
     "vui-routes-chatcodingroute contextCompositionSegmentAgent min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
   contextCompositionSegmentAttachments:
@@ -311,7 +311,7 @@ const styles: Record<string, string> = {
   contextCompositionSegmentToolDescriptions:
     "vui-routes-chatcodingroute contextCompositionSegmentToolDescriptions min-w-0 border-[color-mix(in_srgb,var(--accent-warm)_24%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_8%,transparent)] text-[var(--accent-warm)]",
   contextCompositionSegmentToolSchema:
-    "vui-routes-chatcodingroute contextCompositionSegmentToolSchema min-w-0 font-mono text-[var(--vui-font-xs)] border-[color-mix(in_srgb,var(--accent-warm)_24%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_8%,transparent)] text-[var(--accent-warm)]",
+    "vui-routes-chatcodingroute contextCompositionSegmentToolSchema min-w-0 font-mono [font-size:var(--vui-font-xs)] border-[color-mix(in_srgb,var(--accent-warm)_24%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_8%,transparent)] text-[var(--accent-warm)]",
   contextCompositionSegmentUncached:
     "vui-routes-chatcodingroute contextCompositionSegmentUncached min-w-0 border-[color-mix(in_srgb,var(--accent-warm)_24%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_8%,transparent)] text-[var(--accent-warm)]",
   contextCompositionSegmentUnused:
@@ -331,11 +331,11 @@ const styles: Record<string, string> = {
   conversationGroup:
     "vui-routes-chatcodingroute conversationGroup grid min-w-0 gap-0.5",
   conversationGroupHeader:
-    "vui-routes-chatcodingroute conversationGroupHeader !grid !w-full min-h-[28px] grid-cols-[14px_minmax(0,1fr)_auto] items-center gap-1 rounded-[var(--radius-control)] border-0 bg-transparent px-1.5 py-0 text-left text-[var(--vui-font-sm)] font-semibold leading-tight text-[var(--fg-secondary)] shadow-none transition-colors hover:border-transparent hover:bg-[color-mix(in_srgb,var(--surface-card)_38%,transparent)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_36%,transparent)] [&_svg]:transition-transform [&[aria-expanded=true]_svg]:rotate-90 [&_span]:min-w-0 [&_span]:truncate [&_strong]:inline-grid [&_strong]:min-w-5 [&_strong]:place-items-center [&_strong]:rounded-full [&_strong]:bg-[color-mix(in_srgb,var(--vui-control-muted)_78%,transparent)] [&_strong]:px-1.5 [&_strong]:text-[var(--vui-font-xs)] [&_strong]:font-semibold [&_strong]:text-[var(--fg-secondary)]",
+    "vui-routes-chatcodingroute conversationGroupHeader !grid !w-full min-h-[28px] grid-cols-[14px_minmax(0,1fr)_auto] items-center gap-1 rounded-[var(--radius-control)] border-0 bg-transparent px-1.5 py-0 text-left [font-size:var(--vui-font-sm)] font-semibold leading-tight text-[var(--fg-secondary)] shadow-none transition-colors hover:border-transparent hover:bg-[color-mix(in_srgb,var(--surface-card)_38%,transparent)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_36%,transparent)] [&_svg]:transition-transform [&[aria-expanded=true]_svg]:rotate-90 [&_span]:min-w-0 [&_span]:truncate [&_strong]:inline-grid [&_strong]:min-w-5 [&_strong]:place-items-center [&_strong]:rounded-full [&_strong]:bg-[color-mix(in_srgb,var(--vui-control-muted)_78%,transparent)] [&_strong]:px-1.5 [&_strong]:[font-size:var(--vui-font-xs)] [&_strong]:font-semibold [&_strong]:text-[var(--fg-secondary)]",
   conversationGroupList:
     "vui-routes-chatcodingroute conversationGroupList grid min-w-0 gap-1",
   conversationKindBadge:
-    "vui-routes-chatcodingroute conversationKindBadge min-w-0 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 text-[var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)]",
+    "vui-routes-chatcodingroute conversationKindBadge min-w-0 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 [font-size:var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)]",
   conversationKindBadgeChild:
     "vui-routes-chatcodingroute conversationKindBadgeChild min-w-0",
   conversationKindBadgeDirect:
@@ -349,29 +349,29 @@ const styles: Record<string, string> = {
   conversationIndexScrollRegion:
     "vui-routes-chatcodingroute conversationIndexScrollRegion min-h-0 overflow-y-auto pr-1 [scrollbar-gutter:stable]",
   conversationMetaMain:
-    "vui-routes-chatcodingroute conversationMetaMain inline-flex min-w-0 items-center gap-1 overflow-hidden text-[var(--vui-font-xs)] font-medium leading-tight text-[var(--fg-tertiary)] [&>span]:min-w-0 [&>span]:truncate",
+    "vui-routes-chatcodingroute conversationMetaMain inline-flex min-w-0 items-center gap-1 overflow-hidden [font-size:var(--vui-font-xs)] font-medium leading-tight text-[var(--fg-tertiary)] [&>span]:min-w-0 [&>span]:truncate",
   conversationMetaRow:
-    "vui-routes-chatcodingroute conversationMetaRow grid min-w-0 grid-cols-[minmax(0,1fr)_max-content] items-center gap-x-1.5 text-[var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)] [&_time]:flex-none [&_time]:overflow-visible [&_time]:text-clip",
+    "vui-routes-chatcodingroute conversationMetaRow grid min-w-0 grid-cols-[minmax(0,1fr)_max-content] items-center gap-x-1.5 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)] [&_time]:flex-none [&_time]:overflow-visible [&_time]:text-clip",
   conversationMetaTime:
-    "vui-routes-chatcodingroute conversationMetaTime inline-flex max-w-[112px] shrink-0 items-center justify-end gap-0.5 overflow-visible whitespace-nowrap text-[var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)] [&_time]:flex-none [&_time]:overflow-visible [&_time]:text-clip",
+    "vui-routes-chatcodingroute conversationMetaTime inline-flex max-w-[112px] shrink-0 items-center justify-end gap-0.5 overflow-visible whitespace-nowrap [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)] [&_time]:flex-none [&_time]:overflow-visible [&_time]:text-clip",
   conversationTitleMain:
     "vui-routes-chatcodingroute conversationTitleMain inline-flex min-w-0 max-w-full items-center gap-1.5 overflow-hidden",
   conversationTitleRow:
     "vui-routes-chatcodingroute conversationTitleRow grid min-w-0 max-w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-1",
   conversationTreeRootHeader:
-    "vui-routes-chatcodingroute conversationTreeRootHeader !grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 px-1.5 text-[var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-tertiary)] [&_strong]:font-semibold [&_strong]:tabular-nums",
+    "vui-routes-chatcodingroute conversationTreeRootHeader !grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 px-1.5 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-tertiary)] [&_strong]:font-semibold [&_strong]:tabular-nums",
   createGroupButton:
-    "vui-routes-chatcodingroute createGroupButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 text-[var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55",
+    "vui-routes-chatcodingroute createGroupButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55",
   currentSessionBlock:
     "vui-routes-chatcodingroute currentSessionBlock min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_26%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_5%,transparent)] text-[var(--fg-primary)]",
   currentSessionLine:
-    "vui-routes-chatcodingroute currentSessionLine min-w-0 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--accent-cool)_22%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-row)_88%,transparent)] px-1.5 py-1 text-[var(--vui-font-sm)] leading-snug text-[var(--fg-primary)] whitespace-normal [overflow-wrap:anywhere]",
+    "vui-routes-chatcodingroute currentSessionLine min-w-0 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--accent-cool)_22%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-row)_88%,transparent)] px-1.5 py-1 [font-size:var(--vui-font-sm)] leading-snug text-[var(--fg-primary)] whitespace-normal [overflow-wrap:anywhere]",
   currentSessionMetaList:
     "vui-routes-chatcodingroute currentSessionMetaList min-w-0 flex flex-wrap items-center gap-1 border-[color-mix(in_srgb,var(--accent-cool)_24%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_6%,transparent)] text-[var(--accent-cool)]",
   directSessionItem:
     "vui-routes-chatcodingroute directSessionItem pr-0 shadow-none",
   featureChip:
-    "vui-routes-chatcodingroute featureChip relative !grid min-h-[32px] min-w-0 !w-full max-w-full grid-cols-[auto_minmax(0,1fr)] items-center justify-start gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-1.5 py-1 text-[var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] transition-colors hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55 [&_[data-slot=vui-button-content]]:min-w-0 [&_[data-slot=vui-button-content]]:max-w-full [&_[data-slot=vui-button-content]]:w-full [&_[data-slot=vui-button-label]]:grid [&_[data-slot=vui-button-label]]:min-w-0 [&_[data-slot=vui-button-label]]:w-full [&_[data-slot=vui-button-label]]:grid-cols-[minmax(0,1fr)_auto] [&_[data-slot=vui-button-label]]:items-center [&_[data-slot=vui-button-label]]:gap-1 before:content-[''] before:h-1.5 before:w-1.5 before:shrink-0 before:rounded-full before:bg-[var(--fg-tertiary)] [&_em]:shrink-0 [&_em]:not-italic [&_strong]:min-w-0 [&_strong]:whitespace-normal [&_strong]:leading-tight [&_strong]:[overflow-wrap:anywhere]",
+    "vui-routes-chatcodingroute featureChip relative !grid min-h-[32px] min-w-0 !w-full max-w-full grid-cols-[auto_minmax(0,1fr)] items-center justify-start gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-1.5 py-1 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] transition-colors hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55 [&_[data-slot=vui-button-content]]:min-w-0 [&_[data-slot=vui-button-content]]:max-w-full [&_[data-slot=vui-button-content]]:w-full [&_[data-slot=vui-button-label]]:grid [&_[data-slot=vui-button-label]]:min-w-0 [&_[data-slot=vui-button-label]]:w-full [&_[data-slot=vui-button-label]]:grid-cols-[minmax(0,1fr)_auto] [&_[data-slot=vui-button-label]]:items-center [&_[data-slot=vui-button-label]]:gap-1 before:content-[''] before:h-1.5 before:w-1.5 before:shrink-0 before:rounded-full before:bg-[var(--fg-tertiary)] [&_em]:shrink-0 [&_em]:not-italic [&_strong]:min-w-0 [&_strong]:whitespace-normal [&_strong]:leading-tight [&_strong]:[overflow-wrap:anywhere]",
   featureChipActive:
     "vui-routes-chatcodingroute featureChipActive border-[color-mix(in_srgb,var(--accent-cool)_38%,var(--vui-border-subtle))] text-[var(--fg-primary)] before:bg-[var(--accent-cool)]",
   featureChipPrimary:
@@ -389,15 +389,15 @@ const styles: Record<string, string> = {
   groupAgentPicker:
     "vui-routes-chatcodingroute groupAgentPicker min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
   groupApplyButton:
-    "vui-routes-chatcodingroute groupApplyButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 text-[var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55",
+    "vui-routes-chatcodingroute groupApplyButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55",
   groupBubble:
     "vui-routes-chatcodingroute groupBubble min-w-0",
   groupBubbleAvatar:
     "vui-routes-chatcodingroute groupBubbleAvatar min-w-0 inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)]",
   groupBubbleBody:
-    "vui-routes-chatcodingroute groupBubbleBody min-w-0 text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
+    "vui-routes-chatcodingroute groupBubbleBody min-w-0 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
   groupBubbleBodyCollapsed:
-    "vui-routes-chatcodingroute groupBubbleBodyCollapsed min-w-0 text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] hidden",
+    "vui-routes-chatcodingroute groupBubbleBodyCollapsed min-w-0 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] hidden",
   groupBubbleHeader:
     "vui-routes-chatcodingroute groupBubbleHeader min-w-0 flex flex-wrap items-center gap-1.5",
   groupBubbleMeta:
@@ -413,21 +413,21 @@ const styles: Record<string, string> = {
   groupComposerBar:
     "vui-routes-chatcodingroute groupComposerBar min-w-0 !grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-2 border-t border-[var(--vui-border-subtle)] bg-[color-mix(in_srgb,var(--vui-surface-panel)_70%,transparent)] p-2",
   groupComposerEmpty:
-    "vui-routes-chatcodingroute groupComposerEmpty min-w-0 text-[var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
+    "vui-routes-chatcodingroute groupComposerEmpty min-w-0 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
   groupComposerField:
-    "vui-routes-chatcodingroute groupComposerField min-w-0 grid gap-1 text-[var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full",
+    "vui-routes-chatcodingroute groupComposerField min-w-0 grid gap-1 [font-size:var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full",
   groupComposerInput:
-    "vui-routes-chatcodingroute groupComposerInput min-w-0 grid gap-1 text-[var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full",
+    "vui-routes-chatcodingroute groupComposerInput min-w-0 grid gap-1 [font-size:var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full",
   groupComposerPanel:
     "vui-routes-chatcodingroute groupComposerPanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
   groupConversationFrame:
     "vui-routes-chatcodingroute groupConversationFrame grid h-full min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[color-mix(in_srgb,var(--vui-surface-panel)_78%,transparent)] shadow-[var(--vui-shadow-hairline)]",
   groupConversationHeader:
-    "vui-routes-chatcodingroute groupConversationHeader min-w-0 !grid grid-cols-[minmax(0,1fr)_auto] items-start gap-2 border-b border-[var(--vui-border-subtle)] bg-[color-mix(in_srgb,var(--vui-surface-panel)_74%,transparent)] px-2 py-2 [&_div]:grid [&_div]:min-w-0 [&_div]:gap-0.5 [&_h2]:m-0 [&_h2]:min-w-0 [&_h2]:truncate [&_h2]:text-[var(--vui-font-title)] [&_h2]:font-semibold [&_h2]:leading-tight [&_h2]:text-[var(--fg-primary)] [&_p]:m-0 [&_p]:truncate [&_p]:text-[10px] [&_p]:font-medium [&_p]:leading-tight [&_p]:text-[var(--fg-tertiary)] [&_span]:min-w-0 [&_span]:truncate [&_span]:text-[var(--vui-font-xs)] [&_span]:leading-tight [&_span]:text-[var(--fg-secondary)]",
+    "vui-routes-chatcodingroute groupConversationHeader min-w-0 !grid grid-cols-[minmax(0,1fr)_auto] items-start gap-2 border-b border-[var(--vui-border-subtle)] bg-[color-mix(in_srgb,var(--vui-surface-panel)_74%,transparent)] px-2 py-2 [&_div]:grid [&_div]:min-w-0 [&_div]:gap-0.5 [&_h2]:m-0 [&_h2]:min-w-0 [&_h2]:truncate [&_h2]:[font-size:var(--vui-font-title)] [&_h2]:font-semibold [&_h2]:leading-tight [&_h2]:text-[var(--fg-primary)] [&_p]:m-0 [&_p]:truncate [&_p]:text-[10px] [&_p]:font-medium [&_p]:leading-tight [&_p]:text-[var(--fg-tertiary)] [&_span]:min-w-0 [&_span]:truncate [&_span]:[font-size:var(--vui-font-xs)] [&_span]:leading-tight [&_span]:text-[var(--fg-secondary)]",
   groupDeleteButton:
-    "vui-routes-chatcodingroute groupDeleteButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 text-[var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
+    "vui-routes-chatcodingroute groupDeleteButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
   groupEmptyState:
-    "vui-routes-chatcodingroute groupEmptyState grid min-h-[min(220px,calc(100dvh_-_260px))] min-w-0 place-items-center px-6 text-center text-[var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)] [&_svg]:mb-2 [&_svg]:text-[var(--accent-cool)]",
+    "vui-routes-chatcodingroute groupEmptyState grid min-h-[min(220px,calc(100dvh_-_260px))] min-w-0 place-items-center px-6 text-center [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)] [&_svg]:mb-2 [&_svg]:text-[var(--accent-cool)]",
   groupManagementActions:
     "vui-routes-chatcodingroute groupManagementActions min-w-0 flex flex-wrap items-center gap-1.5 !grid grid-cols-[repeat(2,minmax(0,1fr))] gap-[7px]",
   groupManagementControls:
@@ -437,7 +437,7 @@ const styles: Record<string, string> = {
   groupManagementHeader:
     "vui-routes-chatcodingroute groupManagementHeader min-w-0 flex flex-wrap items-center gap-1.5",
   groupManagementHint:
-    "vui-routes-chatcodingroute groupManagementHint min-w-0 text-[var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
+    "vui-routes-chatcodingroute groupManagementHint min-w-0 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
   groupManagementTitleRow:
     "vui-routes-chatcodingroute groupManagementTitleRow inline-flex min-w-0 items-center gap-1",
   groupConversationTitleRow:
@@ -445,23 +445,23 @@ const styles: Record<string, string> = {
   groupManagementPanel:
     "vui-routes-chatcodingroute groupManagementPanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
   groupMemberChip:
-    "vui-routes-chatcodingroute groupMemberChip min-w-0 !grid min-h-[34px] !w-full max-w-full grid-cols-[18px_26px_minmax(0,1fr)_auto] items-center gap-1.5 overflow-hidden rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[color-mix(in_srgb,var(--vui-surface-row)_76%,transparent)] px-1.5 py-1 text-left text-[var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)]",
+    "vui-routes-chatcodingroute groupMemberChip min-w-0 !grid min-h-[34px] !w-full max-w-full grid-cols-[18px_26px_minmax(0,1fr)_auto] items-center gap-1.5 overflow-hidden rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[color-mix(in_srgb,var(--vui-surface-row)_76%,transparent)] px-1.5 py-1 text-left [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)]",
   groupMemberChipSelected:
     "vui-routes-chatcodingroute groupMemberChipSelected min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)]",
   groupMemberCopy:
-    "vui-routes-chatcodingroute groupMemberCopy grid min-w-0 gap-0.5 overflow-hidden text-left text-[var(--vui-font-xs)] leading-tight text-[var(--fg-secondary)] [&_small]:min-w-0 [&_small]:truncate [&_strong]:min-w-0 [&_strong]:truncate",
+    "vui-routes-chatcodingroute groupMemberCopy grid min-w-0 gap-0.5 overflow-hidden text-left [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-secondary)] [&_small]:min-w-0 [&_small]:truncate [&_strong]:min-w-0 [&_strong]:truncate",
   groupMemberPicker:
     "vui-routes-chatcodingroute groupMemberPicker grid min-h-0 min-w-0 max-h-[min(40dvh,360px)] gap-1.5 overflow-auto pr-1",
   groupMessageList:
-    "vui-routes-chatcodingroute groupMessageList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
+    "vui-routes-chatcodingroute groupMessageList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
   groupMessageTimeline:
-    "vui-routes-chatcodingroute groupMessageTimeline min-w-0 grid min-h-0 content-start gap-2 overflow-auto p-2 text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] [scrollbar-gutter:stable]",
+    "vui-routes-chatcodingroute groupMessageTimeline min-w-0 grid min-h-0 content-start gap-2 overflow-auto p-2 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] [scrollbar-gutter:stable]",
   groupModeSelect:
-    "vui-routes-chatcodingroute groupModeSelect min-w-0 grid gap-1 text-[var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full",
+    "vui-routes-chatcodingroute groupModeSelect min-w-0 grid gap-1 [font-size:var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full",
   groupProfileBlock:
     "vui-routes-chatcodingroute groupProfileBlock min-w-0",
   groupRefreshButton:
-    "vui-routes-chatcodingroute groupRefreshButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 text-[var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55",
+    "vui-routes-chatcodingroute groupRefreshButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55",
   groupRoundBlock:
     "vui-routes-chatcodingroute groupRoundBlock min-w-0",
   groupRoundDivider:
@@ -469,17 +469,17 @@ const styles: Record<string, string> = {
   groupRoundSummary:
     "vui-routes-chatcodingroute groupRoundSummary min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
   groupSecondaryButton:
-    "vui-routes-chatcodingroute groupSecondaryButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 text-[var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55",
+    "vui-routes-chatcodingroute groupSecondaryButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55",
   groupSessionItem:
     "vui-routes-chatcodingroute groupSessionItem pr-0 border-transparent bg-transparent shadow-none",
   groupStopButton:
-    "vui-routes-chatcodingroute groupStopButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 text-[var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55",
+    "vui-routes-chatcodingroute groupStopButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55",
   groupTitleField:
-    "vui-routes-chatcodingroute groupTitleField min-w-0 grid gap-1 text-[var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full text-[var(--vui-font-title)] font-semibold leading-tight text-[var(--fg-primary)]",
+    "vui-routes-chatcodingroute groupTitleField min-w-0 grid gap-1 [font-size:var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full [font-size:var(--vui-font-title)] font-semibold leading-tight text-[var(--fg-primary)]",
   groupTopicBubble:
     "vui-routes-chatcodingroute groupTopicBubble min-w-0",
   groupTopicMessage:
-    "vui-routes-chatcodingroute groupTopicMessage min-w-0 text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
+    "vui-routes-chatcodingroute groupTopicMessage min-w-0 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
   groupTypingDots:
     "vui-routes-chatcodingroute groupTypingDots min-w-0",
   inlineMetaList:
@@ -489,7 +489,7 @@ const styles: Record<string, string> = {
   inlineNotice:
     "vui-routes-chatcodingroute inlineNotice min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
   inlineStat:
-    "vui-routes-chatcodingroute inlineStat min-w-0 !grid grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)] items-baseline gap-0.5 text-[var(--vui-font-xs)] leading-tight [&_span]:min-w-0 [&_span]:whitespace-normal [&_span]:text-[var(--fg-tertiary)] [&_strong]:min-w-0 [&_strong]:whitespace-normal [overflow-wrap:anywhere]",
+    "vui-routes-chatcodingroute inlineStat min-w-0 !grid grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)] items-baseline gap-0.5 [font-size:var(--vui-font-xs)] leading-tight [&_span]:min-w-0 [&_span]:whitespace-normal [&_span]:text-[var(--fg-tertiary)] [&_strong]:min-w-0 [&_strong]:whitespace-normal [overflow-wrap:anywhere]",
   inlineStatGrid:
     "vui-routes-chatcodingroute inlineStatGrid min-w-0 grid gap-2 !grid grid-cols-[1fr] gap-[3px]",
   kernelTraceLink:
@@ -509,7 +509,7 @@ layout:
   memberIndexSummary:
     "vui-routes-chatcodingroute memberIndexSummary min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 !grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-1.5",
   mentalStateBadge:
-    "vui-routes-chatcodingroute mentalStateBadge min-w-0 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 text-[var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)]",
+    "vui-routes-chatcodingroute mentalStateBadge min-w-0 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 [font-size:var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)]",
   mentalStateBadge_active:
     "vui-routes-chatcodingroute mentalStateBadge_active min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
   mentalStateBadge_answering:
@@ -565,13 +565,13 @@ layout:
   mentalStateBadge_missing:
     "vui-routes-chatcodingroute mentalStateBadge_missing min-w-0",
   mentalStateBadge_modelInput:
-    "vui-routes-chatcodingroute mentalStateBadge_modelInput min-w-0 grid gap-1 text-[var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full",
+    "vui-routes-chatcodingroute mentalStateBadge_modelInput min-w-0 grid gap-1 [font-size:var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full",
   mentalStateBadge_moose:
     "vui-routes-chatcodingroute mentalStateBadge_moose min-w-0",
   mentalStateBadge_muted:
-    "vui-routes-chatcodingroute mentalStateBadge_muted min-w-0 text-[var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
+    "vui-routes-chatcodingroute mentalStateBadge_muted min-w-0 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
   mentalStateBadge_needs_input:
-    "vui-routes-chatcodingroute mentalStateBadge_needs_input min-w-0 grid gap-1 text-[var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full",
+    "vui-routes-chatcodingroute mentalStateBadge_needs_input min-w-0 grid gap-1 [font-size:var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full",
   mentalStateBadge_neutral:
     "vui-routes-chatcodingroute mentalStateBadge_neutral min-w-0",
   mentalStateBadge_normal:
@@ -639,7 +639,7 @@ layout:
   newSessionButton:
     "vui-routes-chatcodingroute newSessionButton !inline-flex !h-[34px] !min-h-[34px] !min-w-0 !w-full max-w-full items-center justify-center gap-1 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--accent-cool)_34%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))] px-2 py-0 ![font-size:var(--vui-font-xs)] font-semibold !leading-none [color:var(--accent-cool)] shadow-none hover:bg-[color-mix(in_srgb,var(--accent-cool)_14%,var(--vui-surface-row))] [&_[data-slot=vui-button-content]]:min-w-0 [&_[data-slot=vui-button-content]]:!leading-none [&_[data-slot=vui-button-label]]:min-w-0 [&_[data-slot=vui-button-label]]:truncate [&_[data-slot=vui-button-label]]:!leading-none",
   oneLineValue:
-    "vui-routes-chatcodingroute oneLineValue min-w-0 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--vui-border-subtle)_68%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-row)_42%,transparent)] px-1.5 py-1 text-[var(--vui-font-xs)] leading-tight text-[var(--fg-secondary)] [&_span]:mr-1.5 [&_span]:font-semibold [&_span]:text-[var(--fg-tertiary)]",
+    "vui-routes-chatcodingroute oneLineValue min-w-0 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--vui-border-subtle)_68%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-row)_42%,transparent)] px-1.5 py-1 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-secondary)] [&_span]:mr-1.5 [&_span]:font-semibold [&_span]:text-[var(--fg-tertiary)]",
   paneCollapsed:
     "vui-routes-chatcodingroute paneCollapsed min-w-0 !hidden invisible pointer-events-none !overflow-hidden opacity-0",
   overlayBackdrop:
@@ -653,23 +653,23 @@ layout:
   overlayPaneRight:
     "vui-routes-chatcodingroute overlayPaneRight right-0",
   overlayPaneToggle:
-    "vui-routes-chatcodingroute overlayPaneToggle inline-flex min-h-[30px] items-center rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 text-[var(--vui-font-xs)] font-semibold text-[var(--fg-secondary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-cool)]",
+    "vui-routes-chatcodingroute overlayPaneToggle inline-flex min-h-[30px] items-center rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 [font-size:var(--vui-font-xs)] font-semibold text-[var(--fg-secondary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-cool)]",
   panelBody:
-    "vui-routes-chatcodingroute panelBody min-w-0 h-full p-2 text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] min-h-0 overflow-auto [scrollbar-gutter:stable]",
+    "vui-routes-chatcodingroute panelBody min-w-0 h-full p-2 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] min-h-0 overflow-auto [scrollbar-gutter:stable]",
   panelNotice:
-    "vui-routes-chatcodingroute panelNotice grid min-w-0 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--accent-warm)_22%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-warm)_5%,var(--vui-surface-row))] px-2 py-1.5 text-[var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)]",
+    "vui-routes-chatcodingroute panelNotice grid min-w-0 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--accent-warm)_22%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-warm)_5%,var(--vui-surface-row))] px-2 py-1.5 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)]",
   panelSearch:
     "vui-routes-chatcodingroute panelSearch grid min-h-9 min-w-0 grid-cols-[16px_minmax(0,1fr)] items-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[color-mix(in_srgb,var(--vui-surface-row)_56%,transparent)] px-2 py-0 text-[var(--fg-tertiary)] shadow-none transition-colors hover:border-[color-mix(in_srgb,var(--accent-cool)_24%,var(--vui-border-subtle))] focus-within:border-[color-mix(in_srgb,var(--accent-cool)_42%,var(--vui-border-subtle))] focus-within:bg-[color-mix(in_srgb,var(--surface-card)_66%,transparent)]",
   panelSearchInput:
-    "vui-routes-chatcodingroute panelSearchInput min-w-0 w-full !border-0 !bg-transparent px-0 py-0 text-[var(--fg-primary)] !shadow-none [&_[data-slot=input-wrapper]]:min-h-8 [&_[data-slot=input-wrapper]]:rounded-none [&_[data-slot=input-wrapper]]:!border-0 [&_[data-slot=input-wrapper]]:!bg-transparent [&_[data-slot=input-wrapper]]:px-0 [&_[data-slot=input-wrapper]]:shadow-none [&_[data-slot=input]]:text-[var(--vui-font-sm)] [&_[data-slot=input]]:text-[var(--fg-primary)] [&_[data-slot=input]]:placeholder:text-[var(--fg-tertiary)] [&_[data-slot=inner-wrapper]]:gap-0",
+    "vui-routes-chatcodingroute panelSearchInput min-w-0 w-full !border-0 !bg-transparent px-0 py-0 text-[var(--fg-primary)] !shadow-none [&_[data-slot=input-wrapper]]:min-h-8 [&_[data-slot=input-wrapper]]:rounded-none [&_[data-slot=input-wrapper]]:!border-0 [&_[data-slot=input-wrapper]]:!bg-transparent [&_[data-slot=input-wrapper]]:px-0 [&_[data-slot=input-wrapper]]:shadow-none [&_[data-slot=input]]:[font-size:var(--vui-font-sm)] [&_[data-slot=input]]:text-[var(--fg-primary)] [&_[data-slot=input]]:placeholder:text-[var(--fg-tertiary)] [&_[data-slot=inner-wrapper]]:gap-0",
   panelState:
     "vui-routes-chatcodingroute panelState min-h-[72px] place-items-center !content-center !text-center",
   petMiniAvatar:
     "vui-routes-chatcodingroute petMiniAvatar min-w-0 inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)]",
   petShowcaseAction:
-    "vui-routes-chatcodingroute petShowcaseAction min-w-0 !grid min-h-[30px] !w-full grid-cols-[14px_minmax(0,1fr)] items-center gap-1 rounded-[var(--radius-control)] px-1.5 py-1 text-[var(--vui-font-sm)] [&_[data-slot=vui-button-content]]:contents [&_[data-slot=vui-button-label]]:contents [&_span]:min-w-0 [&_span]:whitespace-normal [&_span]:leading-tight [&_span]:[overflow-wrap:anywhere] [&_svg]:shrink-0",
+    "vui-routes-chatcodingroute petShowcaseAction min-w-0 !grid min-h-[30px] !w-full grid-cols-[14px_minmax(0,1fr)] items-center gap-1 rounded-[var(--radius-control)] px-1.5 py-1 [font-size:var(--vui-font-sm)] [&_[data-slot=vui-button-content]]:contents [&_[data-slot=vui-button-label]]:contents [&_span]:min-w-0 [&_span]:whitespace-normal [&_span]:leading-tight [&_span]:[overflow-wrap:anywhere] [&_svg]:shrink-0",
   petShowcaseActionHint:
-    "vui-routes-chatcodingroute petShowcaseActionHint min-w-0 flex flex-wrap items-center gap-1.5 text-[var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
+    "vui-routes-chatcodingroute petShowcaseActionHint min-w-0 flex flex-wrap items-center gap-1.5 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
   petShowcaseActions:
     "vui-routes-chatcodingroute petShowcaseActions min-w-0 flex flex-wrap items-center gap-1.5 !grid grid-cols-[repeat(3,minmax(0,1fr))] gap-[4px]",
   petShowcaseAvatar:
@@ -729,13 +729,13 @@ layout:
   petShowcaseAvatar_missing:
     "vui-routes-chatcodingroute petShowcaseAvatar_missing min-w-0 inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)]",
   petShowcaseAvatar_modelInput:
-    "vui-routes-chatcodingroute petShowcaseAvatar_modelInput min-w-0 inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] grid gap-1 text-[var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full",
+    "vui-routes-chatcodingroute petShowcaseAvatar_modelInput min-w-0 inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] grid gap-1 [font-size:var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full",
   petShowcaseAvatar_moose:
     "vui-routes-chatcodingroute petShowcaseAvatar_moose min-w-0 inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)]",
   petShowcaseAvatar_muted:
-    "vui-routes-chatcodingroute petShowcaseAvatar_muted min-w-0 inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] text-[var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
+    "vui-routes-chatcodingroute petShowcaseAvatar_muted min-w-0 inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
   petShowcaseAvatar_needs_input:
-    "vui-routes-chatcodingroute petShowcaseAvatar_needs_input min-w-0 inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] grid gap-1 text-[var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full",
+    "vui-routes-chatcodingroute petShowcaseAvatar_needs_input min-w-0 inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] grid gap-1 [font-size:var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full",
   petShowcaseAvatar_neutral:
     "vui-routes-chatcodingroute petShowcaseAvatar_neutral min-w-0 inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)]",
   petShowcaseAvatar_normal:
@@ -807,7 +807,7 @@ layout:
   petShowcaseFace:
     "vui-routes-chatcodingroute petShowcaseFace min-w-0",
   petShowcaseFeedback:
-    "vui-routes-chatcodingroute petShowcaseFeedback min-w-0 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--accent-cool)_20%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_6%,transparent)] px-1.5 py-1 text-[var(--vui-font-sm)] leading-snug text-[var(--fg-secondary)]",
+    "vui-routes-chatcodingroute petShowcaseFeedback min-w-0 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--accent-cool)_20%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_6%,transparent)] px-1.5 py-1 [font-size:var(--vui-font-sm)] leading-snug text-[var(--fg-secondary)]",
   petShowcaseFootLeft:
     "vui-routes-chatcodingroute petShowcaseFootLeft min-w-0",
   petShowcaseFootRight:
@@ -821,7 +821,7 @@ layout:
   projectBusEventActions:
     "vui-routes-chatcodingroute projectBusEventActions min-w-0 flex flex-wrap items-center gap-1.5",
   projectBusEventBody:
-    "vui-routes-chatcodingroute projectBusEventBody min-w-0 text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
+    "vui-routes-chatcodingroute projectBusEventBody min-w-0 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
   projectBusEventHeader:
     "vui-routes-chatcodingroute projectBusEventHeader min-w-0 flex flex-wrap items-center gap-1.5",
   projectBusEventMeta:
@@ -844,7 +844,7 @@ layout:
   resourceSplit:
     "vui-routes-chatcodingroute resourceSplit min-w-0 !grid grid-cols-[repeat(auto-fit,minmax(118px,1fr))] gap-[5px]",
   rightIndexTab:
-    "vui-routes-chatcodingroute rightIndexTab min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 text-[var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55",
+    "vui-routes-chatcodingroute rightIndexTab min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55",
   rightIndexTabActive:
     "vui-routes-chatcodingroute rightIndexTabActive min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
   rightIndexTabs:
@@ -862,9 +862,9 @@ layout:
   sectionIdentity:
     "vui-routes-chatcodingroute sectionIdentity grid min-w-0 gap-0.5",
   sectionMetaLine:
-    "vui-routes-chatcodingroute sectionMetaLine min-w-0 whitespace-normal text-[var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)] [overflow-wrap:anywhere]",
+    "vui-routes-chatcodingroute sectionMetaLine min-w-0 whitespace-normal [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)] [overflow-wrap:anywhere]",
   sectionTitle:
-    "vui-routes-chatcodingroute sectionTitle min-w-0 text-[var(--vui-font-title)] font-semibold leading-tight text-[var(--fg-primary)] m-0 text-[var(--vui-font-title)] font-semibold leading-tight text-[var(--fg-primary)]",
+    "vui-routes-chatcodingroute sectionTitle min-w-0 [font-size:var(--vui-font-title)] font-semibold leading-tight text-[var(--fg-primary)] m-0 [font-size:var(--vui-font-title)] font-semibold leading-tight text-[var(--fg-primary)]",
   sessionActionRow:
     "vui-routes-chatcodingroute sessionActionRow grid min-w-0 grid-cols-2 items-center gap-2 border-0 bg-transparent p-0",
   sessionActionStack:
@@ -878,7 +878,7 @@ layout:
   sessionContextMenuItem:
     "vui-routes-chatcodingroute sessionContextMenuItem min-w-0 !w-full justify-start rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] px-2 py-1.5 text-left text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] [&_[data-slot=vui-button-content]]:contents [&_[data-slot=vui-button-label]]:contents [&_[data-slot=vui-button-label]]:col-span-full",
   sessionCurrentBadge:
-    "vui-routes-chatcodingroute sessionCurrentBadge !inline-flex !h-[22px] !min-h-[22px] !w-fit max-w-full shrink-0 items-center justify-center gap-1 overflow-hidden border-[color-mix(in_srgb,var(--accent-cool)_36%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,transparent)] px-1.5 text-[var(--vui-font-xs)] font-semibold leading-none text-[var(--accent-cool)] [&_span]:leading-none",
+    "vui-routes-chatcodingroute sessionCurrentBadge !inline-flex !h-[22px] !min-h-[22px] !w-fit max-w-full shrink-0 items-center justify-center gap-1 overflow-hidden border-[color-mix(in_srgb,var(--accent-cool)_36%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,transparent)] px-1.5 [font-size:var(--vui-font-xs)] font-semibold leading-none text-[var(--accent-cool)] [&_span]:leading-none",
   sessionIconButton:
     "vui-routes-chatcodingroute sessionIconButton min-w-0 inline-grid h-[var(--vui-control-height-sm)] min-h-[var(--vui-control-height-sm)] w-[var(--vui-control-height-sm)] min-w-[var(--vui-control-height-sm)] place-items-center rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] p-0 text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] shrink-0 text-[var(--fg-tertiary)]",
   sessionItem:
@@ -894,19 +894,19 @@ layout:
   sessionItemNotice:
     "vui-routes-chatcodingroute sessionItemNotice min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 rounded-[var(--radius-control)] bg-[var(--vui-surface-row)]",
   sessionItemSummary:
-    "vui-routes-chatcodingroute sessionItemSummary block min-w-0 truncate text-[var(--vui-font-xs)] leading-tight text-[var(--fg-secondary)]",
+    "vui-routes-chatcodingroute sessionItemSummary block min-w-0 truncate [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-secondary)]",
   sessionItemTitle:
-    "vui-routes-chatcodingroute sessionItemTitle min-w-0 truncate text-[var(--vui-font-md)] font-semibold leading-tight text-[var(--fg-primary)]",
+    "vui-routes-chatcodingroute sessionItemTitle min-w-0 truncate [font-size:var(--vui-font-md)] font-semibold leading-tight text-[var(--fg-primary)]",
   sessionLoadMoreButton:
-    "vui-routes-chatcodingroute sessionLoadMoreButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 text-[var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55",
+    "vui-routes-chatcodingroute sessionLoadMoreButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55",
   sessionLoadMoreStatus:
     "vui-routes-chatcodingroute sessionLoadMoreStatus min-w-0",
   sessionRunningBadge:
-    "vui-routes-chatcodingroute sessionRunningBadge !inline-flex !h-[22px] !min-h-[22px] !w-fit max-w-full shrink-0 items-center justify-center gap-1 overflow-hidden border-[color-mix(in_srgb,var(--state-success)_32%,transparent)] bg-[color-mix(in_srgb,var(--state-success)_9%,transparent)] px-1.5 text-[var(--vui-font-xs)] font-semibold leading-none text-[var(--state-success)] [&_span]:leading-none [&_svg]:size-[10px] [&_svg]:shrink-0 [&_svg]:animate-spin",
+    "vui-routes-chatcodingroute sessionRunningBadge !inline-flex !h-[22px] !min-h-[22px] !w-fit max-w-full shrink-0 items-center justify-center gap-1 overflow-hidden border-[color-mix(in_srgb,var(--state-success)_32%,transparent)] bg-[color-mix(in_srgb,var(--state-success)_9%,transparent)] px-1.5 [font-size:var(--vui-font-xs)] font-semibold leading-none text-[var(--state-success)] [&_span]:leading-none [&_svg]:size-[10px] [&_svg]:shrink-0 [&_svg]:animate-spin",
   sessionState:
     "vui-routes-chatcodingroute sessionState !inline-flex !h-[22px] !min-h-[22px] !w-fit shrink-0 items-center justify-center overflow-hidden border-[color-mix(in_srgb,var(--state-success)_32%,transparent)] bg-[color-mix(in_srgb,var(--state-success)_9%,transparent)] px-1.5 text-[var(--state-success)] [&_svg]:size-[10px] [&_svg]:shrink-0",
   sessionStatePill:
-    "vui-routes-chatcodingroute sessionStatePill min-w-0 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 text-[var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)]",
+    "vui-routes-chatcodingroute sessionStatePill min-w-0 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 [font-size:var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)]",
   sessionStatePill_active:
     "vui-routes-chatcodingroute sessionStatePill_active min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
   sessionStatePill_answering:
@@ -962,13 +962,13 @@ layout:
   sessionStatePill_missing:
     "vui-routes-chatcodingroute sessionStatePill_missing min-w-0",
   sessionStatePill_modelInput:
-    "vui-routes-chatcodingroute sessionStatePill_modelInput min-w-0 grid gap-1 text-[var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full",
+    "vui-routes-chatcodingroute sessionStatePill_modelInput min-w-0 grid gap-1 [font-size:var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full",
   sessionStatePill_moose:
     "vui-routes-chatcodingroute sessionStatePill_moose min-w-0",
   sessionStatePill_muted:
-    "vui-routes-chatcodingroute sessionStatePill_muted min-w-0 text-[var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
+    "vui-routes-chatcodingroute sessionStatePill_muted min-w-0 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
   sessionStatePill_needs_input:
-    "vui-routes-chatcodingroute sessionStatePill_needs_input min-w-0 grid gap-1 text-[var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full",
+    "vui-routes-chatcodingroute sessionStatePill_needs_input min-w-0 grid gap-1 [font-size:var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full",
   sessionStatePill_neutral:
     "vui-routes-chatcodingroute sessionStatePill_neutral min-w-0",
   sessionStatePill_normal:
@@ -1034,9 +1034,9 @@ layout:
   sessionStatusCluster:
     "vui-routes-chatcodingroute sessionStatusCluster inline-flex min-w-0 items-center justify-end gap-1",
   sessionTitleInput:
-    "vui-routes-chatcodingroute sessionTitleInput min-w-0 grid gap-1 text-[var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full text-[var(--vui-font-title)] font-semibold leading-tight text-[var(--fg-primary)]",
+    "vui-routes-chatcodingroute sessionTitleInput min-w-0 grid gap-1 [font-size:var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full [font-size:var(--vui-font-title)] font-semibold leading-tight text-[var(--fg-primary)]",
   sessionUnreadBadge:
-    "vui-routes-chatcodingroute sessionUnreadBadge !inline-flex !h-[22px] !min-h-[22px] !w-fit max-w-full shrink-0 items-center justify-center gap-1 overflow-hidden border-[color-mix(in_srgb,var(--state-warning)_34%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_10%,transparent)] px-1.5 text-[var(--vui-font-xs)] font-semibold leading-none text-[var(--state-warning)] [&_span]:leading-none",
+    "vui-routes-chatcodingroute sessionUnreadBadge !inline-flex !h-[22px] !min-h-[22px] !w-fit max-w-full shrink-0 items-center justify-center gap-1 overflow-hidden border-[color-mix(in_srgb,var(--state-warning)_34%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_10%,transparent)] px-1.5 [font-size:var(--vui-font-xs)] font-semibold leading-none text-[var(--state-warning)] [&_span]:leading-none",
   systemEntryButton:
     "vui-routes-chatcodingroute systemEntryButton relative !grid !h-auto !min-h-[46px] !w-full grid-cols-[28px_minmax(0,1fr)] items-center justify-start gap-2 overflow-hidden rounded-[var(--radius-control)] border border-transparent bg-transparent px-1.5 py-1 text-left [color:var(--fg-secondary)] shadow-none transition-colors before:absolute before:inset-y-1.5 before:left-0 before:w-[2px] before:rounded-full before:bg-[var(--accent-cool)] before:opacity-0 hover:border-[color-mix(in_srgb,var(--accent-cool)_18%,transparent)] hover:bg-[color-mix(in_srgb,var(--surface-card)_46%,transparent)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] [&_[data-slot=vui-button-content]]:contents [&_[data-slot=vui-button-label]]:contents",
   systemEntryButtonActive:
@@ -1054,7 +1054,7 @@ layout:
   systemEntryTitleRow:
     "vui-routes-chatcodingroute systemEntryTitleRow !flex min-w-0 items-center gap-1.5",
   tab:
-    "vui-routes-chatcodingroute tab min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 text-[var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55",
+    "vui-routes-chatcodingroute tab min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55",
   tabActive:
     "vui-routes-chatcodingroute tabActive min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
   tabStrip:
@@ -1068,7 +1068,7 @@ layout:
   teamTreeItem:
     "vui-routes-chatcodingroute teamTreeItem min-w-0 overflow-hidden border-transparent bg-transparent shadow-none",
   teamTreeLabelRow:
-    "vui-routes-chatcodingroute teamTreeLabelRow min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2 text-[var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
+    "vui-routes-chatcodingroute teamTreeLabelRow min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
   tokenCompressionCard:
     "vui-routes-chatcodingroute tokenCompressionCard min-w-0",
   tokenStatusBar:
@@ -1144,9 +1144,9 @@ layout:
   tokenStatusMetric_moose:
     "vui-routes-chatcodingroute tokenStatusMetric_moose min-w-0",
   tokenStatusMetric_muted:
-    "vui-routes-chatcodingroute tokenStatusMetric_muted min-w-0 text-[var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
+    "vui-routes-chatcodingroute tokenStatusMetric_muted min-w-0 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
   tokenStatusMetric_needs_input:
-    "vui-routes-chatcodingroute tokenStatusMetric_needs_input min-w-0 grid gap-1 text-[var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full",
+    "vui-routes-chatcodingroute tokenStatusMetric_needs_input min-w-0 grid gap-1 [font-size:var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full",
   tokenStatusMetric_neutral:
     "vui-routes-chatcodingroute tokenStatusMetric_neutral min-w-0",
   tokenStatusMetric_normal:
