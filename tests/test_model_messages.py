@@ -109,6 +109,64 @@ def test_provider_turn_messages_demote_partial_live_tool_chain_without_orphan_re
     assert validate_tool_result_pairing(messages).ok
 
 
+def test_provider_turn_messages_complete_explicitly_interrupted_parallel_chain_with_aborted_result():
+    messages = normalize_provider_turn_messages(
+        [
+            {
+                "role": "assistant",
+                "content": "先完成可返回的检查。",
+                "metadata": {"interrupted": True},
+                "tool_calls": [
+                    {
+                        "id": "call_done",
+                        "type": "function",
+                        "function": {"name": "cli_tool", "arguments": "{\"command\":\"echo ok\"}"},
+                    },
+                    {
+                        "id": "call_stopped",
+                        "type": "function",
+                        "function": {"name": "read_file_tool", "arguments": "{\"file_path\":\"large.log\"}"},
+                    },
+                ],
+            },
+            {"role": "tool", "tool_call_id": "call_done", "content": "ok"},
+            {"role": "user", "content": "继续"},
+        ]
+    )
+
+    assert [message["role"] for message in messages] == ["assistant", "tool", "tool", "user"]
+    assert messages[1]["tool_call_id"] == "call_done"
+    assert messages[2]["tool_call_id"] == "call_stopped"
+    assert messages[2]["content"] == "aborted"
+    assert messages[2]["metadata"]["kind"] == "interrupted_tool_result"
+    assert validate_tool_result_pairing(messages).ok
+
+
+def test_provider_turn_messages_complete_stopped_embedded_tool_call_with_aborted_result():
+    messages = normalize_provider_turn_messages(
+        [
+            {
+                "role": "assistant",
+                "content": "",
+                "metadata": {"interrupted": True},
+                "toolCalls": [
+                    {
+                        "id": "call_stopped",
+                        "name": "code_symbol_tool",
+                        "status": "stopped",
+                        "arguments": {"query": "Agent"},
+                    }
+                ],
+            }
+        ]
+    )
+
+    assert [message["role"] for message in messages] == ["assistant", "tool"]
+    assert messages[1]["tool_call_id"] == "call_stopped"
+    assert messages[1]["content"] == "aborted"
+    assert validate_tool_result_pairing(messages).ok
+
+
 def test_provider_turn_messages_preserve_valid_live_tool_pair():
     messages = normalize_provider_turn_messages(
         [
