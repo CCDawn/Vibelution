@@ -6,7 +6,6 @@ from types import SimpleNamespace
 import pytest
 from fastapi.testclient import TestClient
 
-from core.authorization import tool_authorization_service
 from core.agent_kernel import service as agent_kernel_service
 from core.chat.conversation_ledger import EVENT_ASSISTANT_MESSAGE, EVENT_USER_MESSAGE, append_conversation_event
 from core.infrastructure import developer_sandbox
@@ -28,6 +27,7 @@ from core.web.services import (
     supervised_agent_service,
 )
 from tools.session_reference_tools import session_reference_context
+from tests.helpers.tool_authorization import execute_authorized_agent_tool
 
 pytestmark = pytest.mark.serial
 
@@ -61,44 +61,6 @@ def _allow_agent_message_tool(agent_id: str) -> None:
         allowed.append("agent_message_tool")
     policy["allowedTools"] = allowed
     agent_directory_service.update_agent_instance(agent_id, tool_policy=policy)
-
-
-def _execute_authorized_agent_tool(
-    agent_id: str,
-    session_id: str,
-    tool_name: str,
-    tool_args: dict,
-    *,
-    executable_tools: tuple[str, ...] | None = None,
-) -> tuple:
-    turn_id = f"turn-test-{tool_name}"
-    with agent_directory_service.active_agent_runtime(
-        agent_id,
-        session_id=session_id,
-        turn_id=turn_id,
-    ):
-        tool_authorization_service.install_execution_authorization(
-            SimpleNamespace(
-                decision=SimpleNamespace(
-                    agent_id=agent_id,
-                    turn_id=turn_id,
-                    decision_fingerprint=f"decision-test-{tool_name}",
-                    executable_tools=(
-                        tuple(executable_tools)
-                        if executable_tools is not None
-                        else (tool_name,)
-                    ),
-                )
-            )
-        )
-        try:
-            return ToolExecutor().execute(
-                tool_name,
-                tool_args,
-                tool_call_id=f"call-test-{tool_name}",
-            )
-        finally:
-            tool_authorization_service.clear_execution_authorization()
 
 
 class _FakeResearchWorkspace:
@@ -1903,7 +1865,7 @@ def test_agent_message_tool_sends_persistent_message_by_agent_code(tmp_path, mon
     beta = session_service.create_chat_session(title="Beta Agent")
     _allow_agent_message_tool(alpha["agentId"])
 
-    result, action = _execute_authorized_agent_tool(
+    result, action = execute_authorized_agent_tool(
         alpha["agentId"],
         alpha["id"],
         "agent_message_tool",
@@ -2037,7 +1999,7 @@ def test_agent_message_tool_resolves_ui_composite_agent_label(tmp_path, monkeypa
     beta_agent = agent_directory_service.get_agent(beta["agentId"])
     label = f"{beta['agentCode']} · {beta_agent['displayName']}"
 
-    result, action = _execute_authorized_agent_tool(
+    result, action = execute_authorized_agent_tool(
         alpha["agentId"],
         alpha["id"],
         "agent_message_tool",
@@ -2073,7 +2035,7 @@ def test_agent_message_tool_resolves_common_agent_label_variants(tmp_path, monke
     beta_agent = agent_directory_service.get_agent(beta["agentId"])
     label = label_template.format(code=beta["agentCode"], name=beta_agent["displayName"])
 
-    result, action = _execute_authorized_agent_tool(
+    result, action = execute_authorized_agent_tool(
         alpha["agentId"],
         alpha["id"],
         "agent_message_tool",
@@ -2102,7 +2064,7 @@ def test_agent_message_tool_resolves_unique_role_key_target(tmp_path, monkeypatc
         role_key="source_finder",
     )
 
-    result, action = _execute_authorized_agent_tool(
+    result, action = execute_authorized_agent_tool(
         alpha["agentId"],
         alpha["id"],
         "agent_message_tool",
@@ -2128,7 +2090,7 @@ def test_agent_message_tool_preserves_full_message_body(tmp_path, monkeypatch):
     _allow_agent_message_tool(alpha["agentId"])
     full_report = "\n".join(f"第 {index:02d} 行：工具发送报告正文" for index in range(1, 31))
 
-    result, action = _execute_authorized_agent_tool(
+    result, action = execute_authorized_agent_tool(
         alpha["agentId"],
         alpha["id"],
         "agent_message_tool",
@@ -2178,7 +2140,7 @@ def test_agent_message_tool_can_wake_target_session_and_consume_inbox(tmp_path, 
         SimpleNamespace(submit=lambda fn, context: fn(context)),
     )
 
-    result, action = _execute_authorized_agent_tool(
+    result, action = execute_authorized_agent_tool(
         alpha["agentId"],
         alpha["id"],
         "agent_message_tool",
@@ -2442,7 +2404,7 @@ def test_agent_message_tool_routes_research_core_messages_through_org_policy(tmp
     steward = next(node for node in org["agents"] if node["role"] == "capability_steward")
     _allow_agent_message_tool(ceo["agentId"])
 
-    result, action = _execute_authorized_agent_tool(
+    result, action = execute_authorized_agent_tool(
         ceo["agentId"],
         ceo["agent"]["directSessionId"],
         "agent_message_tool",
@@ -2507,7 +2469,7 @@ def test_agent_message_tool_blocks_research_core_message_without_intent(tmp_path
     steward = next(node for node in org["agents"] if node["role"] == "capability_steward")
     _allow_agent_message_tool(ceo["agentId"])
 
-    result, action = _execute_authorized_agent_tool(
+    result, action = execute_authorized_agent_tool(
         ceo["agentId"],
         ceo["agent"]["directSessionId"],
         "agent_message_tool",
@@ -2588,7 +2550,7 @@ def test_agent_message_tool_blocks_research_core_messages_without_allowed_policy
     advisor = next(node for node in org["agents"] if node["role"] == "organization_advisor")
     _allow_agent_message_tool(advisor["agentId"])
 
-    result, action = _execute_authorized_agent_tool(
+    result, action = execute_authorized_agent_tool(
         advisor["agentId"],
         advisor["agent"]["directSessionId"],
         "agent_message_tool",
@@ -2638,7 +2600,7 @@ def test_agent_message_tool_blocks_outsider_to_research_core_agent(tmp_path, mon
     outsider = session_service.create_chat_session(title="外部 Chat Agent")
     _allow_agent_message_tool(outsider["agentId"])
 
-    result, action = _execute_authorized_agent_tool(
+    result, action = execute_authorized_agent_tool(
         outsider["agentId"],
         outsider["id"],
         "agent_message_tool",
@@ -2778,7 +2740,7 @@ def test_tool_policy_blocks_before_tool_execution_and_returns_correctable_error(
         tool_policy={"blockedTools": ["cli_tool"]},
     )
 
-    result, action = _execute_authorized_agent_tool(
+    result, action = execute_authorized_agent_tool(
         agent["agentId"],
         agent["directSessionId"],
         "cli_tool",

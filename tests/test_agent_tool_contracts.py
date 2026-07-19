@@ -13,6 +13,7 @@ from core.web.services import chat_room_service
 from core.web.services import team_knowledge_service
 from core.web.services import team_service
 from core.web.services import tool_catalog
+from tests.helpers.tool_authorization import authorized_agent_tool_executor
 from tools.Key_Tools import create_key_tools, create_llm_facing_tools
 
 
@@ -149,8 +150,12 @@ def test_team_memory_write_tools_block_before_service_mutation_when_policy_disal
         },
     )
 
-    with agent_directory_service.active_agent_runtime(agent["agentId"], session_id="session-policy"):
-        proposal_result, proposal_action = _executor_result(
+    with authorized_agent_tool_executor(
+        agent["agentId"],
+        session_id="session-policy",
+        executable_tools=tuple(sorted(TEAM_MEMORY_TOOLS)),
+    ) as execute:
+        proposal_result, proposal_action = execute(
             "knowledge_proposal_tool",
             {
                 "knowledge_base_id": "kb-blocked",
@@ -160,7 +165,7 @@ def test_team_memory_write_tools_block_before_service_mutation_when_policy_disal
                 "proposal_content": "should not be submitted",
             },
         )
-        rating_result, rating_action = _executor_result(
+        rating_result, rating_action = execute(
             "knowledge_rating_suggestion_tool",
             {
                 "knowledge_base_id": "kb-blocked",

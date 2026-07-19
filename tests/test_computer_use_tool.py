@@ -5,13 +5,13 @@ import pytest
 from fastapi.testclient import TestClient
 
 import scripts.computer_use_bridge as computer_use_bridge
-from core.infrastructure.tool_executor import ToolExecutor
 from core.web.app import create_app
 from core.web.control import CONTROL_TOKEN_HEADER, get_control_token
 from core.web.services import agent_directory_service
 from core.web.services import computer_use_service
 from core.web.services import tool_registry_service as registry
 from core.web.services import tool_catalog
+from tests.helpers.tool_authorization import execute_authorized_agent_tool
 from tools.computer_use_tools import computer_use_session_tool, computer_use_task_tool
 
 
@@ -940,13 +940,15 @@ def test_computer_use_tool_no_longer_requires_explicit_tool_policy(computer_use_
         llm_bindings={"dialogue": {"modelId": "model-primary"}},
     )
 
-    with agent_directory_service.active_agent_runtime(agent["agentId"]):
-        result, _ = ToolExecutor().execute(
-            "computer_use_task_tool",
-            {"task": "Open example", "target_url": "https://example.com", "allowed_domains": "example.com"},
-        )
+    result, _ = execute_authorized_agent_tool(
+        agent["agentId"],
+        "",
+        "computer_use_task_tool",
+        {"task": "Open example", "target_url": "https://example.com", "allowed_domains": "example.com"},
+    )
 
     assert "ToolPolicy.allowedTools" not in result
+    assert "[工具授权]" not in result
 
 
 def test_computer_use_session_tool_no_longer_requires_explicit_tool_policy(computer_use_tmp, monkeypatch):
@@ -957,13 +959,15 @@ def test_computer_use_session_tool_no_longer_requires_explicit_tool_policy(compu
         llm_bindings={"dialogue": {"modelId": "model-primary"}},
     )
 
-    with agent_directory_service.active_agent_runtime(agent["agentId"]):
-        result, _ = ToolExecutor().execute(
-            "computer_use_session_tool",
-            {"session_id": "cu-test", "action": "get"},
-        )
+    result, _ = execute_authorized_agent_tool(
+        agent["agentId"],
+        "",
+        "computer_use_session_tool",
+        {"session_id": "cu-test", "action": "get"},
+    )
 
     assert "ToolPolicy.allowedTools" not in result
+    assert "[工具授权]" not in result
 
 
 def test_tool_registry_marks_computer_use_as_high_risk_without_tool_policy_gate(tmp_path, monkeypatch):
