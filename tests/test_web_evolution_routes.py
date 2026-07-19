@@ -2829,6 +2829,9 @@ def test_evolution_routes_expose_supervised_policy_observing_proposal(tmp_path, 
     detail_response = client.get("/api/evolution/proposals/observing_policy_run")
 
     assert runs_payload[0]["proposalStatus"] == "observing"
+    assert runs_payload[0]["status"] == "observing"
+    assert runs_payload[0]["runSemantics"]["runStatusLabel"] == "评测完成 · 观察池"
+    assert "等待" not in runs_payload[0]["runSemantics"]["runStatusLabel"]
     assert runs_payload[0]["runtimeEffect"] == "not_applied"
     assert runs_payload[0]["agentConsumption"] == "advisory"
     assert runs_payload[0]["sourceProposalPath"] == str(proposal_path)
