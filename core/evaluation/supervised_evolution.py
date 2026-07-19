@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
+from core.evaluation.supervised_evidence_integrity import assert_supervised_evidence_write_allowed
 from core.infrastructure import developer_sandbox
 from core.infrastructure.workspace_manager import get_workspace
 from core.evaluation.dataset_environment import preflight_environment_contract
@@ -364,6 +365,7 @@ def resolve_supervised_bundle_path(bundle_name: str = DEFAULT_BUNDLE_NAME, *, pr
 
 def _ensure_supervised_dirs(project_root: Path) -> Dict[str, Path]:
     base = developer_sandbox.seeded_sandbox_workspace_path(project_root, "supervised_evolution")
+    assert_supervised_evidence_write_allowed(project_root=project_root, evidence_root=base)
     dirs = {
         "base": base,
         "sessions": base / "sessions",
