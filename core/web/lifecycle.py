@@ -45,8 +45,13 @@ async def web_workbench_lifespan(_: FastAPI):
 
     await asyncio.to_thread(reconcile_cli_agent_terminal_states_on_startup, reason="backend_startup")
     startup_cache_prewarm_task = asyncio.create_task(prewarm_ui_caches_on_startup())
+    from .services.session_service import recover_wakeable_agent_inbox_messages_on_startup
 
-    def consume_startup_cache_prewarm_result(task: asyncio.Task[None]) -> None:
+    startup_agent_inbox_recovery_task = asyncio.create_task(
+        asyncio.to_thread(recover_wakeable_agent_inbox_messages_on_startup)
+    )
+
+    def consume_startup_task_result(task: asyncio.Task[Any], *, message: str) -> None:
         try:
             task.result()
         except asyncio.CancelledError:
@@ -54,19 +59,25 @@ async def web_workbench_lifespan(_: FastAPI):
         except Exception as exc:
             loop.call_exception_handler(
                 {
-                    "message": "UI cache prewarm failed during startup.",
+                    "message": message,
                     "exception": exc,
                 }
             )
 
-    startup_cache_prewarm_task.add_done_callback(consume_startup_cache_prewarm_result)
+    startup_cache_prewarm_task.add_done_callback(
+        lambda task: consume_startup_task_result(task, message="UI cache prewarm failed during startup.")
+    )
+    startup_agent_inbox_recovery_task.add_done_callback(
+        lambda task: consume_startup_task_result(task, message="Agent inbox recovery failed during startup.")
+    )
     try:
         yield
     finally:
-        if not startup_cache_prewarm_task.done():
-            startup_cache_prewarm_task.cancel()
-            with suppress(asyncio.CancelledError):
-                await startup_cache_prewarm_task
+        for startup_task in (startup_cache_prewarm_task, startup_agent_inbox_recovery_task):
+            if not startup_task.done():
+                startup_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await startup_task
         from .services.cli_agent_terminal_service import shutdown_cli_agent_terminal_sessions
 
         await asyncio.to_thread(shutdown_cli_agent_terminal_sessions)

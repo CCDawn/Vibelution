@@ -6640,6 +6640,57 @@ def wake_agent_for_inbox_message(message: dict[str, Any]) -> dict[str, Any]:
             _AGENT_INBOX_WAKE_IN_FLIGHT_MESSAGE_IDS.discard(message_id)
 
 
+def recover_wakeable_agent_inbox_messages_on_startup() -> dict[str, Any]:
+    """Attempt the oldest persistent wake-eligible inbox message for each active Agent."""
+
+    started_at = _perf_counter()
+    summary: dict[str, Any] = {
+        "trigger": "backend_startup",
+        "scannedAgentCount": 0,
+        "eligibleAgentCount": 0,
+        "startedCount": 0,
+        "skippedCount": 0,
+        "errorCount": 0,
+        "wakeStatusCounts": {},
+        "errorTypeCounts": {},
+    }
+    try:
+        # A restarted process owns no in-memory turns, so repair stale persisted
+        # turn markers before submitting recovered inbox work to the scheduler.
+        _load_conversations()
+        agents = agent_directory_service.list_agents(include_archived=False, detail="summary")
+        summary["scannedAgentCount"] = len(agents)
+        for agent in agents:
+            agent_id = str(agent.get("agentId") or "").strip()
+            if not agent_id:
+                continue
+            try:
+                message = next_wakeable_agent_inbox_message_for_agent(agent_id)
+                if not message:
+                    continue
+                summary["eligibleAgentCount"] += 1
+                delivery = wake_agent_for_inbox_message(message)
+                wake_status = str(delivery.get("wakeStatus") or "unknown").strip() or "unknown"
+                status_counts = summary["wakeStatusCounts"]
+                status_counts[wake_status] = int(status_counts.get(wake_status) or 0) + 1
+                if wake_status == "started":
+                    summary["startedCount"] += 1
+                else:
+                    summary["skippedCount"] += 1
+            except Exception as exc:
+                summary["errorCount"] += 1
+                error_type = type(exc).__name__
+                error_counts = summary["errorTypeCounts"]
+                if len(error_counts) < 8 or error_type in error_counts:
+                    error_counts[error_type] = int(error_counts.get(error_type) or 0) + 1
+    except Exception as exc:
+        summary["errorCount"] += 1
+        summary["errorTypeCounts"][type(exc).__name__] = 1
+    summary["durationMs"] = _elapsed_ms(started_at)
+    _record_agent_inbox_startup_recovery_event(summary)
+    return summary
+
+
 def edit_and_resubmit_session_message(
     session_id: str,
     message_id: str,
@@ -16564,6 +16615,23 @@ def _record_agent_inbox_idle_drain_event(
                 "reason": str(delivery.get("reason") or "").strip(),
                 "trigger": "session_release",
             },
+            lifecycle=True,
+        )
+    except Exception:
+        return
+
+
+def _record_agent_inbox_startup_recovery_event(summary: dict[str, Any]) -> None:
+    error_count = max(0, int(summary.get("errorCount") or 0))
+    try:
+        record_runtime_scene_event(
+            "agent_inbox",
+            "startup_recovery",
+            "agent_inbox.startup_recovery_completed",
+            message="Persistent wake-eligible Agent inbox messages were scanned after backend startup.",
+            level="warning" if error_count else "info",
+            outcome="degraded" if error_count else "completed",
+            fields=dict(summary),
             lifecycle=True,
         )
     except Exception:
