@@ -126,3 +126,7 @@ export function formatTokenSpeedValue(tokensPerSecond: number | null | undefined
   }
   return tokensPerSecond < 1 ? "<1 t/s" : `${Math.round(tokensPerSecond)} t/s`;
 }
+
+export function chatStreamPerformanceNowMs() {
+  return typeof performance === "undefined" ? Date.now() : performance.now();
+}
