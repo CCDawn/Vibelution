@@ -36,6 +36,8 @@ class ExperimentConfig:
     candidate_mechanism: str = INFERENCE_LATENT_CORRECTION
     candidate_masked_loss_weight: float = 4.0
     candidate_loss_mask_mode: str = ALIGNED_LOSS_MASK
+    candidate_loss_mask_modes: tuple[str, ...] = ()
+    evaluation_mask_sizes: tuple[int, ...] = ()
     minimum_mse_improvement: float = 0.001
     maximum_latency_multiplier: float = 5.0
     maximum_global_mse_regression: float = 0.0005
@@ -174,6 +176,7 @@ def train(
     config: ExperimentConfig,
     *,
     masked_loss_weight: float = 0.0,
+    loss_mask_mode: str | None = None,
 ) -> list[float]:
     torch, nn, *_ = _torch_modules()
     optimizer = torch.optim.Adam(model.parameters(), lr=config.learning_rate)
@@ -196,7 +199,7 @@ def train(
             if masked_loss_weight > 0:
                 weight_mask = loss_weight_mask(
                     observed_mask,
-                    mode=config.candidate_loss_mask_mode,
+                    mode=loss_mask_mode or config.candidate_loss_mask_mode,
                     mask_size=config.mask_size,
                     generator=loss_mask_generator,
                     torch_module=torch,
@@ -213,8 +216,16 @@ def train(
     return epoch_losses
 
 
-def _evaluate_models(baseline_model, candidate_model, test_loader, config: ExperimentConfig) -> dict[str, Any]:
+def _evaluate_models(
+    baseline_model,
+    candidate_model,
+    test_loader,
+    config: ExperimentConfig,
+    *,
+    evaluation_mask_size: int | None = None,
+) -> dict[str, Any]:
     torch, *_ = _torch_modules()
+    mask_size = evaluation_mask_size or config.mask_size
     corruption_generator = torch.Generator().manual_seed(config.seed + 20)
     totals = {key: 0.0 for key in ("baseline", "variant", "baseline_masked", "variant_masked")}
     sample_count = 0
@@ -224,7 +235,7 @@ def _evaluate_models(baseline_model, candidate_model, test_loader, config: Exper
     baseline_model.eval()
     candidate_model.eval()
     for clean, _ in test_loader:
-        corrupted, observed_mask = structured_mask(clean, generator=corruption_generator, mask_size=config.mask_size)
+        corrupted, observed_mask = structured_mask(clean, generator=corruption_generator, mask_size=mask_size)
         missing_mask = 1.0 - observed_mask
         start = time.perf_counter()
         with torch.no_grad():
@@ -263,6 +274,33 @@ def _evaluate_models(baseline_model, candidate_model, test_loader, config: Exper
         },
         "test_samples": sample_count,
     }
+
+
+def evaluate_candidate_across_mask_sizes(
+    baseline_model,
+    candidate_model,
+    test_loader,
+    config: ExperimentConfig,
+    *,
+    evaluation_mask_sizes: list[int] | tuple[int, ...],
+) -> list[dict[str, Any]]:
+    matrix: list[dict[str, Any]] = []
+    for mask_size in evaluation_mask_sizes:
+        metrics = _evaluate_models(
+            baseline_model,
+            candidate_model,
+            test_loader,
+            config,
+            evaluation_mask_size=int(mask_size),
+        )
+        matrix.append(
+            {
+                "maskSize": int(mask_size),
+                "metrics": metrics,
+                "decision": classify_decision(metrics, config),
+            }
+        )
+    return matrix
 
 
 def evaluate(model, test_loader, config: ExperimentConfig) -> dict[str, Any]:
@@ -389,6 +427,9 @@ def classify_decision(metrics: dict[str, Any], config: ExperimentConfig) -> dict
 
 def run(config: ExperimentConfig, *, data_root: Path, output_dir: Path) -> dict[str, Any]:
     torch, *_ = _torch_modules()
+    mask_sizes = (config.mask_size, *config.evaluation_mask_sizes)
+    if any(mask_size < 1 or mask_size > 28 for mask_size in mask_sizes):
+        raise ValueError("mask sizes must be between 1 and 28")
     set_determinism(config.seed)
     train_loader, test_loader = load_data(config, data_root)
     baseline_model = build_model(config.latent_dim)
@@ -396,26 +437,96 @@ def run(config: ExperimentConfig, *, data_root: Path, output_dir: Path) -> dict[
         name: tensor.detach().clone()
         for name, tensor in baseline_model.state_dict().items()
     }
-    candidate_model = baseline_model
     started = time.perf_counter()
     baseline_epoch_losses = train(baseline_model, train_loader, config)
     baseline_training_seconds = time.perf_counter() - started
+    candidate_model = baseline_model
     candidate_epoch_losses: list[float] = []
     candidate_training_seconds = 0.0
+    candidate_results: list[dict[str, Any]] = []
+    comparison_matrix: list[dict[str, Any]] = []
     shared_weights = True
+    primary_candidate_checkpoint_path = output_dir / "fashion_mnist_candidate.pt"
+    primary_candidate_checkpoint_hash = ""
+    primary_candidate_model_state_hash = ""
     if config.candidate_mechanism == MASKED_PREDICTION_ERROR_TRAINING:
-        candidate_model = build_model(config.latent_dim)
-        candidate_model.load_state_dict(initial_state)
-        candidate_train_loader, _ = load_data(config, data_root)
-        started = time.perf_counter()
-        candidate_epoch_losses = train(
-            candidate_model,
-            candidate_train_loader,
-            config,
-            masked_loss_weight=config.candidate_masked_loss_weight,
+        candidate_modes = tuple(config.candidate_loss_mask_modes) or (config.candidate_loss_mask_mode,)
+        evaluation_mask_sizes = tuple(config.evaluation_mask_sizes) or (config.mask_size,)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        for mode_index, loss_mask_mode in enumerate(candidate_modes):
+            current_candidate = build_model(config.latent_dim)
+            current_candidate.load_state_dict(initial_state)
+            candidate_train_loader, _ = load_data(config, data_root)
+            started = time.perf_counter()
+            current_epoch_losses = train(
+                current_candidate,
+                candidate_train_loader,
+                config,
+                masked_loss_weight=config.candidate_masked_loss_weight,
+                loss_mask_mode=loss_mask_mode,
+            )
+            current_training_seconds = time.perf_counter() - started
+            evaluation_matrix = evaluate_candidate_across_mask_sizes(
+                baseline_model,
+                current_candidate,
+                test_loader,
+                config,
+                evaluation_mask_sizes=evaluation_mask_sizes,
+            )
+            checkpoint_name = (
+                "fashion_mnist_candidate.pt"
+                if len(candidate_modes) == 1
+                else f"fashion_mnist_candidate_{loss_mask_mode}.pt"
+            )
+            current_checkpoint_path = output_dir / checkpoint_name
+            torch.save(
+                {
+                    "model_state": current_candidate.state_dict(),
+                    "config": asdict(config),
+                    "candidateLossMaskMode": loss_mask_mode,
+                },
+                current_checkpoint_path,
+            )
+            current_checkpoint_hash = _sha256_file(current_checkpoint_path)
+            current_model_state_hash = _state_dict_hash(current_candidate)
+            candidate_result = {
+                "candidateLossMaskMode": loss_mask_mode,
+                "training": {
+                    "epochLosses": current_epoch_losses,
+                    "seconds": round(current_training_seconds, 6),
+                },
+                "checkpoint": {
+                    "path": str(current_checkpoint_path),
+                    "sha256": current_checkpoint_hash,
+                    "modelStateSha256": current_model_state_hash,
+                },
+                "evaluationMatrix": evaluation_matrix,
+            }
+            candidate_results.append(candidate_result)
+            comparison_matrix.extend(
+                {
+                    "candidateLossMaskMode": loss_mask_mode,
+                    **entry,
+                }
+                for entry in evaluation_matrix
+            )
+            if mode_index == 0:
+                candidate_model = current_candidate
+                candidate_epoch_losses = current_epoch_losses
+                candidate_training_seconds = current_training_seconds
+                primary_candidate_checkpoint_path = current_checkpoint_path
+                primary_candidate_checkpoint_hash = current_checkpoint_hash
+                primary_candidate_model_state_hash = current_model_state_hash
+        primary_entry = next(
+            (
+                entry
+                for entry in comparison_matrix
+                if entry["candidateLossMaskMode"] == candidate_modes[0]
+                and entry["maskSize"] == config.mask_size
+            ),
+            comparison_matrix[0],
         )
-        candidate_training_seconds = time.perf_counter() - started
-        metrics = _evaluate_models(baseline_model, candidate_model, test_loader, config)
+        metrics = primary_entry["metrics"]
         shared_weights = False
     elif config.candidate_mechanism == INFERENCE_LATENT_CORRECTION:
         metrics = evaluate(baseline_model, test_loader, config)
@@ -425,17 +536,18 @@ def run(config: ExperimentConfig, *, data_root: Path, output_dir: Path) -> dict[
     output_dir.mkdir(parents=True, exist_ok=True)
     checkpoint_path = output_dir / "fashion_mnist_autoencoder.pt"
     torch.save({"model_state": baseline_model.state_dict(), "config": asdict(config)}, checkpoint_path)
-    candidate_checkpoint_path = output_dir / "fashion_mnist_candidate.pt"
-    if candidate_model is not baseline_model:
+    candidate_checkpoint_path = primary_candidate_checkpoint_path
+    if candidate_model is not baseline_model and not candidate_checkpoint_path.is_file():
         torch.save({"model_state": candidate_model.state_dict(), "config": asdict(config)}, candidate_checkpoint_path)
     checkpoint_hash = _sha256_file(checkpoint_path)
     candidate_checkpoint_hash = (
-        _sha256_file(candidate_checkpoint_path)
+        primary_candidate_checkpoint_hash or _sha256_file(candidate_checkpoint_path)
         if candidate_checkpoint_path.is_file()
         else checkpoint_hash
     )
     model_state_hash = _state_dict_hash(baseline_model)
-    candidate_model_state_hash = _state_dict_hash(candidate_model)
+    candidate_model_state_hash = primary_candidate_model_state_hash or _state_dict_hash(candidate_model)
+    full_official_dataset = config.train_samples == 60000 and config.test_samples == 10000
     result = {
         "schemaVersion": 2,
         "status": "completed",
@@ -444,7 +556,8 @@ def run(config: ExperimentConfig, *, data_root: Path, output_dir: Path) -> dict[
             "source": "torchvision.datasets.FashionMNIST",
             "trainSamples": config.train_samples,
             "testSamples": config.test_samples,
-            "fixedSubset": True,
+            "fixedSubset": not full_official_dataset,
+            "fullOfficialDataset": full_official_dataset,
             "structuredMaskSize": config.mask_size,
         },
         "config": asdict(config),
@@ -462,6 +575,7 @@ def run(config: ExperimentConfig, *, data_root: Path, output_dir: Path) -> dict[
             "baselineSeconds": round(baseline_training_seconds, 6),
             "candidateSeconds": round(candidate_training_seconds, 6),
             "matchedEpochAndBatchBudget": True,
+            "candidateRuns": candidate_results,
         },
         "metrics": metrics,
         "checkpoint": {
@@ -473,9 +587,11 @@ def run(config: ExperimentConfig, *, data_root: Path, output_dir: Path) -> dict[
             "candidateModelStateSha256": candidate_model_state_hash,
         },
         "decision": decision,
+        "comparisonMatrix": comparison_matrix,
+        "sharedBaseline": bool(comparison_matrix),
         "boundaries": [
             "single_seed_smoke_only",
-            "fixed_subset_not_full_dataset",
+            "full_official_dataset" if full_official_dataset else "fixed_subset_not_full_dataset",
             "does_not_validate_neural_realism",
             "full_run_requires_multi_seed_review",
         ],
@@ -487,6 +603,14 @@ def run(config: ExperimentConfig, *, data_root: Path, output_dir: Path) -> dict[
             "metrics": stable_metric_payload(result["metrics"]),
             "modelStateSha256": model_state_hash,
             "candidateModelStateSha256": candidate_model_state_hash,
+            "comparisonMatrix": [
+                {
+                    "candidateLossMaskMode": entry["candidateLossMaskMode"],
+                    "maskSize": entry["maskSize"],
+                    "metrics": stable_metric_payload(entry["metrics"]),
+                }
+                for entry in comparison_matrix
+            ],
         },
         ensure_ascii=False,
         sort_keys=True,
@@ -558,6 +682,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--batch-size", type=int, default=64)
     parser.add_argument("--correction-steps", type=int, default=3)
     parser.add_argument("--correction-rate", type=float, default=0.8)
+    parser.add_argument("--mask-size", type=int, default=8)
     parser.add_argument(
         "--candidate-mechanism",
         choices=(INFERENCE_LATENT_CORRECTION, MASKED_PREDICTION_ERROR_TRAINING),
@@ -573,6 +698,17 @@ def parse_args() -> argparse.Namespace:
         ),
         default=ALIGNED_LOSS_MASK,
     )
+    parser.add_argument(
+        "--candidate-loss-mask-modes",
+        nargs="+",
+        choices=(
+            ALIGNED_LOSS_MASK,
+            SPATIALLY_SHIFTED_LOSS_MASK,
+            DETERMINISTICALLY_PERMUTED_LOSS_MASK,
+        ),
+        default=(),
+    )
+    parser.add_argument("--evaluation-mask-sizes", nargs="+", type=int, default=())
     parser.add_argument("--minimum-mse-improvement", type=float, default=0.001)
     parser.add_argument("--maximum-latency-multiplier", type=float, default=5.0)
     parser.add_argument("--maximum-global-mse-regression", type=float, default=0.0005)
@@ -595,9 +731,12 @@ def main() -> None:
         batch_size=args.batch_size,
         correction_steps=args.correction_steps,
         correction_rate=args.correction_rate,
+        mask_size=args.mask_size,
         candidate_mechanism=args.candidate_mechanism,
         candidate_masked_loss_weight=args.candidate_masked_loss_weight,
         candidate_loss_mask_mode=args.candidate_loss_mask_mode,
+        candidate_loss_mask_modes=tuple(args.candidate_loss_mask_modes),
+        evaluation_mask_sizes=tuple(args.evaluation_mask_sizes),
         minimum_mse_improvement=args.minimum_mse_improvement,
         maximum_latency_multiplier=args.maximum_latency_multiplier,
         maximum_global_mse_regression=args.maximum_global_mse_regression,

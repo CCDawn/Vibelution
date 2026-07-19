@@ -82,6 +82,40 @@ def test_stable_metric_payload_excludes_runtime_timing() -> None:
     assert "latency_multiplier" not in stable["delta"]
 
 
+def test_evaluate_candidate_matrix_reuses_trained_models_across_mask_sizes(monkeypatch) -> None:
+    module = _load_experiment_module()
+    baseline_model = object()
+    candidate_model = object()
+    test_loader = object()
+    config = module.ExperimentConfig(mask_size=8)
+    calls: list[tuple[object, object, object, int]] = []
+
+    def fake_evaluate(baseline, candidate, loader, current_config, *, evaluation_mask_size=None):
+        calls.append((baseline, candidate, loader, evaluation_mask_size))
+        return {
+            "delta": {
+                "mse_improvement": evaluation_mask_size / 10000,
+                "masked_mse_improvement": evaluation_mask_size / 1000,
+                "latency_multiplier": 1.0,
+            }
+        }
+
+    monkeypatch.setattr(module, "_evaluate_models", fake_evaluate)
+
+    matrix = module.evaluate_candidate_across_mask_sizes(
+        baseline_model,
+        candidate_model,
+        test_loader,
+        config,
+        evaluation_mask_sizes=[4, 8, 12],
+    )
+
+    assert [entry["maskSize"] for entry in matrix] == [4, 8, 12]
+    assert [entry["metrics"]["delta"]["masked_mse_improvement"] for entry in matrix] == [0.004, 0.008, 0.012]
+    assert all(call[:3] == (baseline_model, candidate_model, test_loader) for call in calls)
+    assert [call[3] for call in calls] == [4, 8, 12]
+
+
 def test_fashion_mnist_experiment_self_check() -> None:
     if not EXPERIMENT_PYTHON.exists():
         pytest.skip("isolated Challenge Cup experiment environment is not installed")
