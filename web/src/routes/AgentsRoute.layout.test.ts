@@ -813,6 +813,23 @@ describe("AgentsRoute layout contract", () => {
     expect(createPanelStyles).toHaveProperty("quickFill");
     expect(createPanelStyles).toHaveProperty("wizardSteps");
     expect(createPanelStyles).toHaveProperty("createSummary");
+    expect(workspaceLayoutPanelSource).toContain("if (createOpen)");
+    expect(workspaceLayoutPanelSource).toContain("styles.createWorkspace");
+    expect(workspaceLayoutPanelSource).toContain("<AgentCreatePanel");
+    expect(listWorkspacePanelSource).not.toContain("AgentCreatePanel");
+    expect(listWorkspacePanelSource).not.toContain("createOpen");
+    expect(workspaceLayoutStyles.workspaceCreating).toContain("[grid-template-columns:minmax(0,_1fr)]");
+    expect(workspaceLayoutStyles.workspaceCreating).toContain("[overflow:auto]");
+    expect(workspaceLayoutStyles.createWorkspace).toContain("[max-width:1180px]");
+    expect(createPanelStyles.createAgentPanel).not.toContain("[overflow:auto]");
+    expect(createPanelStyles.createToolBundleGrid).not.toContain("[max-height:184px]");
+    expect(createPanelStyles.createToolBundleGrid).not.toContain("[overflow:auto]");
+    expect(createPanelStyles.finalStepLayout).toContain("[grid-template-columns:minmax(0,_1.7fr)_minmax(260px,_0.8fr)]");
+    expect(createPanelStyles.finalStepLayout).toContain("max-[980px]:[grid-template-columns:1fr]");
+    expect(createPanelStyles.createSummary).toContain("[position:sticky]");
+    expect(createPanelStyles.createSummary).toContain("max-[980px]:[position:static]");
+    expect(createPanelStyles.editorActions).toContain("[position:sticky]");
+    expect(createPanelStyles.editorActions).toContain("[bottom:0]");
   });
 
   it("keeps permanent Agent deletion behind the archived-state safety gate", () => {
@@ -898,14 +915,12 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("creationToolBundleIds: sortedIds(draft.selectedToolBundleIds)");
     expect(routeSource).toContain("toolPolicy: {");
     expect(workspaceLayoutPanelSource).toContain("styles.workspaceCreating");
-    expect(listWorkspacePanelSource).toContain("styles.agentPanelCreating");
     expect(routeSource).not.toContain("toolPolicy: workSession ? {} : {");
     expect(styles.createToolBundleGrid).toBeTruthy();
     expect(styles.createToolBundleOption).toBeTruthy();
     expect(styles.createToolBundleSelected).toBeTruthy();
     expect(styles.createToolBundlePreview).toBeTruthy();
     expect(workspaceLayoutStyles.workspaceCreating).toBeTruthy();
-    expect(listWorkspaceStyles.agentPanelCreating).toBeTruthy();
   });
 
   it("keeps disabled tool-query fallbacks referentially stable so Agent navigation can settle", () => {
@@ -1551,7 +1566,7 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("method: \"POST\"");
     expect(routeSource).toContain("createAgentMutation");
     expect(routeSource).toContain("copy.createAgent");
-    expect(listWorkspacePanelSource).toContain("<AgentCreatePanel");
+    expect(workspaceLayoutPanelSource).toContain("<AgentCreatePanel");
     expect(routeSource).toContain("onCreate: createAgent");
     expect(createPanelSource).toContain("styles.createAgentPanel");
     expect(createPanelSource).toContain("styles.createAgentGrid");
