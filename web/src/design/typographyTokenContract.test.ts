@@ -10,7 +10,7 @@ const FORBIDDEN_FONT_AS_COLOR =
   /(?<!\[font-size:)(?<!\[length:)(?<!font-size:)(?<!length:)!?(?:text-\[var\(--vui-font-(?:xs|sm|md|title|chat)\)\])/g;
 
 /** claim-1ded3aed8d30 owns ConversationView.styles until released. */
-const DEFERRED_BASENAMES = new Set(["ConversationView.styles.ts"]);
+const DEFERRED_BASENAMES = new Set<string>([]);
 
 const SRC_ROOT = resolve(import.meta.dirname, "..");
 
@@ -30,7 +30,7 @@ function collectSourceFiles(entry: string, out: string[] = []): string[] {
 }
 
 describe("typography token contract (Path B wave 9 / 9b)", () => {
-  it("keeps production sources free of text-[var(--vui-font-*)] color traps (except deferred ConversationView.styles)", () => {
+  it("keeps production sources free of text-[var(--vui-font-*)] color traps (including ConversationView.styles)", () => {
     const files = collectSourceFiles(SRC_ROOT);
     const offenders: string[] = [];
 

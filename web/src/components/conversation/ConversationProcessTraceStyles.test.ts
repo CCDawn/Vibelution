@@ -15,7 +15,7 @@ describe("conversation process trace styles", () => {
     expect(styles.timelineCellTitleRow).toContain("inline-flex");
     expect(styles.timelineCellTitleRow).toContain("items-baseline");
     expect(styles.timelineCellTitle).toContain("[overflow-wrap:anywhere]");
-    expect(styles.timelineCellTitle).toContain("text-[var(--vui-font-sm)]");
+    expect(styles.timelineCellTitle).toContain("[font-size:var(--vui-font-sm)]");
     expect(styles.timelineCellTitle).toContain("font-semibold");
     expect(styles.timelineCellMeta).toContain("inline-flex");
     expect(styles.timelineCellMeta).toContain("align-baseline");
@@ -23,7 +23,7 @@ describe("conversation process trace styles", () => {
     expect(styles.timelineCellMeta).not.toContain("max-w-[min(30ch,34vw)]");
     expect(styles.timelineCellMeta).not.toContain("justify-self-end");
     expect(styles.timelineCellMeta).not.toContain("text-right");
-    expect(styles.timelineCellMeta).toContain("text-[var(--vui-font-xs)]");
+    expect(styles.timelineCellMeta).toContain("[font-size:var(--vui-font-xs)]");
     expect(styles.timelineCellMeta).toContain("text-[var(--fg-tertiary)]");
     expect(styles.timelineThoughtHeader).toContain("grid-cols-[20px_minmax(0,1fr)_24px]");
     expect(styles.timelineThoughtHeader).not.toContain("grid-cols-[20px_fit-content(52rem)_24px_minmax(0,1fr)]");
@@ -37,13 +37,13 @@ describe("conversation process trace styles", () => {
     expect(styles.timelineCommandRow).toContain("grid-cols-[20px_minmax(0,1fr)]");
     expect(styles.timelineCommandRow).not.toContain("_max-content");
     expect(styles.timelineCommandRow).toContain("py-2");
-    expect(styles.timelineCommandRow).toContain("text-[var(--vui-font-sm)]");
+    expect(styles.timelineCommandRow).toContain("[font-size:var(--vui-font-sm)]");
     expect(styles.timelineCommandRow).toContain("border-b");
     expect(styles.timelineCommandRow).not.toContain("overflow-auto");
     expect(styles.timelineCommandRow).not.toContain("bg-[var(--vui-surface-row)]");
     expect(styles.timelineCommandError).toContain("col-start-2");
     expect(styles.timelineCommandError).not.toContain("col-span-2");
-    expect(styles.timelineCommandError).toContain("text-[var(--vui-font-sm)]");
+    expect(styles.timelineCommandError).toContain("[font-size:var(--vui-font-sm)]");
   });
 
   it("keeps normal completed process rows neutral and reserves red for failures", () => {
@@ -74,10 +74,10 @@ describe("conversation process trace styles", () => {
     expect(styles.surfaceCompact).not.toContain("backdrop-blur");
 
     expect(styles.timelineCellPreview).toContain("line-clamp-2");
-    expect(styles.timelineCellPreview).toContain("text-[var(--vui-font-sm)]");
+    expect(styles.timelineCellPreview).toContain("[font-size:var(--vui-font-sm)]");
     expect(styles.timelineCellPreview).toContain("text-[var(--fg-secondary)]");
     expect(styles.timelineCellPreview).not.toContain("text-[var(--fg-tertiary)]");
-    expect(styles.timelineCellPreview).not.toContain("text-[var(--vui-font-xs)]");
+    expect(styles.timelineCellPreview).not.toContain("[font-size:var(--vui-font-xs)]");
   });
 
   it("gives final answers stronger hierarchy than commentary and completed tools", () => {
