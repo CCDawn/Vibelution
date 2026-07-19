@@ -23,6 +23,7 @@ from core.evaluation.supervised_evolution import (
     supervised_mental_model_enabled_for_mode,
 )
 from core.infrastructure import developer_sandbox, git_process
+from core.llm.errors import classify_exception
 from core.runtime_manager import work_run_store
 from core.runtime_manager.work_run_leases import (
     EVALUATION_LEASE,
@@ -1295,6 +1296,19 @@ def _baseline_has_retryable_provider_failure(baseline: dict[str, Any]) -> bool:
         category = str(failure.get("category") or "").strip()
         if bool(failure.get("retryable")) and category == "provider_transport_error":
             return True
+        if str(case.get("status") or "").strip().lower() != "failed":
+            continue
+        reason = str(case.get("reason") or failure.get("message") or "").strip()
+        if not reason:
+            continue
+        normalized = classify_exception(RuntimeError(reason))
+        if normalized.retryable and normalized.category in {
+            "network_error",
+            "rate_limit",
+            "server_error",
+            "timeout",
+        }:
+            return True
     return False
 
 
@@ -1512,6 +1526,9 @@ def _baseline_failure_reason(baseline: dict[str, Any]) -> str:
         message = str(failure.get("message") or "").strip()
         if message:
             return message
+        reason = str(case.get("reason") or "").strip()
+        if reason:
+            return reason
     return str(baseline.get("summary") or "baseline provider transport failure")
 
 

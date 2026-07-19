@@ -137,6 +137,31 @@ def _retryable_provider_failure_evaluator(_: Path, bundle_name: str, role: str, 
     }
 
 
+def _retryable_provider_reason_evaluator(_: Path, bundle_name: str, role: str, __: dict) -> dict:
+    assert role == "baseline"
+    return {
+        "role": role,
+        "status": "failed",
+        "score": 0.0,
+        "successes": 0,
+        "total": 1,
+        "failures": 1,
+        "bundleName": bundle_name,
+        "summary": "baseline score 0.0",
+        "cases": [
+            {
+                "caseId": "provider-down",
+                "status": "failed",
+                "reason": (
+                    "server_error: litellm.ServiceUnavailableError: "
+                    'OpenAIException - {"error":{"message":"Service temporarily unavailable","type":"api_error"}}'
+                ),
+                "llmFailure": {"detected": False},
+            }
+        ],
+    }
+
+
 def _make_candidate_repo(tmp_path: Path, project_root: Path, *, changed_path: str = "agent.py") -> Path:
     candidate = tmp_path / f"candidate-{changed_path.replace('/', '-')}"
     _init_repo(candidate)
@@ -515,6 +540,37 @@ def test_supervised_worktree_flow_stops_when_baseline_provider_transport_fails(t
     assert snapshot["candidateWorktree"] == {}
     assert snapshot["candidateModification"] == {}
     assert snapshot["candidate"] == {}
+    assert calls == {"modifier": 0, "worktree": 0}
+
+
+def test_supervised_worktree_flow_stops_when_retryable_provider_failure_is_only_in_case_reason(tmp_path):
+    project_root = tmp_path / "project"
+    _write_bundle(project_root)
+    calls = {"modifier": 0, "worktree": 0}
+
+    def modifier(*_: object) -> dict:
+        calls["modifier"] += 1
+        return {"status": "success"}
+
+    def worktree_factory(*_: object) -> dict:
+        calls["worktree"] += 1
+        return {"path": str(tmp_path / "candidate")}
+
+    snapshot = service.run_supervised_worktree_flow(
+        {"sourceKind": "bundle", "bundleName": "closed_loop_v1", "mode": "manual"},
+        project_root=project_root,
+        dependencies=service.WorktreeRunDependencies(
+            evaluation_runner=_retryable_provider_reason_evaluator,
+            candidate_modifier=modifier,
+            worktree_factory=worktree_factory,
+        ),
+    )
+
+    assert snapshot["status"] == "failed"
+    assert snapshot["phase"] == "baseline_unavailable"
+    assert snapshot["outcome"] == "baseline_unavailable"
+    assert snapshot["errorType"] == "ProviderTransportError"
+    assert "Service temporarily unavailable" in snapshot["error"]
     assert calls == {"modifier": 0, "worktree": 0}
 
 
