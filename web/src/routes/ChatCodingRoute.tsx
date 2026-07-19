@@ -70,13 +70,8 @@ import { getPageInstanceId } from "../app/pageInstance";
 import { resolvePollingInterval, usePageVisibility, useStartupWarmup } from "../app/pollingPolicy";
 import type { TranslationKey } from "../i18n/dictionary";
 import { PaneCollapseHandle } from "../components/layout/PaneCollapseHandle";
-import { petAvatarPresetLabel } from "../i18n/petLabels";
 import { useAppI18n } from "../i18n/useAppI18n";
 import { useChatWorkbenchStore } from "../store/chatWorkbenchStore";
-import {
-  clampPercent,
-  formatRelativeTime,
-} from "./chatShellFormat";
 import {
   deriveSessionDetailQueryErrorState,
   deriveSessionListQueryErrorState,
@@ -99,9 +94,6 @@ import {
   resolveLatestEditTarget,
 } from "./chatComposerState";
 import {
-  buildVisiblePanelRows,
-  getPetAvatarPresetKey,
-  getPetAvatarSymbol,
   resolveChatUserDisplayName,
 } from "./chatCompactPanel";
 import {
@@ -203,6 +195,14 @@ import { buildChatCacheDetailViewModel } from "./chat/chatCacheDetailModel";
 import { useChatCacheDetailDialog } from "./chat/useChatCacheDetailDialog";
 import { buildChatTokenStatusViewModel } from "./chat/chatTokenStatusModel";
 import {
+  buildAgentSessionTabs,
+  buildChatActiveSkillViewModel,
+  buildChatMentalStateViewModel,
+  buildChatPetCompanionViewModel,
+  buildChatSessionStateViewModel,
+  type ActiveSkillContract,
+} from "./chat/chatSessionSurfaceModel";
+import {
   chatRoomModeLabel,
   chatRoomPurposeLabel,
   contextCompositionSegmentClass,
@@ -267,20 +267,6 @@ const CliAgentRunTerminalPanel = lazy(() =>
     default: module.CliAgentRunTerminalPanel,
   })),
 );
-
-type ActiveSkillContract = {
-  status?: string;
-  scope?: string;
-  command?: string;
-  args?: string;
-  skillName?: string;
-  skillPath?: string;
-  skillHash?: string;
-  description?: string;
-  keyRules?: string[];
-  activatedAt?: string;
-  staleReason?: string;
-};
 
 type SessionDetailWithActiveSkill = SessionDetail & {
   activeSkillContract?: ActiveSkillContract | null;
@@ -1315,36 +1301,26 @@ export function ChatCodingRoute() {
   const lastContextComposition = detail?.lastContextComposition ?? null;
   const lastCacheComposition = detail?.lastCacheComposition ?? null;
   const lastLlmPayloadTrace = detail?.lastLlmPayloadTrace ?? null;
-  const activeSkillContract = (detail as SessionDetailWithActiveSkill | undefined)?.activeSkillContract ?? null;
-  const activeSkillCommand = String(activeSkillContract?.command ?? "").trim();
-  const activeSkillName = String(activeSkillContract?.skillName ?? activeSkillCommand).trim();
-  const activeSkillStatusValue = String(activeSkillContract?.status ?? "active").trim().toLowerCase();
-  const activeSkillStatus = ["active", "stale", "missing"].includes(activeSkillStatusValue)
-    ? activeSkillStatusValue
-    : "active";
-  const activeSkillStatusLabel = activeSkillStatus === "stale"
-    ? (lang === "zh" ? "已变更" : "stale")
-    : activeSkillStatus === "missing"
-      ? (lang === "zh" ? "缺失" : "missing")
-      : (lang === "zh" ? "生效中" : "active");
+  const {
+    activeSkillCommand,
+    activeSkillName,
+    activeSkillStatus,
+    activeSkillStatusLabel,
+    activeSkillShortHash,
+    activeSkillSummary,
+    activeSkillTitle,
+    hasActiveSkill,
+  } = buildChatActiveSkillViewModel({
+    contract: (detail as SessionDetailWithActiveSkill | undefined)?.activeSkillContract,
+    lang,
+    numberFormatter,
+    formatTime,
+  });
   const activeSkillStatusStyle = activeSkillStatus === "stale"
     ? styles.activeSkillStatus_stale
     : activeSkillStatus === "missing"
       ? styles.activeSkillStatus_missing
       : styles.activeSkillStatus_active;
-  const activeSkillHash = String(activeSkillContract?.skillHash ?? "").trim();
-  const activeSkillShortHash = activeSkillHash ? activeSkillHash.slice(0, 8) : "";
-  const activeSkillRuleCount = Array.isArray(activeSkillContract?.keyRules)
-    ? activeSkillContract.keyRules.length
-    : 0;
-  const activeSkillSummary = activeSkillContract && (activeSkillName || activeSkillCommand)
-    ? [
-      activeSkillCommand ? `/${activeSkillCommand}` : "",
-      activeSkillName,
-      activeSkillStatusLabel,
-      activeSkillShortHash ? `#${activeSkillShortHash}` : "",
-    ].filter(Boolean).join(" · ")
-    : "";
   const projectBusTimeline = projectAgentBusQuery.data;
   const projectBusEvents = projectBusTimeline?.events ?? [];
   const activeGroupRound = latestChatRoomRound(activeGroupRoom);
@@ -1422,37 +1398,6 @@ export function ChatCodingRoute() {
     || !activeGroupRoom
     || !groupRoundRunning
     || stopGroupRoundMutation.isPending;
-  const noActiveDirectSessionTitle = lang === "zh" ? "未选择会话" : "No session selected";
-  const noActiveDirectSessionLine = lang === "zh" ? "选择或新建会话" : "Select or create a chat";
-  const loadingDirectSessionTitle = t("loadingSession");
-  const activeSurfaceTitle = groupPanelActive
-    ? (
-      projectBusActive
-        ? (lang === "zh" ? "助手通知流" : "Agent notice stream")
-        : activeGroupRoom?.title ?? (lang === "zh" ? "群聊加载中" : "Loading group")
-    )
-    : !activeSessionId
-      ? noActiveDirectSessionTitle
-      : detail?.agentDisplayName ?? detail?.title ?? directSessionActiveSummary?.agentDisplayName ?? directSessionActiveSummary?.title ?? loadingDirectSessionTitle;
-  const activeSurfaceStatus = groupPanelActive
-    ? (
-      projectBusActive
-        ? (lang === "zh" ? "全局广播" : "global broadcast")
-        : statusLabel(activeGroupRoom?.status ?? "ready")
-    )
-    : statusLabel(detail?.status || detail?.currentPhase || "idle");
-  const activeSurfaceLine = groupPanelActive
-    ? (
-      projectBusActive
-        ? `${projectBusTimeline?.activeAgentCount ?? 0} ${lang === "zh" ? "位 active Agent · 全局广播/私信投递记录" : "active agents · broadcast/private delivery log"}`
-        : (
-          activeGroupRound?.summary
-          || (lang === "zh"
-            ? `${availableGroupParticipantCount} 位可用助手`
-            : `${availableGroupParticipantCount} available agents · ${activeGroupRoom?.mode ?? "round_robin"} · ${activeGroupRoom?.purpose ?? "discussion"}`)
-        )
-    )
-    : "";
   const sessionDetailErrorState = deriveSessionDetailQueryErrorState(detail, sessionDetailQuery.isError, {
     dataUpdatedAt: sessionDetailQuery.dataUpdatedAt,
     errorUpdatedAt: sessionDetailQuery.errorUpdatedAt,
@@ -1474,20 +1419,6 @@ export function ChatCodingRoute() {
     : "";
   const sessionsErrorMessage = sessionsQuery.isError
     ? describeError(sessionsQuery.error, t("loadFailed"))
-    : "";
-  const activeSkillTitle = activeSkillContract && (activeSkillName || activeSkillCommand)
-    ? [
-      lang === "zh" ? "当前 Skill Contract" : "Active Skill Contract",
-      activeSkillCommand ? `/${activeSkillCommand}` : "",
-      activeSkillName,
-      activeSkillStatusLabel,
-      activeSkillHash ? `hash ${activeSkillHash}` : "",
-      activeSkillContract.scope ? `scope ${activeSkillContract.scope}` : "",
-      activeSkillContract.activatedAt ? `${lang === "zh" ? "激活于" : "activated"} ${formatTime(activeSkillContract.activatedAt)}` : "",
-      activeSkillRuleCount ? `${numberFormatter.format(activeSkillRuleCount)} ${lang === "zh" ? "条规则" : "rules"}` : "",
-      activeSkillContract.staleReason ? `reason ${activeSkillContract.staleReason}` : "",
-      activeSkillContract.skillPath || "",
-    ].filter(Boolean).join(" · ")
     : "";
   const cacheDetailViewModel = useMemo(
     () => buildChatCacheDetailViewModel({
@@ -1778,78 +1709,65 @@ export function ChatCodingRoute() {
   }, [activeAgentImageInputUnsupported, activeImageAttachments.length, activeSessionId]);
 
 
-  const petVitals = useMemo(
-    () => [
-      { key: "hunger", label: t("hunger"), value: clampPercent(pet?.hunger ?? 0) },
-      { key: "energy", label: t("energy"), value: clampPercent(pet?.energy ?? 0) },
-      { key: "health", label: t("health"), value: clampPercent(pet?.health ?? 0) },
-      { key: "love", label: t("love"), value: clampPercent(pet?.love ?? 0) },
-    ],
-    [pet?.energy, pet?.health, pet?.hunger, pet?.love, t],
-  );
-  const petCompanionLine = petQuery.isError
-    ? describeError(petQuery.error, t("loadFailed"))
-    : pet?.inDream
-      ? t("petCompanionDreaming")
-      : (pet?.health ?? 0) < 35
-        ? t("petCompanionLowHealth")
-        : (pet?.hunger ?? 0) < 30
-          ? t("petCompanionLowFuel")
-          : (pet?.energy ?? 0) < 35
-            ? t("petCompanionLowEnergy")
-            : t("petCompanionStable");
-  const petPresetLabel = petAvatarPresetLabel(t, pet?.avatarPreset);
-  const petAvatarPresetKey = getPetAvatarPresetKey(pet?.avatarPreset);
+  const {
+    petVitals,
+    petPresetLabel,
+    petAvatarPresetKey,
+    petAvatarSymbol,
+    petCompactLine,
+    petInteractionLabels,
+  } = buildChatPetCompanionViewModel({
+    pet,
+    petQueryError: petQuery.isError,
+    petQueryErrorMessage: describeError(petQuery.error, t("loadFailed")),
+    petActionPending: petActionMutation.isPending,
+    lang,
+    t,
+    numberFormatter,
+  });
   const petAvatarSkinStyle = styles[`petShowcaseAvatar_${petAvatarPresetKey}`] ?? styles.petShowcaseAvatar_default;
-  const petAvatarSymbol = getPetAvatarSymbol(pet?.avatarPreset, pet?.name);
-  const petInteractionLabels = {
-    group: lang === "zh" ? "宠物互动" : "Pet interactions",
-    pending: petActionMutation.isPending
-      ? lang === "zh" ? "处理中" : "Working"
-      : lang === "zh" ? "即时生效" : "Live",
-    feed: lang === "zh" ? "喂食" : "Feed",
-    talk: lang === "zh" ? "沟通" : "Talk",
-    care: lang === "zh" ? "照看" : "Care",
-    feedTitle: lang === "zh" ? "喂食并刷新宠物状态" : "Feed and refresh pet state",
-    talkTitle: lang === "zh" ? "和宠物沟通并刷新状态" : "Talk and refresh pet state",
-    careTitle: lang === "zh" ? "照看宠物并刷新状态" : "Care and refresh pet state",
-  };
   const compression = runtimeMatchesSelectedSession ? runtime?.contextCompression : undefined;
-  const sessionStateLabel = (() => {
-    if (groupPanelActive) {
-      return activeSurfaceStatus;
-    }
-    const runtimeSessionState = runtimeMatchesSelectedSession ? runtime?.sessionState : "";
-    switch (runtimeSessionState) {
-      case "thinking":
-        return t("sessionStateThinking");
-      case "tooling":
-        return t("sessionStateTooling");
-      case "answering":
-        return t("sessionStateAnswering");
-      default:
-        return statusLabel(runtimeSessionState || detail?.currentPhase || directSessionActiveSummary?.currentPhase || directSessionActiveSummary?.status || "idle");
-    }
-  })();
-  const sessionStateLine = groupPanelActive
-    ? activeSurfaceLine
-    : !activeSessionId
-      ? noActiveDirectSessionLine
-      : runtimeMatchesSelectedSession && runtime?.sessionStateLine
-      ? runtime.sessionStateLine
-      : runtimeMismatchLine || (sessionDetailErrorState.blockingError
-        ? sessionDetailErrorMessage
-        : activeAgentStatusMessage || detail?.taskSummary || directSessionActiveSummary?.taskSummary || (sessionDetailLoadingForActiveSession ? t("loadingSession") : t("preparingShell")));
-  const compactSessionStateLine = detail?.lastTurnError
-    ? [sessionStateLabel, detail.lastTurnError.httpStatus || detail.lastTurnError.reasonCode].filter(Boolean).join(" · ")
-    : sessionStateLine;
-  const activeTask = detail?.activeTask ?? null;
-  const agentDirectSessionMismatch = Boolean(detail?.agentDirectSessionMismatch);
-  const agentPrimaryDirectSessionId = String(detail?.agentPrimaryDirectSessionId ?? "").trim();
-  const sessionBindingMismatchLine = agentDirectSessionMismatch ? t("sessionBindingMismatchLine") : "";
-  const sessionStateValue = String(groupPanelActive ? (projectBusActive ? "ready" : activeGroupRoom?.status ?? "ready") : (runtimeMatchesSelectedSession ? runtime?.sessionState : "") || detail?.currentPhase || directSessionActiveSummary?.currentPhase || directSessionActiveSummary?.status || "idle")
-    .trim()
-    .toLowerCase();
+  const {
+    activeSurfaceTitle,
+    sessionStateLabel,
+    sessionStateLine,
+    compactSessionStateLine,
+    sessionStateValue,
+    agentDirectSessionMismatch,
+    agentPrimaryDirectSessionId,
+    sessionBindingMismatchLine,
+    currentTaskSummary,
+    sessionCompactRows,
+  } = buildChatSessionStateViewModel({
+    lang,
+    t,
+    statusLabel,
+    groupPanelActive,
+    projectBusActive,
+    activeSessionId,
+    activeGroupRoomTitle: activeGroupRoom?.title,
+    activeGroupRoomStatus: activeGroupRoom?.status,
+    activeGroupRoomMode: activeGroupRoom?.mode,
+    activeGroupRoomPurpose: activeGroupRoom?.purpose,
+    activeGroupRoundSummary: activeGroupRound?.summary,
+    availableGroupParticipantCount,
+    projectBusActiveAgentCount: projectBusTimeline?.activeAgentCount ?? 0,
+    detail,
+    directSessionActiveSummary,
+    runtimeMatchesSelectedSession,
+    runtimeSessionState: runtime?.sessionState,
+    runtimeSessionStateLine: runtime?.sessionStateLine,
+    runtimeTaskSummary: runtime?.taskSummary,
+    runtimeDefaultRoute: runtime?.defaultRoute,
+    runtimeMismatchLine,
+    sessionDetailBlockingError: sessionDetailErrorState.blockingError,
+    sessionDetailErrorMessage,
+    sessionDetailLoadingForActiveSession,
+    activeAgentStatusMessage,
+    latestControlSignalLine,
+    latestControlSignalTitle,
+    hasLatestControlSignal: Boolean(latestControlSignal),
+  });
   useEffect(() => {
     const sample = groupPanelActive
       ? null
@@ -1861,40 +1779,6 @@ export function ChatCodingRoute() {
       );
     setTokenSpeedTracker((previous) => updateTokenSpeedTracker(previous, sample));
   }, [activeSessionId, detail?.id, detail?.messages, groupPanelActive, sessionStateValue]);
-  const activeTaskSummary = agentDirectSessionMismatch
-    ? ""
-    : activeTask?.goal
-      || activeTask?.title
-      || activeTask?.nextAction
-      || activeTask?.latestSummary
-      || "";
-  const currentTaskSummary =
-    activeTaskSummary
-    || detail?.taskSummary
-    || directSessionActiveSummary?.taskSummary
-    || (runtimeMatchesSelectedSession ? runtime?.taskSummary : "")
-    || t("preparingShell");
-  const fileContextValue = detail?.defaultFileContext ?? (runtimeMatchesSelectedSession ? runtime?.defaultRoute : undefined) ?? "workspace";
-  const sessionCompactRows = buildVisiblePanelRows(
-    [
-      {
-        label: t("fileContext"),
-        value: fileContextValue,
-        title: fileContextValue,
-      },
-      ...(agentDirectSessionMismatch ? [{
-        label: t("sessionBinding"),
-        value: t("sessionBindingHistorical"),
-        title: `${sessionBindingMismatchLine} ${agentPrimaryDirectSessionId}`,
-      }] : []),
-      ...(latestControlSignal ? [{
-        label: t("nextStateSignalsLabel"),
-        value: latestControlSignalLine,
-        title: latestControlSignalTitle,
-      }] : []),
-    ],
-    [t("preparingShell"), t("loadingSession"), t("loadingContext")],
-  );
   const { tokenStatusMetrics } = useMemo(
     () => buildChatTokenStatusViewModel({
       detail,
@@ -1948,60 +1832,23 @@ export function ChatCodingRoute() {
       tokenSpeedTracker,
     ],
   );
-  const mental = runtime?.mentalState;
-  const mentalCognitiveStateValue = String(mental?.cognitiveState ?? "unknown").trim().toLowerCase() || "unknown";
-  const mentalSourceValue = String(mental?.source ?? "unavailable").trim().toLowerCase() || "unavailable";
-  const mentalCognitiveStateLabel = (() => {
-    switch (mentalCognitiveStateValue) {
-      case "normal":
-        return t("mentalCognitiveState_normal");
-      case "productive":
-        return t("mentalCognitiveState_productive");
-      case "looping":
-        return t("mentalCognitiveState_looping");
-      case "thrashing":
-        return t("mentalCognitiveState_thrashing");
-      case "tunnel_vision":
-        return t("mentalCognitiveState_tunnel_vision");
-      case "disoriented":
-        return t("mentalCognitiveState_disoriented");
-      default:
-        return t("mentalCognitiveState_unknown");
-    }
-  })();
-  const mentalSourceLabel = (() => {
-    switch (mentalSourceValue) {
-      case "state":
-        return t("mentalSourceState");
-      case "diagnosis":
-        return t("mentalSourceDiagnosis");
-      default:
-        return t("mentalSourceUnavailable");
-    }
-  })();
-  const mentalStateLabel = mental?.mood?.trim() || mentalCognitiveStateLabel;
-  const mentalSummary = mental?.feeling?.trim() || mental?.summary || t("mentalStatePending");
-  const mentalWhisper = mental?.whisper?.trim() || t("mentalStatePending");
-  const mentalConfidence =
-    Number.isFinite(mental?.confidence)
-      ? `${Math.round((mental?.confidence ?? 0) * 100)}%`
-      : "--";
-  const mentalRelativeTime = formatRelativeTime(mental?.updatedAt ?? "", Date.now(), locale) || "--";
-  const mentalCompactLine = [
+  const {
+    mental,
+    mentalCognitiveStateValue,
+    mentalCognitiveStateLabel,
     mentalSourceLabel,
-    mentalConfidence !== "--" ? `${t("mentalConfidence")} ${mentalConfidence}` : "",
-    mentalRelativeTime !== "--" ? mentalRelativeTime : "",
-  ]
-    .filter(Boolean)
-    .join(" · ");
-  const petCompactLine = [
-    petCompanionLine,
-    pet?.heartActive ? t("heartActive") : t("heartIdle"),
-    pet?.inDream ? t("dreamSleeping") : t("dreamAwake"),
-    `${t("tokens")} ${numberFormatter.format(pet?.totalTokens ?? 0)}`,
-  ]
-    .filter(Boolean)
-    .join(" · ");
+    mentalStateLabel,
+    mentalSummary,
+    mentalWhisper,
+    mentalConfidence,
+    mentalRelativeTime,
+    mentalCompactLine,
+  } = buildChatMentalStateViewModel({
+    mental: runtime?.mentalState,
+    lang,
+    t,
+    locale,
+  });
 
   const agentsById = useMemo(() => {
     return new Map((agentsQuery.data ?? []).map((agent) => [agent.agentId, agent]));
@@ -2096,20 +1943,13 @@ export function ChatCodingRoute() {
     return allVisibleSessions.filter((session) => !isRepresentedInAgentSessionTabs(session));
   }, [allVisibleSessions]);
 
-  const agentSessionTabs = useMemo(() => {
-    const sessions = selectedAgentSessionsQuery.data?.items ?? [];
-    return sessions
-      .filter((session): session is SessionSummary => Boolean(session))
-      .filter((session, index, items) => items.findIndex((item) => item.id === session.id) === index)
-      .sort((left, right) => {
-        const leftPriority = left.id === agentsById.get(selectedChatAgentId)?.directSessionId ? 0 : isChildSession(left) ? 2 : 1;
-        const rightPriority = right.id === agentsById.get(selectedChatAgentId)?.directSessionId ? 0 : isChildSession(right) ? 2 : 1;
-        if (leftPriority !== rightPriority) {
-          return leftPriority - rightPriority;
-        }
-        return String(right.updatedAt || right.lastActive || "").localeCompare(String(left.updatedAt || left.lastActive || ""));
-      });
-  }, [agentsById, selectedAgentSessionsQuery.data?.items, selectedChatAgentId]);
+  const agentSessionTabs = useMemo(
+    () => buildAgentSessionTabs({
+      sessions: selectedAgentSessionsQuery.data?.items,
+      selectedChatAgentDirectSessionId: agentsById.get(selectedChatAgentId)?.directSessionId,
+    }),
+    [agentsById, selectedAgentSessionsQuery.data?.items, selectedChatAgentId],
+  );
 
   const groupCandidateAgents = useMemo(() => {
     return (agentsQuery.data ?? []).filter((agent) => {
@@ -2567,7 +2407,7 @@ export function ChatCodingRoute() {
         sessionBindingMismatchLine={sessionBindingMismatchLine}
         onOpenDirectSession={handleOpenDirectSession}
         sessionCompactRows={sessionCompactRows}
-        activeSkillSummary={Boolean(activeSkillSummary)}
+        activeSkillSummary={hasActiveSkill}
         activeSkillStatusStyle={activeSkillStatusStyle}
         activeSkillTitle={activeSkillTitle}
         activeSkillName={activeSkillName}
