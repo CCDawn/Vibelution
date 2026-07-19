@@ -1,6 +1,7 @@
 import base64
 import copy
 import json
+import struct
 from types import SimpleNamespace
 
 import httpx
@@ -2228,6 +2229,16 @@ def test_config_image_input_probe_status_avoids_generic_vision_overmatch():
     assert config_service._image_input_probe_status("model does not support vision") == (False, "unsupported")
 
 
+def test_config_image_input_probe_uses_non_degenerate_png():
+    data_url = config_service._IMAGE_INPUT_PROBE_DATA_URL
+    assert data_url.startswith("data:image/png;base64,")
+    png = base64.b64decode(data_url.split(",", 1)[1])
+    assert png.startswith(b"\x89PNG\r\n\x1a\n")
+    width, height = struct.unpack(">II", png[16:24])
+    assert width >= 32
+    assert height >= 32
+
+
 def test_config_workspace_test_llm_image_input_reports_unsupported(monkeypatch, tmp_path):
     monkeypatch.setenv(MODEL_CAPABILITY_CACHE_ENV, str(tmp_path / "model-capabilities.json"))
     public_config = copy.deepcopy(load_public_config())
@@ -2373,7 +2384,13 @@ def test_config_workspace_batch_image_capability_persists_model_only(monkeypatch
         def invoke(self, messages, tools=None, metadata=None):
             assert metadata["probeCapability"] == "image_input"
             assert metadata["llmInvocationSurface"] == "config_image_input_probe"
-            assert messages[0]["content"][1]["image_url"]["url"].startswith("data:image/png;base64,")
+            data_url = messages[0]["content"][1]["image_url"]["url"]
+            assert data_url.startswith("data:image/png;base64,")
+            png = base64.b64decode(data_url.split(",", 1)[1])
+            assert png.startswith(b"\x89PNG\r\n\x1a\n")
+            width, height = struct.unpack(">II", png[16:24])
+            assert width >= 32
+            assert height >= 32
             return {"ok": True}
 
     monkeypatch.setattr("core.llm.LLMClient", FakeClient)
