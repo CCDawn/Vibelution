@@ -78,7 +78,7 @@ export const ShadcnButton = forwardRef<HTMLButtonElement, ShadcnButtonProps>(
         aria-disabled={isDisabled || undefined}
         className={[
           "inline-flex max-w-full shrink-0 items-center justify-center justify-self-start",
-          "rounded-[var(--radius-control)] px-2 text-[var(--vui-font-sm)] font-semibold leading-tight",
+          "rounded-[var(--radius-control)] px-2 [font-size:var(--vui-font-sm)] font-semibold leading-tight",
           vuiButtonDensityClass(density),
           variantClass(variant),
           vuiButtonFocusClass,
