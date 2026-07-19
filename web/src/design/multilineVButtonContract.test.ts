@@ -11,7 +11,7 @@ describe("multiline VButton hardening (Path B wave 10)", () => {
   });
 
   it("uses plain layout for chat feature chips, pet actions, and model picker cards", () => {
-    const chat = src("routes/ChatCodingRoute.tsx");
+    const chat = src("routes/chat/ChatStatusRail.tsx");
     const picker = src("routes/AgentModelPicker.tsx");
     const token = src("routes/chat/TokenCoreStatusPanel.tsx");
     expect(chat).toMatch(/contentLayout="plain"[\s\S]{0,120}styles\.featureChip/);
