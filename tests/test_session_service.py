@@ -812,6 +812,8 @@ def test_session_llm_transport_status_updates_one_visible_recovery_event(monkeyp
     assert degraded_event["name"] == "model_transport"
     assert degraded_event["status"] == "degraded"
     assert degraded_event["error"] == "no available account"
+    assert "no available account" not in degraded_event["summary"]
+    assert "no available account" not in degraded_event["resultPreview"]
     assert recovered is not None
     assert len(recovered.feedback_events) == 1
     assert recovered.feedback_events[0]["status"] == "recovered"
