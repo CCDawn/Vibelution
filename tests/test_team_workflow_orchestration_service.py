@@ -9242,6 +9242,58 @@ def test_research_memory_claim_map_keeps_status_without_result_artifact():
     assert by_claim["Rejected claim"]["status"] == "rejected"
 
 
+def test_research_memory_context_uses_active_design_for_nested_allowed_variable():
+    context = team_workflow_orchestration_service._build_research_memory_context(
+        stage_type="experiment_design",
+        research_question="Does the smoke budget preserve the formal gate profile?",
+        plans=[
+            {
+                "planId": "plan-best-validated",
+                "status": "ingested",
+                "experimentContract": {
+                    "revision": 4,
+                    "researchQuestion": "Does the candidate improve the primary metric?",
+                },
+                "activeFullRunResult": {
+                    "fullRunResultId": "full-best",
+                    "status": "passed",
+                },
+            },
+            {
+                "planId": "plan-active-diagnostic",
+                "status": "smoke_needs_review",
+                "experimentContract": {
+                    "revision": 12,
+                    "researchQuestion": "Does the smoke budget preserve the formal gate profile?",
+                    "methodConfig": {"budget": {"epochs": [2, 8]}},
+                    "constraints": ["same seed and controls", "only epochs changes from 2 to 8"],
+                },
+            },
+        ],
+        control_plan={
+            "planId": "plan-active-diagnostic",
+            "experimentContract": {
+                "methodConfig": {"budget": {"epochs": [2, 8]}},
+                "constraints": ["same seed and controls", "only epochs changes from 2 to 8"],
+            },
+        },
+    )
+
+    assert context["currentBest"]["planId"] == "plan-best-validated"
+    assert context["allowedVariableContract"] == {
+        "status": "derived_from_frozen_constraints",
+        "variables": [
+            {
+                "path": "methodConfig.budget.epochs",
+                "source": "frozen_constraint",
+                "evidenceRef": "plan-active-diagnostic",
+            }
+        ],
+        "frozenControls": ["same seed and controls"],
+    }
+    assert "explicit_allowed_variable_changes" not in context["missingEvidence"]
+
+
 def test_start_research_stage_round_keeps_experiment_plan_when_coordination_busy(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _stub_source_collection_search_background(monkeypatch)

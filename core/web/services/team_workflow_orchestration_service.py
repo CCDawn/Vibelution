@@ -22039,6 +22039,7 @@ def _research_stage_memory_context(
         ],
         knowledge_results=knowledge_results,
         retrieval_status=retrieval_status,
+        control_plan=_active_experiment_plan(plan_store),
     )
 
 
@@ -22276,8 +22277,16 @@ def _legacy_research_lifecycle_memory_contexts(
         "retrieval_status": retrieval_status,
     }
     return {
-        "stage2": _build_research_memory_context(stage_type="experiment_design", **common),
-        "stage3": _build_research_memory_context(stage_type="experiment_execution_iteration", **common),
+        "stage2": _build_research_memory_context(
+            stage_type="experiment_design",
+            control_plan=design_plan,
+            **common,
+        ),
+        "stage3": _build_research_memory_context(
+            stage_type="experiment_execution_iteration",
+            control_plan=design_plan,
+            **common,
+        ),
     }
 
 

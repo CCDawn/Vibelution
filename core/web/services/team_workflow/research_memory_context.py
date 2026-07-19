@@ -40,6 +40,7 @@ def build_research_memory_context(
     loops: list[dict[str, Any]] | None = None,
     knowledge_results: list[dict[str, Any]] | None = None,
     retrieval_status: str = "completed",
+    control_plan: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     candidate_rows = [item for item in list(candidates or []) if isinstance(item, dict)]
     plan_rows = [item for item in list(plans or []) if isinstance(item, dict)]
@@ -88,7 +89,9 @@ def build_research_memory_context(
         status: sum(1 for item in claim_map if item["status"] == status)
         for status in CLAIM_STATUS_ORDER
     }
-    allowed_variable_contract = _allowed_variable_contract(best_plan)
+    allowed_variable_contract = _allowed_variable_contract(
+        control_plan if isinstance(control_plan, dict) else best_plan
+    )
     variables_allowed_to_change = [
         item["path"]
         for item in allowed_variable_contract["variables"]
@@ -670,17 +673,37 @@ def _derive_allowed_paths_from_constraints(contract: dict[str, Any]) -> list[str
             if match is None:
                 continue
             raw_path = match.group(1).strip(" .")
-            path = (
-                raw_path
-                if "." in raw_path or raw_path not in method_config
-                else f"methodConfig.{raw_path}"
-            )
+            path = _resolve_method_config_path(method_config, raw_path)
             if path and path not in variables:
                 variables.append(path)
             break
         if len(variables) >= 16:
             break
     return variables
+
+
+def _resolve_method_config_path(
+    method_config: dict[str, Any],
+    raw_path: str,
+) -> str:
+    if "." in raw_path:
+        return raw_path
+    matches: list[str] = []
+
+    def visit(value: Any, prefix: str) -> None:
+        if not isinstance(value, dict):
+            return
+        for key, child in value.items():
+            key_text = str(key)
+            path = f"{prefix}.{key_text}"
+            if key_text.lower() == raw_path.lower():
+                matches.append(path)
+            visit(child, path)
+
+    visit(method_config, "methodConfig")
+    if len(matches) == 1:
+        return matches[0]
+    return raw_path
 
 
 def _frozen_controls(
