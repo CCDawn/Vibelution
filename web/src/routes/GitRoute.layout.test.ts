@@ -94,10 +94,13 @@ describe("GitRoute layout contract", () => {
     expect(gitRouteStyles.route).toContain("overflow-x-hidden");
     expect(gitRouteStyles.workspace).toContain("min-w-0");
     expect(gitRouteStyles.workspace).toContain("minmax(0,1fr)");
+    expect(gitRouteStyles.workspace).toContain("clamp(250px,22vw,360px)");
     expect(gitRouteStyles.workspace).not.toMatch(/minmax\((500|520)px/);
+    expect(gitRouteStyles.workspace).not.toContain("minmax(250px,310px)");
     expect(gitRouteStyles.workspace).toContain("max-[860px]:grid-cols-[minmax(0,1fr)]");
     expect(gitRouteStyles.workspace).toContain("max-[860px]:content-start");
     expect(gitRouteStyles.workspaceOverview).toContain("minmax(0,1fr)");
+    expect(gitRouteStyles.workspaceOverview).toContain("minmax(0,0.9fr)");
     expect(gitRouteStyles.workspaceOverview).not.toMatch(/minmax\((500|520)px/);
     expect(gitRouteStyles.workspaceOverview).toContain("max-[860px]:grid-cols-[minmax(0,1fr)]");
     expect(gitRouteStyles.diffPanel).toContain("min-w-0");
@@ -134,8 +137,8 @@ describe("GitRoute layout contract", () => {
   });
 
   it("keeps Git summary and list rows dense without stretching controls", () => {
-    expect(gitRouteStyles.summaryGrid).toContain("mx-3");
-    expect(gitRouteStyles.summaryGrid).toContain("mt-1.5");
+    expect(gitRouteStyles.summaryGrid).toContain("mx-2");
+    expect(gitRouteStyles.summaryGrid).toContain("mt-1");
     expect(gitRouteStyles.summaryGrid).toContain("overflow-x-auto");
     expect(gitRouteStyles.changePanel).toContain("gap-1.5");
     expect(gitRouteStyles.changePanel).toContain("p-2");
@@ -191,7 +194,7 @@ describe("GitRoute layout contract", () => {
     expect(routeSource).toContain("invalidateQueries({ queryKey: queryKeys.gitStatusSummary() })");
     expect(routeSource).toContain('tone="loading"');
     expect(routeSource).toContain("gitStatusLoading");
-    expect(gitRouteStyles.summaryGrid).toContain("min-h-[52px]");
+    expect(gitRouteStyles.summaryGrid).toContain("min-h-[48px]");
   });
 
   it("renders an aria-busy recent commits surface while commits load independently", () => {
@@ -346,7 +349,8 @@ describe("GitRoute layout contract", () => {
     expect(routeSource).toContain('kind: "worktree"');
     expect(routeSource).toContain('kind: "commit"');
     expect(routeSource).toContain("objectDetailQuery");
-    expect(stylesSource).toContain("grid-cols-[minmax(260px,0.9fr)_minmax(0,1.18fr)_minmax(240px,0.62fr)]");
+    expect(stylesSource).toContain("grid-cols-[minmax(0,0.9fr)_minmax(0,1.18fr)_minmax(0,0.62fr)]");
+    expect(stylesSource).toContain("clamp(250px,22vw,360px)");
     expect(stylesSource).toContain("objectDetailPanel:");
     expect(stylesSource).toContain("objectItemActive:");
   });

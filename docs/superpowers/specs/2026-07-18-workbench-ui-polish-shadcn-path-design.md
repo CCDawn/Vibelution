@@ -83,6 +83,7 @@ Renderer+tokens  →  唯一视觉实现（今日 HeroUI，可换 shadcn/Radix�
 | **3** | Teams/Memory/Config 同构：主区 `minmax(0,1fr)` 吃满，侧栏 `clamp` 弹性；Config 去 max-width 与过重 elevation | layout 测试 |
 | **R** | HeroUI → shadcn/Radix renderer（按 primitive） | 完成：Button / Tooltip / Chip / Input / Textarea / Select / Checkbox |
 | **4** | Logs / Evolution / Launcher 同构吃满：去状态条 max-width、侧栏 clamp、library 摘要弹性列 | layout 测试 + build |
+| **5** | Git 工作区同构：commit 侧栏 clamp、overview 弹性列、顶栏边距对齐、resize 去 soft shadow | layout 测试 + build |
 
 ### Wave R（完成）
 
@@ -104,6 +105,11 @@ Renderer+tokens  →  唯一视觉实现（今日 HeroUI，可换 shadcn/Radix�
 - `web/src/routes/EvolutionRoute.styles.ts`（library 摘要与 overview 弹性列；页边距密度）
 - `web/src/routes/LogsRoute.styles.ts`（右轨 fallback 改为 clamp）
 - 对应 `*.layout.test.ts`
+
+### Wave 5 文件范围
+
+- `web/src/routes/GitRoute.styles.ts`
+- `web/src/routes/GitRoute.layout.test.ts`
 
 ### Wave 2 文件范围
 
