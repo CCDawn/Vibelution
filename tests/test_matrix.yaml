@@ -5,6 +5,7 @@ always:
     - "hygiene"
   commands:
     - "git diff --check"
+    - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_tool_authorization_test_contract.py -q"
 
 default:
   executionLayers:

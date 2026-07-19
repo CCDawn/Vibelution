@@ -1155,6 +1155,11 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("团队记忆");
     expect(routeSource).toContain("已用记忆");
     expect(routeSource).toContain("forbiddenDuplicateExperimentCount");
+    expect(routeSource).toContain("查看 Claim Map 与变量边界");
+    expect(routeSource).toContain("claimStatusCounts");
+    expect(routeSource).toContain("allowedVariables");
+    expect(routeSource).toContain("claimMapPreview");
+    expect(routeSource).toContain("data-memory-context-id");
     expect(routeSource).toContain("value === \"source_collection\"");
     expect(routeSource).toContain("return \"knowledge_collection\"");
     expect(routeSource).toContain('id="research-workflow-overview"');

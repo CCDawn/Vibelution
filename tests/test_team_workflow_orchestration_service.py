@@ -8929,6 +8929,12 @@ def test_start_experiment_stage_builds_bounded_memory_context_with_negative_shie
                 "revision": 4,
                 "researchQuestion": "Does weight 0.875 provide bounded benefit?",
                 "methodConfig": {"candidateMaskedLossWeight": 0.875, "dataset": "FashionMNIST"},
+                "iterationContract": {
+                    "allowedChanges": ["methodConfig.candidateMaskedLossWeight"],
+                    "requiresFeedbackSignals": True,
+                    "requiresPlanDiff": True,
+                    "requiresResultConclusion": True,
+                },
             },
             "activeFullRunResultId": "full-best-revision4",
             "activeFullRunResult": {"fullRunResultId": "full-best-revision4", "status": "passed"},
@@ -8982,6 +8988,27 @@ def test_start_experiment_stage_builds_bounded_memory_context_with_negative_shie
     assert context["negativeExperiments"][0]["failedGates"] == ["global regression exceeds 0.0005"]
     assert context["negativeExperiments"][0]["retestPolicy"] == "blocked_without_new_evidence_or_changed_assumption"
     assert context["forbiddenDuplicateExperiments"][0]["planId"] == "plan-negative-weight-1"
+    assert context["allowedVariableContract"] == {
+        "status": "explicit",
+        "variables": [
+            {
+                "path": "methodConfig.candidateMaskedLossWeight",
+                "source": "iteration_contract",
+                "evidenceRef": "plan-best-revision4",
+            }
+        ],
+        "frozenControls": [],
+    }
+    assert context["variablesAllowedToChange"] == ["methodConfig.candidateMaskedLossWeight"]
+    assert context["missingEvidence"] == []
+    claim_statuses = {item["status"] for item in context["claimMap"]}
+    assert claim_statuses == {"qualified", "unsupported"}
+    qualified_claim = next(item for item in context["claimMap"] if item["status"] == "qualified")
+    unsupported_claim = next(item for item in context["claimMap"] if item["status"] == "unsupported")
+    assert qualified_claim["sourcePlanIds"] == ["plan-best-revision4"]
+    assert qualified_claim["supportEvidenceRefs"][0]["id"] == "full-best-revision4"
+    assert unsupported_claim["sourcePlanIds"] == ["plan-negative-weight-1"]
+    assert unsupported_claim["counterEvidenceRefs"][0]["id"] == "full-negative-weight-1"
     assert experiment["stageRound"]["planningContract"]["memoryContextId"] == context["contextId"]
     assert experiment["stageRound"]["coordinationContract"]["config"]["memoryContextId"] == context["contextId"]
     assert (
@@ -8996,7 +9023,28 @@ def test_start_experiment_stage_builds_bounded_memory_context_with_negative_shie
         "negativeExperimentCount": 1,
         "successfulRunCount": 1,
         "forbiddenDuplicateExperimentCount": 1,
-        "missingEvidence": ["explicit_allowed_variable_changes"],
+        "claimCount": 2,
+        "claimStatusCounts": {
+            "qualified": 1,
+            "unsupported": 1,
+            "rejected": 0,
+            "not_established": 0,
+        },
+        "allowedVariableCount": 1,
+        "allowedVariables": ["methodConfig.candidateMaskedLossWeight"],
+        "claimMapPreview": [
+            {
+                "claimId": qualified_claim["claimId"],
+                "claim": qualified_claim["claim"],
+                "status": "qualified",
+            },
+            {
+                "claimId": unsupported_claim["claimId"],
+                "claim": unsupported_claim["claim"],
+                "status": "unsupported",
+            },
+        ],
+        "missingEvidence": [],
     }
 
 
@@ -9064,6 +9112,10 @@ def test_experiment_lifecycle_projection_derives_memory_summary_for_legacy_plans
                 "revision": 4,
                 "researchQuestion": "Does the bounded candidate improve masked reconstruction?",
                 "methodConfig": {"candidateMaskedLossWeight": 0.875},
+                "constraints": [
+                    "same dataset and architecture",
+                    "only candidateMaskedLossWeight changes",
+                ],
             },
             "contractValidation": {"valid": True},
             "readiness": {"readyForPlanReview": True},
@@ -9107,14 +9159,139 @@ def test_experiment_lifecycle_projection_derives_memory_summary_for_legacy_plans
         "negativeExperimentCount": 1,
         "successfulRunCount": 1,
         "forbiddenDuplicateExperimentCount": 1,
-        "missingEvidence": ["explicit_allowed_variable_changes"],
+        "claimCount": 1,
+        "claimStatusCounts": {
+            "qualified": 1,
+            "unsupported": 0,
+            "rejected": 0,
+            "not_established": 0,
+        },
+        "allowedVariableCount": 1,
+        "allowedVariables": ["methodConfig.candidateMaskedLossWeight"],
+        "claimMapPreview": status["lifecycleProjection"]["stage2"]["memoryContextSummary"]["claimMapPreview"],
+        "missingEvidence": [],
     }
+    assert status["lifecycleProjection"]["stage2"]["memoryContextSummary"]["claimMapPreview"]
+    assert len(knowledge_search_calls) == 1
+    legacy_context = team_workflow_orchestration_service._legacy_research_lifecycle_memory_contexts(
+        team_id=team["teamId"],
+        candidate_store=candidate_store,
+        plans=plan_store["plans"],
+        design_plan=plan_store["plans"][1],
+        best_plan=plan_store["plans"][1],
+        latest_experiment=plan_store["plans"][1],
+        latest_iteration=None,
+        active_loop=None,
+    )["stage2"]
+    assert legacy_context["claimMap"][0]["status"] == "qualified"
+    assert legacy_context["claimMap"][0]["supportEvidenceRefs"][0]["id"] == "full-legacy-best"
+    assert legacy_context["claimMap"][0]["counterEvidenceRefs"][0]["id"] == "full-legacy-negative"
     assert status["lifecycleProjection"]["stage2"]["memoryContextSummary"]["contextId"]
     assert status["lifecycleProjection"]["stage3"]["memoryContextSummary"]["knowledgeItemCount"] == 1
     assert status["lifecycleProjection"]["stage3"]["memoryContextSummary"]["negativeExperimentCount"] == 1
-    assert len(knowledge_search_calls) == 1
+    assert status["lifecycleProjection"]["stage3"]["memoryContextSummary"]["allowedVariables"] == [
+        "methodConfig.candidateMaskedLossWeight"
+    ]
     persisted_store = team_workflow_orchestration_service._load_experiment_plan_store(team["teamId"])
     assert all("memoryContext" not in plan for plan in persisted_store["plans"])
+
+
+def test_research_memory_claim_map_keeps_status_without_result_artifact():
+    context = team_workflow_orchestration_service._build_research_memory_context(
+        stage_type="experiment_design",
+        research_question="Bounded claim status",
+        plans=[
+            {
+                "planId": "plan-qualified-with-knowledge",
+                "status": "ingested",
+                "experimentContract": {"researchQuestion": "Qualified claim"},
+                "knowledgeIngestion": {
+                    "status": "ingested",
+                    "result": {"knowledgeItemId": "kitem-qualified"},
+                },
+            },
+            {
+                "planId": "plan-unsupported-without-artifact",
+                "status": "smoke_needs_review",
+                "experimentContract": {"researchQuestion": "Unsupported claim"},
+            },
+            {
+                "planId": "plan-not-established",
+                "status": "draft",
+                "experimentContract": {"researchQuestion": "Unvalidated claim"},
+            },
+        ],
+        candidates=[
+            {
+                "candidateId": "candidate-rejected",
+                "candidateType": "algorithm_hypothesis",
+                "currentState": "rejected",
+                "claims": [{"claim": "Rejected claim"}],
+            }
+        ],
+    )
+
+    by_claim = {item["claim"]: item for item in context["claimMap"]}
+    assert by_claim["Qualified claim"]["status"] == "qualified"
+    assert by_claim["Qualified claim"]["supportEvidenceRefs"] == [
+        {"type": "knowledge_item", "id": "kitem-qualified"}
+    ]
+    assert by_claim["Unsupported claim"]["status"] == "unsupported"
+    assert by_claim["Unsupported claim"]["counterEvidenceRefs"] == []
+    assert by_claim["Unvalidated claim"]["status"] == "not_established"
+    assert by_claim["Rejected claim"]["status"] == "rejected"
+
+
+def test_research_memory_context_uses_active_design_for_nested_allowed_variable():
+    context = team_workflow_orchestration_service._build_research_memory_context(
+        stage_type="experiment_design",
+        research_question="Does the smoke budget preserve the formal gate profile?",
+        plans=[
+            {
+                "planId": "plan-best-validated",
+                "status": "ingested",
+                "experimentContract": {
+                    "revision": 4,
+                    "researchQuestion": "Does the candidate improve the primary metric?",
+                },
+                "activeFullRunResult": {
+                    "fullRunResultId": "full-best",
+                    "status": "passed",
+                },
+            },
+            {
+                "planId": "plan-active-diagnostic",
+                "status": "smoke_needs_review",
+                "experimentContract": {
+                    "revision": 12,
+                    "researchQuestion": "Does the smoke budget preserve the formal gate profile?",
+                    "methodConfig": {"budget": {"epochs": [2, 8]}},
+                    "constraints": ["same seed and controls", "only epochs changes from 2 to 8"],
+                },
+            },
+        ],
+        control_plan={
+            "planId": "plan-active-diagnostic",
+            "experimentContract": {
+                "methodConfig": {"budget": {"epochs": [2, 8]}},
+                "constraints": ["same seed and controls", "only epochs changes from 2 to 8"],
+            },
+        },
+    )
+
+    assert context["currentBest"]["planId"] == "plan-best-validated"
+    assert context["allowedVariableContract"] == {
+        "status": "derived_from_frozen_constraints",
+        "variables": [
+            {
+                "path": "methodConfig.budget.epochs",
+                "source": "frozen_constraint",
+                "evidenceRef": "plan-active-diagnostic",
+            }
+        ],
+        "frozenControls": ["same seed and controls"],
+    }
+    assert "explicit_allowed_variable_changes" not in context["missingEvidence"]
 
 
 def test_start_research_stage_round_keeps_experiment_plan_when_coordination_busy(tmp_path, monkeypatch):
