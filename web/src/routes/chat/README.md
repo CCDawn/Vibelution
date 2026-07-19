@@ -15,6 +15,7 @@ Agent-oriented map for Chat workbench development. Prefer editing a **module** o
 | Center workspace shell | `ChatSessionWorkspacePanel.tsx` | index rail |
 | Layout width math | `chatCodingRouteViewModel.ts` | session protocol |
 | Left index / new Agent / group / system entry UI | `ChatConversationIndexRail.tsx` | stream/submit |
+| Right status / run modes / token / pet / group settings | `ChatStatusRail.tsx` | left index, stream apply |
 | Orchestration / wiring only | `../ChatCodingRoute.tsx` | — |
 
 ## Phase A (done)
@@ -31,10 +32,13 @@ Pure helpers extracted from `ChatCodingRoute.tsx`:
 
 - `ChatConversationIndexRail.tsx` — left conversation index pane (tabs, member status, new Agent/group, system entry)
 
+## Phase C (done)
+
+- `ChatStatusRail.tsx` — right status pane (group profile/settings, current session, run modes, token/LLM panels, companion/pet)
+
 ## Next (planned)
 
 - Hooks: selection/detail+stream, composer submit, group room
-- Status rail shell
 - Thin `ChatCodingRoute` composition + layout test split
 
 ## Rules
