@@ -82,6 +82,18 @@ Plan: `docs/superpowers/plans/2026-07-19-chat-coding-route-stream-selection-spli
 - Further thin remaining queries/wiring/JSX composition
 - Target `ChatCodingRoute` toward ~800–1500 LOC
 
+## Hand-test substitutes
+
+Prefer automated substitutes over manual click smoke when validating Chat split work:
+
+```bash
+npm --prefix web test -- --run src/routes/chat/chatHandTestSubstitute.test.ts src/routes/chat/ChatGroupCenterSurface.test.tsx src/routes/chat/cliAgentRunModel.test.ts
+```
+
+- `chatHandTestSubstitute.test.ts` — maps hand checklist to pure models, stream ownership, wiring contracts, and optional live `/api`+SSE probe when workbench is up
+- `ChatGroupCenterSurface.test.tsx` — SSR markup for group/bus empty/active states
+- `cliAgentRunModel.test.ts` — CLI tab id / close-active / tool-call run extraction
+
 ## Rules
 
 1. Do not open a second session stream; reuse existing stream controllers.
