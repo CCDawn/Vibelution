@@ -396,16 +396,17 @@ describe("GitRoute layout contract", () => {
 
     expect(commitItemStyles).toContain("min-w-0");
     expect(routeSource).toContain("<VNativeButton");
-    expect(commitItemStyles).toContain("grid");
-    expect(commitItemStyles).toContain("min-h-[62px]");
-    expect(commitItemStyles).not.toContain("!grid");
+    expect(commitItemStyles).toContain("!grid");
+    expect(commitItemStyles).toContain("grid-cols-1");
+    expect(commitItemStyles).toContain("whitespace-normal");
     expect(commitItemStyles).not.toContain("data-slot=vui-button-content");
     expect(commitItemStyles).not.toContain("data-slot=vui-button-label");
     expect(gitRouteStyles.commitItem).toContain("bg-[color-mix(in_srgb,var(--vui-surface-row)");
-    expect(commitItemStyles).toContain("[&_strong]:block");
-    expect(commitItemStyles).toContain("[&_strong]:max-w-full");
-    expect(commitItemStyles).toContain("[&_strong]:text-ellipsis");
-    expect(commitItemStyles).toContain("[&_strong]:whitespace-nowrap");
-    expect(commitItemStyles).toContain("[&_strong]:leading-snug");
+    expect(stylesSource).toContain("commitSubject:");
+    expect(stylesSource).toContain("commitAuthor:");
+    expect(gitRouteStyles.commitSubject).toContain("text-ellipsis");
+    expect(gitRouteStyles.commitAuthor).toContain("text-vui-fg-tertiary");
+    expect(routeSource).toContain("styles.commitSubject");
+    expect(routeSource).toContain("styles.commitAuthor");
   });
 });
