@@ -13,6 +13,10 @@ Agent-oriented map for Chat workbench development. Prefer editing a **module** o
 | Submit telemetry fields | `chatSubmitTelemetry.ts` | layout resize |
 | Composer draft/attachments/submit pure helpers | `chatComposerSubmitModel.ts` | stream apply, dual EventSource |
 | Composer turn mutations + submit actions | `useChatComposerSubmit.ts` | session EventSource ownership |
+| Session stream connect/grace pure helpers | `chatSessionStreamConnect.ts` | opening EventSource |
+| Direct session detail SSE (sole EventSource) | `useSessionDetailStream.ts` | second session EventSource, group stream |
+| Group room SSE (sole EventSource) | `useGroupRoomStream.ts` | second group EventSource, session stream |
+| Session select / URL / bootstrap | `useChatSessionSelection.ts` | EventSource ownership |
 | Composer bridge UI | `ChatConversationComposerBridge.tsx` | CLI model |
 | Center workspace shell | `ChatSessionWorkspacePanel.tsx` | index rail |
 | Layout width math | `chatCodingRouteViewModel.ts` | session protocol |
@@ -45,10 +49,18 @@ Pure helpers extracted from `ChatCodingRoute.tsx`:
 - `chatComposerSubmitModel.ts` — composer draft/attachment/reference pure helpers, image classify, submit guards, mental-model toggle storage, optimistic turn id
 - `useChatComposerSubmit.ts` — `useChatComposerTurnMutations` (submit/edit/stop/guidance) + `useChatComposerSubmitActions` (handlers/upload pipeline); no second EventSource
 
+## Phase E (in progress)
+
+Plan: `docs/superpowers/plans/2026-07-19-chat-coding-route-stream-selection-split.md`
+
+- **E1 done:** `chatSessionStreamConnect.ts` + `useSessionDetailStream.ts` — sole owner of `/api/sessions/:id/events` EventSource; connect/grace pure helpers
+- **E2 done:** `useGroupRoomStream.ts` — sole owner of `/api/chat-rooms/:id/events` EventSource
+- **E3 done:** `useChatSessionSelection.ts` — select mutation + URL/bootstrap selection effects
+
 ## Next (planned)
 
-- Hooks: selection/detail+stream (single EventSource), group room
-- Thin `ChatCodingRoute` composition + layout test split
+- Thin route residual pure helpers / group room mutations
+- Thin `ChatCodingRoute` composition toward ~800–1500 LOC
 
 ## Rules
 
