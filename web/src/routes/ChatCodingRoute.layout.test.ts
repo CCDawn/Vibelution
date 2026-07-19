@@ -54,6 +54,8 @@ import chatSessionStreamConnectSource from "./chat/chatSessionStreamConnect.ts?r
 import sessionDetailStreamSource from "./chat/useSessionDetailStream.ts?raw";
 import groupRoomStreamSource from "./chat/useGroupRoomStream.ts?raw";
 import chatSessionSelectionSource from "./chat/useChatSessionSelection.ts?raw";
+import chatSessionDetailHelpersSource from "./chat/chatSessionDetailHelpers.ts?raw";
+import chatRoutePresentationSource from "./chat/chatRoutePresentation.tsx?raw";
 import chatToolApprovalDialogStyles from "./chat/ChatToolApprovalDialog.styles";
 import chatToolApprovalDialogSource from "./chat/ChatToolApprovalDialog.tsx?raw";
 import { ChatToolApprovalDialog } from "./chat/ChatToolApprovalDialog";
@@ -135,6 +137,7 @@ const routeAndLayoutSource = `${routeSource}\n${chatWorkbenchLayoutSource}`;
 const routeAndComposerSource = `${routeSource}\n${chatComposerSubmitModelSource}\n${chatComposerSubmitHookSource}\n${chatActiveTurnLayerSource}\n${chatSubmitTelemetrySource}`;
 const routeAndStreamSource = `${routeSource}\n${sessionDetailStreamSource}\n${groupRoomStreamSource}\n${chatSessionStreamConnectSource}\n${chatStreamApplyControllerSource}\n${chatActiveTurnLayerSource}`;
 const routeAndSelectionSource = `${routeSource}\n${chatSessionSelectionSource}`;
+const routeAndHelpersSource = `${routeSource}\n${chatSessionDetailHelpersSource}\n${chatRoutePresentationSource}`;
 
 describe("ChatCodingRoute layout contract", () => {
   it("keeps the center conversation readable and the composer as a stable bottom layer", () => {
@@ -474,7 +477,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("modelImageInputSupportById");
     expect(routeSource).toContain("imageInputModelIdForAgent(activeSessionAgent, detail?.dialogueModelId)");
     expect(routeSource).toContain("activeAgentImageInputSupported === false");
-    expect(routeSource).toContain("const visionModelId = String(agent?.llmBindings?.vision?.modelId ?? \"\").trim()");
+    expect(routeAndHelpersSource).toContain("const visionModelId = String(agent?.llmBindings?.vision?.modelId ?? \"\").trim()");
     expect(routeSource).toContain("imageInputUnsupported: activeAgentImageInputUnsupported");
     expect(chatConversationComposerBridgeSource).toContain("attachmentInputDisabled: disabled || Boolean(input.editTargetMessageId) || input.imageInputUnsupported");
     expect(routeSource).toContain("clearSessionImageAttachments(current, activeSessionId)");
@@ -996,7 +999,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeAndIndexRailSource).toContain("styles.agentIndexOpenButton");
     expect(routeAndIndexRailSource).toContain("onClick={() => onOpenDirectSession(participant.sessionId)}");
     expect(routeAndIndexRailSource).toContain("avatarImageUrlFrom(participantAgent, participant)");
-    expect(routeAndIndexRailSource).toContain("styles.agentAvatarImage");
+    expect(routeAndHelpersSource).toContain("styles.agentAvatarImage");
     expect(routeAndIndexRailSource).toContain("styles.agentIndexNameLine");
     expect(routeAndIndexRailSource).toContain("styles.agentIndexEmptyState");
     expect(routeAndIndexRailSource).toContain("aria-expanded={expanded}");
@@ -1410,7 +1413,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeAndIndexRailSource).toContain("className={`${styles.activeSkillStatus} ${activeSkillStatusStyle}`}");
     expect(routeAndIndexRailSource).toContain("styles.activeSkillIdentity");
     expect(routeAndIndexRailSource).toContain("styles.activeSkillMeta");
-    expect(routeSource).toContain("case \"active_skill\":");
+    expect(routeAndHelpersSource).toContain("case \"active_skill\":");
     const renderedActiveSkillIndex = routeAndIndexRailSource.indexOf(
       "className={`${styles.activeSkillStatus} ${activeSkillStatusStyle}`}",
     );
@@ -1657,11 +1660,11 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeAndIndexRailSource).toContain("chatRoomPurposeLabel(purpose, lang)");
     expect(routeSource).toContain("queryKeys.chatRoomPurposes()");
     expect(routeSource).toContain("fetchJson<ChatRoomPurpose[]>(\"/api/chat-rooms/purposes\")");
-    expect(routeSource).toContain("抢占式讨论");
-    expect(routeSource).toContain("协同问诊会诊");
-    expect(routeSource).toContain("医疗分诊建议");
-    expect(routeSource).toContain("medical_consultation_panel");
-    expect(routeSource).toContain("medical_triage");
+    expect(routeAndHelpersSource).toContain("抢占式讨论");
+    expect(routeAndHelpersSource).toContain("协同问诊会诊");
+    expect(routeAndHelpersSource).toContain("医疗分诊建议");
+    expect(routeAndHelpersSource).toContain("medical_consultation_panel");
+    expect(routeAndHelpersSource).toContain("medical_triage");
     expect(routeAndIndexRailSource).toContain("对话目的");
     expect(routeSource).toContain("purpose: groupPurposeDraft || \"discussion\"");
     expect(routeSource).toContain("purpose: activeGroupRoom?.purpose || \"discussion\"");
@@ -1704,7 +1707,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("compactAgentRoleLabel");
     expect(routeSource).toContain("shouldCollapseGroupMessage");
     expect(routeSource).toContain("shouldDefaultCollapseGroupMessage");
-    expect(routeSource).toContain("message.audience === \"internal\"");
+    expect(routeAndHelpersSource).toContain("message.audience === \"internal\"");
     expect(routeSource).toContain("展开讨论");
     expect(routeSource).toContain("expandedGroupMessageIds");
     expect(routeSource).toContain("stripGroupSpeakerPrefix(message, identityName)");
@@ -1713,7 +1716,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("展开全文");
     expect(routeSource).toContain("收起");
     expect(routeSource).toContain("message.status !== \"completed\" ? <span>{statusLabel(message.status)}</span> : null");
-    expect(routeSource).toContain("numericTail.slice(-2)");
+    expect(routeAndHelpersSource).toContain("numericTail.slice(-2)");
     expect(routeSource).not.toContain("navigate(`/chat-rooms");
     expect(routeStyles.leftRail).toContain("[grid-column:5]");
     expect(chatStatusRailSource.indexOf("styles.groupManagementPanel")).toBeGreaterThan(-1);
@@ -1863,6 +1866,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeAndStreamSource).toContain("const SESSION_STREAM_MIN_APPLY_INTERVAL_MS = 350");
     expect(routeSource).toContain("const nextDetail = mergeSessionDetailMessageWindow(previous, detail)");
     expect(routeSource).toContain("sessionDetailSnapshotKey(previous) === sessionDetailSnapshotKey(nextDetail)");
+    // snapshot helper lives in chatSessionDetailHelpers
     expect(routeAndStreamSource).toContain("setActiveTurnLayerForSession(current, streamSessionId, undefined)");
     expect(routeAndStreamSource).toContain("let pendingDetail: SessionDetail | null = null");
     expect(routeAndStreamSource).toContain("let pendingDetailTrace: SessionStreamProtocolTrace | null = null");
@@ -1885,7 +1889,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(chatStreamApplyControllerSource).toContain("mergeAssistantDeltaIntoActiveTurnLayer(pendingLayer, entry.payload)");
     expect(routeAndStreamSource).toContain("isActiveTurnSettledByDetail(activeLayer, detail)");
     expect(routeSource).toContain("activeTurnMessage,");
-    expect(routeSource).toContain("function isStaleLedgerUpdate(currentSeq: unknown, incomingSeq: unknown)");
+    expect(routeAndHelpersSource).toContain("function isStaleLedgerUpdate(currentSeq: unknown, incomingSeq: unknown)");
     expect(routeAndStreamSource).not.toContain("function mergeLiveAssistantMessagesIntoSessionDetail(");
     expect(routeAndStreamSource).not.toContain("kind: \"session_live_overlay\"");
     expect(routeAndStreamSource).toContain("committedAssistantDeltaLayer = decision.nextCommittedLayer");
@@ -2807,10 +2811,10 @@ describe("ChatCodingRoute layout contract", () => {
   });
 
   it("loads direct session details as a window and wires top-edge history paging", () => {
-    expect(routeSource).toContain("const SESSION_DETAIL_INITIAL_MESSAGE_LIMIT = 40");
-    expect(routeSource).toContain("function fetchSessionDetailWindow(");
-    expect(routeSource).toContain("params.set(\"messageLimit\", String(options.messageLimit ?? SESSION_DETAIL_INITIAL_MESSAGE_LIMIT))");
-    expect(routeSource).toContain("params.set(\"transcriptScope\", options.transcriptScope ?? \"window\")");
+    expect(routeAndHelpersSource).toContain("const SESSION_DETAIL_INITIAL_MESSAGE_LIMIT = 40");
+    expect(routeAndHelpersSource).toContain("function fetchSessionDetailWindow(");
+    expect(routeAndHelpersSource).toContain("params.set(\"messageLimit\", String(options.messageLimit ?? SESSION_DETAIL_INITIAL_MESSAGE_LIMIT))");
+    expect(routeAndHelpersSource).toContain("params.set(\"transcriptScope\", options.transcriptScope ?? \"window\")");
     expect(routeSource).toContain("structuralSharing: (previous, next) =>");
     expect(routeSource).toContain("mergeSessionDetailMessageWindow(current, page)");
     expect(routeSource).toContain("const nextDetail = mergeSessionDetailMessageWindow(previous, detail)");
@@ -2870,8 +2874,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("removeDeletedSessionFromConversations");
     expect(deleteMutationSource).toContain("updateSessionSummaryCaches(queryClient");
     expect(deleteMutationSource).toContain("queryClient.setQueryData<ConversationSummary[]>(queryKeys.conversations()");
-    expect(routeSource).toContain("conversation.type !== \"direct_agent\"");
-    expect(routeSource).toContain("conversation.directSessionId !== deletedSessionId && conversation.conversationId !== deletedSessionId");
+    expect(routeAndHelpersSource).toContain("conversation.type !== \"direct_agent\"");
+    expect(routeAndHelpersSource).toContain("conversation.directSessionId !== deletedSessionId && conversation.conversationId !== deletedSessionId");
     expect(deleteMutationSource.indexOf("updateSessionSummaryCaches(queryClient")).toBeLessThan(
       deleteMutationSource.indexOf("void chatWorkspaceCache.afterSessionDeleted({"),
     );
@@ -2903,7 +2907,7 @@ describe("ChatCodingRoute layout contract", () => {
   });
 
   it("reconciles stale active sessions when reset removes their backend record", () => {
-    expect(routeSource).toContain("function isSessionNotFoundError");
+    expect(routeAndHelpersSource).toContain("function isSessionNotFoundError");
     expect(routeSource).toContain("sessionDetailQuery.isError");
     expect(routeSource).toContain("isSessionNotFoundError(sessionDetailQuery.error)");
     expect(routeSource).toContain("removeSessionWorkspace(activeSessionId, nextActiveSessionId || null)");
@@ -2954,7 +2958,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(directSessionIndexItemSource).toContain("showSessionSummaryInline");
     expect(directSessionIndexItemSource).not.toContain('label === "会话入口"');
     expect(directSessionIndexItemSource).toContain("const sessionTitle = sessionListTitle(session) || sessionDisplay.name");
-    expect(routeSource).toContain("agentDisplayName: title");
+    expect(routeAndHelpersSource).toContain("agentDisplayName: title");
     expect(routeSource).toContain("targetSession");
     expect(directSessionIndexItemSource).toContain("{sessionTitle}");
     expect(renameMutationSource).toContain("onMutate: (variables) =>");
