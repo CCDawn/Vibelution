@@ -22159,6 +22159,29 @@ def _best_validated_experiment_plan(
 def _research_memory_context_summary(value: Any) -> dict[str, Any]:
     context = value if isinstance(value, dict) else {}
     retrieval = context.get("retrieval") if isinstance(context.get("retrieval"), dict) else {}
+    claim_map = [
+        item
+        for item in list(context.get("claimMap") or [])
+        if isinstance(item, dict)
+    ]
+    claim_status_counts = {
+        status: sum(
+            1
+            for item in claim_map
+            if str(item.get("status") or "") == status
+        )
+        for status in ("qualified", "unsupported", "rejected", "not_established")
+    }
+    allowed_variable_contract = (
+        context.get("allowedVariableContract")
+        if isinstance(context.get("allowedVariableContract"), dict)
+        else {}
+    )
+    allowed_variables = [
+        str(item.get("path") or "")
+        for item in list(allowed_variable_contract.get("variables") or [])
+        if isinstance(item, dict) and str(item.get("path") or "").strip()
+    ][:16]
     forbidden = [
         item
         for item in list(context.get("forbiddenDuplicateExperiments") or [])
@@ -22171,6 +22194,18 @@ def _research_memory_context_summary(value: Any) -> dict[str, Any]:
         "negativeExperimentCount": int(retrieval.get("negativeExperimentCount") or 0),
         "successfulRunCount": int(retrieval.get("successfulRunCount") or 0),
         "forbiddenDuplicateExperimentCount": len(forbidden),
+        "claimCount": len(claim_map),
+        "claimStatusCounts": claim_status_counts,
+        "allowedVariableCount": len(allowed_variables),
+        "allowedVariables": allowed_variables,
+        "claimMapPreview": [
+            {
+                "claimId": str(item.get("claimId") or ""),
+                "claim": str(item.get("claim") or ""),
+                "status": str(item.get("status") or ""),
+            }
+            for item in claim_map[:6]
+        ],
         "missingEvidence": [
             str(item)
             for item in list(context.get("missingEvidence") or [])
