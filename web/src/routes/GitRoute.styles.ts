@@ -86,14 +86,15 @@ export const gitRouteStyles = {
   emptyPreview:
     `grid h-full content-start justify-items-start gap-[7px] ${panelSurface} p-3.5 text-vui-fg-secondary [&_p]:m-0 [&_p]:text-[var(--vui-font-xs)] [&_p]:leading-tight [&_p]:text-vui-fg-secondary [&_strong]:text-[0.98rem] [&_strong]:text-vui-fg-primary [&_svg]:h-[18px] [&_svg]:w-[18px] [&_svg]:text-[var(--accent-cool)]`,
   emptyState: "m-0 text-[var(--vui-font-xs)] leading-tight text-[var(--fg-secondary)]",
-  // Explicit single-column card; !grid + whitespace-normal beat VNativeButton defaults
-  // (inline-flex / nowrap) that otherwise put title and author on one crushed line.
+  // Single-column card. Prefer [font-size]/[color:] arbitrary props so
+  // Tailwind never maps font-size CSS vars into the text-* color channel
+  // (that made subject/author paint as near-invisible).
   commitItem:
-    `!grid h-auto min-h-0 w-full min-w-0 grid-cols-1 auto-rows-auto items-stretch justify-items-stretch gap-1 whitespace-normal ${rowSurface} p-2 text-left text-inherit ${rowSurfaceHover}`,
+    `!grid h-auto min-h-0 w-full min-w-0 grid-cols-1 auto-rows-auto content-start items-stretch justify-items-stretch gap-1 whitespace-normal ${rowSurface} p-2 text-left [color:var(--fg-primary)] ${rowSurfaceHover}`,
   commitSubject:
-    "m-0 min-w-0 max-w-full overflow-hidden text-ellipsis whitespace-nowrap text-[var(--vui-font-sm)] font-semibold leading-snug text-vui-fg-primary",
+    "block m-0 min-h-[1.25em] min-w-0 max-w-full overflow-hidden text-ellipsis whitespace-nowrap font-semibold leading-snug [font-size:var(--vui-font-sm)] [color:var(--fg-primary)]",
   commitAuthor:
-    "m-0 min-w-0 max-w-full overflow-hidden text-ellipsis whitespace-nowrap text-[var(--vui-font-xs)] font-normal leading-tight text-vui-fg-tertiary",
+    "block m-0 min-h-[1.15em] min-w-0 max-w-full overflow-hidden text-ellipsis whitespace-nowrap font-normal leading-tight [font-size:var(--vui-font-xs)] [color:var(--fg-secondary)]",
   objectItemActive:
     "border-[color-mix(in_srgb,var(--accent-cool)_40%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))] shadow-[var(--vui-shadow-inset-accent)]",
   manualCommitPanel:
@@ -127,5 +128,5 @@ export const gitRouteStyles = {
   commitBlockReason: "m-0 text-[var(--vui-font-xs)] leading-snug text-[var(--accent-warm-2)]",
   commitReady: "m-0 text-[var(--vui-font-xs)] leading-snug text-[var(--state-success)]",
   commitHeader:
-    "flex w-full min-w-0 items-center justify-between gap-2 leading-tight [&_code]:shrink-0 [&_code]:font-mono [&_code]:text-[var(--vui-font-xs)] [&_code]:text-[var(--accent-warm-2)] [&_span]:inline-flex [&_span]:min-w-0 [&_span]:shrink [&_span]:items-center [&_span]:gap-[5px] [&_span]:overflow-hidden [&_span]:text-ellipsis [&_span]:whitespace-nowrap [&_span]:text-[var(--vui-font-xs)] [&_span]:leading-tight [&_span]:text-[var(--fg-tertiary)]",
+    "flex w-full min-w-0 items-center justify-between gap-2 leading-tight [&_code]:shrink-0 [&_code]:font-mono [&_code]:[font-size:var(--vui-font-xs)] [&_code]:[color:var(--accent-warm-2)] [&_span]:inline-flex [&_span]:min-w-0 [&_span]:shrink-0 [&_span]:items-center [&_span]:gap-[5px] [&_span]:[font-size:var(--vui-font-xs)] [&_span]:leading-tight [&_span]:[color:var(--fg-tertiary)]",
 } as const;
