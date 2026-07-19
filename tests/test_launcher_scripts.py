@@ -220,6 +220,50 @@ def test_python_launcher_start_rejects_an_existing_port_owner(monkeypatch):
         launcher._start_backend(8000, "127.0.0.1", no_browser=True)
 
 
+def test_python_launcher_restart_builds_before_stopping_backend(monkeypatch):
+    launcher = _load_python_launcher()
+    calls: list[tuple[str, object]] = []
+    source_identity = {
+        "projectRoot": str(launcher.PROJECT_ROOT),
+        "branch": "main",
+        "commit": "a" * 40,
+        "frontendTree": "tree-current",
+        "trackedClean": True,
+    }
+
+    monkeypatch.setattr(launcher, "_assert_internal_action_authorized", lambda action: None)
+    monkeypatch.setattr(launcher, "_runtime_source_identity", lambda: source_identity)
+    monkeypatch.setattr(
+        launcher,
+        "_ensure_frontend_build",
+        lambda identity: calls.append(("build", identity)) or {"rebuilt": True},
+    )
+    monkeypatch.setattr(
+        launcher,
+        "_assert_runtime_source_identity",
+        lambda identity: calls.append(("assert", identity)),
+    )
+    monkeypatch.setattr(launcher, "_stop_backend", lambda: calls.append(("stop", None)) or {})
+    monkeypatch.setattr(
+        launcher,
+        "_start_backend",
+        lambda port, host, *, no_browser: calls.append(
+            ("start", {"port": port, "host": host, "noBrowser": no_browser})
+        )
+        or {},
+    )
+
+    result = launcher.main(["--action", "restart", "--host", "127.0.0.1", "--port", "8123", "--no-browser"])
+
+    assert result == 0
+    assert calls == [
+        ("build", source_identity),
+        ("assert", source_identity),
+        ("stop", None),
+        ("start", {"port": 8123, "host": "127.0.0.1", "noBrowser": True}),
+    ]
+
+
 def test_python_launcher_stop_preserves_state_when_a_foreign_port_owner_remains(monkeypatch):
     launcher = _load_python_launcher()
     written: list[dict] = []
