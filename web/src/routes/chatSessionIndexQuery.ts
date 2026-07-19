@@ -18,6 +18,7 @@ type UseSessionIndexQueryOptions = {
 type SessionSummaryUpdater = (sessions: SessionSummary[] | undefined) => SessionSummary[] | undefined;
 type SessionQueryInfiniteData = InfiniteData<SessionQueryResponse, string>;
 export type SessionIndexCacheSnapshot = Array<[QueryKey, SessionQueryInfiniteData | undefined]>;
+export type AgentSessionCacheSnapshot = Array<[QueryKey, SessionQueryResponse | undefined]>;
 
 function sessionQueryUrl(queryText: string, cursor: string): string {
   const params = new URLSearchParams();
@@ -95,6 +96,10 @@ export function captureSessionIndexCacheSnapshots(queryClient: QueryClient): Ses
   return queryClient.getQueriesData<SessionQueryInfiniteData>({ queryKey: ["sessions", "query"] });
 }
 
+export function captureAgentSessionCacheSnapshots(queryClient: QueryClient): AgentSessionCacheSnapshot {
+  return queryClient.getQueriesData<SessionQueryResponse>({ queryKey: ["sessions", "agent"] });
+}
+
 export function restoreSessionIndexCacheSnapshots(
   queryClient: QueryClient,
   snapshots: SessionIndexCacheSnapshot | undefined,
@@ -102,6 +107,40 @@ export function restoreSessionIndexCacheSnapshots(
   for (const [queryKey, data] of snapshots ?? []) {
     queryClient.setQueryData(queryKey, data);
   }
+}
+
+export function restoreAgentSessionCacheSnapshots(
+  queryClient: QueryClient,
+  snapshots: AgentSessionCacheSnapshot | undefined,
+) {
+  for (const [queryKey, data] of snapshots ?? []) {
+    queryClient.setQueryData(queryKey, data);
+  }
+}
+
+export function removeSessionFromAgentSessionCaches(queryClient: QueryClient, sessionId: string) {
+  const normalizedSessionId = sessionId.trim();
+  if (!normalizedSessionId) {
+    return;
+  }
+  queryClient.setQueriesData<SessionQueryResponse>({ queryKey: ["sessions", "agent"] }, (data) => {
+    if (!data) {
+      return data;
+    }
+    const items = data.items.filter((session) => session.id !== normalizedSessionId);
+    const removedCount = data.items.length - items.length;
+    if (removedCount === 0) {
+      return data;
+    }
+    return {
+      ...data,
+      items,
+      totalEstimate:
+        typeof data.totalEstimate === "number"
+          ? Math.max(0, data.totalEstimate - removedCount)
+          : data.totalEstimate,
+    };
+  });
 }
 
 export function updateSessionSummaryCaches(queryClient: QueryClient, updater: SessionSummaryUpdater) {

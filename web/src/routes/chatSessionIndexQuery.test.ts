@@ -4,7 +4,10 @@ import { describe, expect, it } from "vitest";
 import { queryKeys } from "../api/queryKeys";
 import type { SessionQueryResponse, SessionSummary } from "../api/types";
 import {
+  captureAgentSessionCacheSnapshots,
   captureSessionIndexCacheSnapshots,
+  removeSessionFromAgentSessionCaches,
+  restoreAgentSessionCacheSnapshots,
   restoreSessionIndexCacheSnapshots,
   updateSessionSummaryCaches,
 } from "./chatSessionIndexQuery";
@@ -73,5 +76,31 @@ describe("chatSessionIndexQuery cache helpers", () => {
 
     const paginated = queryClient.getQueryData<{ pages: SessionQueryResponse[] }>(queryKeys.sessionQuery("", 50));
     expect(paginated?.pages[0]?.items[0]?.title).toBe("Alpha");
+  });
+
+  it("removes a deleted session from Agent tab caches and restores it after failure", () => {
+    const queryClient = new QueryClient();
+    const agentAKey = ["sessions", "agent", "agent-a"] as const;
+    const agentBKey = ["sessions", "agent", "agent-b"] as const;
+    queryClient.setQueryData(agentAKey, page([
+      session("session-delete", "Delete"),
+      session("session-keep", "Keep"),
+    ], "", 2));
+    queryClient.setQueryData(agentBKey, page([session("session-other", "Other")], "", 1));
+    const snapshots = captureAgentSessionCacheSnapshots(queryClient);
+
+    removeSessionFromAgentSessionCaches(queryClient, "session-delete");
+
+    expect(queryClient.getQueryData<SessionQueryResponse>(agentAKey)?.items.map((item) => item.id))
+      .toEqual(["session-keep"]);
+    expect(queryClient.getQueryData<SessionQueryResponse>(agentAKey)?.totalEstimate).toBe(1);
+    expect(queryClient.getQueryData<SessionQueryResponse>(agentBKey)?.items.map((item) => item.id))
+      .toEqual(["session-other"]);
+
+    restoreAgentSessionCacheSnapshots(queryClient, snapshots);
+
+    expect(queryClient.getQueryData<SessionQueryResponse>(agentAKey)?.items.map((item) => item.id))
+      .toEqual(["session-delete", "session-keep"]);
+    expect(queryClient.getQueryData<SessionQueryResponse>(agentAKey)?.totalEstimate).toBe(2);
   });
 });
