@@ -121,8 +121,9 @@ export const ShadcnSelect = forwardRef<HTMLSelectElement, ShadcnSelectProps>(fun
         vuiFormControlClass(density),
         "w-full min-w-0 appearance-none",
         "bg-[length:12px_12px] bg-[right_0.55rem_center] bg-no-repeat pr-7",
-        // lightweight chevron without extra icon dependency
-        "bg-[url('data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20width%3D%2212%22%20height%3D%2212%22%20viewBox%3D%220%200%2012%2012%22%3E%3Cpath%20fill%3D%22%237d8796%22%20d%3D%22M2.5%204.5%206%208l3.5-3.5%22/%3E%3C/svg%3E')]",
+        // Theme-token chevron (dark/light) — avoid hardcoded fill hex.
+        "bg-[image:var(--vui-select-chevron)]",
+        "[color-scheme:inherit]",
         className,
       ]
         .filter(Boolean)

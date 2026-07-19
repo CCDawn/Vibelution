@@ -1,4 +1,5 @@
 import type { AgentInstance, SessionSummary } from "../api/types";
+import { VButton } from "../components/vui";
 import styles from "./AgentConversationDirectory.styles";
 
 export type AgentConversationDirectoryProps = {
@@ -90,12 +91,12 @@ export function AgentConversationDirectory({
             const displayName = String(agent.displayName || agent.agentCode || agentId).trim();
             const avatarUrl = String(agent.avatarImageUrl || "").trim();
             return (
-              <button
+              <VButton
                 key={agentId}
                 type="button"
                 className={[styles.agentRow, active ? styles.agentRowActive : ""].filter(Boolean).join(" ")}
                 aria-current={active ? "page" : undefined}
-                onClick={() => onOpenAgent(agent)}
+                onPress={() => onOpenAgent(agent)}
               >
                 <span className={styles.agentAvatar} aria-hidden="true">
                   {avatarUrl ? <img className={styles.agentAvatarImage} src={avatarUrl} alt="" /> : avatarInitials(agent.agentCode, displayName, agentId)}
@@ -111,7 +112,7 @@ export function AgentConversationDirectory({
                     {latestSession ? <time className={styles.agentMetaItem}>{formatTime(latestSession.updatedAt || latestSession.lastActive)}</time> : null}
                   </span>
                 </span>
-              </button>
+              </VButton>
             );
           })}
         </div>

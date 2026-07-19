@@ -120,6 +120,77 @@ def test_session_agent_runtime_cache_reuses_transport_and_invalidates_on_prompt_
     session_service._invalidate_session_agent_runtime_cache()
 
 
+def test_session_agent_runtime_cache_ignores_unrelated_app_config_domains(tmp_path, monkeypatch):
+    session_service._invalidate_session_agent_runtime_cache()
+    created = []
+
+    def create_runtime(*_args, **_kwargs):
+        runtime = object()
+        created.append(runtime)
+        return runtime
+
+    monkeypatch.setattr(session_service, "_create_chat_agent_for_session", create_runtime)
+    agent = {
+        "agentId": "agent-primary",
+        "updatedAt": "2026-07-16T10:00:00Z",
+        "primaryMode": "chat",
+        "promptTemplateId": "prompt-chat-default",
+    }
+    base_config = {
+        "llm": {"profiles": {"primary": {"model": "model-primary"}}},
+        "agent": {"name": "Agent"},
+        "context_compression": {"enabled": True},
+        "pet": {"mood": "calm"},
+    }
+    first, first_cache = session_service._acquire_chat_agent_for_session(
+        "session-live",
+        tmp_path,
+        agent,
+        resolved_llm=SimpleNamespace(config=base_config, model_id="model-primary"),
+        prompt_snapshot_hash="prompt-v1",
+    )
+    unrelated_change, unrelated_cache = session_service._acquire_chat_agent_for_session(
+        "session-live",
+        tmp_path,
+        agent,
+        resolved_llm=SimpleNamespace(
+            config={**base_config, "pet": {"mood": "excited"}},
+            model_id="model-primary",
+        ),
+        prompt_snapshot_hash="prompt-v1",
+    )
+    llm_change, llm_cache = session_service._acquire_chat_agent_for_session(
+        "session-live",
+        tmp_path,
+        agent,
+        resolved_llm=SimpleNamespace(
+            config={**base_config, "llm": {"profiles": {"primary": {"model": "model-next"}}}},
+            model_id="model-primary",
+        ),
+        prompt_snapshot_hash="prompt-v1",
+    )
+
+    assert first_cache["status"] == "miss"
+    assert unrelated_cache["status"] == "hit"
+    assert unrelated_change is first
+    assert llm_cache["status"] == "miss"
+    assert llm_change is not first
+    compression_change, compression_cache = session_service._acquire_chat_agent_for_session(
+        "session-live",
+        tmp_path,
+        agent,
+        resolved_llm=SimpleNamespace(
+            config={**base_config, "context_compression": {"enabled": False}},
+            model_id="model-primary",
+        ),
+        prompt_snapshot_hash="prompt-v1",
+    )
+    assert compression_cache["status"] == "miss"
+    assert compression_change is not llm_change
+    assert len(created) == 3
+    session_service._invalidate_session_agent_runtime_cache()
+
+
 def test_session_event_cache_coalesces_concurrent_misses(monkeypatch):
     session_id = "session-singleflight"
     loader_started = threading.Event()

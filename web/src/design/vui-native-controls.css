@@ -182,3 +182,39 @@
   margin: 0;
   accent-color: var(--accent-cool);
 }
+
+/* Path B Wave 7: shadcn-native form renderer dual-theme hardening */
+[data-vui-app] :is(
+  input[data-renderer="shadcn"],
+  select[data-renderer="shadcn"],
+  textarea[data-renderer="shadcn"]
+) {
+  color-scheme: inherit;
+  background-color: var(--vui-control-muted);
+  color: var(--fg-primary);
+  border-color: var(--vui-border-subtle);
+}
+
+[data-vui-app] select[data-renderer="shadcn"] option,
+[data-vui-app] select[data-renderer="shadcn"] optgroup {
+  background-color: var(--surface-input);
+  color: var(--fg-primary);
+}
+
+[data-vui-app] :is(
+  input[data-renderer="shadcn"],
+  textarea[data-renderer="shadcn"]
+)::placeholder {
+  color: var(--fg-tertiary);
+}
+
+[data-vui-app] label[data-vui="checkbox"][data-renderer="shadcn"] {
+  color: var(--fg-secondary);
+  border-color: var(--vui-border-subtle);
+  background-color: var(--vui-control-muted);
+}
+
+[data-vui-app] label[data-vui="checkbox"][data-renderer="shadcn"][data-selected="true"] {
+  color: var(--fg-primary);
+  border-color: color-mix(in srgb, var(--accent-cool) 48%, var(--vui-border-subtle));
+}
