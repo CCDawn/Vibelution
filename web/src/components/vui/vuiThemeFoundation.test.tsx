@@ -182,7 +182,9 @@ describe("VUI dual-theme foundation", () => {
 
     expect(vuiSources).not.toMatch(/text-\[0\.(?:6\d|7[0-7])rem\]/);
     expect(vuiSources).not.toContain("text-xs");
-    expect(vuiSources).toContain("text-[var(--vui-font-xs)]");
+    // Tailwind treats text-[var(--vui-font-*)] as color; use explicit font-size.
+    expect(vuiSources).toContain("[font-size:var(--vui-font-xs)]");
+    expect(vuiSources).not.toMatch(/(?<!font-size:)(?<!length:)text-\[var\(--vui-font-xs\)\]/);
   });
 
   it("keeps migrated route style maps free of page-local sub-14px typography", () => {

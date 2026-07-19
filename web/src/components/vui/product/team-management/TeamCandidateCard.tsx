@@ -46,7 +46,7 @@ const CARD_SELECTED =
 
 const CHIP_BASE =
   "inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border px-2 " +
-  "text-[var(--vui-font-xs)] font-semibold leading-none whitespace-nowrap min-w-0";
+  "[font-size:var(--vui-font-xs)] font-semibold leading-none whitespace-nowrap min-w-0";
 
 const CHIP_TONE: Record<TeamSourceResultTone, string> = {
   ready:
@@ -65,7 +65,7 @@ const ACTIONS =
   "[&_[data-vui=native-button]]:rounded-[7px] [&_[data-vui=native-button]]:border " +
   "[&_[data-vui=native-button]]:border-[color:color-mix(in_srgb,var(--accent-cool)_28%,var(--border-soft))] " +
   "[&_[data-vui=native-button]]:bg-[color:color-mix(in_srgb,var(--vui-surface-row)_74%,transparent)] " +
-  "[&_[data-vui=native-button]]:text-[var(--fg-primary)] [&_[data-vui=native-button]]:text-[var(--vui-font-xs)] " +
+  "[&_[data-vui=native-button]]:text-[var(--fg-primary)] [&_[data-vui=native-button]]:[font-size:var(--vui-font-xs)] " +
   "[&_[data-vui=native-button]:disabled]:cursor-not-allowed [&_[data-vui=native-button]:disabled]:opacity-55";
 
 export function TeamCandidateCard({
@@ -146,10 +146,10 @@ export function TeamCandidateCard({
         {statusTitle && !activateTitle ? <VTooltip content={statusTitle}>{statusBadge}</VTooltip> : statusBadge}
       </div>
       {summary ? (
-        <p className="col-start-1 m-0 min-w-0 truncate text-[var(--vui-font-xs)] text-[var(--fg-tertiary)]">{summary}</p>
+        <p className="col-start-1 m-0 min-w-0 truncate [font-size:var(--vui-font-xs)] text-[var(--fg-tertiary)]">{summary}</p>
       ) : null}
       {meta && meta.length ? (
-        <div className="col-start-1 flex flex-wrap items-center gap-1.5 min-w-0 text-[var(--vui-font-xs)] text-[var(--fg-tertiary)] [&_span:first-child]:text-[var(--fg-secondary)]">
+        <div className="col-start-1 flex flex-wrap items-center gap-1.5 min-w-0 [font-size:var(--vui-font-xs)] text-[var(--fg-tertiary)] [&_span:first-child]:text-[var(--fg-secondary)]">
           {meta.map((entry) => (
             <span key={entry.key}>{entry.label}</span>
           ))}
@@ -158,7 +158,7 @@ export function TeamCandidateCard({
       {source ? (
         <div
           data-missing={source.missing ? "true" : undefined}
-          className="col-start-2 row-start-1 row-span-3 grid min-w-0 max-w-full grid-cols-[max-content_minmax(0,1fr)] items-center self-center gap-1 overflow-hidden text-[var(--vui-font-xs)] [&_a]:truncate [&_code]:truncate [&_a]:text-[var(--accent-cool)] [&_code]:text-[var(--fg-tertiary)] max-[820px]:col-start-1 max-[820px]:row-start-auto max-[820px]:row-span-1 data-[missing=true]:text-[var(--state-warning)]"
+          className="col-start-2 row-start-1 row-span-3 grid min-w-0 max-w-full grid-cols-[max-content_minmax(0,1fr)] items-center self-center gap-1 overflow-hidden [font-size:var(--vui-font-xs)] [&_a]:truncate [&_code]:truncate [&_a]:text-[var(--accent-cool)] [&_code]:text-[var(--fg-tertiary)] max-[820px]:col-start-1 max-[820px]:row-start-auto max-[820px]:row-span-1 data-[missing=true]:text-[var(--state-warning)]"
         >
           <span className="text-[var(--fg-tertiary)]">{source.label}</span>
           {source.title && !activateTitle ? (

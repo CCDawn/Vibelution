@@ -89,7 +89,7 @@ export function VDenseRow({ className, children, ...props }: VDenseRowProps) {
       {...props}
       data-vui="dense-row"
       className={[
-        "min-w-0 rounded-[var(--radius-control)] border border-vui-border-subtle bg-vui-surface-row px-2 py-1.5 text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-vui-fg-secondary",
+        "min-w-0 rounded-[var(--radius-control)] border border-vui-border-subtle bg-vui-surface-row px-2 py-1.5 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-vui-fg-secondary",
         "focus-within:ring-2 focus-within:ring-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)]",
         className,
       ]
@@ -119,7 +119,7 @@ export function VMetricChip({ className, label, value, ...props }: VMetricChipPr
       {...props}
       data-vui="metric-chip"
       className={[
-        "inline-flex min-h-6 w-fit max-w-full items-center gap-1.5 rounded-full border border-vui-border-subtle bg-vui-control-muted px-2 text-[var(--vui-font-xs)] font-semibold leading-none text-vui-fg-secondary",
+        "inline-flex min-h-6 w-fit max-w-full items-center gap-1.5 rounded-full border border-vui-border-subtle bg-vui-control-muted px-2 [font-size:var(--vui-font-xs)] font-semibold leading-none text-vui-fg-secondary",
         className,
       ]
         .filter(Boolean)
@@ -138,7 +138,7 @@ export function VStatusChip({ className, children, tone = "neutral", ...props }:
       data-vui="status-chip"
       data-tone={tone}
       className={[
-        "inline-flex min-h-6 w-fit max-w-full items-center rounded-full border px-2 text-[var(--vui-font-xs)] font-semibold leading-none",
+        "inline-flex min-h-6 w-fit max-w-full items-center rounded-full border px-2 [font-size:var(--vui-font-xs)] font-semibold leading-none",
         stateToneClass[tone],
         className,
       ]

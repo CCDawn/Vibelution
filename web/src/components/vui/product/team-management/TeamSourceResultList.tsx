@@ -54,7 +54,7 @@ const ROW_SELECTED =
 
 const CHIP_BASE =
   "inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border px-2 " +
-  "text-[var(--vui-font-xs)] font-semibold leading-none whitespace-nowrap justify-self-start min-w-0";
+  "[font-size:var(--vui-font-xs)] font-semibold leading-none whitespace-nowrap justify-self-start min-w-0";
 
 const CHIP_TONE: Record<TeamSourceResultTone, string> = {
   ready:
@@ -128,17 +128,17 @@ export function TeamSourceResultItem({
       onKeyDown={handleKeyDown}
     >
       {statusTitle && !activateTitle ? <VTooltip content={statusTitle}>{statusBadge}</VTooltip> : statusBadge}
-      <div className="min-w-0 text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] [&_strong]:block [&_strong]:truncate">
+      <div className="min-w-0 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] [&_strong]:block [&_strong]:truncate">
         {titleTooltip && !activateTitle ? <VTooltip content={titleTooltip} width="wide">{titleValue}</VTooltip> : titleValue}
       </div>
-      <div className="flex min-w-[76px] flex-nowrap items-center gap-1 whitespace-nowrap text-[var(--vui-font-xs)] text-[var(--fg-tertiary)] [&_span:first-child]:text-[var(--fg-secondary)] max-[820px]:hidden">
+      <div className="flex min-w-[76px] flex-nowrap items-center gap-1 whitespace-nowrap [font-size:var(--vui-font-xs)] text-[var(--fg-tertiary)] [&_span:first-child]:text-[var(--fg-secondary)] max-[820px]:hidden">
         {meta.map((entry) => (
           <span key={entry.key}>{entry.label}</span>
         ))}
       </div>
       <div
         data-missing={source.missing ? "true" : undefined}
-        className="grid min-w-0 max-w-full grid-cols-[max-content_minmax(0,1fr)] items-center gap-1 overflow-hidden text-[var(--vui-font-xs)] [&_a]:truncate [&_code]:truncate [&_a]:text-[var(--accent-cool)] [&_code]:text-[var(--fg-tertiary)] max-[980px]:col-span-2 data-[missing=true]:text-[var(--state-warning)]"
+        className="grid min-w-0 max-w-full grid-cols-[max-content_minmax(0,1fr)] items-center gap-1 overflow-hidden [font-size:var(--vui-font-xs)] [&_a]:truncate [&_code]:truncate [&_a]:text-[var(--accent-cool)] [&_code]:text-[var(--fg-tertiary)] max-[980px]:col-span-2 data-[missing=true]:text-[var(--state-warning)]"
       >
         <span className="text-[var(--fg-tertiary)]">{source.label}</span>
         {source.title && !activateTitle ? (
