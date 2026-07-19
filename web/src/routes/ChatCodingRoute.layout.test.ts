@@ -64,6 +64,7 @@ import chatSessionRenameMenuSource from "./chat/useChatSessionRenameMenu.ts?raw"
 import chatCliAgentTerminalSource from "./chat/useChatCliAgentTerminal.ts?raw";
 import chatCacheDetailModelSource from "./chat/chatCacheDetailModel.ts?raw";
 import chatCacheDetailDialogSource from "./chat/useChatCacheDetailDialog.ts?raw";
+import chatTokenStatusModelSource from "./chat/chatTokenStatusModel.ts?raw";
 import chatToolApprovalDialogStyles from "./chat/ChatToolApprovalDialog.styles";
 import chatToolApprovalDialogSource from "./chat/ChatToolApprovalDialog.tsx?raw";
 import { ChatToolApprovalDialog } from "./chat/ChatToolApprovalDialog";
@@ -153,6 +154,7 @@ const routeAndGroupPresentationSource = `${routeSource}\n${chatGroupMessagePrese
 const routeAndRenameMenuSource = `${routeSource}\n${chatSessionRenameMenuSource}`;
 const routeAndCliTerminalSource = `${routeSource}\n${chatCliAgentTerminalSource}\n${cliAgentRunModelSource}`;
 const routeAndCacheDetailSource = `${routeSource}\n${chatCacheDetailModelSource}\n${chatCacheDetailDialogSource}\n${sessionCacheCompositionSource}\n${chatRoutePresentationSource}`;
+const routeAndTokenStatusSource = `${routeSource}\n${chatTokenStatusModelSource}`;
 
 describe("ChatCodingRoute layout contract", () => {
   it("keeps the center conversation readable and the composer as a stable bottom layer", () => {
@@ -1061,19 +1063,19 @@ describe("ChatCodingRoute layout contract", () => {
   });
 
   it("keeps prompt cache observation visible in the current session status strip", () => {
-    expect(routeSource).toContain("const sessionCacheUsage = detail?.cacheUsage");
-    expect(routeSource).toContain("sessionCacheUsage?.source === \"provider_usage\"");
-    expect(routeSource).toContain("sessionCacheUsage?.source === \"not_called\"");
-    expect(routeSource).toContain("key: \"cache\"");
-    expect(routeSource).toContain("label: t(\"previousCacheHit\")");
-    expect(routeSource).toContain("turnCachedInputTokens");
-    expect(routeSource).toContain("cacheCreationInputTokens");
-    expect(routeSource).toContain("turnInputTokens");
-    expect(routeSource).toContain("turnCacheHitRate");
-    expect(routeSource).toContain("cacheHitNotCalled");
-    expect(routeSource).toContain("cacheHitMissing");
-    expect(routeSource).toContain("const tokenStatusCacheTitle = [");
-    expect(routeSource).toContain("llmUsageTitle");
+    expect(routeAndTokenStatusSource).toContain("const sessionCacheUsage = detail?.cacheUsage");
+    expect(routeAndTokenStatusSource).toContain("sessionCacheUsage?.source === \"provider_usage\"");
+    expect(routeAndTokenStatusSource).toContain("sessionCacheUsage?.source === \"not_called\"");
+    expect(routeAndTokenStatusSource).toContain("key: \"cache\"");
+    expect(routeAndTokenStatusSource).toContain("label: t(\"previousCacheHit\")");
+    expect(routeAndTokenStatusSource).toContain("turnCachedInputTokens");
+    expect(routeAndTokenStatusSource).toContain("cacheCreationInputTokens");
+    expect(routeAndTokenStatusSource).toContain("turnInputTokens");
+    expect(routeAndTokenStatusSource).toContain("turnCacheHitRate");
+    expect(routeAndTokenStatusSource).toContain("cacheHitNotCalled");
+    expect(routeAndTokenStatusSource).toContain("cacheHitMissing");
+    expect(routeAndTokenStatusSource).toContain("const tokenStatusCacheTitle = [");
+    expect(routeAndTokenStatusSource).toContain("llmUsageTitle");
   });
 
   it("presents previous-turn token state as compact visual metrics with hover details", () => {
@@ -1082,7 +1084,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("const lastLlmPayloadTrace = detail?.lastLlmPayloadTrace ?? null");
     expect(routeSource).toContain("import { CacheDetailDialog }");
     expect(routeSource).toContain("import { LlmPayloadTracePanel }");
-    expect(routeSource).toContain("import { TokenCoreStatusPanel, type TokenCoreStatusMetric }");
+    expect(routeSource).toContain("import { TokenCoreStatusPanel }");
+    expect(routeSource).toContain('from "./chat/chatTokenStatusModel"');
     expect(routeSource).not.toContain("<details className={styles.sessionDiagnosticsDetails}>");
     expect(routeSource).not.toContain("<summary className={styles.sessionDiagnosticsSummary}>");
     expect(routeSource).not.toContain("const tokenCompressionContextBadge");
@@ -1090,7 +1093,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).not.toContain("styles.tokenCompressionBadges");
     expect(routeSource).not.toContain("<span className={styles.metricValue}>{compressionCurrentPercent}%</span>");
     expect(tokenCoreStatusPanelSource).toContain("styles.tokenCompressionCard");
-    expect(routeSource).toContain("const tokenStatusMetrics");
+    expect(routeAndTokenStatusSource).toContain("tokenStatusMetrics");
     expect(routeAndIndexRailSource).toContain("<TokenCoreStatusPanel");
     expect(routeAndIndexRailSource).toContain("<LlmPayloadTracePanel");
     expect(routeAndIndexRailSource).toContain("trace={lastLlmPayloadTrace}");
@@ -1110,18 +1113,18 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).not.toContain("const tokenCompressionRows");
     expect(routeSource).not.toContain("key: \"llm\"");
     expect(routeSource).not.toContain("key: \"output\"");
-    expect(routeSource).toContain("key: \"cache\"");
-    expect(routeSource).toContain("key: \"modelInput\"");
-    expect(routeSource).toContain("key: \"compression\"");
-    expect(routeSource).toContain("key: \"speed\"");
+    expect(routeAndTokenStatusSource).toContain("key: \"cache\"");
+    expect(routeAndTokenStatusSource).toContain("key: \"modelInput\"");
+    expect(routeAndTokenStatusSource).toContain("key: \"compression\"");
+    expect(routeAndTokenStatusSource).toContain("key: \"speed\"");
     expect(routeSource).not.toContain("key: \"strategy\"");
-    expect(routeSource).toContain("t(\"previousCacheHit\")");
-    expect(routeSource).toContain("label: lang === \"zh\" ? \"模型输入\" : \"Model input\"");
+    expect(routeAndTokenStatusSource).toContain("t(\"previousCacheHit\")");
+    expect(routeAndTokenStatusSource).toContain("label: lang === \"zh\" ? \"模型输入\" : \"Model input\"");
     expect(routeSource).not.toContain("label: lang === \"zh\" ? \"本轮上下文\" : \"Current context\"");
-    expect(routeSource).toContain("label: lang === \"zh\" ? \"压缩状态\" : \"Compression\"");
-    expect(routeSource).toContain("const tokenStatusCacheTitle = [");
+    expect(routeAndTokenStatusSource).toContain("label: lang === \"zh\" ? \"压缩状态\" : \"Compression\"");
+    expect(routeAndTokenStatusSource).toContain("const tokenStatusCacheTitle = [");
     expect(routeSource).not.toContain("const tokenStatusContextTitle = [");
-    expect(routeSource).toContain("const tokenStatusCompressionTitle = [");
+    expect(routeAndTokenStatusSource).toContain("const tokenStatusCompressionTitle = [");
     expect(tokenCoreStatusPanelSource).toContain("content={metric.title}");
     expect(tokenCoreStatusPanelSource).toContain("\"--token-status-value\": metric.percent");
     expect(routeSource).toContain("cacheDetailOpenLabel");
@@ -1133,14 +1136,14 @@ describe("ChatCodingRoute layout contract", () => {
     expect(tokenCoreStatusPanelSource).toContain("aria-controls={cacheDetailAvailable ? \"cache-detail-dialog\" : undefined}");
     expect(tokenCoreStatusPanelSource).toContain("role=\"listitem\"");
     expect(tokenCoreStatusPanelSource).toContain("<VButton");
-    expect(routeSource).toContain("const modelInputTokens = Math.max(");
-    expect(routeSource).toContain("lastCacheComposition?.calibratedInputTokens");
-    expect(routeSource).toContain("hasProviderLlmUsage ? sessionLlmUsage.inputTokens : undefined");
-    expect(routeSource).toContain("modelInputMetaLine");
-    expect(routeSource).toContain("modelInputTitle");
-    expect(routeSource).toContain("compressionThresholdValue");
-    expect(routeSource).toContain("compressionThresholdMeta");
-    expect(routeSource).toContain("tokenCompressionStrategyTitle");
+    expect(routeAndTokenStatusSource).toContain("const modelInputTokens = Math.max(");
+    expect(routeAndTokenStatusSource).toContain("lastCacheComposition?.calibratedInputTokens");
+    expect(routeAndTokenStatusSource).toContain("hasProviderLlmUsage ? sessionLlmUsage.inputTokens : undefined");
+    expect(routeAndTokenStatusSource).toContain("modelInputMetaLine");
+    expect(routeAndTokenStatusSource).toContain("modelInputTitle");
+    expect(routeAndTokenStatusSource).toContain("compressionThresholdValue");
+    expect(routeAndTokenStatusSource).toContain("compressionThresholdMeta");
+    expect(routeAndTokenStatusSource).toContain("tokenCompressionStrategyTitle");
     expect(routeAndCacheDetailSource).toContain("buildCacheDonutSegments(cachePromptCompositionSegments, cachePromptCompositionTotalTokens)");
     expect(routeAndCacheDetailSource).toContain("lastCacheComposition?.computedSegments");
     expect(routeAndCacheDetailSource).toContain("lastCacheComposition?.calibratedSegments");
@@ -1207,8 +1210,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeAndIndexRailSource).toContain("styles.currentSessionBlock");
     expect(routeAndIndexRailSource).toContain("styles.currentSessionLine");
     expect(routeAndIndexRailSource).toContain("styles.currentSessionMetaList");
-    expect(routeSource).toContain("· 缓 ${numberFormatter.format(sessionLlmUsage.cachedInputTokens)}");
-    expect(routeSource).not.toContain("${numberFormatter.format(sessionLlmUsage.inputTokens)} tokens · ${numberFormatter.format(sessionLlmUsage.cachedInputTokens)} cached");
+    expect(routeAndTokenStatusSource).toContain("· 缓 ${numberFormatter.format(sessionLlmUsage.cachedInputTokens)}");
+    expect(routeAndTokenStatusSource).not.toContain("${numberFormatter.format(sessionLlmUsage.inputTokens)} tokens · ${numberFormatter.format(sessionLlmUsage.cachedInputTokens)} cached");
     expect(routeAndIndexRailSource.indexOf("styles.runModeBlock")).toBeGreaterThan(
       routeAndIndexRailSource.indexOf("sessionCompactRows.map"),
     );
@@ -1413,7 +1416,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(html).toContain("128,000 / 200,000");
     expect(html).toContain('aria-label="模型输入 128,000. 128,000 / 200,000 · 64%"');
     expect(routeSource).toContain("const compactNumberFormatter = useMemo(");
-    expect(routeSource).toContain("displayValue: modelInputAvailable ? compactNumberFormatter.format(modelInputTokens) : \"--\"");
+    expect(routeAndTokenStatusSource).toContain("displayValue: modelInputAvailable ? compactNumberFormatter.format(modelInputTokens) : \"--\"");
   });
 
   it("shows the active skill contract before the context status cards", () => {
@@ -1446,42 +1449,42 @@ describe("ChatCodingRoute layout contract", () => {
   });
 
   it("keeps provider-observed LLM usage available in token hover details", () => {
-    expect(routeSource).toContain("const sessionLlmUsage = detail?.llmUsage ?? null");
-    expect(routeSource).toContain("sessionLlmUsage?.source === \"provider_usage\"");
-    expect(routeSource).toContain("sessionLlmUsage?.source === \"not_called\"");
+    expect(routeAndTokenStatusSource).toContain("const sessionLlmUsage = detail?.llmUsage ?? null");
+    expect(routeAndTokenStatusSource).toContain("sessionLlmUsage?.source === \"provider_usage\"");
+    expect(routeAndTokenStatusSource).toContain("sessionLlmUsage?.source === \"not_called\"");
     expect(routeSource).not.toContain("key: \"llm\"");
     expect(routeSource).not.toContain("key: \"output\"");
     expect(routeSource).not.toContain("label: lang === \"zh\" ? \"输入\" : \"Input\"");
     expect(routeSource).not.toContain("label: lang === \"zh\" ? \"输出\" : \"Output\"");
     expect(routeSource).not.toContain("const tokenInputLine = hasProviderLlmUsage");
     expect(routeSource).not.toContain("const tokenOutputLine = hasProviderLlmUsage");
-    expect(routeSource).toContain("const llmUsageLine = hasProviderLlmUsage");
-    expect(routeSource).toContain("const llmUsageTitle = hasProviderLlmUsage");
-    expect(routeSource).toContain("const tokenStatusCacheTitle = [");
-    expect(routeSource).toContain("numberFormatter.format(sessionLlmUsage.outputTokens)");
-    expect(routeSource).toContain("t(\"llmUsageNotCalled\")");
-    expect(routeSource).toContain("t(\"llmUsageMissing\")");
-    expect(routeSource).toContain("modelInputTitle");
+    expect(routeAndTokenStatusSource).toContain("const llmUsageLine = hasProviderLlmUsage");
+    expect(routeAndTokenStatusSource).toContain("const llmUsageTitle = hasProviderLlmUsage");
+    expect(routeAndTokenStatusSource).toContain("const tokenStatusCacheTitle = [");
+    expect(routeAndTokenStatusSource).toContain("numberFormatter.format(sessionLlmUsage.outputTokens)");
+    expect(routeAndTokenStatusSource).toContain("t(\"llmUsageNotCalled\")");
+    expect(routeAndTokenStatusSource).toContain("t(\"llmUsageMissing\")");
+    expect(routeAndTokenStatusSource).toContain("modelInputTitle");
   });
 
   it("labels runtime compression as a separate estimate from session message history", () => {
     expect(routeSource).not.toContain("const contextSourceLine = lastContextComposition");
-    expect(routeSource).toContain("t(\"compressionScopeRuntime\")");
-    expect(routeSource).toContain("t(\"compressionLimitBasisEffective\")");
-    expect(routeSource).toContain("const compressionModelWindowLine = compression");
-    expect(routeSource).toContain("const compressionPolicySourceLine = compression");
-    expect(routeSource).toContain("compression.policySource === \"agent_custom\"");
-    expect(routeSource).toContain("Agent 自定义策略");
-    expect(routeSource).toContain("继承全局策略");
+    expect(routeAndTokenStatusSource).toContain("t(\"compressionScopeRuntime\")");
+    expect(routeAndTokenStatusSource).toContain("t(\"compressionLimitBasisEffective\")");
+    expect(routeAndTokenStatusSource).toContain("const compressionModelWindowLine = compression");
+    expect(routeAndTokenStatusSource).toContain("const compressionPolicySourceLine = compression");
+    expect(routeAndTokenStatusSource).toContain("compression.policySource === \"agent_custom\"");
+    expect(routeAndTokenStatusSource).toContain("Agent 自定义策略");
+    expect(routeAndTokenStatusSource).toContain("继承全局策略");
     expect(tokenCoreStatusPanelSource).toContain("styles.tokenCompressionCard");
-    expect(routeSource).toContain("key: \"compression\"");
+    expect(routeAndTokenStatusSource).toContain("key: \"compression\"");
     expect(routeSource).not.toContain("key: \"strategy\"");
-    expect(routeSource).toContain("const tokenStatusCompressionTitle = [");
-    expect(routeSource).toContain("compressionTitleLine");
-    expect(routeSource).toContain("compressionThresholdValue");
-    expect(routeSource).toContain("compressionThresholdMeta");
-    expect(routeSource).toContain("compression.contextWindowLimit");
-    expect(routeSource).toContain("compression.source || \"runtime_state\"");
+    expect(routeAndTokenStatusSource).toContain("const tokenStatusCompressionTitle = [");
+    expect(routeAndTokenStatusSource).toContain("compressionTitleLine");
+    expect(routeAndTokenStatusSource).toContain("compressionThresholdValue");
+    expect(routeAndTokenStatusSource).toContain("compressionThresholdMeta");
+    expect(routeAndTokenStatusSource).toContain("compression.contextWindowLimit");
+    expect(routeAndTokenStatusSource).toContain("compression.source || \"runtime_state\"");
   });
 
   it("keeps the current session status bar keyed to the selected session", () => {
@@ -1501,8 +1504,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("const runtimeMismatchLine = runtimeActiveChatTurnSessionId && !runtimeMatchesSelectedSession");
     expect(routeSource).toContain("const noActiveDirectSessionTitle =");
     expect(routeSource).toMatch(/!\s*activeSessionId\s*\?\s*noActiveDirectSessionTitle/);
-    expect(routeSource).toContain("lastContextComposition?.totalTokens ?? sessionContextUsage?.used ?? 0");
-    expect(routeSource).toContain("lastContextComposition?.limitTokens ?? sessionContextUsage?.limit ?? 0");
+    expect(routeAndTokenStatusSource).toContain("lastContextComposition?.totalTokens ?? sessionContextUsage?.used ?? 0");
+    expect(routeAndTokenStatusSource).toContain("lastContextComposition?.limitTokens ?? sessionContextUsage?.limit ?? 0");
     expect(routeSource).toContain("const compression = runtimeMatchesSelectedSession ? runtime?.contextCompression : undefined");
     expect(routeSource).toContain("runtimeMatchesSelectedSession && runtime?.sessionStateLine");
     expect(routeSource).toMatch(/!\s*activeSessionId\s*\?\s*noActiveDirectSessionLine/);
@@ -1520,9 +1523,9 @@ describe("ChatCodingRoute layout contract", () => {
   });
 
   it("uses the model context window, not the compression threshold, for model input usage", () => {
-    expect(routeSource).toContain("const modelInputLimitTokens = Math.max(");
-    expect(routeSource).toContain("lastContextComposition?.limitTokens\n      ?? sessionContextUsage?.limit\n      ?? compression?.contextWindowLimit");
-    expect(routeSource).not.toContain("compression?.effectiveTokenLimit\n      ?? compression?.contextWindowLimit");
+    expect(routeAndTokenStatusSource).toContain("const modelInputLimitTokens = Math.max(");
+    expect(routeAndTokenStatusSource).toContain("lastContextComposition?.limitTokens\n      ?? sessionContextUsage?.limit\n      ?? compression?.contextWindowLimit");
+    expect(routeAndTokenStatusSource).not.toContain("compression?.effectiveTokenLimit\n      ?? compression?.contextWindowLimit");
   });
 
   it("moves recent control signals into the current session status bar", () => {
@@ -1543,11 +1546,11 @@ describe("ChatCodingRoute layout contract", () => {
   it("binds live token speed to the core token status metrics", () => {
     expect(routeSource).toContain("tokenSpeedSampleFromMessages");
     expect(routeSource).toContain("updateTokenSpeedTracker");
-    expect(routeSource).toContain("key: \"speed\"");
-    expect(routeSource).toContain("label: t(\"tokenSpeed\")");
-    expect(routeSource).toContain("const tokenSpeedValue");
-    expect(routeSource).toContain("const tokenSpeedTitle");
-    expect(routeSource).toContain("const conversationChainTokenSpeedActive");
+    expect(routeAndTokenStatusSource).toContain("key: \"speed\"");
+    expect(routeAndTokenStatusSource).toContain("label: t(\"tokenSpeed\")");
+    expect(routeAndTokenStatusSource).toContain("const tokenSpeedValue");
+    expect(routeAndTokenStatusSource).toContain("const tokenSpeedTitle");
+    expect(routeAndTokenStatusSource).toContain("const conversationChainTokenSpeedActive");
     expect(routeSource).not.toContain("label: t(\"currentTask\")");
   });
 
