@@ -6,7 +6,7 @@ import {
   Search,
   UsersRound,
 } from "lucide-react";
-import type { Dispatch, ReactNode, SetStateAction } from "react";
+import type { Dispatch, ReactNode, Ref, SetStateAction } from "react";
 
 import type {
   AgentInstance,
@@ -49,6 +49,7 @@ export type ChatConversationIndexRailProps = {
   conversationIndexPanel: ReactNode;
   conversationIndexPaneClassName: string;
   createGroupRoomPending: boolean;
+  createAgentButtonRef?: Ref<HTMLButtonElement>;
   describeError: (error: unknown, fallback: string) => string;
   expandedGroupAgentDetailsBySessionId: Map<string, { data?: SessionDetail; isPending?: boolean; isError?: boolean; error?: unknown }>;
   expandedGroupAgentSessionIds: string[];
@@ -129,6 +130,7 @@ export function ChatConversationIndexRail(props: ChatConversationIndexRailProps)
     conversationIndexPanel,
     conversationIndexPaneClassName,
     createGroupRoomPending,
+    createAgentButtonRef,
     describeError,
     expandedGroupAgentDetailsBySessionId,
     expandedGroupAgentSessionIds,
@@ -394,6 +396,8 @@ export function ChatConversationIndexRail(props: ChatConversationIndexRailProps)
             <div className={styles.conversationIndexLayout}>
             <div className={styles.sessionActionRow}>
               <VButton
+                ref={createAgentButtonRef}
+                id="chat-agent-create-trigger"
                 type="button"
                 className={styles.newSessionButton}
                 icon={<Plus size={15} />}

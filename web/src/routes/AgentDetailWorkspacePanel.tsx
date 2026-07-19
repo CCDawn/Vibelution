@@ -7,7 +7,6 @@ import { AgentReturnBannerPanel } from "./AgentReturnBannerPanel";
 import styles from "./AgentDetailWorkspacePanel.styles";
 
 type AgentDetailWorkspacePanelProps = {
-  createOpen: boolean;
   ariaLabel: string;
   returnBanner: ComponentProps<typeof AgentReturnBannerPanel> | null;
   bulkConfig: ComponentProps<typeof AgentBulkConfigPanel> | null;
@@ -16,7 +15,6 @@ type AgentDetailWorkspacePanelProps = {
 };
 
 export function AgentDetailWorkspacePanel({
-  createOpen,
   ariaLabel,
   returnBanner,
   bulkConfig,
@@ -29,7 +27,7 @@ export function AgentDetailWorkspacePanel({
     <AgentWorkspacePanel
       as="aside"
       ariaLabel={ariaLabel}
-      className={createOpen ? `${styles.detailPanel} ${styles.detailPanelCreating}` : styles.detailPanel}
+      className={styles.detailPanel}
     >
       {returnBanner ? <AgentReturnBannerPanel {...returnBanner} /> : null}
       {bulkConfigPanel ?? selectedContent ?? <AgentEmptySelectionPanel title={emptySelectionTitle} />}

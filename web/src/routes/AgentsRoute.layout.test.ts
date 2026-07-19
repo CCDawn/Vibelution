@@ -49,6 +49,7 @@ import toolSummaryStyles from "./AgentToolSummaryPanel.styles";
 import returnBannerStyles from "./AgentReturnBannerPanel.styles";
 import selectedDetailContentStyles from "./AgentSelectedDetailContentPanel.styles";
 import workspaceLayoutStyles from "./AgentWorkspaceLayoutPanel.styles";
+import agentCreateDialogStyles from "./agent-create/AgentCreateWizardDialog.styles";
 import routerSource from "../app/router.tsx?raw";
 import shellSource from "../app/AppShell.tsx?raw";
 
@@ -90,6 +91,14 @@ const configReferencesPanePanelSource = readFileSync(
 );
 const createPanelSource = readFileSync(
   new URL("./AgentCreatePanel.tsx", import.meta.url),
+  "utf-8",
+);
+const agentCreateDialogSource = readFileSync(
+  new URL("./agent-create/AgentCreateWizardDialog.tsx", import.meta.url),
+  "utf-8",
+);
+const agentCreateContractSource = readFileSync(
+  new URL("./agent-create/agentCreateContract.ts", import.meta.url),
   "utf-8",
 );
 const archiveZonePanelSource = readFileSync(
@@ -429,9 +438,14 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("queryKeys.agentConfigWorkspace()");
     expect(routeSource).toContain("const workspace = resolveAgentWorkspaceSource({");
     expect(routeSource).toContain('searchParams.get("create") === "1"');
-    expect(routeSource).toContain("setCreateOpen(true)");
+    expect(routeSource).toContain("const createOpen = requestedCreate");
     expect(routeSource).toContain("setCreateWizardOpen(false)");
-    expect(routeSource).toContain('const fullWorkspaceNeeded = Boolean(createOpen || activePane === "config" || activePane === "activity" || requestedAgentId)');
+    expect(routeSource).toContain('const fullWorkspaceNeeded = Boolean(activePane === "config" || activePane === "activity" || requestedAgentId)');
+    expect(routeSource).toContain("<AgentCreateWizardDialog");
+    expect(routeSource).toContain("triggerRef={agentCreateTriggerRef}");
+    expect(agentCreateDialogSource).toContain('enabled: open');
+    expect(agentCreateDialogSource).toContain('queryKeys.agentConfigWorkspace()');
+    expect(agentCreateDialogSource).toContain('queryKeys.tools()');
     expect(routeSource).toContain("enabled: fullWorkspaceNeeded");
     expect(routeSource).toContain("staleTime: 10_000");
   });
@@ -743,7 +757,7 @@ describe("AgentsRoute layout contract", () => {
     expect(modelPickerSource).toContain("上游模型当前不可用");
     expect(modelPickerSource).toContain("请先保存或放弃未保存修改");
     expect(createPanelSource).toContain("modelChoices.map((model)");
-    expect(routeSource).toContain("selectedModelId: agentLlmSlotModelId(createDraft.llmBindings, FALLBACK_AGENT_LLM_SLOTS[0])");
+    expect(agentCreateDialogSource).toContain("selectedModelId={selectedModelId}");
     expect(createPanelSource).toContain("value={selectedModelId}");
     expect(coreConfigPanelSource).toContain("<AgentModelPicker");
     expect(routeSource).toContain(
@@ -792,14 +806,13 @@ describe("AgentsRoute layout contract", () => {
   });
 
   it("guides Agent creation through defaults, provider-model linkage, and a final review", () => {
-    expect(routeSource).toContain('item.promptTemplateId === "prompt-chat-default"');
-    expect(routeSource).toContain("createAgentPresets(workspace, toolBundles, lang)");
-    expect(routeSource).toContain('id: "recommended"');
-    expect(routeSource).toContain('id: "coding"');
-    expect(routeSource).toContain('id: "research"');
-    expect(routeSource).toContain('providerId: model.providerId');
-    expect(routeSource).toContain('providerLabel: model.providerLabel');
-    expect(routeSource).toContain('selectedToolBundleIds: selectAvailableToolBundles');
+    expect(routeSource).toContain('import { AgentCreateWizardDialog } from "./agent-create/AgentCreateWizardDialog"');
+    expect(agentCreateContractSource).toContain('id: "recommended"');
+    expect(agentCreateContractSource).toContain('id: "coding"');
+    expect(agentCreateContractSource).toContain('id: "research"');
+    expect(agentCreateContractSource).toContain('providerId: model.providerId');
+    expect(agentCreateContractSource).toContain('providerLabel: model.providerLabel');
+    expect(agentCreateContractSource).toContain('selectedToolBundleIds: selectAvailableToolBundles');
     expect(createPanelSource).toContain("const [activeStep, setActiveStep] = useState(0)");
     expect(createPanelSource).toContain('aria-current={index === activeStep ? "step" : undefined}');
     expect(createPanelSource).toContain("const providerChoices = useMemo");
@@ -813,14 +826,15 @@ describe("AgentsRoute layout contract", () => {
     expect(createPanelStyles).toHaveProperty("quickFill");
     expect(createPanelStyles).toHaveProperty("wizardSteps");
     expect(createPanelStyles).toHaveProperty("createSummary");
-    expect(workspaceLayoutPanelSource).toContain("if (createOpen)");
-    expect(workspaceLayoutPanelSource).toContain("styles.createWorkspace");
-    expect(workspaceLayoutPanelSource).toContain("<AgentCreatePanel");
+    expect(agentCreateDialogSource).toContain("<AgentCreatePanel");
+    expect(agentCreateDialogSource).toContain('role="dialog"');
+    expect(agentCreateDialogSource).toContain("createPortal(");
+    expect(agentCreateDialogStyles.overlay).toContain("fixed inset-0");
+    expect(agentCreateDialogStyles.dialog).toContain("min(880px");
     expect(listWorkspacePanelSource).not.toContain("AgentCreatePanel");
     expect(listWorkspacePanelSource).not.toContain("createOpen");
-    expect(workspaceLayoutStyles.workspaceCreating).toContain("[grid-template-columns:minmax(0,_1fr)]");
-    expect(workspaceLayoutStyles.workspaceCreating).toContain("[overflow:auto]");
-    expect(workspaceLayoutStyles.createWorkspace).toContain("[max-width:1180px]");
+    expect(workspaceLayoutPanelSource).not.toContain("AgentCreatePanel");
+    expect(workspaceLayoutPanelSource).not.toContain("workspaceCreating");
     expect(createPanelStyles.createAgentPanel).not.toContain("[overflow:auto]");
     expect(createPanelStyles.createToolBundleGrid).not.toContain("[max-height:184px]");
     expect(createPanelStyles.createToolBundleGrid).not.toContain("[overflow:auto]");
@@ -882,45 +896,43 @@ describe("AgentsRoute layout contract", () => {
   });
 
   it("creates Agents through tool bundle presets instead of raw tool strings", () => {
-    expect(routeSource).toContain("DEFAULT_SESSION_AGENT_ALLOWED_TOOLS");
-    expect(routeSource).toContain("DEFAULT_SESSION_AGENT_PREFERRED_TOOLS");
-    expect(routeSource).toContain("\"conversation_log_inspect_tool\"");
-    expect(routeSource).not.toContain("\"read_file_tool\",");
-    expect(routeSource).toContain("\"grep_search_tool\"");
-    expect(routeSource).toContain("\"glob_tool\"");
-    expect(routeSource).not.toContain("\"cli_agent_run_tool\"");
-    expect(routeSource).not.toContain("\"image2_generate_tool\"");
-    expect(routeSource).toContain("allowedTools: DEFAULT_SESSION_AGENT_ALLOWED_TOOLS.join(\", \")");
-    expect(routeSource).toContain("const fallbackAllowedTools = toolBundles.length ? [] : expertiseFromDraft(draft.allowedTools)");
-    expect(routeSource).toContain("const allowedTools = sortedIds(selectedAllowedTools)");
-    expect(routeSource).toContain("const selectedPreferredTools = selectedToolPolicy.preferredTools.length");
-    expect(routeSource).toContain("const preferredTools = sortedIds(selectedPreferredTools.filter((tool) => allowedTools.includes(tool)))");
-    expect(routeSource).not.toContain("const sessionDefaultAllowedTools = workSession ? DEFAULT_SESSION_AGENT_ALLOWED_TOOLS : []");
-    expect(routeSource).not.toContain("const sessionDefaultPreferredTools = workSession ? DEFAULT_SESSION_AGENT_PREFERRED_TOOLS : []");
-    expect(routeSource).not.toContain("const allowedTools = sortedIds([...sessionDefaultAllowedTools, ...selectedAllowedTools])");
-    expect(createPanelSource).toContain("selectedToolBundleIds: string[]");
-    expect(routeSource).toContain("function defaultCreateToolBundleIds");
-    expect(routeSource).toContain('const preferred = workSession ? ["core"] : ["core", "research", "collaboration"]');
-    expect(routeSource).toContain("return bundles[0]?.bundleId ? [bundles[0].bundleId] : []");
-    expect(routeSource).toContain("const hasToolPolicyChoice = selectedPolicy.selectedBundles.length > 0 || fallbackAllowedTools.length > 0");
-    expect(routeSource).toContain("&& (workSession ? hasToolPolicyChoice : configuredToolCount > 0)");
-    expect(routeSource).toContain("function toolBundleIdsForModeChange");
-    expect(routeSource).toContain("const hasCustomSelection = draft.selectedToolBundleIds.length > 0 && !sameStringSet(draft.selectedToolBundleIds, currentDefaults)");
-    expect(routeSource).toContain("selectedToolBundleIds: toolBundleIdsForModeChange(createDraft, primaryMode, toolBundles)");
-    expect(routeSource).toContain("function toolBundleSelectionToPolicy");
-    expect(routeSource).toContain("function createToolBundleSummary");
-    expect(routeSource).toContain("createToolBundleSummaryValue");
+    expect(agentCreateContractSource).toContain("DEFAULT_SESSION_AGENT_ALLOWED_TOOLS");
+    expect(agentCreateContractSource).toContain("preferredTools");
+    expect(agentCreateContractSource).toContain("\"conversation_log_inspect_tool\"");
+    expect(agentCreateContractSource).not.toContain("\"read_file_tool\",");
+    expect(agentCreateContractSource).toContain("\"grep_search_tool\"");
+    expect(agentCreateContractSource).toContain("\"glob_tool\"");
+    expect(agentCreateContractSource).not.toContain("\"cli_agent_run_tool\"");
+    expect(agentCreateContractSource).not.toContain("\"image2_generate_tool\"");
+    expect(agentCreateContractSource).toContain("DEFAULT_SESSION_AGENT_ALLOWED_TOOLS.join(\", \")");
+    expect(agentCreateContractSource).toContain("const fallbackAllowedTools = bundles.length ? [] : expertiseFromDraft(draft.allowedTools)");
+    expect(agentCreateContractSource).toContain("const allowedTools = sortedIds(selectedAllowedTools)");
+    expect(agentCreateContractSource).toContain("const selectedPreferredTools = selectedToolPolicy.preferredTools.length");
+    expect(agentCreateContractSource).toContain("const preferredTools = sortedIds(selectedPreferredTools.filter((tool) => allowedTools.includes(tool)))");
+    expect(agentCreateContractSource).not.toContain("const sessionDefaultAllowedTools = workSession ? DEFAULT_SESSION_AGENT_ALLOWED_TOOLS : []");
+    expect(agentCreateContractSource).not.toContain("const sessionDefaultPreferredTools = workSession ? DEFAULT_SESSION_AGENT_PREFERRED_TOOLS : []");
+    expect(agentCreateContractSource).not.toContain("const allowedTools = sortedIds([...sessionDefaultAllowedTools, ...selectedAllowedTools])");
+    expect(agentCreateContractSource).toContain("selectedToolBundleIds: string[]");
+    expect(agentCreateContractSource).toContain("function defaultCreateToolBundleIds");
+    expect(agentCreateContractSource).toContain('const preferred = workSession ? ["core"] : ["core", "research", "collaboration"]');
+    expect(agentCreateContractSource).toContain("return selected.length ? selected : bundles[0]?.bundleId ? [bundles[0].bundleId] : []");
+    expect(agentCreateContractSource).toContain("const hasToolPolicyChoice = selectedPolicy.selectedBundles.length > 0 || fallbackAllowedTools.length > 0");
+    expect(agentCreateContractSource).toContain("&& (workSession ? hasToolPolicyChoice : configuredToolCount > 0)");
+    expect(agentCreateContractSource).toContain("function toolBundleIdsForModeChange");
+    expect(agentCreateContractSource).toContain("const hasCustomSelection = draft.selectedToolBundleIds.length > 0 && !sameStringSet(draft.selectedToolBundleIds, currentDefaults)");
+    expect(agentCreateContractSource).toContain("function toolBundleSelectionToPolicy");
+    expect(agentCreateContractSource).toContain("function createToolBundleSummary");
     expect(createPanelSource).toContain("copy.createAgentToolBundles");
     expect(createPanelSource).toContain("copy.createAgentToolBundlePreview");
-    expect(routeSource).toContain("creationToolBundleIds: sortedIds(draft.selectedToolBundleIds)");
-    expect(routeSource).toContain("toolPolicy: {");
-    expect(workspaceLayoutPanelSource).toContain("styles.workspaceCreating");
+    expect(agentCreateContractSource).toContain("creationToolBundleIds: sortedIds(draft.selectedToolBundleIds)");
+    expect(agentCreateContractSource).toContain("toolPolicy: {");
+    expect(workspaceLayoutPanelSource).not.toContain("styles.workspaceCreating");
     expect(routeSource).not.toContain("toolPolicy: workSession ? {} : {");
     expect(styles.createToolBundleGrid).toBeTruthy();
     expect(styles.createToolBundleOption).toBeTruthy();
     expect(styles.createToolBundleSelected).toBeTruthy();
     expect(styles.createToolBundlePreview).toBeTruthy();
-    expect(workspaceLayoutStyles.workspaceCreating).toBeTruthy();
+    expect(workspaceLayoutStyles.workspace).toBeTruthy();
   });
 
   it("keeps disabled tool-query fallbacks referentially stable so Agent navigation can settle", () => {
@@ -1024,7 +1036,7 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("const coreConfigToolPolicyTooltip = [");
     expect(coreConfigPanelSource).toContain("tooltip={toolPolicyTooltip}");
     expect(routeSource).not.toContain("<small>{toolPolicySourceLine}</small>");
-    expect(createPanelSource).toContain("content={copy.createAgentHint}");
+    expect(agentCreateDialogSource).toContain('"3 步完成；当前对话会保留在背景中。"');
     expect(createPanelSource).toContain("content={copy.createAgentToolBundlesHint}");
     expect(createPanelSource).not.toContain("title={copy.createAgentHint}");
     expect(createPanelSource).not.toContain("title={copy.createAgentToolBundlesHint}");
@@ -1401,9 +1413,9 @@ describe("AgentsRoute layout contract", () => {
   });
 
   it("includes work-session Agent setup copy for model instructions and workspace boundaries", () => {
-    expect(routeSource).toContain("function isWorkSessionCreateDraft");
-    expect(routeSource).toContain("const createDraftIsWorkSession = isWorkSessionCreateDraft(createDraft)");
-    expect(routeSource).toContain("const workSession = isWorkSessionCreateDraft(draft)");
+    expect(agentCreateContractSource).toContain("function isWorkSessionCreateDraft");
+    expect(agentCreateDialogSource).toContain("isWorkSession={isWorkSessionCreateDraft(draft)}");
+    expect(agentCreateContractSource).toContain("const workSession = isWorkSessionCreateDraft(draft)");
     expect(routeSource).toContain("const sectionOrder = [\"status\", \"boundary\", \"team_index\"] as const");
     expect(routeSource).toContain("const sectionOrder = [\"source_scope\", \"mode\", \"reference\"] as const");
     expect(routeSource).toContain("copy.managementModelPrompt");
@@ -1439,11 +1451,11 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("personaProfile: selectedAgentRequiresPersona ? {");
     expect(routeSource).toContain("taskProfile: selectedAgentRequiresTask ? {");
     expect(routeSource).toContain("modeMembership: selectedAgentRequiresTeamMembership ? {");
-    expect(routeSource).toContain("isWorkSession: createDraftIsWorkSession");
+    expect(agentCreateDialogSource).toContain("isWorkSession={isWorkSessionCreateDraft(draft)}");
     expect(createPanelSource).toContain("{!isWorkSession ? (");
-    expect(routeSource).toContain("const roleKey = workSession ? \"\" : draft.roleKey.trim()");
-    expect(routeSource).toContain("const personaProfile = workSession");
-    expect(routeSource).toContain("const taskProfile = workSession");
+    expect(agentCreateContractSource).toContain("const roleKey = workSession ? \"\" : draft.roleKey.trim()");
+    expect(agentCreateContractSource).toContain("const personaProfile = workSession");
+    expect(agentCreateContractSource).toContain("const taskProfile = workSession");
   });
 
   it("adds task-oriented Agent management filters for configuration gaps", () => {
@@ -1560,14 +1572,14 @@ describe("AgentsRoute layout contract", () => {
     expect(runtimePolicyStyles.editorActions).toBeTruthy();
   });
 
-  it("creates and safely archives Agents from the unified Agent card", () => {
-    expect(routeSource).toContain("AgentCreateDraft");
-    expect(routeSource).toContain("fetchJson<AgentConfigWorkspaceAgent>(\"/api/agents\"");
-    expect(routeSource).toContain("method: \"POST\"");
-    expect(routeSource).toContain("createAgentMutation");
+  it("creates Agents through the shared dialog and safely archives them", () => {
+    expect(routeSource).toContain("<AgentCreateWizardDialog");
+    expect(agentCreateDialogSource).toContain('fetchJson<AgentConfigWorkspaceAgent>("/api/agents"');
+    expect(agentCreateDialogSource).toContain('method: "POST"');
+    expect(agentCreateDialogSource).toContain("createMutation");
     expect(routeSource).toContain("copy.createAgent");
-    expect(workspaceLayoutPanelSource).toContain("<AgentCreatePanel");
-    expect(routeSource).toContain("onCreate: createAgent");
+    expect(agentCreateDialogSource).toContain("<AgentCreatePanel");
+    expect(agentCreateDialogSource).toContain("onCreate={() => createMutation.mutate(draft)}");
     expect(createPanelSource).toContain("styles.createAgentPanel");
     expect(createPanelSource).toContain("styles.createAgentGrid");
     expect(createPanelStyles.createAgentPanel).toBeTruthy();
@@ -1705,7 +1717,7 @@ describe("AgentsRoute layout contract", () => {
     expect(detailWorkspaceStyles.detailPanel).toContain("[overflow:auto]");
     expect(detailWorkspaceStyles.detailPanel).toContain("max-[860px]:[min-height:420px]");
     expect(detailWorkspaceStyles.detailPanel).not.toContain("max-[860px]:hidden");
-    expect(detailWorkspaceStyles.detailPanelCreating).toContain("max-[860px]:hidden");
+    expect(detailWorkspacePanelSource).not.toContain("detailPanelCreating");
     expect(selectedDetailContentPanelSource).toContain("styles.overviewLayout");
     expect(selectedDetailContentPanelSource).toContain("<aside className={styles.overviewAside}>");
   });

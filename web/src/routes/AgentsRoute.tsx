@@ -65,7 +65,7 @@ import {
   type AgentConfigDraft,
   type AgentCoreConfigLlmSlotView,
 } from "./AgentCoreConfigPanel";
-import { type AgentCreateDraft, type AgentCreatePreset } from "./AgentCreatePanel";
+import { AgentCreateWizardDialog } from "./agent-create/AgentCreateWizardDialog";
 import { type AgentResetOptions } from "./AgentDebugResetPanel";
 import { type AgentMemoryPolicyDraft } from "./AgentMemoryPolicyPanel";
 import { type AgentModeMembershipDraft } from "./AgentModeMembershipPanel";
@@ -381,16 +381,6 @@ const DEFAULT_BULK_CONFIG_APPLY: AgentBulkConfigApply = {
   primaryMode: false,
   roleKey: false,
 };
-const DEFAULT_SESSION_AGENT_ALLOWED_TOOLS = [
-  "grep_search_tool",
-  "glob_tool",
-  "get_core_context_tool",
-  "get_current_goal_tool",
-  "task_list_tool",
-  "get_git_status_summary_tool",
-  "get_recent_changes_tool",
-  "conversation_log_inspect_tool",
-];
 const DEFAULT_SESSION_AGENT_PREFERRED_TOOLS = [
   "grep_search_tool",
   "conversation_log_inspect_tool",
@@ -1744,11 +1734,6 @@ function isWorkSessionAgent(agent: AgentConfigWorkspaceAgent | null | undefined)
   return agentBoundaryType(agent) === "work_session";
 }
 
-function isWorkSessionCreateDraft(draft: AgentCreateDraft) {
-  const primaryMode = String(draft.primaryMode || "").trim();
-  return primaryMode === "" || primaryMode === "chat";
-}
-
 function normalizeToolPolicyDraftForAgent(
   draft: AgentToolPolicyDraft,
   _agent: AgentConfigWorkspaceAgent | null | undefined,
@@ -1998,137 +1983,6 @@ function taskDraftEqualsDraft(left: AgentTaskDraft, right: AgentTaskDraft) {
   );
 }
 
-function createDraftFromWorkspace(
-  workspace: AgentConfigWorkspace | undefined,
-  bundles: ToolBundle[] = [],
-  lang: "zh" | "en" = "zh",
-): AgentCreateDraft {
-  const firstModel = buildAgentModelChoices(workspace?.agentModelChoices ?? [])[0]?.modelId
-    ?? workspace?.agentModelChoices?.[0]?.modelId
-    ?? "";
-  const firstPrompt = workspace?.promptTemplates?.find((item) => item.promptTemplateId === "prompt-chat-default")
-    ?? workspace?.promptTemplates?.find((item) => item.category === "chat")
-    ?? workspace?.promptTemplates?.[0];
-  return {
-    displayName: lang === "zh" ? "新会话 Agent" : "New chat Agent",
-    llmBindings: firstModel ? { dialogue: { modelId: firstModel } } : {},
-    primaryMode: "chat",
-    roleKey: "",
-    promptTemplateId: firstPrompt?.promptTemplateId || firstPrompt?.templateId || "prompt-chat-default",
-    personaSummary: "",
-    taskMission: "",
-    selectedToolBundleIds: defaultCreateToolBundleIds(true, bundles),
-    allowedTools: DEFAULT_SESSION_AGENT_ALLOWED_TOOLS.join(", "),
-  };
-}
-
-function normalizeCreateDraftForWorkspace(
-  draft: AgentCreateDraft,
-  workspace: AgentConfigWorkspace | undefined,
-  bundles: ToolBundle[] = [],
-  lang: "zh" | "en" = "zh",
-) {
-  if (!workspace) {
-    return draft;
-  }
-  const defaults = createDraftFromWorkspace(workspace, bundles, lang);
-  const modelIds = new Set(buildAgentModelChoices(workspace.agentModelChoices ?? []).map((choice) => choice.modelId));
-  const promptIds = new Set((workspace.promptTemplates ?? []).map((template) => template.promptTemplateId || template.templateId || ""));
-  const dialogueModelId = agentLlmSlotModelId(draft.llmBindings, FALLBACK_AGENT_LLM_SLOTS[0]);
-  const defaultDialogueModelId = agentLlmSlotModelId(defaults.llmBindings, FALLBACK_AGENT_LLM_SLOTS[0]);
-  const nextDialogueModelId = modelIds.size === 0 || modelIds.has(dialogueModelId) ? dialogueModelId : defaultDialogueModelId;
-  const promptTemplateId = !draft.promptTemplateId || promptIds.size === 0 || promptIds.has(draft.promptTemplateId)
-    ? draft.promptTemplateId || defaults.promptTemplateId
-    : defaults.promptTemplateId;
-  return {
-    ...draft,
-    displayName: draft.displayName || defaults.displayName,
-    llmBindings: updateAgentLlmSlotBinding(draft.llmBindings, FALLBACK_AGENT_LLM_SLOTS[0], nextDialogueModelId || defaultDialogueModelId),
-    promptTemplateId,
-  };
-}
-
-function selectAvailableToolBundles(bundles: ToolBundle[], preferred: string[], fallback: string[]) {
-  const available = new Set(bundles.map((bundle) => bundle.bundleId));
-  const selected = preferred.filter((bundleId) => available.has(bundleId));
-  return selected.length ? selected : fallback;
-}
-
-function createAgentPresets(
-  workspace: AgentConfigWorkspace | undefined,
-  bundles: ToolBundle[],
-  lang: "zh" | "en",
-): AgentCreatePreset[] {
-  const base = createDraftFromWorkspace(workspace, bundles, lang);
-  const prompts = workspace?.promptTemplates ?? [];
-  const promptId = (category: string, preferredIds: string[]) => {
-    const exact = prompts.find((prompt) => preferredIds.includes(prompt.promptTemplateId || prompt.templateId || ""));
-    const categoryMatch = prompts.find((prompt) => prompt.category === category);
-    return exact?.promptTemplateId || exact?.templateId || categoryMatch?.promptTemplateId || categoryMatch?.templateId || base.promptTemplateId;
-  };
-  const workDefaults = defaultCreateToolBundleIds(true, bundles);
-  const teamDefaults = defaultCreateToolBundleIds(false, bundles);
-  const copy = lang === "zh" ? {
-    recommendedLabel: "推荐配置",
-    recommendedDescription: "通用会话、默认提示词与核心工具",
-    recommendedName: "新会话 Agent",
-    codingLabel: "代码开发",
-    codingDescription: "面向实现、调试和测试的工作配置",
-    codingName: "代码开发 Agent",
-    researchLabel: "研究协作",
-    researchDescription: "研究提示词、检索与协作工具",
-    researchName: "研究协作 Agent",
-    researchPersona: "严谨、证据优先，能够区分事实、推断和待验证结论。",
-    researchMission: "完成研究、资料核验与协作交付，并明确证据来源和下一步。",
-  } : {
-    recommendedLabel: "Recommended",
-    recommendedDescription: "General chat, default prompt, and core tools",
-    recommendedName: "New chat Agent",
-    codingLabel: "Code development",
-    codingDescription: "A work setup for implementation, debugging, and testing",
-    codingName: "Code development Agent",
-    researchLabel: "Research collaboration",
-    researchDescription: "Research prompt with search and collaboration tools",
-    researchName: "Research collaboration Agent",
-    researchPersona: "Rigorous and evidence-first, clearly separating facts, inference, and open questions.",
-    researchMission: "Deliver research, source verification, and collaboration outputs with evidence and explicit next steps.",
-  };
-  return [
-    {
-      id: "recommended",
-      label: copy.recommendedLabel,
-      description: copy.recommendedDescription,
-      draft: { ...base, displayName: copy.recommendedName },
-    },
-    {
-      id: "coding",
-      label: copy.codingLabel,
-      description: copy.codingDescription,
-      draft: {
-        ...base,
-        displayName: copy.codingName,
-        promptTemplateId: promptId("chat", ["prompt-chat-operation-default", "prompt-chat-default"]),
-        selectedToolBundleIds: selectAvailableToolBundles(bundles, ["core", "coding", "development"], workDefaults),
-      },
-    },
-    {
-      id: "research",
-      label: copy.researchLabel,
-      description: copy.researchDescription,
-      draft: {
-        ...base,
-        displayName: copy.researchName,
-        primaryMode: "research",
-        roleKey: "research_assistant",
-        promptTemplateId: promptId("research", ["prompt-research-default"]),
-        personaSummary: copy.researchPersona,
-        taskMission: copy.researchMission,
-        selectedToolBundleIds: selectAvailableToolBundles(bundles, ["core", "research", "collaboration"], teamDefaults),
-      },
-    },
-  ];
-}
-
 function commonBulkConfigValue(
   agents: AgentConfigWorkspaceAgent[],
   selector: (agent: AgentConfigWorkspaceAgent) => string,
@@ -2205,24 +2059,6 @@ function bulkConfigFieldReady(field: AgentBulkConfigField, draft: AgentBulkConfi
 
 function bulkConfigReady(draft: AgentBulkConfigDraft, apply: AgentBulkConfigApply) {
   return (Object.keys(apply) as AgentBulkConfigField[]).some((field) => apply[field] && bulkConfigFieldReady(field, draft));
-}
-
-function createDraftReady(draft: AgentCreateDraft, bundles: ToolBundle[] = []) {
-  const workSession = isWorkSessionCreateDraft(draft);
-  const selectedPolicy = toolBundleSelectionToPolicy(draft.selectedToolBundleIds, bundles);
-  const fallbackAllowedTools = bundles.length ? [] : expertiseFromDraft(draft.allowedTools);
-  const configuredToolCount = selectedPolicy.allowedTools.length || fallbackAllowedTools.length;
-  const hasToolPolicyChoice = selectedPolicy.selectedBundles.length > 0 || fallbackAllowedTools.length > 0;
-  return Boolean(
-    draft.displayName.trim()
-    && agentLlmSlotModelId(draft.llmBindings, FALLBACK_AGENT_LLM_SLOTS[0])
-    && draft.primaryMode.trim()
-    && (workSession || draft.roleKey.trim())
-    && draft.promptTemplateId.trim()
-    && (workSession || draft.personaSummary.trim())
-    && (workSession || draft.taskMission.trim())
-    && (workSession ? hasToolPolicyChoice : configuredToolCount > 0)
-  );
 }
 
 function slotForAgent(slots: Record<string, string> | undefined, agentId: string) {
@@ -2334,95 +2170,6 @@ function toolPolicyDeltaFromDraft(draft: AgentToolPolicyDraft, agent: AgentConfi
 
 function toolPolicyDeltaCount(delta: ReturnType<typeof toolPolicyDeltaFromDraft>) {
   return delta.grantTools.length + delta.revokeTools.length + delta.blockTools.length + delta.unblockTools.length;
-}
-
-function toolBundleMeta(bundle: ToolBundle, lang: "zh" | "en") {
-  const parts = [
-    lang === "zh" ? `${bundle.toolCount} 个工具` : `${bundle.toolCount} tools`,
-    lang === "zh" ? `${bundle.preferredToolCount} 个优先` : `${bundle.preferredToolCount} preferred`,
-  ];
-  if (bundle.highRiskToolCount > 0) {
-    parts.push(lang === "zh" ? `${bundle.highRiskToolCount} 个高风险` : `${bundle.highRiskToolCount} high risk`);
-  }
-  if (bundle.explicitAllowToolCount > 0) {
-    parts.push(lang === "zh" ? `${bundle.explicitAllowToolCount} 个需显式允许` : `${bundle.explicitAllowToolCount} explicit allow`);
-  }
-  return parts.join(" · ");
-}
-
-function defaultCreateToolBundleIds(workSession: boolean, bundles: ToolBundle[]) {
-  const available = new Set(bundles.map((bundle) => bundle.bundleId));
-  const preferred = workSession ? ["core"] : ["core", "research", "collaboration"];
-  const selected = preferred.filter((bundleId) => available.has(bundleId));
-  if (selected.length) {
-    return selected;
-  }
-  return bundles[0]?.bundleId ? [bundles[0].bundleId] : [];
-}
-
-function toolBundleIdsForModeChange(draft: AgentCreateDraft, nextPrimaryMode: string, bundles: ToolBundle[]) {
-  const currentDefaults = defaultCreateToolBundleIds(isWorkSessionCreateDraft(draft), bundles);
-  const hasCustomSelection = draft.selectedToolBundleIds.length > 0 && !sameStringSet(draft.selectedToolBundleIds, currentDefaults);
-  if (hasCustomSelection) {
-    return draft.selectedToolBundleIds;
-  }
-  const nextWorkSession = !String(nextPrimaryMode || "").trim() || nextPrimaryMode === "chat";
-  return defaultCreateToolBundleIds(nextWorkSession, bundles);
-}
-
-function toolBundleSelectionToPolicy(bundleIds: string[], bundles: ToolBundle[]) {
-  const selectedIds = new Set(sortedIds(bundleIds));
-  const selectedBundles = bundles.filter((bundle) => selectedIds.has(bundle.bundleId));
-  const allowed = new Set<string>();
-  const preferred = new Set<string>();
-  for (const bundle of selectedBundles) {
-    for (const tool of bundle.toolNames ?? []) {
-      allowed.add(tool);
-    }
-    for (const tool of bundle.preferredToolNames ?? []) {
-      if ((bundle.toolNames ?? []).includes(tool)) {
-        preferred.add(tool);
-      }
-    }
-  }
-  return {
-    selectedBundles,
-    allowedTools: sortedIds(Array.from(allowed)),
-    preferredTools: sortedIds(Array.from(preferred).filter((tool) => allowed.has(tool))),
-  };
-}
-
-function createToolBundleSummary(
-  bundleIds: string[],
-  bundles: ToolBundle[],
-  lang: "zh" | "en",
-  requiredAllowedTools: string[] = [],
-  requiredPreferredTools: string[] = [],
-) {
-  const policy = toolBundleSelectionToPolicy(bundleIds, bundles);
-  const allowedTools = sortedIds([...requiredAllowedTools, ...policy.allowedTools]);
-  const preferredTools = sortedIds([...requiredPreferredTools, ...policy.preferredTools].filter((tool) => allowedTools.includes(tool)));
-  const highRiskCount = policy.selectedBundles.reduce((total, bundle) => total + Math.max(0, bundle.highRiskToolCount || 0), 0);
-  const explicitAllowCount = policy.selectedBundles.reduce((total, bundle) => total + Math.max(0, bundle.explicitAllowToolCount || 0), 0);
-  const bundleLabels = policy.selectedBundles.map((bundle) => bundle.label);
-  const label = bundleLabels.length
-    ? bundleLabels.join(" / ")
-    : requiredAllowedTools.length ? (lang === "zh" ? "会话推荐默认" : "Recommended session default") : (lang === "zh" ? "未选择工具包" : "No package selected");
-  return {
-    ...policy,
-    allowedTools,
-    preferredTools,
-    bundleLabels,
-    highRiskCount,
-    explicitAllowCount,
-    label,
-    meta: [
-      lang === "zh" ? `${allowedTools.length} 个允许工具` : `${allowedTools.length} allowed tools`,
-      lang === "zh" ? `${preferredTools.length} 个优先工具` : `${preferredTools.length} preferred tools`,
-      highRiskCount ? (lang === "zh" ? `${highRiskCount} 个高风险` : `${highRiskCount} high risk`) : "",
-      explicitAllowCount ? (lang === "zh" ? `${explicitAllowCount} 个需显式授权` : `${explicitAllowCount} explicit allow`) : "",
-    ].filter(Boolean).join(" · "),
-  };
 }
 
 function toolPolicyMode(draft: AgentToolPolicyDraft, toolName: string): ToolPolicyMode {
@@ -3641,8 +3388,7 @@ export function AgentsRoute() {
   const [searchText, setSearchText] = useState("");
   const [selectedAgentId, setSelectedAgentId] = useState("");
   const [activePane, setActivePane] = useState<AgentConfigPaneId>("overview");
-  const [createOpen, setCreateOpen] = useState(false);
-  const [createDraft, setCreateDraft] = useState<AgentCreateDraft>(() => createDraftFromWorkspace(undefined, [], lang));
+  const createOpen = requestedCreate;
   const [configDraft, setConfigDraft] = useState<AgentConfigDraft>(() => draftFromAgent(null));
   const [membershipDraft, setMembershipDraft] = useState<AgentModeMembershipDraft>(() => membershipDraftFromWorkspace(undefined, null));
   const [personaDraft, setPersonaDraft] = useState<AgentPersonaDraft>(() => personaDraftFromAgent(null));
@@ -3667,6 +3413,7 @@ export function AgentsRoute() {
   const [configDraftPresenceDirty, setConfigDraftPresenceDirty] = useState(() => readConfigDraftPresence());
   const draftSyncSourceRef = useRef<AgentDraftSyncSource | null>(null);
   const appliedRouteTargetRef = useRef("");
+  const agentCreateTriggerRef = useRef<HTMLButtonElement | null>(null);
 
   useEffect(() => {
     const refreshPresence = () => setConfigDraftPresenceDirty(readConfigDraftPresence());
@@ -3685,7 +3432,7 @@ export function AgentsRoute() {
     };
   }, []);
 
-  const fullWorkspaceNeeded = Boolean(createOpen || activePane === "config" || activePane === "activity" || requestedAgentId);
+  const fullWorkspaceNeeded = Boolean(activePane === "config" || activePane === "activity" || requestedAgentId);
   const workspaceQuery = useQuery({
     queryKey: queryKeys.agentConfigWorkspace(),
     queryFn: () => fetchJson<AgentConfigWorkspaceWithTeamIndexes>("/api/agents/config-workspace?includeRuntime=false"),
@@ -3698,7 +3445,7 @@ export function AgentsRoute() {
     staleTime: 10_000,
   });
 
-  const toolsWorkspaceNeeded = createOpen || activePane === "config";
+  const toolsWorkspaceNeeded = activePane === "config";
   const toolsQuery = useQuery({
     queryKey: queryKeys.tools(),
     queryFn: () => fetchJson<ToolRegistryPayload>("/api/tools"),
@@ -3757,10 +3504,6 @@ export function AgentsRoute() {
   const agentModelChoices = useMemo(
     () => buildAgentModelChoices(workspace?.agentModelChoices ?? []),
     [workspace?.agentModelChoices],
-  );
-  const createPresets = useMemo(
-    () => createAgentPresets(workspace, toolBundles, lang),
-    [lang, toolBundles, workspace],
   );
   const llmSlots = useMemo(() => agentLlmSlots(workspace), [workspace?.agentLlmSlots]);
   const groups = workspace?.groups ?? EMPTY_AGENT_CONFIG_GROUPS;
@@ -4070,20 +3813,10 @@ export function AgentsRoute() {
     setActivePane(requestedPane);
     setActiveFilter(targetAgent.status === "archived" ? "archived" : "active");
     setSearchText("");
-    setCreateOpen(false);
     setSelectedBulkAgentIds(new Set());
     setBulkSelectionAnchorAgentId(targetAgent.agentId);
     appliedRouteTargetRef.current = routeTargetKey;
   }, [lang, requestedAgentId, requestedPane, workspace, workspaceQuery.data]);
-
-  useEffect(() => {
-    if (!requestedCreate) {
-      return;
-    }
-    setSelectedAgentId("");
-    setActivePane("overview");
-    setCreateOpen(true);
-  }, [requestedCreate]);
 
   useEffect(() => {
     setBulkConfigDraft(bulkConfigDraftFromAgents(selectedBulkAgents));
@@ -4138,22 +3871,6 @@ export function AgentsRoute() {
   }, [requestedAgentId, selectedAgent?.agentId]);
 
   useEffect(() => {
-    setCreateDraft((current) => {
-      if (agentLlmSlotModelId(current.llmBindings, FALLBACK_AGENT_LLM_SLOTS[0]) || current.promptTemplateId) {
-        const normalized = normalizeCreateDraftForWorkspace(current, workspace, toolBundles, lang);
-        if (normalized.selectedToolBundleIds.length || !toolBundles.length) {
-          return normalized;
-        }
-        return {
-          ...normalized,
-          selectedToolBundleIds: defaultCreateToolBundleIds(isWorkSessionCreateDraft(normalized), toolBundles),
-        };
-      }
-      return createDraftFromWorkspace(workspace, toolBundles, lang);
-    });
-  }, [lang, toolBundles, workspace]);
-
-  useEffect(() => {
     setSelectedBulkAgentIds((current) => {
       const visibleIds = new Set(visibleAgents.map((agent) => agent.agentId));
       const next = new Set(Array.from(current).filter((agentId) => visibleIds.has(agentId)));
@@ -4179,16 +3896,6 @@ export function AgentsRoute() {
   const canSaveToolPolicy = Boolean(selectedAgent?.agentId && toolPolicyDirty);
   const canSaveMemoryPolicy = Boolean(selectedAgent?.agentId && memoryPolicyDirty);
   const canSaveRuntimePolicy = Boolean(selectedAgent?.agentId && runtimePolicyDirty);
-  const createToolBundleSummaryValue = useMemo(
-    () => createToolBundleSummary(
-      createDraft.selectedToolBundleIds,
-      toolBundles,
-      lang,
-    ),
-    [createDraft, lang, toolBundles],
-  );
-  const canCreateAgent = createDraftReady(createDraft, toolBundles);
-  const createDraftIsWorkSession = isWorkSessionCreateDraft(createDraft);
   const selectedAgentRequiresPersona = requiresPersonaProfile(selectedAgent);
   const selectedAgentRequiresTask = requiresTaskProfile(selectedAgent);
   const selectedAgentRequiresTeamMembership = requiresTeamMembership(selectedAgent);
@@ -4249,87 +3956,7 @@ export function AgentsRoute() {
     toolPolicySource?.description || copy.toolPolicyPickerHint,
   ].filter(Boolean).join("\n");
 
-  const createAgentMutation = useMutation({
-    mutationFn: (draft: AgentCreateDraft) => {
-      const workSession = isWorkSessionCreateDraft(draft);
-      const roleKey = workSession ? "" : draft.roleKey.trim();
-      const selectedToolPolicy = toolBundleSelectionToPolicy(draft.selectedToolBundleIds, toolBundles);
-      const fallbackAllowedTools = toolBundles.length ? [] : expertiseFromDraft(draft.allowedTools);
-      const selectedAllowedTools = selectedToolPolicy.allowedTools.length ? selectedToolPolicy.allowedTools : fallbackAllowedTools;
-      const allowedTools = sortedIds(selectedAllowedTools);
-      const selectedPreferredTools = selectedToolPolicy.preferredTools.length
-        ? selectedToolPolicy.preferredTools
-        : fallbackAllowedTools.includes("agent_message_tool") ? ["agent_message_tool"] : [];
-      const preferredTools = sortedIds(selectedPreferredTools.filter((tool) => allowedTools.includes(tool)));
-      const personaProfile = workSession
-        ? {}
-        : {
-            personality: draft.personaSummary.trim(),
-            communicationStyle: "按角色边界回应；先给结论，再说明依据和需要交接的事项。",
-            background: `由 Agent 中心创建，用于 ${draft.displayName.trim()}。`,
-            collaborationPreference: "优先保持短反馈和清晰交接；超出任务使命时主动说明边界。",
-            identityNotes: "创建时已完成最小建档；可在人物档案中继续细化。",
-            expertise: roleKey ? [roleKey] : [],
-          };
-      const taskProfile = workSession
-        ? {}
-        : {
-            mission: draft.taskMission.trim(),
-            taskTypes: roleKey ? [roleKey] : [draft.primaryMode],
-            responsibilities: `围绕 ${draft.displayName.trim()} 执行任务；遵守角色键 ${roleKey} 的职责边界。`,
-            preferredTasks: draft.taskMission.trim(),
-            avoidTasks: "不要承担未授权工具调用、未绑定团队职位或超出任务使命的长期职责。",
-            successCriteria: "用户能清楚理解该 Agent 的职责、边界、下一步和交付结果。",
-            deliverables: "结论、依据、待确认事项和必要的交接说明。",
-            constraints: "只使用已授权工具；需要更多权限时走工具治理或用户确认。",
-            handoffNotes: "由 Agent 中心创建，后续可在人物档案和任务档案中继续细化。",
-          };
-      return fetchJson<AgentConfigWorkspaceAgent>("/api/agents", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          displayName: draft.displayName.trim(),
-          llmBindings: normalizeAgentLlmBindings(draft.llmBindings),
-          primaryMode: draft.primaryMode,
-          roleKey,
-          promptTemplateId: draft.promptTemplateId,
-          personaProfile,
-          taskProfile,
-          toolPolicy: {
-            allowedTools,
-            preferredTools,
-            readScopes: ["private"],
-            writeScopes: ["private"],
-            networkAccess: "controlled",
-            mutationAccess: "controlled",
-          },
-          metadata: {
-            creationChannel: "agent_center",
-            onboardingStatus: "complete",
-            onboardingMissing: [],
-            creationToolBundleIds: sortedIds(draft.selectedToolBundleIds),
-          },
-        }),
-      });
-    },
-    onSuccess: (agent) => {
-      setSelectedAgentId(agent.agentId);
-      setActivePane("config");
-      setCreateWizardOpen(false);
-      setCreateDraft(createDraftFromWorkspace(workspace, toolBundles, lang));
-      setNotice({
-        tone: "success",
-        text: lang === "zh" ? `已新增 ${agentLabel(agent)}` : `Created ${agentLabel(agent)}`,
-      });
-      void chatWorkspaceCache.afterAgentWorkspaceChanged();
-    },
-    onError: (error) => {
-      setNotice({ tone: "error", text: error instanceof Error ? error.message : String(error) });
-    },
-  });
-
   function setCreateWizardOpen(open: boolean) {
-    setCreateOpen(open);
     setSearchParams((current) => {
       const next = new URLSearchParams(current);
       if (open) {
@@ -4913,10 +4540,6 @@ export function AgentsRoute() {
     }));
   };
 
-  const updateCreateDraft = (patch: Partial<AgentCreateDraft>) => {
-    setCreateDraft((current) => ({ ...current, ...patch }));
-  };
-
   const updateMembershipDraft = (patch: Partial<AgentModeMembershipDraft>) => {
     setMembershipDraft((current) => ({ ...current, ...patch }));
   };
@@ -5224,13 +4847,6 @@ export function AgentsRoute() {
       delegationPolicy: delegationPolicyDraft,
       supervisionPolicy: supervisionPolicyDraft,
     });
-  };
-
-  const createAgent = () => {
-    if (!canCreateAgent || createAgentMutation.isPending) {
-      return;
-    }
-    createAgentMutation.mutate(createDraft);
   };
 
   const toggleBulkAgent = (agentId: string, selected: boolean, extendRange = false) => {
@@ -6368,47 +5984,6 @@ export function AgentsRoute() {
       />
 
       <AgentWorkspaceLayoutPanel
-        createOpen={createOpen}
-        createWorkspace={{
-          copy,
-          draft: createDraft,
-          selectedModelId: agentLlmSlotModelId(createDraft.llmBindings, FALLBACK_AGENT_LLM_SLOTS[0]),
-          isWorkSession: createDraftIsWorkSession,
-          canCreate: canCreateAgent,
-          pending: createAgentMutation.isPending,
-          notice,
-          modelChoices: agentModelChoices,
-          primaryModeOptions: bulkPrimaryModeOptions,
-          promptTemplateOptions: bulkPromptTemplateOptions,
-          toolBundles,
-          toolBundleSummary: createToolBundleSummaryValue,
-          toolBundleMeta: (bundle) => toolBundleMeta(bundle, lang),
-          presets: createPresets,
-          lang,
-          onDraftChange: updateCreateDraft,
-          onApplyPreset: (draft) => setCreateDraft(draft),
-          onModelChange: (modelId) => updateCreateDraft({
-            llmBindings: updateAgentLlmSlotBinding(createDraft.llmBindings, FALLBACK_AGENT_LLM_SLOTS[0], modelId),
-          }),
-          onPrimaryModeChange: (primaryMode) => updateCreateDraft({
-            primaryMode,
-            selectedToolBundleIds: toolBundleIdsForModeChange(createDraft, primaryMode, toolBundles),
-          }),
-          onToolBundleToggle: (bundleId, selected) => {
-            const next = new Set(createDraft.selectedToolBundleIds);
-            if (selected) {
-              next.add(bundleId);
-            } else {
-              next.delete(bundleId);
-            }
-            updateCreateDraft({ selectedToolBundleIds: sortedIds(Array.from(next)) });
-          },
-          onCancel: () => {
-            setCreateWizardOpen(false);
-            setCreateDraft(createDraftFromWorkspace(workspace, toolBundles, lang));
-          },
-          onCreate: createAgent,
-        }}
         filterRail={{
           ariaLabel: copy.agentFilters,
           searchValue: searchText,
@@ -6429,7 +6004,9 @@ export function AgentsRoute() {
           headerTitle: activeGroupLabel,
           createAgentLabel: copy.createAgent,
           visibleAgentCount: visibleAgents.length,
-          onToggleCreate: () => setCreateWizardOpen(!createOpen),
+          createAgentButtonRef: agentCreateTriggerRef,
+          createAgentButtonId: "agents-create-trigger",
+          onToggleCreate: () => setCreateWizardOpen(true),
           bulkOperations: {
             copy,
             selectedCount: selectedBulkAgents.length,
@@ -6477,7 +6054,6 @@ export function AgentsRoute() {
           },
         }}
         detailWorkspace={{
-          createOpen,
           ariaLabel: selectedAgent ? agentLabel(selectedAgent) : copy.title,
           returnBanner: returnToPath ? {
             copy,
@@ -6506,6 +6082,24 @@ export function AgentsRoute() {
           } : null,
           selectedContent: selectedAgentDetailContent ? <AgentSelectedDetailContentPanel {...selectedAgentDetailContent} /> : null,
           emptySelectionTitle: copy.selectAgent,
+        }}
+      />
+      <AgentCreateWizardDialog
+        open={createOpen}
+        triggerRef={agentCreateTriggerRef}
+        triggerId="agents-create-trigger"
+        onClose={() => setCreateWizardOpen(false)}
+        onCreated={(agent) => {
+          setSelectedAgentId(agent.agentId);
+          setActivePane("overview");
+          setNotice({
+            tone: "success",
+            text: lang === "zh" ? `已新增 ${agentLabel(agent)}` : `Created ${agentLabel(agent)}`,
+          });
+        }}
+        onOpenAdvancedConfig={(agent) => {
+          setCreateWizardOpen(false);
+          navigate(`/agents?agent=${encodeURIComponent(agent.agentId)}&pane=config`);
         }}
       />
     </section>

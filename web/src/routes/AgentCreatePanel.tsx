@@ -1,43 +1,22 @@
-import { Bot, Check, ChevronLeft, ChevronRight, Plus, Sparkles } from "lucide-react";
+import { Check, ChevronLeft, ChevronRight, Plus, Sparkles } from "lucide-react";
 import { useMemo, useState } from "react";
 
-import { type AgentLlmBindings, type ToolBundle } from "../api/types";
+import { type ToolBundle } from "../api/types";
 import { VButton, VContextualHint, VFieldRow, VNativeButton, VNativeInput, VNativeSelect, VNativeTextarea, VTooltip } from "../components/vui";
+import {
+  type AgentCreateDraft,
+  type AgentCreatePanelModelChoice,
+  type AgentCreatePreset,
+  type AgentCreateSelectOption,
+} from "./agent-create/agentCreateContract";
 import styles from "./AgentCreatePanel.styles";
 
-export type AgentCreateDraft = {
-  displayName: string;
-  llmBindings: AgentLlmBindings;
-  primaryMode: string;
-  roleKey: string;
-  promptTemplateId: string;
-  personaSummary: string;
-  taskMission: string;
-  selectedToolBundleIds: string[];
-  allowedTools: string;
-};
-
-export type AgentCreatePanelModelChoice = {
-  key: string;
-  modelId: string;
-  label: string;
-  modelLabel: string;
-  providerId: string;
-  providerLabel: string;
-  providerKind: string;
-};
-
-export type AgentCreateSelectOption = {
-  value: string;
-  label: string;
-};
-
-export type AgentCreatePreset = {
-  id: "recommended" | "coding" | "research";
-  label: string;
-  description: string;
-  draft: AgentCreateDraft;
-};
+export type {
+  AgentCreateDraft,
+  AgentCreatePanelModelChoice,
+  AgentCreatePreset,
+  AgentCreateSelectOption,
+} from "./agent-create/agentCreateContract";
 
 export type AgentCreatePanelCopy = {
   createAgent: string;
@@ -70,6 +49,8 @@ type AgentCreatePanelProps = {
   isWorkSession: boolean;
   canCreate: boolean;
   pending: boolean;
+  loadingOptions?: boolean;
+  optionsError?: string;
   notice: { tone: "success" | "error"; text: string } | null;
   modelChoices: AgentCreatePanelModelChoice[];
   primaryModeOptions: AgentCreateSelectOption[];
@@ -98,6 +79,8 @@ export function AgentCreatePanel({
   isWorkSession,
   canCreate,
   pending,
+  loadingOptions = false,
+  optionsError = "",
   notice,
   modelChoices,
   primaryModeOptions,
@@ -158,21 +141,6 @@ export function AgentCreatePanel({
 
   return (
     <section className={styles.createAgentPanel}>
-      <div className={styles.panelHeader}>
-        <div>
-          <p className={styles.panelEyebrow}>{copy.createAgentTitle}</p>
-          <div className={styles.contextualHintRow}>
-            <h3>{copy.createAgent}</h3>
-            <VContextualHint
-              label={lang === "zh" ? "新建 Agent 说明" : "New Agent details"}
-              content={copy.createAgentHint}
-              width="wide"
-            />
-          </div>
-        </div>
-        <Bot size={16} />
-      </div>
-
       <section className={styles.quickFill} aria-label={quickFillTitle}>
         <div className={styles.quickFillHeader}>
           <span>
@@ -250,6 +218,7 @@ export function AgentCreatePanel({
 
         {activeStep === 1 ? (
           <div className={styles.createAgentGrid}>
+            {loadingOptions ? <div className={styles.loadingRows} aria-label={lang === "zh" ? "正在加载模型选项" : "Loading model options"} /> : null}
             <VFieldRow label={lang === "zh" ? "服务商" : "Provider"} className="col-span-full">
               <VNativeSelect
                 value={selectedProviderId}
@@ -271,13 +240,14 @@ export function AgentCreatePanel({
                 ))}
               </VNativeSelect>
             </VFieldRow>
-            {!modelChoices.length ? <p className={styles.errorText}>{lang === "zh" ? "请先在模型库中配置至少一个可运行模型。" : "Configure at least one runtime model in the model library first."}</p> : null}
+            {!loadingOptions && !modelChoices.length ? <p className={styles.errorText}>{lang === "zh" ? "请先在模型库中配置至少一个可运行模型。" : "Configure at least one runtime model in the model library first."}</p> : null}
           </div>
         ) : null}
 
         {activeStep === 2 ? (
           <div className={styles.finalStepLayout}>
             <div className={styles.finalStepMain}>
+              {loadingOptions ? <div className={styles.loadingRows} aria-label={lang === "zh" ? "正在加载提示词和工具" : "Loading prompts and tools"} /> : null}
               <VFieldRow label={copy.prompt}>
                 <VNativeSelect value={draft.promptTemplateId} onChange={(event) => onDraftChange({ promptTemplateId: event.target.value })}>
                   <option value="">-</option>
@@ -337,6 +307,7 @@ export function AgentCreatePanel({
         ) : null}
       </div>
 
+      {optionsError ? <p className={styles.errorText}>{optionsError}</p> : null}
       {notice ? <p className={notice.tone === "error" ? styles.errorText : styles.successText}>{notice.text}</p> : null}
       <div className={styles.editorActions}>
         <VButton type="button" variant="secondary" isDisabled={pending} onPress={onCancel}>{copy.cancelCreate}</VButton>
