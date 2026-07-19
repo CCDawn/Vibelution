@@ -38,14 +38,20 @@ import {
   isBusyPhase,
 } from "./chatCodingRouteViewModel";
 import {
+  MAX_COMPOSER_IMAGE_ATTACHMENTS,
+  classifyComposerImageFiles,
   clearSessionDraftForSubmittedTurn,
   clearSessionImageAttachments,
   clearSessionReferenceAttachments,
   encodeUtf8Base64,
+  mergeComposerImageAttachments,
   optimisticTurnIdForSubmission,
+  removeSessionImageAttachment,
   resolveComposerSubmitGuard,
   restoreSubmittedDraftIfComposerStillEmpty,
+  sessionReferenceId,
   uploadSessionImageAttachment,
+  writeStoredMentalModelToggle,
   type ComposerImageAttachment,
 } from "./chatComposerSubmitModel";
 import { postSubmitTelemetry } from "./chatSubmitTelemetry";
@@ -440,9 +446,16 @@ export type UseChatComposerSubmitActionsOptions = ChatComposerTurnMutations & {
   activeImageInputModelId: string;
   latestUserMessageId: string;
   detail: SessionDetail | undefined;
+  setMentalModelEnabledForNextTurn: Dispatch<SetStateAction<boolean>>;
 };
 
 export type UseChatComposerSubmitActionsResult = {
+  handleComposerChange: (value: string) => void;
+  handleMentalModelEnabledChange: (enabled: boolean) => void;
+  handleAddComposerAttachments: (files: FileList | File[]) => void;
+  handleRemoveComposerAttachment: (attachmentId: string) => void;
+  handleAddComposerReference: (reference: SessionReferenceAttachment) => void;
+  handleRemoveComposerReference: (referenceId: string) => void;
   handleSubmitTurn: () => void;
   handleStopTurn: () => void;
   handleSubmitGuidance: (mode: SessionGuidanceMode) => void;
@@ -483,7 +496,120 @@ export function useChatComposerSubmitActions({
   activeImageInputModelId,
   latestUserMessageId,
   detail,
+  setMentalModelEnabledForNextTurn,
 }: UseChatComposerSubmitActionsOptions): UseChatComposerSubmitActionsResult {
+  const handleComposerChange = useCallback((value: string) => {
+    if (!activeSessionId) {
+      return;
+    }
+    setSessionDrafts((current) => ({
+      ...current,
+      [activeSessionId]: value,
+    }));
+    setSessionComposerErrors((current) => ({
+      ...current,
+      [activeSessionId]: "",
+    }));
+  }, [activeSessionId, setSessionComposerErrors, setSessionDrafts]);
+
+  const handleMentalModelEnabledChange = useCallback((enabled: boolean) => {
+    setMentalModelEnabledForNextTurn(enabled);
+    writeStoredMentalModelToggle(enabled);
+  }, [setMentalModelEnabledForNextTurn]);
+
+  const handleAddComposerAttachments = useCallback((files: FileList | File[]) => {
+    if (!activeSessionId) {
+      return;
+    }
+    if (activeAgentImageInputUnsupported) {
+      setSessionComposerErrors((current) => ({
+        ...current,
+        [activeSessionId]: lang === "zh" ? "当前 Agent 模型不支持图片输入。" : "The current Agent model does not support image input.",
+      }));
+      return;
+    }
+    const { accepted, rejected } = classifyComposerImageFiles(files);
+    if (!accepted.length && !rejected.length) {
+      return;
+    }
+    if (accepted.length) {
+      setSessionImageAttachments((current) => {
+        const existing = current[activeSessionId] ?? [];
+        return {
+          ...current,
+          [activeSessionId]: mergeComposerImageAttachments(existing, accepted, MAX_COMPOSER_IMAGE_ATTACHMENTS),
+        };
+      });
+    }
+    setSessionComposerErrors((current) => ({
+      ...current,
+      [activeSessionId]: rejected.length
+        ? (lang === "zh" ? "部分图片格式或大小不支持。" : "Some images were rejected by type or size.")
+        : "",
+    }));
+  }, [
+    activeAgentImageInputUnsupported,
+    activeSessionId,
+    lang,
+    setSessionComposerErrors,
+    setSessionImageAttachments,
+  ]);
+
+  const handleRemoveComposerAttachment = useCallback((attachmentId: string) => {
+    if (!activeSessionId) {
+      return;
+    }
+    setSessionImageAttachments((current) => removeSessionImageAttachment(current, activeSessionId, attachmentId));
+  }, [activeSessionId, setSessionImageAttachments]);
+
+  const handleAddComposerReference = useCallback((reference: SessionReferenceAttachment) => {
+    if (!activeSessionId) {
+      return;
+    }
+    const referenceId = sessionReferenceId(reference);
+    if (!referenceId) {
+      setSessionComposerErrors((current) => ({
+        ...current,
+        [activeSessionId]: lang === "zh" ? "会话引用缺少有效 id。" : "Session reference is missing a valid id.",
+      }));
+      return;
+    }
+    setSessionReferenceAttachments((current) => {
+      const existing = current[activeSessionId] ?? [];
+      if (existing.some((item) => sessionReferenceId(item) === referenceId)) {
+        return current;
+      }
+      return {
+        ...current,
+        [activeSessionId]: [...existing, reference].slice(-6),
+      };
+    });
+    setSessionComposerErrors((current) => ({
+      ...current,
+      [activeSessionId]: "",
+    }));
+  }, [activeSessionId, lang, setSessionComposerErrors, setSessionReferenceAttachments]);
+
+  const handleRemoveComposerReference = useCallback((referenceId: string) => {
+    if (!activeSessionId) {
+      return;
+    }
+    setSessionReferenceAttachments((current) => {
+      const existing = current[activeSessionId] ?? [];
+      const next = existing.filter((reference) => sessionReferenceId(reference) !== referenceId);
+      if (next.length === existing.length) {
+        return current;
+      }
+      if (!next.length) {
+        return clearSessionReferenceAttachments(current, activeSessionId);
+      }
+      return {
+        ...current,
+        [activeSessionId]: next,
+      };
+    });
+  }, [activeSessionId, setSessionReferenceAttachments]);
+
   const submitTurnWithAttachments = useCallback(async (
     sessionId: string,
     content: string,
@@ -844,6 +970,12 @@ export function useChatComposerSubmitActions({
   }, [activeDraftEffective, activeSessionId, sessionBusy, sessionGuidanceMutation, sessionStopping]);
 
   return {
+    handleComposerChange,
+    handleMentalModelEnabledChange,
+    handleAddComposerAttachments,
+    handleRemoveComposerAttachment,
+    handleAddComposerReference,
+    handleRemoveComposerReference,
     handleSubmitTurn,
     handleStopTurn,
     handleSubmitGuidance,
