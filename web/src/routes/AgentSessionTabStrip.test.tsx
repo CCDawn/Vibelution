@@ -103,7 +103,7 @@ describe("AgentSessionTabStrip", () => {
     const markup = renderStrip();
 
     expect(markup).toContain("Agent 会话");
-    expect(markup).toContain("知识管理员");
+    expect(markup).toContain("顾明澈");
     expect(markup).toContain("GPT 5.5");
     expect(markup).not.toContain("idle · GPT 5.5</span>");
     expect(markup).not.toContain(">子对话</span>");
@@ -240,7 +240,7 @@ describe("AgentSessionTabStrip", () => {
 
     expect(markup).toContain("role=\"tablist\"");
     expect(markup.match(/role="tab"/g)?.length).toBe(1);
-    expect(markup).toContain("知识管理员");
+    expect(markup).toContain("顾明澈");
     expect(markup).toContain("aria-current=\"true\"");
     expect(markup).toContain("aria-selected=\"true\"");
   });
