@@ -22013,6 +22013,41 @@ def _research_stage_memory_context(
     candidate_store = _load_candidate_store(team_id)
     plan_store = _load_experiment_plan_store(team_id)
     loop_store = _read_json(_team_workflow_root(team_id) / "research_loops" / "index.json")
+    knowledge_results, retrieval_status = _research_memory_knowledge_results(
+        team_id,
+        research_question=research_question,
+        actor_agent_id=actor_agent_id,
+    )
+    normalized_stage_type = (
+        "experiment_execution_iteration"
+        if stage_type == "iteration"
+        else "experiment_design"
+    )
+    return _build_research_memory_context(
+        stage_type=normalized_stage_type,
+        research_question=research_question,
+        candidates=[
+            item
+            for item in list(candidate_store.get("candidates") or [])
+            if isinstance(item, dict)
+        ],
+        plans=_experiment_plans(plan_store),
+        loops=[
+            item
+            for item in list(loop_store.get("loops") or [])
+            if isinstance(item, dict)
+        ],
+        knowledge_results=knowledge_results,
+        retrieval_status=retrieval_status,
+    )
+
+
+def _research_memory_knowledge_results(
+    team_id: str,
+    *,
+    research_question: str,
+    actor_agent_id: str,
+) -> tuple[list[dict[str, Any]], str]:
     normalized_actor_id = _trim_text(actor_agent_id, max_length=160)
     if not normalized_actor_id.startswith("agent-"):
         try:
@@ -22036,28 +22071,7 @@ def _research_stage_memory_context(
         ]
     except Exception:
         retrieval_status = "unavailable"
-    normalized_stage_type = (
-        "experiment_execution_iteration"
-        if stage_type == "iteration"
-        else "experiment_design"
-    )
-    return _build_research_memory_context(
-        stage_type=normalized_stage_type,
-        research_question=research_question,
-        candidates=[
-            item
-            for item in list(candidate_store.get("candidates") or [])
-            if isinstance(item, dict)
-        ],
-        plans=_experiment_plans(plan_store),
-        loops=[
-            item
-            for item in list(loop_store.get("loops") or [])
-            if isinstance(item, dict)
-        ],
-        knowledge_results=knowledge_results,
-        retrieval_status=retrieval_status,
-    )
+    return knowledge_results, retrieval_status
 
 
 def _experiment_plan_revision(plan: dict[str, Any] | None) -> int:
@@ -22165,6 +22179,73 @@ def _research_memory_context_summary(value: Any) -> dict[str, Any]:
     }
 
 
+def _legacy_research_lifecycle_memory_contexts(
+    *,
+    team_id: str,
+    candidate_store: dict[str, Any],
+    plans: list[dict[str, Any]],
+    design_plan: dict[str, Any] | None,
+    best_plan: dict[str, Any] | None,
+    latest_experiment: dict[str, Any] | None,
+    latest_iteration: dict[str, Any] | None,
+    active_loop: dict[str, Any] | None,
+) -> dict[str, dict[str, Any]]:
+    design_contract = (
+        design_plan.get("experimentContract")
+        if isinstance((design_plan or {}).get("experimentContract"), dict)
+        else {}
+    )
+    best_contract = (
+        best_plan.get("experimentContract")
+        if isinstance((best_plan or {}).get("experimentContract"), dict)
+        else {}
+    )
+    research_question = _trim_text(
+        design_contract.get("researchQuestion")
+        or best_contract.get("researchQuestion")
+        or (latest_experiment or {}).get("topic")
+        or (latest_experiment or {}).get("goal")
+        or (latest_iteration or {}).get("topic")
+        or (latest_iteration or {}).get("goal")
+        or (active_loop or {}).get("title")
+        or "research lifecycle memory projection",
+        max_length=1200,
+    )
+    actor_agent_id = _trim_text(
+        (latest_experiment or {}).get("requestedByAgent")
+        or (latest_experiment or {}).get("ownerAgentId")
+        or (latest_iteration or {}).get("requestedByAgent")
+        or (latest_iteration or {}).get("ownerAgentId"),
+        max_length=160,
+    )
+    knowledge_results, retrieval_status = _research_memory_knowledge_results(
+        team_id,
+        research_question=research_question,
+        actor_agent_id=actor_agent_id,
+    )
+    loop_store = _read_json(_team_workflow_root(team_id) / "research_loops" / "index.json")
+    common = {
+        "research_question": research_question,
+        "candidates": [
+            item
+            for item in list(candidate_store.get("candidates") or [])
+            if isinstance(item, dict)
+        ],
+        "plans": plans,
+        "loops": [
+            item
+            for item in list(loop_store.get("loops") or [])
+            if isinstance(item, dict)
+        ],
+        "knowledge_results": knowledge_results,
+        "retrieval_status": retrieval_status,
+    }
+    return {
+        "stage2": _build_research_memory_context(stage_type="experiment_design", **common),
+        "stage3": _build_research_memory_context(stage_type="experiment_execution_iteration", **common),
+    }
+
+
 def _experiment_lifecycle_projection(
     *,
     team_id: str,
@@ -22237,6 +22318,31 @@ def _experiment_lifecycle_projection(
         if isinstance((active_loop or {}).get("memoryContext"), dict)
         else (latest_iteration or {}).get("memoryContext")
     )
+    fallback_contexts: dict[str, dict[str, Any]] = {}
+    if (
+        (design_plan is not None and not isinstance(stage2_memory_context, dict))
+        or (
+            (active_loop is not None or latest_iteration is not None or best_plan is not None)
+            and not isinstance(stage3_memory_context, dict)
+        )
+    ):
+        fallback_contexts = _legacy_research_lifecycle_memory_contexts(
+            team_id=team_id,
+            candidate_store=candidate_store,
+            plans=plans,
+            design_plan=design_plan,
+            best_plan=best_plan,
+            latest_experiment=latest_experiment,
+            latest_iteration=latest_iteration,
+            active_loop=active_loop,
+        )
+    if design_plan is not None and not isinstance(stage2_memory_context, dict):
+        stage2_memory_context = fallback_contexts.get("stage2")
+    if (
+        (active_loop is not None or latest_iteration is not None or best_plan is not None)
+        and not isinstance(stage3_memory_context, dict)
+    ):
+        stage3_memory_context = fallback_contexts.get("stage3")
     return {
         "schemaVersion": 1,
         "migrationMode": "derived_from_append_only_history",
