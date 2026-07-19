@@ -682,7 +682,8 @@ def model_visible_messages_from_events(events: Iterable[TurnJournalEvent]) -> li
                 turn_id=turn_id,
                 event_id=event.event_id,
                 timestamp=event.timestamp,
-                interrupted=False,
+                interrupted=str(event.status or "").strip().lower()
+                in {"aborted", "cancelled", "canceled", "interrupted", "stopped", "stopped_by_user"},
             )
             if _message_has_visible_payload(message):
                 messages.append(message)
