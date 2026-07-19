@@ -407,7 +407,7 @@ function committedAssistantAnswerForTurn(
     ) {
       return false;
     }
-    return hasCommittedAssistantProtocolAnswer(message);
+    return isTurnErrorMessage(message) || hasCommittedAssistantProtocolAnswer(message);
   });
 }
 
