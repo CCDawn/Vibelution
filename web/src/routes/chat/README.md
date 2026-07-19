@@ -19,6 +19,7 @@ Agent-oriented map for Chat workbench development. Prefer editing a **module** o
 | Session select / URL / bootstrap | `useChatSessionSelection.ts` | EventSource ownership |
 | Session detail window / ledger / conversation merge | `chatSessionDetailHelpers.ts` | stream EventSource |
 | Labels / avatar / group message presentation | `chatRoutePresentation.tsx` | mutations / stream |
+| Session/group lifecycle mutations | `useChatWorkspaceLifecycle.ts` | EventSource, composer submit |
 | Composer bridge UI | `ChatConversationComposerBridge.tsx` | CLI model |
 | Center workspace shell | `ChatSessionWorkspacePanel.tsx` | index rail |
 | Layout width math | `chatCodingRouteViewModel.ts` | session protocol |
@@ -59,10 +60,11 @@ Plan: `docs/superpowers/plans/2026-07-19-chat-coding-route-stream-selection-spli
 - **E2 done:** `useGroupRoomStream.ts` — sole owner of `/api/chat-rooms/:id/events` EventSource
 - **E3 done:** `useChatSessionSelection.ts` — select mutation + URL/bootstrap selection effects
 - **E4a done:** `chatSessionDetailHelpers.ts` + `chatRoutePresentation.tsx` — pure detail/presentation helpers
+- **E4b done:** `useChatWorkspaceLifecycle.ts` — create/delete/rename session, group CRUD/rounds, project-bus send/revoke
 
 ## Next (planned)
 
-- E4b group/session lifecycle mutations hook (create/delete/rename/round)
+- Remaining route-local mutations (reasoning effort, load earlier, tool approval, pet)
 - Thin `ChatCodingRoute` composition toward ~800–1500 LOC
 
 ## Rules
