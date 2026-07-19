@@ -201,6 +201,11 @@ _SESSION_CONVERSATION_EVENTS_INFLIGHT: dict[str, object] = {}
 _SESSION_AGENT_RUNTIME_CACHE_LOCK = threading.Lock()
 _SESSION_AGENT_RUNTIME_CACHE_MAX_ENTRIES = 16
 _SESSION_AGENT_RUNTIME_CACHE: dict[str, dict[str, Any]] = {}
+_SESSION_AGENT_RUNTIME_CONFIG_FINGERPRINT_KEYS = (
+    "llm",
+    "agent",
+    "context_compression",
+)
 _SESSION_DETAIL_MESSAGE_WINDOW_MAX_LIMIT = 200
 _AGENT_DIRECTORY_STUB_HIDDEN_TEAM_SOURCES = {
     "ai_search",
@@ -14301,15 +14306,7 @@ def _session_agent_runtime_cache_fingerprint(
 ) -> str:
     agent = agent_instance if isinstance(agent_instance, dict) else {}
     config = getattr(resolved_llm, "config", None) or _session_agent_config_for_llm_slot(agent_instance, llm_slot)
-    if hasattr(config, "model_dump"):
-        try:
-            config_payload: Any = config.model_dump(mode="json")
-        except (TypeError, ValueError):
-            config_payload = config.model_dump()
-    elif hasattr(config, "dict"):
-        config_payload = config.dict()
-    else:
-        config_payload = repr(config)
+    config_payload = _session_agent_runtime_config_fingerprint_payload(config)
     semantic_agent_fields = {
         key: agent.get(key)
         for key in (
@@ -14344,6 +14341,34 @@ def _session_agent_runtime_cache_fingerprint(
         default=str,
     )
     return hashlib.sha256(raw.encode("utf-8", errors="replace")).hexdigest()
+
+
+def _session_agent_runtime_config_fingerprint_payload(config: Any) -> Any:
+    """Keep session runtime reuse tied only to config consumed by chat Agents.
+
+    The AppConfig also contains unrelated runtime domains (for example UI and
+    pet state). Including the whole object causes a new Agent and transport on
+    ordinary chat turns even when the dialogue model contract is unchanged.
+    """
+
+    if hasattr(config, "model_dump"):
+        try:
+            raw_payload: Any = config.model_dump(mode="json")
+        except (TypeError, ValueError):
+            raw_payload = config.model_dump()
+    elif hasattr(config, "dict"):
+        raw_payload = config.dict()
+    elif isinstance(config, Mapping):
+        raw_payload = dict(config)
+    else:
+        return repr(config)
+    if not isinstance(raw_payload, Mapping):
+        return raw_payload
+    return {
+        key: raw_payload[key]
+        for key in _SESSION_AGENT_RUNTIME_CONFIG_FINGERPRINT_KEYS
+        if key in raw_payload
+    }
 
 
 def _invalidate_session_agent_runtime_cache(session_id: str = "") -> int:
