@@ -166,6 +166,7 @@ export function MemoryAgentMemoryPanel({
               <VButton
                 key={agent.id}
                 type="button"
+                contentLayout="plain"
                 className={agent.active ? `${styles.itemButton} ${styles.itemButtonActive}` : styles.itemButton}
                 onClick={() => onSelectAgent(agent.id)}
               >
@@ -211,6 +212,7 @@ export function MemoryAgentMemoryPanel({
               <VButton
                 key={item.id}
                 type="button"
+                contentLayout="plain"
                 className={item.active ? `${styles.itemButton} ${styles.itemButtonActive}` : styles.itemButton}
                 onClick={() => onSelectItem(item.id)}
               >

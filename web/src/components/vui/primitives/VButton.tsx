@@ -109,6 +109,8 @@ export const VButton = forwardRef<HTMLButtonElement, VButtonProps>(function VBut
       className={[
         buttonGeometryClass(className, contentLayout),
         "min-w-0",
+        // Plain multi-line/card buttons must escape fixed density height.
+        contentLayout === "plain" ? "!h-auto" : null,
         className,
       ]
         .filter(Boolean)

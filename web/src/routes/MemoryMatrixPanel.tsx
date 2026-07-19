@@ -54,6 +54,7 @@ export function MemoryMatrixPanel({
           <VButton
             key={card.id}
             type="button"
+                contentLayout="plain"
             className={
               activeChannel === card.channel
                 ? `${styles.matrixCard} ${styles.matrixCardButton} ${styles.matrixCardActive}`

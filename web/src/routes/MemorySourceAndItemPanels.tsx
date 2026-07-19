@@ -105,6 +105,7 @@ export function MemorySourceAndItemPanels({
 
         <VButton
           type="button"
+                contentLayout="plain"
           className={allSectionsActive ? `${styles.sourceButton} ${styles.sourceButtonActive}` : styles.sourceButton}
           onClick={onSelectAllSections}
         >
@@ -125,6 +126,7 @@ export function MemorySourceAndItemPanels({
             <VButton
               key={section.id}
               type="button"
+                contentLayout="plain"
               className={section.active ? `${styles.sourceButton} ${styles.sourceButtonActive}` : styles.sourceButton}
               onClick={() => onSelectSection(section.id)}
               aria-pressed={section.active}
