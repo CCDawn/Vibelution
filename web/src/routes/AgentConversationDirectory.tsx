@@ -94,6 +94,7 @@ export function AgentConversationDirectory({
               <VButton
                 key={agentId}
                 type="button"
+                contentLayout="plain"
                 className={[styles.agentRow, active ? styles.agentRowActive : ""].filter(Boolean).join(" ")}
                 aria-current={active ? "page" : undefined}
                 onPress={() => onOpenAgent(agent)}
