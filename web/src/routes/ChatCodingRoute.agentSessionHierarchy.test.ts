@@ -16,4 +16,12 @@ describe("ChatCodingRoute Agent-session hierarchy", () => {
   it("uses the session title, not the Agent name, for root session tabs", () => {
     expect(tabStripSource).toContain("sessionIsChild ? (session.taskTitle || session.resultCard?.title || session.title) : session.title");
   });
+
+  it("optimistically removes deleted sessions from Agent tab caches with rollback", () => {
+    expect(routeSource).toContain("captureAgentSessionCacheSnapshots(queryClient)");
+    expect(routeSource).toContain("removeSessionFromAgentSessionCaches(queryClient, variables.sessionId)");
+    expect(routeSource).toContain(
+      "restoreAgentSessionCacheSnapshots(queryClient, context?.previousAgentSessionCaches)",
+    );
+  });
 });

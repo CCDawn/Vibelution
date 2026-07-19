@@ -116,7 +116,10 @@ import {
 } from "./chatSessionState";
 import {
   SESSION_INDEX_PAGE_SIZE,
+  captureAgentSessionCacheSnapshots,
   captureSessionIndexCacheSnapshots,
+  removeSessionFromAgentSessionCaches,
+  restoreAgentSessionCacheSnapshots,
   restoreSessionIndexCacheSnapshots,
   updateSessionSummaryCaches,
   useSessionIndexQuery,
@@ -3138,18 +3141,26 @@ export function ChatCodingRoute() {
       ]);
       const previousSessions = queryClient.getQueryData<SessionSummary[]>(queryKeys.sessions());
       const previousSessionIndexCaches = captureSessionIndexCacheSnapshots(queryClient);
+      const previousAgentSessionCaches = captureAgentSessionCacheSnapshots(queryClient);
       const previousConversations = queryClient.getQueryData<ConversationSummary[]>(queryKeys.conversations());
       const previousAgents = queryClient.getQueryData<AgentInstance[]>(queryKeys.agents());
       updateSessionSummaryCaches(queryClient, (sessions) =>
         sessions?.filter((session) => session.id !== variables.sessionId),
       );
+      removeSessionFromAgentSessionCaches(queryClient, variables.sessionId);
       queryClient.setQueryData<ConversationSummary[]>(queryKeys.conversations(), (conversations) =>
         removeDeletedSessionFromConversations(conversations, variables.sessionId),
       );
       queryClient.setQueryData<AgentInstance[]>(queryKeys.agents(), (agents) =>
         agents?.filter((agent) => agent.directSessionId !== variables.sessionId),
       );
-      return { previousSessions, previousSessionIndexCaches, previousConversations, previousAgents };
+      return {
+        previousSessions,
+        previousSessionIndexCaches,
+        previousAgentSessionCaches,
+        previousConversations,
+        previousAgents,
+      };
     },
     onSuccess: (deleteResult, variables) => {
       const nextActiveSessionId = deleteResult.nextActiveSessionId || "";
@@ -3174,6 +3185,7 @@ export function ChatCodingRoute() {
         queryClient.setQueryData(queryKeys.sessions(), context.previousSessions);
       }
       restoreSessionIndexCacheSnapshots(queryClient, context?.previousSessionIndexCaches);
+      restoreAgentSessionCacheSnapshots(queryClient, context?.previousAgentSessionCaches);
       if (context?.previousConversations) {
         queryClient.setQueryData(queryKeys.conversations(), context.previousConversations);
       }
