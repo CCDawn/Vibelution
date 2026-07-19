@@ -24,9 +24,19 @@ export type TranscriptCellDisplayInput = RuntimeStatusDisplayInput & {
   messageId?: unknown;
 };
 
-export function shouldDisplayRuntimeStatus(input: RuntimeStatusDisplayInput) {
+export type RuntimeStatusDisplayContext = {
+  surface?: "active" | "transcript";
+};
+
+export function shouldDisplayRuntimeStatus(
+  input: RuntimeStatusDisplayInput,
+  context: RuntimeStatusDisplayContext = {},
+) {
   if (normalizedText(input.kind) !== "status") {
     return true;
+  }
+  if (isModelTransportStatus(input)) {
+    return context.surface === "active" && isActiveTransportDegradation(input);
   }
   return hasDisplayableDiagnosticStatus(input);
 }
@@ -81,6 +91,14 @@ function hasDisplayableDiagnosticStatus(input: RuntimeStatusDisplayInput) {
     || ["failed", "error", "failure", "timeout", "timed_out", "cancelled"].includes(status)
     || ["degraded", "fallback", "partial", "recovered", "unavailable"].includes(status)
   );
+}
+
+function isModelTransportStatus(input: RuntimeStatusDisplayInput) {
+  return normalizedText(input.name ?? input.label ?? input.title) === "model_transport";
+}
+
+function isActiveTransportDegradation(input: RuntimeStatusDisplayInput) {
+  return ["degraded", "fallback", "unavailable"].includes(normalizedText(input.status));
 }
 
 function hasNonAnswerTranscriptText(cell: TranscriptCellDisplayInput) {

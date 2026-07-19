@@ -21604,8 +21604,8 @@ def _set_session_llm_status_live_output(
     elif status_key == "transport_degraded":
         content = text_for(
             language,
-            zh=f"模型连接中断，正在恢复。{f'\\n{transport_detail}' if transport_detail else ''}",
-            en=f"The model connection was interrupted and is recovering.{f'\\n{transport_detail}' if transport_detail else ''}",
+            zh="模型连接中断，正在恢复。",
+            en="The model connection was interrupted and is recovering.",
         )
         stage = "model_transport"
         feedback_status = "degraded"
@@ -21616,8 +21616,8 @@ def _set_session_llm_status_live_output(
         target = fallback_transport.upper() if fallback_transport else "HTTP"
         content = text_for(
             language,
-            zh=f"WebSocket 暂时不可用，正在切换到 {target}。{f'\\n{transport_detail}' if transport_detail else ''}",
-            en=f"WebSocket is temporarily unavailable; switching to {target}.{f'\\n{transport_detail}' if transport_detail else ''}",
+            zh=f"WebSocket 暂时不可用，正在切换到 {target}。",
+            en=f"WebSocket is temporarily unavailable; switching to {target}.",
         )
         stage = "model_transport"
         feedback_status = "degraded"
@@ -21679,13 +21679,14 @@ def _set_session_llm_status_live_output(
                 existing.update(feedback_event)
                 break
         feedback_events = list(capture.feedback_events)
-    _set_session_live_output(
-        session_id,
-        turn_id=turn_id,
-        stage=stage,
-        content=content,
-        feedback_events=feedback_events,
-    )
+    live_output_fields: dict[str, Any] = {
+        "turn_id": turn_id,
+        "stage": stage,
+        "feedback_events": feedback_events,
+    }
+    if not status_key.startswith("transport_"):
+        live_output_fields["content"] = content
+    _set_session_live_output(session_id, **live_output_fields)
     _touch_chat_turn_work_run(session_id=session_id, turn_id=turn_id, stage=stage, summary=trim_lines(content, max_lines=1))
     _record_session_turn_lifecycle_event(
         session_id,
