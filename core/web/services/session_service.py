@@ -142,6 +142,7 @@ from .agent_directory_service import (
     get_agent,
     list_agent_inbox_messages_for_agent,
     list_group_context_events_for_agent,
+    next_wakeable_agent_inbox_message_for_agent,
     resolve_memory_policy_for_agent,
     update_agent_instance,
 )
@@ -154,6 +155,9 @@ _RUNNING_SESSIONS_LOCK = threading.Lock()
 _RUNNING_SESSION_IDS: set[str] = set()
 _SESSION_ACTIVE_TURN_IDS: dict[str, str] = {}
 _SESSION_ACTIVE_TURN_LEASES: dict[str, list[str]] = {}
+_AGENT_INBOX_WAKE_STATE_LOCK = threading.Lock()
+_AGENT_INBOX_IDLE_DRAINING_SESSION_IDS: set[str] = set()
+_AGENT_INBOX_WAKE_IN_FLIGHT_MESSAGE_IDS: set[str] = set()
 _SESSION_EXECUTOR = ThreadPoolExecutor(max_workers=4, thread_name_prefix="web-chat-turn")
 _SESSION_CYCLE_PROJECTION_EXECUTOR = ThreadPoolExecutor(
     max_workers=1,
@@ -6559,69 +6563,81 @@ def wake_agent_for_inbox_message(message: dict[str, Any]) -> dict[str, Any]:
         _record_agent_inbox_wake_event("agent_inbox.wake_skipped", message, delivery, level="info")
         return delivery
 
-    message_metadata = message.get("metadata") if isinstance(message.get("metadata"), dict) else {}
-    research_org_metadata = {
-        "researchOrgMessageId": str(message_metadata.get("researchOrgMessageId") or "").strip(),
-        "researchOrgDeliveryMode": str(message_metadata.get("researchOrgDeliveryMode") or "").strip(),
-        "researchOrgMessageType": str(message_metadata.get("researchOrgMessageType") or "").strip(),
-        "researchOrgIntent": str(message_metadata.get("researchOrgIntent") or "").strip(),
-        "communicationEdgeId": str(message_metadata.get("communicationEdgeId") or "").strip(),
-    }
-    prompt = _format_agent_inbox_wake_prompt(message)
-    try:
-        detail = submit_session_message(
-            target_session_id,
-            prompt,
-            turn_mode="agent_inbox",
-            write_intent=False,
-            message_metadata={
-                "kind": "agent_inbox_message",
-                "messageId": message_id,
-                "inboxKind": str(message.get("kind") or "").strip(),
-                "threadId": str(message.get("threadId") or "").strip(),
-                "sourceAgentId": str(message.get("sourceAgentId") or "").strip(),
-                "sourceAgentCode": str(message.get("sourceAgentCode") or "").strip(),
-                "sourceAgentName": str(message.get("sourceAgentName") or "").strip(),
-                "sourceSessionId": str(message.get("sourceSessionId") or "").strip(),
-                "targetAgentId": target_agent_id,
-                "targetAgentCode": str(message.get("targetAgentCode") or "").strip(),
-                "targetAgentName": str(message.get("targetAgentName") or "").strip(),
-                "targetSessionId": target_session_id,
-                **{key: value for key, value in research_org_metadata.items() if value},
-            },
-            message_source="agent_inbox",
-            include_started_turn_id=True,
-        )
-    except SessionBusyError:
-        delivery["wakeStatus"] = "skipped_busy"
-        delivery["reason"] = "target_session_busy"
-        _record_agent_inbox_wake_event("agent_inbox.wake_skipped", message, delivery, level="info")
-        return delivery
-    except (SessionNotFoundError, SessionValidationError) as exc:
-        delivery["wakeStatus"] = "skipped_invalid_session"
-        delivery["reason"] = type(exc).__name__
-        _record_agent_inbox_wake_event("agent_inbox.wake_skipped", message, delivery, level="warning")
-        return delivery
+    with _AGENT_INBOX_WAKE_STATE_LOCK:
+        if message_id in _AGENT_INBOX_WAKE_IN_FLIGHT_MESSAGE_IDS:
+            delivery["wakeStatus"] = "skipped_in_flight"
+            delivery["reason"] = "inbox_message_wake_in_flight"
+            _record_agent_inbox_wake_event("agent_inbox.wake_skipped", message, delivery, level="info")
+            return delivery
+        _AGENT_INBOX_WAKE_IN_FLIGHT_MESSAGE_IDS.add(message_id)
 
-    turn_id = str(detail.get("startedTurnId") or "").strip()
     try:
-        consume_agent_inbox_message(
-            target_agent_id,
-            message_id,
-            consumed_by_session_id=target_session_id,
-            consumed_by_turn_id=turn_id,
-        )
-    except Exception as exc:
-        delivery["wakeStatus"] = "started_consume_failed"
-        delivery["reason"] = type(exc).__name__
+        message_metadata = message.get("metadata") if isinstance(message.get("metadata"), dict) else {}
+        research_org_metadata = {
+            "researchOrgMessageId": str(message_metadata.get("researchOrgMessageId") or "").strip(),
+            "researchOrgDeliveryMode": str(message_metadata.get("researchOrgDeliveryMode") or "").strip(),
+            "researchOrgMessageType": str(message_metadata.get("researchOrgMessageType") or "").strip(),
+            "researchOrgIntent": str(message_metadata.get("researchOrgIntent") or "").strip(),
+            "communicationEdgeId": str(message_metadata.get("communicationEdgeId") or "").strip(),
+        }
+        prompt = _format_agent_inbox_wake_prompt(message)
+        try:
+            detail = submit_session_message(
+                target_session_id,
+                prompt,
+                turn_mode="agent_inbox",
+                write_intent=False,
+                message_metadata={
+                    "kind": "agent_inbox_message",
+                    "messageId": message_id,
+                    "inboxKind": str(message.get("kind") or "").strip(),
+                    "threadId": str(message.get("threadId") or "").strip(),
+                    "sourceAgentId": str(message.get("sourceAgentId") or "").strip(),
+                    "sourceAgentCode": str(message.get("sourceAgentCode") or "").strip(),
+                    "sourceAgentName": str(message.get("sourceAgentName") or "").strip(),
+                    "sourceSessionId": str(message.get("sourceSessionId") or "").strip(),
+                    "targetAgentId": target_agent_id,
+                    "targetAgentCode": str(message.get("targetAgentCode") or "").strip(),
+                    "targetAgentName": str(message.get("targetAgentName") or "").strip(),
+                    "targetSessionId": target_session_id,
+                    **{key: value for key, value in research_org_metadata.items() if value},
+                },
+                message_source="agent_inbox",
+                include_started_turn_id=True,
+            )
+        except SessionBusyError:
+            delivery["wakeStatus"] = "skipped_busy"
+            delivery["reason"] = "target_session_busy"
+            _record_agent_inbox_wake_event("agent_inbox.wake_skipped", message, delivery, level="info")
+            return delivery
+        except (SessionNotFoundError, SessionValidationError) as exc:
+            delivery["wakeStatus"] = "skipped_invalid_session"
+            delivery["reason"] = type(exc).__name__
+            _record_agent_inbox_wake_event("agent_inbox.wake_skipped", message, delivery, level="warning")
+            return delivery
+
+        turn_id = str(detail.get("startedTurnId") or "").strip()
+        try:
+            consume_agent_inbox_message(
+                target_agent_id,
+                message_id,
+                consumed_by_session_id=target_session_id,
+                consumed_by_turn_id=turn_id,
+            )
+        except Exception as exc:
+            delivery["wakeStatus"] = "started_consume_failed"
+            delivery["reason"] = type(exc).__name__
+            delivery["turnId"] = turn_id
+            _record_agent_inbox_wake_event("agent_inbox.wake_started_consume_failed", message, delivery, level="warning")
+            return delivery
+
+        delivery["wakeStatus"] = "started"
         delivery["turnId"] = turn_id
-        _record_agent_inbox_wake_event("agent_inbox.wake_started_consume_failed", message, delivery, level="warning")
+        _record_agent_inbox_wake_event("agent_inbox.wake_started", message, delivery, level="info")
         return delivery
-
-    delivery["wakeStatus"] = "started"
-    delivery["turnId"] = turn_id
-    _record_agent_inbox_wake_event("agent_inbox.wake_started", message, delivery, level="info")
-    return delivery
+    finally:
+        with _AGENT_INBOX_WAKE_STATE_LOCK:
+            _AGENT_INBOX_WAKE_IN_FLIGHT_MESSAGE_IDS.discard(message_id)
 
 
 def edit_and_resubmit_session_message(
@@ -12952,23 +12968,54 @@ def _execute_scheduled_session_turn(context: dict[str, Any]) -> None:
 
 
 def _release_scheduled_session_turn(context: dict[str, Any]) -> None:
-    released = _SESSION_TURN_SCHEDULER.release(context)
-    if released is None:
+    try:
+        released = _SESSION_TURN_SCHEDULER.release(context)
+        if released is None:
+            return
+
+        for dropped in released.dropped_contexts:
+            _record_session_scheduler_event(dropped, "dropped_stale", outcome="skipped")
+
+        next_context = released.context
+        if next_context is None:
+            return
+        if released.external:
+            _record_session_scheduler_event(next_context, "external_dequeued", outcome="running")
+            return
+
+        contexts_to_submit = [next_context, *list(released.additional_contexts or [])]
+        for runnable_context in contexts_to_submit:
+            _submit_released_session_turn(runnable_context)
+    finally:
+        _drain_wakeable_agent_inbox_after_session_release(context)
+
+
+def _drain_wakeable_agent_inbox_after_session_release(context: dict[str, Any]) -> None:
+    session_id = str(context.get("session_id") or context.get("sessionId") or "").strip()
+    agent_id = str(context.get("agent_id") or context.get("agentId") or "").strip()
+    if not session_id or not agent_id or _is_session_running(session_id):
         return
 
-    for dropped in released.dropped_contexts:
-        _record_session_scheduler_event(dropped, "dropped_stale", outcome="skipped")
+    with _AGENT_INBOX_WAKE_STATE_LOCK:
+        if session_id in _AGENT_INBOX_IDLE_DRAINING_SESSION_IDS:
+            return
+        _AGENT_INBOX_IDLE_DRAINING_SESSION_IDS.add(session_id)
 
-    next_context = released.context
-    if next_context is None:
-        return
-    if released.external:
-        _record_session_scheduler_event(next_context, "external_dequeued", outcome="running")
-        return
-
-    contexts_to_submit = [next_context, *list(released.additional_contexts or [])]
-    for runnable_context in contexts_to_submit:
-        _submit_released_session_turn(runnable_context)
+    try:
+        agent = get_agent(agent_id, include_archived=False)
+        if not agent or str(agent.get("directSessionId") or "").strip() != session_id:
+            return
+        while not _is_session_running(session_id):
+            message = next_wakeable_agent_inbox_message_for_agent(agent_id)
+            if not message:
+                return
+            delivery = wake_agent_for_inbox_message(message)
+            _record_agent_inbox_idle_drain_event(message, delivery)
+            if str(delivery.get("wakeStatus") or "").strip() != "started":
+                return
+    finally:
+        with _AGENT_INBOX_WAKE_STATE_LOCK:
+            _AGENT_INBOX_IDLE_DRAINING_SESSION_IDS.discard(session_id)
 
 
 def _submit_released_session_turn(next_context: dict[str, Any]) -> None:
@@ -16487,6 +16534,35 @@ def _record_agent_inbox_wake_event(
                 "turnId": str(delivery.get("turnId") or "").strip(),
                 "wakeStatus": str(delivery.get("wakeStatus") or "").strip(),
                 "reason": str(delivery.get("reason") or "").strip(),
+            },
+            lifecycle=True,
+        )
+    except Exception:
+        return
+
+
+def _record_agent_inbox_idle_drain_event(
+    message: dict[str, Any],
+    delivery: dict[str, Any],
+) -> None:
+    wake_status = str(delivery.get("wakeStatus") or "").strip() or "observed"
+    try:
+        record_runtime_scene_event(
+            "agent_inbox",
+            "idle_drain",
+            "agent_inbox.idle_drain_started" if wake_status == "started" else "agent_inbox.idle_drain_skipped",
+            message="Agent inbox idle drain attempted a queued wake.",
+            level="info" if wake_status == "started" else "warning",
+            outcome=wake_status,
+            fields={
+                "messageId": str(message.get("messageId") or message.get("eventId") or "").strip(),
+                "sourceAgentId": str(message.get("sourceAgentId") or "").strip(),
+                "targetAgentId": str(message.get("targetAgentId") or "").strip(),
+                "targetSessionId": str(delivery.get("targetSessionId") or "").strip(),
+                "turnId": str(delivery.get("turnId") or "").strip(),
+                "wakeStatus": wake_status,
+                "reason": str(delivery.get("reason") or "").strip(),
+                "trigger": "session_release",
             },
             lifecycle=True,
         )
