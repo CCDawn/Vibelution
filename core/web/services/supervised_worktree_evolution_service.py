@@ -23,6 +23,7 @@ from core.evaluation.supervised_evolution import (
     supervised_mental_model_enabled_for_mode,
 )
 from core.infrastructure import developer_sandbox, git_process
+from core.llm.errors import classify_exception
 from core.runtime_manager import work_run_store
 from core.runtime_manager.work_run_leases import (
     EVALUATION_LEASE,
@@ -1295,6 +1296,19 @@ def _baseline_has_retryable_provider_failure(baseline: dict[str, Any]) -> bool:
         category = str(failure.get("category") or "").strip()
         if bool(failure.get("retryable")) and category == "provider_transport_error":
             return True
+        if str(case.get("status") or "").strip().lower() != "failed":
+            continue
+        reason = str(case.get("reason") or failure.get("message") or "").strip()
+        if not reason:
+            continue
+        normalized = classify_exception(RuntimeError(reason))
+        if normalized.retryable and normalized.category in {
+            "network_error",
+            "rate_limit",
+            "server_error",
+            "timeout",
+        }:
+            return True
     return False
 
 
@@ -1512,6 +1526,9 @@ def _baseline_failure_reason(baseline: dict[str, Any]) -> str:
         message = str(failure.get("message") or "").strip()
         if message:
             return message
+        reason = str(case.get("reason") or "").strip()
+        if reason:
+            return reason
     return str(baseline.get("summary") or "baseline provider transport failure")
 
 
@@ -2712,6 +2729,12 @@ def _append_event(snapshot: dict[str, Any], event_type: str, message: str) -> No
 
 def _persist_snapshot(snapshot: dict[str, Any], *, active_run_id: str = "") -> dict[str, Any]:
     payload = _clone(snapshot)
+    run_id = str(payload.get("runId") or "").strip()
+    if run_id and str(payload.get("status") or "").strip().lower() in _ACTIVE_STATUSES:
+        existing = _work_run_store().load_snapshot(RUN_KIND, run_id)
+        if isinstance(existing, dict) and str(existing.get("status") or "").strip().lower() in _TERMINAL_STATUSES:
+            _publish_snapshot(existing)
+            return existing
     persisted = _work_run_store().persist_snapshot(RUN_KIND, payload, active_run_id=active_run_id)
     _publish_snapshot(persisted)
     return persisted

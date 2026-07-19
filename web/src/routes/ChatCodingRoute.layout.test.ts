@@ -12,9 +12,14 @@ import routerSource from "../app/router.tsx?raw";
 import shellStoreSource from "../store/shellStore.ts?raw";
 import agentSessionTabStripSource from "./AgentSessionTabStrip.tsx?raw";
 import routeSource from "./ChatCodingRoute.tsx?raw";
+import conversationIndexRailSource from "./chat/ChatConversationIndexRail.tsx?raw";
+import chatStatusRailSource from "./chat/ChatStatusRail.tsx?raw";
 import cliAgentRunModelSource from "./chat/cliAgentRunModel.ts?raw";
 import sessionCacheCompositionSource from "./chat/sessionCacheComposition.ts?raw";
 import chatSubmitTelemetrySource from "./chat/chatSubmitTelemetry.ts?raw";
+import chatComposerSubmitModelSource from "./chat/chatComposerSubmitModel.ts?raw";
+import chatComposerSubmitHookSource from "./chat/useChatComposerSubmit.ts?raw";
+import chatActiveTurnLayerSource from "./chatActiveTurnLayer.ts?raw";
 import chatStreamApplyControllerSource from "./chatStreamApplyController.ts?raw";
 import terminalPanelSource from "./chat/CliAgentRunTerminalPanel.tsx?raw";
 import conversationIndexModelSource from "./conversationIndexModel.ts?raw";
@@ -44,6 +49,7 @@ import chatRuntimeNoticeStackSource from "./chat/ChatRuntimeNoticeStack.tsx?raw"
 import chatSessionWorkspacePanelStyles from "./chat/ChatSessionWorkspacePanel.styles";
 import chatSessionWorkspacePanelSource from "./chat/ChatSessionWorkspacePanel.tsx?raw";
 import chatCodingRouteViewModelSource from "./chat/chatCodingRouteViewModel.ts?raw";
+import chatWorkbenchLayoutSource from "./chat/useChatWorkbenchLayout.ts?raw";
 import chatToolApprovalDialogStyles from "./chat/ChatToolApprovalDialog.styles";
 import chatToolApprovalDialogSource from "./chat/ChatToolApprovalDialog.tsx?raw";
 import { ChatToolApprovalDialog } from "./chat/ChatToolApprovalDialog";
@@ -119,6 +125,10 @@ const tokenCoreStatusMetrics: TokenCoreStatusMetric[] = [
     tone: "speed",
   },
 ];
+
+const routeAndIndexRailSource = `${routeSource}\n${conversationIndexRailSource}\n${chatStatusRailSource}`;
+const routeAndLayoutSource = `${routeSource}\n${chatWorkbenchLayoutSource}`;
+const routeAndComposerSource = `${routeSource}\n${chatComposerSubmitModelSource}\n${chatComposerSubmitHookSource}\n${chatActiveTurnLayerSource}`;
 
 describe("ChatCodingRoute layout contract", () => {
   it("keeps the center conversation readable and the composer as a stable bottom layer", () => {
@@ -238,7 +248,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(conversationStyles.composer).toContain("backdrop-blur-[6px]");
     expect(conversationStyles.composer).not.toContain("var(--surface-panel-strong)_92%");
 
-    expect(conversationStyles.sendButton).toContain("bg-[color-mix(in_srgb,var(--accent-cool)_16%,var(--vui-surface-row))]");
+    expect(conversationStyles.sendButton).toContain("!bg-[var(--fg-primary)]");
     expect(conversationStyles.sendButton).toContain("focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)]");
     expect(conversationStyles.sendButton).toContain("shadow-none");
     expect(conversationStyles.sendButton).not.toContain("bg-[#");
@@ -388,7 +398,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(chatConversationComposerBridgeSource).toContain("LazyConversationView");
     expect(chatConversationComposerBridgeSource).toContain("composerValue={composer.value}");
     expect(chatConversationComposerBridgeSource).toContain("composerAttachments={composer.attachments}");
-    expect(routeSource).toContain("conversationConstants");
+    expect(routeAndComposerSource).toContain("conversationConstants");
     expect(chatSessionWorkspacePanelSource).toContain("const conversationLoadingFallback = (");
     expect(chatSessionWorkspacePanelSource).toContain("fallback={conversationLoadingFallback}");
     expect(routeSource).not.toContain("fallback={<div className={styles.emptySurface}>{t(\"loadingSession\")}</div>}");
@@ -409,7 +419,9 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("editResubmitMutation");
     expect(routeSource).toContain("stopTurnMutation");
     expect(routeSource).toContain("sessionGuidanceMutation");
-    expect(routeSource).toContain("submitTurnWithAttachments");
+    expect(routeAndComposerSource).toContain("submitTurnWithAttachments");
+    expect(routeSource).toContain("useChatComposerTurnMutations");
+    expect(routeSource).toContain("useChatComposerSubmitActions");
     expect(routeSource).not.toContain("composerActionDisabled={composerActionDisabled}");
     expect(routeSource).not.toContain("composerActionMode={composerStopMode ? \"stop\" : \"send\"}");
     expect(routeSource).not.toContain("composerAttachments={activeImageAttachments.map");
@@ -487,14 +499,15 @@ describe("ChatCodingRoute layout contract", () => {
   });
 
   it("derives responsive layout from the workbench ResizeObserver without overwriting pane preferences", () => {
-    expect(routeSource).toContain("resolveChatResponsiveLayout");
-    expect(routeSource).toContain("new ResizeObserver(syncResponsiveLayout)");
-    expect(routeSource).toContain("data-chat-responsive-mode={responsiveLayout.mode}");
-    expect(routeSource).not.toContain("CHAT_COMPACT_DESKTOP_MEDIA_QUERY");
-    expect(routeSource).not.toContain("compactDesktopAutoCollapseRef");
-    expect(routeSource).not.toContain("setRightPaneCollapsed(true)");
-    expect(routeSource).toContain("styles.layoutCompactDesktop");
-    expect(routeSource).toContain("styles.layoutOverlay");
+    expect(routeAndLayoutSource).toContain("resolveChatResponsiveLayout");
+    expect(routeAndLayoutSource).toContain("new ResizeObserver(syncResponsiveLayout)");
+    expect(routeAndLayoutSource).toContain("data-chat-responsive-mode={responsiveLayout.mode}");
+    expect(routeAndLayoutSource).not.toContain("CHAT_COMPACT_DESKTOP_MEDIA_QUERY");
+    expect(routeAndLayoutSource).not.toContain("compactDesktopAutoCollapseRef");
+    expect(routeAndLayoutSource).not.toContain("setRightPaneCollapsed(true)");
+    expect(routeAndLayoutSource).toContain("styles.layoutCompactDesktop");
+    expect(routeAndLayoutSource).toContain("styles.layoutOverlay");
+    expect(routeSource).toContain("useChatWorkbenchLayout");
   });
 
   it("aligns side-pane gutters while preserving overlay resize handles", () => {
@@ -549,7 +562,7 @@ describe("ChatCodingRoute layout contract", () => {
   });
 
   it("reclaims the status rail grid track on wide desktops while retaining the conversation index", () => {
-    expect(routeSource).toContain("responsiveLayout.mode === \"wide\" && statusRailCollapsed ? styles.layoutStatusRailCollapsed : \"\"");
+    expect(routeAndLayoutSource).toContain("responsiveLayout.mode === \"wide\" && statusRailCollapsed ? styles.layoutStatusRailCollapsed : \"\"");
     expect(routeSource).toContain("className={chatLayoutClassName}");
     expect(routeStyles.layoutStatusRailCollapsed).toContain("!grid-cols-[var(--chat-left-pane-width,300px)_var(--chat-pane-gutter)_minmax(0,1fr)]");
   });
@@ -559,8 +572,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(shellStoreSource).toContain("rightPanelWidth: 220");
     expect(shellStoreSource).toContain("normalizePersistedChatPanelWidths");
     expect(shellStoreSource).toContain("merge: (persistedState, currentState)");
-    expect(routeSource).toContain('"--chat-left-pane-width": conversationIndexCollapsed ? "0px" : `${leftPanelWidth}px`');
-    expect(routeSource).toContain('"--chat-right-pane-width": statusRailCollapsed ? "0px" : `${rightPanelWidth}px`');
+    expect(routeAndLayoutSource).toContain('"--chat-left-pane-width": conversationIndexCollapsed ? "0px" : `${leftPanelWidth}px`');
+    expect(routeAndLayoutSource).toContain('"--chat-right-pane-width": statusRailCollapsed ? "0px" : `${rightPanelWidth}px`');
     expect(routeStyles.leftRail).toContain("flex");
     expect(routeStyles.leftRail).toContain("flex-col");
     expect(routeStyles.leftRail).toContain("p-1");
@@ -576,19 +589,23 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.rightPane).toContain("grid");
     expect(routeStyles.rightPane).toContain("gap-[var(--chat-workbench-gap)]");
     expect(routeStyles.rightPane).toContain("p-[var(--chat-workbench-gap)]");
-    expect(routeSource).toContain("styles.rightPaneWithTabs");
-    expect(routeSource).toContain("styles.rightPaneWithoutTabs");
+    expect(routeAndLayoutSource).toContain("styles.rightPaneWithTabs");
+    expect(routeAndLayoutSource).toContain("styles.rightPaneWithoutTabs");
     expect(routeCssSource).not.toContain(".sessionAgentStatusControl");
   });
 
   it("places the conversation index on the left and the status rail on the right", () => {
-    const statusAsideStart = routeSource.indexOf('id="chat-status-pane"');
+    const statusAsideMount = routeSource.indexOf("<ChatStatusRail");
     const centerPaneStart = routeSource.indexOf("<section className={centerPaneClassName}");
-    const conversationAsideStart = routeSource.indexOf('id="chat-conversation-index-pane"');
+    const conversationAsideMount = routeSource.indexOf("<ChatConversationIndexRail");
+    const statusAsideStart = chatStatusRailSource.indexOf('id="chat-status-pane"');
+    const conversationAsideStart = conversationIndexRailSource.indexOf('id="chat-conversation-index-pane"');
 
+    expect(statusAsideMount).toBeGreaterThan(-1);
+    expect(centerPaneStart).toBeGreaterThan(statusAsideMount);
+    expect(conversationAsideMount).toBeGreaterThan(centerPaneStart);
     expect(statusAsideStart).toBeGreaterThan(-1);
-    expect(centerPaneStart).toBeGreaterThan(statusAsideStart);
-    expect(conversationAsideStart).toBeGreaterThan(centerPaneStart);
+    expect(conversationAsideStart).toBeGreaterThan(-1);
     expect(routeStyles.rightPane).toContain("[grid-column:1]");
     expect(routeStyles.rightPane).toContain("[grid-row:1]");
     expect(routeStyles.resizeHandleLeft).toContain("[grid-column:2]");
@@ -599,13 +616,15 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.resizeHandleRight).toContain("[grid-row:1]");
     expect(routeStyles.leftRail).toContain("[grid-column:5]");
     expect(routeStyles.leftRail).toContain("[grid-row:1]");
-    expect(routeSource).toContain("const conversationIndexCollapsed = responsiveLayout.leftVisible");
-    expect(routeSource).toContain("const statusRailCollapsed = responsiveLayout.rightVisible");
-    expect(routeSource.indexOf("{conversationIndexPanel}")).toBeGreaterThan(conversationAsideStart);
-    expect(routeSource.indexOf("styles.systemEntryGroup")).toBeGreaterThan(conversationAsideStart);
-    expect(routeSource.indexOf("styles.currentSessionBlock")).toBeGreaterThan(statusAsideStart);
-    expect(routeSource.indexOf("<TokenCoreStatusPanel")).toBeGreaterThan(statusAsideStart);
-    expect(routeSource.indexOf("styles.companionBlock")).toBeGreaterThan(statusAsideStart);
+    expect(routeAndLayoutSource).toContain("const conversationIndexCollapsed = responsiveLayout.leftVisible");
+    expect(routeAndLayoutSource).toContain("const statusRailCollapsed = responsiveLayout.rightVisible");
+    expect(conversationIndexRailSource.indexOf("{conversationIndexPanel}")).toBeGreaterThan(-1);
+    expect(conversationIndexRailSource.indexOf("styles.systemEntryGroup")).toBeGreaterThan(
+      conversationIndexRailSource.indexOf('id="chat-conversation-index-pane"'),
+    );
+    expect(chatStatusRailSource.indexOf("styles.currentSessionBlock")).toBeGreaterThan(-1);
+    expect(chatStatusRailSource.indexOf("<TokenCoreStatusPanel")).toBeGreaterThan(-1);
+    expect(chatStatusRailSource.indexOf("styles.companionBlock")).toBeGreaterThan(-1);
   });
 
   it("uses shared readable scale tokens instead of page-local micro typography", () => {
@@ -735,15 +754,15 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.layoutOverlay).toContain("grid-cols-[minmax(0,1fr)]");
     expect(routeSource).toContain('aria-controls="chat-conversation-index-pane"');
     expect(routeSource).toContain('aria-controls="chat-status-pane"');
-    expect(routeSource).toContain('event.key !== "Escape"');
-    expect(routeSource).toContain("closeResponsiveOverlayPane");
+    expect(routeAndLayoutSource).toContain('event.key !== "Escape"');
+    expect(routeAndLayoutSource).toContain("closeResponsiveOverlayPane");
     expect(routeStyles.paneCollapsed).toContain("!overflow-hidden");
     expect(routeStyles.paneCollapsed).toContain("invisible");
     expect(routeStyles.paneCollapsed).toContain("!hidden");
   });
 
   it("compresses the left rail into primary controls plus auxiliary status groups", () => {
-    expect(routeSource).toContain("<TokenCoreStatusPanel");
+    expect(routeAndIndexRailSource).toContain("<TokenCoreStatusPanel");
     expect(tokenCoreStatusPanelSource).toContain("styles.tokenCompressionCard");
     expect(tokenCoreStatusPanelSource).toContain("styles.tokenStatusVisualGrid");
     expect(tokenCoreStatusPanelSource).toContain("styles.tokenStatusMetric");
@@ -756,16 +775,16 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).not.toContain("styles.cacheStatusCard");
     expect(routeSource).not.toContain("styles.compressionStatusCard");
     expect(routeSource).not.toContain("styles.compressionStrategyCard");
-    expect(routeSource).toContain("styles.runModeBlock");
+    expect(routeAndIndexRailSource).toContain("styles.runModeBlock");
     expect(routeSource).not.toContain("<details className={styles.sessionDiagnosticsDetails}>");
     expect(routeSource).not.toContain("styles.sessionResourceDiagnostics");
-    expect(routeSource).toContain("styles.companionBlock");
-    expect(routeSource).toContain("styles.companionCompact");
-    expect(routeSource).toContain("styles.petMiniAvatar");
-    expect(routeSource).toContain("styles.featureChipPrimary");
-    expect(routeSource).toContain("styles.featureChipRow");
-    expect(routeSource).toContain("styles.featureChip");
-    expect(routeSource).toContain("<em>{enabled ? (lang === \"zh\" ? \"开\" : \"On\") : (lang === \"zh\" ? \"关\" : \"Off\")}</em>");
+    expect(routeAndIndexRailSource).toContain("styles.companionBlock");
+    expect(routeAndIndexRailSource).toContain("styles.companionCompact");
+    expect(routeAndIndexRailSource).toContain("styles.petMiniAvatar");
+    expect(routeAndIndexRailSource).toContain("styles.featureChipPrimary");
+    expect(routeAndIndexRailSource).toContain("styles.featureChipRow");
+    expect(routeAndIndexRailSource).toContain("styles.featureChip");
+    expect(routeAndIndexRailSource).toContain("<em>{enabled ? (lang === \"zh\" ? \"开\" : \"On\") : (lang === \"zh\" ? \"关\" : \"Off\")}</em>");
     expect(routeSource).not.toContain("<section className={styles.petShowcase}");
     expect(routeSource).not.toContain("styles.featurePresetGrid");
 
@@ -793,8 +812,8 @@ describe("ChatCodingRoute layout contract", () => {
   });
 
   it("keeps the companion details toggle as a single compact control", () => {
-    expect(routeSource).toContain("<details className={styles.compactDetails}>");
-    expect(routeSource).toContain("<ChevronRight size={14} aria-hidden=\"true\" />");
+    expect(routeAndIndexRailSource).toContain("<details className={styles.compactDetails}>");
+    expect(routeAndIndexRailSource).toContain("<ChevronRight size={14} aria-hidden=\"true\" />");
     expect(routeStyles.compactDetails).toContain("[&>summary]:list-none");
     expect(routeStyles.compactDetails).toContain("[&>summary::-webkit-details-marker]:hidden");
     expect(routeStyles.compactDetails).toContain("[&_.compactDetailsOpenLabel]:hidden");
@@ -859,16 +878,16 @@ describe("ChatCodingRoute layout contract", () => {
     expect(llmPayloadTracePanelSource).not.toContain('<p className={styles.blockEyebrow}>LLM</p>');
     expect(routeSource).not.toContain('<p className={styles.blockEyebrow}>{lang === "zh" ? "模式控制" : "Mode controls"}</p>');
     expect(routeSource).not.toContain('<p className={styles.sectionMetaLine}>{mentalCompactLine || mentalSourceLabel}</p>');
-    expect(routeSource).toContain("content={mentalCompactLine || mentalSourceLabel}");
-    expect(routeSource).toContain('aria-label={`${mentalStateLabel}. ${mentalCompactLine || mentalSourceLabel}`}');
-    expect(routeSource).toContain("VContextualHint");
-    expect(routeSource).toContain("styles.sectionEyebrowRow");
-    expect(routeSource).toContain("styles.groupManagementTitleRow");
+    expect(routeAndIndexRailSource).toContain("content={mentalCompactLine || mentalSourceLabel}");
+    expect(routeAndIndexRailSource).toContain('aria-label={`${mentalStateLabel}. ${mentalCompactLine || mentalSourceLabel}`}');
+    expect(routeAndIndexRailSource).toContain("VContextualHint");
+    expect(routeAndIndexRailSource).toContain("styles.sectionEyebrowRow");
+    expect(routeAndIndexRailSource).toContain("styles.groupManagementTitleRow");
     expect(routeSource).toContain("styles.groupConversationTitleRow");
     expect(routeSource).toContain("暂无通知。");
     expect(routeSource).not.toContain("className={styles.featurePresetNote}");
-    expect(routeSource).toContain("groupManagementHint");
-    expect(routeSource).toContain("sessionBindingNotice");
+    expect(routeAndIndexRailSource).toContain("groupManagementHint");
+    expect(routeAndIndexRailSource).toContain("sessionBindingNotice");
   });
 
   it("keeps left rail VButton cards from collapsing their internal grid layout", () => {
@@ -914,16 +933,16 @@ describe("ChatCodingRoute layout contract", () => {
   });
 
   it("optimistically renders the agent turn while submitted chat content is waiting for backend stream", () => {
-    expect(routeSource).toContain("createOptimisticActiveTurnLayer");
-    expect(routeSource).toContain("optimisticTurnIdForSubmission");
+    expect(routeAndComposerSource).toContain("createOptimisticActiveTurnLayer");
+    expect(routeAndComposerSource).toContain("optimisticTurnIdForSubmission");
 
-    const submitMutationStart = routeSource.indexOf("const submitTurnMutation = useMutation");
-    const submitMutateStart = routeSource.indexOf("onMutate: async (variables)", submitMutationStart);
-    const submitSuccessStart = routeSource.indexOf("onSuccess: (acceptedTurn, variables)", submitMutateStart);
-    const submitErrorStart = routeSource.indexOf("onError: (error, variables)", submitSuccessStart);
-    const submitMutateBlock = routeSource.slice(submitMutateStart, submitSuccessStart);
-    const submitSuccessBlock = routeSource.slice(submitSuccessStart, submitErrorStart);
-    const submitErrorBlock = routeSource.slice(submitErrorStart, routeSource.indexOf("const editResubmitMutation", submitErrorStart));
+    const submitMutationStart = routeAndComposerSource.indexOf("const submitTurnMutation = useMutation");
+    const submitMutateStart = routeAndComposerSource.indexOf("onMutate: async (variables)", submitMutationStart);
+    const submitSuccessStart = routeAndComposerSource.indexOf("onSuccess: (acceptedTurn, variables)", submitMutateStart);
+    const submitErrorStart = routeAndComposerSource.indexOf("onError: (error, variables)", submitSuccessStart);
+    const submitMutateBlock = routeAndComposerSource.slice(submitMutateStart, submitSuccessStart);
+    const submitSuccessBlock = routeAndComposerSource.slice(submitSuccessStart, submitErrorStart);
+    const submitErrorBlock = routeAndComposerSource.slice(submitErrorStart, routeAndComposerSource.indexOf("const editResubmitMutation", submitErrorStart));
 
     expect(submitMutateBlock).toContain("setActiveTurnLayersBySession((current) =>");
     expect(submitMutateBlock).toContain("createOptimisticActiveTurnLayer({");
@@ -933,13 +952,13 @@ describe("ChatCodingRoute layout contract", () => {
     expect(submitSuccessBlock).toContain("turnId: acceptedTurn.turnId");
     expect(submitErrorBlock).toContain("setActiveTurnLayerForSession(current, variables.sessionId, undefined)");
 
-    const editMutationStart = routeSource.indexOf("const editResubmitMutation = useMutation");
-    const editMutateStart = routeSource.indexOf("onMutate: async (variables)", editMutationStart);
-    const editSuccessStart = routeSource.indexOf("onSuccess: (nextDetail, variables)", editMutateStart);
-    const editErrorStart = routeSource.indexOf("onError: (error, variables)", editSuccessStart);
-    const editMutateBlock = routeSource.slice(editMutateStart, editSuccessStart);
-    const editSuccessBlock = routeSource.slice(editSuccessStart, editErrorStart);
-    const editErrorBlock = routeSource.slice(editErrorStart, routeSource.indexOf("const stopTurnMutation", editErrorStart));
+    const editMutationStart = routeAndComposerSource.indexOf("const editResubmitMutation = useMutation");
+    const editMutateStart = routeAndComposerSource.indexOf("onMutate: async (variables)", editMutationStart);
+    const editSuccessStart = routeAndComposerSource.indexOf("onSuccess: (nextDetail, variables)", editMutateStart);
+    const editErrorStart = routeAndComposerSource.indexOf("onError: (error, variables)", editSuccessStart);
+    const editMutateBlock = routeAndComposerSource.slice(editMutateStart, editSuccessStart);
+    const editSuccessBlock = routeAndComposerSource.slice(editSuccessStart, editErrorStart);
+    const editErrorBlock = routeAndComposerSource.slice(editErrorStart, routeAndComposerSource.indexOf("const stopTurnMutation", editErrorStart));
 
     expect(editMutateBlock).toContain("setActiveTurnLayersBySession((current) =>");
     expect(editMutateBlock).toContain("createOptimisticActiveTurnLayer({");
@@ -962,30 +981,30 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("rightIndexPanel");
     expect(routeSource).toContain("setRightIndexPanel(\"members\")");
     expect(routeSource).toContain("latestMentalSnapshot");
-    expect(routeSource).toContain("styles.groupProfileBlock");
-    expect(routeSource).toContain("styles.rightIndexTabs");
-    expect(routeSource).toContain("styles.agentIndexRoster");
-    expect(routeSource).toContain("styles.agentIndexHeader");
-    expect(routeSource).toContain("styles.agentIndexExpandButton");
-    expect(routeSource).toContain("styles.agentIndexOpenButton");
-    expect(routeSource).toContain("onClick={() => handleOpenDirectSession(participant.sessionId)}");
-    expect(routeSource).toContain("avatarImageUrlFrom(participantAgent, participant)");
-    expect(routeSource).toContain("styles.agentAvatarImage");
-    expect(routeSource).toContain("styles.agentIndexNameLine");
-    expect(routeSource).toContain("styles.agentIndexEmptyState");
-    expect(routeSource).toContain("aria-expanded={expanded}");
-    expect(routeSource).toContain("只展示可用成员；已归档或断链的历史成员保留在日志里，不在这里打扰。");
-    expect(routeSource).toContain("暂无可用群成员。请在右侧群设置中选择成员并应用变更。");
+    expect(routeAndIndexRailSource).toContain("styles.groupProfileBlock");
+    expect(routeAndIndexRailSource).toContain("styles.rightIndexTabs");
+    expect(routeAndIndexRailSource).toContain("styles.agentIndexRoster");
+    expect(routeAndIndexRailSource).toContain("styles.agentIndexHeader");
+    expect(routeAndIndexRailSource).toContain("styles.agentIndexExpandButton");
+    expect(routeAndIndexRailSource).toContain("styles.agentIndexOpenButton");
+    expect(routeAndIndexRailSource).toContain("onClick={() => onOpenDirectSession(participant.sessionId)}");
+    expect(routeAndIndexRailSource).toContain("avatarImageUrlFrom(participantAgent, participant)");
+    expect(routeAndIndexRailSource).toContain("styles.agentAvatarImage");
+    expect(routeAndIndexRailSource).toContain("styles.agentIndexNameLine");
+    expect(routeAndIndexRailSource).toContain("styles.agentIndexEmptyState");
+    expect(routeAndIndexRailSource).toContain("aria-expanded={expanded}");
+    expect(routeAndIndexRailSource).toContain("只展示可用成员；已归档或断链的历史成员保留在日志里，不在这里打扰。");
+    expect(routeAndIndexRailSource).toContain("暂无可用群成员。请在右侧群设置中选择成员并应用变更。");
     expect(routeSource).not.toContain("添加群成员");
     expect(routeSource).not.toContain("Add members");
     expect(routeSource).not.toContain("已从群聊调度中停用");
     expect(routeStyles.leftRail).toContain("[grid-column:5]");
     expect(routeStyles.rightPane).toContain("[grid-column:1]");
-    expect(routeSource.indexOf("styles.groupProfileBlock")).toBeGreaterThan(
-      routeSource.indexOf("<aside className={statusRailCollapsed"),
-    );
-    expect(routeSource.indexOf("styles.agentIndexRoster")).toBeGreaterThan(
-      routeSource.indexOf("<aside className={conversationIndexCollapsed"),
+    expect(chatStatusRailSource.indexOf("styles.groupProfileBlock")).toBeGreaterThan(-1);
+    expect(routeSource.indexOf("<ChatStatusRail")).toBeGreaterThan(-1);
+    expect(routeAndIndexRailSource.indexOf("styles.agentIndexRoster")).toBeGreaterThan(-1);
+    expect(routeSource.indexOf("<ChatConversationIndexRail")).toBeGreaterThan(
+      routeSource.indexOf('id="chat-status-pane"'),
     );
 
     expect(routeStyles.groupProfileBlock).toBeTypeOf("string");
@@ -1005,15 +1024,15 @@ describe("ChatCodingRoute layout contract", () => {
   });
 
   it("hides the right index tab switcher when only the conversation index is available", () => {
-    const rightAsideStart = routeSource.indexOf('id="chat-conversation-index-pane"');
-    const tabsRenderStart = routeSource.indexOf("{standardGroupRoomActive ? (", rightAsideStart);
-    const tabsClassStart = routeSource.indexOf("className={styles.rightIndexTabs}", tabsRenderStart);
-    const memberSummaryStart = routeSource.indexOf("{rightIndexPanel === \"members\" && standardGroupRoomActive", tabsClassStart);
+    const rightAsideStart = conversationIndexRailSource.indexOf('id="chat-conversation-index-pane"');
+    const tabsRenderStart = conversationIndexRailSource.indexOf("{standardGroupRoomActive ? (", rightAsideStart);
+    const tabsClassStart = conversationIndexRailSource.indexOf("className={styles.rightIndexTabs}", tabsRenderStart);
+    const memberSummaryStart = conversationIndexRailSource.indexOf("{rightIndexPanel === \"members\" && standardGroupRoomActive", tabsClassStart);
     expect(rightAsideStart).toBeGreaterThan(-1);
     expect(tabsRenderStart).toBeGreaterThan(rightAsideStart);
     expect(tabsClassStart).toBeGreaterThan(tabsRenderStart);
     expect(tabsClassStart).toBeLessThan(memberSummaryStart);
-    expect(routeSource).not.toContain("rightIndexTabsSingle");
+    expect(routeAndIndexRailSource).not.toContain("rightIndexTabsSingle");
   });
 
   it("keeps prompt cache observation visible in the current session status strip", () => {
@@ -1047,10 +1066,10 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).not.toContain("<span className={styles.metricValue}>{compressionCurrentPercent}%</span>");
     expect(tokenCoreStatusPanelSource).toContain("styles.tokenCompressionCard");
     expect(routeSource).toContain("const tokenStatusMetrics");
-    expect(routeSource).toContain("<TokenCoreStatusPanel");
-    expect(routeSource).toContain("<LlmPayloadTracePanel");
-    expect(routeSource).toContain("trace={lastLlmPayloadTrace}");
-    expect(routeSource.indexOf("<LlmPayloadTracePanel")).toBeGreaterThan(routeSource.indexOf("<TokenCoreStatusPanel"));
+    expect(routeAndIndexRailSource).toContain("<TokenCoreStatusPanel");
+    expect(routeAndIndexRailSource).toContain("<LlmPayloadTracePanel");
+    expect(routeAndIndexRailSource).toContain("trace={lastLlmPayloadTrace}");
+    expect(routeAndIndexRailSource.indexOf("<LlmPayloadTracePanel")).toBeGreaterThan(routeAndIndexRailSource.indexOf("<TokenCoreStatusPanel"));
     expect(tokenCoreStatusPanelSource).toContain("styles.tokenStatusVisualGrid");
     expect(tokenCoreStatusPanelSource).toContain("styles.tokenStatusMetric");
     expect(tokenCoreStatusPanelSource).toContain("styles.tokenStatusRing");
@@ -1160,20 +1179,26 @@ describe("ChatCodingRoute layout contract", () => {
     expect(cacheDetailDialogSource).toContain("styles.cacheDetailDonutPanel");
     expect(cacheDetailDialogSource).toContain("case \"cache_write\"");
     expect(routeSource).toContain("cacheCreationInputTokens");
-    expect(routeSource).toContain("styles.currentSessionBlock");
-    expect(routeSource).toContain("styles.currentSessionLine");
-    expect(routeSource).toContain("styles.currentSessionMetaList");
+    expect(routeAndIndexRailSource).toContain("styles.currentSessionBlock");
+    expect(routeAndIndexRailSource).toContain("styles.currentSessionLine");
+    expect(routeAndIndexRailSource).toContain("styles.currentSessionMetaList");
     expect(routeSource).toContain("· 缓 ${numberFormatter.format(sessionLlmUsage.cachedInputTokens)}");
     expect(routeSource).not.toContain("${numberFormatter.format(sessionLlmUsage.inputTokens)} tokens · ${numberFormatter.format(sessionLlmUsage.cachedInputTokens)} cached");
-    expect(routeSource.indexOf("styles.runModeBlock")).toBeGreaterThan(routeSource.indexOf("sessionCompactRows.map"));
-    expect(routeSource.indexOf("<TokenCoreStatusPanel")).toBeGreaterThan(routeSource.indexOf("styles.runModeBlock"));
+    expect(routeAndIndexRailSource.indexOf("styles.runModeBlock")).toBeGreaterThan(
+      routeAndIndexRailSource.indexOf("sessionCompactRows.map"),
+    );
+    expect(routeAndIndexRailSource.indexOf("<TokenCoreStatusPanel")).toBeGreaterThan(
+      routeAndIndexRailSource.indexOf("styles.runModeBlock"),
+    );
     expect(routeSource).not.toContain("className={`${styles.leftBlock} ${styles.contextStatusCard}`}");
     expect(routeSource).not.toContain("className={`${styles.leftBlock} ${styles.cacheStatusCard}`}");
     expect(routeSource).not.toContain("className={`${styles.leftBlock} ${styles.resourceBlock} ${styles.compressionStatusCard}`}");
     expect(routeSource).not.toContain("className={`${styles.leftBlock} ${styles.compressionStrategyCard}`}");
     expect(routeSource).toContain("lastCacheComposition.source === \"not_called\"");
     expect(routeStyles.leftRail).toContain("[grid-column:5]");
-    expect(routeSource.indexOf("<TokenCoreStatusPanel")).toBeGreaterThan(routeSource.indexOf("<aside className={statusRailCollapsed"));
+    expect(routeAndIndexRailSource.indexOf("<TokenCoreStatusPanel")).toBeGreaterThan(
+      chatStatusRailSource.indexOf('id="chat-status-pane"'),
+    );
 
     expect(routeStyles.tokenCompressionCard).toBeTypeOf("string");
     expect(routeStyles.tokenStatusVisualGrid).toBeTypeOf("string");
@@ -1370,18 +1395,20 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("type ActiveSkillContract = {");
     expect(routeSource).toContain("type SessionDetailWithActiveSkill = SessionDetail &");
     expect(routeSource).toContain("const activeSkillContract = (detail as SessionDetailWithActiveSkill | undefined)?.activeSkillContract ?? null");
-    expect(routeSource).toContain("const activeSkillStatusLabel = activeSkillStatus === \"stale\"");
-    expect(routeSource).toContain("styles.activeSkillStatus_stale");
-    expect(routeSource).toContain("styles.activeSkillStatus_missing");
+    expect(routeAndIndexRailSource).toContain("const activeSkillStatusLabel = activeSkillStatus === \"stale\"");
+    expect(routeAndIndexRailSource).toContain("styles.activeSkillStatus_stale");
+    expect(routeAndIndexRailSource).toContain("styles.activeSkillStatus_missing");
     expect(routeSource).toContain("const activeSkillTitle = activeSkillContract");
-    expect(routeSource).toContain("const activeSkillStatusStyle = activeSkillStatus === \"stale\"");
-    expect(routeSource).toContain("className={`${styles.activeSkillStatus} ${activeSkillStatusStyle}`}");
-    expect(routeSource).toContain("styles.activeSkillIdentity");
-    expect(routeSource).toContain("styles.activeSkillMeta");
+    expect(routeAndIndexRailSource).toContain("const activeSkillStatusStyle = activeSkillStatus === \"stale\"");
+    expect(routeAndIndexRailSource).toContain("className={`${styles.activeSkillStatus} ${activeSkillStatusStyle}`}");
+    expect(routeAndIndexRailSource).toContain("styles.activeSkillIdentity");
+    expect(routeAndIndexRailSource).toContain("styles.activeSkillMeta");
     expect(routeSource).toContain("case \"active_skill\":");
-    const renderedActiveSkillIndex = routeSource.indexOf("className={`${styles.activeSkillStatus} ${activeSkillStatusStyle}`}");
-    expect(renderedActiveSkillIndex).toBeGreaterThan(routeSource.indexOf("sessionCompactRows.map"));
-    expect(renderedActiveSkillIndex).toBeLessThan(routeSource.indexOf("<TokenCoreStatusPanel"));
+    const renderedActiveSkillIndex = routeAndIndexRailSource.indexOf(
+      "className={`${styles.activeSkillStatus} ${activeSkillStatusStyle}`}",
+    );
+    expect(renderedActiveSkillIndex).toBeGreaterThan(routeAndIndexRailSource.indexOf("sessionCompactRows.map"));
+    expect(renderedActiveSkillIndex).toBeLessThan(routeAndIndexRailSource.indexOf("<TokenCoreStatusPanel"));
 
     expect(routeStyles.activeSkillStatus).toBeTypeOf("string");
     expect(routeStyles.activeSkillStatus_active).toBeTypeOf("string");
@@ -1500,42 +1527,45 @@ describe("ChatCodingRoute layout contract", () => {
   });
 
   it("shows direct-session mismatch as a status-strip notice with a switch action", () => {
-    expect(routeSource).toContain("agentDirectSessionMismatch");
-    expect(routeSource).toContain("sessionBindingNotice");
-    expect(routeSource).toContain("sessionBindingMismatchLine");
-    expect(routeSource).toContain("handleOpenDirectSession(agentPrimaryDirectSessionId)");
+    expect(routeAndIndexRailSource).toContain("agentDirectSessionMismatch");
+    expect(routeAndIndexRailSource).toContain("sessionBindingNotice");
+    expect(routeAndIndexRailSource).toContain("sessionBindingMismatchLine");
+    expect(routeAndIndexRailSource).toContain("onOpenDirectSession(agentPrimaryDirectSessionId)");
     expect(routeSource).toContain("label: t(\"sessionBinding\")");
     expect(routeSource.indexOf("label: t(\"sessionBinding\")")).toBeLessThan(
-      routeSource.indexOf("<TokenCoreStatusPanel"),
+      routeAndIndexRailSource.indexOf("<TokenCoreStatusPanel"),
     );
     expect(routeSource).not.toContain("label: t(\"currentTask\")");
   });
 
   it("records direct chat submit lifecycle telemetry before backend acceptance", () => {
-    expect(routeSource).toContain("postSubmitTelemetry");
-    expect(routeSource).toContain("browser.chat_submit.requested");
-    expect(routeSource).toContain("browser.chat_submit.blocked");
-    expect(routeSource).toContain("browser.chat_submit.upload_started");
-    expect(routeSource).toContain("browser.chat_submit.upload_failed");
-    expect(routeSource).toContain("browser.chat_submit.mutate_called");
-    expect(routeSource).toContain("browser.chat_submit.request_started");
-    expect(routeSource).toContain("browser.chat_submit.accepted");
-    expect(routeSource).toContain("browser.chat_submit.request_failed");
-    expect(routeSource).toContain("contentLength");
-    expect(routeSource).toContain("guardReason");
+    expect(routeAndComposerSource).toContain("postSubmitTelemetry");
+    expect(routeAndComposerSource).toContain("browser.chat_submit.requested");
+    expect(routeAndComposerSource).toContain("browser.chat_submit.blocked");
+    expect(routeAndComposerSource).toContain("browser.chat_submit.upload_started");
+    expect(routeAndComposerSource).toContain("browser.chat_submit.upload_failed");
+    expect(routeAndComposerSource).toContain("browser.chat_submit.mutate_called");
+    expect(routeAndComposerSource).toContain("browser.chat_submit.request_started");
+    expect(routeAndComposerSource).toContain("browser.chat_submit.accepted");
+    expect(routeAndComposerSource).toContain("browser.chat_submit.request_failed");
+    expect(routeAndComposerSource).toContain("contentLength");
+    expect(routeAndComposerSource).toContain("guardReason");
     expect(chatSubmitTelemetrySource).toContain("fields.clientSubmissionId = options.clientSubmissionId");
     expect(chatSubmitTelemetrySource).toContain("fields.turnId = options.turnId");
     expect(chatSubmitTelemetrySource).toContain("fields.acceptedAt = options.acceptedAt");
-    expect(routeSource).toContain("requestStartedAtMs: chatStreamPerformanceNowMs()");
-    expect(routeSource).toContain("durationMs: Math.max(0, chatStreamPerformanceNowMs() - variables.requestStartedAtMs)");
-    expect(routeSource).not.toContain("fields: { content,");
+    expect(routeAndComposerSource).toContain("requestStartedAtMs: chatStreamPerformanceNowMs()");
+    expect(routeAndComposerSource).toContain("durationMs: Math.max(0, chatStreamPerformanceNowMs() - variables.requestStartedAtMs)");
+    expect(routeAndComposerSource).not.toContain("fields: { content,");
   });
 
   it("clears the direct chat composer immediately after submit and restores only failed text", () => {
-    const submitWithAttachmentsStart = routeSource.indexOf("async function submitTurnWithAttachments");
-    const optimisticAppend = routeSource.indexOf("appendOptimisticUserMessage(detail, { sessionId, content, references, clientSubmissionId })", submitWithAttachmentsStart);
-    const immediateDraftClear = routeSource.indexOf("clearSessionDraftForSubmittedTurn(current, sessionId)", submitWithAttachmentsStart);
-    const uploadFailureDraftRestore = routeSource.indexOf(
+    const submitWithAttachmentsStart = routeAndComposerSource.indexOf("const submitTurnWithAttachments = useCallback(async (");
+    const optimisticAppend = routeAndComposerSource.indexOf(
+      "appendOptimisticUserMessage(detailState, { sessionId, content, references, clientSubmissionId })",
+      submitWithAttachmentsStart,
+    );
+    const immediateDraftClear = routeAndComposerSource.indexOf("clearSessionDraftForSubmittedTurn(current, sessionId)", submitWithAttachmentsStart);
+    const uploadFailureDraftRestore = routeAndComposerSource.indexOf(
       "restoreSubmittedDraftIfComposerStillEmpty(current, sessionId, content)",
       submitWithAttachmentsStart,
     );
@@ -1543,14 +1573,14 @@ describe("ChatCodingRoute layout contract", () => {
     expect(immediateDraftClear).toBeGreaterThan(submitWithAttachmentsStart);
     expect(immediateDraftClear).toBeLessThan(optimisticAppend);
     expect(uploadFailureDraftRestore).toBeGreaterThan(optimisticAppend);
-    expect(routeSource).toContain("const clientSubmissionId = createClientSubmissionId(activeSessionId)");
-    expect(routeSource).toContain("clientSubmissionId,");
+    expect(routeAndComposerSource).toContain("const clientSubmissionId = createClientSubmissionId(activeSessionId)");
+    expect(routeAndComposerSource).toContain("clientSubmissionId,");
 
-    const submitMutationStart = routeSource.indexOf("const submitTurnMutation = useMutation");
-    const submitSuccessStart = routeSource.indexOf("onSuccess: (acceptedTurn, variables)", submitMutationStart);
-    const submitErrorStart = routeSource.indexOf("onError: (error, variables)", submitSuccessStart);
-    const submitSuccessBlock = routeSource.slice(submitSuccessStart, submitErrorStart);
-    const submitErrorBlock = routeSource.slice(submitErrorStart, routeSource.indexOf("const editResubmitMutation", submitErrorStart));
+    const submitMutationStart = routeAndComposerSource.indexOf("const submitTurnMutation = useMutation");
+    const submitSuccessStart = routeAndComposerSource.indexOf("onSuccess: (acceptedTurn, variables)", submitMutationStart);
+    const submitErrorStart = routeAndComposerSource.indexOf("onError: (error, variables)", submitSuccessStart);
+    const submitSuccessBlock = routeAndComposerSource.slice(submitSuccessStart, submitErrorStart);
+    const submitErrorBlock = routeAndComposerSource.slice(submitErrorStart, routeAndComposerSource.indexOf("const editResubmitMutation", submitErrorStart));
     expect(submitSuccessBlock).not.toContain("setSessionDrafts");
     expect(submitErrorBlock).toContain("restoreSubmittedDraftIfComposerStillEmpty(current, variables.sessionId, variables.content)");
   });
@@ -1559,8 +1589,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("readStoredMentalModelToggle() ?? false");
     expect(routeSource).not.toContain("const defaultEnabled = String(runtime.mentalState?.source");
     expect(routeSource).toContain("showMentalSnapshots: mentalModelEnabledForNextTurn");
-    expect(routeSource).toContain("mentalModelEnabled: mentalModelEnabledForNextTurn");
-    expect(routeSource).toContain("const memberMental = mentalModelEnabledForNextTurn ? latestMentalSnapshot(memberDetail?.messages) : undefined");
+    expect(routeAndComposerSource).toContain("mentalModelEnabled: mentalModelEnabledForNextTurn");
+    expect(routeAndIndexRailSource).toContain("const memberMental = mentalModelEnabledForNextTurn ? latestMentalSnapshot(memberDetail?.messages) : undefined");
   });
 
   it("exposes dynamic group creation from the unified conversation list", () => {
@@ -1568,11 +1598,11 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("handleCreateGroupRoom");
     expect(routeSource).toContain("fetchJson<AgentInstance[]>(\"/api/agents?detail=summary\")");
     expect(routeSource).toContain("body: JSON.stringify({ title, agentIds, mode, purpose })");
-    expect(routeSource).toContain("styles.groupComposerPanel");
-    expect(routeSource).toContain("styles.groupAgentPicker");
-    expect(routeSource).toContain("styles.createGroupButton");
-    expect(routeSource).toContain("styles.systemEntryGroup");
-    expect(routeSource).toContain("styles.systemEntryButton");
+    expect(routeAndIndexRailSource).toContain("styles.groupComposerPanel");
+    expect(routeAndIndexRailSource).toContain("styles.groupAgentPicker");
+    expect(routeAndIndexRailSource).toContain("styles.createGroupButton");
+    expect(routeAndIndexRailSource).toContain("styles.systemEntryGroup");
+    expect(routeAndIndexRailSource).toContain("styles.systemEntryButton");
 
     expect(routeStyles.sessionActionRow).toBeTypeOf("string");
     expect(routeStyles.newGroupButton).toBeTypeOf("string");
@@ -1616,8 +1646,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("requestedRoomId && activeGroupRoomId !== requestedRoomId");
     expect(routeSource).toContain("navigate(`/chat?room=${encodeURIComponent(roomId)}`, { replace: false })");
     expect(routeSource).toContain("setRightPaneCollapsed(false)");
-    expect(routeSource).toContain("chatRoomModeLabel(mode, lang)");
-    expect(routeSource).toContain("chatRoomPurposeLabel(purpose, lang)");
+    expect(routeAndIndexRailSource).toContain("chatRoomModeLabel(mode, lang)");
+    expect(routeAndIndexRailSource).toContain("chatRoomPurposeLabel(purpose, lang)");
     expect(routeSource).toContain("queryKeys.chatRoomPurposes()");
     expect(routeSource).toContain("fetchJson<ChatRoomPurpose[]>(\"/api/chat-rooms/purposes\")");
     expect(routeSource).toContain("抢占式讨论");
@@ -1625,7 +1655,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("医疗分诊建议");
     expect(routeSource).toContain("medical_consultation_panel");
     expect(routeSource).toContain("medical_triage");
-    expect(routeSource).toContain("对话目的");
+    expect(routeAndIndexRailSource).toContain("对话目的");
     expect(routeSource).toContain("purpose: groupPurposeDraft || \"discussion\"");
     expect(routeSource).toContain("purpose: activeGroupRoom?.purpose || \"discussion\"");
     expect(routeSource).toContain("purpose: groupManagePurposeDraft || \"discussion\"");
@@ -1648,20 +1678,20 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("const activeGroupTeamOwned = Boolean(activeGroupTeam)");
     expect(routeSource).toContain("|| activeGroupTeamOwned");
     expect(routeSource).toContain("if (!sessionId || activeGroupTeamOwned || groupRoundActive || updateGroupRoomMutation.isPending)");
-    expect(routeSource).toContain("团队群聊引用");
-    expect(routeSource).toContain("Team room reference");
-    expect(routeSource).toContain("onClick={() => navigate(`/teams?team=${encodeURIComponent(activeGroupTeam.teamId)}`)}");
-    expect(routeSource).toContain("打开团队");
-    expect(routeSource).toContain("disabled={activeGroupTeamOwned || groupRoundActive || updateGroupRoomMutation.isPending}");
-    expect(routeSource).toContain("disabled={activeGroupTeamOwned || groupRoundRunning || updateGroupRoomMutation.isPending}");
-    expect(routeSource).toContain("团队关联群聊的成员来自团队组织画布");
+    expect(routeAndIndexRailSource).toContain("团队群聊引用");
+    expect(routeAndIndexRailSource).toContain("Team room reference");
+    expect(routeAndIndexRailSource).toContain("onClick={() => onOpenTeam(activeGroupTeam.teamId)}");
+    expect(routeAndIndexRailSource).toContain("打开团队");
+    expect(routeAndIndexRailSource).toContain("disabled={activeGroupTeamOwned || groupRoundActive || updateGroupRoomPending}");
+    expect(routeAndIndexRailSource).toContain("disabled={activeGroupTeamOwned || groupRoundRunning || updateGroupRoomPending}");
+    expect(routeAndIndexRailSource).toContain("团队关联群聊的成员来自团队组织画布");
     expect(routeSource).toContain("groupManageTitleDraft");
     expect(routeSource).toContain("title: groupManageTitleDraft.trim()");
     expect(routeSource).toContain("groupManagePurposeDraft");
     expect(routeSource).toContain("participantSessionIds: sessionIds");
     expect(routeSource).toContain("groupManageSessionIds.length < 2");
     expect(routeSource).toContain("setGroupManageSessionIds((current) => current.filter((sessionId) => sessionId !== variables.sessionId))");
-    expect(routeSource).toContain("styles.groupManagementPanel");
+    expect(routeAndIndexRailSource).toContain("styles.groupManagementPanel");
     expect(routeSource).toContain("styles.groupConversationFrame");
     expect(routeSource).toContain("compactAgentRoleLabel");
     expect(routeSource).toContain("shouldCollapseGroupMessage");
@@ -1678,9 +1708,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("numericTail.slice(-2)");
     expect(routeSource).not.toContain("navigate(`/chat-rooms");
     expect(routeStyles.leftRail).toContain("[grid-column:5]");
-    expect(routeSource.indexOf("styles.groupManagementPanel")).toBeGreaterThan(
-      routeSource.indexOf("<aside className={statusRailCollapsed"),
-    );
+    expect(chatStatusRailSource.indexOf("styles.groupManagementPanel")).toBeGreaterThan(-1);
+    expect(routeSource.indexOf("<ChatStatusRail")).toBeGreaterThan(-1);
 
     expect(routeStyles.groupConversationFrame).toBeTypeOf("string");
     expect(routeStyles.groupManagementPanel).toBeTypeOf("string");
@@ -1967,10 +1996,10 @@ describe("ChatCodingRoute layout contract", () => {
   });
 
   it("does not refetch chat indexes or detail immediately after an accepted direct turn", () => {
-    const submitMutationStart = routeSource.indexOf("const submitTurnMutation = useMutation");
-    const submitSuccessStart = routeSource.indexOf("onSuccess: (acceptedTurn, variables)", submitMutationStart);
-    const submitErrorStart = routeSource.indexOf("onError: (error, variables)", submitSuccessStart);
-    const submitSuccessBlock = routeSource.slice(submitSuccessStart, submitErrorStart);
+    const submitMutationStart = routeAndComposerSource.indexOf("const submitTurnMutation = useMutation");
+    const submitSuccessStart = routeAndComposerSource.indexOf("onSuccess: (acceptedTurn, variables)", submitMutationStart);
+    const submitErrorStart = routeAndComposerSource.indexOf("onError: (error, variables)", submitSuccessStart);
+    const submitSuccessBlock = routeAndComposerSource.slice(submitSuccessStart, submitErrorStart);
 
     expect(submitSuccessBlock).toContain("markOptimisticUserMessageAccepted");
     expect(submitSuccessBlock).not.toContain("invalidateQueries");
@@ -2219,21 +2248,21 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("queryKeys.configPublic()");
     expect(routeSource).toContain("const modelLabelsById = useMemo");
     expect(routeSource).toContain("const resolveModelLabel = useCallback");
-    expect(routeSource).toContain("agentDisplayInfo(agent, lang, { resolveModelLabel })");
+    expect(routeAndIndexRailSource).toContain("agentDisplayInfo(agent, lang, { resolveModelLabel })");
     expect(agentSessionTabStripSource).toContain("sessionAgentDisplayInfo(session, sessionAgent, lang, resolveModelLabel)");
     expect(routeSource).toContain("participantAgentDisplayInfo(participantLike, participantAgent, lang, resolveModelLabel)");
     expect(conversationIndexModelSource).toContain("dialogueModelId: session.dialogueModelId");
     expect(agentSessionTabStripSource).toContain("sessionDisplay.modelLabel");
-    expect(routeSource).toContain("participantDisplay.modelLabel");
+    expect(routeAndIndexRailSource).toContain("participantDisplay.modelLabel");
     expect(routeSource).toContain("display.modelLabel");
     expect(agentSessionTabStripSource).toContain("const sessionAgent = session.agentId ? agentsById.get(session.agentId) : undefined");
     expect(agentSessionTabStripSource).toContain("const sessionDisplay = sessionAgentDisplayInfo(session, sessionAgent, lang, resolveModelLabel)");
-    expect(routeSource).toContain("const participantDisplay = groupParticipantIdentity(participant)");
+    expect(routeAndIndexRailSource).toContain("const participantDisplay = groupParticipantIdentity(participant)");
     expect(routeSource).toContain("identityLabel: formatAgentIdentityWithRole");
-    expect(routeSource).toContain("styles.groupMemberCopy");
-    expect(routeSource).toContain("styles.agentRoleTag");
-    expect(routeSource).toContain("styles.agentModelTag");
-    expect(routeSource).toContain("styles.agentModelLine");
+    expect(routeAndIndexRailSource).toContain("styles.groupMemberCopy");
+    expect(routeAndIndexRailSource).toContain("styles.agentRoleTag");
+    expect(routeAndIndexRailSource).toContain("styles.agentModelTag");
+    expect(routeAndIndexRailSource).toContain("styles.agentModelLine");
 
     expect(routeStyles.groupMemberCopy).toBeTypeOf("string");
     expect(routeStyles.agentRoleTag).toBeTypeOf("string");
@@ -2606,8 +2635,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("defaultConversationGroupCollapsed(groupKey)");
     expect(routeSource).toContain("ConversationIndexTree");
     expect(routeSource).toContain("<ConversationIndexTree");
-    expect(routeSource.indexOf("<ConversationIndexTree")).toBeLessThan(
-      routeSource.indexOf("styles.systemEntryGroup"),
+    expect(routeAndIndexRailSource.indexOf("<ConversationIndexTree")).toBeLessThan(
+      routeAndIndexRailSource.indexOf("styles.systemEntryGroup"),
     );
     expect(conversationIndexTreeSource).toContain("ConversationIndexSection");
     expect(conversationIndexTreeSource).toContain("defaultConversationGroupCollapsed(group.groupKey, group.groupKind)");
@@ -2646,15 +2675,15 @@ describe("ChatCodingRoute layout contract", () => {
   });
 
   it("keeps the conversation index toolbar buttons slot-aligned and the search field un-nested", () => {
-    const actionRowSource = routeSource.slice(
-      routeSource.indexOf("<div className={styles.sessionActionRow}>"),
-      routeSource.indexOf("{conversationIndexPanel}", routeSource.indexOf("<div className={styles.sessionActionRow}>")),
+    const actionRowSource = routeAndIndexRailSource.slice(
+      routeAndIndexRailSource.indexOf("<div className={styles.sessionActionRow}>"),
+      routeAndIndexRailSource.indexOf("{conversationIndexPanel}", routeAndIndexRailSource.indexOf("<div className={styles.sessionActionRow}>")),
     );
 
     expect(actionRowSource).toContain("icon={<Plus size={15} />}");
     expect(actionRowSource).toContain("icon={<UsersRound size={15} />}");
-    expect(routeSource).toContain("<VInput");
-    expect(routeSource).toContain("<Search size={15} aria-hidden=\"true\" />");
+    expect(routeAndIndexRailSource).toContain("<VInput");
+    expect(routeAndIndexRailSource).toContain("<Search size={15} aria-hidden=\"true\" />");
     expect(routeStyles.newSessionButton).toContain("border-[color-mix(in_srgb,var(--accent-cool)_34%,var(--vui-border-subtle))]");
     expect(routeStyles.newGroupButton).toContain("bg-[var(--vui-control-muted)]");
     expect(routeStyles.panelSearch).toContain("min-h-9");
@@ -2678,9 +2707,9 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.conversationIndexPanelBody).toContain("!overflow-hidden");
     expect(routeStyles.conversationIndexLayout).toContain("grid-rows-[auto_minmax(0,1fr)_auto]");
     expect(routeStyles.conversationIndexScrollRegion).toContain("overflow-y-auto");
-    expect(routeSource).toContain("styles.conversationIndexPanelBody");
-    expect(routeSource).toContain("styles.conversationIndexLayout");
-    expect(routeSource).toContain("styles.conversationIndexScrollRegion");
+    expect(routeAndIndexRailSource).toContain("styles.conversationIndexPanelBody");
+    expect(routeAndIndexRailSource).toContain("styles.conversationIndexLayout");
+    expect(routeAndIndexRailSource).toContain("styles.conversationIndexScrollRegion");
     expect(routeStyles.systemEntryGroup).toContain("border-t");
     expect(routeStyles.systemEntryButton).toContain("grid-cols-[28px_minmax(0,1fr)]");
     expect(routeStyles.systemEntryButton).toContain("border-transparent");
@@ -2959,9 +2988,9 @@ describe("ChatCodingRoute layout contract", () => {
 
   it("routes ChatCoding route controls through VUI primitives", () => {
     expect(routeSource).toContain('from "../components/vui"');
-    expect(routeSource).toContain("<VButton");
-    expect(routeSource).toContain("<VNativeInput");
-    expect(routeSource).toContain("<VNativeSelect");
+    expect(routeAndIndexRailSource).toContain("<VButton");
+    expect(routeAndIndexRailSource).toContain("<VNativeInput");
+    expect(routeAndIndexRailSource).toContain("<VNativeSelect");
     expect(routeSource).not.toMatch(/<button\b/);
     expect(routeSource).not.toMatch(/<input\b/);
     expect(routeSource).not.toMatch(/<select\b/);

@@ -446,6 +446,28 @@ describe("projectAgentMessageTimelineMessages", () => {
     expect(projection.rowIdentities[0].rowKey).toBe("assistant-turn:turn-1");
   });
 
+  it("does not append an active layer after a canonical same-turn error already exists", () => {
+    const terminalError = assistantMessage("terminal-error", {
+      content: "模型服务上游暂时失败，本轮没有完成。",
+      metadata: { kind: "turn_error", turnId: "turn-1", providerFailure: true },
+    });
+    const activeTurn = assistantMessage("active-turn", {
+      content: "",
+      streaming: true,
+      streamStage: "model_request",
+      metadata: { kind: "session_active_turn_layer", turnId: "turn-1" },
+    });
+
+    const projection = projectAgentMessageTimelineMessages({
+      timelineMessages: [terminalError],
+      activeTurnMessage: activeTurn,
+    });
+
+    expect(projection.messages.map((message) => message.id)).toEqual(["terminal-error"]);
+    expect(projection.streamingMessages).toEqual([]);
+    expect(projection.rowIdentities[0].rowKey).toBe("assistant-turn:turn-1");
+  });
+
   it("keeps the active same-turn layer after non-terminal commentary", () => {
     const commentary = assistantMessage("assistant-commentary", {
       content: "I will inspect the file.",
