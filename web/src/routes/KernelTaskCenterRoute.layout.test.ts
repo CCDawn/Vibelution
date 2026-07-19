@@ -143,8 +143,9 @@ describe("KernelTaskCenterRoute layout contract", () => {
     expect(styles.taskListClass).toContain("overflow-auto");
     expect(styles.taskListClass).toContain("overflow-x-hidden");
 
-    expect(styles.detailPaneClass).toContain("grid-cols-[minmax(0,1fr)_minmax(300px,0.86fr)]");
+    expect(styles.detailPaneClass).toContain("grid-cols-[minmax(0,1fr)_clamp(280px,26vw,380px)]");
     expect(styles.detailPaneClass).toContain("grid-rows-[minmax(0,1fr)]");
+    expect(styles.workspaceClass).toContain("clamp(280px,28vw,400px)");
     expect(styles.detailPaneClass).toContain("overflow-hidden");
     expect(styles.detailContentClass).toContain("overflow-auto");
     expect(styles.detailContentClass).toContain("overflow-x-hidden");
