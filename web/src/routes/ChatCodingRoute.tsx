@@ -230,6 +230,7 @@ import {
   buildCliAgentRunViews,
   canInputTerminal,
   cliAgentRunCloseToken,
+  stableCliHash,
   cliAgentRunIdFromTabId,
   cliAgentRunTabId,
   isCliAgentRunActiveForClose,
