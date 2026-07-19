@@ -62,6 +62,7 @@ function renderUtilityFileTree(
       <VButton
         key={node.path}
         type="button"
+                contentLayout="plain"
         className={active ? `${styles.utilityFileButton} ${styles.utilityFileButtonActive}` : styles.utilityFileButton}
         onPress={() => onOpenFile(node.path)}
         tooltip={node.path}

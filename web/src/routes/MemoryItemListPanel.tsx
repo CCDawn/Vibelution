@@ -168,6 +168,7 @@ export function MemoryItemListPanel({
               </label>
               <VButton
                 type="button"
+                contentLayout="plain"
                 className={`${styles.itemContentButton} ${styles.itemContentButtonDense}`}
                 onClick={() => onSelectPair(section.id, item.id)}
                 aria-pressed={active}
@@ -183,6 +184,7 @@ export function MemoryItemListPanel({
             <VButton
               key={itemKey}
               type="button"
+                contentLayout="plain"
               className={
                 active
                   ? `${styles.itemButton} ${styles.itemButtonCompact} ${styles.itemButtonActive}`
@@ -200,6 +202,7 @@ export function MemoryItemListPanel({
           <VButton
             key={itemKey}
             type="button"
+                contentLayout="plain"
             className={active ? `${styles.itemButton} ${styles.itemButtonActive}` : styles.itemButton}
             onClick={() => onSelectPair(section.id, item.id)}
             aria-pressed={active}

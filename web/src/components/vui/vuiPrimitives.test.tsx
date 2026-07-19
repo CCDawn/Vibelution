@@ -204,6 +204,7 @@ describe("VUI foundation primitives", () => {
     expect(markup).not.toContain('data-slot="vui-button-content"');
     expect(markup).not.toContain('data-slot="vui-button-label"');
     expect(markup).not.toContain("whitespace-nowrap");
+    expect(markup).toContain("!h-auto");
     expect(markup).toContain('data-test-id="plain-card-child"');
   });
 

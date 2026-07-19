@@ -27,9 +27,12 @@ function hasExplicitRootWidth(className: VNativeButtonProps["className"]): boole
 }
 
 function nativeButtonGeometryClass(className: VNativeButtonProps["className"]): string {
+  const displayExplicit = hasExplicitRootDisplay(className);
   return [
-    hasExplicitRootDisplay(className) ? null : "inline-flex items-center justify-center gap-1.5",
-    hasExplicitRootWidth(className) ? null : "max-w-full shrink-0 justify-self-start whitespace-nowrap",
+    displayExplicit ? null : "inline-flex items-center justify-center gap-1.5",
+    hasExplicitRootWidth(className) ? null : "max-w-full shrink-0 justify-self-start",
+    // Multi-line grid/flex roots must keep normal whitespace (session cards, headers).
+    displayExplicit ? null : "whitespace-nowrap",
   ]
     .filter(Boolean)
     .join(" ");
