@@ -4,6 +4,7 @@ import { basename } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import chatRouteSource from "./ChatCodingRoute.tsx?raw";
+import chatLayoutSource from "./chat/useChatWorkbenchLayout.ts?raw";
 import gitRouteSource from "./GitRoute.tsx?raw";
 import selfEvolutionTrackSource from "./SelfEvolutionTrack.tsx?raw";
 
@@ -70,8 +71,9 @@ describe("route style display contract", () => {
   });
 
   it("keeps composed grid-template modifiers attached to grid-bearing base styles", () => {
-    expect(chatRouteSource).toContain("`${styles.layout} ${styles.layoutCompactDesktop}`");
-    expect(chatRouteSource).toContain("`${styles.rightPane} ${rightPaneLayoutClassName}`");
+    expect(chatLayoutSource).toContain("`${styles.layout} ${styles.layoutCompactDesktop}`");
+    expect(chatLayoutSource).toContain("`${styles.rightPane} ${rightPaneLayoutClassName}`");
+    expect(chatRouteSource).toContain("className={chatLayoutClassName}");
 
     expect(gitRouteSource).toContain("`${styles.workspace} ${styles.workspaceOverview}`");
     expect(gitRouteSource).toContain("`${styles.commitPanel} ${styles.historyPanel}`");
