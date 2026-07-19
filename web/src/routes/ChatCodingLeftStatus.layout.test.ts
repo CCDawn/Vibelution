@@ -2,7 +2,10 @@ import { describe, expect, it } from "vitest";
 
 import styles from "./ChatCodingRoute.styles";
 import chatCodingRouteSource from "./ChatCodingRoute.tsx?raw";
+import chatSessionSurfaceModelSource from "./chat/chatSessionSurfaceModel.ts?raw";
 import tokenCoreStatusPanelSource from "./chat/TokenCoreStatusPanel.tsx?raw";
+
+const routeAndSessionSurfaceSource = `${chatCodingRouteSource}\n${chatSessionSurfaceModelSource}`;
 
 describe("ChatCodingRoute left status panel layout contract", () => {
   it("uses one raised status rail with flat separator-based groups", () => {
@@ -62,8 +65,8 @@ describe("ChatCodingRoute left status panel layout contract", () => {
   });
 
   it("keeps provider failure status compact and hides numeric operator identities", () => {
-    expect(chatCodingRouteSource).toContain("const compactSessionStateLine = detail?.lastTurnError");
-    expect(chatCodingRouteSource).toContain("detail.lastTurnError.httpStatus || detail.lastTurnError.reasonCode");
+    expect(routeAndSessionSurfaceSource).toContain("const compactSessionStateLine = detail?.lastTurnError");
+    expect(routeAndSessionSurfaceSource).toContain("detail.lastTurnError.httpStatus || detail.lastTurnError.reasonCode");
     expect(chatCodingRouteSource).toContain("resolveChatUserDisplayName(runtime?.userName)");
   });
 });
