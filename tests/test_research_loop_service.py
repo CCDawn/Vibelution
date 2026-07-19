@@ -125,3 +125,91 @@ def test_research_loop_status_persists_to_team_workspace(tmp_path, monkeypatch):
     assert status["summary"]["totalLoopCount"] == 1
     assert status["storagePath"].endswith(f"workspace/teams/{team['teamId']}/research_loops/index.json")
     assert status["nextActions"][0]["action"] == "record_evidence"
+
+
+def test_research_loop_automatically_carries_stage3_memory_context(tmp_path, monkeypatch):
+    team = _team(tmp_path, monkeypatch)
+    coordinator = next(
+        (
+            str(member.get("agentId") or "")
+            for member in team.get("members") or []
+            if str(member.get("role") or "") == "research_coordination"
+        ),
+        "",
+    )
+    workflow_root = research_loop_service._team_workspace_root(team["teamId"])
+    research_loop_service._write_json(
+        workflow_root / "experiment_plans" / "index.json",
+        {
+            "storeKind": "challenge_cup_experiment_plan_store",
+            "activePlanId": "plan-best",
+            "plans": [
+                {
+                    "planId": "plan-negative",
+                    "title": "failed ablation",
+                    "status": "smoke_failed",
+                    "hypothesisCandidateIds": ["candidate-negative"],
+                    "experimentContract": {
+                        "schemaVersion": 2,
+                        "revision": 5,
+                        "methodConfig": {"candidateLossMaskMode": "shifted"},
+                        "constraints": ["same seed", "only mask alignment changes"],
+                        "decisionContract": {"failureCriteria": ["masked gain gate failed"]},
+                    },
+                    "activeSmokeResultId": "smoke-negative",
+                    "activeSmokeResult": {"smokeResultId": "smoke-negative", "status": "failed"},
+                },
+                {
+                    "planId": "plan-best",
+                    "title": "validated candidate",
+                    "status": "ingested",
+                    "hypothesisCandidateIds": ["candidate-best"],
+                    "experimentContract": {
+                        "schemaVersion": 2,
+                        "revision": 4,
+                        "methodConfig": {"candidateMaskedLossWeight": 0.875},
+                    },
+                    "activeFullRunResultId": "full-best",
+                    "activeFullRunResult": {"fullRunResultId": "full-best", "status": "passed"},
+                    "knowledgeIngestion": {
+                        "status": "ingested",
+                        "result": {"knowledgeItemId": "kitem-best"},
+                    },
+                },
+            ],
+        },
+    )
+    monkeypatch.setattr(
+        research_loop_service.team_knowledge_service,
+        "search_knowledge_items",
+        lambda **_: {
+            "results": [
+                {
+                    "knowledgeItemId": "kitem-best",
+                    "title": "Validated bounded result",
+                    "summary": "Use as the frozen current best.",
+                    "sourceArtifactIds": ["artifact-best"],
+                    "centralSourceIds": ["source-best"],
+                }
+            ]
+        },
+    )
+
+    created = research_loop_service.create_research_loop(
+        team["teamId"],
+        {
+            "templateId": "dataset_benchmark",
+            "researchQuestion": "Does the validated candidate generalize to the full dataset?",
+            "planId": "plan-best",
+            "candidateIds": ["candidate-best"],
+            "createdByAgent": coordinator,
+        },
+    )
+    context = created["loop"]["memoryContext"]
+
+    assert context["stageType"] == "experiment_execution_iteration"
+    assert context["currentBest"]["planId"] == "plan-best"
+    assert context["priorSuccessfulRuns"][0]["resultId"] == "full-best"
+    assert context["negativeExperiments"][0]["planId"] == "plan-negative"
+    assert context["forbiddenDuplicateExperiments"][0]["candidateIds"] == ["candidate-negative"]
+    assert created["loop"]["inputs"]["memoryContextId"] == context["contextId"]

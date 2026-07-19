@@ -1151,6 +1151,10 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("最近诊断单独展示，不覆盖主线结果");
     expect(routeSource).toContain("bestValidatedResultId");
     expect(routeSource).toContain("latestDiagnosticStatus");
+    expect(routeSource).toContain("memoryContextSummary");
+    expect(routeSource).toContain("团队记忆");
+    expect(routeSource).toContain("已用记忆");
+    expect(routeSource).toContain("forbiddenDuplicateExperimentCount");
     expect(routeSource).toContain("value === \"source_collection\"");
     expect(routeSource).toContain("return \"knowledge_collection\"");
     expect(routeSource).toContain('id="research-workflow-overview"');
