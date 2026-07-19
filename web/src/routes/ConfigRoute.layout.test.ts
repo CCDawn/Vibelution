@@ -482,6 +482,8 @@ describe("ConfigRoute layout contract", () => {
     expect(providerPanelSource).toContain('id="config-models"');
     expect(providerPanelSource).toContain("styles.registryWorkspace");
     expect(providerPanelSource).toContain("<VDenseTable");
+    expect(routeSource).toContain("onProbeImageInput={(modelRef) =>");
+    expect(providerPanelSource).toContain('data-model-capability-action="image_input"');
     expect(routeSource).toContain("styles.configEditorSection");
     expect(routeSource).toContain('section.id === "llm-discovery" && !presentation ? styles.configDiscoverySection : ""');
     expect(routeSource).toContain("styles.notice");

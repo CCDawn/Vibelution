@@ -60,6 +60,7 @@ function panelProps(
     disabled: false,
     activeCredentialProviderId: "",
     activeRouteProviderId: "",
+    imageCapabilityBusy: false,
     actionFeedback: null,
     liveReferenceCountByModelRef: {},
     onSelectProvider: () => undefined,
@@ -69,6 +70,7 @@ function panelProps(
     onEditRoute: () => undefined,
     onUnpin: () => undefined,
     onTestModel: () => undefined,
+    onProbeImageInput: () => undefined,
     onDeleteProvider: () => undefined,
     ...overrides,
   };
@@ -93,6 +95,7 @@ function renderModels(
       onFilterChange={() => undefined}
       onUnpin={() => undefined}
       onTestModel={() => undefined}
+      onProbeImageInput={() => undefined}
     />,
   );
 }
@@ -132,6 +135,34 @@ describe("ConfigProviderRegistryPanel", () => {
 
     expect(renderModels([pinned])).toContain("测试调用");
     expect(renderModels([pinned])).toContain("取消固定");
+  });
+
+  it("exposes a per-model image input capability probe with current-state copy", () => {
+    const unknownMarkup = renderToStaticMarkup(
+      <ConfigProviderRegistryPanel {...panelProps([model("terra", "observed")])} />,
+    );
+    const supportedModel = {
+      ...model("terra", "observed"),
+      capabilities: {
+        image_input: {
+          value: "supported" as const,
+          source: "runtime_probe" as const,
+          confidence: "",
+          checked_at: "2026-07-19T12:38:58Z",
+        },
+      },
+    };
+    const supportedMarkup = renderToStaticMarkup(
+      <ConfigProviderRegistryPanel {...panelProps([supportedModel])} />,
+    );
+    const busyMarkup = renderToStaticMarkup(
+      <ConfigProviderRegistryPanel {...panelProps([supportedModel], { imageCapabilityBusy: true })} />,
+    );
+
+    expect(unknownMarkup).toContain('data-model-capability-action="image_input"');
+    expect(unknownMarkup).toContain("验证图片输入");
+    expect(supportedMarkup).toContain("重新验证图片");
+    expect(busyMarkup).toContain("验证图片中…");
   });
 
   it("shows verified reasoning efforts as maintained model capability", () => {

@@ -3681,6 +3681,7 @@ export function ConfigRoute() {
                   disabled={structuredActionsDisabled || Boolean(busyAction)}
                   activeCredentialProviderId={providerCredentialEditId}
                   activeRouteProviderId={routeEditProviderId}
+                  imageCapabilityBusy={busyAction === copy.imageCapabilityCheckPending}
                   actionFeedback={providerActionFeedback}
                   liveReferenceCountByModelRef={liveReferenceCountByModelRef}
                   onSelectProvider={(providerId) => {
@@ -3714,6 +3715,9 @@ export function ConfigRoute() {
                   }}
                   onTestModel={(modelRef) => {
                     void handleTestProviderModel(modelRef);
+                  }}
+                  onProbeImageInput={(modelRef) => {
+                    void handleCheckModelImageCapabilities([modelRef]);
                   }}
                   onDeleteProvider={(providerId) => {
                     void handleDeleteProvider(providerId);
