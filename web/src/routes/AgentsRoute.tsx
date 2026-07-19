@@ -6369,6 +6369,46 @@ export function AgentsRoute() {
 
       <AgentWorkspaceLayoutPanel
         createOpen={createOpen}
+        createWorkspace={{
+          copy,
+          draft: createDraft,
+          selectedModelId: agentLlmSlotModelId(createDraft.llmBindings, FALLBACK_AGENT_LLM_SLOTS[0]),
+          isWorkSession: createDraftIsWorkSession,
+          canCreate: canCreateAgent,
+          pending: createAgentMutation.isPending,
+          notice,
+          modelChoices: agentModelChoices,
+          primaryModeOptions: bulkPrimaryModeOptions,
+          promptTemplateOptions: bulkPromptTemplateOptions,
+          toolBundles,
+          toolBundleSummary: createToolBundleSummaryValue,
+          toolBundleMeta: (bundle) => toolBundleMeta(bundle, lang),
+          presets: createPresets,
+          lang,
+          onDraftChange: updateCreateDraft,
+          onApplyPreset: (draft) => setCreateDraft(draft),
+          onModelChange: (modelId) => updateCreateDraft({
+            llmBindings: updateAgentLlmSlotBinding(createDraft.llmBindings, FALLBACK_AGENT_LLM_SLOTS[0], modelId),
+          }),
+          onPrimaryModeChange: (primaryMode) => updateCreateDraft({
+            primaryMode,
+            selectedToolBundleIds: toolBundleIdsForModeChange(createDraft, primaryMode, toolBundles),
+          }),
+          onToolBundleToggle: (bundleId, selected) => {
+            const next = new Set(createDraft.selectedToolBundleIds);
+            if (selected) {
+              next.add(bundleId);
+            } else {
+              next.delete(bundleId);
+            }
+            updateCreateDraft({ selectedToolBundleIds: sortedIds(Array.from(next)) });
+          },
+          onCancel: () => {
+            setCreateWizardOpen(false);
+            setCreateDraft(createDraftFromWorkspace(workspace, toolBundles, lang));
+          },
+          onCreate: createAgent,
+        }}
         filterRail={{
           ariaLabel: copy.agentFilters,
           searchValue: searchText,
@@ -6384,53 +6424,12 @@ export function AgentsRoute() {
           storagePaths: agentStoragePaths,
         }}
         listWorkspace={{
-          createOpen,
           ariaLabel: activeGroupLabel,
           headerEyebrow: copy.agentFilters,
           headerTitle: activeGroupLabel,
           createAgentLabel: copy.createAgent,
           visibleAgentCount: visibleAgents.length,
           onToggleCreate: () => setCreateWizardOpen(!createOpen),
-          createPanel: {
-            copy,
-            draft: createDraft,
-            selectedModelId: agentLlmSlotModelId(createDraft.llmBindings, FALLBACK_AGENT_LLM_SLOTS[0]),
-            isWorkSession: createDraftIsWorkSession,
-            canCreate: canCreateAgent,
-            pending: createAgentMutation.isPending,
-            notice,
-            modelChoices: agentModelChoices,
-            primaryModeOptions: bulkPrimaryModeOptions,
-            promptTemplateOptions: bulkPromptTemplateOptions,
-            toolBundles,
-            toolBundleSummary: createToolBundleSummaryValue,
-            toolBundleMeta: (bundle) => toolBundleMeta(bundle, lang),
-            presets: createPresets,
-            lang,
-            onDraftChange: updateCreateDraft,
-            onApplyPreset: (draft) => setCreateDraft(draft),
-            onModelChange: (modelId) => updateCreateDraft({
-              llmBindings: updateAgentLlmSlotBinding(createDraft.llmBindings, FALLBACK_AGENT_LLM_SLOTS[0], modelId),
-            }),
-            onPrimaryModeChange: (primaryMode) => updateCreateDraft({
-              primaryMode,
-              selectedToolBundleIds: toolBundleIdsForModeChange(createDraft, primaryMode, toolBundles),
-            }),
-            onToolBundleToggle: (bundleId, selected) => {
-              const next = new Set(createDraft.selectedToolBundleIds);
-              if (selected) {
-                next.add(bundleId);
-              } else {
-                next.delete(bundleId);
-              }
-              updateCreateDraft({ selectedToolBundleIds: sortedIds(Array.from(next)) });
-            },
-            onCancel: () => {
-              setCreateWizardOpen(false);
-              setCreateDraft(createDraftFromWorkspace(workspace, toolBundles, lang));
-            },
-            onCreate: createAgent,
-          },
           bulkOperations: {
             copy,
             selectedCount: selectedBulkAgents.length,

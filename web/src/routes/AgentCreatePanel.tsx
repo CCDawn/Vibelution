@@ -276,58 +276,60 @@ export function AgentCreatePanel({
         ) : null}
 
         {activeStep === 2 ? (
-          <div className={styles.createAgentGrid}>
-            <VFieldRow label={copy.prompt} className="col-span-full">
-              <VNativeSelect value={draft.promptTemplateId} onChange={(event) => onDraftChange({ promptTemplateId: event.target.value })}>
-                <option value="">-</option>
-                {promptTemplateOptions.map((template) => <option key={template.value || template.label} value={template.value}>{template.label}</option>)}
-              </VNativeSelect>
-            </VFieldRow>
-            <section className={styles.fieldWide}>
-              <span className={styles.contextualHintRow}>
-                {copy.createAgentToolBundles}
-                <VContextualHint
-                  label={lang === "zh" ? "工具能力包说明" : "Tool bundle details"}
-                  content={copy.createAgentToolBundlesHint}
-                  width="wide"
-                />
-              </span>
-              {toolBundles.length ? (
-                <div className={styles.createToolBundleGrid}>
-                  {toolBundles.map((bundle) => {
-                    const selected = draft.selectedToolBundleIds.includes(bundle.bundleId);
-                    const bundleHint = [toolBundleMeta(bundle), bundle.description].filter(Boolean).join("\n") || bundle.label;
-                    return (
-                      <div key={bundle.bundleId} className={selected ? styles.createToolBundleSelected : styles.createToolBundleOption}>
-                        <label>
-                          <VNativeInput type="checkbox" checked={selected} onChange={(event) => onToolBundleToggle(bundle.bundleId, event.target.checked)} />
-                          <strong>{bundle.label}</strong>
-                        </label>
-                        <VContextualHint
-                          label={`${bundle.label} ${lang === "zh" ? "说明" : "details"}`}
-                          content={bundleHint}
-                          width="wide"
-                        />
-                      </div>
-                    );
-                  })}
-                </div>
-              ) : (
-                <VNativeInput value={draft.allowedTools} placeholder={copy.createAgentAllowedToolsPlaceholder} onChange={(event) => onDraftChange({ allowedTools: event.target.value })} />
-              )}
-            </section>
-            <VTooltip content={toolBundleSummary.meta || copy.createAgentToolBundleEmpty} width="wide">
-              <section
-                className={`${styles.fieldWide} ${styles.createToolBundlePreview}`}
-                role="group"
-                tabIndex={0}
-                aria-label={`${copy.createAgentToolBundlePreview}：${toolBundleSummary.label}`}
-              >
-                <span>{copy.createAgentToolBundlePreview}</span>
-                <strong>{toolBundleSummary.label}</strong>
+          <div className={styles.finalStepLayout}>
+            <div className={styles.finalStepMain}>
+              <VFieldRow label={copy.prompt}>
+                <VNativeSelect value={draft.promptTemplateId} onChange={(event) => onDraftChange({ promptTemplateId: event.target.value })}>
+                  <option value="">-</option>
+                  {promptTemplateOptions.map((template) => <option key={template.value || template.label} value={template.value}>{template.label}</option>)}
+                </VNativeSelect>
+              </VFieldRow>
+              <section className={styles.fieldWide}>
+                <span className={styles.contextualHintRow}>
+                  {copy.createAgentToolBundles}
+                  <VContextualHint
+                    label={lang === "zh" ? "工具能力包说明" : "Tool bundle details"}
+                    content={copy.createAgentToolBundlesHint}
+                    width="wide"
+                  />
+                </span>
+                {toolBundles.length ? (
+                  <div className={styles.createToolBundleGrid}>
+                    {toolBundles.map((bundle) => {
+                      const selected = draft.selectedToolBundleIds.includes(bundle.bundleId);
+                      const bundleHint = [toolBundleMeta(bundle), bundle.description].filter(Boolean).join("\n") || bundle.label;
+                      return (
+                        <div key={bundle.bundleId} className={selected ? styles.createToolBundleSelected : styles.createToolBundleOption}>
+                          <label>
+                            <VNativeInput type="checkbox" checked={selected} onChange={(event) => onToolBundleToggle(bundle.bundleId, event.target.checked)} />
+                            <strong>{bundle.label}</strong>
+                          </label>
+                          <VContextualHint
+                            label={`${bundle.label} ${lang === "zh" ? "说明" : "details"}`}
+                            content={bundleHint}
+                            width="wide"
+                          />
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <VNativeInput value={draft.allowedTools} placeholder={copy.createAgentAllowedToolsPlaceholder} onChange={(event) => onDraftChange({ allowedTools: event.target.value })} />
+                )}
               </section>
-            </VTooltip>
-            <section className={`${styles.fieldWide} ${styles.createSummary}`} aria-label={summaryTitle}>
+              <VTooltip content={toolBundleSummary.meta || copy.createAgentToolBundleEmpty} width="wide">
+                <section
+                  className={`${styles.fieldWide} ${styles.createToolBundlePreview}`}
+                  role="group"
+                  tabIndex={0}
+                  aria-label={`${copy.createAgentToolBundlePreview}：${toolBundleSummary.label}`}
+                >
+                  <span>{copy.createAgentToolBundlePreview}</span>
+                  <strong>{toolBundleSummary.label}</strong>
+                </section>
+              </VTooltip>
+            </div>
+            <section className={styles.createSummary} aria-label={summaryTitle}>
               <strong>{summaryTitle}</strong>
               <dl>{summaryItems.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>
             </section>
