@@ -214,7 +214,12 @@ def test_run_supervised_evolution_session_persists_decision_record(tmp_path: Pat
       "official_score_available": false,
       "max_steps": 4,
       "baseline_prompt": "baseline",
-      "candidate_prompt": "candidate"
+      "candidate_prompt": "candidate",
+      "candidate_variant": {
+        "variant_id": "prompt-policy-v2",
+        "baseline_ref": "prompt-policy-v1",
+        "candidate_ref": "prompt-policy-v2"
+      }
     }
   ]
 }
@@ -259,8 +264,11 @@ def test_run_supervised_evolution_session_persists_decision_record(tmp_path: Pat
     assert decision.candidate_success_rate == 1.0
     assert decision.baseline_summary.validation_passed == 1
     assert decision.candidate_summary.total_guarded_tools == 2
-    assert decision.gates[-1].name == "cost"
-    assert decision.gates[-1].status == "hold"
+    cost_gate = next(gate for gate in decision.gates if gate.name == "cost")
+    assert cost_gate.status == "hold"
+    differentiation_gate = next(gate for gate in decision.gates if gate.name == "differentiation")
+    assert differentiation_gate.status == "pass"
+    assert differentiation_gate.metrics["case_evidence"][0]["differentiated_by"] == ["candidate_variant"]
     assert decision.case_summaries[0].decision_signal == "stable_success"
     assert decision.decision_path
     assert Path(decision.decision_path).exists()
@@ -347,6 +355,57 @@ def test_run_supervised_evolution_session_persists_decision_record(tmp_path: Pat
     assert "policy:" in rendered
 
 
+def test_supervised_session_is_inconclusive_when_candidate_only_changes_role_labels(tmp_path: Path):
+    bundle_dir = tmp_path / "workspace" / "evaluation" / "bundles"
+    bundle_dir.mkdir(parents=True, exist_ok=True)
+    bundle_path = bundle_dir / f"{DEFAULT_BUNDLE_NAME}.json"
+    bundle_path.write_text(
+        json.dumps(
+            {
+                "benchmark": "custom_harness",
+                "bundle_name": DEFAULT_BUNDLE_NAME,
+                "dataset": {
+                    "evaluation_mode": "custom_harness",
+                    "score_label": "Vibelution custom score (non-official)",
+                },
+                "cases": [
+                    {
+                        "case_id": "role_label_only",
+                        "scenario": "transaction",
+                        "mode": "single_turn",
+                        "baseline_prompt": "执行 baseline 稳定性探针",
+                        "candidate_prompt": "执行 candidate 稳定性探针",
+                    }
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    progress_events: list[dict] = []
+    decision = run_supervised_evolution_session(
+        bundle_name=DEFAULT_BUNDLE_NAME,
+        project_root=tmp_path,
+        harness_runner=lambda **kwargs: _fake_result("success", "ok", kwargs["prompt"]),
+        progress_callback=progress_events.append,
+    )
+
+    assert decision.decision == "INCONCLUSIVE"
+    differentiation = next(gate for gate in decision.gates if gate.name == "differentiation")
+    assert differentiation.status == "fail"
+    assert differentiation.metrics["indistinguishable_case_ids"] == ["role_label_only"]
+    assert decision.policy_action["action"] == "INCONCLUSIVE"
+    assert decision.policy_action["proposal_paths"] == []
+    finish_event = next(event for event in progress_events if event["event"] == "session_finish")
+    assert finish_event["differentiation_status"] == "fail"
+    assert finish_event["indistinguishable_case_ids"] == ["role_label_only"]
+    observation_pool = (
+        tmp_path / "workspace" / "supervised_evolution" / "policy" / "candidate_observation_pool.jsonl"
+    )
+    assert not observation_pool.exists()
+
+
 def test_run_supervised_evolution_session_uses_agent_judge_scores(tmp_path: Path):
     bundle_dir = tmp_path / "workspace" / "evaluation" / "bundles"
     bundle_dir.mkdir(parents=True, exist_ok=True)
@@ -367,7 +426,7 @@ def test_run_supervised_evolution_session_uses_agent_judge_scores(tmp_path: Path
                         "scenario": "transaction",
                         "mode": "single_turn",
                         "baseline_prompt": "baseline",
-                        "candidate_prompt": "candidate",
+                        "candidate_prompt": "candidate with stronger validation trace",
                         "agent_judged": True,
                         "judge_required": True,
                         "rubric": {"basis": "agent_judgment"},
@@ -747,6 +806,13 @@ def test_materialized_reviewed_chat_case_enters_supervised_run_with_review_prove
     assert case["dataset_ref"]["session_id"] == "chat_session_reviewed"
     assert case["dataset_ref"]["source_log_path"] == "log_info/conversation_reviewed.jsonl"
     assert case["intake_boundary"]["contract"] == "reviewed_chat_case"
+    case["candidate_prompt"] = (
+        f"{case['baseline_prompt']}\nCandidate intervention: require explicit source-to-conclusion trace."
+    )
+    Path(materialized.bundle_path).write_text(
+        json.dumps(bundle, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
 
     def fake_runner(**kwargs):
         prompt = kwargs["prompt"]
@@ -805,6 +871,15 @@ def test_materialized_generated_case_enters_supervised_run_with_intake_boundary(
     )
 
     materialized = materialize_dataset_bundle("generated_cases", project_root=tmp_path)
+    bundle = json.loads(Path(materialized.bundle_path).read_text(encoding="utf-8"))
+    bundle["cases"][0]["candidate_prompt"] = (
+        f"{bundle['cases'][0]['baseline_prompt']}\n"
+        "Candidate intervention: verify validation evidence before transaction close."
+    )
+    Path(materialized.bundle_path).write_text(
+        json.dumps(bundle, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
 
     def fake_runner(**kwargs):
         return _fake_result("success", "generated case ok", kwargs["prompt"][:12] or "generated")
@@ -905,7 +980,7 @@ def test_run_supervised_evolution_session_records_dynamic_and_impossible_case_sc
                         "scenario": "transaction",
                         "mode": "single_turn",
                         "baseline_prompt": "dynamic baseline",
-                        "candidate_prompt": "dynamic candidate",
+                        "candidate_prompt": "dynamic candidate with explicit replan verification trace",
                         "provenance": {
                             "source": "stt_arena_fixture",
                             "source_trace_id": "dynamic_trace_001",
@@ -924,7 +999,7 @@ def test_run_supervised_evolution_session_records_dynamic_and_impossible_case_sc
                         "scenario": "transaction",
                         "mode": "single_turn",
                         "baseline_prompt": "impossible baseline",
-                        "candidate_prompt": "impossible candidate",
+                        "candidate_prompt": "impossible candidate with explicit permission-boundary evidence",
                         "provenance": {
                             "source": "stt_arena_fixture",
                             "source_trace_id": "impossible_trace_001",
@@ -1085,6 +1160,10 @@ def test_default_dry_run_dynamic_fixture_markers_enter_expected_outcome_decision
         bundle_name=DEFAULT_BUNDLE_NAME,
         project_root=tmp_path,
         harness_runner=fake_runner,
+        agent_bindings={
+            "baseline": {"agentId": "fixture-agent-v1"},
+            "candidate": {"agentId": "fixture-agent-v2"},
+        },
     )
 
     assert "dynamic_replanning_fixture" in seen_scenarios
@@ -1880,6 +1959,9 @@ def test_run_supervised_evolution_session_rolls_back_when_candidate_regresses(tm
     assert decision.score_delta == -1.0
     assert decision.gates[1].name == "safety"
     assert decision.gates[1].status == "fail"
+    differentiation = next(gate for gate in decision.gates if gate.name == "differentiation")
+    assert differentiation.status == "fail"
+    assert differentiation.metrics["indistinguishable_case_ids"] == ["probe"]
     assert decision.policy_action["action"] == "ROLLBACK"
     rollback_pool = tmp_path / "workspace" / "supervised_evolution" / "policy" / "candidate_rollbacks.jsonl"
     assert rollback_pool.exists()
@@ -2042,7 +2124,7 @@ def test_run_supervised_evolution_session_holds_improvement_when_cost_is_too_hig
       "scenario": "transaction",
       "mode": "single_turn",
       "baseline_prompt": "baseline",
-      "candidate_prompt": "candidate"
+      "candidate_prompt": "candidate with expanded validation and trace capture"
     }
   ]
 }
@@ -2069,9 +2151,9 @@ def test_run_supervised_evolution_session_holds_improvement_when_cost_is_too_hig
     )
 
     assert decision.decision == "HOLD"
-    assert decision.gates[-1].name == "cost"
-    assert decision.gates[-1].status == "hold"
-    assert "代价偏高" in decision.gates[-1].reason
+    cost_gate = next(gate for gate in decision.gates if gate.name == "cost")
+    assert cost_gate.status == "hold"
+    assert "代价偏高" in cost_gate.reason
     case = decision.case_summaries[0]
     assert case.difference_metrics["validation_passed_delta"] == 1
     assert case.difference_metrics["validation_failed_delta"] == -1
@@ -2181,7 +2263,12 @@ def test_run_supervised_evolution_session_reuses_proposal_and_increments_observa
       "scenario": "transaction",
       "mode": "single_turn",
       "baseline_prompt": "baseline",
-      "candidate_prompt": "candidate"
+      "candidate_prompt": "candidate",
+      "candidate_variant": {
+        "variant_id": "observation-v1",
+        "baseline_ref": "baseline-v1",
+        "candidate_ref": "observation-v1"
+      }
     }
   ]
 }
@@ -2231,7 +2318,12 @@ def test_run_supervised_evolution_session_expires_observing_proposal_after_budge
       "scenario": "transaction",
       "mode": "single_turn",
       "baseline_prompt": "baseline",
-      "candidate_prompt": "candidate"
+      "candidate_prompt": "candidate",
+      "candidate_variant": {
+        "variant_id": "observation-budget-v1",
+        "baseline_ref": "baseline-v1",
+        "candidate_ref": "observation-budget-v1"
+      }
     }
   ]
 }
