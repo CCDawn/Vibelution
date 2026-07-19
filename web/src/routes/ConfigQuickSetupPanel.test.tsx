@@ -44,8 +44,9 @@ function props(overrides: Partial<ConfigQuickSetupPanelProps> = {}): ConfigQuick
 }
 
 describe("ConfigQuickSetupPanel", () => {
-  it("uses comfortable desktop controls and announces progressive feedback", () => {
-    expect(styles.workspace).toContain("max-w-[88rem]");
+  it("uses a full-width desktop workspace and announces progressive feedback", () => {
+    expect(styles.workspace).toContain("w-full");
+    expect(styles.workspace).toContain("max-w-none");
     expect(styles.field).toContain("[&_[data-vui=select-trigger]]:!min-h-10");
     expect(styles.primaryAction).toContain("min-h-10");
     expect(styles.reviewActions).toContain("items-end");

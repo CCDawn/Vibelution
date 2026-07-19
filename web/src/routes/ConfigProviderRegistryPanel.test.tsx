@@ -201,7 +201,7 @@ describe("ConfigProviderRegistryPanel", () => {
 
   it("fills the desktop workspace with large Provider rows and a bottom danger zone", () => {
     expect(panelStyles.sectionSurface).toContain("h-full");
-    expect(panelStyles.registryWorkspace).toContain("[--vui-workspace-sidebar:clamp(22rem,28%,28rem)]");
+    expect(panelStyles.registryWorkspace).toContain("[--vui-workspace-sidebar:clamp(18rem,26vw,24rem)]");
     expect(panelStyles.providerList).toContain("h-full");
     expect(panelStyles.providerButton).toContain("!min-h-[58px]");
     expect(panelStyles.detailSurface).toContain("[grid-template-rows:auto_auto_auto_minmax(0,1fr)_auto_auto]");

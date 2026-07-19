@@ -85,6 +85,7 @@ Renderer+tokens  →  唯一视觉实现（今日 HeroUI，可换 shadcn/Radix�
 | **4** | Logs / Evolution / Launcher 同构吃满：去状态条 max-width、侧栏 clamp、library 摘要弹性列 | layout 测试 + build |
 | **5** | Git 工作区同构：commit 侧栏 clamp、overview 弹性列、顶栏边距对齐、resize 去 soft shadow | layout 测试 + build |
 | **6** | Tools / Skills / Usage / Kernel 同构：列表轨 clamp、主区 minmax(0,1fr)、Usage 去 elevation、边距密度 | layout 测试 + build |
+| **7** | 双主题加固：shadcn form 的 color-scheme / option 色 / select chevron token | foundation 测试 + build |
 
 ### Wave R（完成）
 
@@ -118,6 +119,14 @@ Renderer+tokens  →  唯一视觉实现（今日 HeroUI，可换 shadcn/Radix�
 - `web/src/routes/SkillsRoute.styles.ts` + layout test
 - `web/src/routes/UsageRoute.styles.ts` + layout test
 - `web/src/routes/ToolsRouteAgentScopePanel.styles.ts` + Tools layout test
+
+### Wave 7 文件范围
+
+- `web/src/design/tokens.css`（`--vui-select-chevron` light/dark）
+- `web/src/design/vui-native-controls.css`（shadcn renderer option / color-scheme）
+- `web/src/components/vui/forms/formClasses.ts`
+- `web/src/components/vui/renderers/shadcn/ShadcnSelect.tsx`
+- `web/src/components/vui/vuiThemeFoundation.test.tsx`
 
 ### Wave 2 文件范围
 

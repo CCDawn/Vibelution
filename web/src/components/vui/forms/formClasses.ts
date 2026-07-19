@@ -7,6 +7,8 @@ export function vuiFormControlClass(density: VuiDensity | undefined): string {
     heightClass,
     "w-full min-w-0 rounded-md border border-vui-border-subtle",
     "bg-vui-control-muted px-2 text-sm text-vui-fg-primary shadow-none",
+    // Inherit document theme so native pickers/options follow light/dark tokens.
+    "[color-scheme:inherit]",
     "transition-colors placeholder:text-vui-fg-tertiary",
     "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-vui-accent-cool",
     "disabled:cursor-not-allowed disabled:opacity-55",

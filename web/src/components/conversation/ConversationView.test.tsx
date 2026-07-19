@@ -2865,7 +2865,7 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).toContain("Answer");
   });
 
-  it("keeps the composer writable while a running turn hides explanatory guidance and keeps stop actions", () => {
+  it("keeps the composer writable while a running turn shows guidance and keeps stop actions", () => {
     const html = renderConversation([], {
       composerValue: "下一句先写在这里",
       composerDisabled: true,
@@ -2877,8 +2877,8 @@ describe("ConversationView edit resend affordance", () => {
     });
 
     expect(html).toContain("下一句先写在这里");
-    expect(html).not.toContain("当前轮仍在运行");
-    expect(html).not.toContain("打断引导");
+    expect(html).toContain("当前轮仍在运行");
+    expect(html).toContain("打断引导会先记录再请求停止当前轮");
     expect(html).toContain('aria-label="安全引导"');
     expect(html).not.toContain('aria-label="打断引导"');
     expect(html).toContain('aria-label="终止"');
@@ -2888,7 +2888,7 @@ describe("ConversationView edit resend affordance", () => {
     expect(textarea).not.toMatch(/\sdisabled(?:[=>\s]|$)/);
   });
 
-  it("keeps the running composer stop-only until guidance text exists", () => {
+  it("keeps the running composer stop-only until a draft exists while guidance remains visible", () => {
     const html = renderConversation([], {
       composerValue: "",
       composerDisabled: true,
@@ -2899,8 +2899,8 @@ describe("ConversationView edit resend affordance", () => {
       onInterruptGuidance: () => undefined,
     });
 
-    expect(html).not.toContain("当前轮仍在运行");
-    expect(html).not.toContain("打断引导");
+    expect(html).toContain("当前轮仍在运行");
+    expect(html).toContain("打断引导会先记录再请求停止当前轮");
     expect(html).not.toContain('aria-label="安全引导"');
     expect(html).toContain('aria-label="终止"');
     expect(html.match(/composerRoundButton/g)?.length).toBe(1);
