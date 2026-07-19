@@ -61,6 +61,9 @@ import chatSessionDetailMutationsSource from "./chat/useChatSessionDetailMutatio
 import chatWorkspaceActionsSource from "./chat/useChatWorkspaceActions.ts?raw";
 import chatGroupMessagePresentationSource from "./chat/ChatGroupMessagePresentation.tsx?raw";
 import chatSessionRenameMenuSource from "./chat/useChatSessionRenameMenu.ts?raw";
+import chatCliAgentTerminalSource from "./chat/useChatCliAgentTerminal.ts?raw";
+import chatCacheDetailModelSource from "./chat/chatCacheDetailModel.ts?raw";
+import chatCacheDetailDialogSource from "./chat/useChatCacheDetailDialog.ts?raw";
 import chatToolApprovalDialogStyles from "./chat/ChatToolApprovalDialog.styles";
 import chatToolApprovalDialogSource from "./chat/ChatToolApprovalDialog.tsx?raw";
 import { ChatToolApprovalDialog } from "./chat/ChatToolApprovalDialog";
@@ -148,6 +151,8 @@ const routeAndDetailMutationsSource = `${routeSource}\n${chatSessionDetailMutati
 const routeAndActionsSource = `${routeSource}\n${chatWorkspaceActionsSource}`;
 const routeAndGroupPresentationSource = `${routeSource}\n${chatGroupMessagePresentationSource}\n${chatRoutePresentationSource}`;
 const routeAndRenameMenuSource = `${routeSource}\n${chatSessionRenameMenuSource}`;
+const routeAndCliTerminalSource = `${routeSource}\n${chatCliAgentTerminalSource}\n${cliAgentRunModelSource}`;
+const routeAndCacheDetailSource = `${routeSource}\n${chatCacheDetailModelSource}\n${chatCacheDetailDialogSource}\n${sessionCacheCompositionSource}\n${chatRoutePresentationSource}`;
 
 describe("ChatCodingRoute layout contract", () => {
   it("keeps the center conversation readable and the composer as a stable bottom layer", () => {
@@ -1075,7 +1080,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("const lastContextComposition = detail?.lastContextComposition ?? null");
     expect(routeSource).toContain("const lastCacheComposition = detail?.lastCacheComposition ?? null");
     expect(routeSource).toContain("const lastLlmPayloadTrace = detail?.lastLlmPayloadTrace ?? null");
-    expect(routeSource).toContain("import { CacheDetailDialog, type CacheDonutSegment }");
+    expect(routeSource).toContain("import { CacheDetailDialog }");
     expect(routeSource).toContain("import { LlmPayloadTracePanel }");
     expect(routeSource).toContain("import { TokenCoreStatusPanel, type TokenCoreStatusMetric }");
     expect(routeSource).not.toContain("<details className={styles.sessionDiagnosticsDetails}>");
@@ -1136,31 +1141,31 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("compressionThresholdValue");
     expect(routeSource).toContain("compressionThresholdMeta");
     expect(routeSource).toContain("tokenCompressionStrategyTitle");
-    expect(routeSource).toContain("buildCacheDonutSegments(cachePromptCompositionSegments, cachePromptCompositionTotalTokens)");
-    expect(routeSource).toContain("lastCacheComposition?.computedSegments");
-    expect(routeSource).toContain("lastCacheComposition?.calibratedSegments");
-    expect(routeSource).toContain("calibratedCachedInputTokens");
-    expect(routeSource).toContain("upperBoundCachedInputTokens");
-    expect(routeSource).toContain("upperBoundCacheHitRate");
+    expect(routeAndCacheDetailSource).toContain("buildCacheDonutSegments(cachePromptCompositionSegments, cachePromptCompositionTotalTokens)");
+    expect(routeAndCacheDetailSource).toContain("lastCacheComposition?.computedSegments");
+    expect(routeAndCacheDetailSource).toContain("lastCacheComposition?.calibratedSegments");
+    expect(routeAndCacheDetailSource).toContain("calibratedCachedInputTokens");
+    expect(routeAndCacheDetailSource).toContain("upperBoundCachedInputTokens");
+    expect(routeAndCacheDetailSource).toContain("upperBoundCacheHitRate");
     expect(sessionCacheCompositionSource).toContain("predictedCachedInputTokens");
     expect(sessionCacheCompositionSource).toContain("predictedCacheHitRate");
-    expect(routeSource).toContain("computedOverestimatedInputTokens");
-    expect(routeSource).toContain("calibrationReason");
-    expect(routeSource).toContain("averageCacheHitRate");
-    expect(routeSource).toContain("averageObservedTurnCount");
-    expect(routeSource).toContain("setCacheDetailOpen(true)");
+    expect(routeAndCacheDetailSource).toContain("computedOverestimatedInputTokens");
+    expect(routeAndCacheDetailSource).toContain("calibrationReason");
+    expect(routeAndCacheDetailSource).toContain("averageCacheHitRate");
+    expect(routeAndCacheDetailSource).toContain("averageObservedTurnCount");
+    expect(routeAndCacheDetailSource).toContain("setCacheDetailOpen(true)");
     expect(tokenCoreStatusPanelSource).not.toContain("aria-controls={cacheDetailOpen ? \"cache-detail-dialog\" : undefined}");
     expect(routeSource).not.toContain("className={styles.contextCompositionItem} title={cacheCompositionTitle}");
     expect(tokenCoreStatusPanelSource).toContain("content={metric.title}");
-    expect(routeSource).toContain("handleCacheDetailKeyDown");
-    expect(routeSource).toContain("event.key === \"Escape\"");
-    expect(routeSource).toContain("setCacheDetailOpen(false);");
+    expect(routeAndCacheDetailSource).toContain("handleCacheDetailKeyDown");
+    expect(routeAndCacheDetailSource).toContain("event.key === \"Escape\"");
+    expect(routeAndCacheDetailSource).toContain("setCacheDetailOpen(false)");
     expect(cacheDetailDialogSource).toContain("styles.cacheDonutOuterSegment");
     expect(cacheDetailDialogSource).toContain("styles.cacheDonutInnerSegment");
     expect(cacheDetailDialogSource).toContain("promptSegmentCategory(segment)");
     expect(cacheDetailDialogSource).toContain("cachePromptSegmentClass(segment)");
     expect(cacheDetailDialogSource).toContain("cachePromptLegendSegmentClass(segment)");
-    expect(routeSource).toContain("promptSegmentDisplayLabel(segment, lang, t)");
+    expect(routeAndCacheDetailSource).toContain("promptSegmentDisplayLabel(segment, lang, t)");
     expect(cacheDetailDialogSource).toContain("promptSegmentCategoryLabel(segment, lang)");
     expect(cacheDetailDialogSource).toContain("promptSegmentAccuracyLabel(segment, lang)");
     expect(cacheDetailDialogSource).toContain("cacheDonutSegmentStyle(segment, cachePromptDonutSegments.length > 1 ? 0.55 : 0)");
@@ -1198,7 +1203,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(cacheDetailDialogSource).toContain("observedMissedPercent");
     expect(cacheDetailDialogSource).toContain("styles.cacheDetailDonutPanel");
     expect(cacheDetailDialogSource).toContain("case \"cache_write\"");
-    expect(routeSource).toContain("cacheCreationInputTokens");
+    expect(routeAndCacheDetailSource).toContain("cacheCreationInputTokens");
     expect(routeAndIndexRailSource).toContain("styles.currentSessionBlock");
     expect(routeAndIndexRailSource).toContain("styles.currentSessionLine");
     expect(routeAndIndexRailSource).toContain("styles.currentSessionMetaList");
@@ -1214,7 +1219,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).not.toContain("className={`${styles.leftBlock} ${styles.cacheStatusCard}`}");
     expect(routeSource).not.toContain("className={`${styles.leftBlock} ${styles.resourceBlock} ${styles.compressionStatusCard}`}");
     expect(routeSource).not.toContain("className={`${styles.leftBlock} ${styles.compressionStrategyCard}`}");
-    expect(routeSource).toContain("lastCacheComposition.source === \"not_called\"");
+    expect(routeAndCacheDetailSource).toContain("lastCacheComposition.source === \"not_called\"");
     expect(routeStyles.leftRail).toContain("[grid-column:5]");
     expect(routeAndIndexRailSource.indexOf("<TokenCoreStatusPanel")).toBeGreaterThan(
       chatStatusRailSource.indexOf('id="chat-status-pane"'),
@@ -2478,19 +2483,22 @@ describe("ChatCodingRoute layout contract", () => {
     expect(cliAgentRunModelSource).not.toContain("closedRunIds.delete(cliRunId)");
     expect(cliAgentRunModelSource).toContain("toolCall.name !== CLI_AGENT_TOOL_NAME");
     expect(cliAgentRunModelSource).toContain("function isCliAgentRunActiveForClose");
-    expect(routeSource).toContain('from "./chat/cliAgentRunModel"');
-    expect(routeSource).toContain("const [closedCliAgentRunTokensBySession");
-    expect(routeSource).toContain("const [cliAgentTerminalSessions");
-    expect(routeSource).toContain("const [mountedCliAgentRunIdsBySession");
-    expect(routeSource).toContain("const mountedCliAgentRuns = useMemo");
+    expect(routeAndCliTerminalSource).toContain('from "./chat/cliAgentRunModel"');
+    expect(routeSource).toContain('from "./chat/useChatCliAgentTerminal"');
+    expect(routeAndCliTerminalSource).toContain("closeCliAgentRun");
+    expect(routeAndCliTerminalSource).toContain("/api/cli-agents/terminal-sessions/");
+    expect(routeAndCliTerminalSource).toContain("const [closedCliAgentRunTokensBySession");
+    expect(routeAndCliTerminalSource).toContain("const [cliAgentTerminalSessions");
+    expect(routeAndCliTerminalSource).toContain("const [mountedCliAgentRunIdsBySession");
+    expect(routeAndCliTerminalSource).toContain("const mountedCliAgentRuns = useMemo");
     expect(routeSource).toContain('const activeFilePath = workspace.activeTab !== "agent" && !activeCliAgentRunId ? workspace.activeTab : null;');
     expect(routeSource).toContain("cliAgentRuns={cliAgentRunTabs}");
     expect(routeSource).toContain("onOpenCliAgentRun={(runId) =>");
     expect(routeSource).toContain("onCloseCliAgentRun={(runId) =>");
     expect(routeSource).toContain("setActiveTab(activeSessionId, cliAgentRunTabId(runId));");
-    expect(routeSource).toContain("window.confirm(");
-    expect(routeSource).toContain("const terminalSessionId = String(terminalSession?.terminalSessionId || run.terminalSessionId || run.result?.terminalSessionId || \"\").trim()");
-    expect(routeSource).toContain("`/api/cli-agents/terminal-sessions/${encodeURIComponent(terminalSessionId)}/stop`");
+    expect(routeAndCliTerminalSource).toContain("window.confirm(");
+    expect(routeAndCliTerminalSource).toContain("const terminalSessionId = String(terminalSession?.terminalSessionId || run.terminalSessionId || run.result?.terminalSessionId || \"\").trim()");
+    expect(routeAndCliTerminalSource).toContain("`/api/cli-agents/terminal-sessions/${encodeURIComponent(terminalSessionId)}/stop`");
     expect(routeSource).toContain("const CliAgentRunTerminalPanel = lazy(() =>");
     expect(routeSource).toContain('import("./chat/CliAgentRunTerminalPanel")');
     expect(routeSource).toContain("<CliAgentRunTerminalPanel");
@@ -2527,7 +2535,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(terminalPanelSource).toContain("已恢复，等待终端输出。");
     expect(terminalPanelSource).toContain("sourceRunId: run.sourceRunId");
     expect(terminalPanelSource).toContain('cliSessionId: intent === "start" ? "" : terminalCliSessionIdRef.current');
-    expect(routeSource).toContain("void sessionDetailQuery.refetch()");
+    expect(routeAndCliTerminalSource).toContain("void refetchSessionDetail()");
+    expect(routeSource).toContain("refetchSessionDetail: () => sessionDetailQuery.refetch()");
     expect(terminalPanelSource).toContain("new EventSource(`/api/cli-agents/terminal-sessions/${encodeURIComponent(terminalSessionId)}/events`)");
     expect(terminalPanelSource).toContain("terminal_output");
     expect(terminalPanelSource).toContain("transcriptTailReplayable");
@@ -2551,7 +2560,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).not.toContain("输入命令或回复");
     expect(routeSource).not.toContain("Type input");
     expect(terminalPanelSource).toContain("/input`");
-    expect(routeSource).toContain("/stop`");
+    expect(routeAndCliTerminalSource).toContain("/stop`");
     expect(routeSource).not.toContain("const [activeCliAgentRunId, setActiveCliAgentRunId] = useState");
     expect(routeStyles.cliAgentRunPanel).toBeTypeOf("string");
     expect(routeStyles.cliAgentRunPanelHidden).toContain("hidden");
