@@ -4097,6 +4097,42 @@ def test_provider_retry_does_not_use_compression_profile_as_fallback():
     assert fallback is None
 
 
+def test_responses_websocket_states_publish_turn_visible_transport_statuses(monkeypatch):
+    recorded_statuses: list[tuple[str, dict]] = []
+    monkeypatch.setattr("core.llm.client._record_llm_scene_event", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        "core.llm.client._publish_llm_status_event",
+        lambda status, **fields: recorded_statuses.append((status, fields)),
+    )
+    client = object.__new__(LLMClient)
+    client.provider = SimpleNamespace(provider_id="ai-pixel", kind="ai-pixel")
+    client.profile = SimpleNamespace(model="gpt-5.6-terra")
+    client.profile_id = "primary"
+
+    client._record_responses_websocket_state(
+        "fallback",
+        {
+            "reasonType": "ConnectionClosedError",
+            "closeCode": 1013,
+            "closeReason": "no available account",
+            "fallbackTransport": "http",
+        },
+    )
+    client._record_responses_websocket_state(
+        "recovered",
+        {"fallbackTransport": "http"},
+    )
+
+    assert [status for status, _fields in recorded_statuses] == [
+        "transport_fallback",
+        "transport_recovered",
+    ]
+    assert recorded_statuses[0][1]["category"] == "provider_transport_unavailable"
+    assert recorded_statuses[0][1]["closeCode"] == 1013
+    assert recorded_statuses[0][1]["closeReason"] == "no available account"
+    assert recorded_statuses[1][1]["fallbackTransport"] == "http"
+
+
 def test_usage_observation_accepts_provider_usage_objects():
     class UsageObject:
         prompt_tokens = 100

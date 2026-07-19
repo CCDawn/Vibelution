@@ -89,6 +89,8 @@ export type AgentRuntimeEventPart = {
   summary: string;
   resultPreview?: string;
   error?: string;
+  failureClass?: string;
+  transportStatus?: string;
   sequence?: number;
   timestamp?: string;
   tracePath?: string;
