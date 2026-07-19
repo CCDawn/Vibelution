@@ -28,8 +28,6 @@ def classify_exception(exc: Exception) -> LLMError:
         return LLMError("tool_protocol_error", exc_msg or "tool calling 协议错误", retryable=False)
     if "chat content is empty" in lower or "content is empty" in lower:
         return LLMError("empty_content_error", "provider 拒绝空消息内容", retryable=False)
-    if "bad_request" in lower or "bad request" in lower or "invalid params" in lower or "400" in lower:
-        return LLMError("provider_protocol_error", exc_msg or "provider 请求参数错误", retryable=False)
     if (
         "unexpected_eof_while_reading" in lower
         or "eof occurred in violation of protocol" in lower
@@ -72,6 +70,8 @@ def classify_exception(exc: Exception) -> LLMError:
         or "api_error" in lower
     ):
         return LLMError("server_error", exc_msg or "provider 服务异常", retryable=True)
+    if "bad_request" in lower or "bad request" in lower or "invalid params" in lower or "400" in lower:
+        return LLMError("provider_protocol_error", exc_msg or "provider 请求参数错误", retryable=False)
     if "duplicate tool_call id" in lower or ("tool" in lower and "schema" in lower):
         return LLMError("tool_protocol_error", exc_msg or "tool calling 协议错误", retryable=False)
     if "chat content is empty" in lower or "content is empty" in lower:

@@ -48,7 +48,6 @@ import {
   ChatRoomMode,
   ChatRoomPurpose,
   ConfigSummary,
-  ChatRoomStreamEvent,
   FileContent,
   MentalStateSnapshot,
   PetActionResponse,
@@ -167,18 +166,6 @@ import {
   setActiveTurnLayerForSession,
   type ActiveTurnLayerState,
 } from "./chatActiveTurnLayer";
-import { createSessionAssistantDeltaScheduler } from "./sessionAssistantDeltaScheduler";
-import {
-  routeSessionStreamEvent,
-  sessionStreamProtocolTelemetryFields,
-  type SessionStreamProtocolTrace,
-} from "./chatSessionStreamProtocol";
-import {
-  planAppliedAssistantDeltaDrain,
-  planAppliedSessionDetail,
-  planQueuedSessionDetail,
-  type SessionStreamApplyStats,
-} from "./chatStreamApplyController";
 import {
   isChildSession,
   isAgentRootSession,
@@ -215,6 +202,17 @@ import {
   useChatComposerSubmitActions,
   useChatComposerTurnMutations,
 } from "./chat/useChatComposerSubmit";
+import {
+  nextSessionStreamGraceWindow,
+  resolveSessionStreamRouteSettling,
+  resolveSessionStreamRouteSwitchGraceActive,
+  resolveSessionStreamRouteTargetMatches,
+  resolveSessionStreamShouldConnect,
+  type SessionStreamDecisionSnapshot,
+} from "./chat/chatSessionStreamConnect";
+import { useSessionDetailStream } from "./chat/useSessionDetailStream";
+import { useGroupRoomStream } from "./chat/useGroupRoomStream";
+import { useChatSessionSelection } from "./chat/useChatSessionSelection";
 import {
   CLI_AGENT_RUN_TAB_PREFIX,
   CLI_AGENT_TOOL_NAME,
@@ -449,8 +447,6 @@ function fetchSessionDetailWindow(
 
 const SESSION_DETAIL_INITIAL_MESSAGE_LIMIT = 40;
 const SESSION_DETAIL_HISTORY_PAGE_SIZE = 40;
-const SESSION_STREAM_MIN_APPLY_INTERVAL_MS = 350;
-const SESSION_STREAM_ROUTE_SWITCH_GRACE_MS = 4_000;
 
 type PetInteractionAction = "feed" | "talk" | "care";
 type RightIndexPanel = "conversations" | "members";
@@ -759,9 +755,8 @@ export function ChatCodingRoute() {
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
   const [editingSessionTitle, setEditingSessionTitle] = useState("");
   const [sessionContextMenu, setSessionContextMenu] = useState<SessionContextMenuState | null>(null);
-  const [sessionStreamConnected, setSessionStreamConnected] = useState(false);
   const [activeTurnLayersBySession, setActiveTurnLayersBySession] = useState<Record<string, ActiveTurnLayerState>>({});
-  const [groupStreamConnected, setGroupStreamConnected] = useState(false);
+
   const [tokenSpeedTracker, setTokenSpeedTracker] = useState<TokenSpeedTrackerState | null>(null);
   const [petActionFeedback, setPetActionFeedback] = useState("");
   const [mentalModelEnabledForNextTurn, setMentalModelEnabledForNextTurn] = useState<boolean>(
@@ -795,9 +790,6 @@ export function ChatCodingRoute() {
   const [closedCliAgentRunTokensBySession, setClosedCliAgentRunTokensBySession] = useState<Record<string, string[]>>({});
   const [cliAgentTerminalSessions, setCliAgentTerminalSessions] = useState<Record<string, CliAgentTerminalSession>>({});
   const [mountedCliAgentRunIdsBySession, setMountedCliAgentRunIdsBySession] = useState<Record<string, string[]>>({});
-  const sessionStreamErrorLoggedRef = useRef<Record<string, boolean>>({});
-  const sessionStreamPayloadErrorLoggedRef = useRef<Record<string, boolean>>({});
-  const sessionStreamApplyStatsRef = useRef<Record<string, SessionStreamApplyStats>>({});
   const lastConversationStreamingFrameTelemetryAtRef = useRef<Record<string, number>>({});
   const lastAssistantDeltaAppliedAtRef = useRef<Record<string, number>>({});
   const activeTurnLayersBySessionRef = useRef<Record<string, ActiveTurnLayerState>>({});
@@ -805,7 +797,7 @@ export function ChatCodingRoute() {
     bridge: browserDesktopNotificationBridge(),
     postTelemetry: postBrowserTelemetry,
   }));
-  const sessionStreamDecisionSnapshotRef = useRef({
+  const sessionStreamDecisionSnapshotRef = useRef<SessionStreamDecisionSnapshot>({
     sessionId: "",
     shouldConnect: false,
     pageVisible: false,
@@ -817,8 +809,7 @@ export function ChatCodingRoute() {
     routeSwitchGraceActive: false,
     routeSwitchGraceMsRemaining: 0,
   });
-  const groupStreamErrorLoggedRef = useRef<Record<string, boolean>>({});
-  const groupStreamPayloadErrorLoggedRef = useRef<Record<string, boolean>>({});
+
   const chatRouteMountStartedAtRef = useRef(Date.now());
   const chatRouteShellMountedLoggedRef = useRef(false);
   const chatRouteStartupReadyLoggedRef = useRef(false);
@@ -927,11 +918,11 @@ export function ChatCodingRoute() {
   const secondaryChatDataEnabled = chatStartupDataReady && (
     !activeSessionId || startupDetailSettledSessionId === activeSessionId
   );
-  const sessionStreamRouteTargetMatches = Boolean(
-    activeSessionId
-    && !groupPanelActive
-    && (!requestedSessionId || requestedSessionId === activeSessionId),
-  );
+  const sessionStreamRouteTargetMatches = resolveSessionStreamRouteTargetMatches({
+    activeSessionId,
+    groupPanelActive,
+    requestedSessionId,
+  });
 
   useEffect(() => {
     if (!sessionContextMenu) {
@@ -954,29 +945,34 @@ export function ChatCodingRoute() {
       window.removeEventListener("keydown", handleKeyDown);
     };
   }, [sessionContextMenu]);
-  const sessionStreamRouteSettling = Boolean(
-    activeSessionId
-    && !groupPanelActive
-    && requestedSessionId
-    && requestedSessionId !== activeSessionId,
-  );
+  const sessionStreamRouteSettling = resolveSessionStreamRouteSettling({
+    activeSessionId,
+    groupPanelActive,
+    requestedSessionId,
+  });
   const sessionStreamGraceSessionRef = useRef("");
   const sessionStreamGraceUntilRef = useRef(0);
-  if (activeSessionId && sessionStreamGraceSessionRef.current !== activeSessionId) {
-    sessionStreamGraceSessionRef.current = activeSessionId;
-    sessionStreamGraceUntilRef.current = Date.now() + SESSION_STREAM_ROUTE_SWITCH_GRACE_MS;
+  const nextGrace = nextSessionStreamGraceWindow({
+    activeSessionId,
+    currentGraceSessionId: sessionStreamGraceSessionRef.current,
+    currentGraceUntilMs: sessionStreamGraceUntilRef.current,
+  });
+  if (nextGrace.changed) {
+    sessionStreamGraceSessionRef.current = nextGrace.graceSessionId;
+    sessionStreamGraceUntilRef.current = nextGrace.graceUntilMs;
   }
-  const sessionStreamRouteSwitchGraceActive = Boolean(
-    activeSessionId
-    && sessionStreamRouteTargetMatches
-    && sessionStreamGraceSessionRef.current === activeSessionId
-    && Date.now() < sessionStreamGraceUntilRef.current,
-  );
-  const sessionStreamShouldConnect = Boolean(
-    activeSessionId
-    && sessionStreamRouteTargetMatches
-    && (chatPollingVisible || sessionStreamRouteSwitchGraceActive),
-  );
+  const sessionStreamRouteSwitchGraceActive = resolveSessionStreamRouteSwitchGraceActive({
+    activeSessionId,
+    routeTargetMatches: sessionStreamRouteTargetMatches,
+    graceSessionId: sessionStreamGraceSessionRef.current,
+    graceUntilMs: sessionStreamGraceUntilRef.current,
+  });
+  const sessionStreamShouldConnect = resolveSessionStreamShouldConnect({
+    activeSessionId,
+    routeTargetMatches: sessionStreamRouteTargetMatches,
+    chatPollingVisible,
+    routeSwitchGraceActive: sessionStreamRouteSwitchGraceActive,
+  });
   sessionStreamDecisionSnapshotRef.current = {
     sessionId: activeSessionId || "",
     shouldConnect: sessionStreamShouldConnect,
@@ -994,6 +990,20 @@ export function ChatCodingRoute() {
     && activeGroupRoomId
     && (chatPollingVisible || groupBackgroundSyncActive),
   );
+  const syncChatRoomDetail = useCallback(
+    (room: ChatRoomDetail) => {
+      queryClient.setQueryData(queryKeys.chatRoom(room.roomId), room);
+      if (String(room.status ?? "").trim().toLowerCase() !== "running") {
+        void chatWorkspaceCache.afterChatRoomChanged(room.roomId);
+      }
+    },
+    [chatWorkspaceCache, queryClient],
+  );
+  const { groupStreamConnected } = useGroupRoomStream({
+    activeGroupRoomId,
+    groupStreamShouldConnect,
+    syncChatRoomDetail,
+  });
   const sessionStreamAvailable = typeof EventSource !== "undefined";
   const chatLiveQueryPolicyInput = {
     chatPollingVisible,
@@ -1208,52 +1218,27 @@ export function ChatCodingRoute() {
     },
     [queryClient],
   );
-  const selectDirectSessionMutation = useMutation({
-    mutationFn: async (sessionId: string) =>
-      fetchJson<SessionDetail>(`/api/sessions/${encodeURIComponent(sessionId)}/select`, {
-        method: "POST",
-      }),
-    onSuccess: (nextDetail) => {
-      const latestSessionId = latestDirectSessionSelectionRef.current;
-      if (latestSessionId && latestSessionId !== nextDetail.id) {
-        reselectDirectSessionRef.current(latestSessionId);
-        return;
-      }
-      setSessionComposerErrors((current) => ({
-        ...current,
-        [nextDetail.id]: "",
-        __sessions__: "",
-      }));
-      syncSessionDetail(nextDetail);
-      void chatWorkspaceCache.afterSessionSelected();
-    },
-    onError: (error, sessionId) => {
-      if (latestDirectSessionSelectionRef.current !== sessionId) {
-        return;
-      }
-      setSessionComposerErrors((current) => ({
-        ...current,
-        [sessionId]: describeError(error, lang === "zh" ? "选择会话失败" : "Select session failed"),
-      }));
-      void chatWorkspaceCache.refreshSessionRuntime(sessionId);
-    },
+  const { selectDirectSessionMutation } = useChatSessionSelection({
+    queryClient,
+    chatWorkspaceCache,
+    lang,
+    describeError,
+    syncSessionDetail,
+    setSessionComposerErrors,
+    latestDirectSessionSelectionRef,
+    reselectDirectSessionRef,
+    activeSessionId,
+    setActiveSession,
+    activeGroupRoomId,
+    setActiveGroupRoomId,
+    requestedSessionId,
+    requestedRoomId,
+    bootstrapActiveSessionId: activeSessionBootstrapQuery.data?.activeSessionId,
+    sessions: sessionsQuery.data,
+    setRightIndexPanel,
+    setRightPaneCollapsed,
+    setGroupRoomActionError,
   });
-  reselectDirectSessionRef.current = (sessionId: string) => {
-    const normalizedSessionId = String(sessionId || "").trim();
-    if (!normalizedSessionId) {
-      return;
-    }
-    selectDirectSessionMutation.mutate(normalizedSessionId);
-  };
-  const syncChatRoomDetail = useCallback(
-    (room: ChatRoomDetail) => {
-      queryClient.setQueryData(queryKeys.chatRoom(room.roomId), room);
-      if (String(room.status ?? "").trim().toLowerCase() !== "running") {
-        void chatWorkspaceCache.afterChatRoomChanged(room.roomId);
-      }
-    },
-    [chatWorkspaceCache, queryClient],
-  );
   const directSessionActiveSummary = useMemo(
     () => (activeSessionId ? sessionsQuery.data?.find((session) => session.id === activeSessionId) : undefined),
     [activeSessionId, sessionsQuery.data],
@@ -1264,47 +1249,6 @@ export function ChatCodingRoute() {
       && isBusyPhase(activeGroupRoomQuery.data?.status),
     ));
   }, [activeGroupRoomQuery.data?.status, standardGroupRoomActive]);
-  useEffect(() => {
-    if (requestedSessionId || requestedRoomId || activeSessionId) {
-      return;
-    }
-    const bootstrapSessionId = activeSessionBootstrapQuery.data?.activeSessionId?.trim() ?? "";
-    if (!bootstrapSessionId) {
-      return;
-    }
-    setActiveGroupRoomId("");
-    setActiveSession(bootstrapSessionId);
-  }, [
-    activeSessionBootstrapQuery.data?.activeSessionId,
-    activeSessionId,
-    requestedRoomId,
-    requestedSessionId,
-    setActiveGroupRoomId,
-    setActiveSession,
-  ]);
-
-  useEffect(() => {
-    if (requestedRoomId && activeGroupRoomId !== requestedRoomId) {
-      setActiveGroupRoomId(requestedRoomId);
-      setRightIndexPanel("members");
-      setRightPaneCollapsed(false);
-      setGroupRoomActionError("");
-      return;
-    }
-    if (
-      requestedSessionId
-      && !requestedRoomId
-      && activeSessionId !== requestedSessionId
-    ) {
-      setActiveGroupRoomId("");
-      setActiveSession(requestedSessionId);
-      return;
-    }
-    if (!activeSessionId && sessionsQuery.data && sessionsQuery.data.length > 0) {
-      setActiveSession(sessionsQuery.data[0].id);
-      return;
-    }
-  }, [activeGroupRoomId, activeSessionId, requestedRoomId, requestedSessionId, sessionsQuery.data, setActiveSession]);
 
   useEffect(() => {
     const pendingHandoff = loadPendingSelfEvolutionHandoff();
@@ -2124,543 +2068,24 @@ export function ChatCodingRoute() {
     setGroupManagePurposeDraft(activeGroupRoom.purpose || "discussion");
   }, [activeGroupRoom, sessionsQuery.data]);
 
-  useEffect(() => {
-    if (!sessionStreamShouldConnect || typeof EventSource === "undefined") {
-      const decisionSnapshot = sessionStreamDecisionSnapshotRef.current;
-      setSessionStreamConnected(false);
-      postBrowserTelemetry({
-        phase: "session_stream",
-        eventCode: "browser.session_stream.skipped",
-        message: "Session detail stream connection was skipped.",
-        level: "info",
-        fields: {
-          sessionId: decisionSnapshot.sessionId,
-          shouldConnect: decisionSnapshot.shouldConnect,
-          pageVisible: decisionSnapshot.pageVisible,
-          chatStartupWarmupActive: decisionSnapshot.chatStartupWarmupActive,
-          chatPollingVisible: decisionSnapshot.chatPollingVisible,
-          directSessionBackgroundSyncActive: decisionSnapshot.directSessionBackgroundSyncActive,
-          routeTargetMatches: decisionSnapshot.routeTargetMatches,
-          routeSettling: decisionSnapshot.routeSettling,
-          routeSwitchGraceActive: decisionSnapshot.routeSwitchGraceActive,
-          visibilityState: typeof document === "undefined" ? "unknown" : document.visibilityState,
-          eventSourceAvailable: typeof EventSource !== "undefined",
-          pageInstanceId: getPageInstanceId(),
-          ...collectBrowserPageSnapshot(),
-        },
-      });
-      return;
-    }
-
-    let disposed = false;
-    const streamSessionId = String(activeSessionId || "");
-    if (!streamSessionId) {
-      setSessionStreamConnected(false);
-      return;
-    }
-    let pendingDetail: SessionDetail | null = null;
-    let pendingDetailTrace: SessionStreamProtocolTrace | null = null;
-    let applyTimer: number | null = null;
-    let lastAppliedAt = 0;
-    let committedAssistantDeltaLayer: ActiveTurnLayerState | undefined = activeTurnLayersBySessionRef.current[streamSessionId];
-    const assistantDeltaScheduler = createSessionAssistantDeltaScheduler({
-      nowMs: chatStreamPerformanceNowMs,
-    });
-    let assistantDeltaApplyFrame: number | null = null;
-    let frameScheduledAtMs = 0;
-    let rejectedSessionStreamRouteLogged = false;
-    const decisionSnapshot = sessionStreamDecisionSnapshotRef.current;
-    postBrowserTelemetry({
-      phase: "session_stream",
-      eventCode: "browser.session_stream.effect_started",
-      message: "Session detail stream effect started.",
-      level: "info",
-      fields: {
-        sessionId: streamSessionId,
-        shouldConnect: decisionSnapshot.shouldConnect,
-        pageVisible: decisionSnapshot.pageVisible,
-        chatStartupWarmupActive: decisionSnapshot.chatStartupWarmupActive,
-        chatPollingVisible: decisionSnapshot.chatPollingVisible,
-        directSessionBackgroundSyncActive: decisionSnapshot.directSessionBackgroundSyncActive,
-        routeTargetMatches: decisionSnapshot.routeTargetMatches,
-        routeSettling: decisionSnapshot.routeSettling,
-        routeSwitchGraceActive: decisionSnapshot.routeSwitchGraceActive,
-        routeSwitchGraceMsRemaining: decisionSnapshot.routeSwitchGraceMsRemaining,
-        visibilityState: typeof document === "undefined" ? "unknown" : document.visibilityState,
-        pageInstanceId: getPageInstanceId(),
-        ...collectBrowserPageSnapshot(),
-      },
-    });
-    const stream = new EventSource(`/api/sessions/${streamSessionId}/events?initial=light`);
-
-    function logRejectedSessionStreamRoute(trace: SessionStreamProtocolTrace, message: string) {
-      if (trace.rejectReason === "parse_error") {
-        if (!sessionStreamPayloadErrorLoggedRef.current[streamSessionId]) {
-          sessionStreamPayloadErrorLoggedRef.current[streamSessionId] = true;
-          postBrowserTelemetry({
-            phase: "session_stream",
-            eventCode: "browser.session_stream.bad_payload",
-            message,
-            level: "warning",
-            fields: {
-              sessionId: streamSessionId,
-              payloadLength: trace.payloadLength,
-              ...sessionStreamProtocolTelemetryFields(trace),
-            },
-          });
-        }
-        return;
-      }
-      if (rejectedSessionStreamRouteLogged) {
-        return;
-      }
-      rejectedSessionStreamRouteLogged = true;
-      postBrowserTelemetry({
-        phase: "session_stream",
-        eventCode: "browser.session_stream.event_rejected",
-        message: "Session stream event was rejected by the protocol router.",
-        level: "info",
-        fields: {
-          sessionId: streamSessionId,
-          ...sessionStreamProtocolTelemetryFields(trace),
-        },
-      });
-    }
-
-    function applyPendingDetail(reason: "timer" | "close" | "final") {
-      if (!pendingDetail || disposed) {
-        return;
-      }
-      const detail = pendingDetail;
-      const trace = pendingDetailTrace;
-      pendingDetail = null;
-      pendingDetailTrace = null;
-      if (applyTimer) {
-        window.clearTimeout(applyTimer);
-        applyTimer = null;
-      }
-      lastAppliedAt = Date.now();
-      const activeLayer = activeTurnLayersBySessionRef.current[streamSessionId];
-      const decision = planAppliedSessionDetail({
-        streamSessionId,
-        reason,
-        detail,
-        trace,
-        stats: sessionStreamApplyStatsRef.current[streamSessionId],
-        activeLayer,
-        activeLayerSettled: isActiveTurnSettledByDetail(activeLayer, detail),
-        isBusyPhase,
-      });
-      sessionStreamApplyStatsRef.current[streamSessionId] = decision.stats;
-      if (decision.shouldLogApplied) {
-        postBrowserTelemetry({
-          phase: "session_stream",
-          eventCode: "browser.session_stream.snapshot_applied",
-          message: "Session detail stream snapshot was applied to the UI cache.",
-          level: "info",
-          fields: decision.telemetry,
-        });
-      }
-      syncSessionDetail(detail);
-      desktopConversationNotifierRef.current.handleSessionDetail(detail, {
-        sessionTitle: detail.title || detail.id,
-      });
-      if (decision.clearActiveLayer) {
-        committedAssistantDeltaLayer = undefined;
-        setActiveTurnLayersBySession((current) =>
-          setActiveTurnLayerForSession(current, streamSessionId, undefined)
-        );
-      }
-    }
-
-    function queueSessionDetail(detail: SessionDetail, trace: SessionStreamProtocolTrace) {
-      const decision = planQueuedSessionDetail({
-        detail,
-        trace,
-        pendingDetail,
-        stats: sessionStreamApplyStatsRef.current[streamSessionId],
-        lastAppliedAtMs: lastAppliedAt,
-        nowMs: Date.now(),
-        minApplyIntervalMs: SESSION_STREAM_MIN_APPLY_INTERVAL_MS,
-        isBusyPhase,
-      });
-      sessionStreamApplyStatsRef.current[streamSessionId] = decision.stats;
-      pendingDetail = decision.pendingDetail;
-      pendingDetailTrace = decision.pendingDetailTrace;
-      if (decision.action === "apply_now") {
-        applyPendingDetail(decision.applyReason ?? "final");
-        return;
-      }
-      if (!applyTimer) {
-        applyTimer = window.setTimeout(() => {
-          applyTimer = null;
-          applyPendingDetail("timer");
-        }, decision.delayMs);
-      }
-      if (decision.shouldLogQueued) {
-        postBrowserTelemetry({
-          phase: "session_stream",
-          eventCode: "browser.session_stream.snapshot_queued",
-          message: "Session detail stream snapshot was queued before UI cache apply.",
-          level: "info",
-          fields: {
-            sessionId: streamSessionId,
-            ...decision.telemetry,
-          },
-        });
-      }
-    }
-
-    function applyPendingAssistantDeltas(reason: "frame" | "close" | "final") {
-      if (assistantDeltaScheduler.pendingCount === 0 || disposed) {
-        return;
-      }
-      const applyStartedAtMs = chatStreamPerformanceNowMs();
-      if (assistantDeltaApplyFrame !== null) {
-        window.cancelAnimationFrame(assistantDeltaApplyFrame);
-        assistantDeltaApplyFrame = null;
-      }
-      const scheduledAtMs = frameScheduledAtMs;
-      frameScheduledAtMs = 0;
-      const drain = assistantDeltaScheduler.drain(reason, { frameScheduledAtMs: scheduledAtMs });
-      const decision = planAppliedAssistantDeltaDrain({
-        streamSessionId,
-        reason,
-        drain,
-        committedLayer: committedAssistantDeltaLayer,
-        stats: sessionStreamApplyStatsRef.current[streamSessionId],
-        applyStartedAtMs,
-        nowMs: chatStreamPerformanceNowMs,
-      });
-      if (!decision.applied) {
-        return;
-      }
-      committedAssistantDeltaLayer = decision.nextCommittedLayer;
-      if (decision.shouldCommitRender) {
-        setActiveTurnLayersBySession((current) =>
-          setActiveTurnLayerForSession(current, streamSessionId, decision.nextCommittedLayer)
-        );
-      }
-      sessionStreamApplyStatsRef.current[streamSessionId] = decision.stats;
-      if (decision.shouldCommitRender) {
-        lastAssistantDeltaAppliedAtRef.current = {
-          ...lastAssistantDeltaAppliedAtRef.current,
-          [streamSessionId]: decision.lastAppliedAtMs,
-        };
-      }
-      if (decision.shouldLogApplied) {
-        postBrowserTelemetry({
-          phase: "session_stream",
-          eventCode: "browser.session_stream.assistant_delta_applied",
-          message: "Session assistant delta stream was applied to the active turn layer.",
-          level: "info",
-          fields: decision.telemetry,
-        });
-      }
-      if (decision.shouldScheduleNextFrame && !disposed) {
-        scheduleAssistantDeltaFrame();
-      }
-      if (decision.shouldInvalidateSession) {
-        void queryClient.invalidateQueries({ queryKey: queryKeys.session(streamSessionId) });
-      }
-    }
-
-    function scheduleAssistantDeltaFrame() {
-      if (assistantDeltaApplyFrame !== null || disposed) {
-        return;
-      }
-      frameScheduledAtMs = chatStreamPerformanceNowMs();
-      assistantDeltaApplyFrame = window.requestAnimationFrame(() => {
-        assistantDeltaApplyFrame = null;
-        applyPendingAssistantDeltas("frame");
-      });
-    }
-
-    function queueAssistantDelta(
-      payload: Extract<SessionStreamEvent, { type: "assistant_delta" }>,
-      trace: SessionStreamProtocolTrace,
-    ) {
-      const stats = sessionStreamApplyStatsRef.current[streamSessionId] ?? { received: 0, applied: 0, dropped: 0 };
-      stats.received += 1;
-      sessionStreamApplyStatsRef.current[streamSessionId] = stats;
-      const queued = assistantDeltaScheduler.enqueue(payload, trace.payloadLength, trace);
-      if (payload.done) {
-        applyPendingAssistantDeltas("final");
-        return;
-      }
-      scheduleAssistantDeltaFrame();
-      if (stats.received === 1 || stats.received % 50 === 0) {
-        postBrowserTelemetry({
-          phase: "session_stream",
-          eventCode: "browser.session_stream.assistant_delta_frame_scheduled",
-          message: "Session assistant delta stream was scheduled for the next browser frame.",
-          level: "info",
-          fields: {
-            sessionId: streamSessionId,
-            turnId: payload.turnId,
-            stage: payload.stage,
-            receivedCount: stats.received,
-            appliedCount: stats.applied,
-            droppedCount: stats.dropped,
-            payloadLength: trace.payloadLength,
-            contentDeltaLength: queued.contentDeltaLength,
-            thoughtDeltaLength: queued.thoughtDeltaLength,
-            pendingTextLength: 0,
-            batchSize: queued.pendingCount,
-            done: payload.done,
-            receivedAtMs: Math.round(queued.receivedAtMs),
-            frameScheduledAtMs: Math.round(frameScheduledAtMs),
-            queuedForMs: Math.max(0, Math.round(frameScheduledAtMs - queued.receivedAtMs)),
-            ...sessionStreamProtocolTelemetryFields(trace),
-          },
-        });
-      }
-    }
-
-    stream.onopen = () => {
-      if (!disposed) {
-        setSessionStreamConnected(true);
-        sessionStreamErrorLoggedRef.current[streamSessionId] = false;
-        postBrowserTelemetry({
-          phase: "session_stream",
-          eventCode: "browser.session_stream.opened",
-          message: "Session detail stream opened.",
-          level: "info",
-          fields: {
-            sessionId: streamSessionId,
-          },
-        });
-      }
-    };
-
-    stream.onerror = () => {
-      if (!disposed) {
-        setSessionStreamConnected(false);
-        const pendingAssistantDeltaCount = assistantDeltaScheduler.pendingCount;
-        applyPendingAssistantDeltas("close");
-        void queryClient.invalidateQueries({ queryKey: queryKeys.session(streamSessionId) });
-        if (!sessionStreamErrorLoggedRef.current[streamSessionId]) {
-          sessionStreamErrorLoggedRef.current[streamSessionId] = true;
-          postBrowserTelemetry({
-            phase: "session_stream",
-            eventCode: "browser.session_stream.error",
-            message: "Session detail stream reported an error.",
-            level: "warning",
-            fields: {
-              sessionId: streamSessionId,
-              readyState: stream.readyState,
-            },
-          });
-          postBrowserTelemetry({
-            phase: "session_stream",
-            eventCode: "browser.session_stream.authoritative_refresh_requested",
-            message: "Authoritative session detail refresh was requested after a stream error.",
-            level: "warning",
-            fields: {
-              sessionId: streamSessionId,
-              readyState: stream.readyState,
-              pendingAssistantDeltaCount,
-            },
-          });
-        }
-      }
-    };
-
-    function handleSessionDetail(event: MessageEvent<string>) {
-      const routed = routeSessionStreamEvent({
-        activeSessionId: streamSessionId,
-        expectedType: "session_detail",
-        rawData: event.data,
-      });
-      if (!routed.accepted) {
-        logRejectedSessionStreamRoute(routed.trace, "Session detail stream payload could not be parsed.");
-        return;
-      }
-      setSessionStreamConnected(true);
-      queueSessionDetail(routed.payload.detail, routed.trace);
-    }
-
-    function handleSessionInitial(event: MessageEvent<string>) {
-      const routed = routeSessionStreamEvent({
-        activeSessionId: streamSessionId,
-        expectedType: "session_initial",
-        rawData: event.data,
-      });
-      if (!routed.accepted) {
-        logRejectedSessionStreamRoute(routed.trace, "Session initial stream payload could not be parsed.");
-        return;
-      }
-      setSessionStreamConnected(true);
-      postBrowserTelemetry({
-        phase: "session_stream",
-        eventCode: "browser.session_stream.initial_received",
-        message: "Session stream lightweight initial state was received.",
-        level: "info",
-        fields: {
-          sessionId: streamSessionId,
-          payloadLength: routed.trace.payloadLength,
-          ledgerSeq: routed.payload.ledgerSeq,
-          currentPhase: routed.payload.currentPhase || "",
-          running: routed.payload.running,
-          latestMessageRole: routed.payload.latestMessage?.role || "",
-          latestMessageContentLength: routed.payload.latestMessage?.contentLength ?? 0,
-          latestMessageThoughtLength: routed.payload.latestMessage?.thoughtLength ?? 0,
-          ...sessionStreamProtocolTelemetryFields(routed.trace),
-        },
-      });
-    }
-
-    function handleAssistantDelta(event: MessageEvent<string>) {
-      const routed = routeSessionStreamEvent({
-        activeSessionId: streamSessionId,
-        expectedType: "assistant_delta",
-        rawData: event.data,
-      });
-      if (!routed.accepted) {
-        logRejectedSessionStreamRoute(routed.trace, "Session assistant delta stream payload could not be parsed.");
-        return;
-      }
-      setSessionStreamConnected(true);
-      desktopConversationNotifierRef.current.handleAssistantDelta(routed.payload, {
-        sessionTitle: sessionDetailQuery.data?.title || directSessionActiveSummary?.title || streamSessionId,
-      });
-      queueAssistantDelta(routed.payload, routed.trace);
-    }
-
-    stream.addEventListener("session_detail", handleSessionDetail as EventListener);
-    stream.addEventListener("session_initial", handleSessionInitial as EventListener);
-    stream.addEventListener("assistant_delta", handleAssistantDelta as EventListener);
-
-    return () => {
-      const readyStateBeforeClose = stream.readyState;
-      applyPendingAssistantDeltas("close");
-      applyPendingDetail("close");
-      disposed = true;
-      setSessionStreamConnected(false);
-      if (applyTimer) {
-        window.clearTimeout(applyTimer);
-        applyTimer = null;
-      }
-      if (assistantDeltaApplyFrame !== null) {
-        window.cancelAnimationFrame(assistantDeltaApplyFrame);
-        assistantDeltaApplyFrame = null;
-      }
-      stream.removeEventListener("session_detail", handleSessionDetail as EventListener);
-      stream.removeEventListener("session_initial", handleSessionInitial as EventListener);
-      stream.removeEventListener("assistant_delta", handleAssistantDelta as EventListener);
-      stream.close();
-      postBrowserTelemetry({
-        phase: "session_stream",
-        eventCode: "browser.session_stream.closed",
-        message: "Session detail stream closed.",
-        fields: {
-          sessionId: streamSessionId,
-          readyState: readyStateBeforeClose,
-        },
-      });
-    };
-  }, [
+  const sessionTitleForNotifications = (
+    sessionDetailQuery.data?.title
+    || directSessionActiveSummary?.title
+    || activeSessionId
+    || ""
+  );
+  const { sessionStreamConnected } = useSessionDetailStream({
     activeSessionId,
-    queryClient,
     sessionStreamShouldConnect,
+    queryClient,
     syncSessionDetail,
-  ]);
-
-  useEffect(() => {
-    if (!groupStreamShouldConnect || typeof EventSource === "undefined") {
-      setGroupStreamConnected(false);
-      return;
-    }
-
-    let disposed = false;
-    const streamRoomId = String(activeGroupRoomId || "");
-    if (!streamRoomId) {
-      setGroupStreamConnected(false);
-      return;
-    }
-    const stream = new EventSource(`/api/chat-rooms/${streamRoomId}/events`);
-
-    stream.onopen = () => {
-      if (!disposed) {
-        setGroupStreamConnected(true);
-        groupStreamErrorLoggedRef.current[streamRoomId] = false;
-        postBrowserTelemetry({
-          phase: "chat_room_stream",
-          eventCode: "browser.chat_room_stream.opened",
-          message: "Chat room detail stream opened.",
-          level: "info",
-          fields: {
-            roomId: streamRoomId,
-          },
-        });
-      }
-    };
-
-    stream.onerror = () => {
-      if (!disposed) {
-        setGroupStreamConnected(false);
-        if (!groupStreamErrorLoggedRef.current[streamRoomId]) {
-          groupStreamErrorLoggedRef.current[streamRoomId] = true;
-          postBrowserTelemetry({
-            phase: "chat_room_stream",
-            eventCode: "browser.chat_room_stream.error",
-            message: "Chat room detail stream reported an error.",
-            level: "warning",
-            fields: {
-              roomId: streamRoomId,
-              readyState: stream.readyState,
-            },
-          });
-        }
-      }
-    };
-
-    function handleChatRoomDetail(event: MessageEvent<string>) {
-      let payload: ChatRoomStreamEvent;
-      try {
-        payload = JSON.parse(event.data) as ChatRoomStreamEvent;
-      } catch {
-        if (!groupStreamPayloadErrorLoggedRef.current[streamRoomId]) {
-          groupStreamPayloadErrorLoggedRef.current[streamRoomId] = true;
-          postBrowserTelemetry({
-            phase: "chat_room_stream",
-            eventCode: "browser.chat_room_stream.bad_payload",
-            message: "Chat room detail stream payload could not be parsed.",
-            level: "warning",
-            fields: {
-              roomId: streamRoomId,
-              payloadLength: event.data.length,
-            },
-          });
-        }
-        return;
-      }
-      if (payload.roomId !== streamRoomId || payload.detail?.roomId !== streamRoomId) {
-        return;
-      }
-      setGroupStreamConnected(true);
-      syncChatRoomDetail(payload.detail);
-    }
-
-    stream.addEventListener("chat_room_detail", handleChatRoomDetail as EventListener);
-
-    return () => {
-      const readyStateBeforeClose = stream.readyState;
-      disposed = true;
-      setGroupStreamConnected(false);
-      stream.removeEventListener("chat_room_detail", handleChatRoomDetail as EventListener);
-      stream.close();
-      postBrowserTelemetry({
-        phase: "chat_room_stream",
-        eventCode: "browser.chat_room_stream.closed",
-        message: "Chat room detail stream closed.",
-        fields: {
-          roomId: streamRoomId,
-          readyState: readyStateBeforeClose,
-        },
-      });
-    };
-  }, [activeGroupRoomId, groupStreamShouldConnect, syncChatRoomDetail]);
+    setActiveTurnLayersBySession,
+    activeTurnLayersBySessionRef,
+    lastAssistantDeltaAppliedAtRef,
+    sessionStreamDecisionSnapshotRef,
+    desktopConversationNotifierRef,
+    sessionTitleForNotifications,
+  });
 
   const workspace = activeSessionId
     ? sessionWorkspaces[activeSessionId] ?? {
