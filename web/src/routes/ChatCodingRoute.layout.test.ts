@@ -17,6 +17,7 @@ import chatStatusRailSource from "./chat/ChatStatusRail.tsx?raw";
 import cliAgentRunModelSource from "./chat/cliAgentRunModel.ts?raw";
 import sessionCacheCompositionSource from "./chat/sessionCacheComposition.ts?raw";
 import chatSubmitTelemetrySource from "./chat/chatSubmitTelemetry.ts?raw";
+import chatComposerSubmitModelSource from "./chat/chatComposerSubmitModel.ts?raw";
 import chatStreamApplyControllerSource from "./chatStreamApplyController.ts?raw";
 import terminalPanelSource from "./chat/CliAgentRunTerminalPanel.tsx?raw";
 import conversationIndexModelSource from "./conversationIndexModel.ts?raw";
@@ -125,6 +126,7 @@ const tokenCoreStatusMetrics: TokenCoreStatusMetric[] = [
 
 const routeAndIndexRailSource = `${routeSource}\n${conversationIndexRailSource}\n${chatStatusRailSource}`;
 const routeAndLayoutSource = `${routeSource}\n${chatWorkbenchLayoutSource}`;
+const routeAndComposerSource = `${routeSource}\n${chatComposerSubmitModelSource}`;
 
 describe("ChatCodingRoute layout contract", () => {
   it("keeps the center conversation readable and the composer as a stable bottom layer", () => {
@@ -394,7 +396,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(chatConversationComposerBridgeSource).toContain("LazyConversationView");
     expect(chatConversationComposerBridgeSource).toContain("composerValue={composer.value}");
     expect(chatConversationComposerBridgeSource).toContain("composerAttachments={composer.attachments}");
-    expect(routeSource).toContain("conversationConstants");
+    expect(routeAndComposerSource).toContain("conversationConstants");
     expect(chatSessionWorkspacePanelSource).toContain("const conversationLoadingFallback = (");
     expect(chatSessionWorkspacePanelSource).toContain("fallback={conversationLoadingFallback}");
     expect(routeSource).not.toContain("fallback={<div className={styles.emptySurface}>{t(\"loadingSession\")}</div>}");

@@ -11,6 +11,7 @@ Agent-oriented map for Chat workbench development. Prefer editing a **module** o
 | Feature presets labels | `chatFeaturePresets.ts` | detail stream |
 | Tool approval copy | `toolApprovalLabels.ts`, `ChatToolApprovalDialog.tsx` | left rail JSX |
 | Submit telemetry fields | `chatSubmitTelemetry.ts` | layout resize |
+| Composer draft/attachments/submit pure helpers | `chatComposerSubmitModel.ts` | stream apply, dual EventSource |
 | Composer bridge UI | `ChatConversationComposerBridge.tsx` | CLI model |
 | Center workspace shell | `ChatSessionWorkspacePanel.tsx` | index rail |
 | Layout width math | `chatCodingRouteViewModel.ts` | session protocol |
@@ -37,13 +38,14 @@ Pure helpers extracted from `ChatCodingRoute.tsx`:
 
 - `ChatStatusRail.tsx` — right status pane (group profile/settings, current session, run modes, token/LLM panels, companion/pet)
 
-## Phase D (in progress)
+## Phase D (done / in progress)
 
 - `useChatWorkbenchLayout.ts` — panel widths, resize drag/keyboard, responsive collapse/overlay, layout CSS vars/class names
+- `chatComposerSubmitModel.ts` — composer draft/attachment/reference pure helpers, image classify, submit guards, mental-model toggle storage, optimistic turn id
 
 ## Next (planned)
 
-- Hooks: selection/detail+stream, composer submit, group room
+- Hooks: selection/detail+stream, full composer submit/mutation hook, group room
 - Thin `ChatCodingRoute` composition + layout test split
 
 ## Rules
