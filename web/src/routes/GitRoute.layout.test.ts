@@ -399,9 +399,13 @@ describe("GitRoute layout contract", () => {
     expect(commitItemStyles).toContain("!grid");
     expect(commitItemStyles).toContain("grid-cols-1");
     expect(commitItemStyles).toContain("whitespace-normal");
+    expect(commitItemStyles).toContain("min-h-[4.5rem]");
+    expect(commitItemStyles).toContain("py-2.5");
+    expect(commitItemStyles).toContain("gap-1.5");
     expect(commitItemStyles).not.toContain("data-slot=vui-button-content");
     expect(commitItemStyles).not.toContain("data-slot=vui-button-label");
     expect(gitRouteStyles.commitItem).toContain("bg-[color-mix(in_srgb,var(--vui-surface-row)");
+    expect(gitRouteStyles.commitList).toContain("gap-2.5");
     expect(stylesSource).toContain("commitSubject:");
     expect(stylesSource).toContain("commitAuthor:");
     expect(gitRouteStyles.commitSubject).toContain("text-ellipsis");
