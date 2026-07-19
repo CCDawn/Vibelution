@@ -17,6 +17,7 @@ import chatStatusRailSource from "./chat/ChatStatusRail.tsx?raw";
 import cliAgentRunModelSource from "./chat/cliAgentRunModel.ts?raw";
 import sessionCacheCompositionSource from "./chat/sessionCacheComposition.ts?raw";
 import chatSubmitTelemetrySource from "./chat/chatSubmitTelemetry.ts?raw";
+import chatComposerSubmitModelSource from "./chat/chatComposerSubmitModel.ts?raw";
 import chatStreamApplyControllerSource from "./chatStreamApplyController.ts?raw";
 import terminalPanelSource from "./chat/CliAgentRunTerminalPanel.tsx?raw";
 import conversationIndexModelSource from "./conversationIndexModel.ts?raw";
@@ -46,6 +47,7 @@ import chatRuntimeNoticeStackSource from "./chat/ChatRuntimeNoticeStack.tsx?raw"
 import chatSessionWorkspacePanelStyles from "./chat/ChatSessionWorkspacePanel.styles";
 import chatSessionWorkspacePanelSource from "./chat/ChatSessionWorkspacePanel.tsx?raw";
 import chatCodingRouteViewModelSource from "./chat/chatCodingRouteViewModel.ts?raw";
+import chatWorkbenchLayoutSource from "./chat/useChatWorkbenchLayout.ts?raw";
 import chatToolApprovalDialogStyles from "./chat/ChatToolApprovalDialog.styles";
 import chatToolApprovalDialogSource from "./chat/ChatToolApprovalDialog.tsx?raw";
 import { ChatToolApprovalDialog } from "./chat/ChatToolApprovalDialog";
@@ -123,6 +125,8 @@ const tokenCoreStatusMetrics: TokenCoreStatusMetric[] = [
 ];
 
 const routeAndIndexRailSource = `${routeSource}\n${conversationIndexRailSource}\n${chatStatusRailSource}`;
+const routeAndLayoutSource = `${routeSource}\n${chatWorkbenchLayoutSource}`;
+const routeAndComposerSource = `${routeSource}\n${chatComposerSubmitModelSource}`;
 
 describe("ChatCodingRoute layout contract", () => {
   it("keeps the center conversation readable and the composer as a stable bottom layer", () => {
@@ -392,7 +396,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(chatConversationComposerBridgeSource).toContain("LazyConversationView");
     expect(chatConversationComposerBridgeSource).toContain("composerValue={composer.value}");
     expect(chatConversationComposerBridgeSource).toContain("composerAttachments={composer.attachments}");
-    expect(routeSource).toContain("conversationConstants");
+    expect(routeAndComposerSource).toContain("conversationConstants");
     expect(chatSessionWorkspacePanelSource).toContain("const conversationLoadingFallback = (");
     expect(chatSessionWorkspacePanelSource).toContain("fallback={conversationLoadingFallback}");
     expect(routeSource).not.toContain("fallback={<div className={styles.emptySurface}>{t(\"loadingSession\")}</div>}");
@@ -491,14 +495,15 @@ describe("ChatCodingRoute layout contract", () => {
   });
 
   it("derives responsive layout from the workbench ResizeObserver without overwriting pane preferences", () => {
-    expect(routeSource).toContain("resolveChatResponsiveLayout");
-    expect(routeSource).toContain("new ResizeObserver(syncResponsiveLayout)");
-    expect(routeSource).toContain("data-chat-responsive-mode={responsiveLayout.mode}");
-    expect(routeSource).not.toContain("CHAT_COMPACT_DESKTOP_MEDIA_QUERY");
-    expect(routeSource).not.toContain("compactDesktopAutoCollapseRef");
-    expect(routeSource).not.toContain("setRightPaneCollapsed(true)");
-    expect(routeSource).toContain("styles.layoutCompactDesktop");
-    expect(routeSource).toContain("styles.layoutOverlay");
+    expect(routeAndLayoutSource).toContain("resolveChatResponsiveLayout");
+    expect(routeAndLayoutSource).toContain("new ResizeObserver(syncResponsiveLayout)");
+    expect(routeAndLayoutSource).toContain("data-chat-responsive-mode={responsiveLayout.mode}");
+    expect(routeAndLayoutSource).not.toContain("CHAT_COMPACT_DESKTOP_MEDIA_QUERY");
+    expect(routeAndLayoutSource).not.toContain("compactDesktopAutoCollapseRef");
+    expect(routeAndLayoutSource).not.toContain("setRightPaneCollapsed(true)");
+    expect(routeAndLayoutSource).toContain("styles.layoutCompactDesktop");
+    expect(routeAndLayoutSource).toContain("styles.layoutOverlay");
+    expect(routeSource).toContain("useChatWorkbenchLayout");
   });
 
   it("aligns side-pane gutters while preserving overlay resize handles", () => {
@@ -553,7 +558,7 @@ describe("ChatCodingRoute layout contract", () => {
   });
 
   it("reclaims the status rail grid track on wide desktops while retaining the conversation index", () => {
-    expect(routeSource).toContain("responsiveLayout.mode === \"wide\" && statusRailCollapsed ? styles.layoutStatusRailCollapsed : \"\"");
+    expect(routeAndLayoutSource).toContain("responsiveLayout.mode === \"wide\" && statusRailCollapsed ? styles.layoutStatusRailCollapsed : \"\"");
     expect(routeSource).toContain("className={chatLayoutClassName}");
     expect(routeStyles.layoutStatusRailCollapsed).toContain("!grid-cols-[var(--chat-left-pane-width,300px)_var(--chat-pane-gutter)_minmax(0,1fr)]");
   });
@@ -563,8 +568,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(shellStoreSource).toContain("rightPanelWidth: 220");
     expect(shellStoreSource).toContain("normalizePersistedChatPanelWidths");
     expect(shellStoreSource).toContain("merge: (persistedState, currentState)");
-    expect(routeSource).toContain('"--chat-left-pane-width": conversationIndexCollapsed ? "0px" : `${leftPanelWidth}px`');
-    expect(routeSource).toContain('"--chat-right-pane-width": statusRailCollapsed ? "0px" : `${rightPanelWidth}px`');
+    expect(routeAndLayoutSource).toContain('"--chat-left-pane-width": conversationIndexCollapsed ? "0px" : `${leftPanelWidth}px`');
+    expect(routeAndLayoutSource).toContain('"--chat-right-pane-width": statusRailCollapsed ? "0px" : `${rightPanelWidth}px`');
     expect(routeStyles.leftRail).toContain("flex");
     expect(routeStyles.leftRail).toContain("flex-col");
     expect(routeStyles.leftRail).toContain("p-1");
@@ -580,8 +585,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.rightPane).toContain("grid");
     expect(routeStyles.rightPane).toContain("gap-[var(--chat-workbench-gap)]");
     expect(routeStyles.rightPane).toContain("p-[var(--chat-workbench-gap)]");
-    expect(routeSource).toContain("styles.rightPaneWithTabs");
-    expect(routeSource).toContain("styles.rightPaneWithoutTabs");
+    expect(routeAndLayoutSource).toContain("styles.rightPaneWithTabs");
+    expect(routeAndLayoutSource).toContain("styles.rightPaneWithoutTabs");
     expect(routeCssSource).not.toContain(".sessionAgentStatusControl");
   });
 
@@ -607,8 +612,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.resizeHandleRight).toContain("[grid-row:1]");
     expect(routeStyles.leftRail).toContain("[grid-column:5]");
     expect(routeStyles.leftRail).toContain("[grid-row:1]");
-    expect(routeSource).toContain("const conversationIndexCollapsed = responsiveLayout.leftVisible");
-    expect(routeSource).toContain("const statusRailCollapsed = responsiveLayout.rightVisible");
+    expect(routeAndLayoutSource).toContain("const conversationIndexCollapsed = responsiveLayout.leftVisible");
+    expect(routeAndLayoutSource).toContain("const statusRailCollapsed = responsiveLayout.rightVisible");
     expect(conversationIndexRailSource.indexOf("{conversationIndexPanel}")).toBeGreaterThan(-1);
     expect(conversationIndexRailSource.indexOf("styles.systemEntryGroup")).toBeGreaterThan(
       conversationIndexRailSource.indexOf('id="chat-conversation-index-pane"'),
@@ -745,8 +750,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.layoutOverlay).toContain("grid-cols-[minmax(0,1fr)]");
     expect(routeSource).toContain('aria-controls="chat-conversation-index-pane"');
     expect(routeSource).toContain('aria-controls="chat-status-pane"');
-    expect(routeSource).toContain('event.key !== "Escape"');
-    expect(routeSource).toContain("closeResponsiveOverlayPane");
+    expect(routeAndLayoutSource).toContain('event.key !== "Escape"');
+    expect(routeAndLayoutSource).toContain("closeResponsiveOverlayPane");
     expect(routeStyles.paneCollapsed).toContain("!overflow-hidden");
     expect(routeStyles.paneCollapsed).toContain("invisible");
     expect(routeStyles.paneCollapsed).toContain("!hidden");
