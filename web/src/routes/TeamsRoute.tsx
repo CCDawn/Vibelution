@@ -1041,6 +1041,15 @@ type ExperimentPlanningStatusPayload = {
       frozenDesignRevision: number;
       readyForExecution: boolean;
       completionDefinition: string;
+      memoryContextSummary?: {
+        contextId: string;
+        knowledgeItemCount: number;
+        reviewedSourceCount: number;
+        negativeExperimentCount: number;
+        successfulRunCount: number;
+        forbiddenDuplicateExperimentCount: number;
+        missingEvidence: string[];
+      };
     };
     stage3: {
       status: string;
@@ -1055,6 +1064,15 @@ type ExperimentPlanningStatusPayload = {
         title: string;
       };
       completionDefinition: string;
+      memoryContextSummary?: {
+        contextId: string;
+        knowledgeItemCount: number;
+        reviewedSourceCount: number;
+        negativeExperimentCount: number;
+        successfulRunCount: number;
+        forbiddenDuplicateExperimentCount: number;
+        missingEvidence: string[];
+      };
     };
     compatibility: {
       legacyActivePlanId: string;
@@ -5555,6 +5573,10 @@ export function TeamsRoute({
                       {lang === "zh" ? "当前设计" : "design"} {experimentLifecycleProjection.stage2.activeDesignPlanId || "-"}
                     </span>
                     <span>{experimentLifecycleProjection.stage2.readyForExecution ? (lang === "zh" ? "可执行" : "executable") : (lang === "zh" ? "待冻结" : "not frozen")}</span>
+                    <span title={experimentLifecycleProjection.stage2.memoryContextSummary?.missingEvidence.join(" / ") || ""}>
+                      {lang === "zh" ? "团队记忆" : "memory"} {experimentLifecycleProjection.stage2.memoryContextSummary?.knowledgeItemCount ?? 0}
+                      {" · "}{lang === "zh" ? "负向" : "negative"} {experimentLifecycleProjection.stage2.memoryContextSummary?.negativeExperimentCount ?? 0}
+                    </span>
                   </div>
                 ) : stageType === "iteration" && experimentLifecycleProjection?.stage3 ? (
                   <div className={styles.researchStageCardMetrics}>
@@ -5566,6 +5588,10 @@ export function TeamsRoute({
                     </span>
                     <span title={experimentLifecycleProjection.stage3.latestDiagnosticStatus.title}>
                       {lang === "zh" ? "最近诊断" : "diagnostic"} {experimentLifecycleProjection.stage3.latestDiagnosticStatus.status || "-"}
+                    </span>
+                    <span title={experimentLifecycleProjection.stage3.memoryContextSummary?.missingEvidence.join(" / ") || ""}>
+                      {lang === "zh" ? "已用记忆" : "memory used"} {experimentLifecycleProjection.stage3.memoryContextSummary?.knowledgeItemCount ?? 0}
+                      {" · "}{lang === "zh" ? "禁重" : "blocked repeats"} {experimentLifecycleProjection.stage3.memoryContextSummary?.forbiddenDuplicateExperimentCount ?? 0}
                     </span>
                   </div>
                 ) : (
