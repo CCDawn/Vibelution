@@ -158,15 +158,16 @@ Depends on E1 pattern proven.
 2. **E1a** constants/helpers if cheap
 3. **E1** `useSessionDetailStream` + wire route + fix layout tests
 4. build + vitest + commit + self-merge local main
-5. Stop or continue E2/E3 only if E1 green and time allows
+5. **E2** `useGroupRoomStream` when E1 green
+6. **E3** selection when E2 green
 
 ## Success evidence
 
-- [ ] Plan checked into repo
-- [ ] Only one session EventSource construction path in extracted hook + route import
-- [ ] Layout stream contracts green
-- [ ] Production build green
-- [ ] Merged to local `main`
+- [x] Plan checked into repo
+- [x] Only one session EventSource construction path in extracted hook + route import
+- [x] E1 Layout stream contracts green / build green / merged
+- [x] E2 sole group EventSource (`useGroupRoomStream`)
+- [ ] E3 selection extracted
 - [ ] Version impact: none (refactor)
 - [ ] Launcher refresh: recommended before user testing (stream path)
 
