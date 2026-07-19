@@ -52,6 +52,8 @@ import chatCodingRouteViewModelSource from "./chat/chatCodingRouteViewModel.ts?r
 import chatWorkbenchLayoutSource from "./chat/useChatWorkbenchLayout.ts?raw";
 import chatSessionStreamConnectSource from "./chat/chatSessionStreamConnect.ts?raw";
 import sessionDetailStreamSource from "./chat/useSessionDetailStream.ts?raw";
+import groupRoomStreamSource from "./chat/useGroupRoomStream.ts?raw";
+import chatSessionSelectionSource from "./chat/useChatSessionSelection.ts?raw";
 import chatToolApprovalDialogStyles from "./chat/ChatToolApprovalDialog.styles";
 import chatToolApprovalDialogSource from "./chat/ChatToolApprovalDialog.tsx?raw";
 import { ChatToolApprovalDialog } from "./chat/ChatToolApprovalDialog";
@@ -131,7 +133,8 @@ const tokenCoreStatusMetrics: TokenCoreStatusMetric[] = [
 const routeAndIndexRailSource = `${routeSource}\n${conversationIndexRailSource}\n${chatStatusRailSource}`;
 const routeAndLayoutSource = `${routeSource}\n${chatWorkbenchLayoutSource}`;
 const routeAndComposerSource = `${routeSource}\n${chatComposerSubmitModelSource}\n${chatComposerSubmitHookSource}\n${chatActiveTurnLayerSource}\n${chatSubmitTelemetrySource}`;
-const routeAndStreamSource = `${routeSource}\n${sessionDetailStreamSource}\n${chatSessionStreamConnectSource}\n${chatStreamApplyControllerSource}\n${chatActiveTurnLayerSource}`;
+const routeAndStreamSource = `${routeSource}\n${sessionDetailStreamSource}\n${groupRoomStreamSource}\n${chatSessionStreamConnectSource}\n${chatStreamApplyControllerSource}\n${chatActiveTurnLayerSource}`;
+const routeAndSelectionSource = `${routeSource}\n${chatSessionSelectionSource}`;
 
 describe("ChatCodingRoute layout contract", () => {
   it("keeps the center conversation readable and the composer as a stable bottom layer", () => {
@@ -489,13 +492,14 @@ describe("ChatCodingRoute layout contract", () => {
   it("selects direct sessions through the backend active-session endpoint", () => {
     expect(routeSource).toContain("latestDirectSessionSelectionRef");
     expect(routeSource).toContain("selectDirectSessionMutation");
-    expect(routeSource).toContain("`/api/sessions/${encodeURIComponent(sessionId)}/select`");
+    expect(routeSource).toContain("useChatSessionSelection");
+    expect(routeAndSelectionSource).toContain("`/api/sessions/${encodeURIComponent(sessionId)}/select`");
     expect(routeSource).toContain("latestDirectSessionSelectionRef.current = normalizedSessionId");
-    expect(routeSource).toContain("selectDirectSessionMutation.mutate(normalizedSessionId)");
-    expect(routeSource).toContain("if (latestSessionId && latestSessionId !== nextDetail.id)");
-    expect(routeSource).toContain("syncSessionDetail(nextDetail)");
-    expect(routeSource).toContain("chatWorkspaceCache.afterSessionSelected()");
-    expect(routeSource).not.toContain("afterSessionChanged({\n        sessionId: nextDetail.id");
+    expect(routeAndSelectionSource).toContain("selectDirectSessionMutation.mutate(normalizedSessionId)");
+    expect(routeAndSelectionSource).toContain("if (latestSessionId && latestSessionId !== nextDetail.id)");
+    expect(routeAndSelectionSource).toContain("syncSessionDetail(nextDetail)");
+    expect(routeAndSelectionSource).toContain("chatWorkspaceCache.afterSessionSelected()");
+    expect(routeAndSelectionSource).not.toContain("afterSessionChanged({\n        sessionId: nextDetail.id");
     expect(routeSource.indexOf("selectDirectSessionMutation.mutate(normalizedSessionId)")).toBeLessThan(
       routeSource.indexOf("navigate(`/chat?session=${encodeURIComponent(normalizedSessionId)}`"),
     );
@@ -1646,9 +1650,9 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("activeGroupRoomId");
     expect(routeSource).toContain("handleOpenGroupRoom");
     expect(routeSource).toContain('new URLSearchParams(location.search).get("room")');
-    expect(routeSource).toContain("requestedRoomId && activeGroupRoomId !== requestedRoomId");
+    expect(routeAndSelectionSource).toContain("requestedRoomId && activeGroupRoomId !== requestedRoomId");
     expect(routeSource).toContain("navigate(`/chat?room=${encodeURIComponent(roomId)}`, { replace: false })");
-    expect(routeSource).toContain("setRightPaneCollapsed(false)");
+    expect(routeAndSelectionSource).toContain("setRightPaneCollapsed(false)");
     expect(routeAndIndexRailSource).toContain("chatRoomModeLabel(mode, lang)");
     expect(routeAndIndexRailSource).toContain("chatRoomPurposeLabel(purpose, lang)");
     expect(routeSource).toContain("queryKeys.chatRoomPurposes()");
@@ -1663,9 +1667,10 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("purpose: activeGroupRoom?.purpose || \"discussion\"");
     expect(routeSource).toContain("purpose: groupManagePurposeDraft || \"discussion\"");
     expect(routeSource).toContain("fetchJson<ChatRoomDetail>(`/api/chat-rooms/${activeGroupRoomId}`)");
-    expect(routeSource).toContain("new EventSource(`/api/chat-rooms/${streamRoomId}/events`)");
-    expect(routeSource).toContain("syncChatRoomDetail(payload.detail)");
-    expect(routeSource).toContain("browser.chat_room_stream.closed");
+    expect(routeAndStreamSource).toContain("new EventSource(`/api/chat-rooms/${streamRoomId}/events`)");
+    expect(routeAndStreamSource).toContain("syncChatRoomDetail(payload.detail)");
+    expect(routeAndStreamSource).toContain("browser.chat_room_stream.closed");
+    expect(routeSource).toContain("useGroupRoomStream");
     expect(routeSource).toContain("handleStartGroupRound");
     expect(routeSource).toContain("fetchJson<ChatRoomRoundAcceptedResponse>(`/api/chat-rooms/${roomId}/rounds`");
     expect(routeSource).toContain("Prefer\": \"respond-async\"");
@@ -2035,7 +2040,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(sessionStreamEffectSource).not.toContain("chatStartupWarmupActive,");
     expect(sessionStreamEffectSource).not.toContain("directSessionBackgroundSyncActive,");
     expect(sessionStreamEffectSource).not.toContain("pageVisible,");
-    expect(routeSource).toContain("if (!groupStreamShouldConnect || typeof EventSource === \"undefined\")");
+    expect(routeAndStreamSource).toContain("if (!groupStreamShouldConnect || typeof EventSource === \"undefined\")");
     expect(routeSource).toContain("refetchIntervalInBackground: chatLiveQueryPolicy.directRefetchIntervalInBackground");
     expect(routeSource).toContain("refetchIntervalInBackground: chatLiveQueryPolicy.sharedRefetchIntervalInBackground");
     expect(routeSource).toContain("refetchIntervalInBackground: childSessionLiveQueryPolicy.directRefetchIntervalInBackground");
@@ -2761,11 +2766,11 @@ describe("ChatCodingRoute layout contract", () => {
   });
 
   it("selects requested direct sessions without waiting for the session index", () => {
-    const requestedSessionBranchStart = routeSource.indexOf("requestedSessionId\n      && !requestedRoomId");
+    const requestedSessionBranchStart = routeAndSelectionSource.indexOf("requestedSessionId\n      && !requestedRoomId");
     expect(requestedSessionBranchStart).toBeGreaterThan(0);
-    const requestedSessionBranch = routeSource.slice(
+    const requestedSessionBranch = routeAndSelectionSource.slice(
       requestedSessionBranchStart,
-      routeSource.indexOf("if (!activeSessionId && sessionsQuery.data", requestedSessionBranchStart),
+      routeAndSelectionSource.indexOf("if (!activeSessionId && sessions", requestedSessionBranchStart),
     );
     expect(requestedSessionBranch).toContain("activeSessionId !== requestedSessionId");
     expect(requestedSessionBranch).toContain("setActiveGroupRoomId(\"\")");
@@ -2787,13 +2792,13 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("const sessionIndexQueryEnabled =");
     expect(routeSource).toContain("|| activeSessionBootstrapQuery.isFetched");
     expect(routeSource).toContain("enabled: sessionIndexQueryEnabled");
-    const bootstrapEffectStart = routeSource.indexOf(
-      "const bootstrapSessionId = activeSessionBootstrapQuery.data?.activeSessionId?.trim()",
+    const bootstrapEffectStart = routeAndSelectionSource.indexOf(
+      "const bootstrapSessionId = String(bootstrapActiveSessionId ?? \"\").trim()",
     );
     expect(bootstrapEffectStart).toBeGreaterThan(0);
-    const bootstrapEffect = routeSource.slice(
-      routeSource.lastIndexOf("useEffect(() => {", bootstrapEffectStart),
-      routeSource.indexOf("useEffect(() => {", bootstrapEffectStart),
+    const bootstrapEffect = routeAndSelectionSource.slice(
+      routeAndSelectionSource.lastIndexOf("useEffect(() => {", bootstrapEffectStart),
+      routeAndSelectionSource.indexOf("useEffect(() => {", bootstrapEffectStart + 1),
     );
     expect(bootstrapEffect).toContain("requestedSessionId || requestedRoomId || activeSessionId");
     expect(bootstrapEffect).toContain('setActiveGroupRoomId("")');
@@ -2888,12 +2893,13 @@ describe("ChatCodingRoute layout contract", () => {
   });
 
   it("keeps the active direct session selected when the list is temporarily stale", () => {
-    const selectionEffectSource = routeSource.slice(
-      routeSource.indexOf("if (requestedRoomId && activeGroupRoomId !== requestedRoomId)"),
-      routeSource.indexOf("const pendingHandoff = loadPendingSelfEvolutionHandoff()"),
+    const selectionEffectSource = routeAndSelectionSource.slice(
+      routeAndSelectionSource.indexOf("if (requestedRoomId && activeGroupRoomId !== requestedRoomId)"),
+      routeAndSelectionSource.length,
     );
-    expect(selectionEffectSource).toContain("if (!activeSessionId && sessionsQuery.data && sessionsQuery.data.length > 0)");
+    expect(selectionEffectSource).toContain("if (!activeSessionId && sessions && sessions.length > 0)");
     expect(selectionEffectSource).not.toContain("!sessionsQuery.data.some((session) => session.id === activeSessionId)");
+    expect(selectionEffectSource).not.toContain("!sessions.some((session) => session.id === activeSessionId)");
   });
 
   it("reconciles stale active sessions when reset removes their backend record", () => {
