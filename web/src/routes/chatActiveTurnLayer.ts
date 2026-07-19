@@ -157,7 +157,7 @@ function hasVisibleFeedbackEvent(event: ConversationFeedbackEvent) {
     error: event.error,
     failureClass: event.failureClass,
     timedOut: event.timedOut,
-  })) {
+  }, { surface: "active" })) {
     return false;
   }
   if (event.kind === "status") {
