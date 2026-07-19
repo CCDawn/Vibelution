@@ -5,7 +5,9 @@ const styles = {
   directory:
     "grid min-h-0 min-w-0 [grid-template-rows:minmax(158px,_0.34fr)_minmax(280px,_0.66fr)] [gap:var(--agent-density-gap)] max-[860px]:[grid-template-rows:minmax(150px,_auto)_minmax(260px,_auto)]",
   workspaceCreating:
-    "max-[860px]:[grid-template-rows:minmax(0,_1fr)]",
+    "[grid-template-columns:minmax(0,_1fr)] [align-content:start] [overflow:auto]",
+  createWorkspace:
+    "grid min-h-full min-w-0 w-full [max-width:1180px] [margin:0_auto] [align-content:start] [padding:2px_0_10px]",
 } as const;
 
 export default styles;
