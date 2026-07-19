@@ -776,6 +776,72 @@ class TestToolExecutorExecute:
         assert result == "pytest ok"
         assert called["command"] == "python -m pytest tests/test_dataset_registry.py -q"
 
+    @pytest.mark.parametrize(
+        "command",
+        [
+            'rg --line-number "terminal_bench_agent_judged" core/evaluation tests -g "*.py"',
+            'Get-Content -LiteralPath "core/evaluation/dataset_registry.py" -TotalCount 80',
+        ],
+    )
+    def test_supervised_evaluation_runtime_goal_allows_bounded_read_only_cli(self, executor, command):
+        session = reset_session_state()
+        session.set_runtime_goal_packet(
+            SimpleNamespace(
+                capability_profile="supervised_evaluation",
+                allow_file_writes=True,
+                allow_git_commit=False,
+                allow_evolution_transaction=True,
+                allow_subagents=False,
+            )
+        )
+        called = {"command": ""}
+
+        def fake_cli_tool(command="", timeout=60):
+            called["command"] = command
+            return "read ok"
+
+        executor.register_tool("cli_tool", fake_cli_tool, timeout=5)
+
+        result, action = executor.execute("cli_tool", {"command": command})
+
+        assert action is None
+        assert result == "read ok"
+        assert called["command"] == command
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            'Get-Content core/evaluation/dataset_registry.py | Select-Object -First 20',
+            'rg "dataset" core > result.txt',
+            'rg --pre "python malicious.py" "dataset" core',
+            "Remove-Item -LiteralPath core/evaluation/dataset_registry.py",
+        ],
+    )
+    def test_supervised_evaluation_runtime_goal_blocks_mutating_or_chained_cli(self, executor, command):
+        session = reset_session_state()
+        session.set_runtime_goal_packet(
+            SimpleNamespace(
+                capability_profile="supervised_evaluation",
+                allow_file_writes=True,
+                allow_git_commit=False,
+                allow_evolution_transaction=True,
+                allow_subagents=False,
+            )
+        )
+        called = {"value": False}
+
+        def fake_cli_tool(command="", timeout=60):
+            called["value"] = True
+            return "should not run"
+
+        executor.register_tool("cli_tool", fake_cli_tool, timeout=5)
+
+        result, action = executor.execute("cli_tool", {"command": command})
+
+        assert action is None
+        assert called["value"] is False
+        assert "禁止 Git" in str(result)
+
     def test_supervised_evaluation_runtime_goal_still_blocks_git_cli(self, executor):
         session = reset_session_state()
         session.set_runtime_goal_packet(

@@ -146,6 +146,31 @@ def test_code_symbol_tool_inspect_reports_unindexed_file_after_stale_index(tmp_p
     assert "调用" not in payload["message"]
 
 
+def test_code_symbol_tool_rebuilds_index_when_cached_root_belongs_to_another_workspace(tmp_path, monkeypatch):
+    from core.code_context_graph import service as graph_service
+
+    first_root = tmp_path / "first"
+    second_root = tmp_path / "second"
+    cache_path = tmp_path / "shared" / "index.json"
+    (first_root / "core").mkdir(parents=True)
+    (second_root / "core").mkdir(parents=True)
+    (first_root / "core" / "first.py").write_text("def first():\n    return 1\n", encoding="utf-8")
+    (second_root / "core" / "second.py").write_text("def second():\n    return 2\n", encoding="utf-8")
+    monkeypatch.setattr(graph_service, "index_path", lambda root=None: cache_path)
+
+    monkeypatch.setattr(graph_service, "project_root", lambda: first_root)
+    first = graph_service.build_index(force=True)
+    assert first["index"]["root"] == str(first_root)
+
+    monkeypatch.setattr(graph_service, "project_root", lambda: second_root)
+    inspected = graph_service.code_context_graph_tool(mode="inspect", file_path="core/second.py")
+
+    assert inspected["status"] == "ok"
+    assert inspected["file"]["path"] == "core/second.py"
+    persisted = json.loads(cache_path.read_text(encoding="utf-8"))
+    assert persisted["index"]["root"] == str(second_root)
+
+
 def test_code_symbol_tool_inspects_symbol_within_file_when_both_targets_are_supplied(tmp_path, monkeypatch):
     from core.code_context_graph import service as graph_service
 
