@@ -214,6 +214,7 @@ import { ChatSessionWorkspacePanel } from "./chat/ChatSessionWorkspacePanel";
 import { LlmPayloadTracePanel } from "./chat/LlmPayloadTracePanel";
 import { TokenCoreStatusPanel, type TokenCoreStatusMetric } from "./chat/TokenCoreStatusPanel";
 import { ChatConversationIndexRail } from "./chat/ChatConversationIndexRail";
+import { ChatStatusRail } from "./chat/ChatStatusRail";
 import {
   clamp,
   describeChatRouteError as describeError,
@@ -5914,489 +5915,104 @@ export function ChatCodingRoute() {
           <span className="sr-only">{lang === "zh" ? "关闭侧栏" : "Close side panel"}</span>
         </VButton>
       ) : null}
-      <aside
-        id="chat-status-pane"
-        className={statusRailClassName}
-        aria-hidden={statusRailCollapsed}
-        role={statusRailOverlayOpen ? "dialog" : undefined}
-        aria-label={statusRailOverlayOpen ? (lang === "zh" ? "状态栏" : "Status panel") : undefined}
-      >
-        {standardGroupRoomActive ? (
-          <section className={`${styles.leftBlock} ${styles.groupProfileBlock}`}>
-            <div className={styles.sectionHeader}>
-              <div className={styles.sectionIdentity}>
-                <div className={styles.sectionEyebrowRow}>
-                  <p className={styles.blockEyebrow}>{lang === "zh" ? "群资料与设置" : "Group profile"}</p>
-                  <VContextualHint
-                    content={activeGroupTeamOwned
-                      ? (lang === "zh"
-                        ? "这是团队关联群聊；成员、角色和同步关系由团队页维护，这里只负责讨论运行与成员状态观察。"
-                        : "This room is owned by a Team. Membership, roles, and sync stay in Teams; Chat only runs discussion and shows member status.")
-                      : (lang === "zh"
-                        ? "这里管理当前普通群聊的资料、成员和调度；成员状态索引放在左侧会话列。"
-                        : "Manage this standalone group's info, members, and scheduling here. Member status lives in the left conversation column.")}
-                    label={lang === "zh" ? "群资料与设置说明" : "Group profile details"}
-                    width="wide"
-                  />
-                </div>
-                <h3 className={styles.sectionTitle}>{activeGroupRoom?.title ?? (lang === "zh" ? "群聊加载中" : "Loading group")}</h3>
-              </div>
-              <span className={`${styles.sessionStatePill} ${styles[`sessionStatePill_${String(activeGroupRoom?.status ?? "ready").trim().toLowerCase()}`]}`}>
-                {statusLabel(activeGroupRoom?.status ?? "ready")}
-              </span>
-            </div>
-            <div className={styles.resourceSplit}>
-              <div className={styles.resourceMetric}>
-                <span>{lang === "zh" ? "可用成员" : "Available"}</span>
-                <strong>{numberFormatter.format(availableGroupParticipantCount)}</strong>
-              </div>
-              <div className={styles.resourceMetric}>
-                <span>{lang === "zh" ? "调度" : "Mode"}</span>
-                <strong>{activeGroupRoom?.mode ?? "round_robin"}</strong>
-              </div>
-              <div className={styles.resourceMetric}>
-                <span>{lang === "zh" ? "目的" : "Purpose"}</span>
-                <strong>{activeGroupRoom?.purpose ?? "discussion"}</strong>
-              </div>
-            </div>
-            <section className={styles.groupManagementPanel} aria-label={lang === "zh" ? "群聊管理" : "Group management"}>
-              <div className={styles.groupManagementHeader}>
-                <div>
-                  <span className={styles.groupManagementTitleRow}>
-                    <strong>{activeGroupTeamOwned ? (lang === "zh" ? "团队群聊引用" : "Team room reference") : (lang === "zh" ? "群设置" : "Group settings")}</strong>
-                    {activeGroupTeamOwned ? (
-                      <VContextualHint
-                        content={lang === "zh"
-                          ? "团队关联群聊的成员来自团队组织画布；如需调整成员、角色或同步关系，请打开团队页。"
-                          : "Team-owned room members come from the Team canvas. Open Teams to change members, roles, or sync."}
-                        label={lang === "zh" ? "团队群聊引用说明" : "Team room reference details"}
-                        width="wide"
-                      />
-                    ) : null}
-                  </span>
-                  <span title={activeGroupRoom?.title ?? ""}>
-                    {activeGroupRoom?.title ?? (lang === "zh" ? "群聊加载中" : "Loading group")}
-                  </span>
-                </div>
-                <div className={styles.groupManagementActions}>
-                  {activeGroupTeamOwned && activeGroupTeam ? (
-                    <VButton
-                      type="button"
-                      className={styles.groupSecondaryButton}
-                      onClick={() => navigate(`/teams?team=${encodeURIComponent(activeGroupTeam.teamId)}`)}
-                    >
-                      <ArrowUpRight size={14} />
-                      <span>{lang === "zh" ? "打开团队" : "Open team"}</span>
-                    </VButton>
-                  ) : null}
-                  <VButton
-                    type="button"
-                    className={groupManageChanged ? styles.groupApplyButton : styles.groupSecondaryButton}
-                    isDisabled={groupManageDisabled || !groupManageChanged}
-                    onClick={handleApplyGroupRoomManagement}
-                  >
-                    <Check size={14} />
-                    <span>
-                      {updateGroupRoomMutation.isPending
-                        ? (lang === "zh" ? "应用中" : "Applying")
-                        : (lang === "zh" ? "应用变更" : "Apply")}
-                    </span>
-                  </VButton>
-                  <VButton
-                    type="button"
-                    className={styles.groupDeleteButton}
-                    isDisabled={groupDeleteDisabled}
-                    onClick={handleDeleteActiveGroupRoom}
-                  >
-                    <Trash2 size={14} />
-                    <span>
-                      {deleteGroupRoomMutation.isPending
-                        ? (lang === "zh" ? "删除中" : "Deleting")
-                        : (lang === "zh" ? "删除" : "Delete")}
-                    </span>
-                  </VButton>
-                  <VButton
-                    type="button"
-                    className={styles.groupSecondaryButton}
-                    isDisabled={groupResetDisabled}
-                    onClick={handleResetActiveGroupRoom}
-                  >
-                    <RotateCcw size={14} />
-                    <span>
-                      {resetGroupRoomMutation.isPending
-                        ? (lang === "zh" ? "重置中" : "Resetting")
-                        : (lang === "zh" ? "重置消息" : "Reset messages")}
-                    </span>
-                  </VButton>
-                </div>
-              </div>
-              {groupRoomActionError ? (
-                <div className={styles.panelNotice}>{groupRoomActionError}</div>
-              ) : null}
-              <div className={styles.groupManagementControls}>
-                <label className={styles.groupTitleField}>
-                  <span>{lang === "zh" ? "群名" : "Name"}</span>
-                  <VNativeInput
-                    value={groupManageTitleDraft}
-                    maxLength={80}
-                    disabled={activeGroupTeamOwned || groupRoundActive || updateGroupRoomMutation.isPending}
-                    onChange={(event) => {
-                      setGroupRoomActionError("");
-                      setGroupManageTitleDraft(event.target.value);
-                    }}
-                  />
-                </label>
-                <label className={styles.groupModeSelect}>
-                  <span>{lang === "zh" ? "调度模式" : "Mode"}</span>
-                  <VNativeSelect
-                    value={groupManageModeDraft}
-                    disabled={activeGroupTeamOwned || groupRoundActive || updateGroupRoomMutation.isPending}
-                    onChange={(event) => {
-                      setGroupRoomActionError("");
-                      setGroupManageModeDraft(event.target.value);
-                    }}
-                  >
-                    {readyChatRoomModes.map((mode) => (
-                      <option key={mode.id} value={mode.id}>
-                        {chatRoomModeLabel(mode, lang)}
-                      </option>
-                    ))}
-                  </VNativeSelect>
-                </label>
-                <label className={styles.groupModeSelect}>
-                  <span>{lang === "zh" ? "对话目的" : "Purpose"}</span>
-                  <VNativeSelect
-                    value={groupManagePurposeDraft}
-                    disabled={activeGroupTeamOwned || groupRoundRunning || updateGroupRoomMutation.isPending}
-                    onChange={(event) => {
-                      setGroupRoomActionError("");
-                      setGroupManagePurposeDraft(event.target.value);
-                    }}
-                  >
-                    {availableChatRoomPurposes.map((purpose) => (
-                      <option key={purpose.id} value={purpose.id}>
-                        {chatRoomPurposeLabel(purpose, lang)}
-                      </option>
-                    ))}
-                  </VNativeSelect>
-                </label>
-                <div className={styles.groupManagementCount}>
-                  <span>{lang === "zh" ? "已选" : "Selected"}</span>
-                  <strong>
-                    {groupManageSessionIds.length}/{sessionsQuery.data?.length ?? 0}
-                  </strong>
-                </div>
-                <div className={styles.groupMemberPicker}>
-                  {(sessionsQuery.data ?? []).map((session) => {
-                    const selected = groupManageSessionSet.has(session.id);
-                    const sessionAgent = session.agentId ? agentsById.get(session.agentId) : undefined;
-                    const display = sessionAgentDisplayInfo(session, sessionAgent, lang, resolveModelLabel);
-                    const sessionAvatarImageUrl = avatarImageUrlFrom(sessionAgent, session);
-                    const missingMessage = session.agentMissing
-                      ? session.agentStatusMessage || (lang === "zh" ? "缺少有效 Agent" : "Missing valid Agent")
-                      : "";
-                    return (
-                      <label
-                        key={session.id}
-                        className={
-                          selected
-                            ? `${styles.groupMemberChip} ${styles.groupMemberChipSelected}`
-                            : styles.groupMemberChip
-                        }
-                      >
-                        <VNativeInput
-                          type="checkbox"
-                          checked={selected}
-                          disabled={activeGroupTeamOwned || groupRoundActive || updateGroupRoomMutation.isPending}
-                          onChange={() => handleToggleGroupManageSession(session.id)}
-                        />
-                        {renderAgentAvatar(
-                          styles.agentOptionAvatar,
-                          sessionAvatarImageUrl,
-                          avatarInitials(session.agentCode, display.name),
-                        )}
-                        <span className={styles.groupMemberCopy}>
-                          <strong>{display.name}</strong>
-                          <small className={`${styles.agentRoleTag} ${styles[agentRoleClass(display.tone)]}`}>
-                            {display.functionLabel}
-                          </small>
-                        </span>
-                        {missingMessage ? (
-                          <span className={styles.agentMissingInline} title={missingMessage}>
-                            {lang === "zh" ? "缺少有效 Agent" : "Missing Agent"}
-                          </span>
-                        ) : null}
-                      </label>
-                    );
-                  })}
-                </div>
-              </div>
-              {groupRoundActive ? (
-                <p className={styles.groupManagementHint}>
-                  {lang === "zh" ? "群聊运行中，成员和模式会在本轮结束后允许修改。" : "The group is running. Members and mode can be changed after this round finishes."}
-                </p>
-              ) : groupManageSessionIds.length < 2 ? (
-                <p className={styles.groupManagementHint}>
-                  {lang === "zh" ? "群聊至少需要保留 2 位 Agent。" : "A group needs at least 2 agents."}
-                </p>
-              ) : null}
-            </section>
-          </section>
-        ) : (
-          <>
-        <section className={`${styles.leftBlock} ${styles.currentSessionBlock}`}>
-          <div className={styles.sectionHeader}>
-            <div className={styles.sectionIdentity}>
-              <p className={styles.blockEyebrow}>{t("currentSession")}</p>
-              <h3 className={styles.sectionTitle}>{activeSurfaceTitle}</h3>
-            </div>
-            <span className={`${styles.sessionStatePill} ${styles[`sessionStatePill_${sessionStateValue}`]}`}>
-              {sessionStateLabel}
-            </span>
-          </div>
-          <p className={`${styles.contextLineCompact} ${styles.currentSessionLine}`} title={sessionStateLine}>
-            {compactSessionStateLine}
-          </p>
-          {agentDirectSessionMismatch && agentPrimaryDirectSessionId ? (
-            <div className={styles.sessionBindingNotice} role="status">
-              <span>{sessionBindingMismatchLine}</span>
-              <VButton
-                type="button"
-                onClick={() => handleOpenDirectSession(agentPrimaryDirectSessionId)}
-                title={`${t("openCurrentDirectSession")} · ${agentPrimaryDirectSessionId}`}
-              >
-                <ArrowUpRight size={13} />
-                <span>{t("openCurrentDirectSession")}</span>
-              </VButton>
-            </div>
-          ) : null}
-          {sessionCompactRows.length > 0 ? (
-            <div className={`${styles.inlineMetaList} ${styles.currentSessionMetaList}`}>
-              {sessionCompactRows.map((row) => (
-                <span key={row.label} className={styles.inlineMetaPill} title={row.title ?? row.value}>
-                  <span>{row.label}</span>
-                  <strong>{row.value}</strong>
-                </span>
-              ))}
-            </div>
-          ) : null}
-          {activeSkillSummary ? (
-            <section
-              className={`${styles.activeSkillStatus} ${activeSkillStatusStyle}`}
-              title={activeSkillTitle}
-              aria-label={lang === "zh" ? "当前 active skill 状态" : "Current active skill status"}
-            >
-              <div className={styles.activeSkillIdentity}>
-                <span className={styles.activeSkillEyebrow}>
-                  {lang === "zh" ? "当前 Skill" : "Active skill"}
-                </span>
-                <strong>{activeSkillName || activeSkillCommand}</strong>
-              </div>
-              <div className={styles.activeSkillMeta}>
-                {activeSkillCommand ? <span>/{activeSkillCommand}</span> : null}
-                <span className={styles.activeSkillState}>{activeSkillStatusLabel}</span>
-                {activeSkillShortHash ? <span>#{activeSkillShortHash}</span> : null}
-              </div>
-            </section>
-          ) : null}
-        </section>
-
-        <section className={`${styles.leftBlock} ${styles.featurePresetBlock} ${styles.runModeBlock}`}>
-          <div className={styles.sectionHeader}>
-            <h3 className={styles.sectionTitle}>{lang === "zh" ? "运行模式" : "Run modes"}</h3>
-            <span className={styles.featurePresetScope} title={t("chatFeaturePanelHint")}>{lang === "zh" ? "下轮生效" : "Next turn"}</span>
-          </div>
-          <div className={styles.featureChipRow}>
-            <VButton
-              type="button"
-              contentLayout="plain"
-              className={
-                mentalModelEnabledForNextTurn
-                  ? `${styles.featureChip} ${styles.featureChipPrimary} ${styles.featureChipActive}`
-                  : `${styles.featureChip} ${styles.featureChipPrimary}`
-              }
-              aria-pressed={mentalModelEnabledForNextTurn}
-              isDisabled={!activeSessionId}
-              onClick={() => handleMentalModelEnabledChange(!mentalModelEnabledForNextTurn)}
-              title={t("chatFeatureMentalModelHint")}
-            >
-              <strong>{lang === "zh" ? "心智" : t("chatFeatureMentalModel")}</strong>
-              <em>{mentalModelEnabledForNextTurn ? (lang === "zh" ? "开" : "On") : (lang === "zh" ? "关" : "Off")}</em>
-            </VButton>
-            {CHAT_FEATURE_PRESETS.map((item) => {
-              const enabled = featurePresetState[item.key];
-              const featureLabel = t(item.labelKey);
-              return (
-                <VButton
-                  key={item.key}
-                  type="button"
-                  contentLayout="plain"
-                  className={enabled ? `${styles.featureChip} ${styles.featureChipActive}` : styles.featureChip}
-                  aria-pressed={enabled}
-                  onClick={() => toggleFeaturePreset(item.key)}
-                  title={t(item.hintKey)}
-                >
-                  <strong>{chatFeaturePresetShortLabel(item.key, lang, featureLabel)}</strong>
-                  <em>{enabled ? (lang === "zh" ? "开" : "On") : (lang === "zh" ? "关" : "Off")}</em>
-                </VButton>
-              );
-            })}
-          </div>
-        </section>
-
-        <TokenCoreStatusPanel
-          cacheDetailAvailable={cacheDetailAvailable}
-          cacheDetailOpen={cacheDetailOpen}
-          cacheDetailOpenLabel={cacheDetailOpenLabel}
-          lang={lang}
-          metrics={tokenStatusMetrics}
-          onOpenCacheDetail={openCacheDetail}
-        />
-
-        <LlmPayloadTracePanel lang={lang} trace={lastLlmPayloadTrace} />
-
-        <section className={`${styles.leftBlock} ${styles.companionBlock}`}>
-          <div className={styles.sectionHeader}>
-            <h3 className={styles.sectionTitle}>{t("mentalState")} / {t("petSpace")}</h3>
-            <VTooltip
-              content={mentalCompactLine || mentalSourceLabel}
-              renderTrigger={(tooltipTriggerProps) => {
-                const {
-                  children: _triggerChildren,
-                  className: triggerClassName,
-                  role: _triggerRole,
-                  tabIndex: _triggerTabIndex,
-                  ...triggerProps
-                } = tooltipTriggerProps;
-
-                return (
-                  <VButton
-                    {...(triggerProps as unknown as VButtonProps)}
-                    type="button"
-                    className={[
-                      triggerClassName,
-                      styles.mentalStateBadge,
-                      styles[`mentalStateBadge_${mentalCognitiveStateValue}`],
-                    ].filter(Boolean).join(" ")}
-                    aria-label={`${mentalStateLabel}. ${mentalCompactLine || mentalSourceLabel}`}
-                  >
-                    {mentalStateLabel}
-                  </VButton>
-                );
-              }}
-            >
-              {mentalStateLabel}
-            </VTooltip>
-          </div>
-          <p className={styles.contextLineCompact}>{mentalSummary}</p>
-          <div className={styles.companionCompact}>
-            <div className={styles.petMiniAvatar} aria-hidden="true">
-              <div className={`${styles.petShowcaseAvatar} ${petAvatarSkinStyle}`}>
-                <span className={styles.petShowcaseEarLeft} />
-                <span className={styles.petShowcaseEarRight} />
-                <span className={styles.petShowcaseFace}>
-                  <span className={styles.petShowcaseEye} />
-                  <span className={styles.petShowcaseMuzzle} />
-                  <span className={styles.petShowcaseEye} />
-                </span>
-                <span className={styles.petShowcaseSymbol}>{petAvatarSymbol}</span>
-                <span className={styles.petShowcaseFootLeft} />
-                <span className={styles.petShowcaseFootRight} />
-              </div>
-            </div>
-            <div className={styles.companionCopy}>
-              <div className={styles.companionTopLine}>
-                <strong>{pet?.name ?? t("loadingPetState")}</strong>
-                <span>{t("level")} {pet?.level ?? 0} · {petPresetLabel}</span>
-              </div>
-              <p title={petCompactLine}>{petCompactLine}</p>
-            </div>
-          </div>
-          <details className={styles.compactDetails}>
-            <summary>
-              <ChevronRight size={14} aria-hidden="true" />
-              <span className={styles.compactDetailsClosedLabel}>{t("expandSection")}</span>
-              <span className={styles.compactDetailsOpenLabel}>{t("collapseSection")}</span>
-            </summary>
-            <p className={styles.oneLineValue} title={mentalWhisper}>
-              <span>{t("mentalWhisper")}</span>
-              {mentalWhisper}
-            </p>
-            <div className={styles.inlineStatGrid}>
-              <div className={styles.inlineStat}>
-                <span>{t("state")}</span>
-                <strong>{mentalCognitiveStateLabel}</strong>
-              </div>
-              <div className={styles.inlineStat}>
-                <span>{t("mentalConfidence")}</span>
-                <strong>{mentalConfidence}</strong>
-              </div>
-              <div className={styles.inlineStat}>
-                <span>{t("mentalSource")}</span>
-                <strong>{mentalSourceLabel}</strong>
-              </div>
-              <div className={styles.inlineStat}>
-                <span>{t("mentalLastUpdated")}</span>
-                <strong title={formatTime(mental?.updatedAt ?? "")}>{mentalRelativeTime}</strong>
-              </div>
-            </div>
-            <div className={styles.inlineMetaList}>
-              <span className={styles.inlineMetaPill}>
-                <span>{t("dailyTokens")}</span>
-                <strong>{numberFormatter.format(pet?.dailyTokens ?? 0)}</strong>
-              </span>
-              {petVitals.map((vital) => (
-                <span key={vital.key} className={styles.inlineMetaPill}>
-                  <span>{vital.label}</span>
-                  <strong>{vital.value}</strong>
-                </span>
-              ))}
-            </div>
-            <div className={styles.petShowcaseActions} aria-label={petInteractionLabels.group}>
-              <VButton
-                type="button"
-                contentLayout="plain"
-                className={styles.petShowcaseAction}
-                onClick={() => handlePetInteraction("feed")}
-                isDisabled={petActionMutation.isPending}
-                title={petInteractionLabels.feedTitle}
-              >
-                <Apple size={14} />
-                <span>{petInteractionLabels.feed}</span>
-              </VButton>
-              <VButton
-                type="button"
-                contentLayout="plain"
-                className={styles.petShowcaseAction}
-                onClick={() => handlePetInteraction("talk")}
-                isDisabled={petActionMutation.isPending}
-                title={petInteractionLabels.talkTitle}
-              >
-                <MessageCircleHeart size={14} />
-                <span>{petInteractionLabels.talk}</span>
-              </VButton>
-              <VButton
-                type="button"
-                contentLayout="plain"
-                className={styles.petShowcaseAction}
-                onClick={() => handlePetInteraction("care")}
-                isDisabled={petActionMutation.isPending}
-                title={petInteractionLabels.careTitle}
-              >
-                <HeartHandshake size={14} />
-                <span>{petInteractionLabels.care}</span>
-              </VButton>
-              <span className={styles.petShowcaseActionHint}>
-                <Sparkles size={13} />
-                <span>{petInteractionLabels.pending}</span>
-              </span>
-            </div>
-            {petActionFeedback ? <p className={styles.petShowcaseFeedback}>{petActionFeedback}</p> : null}
-          </details>
-        </section>
-          </>
-        )}
-      </aside>
+      <ChatStatusRail
+        statusRailClassName={statusRailClassName}
+        statusRailCollapsed={statusRailCollapsed}
+        statusRailOverlayOpen={statusRailOverlayOpen}
+        standardGroupRoomActive={standardGroupRoomActive}
+        lang={lang}
+        t={t}
+        numberFormatter={numberFormatter}
+        activeGroupRoom={activeGroupRoom}
+        activeGroupTeamOwned={activeGroupTeamOwned}
+        activeGroupTeam={activeGroupTeam}
+        availableGroupParticipantCount={availableGroupParticipantCount}
+        statusLabel={statusLabel}
+        groupManageChanged={groupManageChanged}
+        groupManageDisabled={groupManageDisabled}
+        groupDeleteDisabled={groupDeleteDisabled}
+        groupResetDisabled={groupResetDisabled}
+        groupRoundActive={groupRoundActive}
+        groupRoundRunning={groupRoundRunning}
+        groupRoomActionError={groupRoomActionError}
+        setGroupRoomActionError={setGroupRoomActionError}
+        groupManageTitleDraft={groupManageTitleDraft}
+        setGroupManageTitleDraft={setGroupManageTitleDraft}
+        groupManageModeDraft={groupManageModeDraft}
+        setGroupManageModeDraft={setGroupManageModeDraft}
+        groupManagePurposeDraft={groupManagePurposeDraft}
+        setGroupManagePurposeDraft={setGroupManagePurposeDraft}
+        readyChatRoomModes={readyChatRoomModes}
+        availableChatRoomPurposes={availableChatRoomPurposes}
+        chatRoomModeLabel={chatRoomModeLabel}
+        chatRoomPurposeLabel={chatRoomPurposeLabel}
+        groupManageSessionIds={groupManageSessionIds}
+        groupManageSessionSet={groupManageSessionSet}
+        sessions={sessionsQuery.data}
+        agentsById={agentsById}
+        resolveModelLabel={resolveModelLabel}
+        renderAgentAvatar={renderAgentAvatar}
+        avatarInitials={avatarInitials}
+        agentRoleClass={agentRoleClass}
+        avatarImageUrlFrom={avatarImageUrlFrom}
+        updateGroupRoomPending={updateGroupRoomMutation.isPending}
+        deleteGroupRoomPending={deleteGroupRoomMutation.isPending}
+        resetGroupRoomPending={resetGroupRoomMutation.isPending}
+        onOpenTeam={(teamId) => navigate(`/teams?team=${encodeURIComponent(teamId)}`)}
+        onApplyGroupRoomManagement={handleApplyGroupRoomManagement}
+        onDeleteActiveGroupRoom={handleDeleteActiveGroupRoom}
+        onResetActiveGroupRoom={handleResetActiveGroupRoom}
+        onToggleGroupManageSession={handleToggleGroupManageSession}
+        activeSurfaceTitle={activeSurfaceTitle}
+        sessionStateValue={sessionStateValue}
+        sessionStateLabel={sessionStateLabel}
+        sessionStateLine={sessionStateLine}
+        compactSessionStateLine={compactSessionStateLine}
+        agentDirectSessionMismatch={agentDirectSessionMismatch}
+        agentPrimaryDirectSessionId={agentPrimaryDirectSessionId}
+        sessionBindingMismatchLine={sessionBindingMismatchLine}
+        onOpenDirectSession={handleOpenDirectSession}
+        sessionCompactRows={sessionCompactRows}
+        activeSkillSummary={Boolean(activeSkillSummary)}
+        activeSkillStatusStyle={activeSkillStatusStyle}
+        activeSkillTitle={activeSkillTitle}
+        activeSkillName={activeSkillName}
+        activeSkillCommand={activeSkillCommand}
+        activeSkillStatusLabel={activeSkillStatusLabel}
+        activeSkillShortHash={activeSkillShortHash}
+        mentalModelEnabledForNextTurn={mentalModelEnabledForNextTurn}
+        activeSessionId={activeSessionId}
+        onMentalModelEnabledChange={handleMentalModelEnabledChange}
+        featurePresetState={featurePresetState}
+        onToggleFeaturePreset={toggleFeaturePreset}
+        cacheDetailAvailable={cacheDetailAvailable}
+        cacheDetailOpen={cacheDetailOpen}
+        cacheDetailOpenLabel={cacheDetailOpenLabel}
+        tokenStatusMetrics={tokenStatusMetrics}
+        onOpenCacheDetail={openCacheDetail}
+        lastLlmPayloadTrace={lastLlmPayloadTrace}
+        mentalCompactLine={mentalCompactLine}
+        mentalSourceLabel={mentalSourceLabel}
+        mentalCognitiveStateValue={mentalCognitiveStateValue}
+        mentalStateLabel={mentalStateLabel}
+        mentalSummary={mentalSummary}
+        mentalWhisper={mentalWhisper}
+        mentalCognitiveStateLabel={mentalCognitiveStateLabel}
+        mentalConfidence={mentalConfidence}
+        mentalRelativeTime={mentalRelativeTime}
+        formatTime={formatTime}
+        mental={mental}
+        pet={pet}
+        petPresetLabel={petPresetLabel}
+        petCompactLine={petCompactLine}
+        petAvatarSkinStyle={petAvatarSkinStyle}
+        petAvatarSymbol={petAvatarSymbol}
+        petVitals={petVitals}
+        petInteractionLabels={petInteractionLabels}
+        petActionPending={petActionMutation.isPending}
+        petActionFeedback={petActionFeedback}
+        onPetInteraction={handlePetInteraction}
+      />
 
       {responsiveLayout.leftVisible ? <PaneCollapseHandle
         side="left"
