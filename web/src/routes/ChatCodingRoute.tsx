@@ -24,11 +24,8 @@ import {
   useMemo,
   useRef,
   useState,
-  type CSSProperties,
   type DragEvent,
-  type KeyboardEvent,
   type MouseEvent as ReactMouseEvent,
-  type PointerEvent,
 } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 
@@ -92,7 +89,6 @@ import { PaneCollapseHandle } from "../components/layout/PaneCollapseHandle";
 import { petAvatarPresetLabel } from "../i18n/petLabels";
 import { useAppI18n } from "../i18n/useAppI18n";
 import { useChatWorkbenchStore } from "../store/chatWorkbenchStore";
-import { useShellStore } from "../store/shellStore";
 import {
   clampPercent,
   contextUsagePercent,
@@ -138,7 +134,6 @@ import {
   buildVisiblePanelRows,
   getPetAvatarPresetKey,
   getPetAvatarSymbol,
-  resolveChatResponsiveLayout,
   resolveChatUserDisplayName,
 } from "./chatCompactPanel";
 import {
@@ -216,16 +211,14 @@ import { TokenCoreStatusPanel, type TokenCoreStatusMetric } from "./chat/TokenCo
 import { ChatConversationIndexRail } from "./chat/ChatConversationIndexRail";
 import { ChatStatusRail } from "./chat/ChatStatusRail";
 import {
-  clamp,
   describeChatRouteError as describeError,
   formatTokenSpeedValue,
-  getResizeBounds,
   isBusyPhase,
   isRunningPhase,
   isStoppingPhase,
-  normalizePanelWidths,
   shouldSuppressComposerErrorForTurnError,
 } from "./chat/chatCodingRouteViewModel";
+import { useChatWorkbenchLayout } from "./chat/useChatWorkbenchLayout";
 import {
   CLI_AGENT_RUN_TAB_PREFIX,
   CLI_AGENT_TOOL_NAME,
@@ -559,7 +552,6 @@ function fetchSessionDetailWindow(
   );
 }
 
-const KEYBOARD_RESIZE_STEP = 24;
 const MENTAL_MODEL_TOGGLE_STORAGE_KEY = "vibelution.chat.mentalModelEnabled";
 const MAX_COMPOSER_IMAGE_ATTACHMENTS = 4;
 const MAX_COMPOSER_IMAGE_BYTES = 8 * 1024 * 1024;
@@ -568,7 +560,6 @@ const SESSION_DETAIL_HISTORY_PAGE_SIZE = 40;
 const SESSION_STREAM_MIN_APPLY_INTERVAL_MS = 350;
 const SESSION_STREAM_ROUTE_SWITCH_GRACE_MS = 4_000;
 
-type ResizableSide = "left" | "right";
 type PetInteractionAction = "feed" | "talk" | "care";
 type RightIndexPanel = "conversations" | "members";
 type ComposerImageAttachment = {
@@ -578,13 +569,6 @@ type ComposerImageAttachment = {
   previewUrl: string;
   sizeBytes: number;
   contentType: string;
-};
-
-type DragState = {
-  side: ResizableSide;
-  startX: number;
-  startLeftWidth: number;
-  startRightWidth: number;
 };
 
 type SessionContextMenuState = {
@@ -940,8 +924,6 @@ export function ChatCodingRoute() {
   const chatWorkspaceCache = useMemo(() => createChatWorkspaceCache(queryClient), [queryClient]);
   const navigate = useNavigate();
   const location = useLocation();
-  const chatPanelWidths = useShellStore((state) => state.chatPanelWidths);
-  const setChatPanelWidths = useShellStore((state) => state.setChatPanelWidths);
   const activeSessionId = useChatWorkbenchStore((state) => state.activeSessionId);
   const sessionWorkspaces = useChatWorkbenchStore((state) => state.sessionWorkspaces);
   const setActiveSession = useChatWorkbenchStore((state) => state.setActiveSession);
@@ -952,13 +934,6 @@ export function ChatCodingRoute() {
   const reselectDirectSessionRef = useRef<(sessionId: string) => void>(() => undefined);
   const setActiveTab = useChatWorkbenchStore((state) => state.setActiveTab);
   const [sessionFilter, setSessionFilter] = useState("");
-  const [dragState, setDragState] = useState<DragState | null>(null);
-  const [leftRailCollapsed, setLeftRailCollapsed] = useState(false);
-  const [rightPaneCollapsed, setRightPaneCollapsed] = useState(false);
-  const [responsiveLayout, setResponsiveLayout] = useState(() =>
-    resolveChatResponsiveLayout(typeof window === "undefined" ? 1440 : window.innerWidth),
-  );
-  const [responsiveOverlayPane, setResponsiveOverlayPane] = useState<"left" | "right" | null>(null);
   const [cacheDetailOpen, setCacheDetailOpen] = useState(false);
   const imageUploadInFlightRef = useRef<Record<string, boolean>>({});
   const [sessionDrafts, setSessionDrafts] = useState<Record<string, string>>({});
@@ -1004,7 +979,6 @@ export function ChatCodingRoute() {
   const [closedCliAgentRunTokensBySession, setClosedCliAgentRunTokensBySession] = useState<Record<string, string[]>>({});
   const [cliAgentTerminalSessions, setCliAgentTerminalSessions] = useState<Record<string, CliAgentTerminalSession>>({});
   const [mountedCliAgentRunIdsBySession, setMountedCliAgentRunIdsBySession] = useState<Record<string, string[]>>({});
-  const layoutRef = useRef<HTMLDivElement | null>(null);
   const sessionStreamErrorLoggedRef = useRef<Record<string, boolean>>({});
   const sessionStreamPayloadErrorLoggedRef = useRef<Record<string, boolean>>({});
   const sessionStreamApplyStatsRef = useRef<Record<string, SessionStreamApplyStats>>({});
@@ -1109,6 +1083,27 @@ export function ChatCodingRoute() {
   const projectBusActive = activeGroupRoomId === "__project_agent_bus__";
   const groupPanelActive = Boolean(activeGroupRoomId);
   const standardGroupRoomActive = groupPanelActive && !projectBusActive;
+  const {
+    layoutRef,
+    dragState,
+    responsiveLayout,
+    conversationIndexCollapsed,
+    statusRailCollapsed,
+    conversationIndexOverlayOpen,
+    statusRailOverlayOpen,
+    responsiveOverlayOpen,
+    layoutStyle,
+    chatLayoutClassName,
+    centerPaneClassName,
+    statusRailClassName,
+    conversationIndexPaneClassName,
+    handleResizeStart,
+    handleResizeKeyDown,
+    closeResponsiveOverlayPane,
+    setLeftRailCollapsed,
+    setRightPaneCollapsed,
+    setResponsiveOverlayPane,
+  } = useChatWorkbenchLayout({ standardGroupRoomActive });
   const directSessionPanelActive = Boolean(activeSessionId) && !groupPanelActive;
   const sessionQueryText = sessionFilter.trim();
   const [directSessionBackgroundSyncActive, setDirectSessionBackgroundSyncActive] = useState(false);
@@ -3156,139 +3151,7 @@ export function ChatCodingRoute() {
       fetchJson<FileContent>(`/api/files/content?path=${encodeURIComponent(activeFilePath ?? "")}`),
   });
 
-  const conversationIndexCollapsed = responsiveLayout.leftVisible
-    ? leftRailCollapsed
-    : responsiveOverlayPane !== "left";
-  const statusRailCollapsed = responsiveLayout.rightVisible
-    ? rightPaneCollapsed
-    : responsiveOverlayPane !== "right";
-  const conversationIndexOverlayOpen = !responsiveLayout.leftVisible && responsiveOverlayPane === "left";
-  const statusRailOverlayOpen = !responsiveLayout.rightVisible && responsiveOverlayPane === "right";
-  const responsiveOverlayOpen = conversationIndexOverlayOpen || statusRailOverlayOpen;
   const changedFiles = new Set(sessionDetailQuery.data?.changedFiles ?? []);
-  const leftPanelWidth = chatPanelWidths.leftPanelWidth;
-  const rightPanelWidth = chatPanelWidths.rightPanelWidth;
-
-  const syncPanelWidthsToLayout = useCallback(() => {
-    const layoutWidth = layoutRef.current?.getBoundingClientRect().width ?? 0;
-    if (!layoutWidth) {
-      return;
-    }
-    const normalized = normalizePanelWidths(layoutWidth, leftPanelWidth, rightPanelWidth);
-    if (
-      normalized.leftPanelWidth !== leftPanelWidth ||
-      normalized.rightPanelWidth !== rightPanelWidth
-    ) {
-      setChatPanelWidths(normalized);
-    }
-  }, [leftPanelWidth, rightPanelWidth, setChatPanelWidths]);
-
-  useEffect(() => {
-    const layoutElement = layoutRef.current;
-    if (!layoutElement) {
-      return;
-    }
-    const syncResponsiveLayout = () => {
-      const width = layoutElement.getBoundingClientRect().width;
-      const nextLayout = resolveChatResponsiveLayout(width);
-      setResponsiveLayout((current) => (
-        current.mode === nextLayout.mode
-        && current.leftVisible === nextLayout.leftVisible
-        && current.rightVisible === nextLayout.rightVisible
-          ? current
-          : nextLayout
-      ));
-      if (nextLayout.mode === "wide" || nextLayout.mode === "compact") {
-        syncPanelWidthsToLayout();
-      }
-    };
-    syncResponsiveLayout();
-    const observer = new ResizeObserver(syncResponsiveLayout);
-    observer.observe(layoutElement);
-    return () => observer.disconnect();
-  }, [syncPanelWidthsToLayout]);
-
-  useEffect(() => {
-    if (!responsiveOverlayPane || typeof window === "undefined") {
-      return;
-    }
-    const handleEscape = (event: globalThis.KeyboardEvent) => {
-      if (event.key !== "Escape") {
-        return;
-      }
-      const closingPane = responsiveOverlayPane;
-      setResponsiveOverlayPane(null);
-      window.requestAnimationFrame(() => {
-        document.getElementById(
-          closingPane === "left" ? "chat-conversation-index-toggle" : "chat-status-toggle",
-        )?.focus();
-      });
-    };
-    window.addEventListener("keydown", handleEscape);
-    return () => window.removeEventListener("keydown", handleEscape);
-  }, [responsiveOverlayPane]);
-
-  useEffect(() => {
-    if (responsiveOverlayPane === "left" && responsiveLayout.leftVisible) {
-      setResponsiveOverlayPane(null);
-    } else if (responsiveOverlayPane === "right" && responsiveLayout.rightVisible) {
-      setResponsiveOverlayPane(null);
-    }
-  }, [responsiveLayout.leftVisible, responsiveLayout.rightVisible, responsiveOverlayPane]);
-
-  useEffect(() => {
-    if (!dragState) {
-      return;
-    }
-    const activeDrag = dragState;
-
-    const previousCursor = document.body.style.cursor;
-    const previousUserSelect = document.body.style.userSelect;
-    document.body.style.cursor = "col-resize";
-    document.body.style.userSelect = "none";
-
-    function stopDragging() {
-      setDragState(null);
-    }
-
-    function handlePointerMove(event: globalThis.PointerEvent) {
-      const layoutWidth = layoutRef.current?.getBoundingClientRect().width ?? 0;
-      if (!layoutWidth) {
-        return;
-      }
-
-      const delta = event.clientX - activeDrag.startX;
-
-      if (activeDrag.side === "left") {
-        if (conversationIndexCollapsed) {
-          return;
-        }
-        const bounds = getResizeBounds("left", layoutWidth, statusRailCollapsed ? 0 : activeDrag.startRightWidth);
-        const nextLeftWidth = clamp(activeDrag.startLeftWidth + delta, bounds.min, bounds.max);
-        setChatPanelWidths({ leftPanelWidth: Math.round(nextLeftWidth) });
-        return;
-      }
-
-      if (statusRailCollapsed) {
-        return;
-      }
-      const bounds = getResizeBounds("right", layoutWidth, conversationIndexCollapsed ? 0 : activeDrag.startLeftWidth);
-      const nextRightWidth = clamp(activeDrag.startRightWidth - delta, bounds.min, bounds.max);
-      setChatPanelWidths({ rightPanelWidth: Math.round(nextRightWidth) });
-    }
-
-    window.addEventListener("pointermove", handlePointerMove);
-    window.addEventListener("pointerup", stopDragging);
-    window.addEventListener("pointercancel", stopDragging);
-
-    return () => {
-      document.body.style.cursor = previousCursor;
-      document.body.style.userSelect = previousUserSelect;
-      window.removeEventListener("pointermove", handlePointerMove);
-      window.removeEventListener("pointerup", stopDragging);
-      window.removeEventListener("pointercancel", stopDragging);
-    };
-  }, [conversationIndexCollapsed, dragState, setChatPanelWidths, statusRailCollapsed]);
 
   const locale = lang === "zh" ? "zh-CN" : "en-US";
 
@@ -5650,112 +5513,12 @@ export function ChatCodingRoute() {
     renameSessionMutation.mutate({ sessionId: session.id, title });
   }
 
-  function handleResizeStart(side: ResizableSide, event: PointerEvent<HTMLDivElement>) {
-    if (event.button !== 0) {
-      return;
-    }
-    if ((side === "left" && conversationIndexCollapsed) || (side === "right" && statusRailCollapsed)) {
-      return;
-    }
-    event.preventDefault();
-    setDragState({
-      side,
-      startX: event.clientX,
-      startLeftWidth: leftPanelWidth,
-      startRightWidth: rightPanelWidth,
-    });
-  }
-
-  function handleResizeKeyDown(side: ResizableSide, event: KeyboardEvent<HTMLDivElement>) {
-    if (!layoutRef.current) {
-      return;
-    }
-    if ((side === "left" && conversationIndexCollapsed) || (side === "right" && statusRailCollapsed)) {
-      return;
-    }
-
-    const { key } = event;
-    const direction =
-      key === "ArrowLeft" ? -1 : key === "ArrowRight" ? 1 : key === "Home" ? "min" : key === "End" ? "max" : null;
-    if (direction === null) {
-      return;
-    }
-
-    event.preventDefault();
-    const layoutWidth = layoutRef.current.getBoundingClientRect().width;
-
-    if (side === "left") {
-      const bounds = getResizeBounds("left", layoutWidth, statusRailCollapsed ? 0 : rightPanelWidth);
-      const nextLeftWidth =
-        direction === "min"
-          ? bounds.min
-          : direction === "max"
-            ? bounds.max
-            : clamp(leftPanelWidth + Number(direction) * KEYBOARD_RESIZE_STEP, bounds.min, bounds.max);
-      setChatPanelWidths({ leftPanelWidth: Math.round(nextLeftWidth) });
-      return;
-    }
-
-    const bounds = getResizeBounds("right", layoutWidth, conversationIndexCollapsed ? 0 : leftPanelWidth);
-    const delta =
-      direction === "min"
-        ? bounds.min
-        : direction === "max"
-          ? bounds.max
-          : clamp(rightPanelWidth - Number(direction) * KEYBOARD_RESIZE_STEP, bounds.min, bounds.max);
-    setChatPanelWidths({ rightPanelWidth: Math.round(delta) });
-  }
-
   const toggleFeaturePreset = useCallback((key: FeaturePresetKey) => {
     setFeaturePresetState((current) => ({
       ...current,
       [key]: !current[key],
     }));
   }, []);
-
-  const layoutStyle = useMemo(
-    () =>
-      ({
-        "--chat-left-pane-width": conversationIndexCollapsed ? "0px" : `${leftPanelWidth}px`,
-        "--chat-right-pane-width": statusRailCollapsed ? "0px" : `${rightPanelWidth}px`,
-      }) as CSSProperties,
-    [conversationIndexCollapsed, leftPanelWidth, rightPanelWidth, statusRailCollapsed],
-  );
-  const rightPaneLayoutClassName = standardGroupRoomActive ? styles.rightPaneWithTabs : styles.rightPaneWithoutTabs;
-  const rightPaneClassName = `${styles.rightPane} ${rightPaneLayoutClassName}`;
-  const layoutModeClassName = responsiveLayout.mode === "wide"
-    ? styles.layout
-    : responsiveLayout.mode === "compact"
-      ? `${styles.layout} ${styles.layoutCompactDesktop}`
-      : `${styles.layout} ${styles.layoutOverlay}`;
-  const chatLayoutClassName = [
-    layoutModeClassName,
-    responsiveLayout.mode === "wide" && statusRailCollapsed ? styles.layoutStatusRailCollapsed : "",
-  ].filter(Boolean).join(" ");
-  const centerPaneClassName = responsiveLayout.mode === "overlay" || responsiveLayout.mode === "mobile"
-    ? `${styles.centerPane} ${styles.centerPaneOverlay}`
-    : styles.centerPane;
-  const statusRailClassName = [
-    styles.leftRail,
-    statusRailCollapsed ? styles.paneCollapsed : "",
-    statusRailOverlayOpen ? `${styles.overlayPane} ${styles.overlayPaneRight}` : "",
-  ].filter(Boolean).join(" ");
-  const conversationIndexPaneClassName = [
-    rightPaneClassName,
-    conversationIndexCollapsed ? styles.paneCollapsed : "",
-    conversationIndexOverlayOpen ? `${styles.overlayPane} ${styles.overlayPaneLeft}` : "",
-  ].filter(Boolean).join(" ");
-  const closeResponsiveOverlayPane = () => {
-    const closingPane = responsiveOverlayPane;
-    setResponsiveOverlayPane(null);
-    if (closingPane && typeof window !== "undefined") {
-      window.requestAnimationFrame(() => {
-        document.getElementById(
-          closingPane === "left" ? "chat-conversation-index-toggle" : "chat-status-toggle",
-        )?.focus();
-      });
-    }
-  };
 
   const contextMenuSessionIsBusy = contextMenuSession
     ? isBusyPhase(contextMenuSession.currentPhase || contextMenuSession.status)
