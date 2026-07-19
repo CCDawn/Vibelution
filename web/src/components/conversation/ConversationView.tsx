@@ -2171,6 +2171,7 @@ export function ConversationView({
       >
         <VButton
           type="button"
+        contentLayout="plain"
           className={styles.timelineThoughtHeader}
           aria-expanded={expanded}
           onClick={() => toggleSection(message.id, item.id, item.defaultExpanded)}
@@ -2270,6 +2271,7 @@ export function ConversationView({
       >
         <VButton
           type="button"
+        contentLayout="plain"
           className={`${styles.timelineCellHeader} ${toneTextClassName}`}
           aria-expanded={expanded}
           onClick={() => toggleSection(message.id, item.id, false)}
@@ -2721,6 +2723,7 @@ export function ConversationView({
       >
         <VButton
           type="button"
+        contentLayout="plain"
           className={styles.answerOnlyProcessToggle}
           aria-expanded={expanded}
           onClick={() => toggleSection(messageId, "process", defaultExpanded)}
@@ -3524,6 +3527,7 @@ export function ConversationView({
       {!isAtBottom ? (
         <VButton
           type="button"
+        contentLayout="plain"
           className={styles.backToBottomButton}
           onClick={scrollToBottom}
           title={t("backToBottom")}

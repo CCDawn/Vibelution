@@ -1129,8 +1129,8 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("待 Agent 复核");
     expect(routeSource).not.toContain("待质检");
     expect(routeSource).not.toContain("workflowSourceCollectionPrimaryButton");
-    expect(routeSource).toContain("启动实验规划");
-    expect(routeSource).toContain("启动迭代");
+    expect(routeSource).toContain("启动设计");
+    expect(routeSource).toContain("启动执行迭代");
     expect(routeSource).not.toContain("{researchWorkflowTeamSelected ? renderResearchWorkspaceNav() : null}");
     expect(routeSource).toContain("onSelectionChange={(key) => {");
     expect(routeSource).toContain("selectTeamRecord(nextTeam)");
@@ -1143,8 +1143,14 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("researchCanvasRoute(selectedTeam?.teamId || RESEARCH_TEAM_ID)");
     expect(routeSource).toContain("搜索、提炼、审查与入库");
     expect(routeSource).toContain("资料寻找 / 资料提炼 / 资料关系整理 / 资料入库");
-    expect(routeSource).toContain("实验规划 / Baseline / 指标 / 结果记录");
-    expect(routeSource).toContain("复盘 / 版本化 / 改进计划 / 交付门禁");
+    expect(routeSource).toContain("研究问题 / 假设 / 控制变量 / 冻结设计");
+    expect(routeSource).toContain("执行批次 / 结果评估 / 消融归因 / 优化迭代");
+    expect(routeSource).toContain("lifecycleProjection");
+    expect(routeSource).toContain("已设计 · 待执行");
+    expect(routeSource).toContain("训练结果不参与本阶段完成判定");
+    expect(routeSource).toContain("最近诊断单独展示，不覆盖主线结果");
+    expect(routeSource).toContain("bestValidatedResultId");
+    expect(routeSource).toContain("latestDiagnosticStatus");
     expect(routeSource).toContain("value === \"source_collection\"");
     expect(routeSource).toContain("return \"knowledge_collection\"");
     expect(routeSource).toContain('id="research-workflow-overview"');

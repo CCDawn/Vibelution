@@ -153,6 +153,8 @@ function runtimeEventToAgentPart(
     summary: compactText(event.summary),
     resultPreview: event.resultPreview,
     error: event.error,
+    failureClass: event.failureClass,
+    transportStatus: event.transportStatus,
     sequence: event.sequence || undefined,
     timestamp: event.timestamp,
     tracePath: event.tracePath,

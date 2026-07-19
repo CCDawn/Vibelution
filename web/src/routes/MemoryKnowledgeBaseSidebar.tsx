@@ -85,6 +85,7 @@ export function MemoryKnowledgeBaseSidebar({
           <VButton
             key={base.requestId}
             type="button"
+                contentLayout="plain"
             className={base.requestId === activeBaseRequestId ? `${styles.sourceButton} ${styles.sourceButtonActive}` : styles.sourceButton}
             onClick={() => onSelectBase(base.requestId)}
           >

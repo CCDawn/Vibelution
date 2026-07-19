@@ -8959,6 +8959,164 @@ def test_experiment_plan_draft_uses_ready_algorithm_hypotheses_and_blocks_full_r
     assert status["boundaries"]["createsExperimentAttempt"] is False
 
 
+def test_experiment_status_separates_frozen_design_best_result_and_latest_diagnostic(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = team_service.create_team(name="ai科学研究团队")
+    stage = team_workflow_orchestration_service.start_research_stage_round(
+        team["teamId"],
+        {"stageType": "experiment", "topic": "masked prediction error"},
+    )
+    store = team_workflow_orchestration_service._load_experiment_plan_store(team["teamId"])
+    store["plans"] = [
+        {
+            "planId": "exp_revision4",
+            "status": "ingested",
+            "title": "weight 0.875 bounded confirmation",
+            "createdAt": "2026-07-18T00:59:23+08:00",
+            "updatedAt": "2026-07-18T20:54:13+08:00",
+            "stageRoundId": stage["stageRound"]["stageRoundId"],
+            "hypothesisCandidateIds": ["candidate_revision4"],
+            "experimentContract": {"schemaVersion": 2, "revision": 4, "status": "result_review"},
+            "contractValidation": {"valid": True, "missingFields": []},
+            "readiness": {
+                "readyForPlanReview": True,
+                "readyForSmoke": True,
+                "readyForFullRun": True,
+                "readyForKnowledgeIngestion": True,
+            },
+            "activeFullRunResultId": "full_revision4",
+            "activeFullRunResult": {"fullRunResultId": "full_revision4", "status": "passed"},
+            "knowledgeIngestion": {
+                "status": "ingested",
+                "result": {"knowledgeItemId": "kitem_revision4"},
+            },
+        },
+        {
+            "planId": "exp_diagnostic_revision12",
+            "status": "smoke_needs_review",
+            "title": "2 to 8 epoch fidelity diagnostic",
+            "createdAt": "2026-07-19T20:26:18+08:00",
+            "updatedAt": "2026-07-19T20:32:29+08:00",
+            "stageRoundId": stage["stageRound"]["stageRoundId"],
+            "hypothesisCandidateIds": ["candidate_diagnostic"],
+            "experimentContract": {"schemaVersion": 2, "revision": 12, "status": "smoke_review"},
+            "contractValidation": {"valid": True, "missingFields": []},
+            "readiness": {
+                "readyForPlanReview": True,
+                "readyForSmoke": True,
+                "readyForFullRun": False,
+                "readyForKnowledgeIngestion": False,
+            },
+            "activeSmokeResultId": "smoke_diagnostic",
+            "activeSmokeResult": {"smokeResultId": "smoke_diagnostic", "status": "needs_review"},
+        },
+    ]
+    store["activePlanId"] = "exp_diagnostic_revision12"
+    team_workflow_orchestration_service._write_json(
+        team_workflow_orchestration_service._experiment_plan_store_path(team["teamId"]),
+        store,
+    )
+    loop_path = team_workflow_orchestration_service._team_workflow_root(team["teamId"]) / "research_loops" / "index.json"
+    team_workflow_orchestration_service._write_json(
+        loop_path,
+        {
+            "schemaVersion": 1,
+            "storeKind": "team_research_loop_store",
+            "teamId": team["teamId"],
+            "activeLoopId": "loop_external_validity",
+            "loops": [
+                {
+                    "loopId": "loop_external_validity",
+                    "status": "accepted_for_writeup",
+                    "title": "full dataset external validity",
+                    "updatedAt": "2026-07-19T21:55:12+08:00",
+                    "linkedExperiment": {
+                        "planId": "exp_revision4",
+                        "candidateIds": ["candidate_revision4"],
+                    },
+                    "evidenceRecords": [
+                        {
+                            "evidenceId": "benchmark_revision4_external",
+                            "evidenceType": "benchmark_result",
+                            "status": "passed",
+                        }
+                    ],
+                    "decisions": [
+                        {
+                            "decisionId": "decision_accept_revision4",
+                            "decision": "accept_for_writeup",
+                            "statusAfterDecision": "accepted_for_writeup",
+                        }
+                    ],
+                }
+            ],
+        },
+    )
+
+    status = team_workflow_orchestration_service.get_experiment_planning_status(team["teamId"])
+    lifecycle = status["lifecycleProjection"]
+
+    assert status["summary"]["activePlanId"] == "exp_diagnostic_revision12"
+    assert lifecycle["stage2"]["status"] == "frozen"
+    assert lifecycle["stage2"]["activeDesignPlanId"] == "exp_diagnostic_revision12"
+    assert lifecycle["stage2"]["frozenDesignRevision"] == 12
+    assert lifecycle["stage3"]["status"] == "accepted_for_writeup"
+    assert lifecycle["stage3"]["activeIterationId"] == "loop_external_validity"
+    assert lifecycle["stage3"]["bestCandidateId"] == "candidate_revision4"
+    assert lifecycle["stage3"]["bestValidatedResultId"] == "benchmark_revision4_external"
+    assert lifecycle["stage3"]["bestValidatedPlanId"] == "exp_revision4"
+    assert lifecycle["stage3"]["latestDiagnosticStatus"] == {
+        "planId": "exp_diagnostic_revision12",
+        "revision": 12,
+        "status": "smoke_needs_review",
+        "title": "2 to 8 epoch fidelity diagnostic",
+    }
+
+
+def test_experiment_design_can_be_frozen_without_any_training_result(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = team_service.create_team(name="ai科学研究团队")
+    stage = team_workflow_orchestration_service.start_research_stage_round(
+        team["teamId"],
+        {"stageType": "experiment", "topic": "frozen design only"},
+    )
+    store = team_workflow_orchestration_service._load_experiment_plan_store(team["teamId"])
+    store["plans"] = [
+        {
+            "planId": "exp_frozen_without_run",
+            "status": "draft",
+            "title": "preregistered executable design",
+            "createdAt": "2026-07-19T20:00:00+08:00",
+            "updatedAt": "2026-07-19T20:00:00+08:00",
+            "stageRoundId": stage["stageRound"]["stageRoundId"],
+            "hypothesisCandidateIds": ["candidate_preregistered"],
+            "experimentContract": {"schemaVersion": 2, "revision": 3, "status": "ready_for_prepare"},
+            "contractValidation": {"valid": True, "missingFields": []},
+            "readiness": {
+                "readyForPlanReview": True,
+                "readyForSmoke": False,
+                "readyForFullRun": False,
+                "readyForKnowledgeIngestion": False,
+            },
+        }
+    ]
+    store["activePlanId"] = "exp_frozen_without_run"
+    team_workflow_orchestration_service._write_json(
+        team_workflow_orchestration_service._experiment_plan_store_path(team["teamId"]),
+        store,
+    )
+
+    status = team_workflow_orchestration_service.get_experiment_planning_status(team["teamId"])
+    lifecycle = status["lifecycleProjection"]
+
+    assert lifecycle["stage2"]["status"] == "frozen"
+    assert lifecycle["stage2"]["activeDesignPlanId"] == "exp_frozen_without_run"
+    assert lifecycle["stage2"]["frozenDesignRevision"] == 3
+    assert lifecycle["stage2"]["readyForExecution"] is True
+    assert lifecycle["stage3"]["status"] == "not_started"
+    assert lifecycle["stage3"]["bestValidatedResultId"] == ""
+
+
 def test_experiment_baseline_artifact_registration_unlocks_smoke_gate(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     team = team_service.create_team(name="ai科学研究团队")

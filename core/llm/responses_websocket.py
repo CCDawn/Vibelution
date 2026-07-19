@@ -9,6 +9,7 @@ dropping conversation history.
 from __future__ import annotations
 
 import threading
+import time
 from typing import Any, Callable, Dict, Iterator
 from urllib.parse import urlsplit
 
@@ -68,6 +69,13 @@ def _websocket_close_code(exc: Exception) -> int | None:
         return int(raw_code) if raw_code is not None else None
     except (TypeError, ValueError):
         return None
+
+
+def _websocket_close_reason(exc: Exception) -> str:
+    raw_reason = getattr(exc, "reason", None)
+    if not raw_reason:
+        raw_reason = getattr(getattr(exc, "rcvd", None), "reason", None)
+    return " ".join(str(raw_reason or "").split())[:240]
 
 
 class ResponsesWebSocketBackend:
@@ -166,6 +174,7 @@ class ResponsesWebSocketBackend:
 
         def events() -> Iterator[Any]:
             with self._lock:
+                request_started = time.perf_counter()
                 try:
                     connection, reused = self._connect_locked(payload)
                 except Exception as exc:
@@ -175,8 +184,14 @@ class ResponsesWebSocketBackend:
                         "fallback",
                         reasonType=type(exc).__name__,
                         fallbackTransport="http",
+                        elapsedMs=max(0, int((time.perf_counter() - request_started) * 1000)),
                     )
                     yield from self._http_backend(_clean_http_payload(payload))
+                    self._emit(
+                        "recovered",
+                        fallbackTransport="http",
+                        elapsedMs=max(0, int((time.perf_counter() - request_started) * 1000)),
+                    )
                     return
 
                 if reused:
@@ -195,8 +210,14 @@ class ResponsesWebSocketBackend:
                         reasonType=type(exc).__name__,
                         fallbackTransport="http",
                         preSendValidationFailure=True,
+                        elapsedMs=max(0, int((time.perf_counter() - request_started) * 1000)),
                     )
                     yield from self._http_backend(_clean_http_payload(payload))
+                    self._emit(
+                        "recovered",
+                        fallbackTransport="http",
+                        elapsedMs=max(0, int((time.perf_counter() - request_started) * 1000)),
+                    )
                     return
                 try:
                     while True:
@@ -208,17 +229,29 @@ class ResponsesWebSocketBackend:
                 except Exception as exc:
                     self._close_locked()
                     close_code = _websocket_close_code(exc)
+                    close_reason = _websocket_close_reason(exc)
+                    failure_fields = {
+                        "reasonType": type(exc).__name__,
+                        "closeCode": close_code,
+                        "closeReason": close_reason,
+                        "elapsedMs": max(0, int((time.perf_counter() - request_started) * 1000)),
+                        "receivedProtocolEvent": emitted,
+                    }
                     if not emitted and close_code == 1013:
                         self._disabled = True
                         self._emit(
                             "fallback",
-                            reasonType=type(exc).__name__,
-                            closeCode=close_code,
                             fallbackTransport="http",
+                            **failure_fields,
                         )
                         yield from self._http_backend(_clean_http_payload(payload))
+                        self._emit(
+                            "recovered",
+                            fallbackTransport="http",
+                            elapsedMs=max(0, int((time.perf_counter() - request_started) * 1000)),
+                        )
                         return
-                    self._emit("disconnected", connectionReused=reused)
+                    self._emit("disconnected", connectionReused=reused, **failure_fields)
                     raise
 
         return events()
