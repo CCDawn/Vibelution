@@ -275,7 +275,8 @@ export function MemoryKnowledgeSourceGovernancePanel({
               </div>
             </>
           ) : (
-            <VButton type="button" className={styles.collapsedFormButton} onClick={() => onShowOwnerSourceFormChange(true)}>
+            <VButton type="button"
+                contentLayout="plain" className={styles.collapsedFormButton} onClick={() => onShowOwnerSourceFormChange(true)}>
               <Pencil size={15} />
               <span>{copy.submitSource}</span>
               <small>{ownerSourceDraft.sourceType}</small>

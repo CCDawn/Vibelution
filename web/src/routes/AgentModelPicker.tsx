@@ -271,6 +271,7 @@ export function AgentModelPicker({
                       else optionRefs.current.delete(candidate.modelRef);
                     }}
                     type="button"
+                    contentLayout="plain"
                     role="option"
                     className={`${styles.option} ${selectedRow ? styles.optionSelected : ""} ${reason ? styles.optionDisabled : ""}`}
                     isDisabled={disabled || Boolean(reason)}
@@ -313,6 +314,7 @@ export function AgentModelPicker({
       <VButton
         ref={triggerRef}
         type="button"
+        contentLayout="plain"
         className={styles.trigger}
         isDisabled={disabled}
         aria-haspopup="dialog"

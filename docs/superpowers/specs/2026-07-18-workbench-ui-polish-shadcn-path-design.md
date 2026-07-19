@@ -89,6 +89,7 @@ Renderer+tokens  →  唯一视觉实现（今日 HeroUI，可换 shadcn/Radix�
 | **8** | 剩余工具页：PromptTemplates / ResearchFlow / Reset / SupervisedReview 吃满 + clamp | layout 测试 + build |
 | **9** | 字号 token 安全：shell / chat 侧栏 chrome / VUI layout 去掉 `text-[var(--vui-font-*)]` 颜色陷阱 | typography 契约 + layout 测试 + build |
 | **9b** | 字号扫尾：其余 routes / preview / conversation companions；契约扩到全 `web/src`（除 ConversationView.styles） | typography 契约 + 抽样 layout 测试 + build |
+| **10** | 多行 VButton 加固：`contentLayout="plain"` + plain 默认 `!h-auto`；聊天 chips / 模型选择 / Memory 列表 / 工具菜单 | primitives 测试 + 抽样 layout + build |
 | **D** | ConversationView 对话区本体 | **延期**：claim-1ded3aed8d30 仍标 active（已过期、worktree 已失），释放前不改 styles |
 
 ### Wave R（完成）
@@ -156,6 +157,14 @@ Renderer+tokens  →  唯一视觉实现（今日 HeroUI，可换 shadcn/Radix�
 - 同步更新 layout 测试中对字号 class 的字符串断言
 - `typographyTokenContract.test.ts` 覆盖全 `web/src` production 源（仅 defer ConversationView.styles）
 - 明确不改：`ConversationView.styles.ts` + 其 test 中与该 claim 文件绑定的断言
+
+### Wave 10 文件范围
+
+- `VButton`：`contentLayout="plain"` 时默认 `!h-auto`（摆脱 density 固定高度）
+- `VNativeButton`：显式 `grid/flex` 根不再强制 `whitespace-nowrap`
+- Chat：`featureChip` / `petShowcaseAction` / `tokenStatusMetricButton` / `AgentModelPicker`
+- Memory 列表卡、`AppShellUtilityMenu` 文件行、`AgentResponseSectionView` toggle
+- 明确不改：`ConversationView.styles.ts`（claim）
 
 ### Wave 2 文件范围
 
