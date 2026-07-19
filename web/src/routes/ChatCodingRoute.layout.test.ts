@@ -1322,7 +1322,9 @@ describe("ChatCodingRoute layout contract", () => {
     expect(unavailableHtml).toContain("aria-disabled=\"true\"");
     expect(unavailableHtml).not.toContain("aria-expanded");
     expect(unavailableHtml).not.toContain("aria-controls=\"cache-detail-dialog\"");
-    expect(availableHtml).toContain("aria-disabled=\"false\"");
+    // HeroUI omits a false ARIA state for an enabled native button. The
+    // accessibility contract is that it must not remain disabled.
+    expect(availableHtml).not.toContain("aria-disabled=\"true\"");
     expect(availableHtml).toContain("aria-expanded=\"true\"");
     expect(availableHtml).toContain("aria-controls=\"cache-detail-dialog\"");
     expect(availableClosedHtml).toContain("aria-expanded=\"false\"");
@@ -1586,8 +1588,10 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.createGroupButton).toBeTypeOf("string");
   });
 
-  it("keeps Agent rebinding out of the chat conversation surface", () => {
-    expect(routeSource).not.toContain("body: JSON.stringify({ agentId })");
+  it("keeps Agent rebinding out of chat while allowing new sessions for the selected Agent", () => {
+    expect(routeSource).toContain("const createSessionMutation");
+    expect(routeSource).toContain('fetchJson<SessionDetail>("/api/sessions"');
+    expect(routeSource).toContain("createSessionMutation.mutate({ agentId: selectedChatAgentId })");
     expect(routeSource).not.toContain("updateSessionAgentMutation");
     expect(routeSource).not.toContain("sessionAgentOptions");
     expect(routeSource).not.toContain("handleAgentTemplateChange");
@@ -2259,7 +2263,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(conversationIndexModelSource).toContain("if (!isVisibleConversation(conversation, rawSessionsById))");
   });
 
-  it("renders child sessions in the top Agent session strip instead of the right conversation index", () => {
+  it("renders selected Agent sessions in the top Agent session strip instead of the right conversation index", () => {
     expect(directSessionIndexItemSource).toContain("export function isChildSession");
     expect(conversationIndexModelSource).toContain("export function rootSessionIdFor");
     expect(conversationIndexModelSource).toContain("export function isRepresentedInAgentSessionTabs");
@@ -2273,7 +2277,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("const rightIndexSessions = useMemo");
     expect(routeSource).toContain("return allVisibleSessions.filter((session) => !isRepresentedInAgentSessionTabs(session))");
     expect(routeSource).toContain("const agentSessionTabs = useMemo");
-    expect(routeSource).toContain("rootSessionIdFor(session) === activeRootSessionId");
+    expect(routeSource).toContain("const sessions = selectedAgentSessionsQuery.data?.items ?? []");
+    expect(routeSource).toContain("isChildSession(left) ? 2 : 1");
     expect(conversationIndexModelSource).toContain("mergeVisibleSessionsIntoConversations(conversations, rightIndexSessions)");
     expect(conversationIndexModelSource).toContain("if (isRepresentedInAgentSessionTabs(session))");
     expect(routeSource).toContain("const invalidChildSessionLinkMessage = hasInvalidChildSessionLink(sessionDetailQuery.data ?? directSessionActiveSummary)");
