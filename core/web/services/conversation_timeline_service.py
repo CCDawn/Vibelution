@@ -75,7 +75,8 @@ def build_conversation_timeline_items(
             command_buffer.append(event)
             continue
         flush_command_buffer()
-        if kind == "status" and not str(event.get("error") or "").strip() and _timeline_status(event.get("status")) != "failed":
+        timeline_status = _timeline_status(event.get("status"))
+        if kind == "status" and not str(event.get("error") or "").strip() and timeline_status not in {"failed", "degraded", "recovered"}:
             continue
         items.append(_operation_item(message_id, event, lang=lang))
 
@@ -296,6 +297,8 @@ def _timeline_status(status: Any) -> TimelineStatus:
     if _is_running_status(status):
         return "running"
     normalized = str(status or "").strip().lower()
+    if normalized in {"degraded", "recovered"}:
+        return normalized
     if normalized in {"queued", "pending"}:
         return "pending"
     return "completed"

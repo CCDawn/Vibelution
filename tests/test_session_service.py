@@ -777,6 +777,48 @@ def test_session_llm_retry_status_still_updates_durable_work_run(monkeypatch, tm
     assert durable_updates[0]["turn_id"] == "turn-retry"
 
 
+def test_session_llm_transport_status_updates_one_visible_recovery_event(monkeypatch, tmp_path):
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(session_service, "_publish_session_detail_snapshot", lambda _session_id: None)
+    monkeypatch.setattr(session_service, "_touch_chat_turn_work_run", lambda **_kwargs: None)
+
+    session_service._set_session_running("session-live", True, turn_id="turn-transport")
+    try:
+        session_service._set_session_llm_status_live_output(
+            "session-live",
+            "transport_fallback",
+            turn_id="turn-transport",
+            fields={
+                "category": "provider_transport_unavailable",
+                "closeCode": 1013,
+                "closeReason": "no available account",
+                "fallbackTransport": "http",
+            },
+        )
+        degraded = session_service._snapshot_session_live_output("session-live")
+        assert degraded is not None
+        degraded_event = dict(degraded.feedback_events[0])
+        session_service._set_session_llm_status_live_output(
+            "session-live",
+            "transport_recovered",
+            turn_id="turn-transport",
+            fields={"fallbackTransport": "http"},
+        )
+        recovered = session_service._snapshot_session_live_output("session-live")
+    finally:
+        session_service._clear_session_live_output("session-live", turn_id="turn-transport")
+        session_service._set_session_running("session-live", False, turn_id="turn-transport")
+
+    assert degraded_event["name"] == "model_transport"
+    assert degraded_event["status"] == "degraded"
+    assert degraded_event["error"] == "no available account"
+    assert recovered is not None
+    assert len(recovered.feedback_events) == 1
+    assert recovered.feedback_events[0]["status"] == "recovered"
+    assert "error" not in recovered.feedback_events[0]
+    assert "连接已恢复" in recovered.feedback_events[0]["summary"]
+
+
 def test_session_turn_prepare_timing_log_fields_are_bounded_and_non_sensitive():
     fields = session_service._session_turn_prepare_timing_log_fields(
         {

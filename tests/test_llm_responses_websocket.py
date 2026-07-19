@@ -53,6 +53,7 @@ class _RejectedConnection(_FakeConnection):
     def recv(self):
         error = RuntimeError("provider unavailable")
         error.code = 1013
+        error.reason = "no available account"
         raise error
 
 
@@ -175,14 +176,11 @@ def test_responses_websocket_pre_send_type_error_falls_back_once(monkeypatch):
 
     assert result[0]["type"] == "response.completed"
     assert len(http_payloads) == 1
-    assert states[-1] == (
-        "fallback",
-        {
-            "reasonType": "TypeError",
-            "fallbackTransport": "http",
-            "preSendValidationFailure": True,
-        },
-    )
+    assert [state for state, _fields in states[-2:]] == ["fallback", "recovered"]
+    assert states[-2][1]["reasonType"] == "TypeError"
+    assert states[-2][1]["fallbackTransport"] == "http"
+    assert states[-2][1]["preSendValidationFailure"] is True
+    assert states[-1][1]["fallbackTransport"] == "http"
 
 
 def test_responses_websocket_connect_failure_falls_back_with_full_http_payload(monkeypatch):
@@ -213,12 +211,10 @@ def test_responses_websocket_connect_failure_falls_back_with_full_http_payload(m
     assert "previous_response_id" not in http_payloads[0]
     assert http_payloads[0]["input"][0]["content"][0]["text"] == "full"
     assert "_vibelution_responses_websocket" not in http_payloads[0]
-    assert states == [
-        (
-            "fallback",
-            {"reasonType": "RuntimeError", "fallbackTransport": "http"},
-        )
-    ]
+    assert [state for state, _fields in states] == ["fallback", "recovered"]
+    assert states[0][1]["reasonType"] == "RuntimeError"
+    assert states[0][1]["fallbackTransport"] == "http"
+    assert states[1][1]["fallbackTransport"] == "http"
 
 
 def test_responses_websocket_explicit_1013_rejection_falls_back_before_any_event(monkeypatch):
@@ -247,11 +243,11 @@ def test_responses_websocket_explicit_1013_rejection_falls_back_before_any_event
     assert result[0]["type"] == "response.completed"
     assert http_payloads[0]["input"][0]["content"][0]["text"] == "full"
     assert "previous_response_id" not in http_payloads[0]
-    assert states[-1] == (
-        "fallback",
-        {
-            "reasonType": "RuntimeError",
-            "closeCode": 1013,
-            "fallbackTransport": "http",
-        },
-    )
+    assert [state for state, _fields in states[-2:]] == ["fallback", "recovered"]
+    fallback_fields = states[-2][1]
+    assert fallback_fields["reasonType"] == "RuntimeError"
+    assert fallback_fields["closeCode"] == 1013
+    assert fallback_fields["closeReason"] == "no available account"
+    assert fallback_fields["fallbackTransport"] == "http"
+    assert fallback_fields["receivedProtocolEvent"] is False
+    assert fallback_fields["elapsedMs"] >= 0
