@@ -41,7 +41,7 @@ export function AgentResponseSectionView({
     >
       <VButton
         type="button"
-                contentLayout="plain"
+        contentLayout="plain"
         className={styles.responseToggle}
         aria-expanded={bodyVisible}
         aria-controls={responseBodyId}
