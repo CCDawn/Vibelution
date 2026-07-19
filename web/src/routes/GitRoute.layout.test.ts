@@ -405,7 +405,9 @@ describe("GitRoute layout contract", () => {
     expect(stylesSource).toContain("commitSubject:");
     expect(stylesSource).toContain("commitAuthor:");
     expect(gitRouteStyles.commitSubject).toContain("text-ellipsis");
-    expect(gitRouteStyles.commitAuthor).toContain("text-vui-fg-tertiary");
+    expect(gitRouteStyles.commitSubject).toContain("[color:var(--fg-primary)]");
+    expect(gitRouteStyles.commitAuthor).toContain("[color:var(--fg-secondary)]");
+    expect(gitRouteStyles.commitSubject).toContain("[font-size:var(--vui-font-sm)]");
     expect(routeSource).toContain("styles.commitSubject");
     expect(routeSource).toContain("styles.commitAuthor");
   });
