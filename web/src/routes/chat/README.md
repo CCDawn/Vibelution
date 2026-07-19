@@ -24,6 +24,8 @@ Agent-oriented map for Chat workbench development. Prefer editing a **module** o
 | Session detail mutations (reasoning/history/tool/pet) | `useChatSessionDetailMutations.ts` | EventSource, lifecycle |
 | Workspace UI action handlers | `useChatWorkspaceActions.ts` | EventSource, JSX render |
 | Group message / @mention presentation | `ChatGroupMessagePresentation.tsx` | mutations |
+| Group / project-bus center surface | `ChatGroupCenterSurface.tsx` | stream EventSource, left rail |
+| CLI terminal mount stack | `ChatCliAgentTerminalStack.tsx` | stream EventSource |
 | Session rename + context menu | `useChatSessionRenameMenu.ts` | stream |
 | Composer bridge UI | `ChatConversationComposerBridge.tsx` | CLI model |
 | Center workspace shell | `ChatSessionWorkspacePanel.tsx` | index rail |
@@ -71,10 +73,11 @@ Plan: `docs/superpowers/plans/2026-07-19-chat-coding-route-stream-selection-spli
 - **E4e done:** `ChatGroupMessagePresentation.tsx` + `useChatSessionRenameMenu.ts`
 - **E4f done:** `useChatCliAgentTerminal.ts` + `chatCacheDetailModel.ts` + `useChatCacheDetailDialog.ts`
 - **E4g done:** `chatTokenStatusModel.ts` — Token core status metrics pure view-model
+- **E4h done:** `ChatGroupCenterSurface.tsx` + `ChatCliAgentTerminalStack.tsx` — center group/bus + CLI mount stack
 
 ## Next (planned)
 
-- Extract remaining derived view-model / center JSX blocks
+- Extract remaining session-derived pure view-model / tab strip wiring
 - Thin `ChatCodingRoute` composition toward ~800–1500 LOC
 
 ## Rules
