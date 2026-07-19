@@ -24,11 +24,7 @@ import {
   useMemo,
   useRef,
   useState,
-  type CSSProperties,
-  type DragEvent,
-  type KeyboardEvent,
   type MouseEvent as ReactMouseEvent,
-  type PointerEvent,
 } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 
@@ -76,10 +72,8 @@ import {
   SkillLibraryPayload,
   TeamListPayload,
   ConversationMessage,
-  ConversationAttachment,
   ToolCall,
 } from "../api/types";
-import { COMPOSER_SESSION_REFERENCE_MIME } from "../components/conversation/conversationConstants";
 import type { ConversationStreamingFramePaintMetrics } from "../components/conversation/conversationStreamingMetrics";
 import { shouldShowNextStateSignalInConversation } from "../components/conversation/conversationNextStateSignal";
 import type { TurnAvatarResolution } from "../components/conversation/conversationTurnAvatar";
@@ -93,7 +87,6 @@ import { PaneCollapseHandle } from "../components/layout/PaneCollapseHandle";
 import { petAvatarPresetLabel } from "../i18n/petLabels";
 import { useAppI18n } from "../i18n/useAppI18n";
 import { useChatWorkbenchStore } from "../store/chatWorkbenchStore";
-import { useShellStore } from "../store/shellStore";
 import {
   clampPercent,
   contextUsagePercent,
@@ -103,17 +96,10 @@ import {
 import {
   deriveSessionDetailQueryErrorState,
   deriveSessionListQueryErrorState,
-  appendOptimisticUserMessage,
-  createClientSubmissionId,
-  markOptimisticUserMessageAccepted,
-  markSessionDetailRunning,
-  markSessionSummaryRunning,
   mergeSessionDetailMessageWindow,
   mergeSessionDetailIntoSummaries,
   renameSessionDetail,
   renameSessionInSummaries,
-  removeDeletedSessionFromSummaries,
-  removeOptimisticUserMessage,
 } from "./chatSessionState";
 import {
   SESSION_INDEX_PAGE_SIZE,
@@ -139,7 +125,6 @@ import {
   buildVisiblePanelRows,
   getPetAvatarPresetKey,
   getPetAvatarSymbol,
-  resolveChatResponsiveLayout,
   resolveChatUserDisplayName,
 } from "./chatCompactPanel";
 import {
@@ -178,8 +163,8 @@ import {
 import {
   activeTurnLayerToConversationMessage,
   activeTurnLayerTextLength,
-  createOptimisticActiveTurnLayer,
   isActiveTurnSettledByDetail,
+  setActiveTurnLayerForSession,
   type ActiveTurnLayerState,
 } from "./chatActiveTurnLayer";
 import { createSessionAssistantDeltaScheduler } from "./sessionAssistantDeltaScheduler";
@@ -214,24 +199,28 @@ import { ConversationIndexLoadingShell } from "./chat/ChatLoadingShell";
 import { ChatSessionWorkspacePanel } from "./chat/ChatSessionWorkspacePanel";
 import { LlmPayloadTracePanel } from "./chat/LlmPayloadTracePanel";
 import { TokenCoreStatusPanel, type TokenCoreStatusMetric } from "./chat/TokenCoreStatusPanel";
+import { ChatConversationIndexRail } from "./chat/ChatConversationIndexRail";
+import { ChatStatusRail } from "./chat/ChatStatusRail";
 import {
-  clamp,
+  chatStreamPerformanceNowMs,
   describeChatRouteError as describeError,
   formatTokenSpeedValue,
-  getResizeBounds,
   isBusyPhase,
   isRunningPhase,
   isStoppingPhase,
-  normalizePanelWidths,
   shouldSuppressComposerErrorForTurnError,
 } from "./chat/chatCodingRouteViewModel";
+import { useChatWorkbenchLayout } from "./chat/useChatWorkbenchLayout";
+import {
+  useChatComposerSubmitActions,
+  useChatComposerTurnMutations,
+} from "./chat/useChatComposerSubmit";
 import {
   CLI_AGENT_RUN_TAB_PREFIX,
   CLI_AGENT_TOOL_NAME,
   buildCliAgentRunViews,
   canInputTerminal,
   cliAgentRunCloseToken,
-  stableCliHash,
   cliAgentRunIdFromTabId,
   cliAgentRunTabId,
   isCliAgentRunActiveForClose,
@@ -254,6 +243,20 @@ import {
   toolApprovalScopeLabel,
 } from "./chat/toolApprovalLabels";
 import { postSubmitTelemetry } from "./chat/chatSubmitTelemetry";
+import {
+  MAX_COMPOSER_IMAGE_ATTACHMENTS,
+  buildSessionReferencePayload,
+  classifyComposerImageFiles,
+  clearSessionImageAttachments,
+  clearSessionReferenceAttachments,
+  mergeComposerImageAttachments,
+  readStoredMentalModelToggle,
+  removeSessionImageAttachment,
+  sessionReferenceId,
+  startSessionReferenceDrag,
+  writeStoredMentalModelToggle,
+  type ComposerImageAttachment,
+} from "./chat/chatComposerSubmitModel";
 import styles from "./ChatCodingRoute.styles";
 
 export type { CliAgentRunView, CliAgentTerminalSession } from "./chat/cliAgentRunModel";
@@ -282,93 +285,6 @@ type ActiveSkillContract = {
 type SessionDetailWithActiveSkill = SessionDetail & {
   activeSkillContract?: ActiveSkillContract | null;
 };
-
-function encodeUtf8Base64(value: string): string {
-  const bytes = new TextEncoder().encode(value);
-  let binary = "";
-  bytes.forEach((byte) => {
-    binary += String.fromCharCode(byte);
-  });
-  return btoa(binary);
-}
-
-function clearSessionImageAttachments(
-  current: Record<string, ComposerImageAttachment[]>,
-  sessionId: string,
-) {
-  const attachments = current[sessionId] ?? [];
-  attachments.forEach((attachment) => URL.revokeObjectURL(attachment.previewUrl));
-  const { [sessionId]: _removed, ...remaining } = current;
-  return remaining;
-}
-
-function clearSessionReferenceAttachments(
-  current: Record<string, SessionReferenceAttachment[]>,
-  sessionId: string,
-) {
-  const { [sessionId]: _removed, ...remaining } = current;
-  return remaining;
-}
-
-function sessionReferenceId(reference: SessionReferenceAttachment) {
-  return String(reference.referenceId || reference.sessionId || "").trim();
-}
-
-function buildSessionReferencePayload(
-  session: SessionSummary,
-  displayName: string,
-  summary: string,
-): SessionReferenceAttachment {
-  const sessionId = String(session.id || "").trim();
-  return {
-    referenceId: `session:${sessionId}`,
-    kind: "session",
-    sessionId,
-    title: String(session.taskTitle || session.resultCard?.title || session.title || sessionId).trim(),
-    agentId: String(session.agentId || "").trim(),
-    agentCode: String(session.agentCode || "").trim(),
-    agentDisplayName: String(displayName || session.agentDisplayName || "").trim(),
-    summary: String(summary || session.taskSummary || "").trim(),
-    createdAt: new Date().toISOString(),
-  };
-}
-
-function startSessionReferenceDrag(
-  event: DragEvent<HTMLElement>,
-  reference: SessionReferenceAttachment,
-) {
-  const payload = JSON.stringify(reference);
-  event.dataTransfer.setData(COMPOSER_SESSION_REFERENCE_MIME, payload);
-  event.dataTransfer.setData("text/plain", `[Session Reference] ${reference.title || reference.sessionId}`);
-  event.dataTransfer.effectAllowed = "copy";
-}
-
-function clearSessionDraftForSubmittedTurn(
-  current: Record<string, string>,
-  sessionId: string,
-) {
-  if ((current[sessionId] ?? "") === "") {
-    return current;
-  }
-  return {
-    ...current,
-    [sessionId]: "",
-  };
-}
-
-function restoreSubmittedDraftIfComposerStillEmpty(
-  current: Record<string, string>,
-  sessionId: string,
-  content: string,
-) {
-  if (!content || (current[sessionId] ?? "") !== "") {
-    return current;
-  }
-  return {
-    ...current,
-    [sessionId]: content,
-  };
-}
 
 function chatRoomModeLabel(mode: ChatRoomMode, lang: "zh" | "en") {
   if (mode.id === "round_robin") {
@@ -507,33 +423,6 @@ function cacheCalibrationSummaryLabel(
 }
 
 
-function removeSessionImageAttachment(
-  current: Record<string, ComposerImageAttachment[]>,
-  sessionId: string,
-  attachmentId: string,
-) {
-  const attachments = current[sessionId] ?? [];
-  const removed = attachments.find((attachment) => attachment.id === attachmentId);
-  if (removed) {
-    URL.revokeObjectURL(removed.previewUrl);
-  }
-  return {
-    ...current,
-    [sessionId]: attachments.filter((attachment) => attachment.id !== attachmentId),
-  };
-}
-
-async function uploadSessionImageAttachment(sessionId: string, attachment: ComposerImageAttachment) {
-  return fetchJson<ConversationAttachment>(`/api/sessions/${sessionId}/attachments`, {
-    method: "POST",
-    headers: {
-      "Content-Type": attachment.contentType || "application/octet-stream",
-      "X-Vibelution-Filename": encodeURIComponent(attachment.filename),
-    },
-    body: attachment.file,
-  });
-}
-
 type SessionDetailWindowOptions = {
   messageLimit?: number;
   beforeMessageIndex?: number;
@@ -558,33 +447,13 @@ function fetchSessionDetailWindow(
   );
 }
 
-const KEYBOARD_RESIZE_STEP = 24;
-const MENTAL_MODEL_TOGGLE_STORAGE_KEY = "vibelution.chat.mentalModelEnabled";
-const MAX_COMPOSER_IMAGE_ATTACHMENTS = 4;
-const MAX_COMPOSER_IMAGE_BYTES = 8 * 1024 * 1024;
 const SESSION_DETAIL_INITIAL_MESSAGE_LIMIT = 40;
 const SESSION_DETAIL_HISTORY_PAGE_SIZE = 40;
 const SESSION_STREAM_MIN_APPLY_INTERVAL_MS = 350;
 const SESSION_STREAM_ROUTE_SWITCH_GRACE_MS = 4_000;
 
-type ResizableSide = "left" | "right";
 type PetInteractionAction = "feed" | "talk" | "care";
 type RightIndexPanel = "conversations" | "members";
-type ComposerImageAttachment = {
-  id: string;
-  file: File;
-  filename: string;
-  previewUrl: string;
-  sizeBytes: number;
-  contentType: string;
-};
-
-type DragState = {
-  side: ResizableSide;
-  startX: number;
-  startLeftWidth: number;
-  startRightWidth: number;
-};
 
 type SessionContextMenuState = {
   sessionId: string;
@@ -612,27 +481,6 @@ function isSessionNotFoundError(error: unknown) {
 function latestVisibleTurnErrorMessage(messages: ConversationMessage[] | undefined) {
   const latestMessage = messages?.[messages.length - 1];
   return latestMessage && isTurnErrorMessage(latestMessage) ? String(latestMessage.content ?? "") : "";
-}
-
-function readStoredMentalModelToggle(): boolean | null {
-  if (typeof window === "undefined") {
-    return null;
-  }
-  const raw = window.localStorage.getItem(MENTAL_MODEL_TOGGLE_STORAGE_KEY);
-  if (raw === "true") {
-    return true;
-  }
-  if (raw === "false") {
-    return false;
-  }
-  return null;
-}
-
-function writeStoredMentalModelToggle(enabled: boolean) {
-  if (typeof window === "undefined") {
-    return;
-  }
-  window.localStorage.setItem(MENTAL_MODEL_TOGGLE_STORAGE_KEY, enabled ? "true" : "false");
 }
 
 function formatAgentIdentityWithRole(name: string, role: string, fallback = "Agent") {
@@ -728,10 +576,6 @@ function renderAgentAvatar(className: string, imageUrl: string | undefined, fall
 
 function escapeRegExp(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-function chatStreamPerformanceNowMs() {
-  return typeof performance === "undefined" ? Date.now() : performance.now();
 }
 
 function stripGroupSpeakerPrefix(message: ChatRoomMessage, identityName = "") {
@@ -879,51 +723,6 @@ function isStaleLedgerUpdate(currentSeq: unknown, incomingSeq: unknown): boolean
   return current > 0 && incoming > 0 && incoming < current;
 }
 
-function setActiveTurnLayerForSession(
-  current: Record<string, ActiveTurnLayerState>,
-  sessionId: string,
-  layer: ActiveTurnLayerState | undefined,
-) {
-  const normalizedSessionId = String(sessionId || "").trim();
-  if (!normalizedSessionId) {
-    return current;
-  }
-  if (!layer) {
-    if (!current[normalizedSessionId]) {
-      return current;
-    }
-    const next = { ...current };
-    delete next[normalizedSessionId];
-    return next;
-  }
-  if (current[normalizedSessionId] === layer) {
-    return current;
-  }
-  return {
-    ...current,
-    [normalizedSessionId]: layer,
-  };
-}
-
-function optimisticTurnIdForSubmission(kind: "submit" | "edit", sessionId: string, createdAt: string) {
-  return `optimistic-${kind}-${stableCliHash([kind, sessionId, createdAt].join("\n"))}`;
-}
-
-function latestUserTurnId(detail: SessionDetail | undefined) {
-  const messages = detail?.messages ?? [];
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    const message = messages[index];
-    if (message?.role !== "user") {
-      continue;
-    }
-    const turnId = String(message.metadata?.turnId ?? message.metadata?.turn_id ?? "").trim();
-    if (turnId) {
-      return turnId.startsWith("live:") ? turnId.slice("live:".length) : turnId;
-    }
-  }
-  return "";
-}
-
 function latestMentalSnapshot(messages: ConversationMessage[] | undefined): MentalStateSnapshot | undefined {
   return [...(messages ?? [])].reverse().find((message) => message.role === "assistant" && message.mentalSnapshot)?.mentalSnapshot;
 }
@@ -939,8 +738,6 @@ export function ChatCodingRoute() {
   const chatWorkspaceCache = useMemo(() => createChatWorkspaceCache(queryClient), [queryClient]);
   const navigate = useNavigate();
   const location = useLocation();
-  const chatPanelWidths = useShellStore((state) => state.chatPanelWidths);
-  const setChatPanelWidths = useShellStore((state) => state.setChatPanelWidths);
   const activeSessionId = useChatWorkbenchStore((state) => state.activeSessionId);
   const sessionWorkspaces = useChatWorkbenchStore((state) => state.sessionWorkspaces);
   const setActiveSession = useChatWorkbenchStore((state) => state.setActiveSession);
@@ -951,13 +748,6 @@ export function ChatCodingRoute() {
   const reselectDirectSessionRef = useRef<(sessionId: string) => void>(() => undefined);
   const setActiveTab = useChatWorkbenchStore((state) => state.setActiveTab);
   const [sessionFilter, setSessionFilter] = useState("");
-  const [dragState, setDragState] = useState<DragState | null>(null);
-  const [leftRailCollapsed, setLeftRailCollapsed] = useState(false);
-  const [rightPaneCollapsed, setRightPaneCollapsed] = useState(false);
-  const [responsiveLayout, setResponsiveLayout] = useState(() =>
-    resolveChatResponsiveLayout(typeof window === "undefined" ? 1440 : window.innerWidth),
-  );
-  const [responsiveOverlayPane, setResponsiveOverlayPane] = useState<"left" | "right" | null>(null);
   const [cacheDetailOpen, setCacheDetailOpen] = useState(false);
   const imageUploadInFlightRef = useRef<Record<string, boolean>>({});
   const [sessionDrafts, setSessionDrafts] = useState<Record<string, string>>({});
@@ -1005,7 +795,6 @@ export function ChatCodingRoute() {
   const [closedCliAgentRunTokensBySession, setClosedCliAgentRunTokensBySession] = useState<Record<string, string[]>>({});
   const [cliAgentTerminalSessions, setCliAgentTerminalSessions] = useState<Record<string, CliAgentTerminalSession>>({});
   const [mountedCliAgentRunIdsBySession, setMountedCliAgentRunIdsBySession] = useState<Record<string, string[]>>({});
-  const layoutRef = useRef<HTMLDivElement | null>(null);
   const sessionStreamErrorLoggedRef = useRef<Record<string, boolean>>({});
   const sessionStreamPayloadErrorLoggedRef = useRef<Record<string, boolean>>({});
   const sessionStreamApplyStatsRef = useRef<Record<string, SessionStreamApplyStats>>({});
@@ -1110,6 +899,27 @@ export function ChatCodingRoute() {
   const projectBusActive = activeGroupRoomId === "__project_agent_bus__";
   const groupPanelActive = Boolean(activeGroupRoomId);
   const standardGroupRoomActive = groupPanelActive && !projectBusActive;
+  const {
+    layoutRef,
+    dragState,
+    responsiveLayout,
+    conversationIndexCollapsed,
+    statusRailCollapsed,
+    conversationIndexOverlayOpen,
+    statusRailOverlayOpen,
+    responsiveOverlayOpen,
+    layoutStyle,
+    chatLayoutClassName,
+    centerPaneClassName,
+    statusRailClassName,
+    conversationIndexPaneClassName,
+    handleResizeStart,
+    handleResizeKeyDown,
+    closeResponsiveOverlayPane,
+    setLeftRailCollapsed,
+    setRightPaneCollapsed,
+    setResponsiveOverlayPane,
+  } = useChatWorkbenchLayout({ standardGroupRoomActive });
   const directSessionPanelActive = Boolean(activeSessionId) && !groupPanelActive;
   const sessionQueryText = sessionFilter.trim();
   const [directSessionBackgroundSyncActive, setDirectSessionBackgroundSyncActive] = useState(false);
@@ -1723,312 +1533,23 @@ export function ChatCodingRoute() {
     sessionDetailQuery.data?.currentPhase,
   ]);
 
-  const submitTurnMutation = useMutation({
-    mutationFn: async (
-      {
-        sessionId,
-        clientSubmissionId,
-        content,
-        mentalModelEnabled,
-        attachmentIds,
-        references,
-        requestStartedAtMs,
-      }: {
-        sessionId: string;
-        clientSubmissionId: string;
-        content: string;
-        mentalModelEnabled: boolean;
-        attachmentIds?: string[];
-        references?: SessionReferenceAttachment[];
-        requestStartedAtMs: number;
-      },
-    ) => {
-      postSubmitTelemetry(
-        "browser.chat_submit.request_started",
-        "Direct chat submit request started.",
-        sessionId,
-        {
-          content,
-          attachmentCount: attachmentIds?.length ?? 0,
-          referenceCount: references?.length ?? 0,
-          mentalModelEnabled,
-          clientSubmissionId,
-        },
-      );
-      return fetchJson<SessionTurnAcceptedResponse>(`/api/sessions/${sessionId}/messages`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Prefer": "respond-async",
-        },
-        body: JSON.stringify({
-          content,
-          clientSubmissionId,
-          contentUtf8Base64: encodeUtf8Base64(content),
-          attachmentIds: attachmentIds ?? [],
-          references: references ?? [],
-          mentalModelEnabled,
-        }),
-      });
-    },
-    onMutate: async (variables) => {
-      postSubmitTelemetry(
-        "browser.chat_submit.mutate_called",
-        "Direct chat submit mutation started.",
-        variables.sessionId,
-        {
-          content: variables.content,
-          attachmentCount: variables.attachmentIds?.length ?? 0,
-          referenceCount: variables.references?.length ?? 0,
-          mentalModelEnabled: variables.mentalModelEnabled,
-          clientSubmissionId: variables.clientSubmissionId,
-        },
-      );
-      const createdAt = new Date().toISOString();
-      setActiveTurnLayersBySession((current) =>
-        setActiveTurnLayerForSession(
-          current,
-          variables.sessionId,
-          createOptimisticActiveTurnLayer({
-            sessionId: variables.sessionId,
-            turnId: optimisticTurnIdForSubmission("submit", variables.sessionId, createdAt),
-            updatedAt: createdAt,
-          }),
-        )
-      );
-      queryClient.setQueryData<SessionDetail>(queryKeys.session(variables.sessionId), (detail) =>
-        markSessionDetailRunning(appendOptimisticUserMessage(detail, variables)),
-      );
-      updateSessionSummaryCaches(queryClient, (sessions) =>
-        markSessionSummaryRunning(sessions, variables.sessionId),
-      );
-    },
-    onSuccess: (acceptedTurn, variables) => {
-      postSubmitTelemetry(
-        "browser.chat_submit.accepted",
-        "Direct chat submit was accepted by the backend.",
-        variables.sessionId,
-        {
-          content: variables.content,
-          attachmentCount: variables.attachmentIds?.length ?? 0,
-          referenceCount: variables.references?.length ?? 0,
-          mentalModelEnabled: variables.mentalModelEnabled,
-          clientSubmissionId: variables.clientSubmissionId,
-          turnId: acceptedTurn.turnId,
-          acceptedAt: acceptedTurn.acceptedAt,
-          durationMs: Math.max(0, chatStreamPerformanceNowMs() - variables.requestStartedAtMs),
-        },
-      );
-      setSessionComposerErrors((current) => ({
-        ...current,
-        [variables.sessionId]: "",
-      }));
-      setSessionImageAttachments((current) => clearSessionImageAttachments(current, variables.sessionId));
-      setSessionReferenceAttachments((current) => clearSessionReferenceAttachments(current, variables.sessionId));
-      queryClient.setQueryData<SessionDetail>(queryKeys.session(variables.sessionId), (detail) =>
-        markSessionDetailRunning(markOptimisticUserMessageAccepted(detail, variables, acceptedTurn.turnId)),
-      );
-      const acceptedTurnId = String(acceptedTurn.turnId || "").trim();
-      setActiveTurnLayersBySession((current) =>
-        setActiveTurnLayerForSession(
-          current,
-          variables.sessionId,
-          acceptedTurnId
-            ? createOptimisticActiveTurnLayer({
-              sessionId: variables.sessionId,
-              turnId: acceptedTurn.turnId,
-              updatedAt: acceptedTurn.acceptedAt,
-            })
-            : undefined,
-        )
-      );
-      // The optimistic detail/index updates above already expose the accepted turn.
-      // SSE owns authoritative reconciliation when available; the existing polling
-      // fallback does the same without competing with the first model request.
-    },
-    onError: (error, variables) => {
-      postSubmitTelemetry(
-        "browser.chat_submit.request_failed",
-        "Direct chat submit request failed before the backend accepted the turn.",
-        variables.sessionId,
-        {
-          content: variables.content,
-          attachmentCount: variables.attachmentIds?.length ?? 0,
-          referenceCount: variables.references?.length ?? 0,
-          mentalModelEnabled: variables.mentalModelEnabled,
-          clientSubmissionId: variables.clientSubmissionId,
-          durationMs: Math.max(0, chatStreamPerformanceNowMs() - variables.requestStartedAtMs),
-          error,
-        },
-        "error",
-      );
-      queryClient.setQueryData<SessionDetail>(queryKeys.session(variables.sessionId), (detail) =>
-        removeOptimisticUserMessage(detail, variables),
-      );
-      setActiveTurnLayersBySession((current) =>
-        setActiveTurnLayerForSession(current, variables.sessionId, undefined)
-      );
-      setSessionDrafts((current) => restoreSubmittedDraftIfComposerStillEmpty(current, variables.sessionId, variables.content));
-      setSessionComposerErrors((current) => ({
-        ...current,
-        [variables.sessionId]: describeError(error, t("submitFailed")),
-      }));
-      void chatWorkspaceCache.afterDirectTurnFailed(variables.sessionId);
-    },
-  });
-
-  const editResubmitMutation = useMutation({
-    mutationFn: async (
-      {
-        sessionId,
-        messageId,
-        clientSubmissionId,
-        content,
-        mentalModelEnabled,
-        attachmentIds: _attachmentIds,
-      }: {
-        sessionId: string;
-        messageId: string;
-        clientSubmissionId: string;
-        content: string;
-        mentalModelEnabled: boolean;
-        attachmentIds?: string[];
-      },
-    ) =>
-      fetchJson<SessionDetail>(`/api/sessions/${sessionId}/messages/edit-resubmit`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          messageId,
-          clientSubmissionId,
-          content,
-          contentUtf8Base64: encodeUtf8Base64(content),
-          mentalModelEnabled,
-        }),
-      }),
-    onMutate: async (variables) => {
-      const createdAt = new Date().toISOString();
-      setActiveTurnLayersBySession((current) =>
-        setActiveTurnLayerForSession(
-          current,
-          variables.sessionId,
-          createOptimisticActiveTurnLayer({
-            sessionId: variables.sessionId,
-            turnId: optimisticTurnIdForSubmission("edit", variables.sessionId, createdAt),
-            updatedAt: createdAt,
-          }),
-        )
-      );
-      queryClient.setQueryData<SessionDetail>(queryKeys.session(variables.sessionId), markSessionDetailRunning);
-      updateSessionSummaryCaches(queryClient, (sessions) =>
-        markSessionSummaryRunning(sessions, variables.sessionId),
-      );
-    },
-    onSuccess: (nextDetail, variables) => {
-      setSessionComposerErrors((current) => ({
-        ...current,
-        [variables.sessionId]: "",
-      }));
-      setSessionDrafts((current) => ({
-        ...current,
-        [variables.sessionId]: "",
-      }));
-      setSessionEditTargets((current) => {
-        const { [variables.sessionId]: _removed, ...remaining } = current;
-        return remaining;
-      });
-      syncSessionDetail(nextDetail);
-      const acceptedTurnId = latestUserTurnId(nextDetail);
-      setActiveTurnLayersBySession((current) => {
-        if (!acceptedTurnId || !isBusyPhase(nextDetail.currentPhase || nextDetail.status)) {
-          return setActiveTurnLayerForSession(current, variables.sessionId, undefined);
-        }
-        return setActiveTurnLayerForSession(
-          current,
-          variables.sessionId,
-          createOptimisticActiveTurnLayer({
-            sessionId: variables.sessionId,
-            turnId: acceptedTurnId,
-            updatedAt: nextDetail.updatedAt,
-          }),
-        );
-      });
-      void chatWorkspaceCache.afterSessionChanged();
-    },
-    onError: (error, variables) => {
-      setActiveTurnLayersBySession((current) =>
-        setActiveTurnLayerForSession(current, variables.sessionId, undefined)
-      );
-      setSessionComposerErrors((current) => ({
-        ...current,
-        [variables.sessionId]: describeError(error, t("editResubmitFailed")),
-      }));
-      void chatWorkspaceCache.afterDirectTurnFailed(variables.sessionId);
-    },
-  });
-
-  const stopTurnMutation = useMutation({
-    mutationFn: async ({ sessionId }: { sessionId: string }) =>
-      fetchJson<SessionDetail>(`/api/sessions/${sessionId}/stop`, {
-        method: "POST",
-      }),
-    onSuccess: (nextDetail, variables) => {
-      setSessionComposerErrors((current) => ({
-        ...current,
-        [variables.sessionId]: "",
-      }));
-      syncSessionDetail(nextDetail);
-      void chatWorkspaceCache.afterSessionChanged();
-    },
-    onError: (error, variables) => {
-      setSessionComposerErrors((current) => ({
-        ...current,
-        [variables.sessionId]: describeError(error, t("stopFailed")),
-      }));
-      void chatWorkspaceCache.afterDirectTurnFailed(variables.sessionId);
-    },
-  });
-
-  const sessionGuidanceMutation = useMutation({
-    mutationFn: async (
-      {
-        sessionId,
-        content,
-        mode,
-      }: {
-        sessionId: string;
-        content: string;
-        mode: SessionGuidanceMode;
-      },
-    ) =>
-      fetchJson<SessionDetail>(`/api/sessions/${sessionId}/guidance`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ content, mode }),
-      }),
-    onSuccess: (nextDetail, variables) => {
-      setSessionComposerErrors((current) => ({
-        ...current,
-        [variables.sessionId]: "",
-      }));
-      setSessionDrafts((current) => ({
-        ...current,
-        [variables.sessionId]: "",
-      }));
-      syncSessionDetail(nextDetail);
-      void chatWorkspaceCache.afterSessionChanged({ sessionId: variables.sessionId });
-    },
-    onError: (error, variables) => {
-      setSessionComposerErrors((current) => ({
-        ...current,
-        [variables.sessionId]: describeError(error, t("guidanceFailed")),
-      }));
-      void chatWorkspaceCache.refreshSessionRuntime(variables.sessionId);
-    },
+  const {
+    submitTurnMutation,
+    editResubmitMutation,
+    stopTurnMutation,
+    sessionGuidanceMutation,
+  } = useChatComposerTurnMutations({
+    queryClient,
+    chatWorkspaceCache,
+    t,
+    describeError,
+    syncSessionDetail,
+    setActiveTurnLayersBySession,
+    setSessionDrafts,
+    setSessionComposerErrors,
+    setSessionImageAttachments,
+    setSessionReferenceAttachments,
+    setSessionEditTargets,
   });
 
   const createSessionMutation = useMutation({
@@ -3157,139 +2678,7 @@ export function ChatCodingRoute() {
       fetchJson<FileContent>(`/api/files/content?path=${encodeURIComponent(activeFilePath ?? "")}`),
   });
 
-  const conversationIndexCollapsed = responsiveLayout.leftVisible
-    ? leftRailCollapsed
-    : responsiveOverlayPane !== "left";
-  const statusRailCollapsed = responsiveLayout.rightVisible
-    ? rightPaneCollapsed
-    : responsiveOverlayPane !== "right";
-  const conversationIndexOverlayOpen = !responsiveLayout.leftVisible && responsiveOverlayPane === "left";
-  const statusRailOverlayOpen = !responsiveLayout.rightVisible && responsiveOverlayPane === "right";
-  const responsiveOverlayOpen = conversationIndexOverlayOpen || statusRailOverlayOpen;
   const changedFiles = new Set(sessionDetailQuery.data?.changedFiles ?? []);
-  const leftPanelWidth = chatPanelWidths.leftPanelWidth;
-  const rightPanelWidth = chatPanelWidths.rightPanelWidth;
-
-  const syncPanelWidthsToLayout = useCallback(() => {
-    const layoutWidth = layoutRef.current?.getBoundingClientRect().width ?? 0;
-    if (!layoutWidth) {
-      return;
-    }
-    const normalized = normalizePanelWidths(layoutWidth, leftPanelWidth, rightPanelWidth);
-    if (
-      normalized.leftPanelWidth !== leftPanelWidth ||
-      normalized.rightPanelWidth !== rightPanelWidth
-    ) {
-      setChatPanelWidths(normalized);
-    }
-  }, [leftPanelWidth, rightPanelWidth, setChatPanelWidths]);
-
-  useEffect(() => {
-    const layoutElement = layoutRef.current;
-    if (!layoutElement) {
-      return;
-    }
-    const syncResponsiveLayout = () => {
-      const width = layoutElement.getBoundingClientRect().width;
-      const nextLayout = resolveChatResponsiveLayout(width);
-      setResponsiveLayout((current) => (
-        current.mode === nextLayout.mode
-        && current.leftVisible === nextLayout.leftVisible
-        && current.rightVisible === nextLayout.rightVisible
-          ? current
-          : nextLayout
-      ));
-      if (nextLayout.mode === "wide" || nextLayout.mode === "compact") {
-        syncPanelWidthsToLayout();
-      }
-    };
-    syncResponsiveLayout();
-    const observer = new ResizeObserver(syncResponsiveLayout);
-    observer.observe(layoutElement);
-    return () => observer.disconnect();
-  }, [syncPanelWidthsToLayout]);
-
-  useEffect(() => {
-    if (!responsiveOverlayPane || typeof window === "undefined") {
-      return;
-    }
-    const handleEscape = (event: globalThis.KeyboardEvent) => {
-      if (event.key !== "Escape") {
-        return;
-      }
-      const closingPane = responsiveOverlayPane;
-      setResponsiveOverlayPane(null);
-      window.requestAnimationFrame(() => {
-        document.getElementById(
-          closingPane === "left" ? "chat-conversation-index-toggle" : "chat-status-toggle",
-        )?.focus();
-      });
-    };
-    window.addEventListener("keydown", handleEscape);
-    return () => window.removeEventListener("keydown", handleEscape);
-  }, [responsiveOverlayPane]);
-
-  useEffect(() => {
-    if (responsiveOverlayPane === "left" && responsiveLayout.leftVisible) {
-      setResponsiveOverlayPane(null);
-    } else if (responsiveOverlayPane === "right" && responsiveLayout.rightVisible) {
-      setResponsiveOverlayPane(null);
-    }
-  }, [responsiveLayout.leftVisible, responsiveLayout.rightVisible, responsiveOverlayPane]);
-
-  useEffect(() => {
-    if (!dragState) {
-      return;
-    }
-    const activeDrag = dragState;
-
-    const previousCursor = document.body.style.cursor;
-    const previousUserSelect = document.body.style.userSelect;
-    document.body.style.cursor = "col-resize";
-    document.body.style.userSelect = "none";
-
-    function stopDragging() {
-      setDragState(null);
-    }
-
-    function handlePointerMove(event: globalThis.PointerEvent) {
-      const layoutWidth = layoutRef.current?.getBoundingClientRect().width ?? 0;
-      if (!layoutWidth) {
-        return;
-      }
-
-      const delta = event.clientX - activeDrag.startX;
-
-      if (activeDrag.side === "left") {
-        if (conversationIndexCollapsed) {
-          return;
-        }
-        const bounds = getResizeBounds("left", layoutWidth, statusRailCollapsed ? 0 : activeDrag.startRightWidth);
-        const nextLeftWidth = clamp(activeDrag.startLeftWidth + delta, bounds.min, bounds.max);
-        setChatPanelWidths({ leftPanelWidth: Math.round(nextLeftWidth) });
-        return;
-      }
-
-      if (statusRailCollapsed) {
-        return;
-      }
-      const bounds = getResizeBounds("right", layoutWidth, conversationIndexCollapsed ? 0 : activeDrag.startLeftWidth);
-      const nextRightWidth = clamp(activeDrag.startRightWidth - delta, bounds.min, bounds.max);
-      setChatPanelWidths({ rightPanelWidth: Math.round(nextRightWidth) });
-    }
-
-    window.addEventListener("pointermove", handlePointerMove);
-    window.addEventListener("pointerup", stopDragging);
-    window.addEventListener("pointercancel", stopDragging);
-
-    return () => {
-      document.body.style.cursor = previousCursor;
-      document.body.style.userSelect = previousUserSelect;
-      window.removeEventListener("pointermove", handlePointerMove);
-      window.removeEventListener("pointerup", stopDragging);
-      window.removeEventListener("pointercancel", stopDragging);
-    };
-  }, [conversationIndexCollapsed, dragState, setChatPanelWidths, statusRailCollapsed]);
 
   const locale = lang === "zh" ? "zh-CN" : "en-US";
 
@@ -4111,6 +3500,44 @@ export function ChatCodingRoute() {
     ],
   );
   const composerDisabled = conversationComposer.disabled;
+
+  const {
+    handleSubmitTurn,
+    handleStopTurn,
+    handleSubmitGuidance,
+    handleEditUserMessage,
+    handleCancelEditMessage,
+  } = useChatComposerSubmitActions({
+    queryClient,
+    lang,
+    describeError,
+    submitTurnMutation,
+    editResubmitMutation,
+    stopTurnMutation,
+    sessionGuidanceMutation,
+    setSessionDrafts,
+    setSessionComposerErrors,
+    setSessionImageAttachments,
+    setSessionReferenceAttachments,
+    setSessionImageUploadPending,
+    setSessionEditTargets,
+    imageUploadInFlightRef,
+    activeSessionId,
+    activeDraftEffective,
+    activeImageAttachments,
+    activeReferenceAttachments,
+    mentalModelEnabledForNextTurn,
+    resolvedEditTarget,
+    activeEditTarget,
+    composerDisabled,
+    sessionBusy,
+    sessionStopping,
+    activePhase: detail?.currentPhase,
+    activeAgentImageInputUnsupported,
+    activeImageInputModelId,
+    latestUserMessageId,
+    detail,
+  });
   const sessionLlmOptions = sessionLlmOptionsQuery.data;
   const sessionLlmControl = activeSessionId ? {
     model: sessionLlmOptions?.model ?? null,
@@ -4821,38 +4248,19 @@ export function ChatCodingRoute() {
       }));
       return;
     }
-    const incoming = Array.from(files || []).filter((file) => file.type.startsWith("image/"));
-    if (!incoming.length) {
+    const { accepted, rejected } = classifyComposerImageFiles(files);
+    if (!accepted.length && !rejected.length) {
       return;
     }
-    const accepted: ComposerImageAttachment[] = [];
-    const rejected: string[] = [];
-    for (const file of incoming) {
-      if (!["image/png", "image/jpeg", "image/webp"].includes(file.type)) {
-        rejected.push(file.name);
-        continue;
-      }
-      if (file.size > MAX_COMPOSER_IMAGE_BYTES) {
-        rejected.push(file.name);
-        continue;
-      }
-      accepted.push({
-        id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
-        file,
-        filename: file.name || "image",
-        previewUrl: URL.createObjectURL(file),
-        sizeBytes: file.size,
-        contentType: file.type,
+    if (accepted.length) {
+      setSessionImageAttachments((current) => {
+        const existing = current[activeSessionId] ?? [];
+        return {
+          ...current,
+          [activeSessionId]: mergeComposerImageAttachments(existing, accepted, MAX_COMPOSER_IMAGE_ATTACHMENTS),
+        };
       });
     }
-    setSessionImageAttachments((current) => {
-      const existing = current[activeSessionId] ?? [];
-      const merged = [...existing, ...accepted].slice(0, MAX_COMPOSER_IMAGE_ATTACHMENTS);
-      return {
-        ...current,
-        [activeSessionId]: merged,
-      };
-    });
     setSessionComposerErrors((current) => ({
       ...current,
       [activeSessionId]: rejected.length
@@ -4913,323 +4321,6 @@ export function ChatCodingRoute() {
         ...current,
         [activeSessionId]: next,
       };
-    });
-  }
-
-  async function submitTurnWithAttachments(
-    sessionId: string,
-    content: string,
-    attachments: ComposerImageAttachment[],
-    references: SessionReferenceAttachment[],
-    mentalModelEnabled: boolean,
-    clientSubmissionId: string,
-  ) {
-    if (imageUploadInFlightRef.current[sessionId]) {
-      postSubmitTelemetry(
-        "browser.chat_submit.blocked",
-        "Direct chat submit was blocked while image upload was already in flight.",
-        sessionId,
-        {
-          content,
-          attachmentCount: attachments.length,
-          referenceCount: references.length,
-          mentalModelEnabled,
-          guardReason: "image_upload_in_flight",
-          clientSubmissionId,
-        },
-        "warning",
-      );
-      return;
-    }
-    imageUploadInFlightRef.current[sessionId] = true;
-    setSessionImageUploadPending((current) => ({
-      ...current,
-      [sessionId]: true,
-    }));
-    setSessionDrafts((current) => clearSessionDraftForSubmittedTurn(current, sessionId));
-    setSessionComposerErrors((current) => ({
-      ...current,
-      [sessionId]: "",
-    }));
-    if (content || references.length) {
-      queryClient.setQueryData<SessionDetail>(queryKeys.session(sessionId), (detail) =>
-        markSessionDetailRunning(appendOptimisticUserMessage(detail, { sessionId, content, references, clientSubmissionId })),
-      );
-    }
-    try {
-      if (attachments.length) {
-        postSubmitTelemetry(
-          "browser.chat_submit.upload_started",
-          "Direct chat submit image upload started.",
-          sessionId,
-          {
-            content,
-            attachmentCount: attachments.length,
-            referenceCount: references.length,
-            mentalModelEnabled,
-            clientSubmissionId,
-          },
-        );
-      }
-      const uploaded = await Promise.all(attachments.map((attachment) => uploadSessionImageAttachment(sessionId, attachment)));
-      if (attachments.length) {
-        postSubmitTelemetry(
-          "browser.chat_submit.upload_succeeded",
-          "Direct chat submit image upload succeeded.",
-          sessionId,
-          {
-            content,
-            attachmentCount: attachments.length,
-            uploadedAttachmentCount: uploaded.length,
-            referenceCount: references.length,
-            mentalModelEnabled,
-            clientSubmissionId,
-          },
-        );
-      }
-      postSubmitTelemetry(
-        "browser.chat_submit.submit_mutate_requested",
-        "Direct chat submit mutation was requested.",
-        sessionId,
-        {
-          content,
-          attachmentCount: attachments.length,
-          uploadedAttachmentCount: uploaded.length,
-          referenceCount: references.length,
-          mentalModelEnabled,
-          clientSubmissionId,
-        },
-      );
-      submitTurnMutation.mutate({
-        sessionId,
-        clientSubmissionId,
-        content,
-        mentalModelEnabled,
-        attachmentIds: uploaded.map((attachment) => attachment.artifactId).filter(Boolean),
-        references,
-        requestStartedAtMs: chatStreamPerformanceNowMs(),
-      });
-    } catch (error) {
-      postSubmitTelemetry(
-        "browser.chat_submit.upload_failed",
-        "Direct chat submit image upload failed before message POST.",
-        sessionId,
-        {
-          content,
-          attachmentCount: attachments.length,
-          referenceCount: references.length,
-          mentalModelEnabled,
-          clientSubmissionId,
-          error,
-        },
-        "error",
-      );
-      setSessionComposerErrors((current) => ({
-        ...current,
-        [sessionId]: describeError(error, lang === "zh" ? "图片上传失败" : "Image upload failed"),
-      }));
-      if (content || references.length) {
-        queryClient.setQueryData<SessionDetail>(queryKeys.session(sessionId), (detail) =>
-          removeOptimisticUserMessage(detail, { sessionId, content, references, clientSubmissionId }),
-        );
-        setSessionDrafts((current) => restoreSubmittedDraftIfComposerStillEmpty(current, sessionId, content));
-      }
-    } finally {
-      imageUploadInFlightRef.current[sessionId] = false;
-      setSessionImageUploadPending((current) => ({
-        ...current,
-        [sessionId]: false,
-      }));
-    }
-  }
-
-  function handleSubmitTurn() {
-    if (!activeSessionId) {
-      return;
-    }
-    const content = activeDraftEffective.trim();
-    const clientSubmissionId = createClientSubmissionId(activeSessionId);
-    postSubmitTelemetry(
-      "browser.chat_submit.requested",
-      "Direct chat submit was requested from the composer.",
-      activeSessionId,
-      {
-        content,
-        attachmentCount: activeImageAttachments.length,
-        referenceCount: activeReferenceAttachments.length,
-        mentalModelEnabled: mentalModelEnabledForNextTurn,
-        editTargetId: resolvedEditTarget?.messageId,
-        composerDisabled,
-        sessionBusy,
-        activePhase: detail?.currentPhase,
-        clientSubmissionId,
-      },
-    );
-    if (activeImageAttachments.length && activeAgentImageInputUnsupported) {
-      postSubmitTelemetry(
-        "browser.chat_submit.blocked",
-        "Direct chat submit image upload was blocked because the active Agent model does not support image input.",
-        activeSessionId,
-        {
-          content,
-          attachmentCount: activeImageAttachments.length,
-          referenceCount: activeReferenceAttachments.length,
-          mentalModelEnabled: mentalModelEnabledForNextTurn,
-          editTargetId: resolvedEditTarget?.messageId,
-          composerDisabled,
-          sessionBusy,
-          activePhase: detail?.currentPhase,
-          guardReason: "image_input_unsupported",
-          imageInputModelId: activeImageInputModelId,
-          clientSubmissionId,
-        },
-        "warning",
-      );
-      setSessionComposerErrors((current) => ({
-        ...current,
-        [activeSessionId]: lang === "zh" ? "当前 Agent 模型不支持图片输入。" : "The current Agent model does not support image input.",
-      }));
-      return;
-    }
-    const guardReason = composerDisabled
-      ? "composer_disabled"
-      : !content && !activeImageAttachments.length && !activeReferenceAttachments.length
-        ? "empty_content"
-        : "";
-    if (guardReason) {
-      postSubmitTelemetry(
-        "browser.chat_submit.blocked",
-        "Direct chat submit was blocked by the composer guard.",
-        activeSessionId,
-        {
-          content,
-          attachmentCount: activeImageAttachments.length,
-          referenceCount: activeReferenceAttachments.length,
-          mentalModelEnabled: mentalModelEnabledForNextTurn,
-          editTargetId: resolvedEditTarget?.messageId,
-          composerDisabled,
-          sessionBusy,
-          activePhase: detail?.currentPhase,
-          guardReason,
-          clientSubmissionId,
-        },
-        "warning",
-      );
-      return;
-    }
-    if (resolvedEditTarget) {
-      postSubmitTelemetry(
-        "browser.chat_submit.edit_resubmit_requested",
-        "Edit-resubmit mutation was requested from the composer.",
-        activeSessionId,
-        {
-          content,
-          attachmentCount: activeImageAttachments.length,
-          referenceCount: activeReferenceAttachments.length,
-          mentalModelEnabled: mentalModelEnabledForNextTurn,
-          editTargetId: resolvedEditTarget.messageId,
-          composerDisabled,
-          sessionBusy,
-          activePhase: detail?.currentPhase,
-          clientSubmissionId,
-        },
-      );
-      editResubmitMutation.mutate({
-        sessionId: activeSessionId,
-        messageId: resolvedEditTarget.messageId,
-        clientSubmissionId,
-        content,
-        mentalModelEnabled: mentalModelEnabledForNextTurn,
-      });
-      return;
-    }
-    void submitTurnWithAttachments(
-      activeSessionId,
-      content,
-      activeImageAttachments,
-      activeReferenceAttachments,
-      mentalModelEnabledForNextTurn,
-      clientSubmissionId,
-    );
-  }
-
-  function handleEditUserMessage(message: ConversationMessage) {
-    if (!activeSessionId || sessionBusy) {
-      return;
-    }
-    if (message.id !== latestUserMessageId) {
-      return;
-    }
-    setSessionEditTargets((current) => ({
-      ...current,
-      [activeSessionId]: {
-        messageId: message.id,
-        original: message.content,
-      },
-    }));
-    setSessionImageAttachments((current) => clearSessionImageAttachments(current, activeSessionId));
-    setSessionReferenceAttachments((current) => clearSessionReferenceAttachments(current, activeSessionId));
-    setSessionDrafts((current) => ({
-      ...current,
-      [activeSessionId]: message.content,
-    }));
-    setSessionComposerErrors((current) => ({
-      ...current,
-      [activeSessionId]: "",
-    }));
-  }
-
-  useEffect(() => {
-    if (!activeSessionId || !detail || !activeEditTarget || activeEditTarget.messageId === latestUserMessageId) {
-      return;
-    }
-    setSessionEditTargets((current) => {
-      const { [activeSessionId]: _removed, ...remaining } = current;
-      return remaining;
-    });
-    setSessionDrafts((current) => ({
-      ...current,
-      [activeSessionId]: "",
-    }));
-  }, [activeEditTarget, activeSessionId, latestUserMessageId, setSessionDrafts, setSessionEditTargets]);
-
-  function handleCancelEditMessage() {
-    if (!activeSessionId) {
-      return;
-    }
-    setSessionEditTargets((current) => {
-      const { [activeSessionId]: _removed, ...remaining } = current;
-      return remaining;
-    });
-    setSessionDrafts((current) => ({
-      ...current,
-      [activeSessionId]: "",
-    }));
-    setSessionImageAttachments((current) => clearSessionImageAttachments(current, activeSessionId));
-    setSessionReferenceAttachments((current) => clearSessionReferenceAttachments(current, activeSessionId));
-  }
-
-  function handleStopTurn() {
-    if (!activeSessionId || !sessionBusy || sessionStopping) {
-      return;
-    }
-    stopTurnMutation.mutate({
-      sessionId: activeSessionId,
-    });
-  }
-
-  function handleSubmitGuidance(mode: SessionGuidanceMode) {
-    if (!activeSessionId || !sessionBusy || sessionStopping) {
-      return;
-    }
-    const content = activeDraftEffective.trim();
-    if (!content) {
-      return;
-    }
-    sessionGuidanceMutation.mutate({
-      sessionId: activeSessionId,
-      content,
-      mode,
     });
   }
 
@@ -5651,112 +4742,12 @@ export function ChatCodingRoute() {
     renameSessionMutation.mutate({ sessionId: session.id, title });
   }
 
-  function handleResizeStart(side: ResizableSide, event: PointerEvent<HTMLDivElement>) {
-    if (event.button !== 0) {
-      return;
-    }
-    if ((side === "left" && conversationIndexCollapsed) || (side === "right" && statusRailCollapsed)) {
-      return;
-    }
-    event.preventDefault();
-    setDragState({
-      side,
-      startX: event.clientX,
-      startLeftWidth: leftPanelWidth,
-      startRightWidth: rightPanelWidth,
-    });
-  }
-
-  function handleResizeKeyDown(side: ResizableSide, event: KeyboardEvent<HTMLDivElement>) {
-    if (!layoutRef.current) {
-      return;
-    }
-    if ((side === "left" && conversationIndexCollapsed) || (side === "right" && statusRailCollapsed)) {
-      return;
-    }
-
-    const { key } = event;
-    const direction =
-      key === "ArrowLeft" ? -1 : key === "ArrowRight" ? 1 : key === "Home" ? "min" : key === "End" ? "max" : null;
-    if (direction === null) {
-      return;
-    }
-
-    event.preventDefault();
-    const layoutWidth = layoutRef.current.getBoundingClientRect().width;
-
-    if (side === "left") {
-      const bounds = getResizeBounds("left", layoutWidth, statusRailCollapsed ? 0 : rightPanelWidth);
-      const nextLeftWidth =
-        direction === "min"
-          ? bounds.min
-          : direction === "max"
-            ? bounds.max
-            : clamp(leftPanelWidth + Number(direction) * KEYBOARD_RESIZE_STEP, bounds.min, bounds.max);
-      setChatPanelWidths({ leftPanelWidth: Math.round(nextLeftWidth) });
-      return;
-    }
-
-    const bounds = getResizeBounds("right", layoutWidth, conversationIndexCollapsed ? 0 : leftPanelWidth);
-    const delta =
-      direction === "min"
-        ? bounds.min
-        : direction === "max"
-          ? bounds.max
-          : clamp(rightPanelWidth - Number(direction) * KEYBOARD_RESIZE_STEP, bounds.min, bounds.max);
-    setChatPanelWidths({ rightPanelWidth: Math.round(delta) });
-  }
-
   const toggleFeaturePreset = useCallback((key: FeaturePresetKey) => {
     setFeaturePresetState((current) => ({
       ...current,
       [key]: !current[key],
     }));
   }, []);
-
-  const layoutStyle = useMemo(
-    () =>
-      ({
-        "--chat-left-pane-width": conversationIndexCollapsed ? "0px" : `${leftPanelWidth}px`,
-        "--chat-right-pane-width": statusRailCollapsed ? "0px" : `${rightPanelWidth}px`,
-      }) as CSSProperties,
-    [conversationIndexCollapsed, leftPanelWidth, rightPanelWidth, statusRailCollapsed],
-  );
-  const rightPaneLayoutClassName = standardGroupRoomActive ? styles.rightPaneWithTabs : styles.rightPaneWithoutTabs;
-  const rightPaneClassName = `${styles.rightPane} ${rightPaneLayoutClassName}`;
-  const layoutModeClassName = responsiveLayout.mode === "wide"
-    ? styles.layout
-    : responsiveLayout.mode === "compact"
-      ? `${styles.layout} ${styles.layoutCompactDesktop}`
-      : `${styles.layout} ${styles.layoutOverlay}`;
-  const chatLayoutClassName = [
-    layoutModeClassName,
-    responsiveLayout.mode === "wide" && statusRailCollapsed ? styles.layoutStatusRailCollapsed : "",
-  ].filter(Boolean).join(" ");
-  const centerPaneClassName = responsiveLayout.mode === "overlay" || responsiveLayout.mode === "mobile"
-    ? `${styles.centerPane} ${styles.centerPaneOverlay}`
-    : styles.centerPane;
-  const statusRailClassName = [
-    styles.leftRail,
-    statusRailCollapsed ? styles.paneCollapsed : "",
-    statusRailOverlayOpen ? `${styles.overlayPane} ${styles.overlayPaneRight}` : "",
-  ].filter(Boolean).join(" ");
-  const conversationIndexPaneClassName = [
-    rightPaneClassName,
-    conversationIndexCollapsed ? styles.paneCollapsed : "",
-    conversationIndexOverlayOpen ? `${styles.overlayPane} ${styles.overlayPaneLeft}` : "",
-  ].filter(Boolean).join(" ");
-  const closeResponsiveOverlayPane = () => {
-    const closingPane = responsiveOverlayPane;
-    setResponsiveOverlayPane(null);
-    if (closingPane && typeof window !== "undefined") {
-      window.requestAnimationFrame(() => {
-        document.getElementById(
-          closingPane === "left" ? "chat-conversation-index-toggle" : "chat-status-toggle",
-        )?.focus();
-      });
-    }
-  };
 
   const contextMenuSessionIsBusy = contextMenuSession
     ? isBusyPhase(contextMenuSession.currentPhase || contextMenuSession.status)
@@ -5916,489 +4907,104 @@ export function ChatCodingRoute() {
           <span className="sr-only">{lang === "zh" ? "关闭侧栏" : "Close side panel"}</span>
         </VButton>
       ) : null}
-      <aside
-        id="chat-status-pane"
-        className={statusRailClassName}
-        aria-hidden={statusRailCollapsed}
-        role={statusRailOverlayOpen ? "dialog" : undefined}
-        aria-label={statusRailOverlayOpen ? (lang === "zh" ? "状态栏" : "Status panel") : undefined}
-      >
-        {standardGroupRoomActive ? (
-          <section className={`${styles.leftBlock} ${styles.groupProfileBlock}`}>
-            <div className={styles.sectionHeader}>
-              <div className={styles.sectionIdentity}>
-                <div className={styles.sectionEyebrowRow}>
-                  <p className={styles.blockEyebrow}>{lang === "zh" ? "群资料与设置" : "Group profile"}</p>
-                  <VContextualHint
-                    content={activeGroupTeamOwned
-                      ? (lang === "zh"
-                        ? "这是团队关联群聊；成员、角色和同步关系由团队页维护，这里只负责讨论运行与成员状态观察。"
-                        : "This room is owned by a Team. Membership, roles, and sync stay in Teams; Chat only runs discussion and shows member status.")
-                      : (lang === "zh"
-                        ? "这里管理当前普通群聊的资料、成员和调度；成员状态索引放在左侧会话列。"
-                        : "Manage this standalone group's info, members, and scheduling here. Member status lives in the left conversation column.")}
-                    label={lang === "zh" ? "群资料与设置说明" : "Group profile details"}
-                    width="wide"
-                  />
-                </div>
-                <h3 className={styles.sectionTitle}>{activeGroupRoom?.title ?? (lang === "zh" ? "群聊加载中" : "Loading group")}</h3>
-              </div>
-              <span className={`${styles.sessionStatePill} ${styles[`sessionStatePill_${String(activeGroupRoom?.status ?? "ready").trim().toLowerCase()}`]}`}>
-                {statusLabel(activeGroupRoom?.status ?? "ready")}
-              </span>
-            </div>
-            <div className={styles.resourceSplit}>
-              <div className={styles.resourceMetric}>
-                <span>{lang === "zh" ? "可用成员" : "Available"}</span>
-                <strong>{numberFormatter.format(availableGroupParticipantCount)}</strong>
-              </div>
-              <div className={styles.resourceMetric}>
-                <span>{lang === "zh" ? "调度" : "Mode"}</span>
-                <strong>{activeGroupRoom?.mode ?? "round_robin"}</strong>
-              </div>
-              <div className={styles.resourceMetric}>
-                <span>{lang === "zh" ? "目的" : "Purpose"}</span>
-                <strong>{activeGroupRoom?.purpose ?? "discussion"}</strong>
-              </div>
-            </div>
-            <section className={styles.groupManagementPanel} aria-label={lang === "zh" ? "群聊管理" : "Group management"}>
-              <div className={styles.groupManagementHeader}>
-                <div>
-                  <span className={styles.groupManagementTitleRow}>
-                    <strong>{activeGroupTeamOwned ? (lang === "zh" ? "团队群聊引用" : "Team room reference") : (lang === "zh" ? "群设置" : "Group settings")}</strong>
-                    {activeGroupTeamOwned ? (
-                      <VContextualHint
-                        content={lang === "zh"
-                          ? "团队关联群聊的成员来自团队组织画布；如需调整成员、角色或同步关系，请打开团队页。"
-                          : "Team-owned room members come from the Team canvas. Open Teams to change members, roles, or sync."}
-                        label={lang === "zh" ? "团队群聊引用说明" : "Team room reference details"}
-                        width="wide"
-                      />
-                    ) : null}
-                  </span>
-                  <span title={activeGroupRoom?.title ?? ""}>
-                    {activeGroupRoom?.title ?? (lang === "zh" ? "群聊加载中" : "Loading group")}
-                  </span>
-                </div>
-                <div className={styles.groupManagementActions}>
-                  {activeGroupTeamOwned && activeGroupTeam ? (
-                    <VButton
-                      type="button"
-                      className={styles.groupSecondaryButton}
-                      onClick={() => navigate(`/teams?team=${encodeURIComponent(activeGroupTeam.teamId)}`)}
-                    >
-                      <ArrowUpRight size={14} />
-                      <span>{lang === "zh" ? "打开团队" : "Open team"}</span>
-                    </VButton>
-                  ) : null}
-                  <VButton
-                    type="button"
-                    className={groupManageChanged ? styles.groupApplyButton : styles.groupSecondaryButton}
-                    isDisabled={groupManageDisabled || !groupManageChanged}
-                    onClick={handleApplyGroupRoomManagement}
-                  >
-                    <Check size={14} />
-                    <span>
-                      {updateGroupRoomMutation.isPending
-                        ? (lang === "zh" ? "应用中" : "Applying")
-                        : (lang === "zh" ? "应用变更" : "Apply")}
-                    </span>
-                  </VButton>
-                  <VButton
-                    type="button"
-                    className={styles.groupDeleteButton}
-                    isDisabled={groupDeleteDisabled}
-                    onClick={handleDeleteActiveGroupRoom}
-                  >
-                    <Trash2 size={14} />
-                    <span>
-                      {deleteGroupRoomMutation.isPending
-                        ? (lang === "zh" ? "删除中" : "Deleting")
-                        : (lang === "zh" ? "删除" : "Delete")}
-                    </span>
-                  </VButton>
-                  <VButton
-                    type="button"
-                    className={styles.groupSecondaryButton}
-                    isDisabled={groupResetDisabled}
-                    onClick={handleResetActiveGroupRoom}
-                  >
-                    <RotateCcw size={14} />
-                    <span>
-                      {resetGroupRoomMutation.isPending
-                        ? (lang === "zh" ? "重置中" : "Resetting")
-                        : (lang === "zh" ? "重置消息" : "Reset messages")}
-                    </span>
-                  </VButton>
-                </div>
-              </div>
-              {groupRoomActionError ? (
-                <div className={styles.panelNotice}>{groupRoomActionError}</div>
-              ) : null}
-              <div className={styles.groupManagementControls}>
-                <label className={styles.groupTitleField}>
-                  <span>{lang === "zh" ? "群名" : "Name"}</span>
-                  <VNativeInput
-                    value={groupManageTitleDraft}
-                    maxLength={80}
-                    disabled={activeGroupTeamOwned || groupRoundActive || updateGroupRoomMutation.isPending}
-                    onChange={(event) => {
-                      setGroupRoomActionError("");
-                      setGroupManageTitleDraft(event.target.value);
-                    }}
-                  />
-                </label>
-                <label className={styles.groupModeSelect}>
-                  <span>{lang === "zh" ? "调度模式" : "Mode"}</span>
-                  <VNativeSelect
-                    value={groupManageModeDraft}
-                    disabled={activeGroupTeamOwned || groupRoundActive || updateGroupRoomMutation.isPending}
-                    onChange={(event) => {
-                      setGroupRoomActionError("");
-                      setGroupManageModeDraft(event.target.value);
-                    }}
-                  >
-                    {readyChatRoomModes.map((mode) => (
-                      <option key={mode.id} value={mode.id}>
-                        {chatRoomModeLabel(mode, lang)}
-                      </option>
-                    ))}
-                  </VNativeSelect>
-                </label>
-                <label className={styles.groupModeSelect}>
-                  <span>{lang === "zh" ? "对话目的" : "Purpose"}</span>
-                  <VNativeSelect
-                    value={groupManagePurposeDraft}
-                    disabled={activeGroupTeamOwned || groupRoundRunning || updateGroupRoomMutation.isPending}
-                    onChange={(event) => {
-                      setGroupRoomActionError("");
-                      setGroupManagePurposeDraft(event.target.value);
-                    }}
-                  >
-                    {availableChatRoomPurposes.map((purpose) => (
-                      <option key={purpose.id} value={purpose.id}>
-                        {chatRoomPurposeLabel(purpose, lang)}
-                      </option>
-                    ))}
-                  </VNativeSelect>
-                </label>
-                <div className={styles.groupManagementCount}>
-                  <span>{lang === "zh" ? "已选" : "Selected"}</span>
-                  <strong>
-                    {groupManageSessionIds.length}/{sessionsQuery.data?.length ?? 0}
-                  </strong>
-                </div>
-                <div className={styles.groupMemberPicker}>
-                  {(sessionsQuery.data ?? []).map((session) => {
-                    const selected = groupManageSessionSet.has(session.id);
-                    const sessionAgent = session.agentId ? agentsById.get(session.agentId) : undefined;
-                    const display = sessionAgentDisplayInfo(session, sessionAgent, lang, resolveModelLabel);
-                    const sessionAvatarImageUrl = avatarImageUrlFrom(sessionAgent, session);
-                    const missingMessage = session.agentMissing
-                      ? session.agentStatusMessage || (lang === "zh" ? "缺少有效 Agent" : "Missing valid Agent")
-                      : "";
-                    return (
-                      <label
-                        key={session.id}
-                        className={
-                          selected
-                            ? `${styles.groupMemberChip} ${styles.groupMemberChipSelected}`
-                            : styles.groupMemberChip
-                        }
-                      >
-                        <VNativeInput
-                          type="checkbox"
-                          checked={selected}
-                          disabled={activeGroupTeamOwned || groupRoundActive || updateGroupRoomMutation.isPending}
-                          onChange={() => handleToggleGroupManageSession(session.id)}
-                        />
-                        {renderAgentAvatar(
-                          styles.agentOptionAvatar,
-                          sessionAvatarImageUrl,
-                          avatarInitials(session.agentCode, display.name),
-                        )}
-                        <span className={styles.groupMemberCopy}>
-                          <strong>{display.name}</strong>
-                          <small className={`${styles.agentRoleTag} ${styles[agentRoleClass(display.tone)]}`}>
-                            {display.functionLabel}
-                          </small>
-                        </span>
-                        {missingMessage ? (
-                          <span className={styles.agentMissingInline} title={missingMessage}>
-                            {lang === "zh" ? "缺少有效 Agent" : "Missing Agent"}
-                          </span>
-                        ) : null}
-                      </label>
-                    );
-                  })}
-                </div>
-              </div>
-              {groupRoundActive ? (
-                <p className={styles.groupManagementHint}>
-                  {lang === "zh" ? "群聊运行中，成员和模式会在本轮结束后允许修改。" : "The group is running. Members and mode can be changed after this round finishes."}
-                </p>
-              ) : groupManageSessionIds.length < 2 ? (
-                <p className={styles.groupManagementHint}>
-                  {lang === "zh" ? "群聊至少需要保留 2 位 Agent。" : "A group needs at least 2 agents."}
-                </p>
-              ) : null}
-            </section>
-          </section>
-        ) : (
-          <>
-        <section className={`${styles.leftBlock} ${styles.currentSessionBlock}`}>
-          <div className={styles.sectionHeader}>
-            <div className={styles.sectionIdentity}>
-              <p className={styles.blockEyebrow}>{t("currentSession")}</p>
-              <h3 className={styles.sectionTitle}>{activeSurfaceTitle}</h3>
-            </div>
-            <span className={`${styles.sessionStatePill} ${styles[`sessionStatePill_${sessionStateValue}`]}`}>
-              {sessionStateLabel}
-            </span>
-          </div>
-          <p className={`${styles.contextLineCompact} ${styles.currentSessionLine}`} title={sessionStateLine}>
-            {compactSessionStateLine}
-          </p>
-          {agentDirectSessionMismatch && agentPrimaryDirectSessionId ? (
-            <div className={styles.sessionBindingNotice} role="status">
-              <span>{sessionBindingMismatchLine}</span>
-              <VButton
-                type="button"
-                onClick={() => handleOpenDirectSession(agentPrimaryDirectSessionId)}
-                title={`${t("openCurrentDirectSession")} · ${agentPrimaryDirectSessionId}`}
-              >
-                <ArrowUpRight size={13} />
-                <span>{t("openCurrentDirectSession")}</span>
-              </VButton>
-            </div>
-          ) : null}
-          {sessionCompactRows.length > 0 ? (
-            <div className={`${styles.inlineMetaList} ${styles.currentSessionMetaList}`}>
-              {sessionCompactRows.map((row) => (
-                <span key={row.label} className={styles.inlineMetaPill} title={row.title ?? row.value}>
-                  <span>{row.label}</span>
-                  <strong>{row.value}</strong>
-                </span>
-              ))}
-            </div>
-          ) : null}
-          {activeSkillSummary ? (
-            <section
-              className={`${styles.activeSkillStatus} ${activeSkillStatusStyle}`}
-              title={activeSkillTitle}
-              aria-label={lang === "zh" ? "当前 active skill 状态" : "Current active skill status"}
-            >
-              <div className={styles.activeSkillIdentity}>
-                <span className={styles.activeSkillEyebrow}>
-                  {lang === "zh" ? "当前 Skill" : "Active skill"}
-                </span>
-                <strong>{activeSkillName || activeSkillCommand}</strong>
-              </div>
-              <div className={styles.activeSkillMeta}>
-                {activeSkillCommand ? <span>/{activeSkillCommand}</span> : null}
-                <span className={styles.activeSkillState}>{activeSkillStatusLabel}</span>
-                {activeSkillShortHash ? <span>#{activeSkillShortHash}</span> : null}
-              </div>
-            </section>
-          ) : null}
-        </section>
-
-        <section className={`${styles.leftBlock} ${styles.featurePresetBlock} ${styles.runModeBlock}`}>
-          <div className={styles.sectionHeader}>
-            <h3 className={styles.sectionTitle}>{lang === "zh" ? "运行模式" : "Run modes"}</h3>
-            <span className={styles.featurePresetScope} title={t("chatFeaturePanelHint")}>{lang === "zh" ? "下轮生效" : "Next turn"}</span>
-          </div>
-          <div className={styles.featureChipRow}>
-            <VButton
-              type="button"
-              contentLayout="plain"
-              className={
-                mentalModelEnabledForNextTurn
-                  ? `${styles.featureChip} ${styles.featureChipPrimary} ${styles.featureChipActive}`
-                  : `${styles.featureChip} ${styles.featureChipPrimary}`
-              }
-              aria-pressed={mentalModelEnabledForNextTurn}
-              isDisabled={!activeSessionId}
-              onClick={() => handleMentalModelEnabledChange(!mentalModelEnabledForNextTurn)}
-              title={t("chatFeatureMentalModelHint")}
-            >
-              <strong>{lang === "zh" ? "心智" : t("chatFeatureMentalModel")}</strong>
-              <em>{mentalModelEnabledForNextTurn ? (lang === "zh" ? "开" : "On") : (lang === "zh" ? "关" : "Off")}</em>
-            </VButton>
-            {CHAT_FEATURE_PRESETS.map((item) => {
-              const enabled = featurePresetState[item.key];
-              const featureLabel = t(item.labelKey);
-              return (
-                <VButton
-                  key={item.key}
-                  type="button"
-                  contentLayout="plain"
-                  className={enabled ? `${styles.featureChip} ${styles.featureChipActive}` : styles.featureChip}
-                  aria-pressed={enabled}
-                  onClick={() => toggleFeaturePreset(item.key)}
-                  title={t(item.hintKey)}
-                >
-                  <strong>{chatFeaturePresetShortLabel(item.key, lang, featureLabel)}</strong>
-                  <em>{enabled ? (lang === "zh" ? "开" : "On") : (lang === "zh" ? "关" : "Off")}</em>
-                </VButton>
-              );
-            })}
-          </div>
-        </section>
-
-        <TokenCoreStatusPanel
-          cacheDetailAvailable={cacheDetailAvailable}
-          cacheDetailOpen={cacheDetailOpen}
-          cacheDetailOpenLabel={cacheDetailOpenLabel}
-          lang={lang}
-          metrics={tokenStatusMetrics}
-          onOpenCacheDetail={openCacheDetail}
-        />
-
-        <LlmPayloadTracePanel lang={lang} trace={lastLlmPayloadTrace} />
-
-        <section className={`${styles.leftBlock} ${styles.companionBlock}`}>
-          <div className={styles.sectionHeader}>
-            <h3 className={styles.sectionTitle}>{t("mentalState")} / {t("petSpace")}</h3>
-            <VTooltip
-              content={mentalCompactLine || mentalSourceLabel}
-              renderTrigger={(tooltipTriggerProps) => {
-                const {
-                  children: _triggerChildren,
-                  className: triggerClassName,
-                  role: _triggerRole,
-                  tabIndex: _triggerTabIndex,
-                  ...triggerProps
-                } = tooltipTriggerProps;
-
-                return (
-                  <VButton
-                    {...(triggerProps as unknown as VButtonProps)}
-                    type="button"
-                    className={[
-                      triggerClassName,
-                      styles.mentalStateBadge,
-                      styles[`mentalStateBadge_${mentalCognitiveStateValue}`],
-                    ].filter(Boolean).join(" ")}
-                    aria-label={`${mentalStateLabel}. ${mentalCompactLine || mentalSourceLabel}`}
-                  >
-                    {mentalStateLabel}
-                  </VButton>
-                );
-              }}
-            >
-              {mentalStateLabel}
-            </VTooltip>
-          </div>
-          <p className={styles.contextLineCompact}>{mentalSummary}</p>
-          <div className={styles.companionCompact}>
-            <div className={styles.petMiniAvatar} aria-hidden="true">
-              <div className={`${styles.petShowcaseAvatar} ${petAvatarSkinStyle}`}>
-                <span className={styles.petShowcaseEarLeft} />
-                <span className={styles.petShowcaseEarRight} />
-                <span className={styles.petShowcaseFace}>
-                  <span className={styles.petShowcaseEye} />
-                  <span className={styles.petShowcaseMuzzle} />
-                  <span className={styles.petShowcaseEye} />
-                </span>
-                <span className={styles.petShowcaseSymbol}>{petAvatarSymbol}</span>
-                <span className={styles.petShowcaseFootLeft} />
-                <span className={styles.petShowcaseFootRight} />
-              </div>
-            </div>
-            <div className={styles.companionCopy}>
-              <div className={styles.companionTopLine}>
-                <strong>{pet?.name ?? t("loadingPetState")}</strong>
-                <span>{t("level")} {pet?.level ?? 0} · {petPresetLabel}</span>
-              </div>
-              <p title={petCompactLine}>{petCompactLine}</p>
-            </div>
-          </div>
-          <details className={styles.compactDetails}>
-            <summary>
-              <ChevronRight size={14} aria-hidden="true" />
-              <span className={styles.compactDetailsClosedLabel}>{t("expandSection")}</span>
-              <span className={styles.compactDetailsOpenLabel}>{t("collapseSection")}</span>
-            </summary>
-            <p className={styles.oneLineValue} title={mentalWhisper}>
-              <span>{t("mentalWhisper")}</span>
-              {mentalWhisper}
-            </p>
-            <div className={styles.inlineStatGrid}>
-              <div className={styles.inlineStat}>
-                <span>{t("state")}</span>
-                <strong>{mentalCognitiveStateLabel}</strong>
-              </div>
-              <div className={styles.inlineStat}>
-                <span>{t("mentalConfidence")}</span>
-                <strong>{mentalConfidence}</strong>
-              </div>
-              <div className={styles.inlineStat}>
-                <span>{t("mentalSource")}</span>
-                <strong>{mentalSourceLabel}</strong>
-              </div>
-              <div className={styles.inlineStat}>
-                <span>{t("mentalLastUpdated")}</span>
-                <strong title={formatTime(mental?.updatedAt ?? "")}>{mentalRelativeTime}</strong>
-              </div>
-            </div>
-            <div className={styles.inlineMetaList}>
-              <span className={styles.inlineMetaPill}>
-                <span>{t("dailyTokens")}</span>
-                <strong>{numberFormatter.format(pet?.dailyTokens ?? 0)}</strong>
-              </span>
-              {petVitals.map((vital) => (
-                <span key={vital.key} className={styles.inlineMetaPill}>
-                  <span>{vital.label}</span>
-                  <strong>{vital.value}</strong>
-                </span>
-              ))}
-            </div>
-            <div className={styles.petShowcaseActions} aria-label={petInteractionLabels.group}>
-              <VButton
-                type="button"
-                contentLayout="plain"
-                className={styles.petShowcaseAction}
-                onClick={() => handlePetInteraction("feed")}
-                isDisabled={petActionMutation.isPending}
-                title={petInteractionLabels.feedTitle}
-              >
-                <Apple size={14} />
-                <span>{petInteractionLabels.feed}</span>
-              </VButton>
-              <VButton
-                type="button"
-                contentLayout="plain"
-                className={styles.petShowcaseAction}
-                onClick={() => handlePetInteraction("talk")}
-                isDisabled={petActionMutation.isPending}
-                title={petInteractionLabels.talkTitle}
-              >
-                <MessageCircleHeart size={14} />
-                <span>{petInteractionLabels.talk}</span>
-              </VButton>
-              <VButton
-                type="button"
-                contentLayout="plain"
-                className={styles.petShowcaseAction}
-                onClick={() => handlePetInteraction("care")}
-                isDisabled={petActionMutation.isPending}
-                title={petInteractionLabels.careTitle}
-              >
-                <HeartHandshake size={14} />
-                <span>{petInteractionLabels.care}</span>
-              </VButton>
-              <span className={styles.petShowcaseActionHint}>
-                <Sparkles size={13} />
-                <span>{petInteractionLabels.pending}</span>
-              </span>
-            </div>
-            {petActionFeedback ? <p className={styles.petShowcaseFeedback}>{petActionFeedback}</p> : null}
-          </details>
-        </section>
-          </>
-        )}
-      </aside>
+      <ChatStatusRail
+        statusRailClassName={statusRailClassName}
+        statusRailCollapsed={statusRailCollapsed}
+        statusRailOverlayOpen={statusRailOverlayOpen}
+        standardGroupRoomActive={standardGroupRoomActive}
+        lang={lang}
+        t={t}
+        numberFormatter={numberFormatter}
+        activeGroupRoom={activeGroupRoom}
+        activeGroupTeamOwned={activeGroupTeamOwned}
+        activeGroupTeam={activeGroupTeam}
+        availableGroupParticipantCount={availableGroupParticipantCount}
+        statusLabel={statusLabel}
+        groupManageChanged={groupManageChanged}
+        groupManageDisabled={groupManageDisabled}
+        groupDeleteDisabled={groupDeleteDisabled}
+        groupResetDisabled={groupResetDisabled}
+        groupRoundActive={groupRoundActive}
+        groupRoundRunning={groupRoundRunning}
+        groupRoomActionError={groupRoomActionError}
+        setGroupRoomActionError={setGroupRoomActionError}
+        groupManageTitleDraft={groupManageTitleDraft}
+        setGroupManageTitleDraft={setGroupManageTitleDraft}
+        groupManageModeDraft={groupManageModeDraft}
+        setGroupManageModeDraft={setGroupManageModeDraft}
+        groupManagePurposeDraft={groupManagePurposeDraft}
+        setGroupManagePurposeDraft={setGroupManagePurposeDraft}
+        readyChatRoomModes={readyChatRoomModes}
+        availableChatRoomPurposes={availableChatRoomPurposes}
+        chatRoomModeLabel={chatRoomModeLabel}
+        chatRoomPurposeLabel={chatRoomPurposeLabel}
+        groupManageSessionIds={groupManageSessionIds}
+        groupManageSessionSet={groupManageSessionSet}
+        sessions={sessionsQuery.data}
+        agentsById={agentsById}
+        resolveModelLabel={resolveModelLabel}
+        renderAgentAvatar={renderAgentAvatar}
+        avatarInitials={avatarInitials}
+        agentRoleClass={agentRoleClass}
+        avatarImageUrlFrom={avatarImageUrlFrom}
+        updateGroupRoomPending={updateGroupRoomMutation.isPending}
+        deleteGroupRoomPending={deleteGroupRoomMutation.isPending}
+        resetGroupRoomPending={resetGroupRoomMutation.isPending}
+        onOpenTeam={(teamId) => navigate(`/teams?team=${encodeURIComponent(teamId)}`)}
+        onApplyGroupRoomManagement={handleApplyGroupRoomManagement}
+        onDeleteActiveGroupRoom={handleDeleteActiveGroupRoom}
+        onResetActiveGroupRoom={handleResetActiveGroupRoom}
+        onToggleGroupManageSession={handleToggleGroupManageSession}
+        activeSurfaceTitle={activeSurfaceTitle}
+        sessionStateValue={sessionStateValue}
+        sessionStateLabel={sessionStateLabel}
+        sessionStateLine={sessionStateLine}
+        compactSessionStateLine={compactSessionStateLine}
+        agentDirectSessionMismatch={agentDirectSessionMismatch}
+        agentPrimaryDirectSessionId={agentPrimaryDirectSessionId}
+        sessionBindingMismatchLine={sessionBindingMismatchLine}
+        onOpenDirectSession={handleOpenDirectSession}
+        sessionCompactRows={sessionCompactRows}
+        activeSkillSummary={Boolean(activeSkillSummary)}
+        activeSkillStatusStyle={activeSkillStatusStyle}
+        activeSkillTitle={activeSkillTitle}
+        activeSkillName={activeSkillName}
+        activeSkillCommand={activeSkillCommand}
+        activeSkillStatusLabel={activeSkillStatusLabel}
+        activeSkillShortHash={activeSkillShortHash}
+        mentalModelEnabledForNextTurn={mentalModelEnabledForNextTurn}
+        activeSessionId={activeSessionId}
+        onMentalModelEnabledChange={handleMentalModelEnabledChange}
+        featurePresetState={featurePresetState}
+        onToggleFeaturePreset={toggleFeaturePreset}
+        cacheDetailAvailable={cacheDetailAvailable}
+        cacheDetailOpen={cacheDetailOpen}
+        cacheDetailOpenLabel={cacheDetailOpenLabel}
+        tokenStatusMetrics={tokenStatusMetrics}
+        onOpenCacheDetail={openCacheDetail}
+        lastLlmPayloadTrace={lastLlmPayloadTrace}
+        mentalCompactLine={mentalCompactLine}
+        mentalSourceLabel={mentalSourceLabel}
+        mentalCognitiveStateValue={mentalCognitiveStateValue}
+        mentalStateLabel={mentalStateLabel}
+        mentalSummary={mentalSummary}
+        mentalWhisper={mentalWhisper}
+        mentalCognitiveStateLabel={mentalCognitiveStateLabel}
+        mentalConfidence={mentalConfidence}
+        mentalRelativeTime={mentalRelativeTime}
+        formatTime={formatTime}
+        mental={mental}
+        pet={pet}
+        petPresetLabel={petPresetLabel}
+        petCompactLine={petCompactLine}
+        petAvatarSkinStyle={petAvatarSkinStyle}
+        petAvatarSymbol={petAvatarSymbol}
+        petVitals={petVitals}
+        petInteractionLabels={petInteractionLabels}
+        petActionPending={petActionMutation.isPending}
+        petActionFeedback={petActionFeedback}
+        onPetInteraction={handlePetInteraction}
+      />
 
       {responsiveLayout.leftVisible ? <PaneCollapseHandle
         side="left"
@@ -7096,374 +5702,65 @@ export function ChatCodingRoute() {
         onKeyDown={(event) => handleResizeKeyDown("right", event)}
       /> : null}
 
-      <aside
-        id="chat-conversation-index-pane"
-        className={conversationIndexPaneClassName}
-        aria-hidden={conversationIndexCollapsed}
-        role={conversationIndexOverlayOpen ? "dialog" : undefined}
-        aria-label={conversationIndexOverlayOpen ? (lang === "zh" ? "会话列表" : "Conversation list") : undefined}
-      >
-        {standardGroupRoomActive ? (
-          <div
-            className={styles.rightIndexTabs}
-            role="tablist"
-            aria-label={lang === "zh" ? "左侧索引" : "Left index"}
-          >
-            <VButton
-              type="button"
-              role="tab"
-              aria-selected={rightIndexPanel === "conversations"}
-              className={rightIndexPanel === "conversations" ? `${styles.rightIndexTab} ${styles.rightIndexTabActive}` : styles.rightIndexTab}
-              onClick={() => setRightIndexPanel("conversations")}
-            >
-              <MessageCircleHeart size={14} />
-              <span>{lang === "zh" ? "会话" : "Chats"}</span>
-            </VButton>
-            <VButton
-              type="button"
-              role="tab"
-              aria-selected={rightIndexPanel === "members"}
-              className={rightIndexPanel === "members" ? `${styles.rightIndexTab} ${styles.rightIndexTabActive}` : styles.rightIndexTab}
-              onClick={() => setRightIndexPanel("members")}
-            >
-              <UsersRound size={14} />
-              <span>{lang === "zh" ? "成员" : "Members"}</span>
-            </VButton>
-          </div>
-        ) : null}
-
-        {rightIndexPanel === "members" && standardGroupRoomActive ? (
-          <div className={styles.memberIndexSummary}>
-            <UsersRound size={15} />
-            <span>
-              {availableGroupParticipantCount} {lang === "zh" ? "位可用助手" : "available agents"}
-            </span>
-            <strong>{statusLabel(activeGroupRoom?.status ?? "ready")}</strong>
-          </div>
-        ) : (
-          <div className={styles.panelSearch}>
-            <Search size={15} aria-hidden="true" />
-            <VInput
-              className={styles.panelSearchInput}
-              type="text"
-              value={sessionFilter}
-              onChange={(event) => setSessionFilter(event.target.value)}
-              placeholder={t("searchSessionsPlaceholder")}
-              aria-label={t("searchSessionsPlaceholder")}
-            />
-          </div>
-        )}
-
-        <div
-          className={
-            rightIndexPanel === "members" && standardGroupRoomActive
-              ? styles.panelBody
-              : `${styles.panelBody} ${styles.conversationIndexPanelBody}`
-          }
-        >
-          {rightIndexPanel === "members" && standardGroupRoomActive ? (
-            <section className={styles.agentIndexRoster} aria-label={lang === "zh" ? "群成员状态索引" : "Group member status index"}>
-              <div className={styles.sectionHeader}>
-                <div className={styles.sectionIdentity}>
-                  <div className={styles.sectionEyebrowRow}>
-                    <p className={styles.blockEyebrow}>{lang === "zh" ? "成员状态" : "Member status"}</p>
-                    <VContextualHint
-                      content={lang === "zh"
-                        ? "只展示可用成员；已归档或断链的历史成员保留在日志里，不在这里打扰。"
-                        : "Only available members are shown here; archived or broken historical members stay in diagnostics."}
-                      label={lang === "zh" ? "成员状态筛选说明" : "Member status filter details"}
-                      width="wide"
-                    />
-                  </div>
-                  <h3 className={styles.sectionTitle}>{activeGroupRoom?.title ?? (lang === "zh" ? "群聊加载中" : "Loading group")}</h3>
-                </div>
-              </div>
-              {availableGroupParticipants.length ? (
-                <div className={styles.agentIndexList}>
-                  {availableGroupParticipants.map((participant: ChatRoomParticipant) => {
-                  const expanded = expandedGroupAgentSessionIds.includes(participant.sessionId);
-                  const participantSession = sessionsById.get(participant.sessionId);
-                  const expandedDetailQuery = expandedGroupAgentDetailsBySessionId.get(participant.sessionId);
-                  const memberDetail = expanded ? expandedDetailQuery?.data : undefined;
-                  const memberContext = memberDetail?.contextUsage;
-                  const memberContextUsed = memberContext?.used ?? 0;
-                  const memberContextLimit = memberContext?.limit ?? 0;
-                  const memberContextPercent = contextUsagePercent(memberContextUsed, memberContextLimit);
-                  const memberMental = mentalModelEnabledForNextTurn ? latestMentalSnapshot(memberDetail?.messages) : undefined;
-                  const memberMentalState = memberMental?.mood?.trim()
-                    || memberMental?.cognitiveState?.trim()
-                    || (lang === "zh" ? "未记录" : "No snapshot");
-                  const memberMentalSummary = memberMental?.feeling?.trim()
-                    || memberMental?.summary?.trim()
-                    || (lang === "zh" ? "该助手尚未形成可展示的心智快照。" : "This agent has no visible mental snapshot yet.");
-                  const participantDisplay = groupParticipantIdentity(participant);
-                  const participantAgent = participant.agentId ? agentsById.get(participant.agentId) : undefined;
-                  const participantAvatarImageUrl = avatarImageUrlFrom(participantAgent, participant);
-                  const memberUpdated = formatRelativeTime(
-                    memberMental?.updatedAt || memberDetail?.updatedAt || participantSession?.updatedAt || "",
-                    Date.now(),
-                    locale,
-                  );
-                  return (
-                    <article key={participant.participantId || participant.sessionId} className={styles.agentIndexCard}>
-                      <div className={styles.agentIndexHeader}>
-                        <VButton
-                          type="button"
-                          className={styles.agentIndexExpandButton}
-                          aria-expanded={expanded}
-                          aria-label={expanded
-                            ? (lang === "zh" ? `收起 ${participantDisplay.name} 状态` : `Collapse ${participantDisplay.name} status`)
-                            : (lang === "zh" ? `展开 ${participantDisplay.name} 状态` : `Expand ${participantDisplay.name} status`)}
-                          onClick={() =>
-                            setExpandedGroupAgentSessionIds((current) =>
-                              current.includes(participant.sessionId)
-                                ? current.filter((sessionId) => sessionId !== participant.sessionId)
-                                : [...current, participant.sessionId],
-                            )}
-                        >
-                          <ChevronRight size={14} aria-hidden="true" />
-                        </VButton>
-                        <VButton
-                          type="button"
-                          contentLayout="plain"
-                          className={styles.agentIndexOpenButton}
-                          onClick={() => handleOpenDirectSession(participant.sessionId)}
-                          aria-label={lang === "zh" ? `打开 ${participantDisplay.name} 单聊` : `Open direct chat with ${participantDisplay.name}`}
-                          tooltip={lang === "zh"
-                            ? "打开该助手的单聊。群聊成员由群聊调度驱动；需要单独调整下一轮功能时，请在单聊中完成。"
-                            : "Open this Agent direct chat. Group members are driven by group scheduling; tune next-turn features in the direct chat."}
-                        >
-                          {renderAgentAvatar(
-                            styles.agentIndexAvatar,
-                            participantAvatarImageUrl,
-                            avatarInitials(participant.agentCode, participant.title),
-                          )}
-                          <span className={styles.agentIndexCopy}>
-                            <strong className={styles.agentIndexNameLine}>
-                              <span>{participantDisplay.name}</span>
-                              <em className={`${styles.agentRoleTag} ${styles[agentRoleClass(participantDisplay.tone)]}`}>
-                                {participantDisplay.functionLabel}
-                              </em>
-                            </strong>
-                            {participantDisplay.modelLabel ? (
-                              <span className={styles.agentModelLine} title={participantDisplay.modelLabel}>
-                                {participantDisplay.modelLabel}
-                              </span>
-                            ) : null}
-                          </span>
-                        </VButton>
-                        <span className={styles.agentIndexStatus}>
-                          {statusLabel(participant.status || participantSession?.status || "ready")}
-                        </span>
-                      </div>
-                      {expanded ? (
-                        <div className={styles.agentIndexDetails}>
-                          {expandedDetailQuery?.isPending ? (
-                            <p className={styles.contextLineCompact}>{t("loadingSession")}</p>
-                          ) : expandedDetailQuery?.isError ? (
-                            <p className={styles.panelNotice}>{describeError(expandedDetailQuery.error, t("loadFailed"))}</p>
-                          ) : (
-                            <>
-                              <div className={styles.resourceSplit}>
-                                <div className={styles.resourceMetric}>
-                                  <span>{t("contextInUse")}</span>
-                                  <strong>{formatContextUsage(memberContextUsed, memberContextLimit, locale)}</strong>
-                                </div>
-                                <div className={styles.resourceMetric}>
-                                  <span>{lang === "zh" ? "上下文占比" : "Context ratio"}</span>
-                                  <strong>{memberContextPercent}%</strong>
-                                </div>
-                              </div>
-                              <p className={styles.oneLineValue}>
-                                <span>{lang === "zh" ? "消息" : "Messages"}</span>
-                                {memberContext
-                                  ? `${numberFormatter.format(memberContext.messageCount)} ${lang === "zh" ? "条" : "messages"} · ${numberFormatter.format(memberContext.assistantMessageCount)} Agent`
-                                  : (lang === "zh" ? "暂无上下文统计" : "No context stats yet")}
-                              </p>
-                              <div className={styles.agentIndexMentalBlock}>
-                                <div className={styles.sectionHeader}>
-                                  <div className={styles.sectionIdentity}>
-                                    <p className={styles.blockEyebrow}>{t("mentalState")}</p>
-                                    <p className={styles.sectionMetaLine}>
-                                      {memberUpdated || (lang === "zh" ? "尚未更新" : "Not updated yet")}
-                                    </p>
-                                  </div>
-                                  <span className={styles.mentalStateBadge}>{memberMentalState}</span>
-                                </div>
-                                <p className={styles.contextLineCompact}>{memberMentalSummary}</p>
-                              </div>
-                            </>
-                          )}
-                        </div>
-                      ) : null}
-                    </article>
-                  );
-                  })}
-                </div>
-              ) : (
-                <div className={styles.agentIndexEmptyState}>
-                  <UsersRound size={24} />
-                  <p>
-                    {lang === "zh"
-                      ? "暂无可用群成员。请在右侧群设置中选择成员并应用变更。"
-                      : "No available group members. Choose members in the right group settings and apply the change."}
-                  </p>
-                </div>
-              )}
-            </section>
-          ) : (
-            <div className={styles.conversationIndexLayout}>
-            <div className={styles.sessionActionRow}>
-              <VButton
-                ref={agentCreateTriggerRef}
-                id="chat-agent-create-trigger"
-                type="button"
-                className={styles.newSessionButton}
-                icon={<Plus size={15} />}
-                onClick={handleCreateAgent}
-              >
-                <span>{lang === "zh" ? "新建 Agent" : "New Agent"}</span>
-              </VButton>
-              <VButton
-                type="button"
-                className={styles.newGroupButton}
-                icon={<UsersRound size={15} />}
-                onClick={handleToggleGroupComposer}
-                aria-expanded={groupComposerOpen}
-                isDisabled={createGroupRoomMutation.isPending}
-              >
-                <span>{groupComposerOpen ? (lang === "zh" ? "收起" : "Close") : (lang === "zh" ? "新建群聊" : "New group")}</span>
-              </VButton>
-            </div>
-            <div className={styles.conversationIndexScrollRegion}>
-            {conversationIndexPanel}
-            {groupComposerOpen ? (
-              <section className={styles.groupComposerPanel} aria-label={lang === "zh" ? "新建群聊" : "New group chat"}>
-                <label className={styles.groupComposerField}>
-                  <span>{lang === "zh" ? "群名" : "Name"}</span>
-                  <VNativeInput
-                    className={styles.groupComposerInput}
-                    value={groupTitleDraft}
-                    maxLength={80}
-                    onChange={(event) => setGroupTitleDraft(event.target.value)}
-                  />
-                </label>
-                <label className={styles.groupComposerField}>
-                  <span>{lang === "zh" ? "调度模式" : "Mode"}</span>
-                  <VNativeSelect
-                    className={styles.groupComposerInput}
-                    value={groupModeDraft}
-                    onChange={(event) => setGroupModeDraft(event.target.value)}
-                    disabled={chatRoomModesQuery.isPending || createGroupRoomMutation.isPending}
-                  >
-                    {readyChatRoomModes.map((mode) => (
-                      <option key={mode.id} value={mode.id}>
-                        {chatRoomModeLabel(mode, lang)}
-                      </option>
-                    ))}
-                  </VNativeSelect>
-                </label>
-                <label className={styles.groupComposerField}>
-                  <span>{lang === "zh" ? "对话目的" : "Purpose"}</span>
-                  <VNativeSelect
-                    className={styles.groupComposerInput}
-                    value={groupPurposeDraft}
-                    onChange={(event) => setGroupPurposeDraft(event.target.value)}
-                    disabled={chatRoomPurposesQuery.isPending || createGroupRoomMutation.isPending}
-                  >
-                    {availableChatRoomPurposes.map((purpose) => (
-                      <option key={purpose.id} value={purpose.id}>
-                        {chatRoomPurposeLabel(purpose, lang)}
-                      </option>
-                    ))}
-                  </VNativeSelect>
-                </label>
-                <div className={styles.groupAgentPicker} aria-label={lang === "zh" ? "选择参与助手" : "Choose agents"}>
-                  {agentsQuery.isPending ? (
-                    <p className={styles.groupComposerEmpty}>{lang === "zh" ? "正在读取助手..." : "Loading agents..."}</p>
-                  ) : groupCandidateAgents.length ? (
-                    groupCandidateAgents.map((agent) => {
-                      const selected = groupSelectedAgentIds.includes(agent.agentId);
-                      const display = agentDisplayInfo(agent, lang, { resolveModelLabel });
-                      return (
-                        <label key={agent.agentId} className={selected ? `${styles.groupAgentOption} ${styles.groupAgentOptionSelected}` : styles.groupAgentOption}>
-                          <VNativeInput
-                            type="checkbox"
-                            checked={selected}
-                            disabled={createGroupRoomMutation.isPending}
-                            onChange={() => handleToggleGroupAgent(agent.agentId)}
-                          />
-                          {renderAgentAvatar(
-                            styles.agentOptionAvatar,
-                            agent.avatarImageUrl,
-                            avatarInitials(agent.agentCode, display.name),
-                          )}
-                          <span>
-                            <strong>{display.name}</strong>
-                            <span className={styles.agentOptionMeta}>
-                              <small className={`${styles.agentRoleTag} ${styles[agentRoleClass(display.tone)]}`}>
-                                {display.functionLabel}
-                              </small>
-                              {display.modelLabel ? (
-                                <small className={styles.agentModelTag} title={display.modelLabel}>
-                                  {display.modelLabel}
-                                </small>
-                              ) : null}
-                            </span>
-                          </span>
-                        </label>
-                      );
-                    })
-                  ) : (
-                    <p className={styles.groupComposerEmpty}>{lang === "zh" ? "暂无可加入群聊的持久助手。" : "No persistent agents are available."}</p>
-                  )}
-                </div>
-                <VButton
-                  type="button"
-                  className={styles.createGroupButton}
-                  onClick={handleCreateGroupRoom}
-                  isDisabled={createGroupRoomMutation.isPending || groupSelectedAgentIds.length < 2 || !groupTitleDraft.trim()}
-                >
-                  <UsersRound size={15} />
-                  <span>{createGroupRoomMutation.isPending ? (lang === "zh" ? "创建中" : "Creating") : (lang === "zh" ? "创建群聊" : "Create group")}</span>
-                </VButton>
-              </section>
-            ) : null}
-            </div>
-            <section className={styles.systemEntryGroup} aria-label={lang === "zh" ? "系统入口" : "System entries"}>
-              <div className={styles.conversationTreeRootHeader}>
-                <span>{lang === "zh" ? "系统入口" : "System"}</span>
-                <strong>1</strong>
-              </div>
-              <VButton
-                type="button"
-                contentLayout="plain"
-                aria-current={projectBusActive ? "true" : undefined}
-                className={
-                  projectBusActive
-                    ? `${styles.systemEntryButton} ${styles.systemEntryButtonActive}`
-                    : styles.systemEntryButton
-                }
-                onClick={handleOpenProjectAgentBus}
-              >
-                <span className={styles.systemEntryIcon} aria-hidden="true">
-                  <BellRing size={16} />
-                </span>
-                <span className={styles.systemEntryCopy}>
-                  <span className={styles.systemEntryTitleRow}>
-                    <span className={styles.systemEntryTitle}>{lang === "zh" ? "助手通知流" : "Agent notice stream"}</span>
-                    {projectBusActive ? <span className={styles.sessionCurrentBadge}>{t("currentSession")}</span> : null}
-                  </span>
-                  <span className={styles.systemEntryMeta}>
-                    {lang === "zh" ? "全局广播 · 私信投递记录" : "Global broadcast · private delivery log"}
-                  </span>
-                </span>
-              </VButton>
-            </section>
-            </div>
-          )}
-          </div>
-        </aside>
+      <ChatConversationIndexRail
+        conversationIndexPaneClassName={conversationIndexPaneClassName}
+        conversationIndexCollapsed={conversationIndexCollapsed}
+        conversationIndexOverlayOpen={conversationIndexOverlayOpen}
+        lang={lang}
+        locale={locale}
+        t={t}
+        currentSessionLabel={t("currentSession")}
+        standardGroupRoomActive={standardGroupRoomActive}
+        rightIndexPanel={rightIndexPanel}
+        setRightIndexPanel={setRightIndexPanel}
+        sessionFilter={sessionFilter}
+        setSessionFilter={setSessionFilter}
+        availableGroupParticipantCount={availableGroupParticipantCount}
+        availableGroupParticipants={availableGroupParticipants}
+        activeGroupRoom={activeGroupRoom}
+        expandedGroupAgentSessionIds={expandedGroupAgentSessionIds}
+        setExpandedGroupAgentSessionIds={setExpandedGroupAgentSessionIds}
+        expandedGroupAgentDetailsBySessionId={expandedGroupAgentDetailsBySessionId}
+        sessionsById={sessionsById}
+        agentsById={agentsById}
+        mentalModelEnabledForNextTurn={mentalModelEnabledForNextTurn}
+        numberFormatter={numberFormatter}
+        conversationIndexPanel={conversationIndexPanel}
+        groupComposerOpen={groupComposerOpen}
+        createGroupRoomPending={createGroupRoomMutation.isPending}
+        createAgentButtonRef={agentCreateTriggerRef}
+        onCreateAgent={handleCreateAgent}
+        onToggleGroupComposer={handleToggleGroupComposer}
+        groupTitleDraft={groupTitleDraft}
+        setGroupTitleDraft={setGroupTitleDraft}
+        groupModeDraft={groupModeDraft}
+        setGroupModeDraft={setGroupModeDraft}
+        groupPurposeDraft={groupPurposeDraft}
+        setGroupPurposeDraft={setGroupPurposeDraft}
+        readyChatRoomModes={readyChatRoomModes}
+        availableChatRoomPurposes={availableChatRoomPurposes}
+        chatRoomModesPending={chatRoomModesQuery.isPending}
+        chatRoomPurposesPending={chatRoomPurposesQuery.isPending}
+        groupCandidateAgents={groupCandidateAgents}
+        agentsPending={agentsQuery.isPending}
+        groupSelectedAgentIds={groupSelectedAgentIds}
+        onToggleGroupAgent={handleToggleGroupAgent}
+        onCreateGroupRoom={handleCreateGroupRoom}
+        projectBusActive={projectBusActive}
+        onOpenProjectAgentBus={handleOpenProjectAgentBus}
+        onOpenDirectSession={handleOpenDirectSession}
+        resolveModelLabel={resolveModelLabel}
+        statusLabel={statusLabel}
+        describeError={describeError}
+        renderAgentAvatar={renderAgentAvatar}
+        avatarInitials={avatarInitials}
+        agentRoleClass={agentRoleClass}
+        avatarImageUrlFrom={avatarImageUrlFrom}
+        groupParticipantIdentity={groupParticipantIdentity}
+        latestMentalSnapshot={latestMentalSnapshot}
+        chatRoomModeLabel={chatRoomModeLabel}
+        chatRoomPurposeLabel={chatRoomPurposeLabel}
+      />
       {cacheDetailOpen && cacheDetailAvailable ? (
         <CacheDetailDialog
           averageCacheObservedTurnCount={averageCacheObservedTurnCount}

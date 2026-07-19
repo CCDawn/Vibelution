@@ -21,6 +21,8 @@ const localStylesObjectPattern = /const\s+styles\s*=/;
 const parentRouteStyleImportPattern = /from\s+["']\.\/([A-Za-z0-9]+Route)\.styles["']/g;
 const productSharedParentStyleConsumers = [
   "routes/chat/CacheDetailDialog.tsx",
+  "routes/chat/ChatConversationIndexRail.tsx",
+  "routes/chat/ChatStatusRail.tsx",
   "routes/chat/TokenCoreStatusPanel.tsx",
 ] as const;
 

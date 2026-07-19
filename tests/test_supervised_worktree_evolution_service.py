@@ -137,6 +137,31 @@ def _retryable_provider_failure_evaluator(_: Path, bundle_name: str, role: str, 
     }
 
 
+def _retryable_provider_reason_evaluator(_: Path, bundle_name: str, role: str, __: dict) -> dict:
+    assert role == "baseline"
+    return {
+        "role": role,
+        "status": "failed",
+        "score": 0.0,
+        "successes": 0,
+        "total": 1,
+        "failures": 1,
+        "bundleName": bundle_name,
+        "summary": "baseline score 0.0",
+        "cases": [
+            {
+                "caseId": "provider-down",
+                "status": "failed",
+                "reason": (
+                    "server_error: litellm.ServiceUnavailableError: "
+                    'OpenAIException - {"error":{"message":"Service temporarily unavailable","type":"api_error"}}'
+                ),
+                "llmFailure": {"detected": False},
+            }
+        ],
+    }
+
+
 def _make_candidate_repo(tmp_path: Path, project_root: Path, *, changed_path: str = "agent.py") -> Path:
     candidate = tmp_path / f"candidate-{changed_path.replace('/', '-')}"
     _init_repo(candidate)
@@ -515,6 +540,37 @@ def test_supervised_worktree_flow_stops_when_baseline_provider_transport_fails(t
     assert snapshot["candidateWorktree"] == {}
     assert snapshot["candidateModification"] == {}
     assert snapshot["candidate"] == {}
+    assert calls == {"modifier": 0, "worktree": 0}
+
+
+def test_supervised_worktree_flow_stops_when_retryable_provider_failure_is_only_in_case_reason(tmp_path):
+    project_root = tmp_path / "project"
+    _write_bundle(project_root)
+    calls = {"modifier": 0, "worktree": 0}
+
+    def modifier(*_: object) -> dict:
+        calls["modifier"] += 1
+        return {"status": "success"}
+
+    def worktree_factory(*_: object) -> dict:
+        calls["worktree"] += 1
+        return {"path": str(tmp_path / "candidate")}
+
+    snapshot = service.run_supervised_worktree_flow(
+        {"sourceKind": "bundle", "bundleName": "closed_loop_v1", "mode": "manual"},
+        project_root=project_root,
+        dependencies=service.WorktreeRunDependencies(
+            evaluation_runner=_retryable_provider_reason_evaluator,
+            candidate_modifier=modifier,
+            worktree_factory=worktree_factory,
+        ),
+    )
+
+    assert snapshot["status"] == "failed"
+    assert snapshot["phase"] == "baseline_unavailable"
+    assert snapshot["outcome"] == "baseline_unavailable"
+    assert snapshot["errorType"] == "ProviderTransportError"
+    assert "Service temporarily unavailable" in snapshot["error"]
     assert calls == {"modifier": 0, "worktree": 0}
 
 
@@ -1193,6 +1249,35 @@ def test_operator_terminate_action_cancels_active_supervised_worktree_run_and_un
     cancelled_event = next(item for item in scene_events if item[2] == "supervised_worktree_run.operator_cancelled")
     assert cancelled_event[1] == "operator_terminated"
     assert cancelled_event[3]["lifecycle"] is True
+
+
+def test_terminal_snapshot_cannot_regress_to_active_progress():
+    run_id = "swte-terminal-snapshot"
+    cancelled = {
+        "runId": run_id,
+        "runKind": service.RUN_KIND,
+        "status": "cancelled",
+        "phase": "operator_terminated",
+        "runtimeStatus": "cancelled",
+        "outcome": "operator_cancelled",
+        "latestMessage": "用户已终止。",
+    }
+    service._persist_snapshot(cancelled, active_run_id="")
+
+    stale_progress = {
+        **cancelled,
+        "status": "running",
+        "phase": "candidate_modify",
+        "runtimeStatus": "running",
+        "outcome": "",
+        "latestMessage": "stale worker progress",
+    }
+    persisted = service._persist_snapshot(stale_progress, active_run_id=run_id)
+
+    assert persisted["status"] == "cancelled"
+    assert persisted["phase"] == "operator_terminated"
+    assert persisted["latestMessage"] == "用户已终止。"
+    assert service.get_active_supervised_worktree_run() is None
 
 
 def test_get_active_run_reconciles_stopped_candidate_conversation(monkeypatch, tmp_path):
