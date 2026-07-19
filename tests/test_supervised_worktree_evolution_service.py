@@ -1195,6 +1195,35 @@ def test_operator_terminate_action_cancels_active_supervised_worktree_run_and_un
     assert cancelled_event[3]["lifecycle"] is True
 
 
+def test_terminal_snapshot_cannot_regress_to_active_progress():
+    run_id = "swte-terminal-snapshot"
+    cancelled = {
+        "runId": run_id,
+        "runKind": service.RUN_KIND,
+        "status": "cancelled",
+        "phase": "operator_terminated",
+        "runtimeStatus": "cancelled",
+        "outcome": "operator_cancelled",
+        "latestMessage": "用户已终止。",
+    }
+    service._persist_snapshot(cancelled, active_run_id="")
+
+    stale_progress = {
+        **cancelled,
+        "status": "running",
+        "phase": "candidate_modify",
+        "runtimeStatus": "running",
+        "outcome": "",
+        "latestMessage": "stale worker progress",
+    }
+    persisted = service._persist_snapshot(stale_progress, active_run_id=run_id)
+
+    assert persisted["status"] == "cancelled"
+    assert persisted["phase"] == "operator_terminated"
+    assert persisted["latestMessage"] == "用户已终止。"
+    assert service.get_active_supervised_worktree_run() is None
+
+
 def test_get_active_run_reconciles_stopped_candidate_conversation(monkeypatch, tmp_path):
     monkeypatch.setattr(service.work_run_store, "WORK_RUNS_DIR", tmp_path / "work_runs")
     monkeypatch.setattr(service, "record_runtime_scene_event", lambda *args, **kwargs: {"accepted": True})

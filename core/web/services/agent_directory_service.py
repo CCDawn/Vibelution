@@ -2235,19 +2235,24 @@ def _with_runtime_tool_grants(
         return policy
     allowed = _tool_name_list(policy.get("allowedTools") or [])
     blocked = set(_tool_name_list(policy.get("blockedTools") or []))
+    effective_grants = [tool for tool in runtime_grants if tool and tool not in blocked]
     added: list[str] = []
-    for tool in runtime_grants:
-        if not tool or tool in blocked or tool in allowed:
+    for tool in effective_grants:
+        if tool in allowed:
             continue
         allowed.append(tool)
         added.append(tool)
-    if not added:
+    grants_mutation = any(tool in MUTATING_AGENT_TOOL_NAMES for tool in effective_grants)
+    mutation_access = str(policy.get("mutationAccess") or "inherit").strip()
+    runtime_mutation_access = "controlled" if grants_mutation and mutation_access == "none" else mutation_access
+    if not added and runtime_mutation_access == mutation_access:
         return policy
     return {
         **policy,
         "allowedTools": allowed,
         "temporaryAllowedTools": _tool_name_list(list(policy.get("temporaryAllowedTools") or []) + added),
         "runtimeToolSource": str(source or "").strip(),
+        "mutationAccess": runtime_mutation_access,
     }
 
 

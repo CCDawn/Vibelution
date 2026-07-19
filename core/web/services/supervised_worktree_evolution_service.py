@@ -2712,6 +2712,12 @@ def _append_event(snapshot: dict[str, Any], event_type: str, message: str) -> No
 
 def _persist_snapshot(snapshot: dict[str, Any], *, active_run_id: str = "") -> dict[str, Any]:
     payload = _clone(snapshot)
+    run_id = str(payload.get("runId") or "").strip()
+    if run_id and str(payload.get("status") or "").strip().lower() in _ACTIVE_STATUSES:
+        existing = _work_run_store().load_snapshot(RUN_KIND, run_id)
+        if isinstance(existing, dict) and str(existing.get("status") or "").strip().lower() in _TERMINAL_STATUSES:
+            _publish_snapshot(existing)
+            return existing
     persisted = _work_run_store().persist_snapshot(RUN_KIND, payload, active_run_id=active_run_id)
     _publish_snapshot(persisted)
     return persisted
