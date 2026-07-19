@@ -71,6 +71,8 @@ describe("SkillsRoute layout contract", () => {
 
   it("keeps the narrow skill workspace in normal document flow with compact empty details", () => {
     expect(routeSource).toContain("workspaceClass");
+    expect(stylesSource).toContain("clamp(240px,26vw,340px)");
+    expect(stylesSource).toContain("minmax(0,1fr)");
     expect(stylesSource).toContain("max-[920px]:grid-cols-1");
     expect(stylesSource).toContain("max-[920px]:content-start");
     expect(stylesSource).toContain("max-[920px]:overflow-auto");

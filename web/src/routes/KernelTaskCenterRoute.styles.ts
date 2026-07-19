@@ -6,15 +6,15 @@ const rowSurface =
   "rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--vui-border-subtle)_58%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-row)_74%,transparent)] p-2";
 
 const routeClass = "grid h-full min-h-0 min-w-0 max-w-full grid-rows-[auto_minmax(0,1fr)] overflow-hidden overflow-x-hidden";
-const headerClass = "mx-2.5 mt-2 min-w-0 border-[color-mix(in_srgb,var(--vui-border-subtle)_78%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-panel)_70%,transparent)]";
+const headerClass = "mx-2 mt-1.5 min-w-0 border-[color-mix(in_srgb,var(--vui-border-subtle)_78%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-panel)_70%,transparent)]";
 const headerActionsClass = "flex flex-wrap items-center justify-end gap-2 max-[720px]:items-stretch max-[720px]:flex-col";
 const statusFilterClass = "flex w-fit max-w-full min-w-[210px] items-center gap-[7px] text-[var(--vui-font-xs)] text-vui-fg-secondary";
 const statusFilterLabelClass = "whitespace-nowrap text-[var(--vui-font-xs)] font-bold";
 const iconButtonClass = "h-[34px] w-[34px] min-h-[34px] rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--vui-border-soft)_78%,transparent)] bg-[color-mix(in_srgb,var(--vui-control-muted)_74%,transparent)] text-vui-fg-secondary hover:border-[var(--border-strong)] hover:bg-[color-mix(in_srgb,var(--vui-control-muted-hover)_84%,transparent)] hover:text-vui-fg-primary";
-const workspaceClass = "grid min-h-0 min-w-0 max-w-full grid-cols-[minmax(320px,420px)_minmax(0,1fr)] gap-2 overflow-hidden overflow-x-hidden px-2.5 pb-2.5 pt-2 max-[1120px]:grid-cols-1 max-[1120px]:grid-rows-[minmax(180px,32vh)_minmax(0,1fr)] max-[720px]:grid-cols-[minmax(0,1fr)] max-[720px]:grid-rows-[minmax(180px,34vh)_minmax(360px,1fr)] max-[720px]:p-2";
+const workspaceClass = "grid min-h-0 min-w-0 max-w-full grid-cols-[clamp(280px,28vw,400px)_minmax(0,1fr)] gap-2 overflow-hidden overflow-x-hidden px-2 pb-2 pt-1.5 max-[1120px]:grid-cols-1 max-[1120px]:grid-rows-[minmax(180px,32vh)_minmax(0,1fr)] max-[720px]:grid-cols-[minmax(0,1fr)] max-[720px]:grid-rows-[minmax(180px,34vh)_minmax(360px,1fr)] max-[720px]:p-2";
 const paneClass = `min-h-0 min-w-0 overflow-hidden ${panelSurface}`;
 const taskPaneClass = `${paneClass} grid grid-rows-[auto_minmax(0,1fr)]`;
-const detailPaneClass = `${paneClass} grid max-w-full grid-cols-[minmax(0,1fr)_minmax(300px,0.86fr)] grid-rows-[minmax(0,1fr)] gap-2 p-2 max-[1280px]:grid-cols-1 max-[1280px]:grid-rows-[minmax(0,0.98fr)_minmax(260px,0.82fr)] max-[720px]:grid-rows-none max-[720px]:overflow-y-auto max-[720px]:overflow-x-hidden`;
+const detailPaneClass = `${paneClass} grid max-w-full grid-cols-[minmax(0,1fr)_clamp(280px,26vw,380px)] grid-rows-[minmax(0,1fr)] gap-2 p-2 max-[1280px]:grid-cols-1 max-[1280px]:grid-rows-[minmax(0,0.98fr)_minmax(240px,0.82fr)] max-[720px]:grid-rows-none max-[720px]:overflow-y-auto max-[720px]:overflow-x-hidden`;
 const detailContentClass = "grid min-h-0 min-w-0 max-w-full content-start gap-2 overflow-auto overflow-x-hidden pr-1";
 const panelHeaderClass = "flex items-center justify-between gap-2 border-b border-vui-border-soft p-2";
 const eyebrowClass = "m-0 mb-0.5 text-[var(--vui-font-xs)] font-bold uppercase tracking-[0.08em] text-vui-fg-tertiary";
