@@ -4,6 +4,7 @@ from fastapi.testclient import TestClient
 import pytest
 
 from config.models import AppConfig
+from core.authorization.tool_authorization_service import resolve_enforced_authorization
 from core.ui.chat_state import load_chat_state, save_chat_state
 from core.web.app import create_app
 from core.web.control import CONTROL_TOKEN_HEADER, get_control_token
@@ -177,14 +178,19 @@ def test_supervised_runtime_tools_are_granted_only_during_role_runtime(tmp_path,
     with agent_directory_service.active_agent_runtime(
         baseline["agentId"],
         session_id="session-supervised-baseline",
+        turn_id="turn-supervised-baseline",
         supervised_role="baseline",
-    ):
+    ) as runtime:
         visible = agent_directory_service.effective_visible_tool_names_for_current_agent(probe_tools)
+        authorization = resolve_enforced_authorization(runtime=runtime)
 
     assert "open_evolution_transaction_tool" in visible
     assert "close_evolution_transaction_tool" in visible
     assert "python_lint_tool" in visible
     assert "trigger_self_restart_tool" not in visible
+    assert runtime["toolPolicy"]["mutationAccess"] == "controlled"
+    assert "open_evolution_transaction_tool" in authorization.decision.executable_tools
+    assert "close_evolution_transaction_tool" in authorization.decision.executable_tools
     assert agent_directory_service.resolve_tool_policy_for_agent(baseline["agentId"])["allowedTools"] == []
 
     with agent_directory_service.active_agent_runtime(
