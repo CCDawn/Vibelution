@@ -150,7 +150,7 @@ const styles = {
   providerModelsLayout:
     "vui-routes-configroute providerModelsLayout grid h-full min-h-0 min-w-0 [grid-template-rows:auto_minmax(0,1fr)] gap-3 overflow-hidden",
   providerModeButton:
-    "vui-routes-configroute providerModeButton min-h-10 px-3.5 text-[var(--vui-font-sm)] font-semibold",
+    "vui-routes-configroute providerModeButton min-h-10 px-3.5 [font-size:var(--vui-font-sm)] font-semibold",
   providerRouteEditSurface:
     "vui-routes-configroute providerRouteEditSurface grid min-w-0 gap-2",
   providerRouteEditGrid:
@@ -158,7 +158,7 @@ const styles = {
   providerRouteEditField:
     "vui-routes-configroute providerRouteEditField grid min-w-0 gap-1",
   providerRouteEditWarning:
-    "vui-routes-configroute providerRouteEditWarning m-0 text-[var(--vui-font-xs)] text-[var(--state-warning)]",
+    "vui-routes-configroute providerRouteEditWarning m-0 [font-size:var(--vui-font-xs)] text-[var(--state-warning)]",
   countPill:
     "vui-routes-configroute countPill [display:inline-flex] [align-items:center] [justify-content:center] [min-width:30px] [min-height:28px] [padding:0_9px] [border:1px_solid_var(--border-hairline)] [border-radius:999px] [color:var(--fg-secondary)] [background:var(--vui-surface-row)] [font-size:var(--vui-font-xs)] [font-weight:700]",
   dangerButton:

@@ -428,6 +428,9 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("queryKeys.agentSummary(true)");
     expect(routeSource).toContain("queryKeys.agentConfigWorkspace()");
     expect(routeSource).toContain("const workspace = resolveAgentWorkspaceSource({");
+    expect(routeSource).toContain('searchParams.get("create") === "1"');
+    expect(routeSource).toContain("setCreateOpen(true)");
+    expect(routeSource).toContain("setCreateWizardOpen(false)");
     expect(routeSource).toContain('const fullWorkspaceNeeded = Boolean(createOpen || activePane === "config" || activePane === "activity" || requestedAgentId)');
     expect(routeSource).toContain("enabled: fullWorkspaceNeeded");
     expect(routeSource).toContain("staleTime: 10_000");

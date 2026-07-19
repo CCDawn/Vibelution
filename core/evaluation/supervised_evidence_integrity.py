@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Set
 
@@ -109,6 +110,7 @@ def _safe_reference_paths(payload: Dict[str, Any], allowed_roots: Iterable[Path]
         "report_path",
         "baseline_report_path",
         "candidate_report_path",
+        "touched_files",
     }
     roots = tuple(_resolved(root) for root in allowed_roots)
     for key, value in _walk_values(payload):
@@ -206,3 +208,223 @@ def build_supervised_evidence_preview(evidence_root: Path) -> Dict[str, Any]:
         },
         "sessions": sessions,
     }
+
+
+def _write_bytes_atomic(path: Path, content: bytes) -> None:
+    temporary = path.with_name(f".{path.name}.tmp-{os.getpid()}")
+    temporary.write_bytes(content)
+    os.replace(temporary, path)
+
+
+def _write_json_atomic(path: Path, payload: Dict[str, Any]) -> None:
+    content = (json.dumps(payload, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
+    _write_bytes_atomic(path, content)
+
+
+def _matching_bounded_files(workspace_root: Path, tokens: Set[str]) -> Set[Path]:
+    matches: Set[Path] = set()
+    allowed_suffixes = {".json", ".jsonl", ".html"}
+    for search_root in (workspace_root / "supervised_evolution", workspace_root / "evolution"):
+        if not search_root.exists():
+            continue
+        for path in search_root.rglob("*"):
+            if not path.is_file() or path.suffix.lower() not in allowed_suffixes:
+                continue
+            try:
+                text = path.read_text(encoding="utf-8")
+            except (OSError, UnicodeError):
+                continue
+            if any(token in text for token in tokens):
+                matches.add(_resolved(path))
+    return matches
+
+
+def _archive_relative_path(source: Path, workspace_root: Path) -> Path:
+    try:
+        return source.relative_to(workspace_root)
+    except ValueError:
+        digest = hashlib.sha256(str(source).encode("utf-8")).hexdigest()[:12]
+        return Path("external") / digest / source.name
+
+
+def _filter_jsonl(path: Path, tokens: Set[str]) -> None:
+    retained = [
+        line
+        for line in path.read_text(encoding="utf-8").splitlines(keepends=True)
+        if not any(token in line for token in tokens)
+    ]
+    _write_bytes_atomic(path, "".join(retained).encode("utf-8"))
+
+
+def _remove_lineage_proposals(path: Path, proposal_ids: Set[str]) -> None:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    cases = payload.get("cases") if isinstance(payload, dict) else None
+    if not isinstance(cases, list):
+        raise ValueError(f"lineage 索引结构无法安全清理: {path}")
+    retained_cases: List[Dict[str, Any]] = []
+    for case in cases:
+        if not isinstance(case, dict):
+            retained_cases.append(case)
+            continue
+        chain = case.get("chain")
+        entries = chain if isinstance(chain, list) else []
+        retained_chain = [
+            entry
+            for entry in entries
+            if not (
+                isinstance(entry, dict)
+                and str(entry.get("proposal_id") or "").strip() in proposal_ids
+            )
+        ]
+        if retained_chain:
+            updated = dict(case)
+            updated["chain"] = retained_chain
+            updated["proposal_count"] = len(retained_chain)
+            updated["observation_cycles"] = sum(
+                int(entry.get("observation_count") or 0)
+                for entry in retained_chain
+                if isinstance(entry, dict)
+            )
+            retained_cases.append(updated)
+    if not retained_cases:
+        path.unlink()
+        return
+    payload["cases"] = retained_cases
+    payload["case_count"] = len(retained_cases)
+    payload["proposal_count"] = sum(
+        len(case.get("chain") or []) for case in retained_cases if isinstance(case, dict)
+    )
+    _write_json_atomic(path, payload)
+
+
+def archive_supervised_test_contamination(
+    *,
+    evidence_root: Path,
+    session_ids: Iterable[str],
+    archive_root: Path,
+) -> Dict[str, Any]:
+    """Archive exact bytes, then remove only strongly verified test contamination."""
+
+    root = _resolved(evidence_root)
+    workspace_root = root.parent
+    archive = _resolved(archive_root)
+    requested = {str(session_id).strip() for session_id in session_ids if str(session_id).strip()}
+    if not requested:
+        raise ValueError("至少需要一个 session_id")
+    if archive.exists():
+        raise FileExistsError(f"归档目录已存在，拒绝覆盖: {archive}")
+
+    preview = build_supervised_evidence_preview(root)
+    sessions_by_id = {session["session_id"]: session for session in preview["sessions"]}
+    missing = sorted(requested - sessions_by_id.keys())
+    if missing:
+        raise ValueError(f"未找到监督进化会话: {', '.join(missing)}")
+    unverified = sorted(
+        session_id
+        for session_id in requested
+        if sessions_by_id[session_id]["classification"] != "test_contamination"
+    )
+    if unverified:
+        raise ValueError(f"会话未被强证据确认为测试污染: {', '.join(unverified)}")
+
+    decision_payloads: Dict[str, Dict[str, Any]] = {}
+    proposal_ids: Set[str] = set()
+    dedicated_paths: Set[Path] = set()
+    for session_id in requested:
+        decision_path = Path(sessions_by_id[session_id]["decision_path"])
+        payload = json.loads(decision_path.read_text(encoding="utf-8"))
+        decision_payloads[session_id] = payload
+        dedicated_paths.add(_resolved(decision_path))
+        dedicated_paths.add(_resolved(root / "policy" / f"{session_id}.json"))
+        session_dir = root / "sessions" / session_id
+        if session_dir.exists():
+            dedicated_paths.update(_resolved(path) for path in session_dir.rglob("*") if path.is_file())
+        for key, value in _walk_values(payload):
+            if key == "proposal_id" and isinstance(value, str) and value.strip():
+                proposal_ids.add(value.strip())
+        for path in _safe_reference_paths(
+            payload,
+            allowed_roots=(root, workspace_root / "evolution"),
+        ):
+            if path.parent == workspace_root / "evolution" / "proposals" and path.name != "lineage_index.json":
+                dedicated_paths.add(path)
+
+    tokens = set(requested) | proposal_ids
+    matched_paths = _matching_bounded_files(workspace_root, tokens)
+    shared_jsonl = {
+        _resolved(root / "history.jsonl"),
+        _resolved(root / "policy" / "candidate_observation_pool.jsonl"),
+        _resolved(workspace_root / "evolution" / "audit.jsonl"),
+    }
+    lineage_path = _resolved(workspace_root / "evolution" / "proposals" / "lineage_index.json")
+    dashboard_path = _resolved(root / "dashboard" / "index.html")
+    supported_paths = dedicated_paths | shared_jsonl | {lineage_path, dashboard_path}
+    unsupported = sorted(matched_paths - supported_paths, key=lambda path: str(path).lower())
+    if unsupported:
+        raise ValueError(
+            "发现未分类的关联证据，拒绝自动归档: " + ", ".join(str(path) for path in unsupported)
+        )
+    affected_paths = sorted(
+        (matched_paths | {path for path in dedicated_paths if path.exists()}),
+        key=lambda path: str(path).lower(),
+    )
+
+    archive.mkdir(parents=True)
+    files_root = archive / "files"
+    records: List[Dict[str, Any]] = []
+    for source in affected_paths:
+        relative = _archive_relative_path(source, workspace_root)
+        destination = files_root / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, destination)
+        source_hash = hashlib.sha256(source.read_bytes()).hexdigest()
+        archive_hash = hashlib.sha256(destination.read_bytes()).hexdigest()
+        if source_hash != archive_hash:
+            raise OSError(f"归档哈希校验失败: {source}")
+        records.append(
+            {
+                "source_path": str(source),
+                "archive_path": str(destination),
+                "relative_path": str(relative),
+                "size_bytes": source.stat().st_size,
+                "sha256": source_hash,
+            }
+        )
+    manifest = {
+        "schema_version": 1,
+        "status": "prepared",
+        "operation": "archive_supervised_test_contamination",
+        "evidence_root": str(root),
+        "session_ids": sorted(requested),
+        "proposal_ids": sorted(proposal_ids),
+        "files": records,
+    }
+    _write_json_atomic(archive / "manifest.json", manifest)
+
+    for path in sorted(shared_jsonl & matched_paths, key=lambda item: str(item).lower()):
+        _filter_jsonl(path, tokens)
+    if lineage_path in matched_paths:
+        _remove_lineage_proposals(lineage_path, proposal_ids)
+    for path in sorted(dedicated_paths, key=lambda item: str(item).lower()):
+        if path.exists():
+            path.unlink()
+    if dashboard_path in matched_paths and dashboard_path.exists():
+        dashboard_path.unlink()
+    for session_id in requested:
+        session_dir = root / "sessions" / session_id
+        if session_dir.exists():
+            try:
+                session_dir.rmdir()
+            except OSError:
+                pass
+
+    completion = {
+        "schema_version": 1,
+        "status": "completed",
+        "manifest_path": str(archive / "manifest.json"),
+        "session_ids": sorted(requested),
+        "archived_files": len(records),
+        "remaining_preview": build_supervised_evidence_preview(root)["summary"],
+    }
+    _write_json_atomic(archive / "completion.json", completion)
+    return completion

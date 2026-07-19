@@ -6106,13 +6106,7 @@ export function ChatCodingRoute() {
   }
 
   function handleCreateAgent() {
-    setActiveGroupRoomId("");
-    setRightIndexPanel("conversations");
-    setSessionComposerErrors((current) => ({
-      ...current,
-      __sessions__: "",
-    }));
-    createSessionMutation.mutate({ agentId: "" });
+    navigate("/agents?create=1");
   }
 
   function handleOpenProjectAgentBus() {
@@ -8177,9 +8171,8 @@ export function ChatCodingRoute() {
                 className={styles.newSessionButton}
                 icon={<Plus size={15} />}
                 onClick={handleCreateAgent}
-                isDisabled={createSessionMutation.isPending}
               >
-                <span>{createSessionMutation.isPending ? t("creatingSession") : (lang === "zh" ? "新建 Agent" : "New Agent")}</span>
+                <span>{lang === "zh" ? "新建 Agent" : "New Agent"}</span>
               </VButton>
               <VButton
                 type="button"

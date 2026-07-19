@@ -15,9 +15,9 @@ const rowSurface =
 const warmRowSurface =
   "rounded-[var(--radius-control)] border border-[color:color-mix(in_srgb,var(--accent-warm)_18%,transparent)] bg-[color:color-mix(in_srgb,var(--accent-warm)_5%,transparent)]";
 const buttonBase =
-  "inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 text-[var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55";
+  "inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55";
 const pillBase =
-  "inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 text-[var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)]";
+  "inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 [font-size:var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)]";
 const activeTone =
   "border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))] text-[var(--accent-cool)]";
 const successTone =
@@ -27,7 +27,7 @@ const warningTone =
 const errorTone =
   "border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]";
 const compactField =
-  "grid gap-1 text-[var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full";
+  "grid gap-1 [font-size:var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full";
 const scrollStack = "grid min-h-0 content-start gap-1 overflow-auto";
 
 const styles = {
@@ -40,7 +40,7 @@ const styles = {
   agentPolicyPanel:
     "agentPolicyPanel min-w-0 rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color:color-mix(in_srgb,var(--accent-cool)_7%,transparent)] p-2 text-[var(--accent-cool)]",
   agentPolicySelect:
-    "agentPolicySelect min-w-0 grid gap-1 text-[var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    "agentPolicySelect min-w-0 grid gap-1 [font-size:var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
   agentScopeBar:
     "agentScopeBar min-w-0 flex flex-wrap items-center gap-1.5 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
   bulkActionBar:
@@ -50,7 +50,7 @@ const styles = {
   bulkPolicyToolRow:
     "bulkPolicyToolRow min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2 border-[color-mix(in_srgb,var(--accent-warm)_24%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_8%,transparent)] text-[var(--accent-warm)]",
   bulkSummary:
-    "bulkSummary min-w-0 max-w-full rounded-[var(--radius-control)] border border-[color:color-mix(in_srgb,var(--border-soft)_58%,transparent)] bg-[color:color-mix(in_srgb,var(--vui-surface-row)_50%,transparent)] px-2 py-[4px] text-[var(--vui-font-xs)]",
+    "bulkSummary min-w-0 max-w-full rounded-[var(--radius-control)] border border-[color:color-mix(in_srgb,var(--border-soft)_58%,transparent)] bg-[color:color-mix(in_srgb,var(--vui-surface-row)_50%,transparent)] px-2 py-[4px] [font-size:var(--vui-font-xs)]",
   controlStrip:
     "controlStrip min-w-0 flex flex-wrap items-center gap-1.5",
   contextualHint:
@@ -72,9 +72,9 @@ const styles = {
   detailPanel:
     `detailPanel min-w-0 max-w-full ${panelSurface} grid content-start gap-[7px] overflow-auto`,
   emptyDetail:
-    `emptyDetail min-w-0 max-w-full ${panelSurface} text-[var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]`,
+    `emptyDetail min-w-0 max-w-full ${panelSurface} [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]`,
   emptyState:
-    "emptyState min-w-0 text-[var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
+    "emptyState min-w-0 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
   filterButton:
     `filterButton min-w-0 ${buttonBase}`,
   filterButtonActive:
@@ -110,7 +110,7 @@ const styles = {
   paneCollapsed:
     "paneCollapsed min-w-0 hidden",
   panelEyebrow:
-    "panelEyebrow min-w-0 text-[var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-tertiary)]",
+    "panelEyebrow min-w-0 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-tertiary)]",
   panelHeader:
     "panelHeader min-w-0 flex flex-wrap items-start justify-between gap-2",
   permissionSummaryCards:
@@ -120,9 +120,9 @@ const styles = {
   policyDraftPanel:
     `policyDraftPanel min-w-0 max-w-full ${panelSurface} grid gap-[7px]`,
   policyDraftSummary:
-    `policyDraftSummary min-w-0 max-w-full ${rowSurface} px-2 py-[5px] !grid grid-cols-[repeat(4,minmax(0,1fr))] gap-[5px] text-[var(--vui-font-xs)] max-[900px]:grid-cols-[repeat(2,minmax(0,1fr))] max-[520px]:grid-cols-[1fr]`,
+    `policyDraftSummary min-w-0 max-w-full ${rowSurface} px-2 py-[5px] !grid grid-cols-[repeat(4,minmax(0,1fr))] gap-[5px] [font-size:var(--vui-font-xs)] max-[900px]:grid-cols-[repeat(2,minmax(0,1fr))] max-[520px]:grid-cols-[1fr]`,
   policyHint:
-    "policyHint min-w-0 text-[var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
+    "policyHint min-w-0 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
   policyMeta:
     "policyMeta min-w-0 flex flex-wrap items-center gap-1",
   policyPanel:
@@ -162,7 +162,7 @@ const styles = {
   policy_missing:
     "policy_missing min-w-0",
   policy_muted:
-    "policy_muted min-w-0 text-[var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
+    "policy_muted min-w-0 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
   policy_neutral:
     "policy_neutral min-w-0",
   policy_ok:
@@ -222,7 +222,7 @@ const styles = {
   readiness_missing:
     "readiness_missing min-w-0",
   readiness_muted:
-    "readiness_muted min-w-0 text-[var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
+    "readiness_muted min-w-0 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
   readiness_neutral:
     "readiness_neutral min-w-0",
   readiness_ok:
@@ -260,13 +260,13 @@ const styles = {
   route:
     "route min-w-0 max-w-full grid h-full min-h-0 grid-rows-[auto_auto_minmax(0,1fr)] content-start overflow-hidden overflow-x-hidden text-[var(--fg-primary)]",
   rowSelect:
-    "rowSelect inline-grid h-7 w-7 min-w-7 place-items-center rounded-[var(--radius-control)] border border-[color:color-mix(in_srgb,var(--vui-border-subtle)_58%,transparent)] bg-[color:color-mix(in_srgb,var(--vui-surface-row)_54%,transparent)] text-[var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:sr-only",
+    "rowSelect inline-grid h-7 w-7 min-w-7 place-items-center rounded-[var(--radius-control)] border border-[color:color-mix(in_srgb,var(--vui-border-subtle)_58%,transparent)] bg-[color:color-mix(in_srgb,var(--vui-surface-row)_54%,transparent)] [font-size:var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:sr-only",
   schemaDisclosure:
-    "schemaDisclosure min-w-0 font-mono text-[var(--vui-font-xs)]",
+    "schemaDisclosure min-w-0 font-mono [font-size:var(--vui-font-xs)]",
   scopeCopy:
-    "scopeCopy min-w-0 text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
+    "scopeCopy min-w-0 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
   scopeSelect:
-    "scopeSelect min-w-0 grid gap-1 text-[var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full",
+    "scopeSelect min-w-0 grid gap-1 [font-size:var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full",
   scopeStats:
     "scopeStats min-w-0 grid gap-2 grid-cols-[repeat(auto-fit,minmax(9rem,1fr))]",
   searchBox:
@@ -320,7 +320,7 @@ const styles = {
   state_missing:
     "state_missing min-w-0",
   state_muted:
-    "state_muted min-w-0 text-[var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
+    "state_muted min-w-0 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
   state_neutral:
     "state_neutral min-w-0",
   state_ok:
@@ -376,7 +376,7 @@ const styles = {
   status_missing:
     "status_missing min-w-0",
   status_muted:
-    "status_muted min-w-0 text-[var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
+    "status_muted min-w-0 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
   status_neutral:
     "status_neutral min-w-0",
   status_ok:
@@ -402,7 +402,7 @@ const styles = {
   summaryGrid:
     "summaryGrid min-w-0 grid gap-2 flex-1 grid-cols-[repeat(auto-fit,minmax(6.5rem,1fr))]",
   testArgs:
-    "testArgs min-w-0 font-mono text-[var(--vui-font-xs)]",
+    "testArgs min-w-0 font-mono [font-size:var(--vui-font-xs)]",
   testPanel:
     "testPanel min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] bg-[color:color-mix(in_srgb,var(--vui-surface-panel)_58%,transparent)] p-2",
   toolAgentFitPanel:
@@ -420,21 +420,21 @@ const styles = {
   toolBundleGroup:
     "toolBundleGroup min-w-0 max-w-full rounded-[var(--radius-control)] border border-[color:color-mix(in_srgb,var(--accent-warm)_16%,transparent)] bg-[color:color-mix(in_srgb,var(--accent-warm)_4%,transparent)] p-[5px]",
   toolBundleHeader:
-    "toolBundleHeader min-w-0 flex flex-wrap items-center justify-between gap-1 px-1 pb-[3px] text-[var(--vui-font-xs)]",
+    "toolBundleHeader min-w-0 flex flex-wrap items-center justify-between gap-1 px-1 pb-[3px] [font-size:var(--vui-font-xs)]",
   toolBundleTitle:
     "inline-flex items-center gap-1.5",
   toolBundleItems:
     "toolBundleItems min-w-0 grid min-h-0 content-start gap-1 overflow-auto",
   toolBundleSelect:
-    "toolBundleSelect min-w-0 grid gap-1 text-[var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full !grid grid-cols-[auto_minmax(0,1fr)] items-center gap-[7px]",
+    "toolBundleSelect min-w-0 grid gap-1 [font-size:var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full !grid grid-cols-[auto_minmax(0,1fr)] items-center gap-[7px]",
   toolBundleSummary:
     "toolBundleSummary min-w-0 max-w-full truncate rounded-[var(--radius-control)] border border-[color:color-mix(in_srgb,var(--accent-warm)_18%,transparent)] bg-[color:color-mix(in_srgb,var(--accent-warm)_5%,transparent)] px-2 py-[5px] text-[var(--fg-secondary)]",
   toolButton:
-    "toolButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 text-[var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55 border-[color-mix(in_srgb,var(--accent-warm)_24%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_8%,transparent)] text-[var(--accent-warm)]",
+    "toolButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55 border-[color-mix(in_srgb,var(--accent-warm)_24%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_8%,transparent)] text-[var(--accent-warm)]",
   toolButtonActive:
     "toolButtonActive min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
   toolCopy:
-    "toolCopy grid min-w-0 gap-[1px] text-left text-[var(--vui-font-xs)] leading-tight text-[var(--fg-secondary)] [&>strong]:truncate [&>span]:truncate",
+    "toolCopy grid min-w-0 gap-[1px] text-left [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-secondary)] [&>strong]:truncate [&>span]:truncate",
   toolDetailPanel:
     "toolDetailPanel min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--accent-warm)_24%,transparent)] bg-[color:color-mix(in_srgb,var(--accent-warm)_7%,transparent)] p-[7px] text-[var(--accent-warm)] grid min-h-0 content-start gap-[7px] overflow-auto",
   toolList:
@@ -442,7 +442,7 @@ const styles = {
   toolPermissionGroup:
     "toolPermissionGroup min-w-0 max-w-full rounded-[var(--radius-control)] border border-[color:color-mix(in_srgb,var(--accent-warm)_16%,transparent)] bg-[color:color-mix(in_srgb,var(--accent-warm)_4%,transparent)] p-[5px]",
   toolPermissionGroupHeader:
-    "toolPermissionGroupHeader min-w-0 flex flex-wrap items-center justify-between gap-1 px-1 pb-[3px] text-[var(--vui-font-xs)]",
+    "toolPermissionGroupHeader min-w-0 flex flex-wrap items-center justify-between gap-1 px-1 pb-[3px] [font-size:var(--vui-font-xs)]",
   toolPermissionGroupList:
     "toolPermissionGroupList min-w-0 grid min-h-0 content-start gap-1 overflow-auto",
   toolPermissionList:
@@ -456,7 +456,7 @@ const styles = {
   workspace:
     "workspace min-w-0 max-w-full grid h-full min-h-0 gap-[7px] p-[7px] !grid grid-cols-[minmax(0,var(--tools-left-panel-width))_auto_minmax(0,1fr)] grid-rows-[minmax(0,1fr)] overflow-hidden overflow-x-hidden max-[760px]:grid-cols-[minmax(0,1fr)] max-[760px]:grid-rows-[minmax(220px,42vh)_minmax(420px,1fr)] max-[760px]:overflow-y-auto max-[760px]:overflow-x-hidden",
   workspaceScopePanel:
-    "workspaceScopePanel min-w-0 max-w-full rounded-[var(--radius-control)] border border-[color:color-mix(in_srgb,var(--border-soft)_58%,transparent)] bg-[color:color-mix(in_srgb,var(--vui-surface-row)_58%,transparent)] !grid grid-cols-[repeat(3,minmax(0,1fr))] gap-[5px] px-2 py-[5px] text-[var(--vui-font-xs)] max-[720px]:grid-cols-[1fr]",
+    "workspaceScopePanel min-w-0 max-w-full rounded-[var(--radius-control)] border border-[color:color-mix(in_srgb,var(--border-soft)_58%,transparent)] bg-[color:color-mix(in_srgb,var(--vui-surface-row)_58%,transparent)] !grid grid-cols-[repeat(3,minmax(0,1fr))] gap-[5px] px-2 py-[5px] [font-size:var(--vui-font-xs)] max-[720px]:grid-cols-[1fr]",
 } as const;
 
 export default styles;

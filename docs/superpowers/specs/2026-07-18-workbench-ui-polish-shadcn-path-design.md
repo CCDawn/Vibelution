@@ -87,6 +87,8 @@ Renderer+tokens  →  唯一视觉实现（今日 HeroUI，可换 shadcn/Radix�
 | **6** | Tools / Skills / Usage / Kernel 同构：列表轨 clamp、主区 minmax(0,1fr)、Usage 去 elevation、边距密度 | layout 测试 + build |
 | **7** | 双主题加固：shadcn form 的 color-scheme / option 色 / select chevron token | foundation 测试 + build |
 | **8** | 剩余工具页：PromptTemplates / ResearchFlow / Reset / SupervisedReview 吃满 + clamp | layout 测试 + build |
+| **9** | 字号 token 安全：shell / chat 侧栏 chrome / VUI layout 去掉 `text-[var(--vui-font-*)]` 颜色陷阱 | typography 契约 + layout 测试 + build |
+| **9b** | 字号扫尾：其余 routes / preview / conversation companions；契约扩到全 `web/src`（除 ConversationView.styles） | typography 契约 + 抽样 layout 测试 + build |
 | **D** | ConversationView 对话区本体 | **延期**：claim-1ded3aed8d30 仍标 active（已过期、worktree 已失），释放前不改 styles |
 
 ### Wave R（完成）
@@ -137,6 +139,23 @@ Renderer+tokens  →  唯一视觉实现（今日 HeroUI，可换 shadcn/Radix�
 - `web/src/routes/ResetRoute.styles.ts` + layout test
 - `web/src/routes/SupervisedReviewRoute.styles.ts`
 - 明确不改：`ConversationView.styles.ts`（claim-1ded3aed8d30）
+
+### Wave 9 文件范围
+
+- `web/src/app/AppShell*.styles.ts`、`RouteErrorBoundary` / `RouteLoadingShell`
+- `web/src/components/vui/layout/*`、`aesthetic/*`、`renderers/**`（font-size token）
+- `web/src/routes/ChatCodingRoute.styles.ts`、`DirectSessionIndexItem`、`ConversationIndexSection`、`routes/chat/*`
+- `web/src/design/typographyTokenContract.test.ts`
+- 规则：`text-[var(--vui-font-*)]` → `[font-size:var(--vui-font-*)]`（Tailwind 歧义为 color）
+- 明确不改：`ConversationView.styles.ts`（claim-1ded3aed8d30）；routes 其它业务页可后续批次
+
+### Wave 9b 文件范围
+
+- 其余 `web/src/routes/**/*.styles.ts`（Memory/Teams/Launcher/Logs/Git/Tools/…）
+- `web/src/components/preview/**`、`conversation/*` companions（**不含** `ConversationView.styles.ts`）
+- 同步更新 layout 测试中对字号 class 的字符串断言
+- `typographyTokenContract.test.ts` 覆盖全 `web/src` production 源（仅 defer ConversationView.styles）
+- 明确不改：`ConversationView.styles.ts` + 其 test 中与该 claim 文件绑定的断言
 
 ### Wave 2 文件范围
 
