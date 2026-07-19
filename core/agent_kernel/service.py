@@ -604,6 +604,8 @@ def _deliver_event_to_recipients(event: dict[str, Any], task: dict[str, Any]) ->
 
 def _kernel_inbox_metadata(event: dict[str, Any], task: dict[str, Any]) -> dict[str, Any]:
     event_metadata = event.get("metadata") if isinstance(event.get("metadata"), dict) else {}
+    delivery_policy = event.get("deliveryPolicy") if isinstance(event.get("deliveryPolicy"), dict) else {}
+    semantic = event.get("semanticPayload") if isinstance(event.get("semanticPayload"), dict) else {}
     allowed_keys = (
         "sourceSurface",
         "sourceId",
@@ -652,22 +654,20 @@ def _kernel_inbox_metadata(event: dict[str, Any], task: dict[str, Any]) -> dict[
         "communicationEdgeId",
     )
     metadata = {
-        key: deepcopy(event_metadata[key])
-        for key in allowed_keys
-        if key in event_metadata and event_metadata[key] not in ("", None)
+        "wakeRequested": bool(delivery_policy.get("wakeTarget", True)),
+        "kernelEventId": event["eventId"],
+        "kernelTaskId": task["taskId"],
+        "semanticType": str(semantic.get("semanticType") or ""),
+        **{
+            key: deepcopy(event_metadata[key])
+            for key in allowed_keys
+            if key in event_metadata and event_metadata[key] not in ("", None)
+        },
     }
     projection_refs = _projection_ref_values(metadata.get("projectionRef"), default_kind="projection")
     if projection_refs:
         metadata["projectionRefKind"] = str(projection_refs[0].get("kind") or "").strip()
         metadata["projectionRefId"] = str(projection_refs[0].get("id") or "").strip()
-    semantic = event.get("semanticPayload") if isinstance(event.get("semanticPayload"), dict) else {}
-    metadata.update(
-        {
-            "kernelEventId": event["eventId"],
-            "kernelTaskId": task["taskId"],
-            "semanticType": str(semantic.get("semanticType") or ""),
-        }
-    )
     return _safe_metadata(metadata, max_items=32)
 
 
