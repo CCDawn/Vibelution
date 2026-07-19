@@ -226,8 +226,8 @@ describe("ToolsRoute layout contract", () => {
     expect(routeSource).toContain("toolScopeOptions");
     expect(agentScopePanelSource).toContain("styles.agentScopeBar");
     expect(agentScopeStylesSource).toContain(".agentScopeBar");
-    expect(agentScopeStyles.agentScopeBar).toContain("grid-cols-[minmax(150px,1fr)_minmax(170px,220px)");
-    expect(agentScopeStyles.agentScopeBar).toContain("max-[880px]:grid-cols-[minmax(0,1fr)_minmax(170px,220px)]");
+    expect(agentScopeStyles.agentScopeBar).toContain("grid-cols-[minmax(0,1fr)_clamp(160px,16vw,220px)");
+    expect(agentScopeStyles.agentScopeBar).toContain("max-[880px]:grid-cols-[minmax(0,1fr)_clamp(160px,22vw,220px)]");
     expect(routeSource).toContain("scopeStateForTool(tool, activeAgentScopeId)");
     expect(routeSource).toContain("JSON.stringify({ args: {}, agentScope: payload.agentScopeId, agentId: payload.agentId })");
     expect(routeSource).toContain("agentId: activePolicyAgent.agentId");
