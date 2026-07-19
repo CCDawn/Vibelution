@@ -162,7 +162,6 @@ import { SessionContextMenu } from "./SessionContextMenu";
 import { agentCenterConfigRoute, safeAgentCenterReturnToPath } from "./agentCenterRoutes";
 import {
   buildChatMentionTargets,
-  tokenizeChatMentions,
   type ChatMentionTarget,
 } from "./chatMentionTokens";
 import { CacheDetailDialog, type CacheDonutSegment } from "./chat/CacheDetailDialog";
@@ -204,6 +203,11 @@ import { useChatSessionSelection } from "./chat/useChatSessionSelection";
 import { useChatWorkspaceLifecycle } from "./chat/useChatWorkspaceLifecycle";
 import { useChatSessionDetailMutations } from "./chat/useChatSessionDetailMutations";
 import { useChatWorkspaceActions } from "./chat/useChatWorkspaceActions";
+import { ChatGroupMessageBody, ChatMentionedText } from "./chat/ChatGroupMessagePresentation";
+import {
+  useChatSessionRenameMenu,
+  type SessionContextMenuState,
+} from "./chat/useChatSessionRenameMenu";
 import {
   chatRoomModeLabel,
   chatRoomPurposeLabel,
@@ -214,8 +218,6 @@ import {
   cacheCalibrationSummaryLabel,
   formatAgentIdentityWithRole,
   compactAgentRoleLabel,
-  shouldCollapseGroupMessage,
-  shouldDefaultCollapseGroupMessage,
   agentRoleClass,
   avatarInitials,
   avatarImageUrlFrom,
@@ -223,7 +225,6 @@ import {
   modelImageInputSupport,
   conversationMetadataText,
   renderAgentAvatar,
-  stripGroupSpeakerPrefix,
   isAvailableGroupParticipant,
 } from "./chat/chatRoutePresentation";
 import {
@@ -309,13 +310,6 @@ type PetInteractionAction = "feed" | "talk" | "care";
 
 type RightIndexPanel = "conversations" | "members";
 
-
-type SessionContextMenuState = {
-  sessionId: string;
-  session: SessionSummary;
-  x: number;
-  y: number;
-};
 
 export function ChatCodingRoute() {
   const { lang, t, statusLabel } = useAppI18n();
@@ -2813,131 +2807,22 @@ export function ChatCodingRoute() {
     setAgentCreateWizardOpen(true);
   }
 
-  function renderMentionedText(content: string, fallback = "") {
-    const text = content || fallback;
-    return tokenizeChatMentions(text, chatMentionTargets).map((segment, index) => {
-      if (segment.type === "text") {
-        return <span key={`text-${index}`}>{segment.text}</span>;
-      }
-      const mentionLabel = segment.target.kind === "all"
-        ? (lang === "zh" ? "全体成员" : "All agents")
-        : [segment.target.displayName, segment.target.agentCode].filter(Boolean).join(" · ");
-      return (
-        <VButton
-          key={`mention-${index}-${segment.text}`}
-          type="button"
-          className={styles.agentMention}
-          onClick={() => handleOpenMentionTarget(segment.target)}
-          aria-label={lang === "zh" ? `打开 ${mentionLabel} 的索引` : `Open ${mentionLabel} index`}
-          title={lang === "zh" ? "打开对应 Agent 索引" : "Open the matching agent index"}
-        >
-          {segment.text}
-        </VButton>
-      );
-    });
-  }
-
-  function renderGroupMessageBody(message: ChatRoomMessage, identityName: string) {
-    const content = stripGroupSpeakerPrefix(message, identityName);
-    const expanded = expandedGroupMessageIds.includes(message.messageId);
-    const defaultCollapsed = shouldDefaultCollapseGroupMessage(message);
-    const collapsible = defaultCollapsed || shouldCollapseGroupMessage(content);
-    const collapsed = collapsible && !expanded;
-    const collapseLabel = defaultCollapsed
-      ? (lang === "zh" ? "展开讨论" : "Show discussion")
-      : (lang === "zh" ? "展开全文" : "Show full");
-    return (
-      <>
-        <p className={collapsed ? `${styles.groupBubbleBody} ${styles.groupBubbleBodyCollapsed}` : styles.groupBubbleBody}>
-          {renderMentionedText(content, lang === "zh" ? "暂无内容" : "No content yet")}
-        </p>
-        {collapsible ? (
-          <VButton
-            type="button"
-            className={styles.groupBubbleToggle}
-            onClick={() =>
-              setExpandedGroupMessageIds((current) =>
-                current.includes(message.messageId)
-                  ? current.filter((messageId) => messageId !== message.messageId)
-                  : [...current, message.messageId],
-              )}
-          >
-            {expanded ? (lang === "zh" ? "收起" : "Collapse") : collapseLabel}
-          </VButton>
-        ) : null}
-      </>
-    );
-  }
-
-  function beginRenameSession(session: SessionSummary) {
-    setSessionContextMenu(null);
-    setEditingSessionId(session.id);
-    setEditingSessionTitle(
-      isAgentRootSession(session)
-        ? (session.agentDisplayName || session.title)
-        : isChildSession(session)
-          ? (session.taskTitle || session.resultCard?.title || session.title)
-          : session.title,
-    );
-    setSessionComposerErrors((current) => ({
-      ...current,
-      [session.id]: "",
-      __sessions__: "",
-    }));
-  }
-
-  function openSessionAgentConfig(session: SessionSummary) {
-    const agentId = String(session.agentId || "").trim();
-    if (!agentId) {
-      setSessionContextMenu(null);
-      return;
-    }
-    setSessionContextMenu(null);
-    navigate(agentCenterConfigRoute({
-      agentId,
-      pane: "config",
-      returnLabel: "chat",
-      returnTo: `/chat?session=${encodeURIComponent(session.id)}`,
-    }));
-  }
-
-  function cancelRenameSession() {
-    setSessionContextMenu(null);
-    setEditingSessionId(null);
-    setEditingSessionTitle("");
-  }
-
-  function openSessionContextMenu(event: ReactMouseEvent<HTMLElement>, session: SessionSummary) {
-    event.preventDefault();
-    event.stopPropagation();
-    setSessionContextMenu({
-      sessionId: session.id,
-      session,
-      x: event.clientX,
-      y: event.clientY,
-    });
-  }
-
-  function submitRenameSession(session: SessionSummary) {
-    const title = editingSessionTitle.trim();
-    if (!title) {
-      setSessionComposerErrors((current) => ({
-        ...current,
-        [session.id]: t(isAgentRootSession(session) ? "renameAgentEmpty" : isChildSession(session) ? "renameTaskEmpty" : "renameSessionEmpty"),
-      }));
-      return;
-    }
-    const currentTitle = isAgentRootSession(session)
-      ? (session.agentDisplayName || session.title)
-      : isChildSession(session)
-        ? (session.taskTitle || session.resultCard?.title || session.title)
-        : session.title;
-    if (title === currentTitle) {
-      cancelRenameSession();
-      return;
-    }
-    renameSessionMutation.mutate({ sessionId: session.id, title });
-  }
+  const {
+    beginRenameSession,
+    openSessionAgentConfig,
+    cancelRenameSession,
+    openSessionContextMenu,
+    submitRenameSession,
+  } = useChatSessionRenameMenu({
+    t,
+    navigate,
+    editingSessionTitle,
+    setEditingSessionId,
+    setEditingSessionTitle,
+    setSessionContextMenu,
+    setSessionComposerErrors,
+    renameSession: (variables) => renameSessionMutation.mutate(variables),
+  });
 
   const toggleFeaturePreset = useCallback((key: FeaturePresetKey) => {
     setFeaturePresetState((current) => ({
@@ -3449,7 +3334,14 @@ export function ChatCodingRoute() {
                         <p className={styles.projectBusEventBody}>
                           {revoked
                             ? (lang === "zh" ? "这条消息已撤回，相关 Agent 已请求停止。" : "This message was recalled. Target agents were asked to stop.")
-                            : renderMentionedText(event.content)}
+                            : (
+                              <ChatMentionedText
+                                content={event.content}
+                                lang={lang}
+                                mentionTargets={chatMentionTargets}
+                                onOpenMentionTarget={handleOpenMentionTarget}
+                              />
+                            )}
                         </p>
                         <div className={styles.projectBusEventMeta}>
                           <span>{revoked ? (lang === "zh" ? "已撤回" : "revoked") : event.messageType}</span>
@@ -3494,7 +3386,14 @@ export function ChatCodingRoute() {
                       <article className={styles.groupTopicMessage}>
                         <div className={styles.groupTopicBubble}>
                           <span>{runtime?.userName || (lang === "zh" ? "我" : "Me")}</span>
-                          <p>{renderMentionedText(round.topic)}</p>
+                          <p>{(
+                            <ChatMentionedText
+                              content={round.topic}
+                              lang={lang}
+                              mentionTargets={chatMentionTargets}
+                              onOpenMentionTarget={handleOpenMentionTarget}
+                            />
+                          )}</p>
                         </div>
                       </article>
                       <div className={styles.groupMessageList}>
@@ -3525,7 +3424,22 @@ export function ChatCodingRoute() {
                                 <strong title={speakerIdentity.fullIdentityLabel}>{speakerIdentity.identityLabel}</strong>
                                 {message.status !== "completed" ? <span>{statusLabel(message.status)}</span> : null}
                               </header>
-                              {renderGroupMessageBody(message, speakerIdentity.name)}
+                              {/* group message body */}
+                              <ChatGroupMessageBody
+                                message={message}
+                                identityName={speakerIdentity.name}
+                                lang={lang}
+                                expandedMessageIds={expandedGroupMessageIds}
+                                mentionTargets={chatMentionTargets}
+                                onOpenMentionTarget={handleOpenMentionTarget}
+                                onToggleExpanded={(messageId) =>
+                                  setExpandedGroupMessageIds((current) =>
+                                    current.includes(messageId)
+                                      ? current.filter((id) => id !== messageId)
+                                      : [...current, messageId],
+                                  )
+                                }
+                              />
                               <time className={styles.groupBubbleMeta}>{formatTime(message.timestamp || round.updatedAt)}</time>
                             </div>
                           </article>
@@ -3666,7 +3580,14 @@ export function ChatCodingRoute() {
                       <article className={styles.groupTopicMessage}>
                         <div className={styles.groupTopicBubble}>
                           <span>{runtime?.userName || (lang === "zh" ? "我" : "Me")}</span>
-                          <p>{renderMentionedText(round.topic)}</p>
+                          <p>{(
+                            <ChatMentionedText
+                              content={round.topic}
+                              lang={lang}
+                              mentionTargets={chatMentionTargets}
+                              onOpenMentionTarget={handleOpenMentionTarget}
+                            />
+                          )}</p>
                         </div>
                       </article>
                       <div className={styles.groupMessageList}>
@@ -3697,7 +3618,22 @@ export function ChatCodingRoute() {
                                 <strong title={speakerIdentity.fullIdentityLabel}>{speakerIdentity.identityLabel}</strong>
                                 {message.status !== "completed" ? <span>{statusLabel(message.status)}</span> : null}
                               </header>
-                              {renderGroupMessageBody(message, speakerIdentity.name)}
+                              {/* group message body */}
+                              <ChatGroupMessageBody
+                                message={message}
+                                identityName={speakerIdentity.name}
+                                lang={lang}
+                                expandedMessageIds={expandedGroupMessageIds}
+                                mentionTargets={chatMentionTargets}
+                                onOpenMentionTarget={handleOpenMentionTarget}
+                                onToggleExpanded={(messageId) =>
+                                  setExpandedGroupMessageIds((current) =>
+                                    current.includes(messageId)
+                                      ? current.filter((id) => id !== messageId)
+                                      : [...current, messageId],
+                                  )
+                                }
+                              />
                               <time className={styles.groupBubbleMeta}>{formatTime(message.timestamp || round.updatedAt)}</time>
                             </div>
                           </article>
