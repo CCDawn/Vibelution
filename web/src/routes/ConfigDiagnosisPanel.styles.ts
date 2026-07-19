@@ -4,7 +4,7 @@ const rowSurface =
   "[border:1px_solid_color-mix(in_srgb,var(--vui-border-subtle)_96%,var(--fg-primary)_4%)] [border-radius:8px] [background:color-mix(in_srgb,var(--surface-card)_94%,var(--surface-panel))]";
 
 const styles = {
-  actionButton: "vui-routes-configdiagnosispanel actionButton min-h-10 px-3.5 text-[var(--vui-font-sm)] font-semibold",
+  actionButton: "vui-routes-configdiagnosispanel actionButton min-h-10 px-3.5 [font-size:var(--vui-font-sm)] font-semibold",
   affectedDetails: `vui-routes-configdiagnosispanel affectedDetails ${rowSurface} [padding:8px_10px] [&_summary]:[cursor:pointer] [&_summary]:[color:var(--vui-fg-secondary)] [&_summary]:[font-size:var(--vui-font-xs)] [&_summary]:[font-weight:650]`,
   affectedList: "vui-routes-configdiagnosispanel affectedList [display:flex] [gap:6px] [flex-wrap:wrap] [margin:8px_0_0] [padding:0] [list-style:none]",
   affectedPill: "vui-routes-configdiagnosispanel affectedPill [display:inline-flex] [min-height:24px] [align-items:center] [padding:0_8px] [border-radius:999px] [background:var(--vui-surface-row)] [color:var(--vui-fg-secondary)] [font-family:var(--font-mono)] [font-size:var(--vui-font-xs)]",

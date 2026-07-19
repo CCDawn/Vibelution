@@ -20,7 +20,7 @@ export type VStateSurfaceProps = Omit<ComponentPropsWithoutRef<"section">, "titl
 
 const BASE =
   "grid min-w-0 w-full content-start gap-2 rounded-[var(--radius-control)] border p-3 text-left " +
-  "text-[var(--vui-font-xs)] leading-[var(--vui-line-readable)]";
+  "[font-size:var(--vui-font-xs)] leading-[var(--vui-line-readable)]";
 
 const TONE: Record<VStateSurfaceTone, string> = {
   info:
@@ -43,8 +43,8 @@ const ICON =
   "mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-[var(--radius-control)] " +
   "border border-[color-mix(in_srgb,currentColor_22%,transparent)] text-[var(--accent-cool)]";
 const COPY = "grid min-w-0 gap-0.5";
-const TITLE = "min-w-0 text-[var(--vui-font-sm)] font-[820] leading-tight text-[var(--fg-primary)]";
-const DESCRIPTION = "min-w-0 max-w-[72ch] text-[var(--vui-font-xs)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]";
+const TITLE = "min-w-0 [font-size:var(--vui-font-sm)] font-[820] leading-tight text-[var(--fg-primary)]";
+const DESCRIPTION = "min-w-0 max-w-[72ch] [font-size:var(--vui-font-xs)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]";
 const FACTS = "grid min-w-0 grid-cols-[repeat(auto-fit,minmax(8rem,1fr))] gap-1.5";
 const FACT =
   "grid min-w-0 gap-0.5 rounded-[7px] border border-[var(--vui-border-subtle)] " +

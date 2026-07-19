@@ -1,6 +1,6 @@
 const styles = {
   responseBody:
-    "vui-components-conversationview responseBody min-w-0 text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] grid gap-1.5 border-0 bg-transparent py-1 pl-5 pr-0 text-[var(--fg-primary)] shadow-none [overflow-wrap:anywhere]",
+    "vui-components-conversationview responseBody min-w-0 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] grid gap-1.5 border-0 bg-transparent py-1 pl-5 pr-0 text-[var(--fg-primary)] shadow-none [overflow-wrap:anywhere]",
   responseSection:
     "vui-components-conversationview responseSection min-w-0 grid w-[min(100%,1360px)] max-w-full gap-1 border-l border-[color-mix(in_srgb,var(--fg-tertiary)_24%,var(--vui-border-subtle))] bg-transparent pl-2.5 shadow-none",
   responseToggle:

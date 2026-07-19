@@ -12,7 +12,7 @@ const styles = {
   imagePreviewOverlay:
     "vui-components-conversationview imagePreviewOverlay fixed inset-0 z-50 grid min-w-0 place-items-center overflow-y-auto bg-[color-mix(in_srgb,var(--surface-base)_72%,transparent)] p-4 backdrop-blur-sm",
   imagePreviewTitle:
-    "vui-components-conversationview imagePreviewTitle min-w-0 truncate text-[var(--vui-font-sm)] font-semibold leading-[var(--vui-line-compact)] text-[var(--fg-primary)]",
+    "vui-components-conversationview imagePreviewTitle min-w-0 truncate [font-size:var(--vui-font-sm)] font-semibold leading-[var(--vui-line-compact)] text-[var(--fg-primary)]",
   imagePreviewToolbar:
     "vui-components-conversationview imagePreviewToolbar grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-3",
 } as const;

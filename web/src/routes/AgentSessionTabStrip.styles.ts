@@ -14,9 +14,9 @@ const styles = {
   agentSessionTabContextTarget:
     "vui-routes-chatcodingroute agentSessionTabContextTarget min-w-0",
   agentSessionTabCopy:
-    "vui-routes-chatcodingroute agentSessionTabCopy min-w-0 flex flex-1 flex-col items-start gap-0.5 text-left text-[var(--vui-font-sm)] leading-tight text-[var(--fg-secondary)]",
+    "vui-routes-chatcodingroute agentSessionTabCopy min-w-0 flex flex-1 flex-col items-start gap-0.5 text-left [font-size:var(--vui-font-sm)] leading-tight text-[var(--fg-secondary)]",
   agentSessionTabCopyCompact:
-    "vui-routes-chatcodingroute agentSessionTabCopyCompact min-w-0 text-[var(--vui-font-sm)] leading-tight text-[var(--fg-secondary)]",
+    "vui-routes-chatcodingroute agentSessionTabCopyCompact min-w-0 [font-size:var(--vui-font-sm)] leading-tight text-[var(--fg-secondary)]",
   agentSessionTabEditActions:
     "vui-routes-chatcodingroute agentSessionTabEditActions min-w-0 flex items-center gap-1",
   agentSessionTabEditButton:
@@ -36,7 +36,7 @@ const styles = {
   agentSessionTabMainActionContextTarget:
     "vui-routes-chatcodingroute agentSessionTabMainActionContextTarget border-[color-mix(in_srgb,var(--accent-cool)_30%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_7%,var(--vui-surface-row))]",
   agentSessionTabMeta:
-    "vui-routes-chatcodingroute agentSessionTabMeta min-w-0 max-w-full text-left text-[var(--vui-font-xs)] leading-none text-[var(--fg-tertiary)]",
+    "vui-routes-chatcodingroute agentSessionTabMeta min-w-0 max-w-full text-left [font-size:var(--vui-font-xs)] leading-none text-[var(--fg-tertiary)]",
   agentSessionTabRoot:
     "vui-routes-chatcodingroute agentSessionTabRoot min-w-0",
   agentSessionTabStatusDot:
@@ -48,9 +48,9 @@ const styles = {
   agentSessionTabStatusDotRunning:
     "vui-routes-chatcodingroute agentSessionTabStatusDotRunning bg-[var(--state-success)] text-[var(--state-success)]",
   agentSessionTabTitle:
-    "vui-routes-chatcodingroute agentSessionTabTitle min-w-0 max-w-[9.5rem] truncate text-left text-[var(--vui-font-sm)] font-semibold leading-none text-[var(--fg-primary)]",
+    "vui-routes-chatcodingroute agentSessionTabTitle min-w-0 max-w-[9.5rem] truncate text-left [font-size:var(--vui-font-sm)] font-semibold leading-none text-[var(--fg-primary)]",
   agentSessionTabTitleInput:
-    "vui-routes-chatcodingroute agentSessionTabTitleInput min-w-0 grid gap-1 text-[var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-7 [&_select]:min-h-7 [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full text-[var(--vui-font-sm)] font-semibold leading-tight text-[var(--fg-primary)]",
+    "vui-routes-chatcodingroute agentSessionTabTitleInput min-w-0 grid gap-1 [font-size:var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-7 [&_select]:min-h-7 [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full [font-size:var(--vui-font-sm)] font-semibold leading-tight text-[var(--fg-primary)]",
 } as const;
 
 export default styles;

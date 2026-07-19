@@ -17,8 +17,8 @@ const styles = {
   ].join(" "),
   spinner: "animate-spin motion-reduce:animate-none",
   loadingCopy: "grid min-w-0 gap-0.5",
-  title: "block text-[var(--vui-font-chat)] font-bold leading-[1.35]",
-  meta: "block text-[var(--vui-font-xs)] leading-[1.35] text-vui-fg-tertiary",
+  title: "block [font-size:var(--vui-font-chat)] font-bold leading-[1.35]",
+  meta: "block [font-size:var(--vui-font-xs)] leading-[1.35] text-vui-fg-tertiary",
   skeletonLine: [
     "block h-2.5 w-full max-w-[340px] animate-pulse rounded-full",
     "bg-[color-mix(in_srgb,var(--accent-cool)_18%,var(--vui-border-subtle))] motion-reduce:animate-none",

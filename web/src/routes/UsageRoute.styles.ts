@@ -33,13 +33,13 @@ const styles = {
   panelHeader:
     "flex min-w-0 max-w-full flex-wrap items-center justify-between gap-1.5 [&>div]:min-w-0 [&_h2]:m-0 [&_h2]:min-w-0 [&_h2]:overflow-hidden [&_h2]:text-ellipsis [&_h2]:whitespace-nowrap [&_h2]:text-[0.9rem] [&_h2]:leading-tight [&_h2]:text-vui-fg-primary",
   panelEyebrow:
-    "m-0 mb-0.5 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-[var(--vui-font-xs)] uppercase tracking-[0.06em] text-vui-fg-tertiary",
+    "m-0 mb-0.5 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap [font-size:var(--vui-font-xs)] uppercase tracking-[0.06em] text-vui-fg-tertiary",
   countPill:
-    "inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 overflow-hidden text-ellipsis whitespace-nowrap rounded-full border border-[color-mix(in_srgb,var(--accent-cool)_24%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,transparent)] px-2 text-[var(--vui-font-xs)] text-[var(--accent-cool)] [&_svg]:flex-none",
+    "inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 overflow-hidden text-ellipsis whitespace-nowrap rounded-full border border-[color-mix(in_srgb,var(--accent-cool)_24%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,transparent)] px-2 [font-size:var(--vui-font-xs)] text-[var(--accent-cool)] [&_svg]:flex-none",
   sourceGrid:
     "grid min-w-0 max-w-full grid-cols-[repeat(2,minmax(0,1fr))] gap-1 max-[520px]:grid-cols-1",
   sourceTile:
-    `grid min-h-[50px] min-w-0 max-w-full gap-0.5 ${rowSurface} px-2 py-1.5 [&_span]:min-w-0 [&_span]:overflow-hidden [&_span]:text-ellipsis [&_span]:whitespace-nowrap [&_span]:text-[var(--vui-font-xs)] [&_span]:text-vui-fg-tertiary [&_strong]:min-w-0 [&_strong]:overflow-hidden [&_strong]:text-ellipsis [&_strong]:whitespace-nowrap [&_strong]:text-[0.9rem] [&_strong]:leading-tight [&_strong]:text-vui-fg-primary`,
+    `grid min-h-[50px] min-w-0 max-w-full gap-0.5 ${rowSurface} px-2 py-1.5 [&_span]:min-w-0 [&_span]:overflow-hidden [&_span]:text-ellipsis [&_span]:whitespace-nowrap [&_span]:[font-size:var(--vui-font-xs)] [&_span]:text-vui-fg-tertiary [&_strong]:min-w-0 [&_strong]:overflow-hidden [&_strong]:text-ellipsis [&_strong]:whitespace-nowrap [&_strong]:text-[0.9rem] [&_strong]:leading-tight [&_strong]:text-vui-fg-primary`,
   sourceTileObserved:
     "border-[color-mix(in_srgb,var(--state-success)_30%,transparent)] bg-[color-mix(in_srgb,var(--state-success)_8%,var(--vui-surface-row))]",
   sourceTileEstimated:
@@ -53,7 +53,7 @@ const styles = {
   rollupGrid:
     "grid min-w-0 max-w-full grid-cols-[repeat(2,minmax(0,1fr))] gap-1 max-[720px]:grid-cols-1",
   usageRow:
-    `grid min-w-0 max-w-full grid-cols-[minmax(96px,0.64fr)_minmax(0,1fr)_minmax(58px,max-content)_minmax(54px,max-content)] items-center gap-1.5 ${rowSurface} ${rowSurfaceHover} px-2 py-1.5 max-[620px]:grid-cols-[minmax(0,1fr)] max-[620px]:items-start [&_span]:min-w-0 [&_span]:overflow-hidden [&_span]:text-ellipsis [&_span]:whitespace-nowrap [&_span]:text-[var(--vui-font-xs)] [&_span]:text-vui-fg-tertiary [&_strong]:min-w-0 [&_strong]:overflow-hidden [&_strong]:text-ellipsis [&_strong]:whitespace-nowrap [&_strong]:text-[var(--vui-font-xs)] [&_strong]:text-vui-fg-primary [&_code]:inline-flex [&_code]:min-w-0 [&_code]:max-w-full [&_code]:items-center [&_code]:gap-1 [&_code]:overflow-hidden [&_code]:text-ellipsis [&_code]:whitespace-nowrap [&_code]:font-mono [&_code]:text-[var(--vui-font-xs)] [&_code]:text-[var(--accent-cool)]`,
+    `grid min-w-0 max-w-full grid-cols-[minmax(96px,0.64fr)_minmax(0,1fr)_minmax(58px,max-content)_minmax(54px,max-content)] items-center gap-1.5 ${rowSurface} ${rowSurfaceHover} px-2 py-1.5 max-[620px]:grid-cols-[minmax(0,1fr)] max-[620px]:items-start [&_span]:min-w-0 [&_span]:overflow-hidden [&_span]:text-ellipsis [&_span]:whitespace-nowrap [&_span]:[font-size:var(--vui-font-xs)] [&_span]:text-vui-fg-tertiary [&_strong]:min-w-0 [&_strong]:overflow-hidden [&_strong]:text-ellipsis [&_strong]:whitespace-nowrap [&_strong]:[font-size:var(--vui-font-xs)] [&_strong]:text-vui-fg-primary [&_code]:inline-flex [&_code]:min-w-0 [&_code]:max-w-full [&_code]:items-center [&_code]:gap-1 [&_code]:overflow-hidden [&_code]:text-ellipsis [&_code]:whitespace-nowrap [&_code]:font-mono [&_code]:[font-size:var(--vui-font-xs)] [&_code]:text-[var(--accent-cool)]`,
   usageRowWide:
     "grid grid-cols-[minmax(104px,0.68fr)_minmax(0,1.1fr)_minmax(72px,max-content)] max-[620px]:grid-cols-[minmax(0,1fr)]",
   refreshButton:
@@ -63,15 +63,15 @@ const styles = {
   progressFill:
     "block h-full rounded-full bg-[color-mix(in_srgb,var(--accent-cool)_58%,var(--state-success)_22%)]",
   quietState:
-    `m-0 min-w-0 max-w-full ${rowSurface} px-2 py-1.5 text-[var(--vui-font-xs)] leading-tight text-vui-fg-tertiary [overflow-wrap:anywhere]`,
+    `m-0 min-w-0 max-w-full ${rowSurface} px-2 py-1.5 [font-size:var(--vui-font-xs)] leading-tight text-vui-fg-tertiary [overflow-wrap:anywhere]`,
   detailGrid:
     "grid min-h-0 min-w-0 max-w-full content-start gap-1 overflow-auto overflow-x-hidden pr-1",
   detailRow:
-    `grid min-w-0 max-w-full grid-cols-[minmax(96px,0.5fr)_minmax(0,1fr)] gap-1.5 ${rowSurface} px-2 py-1.5 max-[520px]:grid-cols-[minmax(0,1fr)] [&_span]:min-w-0 [&_span]:overflow-hidden [&_span]:text-ellipsis [&_span]:whitespace-nowrap [&_span]:text-[var(--vui-font-xs)] [&_span]:text-vui-fg-tertiary [&_strong]:min-w-0 [&_strong]:overflow-hidden [&_strong]:text-ellipsis [&_strong]:whitespace-nowrap [&_strong]:text-[var(--vui-font-xs)] [&_strong]:text-vui-fg-primary`,
+    `grid min-w-0 max-w-full grid-cols-[minmax(96px,0.5fr)_minmax(0,1fr)] gap-1.5 ${rowSurface} px-2 py-1.5 max-[520px]:grid-cols-[minmax(0,1fr)] [&_span]:min-w-0 [&_span]:overflow-hidden [&_span]:text-ellipsis [&_span]:whitespace-nowrap [&_span]:[font-size:var(--vui-font-xs)] [&_span]:text-vui-fg-tertiary [&_strong]:min-w-0 [&_strong]:overflow-hidden [&_strong]:text-ellipsis [&_strong]:whitespace-nowrap [&_strong]:[font-size:var(--vui-font-xs)] [&_strong]:text-vui-fg-primary`,
   breakdownList:
     "grid min-h-0 min-w-0 max-w-full content-start gap-1 overflow-auto overflow-x-hidden pr-1",
   breakdownRow:
-    `grid min-w-0 max-w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-1.5 ${rowSurface} px-2 py-1.5 [&_strong]:min-w-0 [&_strong]:overflow-hidden [&_strong]:text-ellipsis [&_strong]:whitespace-nowrap [&_strong]:text-[var(--vui-font-xs)] [&_strong]:text-vui-fg-primary [&_span]:text-[var(--vui-font-xs)] [&_span]:text-vui-fg-tertiary`,
+    `grid min-w-0 max-w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-1.5 ${rowSurface} px-2 py-1.5 [&_strong]:min-w-0 [&_strong]:overflow-hidden [&_strong]:text-ellipsis [&_strong]:whitespace-nowrap [&_strong]:[font-size:var(--vui-font-xs)] [&_strong]:text-vui-fg-primary [&_span]:[font-size:var(--vui-font-xs)] [&_span]:text-vui-fg-tertiary`,
 } as const;
 
 export default styles;
