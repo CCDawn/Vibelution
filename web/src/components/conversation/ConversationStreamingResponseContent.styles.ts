@@ -1,6 +1,6 @@
 const styles = {
   inlineCode:
-    "vui-components-conversationview inlineCode min-w-0 font-mono text-[var(--vui-font-xs)] whitespace-normal break-words",
+    "vui-components-conversationview inlineCode min-w-0 font-mono [font-size:var(--vui-font-xs)] whitespace-normal break-words",
   inlineLink:
     "vui-components-conversationview inlineLink min-w-0",
   inlineStrong:
@@ -8,11 +8,11 @@ const styles = {
   markdownBlockquote:
     "vui-components-conversationview markdownBlockquote min-w-0",
   markdownBody:
-    "vui-components-conversationview markdownBody min-w-0 text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] max-w-[min(100%,128ch)] whitespace-normal break-words [overflow-wrap:anywhere]",
+    "vui-components-conversationview markdownBody min-w-0 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] max-w-[min(100%,128ch)] whitespace-normal break-words [overflow-wrap:anywhere]",
   streamingResponseText:
-    "vui-components-conversationview streamingResponseText min-w-0 text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] text-[var(--vui-font-chat)] leading-[var(--vui-line-readable)] whitespace-normal break-words [overflow-wrap:anywhere]",
+    "vui-components-conversationview streamingResponseText min-w-0 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] [font-size:var(--vui-font-chat)] leading-[var(--vui-line-readable)] whitespace-normal break-words [overflow-wrap:anywhere]",
   markdownBodyWithTable:
-    "vui-components-conversationview markdownBodyWithTable min-w-0 text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] max-w-full",
+    "vui-components-conversationview markdownBodyWithTable min-w-0 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] max-w-full",
   markdownDivider:
     "vui-components-conversationview markdownDivider min-w-0",
   markdownHeading:
@@ -30,7 +30,7 @@ const styles = {
   markdownTableWrap:
     "vui-components-conversationview markdownTableWrap max-w-full overflow-x-auto overflow-y-hidden [scrollbar-gutter:stable]",
   messageBody:
-    "vui-components-conversationview messageBody min-w-0 text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] whitespace-pre-wrap [overflow-wrap:anywhere] max-w-[min(100%,76ch)]",
+    "vui-components-conversationview messageBody min-w-0 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] whitespace-pre-wrap [overflow-wrap:anywhere] max-w-[min(100%,76ch)]",
   responseSegmentList:
     "vui-components-conversationview responseSegmentList min-w-0",
   responseSegmentPre:

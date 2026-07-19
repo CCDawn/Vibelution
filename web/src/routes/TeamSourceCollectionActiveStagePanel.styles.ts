@@ -6,7 +6,7 @@ const styles = {
   sourceCollectionStageChatActions:
     "sourceCollectionStageChatActions min-w-0 !grid grid-cols-[repeat(3,max-content)] items-center justify-end gap-1.5 max-[720px]:!flex max-[720px]:flex-wrap max-[720px]:justify-start [&_a]:inline-flex [&_a]:w-fit [&_a]:max-w-full [&_a]:items-center [&_a]:justify-center [&_a]:gap-1.5 [&_a]:min-h-[30px] [&_a]:px-3 [&_a]:rounded-[7px] [&_a]:border [&_a]:border-[color:color-mix(in_srgb,var(--accent-cool)_36%,var(--border-soft))] [&_a]:bg-[var(--vui-surface-row)] [&_a]:text-[var(--fg-primary)] [&_a]:font-[760] [&_a]:no-underline [&_a]:whitespace-nowrap [&_[data-vui=native-button]]:min-h-[30px] [&_[data-vui=native-button]]:w-fit [&_[data-vui=native-button]]:max-w-full",
   sourceCollectionStageHandoff:
-    "sourceCollectionStageHandoff min-w-0 grid gap-1 text-[var(--vui-font-xs)] leading-tight text-[var(--fg-secondary)] [&>span]:min-w-0 [&>span]:break-words [&>span]:[overflow-wrap:anywhere] [&_b]:mr-1 [&_b]:text-[var(--fg-tertiary)]",
+    "sourceCollectionStageHandoff min-w-0 grid gap-1 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-secondary)] [&>span]:min-w-0 [&>span]:break-words [&>span]:[overflow-wrap:anywhere] [&_b]:mr-1 [&_b]:text-[var(--fg-tertiary)]",
   sourceCollectionStageHandoffNext:
     "sourceCollectionStageHandoffNext min-w-0 text-[var(--fg-primary)]",
   sourceCollectionStagePrimaryAction:

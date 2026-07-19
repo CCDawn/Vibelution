@@ -1,6 +1,6 @@
 const styles = {
   empty:
-    "empty min-w-0 text-[var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
+    "empty min-w-0 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
   workflowCandidateList:
     "workflowCandidateList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto [&_[data-vui-product=team-candidate-card]]:max-w-full",
   workflowCandidateListHeader:
@@ -10,7 +10,7 @@ const styles = {
   workflowCandidateListScroll:
     "workflowCandidateListScroll min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto [scrollbar-gutter:stable]",
   workflowCandidateListScrollHint:
-    "workflowCandidateListScrollHint min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto text-[var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
+    "workflowCandidateListScrollHint min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
 } as const;
 
 export default styles;

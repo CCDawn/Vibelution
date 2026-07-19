@@ -3,9 +3,9 @@ const panelSurface =
 const rowSurface =
   "rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--vui-border-subtle)_78%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-row)_74%,transparent)] p-2";
 const buttonBase =
-  "inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 text-[var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55";
+  "inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55";
 const pillBase =
-  "inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 text-[var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)]";
+  "inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 [font-size:var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)]";
 const activeTone =
   "border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))] text-[var(--accent-cool)]";
 const errorTone =
@@ -18,11 +18,11 @@ const scrollStack = "grid min-h-0 content-start gap-1.5 overflow-auto";
 
 const styles = {
   copyButton:
-    `copyButton min-w-0 ${buttonBase} text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)]`,
+    `copyButton min-w-0 ${buttonBase} [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)]`,
   deleteButton:
     `deleteButton min-w-0 ${buttonBase} ${errorTone}`,
   diagnosticHintGrid:
-    "diagnosticHintGrid min-w-0 grid gap-2 grid-cols-[repeat(auto-fit,minmax(9rem,1fr))] text-[var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
+    "diagnosticHintGrid min-w-0 grid gap-2 grid-cols-[repeat(auto-fit,minmax(9rem,1fr))] [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
   diagnosticMetricGrid:
     "diagnosticMetricGrid min-w-0 grid gap-2 grid-cols-[repeat(auto-fit,minmax(9rem,1fr))]",
   diagnosticPill:
@@ -40,9 +40,9 @@ const styles = {
   diagnosticsSummary:
     `diagnosticsSummary min-w-0 ${panelSurface}`,
   emptySurface:
-    `emptySurface min-w-0 ${panelSurface} text-[var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]`,
+    `emptySurface min-w-0 ${panelSurface} [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]`,
   eyebrow:
-    "eyebrow min-w-0 text-[var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
+    "eyebrow min-w-0 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
   filterButton:
     `filterButton min-w-0 ${buttonBase}`,
   filterButtonActive:
@@ -50,7 +50,7 @@ const styles = {
   filterGroup:
     "filterGroup min-w-0",
   logPreviewStack:
-    `logPreviewStack min-w-0 ${panelSurface} font-mono text-[var(--vui-font-xs)]`,
+    `logPreviewStack min-w-0 ${panelSurface} font-mono [font-size:var(--vui-font-xs)]`,
   metaPill:
     `metaPill min-w-0 flex flex-wrap ${pillBase}`,
   notice:
@@ -68,7 +68,7 @@ const styles = {
   packageDiagnosisDetails:
     "packageDiagnosisDetails min-w-0",
   packageDiagnosisExpandLabel:
-    "packageDiagnosisExpandLabel min-w-0 text-[var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
+    "packageDiagnosisExpandLabel min-w-0 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
   packageDiagnosisFoldout:
     "packageDiagnosisFoldout min-w-0",
   packageDiagnosisFoldoutSection:
@@ -86,7 +86,7 @@ const styles = {
   packageDiagnosisSummaryRow:
     `packageDiagnosisSummaryRow min-w-0 ${rowSurface}`,
   packageDiagnosisSummaryText:
-    `packageDiagnosisSummaryText min-w-0 ${panelSurface} text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]`,
+    `packageDiagnosisSummaryText min-w-0 ${panelSurface} [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]`,
   packageEvidencePaths:
     "packageEvidencePaths min-w-0",
   packageIssueStateStrip:
@@ -104,7 +104,7 @@ const styles = {
   packageSection:
     "packageSection min-w-0",
   packageSectionEmpty:
-    "packageSectionEmpty min-w-0 text-[var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
+    "packageSectionEmpty min-w-0 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
   packageSectionHeader:
     "packageSectionHeader min-w-0 flex flex-wrap items-center gap-1.5",
   packageSectionList:
@@ -112,7 +112,7 @@ const styles = {
   packageSelectButton:
     `packageSelectButton min-w-0 ${buttonBase} grid gap-1 [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full`,
   packageSelectButtonActive:
-    `packageSelectButtonActive min-w-0 grid gap-1 text-[var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full ${activeTone}`,
+    `packageSelectButtonActive min-w-0 grid gap-1 [font-size:var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full ${activeTone}`,
   packageWorkRunHeader:
     "packageWorkRunHeader min-w-0 flex flex-wrap items-center gap-1.5",
   packageWorkRunItem:
@@ -130,7 +130,7 @@ const styles = {
   panelSearch:
     `panelSearch min-w-0 ${panelSurface}`,
   panelSearchInput:
-    `panelSearchInput min-w-0 ${panelSurface} grid gap-1 text-[var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full`,
+    `panelSearchInput min-w-0 ${panelSurface} grid gap-1 [font-size:var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full`,
   panelState:
     `panelState min-w-0 ${panelSurface}`,
   previewActions:
@@ -138,7 +138,7 @@ const styles = {
   previewPane:
     `previewPane min-w-0 ${panelSurface} grid min-h-0 content-start gap-1.5 overflow-auto`,
   railText:
-    "railText min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
+    "railText min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
   rawFileButton:
     `rawFileButton min-w-0 ${buttonBase}`,
   rawFileButtonActive:
@@ -178,7 +178,7 @@ const styles = {
   sceneDetailSurface:
     `sceneDetailSurface min-w-0 ${panelSurface}`,
   sceneDetailTitle:
-    `sceneDetailTitle min-w-0 ${panelSurface} text-[var(--vui-font-title)] font-semibold leading-tight text-[var(--fg-primary)]`,
+    `sceneDetailTitle min-w-0 ${panelSurface} [font-size:var(--vui-font-title)] font-semibold leading-tight text-[var(--fg-primary)]`,
   sceneEvidenceStrip:
     "sceneEvidenceStrip min-w-0 flex flex-wrap items-center gap-1.5",
   sceneHeaderControls:
@@ -192,7 +192,7 @@ const styles = {
   sceneInfoGrid:
     "sceneInfoGrid min-w-0 grid gap-2 grid-cols-[repeat(auto-fit,minmax(9rem,1fr))] border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
   sceneIssueBadge:
-    "sceneIssueBadge min-w-0 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 text-[var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)]",
+    "sceneIssueBadge min-w-0 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 [font-size:var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)]",
   sceneIssueBadgeError:
     "sceneIssueBadgeError min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
   sceneIssueBadgeWarning:
@@ -212,17 +212,17 @@ const styles = {
   selectionActions:
     "selectionActions min-w-0 flex flex-wrap items-center gap-1.5",
   selectionPill:
-    "selectionPill min-w-0 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 text-[var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)]",
+    "selectionPill min-w-0 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 [font-size:var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)]",
   selectionToolbar:
     "selectionToolbar min-w-0 flex flex-wrap items-center gap-1.5",
   sidebar:
     "sidebar min-w-0",
   sidebarEyebrow:
-    "sidebarEyebrow min-w-0 text-[var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
+    "sidebarEyebrow min-w-0 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
   sidebarHeader:
     "sidebarHeader min-w-0 flex flex-wrap items-center gap-1.5",
   sidebarTitle:
-    "sidebarTitle min-w-0 text-[var(--vui-font-title)] font-semibold leading-tight text-[var(--fg-primary)]",
+    "sidebarTitle min-w-0 [font-size:var(--vui-font-title)] font-semibold leading-tight text-[var(--fg-primary)]",
   startupTraceHeader:
     "startupTraceHeader min-w-0 flex flex-wrap items-center gap-1.5",
   startupTracePanel:
@@ -234,9 +234,9 @@ const styles = {
   startupTraceSteps:
     "startupTraceSteps min-w-0",
   timelineCode:
-    "timelineCode min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto font-mono text-[var(--vui-font-xs)]",
+    "timelineCode min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto font-mono [font-size:var(--vui-font-xs)]",
   timelineField:
-    "timelineField min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto gap-1 text-[var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full",
+    "timelineField min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto gap-1 [font-size:var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full",
   timelineFields:
     "timelineFields min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
   timelineHeader:
@@ -250,7 +250,7 @@ const styles = {
   timelineList:
     "timelineList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
   timelineMessage:
-    "timelineMessage min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
+    "timelineMessage min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
   timelineRawRefs:
     "timelineRawRefs min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
   toolbarButton:

@@ -2,7 +2,7 @@ const styles = {
   operationsGrid: "grid min-w-0 grid-cols-[minmax(0,_2fr)_minmax(320px,_3fr)] gap-2 max-[1180px]:grid-cols-1",
   section: "min-w-0 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--vui-border-subtle)_76%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-row)_54%,transparent)] p-3",
   panelHeader: "flex min-w-0 items-start justify-between gap-3",
-  eyebrow: "m-0 text-[var(--vui-font-xs)] font-medium text-[var(--fg-tertiary)]",
+  eyebrow: "m-0 [font-size:var(--vui-font-xs)] font-medium text-[var(--fg-tertiary)]",
   title: "m-0 text-sm font-semibold text-[var(--fg-primary)]",
   runtimeStatus: "mt-2 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1",
   runtimePill: "inline-flex shrink-0 items-center rounded-full border border-[color-mix(in_srgb,var(--accent-cool)_44%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_12%,transparent)] px-2 py-0.5 text-[11px] font-semibold text-[var(--fg-primary)]",
