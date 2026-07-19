@@ -95,17 +95,10 @@ import {
 import {
   deriveSessionDetailQueryErrorState,
   deriveSessionListQueryErrorState,
-  appendOptimisticUserMessage,
-  createClientSubmissionId,
-  markOptimisticUserMessageAccepted,
-  markSessionDetailRunning,
-  markSessionSummaryRunning,
   mergeSessionDetailMessageWindow,
   mergeSessionDetailIntoSummaries,
   renameSessionDetail,
   renameSessionInSummaries,
-  removeDeletedSessionFromSummaries,
-  removeOptimisticUserMessage,
 } from "./chatSessionState";
 import {
   SESSION_INDEX_PAGE_SIZE,
@@ -169,8 +162,8 @@ import {
 import {
   activeTurnLayerToConversationMessage,
   activeTurnLayerTextLength,
-  createOptimisticActiveTurnLayer,
   isActiveTurnSettledByDetail,
+  setActiveTurnLayerForSession,
   type ActiveTurnLayerState,
 } from "./chatActiveTurnLayer";
 import { createSessionAssistantDeltaScheduler } from "./sessionAssistantDeltaScheduler";
@@ -208,6 +201,7 @@ import { TokenCoreStatusPanel, type TokenCoreStatusMetric } from "./chat/TokenCo
 import { ChatConversationIndexRail } from "./chat/ChatConversationIndexRail";
 import { ChatStatusRail } from "./chat/ChatStatusRail";
 import {
+  chatStreamPerformanceNowMs,
   describeChatRouteError as describeError,
   formatTokenSpeedValue,
   isBusyPhase,
@@ -216,6 +210,10 @@ import {
   shouldSuppressComposerErrorForTurnError,
 } from "./chat/chatCodingRouteViewModel";
 import { useChatWorkbenchLayout } from "./chat/useChatWorkbenchLayout";
+import {
+  useChatComposerSubmitActions,
+  useChatComposerTurnMutations,
+} from "./chat/useChatComposerSubmit";
 import {
   CLI_AGENT_RUN_TAB_PREFIX,
   CLI_AGENT_TOOL_NAME,
@@ -248,19 +246,13 @@ import {
   MAX_COMPOSER_IMAGE_ATTACHMENTS,
   buildSessionReferencePayload,
   classifyComposerImageFiles,
-  clearSessionDraftForSubmittedTurn,
   clearSessionImageAttachments,
   clearSessionReferenceAttachments,
-  encodeUtf8Base64,
   mergeComposerImageAttachments,
-  optimisticTurnIdForSubmission,
   readStoredMentalModelToggle,
   removeSessionImageAttachment,
-  resolveComposerSubmitGuard,
-  restoreSubmittedDraftIfComposerStillEmpty,
   sessionReferenceId,
   startSessionReferenceDrag,
-  uploadSessionImageAttachment,
   writeStoredMentalModelToggle,
   type ComposerImageAttachment,
 } from "./chat/chatComposerSubmitModel";
@@ -585,10 +577,6 @@ function escapeRegExp(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-function chatStreamPerformanceNowMs() {
-  return typeof performance === "undefined" ? Date.now() : performance.now();
-}
-
 function stripGroupSpeakerPrefix(message: ChatRoomMessage, identityName = "") {
   let content = String(message.content || message.summary || "").trim();
   if (!content) {
@@ -732,47 +720,6 @@ function isStaleLedgerUpdate(currentSeq: unknown, incomingSeq: unknown): boolean
   const current = normalizedLedgerSeq(currentSeq);
   const incoming = normalizedLedgerSeq(incomingSeq);
   return current > 0 && incoming > 0 && incoming < current;
-}
-
-function setActiveTurnLayerForSession(
-  current: Record<string, ActiveTurnLayerState>,
-  sessionId: string,
-  layer: ActiveTurnLayerState | undefined,
-) {
-  const normalizedSessionId = String(sessionId || "").trim();
-  if (!normalizedSessionId) {
-    return current;
-  }
-  if (!layer) {
-    if (!current[normalizedSessionId]) {
-      return current;
-    }
-    const next = { ...current };
-    delete next[normalizedSessionId];
-    return next;
-  }
-  if (current[normalizedSessionId] === layer) {
-    return current;
-  }
-  return {
-    ...current,
-    [normalizedSessionId]: layer,
-  };
-}
-
-function latestUserTurnId(detail: SessionDetail | undefined) {
-  const messages = detail?.messages ?? [];
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    const message = messages[index];
-    if (message?.role !== "user") {
-      continue;
-    }
-    const turnId = String(message.metadata?.turnId ?? message.metadata?.turn_id ?? "").trim();
-    if (turnId) {
-      return turnId.startsWith("live:") ? turnId.slice("live:".length) : turnId;
-    }
-  }
-  return "";
 }
 
 function latestMentalSnapshot(messages: ConversationMessage[] | undefined): MentalStateSnapshot | undefined {
@@ -1583,312 +1530,23 @@ export function ChatCodingRoute() {
     sessionDetailQuery.data?.currentPhase,
   ]);
 
-  const submitTurnMutation = useMutation({
-    mutationFn: async (
-      {
-        sessionId,
-        clientSubmissionId,
-        content,
-        mentalModelEnabled,
-        attachmentIds,
-        references,
-        requestStartedAtMs,
-      }: {
-        sessionId: string;
-        clientSubmissionId: string;
-        content: string;
-        mentalModelEnabled: boolean;
-        attachmentIds?: string[];
-        references?: SessionReferenceAttachment[];
-        requestStartedAtMs: number;
-      },
-    ) => {
-      postSubmitTelemetry(
-        "browser.chat_submit.request_started",
-        "Direct chat submit request started.",
-        sessionId,
-        {
-          content,
-          attachmentCount: attachmentIds?.length ?? 0,
-          referenceCount: references?.length ?? 0,
-          mentalModelEnabled,
-          clientSubmissionId,
-        },
-      );
-      return fetchJson<SessionTurnAcceptedResponse>(`/api/sessions/${sessionId}/messages`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Prefer": "respond-async",
-        },
-        body: JSON.stringify({
-          content,
-          clientSubmissionId,
-          contentUtf8Base64: encodeUtf8Base64(content),
-          attachmentIds: attachmentIds ?? [],
-          references: references ?? [],
-          mentalModelEnabled,
-        }),
-      });
-    },
-    onMutate: async (variables) => {
-      postSubmitTelemetry(
-        "browser.chat_submit.mutate_called",
-        "Direct chat submit mutation started.",
-        variables.sessionId,
-        {
-          content: variables.content,
-          attachmentCount: variables.attachmentIds?.length ?? 0,
-          referenceCount: variables.references?.length ?? 0,
-          mentalModelEnabled: variables.mentalModelEnabled,
-          clientSubmissionId: variables.clientSubmissionId,
-        },
-      );
-      const createdAt = new Date().toISOString();
-      setActiveTurnLayersBySession((current) =>
-        setActiveTurnLayerForSession(
-          current,
-          variables.sessionId,
-          createOptimisticActiveTurnLayer({
-            sessionId: variables.sessionId,
-            turnId: optimisticTurnIdForSubmission("submit", variables.sessionId, createdAt),
-            updatedAt: createdAt,
-          }),
-        )
-      );
-      queryClient.setQueryData<SessionDetail>(queryKeys.session(variables.sessionId), (detail) =>
-        markSessionDetailRunning(appendOptimisticUserMessage(detail, variables)),
-      );
-      updateSessionSummaryCaches(queryClient, (sessions) =>
-        markSessionSummaryRunning(sessions, variables.sessionId),
-      );
-    },
-    onSuccess: (acceptedTurn, variables) => {
-      postSubmitTelemetry(
-        "browser.chat_submit.accepted",
-        "Direct chat submit was accepted by the backend.",
-        variables.sessionId,
-        {
-          content: variables.content,
-          attachmentCount: variables.attachmentIds?.length ?? 0,
-          referenceCount: variables.references?.length ?? 0,
-          mentalModelEnabled: variables.mentalModelEnabled,
-          clientSubmissionId: variables.clientSubmissionId,
-          turnId: acceptedTurn.turnId,
-          acceptedAt: acceptedTurn.acceptedAt,
-          durationMs: Math.max(0, chatStreamPerformanceNowMs() - variables.requestStartedAtMs),
-        },
-      );
-      setSessionComposerErrors((current) => ({
-        ...current,
-        [variables.sessionId]: "",
-      }));
-      setSessionImageAttachments((current) => clearSessionImageAttachments(current, variables.sessionId));
-      setSessionReferenceAttachments((current) => clearSessionReferenceAttachments(current, variables.sessionId));
-      queryClient.setQueryData<SessionDetail>(queryKeys.session(variables.sessionId), (detail) =>
-        markSessionDetailRunning(markOptimisticUserMessageAccepted(detail, variables, acceptedTurn.turnId)),
-      );
-      const acceptedTurnId = String(acceptedTurn.turnId || "").trim();
-      setActiveTurnLayersBySession((current) =>
-        setActiveTurnLayerForSession(
-          current,
-          variables.sessionId,
-          acceptedTurnId
-            ? createOptimisticActiveTurnLayer({
-              sessionId: variables.sessionId,
-              turnId: acceptedTurn.turnId,
-              updatedAt: acceptedTurn.acceptedAt,
-            })
-            : undefined,
-        )
-      );
-      // The optimistic detail/index updates above already expose the accepted turn.
-      // SSE owns authoritative reconciliation when available; the existing polling
-      // fallback does the same without competing with the first model request.
-    },
-    onError: (error, variables) => {
-      postSubmitTelemetry(
-        "browser.chat_submit.request_failed",
-        "Direct chat submit request failed before the backend accepted the turn.",
-        variables.sessionId,
-        {
-          content: variables.content,
-          attachmentCount: variables.attachmentIds?.length ?? 0,
-          referenceCount: variables.references?.length ?? 0,
-          mentalModelEnabled: variables.mentalModelEnabled,
-          clientSubmissionId: variables.clientSubmissionId,
-          durationMs: Math.max(0, chatStreamPerformanceNowMs() - variables.requestStartedAtMs),
-          error,
-        },
-        "error",
-      );
-      queryClient.setQueryData<SessionDetail>(queryKeys.session(variables.sessionId), (detail) =>
-        removeOptimisticUserMessage(detail, variables),
-      );
-      setActiveTurnLayersBySession((current) =>
-        setActiveTurnLayerForSession(current, variables.sessionId, undefined)
-      );
-      setSessionDrafts((current) => restoreSubmittedDraftIfComposerStillEmpty(current, variables.sessionId, variables.content));
-      setSessionComposerErrors((current) => ({
-        ...current,
-        [variables.sessionId]: describeError(error, t("submitFailed")),
-      }));
-      void chatWorkspaceCache.afterDirectTurnFailed(variables.sessionId);
-    },
-  });
-
-  const editResubmitMutation = useMutation({
-    mutationFn: async (
-      {
-        sessionId,
-        messageId,
-        clientSubmissionId,
-        content,
-        mentalModelEnabled,
-        attachmentIds: _attachmentIds,
-      }: {
-        sessionId: string;
-        messageId: string;
-        clientSubmissionId: string;
-        content: string;
-        mentalModelEnabled: boolean;
-        attachmentIds?: string[];
-      },
-    ) =>
-      fetchJson<SessionDetail>(`/api/sessions/${sessionId}/messages/edit-resubmit`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          messageId,
-          clientSubmissionId,
-          content,
-          contentUtf8Base64: encodeUtf8Base64(content),
-          mentalModelEnabled,
-        }),
-      }),
-    onMutate: async (variables) => {
-      const createdAt = new Date().toISOString();
-      setActiveTurnLayersBySession((current) =>
-        setActiveTurnLayerForSession(
-          current,
-          variables.sessionId,
-          createOptimisticActiveTurnLayer({
-            sessionId: variables.sessionId,
-            turnId: optimisticTurnIdForSubmission("edit", variables.sessionId, createdAt),
-            updatedAt: createdAt,
-          }),
-        )
-      );
-      queryClient.setQueryData<SessionDetail>(queryKeys.session(variables.sessionId), markSessionDetailRunning);
-      updateSessionSummaryCaches(queryClient, (sessions) =>
-        markSessionSummaryRunning(sessions, variables.sessionId),
-      );
-    },
-    onSuccess: (nextDetail, variables) => {
-      setSessionComposerErrors((current) => ({
-        ...current,
-        [variables.sessionId]: "",
-      }));
-      setSessionDrafts((current) => ({
-        ...current,
-        [variables.sessionId]: "",
-      }));
-      setSessionEditTargets((current) => {
-        const { [variables.sessionId]: _removed, ...remaining } = current;
-        return remaining;
-      });
-      syncSessionDetail(nextDetail);
-      const acceptedTurnId = latestUserTurnId(nextDetail);
-      setActiveTurnLayersBySession((current) => {
-        if (!acceptedTurnId || !isBusyPhase(nextDetail.currentPhase || nextDetail.status)) {
-          return setActiveTurnLayerForSession(current, variables.sessionId, undefined);
-        }
-        return setActiveTurnLayerForSession(
-          current,
-          variables.sessionId,
-          createOptimisticActiveTurnLayer({
-            sessionId: variables.sessionId,
-            turnId: acceptedTurnId,
-            updatedAt: nextDetail.updatedAt,
-          }),
-        );
-      });
-      void chatWorkspaceCache.afterSessionChanged();
-    },
-    onError: (error, variables) => {
-      setActiveTurnLayersBySession((current) =>
-        setActiveTurnLayerForSession(current, variables.sessionId, undefined)
-      );
-      setSessionComposerErrors((current) => ({
-        ...current,
-        [variables.sessionId]: describeError(error, t("editResubmitFailed")),
-      }));
-      void chatWorkspaceCache.afterDirectTurnFailed(variables.sessionId);
-    },
-  });
-
-  const stopTurnMutation = useMutation({
-    mutationFn: async ({ sessionId }: { sessionId: string }) =>
-      fetchJson<SessionDetail>(`/api/sessions/${sessionId}/stop`, {
-        method: "POST",
-      }),
-    onSuccess: (nextDetail, variables) => {
-      setSessionComposerErrors((current) => ({
-        ...current,
-        [variables.sessionId]: "",
-      }));
-      syncSessionDetail(nextDetail);
-      void chatWorkspaceCache.afterSessionChanged();
-    },
-    onError: (error, variables) => {
-      setSessionComposerErrors((current) => ({
-        ...current,
-        [variables.sessionId]: describeError(error, t("stopFailed")),
-      }));
-      void chatWorkspaceCache.afterDirectTurnFailed(variables.sessionId);
-    },
-  });
-
-  const sessionGuidanceMutation = useMutation({
-    mutationFn: async (
-      {
-        sessionId,
-        content,
-        mode,
-      }: {
-        sessionId: string;
-        content: string;
-        mode: SessionGuidanceMode;
-      },
-    ) =>
-      fetchJson<SessionDetail>(`/api/sessions/${sessionId}/guidance`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ content, mode }),
-      }),
-    onSuccess: (nextDetail, variables) => {
-      setSessionComposerErrors((current) => ({
-        ...current,
-        [variables.sessionId]: "",
-      }));
-      setSessionDrafts((current) => ({
-        ...current,
-        [variables.sessionId]: "",
-      }));
-      syncSessionDetail(nextDetail);
-      void chatWorkspaceCache.afterSessionChanged({ sessionId: variables.sessionId });
-    },
-    onError: (error, variables) => {
-      setSessionComposerErrors((current) => ({
-        ...current,
-        [variables.sessionId]: describeError(error, t("guidanceFailed")),
-      }));
-      void chatWorkspaceCache.refreshSessionRuntime(variables.sessionId);
-    },
+  const {
+    submitTurnMutation,
+    editResubmitMutation,
+    stopTurnMutation,
+    sessionGuidanceMutation,
+  } = useChatComposerTurnMutations({
+    queryClient,
+    chatWorkspaceCache,
+    t,
+    describeError,
+    syncSessionDetail,
+    setActiveTurnLayersBySession,
+    setSessionDrafts,
+    setSessionComposerErrors,
+    setSessionImageAttachments,
+    setSessionReferenceAttachments,
+    setSessionEditTargets,
   });
 
   const createSessionMutation = useMutation({
@@ -3839,6 +3497,44 @@ export function ChatCodingRoute() {
     ],
   );
   const composerDisabled = conversationComposer.disabled;
+
+  const {
+    handleSubmitTurn,
+    handleStopTurn,
+    handleSubmitGuidance,
+    handleEditUserMessage,
+    handleCancelEditMessage,
+  } = useChatComposerSubmitActions({
+    queryClient,
+    lang,
+    describeError,
+    submitTurnMutation,
+    editResubmitMutation,
+    stopTurnMutation,
+    sessionGuidanceMutation,
+    setSessionDrafts,
+    setSessionComposerErrors,
+    setSessionImageAttachments,
+    setSessionReferenceAttachments,
+    setSessionImageUploadPending,
+    setSessionEditTargets,
+    imageUploadInFlightRef,
+    activeSessionId,
+    activeDraftEffective,
+    activeImageAttachments,
+    activeReferenceAttachments,
+    mentalModelEnabledForNextTurn,
+    resolvedEditTarget,
+    activeEditTarget,
+    composerDisabled,
+    sessionBusy,
+    sessionStopping,
+    activePhase: detail?.currentPhase,
+    activeAgentImageInputUnsupported,
+    activeImageInputModelId,
+    latestUserMessageId,
+    detail,
+  });
   const sessionLlmOptions = sessionLlmOptionsQuery.data;
   const sessionLlmControl = activeSessionId ? {
     model: sessionLlmOptions?.model ?? null,
@@ -4622,324 +4318,6 @@ export function ChatCodingRoute() {
         ...current,
         [activeSessionId]: next,
       };
-    });
-  }
-
-  async function submitTurnWithAttachments(
-    sessionId: string,
-    content: string,
-    attachments: ComposerImageAttachment[],
-    references: SessionReferenceAttachment[],
-    mentalModelEnabled: boolean,
-    clientSubmissionId: string,
-  ) {
-    if (imageUploadInFlightRef.current[sessionId]) {
-      postSubmitTelemetry(
-        "browser.chat_submit.blocked",
-        "Direct chat submit was blocked while image upload was already in flight.",
-        sessionId,
-        {
-          content,
-          attachmentCount: attachments.length,
-          referenceCount: references.length,
-          mentalModelEnabled,
-          guardReason: "image_upload_in_flight",
-          clientSubmissionId,
-        },
-        "warning",
-      );
-      return;
-    }
-    imageUploadInFlightRef.current[sessionId] = true;
-    setSessionImageUploadPending((current) => ({
-      ...current,
-      [sessionId]: true,
-    }));
-    setSessionDrafts((current) => clearSessionDraftForSubmittedTurn(current, sessionId));
-    setSessionComposerErrors((current) => ({
-      ...current,
-      [sessionId]: "",
-    }));
-    if (content || references.length) {
-      queryClient.setQueryData<SessionDetail>(queryKeys.session(sessionId), (detail) =>
-        markSessionDetailRunning(appendOptimisticUserMessage(detail, { sessionId, content, references, clientSubmissionId })),
-      );
-    }
-    try {
-      if (attachments.length) {
-        postSubmitTelemetry(
-          "browser.chat_submit.upload_started",
-          "Direct chat submit image upload started.",
-          sessionId,
-          {
-            content,
-            attachmentCount: attachments.length,
-            referenceCount: references.length,
-            mentalModelEnabled,
-            clientSubmissionId,
-          },
-        );
-      }
-      const uploaded = await Promise.all(attachments.map((attachment) => uploadSessionImageAttachment(sessionId, attachment)));
-      if (attachments.length) {
-        postSubmitTelemetry(
-          "browser.chat_submit.upload_succeeded",
-          "Direct chat submit image upload succeeded.",
-          sessionId,
-          {
-            content,
-            attachmentCount: attachments.length,
-            uploadedAttachmentCount: uploaded.length,
-            referenceCount: references.length,
-            mentalModelEnabled,
-            clientSubmissionId,
-          },
-        );
-      }
-      postSubmitTelemetry(
-        "browser.chat_submit.submit_mutate_requested",
-        "Direct chat submit mutation was requested.",
-        sessionId,
-        {
-          content,
-          attachmentCount: attachments.length,
-          uploadedAttachmentCount: uploaded.length,
-          referenceCount: references.length,
-          mentalModelEnabled,
-          clientSubmissionId,
-        },
-      );
-      submitTurnMutation.mutate({
-        sessionId,
-        clientSubmissionId,
-        content,
-        mentalModelEnabled,
-        attachmentIds: uploaded.map((attachment) => attachment.artifactId).filter(Boolean),
-        references,
-        requestStartedAtMs: chatStreamPerformanceNowMs(),
-      });
-    } catch (error) {
-      postSubmitTelemetry(
-        "browser.chat_submit.upload_failed",
-        "Direct chat submit image upload failed before message POST.",
-        sessionId,
-        {
-          content,
-          attachmentCount: attachments.length,
-          referenceCount: references.length,
-          mentalModelEnabled,
-          clientSubmissionId,
-          error,
-        },
-        "error",
-      );
-      setSessionComposerErrors((current) => ({
-        ...current,
-        [sessionId]: describeError(error, lang === "zh" ? "图片上传失败" : "Image upload failed"),
-      }));
-      if (content || references.length) {
-        queryClient.setQueryData<SessionDetail>(queryKeys.session(sessionId), (detail) =>
-          removeOptimisticUserMessage(detail, { sessionId, content, references, clientSubmissionId }),
-        );
-        setSessionDrafts((current) => restoreSubmittedDraftIfComposerStillEmpty(current, sessionId, content));
-      }
-    } finally {
-      imageUploadInFlightRef.current[sessionId] = false;
-      setSessionImageUploadPending((current) => ({
-        ...current,
-        [sessionId]: false,
-      }));
-    }
-  }
-
-  function handleSubmitTurn() {
-    if (!activeSessionId) {
-      return;
-    }
-    const content = activeDraftEffective.trim();
-    const clientSubmissionId = createClientSubmissionId(activeSessionId);
-    postSubmitTelemetry(
-      "browser.chat_submit.requested",
-      "Direct chat submit was requested from the composer.",
-      activeSessionId,
-      {
-        content,
-        attachmentCount: activeImageAttachments.length,
-        referenceCount: activeReferenceAttachments.length,
-        mentalModelEnabled: mentalModelEnabledForNextTurn,
-        editTargetId: resolvedEditTarget?.messageId,
-        composerDisabled,
-        sessionBusy,
-        activePhase: detail?.currentPhase,
-        clientSubmissionId,
-      },
-    );
-    if (activeImageAttachments.length && activeAgentImageInputUnsupported) {
-      postSubmitTelemetry(
-        "browser.chat_submit.blocked",
-        "Direct chat submit image upload was blocked because the active Agent model does not support image input.",
-        activeSessionId,
-        {
-          content,
-          attachmentCount: activeImageAttachments.length,
-          referenceCount: activeReferenceAttachments.length,
-          mentalModelEnabled: mentalModelEnabledForNextTurn,
-          editTargetId: resolvedEditTarget?.messageId,
-          composerDisabled,
-          sessionBusy,
-          activePhase: detail?.currentPhase,
-          guardReason: "image_input_unsupported",
-          imageInputModelId: activeImageInputModelId,
-          clientSubmissionId,
-        },
-        "warning",
-      );
-      setSessionComposerErrors((current) => ({
-        ...current,
-        [activeSessionId]: lang === "zh" ? "当前 Agent 模型不支持图片输入。" : "The current Agent model does not support image input.",
-      }));
-      return;
-    }
-    const guardReason = resolveComposerSubmitGuard({
-      composerDisabled,
-      content,
-      imageAttachmentCount: activeImageAttachments.length,
-      referenceAttachmentCount: activeReferenceAttachments.length,
-    });
-    if (guardReason) {
-      postSubmitTelemetry(
-        "browser.chat_submit.blocked",
-        "Direct chat submit was blocked by the composer guard.",
-        activeSessionId,
-        {
-          content,
-          attachmentCount: activeImageAttachments.length,
-          referenceCount: activeReferenceAttachments.length,
-          mentalModelEnabled: mentalModelEnabledForNextTurn,
-          editTargetId: resolvedEditTarget?.messageId,
-          composerDisabled,
-          sessionBusy,
-          activePhase: detail?.currentPhase,
-          guardReason,
-          clientSubmissionId,
-        },
-        "warning",
-      );
-      return;
-    }
-    if (resolvedEditTarget) {
-      postSubmitTelemetry(
-        "browser.chat_submit.edit_resubmit_requested",
-        "Edit-resubmit mutation was requested from the composer.",
-        activeSessionId,
-        {
-          content,
-          attachmentCount: activeImageAttachments.length,
-          referenceCount: activeReferenceAttachments.length,
-          mentalModelEnabled: mentalModelEnabledForNextTurn,
-          editTargetId: resolvedEditTarget.messageId,
-          composerDisabled,
-          sessionBusy,
-          activePhase: detail?.currentPhase,
-          clientSubmissionId,
-        },
-      );
-      editResubmitMutation.mutate({
-        sessionId: activeSessionId,
-        messageId: resolvedEditTarget.messageId,
-        clientSubmissionId,
-        content,
-        mentalModelEnabled: mentalModelEnabledForNextTurn,
-      });
-      return;
-    }
-    void submitTurnWithAttachments(
-      activeSessionId,
-      content,
-      activeImageAttachments,
-      activeReferenceAttachments,
-      mentalModelEnabledForNextTurn,
-      clientSubmissionId,
-    );
-  }
-
-  function handleEditUserMessage(message: ConversationMessage) {
-    if (!activeSessionId || sessionBusy) {
-      return;
-    }
-    if (message.id !== latestUserMessageId) {
-      return;
-    }
-    setSessionEditTargets((current) => ({
-      ...current,
-      [activeSessionId]: {
-        messageId: message.id,
-        original: message.content,
-      },
-    }));
-    setSessionImageAttachments((current) => clearSessionImageAttachments(current, activeSessionId));
-    setSessionReferenceAttachments((current) => clearSessionReferenceAttachments(current, activeSessionId));
-    setSessionDrafts((current) => ({
-      ...current,
-      [activeSessionId]: message.content,
-    }));
-    setSessionComposerErrors((current) => ({
-      ...current,
-      [activeSessionId]: "",
-    }));
-  }
-
-  useEffect(() => {
-    if (!activeSessionId || !detail || !activeEditTarget || activeEditTarget.messageId === latestUserMessageId) {
-      return;
-    }
-    setSessionEditTargets((current) => {
-      const { [activeSessionId]: _removed, ...remaining } = current;
-      return remaining;
-    });
-    setSessionDrafts((current) => ({
-      ...current,
-      [activeSessionId]: "",
-    }));
-  }, [activeEditTarget, activeSessionId, latestUserMessageId, setSessionDrafts, setSessionEditTargets]);
-
-  function handleCancelEditMessage() {
-    if (!activeSessionId) {
-      return;
-    }
-    setSessionEditTargets((current) => {
-      const { [activeSessionId]: _removed, ...remaining } = current;
-      return remaining;
-    });
-    setSessionDrafts((current) => ({
-      ...current,
-      [activeSessionId]: "",
-    }));
-    setSessionImageAttachments((current) => clearSessionImageAttachments(current, activeSessionId));
-    setSessionReferenceAttachments((current) => clearSessionReferenceAttachments(current, activeSessionId));
-  }
-
-  function handleStopTurn() {
-    if (!activeSessionId || !sessionBusy || sessionStopping) {
-      return;
-    }
-    stopTurnMutation.mutate({
-      sessionId: activeSessionId,
-    });
-  }
-
-  function handleSubmitGuidance(mode: SessionGuidanceMode) {
-    if (!activeSessionId || !sessionBusy || sessionStopping) {
-      return;
-    }
-    const content = activeDraftEffective.trim();
-    if (!content) {
-      return;
-    }
-    sessionGuidanceMutation.mutate({
-      sessionId: activeSessionId,
-      content,
-      mode,
     });
   }
 
