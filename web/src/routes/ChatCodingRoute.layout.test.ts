@@ -13,6 +13,7 @@ import shellStoreSource from "../store/shellStore.ts?raw";
 import agentSessionTabStripSource from "./AgentSessionTabStrip.tsx?raw";
 import routeSource from "./ChatCodingRoute.tsx?raw";
 import conversationIndexRailSource from "./chat/ChatConversationIndexRail.tsx?raw";
+import chatStatusRailSource from "./chat/ChatStatusRail.tsx?raw";
 import cliAgentRunModelSource from "./chat/cliAgentRunModel.ts?raw";
 import sessionCacheCompositionSource from "./chat/sessionCacheComposition.ts?raw";
 import chatSubmitTelemetrySource from "./chat/chatSubmitTelemetry.ts?raw";
@@ -121,7 +122,7 @@ const tokenCoreStatusMetrics: TokenCoreStatusMetric[] = [
   },
 ];
 
-const routeAndIndexRailSource = `${routeSource}\n${conversationIndexRailSource}`;
+const routeAndIndexRailSource = `${routeSource}\n${conversationIndexRailSource}\n${chatStatusRailSource}`;
 
 describe("ChatCodingRoute layout contract", () => {
   it("keeps the center conversation readable and the composer as a stable bottom layer", () => {
@@ -585,14 +586,16 @@ describe("ChatCodingRoute layout contract", () => {
   });
 
   it("places the conversation index on the left and the status rail on the right", () => {
-    const statusAsideStart = routeSource.indexOf('id="chat-status-pane"');
+    const statusAsideMount = routeSource.indexOf("<ChatStatusRail");
     const centerPaneStart = routeSource.indexOf("<section className={centerPaneClassName}");
     const conversationAsideMount = routeSource.indexOf("<ChatConversationIndexRail");
-    const conversationAsideStart = routeAndIndexRailSource.indexOf('id="chat-conversation-index-pane"');
+    const statusAsideStart = chatStatusRailSource.indexOf('id="chat-status-pane"');
+    const conversationAsideStart = conversationIndexRailSource.indexOf('id="chat-conversation-index-pane"');
 
-    expect(statusAsideStart).toBeGreaterThan(-1);
-    expect(centerPaneStart).toBeGreaterThan(statusAsideStart);
+    expect(statusAsideMount).toBeGreaterThan(-1);
+    expect(centerPaneStart).toBeGreaterThan(statusAsideMount);
     expect(conversationAsideMount).toBeGreaterThan(centerPaneStart);
+    expect(statusAsideStart).toBeGreaterThan(-1);
     expect(conversationAsideStart).toBeGreaterThan(-1);
     expect(routeStyles.rightPane).toContain("[grid-column:1]");
     expect(routeStyles.rightPane).toContain("[grid-row:1]");
@@ -610,9 +613,9 @@ describe("ChatCodingRoute layout contract", () => {
     expect(conversationIndexRailSource.indexOf("styles.systemEntryGroup")).toBeGreaterThan(
       conversationIndexRailSource.indexOf('id="chat-conversation-index-pane"'),
     );
-    expect(routeSource.indexOf("styles.currentSessionBlock")).toBeGreaterThan(statusAsideStart);
-    expect(routeSource.indexOf("<TokenCoreStatusPanel")).toBeGreaterThan(statusAsideStart);
-    expect(routeSource.indexOf("styles.companionBlock")).toBeGreaterThan(statusAsideStart);
+    expect(chatStatusRailSource.indexOf("styles.currentSessionBlock")).toBeGreaterThan(-1);
+    expect(chatStatusRailSource.indexOf("<TokenCoreStatusPanel")).toBeGreaterThan(-1);
+    expect(chatStatusRailSource.indexOf("styles.companionBlock")).toBeGreaterThan(-1);
   });
 
   it("uses shared readable scale tokens instead of page-local micro typography", () => {
@@ -750,7 +753,7 @@ describe("ChatCodingRoute layout contract", () => {
   });
 
   it("compresses the left rail into primary controls plus auxiliary status groups", () => {
-    expect(routeSource).toContain("<TokenCoreStatusPanel");
+    expect(routeAndIndexRailSource).toContain("<TokenCoreStatusPanel");
     expect(tokenCoreStatusPanelSource).toContain("styles.tokenCompressionCard");
     expect(tokenCoreStatusPanelSource).toContain("styles.tokenStatusVisualGrid");
     expect(tokenCoreStatusPanelSource).toContain("styles.tokenStatusMetric");
@@ -763,16 +766,16 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).not.toContain("styles.cacheStatusCard");
     expect(routeSource).not.toContain("styles.compressionStatusCard");
     expect(routeSource).not.toContain("styles.compressionStrategyCard");
-    expect(routeSource).toContain("styles.runModeBlock");
+    expect(routeAndIndexRailSource).toContain("styles.runModeBlock");
     expect(routeSource).not.toContain("<details className={styles.sessionDiagnosticsDetails}>");
     expect(routeSource).not.toContain("styles.sessionResourceDiagnostics");
-    expect(routeSource).toContain("styles.companionBlock");
-    expect(routeSource).toContain("styles.companionCompact");
-    expect(routeSource).toContain("styles.petMiniAvatar");
-    expect(routeSource).toContain("styles.featureChipPrimary");
-    expect(routeSource).toContain("styles.featureChipRow");
-    expect(routeSource).toContain("styles.featureChip");
-    expect(routeSource).toContain("<em>{enabled ? (lang === \"zh\" ? \"开\" : \"On\") : (lang === \"zh\" ? \"关\" : \"Off\")}</em>");
+    expect(routeAndIndexRailSource).toContain("styles.companionBlock");
+    expect(routeAndIndexRailSource).toContain("styles.companionCompact");
+    expect(routeAndIndexRailSource).toContain("styles.petMiniAvatar");
+    expect(routeAndIndexRailSource).toContain("styles.featureChipPrimary");
+    expect(routeAndIndexRailSource).toContain("styles.featureChipRow");
+    expect(routeAndIndexRailSource).toContain("styles.featureChip");
+    expect(routeAndIndexRailSource).toContain("<em>{enabled ? (lang === \"zh\" ? \"开\" : \"On\") : (lang === \"zh\" ? \"关\" : \"Off\")}</em>");
     expect(routeSource).not.toContain("<section className={styles.petShowcase}");
     expect(routeSource).not.toContain("styles.featurePresetGrid");
 
@@ -800,8 +803,8 @@ describe("ChatCodingRoute layout contract", () => {
   });
 
   it("keeps the companion details toggle as a single compact control", () => {
-    expect(routeSource).toContain("<details className={styles.compactDetails}>");
-    expect(routeSource).toContain("<ChevronRight size={14} aria-hidden=\"true\" />");
+    expect(routeAndIndexRailSource).toContain("<details className={styles.compactDetails}>");
+    expect(routeAndIndexRailSource).toContain("<ChevronRight size={14} aria-hidden=\"true\" />");
     expect(routeStyles.compactDetails).toContain("[&>summary]:list-none");
     expect(routeStyles.compactDetails).toContain("[&>summary::-webkit-details-marker]:hidden");
     expect(routeStyles.compactDetails).toContain("[&_.compactDetailsOpenLabel]:hidden");
@@ -866,16 +869,16 @@ describe("ChatCodingRoute layout contract", () => {
     expect(llmPayloadTracePanelSource).not.toContain('<p className={styles.blockEyebrow}>LLM</p>');
     expect(routeSource).not.toContain('<p className={styles.blockEyebrow}>{lang === "zh" ? "模式控制" : "Mode controls"}</p>');
     expect(routeSource).not.toContain('<p className={styles.sectionMetaLine}>{mentalCompactLine || mentalSourceLabel}</p>');
-    expect(routeSource).toContain("content={mentalCompactLine || mentalSourceLabel}");
-    expect(routeSource).toContain('aria-label={`${mentalStateLabel}. ${mentalCompactLine || mentalSourceLabel}`}');
-    expect(routeSource).toContain("VContextualHint");
-    expect(routeSource).toContain("styles.sectionEyebrowRow");
-    expect(routeSource).toContain("styles.groupManagementTitleRow");
+    expect(routeAndIndexRailSource).toContain("content={mentalCompactLine || mentalSourceLabel}");
+    expect(routeAndIndexRailSource).toContain('aria-label={`${mentalStateLabel}. ${mentalCompactLine || mentalSourceLabel}`}');
+    expect(routeAndIndexRailSource).toContain("VContextualHint");
+    expect(routeAndIndexRailSource).toContain("styles.sectionEyebrowRow");
+    expect(routeAndIndexRailSource).toContain("styles.groupManagementTitleRow");
     expect(routeSource).toContain("styles.groupConversationTitleRow");
     expect(routeSource).toContain("暂无通知。");
     expect(routeSource).not.toContain("className={styles.featurePresetNote}");
-    expect(routeSource).toContain("groupManagementHint");
-    expect(routeSource).toContain("sessionBindingNotice");
+    expect(routeAndIndexRailSource).toContain("groupManagementHint");
+    expect(routeAndIndexRailSource).toContain("sessionBindingNotice");
   });
 
   it("keeps left rail VButton cards from collapsing their internal grid layout", () => {
@@ -969,7 +972,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("rightIndexPanel");
     expect(routeSource).toContain("setRightIndexPanel(\"members\")");
     expect(routeSource).toContain("latestMentalSnapshot");
-    expect(routeSource).toContain("styles.groupProfileBlock");
+    expect(routeAndIndexRailSource).toContain("styles.groupProfileBlock");
     expect(routeAndIndexRailSource).toContain("styles.rightIndexTabs");
     expect(routeAndIndexRailSource).toContain("styles.agentIndexRoster");
     expect(routeAndIndexRailSource).toContain("styles.agentIndexHeader");
@@ -988,9 +991,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).not.toContain("已从群聊调度中停用");
     expect(routeStyles.leftRail).toContain("[grid-column:5]");
     expect(routeStyles.rightPane).toContain("[grid-column:1]");
-    expect(routeSource.indexOf("styles.groupProfileBlock")).toBeGreaterThan(
-      routeSource.indexOf("<aside className={statusRailCollapsed"),
-    );
+    expect(chatStatusRailSource.indexOf("styles.groupProfileBlock")).toBeGreaterThan(-1);
+    expect(routeSource.indexOf("<ChatStatusRail")).toBeGreaterThan(-1);
     expect(routeAndIndexRailSource.indexOf("styles.agentIndexRoster")).toBeGreaterThan(-1);
     expect(routeSource.indexOf("<ChatConversationIndexRail")).toBeGreaterThan(
       routeSource.indexOf('id="chat-status-pane"'),
@@ -1055,10 +1057,10 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).not.toContain("<span className={styles.metricValue}>{compressionCurrentPercent}%</span>");
     expect(tokenCoreStatusPanelSource).toContain("styles.tokenCompressionCard");
     expect(routeSource).toContain("const tokenStatusMetrics");
-    expect(routeSource).toContain("<TokenCoreStatusPanel");
-    expect(routeSource).toContain("<LlmPayloadTracePanel");
-    expect(routeSource).toContain("trace={lastLlmPayloadTrace}");
-    expect(routeSource.indexOf("<LlmPayloadTracePanel")).toBeGreaterThan(routeSource.indexOf("<TokenCoreStatusPanel"));
+    expect(routeAndIndexRailSource).toContain("<TokenCoreStatusPanel");
+    expect(routeAndIndexRailSource).toContain("<LlmPayloadTracePanel");
+    expect(routeAndIndexRailSource).toContain("trace={lastLlmPayloadTrace}");
+    expect(routeAndIndexRailSource.indexOf("<LlmPayloadTracePanel")).toBeGreaterThan(routeAndIndexRailSource.indexOf("<TokenCoreStatusPanel"));
     expect(tokenCoreStatusPanelSource).toContain("styles.tokenStatusVisualGrid");
     expect(tokenCoreStatusPanelSource).toContain("styles.tokenStatusMetric");
     expect(tokenCoreStatusPanelSource).toContain("styles.tokenStatusRing");
@@ -1168,20 +1170,26 @@ describe("ChatCodingRoute layout contract", () => {
     expect(cacheDetailDialogSource).toContain("styles.cacheDetailDonutPanel");
     expect(cacheDetailDialogSource).toContain("case \"cache_write\"");
     expect(routeSource).toContain("cacheCreationInputTokens");
-    expect(routeSource).toContain("styles.currentSessionBlock");
-    expect(routeSource).toContain("styles.currentSessionLine");
-    expect(routeSource).toContain("styles.currentSessionMetaList");
+    expect(routeAndIndexRailSource).toContain("styles.currentSessionBlock");
+    expect(routeAndIndexRailSource).toContain("styles.currentSessionLine");
+    expect(routeAndIndexRailSource).toContain("styles.currentSessionMetaList");
     expect(routeSource).toContain("· 缓 ${numberFormatter.format(sessionLlmUsage.cachedInputTokens)}");
     expect(routeSource).not.toContain("${numberFormatter.format(sessionLlmUsage.inputTokens)} tokens · ${numberFormatter.format(sessionLlmUsage.cachedInputTokens)} cached");
-    expect(routeSource.indexOf("styles.runModeBlock")).toBeGreaterThan(routeSource.indexOf("sessionCompactRows.map"));
-    expect(routeSource.indexOf("<TokenCoreStatusPanel")).toBeGreaterThan(routeSource.indexOf("styles.runModeBlock"));
+    expect(routeAndIndexRailSource.indexOf("styles.runModeBlock")).toBeGreaterThan(
+      routeAndIndexRailSource.indexOf("sessionCompactRows.map"),
+    );
+    expect(routeAndIndexRailSource.indexOf("<TokenCoreStatusPanel")).toBeGreaterThan(
+      routeAndIndexRailSource.indexOf("styles.runModeBlock"),
+    );
     expect(routeSource).not.toContain("className={`${styles.leftBlock} ${styles.contextStatusCard}`}");
     expect(routeSource).not.toContain("className={`${styles.leftBlock} ${styles.cacheStatusCard}`}");
     expect(routeSource).not.toContain("className={`${styles.leftBlock} ${styles.resourceBlock} ${styles.compressionStatusCard}`}");
     expect(routeSource).not.toContain("className={`${styles.leftBlock} ${styles.compressionStrategyCard}`}");
     expect(routeSource).toContain("lastCacheComposition.source === \"not_called\"");
     expect(routeStyles.leftRail).toContain("[grid-column:5]");
-    expect(routeSource.indexOf("<TokenCoreStatusPanel")).toBeGreaterThan(routeSource.indexOf("<aside className={statusRailCollapsed"));
+    expect(routeAndIndexRailSource.indexOf("<TokenCoreStatusPanel")).toBeGreaterThan(
+      chatStatusRailSource.indexOf('id="chat-status-pane"'),
+    );
 
     expect(routeStyles.tokenCompressionCard).toBeTypeOf("string");
     expect(routeStyles.tokenStatusVisualGrid).toBeTypeOf("string");
@@ -1378,18 +1386,20 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("type ActiveSkillContract = {");
     expect(routeSource).toContain("type SessionDetailWithActiveSkill = SessionDetail &");
     expect(routeSource).toContain("const activeSkillContract = (detail as SessionDetailWithActiveSkill | undefined)?.activeSkillContract ?? null");
-    expect(routeSource).toContain("const activeSkillStatusLabel = activeSkillStatus === \"stale\"");
-    expect(routeSource).toContain("styles.activeSkillStatus_stale");
-    expect(routeSource).toContain("styles.activeSkillStatus_missing");
+    expect(routeAndIndexRailSource).toContain("const activeSkillStatusLabel = activeSkillStatus === \"stale\"");
+    expect(routeAndIndexRailSource).toContain("styles.activeSkillStatus_stale");
+    expect(routeAndIndexRailSource).toContain("styles.activeSkillStatus_missing");
     expect(routeSource).toContain("const activeSkillTitle = activeSkillContract");
-    expect(routeSource).toContain("const activeSkillStatusStyle = activeSkillStatus === \"stale\"");
-    expect(routeSource).toContain("className={`${styles.activeSkillStatus} ${activeSkillStatusStyle}`}");
-    expect(routeSource).toContain("styles.activeSkillIdentity");
-    expect(routeSource).toContain("styles.activeSkillMeta");
+    expect(routeAndIndexRailSource).toContain("const activeSkillStatusStyle = activeSkillStatus === \"stale\"");
+    expect(routeAndIndexRailSource).toContain("className={`${styles.activeSkillStatus} ${activeSkillStatusStyle}`}");
+    expect(routeAndIndexRailSource).toContain("styles.activeSkillIdentity");
+    expect(routeAndIndexRailSource).toContain("styles.activeSkillMeta");
     expect(routeSource).toContain("case \"active_skill\":");
-    const renderedActiveSkillIndex = routeSource.indexOf("className={`${styles.activeSkillStatus} ${activeSkillStatusStyle}`}");
-    expect(renderedActiveSkillIndex).toBeGreaterThan(routeSource.indexOf("sessionCompactRows.map"));
-    expect(renderedActiveSkillIndex).toBeLessThan(routeSource.indexOf("<TokenCoreStatusPanel"));
+    const renderedActiveSkillIndex = routeAndIndexRailSource.indexOf(
+      "className={`${styles.activeSkillStatus} ${activeSkillStatusStyle}`}",
+    );
+    expect(renderedActiveSkillIndex).toBeGreaterThan(routeAndIndexRailSource.indexOf("sessionCompactRows.map"));
+    expect(renderedActiveSkillIndex).toBeLessThan(routeAndIndexRailSource.indexOf("<TokenCoreStatusPanel"));
 
     expect(routeStyles.activeSkillStatus).toBeTypeOf("string");
     expect(routeStyles.activeSkillStatus_active).toBeTypeOf("string");
@@ -1508,13 +1518,13 @@ describe("ChatCodingRoute layout contract", () => {
   });
 
   it("shows direct-session mismatch as a status-strip notice with a switch action", () => {
-    expect(routeSource).toContain("agentDirectSessionMismatch");
-    expect(routeSource).toContain("sessionBindingNotice");
-    expect(routeSource).toContain("sessionBindingMismatchLine");
-    expect(routeSource).toContain("handleOpenDirectSession(agentPrimaryDirectSessionId)");
+    expect(routeAndIndexRailSource).toContain("agentDirectSessionMismatch");
+    expect(routeAndIndexRailSource).toContain("sessionBindingNotice");
+    expect(routeAndIndexRailSource).toContain("sessionBindingMismatchLine");
+    expect(routeAndIndexRailSource).toContain("onOpenDirectSession(agentPrimaryDirectSessionId)");
     expect(routeSource).toContain("label: t(\"sessionBinding\")");
     expect(routeSource.indexOf("label: t(\"sessionBinding\")")).toBeLessThan(
-      routeSource.indexOf("<TokenCoreStatusPanel"),
+      routeAndIndexRailSource.indexOf("<TokenCoreStatusPanel"),
     );
     expect(routeSource).not.toContain("label: t(\"currentTask\")");
   });
@@ -1624,8 +1634,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("requestedRoomId && activeGroupRoomId !== requestedRoomId");
     expect(routeSource).toContain("navigate(`/chat?room=${encodeURIComponent(roomId)}`, { replace: false })");
     expect(routeSource).toContain("setRightPaneCollapsed(false)");
-    expect(routeSource).toContain("chatRoomModeLabel(mode, lang)");
-    expect(routeSource).toContain("chatRoomPurposeLabel(purpose, lang)");
+    expect(routeAndIndexRailSource).toContain("chatRoomModeLabel(mode, lang)");
+    expect(routeAndIndexRailSource).toContain("chatRoomPurposeLabel(purpose, lang)");
     expect(routeSource).toContain("queryKeys.chatRoomPurposes()");
     expect(routeSource).toContain("fetchJson<ChatRoomPurpose[]>(\"/api/chat-rooms/purposes\")");
     expect(routeSource).toContain("抢占式讨论");
@@ -1633,7 +1643,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("医疗分诊建议");
     expect(routeSource).toContain("medical_consultation_panel");
     expect(routeSource).toContain("medical_triage");
-    expect(routeSource).toContain("对话目的");
+    expect(routeAndIndexRailSource).toContain("对话目的");
     expect(routeSource).toContain("purpose: groupPurposeDraft || \"discussion\"");
     expect(routeSource).toContain("purpose: activeGroupRoom?.purpose || \"discussion\"");
     expect(routeSource).toContain("purpose: groupManagePurposeDraft || \"discussion\"");
@@ -1656,20 +1666,20 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("const activeGroupTeamOwned = Boolean(activeGroupTeam)");
     expect(routeSource).toContain("|| activeGroupTeamOwned");
     expect(routeSource).toContain("if (!sessionId || activeGroupTeamOwned || groupRoundActive || updateGroupRoomMutation.isPending)");
-    expect(routeSource).toContain("团队群聊引用");
-    expect(routeSource).toContain("Team room reference");
-    expect(routeSource).toContain("onClick={() => navigate(`/teams?team=${encodeURIComponent(activeGroupTeam.teamId)}`)}");
-    expect(routeSource).toContain("打开团队");
-    expect(routeSource).toContain("disabled={activeGroupTeamOwned || groupRoundActive || updateGroupRoomMutation.isPending}");
-    expect(routeSource).toContain("disabled={activeGroupTeamOwned || groupRoundRunning || updateGroupRoomMutation.isPending}");
-    expect(routeSource).toContain("团队关联群聊的成员来自团队组织画布");
+    expect(routeAndIndexRailSource).toContain("团队群聊引用");
+    expect(routeAndIndexRailSource).toContain("Team room reference");
+    expect(routeAndIndexRailSource).toContain("onClick={() => onOpenTeam(activeGroupTeam.teamId)}");
+    expect(routeAndIndexRailSource).toContain("打开团队");
+    expect(routeAndIndexRailSource).toContain("disabled={activeGroupTeamOwned || groupRoundActive || updateGroupRoomPending}");
+    expect(routeAndIndexRailSource).toContain("disabled={activeGroupTeamOwned || groupRoundRunning || updateGroupRoomPending}");
+    expect(routeAndIndexRailSource).toContain("团队关联群聊的成员来自团队组织画布");
     expect(routeSource).toContain("groupManageTitleDraft");
     expect(routeSource).toContain("title: groupManageTitleDraft.trim()");
     expect(routeSource).toContain("groupManagePurposeDraft");
     expect(routeSource).toContain("participantSessionIds: sessionIds");
     expect(routeSource).toContain("groupManageSessionIds.length < 2");
     expect(routeSource).toContain("setGroupManageSessionIds((current) => current.filter((sessionId) => sessionId !== variables.sessionId))");
-    expect(routeSource).toContain("styles.groupManagementPanel");
+    expect(routeAndIndexRailSource).toContain("styles.groupManagementPanel");
     expect(routeSource).toContain("styles.groupConversationFrame");
     expect(routeSource).toContain("compactAgentRoleLabel");
     expect(routeSource).toContain("shouldCollapseGroupMessage");
@@ -1686,9 +1696,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("numericTail.slice(-2)");
     expect(routeSource).not.toContain("navigate(`/chat-rooms");
     expect(routeStyles.leftRail).toContain("[grid-column:5]");
-    expect(routeSource.indexOf("styles.groupManagementPanel")).toBeGreaterThan(
-      routeSource.indexOf("<aside className={statusRailCollapsed"),
-    );
+    expect(chatStatusRailSource.indexOf("styles.groupManagementPanel")).toBeGreaterThan(-1);
+    expect(routeSource.indexOf("<ChatStatusRail")).toBeGreaterThan(-1);
 
     expect(routeStyles.groupConversationFrame).toBeTypeOf("string");
     expect(routeStyles.groupManagementPanel).toBeTypeOf("string");
@@ -2967,9 +2976,9 @@ describe("ChatCodingRoute layout contract", () => {
 
   it("routes ChatCoding route controls through VUI primitives", () => {
     expect(routeSource).toContain('from "../components/vui"');
-    expect(routeSource).toContain("<VButton");
-    expect(routeSource).toContain("<VNativeInput");
-    expect(routeSource).toContain("<VNativeSelect");
+    expect(routeAndIndexRailSource).toContain("<VButton");
+    expect(routeAndIndexRailSource).toContain("<VNativeInput");
+    expect(routeAndIndexRailSource).toContain("<VNativeSelect");
     expect(routeSource).not.toMatch(/<button\b/);
     expect(routeSource).not.toMatch(/<input\b/);
     expect(routeSource).not.toMatch(/<select\b/);
