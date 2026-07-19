@@ -12,8 +12,9 @@ from pathlib import Path
 from typing import Any
 
 from core.infrastructure import developer_sandbox
-from core.web.services import team_service
+from core.web.services import team_knowledge_service, team_service
 from core.web.services.runtime_scene_service import record_runtime_scene_event
+from core.web.services.team_workflow.research_memory_context import build_research_memory_context
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -154,6 +155,12 @@ def create_research_loop(team_id: str, payload: dict[str, Any] | None = None) ->
         raise ResearchLoopError("Research question is required.")
     now = utc_now_iso()
     created_by_agent = _trim_text(request_payload.get("createdByAgent"), max_length=160) or DEFAULT_OWNER_AGENT_ID
+    memory_context = _research_loop_memory_context(
+        normalized_team_id,
+        team=team,
+        research_question=research_question,
+        actor_agent_id=created_by_agent,
+    )
     loop = {
         "schemaVersion": SCHEMA_VERSION,
         "loopId": _new_record_id("research-loop"),
@@ -180,7 +187,9 @@ def create_research_loop(team_id: str, payload: dict[str, Any] | None = None) ->
             "environmentRefs": _trim_list(request_payload.get("environmentRefs"), max_items=24, max_length=500),
             "constraints": _trim_text(request_payload.get("constraints"), max_length=4000),
             "metadata": _normalize_metadata(request_payload.get("metadata")),
+            "memoryContextId": memory_context["contextId"],
         },
+        "memoryContext": memory_context,
         "executionPolicy": _manual_execution_policy(),
         "evidenceRecords": [],
         "decisions": [],
@@ -207,6 +216,9 @@ def create_research_loop(team_id: str, payload: dict[str, Any] | None = None) ->
             "stageRoundId": loop["linkedExperiment"]["stageRoundId"],
             "createdByAgent": created_by_agent,
             "autoExecution": False,
+            "memoryContextId": memory_context["contextId"],
+            "memoryKnowledgeItemCount": int((memory_context.get("retrieval") or {}).get("knowledgeItemCount") or 0),
+            "memoryNegativeExperimentCount": int((memory_context.get("retrieval") or {}).get("negativeExperimentCount") or 0),
         },
     )
     return {
@@ -556,6 +568,65 @@ def _load_research_loop_store(team_id: str) -> dict[str, Any]:
     store.setdefault("createdAt", store.get("updatedAt") or utc_now_iso())
     store.setdefault("updatedAt", store.get("createdAt") or utc_now_iso())
     return store
+
+
+def _research_loop_memory_context(
+    team_id: str,
+    *,
+    team: dict[str, Any],
+    research_question: str,
+    actor_agent_id: str,
+) -> dict[str, Any]:
+    normalized_actor_id = _trim_text(actor_agent_id, max_length=160)
+    if not normalized_actor_id.startswith("agent-"):
+        normalized_actor_id = next(
+            (
+                str(member.get("agentId") or "")
+                for member in list(team.get("members") or [])
+                if isinstance(member, dict)
+                and str(member.get("role") or "") == "research_coordination"
+                and str(member.get("agentId") or "")
+            ),
+            "",
+        )
+    retrieval_status = "completed"
+    knowledge_results: list[dict[str, Any]] = []
+    try:
+        knowledge_payload = team_knowledge_service.search_knowledge_items(
+            agent_id=normalized_actor_id,
+            team_id=team_id,
+            query=_trim_text(research_question, max_length=1200),
+            search_mode="bm25",
+            limit=6,
+        )
+        knowledge_results = [
+            item
+            for item in list(knowledge_payload.get("results") or [])
+            if isinstance(item, dict)
+        ]
+    except Exception:
+        retrieval_status = "unavailable"
+    root = _team_workspace_root(team_id)
+    candidate_store = _read_json(root / "candidate_store" / "index.json")
+    plan_store = _read_json(root / "experiment_plans" / "index.json")
+    loop_store = _load_research_loop_store(team_id)
+    return build_research_memory_context(
+        stage_type="experiment_execution_iteration",
+        research_question=research_question,
+        candidates=[
+            item
+            for item in list(candidate_store.get("candidates") or [])
+            if isinstance(item, dict)
+        ],
+        plans=[
+            item
+            for item in list(plan_store.get("plans") or [])
+            if isinstance(item, dict)
+        ],
+        loops=_loop_records(loop_store),
+        knowledge_results=knowledge_results,
+        retrieval_status=retrieval_status,
+    )
 
 
 def _loop_records(store: dict[str, Any]) -> list[dict[str, Any]]:

@@ -1294,6 +1294,15 @@ def test_team_workflow_route_resolves_stale_prompt_cache_model_for_stage_round(t
 def test_team_workflow_route_retries_research_stage_coordination(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _stub_source_collection_search_background(monkeypatch)
+    monkeypatch.setattr(
+        team_workflow_orchestration_service.chat_room_service,
+        "start_chat_room_round",
+        lambda room_id, topic, **_: {
+            "roomId": room_id,
+            "roundId": "coordination-round-route-test",
+            "status": "running",
+        },
+    )
     client = _client()
     team = client.post("/api/teams", json={"name": "ai科学研究团队"}).json()
     start_response = client.post(

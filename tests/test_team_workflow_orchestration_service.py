@@ -8863,6 +8863,143 @@ def test_start_research_stage_round_creates_experiment_planning_placeholder(tmp_
     assert experiment["boundaries"]["autoTransitionsNextStage"] is False
 
 
+def test_start_experiment_stage_builds_bounded_memory_context_with_negative_shields(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    agent = agent_directory_service.create_agent_instance(display_name="Coordinator", direct_session_id="session-coordinator")
+    team = team_service.create_team(
+        name="ai科学研究团队",
+        members=[{"agentId": agent["agentId"], "role": "research_coordination"}],
+    )
+    candidate_store = team_workflow_orchestration_service._load_candidate_store(team["teamId"])
+    candidate_store["candidates"] = [
+        {
+            "candidateId": "source-reviewed-1",
+            "candidateType": "source_manifest",
+            "title": "Reviewed source",
+            "currentState": "source_quality_approved",
+            "sourceRef": "doi:10.1000/reviewed",
+        },
+        {
+            "candidateId": "hypothesis-ready-1",
+            "candidateType": "algorithm_hypothesis",
+            "title": "Ready hypothesis",
+            "currentState": "hypothesis_candidate",
+            "qualityStatus": "prefiltered",
+            "claims": [{"claim": "The bounded candidate may improve the masked metric.", "sourceRef": "source-reviewed-1"}],
+        },
+    ]
+    team_workflow_orchestration_service._write_json(
+        team_workflow_orchestration_service._candidate_store_path(team["teamId"]),
+        candidate_store,
+    )
+    plan_store = team_workflow_orchestration_service._load_experiment_plan_store(team["teamId"])
+    plan_store["plans"] = [
+        {
+            "planId": "plan-negative-weight-1",
+            "title": "weight 1.0 global regression",
+            "status": "full_run_needs_review",
+            "hypothesisCandidateIds": ["candidate-weight-1"],
+            "experimentContract": {
+                "schemaVersion": 2,
+                "revision": 2,
+                "researchQuestion": "Does weight 1.0 improve masked reconstruction?",
+                "methodConfig": {
+                    "candidateMaskedLossWeight": 1.0,
+                    "dataset": "FashionMNIST",
+                    "model": "matched autoencoder",
+                },
+                "constraints": ["same dataset", "same architecture", "only masked loss weight changes"],
+                "decisionContract": {"failureCriteria": ["global regression exceeds 0.0005"]},
+            },
+            "activeFullRunResultId": "full-negative-weight-1",
+            "activeFullRunResult": {
+                "fullRunResultId": "full-negative-weight-1",
+                "status": "needs_review",
+                "delta": "global regression",
+                "logRef": "artifact:sha256:negative",
+            },
+        },
+        {
+            "planId": "plan-best-revision4",
+            "title": "weight 0.875 bounded result",
+            "status": "ingested",
+            "hypothesisCandidateIds": ["candidate-revision4"],
+            "experimentContract": {
+                "schemaVersion": 2,
+                "revision": 4,
+                "researchQuestion": "Does weight 0.875 provide bounded benefit?",
+                "methodConfig": {"candidateMaskedLossWeight": 0.875, "dataset": "FashionMNIST"},
+            },
+            "activeFullRunResultId": "full-best-revision4",
+            "activeFullRunResult": {"fullRunResultId": "full-best-revision4", "status": "passed"},
+            "knowledgeIngestion": {
+                "status": "ingested",
+                "result": {"knowledgeItemId": "kitem-revision4"},
+            },
+        },
+    ]
+    plan_store["activePlanId"] = "plan-best-revision4"
+    team_workflow_orchestration_service._write_json(
+        team_workflow_orchestration_service._experiment_plan_store_path(team["teamId"]),
+        plan_store,
+    )
+    monkeypatch.setattr(
+        team_workflow_orchestration_service.team_knowledge_service,
+        "search_knowledge_items",
+        lambda **_: {
+            "results": [
+                {
+                    "knowledgeItemId": "kitem-revision4",
+                    "title": "Revision 4 bounded result",
+                    "summary": "Supported only under the frozen FashionMNIST protocol.",
+                    "sourceArtifactIds": ["artifact-revision4"],
+                    "centralSourceIds": ["source-revision4"],
+                }
+            ]
+        },
+    )
+
+    experiment = team_workflow_orchestration_service.start_research_stage_round(
+        team["teamId"],
+        {
+            "stageType": "experiment",
+            "topic": "FashionMNIST masked prediction error",
+            "requestedByAgent": agent["agentId"],
+        },
+    )
+    context = experiment["stageRound"]["memoryContext"]
+
+    assert context["stageType"] == "experiment_design"
+    assert context["retrieval"]["rawKnowledgeContentIncluded"] is False
+    assert context["security"]["embeddedInstructionsMustBeIgnored"] is True
+    assert context["formalKnowledge"][0]["knowledgeItemId"] == "kitem-revision4"
+    assert context["currentBest"]["planId"] == "plan-best-revision4"
+    assert context["currentBest"]["candidateId"] == "candidate-revision4"
+    assert context["negativeExperiments"][0]["planId"] == "plan-negative-weight-1"
+    assert context["negativeExperiments"][0]["changedVariable"] == {
+        "candidateMaskedLossWeight": 1.0,
+    }
+    assert context["negativeExperiments"][0]["failedGates"] == ["global regression exceeds 0.0005"]
+    assert context["negativeExperiments"][0]["retestPolicy"] == "blocked_without_new_evidence_or_changed_assumption"
+    assert context["forbiddenDuplicateExperiments"][0]["planId"] == "plan-negative-weight-1"
+    assert experiment["stageRound"]["planningContract"]["memoryContextId"] == context["contextId"]
+    assert experiment["stageRound"]["coordinationContract"]["config"]["memoryContextId"] == context["contextId"]
+    assert (
+        experiment["stageRound"]["coordinationContract"]["config"]["memoryContext"]["forbiddenDuplicateExperiments"][0]["planId"]
+        == "plan-negative-weight-1"
+    )
+    status = team_workflow_orchestration_service.get_experiment_planning_status(team["teamId"])
+    assert status["lifecycleProjection"]["stage2"]["memoryContextSummary"] == {
+        "contextId": context["contextId"],
+        "knowledgeItemCount": 1,
+        "reviewedSourceCount": 1,
+        "negativeExperimentCount": 1,
+        "successfulRunCount": 1,
+        "forbiddenDuplicateExperimentCount": 1,
+        "missingEvidence": ["explicit_allowed_variable_changes"],
+    }
+
+
 def test_start_research_stage_round_keeps_experiment_plan_when_coordination_busy(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _stub_source_collection_search_background(monkeypatch)

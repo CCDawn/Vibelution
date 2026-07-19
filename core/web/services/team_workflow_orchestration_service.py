@@ -46,6 +46,9 @@ from core.web.services.team_workflow.source_collection_projection import (
     source_collection_stage_user_summary as _source_collection_stage_user_summary,
     source_collection_summary_payload_status as _source_collection_summary_payload_status,
 )
+from core.web.services.team_workflow.research_memory_context import (
+    build_research_memory_context as _build_research_memory_context,
+)
 from core.web.services.team_workflow.source_collection_stage_tasks import (
     source_collection_stage_can_materialize_formal_knowledge as _source_collection_stage_can_materialize_formal_knowledge,
     source_collection_stage_completion_gate as _source_collection_stage_completion_gate,
@@ -6636,6 +6639,36 @@ def start_research_stage_round(team_id: str, payload: dict[str, Any] | None = No
         rounds = _stage_rounds(store)
         active_round = _active_stage_round(rounds, stage_type)
         if active_round and start_mode != "new_round":
+            if stage_type != "knowledge_collection":
+                memory_context = _research_stage_memory_context(
+                    normalized_team_id,
+                    stage_type=stage_type,
+                    research_question=_first_non_empty_text(
+                        active_round.get("goal"),
+                        active_round.get("topic"),
+                    ),
+                    actor_agent_id=requested_by_agent,
+                )
+                active_round["memoryContext"] = memory_context
+                planning_contract = (
+                    active_round.get("planningContract")
+                    if isinstance(active_round.get("planningContract"), dict)
+                    else _stage_planning_contract(stage_type, active_round)
+                )
+                planning_contract["memoryContextId"] = memory_context["contextId"]
+                active_round["planningContract"] = planning_contract
+                active_round["coordinationContract"] = _stage_coordination_contract(
+                    team,
+                    active_round,
+                    trigger="manual",
+                )
+                active_round["coordinationContract"]["startResult"] = _stage_coordination_manual_pending_result(
+                    active_round["coordinationContract"]
+                )
+                active_round["updatedAt"] = utc_now_iso()
+                store["rounds"] = rounds
+                store["updatedAt"] = active_round["updatedAt"]
+                _write_json(_stage_round_store_path(normalized_team_id), store)
             continued_payload = _continued_stage_round_payload(active_round, stage_type)
             continued_ref = continued_payload.get("continuedSourceRunRef") if isinstance(continued_payload.get("continuedSourceRunRef"), dict) else {}
             _record_workflow_event(
@@ -6731,7 +6764,18 @@ def start_research_stage_round(team_id: str, payload: dict[str, Any] | None = No
             workflow = _load_or_create_workflow(normalized_team_id)
         else:
             status = "planning"
+            memory_context = _research_stage_memory_context(
+                normalized_team_id,
+                stage_type=stage_type,
+                research_question=_first_non_empty_text(
+                    round_payload.get("goal"),
+                    round_payload.get("topic"),
+                ),
+                actor_agent_id=requested_by_agent,
+            )
+            round_payload["memoryContext"] = memory_context
             round_payload["planningContract"] = _stage_planning_contract(stage_type, round_payload)
+            round_payload["planningContract"]["memoryContextId"] = memory_context["contextId"]
             workflow["activeWorkflowItems"] = _upsert_active_item(
                 workflow.get("activeWorkflowItems"),
                 candidate_id=round_payload["stageRoundId"],
@@ -6772,6 +6816,9 @@ def start_research_stage_round(team_id: str, payload: dict[str, Any] | None = No
             "coordinationErrorType": str(coordination_result.get("errorType") or ""),
             "sourceSearchAccepted": bool((result_payload.get("sourceCollectionSearchExecution") or {}).get("accepted")),
             "requestedByAgent": requested_by_agent,
+            "memoryContextId": str((round_payload.get("memoryContext") or {}).get("contextId") or ""),
+            "memoryKnowledgeItemCount": int(((round_payload.get("memoryContext") or {}).get("retrieval") or {}).get("knowledgeItemCount") or 0),
+            "memoryNegativeExperimentCount": int(((round_payload.get("memoryContext") or {}).get("retrieval") or {}).get("negativeExperimentCount") or 0),
         },
     )
     if stage_type == "knowledge_collection":
@@ -6854,6 +6901,14 @@ def create_experiment_plan(team_id: str, payload: dict[str, Any] | None = None) 
             request_payload,
             created_by_agent=created_by_agent,
         )
+        memory_context = _research_stage_memory_context(
+            normalized_team_id,
+            stage_type="experiment",
+            research_question=str((plan.get("experimentContract") or {}).get("researchQuestion") or plan.get("goal") or plan.get("topic") or ""),
+            actor_agent_id=created_by_agent,
+        )
+        plan["memoryContext"] = deepcopy(memory_context)
+        stage_round["memoryContext"] = deepcopy(memory_context)
         now = plan["updatedAt"]
         plan_store.setdefault("plans", []).append(plan)
         plan_store["activePlanId"] = plan["planId"]
@@ -6868,6 +6923,7 @@ def create_experiment_plan(team_id: str, payload: dict[str, Any] | None = None) 
         planning_contract = stage_round.get("planningContract") if isinstance(stage_round.get("planningContract"), dict) else {}
         planning_contract["currentPlanId"] = plan["planId"]
         planning_contract["planStoragePath"] = _relative_path(_experiment_plan_store_path(normalized_team_id))
+        planning_contract["memoryContextId"] = memory_context["contextId"]
         planning_contract["autoExecution"] = False
         planning_contract["requiresUserDecision"] = True
         stage_round["planningContract"] = planning_contract
@@ -6903,6 +6959,9 @@ def create_experiment_plan(team_id: str, payload: dict[str, Any] | None = None) 
             "readyForPlanReview": bool((plan.get("readiness") or {}).get("readyForPlanReview")),
             "readyForFullRun": False,
             "createdByAgent": created_by_agent,
+            "memoryContextId": str((plan.get("memoryContext") or {}).get("contextId") or ""),
+            "memoryKnowledgeItemCount": int(((plan.get("memoryContext") or {}).get("retrieval") or {}).get("knowledgeItemCount") or 0),
+            "memoryNegativeExperimentCount": int(((plan.get("memoryContext") or {}).get("retrieval") or {}).get("negativeExperimentCount") or 0),
         },
     )
     return {
@@ -21848,6 +21907,7 @@ def _stage_memory_record(stage_round: dict[str, Any], workflow: dict[str, Any]) 
         "sourceRunIds": list(stage_round.get("sourceRunIds") or []),
         "upstreamRoundIds": list(stage_round.get("upstreamRoundIds") or []),
         "promptCachePolicyRef": _source_collection_prompt_cache_policy_ref(stage_round.get("promptCachePolicy") if isinstance(stage_round.get("promptCachePolicy"), dict) else {}),
+        "memoryContextId": str((stage_round.get("memoryContext") or {}).get("contextId") or ""),
         "boundary": "runtime_stage_record_only_not_formal_team_knowledge",
         "createdAt": utc_now_iso(),
     }
@@ -21860,6 +21920,7 @@ def _stage_coordination_contract(team: dict[str, Any], stage_round: dict[str, An
     linked_room = chat_room_service.get_chat_room_compact(linked_room_id) if linked_room_id else None
     room_mode = _trim_text((linked_room or {}).get("mode"), max_length=80) or "round_robin"
     normalized_trigger = _trim_text(trigger, max_length=80) or "manual"
+    memory_context = stage_round.get("memoryContext") if isinstance(stage_round.get("memoryContext"), dict) else {}
     return {
         "contractKind": "team_coordination_round_contract",
         "linkedChatRoomId": linked_room_id,
@@ -21876,6 +21937,8 @@ def _stage_coordination_contract(team: dict[str, Any], stage_round: dict[str, An
             "teamId": team.get("teamId", ""),
             "stageRoundId": stage_round.get("stageRoundId", ""),
             "sourceRunIds": list(stage_round.get("sourceRunIds") or []),
+            "memoryContextId": str(memory_context.get("contextId") or ""),
+            "memoryContext": deepcopy(memory_context),
         },
     }
 
@@ -21938,6 +22001,63 @@ def _stage_planning_contract(stage_type: str, stage_round: dict[str, Any]) -> di
         "autoExecution": False,
         "requiresUserDecision": True,
     }
+
+
+def _research_stage_memory_context(
+    team_id: str,
+    *,
+    stage_type: str,
+    research_question: str,
+    actor_agent_id: str,
+) -> dict[str, Any]:
+    candidate_store = _load_candidate_store(team_id)
+    plan_store = _load_experiment_plan_store(team_id)
+    loop_store = _read_json(_team_workflow_root(team_id) / "research_loops" / "index.json")
+    normalized_actor_id = _trim_text(actor_agent_id, max_length=160)
+    if not normalized_actor_id.startswith("agent-"):
+        try:
+            normalized_actor_id = _source_collection_owner_agent_id(team_service.get_team(team_id), {})
+        except Exception:
+            normalized_actor_id = ""
+    retrieval_status = "completed"
+    knowledge_results: list[dict[str, Any]] = []
+    try:
+        knowledge_payload = team_knowledge_service.search_knowledge_items(
+            agent_id=normalized_actor_id,
+            team_id=team_id,
+            query=_trim_text(research_question, max_length=1200),
+            search_mode="bm25",
+            limit=6,
+        )
+        knowledge_results = [
+            item
+            for item in list(knowledge_payload.get("results") or [])
+            if isinstance(item, dict)
+        ]
+    except Exception:
+        retrieval_status = "unavailable"
+    normalized_stage_type = (
+        "experiment_execution_iteration"
+        if stage_type == "iteration"
+        else "experiment_design"
+    )
+    return _build_research_memory_context(
+        stage_type=normalized_stage_type,
+        research_question=research_question,
+        candidates=[
+            item
+            for item in list(candidate_store.get("candidates") or [])
+            if isinstance(item, dict)
+        ],
+        plans=_experiment_plans(plan_store),
+        loops=[
+            item
+            for item in list(loop_store.get("loops") or [])
+            if isinstance(item, dict)
+        ],
+        knowledge_results=knowledge_results,
+        retrieval_status=retrieval_status,
+    )
 
 
 def _experiment_plan_revision(plan: dict[str, Any] | None) -> int:
@@ -22022,10 +22142,35 @@ def _best_validated_experiment_plan(
     )
 
 
+def _research_memory_context_summary(value: Any) -> dict[str, Any]:
+    context = value if isinstance(value, dict) else {}
+    retrieval = context.get("retrieval") if isinstance(context.get("retrieval"), dict) else {}
+    forbidden = [
+        item
+        for item in list(context.get("forbiddenDuplicateExperiments") or [])
+        if isinstance(item, dict)
+    ]
+    return {
+        "contextId": str(context.get("contextId") or ""),
+        "knowledgeItemCount": int(retrieval.get("knowledgeItemCount") or 0),
+        "reviewedSourceCount": int(retrieval.get("reviewedSourceCount") or 0),
+        "negativeExperimentCount": int(retrieval.get("negativeExperimentCount") or 0),
+        "successfulRunCount": int(retrieval.get("successfulRunCount") or 0),
+        "forbiddenDuplicateExperimentCount": len(forbidden),
+        "missingEvidence": [
+            str(item)
+            for item in list(context.get("missingEvidence") or [])
+            if str(item).strip()
+        ][:12],
+    }
+
+
 def _experiment_lifecycle_projection(
     *,
     team_id: str,
     latest_collection: dict[str, Any] | None,
+    latest_experiment: dict[str, Any] | None,
+    latest_iteration: dict[str, Any] | None,
     candidate_store: dict[str, Any],
     plans: list[dict[str, Any]],
     active_plan: dict[str, Any] | None,
@@ -22082,6 +22227,16 @@ def _experiment_lifecycle_projection(
         and isinstance((plan.get("knowledgeIngestion") or {}).get("result"), dict)
     ]
     knowledge_item_ids = [item for item in knowledge_item_ids if item]
+    stage2_memory_context = (
+        design_plan.get("memoryContext")
+        if isinstance((design_plan or {}).get("memoryContext"), dict)
+        else (latest_experiment or {}).get("memoryContext")
+    )
+    stage3_memory_context = (
+        active_loop.get("memoryContext")
+        if isinstance((active_loop or {}).get("memoryContext"), dict)
+        else (latest_iteration or {}).get("memoryContext")
+    )
     return {
         "schemaVersion": 1,
         "migrationMode": "derived_from_append_only_history",
@@ -22098,6 +22253,7 @@ def _experiment_lifecycle_projection(
             "frozenDesignRevision": _experiment_plan_revision(design_plan) if stage2_status == "frozen" else 0,
             "readyForExecution": stage2_status == "frozen",
             "completionDefinition": "frozen_executable_experiment_design",
+            "memoryContextSummary": _research_memory_context_summary(stage2_memory_context),
         },
         "stage3": {
             "status": stage3_status,
@@ -22107,6 +22263,7 @@ def _experiment_lifecycle_projection(
             "bestValidatedPlanId": str((best_plan or {}).get("planId") or ""),
             "latestDiagnosticStatus": latest_diagnostic_status,
             "completionDefinition": "executed_evaluated_and_governed_result",
+            "memoryContextSummary": _research_memory_context_summary(stage3_memory_context),
         },
         "compatibility": {
             "legacyActivePlanId": str((active_plan or {}).get("planId") or ""),
@@ -22125,6 +22282,7 @@ def _experiment_planning_status(
     experiment_rounds = [item for item in rounds if str(item.get("stageType") or "") == "experiment"]
     latest_experiment = _latest_stage_round(experiment_rounds)
     latest_collection = _latest_stage_round([item for item in rounds if str(item.get("stageType") or "") == "knowledge_collection"])
+    latest_iteration = _latest_stage_round([item for item in rounds if str(item.get("stageType") or "") == "iteration"])
     hypothesis_candidates = _experiment_hypothesis_summaries(candidate_store)
     ready_hypotheses = [item for item in hypothesis_candidates if item.get("valid") and not item.get("missingExperimentPlanFields")]
     plans = _experiment_plans(plan_store)
@@ -22132,6 +22290,8 @@ def _experiment_planning_status(
     lifecycle_projection = _experiment_lifecycle_projection(
         team_id=team_id,
         latest_collection=latest_collection,
+        latest_experiment=latest_experiment,
+        latest_iteration=latest_iteration,
         candidate_store=candidate_store,
         plans=plans,
         active_plan=active_plan,
