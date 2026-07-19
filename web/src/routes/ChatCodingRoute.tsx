@@ -202,6 +202,7 @@ import { useSessionDetailStream } from "./chat/useSessionDetailStream";
 import { useGroupRoomStream } from "./chat/useGroupRoomStream";
 import { useChatSessionSelection } from "./chat/useChatSessionSelection";
 import { useChatWorkspaceLifecycle } from "./chat/useChatWorkspaceLifecycle";
+import { useChatSessionDetailMutations } from "./chat/useChatSessionDetailMutations";
 import {
   chatRoomModeLabel,
   chatRoomPurposeLabel,
@@ -267,17 +268,11 @@ import {
 } from "./chat/toolApprovalLabels";
 import { postSubmitTelemetry } from "./chat/chatSubmitTelemetry";
 import {
-  MAX_COMPOSER_IMAGE_ATTACHMENTS,
   buildSessionReferencePayload,
-  classifyComposerImageFiles,
   clearSessionImageAttachments,
   clearSessionReferenceAttachments,
-  mergeComposerImageAttachments,
   readStoredMentalModelToggle,
-  removeSessionImageAttachment,
-  sessionReferenceId,
   startSessionReferenceDrag,
-  writeStoredMentalModelToggle,
   type ComposerImageAttachment,
 } from "./chat/chatComposerSubmitModel";
 import styles from "./ChatCodingRoute.styles";
@@ -900,47 +895,6 @@ export function ChatCodingRoute() {
     ),
     staleTime: 30_000,
   });
-  const sessionReasoningEffortMutation = useMutation({
-    mutationFn: (variables: { sessionId: string; reasoningEffort: string }) =>
-      fetchJson<SessionLlmOptions>(`/api/sessions/${encodeURIComponent(variables.sessionId)}/reasoning-effort`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ reasoningEffort: variables.reasoningEffort }),
-      }),
-    onMutate: (variables) => {
-      setSessionComposerErrors((current) => ({ ...current, [variables.sessionId]: "" }));
-    },
-    onSuccess: (payload, variables) => {
-      queryClient.setQueryData(queryKeys.sessionLlmOptions(variables.sessionId), payload);
-      queryClient.setQueryData<SessionDetail>(queryKeys.session(variables.sessionId), (current) => current ? {
-        ...current,
-        reasoningEffort: payload.currentReasoningEffort,
-      } : current);
-      updateSessionSummaryCaches(queryClient, (sessions) => sessions?.map((session) => session.id === variables.sessionId ? {
-        ...session,
-        reasoningEffort: payload.currentReasoningEffort,
-      } : session));
-    },
-    onError: (error, variables) => {
-      setSessionComposerErrors((current) => ({
-        ...current,
-        [variables.sessionId]: describeError(error, lang === "zh" ? "推理强度切换失败" : "Failed to change reasoning effort"),
-      }));
-    },
-  });
-  const loadEarlierSessionMessagesMutation = useMutation({
-    mutationFn: (variables: { sessionId: string; beforeMessageIndex: number }) =>
-      fetchSessionDetailWindow(variables.sessionId, {
-        messageLimit: SESSION_DETAIL_HISTORY_PAGE_SIZE,
-        beforeMessageIndex: variables.beforeMessageIndex,
-        transcriptScope: "window",
-      }),
-    onSuccess: (page, variables) => {
-      queryClient.setQueryData<SessionDetail>(queryKeys.session(variables.sessionId), (current) =>
-        mergeSessionDetailMessageWindow(current, page),
-      );
-    },
-  });
   useEffect(() => {
     if (
       !activeSessionId
@@ -1136,65 +1090,19 @@ export function ChatCodingRoute() {
     setEditingSessionTitle,
   });
 
-  const resolveToolApprovalMutation = useMutation({
-    mutationFn: async (
-      { request, decision }: {
-        request: AgentToolGovernanceRequest;
-        decision: "approve" | "reject";
-      },
-    ) =>
-      fetchJson<AgentToolGovernanceRequest>(
-        `/api/agents/${encodeURIComponent(request.targetAgentId)}/tool-governance-requests/${encodeURIComponent(request.requestId)}`,
-        {
-          method: "PATCH",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            decision,
-            resolvedBy: "user",
-            resolutionNote: decision === "approve" ? "会话内批准" : "会话内拒绝",
-          }),
-        },
-      ),
-    onSuccess: (_payload, variables) => {
-      const sessionId = activeSessionId || variables.request.sourceSessionId || "";
-      setSessionComposerErrors((current) => (sessionId ? { ...current, [sessionId]: "" } : current));
-      if (sessionId) {
-        void queryClient.invalidateQueries({ queryKey: queryKeys.session(sessionId) });
-        void chatWorkspaceCache.refreshSessionRuntime(sessionId);
-      }
-      void queryClient.invalidateQueries({ queryKey: queryKeys.agents() });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.agentConfigWorkspace() });
-      void chatWorkspaceCache.afterSessionChanged({ sessionId });
-    },
-    onError: (error, variables) => {
-      const sessionId = activeSessionId || variables.request.sourceSessionId || "__sessions__";
-      setSessionComposerErrors((current) => ({
-        ...current,
-        [sessionId]: describeError(error, lang === "zh" ? "处理工具审批失败" : "Resolve tool approval failed"),
-      }));
-    },
-  });
-
-  const petActionMutation = useMutation({
-    mutationFn: async ({ action }: { action: PetInteractionAction }) =>
-      fetchJson<PetActionResponse>("/api/pet/actions", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ action }),
-      }),
-    onSuccess: (payload) => {
-      setPetActionFeedback(payload.message);
-      queryClient.setQueryData(queryKeys.petSummary(), payload.summary);
-      void queryClient.invalidateQueries({ queryKey: queryKeys.petSummary() });
-    },
-    onError: (error) => {
-      setPetActionFeedback(describeError(error, lang === "zh" ? "宠物互动失败" : "Pet interaction failed"));
-      void queryClient.invalidateQueries({ queryKey: queryKeys.petSummary() });
-    },
+  const {
+    sessionReasoningEffortMutation,
+    loadEarlierSessionMessagesMutation,
+    resolveToolApprovalMutation,
+    petActionMutation,
+  } = useChatSessionDetailMutations({
+    queryClient,
+    chatWorkspaceCache,
+    lang,
+    describeError,
+    activeSessionId,
+    setSessionComposerErrors,
+    setPetActionFeedback,
   });
 
   const activeGroupRoom = activeGroupRoomQuery.data;
@@ -2103,6 +2011,12 @@ export function ChatCodingRoute() {
     handleSubmitGuidance,
     handleEditUserMessage,
     handleCancelEditMessage,
+    handleComposerChange,
+    handleMentalModelEnabledChange,
+    handleAddComposerAttachments,
+    handleRemoveComposerAttachment,
+    handleAddComposerReference,
+    handleRemoveComposerReference,
   } = useChatComposerSubmitActions({
     queryClient,
     lang,
@@ -2133,6 +2047,7 @@ export function ChatCodingRoute() {
     activeImageInputModelId,
     latestUserMessageId,
     detail,
+    setMentalModelEnabledForNextTurn,
   });
   const sessionLlmOptions = sessionLlmOptionsQuery.data;
   const sessionLlmControl = activeSessionId ? {
@@ -2812,112 +2727,6 @@ export function ChatCodingRoute() {
       ...current,
       [groupKey]: !(current[groupKey] ?? defaultConversationGroupCollapsed(groupKey)),
     }));
-  }
-
-  function handleComposerChange(value: string) {
-    if (!activeSessionId) {
-      return;
-    }
-    setSessionDrafts((current) => ({
-      ...current,
-      [activeSessionId]: value,
-    }));
-    setSessionComposerErrors((current) => ({
-      ...current,
-      [activeSessionId]: "",
-    }));
-  }
-
-  function handleMentalModelEnabledChange(enabled: boolean) {
-    setMentalModelEnabledForNextTurn(enabled);
-    writeStoredMentalModelToggle(enabled);
-  }
-
-  function handleAddComposerAttachments(files: FileList | File[]) {
-    if (!activeSessionId) {
-      return;
-    }
-    if (activeAgentImageInputUnsupported) {
-      setSessionComposerErrors((current) => ({
-        ...current,
-        [activeSessionId]: lang === "zh" ? "当前 Agent 模型不支持图片输入。" : "The current Agent model does not support image input.",
-      }));
-      return;
-    }
-    const { accepted, rejected } = classifyComposerImageFiles(files);
-    if (!accepted.length && !rejected.length) {
-      return;
-    }
-    if (accepted.length) {
-      setSessionImageAttachments((current) => {
-        const existing = current[activeSessionId] ?? [];
-        return {
-          ...current,
-          [activeSessionId]: mergeComposerImageAttachments(existing, accepted, MAX_COMPOSER_IMAGE_ATTACHMENTS),
-        };
-      });
-    }
-    setSessionComposerErrors((current) => ({
-      ...current,
-      [activeSessionId]: rejected.length
-        ? (lang === "zh" ? "部分图片格式或大小不支持。" : "Some images were rejected by type or size.")
-        : "",
-    }));
-  }
-
-  function handleRemoveComposerAttachment(attachmentId: string) {
-    if (!activeSessionId) {
-      return;
-    }
-    setSessionImageAttachments((current) => removeSessionImageAttachment(current, activeSessionId, attachmentId));
-  }
-
-  function handleAddComposerReference(reference: SessionReferenceAttachment) {
-    if (!activeSessionId) {
-      return;
-    }
-    const referenceId = sessionReferenceId(reference);
-    if (!referenceId) {
-      setSessionComposerErrors((current) => ({
-        ...current,
-        [activeSessionId]: lang === "zh" ? "会话引用缺少有效 id。" : "Session reference is missing a valid id.",
-      }));
-      return;
-    }
-    setSessionReferenceAttachments((current) => {
-      const existing = current[activeSessionId] ?? [];
-      if (existing.some((item) => sessionReferenceId(item) === referenceId)) {
-        return current;
-      }
-      return {
-        ...current,
-        [activeSessionId]: [...existing, reference].slice(-6),
-      };
-    });
-    setSessionComposerErrors((current) => ({
-      ...current,
-      [activeSessionId]: "",
-    }));
-  }
-
-  function handleRemoveComposerReference(referenceId: string) {
-    if (!activeSessionId) {
-      return;
-    }
-    setSessionReferenceAttachments((current) => {
-      const existing = current[activeSessionId] ?? [];
-      const next = existing.filter((reference) => sessionReferenceId(reference) !== referenceId);
-      if (next.length === existing.length) {
-        return current;
-      }
-      if (!next.length) {
-        return clearSessionReferenceAttachments(current, activeSessionId);
-      }
-      return {
-        ...current,
-        [activeSessionId]: next,
-      };
-    });
   }
 
   function handlePetInteraction(action: PetInteractionAction) {
