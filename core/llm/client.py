@@ -366,6 +366,24 @@ def _llm_retry_event_fields(
     role_fields = {}
     if isinstance(safe_metadata, dict):
         for key in (
+            "sessionId",
+            "turnId",
+            "invocationId",
+            "iteration",
+            "invocationContextPresent",
+            "conversationBound",
+            "llmSlot",
+            "promptPurpose",
+            "llmInvocationSurface",
+            "llmRunKind",
+            "routeAttempt",
+            "dialogueChainMode",
+            "previousResponseIdPresent",
+            "continuationMode",
+            "responseInputItemCount",
+            "functionCallOutputCount",
+            "llmPayloadTraceId",
+            "retryRequestMode",
             "messageRoles",
             "messageRoleCounts",
             "protocol",
@@ -2115,6 +2133,11 @@ class LLMClient:
         effective_tools = tools if tools is not None else self.bound_tools
         tool_count = len(effective_tools or [])
         event_metadata = {
+            "sessionId": invocation_scope.session_id,
+            "turnId": invocation_scope.turn_id,
+            "invocationId": invocation_scope.invocation_id,
+            "iteration": invocation_scope.iteration,
+            "invocationContextPresent": bool(metadata),
             **(metadata or {}),
             **message_role_summary,
             **message_order_summary,
@@ -2156,6 +2179,11 @@ class LLMClient:
             traceId=llm_payload_trace.get("traceId"),
             llmPayloadTrace=llm_payload_trace,
         )
+        event_metadata = {
+            **event_metadata,
+            "llmPayloadTraceId": llm_payload_trace.get("traceId", ""),
+            "retryRequestMode": "same_wire_payload",
+        }
         response = self._invoke_backend_with_retry(
             payload,
             phase="invoke",
@@ -2673,6 +2701,11 @@ class LLMClient:
         protocol_summary = dict(self._last_payload_protocol_summary or payload_protocol_summary(payload, self.protocol_route))
         capability_source_summary = _safe_capability_source_summary(self._resolved_spec)
         event_metadata = {
+            "sessionId": invocation_scope.session_id,
+            "turnId": invocation_scope.turn_id,
+            "invocationId": invocation_scope.invocation_id,
+            "iteration": invocation_scope.iteration,
+            "invocationContextPresent": bool(metadata),
             **(metadata or {}),
             **message_role_summary,
             **message_order_summary,
@@ -2714,6 +2747,11 @@ class LLMClient:
             traceId=llm_payload_trace.get("traceId"),
             llmPayloadTrace=llm_payload_trace,
         )
+        event_metadata = {
+            **event_metadata,
+            "llmPayloadTraceId": llm_payload_trace.get("traceId", ""),
+            "retryRequestMode": "same_wire_payload",
+        }
         payload_summary_ms = max(0, int((time.perf_counter() - payload_summary_started) * 1000))
         payload_prepare_ms = max(0, int((time.perf_counter() - payload_prepare_started) * 1000))
         max_attempts = _retry_policy_max_attempts(self.profile, role=self.role)
@@ -3036,6 +3074,12 @@ class LLMClient:
                     responses_continuation_summary = _safe_responses_continuation_summary(payload)
                     payload_shape_summary = _safe_payload_shape_summary(payload)
                     event_metadata = {
+                        "sessionId": invocation_scope.session_id,
+                        "turnId": invocation_scope.turn_id,
+                        "invocationId": invocation_scope.invocation_id,
+                        "iteration": invocation_scope.iteration,
+                        "invocationContextPresent": bool(metadata),
+                        **(metadata or {}),
                         **message_role_summary,
                         **route_summary,
                         **responses_continuation_summary,
@@ -3045,6 +3089,8 @@ class LLMClient:
                         **_safe_payload_thinking_summary(payload),
                         **protocol_summary,
                         **capability_source_summary,
+                        "llmPayloadTraceId": llm_payload_trace.get("traceId", ""),
+                        "retryRequestMode": "wire_payload_without_stream_usage_options",
                         "streamUsageOptionsDowngraded": True,
                     }
                     stream_usage_options_downgraded = True

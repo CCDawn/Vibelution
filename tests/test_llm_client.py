@@ -1787,8 +1787,10 @@ def test_invoke_retries_retryable_timeout_up_to_profile_limit(monkeypatch):
     recorded = []
     statuses = []
     attempts = {"count": 0}
+    payloads = []
 
-    def backend(_payload):
+    def backend(payload):
+        payloads.append(dict(payload))
         attempts["count"] += 1
         if attempts["count"] < 3:
             raise TimeoutError("provider timeout")
@@ -1802,13 +1804,35 @@ def test_invoke_retries_retryable_timeout_up_to_profile_limit(monkeypatch):
     monkeypatch.setattr("core.llm.client._publish_llm_status_event", lambda status, **fields: statuses.append((status, fields)))
 
     client = LLMClient(config=config, backend=backend)
-    message = client.invoke([{"role": "user", "content": "ping"}])
+    message = client.invoke(
+        [{"role": "user", "content": "ping"}],
+        metadata={
+            "sessionId": "session-retry",
+            "turnId": "turn-retry",
+            "invocationId": "invoke-retry",
+            "llmSlot": "dialogue",
+            "promptPurpose": "main_reply",
+            "conversationBound": True,
+        },
+    )
 
     assert message.content == "ok"
     assert attempts["count"] == 3
+    assert payloads[0] == payloads[1] == payloads[2]
     retry_events = [item for item in recorded if item[0][1] == "llm.invoke.failed.retrying"]
     assert [event[1]["fields"]["attempt"] for event in retry_events] == [1, 2]
     assert [event[1]["fields"]["nextAttempt"] for event in retry_events] == [2, 3]
+    for _args, kwargs in retry_events:
+        fields = kwargs["fields"]
+        assert fields["sessionId"] == "session-retry"
+        assert fields["turnId"] == "turn-retry"
+        assert fields["invocationId"] == "invoke-retry"
+        assert fields["llmSlot"] == "dialogue"
+        assert fields["promptPurpose"] == "main_reply"
+        assert fields["invocationContextPresent"] is True
+        assert fields["retryRequestMode"] == "same_wire_payload"
+        assert fields["llmPayloadTraceId"]
+        assert list(fields).index("invocationId") < 24
 
 
 def test_stream_retries_retryable_failure_before_first_event(monkeypatch):
@@ -1826,12 +1850,14 @@ def test_stream_retries_retryable_failure_before_first_event(monkeypatch):
     recorded = []
     statuses = []
     attempts = {"count": 0}
+    payloads = []
 
     def failing_before_first_chunk():
         raise TimeoutError("stream timeout")
         yield {"choices": [{"delta": {"content": "unreachable"}}]}
 
-    def backend(_payload):
+    def backend(payload):
+        payloads.append(dict(payload))
         attempts["count"] += 1
         if attempts["count"] < 3:
             return failing_before_first_chunk()
@@ -1842,13 +1868,34 @@ def test_stream_retries_retryable_failure_before_first_event(monkeypatch):
     monkeypatch.setattr("core.llm.client._publish_llm_status_event", lambda status, **fields: statuses.append((status, fields)))
 
     client = LLMClient(config=config, backend=backend)
-    events = list(client.stream_events([{"role": "user", "content": "ping"}]))
+    events = list(
+        client.stream_events(
+            [{"role": "user", "content": "ping"}],
+            metadata={
+                "sessionId": "session-stream-retry",
+                "turnId": "turn-stream-retry",
+                "invocationId": "stream-retry",
+                "llmSlot": "dialogue",
+                "promptPurpose": "main_reply",
+                "conversationBound": True,
+            },
+        )
+    )
 
     assert attempts["count"] == 3
+    assert payloads[0] == payloads[1] == payloads[2]
     assert [event.type for event in events] == ["text_delta", "done"]
     assert events[0].text == "ok"
     retry_events = [item for item in recorded if item[0][1] == "llm.stream.failed.retrying"]
     assert [event[1]["fields"]["attempt"] for event in retry_events] == [1, 2]
+    assert all(
+        event[1]["fields"]["retryRequestMode"] == "same_wire_payload"
+        for event in retry_events
+    )
+    assert all(
+        event[1]["fields"]["invocationId"] == "stream-retry"
+        for event in retry_events
+    )
     retry_statuses = [item for item in statuses if item[0] == "retrying"]
     assert [item[0] for item in retry_statuses] == ["retrying", "retrying"]
     assert [item[1]["attempt"] for item in retry_statuses] == [1, 2]
@@ -2180,7 +2227,19 @@ def test_stream_retries_without_usage_options_when_provider_rejects_them(monkeyp
     monkeypatch.setattr("core.llm.client._record_llm_scene_event", lambda *args, **kwargs: recorded.append((args, kwargs)))
 
     client = LLMClient(config=config, backend=backend)
-    events = list(client.stream_events([{"role": "user", "content": "ping"}]))
+    events = list(
+        client.stream_events(
+            [{"role": "user", "content": "ping"}],
+            metadata={
+                "sessionId": "session-usage-downgrade",
+                "turnId": "turn-usage-downgrade",
+                "invocationId": "usage-downgrade",
+                "llmSlot": "dialogue",
+                "promptPurpose": "main_reply",
+                "conversationBound": True,
+            },
+        )
+    )
 
     assert [payload.get("stream_options") for payload in payloads] == [
         {"include_usage": True},
@@ -2190,6 +2249,18 @@ def test_stream_retries_without_usage_options_when_provider_rejects_them(monkeyp
     assert events[0].text == "ok"
     event_codes = [item[0][1] for item in recorded]
     assert "llm.stream.usage_options_downgraded" in event_codes
+    downgrade_event = next(
+        item for item in recorded if item[0][1] == "llm.stream.usage_options_downgraded"
+    )
+    assert downgrade_event[1]["fields"]["sessionId"] == "session-usage-downgrade"
+    assert downgrade_event[1]["fields"]["turnId"] == "turn-usage-downgrade"
+    assert downgrade_event[1]["fields"]["invocationId"] == "usage-downgrade"
+    assert downgrade_event[1]["fields"]["llmSlot"] == "dialogue"
+    assert downgrade_event[1]["fields"]["promptPurpose"] == "main_reply"
+    assert (
+        downgrade_event[1]["fields"]["retryRequestMode"]
+        == "wire_payload_without_stream_usage_options"
+    )
     success_event = next(item for item in recorded if item[0][1] == "llm.stream.succeeded")
     assert success_event[1]["fields"]["usageObserved"] is False
     assert success_event[1]["fields"]["usageMissingReason"] == "provider_usage_missing"
