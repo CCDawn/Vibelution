@@ -121,11 +121,12 @@ describe("UsageRoute layout contract", () => {
     expect(styles.overviewBand).toBeTypeOf("string");
     expect(styles.emptyState).toBeTypeOf("string");
     expect(styles.metricBand).toBeTypeOf("string");
-    expect(stylesSource).toContain("grid-cols-[minmax(0,1fr)_minmax(280px,360px)]");
+    expect(stylesSource).toContain("grid-cols-[minmax(0,1fr)_clamp(260px,24vw,360px)]");
     expect(stylesSource).toContain("bg-vui-surface-panel/88");
     expect(stylesSource).toContain("min-h-0");
+    expect(stylesSource).toContain("shadow-none");
     expect(styles.usageRow).toContain("hover:bg-[var(--vui-surface-row-hover)]");
-    expect(styles.emptyState).toContain("mx-3 mt-2");
+    expect(styles.emptyState).toContain("mx-2 mt-1.5");
     expect(styles.compositionPanel).toContain("p-2");
     expect(styles.rollupPanel).toContain("p-2");
     expect(styles.recordPanel).toContain("p-2");
@@ -180,7 +181,7 @@ describe("UsageRoute layout contract", () => {
   });
 
   it("reserves stable metric heights while values load", () => {
-    expect(styles.overviewBand).toContain("min-h-[58px]");
+    expect(styles.overviewBand).toContain("min-h-[52px]");
     expect(styles.sourceTile).toContain("grid min-h-[50px]");
   });
 
