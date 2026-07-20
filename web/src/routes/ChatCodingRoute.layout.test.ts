@@ -2293,6 +2293,11 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("<AgentContextMenu");
     expect(routeSource).toContain("const archiveAgentMutation = useMutation");
     expect(routeSource).toContain('method: "DELETE"');
+    expect(routeSource).toContain("await queryClient.cancelQueries({ queryKey: queryKeys.agents() })");
+    expect(routeSource).toContain("queryClient.setQueryData<AgentInstance[]>(queryKeys.agents(), remainingAgents)");
+    expect(routeSource).toContain("setActiveSession(fallbackSession?.id || \"\")");
+    expect(routeSource).toContain("previousActiveSessionId");
+    expect(routeSource).toContain("previousSelectedAgentId");
     expect(routeSource).toContain("chatWorkspaceCache.afterAgentArchived()");
     expect(routeSource).toContain("window.confirm(");
     expect(routeSource).toContain("onArchive={handleArchiveAgent}");

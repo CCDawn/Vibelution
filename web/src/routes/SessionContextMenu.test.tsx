@@ -161,7 +161,9 @@ describe("SessionContextMenu", () => {
     expect(sessionContextMenuStyles.sessionContextMenuItem).toContain("text-left");
     expect(sessionContextMenuStyles.sessionContextMenuItem).toContain("[&_[data-slot=vui-button-content]]:grid");
     expect(sessionContextMenuStyles.sessionContextMenuItem).toContain("[&_[data-slot=vui-button-content]]:grid-cols-[auto_minmax(0,1fr)]");
-    expect(sessionContextMenuStyles.sessionContextMenuDanger).toContain("text-[var(--state-error)]");
+    expect(sessionContextMenuStyles.sessionContextMenuDanger).toContain("!border-[color-mix(in_srgb,var(--state-error)_36%,transparent)]");
+    expect(sessionContextMenuStyles.sessionContextMenuDanger).toContain("!bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)]");
+    expect(sessionContextMenuStyles.sessionContextMenuDanger).toContain("!text-[var(--state-error)]");
     expect(sessionContextMenuStyles.sessionContextMenuDanger).not.toContain("text-[var(--accent-warm)]");
   });
 });
