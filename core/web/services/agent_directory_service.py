@@ -58,7 +58,7 @@ DEFAULT_AGENT_KIND = "persistent"
 DEFAULT_TOOL_POLICY_ID = "default"
 DEFAULT_MEMORY_POLICY_ID = "private"
 DEFAULT_AGENT_PRIMARY_MODE = "chat"
-DEFAULT_SESSION_AGENT_ALLOWED_TOOLS = (
+_LEGACY_SESSION_AGENT_ALLOWED_TOOLS = (
     "grep_search_tool",
     "glob_tool",
     "code_symbol_tool",
@@ -78,7 +78,7 @@ DEFAULT_SESSION_AGENT_ALLOWED_TOOLS = (
     "explain_current_worktree_tool",
     "conversation_log_inspect_tool",
 )
-DEFAULT_SESSION_AGENT_PREFERRED_TOOLS = (
+_LEGACY_SESSION_AGENT_PREFERRED_TOOLS = (
     "grep_search_tool",
     "code_symbol_tool",
     "apply_patch_tool",
@@ -87,8 +87,21 @@ DEFAULT_SESSION_AGENT_PREFERRED_TOOLS = (
     "get_core_context_tool",
     "conversation_log_inspect_tool",
 )
-SELF_EVOLUTION_EXECUTABLE_AGENT_ALLOWED_TOOLS = tuple(DEFAULT_SESSION_AGENT_ALLOWED_TOOLS)
-SELF_EVOLUTION_EXECUTABLE_AGENT_PREFERRED_TOOLS = tuple(DEFAULT_SESSION_AGENT_PREFERRED_TOOLS)
+DEFAULT_SESSION_AGENT_ALLOWED_TOOLS = (
+    *_LEGACY_SESSION_AGENT_ALLOWED_TOOLS[:8],
+    "exec_command",
+    "write_stdin",
+    *_LEGACY_SESSION_AGENT_ALLOWED_TOOLS[8:],
+)
+DEFAULT_SESSION_AGENT_PREFERRED_TOOLS = (
+    "exec_command",
+    "write_stdin",
+    *_LEGACY_SESSION_AGENT_PREFERRED_TOOLS,
+)
+# The persistent stdin protocol belongs to ordinary conversation Agents.  Keep
+# self-evolution role policy unchanged until its own execution contract opts in.
+SELF_EVOLUTION_EXECUTABLE_AGENT_ALLOWED_TOOLS = tuple(_LEGACY_SESSION_AGENT_ALLOWED_TOOLS)
+SELF_EVOLUTION_EXECUTABLE_AGENT_PREFERRED_TOOLS = tuple(_LEGACY_SESSION_AGENT_PREFERRED_TOOLS)
 SELF_EVOLUTION_EXECUTABLE_ROLES = {"executor", "reviewer"}
 SELF_EVOLUTION_OBSERVER_ROLES = {"observer"}
 SELF_EVOLUTION_ACTIVE_ROLES = SELF_EVOLUTION_EXECUTABLE_ROLES | SELF_EVOLUTION_OBSERVER_ROLES
@@ -2316,7 +2329,7 @@ def resolve_tool_policy_for_agent(agent_id: str, *, session_id: str = "", turn_i
     state = load_state()
     policy_id = str(agent.get("toolPolicyId") or DEFAULT_TOOL_POLICY_ID).strip() or DEFAULT_TOOL_POLICY_ID
     policy = _tool_policies(state).get(policy_id) or default_tool_policy(policy_id)
-    normalized = normalize_tool_policy(policy, policy_id)
+    normalized = _with_session_terminal_protocol_defaults(agent, normalize_tool_policy(policy, policy_id))
     with_grants = _with_temporary_tool_grants(
         normalized,
         agent_id=agent_id,
@@ -2325,6 +2338,32 @@ def resolve_tool_policy_for_agent(agent_id: str, *, session_id: str = "", turn_i
     )
     metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
     return _effective_agent_tool_policy(with_grants, metadata.get("delegationPolicy") if isinstance(metadata, dict) else {})
+
+
+def _with_session_terminal_protocol_defaults(agent: dict[str, Any], policy: dict[str, Any]) -> dict[str, Any]:
+    """Project untouched legacy private chat defaults onto the new session protocol.
+
+    User-customized policies are never widened. The projection is deterministic
+    and read-only, so persisted ToolPolicy remains the single writable source.
+    """
+
+    agent_id = str(agent.get("agentId") or "").strip()
+    policy_id = str(agent.get("toolPolicyId") or policy.get("policyId") or "").strip()
+    if not agent_id or policy_id != f"tool-{agent_id}":
+        return policy
+    primary_mode = str(agent.get("primaryMode") or _infer_agent_primary_mode(agent)).strip()
+    if not _is_session_agent_primary_mode(primary_mode):
+        return policy
+    if (
+        _tool_name_list(policy.get("allowedTools") or []) != list(_LEGACY_SESSION_AGENT_ALLOWED_TOOLS)
+        or _tool_name_list(policy.get("preferredTools") or []) != list(_LEGACY_SESSION_AGENT_PREFERRED_TOOLS)
+    ):
+        return policy
+    return {
+        **policy,
+        "allowedTools": list(DEFAULT_SESSION_AGENT_ALLOWED_TOOLS),
+        "preferredTools": list(DEFAULT_SESSION_AGENT_PREFERRED_TOOLS),
+    }
 
 
 def _with_temporary_tool_grants(
@@ -6026,7 +6065,7 @@ def _tool_policy_for_agent(agent: dict[str, Any], *, hydration: AgentApiHydratio
     policy = hydration.tool_policies.get(policy_id) or default_tool_policy(policy_id)
     metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
     return _effective_agent_tool_policy(
-        normalize_tool_policy(policy, policy_id),
+        _with_session_terminal_protocol_defaults(agent, normalize_tool_policy(policy, policy_id)),
         metadata.get("delegationPolicy") if isinstance(metadata, dict) else {},
     )
 

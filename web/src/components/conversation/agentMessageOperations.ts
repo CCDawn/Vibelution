@@ -26,6 +26,15 @@ export type AgentMessageOperation = {
   resultLength?: number;
   error?: string;
   timeoutSeconds?: number;
+  exitCode?: number | null;
+  timedOut?: boolean;
+  resultKind?: string;
+  truncated?: boolean;
+  originalLength?: number;
+  terminalSessionId?: string;
+  terminalStatus?: string;
+  sessionOpen?: boolean;
+  formattedOutput?: string;
   tracePath?: string;
   sequence?: number;
   timestamp?: string;
@@ -184,6 +193,15 @@ function agentToolCallPartToOperation(
     resultLength: numberOrNull(part.resultLength) ?? undefined,
     error: part.error,
     timeoutSeconds: numberOrNull(part.timeoutSeconds) ?? undefined,
+    exitCode: numberOrNull(part.exitCode),
+    timedOut: typeof part.timedOut === "boolean" ? part.timedOut : undefined,
+    resultKind: part.resultKind,
+    truncated: typeof part.truncated === "boolean" ? part.truncated : undefined,
+    originalLength: numberOrNull(part.originalLength) ?? undefined,
+    terminalSessionId: part.terminalSessionId,
+    terminalStatus: part.terminalStatus,
+    sessionOpen: typeof part.sessionOpen === "boolean" ? part.sessionOpen : undefined,
+    formattedOutput: part.formattedOutput,
     tracePath: part.tracePath,
     sequence: numberOrNull(part.sequence) ?? undefined,
     timestamp: part.timestamp,

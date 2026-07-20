@@ -14769,6 +14769,38 @@ def _copy_tool_result_fact_fields(source: dict[str, Any], target: dict[str, Any]
         target[canonical] = str(value).strip()
 
 
+def _sandbox_terminal_result_facts(value: Any) -> dict[str, Any]:
+    """Extract explicit terminal facts from the new sandbox tool result envelope."""
+
+    if isinstance(value, dict):
+        payload = value
+    else:
+        try:
+            payload = json.loads(str(value or "").lstrip("\ufeff").strip())
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return {}
+    if not isinstance(payload, dict):
+        return {}
+    terminal_session_id = str(payload.get("terminalSessionId") or "").strip()
+    if not terminal_session_id:
+        return {}
+    result: dict[str, Any] = {"terminalSessionId": terminal_session_id}
+    for key in ("status", "terminalStatus"):
+        status = str(payload.get(key) or "").strip()
+        if status:
+            result["terminalStatus"] = status
+            break
+    if "sessionOpen" in payload:
+        result["sessionOpen"] = bool(payload.get("sessionOpen"))
+    formatted_output = _trim_tool_detail_text(payload.get("formattedOutput") or "", max_chars=1200, max_lines=10)
+    if formatted_output:
+        result["formattedOutput"] = formatted_output
+    for key in ("exitCode", "timedOut", "truncated", "originalLength", "durationMs"):
+        if key in payload:
+            result[key] = payload[key]
+    return result
+
+
 def _trim_tool_detail_text(value: Any, *, max_chars: int = 1200, max_lines: int = 12) -> str:
     text = str(value or "").strip()
     if not text:
@@ -14905,6 +14937,13 @@ def _normalize_persisted_tool_calls(value: Any) -> list[dict[str, Any]]:
             )
             if result_preview:
                 entry["resultPreview"] = result_preview
+            terminal_facts = _sandbox_terminal_result_facts(
+                item.get("result") or item.get("resultPreview") or item.get("result_preview")
+            ) or _sandbox_terminal_result_facts(item)
+            if terminal_facts:
+                entry.update(terminal_facts)
+                if terminal_facts.get("formattedOutput"):
+                    entry["resultPreview"] = str(terminal_facts["formattedOutput"])
             result_type = str(item.get("resultType") or item.get("result_type") or "").strip()
             if result_type:
                 entry["resultType"] = result_type
@@ -14962,6 +15001,10 @@ def _normalize_message_tool_calls(value: Any) -> list[dict[str, Any]]:
             "truncated",
             "originalLength",
             "tracePath",
+            "terminalSessionId",
+            "terminalStatus",
+            "sessionOpen",
+            "formattedOutput",
         ):
             if key in item:
                 entry[key] = item[key]
@@ -15029,6 +15072,13 @@ def _normalize_persisted_feedback_events(value: Any) -> list[dict[str, Any]]:
         )
         if result_preview:
             entry["resultPreview"] = result_preview
+        terminal_facts = _sandbox_terminal_result_facts(
+            item.get("result") or item.get("resultPreview") or item.get("result_preview")
+        ) or _sandbox_terminal_result_facts(item)
+        if terminal_facts:
+            entry.update(terminal_facts)
+            if terminal_facts.get("formattedOutput"):
+                entry["resultPreview"] = str(terminal_facts["formattedOutput"])
         result_type = str(item.get("resultType") or item.get("result_type") or "").strip()
         if result_type:
             entry["resultType"] = result_type
@@ -15092,6 +15142,10 @@ def _normalize_message_feedback_events(value: Any) -> list[dict[str, Any]]:
             "originalLength",
             "tracePath",
             "relatedThoughtSequence",
+            "terminalSessionId",
+            "terminalStatus",
+            "sessionOpen",
+            "formattedOutput",
             "content",
             "text",
         ):
@@ -15280,6 +15334,13 @@ def _feedback_event_from_conversation_tool_event(event: Any) -> dict[str, Any]:
     )
     if result_preview:
         entry["resultPreview"] = result_preview
+    terminal_facts = _sandbox_terminal_result_facts(
+        tool_call.get("result") or tool_call.get("resultPreview") or tool_call.get("result_preview")
+    ) or _sandbox_terminal_result_facts(tool_call)
+    if terminal_facts:
+        entry.update(terminal_facts)
+        if terminal_facts.get("formattedOutput"):
+            entry["resultPreview"] = str(terminal_facts["formattedOutput"])
     error = _trim_tool_detail_text(tool_call.get("error"), max_chars=1200, max_lines=10)
     if error:
         entry["error"] = error
@@ -15931,7 +15992,8 @@ def _codex_tool_lifecycle_projection_from_source(
         return lifecycle
     tool_call_id = f"tool_call:{operation_id}"
     runtime_kind = _codex_runtime_kind(source)
-    terminal_operation_id = f"terminal_operation:{ordinal}" if runtime_kind == "terminal" else ""
+    terminal_session_key = _codex_terminal_session_key(source)
+    terminal_operation_id = f"terminal_operation:{ordinal}" if runtime_kind == "terminal" and terminal_session_key else ""
     tool_call = _compact_codex_record(
         {
             "toolCallId": tool_call_id,
@@ -15955,9 +16017,9 @@ def _codex_tool_lifecycle_projection_from_source(
         }
     )
     lifecycle["toolCalls"].append(tool_call)
-    if runtime_kind != "terminal":
+    if runtime_kind != "terminal" or not terminal_session_key:
         return lifecycle
-    terminal_id = f"terminal:{_codex_terminal_session_key(source, operation_id)}"
+    terminal_id = f"terminal:{terminal_session_key}"
     terminal_operation = _compact_codex_record(
         {
             "operationId": terminal_operation_id,
@@ -15996,46 +16058,34 @@ def _codex_tool_lifecycle_projection_from_source(
 
 
 def _codex_runtime_kind(source: dict[str, Any]) -> str:
-    haystack = " ".join(
-        str(source.get(key) or "")
-        for key in ("name", "label", "summary", "resultPreview", "error")
-    ).lower()
-    if any(
-        marker in haystack
-        for marker in (
-            "cli_tool",
-            "exec",
-            "shell",
-            "command",
-            "powershell",
-            "cmd.exe",
-            "bash",
-            "npm ",
-            "pytest",
-            "vitest",
-            "rg ",
-            "write_stdin",
-            "命令",
-        )
-    ):
+    name = str(source.get("name") or source.get("label") or "").strip().lower()
+    if str(source.get("terminalSessionId") or "").strip() or name in {
+        "cli_tool",
+        "exec_command",
+        "write_stdin",
+        "cli_agent_run_tool",
+    }:
         return "terminal"
     return "tool"
 
 
-def _codex_terminal_session_key(source: dict[str, Any], operation_id: str) -> str:
+def _codex_terminal_session_key(source: dict[str, Any]) -> str:
+    explicit = str(source.get("terminalSessionId") or source.get("terminal_session_id") or "").strip()
+    if explicit:
+        return explicit
     arguments = source.get("arguments") if isinstance(source.get("arguments"), dict) else {}
-    for key in ("session_id", "sessionId", "terminal_id", "terminalId", "process_id", "processId"):
+    for key in ("session_id", "sessionId", "terminal_id", "terminalId"):
         value = arguments.get(key)
         if isinstance(value, str) and value.strip():
             return value.strip()
         if isinstance(value, (int, float)) and not isinstance(value, bool):
             return str(value)
-    return operation_id
+    return ""
 
 
 def _codex_terminal_operation_kind(source: dict[str, Any]) -> str:
     name = str(source.get("name") or source.get("label") or "").strip().lower()
-    return "WriteStdin" if "write_stdin" in name else "ExecCommand"
+    return "WriteStdin" if name == "write_stdin" else "ExecCommand"
 
 
 def _codex_terminal_request(source: dict[str, Any], summary: str, title: str) -> dict[str, Any]:
@@ -16049,7 +16099,7 @@ def _codex_terminal_request(source: dict[str, Any], summary: str, title: str) ->
         max_chars=1200,
         max_lines=4,
     )
-    command = arguments.get("command")
+    command = arguments.get("command") or arguments.get("cmd")
     if isinstance(command, list):
         command_value = [
             _trim_tool_detail_text(item, max_chars=240, max_lines=1)
@@ -16069,7 +16119,11 @@ def _codex_terminal_request(source: dict[str, Any], summary: str, title: str) ->
 
 
 def _codex_terminal_result(source: dict[str, Any], summary: str, status: str) -> dict[str, Any]:
-    result_preview = _trim_tool_detail_text(source.get("resultPreview") or "", max_chars=1200, max_lines=10)
+    result_preview = _trim_tool_detail_text(
+        source.get("formattedOutput") or source.get("resultPreview") or "",
+        max_chars=1200,
+        max_lines=10,
+    )
     error = _trim_tool_detail_text(source.get("error") or "", max_chars=1200, max_lines=10)
     return _compact_codex_record(
         {

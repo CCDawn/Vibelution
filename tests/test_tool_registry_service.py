@@ -81,6 +81,20 @@ def test_tool_descriptor_validation_rejects_unknown_duplicate_and_ambiguous_tool
         tool_catalog.validate_tool_descriptors((replace(descriptor, aliases=("cli_tool",)), cli_descriptor))
 
 
+def test_terminal_session_tools_have_explicit_high_risk_catalog_descriptors():
+    exec_metadata = tool_catalog.metadata_for_tool("exec_command")
+    stdin_metadata = tool_catalog.metadata_for_tool("write_stdin")
+    operations_bundle = next(
+        bundle for bundle in tool_catalog.TOOL_BUNDLE_DEFINITIONS if bundle["bundleId"] == "operations"
+    )
+
+    assert exec_metadata["category"] == "task_runtime"
+    assert exec_metadata["capabilityTags"] == ["command", "shell", "terminal_session"]
+    assert exec_metadata["permissionTier"] == tool_catalog.HIGH_PERMISSION_TIER
+    assert stdin_metadata["capabilityTags"] == ["command", "terminal_session", "stdin"]
+    assert {"exec_command", "write_stdin"}.issubset(operations_bundle["toolNames"])
+
+
 def test_tool_registry_rejects_duplicate_active_builtin_names(tmp_path, monkeypatch):
     monkeypatch.setattr(registry, "GENERATED_TOOLS_PATH", tmp_path / "generated_tools.json")
     builtins = registry._builtin_tool_items()

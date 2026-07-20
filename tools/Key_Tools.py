@@ -7,6 +7,7 @@ LangChain 工具包装模块
 """
 from copy import copy
 from functools import lru_cache
+import json
 from pathlib import Path
 from typing import Dict, List, Literal
 from langchain_core.tools import BaseTool, tool, StructuredTool
@@ -142,6 +143,34 @@ Args:
     timeout: 文件操作 30s, 编译 60s, 测试/网络 120s
     cwd: 工作目录，默认项目根目录
     max_output_chars: 最大返回字符数，默认 12000；超出时保留开头和结尾摘要
+"""
+
+_EXEC_COMMAND_TOOL_DOCSTRING = """
+【可继续命令】在 Codex 原生沙盒中启动一个可继续交互的命令进程。
+
+使用 `cmd` 启动命令。若进程仍在运行，返回值会包含 `terminalSessionId`；后续必须把该 ID
+原样传给 `write_stdin`，以继续输入或轮询新输出。不要从工具标题、操作 ID 或输出文本猜测会话 ID。
+这是会话 Agent 的默认命令入口；旧 `cli_tool` 仅保留给兼容旧工作流。
+
+Args:
+    cmd: 要在工作区写入沙盒中执行的命令。
+    yield_time_ms: 最多等待多久再返回本轮输出，默认 10000，最大 30000。
+    timeout: 该进程的最大生命周期秒数，默认 60，最大 900。
+    cwd: 可选工作目录；相对路径以当前 Agent 工作区解析。
+    max_output_chars: 本次返回的最大输出字符数，默认 12000。
+"""
+
+_WRITE_STDIN_TOOL_DOCSTRING = """
+【继续命令】向仍在运行的 `exec_command` 沙盒进程写入标准输入，或轮询其新输出。
+
+`session_id` 必须来自 `exec_command` 的真实 `terminalSessionId`。`chars` 为空时只轮询，
+不创建新进程；会话不存在、已过期或后端重启时会明确返回失败，不能回退为执行新命令。
+
+Args:
+    session_id: exec_command 返回的 terminalSessionId。
+    chars: 要写入进程标准输入的内容；为空时仅轮询。
+    yield_time_ms: 最多等待多久再返回新输出，默认 1000，最大 30000。
+    max_output_chars: 本次返回的最大输出字符数，默认 12000。
 """
 
 _CLI_AGENT_RUN_TOOL_DOCSTRING = """
@@ -1102,6 +1131,54 @@ def _build_key_tools() -> List[BaseTool]:
         return result
 
     cli_tool = StructuredTool.from_function(_cli_tool_impl, name="cli_tool", description=_CLI_TOOL_DOCSTRING)
+    def _exec_command_impl(
+        cmd: str = "",
+        yield_time_ms: int = 10000,
+        timeout: int = 60,
+        cwd: str = "",
+        max_output_chars: int = 12000,
+        _cancel_checker=None,
+    ) -> str:
+        from core.infrastructure.codex_cli_sandbox import start_codex_sandbox_terminal_session
+
+        result = start_codex_sandbox_terminal_session(
+            cmd,
+            timeout=timeout,
+            cwd=cwd or None,
+            yield_time_ms=yield_time_ms,
+            max_output_chars=max_output_chars,
+            _cancel_checker=_cancel_checker,
+        )
+        return json.dumps(result, ensure_ascii=False)
+
+    def _write_stdin_impl(
+        session_id: str = "",
+        chars: str = "",
+        yield_time_ms: int = 1000,
+        max_output_chars: int = 12000,
+        _cancel_checker=None,
+    ) -> str:
+        from core.infrastructure.codex_cli_sandbox import write_codex_sandbox_terminal_stdin
+
+        result = write_codex_sandbox_terminal_stdin(
+            session_id,
+            chars,
+            yield_time_ms=yield_time_ms,
+            max_output_chars=max_output_chars,
+            _cancel_checker=_cancel_checker,
+        )
+        return json.dumps(result, ensure_ascii=False)
+
+    exec_command = StructuredTool.from_function(
+        _exec_command_impl,
+        name="exec_command",
+        description=_EXEC_COMMAND_TOOL_DOCSTRING,
+    )
+    write_stdin = StructuredTool.from_function(
+        _write_stdin_impl,
+        name="write_stdin",
+        description=_WRITE_STDIN_TOOL_DOCSTRING,
+    )
     cli_agent_run_tool = StructuredTool.from_function(
         _cli_agent_run_impl,
         name="cli_agent_run_tool",
@@ -2360,6 +2437,8 @@ def _build_key_tools() -> List[BaseTool]:
         history_checkpoint_tool,
         # 文件操作
         cli_tool,
+        exec_command,
+        write_stdin,
         cli_agent_run_tool,
         read_file_tool,
         write_file_tool,

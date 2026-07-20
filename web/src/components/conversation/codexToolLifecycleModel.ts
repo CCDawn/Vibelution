@@ -79,6 +79,7 @@ export type CodexToolLifecycleModel = {
 type RuntimeDiagnosticsOperation = AgentMessageOperation & {
   exitCode?: number | null;
   timedOut?: boolean;
+  formattedOutput?: string;
 };
 
 export function buildCodexToolLifecycleModel(
@@ -120,26 +121,13 @@ export function normalizeCodexToolLifecycleStatus(status: string | undefined): C
 }
 
 export function codexToolRuntimeKind(operation: AgentMessageOperation): CodexToolRuntimeKind {
-  const haystack = [
-    operation.rawLabel,
-    operation.label,
-    operation.summary,
-  ].map((item) => String(item ?? "").toLowerCase()).join(" ");
-  if ([
+  const toolName = String(operation.rawLabel ?? operation.label ?? "").trim().toLowerCase();
+  if (terminalSessionKey(operation) || [
     "cli_tool",
-    "exec",
-    "shell",
-    "command",
-    "powershell",
-    "cmd.exe",
-    "bash",
-    "npm ",
-    "pytest",
-    "vitest",
-    "rg ",
+    "exec_command",
     "write_stdin",
-    "命令",
-  ].some((marker) => haystack.includes(marker))) {
+    "cli_agent_run_tool",
+  ].includes(toolName)) {
     return "terminal";
   }
   return "tool";
@@ -153,16 +141,18 @@ function appendToolOperation(model: CodexToolLifecycleModel, operation: AgentMes
 
   if (runtimeKind === "terminal") {
     const terminalOperation = terminalOperationFromTool(operation, toolCallId, model.terminalOperations.length, status);
-    terminalOperationId = terminalOperation.operationId;
-    model.terminalOperations.push(terminalOperation);
-    ensureTerminalSession(model, terminalOperation, status);
-    model.modelObservations.push({
-      operationId: terminalOperation.operationId,
-      toolCallId,
-      source: "DirectToolCall",
-      callItemIds: [toolCallId],
-      outputItemIds: status === "pending" || status === "running" ? [] : [`${toolCallId}:output`],
-    });
+    if (terminalOperation) {
+      terminalOperationId = terminalOperation.operationId;
+      model.terminalOperations.push(terminalOperation);
+      ensureTerminalSession(model, terminalOperation, status);
+      model.modelObservations.push({
+        operationId: terminalOperation.operationId,
+        toolCallId,
+        source: "DirectToolCall",
+        callItemIds: [toolCallId],
+        outputItemIds: status === "pending" || status === "running" ? [] : [`${toolCallId}:output`],
+      });
+    }
   }
 
   model.toolCalls.push(compactToolCall({
@@ -186,10 +176,14 @@ function terminalOperationFromTool(
   toolCallId: string,
   terminalOrdinal: number,
   status: CodexToolLifecycleStatus,
-): CodexTerminalOperation {
+): CodexTerminalOperation | null {
   const diagnostics = operation as RuntimeDiagnosticsOperation;
+  const sessionKey = terminalSessionKey(operation);
+  if (!sessionKey) {
+    return null;
+  }
   const operationId = `terminal_operation:${terminalOrdinal}`;
-  const terminalId = `terminal:${terminalSessionKey(operation)}`;
+  const terminalId = `terminal:${sessionKey}`;
   const displayCommand = terminalDisplayCommand(operation);
   return compactTerminalOperation({
     operationId,
@@ -206,9 +200,9 @@ function terminalOperationFromTool(
       ? undefined
       : compactTerminalResult({
           exitCode: numberOrNull(diagnostics.exitCode),
-          stdout: status === "failed" ? "" : compactText(operation.summary),
+          stdout: status === "failed" ? "" : compactText(diagnostics.formattedOutput || operation.resultPreview || operation.summary),
           stderr: compactText(operation.error || (status === "failed" ? operation.summary : "")),
-          formattedOutput: compactText(operation.error || operation.resultPreview || operation.summary),
+          formattedOutput: compactText(operation.error || diagnostics.formattedOutput || operation.resultPreview || operation.summary),
           timedOut: typeof diagnostics.timedOut === "boolean" ? diagnostics.timedOut : undefined,
         }),
     durationSeconds: numberOrNull(operation.durationSeconds),
@@ -260,15 +254,20 @@ function mergeTerminalSessionStatus(
 }
 
 function terminalSessionKey(operation: AgentMessageOperation) {
+  const diagnostics = operation as RuntimeDiagnosticsOperation;
+  const explicitSessionId = terminalSessionKeyValue(diagnostics.terminalSessionId);
+  if (explicitSessionId) {
+    return explicitSessionId;
+  }
   const args = operation.arguments ?? {};
-  for (const key of ["session_id", "sessionId", "terminal_id", "terminalId", "process_id", "processId"]) {
+  for (const key of ["session_id", "sessionId", "terminal_id", "terminalId"]) {
     const value = args[key];
     const normalized = terminalSessionKeyValue(value);
     if (normalized) {
       return normalized;
     }
   }
-  return operation.id;
+  return "";
 }
 
 function terminalSessionKeyValue(value: unknown) {
@@ -283,11 +282,23 @@ function terminalSessionKeyValue(value: unknown) {
 
 function terminalOperationKind(operation: AgentMessageOperation): CodexTerminalOperationKind {
   const raw = String(operation.rawLabel ?? operation.label ?? "").trim().toLowerCase();
-  return raw.includes("write_stdin") ? "WriteStdin" : "ExecCommand";
+  return raw === "write_stdin" ? "WriteStdin" : "ExecCommand";
 }
 
 function terminalDisplayCommand(operation: AgentMessageOperation) {
-  return compactText(operation.summary || operation.rawLabel || operation.label);
+  const rawToolName = String(operation.rawLabel ?? operation.label ?? "").trim().toLowerCase();
+  if (rawToolName === "write_stdin") {
+    return "继续终端会话";
+  }
+  const args = operation.arguments ?? {};
+  const command = args.cmd ?? args.command;
+  if (Array.isArray(command)) {
+    return compactText(command.map((item) => String(item ?? "")).join(" "));
+  }
+  const commandText = typeof command === "string" || typeof command === "number"
+    ? String(command)
+    : "";
+  return compactText(commandText || operation.summary || operation.rawLabel || operation.label);
 }
 
 function compactToolCall(call: CodexToolCall): CodexToolCall {

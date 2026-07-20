@@ -409,6 +409,18 @@ TOOL_CATALOG: dict[str, dict[str, Any]] = {
         "riskTags": ["command_execution"],
         "permissionTier": HIGH_PERMISSION_TIER,
     },
+    "exec_command": {
+        "category": "task_runtime",
+        "capabilityTags": ["command", "shell", "terminal_session"],
+        "riskTags": ["command_execution"],
+        "permissionTier": HIGH_PERMISSION_TIER,
+    },
+    "write_stdin": {
+        "category": "task_runtime",
+        "capabilityTags": ["command", "terminal_session", "stdin"],
+        "riskTags": ["command_execution"],
+        "permissionTier": HIGH_PERMISSION_TIER,
+    },
     "cli_agent_run_tool": {
         "category": "agent_collaboration",
         "capabilityTags": ["external_agent", "cli_agent", "command", "worktree"],
@@ -952,6 +964,8 @@ TOOL_BUNDLE_DEFINITIONS: tuple[dict[str, Any], ...] = (
         "category": "operations",
         "toolNames": [
             "cli_tool",
+            "exec_command",
+            "write_stdin",
             "cli_agent_run_tool",
             "clean_workspace_debris_tool",
             "list_workspace_debris_tool",

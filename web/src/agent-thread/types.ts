@@ -118,6 +118,10 @@ export type AgentToolCallPart = {
   resultKind?: string;
   truncated?: boolean;
   originalLength?: number;
+  terminalSessionId?: string;
+  terminalStatus?: string;
+  sessionOpen?: boolean;
+  formattedOutput?: string;
   tracePath?: string;
   sequence?: number;
   timestamp?: string;
