@@ -7,6 +7,7 @@ import draftPanelStyles from "./ConfigDraftPanel.styles";
 import diagnosisPanelSource from "./ConfigDiagnosisPanel.tsx?raw";
 import diagnosisPanelStylesSource from "./ConfigDiagnosisPanel.styles.ts?raw";
 import diagnosisPanelStyles from "./ConfigDiagnosisPanel.styles";
+import featureDecisionPanelSource from "./ConfigFeatureDecisionPanel.tsx?raw";
 import healthDiagnosticsPanelSource from "./ConfigHealthDiagnosticsPanel.tsx?raw";
 import healthDiagnosticsPanelStylesSource from "./ConfigHealthDiagnosticsPanel.styles.ts?raw";
 import healthDiagnosticsPanelStyles from "./ConfigHealthDiagnosticsPanel.styles";
@@ -48,6 +49,7 @@ const configSources = [
   runtimePanelSource,
   draftPanelSource,
   diagnosisPanelSource,
+  featureDecisionPanelSource,
   providerPanelSource,
   wizardSource,
   migrationPanelSource,
@@ -56,6 +58,14 @@ const configSources = [
 ].join("\n");
 
 describe("ConfigRoute layout contract", () => {
+  it("shows trusted feature provenance without creating a second editable state", () => {
+    expect(routeSource).toContain("ConfigFeatureDecisionPanel");
+    expect(routeSource).toContain("workspace.featureDecisions");
+    expect(featureDecisionPanelSource).toContain("featureDecisionReason");
+    expect(featureDecisionPanelSource).toContain("featureSource");
+    expect(featureDecisionPanelSource).not.toContain("onChange");
+  });
+
   it("renders provider-first configuration without endpoint fingerprint identity", () => {
     expect(routeSource).toContain("ConfigProviderRegistryPanel");
     expect(routeSource).toContain("ConfigProviderWizard");

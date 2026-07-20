@@ -56,6 +56,8 @@ def test_snapshot_contains_safe_feature_provenance() -> None:
     assert snapshot["source"] == "operator_config"
     assert len(snapshot["configRevision"]) == 12
     assert snapshot["features"]["mental_model"]["configuredEnabled"] is True
+    assert snapshot["features"]["mental_model"]["featureSource"] == "operator_config"
+    assert snapshot["features"]["mental_model"]["featureDecisionReason"] == "operator_config_enabled"
 
 
 def test_supervised_mental_model_requires_every_operator_gate() -> None:
