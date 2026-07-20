@@ -429,6 +429,97 @@ def test_session_list_cache_returns_isolated_summary_snapshots(tmp_path, monkeyp
     assert third_item["resultCard"]["validations"] == ["pytest ok"]
 
 
+def test_session_list_reuses_lightweight_message_preview_without_full_normalization(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _seed_chat_sessions(tmp_path)
+    _seed_ledger_messages(
+        tmp_path,
+        "session-alpha",
+        [{"role": "user", "content": "Alpha 目标", "timestamp": "2026-05-26T10:00:00"}],
+    )
+    _seed_ledger_messages(
+        tmp_path,
+        "session-beta",
+        [{"role": "user", "content": "Beta 目标", "timestamp": "2026-05-26T10:01:00"}],
+    )
+    session_service._invalidate_session_list_cache()
+    session_service._invalidate_session_conversation_events_cache()
+    real_normalize_messages = session_service._normalize_messages
+    normalized_nonempty_inputs: list[str] = []
+
+    def track_full_message_normalization(conversation_id, items, *args, **kwargs):
+        if list(items or []):
+            normalized_nonempty_inputs.append(str(conversation_id))
+        return real_normalize_messages(conversation_id, items, *args, **kwargs)
+
+    monkeypatch.setattr(session_service, "_normalize_messages", track_full_message_normalization)
+
+    sessions = {item["id"]: item for item in session_service.list_sessions()}
+
+    assert sessions["session-alpha"]["taskSummary"] == "Alpha 目标"
+    assert sessions["session-beta"]["taskSummary"] == "Beta 目标"
+    assert normalized_nonempty_inputs == []
+
+
+def test_session_list_loads_hidden_team_membership_once_per_projection(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _seed_chat_sessions(tmp_path)
+    session_service._invalidate_session_list_cache()
+    team_list_calls = 0
+
+    def list_empty_teams(*args, **kwargs):
+        nonlocal team_list_calls
+        team_list_calls += 1
+        return {"teams": []}
+
+    monkeypatch.setattr(team_service, "list_teams_compact", list_empty_teams)
+
+    sessions = session_service.list_sessions()
+
+    assert {item["id"] for item in sessions} == {"session-alpha", "session-beta"}
+    assert team_list_calls == 1
+
+
+def test_session_list_reuses_known_ledger_presence_for_preview_projection(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    save_chat_state(
+        tmp_path,
+        {
+            "version": 1,
+            "active_conversation_id": "session-preview",
+            "conversations": [
+                {
+                    "conversation_id": "session-preview",
+                    "title": "Preview Agent",
+                    "updated_at": "2026-05-26T10:00:00",
+                    "messages": [],
+                }
+            ],
+        },
+    )
+    _seed_ledger_messages(
+        tmp_path,
+        "session-preview",
+        [{"role": "assistant", "content": "Ledger preview", "timestamp": "2026-05-26T10:00:00"}],
+    )
+    session_service._invalidate_session_list_cache()
+    session_service._invalidate_session_conversation_events_cache()
+    real_ledger_visible_messages = session_service._ledger_visible_messages_for_session
+    calls: list[str] = []
+
+    def counting_ledger_visible_messages(session_id):
+        calls.append(str(session_id))
+        return real_ledger_visible_messages(session_id)
+
+    monkeypatch.setattr(session_service, "_ledger_visible_messages_for_session", counting_ledger_visible_messages)
+
+    sessions = {item["id"]: item for item in session_service.list_sessions()}
+
+    assert sessions["session-preview"]["taskSummary"] == "Ledger preview"
+    assert sessions["session-preview"]["status"] == "ready"
+    assert calls == ["session-preview"]
+
+
 def test_session_title_update_uses_lightweight_path(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     created = session_service.create_chat_session(title="Before Rename")

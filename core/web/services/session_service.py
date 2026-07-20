@@ -2587,7 +2587,9 @@ def _empty_direct_agent_session_hidden_from_index(
     """Hide stale empty Agent recovery channels while preserving real conversations."""
 
     session_id = str(conversation.get("id") or conversation.get("conversation_id") or "").strip()
-    if _ledger_visible_messages_for_session(session_id):
+    if bool(conversation.get("_hasLedgerMessages")):
+        return False
+    if "_hasLedgerMessages" not in conversation and _ledger_visible_messages_for_session(session_id):
         return False
     if isinstance(conversation.get("activeTask"), dict) and conversation.get("activeTask"):
         return False
@@ -3302,9 +3304,18 @@ def list_sessions(*, include_hidden_internal: bool = False) -> list[dict]:
 
     try:
         agent_by_id = _agent_lookup_for_conversations()
-        active_id, conversations = _load_conversations(repair=False, agent_by_id=agent_by_id, lightweight=True)
-        conversations = _append_agent_directory_conversations(conversations, agent_by_id=agent_by_id)
         hidden_team_member_agent_ids = _agent_directory_stub_hidden_team_member_ids()
+        active_id, conversations = _load_conversations(
+            repair=False,
+            agent_by_id=agent_by_id,
+            hidden_team_member_agent_ids=hidden_team_member_agent_ids,
+            lightweight=True,
+        )
+        conversations = _append_agent_directory_conversations(
+            conversations,
+            agent_by_id=agent_by_id,
+            hidden_team_member_agent_ids=hidden_team_member_agent_ids,
+        )
         sessions = []
         hidden_summaries = []
         for item in conversations:
@@ -7045,6 +7056,7 @@ def _load_conversations(
     *,
     repair: bool = True,
     agent_by_id: dict[str, dict[str, Any]] | None = None,
+    hidden_team_member_agent_ids: set[str] | None = None,
     lightweight: bool = False,
 ) -> tuple[str, list[dict[str, Any]]]:
     with _CHAT_STATE_LOCK, chat_state_transaction(PROJECT_ROOT):
@@ -7055,7 +7067,11 @@ def _load_conversations(
         conversations: list[dict[str, Any]] = []
         changed = False
         agent_by_id = agent_by_id if agent_by_id is not None else _agent_lookup_for_conversations()
-        hidden_team_member_agent_ids = _agent_directory_stub_hidden_team_member_ids()
+        hidden_team_member_agent_ids = (
+            hidden_team_member_agent_ids
+            if hidden_team_member_agent_ids is not None
+            else _agent_directory_stub_hidden_team_member_ids()
+        )
         if repair:
             changed = _repair_child_root_agent_direct_session_bindings(payload, agent_by_id=agent_by_id) or changed
         for raw in list(payload.get("conversations") or []):
@@ -7293,6 +7309,7 @@ def _append_agent_directory_conversations(
     conversations: list[dict[str, Any]],
     *,
     agent_by_id: dict[str, dict[str, Any]] | None = None,
+    hidden_team_member_agent_ids: set[str] | None = None,
 ) -> list[dict[str, Any]]:
     by_session_id = {
         str(item.get("id") or "").strip(): item
@@ -7304,7 +7321,11 @@ def _append_agent_directory_conversations(
         agents = list((agent_by_id if agent_by_id is not None else _agent_lookup_for_conversations()).values())
     except Exception:
         return result
-    hidden_team_member_agent_ids = _agent_directory_stub_hidden_team_member_ids()
+    hidden_team_member_agent_ids = (
+        hidden_team_member_agent_ids
+        if hidden_team_member_agent_ids is not None
+        else _agent_directory_stub_hidden_team_member_ids()
+    )
     for agent in agents:
         if not isinstance(agent, dict):
             continue
@@ -7316,7 +7337,11 @@ def _append_agent_directory_conversations(
             continue
         if _agent_directory_stub_hidden_from_user_index(agent, hidden_team_member_agent_ids):
             continue
-        conversation = _agent_directory_conversation_stub(agent, session_id=session_id)
+        conversation = _agent_directory_conversation_stub(
+            agent,
+            session_id=session_id,
+            hidden_team_member_agent_ids=hidden_team_member_agent_ids,
+        )
         result.append(conversation)
         by_session_id[session_id] = conversation
         _record_agent_directory_conversation_index_event(agent, session_id=session_id)
@@ -7735,9 +7760,18 @@ def _mark_conversation_agent_deleted(
     return changed
 
 
-def _agent_directory_conversation_stub(agent: dict[str, Any], *, session_id: str) -> dict[str, Any]:
+def _agent_directory_conversation_stub(
+    agent: dict[str, Any],
+    *,
+    session_id: str,
+    hidden_team_member_agent_ids: set[str] | None = None,
+) -> dict[str, Any]:
     display_name = str(agent.get("displayName") or agent.get("agentCode") or session_id).strip() or session_id
-    hidden_team_member_agent_ids = _agent_directory_stub_hidden_team_member_ids()
+    hidden_team_member_agent_ids = (
+        hidden_team_member_agent_ids
+        if hidden_team_member_agent_ids is not None
+        else _agent_directory_stub_hidden_team_member_ids()
+    )
     team_identity = {
         "teamId": str(agent.get("teamId") or "").strip(),
         "teamName": str(agent.get("teamName") or "").strip(),
@@ -8170,6 +8204,7 @@ def _normalize_conversation(
             messages = _normalize_latest_preview_messages(conversation_id, ledger_messages)
         else:
             messages = _normalize_latest_preview_messages(conversation_id, raw.get("messages") or [])
+        has_ledger_messages = bool(ledger_messages)
         visible_runtime_notices: list[dict[str, Any]] = []
     else:
         ledger_messages = _session_ledger_visible_messages(conversation_id)
@@ -8177,6 +8212,7 @@ def _normalize_conversation(
             messages = ledger_messages
         else:
             messages = _normalize_messages(conversation_id, raw.get("messages") or [])
+        has_ledger_messages = bool(ledger_messages)
         runtime_notices = _normalize_session_runtime_notices(
             raw.get("runtime_notices") or raw.get("runtimeNotices") or []
         )
@@ -8235,6 +8271,8 @@ def _normalize_conversation(
         "workspacePath": workspace_path,
         "messages": messages,
         "_messagesNormalized": not lightweight,
+        "_messagesPreview": bool(lightweight),
+        "_hasLedgerMessages": has_ledger_messages,
         "runtimeNotices": visible_runtime_notices,
         "lastTurnStatus": last_turn_status,
         "lastTurnError": last_turn_error,
@@ -9168,7 +9206,9 @@ def _is_default_empty_session_title(title: str) -> bool:
 def _build_session_summary(conversation: dict[str, Any], *, hydrate_agent: bool = True) -> dict[str, Any]:
     status = _conversation_phase(conversation["id"], conversation)
     summary_messages = list(conversation.get("messages") or [])
-    if summary_messages and bool(conversation.get("_messagesNormalized")):
+    if summary_messages and (
+        bool(conversation.get("_messagesNormalized")) or bool(conversation.get("_messagesPreview"))
+    ):
         normalized_summary_messages = summary_messages
     elif summary_messages:
         normalized_summary_messages = _normalize_messages(conversation["id"], summary_messages)
@@ -12418,7 +12458,9 @@ def _conversation_phase(conversation_id: str, conversation: dict[str, Any]) -> s
         "superseded",
     }:
         return normalized
-    if _ledger_visible_messages_for_session(conversation_id):
+    if bool(conversation.get("_hasLedgerMessages")):
+        return "ready"
+    if "_hasLedgerMessages" not in conversation and _ledger_visible_messages_for_session(conversation_id):
         return "ready"
     return "idle"
 
