@@ -17,7 +17,7 @@ During P0 structure work, `session_service.py` remains the **public import facad
 | `submit_session_message*` / guidance / edit-resubmit entry | `submit.py` | team workflow orchestration, worker loop |
 | Turn queue / schedule / executor handoff | `schedule.py` | candidate store, full worker loop |
 | `_run_session_turn` / continuation loop | `worker.py` (planned) | team SC search |
-| UI stream to journal / `assistant_delta` batching | `stream_capture.py` (planned) | list cache |
+| UI stream to journal / `assistant_delta` batching | `stream_capture.py` | list cache, SSE transport publish |
 | Persist turn outcome / final `session_detail` | `persist.py` (planned) | agent directory CRUD |
 | Session detail/list DTO projection helpers | `projection.py` (planned) | runtime daemon |
 | Public HTTP-facing API surface | `../session_service.py` (facade) | inlining new 500-line blocks |
@@ -57,7 +57,10 @@ During P0 structure work, `session_service.py` remains the **public import facad
   - Facade keeps `_SESSION_EXECUTOR` + `_SESSION_TURN_SCHEDULER` globals so conftest monkeypatches stay effective;
     schedule functions resolve them at call time via `_service()`.
   - Still on facade: running-session flags, `SessionTurnControl`, `_run_session_turn` worker.
-- **Planned:** stream_capture, worker, persist, projection.
+- **Done:** `stream_capture.py` (`SessionTurnCapture`, text batcher, `_capture_session_ui_stream`, UI hooks).
+  - Late-bound facade sanitizers/live_output/journal; ContextVar store re-exported from facade.
+  - Still on facade: SSE `_publish_session_assistant_delta` / stream subscribers / detail snapshot publish.
+- **Planned:** worker, persist, projection.
 
 ## Related
 
