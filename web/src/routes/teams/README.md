@@ -14,6 +14,7 @@ Agent-oriented map for Teams workbench development. Prefer editing a **module** 
 | Source-collection presentation labels / storage paths / tones | `source-collection/presentationModel.ts` | mutations, SSE |
 | Source-collection run selection / labels | `source-collection/runModel.ts` | UI panels |
 | Stage projection / phase-close readiness | `source-collection/stageProjection.ts` | Graph SVG |
+| Experiment + Research Loop types / query keys / status labels | `experimentLoopModel.ts` | mutations, UI panels |
 | Research workflow resource queries/keys | `useResearchWorkflowResources.ts` | Canvas drag |
 | Research memory evidence UI | `ResearchMemoryEvidencePanel.tsx` | Teams shell mutations |
 | Source-collection panel shell alias | `TeamsSourceCollectionPanel.tsx` | full route wiring |
@@ -41,8 +42,8 @@ Agent-oriented map for Teams workbench development. Prefer editing a **module** 
 
 ## Pure extract progress
 
-- **Done:** workspace navigation, team kind guards, canvas geometry, source-collection presentation labels/paths/tones (with unit tests).
-- **Still in `TeamsRoute.tsx`:** experiment/loop types+drafts, AI-search presentation, remaining workflow status labels, mutation wiring, JSX.
+- **Done:** workspace navigation, team kind guards, canvas geometry, source-collection presentation, experiment/loop types+labels (with unit tests).
+- **Still in `TeamsRoute.tsx`:** AI-search presentation, remaining workflow status labels, stage agent role tables, mutation wiring, JSX.
 
 ## Next (planned)
 

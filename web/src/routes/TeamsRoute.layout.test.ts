@@ -15,7 +15,9 @@ import stageProjectionSource from "./teams/source-collection/stageProjection.ts?
 import researchWorkflowResourcesSource from "./teams/useResearchWorkflowResources.ts?raw";
 
 /** Route shell + claimable pure modules extracted from TeamsRoute. */
-const routeAndPureSource = `${routeSource}\n${canvasGeometrySource}\n${researchWorkspaceModelSource}\n${teamKindModelSource}\n${presentationModelSource}`;
+import experimentLoopModelSource from "./teams/experimentLoopModel.ts?raw";
+
+const routeAndPureSource = `${routeSource}\n${canvasGeometrySource}\n${researchWorkspaceModelSource}\n${teamKindModelSource}\n${presentationModelSource}\n${experimentLoopModelSource}`;
 import teamMemoryIndexPanelSource from "./TeamMemoryIndexPanel.tsx?raw";
 import teamMemoryIndexPanelStyles from "./TeamMemoryIndexPanel.styles";
 import teamExperimentMethodPanelSource from "./TeamExperimentMethodPanel.tsx?raw";
@@ -1169,10 +1171,10 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("stage3Lifecycle.bestCandidateId");
     expect(routeSource).toContain("detailHeroDiagnosticStatus");
     expect(routeSource).toContain("latestDiagnosticStatus.status");
-    expect(routeSource).toContain("researchDiagnosticStatusLabel");
-    expect(routeSource).toContain('smoke_needs_review: { zh: "Smoke 待复核", en: "smoke needs review" }');
-    expect(routeSource).toContain('full_run_needs_review: { zh: "正式实验待复核", en: "formal run needs review" }');
-    expect(routeSource).toContain("memoryContextSummary");
+    expect(routeAndPureSource).toContain("researchDiagnosticStatusLabel");
+    expect(experimentLoopModelSource).toContain('smoke_needs_review: { zh: "Smoke 待复核", en: "smoke needs review" }');
+    expect(experimentLoopModelSource).toContain('full_run_needs_review: { zh: "正式实验待复核", en: "formal run needs review" }');
+    expect(routeAndPureSource).toContain("memoryContextSummary");
     expect(routeSource).toContain("团队记忆");
     expect(routeSource).toContain("已用记忆");
     expect(routeSource).toContain("forbiddenDuplicateExperimentCount");
@@ -1455,15 +1457,15 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("登记基线工件");
     expect(routeSource).toContain("reproductionCommand");
     expect(routeSource).toContain("smoke-result");
-    expect(routeSource).toContain("ExperimentSmokeResultRecord");
-    expect(routeSource).toContain("activeSmokeResult");
-    expect(routeSource).toContain("gateDecision");
+    expect(routeAndPureSource).toContain("ExperimentSmokeResultRecord");
+    expect(routeAndPureSource).toContain("activeSmokeResult");
+    expect(routeAndPureSource).toContain("gateDecision");
     expect(routeSource).toContain("登记 smoke 结果");
-    expect(routeSource).toContain("needs_review");
+    expect(routeAndPureSource).toContain("needs_review");
     expect(routeSource).toContain("full-run 已解锁");
-    expect(routeSource).toContain("readyForSmoke");
-    expect(routeSource).toContain("baselineSelection");
-    expect(routeSource).toContain("readyForFullRun");
+    expect(routeAndPureSource).toContain("readyForSmoke");
+    expect(routeAndPureSource).toContain("baselineSelection");
+    expect(routeAndPureSource).toContain("readyForFullRun");
     expect(routeSource).toContain("No training execution was triggered.");
     expect(routeSource).toContain("迭代优化工作台");
     expect(routeSource).toContain("renderResearchStageStandalonePage");
