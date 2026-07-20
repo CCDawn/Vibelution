@@ -33,6 +33,8 @@ import groupSessionIndexItemsStyles from "./GroupSessionIndexItems.styles";
 import groupSessionIndexItemsSource from "./GroupSessionIndexItems.tsx?raw";
 import sessionContextMenuStyles from "./SessionContextMenu.styles";
 import sessionContextMenuSource from "./SessionContextMenu.tsx?raw";
+import agentContextMenuSource from "./AgentContextMenu.tsx?raw";
+import agentConversationDirectorySource from "./AgentConversationDirectory.tsx?raw";
 import agentSessionTabStripStyles from "./AgentSessionTabStrip.styles";
 import routeStyles from "./ChatCodingRoute.styles";
 import routeStylesModuleSource from "./ChatCodingRoute.styles.ts?raw";
@@ -2279,6 +2281,28 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.sessionItemContextTarget).toContain("shadow-[var(--vui-shadow-inset-accent)]");
     expect(routeStyles.agentSessionTabContextTarget).toContain("bg-[color-mix");
     expect(routeStyles.agentSessionTabContextTarget).toContain("border-[color-mix");
+  });
+
+  it("opens an Agent-scoped right-click menu from Agent directory rows", () => {
+    expect(routeSource).toContain("const [agentContextMenu, setAgentContextMenu]");
+    expect(routeSource).toContain("const openAgentContextMenu = useCallback");
+    expect(routeSource).toContain("event.preventDefault()");
+    expect(routeSource).toContain("setAgentContextMenu({");
+    expect(routeSource).toContain("onContextMenu={openAgentContextMenu}");
+    expect(routeSource).toContain('import("./AgentContextMenu")');
+    expect(routeSource).toContain("<AgentContextMenu");
+    expect(routeSource).toContain("onCreateSession={handleCreateAgentSession}");
+    expect(routeSource).toContain("onOpenConfig={handleOpenAgentConfig}");
+    expect(routeSource).toContain("onOpenLatest={handleOpenAgentLatestSession}");
+    expect(agentConversationDirectorySource).toContain(
+      "onContextMenu={(event) => onContextMenu(event, agent, latestSession ?? null)}",
+    );
+    expect(agentContextMenuSource).toContain('aria-label={lang === "zh" ? "Agent 操作" : "Agent actions"}');
+    expect(agentContextMenuSource).toContain("打开最近会话");
+    expect(agentContextMenuSource).toContain("新建会话");
+    expect(agentContextMenuSource).toContain("打开 Agent 设置");
+    expect(agentContextMenuSource).not.toContain("Trash2");
+    expect(agentContextMenuSource).not.toContain("Eraser");
   });
 
   it("shows each visible agent with a functional role label, not only a person name", () => {
