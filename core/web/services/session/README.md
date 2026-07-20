@@ -13,7 +13,7 @@ During P0 structure work, `session_service.py` remains the **public import facad
 |-----------|-------------------|--------|
 | Session list index cache / prewarm signatures | `list_cache.py` | stream capture, agent turn |
 | Live output checkpoint / recovery state | `live_output.py` | submit validation, stream publish |
-| Conversation events cache, ledger seq helpers | `journal_bridge.py` (planned) | LLM invoke |
+| Conversation events cache, ledger seq helpers | `journal_bridge.py` | LLM invoke, live recovery reconcile |
 | `submit_session_message*` / guidance / edit-resubmit entry | `submit.py` (planned) | team workflow orchestration |
 | Turn queue / schedule / executor handoff | `schedule.py` (planned) | candidate store |
 | `_run_session_turn` / continuation loop | `worker.py` (planned) | team SC search |
@@ -48,7 +48,10 @@ During P0 structure work, `session_service.py` remains the **public import facad
 - **Done:** `list_cache.py` (session list signature + inflight cache).
 - **Done:** `live_output.py` (state dataclass, in-memory store, checkpoint I/O + visibility).
   - Facade still owns: timeline/codex payload enrichment, `_set_session_live_output` stream publish, chat-state recovery, progress/status labels.
-- **Planned:** journal_bridge, submit, schedule, stream_capture, worker, persist, projection.
+- **Done:** `journal_bridge.py` (events signature cache, append, ledger seq, snapshot).
+  - Facade thin-wraps with `project_root=PROJECT_ROOT` so monkeypatches / agent-kernel root binding keep working.
+  - Still on facade: stale-ledger reconcile, visible-message projection, truncate-before-message.
+- **Planned:** submit, schedule, stream_capture, worker, persist, projection.
 
 ## Related
 
