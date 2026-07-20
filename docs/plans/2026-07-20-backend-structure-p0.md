@@ -17,6 +17,7 @@ Related: frontend bundle+claim phase (closed); `docs/agents/conversation-flow-ma
 | 2026-07-20 | 2.5 | Extracted `session/schedule.py` (queue/executor handoff); executor/scheduler globals stay on facade |
 | 2026-07-20 | 2.6 | Extracted `session/stream_capture.py` (capture + batching + UI hooks); SSE publish stays on facade |
 | 2026-07-20 | 2.7 | Extracted `session/worker.py` (`_run_session_turn` + continuation loop); persist stays on facade |
+| 2026-07-20 | 2.8 | Extracted `session/persist.py` (turn result/failure/runtime-error + terminal fallback) |
 
 ## 1. Problem Statement
 
