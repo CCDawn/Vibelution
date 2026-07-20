@@ -1,15 +1,15 @@
 import type { CSSProperties } from "react";
 
 import type { TeamWorkflowCandidateGraphNode, TeamWorkflowCandidateGraphPayload } from "../api/types";
+import {
+  type TeamWorkflowGraphLayout,
+  type TeamWorkflowGraphNodeView,
+  workflowGraphViewMetrics,
+} from "./TeamWorkflowGraphLayout";
 import styles from "./TeamWorkflowGraphView.styles";
 
-const WORKFLOW_GRAPH_WIDTH = 1120;
-const WORKFLOW_GRAPH_MIN_HEIGHT = 320;
-const WORKFLOW_GRAPH_NODE_WIDTH = 168;
-const WORKFLOW_GRAPH_NODE_HEIGHT = 58;
-const WORKFLOW_GRAPH_NODE_GAP = 30;
-const WORKFLOW_GRAPH_MARGIN_X = 22;
-const WORKFLOW_GRAPH_MARGIN_Y = 28;
+export type { TeamWorkflowGraphLayout, TeamWorkflowGraphNodeView } from "./TeamWorkflowGraphLayout";
+export { workflowGraphLayout } from "./TeamWorkflowGraphLayout";
 
 type WorkflowGraphDynamicVariable =
   | "--workflow-graph-height"
@@ -22,18 +22,6 @@ type WorkflowGraphDynamicStyle = CSSProperties & Partial<Record<WorkflowGraphDyn
 type WorkflowGraphFrameStyle = WorkflowGraphDynamicStyle & Record<"--workflow-graph-height" | "--workflow-graph-width", string>;
 
 type WorkflowGraphNodeStyle = WorkflowGraphDynamicStyle & Record<"--workflow-graph-node-x" | "--workflow-graph-node-y", string>;
-
-export type TeamWorkflowGraphNodeView = TeamWorkflowCandidateGraphNode & {
-  x: number;
-  y: number;
-};
-
-export type TeamWorkflowGraphLayout = {
-  nodes: TeamWorkflowGraphNodeView[];
-  edges: TeamWorkflowCandidateGraphPayload["edges"];
-  width: number;
-  height: number;
-};
 
 type TeamWorkflowGraphViewProps = {
   layout: TeamWorkflowGraphLayout;
@@ -53,48 +41,6 @@ function workflowGraphNodeStyle(node: Pick<TeamWorkflowGraphNodeView, "x" | "y">
     "--workflow-graph-node-x": `${node.x}px`,
     "--workflow-graph-node-y": `${node.y}px`,
   };
-}
-
-function workflowGraphTypeRank(candidateType: string) {
-  const order: Record<string, number> = {
-    source_manifest: 0,
-    paper_note: 1,
-    neuro_mechanism: 2,
-    mechanism_mapping: 3,
-    algorithm_hypothesis: 4,
-    review_record: 5,
-    candidate_graph: 6,
-  };
-  return order[candidateType] ?? 7;
-}
-
-export function workflowGraphLayout(graph: TeamWorkflowCandidateGraphPayload): TeamWorkflowGraphLayout {
-  const columns = Math.max(
-    1,
-    Math.floor(
-      (WORKFLOW_GRAPH_WIDTH - WORKFLOW_GRAPH_MARGIN_X * 2 + WORKFLOW_GRAPH_NODE_GAP) /
-        (WORKFLOW_GRAPH_NODE_WIDTH + WORKFLOW_GRAPH_NODE_GAP),
-    ),
-  );
-  const nodes = [...graph.nodes]
-    .sort((left, right) => {
-      const rankDelta = workflowGraphTypeRank(left.candidateType) - workflowGraphTypeRank(right.candidateType);
-      if (rankDelta !== 0) {
-        return rankDelta;
-      }
-      return String(left.title || left.candidateId).localeCompare(String(right.title || right.candidateId));
-    })
-    .map((node, index) => ({
-      ...node,
-      x: WORKFLOW_GRAPH_MARGIN_X + (index % columns) * (WORKFLOW_GRAPH_NODE_WIDTH + WORKFLOW_GRAPH_NODE_GAP),
-      y: WORKFLOW_GRAPH_MARGIN_Y + Math.floor(index / columns) * (WORKFLOW_GRAPH_NODE_HEIGHT + WORKFLOW_GRAPH_NODE_GAP),
-    }));
-  const rows = Math.max(1, Math.ceil(nodes.length / columns));
-  const height = Math.max(
-    WORKFLOW_GRAPH_MIN_HEIGHT,
-    WORKFLOW_GRAPH_MARGIN_Y * 2 + rows * WORKFLOW_GRAPH_NODE_HEIGHT + Math.max(0, rows - 1) * WORKFLOW_GRAPH_NODE_GAP,
-  );
-  return { nodes, edges: graph.edges, width: WORKFLOW_GRAPH_WIDTH, height };
 }
 
 function workflowGraphVisualEndpoints(edge: TeamWorkflowCandidateGraphPayload["edges"][number]) {
@@ -117,10 +63,10 @@ function workflowGraphEdgePath(edge: TeamWorkflowCandidateGraphPayload["edges"][
   if (!source || !target) {
     return null;
   }
-  const x1 = source.x + WORKFLOW_GRAPH_NODE_WIDTH;
-  const y1 = source.y + WORKFLOW_GRAPH_NODE_HEIGHT / 2;
+  const x1 = source.x + workflowGraphViewMetrics.nodeWidth;
+  const y1 = source.y + workflowGraphViewMetrics.nodeHeight / 2;
   const x2 = target.x;
-  const y2 = target.y + WORKFLOW_GRAPH_NODE_HEIGHT / 2;
+  const y2 = target.y + workflowGraphViewMetrics.nodeHeight / 2;
   const curve = Math.max(34, Math.abs(x2 - x1) * 0.42);
   return `M ${x1} ${y1} C ${x1 + curve} ${y1}, ${x2 - curve} ${y2}, ${x2} ${y2}`;
 }

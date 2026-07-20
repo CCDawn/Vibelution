@@ -360,7 +360,8 @@ describe("TeamsRoute layout contract", () => {
 
   it("extracts the research source-collection workspace through a route-local wrapper", () => {
     expect(routeSource).toContain("TeamsSourceCollectionPanel");
-    expect(routeSource).toContain('from "./teams/TeamsSourceCollectionPanel"');
+    expect(routeSource).toContain('import("./teams/teamSecondaryPanels")');
+    expect(routeSource).toContain('createLazyNamedTeamPanel(loadTeamSecondaryPanels, "TeamsSourceCollectionPanel")');
     expect(teamsSourceCollectionPanelSource).toContain("TeamSourceCollectionOverviewPanel");
     expect(teamsSourceCollectionPanelSource).not.toContain("TeamsRoute.styles");
     expect(teamsSourceCollectionPanelSource).not.toContain("useQuery");
