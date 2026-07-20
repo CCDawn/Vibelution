@@ -158,6 +158,22 @@ class TestSecurityValidator:
             is_safe, error = validator.validate_command(cmd)
             assert is_safe is True, f"应允许命令：{cmd} | {error}"
 
+    def test_validate_command_treats_format_option_as_argument_not_executable(self, validator):
+        for cmd in [
+            "git show --format=fuller --stat HEAD",
+            'python -c "print(\'format C:\')"',
+        ]:
+            is_safe, error = validator.validate_command(cmd)
+            assert is_safe is True, f"参数文本不应触发 format 命令拦截：{cmd} | {error}"
+
+    def test_validate_command_blocks_format_at_chained_or_wrapped_command_head(self, validator):
+        for cmd in [
+            "echo ok || format C:",
+            'cmd /c "format C: /Q"',
+        ]:
+            is_safe, error = validator.validate_command(cmd)
+            assert is_safe is False, f"应阻止真实 format 命令：{cmd}"
+
     def test_validate_command_allows_parentheses_inside_quoted_git_message(self, validator):
         """提交信息中的括号不应被误判为注入。"""
         cmd = 'git commit -m "feat(prompt): add language awareness section"'

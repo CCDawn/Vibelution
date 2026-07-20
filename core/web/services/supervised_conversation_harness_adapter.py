@@ -30,6 +30,7 @@ from .session_service import (
 )
 
 CONVERSATION_HARNESS_CANCEL_GRACE_SECONDS = 8.0
+CONVERSATION_HARNESS_MAX_CONTINUATIONS = 3
 _CONVERSATION_HARNESS_TRANSCRIPT_LIMIT = 8
 _CONVERSATION_HARNESS_MESSAGE_FIELDS = {
     "id",
@@ -189,6 +190,8 @@ def run_supervised_conversation_harness(
     cancel_deadline: float | None = None
     latest_detail: dict[str, Any] = {}
     latest_completion_snapshot: dict[str, Any] = {}
+    continuation_count = 0
+    turn_ids = [turn_id] if turn_id else []
     while True:
         cancel_reason = str(cancel_checker() or "").strip() if callable(cancel_checker) else ""
         if cancel_reason and not cancel_requested:
@@ -249,6 +252,83 @@ def run_supervised_conversation_harness(
                     "mental_model_enabled": mental_model_enabled,
                 }
             )
+        if (
+            last_status == "needs_continue"
+            and not cancel_requested
+            and continuation_count < CONVERSATION_HARNESS_MAX_CONTINUATIONS
+            and time.monotonic() < deadline
+        ):
+            continuation_count += 1
+            continuation_prompt = (
+                "继续完成当前监督自改任务。请从上一回合进度继续，完成必要修改和最小验证；"
+                "只有任务真正完成或有明确不可继续原因时才结束。"
+            )
+            try:
+                accepted = submit_session_message(
+                    session_id,
+                    continuation_prompt,
+                    mental_model_enabled=mental_model_enabled,
+                    message_metadata={
+                        "supervisedEvolution": True,
+                        "supervisedContinuation": True,
+                        "supervisedContinuationIndex": continuation_count,
+                        "supervisedRunId": run_id,
+                        "supervisedRole": role,
+                        "scenario": scenario,
+                        "mentalModelMode": normalized_mental_mode,
+                        "workspaceOverride": normalized_workspace_override,
+                    },
+                    message_source="supervised_evolution",
+                    include_started_turn_id=True,
+                    lightweight_response=True,
+                )
+                turn_id = str(accepted.get("turnId") or accepted.get("startedTurnId") or "").strip()
+                if turn_id:
+                    turn_ids.append(turn_id)
+                latest_completion_snapshot = {}
+                if callable(progress_callback):
+                    progress_callback(
+                        {
+                            "phase": "conversation_turn_continued",
+                            "conversation_path": f"session:{session_id}",
+                            "conversation_session_id": session_id,
+                            "conversation_turn_id": turn_id,
+                            "latest_input": continuation_prompt,
+                            "latest_output": "",
+                            "latest_output_kind": "status",
+                            "latest_output_label": f"continuation_{continuation_count}",
+                            "updated_at": _now_timestamp(),
+                            "transcript": _conversation_harness_transcript(latest_detail),
+                            "conversation_messages": _conversation_harness_messages(latest_detail),
+                            "mental_model_mode": normalized_mental_mode,
+                            "mental_model_enabled": mental_model_enabled,
+                        }
+                    )
+                continue
+            except Exception as exc:
+                return _conversation_harness_result(
+                    run_id=run_id,
+                    status="failed",
+                    reason=f"隐藏监督会话续跑提交失败：{type(exc).__name__}: {exc}",
+                    started_at=started_at,
+                    repo_root=repo_root,
+                    timeout_seconds=timeout_seconds,
+                    expect_restart=expect_restart,
+                    scenario=scenario,
+                    agent_binding=binding,
+                    session_id=session_id,
+                    prompt_text=prompt_text,
+                    assistant_text=str(latest_completion_snapshot.get("assistantText") or "").strip(),
+                    evolution_summary={},
+                    primary_returncode=1,
+                    mental_model_mode=normalized_mental_mode,
+                    mental_model_enabled=mental_model_enabled,
+                    completion_snapshot={
+                        **latest_completion_snapshot,
+                        "continuationCount": continuation_count,
+                        "turnIds": turn_ids,
+                    },
+                )
         if completion_terminal or (last_status and last_status not in {"queued", "running"}):
             break
         if cancel_requested and cancel_deadline is not None and time.monotonic() >= cancel_deadline:
@@ -364,6 +444,31 @@ def run_supervised_conversation_harness(
             assistant_text=assistant_text,
             evolution_summary=evolution_summary,
             primary_returncode=None,
+            mental_model_mode=normalized_mental_mode,
+            mental_model_enabled=mental_model_enabled,
+            completion_snapshot=latest_completion_snapshot,
+        )
+    latest_completion_snapshot = {
+        **latest_completion_snapshot,
+        "continuationCount": continuation_count,
+        "turnIds": turn_ids,
+    }
+    if last_status == "needs_continue":
+        return _conversation_harness_result(
+            run_id=run_id,
+            status="needs_continue",
+            reason=f"隐藏监督会话在 {continuation_count + 1} 个回合后仍需继续。",
+            started_at=started_at,
+            repo_root=repo_root,
+            timeout_seconds=timeout_seconds,
+            expect_restart=expect_restart,
+            scenario=scenario,
+            agent_binding=binding,
+            session_id=session_id,
+            prompt_text=prompt_text,
+            assistant_text=assistant_text,
+            evolution_summary=evolution_summary,
+            primary_returncode=1,
             mental_model_mode=normalized_mental_mode,
             mental_model_enabled=mental_model_enabled,
             completion_snapshot=latest_completion_snapshot,
@@ -492,6 +597,8 @@ def _conversation_harness_result(
                 "observed_terminal_status": str(completion.get("terminalStatus") or "").strip(),
                 "observed_active_turn_id": str(completion.get("activeTurnId") or "").strip(),
                 "observed_message_count": int(completion.get("messageCount") or 0),
+                "continuation_count": int(completion.get("continuationCount") or 0),
+                "turn_ids": list(completion.get("turnIds") or []),
             },
         },
         agent_binding=agent_binding,

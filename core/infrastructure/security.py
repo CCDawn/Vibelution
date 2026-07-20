@@ -103,6 +103,94 @@ FORBIDDEN_GIT_SUBCOMMANDS: Set[str] = {
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
+def _split_shell_command_segments(command: str) -> List[str]:
+    """按未加引号的 shell 链接符切分命令，避免把参数文本当成子命令。"""
+    segments: List[str] = []
+    buffer: List[str] = []
+    quote = ""
+    escaped = False
+    index = 0
+    while index < len(command):
+        char = command[index]
+        if escaped:
+            buffer.append(char)
+            escaped = False
+            index += 1
+            continue
+        if char in {"`", "^"}:
+            buffer.append(char)
+            escaped = True
+            index += 1
+            continue
+        if quote:
+            buffer.append(char)
+            if char == quote:
+                quote = ""
+            index += 1
+            continue
+        if char in {"'", '"'}:
+            quote = char
+            buffer.append(char)
+            index += 1
+            continue
+        if char in {";", "|", "&", "\n", "\r"}:
+            segment = "".join(buffer).strip()
+            if segment:
+                segments.append(segment)
+            buffer = []
+            if index + 1 < len(command) and command[index + 1] == char and char in {"|", "&"}:
+                index += 1
+            index += 1
+            continue
+        buffer.append(char)
+        index += 1
+    segment = "".join(buffer).strip()
+    if segment:
+        segments.append(segment)
+    return segments
+
+
+def _normalized_executable_name(token: str) -> str:
+    normalized = str(token or "").strip().strip("'\"").replace("/", "\\")
+    name = normalized.rsplit("\\", 1)[-1].lower()
+    for suffix in (".exe", ".com", ".cmd", ".bat"):
+        if name.endswith(suffix):
+            return name[: -len(suffix)]
+    return name
+
+
+def command_invokes_executable(command: str, executable: str) -> bool:
+    """判断危险词是否真的位于命令头，而不是普通参数、路径或引用文本中。"""
+    target = _normalized_executable_name(executable)
+    if not target:
+        return False
+    for segment in _split_shell_command_segments(str(command or "")):
+        try:
+            tokens = shlex.split(segment, posix=False)
+        except ValueError:
+            tokens = segment.split()
+        tokens = [str(token).strip() for token in tokens if str(token).strip()]
+        if not tokens:
+            continue
+        if tokens[0] in {"&", "."}:
+            tokens = tokens[1:]
+        if not tokens:
+            continue
+        head = _normalized_executable_name(tokens[0])
+        if head == target:
+            return True
+        if head in {"cmd", "powershell", "pwsh"}:
+            command_flags = {"/c", "/k"} if head == "cmd" else {"-c", "-command"}
+            for token_index, token in enumerate(tokens[1:], start=1):
+                if str(token).strip("'\"").lower() not in command_flags:
+                    continue
+                nested = " ".join(tokens[token_index + 1 :]).strip().strip("'\"")
+                if nested and command_invokes_executable(nested, target):
+                    return True
+                break
+    return False
+
+
 # ============================================================================
 # 路径沙箱
 # ============================================================================
@@ -249,7 +337,11 @@ class SecurityValidator:
 
         # 检查黑名单
         for forbidden in FORBIDDEN_COMMANDS:
-            if re.search(rf"\b{re.escape(forbidden)}\b", command, re.IGNORECASE):
+            if re.fullmatch(r"[A-Za-z0-9_.-]+", forbidden):
+                matched = command_invokes_executable(command, forbidden)
+            else:
+                matched = re.search(forbidden, command, re.IGNORECASE) is not None
+            if matched:
                 return (False, f"禁止使用命令：{forbidden}")
 
         command_family = self._detect_command_family(command)
