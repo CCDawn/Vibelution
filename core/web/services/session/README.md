@@ -12,7 +12,7 @@ During P0 structure work, `session_service.py` remains the **public import facad
 | Task type | Prefer these files | Avoid |
 |-----------|-------------------|--------|
 | Session list index cache / prewarm signatures | `list_cache.py` | stream capture, agent turn |
-| Live output checkpoint / recovery state | `live_output.py` (planned) | submit validation |
+| Live output checkpoint / recovery state | `live_output.py` | submit validation, stream publish |
 | Conversation events cache, ledger seq helpers | `journal_bridge.py` (planned) | LLM invoke |
 | `submit_session_message*` / guidance / edit-resubmit entry | `submit.py` (planned) | team workflow orchestration |
 | Turn queue / schedule / executor handoff | `schedule.py` (planned) | candidate store |
@@ -46,7 +46,9 @@ During P0 structure work, `session_service.py` remains the **public import facad
 ## Extraction progress
 
 - **Done:** `list_cache.py` (session list signature + inflight cache).
-- **Planned:** live_output, journal_bridge, submit, schedule, stream_capture, worker, persist, projection.
+- **Done:** `live_output.py` (state dataclass, in-memory store, checkpoint I/O + visibility).
+  - Facade still owns: timeline/codex payload enrichment, `_set_session_live_output` stream publish, chat-state recovery, progress/status labels.
+- **Planned:** journal_bridge, submit, schedule, stream_capture, worker, persist, projection.
 
 ## Related
 
