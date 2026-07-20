@@ -114,14 +114,20 @@ def feature_config_snapshot(config: Any | None = None) -> dict[str, Any]:
 
         config = get_config()
     values = _feature_values(config)
+    decisions = {
+        name: resolve_feature_decision(name, config=config)
+        for name in values
+    }
     return {
         "configRevision": _config_revision(values),
         "source": "operator_config",
         "features": {
             name: {
-                "configuredEnabled": enabled,
-                "effectiveEnabled": enabled,
+                "configuredEnabled": decision.configured_enabled,
+                "effectiveEnabled": decision.effective_enabled,
+                "featureSource": decision.source,
+                "featureDecisionReason": decision.reason,
             }
-            for name, enabled in values.items()
+            for name, decision in decisions.items()
         },
     }

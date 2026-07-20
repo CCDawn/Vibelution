@@ -372,11 +372,25 @@ export type ConfigModelOption = {
   capability_error?: string;
 };
 
+export type ConfigFeatureDecision = {
+  configuredEnabled: boolean;
+  effectiveEnabled: boolean;
+  featureSource: string;
+  featureDecisionReason: string;
+};
+
+export type ConfigFeatureDecisionSnapshot = {
+  configRevision: string;
+  source: string;
+  features: Record<string, ConfigFeatureDecision>;
+};
+
 export type ConfigWorkspace = ConfigSummary & ConfigProviderWorkspaceFields & {
   message: string;
   baseHash: string;
   configPath: string;
   publicConfig: Record<string, unknown>;
+  featureDecisions: ConfigFeatureDecisionSnapshot;
   rawToml: string;
   draftMeta: ConfigDraftMeta;
   diagnosis: ConfigDiagnosis;

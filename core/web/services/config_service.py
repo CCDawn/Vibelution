@@ -44,6 +44,7 @@ from config.model_catalog import (
     save_model_catalog_state,
 )
 from core.chat.chat_task_types import trim_lines
+from core.infrastructure.feature_gate import feature_config_snapshot
 from core.llm import LLMInvocationContext, invoke_llm
 from core.llm.provider_discovery.service import discover_provider_models
 from core.llm.protocol_resolver import resolve_model_protocol
@@ -1892,6 +1893,7 @@ def _build_workspace(
         "themeBackgroundReadability": _theme_background_readability(public_config),
         "sections": _config_sections(lang, editor_sections),
         "publicConfig": public_config,
+        "featureDecisions": feature_config_snapshot(public_config),
         "rawToml": _read_raw_public_config() if raw_toml is None else raw_toml,
         "draftMeta": normalized_meta,
         "diagnosis": diagnosis,

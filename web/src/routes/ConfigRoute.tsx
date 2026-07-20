@@ -83,6 +83,7 @@ import { safeAgentCenterReturnToPath } from "./agentCenterRoutes";
 import { ConfigDraftPanel } from "./ConfigDraftPanel";
 import { publishConfigDraftPresence } from "./configDraftPresence";
 import ConfigDiagnosisPanel from "./ConfigDiagnosisPanel";
+import { ConfigFeatureDecisionPanel } from "./ConfigFeatureDecisionPanel";
 import { ConfigHealthDiagnosticsPanel } from "./ConfigHealthDiagnosticsPanel";
 import { ConfigModelMigrationPanel } from "./ConfigModelMigrationPanel";
 import { ConfigOverviewPanel } from "./ConfigOverviewPanel";
@@ -3964,15 +3965,21 @@ export function ConfigRoute() {
         ) : null}
 
         {isSectionVisible("health-diagnostics") ? (
-          <ConfigHealthDiagnosticsPanel
-            diagnostics={healthDiagnosticsQuery.data}
-            loading={healthDiagnosticsQuery.isLoading || healthDiagnosticsQuery.isFetching}
-            lang={currentLanguage}
-            copy={copy}
-            onRefresh={() => {
-              void healthDiagnosticsQuery.refetch();
-            }}
-          />
+          <>
+            <ConfigFeatureDecisionPanel
+              snapshot={workspace.featureDecisions}
+              lang={currentLanguage}
+            />
+            <ConfigHealthDiagnosticsPanel
+              diagnostics={healthDiagnosticsQuery.data}
+              loading={healthDiagnosticsQuery.isLoading || healthDiagnosticsQuery.isFetching}
+              lang={currentLanguage}
+              copy={copy}
+              onRefresh={() => {
+                void healthDiagnosticsQuery.refetch();
+              }}
+            />
+          </>
         ) : null}
 
         {workspace.schemaVersion === 2 && isSectionVisible("models") ? null : activeEditorSections.map((section) => (
