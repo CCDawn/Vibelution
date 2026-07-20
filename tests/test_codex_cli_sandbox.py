@@ -5,6 +5,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from core.infrastructure import codex_cli_sandbox
+from tools.shell_tools import workspace_root_override
 
 
 def test_resolver_prefers_user_local_binary_over_windowsapps_path(monkeypatch, tmp_path):
@@ -21,6 +22,16 @@ def test_resolver_prefers_user_local_binary_over_windowsapps_path(monkeypatch, t
     resolved = codex_cli_sandbox._resolve_codex_executable()
 
     assert resolved == str(local_executable.resolve())
+
+
+def test_relative_cwd_resolves_from_active_session_workspace(tmp_path):
+    candidate_worktree = tmp_path / "candidate"
+    candidate_worktree.mkdir()
+
+    with workspace_root_override(candidate_worktree):
+        resolved = codex_cli_sandbox._resolve_cwd(".")
+
+    assert resolved == candidate_worktree.resolve()
 
 
 class _CompletedProcess:
