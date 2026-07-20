@@ -21,6 +21,7 @@ Related: frontend bundle+claim phase (closed); `docs/agents/conversation-flow-ma
 | 2026-07-20 | 2.9 | **Session Stage 2 closed** — ownership map finalized; flow-map owners updated; full facade slim deferred (projection/SSE/stop remain on facade ~19k) |
 | 2026-07-20 | 3.1–3.2 | Workflow: `orchestration_core.py` + `source_collection/candidates.py`; facade re-exports; first Stage 3 gate |
 | 2026-07-20 | 3.3 | Workflow: `source_collection/runs.py` (start run / search execute+background / summaries) |
+| 2026-07-20 | 3.4–3.5 | Workflow: `source_collection/stages.py` + `storage.py` (stage tasks + open storage) |
 
 ### Session Stage 2 closeout (2026-07-20)
 

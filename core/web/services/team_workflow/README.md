@@ -14,7 +14,9 @@ Align language with frontend claim map: `web/src/routes/teams/README.md`.
 |-----------|-------------------|--------|
 | ensure/get orchestration document | `orchestration_core.py` | session_service |
 | Source-collection pure normalizers | `source_collection_common.py` | HTTP routes |
-| SC stage task / writeback helpers | `source_collection_stage_tasks.py` | experiment smoke runs |
+| SC stage task pure helpers | `source_collection_stage_tasks.py` | experiment smoke runs |
+| SC stage session task start/writeback/context | `source_collection/stages.py` | experiment full-run |
+| SC storage open | `source_collection/storage.py` | candidates register |
 | SC projection / summary helpers | `source_collection_projection.py` | agent directory |
 | SC agent session context seeding | `source_collection_context.py` | LLM client internals |
 | Research memory context packing | `research_memory_context.py` | chat stream capture |
@@ -33,8 +35,8 @@ Align language with frontend claim map: `web/src/routes/teams/README.md`.
 | ensure/get orchestration | `orchestration_core.py` |
 | Candidates / quality entry (register/import/extract/list) | `source_collection/candidates.py` |
 | SC runs / search | `source_collection/runs.py` |
-| Stage agents / writeback | `source_collection_stage_tasks.py` + facade `start_*` / `writeback_*` |
-| Storage open | planned storage pack |
+| Stage agents / writeback | `source_collection/stages.py` + pure helpers in `source_collection_stage_tasks.py` |
+| Storage open | `source_collection/storage.py` |
 | Experiment design/execution | facade + planned `experiment.py` |
 | Research loop | facade + planned `research_loop.py` |
 
@@ -55,7 +57,9 @@ Align language with frontend claim map: `web/src/routes/teams/README.md`.
 | `orchestration_core.py` | done | get/ensure entrypoints (late-bound facade) |
 | `source_collection/candidates.py` | done | register/import/extract/list/validate entrypoints |
 | `source_collection/runs.py` | done | start run, execute/background search, work-run summary, SC summary |
-| storage / stages writeback entry / experiment / research_loop | planned | next packs |
+| `source_collection/stages.py` | done | seed context, start/writeback stage session task, get context, post-turn reconcile |
+| `source_collection/storage.py` | done | open storage target |
+| experiment / research_loop / knowledge | planned | next product packs |
 
 ## Related
 
