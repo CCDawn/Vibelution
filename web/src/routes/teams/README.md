@@ -47,9 +47,9 @@ Agent-oriented map for Teams workbench development. Prefer editing a **module** 
 
 ## Next (planned)
 
-1. Extract source-collection presentation labels + experiment/loop pure types next (keep mutations in route until claimable hooks exist).
-2. Prefer claimability wins over pure LOC grind.
-3. Optional: split source-collection pack vs workflow-status pack if the secondary pack itself grows past route budget.
+1. Optional: AI-search presentation labels, remaining workflow status labels, stage agent role tables.
+2. Prefer claimability wins over pure LOC grind; extract mutations only when hooks can own EventSource-free boundaries.
+3. Optional: split `teamSecondaryPanels` into source-collection vs workflow-status packs if the secondary pack exceeds route budget.
 
 ## Rules
 
