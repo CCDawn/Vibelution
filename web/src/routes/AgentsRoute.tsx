@@ -26,6 +26,7 @@ import {
   AgentConfigHealthIssue,
   AgentModeBindings,
   AgentPersonaProfile,
+  AgentPurgeResponse,
   AgentTaskProfile,
   AgentToolGovernanceRequest,
   AgentConfigReference,
@@ -861,8 +862,8 @@ function runtimeNextStep(agent: AgentConfigWorkspaceAgent | null | undefined, la
   }
   if (state === "archived") {
     return lang === "zh"
-      ? "该 Agent 已归档；只适合查看历史会话、记忆和日志，不建议继续分配新任务。"
-      : "This Agent is archived; inspect historical sessions, memory, and logs instead of assigning new work.";
+      ? "该 Agent 已归档；其绑定会话已封存并从会话栏隐藏，可在本页执行彻底删除。"
+      : "This Agent is archived. Its bound sessions are sealed and hidden from chat; permanent cleanup is available on this page.";
   }
   if (state === "unknown") {
     return lang === "zh"
@@ -1154,7 +1155,7 @@ function buildLightweightAgentWorkspace(
   const issues = agents.flatMap((agent) => agent.health ?? []);
   const groups = [
     lightweightAgentGroup("active", "可用 Agent", "status", "当前可被业务页面引用或调度的 Agent。", agents, (agent) => agent.status !== "archived"),
-    lightweightAgentGroup("archived", "已归档", "status", "只保留历史数据、不再进入可用池的 Agent。", agents, (agent) => agent.status === "archived"),
+    lightweightAgentGroup("archived", "已归档", "status", "已封存且不再进入会话栏或可用池，可在 Agent 管理页统一清理。", agents, (agent) => agent.status === "archived"),
     lightweightAgentGroup("chat", "会话模式", "mode", "属于 Chat 运行模式或会话可用池的 Agent。", activeAgents, (agent) => agent.primaryMode === "chat"),
     lightweightAgentGroup("research", "科研模式", "mode", "属于 Research 运行模式或科研池的 Agent。", activeAgents, (agent) => agent.primaryMode === "research"),
     lightweightAgentGroup(
@@ -2592,7 +2593,7 @@ function agentsRouteCopy(lang: "zh" | "en") {
         bulkConfigReset: "重置面板",
         bulkApplyConfig: "保存批量配置",
         bulkArchiveConfirm: "确认安全归档已选 Agent？受保护或已归档项会自动跳过。",
-        bulkPurgeConfirm: "确认彻底删除已选的已归档 Agent？活跃或受保护项会自动跳过；该操作会删除 Agent 私有工作区，直连历史仅保留为已删除 Agent 历史。",
+        bulkPurgeConfirm: "确认彻底删除已选的已归档 Agent？活跃或受保护项会自动跳过；该操作会一并删除 Agent 私有工作区、全部绑定会话及其私有数据，且不可恢复。",
         bulkSkippedArchived: "已归档，跳过",
         bulkSkippedActive: "仍是活跃状态，请先安全归档",
         bulkSkippedProtected: "受保护，跳过",
@@ -2628,7 +2629,7 @@ function agentsRouteCopy(lang: "zh" | "en") {
         groupDescriptions: {
           active: "当前可被业务页面引用或调度的 Agent。",
           needs_review: "存在阻塞或警告健康项的可用 Agent。",
-          archived: "只保留历史数据、不再进入可用池的 Agent。",
+          archived: "已封存且不再进入会话栏或可用池，可在 Agent 管理页统一清理。",
           work_session: "用于项目开发、调试、实现和审计的 Codex-like 会话入口。",
           team_role: "拥有人物/任务档案，并进入团队或科研组织结构的 Agent。",
           system_role: "由自进化、监督进化等系统流程固定管理的 Agent。",
@@ -2690,13 +2691,13 @@ function agentsRouteCopy(lang: "zh" | "en") {
         archiveAgent: "安全归档",
         archivingAgent: "归档中...",
         archiveAgentTitle: "安全删减",
-        archiveAgentHint: "归档会从默认模式、群聊成员和可选池中移除该 Agent，但保留会话、记忆、日志和工作区。",
-        archiveConfirm: "确认归档 {name}？这会隐藏该 Agent 并清理模式/群聊引用，但不会物理删除数据。",
+        archiveAgentHint: "归档会从默认模式、群聊成员、可选池和会话栏中移除该 Agent；其全部绑定会话会被封存为只读，等待在本页统一清理。",
+        archiveConfirm: "确认归档 {name}？这会封存该 Agent 及全部绑定会话、隐藏会话入口并清理模式/群聊引用；数据仍保留到你执行彻底删除。",
         purgeAgent: "彻底删除",
         purgingAgent: "删除中...",
         purgeAgentTitle: "彻底删除",
-        purgeAgentHint: "会从 AgentDirectory 删除记录，并移除该 Agent 的私有工作区、记忆、inbox 和事件文件；直连历史会保留为已删除 Agent 的历史记录。",
-        purgeConfirm: "彻底删除 {name}？这个操作不可恢复，会删除该 Agent 的私有工作区和历史文件。",
+        purgeAgentHint: "会从 AgentDirectory 删除记录，并一并删除该 Agent 的全部绑定会话、会话工作区、记忆、inbox 和事件文件；不会保留已删除 Agent 的历史占位。",
+        purgeConfirm: "彻底删除 {name}？这个操作不可恢复，会删除该 Agent、全部绑定会话及其私有数据。",
         protectedAgent: "受保护 Agent 不能归档",
         archiveProtection: "归档保护",
         archiveProtectionTitle: "核心保护",
@@ -2989,7 +2990,7 @@ function agentsRouteCopy(lang: "zh" | "en") {
         bulkConfigReset: "Reset panel",
         bulkApplyConfig: "Save bulk config",
         bulkArchiveConfirm: "Archive the selected Agents? Protected or already archived items will be skipped.",
-        bulkPurgeConfirm: "Permanently delete the selected archived Agents? Active or protected Agents will be skipped; private workspaces are removed and direct-session history is kept as deleted-Agent history.",
+        bulkPurgeConfirm: "Permanently delete the selected archived Agents? Active or protected Agents will be skipped. Each Agent, every bound session, and their private data will be deleted and cannot be recovered.",
         bulkSkippedArchived: "Already archived; skipped",
         bulkSkippedActive: "Still active; archive safely first",
         bulkSkippedProtected: "Protected; skipped",
@@ -3025,7 +3026,7 @@ function agentsRouteCopy(lang: "zh" | "en") {
         groupDescriptions: {
           active: "Agents currently available for business pages and routing.",
           needs_review: "Available Agents with blocking or warning health issues.",
-          archived: "Historical records that no longer enter the available pool.",
+          archived: "Sealed Agents excluded from chat and runtime pools; clean them up from Agent management.",
           work_session: "Codex-like session entry Agents for project development, debugging, implementation, and audit work.",
           team_role: "Agents with persona and task profiles that belong to team, research, or business organization structures.",
           system_role: "Agents owned by fixed system flows such as self-evolution or supervised evolution.",
@@ -3087,13 +3088,13 @@ function agentsRouteCopy(lang: "zh" | "en") {
         archiveAgent: "Safe archive",
         archivingAgent: "Archiving...",
         archiveAgentTitle: "Safe removal",
-        archiveAgentHint: "Archiving removes this Agent from defaults, rooms, and pools while keeping sessions, memory, logs, and workspace data.",
-        archiveConfirm: "Archive {name}? This hides the Agent and cleans mode/room references, but does not physically delete data.",
+        archiveAgentHint: "Archiving removes this Agent from defaults, rooms, pools, and the chat index. Every bound session is sealed read-only until it is purged from this page.",
+        archiveConfirm: "Archive {name}? This seals the Agent and every bound session, hides chat entries, and cleans mode/room references. Data remains until permanent deletion.",
         purgeAgent: "Permanently delete",
         purgingAgent: "Deleting...",
         purgeAgentTitle: "Permanent deletion",
-        purgeAgentHint: "Removes the AgentDirectory record plus its private workspace, memory, inbox, and event files; direct-session history is kept as deleted-Agent history.",
-        purgeConfirm: "Permanently delete {name}? This cannot be undone and will delete the Agent private workspace and history files.",
+        purgeAgentHint: "Removes the AgentDirectory record plus every bound session, session workspace, memory, inbox, and event file. No deleted-Agent history placeholder is kept.",
+        purgeConfirm: "Permanently delete {name}? This cannot be undone and deletes the Agent, every bound session, and all private data.",
         protectedAgent: "Protected Agents cannot be archived",
         archiveProtection: "Archive protected",
         archiveProtectionTitle: "Core protection",
@@ -3367,6 +3368,19 @@ function agentBulkActionItemNote(
   const label = agentLabel(agentsById.get(agentId)) || agentId || "-";
   const message = String(item.message || item.reason || fallback || "").trim();
   return message ? `${label}: ${message}` : label;
+}
+
+function agentBulkPurgeCleanupPending(item: AgentBulkActionItem) {
+  const purgeSummary = item.purgeSummary;
+  if (!purgeSummary || typeof purgeSummary !== "object") {
+    return false;
+  }
+  const sessions = (purgeSummary as { sessions?: unknown }).sessions;
+  return Boolean(
+    sessions
+    && typeof sessions === "object"
+    && (sessions as { cleanupPending?: unknown }).cleanupPending,
+  );
 }
 
 export function AgentsRoute() {
@@ -4136,7 +4150,7 @@ export function AgentsRoute() {
 
   const purgeAgentMutation = useMutation({
     mutationFn: (payload: { agentId: string }) =>
-      fetchJson<{ agentId: string; status: string; deleted: boolean; purgeSummary?: { dataRetention?: string } }>(
+      fetchJson<AgentPurgeResponse>(
         `/api/agents/${encodeURIComponent(payload.agentId)}/purge`,
         { method: "DELETE" },
       ),
@@ -4162,7 +4176,11 @@ export function AgentsRoute() {
       setActivePane("overview");
       setNotice({
         tone: "success",
-        text: lang === "zh" ? "已彻底删除归档 Agent" : "Permanently deleted archived Agent",
+        text: result.purgeSummary.sessions.cleanupPending
+          ? (lang === "zh"
+            ? "Agent 与绑定会话已删除；部分私有文件因系统占用等待后续清理"
+            : "The Agent and bound sessions were deleted; some private files remain pending cleanup because they are in use")
+          : (lang === "zh" ? "已彻底删除归档 Agent" : "Permanently deleted archived Agent"),
       });
       void chatWorkspaceCache.afterAgentArchived();
     },
@@ -5115,6 +5133,17 @@ export function AgentsRoute() {
           (current) => bulkPurgeWorkspaceCache(current, response),
         );
         purgedSelectedAgent = response.success.some((item) => item.agentId === selectedAgent?.agentId);
+        response.success.forEach((item) => {
+          if (agentBulkPurgeCleanupPending(item)) {
+            notes.push(agentBulkActionItemNote(
+              item,
+              agentsById,
+              lang === "zh"
+                ? "Agent 与绑定会话已删除；部分私有文件因系统占用等待后续清理"
+                : "The Agent and bound sessions were deleted; some private files remain pending cleanup because they are in use",
+            ));
+          }
+        });
         response.skipped.forEach((item) => notes.push(agentBulkActionItemNote(item, agentsById, copy.bulkSkippedActive)));
         response.failed.forEach((item) => notes.push(agentBulkActionItemNote(item, agentsById, "")));
         success += response.summary.successCount;

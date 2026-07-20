@@ -25,7 +25,7 @@ def _use_tmp_project_root(tmp_path, monkeypatch):
     monkeypatch.setattr(team_service, "PROJECT_ROOT", tmp_path)
 
 
-def test_agent_purge_blocks_delete_when_direct_session_tombstone_fails(tmp_path, monkeypatch):
+def test_agent_purge_blocks_delete_when_session_purge_staging_fails(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     agent = session_service.create_chat_session(title="Tombstone Failure Agent")
     peer = session_service.create_chat_session(title="Peer Agent")
@@ -47,16 +47,10 @@ def test_agent_purge_blocks_delete_when_direct_session_tombstone_fails(tmp_path,
     agent_directory_service.archive_agent_instance(agent["agentId"], repair_mode_bindings=False)
     bindings_before = agent_mode_binding_service.get_mode_bindings_payload()["modes"]["chat"]
 
-    def fail_tombstone(*args, **kwargs):
-        return {
-            "changed": False,
-            "sessionId": agent["id"],
-            "agentId": agent["agentId"],
-            "reason": "tombstone_failed",
-            "errorType": "OSError",
-        }
+    def fail_session_purge_stage(*args, **kwargs):
+        raise OSError("session workspace unavailable")
 
-    monkeypatch.setattr(session_service, "mark_direct_session_agent_deleted", fail_tombstone)
+    monkeypatch.setattr(session_service, "stage_agent_session_purge", fail_session_purge_stage)
 
     response = client.delete(f"/api/agents/{agent['agentId']}/purge")
 
@@ -76,7 +70,7 @@ def test_agent_purge_blocks_delete_when_direct_session_tombstone_fails(tmp_path,
     assert bindings["chat"]["availableAgentIds"] == bindings_before["availableAgentIds"]
 
 
-def test_agent_purge_rolls_back_direct_session_tombstone_when_delete_fails(tmp_path, monkeypatch):
+def test_agent_purge_rolls_back_staged_sessions_when_delete_fails(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     agent = session_service.create_chat_session(title="Rollback Agent")
     peer = session_service.create_chat_session(title="Peer Agent")
@@ -115,7 +109,7 @@ def test_agent_purge_rolls_back_direct_session_tombstone_when_delete_fails(tmp_p
     assert "PermissionError" in response.json()["detail"]
     failed = [event for event in events if event[0][:3] == ("agent_directory", "delete", "agent.purge.failed")]
     assert failed
-    assert failed[-1][1]["fields"]["timingsMs"]["rollback_direct_session_deleted_agent"] >= 0
+    assert failed[-1][1]["fields"]["timingsMs"]["rollback_agent_session_purge"] >= 0
     assert agent_directory_service.get_agent(agent["agentId"], include_archived=True)["status"] == "archived"
     assert workspace_path.exists()
     detail = session_service.get_session_detail(agent["id"])
@@ -130,7 +124,7 @@ def test_agent_purge_rolls_back_direct_session_tombstone_when_delete_fails(tmp_p
     assert agent["agentId"] not in bindings["chat"]["availableAgentIds"]
 
 
-def test_agent_purge_does_not_expose_direct_session_restore_token(tmp_path, monkeypatch):
+def test_agent_purge_does_not_expose_session_restore_token(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     agent = session_service.create_chat_session(title="Successful Purge Agent")
     agent_directory_service.archive_agent_instance(agent["agentId"])
@@ -138,6 +132,9 @@ def test_agent_purge_does_not_expose_direct_session_restore_token(tmp_path, monk
     response = client.delete(f"/api/agents/{agent['agentId']}/purge")
 
     assert response.status_code == 200, response.text
-    direct_session = response.json()["purgeSummary"]["directSession"]
-    assert direct_session["reason"] == "agent_purged"
-    assert "restoreToken" not in direct_session
+    sessions = response.json()["purgeSummary"]["sessions"]
+    assert sessions["status"] == "deleted"
+    assert sessions["historyRetention"] == "deleted"
+    assert "restoreToken" not in sessions
+    assert "stagingRoot" not in sessions
+    assert "stagingRoots" not in sessions

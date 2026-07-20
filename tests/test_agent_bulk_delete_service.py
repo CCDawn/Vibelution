@@ -1,3 +1,5 @@
+import pytest
+
 from core.web.services import (
     agent_bulk_delete_service,
     agent_directory_service,
@@ -17,28 +19,22 @@ def _use_tmp_project_root(tmp_path, monkeypatch):
     monkeypatch.setattr(team_service, "PROJECT_ROOT", tmp_path)
 
 
-def test_bulk_purge_blocks_agent_delete_when_direct_session_tombstone_fails(tmp_path, monkeypatch):
+def test_bulk_purge_blocks_agent_delete_when_session_purge_staging_fails(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     agent_session = session_service.create_chat_session(title="Tombstone Failure Agent")
     agent_record = agent_directory_service.get_agent(agent_session["agentId"])
     agent_directory_service.archive_agent_instance(agent_session["agentId"], repair_mode_bindings=False)
 
-    def fail_tombstone(*args, **kwargs):
-        return {
-            "changed": False,
-            "sessionId": agent_session["id"],
-            "agentId": agent_session["agentId"],
-            "reason": "tombstone_failed",
-            "errorType": "OSError",
-        }
+    def fail_session_purge_stage(*args, **kwargs):
+        raise OSError("session workspace unavailable")
 
-    monkeypatch.setattr(session_service, "mark_direct_session_agent_deleted", fail_tombstone)
+    monkeypatch.setattr(session_service, "stage_agent_session_purge", fail_session_purge_stage)
 
     result = agent_bulk_delete_service.bulk_purge_agents([agent_session["agentId"]])
 
     assert result["status"] == "failed"
     assert result["summary"]["failedCount"] == 1
-    assert result["failed"][0]["reason"] == "tombstone_failed"
+    assert result["failed"][0]["reason"] == "session_purge_stage_failed"
     assert agent_directory_service.get_agent(agent_session["agentId"], include_archived=True)["status"] == "archived"
     assert (tmp_path / agent_record["workspacePath"]).exists()
     detail = session_service.get_session_detail(agent_session["id"])
@@ -46,7 +42,7 @@ def test_bulk_purge_blocks_agent_delete_when_direct_session_tombstone_fails(tmp_
     assert detail["agentStatusCode"] == "archived_agent"
 
 
-def test_bulk_purge_rolls_back_direct_session_tombstone_when_agent_delete_fails(tmp_path, monkeypatch):
+def test_bulk_purge_rolls_back_staged_sessions_when_agent_delete_fails(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     agent_session = session_service.create_chat_session(title="Workspace Locked Agent")
     peer_session = session_service.create_chat_session(title="Peer Agent")
@@ -78,8 +74,8 @@ def test_bulk_purge_rolls_back_direct_session_tombstone_when_agent_delete_fails(
     assert result["status"] == "failed"
     assert result["summary"]["failedCount"] == 1
     assert "PermissionError" in result["failed"][0]["message"]
-    assert result["timingsMs"]["rollback_direct_session_deleted_agent"] >= 0
-    assert "restoreToken" not in result["cleanupSummary"]["directSessions"][0]
+    assert result["timingsMs"]["rollback_agent_session_purge"] >= 0
+    assert result["cleanupSummary"]["sessions"] == []
     assert agent_directory_service.get_agent(agent_session["agentId"], include_archived=True)["status"] == "archived"
     assert workspace_path.exists()
     detail = session_service.get_session_detail(agent_session["id"])
@@ -118,6 +114,35 @@ def test_bulk_archive_skips_system_fixed_role_agent(tmp_path, monkeypatch):
     assert agent_directory_service.get_agent(protected["agentId"])["status"] == "active"
 
 
+def test_bulk_archive_restores_teams_when_room_cleanup_fails(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    agent = session_service.create_chat_session(title="Bulk Archive Cleanup Rollback")
+    team = team_service.create_team(
+        name="Bulk Archive Cleanup Rollback Team",
+        members=[{"agentId": agent["agentId"], "role": "lead"}],
+    )
+
+    def fail_room_cleanup(*args, **kwargs):
+        raise chat_room_service.ChatRoomBusyError("room cleanup failed")
+
+    monkeypatch.setattr(
+        agent_bulk_delete_service,
+        "remove_agents_from_chat_rooms",
+        fail_room_cleanup,
+    )
+
+    with pytest.raises(chat_room_service.ChatRoomBusyError, match="room cleanup failed"):
+        agent_bulk_delete_service.bulk_archive_agents([agent["agentId"]])
+
+    assert agent_directory_service.get_agent(agent["agentId"])["status"] == "active"
+    restored_members = team_service.get_team(team["teamId"])["members"]
+    assert [member["agentId"] for member in restored_members] == [agent["agentId"]]
+    assert [member["role"] for member in restored_members] == ["lead"]
+    detail = session_service.get_session_detail(agent["id"])
+    assert detail["readOnly"] is False
+    assert detail["archiveState"] == {}
+
+
 def test_bulk_archive_restores_references_for_failed_agent(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     agent = session_service.create_chat_session(title="Bulk Archive Rollback Agent")
@@ -146,6 +171,9 @@ def test_bulk_archive_restores_references_for_failed_agent(tmp_path, monkeypatch
     assert result["status"] == "failed"
     assert result["summary"]["failedCount"] == 1
     assert agent_directory_service.get_agent(agent["agentId"])["status"] == "active"
+    restored_session = session_service.get_session_detail(agent["id"])
+    assert restored_session["readOnly"] is False
+    assert restored_session["archiveState"] == {}
     assert team_service.get_team(team["teamId"])["members"][0]["agentId"] == agent["agentId"]
     room_detail = chat_room_service.get_chat_room_detail(room["roomId"])
     assert [participant["agentId"] for participant in room_detail["participants"]] == [

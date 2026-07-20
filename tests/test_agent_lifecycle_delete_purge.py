@@ -58,7 +58,8 @@ def test_agent_delete_api_archives_and_cleans_bindings_and_rooms(tmp_path, monke
     assert response.status_code == 200, response.text
     archived = response.json()
     assert archived["status"] == "archived"
-    assert archived["archiveSummary"]["dataRetention"] == "archived_only"
+    assert archived["archiveSummary"]["dataRetention"] == "sealed"
+    assert archived["archiveSummary"]["sessions"]["archivedCount"] == 1
     assert archived["archiveSummary"]["removedFromRoomIds"] == [room["roomId"]]
     assert archived["archiveSummary"]["removedFromTeamIds"] == [team["teamId"]]
     assert alpha["agentId"] not in {item["agentId"] for item in agent_directory_service.list_agents(include_archived=False)}
@@ -164,10 +165,14 @@ def test_agent_patch_status_archived_uses_safe_archive_cleanup(tmp_path, monkeyp
     payload = response.json()
     assert payload["status"] == "archived"
     assert payload["archiveSummary"]["source"] == "patch_status"
+    assert payload["archiveSummary"]["sessions"]["archivedCount"] == 1
     assert payload["archiveSummary"]["removedFromRoomIds"] == [room["roomId"]]
     assert payload["archiveSummary"]["removedFromTeamIds"] == [team["teamId"]]
     archived = agent_directory_service.get_agent(reviewer["agentId"], include_archived=True)
     assert archived["status"] == "archived"
+    archived_session = session_service.get_session_detail(reviewer_session["id"])
+    assert archived_session["readOnly"] is True
+    assert archived_session["archiveState"]["status"] == "archived"
     bindings = agent_mode_binding_service.get_mode_bindings_payload()["modes"]["chat"]
     assert reviewer["agentId"] not in bindings["availableAgentIds"]
     room_detail = chat_room_service.get_chat_room_detail(room["roomId"])
@@ -437,8 +442,7 @@ def test_agent_bulk_purge_api_removes_many_agents_with_one_reference_cleanup(tmp
     assert payload["timingsMs"]["remove_from_chat_rooms"] >= 0
     for item in (alpha, beta, gamma):
         assert agent_directory_service.get_agent(item["agentId"], include_archived=True) is None
-        detail = session_service.get_session_detail(item["id"])
-        assert detail["agentStatusCode"] == "deleted_agent"
+        assert session_service.get_session_detail(item["id"]) is None
     assert agent_directory_service.get_agent(active["agentId"], include_archived=True)["status"] == "active"
     room_detail = chat_room_service.get_chat_room_detail(room["roomId"])
     assert [participant["agentId"] for participant in room_detail["participants"]] == [active["agentId"]]
@@ -591,6 +595,9 @@ def test_agent_archive_api_restores_references_when_archive_write_fails(tmp_path
 
     assert response.status_code == 422, response.text
     assert agent_directory_service.get_agent(agent["agentId"])["status"] == "active"
+    restored_session = session_service.get_session_detail(agent["id"])
+    assert restored_session["readOnly"] is False
+    assert restored_session["archiveState"] == {}
     team_detail = team_service.get_team(team["teamId"])
     assert team_detail["members"][0]["agentId"] == agent["agentId"]
     assert team_detail["members"][0]["role"] == "lead"
