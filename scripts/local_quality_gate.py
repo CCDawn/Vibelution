@@ -179,7 +179,16 @@ def parse_allowed_command(command: str, root: Path) -> CommandSpec:
         if argv[4] in npm_kinds:
             return CommandSpec(npm_kinds[argv[4]], argv, root)
     if normalized[:3] == ["node", "web/node_modules/vitest/vitest.mjs", "run"]:
-        return CommandSpec("web-test", argv, root)
+        # Frontend selectors intentionally use paths relative to ``web`` (for example
+        # ``src/routes/...``).  Running the node entrypoint from the repository root
+        # skips web/vite.config.ts, so Vitest loses its project test plugins as well.
+        # Preserve the allowlisted selector text while executing it in its declared
+        # frontend project root.
+        return CommandSpec(
+            "web-test",
+            [argv[0], "node_modules/vitest/vitest.mjs", *argv[2:]],
+            root / "web",
+        )
     if normalized == ["node", "挑战杯/build_research_flow_site.mjs"]:
         return CommandSpec("challenge-cup-build", argv, root)
     raise UnsupportedValidationCommand(command)
