@@ -26,6 +26,7 @@ from core.runtime_manager import evolution_store
 from core.web.app import create_app
 from core.web.control import CONTROL_TOKEN_HEADER, get_control_token
 from core.web.routes import evolution as evolution_routes
+from core.web.services.session import journal_bridge, list_cache as session_list_cache
 from core.web.services import (
     agent_mode_binding_service,
     agent_directory_service,
@@ -106,10 +107,8 @@ def isolate_evolution_live_state():
         session_service._SESSION_TURN_CONTROLS.clear()
     with session_service._SESSION_LIVE_OUTPUTS_LOCK:
         session_service._SESSION_LIVE_OUTPUTS.clear()
-    with session_service._SESSION_LIST_CACHE_LOCK:
-        session_service._SESSION_LIST_CACHE.clear()
-    with session_service._SESSION_CONVERSATION_EVENTS_CACHE_LOCK:
-        session_service._SESSION_CONVERSATION_EVENTS_CACHE.clear()
+    session_list_cache.invalidate_session_list_cache()
+    journal_bridge.invalidate_session_conversation_events_cache()
     clear_evolution_store()
     try:
         evolution_store._WORK_RUN_STORE.clear()
@@ -142,10 +141,8 @@ def isolate_evolution_live_state():
         session_service._SESSION_TURN_CONTROLS.clear()
     with session_service._SESSION_LIVE_OUTPUTS_LOCK:
         session_service._SESSION_LIVE_OUTPUTS.clear()
-    with session_service._SESSION_LIST_CACHE_LOCK:
-        session_service._SESSION_LIST_CACHE.clear()
-    with session_service._SESSION_CONVERSATION_EVENTS_CACHE_LOCK:
-        session_service._SESSION_CONVERSATION_EVENTS_CACHE.clear()
+    session_list_cache.invalidate_session_list_cache()
+    journal_bridge.invalidate_session_conversation_events_cache()
 
 def _read_first_sse_event(response):
     event_name = ""

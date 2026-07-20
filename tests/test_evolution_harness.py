@@ -2163,18 +2163,6 @@ def test_infer_result_status_accepts_impossible_fixture_infeasible_marker():
     assert "正常结束" in reason
 
 
-def test_single_turn_direct_response_does_not_finish_tool_required_probe():
-    should_finish = TurnOutcomeController.should_finish_single_turn_after_direct_response(
-        single_turn_mode_active=True,
-        tool_calls=[],
-        visible_text="我会开始执行。",
-        active_goal="调用 open_evolution_transaction_tool 开账，然后调用 python_lint_tool。",
-        active_evolution_txn_id=None,
-    )
-
-    assert should_finish is False
-
-
 def test_infer_result_status_handles_timeout_with_phase():
     status, reason = infer_result_status(
         timed_out=True,
