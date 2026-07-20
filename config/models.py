@@ -717,8 +717,8 @@ class AgentModesConfig(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     chat_enabled: bool = Field(default=True, description="是否启用 chat 模式")
-    self_evolution_enabled: bool = Field(default=True, description="是否启用 self_evolution 模式")
-    supervised_evolution_enabled: bool = Field(default=True, description="是否启用 supervised_evolution 模式")
+    self_evolution_enabled: bool = Field(default=False, description="是否启用 self_evolution 模式")
+    supervised_evolution_enabled: bool = Field(default=False, description="是否启用 supervised_evolution 模式")
     default_shell_mode: str = Field(default="chat", description="交互工作台默认模式")
     default_headless_mode: str = Field(default="self_evolution", description="无交互运行默认模式")
 
@@ -771,7 +771,7 @@ class AgentConfig(BaseModel):
         description="最大运行时间（秒），0 表示无限制"
     )
     auto_backup: bool = Field(
-        default=True,
+        default=False,
         description="是否启用自动备份"
     )
     backup_interval: int = Field(
@@ -1606,6 +1606,27 @@ class MemoryConfig(BaseModel):
         gt=0,
         description="最大记忆条目数"
     )
+    history_persistence: bool = Field(default=True, description="是否持久化会话历史")
+    semantic_memory_enabled: bool = Field(default=False, description="是否启用语义记忆")
+    llm_extraction_enabled: bool = Field(default=False, description="是否启用 LLM 记忆提取")
+    llm_summary_enabled: bool = Field(default=False, description="是否启用 LLM 记忆摘要")
+
+
+class MentalModelConfig(BaseModel):
+    """可信操作员配置控制的心智模型功能。"""
+
+    model_config = ConfigDict(extra="ignore")
+    enabled: bool = Field(default=False, description="是否启用心智模型")
+
+
+class SupervisedEvolutionFeatureConfig(BaseModel):
+    """可信操作员配置控制的监督进化功能族。"""
+
+    model_config = ConfigDict(extra="ignore")
+    enabled: bool = Field(default=False, description="是否启用监督进化")
+    mental_model_enabled: bool = Field(default=False, description="是否允许监督运行使用心智模型")
+    compression_enabled: bool = Field(default=False, description="是否允许监督运行使用上下文压缩")
+    memory_update_enabled: bool = Field(default=False, description="是否允许监督运行更新记忆")
 
 
 # ============================================================================
@@ -1905,7 +1926,7 @@ class PetConfig(BaseModel):
     """宠物系统主配置"""
     model_config = ConfigDict(extra="ignore")
 
-    enabled: bool = Field(default=True, description="是否启用宠物系统")
+    enabled: bool = Field(default=False, description="是否启用宠物系统")
     name: str = Field(default="虾宝", description="宠物名称")
     auto_save: bool = Field(default=True, description="自动保存")
     save_interval: int = Field(default=60, description="自动保存间隔(秒)")
@@ -2038,6 +2059,10 @@ class AppConfig(BaseModel):
     web_chat: WebChatConfig = Field(default_factory=WebChatConfig)
     context_compression: ContextCompressionConfig = Field(
         default_factory=ContextCompressionConfig
+    )
+    mental_model: MentalModelConfig = Field(default_factory=MentalModelConfig)
+    supervised_evolution: SupervisedEvolutionFeatureConfig = Field(
+        default_factory=SupervisedEvolutionFeatureConfig
     )
     tools: ToolConfig = Field(default_factory=ToolConfig)
     security: SecurityConfig = Field(default_factory=SecurityConfig)

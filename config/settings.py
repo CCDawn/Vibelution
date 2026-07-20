@@ -982,8 +982,6 @@ class ConfigLoader:
             f"{prefix}AGENT_EXPLORATION_MODE": "agent.exploration_mode",
             f"{prefix}AGENT_DEFAULT_MODE": "agent.default_mode",
             f"{prefix}AGENT_MODES_CHAT_ENABLED": "agent.modes.chat_enabled",
-            f"{prefix}AGENT_MODES_SELF_EVOLUTION_ENABLED": "agent.modes.self_evolution_enabled",
-            f"{prefix}AGENT_MODES_SUPERVISED_EVOLUTION_ENABLED": "agent.modes.supervised_evolution_enabled",
             f"{prefix}AGENT_MODES_DEFAULT_SHELL_MODE": "agent.modes.default_shell_mode",
             f"{prefix}AGENT_MODES_DEFAULT_HEADLESS_MODE": "agent.modes.default_headless_mode",
 
@@ -1334,8 +1332,27 @@ class ConfigLoader:
             展平后的配置字典（Pydantic 字段格式）
         """
         result: Dict[str, Any] = {}
+        protected_feature_paths = {
+            "mental_model.enabled",
+            "context_compression.enabled",
+            "pet.enabled",
+            "memory.semantic_memory_enabled",
+            "memory.llm_extraction_enabled",
+            "memory.llm_summary_enabled",
+            "supervised_evolution.enabled",
+            "supervised_evolution.mental_model_enabled",
+            "supervised_evolution.compression_enabled",
+            "supervised_evolution.memory_update_enabled",
+            "agent.modes.self_evolution_enabled",
+            "agent.modes.supervised_evolution_enabled",
+        }
         for key, value in kwargs.items():
             normalized_key = key.replace('__', '.')
+            if normalized_key in protected_feature_paths:
+                raise ValueError(
+                    f"{normalized_key} is operator-config-only and cannot be "
+                    "overridden at runtime"
+                )
             if '.' not in normalized_key and '_' in normalized_key:
                 raise ValueError(
                     f"Unsupported legacy config override '{key}'. "

@@ -587,7 +587,7 @@ def _self_child_log_path(run_id: str) -> str:
         char if char.isalnum() or char in {"-", "_", "."} else "_"
         for char in str(run_id or "").strip()
     ).strip("._-")
-    return f"agent/self_evolution_runs/{normalized or 'run'}.jsonl"
+    return f"runs/self_evolution/{normalized or 'run'}/timeline.jsonl"
 
 
 def ensure_self_evolution_agent_instances() -> list[dict[str, Any]]:

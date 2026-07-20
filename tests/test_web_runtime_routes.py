@@ -3073,7 +3073,7 @@ def test_runtime_scene_package_records_conversation_as_child_log(tmp_path, monke
     )
 
     assert payload["accepted"] is True
-    conversation_log = scene_dir / "conversations" / "session-demo.jsonl"
+    conversation_log = scene_dir / "sessions" / "session-demo" / "transcript.jsonl"
     assert conversation_log.exists()
     conversation_text = conversation_log.read_text(encoding="utf-8")
     assert sensitive_content not in conversation_text
@@ -3148,8 +3148,8 @@ def test_runtime_scene_package_records_conversation_as_child_log(tmp_path, monke
     assert detail["packageSummary"]["conversationLogCount"] == 1
     assert detail["packageSummary"]["agentLogCount"] == 2
     assert detail["timeline"][-1]["eventCode"] == "conversation.user_message"
-    assert detail["timeline"][-1]["rawRefs"] == [{"path": "conversations/session-demo.jsonl", "tail_lines": 80}]
-    assert detail["conversationLogs"][0]["path"] == "conversations/session-demo.jsonl"
+    assert detail["timeline"][-1]["rawRefs"] == [{"path": "sessions/session-demo/transcript.jsonl", "tail_lines": 80}]
+    assert detail["conversationLogs"][0]["path"] == "sessions/session-demo/transcript.jsonl"
 
 
 def test_runtime_scene_conversation_keeps_no_runtime_scene_behavior(tmp_path, monkeypatch):
@@ -3948,7 +3948,7 @@ def test_supervised_progress_records_child_log_into_runtime_scene(tmp_path, monk
         },
     )
 
-    child_log = scene_dir / "agent" / "supervised_runs" / "web-supervised-demo.jsonl"
+    child_log = scene_dir / "runs" / "supervised" / "web-supervised-demo" / "timeline.jsonl"
     assert child_log.exists()
     child_event = json.loads(child_log.read_text(encoding="utf-8").splitlines()[-1])
     assert child_event["event"] == "role_finish"
@@ -3963,7 +3963,7 @@ def test_supervised_progress_records_child_log_into_runtime_scene(tmp_path, monk
     ]
     event = event_rows[-1]
     assert event["event_code"] == "supervised_run.progress.role_finish"
-    assert event["raw_refs"] == [{"path": "agent/supervised_runs/web-supervised-demo.jsonl", "tail_lines": 80}]
+    assert event["raw_refs"] == [{"path": "runs/supervised/web-supervised-demo/timeline.jsonl", "tail_lines": 80}]
     assert "supervised_run.progress.role_finish" in (scene_dir / "timeline.jsonl").read_text(encoding="utf-8")
     assert "supervised_run.progress.role_finish" not in (scene_dir / "lifecycle.jsonl").read_text(encoding="utf-8")
 
@@ -4054,7 +4054,7 @@ def test_self_evolution_state_records_child_log_into_runtime_scene(tmp_path, mon
         clear_active=True,
     )
 
-    child_log = scene_dir / "agent" / "self_evolution_runs" / "web-self-demo.jsonl"
+    child_log = scene_dir / "runs" / "self_evolution" / "web-self-demo" / "timeline.jsonl"
     assert child_log.exists()
     child_event = json.loads(child_log.read_text(encoding="utf-8").splitlines()[-1])
     assert child_event["status"] == "done"
@@ -4069,7 +4069,7 @@ def test_self_evolution_state_records_child_log_into_runtime_scene(tmp_path, mon
     ]
     event = event_rows[-1]
     assert event["event_code"] == "self_evolution_run.state.changed"
-    assert event["raw_refs"] == [{"path": "agent/self_evolution_runs/web-self-demo.jsonl", "tail_lines": 80}]
+    assert event["raw_refs"] == [{"path": "runs/self_evolution/web-self-demo/timeline.jsonl", "tail_lines": 80}]
     assert "self_evolution_run.state.changed" in (scene_dir / "timeline.jsonl").read_text(encoding="utf-8")
     assert "self_evolution_run.state.changed" in (scene_dir / "lifecycle.jsonl").read_text(encoding="utf-8")
 
@@ -4118,7 +4118,7 @@ def test_self_evolution_control_paths_record_child_log_before_agent_turn(tmp_pat
     paused = self_evolution_control_service.request_pause_self_evolution_run(started["runId"])
 
     assert paused["status"] == "paused"
-    child_log = scene_dir / "agent" / "self_evolution_runs" / f"{started['runId']}.jsonl"
+    child_log = scene_dir / "runs" / "self_evolution" / started["runId"] / "timeline.jsonl"
     assert child_log.exists()
     child_events = [
         json.loads(line)
@@ -4134,7 +4134,7 @@ def test_self_evolution_control_paths_record_child_log_before_agent_turn(tmp_pat
     ]
     state_events = [event for event in event_rows if event["event_code"] == "self_evolution_run.state.changed"]
     assert state_events[-1]["raw_refs"] == [
-        {"path": f"agent/self_evolution_runs/{started['runId']}.jsonl", "tail_lines": 80}
+        {"path": f"runs/self_evolution/{started['runId']}/timeline.jsonl", "tail_lines": 80}
     ]
     assert state_events[-1]["fields"]["status"] == "paused"
     assert state_events[-1]["fields"]["clearActive"] is False

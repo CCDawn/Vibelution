@@ -68,6 +68,9 @@ from core.chat.skill_registry import build_skill_runtime_context, skill_descript
 from core.chat.slash_commands import SkillSlashCommand, parse_skill_slash_command
 from core.infrastructure import developer_sandbox
 from core.infrastructure.event_bus import EventNames, get_event_bus
+from core.infrastructure.feature_gate import (
+    resolve_feature_decision,
+)
 from core.llm.client import llm_status_context
 from core.llm.agent_runtime import (
     AgentLlmResolutionError,
@@ -13486,7 +13489,13 @@ def _run_session_turn(context: dict[str, Any]) -> None:
     if not isinstance(turn_control, SessionTurnControl):
         turn_control = _get_session_turn_control(session_id)
     turn_capture = SessionTurnCapture(session_id=session_id, turn_id=turn_id)
-    mental_model_enabled = _normalize_optional_bool(context.get("mental_model_enabled"))
+    mental_model_requested = _normalize_optional_bool(context.get("mental_model_enabled"))
+    mental_model_decision = resolve_feature_decision(
+        "mental_model",
+        config=get_config(),
+        requested=mental_model_requested,
+    )
+    mental_model_enabled = mental_model_decision.effective_enabled
     llm_slot = str(context.get("llm_slot") or SESSION_LLM_SLOT_DIALOGUE).strip() or SESSION_LLM_SLOT_DIALOGUE
     prepare_timings: dict[str, Any] = {}
     stage_started_at = _perf_counter()
@@ -17831,7 +17840,7 @@ def _conversation_turn_log_path(session_id: str, turn_id: str, file_name: str) -
     session_token = _safe_session_workspace_token(session_id)
     turn_token = _safe_session_workspace_token(turn_id or "turn")
     file_token = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(file_name or "trace_events.jsonl")).strip("._-")
-    return f"conversations/{session_token}/{turn_token}/{file_token or 'trace_events.jsonl'}"
+    return f"sessions/{session_token}/turns/{turn_token}/{file_token or 'trace_events.jsonl'}"
 
 
 def _record_session_turn_subpackage_event(
@@ -20718,9 +20727,11 @@ def _normalize_optional_bool(value: Any) -> bool | None:
 
 
 def _is_mental_model_enabled_for_turn(override: bool | None = None) -> bool:
-    if override is not None:
-        return bool(override)
-    return is_mental_model_enabled()
+    return resolve_feature_decision(
+        "mental_model",
+        config=get_config(),
+        requested=override,
+    ).effective_enabled
 
 
 def _has_meaningful_mental_snapshot(snapshot: dict[str, Any] | None) -> bool:

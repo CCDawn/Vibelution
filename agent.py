@@ -158,6 +158,7 @@ from core.llm.reasoning_extractor import (
     strip_think_tag_reasoning,
 )
 from core.infrastructure.mental_model import get_mental_model
+from core.infrastructure.feature_gate import resolve_feature_decision
 from core.mental_model_flags import is_mental_model_enabled
 
 # 导入宠物系统
@@ -799,8 +800,24 @@ class SelfEvolvingAgent:
 
         # 心智模型（元认知引擎 — 必须在 EventBus 之后初始化）
         self.mental_model = get_mental_model(workspace_root=self.workspace_path)
-        # 共享 LLM 给感知层（同一实例，不同提示词）
-        self.mental_model.set_shared_llm(self._get_llm_for_agent_slot(AGENT_LLM_SLOT_MENTAL_MODEL, disable_tools=True) or self.llm_with_tools)
+        mental_model_decision = resolve_feature_decision(
+            "mental_model",
+            config=self.config,
+        )
+        _record_agent_scene_event(
+            "startup",
+            "agent.feature.decision",
+            message="已解析心智模型可信配置。",
+            fields=mental_model_decision.log_fields(),
+        )
+        if mental_model_decision.effective_enabled:
+            self.mental_model.set_shared_llm(
+                self._get_llm_for_agent_slot(
+                    AGENT_LLM_SLOT_MENTAL_MODEL,
+                    disable_tools=True,
+                )
+                or self.llm_with_tools
+            )
 
         self._system_prompt_written = False
         self._last_runtime_state_memory = ""
@@ -831,7 +848,7 @@ class SelfEvolvingAgent:
         self._single_turn_mode_active: bool = False
         self._last_turn_metadata: Dict[str, Any] = {}
         self._turn_interrupt_checker = None
-        self._mental_model_enabled_override: Optional[bool] = _runtime_mental_model_override_from_env()
+        self._mental_model_enabled_override: Optional[bool] = None
         if self._mental_model_enabled_override is not None:
             _record_agent_scene_event(
                 "startup",
@@ -988,9 +1005,11 @@ class SelfEvolvingAgent:
 
     def is_mental_model_enabled_for_turn(self) -> bool:
         override = getattr(self, "_mental_model_enabled_override", None)
-        if override is not None:
-            return bool(override)
-        return is_mental_model_enabled()
+        return resolve_feature_decision(
+            "mental_model",
+            config=self.config,
+            requested=override,
+        ).effective_enabled
 
     def _init_model_discovery(self):
         """模型动态发现，返回 effective_max_token_limit"""
@@ -1485,6 +1504,19 @@ class SelfEvolvingAgent:
 
     def _init_token_compressor(self):
         """初始化 Token 压缩器"""
+        compression_decision = resolve_feature_decision(
+            "context_compression",
+            config=self.config,
+        )
+        _record_agent_scene_event(
+            "startup",
+            "agent.feature.decision",
+            message="已解析上下文压缩可信配置。",
+            fields=compression_decision.log_fields(),
+        )
+        if not compression_decision.effective_enabled:
+            self.token_compressor = None
+            return
         self.token_compressor = EnhancedTokenCompressor(
             token_budget=self._effective_max_token_limit,
             compression_llm=(
@@ -1506,7 +1538,10 @@ class SelfEvolvingAgent:
         ui = get_ui()
 
         # Guard: 压缩未启用
-        if not self.config.context_compression.enabled:
+        if self.token_compressor is None or not resolve_feature_decision(
+            "context_compression",
+            config=self.config,
+        ).effective_enabled:
             return messages, False
 
         # Guard: 消息太少

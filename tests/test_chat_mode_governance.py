@@ -22,7 +22,7 @@ def test_chat_turn_subpackage_log_path_is_session_and_turn_scoped():
         "trace_events.jsonl",
     )
 
-    assert path.startswith("conversations/session-demo-")
+    assert path.startswith("sessions/session-demo-")
     assert "/turn-demo-" in path
     assert path.endswith("/trace_events.jsonl")
 
@@ -48,7 +48,7 @@ def test_chat_turn_trace_event_writes_lifecycle_subpackage(monkeypatch):
     args, kwargs = recorded[0]
     assert args[:3] == ("conversation", "turn_trace_mental", "conversation.turn.trace.mental")
     assert kwargs["child_log_path"] == (
-        "conversations/session-live/session-live-20260526120522497070/trace_events.jsonl"
+        "sessions/session-live/turns/session-live-20260526120522497070/trace_events.jsonl"
     )
     assert kwargs["child_log_payload"]["kind"] == "mental"
     assert kwargs["child_log_payload"]["status"] == "completed"
@@ -73,7 +73,7 @@ def test_chat_turn_execution_registry_records_entry_type(monkeypatch):
 
     assert recorded
     _args, kwargs = recorded[0]
-    assert kwargs["child_log_path"] == "conversations/session-live/turn-1/execution_registry.jsonl"
+    assert kwargs["child_log_path"] == "sessions/session-live/turns/turn-1/execution_registry.jsonl"
     assert kwargs["child_log_payload"]["entry_type"] == "llm_turn"
     assert kwargs["child_log_payload"]["status"] == "running"
     assert kwargs["child_log_payload"]["details"] == {"turnIndex": 1}

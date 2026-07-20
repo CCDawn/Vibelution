@@ -2831,7 +2831,7 @@ def _record_worktree_scene_event(
 
 def _child_log_path(run_id: str) -> str:
     normalized = "".join(char if char.isalnum() or char in {"-", "_", "."} else "_" for char in str(run_id or ""))
-    return f"agent/supervised_worktree_runs/{normalized or 'run'}.jsonl"
+    return f"runs/supervised_worktree/{normalized or 'run'}/timeline.jsonl"
 
 
 def _snapshot_event_fields(snapshot: dict[str, Any]) -> dict[str, Any]:

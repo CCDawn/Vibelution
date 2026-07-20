@@ -7,6 +7,7 @@ from contextvars import ContextVar
 from typing import Any
 
 from config.public_config import load_public_config
+from core.infrastructure.feature_gate import resolve_feature_decision
 
 _MENTAL_MODEL_ENABLED_OVERRIDE: ContextVar[bool | None] = ContextVar(
     "mental_model_enabled_override",
@@ -35,10 +36,6 @@ def _coerce_bool(value: Any, default: bool = _DEFAULT_MENTAL_MODEL_ENABLED) -> b
 def is_mental_model_enabled(public_config: dict[str, Any] | None = None) -> bool:
     """Return whether the mental-model layer should be active."""
 
-    override = _MENTAL_MODEL_ENABLED_OVERRIDE.get()
-    if override is not None:
-        return bool(override)
-
     config = public_config
     if config is None:
         try:
@@ -46,20 +43,11 @@ def is_mental_model_enabled(public_config: dict[str, Any] | None = None) -> bool
         except Exception:
             config = {}
 
-    if not isinstance(config, dict):
-        return _DEFAULT_MENTAL_MODEL_ENABLED
-
-    section = config.get("mental_model")
-    if isinstance(section, dict) and "enabled" in section:
-        return _coerce_bool(section.get("enabled"))
-
-    agent_section = config.get("agent")
-    if isinstance(agent_section, dict):
-        nested = agent_section.get("mental_model")
-        if isinstance(nested, dict) and "enabled" in nested:
-            return _coerce_bool(nested.get("enabled"))
-
-    return _DEFAULT_MENTAL_MODEL_ENABLED
+    return resolve_feature_decision(
+        "mental_model",
+        config=config,
+        requested=_MENTAL_MODEL_ENABLED_OVERRIDE.get(),
+    ).effective_enabled
 
 
 @contextmanager
