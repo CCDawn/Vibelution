@@ -2291,6 +2291,11 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("onContextMenu={openAgentContextMenu}");
     expect(routeSource).toContain('import("./AgentContextMenu")');
     expect(routeSource).toContain("<AgentContextMenu");
+    expect(routeSource).toContain("const archiveAgentMutation = useMutation");
+    expect(routeSource).toContain('method: "DELETE"');
+    expect(routeSource).toContain("chatWorkspaceCache.afterAgentArchived()");
+    expect(routeSource).toContain("window.confirm(");
+    expect(routeSource).toContain("onArchive={handleArchiveAgent}");
     expect(routeSource).toContain("onCreateSession={handleCreateAgentSession}");
     expect(routeSource).toContain("onOpenConfig={handleOpenAgentConfig}");
     expect(routeSource).toContain("onOpenLatest={handleOpenAgentLatestSession}");
@@ -2301,6 +2306,9 @@ describe("ChatCodingRoute layout contract", () => {
     expect(agentContextMenuSource).toContain("打开最近会话");
     expect(agentContextMenuSource).toContain("新建会话");
     expect(agentContextMenuSource).toContain("打开 Agent 设置");
+    expect(agentContextMenuSource).toContain("安全归档");
+    expect(agentContextMenuSource).toContain("agentCanArchiveFromContextMenu");
+    expect(agentContextMenuSource).toContain("sessionContextMenuDanger");
     expect(agentContextMenuSource).not.toContain("Trash2");
     expect(agentContextMenuSource).not.toContain("Eraser");
   });

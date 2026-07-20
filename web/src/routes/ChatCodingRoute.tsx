@@ -1074,6 +1074,30 @@ export function ChatCodingRoute() {
     setEditingSessionTitle,
   });
 
+  const archiveAgentMutation = useMutation({
+    mutationFn: (payload: { agentId: string }) =>
+      fetchJson<AgentInstance>(`/api/agents/${encodeURIComponent(payload.agentId)}`, {
+        method: "DELETE",
+      }),
+    onSuccess: (agent) => {
+      setAgentContextMenu(null);
+      setSelectedAgentId((current) => (current === agent.agentId ? "" : current));
+      setSessionComposerErrors((current) => ({
+        ...current,
+        __sessions__: "",
+      }));
+    },
+    onError: (error) => {
+      setSessionComposerErrors((current) => ({
+        ...current,
+        __sessions__: describeError(error, t("loadFailed")),
+      }));
+    },
+    onSettled: () => {
+      void chatWorkspaceCache.afterAgentArchived();
+    },
+  });
+
   const {
     sessionReasoningEffortMutation,
     loadEarlierSessionMessagesMutation,
@@ -2271,6 +2295,27 @@ export function ChatCodingRoute() {
     }));
   }, [navigate]);
 
+  const handleArchiveAgent = useCallback((agent: AgentInstance) => {
+    const agentId = String(agent.agentId || "").trim();
+    if (!agentId || archiveAgentMutation.isPending) {
+      return;
+    }
+    const agentName = String(agent.displayName || agent.agentCode || agentId).trim();
+    const confirmed = window.confirm(
+      lang === "zh"
+        ? `确认安全归档 ${agentName}？这会将 Agent 移出可用列表及相关绑定，但保留会话、记忆、日志和工作区。`
+        : `Archive ${agentName}? This removes the Agent from active lists and bindings while keeping sessions, memory, logs, and workspace data.`,
+    );
+    if (!confirmed) {
+      return;
+    }
+    setSessionComposerErrors((current) => ({
+      ...current,
+      __sessions__: "",
+    }));
+    archiveAgentMutation.mutate({ agentId });
+  }, [archiveAgentMutation, lang]);
+
   const toggleFeaturePreset = useCallback((key: FeaturePresetKey) => {
     setFeaturePresetState((current) => ({
       ...current,
@@ -2299,6 +2344,11 @@ export function ChatCodingRoute() {
   const contextMenuClearHistoryVisible = Boolean(
     contextMenuSession?.agentId
     && isAgentRootSession(contextMenuSession)
+  );
+  const contextMenuAgentArchivePending = Boolean(
+    agentContextMenu
+    && archiveAgentMutation.isPending
+    && archiveAgentMutation.variables?.agentId === agentContextMenu.agent.agentId
   );
   const contextMenuDeleteDisabled = contextMenuDeletePending || contextMenuSessionIsBusy;
   const contextMenuAddToReviewDisabled = contextMenuAddToReviewPending || contextMenuSessionIsBusy;
@@ -2342,9 +2392,11 @@ export function ChatCodingRoute() {
           {agentContextMenu ? (
             <Suspense fallback={null}>
               <AgentContextMenu
+                archivePending={contextMenuAgentArchivePending}
                 createPending={createSessionMutation.isPending}
                 lang={lang}
                 state={agentContextMenu}
+                onArchive={handleArchiveAgent}
                 onCreateSession={handleCreateAgentSession}
                 onOpenConfig={handleOpenAgentConfig}
                 onOpenLatest={handleOpenAgentLatestSession}
