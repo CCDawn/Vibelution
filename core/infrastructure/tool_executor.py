@@ -1215,7 +1215,7 @@ class ToolExecutor:
             if (
                 normalized_tool == "cli_tool"
                 and profile == "supervised_evaluation"
-                and cls._is_supervised_evaluation_safe_cli(tool_args)
+                and cls._is_supervised_evaluation_cli_allowed(tool_args)
             ):
                 return None
             return (
@@ -1233,38 +1233,19 @@ class ToolExecutor:
         return None
 
     @classmethod
-    def _is_supervised_evaluation_safe_cli(cls, tool_args: dict) -> bool:
+    def _is_supervised_evaluation_cli_allowed(cls, tool_args: dict) -> bool:
         command = str((tool_args or {}).get("command") or "").strip()
         if not command:
             return False
         lowered = command.lower()
-        blocked_fragments = ("&&", "||", "|", ">", "<", "\n", "\r", "`", "$(")
-        if any(fragment in lowered for fragment in blocked_fragments):
-            return False
         blocked_patterns = (
-            r"\bgit\s+(?:commit|push|merge|reset|checkout|switch|branch|tag|rebase|cherry-pick)\b",
+            r"(?:^|\s)--pre(?:=|\s|$)",
+            r"\bgit\s+(?:add|commit|push|merge|reset|checkout|switch|branch|tag|rebase|cherry-pick|clean|restore)\b",
             r"\b(?:remove-item|del|erase|rmdir)\b",
             r"(^|\s)rm\s+",
             r"\btrigger_self_restart_tool\b",
         )
-        if any(re.search(pattern, lowered) for pattern in blocked_patterns):
-            return False
-        validation_command = bool(
-            re.match(
-                r'^(?:&\s*)?(?:(?:"[^"]*(?:python|py)(?:\.exe)?")|(?:[^\s"]*(?:python|py)(?:\.exe)?))\s+-m\s+pytest(?:\s|$)',
-                command,
-                flags=re.IGNORECASE,
-            )
-            or re.match(r"^pytest(?:\.exe)?(?:\s|$)", command, flags=re.IGNORECASE)
-        )
-        read_only_command = bool(
-            (
-                re.match(r"^(?:rg|rg\.exe)(?:\s|$)", command, flags=re.IGNORECASE)
-                and not re.search(r"(?:^|\s)--pre(?:=|\s|$)", command, flags=re.IGNORECASE)
-            )
-            or re.match(r"^get-content(?:\s|$)", command, flags=re.IGNORECASE)
-        )
-        return validation_command or read_only_command
+        return not any(re.search(pattern, lowered) for pattern in blocked_patterns)
 
     def _check_canonical_execution_authorization(self, tool_name: str, tool_call_id: str, tool_args: dict):
         if str(tool_name or "").strip() not in self._tool_map:

@@ -16,7 +16,7 @@ import subprocess
 import pytest
 import threading
 import time
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 from pathlib import Path
 from core.infrastructure.event_bus import EventNames, get_event_bus
 from core.pet_system import get_pet_system
@@ -780,10 +780,15 @@ class TestToolExecutorExecute:
         "command",
         [
             'rg --line-number "terminal_bench_agent_judged" core/evaluation tests -g "*.py"',
+            'rg -n "terminal_bench|adapter" core/evaluation/dataset_registry.py',
             'Get-Content -LiteralPath "core/evaluation/dataset_registry.py" -TotalCount 80',
+            'Get-Content core/evaluation/dataset_registry.py | Select-Object -First 20',
+            'rg "dataset" core > result.txt',
+            'python -c "from pathlib import Path; print(Path.cwd())"',
+            "git status --short",
         ],
     )
-    def test_supervised_evaluation_runtime_goal_allows_bounded_read_only_cli(self, executor, command):
+    def test_supervised_evaluation_runtime_goal_allows_sandboxed_cli(self, executor, command):
         session = reset_session_state()
         session.set_runtime_goal_packet(
             SimpleNamespace(
@@ -811,13 +816,11 @@ class TestToolExecutorExecute:
     @pytest.mark.parametrize(
         "command",
         [
-            'Get-Content core/evaluation/dataset_registry.py | Select-Object -First 20',
-            'rg "dataset" core > result.txt',
             'rg --pre "python malicious.py" "dataset" core',
             "Remove-Item -LiteralPath core/evaluation/dataset_registry.py",
         ],
     )
-    def test_supervised_evaluation_runtime_goal_blocks_mutating_or_chained_cli(self, executor, command):
+    def test_supervised_evaluation_runtime_goal_blocks_explicitly_dangerous_cli(self, executor, command):
         session = reset_session_state()
         session.set_runtime_goal_packet(
             SimpleNamespace(
@@ -1348,22 +1351,31 @@ class TestToolExecutorTimeout:
         assert process.terminated
         assert process.communicate_calls >= 2
 
-    def test_registered_cli_tool_forwards_cancel_checker_to_shell(self, executor, monkeypatch):
+    def test_registered_cli_tool_routes_through_codex_sandbox(self, executor, monkeypatch, tmp_path):
         captured = {}
 
-        def fake_execute_shell_command(command, timeout=60, cwd=None, check_safety=True, _cancel_checker=None):
+        def fake_execute_codex_sandbox_command(command, timeout=60, cwd=None, _cancel_checker=None):
             captured["command"] = command
+            captured["timeout"] = timeout
+            captured["cwd"] = cwd
             captured["checker"] = _cancel_checker
             return "ok"
 
-        monkeypatch.setattr(shell_tools, "execute_shell_command", fake_execute_shell_command)
+        fake_module = ModuleType("core.infrastructure.codex_cli_sandbox")
+        fake_module.execute_codex_sandbox_command = fake_execute_codex_sandbox_command
+        monkeypatch.setitem(sys.modules, "core.infrastructure.codex_cli_sandbox", fake_module)
         executor.set_cancel_checker(lambda: "")
 
-        result, action = executor.execute("cli_tool", {"command": "echo ok"})
+        result, action = executor.execute(
+            "cli_tool",
+            {"command": "echo ok", "timeout": 45, "cwd": str(tmp_path)},
+        )
 
         assert action is None
         assert result == "ok"
         assert captured["command"] == "echo ok"
+        assert captured["timeout"] == 45
+        assert captured["cwd"] == str(tmp_path)
         assert callable(captured["checker"])
 
     def test_cli_tool_schema_hides_internal_cancel_checker(self):
@@ -1502,7 +1514,19 @@ class TestToolExecutorErrorHandling:
         assert "file_path 需要 str" in str(result)
         assert "示例：read_file_tool" in str(result)
 
-    def test_cli_tool_accepts_cwd_and_truncates_output(self, executor, tmp_path):
+    def test_cli_tool_accepts_cwd_and_truncates_output(self, executor, tmp_path, monkeypatch):
+        sandbox_module = ModuleType("core.infrastructure.codex_cli_sandbox")
+
+        def fake_execute_codex_sandbox_command(command="", timeout=60, cwd=None, _cancel_checker=None):
+            assert cwd == str(tmp_path)
+            return "x" * 80
+
+        sandbox_module.execute_codex_sandbox_command = fake_execute_codex_sandbox_command
+        monkeypatch.setitem(
+            sys.modules,
+            "core.infrastructure.codex_cli_sandbox",
+            sandbox_module,
+        )
         marker = tmp_path / "marker.txt"
         marker.write_text("ok", encoding="utf-8")
 
