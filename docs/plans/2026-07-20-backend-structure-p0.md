@@ -1,7 +1,7 @@
 # Backend Structure P0 Plan
 
 Date: 2026-07-20
-Status: session_stage2_closed / overall_in_progress
+Status: session_stage2_closed / workflow_stage3_closed / p0_remaining_optional
 Owner lane: backend structure / web services
 Related: frontend bundle+claim phase (closed); `docs/agents/conversation-flow-map.md`; backend structure review (session)
 
@@ -23,6 +23,7 @@ Related: frontend bundle+claim phase (closed); `docs/agents/conversation-flow-ma
 | 2026-07-20 | 3.3 | Workflow: `source_collection/runs.py` (start run / search execute+background / summaries) |
 | 2026-07-20 | 3.4–3.5 | Workflow: `source_collection/stages.py` + `storage.py` (stage tasks + open storage) |
 | 2026-07-20 | 3.6–3.7 | Workflow: `experiment.py` + `research_loop.py` public entry packs |
+| 2026-07-20 | 3.8 | **Workflow Stage 3 closed** — product-surface claim packs done; facade slim / knowledge mega APIs deferred |
 
 ### Session Stage 2 closeout (2026-07-20)
 
@@ -47,10 +48,39 @@ Related: frontend bundle+claim phase (closed); `docs/agents/conversation-flow-ma
 2. SSE publish / stream subscriber pack still on facade.
 3. Stop/control, inbox wake, agent-runtime helpers still on facade.
 4. Full “facade = re-exports only” (Stage 2.9 original ideal) → later maintenance track.
-5. Stage 3 `team_workflow_orchestration_service` deep split — **next P0 major**.
+5. Stage 3 `team_workflow_orchestration_service` deep split — **closed** (see Stage 3 closeout below).
 
 **Version impact:** none (structure only).
 **Launcher refresh:** not needed for docs/structure closeout.
+
+### Workflow Stage 3 closeout (2026-07-20)
+
+**Exit met**
+
+- Product-surface claim packs under `core/web/services/team_workflow/`:
+  - `orchestration_core`, `source_collection/{candidates,runs,stages,storage}`, `experiment`, `research_loop`
+  - plus pre-existing pure helpers (`source_collection_*`, `research_memory_context`)
+- Public imports stable via `team_workflow_orchestration_service` re-exports.
+- Focused structure pack tests green; related orchestration service subsets green at each pack gate.
+- No intentional REST path / event contract change.
+
+**Measured (approx.)**
+
+| Surface | ~LOC |
+|---------|------|
+| Stage 3 vertical entry packs (new) | ~3.9k |
+| Pre-existing helper modules | ~1.9k |
+| Facade remainder | ~20.7k (was ~24.3k at Stage 3 start) |
+
+**Deferred (not blocking Stage 3 exit)**
+
+1. Full facade slim to re-exports only.
+2. Optional `knowledge.py` for graph/steward/coordination mega APIs.
+3. Moving private `_execute_*` / materialize helpers into packs.
+4. Stage 4 secondary gods (agent_directory / team_service) maps-only or later.
+5. Stage 5 hardening / quality-gate full suite / P0 completion note if release needs it.
+
+**Version impact:** none · **Launcher refresh:** not needed
 
 ## 1. Problem Statement
 
@@ -58,7 +88,7 @@ Backend directories look modular (`core/web/routes`, `core/chat`, `core/llm`, �
 
 | File | ~LOC | Role |
 |------|------|------|
-| `core/web/services/team_workflow_orchestration_service.py` | ~22.9k | Research / source-collection / experiment / loop orchestration |
+| `core/web/services/team_workflow_orchestration_service.py` | ~20.7k facade + ~5.8k `team_workflow/*` packs (Stage 3 closed) | Research / SC / experiment / loop; public entry packs claimable |
 | `core/web/services/session_service.py` | ~19.2k facade + ~5.5k `session/*` slices (Stage 2 closed) | Session hot path claim-split; remainder is projection/SSE/stop/helpers |
 | `core/web/services/agent_directory_service.py` | ~7.1k | Agent directory / binding surface |
 | `core/web/services/team_service.py` | ~5.7k | Team CRUD / membership / canvas-adjacent |

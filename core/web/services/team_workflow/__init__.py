@@ -1,6 +1,6 @@
 """Team workflow internal packs (research / SC / experiment / loop).
 
-Stage 3 claim packs (partial):
+Stage 3 claim packs (closed for product-surface entrypoints):
 
 - ``orchestration_core`` — get/ensure orchestration document
 - ``source_collection.candidates`` — candidate register/import/extract/list

@@ -22,10 +22,9 @@ Align language with frontend claim map: `web/src/routes/teams/README.md`.
 | Research memory context packing | `research_memory_context.py` | chat stream capture |
 | Candidates register/import/extract/list | `source_collection/candidates.py` | pet system |
 | SC runs / search / background | `source_collection/runs.py` | session list cache, stage writeback |
-| SC storage open targets | `source_collection/storage.py` (planned) | supervised evolution |
 | Experiment plan/smoke/full-run APIs | `experiment.py` | session submit |
 | Research loop / stage round | `research_loop.py` | CLI terminal |
-| Knowledge ingestion / graph / coordination | facade + planned `knowledge.py` | launcher daemon |
+| Knowledge graph / coordination mega APIs | facade remainder (optional later pack) | launcher daemon |
 | Public HTTP-facing API surface | `../team_workflow_orchestration_service.py` (facade) | dumping new mega-functions into facade |
 
 ## Product surface ↔ packs
@@ -33,7 +32,7 @@ Align language with frontend claim map: `web/src/routes/teams/README.md`.
 | Product / frontend language | Backend home |
 |-----------------------------|--------------|
 | ensure/get orchestration | `orchestration_core.py` |
-| Candidates / quality entry (register/import/extract/list) | `source_collection/candidates.py` |
+| Candidates register/import/extract/list | `source_collection/candidates.py` |
 | SC runs / search | `source_collection/runs.py` |
 | Stage agents / writeback | `source_collection/stages.py` + pure helpers in `source_collection_stage_tasks.py` |
 | Storage open | `source_collection/storage.py` |
@@ -48,20 +47,29 @@ Align language with frontend claim map: `web/src/routes/teams/README.md`.
 4. Prefer vertical packs (SC / experiment / loop) over a single `helpers.py`.
 5. When moving a public function, re-export it from the facade in the same change.
 
-## Extraction progress
+## Extraction progress (Stage 3 closed)
 
-| Pack | Status | Notes |
-|------|--------|--------|
-| Map README | done | this file |
-| Pre-existing helpers | done | `source_collection_*`, `research_memory_context` |
-| `orchestration_core.py` | done | get/ensure entrypoints (late-bound facade) |
-| `source_collection/candidates.py` | done | register/import/extract/list/validate entrypoints |
-| `source_collection/runs.py` | done | start run, execute/background search, work-run summary, SC summary |
-| `source_collection/stages.py` | done | seed context, start/writeback stage session task, get context, post-turn reconcile |
-| `source_collection/storage.py` | done | open storage target |
-| `experiment.py` | done | plan/status/methods/smoke/full-run + knowledge ingestion hooks |
-| `research_loop.py` | done | stage round status/start + coordination/memory retries |
-| knowledge graph/coordination mega APIs | partial / facade | further cuts optional |
+| Pack | ~LOC | Role |
+|------|------|------|
+| `orchestration_core.py` | ~64 | get/ensure orchestration |
+| `source_collection/candidates.py` | ~591 | register/import/extract/list/validate |
+| `source_collection/runs.py` | ~556 | start run / search / summaries |
+| `source_collection/stages.py` | ~1052 | stage session task lifecycle |
+| `source_collection/storage.py` | ~67 | open storage target |
+| `experiment.py` | ~1148 | plan/smoke/full-run entrypoints |
+| `research_loop.py` | ~374 | stage round status/start/retry |
+| Pre-existing helpers | ~1.9k | common/projection/context/stage_tasks/memory |
+| **Stage 3 claim packs (new+vertical)** | **~3.9k** | product-surface entrypoints |
+| Facade remainder | ~20.7k | private helpers, knowledge graph, coordination |
+
+**Stage 3 exit (met):** product-surface claim packs cover SC + experiment + research loop; public imports stable via facade re-exports; structure pack tests green.
+
+**Deferred (not Stage 3 blockers):**
+
+1. Full facade slim to re-exports only.
+2. Dedicated `knowledge.py` for graph/steward/coordination mega APIs.
+3. Moving private `_execute_*` / materialize helpers into packs.
+4. Stage 4 secondary gods (agent_directory / team_service) — maps-only optional.
 
 ## Related
 
