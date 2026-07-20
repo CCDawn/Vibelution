@@ -2737,6 +2737,20 @@ def get_session_detail(
         transcript_scope=transcript_scope,
     )
 
+    _ensure_agent_directory_conversation_materialized(normalized_session_id, source="get_session_detail")
+    agent_by_id = _agent_lookup_for_conversations()
+    payload = load_chat_state(PROJECT_ROOT)
+    if _find_conversation_entry(payload, normalized_session_id) is None:
+        fallback = _agent_directory_session_stub_for_id(normalized_session_id, agent_by_id=agent_by_id)
+        if fallback is None:
+            return None
+        return _build_session_detail(
+            fallback,
+            message_limit=message_limit,
+            before_message_index=before_message_index,
+            transcript_scope=transcript_scope,
+        )
+
     with _RUNNING_SESSIONS_LOCK:
         active_turn_id = str(_SESSION_ACTIVE_TURN_IDS.get(normalized_session_id) or "").strip()
         session_running = normalized_session_id in _RUNNING_SESSION_IDS
@@ -2745,8 +2759,6 @@ def get_session_detail(
         active_turn_id=active_turn_id if session_running else "",
         reason="detail_loaded_after_restart",
     )
-    _ensure_agent_directory_conversation_materialized(normalized_session_id, source="get_session_detail")
-    agent_by_id = _agent_lookup_for_conversations()
     payload = load_chat_state(PROJECT_ROOT)
     target = _load_conversation_detail_target(
         normalized_session_id,
@@ -2758,14 +2770,6 @@ def get_session_detail(
     if target is not None:
         return _build_session_detail(
             target,
-            message_limit=message_limit,
-            before_message_index=before_message_index,
-            transcript_scope=transcript_scope,
-        )
-    fallback = _agent_directory_session_stub_for_id(normalized_session_id, agent_by_id=agent_by_id)
-    if fallback is not None:
-        return _build_session_detail(
-            fallback,
             message_limit=message_limit,
             before_message_index=before_message_index,
             transcript_scope=transcript_scope,
@@ -5723,6 +5727,590 @@ def _agent_directory_conversation_record(agent: dict[str, Any], *, session_id: s
     return conversation
 
 
+def _agent_session_conversation_ids(
+    conversations: list[Any],
+    *,
+    agent_id: str,
+    direct_session_id: str = "",
+) -> list[str]:
+    normalized_agent_id = str(agent_id or "").strip()
+    normalized_direct_session_id = str(direct_session_id or "").strip()
+    selected: set[str] = {normalized_direct_session_id} if normalized_direct_session_id else set()
+    ordered_ids: list[str] = []
+    for raw in conversations:
+        if not isinstance(raw, dict):
+            continue
+        session_id = str(raw.get("conversation_id") or "").strip()
+        raw_agent_id = str(raw.get("agent_id") or raw.get("agentId") or "").strip()
+        if session_id and normalized_agent_id and raw_agent_id == normalized_agent_id:
+            selected.add(session_id)
+    changed = True
+    while changed:
+        changed = False
+        for raw in conversations:
+            if not isinstance(raw, dict):
+                continue
+            session_id = str(raw.get("conversation_id") or "").strip()
+            if not session_id or session_id in selected:
+                continue
+            parent_id = str(raw.get("parent_session_id") or raw.get("parentSessionId") or "").strip()
+            root_id = str(raw.get("root_session_id") or raw.get("rootSessionId") or "").strip()
+            if parent_id in selected or root_id in selected:
+                selected.add(session_id)
+                changed = True
+    for raw in conversations:
+        if not isinstance(raw, dict):
+            continue
+        session_id = str(raw.get("conversation_id") or "").strip()
+        if session_id and session_id in selected and session_id not in ordered_ids:
+            ordered_ids.append(session_id)
+    return ordered_ids
+
+
+def _record_agent_session_lifecycle_event(
+    phase: str,
+    event_code: str,
+    *,
+    fields: dict[str, Any],
+    outcome: str = "succeeded",
+    level: str = "info",
+) -> None:
+    try:
+        record_runtime_scene_event(
+            "conversation",
+            phase,
+            event_code,
+            outcome=outcome,
+            level=level,
+            fields=fields,
+            lifecycle=True,
+        )
+    except Exception:
+        return
+
+
+def _agent_session_lifecycle_restore_token(
+    payload: dict[str, Any],
+    *,
+    agent_id: str,
+    session_ids: list[str],
+) -> dict[str, Any]:
+    selected = set(session_ids)
+    previous_conversations = [
+        {
+            "index": index,
+            "conversation": copy.deepcopy(raw),
+        }
+        for index, raw in enumerate(list(payload.get("conversations") or []))
+        if isinstance(raw, dict)
+        and str(raw.get("conversation_id") or "").strip() in selected
+    ]
+    return {
+        "agentId": str(agent_id or "").strip(),
+        "sessionIds": list(session_ids),
+        "previousConversations": previous_conversations,
+        "previousActiveConversationId": str(payload.get("active_conversation_id") or "").strip(),
+        "previousUpdatedAt": str(payload.get("updated_at") or "").strip(),
+        "previousVersion": payload.get("version"),
+        "createdReplacementSessionId": "",
+        "workspaceMoves": [],
+    }
+
+
+def _replacement_session_after_agent_session_removal(
+    payload: dict[str, Any],
+    *,
+    removed_session_ids: set[str],
+    timestamp: str,
+    preserve_removed: bool = False,
+) -> str:
+    current_active_id = str(payload.get("active_conversation_id") or "").strip()
+    remaining = [
+        raw
+        for raw in list(payload.get("conversations") or [])
+        if isinstance(raw, dict)
+        and str(raw.get("conversation_id") or "").strip() not in removed_session_ids
+    ]
+    remaining_ids = {
+        str(raw.get("conversation_id") or "").strip()
+        for raw in remaining
+        if str(raw.get("conversation_id") or "").strip()
+    }
+    if current_active_id and current_active_id in remaining_ids:
+        return current_active_id
+    if remaining:
+        return str(
+            max(
+                remaining,
+                key=lambda raw: _timestamp_sort_key(raw.get("updated_at") or raw.get("updatedAt") or ""),
+            ).get("conversation_id")
+            or ""
+        ).strip()
+    replacement_id = _new_conversation_id(removed_session_ids)
+    replacement = _make_empty_conversation(
+        replacement_id,
+        title=text_for(get_web_language(), zh="新会话", en="New session"),
+        timestamp=timestamp,
+    )
+    payload["conversations"] = (
+        list(payload.get("conversations") or []) + [replacement]
+        if preserve_removed
+        else [replacement]
+    )
+    return replacement_id
+
+
+def _restore_agent_session_lifecycle_state(restore_token: dict[str, Any]) -> bool:
+    token = restore_token if isinstance(restore_token, dict) else {}
+    session_ids = {
+        str(item or "").strip()
+        for item in list(token.get("sessionIds") or [])
+        if str(item or "").strip()
+    }
+    if not session_ids:
+        return False
+    with _CHAT_STATE_LOCK, chat_state_transaction(PROJECT_ROOT):
+        payload = load_chat_state(PROJECT_ROOT)
+        conversations = [
+            raw
+            for raw in list(payload.get("conversations") or [])
+            if isinstance(raw, dict)
+            and str(raw.get("conversation_id") or "").strip() not in session_ids
+        ]
+        replacement_id = str(token.get("createdReplacementSessionId") or "").strip()
+        if replacement_id:
+            conversations = [
+                raw
+                for raw in conversations
+                if str(raw.get("conversation_id") or "").strip() != replacement_id
+            ]
+        previous = list(token.get("previousConversations") or [])
+        for item in sorted(
+            (item for item in previous if isinstance(item, dict)),
+            key=lambda item: int(item.get("index") or 0),
+        ):
+            raw = item.get("conversation")
+            if not isinstance(raw, dict):
+                continue
+            index = max(0, min(int(item.get("index") or 0), len(conversations)))
+            conversations.insert(index, copy.deepcopy(raw))
+        payload["conversations"] = conversations
+        payload["active_conversation_id"] = str(token.get("previousActiveConversationId") or "").strip()
+        previous_updated_at = str(token.get("previousUpdatedAt") or "").strip()
+        payload["updated_at"] = previous_updated_at or _now_timestamp()
+        previous_version = token.get("previousVersion")
+        payload["version"] = previous_version if isinstance(previous_version, int) else int(
+            payload.get("version") or CHAT_STATE_VERSION
+        )
+        save_chat_state(PROJECT_ROOT, payload)
+    _invalidate_session_list_cache()
+    return True
+
+
+def archive_agent_sessions(
+    agent_id: str,
+    *,
+    direct_session_id: str = "",
+    include_restore_token: bool = False,
+) -> dict[str, Any]:
+    """Seal every Agent-owned session as hidden read-only history."""
+
+    normalized_agent_id = str(agent_id or "").strip()
+    normalized_direct_session_id = str(direct_session_id or "").strip()
+    if not normalized_agent_id:
+        raise SessionValidationError("Agent id is required to archive sessions.")
+    timestamp = _now_timestamp()
+    restore_token: dict[str, Any] | None = None
+    session_ids: list[str] = []
+    child_count = 0
+    direct_count = 0
+    with _CHAT_STATE_LOCK, chat_state_transaction(PROJECT_ROOT):
+        payload = load_chat_state(PROJECT_ROOT)
+        conversations = payload.get("conversations")
+        if not isinstance(conversations, list):
+            conversations = []
+            payload["conversations"] = conversations
+        session_ids = _agent_session_conversation_ids(
+            conversations,
+            agent_id=normalized_agent_id,
+            direct_session_id=normalized_direct_session_id,
+        )
+        selected = set(session_ids)
+        for raw in conversations:
+            if not isinstance(raw, dict):
+                continue
+            session_id = str(raw.get("conversation_id") or "").strip()
+            if session_id not in selected:
+                continue
+            normalized = _normalize_conversation(
+                raw,
+                agent_by_id=_agent_lookup_for_conversations(),
+                ensure_workspace=False,
+                lightweight=True,
+            ) or {"id": session_id}
+            phase = _conversation_phase(session_id, normalized)
+            if phase in {"running", "stopping"}:
+                raise SessionBusyError(
+                    text_for(
+                        get_web_language(),
+                        zh=f"会话 {session_id} 仍在运行或停止中，暂时不能归档 Agent。",
+                        en=f"Session {session_id} is still running or stopping; the Agent cannot be archived yet.",
+                    )
+                )
+        restore_token = _agent_session_lifecycle_restore_token(
+            payload,
+            agent_id=normalized_agent_id,
+            session_ids=session_ids,
+        )
+        for raw in conversations:
+            if not isinstance(raw, dict):
+                continue
+            session_id = str(raw.get("conversation_id") or "").strip()
+            if session_id not in selected:
+                continue
+            session_kind = _normalize_session_kind(raw.get("session_kind") or raw.get("sessionKind"))
+            child_count += int(session_kind == "child")
+            direct_count += int(session_id == normalized_direct_session_id)
+            archive_state = {
+                "status": "archived",
+                "source": "agent_archive",
+                "agentId": normalized_agent_id,
+                "archivedAt": timestamp,
+            }
+            raw["archive_state"] = archive_state
+            raw["archiveState"] = archive_state
+            raw["read_only"] = True
+            raw["readOnly"] = True
+            raw["hidden_from_index"] = True
+            raw["hiddenFromIndex"] = True
+            raw["conversation_index_kind"] = agent_directory_service.CONVERSATION_INDEX_KIND_HIDDEN
+            raw["conversationIndexKind"] = agent_directory_service.CONVERSATION_INDEX_KIND_HIDDEN
+            raw["conversation_index_visibility"] = agent_directory_service.CONVERSATION_INDEX_VISIBILITY_HIDDEN
+            raw["conversationIndexVisibility"] = agent_directory_service.CONVERSATION_INDEX_VISIBILITY_HIDDEN
+            raw["updated_at"] = timestamp
+        active_id = str(payload.get("active_conversation_id") or "").strip()
+        if active_id in selected:
+            replacement_id = _replacement_session_after_agent_session_removal(
+                payload,
+                removed_session_ids=selected,
+                timestamp=timestamp,
+                preserve_removed=True,
+            )
+            payload["active_conversation_id"] = replacement_id
+            if restore_token is not None and replacement_id not in {
+                str(raw.get("conversation_id") or "").strip()
+                for raw in conversations
+                if isinstance(raw, dict)
+            }:
+                restore_token["createdReplacementSessionId"] = replacement_id
+        payload["version"] = int(payload.get("version") or CHAT_STATE_VERSION)
+        payload["updated_at"] = timestamp
+        save_chat_state(PROJECT_ROOT, payload)
+    _invalidate_session_list_cache()
+    result = {
+        "status": "archived",
+        "agentId": normalized_agent_id,
+        "archivedCount": len(session_ids),
+        "directSessionCount": direct_count,
+        "childSessionCount": child_count,
+        "sessionIds": session_ids,
+        "readOnly": True,
+        "historyRetention": "sealed",
+    }
+    if include_restore_token and restore_token is not None:
+        result["restoreToken"] = restore_token
+    _record_agent_session_lifecycle_event(
+        "agent_archive",
+        "conversation.agent_sessions.archived",
+        fields={
+            "agentId": normalized_agent_id,
+            "archivedSessionCount": len(session_ids),
+            "directSessionCount": direct_count,
+            "childSessionCount": child_count,
+            "sessionIds": session_ids[:20],
+        },
+    )
+    return result
+
+
+def restore_agent_sessions_archive(restore_token: dict[str, Any] | None) -> dict[str, Any]:
+    token = restore_token if isinstance(restore_token, dict) else {}
+    changed = _restore_agent_session_lifecycle_state(token)
+    return {
+        "status": "restored" if changed else "unchanged",
+        "changed": changed,
+        "agentId": str(token.get("agentId") or "").strip(),
+        "sessionIds": list(token.get("sessionIds") or []),
+    }
+
+
+def _agent_session_workspace_roots() -> list[Path]:
+    roots: list[Path] = []
+    for candidate in (
+        developer_sandbox.sandboxed_workspace_path(PROJECT_ROOT, "sessions"),
+        developer_sandbox.formal_workspace_path(PROJECT_ROOT, "sessions"),
+    ):
+        resolved = candidate.resolve()
+        if resolved not in roots:
+            roots.append(resolved)
+    return roots
+
+
+def _agent_session_purge_staging_root(
+    sessions_root: Path,
+    *,
+    agent_id: str,
+    nonce: str,
+) -> Path:
+    token = _safe_session_workspace_token(agent_id)
+    staging_root = (sessions_root / f".agent-purge-{token}-{nonce}").resolve()
+    if not staging_root.is_relative_to(sessions_root):
+        raise SessionValidationError(f"Invalid Agent session purge staging path: {staging_root}")
+    return staging_root
+
+
+def stage_agent_session_purge(
+    agent_id: str,
+    *,
+    direct_session_id: str = "",
+) -> dict[str, Any]:
+    """Remove Agent-owned session state and return the token required to finish or roll back."""
+
+    normalized_agent_id = str(agent_id or "").strip()
+    normalized_direct_session_id = str(direct_session_id or "").strip()
+    if not normalized_agent_id:
+        raise SessionValidationError("Agent id is required to purge sessions.")
+    timestamp = _now_timestamp()
+    restore_token: dict[str, Any] | None = None
+    session_ids: list[str] = []
+    with _CHAT_STATE_LOCK, chat_state_transaction(PROJECT_ROOT):
+        payload = load_chat_state(PROJECT_ROOT)
+        conversations = payload.get("conversations")
+        if not isinstance(conversations, list):
+            conversations = []
+            payload["conversations"] = conversations
+        session_ids = _agent_session_conversation_ids(
+            conversations,
+            agent_id=normalized_agent_id,
+            direct_session_id=normalized_direct_session_id,
+        )
+        selected = set(session_ids)
+        for raw in conversations:
+            if not isinstance(raw, dict):
+                continue
+            session_id = str(raw.get("conversation_id") or "").strip()
+            if session_id not in selected:
+                continue
+            normalized = _normalize_conversation(
+                raw,
+                agent_by_id=_agent_lookup_for_conversations(),
+                ensure_workspace=False,
+                lightweight=True,
+            ) or {"id": session_id}
+            phase = _conversation_phase(session_id, normalized)
+            if phase in {"running", "stopping"}:
+                raise SessionBusyError(
+                    text_for(
+                        get_web_language(),
+                        zh=f"会话 {session_id} 仍在运行或停止中，暂时不能彻底删除 Agent。",
+                        en=f"Session {session_id} is still running or stopping; the Agent cannot be purged yet.",
+                    )
+                )
+        restore_token = _agent_session_lifecycle_restore_token(
+            payload,
+            agent_id=normalized_agent_id,
+            session_ids=session_ids,
+        )
+        payload["conversations"] = [
+            raw
+            for raw in conversations
+            if not isinstance(raw, dict)
+            or str(raw.get("conversation_id") or "").strip() not in selected
+        ]
+        if str(payload.get("active_conversation_id") or "").strip() in selected:
+            existing_session_ids = {
+                str(raw.get("conversation_id") or "").strip()
+                for raw in conversations
+                if isinstance(raw, dict)
+            }
+            replacement_id = _replacement_session_after_agent_session_removal(
+                payload,
+                removed_session_ids=selected,
+                timestamp=timestamp,
+            )
+            payload["active_conversation_id"] = replacement_id
+            if restore_token is not None and replacement_id not in existing_session_ids:
+                restore_token["createdReplacementSessionId"] = replacement_id
+        payload["version"] = int(payload.get("version") or CHAT_STATE_VERSION)
+        payload["updated_at"] = timestamp
+        save_chat_state(PROJECT_ROOT, payload)
+
+    staging_roots: list[Path] = []
+    workspace_moves: list[dict[str, str]] = []
+    try:
+        for session_id in session_ids:
+            _set_session_running(session_id, False)
+            _clear_session_turn_control(session_id)
+            _clear_session_live_output(session_id)
+            _invalidate_session_agent_runtime_cache(session_id)
+            _invalidate_session_conversation_events_cache(session_id)
+
+        staging_nonce = secrets.token_hex(6)
+        workspace_roots = _agent_session_workspace_roots()
+        staging_roots = [
+            _agent_session_purge_staging_root(
+                sessions_root,
+                agent_id=normalized_agent_id,
+                nonce=staging_nonce,
+            )
+            for sessions_root in workspace_roots
+        ]
+        for sessions_root, staging_root in zip(
+            workspace_roots,
+            staging_roots,
+            strict=True,
+        ):
+            for session_id in session_ids:
+                source = (sessions_root / _safe_session_workspace_token(session_id)).resolve()
+                if not source.is_relative_to(sessions_root) or not source.exists():
+                    continue
+                staging_root.mkdir(parents=True, exist_ok=True)
+                destination = (staging_root / source.name).resolve()
+                if not destination.is_relative_to(staging_root):
+                    raise SessionValidationError(f"Invalid staged session workspace path: {destination}")
+                shutil.move(str(source), str(destination))
+                workspace_moves.append({"source": str(source), "staged": str(destination)})
+    except Exception:
+        for move in reversed(workspace_moves):
+            source = Path(move["source"])
+            staged = Path(move["staged"])
+            if staged.exists() and not source.exists():
+                source.parent.mkdir(parents=True, exist_ok=True)
+                shutil.move(str(staged), str(source))
+        if restore_token is not None:
+            _restore_agent_session_lifecycle_state(restore_token)
+        raise
+    if restore_token is not None:
+        restore_token["workspaceMoves"] = workspace_moves
+        restore_token["stagingRoot"] = str(staging_roots[0]) if staging_roots else ""
+        restore_token["stagingRoots"] = [str(path) for path in staging_roots]
+    _invalidate_session_list_cache()
+    result = {
+        "status": "staged",
+        "agentId": normalized_agent_id,
+        "deletedCount": len(session_ids),
+        "sessionIds": session_ids,
+        "workspaceStagedCount": len(workspace_moves),
+        "workspaceDeletedCount": 0,
+        "historyRetention": "deleted",
+    }
+    if restore_token is not None:
+        result["restoreToken"] = restore_token
+        result["stagingRoot"] = str(staging_roots[0]) if staging_roots else ""
+        result["stagingRoots"] = [str(path) for path in staging_roots]
+    _record_agent_session_lifecycle_event(
+        "agent_purge",
+        "conversation.agent_sessions.purge_staged",
+        fields={
+            "agentId": normalized_agent_id,
+            "deletedSessionCount": len(session_ids),
+            "workspaceStagedCount": len(workspace_moves),
+            "sessionIds": session_ids[:20],
+        },
+    )
+    return result
+
+
+def restore_staged_agent_session_purge(restore_token: dict[str, Any] | None) -> dict[str, Any]:
+    token = restore_token if isinstance(restore_token, dict) else {}
+    workspace_moves = [
+        item
+        for item in list(token.get("workspaceMoves") or [])
+        if isinstance(item, dict)
+    ]
+    restored_workspace_count = 0
+    for move in reversed(workspace_moves):
+        source = Path(str(move.get("source") or ""))
+        staged = Path(str(move.get("staged") or ""))
+        if not staged.exists() or source.exists():
+            continue
+        source.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(staged), str(source))
+        restored_workspace_count += 1
+    changed = _restore_agent_session_lifecycle_state(token)
+    return {
+        "status": "restored" if changed else "unchanged",
+        "changed": changed,
+        "agentId": str(token.get("agentId") or "").strip(),
+        "sessionIds": list(token.get("sessionIds") or []),
+        "workspaceRestoredCount": restored_workspace_count,
+    }
+
+
+def _delete_agent_session_purge_staging_root(staging_root: Path) -> None:
+    shutil.rmtree(staging_root)
+
+
+def commit_staged_agent_session_purge(restore_token: dict[str, Any] | None) -> dict[str, Any]:
+    token = restore_token if isinstance(restore_token, dict) else {}
+    staging_root_values = list(token.get("stagingRoots") or [])
+    if not staging_root_values and str(token.get("stagingRoot") or "").strip():
+        staging_root_values = [str(token.get("stagingRoot") or "").strip()]
+    workspace_moves = [
+        item
+        for item in list(token.get("workspaceMoves") or [])
+        if isinstance(item, dict)
+    ]
+    allowed_roots = _agent_session_workspace_roots()
+    cleanup_failure_types: list[str] = []
+    for staging_root_value in staging_root_values:
+        staging_root = Path(str(staging_root_value or "")).resolve()
+        if (
+            not any(staging_root.is_relative_to(root) for root in allowed_roots)
+            or not staging_root.name.startswith(".agent-purge-")
+        ):
+            raise SessionValidationError(f"Invalid Agent session purge staging path: {staging_root}")
+        if staging_root.exists():
+            try:
+                _delete_agent_session_purge_staging_root(staging_root)
+            except OSError as exc:
+                cleanup_failure_types.append(type(exc).__name__)
+    pending_workspace_count = sum(
+        1
+        for move in workspace_moves
+        if Path(str(move.get("staged") or "")).exists()
+    )
+    deleted_workspace_count = max(0, len(workspace_moves) - pending_workspace_count)
+    cleanup_pending = pending_workspace_count > 0
+    result = {
+        "status": "cleanup_pending" if cleanup_pending else "deleted",
+        "agentId": str(token.get("agentId") or "").strip(),
+        "deletedCount": len(list(token.get("sessionIds") or [])),
+        "sessionIds": list(token.get("sessionIds") or []),
+        "workspaceDeletedCount": deleted_workspace_count,
+        "workspacePendingCount": pending_workspace_count,
+        "cleanupPending": cleanup_pending,
+        "cleanupFailureTypes": sorted(set(cleanup_failure_types)),
+        "historyRetention": "deleted",
+    }
+    _record_agent_session_lifecycle_event(
+        "agent_purge",
+        "conversation.agent_sessions.purged",
+        outcome="partial" if cleanup_pending else "succeeded",
+        level="warning" if cleanup_pending else "info",
+        fields={
+            "agentId": result["agentId"],
+            "deletedSessionCount": result["deletedCount"],
+            "workspaceDeletedCount": result["workspaceDeletedCount"],
+            "workspacePendingCount": result["workspacePendingCount"],
+            "cleanupPending": result["cleanupPending"],
+            "cleanupFailureTypes": result["cleanupFailureTypes"],
+            "sessionIds": result["sessionIds"][:20],
+        },
+    )
+    return result
+
+
 def mark_direct_session_agent_deleted(
     session_id: str,
     *,
@@ -6480,6 +7068,9 @@ def _normalize_conversation(
         agent,
         hidden_team_member_agent_ids=hidden_team_member_agent_ids,
     )
+    archive_state = raw.get("archive_state") or raw.get("archiveState")
+    if not isinstance(archive_state, dict):
+        archive_state = {}
     return {
         "id": conversation_id,
         "title": title,
@@ -6508,6 +7099,8 @@ def _normalize_conversation(
             agent,
             hidden_team_member_agent_ids=hidden_team_member_agent_ids,
         ),
+        "readOnly": bool(raw.get("read_only") or raw.get("readOnly") or archive_state),
+        "archiveState": dict(archive_state),
         "conversationIndexVisibility": conversation_index_visibility,
         "conversationIndexKind": conversation_index_kind,
         "conversationIndexErrors": list(conversation_index_classification.get("errors") or []),
@@ -7530,6 +8123,10 @@ def _build_session_summary(conversation: dict[str, Any], *, hydrate_agent: bool 
         "currentPhase": status,
         "sessionKind": session_kind,
         "hiddenFromIndex": bool(conversation.get("hiddenFromIndex") or conversation.get("hidden_from_index")),
+        "readOnly": bool(conversation.get("readOnly") or conversation.get("read_only")),
+        "archiveState": dict(conversation.get("archiveState") or {})
+        if isinstance(conversation.get("archiveState"), dict)
+        else {},
         "conversationIndexVisibility": str(conversation.get("conversationIndexVisibility") or "").strip(),
         "conversationIndexKind": str(conversation.get("conversationIndexKind") or "").strip(),
         "conversationIndexErrors": list(conversation.get("conversationIndexErrors") or []),

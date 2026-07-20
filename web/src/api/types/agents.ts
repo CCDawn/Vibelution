@@ -825,11 +825,55 @@ export type AgentBoundary = {
   requiresTeamMembership: string;
 };
 
+export type AgentSessionLifecycleSummary = {
+  status: "archived" | "staged" | "deleted" | string;
+  agentId: string;
+  sessionIds: string[];
+  archivedCount?: number;
+  deletedCount?: number;
+  directSessionCount?: number;
+  childSessionCount?: number;
+  workspaceStagedCount?: number;
+  workspaceDeletedCount?: number;
+  workspacePendingCount?: number;
+  cleanupPending?: boolean;
+  cleanupFailureTypes?: string[];
+  readOnly?: boolean;
+  historyRetention: "sealed" | "deleted" | string;
+};
+
+export type AgentArchiveSummary = {
+  modeBindingsRepaired: number;
+  removedFromRoomIds: string[];
+  removedFromTeamIds: string[];
+  sessions: AgentSessionLifecycleSummary;
+  dataRetention: "sealed" | string;
+  source?: string;
+};
+
+export type AgentPurgeSummary = {
+  modeBindingsRepaired: number;
+  removedFromRoomIds: string[];
+  removedFromTeamIds: string[];
+  sessions: AgentSessionLifecycleSummary;
+  dataRetention: "purged" | string;
+};
+
+export type AgentPurgeResponse = {
+  agentId: string;
+  status: "purged" | string;
+  previousStatus: string;
+  deleted: boolean;
+  workspaceDeleted: boolean;
+  purgeSummary: AgentPurgeSummary;
+};
+
 export type AgentConfigWorkspaceAgent = AgentInstance & {
   dialogueModel?: AgentModelChoice | null;
   llmBindingModels?: Partial<Record<keyof AgentLlmBindings, AgentModelChoice | null>>;
   promptTemplate?: PromptTemplate | null;
   agentBoundary?: AgentBoundary;
+  archiveSummary?: AgentArchiveSummary;
   references: AgentConfigReference[];
   health: AgentConfigHealthIssue[];
 };

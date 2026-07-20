@@ -841,40 +841,64 @@ def agent_update(agent_id: str, payload: AgentUpdatePayload) -> dict:
         if str(payload.status or "").strip() == "archived":
             current = get_agent(agent_id)
             if current and str(current.get("status") or "active").strip() != "archived":
-                ensure_agent_archive_allowed(agent_id)
-                team_cleanup = remove_agent_from_teams(agent_id)
-                room_cleanup = remove_agent_from_chat_rooms(agent_id)
-                mode_cleanup = remove_agent_from_mode_bindings(agent_id)
-                archive_summary = {
-                    "modeBindingsRepaired": len(mode_cleanup.get("repairWarnings") or []),
-                    "removedFromRoomIds": list(room_cleanup.get("changedRoomIds") or []),
-                    "removedFromTeamIds": list(team_cleanup.get("changedTeamIds") or []),
-                    "dataRetention": "archived_only",
-                    "source": "patch_status",
-                }
-        return _with_agent_workspace_cache_invalidated(update_agent_instance(
-            agent_id,
-            display_name=payload.displayName,
-            llm_bindings=payload.llmBindings,
-            primary_mode=payload.primaryMode,
-            role_key=payload.roleKey,
-            prompt_template_id=payload.promptTemplateId,
-            tool_policy_id=payload.toolPolicyId,
-            memory_policy_id=payload.memoryPolicyId,
-            tool_policy=payload.toolPolicy,
-            memory_policy=payload.memoryPolicy,
-            context_compression_policy=payload.contextCompressionPolicy,
-            delegation_policy=payload.delegationPolicy,
-            supervision_policy=payload.supervisionPolicy,
-            persona_profile=payload.personaProfile,
-            task_profile=payload.taskProfile,
-            metadata=payload.metadata,
-            status=payload.status,
-        ) | ({"archiveSummary": archive_summary} if archive_summary else {}))
+                updated, archive_summary = _archive_agent_with_session_lifecycle(
+                    agent_id,
+                    source="patch_status",
+                    timings={},
+                    archive_write=lambda: update_agent_instance(
+                        agent_id,
+                        display_name=payload.displayName,
+                        llm_bindings=payload.llmBindings,
+                        primary_mode=payload.primaryMode,
+                        role_key=payload.roleKey,
+                        prompt_template_id=payload.promptTemplateId,
+                        tool_policy_id=payload.toolPolicyId,
+                        memory_policy_id=payload.memoryPolicyId,
+                        tool_policy=payload.toolPolicy,
+                        memory_policy=payload.memoryPolicy,
+                        context_compression_policy=payload.contextCompressionPolicy,
+                        delegation_policy=payload.delegationPolicy,
+                        supervision_policy=payload.supervisionPolicy,
+                        persona_profile=payload.personaProfile,
+                        task_profile=payload.taskProfile,
+                        metadata=payload.metadata,
+                        status="archived",
+                    ),
+                )
+                return _with_agent_workspace_cache_invalidated({
+                    **updated,
+                    "archiveSummary": archive_summary,
+                })
+        return _with_agent_workspace_cache_invalidated(
+            update_agent_instance(
+                agent_id,
+                display_name=payload.displayName,
+                llm_bindings=payload.llmBindings,
+                primary_mode=payload.primaryMode,
+                role_key=payload.roleKey,
+                prompt_template_id=payload.promptTemplateId,
+                tool_policy_id=payload.toolPolicyId,
+                memory_policy_id=payload.memoryPolicyId,
+                tool_policy=payload.toolPolicy,
+                memory_policy=payload.memoryPolicy,
+                context_compression_policy=payload.contextCompressionPolicy,
+                delegation_policy=payload.delegationPolicy,
+                supervision_policy=payload.supervisionPolicy,
+                persona_profile=payload.personaProfile,
+                task_profile=payload.taskProfile,
+                metadata=payload.metadata,
+                status=payload.status,
+            )
+            | ({"archiveSummary": archive_summary} if archive_summary else {})
+        )
     except AgentNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ChatRoomBusyError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except session_service.SessionBusyError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except session_service.SessionValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     except (AgentDirectoryError, AgentModeBindingError, ChatRoomValidationError, TeamServiceError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
@@ -949,12 +973,113 @@ def _timed_agent_delete_stage(timings: dict[str, float], stage: str, fn: Any) ->
         timings[stage] = round((perf_counter() - started_at) * 1000, 1)
 
 
-def _public_direct_session_cleanup(cleanup: dict[str, Any]) -> dict[str, Any]:
+def _public_agent_session_cleanup(cleanup: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(cleanup, dict):
         return {}
     public = dict(cleanup)
     public.pop("restoreToken", None)
+    public.pop("stagingRoot", None)
+    public.pop("stagingRoots", None)
     return public
+
+
+def _archive_agent_with_session_lifecycle(
+    agent_id: str,
+    *,
+    source: str,
+    timings: dict[str, float],
+    archive_write: Any,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    current = _timed_agent_delete_stage(
+        timings,
+        "ensure_archive_allowed",
+        lambda: ensure_agent_archive_allowed(agent_id),
+    )
+    direct_session_id = str(current.get("directSessionId") or "").strip()
+    mode_restore_token = _timed_agent_delete_stage(
+        timings,
+        "snapshot_mode_bindings",
+        get_mode_bindings_payload,
+    )
+    team_cleanup: dict[str, Any] = {}
+    room_cleanup: dict[str, Any] = {}
+    mode_cleanup: dict[str, Any] = {}
+    session_cleanup: dict[str, Any] = {}
+    try:
+        team_cleanup = _timed_agent_delete_stage(
+            timings,
+            "remove_from_teams",
+            lambda: remove_agent_from_teams(agent_id, include_restore_token=True),
+        )
+        room_cleanup = _timed_agent_delete_stage(
+            timings,
+            "remove_from_chat_rooms",
+            lambda: remove_agent_from_chat_rooms(agent_id, include_restore_token=True),
+        )
+        mode_cleanup = _timed_agent_delete_stage(
+            timings,
+            "remove_from_mode_bindings",
+            lambda: remove_agent_from_mode_bindings(agent_id),
+        )
+        session_cleanup = _timed_agent_delete_stage(
+            timings,
+            "archive_agent_sessions",
+            lambda: session_service.archive_agent_sessions(
+                agent_id,
+                direct_session_id=direct_session_id,
+                include_restore_token=True,
+            ),
+        )
+        agent = _timed_agent_delete_stage(timings, "archive_agent", archive_write)
+    except Exception as exc:
+        restore_token = session_cleanup.get("restoreToken")
+        if isinstance(restore_token, dict):
+            _timed_agent_delete_stage(
+                timings,
+                "rollback_agent_sessions",
+                lambda: session_service.restore_agent_sessions_archive(restore_token),
+            )
+        _timed_agent_delete_stage(
+            timings,
+            "rollback_mode_bindings",
+            lambda: restore_removed_agents_to_mode_bindings(mode_restore_token),
+        )
+        _timed_agent_delete_stage(
+            timings,
+            "rollback_chat_rooms",
+            lambda: restore_removed_agents_to_chat_rooms(room_cleanup.get("restoreToken")),
+        )
+        _timed_agent_delete_stage(
+            timings,
+            "rollback_teams",
+            lambda: restore_removed_agents_to_teams(team_cleanup.get("restoreToken")),
+        )
+        if isinstance(
+            exc,
+            (
+                AgentDirectoryError,
+                AgentNotFoundError,
+                AgentModeBindingError,
+                ChatRoomBusyError,
+                ChatRoomValidationError,
+                TeamServiceError,
+                session_service.SessionBusyError,
+                session_service.SessionValidationError,
+            ),
+        ):
+            raise
+        raise AgentDirectoryError(
+            f"Agent archive lifecycle failed before commit: {type(exc).__name__}"
+        ) from exc
+    archive_summary = {
+        "modeBindingsRepaired": len(mode_cleanup.get("repairWarnings") or []),
+        "removedFromRoomIds": list(room_cleanup.get("changedRoomIds") or []),
+        "removedFromTeamIds": list(team_cleanup.get("changedTeamIds") or []),
+        "sessions": _public_agent_session_cleanup(session_cleanup),
+        "dataRetention": "sealed",
+        "source": source,
+    }
+    return agent, archive_summary
 
 
 def _record_agent_delete_route_event(
@@ -1057,58 +1182,17 @@ def agent_archive(agent_id: str) -> dict:
     timings: dict[str, float] = {}
     started_at = perf_counter()
     try:
-        _timed_agent_delete_stage(timings, "ensure_archive_allowed", lambda: ensure_agent_archive_allowed(agent_id))
-        mode_restore_token = _timed_agent_delete_stage(timings, "snapshot_mode_bindings", get_mode_bindings_payload)
-        team_cleanup: dict[str, Any] = {}
-        room_cleanup: dict[str, Any] = {}
-        mode_cleanup: dict[str, Any] = {}
-        try:
-            team_cleanup = _timed_agent_delete_stage(
-                timings,
-                "remove_from_teams",
-                lambda: remove_agent_from_teams(agent_id, include_restore_token=True),
-            )
-            room_cleanup = _timed_agent_delete_stage(
-                timings,
-                "remove_from_chat_rooms",
-                lambda: remove_agent_from_chat_rooms(agent_id, include_restore_token=True),
-            )
-            mode_cleanup = _timed_agent_delete_stage(
-                timings,
-                "remove_from_mode_bindings",
-                lambda: remove_agent_from_mode_bindings(agent_id),
-            )
-            agent = _timed_agent_delete_stage(
-                timings,
-                "archive_agent",
-                lambda: archive_agent_instance(agent_id, repair_mode_bindings=False),
-            )
-        except Exception:
-            _timed_agent_delete_stage(
-                timings,
-                "rollback_mode_bindings",
-                lambda: restore_removed_agents_to_mode_bindings(mode_restore_token),
-            )
-            _timed_agent_delete_stage(
-                timings,
-                "rollback_chat_rooms",
-                lambda: restore_removed_agents_to_chat_rooms(room_cleanup.get("restoreToken")),
-            )
-            _timed_agent_delete_stage(
-                timings,
-                "rollback_teams",
-                lambda: restore_removed_agents_to_teams(team_cleanup.get("restoreToken")),
-            )
-            raise
+        agent, archive_summary = _archive_agent_with_session_lifecycle(
+            agent_id,
+            source="delete_route",
+            timings=timings,
+            archive_write=lambda: archive_agent_instance(agent_id, repair_mode_bindings=False),
+        )
         payload = {
             **agent,
-            "archiveSummary": {
-                "modeBindingsRepaired": len(mode_cleanup.get("repairWarnings") or []),
-                "removedFromRoomIds": list(room_cleanup.get("changedRoomIds") or []),
-                "removedFromTeamIds": list(team_cleanup.get("changedTeamIds") or []),
-                "dataRetention": "archived_only",
-            },
+            "archiveSummary": archive_summary,
         }
+        session_summary = archive_summary.get("sessions") if isinstance(archive_summary.get("sessions"), dict) else {}
         _record_agent_delete_route_event(
             "agent.archive.completed",
             agent_id,
@@ -1116,9 +1200,11 @@ def agent_archive(agent_id: str) -> dict:
             started_at=started_at,
             outcome="succeeded",
             fields={
-                "removedFromTeamCount": len(team_cleanup.get("changedTeamIds") or []),
-                "removedFromRoomCount": len(room_cleanup.get("changedRoomIds") or []),
-                "modeBindingRepairWarningCount": len(mode_cleanup.get("repairWarnings") or []),
+                "removedFromTeamCount": len(archive_summary.get("removedFromTeamIds") or []),
+                "removedFromRoomCount": len(archive_summary.get("removedFromRoomIds") or []),
+                "modeBindingRepairWarningCount": int(archive_summary.get("modeBindingsRepaired") or 0),
+                "archivedSessionCount": int(session_summary.get("archivedCount") or 0),
+                "archivedSessionIds": list(session_summary.get("sessionIds") or [])[:20],
             },
         )
         return _with_agent_workspace_cache_invalidated(payload)
@@ -1128,6 +1214,12 @@ def agent_archive(agent_id: str) -> dict:
     except ChatRoomBusyError as exc:
         _record_agent_delete_route_event("agent.archive.failed", agent_id, timings=timings, started_at=started_at, outcome="failed", level="warning", error=exc)
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except session_service.SessionBusyError as exc:
+        _record_agent_delete_route_event("agent.archive.failed", agent_id, timings=timings, started_at=started_at, outcome="failed", level="warning", error=exc)
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except session_service.SessionValidationError as exc:
+        _record_agent_delete_route_event("agent.archive.failed", agent_id, timings=timings, started_at=started_at, outcome="failed", level="warning", error=exc)
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     except (AgentDirectoryError, AgentModeBindingError, ChatRoomValidationError, TeamServiceError) as exc:
         _record_agent_delete_route_event("agent.archive.failed", agent_id, timings=timings, started_at=started_at, outcome="failed", level="warning", error=exc)
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -1137,31 +1229,29 @@ def agent_archive(agent_id: str) -> dict:
 def agent_purge(agent_id: str) -> dict:
     timings: dict[str, float] = {}
     started_at = perf_counter()
-    direct_session_restore_token: dict[str, Any] | None = None
+    session_purge_restore_token: dict[str, Any] | None = None
     try:
         agent_before_purge = _timed_agent_delete_stage(timings, "ensure_purge_allowed", lambda: ensure_agent_purge_allowed(agent_id))
         direct_session_id = str(agent_before_purge.get("directSessionId") or "").strip()
         previous_status = str(agent_before_purge.get("status") or "active").strip() or "active"
         _timed_agent_delete_stage(timings, "ensure_workspace_deletable", lambda: ensure_agent_purge_workspace_deletable(agent_before_purge))
-        direct_session_cleanup = (
-            _timed_agent_delete_stage(
+        try:
+            session_purge = _timed_agent_delete_stage(
                 timings,
-                "mark_direct_session_deleted_agent",
-                lambda: session_service.mark_direct_session_agent_deleted(
-                    direct_session_id,
-                    agent_id=agent_id,
-                    agent_display_name=str(agent_before_purge.get("displayName") or "").strip(),
-                    previous_status=previous_status,
-                    include_restore_token=True,
+                "stage_agent_session_purge",
+                lambda: session_service.stage_agent_session_purge(
+                    agent_id,
+                    direct_session_id=direct_session_id,
                 ),
             )
-            if direct_session_id
-            else {"changed": False, "sessionId": "", "agentId": agent_id, "reason": "no_direct_session"}
-        )
-        if str(direct_session_cleanup.get("reason") or "").strip() == "tombstone_failed":
-            raise AgentDirectoryError("Agent direct-session tombstone failed before permanent delete; no Agent data was deleted.")
-        restore_token = direct_session_cleanup.get("restoreToken")
-        direct_session_restore_token = restore_token if isinstance(restore_token, dict) else None
+        except (session_service.SessionBusyError, session_service.SessionValidationError):
+            raise
+        except Exception as exc:
+            raise AgentDirectoryError(
+                f"Agent session purge staging failed before permanent delete: {type(exc).__name__}"
+            ) from exc
+        restore_token = session_purge.get("restoreToken")
+        session_purge_restore_token = restore_token if isinstance(restore_token, dict) else None
         try:
             team_cleanup = _timed_agent_delete_stage(timings, "remove_from_teams", lambda: remove_agent_from_teams(agent_id))
             room_cleanup = _timed_agent_delete_stage(
@@ -1176,21 +1266,29 @@ def agent_purge(agent_id: str) -> dict:
             )
             purge = _timed_agent_delete_stage(timings, "purge_agent", lambda: purge_archived_agent_instance(agent_id))
         except Exception:
-            if direct_session_restore_token is not None:
+            if session_purge_restore_token is not None:
                 _timed_agent_delete_stage(
                     timings,
-                    "rollback_direct_session_deleted_agent",
-                    lambda: session_service.restore_direct_session_agent_deleted_tombstone(direct_session_restore_token),
+                    "rollback_agent_session_purge",
+                    lambda: session_service.restore_staged_agent_session_purge(session_purge_restore_token),
                 )
             raise
-        public_direct_session_cleanup = _public_direct_session_cleanup(direct_session_cleanup)
+        committed_session_purge = _timed_agent_delete_stage(
+            timings,
+            "commit_agent_session_purge",
+            lambda: session_service.commit_staged_agent_session_purge(session_purge_restore_token),
+        )
+        public_session_purge = _public_agent_session_cleanup({
+            **session_purge,
+            **committed_session_purge,
+        })
         payload = {
             **purge,
             "purgeSummary": {
                 "modeBindingsRepaired": len(mode_cleanup.get("repairWarnings") or []),
                 "removedFromRoomIds": list(room_cleanup.get("changedRoomIds") or []),
                 "removedFromTeamIds": list(team_cleanup.get("changedTeamIds") or []),
-                "directSession": public_direct_session_cleanup,
+                "sessions": public_session_purge,
                 "dataRetention": "purged",
             },
         }
@@ -1199,7 +1297,8 @@ def agent_purge(agent_id: str) -> dict:
             agent_id,
             timings=timings,
             started_at=started_at,
-            outcome="succeeded",
+            outcome="partial" if public_session_purge.get("cleanupPending") else "succeeded",
+            level="warning" if public_session_purge.get("cleanupPending") else "info",
             fields={
                 "removedFromTeamCount": len(team_cleanup.get("changedTeamIds") or []),
                 "removedFromRoomCount": len(room_cleanup.get("changedRoomIds") or []),
@@ -1208,7 +1307,10 @@ def agent_purge(agent_id: str) -> dict:
                 "skippedPathCount": len(purge.get("skippedPaths") or []),
                 "previousStatus": previous_status,
                 "directSessionId": direct_session_id,
-                "directSessionTombstoned": bool(public_direct_session_cleanup.get("changed")),
+                "deletedSessionCount": int(public_session_purge.get("deletedCount") or 0),
+                "deletedSessionIds": list(public_session_purge.get("sessionIds") or [])[:20],
+                "deletedSessionWorkspaceCount": int(public_session_purge.get("workspaceDeletedCount") or 0),
+                "pendingSessionWorkspaceCount": int(public_session_purge.get("workspacePendingCount") or 0),
             },
         )
         return _with_agent_workspace_cache_invalidated(payload)
@@ -1218,6 +1320,12 @@ def agent_purge(agent_id: str) -> dict:
     except ChatRoomBusyError as exc:
         _record_agent_delete_route_event("agent.purge.failed", agent_id, timings=timings, started_at=started_at, outcome="failed", level="warning", error=exc)
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except session_service.SessionBusyError as exc:
+        _record_agent_delete_route_event("agent.purge.failed", agent_id, timings=timings, started_at=started_at, outcome="failed", level="warning", error=exc)
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except session_service.SessionValidationError as exc:
+        _record_agent_delete_route_event("agent.purge.failed", agent_id, timings=timings, started_at=started_at, outcome="failed", level="warning", error=exc)
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     except (AgentDirectoryError, AgentModeBindingError, ChatRoomValidationError, TeamServiceError) as exc:
         _record_agent_delete_route_event("agent.purge.failed", agent_id, timings=timings, started_at=started_at, outcome="failed", level="warning", error=exc)
         raise HTTPException(status_code=422, detail=str(exc)) from exc
