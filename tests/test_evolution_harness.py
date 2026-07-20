@@ -72,24 +72,28 @@ from core.orchestration.turn_outcome import TurnOutcomeController
 pytestmark = pytest.mark.serial
 
 
-def test_create_worktree_uses_sibling_controlled_worktree_root(
+def test_create_worktree_lets_git_create_path_under_controlled_sibling_root(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ):
     repo_root = tmp_path / "Vibelution"
     repo_root.mkdir()
     expected_root = tmp_path / "Vibelution-worktrees"
-    created_path = expected_root / "vibelution-harness-swte-sa-probe"
-    calls: dict[str, object] = {}
+    created_path = expected_root / "vibelution-harness-swte-san-12345678"
+    calls: list[tuple[object, ...]] = []
 
-    def fake_mkdtemp(*, prefix: str, dir: str) -> str:
-        calls["prefix"] = prefix
-        calls["dir"] = dir
+    def fake_run_git(*args: object) -> str:
+        calls.append(args)
+        assert not created_path.exists()
         created_path.mkdir()
-        return str(created_path)
+        return ""
 
-    monkeypatch.setattr(evolution_harness.tempfile, "mkdtemp", fake_mkdtemp)
-    monkeypatch.setattr(evolution_harness, "run_git", lambda *_: "")
+    monkeypatch.setattr(
+        evolution_harness.uuid,
+        "uuid4",
+        lambda: evolution_harness.uuid.UUID("12345678-0000-0000-0000-000000000000"),
+    )
+    monkeypatch.setattr(evolution_harness, "run_git", fake_run_git)
     monkeypatch.setattr(evolution_harness, "mirror_venv_into_worktree", lambda *_: None)
 
     result = create_worktree(
@@ -104,10 +108,16 @@ def test_create_worktree_uses_sibling_controlled_worktree_root(
     )
 
     assert result == created_path
-    assert calls == {
-        "prefix": "vibelution-harness-swte-san-",
-        "dir": str(expected_root),
-    }
+    assert calls == [
+        (
+            repo_root,
+            "worktree",
+            "add",
+            "--detach",
+            str(created_path),
+            "checkpoint",
+        )
+    ]
 
 
 def _write_external_operator_config(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, text: str) -> Path:

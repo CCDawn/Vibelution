@@ -18,7 +18,6 @@ import queue
 import shutil
 import subprocess
 import sys
-import tempfile
 import threading
 import time
 import uuid
@@ -790,13 +789,24 @@ def _harness_worktree_root(repo_root: Path) -> Path:
     return worktree_root
 
 
-def create_worktree(repo_root: Path, snapshot: SnapshotInfo, harness_id: str) -> Path:
-    worktree_path = Path(
-        tempfile.mkdtemp(
-            prefix=f"vibelution-harness-{harness_id[:8]}-",
-            dir=str(_harness_worktree_root(repo_root)),
+def _new_harness_worktree_path(repo_root: Path, harness_id: str) -> Path:
+    worktree_root = _harness_worktree_root(repo_root)
+    for _ in range(10):
+        candidate = (
+            worktree_root
+            / f"vibelution-harness-{harness_id[:8]}-{uuid.uuid4().hex[:8]}"
         )
-    )
+        if not candidate.exists():
+            return candidate
+    raise RuntimeError("无法分配唯一的 harness worktree 路径")
+
+
+def create_worktree(repo_root: Path, snapshot: SnapshotInfo, harness_id: str) -> Path:
+    # Do not pre-create this directory with tempfile.mkdtemp(). On Windows that
+    # applies a user-only ACL which the Codex restricted token cannot traverse.
+    # Let `git worktree add` create the directory so it inherits the controlled
+    # sibling root's sandbox-readable ACL.
+    worktree_path = _new_harness_worktree_path(repo_root, harness_id)
     try:
         run_git(repo_root, "worktree", "add", "--detach", str(worktree_path), snapshot.commit)
         if snapshot.untracked_files:
