@@ -167,6 +167,37 @@ def test_sandbox_uses_cmd_for_native_windows_and_chain(monkeypatch):
     ]
 
 
+def test_sandbox_uses_cmd_for_single_native_windows_command(monkeypatch):
+    monkeypatch.setattr(codex_cli_sandbox.os, "name", "nt")
+    monkeypatch.setattr(
+        codex_cli_sandbox,
+        "_windows_command_interpreter",
+        lambda: r"C:\Windows\System32\cmd.exe",
+    )
+    monkeypatch.setattr(
+        codex_cli_sandbox.shutil,
+        "which",
+        lambda name: r"C:\Program Files\Git\cmd\git.exe" if name == "git" else None,
+    )
+    route = SimpleNamespace(route="git_bash", command="git status --short")
+
+    argv = codex_cli_sandbox._sandbox_argv(
+        r"C:\Codex\codex.exe",
+        route,
+        git_bash_executable=r"C:\Program Files\Git\bin\bash.exe",
+    )
+
+    assert argv[-7:] == [
+        r"C:\Windows\System32\cmd.exe",
+        "/d",
+        "/v:off",
+        "/s",
+        "/c",
+        "call",
+        "%VIBELUTION_CODEX_SANDBOX_COMMAND%",
+    ]
+
+
 def test_execute_passes_native_windows_chain_through_environment(monkeypatch, tmp_path):
     recorded = {}
     command = 'git status --short && rg -n "candidate" .'
@@ -236,8 +267,36 @@ def test_sandbox_keeps_unix_and_chain_on_git_bash(monkeypatch):
     ]
 
 
-def test_sandbox_does_not_treat_quoted_and_as_native_chain(monkeypatch):
+def test_sandbox_keeps_single_unix_command_on_git_bash(monkeypatch):
     monkeypatch.setattr(codex_cli_sandbox.os, "name", "nt")
+    monkeypatch.setattr(
+        codex_cli_sandbox.shutil,
+        "which",
+        lambda name: r"C:\Program Files\Git\usr\bin\ls.exe" if name == "ls" else None,
+    )
+    command = "ls core"
+    route = SimpleNamespace(route="git_bash", command=command)
+
+    argv = codex_cli_sandbox._sandbox_argv(
+        r"C:\Codex\codex.exe",
+        route,
+        git_bash_executable=r"C:\Program Files\Git\bin\bash.exe",
+    )
+
+    assert argv[-3:] == [
+        r"C:\Program Files\Git\bin\bash.exe",
+        "-c",
+        command,
+    ]
+
+
+def test_sandbox_routes_native_command_with_quoted_and_through_cmd(monkeypatch):
+    monkeypatch.setattr(codex_cli_sandbox.os, "name", "nt")
+    monkeypatch.setattr(
+        codex_cli_sandbox,
+        "_windows_command_interpreter",
+        lambda: r"C:\Windows\System32\cmd.exe",
+    )
     monkeypatch.setattr(
         codex_cli_sandbox.shutil,
         "which",
@@ -252,10 +311,14 @@ def test_sandbox_does_not_treat_quoted_and_as_native_chain(monkeypatch):
         git_bash_executable=r"C:\Program Files\Git\bin\bash.exe",
     )
 
-    assert argv[-3:] == [
-        r"C:\Program Files\Git\bin\bash.exe",
-        "-c",
-        command,
+    assert argv[-7:] == [
+        r"C:\Windows\System32\cmd.exe",
+        "/d",
+        "/v:off",
+        "/s",
+        "/c",
+        "call",
+        "%VIBELUTION_CODEX_SANDBOX_COMMAND%",
     ]
 
 
