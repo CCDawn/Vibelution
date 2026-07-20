@@ -383,7 +383,20 @@ export function deriveActiveWorkIndicator(
   const activeItems = runtime?.workRuns?.activeItems;
 
   const candidates = [
-    buildActiveWorkCandidate("supervised", active.supervised_evolution_run, runtime, lang),
+    ...activeWorkCandidatesFromItems(
+      "supervised",
+      activeItems?.supervised_worktree_evolution_run,
+      runtime,
+      lang,
+      active.supervised_worktree_evolution_run,
+    ),
+    ...activeWorkCandidatesFromItems(
+      "supervised",
+      activeItems?.supervised_evolution_run,
+      runtime,
+      lang,
+      active.supervised_evolution_run,
+    ),
     buildActiveWorkCandidate("self", active.self_evolution_run, runtime, lang),
     ...activeWorkCandidatesFromItems("source_collection", activeItems?.source_collection_run, runtime, lang, active.source_collection_run),
     ...activeWorkCandidatesFromItems("chat_room", activeItems?.chat_room_round, runtime, lang, active.chat_room_round),

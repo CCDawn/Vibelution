@@ -22,8 +22,10 @@ import {
   captureAgentSessionCacheSnapshots,
   captureSessionIndexCacheSnapshots,
   removeSessionFromAgentSessionCaches,
+  renameAgentDirectoryEntries,
   restoreAgentSessionCacheSnapshots,
   restoreSessionIndexCacheSnapshots,
+  updateAgentSessionSummaryCaches,
   updateSessionSummaryCaches,
 } from "../chatSessionIndexQuery";
 import {
@@ -569,25 +571,42 @@ export function useChatWorkspaceLifecycle({
       const updatedAt = new Date().toISOString();
       const previousSessions = queryClient.getQueryData<SessionSummary[]>(queryKeys.sessions());
       const previousSessionIndexCaches = captureSessionIndexCacheSnapshots(queryClient);
+      const previousAgentSessionCaches = captureAgentSessionCacheSnapshots(queryClient);
       const previousConversations = queryClient.getQueryData<ConversationSummary[]>(queryKeys.conversations());
       const previousDetail = queryClient.getQueryData<SessionDetail>(queryKeys.session(variables.sessionId));
+      const previousAgents = queryClient.getQueryData<AgentInstance[]>(queryKeys.agents());
       const targetSession = previousDetail ?? previousSessions?.find((session) => session.id === variables.sessionId);
+      const targetAgentId = String(targetSession?.agentId || "").trim();
+      const targetSessionKind = String(targetSession?.sessionKind || "main").trim().toLowerCase();
+      const renameSummaries = (sessions: SessionSummary[] | undefined) =>
+        renameSessionInSummaries(sessions, variables.sessionId, variables.title, updatedAt);
       setEditingSessionId(null);
       setEditingSessionTitle("");
       setSessionComposerErrors((current) => ({
         ...current,
         [variables.sessionId]: "",
       }));
-      updateSessionSummaryCaches(queryClient, (sessions) =>
-        renameSessionInSummaries(sessions, variables.sessionId, variables.title, updatedAt),
-      );
+      updateSessionSummaryCaches(queryClient, renameSummaries);
+      updateAgentSessionSummaryCaches(queryClient, renameSummaries);
       queryClient.setQueryData<ConversationSummary[]>(queryKeys.conversations(), (conversations) =>
         renameSessionInConversations(conversations, variables.sessionId, variables.title, updatedAt, targetSession),
       );
       queryClient.setQueryData<SessionDetail>(queryKeys.session(variables.sessionId), (detail) =>
         renameSessionDetail(detail, variables.sessionId, variables.title, updatedAt),
       );
-      return { previousSessions, previousSessionIndexCaches, previousConversations, previousDetail };
+      if (targetAgentId && targetSessionKind !== "child") {
+        queryClient.setQueryData<AgentInstance[]>(queryKeys.agents(), (agents) =>
+          renameAgentDirectoryEntries(agents, targetAgentId, variables.title),
+        );
+      }
+      return {
+        previousSessions,
+        previousSessionIndexCaches,
+        previousAgentSessionCaches,
+        previousConversations,
+        previousDetail,
+        previousAgents,
+      };
     },
     onSuccess: (nextDetail, variables) => {
       setSessionComposerErrors((current) => ({
@@ -596,9 +615,10 @@ export function useChatWorkspaceLifecycle({
       }));
       const confirmedTitle = String(nextDetail.title || variables.title).trim() || variables.title;
       const confirmedUpdatedAt = String(nextDetail.updatedAt || new Date().toISOString()).trim();
-      updateSessionSummaryCaches(queryClient, (sessions) =>
-        renameSessionInSummaries(sessions, variables.sessionId, confirmedTitle, confirmedUpdatedAt),
-      );
+      const renameSummaries = (sessions: SessionSummary[] | undefined) =>
+        renameSessionInSummaries(sessions, variables.sessionId, confirmedTitle, confirmedUpdatedAt);
+      updateSessionSummaryCaches(queryClient, renameSummaries);
+      updateAgentSessionSummaryCaches(queryClient, renameSummaries);
       queryClient.setQueryData<ConversationSummary[]>(queryKeys.conversations(), (conversations) =>
         renameSessionInConversations(conversations, variables.sessionId, confirmedTitle, confirmedUpdatedAt, nextDetail),
       );
@@ -609,17 +629,29 @@ export function useChatWorkspaceLifecycle({
         ...(detail ?? nextDetail),
         ...nextDetail,
       }));
+      const agentId = String(nextDetail.agentId || "").trim();
+      const sessionKind = String(nextDetail.sessionKind || "main").trim().toLowerCase();
+      if (agentId && sessionKind !== "child") {
+        queryClient.setQueryData<AgentInstance[]>(queryKeys.agents(), (agents) =>
+          renameAgentDirectoryEntries(agents, agentId, confirmedTitle),
+        );
+        void queryClient.invalidateQueries({ queryKey: queryKeys.agents() });
+      }
     },
     onError: (error, variables, context) => {
       if (context?.previousSessions) {
         queryClient.setQueryData(queryKeys.sessions(), context.previousSessions);
       }
       restoreSessionIndexCacheSnapshots(queryClient, context?.previousSessionIndexCaches);
+      restoreAgentSessionCacheSnapshots(queryClient, context?.previousAgentSessionCaches);
       if (context?.previousConversations) {
         queryClient.setQueryData(queryKeys.conversations(), context.previousConversations);
       }
       if (context?.previousDetail) {
         queryClient.setQueryData(queryKeys.session(variables.sessionId), context.previousDetail);
+      }
+      if (context?.previousAgents !== undefined) {
+        queryClient.setQueryData(queryKeys.agents(), context.previousAgents);
       }
       setEditingSessionId(variables.sessionId);
       setEditingSessionTitle(variables.title);

@@ -3,7 +3,7 @@ import { useMemo } from "react";
 
 import { fetchJson } from "../api/client";
 import { queryKeys } from "../api/queryKeys";
-import type { SessionQueryResponse, SessionSummary } from "../api/types";
+import type { AgentInstance, SessionQueryResponse, SessionSummary } from "../api/types";
 
 export const SESSION_INDEX_PAGE_SIZE = 50;
 
@@ -148,6 +148,38 @@ export function updateSessionSummaryCaches(queryClient: QueryClient, updater: Se
   queryClient.setQueriesData<SessionQueryInfiniteData>({ queryKey: ["sessions", "query"] }, (data) =>
     data ? repartitionSessionPages(data, updater) : data,
   );
+}
+
+export function updateAgentSessionSummaryCaches(queryClient: QueryClient, updater: SessionSummaryUpdater) {
+  queryClient.setQueriesData<SessionQueryResponse>({ queryKey: ["sessions", "agent"] }, (data) => {
+    if (!data) {
+      return data;
+    }
+    const items = updater(data.items) ?? data.items;
+    return items === data.items ? data : {
+      ...data,
+      items,
+      totalEstimate:
+        typeof data.totalEstimate === "number"
+          ? Math.max(0, data.totalEstimate + items.length - data.items.length)
+          : data.totalEstimate,
+    };
+  });
+}
+
+export function renameAgentDirectoryEntries(
+  agents: AgentInstance[] | undefined,
+  agentId: string,
+  title: string,
+): AgentInstance[] | undefined {
+  const normalizedAgentId = agentId.trim();
+  if (!agents || !normalizedAgentId) {
+    return agents;
+  }
+  return agents.map((agent) => agent.agentId === normalizedAgentId ? {
+    ...agent,
+    displayName: title,
+  } : agent);
 }
 
 export function useSessionIndexQuery({

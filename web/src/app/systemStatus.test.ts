@@ -675,6 +675,30 @@ describe("systemStatus", () => {
     ]);
   });
 
+  it("classifies supervised worktree evolution as supervised work instead of chat", () => {
+    const indicator = deriveActiveWorkIndicator(
+      runtimeWithActiveWork({
+        supervised_worktree_evolution_run: {
+          runId: "swte-candidate-1",
+          runKind: "supervised_worktree_evolution_run",
+          status: "running",
+          currentPhase: "candidate_worktree",
+          latestMessage: "正在创建候选隔离工作树。",
+        },
+      }),
+    );
+
+    expect(indicator).toMatchObject({
+      kind: "supervised",
+      label: "监督进化",
+      summary: "正在创建候选隔离工作树。",
+      status: "running",
+      runId: "swte-candidate-1",
+      count: 1,
+      overflowCount: 0,
+    });
+  });
+
   it("uses self-evolution goals as summaries and marks queued work as caution", () => {
     const indicator = deriveActiveWorkIndicator(
       runtimeWithActiveWork({
