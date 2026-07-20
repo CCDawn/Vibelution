@@ -27,11 +27,22 @@ def test_resolver_prefers_user_local_binary_over_windowsapps_path(monkeypatch, t
 def test_relative_cwd_resolves_from_active_session_workspace(tmp_path):
     candidate_worktree = tmp_path / "candidate"
     candidate_worktree.mkdir()
+    (candidate_worktree / ".git").write_text("gitdir: test\n", encoding="utf-8")
 
     with workspace_root_override(candidate_worktree):
         resolved = codex_cli_sandbox._resolve_cwd(".")
 
     assert resolved == candidate_worktree.resolve()
+
+
+def test_relative_cwd_ignores_non_git_agent_workspace(tmp_path):
+    agent_workspace = tmp_path / "agent-workspace"
+    agent_workspace.mkdir()
+
+    with workspace_root_override(agent_workspace):
+        resolved = codex_cli_sandbox._resolve_cwd(".")
+
+    assert resolved == codex_cli_sandbox.PROJECT_ROOT.resolve()
 
 
 class _CompletedProcess:

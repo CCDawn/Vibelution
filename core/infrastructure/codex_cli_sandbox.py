@@ -16,6 +16,7 @@ from core.logging import debug_logger as _debug_logger
 from scripts.windowless_subprocess import no_window_subprocess_kwargs
 
 
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 _POLL_INTERVAL_SECONDS = 0.2
 _PYTHON_SITECUSTOMIZE = """\
 import os
@@ -99,7 +100,8 @@ def _resolve_codex_executable() -> str:
 def _resolve_cwd(cwd: str | None) -> Path:
     from tools.shell_tools import _get_workspace_root
 
-    workspace_root = _get_workspace_root().resolve()
+    active_workspace = _get_workspace_root().resolve()
+    workspace_root = active_workspace if (active_workspace / ".git").exists() else PROJECT_ROOT
     raw = Path(str(cwd or "").strip()) if str(cwd or "").strip() else workspace_root
     if not raw.is_absolute():
         raw = workspace_root / raw
