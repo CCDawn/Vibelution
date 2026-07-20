@@ -777,8 +777,26 @@ def _infer_toml_array_indent(lines: List[str], start: int, end: int) -> str:
     return "    "
 
 
+def _harness_worktree_root(repo_root: Path) -> Path:
+    resolved_repo_root = repo_root.resolve()
+    worktree_root = (
+        resolved_repo_root.parent / f"{resolved_repo_root.name}-worktrees"
+    ).resolve()
+    if worktree_root == resolved_repo_root or worktree_root.is_relative_to(
+        resolved_repo_root
+    ):
+        raise RuntimeError("harness worktree 根目录不得位于主项目目录内")
+    worktree_root.mkdir(parents=True, exist_ok=True)
+    return worktree_root
+
+
 def create_worktree(repo_root: Path, snapshot: SnapshotInfo, harness_id: str) -> Path:
-    worktree_path = Path(tempfile.mkdtemp(prefix=f"vibelution-harness-{harness_id[:8]}-"))
+    worktree_path = Path(
+        tempfile.mkdtemp(
+            prefix=f"vibelution-harness-{harness_id[:8]}-",
+            dir=str(_harness_worktree_root(repo_root)),
+        )
+    )
     try:
         run_git(repo_root, "worktree", "add", "--detach", str(worktree_path), snapshot.commit)
         if snapshot.untracked_files:
