@@ -20,7 +20,9 @@ const shellStyles = readFileSync(fileURLToPath(new URL("../design/workbench-shel
 
 describe("AppShell layout contract", () => {
   it("routes shell controls through VUI primitives", () => {
-    expect(shellSource).toContain("from \"../components/vui\"");
+    // Prefer direct primitive paths so the shell entry does not pull the VUI barrel graph.
+    expect(shellSource).toContain('from "../components/vui/primitives/VButton"');
+    expect(shellSource).toContain('from "../components/vui/primitives/VIconButton"');
     expect(shellSource).toContain("<VButton");
     expect(shellSource).toContain("<VIconButton");
     expect(shellSource).not.toMatch(/<button\b/);

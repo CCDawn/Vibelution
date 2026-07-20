@@ -11,6 +11,13 @@ export const BUNDLE_BUDGETS = [
     maxBytes: 760 * 1024,
   },
   {
+    // Framework vendors split from the main entry for cache + first-entry size.
+    // Matched before generic route chunks so vendor-* is not judged as a route feature.
+    name: "known vendor framework chunks",
+    pattern: /^vendor-(?:react-dom|react-router|react|query|overlay)-[\w-]+\.js$/,
+    maxBytes: 480 * 1024,
+  },
+  {
     name: "main application entry",
     pattern: /^index-[\w-]+\.js$/,
     maxBytes: 470 * 1024,

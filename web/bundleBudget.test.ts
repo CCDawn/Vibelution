@@ -35,6 +35,20 @@ describe("bundle budget", () => {
       .toBe("known lazy three graph chunk");
   });
 
+  it("classifies framework vendor chunks separately from route feature chunks", () => {
+    writeAsset("vendor-react-dom-Ab12CdEf.js", 200 * 1024);
+    writeAsset("vendor-react-router-Gh34IjKl.js", 120 * 1024);
+    writeAsset("index-BrPQ1lZ_.js", 200 * 1024);
+
+    const result = checkBundleBudget(tempRoot);
+
+    expect(result.failures).toEqual([]);
+    expect(result.entries.find((entry) => entry.name.startsWith("vendor-react-dom-"))?.budgetName)
+      .toBe("known vendor framework chunks");
+    expect(result.entries.find((entry) => entry.name.startsWith("vendor-react-router-"))?.budgetName)
+      .toBe("known vendor framework chunks");
+  });
+
   it("fails when an ordinary feature chunk grows beyond its budget", () => {
     writeAsset("TeamsRoute-CcYah-sm.js", 420 * 1024);
 

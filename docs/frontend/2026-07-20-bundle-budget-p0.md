@@ -105,7 +105,29 @@ Chat route secondary-lazy (same pattern as CLI terminal):
 | `CacheDetailDialog-*.js` | (in Chat) | ~14 KiB | async | open cache |
 | `ChatCodingRoute.styles-*.js` | (in Chat) | ~128 KiB | shared style map chunk | pulled by dialog + route |
 | `TeamsRoute-*.js` | ~440 KiB | ~441 KiB | 390 KiB | still fail |
-| `index-*.js` | ~559 KiB | ~559 KiB | 470 KiB | still fail |
+| `index-*.js` | ~559 KiB | ~559 KiB | 470 KiB | still fail (see next cut) |
+
+## Measured after index vendor split + lazy VTooltip
+
+Root cause of `index-*.js` bloat (sourcemap / rendered module sizes):
+
+- `react-dom` ~180 KiB min, `react-router` ~95 KiB, `@tanstack/query` ~40 KiB, Radix/floating-ui overlay ~72 KiB
+- App-owned shell (`AppShell` + styles + systemStatus) is smaller than the framework graph
+
+Cuts:
+
+1. Vite `manualChunks` → `vendor-react-dom` / `vendor-react-router` / `vendor-query` / `vendor-overlay`
+2. `VButton` loads `VTooltip` via `React.lazy` so Radix is not forced into every VButton consumer graph
+3. AppShell / RouteErrorBoundary import VButton via direct primitive paths (no VUI barrel)
+
+| Asset | Before | After | Budget | Status |
+|-------|--------|-------|--------|--------|
+| `index-*.js` | ~559 KiB | **~186 KiB** | 470 KiB | **pass** |
+| `vendor-react-dom-*.js` | (in index) | ~174 KiB | 480 KiB vendor | pass |
+| `vendor-react-router-*.js` | (in index) | ~93 KiB | 480 KiB vendor | pass |
+| `vendor-overlay-*.js` | (in index) | ~71 KiB | 480 KiB vendor | pass |
+| `vendor-query-*.js` | (in index) | ~39 KiB | 480 KiB vendor | pass |
+| `TeamsRoute-*.js` | ~441 KiB | ~441 KiB | 390 KiB | still fail |
 
 ## Follow-up backlog (ordered)
 
@@ -113,8 +135,8 @@ Chat route secondary-lazy (same pattern as CLI terminal):
 
 1. ~~**ConversationView JS**: secondary-lazy markdown~~ **done** (~453 → ~192 KiB).
 2. ~~**Chat JS chunk**: secondary-lazy wizard/cache/menu/LLM trace~~ **done** (~434 → ~287 KiB).
-3. **Teams JS**: apply Chat-style claim map + panel split (source + chunk).
-4. **index.js**: shell/i18n/shared-graph slim for first paint (~559 → ≤470).
+3. ~~**index.js**: vendor split + lazy tooltip~~ **done** (~559 → ~186 KiB).
+4. **Teams JS**: apply Chat-style claim map + panel split (source + chunk).
 5. Optional: further split `ConversationView.styles` if CV residual needs more headroom.
 
 ### P1

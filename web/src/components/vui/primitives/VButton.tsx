@@ -1,5 +1,7 @@
 import {
   forwardRef,
+  lazy,
+  Suspense,
   type ButtonHTMLAttributes,
   type MouseEvent,
   type ReactNode,
@@ -10,7 +12,12 @@ import {
   type VuiButtonVariant,
   type VuiDensity,
 } from "../renderers/shared/buttonVariants";
-import { VTooltip } from "./VTooltip";
+
+/** Keep Radix/floating-ui out of the shell entry until a button actually needs a tooltip. */
+const VTooltip = lazy(async () => {
+  const module = await import("./VTooltip");
+  return { default: module.VTooltip };
+});
 
 export type VButtonProps = Omit<
   ButtonHTMLAttributes<HTMLButtonElement>,
@@ -164,22 +171,28 @@ export const VButton = forwardRef<HTMLButtonElement, VButtonProps>(function VBut
         : undefined;
     const reasonLabel = typeof tooltipContent === "string" ? tooltipContent : undefined;
     return (
-      <VTooltip content={tooltipContent} tone={disabledReason ? "warning" : "neutral"}>
-        <span
-          data-vui="disabled-tooltip-trigger"
-          role="note"
-          tabIndex={0}
-          aria-label={[actionLabel, reasonLabel].filter(Boolean).join("：") || undefined}
-          className={[
-            "inline-flex max-w-full shrink-0 justify-self-start rounded-[var(--radius-control)] focus-visible:outline-none focus-visible:shadow-[var(--vui-shadow-focus)]",
-            hasFullRootWidth(className) ? "w-full" : "w-fit",
-          ].join(" ")}
-        >
-          {button}
-        </span>
-      </VTooltip>
+      <Suspense fallback={button}>
+        <VTooltip content={tooltipContent} tone={disabledReason ? "warning" : "neutral"}>
+          <span
+            data-vui="disabled-tooltip-trigger"
+            role="note"
+            tabIndex={0}
+            aria-label={[actionLabel, reasonLabel].filter(Boolean).join("：") || undefined}
+            className={[
+              "inline-flex max-w-full shrink-0 justify-self-start rounded-[var(--radius-control)] focus-visible:outline-none focus-visible:shadow-[var(--vui-shadow-focus)]",
+              hasFullRootWidth(className) ? "w-full" : "w-fit",
+            ].join(" ")}
+          >
+            {button}
+          </span>
+        </VTooltip>
+      </Suspense>
     );
   }
 
-  return <VTooltip content={tooltipContent}>{button}</VTooltip>;
+  return (
+    <Suspense fallback={button}>
+      <VTooltip content={tooltipContent}>{button}</VTooltip>
+    </Suspense>
+  );
 });
