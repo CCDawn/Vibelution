@@ -1,6 +1,7 @@
-import { lazy, Suspense, type CSSProperties, type ReactNode } from "react";
+import { lazy, Suspense, type ReactNode } from "react";
 
 import type { ConversationMarkdownClassNames } from "./conversationMarkdownTypes";
+import styles from "./LazyConversationMarkdownRenderer.styles";
 
 export type LazyConversationMarkdownRendererProps = {
   content: string;
@@ -13,13 +14,6 @@ const ConversationMarkdownRenderer = lazy(async () => {
   const module = await import("./ConversationMarkdownRenderer");
   return { default: module.ConversationMarkdownRenderer };
 });
-
-const FALLBACK_STYLE: CSSProperties = {
-  margin: 0,
-  whiteSpace: "pre-wrap",
-  overflowWrap: "anywhere",
-  wordBreak: "break-word",
-};
 
 function MarkdownFallback({
   content,
@@ -36,11 +30,11 @@ function MarkdownFallback({
   if (classNames?.markdownBody) {
     return (
       <div className={classNames.markdownBody}>
-        <p className={classNames.messageBody} style={FALLBACK_STYLE}>{text}</p>
+        <p className={`${classNames.messageBody} ${styles.fallbackText}`}>{text}</p>
       </div>
     );
   }
-  return <pre style={FALLBACK_STYLE}>{text}</pre>;
+  return <pre className={styles.fallbackPre}>{text}</pre>;
 }
 
 /**

@@ -29,7 +29,9 @@ describe("AgentResponseSectionView", () => {
     expect(html).toContain('aria-controls="agent-response-assistant-1-answer"');
     expect(html).toContain('aria-label="收起回答"');
     expect(html).toContain('id="agent-response-assistant-1-answer"');
-    expect(html).toContain('data-slot="tooltip-trigger"');
+    // The lazy tooltip renderer resolves on the client; SSR must retain the
+    // native button and its accessible label without depending on wrapper DOM.
+    expect(html).toContain('data-vui="button"');
     expect(html).not.toContain('title="收起回答"');
     expect(html).toContain('aria-hidden="true"');
     expect(html).toContain("回答");

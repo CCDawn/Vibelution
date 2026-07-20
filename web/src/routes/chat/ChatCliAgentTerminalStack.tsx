@@ -1,6 +1,6 @@
 import { Suspense, type ComponentType, type LazyExoticComponent } from "react";
 
-import styles from "../ChatCodingRoute.styles";
+import styles from "./ChatCliAgentTerminalStack.styles";
 import type { CliAgentRunView, CliAgentTerminalSession } from "./cliAgentRunModel";
 
 type CliAgentRunTerminalPanelProps = {

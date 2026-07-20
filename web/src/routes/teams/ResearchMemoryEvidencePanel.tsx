@@ -1,5 +1,7 @@
 import type { ReactNode } from "react";
 
+import styles, { statusTone } from "./ResearchMemoryEvidencePanel.styles";
+
 export type ResearchMemoryEvidenceRef = {
   type: string;
   id: string;
@@ -56,13 +58,6 @@ type ResearchMemoryEvidencePanelProps = {
   variant: "compact" | "detail";
 };
 
-const statusTone: Record<string, string> = {
-  qualified: "border-[color-mix(in_srgb,var(--state-success)_30%,transparent)] bg-[var(--vui-status-success-bg)] text-[var(--vui-status-success-fg)]",
-  unsupported: "border-[color-mix(in_srgb,var(--state-warning)_30%,transparent)] bg-[var(--vui-status-warning-bg)] text-[var(--vui-status-warning-fg)]",
-  rejected: "border-[color-mix(in_srgb,var(--state-error)_30%,transparent)] bg-[var(--vui-status-danger-bg)] text-[var(--vui-status-danger-fg)]",
-  not_established: "border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] text-[var(--fg-secondary)]",
-};
-
 function claimStatusLabel(status: string, lang: "zh" | "en") {
   if (lang === "en") {
     return status.replaceAll("_", " ");
@@ -85,26 +80,26 @@ function EvidenceList({
   label: string;
 }) {
   return (
-    <div className="grid min-w-0 gap-1">
-      <strong className="text-[var(--fg-secondary)]">{label}</strong>
+    <div className={styles.evidenceList}>
+      <strong className={styles.evidenceLabel}>{label}</strong>
       {refs.length > 0 ? (
-        <ul className="grid min-w-0 gap-1">
+        <ul className={styles.evidenceItems}>
           {refs.map((ref) => (
-            <li key={`${ref.type}:${ref.id}`} className="grid min-w-0 grid-cols-[max-content_minmax(0,1fr)] gap-2">
-              <span className="text-[var(--fg-tertiary)]">{ref.type || "evidence"}</span>
-              <code className="min-w-0 break-all text-[var(--fg-primary)]">{ref.id}</code>
+            <li key={`${ref.type}:${ref.id}`} className={styles.evidenceItem}>
+              <span className={styles.evidenceType}>{ref.type || "evidence"}</span>
+              <code className={styles.evidenceId}>{ref.id}</code>
             </li>
           ))}
         </ul>
       ) : (
-        <span className="text-[var(--fg-tertiary)]">{emptyText}</span>
+        <span className={styles.emptyText}>{emptyText}</span>
       )}
     </div>
   );
 }
 
 function TagList({ children }: { children: ReactNode[] }) {
-  return <div className="flex min-w-0 flex-wrap gap-1">{children}</div>;
+  return <div className={styles.tagList}>{children}</div>;
 }
 
 export function ResearchMemoryEvidencePanel({
@@ -122,22 +117,22 @@ export function ResearchMemoryEvidencePanel({
     ? (isZh ? "实验设计使用的团队记忆" : "Team memory used by experiment design")
     : (isZh ? "执行迭代使用的团队记忆" : "Team memory used by execution and iteration");
   const content = (
-    <div className="grid min-w-0 gap-3">
-      <div className="flex min-w-0 flex-wrap gap-x-3 gap-y-1 text-[var(--fg-secondary)]">
+    <div className={styles.content}>
+      <div className={styles.statusList}>
         <span>{isZh ? "有边界支持" : "qualified"} {summary.claimStatusCounts.qualified}</span>
         <span>{isZh ? "暂不支持" : "unsupported"} {summary.claimStatusCounts.unsupported}</span>
         <span>{isZh ? "已否定" : "rejected"} {summary.claimStatusCounts.rejected}</span>
         <span>{isZh ? "尚未建立" : "not established"} {summary.claimStatusCounts.not_established}</span>
       </div>
       {summary.allowedVariableContract.variables.length > 0 || summary.allowedVariableContract.frozenControls.length > 0 ? (
-        <section className="grid min-w-0 gap-2 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-muted)] p-2">
+        <section className={styles.variableContract}>
           <strong>{isZh ? "变量变更合同" : "Variable change contract"}</strong>
           {summary.allowedVariableContract.variables.length > 0 ? (
             <TagList>
               {summary.allowedVariableContract.variables.map((variable) => (
                 <code
                   key={`${variable.path}:${variable.source}:${variable.evidenceRef}`}
-                  className="max-w-full break-all rounded bg-[var(--vui-control-muted)] px-1.5 py-0.5"
+                  className={styles.variableTag}
                   title={`${variable.source} · ${variable.evidenceRef}`}
                 >
                   {variable.path} · {variable.source} · {variable.evidenceRef}
@@ -146,11 +141,11 @@ export function ResearchMemoryEvidencePanel({
             </TagList>
           ) : null}
           {summary.allowedVariableContract.frozenControls.length > 0 ? (
-            <div className="grid min-w-0 gap-1">
-              <span className="text-[var(--fg-secondary)]">{isZh ? "冻结控制" : "Frozen controls"}</span>
+            <div className={styles.frozenControls}>
+              <span className={styles.evidenceLabel}>{isZh ? "冻结控制" : "Frozen controls"}</span>
               <TagList>
                 {summary.allowedVariableContract.frozenControls.map((control) => (
-                  <span key={control} className="max-w-full break-words rounded border border-[var(--vui-border-subtle)] px-1.5 py-0.5">
+                  <span key={control} className={styles.frozenControl}>
                     {control}
                   </span>
                 ))}
@@ -159,20 +154,20 @@ export function ResearchMemoryEvidencePanel({
           ) : null}
         </section>
       ) : null}
-      <div className="grid min-w-0 gap-2">
+      <div className={styles.claimList}>
         {summary.claimMap.map((claim) => (
           <details
             key={claim.claimId}
-            className="group min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] p-2"
+            className={styles.claimDetails}
           >
-            <summary className="grid cursor-pointer min-w-0 grid-cols-[max-content_minmax(0,1fr)] items-start gap-2">
-              <span className={`rounded border px-1.5 py-0.5 ${statusTone[claim.status] || statusTone.not_established}`}>
+            <summary className={styles.claimSummary}>
+              <span className={`${styles.statusBadge} ${statusTone[claim.status] || statusTone.not_established}`}>
                 {claimStatusLabel(claim.status, lang)}
               </span>
-              <span className="min-w-0 break-words font-semibold text-[var(--fg-primary)]">{claim.claim}</span>
+              <span className={styles.claimTitle}>{claim.claim}</span>
             </summary>
-            <div className="mt-2 grid min-w-0 gap-3 border-t border-[var(--vui-border-subtle)] pt-2">
-              <div className="grid min-w-0 gap-2 md:grid-cols-2">
+            <div className={styles.claimBody}>
+              <div className={styles.evidenceGrid}>
                 <EvidenceList
                   refs={claim.supportEvidenceRefs}
                   label={isZh ? "支持证据" : "Supporting evidence"}
@@ -185,21 +180,21 @@ export function ResearchMemoryEvidencePanel({
                 />
               </div>
               {claim.applicableBoundaries.length > 0 ? (
-                <div className="grid min-w-0 gap-1">
-                  <strong className="text-[var(--fg-secondary)]">{isZh ? "适用边界" : "Applicable boundaries"}</strong>
+                <div className={styles.frozenControls}>
+                  <strong className={styles.evidenceLabel}>{isZh ? "适用边界" : "Applicable boundaries"}</strong>
                   <TagList>
                     {claim.applicableBoundaries.map((boundary) => (
-                      <span key={boundary} className="max-w-full break-words">{boundary}</span>
+                      <span key={boundary} className={styles.breakWords}>{boundary}</span>
                     ))}
                   </TagList>
                 </div>
               ) : null}
               {claim.sourcePlanIds.length > 0 ? (
-                <div className="grid min-w-0 gap-1">
-                  <strong className="text-[var(--fg-secondary)]">{isZh ? "来源计划" : "Source plans"}</strong>
+                <div className={styles.frozenControls}>
+                  <strong className={styles.evidenceLabel}>{isZh ? "来源计划" : "Source plans"}</strong>
                   <TagList>
                     {claim.sourcePlanIds.map((planId) => (
-                      <code key={planId} className="max-w-full break-all">{planId}</code>
+                      <code key={planId} className={styles.breakAll}>{planId}</code>
                     ))}
                   </TagList>
                 </div>
@@ -214,15 +209,15 @@ export function ResearchMemoryEvidencePanel({
   if (variant === "compact") {
     return (
       <details
-        className="group min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] px-2 py-1.5 [font-size:var(--vui-font-xs)]"
+        className={styles.compactDetails}
         data-memory-context-id={summary.contextId}
         data-research-memory-evidence="compact"
       >
-        <summary className="cursor-pointer select-none font-semibold text-[var(--fg-secondary)]">
+        <summary className={styles.compactSummary}>
           {isZh ? "查看 Claim Map 与变量边界" : "View claim map and variable bounds"}
         </summary>
-        <div className="mt-2 grid min-w-0 gap-2 border-t border-[var(--vui-border-subtle)] pt-2">
-          <div className="flex min-w-0 flex-wrap gap-x-3 gap-y-1 text-[var(--fg-secondary)]">
+        <div className={styles.compactBody}>
+          <div className={styles.statusList}>
             <span>{isZh ? "有边界支持" : "qualified"} {summary.claimStatusCounts.qualified}</span>
             <span>{isZh ? "暂不支持" : "unsupported"} {summary.claimStatusCounts.unsupported}</span>
             <span>{isZh ? "已否定" : "rejected"} {summary.claimStatusCounts.rejected}</span>
@@ -231,18 +226,18 @@ export function ResearchMemoryEvidencePanel({
           {summary.allowedVariables.length > 0 ? (
             <TagList>
               {summary.allowedVariables.map((path) => (
-                <code key={path} className="max-w-full break-all rounded bg-[var(--vui-control-muted)] px-1.5 py-0.5">
+                <code key={path} className={styles.variableTag}>
                   {path}
                 </code>
               ))}
             </TagList>
           ) : null}
           {summary.claimMapPreview.length > 0 ? (
-            <ul className="grid min-w-0 gap-1">
+            <ul className={styles.evidenceItems}>
               {summary.claimMapPreview.map((claim) => (
-                <li key={claim.claimId} className="grid min-w-0 grid-cols-[max-content_minmax(0,1fr)] gap-2">
-                  <span className="text-[var(--fg-tertiary)]">{claimStatusLabel(claim.status, lang)}</span>
-                  <span className="min-w-0 break-words text-[var(--fg-primary)]">{claim.claim}</span>
+                <li key={claim.claimId} className={styles.evidenceItem}>
+                  <span className={styles.evidenceType}>{claimStatusLabel(claim.status, lang)}</span>
+                  <span className={styles.previewClaim}>{claim.claim}</span>
                 </li>
               ))}
             </ul>
@@ -254,13 +249,13 @@ export function ResearchMemoryEvidencePanel({
 
   return (
     <section
-      className="grid min-w-0 gap-3 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] p-3 [font-size:var(--vui-font-sm)]"
+      className={styles.detailSection}
       data-memory-context-id={summary.contextId}
       data-research-memory-evidence="detail"
     >
-      <header className="grid min-w-0 gap-1">
+      <header className={styles.detailHeader}>
         <strong>{title}</strong>
-        <span className="text-[var(--fg-secondary)]">
+        <span className={styles.evidenceLabel}>
           {isZh
             ? `已引用 ${summary.knowledgeItemCount} 条知识、${summary.successfulRunCount} 个成功结果、${summary.negativeExperimentCount} 条负向实验。`
             : `Uses ${summary.knowledgeItemCount} knowledge items, ${summary.successfulRunCount} successful results, and ${summary.negativeExperimentCount} negative experiments.`}

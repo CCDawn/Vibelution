@@ -13,7 +13,7 @@ import type {
 } from "../../api/types";
 import { VButton, VContextualHint, VNativeInput } from "../../components/vui";
 import type { ChatMentionTarget } from "../chatMentionTokens";
-import styles from "../ChatCodingRoute.styles";
+import styles from "./ChatGroupCenterSurface.styles";
 import { ChatGroupMessageBody, ChatMentionedText } from "./ChatGroupMessagePresentation";
 
 export type GroupParticipantIdentity = {

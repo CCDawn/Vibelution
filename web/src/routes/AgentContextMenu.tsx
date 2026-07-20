@@ -3,7 +3,7 @@ import type { CSSProperties, PointerEvent } from "react";
 
 import type { AgentInstance, SessionSummary } from "../api/types";
 import { VButton } from "../components/vui";
-import styles from "./SessionContextMenu.styles";
+import styles from "./AgentContextMenu.styles";
 
 const MENU_WIDTH = 188;
 const MENU_HEIGHT = 176;
