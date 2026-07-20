@@ -1,3 +1,5 @@
+import type { MouseEvent as ReactMouseEvent } from "react";
+
 import type { AgentInstance, SessionSummary } from "../api/types";
 import { VButton } from "../components/vui";
 import styles from "./AgentConversationDirectory.styles";
@@ -11,6 +13,11 @@ export type AgentConversationDirectoryProps = {
   lang: "zh" | "en";
   resolveModelLabel: (modelId: string) => string | undefined;
   sessions: SessionSummary[];
+  onContextMenu: (
+    event: ReactMouseEvent<HTMLElement>,
+    agent: AgentInstance,
+    latestSession: SessionSummary | null,
+  ) => void;
   onOpenAgent: (agent: AgentInstance) => void;
 };
 
@@ -56,6 +63,7 @@ export function AgentConversationDirectory({
   lang,
   resolveModelLabel,
   sessions,
+  onContextMenu,
   onOpenAgent,
 }: AgentConversationDirectoryProps) {
   const visibleAgents = agents.filter(isVisibleChatAgent).filter((agent) => isAgentMatch(agent, filterText));
@@ -97,6 +105,7 @@ export function AgentConversationDirectory({
                 contentLayout="plain"
                 className={[styles.agentRow, active ? styles.agentRowActive : ""].filter(Boolean).join(" ")}
                 aria-current={active ? "page" : undefined}
+                onContextMenu={(event) => onContextMenu(event, agent, latestSession ?? null)}
                 onPress={() => onOpenAgent(agent)}
               >
                 <span className={styles.agentAvatar} aria-hidden="true">
