@@ -1061,7 +1061,7 @@ def _build_key_tools() -> List[BaseTool]:
         max_output_chars: int = 12000,
         _cancel_checker=None,
     ) -> str:
-        from tools.shell_tools import execute_shell_command
+        from core.infrastructure.codex_cli_sandbox import execute_codex_sandbox_command
         if not command:
             return '{"status": "error", "code": "MISSING_COMMAND", "message": "cli_tool 需要提供 command 参数"}'
         try:
@@ -1072,7 +1072,12 @@ def _build_key_tools() -> List[BaseTool]:
             max_output_chars = int(max_output_chars)
         except (TypeError, ValueError):
             max_output_chars = 12000
-        result = execute_shell_command(command, timeout=timeout, cwd=cwd or None, _cancel_checker=_cancel_checker)
+        result = execute_codex_sandbox_command(
+            command,
+            timeout=timeout,
+            cwd=cwd or None,
+            _cancel_checker=_cancel_checker,
+        )
         if max_output_chars > 0 and len(result) > max_output_chars:
             head_size = max(2000, max_output_chars // 2)
             tail_size = max(2000, max_output_chars - head_size)
