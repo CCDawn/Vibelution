@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import Optional, Dict, Any, List
 
 from core.infrastructure.event_bus import get_event_bus, EventNames, Event
+from core.infrastructure.feature_gate import resolve_feature_decision
 from core.infrastructure.state import get_state_manager
 from core.logging.logger import debug as _debug_logger
 
@@ -797,7 +798,8 @@ class MentalModel:
             token_ratio: 当前 token 使用率 (0.0-1.0)
             iteration: 当前迭代次数
         """
-        if not self._shared_llm:
+        mental_model_decision = resolve_feature_decision("mental_model")
+        if not mental_model_decision.effective_enabled or not self._shared_llm:
             return self._fallback_state(token_ratio=token_ratio)
 
         metrics = self.diagnose().metrics
