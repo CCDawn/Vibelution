@@ -166,6 +166,8 @@ from .session.live_output import (
     SESSION_LIVE_OUTPUT_CHECKPOINT_INTERVAL_SECONDS as _SESSION_LIVE_OUTPUT_CHECKPOINT_INTERVAL_SECONDS,
     SessionLiveOutputState,
     # Re-export store symbols for tests/helpers that touch session_service._SESSION_LIVE_OUTPUTS*.
+    _SESSION_LIVE_OUTPUT_CHECKPOINT_LAST_AT,
+    _SESSION_LIVE_OUTPUT_CHECKPOINT_LOCK,
     _SESSION_LIVE_OUTPUTS,
     _SESSION_LIVE_OUTPUTS_LOCK,
     build_live_output_checkpoint_core_payload,
