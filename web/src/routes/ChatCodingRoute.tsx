@@ -1079,21 +1079,67 @@ export function ChatCodingRoute() {
       fetchJson<AgentInstance>(`/api/agents/${encodeURIComponent(payload.agentId)}`, {
         method: "DELETE",
       }),
-    onSuccess: (agent) => {
+    onMutate: async (payload) => {
+      await queryClient.cancelQueries({ queryKey: queryKeys.agents() });
+      const previousAgents = queryClient.getQueryData<AgentInstance[]>(queryKeys.agents());
+      const previousSelectedAgentId = selectedAgentId;
+      const previousActiveSessionId = activeSessionId;
+      const remainingAgents = (previousAgents ?? []).filter((agent) => agent.agentId !== payload.agentId);
+      const remainingAgentIds = new Set(remainingAgents.map((agent) => agent.agentId));
+      const currentActiveSession = (sessionsQuery.data ?? []).find((session) => session.id === activeSessionId);
+      const fallbackSession = (
+        currentActiveSession
+        && remainingAgentIds.has(String(currentActiveSession.agentId || "").trim())
+      )
+        ? currentActiveSession
+        : (sessionsQuery.data ?? []).find(
+          (session) => remainingAgentIds.has(String(session.agentId || "").trim()),
+        );
+      const activeSessionAgentId = String(
+        sessionDetailQuery.data?.agentId
+        || currentActiveSession?.agentId
+        || "",
+      ).trim();
+      const fallbackAgentId = String(
+        fallbackSession?.agentId
+        || remainingAgents.find((agent) => String(agent.status || "").trim() !== "archived")?.agentId
+        || "",
+      ).trim();
+
+      queryClient.setQueryData<AgentInstance[]>(queryKeys.agents(), remainingAgents);
       setAgentContextMenu(null);
-      setSelectedAgentId((current) => (current === agent.agentId ? "" : current));
+      setSelectedAgentId((current) => current === payload.agentId ? fallbackAgentId : current);
+      if (activeSessionAgentId === payload.agentId) {
+        setActiveSession(fallbackSession?.id || "");
+      }
+      return {
+        previousActiveSessionId,
+        previousAgents,
+        previousSelectedAgentId,
+      };
+    },
+    onSuccess: (agent) => {
+      queryClient.setQueryData<AgentInstance[]>(queryKeys.agents(), (current) =>
+        current?.filter((item) => item.agentId !== agent.agentId),
+      );
       setSessionComposerErrors((current) => ({
         ...current,
         __sessions__: "",
       }));
+      void chatWorkspaceCache.afterAgentArchived();
     },
-    onError: (error) => {
+    onError: (error, _variables, context) => {
+      if (context?.previousAgents) {
+        queryClient.setQueryData(queryKeys.agents(), context.previousAgents);
+      }
+      setSelectedAgentId(context?.previousSelectedAgentId ?? "");
+      if (context?.previousActiveSessionId) {
+        setActiveSession(context.previousActiveSessionId);
+      }
       setSessionComposerErrors((current) => ({
         ...current,
         __sessions__: describeError(error, t("loadFailed")),
       }));
-    },
-    onSettled: () => {
       void chatWorkspaceCache.afterAgentArchived();
     },
   });
