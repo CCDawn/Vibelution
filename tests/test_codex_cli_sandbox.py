@@ -5,6 +5,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from core.infrastructure import codex_cli_sandbox
+from tools import shell_tools
 from tools.shell_tools import workspace_root_override
 
 
@@ -125,6 +126,137 @@ def test_sandbox_runs_rewritten_python_command_without_cmd_quote_roundtrip(monke
 
     assert argv[-3:] == [python_executable, "-c", "print(123)"]
     assert "cmd.exe" not in argv
+
+
+def test_sandbox_uses_cmd_for_native_windows_and_chain(monkeypatch):
+    monkeypatch.setattr(codex_cli_sandbox.os, "name", "nt")
+    monkeypatch.setattr(
+        codex_cli_sandbox,
+        "_windows_command_interpreter",
+        lambda: r"C:\Windows\System32\cmd.exe",
+    )
+    native_commands = {
+        "git": r"C:\Program Files\Git\cmd\git.exe",
+        "rg": r"C:\Codex\bin\rg.exe",
+    }
+    monkeypatch.setattr(
+        codex_cli_sandbox.shutil,
+        "which",
+        lambda name: native_commands.get(name),
+    )
+    command = (
+        'git status --short && git rev-parse --show-toplevel '
+        '&& rg -n "candidate" .'
+    )
+    route = SimpleNamespace(route="git_bash", command=command)
+
+    argv = codex_cli_sandbox._sandbox_argv(
+        r"C:\Codex\codex.exe",
+        route,
+        git_bash_executable=r"C:\Program Files\Git\bin\bash.exe",
+    )
+
+    assert argv[-7:] == [
+        r"C:\Windows\System32\cmd.exe",
+        "/d",
+        "/v:off",
+        "/s",
+        "/c",
+        "call",
+        "%VIBELUTION_CODEX_SANDBOX_COMMAND%",
+    ]
+
+
+def test_execute_passes_native_windows_chain_through_environment(monkeypatch, tmp_path):
+    recorded = {}
+    command = 'git status --short && rg -n "candidate" .'
+    native_commands = {
+        "git": r"C:\Program Files\Git\cmd\git.exe",
+        "rg": r"C:\Codex\bin\rg.exe",
+    }
+    monkeypatch.setattr(codex_cli_sandbox.os, "name", "nt")
+    monkeypatch.setattr(
+        codex_cli_sandbox,
+        "_resolve_codex_executable",
+        lambda: r"C:\Codex\codex.exe",
+    )
+    monkeypatch.setattr(
+        codex_cli_sandbox,
+        "_windows_command_interpreter",
+        lambda: r"C:\Windows\System32\cmd.exe",
+    )
+    monkeypatch.setattr(
+        codex_cli_sandbox.shutil,
+        "which",
+        lambda name: native_commands.get(name),
+    )
+    monkeypatch.setattr(
+        shell_tools,
+        "_find_git_bash",
+        lambda: r"C:\Program Files\Git\bin\bash.exe",
+    )
+
+    def fake_popen(argv, **kwargs):
+        recorded["argv"] = argv
+        recorded["env"] = kwargs["env"]
+        return _CompletedProcess()
+
+    monkeypatch.setattr(codex_cli_sandbox.subprocess, "Popen", fake_popen)
+
+    result = codex_cli_sandbox.execute_codex_sandbox_command(
+        command=command,
+        timeout=5,
+        cwd=str(tmp_path),
+    )
+
+    assert result == "sandbox ok"
+    assert recorded["argv"][-2:] == [
+        "call",
+        "%VIBELUTION_CODEX_SANDBOX_COMMAND%",
+    ]
+    assert recorded["env"]["VIBELUTION_CODEX_SANDBOX_COMMAND"] == command
+
+
+def test_sandbox_keeps_unix_and_chain_on_git_bash(monkeypatch):
+    monkeypatch.setattr(codex_cli_sandbox.os, "name", "nt")
+    monkeypatch.setattr(codex_cli_sandbox.shutil, "which", lambda name: None)
+    command = 'ls && grep -n "candidate" README.md'
+    route = SimpleNamespace(route="git_bash", command=command)
+
+    argv = codex_cli_sandbox._sandbox_argv(
+        r"C:\Codex\codex.exe",
+        route,
+        git_bash_executable=r"C:\Program Files\Git\bin\bash.exe",
+    )
+
+    assert argv[-3:] == [
+        r"C:\Program Files\Git\bin\bash.exe",
+        "-c",
+        command,
+    ]
+
+
+def test_sandbox_does_not_treat_quoted_and_as_native_chain(monkeypatch):
+    monkeypatch.setattr(codex_cli_sandbox.os, "name", "nt")
+    monkeypatch.setattr(
+        codex_cli_sandbox.shutil,
+        "which",
+        lambda name: r"C:\Program Files\Git\cmd\git.exe",
+    )
+    command = 'git log --format="subject && body"'
+    route = SimpleNamespace(route="git_bash", command=command)
+
+    argv = codex_cli_sandbox._sandbox_argv(
+        r"C:\Codex\codex.exe",
+        route,
+        git_bash_executable=r"C:\Program Files\Git\bin\bash.exe",
+    )
+
+    assert argv[-3:] == [
+        r"C:\Program Files\Git\bin\bash.exe",
+        "-c",
+        command,
+    ]
 
 
 def test_execute_fails_closed_when_native_codex_is_missing(monkeypatch, tmp_path):

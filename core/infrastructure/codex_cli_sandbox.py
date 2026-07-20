@@ -18,6 +18,26 @@ from scripts.windowless_subprocess import no_window_subprocess_kwargs
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 _POLL_INTERVAL_SECONDS = 0.2
+_WINDOWS_CHAIN_COMMAND_ENV = "VIBELUTION_CODEX_SANDBOX_COMMAND"
+_WINDOWS_CHAIN_BUILTINS = {
+    "cd",
+    "cls",
+    "copy",
+    "dir",
+    "echo",
+    "md",
+    "mkdir",
+    "move",
+    "popd",
+    "pushd",
+    "rd",
+    "ren",
+    "rename",
+    "rmdir",
+    "set",
+    "type",
+    "where",
+}
 _PYTHON_SITECUSTOMIZE = """\
 import os
 from pathlib import Path
@@ -168,6 +188,92 @@ def _direct_executable_argv(command: str) -> list[str]:
     return normalized
 
 
+def _split_unquoted_and_chain(command: str) -> list[str]:
+    segments: list[str] = []
+    current: list[str] = []
+    quote = ""
+    escaped = False
+    index = 0
+    while index < len(command):
+        character = command[index]
+        if escaped:
+            current.append(character)
+            escaped = False
+            index += 1
+            continue
+        if character == "^" and not quote:
+            current.append(character)
+            escaped = True
+            index += 1
+            continue
+        if character in {'"', "'"}:
+            if quote == character:
+                quote = ""
+            elif not quote:
+                quote = character
+            current.append(character)
+            index += 1
+            continue
+        if not quote and character == "&":
+            if index + 1 >= len(command) or command[index + 1] != "&":
+                return []
+            segment = "".join(current).strip()
+            if not segment:
+                return []
+            segments.append(segment)
+            current = []
+            index += 2
+            continue
+        if not quote and character in {"|", "<", ">"}:
+            return []
+        current.append(character)
+        index += 1
+    segment = "".join(current).strip()
+    if not segment:
+        return []
+    segments.append(segment)
+    return segments if len(segments) > 1 else []
+
+
+def _is_native_windows_command_segment(command: str) -> bool:
+    try:
+        tokens = shlex.split(command, posix=False)
+    except ValueError:
+        return False
+    if not tokens:
+        return False
+    executable = tokens[0]
+    if (
+        len(executable) >= 2
+        and executable[0] == executable[-1]
+        and executable[0] in {'"', "'"}
+    ):
+        executable = executable[1:-1]
+    normalized = executable.strip()
+    if not normalized:
+        return False
+    lowered_name = Path(normalized).name.lower()
+    if lowered_name in {"bash", "bash.exe", "sh", "sh.exe", "wsl", "wsl.exe"}:
+        return False
+    if lowered_name in _WINDOWS_CHAIN_BUILTINS:
+        return True
+    resolved = shutil.which(normalized)
+    if not resolved:
+        return False
+    resolved_text = str(Path(resolved).resolve()).replace("/", "\\").lower()
+    if "\\git\\usr\\bin\\" in resolved_text:
+        return False
+    return Path(resolved).suffix.lower() in {".exe", ".com", ".cmd", ".bat"}
+
+
+def _is_native_windows_and_chain(command: str) -> bool:
+    segments = _split_unquoted_and_chain(command)
+    return bool(segments) and all(
+        _is_native_windows_command_segment(segment)
+        for segment in segments
+    )
+
+
 def _sandbox_process_environment(
     workdir: Path,
     command_hash: str,
@@ -237,6 +343,16 @@ def _sandbox_argv(
     direct_argv = _direct_executable_argv(route.command)
     if direct_argv:
         return prefix + direct_argv
+    if route.route == "git_bash" and _is_native_windows_and_chain(route.command):
+        return prefix + [
+            _windows_command_interpreter(),
+            "/d",
+            "/v:off",
+            "/s",
+            "/c",
+            "call",
+            f"%{_WINDOWS_CHAIN_COMMAND_ENV}%",
+        ]
     if route.route == "powershell":
         return prefix + [
             _powershell_executable(),
@@ -364,14 +480,18 @@ def execute_codex_sandbox_command(
     except (TypeError, ValueError):
         timeout_seconds = 60
 
+    is_native_windows_chain = (
+        route.route == "git_bash" and _is_native_windows_and_chain(route.command)
+    )
     argv = _sandbox_argv(
         executable,
         route,
         git_bash_executable=_find_git_bash() if route.route == "git_bash" else "",
     )
+    route_label = "windows_native_chain" if is_native_windows_chain else route.route
     _debug_logger.info(
         f"[Codex CLI 沙盒] 启动 commandHash={command_hash} "
-        f"cwd={workdir} timeout={timeout_seconds}s"
+        f"route={route_label} cwd={workdir} timeout={timeout_seconds}s"
     )
     started_at = time.monotonic()
     process: subprocess.Popen[str] | None = None
@@ -382,6 +502,9 @@ def execute_codex_sandbox_command(
             workdir,
             command_hash,
         )
+        environment.pop(_WINDOWS_CHAIN_COMMAND_ENV, None)
+        if is_native_windows_chain:
+            environment[_WINDOWS_CHAIN_COMMAND_ENV] = route.command
         process = subprocess.Popen(
             argv,
             shell=False,
