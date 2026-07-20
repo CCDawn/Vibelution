@@ -16,8 +16,9 @@ import researchWorkflowResourcesSource from "./teams/useResearchWorkflowResource
 
 /** Route shell + claimable pure modules extracted from TeamsRoute. */
 import experimentLoopModelSource from "./teams/experimentLoopModel.ts?raw";
+import aiSearchPresentationSource from "./teams/aiSearchPresentation.ts?raw";
 
-const routeAndPureSource = `${routeSource}\n${canvasGeometrySource}\n${researchWorkspaceModelSource}\n${teamKindModelSource}\n${presentationModelSource}\n${experimentLoopModelSource}`;
+const routeAndPureSource = `${routeSource}\n${canvasGeometrySource}\n${researchWorkspaceModelSource}\n${teamKindModelSource}\n${presentationModelSource}\n${experimentLoopModelSource}\n${aiSearchPresentationSource}`;
 import teamMemoryIndexPanelSource from "./TeamMemoryIndexPanel.tsx?raw";
 import teamMemoryIndexPanelStyles from "./TeamMemoryIndexPanel.styles";
 import teamExperimentMethodPanelSource from "./TeamExperimentMethodPanel.tsx?raw";
