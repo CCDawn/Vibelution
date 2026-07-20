@@ -133,6 +133,79 @@ def test_governor_file_allowlist_does_not_allow_nested_paths(monkeypatch, tmp_pa
     assert records[-1]["event"] == "mutation_blocked"
 
 
+def test_governor_allows_relative_cli_write_inside_active_workspace_override(monkeypatch, tmp_path):
+    _patch_runtime(monkeypatch, tmp_path)
+    candidate_root = tmp_path / "candidate"
+    candidate_root.mkdir()
+    governor = governor_module.EvolutionGovernor()
+
+    from tools.shell_tools import workspace_root_override
+
+    with workspace_root_override(candidate_root):
+        message = governor.check_mutation_allowed(
+            "cli_tool",
+            {
+                "command": (
+                    "python -c \"from pathlib import Path; "
+                    "Path('web/src/demo.ts').write_text('demo', encoding='utf-8')\""
+                )
+            },
+            "txn_demo",
+        )
+
+    assert message is None
+
+
+def test_governor_blocks_apply_patch_target_outside_active_workspace_override(monkeypatch, tmp_path):
+    project_root = _patch_runtime(monkeypatch, tmp_path)
+    candidate_root = tmp_path / "candidate"
+    candidate_root.mkdir()
+    outside_target = project_root / "web" / "src" / "demo.ts"
+    governor = governor_module.EvolutionGovernor()
+
+    from tools.shell_tools import workspace_root_override
+
+    patch_text = f"""*** Begin Patch
+*** Update File: {outside_target}
+@@
+-before
++after
+*** End Patch"""
+    with workspace_root_override(candidate_root):
+        message = governor.check_mutation_allowed(
+            "apply_patch_tool",
+            {"patch_text": patch_text},
+            "txn_demo",
+        )
+
+    assert message is not None
+    assert "拒绝: web/src/demo.ts" in message
+
+
+def test_governor_allows_apply_patch_target_inside_active_workspace_override(monkeypatch, tmp_path):
+    _patch_runtime(monkeypatch, tmp_path)
+    candidate_root = tmp_path / "candidate"
+    candidate_root.mkdir()
+    governor = governor_module.EvolutionGovernor()
+
+    from tools.shell_tools import workspace_root_override
+
+    patch_text = """*** Begin Patch
+*** Update File: web/src/demo.ts
+@@
+-before
++after
+*** End Patch"""
+    with workspace_root_override(candidate_root):
+        message = governor.check_mutation_allowed(
+            "apply_patch_tool",
+            {"patch_text": patch_text},
+            "txn_demo",
+        )
+
+    assert message is None
+
+
 def test_governor_records_complexity_for_dynamic_prompt_mutation(monkeypatch, tmp_path):
     project_root = _patch_runtime(monkeypatch, tmp_path)
     governor = governor_module.EvolutionGovernor()

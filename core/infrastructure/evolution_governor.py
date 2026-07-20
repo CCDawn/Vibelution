@@ -22,6 +22,10 @@ class EvolutionGovernor:
         "write_file_tool",
         "apply_diff_edit_tool",
     }
+    _APPLY_PATCH_TARGET_PATTERN = re.compile(
+        r"^\*\*\* (?:Add|Update|Delete) File: (?P<path>.+?)\s*$",
+        re.MULTILINE,
+    )
     _DYNAMIC_PROMPT_TOOLS = {
         "write_dynamic_prompt_tool",
         "add_insight_to_dynamic_tool",
@@ -215,12 +219,28 @@ class EvolutionGovernor:
             file_path = str((tool_args or {}).get("file_path") or "").strip()
             if not file_path:
                 return []
-            return [self._resolve_project_path(file_path)]
+            return [self._resolve_tool_path(file_path)]
+        if tool_name == "apply_patch_tool":
+            return self._resolve_apply_patch_targets(tool_args)
         if tool_name == "cli_tool":
             return self._resolve_cli_write_targets(str((tool_args or {}).get("command") or ""))
         if tool_name in self._DYNAMIC_PROMPT_TOOLS:
             return [get_workspace().get_prompt_path("DYNAMIC.md").resolve()]
         return []
+
+    @classmethod
+    def _resolve_apply_patch_targets(cls, tool_args: dict) -> List[Path]:
+        patch_text = str((tool_args or {}).get("patch_text") or "")
+        cwd = str((tool_args or {}).get("cwd") or ".").strip() or "."
+        base_path = Path(cwd)
+        workspace_override = cls._active_workspace_override()
+        if not base_path.is_absolute():
+            base_path = (workspace_override or get_workspace().project_root.resolve()) / base_path
+        return [
+            cls._resolve_tool_path(str(match.group("path") or ""), base_path=base_path)
+            for match in cls._APPLY_PATCH_TARGET_PATTERN.finditer(patch_text)
+            if str(match.group("path") or "").strip()
+        ]
 
     @classmethod
     def _resolve_cli_write_targets(cls, command: str) -> List[Path]:
@@ -231,7 +251,7 @@ class EvolutionGovernor:
                 raw_path = str(match.group("path") or "").strip()
                 if not raw_path or not cls._looks_like_cli_file_target(raw_path):
                     continue
-                resolved = cls._resolve_project_path(raw_path)
+                resolved = cls._resolve_tool_path(raw_path)
                 key = str(resolved).lower()
                 if key in seen:
                     continue
@@ -256,6 +276,9 @@ class EvolutionGovernor:
     def _allowed_roots(self) -> List[Path]:
         evolution = get_config().evolution
         roots = [self._resolve_project_path(item) for item in (evolution.allowed_target_dirs or []) if str(item).strip()]
+        workspace_override = self._active_workspace_override()
+        if workspace_override is not None:
+            roots.append(workspace_override)
         return roots
 
     @staticmethod
@@ -295,6 +318,23 @@ class EvolutionGovernor:
         if parts and parts[0] == "workspace":
             return developer_sandbox.seeded_sandbox_workspace_path(get_workspace().project_root, *parts[1:]).resolve()
         return (get_workspace().project_root / candidate).resolve()
+
+    @classmethod
+    def _resolve_tool_path(cls, path_str: str, *, base_path: Path | None = None) -> Path:
+        candidate = Path(path_str)
+        if candidate.is_absolute():
+            return candidate.resolve()
+        anchor = base_path or cls._active_workspace_override() or get_workspace().project_root.resolve()
+        return (anchor / candidate).resolve()
+
+    @staticmethod
+    def _active_workspace_override() -> Path | None:
+        try:
+            from tools.shell_tools import get_workspace_root_override
+
+            return get_workspace_root_override()
+        except Exception:
+            return None
 
     @classmethod
     def _is_risky_target(cls, path: Path) -> bool:

@@ -1587,6 +1587,50 @@ class TestToolExecutorErrorHandling:
         assert payload["status"] == "ok"
         assert target.read_text(encoding="utf-8") == "hello codex\n"
 
+    def test_apply_patch_tool_defaults_to_active_workspace_override(self, executor, tmp_path):
+        target = tmp_path / "demo.txt"
+        target.write_text("hello\n", encoding="utf-8")
+
+        with shell_tools.workspace_root_override(tmp_path):
+            result, action = executor.execute(
+                "apply_patch_tool",
+                {
+                    "patch_text": """*** Begin Patch
+*** Update File: demo.txt
+@@
+-hello
++hello isolated
+*** End Patch""",
+                },
+            )
+
+        assert action is None
+        payload = json.loads(str(result))
+        assert payload["status"] == "ok"
+        assert target.read_text(encoding="utf-8") == "hello isolated\n"
+
+    def test_apply_diff_edit_tool_defaults_to_active_workspace_override(self, executor, tmp_path):
+        target = tmp_path / "demo.txt"
+        target.write_text("hello\n", encoding="utf-8")
+
+        with shell_tools.workspace_root_override(tmp_path):
+            result, action = executor.execute(
+                "apply_diff_edit_tool",
+                {
+                    "file_path": "demo.txt",
+                    "diff_text": (
+                        ("<" * 7)
+                        + " SEARCH\nhello\n=======\nhello isolated\n"
+                        + (">" * 7)
+                        + " REPLACE"
+                    ),
+                },
+            )
+
+        assert action is None
+        assert str(result).startswith("[编辑] 成功修改")
+        assert target.read_text(encoding="utf-8") == "hello isolated"
+
     def test_python_lint_publishes_validation_event(self, executor):
         events = []
 
