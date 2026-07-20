@@ -1156,8 +1156,13 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("data-research-stage-detail-status={detailHeroStatus}");
     expect(routeSource).toContain("data-research-stage-detail-best={detailHeroBestValue}");
     expect(routeSource).toContain("data-research-stage-detail-diagnostic={detailHeroDiagnosticValue}");
+    expect(routeSource).toContain("data-research-stage-detail-diagnostic-status={detailHeroDiagnosticStatus || undefined}");
     expect(routeSource).toContain("stage3Lifecycle.bestCandidateId");
-    expect(routeSource).toContain("stage3Lifecycle.latestDiagnosticStatus.status");
+    expect(routeSource).toContain("detailHeroDiagnosticStatus");
+    expect(routeSource).toContain("latestDiagnosticStatus.status");
+    expect(routeSource).toContain("researchDiagnosticStatusLabel");
+    expect(routeSource).toContain('smoke_needs_review: { zh: "Smoke 待复核", en: "smoke needs review" }');
+    expect(routeSource).toContain('full_run_needs_review: { zh: "正式实验待复核", en: "formal run needs review" }');
     expect(routeSource).toContain("memoryContextSummary");
     expect(routeSource).toContain("团队记忆");
     expect(routeSource).toContain("已用记忆");

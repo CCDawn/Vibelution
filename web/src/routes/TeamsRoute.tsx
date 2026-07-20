@@ -2146,6 +2146,36 @@ function researchIterationLifecycleStatusLabel(status: string, lang: "zh" | "en"
   return lang === "zh" ? "执行中" : "executing";
 }
 
+function researchDiagnosticStatusLabel(status: string, lang: "zh" | "en") {
+  const normalizedStatus = status.trim().toLowerCase();
+  if (!normalizedStatus) {
+    return lang === "zh" ? "无" : "none";
+  }
+  const labels: Record<string, { zh: string; en: string }> = {
+    draft: { zh: "设计草稿", en: "design draft" },
+    planned: { zh: "已完成规划", en: "planned" },
+    baseline_ready: { zh: "Baseline 已就绪", en: "baseline ready" },
+    ready_for_smoke: { zh: "可执行 Smoke", en: "ready for smoke" },
+    smoke_running: { zh: "Smoke 执行中", en: "smoke running" },
+    smoke_passed: { zh: "Smoke 已通过", en: "smoke passed" },
+    smoke_partial: { zh: "Smoke 部分通过", en: "smoke partially passed" },
+    smoke_needs_review: { zh: "Smoke 待复核", en: "smoke needs review" },
+    ready_for_full_run: { zh: "可执行正式实验", en: "ready for formal run" },
+    full_run_running: { zh: "正式实验执行中", en: "formal run in progress" },
+    full_run_passed: { zh: "正式实验已通过", en: "formal run passed" },
+    full_run_failed: { zh: "正式实验失败", en: "formal run failed" },
+    full_run_needs_review: { zh: "正式实验待复核", en: "formal run needs review" },
+    ready_for_knowledge_ingestion: { zh: "待知识回写", en: "ready for knowledge writeback" },
+    knowledge_steward_notified: { zh: "已通知知识治理", en: "knowledge steward notified" },
+    knowledge_steward_wake_pending: { zh: "等待知识治理响应", en: "waiting for knowledge steward" },
+    knowledge_steward_notification_failed: { zh: "知识治理通知失败", en: "knowledge steward notification failed" },
+    ingested: { zh: "已完成知识回写", en: "knowledge writeback complete" },
+    needs_review: { zh: "待复核", en: "needs review" },
+    blocked: { zh: "已阻塞", en: "blocked" },
+  };
+  return labels[normalizedStatus]?.[lang] || status;
+}
+
 function canvasViewStyle(nodes: TeamCanvasNode[], frameSize?: CanvasFrameSize): CanvasViewportStyle {
   if (!nodes.length) {
     return {
@@ -8387,13 +8417,19 @@ export function TeamsRoute({
     const detailHeroBestValue = stage3Lifecycle
       ? (stage3Lifecycle.bestCandidateId || (lang === "zh" ? "无" : "none"))
       : String(stagePhase?.roundCount ?? 0);
+    const detailHeroDiagnosticStatus = stage3Lifecycle?.latestDiagnosticStatus.status || "";
     const detailHeroDiagnosticValue = stage3Lifecycle
-      ? (stage3Lifecycle.latestDiagnosticStatus.status || (lang === "zh" ? "无" : "none"))
+      ? researchDiagnosticStatusLabel(detailHeroDiagnosticStatus, lang)
       : (latestRound ? `${latestRound.status} #${latestRound.roundNumber}` : (lang === "zh" ? "无" : "none"));
     const detailHeroBestTitle = stage3Lifecycle
       ? [stage3Lifecycle.bestValidatedPlanId, stage3Lifecycle.bestValidatedResultId].filter(Boolean).join(" · ")
       : undefined;
-    const detailHeroDiagnosticTitle = stage3Lifecycle?.latestDiagnosticStatus.title || undefined;
+    const detailHeroDiagnosticTitle = stage3Lifecycle
+      ? [
+          stage3Lifecycle.latestDiagnosticStatus.title,
+          detailHeroDiagnosticStatus ? `status: ${detailHeroDiagnosticStatus}` : "",
+        ].filter(Boolean).join(" · ") || undefined
+      : undefined;
     const config = {
       experiment: {
         eyebrow: lang === "zh" ? "挑战杯ai科研团队 / 实验阶段" : "Challenge Cup AI research team / experiment stage",
@@ -8495,6 +8531,7 @@ export function TeamsRoute({
                 <strong
                   className="min-w-0 break-all"
                   data-research-stage-detail-diagnostic={detailHeroDiagnosticValue}
+                  data-research-stage-detail-diagnostic-status={detailHeroDiagnosticStatus || undefined}
                   title={detailHeroDiagnosticTitle}
                 >
                   {detailHeroDiagnosticValue}
