@@ -116,9 +116,14 @@ def test_agent_purge_rolls_back_staged_sessions_when_delete_fails(tmp_path, monk
     assert detail["agentId"] == agent["agentId"]
     assert detail["agentStatusCode"] == "archived_agent"
     room_detail = chat_room_service.get_chat_room_detail(room["roomId"])
-    assert [participant["agentId"] for participant in room_detail["participants"]] == [peer["agentId"]]
+    assert [participant["agentId"] for participant in room_detail["participants"]] == [
+        agent["agentId"],
+        peer["agentId"],
+    ]
     team_detail = team_service.get_team(team["teamId"])
-    assert team_detail["members"] == []
+    assert [member["agentId"] for member in team_detail["members"]] == [
+        agent["agentId"]
+    ]
     bindings = agent_mode_binding_service.get_mode_bindings_payload()["modes"]
     assert bindings["chat"]["defaultAgentId"] == peer["agentId"]
     assert agent["agentId"] not in bindings["chat"]["availableAgentIds"]

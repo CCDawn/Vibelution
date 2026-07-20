@@ -306,6 +306,8 @@ def session_select(session_id: str) -> dict:
         return select_chat_session(session_id)
     except SessionNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except SessionValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.get("/sessions/{session_id}/child-sessions")
@@ -364,6 +366,8 @@ def session_delete(session_id: str, request: Request) -> dict:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except SessionBusyError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except SessionValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.get("/sessions/{session_id}/events")

@@ -102,6 +102,19 @@ def _public_agent_session_cleanup(cleanup: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _run_best_effort_compensations(
+    timings: dict[str, float],
+    compensations: list[tuple[str, Callable[[], Any]]],
+) -> list[str]:
+    failures: list[str] = []
+    for stage, callback in compensations:
+        try:
+            _timed(timings, stage, callback)
+        except Exception as rollback_error:
+            failures.append(f"{stage}:{type(rollback_error).__name__}")
+    return failures
+
+
 def _prepare_bulk_archive_references(
     candidate_ids: list[str],
     *,
@@ -181,9 +194,6 @@ def bulk_archive_agents(agent_ids: list[str] | None) -> dict[str, Any]:
         except (AgentDirectoryError, AgentNotFoundError) as exc:
             skipped.append(_skip_item(agent_id, _archive_skip_reason(exc), str(exc)))
             continue
-        if str(agent.get("status") or "active").strip() == "archived":
-            skipped.append(_skip_item(agent_id, "already_archived", "Agent is already archived."))
-            continue
         archive_candidates.append(agent)
 
     candidate_ids = [str(agent.get("agentId") or "").strip() for agent in archive_candidates if str(agent.get("agentId") or "").strip()]
@@ -200,6 +210,7 @@ def bulk_archive_agents(agent_ids: list[str] | None) -> dict[str, Any]:
         archived_by_agent_id: dict[str, dict[str, Any]] = {}
         session_archive_by_agent_id: dict[str, dict[str, Any]] = {}
         session_archive_restore_tokens_by_agent_id: dict[str, dict[str, Any]] = {}
+        newly_archived_agent_ids: set[str] = set()
         archive_failure: tuple[str, Exception] | None = None
         for agent_id in candidate_ids:
             session_archive: dict[str, Any] = {}
@@ -223,45 +234,82 @@ def bulk_archive_agents(agent_ids: list[str] | None) -> dict[str, Any]:
                     "archive_agents",
                     lambda agent_id=agent_id: archive_agent_instance(agent_id, repair_mode_bindings=False),
                 )
+                if str(snapshot.get("status") or "active").strip() != "archived":
+                    newly_archived_agent_ids.add(agent_id)
             except Exception as exc:
                 restore_token = session_archive.get("restoreToken")
                 if isinstance(restore_token, dict):
-                    _timed(
+                    rollback_failures = _run_best_effort_compensations(
                         timings,
-                        "rollback_agent_sessions",
-                        lambda restore_token=restore_token: session_service.restore_agent_sessions_archive(restore_token),
+                        [
+                            (
+                                "rollback_agent_sessions",
+                                lambda restore_token=restore_token: session_service.restore_agent_sessions_archive(
+                                    restore_token
+                                ),
+                            )
+                        ],
                     )
+                    if rollback_failures:
+                        exc.add_note(
+                            "Bulk archive compensation incomplete: "
+                            + ", ".join(rollback_failures)
+                        )
                 archive_failure = (agent_id, exc)
                 break
         if archive_failure is not None:
             failed_agent_id, archive_error = archive_failure
+            compensations: list[tuple[str, Callable[[], Any]]] = []
             for archived_agent_id in reversed(list(archived_by_agent_id)):
-                _timed(
-                    timings,
-                    "rollback_archived_agents",
-                    lambda archived_agent_id=archived_agent_id: reactivate_agent_instance(
-                        archived_agent_id,
-                        reason="bulk_archive_rollback",
-                    ),
-                )
+                if archived_agent_id in newly_archived_agent_ids:
+                    compensations.append(
+                        (
+                            "rollback_archived_agents",
+                            lambda archived_agent_id=archived_agent_id: reactivate_agent_instance(
+                                archived_agent_id,
+                                reason="bulk_archive_rollback",
+                            ),
+                        )
+                    )
                 restore_token = session_archive_restore_tokens_by_agent_id.get(archived_agent_id)
                 if restore_token:
-                    _timed(
-                        timings,
-                        "rollback_agent_sessions",
-                        lambda restore_token=restore_token: session_service.restore_agent_sessions_archive(restore_token),
+                    compensations.append(
+                        (
+                            "rollback_agent_sessions",
+                            lambda restore_token=restore_token: session_service.restore_agent_sessions_archive(
+                                restore_token
+                            ),
+                        )
                     )
-            _timed(timings, "rollback_mode_bindings", lambda: restore_removed_agents_to_mode_bindings(mode_restore_token))
-            _timed(
-                timings,
-                "rollback_chat_rooms",
-                lambda: restore_removed_agents_to_chat_rooms(room_cleanup.get("restoreToken")),
+            compensations.extend(
+                [
+                    (
+                        "rollback_mode_bindings",
+                        lambda: restore_removed_agents_to_mode_bindings(mode_restore_token),
+                    ),
+                    (
+                        "rollback_chat_rooms",
+                        lambda: restore_removed_agents_to_chat_rooms(
+                            room_cleanup.get("restoreToken")
+                        ),
+                    ),
+                    (
+                        "rollback_teams",
+                        lambda: restore_removed_agents_to_teams(
+                            team_cleanup.get("restoreToken")
+                        ),
+                    ),
+                ]
             )
-            _timed(
+            rollback_failures = _run_best_effort_compensations(
                 timings,
-                "rollback_teams",
-                lambda: restore_removed_agents_to_teams(team_cleanup.get("restoreToken")),
+                compensations,
             )
+            if rollback_failures:
+                archive_error.add_note(
+                    "Bulk archive compensation incomplete: "
+                    + ", ".join(rollback_failures)
+                )
             for agent_id in candidate_ids:
                 if agent_id == failed_agent_id:
                     failed.append(_failed_item(agent_id, _archive_skip_reason(archive_error), str(archive_error)))
@@ -322,7 +370,7 @@ def bulk_archive_agents(agent_ids: list[str] | None) -> dict[str, Any]:
 
 
 def bulk_purge_agents(agent_ids: list[str] | None) -> dict[str, Any]:
-    """Permanently delete many archived Agents while scanning shared references once."""
+    """Permanently delete archived Agents with per-Agent transactional compensation."""
 
     requested_agent_ids = _dedupe_agent_ids(agent_ids)
     timings: dict[str, float] = {}
@@ -386,8 +434,20 @@ def bulk_purge_agents(agent_ids: list[str] | None) -> dict[str, Any]:
             purge_ready_agent_ids.append(agent_id)
 
     if purge_ready_agent_ids:
+        mode_restore_token = _timed(
+            timings,
+            "snapshot_mode_bindings",
+            get_mode_bindings_payload,
+        )
         try:
-            team_cleanup = _timed(timings, "remove_from_teams", lambda: remove_agents_from_teams(purge_ready_agent_ids))
+            team_cleanup = _timed(
+                timings,
+                "remove_from_teams",
+                lambda: remove_agents_from_teams(
+                    purge_ready_agent_ids,
+                    include_restore_token=True,
+                ),
+            )
             room_cleanup = _timed(
                 timings,
                 "remove_from_chat_rooms",
@@ -396,41 +456,110 @@ def bulk_purge_agents(agent_ids: list[str] | None) -> dict[str, Any]:
                     allow_empty_rooms=True,
                     direct_session_ids_by_agent_id=direct_session_ids_by_agent_id,
                     include_chat_rooms=False,
+                    include_restore_token=True,
                 ),
             )
             mode_cleanup = _timed(
                 timings,
                 "remove_from_mode_bindings",
-                lambda: remove_agents_from_mode_bindings(purge_ready_agent_ids, agent_snapshots_by_agent_id=snapshots_by_agent_id),
+                lambda: remove_agents_from_mode_bindings(
+                    purge_ready_agent_ids,
+                    agent_snapshots_by_agent_id=snapshots_by_agent_id,
+                ),
             )
-        except Exception:
-            for agent_id in purge_ready_agent_ids:
-                restore_token = session_purge_restore_tokens_by_agent_id.get(agent_id)
+        except Exception as exc:
+            compensations: list[tuple[str, Callable[[], Any]]] = []
+            for ready_agent_id in purge_ready_agent_ids:
+                restore_token = session_purge_restore_tokens_by_agent_id.get(
+                    ready_agent_id
+                )
                 if restore_token:
-                    _timed(
-                        timings,
-                        "rollback_agent_session_purge",
-                        lambda restore_token=restore_token: session_service.restore_staged_agent_session_purge(restore_token),
+                    compensations.append(
+                        (
+                            "rollback_agent_session_purge",
+                            lambda restore_token=restore_token: session_service.restore_staged_agent_session_purge(
+                                restore_token
+                            ),
+                        )
                     )
+            compensations.extend(
+                [
+                    (
+                        "rollback_mode_bindings",
+                        lambda: restore_removed_agents_to_mode_bindings(
+                            mode_restore_token
+                        ),
+                    ),
+                    (
+                        "rollback_chat_rooms",
+                        lambda: restore_removed_agents_to_chat_rooms(
+                            room_cleanup.get("restoreToken")
+                        ),
+                    ),
+                    (
+                        "rollback_teams",
+                        lambda: restore_removed_agents_to_teams(
+                            team_cleanup.get("restoreToken")
+                        ),
+                    ),
+                ]
+            )
+            rollback_failures = _run_best_effort_compensations(
+                timings,
+                compensations,
+            )
+            if rollback_failures:
+                exc.add_note(
+                    "Bulk purge compensation incomplete: "
+                    + ", ".join(rollback_failures)
+                )
             raise
+
+        successful_agent_ids: list[str] = []
+        purge_failed_agent_ids: list[str] = []
         for agent_id in purge_ready_agent_ids:
             session_purge = session_purge_by_agent_id.get(agent_id, {})
+            restore_token = session_purge_restore_tokens_by_agent_id.get(agent_id)
             try:
-                purge = _timed(timings, "purge_agents", lambda agent_id=agent_id: purge_archived_agent_instance(agent_id))
-            except (AgentDirectoryError, AgentNotFoundError) as exc:
-                restore_token = session_purge_restore_tokens_by_agent_id.get(agent_id)
+                purge = _timed(
+                    timings,
+                    "purge_agents",
+                    lambda agent_id=agent_id: purge_archived_agent_instance(agent_id),
+                )
+            except Exception as exc:
+                purge_failed_agent_ids.append(agent_id)
+                rollback_failures: list[str] = []
                 if restore_token:
-                    _timed(
+                    rollback_failures = _run_best_effort_compensations(
                         timings,
-                        "rollback_agent_session_purge",
-                        lambda restore_token=restore_token: session_service.restore_staged_agent_session_purge(restore_token),
+                        [
+                            (
+                                "rollback_agent_session_purge",
+                                lambda restore_token=restore_token: session_service.restore_staged_agent_session_purge(
+                                    restore_token
+                                ),
+                            )
+                        ],
                     )
-                failed.append(_failed_item(agent_id, _purge_skip_reason(exc), str(exc)))
+                failure_message = str(exc)
+                if rollback_failures:
+                    failure_message += (
+                        "; compensation incomplete: "
+                        + ", ".join(rollback_failures)
+                    )
+                failed.append(
+                    _failed_item(
+                        agent_id,
+                        _purge_skip_reason(exc),
+                        failure_message,
+                    )
+                )
                 continue
+            successful_agent_ids.append(agent_id)
             committed_session_purge = _timed(
                 timings,
                 "commit_agent_session_purge",
-                lambda restore_token=session_purge_restore_tokens_by_agent_id.get(agent_id): session_service.commit_staged_agent_session_purge(
+                lambda restore_token=restore_token: session_service.commit_staged_agent_session_purge(
                     restore_token
                 ),
             )
@@ -450,6 +579,101 @@ def bulk_purge_agents(agent_ids: list[str] | None) -> dict[str, Any]:
                         "dataRetention": "purged",
                     },
                 }
+            )
+
+        if purge_failed_agent_ids:
+            reference_rollback_failures = _run_best_effort_compensations(
+                timings,
+                [
+                    (
+                        "rollback_mode_bindings",
+                        lambda: restore_removed_agents_to_mode_bindings(
+                            mode_restore_token
+                        ),
+                    ),
+                    (
+                        "rollback_chat_rooms",
+                        lambda: restore_removed_agents_to_chat_rooms(
+                            room_cleanup.get("restoreToken")
+                        ),
+                    ),
+                    (
+                        "rollback_teams",
+                        lambda: restore_removed_agents_to_teams(
+                            team_cleanup.get("restoreToken")
+                        ),
+                    ),
+                ],
+            )
+            if successful_agent_ids:
+                try:
+                    team_cleanup = _timed(
+                        timings,
+                        "reconcile_successful_team_removals",
+                        lambda: remove_agents_from_teams(successful_agent_ids),
+                    )
+                    room_cleanup = _timed(
+                        timings,
+                        "reconcile_successful_room_removals",
+                        lambda: remove_agents_from_chat_rooms(
+                            successful_agent_ids,
+                            allow_empty_rooms=True,
+                            direct_session_ids_by_agent_id={
+                                agent_id: direct_session_ids_by_agent_id.get(
+                                    agent_id,
+                                    "",
+                                )
+                                for agent_id in successful_agent_ids
+                            },
+                            include_chat_rooms=False,
+                            repair_participants=False,
+                        ),
+                    )
+                    mode_cleanup = _timed(
+                        timings,
+                        "reconcile_successful_mode_removals",
+                        lambda: remove_agents_from_mode_bindings(
+                            successful_agent_ids,
+                            agent_snapshots_by_agent_id=snapshots_by_agent_id,
+                        ),
+                    )
+                except Exception as reconciliation_error:
+                    reference_rollback_failures.append(
+                        "reconcile_successful_references:"
+                        + type(reconciliation_error).__name__
+                    )
+            else:
+                team_cleanup = {"changedTeamIds": [], "removedByAgentId": {}}
+                room_cleanup = {"changedRoomIds": [], "removedByAgentId": {}}
+                mode_cleanup = {"repairWarnings": []}
+            if reference_rollback_failures:
+                detail = ", ".join(reference_rollback_failures)
+                for item in failed:
+                    if item.get("agentId") in purge_failed_agent_ids:
+                        item["message"] = (
+                            f"{item.get('message') or ''}; "
+                            f"reference compensation incomplete: {detail}"
+                        )
+
+        for item in success:
+            success_agent_id = str(item.get("agentId") or "").strip()
+            purge_summary = item.get("purgeSummary")
+            if not isinstance(purge_summary, dict):
+                continue
+            purge_summary["modeBindingsRepaired"] = len(
+                mode_cleanup.get("repairWarnings") or []
+            )
+            purge_summary["removedFromRoomIds"] = list(
+                (room_cleanup.get("removedByAgentId") or {}).get(
+                    success_agent_id
+                )
+                or []
+            )
+            purge_summary["removedFromTeamIds"] = list(
+                (team_cleanup.get("removedByAgentId") or {}).get(
+                    success_agent_id
+                )
+                or []
             )
 
     summary = _summary(len(requested_agent_ids), success, skipped, failed)

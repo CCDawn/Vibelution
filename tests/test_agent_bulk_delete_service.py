@@ -82,9 +82,14 @@ def test_bulk_purge_rolls_back_staged_sessions_when_agent_delete_fails(tmp_path,
     assert detail["agentId"] == agent_session["agentId"]
     assert detail["agentStatusCode"] == "archived_agent"
     room_detail = chat_room_service.get_chat_room_detail(room["roomId"])
-    assert [participant["agentId"] for participant in room_detail["participants"]] == [peer_session["agentId"]]
+    assert [participant["agentId"] for participant in room_detail["participants"]] == [
+        agent_session["agentId"],
+        peer_session["agentId"],
+    ]
     team_detail = team_service.get_team(team["teamId"])
-    assert team_detail["members"] == []
+    assert [member["agentId"] for member in team_detail["members"]] == [
+        agent_session["agentId"]
+    ]
     bindings = agent_mode_binding_service.get_mode_bindings_payload()["modes"]
     assert bindings["chat"]["defaultAgentId"] == peer_session["agentId"]
     assert agent_session["agentId"] not in bindings["chat"]["availableAgentIds"]
@@ -217,6 +222,137 @@ def test_bulk_archive_reactivates_earlier_success_when_later_agent_fails(tmp_pat
         second["agentId"],
     ]
     assert result["timingsMs"]["rollback_archived_agents"] >= 0
+
+
+def test_bulk_archive_compensation_continues_after_an_earlier_rollback_fails():
+    calls: list[str] = []
+
+    def fail_first():
+        calls.append("first")
+        raise OSError("first rollback failed")
+
+    def run_second():
+        calls.append("second")
+
+    failures = agent_bulk_delete_service._run_best_effort_compensations(
+        {},
+        [
+            ("rollback_first", fail_first),
+            ("rollback_second", run_second),
+        ],
+    )
+
+    assert calls == ["first", "second"]
+    assert failures == ["rollback_first:OSError"]
+
+
+def test_bulk_archive_rollback_does_not_reactivate_legacy_archived_agent(
+    tmp_path,
+    monkeypatch,
+):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    legacy = session_service.create_chat_session(title="Legacy Archived")
+    failing = session_service.create_chat_session(title="Failing Active")
+    agent_directory_service.archive_agent_instance(
+        legacy["agentId"],
+        repair_mode_bindings=False,
+    )
+    original_archive = agent_bulk_delete_service.archive_agent_instance
+
+    def fail_active(agent_id, *args, **kwargs):
+        if agent_id == failing["agentId"]:
+            raise agent_directory_service.AgentDirectoryError("archive write failed")
+        return original_archive(agent_id, *args, **kwargs)
+
+    monkeypatch.setattr(
+        agent_bulk_delete_service,
+        "archive_agent_instance",
+        fail_active,
+    )
+
+    result = agent_bulk_delete_service.bulk_archive_agents(
+        [legacy["agentId"], failing["agentId"]]
+    )
+
+    assert result["status"] == "failed"
+    assert agent_directory_service.get_agent(
+        legacy["agentId"],
+        include_archived=True,
+    )["status"] == "archived"
+    assert agent_directory_service.get_agent(failing["agentId"])["status"] == "active"
+
+
+def test_bulk_purge_reconciles_references_when_one_agent_delete_fails(
+    tmp_path,
+    monkeypatch,
+):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    first = session_service.create_chat_session(title="Purge Success")
+    second = session_service.create_chat_session(title="Purge Failure")
+    peer = session_service.create_chat_session(title="Purge Peer")
+    room = chat_room_service.create_chat_room(
+        title="Partial Purge Room",
+        participant_agent_ids=[
+            first["agentId"],
+            second["agentId"],
+            peer["agentId"],
+        ],
+    )
+    team = team_service.create_team(
+        name="Partial Purge Team",
+        members=[
+            {"agentId": first["agentId"], "role": "lead"},
+            {"agentId": second["agentId"], "role": "reviewer"},
+        ],
+    )
+    for item in (first, second):
+        agent_directory_service.archive_agent_instance(
+            item["agentId"],
+            repair_mode_bindings=False,
+        )
+    original_purge = agent_bulk_delete_service.purge_archived_agent_instance
+
+    def fail_second(agent_id, *args, **kwargs):
+        if agent_id == second["agentId"]:
+            raise agent_directory_service.AgentDirectoryError("purge failed")
+        return original_purge(agent_id, *args, **kwargs)
+
+    monkeypatch.setattr(
+        agent_bulk_delete_service,
+        "purge_archived_agent_instance",
+        fail_second,
+    )
+
+    result = agent_bulk_delete_service.bulk_purge_agents(
+        [first["agentId"], second["agentId"]]
+    )
+
+    assert result["status"] == "partial_failed"
+    assert result["summary"] == {
+        "requestedCount": 2,
+        "successCount": 1,
+        "skippedCount": 0,
+        "failedCount": 1,
+    }
+    assert agent_directory_service.get_agent(
+        first["agentId"],
+        include_archived=True,
+    ) is None
+    assert agent_directory_service.get_agent(
+        second["agentId"],
+        include_archived=True,
+    )["status"] == "archived"
+    assert session_service.get_session_detail(first["id"]) is None
+    assert session_service.get_session_detail(second["id"]) is not None
+    room_detail = chat_room_service.get_chat_room_detail(room["roomId"])
+    assert [participant["agentId"] for participant in room_detail["participants"]] == [
+        second["agentId"],
+        peer["agentId"],
+    ]
+    team_detail = team_service.get_team(team["teamId"])
+    assert [member["agentId"] for member in team_detail["members"]] == [
+        second["agentId"]
+    ]
 
 
 def test_bulk_purge_skips_system_fixed_role_agent_even_when_legacy_archived(tmp_path, monkeypatch):
