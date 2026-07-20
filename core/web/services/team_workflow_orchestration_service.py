@@ -22183,6 +22183,49 @@ def _research_memory_context_summary(value: Any) -> dict[str, Any]:
         for item in list(allowed_variable_contract.get("variables") or [])
         if isinstance(item, dict) and str(item.get("path") or "").strip()
     ][:16]
+    allowed_variable_details = [
+        {
+            "path": str(item.get("path") or "")[:240],
+            "source": str(item.get("source") or "")[:80],
+            "evidenceRef": str(item.get("evidenceRef") or "")[:240],
+        }
+        for item in list(allowed_variable_contract.get("variables") or [])
+        if isinstance(item, dict) and str(item.get("path") or "").strip()
+    ][:16]
+    claim_details = [
+        {
+            "claimId": str(item.get("claimId") or "")[:160],
+            "claim": str(item.get("claim") or "")[:800],
+            "status": str(item.get("status") or "")[:64],
+            "supportEvidenceRefs": [
+                {
+                    "type": str(ref.get("type") or "")[:80],
+                    "id": str(ref.get("id") or "")[:500],
+                }
+                for ref in list(item.get("supportEvidenceRefs") or [])
+                if isinstance(ref, dict) and str(ref.get("id") or "").strip()
+            ][:8],
+            "counterEvidenceRefs": [
+                {
+                    "type": str(ref.get("type") or "")[:80],
+                    "id": str(ref.get("id") or "")[:500],
+                }
+                for ref in list(item.get("counterEvidenceRefs") or [])
+                if isinstance(ref, dict) and str(ref.get("id") or "").strip()
+            ][:8],
+            "applicableBoundaries": [
+                str(boundary)[:360]
+                for boundary in list(item.get("applicableBoundaries") or [])
+                if str(boundary).strip()
+            ][:12],
+            "sourcePlanIds": [
+                str(plan_id)[:160]
+                for plan_id in list(item.get("sourcePlanIds") or [])
+                if str(plan_id).strip()
+            ][:12],
+        }
+        for item in claim_map[:12]
+    ]
     forbidden = [
         item
         for item in list(context.get("forbiddenDuplicateExperiments") or [])
@@ -22199,6 +22242,16 @@ def _research_memory_context_summary(value: Any) -> dict[str, Any]:
         "claimStatusCounts": claim_status_counts,
         "allowedVariableCount": len(allowed_variables),
         "allowedVariables": allowed_variables,
+        "allowedVariableContract": {
+            "status": str(allowed_variable_contract.get("status") or "missing"),
+            "variables": allowed_variable_details,
+            "frozenControls": [
+                str(item)[:360]
+                for item in list(allowed_variable_contract.get("frozenControls") or [])
+                if str(item).strip()
+            ][:12],
+        },
+        "claimMap": claim_details,
         "claimMapPreview": [
             {
                 "claimId": str(item.get("claimId") or ""),

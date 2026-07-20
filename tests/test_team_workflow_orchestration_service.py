@@ -9032,6 +9032,8 @@ def test_start_experiment_stage_builds_bounded_memory_context_with_negative_shie
         },
         "allowedVariableCount": 1,
         "allowedVariables": ["methodConfig.candidateMaskedLossWeight"],
+        "allowedVariableContract": context["allowedVariableContract"],
+        "claimMap": context["claimMap"],
         "claimMapPreview": [
             {
                 "claimId": qualified_claim["claimId"],
@@ -9168,10 +9170,29 @@ def test_experiment_lifecycle_projection_derives_memory_summary_for_legacy_plans
         },
         "allowedVariableCount": 1,
         "allowedVariables": ["methodConfig.candidateMaskedLossWeight"],
+        "allowedVariableContract": status["lifecycleProjection"]["stage2"]["memoryContextSummary"][
+            "allowedVariableContract"
+        ],
+        "claimMap": status["lifecycleProjection"]["stage2"]["memoryContextSummary"]["claimMap"],
         "claimMapPreview": status["lifecycleProjection"]["stage2"]["memoryContextSummary"]["claimMapPreview"],
         "missingEvidence": [],
     }
     assert status["lifecycleProjection"]["stage2"]["memoryContextSummary"]["claimMapPreview"]
+    claim_detail = status["lifecycleProjection"]["stage2"]["memoryContextSummary"]["claimMap"][0]
+    assert claim_detail["supportEvidenceRefs"][0]["id"] == "full-legacy-best"
+    assert claim_detail["counterEvidenceRefs"][0]["id"] == "full-legacy-negative"
+    assert set(claim_detail["sourcePlanIds"]) == {"plan-legacy-negative", "plan-legacy-best"}
+    assert status["lifecycleProjection"]["stage2"]["memoryContextSummary"]["allowedVariableContract"] == {
+        "status": "derived_from_frozen_constraints",
+        "variables": [
+            {
+                "path": "methodConfig.candidateMaskedLossWeight",
+                "source": "frozen_constraint",
+                "evidenceRef": "plan-legacy-best",
+            }
+        ],
+        "frozenControls": ["same dataset and architecture"],
+    }
     assert len(knowledge_search_calls) == 1
     legacy_context = team_workflow_orchestration_service._legacy_research_lifecycle_memory_contexts(
         team_id=team["teamId"],
