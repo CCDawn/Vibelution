@@ -1,4 +1,4 @@
-import { MessageSquareText, Plus, Settings2 } from "lucide-react";
+import { Archive, MessageSquareText, Plus, Settings2 } from "lucide-react";
 import type { CSSProperties, PointerEvent } from "react";
 
 import type { AgentInstance, SessionSummary } from "../api/types";
@@ -6,7 +6,7 @@ import { VButton } from "../components/vui";
 import styles from "./SessionContextMenu.styles";
 
 const MENU_WIDTH = 188;
-const MENU_HEIGHT = 132;
+const MENU_HEIGHT = 176;
 const MENU_MARGIN = 12;
 
 export type AgentContextMenuPosition = {
@@ -36,18 +36,54 @@ export function agentContextMenuStyle(
 }
 
 type AgentContextMenuProps = {
+  archivePending: boolean;
   createPending: boolean;
   lang: "zh" | "en";
   state: AgentContextMenuState;
+  onArchive: (agent: AgentInstance) => void;
   onCreateSession: (agent: AgentInstance) => void;
   onOpenConfig: (agent: AgentInstance, latestSession: SessionSummary | null) => void;
   onOpenLatest: (agent: AgentInstance, latestSession: SessionSummary | null) => void;
 };
 
+function metadataFlag(agent: AgentInstance, key: string) {
+  const value = agent.metadata?.[key];
+  if (typeof value === "boolean") {
+    return value;
+  }
+  return ["1", "true", "yes"].includes(String(value ?? "").trim().toLowerCase());
+}
+
+function metadataText(agent: AgentInstance, key: string) {
+  const value = agent.metadata?.[key];
+  return typeof value === "string" ? value.trim() : "";
+}
+
+export function agentCanArchiveFromContextMenu(agent: AgentInstance) {
+  if (!agent.agentId || String(agent.status || "").trim().toLowerCase() === "archived") {
+    return false;
+  }
+  const systemOwnedRole = [
+    metadataText(agent, "systemRole"),
+    metadataText(agent, "selfEvolutionRole"),
+    metadataText(agent, "supervisedRole"),
+    metadataText(agent, "aiSearchRole"),
+  ].some(Boolean);
+  const researchOrgRole = metadataText(agent, "researchOrgRole");
+  return !(
+    metadataFlag(agent, "protected")
+    || metadataFlag(agent, "fixedRole")
+    || systemOwnedRole
+    || ["ceo", "organization_advisor", "capability_steward", "knowledge_steward"].includes(researchOrgRole)
+  );
+}
+
 export function AgentContextMenu({
+  archivePending,
   createPending,
   lang,
   state,
+  onArchive,
   onCreateSession,
   onOpenConfig,
   onOpenLatest,
@@ -67,7 +103,7 @@ export function AgentContextMenu({
       style={style}
       role="menu"
       aria-label={lang === "zh" ? "Agent 操作" : "Agent actions"}
-      aria-busy={createPending ? true : undefined}
+      aria-busy={createPending || archivePending ? true : undefined}
       aria-orientation="vertical"
       data-agent-context-menu={state.agent.agentId}
       onPointerDown={stopPointerPropagation}
@@ -103,6 +139,23 @@ export function AgentContextMenu({
       >
         {lang === "zh" ? "打开 Agent 设置" : "Open Agent settings"}
       </VButton>
+      {agentCanArchiveFromContextMenu(state.agent) ? (
+        <VButton
+          type="button"
+          role="menuitem"
+          className={`${styles.sessionContextMenuItem} ${styles.sessionContextMenuDanger}`}
+          variant="danger"
+          onPress={() => onArchive(state.agent)}
+          isDisabled={archivePending}
+          aria-disabled={archivePending ? true : undefined}
+          icon={<Archive size={14} />}
+          title={lang === "zh" ? "安全归档并保留会话、记忆和日志" : "Archive safely and keep sessions, memory, and logs"}
+        >
+          {archivePending
+            ? (lang === "zh" ? "正在归档" : "Archiving")
+            : (lang === "zh" ? "安全归档" : "Safe archive")}
+        </VButton>
+      ) : null}
     </div>
   );
 }
