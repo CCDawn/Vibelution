@@ -19,6 +19,7 @@ from scripts.evolution_harness import (
     collect_untracked_files,
     count_meaningful_tool_steps,
     copy_untracked_files,
+    create_worktree,
     create_harness_config,
     DEFAULT_DYNAMIC_REPLANNING_FIXTURE_PROMPT,
     DEFAULT_FULL_EVOLUTION_PROMPT,
@@ -59,6 +60,7 @@ from scripts.evolution_harness import (
     summarize_conversation_file,
     SupervisedAgentBindingRuntimeError,
     supervised_agent_binding_env,
+    SnapshotInfo,
     run_harness,
     SUPERVISED_AGENT_JUDGMENT_MARKER,
     SUPERVISED_FINAL_STATE_MARKER,
@@ -68,6 +70,44 @@ from scripts.evolution_harness import (
 from core.orchestration.turn_outcome import TurnOutcomeController
 
 pytestmark = pytest.mark.serial
+
+
+def test_create_worktree_uses_sibling_controlled_worktree_root(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    repo_root = tmp_path / "Vibelution"
+    repo_root.mkdir()
+    expected_root = tmp_path / "Vibelution-worktrees"
+    created_path = expected_root / "vibelution-harness-swte-sa-probe"
+    calls: dict[str, object] = {}
+
+    def fake_mkdtemp(*, prefix: str, dir: str) -> str:
+        calls["prefix"] = prefix
+        calls["dir"] = dir
+        created_path.mkdir()
+        return str(created_path)
+
+    monkeypatch.setattr(evolution_harness.tempfile, "mkdtemp", fake_mkdtemp)
+    monkeypatch.setattr(evolution_harness, "run_git", lambda *_: "")
+    monkeypatch.setattr(evolution_harness, "mirror_venv_into_worktree", lambda *_: None)
+
+    result = create_worktree(
+        repo_root,
+        SnapshotInfo(
+            base_head="base",
+            commit="checkpoint",
+            ref_name=None,
+            tracked_dirty=False,
+        ),
+        "swte-sandbox-probe",
+    )
+
+    assert result == created_path
+    assert calls == {
+        "prefix": "vibelution-harness-swte-san-",
+        "dir": str(expected_root),
+    }
 
 
 def _write_external_operator_config(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, text: str) -> Path:
