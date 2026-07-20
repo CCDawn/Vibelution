@@ -77,10 +77,21 @@ Plan: `docs/superpowers/plans/2026-07-19-chat-coding-route-stream-selection-spli
 - **E4h done:** `ChatGroupCenterSurface.tsx` + `ChatCliAgentTerminalStack.tsx` — center group/bus + CLI mount stack
 - **E4i done:** `chatSessionSurfaceModel.ts` — skill / mental / pet / session state / agent session tabs pure builders
 
+## Bundle note (secondary lazy)
+
+`ChatCodingRoute` keeps these off the initial Chat chunk via `React.lazy` + conditional mount:
+
+- `CliAgentRunTerminalPanel` (xterm graph)
+- `AgentCreateWizardDialog` (create Agent modal)
+- `CacheDetailDialog` / `SessionContextMenu`
+- `LlmPayloadTracePanel` (from `ChatStatusRail` when trace present)
+
+Do not re-add static imports of those modules into the Chat shell without a budget re-check.
+
 ## Next (planned)
 
-- Further thin remaining queries/wiring/JSX composition
-- Target `ChatCodingRoute` toward ~800–1500 LOC
+- Prefer chunk wins over further pure LOC grind
+- Target `ChatCodingRoute` toward ~800–1500 LOC only when claimability requires it
 
 ## Hand-test substitutes
 

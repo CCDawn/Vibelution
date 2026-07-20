@@ -17,6 +17,7 @@ import {
   useCallback,
   useEffect,
   lazy,
+  Suspense,
   useMemo,
   useRef,
   useState,
@@ -26,7 +27,6 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 
 import { fetchJson } from "../api/client";
 import { createChatWorkspaceCache } from "./chatWorkspaceCache";
-import { AgentCreateWizardDialog } from "./agent-create/AgentCreateWizardDialog";
 import {
   listProjectAgentBusTimeline,
 } from "../api/projectAgentBus";
@@ -140,21 +140,17 @@ import {
   isChildSession,
   isAgentRootSession,
 } from "./DirectSessionIndexItem";
-import { SessionContextMenu } from "./SessionContextMenu";
 import { agentCenterConfigRoute, safeAgentCenterReturnToPath } from "./agentCenterRoutes";
 import {
   buildChatMentionTargets,
   type ChatMentionTarget,
 } from "./chatMentionTokens";
-import { CacheDetailDialog } from "./chat/CacheDetailDialog";
 import {
   buildConversationComposerBridgeState,
 } from "./chat/ChatConversationComposerBridge";
 import { ChatFileWorkspaceTabs } from "./chat/ChatFileWorkspaceTabs";
 import { ConversationIndexLoadingShell } from "./chat/ChatLoadingShell";
 import { ChatSessionWorkspacePanel } from "./chat/ChatSessionWorkspacePanel";
-import { LlmPayloadTracePanel } from "./chat/LlmPayloadTracePanel";
-import { TokenCoreStatusPanel } from "./chat/TokenCoreStatusPanel";
 import { ChatConversationIndexRail } from "./chat/ChatConversationIndexRail";
 import { ChatStatusRail } from "./chat/ChatStatusRail";
 import {
@@ -265,6 +261,27 @@ export { canInputTerminal } from "./chat/cliAgentRunModel";
 const CliAgentRunTerminalPanel = lazy(() =>
   import("./chat/CliAgentRunTerminalPanel").then((module) => ({
     default: module.CliAgentRunTerminalPanel,
+  })),
+);
+
+/** Secondary-lazy: open only when creating an Agent (keeps wizard graph out of Chat shell). */
+const AgentCreateWizardDialog = lazy(() =>
+  import("./agent-create/AgentCreateWizardDialog").then((module) => ({
+    default: module.AgentCreateWizardDialog,
+  })),
+);
+
+/** Secondary-lazy: cache donut dialog opens from status rail action. */
+const CacheDetailDialog = lazy(() =>
+  import("./chat/CacheDetailDialog").then((module) => ({
+    default: module.CacheDetailDialog,
+  })),
+);
+
+/** Secondary-lazy: session row context menu. */
+const SessionContextMenu = lazy(() =>
+  import("./SessionContextMenu").then((module) => ({
+    default: module.SessionContextMenu,
   })),
 );
 
@@ -2308,23 +2325,25 @@ export function ChatCodingRoute() {
             </div>
           ) : null}
           {sessionContextMenu && contextMenuSession ? (
-            <SessionContextMenu
-              addToReviewDisabled={contextMenuAddToReviewDisabled}
-              addToReviewPending={contextMenuAddToReviewPending}
-              clearHistoryDisabled={contextMenuClearHistoryDisabled}
-              clearHistoryPending={contextMenuClearHistoryPending}
-              clearHistoryVisible={contextMenuClearHistoryVisible}
-              deleteDisabled={contextMenuDeleteDisabled}
-              lang={lang}
-              position={sessionContextMenu}
-              session={contextMenuSession}
-              t={t}
-              onAddToReview={handleAddSessionToReview}
-              onClearHistory={handleClearSessionHistory}
-              onDelete={handleDeleteSession}
-              onOpenAgentConfig={openSessionAgentConfig}
-              onRename={beginRenameSession}
-            />
+            <Suspense fallback={null}>
+              <SessionContextMenu
+                addToReviewDisabled={contextMenuAddToReviewDisabled}
+                addToReviewPending={contextMenuAddToReviewPending}
+                clearHistoryDisabled={contextMenuClearHistoryDisabled}
+                clearHistoryPending={contextMenuClearHistoryPending}
+                clearHistoryVisible={contextMenuClearHistoryVisible}
+                deleteDisabled={contextMenuDeleteDisabled}
+                lang={lang}
+                position={sessionContextMenu}
+                session={contextMenuSession}
+                t={t}
+                onAddToReview={handleAddSessionToReview}
+                onClearHistory={handleClearSessionHistory}
+                onDelete={handleDeleteSession}
+                onOpenAgentConfig={openSessionAgentConfig}
+                onRename={beginRenameSession}
+              />
+            </Suspense>
           ) : null}
         </>
       )}
@@ -2809,53 +2828,59 @@ export function ChatCodingRoute() {
         chatRoomPurposeLabel={chatRoomPurposeLabel}
       />
       {cacheDetailOpen && cacheDetailAvailable ? (
-        <CacheDetailDialog
-          averageCacheObservedTurnCount={averageCacheObservedTurnCount}
-          cacheCompositionAverageLabel={cacheCompositionAverageLabel}
-          cacheCompositionAverageValue={cacheCompositionAverageValue}
-          cacheCompositionPercent={cacheCompositionPercent}
-          cacheCompositionTitle={cacheCompositionTitle}
-          cacheCompositionUpperBoundLabel={cacheCompositionUpperBoundLabel}
-          cacheComputedOverestimatedInputTokens={cacheComputedOverestimatedInputTokens}
-          cacheDetailDialogTitle={cacheDetailDialogTitle}
-          cachePromptCompositionTotalTokens={cachePromptCompositionTotalTokens}
-          cachePromptDonutSegments={cachePromptDonutSegments}
-          cacheProviderExtraCachedInputTokens={cacheProviderExtraCachedInputTokens}
-          cacheCalibrationReason={cacheCalibrationReason}
-          cacheCalibrationSummaryText={cacheCalibrationSummaryText}
-          closeLabel={lang === "zh" ? "关闭缓存详情" : "Close cache details"}
-          lang={lang}
-          missingSegmentLabel={cacheCompositionSegmentLabel("missing", "missing", t)}
-          numberFormatter={numberFormatter}
-          onClose={closeCacheDetail}
-          previousCacheHitLabel={t("previousCacheHit")}
-          providerCachedInputTokens={providerCachedInputTokens}
-          providerCacheInputTokens={providerCacheInputTokens}
-          trueCacheDonutSegments={trueCacheDonutSegments}
-          upperBoundCachedInputTokens={upperBoundCachedInputTokens}
-          upperBoundCacheCompositionPercent={upperBoundCacheCompositionPercent}
-          upperBoundCacheInputTokens={upperBoundCacheInputTokens}
-        />
+        <Suspense fallback={null}>
+          <CacheDetailDialog
+            averageCacheObservedTurnCount={averageCacheObservedTurnCount}
+            cacheCompositionAverageLabel={cacheCompositionAverageLabel}
+            cacheCompositionAverageValue={cacheCompositionAverageValue}
+            cacheCompositionPercent={cacheCompositionPercent}
+            cacheCompositionTitle={cacheCompositionTitle}
+            cacheCompositionUpperBoundLabel={cacheCompositionUpperBoundLabel}
+            cacheComputedOverestimatedInputTokens={cacheComputedOverestimatedInputTokens}
+            cacheDetailDialogTitle={cacheDetailDialogTitle}
+            cachePromptCompositionTotalTokens={cachePromptCompositionTotalTokens}
+            cachePromptDonutSegments={cachePromptDonutSegments}
+            cacheProviderExtraCachedInputTokens={cacheProviderExtraCachedInputTokens}
+            cacheCalibrationReason={cacheCalibrationReason}
+            cacheCalibrationSummaryText={cacheCalibrationSummaryText}
+            closeLabel={lang === "zh" ? "关闭缓存详情" : "Close cache details"}
+            lang={lang}
+            missingSegmentLabel={cacheCompositionSegmentLabel("missing", "missing", t)}
+            numberFormatter={numberFormatter}
+            onClose={closeCacheDetail}
+            previousCacheHitLabel={t("previousCacheHit")}
+            providerCachedInputTokens={providerCachedInputTokens}
+            providerCacheInputTokens={providerCacheInputTokens}
+            trueCacheDonutSegments={trueCacheDonutSegments}
+            upperBoundCachedInputTokens={upperBoundCachedInputTokens}
+            upperBoundCacheCompositionPercent={upperBoundCacheCompositionPercent}
+            upperBoundCacheInputTokens={upperBoundCacheInputTokens}
+          />
+        </Suspense>
       ) : null}
-      <AgentCreateWizardDialog
-        open={agentCreateWizardOpen}
-        triggerRef={agentCreateTriggerRef}
-        triggerId="chat-agent-create-trigger"
-        onClose={() => setAgentCreateWizardOpen(false)}
-        onCreated={(agent) => {
-          setSelectedAgentId(agent.agentId);
-          setRightIndexPanel("conversations");
-        }}
-        onStartConversation={async (agent) => {
-          if (!agent.directSessionId) return false;
-          handleOpenAgent(agent);
-          return true;
-        }}
-        onOpenAdvancedConfig={(agent) => {
-          setAgentCreateWizardOpen(false);
-          navigate(`/agents?agent=${encodeURIComponent(agent.agentId)}&pane=config&returnTo=${encodeURIComponent("/chat")}`);
-        }}
-      />
+      {agentCreateWizardOpen ? (
+        <Suspense fallback={null}>
+          <AgentCreateWizardDialog
+            open={agentCreateWizardOpen}
+            triggerRef={agentCreateTriggerRef}
+            triggerId="chat-agent-create-trigger"
+            onClose={() => setAgentCreateWizardOpen(false)}
+            onCreated={(agent) => {
+              setSelectedAgentId(agent.agentId);
+              setRightIndexPanel("conversations");
+            }}
+            onStartConversation={async (agent) => {
+              if (!agent.directSessionId) return false;
+              handleOpenAgent(agent);
+              return true;
+            }}
+            onOpenAdvancedConfig={(agent) => {
+              setAgentCreateWizardOpen(false);
+              navigate(`/agents?agent=${encodeURIComponent(agent.agentId)}&pane=config&returnTo=${encodeURIComponent("/chat")}`);
+            }}
+          />
+        </Suspense>
+      ) : null}
     </div>
   );
 }

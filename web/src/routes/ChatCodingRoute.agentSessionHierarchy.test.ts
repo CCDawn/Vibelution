@@ -10,9 +10,10 @@ describe("ChatCodingRoute Agent-session hierarchy", () => {
     expect(routeSource).toContain('queryKey: ["sessions", "agent", selectedChatAgentId]');
     expect(routeSource).toContain('`/api/sessions/query?agentId=${encodeURIComponent(selectedChatAgentId)}&limit=100`');
     expect(routeSource).toContain("<AgentConversationDirectory");
-    expect(routeSource).toContain('import { AgentCreateWizardDialog } from "./agent-create/AgentCreateWizardDialog"');
+    expect(routeSource).toContain('import("./agent-create/AgentCreateWizardDialog")');
     expect(routeSource).toContain("setAgentCreateWizardOpen(true)");
     expect(routeSource).toContain("<AgentCreateWizardDialog");
+    expect(routeSource).toContain("{agentCreateWizardOpen ? (");
     expect(routeSource).toContain("triggerRef={agentCreateTriggerRef}");
     expect(routeSource).toContain("createAgentButtonRef={agentCreateTriggerRef}");
     expect(routeSource).toContain("if (!agent.directSessionId) return false");
