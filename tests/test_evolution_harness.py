@@ -1776,6 +1776,30 @@ def test_infer_evolution_summary_records_invalid_supervised_marker_error():
     assert summary["supervised"]["marker_errors"] == {"final_state": "invalid_json"}
 
 
+def test_infer_evolution_summary_ignores_marker_names_inside_source_output():
+    summary = infer_evolution_summary(
+        [
+            {
+                "type": "tool_call",
+                "tool_name": "cli_tool",
+                "status": "success",
+                "tool_args": {"command": "Get-Content scripts/evolution_harness.py"},
+                "tool_result": (
+                    'SUPERVISED_FINAL_STATE_MARKER = "SUPERVISED_FINAL_STATE:"\n'
+                    'line = f"{SUPERVISED_FINAL_STATE_MARKER} not-json"'
+                ),
+            }
+        ],
+        [],
+        [],
+        restart_expected=False,
+        restart_reentered=False,
+    )
+
+    assert "supervised" not in summary
+    assert "supervised_marker_errors" not in summary
+
+
 def test_infer_evolution_summary_prefers_valid_llm_marker_over_debug_prompt_example():
     summary = infer_evolution_summary(
         [
@@ -2201,6 +2225,30 @@ def test_infer_evolution_summary_extracts_environment_unavailable_from_tool_resu
 
     assert summary["environment"]["unavailable"] is True
     assert "/app" in summary["environment"]["evidence"]
+
+
+def test_infer_evolution_summary_ignores_environment_markers_inside_successful_source_read():
+    summary = infer_evolution_summary(
+        [
+            {
+                "type": "tool_call",
+                "tool_name": "cli_tool",
+                "status": "success",
+                "tool_args": {"command": "Get-Content scripts/evolution_harness.py"},
+                "tool_result": (
+                    'ENVIRONMENT_UNAVAILABLE_MARKERS = ("no such file or directory",)\n'
+                    "def classify():\n"
+                    '    return "environment_unavailable"'
+                ),
+            }
+        ],
+        [],
+        [],
+        restart_expected=False,
+        restart_reentered=False,
+    )
+
+    assert "environment" not in summary
 
 
 def test_infer_result_status_requires_complete_safe_modify_probe():

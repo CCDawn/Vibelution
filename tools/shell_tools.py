@@ -600,7 +600,8 @@ FORBIDDEN_DELETE_PATTERNS = _config_defaults.get("FORBIDDEN_DELETE_PATTERNS", [
 def _is_command_dangerous(command: str) -> tuple[bool, str]:
     """检查命令是否危险（黑名单 + 白名单双层验证）"""
     cmd_lower = command.lower().strip()
-    if re.search(r"\bdel\s+.*(?:/s\b|/q\b|/f\b)", cmd_lower) and (
+    from core.infrastructure.security import command_invokes_executable
+    if command_invokes_executable(command, "del") and re.search(r"\bdel\s+.*(?:/s\b|/q\b|/f\b)", cmd_lower) and (
         "c:\\windows" in cmd_lower
         or "c:/windows" in cmd_lower
         or "c:\\" in cmd_lower
@@ -610,7 +611,19 @@ def _is_command_dangerous(command: str) -> tuple[bool, str]:
     if re.search(r"\b(cd|pushd|set-location)\s+\.\.(?:\\|/|\s|$)", cmd_lower):
         return True, "危险命令拦截: path traversal"
     for pattern in DANGEROUS_PATTERNS:
-        if pattern.lower() in cmd_lower:
+        normalized_pattern = pattern.lower().strip()
+        if re.fullmatch(r"[a-z0-9_.-]+", normalized_pattern):
+            matched = command_invokes_executable(command, normalized_pattern)
+        else:
+            pattern_head = normalized_pattern.split(maxsplit=1)[0]
+            if re.fullmatch(r"[a-z0-9_.-]+", pattern_head):
+                matched = (
+                    command_invokes_executable(command, pattern_head)
+                    and normalized_pattern in cmd_lower
+                )
+            else:
+                matched = normalized_pattern in cmd_lower
+        if matched:
             return True, f"危险命令拦截: {pattern}"
     # Whitelist validation (new security module)
     try:

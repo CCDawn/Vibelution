@@ -614,6 +614,15 @@ class TestExecuteShellCommand:
             assert ("错误" in result or "失败" in result or 
                     "禁止" in result or "危险" in result), f"应阻止命令: {cmd}"
 
+    def test_format_option_does_not_trigger_dangerous_command_block(self):
+        for command in [
+            "git show --format=fuller --stat HEAD",
+            'git grep "rm -rf"',
+            'git log -S"del /f /s /q C:\\Windows"',
+        ]:
+            is_dangerous, message = shell_tools_module._is_command_dangerous(command)
+            assert is_dangerous is False, f"{command}: {message}"
+
 
 # ============================================================================
 # run_powershell 测试

@@ -15,6 +15,7 @@ import ast
 import json
 import os
 import queue
+import re
 import shutil
 import subprocess
 import sys
@@ -1776,23 +1777,24 @@ def _extract_supervised_marker_payload(
     marker: str,
 ) -> tuple[Dict[str, Any], Optional[str]]:
     last_error: Optional[str] = None
-    for line in reversed(list(lines)):
-        text = str(line or "").strip()
-        marker_index = text.find(marker)
-        if marker_index < 0:
-            continue
-        raw_payload = text[marker_index + len(marker) :].strip()
-        if not raw_payload:
-            last_error = last_error or "empty_payload"
-            continue
-        try:
-            payload = json.loads(raw_payload)
-        except json.JSONDecodeError:
-            last_error = last_error or "invalid_json"
-            continue
-        if isinstance(payload, dict) and payload:
-            return payload, None
-        last_error = last_error or "non_object_payload"
+    for source in reversed(list(lines)):
+        source_lines = str(source or "").splitlines() or [str(source or "")]
+        for line in reversed(source_lines):
+            text = line.strip()
+            if text != marker and not text.startswith(f"{marker} "):
+                continue
+            raw_payload = text[len(marker) :].strip()
+            if not raw_payload:
+                last_error = last_error or "empty_payload"
+                continue
+            try:
+                payload = json.loads(raw_payload)
+            except json.JSONDecodeError:
+                last_error = last_error or "invalid_json"
+                continue
+            if isinstance(payload, dict) and payload:
+                return payload, None
+            last_error = last_error or "non_object_payload"
     return {}, last_error
 
 
@@ -1888,10 +1890,27 @@ def _validation_passed_for_tool(
     ) and "failed" not in lower_result and "失败" not in result_text
 
 
-def _environment_unavailable_evidence(text: str) -> str:
-    lowered = text.lower()
-    if any(marker in lowered for marker in ENVIRONMENT_UNAVAILABLE_MARKERS):
-        return text[:240]
+def _environment_unavailable_evidence(text: str, *, allow_embedded: bool = True) -> str:
+    for raw_line in str(text or "").splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        lowered = line.lower()
+        if allow_embedded:
+            matched = any(marker in lowered for marker in ENVIRONMENT_UNAVAILABLE_MARKERS)
+        else:
+            matched = bool(
+                re.match(
+                    r"^(?:\[[^\]]+\]\s*)?(?:[^:\r\n]{1,80}:\s*)?"
+                    r"(?:no such file or directory|cannot access\b|cannot find path\b|"
+                    r"path not found\b|command not found\b|is not recognized as an internal or external command\b|"
+                    r"can't open file\b|cannot open file\b|working directory does not exist\b|"
+                    r"environment_unavailable\b)",
+                    lowered,
+                )
+            )
+        if matched:
+            return line[:240]
     return ""
 
 
@@ -2026,9 +2045,10 @@ def infer_evolution_summary(
         elif tool_phase.startswith("guarded_tool:"):
             guarded_tool_count += 1
         command_text = str(tool_args.get("command") or tool_args.get("script") or "")
-        if not environment_unavailable_evidence:
+        if not environment_unavailable_evidence and result_text:
             environment_unavailable_evidence = _environment_unavailable_evidence(
-                f"{command_text}\n{result_text}"
+                result_text,
+                allow_embedded=not tool_succeeded,
             )
 
         if tool_name == "task_create_tool" and tool_succeeded:

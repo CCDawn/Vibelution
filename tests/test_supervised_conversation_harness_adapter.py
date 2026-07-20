@@ -278,6 +278,124 @@ def test_conversation_harness_can_reuse_existing_supervised_session(monkeypatch,
     assert progress_events[0]["conversation_session_id"] == "session-improver"
 
 
+def test_conversation_harness_continues_needs_continue_turn_before_finishing(monkeypatch, tmp_path: Path):
+    submissions: list[str] = []
+    snapshots = iter(
+        [
+            {
+                "terminal": True,
+                "terminalStatus": "needs_continue",
+                "lastTurnStatus": "needs_continue",
+                "assistantText": "已完成分析，下一回合修改。",
+            },
+            {
+                "terminal": True,
+                "terminalStatus": "ready",
+                "lastTurnStatus": "ready",
+                "assistantText": "修改与验证完成。",
+            },
+        ]
+    )
+    monkeypatch.setattr(
+        adapter,
+        "create_supervised_agent_session",
+        lambda **kwargs: {"id": "session-hidden"},
+    )
+
+    def submit(session_id, content, **kwargs):
+        submissions.append(content)
+        return {"turnId": f"turn-{len(submissions)}"}
+
+    monkeypatch.setattr(adapter, "submit_session_message", submit)
+    monkeypatch.setattr(
+        adapter,
+        "get_session_detail",
+        lambda session_id: {
+            "id": session_id,
+            "lastTurnStatus": "ready",
+            "messages": [{"role": "assistant", "content": "修改与验证完成。"}],
+        },
+    )
+    monkeypatch.setattr(
+        adapter,
+        "get_session_turn_completion_snapshot",
+        lambda session_id, turn_id: next(snapshots),
+    )
+    ticks = iter([0.0, 0.1, 0.2, 0.3, 0.4])
+    monkeypatch.setattr(adapter.time, "monotonic", lambda: next(ticks, 0.5))
+    monkeypatch.setattr(adapter.time, "sleep", lambda seconds: None)
+
+    result = adapter.run_supervised_conversation_harness(
+        repo_root=tmp_path,
+        mode="single_turn",
+        prompt="improve candidate",
+        timeout_seconds=5,
+        expect_restart=False,
+        post_restart_observe_seconds=0,
+        keep_worktree=True,
+        scenario="candidate_self_improvement",
+        agent_binding={"agentId": "agent-candidate", "role": "candidate"},
+    )
+
+    assert result.status == "success"
+    assert len(submissions) == 2
+    assert submissions[1].startswith("继续完成当前监督自改任务")
+    backend = result.evolution_summary["conversation_backend"]
+    assert backend["continuation_count"] == 1
+    assert backend["turn_ids"] == ["turn-1", "turn-2"]
+
+
+def test_conversation_harness_preserves_needs_continue_after_continuation_limit(monkeypatch, tmp_path: Path):
+    monkeypatch.setattr(adapter, "CONVERSATION_HARNESS_MAX_CONTINUATIONS", 0)
+    monkeypatch.setattr(
+        adapter,
+        "create_supervised_agent_session",
+        lambda **kwargs: {"id": "session-hidden"},
+    )
+    monkeypatch.setattr(
+        adapter,
+        "submit_session_message",
+        lambda *args, **kwargs: {"turnId": "turn-1"},
+    )
+    monkeypatch.setattr(
+        adapter,
+        "get_session_detail",
+        lambda session_id: {
+            "id": session_id,
+            "lastTurnStatus": "needs_continue",
+            "messages": [{"role": "assistant", "content": "仍需继续。"}],
+        },
+    )
+    monkeypatch.setattr(
+        adapter,
+        "get_session_turn_completion_snapshot",
+        lambda session_id, turn_id: {
+            "terminal": True,
+            "terminalStatus": "needs_continue",
+            "lastTurnStatus": "needs_continue",
+            "assistantText": "仍需继续。",
+        },
+    )
+    ticks = iter([0.0, 0.1, 0.2])
+    monkeypatch.setattr(adapter.time, "monotonic", lambda: next(ticks, 0.3))
+    monkeypatch.setattr(adapter.time, "sleep", lambda seconds: None)
+
+    result = adapter.run_supervised_conversation_harness(
+        repo_root=tmp_path,
+        mode="single_turn",
+        prompt="improve candidate",
+        timeout_seconds=5,
+        expect_restart=False,
+        post_restart_observe_seconds=0,
+        keep_worktree=True,
+        scenario="candidate_self_improvement",
+        agent_binding={"agentId": "agent-candidate", "role": "candidate"},
+    )
+
+    assert result.status == "needs_continue"
+    assert "仍需继续" in result.reason
+
+
 def test_session_turn_completion_snapshot_recovers_finished_hidden_turn(tmp_path: Path, monkeypatch):
     assistant_text = (
         "完成候选探针。\n"
