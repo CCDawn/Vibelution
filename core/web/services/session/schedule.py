@@ -25,7 +25,6 @@ def _service():
 
 
 def _session_scheduler_agent_key(context: dict[str, Any]) -> str:
-    s = _service()
     agent_id = str(context.get("agent_id") or context.get("agentId") or "").strip()
     if agent_id:
         return f"agent:{agent_id}"
@@ -33,7 +32,6 @@ def _session_scheduler_agent_key(context: dict[str, Any]) -> str:
     return f"session:{session_id or 'unknown'}"
 
 def _session_scheduler_session_key(context: dict[str, Any]) -> str:
-    s = _service()
     session_id = str(context.get("session_id") or context.get("sessionId") or "").strip()
     if session_id:
         return f"session:{session_id}"
@@ -46,7 +44,6 @@ def _record_scheduler_event_adapter(
     outcome: str,
     fields: dict[str, Any] | None,
 ) -> None:
-    s = _service()
     _record_session_scheduler_event(context, phase, outcome=outcome, fields=fields)
 
 @contextmanager
@@ -89,8 +86,8 @@ def _schedule_session_turn(context: dict[str, Any]) -> None:
     s = _service()
     s._SESSION_TURN_SCHEDULER.schedule(
         context,
-        submit=_submit_scheduled_session_turn,
-        release=_release_scheduled_session_turn,
+        submit=s._submit_scheduled_session_turn,
+        release=s._release_scheduled_session_turn,
     )
 
 def _submit_scheduled_session_turn(context: dict[str, Any]) -> None:
@@ -105,7 +102,7 @@ def _execute_scheduled_session_turn(context: dict[str, Any]) -> None:
     try:
         s._run_session_turn(context)
     finally:
-        _release_scheduled_session_turn(context)
+        s._release_scheduled_session_turn(context)
 
 def _release_scheduled_session_turn(context: dict[str, Any]) -> None:
     s = _service()
@@ -161,7 +158,7 @@ def _drain_wakeable_agent_inbox_after_session_release(context: dict[str, Any]) -
 def _submit_released_session_turn(next_context: dict[str, Any]) -> None:
     s = _service()
     try:
-        _submit_scheduled_session_turn(next_context)
+        s._submit_scheduled_session_turn(next_context)
     except Exception as exc:
         s._record_session_turn_lifecycle_event(
             str(next_context.get("session_id") or "").strip(),

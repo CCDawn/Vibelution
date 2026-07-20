@@ -1,5 +1,9 @@
 """Real chat session payloads for the web workbench."""
 
+# Extracted session modules intentionally late-bind compatibility symbols from
+# this facade through _service(); those imports are public injection points.
+# ruff: noqa: F401
+
 from __future__ import annotations
 
 import base64
@@ -1248,7 +1252,6 @@ def append_session_assistant_artifact_message(
         payload["updated_at"] = assistant_entry["timestamp"]
         save_chat_state(PROJECT_ROOT, payload)
     turn_id = str((metadata or {}).get("turnId") or (metadata or {}).get("turn_id") or f"artifact:{assistant_entry['timestamp']}").strip()
-    stage_started_at = _perf_counter()
     _append_session_conversation_event(
         normalized_session_id,
         turn_id,
