@@ -546,9 +546,14 @@ def test_agent_purge_api_reports_workspace_delete_failure_without_server_error(t
     assert detail["agentStatusCode"] == "archived_agent"
     assert workspace_path.exists()
     room_detail = chat_room_service.get_chat_room_detail(room["roomId"])
-    assert [participant["agentId"] for participant in room_detail["participants"]] == [peer["agentId"]]
+    assert [participant["agentId"] for participant in room_detail["participants"]] == [
+        agent["agentId"],
+        peer["agentId"],
+    ]
     team_detail = team_service.get_team(team["teamId"])
-    assert team_detail["members"] == []
+    assert [member["agentId"] for member in team_detail["members"]] == [
+        agent["agentId"]
+    ]
     bindings = agent_mode_binding_service.get_mode_bindings_payload()["modes"]
     assert bindings["chat"]["defaultAgentId"] == peer["agentId"]
     assert agent["agentId"] not in bindings["chat"]["availableAgentIds"]

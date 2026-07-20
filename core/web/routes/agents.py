@@ -838,37 +838,45 @@ def agent_messages_consume_all(agent_id: str, payload: AgentMessageConsumePayloa
 def agent_update(agent_id: str, payload: AgentUpdatePayload) -> dict:
     try:
         archive_summary: dict[str, Any] | None = None
-        if str(payload.status or "").strip() == "archived":
-            current = get_agent(agent_id)
-            if current and str(current.get("status") or "active").strip() != "archived":
-                updated, archive_summary = _archive_agent_with_session_lifecycle(
+        requested_status = str(payload.status or "").strip()
+        current = get_agent(agent_id, include_archived=True)
+        if current is None:
+            raise AgentNotFoundError(f"Agent not found: {agent_id}")
+        current_status = str(current.get("status") or "active").strip()
+        if current_status == "archived" and requested_status == "active":
+            raise AgentDirectoryError(
+                "Archived Agent cannot be reactivated through PATCH; "
+                "a complete restore transaction is required."
+            )
+        if requested_status == "archived":
+            updated, archive_summary = _archive_agent_with_session_lifecycle(
+                agent_id,
+                source="patch_status",
+                timings={},
+                archive_write=lambda: update_agent_instance(
                     agent_id,
-                    source="patch_status",
-                    timings={},
-                    archive_write=lambda: update_agent_instance(
-                        agent_id,
-                        display_name=payload.displayName,
-                        llm_bindings=payload.llmBindings,
-                        primary_mode=payload.primaryMode,
-                        role_key=payload.roleKey,
-                        prompt_template_id=payload.promptTemplateId,
-                        tool_policy_id=payload.toolPolicyId,
-                        memory_policy_id=payload.memoryPolicyId,
-                        tool_policy=payload.toolPolicy,
-                        memory_policy=payload.memoryPolicy,
-                        context_compression_policy=payload.contextCompressionPolicy,
-                        delegation_policy=payload.delegationPolicy,
-                        supervision_policy=payload.supervisionPolicy,
-                        persona_profile=payload.personaProfile,
-                        task_profile=payload.taskProfile,
-                        metadata=payload.metadata,
-                        status="archived",
-                    ),
-                )
-                return _with_agent_workspace_cache_invalidated({
-                    **updated,
-                    "archiveSummary": archive_summary,
-                })
+                    display_name=payload.displayName,
+                    llm_bindings=payload.llmBindings,
+                    primary_mode=payload.primaryMode,
+                    role_key=payload.roleKey,
+                    prompt_template_id=payload.promptTemplateId,
+                    tool_policy_id=payload.toolPolicyId,
+                    memory_policy_id=payload.memoryPolicyId,
+                    tool_policy=payload.toolPolicy,
+                    memory_policy=payload.memoryPolicy,
+                    context_compression_policy=payload.contextCompressionPolicy,
+                    delegation_policy=payload.delegationPolicy,
+                    supervision_policy=payload.supervisionPolicy,
+                    persona_profile=payload.personaProfile,
+                    task_profile=payload.taskProfile,
+                    metadata=payload.metadata,
+                    status="archived",
+                ),
+            )
+            return _with_agent_workspace_cache_invalidated({
+                **updated,
+                "archiveSummary": archive_summary,
+            })
         return _with_agent_workspace_cache_invalidated(
             update_agent_instance(
                 agent_id,
@@ -983,6 +991,19 @@ def _public_agent_session_cleanup(cleanup: dict[str, Any]) -> dict[str, Any]:
     return public
 
 
+def _run_agent_archive_compensations(
+    timings: dict[str, float],
+    compensations: tuple[tuple[str, Any], ...],
+) -> list[str]:
+    failures: list[str] = []
+    for stage, callback in compensations:
+        try:
+            _timed_agent_delete_stage(timings, stage, callback)
+        except Exception as rollback_error:
+            failures.append(f"{stage}:{type(rollback_error).__name__}")
+    return failures
+
+
 def _archive_agent_with_session_lifecycle(
     agent_id: str,
     *,
@@ -1033,27 +1054,38 @@ def _archive_agent_with_session_lifecycle(
         agent = _timed_agent_delete_stage(timings, "archive_agent", archive_write)
     except Exception as exc:
         restore_token = session_cleanup.get("restoreToken")
+        compensations: list[tuple[str, Any]] = []
         if isinstance(restore_token, dict):
-            _timed_agent_delete_stage(
-                timings,
-                "rollback_agent_sessions",
-                lambda: session_service.restore_agent_sessions_archive(restore_token),
+            compensations.append(
+                (
+                    "rollback_agent_sessions",
+                    lambda: session_service.restore_agent_sessions_archive(restore_token),
+                )
             )
-        _timed_agent_delete_stage(
-            timings,
-            "rollback_mode_bindings",
-            lambda: restore_removed_agents_to_mode_bindings(mode_restore_token),
+        compensations.extend(
+            (
+                (
+                    "rollback_mode_bindings",
+                    lambda: restore_removed_agents_to_mode_bindings(mode_restore_token),
+                ),
+                (
+                    "rollback_chat_rooms",
+                    lambda: restore_removed_agents_to_chat_rooms(room_cleanup.get("restoreToken")),
+                ),
+                (
+                    "rollback_teams",
+                    lambda: restore_removed_agents_to_teams(team_cleanup.get("restoreToken")),
+                ),
+            )
         )
-        _timed_agent_delete_stage(
+        rollback_failures = _run_agent_archive_compensations(
             timings,
-            "rollback_chat_rooms",
-            lambda: restore_removed_agents_to_chat_rooms(room_cleanup.get("restoreToken")),
+            tuple(compensations),
         )
-        _timed_agent_delete_stage(
-            timings,
-            "rollback_teams",
-            lambda: restore_removed_agents_to_teams(team_cleanup.get("restoreToken")),
-        )
+        if rollback_failures:
+            exc.add_note(
+                "Agent archive compensation incomplete: " + ", ".join(rollback_failures)
+            )
         if isinstance(
             exc,
             (
@@ -1230,6 +1262,9 @@ def agent_purge(agent_id: str) -> dict:
     timings: dict[str, float] = {}
     started_at = perf_counter()
     session_purge_restore_token: dict[str, Any] | None = None
+    mode_restore_token: dict[str, Any] | None = None
+    team_cleanup: dict[str, Any] = {}
+    room_cleanup: dict[str, Any] = {}
     try:
         agent_before_purge = _timed_agent_delete_stage(timings, "ensure_purge_allowed", lambda: ensure_agent_purge_allowed(agent_id))
         direct_session_id = str(agent_before_purge.get("directSessionId") or "").strip()
@@ -1252,12 +1287,29 @@ def agent_purge(agent_id: str) -> dict:
             ) from exc
         restore_token = session_purge.get("restoreToken")
         session_purge_restore_token = restore_token if isinstance(restore_token, dict) else None
+        mode_restore_token = _timed_agent_delete_stage(
+            timings,
+            "snapshot_mode_bindings",
+            get_mode_bindings_payload,
+        )
         try:
-            team_cleanup = _timed_agent_delete_stage(timings, "remove_from_teams", lambda: remove_agent_from_teams(agent_id))
+            team_cleanup = _timed_agent_delete_stage(
+                timings,
+                "remove_from_teams",
+                lambda: remove_agent_from_teams(
+                    agent_id,
+                    include_restore_token=True,
+                ),
+            )
             room_cleanup = _timed_agent_delete_stage(
                 timings,
                 "remove_from_chat_rooms",
-                lambda: remove_agent_from_chat_rooms(agent_id, allow_empty_rooms=True, direct_session_id=direct_session_id),
+                lambda: remove_agent_from_chat_rooms(
+                    agent_id,
+                    allow_empty_rooms=True,
+                    direct_session_id=direct_session_id,
+                    include_restore_token=True,
+                ),
             )
             mode_cleanup = _timed_agent_delete_stage(
                 timings,
@@ -1265,12 +1317,45 @@ def agent_purge(agent_id: str) -> dict:
                 lambda: remove_agent_from_mode_bindings(agent_id, agent_snapshot=agent_before_purge),
             )
             purge = _timed_agent_delete_stage(timings, "purge_agent", lambda: purge_archived_agent_instance(agent_id))
-        except Exception:
+        except Exception as exc:
+            compensations: list[tuple[str, Any]] = []
             if session_purge_restore_token is not None:
-                _timed_agent_delete_stage(
-                    timings,
-                    "rollback_agent_session_purge",
-                    lambda: session_service.restore_staged_agent_session_purge(session_purge_restore_token),
+                compensations.append(
+                    (
+                        "rollback_agent_session_purge",
+                        lambda: session_service.restore_staged_agent_session_purge(
+                            session_purge_restore_token
+                        ),
+                    )
+                )
+            compensations.extend(
+                (
+                    (
+                        "rollback_mode_bindings",
+                        lambda: restore_removed_agents_to_mode_bindings(mode_restore_token),
+                    ),
+                    (
+                        "rollback_chat_rooms",
+                        lambda: restore_removed_agents_to_chat_rooms(
+                            room_cleanup.get("restoreToken")
+                        ),
+                    ),
+                    (
+                        "rollback_teams",
+                        lambda: restore_removed_agents_to_teams(
+                            team_cleanup.get("restoreToken")
+                        ),
+                    ),
+                )
+            )
+            rollback_failures = _run_agent_archive_compensations(
+                timings,
+                tuple(compensations),
+            )
+            if rollback_failures:
+                exc.add_note(
+                    "Agent purge compensation incomplete: "
+                    + ", ".join(rollback_failures)
                 )
             raise
         committed_session_purge = _timed_agent_delete_stage(
