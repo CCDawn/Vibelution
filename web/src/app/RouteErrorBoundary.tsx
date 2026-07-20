@@ -1,6 +1,6 @@
 import { useRouteError } from "react-router-dom";
 
-import { VButton } from "../components/vui";
+import { VButton } from "../components/vui/primitives/VButton";
 import { isDynamicImportFetchError } from "./routeChunkRecovery";
 import styles from "./RouteErrorBoundary.styles";
 

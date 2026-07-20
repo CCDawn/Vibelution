@@ -139,6 +139,52 @@ export default defineConfig({
   },
   build: {
     chunkSizeWarningLimit: 760,
+    rollupOptions: {
+      output: {
+        /**
+         * Keep the main `index-*.js` entry as app shell glue.
+         * Framework graphs are large, change rarely, and benefit from independent caching.
+         * Budget taxonomy treats `vendor-*` separately from route feature chunks.
+         */
+        manualChunks(id) {
+          const normalized = id.replace(/\\/g, "/");
+          if (!normalized.includes("/node_modules/")) {
+            return undefined;
+          }
+          if (
+            normalized.includes("/node_modules/react-dom/")
+            || normalized.includes("/node_modules/scheduler/")
+          ) {
+            return "vendor-react-dom";
+          }
+          if (
+            normalized.includes("/node_modules/react-router/")
+            || normalized.includes("/node_modules/react-router-dom/")
+            || normalized.includes("/node_modules/cookie/")
+            || normalized.includes("/node_modules/set-cookie-parser/")
+          ) {
+            return "vendor-react-router";
+          }
+          // Bare `react` package only — not react-dom / react-router.
+          if (
+            normalized.includes("/node_modules/react/")
+            || normalized.includes("/node_modules/use-sync-external-store/")
+          ) {
+            return "vendor-react";
+          }
+          if (normalized.includes("/node_modules/@tanstack/")) {
+            return "vendor-query";
+          }
+          if (
+            normalized.includes("/node_modules/@radix-ui/")
+            || normalized.includes("/node_modules/@floating-ui/")
+          ) {
+            return "vendor-overlay";
+          }
+          return undefined;
+        },
+      },
+    },
   },
   server: {
     host: "127.0.0.1",

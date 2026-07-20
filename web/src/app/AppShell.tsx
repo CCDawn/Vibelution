@@ -74,7 +74,8 @@ import {
   shouldArmBrowserProjectCloseGuard,
   shouldBlockWorkbenchWindowClose,
 } from "./projectCloseGuard";
-import { VButton, VIconButton } from "../components/vui";
+import { VButton } from "../components/vui/primitives/VButton";
+import { VIconButton } from "../components/vui/primitives/VIconButton";
 import { getPageInstanceId } from "./pageInstance";
 import { useShellStore } from "../store/shellStore";
 import styles from "./AppShell.styles";
