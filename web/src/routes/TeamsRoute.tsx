@@ -120,6 +120,10 @@ import { TeamSourceCollectionStorageActionsPanel, type TeamSourceCollectionStora
 import { TeamWorkflowCandidatePreviewPanel, type TeamWorkflowCandidatePreviewItem } from "./TeamWorkflowCandidatePreviewPanel";
 import { TeamsSourceCollectionPanel } from "./teams/TeamsSourceCollectionPanel";
 import {
+  ResearchMemoryEvidencePanel,
+  type ResearchMemoryContextSummary,
+} from "./teams/ResearchMemoryEvidencePanel";
+import {
   SOURCE_COLLECTION_SOURCE_FILTERS,
   deriveSourceCollectionExcludedRecoveryState,
   evidenceLedgerText,
@@ -1107,30 +1111,6 @@ type ExperimentPlanningStatusPayload = {
   storagePath: string;
   nextActions: string[];
   updatedAt: string;
-};
-
-type ResearchMemoryContextSummary = {
-  contextId: string;
-  knowledgeItemCount: number;
-  reviewedSourceCount: number;
-  negativeExperimentCount: number;
-  successfulRunCount: number;
-  forbiddenDuplicateExperimentCount: number;
-  claimCount: number;
-  claimStatusCounts: {
-    qualified: number;
-    unsupported: number;
-    rejected: number;
-    not_established: number;
-  };
-  allowedVariableCount: number;
-  allowedVariables: string[];
-  claimMapPreview: Array<{
-    claimId: string;
-    claim: string;
-    status: "qualified" | "unsupported" | "rejected" | "not_established" | string;
-  }>;
-  missingEvidence: string[];
 };
 
 type ExperimentPlanCreatePayload = {
@@ -5297,63 +5277,11 @@ export function TeamsRoute({
         primaryAction: lang === "zh" ? "启动执行迭代" : "Start execution",
       },
     };
-    const claimStatusLabel = (status: string) => {
-      if (lang !== "zh") {
-        return status.replace("_", " ");
-      }
-      return {
-        qualified: "有边界支持",
-        unsupported: "暂不支持",
-        rejected: "已否定",
-        not_established: "尚未建立",
-      }[status] || status;
-    };
     const renderResearchMemoryContextDetails = (
       summary: ResearchMemoryContextSummary | undefined,
+      stage: "experiment" | "iteration",
     ) => {
-      if (!summary || (summary.claimCount === 0 && summary.allowedVariableCount === 0)) {
-        return null;
-      }
-      return (
-        <details
-          className="group min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] px-2 py-1.5 [font-size:var(--vui-font-xs)]"
-          data-memory-context-id={summary.contextId}
-        >
-          <summary className="cursor-pointer select-none font-semibold text-[var(--fg-secondary)]">
-            {lang === "zh" ? "查看 Claim Map 与变量边界" : "View claim map and variable bounds"}
-          </summary>
-          <div className="mt-2 grid min-w-0 gap-2 border-t border-[var(--vui-border-subtle)] pt-2">
-            <div className="flex min-w-0 flex-wrap gap-x-3 gap-y-1 text-[var(--fg-secondary)]">
-              <span>{lang === "zh" ? "有边界支持" : "qualified"} {summary.claimStatusCounts.qualified}</span>
-              <span>{lang === "zh" ? "暂不支持" : "unsupported"} {summary.claimStatusCounts.unsupported}</span>
-              <span>{lang === "zh" ? "已否定" : "rejected"} {summary.claimStatusCounts.rejected}</span>
-              <span>{lang === "zh" ? "尚未建立" : "not established"} {summary.claimStatusCounts.not_established}</span>
-            </div>
-            {summary.allowedVariables.length > 0 ? (
-              <div className="grid min-w-0 gap-1">
-                <strong className="text-[var(--fg-secondary)]">{lang === "zh" ? "本轮允许变化" : "Allowed changes"}</strong>
-                <div className="flex min-w-0 flex-wrap gap-1">
-                  {summary.allowedVariables.map((path) => (
-                    <code key={path} className="max-w-full break-all rounded bg-[var(--vui-control-muted)] px-1.5 py-0.5 text-[var(--fg-primary)]">
-                      {path}
-                    </code>
-                  ))}
-                </div>
-              </div>
-            ) : null}
-            {summary.claimMapPreview.length > 0 ? (
-              <ul className="grid min-w-0 gap-1">
-                {summary.claimMapPreview.map((claim) => (
-                  <li key={claim.claimId} className="grid min-w-0 grid-cols-[max-content_minmax(0,1fr)] gap-2">
-                    <span className="text-[var(--fg-tertiary)]">{claimStatusLabel(claim.status)}</span>
-                    <span className="min-w-0 break-words text-[var(--fg-primary)]" title={claim.claim}>{claim.claim}</span>
-                  </li>
-                ))}
-              </ul>
-            ) : null}
-          </div>
-        </details>
-      );
+      return <ResearchMemoryEvidencePanel summary={summary} lang={lang} stage={stage} variant="compact" />;
     };
     const knowledgeCollectionStatusLabel = sourceCollectionDisplayState.statusText;
     const knowledgeCollectionPrimaryActionLabel = !selectedSourceCollectionRun
@@ -5645,7 +5573,7 @@ export function TeamsRoute({
                         {" · "}{lang === "zh" ? "负向" : "negative"} {experimentLifecycleProjection.stage2.memoryContextSummary?.negativeExperimentCount ?? 0}
                       </span>
                     </div>
-                    {renderResearchMemoryContextDetails(experimentLifecycleProjection.stage2.memoryContextSummary)}
+                    {renderResearchMemoryContextDetails(experimentLifecycleProjection.stage2.memoryContextSummary, "experiment")}
                   </>
                 ) : stageType === "iteration" && experimentLifecycleProjection?.stage3 ? (
                   <>
@@ -5664,7 +5592,7 @@ export function TeamsRoute({
                         {" · "}{lang === "zh" ? "禁重" : "blocked repeats"} {experimentLifecycleProjection.stage3.memoryContextSummary?.forbiddenDuplicateExperimentCount ?? 0}
                       </span>
                     </div>
-                    {renderResearchMemoryContextDetails(experimentLifecycleProjection.stage3.memoryContextSummary)}
+                    {renderResearchMemoryContextDetails(experimentLifecycleProjection.stage3.memoryContextSummary, "iteration")}
                   </>
                 ) : (
                   <em>{navItem ? (lang === "zh" ? navItem.zhModules : navItem.enModules) : ""}</em>
@@ -8562,6 +8490,22 @@ export function TeamsRoute({
               </div>
             ) : null}
           </section>
+          {stageView === "experiment" ? (
+            <ResearchMemoryEvidencePanel
+              summary={experimentPlanningStatus?.lifecycleProjection?.stage2.memoryContextSummary}
+              lang={lang}
+              stage="experiment"
+              variant="detail"
+            />
+          ) : null}
+          {stageView === "iteration" ? (
+            <ResearchMemoryEvidencePanel
+              summary={experimentPlanningStatus?.lifecycleProjection?.stage3.memoryContextSummary}
+              lang={lang}
+              stage="iteration"
+              variant="detail"
+            />
+          ) : null}
           {stageView === "experiment" ? renderExperimentPlanningLedgerPanel() : null}
           {stageView === "iteration" ? renderResearchLoopPanel(experimentPlanningStatus?.activePlan ?? null, "iteration") : null}
           <section className={styles.researchStageModuleGrid} aria-label={lang === "zh" ? "阶段模块" : "Stage modules"}>
