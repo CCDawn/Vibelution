@@ -150,6 +150,37 @@ from .agent_directory_service import (
     update_agent_instance,
 )
 from .runtime_scene_service import record_runtime_scene_conversation_event, record_runtime_scene_event
+from .session.list_cache import (
+    SESSION_LIST_CACHE_TTL_SECONDS as _SESSION_LIST_CACHE_TTL_SECONDS,
+    _begin_session_list_cache_build,
+    _copy_session_list_snapshot,
+    _copy_session_summary_snapshot,
+    _finish_session_list_cache_build,
+    _get_session_list_cache,
+    _get_session_list_cache_locked,
+    _session_list_source_signature,
+    _set_session_list_cache,
+    invalidate_session_list_cache as _invalidate_session_list_cache_core,
+)
+from .session.live_output import (
+    SESSION_LIVE_OUTPUT_CHECKPOINT_INTERVAL_SECONDS as _SESSION_LIVE_OUTPUT_CHECKPOINT_INTERVAL_SECONDS,
+    SessionLiveOutputState,
+    # Re-export store symbols for tests/helpers that touch session_service._SESSION_LIVE_OUTPUTS*.
+    _SESSION_LIVE_OUTPUTS,
+    _SESSION_LIVE_OUTPUTS_LOCK,
+    build_live_output_checkpoint_core_payload,
+    clear_session_live_output as _clear_session_live_output_memory,
+    delete_session_live_output_checkpoint as _delete_session_live_output_checkpoint_core,
+    discard_session_live_output_state as _discard_session_live_output_state_core,
+    live_output_checkpoint_has_assistant_payload as _live_output_checkpoint_has_assistant_payload,
+    live_output_checkpoint_has_visible_payload as _live_output_checkpoint_has_visible_payload,
+    live_output_delta as _live_output_delta,
+    load_session_live_output_checkpoint_payload as _load_session_live_output_checkpoint_payload,
+    snapshot_session_live_output as _snapshot_session_live_output,
+    state_from_checkpoint_payload as _state_from_checkpoint_payload,
+    write_session_live_output_checkpoint as _write_session_live_output_checkpoint_core,
+)
+from .session import journal_bridge as _journal_bridge
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -184,27 +215,11 @@ _SESSION_STREAM_LAST_SNAPSHOT_AT: dict[str, float] = {}
 _SESSION_STREAM_THROTTLED_COUNTS: dict[str, int] = {}
 _SESSION_TURN_CONTROLS_LOCK = threading.Lock()
 _SESSION_TURN_CONTROLS: dict[str, "SessionTurnControl"] = {}
-_SESSION_LIVE_OUTPUTS_LOCK = threading.Lock()
-_SESSION_LIVE_OUTPUTS: dict[str, "SessionLiveOutputState"] = {}
-_SESSION_LIVE_OUTPUT_CHECKPOINT_LOCK = threading.Lock()
-_SESSION_LIVE_OUTPUT_CHECKPOINT_LAST_AT: dict[str, float] = {}
-_SESSION_LIVE_OUTPUT_CHECKPOINT_INTERVAL_SECONDS = 0.75
 _SESSION_UI_CAPTURE_LOCK = threading.Lock()
 _SESSION_UI_CAPTURE_CONTEXT: ContextVar[dict[str, Any]] = ContextVar(
     "vibelution_session_ui_capture_context",
     default={},
 )
-_SESSION_LIST_CACHE_LOCK = threading.Lock()
-_SESSION_LIST_CACHE_CONDITION = threading.Condition(_SESSION_LIST_CACHE_LOCK)
-_SESSION_LIST_CACHE_TTL_SECONDS = 4.0
-_SESSION_LIST_INFLIGHT_STALE_SECONDS = 2.0
-_SESSION_LIST_INFLIGHT_WAIT_SECONDS = 0.2
-_SESSION_LIST_CACHE: dict[str, Any] = {}
-_SESSION_CONVERSATION_EVENTS_CACHE_LOCK = threading.Lock()
-_SESSION_CONVERSATION_EVENTS_CACHE_CONDITION = threading.Condition(_SESSION_CONVERSATION_EVENTS_CACHE_LOCK)
-_SESSION_CONVERSATION_EVENTS_CACHE_MAX_ENTRIES = 64
-_SESSION_CONVERSATION_EVENTS_CACHE: dict[str, dict[str, Any]] = {}
-_SESSION_CONVERSATION_EVENTS_INFLIGHT: dict[str, object] = {}
 _SESSION_AGENT_RUNTIME_CACHE_LOCK = threading.Lock()
 _SESSION_AGENT_RUNTIME_CACHE_MAX_ENTRIES = 16
 _SESSION_AGENT_RUNTIME_CACHE: dict[str, dict[str, Any]] = {}
@@ -264,322 +279,74 @@ def _perf_counter() -> float:
     return time.perf_counter()
 
 
-def _session_list_source_signature() -> tuple[Any, ...]:
-    """Return cheap file signatures for the read-only session index inputs."""
-
-    def signature(path: Path) -> tuple[str, int, int]:
-        try:
-            stat = path.stat()
-        except OSError:
-            return (str(path), -1, -1)
-        return (str(path), int(stat.st_mtime_ns), int(stat.st_size))
-
-    inbox_signatures: list[tuple[str, tuple[str, bool, int, int]]] = []
-    state = agent_directory_service.load_state()
-    agents = list(state.get("agents") or []) if isinstance(state, dict) else []
-    for agent in agents:
-        if not isinstance(agent, dict):
-            continue
-        agent_id = str(agent.get("agentId") or "").strip()
-        if not agent_id:
-            continue
-        inbox_path = agent_directory_service._agent_workspace_event_path(
-            agent,
-            "agent_inbox_messages.jsonl",
-        )
-        inbox_signatures.append(
-            (
-                agent_id,
-                agent_directory_service._jsonl_signature(inbox_path),
-            )
-        )
-
-    return (
-        str(PROJECT_ROOT.resolve()),
-        signature(chat_state_path(PROJECT_ROOT)),
-        signature(agent_directory_service.registry_path()),
-        tuple(inbox_signatures),
-    )
-
-
-def _copy_session_list_snapshot(sessions: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    return [_copy_session_summary_snapshot(item) for item in sessions if isinstance(item, dict)]
-
-
-def _copy_session_summary_snapshot(item: dict[str, Any]) -> dict[str, Any]:
-    snapshot = dict(item)
-    child_session_ids = snapshot.get("childSessionIds")
-    if isinstance(child_session_ids, list):
-        snapshot["childSessionIds"] = list(child_session_ids)
-    result_card = snapshot.get("resultCard")
-    if isinstance(result_card, dict):
-        copied_card = dict(result_card)
-        changed_files = copied_card.get("changedFiles")
-        if isinstance(changed_files, list):
-            copied_card["changedFiles"] = list(changed_files)
-        validations = copied_card.get("validations")
-        if isinstance(validations, list):
-            copied_card["validations"] = list(validations)
-        snapshot["resultCard"] = copied_card
-    return snapshot
-
-
-def _get_session_list_cache(
-    *,
-    now: float,
-    signature: tuple[Any, ...],
-    allow_stale_matching_signature: bool = False,
-) -> tuple[list[dict[str, Any]], int, int, int] | None:
-    with _SESSION_LIST_CACHE_LOCK:
-        snapshot = _SESSION_LIST_CACHE.get("sessions")
-        if not isinstance(snapshot, list):
-            return None
-        if _SESSION_LIST_CACHE.get("signature") != signature:
-            return None
-        cached_at = _SESSION_LIST_CACHE.get("cached_at")
-        try:
-            cache_age_seconds = now - float(cached_at)
-        except (TypeError, ValueError):
-            return None
-        if cache_age_seconds < 0:
-            return None
-        if not allow_stale_matching_signature and cache_age_seconds > _SESSION_LIST_CACHE_TTL_SECONDS:
-            return None
-        return (
-            _copy_session_list_snapshot(snapshot),
-            int(round(cache_age_seconds * 1000)),
-            int(_SESSION_LIST_CACHE.get("conversation_count") or 0),
-            int(_SESSION_LIST_CACHE.get("agent_count") or 0),
-        )
-
-
-def _get_session_list_cache_locked(
-    *,
-    now: float,
-    signature: tuple[Any, ...],
-    allow_stale_matching_signature: bool = False,
-) -> tuple[list[dict[str, Any]], int, int, int] | None:
-    snapshot = _SESSION_LIST_CACHE.get("sessions")
-    if not isinstance(snapshot, list):
-        return None
-    if _SESSION_LIST_CACHE.get("signature") != signature:
-        return None
-    cached_at = _SESSION_LIST_CACHE.get("cached_at")
-    try:
-        cache_age_seconds = now - float(cached_at)
-    except (TypeError, ValueError):
-        return None
-    if cache_age_seconds < 0:
-        return None
-    if not allow_stale_matching_signature and cache_age_seconds > _SESSION_LIST_CACHE_TTL_SECONDS:
-        return None
-    return (
-        _copy_session_list_snapshot(snapshot),
-        int(round(cache_age_seconds * 1000)),
-        int(_SESSION_LIST_CACHE.get("conversation_count") or 0),
-        int(_SESSION_LIST_CACHE.get("agent_count") or 0),
-    )
-
-
-def _begin_session_list_cache_build(
-    *,
-    now: float,
-    signature: tuple[Any, ...],
-    allow_stale_matching_signature: bool = False,
-) -> tuple[tuple[list[dict[str, Any]], int, int, int] | None, bool, bool]:
-    """Return cached sessions or reserve this caller as the index builder."""
-
-    waited_for_inflight = False
-    with _SESSION_LIST_CACHE_CONDITION:
-        cached = _get_session_list_cache_locked(
-            now=now,
-            signature=signature,
-            allow_stale_matching_signature=allow_stale_matching_signature,
-        )
-        if cached is not None:
-            return cached, False, waited_for_inflight
-        while _SESSION_LIST_CACHE.get("inflight_signature") == signature:
-            waited_for_inflight = True
-            inflight_started_at = _SESSION_LIST_CACHE.get("inflight_started_at")
-            try:
-                inflight_age_seconds = now - float(inflight_started_at)
-            except (TypeError, ValueError):
-                inflight_age_seconds = _SESSION_LIST_INFLIGHT_STALE_SECONDS
-            if inflight_age_seconds >= _SESSION_LIST_INFLIGHT_STALE_SECONDS:
-                _SESSION_LIST_CACHE.pop("inflight_signature", None)
-                _SESSION_LIST_CACHE.pop("inflight_started_at", None)
-                break
-            remaining_stale_seconds = max(
-                _SESSION_LIST_INFLIGHT_STALE_SECONDS - inflight_age_seconds,
-                0.0,
-            )
-            _SESSION_LIST_CACHE_CONDITION.wait(
-                timeout=min(_SESSION_LIST_INFLIGHT_WAIT_SECONDS, remaining_stale_seconds)
-            )
-            now = _perf_counter()
-            cached = _get_session_list_cache_locked(
-                now=now,
-                signature=signature,
-                allow_stale_matching_signature=allow_stale_matching_signature,
-            )
-            if cached is not None:
-                return cached, False, waited_for_inflight
-            if _SESSION_LIST_CACHE.get("inflight_signature") != signature:
-                break
-        _SESSION_LIST_CACHE["inflight_signature"] = signature
-        _SESSION_LIST_CACHE["inflight_started_at"] = now
-        return None, True, waited_for_inflight
-
-
-def _finish_session_list_cache_build(
-    *,
-    signature: tuple[Any, ...],
-    sessions: list[dict[str, Any]] | None = None,
-    started_at: float | None = None,
-    conversation_count: int = 0,
-    agent_count: int = 0,
-) -> None:
-    with _SESSION_LIST_CACHE_CONDITION:
-        owns_inflight = _SESSION_LIST_CACHE.get("inflight_signature") == signature
-        if started_at is not None:
-            try:
-                owns_inflight = owns_inflight and (
-                    float(_SESSION_LIST_CACHE.get("inflight_started_at")) == float(started_at)
-                )
-            except (TypeError, ValueError):
-                owns_inflight = False
-        if sessions is not None and started_at is not None:
-            if not owns_inflight:
-                _SESSION_LIST_CACHE_CONDITION.notify_all()
-                return
-            _SESSION_LIST_CACHE.clear()
-            _SESSION_LIST_CACHE.update(
-                {
-                    "sessions": _copy_session_list_snapshot(sessions),
-                    "cached_at": started_at,
-                    "signature": signature,
-                    "conversation_count": int(conversation_count),
-                    "agent_count": int(agent_count),
-                }
-            )
-        elif _SESSION_LIST_CACHE.get("inflight_signature") == signature:
-            if started_at is None or owns_inflight:
-                _SESSION_LIST_CACHE.pop("inflight_signature", None)
-                _SESSION_LIST_CACHE.pop("inflight_started_at", None)
-        _SESSION_LIST_CACHE_CONDITION.notify_all()
-
-
-def _set_session_list_cache(
-    sessions: list[dict[str, Any]],
-    *,
-    now: float,
-    signature: tuple[Any, ...],
-    conversation_count: int,
-    agent_count: int,
-) -> None:
-    with _SESSION_LIST_CACHE_LOCK:
-        _SESSION_LIST_CACHE.clear()
-        _SESSION_LIST_CACHE.update(
-            {
-                "sessions": _copy_session_list_snapshot(sessions),
-                "cached_at": now,
-                "signature": signature,
-                "conversation_count": int(conversation_count),
-                "agent_count": int(agent_count),
-            }
-        )
-
-
 def _invalidate_session_list_cache() -> None:
+    """Clear list cache and any direct-session collision repair fingerprint."""
+
     global _DIRECT_SESSION_COLLISION_REPAIR_SIGNATURE
-    with _SESSION_LIST_CACHE_CONDITION:
-        _SESSION_LIST_CACHE.clear()
-        _SESSION_LIST_CACHE_CONDITION.notify_all()
+    _invalidate_session_list_cache_core()
     with _DIRECT_SESSION_COLLISION_REPAIR_LOCK:
         _DIRECT_SESSION_COLLISION_REPAIR_SIGNATURE = None
 
 
 def _session_conversation_events_signature(session_id: str) -> tuple[str, int, int, int]:
-    normalized_session_id = str(session_id or "").strip()
-    if not normalized_session_id:
-        return ("", 0, -1, -1)
-    path = conversation_ledger_path(PROJECT_ROOT, normalized_session_id)
-    try:
-        stat = path.stat()
-        modified_ns = int(stat.st_mtime_ns)
-        size = int(stat.st_size)
-    except OSError:
-        modified_ns = -1
-        size = -1
-    try:
-        sequence = latest_ledger_sequence(PROJECT_ROOT, normalized_session_id)
-    except Exception:
-        sequence = 0
-    return (str(path), int(sequence or 0), modified_ns, size)
-
-
-def _prune_session_conversation_events_cache_locked() -> None:
-    while len(_SESSION_CONVERSATION_EVENTS_CACHE) > _SESSION_CONVERSATION_EVENTS_CACHE_MAX_ENTRIES:
-        oldest_key = min(
-            _SESSION_CONVERSATION_EVENTS_CACHE,
-            key=lambda key: float(_SESSION_CONVERSATION_EVENTS_CACHE.get(key, {}).get("last_access") or 0.0),
-        )
-        _SESSION_CONVERSATION_EVENTS_CACHE.pop(oldest_key, None)
+    return _journal_bridge.session_conversation_events_signature(
+        session_id,
+        project_root=PROJECT_ROOT,
+    )
 
 
 def _invalidate_session_conversation_events_cache(session_id: str = "") -> None:
-    normalized_session_id = str(session_id or "").strip()
-    with _SESSION_CONVERSATION_EVENTS_CACHE_CONDITION:
-        if normalized_session_id:
-            _SESSION_CONVERSATION_EVENTS_CACHE.pop(normalized_session_id, None)
-        else:
-            _SESSION_CONVERSATION_EVENTS_CACHE.clear()
-        _SESSION_CONVERSATION_EVENTS_CACHE_CONDITION.notify_all()
+    _journal_bridge.invalidate_session_conversation_events_cache(session_id)
 
 
 def _load_session_conversation_events_cached(session_id: str) -> list[Any]:
-    normalized_session_id = str(session_id or "").strip()
-    if not normalized_session_id:
-        return []
-    owner = object()
-    while True:
-        signature = _session_conversation_events_signature(normalized_session_id)
-        now = _perf_counter()
-        with _SESSION_CONVERSATION_EVENTS_CACHE_CONDITION:
-            cached = _SESSION_CONVERSATION_EVENTS_CACHE.get(normalized_session_id)
-            if cached and cached.get("signature") == signature:
-                cached["last_access"] = now
-                return list(cached.get("events") or ())
-            if normalized_session_id not in _SESSION_CONVERSATION_EVENTS_INFLIGHT:
-                _SESSION_CONVERSATION_EVENTS_INFLIGHT[normalized_session_id] = owner
-                break
-            _SESSION_CONVERSATION_EVENTS_CACHE_CONDITION.wait()
-
-    try:
-        events = list(load_conversation_events(PROJECT_ROOT, normalized_session_id) or [])
-    except Exception:
-        with _SESSION_CONVERSATION_EVENTS_CACHE_CONDITION:
-            if _SESSION_CONVERSATION_EVENTS_INFLIGHT.get(normalized_session_id) is owner:
-                _SESSION_CONVERSATION_EVENTS_INFLIGHT.pop(normalized_session_id, None)
-            _SESSION_CONVERSATION_EVENTS_CACHE_CONDITION.notify_all()
-        raise
-    with _SESSION_CONVERSATION_EVENTS_CACHE_CONDITION:
-        if _SESSION_CONVERSATION_EVENTS_INFLIGHT.get(normalized_session_id) is owner:
-            _SESSION_CONVERSATION_EVENTS_CACHE[normalized_session_id] = {
-                "signature": signature,
-                "events": tuple(events),
-                "last_access": now,
-            }
-            _SESSION_CONVERSATION_EVENTS_INFLIGHT.pop(normalized_session_id, None)
-            _prune_session_conversation_events_cache_locked()
-        _SESSION_CONVERSATION_EVENTS_CACHE_CONDITION.notify_all()
-        return list(events)
+    return _journal_bridge.load_session_conversation_events_cached(
+        session_id,
+        project_root=PROJECT_ROOT,
+    )
 
 
 def load_session_conversation_events_snapshot(session_id: str) -> list[Any]:
     """Return the current session ledger snapshot through the shared signature cache."""
 
-    return _load_session_conversation_events_cached(session_id)
+    return _journal_bridge.load_session_conversation_events_snapshot(
+        session_id,
+        project_root=PROJECT_ROOT,
+    )
+
+
+def _session_ledger_sequence(session_id: str) -> int:
+    return _journal_bridge.session_ledger_sequence(session_id, project_root=PROJECT_ROOT)
+
+
+def _append_session_conversation_event(
+    session_id: str,
+    turn_id: str,
+    event_type: str,
+    *,
+    status: str = "",
+    payload: dict[str, Any] | None = None,
+    source: str = "session_service",
+    visible_in_model: bool = True,
+    projection_kind: str = "",
+    tool_call_id: str = "",
+    correlation_id: str = "",
+    source_kind: str = "",
+) -> None:
+    _journal_bridge.append_session_conversation_event(
+        session_id,
+        turn_id,
+        event_type,
+        status=status,
+        payload=payload,
+        source=source,
+        visible_in_model=visible_in_model,
+        projection_kind=projection_kind,
+        tool_call_id=tool_call_id,
+        correlation_id=correlation_id,
+        source_kind=source_kind,
+        project_root=PROJECT_ROOT,
+    )
 
 
 def _elapsed_ms(started_at: float) -> int:
@@ -727,20 +494,26 @@ def _live_output_checkpoint_payload(state: "SessionLiveOutputState") -> dict[str
     turn_id = str(getattr(state, "turn_id", "") or "").strip()
     content = str(getattr(state, "content", "") or "")
     feedback_events = _normalize_message_feedback_events(getattr(state, "feedback_events", []) or [])
-    payload = {
-        "schemaVersion": 1,
-        "sessionId": session_id,
-        "turnId": turn_id,
-        "stage": str(getattr(state, "stage", "") or "").strip(),
-        "content": content,
-        "thought": str(getattr(state, "thought", "") or ""),
-        "mentalSnapshot": _normalize_mental_snapshot(getattr(state, "mental_snapshot", None)),
-        "toolCalls": _normalize_message_tool_calls(getattr(state, "tool_calls", []) or []),
-        "feedbackEvents": feedback_events,
-        "contextComposition": _normalize_session_context_composition(getattr(state, "context_composition", None)),
-        "llmPayloadTrace": _normalize_session_llm_payload_trace(getattr(state, "llm_payload_trace", None)),
-        "updatedAt": str(getattr(state, "updated_at", "") or "").strip() or _now_timestamp(),
-    }
+    updated_at = str(getattr(state, "updated_at", "") or "").strip() or _now_timestamp()
+    payload = build_live_output_checkpoint_core_payload(
+        SessionLiveOutputState(
+            session_id=session_id,
+            turn_id=turn_id,
+            stage=str(getattr(state, "stage", "") or "").strip(),
+            thought=str(getattr(state, "thought", "") or ""),
+            content=content,
+            mental_snapshot=_normalize_mental_snapshot(getattr(state, "mental_snapshot", None)),
+            tool_calls=_normalize_message_tool_calls(getattr(state, "tool_calls", []) or []),
+            feedback_events=feedback_events,
+            context_composition=_normalize_session_context_composition(
+                getattr(state, "context_composition", None)
+            ),
+            llm_payload_trace=_normalize_session_llm_payload_trace(getattr(state, "llm_payload_trace", None)),
+            updated_at=updated_at,
+        ),
+        updated_at=updated_at,
+    )
+    # Facade enrichment: timeline/codex projections depend on session_service helpers.
     timeline_items = _build_message_timeline_items(
         message_id=_live_assistant_message_id(session_id, turn_id) if session_id else "",
         content=content,
@@ -765,27 +538,6 @@ def _live_output_checkpoint_payload(state: "SessionLiveOutputState") -> dict[str
     return payload
 
 
-def _live_output_checkpoint_has_visible_payload(payload: dict[str, Any]) -> bool:
-    return bool(
-        str(payload.get("content") or "").strip()
-        or str(payload.get("thought") or "").strip()
-        or list(payload.get("toolCalls") or [])
-        or list(payload.get("feedbackEvents") or [])
-        or isinstance(payload.get("mentalSnapshot"), dict)
-        or isinstance(payload.get("llmPayloadTrace"), dict)
-    )
-
-
-def _live_output_checkpoint_has_assistant_payload(payload: dict[str, Any]) -> bool:
-    return bool(
-        str(payload.get("content") or "").strip()
-        or str(payload.get("thought") or "").strip()
-        or list(payload.get("toolCalls") or [])
-        or list(payload.get("feedbackEvents") or [])
-        or isinstance(payload.get("mentalSnapshot"), dict)
-    )
-
-
 def _write_session_live_output_checkpoint(
     session_id: str,
     state: "SessionLiveOutputState",
@@ -795,80 +547,55 @@ def _write_session_live_output_checkpoint(
     normalized_session_id = str(session_id or "").strip()
     if not normalized_session_id:
         return
-    now = _perf_counter()
-    if not force:
-        with _SESSION_LIVE_OUTPUT_CHECKPOINT_LOCK:
-            last_at = _SESSION_LIVE_OUTPUT_CHECKPOINT_LAST_AT.get(normalized_session_id, 0.0)
-        if last_at > 0 and now - last_at < _SESSION_LIVE_OUTPUT_CHECKPOINT_INTERVAL_SECONDS:
-            return
-    payload = _live_output_checkpoint_payload(state)
-    if not _live_output_checkpoint_has_visible_payload(payload):
-        if force:
-            _delete_session_live_output_checkpoint(normalized_session_id)
-        return
-    checkpoint_path = _session_live_output_checkpoint_path(normalized_session_id)
-    tmp_path = checkpoint_path.with_name(f"{checkpoint_path.name}.tmp")
-    try:
-        tmp_path.write_text(json.dumps(payload, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
-        tmp_path.replace(checkpoint_path)
-        with _SESSION_LIVE_OUTPUT_CHECKPOINT_LOCK:
-            _SESSION_LIVE_OUTPUT_CHECKPOINT_LAST_AT[normalized_session_id] = now
-    except OSError:
-        try:
-            tmp_path.unlink(missing_ok=True)
-        except OSError:
-            pass
+    _write_session_live_output_checkpoint_core(
+        normalized_session_id,
+        checkpoint_path=_session_live_output_checkpoint_path(normalized_session_id),
+        build_payload=lambda: _live_output_checkpoint_payload(state),
+        force=force,
+        interval_seconds=_SESSION_LIVE_OUTPUT_CHECKPOINT_INTERVAL_SECONDS,
+    )
 
 
 def _delete_session_live_output_checkpoint(session_id: str) -> None:
     normalized_session_id = str(session_id or "").strip()
     if not normalized_session_id:
         return
-    with _SESSION_LIVE_OUTPUT_CHECKPOINT_LOCK:
-        _SESSION_LIVE_OUTPUT_CHECKPOINT_LAST_AT.pop(normalized_session_id, None)
-    try:
-        _session_live_output_checkpoint_path(normalized_session_id).unlink(missing_ok=True)
-    except OSError:
-        return
+    _delete_session_live_output_checkpoint_core(
+        normalized_session_id,
+        checkpoint_path=_session_live_output_checkpoint_path(normalized_session_id),
+    )
 
 
 def _discard_session_live_output_state(session_id: str, *, turn_id: str = "") -> None:
     normalized_session_id = str(session_id or "").strip()
     if not normalized_session_id:
         return
-    normalized_turn_id = str(turn_id or "").strip()
-    with _SESSION_LIVE_OUTPUTS_LOCK:
-        if normalized_turn_id:
-            current = _SESSION_LIVE_OUTPUTS.get(normalized_session_id)
-            current_turn_id = str(getattr(current, "turn_id", "") or "").strip()
-            if current is not None and current_turn_id and current_turn_id != normalized_turn_id:
-                return
-        _SESSION_LIVE_OUTPUTS.pop(normalized_session_id, None)
-    _delete_session_live_output_checkpoint(normalized_session_id)
+    _discard_session_live_output_state_core(
+        normalized_session_id,
+        turn_id=turn_id,
+        checkpoint_path=_session_live_output_checkpoint_path(normalized_session_id),
+    )
 
 
 def _load_session_live_output_checkpoint(session_id: str) -> "SessionLiveOutputState | None":
     normalized_session_id = str(session_id or "").strip()
     if not normalized_session_id:
         return None
-    try:
-        payload = json.loads(_session_live_output_checkpoint_path(normalized_session_id).read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+    payload = _load_session_live_output_checkpoint_payload(
+        _session_live_output_checkpoint_path(normalized_session_id)
+    )
+    if payload is None:
         return None
-    if not isinstance(payload, dict) or not _live_output_checkpoint_has_visible_payload(payload):
-        return None
-    return SessionLiveOutputState(
-        session_id=normalized_session_id,
-        turn_id=str(payload.get("turnId") or "").strip(),
-        stage=str(payload.get("stage") or "").strip(),
-        thought=_sanitize_thought_text(payload.get("thought") or ""),
-        content=_sanitize_message_content("assistant", payload.get("content") or ""),
-        mental_snapshot=_normalize_mental_snapshot(payload.get("mentalSnapshot")),
-        tool_calls=_normalize_message_tool_calls(payload.get("toolCalls") or []),
-        feedback_events=_normalize_message_feedback_events(payload.get("feedbackEvents") or []),
-        context_composition=_normalize_session_context_composition(payload.get("contextComposition")),
-        llm_payload_trace=_normalize_session_llm_payload_trace(payload.get("llmPayloadTrace")),
-        updated_at=str(payload.get("updatedAt") or "").strip(),
+    return _state_from_checkpoint_payload(
+        normalized_session_id,
+        payload,
+        sanitize_thought=_sanitize_thought_text,
+        sanitize_content=lambda value: _sanitize_message_content("assistant", value),
+        normalize_mental_snapshot=_normalize_mental_snapshot,
+        normalize_tool_calls=_normalize_message_tool_calls,
+        normalize_feedback_events=_normalize_message_feedback_events,
+        normalize_context_composition=_normalize_session_context_composition,
+        normalize_llm_payload_trace=_normalize_session_llm_payload_trace,
     )
 
 
@@ -911,63 +638,6 @@ def _persist_recovered_live_output_to_chat_state(
         conversation["updated_at"] = assistant_entry["timestamp"]
         chat_payload["updated_at"] = assistant_entry["timestamp"]
         save_chat_state(PROJECT_ROOT, chat_payload)
-
-
-def _append_session_conversation_event(
-    session_id: str,
-    turn_id: str,
-    event_type: str,
-    *,
-    status: str = "",
-    payload: dict[str, Any] | None = None,
-    source: str = "session_service",
-    visible_in_model: bool = True,
-    projection_kind: str = "",
-    tool_call_id: str = "",
-    correlation_id: str = "",
-    source_kind: str = "",
-) -> None:
-    normalized_session_id = str(session_id or "").strip()
-    normalized_event_type = str(event_type or "").strip()
-    if not normalized_session_id or not normalized_event_type:
-        return
-    try:
-        append_conversation_event(
-            PROJECT_ROOT,
-            normalized_session_id,
-            str(turn_id or "").strip(),
-            normalized_event_type,
-            status=status,
-            payload=payload or {},
-            source=source,
-            visible_in_model=visible_in_model,
-            projection_kind=projection_kind,
-            tool_call_id=tool_call_id,
-            correlation_id=correlation_id,
-            source_kind=source_kind,
-        )
-        _invalidate_session_conversation_events_cache(normalized_session_id)
-    except Exception as exc:
-        try:
-            record_runtime_scene_event(
-                "conversation",
-                "conversation_ledger",
-                "conversation.ledger.append_failed",
-                level="warning",
-                outcome="failed",
-                message="Failed to append a chat conversation ledger event.",
-                fields={
-                    "sessionId": normalized_session_id,
-                    "turnId": str(turn_id or "").strip(),
-                    "eventType": normalized_event_type,
-                    "errorType": type(exc).__name__,
-                    "errorPreview": trim_lines(str(exc), max_lines=2),
-                },
-                lifecycle=True,
-            )
-        except Exception:
-            pass
-        raise
 
 
 def _reconcile_stale_session_ledger(session_id: str, *, active_turn_id: str = "", reason: str = "process_restarted") -> None:
@@ -1090,16 +760,6 @@ def _append_stale_turn_interruption_if_session_inactive(
             },
             source="session_service",
         )
-
-
-def _session_ledger_sequence(session_id: str) -> int:
-    normalized_session_id = str(session_id or "").strip()
-    if not normalized_session_id:
-        return 0
-    try:
-        return latest_ledger_sequence(PROJECT_ROOT, normalized_session_id)
-    except Exception:
-        return 0
 
 
 def store_session_image_artifact(
@@ -2663,35 +2323,6 @@ class SessionTurnControl:
     def mark_released_to_user(self) -> None:
         with self._lock:
             self.released_to_user = True
-
-
-@dataclass
-class SessionLiveOutputState:
-    """Ephemeral live assistant output for one active web chat turn."""
-
-    session_id: str
-    turn_id: str = ""
-    stage: str = ""
-    thought: str = ""
-    content: str = ""
-    thought_delta: str = ""
-    content_delta: str = ""
-    replace_thought: bool = False
-    replace_content: bool = False
-    mental_snapshot: dict[str, Any] | None = None
-    tool_calls: list[dict[str, Any]] = field(default_factory=list)
-    feedback_events: list[dict[str, Any]] = field(default_factory=list)
-    context_composition: dict[str, Any] | None = None
-    llm_payload_trace: dict[str, Any] | None = None
-    updated_at: str = ""
-
-
-def _live_output_delta(previous: str, current: str) -> tuple[str, bool]:
-    previous_text = str(previous or "")
-    current_text = str(current or "")
-    if current_text.startswith(previous_text):
-        return current_text[len(previous_text):], False
-    return current_text, True
 
 
 @dataclass
@@ -21818,37 +21449,8 @@ def _set_session_model_thinking_live_output(session_id: str, *, turn_id: str = "
 
 
 def _clear_session_live_output(session_id: str, *, turn_id: str = "") -> None:
-    requested_turn_id = str(turn_id or "").strip()
-    should_delete_checkpoint = False
-    with _SESSION_LIVE_OUTPUTS_LOCK:
-        if requested_turn_id:
-            current = _SESSION_LIVE_OUTPUTS.get(session_id)
-            if current is not None and current.turn_id and current.turn_id != requested_turn_id:
-                return
-        _SESSION_LIVE_OUTPUTS.pop(session_id, None)
-        should_delete_checkpoint = True
-    if should_delete_checkpoint:
+    if _clear_session_live_output_memory(session_id, turn_id=turn_id):
         _delete_session_live_output_checkpoint(session_id)
-
-
-def _snapshot_session_live_output(session_id: str) -> SessionLiveOutputState | None:
-    with _SESSION_LIVE_OUTPUTS_LOCK:
-        state = _SESSION_LIVE_OUTPUTS.get(session_id)
-        if state is None:
-            return None
-        return SessionLiveOutputState(
-            session_id=session_id,
-            turn_id=state.turn_id,
-            stage=state.stage,
-            thought=state.thought,
-            content=state.content,
-            mental_snapshot=dict(state.mental_snapshot or {}) if isinstance(state.mental_snapshot, dict) else None,
-            tool_calls=list(state.tool_calls or []),
-            feedback_events=list(state.feedback_events or []),
-            context_composition=dict(state.context_composition or {}) if isinstance(state.context_composition, dict) else None,
-            llm_payload_trace=dict(state.llm_payload_trace or {}) if isinstance(state.llm_payload_trace, dict) else None,
-            updated_at=state.updated_at,
-        )
 
 
 def _persist_session_interrupted_snapshot(
