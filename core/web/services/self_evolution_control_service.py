@@ -25,6 +25,7 @@ from core.evaluation.self_evolution_reflection import (
     record_bounded_self_evolution_reflection,
 )
 from core.infrastructure import developer_sandbox, git_process
+from core.infrastructure.feature_gate import FeatureDecision, resolve_feature_decision
 from core.launcher import service as launcher_service
 from core.llm import LLMInvocationContext, get_llm_client, invoke_llm
 from core.infrastructure.agent_session import get_session_state
@@ -78,6 +79,49 @@ _RUN_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="web-self-e
 _RUN_STATES: dict[str, dict[str, Any]] = {}
 _RUN_INTERNALS: dict[str, dict[str, Any]] = {}
 _ACTIVE_RUN_ID: str | None = None
+
+
+def _require_self_evolution_feature_enabled() -> FeatureDecision:
+    decision = resolve_feature_decision("self_evolution")
+    if decision.effective_enabled:
+        return decision
+    _record_self_scene_event(
+        "control",
+        "self_evolution_run.feature_blocked",
+        message="Self evolution is disabled by trusted operator config.",
+        outcome="blocked",
+        fields=decision.log_fields(),
+        lifecycle=True,
+    )
+    raise SelfEvolutionRunValidationError(
+        text_for(
+            get_web_language(),
+            zh="可信操作员配置未启用 self_evolution，当前不能启动自进化。",
+            en="Trusted operator config does not enable self_evolution.",
+        )
+    )
+
+
+def _require_self_evolution_worktree_features_enabled() -> None:
+    _require_self_evolution_feature_enabled()
+    decision = resolve_feature_decision("supervised_evolution")
+    if decision.effective_enabled:
+        return
+    _record_self_scene_event(
+        "control",
+        "self_evolution_run.supervised_feature_blocked",
+        message="Supervised evolution is disabled for self-evolution worktree delegation.",
+        outcome="blocked",
+        fields=decision.log_fields(),
+        lifecycle=True,
+    )
+    raise SelfEvolutionRunValidationError(
+        text_for(
+            get_web_language(),
+            zh="可信操作员配置未启用 supervised_evolution，不能创建受监督的自进化工作树。",
+            en="Trusted operator config does not enable supervised_evolution.",
+        )
+    )
 _RUN_STREAM_HEARTBEAT_SECONDS = 15.0
 _RUN_STREAM_POLL_SECONDS = 2.0
 _RUN_STREAM_QUEUE_SIZE = 8
@@ -500,6 +544,7 @@ def _raise_if_self_evolution_requires_worktree_isolation(payload: dict[str, Any]
 def start_self_evolution_worktree_run(payload: dict[str, Any]) -> dict[str, Any]:
     """Route every self-evolution goal through a reviewed candidate worktree."""
 
+    _require_self_evolution_worktree_features_enabled()
     lang = get_web_language()
     contract = get_workbench_contract()
     availability = contract.get("modeAvailability") if isinstance(contract.get("modeAvailability"), dict) else {}
@@ -1220,6 +1265,7 @@ def has_active_self_evolution_run() -> bool:
 def start_self_evolution_run(payload: dict[str, Any]) -> dict[str, Any]:
     """Start one bounded self-evolution pass from the web workbench."""
 
+    _require_self_evolution_feature_enabled()
     global _ACTIVE_RUN_ID
     lang = get_web_language()
     contract = get_workbench_contract()
@@ -4941,6 +4987,7 @@ def has_active_self_evolution_run() -> bool:
 
 
 def start_self_evolution_run(payload: dict[str, Any]) -> dict[str, Any]:
+    _require_self_evolution_feature_enabled()
     if _runtime_manager_live_control_enabled():
         lang = get_web_language()
         contract = get_workbench_contract()
