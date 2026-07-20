@@ -22,6 +22,7 @@ Related: frontend bundle+claim phase (closed); `docs/agents/conversation-flow-ma
 | 2026-07-20 | 3.1–3.2 | Workflow: `orchestration_core.py` + `source_collection/candidates.py`; facade re-exports; first Stage 3 gate |
 | 2026-07-20 | 3.3 | Workflow: `source_collection/runs.py` (start run / search execute+background / summaries) |
 | 2026-07-20 | 3.4–3.5 | Workflow: `source_collection/stages.py` + `storage.py` (stage tasks + open storage) |
+| 2026-07-20 | 3.6–3.7 | Workflow: `experiment.py` + `research_loop.py` public entry packs |
 
 ### Session Stage 2 closeout (2026-07-20)
 

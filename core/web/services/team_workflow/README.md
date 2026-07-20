@@ -23,8 +23,8 @@ Align language with frontend claim map: `web/src/routes/teams/README.md`.
 | Candidates register/import/extract/list | `source_collection/candidates.py` | pet system |
 | SC runs / search / background | `source_collection/runs.py` | session list cache, stage writeback |
 | SC storage open targets | `source_collection/storage.py` (planned) | supervised evolution |
-| Experiment plan/smoke/full-run APIs | `experiment.py` (planned) | session submit |
-| Research loop templates/status | `research_loop.py` (planned) | CLI terminal |
+| Experiment plan/smoke/full-run APIs | `experiment.py` | session submit |
+| Research loop / stage round | `research_loop.py` | CLI terminal |
 | Knowledge ingestion / graph / coordination | facade + planned `knowledge.py` | launcher daemon |
 | Public HTTP-facing API surface | `../team_workflow_orchestration_service.py` (facade) | dumping new mega-functions into facade |
 
@@ -37,8 +37,8 @@ Align language with frontend claim map: `web/src/routes/teams/README.md`.
 | SC runs / search | `source_collection/runs.py` |
 | Stage agents / writeback | `source_collection/stages.py` + pure helpers in `source_collection_stage_tasks.py` |
 | Storage open | `source_collection/storage.py` |
-| Experiment design/execution | facade + planned `experiment.py` |
-| Research loop | facade + planned `research_loop.py` |
+| Experiment design/execution | `experiment.py` |
+| Research loop / stage round | `research_loop.py` |
 
 ## Sole-owner rules
 
@@ -59,7 +59,9 @@ Align language with frontend claim map: `web/src/routes/teams/README.md`.
 | `source_collection/runs.py` | done | start run, execute/background search, work-run summary, SC summary |
 | `source_collection/stages.py` | done | seed context, start/writeback stage session task, get context, post-turn reconcile |
 | `source_collection/storage.py` | done | open storage target |
-| experiment / research_loop / knowledge | planned | next product packs |
+| `experiment.py` | done | plan/status/methods/smoke/full-run + knowledge ingestion hooks |
+| `research_loop.py` | done | stage round status/start + coordination/memory retries |
+| knowledge graph/coordination mega APIs | partial / facade | further cuts optional |
 
 ## Related
 
