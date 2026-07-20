@@ -483,21 +483,13 @@ describe("chat hand-test substitute: agent tabs + skill chip", () => {
   });
 });
 
+const liveWorkbenchBase = process.env.VIBELUTION_WORKBENCH_BASE?.trim();
+
 describe("chat hand-test substitute: optional live runtime probe", () => {
-  it("probes health/sessions/chat/sse when workbench is already running", async () => {
-    const base = process.env.VIBELUTION_WORKBENCH_BASE || "http://127.0.0.1:8000";
-    let health: Response;
-    try {
-      health = await fetch(`${base}/api/health`, { signal: AbortSignal.timeout(2500) });
-    } catch {
-      // Workbench not up: this suite still validates offline substitutes.
-      expect(true).toBe(true);
-      return;
-    }
-    if (!health.ok) {
-      expect(true).toBe(true);
-      return;
-    }
+  it.skipIf(!liveWorkbenchBase)("probes health/sessions/chat/sse when explicitly enabled", async () => {
+    const base = liveWorkbenchBase!;
+    const health = await fetch(`${base}/api/health`, { signal: AbortSignal.timeout(2500) });
+    expect(health.ok).toBe(true);
     const healthJson = await health.json() as { status?: string };
     expect(healthJson.status).toBe("ok");
 
