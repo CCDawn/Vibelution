@@ -7,6 +7,7 @@ LangChain 工具包装模块
 """
 from copy import copy
 from functools import lru_cache
+from pathlib import Path
 from typing import Dict, List, Literal
 from langchain_core.tools import BaseTool, tool, StructuredTool
 from tools.rebirth_tools import trigger_self_restart_tool as _restart_impl
@@ -322,10 +323,16 @@ def _build_key_tools() -> List[BaseTool]:
             操作结果。格式错误时返回具体原因。
         """
         from tools.code_analysis_tools import apply_diff_edit, validate_diff_format
+        from tools.shell_tools import get_workspace_root_override
+
         is_valid, msg = validate_diff_format(diff_text)
         if not is_valid:
             return f"[编辑] 格式验证失败: {msg}"
-        return apply_diff_edit(file_path=file_path, diff_text=diff_text, allow_fuzzy=allow_fuzzy)
+        target_path = Path(file_path)
+        workspace_override = get_workspace_root_override()
+        if workspace_override is not None and not target_path.is_absolute():
+            target_path = workspace_override / target_path
+        return apply_diff_edit(file_path=str(target_path), diff_text=diff_text, allow_fuzzy=allow_fuzzy)
 
     @tool
     def apply_patch_tool(patch_text: str, cwd: str = ".") -> str:
@@ -348,7 +355,13 @@ def _build_key_tools() -> List[BaseTool]:
             JSON 格式的修改结果；格式或匹配失败时返回可纠正错误。
         """
         from tools.code_analysis_tools import apply_patch_edit
-        return apply_patch_edit(patch_text=patch_text, cwd=cwd)
+        from tools.shell_tools import get_workspace_root_override
+
+        cwd_path = Path(cwd or ".")
+        workspace_override = get_workspace_root_override()
+        if workspace_override is not None and not cwd_path.is_absolute():
+            cwd_path = workspace_override / cwd_path
+        return apply_patch_edit(patch_text=patch_text, cwd=str(cwd_path))
 
     @tool
     def code_symbol_tool(

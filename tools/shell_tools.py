@@ -486,11 +486,17 @@ def workspace_root_override(workspace_root: str | Path):
         _WORKSPACE_ROOT_OVERRIDE.reset(token)
 
 
+def get_workspace_root_override() -> Optional[Path]:
+    """Return the active per-session workspace root, when one is set."""
+    override = _WORKSPACE_ROOT_OVERRIDE.get("").strip()
+    return Path(override).resolve() if override else None
+
+
 def _get_workspace_root() -> Path:
     """稳定获取 workspace 根目录。"""
-    override = _WORKSPACE_ROOT_OVERRIDE.get("").strip()
-    if override:
-        return Path(override).resolve()
+    override = get_workspace_root_override()
+    if override is not None:
+        return override
     try:
         from core.infrastructure.workspace_manager import get_workspace
 
