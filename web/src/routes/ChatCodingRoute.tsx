@@ -116,6 +116,7 @@ import {
 } from "./agentDisplay";
 import { AgentSessionTabStrip, type CliAgentRunTab } from "./AgentSessionTabStrip";
 import { AgentConversationDirectory } from "./AgentConversationDirectory";
+import type { AgentContextMenuState } from "./AgentContextMenu";
 import { ConversationIndexTree } from "./ConversationIndexTree";
 import {
   DEFAULT_COLLAPSED_CONVERSATION_GROUPS,
@@ -285,6 +286,13 @@ const SessionContextMenu = lazy(() =>
   })),
 );
 
+/** Secondary-lazy: Agent directory row context menu. */
+const AgentContextMenu = lazy(() =>
+  import("./AgentContextMenu").then((module) => ({
+    default: module.AgentContextMenu,
+  })),
+);
+
 type SessionDetailWithActiveSkill = SessionDetail & {
   activeSkillContract?: ActiveSkillContract | null;
 };
@@ -320,6 +328,7 @@ export function ChatCodingRoute() {
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
   const [editingSessionTitle, setEditingSessionTitle] = useState("");
   const [sessionContextMenu, setSessionContextMenu] = useState<SessionContextMenuState | null>(null);
+  const [agentContextMenu, setAgentContextMenu] = useState<AgentContextMenuState | null>(null);
   const [activeTurnLayersBySession, setActiveTurnLayersBySession] = useState<Record<string, ActiveTurnLayerState>>({});
 
   const [tokenSpeedTracker, setTokenSpeedTracker] = useState<TokenSpeedTrackerState | null>(null);
@@ -487,11 +496,12 @@ export function ChatCodingRoute() {
   });
 
   useEffect(() => {
-    if (!sessionContextMenu) {
+    if (!sessionContextMenu && !agentContextMenu) {
       return;
     }
     function closeSessionContextMenu() {
       setSessionContextMenu(null);
+      setAgentContextMenu(null);
     }
     function handleKeyDown(event: globalThis.KeyboardEvent) {
       if (event.key === "Escape") {
@@ -506,7 +516,7 @@ export function ChatCodingRoute() {
       window.removeEventListener("scroll", closeSessionContextMenu, true);
       window.removeEventListener("keydown", handleKeyDown);
     };
-  }, [sessionContextMenu]);
+  }, [agentContextMenu, sessionContextMenu]);
   const sessionStreamRouteSettling = resolveSessionStreamRouteSettling({
     activeSessionId,
     groupPanelActive,
@@ -2201,6 +2211,66 @@ export function ChatCodingRoute() {
     renameSession: (variables) => renameSessionMutation.mutate(variables),
   });
 
+  const openAgentContextMenu = useCallback((
+    event: ReactMouseEvent<HTMLElement>,
+    agent: AgentInstance,
+    latestSession: SessionSummary | null,
+  ) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setSessionContextMenu(null);
+    setAgentContextMenu({
+      agent,
+      latestSession,
+      x: event.clientX,
+      y: event.clientY,
+    });
+  }, []);
+
+  const handleOpenAgentLatestSession = useCallback((
+    agent: AgentInstance,
+    latestSession: SessionSummary | null,
+  ) => {
+    setAgentContextMenu(null);
+    if (latestSession?.id) {
+      handleOpenDirectSession(latestSession.id);
+      return;
+    }
+    handleOpenAgent(agent);
+  }, [handleOpenAgent, handleOpenDirectSession]);
+
+  const handleCreateAgentSession = useCallback((agent: AgentInstance) => {
+    const agentId = String(agent.agentId || "").trim();
+    setAgentContextMenu(null);
+    if (!agentId || createSessionMutation.isPending) {
+      return;
+    }
+    setSessionComposerErrors((current) => ({
+      ...current,
+      __sessions__: "",
+    }));
+    createSessionMutation.mutate({ agentId });
+  }, [createSessionMutation, setSessionComposerErrors]);
+
+  const handleOpenAgentConfig = useCallback((
+    agent: AgentInstance,
+    latestSession: SessionSummary | null,
+  ) => {
+    const agentId = String(agent.agentId || "").trim();
+    setAgentContextMenu(null);
+    if (!agentId) {
+      return;
+    }
+    navigate(agentCenterConfigRoute({
+      agentId,
+      pane: "config",
+      returnLabel: "chat",
+      returnTo: latestSession?.id
+        ? `/chat?session=${encodeURIComponent(latestSession.id)}`
+        : "/chat",
+    }));
+  }, [navigate]);
+
   const toggleFeaturePreset = useCallback((key: FeaturePresetKey) => {
     setFeaturePresetState((current) => ({
       ...current,
@@ -2266,8 +2336,21 @@ export function ChatCodingRoute() {
             lang={lang}
             resolveModelLabel={resolveModelLabel}
             sessions={allVisibleSessions}
+            onContextMenu={openAgentContextMenu}
             onOpenAgent={handleOpenAgent}
           />
+          {agentContextMenu ? (
+            <Suspense fallback={null}>
+              <AgentContextMenu
+                createPending={createSessionMutation.isPending}
+                lang={lang}
+                state={agentContextMenu}
+                onCreateSession={handleCreateAgentSession}
+                onOpenConfig={handleOpenAgentConfig}
+                onOpenLatest={handleOpenAgentLatestSession}
+              />
+            </Suspense>
+          ) : null}
           <ConversationIndexTree
             activeGroupRoomId={activeGroupRoomId}
             activeSessionId={activeSessionId}

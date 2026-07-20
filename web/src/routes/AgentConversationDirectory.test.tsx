@@ -10,6 +10,7 @@ describe("AgentConversationDirectory", () => {
     expect(directorySource).toContain("agent.llmBindings?.dialogue?.modelId");
     expect(directorySource).toContain("sessionCountByAgentId");
     expect(directorySource).toContain('aria-current={active ? "page" : undefined}');
+    expect(directorySource).toContain("onContextMenu={(event) => onContextMenu(event, agent, latestSession ?? null)}");
   });
 
   it("uses plain multi-line button layout so avatar/title/meta are not crushed into a nowrap label", () => {
