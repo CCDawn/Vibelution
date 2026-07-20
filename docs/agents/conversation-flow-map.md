@@ -20,8 +20,8 @@
 | --- | --- | --- |
 | 前端提交 | `web/src/routes/ChatCodingRoute.tsx` | 发送 `POST /api/sessions/{sessionId}/messages`，带 `Prefer: respond-async`；先乐观更新 UI，再通过 stream/cache 校准。 |
 | API route | `core/web/routes/sessions.py` | 拥有 `/api/sessions/{id}/messages` 和 `/api/sessions/{id}/events`。 |
-| 提交 owner | `core/web/services/session_service.py::submit_session_message` | 校验输入，解析附件/引用，开启 turn，写初始 journal，发布首个 snapshot，并调度后台执行。 |
-| worker owner | `core/web/services/session_service.py::_run_session_turn` | 解析 runtime/model/context，创建 chat agent，捕获 UI stream，运行 agent turn，并持久化终态结果。 |
+| 提交 owner | `core/web/services/session_service.py::submit_session_message`（P0 拆分见 `core/web/services/session/README.md`） | 校验输入，解析附件/引用，开启 turn，写初始 journal，发布首个 snapshot，并调度后台执行。 |
+| worker owner | `core/web/services/session_service.py::_run_session_turn`（目标模块 `session/worker.py`） | 解析 runtime/model/context，创建 chat agent，捕获 UI stream，运行 agent turn，并持久化终态结果。 |
 | Agent turn | `agent.py::run_single_turn` | 执行一轮 agent thought/action loop，返回结构化 result dict。 |
 | LLM 调用 | `agent.py::_invoke_llm` + `core/llm/invocation.py` | 统一经过 streaming/invoke helper，并携带 invocation metadata 与 prompt-cache partition。 |
 | 事实源 | `core/chat/turn_journal.py` | append-only turn 事件日志，用于 replay、模型上下文和可见消息投影。 |
