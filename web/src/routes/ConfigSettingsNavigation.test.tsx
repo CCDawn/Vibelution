@@ -158,7 +158,9 @@ describe("ConfigSettingsNavigation", () => {
     expect(sidebarMarkup).toContain("工具与诊断");
     expect(sidebarMarkup).toContain('data-vui="contextual-hint"');
     expect(sidebarMarkup).not.toContain('title="配置按使用场景分组，修改后统一保存"');
-    expect(sidebarMarkup.match(/data-slot="tooltip-trigger"/g)?.length ?? 0).toBeGreaterThanOrEqual(groups.length + 1);
+    // VButton loads its tooltip renderer lazily, so SSR correctly renders the
+    // accessible button fallback rather than a Radix tooltip trigger.
+    expect(sidebarMarkup.match(/data-vui="button"/g)?.length ?? 0).toBe(groups.length);
     expect(sidebarMarkup).toMatch(/aria-pressed="true"[^>]*><span>工具与诊断<\/span>/);
     expect(tabsMarkup).toContain("日常工具");
     expect(tabsMarkup).toContain("排障中心");
@@ -166,7 +168,7 @@ describe("ConfigSettingsNavigation", () => {
     expect(tabsMarkup).not.toContain("日志与调试");
     expect(tabsMarkup).not.toContain("原始配置");
     expect(tabsMarkup).toContain('aria-current="page"');
-    expect(tabsMarkup).toContain('data-slot="tooltip-trigger"');
+    expect(tabsMarkup.match(/data-vui="button"/g)?.length ?? 0).toBe(activeGroup?.pages.length ?? 0);
     expect(styles.groupButton).toContain("min-h-11");
     expect(styles.pageButton).toContain("min-h-10");
     expect(styles.sidebar).toContain("clamp(15.5rem,17vw,18rem)");

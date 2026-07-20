@@ -2,6 +2,7 @@ import { CheckCircle2, CircleOff, Fingerprint } from "lucide-react";
 
 import type { ConfigFeatureDecisionSnapshot } from "../api/types";
 import { VSection, VStatusStrip } from "../components/vui";
+import styles from "./ConfigFeatureDecisionPanel.styles";
 
 type ConfigFeatureDecisionPanelProps = {
   snapshot: ConfigFeatureDecisionSnapshot;
@@ -45,11 +46,11 @@ export function ConfigFeatureDecisionPanel({
   return (
     <VSection
       id="config-feature-decisions"
-      className="min-w-0"
+      className={styles.section}
       eyebrow={title}
       title={title}
     >
-      <p className="m-0 max-w-4xl text-sm leading-6 text-[var(--vui-text-secondary)]">{body}</p>
+      <p className={styles.body}>{body}</p>
       <VStatusStrip
         aria-label={title}
         items={[
@@ -69,37 +70,37 @@ export function ConfigFeatureDecisionPanel({
           },
         ]}
       />
-      <div className="grid min-w-0 grid-cols-1 gap-2 lg:grid-cols-2">
+      <div className={styles.grid}>
         {entries.map(([feature, decision]) => {
           const label = FEATURE_LABELS[feature]?.[lang] ?? feature;
           const enabled = decision.effectiveEnabled;
           return (
             <article
               key={feature}
-              className="flex min-w-0 items-start gap-3 rounded-xl border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] px-4 py-3"
+              className={styles.card}
             >
               <span
                 className={
                   enabled
-                    ? "mt-0.5 text-[var(--vui-status-success)]"
-                    : "mt-0.5 text-[var(--vui-text-tertiary)]"
+                    ? styles.enabledIcon
+                    : styles.disabledIcon
                 }
               >
                 {enabled ? <CheckCircle2 size={17} /> : <CircleOff size={17} />}
               </span>
-              <div className="min-w-0 flex-1">
-                <div className="flex min-w-0 items-center justify-between gap-3">
-                  <strong className="truncate text-sm text-[var(--vui-text-primary)]">{label}</strong>
-                  <span className="shrink-0 text-xs text-[var(--vui-text-secondary)]">
+              <div className={styles.cardContent}>
+                <div className={styles.cardHeader}>
+                  <strong className={styles.cardTitle}>{label}</strong>
+                  <span className={styles.cardStatus}>
                     {enabled
                       ? lang === "zh" ? "开启" : "Enabled"
                       : lang === "zh" ? "关闭" : "Disabled"}
                   </span>
                 </div>
-                <p className="m-0 mt-1 text-xs leading-5 text-[var(--vui-text-secondary)]">
+                <p className={styles.reason}>
                   {reasonLabel(decision.featureDecisionReason, lang)}
                 </p>
-                <p className="m-0 mt-1 flex items-center gap-1 font-mono text-[11px] text-[var(--vui-text-tertiary)]">
+                <p className={styles.provenance}>
                   <Fingerprint size={12} />
                   {feature} · {decision.featureSource}
                 </p>

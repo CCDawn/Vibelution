@@ -4,7 +4,7 @@ import {
   tokenizeChatMentions,
   type ChatMentionTarget,
 } from "../chatMentionTokens";
-import styles from "../ChatCodingRoute.styles";
+import styles from "./ChatGroupMessagePresentation.styles";
 import {
   shouldCollapseGroupMessage,
   shouldDefaultCollapseGroupMessage,
