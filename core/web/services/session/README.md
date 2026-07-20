@@ -15,7 +15,7 @@ During P0 structure work, `session_service.py` remains the **public import facad
 | Live output checkpoint / recovery state | `live_output.py` | submit validation, stream publish |
 | Conversation events cache, ledger seq helpers | `journal_bridge.py` | LLM invoke, live recovery reconcile |
 | `submit_session_message*` / guidance / edit-resubmit entry | `submit.py` | team workflow orchestration, worker loop |
-| Turn queue / schedule / executor handoff | `schedule.py` (planned) | candidate store |
+| Turn queue / schedule / executor handoff | `schedule.py` | candidate store, full worker loop |
 | `_run_session_turn` / continuation loop | `worker.py` (planned) | team SC search |
 | UI stream to journal / `assistant_delta` batching | `stream_capture.py` (planned) | list cache |
 | Persist turn outcome / final `session_detail` | `persist.py` (planned) | agent directory CRUD |
@@ -53,7 +53,11 @@ During P0 structure work, `session_service.py` remains the **public import facad
   - Still on facade: stale-ledger reconcile, visible-message projection, truncate-before-message.
 - **Done:** `submit.py` (`submit_session_message*`, guidance, edit-resubmit, pure message resolve helpers).
   - Bodies late-bind facade helpers via `_service()` to avoid import cycles; schedule/worker still on facade.
-- **Planned:** schedule, stream_capture, worker, persist, projection.
+- **Done:** `schedule.py` (queue/schedule/release adapters, external slot reserve, mark queued/dequeued).
+  - Facade keeps `_SESSION_EXECUTOR` + `_SESSION_TURN_SCHEDULER` globals so conftest monkeypatches stay effective;
+    schedule functions resolve them at call time via `_service()`.
+  - Still on facade: running-session flags, `SessionTurnControl`, `_run_session_turn` worker.
+- **Planned:** stream_capture, worker, persist, projection.
 
 ## Related
 
