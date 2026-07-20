@@ -316,7 +316,7 @@ def test_commit_mode_without_relevant_staged_files_passes(git_repo: Path) -> Non
         (
             "node web/node_modules/vitest/vitest.mjs run",
             "web-test",
-            ["node", "web/node_modules/vitest/vitest.mjs", "run"],
+            ["node", "node_modules/vitest/vitest.mjs", "run"],
         ),
         (
             "npm --prefix web run build",
@@ -345,7 +345,8 @@ def test_parse_allowed_command(
 
     assert spec.kind == kind
     assert spec.argv[: len(argv_prefix)] == argv_prefix
-    assert spec.cwd == git_repo
+    expected_cwd = git_repo / "web" if kind == "web-test" else git_repo
+    assert spec.cwd == expected_cwd
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows launcher resolution")
@@ -370,12 +371,12 @@ def test_materialize_command_resolves_windowless_vitest_launcher(git_repo: Path)
 
     assert Path(materialized.argv[0]).name.lower() == "node.exe"
     assert materialized.argv[1:] == [
-        "web/node_modules/vitest/vitest.mjs",
+        "node_modules/vitest/vitest.mjs",
         "run",
         "src/example.test.ts",
     ]
     assert all(not argument.lower().endswith((".cmd", ".bat")) for argument in materialized.argv)
-    assert materialized.cwd == git_repo
+    assert materialized.cwd == git_repo / "web"
 
 
 def test_local_quality_gate_matrix_command_matches_self_test_and_allowlist(
