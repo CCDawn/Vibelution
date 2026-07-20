@@ -7,6 +7,9 @@ Agent-oriented map for Teams workbench development. Prefer editing a **module** 
 | Task type | Prefer these files | Avoid |
 |-----------|-------------------|--------|
 | Canvas / known team ids / org layout pure data | `../TeamsRoute.canvasData.ts` | JSX panels |
+| Research workspace views / deep links / labels | `researchWorkspaceModel.ts` | mutations, canvas drag |
+| Team kind guards / system-team roles | `teamKindModel.ts` | UI panels |
+| Canvas geometry / auto-layout / edge paths | `canvasGeometry.ts` | styles maps, mutations |
 | Source-collection evidence / filter pure math | `source-collection/evidenceModel.ts` | EventSource, mutations |
 | Source-collection run selection / labels | `source-collection/runModel.ts` | UI panels |
 | Stage projection / phase-close readiness | `source-collection/stageProjection.ts` | Graph SVG |
@@ -35,10 +38,15 @@ Agent-oriented map for Teams workbench development. Prefer editing a **module** 
 
 **Do not** re-add static value imports of panel components into `TeamsRoute.tsx` without a budget re-check.
 
+## Pure extract progress
+
+- **Done:** workspace navigation, team kind guards, canvas geometry (with unit tests).
+- **Still in `TeamsRoute.tsx`:** source-collection draft/status labels, experiment/loop types+drafts, AI-search presentation, workflow status labels, mutation wiring, JSX.
+
 ## Next (planned)
 
-1. Continue extracting pure helpers / mutations from `TeamsRoute.tsx` into claimable modules (Chat E-phase style).
-2. Prefer chunk + claimability wins over pure LOC grind.
+1. Extract source-collection presentation labels + experiment/loop pure types next (keep mutations in route until claimable hooks exist).
+2. Prefer claimability wins over pure LOC grind.
 3. Optional: split source-collection pack vs workflow-status pack if the secondary pack itself grows past route budget.
 
 ## Rules

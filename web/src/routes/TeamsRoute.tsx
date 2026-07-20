@@ -7,6 +7,45 @@ import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, MouseEvent as 
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 
 import { createLazyNamedTeamPanel } from "./teams/lazyTeamPanel";
+import {
+  CANVAS_VIEWPORT_HEIGHT,
+  CANVAS_VIEWPORT_WIDTH,
+  autoLayoutResearchCanvasNodes,
+  canvasStyleScale,
+  canvasViewStyle,
+  edgeLine,
+  isCommunicationEdge,
+  nextNodeId,
+  teamCanvasNodeStyle,
+  type CanvasFrameSize,
+  type CanvasViewportStyle,
+  type ResearchCanvasLayoutMode,
+} from "./teams/canvasGeometry";
+import {
+  RESEARCH_WORKSPACE_NAV_ITEMS,
+  parseResearchWorkspaceView,
+  researchCanvasRoute,
+  researchSourceCollectionRoute,
+  researchWorkspaceAnchorId,
+  researchWorkspaceStageRoute,
+  researchWorkspaceViewLabel,
+  teamWorkspaceRoute,
+  type ResearchStageWorkspaceView,
+  type ResearchWorkspaceView,
+} from "./teams/researchWorkspaceModel";
+import {
+  SOURCE_COLLECTION_DEFAULT_ROLES,
+  SOURCE_COLLECTION_TEAM_AGENT_ROLES,
+  isAiSearchScopeTeam,
+  isChallengeCupResearchWorkflowTeam,
+  isEvolutionSystemTeam,
+  isKnowledgeExpansionWorkflowTeam,
+  isResearchWorkflowTeam,
+  sourceCollectionAgentRolesForTeam,
+  sourceCollectionWorkflowKindForTeam,
+  sourceCollectionWorkflowPurposeForTeam,
+  systemManagedTeamArchiveReason,
+} from "./teams/teamKindModel";
 import { fetchJson } from "../api/client";
 import { kernelTaskCenterHref } from "../api/kernel";
 import {
@@ -220,15 +259,6 @@ const TeamWorkflowModelEvidenceStatusPanel = createLazyNamedTeamPanel(loadTeamSe
 const TeamWorkflowPaperNoteChunkStatusPanel = createLazyNamedTeamPanel(loadTeamSecondaryPanels, "TeamWorkflowPaperNoteChunkStatusPanel");
 const TeamWorkflowSourceQualityStatusPanel = createLazyNamedTeamPanel(loadTeamSecondaryPanels, "TeamWorkflowSourceQualityStatusPanel");
 
-const NODE_WIDTH = 172;
-const NODE_HEIGHT = 92;
-const CANVAS_VIEWPORT_WIDTH = 1180;
-const CANVAS_VIEWPORT_HEIGHT = 760;
-const RESEARCH_CANVAS_AUTO_LAYOUT_START_X = 64;
-const RESEARCH_CANVAS_AUTO_LAYOUT_CENTER_Y = 250;
-const RESEARCH_CANVAS_AUTO_LAYOUT_LAYER_GAP = 216;
-const RESEARCH_CANVAS_AUTO_LAYOUT_ROW_GAP = 122;
-const EVOLUTION_SYSTEM_TEAM_IDS = new Set(["self-evolution-team", "supervised-evolution-team"]);
 const LINKED_ROOM_ACTIVE_REFETCH_MS = 5_000;
 const LINKED_ROOM_IDLE_REFETCH_MS = 30_000;
 const AI_SEARCH_RUN_PREVIEW_LIMIT = 6;
@@ -238,36 +268,12 @@ const TEAM_BOOTSTRAP_REFETCH_STATUSES = new Set(["running", "needs_retry"]);
 const SOURCE_COLLECTION_STAGE_WRITEBACK_SYNC_GRACE_MS = 30_000;
 const SOURCE_COLLECTION_RUN_PREVIEW_LIMIT = 20;
 const SOURCE_COLLECTION_RESULT_PAGE_SIZE = 8;
-const SOURCE_COLLECTION_DEFAULT_ROLES = ["source_finder", "source_extractor", "source_relation_mapper", "source_ingestor"];
-const SOURCE_COLLECTION_KNOWLEDGE_EXPANSION_ROLES = SOURCE_COLLECTION_DEFAULT_ROLES;
-const SOURCE_COLLECTION_TEAM_AGENT_ROLES = [
-  ...new Set([...SOURCE_COLLECTION_DEFAULT_ROLES]),
-];
 const SOURCE_COLLECTION_SEARCH_EXECUTION_ROLES = new Set(["source_finder"]);
 const SOURCE_COLLECTION_LOCAL_SCAN_DEFAULT_ROOTS = "workspace/knowledge";
 const SOURCE_COLLECTION_PROMPT_CACHE_POLICY = {
   requirement: "required_for_llm_execution",
 };
 const SOURCE_COLLECTION_PROMPT_CACHE_MODEL_LABEL = "configured prompt-cache model";
-
-const experimentPlanningStatusQueryKey = (id: string) => ["teams", id, "workflow-orchestration", "experiments", "status"] as const;
-const experimentMethodCatalogQueryKey = (id: string) => ["teams", id, "workflow-orchestration", "experiments", "methods"] as const;
-const researchLoopTemplatesQueryKey = (id: string) => ["teams", id, "workflow-orchestration", "research-loop", "templates"] as const;
-const researchLoopStatusQueryKey = (id: string) => ["teams", id, "workflow-orchestration", "research-loop", "status"] as const;
-const sourceCollectionSummaryQueryPrefix = (id: string) =>
-  ["teams", id, "workflow-orchestration", "source-collection", "summary"] as const;
-const sourceCollectionSummaryQueryKey = (id: string, runId: string) =>
-  [...sourceCollectionSummaryQueryPrefix(id), runId || "latest"] as const;
-const sourceCollectionRunRecordsQueryKey = (id: string) => ["data-processing", "runs", id, "records"] as const;
-
-function sourceCollectionStageTaskClickKey(stageId: string) {
-  const randomPart = Math.random().toString(36).slice(2, 10) || "manual";
-  return `stage_task_click:${stageId}:${Date.now().toString(36)}:${randomPart}`;
-}
-
-type ResearchStageWorkspaceView = "knowledge_collection" | "experiment" | "iteration";
-type ResearchLegacyWorkspaceView = "source_collection" | "coordination" | "ingestion" | "graph" | "candidates" | "discussion" | "canvas";
-type ResearchWorkspaceView = "overview" | ResearchStageWorkspaceView | ResearchLegacyWorkspaceView;
 
 type TeamsRouteProps = {
   forcedTeamId?: string;
@@ -296,104 +302,19 @@ type TeamWorkflowKnowledgeIngestionPrecheckPayload = {
   workflow: TeamWorkflowOrchestration;
 };
 
-const RESEARCH_WORKSPACE_NAV_ITEMS: Array<{
-  view: ResearchStageWorkspaceView;
-  zh: string;
-  en: string;
-  zhDetail: string;
-  enDetail: string;
-  zhModules: string;
-  enModules: string;
-}> = [
-  {
-    view: "knowledge_collection",
-    zh: "知识搜集",
-    en: "Knowledge collection",
-    zhDetail: "搜索、提炼、审查与入库",
-    enDetail: "Search, extraction, review, and ingestion",
-    zhModules: "资料寻找 / 资料提炼 / 资料关系整理 / 资料入库",
-    enModules: "Search / extraction / review / ingestion",
-  },
-  {
-    view: "experiment",
-    zh: "实验设计",
-    en: "Experiment design",
-    zhDetail: "可证伪假设、变量、控制组与冻结协议",
-    enDetail: "Falsifiable hypothesis, variables, controls, and frozen protocol",
-    zhModules: "研究问题 / 假设 / 控制变量 / 冻结设计",
-    enModules: "Question / hypothesis / controls / frozen design",
-  },
-  {
-    view: "iteration",
-    zh: "执行迭代",
-    en: "Execution & iteration",
-    zhDetail: "执行、评估、消融、归因与版本晋升",
-    enDetail: "Execution, evaluation, ablation, diagnosis, and promotion",
-    zhModules: "执行批次 / 结果评估 / 消融归因 / 优化迭代",
-    enModules: "Runs / evaluation / ablation / controlled iteration",
-  },
-];
+const experimentPlanningStatusQueryKey = (id: string) => ["teams", id, "workflow-orchestration", "experiments", "status"] as const;
+const experimentMethodCatalogQueryKey = (id: string) => ["teams", id, "workflow-orchestration", "experiments", "methods"] as const;
+const researchLoopTemplatesQueryKey = (id: string) => ["teams", id, "workflow-orchestration", "research-loop", "templates"] as const;
+const researchLoopStatusQueryKey = (id: string) => ["teams", id, "workflow-orchestration", "research-loop", "status"] as const;
+const sourceCollectionSummaryQueryPrefix = (id: string) =>
+  ["teams", id, "workflow-orchestration", "source-collection", "summary"] as const;
+const sourceCollectionSummaryQueryKey = (id: string, runId: string) =>
+  [...sourceCollectionSummaryQueryPrefix(id), runId || "latest"] as const;
+const sourceCollectionRunRecordsQueryKey = (id: string) => ["data-processing", "runs", id, "records"] as const;
 
-const RESEARCH_WORKSPACE_LABELS: Record<ResearchWorkspaceView, { zh: string; en: string }> = {
-  overview: { zh: "科研总览", en: "Overview" },
-  knowledge_collection: { zh: "知识搜集", en: "Knowledge collection" },
-  experiment: { zh: "实验设计", en: "Experiment design" },
-  iteration: { zh: "执行迭代", en: "Execution & iteration" },
-  source_collection: { zh: "搜索资料", en: "Source search" },
-  coordination: { zh: "团队协调", en: "Coordination" },
-  ingestion: { zh: "入库审核", en: "Ingestion review" },
-  graph: { zh: "入库关系", en: "Ingestion map" },
-  candidates: { zh: "候选资料", en: "Candidates" },
-  discussion: { zh: "团队沟通", en: "Team discussion" },
-  canvas: { zh: "组织画布", en: "Canvas" },
-};
-
-function researchWorkspaceAnchorId(view: ResearchWorkspaceView) {
-  const ids: Record<ResearchWorkspaceView, string> = {
-    overview: "research-workflow-overview",
-    knowledge_collection: "research-workflow-knowledge-collection",
-    experiment: "research-workflow-experiment",
-    iteration: "research-workflow-iteration",
-    source_collection: "research-workflow-source-collection",
-    coordination: "research-workflow-coordination",
-    ingestion: "research-workflow-ingestion",
-    graph: "research-workflow-graph",
-    candidates: "research-workflow-candidates",
-    discussion: "research-workflow-discussion",
-    canvas: "research-organization-canvas",
-  };
-  return ids[view];
-}
-
-function researchWorkspaceViewLabel(view: ResearchWorkspaceView, lang: "zh" | "en") {
-  const item = RESEARCH_WORKSPACE_LABELS[view];
-  return item ? item[lang] : view;
-}
-
-function parseResearchWorkspaceView(value: string | null): ResearchWorkspaceView | null {
-  if (!value) {
-    return null;
-  }
-  if (value === "source_collection") {
-    return "knowledge_collection";
-  }
-  return value in RESEARCH_WORKSPACE_LABELS ? (value as ResearchWorkspaceView) : null;
-}
-
-function researchWorkspaceStageRoute(teamId = RESEARCH_TEAM_ID, view: ResearchStageWorkspaceView = "knowledge_collection") {
-  return `/teams?team=${encodeURIComponent(teamId)}&researchView=${encodeURIComponent(view)}`;
-}
-
-function researchSourceCollectionRoute(teamId = RESEARCH_TEAM_ID) {
-  return researchWorkspaceStageRoute(teamId, "knowledge_collection");
-}
-
-function teamWorkspaceRoute(teamId = RESEARCH_TEAM_ID) {
-  return `/teams?team=${encodeURIComponent(teamId)}`;
-}
-
-function researchCanvasRoute(teamId = RESEARCH_TEAM_ID) {
-  return `/teams?team=${encodeURIComponent(teamId)}&researchView=canvas`;
+function sourceCollectionStageTaskClickKey(stageId: string) {
+  const randomPart = Math.random().toString(36).slice(2, 10) || "manual";
+  return `stage_task_click:${stageId}:${Date.now().toString(36)}:${randomPart}`;
 }
 
 type NodeDraft = {
@@ -1504,26 +1425,6 @@ type NodeDragState = {
   moved: boolean;
 };
 
-type TeamsRouteDynamicVariable =
-  | "--canvas-offset-x"
-  | "--canvas-offset-y"
-  | "--canvas-scale"
-  | "--node-x"
-  | "--node-y";
-
-type TeamsRouteDynamicStyle = CSSProperties & Partial<Record<TeamsRouteDynamicVariable, string>>;
-
-type CanvasViewportStyle = TeamsRouteDynamicStyle & Record<"--canvas-offset-x" | "--canvas-offset-y" | "--canvas-scale", string>;
-
-type NodePositionStyle = TeamsRouteDynamicStyle & Record<"--node-x" | "--node-y", string>;
-
-type CanvasFrameSize = {
-  width: number;
-  height: number;
-};
-
-type ResearchCanvasLayoutMode = "auto" | "source";
-
 function formatTime(value: string, lang: "zh" | "en") {
   const parsed = new Date(String(value || ""));
   if (Number.isNaN(parsed.getTime())) {
@@ -1885,142 +1786,6 @@ function sourceCollectionOwnerAgentIdFromTeam(team: Team | null | undefined, can
   return "";
 }
 
-function canvasNodeLayoutText(node: TeamCanvasNode) {
-  return [
-    node.id,
-    node.label,
-    node.role,
-    node.purpose,
-    node.agentCode,
-    node.agentName,
-    node.responsibilities?.join(" "),
-  ].filter(Boolean).join(" ").toLowerCase();
-}
-
-function researchCanvasRoleLayer(node: TeamCanvasNode) {
-  const text = canvasNodeLayoutText(node);
-  if (
-    text.includes("ceo")
-    || text.includes("lead")
-    || text.includes("负责人")
-    || text.includes("research_coordination")
-    || text.includes("data_intake_coordinator")
-  ) {
-    return 0;
-  }
-  if (text.includes("organization") || text.includes("advisor") || text.includes("顾问")) {
-    return 1;
-  }
-  if (
-    text.includes("source_finder")
-    || text.includes("资料寻找")
-    || text.includes("寻找")
-    || text.includes("下载")
-    || text.includes("登记")
-    || text.includes("search")
-    || text.includes("搜集")
-  ) {
-    return 2;
-  }
-  if (
-    text.includes("source_extractor")
-    || text.includes("资料提炼")
-    || text.includes("extract")
-    || text.includes("抽取")
-    || text.includes("提炼")
-  ) {
-    return 3;
-  }
-  if (
-    text.includes("source_relation_mapper")
-    || text.includes("资料关系")
-    || text.includes("关系整理")
-    || text.includes("mapping")
-    || text.includes("映射")
-  ) {
-    return 4;
-  }
-  if (
-    text.includes("source_ingestor")
-    || text.includes("资料入库")
-    || text.includes("入库")
-  ) {
-    return 5;
-  }
-  return null;
-}
-
-function teamCanvasNodeSortKey(node: TeamCanvasNode) {
-  return `${researchCanvasRoleLayer(node) ?? 99}:${node.label || ""}:${node.agentCode || ""}:${node.id}`;
-}
-
-function autoLayoutResearchCanvasNodes(
-  nodes: TeamCanvasNode[],
-  edges: Array<{ source: string; target: string; type?: string }>,
-) {
-  if (nodes.length <= 1) {
-    return nodes.map((node) => ({ ...node }));
-  }
-  const nodeIds = new Set(nodes.map((node) => node.id));
-  const outgoing = new Map<string, string[]>();
-  const incomingCount = new Map(nodes.map((node) => [node.id, 0]));
-  edges
-    .filter((edge) => nodeIds.has(edge.source) && nodeIds.has(edge.target) && !isCommunicationEdge({ type: edge.type || "" }))
-    .forEach((edge) => {
-      outgoing.set(edge.source, [...(outgoing.get(edge.source) ?? []), edge.target]);
-      incomingCount.set(edge.target, (incomingCount.get(edge.target) ?? 0) + 1);
-    });
-
-  const graphDepth = new Map(nodes.map((node) => [node.id, 0]));
-  const queue = nodes
-    .filter((node) => (incomingCount.get(node.id) ?? 0) === 0)
-    .sort((left, right) => teamCanvasNodeSortKey(left).localeCompare(teamCanvasNodeSortKey(right)))
-    .map((node) => node.id);
-  const visited = new Set<string>();
-
-  while (queue.length) {
-    const nodeId = queue.shift();
-    if (!nodeId || visited.has(nodeId)) {
-      continue;
-    }
-    visited.add(nodeId);
-    for (const targetId of outgoing.get(nodeId) ?? []) {
-      graphDepth.set(targetId, Math.max(graphDepth.get(targetId) ?? 0, (graphDepth.get(nodeId) ?? 0) + 1));
-      incomingCount.set(targetId, Math.max(0, (incomingCount.get(targetId) ?? 0) - 1));
-      if ((incomingCount.get(targetId) ?? 0) === 0) {
-        queue.push(targetId);
-      }
-    }
-  }
-
-  const layers = new Map<number, TeamCanvasNode[]>();
-  for (const node of nodes) {
-    const roleLayer = researchCanvasRoleLayer(node);
-    const layer = Math.max(roleLayer ?? 0, graphDepth.get(node.id) ?? 0);
-    layers.set(layer, [...(layers.get(layer) ?? []), node]);
-  }
-
-  const positions = new Map<string, { x: number; y: number }>();
-  Array.from(layers.entries())
-    .sort(([leftLayer], [rightLayer]) => leftLayer - rightLayer)
-    .forEach(([layer, layerNodes]) => {
-      const sortedNodes = [...layerNodes].sort((left, right) => teamCanvasNodeSortKey(left).localeCompare(teamCanvasNodeSortKey(right)));
-      const layerHeight = (sortedNodes.length - 1) * RESEARCH_CANVAS_AUTO_LAYOUT_ROW_GAP;
-      const startY = Math.max(56, RESEARCH_CANVAS_AUTO_LAYOUT_CENTER_Y - layerHeight / 2);
-      sortedNodes.forEach((node, index) => {
-        positions.set(node.id, {
-          x: Math.round(RESEARCH_CANVAS_AUTO_LAYOUT_START_X + layer * RESEARCH_CANVAS_AUTO_LAYOUT_LAYER_GAP),
-          y: Math.round(startY + index * RESEARCH_CANVAS_AUTO_LAYOUT_ROW_GAP),
-        });
-      });
-    });
-
-  return nodes.map((node) => ({
-    ...node,
-    ...(positions.get(node.id) ?? {}),
-  }));
-}
-
 function normalizeAgentRoleKey(value: string | undefined | null) {
   return String(value || "").trim().toLowerCase();
 }
@@ -2180,109 +1945,6 @@ function researchDiagnosticStatusLabel(status: string, lang: "zh" | "en") {
   return labels[normalizedStatus]?.[lang] || status;
 }
 
-function canvasViewStyle(nodes: TeamCanvasNode[], frameSize?: CanvasFrameSize): CanvasViewportStyle {
-  if (!nodes.length) {
-    return {
-      "--canvas-offset-x": "0px",
-      "--canvas-offset-y": "0px",
-      "--canvas-scale": "1",
-    };
-  }
-  const minX = Math.min(...nodes.map((node) => node.x));
-  const minY = Math.min(...nodes.map((node) => node.y));
-  const maxX = Math.max(...nodes.map((node) => node.x + NODE_WIDTH));
-  const maxY = Math.max(...nodes.map((node) => node.y + NODE_HEIGHT));
-  const boundsWidth = maxX - minX;
-  const boundsHeight = maxY - minY;
-  const frameWidth = Math.max(420, Math.round(frameSize?.width || CANVAS_VIEWPORT_WIDTH));
-  const frameHeight = Math.max(360, Math.round(frameSize?.height || CANVAS_VIEWPORT_HEIGHT));
-  const scale = Math.min(
-    1,
-    Math.max(
-      0.58,
-      Math.min((frameWidth - 72) / Math.max(boundsWidth, 1), (frameHeight - 104) / Math.max(boundsHeight, 1)),
-    ),
-  );
-  const targetX = Math.max(40, Math.round((frameWidth / scale - boundsWidth) / 2));
-  const targetY = Math.max(54, Math.round((frameHeight / scale - boundsHeight) / 2));
-  return {
-    "--canvas-offset-x": `${Math.round(targetX - minX)}px`,
-    "--canvas-offset-y": `${Math.round(targetY - minY)}px`,
-    "--canvas-scale": scale.toFixed(3),
-  };
-}
-
-function teamCanvasNodeStyle(node: Pick<TeamCanvasNode, "x" | "y">): NodePositionStyle {
-  return {
-    "--node-x": `${node.x}px`,
-    "--node-y": `${node.y}px`,
-  };
-}
-
-function canvasStyleScale(style: CanvasViewportStyle) {
-  const parsed = Number(style["--canvas-scale"]);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
-}
-
-function nodeBoundaryPoint(center: { x: number; y: number }, direction: { x: number; y: number }) {
-  const halfWidth = NODE_WIDTH / 2;
-  const halfHeight = NODE_HEIGHT / 2;
-  const scaleX = Math.abs(direction.x) > 0.0001 ? halfWidth / Math.abs(direction.x) : Number.POSITIVE_INFINITY;
-  const scaleY = Math.abs(direction.y) > 0.0001 ? halfHeight / Math.abs(direction.y) : Number.POSITIVE_INFINITY;
-  const distanceToRectEdge = Math.min(scaleX, scaleY);
-  return {
-    x: center.x + direction.x * distanceToRectEdge,
-    y: center.y + direction.y * distanceToRectEdge,
-  };
-}
-
-function edgeLine(
-  edge: { id?: string; source: string; target: string; type?: string },
-  nodes: TeamCanvasNode[],
-  visiblePeerEdges: Array<{ id?: string; source: string; target: string; type?: string }> = [],
-) {
-  const source = nodes.find((node) => node.id === edge.source);
-  const target = nodes.find((node) => node.id === edge.target);
-  if (!source || !target) {
-    return null;
-  }
-  const sourceCenter = {
-    x: source.x + NODE_WIDTH / 2,
-    y: source.y + NODE_HEIGHT / 2,
-  };
-  const targetCenter = {
-    x: target.x + NODE_WIDTH / 2,
-    y: target.y + NODE_HEIGHT / 2,
-  };
-  const dx = targetCenter.x - sourceCenter.x;
-  const dy = targetCenter.y - sourceCenter.y;
-  const distance = Math.hypot(dx, dy) || 1;
-  const unitX = dx / distance;
-  const unitY = dy / distance;
-  const sourcePoint = nodeBoundaryPoint(sourceCenter, { x: unitX, y: unitY });
-  const targetPoint = nodeBoundaryPoint(targetCenter, { x: -unitX, y: -unitY });
-  const x1 = sourcePoint.x;
-  const y1 = sourcePoint.y;
-  const x2 = targetPoint.x;
-  const y2 = targetPoint.y;
-  const normalX = -unitY;
-  const normalY = unitX;
-  const peerEdges = visiblePeerEdges.filter(
-    (peerEdge) =>
-      (peerEdge.source === edge.source && peerEdge.target === edge.target)
-      || (peerEdge.source === edge.target && peerEdge.target === edge.source),
-  );
-  const peerIndex = Math.max(0, peerEdges.findIndex((peerEdge) => peerEdge.id === edge.id));
-  const pairSpread = peerEdges.length > 1 ? (peerIndex - (peerEdges.length - 1) / 2) * 20 : 0;
-  const sourcePeerEdges = visiblePeerEdges.filter((peerEdge) => peerEdge.source === edge.source);
-  const sourcePeerIndex = Math.max(0, sourcePeerEdges.findIndex((peerEdge) => peerEdge.id === edge.id));
-  const sourceFanSpread = sourcePeerEdges.length > 1 ? (sourcePeerIndex - (sourcePeerEdges.length - 1) / 2) * 8 : 0;
-  const curve = (isCommunicationEdge({ type: edge.type || "" }) ? 42 : 24) + pairSpread + sourceFanSpread;
-  const cx = (x1 + x2) / 2 + normalX * curve;
-  const cy = (y1 + y2) / 2 + normalY * curve;
-  return { x1, y1, x2, y2, cx, cy };
-}
-
 function roleBadgeTone(node: TeamCanvasNode, displayTone = "") {
   if (node.status === "stale") {
     return styles.nodeRoleBadgeStale;
@@ -2398,17 +2060,6 @@ function workRunNumber(snapshot: unknown, key: string, fallback = 0) {
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
 }
 
-function nextNodeId(nodes: TeamCanvasNode[]) {
-  const ids = new Set(nodes.map((node) => node.id));
-  let index = nodes.length + 1;
-  let candidate = `node-${index}`;
-  while (ids.has(candidate)) {
-    index += 1;
-    candidate = `node-${index}`;
-  }
-  return candidate;
-}
-
 function nodeTone(node: TeamCanvasNode) {
   if (node.status === "stale") {
     return styles.nodeStale;
@@ -2417,10 +2068,6 @@ function nodeTone(node: TeamCanvasNode) {
     return styles.nodeBound;
   }
   return styles.nodeOpen;
-}
-
-function isCommunicationEdge(edge: { type: string }) {
-  return edge.type === "communication" || edge.type === "collaborates_with";
 }
 
 function latestChatRoomRound(room: ChatRoomDetail | null | undefined) {
@@ -2440,60 +2087,6 @@ function chatRoomStatusLabel(status: string, lang: "zh" | "en") {
     return lang === "zh" ? "失败" : "Failed";
   }
   return lang === "zh" ? "就绪" : "Ready";
-}
-
-function isChallengeCupResearchWorkflowTeam(team: Team | null | undefined) {
-  if (!team) {
-    return false;
-  }
-  return team.teamId === RESEARCH_TEAM_ID || team.teamSource === "research_organization" || team.teamKind === "research";
-}
-
-function isKnowledgeExpansionWorkflowTeam(team: Team | null | undefined) {
-  if (!team) {
-    return false;
-  }
-  return team.teamId === KNOWLEDGE_EXPANSION_TEAM_ID || team.teamSource === "knowledge_expansion" || team.teamKind === "knowledge_expansion";
-}
-
-function isResearchWorkflowTeam(team: Team | null | undefined) {
-  return isChallengeCupResearchWorkflowTeam(team) || isKnowledgeExpansionWorkflowTeam(team);
-}
-
-function isEvolutionSystemTeam(team: Team | null | undefined) {
-  if (!team) {
-    return false;
-  }
-  return (
-    EVOLUTION_SYSTEM_TEAM_IDS.has(team.teamId) ||
-    team.teamKind === "self_evolution" ||
-    team.teamKind === "supervised_evolution" ||
-    team.teamSource === "self_evolution" ||
-    team.teamSource === "supervised_evolution"
-  );
-}
-
-function isAiSearchScopeTeam(team: Team | null | undefined) {
-  if (!team) {
-    return false;
-  }
-  return team.teamId === AI_SEARCH_TEAM_ID || team.teamKind === "ai_search" || team.teamSource === "ai_search";
-}
-
-function isSystemManagedTeam(team: Team | null | undefined) {
-  return isResearchWorkflowTeam(team) || isEvolutionSystemTeam(team) || isAiSearchScopeTeam(team);
-}
-
-function sourceCollectionWorkflowKindForTeam(team: Team | null | undefined) {
-  return isKnowledgeExpansionWorkflowTeam(team) ? "knowledge_expansion" : "challenge_cup_research";
-}
-
-function sourceCollectionWorkflowPurposeForTeam(team: Team | null | undefined) {
-  return isKnowledgeExpansionWorkflowTeam(team) ? "knowledge_expansion" : "challenge_cup_research";
-}
-
-function sourceCollectionAgentRolesForTeam(team: Team | null | undefined) {
-  return isKnowledgeExpansionWorkflowTeam(team) ? SOURCE_COLLECTION_KNOWLEDGE_EXPANSION_ROLES : SOURCE_COLLECTION_DEFAULT_ROLES;
 }
 
 function sourceCollectionModeForTeam(team: Team | null | undefined, draft: SourceCollectionDraft): SourceCollectionMode {
@@ -2520,13 +2113,6 @@ function sourceCollectionCollectionModeLabel(mode: SourceCollectionMode, lang: "
     mixed: { zh: "混合", en: "Mixed" },
   };
   return labels[mode][lang];
-}
-
-function systemManagedTeamArchiveReason(team: Team | null | undefined, lang: "zh" | "en") {
-  if (!team || !isSystemManagedTeam(team)) {
-    return "";
-  }
-  return lang === "zh" ? "系统团队由工作流自动维护，不能在这里归档。" : "System teams are maintained by workflows and cannot be archived here.";
 }
 
 function aiSearchSourceRoleLabel(value: string, lang: "zh" | "en") {

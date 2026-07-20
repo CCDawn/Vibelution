@@ -5,10 +5,16 @@ import canvasDataSource from "./TeamsRoute.canvasData.ts?raw";
 import routeSource from "./TeamsRoute.tsx?raw";
 import teamsSourceCollectionPanelSource from "./teams/TeamsSourceCollectionPanel.tsx?raw";
 import researchMemoryEvidencePanelSource from "./teams/ResearchMemoryEvidencePanel.tsx?raw";
+import canvasGeometrySource from "./teams/canvasGeometry.ts?raw";
+import researchWorkspaceModelSource from "./teams/researchWorkspaceModel.ts?raw";
+import teamKindModelSource from "./teams/teamKindModel.ts?raw";
 import evidenceModelSource from "./teams/source-collection/evidenceModel.ts?raw";
 import runModelSource from "./teams/source-collection/runModel.ts?raw";
 import stageProjectionSource from "./teams/source-collection/stageProjection.ts?raw";
 import researchWorkflowResourcesSource from "./teams/useResearchWorkflowResources.ts?raw";
+
+/** Route shell + claimable pure modules extracted from TeamsRoute. */
+const routeAndPureSource = `${routeSource}\n${canvasGeometrySource}\n${researchWorkspaceModelSource}\n${teamKindModelSource}`;
 import teamMemoryIndexPanelSource from "./TeamMemoryIndexPanel.tsx?raw";
 import teamMemoryIndexPanelStyles from "./TeamMemoryIndexPanel.styles";
 import teamExperimentMethodPanelSource from "./TeamExperimentMethodPanel.tsx?raw";
@@ -261,7 +267,8 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("commandPreviewOnly: true");
     expect(routeSource).toContain("startSourceCollectionRunMutation");
     expect(routeSource).toContain("knowledgeExpansionWorkflowTeamSelected");
-    expect(routeSource).toContain("SOURCE_COLLECTION_KNOWLEDGE_EXPANSION_ROLES");
+    expect(routeAndPureSource).toContain("SOURCE_COLLECTION_KNOWLEDGE_EXPANSION_ROLES");
+    expect(routeSource).toContain('from "./teams/teamKindModel"');
     expect(routeSource).toContain("source_finder");
     expect(routeSource).toContain("collectionMode");
     expect(routeSource).toContain("local_workspace");
@@ -459,18 +466,18 @@ describe("TeamsRoute layout contract", () => {
   });
 
   it("keeps only the fixed research and AI search teams in the picker", () => {
-    expect(routeSource).toContain("EVOLUTION_SYSTEM_TEAM_IDS");
-    expect(routeSource).toContain('"self-evolution-team"');
-    expect(routeSource).toContain('"supervised-evolution-team"');
+    expect(teamKindModelSource).toContain("EVOLUTION_SYSTEM_TEAM_IDS");
+    expect(teamKindModelSource).toContain('"self-evolution-team"');
+    expect(teamKindModelSource).toContain('"supervised-evolution-team"');
     expect(canvasDataSource).toContain('RESEARCH_TEAM_ID = "research-team"');
     expect(canvasDataSource).toContain('AI_SEARCH_TEAM_ID = "ai-search-team"');
     expect(canvasDataSource).toContain('KNOWLEDGE_EXPANSION_TEAM_ID = "knowledge-expansion-team"');
     expect(routeSource).toContain("TEAM_PICKER_TEAM_IDS.map((teamId) => teamsById.get(teamId))");
-    expect(routeSource).toContain("isEvolutionSystemTeam");
-    expect(routeSource).toContain("team.teamKind === \"self_evolution\"");
-    expect(routeSource).toContain("team.teamKind === \"supervised_evolution\"");
-    expect(routeSource).toContain("team.teamSource === \"self_evolution\"");
-    expect(routeSource).toContain("team.teamSource === \"supervised_evolution\"");
+    expect(routeAndPureSource).toContain("isEvolutionSystemTeam");
+    expect(teamKindModelSource).toContain('team.teamKind === "self_evolution"');
+    expect(teamKindModelSource).toContain('team.teamKind === "supervised_evolution"');
+    expect(teamKindModelSource).toContain('team.teamSource === "self_evolution"');
+    expect(teamKindModelSource).toContain('team.teamSource === "supervised_evolution"');
     expect(routeSource).toContain("const visibleTeamIds = useMemo(() => new Set(visibleTeams.map((team) => team.teamId)), [visibleTeams])");
     expect(routeSource).toContain("requestedVisibleTeamId");
     expect(routeSource).toContain("requestedVisibleAgentTeamId");
@@ -578,9 +585,9 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("接入主干");
     expect(routeSource).toContain("保存节点");
     expect(routeSource).toContain("归档");
-    expect(routeSource).toContain("function isSystemManagedTeam");
-    expect(routeSource).toContain("systemManagedTeamArchiveReason");
-    expect(routeSource).toContain("系统团队由工作流自动维护，不能在这里归档。");
+    expect(teamKindModelSource).toContain("function isSystemManagedTeam");
+    expect(routeAndPureSource).toContain("systemManagedTeamArchiveReason");
+    expect(teamKindModelSource).toContain("系统团队由工作流自动维护，不能在这里归档。");
     expect(routeSource).toContain("系统团队不可归档");
     expect(routeSource).toContain("解绑节点");
     expect(routeSource).toContain("删除节点");
@@ -643,9 +650,9 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("三阶段");
     expect(routeSource).toContain("ResearchStageWorkspaceView");
     expect(routeSource).toContain("researchWorkspaceStageRoute");
-    expect(routeSource).toContain('view: "knowledge_collection"');
-    expect(routeSource).toContain('view: "experiment"');
-    expect(routeSource).toContain('view: "iteration"');
+    expect(researchWorkspaceModelSource).toContain('view: "knowledge_collection"');
+    expect(researchWorkspaceModelSource).toContain('view: "experiment"');
+    expect(researchWorkspaceModelSource).toContain('view: "iteration"');
     expect(routeSource).toContain('key: "experiment_planner"');
     expect(routeSource).toContain('challenge_cup_experiment_planner');
     expect(routeSource).toContain('key: "experiment_ledger"');
@@ -659,9 +666,9 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).not.toContain('key: "mechanism_mapping"');
     expect(routeSource).not.toContain('key: "challenge_cup_delivery"');
     expect(routeSource).not.toContain('view: "source_collection", zh: "资料搜集"');
-    expect(routeSource).toContain("组织画布");
-    expect(routeSource).toContain('canvas: { zh: "组织画布", en: "Canvas" }');
-    expect(routeSource).toContain("搜索资料");
+    expect(routeAndPureSource).toContain("组织画布");
+    expect(researchWorkspaceModelSource).toContain('canvas: { zh: "组织画布", en: "Canvas" }');
+    expect(routeAndPureSource).toContain("搜索资料");
     expect(routeSource).toContain("科研控制台");
     expect(routeSource).toContain("开始知识搜集");
     expect(routeSource).toContain("搜索下一批");
@@ -1143,10 +1150,10 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("研究关系图");
     expect(routeSource).toContain("researchStageHeaderActions");
     expect(routeSource).toContain("researchCanvasRoute(selectedTeam?.teamId || RESEARCH_TEAM_ID)");
-    expect(routeSource).toContain("搜索、提炼、审查与入库");
-    expect(routeSource).toContain("资料寻找 / 资料提炼 / 资料关系整理 / 资料入库");
-    expect(routeSource).toContain("研究问题 / 假设 / 控制变量 / 冻结设计");
-    expect(routeSource).toContain("执行批次 / 结果评估 / 消融归因 / 优化迭代");
+    expect(researchWorkspaceModelSource).toContain("搜索、提炼、审查与入库");
+    expect(researchWorkspaceModelSource).toContain("资料寻找 / 资料提炼 / 资料关系整理 / 资料入库");
+    expect(researchWorkspaceModelSource).toContain("研究问题 / 假设 / 控制变量 / 冻结设计");
+    expect(researchWorkspaceModelSource).toContain("执行批次 / 结果评估 / 消融归因 / 优化迭代");
     expect(routeSource).toContain("lifecycleProjection");
     expect(routeSource).toContain("已设计 · 待执行");
     expect(routeSource).toContain("训练结果不参与本阶段完成判定");
@@ -1176,12 +1183,12 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("ResearchMemoryEvidencePanel");
     expect(routeSource).toContain('stage="experiment"');
     expect(routeSource).toContain('stage="iteration"');
-    expect(routeSource).toContain("value === \"source_collection\"");
-    expect(routeSource).toContain("return \"knowledge_collection\"");
+    expect(researchWorkspaceModelSource).toContain('value === "source_collection"');
+    expect(researchWorkspaceModelSource).toContain('return "knowledge_collection"');
     expect(routeSource).toContain('id="research-workflow-overview"');
-    expect(routeSource).toContain('knowledge_collection: "research-workflow-knowledge-collection"');
+    expect(researchWorkspaceModelSource).toContain('knowledge_collection: "research-workflow-knowledge-collection"');
     expect(teamSourceCollectionOverviewPanelSource).toContain('id="research-workflow-source-collection"');
-    expect(routeSource).toContain('id="research-organization-canvas"');
+    expect(routeAndPureSource).toContain('id="research-organization-canvas"');
     expect(routeSource).toContain('researchWorkspaceView === "canvas"');
     expect(routeSource).toContain('const researchCanvasReadOnly = researchWorkflowTeamSelected && researchWorkspaceView === "canvas"');
     expect(routeSource).toContain("const researchCanvasVisible = researchCanvasReadOnly");
@@ -1202,9 +1209,9 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("自动排版只改变当前显示，不保存坐标");
     expect(routeSource).toContain("原始坐标");
     expect(routeSource).toContain("canvasLayoutModeSwitch");
-    expect(routeSource).toContain("RESEARCH_CANVAS_AUTO_LAYOUT_LAYER_GAP");
-    expect(routeSource).toContain("RESEARCH_CANVAS_AUTO_LAYOUT_ROW_GAP");
-    expect(routeSource).toContain("researchCanvasRoleLayer");
+    expect(canvasGeometrySource).toContain("RESEARCH_CANVAS_AUTO_LAYOUT_LAYER_GAP");
+    expect(canvasGeometrySource).toContain("RESEARCH_CANVAS_AUTO_LAYOUT_ROW_GAP");
+    expect(canvasGeometrySource).toContain("researchCanvasRoleLayer");
     expect(routeSource).toContain("返回三阶段");
     expect(routeSource).toContain("researchCanvasReadOnly ? undefined : (event) => startNodeDrag(event, node)");
     expect(routeSource).toContain("researchCanvasReadOnly ? undefined : moveNodeDrag");
@@ -2598,10 +2605,10 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain('id="team-edge-arrow"');
     expect(routeSource).toContain("key={edge.id}");
     expect(routeSource).toContain("Q ${line.cx} ${line.cy}");
-    expect(routeSource).toContain("nodeBoundaryPoint");
-    expect(routeSource).toContain("distanceToRectEdge");
+    expect(canvasGeometrySource).toContain("nodeBoundaryPoint");
+    expect(canvasGeometrySource).toContain("distanceToRectEdge");
     expect(routeSource).toContain("edgeLine(edge, displayCanvasNodes, visibleEdges)");
-    expect(routeSource).toContain("sourceFanSpread");
+    expect(canvasGeometrySource).toContain("sourceFanSpread");
     expect(routeSource).not.toContain("<line key={edge.id}");
     expect(routeSource).toContain("className={styles.edges}");
   });
@@ -2614,8 +2621,8 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("visibleCommunicationEdges");
     expect(routeSource).toContain("visibleCommunicationEdgeCount");
     expect(routeSource).toContain("visibleEdges");
-    expect(routeSource).toContain("edge.type === \"communication\"");
-    expect(routeSource).toContain("edge.type === \"collaborates_with\"");
+    expect(canvasGeometrySource).toContain('edge.type === "communication"');
+    expect(canvasGeometrySource).toContain('edge.type === "collaborates_with"');
     expect(routeSource).toContain("styles.edgeOrganization");
     expect(routeSource).toContain("styles.edgeCommunication");
     expect(routeSource).toContain("信息线");
@@ -2631,9 +2638,9 @@ describe("TeamsRoute layout contract", () => {
 
   it("centers compact Team canvases and renders function role badges", () => {
     expect(routeSource).toContain("canvasViewStyle");
-    expect(routeSource).toContain("type TeamsRouteDynamicStyle");
-    expect(routeSource).toContain("CANVAS_VIEWPORT_WIDTH");
-    expect(routeSource).toContain("CANVAS_VIEWPORT_HEIGHT");
+    expect(canvasGeometrySource).toContain("type TeamsRouteDynamicStyle");
+    expect(routeAndPureSource).toContain("CANVAS_VIEWPORT_WIDTH");
+    expect(routeAndPureSource).toContain("CANVAS_VIEWPORT_HEIGHT");
     expect(routeSource).toContain("canvasViewportStyle");
     expect(routeSource).toContain("lockedCanvasViewportStyle");
     expect(routeSource).toContain("setLockedCanvasViewportStyle(canvasViewportStyle)");
@@ -2641,9 +2648,9 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("canvasViewStyle(displayCanvasNodes, canvasFrameSize)");
     expect(routeSource).toContain("ResizeObserver");
     expect(routeSource).toContain("styles.canvasViewport");
-    expect(routeSource).toContain("--canvas-offset-x");
-    expect(routeSource).toContain("--canvas-scale");
-    expect(routeSource).toContain("--node-x");
+    expect(canvasGeometrySource).toContain("--canvas-offset-x");
+    expect(canvasGeometrySource).toContain("--canvas-scale");
+    expect(canvasGeometrySource).toContain("--node-x");
     expect(routeSource).toContain("teamCanvasNodeStyle(node)");
     expect(routeSource).toContain("roleBadgeTone");
     expect(routeSource).toContain("teamNodeFunctionLabel");
@@ -2686,13 +2693,14 @@ describe("TeamsRoute layout contract", () => {
   });
 
   it("keeps read-only research canvas auto layout visual-only and deterministic", () => {
-    expect(routeSource).toContain("function autoLayoutResearchCanvasNodes");
-    expect(routeSource).toContain("researchCanvasRoleLayer");
-    expect(routeSource).toContain("RESEARCH_CANVAS_AUTO_LAYOUT_LAYER_GAP");
-    expect(routeSource).toContain("RESEARCH_CANVAS_AUTO_LAYOUT_ROW_GAP");
-    expect(routeSource).toContain("teamCanvasNodeSortKey");
-    expect(routeSource).toContain("positions.set(node.id");
-    expect(routeSource).toContain("return nodes.map((node) => ({");
+    expect(routeSource).toContain('from "./teams/canvasGeometry"');
+    expect(canvasGeometrySource).toContain("function autoLayoutResearchCanvasNodes");
+    expect(canvasGeometrySource).toContain("researchCanvasRoleLayer");
+    expect(canvasGeometrySource).toContain("RESEARCH_CANVAS_AUTO_LAYOUT_LAYER_GAP");
+    expect(canvasGeometrySource).toContain("RESEARCH_CANVAS_AUTO_LAYOUT_ROW_GAP");
+    expect(canvasGeometrySource).toContain("teamCanvasNodeSortKey");
+    expect(canvasGeometrySource).toContain("positions.set(node.id");
+    expect(canvasGeometrySource).toContain("return nodes.map((node) => ({");
     expect(routeSource).toContain("displayCanvasNodes.map((node)");
     expect(routeSource).not.toContain("saveCanvas(autoLayoutCanvasNodes");
     expect(routeSource).not.toContain("saveCanvas(displayCanvasNodes");
