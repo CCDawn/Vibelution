@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import locale
 import os
+import shlex
 import shutil
 import subprocess
 import time
@@ -17,6 +18,37 @@ from scripts.windowless_subprocess import no_window_subprocess_kwargs
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 _POLL_INTERVAL_SECONDS = 0.2
+_PYTHON_SITECUSTOMIZE = """\
+import os
+from pathlib import Path
+
+_sandbox_temp = Path(os.environ["VIBELUTION_CODEX_SANDBOX_TEMP"]).resolve()
+_original_mkdir = os.mkdir
+_original_chmod = os.chmod
+
+
+def _inside_sandbox_temp(path):
+    try:
+        return Path(path).resolve().is_relative_to(_sandbox_temp)
+    except (OSError, TypeError, ValueError):
+        return False
+
+
+def _sandbox_mkdir(path, mode=0o777, *args, **kwargs):
+    if _inside_sandbox_temp(path):
+        mode = 0o777
+    return _original_mkdir(path, mode, *args, **kwargs)
+
+
+def _sandbox_chmod(path, mode, *args, **kwargs):
+    if _inside_sandbox_temp(path):
+        return None
+    return _original_chmod(path, mode, *args, **kwargs)
+
+
+os.mkdir = _sandbox_mkdir
+os.chmod = _sandbox_chmod
+"""
 
 
 def _log_outcome(
@@ -90,6 +122,97 @@ def _powershell_executable() -> str:
     return str(fallback) if fallback.is_file() else "powershell.exe"
 
 
+def _has_unquoted_shell_operator(command: str) -> bool:
+    quote = ""
+    escaped = False
+    for character in command:
+        if escaped:
+            escaped = False
+            continue
+        if character == "^" and not quote:
+            escaped = True
+            continue
+        if character in {'"', "'"}:
+            if quote == character:
+                quote = ""
+            elif not quote:
+                quote = character
+            continue
+        if not quote and character in {"&", "|", "<", ">"}:
+            return True
+    return False
+
+
+def _direct_executable_argv(command: str) -> list[str]:
+    if not command.startswith('"') or _has_unquoted_shell_operator(command):
+        return []
+    try:
+        tokens = shlex.split(command, posix=False)
+    except ValueError:
+        return []
+    if not tokens:
+        return []
+    normalized = [
+        token[1:-1]
+        if len(token) >= 2 and token[0] == token[-1] and token[0] in {'"', "'"}
+        else token
+        for token in tokens
+    ]
+    executable = normalized[0]
+    if not Path(executable).is_absolute() or not executable.lower().endswith(".exe"):
+        return []
+    return normalized
+
+
+def _sandbox_process_environment(
+    workdir: Path,
+    command_hash: str,
+) -> tuple[dict[str, str], Path]:
+    temp_root = (workdir / ".runtime" / "codex-cli").resolve()
+    if not temp_root.is_relative_to(workdir):
+        raise RuntimeError("Codex CLI 沙盒临时目录越出工作区")
+    sandbox_temp = (
+        temp_root
+        / f"{command_hash}-{os.getpid()}-{time.monotonic_ns()}"
+    ).resolve()
+    if not sandbox_temp.is_relative_to(temp_root):
+        raise RuntimeError("Codex CLI 沙盒临时目录解析异常")
+    sandbox_temp.mkdir(parents=True, exist_ok=False)
+    (sandbox_temp / "sitecustomize.py").write_text(
+        _PYTHON_SITECUSTOMIZE,
+        encoding="utf-8",
+    )
+
+    environment = os.environ.copy()
+    for name in ("TMP", "TEMP", "TMPDIR"):
+        environment[name] = str(sandbox_temp)
+    relative_temp = sandbox_temp.relative_to(workdir).as_posix()
+    pytest_options = (
+        f"--basetemp={relative_temp}/pytest "
+        f"-o cache_dir={relative_temp}/pytest-cache"
+    )
+    existing_pytest_options = str(environment.get("PYTEST_ADDOPTS") or "").strip()
+    environment["PYTEST_ADDOPTS"] = " ".join(
+        part for part in (existing_pytest_options, pytest_options) if part
+    )
+    existing_python_path = str(environment.get("PYTHONPATH") or "").strip()
+    environment["PYTHONPATH"] = os.pathsep.join(
+        part for part in (str(sandbox_temp), existing_python_path) if part
+    )
+    environment["VIBELUTION_CODEX_SANDBOX_TEMP"] = str(sandbox_temp)
+    return environment, sandbox_temp
+
+
+def _cleanup_sandbox_temp(workdir: Path, sandbox_temp: Path | None) -> None:
+    if sandbox_temp is None:
+        return
+    temp_root = (workdir / ".runtime" / "codex-cli").resolve()
+    resolved = sandbox_temp.resolve()
+    if resolved == temp_root or not resolved.is_relative_to(temp_root):
+        return
+    shutil.rmtree(resolved, ignore_errors=True)
+
+
 def _sandbox_argv(
     executable: str,
     route: Any,
@@ -102,9 +225,14 @@ def _sandbox_argv(
         executable,
         "sandbox",
         "-c",
+        'windows.sandbox="unelevated"',
+        "-c",
         'sandbox_mode="workspace-write"',
         "--",
     ]
+    direct_argv = _direct_executable_argv(route.command)
+    if direct_argv:
+        return prefix + direct_argv
     if route.route == "powershell":
         return prefix + [
             _powershell_executable(),
@@ -243,12 +371,18 @@ def execute_codex_sandbox_command(
     )
     started_at = time.monotonic()
     process: subprocess.Popen[str] | None = None
+    sandbox_temp: Path | None = None
     try:
         encoding = locale.getpreferredencoding(False) or "utf-8"
+        environment, sandbox_temp = _sandbox_process_environment(
+            workdir,
+            command_hash,
+        )
         process = subprocess.Popen(
             argv,
             shell=False,
             cwd=str(workdir),
+            env=environment,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
@@ -351,3 +485,5 @@ def execute_codex_sandbox_command(
             f"[执行错误] Codex CLI 沙盒启动失败: {type(exc).__name__}: {exc}\n"
             "命令未执行，也未回退到非沙盒模式。"
         )
+    finally:
+        _cleanup_sandbox_temp(workdir, sandbox_temp)

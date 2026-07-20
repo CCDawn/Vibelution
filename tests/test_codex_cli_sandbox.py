@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import subprocess
+from pathlib import Path
+from types import SimpleNamespace
 
 from core.infrastructure import codex_cli_sandbox
 
@@ -50,6 +52,10 @@ def test_execute_uses_native_codex_sandbox_without_shell(monkeypatch, tmp_path):
     def fake_popen(argv, **kwargs):
         recorded["argv"] = argv
         recorded["kwargs"] = kwargs
+        recorded["sitecustomize_exists"] = (
+            Path(kwargs["env"]["VIBELUTION_CODEX_SANDBOX_TEMP"])
+            / "sitecustomize.py"
+        ).is_file()
         return _CompletedProcess()
 
     monkeypatch.setattr(codex_cli_sandbox.subprocess, "Popen", fake_popen)
@@ -65,6 +71,8 @@ def test_execute_uses_native_codex_sandbox_without_shell(monkeypatch, tmp_path):
         r"C:\Codex\codex.exe",
         "sandbox",
         "-c",
+        'windows.sandbox="unelevated"',
+        "-c",
         'sandbox_mode="workspace-write"',
         "--",
         r"C:\Windows\System32\cmd.exe",
@@ -75,6 +83,26 @@ def test_execute_uses_native_codex_sandbox_without_shell(monkeypatch, tmp_path):
     ]
     assert recorded["kwargs"]["shell"] is False
     assert recorded["kwargs"]["cwd"] == str(tmp_path)
+    assert recorded["kwargs"]["env"]["TMP"].startswith(
+        str(tmp_path / ".runtime" / "codex-cli")
+    )
+    assert "--basetemp=.runtime/codex-cli/" in recorded["kwargs"]["env"]["PYTEST_ADDOPTS"]
+    assert recorded["sitecustomize_exists"] is True
+    assert not list((tmp_path / ".runtime" / "codex-cli").glob("*"))
+
+
+def test_sandbox_runs_rewritten_python_command_without_cmd_quote_roundtrip(monkeypatch):
+    monkeypatch.setattr(codex_cli_sandbox.os, "name", "nt")
+    python_executable = r"C:\Project\.venv\Scripts\python.exe"
+    route = SimpleNamespace(
+        route="cmd",
+        command=f'"{python_executable}" -c "print(123)"',
+    )
+
+    argv = codex_cli_sandbox._sandbox_argv(r"C:\Codex\codex.exe", route)
+
+    assert argv[-3:] == [python_executable, "-c", "print(123)"]
+    assert "cmd.exe" not in argv
 
 
 def test_execute_fails_closed_when_native_codex_is_missing(monkeypatch, tmp_path):
