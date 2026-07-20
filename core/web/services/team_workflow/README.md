@@ -19,7 +19,7 @@ Align language with frontend claim map: `web/src/routes/teams/README.md`.
 | SC agent session context seeding | `source_collection_context.py` | LLM client internals |
 | Research memory context packing | `research_memory_context.py` | chat stream capture |
 | Candidates register/import/extract/list | `source_collection/candidates.py` | pet system |
-| SC runs / search / background | `source_collection/runs.py` (planned) | session list cache |
+| SC runs / search / background | `source_collection/runs.py` | session list cache, stage writeback |
 | SC storage open targets | `source_collection/storage.py` (planned) | supervised evolution |
 | Experiment plan/smoke/full-run APIs | `experiment.py` (planned) | session submit |
 | Research loop templates/status | `research_loop.py` (planned) | CLI terminal |
@@ -32,7 +32,7 @@ Align language with frontend claim map: `web/src/routes/teams/README.md`.
 |-----------------------------|--------------|
 | ensure/get orchestration | `orchestration_core.py` |
 | Candidates / quality entry (register/import/extract/list) | `source_collection/candidates.py` |
-| SC runs / search | planned `source_collection/runs.py` (+ facade today) |
+| SC runs / search | `source_collection/runs.py` |
 | Stage agents / writeback | `source_collection_stage_tasks.py` + facade `start_*` / `writeback_*` |
 | Storage open | planned storage pack |
 | Experiment design/execution | facade + planned `experiment.py` |
@@ -54,8 +54,8 @@ Align language with frontend claim map: `web/src/routes/teams/README.md`.
 | Pre-existing helpers | done | `source_collection_*`, `research_memory_context` |
 | `orchestration_core.py` | done | get/ensure entrypoints (late-bound facade) |
 | `source_collection/candidates.py` | done | register/import/extract/list/validate entrypoints |
-| `source_collection/runs.py` | planned | next vertical pack |
-| storage / experiment / research_loop | planned | after runs |
+| `source_collection/runs.py` | done | start run, execute/background search, work-run summary, SC summary |
+| storage / stages writeback entry / experiment / research_loop | planned | next packs |
 
 ## Related
 
