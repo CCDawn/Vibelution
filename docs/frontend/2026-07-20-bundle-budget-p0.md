@@ -127,7 +127,22 @@ Cuts:
 | `vendor-react-router-*.js` | (in index) | ~93 KiB | 480 KiB vendor | pass |
 | `vendor-overlay-*.js` | (in index) | ~71 KiB | 480 KiB vendor | pass |
 | `vendor-query-*.js` | (in index) | ~39 KiB | 480 KiB vendor | pass |
-| `TeamsRoute-*.js` | ~441 KiB | ~441 KiB | 390 KiB | still fail |
+| `TeamsRoute-*.js` | ~441 KiB | ~441 KiB | 390 KiB | still fail (see next cut) |
+
+## Measured after Teams secondary panel pack
+
+Structure-first Teams cut (claim map + one async UI pack):
+
+- `web/src/routes/teams/README.md` — ownership map
+- `teamSecondaryPanels.ts` — single secondary barrel for panel components
+- `lazyTeamPanel.tsx` — shared `createLazyNamedTeamPanel` helper
+- `TeamWorkflowGraphLayout.ts` — pure layout math stays in shell; SVG view stays secondary
+
+| Asset | Before | After | Budget | Status |
+|-------|--------|-------|--------|--------|
+| `TeamsRoute-*.js` | ~441 KiB | **~305 KiB** | 390 KiB | **pass** |
+| `teamSecondaryPanels-*.js` | (in Teams) | **~123 KiB** | 390 KiB | pass (async UI pack) |
+| other P0 assets | pass | pass | — | pass |
 
 ## Follow-up backlog (ordered)
 
@@ -136,8 +151,9 @@ Cuts:
 1. ~~**ConversationView JS**: secondary-lazy markdown~~ **done** (~453 → ~192 KiB).
 2. ~~**Chat JS chunk**: secondary-lazy wizard/cache/menu/LLM trace~~ **done** (~434 → ~287 KiB).
 3. ~~**index.js**: vendor split + lazy tooltip~~ **done** (~559 → ~186 KiB).
-4. **Teams JS**: apply Chat-style claim map + panel split (source + chunk).
-5. Optional: further split `ConversationView.styles` if CV residual needs more headroom.
+4. ~~**Teams JS**: claim map + secondary panel pack~~ **done** (~441 → ~305 KiB).
+5. Optional: further extract pure helpers/mutations from `TeamsRoute.tsx` (claimability; not required for budget).
+6. Optional: further split `ConversationView.styles` if CV residual needs more headroom.
 
 ### P1
 

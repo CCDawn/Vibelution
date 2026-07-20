@@ -6,6 +6,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 
+import { createLazyNamedTeamPanel } from "./teams/lazyTeamPanel";
 import { fetchJson } from "../api/client";
 import { kernelTaskCenterHref } from "../api/kernel";
 import {
@@ -81,50 +82,26 @@ import {
 import { agentCenterMemoryRoute, teamMemoryRoute } from "./agentCenterRoutes";
 import { agentDisplayInfo } from "./agentDisplay";
 import { createChatWorkspaceCache } from "./chatWorkspaceCache";
-import { TeamMemoryIndexPanel, type TeamMemoryIndexMember } from "./TeamMemoryIndexPanel";
-import { TeamExperimentMethodPanel, type ExperimentPlanMethodRequest } from "./TeamExperimentMethodPanel";
-import { TeamSourceCollectionActiveStagePanel } from "./TeamSourceCollectionActiveStagePanel";
-import { TeamSourceCollectionPhaseCloseGatePanel } from "./TeamSourceCollectionPhaseCloseGatePanel";
-import { TeamSourceCollectionStageAgentsPanel, type TeamSourceCollectionStageAgentCard, type TeamSourceCollectionStageAgentTone } from "./TeamSourceCollectionStageAgentsPanel";
-import { TeamSourceCollectionRunSwitcherPanel, type TeamSourceCollectionRunSwitcherRun } from "./TeamSourceCollectionRunSwitcherPanel";
-import { TeamSourceCollectionFindingDetailsPanel } from "./TeamSourceCollectionFindingDetailsPanel";
-import {
-  type TeamSourceCollectionOverviewPlan,
-  type TeamSourceCollectionOverviewResult,
-  type TeamSourceCollectionOverviewStat,
+import type { TeamMemoryIndexMember } from "./TeamMemoryIndexPanel";
+import type { ExperimentPlanMethodRequest } from "./TeamExperimentMethodPanel";
+import type { TeamSourceCollectionStageAgentCard, TeamSourceCollectionStageAgentTone } from "./TeamSourceCollectionStageAgentsPanel";
+import type { TeamSourceCollectionRunSwitcherRun } from "./TeamSourceCollectionRunSwitcherPanel";
+import type {
+  TeamSourceCollectionOverviewPlan,
+  TeamSourceCollectionOverviewResult,
+  TeamSourceCollectionOverviewStat,
 } from "./TeamSourceCollectionOverviewPanel";
-import { TeamSourceCollectionCandidatePanel } from "./TeamSourceCollectionCandidatePanel";
-import { TeamSourceCollectionConversationPanel } from "./TeamSourceCollectionConversationPanel";
-import { TeamSourceCollectionControlsPanel } from "./TeamSourceCollectionControlsPanel";
-import { TeamSourceCollectionExtractionRecoveryPanel } from "./TeamSourceCollectionExtractionRecoveryPanel";
-import { TeamSourceCollectionGraphPanel } from "./TeamSourceCollectionGraphPanel";
-import { TeamSourceCollectionManualWritebackPanel } from "./TeamSourceCollectionManualWritebackPanel";
-import { TeamSourceCollectionMemoryPanel } from "./TeamSourceCollectionMemoryPanel";
-import { TeamSourceCollectionScreeningPanel } from "./TeamSourceCollectionScreeningPanel";
-import {
-  TeamSourceCollectionSourceDetailPanel,
-  type TeamSourceCollectionSourceDetailAction,
-  type TeamSourceCollectionSourceDetailEvidence,
-  type TeamSourceCollectionSourceDetailFact,
-  type TeamSourceCollectionSourceDetailLink,
+import type {
+  TeamSourceCollectionSourceDetailAction,
+  TeamSourceCollectionSourceDetailEvidence,
+  TeamSourceCollectionSourceDetailFact,
+  TeamSourceCollectionSourceDetailLink,
 } from "./TeamSourceCollectionSourceDetailPanel";
-import {
-  TeamSourceCollectionStandaloneStagePanel,
-  type TeamSourceCollectionStandaloneStageModule,
-} from "./TeamSourceCollectionStandaloneStagePanel";
-import { TeamSourceCollectionRunSettingsPanel } from "./TeamSourceCollectionRunSettingsPanel";
-import {
-  TeamSourceCollectionFilterBar,
-  TeamSourceCollectionPagination,
-  type TeamSourceCollectionFilterOption,
-} from "./TeamSourceCollectionResultControls";
-import { TeamSourceCollectionStorageActionsPanel, type TeamSourceCollectionStorageAction } from "./TeamSourceCollectionStorageActionsPanel";
-import { TeamWorkflowCandidatePreviewPanel, type TeamWorkflowCandidatePreviewItem } from "./TeamWorkflowCandidatePreviewPanel";
-import { TeamsSourceCollectionPanel } from "./teams/TeamsSourceCollectionPanel";
-import {
-  ResearchMemoryEvidencePanel,
-  type ResearchMemoryContextSummary,
-} from "./teams/ResearchMemoryEvidencePanel";
+import type { TeamSourceCollectionStandaloneStageModule } from "./TeamSourceCollectionStandaloneStagePanel";
+import type { TeamSourceCollectionFilterOption } from "./TeamSourceCollectionResultControls";
+import type { TeamSourceCollectionStorageAction } from "./TeamSourceCollectionStorageActionsPanel";
+import type { TeamWorkflowCandidatePreviewItem } from "./TeamWorkflowCandidatePreviewPanel";
+import type { ResearchMemoryContextSummary } from "./teams/ResearchMemoryEvidencePanel";
 import {
   SOURCE_COLLECTION_SOURCE_FILTERS,
   deriveSourceCollectionExcludedRecoveryState,
@@ -192,15 +169,7 @@ import {
   useResearchWorkflowResources,
   type TeamWorkflowSourceQualityStatus,
 } from "./teams/useResearchWorkflowResources";
-import { TeamWorkflowGraphView, workflowGraphLayout } from "./TeamWorkflowGraphView";
-import {
-  TeamWorkflowCandidateGraphStatusPanel,
-  TeamWorkflowCoordinationStatusPanel,
-  TeamWorkflowKnowledgeIngestionStatusPanel,
-  TeamWorkflowModelEvidenceStatusPanel,
-  TeamWorkflowPaperNoteChunkStatusPanel,
-  TeamWorkflowSourceQualityStatusPanel,
-} from "./TeamWorkflowStatusPanels";
+import { workflowGraphLayout } from "./TeamWorkflowGraphLayout";
 import {
   AI_SEARCH_TEAM_ID,
   KNOWLEDGE_EXPANSION_TEAM_ID,
@@ -215,6 +184,41 @@ import {
   resolveTeamsRouteEffectiveTeamId,
 } from "./TeamsRoute.canvasData";
 import styles from "./TeamsRoute.styles";
+
+/** One shared async pack for Teams panel UI (see teams/README.md). */
+const loadTeamSecondaryPanels = () => import("./teams/teamSecondaryPanels");
+
+const TeamMemoryIndexPanel = createLazyNamedTeamPanel(loadTeamSecondaryPanels, "TeamMemoryIndexPanel");
+const TeamExperimentMethodPanel = createLazyNamedTeamPanel(loadTeamSecondaryPanels, "TeamExperimentMethodPanel");
+const TeamSourceCollectionActiveStagePanel = createLazyNamedTeamPanel(loadTeamSecondaryPanels, "TeamSourceCollectionActiveStagePanel");
+const TeamSourceCollectionPhaseCloseGatePanel = createLazyNamedTeamPanel(loadTeamSecondaryPanels, "TeamSourceCollectionPhaseCloseGatePanel");
+const TeamSourceCollectionStageAgentsPanel = createLazyNamedTeamPanel(loadTeamSecondaryPanels, "TeamSourceCollectionStageAgentsPanel");
+const TeamSourceCollectionRunSwitcherPanel = createLazyNamedTeamPanel(loadTeamSecondaryPanels, "TeamSourceCollectionRunSwitcherPanel");
+const TeamSourceCollectionFindingDetailsPanel = createLazyNamedTeamPanel(loadTeamSecondaryPanels, "TeamSourceCollectionFindingDetailsPanel");
+const TeamSourceCollectionCandidatePanel = createLazyNamedTeamPanel(loadTeamSecondaryPanels, "TeamSourceCollectionCandidatePanel");
+const TeamSourceCollectionConversationPanel = createLazyNamedTeamPanel(loadTeamSecondaryPanels, "TeamSourceCollectionConversationPanel");
+const TeamSourceCollectionControlsPanel = createLazyNamedTeamPanel(loadTeamSecondaryPanels, "TeamSourceCollectionControlsPanel");
+const TeamSourceCollectionExtractionRecoveryPanel = createLazyNamedTeamPanel(loadTeamSecondaryPanels, "TeamSourceCollectionExtractionRecoveryPanel");
+const TeamSourceCollectionGraphPanel = createLazyNamedTeamPanel(loadTeamSecondaryPanels, "TeamSourceCollectionGraphPanel");
+const TeamSourceCollectionManualWritebackPanel = createLazyNamedTeamPanel(loadTeamSecondaryPanels, "TeamSourceCollectionManualWritebackPanel");
+const TeamSourceCollectionMemoryPanel = createLazyNamedTeamPanel(loadTeamSecondaryPanels, "TeamSourceCollectionMemoryPanel");
+const TeamSourceCollectionScreeningPanel = createLazyNamedTeamPanel(loadTeamSecondaryPanels, "TeamSourceCollectionScreeningPanel");
+const TeamSourceCollectionSourceDetailPanel = createLazyNamedTeamPanel(loadTeamSecondaryPanels, "TeamSourceCollectionSourceDetailPanel");
+const TeamSourceCollectionStandaloneStagePanel = createLazyNamedTeamPanel(loadTeamSecondaryPanels, "TeamSourceCollectionStandaloneStagePanel");
+const TeamSourceCollectionRunSettingsPanel = createLazyNamedTeamPanel(loadTeamSecondaryPanels, "TeamSourceCollectionRunSettingsPanel");
+const TeamSourceCollectionFilterBar = createLazyNamedTeamPanel(loadTeamSecondaryPanels, "TeamSourceCollectionFilterBar");
+const TeamSourceCollectionPagination = createLazyNamedTeamPanel(loadTeamSecondaryPanels, "TeamSourceCollectionPagination");
+const TeamSourceCollectionStorageActionsPanel = createLazyNamedTeamPanel(loadTeamSecondaryPanels, "TeamSourceCollectionStorageActionsPanel");
+const TeamWorkflowCandidatePreviewPanel = createLazyNamedTeamPanel(loadTeamSecondaryPanels, "TeamWorkflowCandidatePreviewPanel");
+const TeamsSourceCollectionPanel = createLazyNamedTeamPanel(loadTeamSecondaryPanels, "TeamsSourceCollectionPanel");
+const ResearchMemoryEvidencePanel = createLazyNamedTeamPanel(loadTeamSecondaryPanels, "ResearchMemoryEvidencePanel");
+const TeamWorkflowGraphView = createLazyNamedTeamPanel(loadTeamSecondaryPanels, "TeamWorkflowGraphView");
+const TeamWorkflowCandidateGraphStatusPanel = createLazyNamedTeamPanel(loadTeamSecondaryPanels, "TeamWorkflowCandidateGraphStatusPanel");
+const TeamWorkflowCoordinationStatusPanel = createLazyNamedTeamPanel(loadTeamSecondaryPanels, "TeamWorkflowCoordinationStatusPanel");
+const TeamWorkflowKnowledgeIngestionStatusPanel = createLazyNamedTeamPanel(loadTeamSecondaryPanels, "TeamWorkflowKnowledgeIngestionStatusPanel");
+const TeamWorkflowModelEvidenceStatusPanel = createLazyNamedTeamPanel(loadTeamSecondaryPanels, "TeamWorkflowModelEvidenceStatusPanel");
+const TeamWorkflowPaperNoteChunkStatusPanel = createLazyNamedTeamPanel(loadTeamSecondaryPanels, "TeamWorkflowPaperNoteChunkStatusPanel");
+const TeamWorkflowSourceQualityStatusPanel = createLazyNamedTeamPanel(loadTeamSecondaryPanels, "TeamWorkflowSourceQualityStatusPanel");
 
 const NODE_WIDTH = 172;
 const NODE_HEIGHT = 92;
