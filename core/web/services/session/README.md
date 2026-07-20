@@ -18,7 +18,7 @@ During P0 structure work, `session_service.py` remains the **public import facad
 | Turn queue / schedule / executor handoff | `schedule.py` | candidate store, full worker loop |
 | `_run_session_turn` / continuation loop | `worker.py` | team SC search, SSE transport |
 | UI stream to journal / `assistant_delta` batching | `stream_capture.py` | list cache, SSE transport publish |
-| Persist turn outcome / final `session_detail` | `persist.py` (planned) | agent directory CRUD |
+| Persist turn outcome / final `session_detail` | `persist.py` | agent directory CRUD, SSE transport |
 | Session detail/list DTO projection helpers | `projection.py` (planned) | runtime daemon |
 | Public HTTP-facing API surface | `../session_service.py` (facade) | inlining new 500-line blocks |
 
@@ -62,8 +62,11 @@ During P0 structure work, `session_service.py` remains the **public import facad
   - Still on facade: SSE `_publish_session_assistant_delta` / stream subscribers / detail snapshot publish.
 - **Done:** `worker.py` (`_run_session_turn`, continuation loop, internal auto-continue context helpers).
   - Late-bound facade for agent/context/capture/persist; default-arg constants inlined to avoid import-time `s.*`.
-  - Still on facade: `_persist_session_turn_*`, `create_chat_agent`, projection helpers.
-- **Planned:** persist, projection.
+  - Still on facade: `create_chat_agent`, projection helpers.
+- **Done:** `persist.py` (`_persist_session_turn_result/failure/runtime_error`, terminal fallback).
+  - Late-bound facade for chat-state lock, ledger, work-run, journal append.
+  - Still on facade: preflight rejection, interrupted snapshot, projection DTO builders.
+- **Planned:** projection (optional), Stage 2.9 facade slim.
 
 ## Related
 
