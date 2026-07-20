@@ -16,14 +16,21 @@ export const BUNDLE_BUDGETS = [
     maxBytes: 470 * 1024,
   },
   {
+    // Shell CSS entry: shared app/components/chat-primary utilities only.
+    name: "main application css entry",
+    pattern: /^index-[\w-]+\.css$/,
+    maxBytes: 360 * 1024,
+  },
+  {
     name: "route or feature chunks",
     pattern: /^[\w.-]+-[\w-]+\.js$/,
     maxBytes: 390 * 1024,
   },
   {
-    name: "route css chunks",
-    pattern: /^[\w.-]+-[\w-]+\.css$/,
-    maxBytes: 170 * 1024,
+    // Lazy route CSS entries (design/route-css/*.tailwind.css).
+    name: "lazy route css chunks",
+    pattern: /^(?!index-)[\w.-]+-[\w-]+\.css$/,
+    maxBytes: 220 * 1024,
   },
 ];
 

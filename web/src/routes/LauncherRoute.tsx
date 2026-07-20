@@ -1,3 +1,5 @@
+import "../design/route-css/workbench-secondary.tailwind.css";
+
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ExternalLink, LoaderCircle, Play, Power, RefreshCw, Square } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";

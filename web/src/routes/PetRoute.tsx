@@ -1,3 +1,5 @@
+import "../design/route-css/workbench-secondary.tailwind.css";
+
 import { useQuery } from "@tanstack/react-query";
 import type { CSSProperties } from "react";
 

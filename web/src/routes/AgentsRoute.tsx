@@ -1,3 +1,5 @@
+import "../design/route-css/agents.tailwind.css";
+
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,

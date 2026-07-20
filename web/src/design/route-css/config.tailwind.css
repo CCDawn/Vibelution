@@ -1,0 +1,7 @@
+/* Loaded with ConfigRoute — keep out of the shell CSS entry. */
+@import "tailwindcss" source(none);
+
+@source "../../routes/ConfigRoute.tsx";
+@source "../../routes/ConfigRoute.styles.ts";
+@source "../../routes/Config*.tsx";
+@source "../../routes/Config*.styles.ts";
