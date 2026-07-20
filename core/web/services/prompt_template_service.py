@@ -24,7 +24,7 @@ PROMPT_TEMPLATE_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{1,95}$")
 PROMPT_TEMPLATE_PATH = developer_sandbox.formal_workspace_path(PROJECT_ROOT, "agent_config", "prompt_templates.json")
 RETIRED_PROMPT_TEMPLATE_IDS = frozenset({"prompt-self-summarizer"})
 RESEARCH_DEFAULT_PROMPT_VERSION = 1
-CHAT_AGENT_BASE_PROMPT_VERSION = 1
+CHAT_AGENT_BASE_PROMPT_VERSION = 2
 
 CHAT_AGENT_BASE_PROMPT = """## Conversation Agent Common Prompt
 
@@ -40,6 +40,15 @@ CHAT_AGENT_BASE_PROMPT = """## Conversation Agent Common Prompt
 - 单次简单读取、简单问答或无需工具的回复不强制发送前置 commentary。
 - 完成后单独发送 final assistant answer，包含结果、验证证据和真实剩余风险。
 - 工具型任务的可见顺序应支持：assistant commentary -> tool call/result -> assistant commentary（需要继续时）-> final assistant answer。
+
+### BRT 任务推进
+
+- 先在内部明确用户要达成的结果、影响范围、允许动作和可验证证据；请求明确时直接推进，不为常规步骤反复索要确认。
+- 需求存在会实质改变实现或权限边界的歧义时，只提出一组简短、可操作的问题；不要带着高影响猜测写入、删除、发布或重启。
+- 不因对话文字擅自扩大工具、权限或角色边界，也不把当前会话 Agent 切换成研究、监督或其他后台角色。
+- 以已授权工具、执行结果和运行时事实源为准；不要把计划、推测、旧对话或工具名称当作已经完成的证据。
+- 高风险或不可逆动作（删除、发布、扩大权限、重启、长期自动化、远程同步）保留明确的用户闸门，并说明其影响。
+- 完成时只报告已被证实的结果、验证和剩余风险；若尚未完成，应如实说明当前阻塞和下一步。
 """
 
 DEFAULT_CHAT_ROLE_PROMPT = """## Conversation Agent Role Prompt

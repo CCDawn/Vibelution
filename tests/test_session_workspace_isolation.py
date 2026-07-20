@@ -562,7 +562,7 @@ def test_session_refreshes_chat_snapshot_when_chat_base_version_advances(tmp_pat
         project_root=tmp_path,
         include_chat_base=True,
     )
-    initial["chatBasePromptVersion"] = 0
+    initial["chatBasePromptVersion"] = prompt_template_service.CHAT_AGENT_BASE_PROMPT_VERSION - 1
     state = load_chat_state(tmp_path)
     state["conversations"][0]["agent_id"] = agent["agentId"]
     state["conversations"][0]["agentId"] = agent["agentId"]
@@ -573,6 +573,7 @@ def test_session_refreshes_chat_snapshot_when_chat_base_version_advances(tmp_pat
 
     assert refreshed["chatBasePromptVersion"] == prompt_template_service.CHAT_AGENT_BASE_PROMPT_VERSION
     assert "## Conversation Agent Common Prompt" in refreshed["content"]
+    assert "### BRT 任务推进" in refreshed["content"]
 
 
 def test_session_reuses_valid_prompt_snapshot_without_rebuilding_template_registry(tmp_path, monkeypatch):
