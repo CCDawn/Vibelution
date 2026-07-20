@@ -5,7 +5,9 @@ Prefer editing a **slice module** over growing `session_service.py` when possibl
 
 Canonical product flow: `docs/agents/conversation-flow-map.md`.
 
-During P0 structure work, `session_service.py` remains the **public import facade** for routes and other services (`from core.web.services.session_service import ...`). New logic should land in this package and be re-exported from the facade when it is part of the public API.
+`session_service.py` remains the **public import facade** for routes and other services
+(`from core.web.services.session_service import ...`). New hot-path logic should land in
+this package and be re-exported from the facade when it is part of the public API.
 
 ## Ownership map (claim scopes)
 
@@ -17,15 +19,15 @@ During P0 structure work, `session_service.py` remains the **public import facad
 | `submit_session_message*` / guidance / edit-resubmit entry | `submit.py` | team workflow orchestration, worker loop |
 | Turn queue / schedule / executor handoff | `schedule.py` | candidate store, full worker loop |
 | `_run_session_turn` / continuation loop | `worker.py` | team SC search, SSE transport |
-| UI stream to journal / `assistant_delta` batching | `stream_capture.py` | list cache, SSE transport publish |
-| Persist turn outcome / final `session_detail` | `persist.py` | agent directory CRUD, SSE transport |
-| Session detail/list DTO projection helpers | `projection.py` (planned) | runtime daemon |
-| Public HTTP-facing API surface | `../session_service.py` (facade) | inlining new 500-line blocks |
+| UI stream to journal / live_output batching | `stream_capture.py` | list cache, SSE transport publish |
+| Persist turn outcome / final assistant + turn_* | `persist.py` | agent directory CRUD, SSE transport |
+| Session detail/list DTO projection / stop / SSE publish | `../session_service.py` (facade remainder) | inlining new 500-line blocks into slices |
+| Public HTTP-facing API surface | `../session_service.py` (facade) | bypassing re-exports |
 
-## Flow map to planned modules
+## Flow map to modules
 
-| Flow map step | Owner (target) |
-|---------------|----------------|
+| Flow map step | Owner |
+|---------------|--------|
 | POST messages / Prefer async | `submit.py` |
 | turn_started / user_message journal | submit + `journal_bridge.py` |
 | schedule background turn | `schedule.py` |
@@ -34,6 +36,8 @@ During P0 structure work, `session_service.py` remains the **public import facad
 | persist assistant_message / turn_* | `persist.py` |
 | list/detail index cache | `list_cache.py` |
 | live output checkpoint | `live_output.py` |
+| SSE `assistant_delta` / `session_detail` publish | facade (deferred slice) |
+| detail DTO projection | facade (optional later `projection.py`) |
 
 ## Sole-owner rules
 
@@ -41,36 +45,35 @@ During P0 structure work, `session_service.py` remains the **public import facad
 2. **`turn_journal` / conversation ledger** is the durable fact source; SSE is transport.
 3. Do not open a second session EventSource protocol; stream ownership stays on `stream_session_events` + capture pipeline.
 4. Do not change journal event type strings or SSE event names in mechanical splits.
-5. Prefer re-export from `session_service.py` over updating every importer until Stage 5.
+5. Prefer re-export from `session_service.py` over updating every importer until a later import-migration stage.
 
-## Extraction progress
+## Extraction progress (Stage 2 closed)
 
-- **Done:** `list_cache.py` (session list signature + inflight cache).
-- **Done:** `live_output.py` (state dataclass, in-memory store, checkpoint I/O + visibility).
-  - Facade still owns: timeline/codex payload enrichment, `_set_session_live_output` stream publish, chat-state recovery, progress/status labels.
-- **Done:** `journal_bridge.py` (events signature cache, append, ledger seq, snapshot).
-  - Facade thin-wraps with `project_root=PROJECT_ROOT` so monkeypatches / agent-kernel root binding keep working.
-  - Still on facade: stale-ledger reconcile, visible-message projection, truncate-before-message.
-- **Done:** `submit.py` (`submit_session_message*`, guidance, edit-resubmit, pure message resolve helpers).
-  - Bodies late-bind facade helpers via `_service()` to avoid import cycles; schedule/worker still on facade.
-- **Done:** `schedule.py` (queue/schedule/release adapters, external slot reserve, mark queued/dequeued).
-  - Facade keeps `_SESSION_EXECUTOR` + `_SESSION_TURN_SCHEDULER` globals so conftest monkeypatches stay effective;
-    schedule functions resolve them at call time via `_service()`.
-  - Still on facade: running-session flags, `SessionTurnControl`, `_run_session_turn` worker.
-- **Done:** `stream_capture.py` (`SessionTurnCapture`, text batcher, `_capture_session_ui_stream`, UI hooks).
-  - Late-bound facade sanitizers/live_output/journal; ContextVar store re-exported from facade.
-  - Still on facade: SSE `_publish_session_assistant_delta` / stream subscribers / detail snapshot publish.
-- **Done:** `worker.py` (`_run_session_turn`, continuation loop, internal auto-continue context helpers).
-  - Late-bound facade for agent/context/capture/persist; default-arg constants inlined to avoid import-time `s.*`.
-  - Still on facade: `create_chat_agent`, projection helpers.
-- **Done:** `persist.py` (`_persist_session_turn_result/failure/runtime_error`, terminal fallback).
-  - Late-bound facade for chat-state lock, ledger, work-run, journal append.
-  - Still on facade: preflight rejection, interrupted snapshot, projection DTO builders.
-- **Planned:** projection (optional), Stage 2.9 facade slim.
+| Module | ~LOC | Role |
+|--------|------|------|
+| `list_cache.py` | ~258 | list index signature + inflight cache |
+| `live_output.py` | ~288 | live state store + checkpoint I/O |
+| `journal_bridge.py` | ~238 | events cache + append + ledger seq |
+| `submit.py` | ~916 | message / guidance / edit-resubmit entry |
+| `schedule.py` | ~313 | queue / executor handoff / external slot |
+| `stream_capture.py` | ~1179 | UI capture + batching + hooks |
+| `worker.py` | ~1288 | run turn + continuation loop |
+| `persist.py` | ~1001 | turn result / failure / terminal fallback |
+| **package total (slices)** | **~5.5k** | claimable hot path |
+| `session_service.py` facade | ~19.2k | re-exports + projection/SSE/stop/helpers |
+
+**Stage 2 exit (met):** hot-path claims exist for submit → schedule → capture → worker → persist plus list/live/journal support slices; public import path unchanged; focused slice tests + `test_web_runtime_routes` green.
+
+**Explicitly deferred (not Stage 2 blockers):**
+
+- Full facade slim to “re-exports only” (still holds projection, SSE publish, stop controls, agent helpers).
+- Optional `projection.py` for detail/list DTO builders.
+- Migrating all internal importers off the facade.
+- Stage 3 `team_workflow` god-service split.
 
 ## Related
 
 - Routes: `core/web/routes/sessions.py`
 - Domain: `core/chat/*` (ledger, context assembler)
-- Agent turn: `agent.py` (out of P0 deep cut)
+- Agent turn: `agent.py` (out of session P0 deep cut)
 - Structure plan: `docs/plans/2026-07-20-backend-structure-p0.md`

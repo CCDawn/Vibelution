@@ -1,7 +1,7 @@
 # Backend Structure P0 Plan
 
 Date: 2026-07-20
-Status: in_progress
+Status: session_stage2_closed / overall_in_progress
 Owner lane: backend structure / web services
 Related: frontend bundle+claim phase (closed); `docs/agents/conversation-flow-map.md`; backend structure review (session)
 
@@ -18,6 +18,35 @@ Related: frontend bundle+claim phase (closed); `docs/agents/conversation-flow-ma
 | 2026-07-20 | 2.6 | Extracted `session/stream_capture.py` (capture + batching + UI hooks); SSE publish stays on facade |
 | 2026-07-20 | 2.7 | Extracted `session/worker.py` (`_run_session_turn` + continuation loop); persist stays on facade |
 | 2026-07-20 | 2.8 | Extracted `session/persist.py` (turn result/failure/runtime-error + terminal fallback) |
+| 2026-07-20 | 2.9 | **Session Stage 2 closed** — ownership map finalized; flow-map owners updated; full facade slim deferred (projection/SSE/stop remain on facade ~19k) |
+
+### Session Stage 2 closeout (2026-07-20)
+
+**Exit met**
+
+- Claimable hot-path modules: 8 slices under `core/web/services/session/` (~5.5k LOC).
+- Public imports stable via `session_service` re-exports.
+- Focused slice tests + `tests/test_web_runtime_routes.py` green at closeout.
+- No intentional journal/SSE/REST protocol change.
+
+**Measured**
+
+| Surface | ~LOC at closeout |
+|---------|------------------|
+| session slices (8 modules) | ~5.5k |
+| `session_service.py` facade remainder | ~19.2k (was ~22.4k at plan start) |
+| Net facade body reduction | ~3k+ mechanical moves; claimability > line vanity |
+
+**Deferred (not blocking Stage 2 exit)**
+
+1. Optional `projection.py` for detail/list DTO builders.
+2. SSE publish / stream subscriber pack still on facade.
+3. Stop/control, inbox wake, agent-runtime helpers still on facade.
+4. Full “facade = re-exports only” (Stage 2.9 original ideal) → later maintenance track.
+5. Stage 3 `team_workflow_orchestration_service` deep split — **next P0 major**.
+
+**Version impact:** none (structure only).
+**Launcher refresh:** not needed for docs/structure closeout.
 
 ## 1. Problem Statement
 
@@ -26,7 +55,7 @@ Backend directories look modular (`core/web/routes`, `core/chat`, `core/llm`, �
 | File | ~LOC | Role |
 |------|------|------|
 | `core/web/services/team_workflow_orchestration_service.py` | ~22.9k | Research / source-collection / experiment / loop orchestration |
-| `core/web/services/session_service.py` | ~22.4k | Session submit, schedule, worker, stream, persist, list cache |
+| `core/web/services/session_service.py` | ~19.2k facade + ~5.5k `session/*` slices (Stage 2 closed) | Session hot path claim-split; remainder is projection/SSE/stop/helpers |
 | `core/web/services/agent_directory_service.py` | ~7.1k | Agent directory / binding surface |
 | `core/web/services/team_service.py` | ~5.7k | Team CRUD / membership / canvas-adjacent |
 
