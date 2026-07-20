@@ -20,6 +20,7 @@ from core.gym.promotion import (
 )
 from core.infrastructure import developer_sandbox
 from core.infrastructure import workspace_manager
+from core.infrastructure.feature_gate import FeatureDecision
 from core.runtime_manager import constants as runtime_manager_constants
 from core.runtime_manager import evolution_store
 from core.web.app import create_app
@@ -52,6 +53,25 @@ client = TestClient(create_app(), headers={CONTROL_TOKEN_HEADER: get_control_tok
 def disable_runtime_manager_live_control(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(supervised_control_service, "_runtime_manager_live_control_enabled", lambda: False)
     monkeypatch.setattr(self_evolution_control_service, "_runtime_manager_live_control_enabled", lambda: False)
+
+
+@pytest.fixture(autouse=True)
+def enable_evolution_features_for_legacy_route_tests(monkeypatch: pytest.MonkeyPatch):
+    def enabled_decision(feature: str, **kwargs) -> FeatureDecision:
+        requested = kwargs.get("requested")
+        return FeatureDecision(
+            feature=feature,
+            configured_enabled=True,
+            effective_enabled=requested is not False,
+            source="test_operator_config",
+            reason="operator_config_enabled" if requested is not False else "run_narrowed_disabled",
+            config_revision="test-enabled",
+            run_requested=requested,
+        )
+
+    monkeypatch.setattr(supervised_control_service, "resolve_feature_decision", enabled_decision)
+    monkeypatch.setattr(self_evolution_control_service, "resolve_feature_decision", enabled_decision)
+
 
 @pytest.fixture(autouse=True)
 def isolate_evolution_live_state():
@@ -154,6 +174,46 @@ def _use_test_supervised_workspace(tmp_path: Path, monkeypatch: pytest.MonkeyPat
     monkeypatch.setattr(developer_sandbox, "resolve_workspace_home", lambda *args, **kwargs: workspace_root)
     monkeypatch.setattr(workspace_manager, "get_workspace", lambda: SimpleNamespace(root=workspace_root))
     return workspace_root
+
+
+def _disabled_feature_decision(feature: str) -> FeatureDecision:
+    return FeatureDecision(
+        feature=feature,
+        configured_enabled=False,
+        effective_enabled=False,
+        source="operator_config",
+        reason="operator_config_disabled",
+        config_revision="test-disabled",
+    )
+
+
+def test_supervised_start_fails_before_runtime_when_operator_config_disabled(monkeypatch):
+    monkeypatch.setattr(
+        supervised_control_service,
+        "resolve_feature_decision",
+        lambda feature, **kwargs: _disabled_feature_decision(feature),
+    )
+
+    with pytest.raises(
+        supervised_control_service.SupervisedRunValidationError,
+        match="supervised_evolution",
+    ):
+        supervised_control_service.start_supervised_run({})
+
+
+def test_self_evolution_start_fails_before_runtime_when_operator_config_disabled(monkeypatch):
+    monkeypatch.setattr(
+        self_evolution_control_service,
+        "resolve_feature_decision",
+        lambda feature, **kwargs: _disabled_feature_decision(feature),
+    )
+
+    with pytest.raises(
+        self_evolution_control_service.SelfEvolutionRunValidationError,
+        match="self_evolution",
+    ):
+        self_evolution_control_service.start_self_evolution_run({})
+
 
 def _use_test_supervised_agent_bindings(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
@@ -1406,7 +1466,7 @@ def test_supervised_worktree_run_routes_start_and_list_simulation(tmp_path, monk
     assert started["fields"]["clientAction"] == "start_closed_loop_button"
     assert "supervised_worktree_run.started" in (scene_dir / "lifecycle.jsonl").read_text(encoding="utf-8")
 
-    child_log = scene_dir / "agent" / "supervised_worktree_runs" / f"{run_id}.jsonl"
+    child_log = scene_dir / "runs" / "supervised_worktree" / run_id / "timeline.jsonl"
     child_payloads = [
         json.loads(line)
         for line in child_log.read_text(encoding="utf-8").splitlines()

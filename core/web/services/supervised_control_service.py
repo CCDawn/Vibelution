@@ -15,6 +15,7 @@ from typing import Any
 from uuid import uuid4
 
 from core.infrastructure import developer_sandbox
+from core.infrastructure.feature_gate import FeatureDecision, resolve_feature_decision
 from core.evaluation import (
     SupervisedEvolutionCancelled,
     build_workbench_state,
@@ -78,6 +79,34 @@ _RUN_STREAM_HEARTBEAT_SECONDS = 15.0
 _RUN_STREAM_QUEUE_SIZE = 16
 _EVENT_TAIL_LIMIT = 12
 _ACTIVE_RUN_STATUSES = {"queued", "running", "paused", "stopping"}
+
+
+def _require_supervised_feature_enabled() -> FeatureDecision:
+    decision = resolve_feature_decision("supervised_evolution")
+    if decision.effective_enabled:
+        return decision
+    _record_supervised_scene_event(
+        "control",
+        "supervised_run.feature_blocked",
+        message="Supervised evolution is disabled by trusted operator config.",
+        outcome="blocked",
+        fields=decision.log_fields(),
+        lifecycle=True,
+    )
+    raise SupervisedRunValidationError(
+        text_for(
+            get_web_language(),
+            zh="可信操作员配置未启用 supervised_evolution，当前不能启动监督运行。",
+            en="Trusted operator config does not enable supervised_evolution.",
+        )
+    )
+
+
+def _supervised_mental_model_decision(requested: bool) -> FeatureDecision:
+    return resolve_feature_decision(
+        "supervised_mental_model",
+        requested=requested,
+    )
 _MANAGER_CONTROL_KEY = "runtimeManagerControl"
 _CLOSED_LOOP_ROLES = ("baseline", "candidate", "judge")
 
@@ -424,6 +453,7 @@ def _docker_daemon_available() -> bool:
 def start_supervised_run(payload: dict[str, Any]) -> dict[str, Any]:
     """Start a live supervised run and return the initial snapshot."""
 
+    _require_supervised_feature_enabled()
     lang = get_web_language()
     source_kind = str(payload.get("sourceKind") or "").strip().lower()
     requested_evaluation_mode = str(payload.get("evaluationMode") or "").strip().lower()
@@ -433,7 +463,10 @@ def start_supervised_run(payload: dict[str, Any]) -> dict[str, Any]:
     dataset_limit = _coerce_dataset_limit(payload.get("datasetLimit"))
     bundle_name = str(payload.get("bundleName") or "").strip()
     mental_model_mode = normalize_supervised_mental_model_mode(payload.get("mentalModelMode"))
-    mental_model_enabled = supervised_mental_model_enabled_for_mode(mental_model_mode)
+    mental_model_decision = _supervised_mental_model_decision(
+        supervised_mental_model_enabled_for_mode(mental_model_mode)
+    )
+    mental_model_enabled = mental_model_decision.effective_enabled
 
     if source_kind not in {"dataset", "bundle"}:
         raise SupervisedRunValidationError(
@@ -524,6 +557,7 @@ def start_supervised_run(payload: dict[str, Any]) -> dict[str, Any]:
         "agentBindings": agent_bindings,
         "mentalModelMode": mental_model_mode,
         "mentalModelEnabled": mental_model_enabled,
+        "mentalModelFeatureDecision": mental_model_decision.log_fields(),
     }
     state = _initial_run_state(context)
 
@@ -3745,6 +3779,7 @@ def get_supervised_workbench(
 
 
 def start_supervised_run(payload: dict[str, Any]) -> dict[str, Any]:
+    _require_supervised_feature_enabled()
     if _runtime_manager_live_control_enabled():
         return _submit_supervised_runtime_manager_command_accepted("start_supervised_run", payload=payload)
     snapshot = _LOCAL_START_SUPERVISED_RUN(payload)
@@ -3761,6 +3796,7 @@ def start_supervised_run(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def retry_supervised_run(run_id: str) -> dict[str, Any]:
+    _require_supervised_feature_enabled()
     if _runtime_manager_live_control_enabled():
         return _submit_supervised_runtime_manager_command("retry_supervised_run", run_id=run_id)
     snapshot = _LOCAL_RETRY_SUPERVISED_RUN(run_id)
