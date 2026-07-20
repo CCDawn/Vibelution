@@ -178,6 +178,7 @@ def _prepare_bulk_archive_references(
     return mode_restore_token, team_cleanup, room_cleanup, mode_cleanup
 
 
+@session_service.session_agent_lifecycle_serialized
 def bulk_archive_agents(agent_ids: list[str] | None) -> dict[str, Any]:
     """Archive many Agents with per-Agent compensation on write failure."""
 
@@ -369,6 +370,7 @@ def bulk_archive_agents(agent_ids: list[str] | None) -> dict[str, Any]:
     }
 
 
+@session_service.session_agent_lifecycle_serialized
 def bulk_purge_agents(agent_ids: list[str] | None) -> dict[str, Any]:
     """Permanently delete archived Agents with per-Agent transactional compensation."""
 
@@ -556,13 +558,21 @@ def bulk_purge_agents(agent_ids: list[str] | None) -> dict[str, Any]:
                 )
                 continue
             successful_agent_ids.append(agent_id)
-            committed_session_purge = _timed(
-                timings,
-                "commit_agent_session_purge",
-                lambda restore_token=restore_token: session_service.commit_staged_agent_session_purge(
-                    restore_token
-                ),
-            )
+            try:
+                committed_session_purge = _timed(
+                    timings,
+                    "commit_agent_session_purge",
+                    lambda restore_token=restore_token: session_service.commit_staged_agent_session_purge(
+                        restore_token
+                    ),
+                )
+            except Exception as cleanup_error:
+                committed_session_purge = (
+                    session_service.agent_session_purge_cleanup_failure_result(
+                        restore_token,
+                        cleanup_error,
+                    )
+                )
             public_session_purge = _public_agent_session_cleanup({
                 **session_purge,
                 **committed_session_purge,

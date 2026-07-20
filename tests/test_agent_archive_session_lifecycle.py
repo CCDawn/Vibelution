@@ -1,5 +1,12 @@
 from __future__ import annotations
 
+import json
+import os
+import shutil
+import subprocess
+import threading
+from pathlib import Path
+
 import pytest
 
 from tests.test_agent_config_workspace_service import (
@@ -249,7 +256,17 @@ def test_archive_rejects_sessions_with_pending_turns(tmp_path, monkeypatch, phas
 
 @pytest.mark.parametrize(
     "mutation",
-    ["rename", "select", "child", "delete", "reasoning", "attachment"],
+    [
+        "rename",
+        "select",
+        "child",
+        "delete",
+        "reasoning",
+        "attachment",
+        "submit",
+        "guidance",
+        "edit",
+    ],
 )
 def test_archived_session_enforces_a_real_read_only_barrier(
     tmp_path,
@@ -288,6 +305,22 @@ def test_archived_session_enforces_a_real_read_only_barrier(
             session_service.update_session_reasoning_effort(
                 direct["id"],
                 reasoning_effort="medium",
+            )
+        elif mutation == "submit":
+            session_service.submit_session_message(
+                direct["id"],
+                "不应提交新消息",
+            )
+        elif mutation == "guidance":
+            session_service.submit_session_guidance(
+                direct["id"],
+                "不应提交运行中引导",
+            )
+        elif mutation == "edit":
+            session_service.edit_and_resubmit_session_message(
+                direct["id"],
+                "message-does-not-matter",
+                "不应编辑并重发",
             )
         else:
             session_service.store_session_user_image_attachment(
@@ -412,6 +445,497 @@ def test_cleanup_pending_can_be_retried_idempotently(tmp_path, monkeypatch):
     assert retry["pendingRootCount"] == 0
     assert repeated["cleanedRootCount"] == 0
     assert repeated["pendingRootCount"] == 0
+
+
+def test_cleanup_retry_uses_external_marker_after_partial_directory_delete(
+    tmp_path,
+    monkeypatch,
+):
+    direct, _child = _create_agent_with_child_session(tmp_path, monkeypatch)
+    archive_response = client.delete(f"/api/agents/{direct['agentId']}")
+    assert archive_response.status_code == 200, archive_response.text
+    delete_staging_root = session_service._delete_agent_session_purge_staging_root
+    attempts = 0
+
+    def partially_delete_first_root(staging_root):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            session_service._agent_session_purge_manifest_path(
+                staging_root
+            ).unlink()
+            raise PermissionError("directory delete interrupted")
+        delete_staging_root(staging_root)
+
+    monkeypatch.setattr(
+        session_service,
+        "_delete_agent_session_purge_staging_root",
+        partially_delete_first_root,
+    )
+    purge_response = client.delete(f"/api/agents/{direct['agentId']}/purge")
+    assert purge_response.status_code == 200, purge_response.text
+    assert purge_response.json()["purgeSummary"]["sessions"]["cleanupPending"] is True
+
+    retry = session_service.retry_pending_agent_session_purge_cleanup()
+
+    assert retry["cleanedRootCount"] >= 1
+    assert retry["pendingRootCount"] == 0
+    assert "MissingManifest" not in retry["cleanupFailureTypes"]
+
+
+def test_cleanup_retry_ignores_an_active_staging_transaction(
+    tmp_path,
+    monkeypatch,
+):
+    direct, child = _create_agent_with_child_session(tmp_path, monkeypatch)
+    agent_directory_service.archive_agent_instance(
+        direct["agentId"],
+        repair_mode_bindings=False,
+    )
+    staged = session_service.stage_agent_session_purge(
+        direct["agentId"],
+        direct_session_id=direct["id"],
+    )
+    existing_staging_roots = [
+        Path(value)
+        for value in staged["stagingRoots"]
+        if Path(value).exists()
+    ]
+    assert existing_staging_roots
+
+    retry = session_service.retry_pending_agent_session_purge_cleanup()
+
+    assert retry["cleanedRootCount"] == 0
+    assert retry["skippedActiveRootCount"] >= 1
+    assert all(path.exists() for path in existing_staging_roots)
+    restored = session_service.restore_staged_agent_session_purge(
+        staged["restoreToken"]
+    )
+    assert restored["status"] == "restored"
+    assert session_service.get_session_detail(direct["id"]) is not None
+    assert session_service.get_session_detail(child["id"]) is not None
+    assert all(not path.exists() for path in existing_staging_roots)
+
+
+@pytest.mark.parametrize("failure_kind", ["missing", "conflict"])
+def test_session_purge_restore_reports_workspace_loss_or_conflict(
+    tmp_path,
+    monkeypatch,
+    failure_kind,
+):
+    direct, child = _create_agent_with_child_session(tmp_path, monkeypatch)
+    agent_directory_service.archive_agent_instance(
+        direct["agentId"],
+        repair_mode_bindings=False,
+    )
+    staged = session_service.stage_agent_session_purge(
+        direct["agentId"],
+        direct_session_id=direct["id"],
+    )
+    move = staged["restoreToken"]["workspaceMoves"][0]
+    source = Path(move["source"])
+    staged_path = Path(move["staged"])
+    if failure_kind == "missing":
+        shutil.rmtree(staged_path)
+        expected_error = "FileNotFoundError"
+    else:
+        source.mkdir(parents=True)
+        expected_error = "FileExistsError"
+
+    with pytest.raises(
+        session_service.SessionValidationError,
+        match=expected_error,
+    ):
+        session_service.restore_staged_agent_session_purge(
+            staged["restoreToken"]
+        )
+
+    assert session_service.get_session_detail(direct["id"]) is not None
+    assert session_service.get_session_detail(child["id"]) is not None
+
+
+def test_cleanup_retry_rejects_a_staging_reparse_point(
+    tmp_path,
+    monkeypatch,
+):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    sessions_root = session_service._agent_session_workspace_roots()[0]
+    sessions_root.mkdir(parents=True, exist_ok=True)
+    target = sessions_root / "normal-session-workspace"
+    target.mkdir()
+    (target / session_service._AGENT_SESSION_PURGE_MANIFEST).write_text(
+        json.dumps({"version": 1, "state": "cleanup_pending"}),
+        encoding="utf-8",
+    )
+    junction = sessions_root / ".agent-purge-junction-probe"
+    if os.name == "nt":
+        created = subprocess.run(
+            ["cmd", "/c", "mklink", "/J", str(junction), str(target)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if created.returncode != 0:
+            pytest.skip(f"Windows junction creation unavailable: {created.stderr}")
+    else:
+        junction.symlink_to(target, target_is_directory=True)
+
+    try:
+        committed = session_service.commit_staged_agent_session_purge(
+            {
+                "agentId": "agent-reparse-probe",
+                "sessionIds": [],
+                "workspaceMoves": [],
+                "stagingRoots": [str(junction)],
+            }
+        )
+        assert committed["cleanupPending"] is True
+        assert "UnsafeStagingPath" in committed["cleanupFailureTypes"]
+        assert target.exists()
+        retry = session_service.retry_pending_agent_session_purge_cleanup()
+        assert retry["pendingRootCount"] >= 1
+        assert "UnsafeStagingPath" in retry["cleanupFailureTypes"]
+        assert target.exists()
+        assert (target / session_service._AGENT_SESSION_PURGE_MANIFEST).exists()
+    finally:
+        if junction.exists() or junction.is_symlink():
+            if os.name == "nt":
+                os.rmdir(junction)
+            else:
+                junction.unlink()
+
+
+def test_agent_workspace_purge_rejects_a_junction_to_another_workspace(
+    tmp_path,
+    monkeypatch,
+):
+    direct, _child = _create_agent_with_child_session(tmp_path, monkeypatch)
+    archive_response = client.delete(f"/api/agents/{direct['agentId']}")
+    assert archive_response.status_code == 200, archive_response.text
+    archived_agent = agent_directory_service.get_agent(
+        direct["agentId"],
+        include_archived=True,
+    )
+    workspace = agent_directory_service._lexical_project_path(
+        archived_agent["workspacePath"]
+    )
+    if workspace.exists():
+        shutil.rmtree(workspace)
+    sibling_workspace = workspace.parent / "agent-sibling-workspace"
+    sibling_workspace.mkdir(parents=True)
+    sentinel = sibling_workspace / "sentinel.txt"
+    sentinel.write_text("must survive", encoding="utf-8")
+    if os.name == "nt":
+        created = subprocess.run(
+            ["cmd", "/c", "mklink", "/J", str(workspace), str(sibling_workspace)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if created.returncode != 0:
+            pytest.skip(f"Windows junction creation unavailable: {created.stderr}")
+    else:
+        workspace.symlink_to(sibling_workspace, target_is_directory=True)
+
+    try:
+        purge_response = client.delete(
+            f"/api/agents/{direct['agentId']}/purge"
+        )
+        assert purge_response.status_code == 422, purge_response.text
+        assert "junction" in str(purge_response.json()["detail"]).lower() or (
+            "reparse" in str(purge_response.json()["detail"]).lower()
+        )
+        assert sentinel.read_text(encoding="utf-8") == "must survive"
+        assert agent_directory_service.get_agent(
+            direct["agentId"],
+            include_archived=True,
+        )["status"] == "archived"
+    finally:
+        if workspace.exists() or workspace.is_symlink():
+            if os.name == "nt":
+                os.rmdir(workspace)
+            else:
+                workspace.unlink()
+
+
+def test_agent_workspace_purge_rejects_a_junction_agents_root(
+    tmp_path,
+    monkeypatch,
+):
+    direct, _child = _create_agent_with_child_session(tmp_path, monkeypatch)
+    archive_response = client.delete(f"/api/agents/{direct['agentId']}")
+    assert archive_response.status_code == 200, archive_response.text
+    archived_agent = agent_directory_service.get_agent(
+        direct["agentId"],
+        include_archived=True,
+    )
+    workspace = agent_directory_service._lexical_project_path(
+        archived_agent["workspacePath"]
+    )
+    agents_root = workspace.parent
+    target_root = agents_root.parent / "agents-junction-target"
+    shutil.move(str(agents_root), str(target_root))
+    if os.name == "nt":
+        created = subprocess.run(
+            ["cmd", "/c", "mklink", "/J", str(agents_root), str(target_root)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if created.returncode != 0:
+            shutil.move(str(target_root), str(agents_root))
+            pytest.skip(f"Windows junction creation unavailable: {created.stderr}")
+    else:
+        agents_root.symlink_to(target_root, target_is_directory=True)
+    sentinel = target_root / workspace.name / "root-sentinel.txt"
+    sentinel.write_text("must survive root junction", encoding="utf-8")
+
+    try:
+        purge_response = client.delete(
+            f"/api/agents/{direct['agentId']}/purge"
+        )
+        assert purge_response.status_code == 422, purge_response.text
+        assert sentinel.read_text(encoding="utf-8") == (
+            "must survive root junction"
+        )
+        assert agent_directory_service.get_agent(
+            direct["agentId"],
+            include_archived=True,
+        )["status"] == "archived"
+    finally:
+        if agents_root.exists() or agents_root.is_symlink():
+            if os.name == "nt":
+                os.rmdir(agents_root)
+            else:
+                agents_root.unlink()
+        if target_root.exists():
+            shutil.move(str(target_root), str(agents_root))
+
+
+def test_agent_workspace_purge_reparse_probe_fails_closed(
+    tmp_path,
+    monkeypatch,
+):
+    direct, _child = _create_agent_with_child_session(tmp_path, monkeypatch)
+    archive_response = client.delete(f"/api/agents/{direct['agentId']}")
+    assert archive_response.status_code == 200, archive_response.text
+    archived_agent = agent_directory_service.get_agent(
+        direct["agentId"],
+        include_archived=True,
+    )
+    workspace = agent_directory_service._lexical_project_path(
+        archived_agent["workspacePath"]
+    )
+    original_lstat = Path.lstat
+
+    def fail_workspace_lstat(path):
+        if Path(path) == workspace:
+            raise PermissionError("reparse probe denied")
+        return original_lstat(path)
+
+    monkeypatch.setattr(Path, "lstat", fail_workspace_lstat)
+
+    with pytest.raises(
+        agent_directory_service.AgentDirectoryError,
+        match="reparse",
+    ):
+        agent_directory_service.ensure_agent_purge_workspace_deletable(
+            archived_agent
+        )
+
+
+@pytest.mark.parametrize("entrypoint", ["single", "bulk"])
+def test_post_agent_delete_cleanup_exception_is_partial_success(
+    tmp_path,
+    monkeypatch,
+    entrypoint,
+):
+    direct, _child = _create_agent_with_child_session(tmp_path, monkeypatch)
+    archive_response = client.delete(f"/api/agents/{direct['agentId']}")
+    assert archive_response.status_code == 200, archive_response.text
+
+    def fail_cleanup_commit(*args, **kwargs):
+        raise session_service.SessionValidationError("cleanup validation failed")
+
+    monkeypatch.setattr(
+        session_service,
+        "commit_staged_agent_session_purge",
+        fail_cleanup_commit,
+    )
+    if entrypoint == "single":
+        response = client.delete(f"/api/agents/{direct['agentId']}/purge")
+        assert response.status_code == 200, response.text
+        sessions = response.json()["purgeSummary"]["sessions"]
+    else:
+        response = client.post(
+            "/api/agents/bulk-purge",
+            json={"agentIds": [direct["agentId"]]},
+        )
+        assert response.status_code == 200, response.text
+        payload = response.json()
+        assert payload["summary"]["successCount"] == 1
+        assert payload["summary"]["failedCount"] == 0
+        sessions = payload["success"][0]["purgeSummary"]["sessions"]
+
+    assert sessions["status"] == "cleanup_pending"
+    assert sessions["cleanupPending"] is True
+    assert sessions["cleanupFailureTypes"] == ["SessionValidationError"]
+    retry = session_service.retry_pending_agent_session_purge_cleanup()
+    assert retry["cleanedRootCount"] >= 1
+    assert retry["pendingRootCount"] == 0
+    assert agent_directory_service.get_agent(
+        direct["agentId"],
+        include_archived=True,
+    ) is None
+
+
+def test_agent_registry_mutation_waits_for_session_lifecycle_lock(
+    tmp_path,
+    monkeypatch,
+):
+    direct, _child = _create_agent_with_child_session(tmp_path, monkeypatch)
+    lifecycle_entered = threading.Event()
+    release_lifecycle = threading.Event()
+    mutation_completed = threading.Event()
+    errors: list[Exception] = []
+    original_check = session_service._ensure_agent_direct_session_not_reassigned
+
+    def hold_lifecycle(agent_id, direct_session_id):
+        original_check(agent_id, direct_session_id)
+        lifecycle_entered.set()
+        assert release_lifecycle.wait(2)
+
+    monkeypatch.setattr(
+        session_service,
+        "_ensure_agent_direct_session_not_reassigned",
+        hold_lifecycle,
+    )
+
+    def archive_sessions():
+        try:
+            session_service.archive_agent_sessions(
+                direct["agentId"],
+                direct_session_id=direct["id"],
+            )
+        except Exception as exc:  # pragma: no cover - assertion reports details
+            errors.append(exc)
+
+    def mutate_registry():
+        try:
+            agent_directory_service.create_agent_instance(
+                display_name="并发创建 Agent",
+                direct_session_id="session-concurrent-probe",
+            )
+        except Exception as exc:  # pragma: no cover - assertion reports details
+            errors.append(exc)
+        finally:
+            mutation_completed.set()
+
+    archive_thread = threading.Thread(target=archive_sessions)
+    mutation_thread = threading.Thread(target=mutate_registry)
+    archive_thread.start()
+    assert lifecycle_entered.wait(2)
+    mutation_thread.start()
+    assert not mutation_completed.wait(0.1)
+    release_lifecycle.set()
+    archive_thread.join(2)
+    mutation_thread.join(2)
+
+    assert not archive_thread.is_alive()
+    assert not mutation_thread.is_alive()
+    assert mutation_completed.is_set()
+    assert errors == []
+
+
+def test_guidance_write_and_archive_are_serialized_by_chat_state_lock(
+    tmp_path,
+    monkeypatch,
+):
+    direct, _child = _create_agent_with_child_session(tmp_path, monkeypatch)
+    guidance_entered = threading.Event()
+    release_guidance = threading.Event()
+    archive_completed = threading.Event()
+    errors: list[Exception] = []
+    original_record = session_service._record_chat_next_state_signal
+
+    def hold_guidance(**kwargs):
+        guidance_entered.set()
+        assert release_guidance.wait(2)
+        return original_record(**kwargs)
+
+    monkeypatch.setattr(
+        session_service,
+        "_record_chat_next_state_signal",
+        hold_guidance,
+    )
+
+    def submit_guidance():
+        try:
+            session_service.submit_session_guidance(
+                direct["id"],
+                "先完成这条引导",
+            )
+        except Exception as exc:  # pragma: no cover - assertion reports details
+            errors.append(exc)
+
+    def archive_sessions():
+        try:
+            session_service.archive_agent_sessions(
+                direct["agentId"],
+                direct_session_id=direct["id"],
+            )
+        except Exception as exc:  # pragma: no cover - assertion reports details
+            errors.append(exc)
+        finally:
+            archive_completed.set()
+
+    guidance_thread = threading.Thread(target=submit_guidance)
+    archive_thread = threading.Thread(target=archive_sessions)
+    guidance_thread.start()
+    assert guidance_entered.wait(2)
+    archive_thread.start()
+    assert not archive_completed.wait(0.1)
+    release_guidance.set()
+    guidance_thread.join(2)
+    archive_thread.join(2)
+
+    assert not guidance_thread.is_alive()
+    assert not archive_thread.is_alive()
+    assert archive_completed.is_set()
+    assert errors == []
+    assert session_service.get_session_detail(direct["id"])["readOnly"] is True
+
+
+def test_session_purge_restore_continues_to_chat_state_after_workspace_failure(
+    tmp_path,
+    monkeypatch,
+):
+    direct, child = _create_agent_with_child_session(tmp_path, monkeypatch)
+    agent_directory_service.archive_agent_instance(
+        direct["agentId"],
+        repair_mode_bindings=False,
+    )
+    staged = session_service.stage_agent_session_purge(
+        direct["agentId"],
+        direct_session_id=direct["id"],
+    )
+    assert session_service.get_session_detail(direct["id"]) is None
+
+    def fail_workspace_restore(*args, **kwargs):
+        raise PermissionError("workspace restore failed")
+
+    monkeypatch.setattr(session_service.shutil, "move", fail_workspace_restore)
+
+    with pytest.raises(
+        session_service.SessionValidationError,
+        match="compensation incomplete",
+    ):
+        session_service.restore_staged_agent_session_purge(
+            staged["restoreToken"]
+        )
+
+    assert session_service.get_session_detail(direct["id"]) is not None
+    assert session_service.get_session_detail(child["id"]) is not None
 
 
 def test_single_archive_compensation_continues_after_an_earlier_rollback_fails():

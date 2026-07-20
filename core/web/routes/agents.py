@@ -1004,6 +1004,7 @@ def _run_agent_archive_compensations(
     return failures
 
 
+@session_service.session_agent_lifecycle_serialized
 def _archive_agent_with_session_lifecycle(
     agent_id: str,
     *,
@@ -1258,6 +1259,7 @@ def agent_archive(agent_id: str) -> dict:
 
 
 @router.delete("/agents/{agent_id}/purge")
+@session_service.session_agent_lifecycle_serialized
 def agent_purge(agent_id: str) -> dict:
     timings: dict[str, float] = {}
     started_at = perf_counter()
@@ -1358,11 +1360,21 @@ def agent_purge(agent_id: str) -> dict:
                     + ", ".join(rollback_failures)
                 )
             raise
-        committed_session_purge = _timed_agent_delete_stage(
-            timings,
-            "commit_agent_session_purge",
-            lambda: session_service.commit_staged_agent_session_purge(session_purge_restore_token),
-        )
+        try:
+            committed_session_purge = _timed_agent_delete_stage(
+                timings,
+                "commit_agent_session_purge",
+                lambda: session_service.commit_staged_agent_session_purge(
+                    session_purge_restore_token
+                ),
+            )
+        except Exception as cleanup_error:
+            committed_session_purge = (
+                session_service.agent_session_purge_cleanup_failure_result(
+                    session_purge_restore_token,
+                    cleanup_error,
+                )
+            )
         public_session_purge = _public_agent_session_cleanup({
             **session_purge,
             **committed_session_purge,
