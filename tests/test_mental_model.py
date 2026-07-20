@@ -441,9 +441,14 @@ class TestMentalModel:
 
         assert mental_model.get_conversation_context() == {}
 
-    def test_sense_state_prompt_includes_conversation_context(self, mental_model):
+    def test_sense_state_prompt_includes_conversation_context(self, mental_model, monkeypatch):
         """The subjective mental prompt receives compact session continuity."""
         captured = {}
+        monkeypatch.setattr(
+            mental_model_module,
+            "resolve_feature_decision",
+            lambda feature: MagicMock(effective_enabled=True),
+        )
 
         class DummyLLM:
             def invoke(self, messages, *, tools=None, metadata=None):

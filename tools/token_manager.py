@@ -33,6 +33,7 @@ from core.infrastructure.runtime_input import (
     is_external_request_message,
 )
 from core.infrastructure.llm_utils import build_cacheable_system_message
+from core.infrastructure.feature_gate import resolve_feature_decision
 
 
 # ============================================================================
@@ -923,6 +924,13 @@ class EnhancedTokenCompressor:
         reason: str = "",
     ) -> str:
         """使用 LLM 生成摘要"""
+        compression_decision = resolve_feature_decision("context_compression")
+        if not compression_decision.effective_enabled:
+            raise RuntimeError(
+                "context_compression is disabled by trusted operator config; "
+                "compression summary LLM invocation is blocked"
+            )
+
         # 构建消息历史文本
         history_text = self._format_messages_for_summary(messages)
         
