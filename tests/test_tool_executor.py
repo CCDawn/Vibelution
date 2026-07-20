@@ -74,7 +74,7 @@ class TestToolExecutorInit:
             "apply_patch_tool", "plan_update_tool",
             "trigger_self_restart_tool", "grep_search_tool",
             "task_create_tool", "task_update_tool", "task_list_tool",
-            "cli_tool", "cli_agent_run_tool", "agent_message_tool", "conversation_log_inspect_tool",
+            "cli_tool", "exec_command", "write_stdin", "cli_agent_run_tool", "agent_message_tool", "conversation_log_inspect_tool",
         ]
         
         for tool_name in expected_tools:
@@ -304,6 +304,34 @@ class TestToolExecutorInit:
         assert events[-1][0][1] == "tool.execute.failed"
         assert events[-1][1]["outcome"] == "failed"
         assert events[-1][1]["fields"]["semanticStatus"] == "failed"
+
+    def test_running_terminal_session_is_observed_not_recorded_as_tool_failure(self, monkeypatch):
+        from core.infrastructure import tool_executor as tool_executor_module
+
+        events = []
+        monkeypatch.setattr(
+            tool_executor_module,
+            "_record_tool_scene_event",
+            lambda *args, **kwargs: events.append((args, kwargs)),
+        )
+        executor = ToolExecutor()
+        executor.register_tool(
+            "exec_command",
+            lambda cmd="": json.dumps({
+                "status": "running",
+                "terminalSessionId": "sandbox-test-session",
+                "sessionOpen": True,
+            }),
+            timeout=5,
+        )
+
+        result, action = executor.execute("exec_command", {"cmd": "echo ready"})
+
+        assert action is None
+        assert json.loads(result)["status"] == "running"
+        assert events[-1][0][1] == "tool.execute.running"
+        assert events[-1][1]["outcome"] == "observed"
+        assert events[-1][1]["fields"]["terminalSessionId"] == "sandbox-test-session"
 
     def test_tool_argument_error_text_is_recorded_as_failed_scene_event(self, monkeypatch):
         """Tool argument error text should be treated as a failed tool result."""
@@ -639,6 +667,8 @@ class TestToolExecutorInit:
         
         # 检查关键工具的超时配置
         assert executor._timeout_map["cli_tool"] == 60
+        assert executor._timeout_map["exec_command"] == 60
+        assert executor._timeout_map["write_stdin"] == 35
         assert executor._timeout_map["cli_agent_run_tool"] == 900
         assert executor._timeout_map["python_lint_tool"] == 60
         assert executor._timeout_map["spawn_agent_tool"] == 150
@@ -1383,6 +1413,16 @@ class TestToolExecutorTimeout:
         schema = cli_tool.args_schema.model_json_schema()
 
         assert "_cancel_checker" not in schema.get("properties", {})
+
+    def test_session_terminal_tools_expose_cmd_and_session_id_without_internal_cancel_checker(self):
+        tools = {tool.name: tool for tool in create_key_tools()}
+        exec_schema = tools["exec_command"].args_schema.model_json_schema()
+        stdin_schema = tools["write_stdin"].args_schema.model_json_schema()
+
+        assert {"cmd", "yield_time_ms", "timeout", "cwd"}.issubset(exec_schema["properties"])
+        assert {"session_id", "chars", "yield_time_ms"}.issubset(stdin_schema["properties"])
+        assert "_cancel_checker" not in exec_schema["properties"]
+        assert "_cancel_checker" not in stdin_schema["properties"]
 
     def test_code_symbol_tool_schema_hides_internal_cancel_checker(self):
         code_symbol_tool = next(tool for tool in create_key_tools() if tool.name == "code_symbol_tool")

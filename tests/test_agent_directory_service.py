@@ -68,6 +68,32 @@ def test_replace_agent_llm_bindings_if_current_rejects_stale_timestamp_without_o
     assert current["llmBindings"]["dialogue"]["modelId"] == "ai-pixel/concurrent"
 
 
+def test_session_agent_tool_policy_exposes_explicit_terminal_protocol_without_widening_custom_policy(
+    tmp_path, monkeypatch
+):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    agent = agent_directory_service.create_agent_instance(display_name="Terminal Session Agent")
+
+    default_policy = agent_directory_service.resolve_tool_policy_for_agent(agent["agentId"])
+
+    assert "exec_command" in default_policy["allowedTools"]
+    assert "write_stdin" in default_policy["allowedTools"]
+    assert default_policy["preferredTools"][:2] == ["exec_command", "write_stdin"]
+
+    agent_directory_service.update_agent_instance(
+        agent["agentId"],
+        tool_policy={
+            "allowedTools": ["grep_search_tool"],
+            "preferredTools": ["grep_search_tool"],
+        },
+    )
+
+    custom_policy = agent_directory_service.resolve_tool_policy_for_agent(agent["agentId"])
+
+    assert custom_policy["allowedTools"] == ["grep_search_tool"]
+    assert custom_policy["preferredTools"] == ["grep_search_tool"]
+
+
 def test_repair_reuses_shared_workspace_and_avatar_inventory(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _seed_agent_avatars(tmp_path)

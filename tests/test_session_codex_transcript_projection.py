@@ -1,9 +1,20 @@
+import json
 import queue
 
 from core.web.services import session_service
 
 
 def test_normalized_assistant_message_exposes_native_codex_transcript():
+    terminal_result = json.dumps(
+        {
+            "status": "completed",
+            "terminalSessionId": "sandbox-terminal-1",
+            "sessionOpen": False,
+            "exitCode": 0,
+            "formattedOutput": "12 passed",
+            "durationMs": 1250,
+        }
+    )
     messages = session_service._normalize_messages(
         "session-codex",
         [
@@ -13,11 +24,11 @@ def test_normalized_assistant_message_exposes_native_codex_transcript():
                 "timestamp": "2026-07-07T10:30:00Z",
                 "tool_calls": [
                     {
-                        "name": "cli_tool",
+                        "name": "exec_command",
                         "status": "done",
                         "summary": "npm --prefix web run test",
                         "arguments": {"cmd": "npm --prefix web run test", "cwd": "C:/repo"},
-                        "resultPreview": "12 passed",
+                        "result": terminal_result,
                         "durationSeconds": 1.25,
                         "exitCode": 0,
                     },
@@ -35,10 +46,10 @@ def test_normalized_assistant_message_exposes_native_codex_transcript():
                         "sequence": 1,
                         "kind": "tool",
                         "status": "done",
-                        "name": "cli_tool",
+                        "name": "exec_command",
                         "summary": "npm --prefix web run test",
                         "arguments": {"cmd": "npm --prefix web run test", "cwd": "C:/repo"},
-                        "resultPreview": "12 passed",
+                        "result": terminal_result,
                         "durationSeconds": 1.25,
                         "exitCode": 0,
                     },
@@ -74,9 +85,11 @@ def test_normalized_assistant_message_exposes_native_codex_transcript():
     assert transcript["cells"][1]["status"] == "failed"
     assert transcript["cells"][1]["summary"] == "No matches"
     assert transcript["toolCalls"][0]["runtimeKind"] == "terminal"
+    assert transcript["toolCalls"][0]["terminalOperationId"] == "terminal_operation:0"
     assert transcript["terminalOperations"][0]["request"]["displayCommand"] == "npm --prefix web run test"
     assert transcript["terminalOperations"][0]["result"]["exitCode"] == 0
     assert transcript["terminalOperations"][0]["result"]["formattedOutput"] == "12 passed"
+    assert transcript["terminalSessions"][0]["terminalId"] == "terminal:sandbox-terminal-1"
     assert transcript["terminalSessions"][0]["operationIds"] == ["terminal_operation:0"]
     assert transcript["modelObservations"][0]["source"] == "DirectToolCall"
     assert [event["kind"] for event in transcript["rolloutEvents"][:4]] == [
@@ -85,6 +98,35 @@ def test_normalized_assistant_message_exposes_native_codex_transcript():
         "RuntimeEnded",
         "ToolCallEnded",
     ]
+
+
+def test_native_codex_transcript_does_not_invent_terminal_session_from_legacy_tool_name():
+    messages = session_service._normalize_messages(
+        "session-codex",
+        [
+            {
+                "role": "assistant",
+                "content": "命令已经完成。",
+                "feedback_events": [
+                    {
+                        "sequence": 1,
+                        "kind": "tool",
+                        "status": "done",
+                        "name": "cli_tool",
+                        "summary": "powershell npm --prefix web run test",
+                        "resultPreview": "12 passed",
+                    }
+                ],
+            }
+        ],
+    )
+
+    transcript = messages[0]["codexTranscript"]
+
+    assert transcript["toolCalls"][0]["runtimeKind"] == "terminal"
+    assert "terminalOperationId" not in transcript["toolCalls"][0]
+    assert transcript.get("terminalOperations", []) == []
+    assert transcript.get("terminalSessions", []) == []
 
 
 def test_normalized_transcript_preserves_commentary_before_tool_and_final_answer():

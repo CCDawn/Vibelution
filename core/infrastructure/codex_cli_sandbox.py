@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import locale
 import os
 import shlex
 import shutil
 import subprocess
+import threading
 import time
+import uuid
 from pathlib import Path
 from typing import Any, Callable
 
@@ -18,6 +21,9 @@ from scripts.windowless_subprocess import no_window_subprocess_kwargs
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 _POLL_INTERVAL_SECONDS = 0.2
+_TERMINAL_SESSION_MAX_OUTPUT_CHARS = 120_000
+_TERMINAL_SESSION_TTL_SECONDS = 15 * 60
+_TERMINAL_SESSION_MAX_LIFETIME_SECONDS = 15 * 60
 _WINDOWS_COMMAND_ENV = "VIBELUTION_CODEX_SANDBOX_COMMAND"
 _WINDOWS_CHAIN_BUILTINS = {
     "cd",
@@ -89,7 +95,7 @@ def _log_outcome(
     if started_at is not None:
         fields.append(f"durationMs={int((time.monotonic() - started_at) * 1000)}")
     message = f"[Codex CLI 沙盒] 结果 {' '.join(fields)}"
-    if status == "completed":
+    if status in {"completed", "started"}:
         _debug_logger.info(message)
     else:
         _debug_logger.warning(message)
@@ -441,6 +447,368 @@ def _format_output(stdout: str, stderr: str, returncode: int | None) -> str:
     )
     prefix = "EXEC FAILURE" if has_error_keywords else "WARNING"
     return f"[{prefix} | Exit Code: {code}]\n{output}"
+
+
+def _clamp_terminal_timeout(value: Any, *, default: int, minimum: int, maximum: int) -> int:
+    try:
+        normalized = int(value)
+    except (TypeError, ValueError):
+        normalized = default
+    return max(minimum, min(normalized, maximum))
+
+
+class _SandboxTerminalSession:
+    """One sandboxed process with bounded, pollable output and stdin support.
+
+    The session is intentionally in-memory.  A backend restart makes a live child
+    process unavailable rather than attempting to reattach to an unsafe shell.
+    """
+
+    def __init__(
+        self,
+        *,
+        session_id: str,
+        process: Any,
+        command_hash: str,
+        workdir: Path,
+        sandbox_temp: Path,
+        timeout_seconds: int,
+    ) -> None:
+        self.session_id = session_id
+        self.process = process
+        self.command_hash = command_hash
+        self.workdir = workdir
+        self.sandbox_temp = sandbox_temp
+        self.started_at = time.monotonic()
+        self.deadline = self.started_at + timeout_seconds
+        self.last_accessed_at = self.started_at
+        self._status = "running"
+        self._lock = threading.RLock()
+        self._output_ready = threading.Event()
+        self._stdout_pending = ""
+        self._stderr_pending = ""
+        self._total_output_chars = 0
+        self._output_truncated = False
+        self._outcome_logged = False
+        self._reader_threads = [
+            threading.Thread(target=self._reader_loop, args=("stdout",), daemon=True, name=f"codex-sandbox-out-{session_id}"),
+            threading.Thread(target=self._reader_loop, args=("stderr",), daemon=True, name=f"codex-sandbox-err-{session_id}"),
+        ]
+
+    def start(self) -> None:
+        for reader in self._reader_threads:
+            reader.start()
+
+    def _reader_loop(self, stream_name: str) -> None:
+        stream = getattr(self.process, stream_name, None)
+        if stream is None:
+            return
+        while True:
+            try:
+                chunk = str(stream.read(1) or "")
+            except Exception:
+                return
+            if not chunk:
+                return
+            with self._lock:
+                self._total_output_chars += len(chunk)
+                attribute = "_stdout_pending" if stream_name == "stdout" else "_stderr_pending"
+                existing = str(getattr(self, attribute) or "")
+                combined = existing + chunk
+                if len(combined) > _TERMINAL_SESSION_MAX_OUTPUT_CHARS:
+                    combined = combined[-_TERMINAL_SESSION_MAX_OUTPUT_CHARS :]
+                    self._output_truncated = True
+                setattr(self, attribute, combined)
+                self._output_ready.set()
+
+    def _is_alive(self) -> bool:
+        try:
+            return self.process.poll() is None
+        except Exception:
+            return False
+
+    def _expire_if_needed(self) -> None:
+        if self._status != "running" or time.monotonic() < self.deadline:
+            return
+        self._status = "timeout"
+        _terminate_process_tree(self.process)
+
+    def _terminal_status(self) -> str:
+        self._expire_if_needed()
+        if self._status != "running":
+            return self._status
+        if self._is_alive():
+            return "running"
+        try:
+            return "completed" if int(self.process.returncode or 0) == 0 else "failed"
+        except (TypeError, ValueError):
+            return "failed"
+
+    def _drain_output(self, *, max_output_chars: int) -> tuple[str, str, bool, int]:
+        with self._lock:
+            stdout = self._stdout_pending
+            stderr = self._stderr_pending
+            self._stdout_pending = ""
+            self._stderr_pending = ""
+            self._output_ready.clear()
+            total = self._total_output_chars
+            truncated = self._output_truncated
+        limit = _clamp_terminal_timeout(max_output_chars, default=12000, minimum=256, maximum=60000)
+        combined_length = len(stdout) + len(stderr)
+        if combined_length > limit:
+            keep_stdout = min(len(stdout), max(0, limit // 2))
+            keep_stderr = max(0, limit - keep_stdout)
+            stdout = stdout[:keep_stdout]
+            stderr = stderr[-keep_stderr:] if keep_stderr else ""
+            truncated = True
+        return stdout, stderr, truncated, total
+
+    def _log_terminal_outcome_once(self, status: str, exit_code: int | None) -> None:
+        if status == "running" or self._outcome_logged:
+            return
+        self._outcome_logged = True
+        _log_outcome(
+            self.command_hash,
+            status,
+            reason="terminal_session_exit",
+            started_at=self.started_at,
+            exit_code=exit_code,
+        )
+        _cleanup_sandbox_temp(self.workdir, self.sandbox_temp)
+
+    def snapshot(self, *, max_output_chars: int) -> dict[str, Any]:
+        self.last_accessed_at = time.monotonic()
+        status = self._terminal_status()
+        stdout, stderr, truncated, original_length = self._drain_output(max_output_chars=max_output_chars)
+        try:
+            exit_code = self.process.returncode if not self._is_alive() else None
+        except Exception:
+            exit_code = None
+        self._log_terminal_outcome_once(status, exit_code)
+        formatted_output = _format_output(stdout, stderr, exit_code) if (stdout or stderr or status != "running") else ""
+        payload: dict[str, Any] = {
+            "status": status,
+            "terminalSessionId": self.session_id,
+            "sessionOpen": status == "running",
+            "exitCode": exit_code,
+            "stdout": stdout,
+            "stderr": stderr,
+            "formattedOutput": formatted_output,
+            "durationMs": int((time.monotonic() - self.started_at) * 1000),
+            "timedOut": status == "timeout",
+            "truncated": bool(truncated),
+            "originalLength": original_length,
+        }
+        if status in {"failed", "timeout", "cancelled"}:
+            payload["failureClass"] = "timeout" if status == "timeout" else "process_exit"
+        return {key: value for key, value in payload.items() if value not in {None, ""}}
+
+    def wait_for_update(
+        self,
+        *,
+        yield_time_ms: int,
+        max_output_chars: int,
+        cancel_checker: Callable[[], str] | None = None,
+    ) -> dict[str, Any]:
+        deadline = time.monotonic() + _clamp_terminal_timeout(
+            yield_time_ms,
+            default=10_000,
+            minimum=0,
+            maximum=30_000,
+        ) / 1000.0
+        while True:
+            cancellation_reason = ""
+            if callable(cancel_checker):
+                try:
+                    cancellation_reason = str(cancel_checker() or "").strip()
+                except Exception:
+                    cancellation_reason = ""
+            if cancellation_reason:
+                self._status = "cancelled"
+                _terminate_process_tree(self.process)
+                payload = self.snapshot(max_output_chars=max_output_chars)
+                payload["cancelReason"] = cancellation_reason
+                return payload
+            if self._terminal_status() != "running" or self._output_ready.is_set() or time.monotonic() >= deadline:
+                return self.snapshot(max_output_chars=max_output_chars)
+            self._output_ready.wait(timeout=min(0.1, max(0.0, deadline - time.monotonic())))
+
+    def send_input(self, chars: str) -> str:
+        if self._terminal_status() != "running":
+            return "terminal_not_running"
+        if not chars:
+            return ""
+        stdin = getattr(self.process, "stdin", None)
+        if stdin is None:
+            return "stdin_unavailable"
+        try:
+            stdin.write(chars)
+            stdin.flush()
+        except Exception:
+            return "stdin_write_failed"
+        return ""
+
+
+_SANDBOX_TERMINAL_SESSIONS: dict[str, _SandboxTerminalSession] = {}
+_SANDBOX_TERMINAL_SESSIONS_LOCK = threading.RLock()
+
+
+def _prune_sandbox_terminal_sessions() -> None:
+    now = time.monotonic()
+    with _SANDBOX_TERMINAL_SESSIONS_LOCK:
+        stale_ids: list[str] = []
+        for session_id, session in _SANDBOX_TERMINAL_SESSIONS.items():
+            status = session._terminal_status()
+            if status == "running":
+                continue
+            try:
+                exit_code = session.process.returncode
+            except Exception:
+                exit_code = None
+            session._log_terminal_outcome_once(status, exit_code)
+            if now - session.last_accessed_at > _TERMINAL_SESSION_TTL_SECONDS:
+                stale_ids.append(session_id)
+        for session_id in stale_ids:
+            _SANDBOX_TERMINAL_SESSIONS.pop(session_id, None)
+
+
+def _terminal_error_payload(code: str, message: str, *, session_id: str = "") -> dict[str, Any]:
+    payload = {
+        "status": "failed",
+        "code": code,
+        "message": message,
+        "failureClass": code.lower(),
+    }
+    if session_id:
+        payload["terminalSessionId"] = session_id
+    return payload
+
+
+def start_codex_sandbox_terminal_session(
+    command: str = "",
+    *,
+    timeout: int = 60,
+    cwd: str | None = None,
+    yield_time_ms: int = 10_000,
+    max_output_chars: int = 12_000,
+    _cancel_checker: Callable[[], str] | None = None,
+) -> dict[str, Any]:
+    """Start one sandboxed command and return a bounded Codex-style process snapshot."""
+
+    normalized_command = str(command or "").strip()
+    if not normalized_command:
+        return _terminal_error_payload("MISSING_COMMAND", "exec_command 需要提供 cmd 参数。")
+    command_hash = hashlib.sha256(normalized_command.encode("utf-8")).hexdigest()[:12]
+    from tools.shell_tools import _find_git_bash, _is_command_dangerous, classify_shell_command
+
+    is_dangerous, message = _is_command_dangerous(normalized_command)
+    if is_dangerous:
+        _log_outcome(command_hash, "blocked", reason="dangerous_command")
+        return _terminal_error_payload("DANGEROUS_COMMAND", message)
+    workdir = _resolve_cwd(cwd)
+    if not workdir.is_dir():
+        _log_outcome(command_hash, "unavailable", reason="invalid_cwd")
+        return _terminal_error_payload("INVALID_CWD", f"工作目录不存在: {workdir}")
+    route = classify_shell_command(normalized_command)
+    if route.blocked:
+        _log_outcome(command_hash, "blocked", reason=route.reason or "shell_route")
+        return _terminal_error_payload("SHELL_ROUTE_BLOCKED", str(route.error or "命令路由被拦截。"))
+    executable = _resolve_codex_executable()
+    if not executable:
+        _log_outcome(command_hash, "unavailable", reason="codex_executable_missing")
+        return _terminal_error_payload("CODEX_SANDBOX_UNAVAILABLE", "未找到原生 codex.exe；命令未执行。")
+    timeout_seconds = _clamp_terminal_timeout(timeout, default=60, minimum=1, maximum=_TERMINAL_SESSION_MAX_LIFETIME_SECONDS)
+    is_native_windows_command = route.route == "git_bash" and _is_native_windows_command(route.command)
+    argv = _sandbox_argv(
+        executable,
+        route,
+        git_bash_executable=_find_git_bash() if route.route == "git_bash" else "",
+    )
+    sandbox_temp: Path | None = None
+    try:
+        encoding = locale.getpreferredencoding(False) or "utf-8"
+        environment, sandbox_temp = _sandbox_process_environment(workdir, command_hash)
+        environment.pop(_WINDOWS_COMMAND_ENV, None)
+        if is_native_windows_command:
+            environment[_WINDOWS_COMMAND_ENV] = route.command
+        process = subprocess.Popen(
+            argv,
+            shell=False,
+            cwd=str(workdir),
+            env=environment,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding=encoding,
+            errors="replace",
+            **no_window_subprocess_kwargs(),
+        )
+    except (FileNotFoundError, PermissionError) as exc:
+        _cleanup_sandbox_temp(workdir, sandbox_temp)
+        _log_outcome(command_hash, "unavailable", reason=type(exc).__name__)
+        return _terminal_error_payload("SANDBOX_START_FAILED", "Codex CLI 沙盒启动失败；命令未回退到非沙盒模式。")
+    except Exception as exc:
+        _cleanup_sandbox_temp(workdir, sandbox_temp)
+        _log_outcome(command_hash, "failed", reason=type(exc).__name__)
+        return _terminal_error_payload("SANDBOX_START_FAILED", f"Codex CLI 沙盒启动失败: {type(exc).__name__}")
+    if sandbox_temp is None:
+        _terminate_process_tree(process)
+        return _terminal_error_payload("SANDBOX_TEMP_UNAVAILABLE", "沙盒临时目录不可用。")
+    _prune_sandbox_terminal_sessions()
+    session_id = f"sandbox-{uuid.uuid4().hex[:16]}"
+    session = _SandboxTerminalSession(
+        session_id=session_id,
+        process=process,
+        command_hash=command_hash,
+        workdir=workdir,
+        sandbox_temp=sandbox_temp,
+        timeout_seconds=timeout_seconds,
+    )
+    with _SANDBOX_TERMINAL_SESSIONS_LOCK:
+        _SANDBOX_TERMINAL_SESSIONS[session_id] = session
+    session.start()
+    _log_outcome(command_hash, "started", reason="terminal_session_started", started_at=session.started_at)
+    return session.wait_for_update(
+        yield_time_ms=yield_time_ms,
+        max_output_chars=max_output_chars,
+        cancel_checker=_cancel_checker,
+    )
+
+
+def write_codex_sandbox_terminal_stdin(
+    terminal_session_id: str = "",
+    chars: str = "",
+    *,
+    yield_time_ms: int = 1_000,
+    max_output_chars: int = 12_000,
+    _cancel_checker: Callable[[], str] | None = None,
+) -> dict[str, Any]:
+    """Send stdin to a live sandbox command or poll its bounded output."""
+
+    _prune_sandbox_terminal_sessions()
+    session_id = str(terminal_session_id or "").strip()
+    if not session_id:
+        return _terminal_error_payload("MISSING_SESSION_ID", "write_stdin 需要提供 session_id 参数。")
+    with _SANDBOX_TERMINAL_SESSIONS_LOCK:
+        session = _SANDBOX_TERMINAL_SESSIONS.get(session_id)
+    if session is None:
+        return _terminal_error_payload("TERMINAL_SESSION_NOT_FOUND", "终端会话不存在、已过期或后端已重启。", session_id=session_id)
+    input_error = session.send_input(str(chars or ""))
+    if input_error:
+        message = {
+            "terminal_not_running": "终端会话已结束，不能继续写入。",
+            "stdin_unavailable": "终端会话不支持标准输入。",
+            "stdin_write_failed": "写入终端标准输入失败。",
+        }.get(input_error, "终端输入不可用。")
+        payload = session.snapshot(max_output_chars=max_output_chars)
+        payload.update(_terminal_error_payload("TERMINAL_STDIN_UNAVAILABLE", message, session_id=session_id))
+        return payload
+    return session.wait_for_update(
+        yield_time_ms=yield_time_ms,
+        max_output_chars=max_output_chars,
+        cancel_checker=_cancel_checker,
+    )
 
 
 def execute_codex_sandbox_command(

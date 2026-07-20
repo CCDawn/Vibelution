@@ -55,6 +55,7 @@ describe("codexToolLifecycleModel", () => {
   it("reduces a completed terminal-like operation into tool call, terminal operation, session, and observation records", () => {
     const model = buildCodexToolLifecycleModel(toolOperation({
       id: "op-command",
+      terminalSessionId: "terminal-command",
       sequence: 12,
       timestamp: "2026-07-07T10:00:00Z",
       error: "",
@@ -73,7 +74,7 @@ describe("codexToolLifecycleModel", () => {
     expect(model.terminalOperations).toEqual([
       expect.objectContaining({
         operationId: "terminal_operation:0",
-        terminalId: "terminal:op-command",
+        terminalId: "terminal:terminal-command",
         toolCallId: "tool_call:op-command",
         kind: "ExecCommand",
         status: "completed",
@@ -88,7 +89,7 @@ describe("codexToolLifecycleModel", () => {
     ]);
     expect(model.terminalSessions).toEqual([
       expect.objectContaining({
-        terminalId: "terminal:op-command",
+        terminalId: "terminal:terminal-command",
         operationIds: ["terminal_operation:0"],
         status: "completed",
       }),
@@ -120,10 +121,27 @@ describe("codexToolLifecycleModel", () => {
     expect(model.modelObservations).toEqual([]);
   });
 
+  it("does not invent a terminal session from a command-like label or summary", () => {
+    const model = buildCodexToolLifecycleModel(toolOperation({
+      id: "op-command-like",
+      rawLabel: "cli_tool",
+      label: "命令",
+      summary: "powershell npm --prefix web run test",
+    }));
+
+    expect(model.toolCalls[0]).toMatchObject({
+      runtimeKind: "terminal",
+    });
+    expect(model.toolCalls[0]).not.toHaveProperty("terminalOperationId");
+    expect(model.terminalOperations).toEqual([]);
+    expect(model.terminalSessions).toEqual([]);
+  });
+
   it("preserves failed terminal diagnostics in terminal results", () => {
     const failedCommand = {
       ...toolOperation({
         id: "op-failed",
+        terminalSessionId: "terminal-failed",
         status: "failed",
         summary: "npm test",
         error: "Exit code 1",

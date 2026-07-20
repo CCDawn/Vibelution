@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import subprocess
+from io import StringIO
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -373,6 +374,107 @@ class _RunningProcess:
 
     def wait(self, timeout=None):
         self.returncode = 1
+
+
+class _TerminalSessionInput:
+    def __init__(self, process):
+        self.process = process
+        self.writes = []
+
+    def write(self, value):
+        self.writes.append(value)
+        self.process.returncode = 0
+
+    def flush(self):
+        return None
+
+
+class _TerminalSessionProcess:
+    pid = 5151
+
+    def __init__(self):
+        self.returncode = None
+        self.stdout = StringIO("ready\\n")
+        self.stderr = StringIO("")
+        self.stdin = _TerminalSessionInput(self)
+
+    def poll(self):
+        return self.returncode
+
+    def wait(self, timeout=None):
+        if self.returncode is None:
+            self.returncode = 1
+        return self.returncode
+
+
+def test_terminal_session_exec_and_stdin_keep_one_explicit_session_id(monkeypatch, tmp_path):
+    process = _TerminalSessionProcess()
+    codex_cli_sandbox._SANDBOX_TERMINAL_SESSIONS.clear()
+    monkeypatch.setattr(codex_cli_sandbox, "_resolve_codex_executable", lambda: r"C:\\Codex\\codex.exe")
+    monkeypatch.setattr(codex_cli_sandbox.subprocess, "Popen", lambda *args, **kwargs: process)
+    monkeypatch.setattr(codex_cli_sandbox.uuid, "uuid4", lambda: SimpleNamespace(hex="session0000000000"))
+
+    try:
+        started = codex_cli_sandbox.start_codex_sandbox_terminal_session(
+            "echo ready",
+            cwd=str(tmp_path),
+            yield_time_ms=0,
+        )
+        session_id = started["terminalSessionId"]
+        continued = codex_cli_sandbox.write_codex_sandbox_terminal_stdin(
+            session_id,
+            "exit\\n",
+            yield_time_ms=0,
+        )
+    finally:
+        codex_cli_sandbox._SANDBOX_TERMINAL_SESSIONS.clear()
+
+    assert session_id == "sandbox-session000000000"
+    assert started["status"] == "running"
+    assert started["sessionOpen"] is True
+    assert process.stdin.writes == ["exit\\n"]
+    assert continued["terminalSessionId"] == session_id
+    assert continued["status"] == "completed"
+    assert continued["sessionOpen"] is False
+
+
+def test_terminal_session_stdin_rejects_unknown_session_without_starting_process():
+    codex_cli_sandbox._SANDBOX_TERMINAL_SESSIONS.clear()
+
+    result = codex_cli_sandbox.write_codex_sandbox_terminal_stdin("sandbox-missing", "hello")
+
+    assert result["status"] == "failed"
+    assert result["code"] == "TERMINAL_SESSION_NOT_FOUND"
+    assert result["terminalSessionId"] == "sandbox-missing"
+
+
+def test_terminal_session_prune_cleans_finished_unpolled_sandbox(monkeypatch, tmp_path):
+    process = _TerminalSessionProcess()
+    process.returncode = 0
+    sandbox_temp = tmp_path / ".runtime" / "codex-cli" / "orphaned"
+    sandbox_temp.mkdir(parents=True)
+    session = codex_cli_sandbox._SandboxTerminalSession(
+        session_id="sandbox-finished",
+        process=process,
+        command_hash="test-command",
+        workdir=tmp_path,
+        sandbox_temp=sandbox_temp,
+        timeout_seconds=60,
+    )
+    session.last_accessed_at -= codex_cli_sandbox._TERMINAL_SESSION_TTL_SECONDS + 1
+    cleaned = []
+    codex_cli_sandbox._SANDBOX_TERMINAL_SESSIONS.clear()
+    codex_cli_sandbox._SANDBOX_TERMINAL_SESSIONS[session.session_id] = session
+    monkeypatch.setattr(
+        codex_cli_sandbox,
+        "_cleanup_sandbox_temp",
+        lambda workdir, temp: cleaned.append((workdir, temp)),
+    )
+
+    codex_cli_sandbox._prune_sandbox_terminal_sessions()
+
+    assert session.session_id not in codex_cli_sandbox._SANDBOX_TERMINAL_SESSIONS
+    assert cleaned == [(tmp_path, sandbox_temp)]
 
 
 def test_execute_terminates_sandbox_when_cancelled(monkeypatch, tmp_path):

@@ -81,12 +81,34 @@ def _summarize_tool_args(tool_args: dict) -> dict[str, Any]:
     for path_key in ("file_path", "path", "target_path", "directory", "cwd"):
         if path_key in payload:
             summary[path_key] = str(payload.get(path_key) or "")
-    if "command" in payload:
-        summary["commandLength"] = len(str(payload.get("command") or ""))
+    command = payload.get("command", payload.get("cmd", ""))
+    if command:
+        summary["commandLength"] = len(str(command))
+    if "session_id" in payload or "sessionId" in payload:
+        summary["terminalSessionIdPresent"] = bool(str(payload.get("session_id") or payload.get("sessionId") or "").strip())
+    if "chars" in payload:
+        summary["stdinCharsLength"] = len(str(payload.get("chars") or ""))
     return summary
 
 
 def _summarize_tool_result(result: Any) -> dict[str, Any]:
+    if isinstance(result, str) and result.lstrip().startswith("{"):
+        try:
+            terminal = json.loads(result)
+        except (TypeError, json.JSONDecodeError):
+            terminal = {}
+        if isinstance(terminal, dict) and terminal.get("terminalSessionId"):
+            output_length = len(str(terminal.get("stdout") or "")) + len(str(terminal.get("stderr") or ""))
+            return {
+                "resultType": "sandbox_terminal_session",
+                "terminalSessionId": str(terminal.get("terminalSessionId") or "").strip(),
+                "terminalStatus": str(terminal.get("status") or "").strip(),
+                "sessionOpen": bool(terminal.get("sessionOpen")),
+                "exitCode": terminal.get("exitCode"),
+                "outputChars": output_length,
+                "truncated": bool(terminal.get("truncated")),
+                "originalLength": terminal.get("originalLength"),
+            }
     text = str(result or "")
     semantics = extract_tool_result_semantics(result)
     return {
@@ -296,6 +318,20 @@ def _classify_tool_semantic_result(tool_name: str, result: Any) -> dict[str, Any
     if payload_status and payload.get("status") != payload_status:
         payload = dict(payload)
         payload["status"] = payload_status
+    if tool_name in {"exec_command", "write_stdin"} and payload_status == "running":
+        return {
+            "eventCode": "tool.execute.running",
+            "level": "info",
+            "outcome": "observed",
+            "lifecycle": True,
+            "fields": {
+                **fields,
+                "semanticStatus": "running",
+                "terminalSessionId": str(payload.get("terminalSessionId") or "").strip(),
+                "terminalStatus": "running",
+                "sessionOpen": bool(payload.get("sessionOpen")),
+            },
+        }
     if tool_name == "close_evolution_transaction_tool" and payload_status:
         fields["toolResultStatus"] = payload_status
     is_business_success = infer_tool_business_success(payload) if payload else True
@@ -535,6 +571,8 @@ class ToolExecutor:
         "open_evolution_transaction_tool",
         "close_evolution_transaction_tool",
         "cli_tool",
+        "exec_command",
+        "write_stdin",
         "cli_agent_run_tool",
         "task_create_tool",
         "task_update_tool",
@@ -555,6 +593,8 @@ class ToolExecutor:
     _RUNTIME_GOAL_WRITE_BLOCKED_TOOLS = set(_READ_ONLY_BLOCKED_TOOLS)
     _RUNTIME_GOAL_GIT_BLOCKED_TOOLS = {
         "cli_tool",
+        "exec_command",
+        "write_stdin",
         "commit_compressed_memory_tool",
         "trigger_self_restart_tool",
     }
@@ -584,6 +624,8 @@ class ToolExecutor:
 
         self._timeout_map = {
             "cli_tool": 60,
+            "exec_command": 60,
+            "write_stdin": 35,
             "cli_agent_run_tool": 900,
             "grep_search_tool": 30,
             "web_fetch_tool": 30,
@@ -1375,8 +1417,8 @@ class ToolExecutor:
             session.record_blocked_tool_pattern(pattern, "安全策略已拦截该模式", hint)
             session.record_blocker("security_block", f"{tool_name} 触发 `{pattern}` 安全拦截", hint)
 
-        command = str((tool_args or {}).get("command") or "")
-        if tool_name in {"run_test_for_tool", "cli_tool"} and ("pytest" in command or tool_name == "run_test_for_tool"):
+        command = str((tool_args or {}).get("command") or (tool_args or {}).get("cmd") or "")
+        if tool_name in {"run_test_for_tool", "cli_tool", "exec_command"} and ("pytest" in command or tool_name == "run_test_for_tool"):
             verification_status, verification_summary, _ = verification_from_tool_record(
                 {"name": tool_name, "args": tool_args or {}, "result_preview": result_text}
             )
@@ -1411,7 +1453,7 @@ class ToolExecutor:
                 })
                 if pet and passed:
                     pet.reward_validation("tests", True)
-        elif tool_name == "cli_tool" and "py_compile" in command:
+        elif tool_name in {"cli_tool", "exec_command"} and "py_compile" in command:
             verification_status, verification_summary, _ = verification_from_tool_record(
                 {"name": tool_name, "args": tool_args or {}, "result_preview": result_text}
             )
