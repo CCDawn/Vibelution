@@ -177,7 +177,7 @@ def _supervised_child_log_path(run_id: str) -> str:
         char if char.isalnum() or char in {"-", "_", "."} else "_"
         for char in str(run_id or "").strip()
     ).strip("._-")
-    return f"agent/supervised_runs/{normalized or 'run'}.jsonl"
+    return f"runs/supervised/{normalized or 'run'}/timeline.jsonl"
 
 
 def _supervised_snapshot_event_fields(snapshot: dict[str, Any] | None) -> dict[str, Any]:

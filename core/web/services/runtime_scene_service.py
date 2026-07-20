@@ -41,6 +41,8 @@ LIFECYCLE_PATH = "lifecycle.jsonl"
 PACKAGE_INDEX_PATH = "package_index.json"
 SUMMARY_PATH = "summary.json"
 CONVERSATIONS_DIR = "conversations"
+SESSIONS_DIR = "sessions"
+RUNS_DIR = "runs"
 AGENT_DIR = "agent"
 ARTIFACTS_DIR = "artifacts"
 EVENTS_DIR = "events"
@@ -1205,7 +1207,7 @@ def record_runtime_scene_conversation_event(
     normalized_session_id = _sanitize_path_token(session_id, default="session")
     role_label = _sanitize_token(role, default="message")
     event_code = f"conversation.{_sanitize_path_token(event, default='message')}"
-    relative_path = f"{CONVERSATIONS_DIR}/{normalized_session_id}.jsonl"
+    relative_path = f"{SESSIONS_DIR}/{normalized_session_id}/transcript.jsonl"
     content_length = len(str(content or ""))
     content_redacted = content_length > 0
     correlation_ids = _runtime_scene_conversation_correlation_ids(session_id, message)
@@ -1655,6 +1657,8 @@ def _runtime_scene_package_index_payload(scene_dir: Path, package_index: dict[st
         "lifecycle_path": LIFECYCLE_PATH,
         "raw_dir": "raw",
         "conversations_dir": CONVERSATIONS_DIR,
+        "sessions_dir": SESSIONS_DIR,
+        "runs_dir": RUNS_DIR,
         "agent_dir": AGENT_DIR,
         "artifacts_dir": ARTIFACTS_DIR,
         "research_dir": RESEARCH_DIR,
@@ -1684,6 +1688,8 @@ def _runtime_scene_lightweight_package_index_payload(package_index: dict[str, An
         "lifecycle_path": LIFECYCLE_PATH,
         "raw_dir": "raw",
         "conversations_dir": CONVERSATIONS_DIR,
+        "sessions_dir": SESSIONS_DIR,
+        "runs_dir": RUNS_DIR,
         "agent_dir": AGENT_DIR,
         "artifacts_dir": ARTIFACTS_DIR,
         "research_dir": RESEARCH_DIR,
@@ -1753,12 +1759,13 @@ def _runtime_scene_summary_payload(
                 "raw/launcher-control.log",
                 TIMELINE_PATH,
                 LIFECYCLE_PATH,
+                "sessions/",
                 "conversations/",
                 "agent/turns.jsonl",
                 "agent/tool_calls.jsonl",
-                "agent/supervised_runs/",
-                "agent/supervised_worktree_runs/",
-                "agent/self_evolution_runs/",
+                "runs/supervised/",
+                "runs/supervised_worktree/",
+                "runs/self_evolution/",
                 RESEARCH_SUMMARY_PATH,
                 RESEARCH_EVENTS_PATH,
                 "raw/",
@@ -2091,9 +2098,12 @@ def _runtime_scene_summary_counts(scene_dir: Path) -> dict[str, int]:
         "event_logs": len(event_logs),
         "research_files": len(research_logs),
         "research_events": len(research_events),
-        "supervised_evolution_logs": _count_runtime_scene_files(scene_dir, f"{AGENT_DIR}/supervised_runs")
+        "supervised_evolution_logs": _count_runtime_scene_files(scene_dir, f"{RUNS_DIR}/supervised")
+        + _count_runtime_scene_files(scene_dir, f"{RUNS_DIR}/supervised_worktree")
+        + _count_runtime_scene_files(scene_dir, f"{AGENT_DIR}/supervised_runs")
         + _count_runtime_scene_files(scene_dir, f"{AGENT_DIR}/supervised_worktree_runs"),
-        "self_evolution_logs": _count_runtime_scene_files(scene_dir, f"{AGENT_DIR}/self_evolution_runs"),
+        "self_evolution_logs": _count_runtime_scene_files(scene_dir, f"{RUNS_DIR}/self_evolution")
+        + _count_runtime_scene_files(scene_dir, f"{AGENT_DIR}/self_evolution_runs"),
         "errors": severity["errorCount"],
         "warnings": severity["warningCount"],
     }
@@ -2133,19 +2143,25 @@ def _runtime_scene_summary_sections() -> dict[str, dict[str, str]]:
         },
         "conversations": {
             "path": CONVERSATIONS_DIR,
-            "purpose": "Per-session user, assistant, tool-call, and chat-review conversation breadcrumbs.",
+            "purpose": "Legacy per-session conversation logs retained for read compatibility.",
+        },
+        "sessions": {
+            "path": SESSIONS_DIR,
+            "purpose": "Canonical session transcripts and isolated per-turn execution evidence.",
         },
         "agent": {
             "path": AGENT_DIR,
             "purpose": "Agent turn and tool-call child logs used to diagnose reasoning and execution flow.",
         },
         "supervised_evolution": {
-            "path": f"{AGENT_DIR}/supervised_runs",
-            "worktree_path": f"{AGENT_DIR}/supervised_worktree_runs",
+            "path": f"{RUNS_DIR}/supervised",
+            "worktree_path": f"{RUNS_DIR}/supervised_worktree",
+            "legacy_path": f"{AGENT_DIR}/supervised_runs",
             "purpose": "Supervised evolution run, candidate, review, selection, promotion, and rollback breadcrumbs when present.",
         },
         "self_evolution": {
-            "path": f"{AGENT_DIR}/self_evolution_runs",
+            "path": f"{RUNS_DIR}/self_evolution",
+            "legacy_path": f"{AGENT_DIR}/self_evolution_runs",
             "purpose": "Unsupervised self-evolution run, checkpoint, reflection, guard, and validation breadcrumbs when present.",
         },
         "research": {
@@ -2840,7 +2856,10 @@ def _runtime_scene_file_size(path: Path) -> int | None:
 
 
 def _list_conversation_logs(scene_dir: Path) -> list[dict[str, Any]]:
-    return _list_package_files(scene_dir, CONVERSATIONS_DIR, label_prefix="Conversation")
+    return (
+        _list_package_files(scene_dir, SESSIONS_DIR, label_prefix="Session")
+        + _list_package_files(scene_dir, CONVERSATIONS_DIR, label_prefix="Conversation")
+    )
 
 
 def _list_agent_logs(scene_dir: Path) -> list[dict[str, Any]]:
