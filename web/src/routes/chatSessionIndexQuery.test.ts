@@ -2,13 +2,15 @@ import { QueryClient } from "@tanstack/react-query";
 import { describe, expect, it } from "vitest";
 
 import { queryKeys } from "../api/queryKeys";
-import type { SessionQueryResponse, SessionSummary } from "../api/types";
+import type { AgentInstance, SessionQueryResponse, SessionSummary } from "../api/types";
 import {
   captureAgentSessionCacheSnapshots,
   captureSessionIndexCacheSnapshots,
   removeSessionFromAgentSessionCaches,
+  renameAgentDirectoryEntries,
   restoreAgentSessionCacheSnapshots,
   restoreSessionIndexCacheSnapshots,
+  updateAgentSessionSummaryCaches,
   updateSessionSummaryCaches,
 } from "./chatSessionIndexQuery";
 import { renameSessionInSummaries } from "./chatSessionState";
@@ -59,6 +61,33 @@ describe("chatSessionIndexQuery cache helpers", () => {
       .toBe("Renamed Beta");
     const paginated = queryClient.getQueryData<{ pages: SessionQueryResponse[] }>(queryKeys.sessionQuery("", 50));
     expect(paginated?.pages.flatMap((item) => item.items).find((item) => item.id === "session-b")?.title).toBe("Renamed Beta");
+  });
+
+  it("updates Agent-scoped session caches after a session rename", () => {
+    const queryClient = new QueryClient();
+    const agentAKey = ["sessions", "agent", "agent-a"] as const;
+    const agentBKey = ["sessions", "agent", "agent-b"] as const;
+    queryClient.setQueryData(agentAKey, page([session("session-a", "Alpha")]));
+    queryClient.setQueryData(agentBKey, page([session("session-b", "Beta")]));
+
+    updateAgentSessionSummaryCaches(queryClient, (sessions) =>
+      renameSessionInSummaries(sessions, "session-a", "Renamed Alpha", "2026-06-09T08:05:00"),
+    );
+
+    expect(queryClient.getQueryData<SessionQueryResponse>(agentAKey)?.items[0]?.title).toBe("Renamed Alpha");
+    expect(queryClient.getQueryData<SessionQueryResponse>(agentBKey)?.items[0]?.title).toBe("Beta");
+  });
+
+  it("updates the root Agent directory label without renaming other Agents", () => {
+    const agents = [
+      { agentId: "agent-a", displayName: "Alpha" },
+      { agentId: "agent-b", displayName: "Beta" },
+    ] as AgentInstance[];
+
+    expect(renameAgentDirectoryEntries(agents, "agent-a", "Renamed Alpha")).toMatchObject([
+      { agentId: "agent-a", displayName: "Renamed Alpha" },
+      { agentId: "agent-b", displayName: "Beta" },
+    ]);
   });
 
   it("restores paginated session caches after optimistic failures", () => {
