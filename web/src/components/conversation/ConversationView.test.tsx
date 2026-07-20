@@ -904,8 +904,9 @@ describe("ConversationView edit resend affordance", () => {
     expect(conversationViewSource).not.toContain("function getCachedMarkdownBlocks(content: string)");
     expect(conversationViewSource).not.toContain("parseConversationMarkdownBlocks");
     expect(conversationViewSource).not.toContain("renderConversationInlineMarkdown");
-    expect(conversationViewSource).toContain('from "./ConversationMarkdownRenderer"');
-    expect(conversationViewSource).toContain("<ConversationMarkdownRenderer");
+    expect(conversationViewSource).toContain('from "./LazyConversationMarkdownRenderer"');
+    expect(conversationViewSource).toContain("<LazyConversationMarkdownRenderer");
+    expect(conversationViewSource).not.toContain('from "./ConversationMarkdownRenderer"');
     expect(conversationViewSource).toContain("const responseSegments = showResponseBlock && !isStreamingStatusPlaceholder && !isResponseStreaming");
     expect(conversationViewSource).not.toContain("responseExpanded && !isResponseStreaming");
     expect(conversationViewSource).toContain("? getCachedResponseSegments(responseText)");

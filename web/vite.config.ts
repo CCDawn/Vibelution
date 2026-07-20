@@ -3,6 +3,52 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const webRoot = fileURLToPath(new URL(".", import.meta.url));
+/** SSR tests use a sync re-export so renderToStaticMarkup sees full markdown sanitization. */
+const lazyConversationMarkdownEntry = resolve(
+  webRoot,
+  "src/components/conversation/LazyConversationMarkdownRenderer.tsx",
+);
+const lazyConversationMarkdownSyncShim = resolve(
+  webRoot,
+  "src/components/conversation/LazyConversationMarkdownRenderer.sync.tsx",
+);
+
+/** Vitest-only: relative imports of the lazy markdown shell resolve to the sync renderer. */
+function lazyMarkdownTestShimPlugin() {
+  return {
+    name: "vibelution-lazy-markdown-test-shim",
+    enforce: "pre" as const,
+    resolveId(source: string, importer: string | undefined) {
+      if (!process.env.VITEST) {
+        return null;
+      }
+      if (
+        source === "./LazyConversationMarkdownRenderer" ||
+        source === "./LazyConversationMarkdownRenderer.tsx" ||
+        source.endsWith("/LazyConversationMarkdownRenderer") ||
+        source.endsWith("/LazyConversationMarkdownRenderer.tsx") ||
+        source.replace(/\\/g, "/").endsWith("/LazyConversationMarkdownRenderer") ||
+        source.replace(/\\/g, "/").endsWith("/LazyConversationMarkdownRenderer.tsx")
+      ) {
+        // Only rewrite when the importer lives next to the conversation markdown modules.
+        if (
+          importer &&
+          !importer.includes("LazyConversationMarkdownRenderer.sync") &&
+          importer.replace(/\\/g, "/").includes("/components/conversation/")
+        ) {
+          return lazyConversationMarkdownSyncShim;
+        }
+      }
+      if (source === lazyConversationMarkdownEntry) {
+        return lazyConversationMarkdownSyncShim;
+      }
+      return null;
+    },
+  };
+}
 
 const buildStamp = new Date().toISOString().replace(/\D/g, "").slice(0, 14);
 const DEFAULT_BACKEND_PORT = 8000;
@@ -86,7 +132,7 @@ export default defineConfig({
   define: {
     __VIBELUTION_BUILD_ID__: JSON.stringify(buildStamp),
   },
-  plugins: [tailwindcss(), react()],
+  plugins: [lazyMarkdownTestShimPlugin(), tailwindcss(), react()],
   test: {
     environment: "node",
     include: ["src/**/*.test.ts", "src/**/*.test.tsx", "*.test.ts"],

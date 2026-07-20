@@ -73,13 +73,30 @@ Source modularization of Chat improved claimability, but **did not by itself** b
 
 CSS budget class now passes for shell + lazy route CSS. Remaining failures are **JS** entry/chunks.
 
+## Measured after ConversationView markdown secondary-lazy
+
+`ConversationView` / streaming content now import `LazyConversationMarkdownRenderer` (`React.lazy` + `Suspense`). `react-markdown` / `remark-gfm` land in a separate async chunk.
+
+| Asset | Before (post CSS) | After markdown split | Budget | Status |
+|-------|-------------------|----------------------|--------|--------|
+| `ConversationView-*.js` | ~453 KiB | **~192 KiB** | 390 KiB | **pass** |
+| `ConversationMarkdownRenderer-*.js` | (inside CV) | **~154 KiB** | n/a (async) | loads on rich markdown |
+| `ConversationView.styles-*.js` | shared | ~108 KiB | n/a | residual style map chunk |
+| `ChatCodingRoute-*.js` | ~434 KiB | ~434 KiB | 390 KiB | still fail |
+| `TeamsRoute-*.js` | ~440 KiB | ~440 KiB | 390 KiB | still fail |
+| `index-*.js` | ~559 KiB | ~559 KiB | 470 KiB | still fail |
+| `index-*.css` | ~260 KiB | ~260 KiB | 360 KiB | pass |
+
+Test note: node `renderToStaticMarkup` never resolves `React.lazy`. Vitest uses a production-noop plugin + `LazyConversationMarkdownRenderer.sync.tsx` re-export so sanitization contracts still run in SSR tests.
+
 ## Follow-up backlog (ordered)
 
 ### P0 remaining
 
-1. **ConversationView JS**: secondary-lazy markdown/codex/tool-detail panels; measure again.
+1. ~~**ConversationView JS**: secondary-lazy markdown~~ **done** (~453 → ~192 KiB).
 2. **Chat JS chunk**: ensure CliAgentRunTerminalPanel stays lazy (already); audit remaining eager imports from ChatCodingRoute.
 3. **Teams JS**: apply Chat-style claim map + panel split (source + chunk).
+4. Optional: further split `ConversationView.styles` if CV residual needs more headroom.
 
 ### P1
 

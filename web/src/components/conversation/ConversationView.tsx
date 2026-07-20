@@ -138,7 +138,7 @@ import {
 } from "./agentMessageSections";
 import { shouldLoadEarlierConversationMessages } from "./conversationHistoryWindow";
 import { parseResponseSegments, ResponseSegment } from "./messageResponseSegments";
-import { ConversationMarkdownRenderer } from "./ConversationMarkdownRenderer";
+import { LazyConversationMarkdownRenderer } from "./LazyConversationMarkdownRenderer";
 import { ConversationInferenceControl } from "./ConversationInferenceControl";
 import {
   addComparableConversationImageUrl,
@@ -2900,7 +2900,7 @@ export function ConversationView({
 
   function renderResponseText(content: string, duplicateImageUrls?: Set<string>) {
     return (
-      <ConversationMarkdownRenderer
+      <LazyConversationMarkdownRenderer
         content={content}
         duplicateImageUrls={duplicateImageUrls}
         renderImage={renderMarkdownImage}

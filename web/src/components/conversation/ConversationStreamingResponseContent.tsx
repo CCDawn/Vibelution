@@ -1,7 +1,8 @@
 import React, { useMemo } from "react";
 
 import { createCodexStreamController } from "./codexStreamController";
-import { ConversationMarkdownRenderer, type ConversationMarkdownClassNames } from "./ConversationMarkdownRenderer";
+import type { ConversationMarkdownClassNames } from "./conversationMarkdownTypes";
+import { LazyConversationMarkdownRenderer } from "./LazyConversationMarkdownRenderer";
 import styles from "./ConversationStreamingResponseContent.styles";
 import { projectStreamingMarkdownBlocks } from "./streamingMarkdown";
 
@@ -45,7 +46,7 @@ export function ConversationStreamingResponseContent({
         hasTable ? classNames.markdownBodyWithTable : "",
       ].filter(Boolean).join(" ")}
     >
-      <ConversationMarkdownRenderer content={renderText} classNames={classNames} />
+      <LazyConversationMarkdownRenderer content={renderText} classNames={classNames} />
     </div>
   );
 }

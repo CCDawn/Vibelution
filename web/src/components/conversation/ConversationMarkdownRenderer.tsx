@@ -3,29 +3,12 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 import { safeConversationMarkdownUrl } from "./conversationMarkdownUrl";
+import type { ConversationMarkdownClassNames } from "./conversationMarkdownTypes";
 import { conversationMarkdownRendererStyles } from "./ConversationMarkdownRenderer.styles";
 
-export type ConversationMarkdownClassNames = {
-  inlineCode: string;
-  inlineLink: string;
-  inlineStrong: string;
-  markdownBlockquote: string;
-  markdownBody: string;
-  markdownBodyWithTable: string;
-  markdownDivider: string;
-  markdownHeading: string;
-  markdownHeading1: string;
-  markdownHeading2: string;
-  markdownHeading3: string;
-  markdownHeading4: string;
-  markdownTable: string;
-  markdownTableWrap: string;
-  messageBody: string;
-  responseSegmentList: string;
-  responseSegmentPre: string;
-};
+export type { ConversationMarkdownClassNames } from "./conversationMarkdownTypes";
 
-type ConversationMarkdownRendererProps = {
+export type ConversationMarkdownRendererProps = {
   content: string;
   classNames?: ConversationMarkdownClassNames;
   duplicateImageUrls?: Set<string>;
