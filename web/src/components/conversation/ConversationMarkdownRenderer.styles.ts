@@ -1,4 +1,4 @@
-import type { ConversationMarkdownClassNames } from "./ConversationMarkdownRenderer";
+import type { ConversationMarkdownClassNames } from "./conversationMarkdownTypes";
 import conversationViewStyles from "./ConversationView.styles";
 
 export const conversationMarkdownRendererStyles: ConversationMarkdownClassNames = {

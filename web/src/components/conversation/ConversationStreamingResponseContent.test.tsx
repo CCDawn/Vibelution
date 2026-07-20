@@ -56,8 +56,9 @@ describe("ConversationStreamingResponseContent", () => {
 
     expect(source).toContain('from "./codexStreamController"');
     expect(source).toContain("createCodexStreamController");
-    expect(source).toContain('from "./ConversationMarkdownRenderer"');
-    expect(source).toContain("<ConversationMarkdownRenderer");
+    expect(source).toContain('from "./LazyConversationMarkdownRenderer"');
+    expect(source).toContain("<LazyConversationMarkdownRenderer");
+    expect(source).not.toContain('from "./ConversationMarkdownRenderer"');
     expect(source).toContain("streamProjection.stableText");
     expect(source).toContain("streamProjection.liveText");
     expect(source).not.toContain("parseStreamingMarkdownBlocks");
