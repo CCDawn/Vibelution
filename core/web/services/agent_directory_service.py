@@ -9,6 +9,7 @@ import os
 import re
 import secrets
 import shutil
+import stat
 import tempfile
 import threading
 import time
@@ -16,8 +17,9 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from functools import wraps
 from pathlib import Path, PurePosixPath
-from typing import Any, Iterable
+from typing import Any, Callable, Iterable
 from urllib.parse import quote
 
 from core.chat.chat_task_types import trim_lines
@@ -389,6 +391,7 @@ _PUBLIC_NAME_GIVEN = (
     "念青",
 )
 _STATE_LOCK = threading.RLock()
+_AGENT_SESSION_LIFECYCLE_LOCK = threading.RLock()
 _REPAIRED_STATE_CACHE_SIGNATURE: tuple[str, bool, int, int] | None = None
 _REPAIRED_STATE_CACHE: dict[str, Any] | None = None
 _JSONL_RECENT_CACHE: dict[tuple[str, bool, int, int, int, str, bool], list[dict[str, Any]]] = {}
@@ -435,6 +438,42 @@ class AgentMessageNotFoundError(AgentDirectoryError):
 
 class AgentMemoryProposalNotFoundError(AgentDirectoryError):
     """Raised when an Agent project-memory proposal does not exist."""
+
+
+def agent_session_lifecycle_serialized(
+    callback: Callable[..., Any],
+) -> Callable[..., Any]:
+    """Serialize Agent registry mutations with bound-session lifecycle work."""
+
+    @wraps(callback)
+    def wrapped(*args: Any, **kwargs: Any) -> Any:
+        with agent_session_lifecycle_transaction():
+            return callback(*args, **kwargs)
+
+    return wrapped
+
+
+def agent_session_lifecycle_with_chat_serialized(
+    callback: Callable[..., Any],
+) -> Callable[..., Any]:
+    """Serialize Agent work that also mutates bound chat-session state."""
+
+    @wraps(callback)
+    def wrapped(*args: Any, **kwargs: Any) -> Any:
+        from . import session_service
+
+        with session_service.session_agent_lifecycle_transaction():
+            return callback(*args, **kwargs)
+
+    return wrapped
+
+
+@contextmanager
+def agent_session_lifecycle_transaction():
+    """Hold the cross-store Agent/session lifecycle serialization lock."""
+
+    with _AGENT_SESSION_LIFECYCLE_LOCK:
+        yield
 
 
 @dataclass(frozen=True)
@@ -604,6 +643,7 @@ def get_agent(agent_id: str, *, include_archived: bool = True) -> dict[str, Any]
     return _agent_to_api(agent)
 
 
+@agent_session_lifecycle_serialized
 def create_agent_instance(
     *,
     display_name: str = "",
@@ -710,6 +750,7 @@ def create_agent_instance(
     return _agent_to_api(agent)
 
 
+@agent_session_lifecycle_serialized
 def ensure_agent_for_session(
     session_id: str,
     *,
@@ -1110,6 +1151,7 @@ def _jsonl_file_has_records(path: Path) -> bool:
     return False
 
 
+@agent_session_lifecycle_serialized
 def update_agent_instance(
     agent_id: str,
     *,
@@ -1407,6 +1449,7 @@ def build_agent_policy_options(
     }
 
 
+@agent_session_lifecycle_serialized
 def archive_agent_instance(agent_id: str, *, repair_mode_bindings: bool = True) -> dict[str, Any]:
     with _STATE_LOCK:
         state = load_state()
@@ -1426,6 +1469,7 @@ def archive_agent_instance(agent_id: str, *, repair_mode_bindings: bool = True) 
     return _agent_to_api(agent)
 
 
+@agent_session_lifecycle_serialized
 def purge_archived_agent_instance(
     agent_id: str,
     *,
@@ -1555,25 +1599,49 @@ def ensure_agent_purge_workspace_deletable(agent: dict[str, Any]) -> dict[str, A
     if not agent_id or not workspace_path:
         return {"deletable": True, "workspacePath": workspace_path, "reason": "no_workspace_path"}
     try:
-        resolved = _resolve_project_path(workspace_path)
-        agents_root = _workspace_path("agents").resolve()
-        expected_private = _resolve_project_path(_agent_workspace_relative_path(agent_id))
+        workspace = _lexical_project_path(workspace_path)
+        agents_root = _lexical_project_path("workspace/agents")
+        expected_private = _lexical_project_path(
+            _agent_workspace_relative_path(agent_id)
+        )
     except Exception as exc:
         raise AgentDirectoryError(f"Agent workspace path could not be resolved: {type(exc).__name__}") from exc
-    if resolved != expected_private:
-        raise AgentDirectoryError(f"Agent workspace path is not the expected private workspace: {_relative_project_path(resolved)}")
+    if workspace != expected_private:
+        raise AgentDirectoryError(
+            "Agent workspace path is not the expected private workspace: "
+            + workspace_path
+        )
     try:
-        if not resolved.is_relative_to(agents_root):
-            raise AgentDirectoryError(f"Agent workspace path is outside the agents root: {_relative_project_path(resolved)}")
+        if not workspace.is_relative_to(agents_root):
+            raise AgentDirectoryError(
+                f"Agent workspace path is outside the agents root: {workspace_path}"
+            )
     except ValueError as exc:
-        raise AgentDirectoryError(f"Agent workspace path is outside the agents root: {_relative_project_path(resolved)}") from exc
-    if not resolved.exists():
-        return {"deletable": True, "workspacePath": _relative_project_path(resolved), "reason": "workspace_absent"}
-    if not resolved.is_dir():
-        raise AgentDirectoryError(f"Agent workspace path is not a directory: {_relative_project_path(resolved)}")
-    return {"deletable": True, "workspacePath": _relative_project_path(resolved), "reason": "workspace_present"}
+        raise AgentDirectoryError(
+            f"Agent workspace path is outside the agents root: {workspace_path}"
+        ) from exc
+    if _path_has_reparse_component(workspace, stop_at=agents_root):
+        raise AgentDirectoryError(
+            "Agent workspace path contains a symlink, junction, or reparse point."
+        )
+    if not workspace.exists():
+        return {
+            "deletable": True,
+            "workspacePath": _agent_workspace_relative_path(agent_id),
+            "reason": "workspace_absent",
+        }
+    if not workspace.is_dir():
+        raise AgentDirectoryError(
+            f"Agent workspace path is not a directory: {workspace_path}"
+        )
+    return {
+        "deletable": True,
+        "workspacePath": _agent_workspace_relative_path(agent_id),
+        "reason": "workspace_present",
+    }
 
 
+@agent_session_lifecycle_with_chat_serialized
 def reset_agent_instance(
     agent_id: str,
     *,
@@ -1748,6 +1816,7 @@ def ensure_agent_purge_allowed(agent_id: str) -> dict[str, Any]:
         return _agent_to_api(agent)
 
 
+@agent_session_lifecycle_serialized
 def reactivate_agent_instance(agent_id: str, *, reason: str = "", metadata: dict[str, Any] | None = None) -> dict[str, Any]:
     """Explicitly restore an archived AgentInstance to active status."""
 
@@ -6710,6 +6779,44 @@ def _agent_workspace_relative_path(agent_id: str) -> str:
     return f"workspace/agents/{_safe_fragment(agent_id)}"
 
 
+def _lexical_project_path(path_value: str) -> Path:
+    raw = str(path_value or "").strip()
+    path = Path(raw)
+    if path.parts and path.parts[0].lower() == "workspace":
+        path = _workspace_path(*path.parts[1:])
+    elif not path.is_absolute():
+        path = _project_root() / path
+    return Path(os.path.abspath(path))
+
+
+def _path_is_reparse_point(path: Path) -> bool:
+    attributes = int(getattr(path.lstat(), "st_file_attributes", 0) or 0)
+    return bool(
+        path.is_symlink()
+        or attributes & int(getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400))
+    )
+
+
+def _path_has_reparse_component(path: Path, *, stop_at: Path) -> bool:
+    current = Path(os.path.abspath(path))
+    boundary = Path(os.path.abspath(stop_at))
+    if current != boundary and not current.is_relative_to(boundary):
+        return True
+    while True:
+        try:
+            is_reparse_point = _path_is_reparse_point(current)
+        except FileNotFoundError:
+            is_reparse_point = False
+        except OSError:
+            return True
+        if is_reparse_point:
+            return True
+        if current == boundary:
+            break
+        current = current.parent
+    return False
+
+
 def _is_agent_private_workspace_path(path_value: str, agent_id: str) -> bool:
     normalized_agent_id = str(agent_id or "").strip()
     if not normalized_agent_id:
@@ -6748,23 +6855,37 @@ def _delete_purged_agent_workspace(agent: dict[str, Any]) -> dict[str, Any]:
     if not workspace_path:
         return {"deleted": False, "deletedPaths": [], "skippedPaths": []}
     try:
-        resolved = _resolve_project_path(workspace_path)
-        agents_root = _workspace_path("agents").resolve()
+        workspace = _lexical_project_path(workspace_path)
+        agents_root = _lexical_project_path("workspace/agents")
+        expected_private = _lexical_project_path(
+            _agent_workspace_relative_path(agent_id)
+        )
     except Exception:
         return {"deleted": False, "deletedPaths": [], "skippedPaths": [workspace_path]}
-    expected_private = _resolve_project_path(_agent_workspace_relative_path(agent_id))
-    if resolved != expected_private:
-        return {"deleted": False, "deletedPaths": [], "skippedPaths": [_relative_project_path(resolved)]}
+    if workspace != expected_private:
+        return {"deleted": False, "deletedPaths": [], "skippedPaths": [workspace_path]}
     try:
-        if not resolved.is_relative_to(agents_root):
-            return {"deleted": False, "deletedPaths": [], "skippedPaths": [_relative_project_path(resolved)]}
+        if not workspace.is_relative_to(agents_root):
+            return {"deleted": False, "deletedPaths": [], "skippedPaths": [workspace_path]}
     except ValueError:
-        return {"deleted": False, "deletedPaths": [], "skippedPaths": [_relative_project_path(resolved)]}
-    if not resolved.exists():
+        return {"deleted": False, "deletedPaths": [], "skippedPaths": [workspace_path]}
+    if _path_has_reparse_component(workspace, stop_at=agents_root):
+        return {
+            "deleted": False,
+            "deletedPaths": [],
+            "skippedPaths": [
+                f"{workspace_path} (symlink/junction/reparse point)"
+            ],
+        }
+    if not workspace.exists():
         return {"deleted": False, "deletedPaths": [], "skippedPaths": []}
-    relative_path = _relative_project_path(resolved)
+    relative_path = _agent_workspace_relative_path(agent_id)
     try:
-        shutil.rmtree(resolved)
+        if _path_has_reparse_component(workspace, stop_at=agents_root):
+            raise AgentDirectoryError(
+                "Agent workspace path changed to a symlink, junction, or reparse point."
+            )
+        shutil.rmtree(workspace)
     except Exception as exc:
         return {"deleted": False, "deletedPaths": [], "skippedPaths": [f"{relative_path} ({type(exc).__name__})"]}
     return {"deleted": True, "deletedPaths": [relative_path], "skippedPaths": []}

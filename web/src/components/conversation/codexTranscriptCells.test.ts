@@ -262,6 +262,7 @@ describe("codexTranscriptCells", () => {
           kind: "tool",
           label: "命令",
           rawLabel: "cli_tool",
+          terminalSessionId: "op-command",
           status: "done",
           summary: "npm --prefix web run test",
           durationSeconds: 1.5,

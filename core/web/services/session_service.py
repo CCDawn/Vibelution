@@ -10,10 +10,12 @@ import base64
 import binascii
 import copy
 import json
+import os
 import queue
 import re
 import secrets
 import shutil
+import stat
 import threading
 import hashlib
 import time
@@ -22,6 +24,7 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from datetime import datetime
+from functools import wraps
 from pathlib import Path
 from typing import Any, Callable, Mapping
 from urllib.parse import quote
@@ -249,6 +252,32 @@ from .session.persist import (
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 _CHAT_STATE_LOCK = threading.RLock()
+
+
+def session_agent_lifecycle_serialized(
+    callback: Callable[..., Any],
+) -> Callable[..., Any]:
+    """Serialize chat state before entering the shared Agent lifecycle lock."""
+
+    @wraps(callback)
+    def wrapped(*args: Any, **kwargs: Any) -> Any:
+        with session_agent_lifecycle_transaction():
+            return callback(*args, **kwargs)
+
+    return wrapped
+
+
+@contextmanager
+def session_agent_lifecycle_transaction():
+    """Hold chat state before the shared Agent lifecycle serialization lock."""
+
+    with (
+        _CHAT_STATE_LOCK,
+        agent_directory_service.agent_session_lifecycle_transaction(),
+    ):
+        yield
+
+
 _RUNNING_SESSIONS_LOCK = threading.Lock()
 _RUNNING_SESSION_IDS: set[str] = set()
 _SESSION_ACTIVE_TURN_IDS: dict[str, str] = {}
@@ -840,18 +869,20 @@ def store_session_image_artifact(
     if not payload:
         raise SessionValidationError("Image artifact payload is empty.")
 
-    workspace_path = _ensure_session_workspace(normalized_session_id)
-    images_dir = (workspace_path / "artifacts" / "images").resolve()
-    artifacts_root = (workspace_path / "artifacts").resolve()
-    images_dir.mkdir(parents=True, exist_ok=True)
-    if not images_dir.is_relative_to(artifacts_root):
-        raise SessionValidationError(f"Invalid session image artifact path: {images_dir}")
+    with _CHAT_STATE_LOCK:
+        _ensure_session_mutable(normalized_session_id)
+        workspace_path = _ensure_session_workspace(normalized_session_id)
+        images_dir = (workspace_path / "artifacts" / "images").resolve()
+        artifacts_root = (workspace_path / "artifacts").resolve()
+        images_dir.mkdir(parents=True, exist_ok=True)
+        if not images_dir.is_relative_to(artifacts_root):
+            raise SessionValidationError(f"Invalid session image artifact path: {images_dir}")
 
-    artifact_id = f"{source}-{int(time.time() * 1000)}-{secrets.token_hex(4)}.{normalized_format}"
-    output_path = (images_dir / artifact_id).resolve()
-    if output_path.parent != images_dir:
-        raise SessionValidationError("Invalid session image artifact filename.")
-    output_path.write_bytes(payload)
+        artifact_id = f"{source}-{int(time.time() * 1000)}-{secrets.token_hex(4)}.{normalized_format}"
+        output_path = (images_dir / artifact_id).resolve()
+        if output_path.parent != images_dir:
+            raise SessionValidationError("Invalid session image artifact filename.")
+        output_path.write_bytes(payload)
 
     url = (
         f"/api/sessions/{quote(normalized_session_id, safe='')}"
@@ -897,19 +928,21 @@ def store_session_user_image_attachment(
     extension = sniffed_extension
     normalized_content_type = _SESSION_IMAGE_ARTIFACT_CONTENT_TYPES[extension]
 
-    artifact = store_session_image_artifact(
-        session_id,
-        payload,
-        output_format=extension,
-        source="user-image",
-    )
-    attachment = {
-        **artifact,
-        "kind": "user_image",
-        "status": "ready",
-        "filename": original_filename or artifact["filename"],
-    }
-    _remember_session_uploaded_attachment(session_id, attachment)
+    with _CHAT_STATE_LOCK:
+        _ensure_session_mutable(session_id)
+        artifact = store_session_image_artifact(
+            session_id,
+            payload,
+            output_format=extension,
+            source="user-image",
+        )
+        attachment = {
+            **artifact,
+            "kind": "user_image",
+            "status": "ready",
+            "filename": original_filename or artifact["filename"],
+        }
+        _remember_session_uploaded_attachment(session_id, attachment)
     _record_session_attachment_event(
         session_id,
         "stored",
@@ -3511,6 +3544,7 @@ def select_chat_session(session_id: str) -> dict:
             conversation = _find_conversation_entry(payload, normalized_session_id)
         if conversation is None:
             raise SessionNotFoundError("Session not found")
+        _ensure_session_mutable(normalized_session_id, conversation=conversation)
         changed = _ensure_conversation_workspace_metadata(conversation) or changed
         changed = _ensure_conversation_agent_metadata(conversation, agent_by_id=agent_by_id) or changed
         previous_active_id = str(payload.get("active_conversation_id") or "").strip()
@@ -3834,6 +3868,7 @@ def create_child_session(
         source_parent = _find_conversation_entry(payload, parent_id)
         if source_parent is None:
             raise SessionNotFoundError(text_for(lang, zh="未找到父会话。", en="Parent session not found."))
+        _ensure_session_mutable(parent_id, conversation=source_parent)
         _ensure_conversation_workspace_metadata(source_parent)
         _ensure_conversation_agent_metadata(source_parent)
         normalized_parent = _normalize_conversation(source_parent, ensure_workspace=False)
@@ -3977,6 +4012,7 @@ def update_chat_session(
         conversation = _find_conversation_entry(payload, conversation_id)
         if conversation is None:
             raise SessionNotFoundError(text_for(lang, zh="未找到当前会话。", en="Session not found."))
+        _ensure_session_mutable(conversation_id, conversation=conversation)
         changed = False
         changed = _ensure_conversation_workspace_metadata(conversation) or changed
         changed = _ensure_conversation_agent_metadata(conversation) or changed
@@ -4024,6 +4060,7 @@ def update_chat_session_title(session_id: str, title: str) -> dict:
         conversation = _find_conversation_entry(payload, conversation_id)
         if conversation is None:
             raise SessionNotFoundError(text_for(lang, zh="未找到当前会话。", en="Session not found."))
+        _ensure_session_mutable(conversation_id, conversation=conversation)
 
         session_kind = str(conversation.get("session_kind") or conversation.get("sessionKind") or "main").strip().lower()
         agent_id = str(conversation.get("agent_id") or conversation.get("agentId") or "").strip()
@@ -4186,6 +4223,10 @@ def _delete_chat_session_state(session_id: str, *, activate_replacement: bool = 
                 break
         if target_index < 0 or target_conversation is None:
             raise SessionNotFoundError(text_for(lang, zh="未找到当前会话。", en="Session not found."))
+        _ensure_session_mutable(
+            conversation_id,
+            conversation=target_conversation,
+        )
         _ensure_conversation_workspace_metadata(target_conversation)
         _ensure_conversation_agent_metadata(target_conversation)
         target_agent_id = str(target_conversation.get("agent_id") or target_conversation.get("agentId") or "").strip()
@@ -5770,6 +5811,31 @@ def _agent_session_conversation_ids(
     return ordered_ids
 
 
+def _ensure_agent_direct_session_not_reassigned(
+    agent_id: str,
+    direct_session_id: str,
+) -> None:
+    normalized_agent_id = str(agent_id or "").strip()
+    normalized_direct_session_id = str(direct_session_id or "").strip()
+    if not normalized_agent_id or not normalized_direct_session_id:
+        return
+    for agent in agent_directory_service.list_agents(include_archived=False):
+        if not isinstance(agent, dict):
+            continue
+        active_agent_id = str(agent.get("agentId") or "").strip()
+        if not active_agent_id or active_agent_id == normalized_agent_id:
+            continue
+        if (
+            str(agent.get("directSessionId") or "").strip()
+            == normalized_direct_session_id
+        ):
+            raise SessionValidationError(
+                "Agent direct session is now bound to another active Agent "
+                f"({active_agent_id}); archive or purge cannot take ownership "
+                f"of session {normalized_direct_session_id}."
+            )
+
+
 def _record_agent_session_lifecycle_event(
     phase: str,
     event_code: str,
@@ -5910,6 +5976,7 @@ def _restore_agent_session_lifecycle_state(restore_token: dict[str, Any]) -> boo
     return True
 
 
+@session_agent_lifecycle_serialized
 def archive_agent_sessions(
     agent_id: str,
     *,
@@ -5922,6 +5989,10 @@ def archive_agent_sessions(
     normalized_direct_session_id = str(direct_session_id or "").strip()
     if not normalized_agent_id:
         raise SessionValidationError("Agent id is required to archive sessions.")
+    _ensure_agent_direct_session_not_reassigned(
+        normalized_agent_id,
+        normalized_direct_session_id,
+    )
     timestamp = _now_timestamp()
     restore_token: dict[str, Any] | None = None
     session_ids: list[str] = []
@@ -5952,7 +6023,7 @@ def archive_agent_sessions(
                 lightweight=True,
             ) or {"id": session_id}
             phase = _conversation_phase(session_id, normalized)
-            if phase in {"running", "stopping"}:
+            if phase in {"queued", "running", "stopping", "paused"}:
                 raise SessionBusyError(
                     text_for(
                         get_web_language(),
@@ -6072,6 +6143,140 @@ def _agent_session_purge_staging_root(
     return staging_root
 
 
+_AGENT_SESSION_PURGE_MANIFEST = ".purge-manifest.json"
+_AGENT_SESSION_PURGE_CLEANUP_MARKER_SUFFIX = ".cleanup.json"
+
+
+def _path_is_reparse_point(path: Path) -> bool:
+    try:
+        attributes = int(getattr(path.lstat(), "st_file_attributes", 0) or 0)
+    except OSError:
+        return False
+    return bool(
+        path.is_symlink()
+        or attributes & int(getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400))
+    )
+
+
+def _agent_session_purge_manifest_path(staging_root: Path) -> Path:
+    return staging_root / _AGENT_SESSION_PURGE_MANIFEST
+
+
+def _agent_session_purge_cleanup_marker_path(staging_root: Path) -> Path:
+    return staging_root.parent / (
+        staging_root.name + _AGENT_SESSION_PURGE_CLEANUP_MARKER_SUFFIX
+    )
+
+
+def _write_agent_session_purge_record(
+    path: Path,
+    payload: dict[str, Any],
+) -> None:
+    temporary_path = path.with_name(f"{path.name}.{secrets.token_hex(4)}.tmp")
+    try:
+        temporary_path.write_text(
+            json.dumps(payload, ensure_ascii=False, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        os.replace(temporary_path, path)
+    finally:
+        if temporary_path.exists():
+            temporary_path.unlink()
+
+
+def _write_agent_session_purge_manifest(
+    staging_root: Path,
+    manifest: dict[str, Any],
+) -> None:
+    if _path_is_reparse_point(staging_root):
+        raise SessionValidationError(
+            f"Agent session purge staging root is a reparse point: {staging_root}"
+        )
+    staging_root.mkdir(parents=True, exist_ok=True)
+    _write_agent_session_purge_record(
+        _agent_session_purge_manifest_path(staging_root),
+        manifest,
+    )
+
+
+def _read_agent_session_purge_manifest(
+    staging_root: Path,
+) -> dict[str, Any] | None:
+    manifest_path = _agent_session_purge_manifest_path(staging_root)
+    if (
+        not manifest_path.is_file()
+        or manifest_path.is_symlink()
+        or _path_is_reparse_point(manifest_path)
+    ):
+        return None
+    try:
+        payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _read_agent_session_purge_cleanup_marker(
+    marker_path: Path,
+) -> dict[str, Any] | None:
+    if (
+        not marker_path.is_file()
+        or marker_path.is_symlink()
+        or _path_is_reparse_point(marker_path)
+    ):
+        return None
+    try:
+        payload = json.loads(marker_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if (
+        not isinstance(payload, dict)
+        or str(payload.get("state") or "").strip() != "cleanup_pending"
+    ):
+        return None
+    return payload
+
+
+def _restore_staged_agent_workspace_move(move: dict[str, Any]) -> bool:
+    source_value = str(move.get("source") or "").strip()
+    staged_value = str(move.get("staged") or "").strip()
+    if not source_value or not staged_value:
+        raise SessionValidationError("Agent session purge restore path is missing.")
+    source = Path(source_value)
+    staged = Path(staged_value)
+    source_exists = source.exists()
+    staged_exists = staged.exists()
+    if source_exists and not staged_exists:
+        return False
+    if not source_exists and not staged_exists:
+        raise FileNotFoundError(
+            f"Agent session workspace is missing from source and staging: {source}"
+        )
+    if source_exists and staged_exists:
+        raise FileExistsError(
+            f"Agent session workspace restore conflicts with an existing source: {source}"
+        )
+    source.parent.mkdir(parents=True, exist_ok=True)
+    shutil.move(str(staged), str(source))
+    if not source.exists() or staged.exists():
+        raise OSError(f"Agent session workspace restore did not converge: {source}")
+    return True
+
+
+def _agent_session_purge_staging_root_is_safe(
+    staging_root: Path,
+    *,
+    allowed_roots: list[Path],
+) -> bool:
+    return bool(
+        staging_root.name.startswith(".agent-purge-")
+        and any(staging_root.parent == root for root in allowed_roots)
+        and not staging_root.is_symlink()
+        and not _path_is_reparse_point(staging_root)
+    )
+
+
+@session_agent_lifecycle_serialized
 def stage_agent_session_purge(
     agent_id: str,
     *,
@@ -6083,6 +6288,34 @@ def stage_agent_session_purge(
     normalized_direct_session_id = str(direct_session_id or "").strip()
     if not normalized_agent_id:
         raise SessionValidationError("Agent id is required to purge sessions.")
+    registered_agent = agent_directory_service.get_agent(
+        normalized_agent_id,
+        include_archived=True,
+    )
+    if registered_agent is None:
+        raise SessionNotFoundError(f"Agent not found: {normalized_agent_id}")
+    if str(registered_agent.get("status") or "active").strip() != "archived":
+        raise SessionValidationError(
+            "Only archived Agents can have their sessions permanently purged."
+        )
+    registered_direct_session_id = str(
+        registered_agent.get("directSessionId") or ""
+    ).strip()
+    if (
+        normalized_direct_session_id
+        and registered_direct_session_id
+        and normalized_direct_session_id != registered_direct_session_id
+    ):
+        raise SessionValidationError(
+            "Requested direct session does not match the archived Agent."
+        )
+    normalized_direct_session_id = (
+        normalized_direct_session_id or registered_direct_session_id
+    )
+    _ensure_agent_direct_session_not_reassigned(
+        normalized_agent_id,
+        normalized_direct_session_id,
+    )
     timestamp = _now_timestamp()
     restore_token: dict[str, Any] | None = None
     session_ids: list[str] = []
@@ -6111,7 +6344,7 @@ def stage_agent_session_purge(
                 lightweight=True,
             ) or {"id": session_id}
             phase = _conversation_phase(session_id, normalized)
-            if phase in {"running", "stopping"}:
+            if phase in {"queued", "running", "stopping", "paused"}:
                 raise SessionBusyError(
                     text_for(
                         get_web_language(),
@@ -6173,6 +6406,7 @@ def stage_agent_session_purge(
             staging_roots,
             strict=True,
         ):
+            root_workspace_moves: list[dict[str, str]] = []
             for session_id in session_ids:
                 source = (sessions_root / _safe_session_workspace_token(session_id)).resolve()
                 if not source.is_relative_to(sessions_root) or not source.exists():
@@ -6181,17 +6415,55 @@ def stage_agent_session_purge(
                 destination = (staging_root / source.name).resolve()
                 if not destination.is_relative_to(staging_root):
                     raise SessionValidationError(f"Invalid staged session workspace path: {destination}")
+                move = {"source": str(source), "staged": str(destination)}
+                root_workspace_moves.append(move)
+                workspace_moves.append(move)
+                _write_agent_session_purge_manifest(
+                    staging_root,
+                    {
+                        "version": 1,
+                        "transactionId": staging_nonce,
+                        "agentId": normalized_agent_id,
+                        "state": "staged",
+                        "sessionIds": session_ids,
+                        "workspaceMoves": root_workspace_moves,
+                        "updatedAt": _now_timestamp(),
+                    },
+                )
                 shutil.move(str(source), str(destination))
-                workspace_moves.append({"source": str(source), "staged": str(destination)})
-    except Exception:
+    except Exception as exc:
+        rollback_failures: list[str] = []
         for move in reversed(workspace_moves):
-            source = Path(move["source"])
-            staged = Path(move["staged"])
-            if staged.exists() and not source.exists():
-                source.parent.mkdir(parents=True, exist_ok=True)
-                shutil.move(str(staged), str(source))
+            try:
+                _restore_staged_agent_workspace_move(move)
+            except Exception as rollback_error:
+                rollback_failures.append(
+                    "rollback_workspace:"
+                    + type(rollback_error).__name__
+                )
         if restore_token is not None:
-            _restore_agent_session_lifecycle_state(restore_token)
+            try:
+                _restore_agent_session_lifecycle_state(restore_token)
+            except Exception as rollback_error:
+                rollback_failures.append(
+                    "rollback_chat_state:"
+                    + type(rollback_error).__name__
+                )
+        if not rollback_failures:
+            for staging_root in staging_roots:
+                try:
+                    if staging_root.exists():
+                        _delete_agent_session_purge_staging_root(staging_root)
+                except Exception as rollback_error:
+                    rollback_failures.append(
+                        "rollback_staging_cleanup:"
+                        + type(rollback_error).__name__
+                    )
+        if rollback_failures:
+            exc.add_note(
+                "Agent session purge staging compensation incomplete: "
+                + ", ".join(rollback_failures)
+            )
         raise
     if restore_token is not None:
         restore_token["workspaceMoves"] = workspace_moves
@@ -6224,6 +6496,7 @@ def stage_agent_session_purge(
     return result
 
 
+@session_agent_lifecycle_serialized
 def restore_staged_agent_session_purge(restore_token: dict[str, Any] | None) -> dict[str, Any]:
     token = restore_token if isinstance(restore_token, dict) else {}
     workspace_moves = [
@@ -6232,15 +6505,54 @@ def restore_staged_agent_session_purge(restore_token: dict[str, Any] | None) -> 
         if isinstance(item, dict)
     ]
     restored_workspace_count = 0
+    rollback_failures: list[str] = []
     for move in reversed(workspace_moves):
-        source = Path(str(move.get("source") or ""))
-        staged = Path(str(move.get("staged") or ""))
-        if not staged.exists() or source.exists():
-            continue
-        source.parent.mkdir(parents=True, exist_ok=True)
-        shutil.move(str(staged), str(source))
-        restored_workspace_count += 1
-    changed = _restore_agent_session_lifecycle_state(token)
+        try:
+            restored_workspace_count += int(
+                _restore_staged_agent_workspace_move(move)
+            )
+        except Exception as rollback_error:
+            rollback_failures.append(
+                "rollback_workspace:"
+                + type(rollback_error).__name__
+            )
+    changed = False
+    try:
+        changed = _restore_agent_session_lifecycle_state(token)
+    except Exception as rollback_error:
+        rollback_failures.append(
+            "rollback_chat_state:"
+            + type(rollback_error).__name__
+        )
+    if not rollback_failures:
+        staging_root_values = list(token.get("stagingRoots") or [])
+        if not staging_root_values and str(token.get("stagingRoot") or "").strip():
+            staging_root_values = [str(token.get("stagingRoot") or "").strip()]
+        allowed_roots = _agent_session_workspace_roots()
+        for staging_root_value in staging_root_values:
+            staging_root = Path(
+                os.path.abspath(str(staging_root_value or ""))
+            )
+            try:
+                if not _agent_session_purge_staging_root_is_safe(
+                    staging_root,
+                    allowed_roots=allowed_roots,
+                ):
+                    raise SessionValidationError(
+                        f"Invalid Agent session purge staging path: {staging_root}"
+                    )
+                if staging_root.exists():
+                    _delete_agent_session_purge_staging_root(staging_root)
+            except Exception as rollback_error:
+                rollback_failures.append(
+                    "rollback_staging_cleanup:"
+                    + type(rollback_error).__name__
+                )
+    if rollback_failures:
+        raise SessionValidationError(
+            "Agent session purge compensation incomplete: "
+            + ", ".join(rollback_failures)
+        )
     return {
         "status": "restored" if changed else "unchanged",
         "changed": changed,
@@ -6251,9 +6563,134 @@ def restore_staged_agent_session_purge(restore_token: dict[str, Any] | None) -> 
 
 
 def _delete_agent_session_purge_staging_root(staging_root: Path) -> None:
+    if not _agent_session_purge_staging_root_is_safe(
+        staging_root,
+        allowed_roots=_agent_session_workspace_roots(),
+    ):
+        raise SessionValidationError(
+            f"Invalid Agent session purge staging path: {staging_root}"
+        )
     shutil.rmtree(staging_root)
 
 
+@session_agent_lifecycle_serialized
+def retry_pending_agent_session_purge_cleanup() -> dict[str, Any]:
+    """Retry deletion of durable Agent purge staging directories."""
+
+    cleaned_root_count = 0
+    pending_root_count = 0
+    cleanup_failure_types: list[str] = []
+    scanned_root_count = 0
+    skipped_active_root_count = 0
+    allowed_roots = _agent_session_workspace_roots()
+    for sessions_root in allowed_roots:
+        if not sessions_root.exists():
+            continue
+        cleanup_marked_root_names: set[str] = set()
+        for marker_path in sessions_root.iterdir():
+            if (
+                not marker_path.name.startswith(".agent-purge-")
+                or not marker_path.name.endswith(
+                    _AGENT_SESSION_PURGE_CLEANUP_MARKER_SUFFIX
+                )
+            ):
+                continue
+            scanned_root_count += 1
+            if (
+                marker_path.is_symlink()
+                or _path_is_reparse_point(marker_path)
+            ):
+                pending_root_count += 1
+                cleanup_failure_types.append("UnsafeCleanupMarker")
+                continue
+            marker = _read_agent_session_purge_cleanup_marker(marker_path)
+            staging_root_name = str(
+                (marker or {}).get("stagingRootName") or ""
+            ).strip()
+            if (
+                marker is None
+                or not staging_root_name.startswith(".agent-purge-")
+                or marker_path.name
+                != staging_root_name
+                + _AGENT_SESSION_PURGE_CLEANUP_MARKER_SUFFIX
+            ):
+                pending_root_count += 1
+                cleanup_failure_types.append("InvalidCleanupMarker")
+                continue
+            cleanup_marked_root_names.add(staging_root_name)
+            staging_root = Path(
+                os.path.abspath(sessions_root / staging_root_name)
+            )
+            if staging_root.exists():
+                if not _agent_session_purge_staging_root_is_safe(
+                    staging_root,
+                    allowed_roots=allowed_roots,
+                ):
+                    pending_root_count += 1
+                    cleanup_failure_types.append("UnsafeStagingPath")
+                    continue
+                try:
+                    _delete_agent_session_purge_staging_root(staging_root)
+                except Exception as exc:
+                    cleanup_failure_types.append(type(exc).__name__)
+            if staging_root.exists():
+                pending_root_count += 1
+                continue
+            try:
+                marker_path.unlink()
+            except OSError as exc:
+                cleanup_failure_types.append(type(exc).__name__)
+            if marker_path.exists():
+                pending_root_count += 1
+            else:
+                cleaned_root_count += 1
+        for candidate in sessions_root.iterdir():
+            if (
+                not candidate.name.startswith(".agent-purge-")
+                or candidate.name.endswith(
+                    _AGENT_SESSION_PURGE_CLEANUP_MARKER_SUFFIX
+                )
+                or candidate.name in cleanup_marked_root_names
+            ):
+                continue
+            scanned_root_count += 1
+            staging_root = Path(os.path.abspath(candidate))
+            if not _agent_session_purge_staging_root_is_safe(
+                staging_root,
+                allowed_roots=allowed_roots,
+            ):
+                pending_root_count += 1
+                cleanup_failure_types.append("UnsafeStagingPath")
+                continue
+            manifest = _read_agent_session_purge_manifest(staging_root)
+            if manifest is None:
+                pending_root_count += 1
+                cleanup_failure_types.append("MissingManifest")
+                continue
+            if str(manifest.get("state") or "").strip() == "cleanup_pending":
+                pending_root_count += 1
+                cleanup_failure_types.append("MissingCleanupMarker")
+                continue
+            skipped_active_root_count += 1
+    result = {
+        "status": "cleanup_pending" if pending_root_count else "clean",
+        "scannedRootCount": scanned_root_count,
+        "cleanedRootCount": cleaned_root_count,
+        "pendingRootCount": pending_root_count,
+        "skippedActiveRootCount": skipped_active_root_count,
+        "cleanupFailureTypes": sorted(set(cleanup_failure_types)),
+    }
+    _record_agent_session_lifecycle_event(
+        "agent_purge",
+        "conversation.agent_sessions.purge_cleanup_retried",
+        outcome="partial" if pending_root_count else "succeeded",
+        level="warning" if pending_root_count else "info",
+        fields=result,
+    )
+    return result
+
+
+@session_agent_lifecycle_serialized
 def commit_staged_agent_session_purge(restore_token: dict[str, Any] | None) -> dict[str, Any]:
     token = restore_token if isinstance(restore_token, dict) else {}
     staging_root_values = list(token.get("stagingRoots") or [])
@@ -6266,16 +6703,61 @@ def commit_staged_agent_session_purge(restore_token: dict[str, Any] | None) -> d
     ]
     allowed_roots = _agent_session_workspace_roots()
     cleanup_failure_types: list[str] = []
+    cleanup_marker_paths: list[Path] = []
     for staging_root_value in staging_root_values:
-        staging_root = Path(str(staging_root_value or "")).resolve()
-        if (
-            not any(staging_root.is_relative_to(root) for root in allowed_roots)
-            or not staging_root.name.startswith(".agent-purge-")
+        staging_root = Path(os.path.abspath(str(staging_root_value or "")))
+        cleanup_marker_path = _agent_session_purge_cleanup_marker_path(
+            staging_root
+        )
+        cleanup_marker_paths.append(cleanup_marker_path)
+        if not _agent_session_purge_staging_root_is_safe(
+            staging_root,
+            allowed_roots=allowed_roots,
         ):
-            raise SessionValidationError(f"Invalid Agent session purge staging path: {staging_root}")
+            cleanup_failure_types.append("UnsafeStagingPath")
+            continue
         if staging_root.exists():
+            manifest = _read_agent_session_purge_manifest(staging_root)
+            if manifest is None:
+                cleanup_failure_types.append("MissingManifest")
+                continue
+            committed_manifest = {
+                **manifest,
+                "state": "cleanup_pending",
+                "updatedAt": _now_timestamp(),
+            }
             try:
+                if (
+                    cleanup_marker_path.is_symlink()
+                    or _path_is_reparse_point(cleanup_marker_path)
+                ):
+                    raise SessionValidationError(
+                        "Agent session purge cleanup marker is unsafe."
+                    )
+                _write_agent_session_purge_record(
+                    cleanup_marker_path,
+                    {
+                        "version": 1,
+                        "state": "cleanup_pending",
+                        "stagingRootName": staging_root.name,
+                        "agentId": str(token.get("agentId") or "").strip(),
+                        "transactionId": str(
+                            manifest.get("transactionId") or ""
+                        ).strip(),
+                        "sessionIds": list(token.get("sessionIds") or []),
+                        "updatedAt": _now_timestamp(),
+                    },
+                )
+                _write_agent_session_purge_manifest(
+                    staging_root,
+                    committed_manifest,
+                )
                 _delete_agent_session_purge_staging_root(staging_root)
+            except Exception as exc:
+                cleanup_failure_types.append(type(exc).__name__)
+        if not staging_root.exists() and cleanup_marker_path.exists():
+            try:
+                cleanup_marker_path.unlink()
             except OSError as exc:
                 cleanup_failure_types.append(type(exc).__name__)
     pending_workspace_count = sum(
@@ -6284,7 +6766,14 @@ def commit_staged_agent_session_purge(restore_token: dict[str, Any] | None) -> d
         if Path(str(move.get("staged") or "")).exists()
     )
     deleted_workspace_count = max(0, len(workspace_moves) - pending_workspace_count)
-    cleanup_pending = pending_workspace_count > 0
+    cleanup_marker_pending_count = sum(
+        1 for marker_path in cleanup_marker_paths if marker_path.exists()
+    )
+    cleanup_pending = (
+        pending_workspace_count > 0
+        or cleanup_marker_pending_count > 0
+        or bool(cleanup_failure_types)
+    )
     result = {
         "status": "cleanup_pending" if cleanup_pending else "deleted",
         "agentId": str(token.get("agentId") or "").strip(),
@@ -6292,6 +6781,7 @@ def commit_staged_agent_session_purge(restore_token: dict[str, Any] | None) -> d
         "sessionIds": list(token.get("sessionIds") or []),
         "workspaceDeletedCount": deleted_workspace_count,
         "workspacePendingCount": pending_workspace_count,
+        "cleanupMarkerPendingCount": cleanup_marker_pending_count,
         "cleanupPending": cleanup_pending,
         "cleanupFailureTypes": sorted(set(cleanup_failure_types)),
         "historyRetention": "deleted",
@@ -6307,6 +6797,109 @@ def commit_staged_agent_session_purge(restore_token: dict[str, Any] | None) -> d
             "workspaceDeletedCount": result["workspaceDeletedCount"],
             "workspacePendingCount": result["workspacePendingCount"],
             "cleanupPending": result["cleanupPending"],
+            "cleanupFailureTypes": result["cleanupFailureTypes"],
+            "sessionIds": result["sessionIds"][:20],
+        },
+    )
+    return result
+
+
+def agent_session_purge_cleanup_failure_result(
+    restore_token: dict[str, Any] | None,
+    error: Exception,
+) -> dict[str, Any]:
+    """Describe post-purge cleanup failure without misreporting irreversible delete."""
+
+    token = restore_token if isinstance(restore_token, dict) else {}
+    workspace_moves = [
+        item
+        for item in list(token.get("workspaceMoves") or [])
+        if isinstance(item, dict)
+    ]
+    cleanup_failure_types = [type(error).__name__]
+    staging_root_values = list(token.get("stagingRoots") or [])
+    if not staging_root_values and str(token.get("stagingRoot") or "").strip():
+        staging_root_values = [str(token.get("stagingRoot") or "").strip()]
+    allowed_roots = _agent_session_workspace_roots()
+    cleanup_marker_paths: list[Path] = []
+    for staging_root_value in staging_root_values:
+        staging_root = Path(os.path.abspath(str(staging_root_value or "")))
+        cleanup_marker_path = _agent_session_purge_cleanup_marker_path(
+            staging_root
+        )
+        cleanup_marker_paths.append(cleanup_marker_path)
+        try:
+            if not staging_root.exists():
+                continue
+            if not _agent_session_purge_staging_root_is_safe(
+                staging_root,
+                allowed_roots=allowed_roots,
+            ):
+                raise SessionValidationError(
+                    "Agent session purge staging path is unsafe."
+                )
+            manifest = _read_agent_session_purge_manifest(staging_root)
+            if manifest is None:
+                raise SessionValidationError(
+                    "Agent session purge staging manifest is missing."
+                )
+            if (
+                cleanup_marker_path.is_symlink()
+                or _path_is_reparse_point(cleanup_marker_path)
+            ):
+                raise SessionValidationError(
+                    "Agent session purge cleanup marker is unsafe."
+                )
+            _write_agent_session_purge_record(
+                cleanup_marker_path,
+                {
+                    "version": 1,
+                    "state": "cleanup_pending",
+                    "stagingRootName": staging_root.name,
+                    "agentId": str(token.get("agentId") or "").strip(),
+                    "transactionId": str(
+                        manifest.get("transactionId") or ""
+                    ).strip(),
+                    "sessionIds": list(token.get("sessionIds") or []),
+                    "updatedAt": _now_timestamp(),
+                },
+            )
+        except Exception as marker_error:
+            cleanup_failure_types.append(
+                "cleanup_marker:" + type(marker_error).__name__
+            )
+    pending_workspace_count = sum(
+        1
+        for move in workspace_moves
+        if Path(str(move.get("staged") or "")).exists()
+    )
+    cleanup_marker_pending_count = sum(
+        1 for marker_path in cleanup_marker_paths if marker_path.exists()
+    )
+    result = {
+        "status": "cleanup_pending",
+        "agentId": str(token.get("agentId") or "").strip(),
+        "deletedCount": len(list(token.get("sessionIds") or [])),
+        "sessionIds": list(token.get("sessionIds") or []),
+        "workspaceDeletedCount": max(
+            0,
+            len(workspace_moves) - pending_workspace_count,
+        ),
+        "workspacePendingCount": pending_workspace_count,
+        "cleanupMarkerPendingCount": cleanup_marker_pending_count,
+        "cleanupPending": True,
+        "cleanupFailureTypes": sorted(set(cleanup_failure_types)),
+        "historyRetention": "deleted",
+    }
+    _record_agent_session_lifecycle_event(
+        "agent_purge",
+        "conversation.agent_sessions.purge_cleanup_failed_after_agent_delete",
+        outcome="partial",
+        level="warning",
+        fields={
+            "agentId": result["agentId"],
+            "deletedSessionCount": result["deletedCount"],
+            "workspacePendingCount": result["workspacePendingCount"],
             "cleanupFailureTypes": result["cleanupFailureTypes"],
             "sessionIds": result["sessionIds"][:20],
         },
@@ -10554,6 +11147,47 @@ def _find_conversation_entry(payload: dict[str, Any], session_id: str) -> dict[s
     return None
 
 
+def _conversation_is_read_only(conversation: dict[str, Any]) -> bool:
+    archive_state = conversation.get("archive_state") or conversation.get(
+        "archiveState"
+    )
+    archived = (
+        isinstance(archive_state, dict)
+        and str(archive_state.get("status") or "").strip().lower() == "archived"
+    )
+    return bool(
+        conversation.get("read_only")
+        or conversation.get("readOnly")
+        or archived
+    )
+
+
+def _ensure_session_mutable(
+    session_id: str,
+    *,
+    conversation: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    normalized_session_id = str(session_id or "").strip()
+    if not normalized_session_id:
+        raise SessionNotFoundError("Session not found")
+    target = conversation
+    if target is None:
+        with _CHAT_STATE_LOCK:
+            payload = load_chat_state(PROJECT_ROOT)
+            target = _find_conversation_entry(payload, normalized_session_id)
+    if target is None:
+        raise SessionNotFoundError(f"Session not found: {normalized_session_id}")
+    if _conversation_is_read_only(target):
+        raise SessionValidationError(
+            text_for(
+                get_web_language(),
+                zh="该会话已归档并处于只读状态，不能再修改。",
+                en="This session is archived and read-only; it cannot be modified.",
+            )
+        )
+    return target
+
+
 def _find_cli_agent_lifecycle_message(
     conversation_id: str,
     messages: list[dict[str, Any]],
@@ -10899,6 +11533,10 @@ def update_session_reasoning_effort(
         conversation = _find_conversation_entry(payload, normalized_session_id)
         if conversation is None:
             raise SessionNotFoundError(f"Session not found: {normalized_session_id}")
+        _ensure_session_mutable(
+            normalized_session_id,
+            conversation=conversation,
+        )
         conversation["reasoning_effort"] = normalized_effort
         conversation["updated_at"] = _now_timestamp()
         save_chat_state(PROJECT_ROOT, payload)
@@ -11255,7 +11893,7 @@ def _session_prompt_cache_log_fields(*, scope: str, partition: str) -> dict[str,
 
 def _is_session_busy_for_delete(conversation_id: str, conversation: dict[str, Any]) -> bool:
     phase = _conversation_phase(conversation_id, conversation)
-    return phase in {"running", "stopping"}
+    return phase in {"queued", "running", "stopping", "paused"}
 
 
 def _conversation_phase(conversation_id: str, conversation: dict[str, Any]) -> str:
@@ -11272,6 +11910,7 @@ def _conversation_phase(conversation_id: str, conversation: dict[str, Any]) -> s
         "ready",
         "completed",
         "needs_continue",
+        "paused",
         "paused_limit",
         "stopped_by_user",
         "failed_provider",

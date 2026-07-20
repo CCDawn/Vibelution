@@ -44,45 +44,47 @@ def submit_session_guidance(session_id: str, content: str, *, mode: str = "safe"
     if normalized_mode not in {"safe", "interrupt"}:
         raise s.SessionValidationError(s.text_for(lang, zh="引导模式无效。", en="Invalid guidance mode."))
 
-    controller = s._get_session_turn_control(conversation_id)
-    active_turn_id = ""
-    if controller is not None:
-        active_turn_id = str(controller.turn_id or "").strip()
-    if not active_turn_id:
-        for run in s.list_active_session_work_runs():
-            if str(run.get("sessionId") or "").strip() == conversation_id:
-                active_turn_id = str(run.get("runId") or "").strip()
-                break
+    with s._CHAT_STATE_LOCK:
+        s._ensure_session_mutable(conversation_id)
+        controller = s._get_session_turn_control(conversation_id)
+        active_turn_id = ""
+        if controller is not None:
+            active_turn_id = str(controller.turn_id or "").strip()
+        if not active_turn_id:
+            for run in s.list_active_session_work_runs():
+                if str(run.get("sessionId") or "").strip() == conversation_id:
+                    active_turn_id = str(run.get("runId") or "").strip()
+                    break
 
-    running = s._is_session_running(conversation_id)
-    signal = s._record_chat_next_state_signal(
-        session_id=conversation_id,
-        turn_id=active_turn_id,
-        source="user",
-        kind="user_interrupt_guidance" if normalized_mode == "interrupt" else "user_guidance",
-        polarity="neutral",
-        mode="directive",
-        related_event_code=(
-            "conversation.user_interrupt_guidance_submitted"
-            if normalized_mode == "interrupt"
-            else "conversation.user_guidance_submitted"
-        ),
-        summary=guidance_text,
-        metadata={
-            "guidanceMode": normalized_mode,
-            "guidanceLength": len(guidance_text),
-            "sessionRunning": running,
-            "willRequestStop": normalized_mode == "interrupt" and running,
-        },
-    )
-    s._record_session_guidance_event(
-        conversation_id,
-        mode=normalized_mode,
-        turn_id=active_turn_id,
-        signal_id=str((signal or {}).get("signalId") or ""),
-        guidance_length=len(guidance_text),
-        running=running,
-    )
+        running = s._is_session_running(conversation_id)
+        signal = s._record_chat_next_state_signal(
+            session_id=conversation_id,
+            turn_id=active_turn_id,
+            source="user",
+            kind="user_interrupt_guidance" if normalized_mode == "interrupt" else "user_guidance",
+            polarity="neutral",
+            mode="directive",
+            related_event_code=(
+                "conversation.user_interrupt_guidance_submitted"
+                if normalized_mode == "interrupt"
+                else "conversation.user_guidance_submitted"
+            ),
+            summary=guidance_text,
+            metadata={
+                "guidanceMode": normalized_mode,
+                "guidanceLength": len(guidance_text),
+                "sessionRunning": running,
+                "willRequestStop": normalized_mode == "interrupt" and running,
+            },
+        )
+        s._record_session_guidance_event(
+            conversation_id,
+            mode=normalized_mode,
+            turn_id=active_turn_id,
+            signal_id=str((signal or {}).get("signalId") or ""),
+            guidance_length=len(guidance_text),
+            running=running,
+        )
 
     if normalized_mode == "interrupt" and running:
         return s.request_stop_session_turn(conversation_id)
@@ -132,6 +134,10 @@ def submit_session_message(
         conversation = s._find_conversation_entry(payload, conversation_id)
         if conversation is None:
             raise s.SessionNotFoundError(s.text_for(lang, zh="未找到当前会话。", en="Session not found."))
+        s._ensure_session_mutable(
+            conversation_id,
+            conversation=conversation,
+        )
         s._ensure_conversation_workspace_metadata(conversation)
         attachments = s._resolve_session_image_attachments(
             conversation_id,
@@ -638,7 +644,6 @@ def submit_session_message_lightweight(
 ) -> dict[str, Any]:
     """Submit a user message and return the smallest accepted-turn payload."""
 
-    s = _service()
     detail = submit_session_message(
         session_id,
         content,
@@ -688,6 +693,10 @@ def edit_and_resubmit_session_message(
         conversation = s._find_conversation_entry(payload, conversation_id)
         if conversation is None:
             raise s.SessionNotFoundError(s.text_for(lang, zh="未找到当前会话。", en="Session not found."))
+        s._ensure_session_mutable(
+            conversation_id,
+            conversation=conversation,
+        )
         s._ensure_conversation_workspace_metadata(conversation)
 
         previous_messages = s._session_ledger_visible_messages(conversation_id)
