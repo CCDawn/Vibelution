@@ -1,3 +1,5 @@
+import "../design/route-css/evolution.tailwind.css";
+
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Activity,

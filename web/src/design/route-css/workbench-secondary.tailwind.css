@@ -1,0 +1,35 @@
+/* Secondary workbench routes that are not chat-primary. */
+@import "tailwindcss" source(none);
+
+@source "../../routes/ToolsRoute.tsx";
+@source "../../routes/ToolsRoute.styles.ts";
+@source "../../routes/ToolsRouteAgentScopePanel.tsx";
+@source "../../routes/ToolsRouteAgentScopePanel.styles.ts";
+@source "../../routes/LogsRoute.tsx";
+@source "../../routes/LogsRoute.styles.ts";
+@source "../../routes/LauncherRoute.tsx";
+@source "../../routes/LauncherRoute.styles.ts";
+@source "../../routes/Launcher*.tsx";
+@source "../../routes/Launcher*.styles.ts";
+@source "../../routes/GitRoute.tsx";
+@source "../../routes/GitRoute.styles.ts";
+@source "../../routes/GitDiffView.tsx";
+@source "../../routes/GitDiffView.styles.ts";
+@source "../../routes/SkillsRoute.tsx";
+@source "../../routes/SkillsRoute.styles.ts";
+@source "../../routes/UsageRoute.tsx";
+@source "../../routes/UsageRoute.styles.ts";
+@source "../../routes/KernelTaskCenterRoute.tsx";
+@source "../../routes/KernelTaskCenterRoute.styles.ts";
+@source "../../routes/PromptTemplatesRoute.tsx";
+@source "../../routes/PromptTemplatesRoute.styles.ts";
+@source "../../routes/PetRoute.tsx";
+@source "../../routes/PetRoute.styles.ts";
+@source "../../routes/ResetRoute.tsx";
+@source "../../routes/ResetRoute.styles.ts";
+@source "../../routes/SupervisedReviewRoute.tsx";
+@source "../../routes/SupervisedReviewRoute.styles.ts";
+@source "../../routes/Supervised*.tsx";
+@source "../../routes/Supervised*.styles.ts";
+@source "../../routes/RuntimeScenesPane.tsx";
+@source "../../routes/RuntimeScenesPane.styles.ts";

@@ -1,3 +1,5 @@
+import "../design/route-css/workbench-secondary.tailwind.css";
+
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Activity, Database, Gauge, RefreshCw } from "lucide-react";
 

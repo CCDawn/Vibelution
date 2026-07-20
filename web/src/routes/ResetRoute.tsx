@@ -1,3 +1,5 @@
+import "../design/route-css/workbench-secondary.tailwind.css";
+
 import { AlertTriangle, CheckCircle2, ExternalLink, ShieldCheck } from "lucide-react";
 
 import { VRouteHeader } from "../components/vui";

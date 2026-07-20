@@ -1,3 +1,5 @@
+import "../design/route-css/config.tailwind.css";
+
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ChevronRight,

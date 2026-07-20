@@ -1,0 +1,7 @@
+/* Loaded with AgentsRoute — keep out of the shell CSS entry. */
+@import "tailwindcss" source(none);
+
+@source "../../routes/AgentsRoute.tsx";
+@source "../../routes/AgentsRoute.styles.ts";
+@source "../../routes/Agent*.tsx";
+@source "../../routes/Agent*.styles.ts";

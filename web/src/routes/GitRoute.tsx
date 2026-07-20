@@ -1,3 +1,5 @@
+import "../design/route-css/workbench-secondary.tailwind.css";
+
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Bot, CheckSquare, Clock3, FileText, GitBranch, GitCommitHorizontal, RefreshCw, Save, Square } from "lucide-react";
 import { type CSSProperties, type KeyboardEvent, type PointerEvent, type ReactNode, useEffect, useMemo, useState } from "react";

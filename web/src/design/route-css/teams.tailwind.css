@@ -1,0 +1,7 @@
+/* Loaded with TeamsRoute — keep out of the shell CSS entry. */
+@import "tailwindcss" source(none);
+
+@source "../../routes/TeamsRoute.tsx";
+@source "../../routes/TeamsRoute.styles.ts";
+@source "../../routes/Team*.tsx";
+@source "../../routes/Team*.styles.ts";

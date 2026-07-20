@@ -1,0 +1,9 @@
+/* Loaded with Evolution / Self-Evolution surfaces. */
+@import "tailwindcss" source(none);
+
+@source "../../routes/EvolutionRoute.tsx";
+@source "../../routes/EvolutionRoute.styles.ts";
+@source "../../routes/Evolution*.tsx";
+@source "../../routes/Evolution*.styles.ts";
+@source "../../routes/SelfEvolutionTrack.tsx";
+@source "../../routes/SelfEvolutionTrack.styles.ts";

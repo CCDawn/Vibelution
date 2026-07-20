@@ -1,0 +1,7 @@
+/* Loaded with Research surfaces. */
+@import "tailwindcss" source(none);
+
+@source "../../routes/ResearchRoute.tsx";
+@source "../../routes/ResearchRoute.styles.ts";
+@source "../../routes/ResearchFlowCanvasRoute.tsx";
+@source "../../routes/ResearchFlowCanvasRoute.styles.ts";

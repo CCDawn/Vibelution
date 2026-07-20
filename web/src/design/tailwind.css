@@ -1,9 +1,38 @@
 @import "tailwindcss" source(none);
 
+/* Shell + shared UI (always loaded). */
 @source "../app/**/*.{ts,tsx}";
 @source "../agent-thread/**/*.{ts,tsx}";
 @source "../components/**/*.{ts,tsx}";
-@source "../routes/**/*.{ts,tsx}";
+
+/*
+ * Chat is the primary workbench surface and is kept in the shell CSS entry
+ * so first navigation to /chat does not wait on a second CSS chunk.
+ * Heavy non-chat routes load their utilities via design/route-css/*.tailwind.css.
+ */
+@source "../routes/ChatCodingRoute.tsx";
+@source "../routes/ChatCodingRoute.styles.ts";
+@source "../routes/chat/**/*.{ts,tsx}";
+@source "../routes/AgentSessionTabStrip.tsx";
+@source "../routes/AgentSessionTabStrip.styles.ts";
+@source "../routes/AgentConversationDirectory.tsx";
+@source "../routes/AgentConversationDirectory.styles.ts";
+@source "../routes/ConversationIndexSection.tsx";
+@source "../routes/ConversationIndexSection.styles.ts";
+@source "../routes/ConversationIndexTree.tsx";
+@source "../routes/ConversationIndexTree.styles.ts";
+@source "../routes/DirectSessionIndexItem.tsx";
+@source "../routes/DirectSessionIndexItem.styles.ts";
+@source "../routes/DirectSessionIndexList.tsx";
+@source "../routes/GroupSessionIndexItems.tsx";
+@source "../routes/GroupSessionIndexItems.styles.ts";
+@source "../routes/SessionContextMenu.tsx";
+@source "../routes/SessionContextMenu.styles.ts";
+@source "../routes/agent-create/**/*.{ts,tsx}";
+@source "../routes/LegacyChatRoomsRedirect.tsx";
+@source "../routes/HomeRedirect.tsx";
+@source "../routes/WorkbenchDomainRoute.tsx";
+@source "../routes/WorkbenchModeRoute.tsx";
 
 @theme inline {
   --font-sans: var(--font-body);
