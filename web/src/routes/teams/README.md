@@ -11,6 +11,7 @@ Agent-oriented map for Teams workbench development. Prefer editing a **module** 
 | Team kind guards / system-team roles | `teamKindModel.ts` | UI panels |
 | Canvas geometry / auto-layout / edge paths | `canvasGeometry.ts` | styles maps, mutations |
 | Source-collection evidence / filter pure math | `source-collection/evidenceModel.ts` | EventSource, mutations |
+| Source-collection presentation labels / storage paths / tones | `source-collection/presentationModel.ts` | mutations, SSE |
 | Source-collection run selection / labels | `source-collection/runModel.ts` | UI panels |
 | Stage projection / phase-close readiness | `source-collection/stageProjection.ts` | Graph SVG |
 | Research workflow resource queries/keys | `useResearchWorkflowResources.ts` | Canvas drag |
@@ -40,8 +41,8 @@ Agent-oriented map for Teams workbench development. Prefer editing a **module** 
 
 ## Pure extract progress
 
-- **Done:** workspace navigation, team kind guards, canvas geometry (with unit tests).
-- **Still in `TeamsRoute.tsx`:** source-collection draft/status labels, experiment/loop types+drafts, AI-search presentation, workflow status labels, mutation wiring, JSX.
+- **Done:** workspace navigation, team kind guards, canvas geometry, source-collection presentation labels/paths/tones (with unit tests).
+- **Still in `TeamsRoute.tsx`:** experiment/loop types+drafts, AI-search presentation, remaining workflow status labels, mutation wiring, JSX.
 
 ## Next (planned)
 
