@@ -1152,6 +1152,12 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("最近诊断单独展示，不覆盖主线结果");
     expect(routeSource).toContain("bestValidatedResultId");
     expect(routeSource).toContain("latestDiagnosticStatus");
+    expect(routeSource).toContain("researchIterationLifecycleStatusLabel");
+    expect(routeSource).toContain("data-research-stage-detail-status={detailHeroStatus}");
+    expect(routeSource).toContain("data-research-stage-detail-best={detailHeroBestValue}");
+    expect(routeSource).toContain("data-research-stage-detail-diagnostic={detailHeroDiagnosticValue}");
+    expect(routeSource).toContain("stage3Lifecycle.bestCandidateId");
+    expect(routeSource).toContain("stage3Lifecycle.latestDiagnosticStatus.status");
     expect(routeSource).toContain("memoryContextSummary");
     expect(routeSource).toContain("团队记忆");
     expect(routeSource).toContain("已用记忆");

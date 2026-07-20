@@ -2133,6 +2133,19 @@ function researchStageAgentConfigTone(agent: AgentConfigWorkspaceAgent | null | 
   return "ready";
 }
 
+function researchIterationLifecycleStatusLabel(status: string, lang: "zh" | "en") {
+  if (status === "accepted_for_writeup") {
+    return lang === "zh" ? "已晋升" : "promoted";
+  }
+  if (status === "not_started") {
+    return lang === "zh" ? "待执行" : "not started";
+  }
+  if (["needs_review", "ready_for_iteration", "repair_and_repeat"].includes(status)) {
+    return lang === "zh" ? "待优化" : "needs iteration";
+  }
+  return lang === "zh" ? "执行中" : "executing";
+}
+
 function canvasViewStyle(nodes: TeamCanvasNode[], frameSize?: CanvasFrameSize): CanvasViewportStyle {
   if (!nodes.length) {
     return {
@@ -5385,17 +5398,7 @@ export function TeamsRoute({
         }
       }
       if (stageType === "iteration" && experimentLifecycleProjection?.stage3) {
-        const executionStatus = experimentLifecycleProjection.stage3.status;
-        if (executionStatus === "accepted_for_writeup") {
-          return lang === "zh" ? "已晋升" : "promoted";
-        }
-        if (executionStatus === "not_started") {
-          return lang === "zh" ? "待执行" : "not started";
-        }
-        if (["needs_review", "ready_for_iteration", "repair_and_repeat"].includes(executionStatus)) {
-          return lang === "zh" ? "待优化" : "needs iteration";
-        }
-        return lang === "zh" ? "执行中" : "executing";
+        return researchIterationLifecycleStatusLabel(experimentLifecycleProjection.stage3.status, lang);
       }
       if (stageStatusLoading) {
         return lang === "zh" ? "状态同步中" : "Syncing status";
@@ -8375,6 +8378,22 @@ export function TeamsRoute({
     const stageType: ResearchStageType = stageView;
     const stagePhase = researchStagePhases.find((phase) => phase.stageType === stageType);
     const latestRound = stagePhase?.latestRound;
+    const stage3Lifecycle = stageView === "iteration"
+      ? experimentPlanningStatus?.lifecycleProjection?.stage3
+      : undefined;
+    const detailHeroStatus = stage3Lifecycle
+      ? researchIterationLifecycleStatusLabel(stage3Lifecycle.status, lang)
+      : (stagePhase?.status || (lang === "zh" ? "未启动" : "not started"));
+    const detailHeroBestValue = stage3Lifecycle
+      ? (stage3Lifecycle.bestCandidateId || (lang === "zh" ? "无" : "none"))
+      : String(stagePhase?.roundCount ?? 0);
+    const detailHeroDiagnosticValue = stage3Lifecycle
+      ? (stage3Lifecycle.latestDiagnosticStatus.status || (lang === "zh" ? "无" : "none"))
+      : (latestRound ? `${latestRound.status} #${latestRound.roundNumber}` : (lang === "zh" ? "无" : "none"));
+    const detailHeroBestTitle = stage3Lifecycle
+      ? [stage3Lifecycle.bestValidatedPlanId, stage3Lifecycle.bestValidatedResultId].filter(Boolean).join(" · ")
+      : undefined;
+    const detailHeroDiagnosticTitle = stage3Lifecycle?.latestDiagnosticStatus.title || undefined;
     const config = {
       experiment: {
         eyebrow: lang === "zh" ? "挑战杯ai科研团队 / 实验阶段" : "Challenge Cup AI research team / experiment stage",
@@ -8455,15 +8474,31 @@ export function TeamsRoute({
             <div className={styles.researchStageHeroStats}>
               <span>
                 {lang === "zh" ? "状态" : "Status"}
-                <strong>{stagePhase?.status || (lang === "zh" ? "未启动" : "not started")}</strong>
+                <strong data-research-stage-detail-status={detailHeroStatus}>{detailHeroStatus}</strong>
               </span>
               <span>
-                {lang === "zh" ? "轮次" : "Rounds"}
-                <strong>{stagePhase?.roundCount ?? 0}</strong>
+                {stage3Lifecycle
+                  ? (lang === "zh" ? "当前最佳" : "Current best")
+                  : (lang === "zh" ? "轮次" : "Rounds")}
+                <strong
+                  className="min-w-0 break-all"
+                  data-research-stage-detail-best={detailHeroBestValue}
+                  title={detailHeroBestTitle}
+                >
+                  {detailHeroBestValue}
+                </strong>
               </span>
               <span>
-                {lang === "zh" ? "最近" : "Latest"}
-                <strong>{latestRound ? `${latestRound.status} #${latestRound.roundNumber}` : (lang === "zh" ? "无" : "none")}</strong>
+                {stage3Lifecycle
+                  ? (lang === "zh" ? "最近诊断" : "Latest diagnostic")
+                  : (lang === "zh" ? "最近" : "Latest")}
+                <strong
+                  className="min-w-0 break-all"
+                  data-research-stage-detail-diagnostic={detailHeroDiagnosticValue}
+                  title={detailHeroDiagnosticTitle}
+                >
+                  {detailHeroDiagnosticValue}
+                </strong>
               </span>
             </div>
           </section>
