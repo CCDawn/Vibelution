@@ -1088,9 +1088,9 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("const lastContextComposition = detail?.lastContextComposition ?? null");
     expect(routeSource).toContain("const lastCacheComposition = detail?.lastCacheComposition ?? null");
     expect(routeSource).toContain("const lastLlmPayloadTrace = detail?.lastLlmPayloadTrace ?? null");
-    expect(routeSource).toContain("import { CacheDetailDialog }");
-    expect(routeSource).toContain("import { LlmPayloadTracePanel }");
-    expect(routeSource).toContain("import { TokenCoreStatusPanel }");
+    expect(routeSource).toContain('import("./chat/CacheDetailDialog")');
+    expect(chatStatusRailSource).toContain('import("./LlmPayloadTracePanel")');
+    expect(chatStatusRailSource).toContain("import { TokenCoreStatusPanel");
     expect(routeSource).toContain('from "./chat/chatTokenStatusModel"');
     expect(routeSource).not.toContain("<details className={styles.sessionDiagnosticsDetails}>");
     expect(routeSource).not.toContain("<summary className={styles.sessionDiagnosticsSummary}>");
@@ -2244,6 +2244,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeAndRenameMenuSource).toContain("const openSessionAgentConfig = useCallback");
     expect(routeAndRenameMenuSource).toContain("returnLabel: \"chat\"");
     expect(routeAndRenameMenuSource).toContain("returnTo: `/chat?session=${encodeURIComponent(session.id)}`");
+    expect(routeSource).toContain('import("./SessionContextMenu")');
     expect(routeSource).toContain("<SessionContextMenu");
     expect(routeSource).toContain("onAddToReview={handleAddSessionToReview}");
     expect(routeSource).toContain("onOpenAgentConfig={openSessionAgentConfig}");

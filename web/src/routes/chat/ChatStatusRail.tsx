@@ -9,7 +9,7 @@ import {
   Sparkles,
   Trash2,
 } from "lucide-react";
-import type { Dispatch, ReactNode, SetStateAction } from "react";
+import { lazy, Suspense, type Dispatch, type ReactNode, type SetStateAction } from "react";
 
 import type {
   AgentInstance,
@@ -17,9 +17,9 @@ import type {
   ChatRoomMode,
   ChatRoomPurpose,
   PetSummary,
+  SessionLlmPayloadTrace,
   SessionSummary,
 } from "../../api/types";
-import type { ComponentProps } from "react";
 import {
   VButton,
   VContextualHint,
@@ -35,9 +35,15 @@ import {
   chatFeaturePresetShortLabel,
   type FeaturePresetKey,
 } from "./chatFeaturePresets";
-import { LlmPayloadTracePanel } from "./LlmPayloadTracePanel";
 import { TokenCoreStatusPanel, type TokenCoreStatusMetric } from "./TokenCoreStatusPanel";
 import styles from "../ChatCodingRoute.styles";
+
+/** Secondary-lazy: status-rail debug panel, not required for first Chat paint. */
+const LlmPayloadTracePanel = lazy(() =>
+  import("./LlmPayloadTracePanel").then((module) => ({
+    default: module.LlmPayloadTracePanel,
+  })),
+);
 
 export type ChatStatusRailProps = {
   statusRailClassName: string;
@@ -116,7 +122,7 @@ export type ChatStatusRailProps = {
   cacheDetailOpenLabel: string;
   tokenStatusMetrics: TokenCoreStatusMetric[];
   onOpenCacheDetail: () => void;
-  lastLlmPayloadTrace: ComponentProps<typeof LlmPayloadTracePanel>["trace"];
+  lastLlmPayloadTrace: SessionLlmPayloadTrace | null | undefined;
   mentalCompactLine: string;
   mentalSourceLabel: string;
   mentalCognitiveStateValue: string;
@@ -589,7 +595,11 @@ export function ChatStatusRail(props: ChatStatusRailProps) {
           onOpenCacheDetail={onOpenCacheDetail}
         />
 
-        <LlmPayloadTracePanel lang={lang} trace={lastLlmPayloadTrace} />
+        {lastLlmPayloadTrace ? (
+          <Suspense fallback={null}>
+            <LlmPayloadTracePanel lang={lang} trace={lastLlmPayloadTrace} />
+          </Suspense>
+        ) : null}
 
         <section className={`${styles.leftBlock} ${styles.companionBlock}`}>
           <div className={styles.sectionHeader}>
