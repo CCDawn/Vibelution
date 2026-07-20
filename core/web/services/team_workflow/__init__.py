@@ -4,6 +4,7 @@ Stage 3 claim packs (partial):
 
 - ``orchestration_core`` — get/ensure orchestration document
 - ``source_collection.candidates`` — candidate register/import/extract/list
+- ``source_collection.runs`` — start run / search execute / summary
 - pre-existing: ``source_collection_*`` helpers, ``research_memory_context``
 
 Public callers should import from ``team_workflow_orchestration_service``
