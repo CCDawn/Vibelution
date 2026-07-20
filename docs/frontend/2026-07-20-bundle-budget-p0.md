@@ -152,7 +152,7 @@ Structure-first Teams cut (claim map + one async UI pack):
 2. ~~**Chat JS chunk**: secondary-lazy wizard/cache/menu/LLM trace~~ **done** (~434 → ~287 KiB).
 3. ~~**index.js**: vendor split + lazy tooltip~~ **done** (~559 → ~186 KiB).
 4. ~~**Teams JS**: claim map + secondary panel pack~~ **done** (~441 → ~305 KiB).
-5. Optional: further extract pure helpers/mutations from `TeamsRoute.tsx` (claimability; not required for budget).
+5. ~~Extract Teams pure helpers (workspace/kind/canvas geometry)~~ **done** — claim map + unit tests; more presentation labels still in route.
 6. Optional: further split `ConversationView.styles` if CV residual needs more headroom.
 
 ### P1

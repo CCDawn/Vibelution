@@ -56,6 +56,12 @@ def _feature_values(config: Any) -> dict[str, bool]:
             _value(config, "supervised_evolution.enabled")
             and _value(config, "agent.modes.supervised_evolution_enabled")
         ),
+        "supervised_mental_model": (
+            _value(config, "supervised_evolution.enabled")
+            and _value(config, "supervised_evolution.mental_model_enabled")
+            and _value(config, "mental_model.enabled")
+            and _value(config, "agent.modes.supervised_evolution_enabled")
+        ),
         "self_evolution": _value(config, "agent.modes.self_evolution_enabled"),
     }
 
