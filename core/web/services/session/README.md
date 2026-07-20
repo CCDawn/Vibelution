@@ -16,7 +16,7 @@ During P0 structure work, `session_service.py` remains the **public import facad
 | Conversation events cache, ledger seq helpers | `journal_bridge.py` | LLM invoke, live recovery reconcile |
 | `submit_session_message*` / guidance / edit-resubmit entry | `submit.py` | team workflow orchestration, worker loop |
 | Turn queue / schedule / executor handoff | `schedule.py` | candidate store, full worker loop |
-| `_run_session_turn` / continuation loop | `worker.py` (planned) | team SC search |
+| `_run_session_turn` / continuation loop | `worker.py` | team SC search, SSE transport |
 | UI stream to journal / `assistant_delta` batching | `stream_capture.py` | list cache, SSE transport publish |
 | Persist turn outcome / final `session_detail` | `persist.py` (planned) | agent directory CRUD |
 | Session detail/list DTO projection helpers | `projection.py` (planned) | runtime daemon |
@@ -60,7 +60,10 @@ During P0 structure work, `session_service.py` remains the **public import facad
 - **Done:** `stream_capture.py` (`SessionTurnCapture`, text batcher, `_capture_session_ui_stream`, UI hooks).
   - Late-bound facade sanitizers/live_output/journal; ContextVar store re-exported from facade.
   - Still on facade: SSE `_publish_session_assistant_delta` / stream subscribers / detail snapshot publish.
-- **Planned:** worker, persist, projection.
+- **Done:** `worker.py` (`_run_session_turn`, continuation loop, internal auto-continue context helpers).
+  - Late-bound facade for agent/context/capture/persist; default-arg constants inlined to avoid import-time `s.*`.
+  - Still on facade: `_persist_session_turn_*`, `create_chat_agent`, projection helpers.
+- **Planned:** persist, projection.
 
 ## Related
 
