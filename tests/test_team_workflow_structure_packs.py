@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from core.web.services import team_workflow_orchestration_service as facade
 from core.web.services.team_workflow import orchestration_core
-from core.web.services.team_workflow.source_collection import candidates, runs
+from core.web.services.team_workflow.source_collection import candidates, runs, stages, storage
 
 
 def test_facade_reexports_orchestration_core() -> None:
@@ -26,6 +26,18 @@ def test_facade_reexports_runs_pack() -> None:
     assert facade.start_source_collection_search_background is runs.start_source_collection_search_background
     assert facade.get_source_collection_summary is runs.get_source_collection_summary
     assert facade.load_source_collection_work_run_summary is runs.load_source_collection_work_run_summary
+
+
+def test_facade_reexports_stages_and_storage_packs() -> None:
+    assert facade.start_source_collection_stage_session_task is stages.start_source_collection_stage_session_task
+    assert facade.writeback_source_collection_stage_session_task is stages.writeback_source_collection_stage_session_task
+    assert facade.get_source_collection_stage_task_context is stages.get_source_collection_stage_task_context
+    assert facade.seed_source_collection_agent_session_context is stages.seed_source_collection_agent_session_context
+    assert (
+        facade.reconcile_source_collection_stage_session_task_after_turn
+        is stages.reconcile_source_collection_stage_session_task_after_turn
+    )
+    assert facade.open_source_collection_storage_target is storage.open_source_collection_storage_target
 
 
 def test_get_orchestration_rejects_blank_team_id() -> None:
