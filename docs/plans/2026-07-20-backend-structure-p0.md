@@ -11,6 +11,7 @@ Related: frontend bundle+claim phase (closed); `docs/agents/conversation-flow-ma
 |------|-------|--------|
 | 2026-07-20 | 1 | Added `session/README.md`, `team_workflow/README.md` |
 | 2026-07-20 | 2.1 | Extracted `session/list_cache.py`; facade wraps invalidate + collision repair |
+| 2026-07-20 | 2.2 | Extracted `session/live_output.py` (store + checkpoint I/O); stream publish / timeline enrichment stay on facade |
 
 ## 1. Problem Statement
 
