@@ -14,7 +14,7 @@ During P0 structure work, `session_service.py` remains the **public import facad
 | Session list index cache / prewarm signatures | `list_cache.py` | stream capture, agent turn |
 | Live output checkpoint / recovery state | `live_output.py` | submit validation, stream publish |
 | Conversation events cache, ledger seq helpers | `journal_bridge.py` | LLM invoke, live recovery reconcile |
-| `submit_session_message*` / guidance / edit-resubmit entry | `submit.py` (planned) | team workflow orchestration |
+| `submit_session_message*` / guidance / edit-resubmit entry | `submit.py` | team workflow orchestration, worker loop |
 | Turn queue / schedule / executor handoff | `schedule.py` (planned) | candidate store |
 | `_run_session_turn` / continuation loop | `worker.py` (planned) | team SC search |
 | UI stream to journal / `assistant_delta` batching | `stream_capture.py` (planned) | list cache |
@@ -51,7 +51,9 @@ During P0 structure work, `session_service.py` remains the **public import facad
 - **Done:** `journal_bridge.py` (events signature cache, append, ledger seq, snapshot).
   - Facade thin-wraps with `project_root=PROJECT_ROOT` so monkeypatches / agent-kernel root binding keep working.
   - Still on facade: stale-ledger reconcile, visible-message projection, truncate-before-message.
-- **Planned:** submit, schedule, stream_capture, worker, persist, projection.
+- **Done:** `submit.py` (`submit_session_message*`, guidance, edit-resubmit, pure message resolve helpers).
+  - Bodies late-bind facade helpers via `_service()` to avoid import cycles; schedule/worker still on facade.
+- **Planned:** schedule, stream_capture, worker, persist, projection.
 
 ## Related
 
