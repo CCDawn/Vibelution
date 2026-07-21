@@ -6,6 +6,8 @@ from core.web.services import team_workflow_orchestration_service as facade
 from core.web.services.team_workflow import orchestration_core
 from core.web.services.team_workflow import experiment, research_loop
 from core.web.services.team_workflow.source_collection import candidates, runs, stages, storage
+from core.web.services.team_workflow.source_collection import search_execution
+from core.web.services.team_workflow.source_collection import writeback_materialize
 
 
 def test_facade_reexports_orchestration_core() -> None:
@@ -27,6 +29,44 @@ def test_facade_reexports_runs_pack() -> None:
     assert facade.start_source_collection_search_background is runs.start_source_collection_search_background
     assert facade.get_source_collection_summary is runs.get_source_collection_summary
     assert facade.load_source_collection_work_run_summary is runs.load_source_collection_work_run_summary
+
+
+def test_facade_reexports_search_execution_pack() -> None:
+    assert facade._execute_source_collection_search_impl is search_execution._execute_source_collection_search_impl
+    assert facade._run_source_collection_search_background is search_execution._run_source_collection_search_background
+    assert facade._execute_source_collection_query is search_execution._execute_source_collection_query
+    assert facade._sync_source_collection_stage_round_after_search is search_execution._sync_source_collection_stage_round_after_search
+    assert (
+        facade._source_collection_search_result_quality_gate
+        is search_execution._source_collection_search_result_quality_gate
+    )
+
+
+def test_facade_reexports_writeback_materialize_pack() -> None:
+    assert (
+        facade._materialize_source_collection_stage_writeback_sources
+        is writeback_materialize._materialize_source_collection_stage_writeback_sources
+    )
+    assert (
+        facade._materialize_source_collection_stage_writeback_quality
+        is writeback_materialize._materialize_source_collection_stage_writeback_quality
+    )
+    assert (
+        facade._materialize_source_collection_stage_writeback_candidate_graph
+        is writeback_materialize._materialize_source_collection_stage_writeback_candidate_graph
+    )
+    assert (
+        facade._materialize_source_collection_stage_writeback_knowledge_ingestion
+        is writeback_materialize._materialize_source_collection_stage_writeback_knowledge_ingestion
+    )
+    assert (
+        facade._normalize_source_collection_stage_writeback_result_payload
+        is writeback_materialize._normalize_source_collection_stage_writeback_result_payload
+    )
+    assert (
+        facade._source_collection_stage_writeback_candidate_coverage
+        is writeback_materialize._source_collection_stage_writeback_candidate_coverage
+    )
 
 
 def test_facade_reexports_stages_and_storage_packs() -> None:
