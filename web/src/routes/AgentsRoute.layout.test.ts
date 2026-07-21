@@ -923,7 +923,8 @@ describe("AgentsRoute layout contract", () => {
     expect(agentCreateContractSource).toContain("function toolBundleSelectionToPolicy");
     expect(agentCreateContractSource).toContain("function createToolBundleSummary");
     expect(createPanelSource).toContain("copy.createAgentToolBundles");
-    expect(createPanelSource).toContain("copy.createAgentToolBundlePreview");
+    expect(createPanelSource).toContain("toolBundlesLabel");
+    expect(createPanelSource).not.toContain("copy.createAgentToolBundlePreview");
     expect(agentCreateContractSource).toContain("creationToolBundleIds: sortedIds(draft.selectedToolBundleIds)");
     expect(agentCreateContractSource).toContain("toolPolicy: {");
     expect(workspaceLayoutPanelSource).not.toContain("styles.workspaceCreating");
@@ -931,7 +932,7 @@ describe("AgentsRoute layout contract", () => {
     expect(styles.createToolBundleGrid).toBeTruthy();
     expect(styles.createToolBundleOption).toBeTruthy();
     expect(styles.createToolBundleSelected).toBeTruthy();
-    expect(styles.createToolBundlePreview).toBeTruthy();
+    expect(createPanelStyles).not.toHaveProperty("createToolBundlePreview");
     expect(workspaceLayoutStyles.workspace).toBeTruthy();
   });
 
@@ -1019,7 +1020,7 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).not.toContain("<small>{issueSummary(agent.health, lang)}</small>");
     expect(denseListSource).toContain("title={column.description}");
     expect(routeSource).not.toContain("<span>{column.description}</span>");
-    expect(createPanelSource).toContain("content={toolBundleSummary.meta || copy.createAgentToolBundleEmpty}");
+    expect(createPanelSource).not.toContain("content={toolBundleSummary.meta || copy.createAgentToolBundleEmpty}");
     expect(routeSource).not.toContain("<small>{createToolBundleSummaryValue.meta || copy.createAgentToolBundleEmpty}</small>");
     expect(routeSource).not.toContain("<small>{toolBundleMeta(bundle, lang)}</small>");
     expect(routeSource).toContain("healthTitle: issueSummary(selectedAgent.health, lang)");
@@ -1826,7 +1827,6 @@ describe("AgentsRoute layout contract", () => {
       [createPanelStyles.createAgentPanel, "AgentCreate.createAgentPanel"],
       [createPanelStyles.createToolBundleOption, "AgentCreate.createToolBundleOption"],
       [createPanelStyles.createToolBundleSelected, "AgentCreate.createToolBundleSelected"],
-      [createPanelStyles.createToolBundlePreview, "AgentCreate.createToolBundlePreview"],
       [debugResetStyles.resetZone, "AgentDebugReset.resetZone"],
       [debugResetStyles.resetOptionField, "AgentDebugReset.resetOptionField"],
       [coreConfigStyles.configEditor, "AgentCoreConfig.configEditor"],
