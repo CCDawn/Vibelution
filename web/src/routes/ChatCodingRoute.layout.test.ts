@@ -2306,6 +2306,9 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("renameSessionMutation.mutate({ sessionId: directSessionId, title })");
     expect(routeSource).toContain("onRename={handleRenameAgent}");
     expect(routeSource).toContain("onCreateSession={handleCreateAgentSession}");
+    expect(routeSource).toContain(
+      "agent.directSessionId ? handleOpenAgent(agent) : handleCreateAgentSession(agent)",
+    );
     expect(routeSource).toContain("onOpenConfig={handleOpenAgentConfig}");
     expect(routeSource).toContain("onOpenLatest={handleOpenAgentLatestSession}");
     expect(agentConversationDirectorySource).toContain(

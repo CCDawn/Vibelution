@@ -99,6 +99,43 @@ def test_agent_index_repair_promotes_legacy_api_agent_to_personal_conversation(t
     assert stored_agent["conversationIndexKind"] == agent_directory_service.CONVERSATION_INDEX_KIND_PERSONAL_AGENT
 
 
+def test_agent_index_repair_promotes_legacy_user_chat_agent_to_personal_conversation(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+
+    legacy = session_service.create_chat_session(
+        title="旧用户会话 Agent",
+        created_by="user",
+    )
+    agent_id = legacy["agentId"]
+    state = agent_directory_service.load_state()
+    stored_agent = next(item for item in state["agents"] if item["agentId"] == agent_id)
+    metadata = dict(stored_agent.get("metadata") or {})
+    metadata.pop("conversationIndexKind", None)
+    metadata.pop("conversationIndexVisibility", None)
+    stored_agent["metadata"] = metadata
+    agent_directory_service.save_state(state)
+
+    chat_state = session_service.load_chat_state(tmp_path)
+    conversation = next(
+        item for item in chat_state["conversations"]
+        if item["conversation_id"] == legacy["id"]
+    )
+    conversation.pop("conversationIndexKind", None)
+    conversation.pop("conversationIndexVisibility", None)
+    session_service.save_chat_state(tmp_path, chat_state)
+
+    repair = session_service.repair_conversation_index_records()
+
+    assert repair["changed"] is True
+    assert repair["agentCount"] == 1
+    assert repair["conversationCount"] == 1
+    repaired = session_service.get_session_detail(legacy["id"])
+    assert repaired["conversationIndexKind"] == agent_directory_service.CONVERSATION_INDEX_KIND_PERSONAL_AGENT
+    assert repaired["conversationIndexVisibility"] == agent_directory_service.CONVERSATION_INDEX_VISIBILITY_USER_VISIBLE
+    repaired_agent = agent_directory_service.get_agent(agent_id)
+    assert repaired_agent["conversationIndexKind"] == agent_directory_service.CONVERSATION_INDEX_KIND_PERSONAL_AGENT
+
+
 def test_agent_create_api_allows_work_session_without_persona_task_or_role(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     monkeypatch.setattr(config_service, "get_config_workspace", _fake_config_workspace)
