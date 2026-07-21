@@ -12,6 +12,8 @@ from core.web.services.team_workflow.source_collection import stage_reconcile
 from core.web.services.team_workflow import knowledge
 from core.web.services.team_workflow import knowledge_kernel
 from core.web.services.team_workflow import experiment_kernel
+from core.web.services.team_workflow import workflow_ops
+from core.web.services.team_workflow.source_collection import residual
 
 
 def test_facade_reexports_orchestration_core() -> None:
@@ -149,6 +151,27 @@ def test_facade_reexports_knowledge_kernel_pack() -> None:
     assert facade._build_knowledge_ingestion_precheck_output is knowledge_kernel._build_knowledge_ingestion_precheck_output
     assert facade._coordination_queues is knowledge_kernel._coordination_queues
     assert facade._persist_knowledge_ingestion_work_run is knowledge_kernel._persist_knowledge_ingestion_work_run
+
+
+def test_facade_reexports_sc_residual_pack() -> None:
+    assert (
+        facade._import_source_collection_local_workspace_sources
+        is residual._import_source_collection_local_workspace_sources
+    )
+    assert facade._build_source_collection_search_plan is residual._build_source_collection_search_plan
+    assert facade._record_source_collection_exclusion is residual._record_source_collection_exclusion
+    assert facade._persist_source_collection_work_run is residual._persist_source_collection_work_run
+    assert facade._source_collection_phase_close_gate is residual._source_collection_phase_close_gate
+    assert facade.get_source_collection_exclusion_ledger is residual.get_source_collection_exclusion_ledger
+
+
+def test_facade_reexports_workflow_ops_pack() -> None:
+    assert facade.propose_iteration is workflow_ops.propose_iteration
+    assert facade.export_deliverables is workflow_ops.export_deliverables
+    assert facade.validate_candidate_record is workflow_ops.validate_candidate_record
+    assert facade._build_stage_round is workflow_ops._build_stage_round
+    assert facade._default_workflow is workflow_ops._default_workflow
+    assert facade._submit_team_workflow_inbox_via_kernel is workflow_ops._submit_team_workflow_inbox_via_kernel
 
 
 def test_get_orchestration_rejects_blank_team_id() -> None:

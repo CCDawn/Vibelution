@@ -36,6 +36,8 @@ Align language with frontend claim map: `web/src/routes/teams/README.md`.
 | Research loop / stage round | `research_loop.py` | CLI terminal |
 | Knowledge / graph / steward / coordination / paper-note APIs | `knowledge.py` | session_service |
 | Knowledge private ingestion/graph/coordination kernel | `knowledge_kernel.py` | session_service |
+| SC residual helpers (import/plan/exclusion/work-run) | `source_collection/residual.py` | session_service |
+| Iteration/export/inbox/stage-round glue | `workflow_ops.py` | session_service |
 | Residual private helpers still on facade | facade remainder | new public mega APIs on facade |
 | Public HTTP-facing API surface | `../team_workflow_orchestration_service.py` (facade) | dumping new mega-functions into facade |
 
@@ -129,3 +131,12 @@ Align language with frontend claim map: `web/src/routes/teams/README.md`.
 - Structure plan: `docs/plans/2026-07-20-backend-structure-p0.md`
 - Phase 1 plan: `docs/plans/2026-07-21-service-optimization-phase1-sc-search-kernel.md`
 - Phase 2 plan: `docs/plans/2026-07-21-service-optimization-phase2-knowledge.md`
+
+
+### Service optimization Phase 15 (SC residual + workflow ops)
+
+| Pack | ~LOC | Role |
+|------|------|------|
+| `source_collection/residual.py` | ~3.1k | import/plan/exclusion/work-run/extraction residual |
+| `workflow_ops.py` | ~0.9k | propose_iteration, export, inbox, stage-round glue |
+| facade after Phase 15 | ~2.0k | re-exports + thinner residual |
