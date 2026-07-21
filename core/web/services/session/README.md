@@ -15,6 +15,34 @@ this package and be re-exported from the facade when it is part of the public AP
 
 **Service optimization Phase 4** (2026-07-21): stop control + agent session lifecycle — `docs/plans/2026-07-21-service-optimization-phase4-session-lifecycle.md`.
 
+## 30-second routing (edit here first)
+
+| You are changing… | Open first |
+|-------------------|------------|
+| Submit / guidance / edit-resubmit | `submit.py` |
+| Turn schedule / executor handoff | `schedule.py` |
+| Run turn / continuation loop | `worker.py` |
+| Stream capture / UI batching | `stream_capture.py` |
+| Persist turn result / failure | `persist.py` |
+| List/detail DTO projection | `projection.py` |
+| SSE publish / assistant_delta | `publish.py` |
+| Stop / interrupt turn | `control.py` |
+| Agent purge/archive/child/inbox/cli | `agent_sessions.py` |
+| Create/select session / index repair | `conversation_index.py` |
+| List cache / prewarm | `list_cache.py` + `session_ops.py` |
+| Live overlay / checkpoint | `live_output.py` + `live_output_write.py` |
+| Timeline / tool normalize | `timeline.py` |
+| Turn errors / work-runs / review | `turn_diagnostics.py` |
+| Agent bind / prompt snapshot / LLM slot | `agent_runtime.py` |
+| Image store/resolve | `image_attachments.py` |
+| Session runtime-scene events | `events.py` |
+| Title / reasoning / prewarm / ops helpers | `session_ops.py` |
+| Failure signals / visible reply / image-retry cues | `signals_format.py` |
+| Running state / workspace / codex / SC bridge glue | `runtime_glue.py` |
+| Public import surface only | `../session_service.py` (prefer re-export, not new business bodies) |
+
+Product flow map: `docs/agents/conversation-flow-map.md`. Structure awareness (soft): `DEVELOPMENT_STANDARD.md` §8.3.
+
 ## Ownership map (claim scopes)
 
 | Task type | Prefer these files | Avoid |

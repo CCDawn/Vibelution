@@ -7,6 +7,7 @@ This directory contains project documentation that is useful across sessions. Us
 | Area | Document | Use |
 | --- | --- | --- |
 | Project operation | [../DEVELOPMENT_STANDARD.md](../DEVELOPMENT_STANDARD.md) | Canonical development, worktree, validation, and release rules. |
+| Structure / file-size awareness | [../DEVELOPMENT_STANDARD.md#83-structure-and-file-size-awareness](../DEVELOPMENT_STANDARD.md#83-structure-and-file-size-awareness) | Soft guidance to prefer packs over god files; no hard fail. |
 | Frontend style ownership | [../DEVELOPMENT_STANDARD.md#9-frontend-standards](../DEVELOPMENT_STANDARD.md#9-frontend-standards) | Tailwind-first styling, HeroUI primitive usage, and VUI composition rules. |
 | Domain language | [../CONTEXT.md](../CONTEXT.md) | Stable product and architecture vocabulary. |
 | Multi-agent work | [agents/worktree-collaboration.md](agents/worktree-collaboration.md) | Worktree, branch, claim, and merge protocol. |
@@ -15,6 +16,24 @@ This directory contains project documentation that is useful across sessions. Us
 | Runtime logging | [../core/logging/README.md](../core/logging/README.md) | Logging module overview. |
 | Challenge Cup flow | [../挑战杯/research_team_flow_design.html](../挑战杯/research_team_flow_design.html) | Current generated research-flow site. |
 | Spec/plan lifecycle | [superpowers/](superpowers/) | Status metadata and ownership rules for active design specs and implementation plans. |
+
+## Norms Map (how work is governed)
+
+Use this map when you need **where the rule lives**, not a second full process manual. Prefer awareness and smallest useful change over rigid enforcement.
+
+| Concern | Canonical place | Notes |
+| --- | --- | --- |
+| How to develop / validate / merge / release | [../DEVELOPMENT_STANDARD.md](../DEVELOPMENT_STANDARD.md) | Full operating standard |
+| Red lines & short Agent entry | [../AGENTS.md](../AGENTS.md) | Compact index; details stay in Standard |
+| Backend “which file do I edit?” | [../core/web/services/session/README.md](../core/web/services/session/README.md), [../core/web/services/team_workflow/README.md](../core/web/services/team_workflow/README.md), [../core/web/services/agent_directory/README.md](../core/web/services/agent_directory/README.md), [../core/web/services/runtime_scene/README.md](../core/web/services/runtime_scene/README.md) | Claim maps + 30-second routing tables |
+| Frontend TS / Tailwind / HeroUI / VUI | [../DEVELOPMENT_STANDARD.md#9-frontend-standards](../DEVELOPMENT_STANDARD.md#9-frontend-standards) | Implementation style for `web/` |
+| Domain vocabulary | [../CONTEXT.md](../CONTEXT.md) | Product language, not code style |
+| Architecture decision memory | [adr/](adr/) | Why a major choice exists |
+| Tests how-to | [../tests/README.md](../tests/README.md) | Suite layout and matrix |
+| Commit Python fatal checks | `scripts/local_quality_gate.py` + `.githooks` | Ruff subset for crash-class issues only |
+| Project structure snapshot | [../INDEX.md](../INDEX.md) | Orientation index; verify hot numbers when they matter |
+
+There is **no** separate full-stack `CODING_STYLE.md`. Python style is mostly project habit plus fatal Ruff at commit; frontend style is Standard §9. Structure preferences are Standard §8.3 plus service pack READMEs.
 
 ## Directory Map
 

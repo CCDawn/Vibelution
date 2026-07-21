@@ -5,6 +5,22 @@ Prefer slice modules over growing `agent_directory_service.py` when possible.
 
 `agent_directory_service.py` remains the **public import facade**.
 
+## 30-second routing (edit here first)
+
+| You are changing… | Open first |
+|-------------------|------------|
+| Persona / task profile normalize | `profiles.py` |
+| Tool / memory / delegation / supervision policy | `policies.py` |
+| Archive / purge / reset | `lifecycle.py` |
+| List/get / API hydration | `projections.py` |
+| Create/update agent / avatar | `mutations.py` |
+| Registry repair / load/save / shrink guard | `repair_store.py` |
+| Inbox / workspace write / ensure-session / profile defaults | `ops_residual.py` |
+| Lifecycle serializers on facade | `../agent_directory_service.py` (wrappers only) |
+| Public import surface | `../agent_directory_service.py` (prefer re-export) |
+
+Structure awareness (soft): `DEVELOPMENT_STANDARD.md` §8.3.
+
 ## Ownership map (claim scopes)
 
 | Task type | Prefer these files | Avoid |
@@ -34,18 +50,11 @@ Prefer slice modules over growing `agent_directory_service.py` when possible.
 | `lifecycle.py` | done | Phase 11 — archive/purge/reset |
 | `projections.py` | done | Phase 12 — list/get + hydration + API builders |
 | `mutations.py` | done | Phase 12 — create/update + avatar |
-| repair / inbox / workspace residual | deferred | next agent_directory cuts |
+| `repair_store.py` | done | Phase 17 — registry repair/load-save |
+| `ops_residual.py` | done | Phase 17 — inbox/workspace/ensure-session residual |
+| facade residual | serializers only | lifecycle wrappers |
 
 ## Related
 
 - Routes: `core/web/routes/agents.py`
 - Structure plan: `docs/plans/2026-07-20-backend-structure-p0.md`
-
-
-### Service optimization Phase 17 (repair + ops residual)
-
-| Pack | Status | Notes |
-|------|--------|--------|
-| `repair_store.py` | done | registry repair/load-save |
-| `ops_residual.py` | done | inbox/workspace/ensure-session/profile defaults |
-| facade residual | serializers only | lifecycle wrappers |

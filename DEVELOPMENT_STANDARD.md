@@ -353,6 +353,36 @@ Avoid Rust for:
 
 Any Rust accelerator must report its integration path, fallback behavior, validation command, runtime refresh impact, packaging impact, and version-impact judgment before merge.
 
+### 8.3 Structure And File Size Awareness
+
+This subsection is **guidance for maintainability**, not a hard gate. Prefer correctness and the smallest useful change over mechanical splits. When a rule below conflicts with a safe fix, take the safe fix and note the exception in the closeout if it matters.
+
+**Backend web services**
+
+- Public import facades such as `session_service.py`, `team_workflow_orchestration_service.py`, `agent_directory_service.py`, and `runtime_scene_service.py` should stay thin: re-exports, shared constants/types, lifecycle serializers or wrappers, and only the glue that must live on the facade for stability or monkeypatch contracts.
+- Prefer placing new hot-path or domain behavior in the matching pack under `core/web/services/session/`, `team_workflow/`, `agent_directory/`, or `runtime_scene/`, then re-export from the facade when routes or other services need a stable import path.
+- Before growing a facade with a large new private helper, check the package README claim map (30-second routing table). Prefer an existing pack owner when one already claims that concern.
+- Soft size awareness: when a service implementation file approaches roughly 1.5–2k lines and keeps growing, pause and consider whether a claim-scoped extract would help the next editor. Soft upper awareness around ~2.5–3k lines is a prompt to split **when it reduces risk**, not a requirement to split mid-hotfix.
+- Names such as `residual`, `glue`, or `facade_helpers` mark transition zones. Prefer not to treat them as unlimited dumping grounds; when they grow hard to navigate, plan a later semantic split rather than forcing an emergency cut.
+
+**Frontend**
+
+- Prefer not to grow already-thick routes (for example large Chat/Coding route modules) with more product logic. Extract route-local modules, hooks, or VUI composition pieces when the change is natural for the task.
+- Tailwind / HeroUI / VUI ownership remains §9; structure awareness does not replace those styling rules.
+
+**Late-bind and flexibility**
+
+- Pack modules may late-bind to a facade via `_service()` when that preserves monkeypatch stability or avoids circular imports. That is an allowed migration and coupling pattern, not a defect by itself.
+- Prefer direct imports for pure helpers when the dependency graph is already clean. Cross-domain late-bind (for example a session pack binding to agent directory) should stay rare and visible in the owning README when it is intentional.
+- Lifecycle serializers and `__wrapped__` rebind patterns may remain on facades; do not “clean them away” for aesthetics during unrelated work.
+
+**Exceptions**
+
+- Emergency fixes, compatibility shims, and one-off glue may land on a facade or a large file when that is the smallest safe path. Prefer a short closeout note when the placement is temporary or unusual.
+- Do not invent parallel god files under a new name to dodge size awareness.
+
+Docs index: [docs/README.md](docs/README.md) norms map. Service claim maps: `core/web/services/session/README.md`, `team_workflow/README.md`, `agent_directory/README.md`, `runtime_scene/README.md`.
+
 ## 9. Frontend Standards
 
 Frontend changes under `web/` should be TypeScript by default:
