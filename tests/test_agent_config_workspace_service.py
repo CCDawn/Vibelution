@@ -339,6 +339,10 @@ def test_agent_config_workspace_keeps_empty_direct_session_out_of_work_session_g
     assert agents[agent_id]["agentBoundary"]["type"] == "service_role"
     assert agents[agent_id]["agentBoundary"]["directSessionRole"] == "pending_activity"
     assert agents[agent_id]["agentBoundary"]["reason"] == "empty_direct_session"
+    assert agents[agent_id]["agentBoundary"]["requiresTaskProfile"] == "false"
+    assert "agent_onboarding_incomplete" not in {
+        item["code"] for item in agents[agent_id]["health"]
+    }
     assert agent_id not in groups["work_session"]["agentIds"]
 
 
