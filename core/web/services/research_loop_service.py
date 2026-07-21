@@ -450,12 +450,118 @@ def record_research_loop_decision(team_id: str, loop_id: str, payload: dict[str,
     }
 
 
+def materialize_research_loop_iteration_design(
+    team_id: str,
+    loop_id: str,
+    proposal_id: str,
+    payload: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Create or reuse the gated Stage2 draft for one persisted iteration proposal."""
+
+    normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
+    normalized_loop_id = _normalize_required_id(loop_id, "Research loop id is required.")
+    normalized_proposal_id = _normalize_required_id(proposal_id, "Iteration proposal id is required.")
+    team = team_service.get_team(normalized_team_id)
+    request_payload = payload if isinstance(payload, dict) else {}
+    created_by_agent = _trim_text(request_payload.get("createdByAgent"), max_length=160) or DEFAULT_OWNER_AGENT_ID
+    with _LOCK:
+        store = _load_research_loop_store(normalized_team_id)
+        loop = _find_loop(store, normalized_loop_id)
+        if loop is None:
+            raise ResearchLoopError("Research loop not found.")
+        proposal = next(
+            (
+                item
+                for item in loop.get("iterationProposals") or []
+                if isinstance(item, dict) and str(item.get("proposalId") or "") == normalized_proposal_id
+            ),
+            None,
+        )
+        if proposal is None:
+            raise ResearchLoopError("Iteration proposal not found.")
+        decision = next(
+            (
+                item
+                for item in loop.get("decisions") or []
+                if isinstance(item, dict)
+                and str(item.get("iterationProposalId") or "") == normalized_proposal_id
+            ),
+            None,
+        )
+        if decision is None:
+            raise ResearchLoopError("Iteration proposal is not linked to a governed decision.")
+        decision_value = str(decision.get("decision") or "")
+        if decision_value not in {"promote_to_iteration", "repair_and_repeat"}:
+            raise ResearchLoopError("Only promote or repair iteration proposals can create a design draft.")
+        source_plan_id = str((loop.get("linkedExperiment") or {}).get("planId") or "")
+        if not source_plan_id:
+            raise ResearchLoopError("A linked experiment plan is required to create the next design draft.")
+        from core.web.services.team_workflow.experiment import create_experiment_plan_revision_from_iteration
+        from core.web.services.team_workflow_orchestration_service import TeamWorkflowOrchestrationError
+
+        try:
+            next_design_draft = create_experiment_plan_revision_from_iteration(
+                normalized_team_id,
+                source_plan_id=source_plan_id,
+                loop_id=normalized_loop_id,
+                decision_id=str(decision.get("decisionId") or ""),
+                proposal_id=normalized_proposal_id,
+                idempotency_key=f"proposal-materialization:{normalized_loop_id}:{normalized_proposal_id}",
+                decision=decision_value,
+                rationale=str(decision.get("rationale") or ""),
+                next_actions=list(proposal.get("nextActions") or []),
+                created_by_agent=created_by_agent,
+            )
+        except TeamWorkflowOrchestrationError as exc:
+            raise ResearchLoopError(str(exc)) from exc
+        next_plan = next_design_draft.get("plan") if isinstance(next_design_draft, dict) else {}
+        next_plan_id = str((next_plan or {}).get("planId") or "")
+        if not next_plan_id:
+            raise ResearchLoopError("Iteration design draft did not return a plan id.")
+        proposal["nextDesignPlanId"] = next_plan_id
+        proposal["nextDesignRevision"] = int((((next_plan or {}).get("experimentContract") or {}).get("revision") or 0))
+        proposal["nextDesignGateStatus"] = str((((next_plan or {}).get("designGate") or {}).get("status") or ""))
+        decision["nextDesignPlanId"] = next_plan_id
+        now = utc_now_iso()
+        loop["updatedAt"] = now
+        store["updatedAt"] = now
+        _write_json(_research_loop_store_path(normalized_team_id), store)
+        projected_active_loop = _find_loop(store, str(store.get("activeLoopId") or "")) or loop
+        status_payload = _status_payload(normalized_team_id, team, store, active_loop=projected_active_loop)
+    _record_research_loop_event(
+        "research_loop.iteration_design_materialized",
+        normalized_team_id,
+        fields={
+            "loopId": normalized_loop_id,
+            "decisionId": str(decision.get("decisionId") or ""),
+            "proposalId": normalized_proposal_id,
+            "nextDesignPlanId": next_plan_id,
+            "nextDesignRevision": int(proposal.get("nextDesignRevision") or 0),
+            "draftOutcome": str(next_design_draft.get("status") or ""),
+            "requiresExplicitFreeze": True,
+            "autoExecution": False,
+            "createdByAgent": created_by_agent,
+        },
+    )
+    return {
+        "decision": decision,
+        "iterationProposal": proposal,
+        "nextDesignDraft": next_design_draft,
+        "loop": loop,
+        "status": status_payload,
+        "boundaries": _research_loop_boundaries(),
+        "idempotentReplay": str(next_design_draft.get("status") or "") == "reused",
+    }
+
+
 def utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
 def _status_payload(team_id: str, team: dict[str, Any], store: dict[str, Any], *, active_loop: dict[str, Any] | None) -> dict[str, Any]:
-    loops = [_loop_summary(loop) for loop in _loop_records(store)]
+    loop_records = _loop_records(store)
+    loops = [_loop_summary(loop) for loop in loop_records]
+    pending_design_proposals = _pending_iteration_design_proposals(loop_records)
     summary = {
         "totalLoopCount": len(loops),
         "readyForDecisionCount": sum(1 for loop in loops if loop.get("readyForDecision")),
@@ -470,12 +576,44 @@ def _status_payload(team_id: str, team: dict[str, Any], store: dict[str, Any], *
         "activeLoopId": store.get("activeLoopId", ""),
         "activeLoop": active_loop,
         "loops": loops,
+        "pendingDesignProposals": pending_design_proposals,
         "summary": summary,
         "templates": [deepcopy(template) for template in RESEARCH_LOOP_TEMPLATES],
         "storagePath": _relative_path(_research_loop_store_path(team_id)),
         "nextActions": _research_loop_next_actions(active_loop),
         "boundaries": _research_loop_boundaries(),
     }
+
+
+def _pending_iteration_design_proposals(loops: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    pending: list[dict[str, Any]] = []
+    for loop in loops:
+        governed_proposal_ids = {
+            str(decision.get("iterationProposalId") or "")
+            for decision in loop.get("decisions") or []
+            if isinstance(decision, dict)
+            and str(decision.get("decision") or "") in {"promote_to_iteration", "repair_and_repeat"}
+        }
+        for proposal in loop.get("iterationProposals") or []:
+            if not isinstance(proposal, dict):
+                continue
+            proposal_id = str(proposal.get("proposalId") or "")
+            if (
+                not proposal_id
+                or proposal_id not in governed_proposal_ids
+                or str(proposal.get("nextDesignPlanId") or "")
+            ):
+                continue
+            pending.append(
+                {
+                    **deepcopy(proposal),
+                    "loopId": str(loop.get("loopId") or ""),
+                    "loopTitle": str(loop.get("title") or ""),
+                    "researchQuestion": str(loop.get("researchQuestion") or ""),
+                    "sourcePlanId": str((loop.get("linkedExperiment") or {}).get("planId") or ""),
+                }
+            )
+    return pending[-12:]
 
 
 def _loop_summary(loop: dict[str, Any]) -> dict[str, Any]:

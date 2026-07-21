@@ -271,6 +271,10 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("/freeze`");
     expect(routeSource).toContain("冻结设计");
     expect(routeSource).toContain("designExecutionAllowed");
+    expect(routeSource).toContain("materializeResearchLoopIterationDesignMutation");
+    expect(routeSource).toContain("pendingDesignProposals");
+    expect(routeSource).toContain("生成设计草稿");
+    expect(routeSource).toContain("生成后仍需人工冻结，不会自动执行实验。");
     expect(routeSource).toContain("renderResearchLoopPanel");
     expect(routeSource).toContain("Research Loop 模板");
     expect(routeSource).toContain("实验迭代决策");
