@@ -22,6 +22,7 @@ Align language with frontend claim map: `web/src/routes/teams/README.md`.
 | Source-collection pure normalizers | `source_collection_common.py` | HTTP routes |
 | SC stage task pure helpers | `source_collection_stage_tasks.py` | experiment smoke runs |
 | SC stage session task start/writeback/context | `source_collection/stages.py` | experiment full-run |
+| SC stage reconcile / cards projection / task message | `source_collection/stage_reconcile.py` | knowledge mega APIs |
 | SC search execution kernel (impl/query/quality/bg) | `source_collection/search_execution.py` | knowledge mega APIs |
 | SC writeback materialize kernel | `source_collection/writeback_materialize.py` | session_service |
 | SC storage open | `source_collection/storage.py` | candidates register |
@@ -31,6 +32,7 @@ Align language with frontend claim map: `web/src/routes/teams/README.md`.
 | Candidates register/import/extract/list | `source_collection/candidates.py` | pet system |
 | SC runs / search entry + summaries | `source_collection/runs.py` | session list cache |
 | Experiment plan/smoke/full-run APIs | `experiment.py` | session submit |
+| Experiment private records/status/notify kernel | `experiment_kernel.py` | session_service |
 | Research loop / stage round | `research_loop.py` | CLI terminal |
 | Knowledge / graph / steward / coordination / paper-note APIs | `knowledge.py` | session_service |
 | Residual private helpers still on facade | facade remainder | new public mega APIs on facade |
@@ -46,8 +48,10 @@ Align language with frontend claim map: `web/src/routes/teams/README.md`.
 | SC search execution body | `source_collection/search_execution.py` |
 | Stage agents / writeback entry | `source_collection/stages.py` + pure helpers in `source_collection_stage_tasks.py` |
 | Stage writeback materialize body | `source_collection/writeback_materialize.py` |
+| Stage reconcile / cards projection | `source_collection/stage_reconcile.py` |
 | Storage open | `source_collection/storage.py` |
-| Experiment design/execution | `experiment.py` |
+| Experiment design/execution entry | `experiment.py` |
+| Experiment plan/status/notify kernel | `experiment_kernel.py` |
 | Research loop / stage round | `research_loop.py` |
 | Knowledge ingestion / steward / graph / coordination | `knowledge.py` |
 
@@ -86,17 +90,26 @@ Align language with frontend claim map: `web/src/routes/teams/README.md`.
 | Pack | ~LOC | Role |
 |------|------|------|
 | `knowledge.py` | ~3.6k | paper-note pipeline, source quality, graph, steward, ingestion/completion, coordination, transfer, local research model |
-| Facade remainder (after Phase 2) | ~13.4k total lines | private helpers, residual glue |
+
+### Service optimization P1 / Phase 5 (stage residual + experiment kernel)
+
+| Pack | ~LOC | Role |
+|------|------|------|
+| `source_collection/stage_reconcile.py` | ~2.9k | stage cards projection, reconcile, repair, task message/progress, stage support |
+| `experiment_kernel.py` | ~1.4k | plan records, readiness, lifecycle projection, steward notify |
+| Facade remainder (after Phase 5) | ~9.4k total lines | shared glue + residual helpers |
 
 **Phase 1 exit:** search + writeback execution bodies claimable outside facade.
 
-**Phase 2 exit:** knowledge/graph/steward/coordination public mega APIs claimable in `knowledge.py`; private helpers still late-bound on facade; structure + focused knowledge/routes tests green.
+**Phase 2 exit:** knowledge public mega APIs claimable in `knowledge.py`.
+
+**Phase 5 (P1 residual) exit:** SC stage reconcile/projection + experiment private kernel claimable; structure + focused stage/experiment tests green.
 
 **Still deferred:**
 
-1. Full facade slim to re-exports only (move remaining private helpers).
-2. Late-bind removal (packs still call facade via `_service()` for shared helpers).
-3. Session projection/SSE packs (separate optimization track).
+1. Full facade slim to re-exports only (remaining shared glue).
+2. Late-bind removal (packs still call facade via `_service()`).
+3. Knowledge private helper migration.
 
 ## Related
 
