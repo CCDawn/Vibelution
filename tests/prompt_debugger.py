@@ -316,11 +316,26 @@ def _get_system_prompt_for_tool(tool_name: str, tool_desc: str, tool_params: str
         ),
     }
     hint = hints.get(tool_name, "")
+    expected_tool_names = sorted(
+        {
+            str(scenario["expected_tool"])
+            for scenario in TOOL_TEST_SUITES.get(tool_name, {}).get("scenarios", [])
+            if scenario.get("expected_tool")
+        }
+    )
+    registered_tool_hint = (
+        f"本类别实际可用的工具名仅为：{', '.join(expected_tool_names)}。"
+        if expected_tool_names
+        else ""
+    )
     return (
-        f"你是AI助手。当前测试类别: {tool_name}({tool_desc}, 参数: {tool_params})。"
-        f"{hint} 仅在需要时调用工具。优先输出严格的 "
-        f"<tool_call>{{\"name\": \"...\", \"args\": {{...}}}}</tool_call>。"
-        f"不要输出 bash 代码块，不要先查看工具列表，不要改用其他近似工具。"
+        f"你正在执行受控工具路由验收。当前测试类别: {tool_name}({tool_desc}, 参数: {tool_params})。"
+        f"{hint}{registered_tool_hint} 用户请求已经明确属于这个类别时，必须调用最匹配的真实工具；"
+        f"不得以解释、计划或代码块代替调用，也不得先查看工具列表或改用近似工具。"
+        f"正常请求只输出一个严格的 "
+        f"<tool_call>{{\"name\": \"真实工具名\", \"args\": {{...}}}}</tool_call>，"
+        f"即使参数未知也使用空对象 {{}}。"
+        f"只有危险或破坏性命令才拒绝且不调用执行工具。"
     )
 
 
