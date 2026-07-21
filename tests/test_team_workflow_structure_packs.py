@@ -8,6 +8,7 @@ from core.web.services.team_workflow import experiment, research_loop
 from core.web.services.team_workflow.source_collection import candidates, runs, stages, storage
 from core.web.services.team_workflow.source_collection import search_execution
 from core.web.services.team_workflow.source_collection import writeback_materialize
+from core.web.services.team_workflow import knowledge
 
 
 def test_facade_reexports_orchestration_core() -> None:
@@ -89,6 +90,19 @@ def test_facade_reexports_experiment_and_research_loop_packs() -> None:
     assert facade.start_research_stage_round is research_loop.start_research_stage_round
     assert facade.get_research_stage_round_status is research_loop.get_research_stage_round_status
     assert facade.retry_research_stage_round_coordination is research_loop.retry_research_stage_round_coordination
+
+
+def test_facade_reexports_knowledge_pack() -> None:
+    assert facade.run_knowledge_collection_ingestion is knowledge.run_knowledge_collection_ingestion
+    assert facade.run_knowledge_collection_completion is knowledge.run_knowledge_collection_completion
+    assert facade.start_knowledge_collection_ingestion_background is knowledge.start_knowledge_collection_ingestion_background
+    assert facade.submit_steward_pack_to_knowledge_ingestion is knowledge.submit_steward_pack_to_knowledge_ingestion
+    assert facade.review_steward_pack_knowledge_ingestion is knowledge.review_steward_pack_knowledge_ingestion
+    assert facade.build_candidate_graph is knowledge.build_candidate_graph
+    assert facade.get_team_workflow_coordination_status is knowledge.get_team_workflow_coordination_status
+    assert facade.invoke_local_research_model is knowledge.invoke_local_research_model
+    assert facade.draft_paper_note_from_source_candidate is knowledge.draft_paper_note_from_source_candidate
+    assert facade.sync_official_research_graph is knowledge.sync_official_research_graph
 
 
 def test_get_orchestration_rejects_blank_team_id() -> None:

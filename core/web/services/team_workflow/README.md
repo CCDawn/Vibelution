@@ -12,6 +12,8 @@ Align language with frontend claim map: `web/src/routes/teams/README.md`.
 
 **Service optimization Phase 1** (2026-07-21): SC search + writeback kernels — `docs/plans/2026-07-21-service-optimization-phase1-sc-search-kernel.md`.
 
+**Service optimization Phase 2** (2026-07-21): knowledge / graph / steward public APIs — `docs/plans/2026-07-21-service-optimization-phase2-knowledge.md`.
+
 ## Ownership map (claim scopes)
 
 | Task type | Prefer these files | Avoid |
@@ -30,7 +32,8 @@ Align language with frontend claim map: `web/src/routes/teams/README.md`.
 | SC runs / search entry + summaries | `source_collection/runs.py` | session list cache |
 | Experiment plan/smoke/full-run APIs | `experiment.py` | session submit |
 | Research loop / stage round | `research_loop.py` | CLI terminal |
-| Knowledge graph / coordination mega APIs | facade remainder (optional later pack) | launcher daemon |
+| Knowledge / graph / steward / coordination / paper-note APIs | `knowledge.py` | session_service |
+| Residual private helpers still on facade | facade remainder | new public mega APIs on facade |
 | Public HTTP-facing API surface | `../team_workflow_orchestration_service.py` (facade) | dumping new mega-functions into facade |
 
 ## Product surface ↔ packs
@@ -46,6 +49,7 @@ Align language with frontend claim map: `web/src/routes/teams/README.md`.
 | Storage open | `source_collection/storage.py` |
 | Experiment design/execution | `experiment.py` |
 | Research loop / stage round | `research_loop.py` |
+| Knowledge ingestion / steward / graph / coordination | `knowledge.py` |
 
 ## Sole-owner rules
 
@@ -76,16 +80,23 @@ Align language with frontend claim map: `web/src/routes/teams/README.md`.
 |------|------|------|
 | `source_collection/search_execution.py` | ~1.1k | search impl / query / quality / bg / after-search sync |
 | `source_collection/writeback_materialize.py` | ~2.7k | writeback normalize/merge + materialize_* |
-| Facade remainder (after Phase 1) | ~17k total lines | knowledge mega APIs, experiment helpers, residual SC glue |
 
-**Phase 1 exit:** search + writeback execution bodies claimable outside facade; public imports still via facade re-exports; structure + SC search/writeback tests green.
+### Service optimization Phase 2 (knowledge public APIs)
+
+| Pack | ~LOC | Role |
+|------|------|------|
+| `knowledge.py` | ~3.6k | paper-note pipeline, source quality, graph, steward, ingestion/completion, coordination, transfer, local research model |
+| Facade remainder (after Phase 2) | ~13.4k total lines | private helpers, residual glue |
+
+**Phase 1 exit:** search + writeback execution bodies claimable outside facade.
+
+**Phase 2 exit:** knowledge/graph/steward/coordination public mega APIs claimable in `knowledge.py`; private helpers still late-bound on facade; structure + focused knowledge/routes tests green.
 
 **Still deferred:**
 
-1. Full facade slim to re-exports only.
-2. Dedicated `knowledge.py` for graph/steward/coordination mega APIs.
-3. Late-bind removal (packs still call facade via `_service()` for shared helpers).
-4. Session projection/SSE packs (separate optimization track).
+1. Full facade slim to re-exports only (move remaining private helpers).
+2. Late-bind removal (packs still call facade via `_service()` for shared helpers).
+3. Session projection/SSE packs (separate optimization track).
 
 ## Related
 
@@ -93,3 +104,4 @@ Align language with frontend claim map: `web/src/routes/teams/README.md`.
 - Frontend: `web/src/routes/teams/README.md`
 - Structure plan: `docs/plans/2026-07-20-backend-structure-p0.md`
 - Phase 1 plan: `docs/plans/2026-07-21-service-optimization-phase1-sc-search-kernel.md`
+- Phase 2 plan: `docs/plans/2026-07-21-service-optimization-phase2-knowledge.md`
