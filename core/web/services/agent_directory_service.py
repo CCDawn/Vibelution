@@ -50,6 +50,92 @@ from .agent_directory.profiles import (
     _persona_profile_has_content,
     _task_profile_has_content,
 )
+from .agent_directory.policies import (
+    _context_compression_base_policy_for_agents,
+    _context_compression_policy_from_config,
+    _context_compression_ratio,
+    _conversation_index_visibility_for_kind,
+    _count_policy_refs,
+    _default_tool_policy_for_agent,
+    _default_tool_policy_id_for_agent,
+    _direct_session_visibility,
+    _effective_agent_tool_policy,
+    _ensure_fixed_role_tool_policy,
+    _ensure_session_agent_tool_policy,
+    _fixed_role_tool_policy_kind,
+    _has_context_compression_override,
+    _knowledge_steward_memory_policy,
+    _knowledge_steward_tool_policy,
+    _memory_policy_for_agent,
+    _normalize_context_compression_levels,
+    _normalize_context_compression_preservation,
+    _normalize_context_compression_summary_chars,
+    _normalize_tool_policy_scopes,
+    _positive_context_compression_int,
+    _record_agent_delegation_policy_event,
+    _record_agent_memory_policy_event,
+    _record_agent_supervision_policy_event,
+    _record_agent_tool_policy_event,
+    _record_delegation_policy_block,
+    _record_policy_block,
+    _record_supervision_policy_block,
+    _record_supervision_policy_observed,
+    _tool_name_list,
+    _tool_policies,
+    _tool_policy_for_agent,
+    _tool_policy_source_for_agent,
+    _with_temporary_tool_grants,
+    _without_subagent_delegation_tools,
+    _workspace_path_for_policy,
+    agent_conversation_index_visibility,
+    build_agent_policy_options,
+    compute_effective_tool_visibility,
+    default_memory_policy,
+    default_research_role_tool_policy,
+    default_research_source_tool_policy,
+    default_self_evolution_executable_tool_policy,
+    default_session_agent_tool_policy,
+    default_session_agent_tool_policy_v2,
+    default_system_no_tool_policy,
+    default_tool_policy,
+    effective_agent_context_compression_policy,
+    evaluate_current_delegation_policy,
+    evaluate_current_supervision_policy,
+    evaluate_current_tool_policy,
+    evaluate_delegation_policy,
+    evaluate_delegation_wake_policy,
+    evaluate_supervision_policy,
+    evaluate_tool_policy,
+    normalize_agent_context_compression_policy,
+    normalize_conversation_index_visibility,
+    normalize_delegation_policy,
+    normalize_memory_policy,
+    normalize_supervision_policy,
+    normalize_tool_policy,
+    record_supervision_policy_decision,
+    resolve_delegation_policy_for_agent,
+    resolve_memory_policy_for_agent,
+    resolve_supervision_policy_for_agent,
+    resolve_tool_policy_for_agent,
+    session_agent_visibility,
+    tool_policy_fingerprint,
+)
+from .agent_directory.lifecycle import (
+    _agent_archive_protected,
+    _archive_retired_self_evolution_agent,
+    _delete_purged_agent_workspace,
+    _record_agent_purged_event,
+    _record_agent_reset_event,
+    _reset_agent_direct_session,
+    agent_archive_protected,
+    archive_agent_instance,
+    ensure_agent_archive_allowed,
+    ensure_agent_purge_allowed,
+    ensure_agent_purge_workspace_deletable,
+    purge_archived_agent_instance,
+    purge_system_team_agent_instance,
+    reset_agent_instance,
+)
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -468,6 +554,11 @@ def agent_session_lifecycle_with_chat_serialized(
     return wrapped
 
 
+
+# Lifecycle pack bodies; serializer wrappers stay on this facade.
+archive_agent_instance = agent_session_lifecycle_serialized(archive_agent_instance)
+purge_archived_agent_instance = agent_session_lifecycle_serialized(purge_archived_agent_instance)
+reset_agent_instance = agent_session_lifecycle_with_chat_serialized(reset_agent_instance)
 @contextmanager
 def agent_session_lifecycle_transaction():
     """Hold the cross-store Agent/session lifecycle serialization lock."""
@@ -916,63 +1007,11 @@ def ensure_agent_for_session(
     return _agent_to_api(agent)
 
 
-def session_agent_visibility(agent: dict[str, Any] | None) -> str:
-    """Return whether a direct chat Agent is backed by real session activity."""
-
-    if not isinstance(agent, dict):
-        return SESSION_AGENT_VISIBILITY_NONE
-    primary_mode = _normalize_primary_mode(agent.get("primaryMode") or _infer_agent_primary_mode(agent))
-    direct_session_id = str(agent.get("directSessionId") or "").strip()
-    if primary_mode != "chat" or not direct_session_id:
-        return SESSION_AGENT_VISIBILITY_NONE
-    metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
-    legacy_workspace_path = str(metadata.get("legacySessionWorkspacePath") or "").strip()
-    visibility = str(metadata.get("directSessionVisibility") or "").strip()
-    if direct_session_id == _active_chat_session_id():
-        return SESSION_AGENT_VISIBILITY_ACTIVE
-    if visibility == SESSION_AGENT_VISIBILITY_ACTIVE:
-        return SESSION_AGENT_VISIBILITY_ACTIVE
-    if visibility == SESSION_AGENT_VISIBILITY_PENDING:
-        if _session_workspace_has_activity(
-            direct_session_id,
-            session_workspace_path=legacy_workspace_path,
-        ):
-            return SESSION_AGENT_VISIBILITY_ACTIVE
-        return SESSION_AGENT_VISIBILITY_PENDING
-    session_root_exists = _session_workspace_root_exists(direct_session_id)
-    if (
-        not legacy_workspace_path
-        and not direct_session_id.startswith("session-seed-")
-        and direct_session_id != "session-coordinator"
-        and not session_root_exists
-    ):
-        return SESSION_AGENT_VISIBILITY_ACTIVE
-    return _direct_session_visibility(
-        direct_session_id,
-        session_workspace_path=legacy_workspace_path,
-    )
-
-
-def normalize_conversation_index_visibility(value: Any) -> str:
-    visibility = str(value or "").strip()
-    if visibility in CONVERSATION_INDEX_VISIBILITIES:
-        return visibility
-    return ""
-
-
 def normalize_conversation_index_kind(value: Any) -> str:
     kind = str(value or "").strip()
     if kind in CONVERSATION_INDEX_KINDS:
         return kind
     return ""
-
-
-def _conversation_index_visibility_for_kind(kind: str) -> str:
-    if kind == CONVERSATION_INDEX_KIND_TEAM_AGENT:
-        return CONVERSATION_INDEX_VISIBILITY_TEAM_PRIVATE
-    if kind == CONVERSATION_INDEX_KIND_HIDDEN:
-        return CONVERSATION_INDEX_VISIBILITY_HIDDEN
-    return CONVERSATION_INDEX_VISIBILITY_USER_VISIBLE
 
 
 def _agent_metadata_conversation_index_updates(kind: Any) -> dict[str, Any]:
@@ -1055,35 +1094,6 @@ def agent_conversation_index_classification(
     return {"kind": kind, "errors": sorted(set(errors))}
 
 
-def agent_conversation_index_visibility(
-    agent: dict[str, Any] | None,
-    *,
-    hidden_team_member_agent_ids: set[str] | None = None,
-) -> str:
-    """Return how an Agent direct session may appear in the ordinary chat index."""
-
-    if not isinstance(agent, dict):
-        return CONVERSATION_INDEX_VISIBILITY_HIDDEN
-    if str(agent.get("kind") or DEFAULT_AGENT_KIND).strip() != DEFAULT_AGENT_KIND:
-        return CONVERSATION_INDEX_VISIBILITY_HIDDEN
-    if str(agent.get("status") or "active").strip().lower() == "archived":
-        return CONVERSATION_INDEX_VISIBILITY_HIDDEN
-    agent_id = str(agent.get("agentId") or "").strip()
-    direct_session_id = str(agent.get("directSessionId") or "").strip()
-    if not agent_id or not direct_session_id:
-        return CONVERSATION_INDEX_VISIBILITY_HIDDEN
-    classification = agent_conversation_index_classification(
-        agent,
-        hidden_team_member_agent_ids=hidden_team_member_agent_ids,
-    )
-    kind = str(classification.get("kind") or "").strip()
-    if kind == CONVERSATION_INDEX_KIND_TEAM_AGENT:
-        return CONVERSATION_INDEX_VISIBILITY_TEAM_PRIVATE
-    if kind in {CONVERSATION_INDEX_KIND_PERSONAL_AGENT, CONVERSATION_INDEX_KIND_USER_CHAT, CONVERSATION_INDEX_KIND_SYSTEM_ENTRY}:
-        return CONVERSATION_INDEX_VISIBILITY_USER_VISIBLE
-    return CONVERSATION_INDEX_VISIBILITY_HIDDEN
-
-
 def _active_chat_session_id() -> str:
     try:
         payload = load_chat_state(PROJECT_ROOT)
@@ -1092,19 +1102,6 @@ def _active_chat_session_id() -> str:
     if not isinstance(payload, dict):
         return ""
     return str(payload.get("active_conversation_id") or "").strip()
-
-
-def _direct_session_visibility(
-    session_id: str,
-    *,
-    session_workspace_path: str = "",
-) -> str:
-    normalized_session_id = str(session_id or "").strip()
-    if not normalized_session_id:
-        return SESSION_AGENT_VISIBILITY_NONE
-    if _session_workspace_has_activity(normalized_session_id, session_workspace_path=session_workspace_path):
-        return SESSION_AGENT_VISIBILITY_ACTIVE
-    return SESSION_AGENT_VISIBILITY_PENDING
 
 
 def _session_workspace_has_activity(session_id: str, *, session_workspace_path: str = "") -> bool:
@@ -1404,418 +1401,6 @@ def list_agent_policy_options() -> dict[str, list[dict[str, Any]]]:
     return build_agent_policy_options(state=state, agents=agents)
 
 
-def build_agent_policy_options(
-    *,
-    state: dict[str, Any] | None = None,
-    agents: list[dict[str, Any]] | None = None,
-) -> dict[str, list[dict[str, Any]]]:
-    """Build lightweight policy options from an already-loaded Agent registry snapshot."""
-
-    source_state = state if isinstance(state, dict) else load_state()
-    source_agents = list(agents or [])
-    if not source_agents:
-        source_agents = [item for item in source_state.get("agents") or [] if isinstance(item, dict)]
-    tool_policies = _tool_policies(source_state)
-    memory_policies = _memory_policies(source_state)
-    return {
-        "toolPolicies": [
-            {
-                "policyId": policy_id,
-                "agentCount": _count_policy_refs(agents, "toolPolicyId", policy_id),
-                "allowedToolCount": len(list(policy.get("allowedTools") or [])),
-                "preferredToolCount": len(list(policy.get("preferredTools") or [])),
-                "blockedToolCount": len(list(policy.get("blockedTools") or [])),
-                "networkAccess": str(policy.get("networkAccess") or "inherit"),
-                "mutationAccess": str(policy.get("mutationAccess") or "inherit"),
-                "maxCallsPerTurn": int(policy.get("maxCallsPerTurn") or 0),
-            }
-            for policy_id, policy in sorted(tool_policies.items())
-        ],
-        "memoryPolicies": [
-            {
-                "policyId": policy_id,
-                "agentCount": _count_policy_refs(agents, "memoryPolicyId", policy_id),
-                "privateMemoryRoot": str(policy.get("privateMemoryRoot") or ""),
-                "readSharedGroupCount": len(list(policy.get("readSharedGroups") or [])),
-                "writeSharedGroupCount": len(list(policy.get("writeSharedGroups") or [])),
-                "readKnowledgeBaseCount": len(list(policy.get("readKnowledgeBaseIds") or [])),
-                "proposeKnowledgeBaseCount": len(list(policy.get("proposeKnowledgeBaseIds") or [])),
-                "reviewKnowledgeBaseCount": len(list(policy.get("reviewKnowledgeBaseIds") or [])),
-                "rateKnowledgeBaseCount": len(list(policy.get("rateKnowledgeBaseIds") or [])),
-                "hasInboxPath": bool(str(policy.get("agentInboxMessagesPath") or "").strip()),
-            }
-            for policy_id, policy in sorted(memory_policies.items())
-        ],
-    }
-
-
-@agent_session_lifecycle_serialized
-def archive_agent_instance(agent_id: str, *, repair_mode_bindings: bool = True) -> dict[str, Any]:
-    with _STATE_LOCK:
-        state = load_state()
-        agent = _find_agent(state, agent_id)
-        if agent is None:
-            raise AgentNotFoundError(f"Agent not found: {agent_id}")
-        if _agent_archive_protected(agent):
-            raise AgentDirectoryError("Protected core Agent cannot be archived.")
-        agent["status"] = "archived"
-        agent["updatedAt"] = utc_now_iso()
-        save_state(state)
-    _record_agent_event("agent.archived", agent, lifecycle=True)
-    if repair_mode_bindings:
-        from .agent_mode_binding_service import remove_agent_from_mode_bindings
-
-        remove_agent_from_mode_bindings(agent_id)
-    return _agent_to_api(agent)
-
-
-@agent_session_lifecycle_serialized
-def purge_archived_agent_instance(
-    agent_id: str,
-    *,
-    allow_active: bool = False,
-    _allow_protected_system_repair: bool = False,
-) -> dict[str, Any]:
-    """Physically remove an AgentInstance and its private workspace."""
-
-    normalized_agent_id = str(agent_id or "").strip()
-    if not normalized_agent_id:
-        raise AgentDirectoryError("Agent id is required.")
-    with _STATE_LOCK:
-        state = load_state()
-        agent = _find_agent(state, normalized_agent_id)
-        if agent is None:
-            raise AgentNotFoundError(f"Agent not found: {normalized_agent_id}")
-        previous_status = str(agent.get("status") or "active").strip() or "active"
-        if previous_status != "archived" and not allow_active:
-            raise AgentDirectoryError("Only archived Agents can be permanently deleted.")
-        if _agent_archive_protected(agent) and not _allow_protected_system_repair:
-            raise AgentDirectoryError("Protected core Agent cannot be purged.")
-        agent_snapshot = dict(agent)
-        agent_snapshot["status"] = previous_status
-        tool_policy_id = str(agent.get("toolPolicyId") or "").strip()
-        memory_policy_id = str(agent.get("memoryPolicyId") or "").strip()
-
-    workspace_result = _delete_purged_agent_workspace(agent_snapshot)
-    if list(workspace_result.get("skippedPaths") or []):
-        skipped = ", ".join(str(item) for item in list(workspace_result.get("skippedPaths") or [])[:3])
-        raise AgentDirectoryError(f"Agent workspace could not be fully deleted: {skipped}")
-
-    with _STATE_LOCK:
-        state = load_state()
-        agent = _find_agent(state, normalized_agent_id)
-        if agent is None:
-            raise AgentNotFoundError(f"Agent not found: {normalized_agent_id}")
-        current_status = str(agent.get("status") or "active").strip() or "active"
-        if current_status != "archived" and not allow_active:
-            raise AgentDirectoryError("Only archived Agents can be permanently deleted.")
-        if _agent_archive_protected(agent) and not _allow_protected_system_repair:
-            raise AgentDirectoryError("Protected core Agent cannot be purged.")
-        agents = [
-            item
-            for item in state.get("agents") or []
-            if not (
-                isinstance(item, dict)
-                and str(item.get("agentId") or "").strip() == normalized_agent_id
-            )
-        ]
-        state["agents"] = agents
-        removed_tool_policy = False
-        removed_memory_policy = False
-        if tool_policy_id and tool_policy_id != DEFAULT_TOOL_POLICY_ID and _count_policy_refs(agents, "toolPolicyId", tool_policy_id) == 0:
-            policies = _tool_policies(state)
-            removed_tool_policy = policies.pop(tool_policy_id, None) is not None
-            state["toolPolicies"] = policies
-        if memory_policy_id and _count_policy_refs(agents, "memoryPolicyId", memory_policy_id) == 0:
-            policies = _memory_policies(state)
-            removed_memory_policy = policies.pop(memory_policy_id, None) is not None
-            state["memoryPolicies"] = policies
-        save_state(state)
-
-    result = {
-        "agentId": normalized_agent_id,
-        "status": "purged",
-        "previousStatus": str(agent_snapshot.get("status") or "").strip(),
-        "deleted": True,
-        "workspaceDeleted": bool(workspace_result.get("deleted")),
-        "deletedPaths": list(workspace_result.get("deletedPaths") or []),
-        "skippedPaths": list(workspace_result.get("skippedPaths") or []),
-        "removedToolPolicy": removed_tool_policy,
-        "removedMemoryPolicy": removed_memory_policy,
-        "toolPolicyId": tool_policy_id,
-        "memoryPolicyId": memory_policy_id,
-    }
-    _record_agent_purged_event(agent_snapshot, result)
-    return result
-
-
-def purge_system_team_agent_instance(
-    agent_id: str,
-    *,
-    expected_created_by: str,
-    expected_team_metadata_key: str,
-    expected_team_id: str,
-) -> dict[str, Any]:
-    """Purge a stale system-team Agent after validating its ownership boundary."""
-
-    normalized_agent_id = str(agent_id or "").strip()
-    normalized_created_by = str(expected_created_by or "").strip()
-    normalized_team_key = str(expected_team_metadata_key or "").strip()
-    normalized_team_id = str(expected_team_id or "").strip()
-    if not normalized_agent_id or not normalized_created_by or not normalized_team_key or not normalized_team_id:
-        raise AgentDirectoryError("System team purge requires agent id, owner, team key, and team id.")
-    if normalized_agent_id == KNOWLEDGE_STEWARD_AGENT_ID:
-        raise AgentDirectoryError("Knowledge steward Agent cannot be purged by system team repair.")
-
-    with _STATE_LOCK:
-        state = load_state()
-        agent = _find_agent(state, normalized_agent_id)
-        if agent is None:
-            raise AgentNotFoundError(f"Agent not found: {normalized_agent_id}")
-        metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
-        if bool(metadata.get("protected")):
-            raise AgentDirectoryError("Protected core Agent cannot be purged.")
-        if str(agent.get("createdBy") or "").strip() != normalized_created_by:
-            raise AgentDirectoryError("System team purge owner mismatch.")
-        if str(metadata.get(normalized_team_key) or "").strip() != normalized_team_id:
-            raise AgentDirectoryError("System team purge team mismatch.")
-        if str(metadata.get("conversationIndexKind") or "").strip() != CONVERSATION_INDEX_KIND_TEAM_AGENT:
-            raise AgentDirectoryError("System team purge requires a team Agent.")
-        if str(metadata.get("conversationIndexVisibility") or "").strip() != CONVERSATION_INDEX_VISIBILITY_TEAM_PRIVATE:
-            raise AgentDirectoryError("System team purge requires a team-private Agent.")
-
-    return purge_archived_agent_instance(
-        normalized_agent_id,
-        allow_active=True,
-        _allow_protected_system_repair=True,
-    )
-
-
-def ensure_agent_purge_workspace_deletable(agent: dict[str, Any]) -> dict[str, Any]:
-    """Validate the purge workspace boundary before callers mutate external references."""
-
-    agent_id = str(agent.get("agentId") or "").strip()
-    workspace_path = str(agent.get("workspacePath") or _agent_workspace_relative_path(agent_id)).strip()
-    if not agent_id or not workspace_path:
-        return {"deletable": True, "workspacePath": workspace_path, "reason": "no_workspace_path"}
-    try:
-        workspace = _lexical_project_path(workspace_path)
-        agents_root = _lexical_project_path("workspace/agents")
-        expected_private = _lexical_project_path(
-            _agent_workspace_relative_path(agent_id)
-        )
-    except Exception as exc:
-        raise AgentDirectoryError(f"Agent workspace path could not be resolved: {type(exc).__name__}") from exc
-    if workspace != expected_private:
-        raise AgentDirectoryError(
-            "Agent workspace path is not the expected private workspace: "
-            + workspace_path
-        )
-    try:
-        if not workspace.is_relative_to(agents_root):
-            raise AgentDirectoryError(
-                f"Agent workspace path is outside the agents root: {workspace_path}"
-            )
-    except ValueError as exc:
-        raise AgentDirectoryError(
-            f"Agent workspace path is outside the agents root: {workspace_path}"
-        ) from exc
-    if _path_has_reparse_component(workspace, stop_at=agents_root):
-        raise AgentDirectoryError(
-            "Agent workspace path contains a symlink, junction, or reparse point."
-        )
-    if not workspace.exists():
-        return {
-            "deletable": True,
-            "workspacePath": _agent_workspace_relative_path(agent_id),
-            "reason": "workspace_absent",
-        }
-    if not workspace.is_dir():
-        raise AgentDirectoryError(
-            f"Agent workspace path is not a directory: {workspace_path}"
-        )
-    return {
-        "deletable": True,
-        "workspacePath": _agent_workspace_relative_path(agent_id),
-        "reason": "workspace_present",
-    }
-
-
-@agent_session_lifecycle_with_chat_serialized
-def reset_agent_instance(
-    agent_id: str,
-    *,
-    clear_runtime_state: bool = True,
-    reset_direct_session: bool = True,
-    direct_session_id: str = "",
-    reset_persona_profile: bool = False,
-    reset_task_profile: bool = False,
-    reset_tool_policy: bool = False,
-    reset_memory_policy: bool = False,
-    reset_runtime_policy: bool = False,
-) -> dict[str, Any]:
-    """Reset a single Agent for debugging without changing team, room, or mode membership."""
-
-    normalized_agent_id = str(agent_id or "").strip()
-    normalized_direct_session_id = str(direct_session_id or "").strip()
-    if not normalized_agent_id:
-        raise AgentDirectoryError("Agent id is required.")
-
-    reset_summary: dict[str, Any] = {
-        "agentId": normalized_agent_id,
-        "clearedRuntimeState": False,
-        "resetDirectSession": False,
-        "previousDirectSessionId": "",
-        "replacementDirectSessionId": "",
-        "deletedPaths": [],
-        "skippedPaths": [],
-        "resetPersonaProfile": False,
-        "resetTaskProfile": False,
-        "resetToolPolicy": False,
-        "resetMemoryPolicy": False,
-        "resetRuntimePolicy": False,
-        "preserved": ["agent_identity", "team_membership", "chat_room_membership", "mode_membership"],
-    }
-    updated_tool_policy: dict[str, Any] | None = None
-    updated_memory_policy: dict[str, Any] | None = None
-    updated_delegation_policy: dict[str, Any] | None = None
-    updated_supervision_policy: dict[str, Any] | None = None
-    updated_persona_profile: dict[str, Any] | None = None
-    updated_task_profile: dict[str, Any] | None = None
-    with _STATE_LOCK:
-        state = load_state()
-        agent = _find_agent(state, normalized_agent_id)
-        if agent is None:
-            raise AgentNotFoundError(f"Agent not found: {normalized_agent_id}")
-        if str(agent.get("status") or "active").strip() == "archived":
-            raise AgentDirectoryError("Archived Agent cannot be reset. Restore or purge archived data instead.")
-        agent_snapshot = dict(agent)
-        stored_direct_session_id = str(agent_snapshot.get("directSessionId") or "").strip()
-        if normalized_direct_session_id:
-            if stored_direct_session_id and stored_direct_session_id != normalized_direct_session_id:
-                raise AgentDirectoryError(
-                    "Requested direct session does not match the Agent's active direct session."
-                )
-            agent_snapshot["directSessionId"] = normalized_direct_session_id
-        reset_summary["previousDirectSessionId"] = str(agent_snapshot.get("directSessionId") or "").strip()
-        now = utc_now_iso()
-        profileless_session_agent = _is_profileless_session_agent(agent)
-        if reset_persona_profile:
-            metadata = dict(agent.get("metadata") or {})
-            if profileless_session_agent:
-                metadata.pop("personaProfile", None)
-            else:
-                updated_persona_profile = normalize_persona_profile({})
-                metadata["personaProfile"] = updated_persona_profile
-                metadata["personaProfileDefaultsDisabled"] = True
-                reset_summary["resetPersonaProfile"] = True
-            agent["metadata"] = metadata
-        if reset_task_profile:
-            metadata = dict(agent.get("metadata") or {})
-            if profileless_session_agent:
-                metadata.pop("taskProfile", None)
-            else:
-                updated_task_profile = normalize_task_profile({})
-                metadata["taskProfile"] = updated_task_profile
-                metadata["taskProfileDefaultsDisabled"] = True
-                reset_summary["resetTaskProfile"] = True
-            agent["metadata"] = metadata
-        if reset_tool_policy:
-            previous_policy_id = str(agent.get("toolPolicyId") or DEFAULT_TOOL_POLICY_ID).strip() or DEFAULT_TOOL_POLICY_ID
-            policy_id = _default_tool_policy_id_for_agent(normalized_agent_id, str(agent.get("primaryMode") or ""))
-            agent["toolPolicyId"] = policy_id
-            policies = _tool_policies(state)
-            if previous_policy_id != DEFAULT_TOOL_POLICY_ID and _count_policy_refs(state.get("agents") or [], "toolPolicyId", previous_policy_id) == 0:
-                policies.pop(previous_policy_id, None)
-            policies[policy_id] = _default_tool_policy_for_agent(
-                policy_id,
-                str(agent.get("primaryMode") or ""),
-                role_key=str(agent.get("roleKey") or ""),
-            )
-            state["toolPolicies"] = policies
-            updated_tool_policy = normalize_tool_policy(policies.get(policy_id) or default_tool_policy(policy_id), policy_id)
-            reset_summary["resetToolPolicy"] = True
-        if reset_memory_policy:
-            policy_id = str(agent.get("memoryPolicyId") or "").strip() or f"memory-{normalized_agent_id}"
-            workspace_path = _agent_workspace_relative_path(normalized_agent_id)
-            agent["workspacePath"] = workspace_path
-            agent["memoryPolicyId"] = policy_id
-            _ensure_agent_workspace(workspace_path)
-            policies = _memory_policies(state)
-            updated_memory_policy = default_memory_policy(policy_id, workspace_path)
-            policies[policy_id] = updated_memory_policy
-            state["memoryPolicies"] = policies
-            reset_summary["resetMemoryPolicy"] = True
-        if reset_runtime_policy:
-            metadata = dict(agent.get("metadata") or {})
-            updated_delegation_policy = normalize_delegation_policy({})
-            updated_supervision_policy = normalize_supervision_policy({})
-            metadata["delegationPolicy"] = updated_delegation_policy
-            metadata["supervisionPolicy"] = updated_supervision_policy
-            agent["metadata"] = metadata
-            reset_summary["resetRuntimePolicy"] = True
-        agent["updatedAt"] = now
-        save_state(state)
-
-    if clear_runtime_state:
-        runtime_cleanup = _clear_agent_runtime_state(agent_snapshot)
-        reset_summary["clearedRuntimeState"] = True
-        reset_summary["deletedPaths"] = list(runtime_cleanup.get("deletedPaths") or [])
-        reset_summary["skippedPaths"] = list(runtime_cleanup.get("skippedPaths") or [])
-    if reset_direct_session:
-        direct_session_cleanup = _reset_agent_direct_session(agent_snapshot)
-        reset_summary["resetDirectSession"] = bool(direct_session_cleanup.get("resetDirectSession"))
-        reset_summary["replacementDirectSessionId"] = str(direct_session_cleanup.get("replacementDirectSessionId") or "").strip()
-        reset_summary["skippedPaths"].extend(list(direct_session_cleanup.get("skippedPaths") or []))
-        if reset_summary["resetDirectSession"] and reset_summary["replacementDirectSessionId"]:
-            with _STATE_LOCK:
-                state = load_state()
-                agent = _find_agent(state, normalized_agent_id)
-                if agent is not None:
-                    metadata = dict(agent.get("metadata") or {})
-                    metadata["directSessionVisibility"] = SESSION_AGENT_VISIBILITY_ACTIVE
-                    agent["metadata"] = metadata
-                    agent["updatedAt"] = utc_now_iso()
-                    save_state(state)
-
-    updated_agent = get_agent(normalized_agent_id)
-    _record_agent_reset_event(updated_agent or agent_snapshot, reset_summary)
-    if updated_tool_policy is not None and updated_agent:
-        _record_agent_tool_policy_event(updated_agent, updated_tool_policy)
-    if updated_memory_policy is not None and updated_agent:
-        _record_agent_memory_policy_event(updated_agent, updated_memory_policy)
-    if updated_delegation_policy is not None and updated_agent:
-        _record_agent_delegation_policy_event(updated_agent, updated_delegation_policy)
-    if updated_supervision_policy is not None and updated_agent:
-        _record_agent_supervision_policy_event(updated_agent, updated_supervision_policy)
-    if updated_persona_profile is not None and updated_agent:
-        _record_agent_persona_profile_event(updated_agent, updated_persona_profile)
-    if updated_task_profile is not None and updated_agent:
-        _record_agent_task_profile_event(updated_agent, updated_task_profile)
-    return {
-        "agent": updated_agent,
-        "resetSummary": reset_summary,
-    }
-
-
-def ensure_agent_purge_allowed(agent_id: str) -> dict[str, Any]:
-    """Validate permanent deletion before callers mutate external Agent references."""
-
-    normalized_agent_id = str(agent_id or "").strip()
-    if not normalized_agent_id:
-        raise AgentDirectoryError("Agent id is required.")
-    with _STATE_LOCK:
-        state = load_state()
-        agent = _find_agent(state, normalized_agent_id)
-        if agent is None:
-            raise AgentNotFoundError(f"Agent not found: {normalized_agent_id}")
-        if str(agent.get("status") or "active").strip() != "archived":
-            raise AgentDirectoryError("Only archived Agents can be permanently deleted.")
-        if _agent_archive_protected(agent):
-            raise AgentDirectoryError("Protected core Agent cannot be purged.")
-        return _agent_to_api(agent)
-
-
 @agent_session_lifecycle_serialized
 def reactivate_agent_instance(agent_id: str, *, reason: str = "", metadata: dict[str, Any] | None = None) -> dict[str, Any]:
     """Explicitly restore an archived AgentInstance to active status."""
@@ -1838,19 +1423,6 @@ def reactivate_agent_instance(agent_id: str, *, reason: str = "", metadata: dict
         save_state(state)
     _record_agent_event("agent.reactivated", agent, lifecycle=True)
     return _agent_to_api(agent)
-
-
-def ensure_agent_archive_allowed(agent_id: str) -> dict[str, Any]:
-    """Validate archival before callers mutate external Agent references."""
-
-    with _STATE_LOCK:
-        state = load_state()
-        agent = _find_agent(state, agent_id)
-        if agent is None:
-            raise AgentNotFoundError(f"Agent not found: {agent_id}")
-        if _agent_archive_protected(agent):
-            raise AgentDirectoryError("Protected core Agent cannot be archived.")
-        return _agent_to_api(agent)
 
 
 def repair_agent_directory() -> dict[str, Any]:
@@ -2223,36 +1795,6 @@ def active_agent_runtime(
         _CURRENT_AGENT_RUNTIME.reset(token)
 
 
-def _tool_name_list(tools: Iterable[Any]) -> list[str]:
-    names: list[str] = []
-    seen: set[str] = set()
-    for tool in list(tools or []):
-        name = str(getattr(tool, "name", "") or tool or "").strip()
-        if not name or name in seen:
-            continue
-        seen.add(name)
-        names.append(name)
-    return names
-
-
-def _without_subagent_delegation_tools(policy: dict[str, Any], delegation_policy: dict[str, Any] | None) -> dict[str, Any]:
-    normalized_policy = normalize_delegation_policy(delegation_policy)
-    if bool(normalized_policy.get("allowSubagents", False)):
-        return policy
-    blocked_tools = SUBAGENT_DELEGATION_TOOL_NAMES
-    allowed = [name for name in _tool_name_list(policy.get("allowedTools") or []) if name not in blocked_tools]
-    preferred = [name for name in _tool_name_list(policy.get("preferredTools") or []) if name not in blocked_tools]
-    if allowed == _tool_name_list(policy.get("allowedTools") or []) and preferred == _tool_name_list(
-        policy.get("preferredTools") or []
-    ):
-        return policy
-    return {
-        **policy,
-        "allowedTools": allowed,
-        "preferredTools": preferred,
-    }
-
-
 def _without_disabled_agent_tools(policy: dict[str, Any]) -> dict[str, Any]:
     blocked_tools = DISABLED_AGENT_DIRECT_READ_TOOL_NAMES
     allowed = [name for name in _tool_name_list(policy.get("allowedTools") or []) if name not in blocked_tools]
@@ -2272,10 +1814,6 @@ def _without_disabled_agent_tools(policy: dict[str, Any]) -> dict[str, Any]:
         "preferredTools": preferred,
         "temporaryAllowedTools": temporary_allowed,
     }
-
-
-def _effective_agent_tool_policy(policy: dict[str, Any], delegation_policy: dict[str, Any] | None) -> dict[str, Any]:
-    return _without_disabled_agent_tools(_without_subagent_delegation_tools(policy, delegation_policy))
 
 
 def _with_runtime_tool_grants(
@@ -2310,60 +1848,6 @@ def _with_runtime_tool_grants(
     }
 
 
-def compute_effective_tool_visibility(
-    tools: Iterable[Any],
-    *,
-    policy: dict[str, Any] | None = None,
-) -> EffectiveToolVisibility:
-    normalized_policy = _without_disabled_agent_tools(policy if isinstance(policy, dict) else {})
-    policy_id = str(normalized_policy.get("policyId") or normalized_policy.get("id") or DEFAULT_TOOL_POLICY_ID).strip()
-    policy_id = policy_id or DEFAULT_TOOL_POLICY_ID
-    tool_names = _tool_name_list(tools)
-    tool_name_set = set(tool_names)
-    allowed = tuple(
-        name
-        for name in _tool_name_list(normalized_policy.get("allowedTools") or [])
-        if name
-    )
-    blocked = tuple(
-        name
-        for name in _tool_name_list(normalized_policy.get("blockedTools") or [])
-        if name
-    )
-    allowed_set = set(allowed)
-    blocked_set = set(blocked)
-    visible = tuple(
-        name
-        for name in tool_names
-        if name in allowed_set and name not in blocked_set
-    )
-    visible_set = set(visible)
-    preferred = tuple(
-        name
-        for name in _tool_name_list(normalized_policy.get("preferredTools") or [])
-        if name in visible_set
-    )
-    hidden_restricted = tuple(
-        name
-        for name in tool_names
-        if name not in visible_set
-    )
-    configured_unavailable = tuple(
-        name
-        for name in allowed
-        if name not in tool_name_set
-    )
-    return EffectiveToolVisibility(
-        policy_id=policy_id,
-        visible_tools=visible,
-        configured_unavailable_tools=configured_unavailable,
-        blocked_tools=tuple(name for name in blocked if name in tool_name_set),
-        hidden_restricted_tools=hidden_restricted,
-        preferred_tools=preferred,
-        write_scopes=tuple(_normalize_tool_policy_scopes(normalized_policy.get("writeScopes"))),
-    )
-
-
 def effective_visible_tool_names_for_current_agent(tools: Iterable[Any] | None = None) -> list[str]:
     runtime = current_agent_runtime()
     if tools is None:
@@ -2391,24 +1875,6 @@ def filter_llm_tools_for_current_agent(tools: Iterable[Any]) -> list[Any]:
     ]
 
 
-def resolve_tool_policy_for_agent(agent_id: str, *, session_id: str = "", turn_id: str = "") -> dict[str, Any]:
-    agent = _find_agent(load_state(), agent_id)
-    if agent is None:
-        return default_tool_policy(DEFAULT_TOOL_POLICY_ID)
-    state = load_state()
-    policy_id = str(agent.get("toolPolicyId") or DEFAULT_TOOL_POLICY_ID).strip() or DEFAULT_TOOL_POLICY_ID
-    policy = _tool_policies(state).get(policy_id) or default_tool_policy(policy_id)
-    normalized = _with_session_terminal_protocol_defaults(agent, normalize_tool_policy(policy, policy_id))
-    with_grants = _with_temporary_tool_grants(
-        normalized,
-        agent_id=agent_id,
-        session_id=session_id,
-        turn_id=turn_id,
-    )
-    metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
-    return _effective_agent_tool_policy(with_grants, metadata.get("delegationPolicy") if isinstance(metadata, dict) else {})
-
-
 def _with_session_terminal_protocol_defaults(agent: dict[str, Any], policy: dict[str, Any]) -> dict[str, Any]:
     """Project untouched legacy private chat defaults onto the new session protocol.
 
@@ -2433,63 +1899,6 @@ def _with_session_terminal_protocol_defaults(agent: dict[str, Any], policy: dict
         "allowedTools": list(DEFAULT_SESSION_AGENT_ALLOWED_TOOLS),
         "preferredTools": list(DEFAULT_SESSION_AGENT_PREFERRED_TOOLS),
     }
-
-
-def _with_temporary_tool_grants(
-    policy: dict[str, Any],
-    *,
-    agent_id: str,
-    session_id: str = "",
-    turn_id: str = "",
-) -> dict[str, Any]:
-    normalized_session_id = str(session_id or "").strip()
-    if not normalized_session_id:
-        return policy
-    try:
-        from core.web.services import agent_tool_governance_service
-
-        temporary_grants = agent_tool_governance_service.temporary_granted_tools_for_agent(
-            agent_id,
-            session_id=normalized_session_id,
-            turn_id=turn_id,
-        )
-    except Exception as exc:
-        _debug_logger.warning(
-            f"Failed to load temporary tool grants for agent={agent_id}, session_id={normalized_session_id}, turn_id={turn_id}. error={type(exc).__name__}: {exc}",
-            tag="AGENT_TOOL_DIRECTORY",
-        )
-        return policy
-    if not temporary_grants:
-        return policy
-
-    allowed = _tool_name_list(policy.get("allowedTools") or [])
-    blocked = set(_tool_name_list(policy.get("blockedTools") or []))
-    temporary_allowed: list[str] = []
-    for tool in _tool_name_list(temporary_grants):
-        if not tool or tool in blocked or tool in allowed:
-            continue
-        allowed.append(tool)
-        temporary_allowed.append(tool)
-    if not temporary_allowed:
-        return policy
-    return {
-        **policy,
-        "allowedTools": allowed,
-        "temporaryAllowedTools": _tool_name_list(list(policy.get("temporaryAllowedTools") or []) + temporary_allowed),
-    }
-
-
-def resolve_memory_policy_for_agent(agent_id: str) -> dict[str, Any]:
-    state = load_state()
-    agent = _find_agent(state, agent_id)
-    if agent is None:
-        return {}
-    policy_id = str(agent.get("memoryPolicyId") or "").strip()
-    policy = _memory_policies(state).get(policy_id)
-    workspace_path = str(agent.get("workspacePath") or _agent_workspace_relative_path(agent_id)).strip()
-    if isinstance(policy, dict):
-        return normalize_memory_policy(policy, policy_id, workspace_path)
-    return default_memory_policy(policy_id or f"memory-{agent_id}", workspace_path)
 
 
 def resolve_agent_workspace_territory(agent_id: str) -> dict[str, Any]:
@@ -2569,294 +1978,6 @@ def evaluate_agent_workspace_write(agent_id: str, path_value: str | Path, *, pur
     )
     _record_agent_territory_write_blocked(agent, decision, purpose=purpose)
     return decision
-
-
-def resolve_delegation_policy_for_agent(agent_id: str) -> dict[str, Any]:
-    state = load_state()
-    agent = _find_agent(state, agent_id)
-    if agent is None:
-        return normalize_delegation_policy({})
-    metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
-    return normalize_delegation_policy(metadata.get("delegationPolicy") if isinstance(metadata, dict) else {})
-
-
-def resolve_supervision_policy_for_agent(agent_id: str) -> dict[str, Any]:
-    state = load_state()
-    agent = _find_agent(state, agent_id)
-    if agent is None:
-        return normalize_supervision_policy({})
-    metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
-    return normalize_supervision_policy(metadata.get("supervisionPolicy") if isinstance(metadata, dict) else {})
-
-
-def evaluate_current_delegation_policy(
-    *,
-    context_mode: str = "isolated",
-    requested_depth: int | None = None,
-    wake_message: bool = False,
-) -> DelegationPolicyDecision:
-    runtime = current_agent_runtime()
-    agent_id = str(runtime.get("agentId") or "").strip()
-    if not agent_id:
-        return DelegationPolicyDecision(True, context_mode=str(context_mode or "isolated").strip() or "isolated")
-    policy = runtime.get("delegationPolicy") or resolve_delegation_policy_for_agent(agent_id)
-    decision = evaluate_delegation_policy(
-        policy,
-        agent_id=agent_id,
-        context_mode=context_mode,
-        requested_depth=requested_depth,
-        wake_message=wake_message,
-    )
-    if not decision.allowed:
-        _record_delegation_policy_block(agent_id, policy, decision)
-    return decision
-
-
-def evaluate_current_supervision_policy(
-    *,
-    action: str,
-    human_override: bool = False,
-    user_initiated: bool = False,
-) -> SupervisionPolicyDecision:
-    runtime = current_agent_runtime()
-    agent_id = str(runtime.get("agentId") or "").strip()
-    if not agent_id:
-        return SupervisionPolicyDecision(True, action=str(action or "").strip())
-    policy = runtime.get("supervisionPolicy") or resolve_supervision_policy_for_agent(agent_id)
-    decision = evaluate_supervision_policy(
-        policy,
-        agent_id=agent_id,
-        action=action,
-        human_override=human_override,
-        user_initiated=user_initiated,
-    )
-    record_supervision_policy_decision(decision)
-    return decision
-
-
-def evaluate_supervision_policy(
-    policy: dict[str, Any],
-    *,
-    agent_id: str = "",
-    action: str,
-    human_override: bool = False,
-    user_initiated: bool = False,
-) -> SupervisionPolicyDecision:
-    normalized_policy = normalize_supervision_policy(policy)
-    normalized_action = str(action or "").strip() or "runtime_action"
-    review_mode = str(normalized_policy.get("reviewMode") or "advisory").strip() or "advisory"
-    evidence_level = str(normalized_policy.get("evidenceLevel") or "standard").strip() or "standard"
-    supervision_enabled = bool(normalized_policy.get("supervisionEnabled", False))
-    requires_review = bool(normalized_policy.get("requiresReview", False))
-    base = {
-        "agent_id": agent_id,
-        "action": normalized_action,
-        "supervision_enabled": supervision_enabled,
-        "requires_review": requires_review,
-        "review_mode": review_mode,
-        "evidence_level": evidence_level,
-    }
-    if human_override or user_initiated:
-        return SupervisionPolicyDecision(True, reason="human_override", **base)
-    if not supervision_enabled:
-        return SupervisionPolicyDecision(True, reason="supervision_disabled", **base)
-    if review_mode == "disabled":
-        return SupervisionPolicyDecision(True, reason="review_disabled", **base)
-    if review_mode == "required" or requires_review:
-        return SupervisionPolicyDecision(
-            False,
-            message="[监督策略提示] 当前 Agent 的自主动作需要先完成复核，本次动作已被阻止。",
-            reason="supervision_review_required",
-            **base,
-        )
-    return SupervisionPolicyDecision(True, reason="supervision_advisory", **base)
-
-
-def record_supervision_policy_decision(decision: SupervisionPolicyDecision) -> None:
-    if not decision.agent_id or not decision.supervision_enabled:
-        return
-    if decision.reason in {"human_override", "review_disabled", "supervision_disabled"}:
-        return
-    if not decision.allowed:
-        _record_supervision_policy_block(decision)
-        return
-    if decision.review_mode == "advisory":
-        _record_supervision_policy_observed(decision)
-
-
-def evaluate_delegation_policy(
-    policy: dict[str, Any],
-    *,
-    agent_id: str = "",
-    context_mode: str = "isolated",
-    requested_depth: int | None = None,
-    wake_message: bool = False,
-) -> DelegationPolicyDecision:
-    normalized_policy = normalize_delegation_policy(policy)
-    normalized_mode = str(context_mode or "isolated").strip().lower() or "isolated"
-    max_depth = int(normalized_policy.get("maxDepth") or 0)
-    max_concurrent = int(normalized_policy.get("maxConcurrent") or 0)
-    if wake_message and not bool(normalized_policy.get("allowWakeMessages", True)):
-        return DelegationPolicyDecision(
-            False,
-            message="[委托策略提示] 目标 Agent 的唤醒消息已关闭，消息会留在 inbox 中等待后续处理。",
-            reason="wake_messages_disabled",
-            agent_id=agent_id,
-            max_depth=max_depth,
-            max_concurrent=max_concurrent,
-            context_mode=normalized_mode,
-        )
-    if not bool(normalized_policy.get("allowSubagents", False)):
-        return DelegationPolicyDecision(
-            False,
-            message="[委托策略提示] 当前 Agent 的 DelegationPolicy 禁止派发子 Agent。",
-            reason="subagents_disabled",
-            agent_id=agent_id,
-            max_depth=max_depth,
-            max_concurrent=max_concurrent,
-            context_mode=normalized_mode,
-        )
-    allowed_modes = set(str(item or "").strip().lower() for item in normalized_policy.get("allowedContextModes") or [])
-    if normalized_mode not in allowed_modes:
-        return DelegationPolicyDecision(
-            False,
-            message=f"[委托策略提示] 当前 Agent 不允许 `{normalized_mode}` 子 Agent 上下文模式。",
-            reason="context_mode_not_allowed",
-            agent_id=agent_id,
-            max_depth=max_depth,
-            max_concurrent=max_concurrent,
-            context_mode=normalized_mode,
-        )
-    depth = _clamp_int(requested_depth, minimum=0, maximum=99, default=0) if requested_depth is not None else 0
-    if max_depth <= 0 or depth > max_depth:
-        return DelegationPolicyDecision(
-            False,
-            message="[委托策略提示] 当前 Agent 的子 Agent 深度上限不允许本次派发。",
-            reason="max_depth_exceeded",
-            agent_id=agent_id,
-            max_depth=max_depth,
-            max_concurrent=max_concurrent,
-            context_mode=normalized_mode,
-        )
-    return DelegationPolicyDecision(
-        True,
-        agent_id=agent_id,
-        max_depth=max_depth,
-        max_concurrent=max_concurrent,
-        context_mode=normalized_mode,
-    )
-
-
-def evaluate_delegation_wake_policy(policy: dict[str, Any], *, agent_id: str = "") -> DelegationPolicyDecision:
-    normalized_policy = normalize_delegation_policy(policy)
-    if bool(normalized_policy.get("allowWakeMessages", True)):
-        return DelegationPolicyDecision(
-            True,
-            agent_id=agent_id,
-            max_depth=int(normalized_policy.get("maxDepth") or 0),
-            max_concurrent=int(normalized_policy.get("maxConcurrent") or 0),
-            context_mode="agent_inbox",
-        )
-    return DelegationPolicyDecision(
-        False,
-        message="[委托策略提示] 目标 Agent 的唤醒消息已关闭，消息会留在 inbox 中等待后续处理。",
-        reason="wake_messages_disabled",
-        agent_id=agent_id,
-        max_depth=int(normalized_policy.get("maxDepth") or 0),
-        max_concurrent=int(normalized_policy.get("maxConcurrent") or 0),
-        context_mode="agent_inbox",
-    )
-
-
-def evaluate_current_tool_policy(tool_name: str, tool_args: dict[str, Any]) -> ToolPolicyDecision:
-    runtime = current_agent_runtime()
-    agent_id = str(runtime.get("agentId") or "").strip()
-    if not agent_id:
-        return ToolPolicyDecision(True)
-    normalized_tool = str(tool_name or "").strip()
-    delegation_policy = normalize_delegation_policy(runtime.get("delegationPolicy"))
-    if normalized_tool in DISABLED_AGENT_DIRECT_READ_TOOL_NAMES:
-        policy = runtime.get("toolPolicy") or {}
-        policy_id = str(policy.get("policyId") or policy.get("id") or "").strip() or DEFAULT_TOOL_POLICY_ID
-        decision = _blocked_decision(
-            normalized_tool,
-            "direct_read_tool_disabled",
-            policy_id,
-            agent_id,
-            f"[工具策略提示] 当前 Agent 默认关闭 `{normalized_tool}`；请改用 `cli_tool` 执行 `rg` 与小范围命令读取。",
-        )
-        _record_policy_block(agent_id, policy, normalized_tool, tool_args, decision)
-        return decision
-    if normalized_tool in SUBAGENT_DELEGATION_TOOL_NAMES and not bool(
-        delegation_policy.get("allowSubagents", False)
-    ):
-        policy = runtime.get("toolPolicy") or {}
-        policy_id = str(policy.get("policyId") or policy.get("id") or "").strip() or DEFAULT_TOOL_POLICY_ID
-        decision = _blocked_decision(
-            normalized_tool,
-            "subagent_delegation_disabled",
-            policy_id,
-            agent_id,
-            f"[委托策略提示] 当前 Agent 默认关闭子 agent 派发权限，`{normalized_tool}` 已被拦截。",
-        )
-        _record_policy_block(agent_id, policy, normalized_tool, tool_args, decision)
-        return decision
-    policy = runtime.get("toolPolicy") or {}
-    decision = evaluate_tool_policy(
-        normalized_tool,
-        tool_args,
-        policy=policy,
-        agent_id=agent_id,
-    )
-    if not decision.allowed:
-        _record_policy_block(agent_id, policy, tool_name, tool_args, decision)
-    return decision
-
-
-def evaluate_tool_policy(
-    tool_name: str,
-    tool_args: dict[str, Any],
-    *,
-    policy: dict[str, Any],
-    agent_id: str = "",
-) -> ToolPolicyDecision:
-    normalized_tool = str(tool_name or "").strip()
-    policy_id = str(policy.get("policyId") or policy.get("id") or "").strip() or DEFAULT_TOOL_POLICY_ID
-    if not normalized_tool:
-        return _blocked_decision(
-            normalized_tool,
-            "missing_tool",
-            policy_id,
-            agent_id,
-            "[工具策略提示] 当前工具调用缺少工具名称，已被 ToolPolicy 拦截。",
-        )
-    blocked = set(_tool_name_list(policy.get("blockedTools") or []))
-    if normalized_tool in blocked:
-        return _blocked_decision(
-            normalized_tool,
-            "blocked_tool",
-            policy_id,
-            agent_id,
-            f"[工具策略提示] `{normalized_tool}` 已被该 Agent 的 ToolPolicy 禁用。",
-        )
-    allowed = set(_tool_name_list(policy.get("allowedTools") or []))
-    if not allowed:
-        return _blocked_decision(
-            normalized_tool,
-            "no_allowed_tools",
-            policy_id,
-            agent_id,
-            "[工具策略提示] 当前 Agent 未配置可用工具，工具调用已被拦截。",
-        )
-    if normalized_tool not in allowed:
-        return _blocked_decision(
-            normalized_tool,
-            "tool_not_allowed",
-            policy_id,
-            agent_id,
-            f"[工具策略提示] `{normalized_tool}` 不在该 Agent 的可用工具策略中。",
-        )
-    return ToolPolicyDecision(True, policy_id=policy_id, agent_id=agent_id)
 
 
 def write_group_context_event(agent_id: str, event: dict[str, Any]) -> dict[str, Any]:
@@ -3429,124 +2550,6 @@ def build_agent_runtime_context_block(
     return "\n".join(line for line in lines if line is not None).strip()
 
 
-def default_tool_policy(policy_id: str = DEFAULT_TOOL_POLICY_ID) -> dict[str, Any]:
-    return {
-        "policyId": str(policy_id or DEFAULT_TOOL_POLICY_ID),
-        "allowedTools": [],
-        "preferredTools": [],
-        "blockedTools": [],
-        "readScopes": [],
-        "writeScopes": [],
-        "allowedCommandKinds": [],
-        "blockedCommandPatterns": [],
-        "networkAccess": "inherit",
-        "mutationAccess": "inherit",
-        "maxCallsPerTurn": 0,
-        "perToolRules": {},
-    }
-
-
-def default_session_agent_tool_policy(policy_id: str) -> dict[str, Any]:
-    payload = default_tool_policy(policy_id)
-    payload["allowedTools"] = list(DEFAULT_SESSION_AGENT_ALLOWED_TOOLS)
-    payload["preferredTools"] = list(DEFAULT_SESSION_AGENT_PREFERRED_TOOLS)
-    payload["readScopes"] = ["private", "shared"]
-    payload["writeScopes"] = ["private"]
-    return payload
-
-
-def default_session_agent_tool_policy_v2(policy_id: str, *, registered_tool_names: Iterable[str]):
-    """Project the existing default session assignment into immutable ToolPolicyV2."""
-
-    from core.authorization.tool_policy_evaluator import normalize_legacy_tool_policy
-
-    return normalize_legacy_tool_policy(
-        default_session_agent_tool_policy(policy_id),
-        registered_tool_names=registered_tool_names,
-        policy_id=policy_id,
-    )
-
-
-def default_system_no_tool_policy(policy_id: str) -> dict[str, Any]:
-    payload = default_tool_policy(policy_id)
-    payload["networkAccess"] = "none"
-    payload["mutationAccess"] = "none"
-    return payload
-
-
-def default_self_evolution_executable_tool_policy(policy_id: str) -> dict[str, Any]:
-    payload = default_tool_policy(policy_id)
-    payload["allowedTools"] = list(SELF_EVOLUTION_EXECUTABLE_AGENT_ALLOWED_TOOLS)
-    payload["preferredTools"] = list(SELF_EVOLUTION_EXECUTABLE_AGENT_PREFERRED_TOOLS)
-    payload["readScopes"] = ["private", "shared", "repo"]
-    payload["writeScopes"] = ["repo"]
-    payload["networkAccess"] = "none"
-    payload["mutationAccess"] = "restricted"
-    payload["maxCallsPerTurn"] = 12
-    return payload
-
-
-def default_research_source_tool_policy(policy_id: str, *, role_key: str = "") -> dict[str, Any]:
-    payload = default_tool_policy(policy_id)
-    resolved = agent_role_tool_profile_service.resolve_role_tool_policy(
-        role_key=role_key,
-        primary_mode="research",
-        policy_id=policy_id,
-    )
-    if resolved and str(resolved.get("roleToolProfileId") or "").strip() != "research_role_default":
-        payload.update(resolved)
-    else:
-        profile = _RESEARCH_SOURCE_DEFAULT_PROFILE
-        if profile:
-            payload.update(agent_role_tool_profile_service.build_policy_from_role_profile(profile, policy_id))
-        else:
-            payload["allowedTools"] = list(RESEARCH_SOURCE_ALLOWED_TOOLS)
-            payload["preferredTools"] = list(RESEARCH_SOURCE_PREFERRED_TOOLS)
-            payload["readScopes"] = ["private", "shared"]
-            payload["writeScopes"] = []
-            payload["networkAccess"] = "controlled"
-            payload["mutationAccess"] = "none"
-            payload["maxCallsPerTurn"] = 8
-    return payload
-
-
-def default_research_role_tool_policy(policy_id: str, *, role_key: str = "") -> dict[str, Any]:
-    payload = default_tool_policy(policy_id)
-    resolved = agent_role_tool_profile_service.resolve_role_tool_policy(
-        role_key=role_key,
-        primary_mode="research",
-        policy_id=policy_id,
-    )
-    if resolved:
-        payload.update(resolved)
-    else:
-        profile = _RESEARCH_ROLE_DEFAULT_PROFILE
-        payload["allowedTools"] = list(profile.get("allowedTools") or ("agent_message_tool", "research_knowledge_query_tool"))
-        payload["preferredTools"] = list(profile.get("preferredTools") or payload["allowedTools"])
-        payload["readScopes"] = ["private", "shared"]
-        payload["writeScopes"] = []
-        payload["networkAccess"] = "controlled"
-        payload["mutationAccess"] = "none"
-        payload["maxCallsPerTurn"] = 8
-    return payload
-
-
-def _default_tool_policy_id_for_agent(agent_id: str, primary_mode: str) -> str:
-    normalized_mode = _normalize_primary_mode(primary_mode)
-    if _is_session_agent_primary_mode(normalized_mode) or normalized_mode == "research":
-        return f"tool-{agent_id}"
-    return DEFAULT_TOOL_POLICY_ID
-
-
-def _default_tool_policy_for_agent(policy_id: str, primary_mode: str, *, role_key: str = "") -> dict[str, Any]:
-    normalized_mode = _normalize_primary_mode(primary_mode)
-    if _is_session_agent_primary_mode(normalized_mode):
-        return default_session_agent_tool_policy(policy_id)
-    if normalized_mode == "research":
-        return default_research_role_tool_policy(policy_id, role_key=role_key)
-    return default_tool_policy(policy_id)
-
-
 def _is_session_agent_primary_mode(primary_mode: str) -> bool:
     return str(primary_mode or "").strip() in {"", "chat"}
 
@@ -3555,111 +2558,6 @@ def _is_profileless_session_agent(agent: dict[str, Any]) -> bool:
     primary_mode = _normalize_primary_mode(agent.get("primaryMode") or _infer_agent_primary_mode(agent))
     role_key = _normalize_role_key(agent.get("roleKey") or _infer_agent_role_key(agent))
     return _is_session_agent_primary_mode(primary_mode) and not role_key
-
-
-def _ensure_session_agent_tool_policy(
-    state: dict[str, Any],
-    agent: dict[str, Any],
-    *,
-    normalized_tool_policies: dict[str, Any] | None = None,
-) -> bool:
-    if not _is_session_agent_primary_mode(str(agent.get("primaryMode") or "")):
-        return False
-    agent_id = str(agent.get("agentId") or "").strip()
-    if not agent_id:
-        return False
-    policies = normalized_tool_policies if normalized_tool_policies is not None else _tool_policies(state)
-    current_policy_id = str(agent.get("toolPolicyId") or DEFAULT_TOOL_POLICY_ID).strip() or DEFAULT_TOOL_POLICY_ID
-    policy_missing = current_policy_id not in policies
-    if current_policy_id != DEFAULT_TOOL_POLICY_ID and not policy_missing:
-        return False
-
-    policy_id = current_policy_id if policy_missing and current_policy_id != DEFAULT_TOOL_POLICY_ID else f"tool-{agent_id}"
-    policies[policy_id] = default_session_agent_tool_policy(policy_id)
-    state["toolPolicies"] = policies
-    agent["toolPolicyId"] = policy_id
-    return True
-
-
-def _ensure_fixed_role_tool_policy(
-    state: dict[str, Any],
-    agent: dict[str, Any],
-    *,
-    normalized_tool_policies: dict[str, Any] | None = None,
-) -> dict[str, Any] | None:
-    desired_kind = _fixed_role_tool_policy_kind(agent)
-    if not desired_kind:
-        return None
-    agent_id = str(agent.get("agentId") or "").strip()
-    if not agent_id:
-        return None
-    role_key = _normalize_role_key(agent.get("roleKey") or _infer_agent_role_key(agent))
-    if agent_id == KNOWLEDGE_STEWARD_AGENT_ID or role_key == KNOWLEDGE_STEWARD_ROLE_KEY:
-        policy_id = KNOWLEDGE_STEWARD_TOOL_POLICY_ID
-    else:
-        policy_id = f"tool-{agent_id}"
-    policies = normalized_tool_policies if normalized_tool_policies is not None else _tool_policies(state)
-    if desired_kind == "research_source":
-        desired_policy = default_research_source_tool_policy(policy_id, role_key=str(agent.get("roleKey") or ""))
-    elif desired_kind == "research_role":
-        desired_policy = default_research_role_tool_policy(policy_id, role_key=str(agent.get("roleKey") or ""))
-    elif desired_kind == "self_evolution_executable":
-        desired_policy = default_self_evolution_executable_tool_policy(policy_id)
-    elif desired_kind == "role_profile":
-        metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
-        desired_policy = agent_role_tool_profile_service.resolve_role_tool_policy(
-            role_key=str(agent.get("roleKey") or ""),
-            primary_mode=str(agent.get("primaryMode") or ""),
-            metadata=metadata,
-            policy_id=policy_id,
-        ) or default_research_role_tool_policy(policy_id, role_key=str(agent.get("roleKey") or ""))
-    else:
-        desired_policy = default_system_no_tool_policy(policy_id)
-    current_policy_id = str(agent.get("toolPolicyId") or DEFAULT_TOOL_POLICY_ID).strip() or DEFAULT_TOOL_POLICY_ID
-    current_policy = normalize_tool_policy(policies.get(current_policy_id) or default_tool_policy(current_policy_id), current_policy_id)
-    versioned_runtime_overrides: dict[str, Any] = {}
-    if int(current_policy.get("policyVersion") or 1) > int(desired_policy.get("policyVersion") or 1):
-        versioned_runtime_overrides = {
-            "maxCallsPerTurn": int(current_policy.get("maxCallsPerTurn") or 0),
-            "policyVersion": int(current_policy.get("policyVersion") or 1),
-        }
-    next_policy = normalize_tool_policy(
-        {
-            **desired_policy,
-            **versioned_runtime_overrides,
-            "perToolRules": dict(current_policy.get("perToolRules") or {}),
-        },
-        policy_id,
-    )
-    if current_policy_id == policy_id and policies.get(policy_id) == next_policy:
-        return None
-    previous_policy_id = current_policy_id
-    policies[policy_id] = next_policy
-    previous_policy_is_orphaned = (
-        previous_policy_id != DEFAULT_TOOL_POLICY_ID
-        and previous_policy_id != policy_id
-        and _count_policy_refs(state.get("agents") or [], "toolPolicyId", previous_policy_id) == 1
-    )
-    if previous_policy_is_orphaned:
-        policies.pop(previous_policy_id, None)
-    state["toolPolicies"] = policies
-    agent["toolPolicyId"] = policy_id
-    return next_policy
-
-
-def _fixed_role_tool_policy_kind(agent: dict[str, Any]) -> str:
-    primary_mode = _normalize_primary_mode(agent.get("primaryMode") or _infer_agent_primary_mode(agent))
-    role_key = _normalize_role_key(agent.get("roleKey") or _infer_agent_role_key(agent))
-    metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
-    if primary_mode in SYSTEM_NO_TOOL_MODES:
-        system_role = _normalize_role_key(metadata.get("selfEvolutionRole") or metadata.get("supervisedRole") or role_key)
-        if primary_mode == "self_evolution" and system_role in SELF_EVOLUTION_EXECUTABLE_ROLES:
-            return "self_evolution_executable"
-        if system_role in SYSTEM_NO_TOOL_ROLES.get(primary_mode, set()):
-            return "no_tools"
-    if agent_role_tool_profile_service.role_has_explicit_tool_profile(role_key, primary_mode=primary_mode, metadata=metadata):
-        return "role_profile"
-    return ""
 
 
 def _retired_self_evolution_role(agent: dict[str, Any]) -> str:
@@ -3674,31 +2572,6 @@ def _retired_self_evolution_role(agent: dict[str, Any]) -> str:
     if primary_mode == "self_evolution" and prompt_template_id in SELF_EVOLUTION_RETIRED_PROMPT_TEMPLATE_IDS:
         return self_role or "summarizer"
     return ""
-
-
-def _archive_retired_self_evolution_agent(agent: dict[str, Any], retired_role: str) -> bool:
-    changed = False
-    now = utc_now_iso()
-    if str(agent.get("status") or "active").strip() != "archived":
-        agent["status"] = "archived"
-        changed = True
-    metadata = dict(agent.get("metadata") or {})
-    updates = {
-        "retiredRole": _normalize_role_key(retired_role),
-        "retiredReason": "self_evolution_role_retired",
-    }
-    if not str(metadata.get("retiredAt") or "").strip():
-        updates["retiredAt"] = now
-    for key, value in updates.items():
-        if metadata.get(key) != value:
-            metadata[key] = value
-            changed = True
-    if agent.get("metadata") != metadata:
-        agent["metadata"] = metadata
-        changed = True
-    if changed:
-        agent["updatedAt"] = now
-    return changed
 
 
 
@@ -4114,200 +2987,6 @@ def _format_task_profile_context(profile: Any) -> list[str]:
     return lines
 
 
-def normalize_tool_policy(policy: dict[str, Any], policy_id: str = "") -> dict[str, Any]:
-    raw_policy = policy if isinstance(policy, dict) else {}
-    payload = default_tool_policy(policy_id or str(raw_policy.get("policyId") or raw_policy.get("id") or DEFAULT_TOOL_POLICY_ID))
-    payload.update(raw_policy)
-    for key in (
-        "allowedTools",
-        "preferredTools",
-        "blockedTools",
-        "allowedCommandKinds",
-        "blockedCommandPatterns",
-    ):
-        normalized_values: list[str] = []
-        seen_values: set[str] = set()
-        for item in list(payload.get(key) or []):
-            value = str(item or "").strip()
-            if not value or value in seen_values:
-                continue
-            normalized_values.append(value)
-            seen_values.add(value)
-        payload[key] = normalized_values
-    for key in ("allowedTools", "preferredTools"):
-        payload[key] = [name for name in payload.get(key) or [] if name not in DISABLED_AGENT_DIRECT_READ_TOOL_NAMES]
-    payload["readScopes"] = _normalize_tool_policy_scopes(payload.get("readScopes"))
-    payload["writeScopes"] = _normalize_tool_policy_scopes(payload.get("writeScopes"))
-    payload["perToolRules"] = dict(payload.get("perToolRules") or {})
-    try:
-        payload["maxCallsPerTurn"] = max(0, int(payload.get("maxCallsPerTurn") or 0))
-    except (TypeError, ValueError):
-        payload["maxCallsPerTurn"] = 0
-    try:
-        payload["policyVersion"] = max(1, int(payload.get("policyVersion") or 1))
-    except (TypeError, ValueError):
-        payload["policyVersion"] = 1
-    return payload
-
-
-def tool_policy_fingerprint(policy: dict[str, Any]) -> str:
-    import hashlib
-    import json
-
-    normalized = normalize_tool_policy(policy, str((policy or {}).get("policyId") or ""))
-    encoded = json.dumps(normalized, ensure_ascii=True, sort_keys=True, separators=(",", ":")).encode("utf-8")
-    return hashlib.sha256(encoded).hexdigest()
-
-
-def _normalize_tool_policy_scopes(scopes: Any) -> list[str]:
-    normalized: list[str] = []
-    raw_scopes = [scopes] if isinstance(scopes, str) else list(scopes or [])
-    for item in raw_scopes:
-        scope = str(item or "").strip().lower()
-        if scope not in TOOL_POLICY_WORKSPACE_SCOPES or scope in normalized:
-            continue
-        normalized.append(scope)
-    return normalized
-
-
-def default_memory_policy(policy_id: str, agent_workspace_path: str) -> dict[str, Any]:
-    workspace_path = _workspace_path_for_policy(str(agent_workspace_path or "").strip(), "")
-    return {
-        "policyId": str(policy_id or "").strip(),
-        "privateMemoryRoot": f"{workspace_path}/memory" if workspace_path else "",
-        "episodicEventsPath": f"{workspace_path}/events/episodic_events.jsonl" if workspace_path else "",
-        "groupContextEventsPath": f"{workspace_path}/events/group_context_events.jsonl" if workspace_path else "",
-        "agentInboxMessagesPath": f"{workspace_path}/events/agent_inbox_messages.jsonl" if workspace_path else "",
-        "projectMemoryUpdatesPath": f"{workspace_path}/events/project_memory_updates.jsonl" if workspace_path else "",
-        "toolObservationsPath": f"{workspace_path}/events/tool_observations.jsonl" if workspace_path else "",
-        "summariesPath": f"{workspace_path}/memory/summaries.jsonl" if workspace_path else "",
-        "readSharedGroups": [],
-        "writeSharedGroups": [],
-        "readKnowledgeBaseIds": [],
-        "proposeKnowledgeBaseIds": [],
-        "reviewKnowledgeBaseIds": [],
-        "rateKnowledgeBaseIds": [],
-    }
-
-
-def normalize_memory_policy(policy: dict[str, Any], policy_id: str, agent_workspace_path: str) -> dict[str, Any]:
-    payload = default_memory_policy(policy_id, agent_workspace_path)
-    payload.update(policy if isinstance(policy, dict) else {})
-    payload["policyId"] = str(policy_id or payload.get("policyId") or "").strip()
-    workspace_path = _workspace_path_for_policy(str(agent_workspace_path or "").strip(), str(payload.get("privateMemoryRoot") or ""))
-    for key, suffix in (
-        ("privateMemoryRoot", "memory"),
-        ("episodicEventsPath", "events/episodic_events.jsonl"),
-        ("groupContextEventsPath", "events/group_context_events.jsonl"),
-        ("agentInboxMessagesPath", "events/agent_inbox_messages.jsonl"),
-        ("projectMemoryUpdatesPath", "events/project_memory_updates.jsonl"),
-        ("toolObservationsPath", "events/tool_observations.jsonl"),
-        ("summariesPath", "memory/summaries.jsonl"),
-    ):
-        value = str(payload.get(key) or "").strip()
-        if workspace_path:
-            value = f"{workspace_path}/{suffix}"
-        payload[key] = value
-    for key in (
-        "readSharedGroups",
-        "writeSharedGroups",
-        "readKnowledgeBaseIds",
-        "proposeKnowledgeBaseIds",
-        "reviewKnowledgeBaseIds",
-        "rateKnowledgeBaseIds",
-    ):
-        payload[key] = _unique_string_list(payload.get(key))
-    return payload
-
-
-def normalize_agent_context_compression_policy(policy: dict[str, Any] | None) -> dict[str, Any]:
-    source = policy if isinstance(policy, dict) else {}
-    mode = str(source.get("mode") or "").strip().lower()
-    if mode not in {"inherit", "custom"}:
-        mode = "custom" if _has_context_compression_override(source) else "inherit"
-    if mode != "custom":
-        return dict(DEFAULT_AGENT_CONTEXT_COMPRESSION_POLICY)
-
-    payload: dict[str, Any] = {
-        "mode": "custom",
-        "enabled": bool(source.get("enabled", True)),
-    }
-    max_token_limit = _positive_context_compression_int(
-        source.get("maxTokenLimit", source.get("max_token_limit")),
-        default=0,
-        maximum=2_000_000,
-    )
-    if max_token_limit > 0:
-        payload["maxTokenLimit"] = max_token_limit
-    payload["maxCompressionsPerSession"] = _positive_context_compression_int(
-        source.get("maxCompressionsPerSession", source.get("max_compressions_per_session")),
-        default=20,
-        maximum=100,
-    )
-    payload["levels"] = _normalize_context_compression_levels(source.get("levels"))
-    payload["summaryChars"] = _normalize_context_compression_summary_chars(
-        source.get("summaryChars", source.get("summary_chars"))
-    )
-    payload["preservation"] = _normalize_context_compression_preservation(source.get("preservation"))
-    return payload
-
-
-def effective_agent_context_compression_policy(
-    agent: dict[str, Any] | None,
-    base_policy: Any = None,
-    *,
-    context_window_limit: int = 0,
-) -> dict[str, Any]:
-    base = _context_compression_policy_from_config(base_policy, context_window_limit=context_window_limit)
-    raw_agent_policy = normalize_agent_context_compression_policy(
-        (agent or {}).get("contextCompressionPolicy") if isinstance(agent, dict) else None
-    )
-    if raw_agent_policy.get("mode") != "custom":
-        return {
-            **base,
-            "mode": "inherit",
-            "source": "global",
-            "agentPolicy": raw_agent_policy,
-        }
-
-    merged = {
-        **base,
-        "mode": "custom",
-        "source": "agent_custom",
-        "agentPolicy": raw_agent_policy,
-        "enabled": bool(raw_agent_policy.get("enabled", base.get("enabled", True))),
-        "maxCompressionsPerSession": _positive_context_compression_int(
-            raw_agent_policy.get("maxCompressionsPerSession"),
-            default=int(base.get("maxCompressionsPerSession") or 20),
-            maximum=100,
-        ),
-        "levels": {
-            **dict(base.get("levels") or {}),
-            **dict(raw_agent_policy.get("levels") or {}),
-        },
-        "summaryChars": {
-            **dict(base.get("summaryChars") or {}),
-            **dict(raw_agent_policy.get("summaryChars") or {}),
-        },
-        "preservation": {
-            **dict(base.get("preservation") or {}),
-            **dict(raw_agent_policy.get("preservation") or {}),
-        },
-    }
-    raw_limit = _positive_context_compression_int(raw_agent_policy.get("maxTokenLimit"), default=0, maximum=2_000_000)
-    context_window = _positive_context_compression_int(context_window_limit, default=int(base.get("contextWindowLimit") or 0), maximum=2_000_000)
-    if raw_limit > 0:
-        merged["maxTokenLimit"] = raw_limit
-        merged["effectiveTokenLimit"] = min(raw_limit, context_window) if context_window > 0 else raw_limit
-    else:
-        merged["maxTokenLimit"] = int(base.get("maxTokenLimit") or base.get("effectiveTokenLimit") or 0)
-        merged["effectiveTokenLimit"] = int(base.get("effectiveTokenLimit") or merged["maxTokenLimit"])
-    merged["compressionTriggerTokenLimit"] = int(merged.get("effectiveTokenLimit") or 0)
-    merged["contextWindowLimit"] = context_window or int(merged.get("effectiveTokenLimit") or 0)
-    merged["modelContextWindowLimit"] = int(merged.get("contextWindowLimit") or 0)
-    return merged
-
-
 def _agent_context_window_limit(
     agent: dict[str, Any] | None,
     *,
@@ -4371,124 +3050,6 @@ def _model_context_window_limits_for_agents(agents: list[dict[str, Any]]) -> dic
         return {model_id: 0 for model_id in model_ids}
 
 
-def _context_compression_base_policy_for_agents() -> Any:
-    try:
-        from config import get_config
-
-        return get_config().context_compression
-    except Exception:
-        return {}
-
-
-def _has_context_compression_override(source: dict[str, Any]) -> bool:
-    return any(
-        key in source
-        for key in (
-            "enabled",
-            "maxTokenLimit",
-            "max_token_limit",
-            "maxCompressionsPerSession",
-            "max_compressions_per_session",
-            "levels",
-            "summaryChars",
-            "summary_chars",
-            "preservation",
-        )
-    )
-
-
-def _context_compression_policy_from_config(base_policy: Any, *, context_window_limit: int = 0) -> dict[str, Any]:
-    if base_policy is None:
-        try:
-            from config import get_config
-
-            base_policy = get_config().context_compression
-        except Exception:
-            base_policy = {}
-    effective_limit = _positive_context_compression_int(
-        _get_config_value(base_policy, "max_token_limit", "maxTokenLimit"),
-        default=16_000,
-        maximum=2_000_000,
-    )
-    context_window = _positive_context_compression_int(
-        context_window_limit,
-        default=effective_limit,
-        maximum=2_000_000,
-    )
-    effective_token_limit = min(effective_limit, context_window) if context_window > 0 else effective_limit
-    return {
-        "mode": "inherit",
-        "source": "global",
-        "enabled": bool(_get_config_value(base_policy, "enabled", default=True)),
-        "maxTokenLimit": effective_limit,
-        "effectiveTokenLimit": effective_token_limit,
-        "compressionTriggerTokenLimit": effective_token_limit,
-        "contextWindowLimit": context_window,
-        "modelContextWindowLimit": context_window,
-        "maxCompressionsPerSession": _positive_context_compression_int(
-            _get_config_value(base_policy, "max_compressions_per_session", "maxCompressionsPerSession"),
-            default=20,
-            maximum=100,
-        ),
-        "levels": _normalize_context_compression_levels(_get_config_value(base_policy, "levels", default={})),
-        "summaryChars": _normalize_context_compression_summary_chars(
-            _get_config_value(base_policy, "summary_chars", "summaryChars", default={})
-        ),
-        "preservation": _normalize_context_compression_preservation(
-            _get_config_value(base_policy, "preservation", default={})
-        ),
-    }
-
-
-def _normalize_context_compression_levels(levels: Any) -> dict[str, float]:
-    raw = levels if levels is not None else {}
-    return {
-        "light": _context_compression_ratio(_get_config_value(raw, "light"), DEFAULT_CONTEXT_COMPRESSION_LEVELS["light"]),
-        "standard": _context_compression_ratio(_get_config_value(raw, "standard"), DEFAULT_CONTEXT_COMPRESSION_LEVELS["standard"]),
-        "deep": _context_compression_ratio(_get_config_value(raw, "deep"), DEFAULT_CONTEXT_COMPRESSION_LEVELS["deep"]),
-        "emergency": _context_compression_ratio(_get_config_value(raw, "emergency"), DEFAULT_CONTEXT_COMPRESSION_LEVELS["emergency"]),
-    }
-
-
-def _normalize_context_compression_summary_chars(summary_chars: Any) -> dict[str, int]:
-    raw = summary_chars if summary_chars is not None else {}
-    return {
-        "light": _positive_context_compression_int(_get_config_value(raw, "light"), default=DEFAULT_CONTEXT_COMPRESSION_SUMMARY_CHARS["light"], maximum=20_000),
-        "standard": _positive_context_compression_int(_get_config_value(raw, "standard"), default=DEFAULT_CONTEXT_COMPRESSION_SUMMARY_CHARS["standard"], maximum=20_000),
-        "deep": _positive_context_compression_int(_get_config_value(raw, "deep"), default=DEFAULT_CONTEXT_COMPRESSION_SUMMARY_CHARS["deep"], maximum=20_000),
-        "emergency": _positive_context_compression_int(_get_config_value(raw, "emergency"), default=DEFAULT_CONTEXT_COMPRESSION_SUMMARY_CHARS["emergency"], maximum=20_000),
-    }
-
-
-def _normalize_context_compression_preservation(preservation: Any) -> dict[str, Any]:
-    raw = preservation if preservation is not None else {}
-    return {
-        "keepAiMessages": _positive_context_compression_int(
-            _get_config_value(raw, "keepAiMessages", "keep_ai_messages"),
-            default=5,
-            maximum=50,
-        ),
-        "preserveErrors": bool(_get_config_value(raw, "preserveErrors", "preserve_errors", default=True)),
-        "extractKeyDecisions": bool(_get_config_value(raw, "extractKeyDecisions", "extract_key_decisions", default=True)),
-    }
-
-
-def _context_compression_ratio(value: Any, default: float) -> float:
-    try:
-        parsed = float(value)
-    except (TypeError, ValueError):
-        parsed = default
-    return max(0.0, min(1.0, parsed))
-
-
-def _positive_context_compression_int(value: Any, *, default: int, maximum: int) -> int:
-    try:
-        parsed = int(value)
-    except (TypeError, ValueError):
-        parsed = default
-    return max(0, min(maximum, parsed))
-
-
 def _get_config_value(source: Any, *keys: str, default: Any = None) -> Any:
     for key in keys:
         if isinstance(source, dict) and key in source:
@@ -4496,45 +3057,6 @@ def _get_config_value(source: Any, *keys: str, default: Any = None) -> Any:
         if hasattr(source, key):
             return getattr(source, key)
     return default
-
-
-def normalize_delegation_policy(policy: dict[str, Any] | None) -> dict[str, Any]:
-    source = policy if isinstance(policy, dict) else {}
-    allowed_modes = [
-        mode
-        for mode in _unique_string_list(source.get("allowedContextModes"))
-        if mode in {"isolated", "fork"}
-    ]
-    if not allowed_modes:
-        allowed_modes = ["isolated"]
-    return {
-        "allowSubagents": bool(source.get("allowSubagents", False)),
-        "maxConcurrent": _clamp_int(source.get("maxConcurrent"), minimum=0, maximum=8, default=0),
-        "maxDepth": _clamp_int(source.get("maxDepth"), minimum=0, maximum=4, default=0),
-        "allowWakeMessages": bool(source.get("allowWakeMessages", True)),
-        "allowedContextModes": allowed_modes,
-    }
-
-
-def normalize_supervision_policy(policy: dict[str, Any] | None) -> dict[str, Any]:
-    source = policy if isinstance(policy, dict) else {}
-    review_mode = str(source.get("reviewMode") or "advisory").strip().lower()
-    if review_mode not in {"advisory", "required", "disabled"}:
-        review_mode = "advisory"
-    evidence_level = str(source.get("evidenceLevel") or "standard").strip().lower()
-    if evidence_level not in {"light", "standard", "strict"}:
-        evidence_level = "standard"
-    requires_review = bool(source.get("requiresReview", review_mode == "required"))
-    if review_mode == "required":
-        requires_review = True
-    if review_mode == "disabled":
-        requires_review = False
-    return {
-        "supervisionEnabled": bool(source.get("supervisionEnabled", False)),
-        "requiresReview": requires_review,
-        "reviewMode": review_mode,
-        "evidenceLevel": evidence_level,
-    }
 
 
 def load_state() -> dict[str, Any]:
@@ -4949,71 +3471,6 @@ def _ensure_knowledge_steward_agent(
         "agent": dict(agent),
         "repairedFields": sorted(set(repaired_fields)),
     }
-
-
-def _knowledge_steward_tool_policy() -> dict[str, Any]:
-    profile_policy = agent_role_tool_profile_service.resolve_role_tool_policy(
-        role_key=KNOWLEDGE_STEWARD_ROLE_KEY,
-        primary_mode="general",
-        metadata={"systemRole": KNOWLEDGE_STEWARD_ROLE_KEY},
-        policy_id=KNOWLEDGE_STEWARD_TOOL_POLICY_ID,
-    )
-    if profile_policy:
-        return normalize_tool_policy(profile_policy, KNOWLEDGE_STEWARD_TOOL_POLICY_ID)
-    return normalize_tool_policy(
-        {
-            **default_tool_policy(KNOWLEDGE_STEWARD_TOOL_POLICY_ID),
-            "allowedTools": [
-                "agent_message_tool",
-                "source_collection_context_tool",
-                "source_collection_stage_writeback_tool",
-                "skill_library_search_tool",
-                "unified_memory_search_tool",
-                "knowledge_proposal_tool",
-                "knowledge_ingestion_tool",
-                "knowledge_governance_tasks_tool",
-                "knowledge_operations_health_tool",
-                "knowledge_governance_plan_tool",
-                "knowledge_steward_recommendations_tool",
-                "knowledge_steward_workbench_tool",
-                "knowledge_rating_suggestion_tool",
-            ],
-            "preferredTools": [
-                "source_collection_context_tool",
-                "source_collection_stage_writeback_tool",
-                "knowledge_governance_tasks_tool",
-                "knowledge_operations_health_tool",
-                "knowledge_governance_plan_tool",
-                "knowledge_steward_workbench_tool",
-                "knowledge_steward_recommendations_tool",
-                "skill_library_search_tool",
-                "unified_memory_search_tool",
-                "knowledge_rating_suggestion_tool",
-            ],
-            "readScopes": ["private", "shared"],
-            "writeScopes": ["private"],
-            "networkAccess": "none",
-            "mutationAccess": "restricted",
-            "maxCallsPerTurn": 12,
-        },
-        KNOWLEDGE_STEWARD_TOOL_POLICY_ID,
-    )
-
-
-def _knowledge_steward_memory_policy(workspace_path: str) -> dict[str, Any]:
-    return normalize_memory_policy(
-        {
-            **default_memory_policy(KNOWLEDGE_STEWARD_MEMORY_POLICY_ID, workspace_path),
-            "readSharedGroups": ["project"],
-            "writeSharedGroups": [],
-            "readKnowledgeBaseIds": [],
-            "proposeKnowledgeBaseIds": [],
-            "reviewKnowledgeBaseIds": [],
-            "rateKnowledgeBaseIds": [],
-        },
-        KNOWLEDGE_STEWARD_MEMORY_POLICY_ID,
-        workspace_path,
-    )
 
 
 def _knowledge_steward_metadata() -> dict[str, Any]:
@@ -6114,85 +4571,6 @@ def _remember_agent_api_hydration_cache(
         _AGENT_API_HYDRATION_CACHE = context
 
 
-def _memory_policy_for_agent(agent: dict[str, Any], *, hydration: AgentApiHydrationContext | None = None) -> dict[str, Any]:
-    agent_id = str(agent.get("agentId") or "").strip()
-    if hydration is None:
-        return resolve_memory_policy_for_agent(agent_id)
-    policy_id = str(agent.get("memoryPolicyId") or "").strip()
-    policy = hydration.memory_policies.get(policy_id)
-    workspace_path = str(agent.get("workspacePath") or _agent_workspace_relative_path(agent_id)).strip()
-    if isinstance(policy, dict):
-        return normalize_memory_policy(policy, policy_id, workspace_path)
-    return default_memory_policy(policy_id or f"memory-{agent_id}", workspace_path)
-
-
-def _tool_policy_for_agent(agent: dict[str, Any], *, hydration: AgentApiHydrationContext | None = None) -> dict[str, Any]:
-    agent_id = str(agent.get("agentId") or "").strip()
-    if hydration is None:
-        return resolve_tool_policy_for_agent(agent_id)
-    policy_id = str(agent.get("toolPolicyId") or DEFAULT_TOOL_POLICY_ID).strip() or DEFAULT_TOOL_POLICY_ID
-    policy = hydration.tool_policies.get(policy_id) or default_tool_policy(policy_id)
-    metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
-    return _effective_agent_tool_policy(
-        _with_session_terminal_protocol_defaults(agent, normalize_tool_policy(policy, policy_id)),
-        metadata.get("delegationPolicy") if isinstance(metadata, dict) else {},
-    )
-
-
-def _tool_policy_source_for_agent(agent: dict[str, Any], policy: dict[str, Any] | None) -> dict[str, Any]:
-    agent_id = str(agent.get("agentId") or "").strip()
-    policy_id = str(agent.get("toolPolicyId") or DEFAULT_TOOL_POLICY_ID).strip() or DEFAULT_TOOL_POLICY_ID
-    normalized_policy = normalize_tool_policy(policy if isinstance(policy, dict) else {}, policy_id)
-    allowed_tools = _tool_name_list(normalized_policy.get("allowedTools") or [])
-    preferred_tools = _tool_name_list(normalized_policy.get("preferredTools") or [])
-    mutating_tools = sorted({tool for tool in allowed_tools if tool in MUTATING_AGENT_TOOL_NAMES})
-    is_session_agent = _is_session_agent_primary_mode(str(agent.get("primaryMode") or _infer_agent_primary_mode(agent)))
-    is_private_policy = bool(agent_id and policy_id == f"tool-{agent_id}")
-    fixed_kind = _fixed_role_tool_policy_kind(agent)
-    default_allowed = list(DEFAULT_SESSION_AGENT_ALLOWED_TOOLS)
-    default_preferred = list(DEFAULT_SESSION_AGENT_PREFERRED_TOOLS)
-    if fixed_kind == "no_tools":
-        kind = "system_no_tools"
-        label = "系统固定无工具"
-        description = "该系统角色由运行时固定为无工具策略，避免误删或误授权影响核心流程。"
-    elif fixed_kind in {"research_source", "research_role"}:
-        kind = "fixed_role_policy"
-        label = "角色固定工具"
-        description = "该科研角色使用固定工具包，系统会按职责保持只读/受控权限。"
-    elif policy_id == DEFAULT_TOOL_POLICY_ID:
-        kind = "empty_default_policy"
-        label = "空默认包"
-        description = "当前引用全局空默认包；没有显式允许工具。"
-    elif is_session_agent and is_private_policy and allowed_tools == default_allowed and preferred_tools == default_preferred:
-        kind = "session_default_private"
-        label = "会话默认包"
-        description = "当前会话 Agent 使用自己的默认工具包；保存后不会被其他共享包覆盖。"
-    elif is_session_agent and len(allowed_tools) > len(default_allowed) and mutating_tools:
-        kind = "legacy_wide_private_override"
-        label = "历史宽权限覆盖"
-        description = "该会话 Agent 保留了旧的私有宽权限配置；系统不会静默收窄，请在工具页手动替换为目标工具包。"
-    elif is_private_policy:
-        kind = "agent_private_override"
-        label = "Agent 私有覆盖"
-        description = "该 Agent 使用自己的私有 ToolPolicy；重置/替换只影响当前 Agent。"
-    else:
-        kind = "shared_policy"
-        label = "共享工具包"
-        description = "该 Agent 引用共享 ToolPolicy；修改共享包可能影响其他 Agent。"
-    return {
-        "kind": kind,
-        "label": label,
-        "description": description,
-        "policyId": policy_id,
-        "isPrivate": is_private_policy,
-        "isLegacyWide": kind == "legacy_wide_private_override",
-        "allowedToolCount": len(allowed_tools),
-        "preferredToolCount": len(preferred_tools),
-        "mutatingToolCount": len(mutating_tools),
-        "mutatingTools": mutating_tools,
-    }
-
-
 def _tool_governance_requests_for_agent(
     agent_id: str,
     *,
@@ -6318,16 +4696,6 @@ def _read_tool_governance_requests_for_agent(agent: dict[str, Any], *, limit: in
     return _read_jsonl(path)
 
 
-def _tool_policies(state: dict[str, Any]) -> dict[str, Any]:
-    raw = state.get("toolPolicies")
-    policies = dict(raw) if isinstance(raw, dict) else {}
-    policies.setdefault(DEFAULT_TOOL_POLICY_ID, default_tool_policy(DEFAULT_TOOL_POLICY_ID))
-    return {
-        str(policy_id): normalize_tool_policy(policy if isinstance(policy, dict) else {}, str(policy_id))
-        for policy_id, policy in policies.items()
-    }
-
-
 def _memory_policies(state: dict[str, Any]) -> dict[str, Any]:
     raw = state.get("memoryPolicies")
     policies = dict(raw) if isinstance(raw, dict) else {}
@@ -6348,17 +4716,6 @@ def _list_recent_tool_governance_requests_for_agent(agent_id: str, *, limit: int
             tag="AGENT_TOOL_DIRECTORY",
         )
         return []
-
-
-def _workspace_path_for_policy(agent_workspace_path: str, existing_private_root: str = "") -> str:
-    workspace_path = str(agent_workspace_path or "").strip()
-    if workspace_path:
-        return workspace_path
-    private_root = str(existing_private_root or "").strip().replace("\\", "/")
-    suffix = "/memory"
-    if private_root.endswith(suffix):
-        return private_root[: -len(suffix)]
-    return ""
 
 
 def _agent_workspace_territory(agent: dict[str, Any]) -> dict[str, Any]:
@@ -6390,29 +4747,6 @@ def _agent_workspace_territory(agent: dict[str, Any]) -> dict[str, Any]:
         if isinstance(agent.get("metadata"), dict)
         else "",
     }
-
-
-def _count_policy_refs(agents: list[dict[str, Any]], field: str, policy_id: str) -> int:
-    return sum(1 for agent in agents if str(agent.get(field) or "").strip() == policy_id)
-
-
-def _agent_archive_protected(agent: dict[str, Any]) -> bool:
-    metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
-    if bool(metadata.get("protected")) or bool(metadata.get("fixedRole")):
-        return True
-    system_role = str(metadata.get("systemRole") or "").strip()
-    research_org_role = str(metadata.get("researchOrgRole") or "").strip()
-    system_owned_role = any(
-        str(metadata.get(key) or "").strip()
-        for key in ("selfEvolutionRole", "supervisedRole", "aiSearchRole")
-    )
-    if system_owned_role or system_role:
-        return True
-    return research_org_role in {"ceo", "organization_advisor", "capability_steward", KNOWLEDGE_STEWARD_ROLE_KEY}
-
-
-def agent_archive_protected(agent: dict[str, Any]) -> bool:
-    return _agent_archive_protected(agent)
 
 
 def _find_agent(state: dict[str, Any], agent_id: str) -> dict[str, Any] | None:
@@ -6849,48 +5183,6 @@ def _ensure_agent_workspace(path_value: str, *, ensure_shared: bool = True) -> P
     return path
 
 
-def _delete_purged_agent_workspace(agent: dict[str, Any]) -> dict[str, Any]:
-    agent_id = str(agent.get("agentId") or "").strip()
-    workspace_path = str(agent.get("workspacePath") or _agent_workspace_relative_path(agent_id)).strip()
-    if not workspace_path:
-        return {"deleted": False, "deletedPaths": [], "skippedPaths": []}
-    try:
-        workspace = _lexical_project_path(workspace_path)
-        agents_root = _lexical_project_path("workspace/agents")
-        expected_private = _lexical_project_path(
-            _agent_workspace_relative_path(agent_id)
-        )
-    except Exception:
-        return {"deleted": False, "deletedPaths": [], "skippedPaths": [workspace_path]}
-    if workspace != expected_private:
-        return {"deleted": False, "deletedPaths": [], "skippedPaths": [workspace_path]}
-    try:
-        if not workspace.is_relative_to(agents_root):
-            return {"deleted": False, "deletedPaths": [], "skippedPaths": [workspace_path]}
-    except ValueError:
-        return {"deleted": False, "deletedPaths": [], "skippedPaths": [workspace_path]}
-    if _path_has_reparse_component(workspace, stop_at=agents_root):
-        return {
-            "deleted": False,
-            "deletedPaths": [],
-            "skippedPaths": [
-                f"{workspace_path} (symlink/junction/reparse point)"
-            ],
-        }
-    if not workspace.exists():
-        return {"deleted": False, "deletedPaths": [], "skippedPaths": []}
-    relative_path = _agent_workspace_relative_path(agent_id)
-    try:
-        if _path_has_reparse_component(workspace, stop_at=agents_root):
-            raise AgentDirectoryError(
-                "Agent workspace path changed to a symlink, junction, or reparse point."
-            )
-        shutil.rmtree(workspace)
-    except Exception as exc:
-        return {"deleted": False, "deletedPaths": [], "skippedPaths": [f"{relative_path} ({type(exc).__name__})"]}
-    return {"deleted": True, "deletedPaths": [relative_path], "skippedPaths": []}
-
-
 def _clear_agent_runtime_state(agent: dict[str, Any]) -> dict[str, Any]:
     agent_id = str(agent.get("agentId") or "").strip()
     workspace_path = str(agent.get("workspacePath") or _agent_workspace_relative_path(agent_id)).strip()
@@ -6932,38 +5224,6 @@ def _clear_agent_runtime_state(agent: dict[str, Any]) -> dict[str, Any]:
         except Exception as exc:
             skipped_paths.append(f"{relative_path} ({type(exc).__name__})")
     return {"deletedPaths": deleted_paths, "skippedPaths": skipped_paths}
-
-
-def _reset_agent_direct_session(agent: dict[str, Any]) -> dict[str, Any]:
-    session_id = str(agent.get("directSessionId") or "").strip()
-    if not session_id:
-        return {"resetDirectSession": False, "replacementDirectSessionId": "", "skippedPaths": []}
-    try:
-        from . import session_service
-
-        session_detail = session_service.get_session_detail(session_id)
-        agent_id = str(agent.get("agentId") or "").strip()
-        session_agent_id = str(session_detail.get("agentId") or "").strip()
-        parent_session_id = str(session_detail.get("parentSessionId") or "").strip()
-        root_session_id = str(session_detail.get("rootSessionId") or "").strip()
-        if session_agent_id != agent_id:
-            raise AgentDirectoryError("Requested direct session is not owned by this Agent.")
-        if parent_session_id or (root_session_id and root_session_id != session_id):
-            raise AgentDirectoryError("Only an Agent root direct session can be reset.")
-
-        result = session_service.reset_agent_direct_session_lightweight(
-            session_id,
-            agent_id=agent_id,
-            title=str(agent.get("displayName") or "").strip(),
-        )
-    except Exception as exc:
-        raise AgentDirectoryError(f"Agent direct session reset failed: {type(exc).__name__}: {exc}") from exc
-    replacement_direct_session_id = str(result.get("replacementDirectSessionId") or result.get("nextActiveSessionId") or "").strip()
-    return {
-        "resetDirectSession": True,
-        "replacementDirectSessionId": replacement_direct_session_id,
-        "skippedPaths": [],
-    }
 
 
 def _resolve_project_path(path_value: str) -> Path:
@@ -7437,65 +5697,6 @@ def _record_agent_avatar_uploaded_event(agent: dict[str, Any], *, content_type: 
         return
 
 
-def _record_agent_purged_event(agent: dict[str, Any], result: dict[str, Any]) -> None:
-    try:
-        record_runtime_scene_event(
-            "agent_directory",
-            "agent",
-            "agent.purged",
-            message="Archived Agent was permanently deleted.",
-            level="warning",
-            outcome="deleted",
-            fields={
-                "agentId": str(agent.get("agentId") or "").strip(),
-                "agentCode": _normalize_agent_code(agent.get("agentCode")),
-                "directSessionId": str(agent.get("directSessionId") or "").strip(),
-                "workspaceDeleted": bool(result.get("workspaceDeleted")),
-                "deletedPaths": list(result.get("deletedPaths") or []),
-                "skippedPaths": list(result.get("skippedPaths") or []),
-                "removedToolPolicy": bool(result.get("removedToolPolicy")),
-                "removedMemoryPolicy": bool(result.get("removedMemoryPolicy")),
-                "source": "AgentDirectory",
-            },
-            lifecycle=True,
-        )
-    except Exception:
-        return
-
-
-def _record_agent_reset_event(agent: dict[str, Any], summary: dict[str, Any]) -> None:
-    try:
-        record_runtime_scene_event(
-            "agent_directory",
-            "reset",
-            "agent.reset.completed",
-            message="Agent debug reset completed.",
-            level="info",
-            outcome="reset",
-            fields={
-                "agentId": str(agent.get("agentId") or summary.get("agentId") or "").strip(),
-                "agentCode": _normalize_agent_code(agent.get("agentCode")),
-                "directSessionId": str(agent.get("directSessionId") or "").strip(),
-                "clearedRuntimeState": bool(summary.get("clearedRuntimeState")),
-                "resetDirectSession": bool(summary.get("resetDirectSession")),
-                "previousDirectSessionId": str(summary.get("previousDirectSessionId") or "").strip(),
-                "replacementDirectSessionId": str(summary.get("replacementDirectSessionId") or "").strip(),
-                "deletedPathCount": len(list(summary.get("deletedPaths") or [])),
-                "skippedPathCount": len(list(summary.get("skippedPaths") or [])),
-                "resetPersonaProfile": bool(summary.get("resetPersonaProfile")),
-                "resetTaskProfile": bool(summary.get("resetTaskProfile")),
-                "resetToolPolicy": bool(summary.get("resetToolPolicy")),
-                "resetMemoryPolicy": bool(summary.get("resetMemoryPolicy")),
-                "resetRuntimePolicy": bool(summary.get("resetRuntimePolicy")),
-                "preserved": list(summary.get("preserved") or []),
-                "source": "AgentDirectory",
-            },
-            lifecycle=True,
-        )
-    except Exception:
-        return
-
-
 def _record_agent_territory_event(event_code: str, agent: dict[str, Any], *, outcome: str = "observed", level: str = "info") -> None:
     try:
         territory = _agent_workspace_territory(agent)
@@ -7542,59 +5743,6 @@ def _record_agent_territory_write_blocked(
                 "scope": decision.scope,
                 "reason": decision.reason,
                 "purpose": trim_lines(str(purpose or ""), max_lines=1),
-            },
-            lifecycle=True,
-        )
-    except Exception:
-        return
-
-
-def _record_agent_tool_policy_event(agent: dict[str, Any], policy: dict[str, Any]) -> None:
-    try:
-        record_runtime_scene_event(
-            "agent_directory",
-            "tool_policy",
-            "agent.tool_policy.updated",
-            message="agent.tool_policy.updated",
-            level="info",
-            outcome="observed",
-            fields={
-                "agentId": str(agent.get("agentId") or "").strip(),
-                "agentCode": _normalize_agent_code(agent.get("agentCode")),
-                "toolPolicyId": str(policy.get("policyId") or agent.get("toolPolicyId") or "").strip(),
-                "allowedToolCount": len(list(policy.get("allowedTools") or [])),
-                "blockedToolCount": len(list(policy.get("blockedTools") or [])),
-                "preferredToolCount": len(list(policy.get("preferredTools") or [])),
-                "readScopeCount": len(list(policy.get("readScopes") or [])),
-                "writeScopeCount": len(list(policy.get("writeScopes") or [])),
-                "sharedWriteEnabled": "shared" in set(_normalize_tool_policy_scopes(policy.get("writeScopes"))),
-            },
-            lifecycle=True,
-        )
-    except Exception:
-        return
-
-
-def _record_agent_memory_policy_event(agent: dict[str, Any], policy: dict[str, Any]) -> None:
-    try:
-        record_runtime_scene_event(
-            "agent_directory",
-            "memory_policy",
-            "agent.memory_policy.updated",
-            message="agent.memory_policy.updated",
-            level="info",
-            outcome="observed",
-            fields={
-                "agentId": str(agent.get("agentId") or "").strip(),
-                "agentCode": _normalize_agent_code(agent.get("agentCode")),
-                "memoryPolicyId": str(policy.get("policyId") or agent.get("memoryPolicyId") or "").strip(),
-                "readSharedGroupCount": len(list(policy.get("readSharedGroups") or [])),
-                "writeSharedGroupCount": len(list(policy.get("writeSharedGroups") or [])),
-                "readKnowledgeBaseCount": len(list(policy.get("readKnowledgeBaseIds") or [])),
-                "proposeKnowledgeBaseCount": len(list(policy.get("proposeKnowledgeBaseIds") or [])),
-                "reviewKnowledgeBaseCount": len(list(policy.get("reviewKnowledgeBaseIds") or [])),
-                "rateKnowledgeBaseCount": len(list(policy.get("rateKnowledgeBaseIds") or [])),
-                "hasPrivateMemoryRoot": bool(str(policy.get("privateMemoryRoot") or "").strip()),
             },
             lifecycle=True,
         )
@@ -7680,53 +5828,6 @@ def _record_knowledge_steward_repaired_event(
         return
 
 
-def _record_agent_delegation_policy_event(agent: dict[str, Any], policy: dict[str, Any]) -> None:
-    try:
-        record_runtime_scene_event(
-            "agent_directory",
-            "delegation_policy",
-            "agent.delegation_policy.updated",
-            message="agent.delegation_policy.updated",
-            level="info",
-            outcome="observed",
-            fields={
-                "agentId": str(agent.get("agentId") or "").strip(),
-                "agentCode": _normalize_agent_code(agent.get("agentCode")),
-                "allowSubagents": bool(policy.get("allowSubagents", False)),
-                "maxConcurrent": int(policy.get("maxConcurrent") or 0),
-                "maxDepth": int(policy.get("maxDepth") or 0),
-                "allowWakeMessages": bool(policy.get("allowWakeMessages", False)),
-                "allowedContextModeCount": len(list(policy.get("allowedContextModes") or [])),
-            },
-            lifecycle=True,
-        )
-    except Exception:
-        return
-
-
-def _record_agent_supervision_policy_event(agent: dict[str, Any], policy: dict[str, Any]) -> None:
-    try:
-        record_runtime_scene_event(
-            "agent_directory",
-            "supervision_policy",
-            "agent.supervision_policy.updated",
-            message="agent.supervision_policy.updated",
-            level="info",
-            outcome="observed",
-            fields={
-                "agentId": str(agent.get("agentId") or "").strip(),
-                "agentCode": _normalize_agent_code(agent.get("agentCode")),
-                "supervisionEnabled": bool(policy.get("supervisionEnabled", False)),
-                "requiresReview": bool(policy.get("requiresReview", False)),
-                "reviewMode": str(policy.get("reviewMode") or "").strip(),
-                "evidenceLevel": str(policy.get("evidenceLevel") or "").strip(),
-            },
-            lifecycle=True,
-        )
-    except Exception:
-        return
-
-
 def _record_agent_persona_profile_event(agent: dict[str, Any], profile: dict[str, Any]) -> None:
     try:
         normalized = normalize_persona_profile(profile)
@@ -7770,108 +5871,6 @@ def _record_agent_task_profile_event(agent: dict[str, Any], profile: dict[str, A
                 "hasMission": bool(str(normalized.get("mission") or "").strip()),
                 "hasSuccessCriteria": bool(str(normalized.get("successCriteria") or "").strip()),
                 "source": "AgentDirectory",
-            },
-            lifecycle=True,
-        )
-    except Exception:
-        return
-
-
-def _record_policy_block(
-    agent_id: str,
-    policy: dict[str, Any],
-    tool_name: str,
-    tool_args: dict[str, Any],
-    decision: ToolPolicyDecision,
-) -> None:
-    try:
-        record_runtime_scene_event(
-            "tool_policy",
-            "execute",
-            "tool.policy_blocked",
-            message=decision.message or "Tool policy blocked a call.",
-            level="warning",
-            outcome="blocked",
-            fields={
-                "agentId": agent_id,
-                "policyId": str(policy.get("policyId") or policy.get("id") or decision.policy_id or ""),
-                "toolName": str(tool_name or "").strip(),
-                "argKeys": sorted(str(key) for key in (tool_args or {}).keys())[:24],
-                "blockedReason": decision.reason,
-            },
-            lifecycle=True,
-        )
-    except Exception:
-        return
-
-
-def _record_delegation_policy_block(
-    agent_id: str,
-    policy: dict[str, Any],
-    decision: DelegationPolicyDecision,
-) -> None:
-    try:
-        record_runtime_scene_event(
-            "delegation_policy",
-            "execute",
-            "delegation.policy_blocked",
-            message=decision.message or "DelegationPolicy blocked a runtime delegation action.",
-            level="warning",
-            outcome="blocked",
-            fields={
-                "agentId": agent_id,
-                "blockedReason": decision.reason,
-                "contextMode": decision.context_mode,
-                "maxDepth": decision.max_depth,
-                "maxConcurrent": decision.max_concurrent,
-                "allowSubagents": bool(policy.get("allowSubagents", False)),
-                "allowWakeMessages": bool(policy.get("allowWakeMessages", True)),
-            },
-            lifecycle=True,
-        )
-    except Exception:
-        return
-
-
-def _record_supervision_policy_block(decision: SupervisionPolicyDecision) -> None:
-    try:
-        record_runtime_scene_event(
-            "supervision_policy",
-            "execute",
-            "supervision.policy_blocked",
-            message=decision.message or "SupervisionPolicy blocked a runtime action.",
-            level="warning",
-            outcome="blocked",
-            fields={
-                "agentId": decision.agent_id,
-                "action": decision.action,
-                "blockedReason": decision.reason,
-                "requiresReview": decision.requires_review,
-                "reviewMode": decision.review_mode,
-                "evidenceLevel": decision.evidence_level,
-            },
-            lifecycle=True,
-        )
-    except Exception:
-        return
-
-
-def _record_supervision_policy_observed(decision: SupervisionPolicyDecision) -> None:
-    try:
-        record_runtime_scene_event(
-            "supervision_policy",
-            "execute",
-            "supervision.policy_observed",
-            message="SupervisionPolicy observed an advisory runtime action.",
-            level="info",
-            outcome="observed",
-            fields={
-                "agentId": decision.agent_id,
-                "action": decision.action,
-                "reason": decision.reason,
-                "requiresReview": decision.requires_review,
-                "reviewMode": decision.review_mode,
-                "evidenceLevel": decision.evidence_level,
             },
             lifecycle=True,
         )
