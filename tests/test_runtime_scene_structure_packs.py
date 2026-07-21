@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from core.web.services import runtime_scene_service as facade
-from core.web.services.runtime_scene import diagnosis, query, record
+from core.web.services.runtime_scene import diagnosis, package_index, query, record
 
 
 def test_facade_reexports_record_pack() -> None:
@@ -31,3 +31,18 @@ def test_facade_reexports_diagnosis_pack() -> None:
     assert facade._runtime_scene_key_entries is diagnosis._runtime_scene_key_entries
     assert facade._fold_repeated_work_run_snapshots is diagnosis._fold_repeated_work_run_snapshots
     assert facade._runtime_scene_diagnosis_next_step is diagnosis._runtime_scene_diagnosis_next_step
+
+
+def test_facade_reexports_package_index_pack() -> None:
+    assert (
+        facade._sync_runtime_scene_package_index_if_stale
+        is package_index._sync_runtime_scene_package_index_if_stale
+    )
+    assert (
+        facade._runtime_scene_package_index_sidecar_is_stale
+        is package_index._runtime_scene_package_index_sidecar_is_stale
+    )
+    assert (
+        facade._update_runtime_scene_manifest_package_index_fields
+        is package_index._update_runtime_scene_manifest_package_index_fields
+    )
