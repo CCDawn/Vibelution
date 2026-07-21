@@ -88,4 +88,16 @@ describe("AgentConversationDirectory", () => {
     expect(directorySource).toContain('lang === "zh" ? "会话 Agent" : "Conversation Agents"');
     expect(directorySource).toContain('lang === "zh" ? "特殊 Agent" : "Special Agents"');
   });
+
+  it("keeps each Agent directory section independently collapsible and accessible", () => {
+    expect(directorySource).toContain("DEFAULT_COLLAPSED_DIRECTORY_SECTIONS");
+    expect(directorySource).toContain("const [collapsedSections, setCollapsedSections]");
+    expect(directorySource).toContain("aria-expanded={expanded}");
+    expect(directorySource).toContain("aria-controls={sectionContentId}");
+    expect(directorySource).toContain("onClick={() => setCollapsedSections");
+    expect(directorySource).toContain("expanded ? <ChevronDown");
+    expect(directorySource).toContain("{expanded ? <div id={sectionContentId}");
+    expect(styles.agentSectionHeader).toContain("!w-full");
+    expect(styles.agentSectionHeaderLabel).toContain("items-center");
+  });
 });
