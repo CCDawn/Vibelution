@@ -112,7 +112,8 @@ export function AgentCreatePanel({
   const selectedProviderId = selectedModel?.providerId || providerChoices[0]?.id || "";
   const providerModels = modelChoices.filter((model) => model.providerId === selectedProviderId);
   const selectedPrompt = promptTemplateOptions.find((template) => template.value === draft.promptTemplateId)?.label || draft.promptTemplateId || "-";
-  const selectedProvider = providerChoices.find((provider) => provider.id === selectedProviderId)?.label || "-";
+  const selectedProvider = selectedModel?.providerLabel || selectedModel?.providerId || "-";
+  const selectedToolBundleCount = draft.selectedToolBundleIds.length;
   const basicReady = Boolean(
     draft.displayName.trim()
     && draft.primaryMode.trim()
@@ -133,6 +134,9 @@ export function AgentCreatePanel({
   const summaryItems = lang === "zh"
     ? [["名称", draft.displayName || "-"], ["服务商", selectedProvider], ["模型", selectedModel?.modelLabel || selectedModelId || "-"], ["提示词", selectedPrompt], ["工具", toolBundleSummary.label]]
     : [["Name", draft.displayName || "-"], ["Provider", selectedProvider], ["Model", selectedModel?.modelLabel || selectedModelId || "-"], ["Prompt", selectedPrompt], ["Tools", toolBundleSummary.label]];
+  const toolBundlesLabel = lang === "zh"
+    ? `${copy.createAgentToolBundles} · 已选 ${selectedToolBundleCount}`
+    : `${copy.createAgentToolBundles} · ${selectedToolBundleCount} selected`;
 
   const applyPreset = (preset: AgentCreatePreset) => {
     onApplyPreset(preset.draft);
@@ -256,7 +260,7 @@ export function AgentCreatePanel({
               </VFieldRow>
               <section className={styles.fieldWide}>
                 <span className={styles.contextualHintRow}>
-                  {copy.createAgentToolBundles}
+                  {toolBundlesLabel}
                   <VContextualHint
                     label={lang === "zh" ? "工具能力包说明" : "Tool bundle details"}
                     content={copy.createAgentToolBundlesHint}
@@ -287,17 +291,6 @@ export function AgentCreatePanel({
                   <VNativeInput value={draft.allowedTools} placeholder={copy.createAgentAllowedToolsPlaceholder} onChange={(event) => onDraftChange({ allowedTools: event.target.value })} />
                 )}
               </section>
-              <VTooltip content={toolBundleSummary.meta || copy.createAgentToolBundleEmpty} width="wide">
-                <section
-                  className={`${styles.fieldWide} ${styles.createToolBundlePreview}`}
-                  role="group"
-                  tabIndex={0}
-                  aria-label={`${copy.createAgentToolBundlePreview}：${toolBundleSummary.label}`}
-                >
-                  <span>{copy.createAgentToolBundlePreview}</span>
-                  <strong>{toolBundleSummary.label}</strong>
-                </section>
-              </VTooltip>
             </div>
             <section className={styles.createSummary} aria-label={summaryTitle}>
               <strong>{summaryTitle}</strong>
