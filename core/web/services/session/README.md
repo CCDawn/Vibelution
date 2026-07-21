@@ -31,6 +31,8 @@ this package and be re-exported from the facade when it is part of the public AP
 | SSE `assistant_delta` / `session_detail` publish | `publish.py` | DTO projection builders |
 | Stop / interrupt turn control | `control.py` | agent purge/archive |
 | Agent session purge/archive/child/inbox/cli lifecycle | `agent_sessions.py` | list/detail projection |
+| Conversation/agent index create/repair/metadata | `conversation_index.py` | SSE publish |
+| Live-output write / checkpoint bridge | `live_output_write.py` | pure store in `live_output.py` |
 | Residual helpers | `../session_service.py` (facade remainder) | new mega public APIs on facade |
 | Public HTTP-facing API surface | `../session_service.py` (facade) | bypassing re-exports |
 
@@ -87,11 +89,21 @@ this package and be re-exported from the facade when it is part of the public AP
 | `agent_sessions.py` | ~3.2k | purge/archive/delete/reset, child sessions, inbox wake, CLI lifecycle |
 | `session_service.py` facade (after Phase 4) | ~13.4k total lines | re-exports + remaining shared helpers |
 
+### Service optimization Phase 7 (conversation index + live write)
+
+| Module | ~LOC | Role |
+|--------|------|------|
+| `conversation_index.py` | ~1.8k | create/select/query session, agent metadata, index repair |
+| `live_output_write.py` | ~0.7k | set live overlay + checkpoint bridge |
+| `session_service.py` facade (after Phase 7) | ~11.1k total lines | re-exports + residual helpers |
+
 **Stage 2 exit (met):** hot-path claims for submit → schedule → capture → worker → persist.
 
 **Phase 3 exit:** projection + SSE publish claimable outside facade.
 
-**Phase 4 exit:** stop control + agent session lifecycle claimable outside facade; structure + lifecycle tests green.
+**Phase 4 exit:** stop control + agent session lifecycle claimable outside facade.
+
+**Phase 7 exit:** conversation index + live-output write claimable; structure + session tests green.
 
 **Still deferred:**
 
