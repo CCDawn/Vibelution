@@ -6,9 +6,11 @@ from core.web.services import session_service as facade
 from core.web.services.session import (
     agent_sessions,
     control,
+    conversation_index,
     journal_bridge,
     list_cache,
     live_output,
+    live_output_write,
     persist,
     projection,
     publish,
@@ -64,3 +66,21 @@ def test_facade_reexports_agent_sessions_pack() -> None:
     assert facade.wake_agent_for_inbox_message is agent_sessions.wake_agent_for_inbox_message
     assert facade.append_cli_agent_lifecycle_event is agent_sessions.append_cli_agent_lifecycle_event
     assert facade.delete_chat_session is agent_sessions.delete_chat_session
+
+
+def test_facade_reexports_conversation_index_pack() -> None:
+    assert facade.create_chat_session is conversation_index.create_chat_session
+    assert facade.ensure_agent_direct_session is conversation_index.ensure_agent_direct_session
+    assert facade.query_sessions is conversation_index.query_sessions
+    assert facade.select_chat_session is conversation_index.select_chat_session
+    assert facade._ensure_conversation_agent_metadata is conversation_index._ensure_conversation_agent_metadata
+    assert facade.repair_conversation_index_records is conversation_index.repair_conversation_index_records
+    assert facade._repair_agent_direct_session_collisions is conversation_index._repair_agent_direct_session_collisions
+
+
+def test_facade_reexports_live_output_write_pack() -> None:
+    assert facade._set_session_live_output is live_output_write._set_session_live_output
+    assert facade._set_session_llm_status_live_output is live_output_write._set_session_llm_status_live_output
+    assert facade._set_session_turn_progress_live_output is live_output_write._set_session_turn_progress_live_output
+    assert facade._build_live_output_message is live_output_write._build_live_output_message
+    assert facade._live_output_checkpoint_payload is live_output_write._live_output_checkpoint_payload
