@@ -38,6 +38,8 @@ this package and be re-exported from the facade when it is part of the public AP
 | Agent binding / prompt snapshot / LLM runtime | `agent_runtime.py` | image store |
 | Context segment / provider cache estimation | `cache_context.py` | agent binding |
 | Image artifact / attachment store-resolve | `image_attachments.py` | agent image-input policy |
+| Runtime-scene session event logging | `events.py` | session ops/update helpers |
+| Session update / prewarm / transcript / repair ops | `session_ops.py` | pure event recorders |
 | Residual helpers | `../session_service.py` (facade remainder) | new mega public APIs on facade |
 | Public HTTP-facing API surface | `../session_service.py` (facade) | bypassing re-exports |
 
@@ -119,15 +121,21 @@ this package and be re-exported from the facade when it is part of the public AP
 | `image_attachments.py` | ~0.5k | image artifact store/resolve + LLM attachments |
 | `session_service.py` facade (after Phase 9) | ~6.8k total lines | re-exports + residual event/logging glue |
 
+### Service optimization Phase 10 (events + session ops)
+
+| Module | ~LOC | Role |
+|--------|------|------|
+| `events.py` | ~0.7k | list/query/prewarm/turn lifecycle/skill/delete/guidance runtime-scene events |
+| `session_ops.py` | ~1.4k | update session/title/reasoning, prewarm, message builders, codex transcript, repair |
+| `session_service.py` facade (after Phase 10) | ~4.8k total lines | re-exports + thinner residual glue |
+
 **Stage 2 exit (met):** hot-path claims for submit → schedule → capture → worker → persist.
 
-**Phase 3–8 exit:** projection/publish/control/lifecycle/index/live/timeline/turn claimable.
-
-**Phase 9 exit:** agent runtime + cache context + image attachments claimable.
+**Phase 3–10 exit:** projection/publish/control/lifecycle/index/live/timeline/turn/agent-runtime/cache/image/events/ops claimable.
 
 **Still deferred:**
 
-- Full facade slim to re-exports only (remaining event/logging glue).
+- Full facade slim to re-exports only (remaining shared constants/types/glue).
 - Late-bind removal.
 - Secondary gods (`runtime_scene`, `agent_directory`).
 

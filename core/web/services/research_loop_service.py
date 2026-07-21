@@ -304,6 +304,8 @@ def record_research_loop_decision(team_id: str, loop_id: str, payload: dict[str,
     normalized_loop_id = _normalize_required_id(loop_id, "Research loop id is required.")
     team = team_service.get_team(normalized_team_id)
     request_payload = payload if isinstance(payload, dict) else {}
+    idempotency_key = _trim_text(request_payload.get("idempotencyKey"), max_length=240)
+    create_next_design_draft = bool(request_payload.get("createNextDesignDraft", False))
     decision_value = _safe_token(request_payload.get("decision"), default="", max_length=96)
     if decision_value not in DECISION_STATUS_BY_VALUE:
         raise ResearchLoopError(f"Unsupported research loop decision: {decision_value}.")
@@ -317,6 +319,49 @@ def record_research_loop_decision(team_id: str, loop_id: str, payload: dict[str,
         loop = _find_loop(store, normalized_loop_id)
         if loop is None:
             raise ResearchLoopError("Research loop not found.")
+        if idempotency_key:
+            existing_decision = next(
+                (
+                    item
+                    for item in loop.get("decisions") or []
+                    if isinstance(item, dict) and str(item.get("idempotencyKey") or "") == idempotency_key
+                ),
+                None,
+            )
+            if existing_decision is not None:
+                existing_proposal = next(
+                    (
+                        item
+                        for item in loop.get("iterationProposals") or []
+                        if isinstance(item, dict)
+                        and str(item.get("proposalId") or "") == str(existing_decision.get("iterationProposalId") or "")
+                    ),
+                    None,
+                )
+                next_design_draft = None
+                next_design_plan_id = str((existing_proposal or {}).get("nextDesignPlanId") or "")
+                if next_design_plan_id:
+                    from core.web.services.team_workflow.experiment import get_experiment_planning_status
+
+                    experiment_status = get_experiment_planning_status(normalized_team_id)
+                    next_plan = next(
+                        (
+                            item
+                            for item in experiment_status.get("plans") or []
+                            if isinstance(item, dict) and str(item.get("planId") or "") == next_design_plan_id
+                        ),
+                        {"planId": next_design_plan_id},
+                    )
+                    next_design_draft = {"status": "reused", "plan": next_plan}
+                return {
+                    "decision": existing_decision,
+                    "iterationProposal": existing_proposal,
+                    "nextDesignDraft": next_design_draft,
+                    "loop": loop,
+                    "status": _status_payload(normalized_team_id, team, store, active_loop=loop),
+                    "boundaries": _research_loop_boundaries(),
+                    "idempotentReplay": True,
+                }
         _refresh_loop_readiness(loop)
         readiness = loop.get("readiness") if isinstance(loop.get("readiness"), dict) else {}
         if decision_value in {"promote_to_iteration", "accept_for_writeup"} and not readiness.get("readyForDecision"):
@@ -330,10 +375,43 @@ def record_research_loop_decision(team_id: str, loop_id: str, payload: dict[str,
             "decidedByAgent": decided_by_agent,
             "metadata": _normalize_metadata(request_payload.get("metadata")),
             "executionBoundary": _manual_execution_policy(),
+            "idempotencyKey": idempotency_key,
         }
         iteration_proposal = _iteration_proposal_for_decision(loop, decision, request_payload, decided_by_agent=decided_by_agent, created_at=now)
+        next_design_draft = None
         if iteration_proposal:
             decision["iterationProposalId"] = iteration_proposal["proposalId"]
+            if create_next_design_draft and decision_value in {"promote_to_iteration", "repair_and_repeat"}:
+                source_plan_id = str((loop.get("linkedExperiment") or {}).get("planId") or "")
+                if not source_plan_id:
+                    raise ResearchLoopError("A linked experiment plan is required to create the next design draft.")
+                from core.web.services.team_workflow.experiment import create_experiment_plan_revision_from_iteration
+                from core.web.services.team_workflow_orchestration_service import TeamWorkflowOrchestrationError
+
+                try:
+                    next_design_draft = create_experiment_plan_revision_from_iteration(
+                        normalized_team_id,
+                        source_plan_id=source_plan_id,
+                        loop_id=normalized_loop_id,
+                        decision_id=decision["decisionId"],
+                        proposal_id=iteration_proposal["proposalId"],
+                        idempotency_key=idempotency_key,
+                        decision=decision_value,
+                        rationale=rationale,
+                        next_actions=list(iteration_proposal.get("nextActions") or []),
+                        created_by_agent=decided_by_agent,
+                    )
+                except TeamWorkflowOrchestrationError as exc:
+                    raise ResearchLoopError(str(exc)) from exc
+                next_plan = next_design_draft.get("plan") if isinstance(next_design_draft, dict) else {}
+                iteration_proposal["nextDesignPlanId"] = str((next_plan or {}).get("planId") or "")
+                iteration_proposal["nextDesignRevision"] = int(
+                    (((next_plan or {}).get("experimentContract") or {}).get("revision") or 0)
+                )
+                iteration_proposal["nextDesignGateStatus"] = str(
+                    (((next_plan or {}).get("designGate") or {}).get("status") or "")
+                )
+                decision["nextDesignPlanId"] = iteration_proposal["nextDesignPlanId"]
             proposals = [item for item in loop.get("iterationProposals") or [] if isinstance(item, dict)]
             proposals.append(iteration_proposal)
             loop["iterationProposals"] = proposals[-MAX_DECISION_RECORDS:]
@@ -356,6 +434,8 @@ def record_research_loop_decision(team_id: str, loop_id: str, payload: dict[str,
             "decision": decision_value,
             "statusAfterDecision": loop["status"],
             "iterationProposalId": str(decision.get("iterationProposalId") or ""),
+            "nextDesignPlanId": str(decision.get("nextDesignPlanId") or ""),
+            "nextDesignDraftRequested": create_next_design_draft,
             "decidedByAgent": decided_by_agent,
             "autoExecution": False,
         },
@@ -363,6 +443,7 @@ def record_research_loop_decision(team_id: str, loop_id: str, payload: dict[str,
     return {
         "decision": decision,
         "iterationProposal": iteration_proposal,
+        "nextDesignDraft": next_design_draft,
         "loop": loop,
         "status": _status_payload(normalized_team_id, team, store, active_loop=loop),
         "boundaries": _research_loop_boundaries(),
@@ -532,6 +613,9 @@ def _research_loop_boundaries() -> dict[str, Any]:
         "writesFormalRag": False,
         "writesOfficialGraph": False,
         "requiresUserDecision": True,
+        "canCreateNextDesignDraft": True,
+        "nextDesignDraftRequiresExplicitFreeze": True,
+        "nextDesignDraftStartsExecution": False,
     }
 
 

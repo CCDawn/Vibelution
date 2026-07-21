@@ -9,6 +9,7 @@ from core.web.services.session import (
     cache_context,
     control,
     conversation_index,
+    events,
     image_attachments,
     journal_bridge,
     list_cache,
@@ -18,6 +19,7 @@ from core.web.services.session import (
     projection,
     publish,
     schedule,
+    session_ops,
     stream_capture,
     submit,
     timeline,
@@ -126,3 +128,24 @@ def test_facade_reexports_image_attachments_pack() -> None:
     assert facade.store_session_user_image_attachment is image_attachments.store_session_user_image_attachment
     assert facade.resolve_session_image_artifact is image_attachments.resolve_session_image_artifact
     assert facade._build_llm_image_attachments is image_attachments._build_llm_image_attachments
+
+
+def test_facade_reexports_events_pack() -> None:
+    assert facade._record_session_turn_started_event is events._record_session_turn_started_event
+    assert facade._record_session_turn_lifecycle_event is events._record_session_turn_lifecycle_event
+    assert facade._record_session_list_loaded_event is events._record_session_list_loaded_event
+    assert facade._record_session_list_prewarm_event is events._record_session_list_prewarm_event
+    assert facade._record_session_message_edit_resubmit_event is events._record_session_message_edit_resubmit_event
+    assert facade._record_session_delete_event is events._record_session_delete_event
+    assert facade._record_session_guidance_event is events._record_session_guidance_event
+
+
+def test_facade_reexports_session_ops_pack() -> None:
+    assert facade.update_chat_session is session_ops.update_chat_session
+    assert facade.update_chat_session_title is session_ops.update_chat_session_title
+    assert facade.update_session_reasoning_effort is session_ops.update_session_reasoning_effort
+    assert facade.prewarm_session_list_cache is session_ops.prewarm_session_list_cache
+    assert facade.append_session_assistant_artifact_message is session_ops.append_session_assistant_artifact_message
+    assert facade._repair_stale_running_conversations is session_ops._repair_stale_running_conversations
+    assert facade._session_prompt_cache_partition is session_ops._session_prompt_cache_partition
+    assert facade._make_chat_message is session_ops._make_chat_message

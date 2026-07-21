@@ -38,6 +38,7 @@ import {
   type ExperimentBaselineArtifactDraft,
   type ExperimentBaselineArtifactRecord,
   type ExperimentBaselineArtifactRegisterPayload,
+  type ExperimentDesignFreezePayload,
   type ExperimentFullRunResultDraft,
   type ExperimentFullRunResultRecord,
   type ExperimentFullRunResultRegisterPayload,
@@ -2486,6 +2487,25 @@ export function TeamsRoute({
     },
   });
 
+  const freezeExperimentDesignMutation = useMutation({
+    mutationFn: (payload: { teamId: string; plan: ExperimentPlanRecord }) =>
+      fetchJson<ExperimentDesignFreezePayload>(
+        `/api/teams/${encodeURIComponent(payload.teamId)}/workflow-orchestration/experiments/plans/${encodeURIComponent(payload.plan.planId)}/freeze`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ frozenByAgent: sourceCollectionOwnerAgentId }),
+        },
+      ),
+    onSuccess: (payload, variables) => {
+      if (payload.experimentStatus) {
+        queryClient.setQueryData(experimentPlanningStatusQueryKey(variables.teamId), payload.experimentStatus);
+      }
+      void queryClient.invalidateQueries({ queryKey: experimentPlanningStatusQueryKey(variables.teamId) });
+      void queryClient.invalidateQueries({ queryKey: researchStageRoundStatusQueryKey(variables.teamId) });
+    },
+  });
+
   const registerExperimentBaselineArtifactMutation = useMutation({
     mutationFn: (payload: {
       teamId: string;
@@ -2772,6 +2792,10 @@ export function TeamsRoute({
             nextTemplateId: payload.nextTemplateId,
             nextActions: splitDraftList(payload.draft.nextActions, 24),
             decidedByAgent: sourceCollectionOwnerAgentId,
+            createNextDesignDraft:
+              payload.draft.decision === "promote_to_iteration"
+              || payload.draft.decision === "repair_and_repeat",
+            idempotencyKey: `${payload.loop.loopId}:${payload.loop.updatedAt}:${payload.draft.decision}`,
             metadata: {
               enteredFrom: "teams_research_loop_panel",
               noAutomaticIterationExecution: true,
@@ -2787,6 +2811,9 @@ export function TeamsRoute({
         nextActions: "",
       }));
       void queryClient.invalidateQueries({ queryKey: researchLoopStatusQueryKey(variables.teamId) });
+      if (payload.nextDesignDraft) {
+        void queryClient.invalidateQueries({ queryKey: experimentPlanningStatusQueryKey(variables.teamId) });
+      }
     },
   });
 
@@ -3256,6 +3283,13 @@ export function TeamsRoute({
       plan,
       draft: experimentBaselineArtifactDraft,
     });
+  }
+
+  function freezeExperimentDesignFromWorkspace(plan: ExperimentPlanRecord) {
+    if (!selectedTeam?.teamId || selectedTeamFreezeExperimentDesignPending) {
+      return;
+    }
+    freezeExperimentDesignMutation.mutate({ teamId: selectedTeam.teamId, plan });
   }
 
   function registerExperimentSmokeResultFromWorkspace(plan: ExperimentPlanRecord) {
@@ -6252,6 +6286,12 @@ export function TeamsRoute({
                 <strong>{lang === "zh" ? "最新决策" : "Latest decision"}</strong>
                 <span>{latestDecision ? `${latestDecision.decision} -> ${latestDecision.statusAfterDecision}` : (lang === "zh" ? "尚未决策" : "no decision yet")}</span>
                 {latestProposal ? <small>{latestProposal.nextTemplateId}: {latestProposal.nextActions.join(" / ")}</small> : null}
+                {latestProposal?.nextDesignPlanId ? (
+                  <small title={latestProposal.nextDesignPlanId}>
+                    {lang === "zh" ? "已生成下一版设计" : "Next design created"}
+                    {` · v${latestProposal.nextDesignRevision ?? "-"} · ${latestProposal.nextDesignGateStatus || "draft"}`}
+                  </small>
+                ) : null}
               </section>
             </div>
           </>
@@ -6274,15 +6314,18 @@ export function TeamsRoute({
     const latestSmokeMutationPayload = selectedTeamRegisterExperimentSmokeResultResult;
     const latestBaselineMutationPayload = selectedTeamRegisterExperimentBaselineArtifactResult;
     const latestMutationPayload = selectedTeamCreateExperimentPlanResult;
+    const latestFreezePayload = selectedTeamFreezeExperimentDesignResult;
     const statusPayload =
-      latestKnowledgeIngestionMutationPayload?.status
+      latestFreezePayload?.experimentStatus
+      ?? latestKnowledgeIngestionMutationPayload?.status
       ?? latestFullRunMutationPayload?.status
       ?? latestSmokeMutationPayload?.status
       ?? latestBaselineMutationPayload?.status
       ?? latestMutationPayload?.status
       ?? experimentPlanningStatus;
     const activePlan =
-      latestKnowledgeIngestionMutationPayload?.plan
+      latestFreezePayload?.plan
+      ?? latestKnowledgeIngestionMutationPayload?.plan
       ?? latestFullRunMutationPayload?.plan
       ?? latestSmokeMutationPayload?.plan
       ?? latestBaselineMutationPayload?.plan
@@ -6307,6 +6350,16 @@ export function TeamsRoute({
       ? statusPayload.readyHypothesisCandidates
       : statusPayload?.hypothesisCandidates ?? [];
     const canDraftPlan = Boolean(selectedTeam?.teamId && statusPayload?.latestExperimentRound && !selectedTeamCreateExperimentPlanPending);
+    const explicitDesignGate = activePlan?.designGate;
+    const designExecutionAllowed = !explicitDesignGate || explicitDesignGate.status === "frozen";
+    const canFreezeDesign = Boolean(
+      selectedTeam?.teamId
+      && activePlan
+      && explicitDesignGate?.status === "draft"
+      && activePlan.contractValidation?.valid
+      && activePlan.readiness.readyForPlanReview
+      && !selectedTeamFreezeExperimentDesignPending,
+    );
     const canRegisterBaselineArtifact = Boolean(
       selectedTeam?.teamId
       && activePlan
@@ -6318,6 +6371,7 @@ export function TeamsRoute({
     const canRegisterSmokeResult = Boolean(
       selectedTeam?.teamId
       && activePlan
+      && designExecutionAllowed
       && activePlan.baselineSelection.activeBaselineReady
       && experimentSmokeResultDraft.metricValue.trim()
       && (experimentSmokeResultDraft.resultPath.trim() || experimentSmokeResultDraft.logRef.trim())
@@ -6326,6 +6380,7 @@ export function TeamsRoute({
     const canRegisterFullRunResult = Boolean(
       selectedTeam?.teamId
       && activePlan
+      && designExecutionAllowed
       && activePlan.readiness.readyForFullRun
       && experimentFullRunResultDraft.metricValue.trim()
       && (experimentFullRunResultDraft.resultPath.trim() || experimentFullRunResultDraft.logRef.trim())
@@ -6423,6 +6478,27 @@ export function TeamsRoute({
                 ))}
               </div>
             </div>
+            {explicitDesignGate ? (
+              <div className={styles.experimentBaselineArtifact}>
+                <span>{lang === "zh" ? "设计门禁" : "Design gate"}</span>
+                <strong>
+                  {explicitDesignGate.status === "frozen"
+                    ? (lang === "zh" ? `已冻结 v${activeExperimentContract?.revision ?? "-"}` : `Frozen v${activeExperimentContract?.revision ?? "-"}`)
+                    : (lang === "zh" ? `迭代草稿 v${activeExperimentContract?.revision ?? "-"} · 待冻结` : `Iteration draft v${activeExperimentContract?.revision ?? "-"} · freeze required`)}
+                </strong>
+                <small title={explicitDesignGate.sourceProposalId}>
+                  {lang === "zh" ? "来源" : "Source"} · {explicitDesignGate.sourceLoopId || explicitDesignGate.sourceProposalId}
+                </small>
+                {explicitDesignGate.status === "draft" ? (
+                  <VNativeButton type="button" onClick={() => freezeExperimentDesignFromWorkspace(activePlan)} disabled={!canFreezeDesign}>
+                    <CheckCircle2 size={13} />
+                    {selectedTeamFreezeExperimentDesignPending
+                      ? (lang === "zh" ? "冻结中" : "Freezing")
+                      : (lang === "zh" ? "冻结设计" : "Freeze design")}
+                  </VNativeButton>
+                ) : null}
+              </div>
+            ) : null}
             {activeBaselineArtifact ? (
               <div className={styles.experimentBaselineArtifact}>
                 <span>{lang === "zh" ? "Active baseline" : "Active baseline"}</span>
@@ -6853,6 +6929,7 @@ export function TeamsRoute({
           </section>
         </div>
         {selectedTeamCreateExperimentPlanError ? <div className={styles.workflowError}>{selectedTeamCreateExperimentPlanError.message}</div> : null}
+        {selectedTeamFreezeExperimentDesignError ? <div className={styles.workflowError}>{selectedTeamFreezeExperimentDesignError.message}</div> : null}
         {selectedTeamRegisterExperimentBaselineArtifactError ? <div className={styles.workflowError}>{selectedTeamRegisterExperimentBaselineArtifactError.message}</div> : null}
         {selectedTeamRegisterExperimentSmokeResultError ? <div className={styles.workflowError}>{selectedTeamRegisterExperimentSmokeResultError.message}</div> : null}
         {selectedTeamRegisterExperimentFullRunResultError ? <div className={styles.workflowError}>{selectedTeamRegisterExperimentFullRunResultError.message}</div> : null}
@@ -7511,6 +7588,16 @@ export function TeamsRoute({
       : null;
   const selectedTeamCreateExperimentPlanResult =
     createExperimentPlanMutation.variables?.teamId === selectedTeam?.teamId ? createExperimentPlanMutation.data : undefined;
+  const selectedTeamFreezeExperimentDesignPending =
+    freezeExperimentDesignMutation.isPending && freezeExperimentDesignMutation.variables?.teamId === selectedTeam?.teamId;
+  const selectedTeamFreezeExperimentDesignError =
+    freezeExperimentDesignMutation.variables?.teamId === selectedTeam?.teamId && freezeExperimentDesignMutation.error instanceof Error
+      ? freezeExperimentDesignMutation.error
+      : null;
+  const selectedTeamFreezeExperimentDesignResult =
+    freezeExperimentDesignMutation.variables?.teamId === selectedTeam?.teamId
+      ? freezeExperimentDesignMutation.data
+      : undefined;
   const selectedTeamRegisterExperimentBaselineArtifactPending =
     registerExperimentBaselineArtifactMutation.isPending && registerExperimentBaselineArtifactMutation.variables?.teamId === selectedTeam?.teamId;
   const selectedTeamRegisterExperimentBaselineArtifactError =

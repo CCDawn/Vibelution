@@ -62,6 +62,8 @@ class ResearchLoopDecisionPayload(BaseModel):
     nextTemplateId: str = Field("", max_length=96)
     nextActions: list[str] = Field(default_factory=list, max_length=24)
     decidedByAgent: str = Field("", max_length=160)
+    createNextDesignDraft: bool = False
+    idempotencyKey: str = Field("", max_length=240)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
