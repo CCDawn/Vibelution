@@ -1418,7 +1418,7 @@ def _source_collection_stage_session_task_turn_result(
         "agents",
         s._safe_token(agent_id, default="agent", max_length=160),
         "events",
-        "agent_turn_resultjsonl",
+        "agent_turn_results.jsonl",
     )
     for item in reversed(s._read_jsonl(events_path)):
         if s._trim_text(item.get("runId"), max_length=200) != turn_id:

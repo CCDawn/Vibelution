@@ -114,7 +114,7 @@ def _persist_session_preflight_rejection(
                 "userMessageChars": len(str(message or "")),
                 "llmCalled": False,
             },
-            child_log_path=f"conversations/{s._safe_session_workspace_token(str(conversation.get('conversation_id') or conversation.get('id') or '').strip())}-turnjsonl",
+            child_log_path=f"conversations/{s._safe_session_workspace_token(str(conversation.get('conversation_id') or conversation.get('id') or '').strip())}-turns.jsonl",
             child_log_payload={
                 "event": "turn_rejected_before_llm",
                 "timestamp": timestamp,
@@ -213,7 +213,7 @@ def _record_session_turn_tool_calls(
         s._record_session_turn_subpackage_event(
             session_id,
             turn_id,
-            "tool_calljsonl",
+            "tool_calls.jsonl",
             {
                 "index": index,
                 "toolCallId": str(

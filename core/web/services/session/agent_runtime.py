@@ -400,7 +400,7 @@ def _record_session_prompt_snapshot_event(
                 "reason": str(snapshot.get("reason") or "").strip(),
                 "source": "session_service",
             },
-            child_log_path=f"conversations/{s._safe_session_workspace_token(session_id)}-prompt-snapshotjsonl",
+            child_log_path=f"conversations/{s._safe_session_workspace_token(session_id)}-prompt-snapshots.jsonl",
             child_log_payload={
                 "session_id": str(session_id or "").strip(),
                 "agent_id": str(agent_id or "").strip(),
@@ -848,7 +848,7 @@ def _record_session_llm_usage_event(
             outcome="recorded" if observed else "missing",
             message="Conversation turn LLM usage recorded." if observed else "Conversation turn LLM usage missing.",
             fields=fields,
-            child_log_path=f"conversations/{s._safe_session_workspace_token(str(session_id or '').strip())}-turnjsonl",
+            child_log_path=f"conversations/{s._safe_session_workspace_token(str(session_id or '').strip())}-turns.jsonl",
             child_log_payload=fields,
             lifecycle=False,
         )
@@ -912,7 +912,7 @@ def _record_session_agent_child_direct_binding_repaired_event(
                 "previousDirectSessionId": previous_session_id,
                 "source": "session_child_contract_repair",
             },
-            child_log_path=f"conversations/{s._safe_session_workspace_token(normalized_session_id)}-agent-bindingjsonl",
+            child_log_path=f"conversations/{s._safe_session_workspace_token(normalized_session_id)}-agent-bindings.jsonl",
             child_log_payload={
                 "session_id": normalized_session_id,
                 "agent_id": str(agent_id or "").strip(),
@@ -950,7 +950,7 @@ def _record_session_agent_binding_updated_event(
                 "roleKey": str(role_key or "").strip(),
                 "source": str(source or "").strip(),
             },
-            child_log_path=f"conversations/{s._safe_session_workspace_token(normalized_session_id)}-agent-bindingjsonl",
+            child_log_path=f"conversations/{s._safe_session_workspace_token(normalized_session_id)}-agent-bindings.jsonl",
             child_log_payload={
                 "session_id": normalized_session_id,
                 "agent_id": str(agent_id or "").strip(),
@@ -997,7 +997,7 @@ def _record_session_agent_missing_index_event(
                 "hiddenFromIndex": True,
                 "controlSignal": True,
             },
-            child_log_path=f"conversations/{s._safe_session_workspace_token(session_id)}-agent-bindingjsonl",
+            child_log_path=f"conversations/{s._safe_session_workspace_token(session_id)}-agent-bindings.jsonl",
             child_log_payload={
                 "session_id": session_id,
                 "agent_id": agent_id,

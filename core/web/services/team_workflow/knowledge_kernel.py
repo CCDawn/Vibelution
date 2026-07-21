@@ -4064,7 +4064,7 @@ def _candidate_store_path(team_id: str) -> Path:
 
 def _transfer_records_path(team_id: str) -> Path:
     s = _service()
-    return s._team_workflow_root(team_id) / "transfer_recordjsonl"
+    return s._team_workflow_root(team_id) / "transfer_records.jsonl"
 
 
 def _official_model_evidence_store_path(team_id: str) -> Path:

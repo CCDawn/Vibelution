@@ -27,11 +27,14 @@ pytestmark = pytest.mark.serial
 
 def test_source_collection_stage_round_sync_has_single_implementation_across_split_modules():
     service_path = Path(team_workflow_orchestration_service.__file__)
-    split_module_paths = sorted((service_path.parent / "team_workflow").glob("*.py"))
+    # Packs may live under team_workflow/** (e.g. source_collection/), not only the top level.
+    split_module_paths = sorted((service_path.parent / "team_workflow").rglob("*.py"))
     candidate_paths = [service_path, *split_module_paths]
 
     implementation_count = 0
     for path in candidate_paths:
+        if path.name == "__init__.py":
+            continue
         tree = ast.parse(path.read_text(encoding="utf-8-sig"), filename=str(path))
         implementation_count += sum(
             1
@@ -41,6 +44,10 @@ def test_source_collection_stage_round_sync_has_single_implementation_across_spl
         )
 
     assert implementation_count == 1
+    assert (
+        team_workflow_orchestration_service._sync_source_collection_stage_round_after_search.__module__
+        == "core.web.services.team_workflow.source_collection.search_execution"
+    )
 
 
 def test_source_collection_pure_helpers_are_package_backed():
