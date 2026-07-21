@@ -28,6 +28,8 @@
 @source "../routes/GroupSessionIndexItems.styles.ts";
 @source "../routes/SessionContextMenu.tsx";
 @source "../routes/SessionContextMenu.styles.ts";
+@source "../routes/AgentCreatePanel.tsx";
+@source "../routes/AgentCreatePanel.styles.ts";
 @source "../routes/agent-create/**/*.{ts,tsx}";
 @source "../routes/LegacyChatRoomsRedirect.tsx";
 @source "../routes/HomeRedirect.tsx";
