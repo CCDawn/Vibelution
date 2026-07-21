@@ -12,9 +12,9 @@ Prefer slice modules over growing `agent_directory_service.py` when possible.
 | Persona / task profile pure normalizers | `profiles.py` | registry save/load |
 | Tool/memory/delegation/supervision policy | `policies.py` | session submit |
 | Archive / purge / reset lifecycle | `lifecycle.py` | team membership graph |
-| List/get API hydration projections | facade (later `projections.py`) | team canvas |
-| Create/update mutations | facade (later `mutations.py`) | lifecycle purge path |
-| Registry repair / shrink guards | facade | workflow orchestration |
+| List/get API hydration projections | `projections.py` | team canvas |
+| Create/update + avatar mutations | `mutations.py` | lifecycle purge path |
+| Registry repair / shrink guards | facade (later `repair.py`) | workflow orchestration |
 
 ## Sole-owner rules
 
@@ -31,7 +31,9 @@ Prefer slice modules over growing `agent_directory_service.py` when possible.
 | `profiles.py` | done | persona/task profile normalizers (Stage 4) |
 | `policies.py` | done | Phase 11 — policy normalize/evaluate/resolve |
 | `lifecycle.py` | done | Phase 11 — archive/purge/reset |
-| projections / mutations / repair | deferred | next agent_directory cuts |
+| `projections.py` | done | Phase 12 — list/get + hydration + API builders |
+| `mutations.py` | done | Phase 12 — create/update + avatar |
+| repair / inbox / workspace residual | deferred | next agent_directory cuts |
 
 ## Related
 
