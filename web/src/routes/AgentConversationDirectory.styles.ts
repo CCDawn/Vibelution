@@ -8,7 +8,9 @@ const styles = {
   agentSection:
     "vui-routes-agentconversationdirectory agentSection grid min-w-0 gap-0.5",
   agentSectionHeader:
-    "vui-routes-agentconversationdirectory agentSectionHeader flex min-w-0 items-center justify-between px-2.5 py-1 [font-size:var(--vui-font-xs)] font-medium [color:var(--fg-secondary)] [&_strong]:tabular-nums [&_strong]:font-medium [&_strong]:[color:var(--fg-tertiary)]",
+    "vui-routes-agentconversationdirectory agentSectionHeader !flex !h-auto !min-h-0 !w-full min-w-0 items-center justify-between rounded-[var(--radius-control)] px-2.5 py-1 text-left [font-size:var(--vui-font-xs)] font-medium [color:var(--fg-secondary)] shadow-none transition-[background-color,color] hover:bg-[var(--vui-control-hover-bg)] hover:[color:var(--fg-primary)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] [&_strong]:tabular-nums [&_strong]:font-medium [&_strong]:[color:var(--fg-tertiary)]",
+  agentSectionHeaderLabel:
+    "vui-routes-agentconversationdirectory agentSectionHeaderLabel flex min-w-0 items-center gap-1.5",
   agentDirectoryList:
     "vui-routes-agentconversationdirectory agentDirectoryList grid min-w-0 gap-px",
   agentRow:

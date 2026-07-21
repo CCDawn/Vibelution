@@ -1,4 +1,5 @@
-import type { MouseEvent as ReactMouseEvent } from "react";
+import { ChevronDown, ChevronRight } from "lucide-react";
+import { useState, type MouseEvent as ReactMouseEvent } from "react";
 
 import type { AgentInstance, SessionSummary } from "../api/types";
 import { VButton } from "../components/vui";
@@ -23,6 +24,11 @@ export type AgentConversationDirectoryProps = {
 };
 
 export type AgentDirectorySection = "conversation" | "special";
+
+const DEFAULT_COLLAPSED_DIRECTORY_SECTIONS: Record<AgentDirectorySection, boolean> = {
+  conversation: false,
+  special: false,
+};
 
 function storedConversationIndexKind(agent: AgentInstance) {
   return String(
@@ -84,6 +90,9 @@ export function AgentConversationDirectory({
   const visibleAgents = agents.filter(isVisibleDirectoryAgent).filter((agent) => isAgentMatch(agent, filterText));
   const conversationAgents = visibleAgents.filter((agent) => agentDirectorySection(agent) === "conversation");
   const specialAgents = visibleAgents.filter((agent) => agentDirectorySection(agent) === "special");
+  const [collapsedSections, setCollapsedSections] = useState<Record<AgentDirectorySection, boolean>>(
+    DEFAULT_COLLAPSED_DIRECTORY_SECTIONS,
+  );
   const sessionCountByAgentId = new Map<string, number>();
   const latestSessionByAgentId = new Map<string, SessionSummary>();
   for (const session of sessions) {
@@ -145,13 +154,30 @@ export function AgentConversationDirectory({
     const label = section === "conversation"
       ? (lang === "zh" ? "会话 Agent" : "Conversation Agents")
       : (lang === "zh" ? "特殊 Agent" : "Special Agents");
+    const expanded = !collapsedSections[section];
+    const sectionContentId = `agent-directory-section-${section}`;
+    const toggleLabel = expanded
+      ? (lang === "zh" ? `收起${label}` : `Collapse ${label}`)
+      : (lang === "zh" ? `展开${label}` : `Expand ${label}`);
     return (
       <section className={styles.agentSection} aria-label={label}>
-        <div className={styles.agentSectionHeader}>
-          <span>{label}</span>
+        <VButton
+          type="button"
+          contentLayout="plain"
+          className={styles.agentSectionHeader}
+          aria-expanded={expanded}
+          aria-controls={sectionContentId}
+          aria-label={toggleLabel}
+          title={toggleLabel}
+          onClick={() => setCollapsedSections((current) => ({ ...current, [section]: !current[section] }))}
+        >
+          <span className={styles.agentSectionHeaderLabel}>
+            {expanded ? <ChevronDown size={14} aria-hidden="true" /> : <ChevronRight size={14} aria-hidden="true" />}
+            <span>{label}</span>
+          </span>
           <strong>{sectionAgents.length}</strong>
-        </div>
-        <div className={styles.agentDirectoryList}>{sectionAgents.map(renderAgent)}</div>
+        </VButton>
+        {expanded ? <div id={sectionContentId} className={styles.agentDirectoryList}>{sectionAgents.map(renderAgent)}</div> : null}
       </section>
     );
   };
