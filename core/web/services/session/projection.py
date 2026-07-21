@@ -3050,7 +3050,7 @@ def _with_direct_session_agent_for_summary(
     *,
     agent_by_id: dict[str, dict[str, Any]],
 ) -> dict[str, Any]:
-    """Attach a direct-session Agent to a lightweight summary s.copy without repairing state."""
+    """Attach a direct-session Agent to a lightweight summary copy without repairing state."""
     s = _service()
 
     session_id = str(conversation.get("id") or conversation.get("conversation_id") or "").strip()
