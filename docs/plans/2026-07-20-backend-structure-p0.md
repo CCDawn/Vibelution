@@ -1,9 +1,9 @@
 # Backend Structure P0 Plan
 
 Date: 2026-07-20
-Status: session_stage2_closed / workflow_stage3_closed / stage4_closed / p0_remaining_optional
+Status: **p0_structure_closed** (Stages 1–5)
 Owner lane: backend structure / web services
-Related: frontend bundle+claim phase (closed); `docs/agents/conversation-flow-map.md`; backend structure review (session)
+Related: frontend bundle+claim phase (closed); `docs/agents/conversation-flow-map.md`; completion note `docs/plans/2026-07-21-backend-structure-p0-completion.md`
 
 ### Execution log
 
@@ -25,6 +25,7 @@ Related: frontend bundle+claim phase (closed); `docs/agents/conversation-flow-ma
 | 2026-07-20 | 3.6–3.7 | Workflow: `experiment.py` + `research_loop.py` public entry packs |
 | 2026-07-20 | 3.8 | **Workflow Stage 3 closed** — product-surface claim packs done; facade slim / knowledge mega APIs deferred |
 | 2026-07-21 | 4 | Secondary gods: ownership maps + pure cuts (`agent_directory/profiles`, `team/canvas_primitives`) |
+| 2026-07-21 | 5 | **P0 structure closed** — completion note, facade public-import rule, structure regression 148 passed |
 
 ### Session Stage 2 closeout (2026-07-20)
 
@@ -100,6 +101,15 @@ Related: frontend bundle+claim phase (closed); `docs/agents/conversation-flow-ma
 3. Stage 5 full quality gate / formal P0 completion package
 
 **Version impact:** none · **Launcher:** not needed
+
+### Stage 5 closeout (2026-07-21)
+
+- Completion note: `docs/plans/2026-07-21-backend-structure-p0-completion.md`
+- Facades remain public import surfaces (documented in package READMEs + completion note)
+- Structure regression: session packs + workflow structure packs + Stage 4 packs + `test_web_runtime_routes` → **148 passed**
+- Conversation flow map session owners already point at `session/*` packs
+- Full `local_quality_gate.py` / mega workflow suite left as **release-time** gate, not structure-exit blocker
+- **Version impact:** none · **push/PR:** not performed without user authorization
 
 ## 1. Problem Statement
 

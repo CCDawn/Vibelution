@@ -9,6 +9,8 @@ Canonical product flow: `docs/agents/conversation-flow-map.md`.
 (`from core.web.services.session_service import ...`). New hot-path logic should land in
 this package and be re-exported from the facade when it is part of the public API.
 
+**P0 structure closed** (2026-07-21): see `docs/plans/2026-07-21-backend-structure-p0-completion.md`.
+
 ## Ownership map (claim scopes)
 
 | Task type | Prefer these files | Avoid |

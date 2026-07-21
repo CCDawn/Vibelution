@@ -6,7 +6,9 @@
 
 主路径：
 
-`ChatCodingRoute` 乐观提交 -> FastAPI sessions route -> `session_service` 提交/调度/worker -> `agent.py` 单轮执行 -> `core.llm` invoke/stream -> UI capture -> turn journal/live output -> SSE -> 前端 active-turn layer -> `ConversationView`。
+`ChatCodingRoute` 乐观提交 -> FastAPI sessions route -> `session_service` 提交/调度/worker（实现 claim 见 `core/web/services/session/*`） -> `agent.py` 单轮执行 -> `core.llm` invoke/stream -> UI capture -> turn journal/live output -> SSE -> 前端 active-turn layer -> `ConversationView`。
+
+结构拆分完成说明：`docs/plans/2026-07-21-backend-structure-p0-completion.md`。Team 工作流产品面 claim 见 `core/web/services/team_workflow/README.md`（routes 仍经 `team_workflow_orchestration_service` facade）。
 
 不覆盖：
 
