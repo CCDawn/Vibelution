@@ -411,6 +411,12 @@ export type ResearchLoopIterationProposal = {
   nextDesignGateStatus?: string;
 };
 
+export type ResearchLoopPendingDesignProposal = ResearchLoopIterationProposal & {
+  loopTitle: string;
+  researchQuestion: string;
+  sourcePlanId: string;
+};
+
 export type ResearchLoopRecord = {
   loopId: string;
   teamId: string;
@@ -475,6 +481,7 @@ export type ResearchLoopStatusPayload = {
   activeLoopId: string;
   activeLoop: ResearchLoopRecord | null;
   loops: ResearchLoopSummary[];
+  pendingDesignProposals: ResearchLoopPendingDesignProposal[];
   summary: {
     totalLoopCount: number;
     readyForDecisionCount: number;

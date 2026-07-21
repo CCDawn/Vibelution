@@ -2817,6 +2817,23 @@ export function TeamsRoute({
     },
   });
 
+  const materializeResearchLoopIterationDesignMutation = useMutation({
+    mutationFn: (payload: { teamId: string; loopId: string; proposalId: string }) =>
+      fetchJson<ResearchLoopDecisionPayload>(
+        `/api/teams/${encodeURIComponent(payload.teamId)}/workflow-orchestration/research-loop/loops/${encodeURIComponent(payload.loopId)}/proposals/${encodeURIComponent(payload.proposalId)}/design-draft`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ createdByAgent: sourceCollectionOwnerAgentId }),
+        },
+      ),
+    onSuccess: (payload, variables) => {
+      queryClient.setQueryData(researchLoopStatusQueryKey(variables.teamId), payload.status);
+      void queryClient.invalidateQueries({ queryKey: researchLoopStatusQueryKey(variables.teamId) });
+      void queryClient.invalidateQueries({ queryKey: experimentPlanningStatusQueryKey(variables.teamId) });
+    },
+  });
+
   const recordSourceCollectionOutputMutation = useMutation({
     mutationFn: async (payload: { teamId: string; runId: string; draft: SourceCollectionOutputDraft }) => {
       const output = await fetchJson<DataProcessingCollectionOutputPayload>(
@@ -6047,6 +6064,13 @@ export function TeamsRoute({
     );
     const latestProposal = activeLoop?.iterationProposals?.[activeLoop.iterationProposals.length - 1] ?? null;
     const latestDecision = activeLoop?.decisions?.[activeLoop.decisions.length - 1] ?? null;
+    const pendingDesignProposal = loopStatusPayload?.pendingDesignProposals?.[0] ?? null;
+    const materializingPendingDesign = Boolean(
+      pendingDesignProposal
+      && materializeResearchLoopIterationDesignMutation.isPending
+      && materializeResearchLoopIterationDesignMutation.variables?.teamId === selectedTeam?.teamId
+      && materializeResearchLoopIterationDesignMutation.variables?.proposalId === pendingDesignProposal.proposalId
+    );
     const panelTitle = variant === "iteration"
       ? (lang === "zh" ? "实验迭代决策" : "Experiment iteration decision")
       : (lang === "zh" ? "Research Loop 模板" : "Research Loop template");
@@ -6293,6 +6317,33 @@ export function TeamsRoute({
                   </small>
                 ) : null}
               </section>
+              {pendingDesignProposal ? (
+                <section>
+                  <strong>{lang === "zh" ? "待生成设计" : "Pending design"}</strong>
+                  <span>{pendingDesignProposal.loopTitle || pendingDesignProposal.nextTemplateId}</span>
+                  <small>{pendingDesignProposal.nextTemplateId}: {pendingDesignProposal.nextActions.join(" / ")}</small>
+                  <VNativeButton
+                    type="button"
+                    disabled={materializingPendingDesign || !selectedTeam?.teamId}
+                    onClick={() => {
+                      if (!selectedTeam?.teamId) {
+                        return;
+                      }
+                      materializeResearchLoopIterationDesignMutation.mutate({
+                        teamId: selectedTeam.teamId,
+                        loopId: pendingDesignProposal.loopId,
+                        proposalId: pendingDesignProposal.proposalId,
+                      });
+                    }}
+                  >
+                    <Plus size={13} />
+                    {materializingPendingDesign
+                      ? (lang === "zh" ? "生成中" : "Creating")
+                      : (lang === "zh" ? "生成设计草稿" : "Create design draft")}
+                  </VNativeButton>
+                  <small>{lang === "zh" ? "生成后仍需人工冻结，不会自动执行实验。" : "The draft still requires an explicit freeze and will not execute automatically."}</small>
+                </section>
+              ) : null}
             </div>
           </>
         ) : (
@@ -6304,6 +6355,9 @@ export function TeamsRoute({
         {selectedTeamCreateResearchLoopError ? <div className={styles.workflowError}>{selectedTeamCreateResearchLoopError.message}</div> : null}
         {selectedTeamRecordResearchLoopEvidenceError ? <div className={styles.workflowError}>{selectedTeamRecordResearchLoopEvidenceError.message}</div> : null}
         {selectedTeamRecordResearchLoopDecisionError ? <div className={styles.workflowError}>{selectedTeamRecordResearchLoopDecisionError.message}</div> : null}
+        {materializeResearchLoopIterationDesignMutation.error instanceof Error
+          ? <div className={styles.workflowError}>{materializeResearchLoopIterationDesignMutation.error.message}</div>
+          : null}
       </section>
     );
   }

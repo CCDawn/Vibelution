@@ -12,6 +12,7 @@ from core.web.services.research_loop_service import (
     create_research_loop,
     get_research_loop_status,
     list_research_loop_templates,
+    materialize_research_loop_iteration_design,
     record_research_loop_decision,
     record_research_loop_evidence,
 )
@@ -67,6 +68,10 @@ class ResearchLoopDecisionPayload(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+class ResearchLoopIterationDesignPayload(BaseModel):
+    createdByAgent: str = Field("", max_length=160)
+
+
 @router.get("/teams/{team_id}/workflow-orchestration/research-loop/templates")
 def team_research_loop_templates(team_id: str) -> dict:
     try:
@@ -118,6 +123,24 @@ def team_research_loop_evidence_record(team_id: str, loop_id: str, payload: Rese
 def team_research_loop_decision_record(team_id: str, loop_id: str, payload: ResearchLoopDecisionPayload) -> dict:
     try:
         return record_research_loop_decision(team_id, loop_id, payload.model_dump())
+    except TeamNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except (TeamServiceError, ResearchLoopError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.post(
+    "/teams/{team_id}/workflow-orchestration/research-loop/loops/{loop_id}/proposals/{proposal_id}/design-draft",
+    status_code=status.HTTP_201_CREATED,
+)
+def team_research_loop_iteration_design_materialize(
+    team_id: str,
+    loop_id: str,
+    proposal_id: str,
+    payload: ResearchLoopIterationDesignPayload,
+) -> dict:
+    try:
+        return materialize_research_loop_iteration_design(team_id, loop_id, proposal_id, payload.model_dump())
     except TeamNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except (TeamServiceError, ResearchLoopError) as exc:

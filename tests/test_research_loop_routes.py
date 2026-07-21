@@ -105,3 +105,30 @@ def test_research_loop_routes_report_missing_team(tmp_path, monkeypatch):
     response = client.get("/api/teams/missing-team/workflow-orchestration/research-loop/status")
 
     assert response.status_code == 404
+
+
+def test_research_loop_route_materializes_existing_iteration_proposal(monkeypatch):
+    client = _client()
+    expected = {
+        "iterationProposal": {"proposalId": "proposal-1", "nextDesignPlanId": "plan-v13"},
+        "nextDesignDraft": {"status": "created", "plan": {"planId": "plan-v13"}},
+    }
+    monkeypatch.setattr(
+        "core.web.routes.research_loop.materialize_research_loop_iteration_design",
+        lambda team_id, loop_id, proposal_id, payload: {
+            **expected,
+            "teamId": team_id,
+            "loopId": loop_id,
+            "proposalId": proposal_id,
+            "payload": payload,
+        },
+    )
+
+    response = client.post(
+        "/api/teams/research-team/workflow-orchestration/research-loop/loops/loop-1/proposals/proposal-1/design-draft",
+        json={"createdByAgent": "Research Coordination Agent"},
+    )
+
+    assert response.status_code == 201, response.text
+    assert response.json()["nextDesignDraft"]["plan"]["planId"] == "plan-v13"
+    assert response.json()["payload"]["createdByAgent"] == "Research Coordination Agent"
