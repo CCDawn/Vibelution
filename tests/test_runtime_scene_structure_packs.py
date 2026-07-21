@@ -1,9 +1,9 @@
-"""Focused tests for runtime_scene structure packs (record/query)."""
+"""Focused tests for runtime_scene structure packs (record/query/diagnosis)."""
 
 from __future__ import annotations
 
 from core.web.services import runtime_scene_service as facade
-from core.web.services.runtime_scene import query, record
+from core.web.services.runtime_scene import diagnosis, query, record
 
 
 def test_facade_reexports_record_pack() -> None:
@@ -22,3 +22,12 @@ def test_facade_reexports_query_pack() -> None:
     assert facade.read_runtime_scene_file is query.read_runtime_scene_file
     assert facade.list_runtime_scene_evidence_for_agent is query.list_runtime_scene_evidence_for_agent
     assert facade.build_runtime_scene_prompt_index is query.build_runtime_scene_prompt_index
+
+
+def test_facade_reexports_diagnosis_pack() -> None:
+    assert facade._runtime_scene_package_diagnosis is diagnosis._runtime_scene_package_diagnosis
+    assert facade._runtime_scene_agent_brief is diagnosis._runtime_scene_agent_brief
+    assert facade._runtime_scene_issue_state is diagnosis._runtime_scene_issue_state
+    assert facade._runtime_scene_key_entries is diagnosis._runtime_scene_key_entries
+    assert facade._fold_repeated_work_run_snapshots is diagnosis._fold_repeated_work_run_snapshots
+    assert facade._runtime_scene_diagnosis_next_step is diagnosis._runtime_scene_diagnosis_next_step

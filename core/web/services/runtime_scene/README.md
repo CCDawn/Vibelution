@@ -9,7 +9,7 @@ Ownership map for structured runtime scene bundles.
 |-----------|-------------------|--------|
 | `record_*` writers / manifests / delete | `record.py` | diagnosis residual |
 | list/get/detail / evidence / prompt index / retention | `query.py` | record append path |
-| diagnosis / issue / work-run residual helpers | facade (later `diagnosis.py`) | package write |
+| diagnosis / issue / work-run / startup signals | `diagnosis.py` | package index sidecar glue |
 
 ## Extraction progress
 
@@ -17,9 +17,9 @@ Ownership map for structured runtime scene bundles.
 |------|--------|--------|
 | `record.py` | done | Phase 13 write path |
 | `query.py` | done | Phase 13 query path |
-| diagnosis residual | deferred | next runtime_scene cut |
+| `diagnosis.py` | done | Phase 14 diagnosis/issue/work-run |
+| package-index sidecar residual | facade glue | 3 helpers |
 
 ## Related
 
-- Routes / consumers: session events, launcher, web diagnostics
-- Structure plan family: `docs/plans/2026-07-21-service-optimization-phase*.md`
+- Structure plans: `docs/plans/2026-07-21-service-optimization-phase13-runtime-scene.md`, phase14 plan
