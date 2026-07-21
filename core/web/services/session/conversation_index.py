@@ -1704,7 +1704,7 @@ def _record_agent_directory_conversation_materialized_event(
                 "promptTemplateId": str(agent.get("promptTemplateId") or "").strip(),
                 "source": str(source or "").strip(),
             },
-            child_log_path=f"conversations/{s._safe_session_workspace_token(session_id)}-agent-bindingjsonl",
+            child_log_path=f"conversations/{s._safe_session_workspace_token(session_id)}-agent-bindings.jsonl",
             child_log_payload={
                 "session_id": str(session_id or "").strip(),
                 "agent_id": str(agent.get("agentId") or "").strip(),
@@ -1749,7 +1749,7 @@ def _record_session_agent_legacy_model_fields_repaired_event(
                 "roleKey": str(role_key or "").strip(),
                 "source": "AgentInstance",
             },
-            child_log_path=f"conversations/{s._safe_session_workspace_token(normalized_session_id)}-agent-bindingjsonl",
+            child_log_path=f"conversations/{s._safe_session_workspace_token(normalized_session_id)}-agent-bindings.jsonl",
             child_log_payload={
                 "session_id": normalized_session_id,
                 "agent_id": str(agent_id or "").strip(),

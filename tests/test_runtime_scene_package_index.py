@@ -78,7 +78,9 @@ def test_runtime_scene_uses_active_launcher_reference_when_state_is_runtime_proj
     )
 
     assert recorded["accepted"] is True
-    assert (scene_dir / "conversations" / "session-active-reference.jsonl").exists()
+    # Canonical conversation evidence lives under sessions/<id>/transcript.jsonl.
+    assert (scene_dir / "sessions" / "session-active-reference" / "transcript.jsonl").exists()
+    assert recorded.get("path") == "sessions/session-active-reference/transcript.jsonl"
 
 
 def test_runtime_scene_event_writes_standalone_package_index(tmp_path, monkeypatch):
@@ -185,9 +187,11 @@ def test_runtime_scene_event_writes_standalone_package_index(tmp_path, monkeypat
     assert summary["sections"]["research"]["path"] == "research"
     assert summary["sections"]["research"]["events_path"] == "research/events.jsonl"
     assert summary["sections"]["research"]["summary_path"] == "research/summary.json"
-    assert summary["sections"]["supervised_evolution"]["path"] == "agent/supervised_runs"
-    assert summary["sections"]["supervised_evolution"]["worktree_path"] == "agent/supervised_worktree_runs"
-    assert summary["sections"]["self_evolution"]["path"] == "agent/self_evolution_runs"
+    assert summary["sections"]["supervised_evolution"]["path"] == "runs/supervised"
+    assert summary["sections"]["supervised_evolution"]["worktree_path"] == "runs/supervised_worktree"
+    assert summary["sections"]["supervised_evolution"]["legacy_path"] == "agent/supervised_runs"
+    assert summary["sections"]["self_evolution"]["path"] == "runs/self_evolution"
+    assert summary["sections"]["self_evolution"]["legacy_path"] == "agent/self_evolution_runs"
     assert summary["event_counts"]["timeline_events"] == 3
     assert summary["event_counts"]["lifecycle_events"] == 2
     assert summary["event_counts"]["errors"] == 1

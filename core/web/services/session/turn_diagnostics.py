@@ -1028,7 +1028,7 @@ def _record_session_turn_error(
                 "recoverable": bool(turn_error.get("recoverable", True)),
                 "rawErrorPreview": s.trim_lines(raw_error, max_lines=2),
             },
-            child_log_path=f"conversations/{s._safe_session_workspace_token(session_id)}-errorjsonl",
+            child_log_path=f"conversations/{s._safe_session_workspace_token(session_id)}-errors.jsonl",
             child_log_payload={
                 "session_id": str(session_id or "").strip(),
                 "turn_id": str(turn_error.get("turn_id") or turn_error.get("turnId") or "").strip(),

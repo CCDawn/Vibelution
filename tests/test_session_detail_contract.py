@@ -746,7 +746,7 @@ def test_session_detail_window_can_omit_native_transcript_for_light_payloads(tmp
     assistant = payload["messages"][-1]
     assert assistant["content"] == "窗口回答 1"
     assert assistant["toolCalls"] == [
-        {"name": "rg", "status": "done", "summary": "搜索 1"},
+        {"name": "rg", "status": "done", "summary": "搜索 1", "callId": "tool-window-1"},
     ]
     assert "codexTranscript" not in assistant
     assert payload["messageWindow"]["transcriptScope"] == "none"

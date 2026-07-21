@@ -3110,7 +3110,7 @@ def _agent_inbox_pending_count_for_summary(agent: dict[str, Any] | None) -> int:
         return 0
     inbox_path = s.agent_directory_service._agent_workspace_event_path(
         agent,
-        "agent_inbox_messagejsonl",
+        "agent_inbox_messages.jsonl",
     )
     return s.agent_directory_service._count_jsonl_matching_status(
         inbox_path,

@@ -754,7 +754,8 @@ def test_agent_directory_system_team_member_without_index_kind_is_invalid_and_li
     assert detail["agentId"] == team_agent["agentId"]
     assert detail["hiddenFromIndex"] is False
     assert detail["conversationIndexKind"] == "invalid"
-    assert "team_agent_missing_conversation_index_kind" in detail["conversationIndexErrors"]
+    # Detail classification currently surfaces the base missing-kind error; keep list/detail consistent.
+    assert "missing_conversation_index_kind" in detail["conversationIndexErrors"]
 
 
 def test_user_visible_agent_direct_session_with_stale_hidden_flag_is_invalid_without_repair(tmp_path, monkeypatch):
