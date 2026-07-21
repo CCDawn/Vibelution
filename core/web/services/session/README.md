@@ -11,6 +11,8 @@ this package and be re-exported from the facade when it is part of the public AP
 
 **P0 structure closed** (2026-07-21): see `docs/plans/2026-07-21-backend-structure-p0-completion.md`.
 
+**Service optimization Phase 3** (2026-07-21): projection + SSE publish packs — `docs/plans/2026-07-21-service-optimization-phase3-session-projection.md`.
+
 ## Ownership map (claim scopes)
 
 | Task type | Prefer these files | Avoid |
@@ -23,7 +25,9 @@ this package and be re-exported from the facade when it is part of the public AP
 | `_run_session_turn` / continuation loop | `worker.py` | team SC search, SSE transport |
 | UI stream to journal / live_output batching | `stream_capture.py` | list cache, SSE transport publish |
 | Persist turn outcome / final assistant + turn_* | `persist.py` | agent directory CRUD, SSE transport |
-| Session detail/list DTO projection / stop / SSE publish | `../session_service.py` (facade remainder) | inlining new 500-line blocks into slices |
+| Session detail/list DTO projection | `projection.py` | SSE transport publish |
+| SSE `assistant_delta` / `session_detail` publish | `publish.py` | DTO projection builders |
+| Stop / agent lifecycle residual | `../session_service.py` (facade remainder) | inlining new 500-line blocks into slices |
 | Public HTTP-facing API surface | `../session_service.py` (facade) | bypassing re-exports |
 
 ## Flow map to modules
@@ -38,8 +42,8 @@ this package and be re-exported from the facade when it is part of the public AP
 | persist assistant_message / turn_* | `persist.py` |
 | list/detail index cache | `list_cache.py` |
 | live output checkpoint | `live_output.py` |
-| SSE `assistant_delta` / `session_detail` publish | facade (deferred slice) |
-| detail DTO projection | facade (optional later `projection.py`) |
+| SSE `assistant_delta` / `session_detail` publish | `publish.py` |
+| detail/list DTO projection | `projection.py` |
 
 ## Sole-owner rules
 
@@ -49,7 +53,9 @@ this package and be re-exported from the facade when it is part of the public AP
 4. Do not change journal event type strings or SSE event names in mechanical splits.
 5. Prefer re-export from `session_service.py` over updating every importer until a later import-migration stage.
 
-## Extraction progress (Stage 2 closed)
+## Extraction progress
+
+### Stage 2 closed (hot path)
 
 | Module | ~LOC | Role |
 |--------|------|------|
@@ -61,21 +67,29 @@ this package and be re-exported from the facade when it is part of the public AP
 | `stream_capture.py` | ~1179 | UI capture + batching + hooks |
 | `worker.py` | ~1288 | run turn + continuation loop |
 | `persist.py` | ~1001 | turn result / failure / terminal fallback |
-| **package total (slices)** | **~5.5k** | claimable hot path |
-| `session_service.py` facade | ~19.2k | re-exports + projection/SSE/stop/helpers |
 
-**Stage 2 exit (met):** hot-path claims exist for submit → schedule → capture → worker → persist plus list/live/journal support slices; public import path unchanged; focused slice tests + `test_web_runtime_routes` green.
+### Service optimization Phase 3 (projection + publish)
 
-**Explicitly deferred (not Stage 2 blockers):**
+| Module | ~LOC | Role |
+|--------|------|------|
+| `publish.py` | ~0.8k | SSE stream + detail/delta publish + queue coalesce |
+| `projection.py` | ~3.1k | list/detail DTO + summary/cache composition builders |
+| `session_service.py` facade (after Phase 3) | ~16.8k total lines | re-exports + stop/agent lifecycle residual |
 
-- Full facade slim to “re-exports only” (still holds projection, SSE publish, stop controls, agent helpers).
-- Optional `projection.py` for detail/list DTO builders.
+**Stage 2 exit (met):** hot-path claims for submit → schedule → capture → worker → persist.
+
+**Phase 3 exit:** projection + SSE publish claimable outside facade; public imports still via facade re-exports; structure pack + focused session tests green.
+
+**Still deferred:**
+
+- Full facade slim to re-exports only (stop controls, agent session lifecycle helpers).
+- Late-bind removal.
 - Migrating all internal importers off the facade.
-- Stage 3 `team_workflow` god-service split.
 
 ## Related
 
 - Routes: `core/web/routes/sessions.py`
 - Domain: `core/chat/*` (ledger, context assembler)
 - Agent turn: `agent.py` (out of session P0 deep cut)
+- Phase 3 plan: `docs/plans/2026-07-21-service-optimization-phase3-session-projection.md`
 - Structure plan: `docs/plans/2026-07-20-backend-structure-p0.md`
