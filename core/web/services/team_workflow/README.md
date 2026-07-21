@@ -8,6 +8,8 @@ Align language with frontend claim map: `web/src/routes/teams/README.md`.
 `team_workflow_orchestration_service.py` remains the **public import facade** for
 `core/web/routes/team_workflows.py` and other callers.
 
+**P0 structure closed** (2026-07-21): see `docs/plans/2026-07-21-backend-structure-p0-completion.md`.
+
 ## Ownership map (claim scopes)
 
 | Task type | Prefer these files | Avoid |
