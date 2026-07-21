@@ -17,6 +17,8 @@ from core.web.services.session import (
     schedule,
     stream_capture,
     submit,
+    timeline,
+    turn_diagnostics,
     worker,
 )
 
@@ -84,3 +86,20 @@ def test_facade_reexports_live_output_write_pack() -> None:
     assert facade._set_session_turn_progress_live_output is live_output_write._set_session_turn_progress_live_output
     assert facade._build_live_output_message is live_output_write._build_live_output_message
     assert facade._live_output_checkpoint_payload is live_output_write._live_output_checkpoint_payload
+
+
+def test_facade_reexports_timeline_pack() -> None:
+    assert facade._build_turn_mental_snapshot is timeline._build_turn_mental_snapshot
+    assert facade._normalize_persisted_tool_calls is timeline._normalize_persisted_tool_calls
+    assert facade._normalize_persisted_feedback_events is timeline._normalize_persisted_feedback_events
+    assert facade._assistant_timeline_events_by_turn is timeline._assistant_timeline_events_by_turn
+    assert facade._persist_session_preflight_rejection is timeline._persist_session_preflight_rejection
+
+
+def test_facade_reexports_turn_diagnostics_pack() -> None:
+    assert facade.get_session_turn_completion_snapshot is turn_diagnostics.get_session_turn_completion_snapshot
+    assert facade.create_chat_review_candidate_from_session is turn_diagnostics.create_chat_review_candidate_from_session
+    assert facade._record_session_turn_error is turn_diagnostics._record_session_turn_error
+    assert facade._persist_chat_turn_work_run is turn_diagnostics._persist_chat_turn_work_run
+    assert facade._reconcile_stale_session_ledger is turn_diagnostics._reconcile_stale_session_ledger
+    assert facade._resolve_session_references is turn_diagnostics._resolve_session_references

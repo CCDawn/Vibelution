@@ -385,6 +385,74 @@ from core.web.services.session.live_output_write import (
     _set_session_llm_status_live_output,
     _set_session_model_thinking_live_output,
 )
+from core.web.services.session.timeline import (
+    _persist_session_preflight_rejection,
+    _assistant_timeline_target_indices,
+    _finish_image_attachment_preflight_turn,
+    _record_session_turn_tool_calls,
+    _normalize_tool_call_status,
+    _looks_like_tool_call_failure_summary,
+    _tool_call_name,
+    _normalize_persisted_tool_calls,
+    _normalize_message_tool_calls,
+    _normalize_feedback_event_kind,
+    _normalize_persisted_feedback_events,
+    _normalize_message_feedback_events,
+    _assistant_timeline_events_by_turn,
+    _is_assistant_timeline_segment_event,
+    _conversation_tool_timeline_key,
+    _feedback_event_from_conversation_tool_event,
+    _filter_redundant_assistant_timeline_events,
+    _extract_chat_feedback_events,
+    _normalize_mental_snapshot,
+    _is_mental_model_enabled_for_turn,
+    _has_meaningful_mental_snapshot,
+    _live_mental_snapshot,
+    _build_turn_mental_snapshot,
+    _merge_diagnosis_mental_snapshot,
+    _record_mental_snapshot_selection,
+    _diagnosis_mental_snapshot,
+    _mental_diagnosis_summary,
+)
+from core.web.services.session.turn_diagnostics import (
+    _reconcile_stale_session_ledger,
+    get_session_turn_completion_snapshot,
+    create_chat_review_candidate_from_session,
+    _create_direct_session_submit_kernel_trace,
+    _record_direct_session_submit_kernel_trace_event,
+    _active_chat_turn_work_run_id_for_session,
+    _release_stale_chat_turn_work_run,
+    _complete_turn_error_visible_content,
+    _provider_error_detail_safe_for_chat,
+    _normalize_session_references,
+    _resolve_session_references,
+    _active_chat_turn_work_run_for_session,
+    list_active_session_work_runs,
+    _active_session_work_run_statuses,
+    load_chat_turn_work_run_summary,
+    _persist_chat_turn_work_run,
+    _reconcile_source_collection_stage_task_after_turn,
+    _make_local_runtime_turn_error,
+    _record_session_turn_error,
+    _record_session_turn_circuit_breaker_event,
+    _append_session_workspace_log,
+    _normalize_session_turn_error,
+    _make_session_turn_error,
+    _session_turn_error_to_api,
+    _make_turn_error_chat_message,
+    _looks_like_provider_error_text,
+    _provider_error_user_reason,
+    _provider_error_reason_detail,
+    _provider_error_diagnostics,
+    _iter_provider_error_json,
+    _extract_provider_error_type_from_json,
+    _sanitize_provider_error_type,
+    _extract_provider_error_message_from_json,
+    _sanitize_provider_error_detail,
+    _user_visible_failure_summary,
+    _touch_chat_turn_work_run,
+    _record_session_chat_review_candidate_event,
+)
 from core.web.services.session.projection import (
     list_sessions,
     get_session_detail,
@@ -786,92 +854,6 @@ def _ensure_session_workspace(session_id: str) -> Path:
     for subdir in _SESSION_WORKSPACE_SUBDIRS:
         (workspace_path / subdir).mkdir(parents=True, exist_ok=True)
     return workspace_path
-
-
-def _reconcile_stale_session_ledger(session_id: str, *, active_turn_id: str = "", reason: str = "process_restarted") -> None:
-    normalized_session_id = str(session_id or "").strip()
-    if not normalized_session_id:
-        return
-    if _is_session_running(normalized_session_id):
-        return
-    # Process-local session state can briefly be absent while a submitted turn is
-    # already durable and running. The persisted WorkRun is the cross-request
-    # authority in that window; detail projection must not terminate its ledger.
-    if _active_chat_turn_work_run_for_session(normalized_session_id) is not None:
-        return
-    recovered_from_checkpoint_only = False
-    event_turn_id = ""
-    try:
-        events = load_conversation_events(PROJECT_ROOT, normalized_session_id)
-        checkpoint = _load_session_live_output_checkpoint(normalized_session_id)
-        turn_id = latest_open_turn_id(events)
-        checkpoint_turn_id = str(getattr(checkpoint, "turn_id", "") or "").strip() if checkpoint is not None else ""
-        checkpoint_payload = _live_output_checkpoint_payload(checkpoint) if checkpoint is not None else {}
-        checkpoint_has_assistant_payload = _live_output_checkpoint_has_assistant_payload(checkpoint_payload)
-        if not turn_id and checkpoint_turn_id and _session_events_have_terminal_turn(events, checkpoint_turn_id):
-            _discard_session_live_output_state(normalized_session_id, turn_id=checkpoint_turn_id)
-            return
-        if not turn_id and checkpoint_turn_id and not checkpoint_has_assistant_payload:
-            return
-        if not turn_id and checkpoint_turn_id:
-            turn_id = checkpoint_turn_id
-            recovered_from_checkpoint_only = True
-        if not turn_id:
-            _discard_session_live_output_state(normalized_session_id)
-            return
-        if active_turn_id and turn_id == str(active_turn_id or "").strip():
-            return
-        if checkpoint is not None and (not checkpoint.turn_id or checkpoint.turn_id == turn_id):
-            payload = checkpoint_payload
-            if checkpoint_has_assistant_payload:
-                _persist_recovered_live_output_to_chat_state(normalized_session_id, turn_id, checkpoint)
-                _append_session_conversation_event(
-                    normalized_session_id,
-                    turn_id,
-                    EVENT_ASSISTANT_MESSAGE,
-                    status="interrupted",
-                    payload={
-                        "content": str(payload.get("content") or ""),
-                        "thought": str(payload.get("thought") or ""),
-                        "toolCalls": list(payload.get("toolCalls") or []),
-                        "feedbackEvents": list(payload.get("feedbackEvents") or []),
-                        "metadata": {
-                            "interrupted": True,
-                            "recoveredFromLiveOutputCheckpoint": True,
-                        },
-                    },
-                    source="recover_live_output_checkpoint",
-                )
-        event = _append_stale_turn_interruption_if_session_inactive(
-            normalized_session_id,
-            turn_id,
-            reason=reason,
-        )
-        if event is None:
-            return
-        event_turn_id = str(event.turn_id or turn_id)
-        _invalidate_session_conversation_events_cache(normalized_session_id)
-        _discard_session_live_output_state(normalized_session_id, turn_id=turn_id)
-    except Exception:
-        return
-    try:
-        record_runtime_scene_event(
-            "conversation",
-            "conversation_ledger",
-            "conversation.ledger.reconciled_interrupted",
-            level="warning",
-            outcome="interrupted",
-            message="Reconciled an open chat ledger turn as interrupted.",
-            fields={
-                "sessionId": normalized_session_id,
-                "turnId": event_turn_id,
-                "reason": reason,
-                "recoveredFromCheckpointOnly": recovered_from_checkpoint_only,
-            },
-            lifecycle=True,
-        )
-    except Exception:
-        return
 
 
 def store_session_image_artifact(
@@ -1745,104 +1727,6 @@ def _session_query_matches(
     return query in haystack
 
 
-def get_session_turn_completion_snapshot(session_id: str, turn_id: str = "") -> dict[str, Any]:
-    """Return a turn-scoped completion snapshot for external harness pollers."""
-
-    normalized_session_id = str(session_id or "").strip()
-    normalized_turn_id = str(turn_id or "").strip()
-    if not normalized_session_id:
-        return {
-            "sessionId": "",
-            "turnId": normalized_turn_id,
-            "terminal": False,
-            "terminalStatus": "",
-            "completionSource": "missing_session_id",
-            "completionRecovered": False,
-            "assistantText": "",
-            "lastTurnStatus": "",
-            "messageCount": 0,
-            "isRunning": False,
-            "activeTurnId": "",
-            "turnCurrent": False,
-        }
-
-    with _RUNNING_SESSIONS_LOCK:
-        is_running = normalized_session_id in _RUNNING_SESSION_IDS
-        active_turn_id = str(_SESSION_ACTIVE_TURN_IDS.get(normalized_session_id) or "").strip()
-    turn_current = bool(is_running and (not normalized_turn_id or active_turn_id == normalized_turn_id))
-
-    with _CHAT_STATE_LOCK:
-        payload = load_chat_state(PROJECT_ROOT)
-        payload = _repair_stale_running_conversations(payload)
-        conversation = _find_conversation_entry(payload, normalized_session_id)
-        if conversation is None:
-            return {
-                "sessionId": normalized_session_id,
-                "turnId": normalized_turn_id,
-                "terminal": False,
-                "terminalStatus": "",
-                "completionSource": "missing_conversation",
-                "completionRecovered": False,
-                "assistantText": "",
-                "lastTurnStatus": "",
-                "messageCount": 0,
-                "isRunning": is_running,
-                "activeTurnId": active_turn_id,
-                "turnCurrent": turn_current,
-            }
-        last_turn_status = str(conversation.get("last_turn_status") or conversation.get("lastTurnStatus") or "").strip().lower()
-        messages = _session_ledger_visible_messages(session_id)
-
-    assistant_message = _find_turn_scoped_assistant_message(messages, normalized_turn_id)
-    assistant_text = str((assistant_message or {}).get("content") or "").strip()
-    assistant_turn_id = _message_turn_id(assistant_message)
-    marker_present = _supervised_completion_marker_present(assistant_text)
-    terminal_statuses = {
-        "ready",
-        "completed",
-        "done",
-        "success",
-        "failed",
-        "failed_provider",
-        "failed_runtime",
-        "paused_limit",
-        "stopped",
-        "stopped_by_user",
-        "cancelled",
-        "needs_continue",
-        "superseded",
-    }
-    terminal = False
-    terminal_status = ""
-    completion_source = "running"
-    completion_recovered = False
-    if last_turn_status in terminal_statuses:
-        terminal = True
-        terminal_status = last_turn_status
-        completion_source = "last_turn_status"
-    elif marker_present and assistant_text and not turn_current:
-        terminal = True
-        terminal_status = "ready"
-        completion_source = "assistant_marker"
-        completion_recovered = True
-    return {
-        "sessionId": normalized_session_id,
-        "turnId": normalized_turn_id,
-        "terminal": terminal,
-        "terminalStatus": terminal_status,
-        "completionSource": completion_source,
-        "completionRecovered": completion_recovered,
-        "assistantText": assistant_text,
-        "assistantMessageFound": assistant_message is not None,
-        "assistantTurnId": assistant_turn_id,
-        "lastTurnStatus": last_turn_status,
-        "messageCount": len(messages),
-        "isRunning": is_running,
-        "activeTurnId": active_turn_id,
-        "turnCurrent": turn_current,
-    }
-
-
 def _current_session_turn_id(session_id: str) -> str:
     with _RUNNING_SESSIONS_LOCK:
         return str(_SESSION_ACTIVE_TURN_IDS.get(session_id) or "").strip()
@@ -2077,135 +1961,6 @@ def _remove_replacement_direct_session_after_failed_agent_reset(
     )
 
 
-def create_chat_review_candidate_from_session(session_id: str) -> dict:
-    """Create a pending supervised review candidate from a persisted chat session."""
-
-    lang = get_web_language()
-    conversation_id = str(session_id or "").strip()
-    if not conversation_id:
-        raise SessionValidationError(text_for(lang, zh="会话 ID 不能为空。", en="Session id is required."))
-
-    _, conversations = _load_conversations()
-    conversation = next(
-        (item for item in conversations if str(item.get("id") or "").strip() == conversation_id),
-        None,
-    )
-    if conversation is None:
-        raise SessionNotFoundError(text_for(lang, zh="未找到当前会话。", en="Session not found."))
-
-    stop_requested = _is_session_stop_requested(conversation_id)
-    if _is_session_running(conversation_id) or stop_requested:
-        _record_session_chat_review_candidate_event(
-            "blocked",
-            session_id=conversation_id,
-            outcome="busy",
-            level="warning",
-            fields={"stopRequested": bool(stop_requested)},
-        )
-        raise SessionBusyError(
-            text_for(
-                lang,
-                zh="当前会话仍在运行或停止中，结束后再添加到监督评审队列。",
-                en="This session is still running or stopping. Add it to review after the turn closes.",
-            )
-        )
-
-    messages = _session_ledger_visible_messages(conversation_id)
-    turns = _build_chat_turn_records_from_messages(messages)
-    if len(turns) < 1:
-        _record_session_chat_review_candidate_event(
-            "blocked",
-            session_id=conversation_id,
-            outcome="no_complete_turn",
-            level="warning",
-            fields={"messageCount": len(messages), "turnCount": len(turns)},
-        )
-        raise SessionValidationError(
-            text_for(
-                lang,
-                zh="这个会话还没有完整的用户-助手轮次，不能加入监督评审队列。",
-                en="This session does not have a complete user-assistant turn yet.",
-            )
-        )
-
-    service = ChatDatasetCaptureService(project_root=PROJECT_ROOT)
-    try:
-        candidate = service.capture_candidate(
-            mode="chat",
-            session_id=conversation_id,
-            source_log_path=_resolve_chat_source_log_path(),
-            turns=turns,
-            require_auto_capture=False,
-            apply_quality_filters=False,
-            min_turns=1,
-            max_turns=len(turns),
-        )
-    except Exception as exc:
-        _record_session_chat_review_candidate_event(
-            "failed",
-            session_id=conversation_id,
-            outcome="failed",
-            level="error",
-            fields={
-                "messageCount": len(messages),
-                "turnCount": len(turns),
-                "errorType": exc.__class__.__name__,
-            },
-        )
-        raise
-
-    if candidate is None:
-        capture_enabled = bool(getattr(service.config.evolution.chat_dataset, "enabled", False))
-        _record_session_chat_review_candidate_event(
-            "blocked",
-            session_id=conversation_id,
-            outcome="duplicate" if capture_enabled else "capture_disabled",
-            level="warning",
-            fields={"messageCount": len(messages), "turnCount": len(turns)},
-        )
-        if not capture_enabled:
-            raise SessionValidationError(
-                text_for(
-                    lang,
-                    zh="当前配置未启用 chat 数据采集，不能加入监督评审队列。",
-                    en="Chat dataset capture is disabled in the current configuration.",
-                )
-            )
-        raise SessionChatReviewCandidateExistsError(
-            text_for(
-                lang,
-                zh="这段会话快照已经生成过监督评审样本，刷新评审工作区即可查看当前状态。",
-                en="This session snapshot already has a supervised review sample. Refresh the review workspace to see its current state.",
-            )
-        )
-
-    _record_session_chat_review_candidate_event(
-        "created",
-        session_id=conversation_id,
-        outcome="created",
-        fields={
-            "candidateId": candidate.candidate_id,
-            "turnCount": candidate.turn_count,
-            "qualitySignals": candidate.quality_signals,
-            "rawExcerptPath": candidate.raw_excerpt_path,
-        },
-    )
-    return {
-        "candidateId": candidate.candidate_id,
-        "status": "pending",
-        "sessionId": candidate.session_id,
-        "topicSummary": candidate.topic_summary,
-        "turnCount": candidate.turn_count,
-        "qualitySignals": candidate.quality_signals,
-        "rawExcerptPath": candidate.raw_excerpt_path,
-        "summary": text_for(
-            lang,
-            zh="已加入监督进化会话评审队列，等待人工判定正例、负例或丢弃。",
-            en="Added to the supervised chat review queue for human review.",
-        ),
-    }
-
-
 def _supersede_active_session_turn_for_edit(session_id: str, *, lang: str) -> str:
     controller = _get_session_turn_control(session_id)
     if controller is None:
@@ -2302,160 +2057,6 @@ def _record_missing_session_turn_control_recovery(
     except Exception:
         return
 
-
-
-def _create_direct_session_submit_kernel_trace(
-    conversation: dict[str, Any],
-    *,
-    agent: dict[str, Any] | None,
-    turn_id: str,
-    message: str,
-    source: str,
-) -> dict[str, Any]:
-    normalized_source = str(source or "").strip() or "raw"
-    if normalized_source in {"agent_inbox", "hot_restart_resume", "supervised_evolution"}:
-        return {}
-    if not isinstance(conversation, dict) or not isinstance(agent, dict):
-        return {}
-    session_id = str(conversation.get("id") or conversation.get("conversation_id") or "").strip()
-    normalized_turn_id = str(turn_id or "").strip()
-    agent_id = str(conversation.get("agent_id") or conversation.get("agentId") or agent.get("agentId") or "").strip()
-    if not session_id or not normalized_turn_id or not agent_id:
-        return {}
-    if str(agent.get("agentId") or "").strip() != agent_id:
-        return {}
-    if str(agent.get("directSessionId") or "").strip() != session_id:
-        return {}
-
-    content = str(message or "").strip()
-    if not content:
-        content = f"Direct session turn {normalized_turn_id}"
-    content_hash = hashlib.sha256(content.encode("utf-8", errors="replace")).hexdigest()[:16]
-    event_payload = {
-        "eventId": f"session-submit-{session_id}-{normalized_turn_id}",
-        "sender": {"type": "user", "id": "session_submit"},
-        "recipientAgentIds": [agent_id],
-        "semanticType": "agent.session_submit",
-        "payload": {
-            "goal": f"Direct session turn {normalized_turn_id}",
-            "sessionId": session_id,
-            "turnId": normalized_turn_id,
-            "messageSource": normalized_source,
-            "contentLength": len(content),
-            "contentHash": content_hash,
-        },
-        "correlationId": f"session:{session_id}",
-        "idempotencyKey": f"session-submit:{session_id}:{normalized_turn_id}",
-        "wakeTarget": False,
-        "traceOnly": True,
-        "metadata": {
-            "sourceSurface": "session_submit",
-            "sourceSessionId": session_id,
-            "sourceMessageId": normalized_turn_id,
-            "projectionRef": {"kind": "session_turn", "id": normalized_turn_id},
-            "adapterVersion": "session-submit-kernel-bridge-v1",
-            "source": normalized_source,
-            "targetAgentId": agent_id,
-            "agentId": agent_id,
-            "messageContentHash": content_hash,
-            "messageContentLength": len(content),
-        },
-    }
-    try:
-        from core.agent_kernel import service as agent_kernel_service
-
-        if getattr(agent_kernel_service, "PROJECT_ROOT", PROJECT_ROOT) != PROJECT_ROOT:
-            agent_kernel_service.PROJECT_ROOT = PROJECT_ROOT
-        result = agent_kernel_service.handle_kernel_event(event_payload)
-    except Exception as exc:
-        trace = {
-            "source": "agent_kernel",
-            "traceOnly": True,
-            "status": "failed",
-            "sourceSurface": "session_submit",
-            "errorType": type(exc).__name__,
-            "reason": trim_lines(str(exc), max_lines=2),
-        }
-        _record_direct_session_submit_kernel_trace_event(
-            conversation,
-            trace,
-            turn_id=normalized_turn_id,
-            agent_id=agent_id,
-            source=normalized_source,
-            level="warning",
-            outcome="failed",
-        )
-        return trace
-
-    event = result.get("event") if isinstance(result.get("event"), dict) else {}
-    task = result.get("task") if isinstance(result.get("task"), dict) else {}
-    execution = result.get("execution") if isinstance(result.get("execution"), dict) else {}
-    outcome_payload = result.get("outcome") if isinstance(result.get("outcome"), dict) else {}
-    trace = {
-        "source": "agent_kernel",
-        "sourceSurface": "session_submit",
-        "traceOnly": True,
-        "status": "recorded",
-        "eventId": str(event.get("eventId") or "").strip(),
-        "taskId": str(task.get("taskId") or "").strip(),
-        "workRunId": str(execution.get("workRunId") or "").strip(),
-        "outcomeId": str(outcome_payload.get("outcomeId") or "").strip(),
-        "outcomeStatus": str(outcome_payload.get("status") or task.get("status") or "").strip(),
-        "reused": bool(result.get("reused")),
-    }
-    _record_direct_session_submit_kernel_trace_event(
-        conversation,
-        trace,
-        turn_id=normalized_turn_id,
-        agent_id=agent_id,
-        source=normalized_source,
-        outcome=trace["outcomeStatus"] or "succeeded",
-    )
-    return trace
-
-
-def _record_direct_session_submit_kernel_trace_event(
-    conversation: dict[str, Any],
-    kernel_trace: dict[str, Any],
-    *,
-    turn_id: str,
-    agent_id: str,
-    source: str,
-    level: str = "info",
-    outcome: str = "observed",
-) -> None:
-    try:
-        record_runtime_scene_event(
-            "conversation",
-            "kernel",
-            (
-                "session.submit.kernel_trace_recorded"
-                if str(kernel_trace.get("status") or "").strip() == "recorded"
-                else "session.submit.kernel_trace_failed"
-            ),
-            message="Direct Agent session submit Kernel trace.",
-            level=level,
-            outcome=outcome,
-            fields={
-                "sessionId": str(conversation.get("id") or conversation.get("conversation_id") or "").strip(),
-                "turnId": str(turn_id or "").strip(),
-                "agentId": str(agent_id or "").strip(),
-                "source": str(source or "").strip(),
-                "kernelTraceOnly": bool(kernel_trace.get("traceOnly", True)),
-                "kernelTraceStatus": str(kernel_trace.get("status") or "").strip(),
-                "kernelEventId": str(kernel_trace.get("eventId") or "").strip(),
-                "kernelTaskId": str(kernel_trace.get("taskId") or "").strip(),
-                "kernelWorkRunId": str(kernel_trace.get("workRunId") or "").strip(),
-                "kernelOutcomeId": str(kernel_trace.get("outcomeId") or "").strip(),
-                "kernelOutcomeStatus": str(kernel_trace.get("outcomeStatus") or "").strip(),
-                "reused": bool(kernel_trace.get("reused")),
-                "errorType": str(kernel_trace.get("errorType") or "").strip(),
-                "reason": str(kernel_trace.get("reason") or "").strip(),
-            },
-            lifecycle=True,
-        )
-    except Exception:
-        return
 
 
 
@@ -2676,16 +2277,6 @@ def _repair_stale_running_conversation(conversation: dict[str, Any]) -> bool:
     return True
 
 
-def _active_chat_turn_work_run_id_for_session(session_id: str) -> str:
-    active = _WORK_RUN_STORE.load_active_snapshot("chat_turn")
-    if not isinstance(active, dict):
-        return ""
-    active_session_id = str(active.get("sessionId") or "").strip()
-    if active_session_id and active_session_id != session_id:
-        return ""
-    return str(active.get("runId") or "").strip()
-
-
 def _normalize_session_runtime_notice(value: Any, *, index: int = 0) -> dict[str, Any] | None:
     if not isinstance(value, dict):
         return None
@@ -2756,117 +2347,6 @@ def _not_called_cache_composition(*, recorded_at: str = "", reason: str = "") ->
     ) or {}
 
 
-def _persist_session_preflight_rejection(
-    conversation: dict[str, Any],
-    *,
-    message: str,
-    reason: str,
-    error_type: str,
-    http_status: int,
-    source: str,
-    requested_leases: list[str] | None = None,
-    lease_conflicts: list[dict[str, Any]] | None = None,
-    lang: str,
-) -> dict[str, Any]:
-    timestamp = _now_timestamp()
-    reason_text = str(reason or "").strip()
-    normalized_http_status = _coerce_nonnegative_int(http_status)
-    requested = normalize_leases(requested_leases or [])
-    conflicts = list(lease_conflicts or [])
-    conflict = conflicts[0] if conflicts and isinstance(conflicts[0], dict) else {}
-    conflict_run_id = str(conflict.get("runId") or "").strip()
-    conflict_leases = normalize_leases(conflict.get("leases") or [])
-    message_lines = [
-        text_for(
-            lang,
-            zh="本轮未调用模型：请求在进入 LLM 前被系统拒绝。",
-            en="The model was not called: this request was rejected before the LLM stage.",
-        ),
-        f"HTTP {normalized_http_status}" if normalized_http_status else "",
-        reason_text,
-    ]
-    if conflict_run_id:
-        message_lines.append(f"activeRunId: {conflict_run_id}")
-    if conflict_leases:
-        message_lines.append(f"leases: {', '.join(conflict_leases)}")
-    notice_message = "\n".join(line for line in message_lines if str(line or "").strip())
-    turn_error = {
-        "message": notice_message,
-        "error_type": str(error_type or "preflight_rejected").strip() or "preflight_rejected",
-        "reason_code": "preflight_rejected",
-        "reason_summary": text_for(
-            lang,
-            zh="请求在进入模型调用前被拒绝",
-            en="Request rejected before model call",
-        ),
-        "reason_detail": reason_text,
-        "http_status": normalized_http_status,
-        "provider": "",
-        "provider_host": "",
-        "provider_error_type": "",
-        "provider_error_message": "",
-        "model": "",
-        "recoverable": True,
-        "timestamp": timestamp,
-        "turn_id": "",
-    }
-    conversation["runtime_notices"] = _append_session_runtime_notice(
-        conversation.get("runtime_notices") or conversation.get("runtimeNotices") or [],
-        {
-            "kind": "turn_rejected",
-            "level": "warning" if normalized_http_status != 401 else "error",
-            "message": notice_message,
-            "timestamp": timestamp,
-            "source": source,
-            "previousStatus": "preflight_rejected",
-        },
-    )
-    conversation["last_cache_composition"] = _not_called_cache_composition(
-        recorded_at=timestamp,
-        reason="preflight_rejected",
-    )
-    conversation["last_turn_status"] = "blocked"
-    conversation["last_turn_error"] = turn_error
-    conversation["updated_at"] = timestamp
-    try:
-        record_runtime_scene_event(
-            "conversation",
-            "turn_rejected",
-            "conversation.turn.rejected_before_llm",
-            level="warning" if normalized_http_status != 401 else "error",
-            outcome="rejected",
-            message="Conversation turn rejected before any LLM call.",
-            fields={
-                "sessionId": str(conversation.get("conversation_id") or conversation.get("id") or "").strip(),
-                "source": source,
-                "httpStatus": normalized_http_status,
-                "errorType": str(error_type or "preflight_rejected").strip() or "preflight_rejected",
-                "requestedLeases": requested,
-                "conflictRunId": conflict_run_id,
-                "conflictLeases": conflict_leases,
-                "reason": reason_text,
-                "userMessageChars": len(str(message or "")),
-                "llmCalled": False,
-            },
-            child_log_path=f"conversations/{_safe_session_workspace_token(str(conversation.get('conversation_id') or conversation.get('id') or '').strip())}-turns.jsonl",
-            child_log_payload={
-                "event": "turn_rejected_before_llm",
-                "timestamp": timestamp,
-                "httpStatus": normalized_http_status,
-                "errorType": str(error_type or "preflight_rejected").strip() or "preflight_rejected",
-                "requestedLeases": requested,
-                "conflictRunId": conflict_run_id,
-                "conflictLeases": conflict_leases,
-                "reason": reason_text,
-                "llmCalled": False,
-            },
-            lifecycle=True,
-        )
-    except Exception:
-        pass
-    return turn_error
-
-
 def _visible_session_runtime_notices(
     notices: list[dict[str, Any]],
     messages: list[dict[str, Any]],
@@ -2882,48 +2362,6 @@ def _visible_session_runtime_notices(
             continue
         visible.append(notice)
     return visible[-1:]
-
-
-def _release_stale_chat_turn_work_run(*, session_id: str, finished_at: str, summary: str) -> None:
-    """Clear a persisted active chat_turn when its in-memory worker is gone."""
-
-    active = _WORK_RUN_STORE.load_active_snapshot("chat_turn")
-    if not isinstance(active, dict):
-        return
-    active_session_id = str(active.get("sessionId") or "").strip()
-    if active_session_id and active_session_id != session_id:
-        return
-    run_id = str(active.get("runId") or "").strip()
-    if not run_id:
-        return
-    status = str(active.get("status") or active.get("currentPhase") or "").strip().lower()
-    if status not in {"queued", "running", "stopping", "paused"}:
-        return
-    _persist_chat_turn_work_run(
-        session_id=session_id,
-        turn_id=run_id,
-        status="stopped",
-        summary=summary,
-        finished_at=finished_at,
-        updated_at=finished_at,
-    )
-    try:
-        record_runtime_scene_event(
-            "conversation",
-            "turn_recovery",
-            "conversation.turn_recovered",
-            level="warning",
-            outcome="stopped",
-            message=summary or "Stale chat turn recovered.",
-            fields={
-                "sessionId": session_id,
-                "turnId": run_id,
-                "previousStatus": status,
-            },
-            lifecycle=True,
-        )
-    except Exception:
-        return
 
 
 def _dedupe_turn_error_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -2944,26 +2382,6 @@ def _dedupe_turn_error_messages(messages: list[dict[str, Any]]) -> list[dict[str
                 seen_turn_errors.add(dedupe_key)
         deduped.append(message)
     return deduped
-
-
-def _assistant_timeline_target_indices(items: list[Any], *, source_start_index: int = 1) -> dict[str, int]:
-    targets: dict[str, int] = {}
-    first_assistant_by_turn: dict[str, int] = {}
-    for index, raw in enumerate(list(items or []), start=max(1, int(source_start_index or 1))):
-        if not isinstance(raw, dict):
-            continue
-        if str(raw.get("role") or "").strip().lower() != "assistant":
-            continue
-        turn_id = _message_turn_id(raw)
-        if not turn_id:
-            continue
-        first_assistant_by_turn.setdefault(turn_id, index)
-        content = _sanitize_message_content("assistant", raw.get("content") or "")
-        if content:
-            targets[turn_id] = index
-    for turn_id, index in first_assistant_by_turn.items():
-        targets.setdefault(turn_id, index)
-    return targets
 
 
 def _message_turn_id(message: Any) -> str:
@@ -3051,49 +2469,6 @@ def _normalize_string_list(value: Any) -> list[str]:
         if text and text not in result:
             result.append(text)
     return result
-
-
-def _complete_turn_error_visible_content(content: Any, metadata: dict[str, Any]) -> str:
-    visible = str(content or "").strip()
-    reason_summary = str(metadata.get("reasonSummary") or metadata.get("reason_summary") or "").strip()
-    reason_detail = str(metadata.get("reasonDetail") or metadata.get("reason_detail") or "").strip()
-    http_status = _coerce_nonnegative_int(metadata.get("httpStatus") or metadata.get("http_status"))
-    provider_error_type = str(metadata.get("providerErrorType") or metadata.get("provider_error_type") or "").strip()
-    provider_error_message = str(metadata.get("providerErrorMessage") or metadata.get("provider_error_message") or "").strip()
-    if reason_summary:
-        visible = visible.replace("原因：provider 返回了错误。", f"原因：{reason_summary}。")
-        visible = visible.replace("Reason: the provider returned an error.", f"Reason: {reason_summary}.")
-    if reason_summary and reason_summary not in visible:
-        visible = f"{visible} 原因：{reason_summary}。".strip()
-    if _provider_error_detail_safe_for_chat(reason_detail) and reason_detail not in visible:
-        visible = f"{visible} 具体报错：{reason_detail}。".strip()
-    diagnostics: list[str] = []
-    if http_status > 0:
-        diagnostics.append(f"HTTP {http_status}")
-    if provider_error_type:
-        diagnostics.append(provider_error_type)
-    if (
-        _provider_error_detail_safe_for_chat(provider_error_message)
-        and provider_error_message not in visible
-    ):
-        diagnostics.append(provider_error_message)
-    if diagnostics:
-        diagnostic_line = " / ".join(diagnostics)
-        if diagnostic_line not in visible:
-            visible = f"{visible} 上游诊断：{diagnostic_line}。".strip()
-    return visible
-
-
-def _provider_error_detail_safe_for_chat(reason_detail: Any) -> bool:
-    detail = str(reason_detail or "").strip()
-    if not detail:
-        return False
-    lower = detail.lower()
-    if any(marker in lower for marker in ("reasoning_content", "authorization", "bearer ", "api_key", "apikey", "token", "secret")):
-        return False
-    if "sk-" in lower:
-        return False
-    return len(detail) <= 180
 
 
 def _history_message_turn_id(item: Any) -> str:
@@ -3415,116 +2790,6 @@ def _sanitize_message_content(role: str, content: Any) -> str:
 
 def _normalize_message_attachments(value: Any) -> list[dict[str, Any]]:
     return normalize_chat_attachments(value)
-
-
-def _normalize_session_references(value: Any) -> list[dict[str, Any]]:
-    references: list[dict[str, Any]] = []
-    for raw in list(value or []):
-        if not isinstance(raw, dict):
-            continue
-        session_id = str(raw.get("sessionId") or raw.get("session_id") or "").strip()
-        if not session_id:
-            continue
-        reference_id = str(raw.get("referenceId") or raw.get("reference_id") or f"session:{session_id}").strip()
-        item = {
-            "referenceId": reference_id,
-            "kind": "session",
-            "sessionId": session_id,
-            "title": trim_lines(raw.get("title") or session_id, max_lines=1),
-            "agentId": str(raw.get("agentId") or raw.get("agent_id") or "").strip(),
-            "agentCode": str(raw.get("agentCode") or raw.get("agent_code") or "").strip(),
-            "agentDisplayName": trim_lines(raw.get("agentDisplayName") or raw.get("agent_display_name") or "", max_lines=1),
-            "summary": trim_lines(raw.get("summary") or "", max_lines=2),
-            "createdAt": str(raw.get("createdAt") or raw.get("created_at") or "").strip(),
-        }
-        if not any(existing.get("referenceId") == item["referenceId"] for existing in references):
-            references.append(item)
-    return references[:6]
-
-
-def _resolve_session_references(
-    current_session_id: str,
-    references: Any,
-    *,
-    conversations: list[dict[str, Any]],
-    lang: str,
-) -> list[dict[str, Any]]:
-    normalized = _normalize_session_references(references)
-    if not normalized:
-        return []
-    by_id = {
-        str(item.get("id") or item.get("conversation_id") or "").strip(): item
-        for item in list(conversations or [])
-        if isinstance(item, dict) and str(item.get("id") or item.get("conversation_id") or "").strip()
-    }
-    resolved: list[dict[str, Any]] = []
-    for reference in normalized:
-        target_id = str(reference.get("sessionId") or "").strip()
-        target = by_id.get(target_id)
-        if target is None:
-            raise SessionValidationError(
-                text_for(
-                    lang,
-                    zh=f"会话引用无效：找不到目标会话 {target_id}。",
-                    en=f"Invalid session reference: target session {target_id} was not found.",
-                )
-            )
-        _ensure_conversation_agent_metadata(target)
-        agent_id = str(target.get("agent_id") or target.get("agentId") or reference.get("agentId") or "").strip()
-        agent = get_agent(agent_id) if agent_id else None
-        if agent_id and agent is None:
-            raise SessionValidationError(
-                text_for(
-                    lang,
-                    zh=f"会话引用无效：目标会话 {target_id} 绑定的 Agent {agent_id} 不存在。",
-                    en=f"Invalid session reference: target session {target_id} references missing Agent {agent_id}.",
-                )
-            )
-        if isinstance(agent, dict) and str(agent.get("status") or "").strip() == "archived":
-            raise SessionValidationError(
-                text_for(
-                    lang,
-                    zh=f"会话引用无效：目标会话 {target_id} 的 Agent 已归档。",
-                    en=f"Invalid session reference: target session {target_id} belongs to an archived Agent.",
-                )
-            )
-        title = trim_lines(reference.get("title") or target.get("title") or target_id, max_lines=1)
-        summary = trim_lines(
-            reference.get("summary")
-            or _latest_message_summary(
-                _normalize_messages(
-                    target_id,
-                    _ledger_visible_messages_for_session(target_id),
-                )
-            ),
-            max_lines=2,
-        )
-        resolved.append(
-            {
-                **reference,
-                "referenceId": str(reference.get("referenceId") or f"session:{target_id}").strip(),
-                "sessionId": target_id,
-                "title": title,
-                "agentId": agent_id,
-                "agentCode": str(target.get("agent_code") or target.get("agentCode") or reference.get("agentCode") or "").strip(),
-                "agentDisplayName": trim_lines(
-                    target.get("agent_display_name")
-                    or target.get("agentDisplayName")
-                    or (agent or {}).get("name")
-                    or reference.get("agentDisplayName")
-                    or "",
-                    max_lines=1,
-                ),
-                "summary": summary,
-                "currentSession": target_id == str(current_session_id or "").strip(),
-                "permissions": {
-                    "query": True,
-                    "sendMessage": False,
-                    "sendRequiresExplicitUserIntent": True,
-                },
-            }
-        )
-    return resolved
 
 
 def _session_reference_prompt_block(references: list[dict[str, Any]]) -> str:
@@ -3864,29 +3129,6 @@ def _normalize_llm_payload_trace_map(value: Any, allowed_keys: set[str]) -> dict
             if text:
                 safe_item[key] = text
     return safe_item
-
-
-def _active_chat_turn_work_run_for_session(session_id: str) -> dict[str, Any] | None:
-    normalized_session_id = str(session_id or "").strip()
-    if not normalized_session_id:
-        return None
-    with _RUNNING_SESSIONS_LOCK:
-        active_turn_id = str(_SESSION_ACTIVE_TURN_IDS.get(normalized_session_id) or "").strip()
-    candidates: list[dict[str, Any]] = []
-    if active_turn_id:
-        snapshot = _WORK_RUN_STORE.load_snapshot("chat_turn", active_turn_id)
-        if isinstance(snapshot, dict):
-            candidates.append(snapshot)
-    active = _WORK_RUN_STORE.load_active_snapshot("chat_turn")
-    if isinstance(active, dict):
-        candidates.append(active)
-    for snapshot in candidates:
-        if str(snapshot.get("sessionId") or "").strip() != normalized_session_id:
-            continue
-        status = str(snapshot.get("status") or snapshot.get("currentPhase") or "").strip().lower()
-        if status in {"queued", "running", "stopping", "paused"}:
-            return dict(snapshot)
-    return None
 
 
 def _ordered_model_input_context_segments(context_composition: dict[str, Any] | None) -> list[dict[str, Any]]:
@@ -5160,70 +4402,12 @@ def has_running_sessions() -> bool:
         return bool(_RUNNING_SESSION_IDS)
 
 
-def list_active_session_work_runs() -> list[dict[str, Any]]:
-    """Return active web chat turns as lightweight WorkRun lease snapshots."""
-
-    with _RUNNING_SESSIONS_LOCK:
-        session_ids = sorted(_RUNNING_SESSION_IDS)
-        active_turn_ids = dict(_SESSION_ACTIVE_TURN_IDS)
-        active_leases = {key: list(value) for key, value in _SESSION_ACTIVE_TURN_LEASES.items()}
-    active_statuses = _active_session_work_run_statuses(session_ids)
-    return [
-        {
-            "runId": active_turn_ids.get(session_id) or f"chat-turn-{session_id}",
-            "runKind": "chat_turn",
-            "sessionId": session_id,
-            "status": active_statuses.get(session_id) or "running",
-            "currentPhase": active_statuses.get(session_id) or "running",
-            "leases": active_leases.get(session_id) or ["readonly_chat"],
-        }
-        for session_id in session_ids
-    ]
-
-
-def _active_session_work_run_statuses(session_ids: list[str]) -> dict[str, str]:
-    if not session_ids:
-        return {}
-    session_id_set = set(session_ids)
-    statuses: dict[str, str] = {}
-    try:
-        with _CHAT_STATE_LOCK:
-            payload = load_chat_state(PROJECT_ROOT)
-            conversations = payload.get("conversations") if isinstance(payload, dict) else []
-            for conversation in conversations if isinstance(conversations, list) else []:
-                if not isinstance(conversation, dict):
-                    continue
-                session_id = str(conversation.get("conversation_id") or "").strip()
-                if session_id not in session_id_set:
-                    continue
-                status = str(
-                    conversation.get("last_turn_status") or conversation.get("lastTurnStatus") or ""
-                ).strip().lower()
-                if status in {"queued", "running", "stopping"}:
-                    statuses[session_id] = status
-    except Exception:
-        return {}
-    return statuses
-
-
 def active_session_has_write_leases() -> bool:
     for run in list_active_session_work_runs():
         leases = set(leases_for_snapshot(run))
         if leases.intersection({WORKTREE_WRITE_LEASE, MEMORY_WRITE_LEASE}):
             return True
     return False
-
-
-def load_chat_turn_work_run_summary() -> dict[str, Any]:
-    active_items = list_active_session_work_runs()
-    active = _WORK_RUN_STORE.load_active_snapshot("chat_turn")
-    if not active and active_items:
-        active = active_items[0]
-    return {
-        "active": active,
-        "activeItems": active_items,
-        "latest": _WORK_RUN_STORE.load_latest_snapshot("chat_turn"),
-    }
 
 
 def _check_chat_turn_lease_decision(leases: list[str]):
@@ -5382,52 +4566,6 @@ def _image_input_unsupported_message(lang: str, *, model_name: str = "") -> str:
     )
 
 
-def _finish_image_attachment_preflight_turn(
-    session_id: str,
-    turn_id: str,
-    result: dict[str, Any],
-    *,
-    decision: str,
-    reason: str,
-    agent_id: str,
-    attachments: list[dict[str, Any]],
-    leases: list[str] | None,
-    raw_user_message: str,
-    outcome: str = "completed",
-    level: str = "info",
-    fields: dict[str, Any] | None = None,
-) -> None:
-    _record_image_attachment_capability_event(
-        session_id,
-        turn_id=turn_id,
-        decision=decision,
-        reason=reason,
-        outcome=outcome,
-        level=level,
-        agent_id=agent_id,
-        attachments=attachments,
-        fields={
-            **(fields or {}),
-            "resultStatus": str(result.get("status") or "").strip(),
-            "assistantTextLength": len(str(result.get("summary") or result.get("raw_output") or "")),
-        },
-    )
-    _persist_session_turn_result(session_id, result, turn_id=turn_id)
-    _persist_chat_turn_work_run(
-        session_id=session_id,
-        turn_id=turn_id,
-        status=_chat_turn_result_status(str(result.get("status") or "completed"), result, stop_requested=False),
-        agent_id=agent_id,
-        leases=leases,
-        user_message=raw_user_message,
-        summary=str(result.get("summary") or result.get("raw_output") or "").strip(),
-        finished_at=_now_timestamp(),
-    )
-    _set_session_running(session_id, False, turn_id=turn_id)
-    _clear_session_turn_control(session_id, turn_id=turn_id)
-    _publish_session_detail_snapshot(session_id)
-
-
 def _record_image_attachment_capability_event(
     session_id: str,
     *,
@@ -5478,79 +4616,6 @@ def _record_image_attachment_capability_event(
         )
 
 
-def _persist_chat_turn_work_run(
-    *,
-    session_id: str,
-    turn_id: str,
-    status: str,
-    agent_id: str = "",
-    leases: list[str] | None = None,
-    user_message: str = "",
-    summary: str = "",
-    error_type: str = "",
-    error: str = "",
-    started_at: str = "",
-    updated_at: str = "",
-    finished_at: str = "",
-    last_tool_error: dict[str, Any] | None = None,
-) -> None:
-    normalized_turn_id = str(turn_id or "").strip()
-    if not normalized_turn_id:
-        return
-    now = _now_timestamp()
-    previous = _WORK_RUN_STORE.load_snapshot("chat_turn", normalized_turn_id) or {}
-    started = str(started_at or previous.get("startedAt") or now).strip()
-    finished = str(finished_at or previous.get("finishedAt") or "").strip()
-    normalized_status = str(status or previous.get("status") or "running").strip().lower() or "running"
-    if normalized_status in {"running", "stopping"}:
-        active_run_id = normalized_turn_id
-    elif normalized_status == "queued":
-        active_run_id = _replacement_active_chat_turn_id(exclude_turn_id=normalized_turn_id) or normalized_turn_id
-    else:
-        active_run_id = _replacement_active_chat_turn_id(exclude_turn_id=normalized_turn_id)
-    payload = {
-        **previous,
-        "runId": normalized_turn_id,
-        "runKind": "chat_turn",
-        "track": "dialogue",
-        "sessionId": str(session_id or previous.get("sessionId") or "").strip(),
-        "agentId": str(agent_id or previous.get("agentId") or "").strip(),
-        "status": normalized_status,
-        "currentPhase": normalized_status,
-        "leases": list(leases or previous.get("leases") or ["readonly_chat"]),
-        "userMessage": str(user_message or previous.get("userMessage") or "").strip(),
-        "summary": str(summary or previous.get("summary") or "").strip(),
-        "errorType": str(error_type or previous.get("errorType") or "").strip(),
-        "error": str(error or previous.get("error") or "").strip(),
-        "startedAt": started,
-        "updatedAt": str(updated_at or now).strip(),
-        "finishedAt": finished
-        if normalized_status
-        in {
-            "completed",
-            "failed",
-            "failed_provider",
-            "failed_runtime",
-            "stopped",
-            "cancelled",
-            "paused_limit",
-            "needs_continue",
-            "stopped_by_user",
-            "superseded",
-        }
-        else "",
-    }
-    if isinstance(last_tool_error, dict) and last_tool_error:
-        payload["lastToolError"] = {
-            "toolName": trim_lines(str(last_tool_error.get("toolName") or ""), max_lines=1),
-            "summary": trim_lines(str(last_tool_error.get("summary") or ""), max_lines=2),
-            "errorPreview": trim_lines(str(last_tool_error.get("errorPreview") or ""), max_lines=2),
-            "relatedEventCode": trim_lines(str(last_tool_error.get("relatedEventCode") or ""), max_lines=1),
-            "updatedAt": str(last_tool_error.get("updatedAt") or now).strip(),
-        }
-    _WORK_RUN_STORE.persist_snapshot("chat_turn", payload, active_run_id=active_run_id)
-
-
 def _replacement_active_chat_turn_id(*, exclude_turn_id: str = "") -> str:
     excluded = str(exclude_turn_id or "").strip()
     with _RUNNING_SESSIONS_LOCK:
@@ -5588,71 +4653,6 @@ def _source_collection_stage_task_turn_metadata(messages: list[dict[str, Any]], 
             "turnId": message_turn_id,
         }
     return {}
-
-
-def _reconcile_source_collection_stage_task_after_turn(
-    metadata: dict[str, str],
-    *,
-    session_id: str,
-    turn_id: str,
-    final_status: str,
-) -> None:
-    if not isinstance(metadata, dict) or not metadata:
-        return
-    team_id = str(metadata.get("teamId") or "").strip()
-    task_id = str(metadata.get("taskId") or "").strip()
-    if not team_id or not task_id:
-        return
-    try:
-        from core.web.services import team_workflow_orchestration_service
-
-        result = team_workflow_orchestration_service.reconcile_source_collection_stage_session_task_after_turn(
-            team_id,
-            task_id,
-            run_id=str(metadata.get("runId") or "").strip(),
-            session_id=session_id,
-            turn_id=turn_id,
-            reason=f"session_turn_{final_status or 'completed'}",
-        )
-    except Exception as exc:  # pragma: no cover - defensive, session persistence must not fail here
-        _record_session_turn_lifecycle_event(
-            session_id,
-            "source_collection_stage_task_reconcile_failed",
-            turn_id=turn_id,
-            level="warning",
-            outcome="failed",
-            fields={
-                "teamId": team_id,
-                "taskId": task_id,
-                "runId": str(metadata.get("runId") or "").strip(),
-                "finalStatus": str(final_status or "").strip(),
-                "errorType": type(exc).__name__,
-                "error": trim_lines(str(exc), max_lines=2),
-            },
-        )
-        return
-    if not isinstance(result, dict) or not bool(result.get("changed")):
-        return
-    _record_session_turn_lifecycle_event(
-        session_id,
-        "source_collection_stage_task_reconciled",
-        turn_id=turn_id,
-        outcome=str(result.get("taskStatus") or "reconciled").strip() or "reconciled",
-        fields={
-            "teamId": team_id,
-            "runId": str(result.get("runId") or metadata.get("runId") or "").strip(),
-            "taskId": task_id,
-            "stageId": str(metadata.get("stageId") or "").strip(),
-            "agentId": str(metadata.get("agentId") or "").strip(),
-            "agentRole": str(metadata.get("agentRole") or "").strip(),
-            "finalStatus": str(final_status or "").strip(),
-            "previousTaskStatus": str(result.get("previousTaskStatus") or "").strip(),
-            "taskStatus": str(result.get("taskStatus") or "").strip(),
-            "completionGatePassed": bool(result.get("completionGatePassed")),
-            "taskChecklistComplete": bool(result.get("taskChecklistComplete")),
-            "artifactComplete": bool(result.get("artifactComplete")),
-        },
-    )
 
 
 def _set_session_running(
@@ -6358,48 +5358,6 @@ def _extract_missing_agent_llm_model_id(message: Any) -> str:
     if marker_index < 0:
         return ""
     return value[marker_index + len(marker):].strip().split()[0].strip("`'\".,;")
-
-
-def _make_local_runtime_turn_error(
-    raw_error: Any,
-    *,
-    lang: str,
-    error_type: str,
-    reason_code: str,
-    reason_summary: str,
-    reason_detail: str = "",
-    turn_id: str = "",
-    model: str = "",
-    extra: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    normalized_reason_summary = trim_lines(reason_summary, max_lines=2)
-    normalized_reason_detail = trim_lines(reason_detail or raw_error, max_lines=4)
-    message = text_for(
-        lang,
-        zh="运行提示：本轮没有进入模型调用，因为本地 Agent 模型槽位无法解析。",
-        en="Runtime notice: this turn did not reach the model call because the local Agent model slot could not be resolved.",
-    )
-    if normalized_reason_summary:
-        message = f"{message} 原因：{normalized_reason_summary}。" if lang == "zh" else f"{message} Reason: {normalized_reason_summary}."
-    payload: dict[str, Any] = {
-        "message": message,
-        "error_type": str(error_type or "runtime_error").strip() or "runtime_error",
-        "reason_code": str(reason_code or "").strip(),
-        "reason_summary": normalized_reason_summary,
-        "reason_detail": normalized_reason_detail,
-        "http_status": 0,
-        "provider": "",
-        "provider_host": "",
-        "provider_error_type": "",
-        "provider_error_message": "",
-        "model": str(model or "").strip(),
-        "recoverable": False,
-        "timestamp": _now_timestamp(),
-        "turn_id": str(turn_id or "").strip(),
-    }
-    if extra:
-        payload["extra"] = {str(key): value for key, value in extra.items() if str(key or "").strip()}
-    return payload
 
 
 
@@ -7395,39 +6353,6 @@ def _record_session_turn_visible_message(
     )
 
 
-def _record_session_turn_tool_calls(
-    session_id: str,
-    turn_id: str,
-    tool_calls: list[dict[str, Any]],
-) -> None:
-    for index, tool_call in enumerate(tool_calls or []):
-        if not isinstance(tool_call, dict):
-            continue
-        _record_session_turn_subpackage_event(
-            session_id,
-            turn_id,
-            "tool_calls.jsonl",
-            {
-                "index": index,
-                "toolCallId": str(
-                    tool_call.get("id")
-                    or tool_call.get("toolCallId")
-                    or tool_call.get("tool_call_id")
-                    or ""
-                ).strip(),
-                "name": str(tool_call.get("name") or "").strip(),
-                "status": str(tool_call.get("status") or "").strip(),
-                "summary": trim_lines(tool_call.get("summary") or "", max_lines=3),
-                "owner": str(tool_call.get("owner") or tool_call.get("agent") or "main").strip(),
-                "trace_path": str(tool_call.get("tracePath") or tool_call.get("trace_path") or "").strip(),
-            },
-            phase="turn_tool_call",
-            event_code="conversation.turn.tool_call",
-            outcome=str(tool_call.get("status") or "observed").strip() or "observed",
-            message=f"Conversation turn tool call: {tool_call.get('name') or 'tool'}.",
-        )
-
-
 def _record_session_turn_result_log(
     session_id: str,
     turn_id: str,
@@ -7449,147 +6374,6 @@ def _record_session_turn_result_log(
         event_code="conversation.turn.result",
         outcome=status or "observed",
         message="Conversation turn result persisted.",
-    )
-
-
-def _record_session_turn_error(
-    session_id: str,
-    turn_error: dict[str, Any],
-    *,
-    raw_error: str = "",
-    status: str = "failed",
-    active_task: dict[str, Any] | None = None,
-) -> None:
-    timestamp = str(turn_error.get("timestamp") or _now_timestamp()).strip()
-    error_type = str(turn_error.get("error_type") or turn_error.get("errorType") or "runtime_error").strip()
-    message = {
-        "role": "system",
-        "content": str(turn_error.get("message") or "").strip(),
-        "timestamp": timestamp,
-        "error_type": error_type,
-        "turn_id": str(turn_error.get("turn_id") or turn_error.get("turnId") or "").strip(),
-    }
-    _append_session_workspace_log(
-        session_id,
-        message,
-        event="turn_error",
-        status=status,
-        active_task=active_task,
-    )
-    try:
-        record_runtime_scene_event(
-            "conversation",
-            "turn_error",
-            "conversation.turn_error",
-            level="error",
-            outcome=status,
-            message=str(turn_error.get("message") or "Conversation turn failed."),
-            fields={
-                "sessionId": str(session_id or "").strip(),
-                "turnId": str(turn_error.get("turn_id") or turn_error.get("turnId") or "").strip(),
-                "errorType": error_type,
-                "reasonCode": str(turn_error.get("reason_code") or turn_error.get("reasonCode") or "").strip(),
-                "reasonSummary": str(turn_error.get("reason_summary") or turn_error.get("reasonSummary") or "").strip(),
-                "reasonDetail": str(turn_error.get("reason_detail") or turn_error.get("reasonDetail") or "").strip(),
-                "httpStatus": _coerce_nonnegative_int(turn_error.get("http_status") or turn_error.get("httpStatus")) or None,
-                "provider": str(turn_error.get("provider") or "").strip(),
-                "providerHost": str(turn_error.get("provider_host") or turn_error.get("providerHost") or "").strip(),
-                "providerErrorType": str(turn_error.get("provider_error_type") or turn_error.get("providerErrorType") or "").strip(),
-                "providerErrorMessage": str(turn_error.get("provider_error_message") or turn_error.get("providerErrorMessage") or "").strip(),
-                "model": str(turn_error.get("model") or "").strip(),
-                "chainStage": str(turn_error.get("chain_stage") or turn_error.get("chainStage") or "").strip(),
-                "eventCode": str(turn_error.get("event_code") or turn_error.get("eventCode") or "").strip(),
-                "traceId": str(turn_error.get("trace_id") or turn_error.get("traceId") or "").strip(),
-                "protocol": str(turn_error.get("protocol") or "").strip(),
-                "recoverable": bool(turn_error.get("recoverable", True)),
-                "rawErrorPreview": trim_lines(raw_error, max_lines=2),
-            },
-            child_log_path=f"conversations/{_safe_session_workspace_token(session_id)}-errors.jsonl",
-            child_log_payload={
-                "session_id": str(session_id or "").strip(),
-                "turn_id": str(turn_error.get("turn_id") or turn_error.get("turnId") or "").strip(),
-                "status": status,
-                "error_type": error_type,
-                "message": str(turn_error.get("message") or "").strip(),
-                "reason_code": str(turn_error.get("reason_code") or turn_error.get("reasonCode") or "").strip(),
-                "reason_summary": str(turn_error.get("reason_summary") or turn_error.get("reasonSummary") or "").strip(),
-                "reason_detail": str(turn_error.get("reason_detail") or turn_error.get("reasonDetail") or "").strip(),
-                "http_status": _coerce_nonnegative_int(turn_error.get("http_status") or turn_error.get("httpStatus")) or 0,
-                "provider": str(turn_error.get("provider") or "").strip(),
-                "provider_host": str(turn_error.get("provider_host") or turn_error.get("providerHost") or "").strip(),
-                "provider_error_type": str(turn_error.get("provider_error_type") or turn_error.get("providerErrorType") or "").strip(),
-                "provider_error_message": str(turn_error.get("provider_error_message") or turn_error.get("providerErrorMessage") or "").strip(),
-                "model": str(turn_error.get("model") or "").strip(),
-                "chain_stage": str(turn_error.get("chain_stage") or turn_error.get("chainStage") or "").strip(),
-                "event_code": str(turn_error.get("event_code") or turn_error.get("eventCode") or "").strip(),
-                "trace_id": str(turn_error.get("trace_id") or turn_error.get("traceId") or "").strip(),
-                "protocol": str(turn_error.get("protocol") or "").strip(),
-                "recoverable": bool(turn_error.get("recoverable", True)),
-            },
-        )
-    except Exception as exc:
-        _debug_logger.warning(
-            f"runtime scene turn error log skipped: {type(exc).__name__}: {exc}",
-            tag="LOGS",
-        )
-
-
-def _record_session_turn_circuit_breaker_event(
-    session_id: str,
-    result: Any,
-    *,
-    turn_id: str = "",
-    turn_index: int,
-) -> None:
-    if not isinstance(result, dict):
-        return
-    llm_failure = result.get("llm_failure") if isinstance(result.get("llm_failure"), dict) else {}
-    raw_error = _provider_failure_raw_error(result)
-    error_type = _failure_error_type(raw_error)
-    try:
-        record_runtime_scene_event(
-            "conversation",
-            "turn_circuit_breaker",
-            "conversation.turn_circuit_breaker",
-            level="error",
-            outcome="failed",
-            message="Chat turn stopped after provider failure budget was exhausted.",
-            fields={
-                "sessionId": str(session_id or "").strip(),
-                "errorType": error_type,
-                "llmFailureCategory": str(llm_failure.get("category") or "").strip(),
-                "retryable": bool(llm_failure.get("retryable", True)),
-                "attempts": _coerce_nonnegative_int(llm_failure.get("attempts") or 0),
-                "maxAttempts": _coerce_nonnegative_int(llm_failure.get("max_attempts") or 0),
-                "consecutiveFailures": _coerce_nonnegative_int(llm_failure.get("consecutive_failures") or 0),
-                "continuationTurn": max(0, int(turn_index or 0)),
-                "stopReason": trim_lines(llm_failure.get("stop_reason") or "", max_lines=2),
-                "rawErrorPreview": trim_lines(raw_error, max_lines=2),
-            },
-            child_log_path=f"conversations/{_safe_session_workspace_token(session_id)}-circuit-breaker.jsonl",
-            child_log_payload={
-                "session_id": str(session_id or "").strip(),
-                "error_type": error_type,
-                "llm_failure": dict(llm_failure),
-                "continuation_turn": max(0, int(turn_index or 0)),
-                "raw_error": trim_lines(raw_error, max_lines=6),
-            },
-            lifecycle=True,
-        )
-    except Exception as exc:
-        _debug_logger.warning(
-            f"runtime scene circuit breaker log skipped: {type(exc).__name__}: {exc}",
-            tag="LOGS",
-        )
-    _record_provider_failure_signal(
-        session_id=session_id,
-        turn_id=str(turn_id or "").strip(),
-        error_type=error_type,
-        raw_error=raw_error,
-        related_event_code="conversation.turn_circuit_breaker",
-        metadata={
-            "continuationTurn": max(0, int(turn_index or 0)),
-        },
     )
 
 
@@ -7674,110 +6458,8 @@ def _record_session_message_edit_resubmit_rejected_event(
         )
 
 
-def _append_session_workspace_log(
-    session_id: str,
-    message: dict[str, Any],
-    *,
-    event: str,
-    status: str,
-    active_task: dict[str, Any] | None = None,
-) -> None:
-    try:
-        workspace = _ensure_session_workspace(session_id)
-        logs_dir = workspace / "logs"
-        logs_dir.mkdir(parents=True, exist_ok=True)
-        role = str(message.get("role") or "").strip().lower() or "message"
-        record = {
-            "timestamp": str(message.get("timestamp") or _now_timestamp()).strip(),
-            "session_id": str(session_id or "").strip(),
-            "event": str(event or "message").strip() or "message",
-            "status": str(status or "").strip(),
-            "role": role,
-            "content": _sanitize_message_content(role, message.get("content") or ""),
-            "thought": _sanitize_thought_text(message.get("thought") or ""),
-            "mental_snapshot": _normalize_mental_snapshot(message.get("mental_snapshot") or message.get("mentalSnapshot")),
-            "attachments": _safe_attachment_log_summary(
-                message.get("attachments") or message.get("imageAttachments") or []
-            ),
-            "tool_calls": _normalize_persisted_tool_calls(
-                message.get("tool_calls") or message.get("toolCalls") or []
-            ),
-            "feedback_events": _normalize_persisted_feedback_events(
-                message.get("feedback_events") or message.get("feedbackEvents") or []
-            ),
-            "active_task": active_task if isinstance(active_task, dict) else {},
-        }
-        with (logs_dir / "conversation.jsonl").open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(record, ensure_ascii=False, separators=(",", ":")) + "\n")
-        content = str(record["content"] or "").strip()
-        thought = str(record["thought"] or "").strip()
-        tool_names = ", ".join(
-            str(item.get("name") or "").strip()
-            for item in list(record["tool_calls"] or [])
-            if isinstance(item, dict) and str(item.get("name") or "").strip()
-        )
-        md_lines = [
-            f"## {record['timestamp']} {role}",
-            "",
-            f"- event: {record['event']}",
-            f"- status: {record['status'] or 'observed'}",
-        ]
-        if tool_names:
-            md_lines.append(f"- tools: {tool_names}")
-        if record["feedback_events"]:
-            md_lines.append(f"- feedback events: {len(record['feedback_events'])}")
-        md_lines.extend(["", content or "(empty)", ""])
-        if thought:
-            md_lines.extend(["```thought", thought, "```", ""])
-        with (logs_dir / "conversation.md").open("a", encoding="utf-8") as handle:
-            handle.write("\n".join(md_lines) + "\n")
-    except Exception as exc:
-        _debug_logger.warning(
-            f"session workspace log skipped: {type(exc).__name__}: {exc}",
-            tag="CHAT",
-        )
-
-
 def _now_timestamp() -> str:
     return datetime.now().isoformat(timespec="seconds")
-
-
-def _normalize_tool_call_status(value: Any, *, default: str = "done") -> str:
-    status = str(value or "").strip().lower()
-    if status in {
-        "running",
-        "pending",
-        "queued",
-        "thinking",
-        "tooling",
-        "answering",
-        "done",
-        "success",
-        "succeeded",
-        "completed",
-        "finished",
-        "ready",
-        "degraded",
-        "recovered",
-        "observed",
-        "failed",
-        "error",
-        "blocked",
-        "cancelled",
-        "no_result",
-        "submitted",
-        "in_progress",
-        "timeout",
-        "timed_out",
-    }:
-        if status in {"success", "succeeded", "completed", "finished", "ready", "observed"}:
-            return "done"
-        if status == "error":
-            return "failed"
-        if status in {"timeout", "timed_out"}:
-            return "timeout"
-        return status
-    return default
 
 
 def _compact_tool_loop_failure_hint(value: Any) -> str:
@@ -7933,300 +6615,6 @@ def _coerce_tool_number(value: Any) -> int | float | None:
     return None
 
 
-def _looks_like_tool_call_failure_summary(value: Any) -> bool:
-    text = str(value or "").strip()
-    if not text:
-        return False
-    return bool(
-        re.search(
-            r"(?i)(^\s*\[(?:超时|timeout|failed|error)\]|执行超时|timed\s+out|timeout(?:\s+expired)?|tool\s+failed|工具执行失败|调用失败|traceback|exception\b)",
-            text,
-        )
-    )
-
-
-def _tool_call_name(raw: Any) -> str:
-    if isinstance(raw, dict):
-        function_block = raw.get("function") or {}
-        if not isinstance(function_block, dict):
-            function_block = {}
-        return str(
-            raw.get("name")
-            or raw.get("tool_name")
-            or function_block.get("name")
-            or ""
-        ).strip()
-    return str(raw or "").strip()
-
-
-def _normalize_persisted_tool_calls(value: Any) -> list[dict[str, Any]]:
-    tool_calls: list[dict[str, Any]] = []
-    for item in list(value or []):
-        name = _tool_call_name(item)
-        if not name:
-            continue
-        status = _normalize_tool_call_status(
-            item.get("status") if isinstance(item, dict) else "",
-            default="done",
-        )
-        entry: dict[str, Any] = {
-            "name": name,
-            "status": status,
-        }
-        if isinstance(item, dict):
-            call_id = str(
-                item.get("callId")
-                or item.get("toolCallId")
-                or item.get("tool_call_id")
-                or item.get("id")
-                or ""
-            ).strip()
-            if call_id:
-                entry["callId"] = call_id
-            summary = trim_lines(
-                item.get("summary")
-                or item.get("result_preview")
-                or item.get("resultPreview")
-                or item.get("error")
-                or "",
-                max_lines=2,
-            )
-            if summary:
-                entry["summary"] = summary
-            failure_hint = summary or item.get("error") or ""
-            if _looks_like_tool_call_failure_summary(failure_hint):
-                entry["status"] = "timeout" if re.search(r"(?i)(超时|timed\s+out|timeout)", str(failure_hint or "")) else "failed"
-            arguments = _safe_tool_argument_details(
-                item.get("arguments") if isinstance(item.get("arguments"), dict) else item.get("args")
-            )
-            if arguments:
-                entry["arguments"] = arguments
-            result_preview = _trim_tool_detail_text(
-                item.get("resultPreview") or item.get("result_preview") or item.get("result"),
-                max_chars=1200,
-                max_lines=10,
-            )
-            if result_preview:
-                entry["resultPreview"] = result_preview
-            terminal_facts = _sandbox_terminal_result_facts(
-                item.get("result") or item.get("resultPreview") or item.get("result_preview")
-            ) or _sandbox_terminal_result_facts(item)
-            if terminal_facts:
-                entry.update(terminal_facts)
-                if terminal_facts.get("formattedOutput"):
-                    entry["resultPreview"] = str(terminal_facts["formattedOutput"])
-            result_type = str(item.get("resultType") or item.get("result_type") or "").strip()
-            if result_type:
-                entry["resultType"] = result_type
-            result_length = _coerce_tool_number(item.get("resultLength") or item.get("result_length"))
-            if result_length is not None:
-                entry["resultLength"] = result_length
-            error = _trim_tool_detail_text(item.get("error"), max_chars=1200, max_lines=10)
-            if error:
-                entry["error"] = error
-            duration_ms = _coerce_tool_number(item.get("durationMs") or item.get("duration_ms"))
-            if duration_ms is not None:
-                entry["durationMs"] = duration_ms
-            duration_seconds = _coerce_tool_number(item.get("durationSeconds") or item.get("duration_seconds") or item.get("elapsedSeconds"))
-            if duration_seconds is not None:
-                entry["durationSeconds"] = duration_seconds
-            timeout_seconds = _coerce_tool_number(item.get("timeoutSeconds") or item.get("timeout_seconds"))
-            if timeout_seconds is not None:
-                entry["timeoutSeconds"] = timeout_seconds
-            trace_path = str(item.get("tracePath") or item.get("trace_path") or "").strip()
-            if trace_path:
-                entry["tracePath"] = trace_path
-            _copy_tool_result_fact_fields(item, entry)
-            if entry.get("semanticStatus"):
-                entry["status"] = _normalize_tool_call_status(entry.get("semanticStatus"), default=entry["status"])
-        tool_calls.append(entry)
-    return tool_calls
-
-
-def _normalize_message_tool_calls(value: Any) -> list[dict[str, Any]]:
-    tool_calls: list[dict[str, Any]] = []
-    for item in _normalize_persisted_tool_calls(value):
-        entry = {
-            "name": str(item.get("name") or "").strip(),
-            "status": _normalize_tool_call_status(item.get("status"), default="done"),
-        }
-        summary = trim_lines(item.get("summary") or "", max_lines=2)
-        if summary:
-            entry["summary"] = summary
-        for key in (
-            "callId",
-            "arguments",
-            "resultPreview",
-            "resultType",
-            "resultLength",
-            "error",
-            "durationMs",
-            "durationSeconds",
-            "timeoutSeconds",
-            "transportStatus",
-            "semanticStatus",
-            "failureClass",
-            "exitCode",
-            "timedOut",
-            "resultKind",
-            "truncated",
-            "originalLength",
-            "tracePath",
-            "terminalSessionId",
-            "terminalStatus",
-            "sessionOpen",
-            "formattedOutput",
-        ):
-            if key in item:
-                entry[key] = item[key]
-        if entry["name"]:
-            tool_calls.append(entry)
-    return tool_calls
-
-
-def _normalize_feedback_event_kind(value: Any) -> str:
-    kind = str(value or "").strip().lower()
-    if kind in {"thought", "mental", "tool", "status", "assistant_text"}:
-        return kind
-    return ""
-
-
-def _normalize_persisted_feedback_events(value: Any) -> list[dict[str, Any]]:
-    events: list[dict[str, Any]] = []
-    for index, item in enumerate(list(value or []), start=1):
-        if not isinstance(item, dict):
-            continue
-        kind = _normalize_feedback_event_kind(item.get("kind"))
-        if not kind:
-            continue
-        sequence = _coerce_nonnegative_int(item.get("sequence"))
-        if sequence <= 0:
-            sequence = index
-        status = _normalize_tool_call_status(item.get("status"), default="done")
-        entry: dict[str, Any] = {
-            "sequence": sequence,
-            "kind": kind,
-            "status": status,
-        }
-        timestamp = str(item.get("timestamp") or item.get("createdAt") or item.get("created_at") or "").strip()
-        if timestamp:
-            entry["timestamp"] = timestamp
-        name = str(item.get("name") or item.get("label") or "").strip()
-        if name:
-            entry["name"] = name
-        call_id = str(item.get("callId") or item.get("toolCallId") or item.get("tool_call_id") or "").strip()
-        if call_id:
-            entry["callId"] = call_id
-        summary = trim_lines(
-            item.get("summary")
-            or item.get("resultPreview")
-            or item.get("result_preview")
-            or item.get("error")
-            or "",
-            max_lines=2,
-        )
-        if summary:
-            entry["summary"] = summary
-        if kind == "assistant_text":
-            content = _sanitize_message_content("assistant", item.get("text") or item.get("content") or summary)
-            if content:
-                entry["content"] = content
-        arguments = _safe_tool_argument_details(
-            item.get("arguments") if isinstance(item.get("arguments"), dict) else item.get("args")
-        )
-        if arguments:
-            entry["arguments"] = arguments
-        result_preview = _trim_tool_detail_text(
-            item.get("resultPreview") or item.get("result_preview") or item.get("result"),
-            max_chars=1800 if kind == "thought" else 1200,
-            max_lines=18 if kind == "thought" else 10,
-        )
-        if result_preview:
-            entry["resultPreview"] = result_preview
-        terminal_facts = _sandbox_terminal_result_facts(
-            item.get("result") or item.get("resultPreview") or item.get("result_preview")
-        ) or _sandbox_terminal_result_facts(item)
-        if terminal_facts:
-            entry.update(terminal_facts)
-            if terminal_facts.get("formattedOutput"):
-                entry["resultPreview"] = str(terminal_facts["formattedOutput"])
-        result_type = str(item.get("resultType") or item.get("result_type") or "").strip()
-        if result_type:
-            entry["resultType"] = result_type
-        result_length = _coerce_tool_number(item.get("resultLength") or item.get("result_length"))
-        if result_length is not None:
-            entry["resultLength"] = result_length
-        error = _trim_tool_detail_text(item.get("error"), max_chars=1200, max_lines=10)
-        if error:
-            entry["error"] = error
-        duration_ms = _coerce_tool_number(item.get("durationMs") or item.get("duration_ms"))
-        if duration_ms is not None:
-            entry["durationMs"] = duration_ms
-        duration_seconds = _coerce_tool_number(item.get("durationSeconds") or item.get("duration_seconds") or item.get("elapsedSeconds"))
-        if duration_seconds is not None:
-            entry["durationSeconds"] = duration_seconds
-        timeout_seconds = _coerce_tool_number(item.get("timeoutSeconds") or item.get("timeout_seconds"))
-        if timeout_seconds is not None:
-            entry["timeoutSeconds"] = timeout_seconds
-        trace_path = str(item.get("tracePath") or item.get("trace_path") or "").strip()
-        if trace_path:
-            entry["tracePath"] = trace_path
-        _copy_tool_result_fact_fields(item, entry)
-        if entry.get("semanticStatus"):
-            entry["status"] = _normalize_tool_call_status(entry.get("semanticStatus"), default=entry["status"])
-        related_sequence = _coerce_nonnegative_int(item.get("relatedThoughtSequence") or item.get("related_thought_sequence"))
-        if related_sequence > 0:
-            entry["relatedThoughtSequence"] = related_sequence
-        events.append(entry)
-    events.sort(key=lambda event: _coerce_nonnegative_int(event.get("sequence")))
-    return events[-120:]
-
-
-def _normalize_message_feedback_events(value: Any) -> list[dict[str, Any]]:
-    events: list[dict[str, Any]] = []
-    for item in _normalize_persisted_feedback_events(value):
-        entry = {
-            "sequence": _coerce_nonnegative_int(item.get("sequence")),
-            "kind": str(item.get("kind") or "").strip(),
-            "status": _normalize_tool_call_status(item.get("status"), default="done"),
-        }
-        for key in (
-            "timestamp",
-            "callId",
-            "name",
-            "summary",
-            "arguments",
-            "resultPreview",
-            "resultType",
-            "resultLength",
-            "error",
-            "durationMs",
-            "durationSeconds",
-            "timeoutSeconds",
-            "transportStatus",
-            "semanticStatus",
-            "failureClass",
-            "exitCode",
-            "timedOut",
-            "resultKind",
-            "truncated",
-            "originalLength",
-            "tracePath",
-            "relatedThoughtSequence",
-            "terminalSessionId",
-            "terminalStatus",
-            "sessionOpen",
-            "formattedOutput",
-            "content",
-            "text",
-        ):
-            if key in item:
-                entry[key] = item[key]
-        if entry["sequence"] > 0 and entry["kind"]:
-            events.append(entry)
-    return events
-
-
 def _close_previous_running_status_events(events: Any, current_name: str) -> list[dict[str, Any]]:
     normalized_current_name = str(current_name or "").strip()
     normalized_events: list[dict[str, Any]] = []
@@ -8256,183 +6644,6 @@ def _session_events_have_terminal_turn(events: Any, turn_id: str) -> bool:
     return False
 
 
-def _assistant_timeline_events_by_turn(conversation_id: str) -> dict[str, list[dict[str, Any]]]:
-    normalized_session_id = str(conversation_id or "").strip()
-    if not normalized_session_id:
-        return {}
-    events_by_turn: dict[str, list[dict[str, Any]]] = {}
-    tool_event_keys: dict[str, dict[str, int]] = {}
-    journal_events = list(_load_session_conversation_events_cached(normalized_session_id))
-    canonical_commentary_turn_ids: set[str] = set()
-    for event in journal_events:
-        if str(getattr(event, "event_type", "") or "").strip() != "assistant_item_committed":
-            continue
-        payload = dict(getattr(event, "payload", {}) or {})
-        item_payload = dict(payload.get("item") or {})
-        item_kind = str(payload.get("kind") or item_payload.get("kind") or "").strip().lower()
-        item_text = _sanitize_message_content(
-            "assistant",
-            payload.get("text") or item_payload.get("text") or "",
-        )
-        turn_id = str(getattr(event, "turn_id", "") or "").strip()
-        if turn_id and item_kind == "commentary" and item_text:
-            canonical_commentary_turn_ids.add(turn_id)
-    for event in journal_events:
-        turn_id = str(getattr(event, "turn_id", "") or "").strip()
-        if not turn_id:
-            continue
-        event_type = str(getattr(event, "event_type", "") or "").strip()
-        payload = dict(getattr(event, "payload", {}) or {})
-        if event_type == "assistant_item_committed":
-            item_payload = dict(payload.get("item") or {})
-            item_kind = str(payload.get("kind") or item_payload.get("kind") or "").strip().lower()
-            content = _sanitize_message_content(
-                "assistant",
-                payload.get("text") or item_payload.get("text") or "",
-            )
-            sequence = _coerce_nonnegative_int(getattr(event, "sequence", 0))
-            if item_kind not in {"commentary", "reasoning"} or sequence <= 0 or not content:
-                continue
-            events_by_turn.setdefault(turn_id, []).append(
-                {
-                    "sequence": sequence,
-                    "kind": "assistant_text" if item_kind == "commentary" else "thought",
-                    "status": _normalize_tool_call_status(getattr(event, "status", ""), default="done"),
-                    "content": content,
-                    "source": "assistant_item_committed",
-                }
-            )
-            continue
-        if event_type == EVENT_ASSISTANT_DELTA_COMMITTED:
-            if turn_id in canonical_commentary_turn_ids:
-                continue
-            sequence = _coerce_nonnegative_int(payload.get("feedbackSequence") or payload.get("feedback_sequence"))
-            if sequence <= 0 and _is_assistant_timeline_segment_event(event):
-                sequence = _coerce_nonnegative_int(getattr(event, "sequence", 0))
-            content = _sanitize_message_content("assistant", payload.get("content") or "")
-            if sequence <= 0 or not content:
-                continue
-            events_by_turn.setdefault(turn_id, []).append(
-                {
-                    "sequence": sequence,
-                    "kind": "assistant_text",
-                    "status": _normalize_tool_call_status(getattr(event, "status", ""), default="done"),
-                    "content": content,
-                }
-            )
-            continue
-        if event_type not in {EVENT_TOOL_CALL_STARTED, EVENT_TOOL_RESULT, EVENT_CLI_TASK_SENT, EVENT_CLI_TASK_RESULT}:
-            continue
-        tool_event = _feedback_event_from_conversation_tool_event(event)
-        if tool_event:
-            if turn_id in canonical_commentary_turn_ids:
-                tool_event["sequence"] = _coerce_nonnegative_int(getattr(event, "sequence", 0))
-            items = events_by_turn.setdefault(turn_id, [])
-            tool_key = _conversation_tool_timeline_key(event)
-            previous_index = tool_event_keys.setdefault(turn_id, {}).get(tool_key) if tool_key else None
-            if previous_index is not None and 0 <= previous_index < len(items):
-                items[previous_index] = tool_event
-            else:
-                if tool_key:
-                    tool_event_keys.setdefault(turn_id, {})[tool_key] = len(items)
-                items.append(tool_event)
-    return {
-        turn_id: sorted(items, key=lambda item: _coerce_nonnegative_int(item.get("sequence")))
-        for turn_id, items in events_by_turn.items()
-        if any(str(item.get("kind") or "") in {"assistant_text", "thought"} for item in items)
-    }
-
-
-def _is_assistant_timeline_segment_event(event: Any) -> bool:
-    projection_kind = str(getattr(event, "projection_kind", "") or "").strip()
-    source = str(getattr(event, "source", "") or "").strip()
-    return projection_kind == "assistant_timeline_segment" or source == "session_ui_capture"
-
-
-def _conversation_tool_timeline_key(event: Any) -> str:
-    payload = dict(getattr(event, "payload", {}) or {})
-    tool_call = dict(payload.get("toolCall") or payload.get("tool_call") or payload)
-    tool_id = str(
-        getattr(event, "tool_call_id", "")
-        or tool_call.get("id")
-        or tool_call.get("toolCallId")
-        or tool_call.get("tool_call_id")
-        or tool_call.get("taskId")
-        or ""
-    ).strip()
-    if tool_id:
-        return f"id:{tool_id}"
-    sequence = _coerce_nonnegative_int(tool_call.get("feedbackSequence") or tool_call.get("feedback_sequence"))
-    if sequence > 0:
-        return f"sequence:{sequence}"
-    return ""
-
-
-def _feedback_event_from_conversation_tool_event(event: Any) -> dict[str, Any]:
-    payload = dict(getattr(event, "payload", {}) or {})
-    tool_call = dict(payload.get("toolCall") or payload.get("tool_call") or payload)
-    name = str(tool_call.get("name") or tool_call.get("toolName") or tool_call.get("tool_name") or "").strip()
-    if not name:
-        return {}
-    sequence = _coerce_nonnegative_int(tool_call.get("feedbackSequence") or tool_call.get("feedback_sequence"))
-    if sequence <= 0:
-        sequence = _coerce_nonnegative_int(getattr(event, "sequence", 0))
-    entry: dict[str, Any] = {
-        "sequence": sequence,
-        "kind": "tool",
-        "status": _normalize_tool_call_status(tool_call.get("status") or getattr(event, "status", ""), default="running"),
-        "name": name,
-    }
-    summary = trim_lines(
-        tool_call.get("summary")
-        or tool_call.get("resultPreview")
-        or tool_call.get("result_preview")
-        or tool_call.get("error")
-        or "",
-        max_lines=2,
-    )
-    if summary:
-        entry["summary"] = summary
-    arguments = _safe_tool_argument_details(
-        tool_call.get("arguments") if isinstance(tool_call.get("arguments"), dict) else tool_call.get("args")
-    )
-    if arguments:
-        entry["arguments"] = arguments
-    result_preview = _trim_tool_detail_text(
-        tool_call.get("resultPreview") or tool_call.get("result_preview") or tool_call.get("result"),
-        max_chars=1200,
-        max_lines=10,
-    )
-    if result_preview:
-        entry["resultPreview"] = result_preview
-    terminal_facts = _sandbox_terminal_result_facts(
-        tool_call.get("result") or tool_call.get("resultPreview") or tool_call.get("result_preview")
-    ) or _sandbox_terminal_result_facts(tool_call)
-    if terminal_facts:
-        entry.update(terminal_facts)
-        if terminal_facts.get("formattedOutput"):
-            entry["resultPreview"] = str(terminal_facts["formattedOutput"])
-    error = _trim_tool_detail_text(tool_call.get("error"), max_chars=1200, max_lines=10)
-    if error:
-        entry["error"] = error
-    for source_key, target_key in (
-        ("durationMs", "durationMs"),
-        ("duration_ms", "durationMs"),
-        ("durationSeconds", "durationSeconds"),
-        ("duration_seconds", "durationSeconds"),
-        ("timeoutSeconds", "timeoutSeconds"),
-        ("timeout_seconds", "timeoutSeconds"),
-    ):
-        if source_key in tool_call and target_key not in entry:
-            value = _coerce_tool_number(tool_call.get(source_key))
-            if value is not None:
-                entry[target_key] = value
-    _copy_tool_result_fact_fields(tool_call, entry)
-    if entry.get("semanticStatus"):
-        entry["status"] = _normalize_tool_call_status(entry.get("semanticStatus"), default=entry["status"])
-    return entry
-
-
 def _build_message_timeline_items(
     *,
     message_id: str,
@@ -8456,24 +6667,6 @@ def _build_message_timeline_items(
         lang=str(lang or "").strip() or get_web_language(),
         include_assistant_text=include_assistant_text,
     )
-
-
-def _filter_redundant_assistant_timeline_events(
-    events: list[dict[str, Any]],
-    content: Any,
-) -> list[dict[str, Any]]:
-    content_key = _assistant_projection_text_key(content)
-    if not content_key:
-        return events
-    filtered: list[dict[str, Any]] = []
-    for event in events:
-        if str(event.get("kind") or "").strip() == "assistant_text":
-            text = _sanitize_message_content("assistant", event.get("text") or event.get("content") or "")
-            text_key = _assistant_projection_text_key(text)
-            if text_key and text_key in content_key:
-                continue
-        filtered.append(event)
-    return filtered
 
 
 def _assistant_projection_text_key(value: Any) -> str:
@@ -8996,114 +7189,6 @@ def _compact_codex_record(record: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _normalize_session_turn_error(value: Any) -> dict[str, Any] | None:
-    if not isinstance(value, dict):
-        return None
-    message = trim_lines(value.get("message") or value.get("summary") or "", max_lines=4)
-    if not message:
-        return None
-    http_status = _coerce_nonnegative_int(value.get("httpStatus") or value.get("http_status"))
-    return {
-        "message": message,
-        "errorType": str(value.get("errorType") or value.get("error_type") or "runtime_error").strip() or "runtime_error",
-        "reasonCode": str(value.get("reasonCode") or value.get("reason_code") or "").strip(),
-        "reasonSummary": str(value.get("reasonSummary") or value.get("reason_summary") or "").strip(),
-        "reasonDetail": str(value.get("reasonDetail") or value.get("reason_detail") or "").strip(),
-        "httpStatus": http_status if http_status > 0 else None,
-        "provider": str(value.get("provider") or "").strip(),
-        "providerHost": str(value.get("providerHost") or value.get("provider_host") or "").strip(),
-        "providerErrorType": str(value.get("providerErrorType") or value.get("provider_error_type") or "").strip(),
-        "providerErrorMessage": str(value.get("providerErrorMessage") or value.get("provider_error_message") or "").strip(),
-        "model": str(value.get("model") or "").strip(),
-        "chainStage": str(value.get("chainStage") or value.get("chain_stage") or "").strip(),
-        "eventCode": str(value.get("eventCode") or value.get("event_code") or "").strip(),
-        "traceId": str(value.get("traceId") or value.get("trace_id") or "").strip(),
-        "protocol": str(value.get("protocol") or "").strip(),
-        "recoverable": bool(value.get("recoverable", True)),
-        "timestamp": str(value.get("timestamp") or value.get("createdAt") or value.get("created_at") or "").strip(),
-        "turnId": str(value.get("turnId") or value.get("turn_id") or "").strip(),
-    }
-
-
-def _make_session_turn_error(
-    raw_error: Any,
-    *,
-    lang: str,
-    error_type: str = "",
-    turn_id: str = "",
-    llm_failure: dict[str, Any] | None = None,
-    llm_payload_trace: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    normalized_error_type = str(error_type or _failure_error_type(str(raw_error or ""))).strip() or "runtime_error"
-    provider_reason = _provider_error_user_reason(raw_error, lang=lang)
-    provider_diagnostics = _provider_error_diagnostics(raw_error, llm_failure=llm_failure)
-    structured_failure = dict(llm_failure or {})
-    payload_trace = dict(llm_payload_trace or {})
-
-    def _failure_text(snake_key: str, camel_key: str, *, max_lines: int = 2) -> str:
-        value = structured_failure.get(snake_key, structured_failure.get(camel_key, ""))
-        return trim_lines(value, max_lines=max_lines)
-
-    if normalized_error_type == "provider_upstream_error" and provider_reason.get("code") in {"", "provider_error"}:
-        provider_reason = {
-            **provider_reason,
-            "code": "upstream_unavailable",
-            "summary": text_for(
-                lang,
-                zh="provider 上游服务不可用或网关失败",
-                en="provider upstream service is unavailable or failed at the gateway",
-            ),
-        }
-    reason_code = _failure_text("reason_code", "reasonCode") or str(provider_reason.get("code") or "").strip()
-    reason_summary = _failure_text("reason_summary", "reasonSummary") or str(
-        provider_reason.get("summary") or ""
-    ).strip()
-    reason_detail = _failure_text("reason_detail", "reasonDetail", max_lines=4) or str(
-        provider_reason.get("detail") or ""
-    ).strip()
-    chain_stage = _failure_text("chain_stage", "chainStage")
-    event_code = _failure_text("event_code", "eventCode")
-    trace_id = _failure_text("trace_id", "traceId") or str(payload_trace.get("traceId") or "").strip()
-    protocol = _failure_text("protocol", "protocol") or str(
-        payload_trace.get("selectedProtocol") or payload_trace.get("transport") or ""
-    ).strip()
-    structured_message = _failure_text("message", "message", max_lines=4)
-    default_recoverable = normalized_error_type.startswith("provider_") or normalized_error_type in {
-        "server_error",
-        "network_error",
-    }
-    return {
-        "message": structured_message
-        or _user_visible_failure_summary(raw_error, lang=lang, provider_reason=provider_reason),
-        "error_type": normalized_error_type,
-        "reason_code": reason_code,
-        "reason_summary": reason_summary,
-        "reason_detail": reason_detail,
-        "chain_stage": chain_stage,
-        "event_code": event_code,
-        "trace_id": trace_id,
-        "protocol": protocol,
-        "http_status": provider_diagnostics.get("http_status") or 0,
-        "provider": provider_diagnostics.get("provider") or "",
-        "provider_host": provider_diagnostics.get("provider_host") or "",
-        "provider_error_type": provider_diagnostics.get("provider_error_type") or "",
-        "provider_error_message": provider_diagnostics.get("provider_error_message") or "",
-        "model": provider_diagnostics.get("model") or "",
-        "recoverable": bool(structured_failure.get("retryable", default_recoverable)),
-        "timestamp": _now_timestamp(),
-        "turn_id": str(turn_id or "").strip(),
-    }
-
-
-def _session_turn_error_to_api(value: Any) -> dict[str, Any] | None:
-    normalized = _normalize_session_turn_error(value)
-    if normalized is None:
-        return None
-    if not normalized["timestamp"]:
-        normalized["timestamp"] = _now_timestamp()
-    return normalized
-
-
 def _extract_chat_tool_calls(result: Any) -> list[dict[str, Any]]:
     if not isinstance(result, dict):
         return []
@@ -9111,35 +7196,6 @@ def _extract_chat_tool_calls(result: Any) -> list[dict[str, Any]]:
     if tool_calls:
         return tool_calls
     return _normalize_persisted_tool_calls(result.get("tool_calls") or result.get("tools") or [])
-
-
-def _extract_chat_feedback_events(result: Any, *, final_status: str = "") -> list[dict[str, Any]]:
-    if not isinstance(result, dict):
-        return []
-    events = _normalize_persisted_feedback_events(result.get("feedback_events") or result.get("feedbackEvents") or [])
-    if not events:
-        return []
-    status_key = str(final_status or "").strip().lower()
-    if not status_key or status_key in {"running", "queued"}:
-        return events
-    finalized: list[dict[str, Any]] = []
-    latest_unfinished_index = -1
-    failure_statuses = {"failed", "failed_runtime", "failed_provider", "timeout", "error"}
-    should_fail_latest_unfinished = status_key in failure_statuses
-    if should_fail_latest_unfinished:
-        for index, item in enumerate(events):
-            if str(item.get("status") or "").strip().lower() in {"running", "pending"}:
-                latest_unfinished_index = index
-    for index, item in enumerate(events):
-        entry = dict(item)
-        if str(entry.get("status") or "").strip().lower() in {"running", "pending"}:
-            entry["status"] = (
-                "done"
-                if not should_fail_latest_unfinished or index < latest_unfinished_index
-                else "failed"
-            )
-        finalized.append(entry)
-    return finalized
 
 
 def _is_phantom_image_generation_success(
@@ -9325,47 +7381,6 @@ def _make_provider_failure_chat_message(
     )
 
 
-def _make_turn_error_chat_message(
-    turn_error: dict[str, Any],
-    *,
-    error_type: str,
-    turn_id: str,
-    provider_failure: bool,
-) -> dict[str, Any]:
-    timestamp = str(turn_error.get("timestamp") or _now_timestamp()).strip()
-    reason_summary = str(turn_error.get("reason_summary") or turn_error.get("reasonSummary") or "").strip()
-    reason_detail = str(turn_error.get("reason_detail") or turn_error.get("reasonDetail") or "").strip()
-    visible_message = str(turn_error.get("message") or "").strip()
-    if reason_summary and reason_summary not in visible_message:
-        visible_message = f"{visible_message} 原因：{reason_summary}。".strip()
-    message = _make_chat_message(
-        "assistant",
-        visible_message,
-        metadata={
-            "kind": "turn_error",
-            "errorType": str(error_type or "").strip(),
-            "turnId": str(turn_id or "").strip(),
-            "recoverable": bool(turn_error.get("recoverable")),
-            "providerFailure": bool(provider_failure),
-            "reasonCode": str(turn_error.get("reason_code") or turn_error.get("reasonCode") or "").strip(),
-            "reasonSummary": reason_summary,
-            "reasonDetail": reason_detail,
-            "httpStatus": _coerce_nonnegative_int(turn_error.get("http_status") or turn_error.get("httpStatus")) or None,
-            "provider": str(turn_error.get("provider") or "").strip(),
-            "providerHost": str(turn_error.get("provider_host") or turn_error.get("providerHost") or "").strip(),
-            "providerErrorType": str(turn_error.get("provider_error_type") or turn_error.get("providerErrorType") or "").strip(),
-            "providerErrorMessage": str(turn_error.get("provider_error_message") or turn_error.get("providerErrorMessage") or "").strip(),
-            "model": str(turn_error.get("model") or "").strip(),
-            "chainStage": str(turn_error.get("chain_stage") or turn_error.get("chainStage") or "").strip(),
-            "eventCode": str(turn_error.get("event_code") or turn_error.get("eventCode") or "").strip(),
-            "traceId": str(turn_error.get("trace_id") or turn_error.get("traceId") or "").strip(),
-            "protocol": str(turn_error.get("protocol") or "").strip(),
-        },
-    )
-    message["timestamp"] = timestamp
-    return message
-
-
 def _is_provider_failed_result(result: Any) -> bool:
     if not isinstance(result, dict):
         return False
@@ -9426,13 +7441,6 @@ def _looks_like_structured_payload(text: str) -> bool:
     return isinstance(parsed, (dict, list))
 
 
-def _looks_like_provider_error_text(text: Any) -> bool:
-    value = str(text or "").strip()
-    if not value:
-        return False
-    return bool(_PROVIDER_ERROR_PATTERN.search(value))
-
-
 def _failure_error_type(raw_error: str, *, exc: Exception | None = None) -> str:
     value = str(raw_error or "").strip().lower()
     exc_type = type(exc).__name__ if exc is not None else ""
@@ -9458,188 +7466,6 @@ def _failure_error_type(raw_error: str, *, exc: Exception | None = None) -> str:
             return "provider_protocol_error"
         return "provider_error"
     return exc_type or "runtime_error"
-
-
-def _provider_error_user_reason(raw_error: Any, *, lang: str | None = None) -> dict[str, str]:
-    language = lang or get_web_language()
-    value = str(raw_error or "").strip()
-    lower = value.lower()
-    detail = _provider_error_reason_detail(value)
-
-    def reason(code: str, zh: str, en: str) -> dict[str, str]:
-        return {"code": code, "summary": text_for(language, zh=zh, en=en), "detail": detail}
-
-    if "api key" in lower and ("额度" in value or "限额" in value or "用完" in value or "quota" in lower or "rate_limit" in lower):
-        return reason("quota_exhausted", "API Key 额度或当日限额已用完", "API key quota or daily limit is exhausted")
-    if (
-        "prompt_cache_unsupported" in lower
-        or "不支持显式 prompt cache" in value
-        or "模型配置声明不支持 prompt cache" in value
-    ):
-        return reason(
-            "prompt_cache_unsupported",
-            "当前模型配置声明不支持 prompt cache",
-            "the current model configuration declares prompt cache unsupported",
-        )
-    if "rate limit" in lower or "rate_limit" in lower or "429" in lower:
-        return reason("rate_limited", "provider 正在限流", "provider is rate limiting requests")
-    if "temperature" in lower and ("deprecated" in lower or "not supported" in lower or "unsupported" in lower):
-        return reason("deprecated_sampling_parameter", "模型不接受当前采样参数，例如 temperature", "model rejected a sampling parameter such as temperature")
-    if "top_p" in lower or "top_k" in lower:
-        return reason("deprecated_sampling_parameter", "模型不接受当前采样参数，例如 top_p/top_k", "model rejected a sampling parameter such as top_p/top_k")
-    if "context_length" in lower or "context length" in lower or "maximum context" in lower or "too many tokens" in lower:
-        return reason("context_limit", "输入上下文超过模型限制", "input context exceeded the model limit")
-    if "auth" in lower or "unauthorized" in lower or "forbidden" in lower or "401" in lower or "403" in lower:
-        return reason("auth_failed", "provider 认证失败，请检查 API Key 或权限", "provider authentication failed; check the API key or permissions")
-    if (
-        "upstream_error" in lower
-        or "upstream request failed" in lower
-        or "badgateway" in lower
-        or "bad gateway" in lower
-        or "serviceunavailable" in lower
-        or "service unavailable" in lower
-    ):
-        return reason("upstream_unavailable", "provider 上游服务不可用或网关失败", "provider upstream service is unavailable or failed at the gateway")
-    if "timeout" in lower:
-        return reason("timeout", "provider 响应超时", "provider response timed out")
-    if _looks_like_provider_error_text(value):
-        return reason("provider_error", "provider 返回了协议或服务错误", "provider returned a protocol or service error")
-    return {"code": "", "summary": "", "detail": detail}
-
-
-def _provider_error_reason_detail(raw_error: Any) -> str:
-    value = str(raw_error or "").strip()
-    if not value:
-        return ""
-    candidates: list[str] = []
-    json_start = value.find("{")
-    json_end = value.rfind("}")
-    json_blobs = [value[json_start:json_end + 1]] if json_start >= 0 and json_end > json_start else []
-    json_blobs.extend(re.findall(r"(?s)(\{.*?\})", value))
-    for json_blob in json_blobs:
-        try:
-            parsed = json.loads(json_blob)
-        except Exception:
-            continue
-        message = _extract_provider_error_message_from_json(parsed)
-        if message:
-            candidates.append(message)
-    for pattern in (
-        r"(?is)['\"]error['\"]\s*:\s*\{[^{}]*['\"]message['\"]\s*:\s*['\"]([^'\"]+)['\"]",
-        r"(?is)['\"]message['\"]\s*:\s*['\"]([^'\"]+)['\"]",
-        r"(?is)\berror\s*:\s*\{[^{}]*\bmessage\s*:\s*['\"]([^'\"]+)['\"]",
-        r"(?is)\bmessage\s*[:=]\s*['\"]([^'\"]+)['\"]",
-        r"(?is)(?:invalid_request_error|rate_limit_error|authentication_error|permission_error|context_length_exceeded)\s*:\s*(.+)$",
-        r"(?is)(?:AnthropicException|OpenAIException|BadGatewayError)\s*-\s*(.+)$",
-    ):
-        match = re.search(pattern, value)
-        if match:
-            candidates.append(match.group(1))
-    for candidate in candidates:
-        detail = _sanitize_provider_error_detail(candidate)
-        if detail:
-            return detail
-    if len(value) <= 220 and not any(secret in value.lower() for secret in ("authorization", "bearer ", "sk-")):
-        return _sanitize_provider_error_detail(value)
-    return ""
-
-
-def _provider_error_diagnostics(raw_error: Any, *, llm_failure: dict[str, Any] | None = None) -> dict[str, Any]:
-    value = str(raw_error or "").strip()
-    llm_failure = llm_failure if isinstance(llm_failure, dict) else {}
-    diagnostics: dict[str, Any] = {
-        "http_status": _coerce_nonnegative_int(
-            llm_failure.get("http_status")
-            or llm_failure.get("httpStatus")
-            or llm_failure.get("status_code")
-            or llm_failure.get("statusCode")
-        ),
-        "provider": str(llm_failure.get("provider") or "").strip(),
-        "provider_host": _host_from_provider_url(llm_failure.get("api_base") or llm_failure.get("base_url") or llm_failure.get("baseUrl")),
-        "provider_error_type": str(llm_failure.get("provider_error_type") or llm_failure.get("providerErrorType") or "").strip(),
-        "provider_error_message": str(
-            llm_failure.get("provider_error_message")
-            or llm_failure.get("providerErrorMessage")
-            or ""
-        ).strip(),
-        "model": str(llm_failure.get("model") or "").strip(),
-    }
-    for parsed in _iter_provider_error_json(value):
-        if not diagnostics["provider_error_message"]:
-            diagnostics["provider_error_message"] = _extract_provider_error_message_from_json(parsed)
-        if not diagnostics["provider_error_type"]:
-            diagnostics["provider_error_type"] = _extract_provider_error_type_from_json(parsed)
-        if not diagnostics["http_status"]:
-            diagnostics["http_status"] = _extract_provider_http_status_from_json(parsed)
-    if not diagnostics["provider_error_message"]:
-        diagnostics["provider_error_message"] = _provider_error_reason_detail(value)
-    if not diagnostics["provider_error_type"]:
-        type_match = re.search(
-            r"(?i)\b(?:litellm\.)?([A-Za-z][A-Za-z0-9_]*(?:Error|Exception))\b",
-            value,
-        )
-        diagnostics["provider_error_type"] = type_match.group(1) if type_match else ""
-    if not diagnostics["http_status"]:
-        diagnostics["http_status"] = _infer_provider_http_status(value)
-    if not diagnostics["provider_host"]:
-        host_match = re.search(r"(?i)\bbaseUrlHost['\"]?\s*[:=]\s*['\"]?([A-Za-z0-9_.-]+)", value)
-        diagnostics["provider_host"] = host_match.group(1) if host_match else ""
-    diagnostics["provider_error_message"] = _sanitize_provider_error_detail(diagnostics["provider_error_message"])
-    diagnostics["provider_error_type"] = _sanitize_provider_error_type(diagnostics["provider_error_type"])
-    if diagnostics["http_status"] <= 0:
-        diagnostics["http_status"] = 0
-    return diagnostics
-
-
-def _iter_provider_error_json(value: str) -> list[Any]:
-    text = str(value or "").strip()
-    if not text:
-        return []
-    blobs: list[str] = []
-    json_start = text.find("{")
-    json_end = text.rfind("}")
-    if json_start >= 0 and json_end > json_start:
-        blobs.append(text[json_start:json_end + 1])
-    blobs.extend(re.findall(r"(?s)(\{.*?\})", text))
-    parsed_items: list[Any] = []
-    seen: set[str] = set()
-    for blob in blobs:
-        candidate = blob.strip()
-        if not candidate or candidate in seen:
-            continue
-        seen.add(candidate)
-        try:
-            parsed_items.append(json.loads(candidate))
-            continue
-        except Exception:
-            pass
-        try:
-            parsed_items.append(json.loads(candidate.encode("utf-8").decode("unicode_escape")))
-        except Exception:
-            continue
-    return parsed_items
-
-
-def _extract_provider_error_type_from_json(value: Any) -> str:
-    if isinstance(value, dict):
-        error = value.get("error")
-        if isinstance(error, dict):
-            error_type = str(error.get("type") or error.get("code") or "").strip()
-            if error_type:
-                return error_type
-        error_type = str(value.get("type") or value.get("code") or "").strip()
-        if error_type and error_type != "error":
-            return error_type
-        for nested in value.values():
-            error_type = _extract_provider_error_type_from_json(nested)
-            if error_type:
-                return error_type
-    if isinstance(value, list):
-        for item in value:
-            error_type = _extract_provider_error_type_from_json(item)
-            if error_type:
-                return error_type
-    return ""
 
 
 def _extract_provider_http_status_from_json(value: Any) -> int:
@@ -9696,109 +7522,6 @@ def _host_from_provider_url(value: Any) -> str:
         return ""
 
 
-def _sanitize_provider_error_type(value: Any) -> str:
-    error_type = str(value or "").strip()
-    if not error_type:
-        return ""
-    error_type = re.sub(r"[^A-Za-z0-9_.:-]", "", error_type)
-    return error_type[:96]
-
-
-def _extract_provider_error_message_from_json(value: Any) -> str:
-    if isinstance(value, dict):
-        error = value.get("error")
-        if isinstance(error, dict):
-            message = str(error.get("message") or "").strip()
-            if message:
-                return message
-        message = str(value.get("message") or "").strip()
-        if message:
-            return message
-        for nested in value.values():
-            message = _extract_provider_error_message_from_json(nested)
-            if message:
-                return message
-    if isinstance(value, list):
-        for item in value:
-            message = _extract_provider_error_message_from_json(item)
-            if message:
-                return message
-    return ""
-
-
-def _sanitize_provider_error_detail(value: Any) -> str:
-    detail = trim_lines(value, max_lines=3)
-    if not detail:
-        return ""
-    detail = re.sub(r"sk-[A-Za-z0-9_-]{8,}", "sk-***", detail)
-    detail = re.sub(r"(?i)\bbearer\s+[A-Za-z0-9._~+/=-]+", "Bearer ***", detail)
-    detail = re.sub(
-        r"(?i)\b(api[_-]?key|token|secret|authorization)(\s*[:=]\s*)([^\s,;]+)",
-        lambda match: f"{match.group(1)}{match.group(2)}***",
-        detail,
-    )
-    if len(detail) > 320:
-        detail = f"{detail[:317].rstrip()}..."
-    return detail
-
-
-def _user_visible_failure_summary(
-    raw_error: Any,
-    *,
-    lang: str | None = None,
-    exc: Exception | None = None,
-    provider_reason: dict[str, str] | None = None,
-) -> str:
-    language = lang or get_web_language()
-    text = str(raw_error or "").strip()
-    if (
-        "prompt_cache_unsupported" in text.lower()
-        or "不支持显式 prompt cache" in text
-        or "模型配置声明不支持 prompt cache" in text
-    ):
-        reason_summary = str((provider_reason or {}).get("summary") or "").strip()
-        reason_line = text_for(
-            language,
-            zh=f"原因：{reason_summary}。" if reason_summary else "原因：当前模型配置声明不支持 prompt cache。",
-            en=f"Reason: {reason_summary}." if reason_summary else "Reason: the current model configuration declares prompt cache unsupported.",
-        )
-        return text_for(
-            language,
-            zh=f"模型配置不满足本轮 prompt cache 要求，本轮已停止。{reason_line}请把当前模型的 prompt_cache.mode 配置为 automatic 或 explicit_cache_control，或关闭缓存强制要求。",
-            en=f"The model configuration does not satisfy this turn's prompt-cache requirement, so the turn was stopped. {reason_line} Set this model's prompt_cache.mode to automatic or explicit_cache_control, or disable the cache requirement.",
-        )
-    if _looks_like_provider_error_text(text):
-        reason_summary = str((provider_reason or {}).get("summary") or "").strip()
-        reason_detail = str((provider_reason or {}).get("detail") or "").strip()
-        visible_reason_detail = reason_detail if _provider_error_detail_safe_for_chat(reason_detail) else ""
-        reason_line = text_for(
-            language,
-            zh=f"原因：{reason_summary}。" if reason_summary else "原因：provider 返回了错误。",
-            en=f"Reason: {reason_summary}." if reason_summary else "Reason: the provider returned an error.",
-        )
-        detail_line = text_for(
-            language,
-            zh=f"具体报错：{visible_reason_detail}。" if visible_reason_detail else "",
-            en=f"Provider detail: {visible_reason_detail}." if visible_reason_detail else "",
-        )
-        return text_for(
-            language,
-            zh=f"模型服务上游暂时失败，本轮没有完成。{reason_line}{detail_line}完整 provider 错误已写入运行日志；可以稍后直接重试或发送“继续”。",
-            en=f'The model provider failed upstream, so this turn did not complete. {reason_line}{detail_line} The full provider error was written to runtime logs; retry later or send "continue".',
-        )
-    reason = trim_lines(text, max_lines=2)
-    summary = text_for(
-        language,
-        zh="网页工作台这一轮执行失败，请检查配置或稍后重试。",
-        en="This web workbench turn failed. Check configuration and try again.",
-    )
-    if reason:
-        return f"{summary}\n{reason}"
-    if exc is not None:
-        return f"{summary}\n{type(exc).__name__}"
-    return summary
-
-
 def _normalize_message_thought(raw: dict[str, Any], *, role: str) -> str:
     if role != "assistant":
         return ""
@@ -9852,47 +7575,6 @@ def _thought_duplicates_reply(thought: str, reply: str) -> bool:
     return False
 
 
-def _normalize_mental_snapshot(value: Any) -> dict[str, Any] | None:
-    if not isinstance(value, dict):
-        return None
-    raw_metrics = value.get("metrics")
-    metrics = dict(raw_metrics) if isinstance(raw_metrics, dict) else {}
-    history_tail: list[dict[str, Any]] = []
-    if isinstance(value.get("historyTail"), list):
-        history_source = value.get("historyTail")
-    elif isinstance(value.get("history_tail"), list):
-        history_source = value.get("history_tail")
-    else:
-        history_source = []
-    for item in list(history_source or [])[-5:]:
-        if isinstance(item, dict):
-            history_tail.append({
-                "cognitiveState": str(item.get("cognitiveState") or item.get("state") or item.get("cognitive_state") or "").strip(),
-                "confidence": _coerce_confidence(item.get("confidence")),
-                "timestamp": str(item.get("timestamp") or item.get("updatedAt") or item.get("updated_at") or "").strip(),
-            })
-    snapshot = {
-        "mood": str(value.get("mood") or "").strip(),
-        "feeling": str(value.get("feeling") or "").strip(),
-        "whisper": str(value.get("whisper") or "").strip(),
-        "summary": str(value.get("summary") or "").strip(),
-        "cognitiveState": str(value.get("cognitiveState") or value.get("cognitive_state") or "").strip(),
-        "confidence": _coerce_confidence(value.get("confidence")),
-        "sampleSize": _coerce_nonnegative_int(value.get("sampleSize") or value.get("sample_size") or 0),
-        "interventionCount": _coerce_nonnegative_int(
-            value.get("interventionCount") or value.get("intervention_count") or 0
-        ),
-        "updatedAt": str(value.get("updatedAt") or value.get("updated_at") or "").strip(),
-        "source": str(value.get("source") or "").strip(),
-        "intervention": trim_lines(value.get("intervention") or "", max_lines=8),
-        "metrics": metrics,
-        "historyTail": history_tail,
-    }
-    if not snapshot["summary"]:
-        snapshot["summary"] = snapshot["feeling"] or snapshot["whisper"]
-    return snapshot
-
-
 def _coerce_confidence(value: Any) -> float:
     try:
         return max(0.0, min(float(value or 0.0), 1.0))
@@ -9922,250 +7604,6 @@ def _normalize_optional_bool(value: Any) -> bool | None:
     if normalized in {"0", "false", "no", "off", "disabled"}:
         return False
     return None
-
-
-def _is_mental_model_enabled_for_turn(override: bool | None = None) -> bool:
-    return resolve_feature_decision(
-        "mental_model",
-        config=get_config(),
-        requested=override,
-    ).effective_enabled
-
-
-def _has_meaningful_mental_snapshot(snapshot: dict[str, Any] | None) -> bool:
-    if not isinstance(snapshot, dict):
-        return False
-    return any(
-        str(snapshot.get(key) or "").strip()
-        for key in ("mood", "feeling", "whisper", "cognitiveState")
-    )
-
-
-def _live_mental_snapshot(state_info: dict[str, Any], lang: str) -> dict[str, Any] | None:
-    mood = str((state_info or {}).get("mood") or "").strip()
-    feeling = str((state_info or {}).get("feeling") or "").strip()
-    whisper = str((state_info or {}).get("whisper") or "").strip()
-    if not any((mood, feeling, whisper)):
-        return None
-    return {
-        "mood": mood,
-        "feeling": feeling,
-        "whisper": whisper,
-        "summary": feeling or whisper or text_for(
-            lang,
-            zh="当前心智层已给出最近一次状态。",
-            en="The mental layer has produced a recent state.",
-        ),
-        "cognitiveState": "",
-        "confidence": 0.0,
-        "sampleSize": 0,
-        "interventionCount": 0,
-        "updatedAt": _now_timestamp(),
-        "source": "state",
-    }
-
-
-def _build_turn_mental_snapshot(
-    result: Any,
-    lang: str,
-    *,
-    mental_model_enabled: bool | None = None,
-    session_workspace: str | Path | None = None,
-    session_id: str = "",
-    turn_id: str = "",
-) -> dict[str, Any] | None:
-    if not _is_mental_model_enabled_for_turn(mental_model_enabled):
-        return None
-    state_snapshot = None
-    explicit = None
-    if isinstance(result, dict):
-        explicit = _normalize_mental_snapshot(result.get("mental_snapshot") or result.get("mentalSnapshot"))
-        if _has_meaningful_mental_snapshot(explicit):
-            _record_mental_snapshot_selection(
-                session_id=session_id,
-                turn_id=turn_id,
-                chosen_source="explicit",
-                explicit=explicit,
-                state_snapshot=None,
-                runtime_snapshot=None,
-                diagnosis_snapshot=None,
-            )
-            return explicit
-        state_snapshot = _live_mental_snapshot(result.get("state_info") or result.get("stateInfo") or {}, lang)
-    else:
-        state_snapshot = None
-
-    runtime_snapshot = None
-    try:
-        from .runtime_service import _mental_state_summary
-
-        runtime_snapshot = _normalize_mental_snapshot(_mental_state_summary(lang))
-    except Exception:
-        runtime_snapshot = None
-
-    diagnosis_snapshot = _diagnosis_mental_snapshot(lang, session_workspace=session_workspace)
-
-    if _has_meaningful_mental_snapshot(state_snapshot):
-        chosen = _merge_diagnosis_mental_snapshot(state_snapshot, diagnosis_snapshot)
-        _record_mental_snapshot_selection(
-            session_id=session_id,
-            turn_id=turn_id,
-            chosen_source="state",
-            explicit=explicit,
-            state_snapshot=state_snapshot,
-            runtime_snapshot=runtime_snapshot,
-            diagnosis_snapshot=diagnosis_snapshot,
-        )
-        return chosen
-    if _has_meaningful_mental_snapshot(runtime_snapshot):
-        chosen = _merge_diagnosis_mental_snapshot(runtime_snapshot, diagnosis_snapshot)
-        _record_mental_snapshot_selection(
-            session_id=session_id,
-            turn_id=turn_id,
-            chosen_source="runtime",
-            explicit=explicit,
-            state_snapshot=state_snapshot,
-            runtime_snapshot=runtime_snapshot,
-            diagnosis_snapshot=diagnosis_snapshot,
-        )
-        return chosen
-    if _has_meaningful_mental_snapshot(diagnosis_snapshot):
-        _record_mental_snapshot_selection(
-            session_id=session_id,
-            turn_id=turn_id,
-            chosen_source="diagnosis",
-            explicit=explicit,
-            state_snapshot=state_snapshot,
-            runtime_snapshot=runtime_snapshot,
-            diagnosis_snapshot=diagnosis_snapshot,
-        )
-        return diagnosis_snapshot
-    _record_mental_snapshot_selection(
-        session_id=session_id,
-        turn_id=turn_id,
-        chosen_source="none",
-        explicit=explicit,
-        state_snapshot=state_snapshot,
-        runtime_snapshot=runtime_snapshot,
-        diagnosis_snapshot=diagnosis_snapshot,
-    )
-    return None
-
-
-def _merge_diagnosis_mental_snapshot(
-    snapshot: dict[str, Any] | None,
-    diagnosis_snapshot: dict[str, Any] | None,
-) -> dict[str, Any] | None:
-    if not snapshot:
-        return None
-    merged = dict(snapshot)
-    if diagnosis_snapshot:
-        for key in ("intervention", "metrics", "historyTail"):
-            if diagnosis_snapshot.get(key):
-                merged[key] = diagnosis_snapshot[key]
-        if not merged.get("cognitiveState"):
-            merged["cognitiveState"] = diagnosis_snapshot.get("cognitiveState", "")
-        if not merged.get("confidence"):
-            merged["confidence"] = diagnosis_snapshot.get("confidence", 0.0)
-        if not merged.get("sampleSize"):
-            merged["sampleSize"] = diagnosis_snapshot.get("sampleSize", 0)
-        if not merged.get("interventionCount"):
-            merged["interventionCount"] = diagnosis_snapshot.get("interventionCount", 0)
-    return _normalize_mental_snapshot(merged)
-
-
-def _record_mental_snapshot_selection(
-    *,
-    session_id: str,
-    turn_id: str,
-    chosen_source: str,
-    explicit: dict[str, Any] | None,
-    state_snapshot: dict[str, Any] | None,
-    runtime_snapshot: dict[str, Any] | None,
-    diagnosis_snapshot: dict[str, Any] | None,
-) -> None:
-    if not session_id and not turn_id:
-        return
-    try:
-        record_runtime_scene_event(
-            "conversation",
-            "mental_snapshot",
-            "conversation.mental_snapshot.selected",
-            message="Conversation mental snapshot source selected.",
-            level="info",
-            outcome="selected",
-            fields={
-                "sessionId": str(session_id or "").strip(),
-                "turnId": str(turn_id or "").strip(),
-                "chosenSource": str(chosen_source or "").strip() or "none",
-                "hasExplicit": _has_meaningful_mental_snapshot(explicit),
-                "hasStateSnapshot": _has_meaningful_mental_snapshot(state_snapshot),
-                "hasRuntimeSnapshot": _has_meaningful_mental_snapshot(runtime_snapshot),
-                "hasDiagnosisSnapshot": _has_meaningful_mental_snapshot(diagnosis_snapshot),
-                "explicitSource": str((explicit or {}).get("source") or "").strip(),
-                "stateMood": str((state_snapshot or {}).get("mood") or "").strip(),
-                "runtimeMood": str((runtime_snapshot or {}).get("mood") or "").strip(),
-                "diagnosisState": str((diagnosis_snapshot or {}).get("cognitiveState") or "").strip(),
-            },
-            lifecycle=True,
-        )
-    except Exception:
-        return
-
-
-def _diagnosis_mental_snapshot(lang: str, *, session_workspace: str | Path | None = None) -> dict[str, Any] | None:
-    try:
-        from core.infrastructure.mental_model import get_mental_model
-
-        workspace_root = Path(session_workspace).resolve() if session_workspace else (PROJECT_ROOT / "workspace")
-        mental_model = get_mental_model(workspace_root=str(workspace_root))
-        diagnosis = mental_model.diagnose()
-        history = []
-        try:
-            history = mental_model.get_diagnosis_history(limit=5)
-        except Exception:
-            history = []
-    except Exception:
-        return None
-
-    metrics = getattr(diagnosis, "metrics", {}) or {}
-    cognitive_state = str(getattr(diagnosis, "state", "") or "").strip()
-    intervention = trim_lines(getattr(diagnosis, "intervention", "") or "", max_lines=8)
-    history_tail = [
-        {
-            "cognitiveState": str(getattr(item, "state", "") or "").strip(),
-            "confidence": _coerce_confidence(getattr(item, "confidence", 0.0)),
-            "timestamp": str(getattr(item, "timestamp", "") or "").strip(),
-        }
-        for item in list(history or [])[-5:]
-    ]
-    return _normalize_mental_snapshot({
-        "mood": "",
-        "feeling": "",
-        "whisper": "",
-        "summary": _mental_diagnosis_summary(lang, cognitive_state) if cognitive_state else "",
-        "cognitiveState": cognitive_state,
-        "confidence": _coerce_confidence(getattr(diagnosis, "confidence", 0.0)),
-        "sampleSize": metrics.get("sample_size") or 0,
-        "interventionCount": metrics.get("intervention_count") or 0,
-        "updatedAt": str(getattr(diagnosis, "timestamp", "") or "").strip(),
-        "source": "diagnosis",
-        "intervention": intervention,
-        "metrics": metrics,
-        "historyTail": history_tail,
-    })
-
-
-def _mental_diagnosis_summary(lang: str, cognitive_state: str) -> str:
-    labels = {
-        "normal": text_for(lang, zh="心智诊断稳定。", en="Mental diagnosis is stable."),
-        "productive": text_for(lang, zh="心智诊断显示当前推进顺畅。", en="Mental diagnosis shows productive progress."),
-        "looping": text_for(lang, zh="心智诊断检测到重复循环。", en="Mental diagnosis detected looping."),
-        "thrashing": text_for(lang, zh="心智诊断检测到工具或方案失稳。", en="Mental diagnosis detected thrashing."),
-        "tunnel_vision": text_for(lang, zh="心智诊断检测到隧道视野。", en="Mental diagnosis detected tunnel vision."),
-        "disoriented": text_for(lang, zh="心智诊断检测到方向分散。", en="Mental diagnosis detected disorientation."),
-    }
-    return labels.get(str(cognitive_state or "").strip().lower(), str(cognitive_state or "").strip())
 
 
 def _session_ledger_visible_messages(session_id: str) -> list[dict[str, Any]]:
@@ -10253,33 +7691,6 @@ def _current_session_live_llm_payload_trace(session_id: str) -> dict[str, Any] |
         return _normalize_session_llm_payload_trace(state.llm_payload_trace)
 
 
-
-
-def _touch_chat_turn_work_run(
-    *,
-    session_id: str,
-    turn_id: str,
-    stage: str,
-    summary: str = "",
-    last_tool_error: dict[str, Any] | None = None,
-) -> None:
-    normalized_turn_id = str(turn_id or "").strip()
-    if not normalized_turn_id:
-        return
-    previous = _WORK_RUN_STORE.load_snapshot("chat_turn", normalized_turn_id)
-    if not isinstance(previous, dict):
-        return
-    status = str(previous.get("status") or previous.get("currentPhase") or "running").strip().lower() or "running"
-    if status not in {"queued", "running", "stopping", "paused"}:
-        return
-    _persist_chat_turn_work_run(
-        session_id=session_id,
-        turn_id=normalized_turn_id,
-        status=status,
-        summary=summary or str(previous.get("summary") or "").strip(),
-        updated_at=_now_timestamp(),
-        last_tool_error=last_tool_error,
-    )
 
 
 def _set_session_waiting_live_output(session_id: str, *, turn_id: str = "") -> None:
@@ -10486,39 +7897,6 @@ def _recent_chat_next_state_signal_summaries(session_id: str, *, limit: int = 8)
         return summarize_chat_next_state_signals(signals, limit=limit)
     except Exception:
         return []
-
-
-def _record_session_chat_review_candidate_event(
-    phase: str,
-    *,
-    session_id: str,
-    outcome: str,
-    level: str = "info",
-    fields: dict[str, Any] | None = None,
-) -> None:
-    try:
-        record_runtime_scene_event(
-            "chat_review",
-            f"session_candidate_{phase}",
-            f"chat_review.session_candidate.{phase}",
-            level=level,
-            outcome=outcome,
-            message="Session chat review candidate event.",
-            fields={
-                "sessionId": str(session_id or "").strip(),
-                "source": "manual_session_action",
-                **(fields or {}),
-            },
-            child_log_path=f"conversations/{_safe_session_workspace_token(session_id)}-chat-review.jsonl",
-            child_log_payload={
-                "session_id": str(session_id or "").strip(),
-                "phase": phase,
-                "outcome": outcome,
-                **(fields or {}),
-            },
-        )
-    except Exception:
-        return
 
 
 def _build_chat_turn_records_from_messages(messages: list[dict[str, Any]]) -> list[ChatTurnRecord]:
