@@ -281,9 +281,9 @@ const nodes = [
     role: "Challenge Cup Delivery Agent",
     summary: "把研究流程产物转为比赛材料。",
     objective: "将候选知识、算法假设和实验计划转成技术方案、演示和提交材料。",
-    inputs: ["ingested 知识", "algorithm_hypothesis", "experiment_result", "赛题要求", "赛题对齐方案"],
-    actions: ["待规划：技术方案 PDF。", "待规划：演示视频脚本。", "待规划：前端演示与源代码包。", "已补充：赛题对齐方案作为赛道选择、评分映射和提交闭环依据。"],
-    outputs: ["技术方案大纲", "演示脚本", "材料清单", "赛题对齐方案"],
+    inputs: ["ingested 知识", "algorithm_hypothesis", "experiment_result", "赛题要求", "项目唯一事实源"],
+    actions: ["待规划：技术方案 PDF。", "待规划：演示视频脚本。", "待规划：前端演示与源代码包。", "README.md 作为固定作品名、方向 A、125 题要求和提交闭环的唯一事实源。"],
+    outputs: ["技术方案大纲", "演示脚本", "材料清单", "项目唯一事实源"],
     memory: "交付材料可引用正式知识，但不把材料草稿反向污染知识库。",
     graph: "未来边：KnowledgeItem supports DeliverableSection。",
     risks: ["比赛材料与正式知识不一致", "缺阿里云百炼凭证", "时间节点遗漏"],
@@ -501,7 +501,7 @@ const knowledgeRunbook = {
 
 const implementationBlueprint = {
   doc: "technical_implementation_plan.md",
-  alignmentDoc: "赛题对齐方案.md",
+  alignmentDoc: "README.md",
   target: "复用 Vibelution 现有 Research、Team Knowledge、RAG、知识库管理员 和 Memory Graph 能力，把 01-09 做成可运行 MVP，并把 10 实验阶段和 11 迭代阶段推进到受限操作型 Agent 账本。",
   activeTeam: {
     teamId: "research-team",
@@ -2880,7 +2880,7 @@ function indexHtml() {
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>神经学机制启发神经网络算法发现科研流程索引</title>
+    <title>面向前沿科学问题的AI假设生成与研究计划设计平台 · 科研流程索引</title>
     <link rel="stylesheet" href="research_flow_pages/flow_pages.css" />
   </head>
   <body>
@@ -2897,7 +2897,7 @@ function indexHtml() {
         <div class="dashboard-hero">
           <div>
             <div class="kicker">Challenge Cup Research Flow Workbench</div>
-            <h1>神经学机制启发神经网络算法发现科研流程审核台</h1>
+            <h1>面向前沿科学问题的AI假设生成与研究计划设计平台</h1>
             <p class="subtitle">首页只承载审核判断：现在能跑到哪里、哪些边界不能越过、哪些节点需要继续规划。完整说明仍保留在节点页和计划库中。</p>
           </div>
           <div class="tag-row">
@@ -2910,7 +2910,7 @@ function indexHtml() {
             <a href="#flow-board">查看流程图</a>
             <a class="secondary" href="research_flow_pages/01-source-workspace.html">进入 01 知识搜集</a>
             <a class="secondary" href="technical_implementation_plan.md">技术方案</a>
-            <a class="secondary" href="${escapeHtml(implementationBlueprint.alignmentDoc)}">赛题对齐方案</a>
+            <a class="secondary" href="${escapeHtml(implementationBlueprint.alignmentDoc)}">项目唯一事实源</a>
           </div>
         </div>
         <aside class="dashboard-panel">
