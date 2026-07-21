@@ -453,6 +453,86 @@ from core.web.services.session.turn_diagnostics import (
     _touch_chat_turn_work_run,
     _record_session_chat_review_candidate_event,
 )
+from core.web.services.session.agent_runtime import (
+    _agent_from_lookup,
+    _recover_active_direct_session_agent,
+    _session_agent_is_available,
+    _release_other_direct_session_agents,
+    _normalize_session_agent_llm_bindings,
+    default_session_llm_bindings,
+    _session_agent_reasoning_effort,
+    _session_llm_model_choices,
+    _session_agent_id_snapshot,
+    get_session_llm_options,
+    _normalize_session_agent_profile_id,
+    llm_bindings_for_profile_id,
+    _session_agent_config_for_llm_bindings,
+    _resolve_session_agent_llm,
+    _session_agent_config_for_llm_slot,
+    _agent_prompt_snapshot_matches_agent,
+    _ensure_session_agent_prompt_snapshot,
+    _render_agent_prompt_snapshot_block,
+    _prompt_snapshot_context_segment,
+    _record_session_prompt_snapshot_event,
+    _session_agent_supports_image_input,
+    _session_agent_dialogue_model_name,
+    _session_agent_llm_slot_model_id,
+    _session_agent_llm_model_name,
+    _image_input_unsupported_message,
+    _session_agent_runtime_cache_fingerprint,
+    _session_agent_runtime_config_fingerprint_payload,
+    _invalidate_session_agent_runtime_cache,
+    _acquire_chat_agent_for_session,
+    _create_chat_agent_for_session,
+    create_chat_agent,
+    _attach_session_llm_runtime_diagnostics,
+    _session_agent_unavailable_message,
+    _record_session_agent_unavailable_event,
+    _record_session_llm_usage_event,
+    _record_session_agent_binding_recovered_event,
+    _record_session_agent_child_direct_binding_repaired_event,
+    _record_session_agent_binding_updated_event,
+    _record_session_agent_missing_index_event,
+    _record_session_agent_missing_index_batch_event,
+)
+from core.web.services.session.cache_context import (
+    _aggregate_session_provider_cache_usage,
+    _context_segment_content_preview,
+    _attach_context_segment_content_previews,
+    _ordered_model_input_context_segments,
+    _estimated_provider_prefix_cache_segments,
+    _provider_cache_calibration_reason,
+    _estimate_context_segment_tokens,
+    _context_segment,
+    _agent_context_segment_label,
+    _session_context_segments_block,
+    _session_context_segments_without_prompt_template,
+)
+from core.web.services.session.image_attachments import (
+    store_session_image_artifact,
+    store_session_user_image_attachment,
+    _remember_session_uploaded_attachment,
+    _decode_attachment_filename,
+    _session_image_extension_for_upload,
+    _sniff_image_extension,
+    resolve_session_image_artifact,
+    _resolve_session_image_attachment,
+    resolve_session_image_attachment_data_url,
+    _resolve_session_image_attachments,
+    _find_session_attachment_metadata,
+    _has_recent_image_attachment_reference,
+    _find_recent_user_image_attachment,
+    _is_ready_user_image_attachment,
+    _normalize_message_attachments,
+    _matches_attachment_reference_pattern,
+    _contains_any_attachment_reference_pattern,
+    _resolve_image_attachment_capability,
+    _recent_image_attachment_missing_message,
+    _record_image_attachment_capability_event,
+    _build_llm_image_attachments,
+    _record_session_attachment_event,
+    _safe_attachment_log_summary,
+)
 from core.web.services.session.projection import (
     list_sessions,
     get_session_detail,
@@ -856,295 +936,6 @@ def _ensure_session_workspace(session_id: str) -> Path:
     return workspace_path
 
 
-def store_session_image_artifact(
-    session_id: str,
-    image_bytes: bytes,
-    *,
-    output_format: str = "png",
-    source: str = "image2",
-) -> dict[str, Any]:
-    """Persist a generated image under the current session workspace."""
-
-    normalized_session_id = str(session_id or "").strip()
-    if not normalized_session_id:
-        raise SessionValidationError("Session id is required for image artifact storage.")
-    normalized_format = str(output_format or "png").strip().lower().lstrip(".") or "png"
-    if normalized_format not in _SESSION_IMAGE_ARTIFACT_CONTENT_TYPES:
-        raise SessionValidationError("Unsupported image artifact format.")
-    payload = bytes(image_bytes or b"")
-    if not payload:
-        raise SessionValidationError("Image artifact payload is empty.")
-
-    with _CHAT_STATE_LOCK:
-        _ensure_session_mutable(normalized_session_id)
-        workspace_path = _ensure_session_workspace(normalized_session_id)
-        images_dir = (workspace_path / "artifacts" / "images").resolve()
-        artifacts_root = (workspace_path / "artifacts").resolve()
-        images_dir.mkdir(parents=True, exist_ok=True)
-        if not images_dir.is_relative_to(artifacts_root):
-            raise SessionValidationError(f"Invalid session image artifact path: {images_dir}")
-
-        artifact_id = f"{source}-{int(time.time() * 1000)}-{secrets.token_hex(4)}.{normalized_format}"
-        output_path = (images_dir / artifact_id).resolve()
-        if output_path.parent != images_dir:
-            raise SessionValidationError("Invalid session image artifact filename.")
-        output_path.write_bytes(payload)
-
-    url = (
-        f"/api/sessions/{quote(normalized_session_id, safe='')}"
-        f"/artifacts/{quote(artifact_id, safe='')}"
-    )
-    relative_path = f"{_session_workspace_relative_path(normalized_session_id)}/artifacts/images/{artifact_id}"
-    return {
-        "artifactId": artifact_id,
-        "filename": artifact_id,
-        "artifactPath": relative_path,
-        "path": str(output_path),
-        "url": url,
-        "imageUrl": url,
-        "downloadUrl": f"{url}?download=1",
-        "contentType": _SESSION_IMAGE_ARTIFACT_CONTENT_TYPES[normalized_format],
-        "sizeBytes": len(payload),
-        "outputFormat": normalized_format,
-    }
-
-
-def store_session_user_image_attachment(
-    session_id: str,
-    image_bytes: bytes,
-    *,
-    filename: str = "",
-    content_type: str = "",
-) -> dict[str, Any]:
-    """Persist a user-uploaded image attachment under the current session workspace."""
-
-    normalized_content_type = str(content_type or "").split(";", 1)[0].strip().lower()
-    original_filename = _decode_attachment_filename(filename)
-    extension = _session_image_extension_for_upload(original_filename, normalized_content_type)
-    if extension not in _SESSION_IMAGE_ARTIFACT_CONTENT_TYPES:
-        raise SessionValidationError("Unsupported image attachment format.")
-    payload = bytes(image_bytes or b"")
-    if not payload:
-        raise SessionValidationError("Image attachment payload is empty.")
-    if len(payload) > _SESSION_USER_IMAGE_MAX_BYTES:
-        raise SessionValidationError("Image attachment is too large.")
-    sniffed_extension = _sniff_image_extension(payload)
-    if not sniffed_extension:
-        raise SessionValidationError("Unsupported image attachment format.")
-    extension = sniffed_extension
-    normalized_content_type = _SESSION_IMAGE_ARTIFACT_CONTENT_TYPES[extension]
-
-    with _CHAT_STATE_LOCK:
-        _ensure_session_mutable(session_id)
-        artifact = store_session_image_artifact(
-            session_id,
-            payload,
-            output_format=extension,
-            source="user-image",
-        )
-        attachment = {
-            **artifact,
-            "kind": "user_image",
-            "status": "ready",
-            "filename": original_filename or artifact["filename"],
-        }
-        _remember_session_uploaded_attachment(session_id, attachment)
-    _record_session_attachment_event(
-        session_id,
-        "stored",
-        attachment,
-        outcome="stored",
-    )
-    return attachment
-
-
-def _remember_session_uploaded_attachment(session_id: str, attachment: dict[str, Any]) -> None:
-    normalized_session_id = str(session_id or "").strip()
-    if not normalized_session_id:
-        return
-    with _CHAT_STATE_LOCK:
-        payload = load_chat_state(PROJECT_ROOT)
-        _materialize_agent_directory_conversation_locked(payload, normalized_session_id, source="store_session_user_image_attachment")
-        conversation = _find_conversation_entry(payload, normalized_session_id)
-        if conversation is None:
-            raise SessionNotFoundError(f"Session not found: {normalized_session_id}")
-        uploaded = list(conversation.get("uploaded_attachments") or [])
-        artifact_id = str(attachment.get("artifactId") or "").strip()
-        uploaded = [
-            item for item in uploaded
-            if not isinstance(item, dict) or str(item.get("artifactId") or "").strip() != artifact_id
-        ]
-        uploaded.append({key: value for key, value in attachment.items() if key != "path"})
-        conversation["uploaded_attachments"] = uploaded[-24:]
-        conversation["updated_at"] = _now_timestamp()
-        payload["updated_at"] = conversation["updated_at"]
-        save_chat_state(PROJECT_ROOT, payload)
-
-
-def _decode_attachment_filename(filename: str) -> str:
-    raw = str(filename or "").strip()
-    if "%" not in raw:
-        return Path(raw).name
-    try:
-        from urllib.parse import unquote
-
-        return Path(unquote(raw)).name
-    except Exception:
-        return Path(raw).name
-
-
-def _session_image_extension_for_upload(filename: str, content_type: str) -> str:
-    extension = Path(str(filename or "")).suffix.lower().lstrip(".")
-    if extension == "jpeg":
-        extension = "jpg"
-    if extension in _SESSION_IMAGE_ARTIFACT_CONTENT_TYPES:
-        return extension
-    for known_extension, known_type in _SESSION_IMAGE_ARTIFACT_CONTENT_TYPES.items():
-        if str(content_type or "").lower() == known_type:
-            return "jpg" if known_extension == "jpeg" else known_extension
-    return extension
-
-
-def _sniff_image_extension(payload: bytes) -> str:
-    data = bytes(payload or b"")
-    if data.startswith(b"\x89PNG\r\n\x1a\n"):
-        return "png"
-    if data.startswith(b"\xff\xd8\xff"):
-        return "jpg"
-    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
-        return "webp"
-    return ""
-
-
-def resolve_session_image_artifact(session_id: str, artifact_id: str) -> tuple[Path, str]:
-    normalized_session_id = str(session_id or "").strip()
-    normalized_artifact_id = str(artifact_id or "").strip()
-    if not normalized_session_id or not normalized_artifact_id:
-        raise FileNotFoundError("missing session artifact")
-    artifact_name = Path(normalized_artifact_id).name
-    if artifact_name != normalized_artifact_id or not _SESSION_IMAGE_ARTIFACT_SAFE_CHARS.fullmatch(artifact_name):
-        raise FileNotFoundError("invalid session artifact")
-    extension = Path(artifact_name).suffix.lower().lstrip(".")
-    content_type = _SESSION_IMAGE_ARTIFACT_CONTENT_TYPES.get(extension)
-    if not content_type:
-        raise FileNotFoundError("unsupported session artifact")
-
-    sessions_root = developer_sandbox.sandboxed_workspace_path(PROJECT_ROOT, "sessions").resolve()
-    workspace_path = _ensure_session_workspace(normalized_session_id).resolve()
-    if not workspace_path.is_relative_to(sessions_root):
-        raise FileNotFoundError("invalid session artifact path")
-    images_dir = (workspace_path / "artifacts" / "images").resolve()
-    target_path = (images_dir / artifact_name).resolve()
-    if not target_path.is_relative_to(images_dir) or not target_path.exists() or not target_path.is_file():
-        raise FileNotFoundError("session artifact not found")
-    return target_path, content_type
-
-
-def _resolve_session_image_attachment(session_id: str, artifact_id: str) -> dict[str, Any]:
-    normalized_session_id = str(session_id or "").strip()
-    normalized_artifact_id = str(artifact_id or "").strip()
-    path, content_type = resolve_session_image_artifact(normalized_session_id, normalized_artifact_id)
-    url = (
-        f"/api/sessions/{quote(normalized_session_id, safe='')}"
-        f"/artifacts/{quote(Path(normalized_artifact_id).name, safe='')}"
-    )
-    relative_path = (
-        f"{_session_workspace_relative_path(normalized_session_id)}"
-        f"/artifacts/images/{Path(normalized_artifact_id).name}"
-    )
-    return {
-        "artifactId": Path(normalized_artifact_id).name,
-        "filename": Path(normalized_artifact_id).name,
-        "artifactPath": relative_path,
-        "path": str(path),
-        "url": url,
-        "imageUrl": url,
-        "downloadUrl": f"{url}?download=1",
-        "contentType": content_type,
-        "sizeBytes": path.stat().st_size,
-        "kind": "user_image",
-        "status": "ready",
-    }
-
-
-def resolve_session_image_attachment_data_url(session_id: str, artifact_id: str) -> dict[str, Any]:
-    """Read a session image artifact as a transient data URL for model input."""
-
-    attachment = _resolve_session_image_attachment(session_id, artifact_id)
-    path = Path(str(attachment.get("path") or ""))
-    payload = path.read_bytes()
-    if len(payload) > _SESSION_USER_IMAGE_MAX_BYTES:
-        raise SessionValidationError("Image attachment is too large for model input.")
-    content_type = str(attachment.get("contentType") or "").strip() or "image/png"
-    data_url = f"data:{content_type};base64,{base64.b64encode(payload).decode('ascii')}"
-    return {
-        **{key: value for key, value in attachment.items() if key != "path"},
-        "dataUrl": data_url,
-    }
-
-
-def _resolve_session_image_attachments(
-    session_id: str,
-    attachment_ids: Any,
-    *,
-    conversation: dict[str, Any] | None = None,
-) -> list[dict[str, Any]]:
-    normalized_ids: list[str] = []
-    seen: set[str] = set()
-    for raw_id in list(attachment_ids or []):
-        artifact_id = str(raw_id or "").strip()
-        if not artifact_id or artifact_id in seen:
-            continue
-        seen.add(artifact_id)
-        normalized_ids.append(artifact_id)
-    if len(normalized_ids) > _SESSION_USER_IMAGE_MAX_ATTACHMENTS_PER_TURN:
-        raise SessionValidationError("Too many image attachments for one turn.")
-    attachments: list[dict[str, Any]] = []
-    for artifact_id in normalized_ids:
-        existing = _find_session_attachment_metadata(conversation, artifact_id)
-        if existing:
-            attachments.append(existing)
-            continue
-        try:
-            attachments.append(_resolve_session_image_attachment(session_id, artifact_id))
-        except FileNotFoundError as exc:
-            raise SessionValidationError(f"Image attachment not found: {artifact_id}") from exc
-    return attachments
-
-
-def _find_session_attachment_metadata(conversation: dict[str, Any] | None, artifact_id: str) -> dict[str, Any]:
-    if not isinstance(conversation, dict):
-        return {}
-    normalized_artifact_id = str(artifact_id or "").strip()
-    if not normalized_artifact_id:
-        return {}
-    conversation_id = str(conversation.get("conversation_id") or conversation.get("id") or "").strip()
-    for message in reversed(_session_ledger_visible_messages(conversation_id)):
-        if not isinstance(message, dict):
-            continue
-        for attachment in _normalize_message_attachments(message.get("attachments") or []):
-            if str(attachment.get("artifactId") or "").strip() == normalized_artifact_id:
-                return dict(attachment)
-    for attachment in reversed(list(conversation.get("uploaded_attachments") or [])):
-        if not isinstance(attachment, dict):
-            continue
-        normalized = _normalize_message_attachments([attachment])
-        if normalized and str(normalized[0].get("artifactId") or "").strip() == normalized_artifact_id:
-            return dict(normalized[0])
-    return {}
-
-
-def _has_recent_image_attachment_reference(message: str) -> bool:
-    normalized = str(message or "").strip().lower()
-    if not normalized:
-        return False
-    if _contains_any_attachment_reference_pattern(normalized, _RECENT_IMAGE_REFERENCE_EXACT_PATTERNS):
-        return True
-    has_reference = _contains_any_attachment_reference_pattern(normalized, _RECENT_IMAGE_REFERENCE_WORDS)
-    has_image_target = _contains_any_attachment_reference_pattern(normalized, _RECENT_IMAGE_TARGET_WORDS)
-    return has_reference and has_image_target
-
-
 def _image_context_request_for_retry(
     message: str,
     *,
@@ -1228,38 +1019,6 @@ def _looks_like_image_retry_context(text: Any) -> bool:
         "retry",
     )
     return any(term in compact for term in image_terms) and any(term in compact for term in retry_terms)
-
-
-def _find_recent_user_image_attachment(conversation: dict[str, Any] | None) -> dict[str, Any]:
-    if not isinstance(conversation, dict):
-        return {}
-    conversation_id = str(conversation.get("conversation_id") or conversation.get("id") or "").strip()
-    for message in reversed(_session_ledger_visible_messages(conversation_id)):
-        if not isinstance(message, dict):
-            continue
-        if str(message.get("role") or "").strip().lower() != "user":
-            continue
-        attachments = _normalize_message_attachments(message.get("attachments") or message.get("imageAttachments") or [])
-        for attachment in reversed(attachments):
-            if _is_ready_user_image_attachment(attachment):
-                return dict(attachment)
-    for attachment in reversed(list(conversation.get("uploaded_attachments") or [])):
-        normalized = _normalize_message_attachments([attachment])
-        if normalized and _is_ready_user_image_attachment(normalized[0]):
-            return dict(normalized[0])
-    return {}
-
-
-def _is_ready_user_image_attachment(attachment: dict[str, Any]) -> bool:
-    if not isinstance(attachment, dict):
-        return False
-    artifact_id = str(attachment.get("artifactId") or "").strip()
-    status = str(attachment.get("status") or "ready").strip().lower()
-    kind = str(attachment.get("kind") or "user_image").strip().lower()
-    content_type = str(attachment.get("contentType") or "").strip().lower()
-    return bool(artifact_id) and status == "ready" and kind == "user_image" and (
-        not content_type or content_type.startswith("image/")
-    )
 
 
 def append_session_assistant_artifact_message(
@@ -1447,46 +1206,6 @@ def _agent_avatar_path(agent: dict[str, Any], metadata: dict[str, Any] | None = 
     return str(agent_directory_service.AGENT_AVATAR_RELATIVE_DIR / filename)
 
 
-def _agent_from_lookup(
-    agent_by_id: dict[str, dict[str, Any]] | None,
-    agent_id: str,
-) -> dict[str, Any] | None:
-    normalized = str(agent_id or "").strip()
-    if not normalized:
-        return None
-    if agent_by_id is not None:
-        agent = agent_by_id.get(normalized)
-        return agent if isinstance(agent, dict) else None
-    return get_agent(normalized)
-
-
-def _recover_active_direct_session_agent(
-    session_id: str,
-    *,
-    agent_by_id: dict[str, dict[str, Any]] | None,
-    preferred_agent_id: str = "",
-) -> dict[str, Any] | None:
-    normalized_session_id = str(session_id or "").strip()
-    if not normalized_session_id or not isinstance(agent_by_id, dict):
-        return None
-    normalized_preferred_agent_id = str(preferred_agent_id or "").strip()
-    preferred_agent = _agent_from_lookup(agent_by_id, normalized_preferred_agent_id) if normalized_preferred_agent_id else None
-    if (
-        isinstance(preferred_agent, dict)
-        and str(preferred_agent.get("status") or "active").strip().lower() != "archived"
-        and str(preferred_agent.get("directSessionId") or "").strip() == normalized_session_id
-    ):
-        return preferred_agent
-    for agent in agent_by_id.values():
-        if not isinstance(agent, dict):
-            continue
-        if str(agent.get("status") or "active").strip().lower() == "archived":
-            continue
-        if str(agent.get("directSessionId") or "").strip() == normalized_session_id:
-            return agent
-    return None
-
-
 def _archived_agent_for_direct_session(session_id: str) -> dict[str, Any] | None:
     normalized_session_id = str(session_id or "").strip()
     if not normalized_session_id:
@@ -1503,10 +1222,6 @@ def _archived_agent_for_direct_session(session_id: str) -> dict[str, Any] | None
         if str(agent.get("status") or "active").strip().lower() == "archived":
             return agent
     return None
-
-
-def _session_agent_is_available(summary: dict[str, Any]) -> bool:
-    return bool(str(summary.get("agentId") or "").strip()) and not bool(summary.get("agentMissing"))
 
 
 def _resolve_active_agent_for_turn(
@@ -1885,32 +1600,6 @@ def update_chat_session_title(session_id: str, title: str) -> dict:
         else:
             _publish_session_detail_snapshot(conversation_id)
     return detail
-
-
-def _release_other_direct_session_agents(session_id: str, *, keep_agent_id: str) -> None:
-    normalized_session_id = str(session_id or "").strip()
-    normalized_keep_agent_id = str(keep_agent_id or "").strip()
-    if not normalized_session_id or not normalized_keep_agent_id:
-        return
-    try:
-        directory_state = agent_directory_service.load_state()
-    except Exception:
-        return
-    for item in directory_state.get("agents") or []:
-        if not isinstance(item, dict):
-            continue
-        agent_id = str(item.get("agentId") or "").strip()
-        if not agent_id or agent_id == normalized_keep_agent_id:
-            continue
-        if str(item.get("status") or "active").strip().lower() == "archived":
-            continue
-        if str(item.get("directSessionId") or "").strip() != normalized_session_id:
-            continue
-        update_agent_instance(
-            agent_id,
-            direct_session_id="",
-            metadata={"previousDirectSessionId": normalized_session_id},
-        )
 
 
 def _remove_replacement_direct_session_after_failed_agent_reset(
@@ -2788,10 +2477,6 @@ def _sanitize_message_content(role: str, content: Any) -> str:
     return sanitize_assistant_visible_text(text)
 
 
-def _normalize_message_attachments(value: Any) -> list[dict[str, Any]]:
-    return normalize_chat_attachments(value)
-
-
 def _session_reference_prompt_block(references: list[dict[str, Any]]) -> str:
     normalized = _normalize_session_references(references)
     if not normalized:
@@ -2908,77 +2593,6 @@ def _session_last_llm_usage(messages: list[dict[str, Any]]) -> dict[str, Any] | 
     return None
 
 
-def _aggregate_session_provider_cache_usage(
-    messages: list[dict[str, Any]],
-    *,
-    fallback_usage: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    usages: list[dict[str, Any]] = []
-    seen: set[tuple[str, int, int, int]] = set()
-    for message in list(messages or []):
-        if str((message or {}).get("role") or "").strip().lower() != "assistant":
-            continue
-        metadata = message.get("metadata") if isinstance(message.get("metadata"), dict) else {}
-        usage = _normalize_turn_llm_usage(metadata.get("llmUsage") or metadata.get("llm_usage"))
-        if usage is None or usage.get("source") != "provider_usage":
-            continue
-        input_tokens = _coerce_nonnegative_int(usage.get("inputTokens") or 0)
-        if not input_tokens:
-            continue
-        key = (
-            str(usage.get("recordedAt") or "").strip(),
-            input_tokens,
-            _coerce_nonnegative_int(usage.get("cachedInputTokens") or 0),
-            _coerce_nonnegative_int(usage.get("outputTokens") or 0),
-        )
-        if key in seen:
-            continue
-        seen.add(key)
-        usages.append(usage)
-    fallback = _normalize_turn_llm_usage(fallback_usage)
-    if fallback is not None and fallback.get("source") == "provider_usage":
-        fallback_input = _coerce_nonnegative_int(fallback.get("inputTokens") or 0)
-        fallback_key = (
-            str(fallback.get("recordedAt") or "").strip(),
-            fallback_input,
-            _coerce_nonnegative_int(fallback.get("cachedInputTokens") or 0),
-            _coerce_nonnegative_int(fallback.get("outputTokens") or 0),
-        )
-        if fallback_input and fallback_key not in seen:
-            usages.append(fallback)
-    total_input = sum(_coerce_nonnegative_int(item.get("inputTokens") or 0) for item in usages)
-    total_cached = sum(_coerce_nonnegative_int(item.get("cachedInputTokens") or 0) for item in usages)
-    total_creation = sum(_coerce_nonnegative_int(item.get("cacheCreationInputTokens") or 0) for item in usages)
-    total_uncached = sum(_coerce_nonnegative_int(item.get("uncachedInputTokens") or 0) for item in usages)
-    if total_input and not total_uncached:
-        total_uncached = max(0, total_input - total_cached)
-    return {
-        "inputTokens": total_input,
-        "cachedInputTokens": min(total_cached, total_input) if total_input else 0,
-        "cacheReadInputTokens": min(total_cached, total_input) if total_input else 0,
-        "cacheCreationInputTokens": min(total_creation, total_input) if total_input else 0,
-        "uncachedInputTokens": min(total_uncached, total_input) if total_input else 0,
-        "cacheHitRate": (min(total_cached, total_input) / total_input) if total_input else 0.0,
-        "turnCount": len(usages),
-    }
-
-
-def _context_segment_content_preview(value: Any) -> str:
-    if not isinstance(value, dict):
-        return ""
-    for key in (
-        "contentPreview",
-        "content_preview",
-        "promptPreview",
-        "prompt_preview",
-        "content",
-    ):
-        preview = _compact_preview_text(value.get(key), max_lines=3, max_chars=240)
-        if preview:
-            return preview
-    return ""
-
-
 def _message_list_content_preview(messages: list[dict[str, Any]], *, limit: int = 4) -> str:
     parts: list[str] = []
     for item in list(messages or [])[-limit:]:
@@ -3018,26 +2632,6 @@ def _active_task_content_preview(active_task: Any) -> str:
         task.get("next_action"),
     ]
     return _compact_preview_text(" | ".join(str(item or "") for item in parts if str(item or "").strip()), max_lines=1, max_chars=240)
-
-
-def _attach_context_segment_content_previews(
-    manifest: dict[str, Any] | None,
-    previews: dict[str, str],
-) -> dict[str, Any] | None:
-    if not isinstance(manifest, dict):
-        return manifest
-    updated = dict(manifest)
-    next_segments: list[dict[str, Any]] = []
-    for item in list(updated.get("segments") or []):
-        if not isinstance(item, dict):
-            continue
-        segment = dict(item)
-        preview = previews.get(str(segment.get("key") or "").strip()) or _context_segment_content_preview(segment)
-        if preview:
-            segment["contentPreview"] = preview
-        next_segments.append(segment)
-    updated["segments"] = next_segments
-    return updated
 
 
 _SESSION_LLM_PAYLOAD_TRACE_TEXT_FIELDS = {
@@ -3131,36 +2725,6 @@ def _normalize_llm_payload_trace_map(value: Any, allowed_keys: set[str]) -> dict
     return safe_item
 
 
-def _ordered_model_input_context_segments(context_composition: dict[str, Any] | None) -> list[dict[str, Any]]:
-    if not isinstance(context_composition, dict):
-        return []
-    segments = [
-        dict(item)
-        for item in list(context_composition.get("segments") or [])
-        if isinstance(item, dict) and bool(item.get("includedInModelInput"))
-    ]
-    if not segments:
-        return []
-    by_key: dict[str, list[dict[str, Any]]] = {}
-    for item in segments:
-        key = str(item.get("key") or "").strip()
-        if key:
-            by_key.setdefault(key, []).append(item)
-    ordered: list[dict[str, Any]] = []
-    for key in list(context_composition.get("modelInputOrdering") or []):
-        normalized_key = str(key or "").strip()
-        if not normalized_key:
-            continue
-        bucket = by_key.get(normalized_key) or []
-        if bucket:
-            ordered.append(bucket.pop(0))
-    used_ids = {id(item) for item in ordered}
-    for item in segments:
-        if id(item) not in used_ids:
-            ordered.append(item)
-    return ordered
-
-
 def _weighted_token_allocation(total_tokens: int, weights: list[int]) -> list[int]:
     total = _coerce_nonnegative_int(total_tokens)
     normalized_weights = [max(0, _coerce_nonnegative_int(weight)) for weight in weights]
@@ -3186,136 +2750,6 @@ def _weighted_token_allocation(total_tokens: int, weights: list[int]) -> list[in
         remainder -= 1
         index += 1
     return allocations
-
-
-def _estimated_provider_prefix_cache_segments(tokens: int) -> list[dict[str, Any]]:
-    normalized_tokens = _coerce_nonnegative_int(tokens)
-    if normalized_tokens <= 0:
-        return []
-    definitions = [
-        {
-            "key": "system_prompt",
-            "label": "system prompt",
-            "promptCategory": "system_prompt",
-            "weight": 14,
-            "description": "Estimated stable system prompt portion inside provider input not mapped by the session manifest.",
-            "contentPreview": "系统提示词估算段；原文未展开。",
-        },
-        {
-            "key": "agent_protocol",
-            "label": "agent protocol",
-            "promptCategory": "agent_spec",
-            "weight": 14,
-            "description": "Estimated agent behavior/protocol instructions inside provider input not mapped by the session manifest.",
-            "contentPreview": "Agent 规范/协议估算段；原文未展开。",
-        },
-        {
-            "key": "tool_descriptions",
-            "label": "tool descriptions",
-            "promptCategory": "tool_descriptions",
-            "weight": 20,
-            "description": "Estimated natural-language tool descriptions inside provider input not mapped by the session manifest.",
-            "contentPreview": "工具描述估算段；原文未展开。",
-        },
-        {
-            "key": "tool_schema",
-            "label": "tool schema",
-            "promptCategory": "tool_schema",
-            "weight": 42,
-            "description": "Estimated provider tool/function schema tokens inside provider input not mapped by the session manifest.",
-            "contentPreview": "工具 schema / 函数定义估算段；原文未展开。",
-        },
-        {
-            "key": "provider_unmapped",
-            "label": "provider unmapped",
-            "promptCategory": "provider_unmapped",
-            "weight": 10,
-            "description": "Provider input tokens not attributable to a known prompt segment category.",
-            "contentPreview": "Provider 输入剩余未映射段；用于提示这里仍是估算边界。",
-        },
-    ]
-    if normalized_tokens < len(definitions):
-        definitions = definitions[:normalized_tokens]
-    allocations = _weighted_token_allocation(
-        normalized_tokens,
-        [_coerce_nonnegative_int(item["weight"]) for item in definitions],
-    )
-    segments: list[dict[str, Any]] = []
-    for index, (definition, allocation) in enumerate(zip(definitions, allocations), start=0):
-        token_count = _coerce_nonnegative_int(allocation)
-        if token_count <= 0:
-            continue
-        segments.append(
-            {
-                "key": str(definition["key"]),
-                "label": str(definition["label"]),
-                "tokens": token_count,
-                "status": "computed_hit",
-                "source": "provider_input_remainder",
-                "description": str(definition["description"]),
-                "cachePolicy": "assumed_stable_prefix",
-                "order": index,
-                "contentPreview": str(definition["contentPreview"]),
-                "promptCategory": str(definition["promptCategory"]),
-                "segmentKind": "prompt_source",
-                "accuracy": "estimated",
-                "parentKey": "provider_input_remainder",
-                "estimated": True,
-            }
-        )
-    return segments
-
-
-def _provider_cache_calibration_reason(
-    *,
-    provider: str,
-    model: str,
-    source: str,
-    cache_creation_tokens: int,
-    overestimated_tokens: int,
-    provider_extra_cached_tokens: int,
-) -> tuple[str, str]:
-    provider_name = provider.lower()
-    model_name = model.lower()
-    if source != "provider_usage":
-        return (
-            "not_available",
-            "Provider cache usage was not returned; computed segments are shown as theoretical cache candidates.",
-        )
-    if overestimated_tokens > 0:
-        if "xiaomi" in provider_name or "mimo" in model_name:
-            if cache_creation_tokens <= 0:
-                return (
-                    "provider_lower_than_computed",
-                    "Xiaomi/MiMo returned fewer cache-read tokens than the computed stable-prefix upper bound and reported no new cache creation for this turn.",
-                )
-            return (
-                "provider_lower_than_computed",
-                "Xiaomi/MiMo returned fewer cache-read tokens than the computed stable-prefix upper bound; the difference is attributed to computed prefix segments.",
-            )
-        if "qwen" in provider_name or "qwen" in model_name:
-            return (
-                "provider_lower_than_computed",
-                "Qwen provider cache usage is lower than the computed stable-prefix upper bound; the difference is attributed to computed prefix segments.",
-            )
-        if "openai" in provider_name or "gpt" in model_name:
-            return (
-                "provider_lower_than_computed",
-                "OpenAI provider cache usage is lower than the computed stable-prefix upper bound; the difference is attributed to computed prefix segments.",
-            )
-        return (
-            "provider_lower_than_computed",
-            "Provider cache usage is lower than the computed stable-prefix upper bound; the difference is attributed to computed prefix segments.",
-        )
-    if provider_extra_cached_tokens > 0:
-        return (
-            "provider_higher_than_computed",
-            "Provider reported more cached input than the context manifest can map to computed cacheable segments.",
-        )
-    return (
-        "aligned",
-        "Provider cache usage matches the computed stable-prefix upper bound for mapped input tokens.",
-    )
 
 
 def _cache_average_from_usage(cache_usage: dict[str, Any] | None) -> dict[str, int]:
@@ -3382,10 +2816,6 @@ def _estimate_session_context_tokens(character_count: int, tool_call_count: int)
     return max(0, int((max(0, character_count) + 2) // 3) + max(0, tool_call_count) * 12)
 
 
-def _estimate_context_segment_tokens(chars: int, item_count: int = 0) -> int:
-    return max(0, int((max(0, chars) + 2) // 3) + max(0, item_count) * 8)
-
-
 def _message_list_chars(messages: list[dict[str, Any]]) -> int:
     total = 0
     for item in list(messages or []):
@@ -3419,55 +2849,6 @@ def _active_task_context_chars(active_task: Any) -> int:
     return len("\n".join(str(item or "") for item in parts if str(item or "").strip()))
 
 
-def _context_segment(
-    key: str,
-    label: str,
-    *,
-    content: Any = None,
-    chars: int = 0,
-    tokens: int = 0,
-    item_count: int = 0,
-    status: str = "included",
-    source: str = "",
-    description: str = "",
-    kind: str = "",
-    lifecycle: str = "",
-    authority: int = 0,
-    volatility: int = 0,
-    relevance: int = 0,
-    placement: str = "",
-    cache_policy: str = "",
-    retention: str = "",
-    included_in_model_input: bool = True,
-    evidence_ref: str = "",
-    content_hash: str = "",
-    stale: bool = False,
-) -> dict[str, Any]:
-    return build_context_segment(
-        key,
-        label,
-        content=content,
-        chars=chars,
-        tokens=tokens,
-        item_count=item_count,
-        status=status,
-        source=source,
-        description=description,
-        kind=kind,
-        lifecycle=lifecycle,
-        authority=authority,
-        volatility=volatility,
-        relevance=relevance,
-        placement=placement,
-        cache_policy=cache_policy,
-        retention=retention,
-        included_in_model_input=included_in_model_input,
-        evidence_ref=evidence_ref,
-        content_hash=content_hash,
-        stale=stale,
-    )
-
-
 _AGENT_CONTEXT_SEGMENT_LABELS = {
     "agent_runtime": "agent runtime rules",
     "research_organization": "research organization context",
@@ -3498,11 +2879,6 @@ _CONTEXT_PROMPT_CATEGORIES = {
     "active_skill": "skill_context",
     "attachments": "attachments",
 }
-
-
-def _agent_context_segment_label(key: str) -> str:
-    normalized = str(key or "").strip()
-    return _AGENT_CONTEXT_SEGMENT_LABELS.get(normalized, normalized.replace("_", " ") or "agent context")
 
 
 def _agent_context_prompt_category(key: str) -> str:
@@ -3823,76 +3199,6 @@ def _latest_user_message_id(conversation_id: str, messages: list[dict[str, Any]]
     return ""
 
 
-def _normalize_session_agent_llm_bindings(value: Any) -> dict[str, dict[str, str]]:
-    normalized = agent_directory_service.normalize_agent_llm_bindings(value)
-    if agent_dialogue_model_id({"llmBindings": normalized}):
-        return normalized
-    default_model_id = _default_session_dialogue_model_id()
-    if default_model_id:
-        normalized["dialogue"] = {"modelId": default_model_id}
-    return normalized
-
-
-def default_session_llm_bindings() -> dict[str, dict[str, str]]:
-    return _normalize_session_agent_llm_bindings(None)
-
-
-def _session_agent_reasoning_effort(agent: dict[str, Any] | None, slot: str = SESSION_LLM_SLOT_DIALOGUE) -> str:
-    metadata = agent.get("metadata") if isinstance(agent, dict) and isinstance(agent.get("metadata"), dict) else {}
-    by_slot = metadata.get("llmReasoningEffort") if isinstance(metadata.get("llmReasoningEffort"), dict) else {}
-    return str(by_slot.get(slot) or "").strip().lower()
-
-
-def _session_llm_model_choices() -> list[dict[str, Any]]:
-    from .agent_model_candidate_service import list_agent_model_candidates
-
-    default_model_id = _default_session_dialogue_model_id()
-    choices = copy.deepcopy(list_agent_model_candidates().get("candidates") or [])
-    for choice in choices:
-        choice["isDefault"] = str(choice.get("modelId") or "").strip() == default_model_id
-        values = [
-            str(value or "").strip().lower()
-            for value in list(choice.get("reasoningEffortValues") or [])
-            if str(value or "").strip()
-        ]
-        choice["reasoningEffortValues"] = values
-        provided_options = choice.get("reasoningEffortOptions") if isinstance(choice.get("reasoningEffortOptions"), list) else []
-        option_by_value = {
-            str(item.get("value") or "").strip().lower(): item
-            for item in provided_options
-            if isinstance(item, dict) and str(item.get("value") or "").strip()
-        }
-        choice["reasoningEffortOptions"] = [
-            {
-                "value": value,
-                "label": str((option_by_value.get(value) or {}).get("label") or {
-                    "low": "低",
-                    "medium": "中",
-                    "high": "高",
-                }.get(value, value)).strip(),
-                "description": str((option_by_value.get(value) or {}).get("description") or {
-                    "low": "更快响应，适合直接问题",
-                    "medium": "平衡速度与推理深度",
-                    "high": "更深推理，适合复杂任务",
-                }.get(value, "")).strip(),
-            }
-            for value in values
-        ]
-        requested_default = str(choice.get("defaultReasoningEffort") or "").strip().lower()
-        choice["defaultReasoningEffort"] = requested_default if requested_default in values else "medium" if "medium" in values else (values[0] if values else "")
-    return choices
-
-
-def _session_agent_id_snapshot(session_id: str) -> str:
-    normalized_session_id = str(session_id or "").strip()
-    with _CHAT_STATE_LOCK:
-        payload = load_chat_state(PROJECT_ROOT)
-        conversation = _find_conversation_entry(payload, normalized_session_id)
-        if conversation is None:
-            raise SessionNotFoundError(f"Session not found: {normalized_session_id}")
-        return str(conversation.get("agent_id") or conversation.get("agentId") or "").strip()
-
-
 def _session_fixed_model_choice(session_id: str) -> dict[str, Any]:
     normalized_session_id = str(session_id or "").strip()
     agent_id = _session_agent_id_snapshot(normalized_session_id)
@@ -3992,17 +3298,6 @@ def _session_reasoning_effort_snapshot(session_id: str) -> str:
     return _ensure_session_reasoning_effort_initialized(session_id)
 
 
-def get_session_llm_options(session_id: str) -> dict[str, Any]:
-    current_reasoning_effort = _session_reasoning_effort_snapshot(session_id)
-    model = _session_fixed_model_choice(session_id)
-    return {
-        "sessionId": str(session_id or "").strip(),
-        "currentModelId": str(model.get("modelRef") or model.get("modelId") or "").strip(),
-        "currentReasoningEffort": normalize_reasoning_effort(current_reasoning_effort),
-        "model": model,
-    }
-
-
 def update_session_reasoning_effort(
     session_id: str,
     *,
@@ -4060,23 +3355,6 @@ def update_session_reasoning_effort(
     return get_session_llm_options(normalized_session_id)
 
 
-def _normalize_session_agent_profile_id(value: Any) -> str:
-    normalized = str(value or "").strip()
-    return normalized or DEFAULT_SESSION_AGENT_PROFILE_ID
-
-
-def llm_bindings_for_profile_id(profile_id: Any) -> dict[str, dict[str, str]]:
-    normalized_profile_id = _normalize_session_agent_profile_id(profile_id)
-    try:
-        config = get_config()
-        profile = config.llm.get_profile(profile_id=normalized_profile_id)
-        model_id, _entry = config.llm.get_model_library_entry_for_profile(profile)
-    except Exception:
-        model_id = ""
-    normalized = {"dialogue": {"modelId": str(model_id or "").strip()}} if str(model_id or "").strip() else {}
-    return _normalize_session_agent_llm_bindings(normalized)
-
-
 def _default_session_dialogue_model_id() -> str:
     try:
         config = get_config()
@@ -4101,34 +3379,6 @@ def _default_session_dialogue_model_id() -> str:
         if model:
             return str(model_id or "").strip()
     return ""
-
-
-def _session_agent_config_for_llm_bindings(agent_instance: dict[str, Any] | None) -> Any:
-    return _session_agent_config_for_llm_slot(agent_instance, SESSION_LLM_SLOT_DIALOGUE)
-
-
-def _resolve_session_agent_llm(
-    agent_instance: dict[str, Any] | None,
-    llm_slot: str,
-    *,
-    reasoning_effort: str | None = None,
-) -> Any:
-    normalized_slot = str(llm_slot or "").strip() or SESSION_LLM_SLOT_DIALOGUE
-    try:
-        return resolve_agent_llm(
-            agent_instance,
-            normalized_slot,
-            config=get_config(),
-            runtime_profile_id=DEFAULT_SESSION_AGENT_PROFILE_ID,
-            fallback_to_dialogue=normalized_slot != SESSION_LLM_SLOT_DIALOGUE,
-            reasoning_effort_override=reasoning_effort,
-        )
-    except AgentLlmResolutionError as exc:
-        raise SessionValidationError(str(exc)) from exc
-
-
-def _session_agent_config_for_llm_slot(agent_instance: dict[str, Any] | None, llm_slot: str) -> Any:
-    return _resolve_session_agent_llm(agent_instance, llm_slot).config
 
 
 def _session_prompt_cache_partition(
@@ -4170,201 +3420,6 @@ def _session_prompt_cache_partition(
     raw = "|".join(raw_parts)
     digest = hashlib.sha256(raw.encode("utf-8", errors="replace")).hexdigest()[:16]
     return developer_sandbox.sandbox_prompt_cache_partition(f"chat-session-{digest}", surface="chat", project_root=PROJECT_ROOT)
-
-
-def _agent_prompt_snapshot_matches_agent(
-    snapshot: Any,
-    *,
-    agent_id: str,
-    prompt_template_id: str,
-    builtin_content_version: int = 0,
-    chat_base_prompt_version: int = 0,
-) -> bool:
-    if not isinstance(snapshot, dict):
-        return False
-    if str(snapshot.get("reason") or "").strip():
-        return False
-    if str(snapshot.get("agentId") or "").strip() != str(agent_id or "").strip():
-        return False
-    if str(snapshot.get("promptTemplateId") or snapshot.get("templateId") or "").strip() != str(prompt_template_id or "").strip():
-        return False
-    try:
-        snapshot_builtin_content_version = max(0, int(snapshot.get("builtinContentVersion") or 0))
-    except (TypeError, ValueError):
-        snapshot_builtin_content_version = 0
-    try:
-        snapshot_chat_base_prompt_version = max(0, int(snapshot.get("chatBasePromptVersion") or 0))
-    except (TypeError, ValueError):
-        snapshot_chat_base_prompt_version = 0
-    return (
-        max(0, int(builtin_content_version or 0)) <= snapshot_builtin_content_version
-        and max(0, int(chat_base_prompt_version or 0)) <= snapshot_chat_base_prompt_version
-    )
-
-
-def _ensure_session_agent_prompt_snapshot(
-    session_id: str,
-    agent: dict[str, Any] | None,
-    *,
-    snapshot_hint: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    normalized_session_id = str(session_id or "").strip()
-    if not normalized_session_id or not isinstance(agent, dict):
-        return {}
-    agent_id = str(agent.get("agentId") or "").strip()
-    prompt_template_id = str(agent.get("promptTemplateId") or "").strip()
-    if not agent_id or not prompt_template_id:
-        return {}
-    include_chat_base = str(agent.get("primaryMode") or "").strip().lower() == "chat"
-    required_versions = prompt_template_service.get_agent_prompt_snapshot_versions(
-        prompt_template_id,
-        project_root=PROJECT_ROOT,
-        include_chat_base=include_chat_base,
-    )
-    if _agent_prompt_snapshot_matches_agent(
-        snapshot_hint,
-        agent_id=agent_id,
-        prompt_template_id=prompt_template_id,
-        builtin_content_version=required_versions.get("builtinContentVersion", 0),
-        chat_base_prompt_version=required_versions.get("chatBasePromptVersion", 0),
-    ):
-        _record_session_prompt_snapshot_event(
-            normalized_session_id,
-            agent_id=agent_id,
-            snapshot=snapshot_hint,
-            outcome="reused",
-        )
-        return dict(snapshot_hint)
-    with _CHAT_STATE_LOCK, chat_state_transaction(PROJECT_ROOT):
-        payload = load_chat_state(PROJECT_ROOT)
-        conversation = _find_conversation_entry(payload, normalized_session_id)
-        if conversation is None:
-            return {}
-        existing = conversation.get("agentPromptSnapshot")
-        if _agent_prompt_snapshot_matches_agent(
-            existing,
-            agent_id=agent_id,
-            prompt_template_id=prompt_template_id,
-            builtin_content_version=required_versions.get("builtinContentVersion", 0),
-            chat_base_prompt_version=required_versions.get("chatBasePromptVersion", 0),
-        ):
-            _record_session_prompt_snapshot_event(
-                normalized_session_id,
-                agent_id=agent_id,
-                snapshot=existing,
-                outcome="reused",
-            )
-            return dict(existing)
-        snapshot = prompt_template_service.build_agent_prompt_snapshot(
-            prompt_template_id,
-            agent_id=agent_id,
-            agent_code=str(agent.get("agentCode") or "").strip(),
-            agent_display_name=str(agent.get("displayName") or "").strip(),
-            project_root=PROJECT_ROOT,
-            include_chat_base=include_chat_base,
-        )
-        if str(snapshot.get("reason") or "").strip():
-            _record_session_prompt_snapshot_event(
-                normalized_session_id,
-                agent_id=agent_id,
-                snapshot=snapshot,
-                outcome="failed",
-            )
-            return dict(snapshot)
-        conversation["agentPromptSnapshot"] = dict(snapshot)
-        payload["updated_at"] = _now_timestamp()
-        save_chat_state(PROJECT_ROOT, payload)
-        _record_session_prompt_snapshot_event(
-            normalized_session_id,
-            agent_id=agent_id,
-            snapshot=snapshot,
-            outcome="refreshed" if isinstance(existing, dict) else "created",
-        )
-        return dict(snapshot)
-
-
-def _render_agent_prompt_snapshot_block(snapshot: Any) -> str:
-    return prompt_template_service.render_agent_prompt_snapshot_system_block(snapshot if isinstance(snapshot, dict) else None)
-
-
-def _prompt_snapshot_context_segment(snapshot_block: str, snapshot: Any) -> dict[str, Any] | None:
-    text = str(snapshot_block or "").strip()
-    if not text:
-        return None
-    return {
-        "key": "agent_prompt_snapshot",
-        "block": text,
-        "placement": "cache_prefix",
-        "stability": "session_static",
-        "chars": len(text),
-        "hash": hashlib.sha256(text.encode("utf-8", errors="ignore")).hexdigest()[:16],
-        "promptTemplateId": str((snapshot or {}).get("promptTemplateId") or "").strip() if isinstance(snapshot, dict) else "",
-        "contentHash": str((snapshot or {}).get("contentHash") or "").strip() if isinstance(snapshot, dict) else "",
-    }
-
-
-def _session_context_segments_block(segments: Any, placement: str) -> str:
-    normalized_placement = str(placement or "").strip()
-    return "\n\n".join(
-        str(item.get("block") or "").strip()
-        for item in list(segments or [])
-        if isinstance(item, dict)
-        and str(item.get("placement") or "").strip() == normalized_placement
-        and str(item.get("block") or "").strip()
-    ).strip()
-
-
-def _session_context_segments_without_prompt_template(segments: Any) -> list[dict[str, Any]]:
-    filtered: list[dict[str, Any]] = []
-    for item in list(segments or []):
-        if not isinstance(item, dict):
-            continue
-        if str(item.get("key") or "").strip() == "prompt_template":
-            continue
-        filtered.append(dict(item))
-    return filtered
-
-
-def _record_session_prompt_snapshot_event(
-    session_id: str,
-    *,
-    agent_id: str,
-    snapshot: dict[str, Any],
-    outcome: str,
-) -> None:
-    try:
-        record_runtime_scene_event(
-            "conversation",
-            "prompt_snapshot",
-            f"session.prompt_snapshot.{str(outcome or 'observed').strip() or 'observed'}",
-            level="warning" if outcome == "failed" else "info",
-            outcome=str(outcome or "observed").strip() or "observed",
-            message="Session Agent prompt snapshot state changed.",
-            fields={
-                "sessionId": str(session_id or "").strip(),
-                "agentId": str(agent_id or "").strip(),
-                "promptTemplateId": str(snapshot.get("promptTemplateId") or snapshot.get("templateId") or "").strip(),
-                "contentHash": str(snapshot.get("contentHash") or "").strip(),
-                "contentLength": int(snapshot.get("contentLength") or len(str(snapshot.get("content") or ""))),
-                "category": str(snapshot.get("category") or "").strip(),
-                "reason": str(snapshot.get("reason") or "").strip(),
-                "source": "session_service",
-            },
-            child_log_path=f"conversations/{_safe_session_workspace_token(session_id)}-prompt-snapshots.jsonl",
-            child_log_payload={
-                "session_id": str(session_id or "").strip(),
-                "agent_id": str(agent_id or "").strip(),
-                "prompt_template_id": str(snapshot.get("promptTemplateId") or snapshot.get("templateId") or "").strip(),
-                "content_hash": str(snapshot.get("contentHash") or "").strip(),
-                "content_length": int(snapshot.get("contentLength") or len(str(snapshot.get("content") or ""))),
-                "category": str(snapshot.get("category") or "").strip(),
-                "reason": str(snapshot.get("reason") or "").strip(),
-                "outcome": str(outcome or "").strip(),
-            },
-            lifecycle=True,
-        )
-    except Exception:
-        return
 
 
 def _session_prompt_cache_scope(*, agent_id: str = "") -> str:
@@ -4432,188 +3487,6 @@ def _localize_lease_conflict(reason: str, *, lang: str) -> str:
         zh=f"当前资源正在被另一条运行占用，请等待它收束后再继续。{fallback}",
         en=f"Another active run holds a conflicting resource lease. Wait for it to finish before continuing. {fallback}",
     ).strip()
-
-
-def _matches_attachment_reference_pattern(normalized: str, pattern: str) -> bool:
-    if not pattern:
-        return False
-    if re.fullmatch(r"[a-z0-9][a-z0-9 _'-]*", pattern):
-        return re.search(rf"(?<![a-z0-9]){re.escape(pattern)}(?![a-z0-9])", normalized) is not None
-    return pattern in normalized
-
-
-def _contains_any_attachment_reference_pattern(normalized: str, patterns: tuple[str, ...]) -> bool:
-    return any(_matches_attachment_reference_pattern(normalized, pattern) for pattern in patterns)
-
-
-def _resolve_image_attachment_capability(
-    *,
-    agent_instance: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    supports_image_input = _session_agent_supports_image_input(
-        agent_instance,
-        slot=SESSION_LLM_SLOT_DIALOGUE,
-    )
-    model_id = _session_agent_llm_slot_model_id(agent_instance, SESSION_LLM_SLOT_DIALOGUE)
-    model_name = _session_agent_llm_model_name(
-        agent_instance,
-        slot=SESSION_LLM_SLOT_DIALOGUE,
-    )
-    return {
-        "supports_image_input": supports_image_input,
-        "model_name": model_name,
-        "model_id": model_id,
-        "llm_slot": SESSION_LLM_SLOT_DIALOGUE,
-    }
-
-
-def _session_agent_supports_image_input(
-    agent_instance: dict[str, Any] | None,
-    *,
-    slot: str = SESSION_LLM_SLOT_DIALOGUE,
-) -> bool | None:
-    model_id = _session_agent_llm_slot_model_id(agent_instance, slot)
-    if not model_id:
-        return None
-    try:
-        config = get_config()
-        resolved = resolve_agent_llm(
-            agent_instance,
-            slot,
-            config=config,
-            fallback_to_dialogue=slot != SESSION_LLM_SLOT_DIALOGUE,
-        )
-        capability_records = (
-            resolved.resolved_spec.provider_details.get("capabilities", {})
-            if resolved.resolved_spec is not None
-            and isinstance(resolved.resolved_spec.provider_details, dict)
-            else {}
-        )
-        image_input_record = (
-            capability_records.get("image_input")
-            if isinstance(capability_records, dict)
-            else None
-        )
-        if isinstance(image_input_record, dict):
-            capability_value = str(image_input_record.get("value") or "").strip().lower()
-            if capability_value == "supported":
-                return True
-            if capability_value == "unsupported":
-                return False
-            if capability_value == "unknown":
-                return None
-        if resolved.capabilities is not None:
-            supports_image_input = resolved.capabilities.supports_image_input
-            return supports_image_input if isinstance(supports_image_input, bool) else None
-        llm_config = config.llm
-    except Exception:
-        try:
-            llm_config = get_config().llm
-        except Exception:
-            return None
-    entry = llm_config.model_library.get(model_id)
-    if not isinstance(entry, dict):
-        return None
-    provider_id = str(entry.get("provider_id") or "").strip()
-    try:
-        provider = llm_config.get_provider(provider_id)
-        lowered_provider = str(getattr(provider, "kind", "") or "").strip().lower()
-    except Exception:
-        lowered_provider = ""
-    return model_record_image_input_support(entry, provider_kind=lowered_provider)
-
-
-def _session_agent_dialogue_model_name(agent_instance: dict[str, Any] | None) -> str:
-    return _session_agent_llm_model_name(agent_instance, slot=SESSION_LLM_SLOT_DIALOGUE)
-
-
-def _session_agent_llm_slot_model_id(agent_instance: dict[str, Any] | None, slot: str) -> str:
-    normalized_slot = str(slot or "").strip() or SESSION_LLM_SLOT_DIALOGUE
-    return agent_llm_model_id(
-        agent_instance,
-        normalized_slot,
-        fallback_to_dialogue=normalized_slot != SESSION_LLM_SLOT_DIALOGUE,
-    )
-
-
-def _session_agent_llm_model_name(agent_instance: dict[str, Any] | None, *, slot: str = SESSION_LLM_SLOT_DIALOGUE) -> str:
-    model_id = _session_agent_llm_slot_model_id(agent_instance, slot)
-    if not model_id:
-        return ""
-    try:
-        entry = get_config().llm.model_library.get(model_id)
-    except Exception:
-        return ""
-    if not isinstance(entry, dict):
-        return ""
-    return str(entry.get("model") or entry.get("label") or model_id).strip()
-
-
-def _recent_image_attachment_missing_message(lang: str) -> str:
-    return text_for(
-        lang,
-        zh="我没有在当前会话里找到可重新查看的最近图片附件。请重新发送图片，或在消息里附上要我查看的图片。",
-        en="I could not find a recent image attachment in this session to inspect again. Please attach or resend the image.",
-    )
-
-
-def _image_input_unsupported_message(lang: str, *, model_name: str = "") -> str:
-    model_label = str(model_name or "").strip() or text_for(lang, zh="当前模型", en="current model")
-    return text_for(
-        lang,
-        zh=f"当前 Agent 使用的对话模型 `{model_label}` 明确不支持图像输入，所以我没有把图片发送给模型。请在 Agent 管理中切换到支持图像输入的对话模型；需要生成/调整图片时，由对话模型理解上下文后再按工具协议调用 image2 工具。",
-        en=f"The current Agent dialogue model `{model_label}` does not support image input, so I did not send the image to the model. Switch this Agent to a vision-capable dialogue model; image generation/editing should be invoked by the dialogue model through the image2 tool protocol after it understands the context.",
-    )
-
-
-def _record_image_attachment_capability_event(
-    session_id: str,
-    *,
-    turn_id: str,
-    decision: str,
-    reason: str,
-    outcome: str,
-    agent_id: str,
-    attachments: list[dict[str, Any]],
-    level: str = "info",
-    fields: dict[str, Any] | None = None,
-) -> None:
-    try:
-        record_runtime_scene_event(
-            "conversation",
-            "image_attachment_capability",
-            "conversation.image_attachment.capability_checked",
-            level=level,
-            outcome=outcome,
-            message="Image input capability checked without semantic intent routing.",
-            fields={
-                "sessionId": str(session_id or "").strip(),
-                "turnId": str(turn_id or "").strip(),
-                "decision": str(decision or "").strip(),
-                "reason": str(reason or "").strip(),
-                "agentId": str(agent_id or "").strip(),
-                "attachmentCount": len(_normalize_message_attachments(attachments or [])),
-                "attachments": _safe_attachment_log_summary(attachments or []),
-                **(fields or {}),
-            },
-            child_log_path=f"conversations/{_safe_session_workspace_token(session_id)}-image-capability.jsonl",
-            child_log_payload={
-                "session_id": str(session_id or "").strip(),
-                "turn_id": str(turn_id or "").strip(),
-                "decision": str(decision or "").strip(),
-                "reason": str(reason or "").strip(),
-                "agent_id": str(agent_id or "").strip(),
-                "attachment_count": len(_normalize_message_attachments(attachments or [])),
-                "attachments": _safe_attachment_log_summary(attachments or []),
-                **(fields or {}),
-            },
-            lifecycle=True,
-        )
-    except Exception as exc:
-        _debug_logger.warning(
-            f"runtime scene image attachment capability log skipped: {type(exc).__name__}: {exc}",
-            tag="LOGS",
-        )
 
 
 def _replacement_active_chat_turn_id(*, exclude_turn_id: str = "") -> str:
@@ -4906,204 +3779,6 @@ def _source_collection_stage_task_required_tool_names(context: dict[str, Any]) -
 
 
 
-def _session_agent_runtime_cache_fingerprint(
-    *,
-    session_workspace: Path,
-    agent_instance: dict[str, Any] | None,
-    llm_slot: str,
-    resolved_llm: Any | None,
-    mode: str,
-    prompt_snapshot_hash: str,
-) -> str:
-    agent = agent_instance if isinstance(agent_instance, dict) else {}
-    config = getattr(resolved_llm, "config", None) or _session_agent_config_for_llm_slot(agent_instance, llm_slot)
-    config_payload = _session_agent_runtime_config_fingerprint_payload(config)
-    semantic_agent_fields = {
-        key: agent.get(key)
-        for key in (
-            "agentId",
-            "updatedAt",
-            "status",
-            "primaryMode",
-            "promptTemplateId",
-            "profileId",
-            "roleKey",
-            "llmBindings",
-            "toolPolicy",
-            "capabilities",
-            "memoryPolicy",
-            "workspacePolicy",
-        )
-        if key in agent
-    }
-    raw = json.dumps(
-        {
-            "workspacePath": str(Path(session_workspace).resolve()),
-            "agent": semantic_agent_fields,
-            "llmSlot": str(llm_slot or "").strip(),
-            "llmModelId": str(getattr(resolved_llm, "model_id", "") or "").strip(),
-            "mode": str(mode or "chat").strip(),
-            "promptSnapshotHash": str(prompt_snapshot_hash or "").strip(),
-            "config": config_payload,
-        },
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-        default=str,
-    )
-    return hashlib.sha256(raw.encode("utf-8", errors="replace")).hexdigest()
-
-
-def _session_agent_runtime_config_fingerprint_payload(config: Any) -> Any:
-    """Keep session runtime reuse tied only to config consumed by chat Agents.
-
-    The AppConfig also contains unrelated runtime domains (for example UI and
-    pet state). Including the whole object causes a new Agent and transport on
-    ordinary chat turns even when the dialogue model contract is unchanged.
-    """
-
-    if hasattr(config, "model_dump"):
-        try:
-            raw_payload: Any = config.model_dump(mode="json")
-        except (TypeError, ValueError):
-            raw_payload = config.model_dump()
-    elif hasattr(config, "dict"):
-        raw_payload = config.dict()
-    elif isinstance(config, Mapping):
-        raw_payload = dict(config)
-    else:
-        return repr(config)
-    if not isinstance(raw_payload, Mapping):
-        return raw_payload
-    return {
-        key: raw_payload[key]
-        for key in _SESSION_AGENT_RUNTIME_CONFIG_FINGERPRINT_KEYS
-        if key in raw_payload
-    }
-
-
-def _invalidate_session_agent_runtime_cache(session_id: str = "") -> int:
-    normalized_session_id = str(session_id or "").strip()
-    removed = 0
-    with _SESSION_AGENT_RUNTIME_CACHE_LOCK:
-        if not normalized_session_id:
-            removed = len(_SESSION_AGENT_RUNTIME_CACHE)
-            _SESSION_AGENT_RUNTIME_CACHE.clear()
-            return removed
-        prefix = f"{normalized_session_id}|"
-        for cache_key in [key for key in _SESSION_AGENT_RUNTIME_CACHE if key.startswith(prefix)]:
-            _SESSION_AGENT_RUNTIME_CACHE.pop(cache_key, None)
-            removed += 1
-    return removed
-
-
-def _acquire_chat_agent_for_session(
-    session_id: str,
-    session_workspace: Path,
-    agent_instance: dict[str, Any] | None,
-    llm_slot: str = SESSION_LLM_SLOT_DIALOGUE,
-    resolved_llm: Any | None = None,
-    mode: str = "chat",
-    prompt_snapshot_hash: str = "",
-) -> tuple[Any, dict[str, Any]]:
-    normalized_session_id = str(session_id or "").strip()
-    normalized_slot = str(llm_slot or SESSION_LLM_SLOT_DIALOGUE).strip() or SESSION_LLM_SLOT_DIALOGUE
-    normalized_mode = str(mode or "chat").strip() or "chat"
-    cache_allowed = bool(normalized_session_id and isinstance(agent_instance, dict) and normalized_mode == "chat")
-    if not cache_allowed:
-        with _SESSION_AGENT_RUNTIME_CACHE_LOCK:
-            entry_count = len(_SESSION_AGENT_RUNTIME_CACHE)
-        return (
-            _create_chat_agent_for_session(
-                session_workspace,
-                agent_instance,
-                llm_slot=normalized_slot,
-                resolved_llm=resolved_llm,
-                mode=normalized_mode,
-            ),
-            {"status": "bypassed", "hit": False, "entryCount": entry_count},
-        )
-
-    fingerprint = _session_agent_runtime_cache_fingerprint(
-        session_workspace=session_workspace,
-        agent_instance=agent_instance,
-        llm_slot=normalized_slot,
-        resolved_llm=resolved_llm,
-        mode=normalized_mode,
-        prompt_snapshot_hash=prompt_snapshot_hash,
-    )
-    cache_key = f"{normalized_session_id}|{normalized_slot}"
-    with _SESSION_AGENT_RUNTIME_CACHE_LOCK:
-        cached = _SESSION_AGENT_RUNTIME_CACHE.get(cache_key)
-        if cached and str(cached.get("fingerprint") or "") == fingerprint:
-            cached["lastAccess"] = _perf_counter()
-            runtime_agent = cached.get("agent")
-            entry_count = len(_SESSION_AGENT_RUNTIME_CACHE)
-        else:
-            runtime_agent = None
-            entry_count = len(_SESSION_AGENT_RUNTIME_CACHE)
-    if runtime_agent is not None:
-        prepare_reuse = getattr(runtime_agent, "prepare_for_session_turn_reuse", None)
-        if callable(prepare_reuse):
-            prepare_reuse()
-        return runtime_agent, {
-            "status": "hit",
-            "hit": True,
-            "entryCount": entry_count,
-        }
-
-    runtime_agent = _create_chat_agent_for_session(
-        session_workspace,
-        agent_instance,
-        llm_slot=normalized_slot,
-        resolved_llm=resolved_llm,
-        mode=normalized_mode,
-    )
-    with _SESSION_AGENT_RUNTIME_CACHE_LOCK:
-        _SESSION_AGENT_RUNTIME_CACHE[cache_key] = {
-            "agent": runtime_agent,
-            "fingerprint": fingerprint,
-            "lastAccess": _perf_counter(),
-        }
-        while len(_SESSION_AGENT_RUNTIME_CACHE) > _SESSION_AGENT_RUNTIME_CACHE_MAX_ENTRIES:
-            oldest_key = min(
-                _SESSION_AGENT_RUNTIME_CACHE,
-                key=lambda key: float(_SESSION_AGENT_RUNTIME_CACHE.get(key, {}).get("lastAccess") or 0.0),
-            )
-            _SESSION_AGENT_RUNTIME_CACHE.pop(oldest_key, None)
-        entry_count = len(_SESSION_AGENT_RUNTIME_CACHE)
-    return runtime_agent, {"status": "miss", "hit": False, "entryCount": entry_count}
-
-
-def _create_chat_agent_for_session(
-    session_workspace: Path,
-    agent_instance: dict[str, Any] | None,
-    llm_slot: str = SESSION_LLM_SLOT_DIALOGUE,
-    resolved_llm: Any | None = None,
-    mode: str = "chat",
-) -> Any:
-    agent_config = getattr(resolved_llm, "config", None) or _session_agent_config_for_llm_slot(agent_instance, llm_slot)
-    runtime_agent = call_agent_factory_with_supported_kwargs(
-        create_chat_agent,
-        mode=mode,
-        workspace_path=session_workspace,
-        config=agent_config,
-    )
-    try:
-        runtime_agent._allow_session_subagent_auto_delegation = False
-    except (AttributeError, TypeError):
-        pass
-    return runtime_agent
-
-
-def create_chat_agent(workspace_path: str | Path | None = None, config: Any | None = None, mode: str = "chat") -> Any:
-    return create_agent_runtime(
-        mode=str(mode or "chat").strip() or "chat",
-        workspace_path=str(workspace_path) if workspace_path else None,
-        config=config,
-    )
-
-
 def _skill_invocation_payload(command: SkillSlashCommand | None) -> dict[str, Any] | None:
     if command is None:
         return None
@@ -5230,66 +3905,6 @@ def _attach_session_prompt_cache_metadata(
         usage.setdefault("llmModelId", metadata.get("llmModelId") or "")
     return result
 
-
-def _attach_session_llm_runtime_diagnostics(result: Any, diagnostics: dict[str, Any] | None) -> Any:
-    if not isinstance(result, dict) or not isinstance(diagnostics, dict) or not diagnostics:
-        return result
-    allowed_keys = {
-        "llmModelId",
-        "runtimeProfileId",
-        "providerId",
-        "providerKind",
-        "model",
-    }
-    sanitized = {
-        str(key): str(value).strip()
-        for key, value in diagnostics.items()
-        if str(key or "").strip() in allowed_keys and str(value or "").strip()
-    }
-    if not sanitized:
-        return result
-    metadata = dict(result.get("metadata") or {}) if isinstance(result.get("metadata"), dict) else {}
-    for key, value in sanitized.items():
-        metadata.setdefault(key, value)
-    result["metadata"] = metadata
-    llm_failure = dict(result.get("llm_failure") or {}) if isinstance(result.get("llm_failure"), dict) else {}
-
-    def fill_empty(key: str, value: str) -> None:
-        if value and not str(llm_failure.get(key) or "").strip():
-            llm_failure[key] = value
-
-    fill_empty("provider", sanitized.get("providerId") or sanitized.get("provider") or "")
-    fill_empty("provider_id", sanitized.get("providerId") or "")
-    fill_empty("providerId", sanitized.get("providerId") or "")
-    fill_empty("provider_kind", sanitized.get("providerKind") or "")
-    fill_empty("providerKind", sanitized.get("providerKind") or "")
-    fill_empty("model", sanitized.get("model") or "")
-    fill_empty("llm_model_id", sanitized.get("llmModelId") or "")
-    fill_empty("llmModelId", sanitized.get("llmModelId") or "")
-    fill_empty("runtime_profile_id", sanitized.get("runtimeProfileId") or "")
-    fill_empty("runtimeProfileId", sanitized.get("runtimeProfileId") or "")
-    result["llm_failure"] = llm_failure
-    return result
-
-
-
-def _build_llm_image_attachments(session_id: str, attachments: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    prepared: list[dict[str, Any]] = []
-    for attachment in _normalize_message_attachments(attachments):
-        artifact_id = str(attachment.get("artifactId") or "").strip()
-        if not artifact_id:
-            continue
-        try:
-            prepared.append(resolve_session_image_attachment_data_url(session_id, artifact_id))
-        except (FileNotFoundError, OSError, SessionValidationError) as exc:
-            _record_session_attachment_event(
-                session_id,
-                "prepare_failed",
-                attachment,
-                outcome=type(exc).__name__,
-            )
-            raise SessionValidationError(f"Image attachment could not be prepared: {artifact_id}") from exc
-    return prepared
 
 
 
@@ -5560,96 +4175,6 @@ def _record_session_turn_started_event(
         )
 
 
-def _session_agent_unavailable_message(reason: str, *, lang: str) -> str:
-    if str(reason or "").strip() == "archived_agent":
-        return text_for(
-            lang,
-            zh="当前会话引用的 Agent 已归档，不能继续运行。请在 Agent 管理中心选择 active Agent 或显式恢复后再发送。",
-            en="This session references an archived Agent and cannot run. Choose an active Agent in Agent Center or explicitly restore it first.",
-        )
-    return text_for(
-        lang,
-        zh="当前会话缺少有效 Agent，不能继续运行。请在 Agent 管理中心选择 active Agent 后再发送。",
-        en="This session has no valid Agent and cannot run. Choose an active Agent in Agent Center first.",
-    )
-
-
-def _record_session_agent_unavailable_event(
-    session_id: str,
-    *,
-    agent_id: str,
-    reason: str,
-    agent_status: str = "",
-) -> None:
-    normalized_reason = str(reason or "").strip() or "missing_agent"
-    event_code = (
-        "conversation.turn.blocked_archived_agent"
-        if normalized_reason == "archived_agent"
-        else "conversation.turn.blocked_missing_agent"
-    )
-    try:
-        record_runtime_scene_event(
-            "conversation",
-            "turn_blocked",
-            event_code,
-            message="Web chat turn blocked because the session Agent is unavailable.",
-            level="warning",
-            outcome="blocked",
-            fields={
-                "sessionId": str(session_id or "").strip(),
-                "agentId": str(agent_id or "").strip(),
-                "reason": normalized_reason,
-                "agentStatus": str(agent_status or "").strip(),
-            },
-            lifecycle=True,
-        )
-    except Exception as exc:
-        _debug_logger.warning(
-            f"runtime scene unavailable agent log skipped: {type(exc).__name__}: {exc}",
-            tag="LOGS",
-        )
-
-
-def _record_session_attachment_event(
-    session_id: str,
-    phase: str,
-    attachment: dict[str, Any],
-    *,
-    outcome: str,
-) -> None:
-    try:
-        record_runtime_scene_event(
-            "conversation",
-            f"attachment_{phase}",
-            f"conversation.attachment.{phase}",
-            level="info",
-            outcome=outcome,
-            message=f"Conversation image attachment {phase}.",
-            fields={
-                "sessionId": str(session_id or "").strip(),
-                "attachment": _safe_attachment_log_summary([attachment])[0] if attachment else {},
-            },
-            lifecycle=True,
-        )
-    except Exception:
-        return
-
-
-def _safe_attachment_log_summary(attachments: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    summary: list[dict[str, Any]] = []
-    for item in _normalize_message_attachments(attachments):
-        summary.append(
-            {
-                "artifactId": str(item.get("artifactId") or "").strip(),
-                "filename": str(item.get("filename") or "").strip(),
-                "contentType": str(item.get("contentType") or "").strip(),
-                "sizeBytes": _coerce_nonnegative_int(item.get("sizeBytes") or 0),
-                "kind": str(item.get("kind") or "").strip(),
-            }
-        )
-    return summary
-
-
 def _record_session_turn_scheduled_event(context: dict[str, Any]) -> None:
     session_id = str(context.get("session_id") or "").strip()
     turn_id = str(context.get("turn_id") or "").strip()
@@ -5802,62 +4327,6 @@ def _session_turn_prepare_timing_log_fields(timings: dict[str, Any]) -> dict[str
     }
 
 
-def _record_session_llm_usage_event(
-    session_id: str,
-    turn_id: str,
-    llm_usage: dict[str, Any] | None,
-) -> None:
-    normalized = _normalize_turn_llm_usage(llm_usage)
-    source = str((normalized or {}).get("source") or "missing").strip() or "missing"
-    observed = source == "provider_usage"
-    fields = {
-        "sessionId": str(session_id or "").strip(),
-        "turnId": str(turn_id or "").strip(),
-        "source": source,
-        "inputTokens": int((normalized or {}).get("inputTokens") or 0),
-        "outputTokens": int((normalized or {}).get("outputTokens") or 0),
-        "totalTokens": int((normalized or {}).get("totalTokens") or 0),
-        "cachedInputTokens": int((normalized or {}).get("cachedInputTokens") or 0),
-        "cacheReadInputTokens": int((normalized or {}).get("cacheReadInputTokens") or (normalized or {}).get("cachedInputTokens") or 0),
-        "cacheCreationInputTokens": int((normalized or {}).get("cacheCreationInputTokens") or 0),
-        "uncachedInputTokens": int((normalized or {}).get("uncachedInputTokens") or 0),
-        "cacheHitRate": float((normalized or {}).get("cacheHitRate") or 0.0),
-        "promptCacheScope": str((normalized or {}).get("promptCacheScope") or "").strip(),
-        "promptCachePartition": str((normalized or {}).get("promptCachePartition") or "").strip(),
-        "llmModelId": str((normalized or {}).get("llmModelId") or "").strip(),
-        "provider": str((normalized or {}).get("provider") or "").strip(),
-        "model": str((normalized or {}).get("model") or "").strip(),
-    }
-    event_code = "conversation.llm_usage.recorded" if observed else "conversation.llm_usage.missing"
-    try:
-        result = record_runtime_scene_event(
-            "conversation",
-            "llm_usage",
-            event_code,
-            level="info" if observed else "warning",
-            outcome="recorded" if observed else "missing",
-            message="Conversation turn LLM usage recorded." if observed else "Conversation turn LLM usage missing.",
-            fields=fields,
-            child_log_path=f"conversations/{_safe_session_workspace_token(str(session_id or '').strip())}-turns.jsonl",
-            child_log_payload=fields,
-            lifecycle=False,
-        )
-        if isinstance(result, dict) and result.get("accepted") is False:
-            reason = str(result.get("reason") or "unknown").strip() or "unknown"
-            _debug_logger.warning(
-                (
-                    "conversation llm usage runtime scene event rejected: "
-                    f"eventCode={event_code} reason={reason} "
-                    f"sessionId={fields['sessionId']} turnId={fields['turnId']} "
-                    f"source={source} inputTokens={fields['inputTokens']} "
-                    f"cachedInputTokens={fields['cachedInputTokens']}"
-                ),
-                tag="CHAT",
-            )
-    except Exception:
-        return
-
-
 def _record_session_delete_event(
     phase: str,
     *,
@@ -5889,212 +4358,6 @@ def _record_session_delete_event(
                 **(fields or {}),
             },
             lifecycle=True,
-        )
-    except Exception:
-        return
-
-
-def _record_session_agent_binding_recovered_event(session_id: str, *, agent_id: str) -> None:
-    try:
-        record_runtime_scene_event(
-            "conversation",
-            "agent_binding",
-            "conversation.agent_binding.recovered",
-            message="Recovered a direct-session Agent binding from stale missing-agent metadata.",
-            level="info",
-            outcome="recovered",
-            fields={
-                "sessionId": str(session_id or "").strip(),
-                "agentId": str(agent_id or "").strip(),
-                "source": "session_agent_metadata_repair",
-            },
-            lifecycle=True,
-        )
-    except Exception:
-        return
-
-
-def _record_session_agent_child_direct_binding_repaired_event(
-    session_id: str,
-    *,
-    agent_id: str,
-    previous_direct_session_id: str,
-) -> None:
-    normalized_session_id = str(session_id or "").strip()
-    previous_session_id = str(previous_direct_session_id or "").strip()
-    try:
-        record_runtime_scene_event(
-            "conversation",
-            "session_agent_child_direct_binding_repaired",
-            "session.agent_child_direct_binding_repaired",
-            level="warning",
-            outcome="repaired",
-            message="Root session repaired an Agent directSessionId that pointed at one of its child sessions.",
-            fields={
-                "sessionId": normalized_session_id,
-                "agentId": str(agent_id or "").strip(),
-                "previousDirectSessionId": previous_session_id,
-                "source": "session_child_contract_repair",
-            },
-            child_log_path=f"conversations/{_safe_session_workspace_token(normalized_session_id)}-agent-bindings.jsonl",
-            child_log_payload={
-                "session_id": normalized_session_id,
-                "agent_id": str(agent_id or "").strip(),
-                "previous_direct_session_id": previous_session_id,
-                "source": "session_child_contract_repair",
-            },
-            lifecycle=True,
-        )
-    except Exception:
-        return
-
-
-def _record_session_agent_binding_updated_event(
-    session_id: str,
-    *,
-    agent_id: str,
-    source: str,
-    prompt_template_id: str = "",
-    role_key: str = "",
-) -> None:
-    normalized_session_id = str(session_id or "").strip()
-    try:
-        record_runtime_scene_event(
-            "conversation",
-            "session_agent_binding_updated",
-            "session.agent_binding_updated",
-            level="info",
-            outcome="updated",
-            message="Session Agent binding updated.",
-            fields={
-                "sessionId": normalized_session_id,
-                "agentId": str(agent_id or "").strip(),
-                "promptTemplateId": str(prompt_template_id or "").strip(),
-                "roleKey": str(role_key or "").strip(),
-                "source": str(source or "").strip(),
-            },
-            child_log_path=f"conversations/{_safe_session_workspace_token(normalized_session_id)}-agent-bindings.jsonl",
-            child_log_payload={
-                "session_id": normalized_session_id,
-                "agent_id": str(agent_id or "").strip(),
-                "prompt_template_id": str(prompt_template_id or "").strip(),
-                "role_key": str(role_key or "").strip(),
-                "source": str(source or "").strip(),
-            },
-            lifecycle=True,
-        )
-    except Exception:
-        return
-
-
-def _record_session_agent_missing_index_event(
-    summary: dict[str, Any],
-    *,
-    source: str,
-) -> None:
-    session_id = str(summary.get("id") or "").strip()
-    if not session_id:
-        return
-    agent_status_code = str(summary.get("agentStatusCode") or "").strip()
-    agent_id = str(summary.get("agentId") or summary.get("agentMissingId") or "").strip()
-    normalized_source = str(source or "").strip()
-    dedupe_key = (str(PROJECT_ROOT.resolve()), session_id, agent_id, agent_status_code, normalized_source)
-    with _SESSION_INDEX_EVENT_DEDUPE_LOCK:
-        if dedupe_key in _SESSION_MISSING_INDEX_EVENT_KEYS:
-            return
-        _SESSION_MISSING_INDEX_EVENT_KEYS.add(dedupe_key)
-    try:
-        record_runtime_scene_event(
-            "conversation",
-            "session_agent_missing",
-            "session.agent_missing.hidden_from_index",
-            level="info",
-            outcome="hidden_control",
-            message="Known stale session hidden from indexes because its bound Agent is missing or archived.",
-            fields={
-                "sessionId": session_id,
-                "agentId": agent_id,
-                "agentStatusCode": agent_status_code,
-                "source": normalized_source,
-                "hiddenFromIndex": True,
-                "controlSignal": True,
-            },
-            child_log_path=f"conversations/{_safe_session_workspace_token(session_id)}-agent-bindings.jsonl",
-            child_log_payload={
-                "session_id": session_id,
-                "agent_id": agent_id,
-                "agent_status_code": agent_status_code,
-                "agent_status_message": trim_lines(str(summary.get("agentStatusMessage") or ""), max_lines=2),
-                "source": normalized_source,
-                "hidden_from_index": True,
-                "control_signal": True,
-            },
-            lifecycle=True,
-        )
-    except Exception:
-        return
-
-
-def _record_session_agent_missing_index_batch_event(
-    summaries: list[dict[str, Any]],
-    *,
-    source: str,
-) -> None:
-    normalized_source = str(source or "").strip()
-    samples: list[dict[str, Any]] = []
-    seen: set[tuple[str, str, str]] = set()
-    hidden_count = 0
-    for summary in list(summaries or []):
-        if not isinstance(summary, dict):
-            continue
-        session_id = str(summary.get("id") or "").strip()
-        if not session_id:
-            continue
-        agent_id = str(summary.get("agentId") or summary.get("agentMissingId") or "").strip()
-        agent_status_code = str(summary.get("agentStatusCode") or "").strip()
-        dedupe_key = (session_id, agent_id, agent_status_code)
-        if dedupe_key in seen:
-            continue
-        seen.add(dedupe_key)
-        hidden_count += 1
-        if len(samples) < 8:
-            samples.append(
-                {
-                    "sessionId": session_id,
-                    "agentId": agent_id,
-                    "agentStatusCode": agent_status_code,
-                    "agentStatusMessage": trim_lines(str(summary.get("agentStatusMessage") or ""), max_lines=2),
-                }
-            )
-    if hidden_count <= 0:
-        return
-    dedupe_key = (
-        str(PROJECT_ROOT.resolve()),
-        normalized_source,
-        hidden_count,
-        tuple((item["sessionId"], item["agentId"], item["agentStatusCode"]) for item in samples),
-    )
-    with _SESSION_INDEX_EVENT_DEDUPE_LOCK:
-        if dedupe_key in _SESSION_MISSING_INDEX_BATCH_EVENT_KEYS:
-            return
-        _SESSION_MISSING_INDEX_BATCH_EVENT_KEYS.add(dedupe_key)
-    try:
-        record_runtime_scene_event(
-            "conversation",
-            "session_agent_missing_batch",
-            "session.agent_missing.hidden_from_index.batch",
-            level="info",
-            outcome="hidden_control",
-            message="Known stale sessions hidden from indexes because their bound Agents are missing or archived.",
-            fields={
-                "source": normalized_source,
-                "hiddenCount": hidden_count,
-                "sampleSessions": samples,
-                "sampleCount": len(samples),
-                "hiddenFromIndex": True,
-                "controlSignal": True,
-            },
-            lifecycle=False,
         )
     except Exception:
         return
