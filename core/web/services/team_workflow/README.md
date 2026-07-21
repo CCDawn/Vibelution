@@ -38,7 +38,8 @@ Align language with frontend claim map: `web/src/routes/teams/README.md`.
 | Knowledge private ingestion/graph/coordination kernel | `knowledge_kernel.py` | session_service |
 | SC residual helpers (import/plan/exclusion/work-run) | `source_collection/residual.py` | session_service |
 | Iteration/export/inbox/stage-round glue | `workflow_ops.py` | session_service |
-| Residual private helpers still on facade | facade remainder | new public mega APIs on facade |
+| Residual private helpers | `facade_helpers.py` | new public mega APIs on facade |
+| Public re-export shell | facade re-exports only | business logic on facade |
 | Public HTTP-facing API surface | `../team_workflow_orchestration_service.py` (facade) | dumping new mega-functions into facade |
 
 ## Product surface ↔ packs
@@ -140,3 +141,11 @@ Align language with frontend claim map: `web/src/routes/teams/README.md`.
 | `source_collection/residual.py` | ~3.1k | import/plan/exclusion/work-run/extraction residual |
 | `workflow_ops.py` | ~0.9k | propose_iteration, export, inbox, stage-round glue |
 | facade after Phase 15 | ~2.0k | re-exports + thinner residual |
+
+
+### Service optimization Phase 18 (facade helpers)
+
+| Pack | ~LOC | Role |
+|------|------|------|
+| `facade_helpers.py` | ~0.9k | remaining workflow/stage/json helpers |
+| facade after Phase 18 | ~1.2k | re-exports only (0 residual function defs) |
