@@ -2120,6 +2120,10 @@ def _onboarding_missing_for_boundary(agent: dict[str, Any], boundary: dict[str, 
         skip = set()
     elif boundary_type == "service_role":
         skip = {"personaProfile"}
+    if str(boundary.get("requiresPersonaProfile") or "").strip().lower() == "false":
+        skip.add("personaProfile")
+    if str(boundary.get("requiresTaskProfile") or "").strip().lower() == "false":
+        skip.add("taskProfile")
     if _agent_allows_empty_prompt_template(agent):
         skip.add("promptTemplateId")
 
