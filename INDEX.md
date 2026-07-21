@@ -1,7 +1,7 @@
 # Vibelution 项目索引
 
-**版本：** v7.4
-**日期：** 2026-07-04
+**版本：** v7.5
+**日期：** 2026-07-21
 **用途：** AI Agent 执行任务的执行参数（结构说明已与仓库同步）
 
 ---
@@ -63,10 +63,12 @@ Vibelution/
 
 | 约束 | 限制 | 当前状态 |
 |------|------|----------|
-| agent.py 体量 | 优先将新逻辑放入 `core/`，入口保持黏合与循环 | ⚠️ 约 2.5k 行；近期偏运维稳定性，结构收敛节奏放缓 |
+| agent.py 体量 | 优先将新逻辑放入 `core/`，入口保持黏合与循环 | ⚠️ 约 2.5k 行；入口保持薄，新逻辑进 `core/` |
 | Core First 规范 | 必须执行 | ✅ 已建立 |
 | 测试 | 变更后跑相关 `pytest`；全量见下 | ✅ `tests/test_*.py` 按功能面持续增长，数量以 `tests/README.md` 中的统计命令为准 |
-| 单文件红线 | core/web/services 与前端 route 控制在 ~2k 行内 | ⚠️ session_service.py 约 1.3w 行、ChatCodingRoute.tsx 约 6.4k 行需拆 |
+| Service facade 体量 | 优先 re-export + pack；新业务尽量不堆 facade | ✅ 四大 facade 约 0.7–1.4k 行（session / workflow / agent_directory / runtime_scene）；业务在 pack |
+| 单文件体量意识 | 实现文件约 1.5–2k 行起评估拆分；约 2.5–3k 为软提示 | ⚠️ 部分 pack / 前端 route 仍厚（如 knowledge*、agent_sessions、ChatCodingRoute 约 3k 行）；规范见 `DEVELOPMENT_STANDARD.md` §8.3 |
+| 规范入口 | 流程 Standard；认领看 services README | ✅ `docs/README.md` 规范地图 |
 
 ---
 

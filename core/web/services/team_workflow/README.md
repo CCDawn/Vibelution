@@ -14,6 +14,32 @@ Align language with frontend claim map: `web/src/routes/teams/README.md`.
 
 **Service optimization Phase 2** (2026-07-21): knowledge / graph / steward public APIs — `docs/plans/2026-07-21-service-optimization-phase2-knowledge.md`.
 
+## 30-second routing (edit here first)
+
+| You are changing… | Open first |
+|-------------------|------------|
+| ensure/get orchestration document | `orchestration_core.py` |
+| Candidates register/import/extract/list | `source_collection/candidates.py` |
+| SC run start / search entry / summary | `source_collection/runs.py` |
+| SC search execution body | `source_collection/search_execution.py` |
+| SC stage task start/writeback/context | `source_collection/stages.py` |
+| SC stage reconcile / cards | `source_collection/stage_reconcile.py` |
+| SC writeback materialize | `source_collection/writeback_materialize.py` |
+| SC import/plan/exclusion/work-run residual | `source_collection/residual.py` |
+| SC storage open | `source_collection/storage.py` |
+| SC projection / summary helpers | `source_collection_projection.py` |
+| SC agent session context seed | `source_collection_context.py` |
+| Experiment plan/smoke/full-run | `experiment.py` |
+| Experiment private kernel | `experiment_kernel.py` |
+| Research loop / stage round | `research_loop.py` |
+| Knowledge / steward / graph / paper-note entry | `knowledge.py` |
+| Knowledge private kernel | `knowledge_kernel.py` |
+| Iteration / export / inbox / stage-round glue | `workflow_ops.py` |
+| Small shared workflow helpers | `facade_helpers.py` |
+| Public import surface only | `../team_workflow_orchestration_service.py` (re-export shell) |
+
+Frontend claim alignment: `web/src/routes/teams/README.md` when present. Structure awareness (soft): `DEVELOPMENT_STANDARD.md` §8.3.
+
 ## Ownership map (claim scopes)
 
 | Task type | Prefer these files | Avoid |

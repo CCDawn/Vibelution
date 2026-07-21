@@ -3,6 +3,18 @@
 Ownership map for structured runtime scene bundles.
 `runtime_scene_service.py` remains the **public import facade**.
 
+## 30-second routing (edit here first)
+
+| You are changing… | Open first |
+|-------------------|------------|
+| `record_*` writers / manifests / delete | `record.py` |
+| list / get detail / evidence / prompt index / retention | `query.py` |
+| diagnosis / issue / work-run / startup signals | `diagnosis.py` |
+| package_index sidecar stale detect/sync | `package_index.py` |
+| Public import surface | `../runtime_scene_service.py` (re-export shell) |
+
+Structure awareness (soft): `DEVELOPMENT_STANDARD.md` §8.3.
+
 ## Ownership map (claim scopes)
 
 | Task type | Prefer these files | Avoid |
