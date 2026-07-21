@@ -9473,6 +9473,7 @@ def test_experiment_plan_draft_uses_ready_algorithm_hypotheses_and_blocks_full_r
 
 def test_experiment_status_separates_frozen_design_best_result_and_latest_diagnostic(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.setattr(team_workflow_orchestration_service, "load_public_config", lambda: {"llm": {"providers": {}}})
     team = team_service.create_team(name="ai科学研究团队")
     stage = team_workflow_orchestration_service.start_research_stage_round(
         team["teamId"],
@@ -9567,6 +9568,7 @@ def test_experiment_status_separates_frozen_design_best_result_and_latest_diagno
 
     status = team_workflow_orchestration_service.get_experiment_planning_status(team["teamId"])
     lifecycle = status["lifecycleProjection"]
+    challenge_program = status["challengeProgramProjection"]
 
     assert status["summary"]["activePlanId"] == "exp_diagnostic_revision12"
     assert lifecycle["stage2"]["status"] == "frozen"
@@ -9583,6 +9585,19 @@ def test_experiment_status_separates_frozen_design_best_result_and_latest_diagno
         "status": "smoke_needs_review",
         "title": "2 to 8 epoch fidelity diagnostic",
     }
+    assert challenge_program["program"]["officialQuestionCount"] == 125
+    assert challenge_program["stage1ComplianceReadiness"]["status"] == "blocked"
+    assert "dashscope_qwen_provider_missing" in challenge_program["stage1ComplianceReadiness"]["blockers"]
+    assert challenge_program["stage2BatchGovernance"]["status"] == "blocked_by_stage1"
+    assert challenge_program["stage2BatchGovernance"]["batchCount"] == 25
+    assert challenge_program["stage2BatchGovernance"]["batchSize"] == 5
+    assert challenge_program["stage3DeepResearchDelivery"]["status"] == "partial"
+    assert challenge_program["stage3DeepResearchDelivery"]["representativeCaseCount"] == 1
+    assert challenge_program["stage3DeepResearchDelivery"]["requiredRepresentativeCaseCount"] == 3
+    assert challenge_program["stage3DeepResearchDelivery"]["caseRecords"][0]["internalStatus"] == "accepted_for_writeup"
+    assert challenge_program["stage3DeepResearchDelivery"]["caseRecords"][0]["projectCompletionStatus"] == "case_only"
+    assert challenge_program["compatibility"]["legacyLifecycleProjectionPreserved"] is True
+    assert challenge_program["compatibility"]["historyRewritten"] is False
 
 
 def test_experiment_design_can_be_frozen_without_any_training_result(tmp_path, monkeypatch):

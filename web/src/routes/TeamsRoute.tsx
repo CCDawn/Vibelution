@@ -3923,7 +3923,32 @@ export function TeamsRoute({
     const stageStatusLoading = !researchStageRoundStatus && researchStageRoundStatusQuery.isPending;
     const stageStatusUnavailable = !researchStageRoundStatus && researchStageRoundStatusQuery.isError;
     const experimentLifecycleProjection = experimentPlanningStatus?.lifecycleProjection;
+    const challengeProgramProjection = experimentPlanningStatus?.challengeProgramProjection;
+    const challengeStageLabel = (stageType: ResearchStageType) => {
+      if (stageType === "knowledge_collection") {
+        return lang === "zh" ? "全量合规与系统可用性" : "Compliance and system readiness";
+      }
+      if (stageType === "experiment") {
+        return lang === "zh" ? "125题批处理与质量治理" : "125-question batch governance";
+      }
+      return lang === "zh" ? "代表性深研闭环与参赛封装" : "Deep-research cases and delivery";
+    };
     const stageStatusLabel = (stageType: ResearchStageType, active: boolean, latestRound: ResearchStagePhaseStatus["latestRound"] | null | undefined) => {
+      if (challengeProgramProjection) {
+        if (stageType === "knowledge_collection") {
+          return challengeProgramProjection.stage1ComplianceReadiness.status === "blocked"
+            ? (lang === "zh" ? "BLOCKED · 待配置" : "BLOCKED · configuration required")
+            : challengeProgramProjection.stage1ComplianceReadiness.status;
+        }
+        if (stageType === "experiment") {
+          return challengeProgramProjection.stage2BatchGovernance.status === "blocked_by_stage1"
+            ? (lang === "zh" ? "等待 Stage1" : "waiting for Stage1")
+            : challengeProgramProjection.stage2BatchGovernance.status;
+        }
+        return challengeProgramProjection.stage3DeepResearchDelivery.status === "partial"
+          ? (lang === "zh" ? "部分完成 · 单案例" : "partial · case only")
+          : challengeProgramProjection.stage3DeepResearchDelivery.status;
+      }
       if (stageType === "knowledge_collection") {
         return knowledgeCollectionStatusLabel;
       }
@@ -3953,6 +3978,17 @@ export function TeamsRoute({
       return lang === "zh" ? "未启动" : "not started";
     };
     const stageStatusStyle = (stageType: ResearchStageType, active: boolean, latestRound: ResearchStagePhaseStatus["latestRound"] | null | undefined) => {
+      if (challengeProgramProjection) {
+        if (stageType === "knowledge_collection" && challengeProgramProjection.stage1ComplianceReadiness.status === "blocked") {
+          return styles.researchStageStatusUnavailable;
+        }
+        if (stageType === "experiment" && challengeProgramProjection.stage2BatchGovernance.status === "blocked_by_stage1") {
+          return styles.researchStageStatusPending;
+        }
+        if (stageType === "iteration" && challengeProgramProjection.stage3DeepResearchDelivery.status === "partial") {
+          return styles.researchStageStatusRecorded;
+        }
+      }
       if (stageType !== "knowledge_collection" && stageStatusLoading) {
         return styles.researchStageStatusLoading;
       }
@@ -3971,6 +4007,9 @@ export function TeamsRoute({
       if (stageType === "knowledge_collection") {
         return knowledgeCollectionPrimaryDisabled;
       }
+      if (challengeProgramProjection) {
+        return true;
+      }
       return stageStatusLoading || stageStatusUnavailable || selectedTeamStartResearchStagePending;
     };
     const runStagePrimaryAction = (stageType: ResearchStageType) => {
@@ -3981,6 +4020,22 @@ export function TeamsRoute({
       launchResearchStage(stageType);
     };
     const stageHint = (stageType: ResearchStageType, active: boolean, latestRound: ResearchStagePhaseStatus["latestRound"] | null | undefined) => {
+      if (challengeProgramProjection) {
+        if (stageType === "knowledge_collection") {
+          const providerReady = challengeProgramProjection.stage1ComplianceReadiness.dashscopeQwenProvider.configured;
+          return providerReady
+            ? (lang === "zh" ? "先完成 1 题真实样例，再进行 5 题试运行；所有证据、七维审查和四个人工门禁必须可追踪。" : "Complete one real sample, then a five-question trial with traceable evidence and gates.")
+            : (lang === "zh" ? "缺少 DashScope/Qwen 正式 provider；只允许契约测试和样例草稿，禁止冒充真实调用。" : "DashScope/Qwen provider is missing; only contract tests and drafts are allowed.");
+        }
+        if (stageType === "experiment") {
+          return lang === "zh"
+            ? "Stage1 通过后按 25 批×5题推进；失败、阻塞和缺证据必须显式入账，不能计入完成。"
+            : "After Stage1, process 25 batches of five; failures and blockers remain explicit and incomplete.";
+        }
+        return lang === "zh"
+          ? "需完成 3 个跨学科深研案例与参赛封装；FashionMNIST 的 accepted_for_writeup 仅是单案例内部状态。"
+          : "Three cross-disciplinary cases are required; FashionMNIST accepted_for_writeup is case-internal only.";
+      }
       if (stageType === "knowledge_collection") {
         if (!selectedSourceCollectionRun) {
           return lang === "zh" ? "生成搜索计划和团队分工，先把资料搜索跑起来。" : "Create the search plan and team assignments.";
@@ -4031,9 +4086,11 @@ export function TeamsRoute({
       <section className={styles.researchStageLauncher} aria-label={lang === "zh" ? "科研控制台" : "Research console"}>
         <div className={styles.researchStageLauncherHeader}>
           <div>
-            <strong>{lang === "zh" ? "科研控制台（三阶段）" : "Research console (3 stages)"}</strong>
+            <strong>{challengeProgramProjection?.program.title || (lang === "zh" ? "科研控制台（三阶段）" : "Research console (3 stages)")}</strong>
             <span>
-              {researchStageRoundStatus
+              {challengeProgramProjection
+                ? `${challengeProgramProjection.program.officialProblemId} · ${challengeProgramProjection.program.track}`
+                : researchStageRoundStatus
                 ? `${lang === "zh" ? "当前阶段" : "Current"} · ${currentStageLabel}`
                 : researchStageRoundStatusQuery.isPending
                 ? (lang === "zh" ? "读取阶段状态中" : "Loading stage status")
@@ -4078,7 +4135,11 @@ export function TeamsRoute({
             const active = Boolean(phase?.activeRoundId);
             const disabled = stagePrimaryDisabled(stageType);
             const navItem = RESEARCH_WORKSPACE_NAV_ITEMS.find((item) => item.view === stageType);
-            const primaryLabel = stagePrimaryLabel(stageType, phase?.primaryAction || fallback.primaryAction);
+            const primaryLabel = challengeProgramProjection && stageType === "experiment"
+              ? (lang === "zh" ? "批处理控制待接入" : "Batch controller pending")
+              : challengeProgramProjection && stageType === "iteration"
+                ? (lang === "zh" ? "请从阶段详情管理案例" : "Manage cases in details")
+                : stagePrimaryLabel(stageType, phase?.primaryAction || fallback.primaryAction);
             return (
               <article
                 key={stageType}
@@ -4089,12 +4150,38 @@ export function TeamsRoute({
                 <div className={styles.researchStageCardHead}>
                   <small>{String(phaseOrder.indexOf(stageType) + 1).padStart(2, "0")}</small>
                   <div>
-                    <strong>{phase?.label || fallback.label}</strong>
+                    <strong>{challengeProgramProjection ? challengeStageLabel(stageType) : (phase?.label || fallback.label)}</strong>
                     <span className={`${styles.researchStageStatus} ${stageStatusStyle(stageType, active, latestRound)}`}>{stageStatusLabel(stageType, active, latestRound)}</span>
                   </div>
                 </div>
                 <p>{stageHint(stageType, active, latestRound)}</p>
-                {stageType === "knowledge_collection" && selectedSourceCollectionRun ? (
+                {challengeProgramProjection ? (
+                  <div className={styles.researchStageCardMetrics}>
+                    {stageType === "knowledge_collection" ? (
+                      <>
+                        <span>{lang === "zh" ? "真实样例" : "real sample"} {challengeProgramProjection.stage1ComplianceReadiness.singleQuestionSample.completed}/{challengeProgramProjection.stage1ComplianceReadiness.singleQuestionSample.required}</span>
+                        <span>{lang === "zh" ? "试运行" : "trial"} {challengeProgramProjection.stage1ComplianceReadiness.trialRun.completed}/{challengeProgramProjection.stage1ComplianceReadiness.trialRun.required}</span>
+                        <span>{lang === "zh" ? "百炼证据" : "DashScope evidence"} {challengeProgramProjection.stage1ComplianceReadiness.officialModelCallEvidence.count}</span>
+                        <span>{lang === "zh" ? "独立维度" : "dimensions"} {challengeProgramProjection.stage1ComplianceReadiness.independentEvaluationDimensions.length} · {lang === "zh" ? "人工门禁" : "human gates"} {challengeProgramProjection.stage1ComplianceReadiness.humanGates.length}</span>
+                      </>
+                    ) : stageType === "experiment" ? (
+                      <>
+                        <span>{lang === "zh" ? "题目" : "questions"} {challengeProgramProjection.stage2BatchGovernance.completedQuestionCount}/{challengeProgramProjection.stage2BatchGovernance.questionCount}</span>
+                        <span>{lang === "zh" ? "批次" : "batches"} {challengeProgramProjection.stage2BatchGovernance.completedBatchCount}/{challengeProgramProjection.stage2BatchGovernance.batchCount}</span>
+                        <span>{lang === "zh" ? "每批" : "batch size"} {challengeProgramProjection.stage2BatchGovernance.batchSize}</span>
+                        <span>{lang === "zh" ? "单总分" : "aggregate score"} {challengeProgramProjection.stage2BatchGovernance.aggregateScoreAllowed ? (lang === "zh" ? "允许" : "allowed") : (lang === "zh" ? "禁止" : "prohibited")}</span>
+                      </>
+                    ) : (
+                      <>
+                        <span>{lang === "zh" ? "深研案例" : "deep cases"} {challengeProgramProjection.stage3DeepResearchDelivery.representativeCaseCount}/{challengeProgramProjection.stage3DeepResearchDelivery.requiredRepresentativeCaseCount}</span>
+                        <span>{lang === "zh" ? "平台完成" : "program complete"} {challengeProgramProjection.stage3DeepResearchDelivery.projectCompleted ? (lang === "zh" ? "是" : "yes") : (lang === "zh" ? "否" : "no")}</span>
+                        <span title={challengeProgramProjection.stage3DeepResearchDelivery.caseRecords[0]?.claimBoundary || ""}>
+                          {lang === "zh" ? "单案例状态" : "case status"} {challengeProgramProjection.stage3DeepResearchDelivery.caseRecords[0]?.internalStatus || "-"}
+                        </span>
+                      </>
+                    )}
+                  </div>
+                ) : stageType === "knowledge_collection" && selectedSourceCollectionRun ? (
                   <div className={styles.researchStageCardMetrics}>
                     <span>{sourceCollectionRunLabel(selectedSourceCollectionRun.runId)}</span>
                     <span>{lang === "zh" ? `可搜索 ${sourceCollectionSearchOpenAssignmentCountText}` : `search ${sourceCollectionSearchOpenAssignmentCountText}`}</span>

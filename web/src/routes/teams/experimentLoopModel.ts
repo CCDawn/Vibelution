@@ -231,6 +231,66 @@ export type ExperimentPlanningStatusPayload = {
       appendOnlyEvidencePreserved: boolean;
     };
   };
+  challengeProgramProjection?: {
+    schemaVersion: number;
+    migrationMode: string;
+    program: {
+      title: string;
+      officialProblemId: string;
+      track: string;
+      officialQuestionCount: number;
+      directionBRole: string;
+      completed: boolean;
+    };
+    stage1ComplianceReadiness: {
+      status: string;
+      completionDefinition: string;
+      blockers: string[];
+      dashscopeQwenProvider: { configured: boolean; providerIds: string[]; modelRefs: string[] };
+      officialModelCallEvidence: { count: number; evidenceIds: string[] };
+      singleQuestionSample: { required: number; completed: number; realCallsRequired: boolean };
+      trialRun: { required: number; completed: number; realCallsRequired: boolean };
+      independentEvaluationDimensions: string[];
+      aggregateScoreAllowed: boolean;
+      humanGates: string[];
+    };
+    stage2BatchGovernance: {
+      status: string;
+      completionDefinition: string;
+      questionCount: number;
+      completedQuestionCount: number;
+      batchSize: number;
+      batchCount: number;
+      completedBatchCount: number;
+      failedOrBlockedCountedAsComplete: boolean;
+      aggregateScoreAllowed: boolean;
+      pipeline: string[];
+      ledger: { initialized: boolean; manifestHashVerified: boolean; citationAuditComplete: boolean };
+    };
+    stage3DeepResearchDelivery: {
+      status: string;
+      completionDefinition: string;
+      representativeCaseCount: number;
+      requiredRepresentativeCaseCount: number;
+      caseRecords: Array<{
+        caseId: string;
+        title: string;
+        internalStatus: string;
+        projectCompletionStatus: string;
+        bestValidatedResultId: string;
+        claimBoundary: string;
+      }>;
+      projectCompleted: boolean;
+    };
+    compatibility: {
+      legacyLifecycleProjectionPreserved: boolean;
+      legacyStage2DesignStatus: string;
+      legacyStage3CaseStatus: string;
+      acceptedForWriteupMeansProgramComplete: boolean;
+      appendOnlyEvidencePreserved: boolean;
+      historyRewritten: boolean;
+    };
+  };
   hypothesisCandidates: ExperimentHypothesisCandidateSummary[];
   readyHypothesisCandidates: ExperimentHypothesisCandidateSummary[];
   gaps: Array<{ code: string; severity: string; message: string }>;

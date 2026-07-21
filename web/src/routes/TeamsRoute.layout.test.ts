@@ -1171,6 +1171,11 @@ describe("TeamsRoute layout contract", () => {
     expect(researchWorkspaceModelSource).toContain("研究问题 / 假设 / 控制变量 / 冻结设计");
     expect(researchWorkspaceModelSource).toContain("执行批次 / 结果评估 / 消融归因 / 优化迭代");
     expect(routeSource).toContain("lifecycleProjection");
+    expect(routeSource).toContain("challengeProgramProjection");
+    expect(routeSource).toContain("全量合规与系统可用性");
+    expect(routeSource).toContain("125题批处理与质量治理");
+    expect(routeSource).toContain("代表性深研闭环与参赛封装");
+    expect(routeSource).toContain("accepted_for_writeup 仅是单案例内部状态");
     expect(routeSource).toContain("已设计 · 待执行");
     expect(routeSource).toContain("训练结果不参与本阶段完成判定");
     expect(routeSource).toContain("最近诊断单独展示，不覆盖主线结果");
