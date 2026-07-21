@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from core.web.services import session_service as facade
 from core.web.services.session import (
+    agent_sessions,
+    control,
     journal_bridge,
     list_cache,
     live_output,
@@ -45,3 +47,20 @@ def test_facade_reexports_stage2_hot_path_packs() -> None:
     assert callable(list_cache.invalidate_session_list_cache)
     assert callable(live_output.snapshot_session_live_output)
     assert journal_bridge is not None
+
+
+def test_facade_reexports_control_pack() -> None:
+    assert facade.request_stop_session_turn is control.request_stop_session_turn
+    assert facade._persist_session_interrupted_snapshot is control._persist_session_interrupted_snapshot
+    assert facade._build_stopped_turn_result is control._build_stopped_turn_result
+
+
+def test_facade_reexports_agent_sessions_pack() -> None:
+    # Lifecycle-serialized surfaces wrap pack bodies on the facade.
+    assert getattr(facade.stage_agent_session_purge, "__wrapped__", None) is agent_sessions.stage_agent_session_purge
+    assert getattr(facade.commit_staged_agent_session_purge, "__wrapped__", None) is agent_sessions.commit_staged_agent_session_purge
+    assert getattr(facade.archive_agent_sessions, "__wrapped__", None) is agent_sessions.archive_agent_sessions
+    assert facade.create_child_session is agent_sessions.create_child_session
+    assert facade.wake_agent_for_inbox_message is agent_sessions.wake_agent_for_inbox_message
+    assert facade.append_cli_agent_lifecycle_event is agent_sessions.append_cli_agent_lifecycle_event
+    assert facade.delete_chat_session is agent_sessions.delete_chat_session
