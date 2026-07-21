@@ -330,6 +330,10 @@ def test_legacy_iteration_proposal_can_materialize_one_gated_design_draft(tmp_pa
     assert materialized["decision"]["nextDesignPlanId"] == materialized["nextDesignDraft"]["plan"]["planId"]
     assert materialized["nextDesignDraft"]["plan"]["designGate"]["status"] == "draft"
     assert materialized["nextDesignDraft"]["plan"]["status"] == "draft"
+    assert (
+        materialized["nextDesignDraft"]["plan"]["experimentContract"]["iterationContract"]["nextTemplateId"]
+        == "dataset_benchmark"
+    )
     assert materialized["status"]["activeLoopId"] == newer_loop["loopId"]
     assert materialized["status"]["activeLoop"]["loopId"] == newer_loop["loopId"]
     assert len(pending_before) == 1

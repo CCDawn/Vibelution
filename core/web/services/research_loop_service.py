@@ -398,6 +398,7 @@ def record_research_loop_decision(team_id: str, loop_id: str, payload: dict[str,
                         idempotency_key=idempotency_key,
                         decision=decision_value,
                         rationale=rationale,
+                        next_template_id=str(iteration_proposal.get("nextTemplateId") or ""),
                         next_actions=list(iteration_proposal.get("nextActions") or []),
                         created_by_agent=decided_by_agent,
                     )
@@ -509,6 +510,7 @@ def materialize_research_loop_iteration_design(
                 idempotency_key=f"proposal-materialization:{normalized_loop_id}:{normalized_proposal_id}",
                 decision=decision_value,
                 rationale=str(decision.get("rationale") or ""),
+                next_template_id=str(proposal.get("nextTemplateId") or ""),
                 next_actions=list(proposal.get("nextActions") or []),
                 created_by_agent=created_by_agent,
             )
