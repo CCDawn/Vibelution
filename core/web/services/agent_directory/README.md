@@ -14,7 +14,8 @@ Prefer slice modules over growing `agent_directory_service.py` when possible.
 | Archive / purge / reset lifecycle | `lifecycle.py` | team membership graph |
 | List/get API hydration projections | `projections.py` | team canvas |
 | Create/update + avatar mutations | `mutations.py` | lifecycle purge path |
-| Registry repair / shrink guards | facade (later `repair.py`) | workflow orchestration |
+| Registry repair / load-save / normalize | `repair_store.py` | workflow orchestration |
+| Inbox / workspace / ensure-session residual | `ops_residual.py` | team membership graph |
 
 ## Sole-owner rules
 
@@ -39,3 +40,12 @@ Prefer slice modules over growing `agent_directory_service.py` when possible.
 
 - Routes: `core/web/routes/agents.py`
 - Structure plan: `docs/plans/2026-07-20-backend-structure-p0.md`
+
+
+### Service optimization Phase 17 (repair + ops residual)
+
+| Pack | Status | Notes |
+|------|--------|--------|
+| `repair_store.py` | done | registry repair/load-save |
+| `ops_residual.py` | done | inbox/workspace/ensure-session/profile defaults |
+| facade residual | serializers only | lifecycle wrappers |
