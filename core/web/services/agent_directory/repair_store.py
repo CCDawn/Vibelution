@@ -588,6 +588,8 @@ def _ensure_knowledge_steward_agent(
         changed = True
         repaired_fields.append("agentCode")
 
+    title = str(agent.get("displayName") or "").strip()
+    display_name_needs_repair = not title or s._display_name_needs_responsibility_repair(title, agent)
     metadata = dict(agent.get("metadata") or {})
     merged_metadata = s._knowledge_steward_merged_metadata(metadata)
     if metadata != merged_metadata:
@@ -595,8 +597,7 @@ def _ensure_knowledge_steward_agent(
         changed = True
         repaired_fields.append("metadata")
 
-    title = str(agent.get("displayName") or "").strip()
-    if not title or s._display_name_needs_responsibility_repair(title, agent):
+    if display_name_needs_repair:
         agent["displayName"] = s._agent_public_display_name(
             s.KNOWLEDGE_STEWARD_FUNCTIONAL_NAME,
             existing_agents=agents,
