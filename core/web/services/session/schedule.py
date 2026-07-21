@@ -101,6 +101,28 @@ def _execute_scheduled_session_turn(context: dict[str, Any]) -> None:
     context["_executor_started_at_monotonic"] = executor_started_at
     try:
         s._run_session_turn(context)
+    except Exception as exc:
+        session_id = str(context.get("session_id") or "").strip()
+        turn_id = str(context.get("turn_id") or "").strip()
+        try:
+            s._record_session_turn_lifecycle_event(
+                session_id,
+                "worker_unhandled_exception",
+                turn_id=turn_id,
+                level="error",
+                outcome="failed",
+                fields={
+                    "exceptionType": type(exc).__name__,
+                    "errorPreview": s.trim_lines(str(exc), max_lines=2),
+                    "agentId": str(context.get("agent_id") or "").strip(),
+                    **_scheduler_log_fields(context),
+                },
+            )
+            s._persist_session_turn_failure(session_id, context, exc)
+        finally:
+            s._set_session_running(session_id, False, turn_id=turn_id)
+            s._clear_session_turn_control(session_id, turn_id=turn_id)
+            s._publish_session_detail_snapshot(session_id)
     finally:
         s._release_scheduled_session_turn(context)
 
