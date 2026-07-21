@@ -13,6 +13,8 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
+from core.web.services.team_workflow.challenge_program import build_challenge_program_projection
+
 
 def _service():
     from core.web.services import team_workflow_orchestration_service
@@ -444,6 +446,12 @@ def _experiment_planning_status(
         plans=plans,
         active_plan=active_plan,
     )
+    official_model_evidence_store = s._load_official_model_evidence_store(team_id)
+    challenge_program_projection = build_challenge_program_projection(
+        legacy_lifecycle=lifecycle_projection,
+        public_config=s.load_public_config(),
+        official_model_evidence=s._official_model_evidence_entries(official_model_evidence_store),
+    )
     gaps = s._experiment_planning_gaps(
         latest_experiment=latest_experiment,
         hypothesis_candidates=hypothesis_candidates,
@@ -485,6 +493,7 @@ def _experiment_planning_status(
         "activePlan": active_plan,
         "plans": plans[-12:],
         "lifecycleProjection": lifecycle_projection,
+        "challengeProgramProjection": challenge_program_projection,
         "hypothesisCandidates": hypothesis_candidates[:24],
         "readyHypothesisCandidates": ready_hypotheses[:24],
         "gaps": gaps,
