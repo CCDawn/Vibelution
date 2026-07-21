@@ -199,7 +199,7 @@ def _attach_source_collection_stage_card_projections(team_id: str, rounds: list[
 
 def _source_collection_stage_session_task_store_path(team_id: str, run_id: str) -> Path:
     s = _service()
-    return s._source_collection_storage_artifact_paths(team_id, run_id)["runDirectory"] / "stage_session_taskjson"
+    return s._source_collection_storage_artifact_paths(team_id, run_id)["runDirectory"] / "stage_session_tasks.json"
 
 
 def _find_source_collection_context_message(session_id: str, context_key: str) -> dict[str, Any] | None:
@@ -439,7 +439,7 @@ def _reconcile_source_collection_stage_session_tasks(team_id: str) -> bool:
     if not runs_root.exists():
         return False
     changed = False
-    for task_store_path in runs_root.glob("*/stage_session_taskjson"):
+    for task_store_path in runs_root.glob("*/stage_session_tasks.json"):
         run_id = task_store_path.parent.name
         changed = s._reconcile_source_collection_stage_session_tasks_for_run(team_id, run_id) or changed
     return changed
@@ -1869,7 +1869,7 @@ def _find_source_collection_stage_session_task_by_id(team_id: str, task_id: str)
     runs_root = s._team_workflow_root(team_id) / "source_collection_runs"
     if not normalized_task_id or not runs_root.exists():
         return None, ""
-    for path in runs_root.glob("*/stage_session_taskjson"):
+    for path in runs_root.glob("*/stage_session_tasks.json"):
         run_id = path.parent.name
         store = s._read_json(path)
         for item in list(store.get("tasks") or []):
