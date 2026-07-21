@@ -1276,6 +1276,57 @@ def test_launcher_active_work_guard_scans_parallel_chat_turn_snapshots(tmp_path,
     assert {item["runId"] for item in active} == {"chat-turn-alpha", "chat-turn-beta"}
 
 
+def test_launcher_active_work_guard_ignores_superseded_worktree_snapshot(tmp_path, monkeypatch):
+    work_runs_dir = tmp_path / ".runtime" / "runtime-manager" / "work_runs"
+    store = WorkRunStore(root=work_runs_dir)
+    store.persist_snapshot(
+        "supervised_worktree_evolution_run",
+        {
+            "runId": "worktree-superseded",
+            "runKind": "supervised_worktree_evolution_run",
+            "status": "running",
+        },
+        active_run_id="worktree-superseded",
+    )
+    store.persist_snapshot(
+        "supervised_worktree_evolution_run",
+        {
+            "runId": "worktree-latest",
+            "runKind": "supervised_worktree_evolution_run",
+            "status": "completed",
+            "finishedAt": datetime.now(timezone.utc).isoformat(),
+        },
+        active_run_id="",
+    )
+    monkeypatch.setattr(work_run_store, "WORK_RUNS_DIR", work_runs_dir)
+
+    assert launcher_service.launcher_active_work_runs() == []
+
+
+def test_launcher_active_work_guard_keeps_indexed_worktree_snapshot(tmp_path, monkeypatch):
+    work_runs_dir = tmp_path / ".runtime" / "runtime-manager" / "work_runs"
+    store = WorkRunStore(root=work_runs_dir)
+    store.persist_snapshot(
+        "supervised_worktree_evolution_run",
+        {
+            "runId": "worktree-current",
+            "runKind": "supervised_worktree_evolution_run",
+            "status": "running",
+        },
+        active_run_id="worktree-current",
+    )
+    monkeypatch.setattr(work_run_store, "WORK_RUNS_DIR", work_runs_dir)
+
+    assert launcher_service.launcher_active_work_runs() == [
+        {
+            "kind": "supervised_worktree_evolution_run",
+            "runId": "worktree-current",
+            "status": "running",
+            "sessionId": "",
+        }
+    ]
+
+
 def test_launcher_active_work_guard_ignores_stale_non_current_snapshots(tmp_path, monkeypatch):
     work_runs_dir = tmp_path / ".runtime" / "runtime-manager" / "work_runs"
     stale_at = (datetime.now(timezone.utc) - timedelta(days=2)).isoformat()
