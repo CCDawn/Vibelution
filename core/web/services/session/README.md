@@ -33,6 +33,8 @@ this package and be re-exported from the facade when it is part of the public AP
 | Agent session purge/archive/child/inbox/cli lifecycle | `agent_sessions.py` | list/detail projection |
 | Conversation/agent index create/repair/metadata | `conversation_index.py` | SSE publish |
 | Live-output write / checkpoint bridge | `live_output_write.py` | pure store in `live_output.py` |
+| Timeline / tool / mental-snapshot normalizers | `timeline.py` | turn diagnostics |
+| Turn errors / work-runs / review / ledger reconcile | `turn_diagnostics.py` | timeline normalizers |
 | Residual helpers | `../session_service.py` (facade remainder) | new mega public APIs on facade |
 | Public HTTP-facing API surface | `../session_service.py` (facade) | bypassing re-exports |
 
@@ -97,17 +99,27 @@ this package and be re-exported from the facade when it is part of the public AP
 | `live_output_write.py` | ~0.7k | set live overlay + checkpoint bridge |
 | `session_service.py` facade (after Phase 7) | ~11.1k total lines | re-exports + residual helpers |
 
+### Service optimization Phase 8 (timeline + turn diagnostics)
+
+| Module | ~LOC | Role |
+|--------|------|------|
+| `timeline.py` | ~1.1k | preflight, tool/feedback normalize, mental snapshot, assistant timeline |
+| `turn_diagnostics.py` | ~1.7k | turn errors, work-runs, review candidates, ledger reconcile, SC post-turn bridge |
+| `session_service.py` facade (after Phase 8) | ~8.5k total lines | re-exports + residual helpers |
+
 **Stage 2 exit (met):** hot-path claims for submit → schedule → capture → worker → persist.
 
 **Phase 3 exit:** projection + SSE publish claimable outside facade.
 
 **Phase 4 exit:** stop control + agent session lifecycle claimable outside facade.
 
-**Phase 7 exit:** conversation index + live-output write claimable; structure + session tests green.
+**Phase 7 exit:** conversation index + live-output write claimable.
+
+**Phase 8 exit:** timeline + turn diagnostics claimable; structure + session tests green.
 
 **Still deferred:**
 
-- Full facade slim to re-exports only (remaining shared helpers).
+- Full facade slim to re-exports only (remaining shared helpers / agent runtime / cache).
 - Late-bind removal.
 - Migrating all internal importers off the facade.
 
