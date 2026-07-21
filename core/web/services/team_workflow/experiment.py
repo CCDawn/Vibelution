@@ -158,6 +158,7 @@ def create_experiment_plan_revision_from_iteration(
     idempotency_key: str,
     decision: str,
     rationale: str,
+    next_template_id: str,
     next_actions: list[str],
     created_by_agent: str,
 ) -> dict[str, Any]:
@@ -178,6 +179,16 @@ def create_experiment_plan_revision_from_iteration(
                 and str(gate.get("sourceIdempotencyKey") or "") == idempotency_key
             )
             if same_proposal or same_idempotent_request:
+                contract = existing.get("experimentContract") if isinstance(existing.get("experimentContract"), dict) else {}
+                iteration = contract.get("iterationContract") if isinstance(contract.get("iterationContract"), dict) else {}
+                if next_template_id and str(iteration.get("nextTemplateId") or "") != next_template_id:
+                    iteration["nextTemplateId"] = next_template_id
+                    contract["iterationContract"] = iteration
+                    existing["experimentContract"] = contract
+                    now = s.utc_now_iso()
+                    existing["updatedAt"] = now
+                    plan_store["updatedAt"] = now
+                    s._write_json(s._experiment_plan_store_path(normalized_team_id), plan_store)
                 return {"status": "reused", "plan": existing}
         source_plan = s._find_experiment_plan(plan_store, normalized_source_plan_id)
         if source_plan is None:
@@ -206,6 +217,7 @@ def create_experiment_plan_revision_from_iteration(
             "sourceIdempotencyKey": idempotency_key,
             "sourceDecision": decision,
             "sourceRationale": rationale,
+            "nextTemplateId": next_template_id,
             "nextActions": list(next_actions),
         }
         adapter_selection = (
