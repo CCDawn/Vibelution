@@ -1339,16 +1339,15 @@ def test_agent_api_effective_compression_uses_dialogue_model_context_window(tmp_
     assert policy["modelContextWindowLimit"] == 900000
 
 
-def test_agent_instance_generates_public_person_name_and_keeps_functional_name(tmp_path, monkeypatch):
+def test_agent_instance_uses_responsibility_as_public_name(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
 
     agent = agent_directory_service.create_agent_instance(display_name="科研 Agent", primary_mode="research")
 
-    assert agent["displayName"]
-    assert agent["displayName"] != "科研 Agent"
+    assert agent["displayName"] == "科研 Agent"
     assert agent["agentCode"]
     assert agent["metadata"]["functionalDisplayName"] == "科研 Agent"
-    assert agent["metadata"]["displayNameSource"] == "generated_person_name"
+    assert agent["metadata"]["displayNameSource"] == "responsibility"
     assert agent["workspaceTerritory"]["privateRoot"] == agent["workspacePath"]
     assert agent["workspaceTerritory"]["sharedRoot"] == "workspace/shared"
     assert agent["workspaceTerritory"]["writeScopes"] == ["private"]
@@ -2339,7 +2338,7 @@ def test_agent_workspace_write_boundary_uses_tool_policy_for_shared_paths(tmp_pa
     assert external_after_policy.reason == "outside_agent_territory"
 
 
-def test_repair_agent_directory_keeps_generated_person_name_stable(tmp_path, monkeypatch):
+def test_repair_agent_directory_keeps_responsibility_name_stable(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     agent = agent_directory_service.create_agent_instance(display_name="科研 Agent", primary_mode="research")
     registry_path = agent_directory_service.registry_path()
@@ -2358,7 +2357,7 @@ def test_repair_agent_directory_keeps_generated_person_name_stable(tmp_path, mon
     assert third_mtime == second_mtime == first_mtime
 
 
-def test_update_agent_instance_keeps_generated_person_name_when_functional_title_syncs(tmp_path, monkeypatch):
+def test_update_agent_instance_keeps_responsibility_name_when_functional_title_syncs(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     agent = agent_directory_service.create_agent_instance(display_name="科研 Agent", primary_mode="research")
     first_name = agent["displayName"]
@@ -2373,10 +2372,10 @@ def test_update_agent_instance_keeps_generated_person_name_when_functional_title
 
     assert updated["displayName"] == first_name
     assert updated["metadata"]["functionalDisplayName"] == "科研 Agent"
-    assert updated["metadata"]["displayNameSource"] == "generated_person_name"
+    assert updated["metadata"]["displayNameSource"] == "responsibility"
 
 
-def test_repair_agent_directory_migrates_legacy_functional_user_display_name(tmp_path, monkeypatch):
+def test_repair_agent_directory_migrates_legacy_generated_person_to_responsibility(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     agent = agent_directory_service.create_agent_instance(
         display_name="自进化执行 Agent",
@@ -2388,12 +2387,35 @@ def test_repair_agent_directory_migrates_legacy_functional_user_display_name(tmp
             "selfEvolutionRoleLabel": "自进化执行 Agent",
         },
     )
-    agent_directory_service.update_agent_instance(agent["agentId"], display_name="自进化执行 Agent")
+    state = agent_directory_service.load_state()
+    raw_agent = next(item for item in state["agents"] if item["agentId"] == agent["agentId"])
+    raw_agent["displayName"] = "唐以宁"
+    raw_agent["metadata"]["displayNameSource"] = "generated_person_name"
+    agent_directory_service.save_state(state)
+
+    agent_directory_service.repair_agent_directory()
 
     repaired = agent_directory_service.get_agent(agent["agentId"])
 
-    assert repaired["displayName"] != "自进化执行 Agent"
+    assert repaired["displayName"] == "自进化执行 Agent"
     assert repaired["metadata"]["functionalDisplayName"] == "自进化执行 Agent"
+    assert repaired["metadata"]["displayNameSource"] == "responsibility"
+
+
+def test_repair_agent_directory_keeps_archived_generated_name_sealed(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    agent = agent_directory_service.create_agent_instance(display_name="历史研究 Agent", primary_mode="research")
+    agent_directory_service.update_agent_instance(agent["agentId"], status="archived")
+    state = agent_directory_service.load_state()
+    raw_agent = next(item for item in state["agents"] if item["agentId"] == agent["agentId"])
+    raw_agent["displayName"] = "闻望舒"
+    raw_agent["metadata"]["displayNameSource"] = "generated_person_name"
+    agent_directory_service.save_state(state)
+
+    agent_directory_service.repair_agent_directory()
+
+    repaired = agent_directory_service.get_agent(agent["agentId"], include_archived=True)
+    assert repaired["displayName"] == "闻望舒"
     assert repaired["metadata"]["displayNameSource"] == "generated_person_name"
 
 

@@ -455,17 +455,14 @@ def _build_session_summary(conversation: dict[str, Any], *, hydrate_agent: bool 
     session_kind = str(conversation.get("sessionKind") or "main").strip() or "main"
     task_title = str(conversation.get("taskTitle") or raw_title).strip() or raw_title
     display_agent_name = agent_display_name or raw_title
-    has_ledger_messages = bool(normalized_summary_messages)
     if session_kind == "child":
         display_title = task_title
-    elif has_ledger_messages:
+    elif not s._is_default_empty_session_title(task_title):
         display_title = task_title
     elif agent_id:
         display_title = display_agent_name
-    elif not s._is_default_empty_session_title(task_title):
-        display_title = task_title
     else:
-        display_title = display_agent_name
+        display_title = task_title
     session_id = str(conversation["id"]).strip()
     session_source_ref = s._source_authority_ref("session", session_id)
     session_projection_edit = s._projection_edit_contract("session", session_id)

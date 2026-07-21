@@ -194,7 +194,6 @@ from .agent_directory.mutations import (
 from .agent_directory.repair_store import (
     _agent_creation_missing_fields,
     _agent_directory_storage_signature,
-    _agent_has_functional_identity,
     _agent_public_display_name,
     _agent_workspace_relative_path,
     _atomic_write_json,
@@ -204,9 +203,7 @@ from .agent_directory.repair_store import (
     _configured_model_library_ids,
     _count_jsonl_matching_status,
     _developer_sandbox_module,
-    _display_name_is_functional_or_machine,
-    _display_name_is_legacy_functional_user_name,
-    _display_title_should_be_generated,
+    _display_name_needs_responsibility_repair,
     _ensure_agent_workspace,
     _ensure_fixed_role_profiles,
     _ensure_knowledge_steward_agent,
@@ -229,7 +226,7 @@ from .agent_directory.repair_store import (
     _knowledge_steward_metadata,
     _load_existing_registry_payload_or_raise,
     _load_repaired_state_for_read,
-    _mark_display_name_generated,
+    _mark_display_name_responsibility,
     _memory_policies,
     _merge_system_agent_metadata,
     _migrate_agent_llm_bindings_to_new_design,
@@ -647,56 +644,6 @@ _AGENT_AVATAR_CONTENT_TYPE_EXTENSIONS = {
 _SAFE_ID_FRAGMENT = re.compile(r"[^A-Za-z0-9_.-]+")
 _AGENT_CODE_PATTERN = re.compile(r"^[A-Z][A-Z0-9-]{1,15}$")
 _AGENT_ID_LIKE_PATTERN = re.compile(r"^(agent[-_].+|[aA]\d{3,}|[A-Z][A-Z0-9-]{1,15})$")
-_FUNCTIONAL_DISPLAY_NAME_TOKENS = (
-    "agent",
-    "智能体",
-    "自进化",
-    "监督进化",
-    "科研",
-    "执行",
-    "评审",
-    "总结",
-    "基线",
-    "候选",
-    "审计",
-    "裁决",
-)
-_PUBLIC_NAME_FAMILY = (
-    "林",
-    "沈",
-    "顾",
-    "许",
-    "陆",
-    "苏",
-    "闻",
-    "江",
-    "程",
-    "夏",
-    "周",
-    "宋",
-    "叶",
-    "秦",
-    "唐",
-    "白",
-)
-_PUBLIC_NAME_GIVEN = (
-    "予安",
-    "知微",
-    "清和",
-    "星辞",
-    "若川",
-    "明澈",
-    "南栀",
-    "云舒",
-    "景行",
-    "听澜",
-    "以宁",
-    "望舒",
-    "言初",
-    "书遥",
-    "映白",
-    "念青",
-)
 _STATE_LOCK = threading.RLock()
 _AGENT_SESSION_LIFECYCLE_LOCK = threading.RLock()
 _REPAIRED_STATE_CACHE_SIGNATURE: tuple[str, bool, int, int] | None = None

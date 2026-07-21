@@ -117,7 +117,7 @@ export function AgentContextMenu({
         role="menuitem"
         className={styles.sessionContextMenuItem}
         onPress={() => onRename(state.agent)}
-        isDisabled={renamePending || !String(state.agent.directSessionId || "").trim()}
+        isDisabled={renamePending}
         icon={<Pencil size={14} />}
       >
         {renamePending
