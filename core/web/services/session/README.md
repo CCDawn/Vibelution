@@ -40,7 +40,9 @@ this package and be re-exported from the facade when it is part of the public AP
 | Image artifact / attachment store-resolve | `image_attachments.py` | agent image-input policy |
 | Runtime-scene session event logging | `events.py` | session ops/update helpers |
 | Session update / prewarm / transcript / repair ops | `session_ops.py` | pure event recorders |
-| Residual helpers | `../session_service.py` (facade remainder) | new mega public APIs on facade |
+| Failure signals / reply format / image-retry cues / cache metadata | `signals_format.py` | submit worker hot path |
+| Agent/team/workspace / running state / codex / SC bridges | `runtime_glue.py` | lifecycle serializers |
+| Residual helpers | `../session_service.py` (facade remainder: lifecycle serializers) | new mega public APIs on facade |
 | Public HTTP-facing API surface | `../session_service.py` (facade) | bypassing re-exports |
 
 ## Flow map to modules
@@ -147,3 +149,12 @@ this package and be re-exported from the facade when it is part of the public AP
 - Phase 3 plan: `docs/plans/2026-07-21-service-optimization-phase3-session-projection.md`
 - Phase 4 plan: `docs/plans/2026-07-21-service-optimization-phase4-session-lifecycle.md`
 - Structure plan: `docs/plans/2026-07-20-backend-structure-p0.md`
+
+
+### Service optimization Phase 16 (signals + runtime glue)
+
+| Module | ~LOC | Role |
+|--------|------|------|
+| `signals_format.py` | ~1.6k | failure signals, history/reply, image-retry, cache metadata |
+| `runtime_glue.py` | ~2.4k | agent/team/workspace, running state, codex/SC bridges |
+| `session_service.py` facade (after Phase 16) | ~1.4k | re-exports + lifecycle serializers only |
