@@ -51,9 +51,9 @@ def test_agent_create_api_adds_direct_agent_with_safe_defaults(tmp_path, monkeyp
     assert response.status_code == 201, response.text
     agent = response.json()
     assert agent["agentId"]
-    assert agent["displayName"]
-    assert agent["displayName"] != "新增研究 Agent"
+    assert agent["displayName"] == "新增研究 Agent"
     assert agent["metadata"]["functionalDisplayName"] == "新增研究 Agent"
+    assert agent["metadata"]["displayNameSource"] == "responsibility"
     assert agent["primaryMode"] == "research"
     assert agent["roleKey"] == "research_broad"
     assert agent["promptTemplateId"] == "prompt-research-broad"

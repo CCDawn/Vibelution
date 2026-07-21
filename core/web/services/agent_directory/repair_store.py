@@ -91,19 +91,12 @@ def _agent_public_display_name(
     metadata: dict[str, Any] | None = None,
 ) -> str:
     s = _service()
-    source = f"{agent_id}|{seed}|{(metadata or {}).get('supervisedRole') or ''}|{(metadata or {}).get('researchAgentKey') or ''}"
-    total = sum((index + 1) * ord(char) for index, char in enumerate(source))
-    names = [f"{family}{given}" for family in s._PUBLIC_NAME_FAMILY for given in s._PUBLIC_NAME_GIVEN]
-    used = {
-        str(item.get("displayName") or "").strip()
-        for item in existing_agents
-        if isinstance(item, dict) and str(item.get("agentId") or "").strip() != str(agent_id or "").strip()
-    }
-    for offset in range(len(names)):
-        candidate = names[(total + offset) % len(names)]
-        if candidate not in used:
-            return candidate
-    return f"{names[total % len(names)]}{len(used) + 1}"
+    del existing_agents
+    responsibility_name = s.trim_lines(
+        str((metadata or {}).get("functionalDisplayName") or seed or ""),
+        max_lines=1,
+    ).strip()
+    return responsibility_name[:120].rstrip() or s._fallback_agent_code(agent_id)
 
 
 def _agent_workspace_relative_path(agent_id: str) -> str:
@@ -446,52 +439,15 @@ def _developer_sandbox_module():
     return developer_sandbox
 
 
-def _display_name_is_functional_or_machine(display_name: str, agent: dict[str, Any]) -> bool:
-    s = _service()
+def _display_name_needs_responsibility_repair(display_name: str, agent: dict[str, Any]) -> bool:
     metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
     source = str(metadata.get("displayNameSource") or "").strip()
     normalized = str(display_name or "").strip()
-    if source == "user":
-        return s._display_name_is_legacy_functional_user_name(normalized, agent)
-    return (
-        s._display_title_should_be_generated(normalized)
-        or normalized == str(metadata.get("functionalDisplayName") or "").strip()
-    )
-
-
-def _display_name_is_legacy_functional_user_name(display_name: str, agent: dict[str, Any]) -> bool:
-    s = _service()
-    normalized = str(display_name or "").strip()
-    if not normalized:
+    if source in {"user", "responsibility"}:
         return False
-    metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
-    functional_names = {
-        str(metadata.get("functionalDisplayName") or "").strip(),
-        str(metadata.get("selfEvolutionRoleLabel") or "").strip(),
-        str(metadata.get("supervisedRoleLabel") or "").strip(),
-    }
-    if normalized not in {item for item in functional_names if item}:
-        return False
-    if s._display_title_should_be_generated(normalized):
+    if source == "generated_person_name":
         return True
-    lowered = normalized.lower()
-    if any(token in lowered or token in normalized for token in s._FUNCTIONAL_DISPLAY_NAME_TOKENS):
-        return True
-    return s._agent_has_functional_identity(agent)
-
-
-def _display_title_should_be_generated(title: str) -> bool:
-    s = _service()
-    normalized = str(title or "").strip()
-    if not normalized:
-        return True
-    lowered = normalized.lower()
-    return (
-        normalized == "Agent"
-        or "agent" in lowered
-        or "智能体" in normalized
-        or s._AGENT_ID_LIKE_PATTERN.match(normalized) is not None
-    )
+    return not normalized or _service()._AGENT_ID_LIKE_PATTERN.match(normalized) is not None
 
 
 def _ensure_agent_workspace(path_value: str, *, ensure_shared: bool = True) -> Path:
@@ -640,7 +596,7 @@ def _ensure_knowledge_steward_agent(
         repaired_fields.append("metadata")
 
     title = str(agent.get("displayName") or "").strip()
-    if not title or s._display_name_is_functional_or_machine(title, agent):
+    if not title or s._display_name_needs_responsibility_repair(title, agent):
         agent["displayName"] = s._agent_public_display_name(
             s.KNOWLEDGE_STEWARD_FUNCTIONAL_NAME,
             existing_agents=agents,
@@ -993,7 +949,7 @@ def _knowledge_steward_metadata() -> dict[str, Any]:
         "conversationIndexVisibility": s.CONVERSATION_INDEX_VISIBILITY_USER_VISIBLE,
         "showInSessionIndex": True,
         "functionalDisplayName": s.KNOWLEDGE_STEWARD_FUNCTIONAL_NAME,
-        "displayNameSource": "generated_person_name",
+        "displayNameSource": "responsibility",
         "agentMode": "general",
         "managedDomain": "team_knowledge",
         "governanceRole": "knowledge_steward",
@@ -1069,11 +1025,10 @@ def _load_repaired_state_for_read() -> tuple[dict[str, Any], bool]:
     return state, False
 
 
-def _mark_display_name_generated(metadata: dict[str, Any], *, force: bool = False) -> dict[str, Any]:
-    s = _service()
+def _mark_display_name_responsibility(metadata: dict[str, Any], *, force: bool = False) -> dict[str, Any]:
     result = dict(metadata or {})
     if force or str(result.get("displayNameSource") or "").strip() != "user":
-        result["displayNameSource"] = "generated_person_name"
+        result["displayNameSource"] = "responsibility"
     return result
 
 
@@ -1696,16 +1651,13 @@ def _should_repair_agent_prompt_template_id(current: str, expected: str) -> bool
     return bool(normalized_expected and not normalized_current)
 
 
-def _should_repair_public_display_name(agent: dict[str, Any], incoming_title: str) -> bool:
-    s = _service()
+def _should_repair_public_display_name(agent: dict[str, Any]) -> bool:
     metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
     source = str(metadata.get("displayNameSource") or "").strip()
-    if source == "user" and not s._display_name_is_legacy_functional_user_name(agent.get("displayName") or "", agent):
+    if source in {"user", "responsibility"} and str(agent.get("displayName") or "").strip():
         return False
     current = str(agent.get("displayName") or "").strip()
-    if not current:
-        return True
-    return s._display_name_is_functional_or_machine(current, agent) or s._display_title_should_be_generated(incoming_title)
+    return not current or source == "generated_person_name" or _service()._AGENT_ID_LIKE_PATTERN.match(current) is not None
 
 
 def _should_replace_generic_challenge_cup_persona(
@@ -1808,8 +1760,6 @@ def _with_functional_display_name(metadata: dict[str, Any], title: str) -> dict[
     normalized = s.trim_lines(title or "", max_lines=1).strip()
     if normalized and not result.get("functionalDisplayName"):
         result["functionalDisplayName"] = normalized
-    if normalized and s._display_title_should_be_generated(normalized):
-        result = s._mark_display_name_generated(result)
     return result
 
 
@@ -1951,26 +1901,35 @@ def repair_agent_directory() -> dict[str, Any]:
                 changed = True
             metadata = dict(agent.get("metadata") or {})
             display_name = str(agent.get("displayName") or "").strip()
-            if display_name and s._display_name_is_functional_or_machine(display_name, agent):
-                metadata = s._with_functional_display_name(metadata, display_name)
+            display_name_is_sealed = str(agent.get("status") or "active").strip() == "archived"
+            if not display_name_is_sealed and display_name and s._display_name_needs_responsibility_repair(display_name, agent):
+                responsibility_name = str(metadata.get("functionalDisplayName") or display_name).strip()
+                metadata = s._with_functional_display_name(metadata, responsibility_name)
                 agent["displayName"] = s._agent_public_display_name(
-                    display_name,
+                    responsibility_name,
                     existing_agents=state.get("agents") or [],
                     agent_id=str(agent.get("agentId") or ""),
                     metadata=metadata,
                 )
-                metadata = s._mark_display_name_generated(metadata, force=True)
+                metadata = s._mark_display_name_responsibility(metadata, force=True)
                 agent["metadata"] = metadata
                 display_name_repaired_agents.append(dict(agent))
                 changed = True
-            elif not display_name:
+            elif not display_name_is_sealed and not display_name:
+                responsibility_name = str(
+                    metadata.get("functionalDisplayName")
+                    or agent.get("roleKey")
+                    or agent.get("agentCode")
+                    or agent.get("agentId")
+                    or "Agent"
+                ).strip()
                 agent["displayName"] = s._agent_public_display_name(
-                    str(agent.get("agentId") or "Agent"),
+                    responsibility_name,
                     existing_agents=state.get("agents") or [],
                     agent_id=str(agent.get("agentId") or ""),
                     metadata=metadata,
                 )
-                agent["metadata"] = s._mark_display_name_generated(metadata)
+                agent["metadata"] = s._mark_display_name_responsibility(metadata, force=True)
                 changed = True
             avatar_result = s._ensure_agent_default_avatar(
                 agent,

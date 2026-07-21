@@ -77,18 +77,19 @@ def update_agent_instance(
             if preserve_generated_display_name:
                 current_display_name = str(agent.get("displayName") or "").strip()
                 metadata_payload = s._with_functional_display_name(metadata_payload, title)
-                if not current_display_name or s._display_name_is_functional_or_machine(current_display_name, {**agent, "metadata": metadata_payload}):
+                if not current_display_name or s._display_name_needs_responsibility_repair(current_display_name, {**agent, "metadata": metadata_payload}):
                     agent["displayName"] = s._agent_public_display_name(
                         title,
                         existing_agents=state.get("agents") or [],
                         agent_id=str(agent.get("agentId") or ""),
                         metadata=metadata_payload,
                     )
-                    metadata_payload = s._mark_display_name_generated(metadata_payload, force=True)
+                    metadata_payload = s._mark_display_name_responsibility(metadata_payload, force=True)
                 else:
-                    metadata_payload = s._mark_display_name_generated(metadata_payload)
+                    metadata_payload = s._mark_display_name_responsibility(metadata_payload)
             else:
                 agent["displayName"] = title[:120].rstrip()
+                metadata_payload["functionalDisplayName"] = agent["displayName"]
                 metadata_payload["displayNameSource"] = "user"
             agent["metadata"] = metadata_payload
         if llm_bindings is not None:
@@ -309,6 +310,10 @@ def create_agent_instance(
             memory_policy={"policyId": memory_policy_id},
             created_at=now,
         )
+        metadata_payload = s._mark_display_name_responsibility(
+            s._with_functional_display_name(metadata_payload, title),
+            force=True,
+        )
         agent = {
             "agentId": agent_id,
             "agentCode": s._next_agent_code(state.get("agents") or []),
@@ -325,7 +330,7 @@ def create_agent_instance(
             "contextCompressionPolicy": normalized_context_compression_policy,
             "createdBy": str(created_by or "user").strip() or "user",
             "status": "active",
-            "metadata": s._with_functional_display_name(metadata_payload, title),
+            "metadata": metadata_payload,
             "createdAt": now,
             "updatedAt": now,
         }

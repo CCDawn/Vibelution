@@ -146,7 +146,7 @@ def test_create_chat_session_creates_persistent_agent_and_direct_conversation(tm
     assert detail["title"] == agent["displayName"]
     assert detail["taskTitle"] == "配置 Agent"
     assert agent["metadata"]["functionalDisplayName"] == "配置 Agent"
-    assert agent["metadata"]["displayNameSource"] == "generated_person_name"
+    assert agent["metadata"]["displayNameSource"] == "responsibility"
     assert detail["hiddenFromIndex"] is False
     assert detail["conversationIndexKind"] == agent_directory_service.CONVERSATION_INDEX_KIND_USER_CHAT
     assert detail["conversationIndexVisibility"] == (
@@ -388,7 +388,7 @@ def test_session_list_uses_short_snapshot_cache_and_invalidates_on_update(tmp_pa
 
     assert lookup_calls == 1
     assert load_calls == 1
-    assert updated_session["title"] == created["title"]
+    assert updated_session["title"] == "Renamed Cached Agent"
     assert updated_session["taskTitle"] == "Renamed Cached Agent"
     assert [item for item in events if item[0][2] == "session.list.loaded"][-1][1]["fields"]["cacheHit"] is False
 
@@ -748,10 +748,9 @@ def test_agent_and_conversation_api_create_direct_agent(tmp_path, monkeypatch):
 
     assert response.status_code == 201, response.text
     agent = response.json()
-    assert agent["displayName"]
-    assert agent["displayName"] != "API Agent"
+    assert agent["displayName"] == "API Agent"
     assert agent["metadata"]["functionalDisplayName"] == "API Agent"
-    assert agent["metadata"]["displayNameSource"] == "generated_person_name"
+    assert agent["metadata"]["displayNameSource"] == "responsibility"
     assert agent["primaryMode"] == "chat"
     assert agent["roleKey"] == ""
     assert agent["promptTemplateId"] == "prompt-chat-default"
@@ -1027,6 +1026,7 @@ def test_agents_api_updates_unified_agent_fields(tmp_path, monkeypatch):
     response = client.patch(
         f"/api/agents/{agent['agentId']}",
         json={
+            "displayName": "研究复核",
             "primaryMode": "research",
             "roleKey": "research_review",
             "promptTemplateId": "prompt-research-review",
@@ -1035,6 +1035,9 @@ def test_agents_api_updates_unified_agent_fields(tmp_path, monkeypatch):
 
     assert response.status_code == 200, response.text
     payload = response.json()
+    assert payload["displayName"] == "研究复核"
+    assert payload["metadata"]["functionalDisplayName"] == "研究复核"
+    assert payload["metadata"]["displayNameSource"] == "user"
     assert payload["primaryMode"] == "research"
     assert payload["roleKey"] == "research_review"
     assert payload["promptTemplateId"] == "prompt-research-review"

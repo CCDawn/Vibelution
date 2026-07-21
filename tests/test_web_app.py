@@ -690,9 +690,15 @@ def test_update_session_title_persists_to_list_and_detail(tmp_path, monkeypatch)
     assert state["conversations"][0]["title"] == "重命名后的会话"
 
 
-def test_update_root_agent_session_title_syncs_agent_display_name(tmp_path, monkeypatch):
+def test_update_root_agent_session_title_keeps_agent_responsibility_separate(tmp_path, monkeypatch):
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    events = []
+    monkeypatch.setattr(
+        session_service,
+        "record_runtime_scene_event",
+        lambda *args, **kwargs: events.append((args, kwargs)) or {"accepted": True},
+    )
     agent = agent_directory_service.create_agent_instance(
         display_name="旧 Agent 名",
         direct_session_id="session-live",
@@ -713,13 +719,40 @@ def test_update_root_agent_session_title_syncs_agent_display_name(tmp_path, monk
         ],
     )
 
-    response = client.patch("/api/sessions/session-live", json={"title": "新 Agent 名"})
+    agent_display_name = agent["displayName"]
+
+    response = client.patch("/api/sessions/session-live", json={"title": "新任务名"})
 
     assert response.status_code == 200, response.text
     payload = response.json()
-    assert payload["title"] == "新 Agent 名"
-    assert payload["agentDisplayName"] == "新 Agent 名"
-    assert agent_directory_service.get_agent(agent["agentId"])["displayName"] == "新 Agent 名"
+    assert payload["title"] == "新任务名"
+    assert payload["agentDisplayName"] == agent_display_name
+    assert agent_directory_service.get_agent(agent["agentId"])["displayName"] == agent_display_name
+    title_event = next(item for item in events if item[0][2] == "conversation.title.updated")
+    assert title_event[1]["fields"] == {
+        "sessionId": "session-live",
+        "agentId": agent["agentId"],
+        "sessionKind": "main",
+        "agentIdentityChanged": False,
+        "source": "session_record",
+    }
+
+
+def test_update_agent_responsibility_keeps_root_session_title_separate(tmp_path, monkeypatch):
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    session = session_service.create_chat_session(title="需求分析")
+
+    response = client.patch(
+        f"/api/agents/{session['agentId']}",
+        json={"displayName": "代码开发"},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["displayName"] == "代码开发"
+    detail = session_service.get_session_detail(session["id"])
+    assert detail["title"] == "需求分析"
+    assert detail["agentDisplayName"] == "代码开发"
 
 
 def test_update_child_session_title_keeps_agent_display_name_separate(tmp_path, monkeypatch):

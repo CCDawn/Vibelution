@@ -1268,7 +1268,6 @@ def update_chat_session_title(session_id: str, title: str) -> dict:
         normalized_title = normalized_title[:120].rstrip()
 
     changed = False
-    agent_id_to_refresh = ""
     with s._CHAT_STATE_LOCK:
         payload = s.load_chat_state(s.PROJECT_ROOT)
         conversation = s._find_conversation_entry(payload, conversation_id)
@@ -1288,7 +1287,6 @@ def update_chat_session_title(session_id: str, title: str) -> dict:
                 s.save_chat_state(s.PROJECT_ROOT, payload)
                 changed = True
         elif agent_id:
-            agent_id_to_refresh = agent_id
             if str(conversation.get("title") or "").strip() != normalized_title:
                 conversation["title"] = normalized_title
                 conversation["updated_at"] = s._now_timestamp()
@@ -1302,16 +1300,9 @@ def update_chat_session_title(session_id: str, title: str) -> dict:
             s.save_chat_state(s.PROJECT_ROOT, payload)
             changed = True
 
-    agent_by_id: dict[str, dict[str, Any]] = {}
-    if agent_id_to_refresh:
-        updated_agent = s.update_agent_instance(agent_id_to_refresh, display_name=normalized_title)
-        agent_by_id[agent_id_to_refresh] = updated_agent
-        changed = True
-
     target = s._load_conversation_detail_target(
         conversation_id,
         repair=False,
-        agent_by_id=agent_by_id if agent_by_id else None,
     )
     detail = s._build_lightweight_session_detail(target) if target is not None else {}
     if changed:
@@ -1320,6 +1311,28 @@ def update_chat_session_title(session_id: str, title: str) -> dict:
             s._publish_session_detail_snapshot(conversation_id, detail=detail)
         else:
             s._publish_session_detail_snapshot(conversation_id)
+        try:
+            s.record_runtime_scene_event(
+                "conversation",
+                "title",
+                "conversation.title.updated",
+                level="info",
+                outcome="updated",
+                message="Session title updated without changing the owning Agent responsibility.",
+                fields={
+                    "sessionId": conversation_id,
+                    "agentId": agent_id,
+                    "sessionKind": session_kind,
+                    "agentIdentityChanged": False,
+                    "source": "session_record",
+                },
+                lifecycle=True,
+            )
+        except Exception as exc:
+            s._debug_logger.warning(
+                f"runtime scene session title log skipped: {type(exc).__name__}: {exc}",
+                tag="LOGS",
+            )
     return detail
 
 

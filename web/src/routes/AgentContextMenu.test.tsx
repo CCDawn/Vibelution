@@ -61,7 +61,7 @@ describe("AgentContextMenu", () => {
     expect(markup.match(/role="menuitem"/g)?.length).toBe(5);
   });
 
-  it("disables opening when the Agent has no session", () => {
+  it("keeps Agent rename available when the Agent has no session", () => {
     const markup = renderToStaticMarkup(
       <AgentContextMenu
         createPending
@@ -80,7 +80,7 @@ describe("AgentContextMenu", () => {
     expect(markup).toContain('aria-busy="true"');
     expect(markup).toContain("Open latest session");
     expect(markup).toContain("Creating session");
-    expect(markup.match(/disabled=""/g)?.length).toBe(3);
+    expect(markup.match(/disabled=""/g)?.length).toBe(2);
   });
 
   it("hides archive for protected Agents and exposes pending state for eligible Agents", () => {

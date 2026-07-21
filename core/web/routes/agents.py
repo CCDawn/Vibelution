@@ -582,13 +582,6 @@ def agent_create(payload: AgentCreatePayload) -> dict:
             agent = update_agent_instance(agent_id, task_profile=task_profile)
         if tool_policy:
             agent = update_agent_instance(agent_id, tool_policy=tool_policy)
-        direct_session_id = str(session.get("id") or agent.get("directSessionId") or "").strip()
-        if direct_session_id:
-            # The Agent directory deliberately gives generic functional names a
-            # stable public Agent name. Keep its primary direct session aligned
-            # with that identity instead of leaving the original draft title in
-            # the tab strip.
-            session_service.update_chat_session(direct_session_id, title=str(agent.get("displayName") or ""))
         return _with_agent_workspace_cache_invalidated(agent)
     except session_service.SessionValidationError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc

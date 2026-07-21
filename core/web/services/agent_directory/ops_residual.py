@@ -1186,21 +1186,35 @@ def ensure_agent_for_session(
             if metadata != agent.get("metadata"):
                 agent["metadata"] = metadata
                 changed = True
-            if s._should_repair_public_display_name(agent, title):
+            if s._should_repair_public_display_name(agent):
+                responsibility_name = str(metadata.get("functionalDisplayName") or title).strip()
                 agent["displayName"] = s._agent_public_display_name(
-                    title,
+                    responsibility_name,
                     existing_agents=state.get("agents") or [],
                     agent_id=str(agent.get("agentId") or ""),
                     metadata=metadata,
                 )
-                agent["metadata"] = s._mark_display_name_generated(dict(agent.get("metadata") or {}), force=True)
+                agent["metadata"] = s._mark_display_name_responsibility(
+                    dict(agent.get("metadata") or {}),
+                    force=True,
+                )
                 changed = True
         if not str(agent.get("displayName") or "").strip():
             agent["displayName"] = s._agent_public_display_name(
-                title or str(agent.get("agentId") or "Agent"),
+                str(
+                    (agent.get("metadata") or {}).get("functionalDisplayName")
+                    or title
+                    or agent.get("agentCode")
+                    or agent.get("agentId")
+                    or "Agent"
+                ),
                 existing_agents=state.get("agents") or [],
                 agent_id=str(agent.get("agentId") or ""),
                 metadata=dict(agent.get("metadata") or {}),
+            )
+            agent["metadata"] = s._mark_display_name_responsibility(
+                dict(agent.get("metadata") or {}),
+                force=True,
             )
             changed = True
         if normalized_llm_bindings and s.normalize_agent_llm_bindings(agent.get("llmBindings")) != normalized_llm_bindings:

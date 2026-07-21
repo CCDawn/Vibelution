@@ -2303,7 +2303,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("onArchive={handleArchiveAgent}");
     expect(routeSource).toContain("const handleRenameAgent = useCallback");
     expect(routeSource).toContain("window.prompt(");
-    expect(routeSource).toContain("renameSessionMutation.mutate({ sessionId: directSessionId, title })");
+    expect(routeSource).toContain("renameAgentMutation.mutate({ agentId, displayName: title })");
+    expect(routeSource).not.toContain("renameSessionMutation.mutate({ sessionId: directSessionId, title })");
     expect(routeSource).toContain("onRename={handleRenameAgent}");
     expect(routeSource).toContain("onCreateSession={handleCreateAgentSession}");
     expect(routeSource).toContain(

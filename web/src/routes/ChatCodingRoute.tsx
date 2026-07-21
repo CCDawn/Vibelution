@@ -1074,6 +1074,41 @@ export function ChatCodingRoute() {
     setEditingSessionTitle,
   });
 
+  const renameAgentMutation = useMutation({
+    mutationFn: (payload: { agentId: string; displayName: string }) =>
+      fetchJson<AgentInstance>(`/api/agents/${encodeURIComponent(payload.agentId)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ displayName: payload.displayName }),
+      }),
+    onMutate: async (payload) => {
+      await queryClient.cancelQueries({ queryKey: queryKeys.agents() });
+      const previousAgents = queryClient.getQueryData<AgentInstance[]>(queryKeys.agents());
+      queryClient.setQueryData<AgentInstance[]>(queryKeys.agents(), (current) =>
+        current?.map((agent) => agent.agentId === payload.agentId
+          ? { ...agent, displayName: payload.displayName }
+          : agent),
+      );
+      return { previousAgents };
+    },
+    onSuccess: (updatedAgent) => {
+      queryClient.setQueryData<AgentInstance[]>(queryKeys.agents(), (current) =>
+        current?.map((agent) => agent.agentId === updatedAgent.agentId ? updatedAgent : agent),
+      );
+      setSessionComposerErrors((current) => ({ ...current, __sessions__: "" }));
+      void chatWorkspaceCache.afterAgentWorkspaceChanged();
+    },
+    onError: (error, _variables, context) => {
+      if (context?.previousAgents) {
+        queryClient.setQueryData(queryKeys.agents(), context.previousAgents);
+      }
+      setSessionComposerErrors((current) => ({
+        ...current,
+        __sessions__: describeError(error, t("loadFailed")),
+      }));
+    },
+  });
+
   const archiveAgentMutation = useMutation({
     mutationFn: (payload: { agentId: string }) =>
       fetchJson<AgentInstance>(`/api/agents/${encodeURIComponent(payload.agentId)}`, {
@@ -2336,9 +2371,8 @@ export function ChatCodingRoute() {
 
   const handleRenameAgent = useCallback((agent: AgentInstance) => {
     const agentId = String(agent.agentId || "").trim();
-    const directSessionId = String(agent.directSessionId || "").trim();
     setAgentContextMenu(null);
-    if (!agentId || !directSessionId || renameSessionMutation.isPending) {
+    if (!agentId || renameAgentMutation.isPending) {
       return;
     }
     const currentName = String(agent.displayName || agent.agentCode || agentId).trim();
@@ -2353,15 +2387,15 @@ export function ChatCodingRoute() {
     if (!title) {
       setSessionComposerErrors((current) => ({
         ...current,
-        [directSessionId]: t("renameAgentEmpty"),
+        __sessions__: t("renameAgentEmpty"),
       }));
       return;
     }
     if (title === currentName) {
       return;
     }
-    renameSessionMutation.mutate({ sessionId: directSessionId, title });
-  }, [lang, renameSessionMutation, setSessionComposerErrors, t]);
+    renameAgentMutation.mutate({ agentId, displayName: title });
+  }, [lang, renameAgentMutation, setSessionComposerErrors, t]);
 
   const handleArchiveAgent = useCallback((agent: AgentInstance) => {
     const agentId = String(agent.agentId || "").trim();
@@ -2464,7 +2498,7 @@ export function ChatCodingRoute() {
               <AgentContextMenu
                 archivePending={contextMenuAgentArchivePending}
                 createPending={createSessionMutation.isPending}
-                renamePending={renameSessionMutation.isPending}
+                renamePending={renameAgentMutation.isPending}
                 lang={lang}
                 state={agentContextMenu}
                 onArchive={handleArchiveAgent}
