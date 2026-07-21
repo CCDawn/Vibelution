@@ -2341,6 +2341,35 @@ export function ChatCodingRoute() {
     }));
   }, [navigate]);
 
+  const handleRenameAgent = useCallback((agent: AgentInstance) => {
+    const agentId = String(agent.agentId || "").trim();
+    const directSessionId = String(agent.directSessionId || "").trim();
+    setAgentContextMenu(null);
+    if (!agentId || !directSessionId || renameSessionMutation.isPending) {
+      return;
+    }
+    const currentName = String(agent.displayName || agent.agentCode || agentId).trim();
+    const requestedName = window.prompt(
+      lang === "zh" ? "输入新的 Agent 名称" : "Enter a new Agent name",
+      currentName,
+    );
+    if (requestedName === null) {
+      return;
+    }
+    const title = requestedName.trim();
+    if (!title) {
+      setSessionComposerErrors((current) => ({
+        ...current,
+        [directSessionId]: t("renameAgentEmpty"),
+      }));
+      return;
+    }
+    if (title === currentName) {
+      return;
+    }
+    renameSessionMutation.mutate({ sessionId: directSessionId, title });
+  }, [lang, renameSessionMutation, setSessionComposerErrors, t]);
+
   const handleArchiveAgent = useCallback((agent: AgentInstance) => {
     const agentId = String(agent.agentId || "").trim();
     if (!agentId || archiveAgentMutation.isPending) {
@@ -2440,12 +2469,14 @@ export function ChatCodingRoute() {
               <AgentContextMenu
                 archivePending={contextMenuAgentArchivePending}
                 createPending={createSessionMutation.isPending}
+                renamePending={renameSessionMutation.isPending}
                 lang={lang}
                 state={agentContextMenu}
                 onArchive={handleArchiveAgent}
                 onCreateSession={handleCreateAgentSession}
                 onOpenConfig={handleOpenAgentConfig}
                 onOpenLatest={handleOpenAgentLatestSession}
+                onRename={handleRenameAgent}
               />
             </Suspense>
           ) : null}

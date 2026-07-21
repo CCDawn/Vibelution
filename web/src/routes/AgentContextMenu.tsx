@@ -1,4 +1,4 @@
-import { Archive, MessageSquareText, Plus, Settings2 } from "lucide-react";
+import { Archive, MessageSquareText, Pencil, Plus, Settings2 } from "lucide-react";
 import type { CSSProperties, PointerEvent } from "react";
 
 import type { AgentInstance, SessionSummary } from "../api/types";
@@ -6,7 +6,7 @@ import { VButton } from "../components/vui";
 import styles from "./AgentContextMenu.styles";
 
 const MENU_WIDTH = 188;
-const MENU_HEIGHT = 176;
+const MENU_HEIGHT = 212;
 const MENU_MARGIN = 12;
 
 export type AgentContextMenuPosition = {
@@ -38,12 +38,14 @@ export function agentContextMenuStyle(
 type AgentContextMenuProps = {
   archivePending: boolean;
   createPending: boolean;
+  renamePending: boolean;
   lang: "zh" | "en";
   state: AgentContextMenuState;
   onArchive: (agent: AgentInstance) => void;
   onCreateSession: (agent: AgentInstance) => void;
   onOpenConfig: (agent: AgentInstance, latestSession: SessionSummary | null) => void;
   onOpenLatest: (agent: AgentInstance, latestSession: SessionSummary | null) => void;
+  onRename: (agent: AgentInstance) => void;
 };
 
 function metadataFlag(agent: AgentInstance, key: string) {
@@ -81,12 +83,14 @@ export function agentCanArchiveFromContextMenu(agent: AgentInstance) {
 export function AgentContextMenu({
   archivePending,
   createPending,
+  renamePending,
   lang,
   state,
   onArchive,
   onCreateSession,
   onOpenConfig,
   onOpenLatest,
+  onRename,
 }: AgentContextMenuProps) {
   const viewport = typeof window === "undefined"
     ? undefined
@@ -103,11 +107,23 @@ export function AgentContextMenu({
       style={style}
       role="menu"
       aria-label={lang === "zh" ? "Agent 操作" : "Agent actions"}
-      aria-busy={createPending || archivePending ? true : undefined}
+      aria-busy={createPending || renamePending || archivePending ? true : undefined}
       aria-orientation="vertical"
       data-agent-context-menu={state.agent.agentId}
       onPointerDown={stopPointerPropagation}
     >
+      <VButton
+        type="button"
+        role="menuitem"
+        className={styles.sessionContextMenuItem}
+        onPress={() => onRename(state.agent)}
+        isDisabled={renamePending || !String(state.agent.directSessionId || "").trim()}
+        icon={<Pencil size={14} />}
+      >
+        {renamePending
+          ? (lang === "zh" ? "正在重命名" : "Renaming")
+          : (lang === "zh" ? "重命名 Agent" : "Rename Agent")}
+      </VButton>
       <VButton
         type="button"
         role="menuitem"
