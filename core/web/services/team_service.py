@@ -23,6 +23,16 @@ from core.infrastructure import developer_sandbox
 from . import agent_directory_service, chat_room_service, project_agent_bus_service
 from .runtime_scene_service import record_runtime_scene_event
 from .team_conversation_contract import build_team_conversation_projection
+from .team.canvas_primitives import (
+    EDGE_TYPES,
+    NODE_TYPES,
+    TeamCanvasValidationError,
+    _SAFE_ID_FRAGMENT,
+    _issue,
+    _normalize_edge as _normalize_edge_pure,
+    _safe_float,
+    _safe_token,
+)
 from core.logging.logger import debug as _debug_logger
 
 
@@ -36,8 +46,6 @@ KNOWLEDGE_EXPANSION_TEAM_ID = "knowledge-expansion-team"
 KNOWLEDGE_EXPANSION_TEAM_DISPLAY_NAME = "知识库内容扩充团队"
 DEFAULT_TEAM_STATUS = "active"
 TEAM_STATUSES = {"active", "archived"}
-NODE_TYPES = {"role", "agent", "group", "user", "external"}
-EDGE_TYPES = {"reports_to", "communication", "collaborates_with", "delegates_to", "observes", "supports"}
 _TEAM_LOCK = threading.RLock()
 _TEAM_SYSTEM_BOOTSTRAP_LOCK = threading.Lock()
 _TEAM_SYSTEM_BOOTSTRAP_THREAD: threading.Thread | None = None
@@ -59,7 +67,6 @@ TEAM_DETAIL_LOG_SLOW_THRESHOLD_MS = 250
 TEAM_DETAIL_LOG_ROLLUP_REPEAT_THRESHOLD = 5
 TEAM_DETAIL_LOG_ROLLUP_WINDOW_SECONDS = 5.0
 TEAM_SYSTEM_BOOTSTRAP_READY_CACHE_TTL_SECONDS = 30.0
-_SAFE_ID_FRAGMENT = re.compile(r"[^A-Za-z0-9_.-]+")
 AI_SEARCH_SOURCE_PAGE_TIMEOUT_SECONDS = 8.0
 AI_SEARCH_SOURCE_PAGE_MAX_BYTES = 400_000
 AI_SEARCH_SOURCE_PAGE_USER_AGENT = "Vibelution-AI-Search/1.0"
@@ -2102,7 +2109,10 @@ def _normalize_canvas(
     if len(node_ids) != len(set(node_ids)):
         raise TeamServiceError("Team canvas node ids must be unique.")
     node_id_set = set(node_ids)
-    normalized_edges = [_normalize_edge(item, index, node_id_set) for index, item in enumerate(edges[:240])]
+    try:
+        normalized_edges = [_normalize_edge_pure(item, index, node_id_set) for index, item in enumerate(edges[:240])]
+    except TeamCanvasValidationError as exc:
+        raise TeamServiceError(str(exc)) from exc
     viewport = raw.get("viewport") if isinstance(raw.get("viewport"), dict) else {}
     return {
         "schemaVersion": SCHEMA_VERSION,
@@ -2165,22 +2175,6 @@ def _normalize_node(
         ],
     }
 
-
-def _normalize_edge(item: Any, index: int, node_ids: set[str]) -> dict[str, Any]:
-    if not isinstance(item, dict):
-        raise TeamServiceError("Team canvas edge must be an object.")
-    source = _safe_token(item.get("source"), default="", max_length=96)
-    target = _safe_token(item.get("target"), default="", max_length=96)
-    if source not in node_ids or target not in node_ids:
-        raise TeamServiceError("Team canvas edge must reference existing nodes.")
-    edge_type = _safe_token(item.get("type"), default="collaborates_with", max_length=40)
-    return {
-        "id": _safe_token(item.get("id"), default=f"edge-{index + 1}", max_length=96),
-        "source": source,
-        "target": target,
-        "label": trim_lines(item.get("label") or "", max_lines=1).strip(),
-        "type": edge_type if edge_type in EDGE_TYPES else "collaborates_with",
-    }
 
 
 def _source_authority_ref(kind: str, source_id: str, metadata: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -5808,40 +5802,7 @@ def _normalize_required_id(value: str, message: str) -> str:
     return normalized
 
 
-def _safe_token(value: Any, *, default: str, max_length: int) -> str:
-    text = str(value or "").strip()
-    if not text:
-        return default
-    text = _SAFE_ID_FRAGMENT.sub("-", text).strip(".-_")
-    return (text or default)[:max_length]
 
-
-def _safe_float(value: Any, default: float) -> float:
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return default
-
-
-def _issue(
-    severity: str,
-    code: str,
-    message: str,
-    *,
-    node_id: str = "",
-    edge_id: str = "",
-    source: str = "",
-    target: str = "",
-) -> dict[str, Any]:
-    return {
-        "severity": severity,
-        "code": code,
-        "message": message,
-        "nodeId": node_id,
-        "edgeId": edge_id,
-        "source": source,
-        "target": target,
-    }
 
 
 def _format_validation_error(validation: dict[str, Any]) -> str:

@@ -1,7 +1,7 @@
 # Backend Structure P0 Plan
 
 Date: 2026-07-20
-Status: session_stage2_closed / workflow_stage3_closed / p0_remaining_optional
+Status: session_stage2_closed / workflow_stage3_closed / stage4_closed / p0_remaining_optional
 Owner lane: backend structure / web services
 Related: frontend bundle+claim phase (closed); `docs/agents/conversation-flow-map.md`; backend structure review (session)
 
@@ -24,6 +24,7 @@ Related: frontend bundle+claim phase (closed); `docs/agents/conversation-flow-ma
 | 2026-07-20 | 3.4–3.5 | Workflow: `source_collection/stages.py` + `storage.py` (stage tasks + open storage) |
 | 2026-07-20 | 3.6–3.7 | Workflow: `experiment.py` + `research_loop.py` public entry packs |
 | 2026-07-20 | 3.8 | **Workflow Stage 3 closed** — product-surface claim packs done; facade slim / knowledge mega APIs deferred |
+| 2026-07-21 | 4 | Secondary gods: ownership maps + pure cuts (`agent_directory/profiles`, `team/canvas_primitives`) |
 
 ### Session Stage 2 closeout (2026-07-20)
 
@@ -77,10 +78,28 @@ Related: frontend bundle+claim phase (closed); `docs/agents/conversation-flow-ma
 1. Full facade slim to re-exports only.
 2. Optional `knowledge.py` for graph/steward/coordination mega APIs.
 3. Moving private `_execute_*` / materialize helpers into packs.
-4. Stage 4 secondary gods (agent_directory / team_service) maps-only or later.
+4. Stage 4 secondary gods — **closed** (maps + one pure cut each; see Stage 4 closeout).
 5. Stage 5 hardening / quality-gate full suite / P0 completion note if release needs it.
 
 **Version impact:** none · **Launcher refresh:** not needed
+
+### Stage 4 closeout (2026-07-21)
+
+**Exit met**
+
+- Ownership maps: `core/web/services/agent_directory/README.md`, `core/web/services/team/README.md`
+- One pure cut each:
+  - Agent: `agent_directory/profiles.py` (persona/task profile normalizers)
+  - Team: `team/canvas_primitives.py` (token/float/issue + edge normalize)
+- Facades re-export; route import paths unchanged
+
+**Deferred**
+
+1. Agent list/get projection pack and mutations pack
+2. Team node/member normalize (still Agent-IO coupled) and system bootstrap pack
+3. Stage 5 full quality gate / formal P0 completion package
+
+**Version impact:** none · **Launcher:** not needed
 
 ## 1. Problem Statement
 
