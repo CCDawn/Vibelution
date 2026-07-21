@@ -31,6 +31,13 @@ this package and be re-exported from the facade when it is part of the public AP
 | SSE `assistant_delta` / `session_detail` publish | `publish.py` | DTO projection builders |
 | Stop / interrupt turn control | `control.py` | agent purge/archive |
 | Agent session purge/archive/child/inbox/cli lifecycle | `agent_sessions.py` | list/detail projection |
+| Conversation/agent index create/repair/metadata | `conversation_index.py` | SSE publish |
+| Live-output write / checkpoint bridge | `live_output_write.py` | pure store in `live_output.py` |
+| Timeline / tool / mental-snapshot normalizers | `timeline.py` | turn diagnostics |
+| Turn errors / work-runs / review / ledger reconcile | `turn_diagnostics.py` | timeline normalizers |
+| Agent binding / prompt snapshot / LLM runtime | `agent_runtime.py` | image store |
+| Context segment / provider cache estimation | `cache_context.py` | agent binding |
+| Image artifact / attachment store-resolve | `image_attachments.py` | agent image-input policy |
 | Residual helpers | `../session_service.py` (facade remainder) | new mega public APIs on facade |
 | Public HTTP-facing API surface | `../session_service.py` (facade) | bypassing re-exports |
 
@@ -87,17 +94,42 @@ this package and be re-exported from the facade when it is part of the public AP
 | `agent_sessions.py` | ~3.2k | purge/archive/delete/reset, child sessions, inbox wake, CLI lifecycle |
 | `session_service.py` facade (after Phase 4) | ~13.4k total lines | re-exports + remaining shared helpers |
 
+### Service optimization Phase 7 (conversation index + live write)
+
+| Module | ~LOC | Role |
+|--------|------|------|
+| `conversation_index.py` | ~1.8k | create/select/query session, agent metadata, index repair |
+| `live_output_write.py` | ~0.7k | set live overlay + checkpoint bridge |
+| `session_service.py` facade (after Phase 7) | ~11.1k total lines | re-exports + residual helpers |
+
+### Service optimization Phase 8 (timeline + turn diagnostics)
+
+| Module | ~LOC | Role |
+|--------|------|------|
+| `timeline.py` | ~1.1k | preflight, tool/feedback normalize, mental snapshot, assistant timeline |
+| `turn_diagnostics.py` | ~1.7k | turn errors, work-runs, review candidates, ledger reconcile, SC post-turn bridge |
+| `session_service.py` facade (after Phase 8) | ~8.5k total lines | re-exports + residual helpers |
+
+### Service optimization Phase 9 (agent runtime / cache / image)
+
+| Module | ~LOC | Role |
+|--------|------|------|
+| `agent_runtime.py` | ~1.1k | acquire agent, prompt snapshot, binding recovery, LLM diagnostics |
+| `cache_context.py` | ~0.4k | context segments + provider cache estimation |
+| `image_attachments.py` | ~0.5k | image artifact store/resolve + LLM attachments |
+| `session_service.py` facade (after Phase 9) | ~6.8k total lines | re-exports + residual event/logging glue |
+
 **Stage 2 exit (met):** hot-path claims for submit → schedule → capture → worker → persist.
 
-**Phase 3 exit:** projection + SSE publish claimable outside facade.
+**Phase 3–8 exit:** projection/publish/control/lifecycle/index/live/timeline/turn claimable.
 
-**Phase 4 exit:** stop control + agent session lifecycle claimable outside facade; structure + lifecycle tests green.
+**Phase 9 exit:** agent runtime + cache context + image attachments claimable.
 
 **Still deferred:**
 
-- Full facade slim to re-exports only (remaining shared helpers).
+- Full facade slim to re-exports only (remaining event/logging glue).
 - Late-bind removal.
-- Migrating all internal importers off the facade.
+- Secondary gods (`runtime_scene`, `agent_directory`).
 
 ## Related
 

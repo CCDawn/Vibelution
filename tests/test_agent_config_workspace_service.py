@@ -1297,6 +1297,10 @@ def test_agent_config_workspace_allows_self_evolution_observer_without_prompt_te
         if "prompt" in str(item.get("code") or "")
     }
     assert "missing_prompt_template_id" not in prompt_issue_codes
+    assert "missing_prompt_template" not in prompt_issue_codes
+    assert "agent_onboarding_incomplete" not in {
+        item["code"] for item in health["issues"]
+    }
 
 
 def test_agent_api_effective_compression_uses_dialogue_model_context_window(tmp_path, monkeypatch):

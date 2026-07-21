@@ -656,8 +656,9 @@ def _derive_health(
                 )
 
         prompt_template_id = str(agent.get("promptTemplateId") or "").strip()
-        if not prompt_template_id and not _agent_allows_empty_prompt_template(agent):
-            issues.append(_agent_issue(agent, "warning", "missing_prompt_template_id", "Agent 未绑定提示词模板", "promptTemplateId 为空。"))
+        if not prompt_template_id:
+            if not _agent_allows_empty_prompt_template(agent):
+                issues.append(_agent_issue(agent, "warning", "missing_prompt_template_id", "Agent 未绑定提示词模板", "promptTemplateId 为空。"))
         elif prompt_template_id not in prompt_refs:
             issues.append(
                 _agent_issue(
@@ -2119,6 +2120,8 @@ def _onboarding_missing_for_boundary(agent: dict[str, Any], boundary: dict[str, 
         skip = set()
     elif boundary_type == "service_role":
         skip = {"personaProfile"}
+    if _agent_allows_empty_prompt_template(agent):
+        skip.add("promptTemplateId")
 
     missing = [item for item in raw_missing if item not in skip]
     if "personaProfile" not in skip and not agent_persona_profile_has_content(_agent_persona_profile(agent)):
