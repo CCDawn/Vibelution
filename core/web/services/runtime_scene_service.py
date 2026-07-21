@@ -285,6 +285,11 @@ from .runtime_scene.diagnosis import (
     _work_run_snapshot_summary_event,
     _work_run_status_is_active,
 )
+from .runtime_scene.package_index import (
+    _runtime_scene_package_index_sidecar_is_stale,
+    _sync_runtime_scene_package_index_if_stale,
+    _update_runtime_scene_manifest_package_index_fields,
+)
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -560,54 +565,6 @@ PACKAGE_INDEX_RESULT_TOKENS = {
 
 _RUNTIME_SCENE_PROMPT_INDEX_CACHE_LOCK = Lock()
 _RUNTIME_SCENE_PROMPT_INDEX_CACHE: dict[tuple[int, tuple[tuple[str, str, str, str], ...]], tuple[float, str]] = {}
-
-
-def _sync_runtime_scene_package_index_if_stale(
-    scene_dir: Path,
-    manifest: dict[str, Any],
-    package_index: dict[str, Any],
-) -> None:
-    if not _runtime_scene_package_index_sidecar_is_stale(scene_dir, manifest, package_index):
-        return
-    try:
-        _save_runtime_scene_lightweight_package_index(scene_dir, package_index)
-        _update_runtime_scene_manifest_package_index_fields(scene_dir, manifest, package_index)
-    except OSError:
-        return
-
-
-def _runtime_scene_package_index_sidecar_is_stale(
-    scene_dir: Path,
-    manifest: dict[str, Any],
-    package_index: dict[str, Any],
-) -> bool:
-    expected_index = _runtime_scene_sidecar_compare_payload(
-        _runtime_scene_lightweight_package_index_payload(package_index)
-    )
-    actual_index = _runtime_scene_sidecar_compare_payload(
-        _load_scene_json(scene_dir / PACKAGE_INDEX_PATH)
-    )
-    for key, expected_value in expected_index.items():
-        if actual_index.get(key) != expected_value:
-            return True
-
-    package = manifest.get("package") if isinstance(manifest.get("package"), dict) else {}
-    expected_package_values = _runtime_scene_manifest_package_index_values(package_index)
-    return any(package.get(key) != expected_value for key, expected_value in expected_package_values.items())
-
-
-def _update_runtime_scene_manifest_package_index_fields(
-    scene_dir: Path,
-    manifest: dict[str, Any],
-    package_index: dict[str, Any],
-) -> None:
-    package = manifest.get("package")
-    if not isinstance(package, dict):
-        package = {}
-    package.update({"schema_version": 2, **_runtime_scene_manifest_package_index_values(package_index)})
-    package["updated_at"] = _now_utc()
-    manifest["package"] = package
-    _save_scene_manifest(scene_dir, manifest)
 
 
 BROWSER_UNLOAD_NETWORK_FAILURE_WINDOW_SECONDS = 2.5
