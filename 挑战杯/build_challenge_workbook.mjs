@@ -1,206 +1,158 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+
 import { SpreadsheetFile, Workbook } from "@oai/artifact-tool";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const outputDir = path.join(scriptDir, "outputs");
-await fs.mkdir(outputDir, { recursive: true });
+const outputPath = path.join(outputDir, "挑战杯报名信息与赛题提取模板.xlsx");
+
+const fixedTitle = "面向前沿科学问题的AI假设生成与研究计划设计平台";
+const officialPage = "https://university.aliyun.com/action/tzbjbgs2026";
+const nadcNotice = "https://nadc.china-vo.org/article/20260624094452";
 
 const workbook = Workbook.create();
 
-const registration = workbook.worksheets.add("报名填报信息");
-registration.showGridLines = false;
-
-registration.getRange("A1:D1").values = [["挑战杯揭榜挂帅报名信息表", "", "", ""]];
-registration.mergeCells("A1:D1");
-registration.getRange("A1:D1").format = {
-  fill: "#1F4E79",
-  font: { bold: true, color: "#FFFFFF", size: 16 },
-  horizontalAlignment: "center",
-  verticalAlignment: "center",
-};
-registration.getRange("A1:D1").format.rowHeightPx = 34;
-
-const regRows = [
-  ["字段", "填写内容", "状态", "备注"],
-  ["对应榜单选题序号 / 题目编号", "XH-202619", "已确定", "来自赛题 PDF"],
-  ["发榜单位", "浙江阿里巴巴云计算有限公司", "已确定", "来自赛题 PDF"],
-  ["参赛题目名称", "基于国产开源大模型的AI Scientist的研发与应用", "已确定", "来自赛题 PDF"],
-  ["推报学院", "计算机学院", "已确定", "来自用户提供信息"],
-  ["揭榜作品名称 / 作品名称", "AI Agent 驱动的动态攻防推演靶场平台", "已确定", "来自用户提供信息"],
-  ["学生负责人", "许郭", "已确定", "来自用户提供信息"],
-  ["学号", "232050348", "已确定", "来自用户提供信息"],
-  ["学生负责人所在学院", "计算机学院", "已确定", "来自用户提供信息"],
-  ["学历", "研究生在读", "已确定", "来自用户提供信息"],
-  ["学生负责人联系方式", "19855532778", "已确定", "来自用户提供信息"],
-  ["指导教师（按照顺序写全）", "陈信、俞东进、王东京", "已确定", "来自用户提供信息"],
-  ["指导教师所在学院", "计算机学院", "已确定", "来自用户提供信息"],
-  ["是否已在系统报名", "是", "已确定", "来自用户提供信息"],
-  ["材料是否完成盖章", "是", "已确定", "来自用户提供信息"],
-  [
-    "初期研究情况",
-    "已围绕“基于国产开源大模型的AI Scientist研发与应用”开展初步调研，结合团队原有AI Agent动态攻防推演靶场基础，将研究方向聚焦于网络安全领域的科学假设生成与验证。前期已对任务进行分解，划分为系统架构设计、多智能体协作机制、攻防场景构建与仿真、数据采集与评估四个方向，并组织开展国内外AI Scientist、多智能体系统、网络攻防推演及安全数据分析相关研究现状调研工作。",
-    "建议填写",
-    "可根据系统字数限制压缩",
-  ],
-  [
-    "作品简介 / 项目简介",
-    "本作品面向网络安全攻防推演场景，基于国产开源大模型及多智能体系统，构建具备问题理解、知识整合、关联发现与可验证假设生成能力的AI Scientist原型平台。平台通过对漏洞情报、攻防日志、靶场行为数据和安全文献进行融合分析，自动生成可验证的攻防假设、风险机制解释与实验验证方案，并在动态靶场环境中进行仿真验证，形成从数据输入到科学假设输出再到攻防实验验证的智能闭环。",
-    "建议填写",
-    "如系统有该字段可用",
-  ],
-  [
-    "研究基础 / 已有成果 / 项目基础",
-    "团队已具备AI Agent系统设计、网络攻防靶场构建、日志数据采集分析和大模型应用开发基础。前期围绕动态攻防推演平台完成了初步方案设计，明确了平台架构、智能体分工、攻防环境构建、数据采集与评估等核心模块，为进一步基于Qwen系列模型和阿里云百炼平台构建AI Scientist系统奠定了基础。",
-    "建议填写",
-    "如系统有该字段可用",
-  ],
-];
-
-registration.getRangeByIndexes(2, 0, regRows.length, 4).values = regRows;
-registration.getRange("A3:D3").format = {
-  fill: "#D9EAF7",
-  font: { bold: true, color: "#17365D" },
-  horizontalAlignment: "center",
-};
-registration.getRange(`A3:D${regRows.length + 2}`).format.borders = {
-  preset: "all",
-  style: "thin",
-  color: "#B7C9D6",
-};
-registration.getRange(`A4:A${regRows.length + 2}`).format = {
-  fill: "#F3F7FA",
-  font: { bold: true },
-  verticalAlignment: "top",
-};
-registration.getRange(`B4:D${regRows.length + 2}`).format = {
-  wrapText: true,
-  verticalAlignment: "top",
-};
-registration.getRange("A:A").format.columnWidthPx = 210;
-registration.getRange("B:B").format.columnWidthPx = 560;
-registration.getRange("C:C").format.columnWidthPx = 90;
-registration.getRange("D:D").format.columnWidthPx = 210;
-registration.getRange(`A3:D${regRows.length + 2}`).format.autofitRows();
-registration.freezePanes.freezeRows(3);
-
-const topic = workbook.worksheets.add("赛题提取信息");
-topic.showGridLines = false;
-topic.getRange("A1:D1").values = [["赛题 XH-202619 核心信息提取", "", "", ""]];
-topic.mergeCells("A1:D1");
-topic.getRange("A1:D1").format = {
-  fill: "#375623",
-  font: { bold: true, color: "#FFFFFF", size: 16 },
-  horizontalAlignment: "center",
-};
-
-const topicRows = [
-  ["类别", "项目", "内容", "备注"],
-  ["基本信息", "题目编号", "XH-202619", ""],
-  ["基本信息", "发榜单位", "浙江阿里巴巴云计算有限公司", ""],
-  ["基本信息", "题目名称", "基于国产开源大模型的AI Scientist的研发与应用", ""],
-  ["核心任务", "任务闭环", "数据/文献输入 -> 问题理解 -> 知识整合 -> 关联发现 -> 可验证科学假设输出", ""],
-  ["技术要求", "基座模型", "必须基于千问开源模型（Qwen）系列", ""],
-  ["技术要求", "开发平台", "需通过阿里云百炼平台调用模型API并提供调用凭证/截图", ""],
-  ["技术要求", "微调", "允许基于下游任务、领域数据的SFT", ""],
-  ["能力项", "文献挖掘与事实提取", "结合选题结构化信息，提取关键科学事实，避免断章取义", ""],
-  ["能力项", "逻辑驱动的假设生成", "利用归纳与演绎推理，基于已知事实生成初步假设", ""],
-  ["能力项", "论证可行与多轮迭代", "确保引用真实可靠、假设具备可行路径，并多轮迭代完善提案", ""],
-  ["能力项", "智能体思辨与人在回路", "构建可交互、具备教学意义的人机协作流程", ""],
-  ["提交材料", "技术方案文档", "PDF≤20页，包含研究问题与解决方法、AI Scientist架构、真实案例、源代码等", ""],
-  ["提交材料", "附加提交", "可交互前端页面、10分钟内演示视频", "可选"],
-  ["评分标准", "科学价值", "40分：核心假设创新性与自洽性、方案可落地验证性", ""],
-  ["评分标准", "技术深度", "30分：多智能体协作设计、多模态科学数据处理成效", ""],
-  ["评分标准", "应用潜力", "30分：场景支撑、论文/专利转化潜力、代码与结果可复现性", ""],
-  ["时间节点", "报名时间", "2026年5月30日-6月30日", ""],
-  ["时间节点", "作品提交", "2026年9月5日前", ""],
-  ["时间节点", "初审", "2026年9月20日前", ""],
-  ["时间节点", "终审擂台赛", "2026年11月", ""],
-  ["联系方式", "联络人", "左老师，xiaoan.zj@alibaba-inc.com，钉钉群号：162255026342", "工作日9:30-18:00"],
-];
-
-topic.getRangeByIndexes(2, 0, topicRows.length, 4).values = topicRows;
-topic.getRange("A3:D3").format = {
-  fill: "#E2F0D9",
-  font: { bold: true, color: "#375623" },
-  horizontalAlignment: "center",
-};
-topic.getRange(`A3:D${topicRows.length + 2}`).format.borders = {
-  preset: "all",
-  style: "thin",
-  color: "#C7D7BD",
-};
-topic.getRange(`A4:B${topicRows.length + 2}`).format = {
-  fill: "#F5FAF2",
-  font: { bold: true },
-  verticalAlignment: "top",
-};
-topic.getRange(`C4:D${topicRows.length + 2}`).format = {
-  wrapText: true,
-  verticalAlignment: "top",
-};
-topic.getRange("A:A").format.columnWidthPx = 120;
-topic.getRange("B:B").format.columnWidthPx = 180;
-topic.getRange("C:C").format.columnWidthPx = 580;
-topic.getRange("D:D").format.columnWidthPx = 190;
-topic.getRange(`A3:D${topicRows.length + 2}`).format.autofitRows();
-topic.freezePanes.freezeRows(3);
-
-const checklist = workbook.worksheets.add("待补清单");
-checklist.showGridLines = false;
-checklist.getRange("A1:D1").values = [["后续待补充/核对事项", "", "", ""]];
-checklist.mergeCells("A1:D1");
-checklist.getRange("A1:D1").format = {
-  fill: "#7F6000",
-  font: { bold: true, color: "#FFFFFF", size: 16 },
-  horizontalAlignment: "center",
-};
-const todoRows = [
-  ["事项", "当前状态", "建议动作", "截止/备注"],
-  ["团队成员完整名单", "待补", "补充所有成员姓名、学号、学院、联系方式", "每队不超过10人"],
-  ["阿里云百炼调用凭证/截图", "待准备", "注册/配置百炼平台并保存调用截图", "技术方案需提供"],
-  ["技术方案PDF", "待撰写", "控制在20页以内", "作品提交材料"],
-  ["源代码仓库/压缩包", "待整理", "整理多智能体工作流核心代码和上下文工程设计", "作品提交材料"],
-  ["真实案例", "待设计", "输出满足赛题字段规范的科学假设与研究计划案例", "评分关键"],
-  ["可交互前端", "可选", "如时间允许，搭建演示页面", "加分展示"],
-  ["演示视频", "可选", "制作10分钟内演示视频", "推荐提交"],
-  ["盖章报名表PDF", "需核对", "确保与系统填报信息严格一致", "9月5日前随作品提交"],
-  ["夸克网盘链接与截图", "待提交前准备", "上传压缩包并记录分享链接、提取码、含上传时间截图", "9月5日前"],
-];
-checklist.getRangeByIndexes(2, 0, todoRows.length, 4).values = todoRows;
-checklist.getRange("A3:D3").format = {
-  fill: "#FFF2CC",
-  font: { bold: true, color: "#7F6000" },
-  horizontalAlignment: "center",
-};
-checklist.getRange(`A3:D${todoRows.length + 2}`).format.borders = {
-  preset: "all",
-  style: "thin",
-  color: "#D6B656",
-};
-checklist.getRange(`A4:D${todoRows.length + 2}`).format = {
-  wrapText: true,
-  verticalAlignment: "top",
-};
-checklist.getRange("A:A").format.columnWidthPx = 210;
-checklist.getRange("B:B").format.columnWidthPx = 120;
-checklist.getRange("C:C").format.columnWidthPx = 430;
-checklist.getRange("D:D").format.columnWidthPx = 180;
-checklist.getRange(`A3:D${todoRows.length + 2}`).format.autofitRows();
-checklist.freezePanes.freezeRows(3);
-
-for (const sheet of [registration, topic, checklist]) {
-  sheet.getRange("A1:D1").format.rowHeightPx = 34;
+function styleSheet(sheet, usedRange, widths) {
+  sheet.showGridLines = false;
+  sheet.freezePanes.freezeRows(3);
+  sheet.getRange(usedRange).format = {
+    font: { size: 10, color: "#243447" },
+    verticalAlignment: "top",
+  };
+  const lastRow = Number(usedRange.match(/\d+$/)?.[0] || 1);
+  widths.forEach((width, index) => {
+    sheet.getRangeByIndexes(0, index, lastRow, 1).format.columnWidth = width;
+  });
 }
 
-const preview = await workbook.render({
-  sheetName: "报名填报信息",
-  range: "A1:D20",
-  scale: 1,
-  format: "png",
-});
-await fs.writeFile(path.join(outputDir, "报名填报信息预览.png"), new Uint8Array(await preview.arrayBuffer()));
+function styleTitle(sheet, range, text, fill, textColor) {
+  sheet.mergeCells(range);
+  const title = sheet.getRange(range);
+  title.values = [[text]];
+  title.format = {
+    fill,
+    font: { bold: true, color: textColor, size: 16 },
+    horizontalAlignment: "center",
+    verticalAlignment: "center",
+    rowHeight: 32,
+  };
+}
 
-const xlsx = await SpreadsheetFile.exportXlsx(workbook);
-await xlsx.save(path.join(outputDir, "挑战杯报名信息与赛题提取表.xlsx"));
+function styleHeader(range, fill, color) {
+  range.format = {
+    fill,
+    font: { bold: true, color },
+    horizontalAlignment: "center",
+    verticalAlignment: "center",
+    wrapText: true,
+    borders: { preset: "outside", style: "medium", color: "#9FB3C8" },
+    rowHeight: 24,
+  };
+}
+
+function styleBody(range) {
+  range.format = {
+    wrapText: true,
+    verticalAlignment: "top",
+    borders: { preset: "all", style: "thin", color: "#D7E0E8" },
+    rowHeight: 27,
+  };
+}
+
+const registration = workbook.worksheets.add("报名信息模板");
+const registrationRows = [
+  ["字段", "填写内容", "状态", "隐私与使用说明"],
+  ["对应榜单选题序号 / 题目编号", "XH-202619", "已确定", "公开赛题信息"],
+  ["固定作品名称", fixedTitle, "已确定", "已经报名，不得改写或替换"],
+  ["参赛定位", "赛道一 / 方向一 / A：科学假设生成与研究计划设计", "已确定", "B 类实验闭环作为代表性验证能力"],
+  ["推报学院", "", "待填写", "内部材料；不要提交到公开代码仓库"],
+  ["学生负责人", "", "待填写", "个人信息；只填写到受控报名材料"],
+  ["学号", "", "待填写", "个人信息；只填写到受控报名材料"],
+  ["学生负责人所在学院", "", "待填写", "内部材料"],
+  ["学历", "", "待填写", "内部材料"],
+  ["学生负责人联系方式", "", "待填写", "个人信息；不得出现在截图、日志或公开仓库"],
+  ["指导教师", "", "待填写", "个人信息；正式提交前核对顺序"],
+  ["指导教师所在学院", "", "待填写", "内部材料"],
+  ["是否已在系统报名", "", "待核验", "只记录状态，不在仓库保存登录或凭证信息"],
+  ["材料是否完成盖章", "", "待核验", "盖章件存放在受控目录，不进入普通源码目录"],
+  ["初期研究情况", "已完成科研Agent流程、证据治理、候选假设、研究计划与多轮实验反馈能力建设；下一阶段集中补齐125个科学问题输出、阿里云百炼证明和正式提交包。", "待审核", "脱敏摘要，可根据报名系统字数限制压缩"],
+  ["作品简介", "平台面向前沿科学问题，以Qwen系列模型和多Agent协作完成证据检索、科学假设生成、多维审查、研究计划设计及反馈修订，并由研究者在高杠杆节点审批。代表性实验用于验证计划可执行性和结果反馈能力。", "待审核", "不夸大自动科研或实验结论边界"],
+];
+
+styleTitle(registration, "A1:D1", "挑战杯报名信息脱敏模板", "#DCEAF5", "#173F5F");
+registration.getRangeByIndexes(2, 0, registrationRows.length, 4).values = registrationRows;
+styleHeader(registration.getRange("A3:D3"), "#DCEAF5", "#173F5F");
+styleBody(registration.getRange(`A4:D${registrationRows.length + 2}`));
+registration.getRange("A5:D6").format.rowHeight = 36;
+registration.getRange("A17:D18").format.rowHeight = 62;
+registration.getRange(`A4:A${registrationRows.length + 2}`).format = {
+  fill: "#F4F8FB",
+  font: { bold: true, color: "#173F5F" },
+};
+styleSheet(registration, `A1:D${registrationRows.length + 2}`, [95, 320, 70, 220]);
+
+const requirements = workbook.worksheets.add("赛题当前要求");
+const requirementRows = [
+  ["类别", "要求", "当前项目状态", "处理决定", "来源"],
+  ["作品名称", fixedTitle, "已固定", "所有对外材料统一使用", officialPage],
+  ["参赛主线", "方向 A：科学假设生成与研究计划设计", "已锁定", "实验反馈作为验证能力，不替代 A 交付", officialPage],
+  ["125题交付", "选择方向 A 时提交全部125个科学问题的输出结果文档", "清单与协议已建立", "先完成百炼接入和1题样例，再按每批5题生成正式结果", officialPage],
+  ["模型", "使用Qwen系列模型", "有本地Qwen记录", "补正式模型标识和调用链证明", officialPage],
+  ["平台证明", "通过阿里云百炼或官方推荐工具形成可核验调用证据", "缺百炼截图", "保留脱敏截图、调用日志和模型配置", officialPage],
+  ["主文档", "PPT/PDF不超过20页；按更严格口径以PDF提交", "未收束", "围绕评分项压缩为单一主文档", officialPage],
+  ["测试API", "提供可调用测试API", "待固化", "提供评审可调用入口、样例和限流说明", officialPage],
+  ["交互前端", "提供可交互前端页面入口", "已有产品基础", "固化评审路径并消除旧标题", officialPage],
+  ["测试案例", "提供代表性输入、输出结果", "实验结果已存在", "选2至3个深度案例并保留边界和失败记录", officialPage],
+  ["技术材料", "详细技术报告、源码、工作流、上下文工程和数据来源", "分散存在", "建立提交索引和复现说明", nadcNotice],
+  ["演示视频", "10分钟以内，可选", "未制作", "主材料稳定后制作", officialPage],
+  ["提交截止", "2026-09-05前", "进行中", "提交前再次核对官网和答疑群", nadcNotice],
+];
+
+styleTitle(requirements, "A1:E1", "赛题当前硬约束与项目对齐", "#DCEFE7", "#245B47");
+requirements.getRangeByIndexes(2, 0, requirementRows.length, 5).values = requirementRows;
+styleHeader(requirements.getRange("A3:E3"), "#DCEFE7", "#245B47");
+styleBody(requirements.getRange(`A4:E${requirementRows.length + 2}`));
+requirements.getRange(`A4:E${requirementRows.length + 2}`).format.rowHeight = 42;
+requirements.getRange(`A4:A${requirementRows.length + 2}`).format = {
+  fill: "#F1F8F4",
+  font: { bold: true, color: "#245B47" },
+};
+styleSheet(requirements, `A1:E${requirementRows.length + 2}`, [70, 240, 100, 205, 170]);
+
+const checklist = workbook.worksheets.add("提交清单");
+const checklistRows = [
+  ["优先级", "交付物", "是否必需", "状态", "证据位置 / 负责人备注"],
+  ["P0", "固定作品名全局一致性", "必需", "进行中", "挑战杯/README.md 为唯一事实源"],
+  ["P0", "125个科学问题规范化清单", "必需", "已完成", "挑战杯/data/science_125_questions.json"],
+  ["P0", "125题批处理任务账本和逐题输出", "必需", "未开始", "按125题执行协议.md分25批推进"],
+  ["P0", "阿里云百炼/Qwen正式调用证明", "必需", "未开始", ""],
+  ["P1", "2至3个代表性深度案例", "必需", "进行中", "Stage 3实验可作为一个验证案例"],
+  ["P1", "可调用测试API", "必需", "未开始", ""],
+  ["P1", "可交互前端入口", "必需", "进行中", ""],
+  ["P1", "20页以内正式PDF", "必需", "未开始", ""],
+  ["P1", "源码与复现说明", "必需", "进行中", ""],
+  ["P1", "代表性输入输出结果", "必需", "进行中", ""],
+  ["P2", "10分钟以内演示视频", "可选", "未开始", ""],
+  ["P2", "盖章报名表和提交附件", "必需", "待核验", "真实文件只存受控目录"],
+  ["P2", "网盘链接、提取码和上传时间截图", "必需", "未开始", "正式提交前生成"],
+];
+
+styleTitle(checklist, "A1:E1", "挑战杯提交清单（脱敏）", "#F5E8CB", "#6B4B16");
+checklist.getRangeByIndexes(2, 0, checklistRows.length, 5).values = checklistRows;
+styleHeader(checklist.getRange("A3:E3"), "#F5E8CB", "#6B4B16");
+styleBody(checklist.getRange(`A4:E${checklistRows.length + 2}`));
+checklist.getRange(`A4:E${checklistRows.length + 2}`).format.rowHeight = 30;
+checklist.getRange(`A4:A${checklistRows.length + 2}`).format = {
+  fill: "#FBF7ED",
+  font: { bold: true, color: "#6B4B16" },
+  horizontalAlignment: "center",
+};
+styleSheet(checklist, `A1:E${checklistRows.length + 2}`, [55, 210, 75, 75, 260]);
+
+await fs.mkdir(outputDir, { recursive: true });
+const output = await SpreadsheetFile.exportXlsx(workbook);
+await output.save(outputPath);
+
+console.log(outputPath);

@@ -1,0 +1,300 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://vibelution.local/challenge-cup/schemas/challenge_question_output.schema.json",
+  "title": "Challenge Cup Science 125 Question Output v1",
+  "description": "A traceable, human-gated output record for one Science 125 question. No aggregate score is permitted.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "catalog_id",
+    "question_id",
+    "question_en",
+    "run",
+    "status",
+    "problem_understanding",
+    "evidence",
+    "hypotheses",
+    "dimension_reviews",
+    "selection",
+    "research_plan",
+    "feedback_iterations",
+    "final_summary",
+    "audit"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "catalog_id": { "const": "science-125-questions-2021" },
+    "question_id": { "type": "string", "pattern": "^SCI-(00[1-9]|0[1-9][0-9]|1[01][0-9]|12[0-5])$" },
+    "question_en": { "type": "string", "minLength": 5, "maxLength": 500 },
+    "question_zh": { "type": "string", "minLength": 2, "maxLength": 500 },
+    "run": { "$ref": "#/$defs/run" },
+    "status": {
+      "enum": ["draft", "review_required", "needs_revision", "approved", "blocked", "failed"]
+    },
+    "problem_understanding": { "$ref": "#/$defs/problemUnderstanding" },
+    "evidence": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/evidenceItem" },
+      "minItems": 1
+    },
+    "hypotheses": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/hypothesis" },
+      "minItems": 2
+    },
+    "dimension_reviews": {
+      "type": "array",
+      "description": "Independent reviews. Do not add or derive an aggregate score.",
+      "items": { "$ref": "#/$defs/dimensionReview" },
+      "minItems": 7
+    },
+    "selection": { "$ref": "#/$defs/selection" },
+    "research_plan": { "$ref": "#/$defs/researchPlan" },
+    "feedback_iterations": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/feedbackIteration" },
+      "minItems": 1
+    },
+    "final_summary": { "$ref": "#/$defs/finalSummary" },
+    "audit": { "$ref": "#/$defs/audit" },
+    "failure": { "$ref": "#/$defs/failure" }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "status": { "enum": ["blocked", "failed"] } }, "required": ["status"] },
+      "then": { "required": ["failure"] }
+    },
+    {
+      "if": { "properties": { "status": { "const": "approved" } }, "required": ["status"] },
+      "then": {
+        "properties": {
+          "selection": {
+            "properties": {
+              "human_gate": {
+                "properties": { "decision": { "const": "approved" } },
+                "required": ["decision"]
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "nonEmptyString": { "type": "string", "minLength": 1, "maxLength": 4000 },
+    "id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{1,127}$" },
+    "uri": { "type": "string", "format": "uri", "maxLength": 2048 },
+    "timestamp": { "type": "string", "format": "date-time" },
+    "stringList": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/nonEmptyString" },
+      "uniqueItems": true
+    },
+    "run": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["run_id", "started_at", "model_provider", "model_id", "platform", "invocation_evidence_refs"],
+      "properties": {
+        "run_id": { "$ref": "#/$defs/id" },
+        "started_at": { "$ref": "#/$defs/timestamp" },
+        "completed_at": { "$ref": "#/$defs/timestamp" },
+        "model_provider": { "$ref": "#/$defs/nonEmptyString" },
+        "model_id": { "$ref": "#/$defs/nonEmptyString" },
+        "platform": { "enum": ["aliyun_bailian", "qoderwork", "qoder", "meoo", "other_official_tool"] },
+        "prompt_version": { "$ref": "#/$defs/id" },
+        "workflow_version": { "$ref": "#/$defs/id" },
+        "invocation_evidence_refs": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/nonEmptyString" },
+          "minItems": 1,
+          "uniqueItems": true
+        }
+      }
+    },
+    "problemUnderstanding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["scope", "subquestions", "assumptions", "known_unknowns", "human_gate"],
+      "properties": {
+        "scope": { "$ref": "#/$defs/nonEmptyString" },
+        "subquestions": { "$ref": "#/$defs/stringList" },
+        "assumptions": { "$ref": "#/$defs/stringList" },
+        "known_unknowns": { "$ref": "#/$defs/stringList" },
+        "human_gate": { "$ref": "#/$defs/humanGate" }
+      }
+    },
+    "evidenceItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["evidence_id", "title", "source_type", "source_url", "retrieved_at", "fact", "relation", "verification_status"],
+      "properties": {
+        "evidence_id": { "$ref": "#/$defs/id" },
+        "title": { "$ref": "#/$defs/nonEmptyString" },
+        "source_type": { "enum": ["peer_reviewed_paper", "preprint", "dataset", "standard", "official_document", "book", "other"] },
+        "source_url": { "$ref": "#/$defs/uri" },
+        "doi": { "type": "string", "maxLength": 256 },
+        "publication_date": { "type": "string", "format": "date" },
+        "retrieved_at": { "$ref": "#/$defs/timestamp" },
+        "fact": { "$ref": "#/$defs/nonEmptyString" },
+        "relation": { "enum": ["supports", "challenges", "context", "method", "boundary"] },
+        "verification_status": { "enum": ["unverified", "metadata_checked", "full_text_checked", "human_verified"] },
+        "limitations": { "$ref": "#/$defs/stringList" }
+      }
+    },
+    "hypothesis": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["hypothesis_id", "statement", "mechanism", "novelty_basis", "falsifiability", "predictions", "supporting_evidence_refs", "challenging_evidence_refs", "boundary_conditions"],
+      "properties": {
+        "hypothesis_id": { "$ref": "#/$defs/id" },
+        "statement": { "$ref": "#/$defs/nonEmptyString" },
+        "mechanism": { "$ref": "#/$defs/nonEmptyString" },
+        "novelty_basis": { "$ref": "#/$defs/nonEmptyString" },
+        "falsifiability": { "$ref": "#/$defs/nonEmptyString" },
+        "predictions": { "$ref": "#/$defs/stringList" },
+        "supporting_evidence_refs": { "$ref": "#/$defs/stringList" },
+        "challenging_evidence_refs": { "$ref": "#/$defs/stringList" },
+        "boundary_conditions": { "$ref": "#/$defs/stringList" }
+      }
+    },
+    "dimensionReview": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["hypothesis_id", "dimension", "rating", "rationale", "evidence_refs", "reviewer"],
+      "properties": {
+        "hypothesis_id": { "$ref": "#/$defs/id" },
+        "dimension": {
+          "enum": ["evidence_support", "factual_accuracy", "novelty", "falsifiability", "plan_feasibility", "risk_and_ethics", "counterexample_coverage"]
+        },
+        "rating": { "enum": ["insufficient", "weak", "mixed", "adequate", "strong"] },
+        "rationale": { "$ref": "#/$defs/nonEmptyString" },
+        "evidence_refs": { "$ref": "#/$defs/stringList" },
+        "reviewer": { "$ref": "#/$defs/nonEmptyString" }
+      }
+    },
+    "selection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["selected_hypothesis_id", "comparison_method", "tradeoffs", "rejected_hypotheses", "human_gate"],
+      "properties": {
+        "selected_hypothesis_id": { "$ref": "#/$defs/id" },
+        "comparison_method": { "const": "multi_dimension_pareto_plus_human_decision" },
+        "tradeoffs": { "$ref": "#/$defs/stringList" },
+        "rejected_hypotheses": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["hypothesis_id", "reason"],
+            "properties": {
+              "hypothesis_id": { "$ref": "#/$defs/id" },
+              "reason": { "$ref": "#/$defs/nonEmptyString" }
+            }
+          }
+        },
+        "human_gate": { "$ref": "#/$defs/humanGate" }
+      }
+    },
+    "humanGate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["required", "decision", "rationale"],
+      "properties": {
+        "required": { "const": true },
+        "decision": { "enum": ["pending", "approved", "revision_requested", "rejected"] },
+        "reviewer": { "$ref": "#/$defs/nonEmptyString" },
+        "decided_at": { "$ref": "#/$defs/timestamp" },
+        "rationale": { "$ref": "#/$defs/nonEmptyString" }
+      }
+    },
+    "researchPlan": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["objective", "method", "work_packages", "variables", "controls", "data_and_materials", "analysis", "success_criteria", "failure_criteria", "stop_conditions", "resources", "timeline", "risks", "human_gate"],
+      "properties": {
+        "objective": { "$ref": "#/$defs/nonEmptyString" },
+        "method": { "$ref": "#/$defs/nonEmptyString" },
+        "work_packages": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["work_package_id", "goal", "inputs", "procedure", "outputs", "dependencies"],
+            "properties": {
+              "work_package_id": { "$ref": "#/$defs/id" },
+              "goal": { "$ref": "#/$defs/nonEmptyString" },
+              "inputs": { "$ref": "#/$defs/stringList" },
+              "procedure": { "$ref": "#/$defs/stringList" },
+              "outputs": { "$ref": "#/$defs/stringList" },
+              "dependencies": { "$ref": "#/$defs/stringList" }
+            }
+          }
+        },
+        "variables": { "$ref": "#/$defs/stringList" },
+        "controls": { "$ref": "#/$defs/stringList" },
+        "data_and_materials": { "$ref": "#/$defs/stringList" },
+        "analysis": { "$ref": "#/$defs/stringList" },
+        "success_criteria": { "$ref": "#/$defs/stringList" },
+        "failure_criteria": { "$ref": "#/$defs/stringList" },
+        "stop_conditions": { "$ref": "#/$defs/stringList" },
+        "resources": { "$ref": "#/$defs/stringList" },
+        "timeline": { "$ref": "#/$defs/stringList" },
+        "risks": { "$ref": "#/$defs/stringList" },
+        "human_gate": { "$ref": "#/$defs/humanGate" }
+      }
+    },
+    "feedbackIteration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["round", "trigger", "input_refs", "changes", "unresolved_issues", "human_feedback"],
+      "properties": {
+        "round": { "type": "integer", "minimum": 1 },
+        "trigger": { "$ref": "#/$defs/nonEmptyString" },
+        "input_refs": { "$ref": "#/$defs/stringList" },
+        "changes": { "$ref": "#/$defs/stringList" },
+        "unresolved_issues": { "$ref": "#/$defs/stringList" },
+        "human_feedback": { "$ref": "#/$defs/nonEmptyString" }
+      }
+    },
+    "finalSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["answer_boundary", "selected_hypothesis", "research_plan_summary", "key_evidence_refs", "counterevidence_refs", "limitations", "next_validation_step"],
+      "properties": {
+        "answer_boundary": { "$ref": "#/$defs/nonEmptyString" },
+        "selected_hypothesis": { "$ref": "#/$defs/nonEmptyString" },
+        "research_plan_summary": { "$ref": "#/$defs/nonEmptyString" },
+        "key_evidence_refs": { "$ref": "#/$defs/stringList" },
+        "counterevidence_refs": { "$ref": "#/$defs/stringList" },
+        "limitations": { "$ref": "#/$defs/stringList" },
+        "next_validation_step": { "$ref": "#/$defs/nonEmptyString" }
+      }
+    },
+    "audit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source_catalog_sha256", "output_sha256", "schema_validation", "citation_validation", "human_review_status"],
+      "properties": {
+        "source_catalog_sha256": { "type": "string", "pattern": "^[A-Fa-f0-9]{64}$" },
+        "output_sha256": { "type": "string", "pattern": "^[A-Fa-f0-9]{64}$" },
+        "schema_validation": { "enum": ["pending", "passed", "failed"] },
+        "citation_validation": { "enum": ["pending", "passed", "failed"] },
+        "human_review_status": { "enum": ["pending", "passed", "revision_requested", "rejected"] }
+      }
+    },
+    "failure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["stage", "code", "message", "retryable"],
+      "properties": {
+        "stage": { "$ref": "#/$defs/nonEmptyString" },
+        "code": { "$ref": "#/$defs/id" },
+        "message": { "$ref": "#/$defs/nonEmptyString" },
+        "retryable": { "type": "boolean" },
+        "missing_inputs": { "$ref": "#/$defs/stringList" }
+      }
+    }
+  }
+}
