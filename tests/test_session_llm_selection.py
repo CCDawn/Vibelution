@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 from core.web.app import create_app
 from core.web.control import CONTROL_TOKEN_HEADER, get_control_token
 from core.web.routes import sessions as sessions_route
-from core.web.services import agent_config_workspace_service, session_service
+from core.web.services import agent_config_workspace_service, agent_model_candidate_service, session_service
 from config.public_config import list_llm_model_options
 from config.llm_key_env import configured_llm_key_env_names
 
@@ -17,6 +17,29 @@ pytestmark = pytest.mark.serial
 
 
 client = TestClient(create_app(), headers={CONTROL_TOKEN_HEADER: get_control_token()})
+
+
+def test_session_model_choices_use_candidate_service_without_facade_alias(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.delattr(session_service, "list_agent_model_candidates", raising=False)
+    monkeypatch.setattr(session_service, "_default_session_dialogue_model_id", lambda: "provider/model-a")
+    monkeypatch.setattr(
+        agent_model_candidate_service,
+        "list_agent_model_candidates",
+        lambda: {
+            "candidates": [
+                {
+                    "modelId": "provider/model-a",
+                    "reasoningEffortValues": ["low", "high"],
+                }
+            ]
+        },
+    )
+
+    choices = session_service._session_llm_model_choices()
+
+    assert choices[0]["modelId"] == "provider/model-a"
+    assert choices[0]["isDefault"] is True
+    assert choices[0]["reasoningEffortValues"] == ["low", "high"]
 
 
 def test_schema_v2_provider_models_feed_the_model_picker():

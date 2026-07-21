@@ -130,7 +130,7 @@ def _session_llm_model_choices() -> list[dict[str, Any]]:
     from core.web.services.agent_model_candidate_service import list_agent_model_candidates
 
     default_model_id = s._default_session_dialogue_model_id()
-    choices = copy.deepcopy(s.list_agent_model_candidates().get("candidates") or [])
+    choices = copy.deepcopy(list_agent_model_candidates().get("candidates") or [])
     for choice in choices:
         choice["isDefault"] = str(choice.get("modelId") or "").strip() == default_model_id
         values = [
