@@ -147,6 +147,176 @@ def create_experiment_plan(team_id: str, payload: dict[str, Any] | None = None) 
         "boundaries": s._experiment_planning_boundaries(),
     }
 
+
+def create_experiment_plan_revision_from_iteration(
+    team_id: str,
+    *,
+    source_plan_id: str,
+    loop_id: str,
+    decision_id: str,
+    proposal_id: str,
+    idempotency_key: str,
+    decision: str,
+    rationale: str,
+    next_actions: list[str],
+    created_by_agent: str,
+) -> dict[str, Any]:
+    """Clone a governed plan into one idempotent, explicitly gated next-design draft."""
+
+    s = _service()
+    normalized_team_id = s._normalize_required_id(team_id, "Team id is required.")
+    normalized_source_plan_id = s._normalize_required_id(source_plan_id, "Source experiment plan id is required.")
+    normalized_proposal_id = s._normalize_required_id(proposal_id, "Iteration proposal id is required.")
+    with s._WORKFLOW_LOCK:
+        plan_store = s._load_experiment_plan_store(normalized_team_id)
+        plans = s._experiment_plans(plan_store)
+        for existing in plans:
+            gate = existing.get("designGate") if isinstance(existing.get("designGate"), dict) else {}
+            same_proposal = str(gate.get("sourceProposalId") or "") == normalized_proposal_id
+            same_idempotent_request = bool(idempotency_key) and (
+                str(gate.get("sourceLoopId") or "") == loop_id
+                and str(gate.get("sourceIdempotencyKey") or "") == idempotency_key
+            )
+            if same_proposal or same_idempotent_request:
+                return {"status": "reused", "plan": existing}
+        source_plan = s._find_experiment_plan(plan_store, normalized_source_plan_id)
+        if source_plan is None:
+            raise s.TeamWorkflowOrchestrationError("Source experiment plan not found for iteration draft.")
+        source_contract = (
+            source_plan.get("experimentContract")
+            if isinstance(source_plan.get("experimentContract"), dict)
+            else {}
+        )
+        source_legacy = (
+            source_plan.get("experimentPlan")
+            if isinstance(source_plan.get("experimentPlan"), dict)
+            else {}
+        )
+        source_iteration = (
+            source_contract.get("iterationContract")
+            if isinstance(source_contract.get("iterationContract"), dict)
+            else {}
+        )
+        next_revision = max([s._experiment_plan_revision(plan) for plan in plans] or [0]) + 1
+        iteration_contract = {
+            **s.deepcopy(source_iteration),
+            "sourceLoopId": loop_id,
+            "sourceDecisionId": decision_id,
+            "sourceProposalId": normalized_proposal_id,
+            "sourceIdempotencyKey": idempotency_key,
+            "sourceDecision": decision,
+            "sourceRationale": rationale,
+            "nextActions": list(next_actions),
+        }
+        adapter_selection = (
+            source_contract.get("adapterSelection")
+            if isinstance(source_contract.get("adapterSelection"), dict)
+            else {}
+        )
+        request_payload = {
+            "stageRoundId": str(source_plan.get("stageRoundId") or ""),
+            "title": f"{str(source_plan.get('title') or 'Experiment design')} · v{next_revision} draft",
+            "createdByAgent": created_by_agent,
+            "hypothesisCandidateIds": list(source_plan.get("hypothesisCandidateIds") or []),
+            "dataset": source_legacy.get("dataset"),
+            "metric": source_legacy.get("metric"),
+            "baseline": source_legacy.get("baseline"),
+            "smokePlan": source_legacy.get("smokePlan"),
+            "researchProfileId": source_contract.get("researchProfileId"),
+            "researchQuestion": source_contract.get("researchQuestion"),
+            "researchMode": source_contract.get("researchMode"),
+            "experimentPurpose": source_contract.get("purpose"),
+            "experimentMethod": source_contract.get("experimentMethod"),
+            "requestedAdapterId": adapter_selection.get("requestedAdapterId")
+            or adapter_selection.get("resolvedAdapterId"),
+            "objective": source_contract.get("objective"),
+            "constraints": list(source_contract.get("constraints") or []),
+            "methodConfig": s.deepcopy(source_contract.get("methodConfig") or {}),
+            "metricContract": s.deepcopy(source_contract.get("metricContract") or {}),
+            "decisionContract": s.deepcopy(source_contract.get("decisionContract") or {}),
+            "artifactContract": s.deepcopy(source_contract.get("artifactContract") or {}),
+            "reproducibilityContract": s.deepcopy(source_contract.get("reproducibilityContract") or {}),
+            "iterationContract": iteration_contract,
+            "recommendation": s.deepcopy(source_contract.get("recommendation") or {}),
+            "revision": next_revision,
+            "supersedesPlanId": normalized_source_plan_id,
+            "notes": f"Generated from {decision}: {rationale}",
+        }
+        created = create_experiment_plan(normalized_team_id, request_payload)
+    s._record_workflow_event(
+        "experiment_plan.iteration_draft_created",
+        normalized_team_id,
+        fields={
+            "sourcePlanId": normalized_source_plan_id,
+            "planId": str((created.get("plan") or {}).get("planId") or ""),
+            "revision": next_revision,
+            "loopId": loop_id,
+            "decisionId": decision_id,
+            "proposalId": normalized_proposal_id,
+            "requiresExplicitFreeze": True,
+        },
+    )
+    return {"status": "created", "plan": created["plan"]}
+
+
+def freeze_experiment_design(team_id: str, plan_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    s = _service()
+    normalized_team_id = s._normalize_required_id(team_id, "Team id is required.")
+    normalized_plan_id = s._normalize_required_id(plan_id, "Experiment plan id is required.")
+    request_payload = payload if isinstance(payload, dict) else {}
+    frozen_by_agent = s._trim_text(request_payload.get("frozenByAgent"), max_length=160) or s.DEFAULT_OWNER_AGENT_ID
+    with s._WORKFLOW_LOCK:
+        plan_store = s._load_experiment_plan_store(normalized_team_id)
+        plan = s._find_experiment_plan(plan_store, normalized_plan_id)
+        if plan is None:
+            raise s.TeamWorkflowOrchestrationError("Experiment plan not found.")
+        gate = plan.get("designGate") if isinstance(plan.get("designGate"), dict) else None
+        if gate is None:
+            raise s.TeamWorkflowOrchestrationError("Experiment plan uses the legacy derived design gate and cannot be explicitly frozen.")
+        validation = plan.get("contractValidation") if isinstance(plan.get("contractValidation"), dict) else {}
+        readiness = plan.get("readiness") if isinstance(plan.get("readiness"), dict) else {}
+        if validation.get("valid") is not True or readiness.get("readyForPlanReview") is not True:
+            raise s.TeamWorkflowOrchestrationError("Experiment design must be valid and review-ready before it can be frozen.")
+        if str(gate.get("status") or "") == "frozen":
+            return {"status": "already_frozen", "plan": plan}
+        now = s.utc_now_iso()
+        gate["status"] = "frozen"
+        gate["frozenAt"] = now
+        gate["frozenByAgent"] = frozen_by_agent
+        plan["designGate"] = gate
+        contract = plan.get("experimentContract") if isinstance(plan.get("experimentContract"), dict) else {}
+        contract["status"] = "frozen"
+        plan["experimentContract"] = contract
+        plan["status"] = "design_frozen"
+        plan["updatedAt"] = now
+        plan_store["activePlanId"] = normalized_plan_id
+        plan_store["updatedAt"] = now
+        s._write_json(s._experiment_plan_store_path(normalized_team_id), plan_store)
+        stage_store = s._load_stage_round_store(normalized_team_id)
+        rounds = s._stage_rounds(stage_store)
+        stage_round = s._find_stage_round(rounds, str(plan.get("stageRoundId") or ""))
+        if stage_round is not None:
+            ref = stage_round.get("experimentPlanRef") if isinstance(stage_round.get("experimentPlanRef"), dict) else {}
+            ref.update({"planId": normalized_plan_id, "status": plan["status"], "updatedAt": now})
+            stage_round["experimentPlanRef"] = ref
+            stage_round["updatedAt"] = now
+            stage_store["rounds"] = rounds
+            stage_store["updatedAt"] = now
+            s._write_json(s._stage_round_store_path(normalized_team_id), stage_store)
+        candidate_store = s._load_candidate_store(normalized_team_id)
+        status_payload = s._experiment_planning_status(normalized_team_id, rounds, candidate_store, plan_store)
+    s._record_workflow_event(
+        "experiment_plan.design_frozen",
+        normalized_team_id,
+        fields={
+            "planId": normalized_plan_id,
+            "revision": s._experiment_plan_revision(plan),
+            "frozenByAgent": frozen_by_agent,
+            "sourceProposalId": str(gate.get("sourceProposalId") or ""),
+        },
+    )
+    return {"status": "frozen", "plan": plan, "experimentStatus": status_payload}
+
 def register_experiment_baseline_artifact(team_id: str, plan_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
     s = _service()
     normalized_team_id = s._normalize_required_id(team_id, "Team id is required.")
@@ -255,6 +425,7 @@ def run_experiment_smoke_run(team_id: str, plan_id: str, payload: dict[str, Any]
             raise s.TeamWorkflowOrchestrationError("Experiment plan not found.")
         plan_snapshot = dict(plan)
     experiment_plan = plan_snapshot.get("experimentPlan") if isinstance(plan_snapshot.get("experimentPlan"), dict) else {}
+    s._require_explicit_experiment_design_frozen(plan_snapshot)
     missing = [
         field
         for field in s.EXPERIMENT_PLAN_REQUIRED_FIELDS
@@ -548,6 +719,7 @@ def register_experiment_smoke_result(team_id: str, plan_id: str, payload: dict[s
         plan = s._find_experiment_plan(plan_store, normalized_plan_id)
         if plan is None:
             raise s.TeamWorkflowOrchestrationError("Experiment plan not found.")
+        s._require_explicit_experiment_design_frozen(plan)
         smoke_result = s._experiment_smoke_result_record(plan, request_payload, recorded_by_agent=recorded_by_agent)
         smoke_results = [item for item in list(plan.get("smokeResults") or []) if isinstance(item, dict)]
         smoke_results.append(smoke_result)
@@ -650,6 +822,7 @@ def register_experiment_full_run_result(team_id: str, plan_id: str, payload: dic
         plan = s._find_experiment_plan(plan_store, normalized_plan_id)
         if plan is None:
             raise s.TeamWorkflowOrchestrationError("Experiment plan not found.")
+        s._require_explicit_experiment_design_frozen(plan)
         full_run_result = s._experiment_full_run_result_record(plan, request_payload, recorded_by_agent=recorded_by_agent)
         full_run_results = [item for item in list(plan.get("fullRunResults") or []) if isinstance(item, dict)]
         full_run_results.append(full_run_result)

@@ -263,6 +263,14 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("createResearchLoopMutation");
     expect(routeSource).toContain("recordResearchLoopEvidenceMutation");
     expect(routeSource).toContain("recordResearchLoopDecisionMutation");
+    expect(routeSource).toContain("createNextDesignDraft:");
+    expect(routeSource).toContain("idempotencyKey: `${payload.loop.loopId}:${payload.loop.updatedAt}:${payload.draft.decision}`");
+    expect(routeSource).toContain("nextDesignPlanId");
+    expect(routeSource).toContain("已生成下一版设计");
+    expect(routeSource).toContain("freezeExperimentDesignMutation");
+    expect(routeSource).toContain("/freeze`");
+    expect(routeSource).toContain("冻结设计");
+    expect(routeSource).toContain("designExecutionAllowed");
     expect(routeSource).toContain("renderResearchLoopPanel");
     expect(routeSource).toContain("Research Loop 模板");
     expect(routeSource).toContain("实验迭代决策");

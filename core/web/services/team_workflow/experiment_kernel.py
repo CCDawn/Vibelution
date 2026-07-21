@@ -27,6 +27,7 @@ def _require_formal_full_run_ready(plan: dict[str, Any]) -> tuple[str, dict[str,
     readiness = plan.get("readiness") if isinstance(plan.get("readiness"), dict) else {}
     selection = contract.get("adapterSelection") if isinstance(contract.get("adapterSelection"), dict) else {}
     adapter_id = s._trim_text(selection.get("resolvedAdapterId"), max_length=200)
+    s._require_explicit_experiment_design_frozen(plan)
     if adapter_id != s.formal_runner.FASHION_MNIST_MULTI_SEED_ADAPTER:
         raise s.TeamWorkflowOrchestrationError("Experiment plan does not select the formal FashionMNIST multi-seed adapter.")
     if not bool(validation.get("valid")):
@@ -35,6 +36,13 @@ def _require_formal_full_run_ready(plan: dict[str, Any]) -> tuple[str, dict[str,
         raise s.TeamWorkflowOrchestrationError("Record a passing smoke result before formal full-run preparation.")
     method_config = contract.get("methodConfig") if isinstance(contract.get("methodConfig"), dict) else {}
     return adapter_id, method_config
+
+
+def _require_explicit_experiment_design_frozen(plan: dict[str, Any]) -> None:
+    s = _service()
+    design_gate = plan.get("designGate") if isinstance(plan.get("designGate"), dict) else None
+    if design_gate is not None and str(design_gate.get("status") or "") != "frozen":
+        raise s.TeamWorkflowOrchestrationError("Experiment design must be explicitly frozen before execution evidence can be recorded.")
 
 
 def _record_formal_full_run_execution(
@@ -217,6 +225,13 @@ def _experiment_design_is_frozen(plan: dict[str, Any] | None) -> bool:
         return False
     validation = plan.get("contractValidation") if isinstance(plan.get("contractValidation"), dict) else {}
     readiness = plan.get("readiness") if isinstance(plan.get("readiness"), dict) else {}
+    design_gate = plan.get("designGate") if isinstance(plan.get("designGate"), dict) else None
+    if design_gate is not None:
+        return (
+            str(design_gate.get("status") or "") == "frozen"
+            and validation.get("valid") is True
+            and readiness.get("readyForPlanReview") is True
+        )
     return validation.get("valid") is True and readiness.get("readyForPlanReview") is True
 
 
@@ -281,7 +296,12 @@ def _experiment_lifecycle_projection(
     source_candidates = [item for item in candidates if str(item.get("candidateType") or "") == "source_manifest"]
     hypothesis_candidates = [item for item in candidates if str(item.get("candidateType") or "") == "algorithm_hypothesis"]
     frozen_design = s._latest_frozen_experiment_design(plans)
-    design_plan = frozen_design or active_plan
+    active_design_gate = (
+        active_plan.get("designGate")
+        if isinstance((active_plan or {}).get("designGate"), dict)
+        else None
+    )
+    design_plan = active_plan if active_design_gate is not None else (frozen_design or active_plan)
     active_loop = s._active_research_loop_projection(team_id)
     best_plan = s._best_validated_experiment_plan(plans, active_loop)
     linked_experiment = (
@@ -595,7 +615,22 @@ def _build_experiment_plan_record(
     )
     ready_for_plan_review = all(item["status"] == "pass" for item in checklist if item["item"] != "active_baseline_record")
     blockers = [item["item"] for item in checklist if item["status"] != "pass"]
-    return {
+    iteration_contract = contract.get("iterationContract") if isinstance(contract.get("iterationContract"), dict) else {}
+    source_proposal_id = s._trim_text(iteration_contract.get("sourceProposalId"), max_length=160)
+    design_gate = None
+    if source_proposal_id:
+        design_gate = {
+            "status": "draft",
+            "requiresExplicitFreeze": True,
+            "source": "research_loop_decision",
+            "sourceLoopId": s._trim_text(iteration_contract.get("sourceLoopId"), max_length=160),
+            "sourceDecisionId": s._trim_text(iteration_contract.get("sourceDecisionId"), max_length=160),
+            "sourceProposalId": source_proposal_id,
+            "sourceIdempotencyKey": s._trim_text(iteration_contract.get("sourceIdempotencyKey"), max_length=240),
+            "frozenAt": "",
+            "frozenByAgent": "",
+        }
+    record = {
         "schemaVersion": s.SCHEMA_VERSION,
         "planId": plan_id,
         "teamId": team_id,
@@ -650,6 +685,9 @@ def _build_experiment_plan_record(
         "createdAt": now,
         "updatedAt": now,
     }
+    if design_gate is not None:
+        record["designGate"] = design_gate
+    return record
 
 
 def _experiment_hypothesis_candidates(candidate_store: dict[str, Any]) -> list[dict[str, Any]]:

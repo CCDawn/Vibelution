@@ -1,11 +1,12 @@
 import pytest
 
-from core.web.services import research_loop_service, team_service
+from core.web.services import research_loop_service, team_service, team_workflow_orchestration_service
 
 
 def _use_tmp_project_root(tmp_path, monkeypatch):
     monkeypatch.setattr(team_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(research_loop_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(team_workflow_orchestration_service, "PROJECT_ROOT", tmp_path)
 
 
 def _team(tmp_path, monkeypatch):
@@ -107,6 +108,116 @@ def test_research_loop_records_template_evidence_and_iteration_decision(tmp_path
     assert decided["loop"]["readiness"]["readyForDecision"] is True
     assert decided["iterationProposal"]["nextTemplateId"] == "dataset_benchmark"
     assert decided["iterationProposal"]["executionPolicy"]["externalExecution"] is False
+
+
+def test_iteration_decision_can_idempotently_create_next_design_draft(tmp_path, monkeypatch):
+    team = _team(tmp_path, monkeypatch)
+    stage = team_workflow_orchestration_service.start_research_stage_round(
+        team["teamId"],
+        {"stageType": "experiment", "topic": "bounded routing experiment"},
+    )
+    plan_store = team_workflow_orchestration_service._load_experiment_plan_store(team["teamId"])
+    plan_store["plans"] = [
+        {
+            "planId": "plan-v4",
+            "stageRoundId": stage["stageRound"]["stageRoundId"],
+            "title": "validated design v4",
+            "status": "ingested",
+            "hypothesisCandidateIds": [],
+            "experimentPlan": {
+                "dataset": "dataset-v1",
+                "metric": "macro_f1",
+                "baseline": "baseline-v1",
+                "smokePlan": "paired smoke",
+            },
+            "experimentContract": {
+                "schemaVersion": 2,
+                "revision": 4,
+                "researchProfileId": "generic-research",
+                "researchMode": "full_research_loop",
+                "purpose": {"id": "algorithm_validation"},
+                "experimentMethod": "model_training_inference",
+                "researchQuestion": "Does the bounded candidate improve macro F1?",
+                "objective": "Improve macro F1 without regressing latency.",
+                "constraints": ["same dataset", "same baseline"],
+                "methodConfig": {"model": "candidate-v4", "seeds": [17], "budget": {"epochs": 4}},
+                "metricContract": {"primaryMetric": "macro_f1"},
+                "decisionContract": {
+                    "successCriteria": ["macro_f1 improves"],
+                    "failureCriteria": ["macro_f1 regresses"],
+                    "inconclusiveCriteria": ["confidence interval overlaps"],
+                },
+                "artifactContract": {"requiredArtifacts": ["result.json"]},
+                "reproducibilityContract": {"seedPolicy": "fixed"},
+                "iterationContract": {"allowedVariableChanges": ["methodConfig.budget.epochs"]},
+                "status": "result_review",
+            },
+            "contractValidation": {"valid": True, "missingFields": []},
+            "readiness": {"readyForPlanReview": True},
+            "updatedAt": "2026-07-19T00:00:00+08:00",
+        }
+    ]
+    plan_store["activePlanId"] = "plan-v4"
+    team_workflow_orchestration_service._write_json(
+        team_workflow_orchestration_service._experiment_plan_store_path(team["teamId"]),
+        plan_store,
+    )
+    created = research_loop_service.create_research_loop(
+        team["teamId"],
+        {
+            "templateId": "environment_probe",
+            "researchQuestion": "Should the validated design be repaired and repeated?",
+            "planId": "plan-v4",
+        },
+    )
+    loop_id = created["loop"]["loopId"]
+    for evidence_type in ("environment_spec", "smoke_log"):
+        research_loop_service.record_research_loop_evidence(
+            team["teamId"],
+            loop_id,
+            {"evidenceType": evidence_type, "status": "passed", "summary": f"{evidence_type} ready"},
+        )
+
+    decided = research_loop_service.record_research_loop_decision(
+        team["teamId"],
+        loop_id,
+        {
+            "decision": "repair_and_repeat",
+            "rationale": "Increase only the frozen epoch budget and repeat.",
+            "nextActions": ["change methodConfig.budget.epochs only"],
+            "createNextDesignDraft": True,
+            "idempotencyKey": "reuse-latest-iteration-draft",
+        },
+    )
+    draft = decided["nextDesignDraft"]
+
+    assert draft["status"] == "created"
+    assert draft["plan"]["experimentContract"]["revision"] == 5
+    assert draft["plan"]["experimentContract"]["supersedesPlanId"] == "plan-v4"
+    assert draft["plan"]["designGate"]["status"] == "draft"
+    assert draft["plan"]["designGate"]["sourceProposalId"] == decided["iterationProposal"]["proposalId"]
+    assert draft["plan"]["designGate"]["sourceIdempotencyKey"] == "reuse-latest-iteration-draft"
+    assert decided["iterationProposal"]["nextDesignPlanId"] == draft["plan"]["planId"]
+    projected = team_workflow_orchestration_service.get_experiment_planning_status(team["teamId"])
+    assert projected["lifecycleProjection"]["stage2"]["status"] == "draft"
+    assert projected["lifecycleProjection"]["stage2"]["activeDesignPlanId"] == draft["plan"]["planId"]
+    assert projected["lifecycleProjection"]["stage2"]["readyForExecution"] is False
+
+    repeated = research_loop_service.record_research_loop_decision(
+        team["teamId"],
+        loop_id,
+        {
+            "decision": "repair_and_repeat",
+            "rationale": "Increase only the frozen epoch budget and repeat.",
+            "nextActions": ["change methodConfig.budget.epochs only"],
+            "createNextDesignDraft": True,
+            "idempotencyKey": "reuse-latest-iteration-draft",
+        },
+    )
+    plans = team_workflow_orchestration_service.get_experiment_planning_status(team["teamId"])["plans"]
+
+    assert repeated["nextDesignDraft"]["plan"]["planId"] == draft["plan"]["planId"]
+    assert len([plan for plan in plans if plan.get("designGate", {}).get("sourceLoopId") == loop_id]) == 1
 
 
 def test_research_loop_status_persists_to_team_workspace(tmp_path, monkeypatch):

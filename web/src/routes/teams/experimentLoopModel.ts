@@ -139,6 +139,17 @@ export type ExperimentPlanRecord = {
   hypothesisCandidateIds: string[];
   experimentContract?: ExperimentContractV2;
   contractValidation?: ExperimentContractValidation;
+  designGate?: {
+    status: "draft" | "frozen" | string;
+    requiresExplicitFreeze: boolean;
+    source: string;
+    sourceLoopId: string;
+    sourceDecisionId: string;
+    sourceProposalId: string;
+    sourceIdempotencyKey?: string;
+    frozenAt: string;
+    frozenByAgent: string;
+  };
   experimentPlan: {
     dataset: string;
     metric: string;
@@ -322,6 +333,9 @@ export type ResearchLoopBoundary = {
   writesFormalRag: boolean;
   writesOfficialGraph: boolean;
   requiresUserDecision: boolean;
+  canCreateNextDesignDraft?: boolean;
+  nextDesignDraftRequiresExplicitFreeze?: boolean;
+  nextDesignDraftStartsExecution?: boolean;
 };
 
 export type ResearchLoopTemplate = {
@@ -378,6 +392,8 @@ export type ResearchLoopDecisionRecord = {
   createdAt: string;
   decidedByAgent: string;
   iterationProposalId?: string;
+  nextDesignPlanId?: string;
+  idempotencyKey?: string;
 };
 
 export type ResearchLoopIterationProposal = {
@@ -390,6 +406,9 @@ export type ResearchLoopIterationProposal = {
   nextActions: string[];
   createdAt: string;
   createdByAgent: string;
+  nextDesignPlanId?: string;
+  nextDesignRevision?: number;
+  nextDesignGateStatus?: string;
 };
 
 export type ResearchLoopRecord = {
@@ -491,9 +510,16 @@ export type ResearchLoopEvidencePayload = {
 export type ResearchLoopDecisionPayload = {
   decision: ResearchLoopDecisionRecord;
   iterationProposal: ResearchLoopIterationProposal | null;
+  nextDesignDraft: { status: "created" | "reused" | string; plan: ExperimentPlanRecord } | null;
   loop: ResearchLoopRecord;
   status: ResearchLoopStatusPayload;
   boundaries: ResearchLoopBoundary;
+};
+
+export type ExperimentDesignFreezePayload = {
+  status: "frozen" | "already_frozen" | string;
+  plan: ExperimentPlanRecord;
+  experimentStatus?: ExperimentPlanningStatusPayload;
 };
 
 export type ExperimentBaselineArtifactDraft = {
