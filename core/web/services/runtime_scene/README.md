@@ -9,7 +9,8 @@ Ownership map for structured runtime scene bundles.
 |-----------|-------------------|--------|
 | `record_*` writers / manifests / delete | `record.py` | diagnosis residual |
 | list/get/detail / evidence / prompt index / retention | `query.py` | record append path |
-| diagnosis / issue / work-run / startup signals | `diagnosis.py` | package index sidecar glue |
+| diagnosis / issue / work-run / startup signals | `diagnosis.py` | package write |
+| package_index sidecar sync | `package_index.py` | record append path |
 
 ## Extraction progress
 
@@ -18,7 +19,8 @@ Ownership map for structured runtime scene bundles.
 | `record.py` | done | Phase 13 write path |
 | `query.py` | done | Phase 13 query path |
 | `diagnosis.py` | done | Phase 14 diagnosis/issue/work-run |
-| package-index sidecar residual | facade glue | 3 helpers |
+| `package_index.py` | done | Phase 19 package_index sidecar |
+| facade residual | re-exports only | 0 function defs |
 
 ## Related
 
