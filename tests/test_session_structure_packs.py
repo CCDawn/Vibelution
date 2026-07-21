@@ -18,8 +18,10 @@ from core.web.services.session import (
     persist,
     projection,
     publish,
+    runtime_glue,
     schedule,
     session_ops,
+    signals_format,
     stream_capture,
     submit,
     timeline,
@@ -149,3 +151,22 @@ def test_facade_reexports_session_ops_pack() -> None:
     assert facade._repair_stale_running_conversations is session_ops._repair_stale_running_conversations
     assert facade._session_prompt_cache_partition is session_ops._session_prompt_cache_partition
     assert facade._make_chat_message is session_ops._make_chat_message
+
+
+def test_facade_reexports_signals_format_pack() -> None:
+    assert facade._format_visible_reply is signals_format._format_visible_reply
+    assert facade._record_provider_failure_signal is signals_format._record_provider_failure_signal
+    assert facade._history_messages_for_agent_seed is signals_format._history_messages_for_agent_seed
+    assert facade._image_context_request_from_user_message is signals_format._image_context_request_from_user_message
+    assert facade._attach_session_prompt_cache_metadata is signals_format._attach_session_prompt_cache_metadata
+
+
+def test_facade_reexports_runtime_glue_pack() -> None:
+    assert facade._set_session_running is runtime_glue._set_session_running
+    assert facade._ensure_session_mutable is runtime_glue._ensure_session_mutable
+    assert facade._agent_team_identity is runtime_glue._agent_team_identity
+    assert facade._agent_context_manifest_segments is runtime_glue._agent_context_manifest_segments
+    assert facade.has_running_sessions is runtime_glue.has_running_sessions
+    assert facade.load_session_conversation_events_snapshot is runtime_glue.load_session_conversation_events_snapshot
+    assert callable(facade.session_agent_lifecycle_serialized)
+    assert callable(facade.session_agent_lifecycle_transaction)
