@@ -2402,6 +2402,40 @@ def test_repair_agent_directory_migrates_legacy_generated_person_to_responsibili
     assert repaired["metadata"]["displayNameSource"] == "responsibility"
 
 
+def test_ensure_knowledge_steward_migrates_generated_name_before_metadata_merge(monkeypatch):
+    steward = {
+        "agentId": agent_directory_service.KNOWLEDGE_STEWARD_AGENT_ID,
+        "agentCode": "A001",
+        "displayName": "test",
+        "metadata": {
+            "functionalDisplayName": agent_directory_service.KNOWLEDGE_STEWARD_FUNCTIONAL_NAME,
+            "displayNameSource": "generated_person_name",
+        },
+        "llmBindings": {},
+    }
+    state = {"agents": [steward], "toolPolicies": {}, "memoryPolicies": {}}
+    monkeypatch.setattr(
+        agent_directory_service,
+        "_migrate_agent_llm_bindings_to_new_design",
+        lambda agent: {"changed": False},
+    )
+    monkeypatch.setattr(agent_directory_service, "_ensure_agent_workspace", lambda *args, **kwargs: None)
+    monkeypatch.setattr(agent_directory_service, "_ensure_agent_default_avatar", lambda *args, **kwargs: False)
+    monkeypatch.setattr(agent_directory_service, "_knowledge_steward_tool_policy", lambda: {})
+    monkeypatch.setattr(agent_directory_service, "_knowledge_steward_memory_policy", lambda workspace_path: {})
+
+    agent_directory_service._ensure_knowledge_steward_agent(
+        state,
+        ensure_shared_workspace=False,
+        available_avatar_filenames=[],
+        normalized_tool_policies={},
+    )
+
+    repaired = state["agents"][0]
+    assert repaired["displayName"] == agent_directory_service.KNOWLEDGE_STEWARD_FUNCTIONAL_NAME
+    assert repaired["metadata"]["displayNameSource"] == "responsibility"
+
+
 def test_repair_agent_directory_keeps_archived_generated_name_sealed(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     agent = agent_directory_service.create_agent_instance(display_name="历史研究 Agent", primary_mode="research")
