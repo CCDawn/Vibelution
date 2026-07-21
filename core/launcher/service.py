@@ -742,7 +742,7 @@ def launcher_active_work_runs() -> list[dict[str, str]]:
     items: list[dict[str, str]] = []
     seen: set[tuple[str, str]] = set()
     store = WorkRunStore(root=work_run_store.WORK_RUNS_DIR)
-    for kind in ("chat_turn", "chat_room_round", "supervised_worktree_evolution_run"):
+    for kind in ("chat_turn", "chat_room_round"):
         active_run_id = str(store.load_run_index(kind).get("activeRunId") or "").strip()
         for payload in store.list_snapshots(kind):
             _append_active_work_run(
@@ -752,6 +752,15 @@ def launcher_active_work_runs() -> list[dict[str, str]]:
                 payload=payload,
                 force_current=str(payload.get("runId") or "").strip() == active_run_id,
             )
+
+    worktree_run = store.load_active_snapshot("supervised_worktree_evolution_run")
+    _append_active_work_run(
+        items,
+        seen,
+        kind="supervised_worktree_evolution_run",
+        payload=worktree_run,
+        force_current=True,
+    )
 
     for kind, storage_kind in (
         ("self_evolution_run", "self"),
