@@ -238,7 +238,9 @@ from core.web.services.team_workflow.source_collection.storage import (
 )
 from core.web.services.team_workflow.experiment import (
     create_experiment_plan,
+    create_experiment_plan_revision_from_iteration,
     execute_experiment_full_run,
+    freeze_experiment_design,
     get_experiment_method_catalog,
     get_experiment_planning_status,
     prepare_experiment_full_run,
@@ -251,6 +253,7 @@ from core.web.services.team_workflow.experiment import (
 )
 from core.web.services.team_workflow.experiment_kernel import (
     _require_formal_full_run_ready,
+    _require_explicit_experiment_design_frozen,
     _record_formal_full_run_execution,
     _experiment_result_steward_notification_child_log_payload,
     _load_experiment_plan_store,

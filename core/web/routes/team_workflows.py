@@ -21,6 +21,7 @@ from core.web.services.team_workflow_orchestration_service import (
     ensure_team_workflow_orchestration,
     execute_source_collection_search,
     execute_experiment_full_run,
+    freeze_experiment_design,
     export_deliverables,
     extract_neuro_mechanism_from_paper_note,
     extract_source_collection_candidates,
@@ -275,6 +276,10 @@ class ExperimentBaselineArtifactPayload(BaseModel):
     evidenceRefs: list[dict[str, Any]] = Field(default_factory=list, max_length=12)
     notes: str = Field("", max_length=4000)
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class ExperimentDesignFreezePayload(BaseModel):
+    frozenByAgent: str = Field("", max_length=160)
 
 
 class ExperimentSmokeResultPayload(BaseModel):
@@ -883,6 +888,20 @@ def team_workflow_experiment_baseline_artifact_register(team_id: str, plan_id: s
             exc,
             status_code=422,
             fields={"planId": plan_id, "registeredByAgent": payload.registeredByAgent, "artifactPath": payload.artifactPath},
+        )
+
+
+@router.post("/teams/{team_id}/workflow-orchestration/experiments/plans/{plan_id}/freeze")
+def team_workflow_experiment_design_freeze(team_id: str, plan_id: str, payload: ExperimentDesignFreezePayload) -> dict:
+    try:
+        return freeze_experiment_design(team_id, plan_id, payload.model_dump())
+    except TeamNotFoundError as exc:
+        _raise_team_workflow_route_error(
+            "experiment_design.freeze", team_id, exc, status_code=404, fields={"planId": plan_id}
+        )
+    except (TeamServiceError, TeamWorkflowOrchestrationError) as exc:
+        _raise_team_workflow_route_error(
+            "experiment_design.freeze", team_id, exc, status_code=422, fields={"planId": plan_id}
         )
 
 

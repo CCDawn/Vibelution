@@ -1356,6 +1356,66 @@ def test_run_experiment_smoke_run_accepts_api_plan_nested_contract(tmp_path, mon
     assert response["status"] == "needs_review"
 
 
+def test_explicit_design_gate_blocks_smoke_until_plan_is_frozen(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = team_service.create_team(name="挑战杯科研团队")
+    plan_store = team_workflow_orchestration_service._load_experiment_plan_store(team["teamId"])
+    plan_store["plans"] = [
+        {
+            "planId": "exp_gated_draft",
+            "status": "draft",
+            "designGate": {"status": "draft", "requiresExplicitFreeze": True},
+            "contractValidation": {"valid": True, "missingFields": []},
+            "readiness": {"readyForPlanReview": True},
+            "experimentPlan": {
+                "dataset": "synthetic_structured_8x8_proxy",
+                "metric": "reconstruction_mse",
+                "baseline": "one-shot PCA reconstruction",
+                "smokePlan": {"adapter": "predictive_coding_reconstruction_proxy", "seed": 42},
+            },
+            "experimentContract": {"schemaVersion": 2, "revision": 2, "status": "draft"},
+            "updatedAt": "2026-06-25T00:00:00+00:00",
+        }
+    ]
+    plan_store["activePlanId"] = "exp_gated_draft"
+    team_workflow_orchestration_service._write_json(
+        team_workflow_orchestration_service._experiment_plan_store_path(team["teamId"]),
+        plan_store,
+    )
+
+    with pytest.raises(
+        team_workflow_orchestration_service.TeamWorkflowOrchestrationError,
+        match="frozen",
+    ):
+        team_workflow_orchestration_service.run_experiment_smoke_run(team["teamId"], "exp_gated_draft", {})
+    with pytest.raises(
+        team_workflow_orchestration_service.TeamWorkflowOrchestrationError,
+        match="frozen",
+    ):
+        team_workflow_orchestration_service.register_experiment_smoke_result(
+            team["teamId"],
+            "exp_gated_draft",
+            {"status": "passed", "metricName": "reconstruction_mse", "metricValue": "0.1"},
+        )
+
+    frozen = team_workflow_orchestration_service.freeze_experiment_design(
+        team["teamId"],
+        "exp_gated_draft",
+        {"frozenByAgent": "Research Coordination Agent"},
+    )
+    response = team_workflow_orchestration_service.run_experiment_smoke_run(
+        team["teamId"],
+        "exp_gated_draft",
+        {},
+    )
+
+    assert frozen["plan"]["designGate"]["status"] == "frozen"
+    assert frozen["plan"]["experimentContract"]["status"] == "frozen"
+    assert frozen["experimentStatus"]["lifecycleProjection"]["stage2"]["status"] == "frozen"
+    assert frozen["experimentStatus"]["lifecycleProjection"]["stage2"]["readyForExecution"] is True
+    assert response["status"] == "needs_review"
+
+
 def test_run_experiment_smoke_run_rejects_non_whitelisted_adapter(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     team = team_service.create_team(name="挑战杯科研团队")
