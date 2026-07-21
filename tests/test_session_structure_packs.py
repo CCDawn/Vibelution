@@ -4,9 +4,12 @@ from __future__ import annotations
 
 from core.web.services import session_service as facade
 from core.web.services.session import (
+    agent_runtime,
     agent_sessions,
+    cache_context,
     control,
     conversation_index,
+    image_attachments,
     journal_bridge,
     list_cache,
     live_output,
@@ -103,3 +106,23 @@ def test_facade_reexports_turn_diagnostics_pack() -> None:
     assert facade._persist_chat_turn_work_run is turn_diagnostics._persist_chat_turn_work_run
     assert facade._reconcile_stale_session_ledger is turn_diagnostics._reconcile_stale_session_ledger
     assert facade._resolve_session_references is turn_diagnostics._resolve_session_references
+
+
+def test_facade_reexports_agent_runtime_pack() -> None:
+    assert facade._acquire_chat_agent_for_session is agent_runtime._acquire_chat_agent_for_session
+    assert facade._ensure_session_agent_prompt_snapshot is agent_runtime._ensure_session_agent_prompt_snapshot
+    assert facade._session_agent_supports_image_input is agent_runtime._session_agent_supports_image_input
+    assert facade._session_agent_runtime_cache_fingerprint is agent_runtime._session_agent_runtime_cache_fingerprint
+
+
+def test_facade_reexports_cache_context_pack() -> None:
+    assert facade._estimated_provider_prefix_cache_segments is cache_context._estimated_provider_prefix_cache_segments
+    assert facade._aggregate_session_provider_cache_usage is cache_context._aggregate_session_provider_cache_usage
+    assert facade._context_segment is cache_context._context_segment
+
+
+def test_facade_reexports_image_attachments_pack() -> None:
+    assert facade.store_session_image_artifact is image_attachments.store_session_image_artifact
+    assert facade.store_session_user_image_attachment is image_attachments.store_session_user_image_attachment
+    assert facade.resolve_session_image_artifact is image_attachments.resolve_session_image_artifact
+    assert facade._build_llm_image_attachments is image_attachments._build_llm_image_attachments

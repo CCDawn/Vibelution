@@ -35,6 +35,9 @@ this package and be re-exported from the facade when it is part of the public AP
 | Live-output write / checkpoint bridge | `live_output_write.py` | pure store in `live_output.py` |
 | Timeline / tool / mental-snapshot normalizers | `timeline.py` | turn diagnostics |
 | Turn errors / work-runs / review / ledger reconcile | `turn_diagnostics.py` | timeline normalizers |
+| Agent binding / prompt snapshot / LLM runtime | `agent_runtime.py` | image store |
+| Context segment / provider cache estimation | `cache_context.py` | agent binding |
+| Image artifact / attachment store-resolve | `image_attachments.py` | agent image-input policy |
 | Residual helpers | `../session_service.py` (facade remainder) | new mega public APIs on facade |
 | Public HTTP-facing API surface | `../session_service.py` (facade) | bypassing re-exports |
 
@@ -107,21 +110,26 @@ this package and be re-exported from the facade when it is part of the public AP
 | `turn_diagnostics.py` | ~1.7k | turn errors, work-runs, review candidates, ledger reconcile, SC post-turn bridge |
 | `session_service.py` facade (after Phase 8) | ~8.5k total lines | re-exports + residual helpers |
 
+### Service optimization Phase 9 (agent runtime / cache / image)
+
+| Module | ~LOC | Role |
+|--------|------|------|
+| `agent_runtime.py` | ~1.1k | acquire agent, prompt snapshot, binding recovery, LLM diagnostics |
+| `cache_context.py` | ~0.4k | context segments + provider cache estimation |
+| `image_attachments.py` | ~0.5k | image artifact store/resolve + LLM attachments |
+| `session_service.py` facade (after Phase 9) | ~6.8k total lines | re-exports + residual event/logging glue |
+
 **Stage 2 exit (met):** hot-path claims for submit → schedule → capture → worker → persist.
 
-**Phase 3 exit:** projection + SSE publish claimable outside facade.
+**Phase 3–8 exit:** projection/publish/control/lifecycle/index/live/timeline/turn claimable.
 
-**Phase 4 exit:** stop control + agent session lifecycle claimable outside facade.
-
-**Phase 7 exit:** conversation index + live-output write claimable.
-
-**Phase 8 exit:** timeline + turn diagnostics claimable; structure + session tests green.
+**Phase 9 exit:** agent runtime + cache context + image attachments claimable.
 
 **Still deferred:**
 
-- Full facade slim to re-exports only (remaining shared helpers / agent runtime / cache).
+- Full facade slim to re-exports only (remaining event/logging glue).
 - Late-bind removal.
-- Migrating all internal importers off the facade.
+- Secondary gods (`runtime_scene`, `agent_directory`).
 
 ## Related
 
