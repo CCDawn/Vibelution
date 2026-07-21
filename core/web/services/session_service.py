@@ -1651,6 +1651,14 @@ def _legacy_agent_conversation_index_repair_kind(
     )
     if looks_team_owned:
         return agent_directory_service.CONVERSATION_INDEX_KIND_TEAM_AGENT
+    if (
+        created_by == "user"
+        and str(agent.get("status") or "active").strip() != "archived"
+        and str(agent.get("primaryMode") or "").strip() == "chat"
+        and not role_key
+        and str(agent.get("directSessionId") or "").strip()
+    ):
+        return agent_directory_service.CONVERSATION_INDEX_KIND_PERSONAL_AGENT
     if created_by == "api_agents" and str(agent.get("directSessionId") or "").strip():
         return agent_directory_service.CONVERSATION_INDEX_KIND_PERSONAL_AGENT
     return ""

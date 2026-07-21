@@ -2,6 +2,7 @@ import type { MouseEvent as ReactMouseEvent } from "react";
 
 import type { AgentInstance, SessionSummary } from "../api/types";
 import { VButton } from "../components/vui";
+import { agentDisplayInfo } from "./agentDisplay";
 import styles from "./AgentConversationDirectory.styles";
 
 export type AgentConversationDirectoryProps = {
@@ -21,15 +22,29 @@ export type AgentConversationDirectoryProps = {
   onOpenAgent: (agent: AgentInstance) => void;
 };
 
-function isVisibleChatAgent(agent: AgentInstance) {
-  const visibility = String(agent.conversationIndexVisibility || "").trim();
-  const kind = String(agent.conversationIndexKind || "").trim();
+export type AgentDirectorySection = "conversation" | "special";
+
+function storedConversationIndexKind(agent: AgentInstance) {
+  return String(
+    agent.conversationIndexKind
+    || agent.metadata?.conversationIndexKind
+    || "",
+  ).trim();
+}
+
+export function isVisibleDirectoryAgent(agent: AgentInstance) {
+  const kind = storedConversationIndexKind(agent);
   return (
     String(agent.kind || "").trim() === "persistent"
     && String(agent.status || "").trim() !== "archived"
-    && visibility !== "hidden"
     && kind !== "team_agent"
   );
+}
+
+export function agentDirectorySection(agent: AgentInstance): AgentDirectorySection {
+  const primaryMode = String(agent.primaryMode || "").trim();
+  const roleKey = String(agent.roleKey || "").trim();
+  return primaryMode === "chat" && !roleKey ? "conversation" : "special";
 }
 
 function isAgentMatch(agent: AgentInstance, filterText: string) {
@@ -45,7 +60,7 @@ function isAgentMatch(agent: AgentInstance, filterText: string) {
 
 function agentStateClass(agent: AgentInstance) {
   const state = String(agent.status || "").trim().toLowerCase();
-  if (state.includes("running") || state.includes("active") || state.includes("处理中")) {
+  if (state.includes("running") || state.includes("处理中")) {
     return styles.agentStatusRunning;
   }
   if (state.includes("error") || state.includes("failed") || state.includes("失败")) {
@@ -66,7 +81,9 @@ export function AgentConversationDirectory({
   onContextMenu,
   onOpenAgent,
 }: AgentConversationDirectoryProps) {
-  const visibleAgents = agents.filter(isVisibleChatAgent).filter((agent) => isAgentMatch(agent, filterText));
+  const visibleAgents = agents.filter(isVisibleDirectoryAgent).filter((agent) => isAgentMatch(agent, filterText));
+  const conversationAgents = visibleAgents.filter((agent) => agentDirectorySection(agent) === "conversation");
+  const specialAgents = visibleAgents.filter((agent) => agentDirectorySection(agent) === "special");
   const sessionCountByAgentId = new Map<string, number>();
   const latestSessionByAgentId = new Map<string, SessionSummary>();
   for (const session of sessions) {
@@ -81,51 +98,75 @@ export function AgentConversationDirectory({
     }
   }
 
+  const renderAgent = (agent: AgentInstance) => {
+    const agentId = String(agent.agentId || "").trim();
+    const latestSession = latestSessionByAgentId.get(agentId);
+    const display = agentDisplayInfo(agent, lang, { resolveModelLabel });
+    const sessionCount = sessionCountByAgentId.get(agentId) || 0;
+    const active = agentId === activeAgentId;
+    const avatarUrl = String(agent.avatarImageUrl || "").trim();
+    return (
+      <VButton
+        key={agentId}
+        type="button"
+        contentLayout="plain"
+        className={[styles.agentRow, active ? styles.agentRowActive : ""].filter(Boolean).join(" ")}
+        aria-current={active ? "page" : undefined}
+        onContextMenu={(event) => onContextMenu(event, agent, latestSession ?? null)}
+        onPress={() => onOpenAgent(agent)}
+      >
+        <span className={styles.agentAvatar} aria-hidden="true">
+          {avatarUrl ? <img className={styles.agentAvatarImage} src={avatarUrl} alt="" /> : avatarInitials(agent.agentCode, display.name, agentId)}
+        </span>
+        <span className={styles.agentCopy}>
+          <span className={styles.agentTitleRow}>
+            <span className={styles.agentTitle}>{display.name}</span>
+            <span className={[styles.agentStatus, agentStateClass(agent)].filter(Boolean).join(" ")} />
+          </span>
+          <span className={styles.agentMeta}>
+            <span className={styles.agentMetaItem}>{display.functionLabel}</span>
+            <span className={styles.agentMetaItem}>{display.modelLabel || (lang === "zh" ? "未配置模型" : "No model")}</span>
+            <span className={styles.agentMetaCount}>
+              {sessionCount > 0
+                ? (lang === "zh" ? `${sessionCount} 个会话` : `${sessionCount} sessions`)
+                : (lang === "zh" ? "点击创建会话" : "Create a session")}
+            </span>
+            {latestSession ? <time className={styles.agentMetaItem}>{formatTime(latestSession.updatedAt || latestSession.lastActive)}</time> : null}
+          </span>
+        </span>
+      </VButton>
+    );
+  };
+
+  const renderSection = (section: AgentDirectorySection, sectionAgents: AgentInstance[]) => {
+    if (!sectionAgents.length) {
+      return null;
+    }
+    const label = section === "conversation"
+      ? (lang === "zh" ? "会话 Agent" : "Conversation Agents")
+      : (lang === "zh" ? "特殊 Agent" : "Special Agents");
+    return (
+      <section className={styles.agentSection} aria-label={label}>
+        <div className={styles.agentSectionHeader}>
+          <span>{label}</span>
+          <strong>{sectionAgents.length}</strong>
+        </div>
+        <div className={styles.agentDirectoryList}>{sectionAgents.map(renderAgent)}</div>
+      </section>
+    );
+  };
+
   return (
-    <nav className={styles.agentDirectory} aria-label={lang === "zh" ? "Agent 管理" : "Agent management"}>
+    <nav className={styles.agentDirectory} aria-label={lang === "zh" ? "Agent 目录" : "Agent directory"}>
       <div className={styles.agentDirectoryHeader}>
-        <span>{lang === "zh" ? "Agent 管理" : "Agent management"}</span>
+        <span>{lang === "zh" ? "Agent" : "Agents"}</span>
         <span className={styles.agentDirectoryCount}>{visibleAgents.length}</span>
       </div>
       {visibleAgents.length ? (
-        <div className={styles.agentDirectoryList}>
-          {visibleAgents.map((agent) => {
-            const agentId = String(agent.agentId || "").trim();
-            const latestSession = latestSessionByAgentId.get(agentId);
-            const modelId = String(agent.llmBindings?.dialogue?.modelId || "").trim();
-            const modelLabel = resolveModelLabel(modelId) || modelId;
-            const sessionCount = sessionCountByAgentId.get(agentId) || 0;
-            const active = agentId === activeAgentId;
-            const displayName = String(agent.displayName || agent.agentCode || agentId).trim();
-            const avatarUrl = String(agent.avatarImageUrl || "").trim();
-            return (
-              <VButton
-                key={agentId}
-                type="button"
-                contentLayout="plain"
-                className={[styles.agentRow, active ? styles.agentRowActive : ""].filter(Boolean).join(" ")}
-                aria-current={active ? "page" : undefined}
-                onContextMenu={(event) => onContextMenu(event, agent, latestSession ?? null)}
-                onPress={() => onOpenAgent(agent)}
-              >
-                <span className={styles.agentAvatar} aria-hidden="true">
-                  {avatarUrl ? <img className={styles.agentAvatarImage} src={avatarUrl} alt="" /> : avatarInitials(agent.agentCode, displayName, agentId)}
-                </span>
-                <span className={styles.agentCopy}>
-                  <span className={styles.agentTitleRow}>
-                    <span className={styles.agentTitle}>{displayName}</span>
-                    <span className={[styles.agentStatus, agentStateClass(agent)].filter(Boolean).join(" ")} />
-                  </span>
-                  <span className={styles.agentMeta}>
-                    <span className={styles.agentMetaItem}>{modelLabel || (lang === "zh" ? "未配置模型" : "No model")}</span>
-                    <span className={styles.agentMetaCount}>{lang === "zh" ? `${sessionCount} 个会话` : `${sessionCount} sessions`}</span>
-                    {latestSession ? <time className={styles.agentMetaItem}>{formatTime(latestSession.updatedAt || latestSession.lastActive)}</time> : null}
-                  </span>
-                </span>
-              </VButton>
-            );
-          })}
-        </div>
+        <>
+          {renderSection("conversation", conversationAgents)}
+          {renderSection("special", specialAgents)}
+        </>
       ) : (
         <p className={styles.agentEmpty}>
           {lang === "zh" ? "暂无可用 Agent。新建 Agent 后可在其下建立多个会话。" : "No available Agents. Create an Agent, then add sessions under it."}

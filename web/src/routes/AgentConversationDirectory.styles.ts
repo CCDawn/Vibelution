@@ -5,6 +5,10 @@ const styles = {
     "vui-routes-agentconversationdirectory agentDirectoryHeader flex min-w-0 items-center justify-between px-2.5 pt-1 [font-size:var(--vui-font-xs)] font-semibold uppercase tracking-[0.08em] [color:var(--fg-tertiary)]",
   agentDirectoryCount:
     "vui-routes-agentconversationdirectory agentDirectoryCount tabular-nums [color:var(--fg-secondary)]",
+  agentSection:
+    "vui-routes-agentconversationdirectory agentSection grid min-w-0 gap-0.5",
+  agentSectionHeader:
+    "vui-routes-agentconversationdirectory agentSectionHeader flex min-w-0 items-center justify-between px-2.5 py-1 [font-size:var(--vui-font-xs)] font-medium [color:var(--fg-secondary)] [&_strong]:tabular-nums [&_strong]:font-medium [&_strong]:[color:var(--fg-tertiary)]",
   agentDirectoryList:
     "vui-routes-agentconversationdirectory agentDirectoryList grid min-w-0 gap-px",
   agentRow:

@@ -115,7 +115,7 @@ import {
   sessionAgentDisplayInfo,
 } from "./agentDisplay";
 import { AgentSessionTabStrip, type CliAgentRunTab } from "./AgentSessionTabStrip";
-import { AgentConversationDirectory } from "./AgentConversationDirectory";
+import { AgentConversationDirectory, isVisibleDirectoryAgent } from "./AgentConversationDirectory";
 import type { AgentContextMenuState } from "./AgentContextMenu";
 import { ConversationIndexTree } from "./ConversationIndexTree";
 import {
@@ -1995,14 +1995,7 @@ export function ChatCodingRoute() {
   }, [allVisibleSessions]);
 
   const visibleChatAgents = useMemo(() => {
-    return (agentsQuery.data ?? []).filter((agent) => {
-      const visibility = String(agent.conversationIndexVisibility || "").trim();
-      const kind = String(agent.conversationIndexKind || "").trim();
-      return String(agent.kind || "").trim() === "persistent"
-        && String(agent.status || "").trim() !== "archived"
-        && visibility !== "hidden"
-        && kind !== "team_agent";
-    });
+    return (agentsQuery.data ?? []).filter(isVisibleDirectoryAgent);
   }, [agentsQuery.data]);
   const activeSessionAgentId = useMemo(() => {
     return String(
@@ -2462,7 +2455,9 @@ export function ChatCodingRoute() {
             resolveModelLabel={resolveModelLabel}
             sessions={allVisibleSessions}
             onContextMenu={openAgentContextMenu}
-            onOpenAgent={handleOpenAgent}
+            onOpenAgent={(agent) => (
+              agent.directSessionId ? handleOpenAgent(agent) : handleCreateAgentSession(agent)
+            )}
           />
           {agentContextMenu ? (
             <Suspense fallback={null}>
