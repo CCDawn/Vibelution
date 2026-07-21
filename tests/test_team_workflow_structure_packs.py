@@ -12,6 +12,7 @@ from core.web.services.team_workflow.source_collection import stage_reconcile
 from core.web.services.team_workflow import knowledge
 from core.web.services.team_workflow import knowledge_kernel
 from core.web.services.team_workflow import experiment_kernel
+from core.web.services.team_workflow import facade_helpers
 from core.web.services.team_workflow import workflow_ops
 from core.web.services.team_workflow.source_collection import residual
 
@@ -172,6 +173,15 @@ def test_facade_reexports_workflow_ops_pack() -> None:
     assert facade._build_stage_round is workflow_ops._build_stage_round
     assert facade._default_workflow is workflow_ops._default_workflow
     assert facade._submit_team_workflow_inbox_via_kernel is workflow_ops._submit_team_workflow_inbox_via_kernel
+
+
+def test_facade_reexports_facade_helpers_pack() -> None:
+    assert facade._repair_workflow is facade_helpers._repair_workflow
+    assert facade._workflow_to_api is facade_helpers._workflow_to_api
+    assert facade._filtered_candidates is facade_helpers._filtered_candidates
+    assert facade._stage_readiness is facade_helpers._stage_readiness
+    assert facade._write_json is facade_helpers._write_json
+    assert facade.utc_now_iso is facade_helpers.utc_now_iso
 
 
 def test_get_orchestration_rejects_blank_team_id() -> None:
