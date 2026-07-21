@@ -8,7 +8,9 @@ from core.web.services.team_workflow import experiment, research_loop
 from core.web.services.team_workflow.source_collection import candidates, runs, stages, storage
 from core.web.services.team_workflow.source_collection import search_execution
 from core.web.services.team_workflow.source_collection import writeback_materialize
+from core.web.services.team_workflow.source_collection import stage_reconcile
 from core.web.services.team_workflow import knowledge
+from core.web.services.team_workflow import experiment_kernel
 
 
 def test_facade_reexports_orchestration_core() -> None:
@@ -103,6 +105,40 @@ def test_facade_reexports_knowledge_pack() -> None:
     assert facade.invoke_local_research_model is knowledge.invoke_local_research_model
     assert facade.draft_paper_note_from_source_candidate is knowledge.draft_paper_note_from_source_candidate
     assert facade.sync_official_research_graph is knowledge.sync_official_research_graph
+
+
+def test_facade_reexports_stage_reconcile_pack() -> None:
+    assert (
+        facade._source_collection_stage_cards_projection
+        is stage_reconcile._source_collection_stage_cards_projection
+    )
+    assert (
+        facade._reconcile_source_collection_stage_session_task
+        is stage_reconcile._reconcile_source_collection_stage_session_task
+    )
+    assert (
+        facade._repair_missing_source_collection_stage_round
+        is stage_reconcile._repair_missing_source_collection_stage_round
+    )
+    assert (
+        facade._source_collection_stage_session_task_message
+        is stage_reconcile._source_collection_stage_session_task_message
+    )
+    assert (
+        facade._sync_stage_round_with_source_collection_stage_task
+        is stage_reconcile._sync_stage_round_with_source_collection_stage_task
+    )
+
+
+def test_facade_reexports_experiment_kernel_pack() -> None:
+    assert facade._build_experiment_plan_record is experiment_kernel._build_experiment_plan_record
+    assert facade._experiment_lifecycle_projection is experiment_kernel._experiment_lifecycle_projection
+    assert facade._experiment_planning_status is experiment_kernel._experiment_planning_status
+    assert (
+        facade._notify_knowledge_steward_for_experiment_result
+        is experiment_kernel._notify_knowledge_steward_for_experiment_result
+    )
+    assert facade._refresh_experiment_plan_readiness is experiment_kernel._refresh_experiment_plan_readiness
 
 
 def test_get_orchestration_rejects_blank_team_id() -> None:
