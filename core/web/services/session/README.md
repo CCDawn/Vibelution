@@ -13,6 +13,8 @@ this package and be re-exported from the facade when it is part of the public AP
 
 **Service optimization Phase 3** (2026-07-21): projection + SSE publish packs — `docs/plans/2026-07-21-service-optimization-phase3-session-projection.md`.
 
+**Service optimization Phase 4** (2026-07-21): stop control + agent session lifecycle — `docs/plans/2026-07-21-service-optimization-phase4-session-lifecycle.md`.
+
 ## Ownership map (claim scopes)
 
 | Task type | Prefer these files | Avoid |
@@ -27,7 +29,9 @@ this package and be re-exported from the facade when it is part of the public AP
 | Persist turn outcome / final assistant + turn_* | `persist.py` | agent directory CRUD, SSE transport |
 | Session detail/list DTO projection | `projection.py` | SSE transport publish |
 | SSE `assistant_delta` / `session_detail` publish | `publish.py` | DTO projection builders |
-| Stop / agent lifecycle residual | `../session_service.py` (facade remainder) | inlining new 500-line blocks into slices |
+| Stop / interrupt turn control | `control.py` | agent purge/archive |
+| Agent session purge/archive/child/inbox/cli lifecycle | `agent_sessions.py` | list/detail projection |
+| Residual helpers | `../session_service.py` (facade remainder) | new mega public APIs on facade |
 | Public HTTP-facing API surface | `../session_service.py` (facade) | bypassing re-exports |
 
 ## Flow map to modules
@@ -74,15 +78,24 @@ this package and be re-exported from the facade when it is part of the public AP
 |--------|------|------|
 | `publish.py` | ~0.8k | SSE stream + detail/delta publish + queue coalesce |
 | `projection.py` | ~3.1k | list/detail DTO + summary/cache composition builders |
-| `session_service.py` facade (after Phase 3) | ~16.8k total lines | re-exports + stop/agent lifecycle residual |
+
+### Service optimization Phase 4 (control + agent sessions)
+
+| Module | ~LOC | Role |
+|--------|------|------|
+| `control.py` | ~0.35k | stop/interrupt turn + paused/stopped result builders |
+| `agent_sessions.py` | ~3.2k | purge/archive/delete/reset, child sessions, inbox wake, CLI lifecycle |
+| `session_service.py` facade (after Phase 4) | ~13.4k total lines | re-exports + remaining shared helpers |
 
 **Stage 2 exit (met):** hot-path claims for submit → schedule → capture → worker → persist.
 
-**Phase 3 exit:** projection + SSE publish claimable outside facade; public imports still via facade re-exports; structure pack + focused session tests green.
+**Phase 3 exit:** projection + SSE publish claimable outside facade.
+
+**Phase 4 exit:** stop control + agent session lifecycle claimable outside facade; structure + lifecycle tests green.
 
 **Still deferred:**
 
-- Full facade slim to re-exports only (stop controls, agent session lifecycle helpers).
+- Full facade slim to re-exports only (remaining shared helpers).
 - Late-bind removal.
 - Migrating all internal importers off the facade.
 
@@ -92,4 +105,5 @@ this package and be re-exported from the facade when it is part of the public AP
 - Domain: `core/chat/*` (ledger, context assembler)
 - Agent turn: `agent.py` (out of session P0 deep cut)
 - Phase 3 plan: `docs/plans/2026-07-21-service-optimization-phase3-session-projection.md`
+- Phase 4 plan: `docs/plans/2026-07-21-service-optimization-phase4-session-lifecycle.md`
 - Structure plan: `docs/plans/2026-07-20-backend-structure-p0.md`
