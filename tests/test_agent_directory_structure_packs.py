@@ -6,9 +6,11 @@ from core.web.services import agent_directory_service as facade
 from core.web.services.agent_directory import (
     lifecycle,
     mutations,
+    ops_residual,
     policies,
     profiles,
     projections,
+    repair_store,
 )
 
 
@@ -58,3 +60,23 @@ def test_facade_reexports_mutations_pack() -> None:
     assert facade.update_agent_avatar is mutations.update_agent_avatar
     assert facade.list_agent_avatar_options is mutations.list_agent_avatar_options
     assert facade.resolve_agent_avatar_file is mutations.resolve_agent_avatar_file
+
+
+def test_facade_reexports_repair_store_pack() -> None:
+    assert facade.repair_agent_directory is repair_store.repair_agent_directory
+    assert facade.load_state is repair_store.load_state
+    assert facade.save_state is repair_store.save_state
+    assert facade.default_state is repair_store.default_state
+    assert facade._normalize_agent_record_for_storage is repair_store._normalize_agent_record_for_storage
+    assert facade._guard_against_suspicious_registry_shrink is repair_store._guard_against_suspicious_registry_shrink
+
+
+def test_facade_reexports_ops_residual_pack() -> None:
+    assert facade.write_agent_inbox_message is ops_residual.write_agent_inbox_message
+    assert facade.consume_agent_inbox_message is ops_residual.consume_agent_inbox_message
+    assert facade.evaluate_agent_workspace_write is ops_residual.evaluate_agent_workspace_write
+    assert getattr(facade.ensure_agent_for_session, "__wrapped__", None) is ops_residual.ensure_agent_for_session
+    assert getattr(facade.reactivate_agent_instance, "__wrapped__", None) is ops_residual.reactivate_agent_instance
+    assert facade.write_project_memory_update_proposal is ops_residual.write_project_memory_update_proposal
+    assert callable(facade.agent_session_lifecycle_serialized)
+    assert callable(facade.agent_session_lifecycle_transaction)
