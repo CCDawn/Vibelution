@@ -10,6 +10,7 @@ from core.web.services.team_workflow.source_collection import search_execution
 from core.web.services.team_workflow.source_collection import writeback_materialize
 from core.web.services.team_workflow.source_collection import stage_reconcile
 from core.web.services.team_workflow import knowledge
+from core.web.services.team_workflow import knowledge_kernel
 from core.web.services.team_workflow import experiment_kernel
 
 
@@ -139,6 +140,15 @@ def test_facade_reexports_experiment_kernel_pack() -> None:
         is experiment_kernel._notify_knowledge_steward_for_experiment_result
     )
     assert facade._refresh_experiment_plan_readiness is experiment_kernel._refresh_experiment_plan_readiness
+
+
+def test_facade_reexports_knowledge_kernel_pack() -> None:
+    assert facade._knowledge_ingestion_action_items is knowledge_kernel._knowledge_ingestion_action_items
+    assert facade._notify_knowledge_steward_for_ingestion is knowledge_kernel._notify_knowledge_steward_for_ingestion
+    assert facade._build_candidate_graph_payload is knowledge_kernel._build_candidate_graph_payload
+    assert facade._build_knowledge_ingestion_precheck_output is knowledge_kernel._build_knowledge_ingestion_precheck_output
+    assert facade._coordination_queues is knowledge_kernel._coordination_queues
+    assert facade._persist_knowledge_ingestion_work_run is knowledge_kernel._persist_knowledge_ingestion_work_run
 
 
 def test_get_orchestration_rejects_blank_team_id() -> None:

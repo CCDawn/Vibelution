@@ -35,6 +35,7 @@ Align language with frontend claim map: `web/src/routes/teams/README.md`.
 | Experiment private records/status/notify kernel | `experiment_kernel.py` | session_service |
 | Research loop / stage round | `research_loop.py` | CLI terminal |
 | Knowledge / graph / steward / coordination / paper-note APIs | `knowledge.py` | session_service |
+| Knowledge private ingestion/graph/coordination kernel | `knowledge_kernel.py` | session_service |
 | Residual private helpers still on facade | facade remainder | new public mega APIs on facade |
 | Public HTTP-facing API surface | `../team_workflow_orchestration_service.py` (facade) | dumping new mega-functions into facade |
 
@@ -53,7 +54,8 @@ Align language with frontend claim map: `web/src/routes/teams/README.md`.
 | Experiment design/execution entry | `experiment.py` |
 | Experiment plan/status/notify kernel | `experiment_kernel.py` |
 | Research loop / stage round | `research_loop.py` |
-| Knowledge ingestion / steward / graph / coordination | `knowledge.py` |
+| Knowledge ingestion / steward / graph / coordination entry | `knowledge.py` |
+| Knowledge private kernel | `knowledge_kernel.py` |
 
 ## Sole-owner rules
 
@@ -99,17 +101,26 @@ Align language with frontend claim map: `web/src/routes/teams/README.md`.
 | `experiment_kernel.py` | ~1.4k | plan records, readiness, lifecycle projection, steward notify |
 | Facade remainder (after Phase 5) | ~9.4k total lines | shared glue + residual helpers |
 
+### Service optimization Phase 6 (knowledge private kernel)
+
+| Pack | ~LOC | Role |
+|------|------|------|
+| `knowledge_kernel.py` | ~4.0k | ingestion/steward/graph/coordination/paper-note/source-quality private helpers |
+| Facade remainder (after Phase 6) | ~5.7k total lines | shared glue residual |
+
 **Phase 1 exit:** search + writeback execution bodies claimable outside facade.
 
 **Phase 2 exit:** knowledge public mega APIs claimable in `knowledge.py`.
 
-**Phase 5 (P1 residual) exit:** SC stage reconcile/projection + experiment private kernel claimable; structure + focused stage/experiment tests green.
+**Phase 5 (P1 residual) exit:** SC stage reconcile/projection + experiment private kernel claimable.
+
+**Phase 6 exit:** knowledge private helpers claimable in `knowledge_kernel.py`; structure + knowledge-focused tests green.
 
 **Still deferred:**
 
 1. Full facade slim to re-exports only (remaining shared glue).
 2. Late-bind removal (packs still call facade via `_service()`).
-3. Knowledge private helper migration.
+3. Session residual glue / secondary gods (`runtime_scene`, `agent_directory`).
 
 ## Related
 
