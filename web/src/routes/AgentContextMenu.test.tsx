@@ -37,12 +37,14 @@ describe("AgentContextMenu", () => {
       <AgentContextMenu
         createPending={false}
         archivePending={false}
+        renamePending={false}
         lang="zh"
         state={{ agent: agent(), latestSession: session(), x: 24, y: 32 }}
         onArchive={() => undefined}
         onCreateSession={() => undefined}
         onOpenConfig={() => undefined}
         onOpenLatest={() => undefined}
+        onRename={() => undefined}
       />,
     );
 
@@ -51,11 +53,12 @@ describe("AgentContextMenu", () => {
     expect(markup).toContain('data-agent-context-menu="agent-1"');
     expect(markup).toContain("打开最近会话");
     expect(markup).toContain("新建会话");
+    expect(markup).toContain("重命名 Agent");
     expect(markup).toContain("打开 Agent 设置");
     expect(markup).toContain("安全归档");
     expect(markup).not.toContain("彻底删除");
     expect(markup).not.toContain("清空");
-    expect(markup.match(/role="menuitem"/g)?.length).toBe(4);
+    expect(markup.match(/role="menuitem"/g)?.length).toBe(5);
   });
 
   it("disables opening when the Agent has no session", () => {
@@ -63,19 +66,21 @@ describe("AgentContextMenu", () => {
       <AgentContextMenu
         createPending
         archivePending={false}
+        renamePending={false}
         lang="en"
         state={{ agent: agent(), latestSession: null, x: 24, y: 32 }}
         onArchive={() => undefined}
         onCreateSession={() => undefined}
         onOpenConfig={() => undefined}
         onOpenLatest={() => undefined}
+        onRename={() => undefined}
       />,
     );
 
     expect(markup).toContain('aria-busy="true"');
     expect(markup).toContain("Open latest session");
     expect(markup).toContain("Creating session");
-    expect(markup.match(/disabled=""/g)?.length).toBe(2);
+    expect(markup.match(/disabled=""/g)?.length).toBe(3);
   });
 
   it("hides archive for protected Agents and exposes pending state for eligible Agents", () => {
@@ -87,12 +92,14 @@ describe("AgentContextMenu", () => {
       <AgentContextMenu
         archivePending={false}
         createPending={false}
+        renamePending={false}
         lang="zh"
         state={{ agent: agent({ protected: true }), latestSession: session(), x: 24, y: 32 }}
         onArchive={() => undefined}
         onCreateSession={() => undefined}
         onOpenConfig={() => undefined}
         onOpenLatest={() => undefined}
+        onRename={() => undefined}
       />,
     );
     expect(protectedMarkup).not.toContain("安全归档");
@@ -101,12 +108,14 @@ describe("AgentContextMenu", () => {
       <AgentContextMenu
         archivePending
         createPending={false}
+        renamePending={false}
         lang="zh"
         state={{ agent: agent(), latestSession: session(), x: 24, y: 32 }}
         onArchive={() => undefined}
         onCreateSession={() => undefined}
         onOpenConfig={() => undefined}
         onOpenLatest={() => undefined}
+        onRename={() => undefined}
       />,
     );
     expect(pendingMarkup).toContain('aria-busy="true"');
@@ -116,7 +125,7 @@ describe("AgentContextMenu", () => {
   it("clamps the menu inside the visible viewport", () => {
     expect(agentContextMenuStyle({ x: 900, y: 700 }, { width: 960, height: 720 })).toEqual({
       left: 772,
-      top: 544,
+      top: 508,
     });
     expect(agentContextMenuStyle({ x: 24, y: 32 }, undefined)).toEqual({
       left: 24,

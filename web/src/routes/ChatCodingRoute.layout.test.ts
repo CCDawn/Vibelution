@@ -2301,6 +2301,10 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("chatWorkspaceCache.afterAgentArchived()");
     expect(routeSource).toContain("window.confirm(");
     expect(routeSource).toContain("onArchive={handleArchiveAgent}");
+    expect(routeSource).toContain("const handleRenameAgent = useCallback");
+    expect(routeSource).toContain("window.prompt(");
+    expect(routeSource).toContain("renameSessionMutation.mutate({ sessionId: directSessionId, title })");
+    expect(routeSource).toContain("onRename={handleRenameAgent}");
     expect(routeSource).toContain("onCreateSession={handleCreateAgentSession}");
     expect(routeSource).toContain("onOpenConfig={handleOpenAgentConfig}");
     expect(routeSource).toContain("onOpenLatest={handleOpenAgentLatestSession}");
@@ -2310,6 +2314,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(agentContextMenuSource).toContain('aria-label={lang === "zh" ? "Agent 操作" : "Agent actions"}');
     expect(agentContextMenuSource).toContain("打开最近会话");
     expect(agentContextMenuSource).toContain("新建会话");
+    expect(agentContextMenuSource).toContain("重命名 Agent");
     expect(agentContextMenuSource).toContain("打开 Agent 设置");
     expect(agentContextMenuSource).toContain("安全归档");
     expect(agentContextMenuSource).toContain("agentCanArchiveFromContextMenu");
