@@ -491,6 +491,54 @@ def test_candidate_variant_changes_when_untracked_content_changes(tmp_path):
     assert first["variantId"] != second["variantId"]
 
 
+def test_candidate_variant_handles_unicode_untracked_path(tmp_path):
+    candidate = tmp_path / "candidate"
+    _init_repo(candidate)
+    (candidate / "tracked.txt").write_text("base\n", encoding="utf-8")
+    _run_git(candidate, "add", "tracked.txt")
+    _run_git(candidate, "commit", "-m", "base")
+    unicode_file = candidate / "挑战杯" / "README.md"
+    unicode_file.parent.mkdir(parents=True)
+    unicode_file.write_text("candidate evidence\n", encoding="utf-8")
+
+    changed_files = service._candidate_changed_files(candidate)
+    variant = service._build_candidate_variant(
+        candidate,
+        checkpoint_commit="checkpoint-unicode",
+        changed_files=changed_files,
+    )
+
+    assert changed_files == [
+        {
+            "path": "挑战杯/README.md",
+            "status": "??",
+            "changeType": "added",
+            "highRisk": False,
+        }
+    ]
+    assert variant["bindingStatus"] == "verified"
+    assert variant["changedPaths"] == ["挑战杯/README.md"]
+
+
+def test_candidate_changed_files_handles_unicode_rename(tmp_path):
+    candidate = tmp_path / "candidate"
+    _init_repo(candidate)
+    original = candidate / "旧名称.txt"
+    original.write_text("base\n", encoding="utf-8")
+    _run_git(candidate, "add", "旧名称.txt")
+    _run_git(candidate, "commit", "-m", "base")
+    _run_git(candidate, "mv", "旧名称.txt", "新名称.txt")
+
+    assert service._candidate_changed_files(candidate) == [
+        {
+            "path": "新名称.txt",
+            "status": "R",
+            "changeType": "renamed",
+            "highRisk": False,
+        }
+    ]
+
+
 def test_decision_fails_closed_without_candidate_variant_binding():
     snapshot = {
         "baseline": {"score": 50},

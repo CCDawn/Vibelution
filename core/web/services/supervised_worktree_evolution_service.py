@@ -2498,25 +2498,22 @@ def _build_candidate_variant(
 def _candidate_untracked_files(candidate_path: Path, *, baseline_noise: set[str]) -> list[str]:
     try:
         proc = git_process.run_git(
-            ["ls-files", "--others", "--exclude-standard"],
+            ["ls-files", "--others", "--exclude-standard", "-z"],
             cwd=str(candidate_path),
             capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
             check=False,
         )
     except OSError as exc:
         raise SupervisedWorktreeRunValidationError(f"无法枚举候选未跟踪文件：{exc}") from exc
     if proc.returncode != 0:
         raise SupervisedWorktreeRunValidationError(
-            f"无法枚举候选未跟踪文件：{str(proc.stderr or '').strip() or 'git ls-files failed'}"
+            f"无法枚举候选未跟踪文件：{_decode_git_output(proc.stderr).strip() or 'git ls-files failed'}"
         )
     return sorted(
         path
         for path in {
-            str(raw or "").replace("\\", "/").strip().lstrip("/")
-            for raw in proc.stdout.splitlines()
+            raw.replace("\\", "/").lstrip("/")
+            for raw in _decode_git_nul_records(proc.stdout)
         }
         if path and not _is_baseline_untracked_noise({"path": path, "status": "??"}, baseline_noise)
     )
@@ -2532,6 +2529,14 @@ def _decode_git_output(value: Any) -> str:
     if isinstance(value, bytes):
         return value.decode("utf-8", errors="replace")
     return str(value or "")
+
+
+def _decode_git_nul_records(value: Any) -> list[str]:
+    return [
+        record.decode("utf-8", errors="surrogateescape")
+        for record in _git_output_bytes(value).split(b"\0")
+        if record
+    ]
 
 
 def _candidate_variant_is_bound(candidate_variant: dict[str, Any]) -> bool:
@@ -2591,12 +2596,9 @@ def _is_baseline_untracked_noise(item: dict[str, str], baseline_untracked: set[s
 def _git_status_files(repo_root: Path) -> list[dict[str, str]]:
     try:
         proc = git_process.run_git(
-            ["status", "--porcelain"],
+            ["status", "--porcelain=v1", "-z", "--untracked-files=all"],
             cwd=str(repo_root),
             capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
             check=False,
         )
     except OSError:
@@ -2604,15 +2606,19 @@ def _git_status_files(repo_root: Path) -> list[dict[str, str]]:
     if proc.returncode != 0:
         return []
     items: list[dict[str, str]] = []
-    for raw in proc.stdout.splitlines():
-        if not raw.strip():
+    records = _decode_git_nul_records(proc.stdout)
+    index = 0
+    while index < len(records):
+        raw = records[index]
+        index += 1
+        if len(raw) < 4:
             continue
         status = raw[:2]
-        path = raw[3:].strip()
-        if " -> " in path:
-            path = path.split(" -> ", 1)[1].strip()
+        path = raw[3:]
         normalized = path.replace("\\", "/")
         items.append({"path": normalized, "status": status.strip() or "??"})
+        if "R" in status or "C" in status:
+            index += 1
     return items
 
 
