@@ -436,7 +436,22 @@ def _frontend_package_manager() -> str:
 
 
 def _node_command() -> str:
-    return shutil.which("node") or "node"
+    resolved = shutil.which("node")
+    if resolved:
+        return resolved
+    if os.name == "nt":
+        candidates: list[Path] = []
+        for env_name in ("ProgramFiles", "ProgramFiles(x86)"):
+            root = os.environ.get(env_name, "").strip()
+            if root:
+                candidates.append(Path(root) / "nodejs" / "node.exe")
+        local_app_data = os.environ.get("LOCALAPPDATA", "").strip()
+        if local_app_data:
+            candidates.append(Path(local_app_data) / "Programs" / "nodejs" / "node.exe")
+        for candidate in candidates:
+            if candidate.is_file():
+                return str(candidate)
+    return "node"
 
 
 def _npm_cli_script_for_node(node_command: str) -> str:
