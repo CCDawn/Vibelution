@@ -1,9 +1,9 @@
-import { ChevronDown, ChevronRight } from "lucide-react";
 import { useState, type MouseEvent as ReactMouseEvent } from "react";
 
 import type { AgentInstance, SessionSummary } from "../api/types";
 import { VButton } from "../components/vui";
 import { agentDisplayInfo } from "./agentDisplay";
+import { ConversationIndexSection } from "./ConversationIndexSection";
 import styles from "./AgentConversationDirectory.styles";
 
 export type AgentConversationDirectoryProps = {
@@ -155,30 +155,16 @@ export function AgentConversationDirectory({
       ? (lang === "zh" ? "会话 Agent" : "Conversation Agents")
       : (lang === "zh" ? "特殊 Agent" : "Special Agents");
     const expanded = !collapsedSections[section];
-    const sectionContentId = `agent-directory-section-${section}`;
-    const toggleLabel = expanded
-      ? (lang === "zh" ? `收起${label}` : `Collapse ${label}`)
-      : (lang === "zh" ? `展开${label}` : `Expand ${label}`);
     return (
-      <section className={styles.agentSection} aria-label={label}>
-        <VButton
-          type="button"
-          contentLayout="plain"
-          className={styles.agentSectionHeader}
-          aria-expanded={expanded}
-          aria-controls={sectionContentId}
-          aria-label={toggleLabel}
-          title={toggleLabel}
-          onClick={() => setCollapsedSections((current) => ({ ...current, [section]: !current[section] }))}
-        >
-          <span className={styles.agentSectionHeaderLabel}>
-            {expanded ? <ChevronDown size={14} aria-hidden="true" /> : <ChevronRight size={14} aria-hidden="true" />}
-            <span>{label}</span>
-          </span>
-          <strong>{sectionAgents.length}</strong>
-        </VButton>
-        {expanded ? <div id={sectionContentId} className={styles.agentDirectoryList}>{sectionAgents.map(renderAgent)}</div> : null}
-      </section>
+      <ConversationIndexSection
+        className={styles.agentSection}
+        count={sectionAgents.length}
+        expanded={expanded}
+        label={label}
+        onToggle={() => setCollapsedSections((current) => ({ ...current, [section]: !current[section] }))}
+      >
+        <div className={styles.agentDirectoryList}>{sectionAgents.map(renderAgent)}</div>
+      </ConversationIndexSection>
     );
   };
 

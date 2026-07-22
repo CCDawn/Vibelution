@@ -38,6 +38,34 @@ def test_build_chat_coding_result_contract_extracts_structured_fields_from_tool_
     assert contract["no_change"] is False
 
 
+def test_build_chat_coding_result_contract_reads_multiline_pytest_footer_before_trimming_summary():
+    pytest_output = (
+        "============================= test session starts =============================\n"
+        "platform win32 -- Python 3.12.10, pytest-8.4.1\n"
+        "collected 30 items\n\n"
+        "tests/test_dataset_registry.py .............................. [100%]\n\n"
+        "============================= 30 passed in 2.44s ============================="
+    )
+    contract = build_chat_coding_result_contract(
+        {
+            "status": "completed",
+            "summary": "已完成修复并运行测试。",
+            "changed_files": ["core/evaluation/dataset_registry.py"],
+            "tool_trace": [
+                {
+                    "name": "cli_tool",
+                    "args": {"command": "python -m pytest tests/test_dataset_registry.py -q"},
+                    "result_preview": pytest_output,
+                }
+            ],
+        }
+    )
+
+    assert contract["verification_status"] == "passed"
+    assert "30 passed in 2.44s" in contract["verification_summary"]
+    assert contract["outcome"] == "done"
+
+
 def test_build_chat_coding_result_contract_treats_completed_file_artifact_as_done_without_verify():
     contract = build_chat_coding_result_contract(
         {

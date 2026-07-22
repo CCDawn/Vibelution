@@ -92,12 +92,12 @@ describe("AgentConversationDirectory", () => {
   it("keeps each Agent directory section independently collapsible and accessible", () => {
     expect(directorySource).toContain("DEFAULT_COLLAPSED_DIRECTORY_SECTIONS");
     expect(directorySource).toContain("const [collapsedSections, setCollapsedSections]");
-    expect(directorySource).toContain("aria-expanded={expanded}");
-    expect(directorySource).toContain("aria-controls={sectionContentId}");
-    expect(directorySource).toContain("onClick={() => setCollapsedSections");
-    expect(directorySource).toContain("expanded ? <ChevronDown");
-    expect(directorySource).toContain("{expanded ? <div id={sectionContentId}");
-    expect(styles.agentSectionHeader).toContain("!w-full");
-    expect(styles.agentSectionHeaderLabel).toContain("items-center");
+    expect(directorySource).toContain('import { ConversationIndexSection } from "./ConversationIndexSection"');
+    expect(directorySource).toContain("<ConversationIndexSection");
+    expect(directorySource).toContain("expanded={expanded}");
+    expect(directorySource).toContain("onToggle={() => setCollapsedSections");
+    expect(styles.agentSection).toContain("gap-1.5");
+    expect(styles.agentDirectoryList).toContain("gap-1.5");
+    expect(styles.agentDirectoryList).toContain("pl-1");
   });
 });
