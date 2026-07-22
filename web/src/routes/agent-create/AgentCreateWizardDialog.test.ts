@@ -33,4 +33,14 @@ describe("AgentCreateWizardDialog contract", () => {
     expect(dialogSource).toContain("setQueryData<AgentInstance[]>(queryKeys.agents()");
     expect(dialogSource).toContain("afterAgentWorkspaceChanged()");
   });
+
+  it("requires a successful saved-config probe before creation", () => {
+    expect(dialogSource).toContain('fetchJson<ConfigLlmTestResult>("/api/config/test-llm"');
+    expect(dialogSource).toContain("publicConfig: {}");
+    expect(dialogSource).toContain('capability: "text"');
+    expect(dialogSource).toContain("probeUsableModelIds");
+    expect(dialogSource).toContain("createDraftReady(draft, toolBundles, probeUsableModelIds)");
+    expect(dialogSource).toContain('markProbe(modelId, "ok"');
+    expect(dialogSource).toContain('markProbe(modelId, "fail"');
+  });
 });
