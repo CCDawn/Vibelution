@@ -13,6 +13,7 @@ import {
 // @ts-expect-error Vitest runs this contract in Node; the web project intentionally omits global Node types.
 import { readFileSync } from "node:fs";
 import routeSource from "./AgentsRoute.tsx?raw";
+import agentStatusPresentationSource from "./agents/agentStatusPresentation.ts?raw";
 import agentManagementNavSource from "./AgentManagementNav.tsx?raw";
 import agentWorkspaceCacheSource from "./agentWorkspaceCache.ts?raw";
 import styles from "./AgentsRoute.styles";
@@ -1081,13 +1082,13 @@ describe("AgentsRoute layout contract", () => {
   });
 
   it("explains Agent health states with reason and next action instead of a bare hint pill", () => {
-    expect(routeSource).toContain('return lang === "zh" ? "提醒" : "Notice"');
-    expect(routeSource).toContain("function issueSummary");
-    expect(routeSource).toContain("function issueNextStep");
-    expect(routeSource).toContain("function issuePanelLabel");
-    expect(routeSource).toContain("function issueDisplayTitle");
-    expect(routeSource).toContain("Inbox 有待处理消息");
-    expect(routeSource).toContain("这是 Inbox 待办提醒，不代表配置坏了");
+    expect(agentStatusPresentationSource).toContain('return lang === "zh" ? "提醒" : "Notice"');
+    expect(agentStatusPresentationSource).toContain("function issueSummary");
+    expect(agentStatusPresentationSource).toContain("function issueNextStep");
+    expect(agentStatusPresentationSource).toContain("function issuePanelLabel");
+    expect(agentStatusPresentationSource).toContain("function issueDisplayTitle");
+    expect(agentStatusPresentationSource).toContain("Inbox 有待处理消息");
+    expect(agentStatusPresentationSource).toContain("这是 Inbox 待办提醒，不代表配置坏了");
     expect(routeSource).toContain("issueTone: issueTone(agent.health)");
     expect(detailHeaderPanelSource).toContain("styles.detailHealthStatus");
     expect(routeSource).toContain("copy.healthNextStep");
