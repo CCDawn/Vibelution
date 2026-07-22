@@ -85,27 +85,6 @@ def test_conversation_harness_recovers_completed_turn_from_completion_snapshot(m
         "submit_session_message",
         lambda *args, **kwargs: {"turnId": "turn-1"},
     )
-    monkeypatch.setattr(
-        adapter,
-        "get_session_detail",
-        lambda session_id: {
-            "id": session_id,
-            "lastTurnStatus": "running",
-            "updatedAt": "2026-06-16T01:32:59",
-            "messages": [
-                {
-                    "role": "user",
-                    "content": "执行监督进化 dynamic_replanning fixture 候选探针",
-                    "metadata": {"turnId": "turn-1"},
-                },
-                {
-                    "role": "assistant",
-                    "content": assistant_text,
-                    "metadata": {"turnId": "turn-1"},
-                },
-            ],
-        },
-    )
     monkeypatch.setattr(adapter, "request_stop_session_turn", lambda session_id: stopped.append(session_id))
     monkeypatch.setattr(
         adapter,
@@ -150,6 +129,130 @@ def test_conversation_harness_recovers_completed_turn_from_completion_snapshot(m
     assert result.evolution_summary["conversation_backend"]["completion_source"] == "assistant_marker"
     assert result.evolution_summary["conversation_backend"]["completion_recovered"] is True
     assert stopped == []
+
+
+def test_conversation_harness_observes_terminal_snapshot_without_loading_full_session_detail(
+    monkeypatch,
+    tmp_path: Path,
+):
+    monkeypatch.setattr(
+        adapter,
+        "create_supervised_agent_session",
+        lambda **kwargs: {"id": "session-hidden"},
+    )
+    monkeypatch.setattr(
+        adapter,
+        "submit_session_message",
+        lambda *args, **kwargs: {"turnId": "turn-1"},
+    )
+    monkeypatch.setattr(
+        adapter,
+        "get_session_turn_completion_snapshot",
+        lambda session_id, turn_id: {
+            "sessionId": session_id,
+            "turnId": turn_id,
+            "terminal": True,
+            "terminalStatus": "ready",
+            "assistantText": "candidate completed",
+            "lastTurnStatus": "ready",
+            "messageCount": 2,
+        },
+    )
+    monkeypatch.setattr(
+        adapter,
+        "get_session_detail",
+        lambda session_id: (_ for _ in ()).throw(AssertionError("full session detail must not gate terminal detection")),
+    )
+
+    result = adapter.run_supervised_conversation_harness(
+        repo_root=tmp_path,
+        mode="single_turn",
+        prompt="probe",
+        timeout_seconds=1,
+        expect_restart=False,
+        post_restart_observe_seconds=0,
+        keep_worktree=False,
+        scenario="candidate_self_improvement",
+        agent_binding={"agentId": "agent-candidate", "role": "candidate"},
+    )
+
+    assert result.status == "success"
+    assert result.evolution_summary["conversation_backend"]["observed_terminal_status"] == "ready"
+
+
+def test_conversation_harness_auto_closes_open_transaction_as_failed(monkeypatch, tmp_path: Path):
+    session_id = "session-open-transaction"
+    turn_id = "turn-1"
+    append_turn_event(
+        tmp_path,
+        session_id,
+        turn_id,
+        EVENT_TOOL_RESULT,
+        status="done",
+        payload={
+            "toolCall": {
+                "name": "open_evolution_transaction_tool",
+                "status": "done",
+                "arguments": {"summary": "candidate probe"},
+                "result": '{"status":"success","txn_id":"txn-open"}',
+            }
+        },
+        source="session_ui_capture",
+    )
+    closed: list[tuple[str, str, str]] = []
+
+    class FakeGitMemoryService:
+        def close_evolution_transaction(self, txn_id: str, status: str, summary: str = "") -> None:
+            closed.append((txn_id, status, summary))
+
+    from core.infrastructure import git_memory
+
+    monkeypatch.setattr(git_memory, "get_git_memory_service", lambda: FakeGitMemoryService())
+    monkeypatch.setattr(
+        adapter,
+        "create_supervised_agent_session",
+        lambda **kwargs: {"id": session_id},
+    )
+    monkeypatch.setattr(
+        adapter,
+        "submit_session_message",
+        lambda *args, **kwargs: {"turnId": turn_id},
+    )
+    monkeypatch.setattr(
+        adapter,
+        "get_session_turn_completion_snapshot",
+        lambda requested_session_id, requested_turn_id: {
+            "sessionId": requested_session_id,
+            "turnId": requested_turn_id,
+            "terminal": True,
+            "terminalStatus": "ready",
+            "assistantText": "candidate stopped without closing the transaction",
+            "lastTurnStatus": "ready",
+            "messageCount": 2,
+        },
+    )
+
+    result = adapter.run_supervised_conversation_harness(
+        repo_root=tmp_path,
+        mode="single_turn",
+        prompt="probe",
+        timeout_seconds=1,
+        expect_restart=False,
+        post_restart_observe_seconds=0,
+        keep_worktree=False,
+        scenario="candidate_self_improvement",
+        agent_binding={"agentId": "agent-candidate", "role": "candidate"},
+    )
+
+    assert result.status == "failed"
+    assert closed == [("txn-open", "failed", "监督会话结束时事务仍处于 open，系统已自动失败关账。")]
+    assert result.evolution_summary["transaction"] == {
+        "opened": True,
+        "closed": True,
+        "status": "failed",
+        "txn_id": "txn-open",
+        "auto_closed": True,
+    }
 
 
 def test_conversation_harness_passes_workspace_override_to_supervised_session(monkeypatch, tmp_path: Path):

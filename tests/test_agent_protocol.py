@@ -93,6 +93,35 @@ def test_session_turn_reuse_refreshes_turn_scoped_tool_authorization(monkeypatch
     assert agent._pending_runtime_context_blocks == []
 
 
+def test_supervised_system_prompt_excludes_global_git_and_runtime_diagnostics():
+    agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+    captured: dict[str, object] = {}
+
+    class DummyPromptManager:
+        def build(self, *, exclude=None):
+            captured["excluded_sections"] = list(exclude or [])
+            return "supervised prompt"
+
+    agent.mode_policy = ModePolicy(
+        mode=AgentMode.SUPERVISED_EVOLUTION,
+        orchestrator_kind="evolution",
+        keep_multi_turn_context=False,
+        allow_auto_loop=False,
+        capture_chat_dataset_candidates=False,
+        reset_context_before_turn=True,
+        reset_context_between_cases=True,
+        allow_direct_supervised_payload=True,
+        finish_after_direct_response=True,
+        runtime_input_builder=build_external_request_message,
+    )
+    agent.prompt_manager = DummyPromptManager()
+
+    prompt = agent._build_system_prompt_for_turn(stable_session_prompt=False)
+
+    assert prompt == "supervised prompt"
+    assert captured["excluded_sections"] == ["GIT_MEMORY", "RUNTIME_LOG_INDEX"]
+
+
 def test_initial_prompt_reuse_requires_unchanged_git_and_runtime_state():
     initial_git_state = SimpleNamespace(
         available=True,
@@ -473,6 +502,7 @@ class TestToolMessageFlow:
             finish_after_direct_response=False,
             runtime_input_builder=build_chat_user_message,
         )
+        agent.config = isolated_settings_config()
         agent._mental_model_enabled_override = False
         agent.mental_model = None
 
@@ -525,6 +555,7 @@ class TestToolMessageFlow:
             finish_after_direct_response=False,
             runtime_input_builder=build_chat_user_message,
         )
+        agent.config = isolated_settings_config()
         agent._mental_model_enabled_override = False
         agent.mental_model = None
 
