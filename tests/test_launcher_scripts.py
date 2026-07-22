@@ -300,6 +300,22 @@ def test_python_launcher_does_not_accept_a_healthy_listener_owned_by_another_pro
     assert launcher._wait_for_started_backend(Process(), 8000, "127.0.0.1", timeout_seconds=0.1) == 0
 
 
+def test_python_launcher_finds_standard_windows_node_install_when_path_is_restricted(monkeypatch, tmp_path):
+    launcher = _load_python_launcher()
+    program_files = tmp_path / "Program Files"
+    node_executable = program_files / "nodejs" / "node.exe"
+    node_executable.parent.mkdir(parents=True)
+    node_executable.write_bytes(b"")
+
+    monkeypatch.setattr(launcher.os, "name", "nt")
+    monkeypatch.setattr(launcher.shutil, "which", lambda _command: None)
+    monkeypatch.setenv("ProgramFiles", str(program_files))
+    monkeypatch.delenv("ProgramFiles(x86)", raising=False)
+    monkeypatch.delenv("LOCALAPPDATA", raising=False)
+
+    assert launcher._node_command() == str(node_executable)
+
+
 def test_python_launcher_rebuilds_when_sources_are_newer_than_dist(monkeypatch, tmp_path):
     launcher = _load_python_launcher()
     web_dir = tmp_path / "web"
