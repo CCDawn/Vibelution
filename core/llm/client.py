@@ -1269,7 +1269,19 @@ def _default_completion_backend(payload: Dict[str, Any]) -> Any:
             retryable=False,
         ) from exc
     _ensure_no_proxy_for_local_base_url(payload.get("base_url"))
-    return completion(**payload)
+    request_payload = dict(payload)
+    if request_payload.get("base_url"):
+        request_payload["base_url"] = _litellm_chat_completions_api_base(request_payload["base_url"])
+    return completion(**request_payload)
+
+
+def _litellm_chat_completions_api_base(value: Any) -> str:
+    """Translate a final Chat Completions endpoint to LiteLLM's service-root contract."""
+
+    endpoint = str(value or "").strip().rstrip("/")
+    if endpoint.lower().endswith("/chat/completions"):
+        return endpoint[: -len("/chat/completions")]
+    return endpoint
 
 
 def _litellm_responses_api_base(value: Any) -> str:
