@@ -20,6 +20,7 @@ Agent-oriented map for Teams workbench development. Prefer editing a **module** 
 | Research stage agent role tables | `researchStageRoles.ts` | mutations, UI panels |
 | SC / workflow React Query keys | `teamWorkflowQueryKeys.ts` | mutations, UI panels |
 | Stage agent binding presentation / routes | `researchStageAgentPresentation.ts` | mutations, UI panels |
+| First-paint detail/canvas/SC query gating | `teamDetailLoadPolicy.ts` | mutations, UI panels |
 | Research workflow resource queries/keys | `useResearchWorkflowResources.ts` | Canvas drag |
 | Research memory evidence UI | `ResearchMemoryEvidencePanel.tsx` | Teams shell mutations |
 | Source-collection panel shell alias | `TeamsSourceCollectionPanel.tsx` | full route wiring |
