@@ -44,6 +44,71 @@ export function isSessionNotFoundError(error: unknown) {
   return /session not found|会话不存在|未找到会话/i.test(message);
 }
 
+/**
+ * Minimal SessionDetail shell from list summary so session switches can paint
+ * title/status immediately while the full detail window loads.
+ */
+export function buildSessionDetailShellFromSummary(
+  summary: SessionSummary | null | undefined,
+): SessionDetail | undefined {
+  if (!summary?.id) {
+    return undefined;
+  }
+  return {
+    ...summary,
+    defaultFileContext: "",
+    previewTabs: [],
+    activePreviewPath: "",
+    changedFiles: [],
+    readFiles: [],
+    messages: [],
+    messageWindow: {
+      mode: "window",
+      totalMessages: 0,
+      returnedMessages: 0,
+      oldestMessageIndex: 0,
+      newestMessageIndex: 0,
+      hasEarlier: false,
+      hasLater: false,
+      transcriptScope: "window",
+    },
+  };
+}
+
+/**
+ * Prefer cached full detail for the active session; otherwise summary shell.
+ * Never return another session's detail as placeholder (avoids flash of wrong chat).
+ */
+export function resolveSessionDetailPlaceholder(options: {
+  activeSessionId: string | null | undefined;
+  cachedDetail: SessionDetail | undefined;
+  summary: SessionSummary | null | undefined;
+}): SessionDetail | undefined {
+  const activeSessionId = String(options.activeSessionId || "").trim();
+  if (!activeSessionId) {
+    return undefined;
+  }
+  if (options.cachedDetail && options.cachedDetail.id === activeSessionId) {
+    return options.cachedDetail;
+  }
+  const summary = options.summary?.id === activeSessionId ? options.summary : undefined;
+  return buildSessionDetailShellFromSummary(summary);
+}
+
+export function isForeignSessionDetailQueryKey(
+  queryKey: readonly unknown[],
+  activeSessionId: string,
+): boolean {
+  if (queryKey[0] !== "sessions" || queryKey.length !== 2) {
+    return false;
+  }
+  const sessionId = String(queryKey[1] ?? "").trim();
+  if (!sessionId || sessionId === "none") {
+    return false;
+  }
+  return sessionId !== activeSessionId;
+}
+
 
 
 
