@@ -1248,9 +1248,12 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("showNodeBindingPanel");
     expect(routeSource).toContain("showWorkflowPanel");
     expect(routeSource).toContain("showResearchSourceCollection");
-    expect(routeSource).toContain('const teamDetailLoadMode = sourceCollectionStandalone ? "light" : "full"');
+    expect(routeSource).toContain("resolveTeamDetailLoadMode");
+    expect(routeSource).toContain("resolveTeamCanvasQueryEnabled");
+    expect(routeSource).toContain("resolveSourceCollectionRunsQueryEnabled");
     expect(routeSource).toContain("queryKeys.team(effectiveTeamId, teamDetailLoadMode)");
     expect(routeSource).toContain("detail=${teamDetailLoadMode}");
+    expect(routeSource).toContain("enabled: teamCanvasQueryEnabled");
     expect(routeSource).toContain("sourceCollectionAgentIdsFromTeam(selectedTeam, canvas)");
     expect(routeSource).toContain("sourceCollectionOwnerAgentIdFromTeam(selectedTeam, canvas)");
     expect(routeSource).toContain("researchSourceCollectionRoute");
