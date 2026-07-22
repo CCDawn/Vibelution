@@ -9,7 +9,6 @@ import pytest
 from fastapi.testclient import TestClient
 
 from core.chat.conversation_ledger import (
-    EVENT_ASSISTANT_MESSAGE,
     EVENT_USER_MESSAGE,
     append_conversation_event,
 )
@@ -1566,6 +1565,7 @@ def test_supervised_session_workspace_override_routes_tool_workspace_to_candidat
         }
     )
     captured_overrides: list[tuple[str, str]] = []
+    captured_runtime_contexts: list[str] = []
 
     class DummyAgent:
         def set_mental_model_enabled_override(self, enabled):
@@ -1573,6 +1573,9 @@ def test_supervised_session_workspace_override_routes_tool_workspace_to_candidat
 
         def seed_chat_history(self, messages):
             self.seeded_history = list(messages)
+
+        def seed_volatile_runtime_context(self, context_block):
+            captured_runtime_contexts.append(str(context_block))
 
         def run_single_turn(self, initial_prompt=None):
             return {
@@ -1613,6 +1616,11 @@ def test_supervised_session_workspace_override_routes_tool_workspace_to_candidat
     tool_workspace, memory_workspace = captured_overrides[-1]
     assert Path(tool_workspace).resolve() == candidate_path.resolve()
     assert Path(memory_workspace).resolve() != candidate_path.resolve()
+    assert captured_runtime_contexts
+    supervised_context = "\n".join(captured_runtime_contexts)
+    assert f"RepositoryRoot: {candidate_path.resolve()}" in supervised_context
+    assert f"ToolWorkspace: {candidate_path.resolve()}" in supervised_context
+    assert "AgentWorkspace is identity/private-memory only; do not use it as CLI cwd." in supervised_context
 
 
 def test_self_observation_message_source_disables_tools(tmp_path, monkeypatch):
