@@ -32,6 +32,7 @@ from .session_service import (
 CONVERSATION_HARNESS_CANCEL_GRACE_SECONDS = 8.0
 CONVERSATION_HARNESS_MAX_CONTINUATIONS = 3
 _CONVERSATION_HARNESS_TRANSCRIPT_LIMIT = 8
+_AUTO_CLOSE_TRANSACTION_SUMMARY = "监督会话结束时事务仍处于 open，系统已自动失败关账。"
 _CONVERSATION_HARNESS_MESSAGE_FIELDS = {
     "id",
     "role",
@@ -188,7 +189,11 @@ def run_supervised_conversation_harness(
     cancel_requested = False
     cancel_reason_text = ""
     cancel_deadline: float | None = None
-    latest_detail: dict[str, Any] = {}
+    latest_detail: dict[str, Any] = {
+        "id": session_id,
+        "sessionId": session_id,
+        "messages": [],
+    }
     latest_completion_snapshot: dict[str, Any] = {}
     continuation_count = 0
     turn_ids = [turn_id] if turn_id else []
@@ -220,7 +225,6 @@ def run_supervised_conversation_harness(
                         "mental_model_enabled": mental_model_enabled,
                     }
                 )
-        latest_detail = get_session_detail(session_id) or {}
         latest_completion_snapshot = get_session_turn_completion_snapshot(session_id, turn_id)
         completion_terminal = bool(latest_completion_snapshot.get("terminal"))
         last_status = str(
@@ -381,7 +385,6 @@ def run_supervised_conversation_harness(
         if time.monotonic() >= deadline:
             latest_completion_snapshot = get_session_turn_completion_snapshot(session_id, turn_id)
             if bool(latest_completion_snapshot.get("terminal")):
-                latest_detail = get_session_detail(session_id) or latest_detail
                 break
             try:
                 request_stop_session_turn(session_id)
@@ -535,6 +538,13 @@ def _conversation_harness_result(
 ) -> HarnessResult:
     ended_at = _now_timestamp()
     completion = dict(completion_snapshot or {}) if isinstance(completion_snapshot, dict) else {}
+    normalized_evolution_summary, auto_close_required = _auto_close_open_evolution_transaction(
+        evolution_summary,
+    )
+    if auto_close_required:
+        status = "failed"
+        reason = _AUTO_CLOSE_TRANSACTION_SUMMARY
+        primary_returncode = 1
     runtime_env = {
         "VIBELUTION_TURN_MODE": "supervised_evolution",
         "VIBELUTION_TURN_RUN_KIND": "supervised_evaluation",
@@ -585,7 +595,7 @@ def _conversation_harness_result(
         },
         post_restart_observation={},
         evolution_summary={
-            **(evolution_summary or {}),
+            **normalized_evolution_summary,
             "conversation_backend": {
                 "enabled": True,
                 "session_id": session_id,
@@ -606,6 +616,44 @@ def _conversation_harness_result(
         effective_returncode=primary_returncode,
         agent_runtime_env=runtime_env,
     )
+
+
+def _auto_close_open_evolution_transaction(
+    evolution_summary: dict[str, Any] | None,
+) -> tuple[dict[str, Any], bool]:
+    summary = dict(evolution_summary or {}) if isinstance(evolution_summary, dict) else {}
+    transaction = dict(summary.get("transaction") or {}) if isinstance(summary.get("transaction"), dict) else {}
+    if not bool(transaction.get("opened")) or bool(transaction.get("closed")):
+        return summary, False
+
+    txn_id = str(transaction.get("txn_id") or "").strip()
+    close_error = ""
+    closed = False
+    if txn_id:
+        try:
+            from core.infrastructure.git_memory import get_git_memory_service
+
+            get_git_memory_service().close_evolution_transaction(
+                txn_id=txn_id,
+                status="failed",
+                summary=_AUTO_CLOSE_TRANSACTION_SUMMARY,
+            )
+            closed = True
+        except Exception as exc:
+            close_error = f"{type(exc).__name__}: {exc}"
+    else:
+        close_error = "missing txn_id"
+
+    updated_transaction = {
+        **transaction,
+        "closed": closed,
+        "status": "failed",
+        "auto_closed": closed,
+    }
+    if close_error:
+        updated_transaction["auto_close_error"] = close_error
+    summary["transaction"] = updated_transaction
+    return summary, True
 
 
 def _conversation_harness_transcript(detail: dict[str, Any]) -> list[dict[str, Any]]:

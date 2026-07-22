@@ -2061,10 +2061,20 @@ class SelfEvolvingAgent:
             getattr(getattr(authorization_report, "decision", None), "decision_fingerprint", "") or ""
         ).strip()
 
-    def _build_system_prompt_for_turn(self, *, stable_session_prompt: bool):
-        """Build a prompt without unrelated global diagnostics for direct chat."""
+    def _excluded_system_prompt_sections_for_turn(self, *, stable_session_prompt: bool) -> List[str]:
+        if self._get_mode_policy().mode == AgentMode.SUPERVISED_EVOLUTION:
+            return ["GIT_MEMORY", "RUNTIME_LOG_INDEX"]
         if stable_session_prompt:
-            return self.prompt_manager.build(exclude=["RUNTIME_LOG_INDEX"])
+            return ["RUNTIME_LOG_INDEX"]
+        return []
+
+    def _build_system_prompt_for_turn(self, *, stable_session_prompt: bool):
+        """Build a prompt without unrelated global diagnostics for the current mode."""
+        excluded_sections = self._excluded_system_prompt_sections_for_turn(
+            stable_session_prompt=stable_session_prompt,
+        )
+        if excluded_sections:
+            return self.prompt_manager.build(exclude=excluded_sections)
         return self.prompt_manager.build()
 
     def clear_chat_provider_replay_state(self) -> None:
@@ -2433,7 +2443,9 @@ class SelfEvolvingAgent:
                 "promptBuildMs": initial_prompt_build_ms,
                 "totalMs": max(0, int((time.perf_counter() - initial_context_started) * 1000)),
                 "stableSessionPrompt": stable_session_prompt,
-                "excludedPromptSections": ["RUNTIME_LOG_INDEX"] if stable_session_prompt else [],
+                "excludedPromptSections": self._excluded_system_prompt_sections_for_turn(
+                    stable_session_prompt=stable_session_prompt,
+                ),
             },
         )
         dynamic_system_context_message = build_dynamic_system_context_message(sp)
