@@ -10,6 +10,7 @@ from core.llm.agent_runtime import config_for_agent_llm_model
 from core.orchestration.response_processor import ResponseProcessor
 from core.llm.client import (
     LLMClient,
+    _default_completion_backend,
     _default_responses_backend,
     _llm_provider_proxy_env,
     _ensure_no_proxy_for_local_base_url,
@@ -166,6 +167,26 @@ def test_local_lan_base_url_is_added_to_no_proxy(monkeypatch):
 
     combined_no_proxy = ",".join(filter(None, [os.environ.get("NO_PROXY", ""), os.environ.get("no_proxy", "")]))
     assert "192.168.20.63" in combined_no_proxy.split(",")
+
+
+def test_default_completion_backend_passes_service_root_to_litellm(monkeypatch):
+    captured = {}
+
+    def fake_completion(**payload):
+        captured.update(payload)
+        return {"ok": True}
+
+    monkeypatch.setattr("litellm.completion", fake_completion)
+    payload = {
+        "model": "openai/qwen-local",
+        "messages": [{"role": "user", "content": "ping"}],
+        "base_url": "http://192.168.20.115:8080/v1/chat/completions",
+        "api_key": "test-key",
+    }
+
+    assert _default_completion_backend(payload) == {"ok": True}
+    assert captured["base_url"] == "http://192.168.20.115:8080/v1"
+    assert payload["base_url"] == "http://192.168.20.115:8080/v1/chat/completions"
 
 
 def test_remote_base_url_does_not_change_no_proxy(monkeypatch):
