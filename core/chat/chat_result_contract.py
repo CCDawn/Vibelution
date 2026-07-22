@@ -31,6 +31,7 @@ PYTEST_CROSS_PLATFORM_BLOCKED_REASON = "pytest 命令被跨平台检查拦截，
 MISSING_MAPPED_TEST_BLOCKED_REASON = "run_test_for_tool 未找到映射测试，验证尚未执行。"
 LINT_ISSUES_BLOCKED_REASON = "python_lint_tool 发现 lint 问题，验证未通过。"
 PY_COMPILE_FAILED_BLOCKED_REASON = "python -m py_compile 执行失败，验证未通过。"
+TOOL_RESULT_CLASSIFICATION_CHAR_LIMIT = 12_000
 
 PATH_ARG_KEYS = (
     "file_path",
@@ -54,17 +55,28 @@ def _tool_command(record: Dict[str, Any]) -> str:
     return str(_tool_args_dict(record).get("command") or "").strip()
 
 
-def _tool_result_preview(record: Dict[str, Any]) -> str:
-    return trim_lines(
+def _tool_result_text(record: Dict[str, Any]) -> str:
+    value = str(
         record.get("result_preview")
         or record.get("resultPreview")
         or record.get("tool_result")
         or record.get("summary")
         or record.get("raw_output")
         or record.get("result")
-        or "",
-        max_lines=3,
-    )
+        or ""
+    ).strip()
+    if len(value) <= TOOL_RESULT_CLASSIFICATION_CHAR_LIMIT:
+        return value
+    half_limit = TOOL_RESULT_CLASSIFICATION_CHAR_LIMIT // 2
+    return f"{value[:half_limit].rstrip()}\n...\n{value[-half_limit:].lstrip()}"
+
+
+def _tool_result_preview(record: Dict[str, Any]) -> str:
+    text = _tool_result_text(record)
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    if len(lines) <= 3:
+        return "\n".join(lines)
+    return "\n".join([*lines[:2], lines[-1]])
 
 
 def _parse_json_payload(text: str) -> dict[str, Any]:
@@ -114,32 +126,33 @@ def _lint_issue_count(payload: dict[str, Any]) -> int | None:
 def verification_from_tool_record(record: Dict[str, Any]) -> Tuple[str, str, str]:
     name = _tool_name(record)
     command = _tool_command(record)
+    result_text = _tool_result_text(record)
     preview = _tool_result_preview(record)
-    if not preview and name not in VERIFY_TOOL_NAMES and "pytest" not in command and "py_compile" not in command:
+    if not result_text and name not in VERIFY_TOOL_NAMES and "pytest" not in command and "py_compile" not in command:
         return ("", "", "")
 
-    if "[跨平台警告]" in preview and "pytest" in command.lower():
+    if "[跨平台警告]" in result_text and "pytest" in command.lower():
         return ("failed", preview or PYTEST_CROSS_PLATFORM_BLOCKED_REASON, PYTEST_CROSS_PLATFORM_BLOCKED_REASON)
 
     if name == "run_test_for_tool":
-        if "[运行测试] 未找到对应测试文件" in preview:
+        if "[运行测试] 未找到对应测试文件" in result_text:
             return ("failed", preview, MISSING_MAPPED_TEST_BLOCKED_REASON)
-        if _pytest_passed(preview):
+        if _pytest_passed(result_text):
             return ("passed", preview or "pytest 通过", "")
         return ("failed", preview or f"{name} 验证未通过", "")
 
     if "pytest" in command.lower():
-        if _pytest_passed(preview):
+        if _pytest_passed(result_text):
             return ("passed", preview or "pytest 通过", "")
         return ("failed", preview or "pytest 验证未通过", "")
 
     if "py_compile" in command:
-        if "[命令执行完成，无输出]" in preview and not _has_failure_marker(preview):
+        if "[命令执行完成，无输出]" in result_text and not _has_failure_marker(result_text):
             return ("passed", "python -m py_compile 通过", "")
         return ("failed", preview or PY_COMPILE_FAILED_BLOCKED_REASON, PY_COMPILE_FAILED_BLOCKED_REASON)
 
     if name == "python_lint_tool":
-        payload = _parse_json_payload(preview)
+        payload = _parse_json_payload(result_text)
         status = str(payload.get("status") or "").strip().lower()
         issue_count = _lint_issue_count(payload)
         if status in {"ok", "success", "passed"} and issue_count == 0:

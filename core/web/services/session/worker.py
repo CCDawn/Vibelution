@@ -595,6 +595,23 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                 )
                 if runtime_context_block and not static_runtime_context_block and not dynamic_runtime_context_block:
                     dynamic_runtime_context_block = runtime_context_block
+                supervised_workspace_context_block = ""
+                if supervised_workspace_override is not None:
+                    resolved_tool_workspace = Path(tool_workspace).resolve()
+                    supervised_workspace_context_block = "\n".join(
+                        [
+                            "## Supervised Execution Workspace",
+                            f"RepositoryRoot: {resolved_tool_workspace}",
+                            f"ToolWorkspace: {resolved_tool_workspace}",
+                            "AgentWorkspace is identity/private-memory only; do not use it as CLI cwd.",
+                            "Use RepositoryRoot or ToolWorkspace for repository commands and file operations.",
+                        ]
+                    )
+                    dynamic_runtime_context_block = "\n\n".join(
+                        part
+                        for part in (dynamic_runtime_context_block, supervised_workspace_context_block)
+                        if str(part or "").strip()
+                    ).strip()
                 runtime_context_block = "\n\n".join(
                     part
                     for part in (static_runtime_context_block, dynamic_runtime_context_block)
@@ -682,6 +699,7 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                         else "",
                         "dynamicRuntimeContextIncluded": dynamic_runtime_context_included,
                         "dynamicRuntimeContextAvailable": bool(dynamic_runtime_context_block),
+                        "supervisedWorkspaceContextIncluded": bool(supervised_workspace_context_block),
                         "dynamicRuntimeContextOmittedFromModelInput": bool(dynamic_runtime_context_block)
                         and not dynamic_runtime_context_included,
                         "runtimeContextSegmentCount": len(runtime_context_segments),
