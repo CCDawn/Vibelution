@@ -60,22 +60,12 @@ Pure helpers extracted from `ChatCodingRoute.tsx`:
 - `chatComposerSubmitModel.ts` — composer draft/attachment/reference pure helpers, image classify, submit guards, mental-model toggle storage, optimistic turn id
 - `useChatComposerSubmit.ts` — `useChatComposerTurnMutations` (submit/edit/stop/guidance) + `useChatComposerSubmitActions` (handlers/upload pipeline); no second EventSource
 
-## Phase E (in progress)
+## Phase E (done for structure ROI)
 
 Plan: `docs/superpowers/plans/2026-07-19-chat-coding-route-stream-selection-split.md`
 
-- **E1 done:** `chatSessionStreamConnect.ts` + `useSessionDetailStream.ts` — sole owner of `/api/sessions/:id/events` EventSource; connect/grace pure helpers
-- **E2 done:** `useGroupRoomStream.ts` — sole owner of `/api/chat-rooms/:id/events` EventSource
-- **E3 done:** `useChatSessionSelection.ts` — select mutation + URL/bootstrap selection effects
-- **E4a done:** `chatSessionDetailHelpers.ts` + `chatRoutePresentation.tsx` — pure detail/presentation helpers
-- **E4b done:** `useChatWorkspaceLifecycle.ts` — create/delete/rename session, group CRUD/rounds, project-bus send/revoke
-- **E4c done:** `useChatSessionDetailMutations.ts` + composer draft handlers in `useChatComposerSubmitActions`
-- **E4d done:** `useChatWorkspaceActions.ts` — open/create/delete/reset group/session and project-bus UI handlers
-- **E4e done:** `ChatGroupMessagePresentation.tsx` + `useChatSessionRenameMenu.ts`
-- **E4f done:** `useChatCliAgentTerminal.ts` + `chatCacheDetailModel.ts` + `useChatCacheDetailDialog.ts`
-- **E4g done:** `chatTokenStatusModel.ts` — Token core status metrics pure view-model
-- **E4h done:** `ChatGroupCenterSurface.tsx` + `ChatCliAgentTerminalStack.tsx` — center group/bus + CLI mount stack
-- **E4i done:** `chatSessionSurfaceModel.ts` — skill / mental / pet / session state / agent session tabs pure builders
+- **E1–E4i done:** stream selection split, workspace hooks, surface models, center surfaces
+- **D2 (ROI queue):** `conversationFeedbackStatusPresentation.ts` — feedback status placeholder pure boundary for `ConversationView` (projection vs shell)
 
 ## Bundle note (secondary lazy)
 
@@ -88,10 +78,33 @@ Plan: `docs/superpowers/plans/2026-07-19-chat-coding-route-stream-selection-spli
 
 Do not re-add static imports of those modules into the Chat shell without a budget re-check.
 
+## ConversationView boundary (D2)
+
+Timeline message rendering lives under `web/src/components/conversation/`.
+Prefer pure modules there over growing `ConversationView.tsx`.
+
+| Task type | Prefer | Avoid |
+|-----------|--------|--------|
+| Feedback status placeholder / long-loop labels | `conversationFeedbackStatusPresentation.ts` | ConversationView JSX |
+| Internal streaming status markers | `conversationInternalStatus.ts` | route shell |
+| Operation groups / timeline rows | `agentMessageOperations.ts`, `agentMessageTimeline*.ts` | ChatCodingRoute |
+| Stream EventSource ownership | `useSessionDetailStream.ts` / `useGroupRoomStream.ts` | ConversationView |
+
+## Live load policy (P1/P5)
+
+| Concern | Owner |
+|---------|--------|
+| When to open session SSE | `chatSessionStreamConnect.ts` + `useSessionDetailStream.ts` |
+| Stop list/detail polling only when SSE is **open** | `chatLiveQueryPolicy.ts` (`sessionStreamConnected` / `groupStreamConnected`) |
+| Session switch shell + cancel foreign detail fetches | `chatSessionDetailHelpers.ts` (`resolveSessionDetailPlaceholder`, `isForeignSessionDetailQueryKey`) |
+
+Do not suppress polling on connect *intent* alone — wait for EventSource `onopen`.
+
 ## Next (planned)
 
-- Prefer chunk wins over further pure LOC grind
-- Target `ChatCodingRoute` toward ~800–1500 LOC only when claimability requires it
+- Prefer chunk wins over further pure LOC grind on `ChatCodingRoute` (already hook/panel split)
+- Continue ConversationView pure extracts only when claimability requires it (draft mappers stay out)
+- Target `ChatCodingRoute` toward ~800–1500 LOC only when a concrete claim needs it
 
 ## Hand-test substitutes
 

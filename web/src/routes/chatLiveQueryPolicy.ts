@@ -13,7 +13,11 @@ export type ChatLiveQueryPolicyInput = {
   standardGroupRoomActive: boolean;
   sessionStreamAvailable: boolean;
   sessionStreamShouldConnect: boolean;
+  /** True only after EventSource onopen for the active direct session. */
+  sessionStreamConnected: boolean;
   groupStreamShouldConnect: boolean;
+  /** True only after EventSource onopen for the active group room. */
+  groupStreamConnected: boolean;
   activeSessionId: string;
   activeRootSessionId: string;
 };
@@ -29,15 +33,21 @@ export type ChatLiveQueryPolicy = {
   sharedRefetchIntervalInBackground: boolean;
 };
 
+/**
+ * Stream owns live queries only when we intend to connect AND the socket is open.
+ * Intent-only ownership left a gap when EventSource failed silently and polling stayed off.
+ */
 export function resolveChatLiveQueryPolicy(input: ChatLiveQueryPolicyInput): ChatLiveQueryPolicy {
   const directSessionStreamOwnsLiveQueries = Boolean(
     input.sessionStreamAvailable
     && input.sessionStreamShouldConnect
+    && input.sessionStreamConnected
     && input.directSessionPanelActive,
   );
   const groupStreamOwnsLiveQueries = Boolean(
     input.sessionStreamAvailable
     && input.groupStreamShouldConnect
+    && input.groupStreamConnected
     && input.standardGroupRoomActive,
   );
   const directBackgroundMs =

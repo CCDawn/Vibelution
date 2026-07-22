@@ -17,8 +17,12 @@ import researchWorkflowResourcesSource from "./teams/useResearchWorkflowResource
 /** Route shell + claimable pure modules extracted from TeamsRoute. */
 import experimentLoopModelSource from "./teams/experimentLoopModel.ts?raw";
 import aiSearchPresentationSource from "./teams/aiSearchPresentation.ts?raw";
+import workflowPresentationSource from "./teams/workflowPresentation.ts?raw";
+import researchStageRolesSource from "./teams/researchStageRoles.ts?raw";
+import teamWorkflowQueryKeysSource from "./teams/teamWorkflowQueryKeys.ts?raw";
+import researchStageAgentPresentationSource from "./teams/researchStageAgentPresentation.ts?raw";
 
-const routeAndPureSource = `${routeSource}\n${canvasGeometrySource}\n${researchWorkspaceModelSource}\n${teamKindModelSource}\n${presentationModelSource}\n${experimentLoopModelSource}\n${aiSearchPresentationSource}`;
+const routeAndPureSource = `${routeSource}\n${canvasGeometrySource}\n${researchWorkspaceModelSource}\n${teamKindModelSource}\n${presentationModelSource}\n${experimentLoopModelSource}\n${aiSearchPresentationSource}\n${workflowPresentationSource}\n${researchStageRolesSource}\n${teamWorkflowQueryKeysSource}\n${researchStageAgentPresentationSource}`;
 import teamMemoryIndexPanelSource from "./TeamMemoryIndexPanel.tsx?raw";
 import teamMemoryIndexPanelStyles from "./TeamMemoryIndexPanel.styles";
 import teamExperimentMethodPanelSource from "./TeamExperimentMethodPanel.tsx?raw";
@@ -373,9 +377,9 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("Agent Center");
     expect(routeSource).toContain("teamCanvasNodeAgentSourceRoute");
     expect(routeSource).toContain("writableTeamCanvas(nextCanvas)");
-    expect(routeSource).toContain("delete writableNode.agentSourceRef");
-    expect(routeSource).toContain("delete writableNode.agentProjectionEdit");
-    expect(routeSource).toContain("delete writableNode.agentProjectionCanWrite");
+    expect(researchStageAgentPresentationSource).toContain("delete writableNode.agentSourceRef");
+    expect(researchStageAgentPresentationSource).toContain("delete writableNode.agentProjectionEdit");
+    expect(researchStageAgentPresentationSource).toContain("delete writableNode.agentProjectionCanWrite");
     expect(routeSource).toContain("TEAM_ORGANIZATION_CANVAS_KIND");
     expect(canvasDataSource).toContain("team_organization_canvas");
     expect(routeSource).not.toContain("/api/research/flow-canvas");
@@ -669,14 +673,14 @@ describe("TeamsRoute layout contract", () => {
     expect(researchWorkspaceModelSource).toContain('view: "knowledge_collection"');
     expect(researchWorkspaceModelSource).toContain('view: "experiment"');
     expect(researchWorkspaceModelSource).toContain('view: "iteration"');
-    expect(routeSource).toContain('key: "experiment_planner"');
-    expect(routeSource).toContain('challenge_cup_experiment_planner');
-    expect(routeSource).toContain('key: "experiment_ledger"');
-    expect(routeSource).toContain('challenge_cup_experiment_ledger');
-    expect(routeSource).toContain('key: "iteration_planner"');
-    expect(routeSource).toContain('challenge_cup_iteration_planner');
-    expect(routeSource).toContain('key: "iteration_versioning"');
-    expect(routeSource).toContain('challenge_cup_versioning');
+    expect(researchStageRolesSource).toContain('key: "experiment_planner"');
+    expect(researchStageRolesSource).toContain('challenge_cup_experiment_planner');
+    expect(researchStageRolesSource).toContain('key: "experiment_ledger"');
+    expect(researchStageRolesSource).toContain('challenge_cup_experiment_ledger');
+    expect(researchStageRolesSource).toContain('key: "iteration_planner"');
+    expect(researchStageRolesSource).toContain('challenge_cup_iteration_planner');
+    expect(researchStageRolesSource).toContain('key: "iteration_versioning"');
+    expect(researchStageRolesSource).toContain('challenge_cup_versioning');
     expect(routeSource).not.toContain('key: "paper_note_extraction"');
     expect(routeSource).not.toContain('key: "neuro_mechanism"');
     expect(routeSource).not.toContain('key: "mechanism_mapping"');
@@ -927,8 +931,8 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("researchStageAgentDirectChatRoute");
     expect(routeSource).toContain("sourceCollectionStageReturnRoute");
     expect(routeSource).toContain("sourceCollectionStageChatReturnLabel");
-    expect(routeSource).toContain("params.set(\"returnTo\", normalizedReturnTo)");
-    expect(routeSource).toContain("params.set(\"returnLabel\", normalizedReturnLabel)");
+    expect(researchStageAgentPresentationSource).toContain("params.set(\"returnTo\", normalizedReturnTo)");
+    expect(researchStageAgentPresentationSource).toContain("params.set(\"returnLabel\", normalizedReturnLabel)");
     expect(routeSource).toContain("openSourceCollectionStageAgentChat");
     expect(routeSource).toContain('type SourceCollectionStageAgentChatStatus = "ready" | "loading" | "error" | "repair"');
     expect(routeSource).toContain("sourceCollectionStageAgentChatState(stageId");
@@ -1115,8 +1119,8 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("当前过滤条件下没有入库关系节点");
     expect(routeSource).toContain("当前过滤条件下没有入库资料");
     expect(routeSource).toContain("sourceCollectionCandidateQualityState(candidate).approved");
-    expect(routeSource).toContain("source_needs_quality_revision: \"需补资料\"");
-    expect(routeSource).toContain("source_screened: \"已审查\"");
+    expect(workflowPresentationSource).toContain("source_needs_quality_revision: \"需补资料\"");
+    expect(workflowPresentationSource).toContain("source_screened: \"已审查\"");
     expect(teamSourceCollectionCandidatePanelSource).toContain("sourceCollectionCandidateListShell");
     expect(teamSourceCollectionCandidatePanelSource).toContain("loading && !hasCandidates");
     expect(teamSourceCollectionCandidatePanelSource).toContain("sourceCollectionCandidateSkeletonRow");
@@ -1244,9 +1248,12 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("showNodeBindingPanel");
     expect(routeSource).toContain("showWorkflowPanel");
     expect(routeSource).toContain("showResearchSourceCollection");
-    expect(routeSource).toContain('const teamDetailLoadMode = sourceCollectionStandalone ? "light" : "full"');
+    expect(routeSource).toContain("resolveTeamDetailLoadMode");
+    expect(routeSource).toContain("resolveTeamCanvasQueryEnabled");
+    expect(routeSource).toContain("resolveSourceCollectionRunsQueryEnabled");
     expect(routeSource).toContain("queryKeys.team(effectiveTeamId, teamDetailLoadMode)");
     expect(routeSource).toContain("detail=${teamDetailLoadMode}");
+    expect(routeSource).toContain("enabled: teamCanvasQueryEnabled");
     expect(routeSource).toContain("sourceCollectionAgentIdsFromTeam(selectedTeam, canvas)");
     expect(routeSource).toContain("sourceCollectionOwnerAgentIdFromTeam(selectedTeam, canvas)");
     expect(routeSource).toContain("researchSourceCollectionRoute");
@@ -1436,7 +1443,7 @@ describe("TeamsRoute layout contract", () => {
     expect(presentationModelSource).toContain('source_ingestor: "资料入库 Agent"');
     expect(routeSource).toContain('return "relations";');
     expect(routeAndPureSource).toContain("SOURCE_COLLECTION_TEAM_AGENT_ROLES");
-    expect(routeSource).toContain('key: "source_relation_mapper"');
+    expect(researchStageRolesSource).toContain('key: "source_relation_mapper"');
     expect(routeSource).toContain("const sourceCollectionRelationMapperAgentId");
     expect(routeSource).toContain("createdByAgent: sourceCollectionRelationMapperAgentId");
     expect(routeSource).not.toContain("createdByAgent: sourceCollectionQualityAgentId");
