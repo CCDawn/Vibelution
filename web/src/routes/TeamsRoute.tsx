@@ -1206,10 +1206,8 @@ export function TeamsRoute({
     queryFn: ({ signal }) => fetchJson<Team>(`/api/teams/${encodeURIComponent(effectiveTeamId)}?detail=${teamDetailLoadMode}`, { signal }),
     enabled: Boolean(effectiveTeamId),
     staleTime: 10_000,
-    placeholderData:
-      selectedTeamReference && selectedTeamReference.teamId === effectiveTeamId
-        ? selectedTeamReference
-        : undefined,
+    placeholderData: () =>
+      (selectedTeamReference && selectedTeamReference.teamId === effectiveTeamId ? selectedTeamReference : undefined),
   });
   const selectedTeam = teamDetailQuery.data ?? selectedTeamReference ?? null;
   const selectedTeamDetailLoading = Boolean(

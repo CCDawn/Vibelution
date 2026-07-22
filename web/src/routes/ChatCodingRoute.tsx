@@ -882,13 +882,14 @@ export function ChatCodingRoute() {
     queryFn: ({ signal }) => fetchSessionDetailWindow(activeSessionId, { signal }),
     structuralSharing: (previous, next) =>
       mergeSessionDetailMessageWindow(previous as SessionDetail | undefined, next as SessionDetail),
-    placeholderData: resolveSessionDetailPlaceholder({
-      activeSessionId,
-      cachedDetail: queryClient.getQueryData<SessionDetail>(queryKeys.session(activeSessionId ?? "none")),
-      summary: activeSessionId
-        ? sessionsQuery.data?.find((session) => session.id === activeSessionId)
-        : undefined,
-    }),
+    placeholderData: () =>
+      resolveSessionDetailPlaceholder({
+        activeSessionId,
+        cachedDetail: queryClient.getQueryData<SessionDetail>(queryKeys.session(activeSessionId ?? "none")),
+        summary: activeSessionId
+          ? sessionsQuery.data?.find((session) => session.id === activeSessionId)
+          : undefined,
+      }),
     refetchInterval: startupDetailSettledSessionId === activeSessionId
       ? chatLiveQueryPolicy.sessionDetailRefetchInterval
       : false,
