@@ -32,7 +32,21 @@ tests/
 | `test_memory*.py` / `test_*knowledge*.py` / `test_rag_*.py` | Memory、Knowledge、RAG、ACL 与检索 | memory |
 | `test_team_*.py` / `test_*workflow*.py` | Teams、Team workflow、source extraction、paper note | teams |
 | `test_config_*.py` / `test_model_*.py` | 配置、模型发现、provider 能力与兼容性 | config |
+| `test_service_pack_path_literals.py` | service pack 路径字面量回归（防 extract 吃掉 `.jsonl`/`.json`） | structure |
 | 其它 `test_*.py` | 按被测模块命名，优先靠 `tests/test_matrix.yaml` 和文件名定位 | module-specific |
+
+`test_team_workflow_orchestration_service.py` 仍是聚合入口（selectors/文档可继续指向它）。用例实现在 `tests/_support/team_workflow/`：
+
+| 模块 | 域 |
+|------|-----|
+| `cases_structure.py` | 结构 / re-export / 角色注册 |
+| `cases_source_collection.py` | source collection / stage |
+| `cases_experiment.py` | experiment / smoke / full-run |
+| `cases_research_knowledge.py` | research graph / candidates / steward |
+| `cases_remainder.py` | 其余 |
+| `helpers.py` | 共享 fakes |
+
+单域快速跑：`py -3 -m pytest tests/_support/team_workflow/cases_source_collection.py -q`
 
 ---
 

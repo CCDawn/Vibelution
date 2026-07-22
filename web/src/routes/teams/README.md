@@ -16,6 +16,8 @@ Agent-oriented map for Teams workbench development. Prefer editing a **module** 
 | Stage projection / phase-close readiness | `source-collection/stageProjection.ts` | Graph SVG |
 | Experiment + Research Loop types / query keys / status labels | `experimentLoopModel.ts` | mutations, UI panels |
 | AI Search presentation labels / run summary copy | `aiSearchPresentation.ts` | mutations, UI panels |
+| Workflow status labels / linked-room refetch | `workflowPresentation.ts` | mutations, UI panels |
+| Research stage agent role tables | `researchStageRoles.ts` | mutations, UI panels |
 | Research workflow resource queries/keys | `useResearchWorkflowResources.ts` | Canvas drag |
 | Research memory evidence UI | `ResearchMemoryEvidencePanel.tsx` | Teams shell mutations |
 | Source-collection panel shell alias | `TeamsSourceCollectionPanel.tsx` | full route wiring |
@@ -43,14 +45,14 @@ Agent-oriented map for Teams workbench development. Prefer editing a **module** 
 
 ## Pure extract progress
 
-- **Done:** workspace navigation, team kind guards, canvas geometry, source-collection presentation, experiment/loop types+labels, AI-search presentation (with unit tests).
-- **Still in `TeamsRoute.tsx`:** remaining workflow status labels, stage agent role tables, mutation wiring, JSX.
+- **Done:** workspace navigation, team kind guards, canvas geometry, source-collection presentation, experiment/loop types+labels, AI-search presentation, workflow presentation labels, research stage agent role tables (with layout raw-source checks).
+- **Still in `TeamsRoute.tsx`:** mutation wiring, JSX shell, style-bound tone helpers, large panel orchestration.
 
 ## Next (planned)
 
-1. Optional: remaining workflow status labels, stage agent role tables.
-2. Prefer claimability wins over pure LOC grind; extract mutations only when hooks can own EventSource-free boundaries.
-3. Optional: split `teamSecondaryPanels` into source-collection vs workflow-status packs if the secondary pack exceeds route budget.
+1. Prefer claimability wins over pure LOC grind; extract mutations only when hooks can own EventSource-free boundaries.
+2. Optional: split `teamSecondaryPanels` into source-collection vs workflow-status packs if the secondary pack exceeds route budget.
+3. Optional: style-bound tone helpers (`workflowQualityTone`) once styles map ownership is clear.
 
 ## Rules
 
