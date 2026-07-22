@@ -8,6 +8,10 @@ import pytest
 
 from config import settings as config_settings
 from config.model_config_migration import preview_v1_to_v2
+from config.operator_bootstrap import (
+    is_thin_local_only_starter,
+    render_default_operator_config_text,
+)
 from config.paths import CONFIG_STARTER_TEXT, EXAMPLE_CONFIG_STARTER_TEXT
 from config.public_config import (
     add_llm_model,
@@ -27,37 +31,6 @@ SCHEMA_V2_LEGACY_WRITE_MESSAGE = (
     "schema v2 model writes must use provider-scoped configuration; "
     "use migration preview for schema v1 configuration"
 )
-EXPECTED_STARTER_TEXT = """# Vibelution operator config
-[llm]
-schema_version = 2
-
-[llm.providers.local_openai]
-label = "Local OpenAI-compatible service"
-service_class = "local_runtime"
-vendor = "custom"
-driver = "openai"
-base_url = "http://127.0.0.1:8000/v1"
-auth_kind = "none"
-credential_ref = "none"
-requires_credential = false
-
-[llm.providers.local_openai.protocols]
-default = "chat_completions"
-allowed = ["chat_completions"]
-
-[llm.providers.local_openai.discovery]
-mode = "auto"
-adapter = "openai_compatible"
-cache_ttl_seconds = 300
-
-[llm.providers.local_openai.models.local-model]
-upstream_id = "local-model"
-label = "Local model"
-enabled = true
-
-[llm.profiles.primary]
-model_ref = "local_openai/local-model"
-"""
 
 
 def _fixture(name: str) -> dict:
@@ -188,16 +161,29 @@ def test_schema_v2_inline_provider_materializer_is_inert() -> None:
     assert llm == before
 
 
-def test_fresh_install_starters_are_exact_schema_v2_provider_config() -> None:
-    assert CONFIG_STARTER_TEXT == EXPECTED_STARTER_TEXT
-    assert EXAMPLE_CONFIG_STARTER_TEXT == EXPECTED_STARTER_TEXT.replace(
-        "# Vibelution operator config",
-        "# Vibelution example operator config",
-        1,
-    )
-    expected = tomllib.loads(EXPECTED_STARTER_TEXT)
-    assert tomllib.loads(EXAMPLE_CONFIG_STARTER_TEXT) == expected
-    assert build_effective_config(expected).llm.schema_version == 2
+def test_fresh_install_starters_are_schema_v2_bootstrap_from_fixed_templates() -> None:
+    starter = CONFIG_STARTER_TEXT
+    example = EXAMPLE_CONFIG_STARTER_TEXT
+    expected_starter = render_default_operator_config_text(example=False)
+    expected_example = render_default_operator_config_text(example=True)
+
+    assert starter == expected_starter
+    assert example == expected_example
+    assert starter.startswith("# Vibelution operator config")
+    assert example.startswith("# Vibelution example operator config")
+
+    payload = tomllib.loads(starter)
+    assert payload["llm"]["schema_version"] == 2
+    providers = payload["llm"]["providers"]
+    assert "local_openai" in providers
+    # Vendor templates materialize as provider instances (not only local placeholder).
+    assert len(providers) >= 5
+    assert "openai_main" in providers or "relay_openai" in providers or "deepseek_main" in providers
+    for provider in providers.values():
+        assert "credential_ref" in provider
+        assert "api_key" not in provider
+    assert build_effective_config(payload).llm.schema_version == 2
+    assert not is_thin_local_only_starter(payload)
 
 
 @pytest.mark.parametrize(

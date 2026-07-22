@@ -6,7 +6,7 @@ import json
 import os
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -18,43 +18,39 @@ MODEL_CATALOG_STATE_FILENAME = "model-catalog-state.json"
 EXAMPLE_CONFIG_FILENAME = "config.example.toml"
 CONFIG_META_FILENAME = "config.meta.json"
 CONFIG_META_SCHEMA_VERSION = 3
-CONFIG_STARTER_TEXT = """# Vibelution operator config
-[llm]
-schema_version = 2
-
-[llm.providers.local_openai]
-label = "Local OpenAI-compatible service"
-service_class = "local_runtime"
-vendor = "custom"
-driver = "openai"
-base_url = "http://127.0.0.1:8000/v1"
-auth_kind = "none"
-credential_ref = "none"
-requires_credential = false
-
-[llm.providers.local_openai.protocols]
-default = "chat_completions"
-allowed = ["chat_completions"]
-
-[llm.providers.local_openai.discovery]
-mode = "auto"
-adapter = "openai_compatible"
-cache_ttl_seconds = 300
-
-[llm.providers.local_openai.models.local-model]
-upstream_id = "local-model"
-label = "Local model"
-enabled = true
-
-[llm.profiles.primary]
-model_ref = "local_openai/local-model"
-"""
-EXAMPLE_CONFIG_STARTER_TEXT = CONFIG_STARTER_TEXT.replace(
-    "# Vibelution operator config",
-    "# Vibelution example operator config",
-    1,
-)
 _CONFIGURED_DATA_HOME_CACHE: dict[str, tuple[int, int, Path | None]] = {}
+
+if TYPE_CHECKING:
+    # Runtime access stays lazy through __getattr__ to avoid the
+    # paths -> operator_bootstrap -> public_config import cycle.
+    CONFIG_STARTER_TEXT: str
+    EXAMPLE_CONFIG_STARTER_TEXT: str
+
+
+def _render_starter_text(*, example: bool = False) -> str:
+    """Materialize starter TOML from project-fixed vendor templates."""
+
+    from config.operator_bootstrap import render_default_operator_config_text
+
+    return render_default_operator_config_text(example=example)
+
+
+def _get_config_starter_text() -> str:
+    return _render_starter_text(example=False)
+
+
+def _get_example_config_starter_text() -> str:
+    return _render_starter_text(example=True)
+
+
+def __getattr__(name: str) -> Any:
+    """Expose generated starter text under the historical constant names."""
+
+    if name == "CONFIG_STARTER_TEXT":
+        return _get_config_starter_text()
+    if name == "EXAMPLE_CONFIG_STARTER_TEXT":
+        return _get_example_config_starter_text()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 def default_config_home() -> Path:
@@ -154,20 +150,36 @@ def ensure_global_config_initialized(
     target.parent.mkdir(parents=True, exist_ok=True)
     backup_dir.mkdir(parents=True, exist_ok=True)
 
+    starter_text = _get_config_starter_text()
+    example_text = _get_example_config_starter_text()
     created_config = _write_if_missing(
         target,
-        fallback_text=CONFIG_STARTER_TEXT,
+        fallback_text=starter_text,
         source_type="external_starter",
     )
+    upgraded_config = {"created": False, "sourceType": "existing", "sourcePath": str(target)}
+    if not created_config.get("created"):
+        upgraded_config = _maybe_upgrade_thin_local_starter(
+            target,
+            backup_dir=backup_dir,
+            starter_text=starter_text,
+        )
     created_example = _write_if_missing(
         example_target,
-        fallback_text=EXAMPLE_CONFIG_STARTER_TEXT,
+        fallback_text=example_text,
         source_type="external_example_starter",
     )
     meta_path = target.with_name(CONFIG_META_FILENAME)
     existing_meta = _read_existing_meta(meta_path)
     config_created_now = bool(created_config.get("created"))
+    config_upgraded_now = bool(upgraded_config.get("created"))
     example_created_now = bool(created_example.get("created"))
+    if config_created_now:
+        config_source = str(created_config.get("sourceType") or "external_starter")
+    elif config_upgraded_now:
+        config_source = str(upgraded_config.get("sourceType") or "external_starter_upgrade")
+    else:
+        config_source = str(existing_meta.get("configSource") or "existing")
     meta = {
         "schemaVersion": CONFIG_META_SCHEMA_VERSION,
         "configHome": str(target.parent),
@@ -180,11 +192,8 @@ def ensure_global_config_initialized(
         "createdAt": str(existing_meta.get("createdAt") or _now_iso()),
         "createdConfig": bool(existing_meta.get("createdConfig")) or config_created_now,
         "createdExampleConfig": bool(existing_meta.get("createdExampleConfig")) or example_created_now,
-        "configSource": (
-            str(created_config.get("sourceType") or "existing")
-            if config_created_now
-            else str(existing_meta.get("configSource") or "existing")
-        ),
+        "upgradedThinStarter": bool(existing_meta.get("upgradedThinStarter")) or config_upgraded_now,
+        "configSource": config_source,
         "exampleConfigSource": (
             str(created_example.get("sourceType") or "existing")
             if example_created_now
@@ -194,6 +203,49 @@ def ensure_global_config_initialized(
     if _should_write_meta(meta_path, existing_meta, meta):
         meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return meta
+
+
+def _maybe_upgrade_thin_local_starter(
+    target: Path,
+    *,
+    backup_dir: Path,
+    starter_text: str,
+) -> dict[str, Any]:
+    """Upgrade legacy local-only starter once; never overwrite customized configs."""
+
+    if not target.exists():
+        return {"created": False, "sourceType": "missing", "sourcePath": str(target)}
+    try:
+        import tomllib
+
+        current_text = target.read_text(encoding="utf-8")
+        current = tomllib.loads(current_text)
+    except (OSError, ValueError):
+        return {"created": False, "sourceType": "existing", "sourcePath": str(target)}
+
+    from config.operator_bootstrap import (
+        is_legacy_thin_local_only_starter_text,
+        is_thin_local_only_starter,
+    )
+
+    if not is_thin_local_only_starter(
+        current
+    ) or not is_legacy_thin_local_only_starter_text(current_text):
+        return {"created": False, "sourceType": "existing", "sourcePath": str(target)}
+
+    backup_dir.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    backup_path = backup_dir / f"operator-config-thin-starter-before-{stamp}.toml"
+    try:
+        backup_path.write_text(current_text, encoding="utf-8")
+        target.write_text(starter_text, encoding="utf-8")
+    except OSError:
+        return {"created": False, "sourceType": "existing", "sourcePath": str(target)}
+    return {
+        "created": True,
+        "sourceType": "external_starter_upgrade",
+        "sourcePath": str(backup_path),
+    }
 
 
 def _write_if_missing(
@@ -269,12 +321,14 @@ def _now_iso() -> str:
 
 __all__ = [
     "CONFIG_FILENAME",
+    "CONFIG_STARTER_TEXT",
     "DATA_HOME_ENV",
     "CONFIG_HOME_ENV",
     "CONFIG_META_FILENAME",
     "CONFIG_META_SCHEMA_VERSION",
     "CONFIG_PATH_ENV",
     "EXAMPLE_CONFIG_FILENAME",
+    "EXAMPLE_CONFIG_STARTER_TEXT",
     "MODEL_CATALOG_STATE_FILENAME",
     "PROJECT_ROOT",
     "default_config_home",
