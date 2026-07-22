@@ -24,6 +24,7 @@ and panel composition. Pure query/presentation helpers should leave the shell.
 | Task type | Prefer | Avoid |
 |-----------|--------|--------|
 | Workspace query pure math | `agentWorkspaceQuery.ts` | JSX panels |
+| Health / runtime / mode status labels | `agentStatusPresentation.ts` | mutations |
 | Agent label / avatar tone pure | `../agentDisplay.ts` | mutations |
 | Bulk archive/purge cache math | `../agentWorkspaceCache.ts` | EventSource |
 | Overview / config / activity panes | panel file | Route-only inlines |
@@ -32,13 +33,14 @@ and panel composition. Pure query/presentation helpers should leave the shell.
 ## Pure extract progress
 
 - **Done (earlier):** many `Agent*Panel` UI slices, `agentDisplay`, `agentCenterRoutes`, `agentWorkspaceCache`, create wizard pack.
-- **Done (ROI D1 start):** `agentWorkspaceQuery.ts` — `resolveAgentWorkspaceSource`, `resolveAgentWorkspaceQueryState`, `agentSummaryMetricValue`.
-- **Still in `AgentsRoute.tsx`:** large pure helper block (health/runtime labels, draft mappers, tool policy drafts) and shell JSX.
+- **Done (ROI D1 start):** `agentWorkspaceQuery.ts` — workspace query pure helpers.
+- **Done (ROI D1 cont):** `agentStatusPresentation.ts` — health/runtime/mode labels and next-step copy.
+- **Still in `AgentsRoute.tsx`:** draft mappers, tool/memory policy drafts, list/filter builders, shell JSX.
 
 ## Next (planned, by ROI)
 
-1. Extract health/runtime status presentation pure helpers (labels/tones) with unit tests.
-2. Extract draft mapper cluster (`draftFromAgent`, persona/task drafts) only when a panel owns the boundary.
+1. Extract draft mapper cluster (`draftFromAgent`, persona/task drafts) only when a panel owns the boundary.
+2. Extract list/filter pure builders (`filterAgents`, management brief) with unit tests.
 3. Do not re-inline pure helpers into the shell for convenience.
 
 ## Rules

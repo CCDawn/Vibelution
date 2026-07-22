@@ -316,6 +316,29 @@ import {
   type ResearchStageAgentRoleDefinition,
 } from "./teams/researchStageRoles";
 import {
+  sourceCollectionRunRecordsQueryKey,
+  sourceCollectionStageTaskClickKey,
+  sourceCollectionSummaryQueryKey,
+  sourceCollectionSummaryQueryPrefix,
+} from "./teams/teamWorkflowQueryKeys";
+import {
+  normalizeAgentRoleKey,
+  researchStageAgentActionableHealthIssues,
+  researchStageAgentConfigStatusLabel,
+  researchStageAgentConfigTone,
+  researchStageAgentDirectChatRoute,
+  researchStageAgentManagementRoute,
+  researchStageAgentModelLabel,
+  sourceCollectionAgentIdsFromCanvas,
+  sourceCollectionAgentIdsFromTeam,
+  sourceCollectionOwnerAgentIdFromCanvas,
+  sourceCollectionOwnerAgentIdFromTeam,
+  teamCanvasNodeAgentSourceRoute,
+  teamChatRoomRoute,
+  writableTeamCanvas,
+  writableTeamCanvasNode,
+} from "./teams/researchStageAgentPresentation";
+import {
   LINKED_ROOM_ACTIVE_REFETCH_MS,
   LINKED_ROOM_IDLE_REFETCH_MS,
   TEAM_BOOTSTRAP_ACTIVE_REFETCH_MS,
@@ -409,17 +432,6 @@ type TeamWorkflowKnowledgeIngestionPrecheckPayload = {
   status: TeamWorkflowKnowledgeIngestionStatus;
   workflow: TeamWorkflowOrchestration;
 };
-
-const sourceCollectionSummaryQueryPrefix = (id: string) =>
-  ["teams", id, "workflow-orchestration", "source-collection", "summary"] as const;
-const sourceCollectionSummaryQueryKey = (id: string, runId: string) =>
-  [...sourceCollectionSummaryQueryPrefix(id), runId || "latest"] as const;
-const sourceCollectionRunRecordsQueryKey = (id: string) => ["data-processing", "runs", id, "records"] as const;
-
-function sourceCollectionStageTaskClickKey(stageId: string) {
-  const randomPart = Math.random().toString(36).slice(2, 10) || "manual";
-  return `stage_task_click:${stageId}:${Date.now().toString(36)}:${randomPart}`;
-}
 
 type NodeDraft = {
   label: string;
@@ -800,172 +812,6 @@ function researchStageStartFeedbackText(payload: ResearchStageRoundStartPayload,
     return `已进入 ${label} 第 ${payload.stageRound.roundNumber} 轮`;
   }
   return `Entered ${label} round ${payload.stageRound.roundNumber}`;
-}
-
-function sourceCollectionAgentIdsFromCanvas(canvas: TeamOrganizationCanvas | null) {
-  const agentIds: Record<string, string> = {};
-  const roleSet = new Set(SOURCE_COLLECTION_TEAM_AGENT_ROLES);
-  for (const node of canvas?.nodes ?? []) {
-    const role = normalizeAgentRoleKey(node.role);
-    if (roleSet.has(role) && node.agentId && !agentIds[role]) {
-      agentIds[role] = node.agentId;
-    }
-  }
-  return agentIds;
-}
-
-function sourceCollectionAgentIdsFromTeam(team: Team | null | undefined, canvas: TeamOrganizationCanvas | null) {
-  const agentIds = sourceCollectionAgentIdsFromCanvas(canvas);
-  const roleSet = new Set(SOURCE_COLLECTION_TEAM_AGENT_ROLES);
-  for (const member of team?.members ?? []) {
-    const role = normalizeAgentRoleKey(member.role);
-    if (roleSet.has(role) && member.agentId && !agentIds[role]) {
-      agentIds[role] = member.agentId;
-    }
-  }
-  return agentIds;
-}
-
-function sourceCollectionOwnerAgentIdFromCanvas(canvas: TeamOrganizationCanvas | null) {
-  const preferredRoles = ["research_coordination", "data_intake_coordinator", "source_finder", "source_ingestor", "ceo", "organization_coordinator"];
-  for (const role of preferredRoles) {
-    const node = canvas?.nodes.find((item) => normalizeAgentRoleKey(item.role) === role && item.agentId);
-    if (node?.agentId) {
-      return node.agentId;
-    }
-  }
-  return "";
-}
-
-function sourceCollectionOwnerAgentIdFromTeam(team: Team | null | undefined, canvas: TeamOrganizationCanvas | null) {
-  const canvasOwnerAgentId = sourceCollectionOwnerAgentIdFromCanvas(canvas);
-  if (canvasOwnerAgentId) {
-    return canvasOwnerAgentId;
-  }
-  const preferredRoles = ["research_coordination", "data_intake_coordinator", "source_finder", "source_ingestor", "ceo", "organization_coordinator"];
-  for (const role of preferredRoles) {
-    const member = (team?.members ?? []).find((item) => normalizeAgentRoleKey(item.role) === role && item.agentId);
-    if (member?.agentId) {
-      return member.agentId;
-    }
-  }
-  return "";
-}
-
-function normalizeAgentRoleKey(value: string | undefined | null) {
-  return String(value || "").trim().toLowerCase();
-}
-
-function researchStageAgentManagementRoute(agentId: string) {
-  const params = new URLSearchParams({ pane: "config" });
-  const normalized = String(agentId || "").trim();
-  if (normalized) {
-    params.set("agent", normalized);
-  }
-  return `/agents?${params.toString()}`;
-}
-
-function teamCanvasNodeAgentSourceRoute(node: TeamCanvasNode, fallbackAgentId = "") {
-  const projectionRoute = String(node.agentProjectionEdit?.canonicalEditRoute || node.agentSourceRef?.canonicalEditRoute || "").trim();
-  if (projectionRoute) {
-    return projectionRoute;
-  }
-  return researchStageAgentManagementRoute(String(node.agentId || fallbackAgentId || "").trim());
-}
-
-function writableTeamCanvasNode(node: TeamCanvasNode): TeamCanvasNode {
-  const writableNode = { ...node };
-  delete writableNode.agentSourceRef;
-  delete writableNode.agentProjectionEdit;
-  delete writableNode.agentProjectionCanWrite;
-  return writableNode;
-}
-
-function writableTeamCanvas(canvas: TeamOrganizationCanvas): TeamOrganizationCanvas {
-  return {
-    ...canvas,
-    nodes: canvas.nodes.map(writableTeamCanvasNode),
-  };
-}
-
-function researchStageAgentDirectChatRoute(
-  agent: AgentConfigWorkspaceAgent | null | undefined,
-  returnTo?: string,
-  returnLabel?: string,
-) {
-  const sessionId = String(agent?.directSessionId || "").trim();
-  if (!sessionId) {
-    return "";
-  }
-  const params = new URLSearchParams({ session: sessionId });
-  const normalizedReturnTo = String(returnTo || "").trim();
-  const normalizedReturnLabel = String(returnLabel || "").trim();
-  if (normalizedReturnTo) {
-    params.set("returnTo", normalizedReturnTo);
-  }
-  if (normalizedReturnLabel) {
-    params.set("returnLabel", normalizedReturnLabel);
-  }
-  return `/chat?${params.toString()}`;
-}
-
-function teamChatRoomRoute(roomId: string, returnTo?: string, returnLabel?: string) {
-  const normalizedRoomId = String(roomId || "").trim();
-  if (!normalizedRoomId) {
-    return "";
-  }
-  const params = new URLSearchParams({ room: normalizedRoomId });
-  const normalizedReturnTo = String(returnTo || "").trim();
-  const normalizedReturnLabel = String(returnLabel || "").trim();
-  if (normalizedReturnTo) {
-    params.set("returnTo", normalizedReturnTo);
-  }
-  if (normalizedReturnLabel) {
-    params.set("returnLabel", normalizedReturnLabel);
-  }
-  return `/chat?${params.toString()}`;
-}
-
-function researchStageAgentModelLabel(agent: AgentConfigWorkspaceAgent | null | undefined, lang: "zh" | "en") {
-  if (!agent) {
-    return lang === "zh" ? "未绑定" : "not bound";
-  }
-  return agent.dialogueModel?.label
-    || agent.llmBindings?.dialogue?.modelId
-    || agent.llmBindings?.mentalModel?.modelId
-    || (lang === "zh" ? "未配置模型" : "model missing");
-}
-
-function researchStageAgentActionableHealthIssues(agent: AgentConfigWorkspaceAgent | null | undefined) {
-  return (agent?.health ?? []).filter((issue) => issue.severity !== "info");
-}
-
-function researchStageAgentConfigStatusLabel(agent: AgentConfigWorkspaceAgent | null | undefined, lang: "zh" | "en") {
-  if (!agent) {
-    return lang === "zh" ? "待绑定" : "missing";
-  }
-  const actionableIssues = researchStageAgentActionableHealthIssues(agent);
-  if (actionableIssues.some((issue) => issue.severity === "blocking")) {
-    return lang === "zh" ? "需修复" : "blocked";
-  }
-  if (actionableIssues.length) {
-    return lang === "zh" ? "需检查" : "needs check";
-  }
-  return lang === "zh" ? "可用" : "ready";
-}
-
-function researchStageAgentConfigTone(agent: AgentConfigWorkspaceAgent | null | undefined) {
-  if (!agent) {
-    return "missing";
-  }
-  const actionableIssues = researchStageAgentActionableHealthIssues(agent);
-  if (actionableIssues.some((issue) => issue.severity === "blocking")) {
-    return "blocked";
-  }
-  if (actionableIssues.length) {
-    return "warning";
-  }
-  return "ready";
 }
 
 function roleBadgeTone(node: TeamCanvasNode, displayTone = "") {
