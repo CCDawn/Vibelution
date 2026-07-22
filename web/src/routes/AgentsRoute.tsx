@@ -106,6 +106,11 @@ import {
   type AgentConfigWorkspaceWithTeamIndexes,
   type AgentTeamIndexGroup,
 } from "./agentWorkspaceCache";
+import {
+  agentSummaryMetricValue,
+  resolveAgentWorkspaceQueryState,
+  resolveAgentWorkspaceSource,
+} from "./agents/agentWorkspaceQuery";
 import { createChatWorkspaceCache } from "./chatWorkspaceCache";
 import {
   CONFIG_DRAFT_PRESENCE_EVENT,
@@ -235,42 +240,11 @@ type RuntimeFocusEvidenceResult = {
   reason: "run" | "source_run" | "session" | "fallback" | "missing";
 };
 
-export function resolveAgentWorkspaceSource<T>({
-  summary,
-  full,
-  fullWorkspaceNeeded,
-}: { summary: T | undefined; full: T | undefined; fullWorkspaceNeeded: boolean }): T | undefined {
-  return fullWorkspaceNeeded && full ? full : summary ?? full;
-}
-
-export function resolveAgentWorkspaceQueryState({
-  hasSummary,
-  hasFull,
-  fullWorkspaceNeeded,
-  summaryError,
-  fullError,
-}: {
-  hasSummary: boolean;
-  hasFull: boolean;
-  fullWorkspaceNeeded: boolean;
-  summaryError: boolean;
-  fullError: boolean;
-}) {
-  const hasWorkspace = hasSummary || hasFull;
-  const requiredFullError = fullWorkspaceNeeded && fullError;
-  const initialError = !hasWorkspace && summaryError && (!fullWorkspaceNeeded || fullError);
-  const backgroundError = hasWorkspace && (requiredFullError || (!fullWorkspaceNeeded && summaryError));
-  const errorOwner = requiredFullError ? "full" : summaryError ? "summary" : null;
-  return { hasWorkspace, initialError, backgroundError, errorOwner } as const;
-}
-
-export function agentSummaryMetricValue(
-  presentation: ReturnType<typeof deriveQueryPresentation>,
-  value: number | undefined,
-  unavailable: string,
-): number | string {
-  return presentation === "error-empty" ? unavailable : value ?? 0;
-}
+export {
+  agentSummaryMetricValue,
+  resolveAgentWorkspaceQueryState,
+  resolveAgentWorkspaceSource,
+} from "./agents/agentWorkspaceQuery";
 
 const AGENT_PRIMARY_MODE_OPTIONS = ["chat", "research", "supervised_evolution", "self_evolution", "general"];
 const FALLBACK_AGENT_LLM_SLOTS: AgentLlmSlotDefinition[] = [
