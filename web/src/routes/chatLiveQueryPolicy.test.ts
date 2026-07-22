@@ -16,13 +16,15 @@ const baseInput = {
   standardGroupRoomActive: false,
   sessionStreamAvailable: true,
   sessionStreamShouldConnect: true,
+  sessionStreamConnected: true,
   groupStreamShouldConnect: false,
+  groupStreamConnected: false,
   activeSessionId: "session-live",
   activeRootSessionId: "session-live",
 };
 
 describe("resolveChatLiveQueryPolicy", () => {
-  it("lets the direct session stream own live direct-session queries", () => {
+  it("lets the open direct session stream own live direct-session queries", () => {
     const policy = resolveChatLiveQueryPolicy(baseInput);
 
     expect(policy.directSessionStreamOwnsLiveQueries).toBe(true);
@@ -33,11 +35,23 @@ describe("resolveChatLiveQueryPolicy", () => {
     expect(policy.childSessionsRefetchInterval).toBe(false);
   });
 
+  it("keeps polling while stream should connect but is not open yet", () => {
+    const policy = resolveChatLiveQueryPolicy({
+      ...baseInput,
+      sessionStreamConnected: false,
+    });
+
+    expect(policy.directSessionStreamOwnsLiveQueries).toBe(false);
+    expect(policy.sessionsRefetchInterval).toBe(ACTIVE_INDEX_POLL_MS);
+    expect(policy.sessionDetailRefetchInterval).toBe(ACTIVE_SESSION_DETAIL_POLL_MS);
+  });
+
   it("falls back to foreground polling when direct stream cannot own the query", () => {
     const policy = resolveChatLiveQueryPolicy({
       ...baseInput,
       sessionStreamAvailable: false,
       sessionStreamShouldConnect: false,
+      sessionStreamConnected: false,
     });
 
     expect(policy.directSessionStreamOwnsLiveQueries).toBe(false);
@@ -53,6 +67,7 @@ describe("resolveChatLiveQueryPolicy", () => {
       chatPollingVisible: false,
       sessionStreamAvailable: false,
       sessionStreamShouldConnect: false,
+      sessionStreamConnected: false,
       directSessionBackgroundSyncActive: true,
     });
 
@@ -63,13 +78,15 @@ describe("resolveChatLiveQueryPolicy", () => {
     expect(policy.directRefetchIntervalInBackground).toBe(true);
   });
 
-  it("lets group streams suppress the shared conversation index without suppressing direct sessions", () => {
+  it("lets open group streams suppress the shared conversation index without suppressing direct sessions", () => {
     const policy = resolveChatLiveQueryPolicy({
       ...baseInput,
       directSessionPanelActive: false,
       standardGroupRoomActive: true,
       sessionStreamShouldConnect: false,
+      sessionStreamConnected: false,
       groupStreamShouldConnect: true,
+      groupStreamConnected: true,
     });
 
     expect(policy.directSessionStreamOwnsLiveQueries).toBe(false);
@@ -77,5 +94,20 @@ describe("resolveChatLiveQueryPolicy", () => {
     expect(policy.sessionsRefetchInterval).toBe(ACTIVE_INDEX_POLL_MS);
     expect(policy.conversationsRefetchInterval).toBe(false);
     expect(policy.sessionDetailRefetchInterval).toBe(ACTIVE_SESSION_DETAIL_POLL_MS);
+  });
+
+  it("does not treat a group stream intent as ownership until the socket is open", () => {
+    const policy = resolveChatLiveQueryPolicy({
+      ...baseInput,
+      directSessionPanelActive: false,
+      standardGroupRoomActive: true,
+      sessionStreamShouldConnect: false,
+      sessionStreamConnected: false,
+      groupStreamShouldConnect: true,
+      groupStreamConnected: false,
+    });
+
+    expect(policy.groupStreamOwnsLiveQueries).toBe(false);
+    expect(policy.conversationsRefetchInterval).toBe(ACTIVE_INDEX_POLL_MS);
   });
 });

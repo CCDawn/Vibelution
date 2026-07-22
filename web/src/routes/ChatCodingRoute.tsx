@@ -221,9 +221,11 @@ import {
   SESSION_DETAIL_HISTORY_PAGE_SIZE,
   fetchSessionDetailWindow,
   isSessionNotFoundError,
+  isForeignSessionDetailQueryKey,
   latestVisibleTurnErrorMessage,
   removeDeletedSessionFromConversations,
   mergeSessionDetailIntoConversations,
+  resolveSessionDetailPlaceholder,
   sessionDetailSnapshotKey,
   isStaleLedgerUpdate,
   latestMentalSnapshot,
@@ -576,7 +578,57 @@ export function ChatCodingRoute() {
     groupStreamShouldConnect,
     syncChatRoomDetail,
   });
+  const syncSessionDetail = useCallback(
+    (detail: SessionDetail) => {
+      let shouldSyncSummaries = true;
+      queryClient.setQueryData<SessionDetail>(queryKeys.session(detail.id), (previous) => {
+        if (isStaleLedgerUpdate(previous?.ledgerSeq, detail.ledgerSeq)) {
+          shouldSyncSummaries = false;
+          return previous ?? detail;
+        }
+        const nextDetail = mergeSessionDetailMessageWindow(previous, detail);
+        if (previous && sessionDetailSnapshotKey(previous) === sessionDetailSnapshotKey(nextDetail)) {
+          shouldSyncSummaries = false;
+          return previous;
+        }
+        return nextDetail;
+      });
+      if (!shouldSyncSummaries) {
+        return;
+      }
+      updateSessionSummaryCaches(queryClient, (sessions) =>
+        mergeSessionDetailIntoSummaries(sessions, detail),
+      );
+      const detailRootSessionId = rootSessionIdFor(detail);
+      if (isChildSession(detail) && detailRootSessionId) {
+        queryClient.setQueryData<SessionSummary[]>(queryKeys.sessionChildSessions(detailRootSessionId), (sessions) =>
+          mergeSessionDetailIntoSummaries(sessions, detail),
+        );
+      }
+      queryClient.setQueryData<ConversationSummary[]>(queryKeys.conversations(), (conversations) =>
+        mergeSessionDetailIntoConversations(conversations, detail),
+      );
+    },
+    [queryClient],
+  );
   const sessionStreamAvailable = typeof EventSource !== "undefined";
+  const sessionTitleForNotifications = (
+    queryClient.getQueryData<SessionDetail>(queryKeys.session(activeSessionId || "none"))?.title
+    || activeSessionId
+    || ""
+  );
+  const { sessionStreamConnected } = useSessionDetailStream({
+    activeSessionId,
+    sessionStreamShouldConnect,
+    queryClient,
+    syncSessionDetail,
+    setActiveTurnLayersBySession,
+    activeTurnLayersBySessionRef,
+    lastAssistantDeltaAppliedAtRef,
+    sessionStreamDecisionSnapshotRef,
+    desktopConversationNotifierRef,
+    sessionTitleForNotifications,
+  });
   const chatLiveQueryPolicyInput = {
     chatPollingVisible,
     chatStartupWarmupActive,
@@ -586,7 +638,9 @@ export function ChatCodingRoute() {
     standardGroupRoomActive,
     sessionStreamAvailable,
     sessionStreamShouldConnect,
+    sessionStreamConnected,
     groupStreamShouldConnect,
+    groupStreamConnected,
     activeSessionId: activeSessionId || "",
     activeRootSessionId: "",
   };
@@ -728,39 +782,6 @@ export function ChatCodingRoute() {
       refetchIntervalInBackground: chatStartupWarmupActive || groupBackgroundSyncActive,
     })),
   });
-  const syncSessionDetail = useCallback(
-    (detail: SessionDetail) => {
-      let shouldSyncSummaries = true;
-      queryClient.setQueryData<SessionDetail>(queryKeys.session(detail.id), (previous) => {
-        if (isStaleLedgerUpdate(previous?.ledgerSeq, detail.ledgerSeq)) {
-          shouldSyncSummaries = false;
-          return previous ?? detail;
-        }
-        const nextDetail = mergeSessionDetailMessageWindow(previous, detail);
-        if (previous && sessionDetailSnapshotKey(previous) === sessionDetailSnapshotKey(nextDetail)) {
-          shouldSyncSummaries = false;
-          return previous;
-        }
-        return nextDetail;
-      });
-      if (!shouldSyncSummaries) {
-        return;
-      }
-      updateSessionSummaryCaches(queryClient, (sessions) =>
-        mergeSessionDetailIntoSummaries(sessions, detail),
-      );
-      const detailRootSessionId = rootSessionIdFor(detail);
-      if (isChildSession(detail) && detailRootSessionId) {
-        queryClient.setQueryData<SessionSummary[]>(queryKeys.sessionChildSessions(detailRootSessionId), (sessions) =>
-          mergeSessionDetailIntoSummaries(sessions, detail),
-        );
-      }
-      queryClient.setQueryData<ConversationSummary[]>(queryKeys.conversations(), (conversations) =>
-        mergeSessionDetailIntoConversations(conversations, detail),
-      );
-    },
-    [queryClient],
-  );
   const clearSessionTransientUiState = useCallback(
     (sessionId: string) => {
       const normalizedSessionId = String(sessionId || "").trim();
@@ -846,12 +867,29 @@ export function ChatCodingRoute() {
     clearPendingSelfEvolutionHandoff();
   }, [activeSessionId, sessionsQuery.data, setActiveSession]);
 
+  useEffect(() => {
+    const activeId = String(activeSessionId || "").trim();
+    if (!activeId) {
+      return;
+    }
+    void queryClient.cancelQueries({
+      predicate: (query) => isForeignSessionDetailQueryKey(query.queryKey, activeId),
+    });
+  }, [activeSessionId, queryClient]);
   const sessionDetailQuery = useQuery({
     queryKey: queryKeys.session(activeSessionId ?? "none"),
     enabled: Boolean(activeSessionId),
     queryFn: ({ signal }) => fetchSessionDetailWindow(activeSessionId, { signal }),
     structuralSharing: (previous, next) =>
       mergeSessionDetailMessageWindow(previous as SessionDetail | undefined, next as SessionDetail),
+    placeholderData: () =>
+      resolveSessionDetailPlaceholder({
+        activeSessionId,
+        cachedDetail: queryClient.getQueryData<SessionDetail>(queryKeys.session(activeSessionId ?? "none")),
+        summary: activeSessionId
+          ? sessionsQuery.data?.find((session) => session.id === activeSessionId)
+          : undefined,
+      }),
     refetchInterval: startupDetailSettledSessionId === activeSessionId
       ? chatLiveQueryPolicy.sessionDetailRefetchInterval
       : false,
@@ -1236,24 +1274,6 @@ export function ChatCodingRoute() {
     setGroupManagePurposeDraft(activeGroupRoom.purpose || "discussion");
   }, [activeGroupRoom, sessionsQuery.data]);
 
-  const sessionTitleForNotifications = (
-    sessionDetailQuery.data?.title
-    || directSessionActiveSummary?.title
-    || activeSessionId
-    || ""
-  );
-  const { sessionStreamConnected } = useSessionDetailStream({
-    activeSessionId,
-    sessionStreamShouldConnect,
-    queryClient,
-    syncSessionDetail,
-    setActiveTurnLayersBySession,
-    activeTurnLayersBySessionRef,
-    lastAssistantDeltaAppliedAtRef,
-    sessionStreamDecisionSnapshotRef,
-    desktopConversationNotifierRef,
-    sessionTitleForNotifications,
-  });
 
   const workspace = activeSessionId
     ? sessionWorkspaces[activeSessionId] ?? {

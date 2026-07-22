@@ -90,6 +90,16 @@ Prefer pure modules there over growing `ConversationView.tsx`.
 | Operation groups / timeline rows | `agentMessageOperations.ts`, `agentMessageTimeline*.ts` | ChatCodingRoute |
 | Stream EventSource ownership | `useSessionDetailStream.ts` / `useGroupRoomStream.ts` | ConversationView |
 
+## Live load policy (P1/P5)
+
+| Concern | Owner |
+|---------|--------|
+| When to open session SSE | `chatSessionStreamConnect.ts` + `useSessionDetailStream.ts` |
+| Stop list/detail polling only when SSE is **open** | `chatLiveQueryPolicy.ts` (`sessionStreamConnected` / `groupStreamConnected`) |
+| Session switch shell + cancel foreign detail fetches | `chatSessionDetailHelpers.ts` (`resolveSessionDetailPlaceholder`, `isForeignSessionDetailQueryKey`) |
+
+Do not suppress polling on connect *intent* alone — wait for EventSource `onopen`.
+
 ## Next (planned)
 
 - Prefer chunk wins over further pure LOC grind on `ChatCodingRoute` (already hook/panel split)
