@@ -9,6 +9,7 @@ import {
   type AgentConfigWorkspace,
   type AgentConfigWorkspaceAgent,
   type AgentInstance,
+  type ConfigLlmTestResult,
   type ToolRegistryPayload,
 } from "../../api/types";
 import { VButton } from "../../components/vui";
@@ -17,6 +18,7 @@ import { AgentCreatePanel, type AgentCreatePanelCopy } from "../AgentCreatePanel
 import { createChatWorkspaceCache } from "../chatWorkspaceCache";
 import {
   buildAgentModelChoices,
+  credentialReadyModelIds,
   createAgentPayload,
   createAgentPresets,
   createDraftFromWorkspace,
@@ -28,10 +30,10 @@ import {
   toolBundleIdsForModeChange,
   toolBundleMeta,
   type AgentCreateDraft,
+  type AgentModelProbeResult,
   withDialogueModel,
 } from "./agentCreateContract";
 import styles from "./AgentCreateWizardDialog.styles";
-
 type AgentCreateWizardDialogProps = {
   open: boolean;
   /** The invoking control receives focus again when this modal closes. */
@@ -120,6 +122,9 @@ export function AgentCreateWizardDialog({
   const [startConversationError, setStartConversationError] = useState("");
   const [startingConversation, setStartingConversation] = useState(false);
   const [instanceKey, setInstanceKey] = useState(0);
+  const [probeResults, setProbeResults] = useState<Record<string, AgentModelProbeResult>>({});
+  const [probeBusy, setProbeBusy] = useState(false);
+  const [probeSummary, setProbeSummary] = useState("");
 
   const workspaceQuery = useQuery({
     queryKey: queryKeys.agentConfigWorkspace(),
@@ -134,7 +139,14 @@ export function AgentCreateWizardDialog({
     staleTime: 10_000,
   });
   const toolBundles = toolsQuery.data?.toolBundles ?? [];
-  const modelChoices = useMemo(() => buildAgentModelChoices(workspaceQuery.data?.agentModelChoices ?? []), [workspaceQuery.data?.agentModelChoices]);
+  const modelChoices = useMemo(
+    () => buildAgentModelChoices(workspaceQuery.data?.agentModelChoices ?? [], lang, probeResults),
+    [lang, probeResults, workspaceQuery.data?.agentModelChoices],
+  );
+  const probeUsableModelIds = useMemo(
+    () => new Set(modelChoices.filter((choice) => choice.probeUsable).map((choice) => choice.modelId)),
+    [modelChoices],
+  );
   const promptTemplateOptions = useMemo(
     () => (workspaceQuery.data?.promptTemplates ?? []).map((template) => ({
       value: template.promptTemplateId || template.templateId || "",
@@ -148,7 +160,7 @@ export function AgentCreateWizardDialog({
   const presets = useMemo(() => createAgentPresets(workspaceQuery.data, toolBundles, lang), [lang, toolBundles, workspaceQuery.data]);
   const toolBundleSummary = useMemo(() => createToolBundleSummary(draft.selectedToolBundleIds, toolBundles, lang), [draft.selectedToolBundleIds, lang, toolBundles]);
   const selectedModelId = dialogueModelId(draft.llmBindings);
-  const canCreate = createDraftReady(draft, toolBundles);
+  const canCreate = createDraftReady(draft, toolBundles, probeUsableModelIds);
   const loadingOptions = workspaceQuery.isPending || toolsQuery.isPending;
   const optionsError = workspaceQuery.isError || toolsQuery.isError
     ? (lang === "zh" ? "部分创建选项加载失败。可以重试；已填写内容会保留。" : "Some creation options failed to load. Retry is available and your draft is preserved.")
@@ -164,6 +176,9 @@ export function AgentCreateWizardDialog({
     setCreatedAgent(null);
     setStartConversationError("");
     setStartingConversation(false);
+    setProbeResults({});
+    setProbeBusy(false);
+    setProbeSummary("");
     setInstanceKey((current) => current + 1);
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
@@ -280,6 +295,80 @@ export function AgentCreateWizardDialog({
     });
     setDraftDirty(true);
   };
+
+  const markProbe = (modelId: string, status: AgentModelProbeResult["status"], message = "") => {
+    setProbeResults((current) => ({
+      ...current,
+      [modelId]: {
+        status,
+        message,
+        checkedAt: new Date().toISOString(),
+      },
+    }));
+  };
+
+  const probeModelIds = async (modelIds: string[]) => {
+    const targets = Array.from(new Set(modelIds.map((id) => String(id || "").trim()).filter(Boolean)));
+    if (!targets.length || probeBusy) return;
+    setProbeBusy(true);
+    setProbeSummary(lang === "zh" ? `正在探测 ${targets.length} 个模型…` : `Probing ${targets.length} model(s)…`);
+    for (const modelId of targets) markProbe(modelId, "probing");
+
+    let okCount = 0;
+    let failCount = 0;
+    const concurrency = 2;
+    let cursor = 0;
+
+    const worker = async () => {
+      while (cursor < targets.length) {
+        const index = cursor;
+        cursor += 1;
+        const modelId = targets[index];
+        try {
+          const result = await fetchJson<ConfigLlmTestResult>("/api/config/test-llm", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              publicConfig: {},
+              modelId,
+              capability: "text",
+            }),
+          });
+          if (result.ok) {
+            okCount += 1;
+            markProbe(modelId, "ok", String(result.message || "").trim());
+          } else {
+            failCount += 1;
+            markProbe(modelId, "fail", String(result.message || "").trim() || (lang === "zh" ? "连通失败" : "connection failed"));
+          }
+        } catch (error) {
+          failCount += 1;
+          const message = error instanceof Error ? error.message : String(error || "");
+          markProbe(modelId, "fail", message.slice(0, 240) || (lang === "zh" ? "探测请求失败" : "probe request failed"));
+        }
+      }
+    };
+
+    try {
+      await Promise.all(Array.from({ length: Math.min(concurrency, targets.length) }, () => worker()));
+      setProbeSummary(
+        lang === "zh"
+          ? `探测完成：通过 ${okCount}，失败 ${failCount}`
+          : `Probe finished: ${okCount} ok, ${failCount} failed`,
+      );
+    } finally {
+      setProbeBusy(false);
+    }
+  };
+
+  const probeSelectedModel = () => {
+    if (!selectedModelId) return;
+    void probeModelIds([selectedModelId]);
+  };
+
+  const probeAllCredentialReady = () => {
+    void probeModelIds(credentialReadyModelIds(modelChoices));
+  };
   const startConversation = async () => {
     if (!createdAgent || !onStartConversation || startingConversation) return;
     setStartingConversation(true);
@@ -365,6 +454,10 @@ export function AgentCreateWizardDialog({
               toolBundleMeta={(bundle) => toolBundleMeta(bundle, lang)}
               presets={presets}
               lang={lang}
+              probeBusy={probeBusy}
+              probeSummary={probeSummary}
+              onProbeSelected={probeSelectedModel}
+              onProbeCredentialReady={probeAllCredentialReady}
               onDraftChange={updateDraft}
               onApplyPreset={applyPreset}
               onModelChange={(modelId) => updateDraft({ llmBindings: withDialogueModel(draft.llmBindings, modelId) })}

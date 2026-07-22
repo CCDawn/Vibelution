@@ -4,11 +4,15 @@ import { useMemo, useState } from "react";
 import { type ToolBundle } from "../api/types";
 import { VButton, VContextualHint, VFieldRow, VNativeButton, VNativeInput, VNativeSelect, VNativeTextarea, VTooltip } from "../components/vui";
 import {
+  buildAgentProviderChoices,
+  firstAvailableModelId,
+  probeStatusLabel,
   type AgentCreateDraft,
   type AgentCreatePanelModelChoice,
   type AgentCreatePreset,
   type AgentCreateSelectOption,
 } from "./agent-create/agentCreateContract";
+import { CreateOptionSelect } from "./agent-create/CreateOptionSelect";
 import styles from "./AgentCreatePanel.styles";
 
 export type {
@@ -63,6 +67,10 @@ type AgentCreatePanelProps = {
   toolBundleMeta: (bundle: ToolBundle) => string;
   presets: AgentCreatePreset[];
   lang: "zh" | "en";
+  probeBusy?: boolean;
+  probeSummary?: string;
+  onProbeSelected?: () => void;
+  onProbeCredentialReady?: () => void;
   onDraftChange: (patch: Partial<AgentCreateDraft>) => void;
   onApplyPreset: (draft: AgentCreateDraft) => void;
   onModelChange: (modelId: string) => void;
@@ -90,6 +98,10 @@ export function AgentCreatePanel({
   toolBundleMeta,
   presets,
   lang,
+  probeBusy = false,
+  probeSummary = "",
+  onProbeSelected,
+  onProbeCredentialReady,
   onDraftChange,
   onApplyPreset,
   onModelChange,
@@ -99,17 +111,20 @@ export function AgentCreatePanel({
   onCreate,
 }: AgentCreatePanelProps) {
   const [activeStep, setActiveStep] = useState(0);
-  const providerChoices = useMemo(() => Array.from(new Map(modelChoices.map((model) => {
-    const providerLabel = model.providerLabel || model.providerKind || model.providerId;
-    const label = [
-      providerLabel,
-      model.providerKind && model.providerKind !== providerLabel ? model.providerKind : "",
-      model.providerId !== providerLabel ? model.providerId : "",
-    ].filter(Boolean).join(" · ");
-    return [model.providerId, { id: model.providerId, label }];
-  })).values()), [modelChoices]);
+  const providerChoices = useMemo(() => buildAgentProviderChoices(modelChoices, lang), [lang, modelChoices]);
+  const credentialReadyCount = useMemo(
+    () => modelChoices.reduce((total, model) => total + (model.available ? 1 : 0), 0),
+    [modelChoices],
+  );
+  const probeOkCount = useMemo(
+    () => modelChoices.reduce((total, model) => total + (model.probeUsable ? 1 : 0), 0),
+    [modelChoices],
+  );
   const selectedModel = modelChoices.find((model) => model.modelId === selectedModelId);
-  const selectedProviderId = selectedModel?.providerId || providerChoices[0]?.id || "";
+  const preferredProviderId = providerChoices.find((provider) => provider.available)?.id
+    || providerChoices[0]?.id
+    || "";
+  const selectedProviderId = selectedModel?.providerId || preferredProviderId;
   const providerModels = modelChoices.filter((model) => model.providerId === selectedProviderId);
   const selectedPrompt = promptTemplateOptions.find((template) => template.value === draft.promptTemplateId)?.label || draft.promptTemplateId || "-";
   const selectedProvider = selectedModel?.providerLabel || selectedModel?.providerId || "-";
@@ -119,7 +134,7 @@ export function AgentCreatePanel({
     && draft.primaryMode.trim()
     && (isWorkSession || (draft.roleKey.trim() && draft.personaSummary.trim() && draft.taskMission.trim())),
   );
-  const modelReady = Boolean(selectedProviderId && selectedModelId);
+  const modelReady = Boolean(selectedProviderId && selectedModelId && selectedModel?.probeUsable);
   const stepReady = [basicReady, modelReady, canCreate];
   const stepLabels = lang === "zh"
     ? ["基本信息", "服务商与模型", "提示词与工具"]
@@ -128,15 +143,33 @@ export function AgentCreatePanel({
   const previousLabel = lang === "zh" ? "上一步" : "Back";
   const quickFillTitle = lang === "zh" ? "快速填写" : "Quick fill";
   const quickFillHint = lang === "zh"
-    ? "配置来自当前模型库、提示词模板和工具包，可一键填写后再逐项调整。"
-    : "Defaults come from the current model library, prompt templates, and tool packages. Apply once, then fine-tune.";
+    ? "配置来自当前模型库。已配密钥的模型需要点「探测」确认真实连通后，才能进入下一步。"
+    : "Defaults come from the model library. Credential-ready models must pass a live probe before you can continue.";
   const summaryTitle = lang === "zh" ? "创建前确认" : "Review before creation";
   const summaryItems = lang === "zh"
-    ? [["名称", draft.displayName || "-"], ["服务商", selectedProvider], ["模型", selectedModel?.modelLabel || selectedModelId || "-"], ["提示词", selectedPrompt], ["工具", toolBundleSummary.label]]
-    : [["Name", draft.displayName || "-"], ["Provider", selectedProvider], ["Model", selectedModel?.modelLabel || selectedModelId || "-"], ["Prompt", selectedPrompt], ["Tools", toolBundleSummary.label]];
+    ? [["名称", draft.displayName || "-"], ["服务商", selectedProvider], ["模型", selectedModel?.modelLabel || selectedModelId || "-"], ["探测", selectedModel ? probeStatusLabel(selectedModel.probeStatus, lang) : "-"], ["提示词", selectedPrompt], ["工具", toolBundleSummary.label]]
+    : [["Name", draft.displayName || "-"], ["Provider", selectedProvider], ["Model", selectedModel?.modelLabel || selectedModelId || "-"], ["Probe", selectedModel ? probeStatusLabel(selectedModel.probeStatus, lang) : "-"], ["Prompt", selectedPrompt], ["Tools", toolBundleSummary.label]];
   const toolBundlesLabel = lang === "zh"
     ? `${copy.createAgentToolBundles} · 已选 ${selectedToolBundleCount}`
     : `${copy.createAgentToolBundles} · ${selectedToolBundleCount} selected`;
+  const availabilitySummary = lang === "zh"
+    ? `已配密钥 ${credentialReadyCount}/${modelChoices.length} · 探测通过 ${probeOkCount}`
+    : `Keyed ${credentialReadyCount}/${modelChoices.length} · probe ok ${probeOkCount}`;
+  const providerSelectOptions = providerChoices.map((provider) => ({
+    value: provider.id,
+    label: provider.label,
+    disabled: !provider.available,
+    description: provider.available
+      ? (lang === "zh" ? `${provider.availableCount} 个可尝试` : `${provider.availableCount} candidate(s)`)
+      : (lang === "zh" ? "无密钥，不可探测" : "No credential"),
+  }));
+  const modelSelectOptions = providerModels.map((model) => ({
+    value: model.modelId,
+    // Keep credential-ready options selectable so they can be probed even before pass.
+    disabled: !model.available || model.probeStatus === "probing",
+    label: model.label,
+    description: model.probeMessage || model.unavailableReason || probeStatusLabel(model.probeStatus, lang),
+  }));
 
   const applyPreset = (preset: AgentCreatePreset) => {
     onApplyPreset(preset.draft);
@@ -223,28 +256,93 @@ export function AgentCreatePanel({
         {activeStep === 1 ? (
           <div className={styles.createAgentGrid}>
             {loadingOptions ? <div className={styles.loadingRows} aria-label={lang === "zh" ? "正在加载模型选项" : "Loading model options"} /> : null}
+            {!loadingOptions && modelChoices.length ? (
+              <p className={styles.availabilitySummary} aria-live="polite">{availabilitySummary}</p>
+            ) : null}
             <VFieldRow label={lang === "zh" ? "服务商" : "Provider"} className="col-span-full">
-              <VNativeSelect
+              <CreateOptionSelect
+                label={lang === "zh" ? "服务商" : "Provider"}
                 value={selectedProviderId}
-                disabled={!providerChoices.length}
-                onChange={(event) => {
-                  const nextModel = modelChoices.find((model) => model.providerId === event.target.value);
-                  onModelChange(nextModel?.modelId || "");
+                disabled={!providerChoices.length || probeBusy}
+                placeholder={lang === "zh" ? "选择服务商" : "Choose provider"}
+                options={providerSelectOptions}
+                onChange={(providerId) => {
+                  const nextModelId = firstAvailableModelId(modelChoices, providerId)
+                    || modelChoices.find((model) => model.providerId === providerId)?.modelId
+                    || "";
+                  onModelChange(nextModelId);
                 }}
-              >
-                {!providerChoices.length ? <option value="">{lang === "zh" ? "没有可用服务商" : "No available provider"}</option> : null}
-                {providerChoices.map((provider) => <option key={provider.id} value={provider.id}>{provider.label}</option>)}
-              </VNativeSelect>
+              />
             </VFieldRow>
             <VFieldRow label={copy.model} className="col-span-full">
-              <VNativeSelect value={selectedModelId} disabled={!providerModels.length} onChange={(event) => onModelChange(event.target.value)}>
-                {!providerModels.length ? <option value="">{lang === "zh" ? "该服务商没有可用模型" : "No model available for this provider"}</option> : null}
-                {providerModels.map((model) => (
-                  <option key={model.key} value={model.modelId} aria-label={model.modelLabel || model.modelId}>{model.label}</option>
-                ))}
-              </VNativeSelect>
+              <CreateOptionSelect
+                label={copy.model}
+                value={selectedModelId}
+                disabled={!providerModels.length || probeBusy}
+                placeholder={lang === "zh" ? "选择模型" : "Choose model"}
+                options={modelSelectOptions}
+                onChange={onModelChange}
+              />
             </VFieldRow>
-            {!loadingOptions && !modelChoices.length ? <p className={styles.errorText}>{lang === "zh" ? "请先在模型库中配置至少一个可运行模型。" : "Configure at least one runtime model in the model library first."}</p> : null}
+            <div className={styles.probeActions}>
+              <VButton
+                type="button"
+                variant="secondary"
+                isDisabled={pending || probeBusy || !selectedModel?.available}
+                onPress={() => onProbeSelected?.()}
+              >
+                {probeBusy && selectedModel?.probeStatus === "probing"
+                  ? (lang === "zh" ? "正在探测…" : "Probing…")
+                  : (lang === "zh" ? "探测当前模型" : "Probe selected")}
+              </VButton>
+              <VButton
+                type="button"
+                variant="secondary"
+                isDisabled={pending || probeBusy || credentialReadyCount === 0}
+                onPress={() => onProbeCredentialReady?.()}
+              >
+                {lang === "zh" ? `探测全部已配密钥（${credentialReadyCount}）` : `Probe all keyed (${credentialReadyCount})`}
+              </VButton>
+            </div>
+            {probeSummary ? <p className={styles.availabilitySummary} aria-live="polite">{probeSummary}</p> : null}
+            {selectedModel && !selectedModel.available ? (
+              <p className={styles.errorText}>
+                {lang === "zh"
+                  ? `当前模型不可用${selectedModel.unavailableReason ? `：${selectedModel.unavailableReason}` : "。"}请选择已配密钥的模型，或先到配置页补齐 API Key。`
+                  : `Selected model is unavailable${selectedModel.unavailableReason ? `: ${selectedModel.unavailableReason}` : "."} Choose a keyed model or configure the API key first.`}
+              </p>
+            ) : null}
+            {selectedModel?.available && selectedModel.probeStatus === "idle" ? (
+              <p className={styles.availabilitySummary}>
+                {lang === "zh"
+                  ? "已配密钥，但尚未探测连通性。请点击「探测当前模型」后再进入下一步。"
+                  : "Credentials look ready, but connectivity is unprobed. Run a probe before continuing."}
+              </p>
+            ) : null}
+            {selectedModel?.probeStatus === "fail" ? (
+              <p className={styles.errorText}>
+                {lang === "zh"
+                  ? `探测失败${selectedModel.probeMessage ? `：${selectedModel.probeMessage}` : "。"}请换模型或检查密钥/网络。`
+                  : `Probe failed${selectedModel.probeMessage ? `: ${selectedModel.probeMessage}` : "."} Switch model or check credentials/network.`}
+              </p>
+            ) : null}
+            {selectedModel?.probeUsable ? (
+              <p className={styles.successText}>
+                {lang === "zh" ? "探测通过，可以使用该模型创建会话。" : "Probe passed. This model can be used to create the session."}
+              </p>
+            ) : null}
+            {!loadingOptions && !modelChoices.length ? (
+              <p className={styles.errorText}>
+                {lang === "zh" ? "请先在模型库中配置至少一个可运行模型。" : "Configure at least one runtime model in the model library first."}
+              </p>
+            ) : null}
+            {!loadingOptions && modelChoices.length > 0 && credentialReadyCount === 0 ? (
+              <p className={styles.errorText}>
+                {lang === "zh"
+                  ? "已列出服务商，但当前没有已配密钥的模型。请先到配置页完成密钥。"
+                  : "Providers are listed, but no credential-ready models exist. Configure API keys first."}
+              </p>
+            ) : null}
           </div>
         ) : null}
 

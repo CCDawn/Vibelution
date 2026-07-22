@@ -17,6 +17,14 @@ export type AgentCreateDraft = {
   allowedTools: string;
 };
 
+export type AgentModelProbeStatus = "idle" | "probing" | "ok" | "fail";
+
+export type AgentModelProbeResult = {
+  status: AgentModelProbeStatus;
+  message: string;
+  checkedAt: string;
+};
+
 export type AgentCreatePanelModelChoice = {
   key: string;
   modelId: string;
@@ -25,6 +33,26 @@ export type AgentCreatePanelModelChoice = {
   providerId: string;
   providerLabel: string;
   providerKind: string;
+  /**
+   * Credential-level readiness from config projection (API key present when required).
+   * Real connectivity is tracked separately via probeStatus.
+   */
+  available: boolean;
+  unavailableReason: string;
+  /** True only when credentials look ready and a live probe succeeded. */
+  probeUsable: boolean;
+  probeStatus: AgentModelProbeStatus;
+  probeMessage: string;
+};
+
+export type AgentCreatePanelProviderChoice = {
+  id: string;
+  label: string;
+  providerLabel: string;
+  providerKind: string;
+  availableCount: number;
+  totalCount: number;
+  available: boolean;
 };
 
 export type AgentCreateSelectOption = {
@@ -90,34 +118,223 @@ function agentModelLabel(model: AgentModelChoice | null | undefined) {
   return String(model?.label || model?.model || model?.modelId || "").trim() || "-";
 }
 
-function selectableAgentModel(model: AgentModelChoice) {
+/** Dialogue-eligible for the create wizard list (includes missing-key skeletons). */
+export function isDialogueEligibleAgentModel(model: AgentModelChoice) {
   const text = [agentModelLabel(model), model.model, model.modelId, model.providerKind]
     .join(" ")
     .trim()
     .toLowerCase();
-  return Boolean(model.runtimeSelectable) && !/\bimage\d*\b/.test(text) && !text.includes("image2");
+  if (!model.runtimeSelectable) return false;
+  if (/\bimage\d*\b/.test(text) || text.includes("image2") || text.includes("gpt-image")) {
+    return false;
+  }
+  const slot = model.slotCompatibility?.dialogue;
+  if (slot && slot.allowed === false) return false;
+  return true;
 }
 
-export function buildAgentModelChoices(models: AgentModelChoice[]): AgentCreatePanelModelChoice[] {
-  return models
-    .filter(selectableAgentModel)
+export function agentModelUnavailableReason(model: AgentModelChoice, lang: "zh" | "en" = "zh"): string {
+  if (model.missingApiKey || (model.requiresApiKey && !model.apiKeyConfigured)) {
+    return lang === "zh" ? "未配置 API Key" : "API key missing";
+  }
+  if (!model.apiKeyConfigured && model.requiresApiKey !== false) {
+    // Defensive: older payloads may omit missingApiKey.
+    if (model.apiKeyState === "missing" || model.apiKeyState === "unconfigured") {
+      return lang === "zh" ? "未配置 API Key" : "API key missing";
+    }
+  }
+  const availability = String(model.availability || "").toLowerCase();
+  if (["missing", "missing_remote", "stale", "unavailable", "unknown"].includes(availability)) {
+    return lang === "zh" ? "上游当前不可用" : "Upstream unavailable";
+  }
+  if (model.catalogStale || model.verificationStatus === "stale") {
+    return lang === "zh" ? "模型发现已过期" : "Catalog stale";
+  }
+  return "";
+}
+
+export function isAgentModelAvailable(model: AgentModelChoice): boolean {
+  if (!isDialogueEligibleAgentModel(model)) return false;
+  if (model.missingApiKey) return false;
+  if (model.requiresApiKey && !model.apiKeyConfigured) return false;
+  // Local / no-credential providers report apiKeyConfigured true with requiresApiKey false.
+  if (!model.apiKeyConfigured && model.requiresApiKey !== false && model.apiKeyState === "missing") {
+    return false;
+  }
+  return true;
+}
+
+export function probeStatusLabel(status: AgentModelProbeStatus, lang: "zh" | "en" = "zh"): string {
+  if (status === "probing") return lang === "zh" ? "探测中" : "probing";
+  if (status === "ok") return lang === "zh" ? "探测通过" : "probe ok";
+  if (status === "fail") return lang === "zh" ? "探测失败" : "probe failed";
+  return lang === "zh" ? "未探测" : "not probed";
+}
+
+export function applyProbeResultsToModelChoices(
+  choices: AgentCreatePanelModelChoice[],
+  probes: Record<string, AgentModelProbeResult>,
+  lang: "zh" | "en" = "zh",
+): AgentCreatePanelModelChoice[] {
+  return choices
+    .map((choice) => {
+      const probe = probes[choice.modelId];
+      const probeStatus = probe?.status || "idle";
+      const probeMessage = String(probe?.message || "").trim();
+      const probeUsable = Boolean(choice.available && probeStatus === "ok");
+      const baseCore = choice.modelLabel;
+      const provider = String(choice.providerKind || "").trim();
+      // Rebuild display label from stable fields.
+      const baseLabel = [
+        baseCore,
+        provider && provider !== baseCore ? provider : "",
+        choice.modelId.includes("/") ? choice.modelId.split("/")[1] : "",
+      ].filter(Boolean).join(" · ") || choice.modelId;
+
+      let suffix = "";
+      if (!choice.available) {
+        suffix = ` · ${lang === "zh" ? "不可用" : "unavailable"}${choice.unavailableReason ? `（${choice.unavailableReason}）` : ""}`;
+      } else if (probeStatus === "ok") {
+        suffix = ` · ${probeStatusLabel("ok", lang)}`;
+      } else if (probeStatus === "fail") {
+        suffix = ` · ${probeStatusLabel("fail", lang)}`;
+      } else if (probeStatus === "probing") {
+        suffix = ` · ${probeStatusLabel("probing", lang)}`;
+      } else {
+        suffix = ` · ${probeStatusLabel("idle", lang)}`;
+      }
+
+      return {
+        ...choice,
+        label: `${baseLabel}${suffix}`,
+        probeStatus,
+        probeMessage,
+        probeUsable,
+        // Keep option selectable when credential-ready so user can probe it;
+        // create/next gates use probeUsable separately.
+        available: choice.available,
+      };
+    })
+    .sort((left, right) => {
+      if (left.probeUsable !== right.probeUsable) return left.probeUsable ? -1 : 1;
+      if (left.available !== right.available) return left.available ? -1 : 1;
+      return left.label.localeCompare(right.label) || left.modelId.localeCompare(right.modelId);
+    });
+}
+
+export function buildAgentModelChoices(
+  models: AgentModelChoice[],
+  lang: "zh" | "en" = "zh",
+  probes: Record<string, AgentModelProbeResult> = {},
+): AgentCreatePanelModelChoice[] {
+  const base = models
+    .filter(isDialogueEligibleAgentModel)
     .map((model) => {
       const label = agentModelLabel(model);
       const provider = String(model.providerKind || "").trim();
       const modelName = String(model.model || "").trim();
+      const available = isAgentModelAvailable(model);
+      const unavailableReason = available ? "" : agentModelUnavailableReason(model, lang);
+      const baseLabel = [label, provider && provider !== label ? provider : "", modelName && modelName !== label ? modelName : ""]
+        .filter(Boolean)
+        .join(" · ") || "-";
       return {
         key: model.modelId,
         modelId: model.modelId,
-        label: [label, provider && provider !== label ? provider : "", modelName && modelName !== label ? modelName : ""]
-          .filter(Boolean)
-          .join(" · ") || "-",
+        label: baseLabel,
         modelLabel: label,
         providerId: model.providerId,
         providerLabel: model.providerLabel,
         providerKind: model.providerKind,
+        available,
+        unavailableReason,
+        probeUsable: false,
+        probeStatus: "idle" as AgentModelProbeStatus,
+        probeMessage: "",
+      };
+    });
+  return applyProbeResultsToModelChoices(base, probes, lang);
+}
+
+export function buildAgentProviderChoices(
+  models: AgentCreatePanelModelChoice[],
+  lang: "zh" | "en" = "zh",
+): AgentCreatePanelProviderChoice[] {
+  const groups = new Map<string, {
+    id: string;
+    providerLabel: string;
+    providerKind: string;
+    sortLabel: string;
+    availableCount: number;
+    probeUsableCount: number;
+    totalCount: number;
+  }>();
+  for (const model of models) {
+    const existing = groups.get(model.providerId);
+    if (existing) {
+      existing.totalCount += 1;
+      if (model.available) existing.availableCount += 1;
+      if (model.probeUsable) existing.probeUsableCount += 1;
+      continue;
+    }
+    const providerLabel = model.providerLabel || model.providerKind || model.providerId;
+    const sortLabel = [
+      providerLabel,
+      model.providerKind && model.providerKind !== providerLabel ? model.providerKind : "",
+      model.providerId !== providerLabel ? model.providerId : "",
+    ].filter(Boolean).join(" · ");
+    groups.set(model.providerId, {
+      id: model.providerId,
+      providerLabel,
+      providerKind: model.providerKind,
+      sortLabel,
+      availableCount: model.available ? 1 : 0,
+      probeUsableCount: model.probeUsable ? 1 : 0,
+      totalCount: 1,
+    });
+  }
+  return Array.from(groups.values())
+    .map((group) => {
+      const available = group.availableCount > 0;
+      let statusText: string;
+      if (group.probeUsableCount > 0) {
+        statusText = lang === "zh"
+          ? `${group.probeUsableCount} 探测通过`
+          : `${group.probeUsableCount} probe ok`;
+      } else if (available) {
+        statusText = lang === "zh"
+          ? `${group.availableCount} 已配密钥 · 未探测`
+          : `${group.availableCount} keyed · not probed`;
+      } else {
+        statusText = lang === "zh" ? "0 可用 · 不可用" : "0 available · unavailable";
+      }
+      return {
+        id: group.id,
+        label: `${group.sortLabel} · ${statusText}`,
+        providerLabel: group.providerLabel,
+        providerKind: group.providerKind,
+        availableCount: group.probeUsableCount > 0 ? group.probeUsableCount : group.availableCount,
+        totalCount: group.totalCount,
+        available,
       };
     })
-    .sort((left, right) => left.label.localeCompare(right.label) || left.modelId.localeCompare(right.modelId));
+    .sort((left, right) => {
+      if (left.available !== right.available) return left.available ? -1 : 1;
+      return left.label.localeCompare(right.label) || left.id.localeCompare(right.id);
+    });
+}
+
+export function firstAvailableModelId(models: AgentCreatePanelModelChoice[], providerId = ""): string {
+  const scoped = providerId
+    ? models.filter((model) => model.providerId === providerId)
+    : models;
+  return scoped.find((model) => model.probeUsable)?.modelId
+    || scoped.find((model) => model.available)?.modelId
+    || "";
+}
+
+export function credentialReadyModelIds(models: AgentCreatePanelModelChoice[]): string[] {
+  return models.filter((model) => model.available).map((model) => model.modelId);
 }
 
 export function isWorkSessionCreateDraft(draft: AgentCreateDraft) {
@@ -165,9 +382,11 @@ export function createDraftFromWorkspace(
   bundles: ToolBundle[] = [],
   lang: "zh" | "en" = "zh",
 ): AgentCreateDraft {
-  const firstModel = buildAgentModelChoices(workspace?.agentModelChoices ?? [])[0]?.modelId
-    ?? workspace?.agentModelChoices?.[0]?.modelId
-    ?? "";
+  const choices = buildAgentModelChoices(workspace?.agentModelChoices ?? [], lang);
+  const firstModel = firstAvailableModelId(choices)
+    || choices[0]?.modelId
+    || workspace?.agentModelChoices?.[0]?.modelId
+    || "";
   const firstPrompt = workspace?.promptTemplates?.find((item) => item.promptTemplateId === "prompt-chat-default")
     ?? workspace?.promptTemplates?.find((item) => item.category === "chat")
     ?? workspace?.promptTemplates?.[0];
@@ -192,11 +411,20 @@ export function normalizeCreateDraftForWorkspace(
 ) {
   if (!workspace) return draft;
   const defaults = createDraftFromWorkspace(workspace, bundles, lang);
-  const modelIds = new Set(buildAgentModelChoices(workspace.agentModelChoices ?? []).map((choice) => choice.modelId));
+  const choices = buildAgentModelChoices(workspace.agentModelChoices ?? [], lang);
+  const availableIds = new Set(choices.filter((choice) => choice.available).map((choice) => choice.modelId));
+  const modelIds = new Set(choices.map((choice) => choice.modelId));
   const promptIds = new Set((workspace.promptTemplates ?? []).map((template) => template.promptTemplateId || template.templateId || ""));
   const currentModel = dialogueModelId(draft.llmBindings);
   const defaultModel = dialogueModelId(defaults.llmBindings);
-  const nextModel = modelIds.size === 0 || modelIds.has(currentModel) ? currentModel : defaultModel;
+  let nextModel = currentModel;
+  if (modelIds.size === 0) {
+    nextModel = currentModel;
+  } else if (!modelIds.has(currentModel)) {
+    nextModel = defaultModel;
+  } else if (availableIds.size > 0 && !availableIds.has(currentModel)) {
+    nextModel = defaultModel || firstAvailableModelId(choices);
+  }
   const promptTemplateId = !draft.promptTemplateId || promptIds.size === 0 || promptIds.has(draft.promptTemplateId)
     ? draft.promptTemplateId || defaults.promptTemplateId
     : defaults.promptTemplateId;
@@ -285,15 +513,24 @@ export function createToolBundleSummary(
   };
 }
 
-export function createDraftReady(draft: AgentCreateDraft, bundles: ToolBundle[] = []) {
+export function createDraftReady(
+  draft: AgentCreateDraft,
+  bundles: ToolBundle[] = [],
+  availableModelIds?: Set<string> | string[],
+) {
   const workSession = isWorkSessionCreateDraft(draft);
   const selectedPolicy = toolBundleSelectionToPolicy(draft.selectedToolBundleIds, bundles);
   const fallbackAllowedTools = bundles.length ? [] : expertiseFromDraft(draft.allowedTools);
   const configuredToolCount = selectedPolicy.allowedTools.length || fallbackAllowedTools.length;
   const hasToolPolicyChoice = selectedPolicy.selectedBundles.length > 0 || fallbackAllowedTools.length > 0;
+  const modelId = dialogueModelId(draft.llmBindings);
+  const availableSet = availableModelIds
+    ? (availableModelIds instanceof Set ? availableModelIds : new Set(availableModelIds))
+    : null;
+  const modelOk = Boolean(modelId) && (availableSet ? availableSet.has(modelId) : true);
   return Boolean(
     draft.displayName.trim()
-    && dialogueModelId(draft.llmBindings)
+    && modelOk
     && draft.primaryMode.trim()
     && (workSession || draft.roleKey.trim())
     && draft.promptTemplateId.trim()
