@@ -1,19 +1,7 @@
-const panelSurface =
-  "rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--vui-border-subtle)_58%,transparent)] bg-[color:color-mix(in_srgb,var(--vui-surface-panel)_38%,transparent)] p-[7px]";
-const rowSurface =
-  "rounded-[var(--radius-control)] border border-[color:color-mix(in_srgb,var(--vui-border-subtle)_58%,transparent)] bg-[color:color-mix(in_srgb,var(--vui-surface-row)_64%,transparent)]";
 const coolSurface =
   "rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--accent-cool)_20%,transparent)] bg-[color:color-mix(in_srgb,var(--accent-cool)_5%,transparent)] p-[7px]";
 
 const styles = {
-  controlStrip:
-    `grid min-w-0 grid-cols-[max-content_minmax(0,1fr)] items-center gap-[7px] ${panelSurface} max-[980px]:grid-cols-[1fr]`,
-  managementNav:
-    "!mx-0 !mt-0 min-w-0 self-start max-[980px]:w-full",
-  summaryGrid:
-    "grid min-w-0 grid-cols-[repeat(3,minmax(0,1fr))] gap-[5px] max-[720px]:grid-cols-[repeat(2,minmax(0,1fr))] max-[520px]:grid-cols-[1fr]",
-  summaryCard:
-    `grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-baseline gap-[5px] ${rowSurface} px-2 py-[4px] [&>span]:truncate [&>span]:[font-size:var(--vui-font-xs)] [&>span]:font-semibold [&>span]:text-vui-fg-tertiary [&>strong]:truncate [&>strong]:[font-size:var(--vui-font-sm)] [&>strong]:font-extrabold [&>strong]:leading-tight [&>strong]:text-vui-fg-primary`,
   agentScopeBar:
     `grid min-w-0 grid-cols-[minmax(0,1fr)_clamp(160px,16vw,220px)_clamp(130px,14vw,180px)_fit-content(18rem)] items-center gap-[7px] ${coolSurface} max-[1180px]:grid-cols-[minmax(0,1fr)_clamp(160px,18vw,220px)_clamp(130px,14vw,180px)] max-[880px]:grid-cols-[minmax(0,1fr)_clamp(160px,22vw,220px)] max-[640px]:grid-cols-[1fr]`,
   scopeCopy:

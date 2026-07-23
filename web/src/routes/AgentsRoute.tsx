@@ -46,13 +46,11 @@ import {
   ToolRegistryPayload,
 } from "../api/types";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
-import { deriveQueryPresentation } from "../app/queryPresentation";
 import {
   type AgentDenseColumn,
   type AgentFilterSectionView,
-  type AgentSummaryMetric,
 } from "../components/vui/product/agent-management";
-import { VButton, VLoadingValue } from "../components/vui";
+import { VButton } from "../components/vui";
 import { safeReturnToPath } from "../app/navigationReturn";
 import { useShellI18n } from "../i18n/useShellI18n";
 import { useChatWorkbenchStore } from "../store/chatWorkbenchStore";
@@ -107,7 +105,6 @@ import {
   type AgentTeamIndexGroup,
 } from "./agentWorkspaceCache";
 import {
-  agentSummaryMetricValue,
   resolveAgentWorkspaceQueryState,
   resolveAgentWorkspaceSource,
 } from "./agents/agentWorkspaceQuery";
@@ -123,8 +120,6 @@ import {
   runtimeNextStep,
   runtimeStatusLabel,
   runtimeStatusTone,
-  workspaceHealthStatusDescription,
-  workspaceHealthStatusLabel,
 } from "./agents/agentStatusPresentation";
 import { createChatWorkspaceCache } from "./chatWorkspaceCache";
 import {
@@ -3199,6 +3194,11 @@ export function AgentsRoute() {
   const [toolSearchText, setToolSearchText] = useState("");
   const [focusedMessageId, setFocusedMessageId] = useState("");
   const [avatarEditorOpen, setAvatarEditorOpen] = useState(false);
+  const [inspectorOpen, setInspectorOpen] = useState(() => (
+    typeof window === "undefined" || typeof window.matchMedia !== "function"
+      ? true
+      : window.matchMedia("(min-width: 1180px)").matches
+  ));
   const [notice, setNotice] = useState<{ tone: "success" | "error"; text: string } | null>(null);
   const [selectedBulkAgentIds, setSelectedBulkAgentIds] = useState<Set<string>>(() => new Set());
   const [bulkSelectionAnchorAgentId, setBulkSelectionAnchorAgentId] = useState("");
@@ -3210,6 +3210,16 @@ export function AgentsRoute() {
   const draftSyncSourceRef = useRef<AgentDraftSyncSource | null>(null);
   const appliedRouteTargetRef = useRef("");
   const agentCreateTriggerRef = useRef<HTMLButtonElement | null>(null);
+
+  useEffect(() => {
+    if (typeof window.matchMedia !== "function") {
+      return;
+    }
+    const media = window.matchMedia("(min-width: 1180px)");
+    const syncInspector = (event: MediaQueryListEvent) => setInspectorOpen(event.matches);
+    media.addEventListener("change", syncInspector);
+    return () => media.removeEventListener("change", syncInspector);
+  }, []);
 
   useEffect(() => {
     const refreshPresence = () => setConfigDraftPresenceDirty(readConfigDraftPresence());
@@ -3284,18 +3294,6 @@ export function AgentsRoute() {
   const agentWorkspaceError = workspaceQueryState.errorOwner === "full"
     ? workspaceQuery.error
     : agentSummaryQuery.error ?? workspaceQuery.error;
-  const agentSummaryPresentation = deriveQueryPresentation({
-    hasData: Boolean(agentSummaryQuery.data),
-    isError: agentSummaryQuery.isError,
-    isFetching: agentSummaryQuery.isFetching,
-    isPending: agentSummaryQuery.isPending,
-  });
-  const agentSummaryInitialLoading = agentSummaryPresentation === "initial-loading";
-  const loadingAgentMetricValue = <VLoadingValue label={copy.loading} />;
-  const unavailableAgentMetricValue = lang === "zh" ? "不可用" : "Unavailable";
-  const summaryMetricValue = (value: number | undefined) => agentSummaryInitialLoading
-    ? loadingAgentMetricValue
-    : agentSummaryMetricValue(agentSummaryPresentation, value, unavailableAgentMetricValue);
   const tools = toolsQuery.data?.tools ?? EMPTY_TOOL_REGISTRY_ITEMS;
   const agentModelChoices = useMemo(
     () => buildAgentModelChoices(workspace?.agentModelChoices ?? []),
@@ -3511,73 +3509,6 @@ export function AgentsRoute() {
     [agentRuntimeEvidenceQuery.data, selectedAgent],
   );
   const runtimeFocusSessionId = selectedAgent?.runtimeStatus?.sessionId || selectedAgent?.directSessionId || "";
-  const summary = workspace?.summary;
-  const healthStatus = workspace?.health.status ?? "ok";
-  const healthStatusLabel = workspaceHealthStatusLabel(healthStatus, lang);
-  const healthStatusDescription = workspaceHealthStatusDescription(healthStatus, summary, lang);
-  // Primary strip: actionable fleet signals only. Secondary folds the rest.
-  const agentSummaryMetrics: AgentSummaryMetric[] = [
-    {
-      id: "active-agents",
-      label: copy.activeAgents,
-      value: summaryMetricValue(summary?.activeAgentCount),
-      detail: copy.activeAgents,
-      tone: "accent",
-    },
-    {
-      id: "health-issues",
-      label: copy.healthIssues,
-      value: summaryMetricValue(summary?.healthIssueCount),
-      detail: `${copy.workspaceHealthStatus}: ${healthStatusLabel}. ${healthStatusDescription}`,
-      tone: healthStatus === "blocked" ? "danger" : healthStatus === "warning" ? "warning" : "success",
-    },
-    {
-      id: "running-agents",
-      label: copy.runningAgents,
-      value: summaryMetricValue(summary?.runningAgentCount),
-      detail: copy.runningAgents,
-      tone: "accent",
-    },
-    {
-      id: "inbox",
-      label: copy.inbox,
-      value: summaryMetricValue(summary?.inboxPendingCount),
-      detail: copy.inbox,
-    },
-  ];
-  const agentSummarySecondaryMetrics: AgentSummaryMetric[] = [
-    {
-      id: "all-agents",
-      label: copy.allAgents,
-      value: summaryMetricValue(summary?.agentCount),
-      detail: copy.allAgents,
-    },
-    {
-      id: "archived-agents",
-      label: copy.archivedAgents,
-      value: summaryMetricValue(summary?.archivedAgentCount),
-      detail: copy.archivedAgents,
-    },
-    {
-      id: "teams",
-      label: copy.teams,
-      value: summaryMetricValue(summary?.teamCount),
-      detail: copy.teams,
-    },
-    {
-      id: "chat-rooms",
-      label: copy.chatRooms,
-      value: summaryMetricValue(summary?.chatRoomCount),
-      detail: copy.chatRooms,
-    },
-    {
-      id: "blocked-agents",
-      label: copy.blockedAgents,
-      value: summaryMetricValue(summary?.blockedAgentCount),
-      detail: copy.blockedAgents,
-      tone: (summary?.blockedAgentCount ?? 0) > 0 ? "danger" : undefined,
-    },
-  ];
   const refresh = () => {
     void queryClient.invalidateQueries({ queryKey: queryKeys.agentSummary(true) });
     if (fullWorkspaceNeeded) {
@@ -5395,6 +5326,9 @@ export function AgentsRoute() {
       healthTitle: issueSummary(selectedAgent.health, lang),
       healthTone: issueTone(selectedAgent.health),
       healthLabel: issueLabel(selectedAgent.health, lang),
+      inspectorLabel: lang === "zh" ? "检查器" : "Inspector",
+      inspectorOpen,
+      runLabel: copy.run,
       panes,
       activePane,
       isAvatarEditorOpen: avatarEditorOpen,
@@ -5410,6 +5344,8 @@ export function AgentsRoute() {
       onResetAvatar: resetSelectedAgentAvatar,
       onSelectAvatar: selectAgentAvatar,
       onSelectPane: setActivePane,
+      onToggleInspector: () => setInspectorOpen((open) => !open),
+      onRun: runtimeFocusSessionId ? () => openAgentSession(runtimeFocusSessionId) : undefined,
     },
     brief: {
       brief: managementBrief,
@@ -5751,19 +5687,13 @@ export function AgentsRoute() {
     <section className={styles.route}>
       <AgentManagementHeaderPanel
         copy={{
-          eyebrow: copy.eyebrow,
-          title: copy.title,
-          subtitle: copy.subtitle,
+          createAgent: copy.createAgent,
           refresh: copy.refresh,
-          workspaceSummary: copy.workspaceSummary,
-          workspaceHealthStatus: copy.workspaceHealthStatus,
-          moreMetrics: lang === "zh" ? "更多指标" : "More metrics",
         }}
-        healthStatus={healthStatus}
-        healthStatusLabel={healthStatusLabel}
-        healthStatusDescription={healthStatusDescription}
-        metrics={agentSummaryMetrics}
-        secondaryMetrics={agentSummarySecondaryMetrics}
+        createAgentButtonRef={agentCreateTriggerRef}
+        createAgentButtonId="agents-create-trigger"
+        refreshing={agentSummaryQuery.isFetching || workspaceQuery.isFetching}
+        onCreateAgent={() => setCreateWizardOpen(true)}
         onRefresh={refresh}
       />
 
@@ -5784,11 +5714,7 @@ export function AgentsRoute() {
           ariaLabel: activeGroupLabel,
           headerEyebrow: copy.agentFilters,
           headerTitle: activeGroupLabel,
-          createAgentLabel: copy.createAgent,
           visibleAgentCount: visibleAgents.length,
-          createAgentButtonRef: agentCreateTriggerRef,
-          createAgentButtonId: "agents-create-trigger",
-          onToggleCreate: () => setCreateWizardOpen(true),
           bulkOperations: {
             copy,
             selectedCount: selectedBulkAgents.length,
@@ -5865,9 +5791,9 @@ export function AgentsRoute() {
           selectedContent: selectedAgentDetailContent ? <AgentSelectedDetailContentPanel {...selectedAgentDetailContent} /> : null,
           emptySelectionTitle: copy.selectAgent,
         }}
-        inspectorRail={selectedAgentDetailContent ? {
+        inspectorRail={selectedAgentDetailContent && inspectorOpen ? {
           ariaLabel: lang === "zh" ? "Agent 侧栏" : "Agent inspector",
-          title: lang === "zh" ? "侧栏" : "Inspector",
+          title: lang === "zh" ? "检查器" : "Inspector",
           subtitle: agentLabel(selectedAgent!),
           emptyTitle: lang === "zh" ? "选择 Agent 查看侧栏" : "Select an Agent",
           emptyHint: lang === "zh"
@@ -5875,6 +5801,8 @@ export function AgentsRoute() {
             : "Management score, next steps, and linked resources appear here.",
           brief: selectedAgentDetailContent.brief,
           resources: selectedAgentDetailContent.resources,
+          closeLabel: lang === "zh" ? "关闭检查器" : "Close inspector",
+          onClose: () => setInspectorOpen(false),
         } : null}
       />
       <AgentCreateWizardDialog

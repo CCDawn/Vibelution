@@ -1,86 +1,55 @@
-import { RefreshCw } from "lucide-react";
+import { Plus, RefreshCw } from "lucide-react";
+import { type Ref } from "react";
 
-import {
-  AgentPageHeader,
-  AgentSummaryStrip,
-  type AgentSummaryMetric,
-} from "../components/vui/product/agent-management";
-import { AgentManagementNav } from "./AgentManagementNav";
-import styles from "./AgentManagementHeaderPanel.styles";
+import { VButton, VIconButton } from "../components/vui";
+import { AgentManagementModuleBar } from "./AgentManagementModuleBar";
 
 type AgentManagementHeaderPanelCopy = {
-  eyebrow: string;
-  title: string;
-  subtitle: string;
+  createAgent: string;
   refresh: string;
-  workspaceSummary: string;
-  workspaceHealthStatus: string;
-  moreMetrics?: string;
 };
 
 type AgentManagementHeaderPanelProps = {
   copy: AgentManagementHeaderPanelCopy;
-  healthStatus: string;
-  healthStatusLabel: string;
-  healthStatusDescription: string;
-  metrics: AgentSummaryMetric[];
-  secondaryMetrics?: AgentSummaryMetric[];
+  createAgentButtonRef?: Ref<HTMLButtonElement>;
+  createAgentButtonId?: string;
+  refreshing?: boolean;
+  onCreateAgent: () => void;
   onRefresh: () => void;
 };
 
-function healthTone(status: string): "danger" | "warning" | "success" {
-  if (status === "blocked") {
-    return "danger";
-  }
-  if (status === "warning") {
-    return "warning";
-  }
-  return "success";
-}
-
 export function AgentManagementHeaderPanel({
   copy,
-  healthStatus,
-  healthStatusLabel,
-  healthStatusDescription,
-  metrics,
-  secondaryMetrics,
+  createAgentButtonRef,
+  createAgentButtonId,
+  refreshing = false,
+  onCreateAgent,
   onRefresh,
 }: AgentManagementHeaderPanelProps) {
   return (
-    <>
-      <AgentPageHeader
-        eyebrow={copy.eyebrow}
-        title={copy.title}
-        tooltip={copy.subtitle}
-        tooltipLabel={`${copy.title} · ${copy.subtitle}`}
-        actions={[
-          {
-            id: "refresh",
-            label: copy.refresh,
-            tooltip: copy.refresh,
-            icon: <RefreshCw size={14} />,
-            onPress: onRefresh,
-          },
-        ]}
-      />
-
-      <div className={styles.controlStrip}>
-        <AgentManagementNav active="agents" className={styles.managementNav} />
-
-        <AgentSummaryStrip
-          ariaLabel={copy.workspaceSummary}
-          status={{
-            label: healthStatusLabel,
-            title: healthStatusDescription,
-            ariaLabel: `${copy.workspaceHealthStatus}: ${healthStatusLabel}. ${healthStatusDescription}`,
-            tone: healthTone(healthStatus),
-          }}
-          metrics={metrics}
-          secondaryMetrics={secondaryMetrics}
-          moreLabel={copy.moreMetrics ?? (copy.eyebrow ? "更多" : "More")}
-        />
-      </div>
-    </>
+    <AgentManagementModuleBar
+      active="agents"
+      actions={(
+        <>
+          <VIconButton
+            type="button"
+            label={copy.refresh}
+            icon={<RefreshCw size={15} />}
+            isDisabled={refreshing}
+            onPress={onRefresh}
+          />
+          <VButton
+            ref={createAgentButtonRef}
+            id={createAgentButtonId}
+            type="button"
+            variant="primary"
+            icon={<Plus size={15} />}
+            onPress={onCreateAgent}
+          >
+            {copy.createAgent}
+          </VButton>
+        </>
+      )}
+    />
   );
 }

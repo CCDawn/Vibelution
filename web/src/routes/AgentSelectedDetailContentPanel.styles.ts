@@ -1,7 +1,7 @@
 const styles = {
   // Main column only — inspector lives in workspace third column.
   selectedDetailFrame:
-    "grid h-full min-h-0 w-full min-w-0 [grid-template-rows:auto_minmax(0,_1fr)] [align-content:start] [gap:8px]",
+    "grid h-full min-h-0 w-full min-w-0 [grid-template-rows:auto_minmax(0,_1fr)] [align-content:start] [gap:12px] [overflow:hidden]",
   overviewLayout:
     "grid min-h-0 min-w-0 [align-content:start] [gap:8px] [overflow:auto] [overscroll-behavior:contain]",
   overviewMain: "grid min-w-0 [align-content:start] [gap:8px]",

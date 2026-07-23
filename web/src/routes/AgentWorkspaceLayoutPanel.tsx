@@ -16,13 +16,13 @@ import { AgentListWorkspacePanel } from "./AgentListWorkspacePanel";
 import styles from "./AgentWorkspaceLayoutPanel.styles";
 
 const STORAGE_KEY = "vibelution.agent-workspace.column-widths.v1";
-const DEFAULT_LEFT = 300;
-const DEFAULT_RIGHT = 320;
-const MIN_LEFT = 220;
-const MAX_LEFT = 480;
-const MIN_RIGHT = 240;
-const MAX_RIGHT = 480;
-const MIN_MAIN = 360;
+const DEFAULT_LEFT = 340;
+const DEFAULT_RIGHT = 360;
+const MIN_LEFT = 280;
+const MAX_LEFT = 440;
+const MIN_RIGHT = 300;
+const MAX_RIGHT = 440;
+const MIN_MAIN = 560;
 const KEYBOARD_STEP = 24;
 
 type ColumnWidths = {
@@ -246,6 +246,12 @@ export function AgentWorkspaceLayoutPanel({
 
       {hasInspector && inspectorRail ? (
         <>
+          <button
+            type="button"
+            className={styles.inspectorBackdrop}
+            aria-label={inspectorRail.closeLabel || inspectorRail.title}
+            onClick={inspectorRail.onClose}
+          />
           <div
             role="separator"
             aria-orientation="vertical"
@@ -256,6 +262,7 @@ export function AgentWorkspaceLayoutPanel({
             tabIndex={0}
             className={[
               styles.resizeHandle,
+              styles.inspectorResizeHandle,
               dragState?.side === "right" ? styles.resizeHandleActive : "",
             ].filter(Boolean).join(" ")}
             onPointerDown={(event) => startResize("right", event)}

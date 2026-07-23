@@ -82,9 +82,7 @@ const styles = {
   filterRow:
     "filterRow min-w-0 flex flex-wrap items-center gap-1 rounded-[var(--radius-control)] border border-[color:color-mix(in_srgb,var(--vui-border-subtle)_58%,transparent)] bg-[color:color-mix(in_srgb,var(--vui-surface-row)_52%,transparent)] p-[5px]",
   header:
-    "header min-w-0 flex flex-wrap items-center gap-1.5",
-  headerActions:
-    "headerActions min-w-0 flex flex-wrap items-center gap-1.5",
+    "hidden",
   image2ModelControls:
     "image2ModelControls min-w-0 grid grid-cols-[minmax(12rem,0.9fr)_minmax(0,1.1fr)] items-end gap-[7px] max-[820px]:grid-cols-[1fr]",
   image2ModelPanel:
@@ -95,8 +93,6 @@ const styles = {
     `image2ModelSummary min-w-0 max-w-full ${quietPanelSurface}`,
   listPanel:
     `listPanel min-w-0 max-w-full ${panelSurface} ${scrollStack} max-[760px]:max-h-[42vh]`,
-  managementNav:
-    "managementNav min-w-0",
   metaGrid:
     "metaGrid min-w-0 grid gap-[5px] grid-cols-[repeat(auto-fit,minmax(7.5rem,1fr))]",
   metaGridWide:
