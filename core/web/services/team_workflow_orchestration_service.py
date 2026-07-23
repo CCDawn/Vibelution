@@ -481,6 +481,11 @@ from core.web.services.team_workflow.experiment import (
     request_experiment_result_knowledge_ingestion,
     run_experiment_smoke_run,
 )
+from core.web.services.team_workflow.challenge_question_runs import (
+    get_challenge_question_run_status,
+    register_challenge_question_output,
+    review_challenge_question_output,
+)
 from core.web.services.team_workflow.experiment_kernel import (
     _require_formal_full_run_ready,
     _require_explicit_experiment_design_frozen,

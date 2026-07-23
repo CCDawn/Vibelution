@@ -28,6 +28,7 @@ from core.web.services.team_workflow_orchestration_service import (
     generate_algorithm_hypothesis_from_mechanism_mapping,
     get_experiment_method_catalog,
     get_experiment_planning_status,
+    get_challenge_question_run_status,
     get_knowledge_ingestion_status,
     get_official_model_evidence_status,
     get_paper_note_chunk_status,
@@ -48,6 +49,8 @@ from core.web.services.team_workflow_orchestration_service import (
     propose_iteration,
     record_local_research_model_output,
     register_experiment_baseline_artifact,
+    register_challenge_question_output,
+    review_challenge_question_output,
     register_experiment_full_run_result,
     register_experiment_smoke_result,
     register_official_model_evidence,
@@ -407,6 +410,18 @@ class OfficialModelEvidencePayload(BaseModel):
     status: str = Field("", max_length=80)
     recordedByAgent: str = Field("", max_length=160)
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class ChallengeQuestionOutputPayload(BaseModel):
+    output: dict[str, Any]
+    citationChecks: list[dict[str, Any]] = Field(default_factory=list, max_length=64)
+    registeredBy: str = Field("", max_length=160)
+
+
+class ChallengeQuestionReviewPayload(BaseModel):
+    reviewer: str = Field(..., min_length=1, max_length=160)
+    rationale: str = Field(..., min_length=1, max_length=4000)
+    decisions: dict[str, str]
 
 
 class CandidateGraphBuildPayload(BaseModel):
@@ -835,6 +850,56 @@ def team_workflow_experiment_planning_status(team_id: str) -> dict:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except (TeamServiceError, TeamWorkflowOrchestrationError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.get("/teams/{team_id}/workflow-orchestration/challenge-program/question-runs/status")
+def team_workflow_challenge_question_run_status(team_id: str) -> dict:
+    try:
+        return get_challenge_question_run_status(team_id)
+    except TeamNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post(
+    "/teams/{team_id}/workflow-orchestration/challenge-program/question-runs",
+    status_code=status.HTTP_201_CREATED,
+)
+def team_workflow_challenge_question_run_register(team_id: str, payload: ChallengeQuestionOutputPayload) -> dict:
+    try:
+        return register_challenge_question_output(team_id, payload.model_dump())
+    except TeamNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        _raise_team_workflow_route_error(
+            "challenge_question_run.register",
+            team_id,
+            exc,
+            status_code=422,
+            fields={"registeredBy": payload.registeredBy},
+        )
+
+
+@router.post(
+    "/teams/{team_id}/workflow-orchestration/challenge-program/questions/{question_id}/runs/{run_id}/review",
+)
+def team_workflow_challenge_question_run_review(
+    team_id: str,
+    question_id: str,
+    run_id: str,
+    payload: ChallengeQuestionReviewPayload,
+) -> dict:
+    try:
+        return review_challenge_question_output(team_id, question_id, run_id, payload.model_dump())
+    except TeamNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        _raise_team_workflow_route_error(
+            "challenge_question_run.review",
+            team_id,
+            exc,
+            status_code=422,
+            fields={"questionId": question_id, "runId": run_id, "reviewer": payload.reviewer},
+        )
 
 
 @router.get("/teams/{team_id}/workflow-orchestration/experiments/methods")
