@@ -80,6 +80,7 @@ export function SupervisedWorkspaceTabs({
             role="tab"
             contentLayout="plain"
             aria-label={tabDescription}
+            title={tabDescription}
             aria-selected={selected}
             className={selected ? `${styles.flowTabClass} ${styles.flowTabActiveClass}` : styles.flowTabClass}
             onPress={() => onWorkflowStepSelect?.(step.key)}

@@ -6,10 +6,12 @@ export type VRouteHeaderProps = ComponentPropsWithoutRef<"header"> & {
   meta?: ReactNode;
   title: ReactNode;
   /**
-   * Hide the eyebrow/title column so actions own the full header width.
+   * Hide the eyebrow/title column and shrink-wrap the header around actions.
    * Prefer this over CSS `[&>div:first-child]:hidden` — hiding the intro
    * node with display:none still leaves a broken 1fr/auto grid track and can
    * make top toolbar buttons unclickable (Evolution supervised focus mode).
+   * Do not use a full-width empty glass shell when intro is hidden — that
+   * creates a large blank band with controls stuck on the right.
    */
   hideIntro?: boolean;
 };
@@ -30,7 +32,8 @@ export function VRouteHeader({
       data-hide-intro={hideIntro ? "true" : undefined}
       className={[
         hideIntro
-          ? "grid min-w-0 grid-cols-1 items-center justify-items-end gap-2"
+          ? // Content-sized action chrome only — no full-width empty 1fr track.
+            "flex w-fit max-w-full min-w-0 items-center justify-end gap-2 justify-self-end self-start"
           : "grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2",
         "rounded-[var(--radius-panel)] border border-vui-border-subtle bg-vui-surface-glass px-3 py-2",
         "shadow-[var(--vui-shadow-hairline)] backdrop-blur-md",
@@ -62,7 +65,8 @@ export function VRouteHeader({
         <div
           className={[
             "relative z-[1] flex min-w-0 max-w-full items-center justify-end gap-1",
-            hideIntro ? "w-full" : "justify-self-end",
+            // Shrink-wrap actions when intro is hidden so the header stays compact.
+            hideIntro ? "w-fit max-w-full shrink-0" : "justify-self-end",
           ].join(" ")}
         >
           {actions}
