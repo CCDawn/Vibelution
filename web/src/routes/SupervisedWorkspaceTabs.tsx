@@ -78,11 +78,11 @@ export function SupervisedWorkspaceTabs({
             key={step.key}
             type="button"
             role="tab"
+            contentLayout="plain"
             aria-label={tabDescription}
             aria-selected={selected}
-            title={tabDescription}
             className={selected ? `${styles.flowTabClass} ${styles.flowTabActiveClass}` : styles.flowTabClass}
-            onClick={() => onWorkflowStepSelect?.(step.key)}
+            onPress={() => onWorkflowStepSelect?.(step.key)}
           >
             <span className={selected ? `${styles.stepIndexClass} ${styles.stepIndexActiveClass}` : styles.stepIndexClass}>{WORKFLOW_STEPS.indexOf(step) + 1}</span>
             <span className={styles.stepBodyClass}>

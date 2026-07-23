@@ -2948,9 +2948,10 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
       {showRouteToolbar ? (
         <VRouteHeader
           aria-label={routeTitle}
+          hideIntro={hideSupervisedToolbarIntro}
           className={
             hideSupervisedToolbarIntro
-              ? `${styles.toolbar} ${styles.toolbarSupervisedFocus} ${styles.toolbarHeaderHidden}`
+              ? `${styles.toolbar} ${styles.toolbarSupervisedFocus}`
               : styles.toolbar
           }
           eyebrow={routeEyebrow}
@@ -2978,7 +2979,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                         ? `${styles.segmentButton} ${styles.segmentButtonActive}`
                         : styles.segmentButton
                     }
-                    onClick={() => setEvolutionTrack(track.key)}
+                    onPress={() => setEvolutionTrack(track.key)}
                   >
                     {track.label}
                   </VButton>

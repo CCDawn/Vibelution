@@ -35,7 +35,7 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).toContain("VStateSurface");
     expect(routeSource).toContain("VStringSelect");
     expect(routeSource).toContain("onChange={setKeepWorktree}");
-    expect(routeSource).toContain("styles.toolbarHeaderHidden");
+    expect(routeSource).toContain("hideIntro={hideSupervisedToolbarIntro}");
     expect(routeSource).not.toContain('"\\u200B"');
     expect(activeRunMonitorPanelSource).toContain("<VButton");
     expect(proposalActionBandsPanelSource).toContain("<VButton");
@@ -759,7 +759,9 @@ describe("EvolutionRoute library user flow contract", () => {
 
   it("hides the supervised toolbar intro so workflow cards own the top row", () => {
     expect(routeSource).toContain('const hideSupervisedToolbarIntro = activeTrack === "supervised"');
-    expect(routeSource).toContain("styles.toolbarSupervisedFocus} ${styles.toolbarHeaderHidden}");
+    expect(routeSource).toContain("hideIntro={hideSupervisedToolbarIntro}");
+    expect(routeSource).toContain("styles.toolbarSupervisedFocus}");
+    expect(routeSource).not.toContain("styles.toolbarHeaderHidden");
     expect(routeSource).toContain("hideSupervisedToolbarIntro");
     expect(routeSource).toContain("styles.toolbarControlsSupervisedFocus");
     expect(routeSource).toContain("aria-label={routeTitle}");
