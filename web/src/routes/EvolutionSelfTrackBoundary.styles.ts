@@ -1,6 +1,6 @@
 const styles = {
   selfModeStack:
-    "grid [grid-template-rows:minmax(0,_1fr)] [gap:8px] min-h-0 [height:100%] [overflow:hidden] [padding-right:4px] max-[900px]:[grid-template-rows:minmax(0,_1fr)] max-[900px]:[height:100%] max-[900px]:[overflow:auto]",
+    "grid min-h-0 h-full max-h-full grid-rows-[minmax(0,1fr)] content-stretch items-stretch gap-0 overflow-hidden pr-1 max-[900px]:h-full max-[900px]:overflow-auto",
   spinIcon:
     "animate-spin",
   structuredEmptyState:
