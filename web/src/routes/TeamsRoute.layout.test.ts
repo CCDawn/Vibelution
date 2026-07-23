@@ -1179,7 +1179,10 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("全量合规与系统可用性");
     expect(routeSource).toContain("125题批处理与质量治理");
     expect(routeSource).toContain("代表性深研闭环与参赛封装");
-    expect(routeSource).toContain("accepted_for_writeup 仅是单案例内部状态");
+    expect(routeSource).toContain("既有 FashionMNIST 仅作为单案例，不代表平台完成");
+    expect(routeSource).toContain('blockers.includes("dashscope_qwen_provider_missing")');
+    expect(routeSource).toContain('"BLOCKED · 待验证"');
+    expect(routeSource).toContain("caseRecords[0]?.title");
     expect(routeSource).toContain("已设计 · 待执行");
     expect(routeSource).toContain("训练结果不参与本阶段完成判定");
     expect(routeSource).toContain("最近诊断单独展示，不覆盖主线结果");
