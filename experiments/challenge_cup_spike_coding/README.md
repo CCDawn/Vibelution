@@ -52,3 +52,28 @@ $input = "C:\Users\Administrator\Documents\Vibelution\data\experiments\sci096_sp
 $output = "C:\Users\Administrator\Documents\Vibelution\data\experiments\sci096_spike_coding\runs\sci096-dandi000140-epoch-discrimination-v3\result.json"
 & $python experiments\challenge_cup_spike_coding\sci096_epoch_discrimination.py --input-nwb $input --output $output
 ```
+
+## DANDI 000121 multi-session adapter
+
+The SCI-096 v3 multi-session branch uses DANDI `000121` only after an
+outcome-blind movement-onset protocol is frozen. The adapter:
+
+- retains successful trials with a finite go cue, target acquisition, target,
+  and recoverable hand-speed onset;
+- applies a fourth-order 15 Hz Butterworth low-pass filter with zero-phase
+  forward/backward filtering (effective eighth order), using fixed 250 ms
+  kinematic context on both sides to avoid filter-edge onset artifacts;
+- defines primary movement onset as the first post-go-cue sample reaching 20%
+  of that trial's peak hand speed before first target acquisition;
+- excludes anticipatory trials whose primary onset is less than 50 ms after
+  the go cue and records the exclusion count;
+- records 10% and 30% anchors as sensitivity evidence only;
+- maps the target displacement from hand position at go cue into eight
+  movement-direction octants and rejects sessions missing any octant;
+- creates a deterministic per-octant 75/25 train/validation split and enforces
+  at least 100 usable trials, 75 train trials, 25 validation trials, and two
+  sorted units per session.
+
+`sci096_dandi000121_adapter.py` only produces the existing decoder dataset
+contract. It does not download DANDI assets, run neural decoding, or alter the
+frozen stationary/transition windows and v3 decision gates.
