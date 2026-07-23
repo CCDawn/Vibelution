@@ -26,6 +26,15 @@ describe("KernelTaskCenterRoute layout contract", () => {
     expect(routeSource).not.toMatch(/<button\b/);
   });
 
+  it("uses the list-detail page recipe for the Kernel shell", () => {
+    expect(routeSource).toContain("VListDetailPage");
+    expect(routeSource).toContain("workspaceClassName={styles.workspaceClass}");
+    expect(routeSource).toContain('columnsClassName=""');
+    expect(routeSource).toContain("headerClassName={styles.headerClass}");
+    expect(routeSource).toContain("list={(");
+    expect(routeSource).toContain("detail={(");
+  });
+
   it("maps Kernel task state and facts through shared VUI compositions", () => {
     expect(routeSource).toContain("VSurface");
     expect(routeSource).toContain("VMetricStrip");

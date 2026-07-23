@@ -8,7 +8,7 @@ export const vuiChipBaseClass =
 export const vuiChipSizeClass =
   "h-6 min-h-6 max-h-6 px-1.5 [font-size:var(--vui-font-xs)] font-semibold leading-none";
 
-/** Tone classes (paired with heroui-theme.css .vui-tone-* under the app provider). */
+/** Tone classes (paired with vui-provider-theme.css .vui-tone-* under the app provider). */
 export function vuiChipToneClass(tone: VuiTone | undefined): string {
   const resolved = tone ?? "neutral";
   if (resolved === "accent") {

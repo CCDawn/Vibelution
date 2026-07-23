@@ -7,7 +7,7 @@ import { RefreshCw } from "lucide-react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
-import { VibelutionHeroProvider } from "../../renderers/heroui/HeroProvider";
+import { VuiProvider } from "../../VuiProvider";
 import {
   AgentBulkActionBar,
   AgentPageHeader,
@@ -29,7 +29,7 @@ describe("Agent Management VUI product components", () => {
 
   it("renders a compact page header without inline explanatory prose", () => {
     const markup = renderToStaticMarkup(
-      <VibelutionHeroProvider>
+      <VuiProvider>
         <AgentPageHeader
           eyebrow="Agent Center"
           title="Agent Management"
@@ -44,7 +44,7 @@ describe("Agent Management VUI product components", () => {
             },
           ]}
         />
-      </VibelutionHeroProvider>,
+      </VuiProvider>,
     );
 
     expect(markup).toContain("Agent Management");

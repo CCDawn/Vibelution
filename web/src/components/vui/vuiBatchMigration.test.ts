@@ -147,12 +147,12 @@ const routeShellTargets = [
   },
   {
     path: "routes/KernelTaskCenterRoute.tsx",
-    expected: ["VRouteHeader", "VSelect", "VIconButton"],
+    expected: ["VListDetailPage", "VSelect", "VIconButton"],
     forbidden: ["<header className={styles.header}", "<select value={status}"],
   },
   {
     path: "routes/LogsRoute.tsx",
-    expected: ["VRouteHeader", "VStatusStrip"],
+    expected: ["VDenseOpsPage", "VStatusStrip"],
     forbidden: ["<header className={styles.header}", "<span className={styles.metaPill}>{t(\"readonlyPreview\")}</span>"],
   },
   {
@@ -167,7 +167,7 @@ const routeShellTargets = [
   },
   {
     path: "routes/SkillsRoute.tsx",
-    expected: ["VRouteHeader", "VIconButton"],
+    expected: ["VListDetailPage", "VIconButton"],
     forbidden: ["<header className={styles.header}"],
   },
   {
@@ -214,7 +214,7 @@ const staticInlineStyleCleanupTargets = [
     forbidden: 'style={{ minHeight: "100%" }}',
   },
   {
-    path: "components/vui/renderers/heroui/HeroProvider.tsx",
+    path: "components/vui/VuiProvider.tsx",
     forbidden: 'style={{ display: "contents" }}',
   },
 ] as const;

@@ -5,6 +5,7 @@ import {
   type ReactNode,
 } from "react";
 
+import { cn } from "../../lib/cn";
 import {
   vuiButtonBaseClass,
   vuiButtonDangerClass,
@@ -76,7 +77,7 @@ export const ShadcnButton = forwardRef<HTMLButtonElement, ShadcnButtonProps>(
         data-icon-only={isIconOnly ? "true" : undefined}
         data-renderer="shadcn"
         aria-disabled={isDisabled || undefined}
-        className={[
+        className={cn(
           "inline-flex max-w-full shrink-0 items-center justify-center justify-self-start",
           "rounded-[var(--radius-control)] px-2 [font-size:var(--vui-font-sm)] font-semibold leading-tight",
           vuiButtonDensityClass(density),
@@ -85,9 +86,7 @@ export const ShadcnButton = forwardRef<HTMLButtonElement, ShadcnButtonProps>(
           vuiButtonDisabledClass,
           isIconOnly ? "aspect-square px-0" : null,
           className,
-        ]
-          .filter(Boolean)
-          .join(" ")}
+        )}
         onClick={(event) => {
           if (isDisabled) {
             event.preventDefault();

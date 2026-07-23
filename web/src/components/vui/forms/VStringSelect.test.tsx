@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
 import { VStringSelect, resolveStringSelectChange } from "./VStringSelect";
-import { VibelutionHeroProvider } from "../renderers/heroui/HeroProvider";
+import { VuiProvider } from "../VuiProvider";
 
 const options = [
   { value: "safe", label: "Safe" },
@@ -34,7 +34,7 @@ describe("resolveStringSelectChange", () => {
 describe("VStringSelect selected-key mapping", () => {
   it("keeps a declared enabled empty option selected", () => {
     const markup = renderToStaticMarkup(
-      <VibelutionHeroProvider>
+      <VuiProvider>
         <VStringSelect
           ariaLabel="Input mode"
           onValueChange={() => undefined}
@@ -42,7 +42,7 @@ describe("VStringSelect selected-key mapping", () => {
           placeholder="Choose input mode"
           value=""
         />
-      </VibelutionHeroProvider>,
+      </VuiProvider>,
     );
 
     expect(markup).not.toContain('data-placeholder="true"');
@@ -50,7 +50,7 @@ describe("VStringSelect selected-key mapping", () => {
 
   it("leaves an undeclared current value unselected", () => {
     const markup = renderToStaticMarkup(
-      <VibelutionHeroProvider>
+      <VuiProvider>
         <VStringSelect
           ariaLabel="Input mode"
           onValueChange={() => undefined}
@@ -58,7 +58,7 @@ describe("VStringSelect selected-key mapping", () => {
           placeholder="Choose input mode"
           value="unknown"
         />
-      </VibelutionHeroProvider>,
+      </VuiProvider>,
     );
 
     expect(markup).toContain('data-placeholder="true"');

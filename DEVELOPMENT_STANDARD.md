@@ -416,37 +416,26 @@ Vibelution workbench surfaces should feel like dense operational consoles: compa
 
 Detailed interaction geometry requirements, including button sizing, control choice, loading-state stability, and screenshot validation, live in section 23.10.
 
-### 9.1 Tailwind, HeroUI, And VUI Style Ownership
+### 9.1 Tailwind, VUI, And shadcn/Radix Style Ownership
 
 Frontend styling is Tailwind-first. New UI, touched UI, extracted components, and visual polish under `web/` should express layout, spacing, density, color, borders, and state styling through Tailwind utility classes or Tailwind class maps. Do not introduce new CSS Modules, page-scale CSS files, ad hoc inline `style={{ ... }}`, or CSS-in-JS for ordinary product UI.
 
 Use this ownership order:
 
-- VUI project components own Vibelution-specific composition, density, tone mapping, and reusable visual language;
-- HeroUI owns accessible interaction primitives such as buttons, inputs, selects, tabs, dropdowns, popovers, tooltips, switches, checkboxes, modals, and drawers;
-- Tailwind owns the final visual styling applied through `className`, HeroUI `classNames`, or typed local `*.styles.ts` class maps.
+- **VUI** (`web/src/components/vui/`) owns the stable product API (`VButton`, `VInput`, …), density/tone mapping, page recipes (`VListDetailPage` / `VSettingsFormPage` / `VDenseOpsPage`), and domain composition under `product/`;
+- **shadcn-style + Radix renderers** under `web/src/components/vui/renderers/shadcn/` own interactive control implementation (focus, floating UI, accessible patterns);
+- **Tailwind** owns final visual styling via `className` and typed local `*.styles.ts` class maps;
+- **HeroUI is removed** (`@heroui/react` is not a dependency). Do not reintroduce it. Prefer extending the shadcn renderer behind a `V*` facade, or use a page recipe for new surfaces.
 
-Before adding a new visible control or interaction primitive, check `web/src/components/vui/` and existing route/component patterns. Extend or compose an existing VUI wrapper when it can express the behavior. Use HeroUI directly only for a missing primitive, a small local composition, or a migration step toward a VUI wrapper.
+Canonical notes: `web/src/components/vui/README.md`.
 
-HeroUI is the preferred base for common interactive controls, but it must not become the business state owner. Map product states such as Agent health, runtime status, memory scope, claim state, tool policy, and validation status into project-owned tone or intent values before passing them into HeroUI props or slots.
+Before adding a new visible control or interaction primitive, check `web/src/components/vui/` and existing route/component patterns. Prefer **page recipes** and compose existing VUI wrappers. **Do not invent a new `V*` primitive** unless at least two call sites already need it.
 
-When customizing HeroUI, prefer its public APIs: `variant`, `size`, `radius`, `color`, `className`, `classNames`, slots, and documented composition patterns. Do not rely on unstable internal DOM structure, deep selectors, or one-off overrides that only work for a single route.
+Routes and product pages must import from `components/vui` (or `components/vui/product/…`) only. They must not import `components/vui/renderers/*` directly.
 
-For substantial HeroUI React work, refresh the official agent-facing reference in a review-first way:
+Map product states such as Agent health, runtime status, memory scope, claim state, tool policy, and validation status into project-owned tone or intent values before styling. Do not let raw library enums become business state.
 
-```powershell
-npx --yes heroui-cli@latest agents-md --react --output AGENTS.md
-```
-
-Use `--output` to target a scratch or review file when the root `AGENTS.md` is not the intended edit target. Review any generated markdown, `.heroui-docs/`, and `.gitignore` changes before merging them into project rules. Keep downloaded HeroUI docs only when they are intentionally part of the current task evidence; otherwise remove temporary generated files before closing the round.
-
-Do not run the remote installer pipeline in the Vibelution main checkout or ordinary task worktrees:
-
-```powershell
-curl -fsSL https://heroui.com/install | bash -s heroui-react
-```
-
-Treat that command as a HeroUI new-project or isolated scratch-environment bootstrap reference only. Existing Vibelution frontend work must preserve the project package-manager contract, lockfiles, VUI ownership layer, and reviewable dependency changes.
+When adding floating/focus-heavy controls (tooltip, dialog, menu, select), prefer Radix primitives wrapped as `V*` APIs. Keep package and lockfile changes reviewable; do not bootstrap a second design system via remote installers in the main checkout.
 
 Style maps should be local, typed, and narrow:
 
@@ -457,9 +446,9 @@ Style maps should be local, typed, and narrow:
 
 Allowed exceptions are limited to global base/reset CSS, Tailwind theme or token definitions, third-party library integration shims, complex markdown/prose rendering, canvas/SVG/chart rendering, and bounded keyframe animations. Each exception should be narrow, named, and justified in the plan, code comment, review note, or final report.
 
-Legacy CSS and non-Tailwind styling may remain until touched. When touching legacy UI, do not expand the old styling surface. Either migrate the touched slice to Tailwind/VUI/HeroUI or record why migration is deferred and what validation protects the mixed state.
+Legacy CSS and non-Tailwind styling may remain until touched. When touching legacy UI, do not expand the old styling surface. Either migrate the touched slice to Tailwind/VUI or record why migration is deferred and what validation protects the mixed state.
 
-Frontend visual verification should cover the affected states and viewports in proportion to the tier. For `FAST_PATCH`, inspect only the states plausibly affected. For `STANDARD_TASK` and `HIGH_RISK` HeroUI or VUI changes, check normal, hover/focus, disabled, loading, error, empty, and longest realistic Chinese/English label states when relevant.
+Frontend visual verification should cover the affected states and viewports in proportion to the tier. For `FAST_PATCH`, inspect only the states plausibly affected. For `STANDARD_TASK` and `HIGH_RISK` VUI/renderer changes, check normal, hover/focus, disabled, loading, error, empty, and longest realistic Chinese/English label states when relevant.
 
 ## 10. Bun Usage
 

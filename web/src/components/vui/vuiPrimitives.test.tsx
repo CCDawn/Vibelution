@@ -16,16 +16,12 @@ import {
   VToolbar,
   VTooltip,
 } from "./index";
-import { VibelutionHeroProvider } from "./renderers/heroui/HeroProvider";
+import { VuiProvider } from "./VuiProvider";
 
 describe("VUI foundation primitives", () => {
   it("keeps VUI button hover behavior owned by shared semantic slots", () => {
     const sharedSlotsSource = readFileSync(
       resolve(import.meta.dirname, "renderers/shared/buttonSlots.ts"),
-      "utf8",
-    );
-    const heroSlotsSource = readFileSync(
-      resolve(import.meta.dirname, "renderers/heroui/heroSlots.ts"),
       "utf8",
     );
     const buttonSource = readFileSync(
@@ -39,7 +35,6 @@ describe("VUI foundation primitives", () => {
     expect(sharedSlotsSource).toContain("hover:text-[var(--vui-control-hover-fg)]");
     expect(sharedSlotsSource).not.toContain("hover:border-[var(--border-strong)]");
     expect(sharedSlotsSource).not.toContain("hover:bg-[var(--vui-control-muted-hover)]");
-    expect(heroSlotsSource).toContain('from "../shared/buttonSlots"');
     expect(buttonSource).toContain('from "../renderers/shadcn/ShadcnButton"');
     expect(buttonSource).toContain("ShadcnButton");
   });
@@ -60,20 +55,20 @@ describe("VUI foundation primitives", () => {
     expect(tailwindEntry).not.toContain(".test");
   });
 
-  it("wraps children in the Vibelution HeroUI provider boundary", () => {
+  it("wraps children in the VUI/shadcn provider boundary", () => {
     const markup = renderToStaticMarkup(
-      <VibelutionHeroProvider>
+      <VuiProvider>
         <main data-test-id="inside-vui">content</main>
-      </VibelutionHeroProvider>,
+      </VuiProvider>,
     );
 
-    expect(markup).toContain('data-vui-provider="heroui"');
+    expect(markup).toContain('data-vui-provider="shadcn"');
     expect(markup).toContain('data-test-id="inside-vui"');
   });
 
   it("renders compact VUI controls with stable data attributes", () => {
     const markup = renderToStaticMarkup(
-      <VibelutionHeroProvider>
+      <VuiProvider>
         <VToolbar ariaLabel="Agent actions">
           <VButton variant="secondary" icon={<Search size={14} />}>
             Search
@@ -81,7 +76,7 @@ describe("VUI foundation primitives", () => {
           <VIconButton label="Refresh" icon={<Search size={14} />} />
           <VChip tone="accent">mimo-v2.5</VChip>
         </VToolbar>
-      </VibelutionHeroProvider>,
+      </VuiProvider>,
     );
 
     expect(markup).toContain('data-vui="button"');
@@ -107,9 +102,9 @@ describe("VUI foundation primitives", () => {
 
   it("gives every icon button a tooltip trigger with an accessible name", () => {
     const markup = renderToStaticMarkup(
-      <VibelutionHeroProvider>
+      <VuiProvider>
         <VIconButton label="Refresh" tooltip="Refresh frontend data" icon={<Search size={14} />} />
-      </VibelutionHeroProvider>,
+      </VuiProvider>,
     );
 
     expect(markup).toContain('data-slot="tooltip-trigger"');
@@ -123,7 +118,7 @@ describe("VUI foundation primitives", () => {
 
   it("keeps a disabled action reason focusable without creating a second button", () => {
     const markup = renderToStaticMarkup(
-      <VibelutionHeroProvider>
+      <VuiProvider>
         <VIconButton
           label="Refresh"
           tooltip="Refresh frontend data"
@@ -131,7 +126,7 @@ describe("VUI foundation primitives", () => {
           icon={<Search size={14} />}
           isDisabled
         />
-      </VibelutionHeroProvider>,
+      </VuiProvider>,
     );
 
     expect(markup.match(/<button\b/g)).toHaveLength(1);
@@ -162,9 +157,9 @@ describe("VUI foundation primitives", () => {
 
   it("attaches contextual help directly to regular buttons without a wrapper button", () => {
     const markup = renderToStaticMarkup(
-      <VibelutionHeroProvider>
+      <VuiProvider>
         <VButton tooltip="Runs a fresh provider discovery">Discover</VButton>
-      </VibelutionHeroProvider>,
+      </VuiProvider>,
     );
 
     expect(markup.match(/<button\b/g)).toHaveLength(1);

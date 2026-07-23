@@ -1,6 +1,6 @@
 import { type ComponentPropsWithoutRef, type ReactNode } from "react";
 
-import { type VuiTone } from "../renderers/heroui/heroVariants";
+import { type VuiTone } from "../renderers/shared/buttonVariants";
 import { VTooltip } from "../primitives/VTooltip";
 
 export type VMetricStripMetric = {
