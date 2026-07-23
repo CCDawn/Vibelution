@@ -416,6 +416,8 @@ class ChallengeQuestionOutputPayload(BaseModel):
     output: dict[str, Any]
     citationChecks: list[dict[str, Any]] = Field(default_factory=list, max_length=64)
     registeredBy: str = Field("", max_length=160)
+    parentRunId: str = Field("", max_length=160)
+    lineageRefs: list[str] = Field(default_factory=list, max_length=64)
 
 
 class ChallengeQuestionReviewPayload(BaseModel):

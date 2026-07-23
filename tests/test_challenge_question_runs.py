@@ -3,6 +3,8 @@ from __future__ import annotations
 from copy import deepcopy
 import json
 
+import pytest
+
 from core.web.services.team_workflow import challenge_question_runs
 
 
@@ -236,6 +238,62 @@ def test_register_valid_pending_candidate_counts_sample_but_not_completion(tmp_p
     assert record["humanGates"]["approvedCount"] == 0
     assert response["summary"]["validCandidateCount"] == 1
     assert response["summary"]["completedCount"] == 0
+
+
+def test_revised_question_run_records_parent_lineage_and_is_immutable(tmp_path, monkeypatch):
+    _isolate_store(tmp_path, monkeypatch)
+    parent_output = _output()
+    challenge_question_runs.register_challenge_question_output(
+        "research-team",
+        {
+            "output": parent_output,
+            "citationChecks": _citation_checks(parent_output),
+        },
+    )
+    revised_output = _output()
+    revised_output["run"]["run_id"] = "run-sci-096-v2"
+    revised_output["hypotheses"][0]["statement"] = "A revised, evidence-bounded hypothesis."
+    payload = {
+        "output": revised_output,
+        "citationChecks": _citation_checks(revised_output),
+        "parentRunId": parent_output["run"]["run_id"],
+        "lineageRefs": ["experiment-result-1", "qwen-revision-v2"],
+    }
+
+    registered = challenge_question_runs.register_challenge_question_output("research-team", payload)
+    duplicate = challenge_question_runs.register_challenge_question_output("research-team", payload)
+
+    assert registered["record"]["lineage"] == {
+        "relation": "revises",
+        "parentRunId": parent_output["run"]["run_id"],
+        "refs": ["experiment-result-1", "qwen-revision-v2"],
+    }
+    assert duplicate["idempotent"] is True
+    assert duplicate["record"]["registeredAt"] == registered["record"]["registeredAt"]
+
+    changed_output = deepcopy(revised_output)
+    changed_output["hypotheses"][0]["statement"] = "An illicit overwrite."
+    with pytest.raises(ValueError, match="immutable"):
+        challenge_question_runs.register_challenge_question_output(
+            "research-team",
+            {**payload, "output": changed_output, "citationChecks": _citation_checks(changed_output)},
+        )
+
+
+def test_revised_question_run_requires_existing_parent(tmp_path, monkeypatch):
+    _isolate_store(tmp_path, monkeypatch)
+    revised_output = _output()
+    revised_output["run"]["run_id"] = "run-sci-096-v2"
+
+    with pytest.raises(ValueError, match="parentRunId was not found"):
+        challenge_question_runs.register_challenge_question_output(
+            "research-team",
+            {
+                "output": revised_output,
+                "citationChecks": _citation_checks(revised_output),
+                "parentRunId": "missing-parent",
+            },
+        )
 
 
 def test_five_approved_unique_questions_complete_trial_count(tmp_path, monkeypatch):
