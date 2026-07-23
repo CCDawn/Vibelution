@@ -53,6 +53,39 @@ describe("AppShell layout contract", () => {
     expect(navStyles).toContain("white-space: nowrap");
   });
 
+  it("keeps the top bar interactive-first so Electron drag does not swallow primary nav clicks", () => {
+    const topBarBlock = shellStyles.slice(
+      shellStyles.indexOf(":where(.vui-app-appshell).topBar {"),
+      shellStyles.indexOf(":where(.vui-app-appshell).topBar > * {"),
+    );
+    expect(topBarBlock).toContain("pointer-events: auto");
+    expect(topBarBlock).toMatch(/(?:^|\n)\s*-webkit-app-region:\s*no-drag\s*;/);
+    // Whole-bar drag is forbidden; only brand/clock chrome may opt in later.
+    expect(topBarBlock).not.toMatch(/(?:^|\n)\s*-webkit-app-region:\s*drag\s*;/);
+
+    // Real specificity on interactive descendants (not only :where).
+    expect(shellStyles).toContain(".vui-app-appshell.topBar a");
+    expect(shellStyles).toContain(".vui-app-appshell.topBar .nav");
+    expect(shellStyles).toContain(".vui-app-appshell.topBar .navLink");
+    expect(shellStyles).toContain("-webkit-app-region: no-drag !important");
+
+    // Window drag is limited to non-interactive brand/clock chrome on Electron.
+    expect(shellStyles).toContain(
+      ':where(.vui-app-appshell).shell[data-desktop-shell="electron"] .topBar .brandCopy',
+    );
+    expect(shellStyles).toContain(
+      ':where(.vui-app-appshell).shell[data-desktop-shell="electron"] .topBar .topClock',
+    );
+
+    const navBlock = shellStyles.slice(
+      shellStyles.indexOf(":where(.vui-app-appshell).nav {"),
+      shellStyles.indexOf(":where(.vui-app-appshell).nav::-webkit-scrollbar"),
+    );
+    expect(navBlock).toContain("pointer-events: auto");
+    expect(navBlock).toContain("-webkit-app-region: no-drag");
+    expect(navBlock).toContain("z-index: 3");
+  });
+
   it("renders one compact status summary chip while keeping the detailed guide panel", () => {
     expect(shellSource).toContain("statusSummaryChip");
     expect(shellSource).toContain('t("brandSubtle")');

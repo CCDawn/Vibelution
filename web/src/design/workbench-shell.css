@@ -127,15 +127,21 @@
   top: 0;
   left: 0;
   right: 0;
-  z-index: 20;
+  /* Stay above route content stacking contexts (transform/filter create new layers). */
+  z-index: 40;
   display: grid;
   grid-template-columns: minmax(0, max-content) minmax(0, 1fr) max-content;
   align-items: center;
   gap: 12px;
   min-height: var(--shell-topbar-height);
   padding: 9px calc(16px + var(--shell-window-control-inset)) 9px 16px;
-  pointer-events: none;
-  -webkit-app-region: drag;
+  /*
+   * Interactive-first chrome: never mark the whole bar as a window-drag region.
+   * Electron's -webkit-app-region: drag on a large ancestor routinely swallows
+   * clicks on nested nav/buttons even when children set no-drag.
+   */
+  pointer-events: auto;
+  -webkit-app-region: no-drag;
 }
 
 :where(.vui-app-appshell).topBar > * {
@@ -143,6 +149,42 @@
   z-index: 1;
   pointer-events: auto;
   -webkit-app-region: no-drag;
+}
+
+/*
+ * Real specificity (not :where) so interactive hit targets always beat any
+ * inherited drag region from brand/clock chrome.
+ */
+.vui-app-appshell.topBar a,
+.vui-app-appshell.topBar button,
+.vui-app-appshell.topBar input,
+.vui-app-appshell.topBar select,
+.vui-app-appshell.topBar textarea,
+.vui-app-appshell.topBar [role="button"],
+.vui-app-appshell.topBar [role="link"],
+.vui-app-appshell.topBar [role="menuitem"],
+.vui-app-appshell.topBar .nav,
+.vui-app-appshell.topBar .navLink,
+.vui-app-appshell.topBar .mobileNav,
+.vui-app-appshell.topBar .topActions,
+.vui-app-appshell.topBar .returnButton,
+.vui-app-appshell.topBar .activeWorkChip,
+.vui-app-appshell.topBar .utilityCluster,
+.vui-app-appshell.topBar .statusCluster,
+.vui-app-appshell.topBar .statusSummaryChip {
+  position: relative;
+  z-index: 2;
+  pointer-events: auto !important;
+  -webkit-app-region: no-drag !important;
+}
+
+/* Electron only: drag from non-interactive brand/clock text, not from nav. */
+:where(.vui-app-appshell).shell[data-desktop-shell="electron"] .topBar .brandCopy,
+:where(.vui-app-appshell).shell[data-desktop-shell="electron"] .topBar .brand,
+:where(.vui-app-appshell).shell[data-desktop-shell="electron"] .topBar .brandSubtle,
+:where(.vui-app-appshell).shell[data-desktop-shell="electron"] .topBar .versionPill,
+:where(.vui-app-appshell).shell[data-desktop-shell="electron"] .topBar .topClock {
+  -webkit-app-region: drag;
 }
 
 :where(.vui-app-appshell).topBar::before {
@@ -157,6 +199,7 @@
   box-shadow: var(--vui-shadow-hairline);
   backdrop-filter: blur(16px);
   pointer-events: none;
+  -webkit-app-region: no-drag;
 }
 
 :where(.vui-app-appshell).shell[data-theme="light"] .topBar::before {
@@ -247,6 +290,11 @@
   overflow-x: auto;
   overscroll-behavior-x: contain;
   scrollbar-width: none;
+  /* Keep nav above brand overflow / drag chrome for hit-testing. */
+  z-index: 3;
+  isolation: isolate;
+  pointer-events: auto;
+  -webkit-app-region: no-drag;
 }
 
 :where(.vui-app-appshell).nav::-webkit-scrollbar {
@@ -254,15 +302,43 @@
 }
 
 :where(.vui-app-appshell).navLink {
+  display: inline-flex;
   flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
   min-height: 30px;
   padding-inline: 10px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
+  color: var(--fg-secondary);
+  font-size: var(--vui-font-sm);
+  font-weight: 600;
+  line-height: 1.2;
+  text-decoration: none;
   white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+  position: relative;
+  z-index: 1;
+  pointer-events: auto;
+  -webkit-app-region: no-drag;
+}
+
+:where(.vui-app-appshell).navLink:hover {
+  color: var(--fg-primary);
+  background: color-mix(in srgb, var(--vui-control-muted) 72%, transparent);
 }
 
 :where(.vui-app-appshell).navLinkActive {
   border-color: color-mix(in srgb, var(--accent-cool) 42%, var(--vui-border-subtle));
   background: color-mix(in srgb, var(--accent-cool) 12%, var(--shell-surface));
+  color: var(--accent-cool);
+}
+
+:where(.vui-app-appshell).navLinkDisabled {
+  cursor: default;
+  opacity: 0.55;
+  pointer-events: none;
 }
 
 :where(.vui-app-appshell).topActions {
