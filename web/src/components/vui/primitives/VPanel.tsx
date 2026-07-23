@@ -14,12 +14,7 @@ export function VPanel({ ariaLabel, className, children, ...props }: VPanelProps
       as="section"
       data-vui="panel"
       ariaLabel={ariaLabel}
-      className={[
-        "backdrop-blur-[1px]",
-        className,
-      ]
-        .filter(Boolean)
-        .join(" ")}
+      className={className}
     >
       {children}
     </VSurface>

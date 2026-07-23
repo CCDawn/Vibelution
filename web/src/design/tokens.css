@@ -38,6 +38,13 @@
   --vui-surface-glass: color-mix(in srgb, var(--vui-surface-panel) 88%, transparent);
   --vui-surface-toolbar: color-mix(in srgb, var(--vui-surface-raised) 86%, transparent);
   --vui-surface-row: rgba(24, 30, 40, 0.98);
+  /* Product surface contract: each visual role has one semantic consumption path. */
+  --vui-surface-workspace: var(--vui-surface-base);
+  --vui-surface-region: var(--vui-surface-rail);
+  --vui-surface-card: var(--vui-surface-panel);
+  --vui-surface-inset: var(--vui-surface-row);
+  --vui-surface-control: var(--vui-control-muted);
+  --vui-surface-popover: var(--vui-surface-glass);
   --vui-row-hover-bg: color-mix(in srgb, var(--vui-surface-row) 90%, var(--fg-primary) 4%);
   --vui-surface-row-hover: var(--vui-row-hover-bg);
   --vui-control-muted: rgba(24, 30, 40, 0.98);
@@ -75,7 +82,7 @@
   --vui-sheen: inset 0 1px 0 rgba(255, 255, 255, 0.05);
   --vui-elevation-1-sheen: var(--vui-sheen), var(--vui-elevation-1);
   --vui-elevation-2-sheen: var(--vui-sheen), var(--vui-elevation-2);
-  --vui-radius-panel-soft: 10px;
+  --vui-radius-panel-soft: 12px;
   --vui-radius-overlay: 12px;
   --vui-elevation-panel: var(--vui-elevation-1-sheen);
   --vui-elevation-overlay: var(--vui-elevation-2-sheen);
@@ -154,9 +161,9 @@
   --font-size-body: var(--vui-font-md);
   --font-size-title: var(--vui-font-title);
 
-  --radius-control: 7px;
-  --radius-panel: 8px;
-  --radius-card: 7px;
+  --radius-control: 8px;
+  --radius-panel: var(--vui-radius-panel-soft);
+  --radius-card: var(--vui-radius-panel-soft);
   --radius-pill: 999px;
   --focus-ring: 0 0 0 2px color-mix(in srgb, var(--accent-warm) 64%, transparent);
   --vui-control-height-compact: 30px;
@@ -228,6 +235,12 @@
   --vui-surface-glass: color-mix(in srgb, var(--vui-surface-panel) 76%, transparent);
   --vui-surface-toolbar: color-mix(in srgb, var(--surface-card) 88%, transparent);
   --vui-surface-row: color-mix(in srgb, var(--surface-card) 86%, transparent);
+  --vui-surface-workspace: var(--vui-surface-base);
+  --vui-surface-region: var(--vui-surface-rail);
+  --vui-surface-card: var(--vui-surface-panel);
+  --vui-surface-inset: var(--vui-surface-row);
+  --vui-surface-control: var(--vui-control-muted);
+  --vui-surface-popover: var(--vui-surface-glass);
   --vui-row-hover-bg: color-mix(in srgb, var(--vui-surface-row) 88%, var(--fg-primary) 3%);
   --vui-surface-row-hover: var(--vui-row-hover-bg);
   --vui-control-muted: color-mix(in srgb, var(--surface-card-muted) 86%, var(--surface-card));
@@ -264,7 +277,7 @@
   --vui-sheen: inset 0 1px 0 rgba(255, 255, 255, 0.7);
   --vui-elevation-1-sheen: var(--vui-sheen), var(--vui-elevation-1);
   --vui-elevation-2-sheen: var(--vui-sheen), var(--vui-elevation-2);
-  --vui-radius-panel-soft: 10px;
+  --vui-radius-panel-soft: 12px;
   --vui-radius-overlay: 12px;
   --vui-elevation-panel: var(--vui-elevation-1-sheen);
   --vui-elevation-overlay: var(--vui-elevation-2-sheen);

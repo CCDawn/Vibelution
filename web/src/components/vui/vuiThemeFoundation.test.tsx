@@ -40,6 +40,12 @@ describe("VUI dual-theme foundation", () => {
       "--vui-surface-glass",
       "--vui-surface-toolbar",
       "--vui-surface-row",
+      "--vui-surface-workspace",
+      "--vui-surface-region",
+      "--vui-surface-card",
+      "--vui-surface-inset",
+      "--vui-surface-control",
+      "--vui-surface-popover",
       "--vui-surface-row-hover",
       "--vui-control-muted",
       "--vui-control-muted-hover",
@@ -79,15 +85,22 @@ describe("VUI dual-theme foundation", () => {
       expect(tokensSource).toContain(token);
     }
 
-    expect(tokensSource).toContain("--vui-radius-panel-soft: 10px;");
+    expect(tokensSource).toContain("--vui-radius-panel-soft: 12px;");
     expect(tokensSource).toContain("--vui-radius-overlay: 12px;");
+    expect(tokensSource).toContain("--radius-control: 8px;");
+    expect(tokensSource).toContain("--radius-panel: var(--vui-radius-panel-soft);");
+    expect(tokensSource).toContain("--radius-card: var(--vui-radius-panel-soft);");
     expect(tokensSource).toContain("--vui-elevation-panel: var(--vui-elevation-1-sheen);");
     expect(tokensSource).toContain("--vui-elevation-overlay: var(--vui-elevation-2-sheen);");
     expect(tailwindSource).toContain("--color-vui-surface-rail: var(--vui-surface-rail)");
     expect(tailwindSource).toContain("--color-vui-surface-raised: var(--vui-surface-raised)");
+    expect(tailwindSource).toContain("--color-vui-surface-card: var(--vui-surface-card)");
+    expect(tailwindSource).toContain("--color-vui-surface-popover: var(--vui-surface-popover)");
 
     const lightThemeBlock = tokensSource.slice(tokensSource.indexOf('[data-theme="light"]'));
     expect(lightThemeBlock).toContain("--vui-surface-glass");
+    expect(lightThemeBlock).toContain("--vui-surface-card");
+    expect(lightThemeBlock).toContain("--vui-surface-popover");
     expect(lightThemeBlock).toContain("--vui-control-muted");
     expect(lightThemeBlock).toContain("--vui-control-hover-bg");
     expect(lightThemeBlock).toContain("--vui-control-hover-border");
