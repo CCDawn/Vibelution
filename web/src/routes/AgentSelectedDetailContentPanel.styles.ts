@@ -11,7 +11,7 @@ const styles = {
   paneContent:
     "grid min-h-0 min-w-0 [align-content:start] [gap:8px] [overflow:auto] [overscroll-behavior:contain]",
   configSectionNav:
-    "inline-grid w-fit max-w-full [grid-auto-flow:column] [grid-auto-columns:minmax(88px,_max-content)] [gap:3px] min-w-0 [padding:3px] [border:1px_solid_var(--vui-border-subtle)] [border-radius:var(--radius-control)] [background:color-mix(in_srgb,_var(--vui-surface-row)_58%,_transparent)] max-[860px]:grid max-[860px]:w-full max-[860px]:[grid-auto-flow:row] max-[860px]:[grid-auto-columns:auto] max-[860px]:[grid-template-columns:repeat(2,_minmax(0,_1fr))]",
+    "inline-grid w-fit max-w-full [grid-auto-flow:column] [grid-auto-columns:minmax(88px,_max-content)] [gap:3px] min-w-0 [padding:3px] [border:1px_solid_var(--vui-border-subtle)] [border-radius:var(--radius-control)] [background:var(--vui-surface-row)] max-[860px]:grid max-[860px]:w-full max-[860px]:[grid-auto-flow:row] max-[860px]:[grid-auto-columns:auto] max-[860px]:[grid-template-columns:repeat(2,_minmax(0,_1fr))]",
   configSectionTab:
     "inline-flex w-full [align-items:center] [justify-content:center] [gap:6px] min-w-0 [min-height:30px] [padding:4px_10px] [border:1px_solid_transparent] [border-radius:var(--radius-control)] [background:transparent] [color:var(--fg-tertiary)] [font-size:var(--vui-font-xs)] [font-weight:720] hover:[background:var(--vui-surface-row-hover)] hover:[color:var(--fg-secondary)]",
   configSectionTabActive:

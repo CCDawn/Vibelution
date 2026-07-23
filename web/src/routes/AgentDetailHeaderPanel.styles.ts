@@ -1,6 +1,6 @@
 const styles = {
   detailHeaderFrame:
-    "grid min-w-0 grid-rows-[auto_auto] border-b border-[var(--vui-border-subtle)] bg-[var(--vui-surface-page)]",
+    "grid min-w-0 grid-rows-[auto_auto] border-b border-[var(--vui-border-subtle)] bg-[var(--vui-surface-workspace)]",
   detailHeader:
     "grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-4 px-0 pb-3 [&_h2]:m-0 [&_h2]:min-w-0 [&_h2]:truncate [&_h2]:text-lg [&_h2]:font-semibold max-[680px]:grid-cols-1 max-[680px]:gap-2",
   detailIdentity: "flex min-w-0 items-center gap-3",
@@ -22,7 +22,7 @@ const styles = {
   issue_warning:
     "border-[color-mix(in_srgb,var(--accent-warm)_30%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_10%,transparent)] text-[var(--accent-warm-2)]",
   detailTabs:
-    "flex min-w-0 items-end gap-6 overflow-x-auto [border:1px_solid_color-mix(in_srgb,var(--vui-border-subtle)_72%,transparent)] [border-left:0] [border-right:0] [border-top:0] bg-[color-mix(in_srgb,var(--vui-surface-row)_18%,transparent)] px-0",
+    "flex min-w-0 items-end gap-6 overflow-x-auto [border:1px_solid_color-mix(in_srgb,var(--vui-border-subtle)_72%,transparent)] [border-left:0] [border-right:0] [border-top:0] bg-[var(--vui-surface-workspace)] px-0",
   detailTab:
     "inline-flex min-h-10 w-fit min-w-max items-center justify-center gap-1.5 border-x-0 border-t-0 border-b-2 border-transparent bg-transparent px-0.5 [font-size:var(--vui-font-sm)] font-semibold text-[var(--fg-tertiary)] hover:border-[color-mix(in_srgb,var(--accent-cool)_36%,transparent)] hover:text-[var(--fg-primary)] [&_strong]:[font-size:var(--vui-font-xs)]",
   detailTabActive:
