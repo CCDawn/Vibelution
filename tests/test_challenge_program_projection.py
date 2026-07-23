@@ -95,6 +95,43 @@ def test_configured_dashscope_and_real_call_evidence_only_clear_their_own_blocke
     assert stage1["status"] == "blocked"
 
 
+def test_valid_single_question_candidate_clears_sample_blocker_but_not_trial_gate():
+    projection = build_challenge_program_projection(
+        legacy_lifecycle={"stage2": {}, "stage3": {}},
+        public_config={
+            "llm": {
+                "providers": {
+                    "dashscope_main": {
+                        "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                        "credential_ref": "env:DASHSCOPE_API_KEY",
+                        "models": {"qwen3.6-plus": {"upstream_id": "qwen3.6-plus"}},
+                    }
+                }
+            }
+        },
+        official_model_evidence=[
+            {
+                "evidenceId": "model-evidence-real-1",
+                "modelProvider": "dashscope",
+                "status": "registered",
+            }
+        ],
+        question_run_summary={
+            "validCandidateCount": 1,
+            "completedCount": 0,
+            "completedQuestionIds": [],
+            "latestCandidate": {"questionId": "SCI-096", "status": "review_required"},
+        },
+    )
+
+    stage1 = projection["stage1ComplianceReadiness"]
+    assert "real_single_question_sample_missing" not in stage1["blockers"]
+    assert stage1["blockers"] == ["five_question_trial_missing"]
+    assert stage1["singleQuestionSample"]["candidateCount"] == 1
+    assert stage1["singleQuestionSample"]["completed"] == 0
+    assert stage1["singleQuestionSample"]["latestCandidate"]["questionId"] == "SCI-096"
+
+
 def test_program_projection_reports_no_deep_case_when_legacy_iteration_never_started():
     projection = build_challenge_program_projection(
         legacy_lifecycle={"stage2": {"status": "draft"}, "stage3": {"status": "not_started"}},

@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from core.web.services.team_workflow.challenge_program import build_challenge_program_projection
+from core.web.services.team_workflow.challenge_question_runs import challenge_question_run_summary
 
 
 CHALLENGE_PROGRAM_CASE_REGISTRY_PATH = Path("挑战杯") / "data" / "representative_deep_cases.json"
@@ -461,6 +462,7 @@ def _experiment_planning_status(
         public_config=s.load_public_config(),
         official_model_evidence=s._official_model_evidence_entries(official_model_evidence_store),
         compatibility_case_registry=_load_challenge_program_case_registry(),
+        question_run_summary=challenge_question_run_summary(team_id),
     )
     gaps = s._experiment_planning_gaps(
         latest_experiment=latest_experiment,

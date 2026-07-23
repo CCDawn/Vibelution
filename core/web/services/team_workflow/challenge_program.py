@@ -178,17 +178,32 @@ def build_challenge_program_projection(
     public_config: dict[str, Any],
     official_model_evidence: list[dict[str, Any]],
     compatibility_case_registry: dict[str, Any] | None = None,
+    question_run_summary: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build a read-only program projection without rewriting legacy history."""
 
     provider = _dashscope_qwen_configuration(public_config)
     call_evidence = _official_dashscope_evidence(official_model_evidence)
+    run_summary = question_run_summary if isinstance(question_run_summary, dict) else {}
+    valid_candidate_count = int(run_summary.get("validCandidateCount") or 0)
+    completed_question_count = int(run_summary.get("completedCount") or 0)
+    latest_candidate = run_summary.get("latestCandidate") if isinstance(run_summary.get("latestCandidate"), dict) else {}
+    latest_validation = (
+        latest_candidate.get("validation") if isinstance(latest_candidate.get("validation"), dict) else {}
+    )
+    latest_semantic = (
+        latest_validation.get("semantic") if isinstance(latest_validation.get("semantic"), dict) else {}
+    )
+    latest_gates = latest_candidate.get("humanGates") if isinstance(latest_candidate.get("humanGates"), dict) else {}
     stage1_blockers: list[str] = []
     if not provider["configured"]:
         stage1_blockers.append("dashscope_qwen_provider_missing")
     if call_evidence["count"] == 0:
         stage1_blockers.append("dashscope_qwen_call_evidence_missing")
-    stage1_blockers.extend(["real_single_question_sample_missing", "five_question_trial_missing"])
+    if valid_candidate_count < 1:
+        stage1_blockers.append("real_single_question_sample_missing")
+    if completed_question_count < 5:
+        stage1_blockers.append("five_question_trial_missing")
 
     case_records = _legacy_case_records(legacy_lifecycle)
     case_recovery_source = "legacy_lifecycle" if case_records else "none"
@@ -216,19 +231,30 @@ def build_challenge_program_projection(
             "blockers": stage1_blockers,
             "dashscopeQwenProvider": provider,
             "officialModelCallEvidence": call_evidence,
-            "singleQuestionSample": {"required": 1, "completed": 0, "realCallsRequired": True},
-            "trialRun": {"required": 5, "completed": 0, "realCallsRequired": True},
+            "singleQuestionSample": {
+                "required": 1,
+                "candidateCount": min(valid_candidate_count, 1),
+                "completed": min(completed_question_count, 1),
+                "realCallsRequired": True,
+                "latestCandidate": latest_candidate or None,
+            },
+            "trialRun": {
+                "required": 5,
+                "completed": min(completed_question_count, 5),
+                "realCallsRequired": True,
+                "completedQuestionIds": list(run_summary.get("completedQuestionIds") or [])[:5],
+            },
             "independentEvaluationDimensions": list(INDEPENDENT_EVALUATION_DIMENSIONS),
             "aggregateScoreAllowed": False,
             "humanGates": list(HUMAN_GATES),
             "acceptance": {
-                "schemaValidation": False,
-                "citationValidation": False,
+                "schemaValidation": latest_validation.get("schemaValidation") == "passed",
+                "citationValidation": latest_validation.get("citationValidation") == "passed",
                 "minimumHypothesisCount": 2,
-                "allSevenDimensionsReviewed": False,
-                "allFourHumanGatesApproved": False,
-                "researchPlanPresent": False,
-                "feedbackRevisionCount": 0,
+                "allSevenDimensionsReviewed": latest_semantic.get("allSevenDimensionsReviewed") is True,
+                "allFourHumanGatesApproved": latest_gates.get("allApproved") is True,
+                "researchPlanPresent": latest_semantic.get("researchPlanPresent") is True,
+                "feedbackRevisionCount": int(latest_semantic.get("feedbackRevisionCount") or 0),
             },
         },
         "stage2BatchGovernance": {
