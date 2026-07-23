@@ -344,6 +344,17 @@ def register_challenge_question_output(team_id: str, payload: dict[str, Any]) ->
     run_id = str(run.get("run_id") or "").strip()
     if not question_id or not run_id:
         raise ValueError("output.question_id and output.run.run_id are required.")
+    parent_run_id = str(payload.get("parentRunId") or "").strip()
+    if parent_run_id == run_id:
+        raise ValueError("parentRunId must reference an earlier run.")
+    raw_lineage_refs = payload.get("lineageRefs")
+    lineage_refs = list(
+        dict.fromkeys(
+            str(item).strip()
+            for item in (raw_lineage_refs if isinstance(raw_lineage_refs, list) else [])
+            if str(item).strip()
+        )
+    )
     catalog_question = _catalog_question(question_id)
     if catalog_question is None:
         issues.append({"path": "question_id", "message": "Question id is not present in the official catalog."})
@@ -378,14 +389,47 @@ def register_challenge_question_output(team_id: str, payload: dict[str, Any]) ->
         "registeredAt": _utc_now(),
         "registeredBy": str(payload.get("registeredBy") or ""),
     }
+    if parent_run_id or lineage_refs:
+        record["lineage"] = {
+            "relation": "revises" if parent_run_id else "derived_from_evidence",
+            "parentRunId": parent_run_id,
+            "refs": lineage_refs,
+        }
     with _STORE_LOCK:
-        _write_json(_artifact_path(team_id, question_id, run_id), output)
         store = _load_store(team_id)
-        records = [
-            item
-            for item in store.get("records", [])
-            if isinstance(item, dict) and item.get("recordId") != record["recordId"]
-        ]
+        records = [item for item in store.get("records", []) if isinstance(item, dict)]
+        existing_record = next(
+            (item for item in records if item.get("recordId") == record["recordId"]),
+            None,
+        )
+        if existing_record is not None:
+            existing_output = _read_json(_artifact_path(team_id, question_id, run_id))
+            if (
+                not existing_output
+                or _output_sha256(existing_output) != existing_record.get("outputSha256")
+            ):
+                raise ValueError(
+                    "Existing challenge question run artifact does not match its immutable index record."
+                )
+            if (
+                existing_record.get("outputSha256") == output_hash
+                and existing_record.get("lineage") == record.get("lineage")
+            ):
+                return {
+                    "record": deepcopy(existing_record),
+                    "output": existing_output,
+                    "summary": challenge_question_run_summary(team_id),
+                    "idempotent": True,
+                }
+            raise ValueError(
+                "Challenge question runs are immutable; use a new run_id for revised output."
+            )
+        if parent_run_id and not any(
+            item.get("questionId") == question_id and item.get("runId") == parent_run_id
+            for item in records
+        ):
+            raise ValueError("parentRunId was not found for this challenge question.")
+        _write_json(_artifact_path(team_id, question_id, run_id), output)
         records.append(record)
         store["records"] = records
         store["updatedAt"] = _utc_now()
@@ -401,6 +445,7 @@ def register_challenge_question_output(team_id: str, payload: dict[str, Any]) ->
             "teamId": team_id,
             "questionId": question_id,
             "runId": run_id,
+            "parentRunId": parent_run_id,
             "schemaValidation": record["validation"]["schemaValidation"],
             "citationValidation": record["validation"]["citationValidation"],
             "officialModelCall": official_call,
