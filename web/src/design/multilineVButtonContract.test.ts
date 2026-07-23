@@ -20,6 +20,22 @@ describe("multiline VButton hardening (Path B wave 10)", () => {
     expect(token).toMatch(/contentLayout="plain"[\s\S]{0,160}styles\.tokenStatusMetricButton/);
   });
 
+  it("uses natural-height plain layout for Agent management directory rows", () => {
+    const skills = src("routes/SkillsRoute.tsx");
+    const skillStyles = src("routes/SkillsRoute.styles.ts");
+    const prompts = src("routes/PromptTemplatesRoute.tsx");
+    const promptStyles = src("routes/PromptTemplatesRoute.styles.ts");
+    const tools = src("routes/ToolsRoute.tsx");
+    const toolStyles = src("routes/ToolsRoute.styles.ts");
+
+    expect(skills).toMatch(/contentLayout="plain"[\s\S]{0,180}styles\.skillButtonBaseClass/);
+    expect(skillStyles).toContain("!h-auto");
+    expect(prompts).toMatch(/contentLayout="plain"[\s\S]{0,180}styles\.templateButtonBaseClass/);
+    expect(promptStyles).toContain("!h-auto");
+    expect(tools).toMatch(/contentLayout="plain"[\s\S]{0,120}styles\.toolButton/);
+    expect(toolStyles).toContain("!h-auto");
+  });
+
   it("does not force nowrap on native buttons with explicit grid display", () => {
     const native = src("components/vui/primitives/VNativeButton.tsx");
     expect(native).toContain("displayExplicit ? null : \"whitespace-nowrap\"");

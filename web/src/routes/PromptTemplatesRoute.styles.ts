@@ -6,7 +6,7 @@ const controlButtonClass =
 const fieldSurfaceClass =
   "rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--vui-border-soft)_76%,transparent)] bg-[color-mix(in_srgb,var(--surface-input-strong)_86%,transparent)]";
 const rowButtonSurfaceClass =
-  "block w-full rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--vui-border-soft)_74%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-row)_78%,transparent)] px-[9px] py-2 text-left text-vui-fg-primary hover:border-[color-mix(in_srgb,var(--border-strong)_78%,transparent)] hover:bg-[color-mix(in_srgb,var(--vui-surface-row)_88%,transparent)]";
+  "block !h-auto w-full rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--vui-border-soft)_74%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-row)_78%,transparent)] px-[9px] py-2 text-left text-vui-fg-primary hover:border-[color-mix(in_srgb,var(--border-strong)_78%,transparent)] hover:bg-[color-mix(in_srgb,var(--vui-surface-row)_88%,transparent)]";
 const pillSurfaceClass =
   "inline-flex min-h-5 max-w-full items-center justify-center rounded-full border border-[color-mix(in_srgb,var(--vui-border-soft)_74%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-row)_72%,transparent)] px-1.5 [font-size:var(--vui-font-xs)]";
 const refreshButtonClass = `${controlButtonClass} h-[var(--vui-control-height-sm)] w-[var(--vui-control-height-sm)] p-0`;
@@ -45,13 +45,12 @@ const linkedBorderClass = "border-[color-mix(in_srgb,var(--accent-cool)_44%,var(
 const hiddenCheckboxClass = "pointer-events-none absolute h-px w-px opacity-0";
 const templateButtonBaseClass = [
   rowButtonSurfaceClass,
-  "[&_[data-slot=vui-button-content]]:w-full",
-  "[&_[data-slot=vui-button-label]]:grid [&_[data-slot=vui-button-label]]:w-full [&_[data-slot=vui-button-label]]:gap-[5px]",
+  "!grid gap-[5px]",
 ].join(" ");
 const templateButtonActiveClass = "border-[color-mix(in_srgb,var(--accent-warm)_30%,transparent)] bg-[var(--surface-active-neutral)] shadow-[var(--vui-shadow-inset-accent)]";
 const templateMainClass = "grid min-w-0 gap-0.5 [&_*]:min-w-0 [&_*]:truncate";
 const templateMetaClass =
-  "flex flex-wrap gap-1 [&_span]:inline-flex [&_span]:min-h-5 [&_span]:max-w-full [&_span]:items-center [&_span]:justify-center [&_span]:rounded-full [&_span]:border [&_span]:border-[color-mix(in_srgb,var(--vui-border-soft)_74%,transparent)] [&_span]:bg-[color-mix(in_srgb,var(--vui-surface-row)_72%,transparent)] [&_span]:px-1.5 [&_span]:[font-size:var(--vui-font-xs)] [&_span]:text-vui-fg-tertiary";
+  "flex min-w-0 max-w-full flex-wrap gap-1 overflow-hidden [&_span]:inline-flex [&_span]:min-h-5 [&_span]:min-w-0 [&_span]:max-w-full [&_span]:items-center [&_span]:justify-center [&_span]:truncate [&_span]:whitespace-nowrap [&_span]:rounded-full [&_span]:border [&_span]:border-[color-mix(in_srgb,var(--vui-border-soft)_74%,transparent)] [&_span]:bg-[color-mix(in_srgb,var(--vui-surface-row)_72%,transparent)] [&_span]:px-1.5 [&_span]:[font-size:var(--vui-font-xs)] [&_span]:text-vui-fg-tertiary";
 const categoryPillClass = `${pillSurfaceClass} text-[var(--accent-cool-2)]`;
 const editorHeaderClass = "flex min-w-0 items-start justify-between gap-3";
 const editorMetaClass = "grid grid-cols-3 gap-1.5 max-[980px]:grid-cols-1";

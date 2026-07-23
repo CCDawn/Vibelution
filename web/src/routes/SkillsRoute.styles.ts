@@ -5,7 +5,7 @@ const controlButtonClass =
 const fieldSurfaceClass =
   "rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--vui-border-soft)_76%,transparent)] bg-[color-mix(in_srgb,var(--surface-input-strong)_86%,transparent)]";
 const rowButtonSurfaceClass =
-  "block w-full rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--vui-border-soft)_74%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-row)_78%,transparent)] p-2 text-left text-vui-fg-primary hover:border-[color-mix(in_srgb,var(--border-strong)_78%,transparent)] hover:bg-[color-mix(in_srgb,var(--vui-surface-row-hover)_84%,transparent)]";
+  "block !h-auto w-full rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--vui-border-soft)_74%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-row)_78%,transparent)] p-2 text-left text-vui-fg-primary hover:border-[color-mix(in_srgb,var(--border-strong)_78%,transparent)] hover:bg-[color-mix(in_srgb,var(--vui-surface-row-hover)_84%,transparent)]";
 const detailSurfaceClass =
   "rounded-[var(--radius-panel)] border border-[color-mix(in_srgb,var(--vui-border-soft)_74%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-panel)_62%,transparent)]";
 const refreshButtonClass = `${controlButtonClass} h-[var(--vui-control-height-sm)] w-[var(--vui-control-height-sm)] p-0`;
@@ -16,7 +16,7 @@ const summaryLabelClass = "[font-size:var(--vui-font-xs)] text-vui-fg-tertiary";
 const summaryValueClass = "min-w-0 truncate [font-size:var(--vui-font-xs)] text-vui-fg-primary";
 const workspaceClass = "grid min-h-0 grid-cols-[clamp(240px,26vw,340px)_minmax(0,1fr)] gap-1.5 px-2 pb-2 pt-1.5 max-[920px]:grid-cols-1 max-[920px]:content-start max-[920px]:overflow-auto";
 const panelClass = "grid min-h-0 min-w-0 content-start gap-[7px]";
-const listPanelClass = `${panelClass} grid-rows-[auto_auto_auto_minmax(0,1fr)]`;
+const listPanelClass = `${panelClass} grid-rows-[auto_auto_auto_auto_minmax(0,1fr)]`;
 const detailPanelClass = `${panelClass} overflow-auto`;
 const panelHeaderClass = "flex min-w-0 items-start justify-between gap-3";
 const panelEyebrowClass = "m-0 mb-px [font-size:var(--vui-font-xs)] uppercase tracking-[0.07em] text-vui-fg-tertiary";
@@ -37,8 +37,7 @@ const rowSelectClass = `grid h-9 w-7 cursor-pointer place-items-center ${fieldSu
 const hiddenCheckboxClass = "pointer-events-none absolute h-px w-px opacity-0";
 const skillButtonBaseClass = [
   rowButtonSurfaceClass,
-  "[&_[data-slot=vui-button-content]]:w-full",
-  "[&_[data-slot=vui-button-label]]:grid [&_[data-slot=vui-button-label]]:w-full [&_[data-slot=vui-button-label]]:grid-cols-[10px_minmax(0,1fr)_auto] [&_[data-slot=vui-button-label]]:items-center [&_[data-slot=vui-button-label]]:gap-2",
+  "!grid grid-cols-[10px_minmax(0,1fr)_auto] items-center gap-2",
 ].join(" ");
 const skillButtonActiveClass = "border-[color-mix(in_srgb,var(--accent-warm)_30%,transparent)] bg-[var(--surface-active-neutral)] shadow-[var(--vui-shadow-inset-accent)]";
 const sourceDotClass = "h-2 w-2 rounded-full bg-[var(--accent-cool)] data-[source=agents]:bg-[var(--accent-warm)] data-[source=other]:bg-vui-fg-tertiary";

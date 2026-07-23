@@ -652,6 +652,7 @@ export function PromptTemplatesRoute() {
                     </VTooltip>
                     <VButton
                       type="button"
+                      contentLayout="plain"
                       className={[
                         styles.templateButtonBaseClass,
                         activeTemplateId === template.promptTemplateId ? styles.templateButtonActiveClass : "",

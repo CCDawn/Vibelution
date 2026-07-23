@@ -356,20 +356,22 @@ describe("VUI batch migration", () => {
     expect(utilityMenuStyles.utilityFileButtonActive).toContain("[&_[data-slot=vui-button-label]]:grid");
   });
 
-  it("routes/SkillsRoute.tsx keeps VUI list button grid on internal slots", () => {
+  it("routes/SkillsRoute.tsx keeps multiline VUI list buttons on a natural-height root grid", () => {
     const source = readTargetSource("routes/SkillsRoute.styles.ts");
 
     expect(source).toContain("skillButtonBaseClass");
-    expect(source).toContain("[&_[data-slot=vui-button-content]]:w-full");
-    expect(source).toContain("[&_[data-slot=vui-button-label]]:grid");
+    expect(source).toContain("!h-auto");
+    expect(source).toContain("!grid grid-cols-[10px_minmax(0,1fr)_auto]");
+    expect(source).not.toContain("[&_[data-slot=vui-button-label]]:grid");
   });
 
-  it("routes/PromptTemplatesRoute.tsx keeps VUI list button grid on internal slots", () => {
+  it("routes/PromptTemplatesRoute.tsx keeps multiline VUI list buttons on a natural-height root grid", () => {
     const source = readTargetSource("routes/PromptTemplatesRoute.styles.ts");
 
     expect(source).toContain("templateButtonBaseClass");
-    expect(source).toContain("[&_[data-slot=vui-button-content]]:w-full");
-    expect(source).toContain("[&_[data-slot=vui-button-label]]:grid");
+    expect(source).toContain("!h-auto");
+    expect(source).toContain("!grid gap-[5px]");
+    expect(source).not.toContain("[&_[data-slot=vui-button-label]]:grid");
   });
 
   it.each(routeShellTargets)(
