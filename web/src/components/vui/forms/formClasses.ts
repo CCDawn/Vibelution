@@ -1,11 +1,12 @@
-import { type VuiDensity } from "../renderers/shared/buttonVariants";
+import {
+  type VuiDensity,
+  vuiControlDensityClass,
+} from "../renderers/shared/buttonVariants";
 
 export function vuiFormControlClass(density: VuiDensity | undefined): string {
-  const heightClass = density === "normal" ? "min-h-9" : "min-h-8";
-
   return [
-    heightClass,
-    "w-full min-w-0 rounded-md border border-vui-border-subtle",
+    vuiControlDensityClass(density),
+    "w-full min-w-0 rounded-[var(--radius-control)] border border-vui-border-subtle",
     "bg-vui-control-muted px-2 text-sm text-vui-fg-primary shadow-none",
     // Inherit document theme so native pickers/options follow light/dark tokens.
     "[color-scheme:inherit]",

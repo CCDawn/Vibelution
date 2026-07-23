@@ -1,6 +1,6 @@
 [data-vui-app] {
-  --vui-native-control-height: 28px;
-  --vui-native-field-height: 30px;
+  --vui-native-control-height: var(--vui-control-height-compact);
+  --vui-native-field-height: var(--vui-control-height-compact);
   --vui-native-field-textarea-min-height: 72px;
   --vui-native-control-radius: var(--radius-control);
   --vui-native-control-border-width: 1px;
