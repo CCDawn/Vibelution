@@ -159,6 +159,8 @@ from .agent_directory_service import (
 from .runtime_scene_service import record_runtime_scene_conversation_event, record_runtime_scene_event
 from .session.list_cache import (
     SESSION_LIST_CACHE_TTL_SECONDS as _SESSION_LIST_CACHE_TTL_SECONDS,
+    _SESSION_LIST_CACHE,
+    _SESSION_LIST_CACHE_CONDITION,
     _begin_session_list_cache_build,
     _copy_session_list_snapshot,
     _copy_session_summary_snapshot,
