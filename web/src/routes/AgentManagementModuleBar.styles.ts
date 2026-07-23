@@ -1,6 +1,6 @@
 const styles = {
   moduleBar:
-    "flex h-[52px] min-w-0 items-stretch justify-between gap-4 border-b border-[var(--vui-border-subtle)] bg-[color-mix(in_srgb,var(--vui-surface-page)_92%,transparent)] px-4",
+    "flex h-[52px] min-w-0 items-stretch justify-between gap-4 border-b border-[var(--vui-border-subtle)] bg-[var(--vui-surface-toolbar)] px-4",
   managementNav: "m-0 min-w-0",
   moduleActions:
     "flex min-w-0 shrink-0 items-center justify-end gap-2 [&_[data-vui=button]]:w-fit max-[560px]:[&_[data-vui=button]_[data-slot=vui-button-label]]:hidden",

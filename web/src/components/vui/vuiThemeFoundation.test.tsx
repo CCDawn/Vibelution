@@ -19,6 +19,7 @@ const designRoot = resolve(import.meta.dirname, "../../design");
 const routesRoot = resolve(import.meta.dirname, "../../routes");
 const baseSource = readFileSync(resolve(designRoot, "base.css"), "utf8");
 const tokensSource = readFileSync(resolve(designRoot, "tokens.css"), "utf8");
+const shellStylesSource = readFileSync(resolve(designRoot, "workbench-shell.css"), "utf8");
 const tailwindSource = readFileSync(resolve(designRoot, "tailwind.css"), "utf8");
 const providerThemeSource = readFileSync(resolve(designRoot, "vui-provider-theme.css"), "utf8");
 const routeStyleMapSource = readdirSync(routesRoot)
@@ -110,6 +111,19 @@ describe("VUI dual-theme foundation", () => {
     expect(lightThemeBlock).toContain("--surface-elevated");
     expect(tokensSource).toContain("--vui-select-chevron");
     expect(lightThemeBlock).toContain("--vui-select-chevron");
+    expect(tokensSource).toContain("--vui-surface-toolbar: var(--vui-surface-raised);");
+    expect(tokensSource).toContain("--vui-surface-row: rgb(24 30 40);");
+    expect(lightThemeBlock).toContain("--vui-surface-row: var(--surface-card-muted);");
+    expect(tokensSource).not.toContain("--vui-surface-row: color-mix(in srgb, var(--surface-card) 86%, transparent);");
+  });
+
+  it("keeps structural shell surfaces opaque while reserving glass for explicit overlay roles", () => {
+    expect(shellStylesSource).toContain("--shell-surface: var(--vui-surface-rail);");
+    expect(shellStylesSource).toContain("--shell-panel: var(--vui-surface-panel);");
+    expect(shellStylesSource).toContain("--shell-card: var(--vui-surface-row);");
+    expect(shellStylesSource).not.toContain("color-mix(in srgb, var(--shell-panel)");
+    expect(shellStylesSource).not.toContain("color-mix(in srgb, var(--shell-card)");
+    expect(tokensSource).toContain("--vui-surface-glass: color-mix(in srgb, var(--vui-surface-panel) 88%, transparent);");
   });
 
   it("keeps shadcn-native form renderers dual-theme safe", () => {
