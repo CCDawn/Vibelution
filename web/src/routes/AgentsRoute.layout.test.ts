@@ -501,6 +501,8 @@ describe("AgentsRoute layout contract", () => {
     expect(managementHeaderPanelSource).not.toContain("<AgentSummaryStrip");
     expect(managementModuleBarStyles.managementNav).toBeTruthy();
     expect(managementModuleBarStyles.moduleBar).toBeTruthy();
+    expect(managementModuleBarStyles.moduleBar).toContain("bg-[var(--vui-surface-toolbar)]");
+    expect(managementModuleBarStyles.moduleBar).not.toContain("transparent");
   });
 
   it("uses a compact VUI module bar with the primary Agent action", () => {

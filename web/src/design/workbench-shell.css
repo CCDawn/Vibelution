@@ -1,11 +1,11 @@
 :where(.vui-app-appshell).shell {
   --shell-topbar-height: 62px;
   --shell-window-control-inset: 0px;
-  --shell-surface: color-mix(in srgb, var(--surface-panel) 92%, transparent);
-  --shell-surface-muted: color-mix(in srgb, var(--surface-panel) 84%, transparent);
-  --shell-surface-hover: color-mix(in srgb, var(--surface-panel-hover) 94%, transparent);
-  --shell-panel: color-mix(in srgb, var(--surface-panel) 94%, transparent);
-  --shell-card: color-mix(in srgb, var(--surface-card) 84%, transparent);
+  --shell-surface: var(--vui-surface-rail);
+  --shell-surface-muted: var(--vui-surface-row);
+  --shell-surface-hover: var(--vui-surface-row-hover);
+  --shell-panel: var(--vui-surface-panel);
+  --shell-card: var(--vui-surface-row);
   --shell-page-end: var(--bg-canvas);
   --shell-star-color: color-mix(in srgb, var(--accent-warm) 20%, transparent);
   --shell-star-faint: color-mix(in srgb, var(--accent-warm) 8%, transparent);
@@ -28,23 +28,10 @@
 
 :where(.vui-app-appshell).shell[data-theme="light"] {
   --shell-page-end: var(--bg-canvas);
-  --shell-surface: color-mix(in srgb, var(--surface-panel) 92%, transparent);
-  --shell-surface-muted: color-mix(in srgb, var(--surface-panel) 84%, transparent);
-  --shell-panel: color-mix(in srgb, var(--surface-panel) 94%, transparent);
-  --shell-card: color-mix(in srgb, var(--surface-card) 84%, transparent);
 }
 
 :where(.vui-app-appshell).shell[data-theme="light"][data-theme-background="custom"] {
   --theme-background-overlay-mid: color-mix(in srgb, var(--bg-canvas) 34%, transparent);
-  --shell-surface-muted: color-mix(in srgb, var(--surface-panel) 78%, transparent);
-  --shell-panel: color-mix(in srgb, var(--surface-panel) 88%, transparent);
-}
-
-:where(.vui-app-appshell).shell[data-theme="dark"] {
-  --shell-surface: color-mix(in srgb, var(--vui-surface-rail) 92%, transparent);
-  --shell-surface-muted: color-mix(in srgb, var(--vui-surface-base) 88%, transparent);
-  --shell-panel: color-mix(in srgb, var(--vui-surface-panel) 94%, transparent);
-  --shell-card: color-mix(in srgb, var(--vui-surface-row) 88%, transparent);
 }
 
 :where(.vui-app-appshell).shell[data-theme-background="custom"] {
@@ -63,8 +50,6 @@
 :where(.vui-app-appshell).shell[data-theme-background="custom"][data-theme-background-readability="soft"] {
   --theme-background-overlay-mid: color-mix(in srgb, var(--bg-canvas) 18%, transparent);
   --theme-background-blur: 0px;
-  --shell-surface-muted: color-mix(in srgb, var(--surface-panel) 68%, transparent);
-  --shell-panel: color-mix(in srgb, var(--surface-panel) 80%, transparent);
 }
 
 :where(.vui-app-appshell).shell[data-theme-background="custom"][data-theme-background-readability="standard"] {
@@ -75,8 +60,6 @@
 :where(.vui-app-appshell).shell[data-theme-background="custom"][data-theme-background-readability="strong"] {
   --theme-background-overlay-mid: color-mix(in srgb, var(--bg-canvas) 60%, transparent);
   --theme-background-blur: 2px;
-  --shell-surface-muted: color-mix(in srgb, var(--surface-panel) 90%, transparent);
-  --shell-panel: color-mix(in srgb, var(--surface-panel) 96%, transparent);
 }
 
 :where(.vui-app-appshell).shell::before,
@@ -192,17 +175,11 @@
   border-bottom: 1px solid var(--border-hairline);
   background:
     var(--vui-gradient-route-soft),
-    color-mix(in srgb, var(--surface-panel) 68%, transparent);
+    var(--shell-surface);
   box-shadow: var(--vui-shadow-hairline);
   backdrop-filter: blur(16px);
   pointer-events: none;
   -webkit-app-region: no-drag;
-}
-
-:where(.vui-app-appshell).shell[data-theme="light"] .topBar::before {
-  background:
-    var(--vui-gradient-route-soft),
-    color-mix(in srgb, var(--surface-panel) 68%, transparent);
 }
 
 :where(.vui-app-appshell).mainArea {
@@ -523,7 +500,7 @@
   border-color: color-mix(in srgb, var(--accent-cool) 24%, var(--border-soft));
   background:
     var(--vui-gradient-route-soft),
-    color-mix(in srgb, var(--shell-panel) 96%, transparent);
+    var(--shell-panel);
   color: var(--fg-primary);
   box-shadow: var(--vui-shadow-soft);
 }
@@ -579,7 +556,7 @@
   padding: 8px;
   border: 1px solid color-mix(in srgb, var(--accent-cool) 20%, var(--border-soft));
   border-radius: var(--radius-control);
-  background: color-mix(in srgb, var(--shell-card) 58%, transparent);
+  background: var(--shell-card);
   color: var(--fg-secondary);
   box-shadow: none;
 }
@@ -791,7 +768,7 @@
   padding: 10px;
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-control);
-  background: color-mix(in srgb, var(--shell-card) 76%, transparent);
+  background: var(--shell-card);
 }
 
 :where(.vui-app-appshell).utilityFileHeader,
@@ -972,7 +949,7 @@
   padding: 8px;
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-control);
-  background: color-mix(in srgb, var(--shell-card) 82%, transparent);
+  background: var(--shell-card);
   color: var(--fg-tertiary);
   font-size: var(--vui-font-xs);
 }
@@ -1052,7 +1029,7 @@
   padding: 6px 7px;
   border: 1px solid color-mix(in srgb, var(--border-soft) 76%, transparent);
   border-radius: var(--radius-control);
-  background: color-mix(in srgb, var(--shell-card) 70%, transparent);
+  background: var(--shell-card);
   color: var(--fg-secondary);
   font-size: var(--vui-font-xs);
 }
@@ -1128,7 +1105,7 @@
   border: 1px solid var(--border-soft);
   border-radius: 999px;
   color: var(--fg-tertiary);
-  background: color-mix(in srgb, var(--shell-card) 74%, transparent);
+  background: var(--shell-card);
   font-size: var(--vui-font-xs);
 }
 
@@ -1183,7 +1160,7 @@
   padding: 3px 6px;
   border: 1px solid color-mix(in srgb, var(--border-soft) 74%, transparent);
   border-radius: 999px;
-  background: color-mix(in srgb, var(--shell-card) 78%, transparent);
+  background: var(--shell-card);
 }
 
 :where(.vui-app-appshell).statusGuideListItem[data-current="true"] {
@@ -1240,7 +1217,7 @@
   padding: 4px 6px;
   border: 1px solid color-mix(in srgb, var(--border-soft) 70%, transparent);
   border-radius: var(--radius-control);
-  background: color-mix(in srgb, var(--shell-card) 70%, transparent);
+  background: var(--shell-card);
 }
 
 :where(.vui-app-appshell).lifecycleProofItem strong {
