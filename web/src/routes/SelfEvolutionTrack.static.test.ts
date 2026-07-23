@@ -137,6 +137,10 @@ describe("SelfEvolutionTrack static assets", () => {
     expect(selfEvolutionStylesSource).toContain("max-h-full");
     expect(styles.trackShell).toContain("grid-rows-[auto_minmax(0,1fr)]");
     expect(selfEvolutionStylesSource).toContain("grid-rows-[auto_minmax(0,1fr)]");
+    // Status/header row stays content-height; body owns the 1fr track.
+    expect(styles.pageTabsRow).toContain("self-start");
+    expect(styles.pageTabsRow).toContain("shrink-0");
+    expect(styles.runActionBar).toContain("self-start");
   });
 
   it("surfaces the active run controls before the workspace columns", () => {

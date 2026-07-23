@@ -455,8 +455,11 @@ const styles = {
     "flex [align-items:center] [justify-content:space-between] [gap:10px] [flex-wrap:wrap]",
   selectionSummary:
     "inline-flex [align-items:center] [gap:8px] [color:var(--fg-secondary)]",
+  // Self track is the only page child (no route toolbar). One 1fr row fills the
+  // viewport; inner trackShell must keep its own auto | 1fr so the status bar
+  // stays content-height instead of stretching.
   selfPage:
-    "[grid-template-rows:minmax(0,_1fr)] [gap:0] [padding:8px_12px_12px] [background:color-mix(in_srgb,_var(--vui-surface-panel)_78%,_var(--surface-page))] max-[900px]:[grid-template-rows:minmax(0,_1fr)] max-[900px]:[gap:0]",
+    "[grid-template-rows:minmax(0,1fr)] [gap:0] [padding:8px_12px_12px] [background:color-mix(in_srgb,_var(--vui-surface-panel)_78%,_var(--surface-page))] [min-h-0] [align-content:stretch] max-[900px]:[grid-template-rows:minmax(0,1fr)] max-[900px]:[gap:0]",
   sourceHero:
     `grid [gap:5px] min-w-0 [padding:12px_14px] ${rowSurface} [&_span]:[color:var(--fg-tertiary)] [&_span]:[font-size:var(--vui-font-xs)] [&_small]:[color:var(--fg-tertiary)] [&_small]:[font-size:var(--vui-font-xs)] [&_strong]:min-w-0 [&_strong]:[overflow:hidden] [&_strong]:[color:var(--fg-primary)] [&_strong]:[text-overflow:ellipsis] [&_strong]:[white-space:nowrap] [&_small]:[overflow:hidden] [&_small]:[text-overflow:ellipsis] [&_small]:[white-space:nowrap]`,
   sourceInventoryBar:
@@ -567,12 +570,15 @@ const styles = {
     "flex [align-items:center] [justify-content:space-between] [gap:8px_12px] [flex-wrap:wrap] min-w-0 max-[1200px]:[align-items:flex-start] max-[900px]:grid max-[900px]:[grid-template-columns:1fr] max-[900px]:[gap:6px]",
   toolbarControls:
     "flex [align-items:center] [justify-content:flex-end] [gap:6px] [flex-wrap:nowrap] min-w-0 max-w-full max-[1200px]:[min-width:min(500px,_100%)] max-[900px]:[justify-content:stretch] max-[900px]:min-w-0 max-[900px]:[width:100%] max-[900px]:[overflow-x:auto] max-[900px]:[scrollbar-width:thin] max-[640px]:[justify-content:flex-start]",
+  // Content-sized row for supervised focus toolbar — never grow into a tall empty shell.
   toolbarControlsSupervisedFocus:
-    "[align-items:center] [flex:0_1_auto] min-w-0 [max-width:100%] [justify-content:flex-end]",
+    "flex flex-nowrap items-center justify-end gap-2 w-fit max-w-full min-w-0 shrink-0 overflow-x-auto [scrollbar-width:thin]",
   toolbarIntro:
     "grid [gap:2px] [min-width:260px] [max-width:min(760px,_100%)] max-[1200px]:[min-width:220px] max-[1200px]:[max-width:min(390px,_100%)] max-[900px]:min-w-0 max-[900px]:[max-width:100%]",
+  // Standalone supervised focus chrome: do NOT also apply `toolbar` (flex-wrap + full row)
+  // on top of VRouteHeader hideIntro — that reintroduced full-width empty bands.
   toolbarSupervisedFocus:
-    "[justify-content:flex-end]",
+    "!flex w-fit max-w-full min-w-0 flex-nowrap items-center justify-end gap-2 justify-self-end self-start",
   transcriptSection:
     "flex [flex:1_1_0] [flex-direction:column] min-h-0 [padding:0] [border:0] [background:transparent]",
   trendBarFill:
