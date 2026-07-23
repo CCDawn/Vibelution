@@ -20,7 +20,7 @@ const routesRoot = resolve(import.meta.dirname, "../../routes");
 const baseSource = readFileSync(resolve(designRoot, "base.css"), "utf8");
 const tokensSource = readFileSync(resolve(designRoot, "tokens.css"), "utf8");
 const tailwindSource = readFileSync(resolve(designRoot, "tailwind.css"), "utf8");
-const herouiThemeSource = readFileSync(resolve(designRoot, "heroui-theme.css"), "utf8");
+const providerThemeSource = readFileSync(resolve(designRoot, "vui-provider-theme.css"), "utf8");
 const routeStyleMapSource = readdirSync(routesRoot)
   .filter((fileName) => fileName.endsWith(".styles.ts"))
   .map((fileName) => readFileSync(resolve(routesRoot, fileName), "utf8"))
@@ -128,22 +128,22 @@ describe("VUI dual-theme foundation", () => {
     expect(baseSource).not.toContain("font-size: 15px");
   });
 
-  it("maps Tailwind and HeroUI bridge classes to Vibelution semantic tokens", () => {
+  it("maps Tailwind and provider theme classes to Vibelution semantic tokens", () => {
     expect(tailwindSource).toContain("@theme inline");
     expect(tailwindSource).toContain("--color-vui-surface-glass: var(--vui-surface-glass)");
     expect(tailwindSource).toContain("--color-vui-surface-toolbar: var(--vui-surface-toolbar)");
     expect(tailwindSource).toContain("--color-vui-surface-row: var(--vui-surface-row)");
     expect(tailwindSource).toContain("--color-vui-control-muted: var(--vui-control-muted)");
     expect(tailwindSource).toContain("--color-vui-border-subtle: var(--vui-border-subtle)");
-    expect(herouiThemeSource).toContain("--vui-component-border");
-    expect(herouiThemeSource).toContain("--vui-component-surface");
-    expect(herouiThemeSource).toContain('button[data-slot="button"][data-vui="button"]');
-    expect(herouiThemeSource).toContain("border-width: 1px");
-    expect(herouiThemeSource).toContain("--vui-component-control-hover-bg");
-    expect(herouiThemeSource).toContain("--vui-component-control-hover-border");
-    expect(herouiThemeSource).toContain("--vui-component-control-hover-fg");
-    expect(herouiThemeSource).toContain("background: var(--vui-component-control-hover-bg)");
-    expect(herouiThemeSource).toContain('[class*="segmentedControl"]');
+    expect(providerThemeSource).toContain("--vui-component-border");
+    expect(providerThemeSource).toContain("--vui-component-surface");
+    expect(providerThemeSource).toContain('[data-vui-provider="shadcn"]');
+    expect(providerThemeSource).toContain('button[data-vui="button"]');
+    expect(providerThemeSource).toContain("border-width: 1px");
+    expect(providerThemeSource).toContain("--vui-component-control-hover-bg");
+    expect(providerThemeSource).toContain("--vui-component-control-hover-border");
+    expect(providerThemeSource).toContain("--vui-component-control-hover-fg");
+    expect(providerThemeSource).toContain(".vui-tone-danger");
   });
 
   it("defines the readable display scale as shared tokens instead of page-local micro text", () => {

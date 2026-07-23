@@ -1,0 +1,68 @@
+:root {
+  --vui-control-height-sm: var(--vui-control-height-compact);
+  --vui-control-height-md: var(--vui-control-height-comfortable);
+  --vui-focus-ring: 0 0 0 2px color-mix(in srgb, var(--accent-cool) 22%, transparent);
+  --vui-component-border: var(--vui-border-subtle);
+  --vui-component-surface: var(--vui-surface-glass);
+  --vui-component-surface-hover: var(--vui-surface-row-hover);
+  --vui-component-control-hover-bg: var(--vui-control-hover-bg);
+  --vui-component-control-hover-border: var(--vui-control-hover-border);
+  --vui-component-control-hover-fg: var(--vui-control-hover-fg);
+  --vui-component-control-hover-shadow: var(--vui-control-hover-shadow);
+}
+
+[data-vui-provider="shadcn"] {
+  color: var(--fg-primary);
+  font-family: var(--font-body);
+}
+
+[data-vui-provider="shadcn"] [data-focus-visible="true"] {
+  outline: 1px solid color-mix(in srgb, var(--accent-cool) 58%, transparent);
+  outline-offset: 1px;
+  box-shadow: var(--vui-focus-ring);
+}
+
+[data-vui-provider="shadcn"] button[data-vui="button"],
+[data-vui-provider="shadcn"] button[data-vui="icon-button"] {
+  min-height: var(--vui-control-height-sm);
+  font-size: var(--vui-font-sm);
+  border-width: 1px;
+  border-style: solid;
+  border-color: var(--vui-component-border);
+  border-radius: var(--radius-control);
+  transition:
+    background 0.16s ease,
+    border-color 0.16s ease,
+    box-shadow 0.16s ease,
+    color 0.16s ease;
+}
+
+[data-vui-provider="shadcn"] button[data-vui][data-focus-visible="true"] {
+  outline: 1px solid color-mix(in srgb, var(--accent-cool) 58%, transparent);
+  outline-offset: 1px;
+  box-shadow: var(--vui-focus-ring);
+}
+
+[data-vui-provider="shadcn"] .vui-tone-info {
+  border-color: color-mix(in srgb, var(--accent-cool) 30%, transparent);
+  background: var(--vui-status-info-bg);
+  color: var(--vui-status-info-fg);
+}
+
+[data-vui-provider="shadcn"] .vui-tone-success {
+  border-color: color-mix(in srgb, var(--state-success) 30%, transparent);
+  background: var(--vui-status-success-bg);
+  color: var(--vui-status-success-fg);
+}
+
+[data-vui-provider="shadcn"] .vui-tone-warning {
+  border-color: color-mix(in srgb, var(--state-warning) 32%, transparent);
+  background: var(--vui-status-warning-bg);
+  color: var(--vui-status-warning-fg);
+}
+
+[data-vui-provider="shadcn"] .vui-tone-danger {
+  border-color: color-mix(in srgb, var(--state-error) 32%, transparent);
+  background: var(--vui-status-danger-bg);
+  color: var(--vui-status-danger-fg);
+}

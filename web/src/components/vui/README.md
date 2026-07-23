@@ -1,0 +1,69 @@
+# VUI — product design system
+
+> **VUI is the stable product API.**
+> **shadcn-style + Radix is the preferred implementation backend.**
+> Routes and product pages must not import `@heroui/react` or `renderers/shadcn/*` directly.
+> `@heroui/react` is **removed** from dependencies.
+
+## Ownership
+
+| Layer | Path | Owns |
+| --- | --- | --- |
+| Product API | `primitives/`, `forms/`, `layout/`, `display/`, `index.ts` | `VButton`, `VInput`, … — stable names for routes |
+| Page recipes | `layout/VListDetailPage`, `VSettingsFormPage`, `VDenseOpsPage` | Prefer for new pages instead of inventing layout |
+| Product domain | `product/` | Agent / Team composition (not a generic UI kit) |
+| Renderers | `renderers/shadcn/` | shadcn-style native + Radix implementations |
+| Shared tokens | `renderers/shared/` | density, tone, button slots (renderer-agnostic) |
+| Root provider | `VuiProvider.tsx` | `data-vui-provider="shadcn"` app boundary |
+
+## Rules (efficiency)
+
+1. **No new `V*` primitive** unless at least two call sites already need it. Prefer composing existing primitives **or a page recipe**.
+2. **Routes import only** from `components/vui` (or `…/vui/product/…`). Never from `renderers/`.
+3. **New interactive controls** go through a `V*` facade; put Radix/shadcn code under `renderers/shadcn/`.
+4. **HeroUI is gone.** Do not re-add `@heroui/react`. Prefer extending the shadcn renderer.
+5. **Domain shells** (Agent three-pane, Chat rails) stay in routes/product — shadcn does not replace them.
+
+## Renderer map (interactive primitives)
+
+| Product API | Implementation | Notes |
+| --- | --- | --- |
+| `VButton` | `ShadcnButton` | density + variant; HeroUI-era `onPress` / `isDisabled` kept |
+| `VIconButton` | via `VButton` | square geometry |
+| `VChip` | `ShadcnChip` | tone map |
+| `VTooltip` | `ShadcnTooltip` (Radix) | `isOpen` alias retained |
+| `VDialog` / `VConfirmDialog` | `ShadcnDialog` (Radix) | Prefer over hand-rolled `fixed inset-0` overlays |
+| `VInput` | `ShadcnInput` | |
+| `VTextarea` | `ShadcnTextarea` | |
+| `VSelect` | `ShadcnSelect` | `selectedKey` / `onSelectionChange` retained |
+| `VCheckbox` | `ShadcnCheckbox` | |
+| `VNativeButton` / `VNativeInput` / `VNativeSelect` / `VNativeTextarea` | native | Prefer for dense ops / zero-float paths |
+| Layout / display (`VPage`, `VSurface`, strips, …) | Tailwind composition | Not shadcn primitives; keep project-owned |
+
+## Page recipes (prefer for new pages)
+
+| Recipe | Use when |
+| --- | --- |
+| `VListDetailPage` | Left list / filter + main detail (+ optional aside); supports `workspaceClassName` / `columnsClassName` for route style maps |
+| `VSettingsFormPage` | Settings/config form with sticky save footer |
+| `VDenseOpsPage` | Dense toolbar + body; use `toolbar` (VToolbar) or `toolbarSlot` (bare strip like metrics) |
+
+Each sets `data-vui-recipe="…"` on the page root for contracts and debugging.
+
+## Adding a control (checklist)
+
+1. Search existing `V*` and product components.
+2. If missing: add `renderers/shadcn/ShadcnX.tsx` + thin `V*` wrapper + export from `index.ts`.
+3. Map product tone/density through `renderers/shared/*`, not raw shadcn class dumps in routes.
+4. Add a focused test under `vui*.test.tsx` or the consuming panel’s layout contract.
+
+## Migration stance
+
+“Borrow shadcn to optimize VUI” means:
+
+- finish making **shadcn/Radix the only interactive backend**;
+- keep **V\*** as the steering wheel for app code;
+- stop growing a second ad-hoc primitive layer;
+- use **page recipes** so new routes do not reinvent headers/splits/footers.
+
+It does **not** mean rewriting Agent/Chat shells or deleting the VUI facade.

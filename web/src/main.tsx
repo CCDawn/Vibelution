@@ -3,20 +3,20 @@ import ReactDOM from "react-dom/client";
 
 import { App } from "./app/App";
 import { redirectToCanonicalWorkbenchHost } from "./app/canonicalWorkbenchHost";
-import { VibelutionHeroProvider } from "./components/vui/renderers/heroui/HeroProvider";
+import { VuiProvider } from "./components/vui/VuiProvider";
 import "./design/tokens.css";
 import "./design/base.css";
 import "./design/tailwind.css";
-import "./design/heroui-theme.css";
+import "./design/vui-provider-theme.css";
 import "./design/vui-native-controls.css";
 import "./design/workbench-shell.css";
 
 if (!redirectToCanonicalWorkbenchHost()) {
   ReactDOM.createRoot(document.getElementById("root")!).render(
     <React.StrictMode>
-      <VibelutionHeroProvider>
+      <VuiProvider>
         <App />
-      </VibelutionHeroProvider>
+      </VuiProvider>
     </React.StrictMode>,
   );
 }
