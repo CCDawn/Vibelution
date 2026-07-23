@@ -29,6 +29,7 @@ def test_native_launcher_tray_menu_exposes_lifecycle_controls():
         "启动项目",
         "停止项目",
         "重启项目",
+        "重建并启动（最新）",
         "状态",
         "退出 Launcher",
         "停止全部",
@@ -38,7 +39,9 @@ def test_native_launcher_tray_menu_exposes_lifecycle_controls():
     assert "\"/api/launcher/start\"" in source
     assert "\"/api/launcher/stop\"" in source
     assert "\"/api/launcher/restart\"" in source
+    assert "\"/api/launcher/rebuild-and-start\"" in source
     assert "\"/api/launcher/force-stop\"" in source
+    assert "QueueRebuildAndStart" in source
     assert "RunPythonBridge(projectDir, \"stop-launcher\", true, false)" in source
 
 

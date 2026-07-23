@@ -81,6 +81,7 @@ internal static class VibelutionLauncher
             menu.Items.Add(MenuItem("启动项目", delegate { QueuePost("/api/launcher/start", "启动项目"); }));
             menu.Items.Add(MenuItem("停止项目", delegate { QueuePost("/api/launcher/stop", "停止项目"); }));
             menu.Items.Add(MenuItem("重启项目", delegate { QueuePost("/api/launcher/restart", "重启项目"); }));
+            menu.Items.Add(MenuItem("重建并启动（最新）", delegate { QueueRebuildAndStart(); }));
             menu.Items.Add(MenuItem("状态", delegate { QueueStatus(); }));
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add(MenuItem("退出 Launcher", delegate { QueueExitLauncher(false); }));
@@ -146,6 +147,85 @@ internal static class VibelutionLauncher
                     }
                 }
             );
+        }
+
+        private void QueueRebuildAndStart()
+        {
+            ThreadPool.QueueUserWorkItem(
+                delegate
+                {
+                    try
+                    {
+                        EnsureLauncherBackend();
+                        ShowInfo("正在排队：强制重建前端并启动/重启工作台…");
+                        // Rebuild runs inside runtime-manager after accept; keep API timeout short.
+                        PostLauncher("/api/launcher/rebuild-and-start");
+                        ShowInfo("重建并启动请求已发送。正在后台构建并拉起工作台…");
+                        // Poll briefly so tray shows real failure instead of only the accept toast.
+                        string lastFailure = WaitForRebuildOutcome(90000);
+                        if (!string.IsNullOrEmpty(lastFailure))
+                        {
+                            ShowWarning("重建/启动失败：" + ShortMessage(lastFailure));
+                        }
+                        else
+                        {
+                            ShowInfo("重建并启动已完成（或仍在收尾中）。可打开控制台查看状态。");
+                        }
+                    }
+                    catch (WebException ex)
+                    {
+                        string detail = ShortMessage(ReadWebException(ex));
+                        if (detail.IndexOf("active_work", StringComparison.OrdinalIgnoreCase) >= 0
+                            || detail.IndexOf("进行中的任务", StringComparison.OrdinalIgnoreCase) >= 0)
+                        {
+                            ShowWarning("有进行中的任务，无法重建并重启。请等待任务完成或先停止任务。");
+                        }
+                        else
+                        {
+                            ShowWarning("重建并启动失败：" + detail);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        ShowWarning("重建并启动失败：" + ShortMessage(ex.Message));
+                    }
+                }
+            );
+        }
+
+        private string WaitForRebuildOutcome(int timeoutMs)
+        {
+            int waited = 0;
+            string lastFailure = "";
+            while (waited < timeoutMs)
+            {
+                try
+                {
+                    string body = GetLauncher("/api/launcher/status");
+                    string overall = ExtractJsonString(body, "overallState").ToLowerInvariant();
+                    string observed = ExtractJsonString(body, "observedState").ToLowerInvariant();
+                    string failure = ExtractJsonString(body, "failureMessage");
+                    if (!string.IsNullOrEmpty(failure))
+                    {
+                        lastFailure = failure;
+                    }
+                    if (overall == "running" || observed == "open" || observed == "running")
+                    {
+                        return "";
+                    }
+                    if (overall == "failed" && !string.IsNullOrEmpty(failure))
+                    {
+                        return failure;
+                    }
+                }
+                catch
+                {
+                    // keep polling while backend restarts
+                }
+                Thread.Sleep(2000);
+                waited += 2000;
+            }
+            return lastFailure;
         }
 
         private void QueueStatus()

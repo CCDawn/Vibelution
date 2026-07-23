@@ -1281,16 +1281,26 @@ def _launcher_workbench_already_closed() -> bool:
     )
 
 
-def request_launcher_restart() -> LauncherCommandResponse:
+def request_launcher_restart(
+    *,
+    force_frontend_rebuild: bool = False,
+    reason: str = "launcher_restart_button",
+    source: str = "launcher_api",
+) -> LauncherCommandResponse:
     """Request the managed project bundle to restart as one lifecycle unit."""
 
     prequeue_started = time.monotonic()
     prequeue_timings_ms: dict[str, Any] = {}
+    operation: LauncherOperation = "restart"
     _record_launcher_event(
         "launcher.bundle.restart.requested",
         phase="restart",
         message="Launcher project bundle restart requested.",
-        fields={"source": "launcher_api"},
+        fields={
+            "source": source,
+            "reason": reason,
+            "forceFrontendRebuild": bool(force_frontend_rebuild),
+        },
     )
     active_work_started = time.monotonic()
     _raise_if_active_work("restart")
@@ -1302,14 +1312,19 @@ def request_launcher_restart() -> LauncherCommandResponse:
         submit_started = time.monotonic()
         command = submit_command(
             "restart_workbench",
-            args={"reason": "launcher_restart_button", "source": "launcher_api", "noBrowser": False},
-            requested_by="launcher_api",
+            args={
+                "reason": reason,
+                "source": source,
+                "noBrowser": False,
+                "forceFrontendRebuild": bool(force_frontend_rebuild),
+            },
+            requested_by=source or "launcher_api",
         )
         prequeue_timings_ms["submitCommandMs"] = _launcher_elapsed_ms(submit_started)
     except Exception as exc:
         prequeue_timings_ms["totalPrequeueMs"] = _launcher_elapsed_ms(prequeue_started)
         _record_launcher_prequeue_timing(
-            "restart",
+            operation,
             phase="restart",
             timings_ms=prequeue_timings_ms,
             outcome="failed",
@@ -1328,7 +1343,7 @@ def request_launcher_restart() -> LauncherCommandResponse:
     command_id = str(command.get("commandId") or "")
     prequeue_timings_ms["totalPrequeueMs"] = _launcher_elapsed_ms(prequeue_started)
     _record_launcher_prequeue_timing(
-        "restart",
+        operation,
         phase="restart",
         timings_ms=prequeue_timings_ms,
         command_id=command_id,
@@ -1339,15 +1354,102 @@ def request_launcher_restart() -> LauncherCommandResponse:
         phase="restart",
         message="Launcher project bundle restart queued through runtime manager.",
         outcome="accepted",
+        fields={
+            "mode": "standalone_control_plane",
+            "commandId": command_id,
+            "forceFrontendRebuild": bool(force_frontend_rebuild),
+        },
+    )
+    message = (
+        "正在强制重建前端并重启工作台。完成后会加载最新前后端内容。"
+        if force_frontend_rebuild
+        else "正在安全重启工作台。运行时管理器会先停稳旧后端，再重新拉起前后端。"
+    )
+    return {
+        "accepted": True,
+        "mode": "runtime_manager",
+        "launcherMode": "standalone_control_plane",
+        "operation": "rebuild-and-restart" if force_frontend_rebuild else "restart",
+        "commandId": command_id,
+        "message": message,
+        "forceFrontendRebuild": bool(force_frontend_rebuild),
+    }
+
+
+def request_launcher_rebuild_and_start() -> LauncherCommandResponse:
+    """Force-rebuild frontend assets, then start or restart the workbench to serve them."""
+
+    prequeue_started = time.monotonic()
+    prequeue_timings_ms: dict[str, Any] = {}
+    _record_launcher_event(
+        "launcher.bundle.rebuild_and_start.requested",
+        phase="restart",
+        message="Launcher rebuild-and-start requested.",
+        fields={"source": "launcher_tray", "forceFrontendRebuild": True},
+    )
+    observe_started = time.monotonic()
+    observed = _observed_workbench()
+    prequeue_timings_ms["observeWorkbenchMs"] = _launcher_elapsed_ms(observe_started)
+    observed_state = str(observed.get("observedState") or "closed").strip().lower()
+    is_running = observed_state in {"open", "running", "starting"} or bool(
+        observed.get("backendHealthy") or observed.get("backendObserved")
+    )
+    if is_running:
+        # Restart reloads Python backend and forces a frontend production build first.
+        response = request_launcher_restart(
+            force_frontend_rebuild=True,
+            reason="tray_rebuild_and_start",
+            source="launcher_tray",
+        )
+        response["operation"] = "rebuild-and-restart"
+        response["message"] = "正在强制重建前端并重启工作台，完成后可看到最新前后端内容。"
+        return response
+
+    try:
+        ensure_started = time.monotonic()
+        ensure_daemon_running()
+        prequeue_timings_ms["ensureDaemonMs"] = _launcher_elapsed_ms(ensure_started)
+        submit_started = time.monotonic()
+        command = submit_command(
+            "open_workbench",
+            args={
+                "reason": "tray_rebuild_and_start",
+                "source": "launcher_tray",
+                "noBrowser": False,
+                "forceFrontendRebuild": True,
+            },
+            requested_by="launcher_tray",
+        )
+        prequeue_timings_ms["submitCommandMs"] = _launcher_elapsed_ms(submit_started)
+    except Exception as exc:
+        prequeue_timings_ms["totalPrequeueMs"] = _launcher_elapsed_ms(prequeue_started)
+        _record_launcher_event(
+            "launcher.bundle.rebuild_and_start.failed",
+            phase="start",
+            message="Launcher rebuild-and-start could not be queued.",
+            outcome="failed",
+            level="error",
+            fields={"mode": "standalone_control_plane", "errorType": type(exc).__name__, "errorMessage": str(exc)},
+        )
+        raise
+
+    command_id = str(command.get("commandId") or "")
+    prequeue_timings_ms["totalPrequeueMs"] = _launcher_elapsed_ms(prequeue_started)
+    _record_launcher_event(
+        "launcher.bundle.rebuild_and_start.accepted",
+        phase="start",
+        message="Launcher rebuild-and-start queued through runtime manager.",
+        outcome="accepted",
         fields={"mode": "standalone_control_plane", "commandId": command_id},
     )
     return {
         "accepted": True,
         "mode": "runtime_manager",
         "launcherMode": "standalone_control_plane",
-        "operation": "restart",
+        "operation": "rebuild-and-start",
         "commandId": command_id,
-        "message": "正在安全重启工作台。运行时管理器会先停稳旧后端，再重新拉起前后端。",
+        "message": "正在强制重建前端并启动工作台，完成后可看到最新前后端内容。",
+        "forceFrontendRebuild": True,
     }
 
 

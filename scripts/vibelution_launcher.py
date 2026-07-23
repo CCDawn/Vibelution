@@ -308,7 +308,17 @@ def _run_capture(args: list[str], *, cwd: Path, label: str, timeout: float = 15.
     return str(result.stdout or "").strip()
 
 
-def _runtime_source_identity() -> dict[str, object]:
+ALLOW_DIRTY_LAUNCH_ENV = "VIBELUTION_ALLOW_DIRTY_LAUNCH"
+
+
+def _allow_dirty_launch() -> bool:
+    """Permit dirty worktrees for explicit tray rebuild/start local-dev launches."""
+
+    return str(os.environ.get(ALLOW_DIRTY_LAUNCH_ENV) or "").strip() in {"1", "true", "TRUE", "yes", "YES"}
+
+
+def _runtime_source_identity(*, allow_dirty: bool | None = None) -> dict[str, object]:
+    allow_dirty_worktree = _allow_dirty_launch() if allow_dirty is None else bool(allow_dirty)
     git_command = shutil.which("git.exe" if os.name == "nt" else "git") or shutil.which("git") or "git"
     root_text = _run_capture(
         [git_command, "rev-parse", "--show-toplevel"],
@@ -339,7 +349,8 @@ def _runtime_source_identity() -> dict[str, object]:
         cwd=PROJECT_ROOT,
         label="git worktree identity",
     )
-    if worktree_status:
+    tracked_clean = not bool(worktree_status)
+    if worktree_status and not allow_dirty_worktree:
         preview = " | ".join(worktree_status.splitlines()[:8])
         raise RuntimeError(
             "Launcher restart requires a clean local main so runtime code cannot drift from HEAD"
@@ -356,12 +367,16 @@ def _runtime_source_identity() -> dict[str, object]:
         "branch": branch,
         "commit": commit,
         "frontendTree": frontend_tree,
-        "trackedClean": True,
+        "trackedClean": tracked_clean,
+        "allowDirty": allow_dirty_worktree,
     }
 
 
 def _assert_runtime_source_identity(expected: dict[str, object]) -> dict[str, object]:
-    current = _runtime_source_identity()
+    if bool(expected.get("allowDirty")):
+        current = _runtime_source_identity(allow_dirty=True)
+    else:
+        current = _runtime_source_identity()
     for field in ("projectRoot", "branch", "commit", "frontendTree"):
         if str(current.get(field) or "") != str(expected.get(field) or ""):
             raise RuntimeError(

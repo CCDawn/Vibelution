@@ -6635,6 +6635,64 @@ def test_handle_restart_workbench_build_preflight_fails_before_close(monkeypatch
     assert state["workbench"]["observedState"] == "open"
 
 
+def test_restart_force_frontend_rebuild_propagates_dirty_launch_opt_in(monkeypatch):
+    runtime_daemon = daemon.RuntimeManagerDaemon()
+    state = {
+        "command": {"activeCommandId": "cmd-restart"},
+        "workbench": {"desiredState": "open", "observedState": "open", "phase": "steady"},
+    }
+    preflight_calls: list[tuple[str, bool]] = []
+    open_calls: list[dict[str, object]] = []
+
+    monkeypatch.setattr(daemon, "load_state", lambda: state)
+    monkeypatch.setattr(daemon, "save_state", lambda next_state: next_state)
+    monkeypatch.setattr(daemon, "now_iso", lambda: "2026-07-23T02:00:00+00:00")
+    monkeypatch.setattr(daemon, "observe_workbench", lambda: {"observedState": "closed"})
+    monkeypatch.setattr(daemon, "_append_event", lambda *args, **kwargs: None)
+    monkeypatch.setattr(daemon, "_active_lifecycle_interrupt", lambda command_id: None)
+    monkeypatch.setattr(daemon, "_lifecycle_interrupt_cancel_check", lambda command_id: None)
+    monkeypatch.setattr(
+        daemon,
+        "_preflight_frontend_build_for_restart",
+        lambda command_id, *, force=False: preflight_calls.append((command_id, force))
+        or {"ok": True, "completedSteps": ["tsc -b", "vite build"]},
+    )
+    monkeypatch.setattr(
+        runtime_daemon,
+        "_close_workbench_with_fast_path",
+        lambda **kwargs: {
+            "cleanupResult": {},
+            "verification": {"observedState": "closed"},
+            "verificationAttempts": 1,
+            "launcherResult": subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr=""),
+            "closeStrategy": "launcher",
+            "closed": True,
+            "lifecycleTimingsMs": {},
+        },
+    )
+
+    def fake_open_workbench(**kwargs):
+        open_calls.append(dict(kwargs))
+        return subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(daemon, "open_workbench", fake_open_workbench)
+    monkeypatch.setattr(
+        daemon,
+        "_wait_for_open_verification",
+        lambda **kwargs: (True, {"observedState": "open", "backendHealthy": True}, 1),
+    )
+    monkeypatch.setattr(daemon, "persist_workbench_launcher_state_after_open", lambda *args, **kwargs: {})
+
+    result = runtime_daemon._perform_restart_workbench(
+        command_id="cmd-restart",
+        args={"forceFrontendRebuild": True, "reason": "tray_rebuild_and_start", "source": "launcher_tray"},
+    )
+
+    assert preflight_calls == [("cmd-restart", True)]
+    assert open_calls == [{"no_browser": False, "cancel_check": None, "allow_dirty_launch": True}]
+    assert result["buildPreflight"]["completedSteps"] == ["tsc -b", "vite build"]
+
+
 def test_restart_build_preflight_skips_when_frontend_build_is_current(monkeypatch):
     events: list[tuple[str, dict]] = []
 

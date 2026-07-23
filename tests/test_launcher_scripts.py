@@ -418,6 +418,7 @@ def test_python_launcher_runtime_identity_requires_clean_main(monkeypatch, tmp_p
 def test_python_launcher_runtime_identity_rejects_dirty_main(monkeypatch, tmp_path):
     launcher = _load_python_launcher()
     monkeypatch.setattr(launcher, "PROJECT_ROOT", tmp_path)
+    monkeypatch.delenv("VIBELUTION_ALLOW_DIRTY_LAUNCH", raising=False)
 
     def fake_capture(args, *, cwd, label, timeout=15.0):
         values = {
@@ -425,6 +426,7 @@ def test_python_launcher_runtime_identity_rejects_dirty_main(monkeypatch, tmp_pa
             "git branch identity": "main",
             "git commit identity": "a" * 40,
             "git worktree identity": " M core/app.py",
+            "frontend tree identity": "tree-a",
         }
         return values[label]
 
@@ -432,6 +434,28 @@ def test_python_launcher_runtime_identity_rejects_dirty_main(monkeypatch, tmp_pa
 
     with pytest.raises(RuntimeError, match="requires a clean local main"):
         launcher._runtime_source_identity()
+
+
+def test_python_launcher_runtime_identity_allows_dirty_when_opted_in(monkeypatch, tmp_path):
+    launcher = _load_python_launcher()
+    monkeypatch.setattr(launcher, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setenv("VIBELUTION_ALLOW_DIRTY_LAUNCH", "1")
+
+    def fake_capture(args, *, cwd, label, timeout=15.0):
+        values = {
+            "git root identity": str(tmp_path),
+            "git branch identity": "main",
+            "git commit identity": "a" * 40,
+            "git worktree identity": " M core/app.py",
+            "frontend tree identity": "tree-a",
+        }
+        return values[label]
+
+    monkeypatch.setattr(launcher, "_run_capture", fake_capture)
+
+    identity = launcher._runtime_source_identity()
+    assert identity["trackedClean"] is False
+    assert identity["allowDirty"] is True
 
 
 def test_python_launcher_rejects_main_change_during_refresh(monkeypatch):

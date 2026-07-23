@@ -30,6 +30,31 @@ def test_standalone_launcher_app_exposes_project_lifecycle_routes(monkeypatch):
     assert calls == ["start"]
 
 
+def test_standalone_launcher_app_exposes_rebuild_and_start_route(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        launcher_service,
+        "request_launcher_rebuild_and_start",
+        lambda: calls.append("rebuild-and-start")
+        or {
+            "accepted": True,
+            "operation": "rebuild-and-start",
+            "launcherMode": "standalone_control_plane",
+            "forceFrontendRebuild": True,
+            "message": "rebuilding",
+        },
+    )
+    client = TestClient(launcher_app.create_launcher_app())
+
+    response = client.post("/api/launcher/rebuild-and-start")
+
+    assert response.status_code == 202
+    body = response.json()
+    assert body["operation"] == "rebuild-and-start"
+    assert body["forceFrontendRebuild"] is True
+    assert calls == ["rebuild-and-start"]
+
+
 def test_launcher_payload_contract_is_shared_between_standalone_and_web_routes():
     from core.launcher import api_contract
 
