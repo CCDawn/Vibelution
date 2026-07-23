@@ -7,6 +7,7 @@ import { AgentHealthMaintenancePanel } from "./AgentHealthMaintenancePanel";
 import { AgentPersonaProfilePanel } from "./AgentPersonaProfilePanel";
 import { AgentTaskProfilePanel } from "./AgentTaskProfilePanel";
 import { AgentToolGovernancePanel } from "./AgentToolGovernancePanel";
+import styles from "./AgentConfigPrimaryPanePanel.styles";
 
 export type AgentConfigPrimarySectionId = "all" | "basic" | "profile" | "ops";
 
@@ -52,14 +53,14 @@ export function AgentConfigPrimaryPanePanel({
       {showOps ? (
         <section
           data-vui-product="agent-config-ops-zone"
-          className="grid min-w-0 content-start gap-2 rounded-[var(--radius-panel)] border border-[color-mix(in_srgb,var(--state-error)_22%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--state-error)_4%,var(--vui-surface-panel))] p-2.5"
+          className={styles.opsZone}
           aria-label={`${opsTitle} · ${opsHint}`}
         >
-          <header className="grid min-w-0 gap-0.5 px-0.5">
-            <p className="m-0 text-[0.62rem] font-bold uppercase tracking-[0.08em] text-[var(--state-error)]">
+          <header className={styles.opsHeader}>
+            <p className={styles.opsTitle}>
               {opsTitle}
             </p>
-            <p className="m-0 text-[0.76rem] leading-[1.35] text-[var(--fg-secondary)]">{opsHint}</p>
+            <p className={styles.opsHint}>{opsHint}</p>
           </header>
           <AgentHealthMaintenancePanel {...healthMaintenance} />
           <AgentArchiveZonePanel {...archiveZone} />
