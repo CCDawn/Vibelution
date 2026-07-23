@@ -631,7 +631,12 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("advancedSections: advancedFilterSections");
     expect(routeSource).toContain("groupDisplayLabel(group, copy)");
     expect(filterRailSource).toContain("<details");
-    expect(filterRailSource).toContain("agent-filter-advanced");
+    expect(filterRailSource).toContain("agent-filter-more");
+    expect(filterRailSource).toContain("STATUS_BUTTON_BASE");
+    expect(filterRailSource).toContain("secondarySections");
+    expect(filterRailSource).not.toContain("agent-filter-queue");
+    expect(filterRailSource).not.toContain("agent-filter-storage");
+    expect(filterRailSource).not.toContain("queueCount");
   });
 
   it("keeps Agent filter explanations in accessible VUI tooltips", () => {
@@ -1721,7 +1726,8 @@ describe("AgentsRoute layout contract", () => {
     expect(workspaceLayoutPanelSource).toContain("data-agent-workspace=\"resizable\"");
     expect(workspaceLayoutPanelSource).toContain("aria-label=\"调整目录栏宽度\"");
     expect(workspaceLayoutStyles.workspace).toContain("max-[860px]:[grid-template-columns:1fr]");
-    expect(listWorkspaceStyles.agentPanel).toContain("[grid-template-rows:auto_auto_minmax(0,_1fr)]");
+    expect(listWorkspaceStyles.agentPanelIdle).toContain("[grid-template-rows:auto_minmax(0,_1fr)]");
+    expect(listWorkspaceStyles.agentPanelSelecting).toContain("[grid-template-rows:auto_auto_minmax(0,_1fr)]");
     expect(detailWorkspaceStyles.detailPanel).toContain("[overflow:auto]");
     expect(detailWorkspaceStyles.detailPanel).toContain("max-[860px]:[min-height:420px]");
     expect(detailWorkspaceStyles.detailPanel).not.toContain("max-[860px]:hidden");
@@ -2080,16 +2086,20 @@ describe("AgentsRoute layout contract", () => {
     expect(bulkConfigPanelSource).toContain("<VNativeInput");
     expect(routeSource).toContain("bulkSelected: selectedBulkAgentIds.has(agent.agentId)");
     expect(denseListSource).toContain("onToggleBulk");
-    expect(listWorkspaceStyles.agentPanel).toContain("[grid-template-rows:auto_auto_minmax(0,_1fr)]");
+    expect(listWorkspaceStyles.agentPanelIdle).toContain("[grid-template-rows:auto_minmax(0,_1fr)]");
+    expect(listWorkspaceStyles.agentPanelSelecting).toContain("[grid-template-rows:auto_auto_minmax(0,_1fr)]");
+    expect(listWorkspacePanelSource).toContain("bulkOperations.selectedCount === 0");
+    expect(listWorkspacePanelSource).toContain("bulkOperations.selectedCount > 0");
+    expect(bulkOperationsPanelSource).toContain("if (!hasSelection)");
+    expect(bulkOperationsPanelSource).toContain("return null");
     expect(routeSource).not.toContain("styles.bulkActionBar");
     expect(stylesSource).not.toContain(".bulkActionBar {");
     expect(stylesSource).not.toContain(".bulkSummary");
     expect(stylesSource).not.toContain(".bulkPromptPicker");
     expect(styles.agentRowBulkSelected).toContain("[background:color-mix(in_srgb,_var(--accent-cool)_10%,_transparent)]");
-    expect(bulkActionBarSource).toContain("!flex-wrap items-center overflow-visible");
-    expect(bulkActionBarSource).toContain("min-[720px]:!flex-nowrap");
-    expect(bulkActionBarSource).toContain("min-[720px]:overflow-x-auto");
-    expect(bulkActionBarSource).toContain("flex-[1_1_156px]");
+    expect(bulkActionBarSource).toContain("!flex-nowrap items-center overflow-x-auto");
+    expect(bulkActionBarSource).toContain("flex-[0_0_190px]");
+    expect(bulkActionBarSource).toContain("min-h-[74px] overflow-hidden");
   });
 
   it("renders bulk action controls through VUI buttons instead of page-owned button CSS", () => {
