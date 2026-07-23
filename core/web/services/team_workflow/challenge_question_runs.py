@@ -215,11 +215,16 @@ def _human_gate_summary(output: dict[str, Any]) -> dict[str, Any]:
     selection = output.get("selection") if isinstance(output.get("selection"), dict) else {}
     plan = output.get("research_plan") if isinstance(output.get("research_plan"), dict) else {}
     audit = output.get("audit") if isinstance(output.get("audit"), dict) else {}
+    h4_decision = {
+        "passed": "approved",
+        "revision_requested": "revision_requested",
+        "rejected": "rejected",
+    }.get(str(audit.get("human_review_status") or ""), "pending")
     decisions = {
         "H1_problem_understanding": str((problem.get("human_gate") or {}).get("decision") or "pending"),
         "H2_hypothesis_selection": str((selection.get("human_gate") or {}).get("decision") or "pending"),
         "H3_research_plan": str((plan.get("human_gate") or {}).get("decision") or "pending"),
-        "H4_external_output": "approved" if audit.get("human_review_status") == "passed" else "pending",
+        "H4_external_output": h4_decision,
     }
     return {
         "decisions": decisions,

@@ -268,6 +268,38 @@ def test_five_approved_unique_questions_complete_trial_count(tmp_path, monkeypat
     assert summary["completedQuestionIds"] == ["SCI-096", "SCI-097", "SCI-098", "SCI-099", "SCI-100"]
 
 
+def test_deferred_h4_review_preserves_revision_requested_decision(tmp_path, monkeypatch):
+    _isolate_store(tmp_path, monkeypatch)
+    output = _output(96)
+    registered = challenge_question_runs.register_challenge_question_output(
+        "research-team",
+        {"output": deepcopy(output), "citationChecks": _citation_checks(output)},
+    )
+
+    response = challenge_question_runs.review_challenge_question_output(
+        "research-team",
+        output["question_id"],
+        registered["record"]["runId"],
+        {
+            "reviewer": "Human Reviewer",
+            "rationale": "H1-H3 approved; H4 deferred pending more evidence.",
+            "decisions": {
+                "H1_problem_understanding": "approved",
+                "H2_hypothesis_selection": "approved",
+                "H3_research_plan": "approved",
+                "H4_external_output": "revision_requested",
+            },
+        },
+    )
+
+    assert response["record"]["status"] == "needs_revision"
+    assert response["record"]["humanGates"]["approvedCount"] == 3
+    assert response["record"]["humanGates"]["allApproved"] is False
+    assert response["record"]["humanGates"]["decisions"]["H4_external_output"] == "revision_requested"
+    assert response["output"]["audit"]["human_review_status"] == "revision_requested"
+    assert response["summary"]["completedCount"] == 0
+
+
 def test_registration_cannot_self_approve_human_gates(tmp_path, monkeypatch):
     _isolate_store(tmp_path, monkeypatch)
     output = _output(approved=True)
