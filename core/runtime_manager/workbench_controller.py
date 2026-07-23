@@ -35,6 +35,8 @@ from .window_provider_state import window_provider_projection, with_window_provi
 
 INTERNAL_LAUNCHER_ENV = "VIBELUTION_RUNTIME_MANAGER_INTERNAL_LAUNCHER"
 INTERNAL_LAUNCHER_VALUE = "1"
+ALLOW_DIRTY_LAUNCH_ENV = "VIBELUTION_ALLOW_DIRTY_LAUNCH"
+ALLOW_DIRTY_LAUNCH_VALUE = "1"
 LAUNCHER_ACTION_CANCELLED_RETURN_CODE = 130
 
 
@@ -795,11 +797,17 @@ def run_launcher_action(
     *,
     no_browser: bool = False,
     cancel_check: Callable[[], bool] | None = None,
+    allow_dirty_launch: bool = False,
 ) -> subprocess.CompletedProcess[str]:
     args = _launcher_command_args(action, no_browser=no_browser)
     env = os.environ.copy()
     env["VIBELUTION_PORT"] = str(configured_backend_port())
     env[INTERNAL_LAUNCHER_ENV] = INTERNAL_LAUNCHER_VALUE
+    if allow_dirty_launch:
+        # Tray rebuild-and-start intentionally runs with local dirty worktrees.
+        env[ALLOW_DIRTY_LAUNCH_ENV] = ALLOW_DIRTY_LAUNCH_VALUE
+    else:
+        env.pop(ALLOW_DIRTY_LAUNCH_ENV, None)
     env["VIBELUTION_PROTECTED_PROCESS_IDS"] = ";".join(
         str(pid)
         for pid in (os.getpid(), os.getppid())
@@ -914,8 +922,14 @@ def open_workbench(
     *,
     no_browser: bool = False,
     cancel_check: Callable[[], bool] | None = None,
+    allow_dirty_launch: bool = False,
 ) -> subprocess.CompletedProcess[str]:
-    return run_launcher_action("internal-start", no_browser=no_browser, cancel_check=cancel_check)
+    return run_launcher_action(
+        "internal-start",
+        no_browser=no_browser,
+        cancel_check=cancel_check,
+        allow_dirty_launch=allow_dirty_launch,
+    )
 
 
 def focus_workbench() -> subprocess.CompletedProcess[str]:
@@ -930,6 +944,12 @@ def restart_workbench(
     *,
     no_browser: bool = False,
     cancel_check: Callable[[], bool] | None = None,
+    allow_dirty_launch: bool = False,
 ) -> subprocess.CompletedProcess[str]:
-    result = run_launcher_action("internal-restart", no_browser=no_browser, cancel_check=cancel_check)
+    result = run_launcher_action(
+        "internal-restart",
+        no_browser=no_browser,
+        cancel_check=cancel_check,
+        allow_dirty_launch=allow_dirty_launch,
+    )
     return result

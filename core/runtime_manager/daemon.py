@@ -1976,10 +1976,10 @@ def _frontend_build_current() -> tuple[bool, str, dict[str, Any]]:
     return True, "frontend build is current", {"distIndex": str(dist_index), "distMtime": dist_mtime, "inputMtime": input_mtime}
 
 
-def _preflight_frontend_build_for_restart(command_id: str) -> dict[str, Any]:
+def _preflight_frontend_build_for_restart(command_id: str, *, force: bool = False) -> dict[str, Any]:
     started_at = now_iso()
     current, reason, freshness = _frontend_build_current()
-    if current:
+    if current and not force:
         payload = {
             "commandId": command_id,
             "ok": True,
@@ -1991,6 +1991,18 @@ def _preflight_frontend_build_for_restart(command_id: str) -> dict[str, Any]:
         }
         _append_event("workbench.restart.build_preflight_skipped_current", payload)
         return payload
+    if force:
+        _append_event(
+            "workbench.restart.build_preflight_forced",
+            {
+                "commandId": command_id,
+                "reason": "force_frontend_rebuild",
+                "previousCurrent": current,
+                "previousReason": reason,
+                "freshness": freshness,
+                "startedAt": started_at,
+            },
+        )
 
     stdout_parts: list[str] = []
     stderr_parts: list[str] = []
@@ -3019,9 +3031,19 @@ class RuntimeManagerDaemon:
         workbench = state.setdefault("workbench", {})
         request_audit = _safe_lifecycle_request_audit(args)
         no_browser = bool(args.get("noBrowser"))
+        force_frontend_rebuild = bool(args.get("forceFrontendRebuild"))
+        if force_frontend_rebuild:
+            # Rebuild before any already-open short-circuit so tray "rebuild and start"
+            # always refreshes static assets even when the workbench is already healthy.
+            _preflight_frontend_build_for_restart(command_id, force=True)
         should_probe_before_launch = _open_should_probe_before_launch(workbench, no_browser=no_browser)
         observation = observe_workbench() if should_probe_before_launch else {}
-        if observation and _open_request_already_satisfied(observation, no_browser=no_browser) and str(workbench.get("phase") or "") != "failed":
+        if (
+            observation
+            and _open_request_already_satisfied(observation, no_browser=no_browser)
+            and str(workbench.get("phase") or "") != "failed"
+            and not force_frontend_rebuild
+        ):
             workbench.update(
                 {
                     "desiredState": "open",
@@ -3121,7 +3143,14 @@ class RuntimeManagerDaemon:
                 extra_result_data={"lifecycleTimingsMs": lifecycle_timings_ms},
             )
         launcher_started = time.monotonic()
-        result = open_workbench(no_browser=no_browser, cancel_check=cancel_check)
+        if force_frontend_rebuild:
+            result = open_workbench(
+                no_browser=no_browser,
+                cancel_check=cancel_check,
+                allow_dirty_launch=True,
+            )
+        else:
+            result = open_workbench(no_browser=no_browser, cancel_check=cancel_check)
         lifecycle_timings_ms["launcher_action_ms"] = _elapsed_monotonic_ms(launcher_started)
         interrupt = _active_lifecycle_interrupt(command_id)
         if interrupt or int(result.returncode or 0) == LAUNCHER_ACTION_CANCELLED_RETURN_CODE:
@@ -3229,7 +3258,14 @@ class RuntimeManagerDaemon:
                     | {"attempts": verification_attempts},
                 )
                 retry_launcher_started = time.monotonic()
-                retry_result = open_workbench(no_browser=no_browser, cancel_check=cancel_check)
+                if force_frontend_rebuild:
+                    retry_result = open_workbench(
+                        no_browser=no_browser,
+                        cancel_check=cancel_check,
+                        allow_dirty_launch=True,
+                    )
+                else:
+                    retry_result = open_workbench(no_browser=no_browser, cancel_check=cancel_check)
                 lifecycle_timings_ms["launcher_retry_ms"] = _elapsed_monotonic_ms(retry_launcher_started)
                 interrupt = _active_lifecycle_interrupt(command_id)
                 if interrupt or int(retry_result.returncode or 0) == LAUNCHER_ACTION_CANCELLED_RETURN_CODE:
@@ -3977,7 +4013,10 @@ class RuntimeManagerDaemon:
         lifecycle_timings_ms: dict[str, Any] = {}
         if _restart_should_preflight_frontend_build(workbench, args=args):
             build_preflight_started = time.monotonic()
-            build_preflight = _preflight_frontend_build_for_restart(command_id)
+            if bool(args.get("forceFrontendRebuild")):
+                build_preflight = _preflight_frontend_build_for_restart(command_id, force=True)
+            else:
+                build_preflight = _preflight_frontend_build_for_restart(command_id)
             lifecycle_timings_ms["build_preflight_ms"] = _elapsed_monotonic_ms(build_preflight_started)
         if requested_no_browser and _restart_should_preserve_visible_browser(workbench):
             effective_no_browser = False
@@ -4071,7 +4110,14 @@ class RuntimeManagerDaemon:
         save_state(self._reconcile_observation(state))
         cancel_check = _lifecycle_interrupt_cancel_check(command_id)
         open_launcher_started = time.monotonic()
-        open_result = open_workbench(no_browser=effective_no_browser, cancel_check=cancel_check)
+        if bool(args.get("forceFrontendRebuild")):
+            open_result = open_workbench(
+                no_browser=effective_no_browser,
+                cancel_check=cancel_check,
+                allow_dirty_launch=True,
+            )
+        else:
+            open_result = open_workbench(no_browser=effective_no_browser, cancel_check=cancel_check)
         lifecycle_timings_ms["open_launcher_action_ms"] = _elapsed_monotonic_ms(open_launcher_started)
         interrupt = _active_lifecycle_interrupt(command_id)
         if interrupt or int(open_result.returncode or 0) == LAUNCHER_ACTION_CANCELLED_RETURN_CODE:

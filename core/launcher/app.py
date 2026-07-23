@@ -206,6 +206,23 @@ def project_restart() -> dict:
         ) from exc
 
 
+@router.post("/api/launcher/rebuild-and-start", status_code=202)
+@router.post("/api/project/rebuild-and-start", status_code=202)
+def project_rebuild_and_start() -> dict:
+    """Force-rebuild frontend production assets, then start or restart the workbench."""
+
+    try:
+        return launcher_service.request_launcher_rebuild_and_start()
+    except launcher_service.LauncherActiveWorkBlocked as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "active_work_restart_blocked",
+                "message": exc.message,
+                "activeWorkRuns": exc.active_work_runs,
+            },
+        ) from exc
+
 @router.post("/api/launcher/lifecycle-intents", status_code=202)
 def launcher_submit_lifecycle_intent(request: Request, payload: LifecycleIntentPayload) -> dict:
     _ensure_control_request(request)
