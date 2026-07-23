@@ -10,6 +10,7 @@ import {
 } from "react";
 
 import { AgentFilterRail } from "../components/vui/product/agent-management";
+import { VNativeButton } from "../components/vui";
 import { AgentDetailWorkspacePanel } from "./AgentDetailWorkspacePanel";
 import { AgentInspectorRailPanel } from "./AgentInspectorRailPanel";
 import { AgentListWorkspacePanel } from "./AgentListWorkspacePanel";
@@ -246,7 +247,7 @@ export function AgentWorkspaceLayoutPanel({
 
       {hasInspector && inspectorRail ? (
         <>
-          <button
+          <VNativeButton
             type="button"
             className={styles.inspectorBackdrop}
             aria-label={inspectorRail.closeLabel || inspectorRail.title}
