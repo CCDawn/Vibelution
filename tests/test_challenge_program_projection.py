@@ -1,4 +1,5 @@
 import importlib.util
+import json
 from pathlib import Path
 
 
@@ -8,6 +9,9 @@ assert _SPEC is not None and _SPEC.loader is not None
 _MODULE = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(_MODULE)
 build_challenge_program_projection = _MODULE.build_challenge_program_projection
+_COMPATIBILITY_CASE_REGISTRY = json.loads(
+    (Path(__file__).parents[1] / "挑战杯" / "data" / "representative_deep_cases.json").read_text(encoding="utf-8")
+)
 
 
 def _legacy_accepted_case() -> dict:
@@ -100,3 +104,52 @@ def test_program_projection_reports_no_deep_case_when_legacy_iteration_never_sta
 
     assert projection["stage3DeepResearchDelivery"]["status"] == "not_started"
     assert projection["stage3DeepResearchDelivery"]["caseRecords"] == []
+
+
+def test_program_projection_recovers_documented_case_when_operator_history_is_missing():
+    projection = build_challenge_program_projection(
+        legacy_lifecycle={"stage2": {"status": "not_started"}, "stage3": {"status": "not_started"}},
+        public_config={"llm": {"providers": {}}},
+        official_model_evidence=[],
+        compatibility_case_registry=_COMPATIBILITY_CASE_REGISTRY,
+    )
+
+    stage3 = projection["stage3DeepResearchDelivery"]
+    assert stage3["status"] == "partial"
+    assert stage3["representativeCaseCount"] == 1
+    assert stage3["caseRecords"][0]["internalStatus"] == "accepted_for_writeup"
+    assert stage3["caseRecords"][0]["evidenceStatus"] == "documented_program_fact"
+    assert stage3["caseRecords"][0]["evidenceRefs"] == [
+        "挑战杯/README.md#5-当前真实进展",
+        ".docs/project-memory/lanes/challenge-cup-research-flow.json",
+    ]
+    assert projection["compatibility"]["caseRecoverySource"] == "tracked_program_case_registry"
+    assert stage3["projectCompleted"] is False
+
+
+def test_live_legacy_case_takes_precedence_over_documented_compatibility_registry():
+    projection = build_challenge_program_projection(
+        legacy_lifecycle=_legacy_accepted_case(),
+        public_config={"llm": {"providers": {}}},
+        official_model_evidence=[],
+        compatibility_case_registry={
+            "schemaVersion": 1,
+            "registryKind": "challenge_program_representative_cases",
+            "cases": [
+                {
+                    "caseId": "fashion_mnist_predictive_coding",
+                    "title": "Documented fallback",
+                    "internalStatus": "accepted_for_writeup",
+                    "projectCompletionStatus": "case_only",
+                    "evidenceStatus": "documented_program_fact",
+                    "evidenceRefs": ["挑战杯/README.md#5-当前真实进展"],
+                    "claimBoundary": "fallback",
+                }
+            ],
+        },
+    )
+
+    case = projection["stage3DeepResearchDelivery"]["caseRecords"][0]
+    assert case["title"] == "FashionMNIST 预测编码工程案例"
+    assert case.get("evidenceStatus") != "documented_program_fact"
+    assert projection["compatibility"]["caseRecoverySource"] == "legacy_lifecycle"

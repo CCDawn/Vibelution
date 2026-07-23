@@ -16,10 +16,19 @@ from typing import Any
 from core.web.services.team_workflow.challenge_program import build_challenge_program_projection
 
 
+CHALLENGE_PROGRAM_CASE_REGISTRY_PATH = Path("挑战杯") / "data" / "representative_deep_cases.json"
+
+
 def _service():
     from core.web.services import team_workflow_orchestration_service
 
     return team_workflow_orchestration_service
+
+
+def _load_challenge_program_case_registry() -> dict[str, Any]:
+    s = _service()
+    path = Path(s.PROJECT_ROOT) / CHALLENGE_PROGRAM_CASE_REGISTRY_PATH
+    return s._read_json(path) if path.exists() else {}
 
 
 def _require_formal_full_run_ready(plan: dict[str, Any]) -> tuple[str, dict[str, Any]]:
@@ -451,6 +460,7 @@ def _experiment_planning_status(
         legacy_lifecycle=lifecycle_projection,
         public_config=s.load_public_config(),
         official_model_evidence=s._official_model_evidence_entries(official_model_evidence_store),
+        compatibility_case_registry=_load_challenge_program_case_registry(),
     )
     gaps = s._experiment_planning_gaps(
         latest_experiment=latest_experiment,

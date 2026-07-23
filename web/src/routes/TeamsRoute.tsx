@@ -3519,9 +3519,17 @@ export function TeamsRoute({
     const stageStatusLabel = (stageType: ResearchStageType, active: boolean, latestRound: ResearchStagePhaseStatus["latestRound"] | null | undefined) => {
       if (challengeProgramProjection) {
         if (stageType === "knowledge_collection") {
-          return challengeProgramProjection.stage1ComplianceReadiness.status === "blocked"
-            ? (lang === "zh" ? "BLOCKED · 待配置" : "BLOCKED · configuration required")
-            : challengeProgramProjection.stage1ComplianceReadiness.status;
+          const stage1 = challengeProgramProjection.stage1ComplianceReadiness;
+          if (stage1.status !== "blocked") {
+            return stage1.status;
+          }
+          if (stage1.blockers.includes("dashscope_qwen_provider_missing")) {
+            return lang === "zh" ? "BLOCKED · 待配置" : "BLOCKED · configuration required";
+          }
+          if (stage1.blockers.includes("dashscope_qwen_call_evidence_missing")) {
+            return lang === "zh" ? "BLOCKED · 待验证" : "BLOCKED · validation required";
+          }
+          return lang === "zh" ? "BLOCKED · 待完成" : "BLOCKED · incomplete";
         }
         if (stageType === "experiment") {
           return challengeProgramProjection.stage2BatchGovernance.status === "blocked_by_stage1"
@@ -3616,8 +3624,8 @@ export function TeamsRoute({
             : "After Stage1, process 25 batches of five; failures and blockers remain explicit and incomplete.";
         }
         return lang === "zh"
-          ? "需完成 3 个跨学科深研案例与参赛封装；FashionMNIST 的 accepted_for_writeup 仅是单案例内部状态。"
-          : "Three cross-disciplinary cases are required; FashionMNIST accepted_for_writeup is case-internal only.";
+          ? "需完成 3 个跨学科深研案例与参赛封装；既有 FashionMNIST 仅作为单案例，不代表平台完成。"
+          : "Three cross-disciplinary cases are required; existing FashionMNIST evidence remains case-only.";
       }
       if (stageType === "knowledge_collection") {
         if (!selectedSourceCollectionRun) {
@@ -3759,7 +3767,7 @@ export function TeamsRoute({
                         <span>{lang === "zh" ? "深研案例" : "deep cases"} {challengeProgramProjection.stage3DeepResearchDelivery.representativeCaseCount}/{challengeProgramProjection.stage3DeepResearchDelivery.requiredRepresentativeCaseCount}</span>
                         <span>{lang === "zh" ? "平台完成" : "program complete"} {challengeProgramProjection.stage3DeepResearchDelivery.projectCompleted ? (lang === "zh" ? "是" : "yes") : (lang === "zh" ? "否" : "no")}</span>
                         <span title={challengeProgramProjection.stage3DeepResearchDelivery.caseRecords[0]?.claimBoundary || ""}>
-                          {lang === "zh" ? "单案例状态" : "case status"} {challengeProgramProjection.stage3DeepResearchDelivery.caseRecords[0]?.internalStatus || "-"}
+                          {challengeProgramProjection.stage3DeepResearchDelivery.caseRecords[0]?.title || (lang === "zh" ? "单案例" : "case")} · {challengeProgramProjection.stage3DeepResearchDelivery.caseRecords[0]?.internalStatus || "-"}
                         </span>
                       </>
                     )}
