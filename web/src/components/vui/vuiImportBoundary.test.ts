@@ -6,10 +6,9 @@ import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, extname, join, relative } from "node:path";
 // @ts-expect-error Vitest runs this contract in Node; the web project intentionally omits global Node types.
 import { fileURLToPath } from "node:url";
-import * as heroUiReact from "@heroui/react";
 
 const sourceRoot = fileURLToPath(new URL("../../", import.meta.url));
-const boundaryTestRelativePath = "components/vui/vuiImportBoundary.test.ts";
+const packageJsonPath = fileURLToPath(new URL("../../../package.json", import.meta.url));
 const heroUiImportToken = "@heroui/react";
 const vuiRendererRelativeRoot = "components/vui/renderers/";
 const vuiProductRelativeRoot = "components/vui/product/";
@@ -49,32 +48,80 @@ function relativeFromSourceRoot(file: string): string {
 }
 
 describe("VUI architecture boundary", () => {
-  it("documents the current HeroUI package root provider surface", () => {
-    const providerSource = readText(join(sourceRoot, "components", "vui", "renderers", "heroui", "HeroProvider.tsx"));
+  it("keeps @heroui/react out of package.json and source imports", () => {
+    const packageJson = readText(packageJsonPath);
+    expect(packageJson).not.toContain(heroUiImportToken);
 
-    expect("HeroUIProvider" in heroUiReact).toBe(false);
-    expect(providerSource).toContain('data-vui-provider="heroui"');
-    expect(providerSource).toContain("HeroUI 3.2.1 does not expose a root provider");
-  });
-
-  it("keeps HeroUI imports inside the VUI renderer layer", () => {
+    const boundarySelf = relativeFromSourceRoot(fileURLToPath(import.meta.url)).replace(/\\/g, "/");
     const offenders = walkFiles(sourceRoot)
       .filter((file) => readText(file).includes(heroUiImportToken))
       .map(relativeFromSourceRoot)
-      .filter((file) => file !== boundaryTestRelativePath)
-      .filter((file) => !file.startsWith("components/vui/"));
+      .filter((file) => file !== boundarySelf && !file.endsWith("vuiImportBoundary.test.ts"));
 
     expect(offenders).toEqual([]);
   });
 
-  it("keeps VUI product components from importing HeroUI directly", () => {
+  it("documents the root provider as a VUI/shadcn boundary", () => {
+    const providerSource = readText(join(sourceRoot, "components", "vui", "VuiProvider.tsx"));
+    const mainSource = readText(join(sourceRoot, "main.tsx"));
+
+    expect(providerSource).toContain("export function VuiProvider");
+    expect(providerSource).toContain('data-vui-provider="shadcn"');
+    expect(mainSource).toContain('from "./components/vui/VuiProvider"');
+    expect(mainSource).toContain("vui-provider-theme.css");
+    expect(mainSource).not.toContain("heroui-theme.css");
+    expect(mainSource).not.toContain("renderers/heroui");
+  });
+
+  it("keeps VUI product components from importing renderer backends directly", () => {
     const offenders = walkFiles(join(sourceRoot, "components", "vui", "product"))
-      .filter((file) => readText(file).includes(heroUiImportToken))
+      .filter((file) => {
+        const text = readText(file);
+        return text.includes(heroUiImportToken) || /from\s+["'][^"']*renderers\/shadcn\//.test(text);
+      })
       .map(relativeFromSourceRoot)
       .filter((file) => !file.startsWith(vuiRendererRelativeRoot))
       .filter((file) => file.startsWith(vuiProductRelativeRoot));
 
     expect(offenders).toEqual([]);
+  });
+
+  it("keeps routes from importing VUI renderers or shadcn backends directly", () => {
+    const rendererImportPattern = /from\s+["'][^"']*components\/vui\/renderers\//;
+    const offenders = walkFiles(join(sourceRoot, "routes"))
+      .filter((file) => routeSourceExtensions.has(extname(file)))
+      .map(relativeFromSourceRoot)
+      .filter((file) => !file.endsWith(".test.ts") && !file.endsWith(".test.tsx"))
+      .filter((file) => rendererImportPattern.test(readText(join(sourceRoot, file))));
+
+    expect(offenders).toEqual([]);
+  });
+
+  it("documents the VUI facade + shadcn renderer ownership model", () => {
+    const readme = readText(join(sourceRoot, "components", "vui", "README.md"));
+    expect(readme).toContain("stable product API");
+    expect(readme).toContain("shadcn-style + Radix is the preferred implementation backend");
+    expect(readme).toContain("No new `V*` primitive");
+    expect(readme).toContain("VButton");
+    expect(readme).toContain("ShadcnButton");
+    expect(readme).toContain("VListDetailPage");
+  });
+
+  it("keeps interactive form primitives on the shadcn renderer path", () => {
+    const button = readText(join(sourceRoot, "components", "vui", "primitives", "VButton.tsx"));
+    const input = readText(join(sourceRoot, "components", "vui", "forms", "VInput.tsx"));
+    const select = readText(join(sourceRoot, "components", "vui", "forms", "VSelect.tsx"));
+    const checkbox = readText(join(sourceRoot, "components", "vui", "forms", "VCheckbox.tsx"));
+    const tooltip = readText(join(sourceRoot, "components", "vui", "primitives", "VTooltip.tsx"));
+    const dialog = readText(join(sourceRoot, "components", "vui", "primitives", "VDialog.tsx"));
+
+    expect(button).toContain("ShadcnButton");
+    expect(input).toContain("ShadcnInput");
+    expect(select).toContain("ShadcnSelect");
+    expect(checkbox).toContain("ShadcnCheckbox");
+    expect(tooltip).toContain("ShadcnTooltip");
+    expect(dialog).toContain("ShadcnDialog");
+    expect(dialog).toContain("export function VConfirmDialog");
   });
 
   it("keeps product source files from adding inline Tailwind visual utility strings", () => {

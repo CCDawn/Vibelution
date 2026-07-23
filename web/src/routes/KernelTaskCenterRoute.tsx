@@ -9,7 +9,7 @@ import { useSearchParams } from "react-router-dom";
 import { getKernelTaskTimeline, listKernelTasks, selectKernelTaskId } from "../api/kernel";
 import { queryKeys } from "../api/queryKeys";
 import type { KernelDelivery, KernelTask, KernelTimelineItem } from "../api/types";
-import { VActionGroup, VButton, VIconButton, VMetricStrip, VRouteHeader, VSelect, VStateSurface, VSurface } from "../components/vui";
+import { VActionGroup, VButton, VIconButton, VListDetailPage, VMetricStrip, VSelect, VStateSurface, VSurface } from "../components/vui";
 import { useShellI18n } from "../i18n/useShellI18n";
 import styles from "./KernelTaskCenterRoute.styles";
 
@@ -272,41 +272,42 @@ export function KernelTaskCenterRoute() {
   );
 
   return (
-    <div className={styles.routeClass}>
-      <VRouteHeader
-        className={styles.headerClass}
-        eyebrow="Kernel"
-        title={copy.title}
-        meta={copy.subtitle}
-        actions={(
-          <VActionGroup ariaLabel={copy.status} className={styles.headerActionsClass}>
-            <div className={styles.statusFilterClass}>
-              <span className={styles.statusFilterLabelClass}>{copy.status}</span>
-              <VSelect
-                aria-label={copy.status}
-                selectedKey={status || ALL_STATUS_KEY}
-                options={statusOptions}
-                placeholder={status || copy.allStatus}
-                onSelectionChange={(key) => setStatus(String(key) === ALL_STATUS_KEY ? "" : String(key))}
-              />
-            </div>
-            <VIconButton
-              label={copy.refresh}
-              className={styles.iconButtonClass}
-              icon={<RefreshCw size={16} />}
-              onPress={() => {
-                taskQuery.refetch();
-                if (selectedTaskId) {
-                  timelineQuery.refetch();
-                }
-              }}
+    <VListDetailPage
+      ariaLabel={copy.title}
+      className={styles.routeClass}
+      headerClassName={styles.headerClass}
+      workspaceClassName={styles.workspaceClass}
+      columnsClassName=""
+      eyebrow="Kernel"
+      title={copy.title}
+      meta={copy.subtitle}
+      actions={(
+        <VActionGroup ariaLabel={copy.status} className={styles.headerActionsClass}>
+          <div className={styles.statusFilterClass}>
+            <span className={styles.statusFilterLabelClass}>{copy.status}</span>
+            <VSelect
+              aria-label={copy.status}
+              selectedKey={status || ALL_STATUS_KEY}
+              options={statusOptions}
+              placeholder={status || copy.allStatus}
+              onSelectionChange={(key) => setStatus(String(key) === ALL_STATUS_KEY ? "" : String(key))}
             />
-          </VActionGroup>
-        )}
-      />
-
-      <div className={styles.workspaceClass}>
-        <VSurface as="aside" ariaLabel={copy.taskList} className={styles.taskPaneClass} elevation="panel" padding="none" tone="rail">
+          </div>
+          <VIconButton
+            label={copy.refresh}
+            className={styles.iconButtonClass}
+            icon={<RefreshCw size={16} />}
+            onPress={() => {
+              taskQuery.refetch();
+              if (selectedTaskId) {
+                timelineQuery.refetch();
+              }
+            }}
+          />
+        </VActionGroup>
+      )}
+      list={(
+        <VSurface as="section" ariaLabel={copy.taskList} className={styles.taskPaneClass} elevation="panel" padding="none" tone="rail">
           <div className={styles.panelHeaderClass}>
             <div>
               <p className={styles.eyebrowClass}>{copy.taskList}</p>
@@ -317,12 +318,13 @@ export function KernelTaskCenterRoute() {
             {taskPaneContent}
           </div>
         </VSurface>
-
-        <VSurface as="main" ariaLabel={copy.detail} className={styles.detailPaneClass} elevation="panel" padding="compact" tone="panel">
+      )}
+      detail={(
+        <VSurface as="section" ariaLabel={copy.detail} className={styles.detailPaneClass} elevation="panel" padding="compact" tone="panel">
           {timelinePaneContent}
         </VSurface>
-      </div>
-    </div>
+      )}
+    />
   );
 }
 

@@ -37,7 +37,7 @@ import {
   LogRoot,
   LogTreeResponse,
 } from "../api/types";
-import { VActionGroup, VButton, VIconButton, VNativeInput, VRouteHeader, VStateSurface, VStatusStrip, VSurface, VTooltip } from "../components/vui";
+import { VActionGroup, VButton, VDenseOpsPage, VIconButton, VNativeInput, VStateSurface, VStatusStrip, VSurface, VTooltip } from "../components/vui";
 import { PaneCollapseHandle } from "../components/layout/PaneCollapseHandle";
 import { LazyFilePreview } from "../components/preview/LazyFilePreview";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
@@ -1059,25 +1059,24 @@ export function LogsRoute() {
   );
 
   return (
-    <div className={styles.route}>
-      <VRouteHeader
-        className={styles.header}
-        aria-label={t("logsSubtitle")}
-        eyebrow={t("navLogs")}
-        title={t("logsTitle")}
-        meta={logsCompactSubtitle}
-        actions={(
-          <VStatusStrip
-            className={styles.headerMeta}
-            items={[
-              { label: lang === "zh" ? "预览" : "Preview", value: t("readonlyPreview") },
-              { label: lang === "zh" ? "复制" : "Copy", value: t("copyEnabled"), tone: "success" },
-              { label: lang === "zh" ? "清理" : "Clean", value: t("cleanupEnabled"), tone: "warning" },
-            ]}
-          />
-        )}
-      />
-
+    <VDenseOpsPage
+      className={styles.route}
+      headerClassName={styles.header}
+      ariaLabel={t("logsSubtitle")}
+      eyebrow={t("navLogs")}
+      title={t("logsTitle")}
+      meta={logsCompactSubtitle}
+      actions={(
+        <VStatusStrip
+          className={styles.headerMeta}
+          items={[
+            { label: lang === "zh" ? "预览" : "Preview", value: t("readonlyPreview") },
+            { label: lang === "zh" ? "复制" : "Copy", value: t("copyEnabled"), tone: "success" },
+            { label: lang === "zh" ? "清理" : "Clean", value: t("cleanupEnabled"), tone: "warning" },
+          ]}
+        />
+      )}
+    >
       <div ref={workspaceRef} className={styles.workspace} style={layoutStyle}>
         {activeRoot && isRuntimeScenesRoot ? (
           <RuntimeScenesPane
@@ -1487,6 +1486,6 @@ export function LogsRoute() {
           </nav>
         </VSurface>
       </div>
-    </div>
+    </VDenseOpsPage>
   );
 }

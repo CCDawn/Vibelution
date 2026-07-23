@@ -1,6 +1,7 @@
+import { useState } from "react";
 import { RefreshCw } from "lucide-react";
 
-import { VButton, VContextualHint, VNativeInput } from "../components/vui";
+import { VButton, VConfirmDialog, VContextualHint, VNativeInput } from "../components/vui";
 import styles from "./AgentDebugResetPanel.styles";
 
 export type AgentResetOptions = {
@@ -17,7 +18,9 @@ export type AgentDebugResetPanelCopy = {
   resetAgent: string;
   resetAgentTitle: string;
   resetAgentHint: string;
+  resetAgentConfirm: string;
   resettingAgent: string;
+  cancelCreate: string;
   resetClearRuntimeState: string;
   resetClearRuntimeStateHint: string;
   resetDirectSession: string;
@@ -72,6 +75,7 @@ const resetOptionRows: ResetOptionRow[] = [
 
 type AgentDebugResetPanelProps = {
   copy: AgentDebugResetPanelCopy;
+  agentName: string;
   options: AgentResetOptions;
   canReset: boolean;
   pending: boolean;
@@ -81,54 +85,75 @@ type AgentDebugResetPanelProps = {
 
 export function AgentDebugResetPanel({
   copy,
+  agentName,
   options,
   canReset,
   pending,
   onOptionChange,
   onReset,
 }: AgentDebugResetPanelProps) {
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const confirmDescription = copy.resetAgentConfirm.replace("{name}", agentName);
+
   return (
-    <section className={styles.resetZone}>
-      <div className={styles.panelHeader}>
-        <div>
-          <p className={styles.panelEyebrow}>{copy.resetAgentTitle}</p>
-          <h3 className={styles.contextualHintRow}>
-            {copy.resetAgent}
-            <VContextualHint content={copy.resetAgentHint} label={`${copy.resetAgentTitle}说明`} tone="danger" />
-          </h3>
+    <>
+      <section className={styles.resetZone}>
+        <div className={styles.panelHeader}>
+          <div>
+            <p className={styles.panelEyebrow}>{copy.resetAgentTitle}</p>
+            <h3 className={styles.contextualHintRow}>
+              {copy.resetAgent}
+              <VContextualHint content={copy.resetAgentHint} label={`${copy.resetAgentTitle}说明`} tone="danger" />
+            </h3>
+          </div>
+          <RefreshCw size={16} />
         </div>
-        <RefreshCw size={16} />
-      </div>
-      <div className={styles.resetOptionGrid}>
-        {resetOptionRows.map((row) => (
-          <label key={row.key} className={styles.resetOptionField}>
-            <VNativeInput
-              type="checkbox"
-              checked={options[row.key]}
-              onChange={(event) => onOptionChange(row.key, event.target.checked)}
-            />
-            <span>
-              <strong className={styles.contextualHintRow}>
-                {copy[row.label]}
-                <VContextualHint content={copy[row.hint]} label={`${copy[row.label]}说明`} tone="warning" />
-              </strong>
-            </span>
-          </label>
-        ))}
-      </div>
-      <div className={styles.editorActions}>
-        <VButton
-          type="button"
-          variant="secondary"
-          icon={<RefreshCw size={15} />}
-          isDisabled={!canReset || pending}
-          tooltip={copy.resetAgentHint}
-          disabledReason={!canReset ? copy.resetAgentHint : copy.resettingAgent}
-          onPress={onReset}
-        >
-          {pending ? copy.resettingAgent : copy.resetAgent}
-        </VButton>
-      </div>
-    </section>
+        <div className={styles.resetOptionGrid}>
+          {resetOptionRows.map((row) => (
+            <label key={row.key} className={styles.resetOptionField}>
+              <VNativeInput
+                type="checkbox"
+                checked={options[row.key]}
+                onChange={(event) => onOptionChange(row.key, event.target.checked)}
+              />
+              <span>
+                <strong className={styles.contextualHintRow}>
+                  {copy[row.label]}
+                  <VContextualHint content={copy[row.hint]} label={`${copy[row.label]}说明`} tone="warning" />
+                </strong>
+              </span>
+            </label>
+          ))}
+        </div>
+        <div className={styles.editorActions}>
+          <VButton
+            type="button"
+            variant="secondary"
+            icon={<RefreshCw size={15} />}
+            isDisabled={!canReset || pending}
+            tooltip={copy.resetAgentHint}
+            disabledReason={!canReset ? copy.resetAgentHint : copy.resettingAgent}
+            onPress={() => setConfirmOpen(true)}
+          >
+            {pending ? copy.resettingAgent : copy.resetAgent}
+          </VButton>
+        </div>
+      </section>
+
+      <VConfirmDialog
+        open={confirmOpen}
+        onOpenChange={setConfirmOpen}
+        title={copy.resetAgent}
+        description={confirmDescription}
+        tone="danger"
+        confirmLabel={copy.resetAgent}
+        cancelLabel={copy.cancelCreate}
+        confirmPending={pending}
+        onConfirm={() => {
+          onReset();
+          setConfirmOpen(false);
+        }}
+      />
+    </>
   );
 }

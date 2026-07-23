@@ -11,9 +11,9 @@ import {
   VButton,
   VDenseToolbar,
   VIconButton,
+  VListDetailPage,
   VNativeInput,
   VPanelHeader,
-  VRouteHeader,
   VStatusChip,
   VStatusStrip,
   VSurface,
@@ -238,40 +238,41 @@ export function SkillsRoute() {
   }
 
   return (
-    <section className={styles.routeClass}>
-      <VRouteHeader
-        className={styles.headerClass}
-        eyebrow={copy.eyebrow}
-        title={copy.title}
-        meta={copy.subtitle}
-        actions={(
-          <VIconButton
-            type="button"
-            className={styles.refreshButtonClass}
-            label={copy.refresh}
-            icon={<RefreshCw size={15} />}
-            isDisabled={libraryQuery.isFetching}
-            onPress={() => libraryQuery.refetch()}
-          />
-        )}
-      />
-
-      <div className={styles.controlStripClass}>
-        <AgentManagementNav active="skills" className={styles.managementNavClass} />
-
-        <VStatusStrip
-          className={styles.summaryStripClass}
-          items={[
-            { label: "Total", value: <strong className={styles.summaryValueClass}>{counts.total}</strong> },
-            { label: "Codex", value: <strong className={styles.summaryValueClass}>{counts.codex}</strong> },
-            { label: "Agents", value: <strong className={styles.summaryValueClass}>{counts.agents}</strong> },
-            { label: copy.readOnly, value: <strong className={styles.summaryValueClass}>{libraryQuery.data?.mode ?? "read_only"}</strong> },
-          ]}
+    <VListDetailPage
+      className={styles.routeClass}
+      headerClassName={styles.headerClass}
+      workspaceClassName={styles.workspaceClass}
+      columnsClassName=""
+      ariaLabel={copy.title}
+      eyebrow={copy.eyebrow}
+      title={copy.title}
+      meta={copy.subtitle}
+      actions={(
+        <VIconButton
+          type="button"
+          className={styles.refreshButtonClass}
+          label={copy.refresh}
+          icon={<RefreshCw size={15} />}
+          isDisabled={libraryQuery.isFetching}
+          onPress={() => libraryQuery.refetch()}
         />
-      </div>
-
-      <main className={styles.workspaceClass}>
-        <VSurface as="aside" className={styles.listPanelClass} ariaLabel={copy.listTitle} tone="panel" padding="compact">
+      )}
+      toolbar={(
+        <div className={styles.controlStripClass}>
+          <AgentManagementNav active="skills" className={styles.managementNavClass} />
+          <VStatusStrip
+            className={styles.summaryStripClass}
+            items={[
+              { label: "Total", value: <strong className={styles.summaryValueClass}>{counts.total}</strong> },
+              { label: "Codex", value: <strong className={styles.summaryValueClass}>{counts.codex}</strong> },
+              { label: "Agents", value: <strong className={styles.summaryValueClass}>{counts.agents}</strong> },
+              { label: copy.readOnly, value: <strong className={styles.summaryValueClass}>{libraryQuery.data?.mode ?? "read_only"}</strong> },
+            ]}
+          />
+        </div>
+      )}
+      list={(
+        <VSurface as="section" className={styles.listPanelClass} ariaLabel={copy.listTitle} tone="panel" padding="compact">
           <VPanelHeader
             className={styles.panelHeaderClass}
             eyebrow={copy.listTitle}
@@ -388,7 +389,8 @@ export function SkillsRoute() {
             )}
           </div>
         </VSurface>
-
+      )}
+      detail={(
         <VSurface as="section" className={styles.detailPanelClass} ariaLabel={copy.detailTitle} tone="panel" padding="compact">
           {activeSkill ? (
             <>
@@ -464,7 +466,7 @@ export function SkillsRoute() {
             </div>
           )}
         </VSurface>
-      </main>
-    </section>
+      )}
+    />
   );
 }

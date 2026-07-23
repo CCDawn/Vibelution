@@ -1,7 +1,8 @@
 import { type ComponentPropsWithoutRef, type ReactNode } from "react";
 
-export type VEmptyStateProps = ComponentPropsWithoutRef<"div"> & {
+export type VEmptyStateProps = Omit<ComponentPropsWithoutRef<"div">, "title" | "children"> & {
   actions?: ReactNode;
+  children?: ReactNode;
   icon?: ReactNode;
   title: ReactNode;
 };
