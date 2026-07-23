@@ -122,11 +122,11 @@ const styles = {
   nav:
     "vui-app-appshell nav min-w-0 max-[639px]:hidden rounded-[var(--vui-radius-panel-soft)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-toolbar)] p-[3px] shadow-[var(--vui-elevation-panel)]",
   navLink:
-    "vui-app-appshell navLink relative z-[2] inline-flex min-h-[30px] min-w-0 cursor-pointer items-center justify-center rounded-[var(--radius-control)] px-2.5 [font-size:var(--vui-font-sm)] font-semibold text-[var(--fg-secondary)] no-underline select-none",
+    "vui-app-appshell navLink relative z-[2] inline-flex min-h-[30px] min-w-0 cursor-pointer items-center justify-center rounded-[var(--radius-control)] px-2.5 [font-size:var(--vui-font-sm)] font-semibold text-[var(--fg-primary)] no-underline select-none",
   navLinkActive:
     "vui-app-appshell navLinkActive relative z-[2] inline-flex min-h-[30px] min-w-0 cursor-pointer items-center justify-center rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))] px-2.5 [font-size:var(--vui-font-sm)] font-semibold text-[var(--accent-cool)] no-underline select-none",
   navLinkDisabled:
-    "vui-app-appshell navLinkDisabled relative inline-flex min-h-[30px] min-w-0 cursor-default items-center justify-center rounded-[var(--radius-control)] px-2.5 [font-size:var(--vui-font-sm)] font-semibold text-[var(--fg-tertiary)] opacity-55 select-none",
+    "vui-app-appshell navLinkDisabled relative inline-flex min-h-[30px] min-w-0 cursor-not-allowed items-center justify-center rounded-[var(--radius-control)] px-2.5 [font-size:var(--vui-font-sm)] font-semibold text-[var(--fg-tertiary)] opacity-55 select-none pointer-events-none",
   returnButton:
     "vui-app-appshell returnButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55",
   shell:

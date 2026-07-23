@@ -127,8 +127,8 @@
   top: 0;
   left: 0;
   right: 0;
-  /* Stay above route content stacking contexts (transform/filter create new layers). */
-  z-index: 40;
+  /* Stay above route content / responsive overlays (chat backdrop is z-30 inside main). */
+  z-index: 60;
   display: grid;
   grid-template-columns: minmax(0, max-content) minmax(0, 1fr) max-content;
   align-items: center;
@@ -178,14 +178,11 @@
   -webkit-app-region: no-drag !important;
 }
 
-/* Electron only: drag from non-interactive brand/clock text, not from nav. */
-:where(.vui-app-appshell).shell[data-desktop-shell="electron"] .topBar .brandCopy,
-:where(.vui-app-appshell).shell[data-desktop-shell="electron"] .topBar .brand,
-:where(.vui-app-appshell).shell[data-desktop-shell="electron"] .topBar .brandSubtle,
-:where(.vui-app-appshell).shell[data-desktop-shell="electron"] .topBar .versionPill,
-:where(.vui-app-appshell).shell[data-desktop-shell="electron"] .topBar .topClock {
-  -webkit-app-region: drag;
-}
+/*
+ * Intentionally no drag regions on topBar chrome. Electron titleBarOverlay already
+ * owns window-control drag; extra -webkit-app-region: drag strips under the nav
+ * band swallow primary navigation clicks on Windows.
+ */
 
 :where(.vui-app-appshell).topBar::before {
   content: "";
@@ -310,7 +307,8 @@
   padding-inline: 10px;
   border: 1px solid transparent;
   border-radius: var(--radius-control);
-  color: var(--fg-secondary);
+  /* Enabled inactive items use primary text so they do not look "disabled gray". */
+  color: var(--fg-primary);
   font-size: var(--vui-font-sm);
   font-weight: 600;
   line-height: 1.2;
@@ -336,9 +334,11 @@
 }
 
 :where(.vui-app-appshell).navLinkDisabled {
-  cursor: default;
+  cursor: not-allowed;
+  color: var(--fg-tertiary);
   opacity: 0.55;
-  pointer-events: none;
+  pointer-events: none !important;
+  -webkit-app-region: no-drag !important;
 }
 
 :where(.vui-app-appshell).topActions {

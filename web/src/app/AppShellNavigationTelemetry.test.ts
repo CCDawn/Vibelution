@@ -154,11 +154,13 @@ describe("AppShell navigation telemetry", () => {
     expect(appShellSource).toContain('import("../routes/ChatCodingRoute")');
     expect(appShellSource).toContain('onPointerEnter={() => preloadChatRouteForNav("pointerenter")}');
     expect(appShellSource).toContain('onFocus={() => preloadChatRouteForNav("focus")}');
-    expect(appShellSource).toContain('onClick={() => preloadChatRouteForNav("click")}');
+    expect(appShellSource).toContain('onClick={(event) => handlePrimaryNavClick(event, "/chat")}');
+    expect(appShellSource).toContain("handlePrimaryNavClick");
+    expect(appShellSource).toContain("browser.primary_nav.click");
   });
 
   it("recovers when the browser address changes without the router location following", () => {
-    expect(appShellSource).toContain("routerLocationDesyncRecoveryPlan(window.location, location)");
+    expect(appShellSource).toContain("routerLocationDesyncRecoveryPlan(window.location, routerLocation)");
     expect(appShellSource).toContain("browser.router_location_desync.recovered");
     expect(appShellSource).toContain('window.history.replaceState(window.history.state, "", recovery.restoreTarget)');
     expect(appShellSource).toContain('navigate(target, { replace: true })');
@@ -166,6 +168,9 @@ describe("AppShell navigation telemetry", () => {
     expect(appShellSource).toContain('window.removeEventListener("click", handleDocumentClick, true)');
     expect(appShellSource).toContain('document.addEventListener("visibilitychange", handleVisibilityChange)');
     expect(appShellSource).toContain("browserPathnameBefore");
+    // Capture-phase recovery must not race primary nav / control clicks.
+    expect(appShellSource).toContain('[data-shell-group="navigation"]');
+    expect(appShellSource).toContain("scheduleRecovery(\"document_click\")");
   });
 
   it("keeps group chat out of the top navigation because it lives in the chat page", () => {
