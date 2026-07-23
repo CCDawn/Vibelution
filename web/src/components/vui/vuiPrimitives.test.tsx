@@ -86,16 +86,19 @@ describe("VUI foundation primitives", () => {
     expect(markup).toContain("mimo-v2.5");
   });
 
-  it("renders project-owned surface tone and elevation contracts", () => {
+  it("renders semantic and legacy surface tones through one opaque card contract", () => {
     const markup = renderToStaticMarkup(
-      <VSurface tone="rail" elevation="panel" ariaLabel="Status rail">
-        Status
-      </VSurface>,
+      <>
+        <VSurface tone="card" elevation="panel" ariaLabel="Status card">Status</VSurface>
+        <VSurface tone="panel" ariaLabel="Legacy panel">Legacy</VSurface>
+      </>,
     );
 
-    expect(markup).toContain('data-tone="rail"');
+    expect(markup).toContain('data-tone="card"');
+    expect(markup).toContain('data-tone="panel"');
     expect(markup).toContain('data-elevation="panel"');
-    expect(markup).toContain("bg-vui-surface-rail");
+    expect(markup).toContain("bg-vui-surface-card");
+    expect(markup).not.toContain("bg-vui-surface-panel/82");
     expect(markup).toContain("shadow-[var(--vui-elevation-panel)]");
     expect(markup).toContain("rounded-[var(--vui-radius-panel-soft)]");
   });
@@ -252,6 +255,7 @@ describe("VUI foundation primitives", () => {
     expect(markup).toContain('data-vui="panel"');
     expect(markup).toContain('aria-label="Agent summary"');
     expect(markup).toContain("<strong>11</strong>");
+    expect(markup).not.toContain("backdrop-blur-[1px]");
   });
 
   it("renders tooltip trigger through the supported Radix/shadcn wrapper structure", () => {

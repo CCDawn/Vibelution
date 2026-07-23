@@ -48,6 +48,12 @@
   --color-vui-surface-toolbar: var(--vui-surface-toolbar);
   --color-vui-surface-row: var(--vui-surface-row);
   --color-vui-surface-row-hover: var(--vui-surface-row-hover);
+  --color-vui-surface-workspace: var(--vui-surface-workspace);
+  --color-vui-surface-region: var(--vui-surface-region);
+  --color-vui-surface-card: var(--vui-surface-card);
+  --color-vui-surface-inset: var(--vui-surface-inset);
+  --color-vui-surface-control: var(--vui-surface-control);
+  --color-vui-surface-popover: var(--vui-surface-popover);
   --color-vui-control-muted: var(--vui-control-muted);
   --color-vui-fg-primary: var(--fg-primary);
   --color-vui-fg-secondary: var(--fg-secondary);
