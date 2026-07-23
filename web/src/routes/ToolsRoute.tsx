@@ -1813,7 +1813,8 @@ export function ToolsRoute() {
                         <VButton
                           type="button"
                           variant="ghost"
-                          className={isActive ? styles.toolButtonActive : styles.toolButton}
+                          contentLayout="plain"
+                          className={`${styles.toolButton} ${isActive ? styles.toolButtonActive : ""}`}
                           tooltip={tool.description || t("toolsNoDescription")}
                           onClick={(event) => handleToolRowClick(tool, event)}
                         >

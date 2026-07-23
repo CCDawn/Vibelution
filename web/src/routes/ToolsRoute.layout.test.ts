@@ -87,7 +87,6 @@ const contentSizedActionStyles = [
   "returnButton",
   "secondaryButton",
   "segmentButton",
-  "toolButton",
 ] as const;
 
 function classTokens(className: string): string[] {
@@ -400,6 +399,12 @@ describe("ToolsRoute layout contract", () => {
 
   it("keeps long tool descriptions readable in the dense tool browser", () => {
     expect(routeSource).toContain("styles.toolCopy");
+    expect(routeSource).toMatch(/contentLayout="plain"[\s\S]{0,120}styles\.toolButton/);
+    expect(routeSource).toContain('className={`${styles.toolButton} ${isActive ? styles.toolButtonActive : ""}`}');
+    expect(styles.toolButton).toContain("!h-auto");
+    expect(styles.toolButton).toContain("!grid");
+    expect(styles.toolButton).toContain("w-full");
+    expect(styles.toolButton).toContain("grid-cols-[auto_minmax(0,1fr)_auto]");
     expect(styles.toolCopy).toContain("[font-size:var(--vui-font-xs)]");
     expect(styles.toolCopy).toContain("[&>span]:truncate");
     expect(styles.toolList).toContain("overflow-auto");
@@ -434,6 +439,10 @@ describe("ToolsRoute layout contract", () => {
     expect(routeSource).toContain("styles.toolList");
     expect(styles.listPanel).toContain("panel");
     expect(styles.bulkActionBar).toContain("flex");
+    expect(styles.bulkActionBar).toContain("flex-wrap");
+    expect(styles.bulkActionBar).not.toContain("!grid");
+    expect(styles.bulkSummary).toContain("shrink-0");
+    expect(styles.bulkSummary).toContain("whitespace-nowrap");
     expect(styles.toolList).toContain("grid");
     expect(styles.dangerButton).toBeTypeOf("string");
   });
@@ -529,8 +538,7 @@ describe("ToolsRoute layout contract", () => {
     expect(styles.filterRow).toContain("flex");
     expect(styles.filterRow).toContain("gap-1");
     expect(styles.searchBox).toContain("grid-cols-[auto_minmax(0,1fr)]");
-    expect(styles.bulkActionBar).toContain("grid-cols-[minmax(0,1fr)_repeat(4,max-content)]");
-    expect(styles.bulkActionBar).toContain("max-[520px]:grid-cols-[minmax(0,1fr)]");
+    expect(styles.bulkActionBar).toContain("flex-wrap");
     expect(styles.selectableToolRow).toContain("grid-cols-[28px_minmax(0,1fr)]");
     expect(styles.toolCopy).toContain("[&>strong]:truncate");
     expect(styles.toolPermissionRow).toContain("max-[640px]:grid-cols-[1fr]");

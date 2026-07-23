@@ -62,6 +62,7 @@ describe("SkillsRoute layout contract", () => {
     expect(routeSource).not.toContain("bulkReadOnlyNoteClass");
     expect(routeSource).not.toContain("title={copy.bulkReadOnlyReason}");
     expect(routeSource).toContain("<VDenseToolbar");
+    expect(styles.listPanelClass).toContain("grid-rows-[auto_auto_auto_auto_minmax(0,1fr)]");
     expect(routeSource).toContain("selectableRowClass");
     expect(routeSource).not.toContain('method: "POST"');
     expect(routeSource).not.toContain('method: "PUT"');
@@ -120,7 +121,7 @@ describe("SkillsRoute layout contract", () => {
       styles.filterButtonClass,
       styles.primaryButtonClass,
     ];
-    const skillButtonBaseClass = stylesSource.match(/const skillButtonBaseClass = \[([\s\S]*?)\]\.join/)?.[1] ?? "";
+    const skillButtonBaseClass = styles.skillButtonBaseClass;
 
     compactButtonClasses.forEach((className) => {
       expect(className).toContain("inline-flex");
@@ -129,7 +130,10 @@ describe("SkillsRoute layout contract", () => {
       expect(className.split(/\s+/)).not.toContain("w-full");
     });
     expect(skillButtonBaseClass).toContain("w-full");
-    expect(skillButtonBaseClass).toContain("[&_[data-slot=vui-button-content]]:w-full");
+    expect(skillButtonBaseClass).toContain("!h-auto");
+    expect(skillButtonBaseClass).toContain("!grid");
+    expect(skillButtonBaseClass).toContain("grid-cols-[10px_minmax(0,1fr)_auto]");
+    expect(routeSource).toMatch(/contentLayout="plain"[\s\S]{0,180}styles\.skillButtonBaseClass/);
   });
 
   it("keeps detail chrome and command rows responsive on narrow viewports", () => {

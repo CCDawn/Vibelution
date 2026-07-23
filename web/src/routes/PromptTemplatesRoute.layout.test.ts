@@ -160,6 +160,16 @@ describe("PromptTemplatesRoute layout contract", () => {
     expect(styles.agentListClass).not.toContain("bg-[var(--surface-panel)]");
   });
 
+  it("lets multiline prompt template rows define their own height", () => {
+    expect(routeSource).toMatch(/contentLayout="plain"[\s\S]{0,180}styles\.templateButtonBaseClass/);
+    expect(styles.templateButtonBaseClass).toContain("!h-auto");
+    expect(styles.templateButtonBaseClass).toContain("!grid");
+    expect(styles.templateButtonBaseClass).toContain("w-full");
+    expect(styles.templateMetaClass).toContain("min-w-0");
+    expect(styles.templateMetaClass).toContain("[&_span]:truncate");
+    expect(styles.templateMetaClass).toContain("[&_span]:whitespace-nowrap");
+  });
+
   it("uses VUI composition for summary, panels, bulk controls, and default status", () => {
     expect(routeSource).toContain("VStatusStrip");
     expect(routeSource).toContain("VSurface");

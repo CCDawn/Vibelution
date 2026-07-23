@@ -371,6 +371,7 @@ export function SkillsRoute() {
                     </VTooltip>
                     <VButton
                       type="button"
+                      contentLayout="plain"
                       className={activeCommand === skill.command ? `${styles.skillButtonBaseClass} ${styles.skillButtonActiveClass}` : styles.skillButtonBaseClass}
                       onPress={() => setActiveCommand(skill.command)}
                     >
