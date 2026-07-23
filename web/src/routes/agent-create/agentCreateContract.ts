@@ -78,6 +78,19 @@ const DEFAULT_SESSION_AGENT_ALLOWED_TOOLS = [
   "conversation_log_inspect_tool",
 ];
 
+export const REQUIRED_SESSION_AGENT_ALLOWED_TOOLS = [
+  "exec_command",
+  "write_stdin",
+  "agent_tool_permission_request_tool",
+];
+
+export const REQUIRED_SESSION_AGENT_PREFERRED_TOOLS = [
+  "exec_command",
+  "write_stdin",
+];
+
+const DEFAULT_SESSION_AGENT_MAX_CALLS_PER_TURN = 32;
+
 const DIALOGUE_SLOT = "dialogue";
 
 export function sortedIds(values: string[]) {
@@ -556,11 +569,15 @@ export function createAgentPayload(draft: AgentCreateDraft, bundles: ToolBundle[
   const selectedToolPolicy = toolBundleSelectionToPolicy(draft.selectedToolBundleIds, bundles);
   const fallbackAllowedTools = bundles.length ? [] : expertiseFromDraft(draft.allowedTools);
   const selectedAllowedTools = selectedToolPolicy.allowedTools.length ? selectedToolPolicy.allowedTools : fallbackAllowedTools;
-  const allowedTools = sortedIds(selectedAllowedTools);
+  const requiredAllowedTools = workSession ? REQUIRED_SESSION_AGENT_ALLOWED_TOOLS : [];
+  const allowedTools = sortedIds([...selectedAllowedTools, ...requiredAllowedTools]);
   const selectedPreferredTools = selectedToolPolicy.preferredTools.length
     ? selectedToolPolicy.preferredTools
     : fallbackAllowedTools.includes("agent_message_tool") ? ["agent_message_tool"] : [];
-  const preferredTools = sortedIds(selectedPreferredTools.filter((tool) => allowedTools.includes(tool)));
+  const requiredPreferredTools = workSession ? REQUIRED_SESSION_AGENT_PREFERRED_TOOLS : [];
+  const preferredTools = sortedIds(
+    [...selectedPreferredTools, ...requiredPreferredTools].filter((tool) => allowedTools.includes(tool)),
+  );
   const personaProfile = workSession ? {} : {
     personality: draft.personaSummary.trim(),
     communicationStyle: "按角色边界回应；先给结论，再说明依据和需要交接的事项。",
@@ -595,6 +612,7 @@ export function createAgentPayload(draft: AgentCreateDraft, bundles: ToolBundle[
       writeScopes: ["private"],
       networkAccess: "controlled",
       mutationAccess: "controlled",
+      maxCallsPerTurn: workSession ? DEFAULT_SESSION_AGENT_MAX_CALLS_PER_TURN : 8,
     },
     metadata: {
       creationChannel: "agent_center",

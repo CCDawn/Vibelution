@@ -24,8 +24,10 @@ import {
   createDraftFromWorkspace,
   createDraftReady,
   createToolBundleSummary,
-  dialogueModelId,
   isWorkSessionCreateDraft,
+  REQUIRED_SESSION_AGENT_ALLOWED_TOOLS,
+  REQUIRED_SESSION_AGENT_PREFERRED_TOOLS,
+  dialogueModelId,
   normalizeCreateDraftForWorkspace,
   toolBundleIdsForModeChange,
   toolBundleMeta,
@@ -158,7 +160,16 @@ export function AgentCreateWizardDialog({
     ? [{ value: "chat", label: "会话" }, { value: "research", label: "研究" }, { value: "general", label: "通用" }]
     : [{ value: "chat", label: "Chat" }, { value: "research", label: "Research" }, { value: "general", label: "General" }], [lang]);
   const presets = useMemo(() => createAgentPresets(workspaceQuery.data, toolBundles, lang), [lang, toolBundles, workspaceQuery.data]);
-  const toolBundleSummary = useMemo(() => createToolBundleSummary(draft.selectedToolBundleIds, toolBundles, lang), [draft.selectedToolBundleIds, lang, toolBundles]);
+  const toolBundleSummary = useMemo(() => {
+    const workSession = isWorkSessionCreateDraft(draft);
+    return createToolBundleSummary(
+      draft.selectedToolBundleIds,
+      toolBundles,
+      lang,
+      workSession ? REQUIRED_SESSION_AGENT_ALLOWED_TOOLS : [],
+      workSession ? REQUIRED_SESSION_AGENT_PREFERRED_TOOLS : [],
+    );
+  }, [draft, lang, toolBundles]);
   const selectedModelId = dialogueModelId(draft.llmBindings);
   const canCreate = createDraftReady(draft, toolBundles, probeUsableModelIds);
   const loadingOptions = workspaceQuery.isPending || toolsQuery.isPending;

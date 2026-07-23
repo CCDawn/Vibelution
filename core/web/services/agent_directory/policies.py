@@ -995,6 +995,7 @@ def default_session_agent_tool_policy(policy_id: str) -> dict[str, Any]:
     payload["preferredTools"] = list(s.DEFAULT_SESSION_AGENT_PREFERRED_TOOLS)
     payload["readScopes"] = ["private", "shared"]
     payload["writeScopes"] = ["private"]
+    payload["maxCallsPerTurn"] = 32
     return payload
 
 
