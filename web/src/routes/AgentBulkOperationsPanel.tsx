@@ -138,6 +138,27 @@ export function AgentBulkOperationsPanel({
     </VButton>
   );
 
+  // Compact by default: only selection controls until the user picks agents.
+  if (!hasSelection) {
+    return (
+      <AgentBulkActionBar
+        ariaLabel={copy.bulkSelected}
+        summary={summary}
+        selectionActions={
+          <VButton
+            type="button"
+            variant="secondary"
+            icon={allVisibleSelected ? <Square size={14} /> : <CheckSquare size={14} />}
+            isDisabled={!hasVisibleAgents || pending}
+            onPress={allVisibleSelected ? onClearSelection : onSelectVisible}
+          >
+            {allVisibleSelected ? copy.bulkClear : copy.bulkSelectVisible}
+          </VButton>
+        }
+      />
+    );
+  }
+
   return (
     <AgentBulkActionBar
       ariaLabel={copy.bulkSelected}

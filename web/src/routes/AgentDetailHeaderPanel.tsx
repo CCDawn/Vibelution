@@ -75,6 +75,8 @@ export function AgentDetailHeaderPanel<TPane extends string>({
   onSelectAvatar,
   onSelectPane,
 }: AgentDetailHeaderPanelProps<TPane>) {
+  // roleTone retained for API stability / layout contracts; identity uses single role eyebrow.
+  void roleToneClass(roleTone);
   return (
     <>
       <VTooltip content={title} width="wide">
@@ -99,9 +101,6 @@ export function AgentDetailHeaderPanel<TPane extends string>({
             <div className={styles.detailIdentityCopy}>
               <p className={styles.panelEyebrow}>{roleLabel}</p>
               <h2>{agentName}</h2>
-              <span className={`${styles.agentRoleTag} ${roleToneClass(roleTone)}`}>
-                {roleLabel}
-              </span>
             </div>
           </div>
           <div className={styles.detailHeaderActions}>
@@ -125,7 +124,7 @@ export function AgentDetailHeaderPanel<TPane extends string>({
             onClick={() => onSelectPane(pane.id)}
           >
             <span>{pane.label}</span>
-            <strong>{pane.count}</strong>
+            {pane.count > 0 ? <strong>{pane.count}</strong> : null}
           </VNativeButton>
         ))}
       </nav>

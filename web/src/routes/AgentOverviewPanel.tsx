@@ -74,6 +74,8 @@ export type AgentOverviewPanelProps = {
   modeMembership: AgentOverviewModeMembership;
   policies: AgentOverviewPanelPolicy[];
   children?: ReactNode;
+  /** Prefer operations (children) above static facts for scan order. */
+  operationsFirst?: boolean;
 };
 
 const overviewIcons: Record<AgentOverviewIcon, LucideIcon> = {
@@ -115,40 +117,60 @@ function FactGrid({ facts }: { facts: AgentOverviewFact[] }) {
   );
 }
 
-export function AgentOverviewPanel({ facts, territory, modeMembership, policies, children }: AgentOverviewPanelProps) {
+export function AgentOverviewPanel({
+  facts,
+  territory,
+  modeMembership,
+  policies,
+  children,
+  operationsFirst = true,
+}: AgentOverviewPanelProps) {
   const primaryFacts = facts.filter((fact) => !TECHNICAL_FACT_IDS.has(fact.id));
   const technicalFacts = facts.filter((fact) => TECHNICAL_FACT_IDS.has(fact.id));
+  const hasModes = modeMembership.modes.length > 0;
+  const policyLabel = modeMembership.eyebrow ? "策略摘要" : "Policies";
 
-  return (
+  const identityBlock = (
     <>
       <FactGrid facts={primaryFacts} />
 
-      <section className={styles.detailSection}>
-        <div className={styles.panelHeader}>
-          <div>
-            <p className={styles.panelEyebrow}>{modeMembership.eyebrow}</p>
-            <h3>{modeMembership.title}</h3>
+      {hasModes ? (
+        <section className={styles.modeStrip} aria-label={modeMembership.title}>
+          <span className={styles.modeStripLabel}>{modeMembership.title}</span>
+          <div className={styles.pillList}>
+            {modeMembership.modes.map((mode) => (
+              <span key={mode.id}>{mode.label}</span>
+            ))}
           </div>
-          <Layers3 size={16} />
-        </div>
-        <div className={styles.pillList}>
-          {modeMembership.modes.map((mode) => (
-            <span key={mode.id}>{mode.label}</span>
-          ))}
-        </div>
-      </section>
+        </section>
+      ) : null}
+    </>
+  );
 
-      {children}
+  return (
+    <>
+      {operationsFirst && children ? children : null}
+      {identityBlock}
+      {!operationsFirst && children ? children : null}
 
-      <section className={styles.policyGrid}>
-        {policies.map((policy) => (
-          <div key={policy.id}>
-            <AgentOverviewIconView icon={policy.icon} />
-            <strong>{policy.label}</strong>
-            <span>{policy.value}</span>
+      {policies.length ? (
+        <details className={styles.policyDetails}>
+          <summary>
+            <ShieldCheck size={15} />
+            <span>{policyLabel}</span>
+            <small>{policies.length}</small>
+          </summary>
+          <div className={styles.policyGrid}>
+            {policies.map((policy) => (
+              <div key={policy.id}>
+                <AgentOverviewIconView icon={policy.icon} />
+                <strong>{policy.label}</strong>
+                <span>{policy.value}</span>
+              </div>
+            ))}
           </div>
-        ))}
-      </section>
+        </details>
+      ) : null}
 
       <details className={styles.technicalDetails}>
         <summary>

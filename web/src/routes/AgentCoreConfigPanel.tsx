@@ -116,6 +116,8 @@ function AgentLlmSlotField({
   pendingModelRef,
   configDraftDirty,
   dirty,
+  compact = false,
+  hideLabel = false,
   onLlmSlotModelChange,
   onPromoteModel,
   onReasoningEffortChange,
@@ -131,6 +133,8 @@ function AgentLlmSlotField({
   pendingModelRef: string;
   configDraftDirty: boolean;
   dirty: boolean;
+  compact?: boolean;
+  hideLabel?: boolean;
   onLlmSlotModelChange: AgentCoreConfigPanelProps["onLlmSlotModelChange"];
   onPromoteModel: AgentCoreConfigPanelProps["onPromoteModel"];
   onReasoningEffortChange: AgentCoreConfigPanelProps["onReasoningEffortChange"];
@@ -138,17 +142,19 @@ function AgentLlmSlotField({
   const slotHint = `${slot.required ? copy.requiredSlot : copy.optionalSlot} · ${slot.description}`;
   return (
     <section
-      className={styles.llmSlotField}
+      className={compact ? styles.llmSlotFieldCompact : styles.llmSlotField}
       aria-label={slotHint}
     >
-      <div className={styles.contextualHintRow}>
-        <strong>{slot.label}</strong>
-        <VContextualHint
-          content={slotHint}
-          label={`${slot.label} ${lang === "zh" ? "说明" : "details"}`}
-          width="wide"
-        />
-      </div>
+      {hideLabel ? null : (
+        <div className={styles.contextualHintRow}>
+          <strong>{slot.label}</strong>
+          <VContextualHint
+            content={slotHint}
+            label={`${slot.label} ${lang === "zh" ? "说明" : "details"}`}
+            width="wide"
+          />
+        </div>
+      )}
       <AgentModelPicker
         candidates={candidates}
         slot={slot}
@@ -218,7 +224,7 @@ export function AgentCoreConfigPanel({
         <div>
           <p className={styles.panelEyebrow}>{copy.configTitle}</p>
           <h3 className={styles.contextualHintRow}>
-            {agentName}
+            <span className={styles.panelTitle}>{lang === "zh" ? "基本配置" : "Basics"}</span>
             <VContextualHint
               content={title}
               label={`${agentName} ${lang === "zh" ? "配置说明" : "configuration details"}`}
@@ -251,29 +257,34 @@ export function AgentCoreConfigPanel({
             <option value="active">{lang === "zh" ? "活跃" : "Active"}</option>
           </VNativeSelect>
         </VFieldRow>
-        {primaryLlmSlot ? <section className={styles.fieldWide} aria-label={copy.llmSlotsHint}>
-          <div className={styles.contextualHintRow}>
-            <span>{primaryModelLabel}</span>
-            <VContextualHint
-              content={copy.llmSlotsHint}
-              label={`${primaryModelLabel} ${lang === "zh" ? "说明" : "details"}`}
-              width="wide"
-            />
-          </div>
-          <div className={styles.primaryLlmSlot}>
-            <AgentLlmSlotField {...primaryLlmSlot} copy={copy} lang={lang} pending={pending} pendingModelRef={pendingModelRef} configDraftDirty={configDraftDirty} dirty={dirty} onLlmSlotModelChange={onLlmSlotModelChange} onPromoteModel={onPromoteModel} onReasoningEffortChange={onReasoningEffortChange} />
-          </div>
-          <div className={styles.configDeepLinkRow}>
-            <VButton
-              type="button"
-              variant="secondary"
-              icon={<ExternalLink size={15} />}
-              onPress={onOpenModelConfig}
-            >
-              {lang === "zh" ? "去模型库配置" : "Open model library"}
-            </VButton>
-          </div>
-        </section> : null}
+        {primaryLlmSlot ? (
+          <section className={styles.fieldWide} aria-label={copy.llmSlotsHint}>
+            <div className={styles.contextualHintRow}>
+              <span>{primaryModelLabel}</span>
+              <VContextualHint
+                content={copy.llmSlotsHint}
+                label={`${primaryModelLabel} ${lang === "zh" ? "说明" : "details"}`}
+                width="wide"
+              />
+            </div>
+            <div className={styles.primaryLlmSlot}>
+              <AgentLlmSlotField
+                {...primaryLlmSlot}
+                copy={copy}
+                lang={lang}
+                pending={pending}
+                pendingModelRef={pendingModelRef}
+                configDraftDirty={configDraftDirty}
+                dirty={dirty}
+                compact
+                hideLabel
+                onLlmSlotModelChange={onLlmSlotModelChange}
+                onPromoteModel={onPromoteModel}
+                onReasoningEffortChange={onReasoningEffortChange}
+              />
+            </div>
+          </section>
+        ) : null}
         <section className={`${styles.fieldWide} ${styles.promptConfigField}`}>
           <span>{copy.prompt}</span>
           <div className={styles.promptConfigRow}>
@@ -295,36 +306,72 @@ export function AgentCoreConfigPanel({
             </VButton>
           </div>
         </section>
-        <VFieldRow
-          label={copy.tools}
-          tooltip={toolPolicyTooltip}
-        >
-          <VNativeSelect value={draft.toolPolicyId} onChange={(event) => onDraftChange({ toolPolicyId: event.target.value })}>
-            {toolPolicyOptions.map((policy) => (
-              <option key={policy.value} value={policy.value} title={policy.title}>
-                {policy.label}
-              </option>
-            ))}
-          </VNativeSelect>
-        </VFieldRow>
-        <VFieldRow label={copy.memory} tooltip={memoryPolicyTooltip}>
-          <VNativeSelect value={draft.memoryPolicyId} onChange={(event) => onDraftChange({ memoryPolicyId: event.target.value })}>
-            {memoryPolicyOptions.map((policy) => (
-              <option key={policy.value} value={policy.value} title={policy.title}>
-                {policy.label}
-              </option>
-            ))}
-          </VNativeSelect>
-        </VFieldRow>
+        <div className={styles.bindingRow}>
+          <VFieldRow
+            label={copy.tools}
+            tooltip={toolPolicyTooltip}
+          >
+            <VNativeSelect value={draft.toolPolicyId} onChange={(event) => onDraftChange({ toolPolicyId: event.target.value })}>
+              {toolPolicyOptions.map((policy) => (
+                <option key={policy.value} value={policy.value} title={policy.title}>
+                  {policy.label}
+                </option>
+              ))}
+            </VNativeSelect>
+          </VFieldRow>
+          <VFieldRow label={copy.memory} tooltip={memoryPolicyTooltip}>
+            <VNativeSelect value={draft.memoryPolicyId} onChange={(event) => onDraftChange({ memoryPolicyId: event.target.value })}>
+              {memoryPolicyOptions.map((policy) => (
+                <option key={policy.value} value={policy.value} title={policy.title}>
+                  {policy.label}
+                </option>
+              ))}
+            </VNativeSelect>
+          </VFieldRow>
+        </div>
+        <div className={`${styles.fieldWide} ${styles.configDeepLinkRow}`}>
+          <VButton
+            type="button"
+            variant="secondary"
+            icon={<ExternalLink size={15} />}
+            onPress={onOpenModelConfig}
+          >
+            {lang === "zh" ? "去模型库配置" : "Open model library"}
+          </VButton>
+          <VButton
+            type="button"
+            variant="ghost"
+            icon={<ExternalLink size={15} />}
+            onPress={onOpenContextConfig}
+          >
+            {lang === "zh" ? "去上下文配置" : "Open context config"}
+          </VButton>
+        </div>
         <details className={styles.advancedConfig}>
           <summary>
             <span>{advancedLabel}</span>
             <small>{advancedLlmSlots.length}</small>
           </summary>
           <div className={styles.advancedConfigBody}>
-            {advancedLlmSlots.length ? <div className={styles.llmSlotGrid}>
-              {advancedLlmSlots.map((slotView) => <AgentLlmSlotField key={slotView.slot.slot} {...slotView} copy={copy} lang={lang} pending={pending} pendingModelRef={pendingModelRef} configDraftDirty={configDraftDirty} dirty={dirty} onLlmSlotModelChange={onLlmSlotModelChange} onPromoteModel={onPromoteModel} onReasoningEffortChange={onReasoningEffortChange} />)}
-            </div> : null}
+            {advancedLlmSlots.length ? (
+              <div className={styles.llmSlotGrid}>
+                {advancedLlmSlots.map((slotView) => (
+                  <AgentLlmSlotField
+                    key={slotView.slot.slot}
+                    {...slotView}
+                    copy={copy}
+                    lang={lang}
+                    pending={pending}
+                    pendingModelRef={pendingModelRef}
+                    configDraftDirty={configDraftDirty}
+                    dirty={dirty}
+                    onLlmSlotModelChange={onLlmSlotModelChange}
+                    onPromoteModel={onPromoteModel}
+                    onReasoningEffortChange={onReasoningEffortChange}
+                  />
+                ))}
+              </div>
+            ) : null}
             <AgentContextCompressionPanel
               copy={copy}
               lang={lang}

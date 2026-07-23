@@ -39,6 +39,28 @@ export type AgentManagementBriefPanelProps = {
 };
 
 export function AgentManagementBriefPanel({ brief, copy, onOpenRoute, onSelectPane }: AgentManagementBriefPanelProps) {
+  const incomplete = brief.items.filter((item) => !item.complete);
+  const allReady = incomplete.length === 0 && brief.actions.length === 0;
+  const checklistItems = allReady ? brief.items : incomplete.length ? incomplete : brief.items;
+
+  if (allReady) {
+    return (
+      <section className={styles.managementBriefPanelCompact} aria-label={copy.managementBriefTitle}>
+        <div className={styles.managementBriefHeader}>
+          <div>
+            <p className={styles.panelEyebrow}>{copy.managementBriefTitle}</p>
+            <h3 className={styles.contextualHintRow}>
+              {brief.statusLabel}
+              <VContextualHint content={copy.managementBriefHint} label={`${copy.managementBriefTitle}说明`} />
+            </h3>
+            <span>{copy.nextAllReady}</span>
+          </div>
+          <strong>{brief.score}</strong>
+        </div>
+      </section>
+    );
+  }
+
   return (
     <section className={styles.managementBriefPanel}>
       <div className={styles.managementBriefHeader}>
@@ -53,7 +75,7 @@ export function AgentManagementBriefPanel({ brief, copy, onOpenRoute, onSelectPa
         <strong>{brief.score}</strong>
       </div>
       <div className={styles.managementChecklist}>
-        {brief.items.map((item) => (
+        {checklistItems.map((item) => (
           <VNativeButton
             key={item.id}
             type="button"

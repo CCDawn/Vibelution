@@ -1,5 +1,5 @@
 const styles = {
-  section: "min-w-0 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--vui-border-subtle)_76%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-row)_54%,transparent)] p-3",
+  section: "min-w-0 rounded-none border-0 border-t border-[color-mix(in_srgb,var(--vui-border-subtle)_72%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-row)_40%,transparent)] p-3",
   header: "flex items-center justify-between gap-2",
   title: "m-0 text-sm font-semibold text-[var(--fg-primary)]",
   list: "mt-2 grid gap-1.5",
