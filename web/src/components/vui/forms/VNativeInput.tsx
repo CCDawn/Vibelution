@@ -1,9 +1,10 @@
 import { forwardRef, type ComponentPropsWithoutRef } from "react";
 
+import { type VuiDensity } from "../renderers/shared/buttonVariants";
 import { vuiFormControlClass } from "./formClasses";
 
 export type VNativeInputProps = ComponentPropsWithoutRef<"input"> & {
-  density?: "compact" | "normal";
+  density?: VuiDensity;
   "data-vui"?: string;
 };
 
@@ -34,6 +35,7 @@ export const VNativeInput = forwardRef<HTMLInputElement, VNativeInputProps>(func
       ref={ref}
       type={inputType}
       data-vui={dataVui ?? "native-input"}
+      data-density={density}
       className={[controlClass, className].filter(Boolean).join(" ")}
     />
   );

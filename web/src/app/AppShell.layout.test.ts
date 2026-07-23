@@ -143,7 +143,8 @@ describe("AppShell layout contract", () => {
     expect(shellStyles).toContain("grid-template-columns: repeat(2, minmax(0, 1fr))");
     expect(shellStyles).toContain("flex-wrap: nowrap");
     expect(styles.topActions).toContain("flex-nowrap");
-    expect(styles.utilityTrigger).toContain("h-8");
+    expect(styles.utilityTrigger).toContain("h-[var(--vui-control-height-sm)]");
+    expect(styles.utilityTrigger).not.toContain("h-8");
     expect(styles.utilityTrigger).toContain("[&_[data-slot=vui-button-content]]:whitespace-nowrap");
     expect(styles.statusSummaryChip).toContain("whitespace-nowrap");
     expect(shellStyles).toContain("@media (max-width: 1279px)");

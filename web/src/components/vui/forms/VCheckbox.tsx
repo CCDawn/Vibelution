@@ -10,8 +10,9 @@ export type VCheckboxProps = ShadcnCheckboxProps;
  * Keeps isSelected / onChange(boolean) for existing call sites.
  */
 export function VCheckbox({
+  density = "compact",
   "data-vui": dataVui,
   ...props
 }: VCheckboxProps) {
-  return <ShadcnCheckbox {...props} data-vui={dataVui ?? "checkbox"} />;
+  return <ShadcnCheckbox {...props} density={density} data-vui={dataVui ?? "checkbox"} />;
 }

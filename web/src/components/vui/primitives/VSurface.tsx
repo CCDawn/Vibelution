@@ -1,7 +1,18 @@
 import { type ComponentPropsWithoutRef, type ReactNode } from "react";
 
 type VSurfaceElement = "article" | "aside" | "div" | "header" | "main" | "section";
-export type VSurfaceTone = "panel" | "rail" | "glass" | "toolbar" | "row";
+export type VSurfaceTone =
+  | "workspace"
+  | "region"
+  | "card"
+  | "inset"
+  | "control"
+  | "popover"
+  | "panel"
+  | "rail"
+  | "glass"
+  | "toolbar"
+  | "row";
 export type VSurfaceElevation = "flat" | "panel" | "overlay";
 type VSurfacePadding = "none" | "compact" | "normal";
 
@@ -16,11 +27,17 @@ export type VSurfaceProps = ComponentPropsWithoutRef<"section"> & {
 };
 
 const toneClass: Record<VSurfaceTone, string> = {
+  card: "bg-vui-surface-card",
+  control: "bg-vui-surface-control",
   glass: "bg-vui-surface-glass backdrop-blur-[1px]",
-  panel: "bg-vui-surface-panel/82",
+  inset: "bg-vui-surface-inset",
+  panel: "bg-vui-surface-panel",
+  popover: "bg-vui-surface-popover backdrop-blur-[1px]",
   rail: "bg-vui-surface-rail",
+  region: "bg-vui-surface-region",
   row: "bg-vui-surface-row",
   toolbar: "bg-vui-surface-toolbar",
+  workspace: "bg-vui-surface-workspace",
 };
 
 const elevationClass: Record<VSurfaceElevation, string> = {

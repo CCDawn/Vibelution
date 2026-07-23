@@ -6,6 +6,11 @@ import {
   type ReactNode,
 } from "react";
 
+import {
+  type VuiDensity,
+  vuiControlMinHeightClass,
+} from "../shared/buttonVariants";
+
 /**
  * Shadcn-style native checkbox renderer.
  * Pages must not import this — only VUI form primitives consume it.
@@ -29,6 +34,7 @@ export type ShadcnCheckboxProps = Omit<
   onChange?: (isSelected: boolean) => void;
   isDisabled?: boolean;
   disabled?: boolean;
+  density?: VuiDensity;
   "data-vui"?: string;
 };
 
@@ -42,6 +48,7 @@ export const ShadcnCheckbox = forwardRef<HTMLInputElement, ShadcnCheckboxProps>(
       onChange,
       isDisabled = false,
       disabled,
+      density = "compact",
       id,
       "data-vui": dataVui,
       "aria-label": ariaLabel,
@@ -61,7 +68,8 @@ export const ShadcnCheckbox = forwardRef<HTMLInputElement, ShadcnCheckboxProps>(
     return (
       <label
         className={[
-          "inline-flex min-h-8 min-w-0 items-center gap-2 rounded-md",
+          "inline-flex min-w-0 items-center gap-2 rounded-[var(--radius-control)]",
+          vuiControlMinHeightClass(density),
           "border border-vui-border-subtle bg-vui-control-muted px-2 text-sm text-vui-fg-secondary shadow-none",
           "transition-colors",
           "has-[:checked]:border-vui-accent-cool has-[:checked]:text-vui-fg-primary",
@@ -72,6 +80,7 @@ export const ShadcnCheckbox = forwardRef<HTMLInputElement, ShadcnCheckboxProps>(
           .join(" ")}
         data-vui={dataVui ?? "checkbox"}
         data-renderer="shadcn"
+        data-density={density}
         data-selected={controlled ? (isSelected ? "true" : "false") : undefined}
         data-disabled={isDisabledResolved ? "true" : undefined}
       >

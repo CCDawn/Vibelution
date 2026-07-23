@@ -36,7 +36,7 @@ describe("VUI form primitives", () => {
             <option value="ready">Ready</option>
           </VNativeSelect>
           <VNativeTextarea aria-label="Native notes" value="Notes" readOnly minRows={2} />
-          <VCheckbox isSelected>Running only</VCheckbox>
+          <VCheckbox isSelected density="normal">Running only</VCheckbox>
         </form>
       </VuiProvider>,
     );
@@ -50,6 +50,10 @@ describe("VUI form primitives", () => {
     expect(markup).toContain('data-vui="select"');
     expect(markup).toContain('data-vui="textarea"');
     expect(markup).toContain('data-vui="checkbox"');
+    expect(markup).toContain('data-density="compact"');
+    expect(markup).toContain('data-density="normal"');
+    expect(markup).toContain("h-[var(--vui-control-height-sm)]");
+    expect(markup).toContain("min-h-[var(--vui-control-height-md)]");
     expect(markup).toContain('data-slot="checkbox-content"');
     expect(markup).toContain('data-slot="checkbox-control"');
     expect(markup).toContain('data-slot="checkbox-indicator"');
