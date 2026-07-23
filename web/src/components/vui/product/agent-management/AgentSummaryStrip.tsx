@@ -48,7 +48,7 @@ export function AgentSummaryStrip({
       />
       {hasSecondary ? (
         <details className="group min-w-0">
-          <summary className="inline-flex cursor-pointer list-none items-center gap-1 rounded-[var(--radius-control)] px-1.5 py-0.5 text-[0.72rem] font-bold text-[var(--fg-tertiary)] hover:bg-[var(--vui-surface-row-hover)] hover:text-[var(--fg-secondary)] [&::-webkit-details-marker]:hidden">
+          <summary className="inline-flex cursor-pointer list-none items-center gap-1 rounded-[var(--radius-control)] px-1.5 py-0.5 [font-size:var(--vui-font-xs)] font-bold text-[var(--fg-tertiary)] hover:bg-[var(--vui-surface-row-hover)] hover:text-[var(--fg-secondary)] [&::-webkit-details-marker]:hidden">
             <span>{moreLabel}</span>
             <ChevronDown
               size={13}

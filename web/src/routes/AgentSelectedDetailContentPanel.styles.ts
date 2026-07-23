@@ -18,7 +18,7 @@ const styles = {
     "inline-flex w-full [align-items:center] [justify-content:center] [gap:6px] min-w-0 [min-height:30px] [padding:4px_10px] [border:1px_solid_color-mix(in_srgb,_var(--accent-cool)_30%,_transparent)] [border-radius:var(--radius-control)] [background:color-mix(in_srgb,_var(--accent-cool)_10%,_transparent)] [color:var(--accent-cool)] [font-size:var(--vui-font-xs)] [font-weight:760]",
   configSectionBody: "grid min-w-0 [align-content:start] [gap:8px]",
   configSectionBadge:
-    "inline-flex [align-items:center] [justify-content:center] [min-width:18px] [min-height:18px] [padding:0_5px] [border-radius:999px] [background:color-mix(in_srgb,_var(--accent-warm)_14%,_transparent)] [color:var(--accent-warm-2)] [font-size:0.68rem] [font-weight:800]",
+    "inline-flex [align-items:center] [justify-content:center] [min-width:18px] [min-height:18px] [padding:0_5px] [border-radius:999px] [background:color-mix(in_srgb,_var(--accent-warm)_14%,_transparent)] [color:var(--accent-warm-2)] [font-size:var(--vui-font-xs)] [font-weight:800]",
 } as const;
 
 export default styles;
