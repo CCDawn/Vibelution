@@ -15,6 +15,7 @@ import { readFileSync } from "node:fs";
 import routeSource from "./AgentsRoute.tsx?raw";
 import agentStatusPresentationSource from "./agents/agentStatusPresentation.ts?raw";
 import agentManagementNavSource from "./AgentManagementNav.tsx?raw";
+import agentManagementModuleBarSource from "./AgentManagementModuleBar.tsx?raw";
 import agentWorkspaceCacheSource from "./agentWorkspaceCache.ts?raw";
 import styles from "./AgentsRoute.styles";
 import stylesSource from "./AgentsRoute.styles.ts?raw";
@@ -33,7 +34,7 @@ import activityHistoryStyles from "./AgentActivityHistoryPanel.styles";
 import healthMaintenanceStyles from "./AgentHealthMaintenancePanel.styles";
 import listWorkspaceStyles from "./AgentListWorkspacePanel.styles";
 import managementNavStyles from "./AgentManagementNav.styles";
-import managementHeaderStyles from "./AgentManagementHeaderPanel.styles";
+import managementModuleBarStyles from "./AgentManagementModuleBar.styles";
 import managementBriefStyles from "./AgentManagementBriefPanel.styles";
 import memoryPolicyStyles from "./AgentMemoryPolicyPanel.styles";
 import modeMembershipStyles from "./AgentModeMembershipPanel.styles";
@@ -456,14 +457,15 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("agentWorkspaceInitialError");
     expect(routeSource).toContain("agentSummaryQuery.isError");
     expect(routeSource).toContain("agentSummaryQuery.isPending");
-    expect(routeSource).toContain("<VLoadingValue");
+    expect(routeSource).not.toContain("<VLoadingValue");
+    expect(managementHeaderPanelSource).not.toContain("AgentSummaryStrip");
     expect(routeSource).not.toContain("isError: workspaceQuery.isError,");
     expect(routeSource).not.toContain("isPending: workspaceQuery.isPending,");
   });
 
   it("keeps real zero distinct from an unresolved Agent summary", () => {
-    expect(routeSource).toContain("agentSummaryInitialLoading");
-    expect(routeSource).toContain("loadingAgentMetricValue");
+    expect(routeSource).not.toContain("agentSummaryInitialLoading");
+    expect(routeSource).not.toContain("loadingAgentMetricValue");
     expect(agentSummaryMetricValue("ready", 0, "不可用")).toBe(0);
   });
 
@@ -481,23 +483,22 @@ describe("AgentsRoute layout contract", () => {
     expect(shellSource).toContain('to="/agents"');
     expect(shellSource).toContain('t("navAgents")');
     expect(routeSource).toContain("<AgentManagementHeaderPanel");
-    expect(managementHeaderPanelSource).toContain('from "./AgentManagementHeaderPanel.styles"');
     expect(managementHeaderPanelSource).not.toContain("AgentsRoute.styles");
-    expect(managementHeaderPanelSource).toContain('<AgentManagementNav active="agents" className={styles.managementNav} />');
-    expect(managementHeaderPanelSource.indexOf('<AgentManagementNav active="agents" className={styles.managementNav} />')).toBeGreaterThan(
-      managementHeaderPanelSource.indexOf("<AgentPageHeader"),
-    );
-    expect(managementHeaderPanelSource.indexOf('<AgentManagementNav active="agents" className={styles.managementNav} />')).toBeLessThan(
-      managementHeaderPanelSource.indexOf("<AgentSummaryStrip"),
-    );
-    expect(managementHeaderStyles.managementNav).toBeTruthy();
-    expect(managementHeaderStyles.controlStrip).toBeTruthy();
+    expect(managementHeaderPanelSource).toContain("<AgentManagementModuleBar");
+    expect(managementHeaderPanelSource).toContain('active="agents"');
+    expect(agentManagementModuleBarSource).toContain('<AgentManagementNav active={active} className={styles.managementNav} />');
+    expect(agentManagementModuleBarSource).toContain('data-agent-management="module-bar"');
+    expect(managementHeaderPanelSource).not.toContain("<AgentPageHeader");
+    expect(managementHeaderPanelSource).not.toContain("<AgentSummaryStrip");
+    expect(managementModuleBarStyles.managementNav).toBeTruthy();
+    expect(managementModuleBarStyles.moduleBar).toBeTruthy();
   });
 
-  it("uses VUI product components for the Agent management header and summary strip", () => {
-    expect(managementHeaderPanelSource).toContain("AgentPageHeader");
-    expect(managementHeaderPanelSource).toContain("AgentSummaryStrip");
-    expect(routeSource).toContain("agentSummaryMetrics");
+  it("uses a compact VUI module bar with the primary Agent action", () => {
+    expect(managementHeaderPanelSource).toContain("VIconButton");
+    expect(managementHeaderPanelSource).toContain("VButton");
+    expect(managementHeaderPanelSource).toContain("onCreateAgent");
+    expect(routeSource).not.toContain("agentSummaryMetrics");
     expect(routeSource).not.toContain("styles.summaryCard");
     expect(routeSource).not.toContain("styles.refreshButton");
     expect(routeSource).not.toContain(['import { Button } from "', "@hero", "ui/react", '"'].join(""));
@@ -580,8 +581,9 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).not.toContain("<AgentDetailHeaderPanel");
     expect(detailHeaderPanelSource).toContain('from "./AgentDetailHeaderPanel.styles"');
     expect(detailHeaderPanelSource).not.toContain("AgentsRoute.styles");
-    expect(detailHeaderPanelSource).toContain("function roleToneClass");
     expect(detailHeaderPanelSource).toContain("function issueToneClass");
+    expect(detailHeaderPanelSource).toContain("onToggleInspector");
+    expect(detailHeaderPanelSource).toContain("onRun");
     expect(selectedDetailContentPanelSource).toContain('activePane === "overview"');
     expect(selectedDetailContentPanelSource).toContain('activePane === "config"');
     expect(selectedDetailContentPanelSource).toContain('activePane === "activity"');
@@ -663,14 +665,11 @@ describe("AgentsRoute layout contract", () => {
   });
 
   it("localizes the workspace health badge and names the avatar editor trigger", () => {
-    expect(routeSource).toContain("workspaceHealthStatusLabel(healthStatus, lang)");
-    expect(routeSource).toContain("workspaceHealthStatusDescription(healthStatus, summary, lang)");
-    expect(routeSource).toContain("copy.workspaceHealthStatus");
-    expect(routeSource).toContain("detail: `${copy.workspaceHealthStatus}: ${healthStatusLabel}. ${healthStatusDescription}`");
-    expect(managementHeaderPanelSource).toContain("status={{");
-    expect(managementHeaderPanelSource).toContain("label: healthStatusLabel");
-    expect(managementHeaderPanelSource).toContain("title: healthStatusDescription");
-    expect(managementHeaderPanelSource).toContain("ariaLabel: `${copy.workspaceHealthStatus}: ${healthStatusLabel}. ${healthStatusDescription}`");
+    expect(routeSource).not.toContain("workspaceHealthStatusLabel(healthStatus, lang)");
+    expect(routeSource).not.toContain("workspaceHealthStatusDescription(healthStatus, summary, lang)");
+    expect(routeSource).toContain("healthTitle: issueSummary(selectedAgent.health, lang)");
+    expect(detailHeaderPanelSource).toContain("content={healthTitle}");
+    expect(detailHeaderPanelSource).toContain("styles.detailHealthStatus");
     expect(avatarEditorPanelSource).toContain("aria-label={copy.editAvatar}");
   });
 
@@ -1020,8 +1019,8 @@ describe("AgentsRoute layout contract", () => {
   });
 
   it("keeps Agent Center helper copy in hover text instead of permanent explanatory blocks", () => {
-    expect(managementHeaderPanelSource).toContain("tooltip={copy.subtitle}");
-    expect(managementHeaderPanelSource).not.toContain("<div title={copy.subtitle}>");
+    expect(managementHeaderPanelSource).not.toContain("copy.subtitle");
+    expect(managementHeaderPanelSource).not.toContain("AgentPageHeader");
     expect(routeSource).not.toContain("<p className={styles.subtitle}>{copy.subtitle}</p>");
     expect(routeSource).toContain("issueSummary: issueSummary(agent.health, lang)");
     expect(denseListSource).toContain("VTooltip");
@@ -1040,7 +1039,6 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("healthTitle: issueSummary(selectedAgent.health, lang)");
     expect(detailHeaderPanelSource).toContain("className={styles.detailHealthStatus}");
     expect(detailHeaderPanelSource).toContain("VTooltip");
-    expect(detailHeaderPanelSource).toContain('<VTooltip content={title} width="wide">');
     expect(detailHeaderPanelSource).toContain('<VTooltip content={healthTitle} width="wide">');
     expect(detailHeaderPanelSource).not.toContain('title={healthTitle}');
     expect(detailHeaderPanelSource).toContain('aria-label={`${healthLabel} · ${healthTitle}`}');
@@ -1247,7 +1245,7 @@ describe("AgentsRoute layout contract", () => {
   it("surfaces Team references as first-class Agent Center relationships", () => {
     expect(routeSource).toContain('team: "团队"');
     expect(routeSource).toContain('team: "Team"');
-    expect(routeSource).toContain("summary?.teamCount");
+    expect(routeSource).not.toContain("summary?.teamCount");
     expect(routeSource).toContain("referenceRoute(reference)");
     expect(routeSource).toContain("reference.projectionEdit?.canonicalEditRoute || reference.sourceRef?.canonicalEditRoute");
     expect(routeSource).toContain("compactProjectionRoute(room");
@@ -1403,8 +1401,9 @@ describe("AgentsRoute layout contract", () => {
     expect(selectedDetailContentPanelSource).toContain("activePane === \"activity\"");
     expect(routeSource).toContain("fetchJson<AgentRunHistory>");
     expect(routeSource).toContain("queryKeys.agentRuns");
-    expect(routeSource).toContain("summary?.runningAgentCount");
-    expect(routeSource).toContain("summary?.blockedAgentCount");
+    expect(routeSource).not.toContain("summary?.runningAgentCount");
+    expect(routeSource).not.toContain("summary?.blockedAgentCount");
+    expect(routeSource).toContain("inspectorOpen");
     expect(runtimeFocusPanelSource).toContain("styles.runtimePill");
     expect(runtimeFocusPanelSource).toContain("styles.runtimeFocusPanel");
     expect(activityHistoryPanelSource).toContain("styles.runHistoryList");
@@ -1719,7 +1718,7 @@ describe("AgentsRoute layout contract", () => {
     expect(archiveZonePanelSource).toContain("copy.archiveProtectionHint");
     expect(archiveZonePanelSource).toContain("isProtected ? styles.protectedZone : styles.dangerZone");
     expect(archiveZonePanelSource).toContain("isProtected ? <ShieldCheck");
-    expect(routeSource).toContain("summary?.archivedAgentCount");
+    expect(routeSource).not.toContain("summary?.archivedAgentCount");
     expect(archiveZoneStyles.protectedZone).toBeTruthy();
   });
 
@@ -1734,11 +1733,13 @@ describe("AgentsRoute layout contract", () => {
     expect(workspaceLayoutPanelSource).toContain("styles.directory");
     expect(workspaceLayoutStyles.workspace).toContain("flex h-full");
     expect(workspaceLayoutStyles.workspace).toContain("overflow-hidden");
-    expect(workspaceLayoutStyles.directory).toContain("[grid-template-rows:auto_minmax(0,1fr)]");
+    expect(workspaceLayoutStyles.directory).toContain("grid-rows-[auto_minmax(0,1fr)]");
     expect(workspaceLayoutStyles.resizeHandle).toContain("cursor-col-resize");
     expect(workspaceLayoutPanelSource).toContain("data-agent-workspace=\"resizable\"");
     expect(workspaceLayoutPanelSource).toContain("aria-label=\"调整目录栏宽度\"");
-    expect(workspaceLayoutStyles.workspace).toContain("max-[860px]:[grid-template-columns:1fr]");
+    expect(workspaceLayoutStyles.workspace).toContain("max-[860px]:flex-col");
+    expect(workspaceLayoutStyles.inspector).toContain("max-[1180px]:absolute");
+    expect(workspaceLayoutStyles.inspectorBackdrop).toContain("max-[1180px]:block");
     expect(listWorkspaceStyles.agentPanelIdle).toContain("[grid-template-rows:auto_minmax(0,_1fr)]");
     expect(listWorkspaceStyles.agentPanelSelecting).toContain("[grid-template-rows:auto_auto_minmax(0,_1fr)]");
     expect(detailWorkspaceStyles.detailPanel).toContain("[overflow:auto]");
@@ -1751,7 +1752,7 @@ describe("AgentsRoute layout contract", () => {
 
   it("keeps Agent Center route chrome background-aware instead of restacking opaque page surfaces", () => {
     expect(styles.route).toContain("max-w-full");
-    expect(styles.route).toContain("[overflow-x:hidden]");
+    expect(styles.route).toContain("[overflow:hidden]");
     expect(styles.route).not.toContain("[background:var(--bg-canvas)]");
     expect(styles.route).not.toContain("[background:var(--surface-page)]");
     expect(styles.route).not.toContain("[background:var(--surface-card)]");
@@ -1761,8 +1762,8 @@ describe("AgentsRoute layout contract", () => {
     expect(workspaceLayoutStyles.workspace).not.toContain("var(--surface-card)");
     expect(workspaceLayoutStyles.workspace).not.toContain("var(--surface-panel-strong)");
     expect(workspaceLayoutStyles.workspace).not.toContain("box-shadow");
-    expect(workspaceLayoutStyles.workspace).toContain("max-[860px]:[grid-template-columns:1fr]");
-    expect(workspaceLayoutStyles.workspace).toContain("max-[860px]:[overflow:auto]");
+    expect(workspaceLayoutStyles.workspace).toContain("max-[860px]:flex-col");
+    expect(workspaceLayoutStyles.workspace).toContain("max-[860px]:overflow-auto");
   });
 
   it("uses route-level VUI density guards for Agent workspace panels and actions", () => {
@@ -1827,6 +1828,7 @@ describe("AgentsRoute layout contract", () => {
       [avatarEditorStyles, "AgentAvatarEditor"],
       [managementBriefStyles, "AgentManagementBrief"],
       [managementNavStyles, "AgentManagementNav"],
+      [managementModuleBarStyles, "AgentManagementModuleBar"],
       [memoryPolicyStyles, "AgentMemoryPolicy"],
       [modeMembershipStyles, "AgentModeMembership"],
       [personaProfileStyles, "AgentPersonaProfile"],
@@ -1890,11 +1892,10 @@ describe("AgentsRoute layout contract", () => {
   });
 
   it("keeps Agent detail actions content-sized while preserving bounded tabs", () => {
-    expect(detailHeaderStyles.detailTabs).toContain("[grid-auto-columns:minmax(104px,_max-content)]");
-    expect(detailHeaderStyles.detailTabs).toContain("w-fit");
-    expect(detailHeaderStyles.detailTabs).toContain("max-[860px]:[grid-template-columns:repeat(3,_minmax(0,_1fr))]");
-    expect(detailHeaderStyles.detailTab.split(/\s+/)).toContain("w-full");
-    expect(detailHeaderStyles.detailTabActive.split(/\s+/)).toContain("w-full");
+    expect(detailHeaderStyles.detailTabs).toContain("overflow-x-auto");
+    expect(detailHeaderStyles.detailHeaderActions).toContain("[&_[data-vui=button]]:w-fit");
+    expect(detailHeaderStyles.detailTab.split(/\s+/)).toContain("w-fit");
+    expect(detailHeaderStyles.detailTabActive.split(/\s+/)).toContain("w-fit");
 
     for (const [className, label] of [
       [createPanelStyles.editorActions, "AgentCreate.editorActions"],

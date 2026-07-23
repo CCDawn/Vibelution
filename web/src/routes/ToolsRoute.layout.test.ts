@@ -74,9 +74,7 @@ const surfaceFreeRepeatedLayoutStyles = [
 
 const backgroundAwareAgentScopeStyles = [
   "agentScopeBar",
-  "controlStrip",
   "scopeStats",
-  "summaryCard",
 ] as const;
 
 const contentSizedActionStyles = [
@@ -145,7 +143,7 @@ describe("ToolsRoute layout contract", () => {
     expect(routeSource).not.toContain('title={activeTool.deleteAllowed ? undefined : activeTool.blockReason || t("toolsBuiltInProtected")}');
   });
 
-  it("lives inside Agent management navigation", () => {
+  it("lives inside Agent management navigation with the shared module bar", () => {
     expect(routerSource).toContain('path: "agents/tools"');
     expect(routerSource).toContain("<ToolsRoute />");
     expect(routerSource).not.toContain('path: "tools"');
@@ -153,11 +151,12 @@ describe("ToolsRoute layout contract", () => {
     expect(routeSource).toContain("<ToolsRouteAgentScopePanel");
     expect(agentScopePanelSource).toContain('from "./ToolsRouteAgentScopePanel.styles"');
     expect(agentScopePanelSource).not.toContain('from "./ToolsRoute.styles"');
-    expect(agentScopePanelSource).toContain('<AgentManagementNav active="tools" className={styles.managementNav} />');
-    const controlStrip = agentScopePanelSource.slice(agentScopePanelSource.indexOf("<div className={styles.controlStrip}>"));
-    expect(controlStrip.indexOf('<AgentManagementNav active="tools" className={styles.managementNav} />')).toBeLessThan(
-      controlStrip.indexOf("styles.summaryGrid"),
-    );
+    expect(routeSource).toContain("<AgentManagementModuleBar");
+    expect(routeSource).toContain('active="tools"');
+    expect(routeSource).toContain("toolbarSlot={(");
+    expect(agentScopePanelSource).not.toContain("AgentManagementNav");
+    expect(agentScopePanelSource).not.toContain("summaryMetrics");
+    expect(agentScopePanelSource).not.toContain("styles.summaryGrid");
   });
 
   it("keeps manual generated-tool creation out of the page", () => {
@@ -430,8 +429,6 @@ describe("ToolsRoute layout contract", () => {
     expect(stylesModuleSource).toContain("const buttonBase");
     expect(stylesModuleSource).toContain("const activeTone");
     expect(stylesModuleSource).toContain("const compactField");
-    expect(agentScopeStylesModuleSource).toContain("const panelSurface");
-    expect(agentScopeStylesModuleSource).toContain("const rowSurface");
     expect(agentScopeStylesModuleSource).toContain("const coolSurface");
   });
 

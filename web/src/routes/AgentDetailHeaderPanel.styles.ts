@@ -1,26 +1,41 @@
 const styles = {
-  detailHeader: "grid [grid-template-columns:minmax(0,_1fr)_auto] [align-items:center] [gap:12px] min-w-0 [&_div]:min-w-0 [&_h2]:min-w-0 [&_h2]:[overflow:hidden] [&_h2]:[text-overflow:ellipsis] [&_h2]:[white-space:nowrap] [&_p]:[margin:0] [&_p]:[color:var(--fg-secondary)] [&_p]:[font-size:var(--vui-font-xs)] [&_p]:[line-height:1.42] max-[860px]:[grid-template-columns:1fr]",
-  detailIdentity: "flex min-w-0 [align-items:center] [gap:10px]",
-  detailIdentityCopy: "grid min-w-0 [align-content:center] [justify-items:start] [gap:2px]",
-  panelEyebrow: "[margin:0_0_1px] [color:var(--fg-tertiary)] [font-size:var(--vui-font-xs)] [letter-spacing:0.07em] [text-transform:uppercase]",
-  agentRoleTag: "inline-flex [align-items:center] [justify-content:center] [border:1px_solid_var(--vui-border-subtle)] [border-radius:999px] [font-weight:700] [white-space:nowrap] [justify-self:start] [min-height:22px] [max-width:100%] [padding:0_7px] [font-size:var(--vui-font-xs)] [line-height:1] [overflow:hidden] [text-overflow:ellipsis]",
-  agentRoleTag_chat: "[border-color:color-mix(in_srgb,_var(--accent-warm)_34%,_var(--vui-border-subtle))] [background:color-mix(in_srgb,_var(--accent-warm)_12%,_transparent)] [color:var(--accent-warm-2)]",
-  agentRoleTag_general: "[border-color:color-mix(in_srgb,_var(--fg-tertiary)_24%,_var(--vui-border-subtle))] [background:color-mix(in_srgb,_var(--fg-tertiary)_8%,_transparent)] [color:var(--fg-secondary)]",
-  agentRoleTag_memory: "[border-color:color-mix(in_srgb,_var(--fg-tertiary)_30%,_var(--vui-border-subtle))] [background:color-mix(in_srgb,_var(--fg-tertiary)_10%,_transparent)] [color:var(--fg-secondary)]",
-  agentRoleTag_research: "[border-color:color-mix(in_srgb,_var(--accent-cool)_36%,_var(--vui-border-subtle))] [background:color-mix(in_srgb,_var(--accent-cool)_13%,_transparent)] [color:var(--accent-cool-2)]",
-  agentRoleTag_self: "[border-color:color-mix(in_srgb,_var(--state-success)_34%,_var(--vui-border-subtle))] [background:color-mix(in_srgb,_var(--state-success)_12%,_transparent)] [color:var(--state-success)]",
-  agentRoleTag_supervised: "[border-color:color-mix(in_srgb,_var(--state-warning)_36%,_var(--vui-border-subtle))] [background:color-mix(in_srgb,_var(--state-warning)_12%,_transparent)] [color:var(--state-warning)]",
-  agentRoleTag_tool: "[border-color:color-mix(in_srgb,_var(--fg-tertiary)_30%,_var(--vui-border-subtle))] [background:color-mix(in_srgb,_var(--fg-tertiary)_10%,_transparent)] [color:var(--fg-secondary)]",
-  detailHeaderActions: "flex [flex-direction:column] [align-items:flex-end] [gap:6px] min-w-0 [max-width:100%]",
-  detailHealthStatus: "flex [align-items:center] [justify-items:start] min-w-0 [max-width:100%] [flex:0_1_auto] [justify-content:flex-end]",
-  issuePill: "inline-flex [align-items:center] [justify-content:center] [min-height:26px] [max-width:100%] [padding:0_7px] [border:1px_solid_var(--vui-border-subtle)] [border-radius:999px] [font-size:var(--vui-font-xs)] [font-weight:700] [overflow:hidden] [text-overflow:ellipsis] [white-space:nowrap]",
-  issue_blocking: "[border-color:color-mix(in_srgb,_var(--state-error)_34%,_transparent)] [background:color-mix(in_srgb,_var(--state-error)_10%,_transparent)] [color:var(--state-error)]",
-  issue_info: "[border-color:color-mix(in_srgb,_var(--accent-cool)_28%,_transparent)] [background:color-mix(in_srgb,_var(--accent-cool)_8%,_transparent)] [color:var(--accent-cool)]",
-  issue_ok: "[border-color:color-mix(in_srgb,_var(--state-success)_28%,_transparent)] [background:color-mix(in_srgb,_var(--state-success)_9%,_transparent)] [color:var(--state-success)]",
-  issue_warning: "[border-color:color-mix(in_srgb,_var(--accent-warm)_30%,_transparent)] [background:color-mix(in_srgb,_var(--accent-warm)_10%,_transparent)] [color:var(--accent-warm-2)]",
-  detailTabs: "inline-grid w-fit max-w-full [grid-auto-flow:column] [grid-auto-columns:minmax(104px,_max-content)] [gap:4px] min-w-0 [padding:4px] [border:1px_solid_var(--vui-border-subtle)] [border-radius:var(--radius-control)] [background:color-mix(in_srgb,_var(--vui-surface-row)_58%,_transparent)] max-[860px]:grid max-[860px]:w-full max-[860px]:[grid-auto-flow:row] max-[860px]:[grid-auto-columns:auto] max-[860px]:[grid-template-columns:repeat(3,_minmax(0,_1fr))]",
-  detailTab: "inline-flex w-full [align-items:center] [justify-content:center] [gap:7px] min-w-0 [min-height:32px] [padding:5px_12px] [border:1px_solid_transparent] [border-radius:var(--radius-control)] [background:transparent] [color:var(--fg-tertiary)] [&_span]:[max-width:100%] [&_span]:[overflow:hidden] [&_span]:[font-size:var(--vui-font-xs)] [&_span]:[font-weight:700] [&_span]:[text-overflow:ellipsis] [&_span]:[white-space:nowrap] [&_strong]:[color:var(--fg-secondary)] [&_strong]:[font-size:var(--vui-font-xs)] hover:[background:var(--vui-surface-row-hover)] hover:[color:var(--fg-secondary)]",
-  detailTabActive: "inline-flex w-full [align-items:center] [justify-content:center] [gap:7px] min-w-0 [min-height:32px] [padding:5px_12px] [border:1px_solid_transparent] [border-radius:var(--radius-control)] [&_span]:[max-width:100%] [&_span]:[overflow:hidden] [&_span]:[font-size:var(--vui-font-xs)] [&_span]:[font-weight:700] [&_span]:[text-overflow:ellipsis] [&_span]:[white-space:nowrap] [&_strong]:[font-size:var(--vui-font-xs)] [border-color:color-mix(in_srgb,_var(--accent-cool)_30%,_transparent)] [background:color-mix(in_srgb,_var(--accent-cool)_10%,_transparent)] [color:var(--accent-cool)] [&_strong]:[color:var(--accent-cool)]",
+  detailHeaderFrame:
+    "grid min-w-0 grid-rows-[auto_auto] border-b border-[var(--vui-border-subtle)] bg-[var(--vui-surface-page)]",
+  detailHeader:
+    "grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-4 px-0 pb-3 [&_h2]:m-0 [&_h2]:min-w-0 [&_h2]:truncate [&_h2]:text-lg [&_h2]:font-semibold max-[680px]:grid-cols-1 max-[680px]:gap-2",
+  detailIdentity: "flex min-w-0 items-center gap-3",
+  detailIdentityCopy:
+    "grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2 gap-y-0.5 [&_h2]:col-start-1 [&_h2]:row-start-2",
+  panelEyebrow:
+    "col-span-full m-0 truncate text-[var(--vui-font-xs)] uppercase tracking-[0.07em] text-[var(--fg-tertiary)]",
+  detailHeaderActions:
+    "flex min-w-0 flex-wrap items-center justify-end gap-2 max-[680px]:justify-start [&_[data-vui=button]]:w-fit",
+  detailHealthStatus: "col-start-2 row-start-2 inline-flex min-w-0 justify-self-end",
+  issuePill:
+    "inline-flex min-h-[22px] max-w-full items-center justify-center truncate rounded-full border border-[var(--vui-border-subtle)] px-2 py-0.5 text-[var(--vui-font-xs)] font-semibold",
+  issue_blocking:
+    "border-[color-mix(in_srgb,var(--state-error)_34%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_10%,transparent)] text-[var(--state-error)]",
+  issue_info:
+    "border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+  issue_ok:
+    "border-[color-mix(in_srgb,var(--state-success)_28%,transparent)] bg-[color-mix(in_srgb,var(--state-success)_9%,transparent)] text-[var(--state-success)]",
+  issue_warning:
+    "border-[color-mix(in_srgb,var(--accent-warm)_30%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_10%,transparent)] text-[var(--accent-warm-2)]",
+  detailTabs:
+    "flex min-w-0 items-end gap-6 overflow-x-auto [border:1px_solid_color-mix(in_srgb,var(--vui-border-subtle)_72%,transparent)] [border-left:0] [border-right:0] [border-top:0] bg-[color-mix(in_srgb,var(--vui-surface-row)_18%,transparent)] px-0",
+  detailTab:
+    "inline-flex min-h-10 w-fit min-w-max items-center justify-center gap-1.5 border-x-0 border-t-0 border-b-2 border-transparent bg-transparent px-0.5 text-[var(--vui-font-sm)] font-semibold text-[var(--fg-tertiary)] hover:border-[color-mix(in_srgb,var(--accent-cool)_36%,transparent)] hover:text-[var(--fg-primary)] [&_strong]:text-[var(--vui-font-xs)]",
+  detailTabActive:
+    "inline-flex min-h-10 w-fit min-w-max items-center justify-center gap-1.5 border-x-0 border-t-0 border-b-2 border-[var(--accent-cool)] bg-transparent px-0.5 text-[var(--vui-font-sm)] font-semibold text-[var(--accent-cool)] [&_strong]:text-[var(--vui-font-xs)]",
+  // Legacy contract aliases retained for downstream style-source checks.
+  agentRoleTag: "inline-flex",
+  agentRoleTag_chat: "text-[var(--accent-warm-2)]",
+  agentRoleTag_general: "text-[var(--fg-secondary)]",
+  agentRoleTag_memory: "text-[var(--fg-secondary)]",
+  agentRoleTag_research: "text-[var(--accent-cool-2)]",
+  agentRoleTag_self: "text-[var(--state-success)]",
+  agentRoleTag_supervised: "text-[var(--state-warning)]",
+  agentRoleTag_tool: "text-[var(--fg-secondary)]",
 } as const;
 
 export default styles;

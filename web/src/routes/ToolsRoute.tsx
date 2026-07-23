@@ -27,6 +27,7 @@ import { VButton, VConfirmDialog, VContextualHint, VDenseOpsPage, VIconButton, V
 import type { TranslationKey } from "../i18n/dictionary";
 import { useAppI18n } from "../i18n/useAppI18n";
 import { safeAgentCenterReturnToPath } from "./agentCenterRoutes";
+import { AgentManagementModuleBar } from "./AgentManagementModuleBar";
 import { clampPaneWidth, keyboardPaneWidth, storedPaneWidth } from "./resizablePane";
 import { ToolsRouteAgentScopePanel } from "./ToolsRouteAgentScopePanel";
 import styles from "./ToolsRoute.styles";
@@ -1309,7 +1310,6 @@ export function ToolsRoute() {
     },
   });
 
-  const counts = toolsQuery.data?.counts;
   const activeIsGenerated = activeTool?.source === "generated";
   const activeToolTestKey = toolTestKey(activeTool?.id, activeAgentScope.id, activePolicyAgent?.agentId);
   const visibleTestResult = testResult?.key === activeToolTestKey ? testResult.result : null;
@@ -1354,12 +1354,6 @@ export function ToolsRoute() {
     requestedToolKey,
     toolsQuery.isPending,
   ]);
-  const toolSummaryMetrics = [
-    { id: "total", label: t("toolsTotal"), value: counts?.total ?? 0 },
-    { id: "built_in", label: t("toolsBuiltIn"), value: counts?.builtIn ?? 0 },
-    { id: "generated", label: t("toolsGenerated"), value: counts?.generated ?? 0 },
-    { id: "llm_visible", label: t("toolsLlmVisible"), value: counts?.llmVisible ?? 0 },
-  ];
   const toolScopeOptions = (agentScopes.length ? agentScopes : [activeAgentScope]).map((scope) => ({
     id: scope.id,
     label: scopeLabel(scope, lang, t),
@@ -1669,25 +1663,30 @@ export function ToolsRoute() {
       eyebrow={t("navTools")}
       title={t("toolsPageTitle")}
       meta={t("toolsPageSubtitle")}
-      actions={(
-        <div className={styles.headerActions}>
-          {returnToPath ? (
-            <VTooltip content={returnToLabel} width="compact">
-              <Link className={styles.returnButton} to={returnToPath}>
-                <ArrowLeft size={15} />
-                <span>{returnToLabel}</span>
-              </Link>
-            </VTooltip>
-          ) : null}
-          <VIconButton
-            type="button"
-            variant="secondary"
-            className={styles.refreshButton}
-            label={t("gitRefresh")}
-            icon={<RefreshCw size={16} />}
-            onPress={refresh}
-          />
-        </div>
+      toolbarSlot={(
+        <AgentManagementModuleBar
+          active="tools"
+          actions={(
+            <>
+              {returnToPath ? (
+                <VTooltip content={returnToLabel} width="compact">
+                  <Link className={styles.returnButton} to={returnToPath}>
+                    <ArrowLeft size={15} />
+                    <span>{returnToLabel}</span>
+                  </Link>
+                </VTooltip>
+              ) : null}
+              <VIconButton
+                type="button"
+                variant="secondary"
+                className={styles.refreshButton}
+                label={t("gitRefresh")}
+                icon={<RefreshCw size={16} />}
+                onPress={refresh}
+              />
+            </>
+          )}
+        />
       )}
     >
       <ToolsRouteAgentScopePanel
@@ -1702,7 +1701,6 @@ export function ToolsRoute() {
           unsaved: lang === "zh" ? "未保存" : "Unsaved",
           visible: t("toolsScopeVisible"),
         }}
-        summaryMetrics={toolSummaryMetrics}
         activeAgents={activeAgents}
         activeAgent={activePolicyAgent}
         agentsLoading={agentsQuery.isPending}

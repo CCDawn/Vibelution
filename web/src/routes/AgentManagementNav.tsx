@@ -3,7 +3,7 @@ import { NavLink } from "react-router-dom";
 import { useShellI18n } from "../i18n/useShellI18n";
 import styles from "./AgentManagementNav.styles";
 
-type AgentManagementSection = "agents" | "prompts" | "tools" | "skills";
+export type AgentManagementSection = "agents" | "prompts" | "tools" | "skills";
 
 const ITEMS: Array<{ key: AgentManagementSection; href: string }> = [
   { key: "agents", href: "/agents" },

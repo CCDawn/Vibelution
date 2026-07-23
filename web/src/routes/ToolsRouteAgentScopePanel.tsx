@@ -1,13 +1,6 @@
 import type { AgentInstance } from "../api/types";
 import { VNativeSelect } from "../components/vui";
-import { AgentManagementNav } from "./AgentManagementNav";
 import styles from "./ToolsRouteAgentScopePanel.styles";
-
-export type ToolsRouteSummaryMetric = {
-  id: string;
-  label: string;
-  value: number;
-};
 
 export type ToolsRouteScopeOption = {
   id: string;
@@ -28,7 +21,6 @@ type ToolsRouteAgentScopeCopy = {
 
 type ToolsRouteAgentScopePanelProps = {
   copy: ToolsRouteAgentScopeCopy;
-  summaryMetrics: ToolsRouteSummaryMetric[];
   activeAgents: AgentInstance[];
   activeAgent?: AgentInstance | null;
   agentsLoading: boolean;
@@ -54,7 +46,6 @@ function agentDisplayName(agent: AgentInstance | null | undefined) {
 
 export function ToolsRouteAgentScopePanel({
   copy,
-  summaryMetrics,
   activeAgents,
   activeAgent,
   agentsLoading,
@@ -67,21 +58,7 @@ export function ToolsRouteAgentScopePanel({
   onScopeChange,
 }: ToolsRouteAgentScopePanelProps) {
   return (
-    <>
-      <div className={styles.controlStrip}>
-        <AgentManagementNav active="tools" className={styles.managementNav} />
-
-        <div className={styles.summaryGrid}>
-          {summaryMetrics.map((metric) => (
-            <section key={metric.id} className={styles.summaryCard}>
-              <span>{metric.label}</span>
-              <strong>{metric.value}</strong>
-            </section>
-          ))}
-        </div>
-      </div>
-
-      <section className={styles.agentScopeBar}>
+    <section className={styles.agentScopeBar}>
         <div className={styles.scopeCopy}>
           <p className={styles.panelEyebrow}>{copy.configureAgent}</p>
           <strong>{agentDisplayName(activeAgent)}</strong>
@@ -131,7 +108,6 @@ export function ToolsRouteAgentScopePanel({
           </span>
         </div>
         {deepLinkNotice ? <p className={styles.deepLinkNotice}>{deepLinkNotice}</p> : null}
-      </section>
-    </>
+    </section>
   );
 }

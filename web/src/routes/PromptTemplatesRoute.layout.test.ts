@@ -6,19 +6,18 @@ import styles from "./PromptTemplatesRoute.styles";
 import stylesSource from "./PromptTemplatesRoute.styles.ts?raw";
 
 describe("PromptTemplatesRoute layout contract", () => {
-  it("lives inside Agent management navigation with the shared nav row", () => {
+  it("lives inside Agent management navigation with the shared module bar", () => {
     expect(routerSource).toContain('path: "agents/prompts"');
     expect(routerSource).toContain("<PromptTemplatesRoute />");
-    expect(routeSource).toContain('<AgentManagementNav active="prompts" className={styles.managementNavClass} />');
-    expect(stylesSource).toContain("const managementNavClass");
+    expect(routeSource).toContain("<AgentManagementModuleBar");
+    expect(routeSource).toContain('active="prompts"');
     expect(routeSource).toContain("VListDetailPage");
     expect(routeSource).toContain("toolbar={(");
-    expect(routeSource.indexOf('<AgentManagementNav active="prompts" className={styles.managementNavClass} />')).toBeGreaterThan(
+    expect(routeSource.indexOf("<AgentManagementModuleBar")).toBeGreaterThan(
       routeSource.indexOf("toolbar={("),
     );
-    expect(routeSource.indexOf('<AgentManagementNav active="prompts" className={styles.managementNavClass} />')).toBeLessThan(
-      routeSource.indexOf("className={styles.summaryStripClass}"),
-    );
+    expect(routeSource).not.toContain("VStatusStrip");
+    expect(routeSource).not.toContain("summaryStripClass");
     expect(routeSource).toContain("workspaceClassName={styles.workspaceClass}");
     expect(routeSource).toContain("list={(");
     expect(routeSource).toContain("detail={(");
@@ -30,18 +29,13 @@ describe("PromptTemplatesRoute layout contract", () => {
     expect(routeSource).not.toContain("useAppI18n");
   });
 
-  it("keeps route and header chrome light enough for AppShell/VUI backgrounds", () => {
+  it("removes the redundant route header while keeping the route background-aware", () => {
     const routeClass = stylesSource.match(/const routeClass = "([^"]+)"/)?.[1] ?? "";
     const headerClass = stylesSource.match(/const headerClass = "([^"]+)"/)?.[1] ?? "";
 
     expect(routeClass).not.toContain("surface-page");
     expect(routeClass).not.toMatch(/\bbg-\[/);
-    expect(headerClass).not.toContain("gradient");
-    expect(headerClass).not.toContain("shadow-[");
-    expect(headerClass).not.toContain("vui-shadow");
-    expect(headerClass).toContain("!bg-transparent");
-    expect(headerClass).toContain("!shadow-none");
-    expect(headerClass).toContain("!backdrop-blur-none");
+    expect(headerClass).toBe("hidden");
   });
 
   it("loads prompt templates and linked Agents through the existing APIs", () => {
@@ -180,13 +174,13 @@ describe("PromptTemplatesRoute layout contract", () => {
     expect(styles.templateMetaClass).toContain("[&_span]:whitespace-nowrap");
   });
 
-  it("uses VUI composition for summary, panels, bulk controls, and default status", () => {
-    expect(routeSource).toContain("VStatusStrip");
+  it("uses VUI composition for panels, bulk controls, and default status", () => {
+    expect(routeSource).not.toContain("VStatusStrip");
     expect(routeSource).toContain("VSurface");
     expect(routeSource).toContain("VDenseToolbar");
     expect(routeSource).toContain("VPanelHeader");
     expect(routeSource).toContain("VStatusChip");
-    expect(routeSource).toContain("className={styles.summaryStripClass}");
+    expect(routeSource).not.toContain("summaryStripClass");
     expect(routeSource).toContain("<VSurface");
     expect(routeSource).toContain('as="section"');
     expect(routeSource).toContain("VListDetailPage");

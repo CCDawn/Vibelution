@@ -11,21 +11,20 @@ function extractConstClass(name: string) {
 }
 
 describe("SkillsRoute layout contract", () => {
-  it("is mounted as an Agent management section", () => {
+  it("is mounted as an Agent management section with the shared module bar", () => {
     expect(routerSource).toContain('path: "agents/skills"');
     expect(routerSource).toContain("<SkillsRoute />");
     expect(routerSource).not.toContain('path: "skills"');
     expect(routerSource).not.toContain('to="/agents/skills" replace');
-    expect(routeSource).toContain('<AgentManagementNav active="skills" className={styles.managementNavClass} />');
-    expect(stylesSource).toContain("const managementNavClass");
+    expect(routeSource).toContain("<AgentManagementModuleBar");
+    expect(routeSource).toContain('active="skills"');
     expect(routeSource).toContain("VListDetailPage");
     expect(routeSource).toContain("toolbar={(");
-    expect(routeSource.indexOf('<AgentManagementNav active="skills" className={styles.managementNavClass} />')).toBeGreaterThan(
+    expect(routeSource.indexOf("<AgentManagementModuleBar")).toBeGreaterThan(
       routeSource.indexOf("toolbar={("),
     );
-    expect(routeSource.indexOf('<AgentManagementNav active="skills" className={styles.managementNavClass} />')).toBeLessThan(
-      routeSource.indexOf("className={styles.summaryStripClass}"),
-    );
+    expect(routeSource).not.toContain("VStatusStrip");
+    expect(routeSource).not.toContain("summaryStripClass");
     expect(routeSource).toContain("workspaceClassName={styles.workspaceClass}");
     expect(routeSource).toContain("list={(");
     expect(routeSource).toContain("detail={(");
@@ -89,17 +88,13 @@ describe("SkillsRoute layout contract", () => {
     expect(stylesSource).toContain("p-3");
   });
 
-  it("keeps route and header chrome background-aware", () => {
+  it("removes the redundant route header while keeping the route background-aware", () => {
     const routeClass = extractConstClass("routeClass");
     const headerClass = extractConstClass("headerClass");
 
     expect(routeClass).not.toContain("surface-page");
     expect(routeClass).not.toMatch(/\bbg-\[(?:var\(--surface-page\)|color-mix\(in_srgb,var\(--surface-page\))/);
-    expect(headerClass).not.toContain("vui-gradient-route-soft");
-    expect(headerClass).not.toMatch(/\bshadow-\[/);
-    expect(headerClass).toContain("!bg-transparent");
-    expect(headerClass).toContain("!shadow-none");
-    expect(headerClass).toContain("!backdrop-blur-none");
+    expect(headerClass).toBe("hidden");
   });
 
   it("keeps Skills surfaces lightweight instead of building nested opaque card walls", () => {
@@ -148,13 +143,13 @@ describe("SkillsRoute layout contract", () => {
     expect(extractConstClass("rootRowClass")).toContain("max-[720px]:grid-cols-1");
   });
 
-  it("uses VUI composition for summary, panels, and bulk/list surfaces", () => {
-    expect(routeSource).toContain("VStatusStrip");
+  it("uses VUI composition for panels and bulk/list surfaces", () => {
+    expect(routeSource).not.toContain("VStatusStrip");
     expect(routeSource).toContain("VSurface");
     expect(routeSource).toContain("VDenseToolbar");
     expect(routeSource).toContain("VPanelHeader");
     expect(routeSource).toContain("VStatusChip");
-    expect(routeSource).toContain("className={styles.summaryStripClass}");
+    expect(routeSource).not.toContain("summaryStripClass");
     expect(routeSource).toContain("<VSurface");
     expect(routeSource).toContain('as="section"');
     expect(routeSource).toContain("VListDetailPage");

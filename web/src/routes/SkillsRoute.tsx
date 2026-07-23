@@ -15,12 +15,11 @@ import {
   VNativeInput,
   VPanelHeader,
   VStatusChip,
-  VStatusStrip,
   VSurface,
   VTooltip,
 } from "../components/vui";
 import { useShellI18n } from "../i18n/useShellI18n";
-import { AgentManagementNav } from "./AgentManagementNav";
+import { AgentManagementModuleBar } from "./AgentManagementModuleBar";
 import styles from "./SkillsRoute.styles";
 
 type SkillSourceFilter = "all" | "codex" | "agents" | "other";
@@ -191,8 +190,6 @@ export function SkillsRoute() {
     enabled: Boolean(activeCommand),
   });
   const activeSkill = detailQuery.data ?? filteredSkills.find((skill) => skill.command === activeCommand) ?? null;
-  const counts = libraryQuery.data?.counts ?? { total: 0, codex: 0, agents: 0, other: 0 };
-
   async function copyCommand(command: string) {
     const text = `${command} `;
     try {
@@ -247,29 +244,20 @@ export function SkillsRoute() {
       eyebrow={copy.eyebrow}
       title={copy.title}
       meta={copy.subtitle}
-      actions={(
-        <VIconButton
-          type="button"
-          className={styles.refreshButtonClass}
-          label={copy.refresh}
-          icon={<RefreshCw size={15} />}
-          isDisabled={libraryQuery.isFetching}
-          onPress={() => libraryQuery.refetch()}
-        />
-      )}
       toolbar={(
-        <div className={styles.controlStripClass}>
-          <AgentManagementNav active="skills" className={styles.managementNavClass} />
-          <VStatusStrip
-            className={styles.summaryStripClass}
-            items={[
-              { label: "Total", value: <strong className={styles.summaryValueClass}>{counts.total}</strong> },
-              { label: "Codex", value: <strong className={styles.summaryValueClass}>{counts.codex}</strong> },
-              { label: "Agents", value: <strong className={styles.summaryValueClass}>{counts.agents}</strong> },
-              { label: copy.readOnly, value: <strong className={styles.summaryValueClass}>{libraryQuery.data?.mode ?? "read_only"}</strong> },
-            ]}
-          />
-        </div>
+        <AgentManagementModuleBar
+          active="skills"
+          actions={(
+            <VIconButton
+              type="button"
+              className={styles.refreshButtonClass}
+              label={copy.refresh}
+              icon={<RefreshCw size={15} />}
+              isDisabled={libraryQuery.isFetching}
+              onPress={() => libraryQuery.refetch()}
+            />
+          )}
+        />
       )}
       list={(
         <VSurface as="section" className={styles.listPanelClass} ariaLabel={copy.listTitle} tone="panel" padding="compact">

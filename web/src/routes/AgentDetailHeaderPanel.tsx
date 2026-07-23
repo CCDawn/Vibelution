@@ -1,5 +1,7 @@
+import { PanelRight, Play } from "lucide-react";
+
 import type { AgentAvatarOptionsPayload } from "../api/types";
-import { VNativeButton, VTooltip } from "../components/vui";
+import { VButton, VNativeButton, VTooltip } from "../components/vui";
 import {
   AgentAvatarEditorPanel,
   type AgentAvatarEditorPanelCopy,
@@ -22,6 +24,9 @@ type AgentDetailHeaderPanelProps<TPane extends string> = {
   healthTitle: string;
   healthTone: string;
   healthLabel: string;
+  inspectorLabel: string;
+  inspectorOpen: boolean;
+  runLabel: string;
   panes: AgentDetailHeaderPaneView<TPane>[];
   activePane: TPane;
   isAvatarEditorOpen: boolean;
@@ -37,12 +42,9 @@ type AgentDetailHeaderPanelProps<TPane extends string> = {
   onResetAvatar: () => void;
   onSelectAvatar: (avatarImagePath: string) => void;
   onSelectPane: (pane: TPane) => void;
+  onToggleInspector: () => void;
+  onRun?: () => void;
 };
-
-function roleToneClass(tone: string) {
-  const toneKey = `agentRoleTag_${tone}` as keyof typeof styles;
-  return styles[toneKey] || styles.agentRoleTag_general;
-}
 
 function issueToneClass(tone: string) {
   const toneKey = `issue_${tone}` as keyof typeof styles;
@@ -59,6 +61,9 @@ export function AgentDetailHeaderPanel<TPane extends string>({
   healthTitle,
   healthTone,
   healthLabel,
+  inspectorLabel,
+  inspectorOpen,
+  runLabel,
   panes,
   activePane,
   isAvatarEditorOpen,
@@ -74,46 +79,70 @@ export function AgentDetailHeaderPanel<TPane extends string>({
   onResetAvatar,
   onSelectAvatar,
   onSelectPane,
+  onToggleInspector,
+  onRun,
 }: AgentDetailHeaderPanelProps<TPane>) {
-  // roleTone retained for API stability / layout contracts; identity uses single role eyebrow.
-  void roleToneClass(roleTone);
+  // Keep roleTone in the stable component contract; identity now uses one quiet eyebrow.
+  void roleTone;
+
   return (
-    <>
-      <VTooltip content={title} width="wide">
-        <section className={styles.detailHeader} tabIndex={0} aria-label={`${agentName} · ${title}`}>
-          <div className={styles.detailIdentity}>
-            <AgentAvatarEditorPanel
-              copy={copy}
-              lang={lang}
-              isOpen={isAvatarEditorOpen}
-              avatarImageUrl={avatarImageUrl}
-              avatarImagePath={avatarImagePath}
-              avatarInitials={avatarInitials}
-              avatarOptions={avatarOptions}
-              avatarOptionsPending={avatarOptionsPending}
-              uploadPending={avatarUploadPending}
-              updatePending={avatarUpdatePending}
-              onOpenChange={onAvatarEditorOpenChange}
-              onUploadAvatar={onUploadAvatar}
-              onResetAvatar={onResetAvatar}
-              onSelectAvatar={onSelectAvatar}
-            />
-            <div className={styles.detailIdentityCopy}>
-              <p className={styles.panelEyebrow}>{roleLabel}</p>
-              <h2>{agentName}</h2>
-            </div>
-          </div>
-          <div className={styles.detailHeaderActions}>
-            <VTooltip content={healthTitle} width="wide">
-              <span className={styles.detailHealthStatus} tabIndex={0} aria-label={`${healthLabel} · ${healthTitle}`}>
-                <span className={`${styles.issuePill} ${issueToneClass(healthTone)}`}>
+    <div className={styles.detailHeaderFrame}>
+      <section className={styles.detailHeader} aria-label={`${agentName} · ${title}`}>
+        <div className={styles.detailIdentity}>
+          <AgentAvatarEditorPanel
+            copy={copy}
+            lang={lang}
+            isOpen={isAvatarEditorOpen}
+            avatarImageUrl={avatarImageUrl}
+            avatarImagePath={avatarImagePath}
+            avatarInitials={avatarInitials}
+            avatarOptions={avatarOptions}
+            avatarOptionsPending={avatarOptionsPending}
+            uploadPending={avatarUploadPending}
+            updatePending={avatarUpdatePending}
+            onOpenChange={onAvatarEditorOpenChange}
+            onUploadAvatar={onUploadAvatar}
+            onResetAvatar={onResetAvatar}
+            onSelectAvatar={onSelectAvatar}
+          />
+          <div className={styles.detailIdentityCopy}>
+            <p className={styles.panelEyebrow}>{roleLabel}</p>
+            <h2>{agentName}</h2>
+            <span
+              className={styles.detailHealthStatus}
+              aria-label={`${healthLabel} · ${healthTitle}`}
+            >
+              <VTooltip content={healthTitle} width="wide">
+                <span className={`${styles.issuePill} ${issueToneClass(healthTone)}`} tabIndex={0}>
                   {healthLabel}
                 </span>
-              </span>
-            </VTooltip>
+              </VTooltip>
+            </span>
           </div>
-        </section>
-      </VTooltip>
+        </div>
+
+        <div className={styles.detailHeaderActions}>
+          <VButton
+            type="button"
+            variant="ghost"
+            icon={<PanelRight size={15} />}
+            aria-pressed={inspectorOpen}
+            onPress={onToggleInspector}
+          >
+            {inspectorLabel}
+          </VButton>
+          {onRun ? (
+            <VButton
+              type="button"
+              variant="primary"
+              icon={<Play size={15} />}
+              onPress={onRun}
+            >
+              {runLabel}
+            </VButton>
+          ) : null}
+        </div>
+      </section>
 
       <nav className={styles.detailTabs} aria-label={title}>
         {panes.map((pane) => (
@@ -128,6 +157,6 @@ export function AgentDetailHeaderPanel<TPane extends string>({
           </VNativeButton>
         ))}
       </nav>
-    </>
+    </div>
   );
 }

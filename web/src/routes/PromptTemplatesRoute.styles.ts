@@ -1,5 +1,5 @@
 const routeClass = "grid h-full min-h-0 min-w-0 grid-rows-[auto_auto_minmax(0,1fr)] overflow-hidden";
-const headerClass = "mx-2 mt-1.5 min-h-9 min-w-0 border-[var(--vui-border-subtle)] !bg-transparent !shadow-none !backdrop-blur-none";
+const headerClass = "hidden";
 const headerActionsClass = "inline-flex min-w-0 items-center justify-end gap-1.5";
 const controlButtonClass =
   "inline-flex min-h-[26px] w-fit max-w-full items-center justify-center gap-1.5 whitespace-nowrap rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--vui-border-soft)_76%,transparent)] bg-[color-mix(in_srgb,var(--vui-control-muted)_72%,transparent)] px-2 py-[3px] [font-size:var(--vui-font-xs)] text-vui-fg-secondary hover:border-[color-mix(in_srgb,var(--border-strong)_78%,transparent)] hover:bg-[var(--vui-control-muted-hover)] hover:text-vui-fg-primary disabled:opacity-55";
@@ -11,11 +11,6 @@ const pillSurfaceClass =
   "inline-flex min-h-5 max-w-full items-center justify-center rounded-full border border-[color-mix(in_srgb,var(--vui-border-soft)_74%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-row)_72%,transparent)] px-1.5 [font-size:var(--vui-font-xs)]";
 const refreshButtonClass = `${controlButtonClass} h-[var(--vui-control-height-sm)] w-[var(--vui-control-height-sm)] p-0`;
 const returnButtonClass = `${controlButtonClass} gap-[5px] text-[var(--accent-cool)] no-underline`;
-const controlStripClass = "grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-center gap-1.5 px-3 pt-1 max-[980px]:grid-cols-1";
-const managementNavClass = "m-0";
-const summaryStripClass = "min-w-0 overflow-hidden rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--border-soft)_70%,transparent)] bg-vui-surface-toolbar p-1 [&_[data-vui=status-strip-item]]:min-w-0 [&_[data-vui=status-strip-item]]:grid-cols-[auto_minmax(0,1fr)] [&_[data-vui=status-strip-item]]:rounded-[var(--radius-control)] [&_[data-vui=status-strip-item]]:bg-transparent [&_[data-vui=status-strip-item]]:font-normal [&_[data-vui=status-strip-item]]:shadow-none [&_[data-vui=status-strip-item]_span:last-child]:min-w-0 [&_[data-vui=status-strip-item]_span:last-child]:truncate";
-const summaryLabelClass = "[font-size:var(--vui-font-xs)] text-vui-fg-tertiary";
-const summaryValueClass = "min-w-0 truncate [font-size:var(--vui-font-xs)] text-vui-fg-primary";
 const workspaceClass = "grid h-full min-h-0 min-w-0 grid-cols-[clamp(260px,26vw,380px)_minmax(0,1fr)] gap-1.5 overflow-hidden px-2 pb-2 pt-1.5 max-[980px]:grid-cols-1 max-[980px]:content-start max-[980px]:overflow-auto";
 const panelBaseClass = "grid min-h-0 min-w-0 content-start gap-2 overflow-hidden";
 const listPanelClass = `${panelBaseClass} grid-rows-[auto_auto_auto_auto_minmax(0,1fr)] max-[980px]:max-h-[44vh]`;
@@ -87,11 +82,6 @@ const styles = {
   headerActionsClass,
   refreshButtonClass,
   returnButtonClass,
-  controlStripClass,
-  managementNavClass,
-  summaryStripClass,
-  summaryLabelClass,
-  summaryValueClass,
   workspaceClass,
   panelBaseClass,
   listPanelClass,
