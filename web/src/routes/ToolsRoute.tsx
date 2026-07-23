@@ -23,7 +23,7 @@ import {
 } from "../api/types";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
 import { PaneCollapseHandle } from "../components/layout/PaneCollapseHandle";
-import { VButton, VContextualHint, VDenseOpsPage, VIconButton, VNativeInput, VNativeSelect, VTooltip } from "../components/vui";
+import { VButton, VConfirmDialog, VContextualHint, VDenseOpsPage, VIconButton, VNativeInput, VNativeSelect, VTooltip } from "../components/vui";
 import type { TranslationKey } from "../i18n/dictionary";
 import { useAppI18n } from "../i18n/useAppI18n";
 import { safeAgentCenterReturnToPath } from "./agentCenterRoutes";
@@ -835,6 +835,11 @@ export function ToolsRoute() {
   const [selectedToolIds, setSelectedToolIds] = useState<Set<string>>(() => new Set());
   const [bulkSelectionAnchorToolId, setBulkSelectionAnchorToolId] = useState<string | null>(null);
   const [bulkToolPending, setBulkToolPending] = useState(false);
+  const [toolConfirm, setToolConfirm] = useState<null | {
+    kind: "bulk-delete" | "delete-one";
+    toolId?: string;
+    toolName?: string;
+  }>(null);
   const [notice, setNotice] = useState<{ tone: "neutral" | "success" | "error"; text: string }>({
     tone: "neutral",
     text: "",
@@ -1616,10 +1621,7 @@ export function ToolsRoute() {
       setNotice({ tone: "error", text: bulkCopy.noSelection });
       return;
     }
-    const confirmed = window.confirm(bulkCopy.deleteConfirm);
-    if (!confirmed) {
-      return;
-    }
+    // Confirm UI lives in VConfirmDialog via toolConfirm.
     setBulkToolPending(true);
     let deletedActiveTool = false;
     const skippedLocal = selectedTools.filter((tool) => !tool.deleteAllowed);
@@ -1768,7 +1770,7 @@ export function ToolsRoute() {
             <VButton type="button" variant="secondary" className={styles.secondaryButton} isDisabled={!selectedTools.length || bulkToolPending} disabledReason={!selectedTools.length ? bulkCopy.selectVisible : bulkCopy.working} onPress={() => bulkSetToolsEnabled(false)} icon={<CircleSlash size={14} />}>
               <span>{bulkToolPending ? bulkCopy.working : bulkCopy.disable}</span>
             </VButton>
-            <VButton type="button" variant="secondary" className={styles.secondaryButton} isDisabled={!selectedTools.length || bulkToolPending} disabledReason={!selectedTools.length ? bulkCopy.selectVisible : bulkCopy.working} onPress={bulkDeleteTools} icon={<Trash2 size={14} />}>
+            <VButton type="button" variant="secondary" className={styles.secondaryButton} isDisabled={!selectedTools.length || bulkToolPending} disabledReason={!selectedTools.length ? bulkCopy.selectVisible : bulkCopy.working} onPress={() => setToolConfirm({ kind: "bulk-delete" })} icon={<Trash2 size={14} />}>
               <span>{bulkToolPending ? bulkCopy.working : bulkCopy.delete}</span>
             </VButton>
           </section>
@@ -2313,15 +2315,11 @@ export function ToolsRoute() {
                   isDisabled={!activeCanDelete}
                   onPress={() => {
                     if (activeTool) {
-                      const confirmed = window.confirm(
-                        lang === "zh"
-                          ? `确认删除工具 ${activeTool.name}？`
-                          : `Delete tool ${activeTool.name}?`,
-                      );
-                      if (!confirmed) {
-                        return;
-                      }
-                      deleteMutation.mutate(activeTool.id);
+                      setToolConfirm({
+                        kind: "delete-one",
+                        toolId: activeTool.id,
+                        toolName: activeTool.name,
+                      });
                     }
                   }}
                   tooltip={lang === "zh" ? "永久删除当前生成工具。" : "Permanently delete the current generated tool."}
@@ -2437,6 +2435,35 @@ export function ToolsRoute() {
           )}
         </main>
       </div>
+      <VConfirmDialog
+        open={Boolean(toolConfirm)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setToolConfirm(null);
+          }
+        }}
+        title={toolConfirm?.kind === "bulk-delete" ? bulkCopy.delete : t("deleteSelected")}
+        description={
+          toolConfirm?.kind === "bulk-delete"
+            ? bulkCopy.deleteConfirm
+            : lang === "zh"
+              ? `确认删除工具 ${toolConfirm?.toolName ?? ""}？`
+              : `Delete tool ${toolConfirm?.toolName ?? ""}?`
+        }
+        tone="danger"
+        confirmLabel={toolConfirm?.kind === "bulk-delete" ? bulkCopy.delete : t("deleteSelected")}
+        cancelLabel={lang === "zh" ? "取消" : "Cancel"}
+        confirmPending={bulkToolPending || activeToolDeletePending}
+        onConfirm={() => {
+          const pending = toolConfirm;
+          setToolConfirm(null);
+          if (pending?.kind === "bulk-delete") {
+            void bulkDeleteTools();
+          } else if (pending?.kind === "delete-one" && pending.toolId) {
+            deleteMutation.mutate(pending.toolId);
+          }
+        }}
+      />
     </VDenseOpsPage>
   );
 }

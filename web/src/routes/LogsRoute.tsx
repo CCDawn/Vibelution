@@ -37,7 +37,7 @@ import {
   LogRoot,
   LogTreeResponse,
 } from "../api/types";
-import { VActionGroup, VButton, VDenseOpsPage, VIconButton, VNativeInput, VStateSurface, VStatusStrip, VSurface, VTooltip } from "../components/vui";
+import { VActionGroup, VButton, VConfirmDialog, VDenseOpsPage, VIconButton, VNativeInput, VStateSurface, VStatusStrip, VSurface, VTooltip } from "../components/vui";
 import { PaneCollapseHandle } from "../components/layout/PaneCollapseHandle";
 import { LazyFilePreview } from "../components/preview/LazyFilePreview";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
@@ -330,6 +330,10 @@ export function LogsRoute() {
   const [severityFilter, setSeverityFilter] = useState<LogSeverityFilter>("all");
   const [copyState, setCopyState] = useState<"idle" | "copied" | "error">("idle");
   const [actionNotice, setActionNotice] = useState<ActionNotice | null>(null);
+  const [logConfirm, setLogConfirm] = useState<null | {
+    kind: "clear" | "delete";
+    description: string;
+  }>(null);
   const [dragState, setDragState] = useState<DragState | null>(null);
   const [rightRailDragState, setRightRailDragState] = useState<DragState | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -854,12 +858,9 @@ export function LogsRoute() {
     if (!activeRoot || !activeFilePath || clearLogMutation.isPending) {
       return;
     }
-    if (!window.confirm(buildClearConfirmationLabel(activeFilePath))) {
-      return;
-    }
-    clearLogMutation.mutate({
-      root: activeRoot.id,
-      path: activeFilePath,
+    setLogConfirm({
+      kind: "clear",
+      description: buildClearConfirmationLabel(activeFilePath),
     });
   }
 
@@ -867,12 +868,9 @@ export function LogsRoute() {
     if (!activeRoot || selectedLogPaths.length === 0 || deleteLogsMutation.isPending) {
       return;
     }
-    if (!window.confirm(buildDeleteConfirmationLabel(selectedLogPaths))) {
-      return;
-    }
-    deleteLogsMutation.mutate({
-      root: activeRoot.id,
-      paths: selectedLogPaths,
+    setLogConfirm({
+      kind: "delete",
+      description: buildDeleteConfirmationLabel(selectedLogPaths),
     });
   }
 
@@ -1486,6 +1484,38 @@ export function LogsRoute() {
           </nav>
         </VSurface>
       </div>
+      <VConfirmDialog
+        open={Boolean(logConfirm)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setLogConfirm(null);
+          }
+        }}
+        title={logConfirm?.kind === "delete" ? t("deleteSelected") : t("clearCurrentLog")}
+        description={logConfirm?.description ?? ""}
+        tone={logConfirm?.kind === "delete" ? "danger" : "neutral"}
+        confirmLabel={logConfirm?.kind === "delete" ? t("deleteSelected") : t("clearCurrentLog")}
+        cancelLabel={lang === "zh" ? "取消" : "Cancel"}
+        confirmPending={clearLogMutation.isPending || deleteLogsMutation.isPending}
+        onConfirm={() => {
+          if (!logConfirm || !activeRoot) {
+            setLogConfirm(null);
+            return;
+          }
+          if (logConfirm.kind === "clear" && activeFilePath) {
+            clearLogMutation.mutate({
+              root: activeRoot.id,
+              path: activeFilePath,
+            });
+          } else if (logConfirm.kind === "delete") {
+            deleteLogsMutation.mutate({
+              root: activeRoot.id,
+              paths: selectedLogPaths,
+            });
+          }
+          setLogConfirm(null);
+        }}
+      />
     </VDenseOpsPage>
   );
 }
