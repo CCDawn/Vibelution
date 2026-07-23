@@ -1,9 +1,10 @@
 import { forwardRef, type ComponentPropsWithoutRef } from "react";
 
+import { type VuiDensity } from "../renderers/shared/buttonVariants";
 import { vuiFormControlClass } from "./formClasses";
 
 export type VNativeTextareaProps = ComponentPropsWithoutRef<"textarea"> & {
-  density?: "compact" | "normal";
+  density?: VuiDensity;
   minRows?: number;
   "data-vui"?: string;
 };
@@ -25,6 +26,7 @@ export const VNativeTextarea = forwardRef<HTMLTextAreaElement, VNativeTextareaPr
       ref={ref}
       rows={rows ?? minRows}
       data-vui={dataVui ?? "native-textarea"}
+      data-density={density}
       className={[
         vuiFormControlClass(density),
         "min-h-20 resize-y py-1.5 leading-5",
