@@ -28,3 +28,27 @@ Dependencies are isolated from Vibelution runtime dependencies:
 The primary decision uses only the frozen `[-0.5 s, 0 s]` window relative to
 movement onset. Other windows are reported as exploratory sensitivity evidence
 and must not be used to retroactively select a favorable result.
+
+## SCI-096 epoch discrimination
+
+After human review of `stage1-sci-096-v2`, the follow-up experiment freezes two
+epochs before execution:
+
+- stationary preparatory epoch: `[-0.5 s, 0 s]`;
+- movement-transition epoch: `[0 s, 0.25 s]`.
+
+It tests whether the temporal-vs-rate decoding gain is larger in the transition
+epoch, while retaining the capacity-matched decoder and count-preserving shuffle
+control. All five preregistered gates must pass; otherwise the result remains a
+branch or negative result rather than support for a universal coding claim.
+The `v3` artifact supersedes the retained `v2` diagnostic because it uses a
+class-stratified balanced-accuracy interaction bootstrap consistently with the
+epoch-level gates.
+
+```powershell
+$env:PYTHONPATH = "C:\Users\Administrator\Documents\Vibelution\data\experiments\sci096_spike_coding\python_packages"
+$python = "$HOME\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe"
+$input = "C:\Users\Administrator\Documents\Vibelution\data\experiments\sci096_spike_coding\source\sub-Jenkins_ses-small_desc-train_behavior+ecephys.nwb"
+$output = "C:\Users\Administrator\Documents\Vibelution\data\experiments\sci096_spike_coding\runs\sci096-dandi000140-epoch-discrimination-v3\result.json"
+& $python experiments\challenge_cup_spike_coding\sci096_epoch_discrimination.py --input-nwb $input --output $output
+```
