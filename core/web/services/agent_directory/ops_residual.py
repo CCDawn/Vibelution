@@ -665,9 +665,9 @@ def _record_agent_list_loaded(
     try:
         s.record_runtime_scene_event(
             "agent_directory",
-            "s.list_agents",
+            "list_agents",
             "agent_directory.list_agents.slow",
-            message="Agent directory s.list_agents was slow.",
+            message="Agent directory list_agents was slow.",
             level="warning" if total_ms >= 3000 or lock_wait_ms >= 1000 else "info",
             outcome="observed",
             fields={
