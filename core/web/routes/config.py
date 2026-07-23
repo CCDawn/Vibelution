@@ -230,6 +230,16 @@ class ProviderMergeRollbackPayload(BaseModel):
 
 
 def _raise_config_http_error(exc: Exception) -> None:
+    if isinstance(exc, provider_config_service.ProviderDiscoveryFailure):
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "provider_discovery_failed",
+                "providerId": exc.provider_id,
+                "reasonCode": exc.reason_code,
+                "retryable": exc.retryable,
+            },
+        ) from exc
     if isinstance(exc, ModelReferenceConflictError):
         raise HTTPException(
             status_code=409,

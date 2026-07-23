@@ -278,4 +278,13 @@ describe("ConfigProviderRegistryPanel", () => {
     expect(errorMarkup).toContain('role="alert"');
     expect(errorMarkup).toContain("API Key 更新失败");
   });
+  it("keeps the latest safe discovery failure on the selected Provider diagnostics", () => {
+    const timedOut = { ...provider([]), status: "discovery_failed" as const, lastErrorType: "timeout" };
+    const markup = renderToStaticMarkup(
+      <ConfigProviderRegistryPanel {...panelProps([], { rows: [timedOut], selectedTab: "diagnostics" })} />,
+    );
+
+    expect(markup).toContain("最近失败原因");
+    expect(markup).toContain("请求超时");
+  });
 });

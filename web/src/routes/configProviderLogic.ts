@@ -19,6 +19,7 @@ export type ProviderRegistryRow = {
   pinnedCount: number;
   status: ConfigProviderStatus | "configured";
   lastAttemptAt: string;
+  lastErrorType?: string;
   lastSuccessAt: string;
   refreshDue: boolean;
   models: ConfigCatalogModel[];
@@ -123,6 +124,7 @@ export function deriveProviderRegistryRows(
         pinnedCount: provider.pinned_count,
         status: observed?.status ?? "configured",
         lastAttemptAt: observed?.lastAttemptAt ?? "",
+        lastErrorType: observed?.lastErrorType ?? "",
         lastSuccessAt: observed?.lastSuccessAt ?? "",
         refreshDue: observed?.refreshDue ?? false,
         models: Object.values(observed?.models ?? {}).sort((left, right) => left.modelRef.localeCompare(right.modelRef)),

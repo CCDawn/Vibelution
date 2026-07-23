@@ -137,7 +137,7 @@ describe("ConfigRoute layout contract", () => {
     expect(quickSetupStylesSource).not.toContain("minmax(22rem,0.9fr)_minmax(28rem,1.1fr)");
     expect(routeSource).toContain('workspace.schemaVersion === 2 && isSectionVisible("models")');
     expect(routeSource).toContain('providerWorkspaceMode === "advanced" ? (\n                  <>');
-    expect(routeSource).toContain('activePage?.id !== "model-connection"');
+    expect(routeSource).toContain('isSectionVisible("models")');
   });
 
   it("keeps formal config apply outside Provider detection orchestration", () => {
@@ -166,9 +166,9 @@ describe("ConfigRoute layout contract", () => {
     expect(routeSource).toContain("baseHash: draftOverride.baseHash");
   });
 
-  it("refreshes only ttl-expired providers when the model surface opens", () => {
-    expect(routeSource).toContain("row.refreshDue");
-    expect(routeSource).toContain("autoRefreshAttemptedProviderIds");
+  it("does not auto-discover Provider endpoints when the model surface opens", () => {
+    expect(routeSource).not.toContain("autoRefreshAttemptedProviderIds");
+    expect(routeSource).not.toContain("refreshDueProviders");
     expect(routeSource).not.toContain("load_public_config");
   });
 
@@ -485,7 +485,7 @@ describe("ConfigRoute layout contract", () => {
   });
 
   it("keeps the model settings group dense enough to use the bottom viewport", () => {
-    expect(routeSource).toContain('activePage?.id !== "model-connection"');
+    expect(routeSource).toContain('isSectionVisible("models")');
     expect(styles.content).toContain("[grid-template-rows:auto_auto_minmax(0,1fr)]");
     expect(styles.pageViewport).toContain("min-h-0");
     expect(routeSource).toContain("<ConfigProviderRegistryPanel");

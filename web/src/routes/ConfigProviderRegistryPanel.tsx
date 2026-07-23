@@ -92,6 +92,27 @@ function statusTone(status: string): VStatusTone {
   return "neutral";
 }
 
+function discoveryErrorLabel(errorType: string): string {
+  switch (errorType) {
+    case "timeout": return "请求超时";
+    case "network": return "网络不可达";
+    case "credential_missing": return "未配置凭据";
+    case "credential_rejected":
+    case "auth_failed": return "认证失败";
+    case "endpoint_invalid": return "服务地址无效";
+    case "protocol_mismatch": return "协议不兼容";
+    case "invalid_response": return "返回格式不兼容";
+    case "rate_limited": return "上游限流";
+    case "upstream_rejected": return "上游拒绝请求";
+    case "service_unavailable":
+    case "upstream_unavailable":
+    case "discovery_unavailable": return "上游暂不可用";
+    case "blocked": return "访问被阻止";
+    case "other": return "发现失败";
+    default: return errorType || "无";
+  }
+}
+
 function capabilityTone(observation: ConfigCapabilityObservation): VStatusTone {
   if (observation.value === "supported") return "success";
   if (observation.value === "unsupported") return "danger";
@@ -413,6 +434,7 @@ function DiagnosticsTab({
         facts={[
           { key: "attempt", label: "最近尝试", value: provider.lastAttemptAt || "从未" },
           { key: "success", label: "最近成功", value: provider.lastSuccessAt || "从未" },
+          { key: "failure", label: "最近失败原因", value: discoveryErrorLabel(provider.lastErrorType ?? "") },
           { key: "auth", label: "认证", value: provider.status === "auth_failed" ? "失败" : provider.credentialState },
           { key: "protocol", label: "协议", value: provider.status === "protocol_mismatch" ? "不匹配" : provider.defaultProtocol || "unknown" },
         ]}
