@@ -142,7 +142,7 @@ const routeShellTargets = [
   },
   {
     path: "routes/GitRoute.tsx",
-    expected: ["VRouteHeader", "VIconButton"],
+    expected: ["VDenseOpsPage", "VIconButton"],
     forbidden: ["<header className={styles.header}"],
   },
   {
@@ -157,12 +157,12 @@ const routeShellTargets = [
   },
   {
     path: "routes/PromptTemplatesRoute.tsx",
-    expected: ["VRouteHeader", "VIconButton"],
+    expected: ["VListDetailPage", "VIconButton"],
     forbidden: ["<header className={styles.header}"],
   },
   {
     path: "routes/ResetRoute.tsx",
-    expected: ["VRouteHeader"],
+    expected: ["VDenseOpsPage"],
     forbidden: ["<header className={styles.header}"],
   },
   {
@@ -172,7 +172,7 @@ const routeShellTargets = [
   },
   {
     path: "routes/ToolsRoute.tsx",
-    expected: ["VRouteHeader", "VIconButton"],
+    expected: ["VDenseOpsPage", "VIconButton"],
     forbidden: ["<header className={styles.header}"],
   },
 ] as const;

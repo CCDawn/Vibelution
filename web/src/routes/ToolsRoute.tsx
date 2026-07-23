@@ -23,7 +23,7 @@ import {
 } from "../api/types";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
 import { PaneCollapseHandle } from "../components/layout/PaneCollapseHandle";
-import { VButton, VContextualHint, VIconButton, VNativeInput, VNativeSelect, VRouteHeader, VTooltip } from "../components/vui";
+import { VButton, VContextualHint, VDenseOpsPage, VIconButton, VNativeInput, VNativeSelect, VTooltip } from "../components/vui";
 import type { TranslationKey } from "../i18n/dictionary";
 import { useAppI18n } from "../i18n/useAppI18n";
 import { safeAgentCenterReturnToPath } from "./agentCenterRoutes";
@@ -1660,35 +1660,34 @@ export function ToolsRoute() {
   }
 
   return (
-    <section className={styles.route}>
-      <VRouteHeader
-        className={styles.header}
-        aria-label={t("toolsPageSubtitle")}
-        eyebrow={t("navTools")}
-        title={t("toolsPageTitle")}
-        meta={t("toolsPageSubtitle")}
-        actions={(
-          <div className={styles.headerActions}>
-            {returnToPath ? (
-              <VTooltip content={returnToLabel} width="compact">
-                <Link className={styles.returnButton} to={returnToPath}>
-                  <ArrowLeft size={15} />
-                  <span>{returnToLabel}</span>
-                </Link>
-              </VTooltip>
-            ) : null}
-            <VIconButton
-              type="button"
-              variant="secondary"
-              className={styles.refreshButton}
-              label={t("gitRefresh")}
-              icon={<RefreshCw size={16} />}
-              onPress={refresh}
-            />
-          </div>
-        )}
-      />
-
+    <VDenseOpsPage
+      className={styles.route}
+      headerClassName={styles.header}
+      ariaLabel={t("toolsPageSubtitle")}
+      eyebrow={t("navTools")}
+      title={t("toolsPageTitle")}
+      meta={t("toolsPageSubtitle")}
+      actions={(
+        <div className={styles.headerActions}>
+          {returnToPath ? (
+            <VTooltip content={returnToLabel} width="compact">
+              <Link className={styles.returnButton} to={returnToPath}>
+                <ArrowLeft size={15} />
+                <span>{returnToLabel}</span>
+              </Link>
+            </VTooltip>
+          ) : null}
+          <VIconButton
+            type="button"
+            variant="secondary"
+            className={styles.refreshButton}
+            label={t("gitRefresh")}
+            icon={<RefreshCw size={16} />}
+            onPress={refresh}
+          />
+        </div>
+      )}
+    >
       <ToolsRouteAgentScopePanel
         copy={{
           blocked: t("toolsScopeBlocked"),
@@ -2438,6 +2437,6 @@ export function ToolsRoute() {
           )}
         </main>
       </div>
-    </section>
+    </VDenseOpsPage>
   );
 }
