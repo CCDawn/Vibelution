@@ -404,7 +404,9 @@ def test_source_collection_stage_prompts_align_backend_bound_checklist_protocol(
 
 def test_challenge_cup_source_collection_contract_names_source_ingestor_as_ingestion_owner():
     repo_root = Path(__file__).resolve().parents[1]
-    agent_directory_source = (repo_root / "core" / "web" / "services" / "agent_directory_service.py").read_text(encoding="utf-8")
+    agent_directory_source = (
+        repo_root / "core" / "web" / "services" / "agent_directory" / "repair_store.py"
+    ).read_text(encoding="utf-8")
     prompt_template_source = (repo_root / "core" / "web" / "services" / "prompt_template_service.py").read_text(encoding="utf-8")
     team_service_source = (repo_root / "core" / "web" / "services" / "team_service.py").read_text(encoding="utf-8")
     flow_builder_source = (repo_root / "挑战杯" / "build_research_flow_site.mjs").read_text(encoding="utf-8")
