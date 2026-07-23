@@ -15,6 +15,7 @@ type AgentManagementHeaderPanelCopy = {
   refresh: string;
   workspaceSummary: string;
   workspaceHealthStatus: string;
+  moreMetrics?: string;
 };
 
 type AgentManagementHeaderPanelProps = {
@@ -23,6 +24,7 @@ type AgentManagementHeaderPanelProps = {
   healthStatusLabel: string;
   healthStatusDescription: string;
   metrics: AgentSummaryMetric[];
+  secondaryMetrics?: AgentSummaryMetric[];
   onRefresh: () => void;
 };
 
@@ -42,6 +44,7 @@ export function AgentManagementHeaderPanel({
   healthStatusLabel,
   healthStatusDescription,
   metrics,
+  secondaryMetrics,
   onRefresh,
 }: AgentManagementHeaderPanelProps) {
   return (
@@ -74,6 +77,8 @@ export function AgentManagementHeaderPanel({
             tone: healthTone(healthStatus),
           }}
           metrics={metrics}
+          secondaryMetrics={secondaryMetrics}
+          moreLabel={copy.moreMetrics ?? (copy.eyebrow ? "更多" : "More")}
         />
       </div>
     </>

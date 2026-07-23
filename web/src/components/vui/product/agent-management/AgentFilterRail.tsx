@@ -33,6 +33,9 @@ export type AgentFilterRailProps = {
   onSelectGroup: (groupId: string) => void;
   storageLabel: ReactNode;
   storagePaths: string[];
+  queueLabel?: ReactNode;
+  moreFiltersLabel?: ReactNode;
+  storageCollapsedLabel?: ReactNode;
   className?: string;
 };
 
@@ -50,6 +53,9 @@ const COUNT_BADGE =
 
 const HEALTH_BADGE =
   "inline-flex items-center justify-center gap-1 min-w-[22px] min-h-[22px] px-[7px] rounded-full text-[0.72rem] not-italic bg-[color-mix(in_srgb,var(--accent-warm)_12%,transparent)] text-[var(--accent-warm-2)]";
+
+const DETAILS_SUMMARY =
+  "group grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-2 min-h-[32px] px-[9px] py-[5px] rounded-none border-0 border-b border-[var(--vui-border-hairline)] bg-transparent text-[var(--fg-secondary)] text-[0.78rem] font-[760] cursor-pointer list-none [&::-webkit-details-marker]:hidden hover:bg-[var(--vui-surface-row-hover)] hover:text-[var(--fg-primary)]";
 
 function FilterSection({
   section,
@@ -93,11 +99,21 @@ function FilterSection({
             <VTooltip key={group.id} content={group.title} width="wide">
               {button}
             </VTooltip>
-          ) : button;
+          ) : (
+            button
+          );
         })}
       </div>
     </section>
   );
+}
+
+function sectionContainsActive(section: AgentFilterSectionView, activeGroupId: string) {
+  return section.groups.some((group) => group.id === activeGroupId);
+}
+
+function sectionIssueCount(section: AgentFilterSectionView) {
+  return section.groups.reduce((total, group) => total + (group.healthLabel ? 1 : 0) + (group.count > 0 && section.id === "management" ? group.count : 0), 0);
 }
 
 export function AgentFilterRail({
@@ -113,8 +129,25 @@ export function AgentFilterRail({
   onSelectGroup,
   storageLabel,
   storagePaths,
+  queueLabel,
+  moreFiltersLabel,
+  storageCollapsedLabel,
   className,
 }: AgentFilterRailProps) {
+  // Status stays open as the primary directory filter; queue/other sections collapse by default.
+  const primarySections = sections.filter((section) => section.id === "status");
+  const queueSections = sections.filter((section) => section.id === "management");
+  const otherSections = sections.filter(
+    (section) => section.id !== "status" && section.id !== "management",
+  );
+  const queueOpen = queueSections.some((section) => sectionContainsActive(section, activeGroupId));
+  const otherOpen = otherSections.some((section) => sectionContainsActive(section, activeGroupId));
+  const queueCount = queueSections.reduce((total, section) => total + sectionIssueCount(section), 0);
+  const otherCount = otherSections.reduce(
+    (total, section) => total + section.groups.reduce((sum, group) => sum + group.count, 0),
+    0,
+  );
+
   return (
     <AgentWorkspacePanel
       as="aside"
@@ -134,8 +167,8 @@ export function AgentFilterRail({
         />
       </label>
 
-      <nav aria-label={ariaLabel} className="grid content-start gap-[10px] min-h-0 overflow-auto">
-        {sections.map((section) => (
+      <nav aria-label={ariaLabel} className="grid content-start gap-[8px] min-h-0 overflow-auto">
+        {primarySections.map((section) => (
           <FilterSection
             key={section.id}
             section={section}
@@ -143,9 +176,68 @@ export function AgentFilterRail({
             onSelectGroup={onSelectGroup}
           />
         ))}
+
+        {queueSections.length ? (
+          <details
+            data-vui-product="agent-filter-queue"
+            className="grid min-w-0"
+            open={queueOpen || undefined}
+          >
+            <summary className={DETAILS_SUMMARY}>
+              <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">
+                {queueLabel ?? "工作队列"}
+              </span>
+              {queueCount > 0 ? <strong className={COUNT_BADGE}>{queueCount}</strong> : <span />}
+              <ChevronDown
+                size={14}
+                className="shrink-0 transition-transform duration-150 group-open:rotate-180 [[open]_&]:rotate-180"
+              />
+            </summary>
+            <div className="grid gap-[8px] min-w-0 pt-2">
+              {queueSections.map((section) => (
+                <FilterSection
+                  key={section.id}
+                  section={section}
+                  activeGroupId={activeGroupId}
+                  onSelectGroup={onSelectGroup}
+                />
+              ))}
+            </div>
+          </details>
+        ) : null}
+
+        {otherSections.length ? (
+          <details
+            data-vui-product="agent-filter-more-primary"
+            className="grid min-w-0"
+            open={otherOpen || undefined}
+          >
+            <summary className={DETAILS_SUMMARY}>
+              <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">
+                {moreFiltersLabel ?? "更多筛选"}
+              </span>
+              {otherCount > 0 ? <strong className={COUNT_BADGE}>{otherCount}</strong> : <span />}
+              <ChevronDown
+                size={14}
+                className="shrink-0 transition-transform duration-150 [[open]_&]:rotate-180"
+              />
+            </summary>
+            <div className="grid gap-[8px] min-w-0 pt-2">
+              {otherSections.map((section) => (
+                <FilterSection
+                  key={section.id}
+                  section={section}
+                  activeGroupId={activeGroupId}
+                  onSelectGroup={onSelectGroup}
+                />
+              ))}
+            </div>
+          </details>
+        ) : null}
+
         {advancedSections && advancedSections.length ? (
           <details data-vui-product="agent-filter-advanced" className="group grid min-w-0">
-            <summary className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-2 min-h-[34px] px-[9px] py-[6px] rounded-none border-0 border-b border-[var(--vui-border-hairline)] bg-transparent text-[var(--fg-secondary)] text-[0.8rem] font-[760] cursor-pointer list-none [&::-webkit-details-marker]:hidden hover:bg-[var(--vui-surface-row-hover)] hover:text-[var(--fg-primary)]">
+            <summary className={DETAILS_SUMMARY}>
               <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">
                 {advancedLabel}
               </span>
@@ -169,22 +261,31 @@ export function AgentFilterRail({
         ) : null}
       </nav>
 
-      <section
+      <details
         data-vui-product="agent-filter-storage"
-        className="grid gap-[5px] min-w-0 p-2 rounded-[var(--radius-control)] border border-[var(--border-soft)] bg-[color-mix(in_srgb,var(--vui-surface-row)_86%,var(--bg-canvas))]"
+        className="grid min-w-0 rounded-[var(--radius-control)] border border-[var(--border-soft)] bg-[color-mix(in_srgb,var(--vui-surface-row)_86%,var(--bg-canvas))]"
       >
-        <p className="m-0 mb-px text-[var(--fg-tertiary)] text-[0.61rem] tracking-[0.07em] uppercase">
-          {storageLabel}
-        </p>
-        {storagePaths.map((path) => (
-          <code
-            key={path}
-            className="min-w-0 overflow-hidden text-[var(--fg-secondary)] text-[0.74rem] text-ellipsis whitespace-nowrap"
-          >
-            {path}
-          </code>
-        ))}
-      </section>
+        <summary className="grid cursor-pointer list-none grid-cols-[minmax(0,1fr)_auto] items-center gap-2 px-2 py-1.5 text-[0.72rem] font-bold text-[var(--fg-tertiary)] [&::-webkit-details-marker]:hidden">
+          <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap uppercase tracking-[0.06em]">
+            {storageCollapsedLabel ?? storageLabel}
+          </span>
+          <ChevronDown size={13} className="shrink-0 [[open]_&]:rotate-180" />
+        </summary>
+        <div className="grid gap-[5px] min-w-0 border-t border-[var(--border-soft)] px-2 pb-2 pt-1.5">
+          <p className="m-0 mb-px text-[var(--fg-tertiary)] text-[0.61rem] tracking-[0.07em] uppercase">
+            {storageLabel}
+          </p>
+          {storagePaths.map((path) => (
+            <code
+              key={path}
+              className="min-w-0 overflow-hidden text-[var(--fg-secondary)] text-[0.74rem] text-ellipsis whitespace-nowrap"
+              title={path}
+            >
+              {path}
+            </code>
+          ))}
+        </div>
+      </details>
     </AgentWorkspacePanel>
   );
 }

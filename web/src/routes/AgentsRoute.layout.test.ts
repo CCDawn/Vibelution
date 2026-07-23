@@ -757,7 +757,7 @@ describe("AgentsRoute layout contract", () => {
     expect(modelPickerSource).toContain("模型与当前 Agent 槽位不兼容");
     expect(modelPickerSource).toContain("上游模型当前不可用");
     expect(modelPickerSource).toContain("请先保存或放弃未保存修改");
-    expect(createPanelSource).toContain("modelChoices.map((model)");
+    expect(createPanelSource).toContain("const modelSelectOptions = providerModels.map((model)");
     expect(agentCreateDialogSource).toContain("selectedModelId={selectedModelId}");
     expect(createPanelSource).toContain("value={selectedModelId}");
     expect(coreConfigPanelSource).toContain("<AgentModelPicker");
@@ -774,11 +774,11 @@ describe("AgentsRoute layout contract", () => {
     expect(coreConfigPanelSource).toContain("copy.llmSlotsHint");
     expect(routeSource).toContain("按 Agent 自己配置对话、心智模型、摘要、子 Agent 和视觉等 LLM 槽位");
     expect(routeSource).toContain("设置页只维护模型库资产");
-    expect(createPanelSource).toContain("aria-label={model.modelLabel || model.modelId}");
+    expect(createPanelSource).toContain("label: model.label");
     expect(createPanelSource).not.toContain("title={model.modelLabel || model.modelId}");
     expect(createPanelSource).toContain('from "./AgentCreatePanel.styles"');
     expect(createPanelSource).not.toContain("AgentsRoute.styles");
-    expect(createPanelSource).toContain("{model.label}");
+    expect(createPanelSource).toContain("options={modelSelectOptions}");
     expect(routeSource).toContain("candidates: workspace?.agentModelChoices ?? []");
     expect(coreConfigPanelSource).toContain("candidates={candidates}");
     expect(routeSource).not.toContain("buildModelProfileChoices(workspace?.modelProfiles ?? [])");
@@ -817,7 +817,7 @@ describe("AgentsRoute layout contract", () => {
     expect(createPanelSource).toContain("const [activeStep, setActiveStep] = useState(0)");
     expect(createPanelSource).toContain('aria-current={index === activeStep ? "step" : undefined}');
     expect(createPanelSource).toContain("const providerChoices = useMemo");
-    expect(createPanelSource).toContain("model.providerId === event.target.value");
+    expect(createPanelSource).toContain("firstAvailableModelId(modelChoices, providerId)");
     expect(createPanelSource).toContain("onApplyPreset(preset.draft)");
     expect(createPanelSource).toContain("setActiveStep(1)");
     expect(createPanelSource).toContain("stepReady.slice(0, index).every(Boolean)");
@@ -1406,8 +1406,10 @@ describe("AgentsRoute layout contract", () => {
     expect(detailHeaderStyles.detailTabs).toBeTruthy();
     expect(selectedDetailContentStyles.selectedDetailFrame).toContain("w-full");
     expect(selectedDetailContentStyles.selectedDetailFrame).not.toContain("max-w-[1280px]");
-    expect(selectedDetailContentStyles.overviewLayout).toContain("minmax(0,_4fr)_minmax(300px,_1fr)");
-    expect(selectedDetailContentStyles.overviewLayout).toContain("max-[1040px]:[grid-template-columns:1fr]");
+    expect(selectedDetailContentStyles.overviewLayout).toContain("[overflow:auto]");
+    expect(selectedDetailContentStyles.overviewAside).toContain("hidden");
+    expect(workspaceLayoutPanelSource).toContain("AgentInspectorRailPanel");
+    expect(workspaceLayoutPanelSource).toContain("inspectorRail");
     expect(overviewStyles.factGrid).toContain("min-[1540px]:[grid-template-columns:repeat(3,_minmax(0,_1fr))]");
     expect(overviewStyles.policyGrid).toContain("min-[1540px]:[grid-template-columns:repeat(4,_minmax(0,_1fr))]");
     expect(selectedDetailContentPanelSource).toContain("styles.overviewMain");
@@ -1550,7 +1552,7 @@ describe("AgentsRoute layout contract", () => {
     expect(selectedDetailContentPanelSource).toContain("<AgentOverviewResourcesPanel");
     expect(overviewOperationsPanelSource).toContain("copy.noActivity");
     expect(overviewOperationsPanelSource).toContain('role="alert"');
-    expect(overviewOperationsStyles.state).toContain("min-h-[184px]");
+    expect(overviewOperationsStyles.state).toContain("min-h-[132px]");
     expect(overviewResourcesPanelSource).toContain("resources.slice(0, 4)");
     expect(overviewResourcesStyles.item).toBeTruthy();
   });
@@ -1712,8 +1714,12 @@ describe("AgentsRoute layout contract", () => {
     expect(detailWorkspacePanelSource).toContain("styles.detailPanel");
     expect(workspaceLayoutStyles.workspace).toBeTruthy();
     expect(workspaceLayoutPanelSource).toContain("styles.directory");
-    expect(workspaceLayoutStyles.workspace).toContain("[grid-template-columns:clamp(340px,_26vw,_420px)_minmax(0,_1fr)]");
-    expect(workspaceLayoutStyles.directory).toContain("[grid-template-rows:minmax(158px,_0.34fr)_minmax(280px,_0.66fr)]");
+    expect(workspaceLayoutStyles.workspace).toContain("flex h-full");
+    expect(workspaceLayoutStyles.workspace).toContain("overflow-hidden");
+    expect(workspaceLayoutStyles.directory).toContain("[grid-template-rows:auto_minmax(0,1fr)]");
+    expect(workspaceLayoutStyles.resizeHandle).toContain("cursor-col-resize");
+    expect(workspaceLayoutPanelSource).toContain("data-agent-workspace=\"resizable\"");
+    expect(workspaceLayoutPanelSource).toContain("aria-label=\"调整目录栏宽度\"");
     expect(workspaceLayoutStyles.workspace).toContain("max-[860px]:[grid-template-columns:1fr]");
     expect(listWorkspaceStyles.agentPanel).toContain("[grid-template-rows:auto_auto_minmax(0,_1fr)]");
     expect(detailWorkspaceStyles.detailPanel).toContain("[overflow:auto]");
@@ -1741,9 +1747,9 @@ describe("AgentsRoute layout contract", () => {
   });
 
   it("uses route-level VUI density guards for Agent workspace panels and actions", () => {
-    expect(styles.route).toContain("[--agent-density-gap:4px]");
+    expect(styles.route).toContain("[--agent-density-gap:0px]");
     expect(styles.route).toContain("[--agent-panel-pad:8px]");
-    expect(styles.route).toContain("[--agent-row-pad-y:5px]");
+    expect(styles.route).toContain("[--agent-row-pad-y:6px]");
     expect(styles.route).toContain("[--agent-control-height:24px]");
     expect(styles.route).toContain("[&_[data-vui-product=\"agent-workspace-panel\"]]:max-w-full");
     expect(styles.route).toContain("[&_[data-vui-product=\"agent-workspace-panel\"]]:overflow-hidden");
@@ -1986,8 +1992,8 @@ describe("AgentsRoute layout contract", () => {
   });
 
   it("keeps the narrow Agent management stack compact enough to preserve list and detail context", () => {
-    expect(workspaceLayoutStyles.directory).toContain("max-[860px]:[grid-template-rows:minmax(150px,_auto)_minmax(260px,_auto)]");
-    expect(workspaceLayoutStyles.workspace).toContain("max-[860px]:[align-content:start]");
+    expect(workspaceLayoutStyles.directory).toContain("max-[860px]:min-h-[320px]");
+    expect(workspaceLayoutStyles.workspace).toContain("max-[860px]:flex-col");
     expect(styles.filterPanel).toContain("max-[860px]:[min-height:150px]");
     expect(listWorkspaceStyles.agentPanel).toContain("max-[860px]:[min-height:240px]");
     expect(detailWorkspaceStyles.detailPanel).toContain("max-[860px]:[min-height:420px]");
@@ -2162,7 +2168,7 @@ describe("AgentsRoute layout contract", () => {
 
     expect(pendingInboxIssueStart).toBeGreaterThanOrEqual(0);
     expect(editorActionBlocks.length).toBeGreaterThanOrEqual(10);
-    expect(actionBlocks.length).toBeGreaterThanOrEqual(15);
+    expect(actionBlocks.length).toBeGreaterThanOrEqual(14);
     expect(actionBlocks.join("\n")).toContain('variant="primary"');
     expect(actionBlocks.join("\n")).toContain('variant="secondary"');
     expect(actionBlocks.join("\n")).toContain('variant="danger"');

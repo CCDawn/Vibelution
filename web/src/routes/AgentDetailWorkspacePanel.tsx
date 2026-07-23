@@ -22,6 +22,9 @@ export function AgentDetailWorkspacePanel({
   emptySelectionTitle,
 }: AgentDetailWorkspacePanelProps) {
   const bulkConfigPanel = bulkConfig ? <AgentBulkConfigPanel {...bulkConfig} /> : null;
+  const body = bulkConfigPanel ?? selectedContent ?? (
+    <AgentEmptySelectionPanel title={emptySelectionTitle} />
+  );
 
   return (
     <AgentWorkspacePanel
@@ -30,7 +33,7 @@ export function AgentDetailWorkspacePanel({
       className={styles.detailPanel}
     >
       {returnBanner ? <AgentReturnBannerPanel {...returnBanner} /> : null}
-      {bulkConfigPanel ?? selectedContent ?? <AgentEmptySelectionPanel title={emptySelectionTitle} />}
+      <div className={styles.detailScroll}>{body}</div>
     </AgentWorkspacePanel>
   );
 }

@@ -2323,20 +2323,13 @@ function agentConfigPanes(copy: ReturnType<typeof agentsRouteCopy>, agent: Agent
   label: string;
   count: number;
 }> {
-  const configCount = (agent?.health.length ?? 0)
-    + (agent?.toolPolicy?.allowedTools?.length ?? 0)
-    + (agent?.toolPolicy?.blockedTools?.length ?? 0)
-    + (agent?.memoryPolicy?.readSharedGroups?.length ?? 0)
-    + (agent?.memoryPolicy?.writeSharedGroups?.length ?? 0)
-    + (agent?.memoryPolicy?.readKnowledgeBaseIds?.length ?? 0)
-    + (agent?.memoryPolicy?.proposeKnowledgeBaseIds?.length ?? 0)
-    + (agent?.memoryPolicy?.reviewKnowledgeBaseIds?.length ?? 0)
-    + (agent ? uniqueModes(agent).length : 0)
-    + (agent?.references.length ?? 0);
+  // Badge = actionable signals only (not panel/field cardinality).
+  const configIssueCount = agent?.health.length ?? 0;
+  const activityCount = (agent?.agentInboxPendingCount ?? 0) + (agent?.groupContextEvents?.length ?? 0);
   return [
-    { id: "overview", label: copy.overviewPane, count: agent ? uniqueModes(agent).length : 0 },
-    { id: "config", label: copy.configTitle, count: configCount },
-    { id: "activity", label: copy.activityPane, count: (agent?.agentInboxPendingCount ?? 0) + (agent?.groupContextEvents?.length ?? 0) },
+    { id: "overview", label: copy.overviewPane, count: 0 },
+    { id: "config", label: copy.configTitle, count: configIssueCount },
+    { id: "activity", label: copy.activityPane, count: activityCount },
   ];
 }
 
@@ -3523,19 +3516,42 @@ export function AgentsRoute() {
   const healthStatus = workspace?.health.status ?? "ok";
   const healthStatusLabel = workspaceHealthStatusLabel(healthStatus, lang);
   const healthStatusDescription = workspaceHealthStatusDescription(healthStatus, summary, lang);
+  // Primary strip: actionable fleet signals only. Secondary folds the rest.
   const agentSummaryMetrics: AgentSummaryMetric[] = [
-    {
-      id: "all-agents",
-      label: copy.allAgents,
-      value: summaryMetricValue(summary?.agentCount),
-      detail: copy.allAgents,
-    },
     {
       id: "active-agents",
       label: copy.activeAgents,
       value: summaryMetricValue(summary?.activeAgentCount),
       detail: copy.activeAgents,
       tone: "accent",
+    },
+    {
+      id: "health-issues",
+      label: copy.healthIssues,
+      value: summaryMetricValue(summary?.healthIssueCount),
+      detail: `${copy.workspaceHealthStatus}: ${healthStatusLabel}. ${healthStatusDescription}`,
+      tone: healthStatus === "blocked" ? "danger" : healthStatus === "warning" ? "warning" : "success",
+    },
+    {
+      id: "running-agents",
+      label: copy.runningAgents,
+      value: summaryMetricValue(summary?.runningAgentCount),
+      detail: copy.runningAgents,
+      tone: "accent",
+    },
+    {
+      id: "inbox",
+      label: copy.inbox,
+      value: summaryMetricValue(summary?.inboxPendingCount),
+      detail: copy.inbox,
+    },
+  ];
+  const agentSummarySecondaryMetrics: AgentSummaryMetric[] = [
+    {
+      id: "all-agents",
+      label: copy.allAgents,
+      value: summaryMetricValue(summary?.agentCount),
+      detail: copy.allAgents,
     },
     {
       id: "archived-agents",
@@ -3550,30 +3566,10 @@ export function AgentsRoute() {
       detail: copy.teams,
     },
     {
-      id: "health-issues",
-      label: copy.healthIssues,
-      value: summaryMetricValue(summary?.healthIssueCount),
-      detail: `${copy.workspaceHealthStatus}: ${healthStatusLabel}. ${healthStatusDescription}`,
-      tone: healthStatus === "blocked" ? "danger" : healthStatus === "warning" ? "warning" : "success",
-    },
-    {
       id: "chat-rooms",
       label: copy.chatRooms,
       value: summaryMetricValue(summary?.chatRoomCount),
       detail: copy.chatRooms,
-    },
-    {
-      id: "inbox",
-      label: copy.inbox,
-      value: summaryMetricValue(summary?.inboxPendingCount),
-      detail: copy.inbox,
-    },
-    {
-      id: "running-agents",
-      label: copy.runningAgents,
-      value: summaryMetricValue(summary?.runningAgentCount),
-      detail: copy.runningAgents,
-      tone: "accent",
     },
     {
       id: "blocked-agents",
@@ -5423,6 +5419,8 @@ export function AgentsRoute() {
 
   const selectedAgentDetailContent: AgentSelectedDetailContentPanelProps | null = selectedAgent ? {
     activePane,
+    preferOpsSection: (selectedAgent.health?.length ?? 0) > 0,
+    inspectorInWorkspaceRail: true,
     header: {
       copy,
       lang,
@@ -5793,11 +5791,13 @@ export function AgentsRoute() {
           refresh: copy.refresh,
           workspaceSummary: copy.workspaceSummary,
           workspaceHealthStatus: copy.workspaceHealthStatus,
+          moreMetrics: lang === "zh" ? "更多指标" : "More metrics",
         }}
         healthStatus={healthStatus}
         healthStatusLabel={healthStatusLabel}
         healthStatusDescription={healthStatusDescription}
         metrics={agentSummaryMetrics}
+        secondaryMetrics={agentSummarySecondaryMetrics}
         onRefresh={refresh}
       />
 
@@ -5815,6 +5815,9 @@ export function AgentsRoute() {
           onSelectGroup: handleSelectFilterGroup,
           storageLabel: copy.readOnly,
           storagePaths: agentStoragePaths,
+          queueLabel: lang === "zh" ? "工作队列" : "Work queue",
+          moreFiltersLabel: lang === "zh" ? "更多筛选" : "More filters",
+          storageCollapsedLabel: lang === "zh" ? "存储路径" : "Storage paths",
         }}
         listWorkspace={{
           ariaLabel: activeGroupLabel,
@@ -5901,6 +5904,17 @@ export function AgentsRoute() {
           selectedContent: selectedAgentDetailContent ? <AgentSelectedDetailContentPanel {...selectedAgentDetailContent} /> : null,
           emptySelectionTitle: copy.selectAgent,
         }}
+        inspectorRail={selectedAgentDetailContent ? {
+          ariaLabel: lang === "zh" ? "Agent 侧栏" : "Agent inspector",
+          title: lang === "zh" ? "侧栏" : "Inspector",
+          subtitle: agentLabel(selectedAgent!),
+          emptyTitle: lang === "zh" ? "选择 Agent 查看侧栏" : "Select an Agent",
+          emptyHint: lang === "zh"
+            ? "管理完整度、下一步建议与关联资源会显示在这里。"
+            : "Management score, next steps, and linked resources appear here.",
+          brief: selectedAgentDetailContent.brief,
+          resources: selectedAgentDetailContent.resources,
+        } : null}
       />
       <AgentCreateWizardDialog
         open={createOpen}
