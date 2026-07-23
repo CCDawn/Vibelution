@@ -49,7 +49,7 @@ export type AgentDenseListProps = {
 };
 
 const PILL_BASE =
-  "inline-flex items-center justify-center min-h-[26px] px-[7px] border rounded-full text-[0.76rem] font-bold whitespace-nowrap";
+  "inline-flex items-center justify-center min-h-[22px] px-[7px] border rounded-full text-[0.7rem] font-bold whitespace-nowrap";
 
 const ROLE_TAG_BASE =
   "inline-flex items-center justify-self-start min-h-[22px] max-w-full px-[7px] border rounded-full text-[0.66rem] leading-none overflow-hidden text-ellipsis whitespace-nowrap";
@@ -115,7 +115,7 @@ function AgentRow({
 }) {
   const rowTooltip = [row.issueSummary, row.modelDetail].filter(Boolean).join("\n");
   const rowClass = [
-    "w-full min-h-[64px] p-2 border border-[var(--vui-border-hairline)] rounded-[var(--radius-control)] bg-[var(--vui-surface-row)] text-[var(--fg-primary)] text-left min-w-0 grid grid-cols-[minmax(0,1fr)_auto] items-start gap-x-2 gap-y-1.5",
+    "w-full min-h-[58px] p-1.5 border border-[var(--vui-border-hairline)] rounded-[var(--radius-control)] bg-[var(--vui-surface-row)] text-[var(--fg-primary)] min-w-0 grid grid-cols-[28px_minmax(0,1fr)] items-center gap-1.5",
     "transition-[border-color,background] duration-150 hover:bg-[var(--vui-surface-row-hover)]",
     row.active
       ? "border-[color-mix(in_srgb,var(--accent-warm)_48%,var(--vui-border-hairline))] bg-[color-mix(in_srgb,var(--accent-warm)_9%,var(--vui-surface-row))]"
@@ -127,7 +127,7 @@ function AgentRow({
 
   const selectionControl = (
     <label
-      className="relative grid place-items-center w-[28px] h-[36px] border border-[var(--border-soft)] rounded-[var(--radius-control)] bg-[var(--vui-surface-row)] text-[var(--fg-secondary)] cursor-pointer hover:border-[var(--border-strong)] hover:text-[var(--accent-warm-2)]"
+      className="relative grid place-items-center w-[28px] h-[36px] rounded-[var(--radius-control)] text-[var(--fg-secondary)] cursor-pointer hover:bg-[color-mix(in_srgb,var(--fg-tertiary)_8%,transparent)] hover:text-[var(--accent-warm-2)]"
     >
       <VNativeInput
         type="checkbox"
@@ -146,8 +146,15 @@ function AgentRow({
     </label>
   );
 
+  const showIssue = row.issueTone !== "ok";
+  const showRuntime = row.runtimeTone !== "idle";
   const agentCard = (
-    <VNativeButton type="button" data-vui="agent-row" className={rowClass} onClick={(event) => onSelectRow(row.id, event)}>
+    <VNativeButton
+      type="button"
+      data-vui="agent-row"
+      className="grid w-full min-w-0 grid-cols-[minmax(0,1fr)_auto] items-start gap-x-2 gap-y-1 border-0 bg-transparent p-0 text-left text-[var(--fg-primary)]"
+      onClick={(event) => onSelectRow(row.id, event)}
+    >
       <span className="grid grid-cols-[30px_minmax(0,1fr)] items-center gap-2 min-w-0 overflow-hidden text-ellipsis">
         <span className={AVATAR} aria-hidden="true">
           {row.avatarUrl ? (
@@ -163,14 +170,18 @@ function AgentRow({
           <em className={[ROLE_TAG_BASE, roleToneClass(row.roleTone)].join(" ")}>{row.roleLabel}</em>
         </span>
       </span>
-      <span className="flex items-center justify-items-end min-w-0">
-        <span className={[PILL_BASE, issueToneClass(row.issueTone)].join(" ")}>{row.issueLabel}</span>
-      </span>
+      {showIssue ? (
+        <span className="flex items-center justify-items-end min-w-0">
+          <span className={[PILL_BASE, issueToneClass(row.issueTone)].join(" ")}>{row.issueLabel}</span>
+        </span>
+      ) : null}
       <span className="col-span-2 flex flex-wrap items-center gap-x-2 gap-y-1 min-w-0 text-[0.72rem] text-[var(--fg-secondary)]">
         <span className="min-w-0 max-w-full overflow-hidden text-ellipsis whitespace-nowrap">
           {row.modelLabel}
         </span>
-        <span className={[PILL_BASE, runtimeToneClass(row.runtimeTone)].join(" ")}>{row.runtimeLabel}</span>
+        {showRuntime ? (
+          <span className={[PILL_BASE, runtimeToneClass(row.runtimeTone)].join(" ")}>{row.runtimeLabel}</span>
+        ) : null}
         <span className="sr-only">
           {row.promptLabel} {row.modes.map((mode) => String(mode)).join(" ")}
         </span>
@@ -179,7 +190,7 @@ function AgentRow({
   );
 
   return (
-    <div className="grid grid-cols-[28px_minmax(0,1fr)] items-center gap-[5px] min-w-0">
+    <div className={rowClass}>
       <VTooltip content={row.selectLabel}>{selectionControl}</VTooltip>
       {rowTooltip ? <VTooltip content={rowTooltip} width="wide">{agentCard}</VTooltip> : agentCard}
     </div>

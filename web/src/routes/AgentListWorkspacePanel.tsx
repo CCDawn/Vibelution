@@ -1,4 +1,4 @@
-import { Plus } from "lucide-react";
+import { CheckSquare, Plus } from "lucide-react";
 import { type ComponentProps, type Ref } from "react";
 
 import { AgentWorkspacePanel } from "../components/vui/product/agent-management";
@@ -36,7 +36,10 @@ export function AgentListWorkspacePanel({
     <AgentWorkspacePanel
       as="main"
       ariaLabel={ariaLabel}
-      className={styles.agentPanel}
+      className={[
+        styles.agentPanel,
+        bulkOperations.selectedCount > 0 ? styles.agentPanelSelecting : styles.agentPanelIdle,
+      ].filter(Boolean).join(" ")}
     >
       <VPanelHeader
         eyebrow={headerEyebrow}
@@ -53,11 +56,22 @@ export function AgentListWorkspacePanel({
             >
               {createAgentLabel}
             </VButton>
+            {bulkOperations.selectedCount === 0 ? (
+              <VButton
+                type="button"
+                variant="secondary"
+                icon={<CheckSquare size={15} />}
+                isDisabled={bulkOperations.visibleCount === 0 || bulkOperations.pending}
+                onPress={bulkOperations.onSelectVisible}
+              >
+                {bulkOperations.copy.bulkSelectVisible}
+              </VButton>
+            ) : null}
             <VChip tone="neutral">{visibleAgentCount}</VChip>
           </>
         }
       />
-      <AgentBulkOperationsPanel {...bulkOperations} />
+      {bulkOperations.selectedCount > 0 ? <AgentBulkOperationsPanel {...bulkOperations} /> : null}
       <AgentListStatePanel {...listState} />
     </AgentWorkspacePanel>
   );

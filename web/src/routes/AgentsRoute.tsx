@@ -3339,7 +3339,6 @@ export function AgentsRoute() {
       }))
       .filter((section) => section.groups.length > 0);
   }, [copy, groups, teamIndexGroups]);
-  const advancedFilterCount = advancedGroupedFilters.reduce((total, section) => total + section.groups.length, 0);
   const activeGroup = groups.find((group) => group.id === activeFilter);
   const activeTeamIndexGroup = teamIndexGroups.find((group) => group.id === activeFilter);
   const activeManagementGroup = managementFilterGroups.find((group) => group.id === activeFilter);
@@ -5128,11 +5127,6 @@ export function AgentsRoute() {
     }),
   }));
 
-  const agentStoragePaths = [
-    workspace?.storage.agentRegistryPath ?? "workspace/agents/agents.json",
-    workspace?.storage.modeBindingPath ?? "workspace/agent_config/mode_bindings.json",
-  ];
-
   const agentRowLookup = new Map<string, AgentConfigWorkspaceAgent>();
   const denseColumns: AgentDenseColumn[] = visibleAgentColumns.map((column) => ({
     id: column.id,
@@ -5810,14 +5804,9 @@ export function AgentsRoute() {
           sections: filterSections,
           advancedSections: advancedFilterSections,
           advancedLabel: copy.moreFilters,
-          advancedCount: advancedFilterCount,
           activeGroupId: activeFilter,
           onSelectGroup: handleSelectFilterGroup,
-          storageLabel: copy.readOnly,
-          storagePaths: agentStoragePaths,
-          queueLabel: lang === "zh" ? "工作队列" : "Work queue",
           moreFiltersLabel: lang === "zh" ? "更多筛选" : "More filters",
-          storageCollapsedLabel: lang === "zh" ? "存储路径" : "Storage paths",
         }}
         listWorkspace={{
           ariaLabel: activeGroupLabel,

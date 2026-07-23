@@ -169,7 +169,7 @@ describe("Agent Management VUI product components", () => {
     expect(markup).not.toContain("<p>");
   });
 
-  it("keeps the bulk toolbar mobile-wrapping while preserving desktop single-line density", () => {
+  it("keeps the selected-Agent toolbar single-line and scrollable in narrow directories", () => {
     const markup = renderToStaticMarkup(
       <AgentBulkActionBar
         ariaLabel="Selected agents"
@@ -181,12 +181,12 @@ describe("Agent Management VUI product components", () => {
       />,
     );
 
-    expect(markup).toContain("!flex-wrap");
-    expect(markup).toContain("overflow-visible");
-    expect(markup).toContain("min-[720px]:!flex-nowrap");
-    expect(markup).toContain("min-[720px]:overflow-x-auto");
-    expect(markup).toContain("flex-[1_1_156px]");
-    expect(markup).toContain("min-[720px]:min-w-[156px]");
+    expect(markup).toContain("!flex-nowrap");
+    expect(markup).toContain("overflow-x-auto");
+    expect(markup).toContain("min-h-[74px]");
+    expect(markup).toContain("overflow-hidden");
+    expect(markup).toContain("flex-[0_0_190px]");
+    expect(markup).toContain("min-w-[156px]");
     expect(markup).toContain("[&amp;_button]:whitespace-nowrap");
     expect(markup).not.toContain("grid-cols-[auto_auto_minmax");
   });
