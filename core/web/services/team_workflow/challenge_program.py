@@ -16,6 +16,8 @@ OFFICIAL_PROBLEM_ID = "XH-202619"
 OFFICIAL_QUESTION_COUNT = 125
 BATCH_SIZE = 5
 REQUIRED_REPRESENTATIVE_CASES = 3
+COMPATIBILITY_CASE_REGISTRY_KIND = "challenge_program_representative_cases"
+DOCUMENTED_CASE_STATUSES = {"accepted_for_writeup", "validated", "promoted"}
 
 INDEPENDENT_EVALUATION_DIMENSIONS = [
     "evidence_support",
@@ -123,11 +125,59 @@ def _legacy_case_records(legacy_lifecycle: dict[str, Any]) -> list[dict[str, Any
     ]
 
 
+def _documented_case_records(registry: dict[str, Any]) -> list[dict[str, Any]]:
+    if (
+        int(registry.get("schemaVersion") or 0) != 1
+        or str(registry.get("registryKind") or "") != COMPATIBILITY_CASE_REGISTRY_KIND
+    ):
+        return []
+    records: list[dict[str, Any]] = []
+    for raw_case in registry.get("cases") if isinstance(registry.get("cases"), list) else []:
+        if not isinstance(raw_case, dict):
+            continue
+        evidence_refs = [
+            str(ref).strip()
+            for ref in raw_case.get("evidenceRefs")
+            if str(ref).strip()
+        ] if isinstance(raw_case.get("evidenceRefs"), list) else []
+        internal_status = str(raw_case.get("internalStatus") or "").strip()
+        if (
+            not str(raw_case.get("caseId") or "").strip()
+            or not str(raw_case.get("title") or "").strip()
+            or internal_status not in DOCUMENTED_CASE_STATUSES
+            or str(raw_case.get("projectCompletionStatus") or "") != "case_only"
+            or str(raw_case.get("evidenceStatus") or "") != "documented_program_fact"
+            or not evidence_refs
+            or not str(raw_case.get("claimBoundary") or "").strip()
+        ):
+            continue
+        records.append(
+            {
+                "caseId": str(raw_case["caseId"]).strip(),
+                "title": str(raw_case["title"]).strip(),
+                "role": str(raw_case.get("role") or "representative_execution_and_revision_evidence"),
+                "internalStatus": internal_status,
+                "projectCompletionStatus": "case_only",
+                "legacyDesignPlanId": str(raw_case.get("legacyDesignPlanId") or ""),
+                "legacyDesignRevision": int(raw_case.get("legacyDesignRevision") or 0),
+                "activeIterationId": str(raw_case.get("activeIterationId") or ""),
+                "bestCandidateId": str(raw_case.get("bestCandidateId") or ""),
+                "bestValidatedResultId": str(raw_case.get("bestValidatedResultId") or ""),
+                "bestValidatedPlanId": str(raw_case.get("bestValidatedPlanId") or ""),
+                "claimBoundary": str(raw_case["claimBoundary"]).strip(),
+                "evidenceStatus": "documented_program_fact",
+                "evidenceRefs": evidence_refs,
+            }
+        )
+    return records
+
+
 def build_challenge_program_projection(
     *,
     legacy_lifecycle: dict[str, Any],
     public_config: dict[str, Any],
     official_model_evidence: list[dict[str, Any]],
+    compatibility_case_registry: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build a read-only program projection without rewriting legacy history."""
 
@@ -141,6 +191,11 @@ def build_challenge_program_projection(
     stage1_blockers.extend(["real_single_question_sample_missing", "five_question_trial_missing"])
 
     case_records = _legacy_case_records(legacy_lifecycle)
+    case_recovery_source = "legacy_lifecycle" if case_records else "none"
+    if not case_records and isinstance(compatibility_case_registry, dict):
+        case_records = _documented_case_records(compatibility_case_registry)
+        if case_records:
+            case_recovery_source = "tracked_program_case_registry"
     representative_case_count = len(case_records)
     stage3_status = "partial" if representative_case_count else "not_started"
 
@@ -222,5 +277,6 @@ def build_challenge_program_projection(
             "acceptedForWriteupMeansProgramComplete": False,
             "appendOnlyEvidencePreserved": True,
             "historyRewritten": False,
+            "caseRecoverySource": case_recovery_source,
         },
     }
