@@ -3860,12 +3860,12 @@ def _infer_official_model_provider(value: Any, model_id: str) -> str:
     if explicit:
         return explicit
     key = model_id.lower()
-    if model_id == s.LOCAL_RESEARCH_MODEL_ID or "qwen" in key:
-        return "local_qwen"
     if "bailian" in key or "百炼" in model_id:
         return "bailian"
     if "dashscope" in key:
         return "dashscope"
+    if model_id == s.LOCAL_RESEARCH_MODEL_ID or "qwen" in key:
+        return "local_qwen"
     return "model_runtime"
 
 

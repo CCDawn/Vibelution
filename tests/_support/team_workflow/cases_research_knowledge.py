@@ -3106,6 +3106,52 @@ def test_local_research_model_invoke_records_candidate_from_json_content(tmp_pat
     assert _FakeLocalResearchClient.captured_messages[0]["profile_id"] == "__challenge_cup_local_research_model"
     assert _FakeLocalResearchClient.captured_messages[0]["metadata"]["taskType"] == "paper_note_draft"
 
+
+def test_local_research_model_invoke_records_dashscope_provider_for_canonical_qwen_ref(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = team_service.create_team(name="挑战杯科研团队")
+    _FakeLocalResearchClient.response = _FakeLocalResearchMessage(
+        """
+        {
+          "candidateType": "paper_note",
+          "sourceRefs": [{"type": "paper", "id": "paper-1", "label": "Paper 1"}],
+          "evidenceRefs": [{"type": "page", "id": "p3", "label": "page 3"}],
+          "claims": [{"claim": "Observed effect", "sourceRef": "paper-1"}],
+          "keyFindings": [{"finding": "Observed effect", "sourceRef": "paper-1", "page": "3", "citation": "Paper 1, p.3"}],
+          "methods": ["controlled experiment"],
+          "limitations": ["small sample"],
+          "citations": [{"sourceRef": "paper-1", "page": "3", "citation": "Paper 1, p.3"}],
+          "uncertainty": [],
+          "riskFlags": [],
+          "confidence": 0.73,
+          "nextAction": "send_to_mechanism_extraction",
+          "requiresReview": true
+        }
+        """
+    )
+    monkeypatch.setattr(
+        team_workflow_orchestration_service,
+        "_local_research_llm_client",
+        lambda model_id, *, llm_client_factory=None: _FakeLocalResearchClient(),
+    )
+
+    response = team_workflow_orchestration_service.invoke_local_research_model(
+        team["teamId"],
+        {
+            "taskType": "paper_note_draft",
+            "modelId": "dashscope_main/qwen3.6-plus",
+            "sourceRefs": [{"type": "paper", "id": "paper-1", "label": "Paper 1"}],
+            "evidenceRefs": [{"type": "page", "id": "p3", "label": "page 3"}],
+            "excerpt": "A short source excerpt.",
+            "createdByAgent": "Paper Note Extraction Agent",
+        },
+    )
+
+    assert response["modelEvidence"]["modelProvider"] == "dashscope"
+    assert response["modelEvidence"]["modelId"] == "dashscope_main/qwen3.6-plus"
+    assert response["modelEvidence"]["modelName"] == "qwen3.6-plus"
+
+
 def test_local_research_model_client_resolves_schema_v2_canonical_model_ref(monkeypatch):
     model_ref = "pixel_relay/gpt-5.6-terra"
     monkeypatch.setattr(
