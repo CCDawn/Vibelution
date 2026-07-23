@@ -21,7 +21,7 @@ type CreateOptionSelectProps = {
 };
 
 /**
- * Modal-safe option picker. Native <select> dropdowns often fail to open inside
+ * Modal-safe option picker. Native select dropdowns often fail to open inside
  * overflow/backdrop-blur dialogs (Windows desktop shell), so this uses an
  * in-panel listbox instead.
  */
