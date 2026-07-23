@@ -2,7 +2,7 @@ import "../design/route-css/workbench-secondary.tailwind.css";
 
 import { AlertTriangle, CheckCircle2, ExternalLink, ShieldCheck } from "lucide-react";
 
-import { VRouteHeader } from "../components/vui";
+import { VDenseOpsPage } from "../components/vui";
 import { useShellI18n } from "../i18n/useShellI18n";
 import styles from "./ResetRoute.styles";
 
@@ -51,22 +51,23 @@ export function ResetRoute() {
   const copy = COPY[lang];
 
   return (
-    <div className={styles.routeClass} data-reset-retired="launcher-owned">
-      <VRouteHeader
-        className={styles.headerClass}
-        eyebrow="Reset"
-        title={copy.title}
-        meta={copy.subtitle}
-        actions={(
-          <div className={styles.headerActionsClass}>
-            <a className={styles.secondaryButtonClass} href="/launcher" target="_blank" rel="noreferrer">
-              <ExternalLink size={15} />
-              {copy.openLauncher}
-            </a>
-          </div>
-        )}
-      />
-
+    <VDenseOpsPage
+      className={styles.routeClass}
+      headerClassName={styles.headerClass}
+      data-reset-retired="launcher-owned"
+      ariaLabel={copy.title}
+      eyebrow="Reset"
+      title={copy.title}
+      meta={copy.subtitle}
+      actions={(
+        <div className={styles.headerActionsClass}>
+          <a className={styles.secondaryButtonClass} href="/launcher" target="_blank" rel="noreferrer">
+            <ExternalLink size={15} />
+            {copy.openLauncher}
+          </a>
+        </div>
+      )}
+    >
       <main className={styles.workspaceClass}>
         <div className={styles.primaryColumnClass}>
           <section className={styles.statusStripClass} data-reset-status="retired">
@@ -118,6 +119,6 @@ export function ResetRoute() {
           </div>
         </aside>
       </main>
-    </div>
+    </VDenseOpsPage>
   );
 }

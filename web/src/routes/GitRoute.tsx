@@ -28,7 +28,7 @@ import {
   VNativeButton,
   VNativeSelect,
   VNativeTextarea,
-  VRouteHeader,
+  VDenseOpsPage,
   VStateSurface,
   VSurface,
 } from "../components/vui";
@@ -628,23 +628,23 @@ export function GitRoute() {
   );
 
   return (
-    <section className={styles.route}>
-      <VRouteHeader
-        className={styles.header}
-        eyebrow={t("navGit")}
-        title={t("gitPageTitle")}
-        meta={t("gitPageSubtitle")}
-        actions={(
-          <VIconButton
-            type="button"
-            className={styles.refreshButton}
-            label={t("gitRefresh")}
-            icon={<RefreshCw size={16} />}
-            onPress={refresh}
-          />
-        )}
-      />
-
+    <VDenseOpsPage
+      className={styles.route}
+      headerClassName={styles.header}
+      ariaLabel={t("gitPageTitle")}
+      eyebrow={t("navGit")}
+      title={t("gitPageTitle")}
+      meta={t("gitPageSubtitle")}
+      actions={(
+        <VIconButton
+          type="button"
+          className={styles.refreshButton}
+          label={t("gitRefresh")}
+          icon={<RefreshCw size={16} />}
+          onPress={refresh}
+        />
+      )}
+    >
       <GitStatusSummaryState
         presentation={statusPresentation}
         status={status}
@@ -1080,6 +1080,6 @@ export function GitRoute() {
           </>
         )}
       </div>
-    </section>
+    </VDenseOpsPage>
   );
 }

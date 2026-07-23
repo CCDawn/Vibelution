@@ -4546,22 +4546,7 @@ export function AgentsRoute() {
       });
       return;
     }
-    const summary = lang === "zh"
-      ? [
-          `Provider：${candidate.providerLabel || candidate.providerId}`,
-          `upstream ID：${candidate.upstreamId}`,
-          `modelRef：${candidate.modelRef}`,
-          "此操作将修改 operator config，并只更新当前 Agent 的模型绑定。",
-        ].join("\n")
-      : [
-          `Provider: ${candidate.providerLabel || candidate.providerId}`,
-          `upstream ID: ${candidate.upstreamId}`,
-          `modelRef: ${candidate.modelRef}`,
-          "This changes operator config and only the current Agent binding.",
-        ].join("\n");
-    if (!window.confirm(summary)) {
-      return;
-    }
+    // Confirm UI lives in AgentModelPicker (VConfirmDialog).
     promoteAgentModelMutation.mutate({
       agent: selectedAgent,
       slot,

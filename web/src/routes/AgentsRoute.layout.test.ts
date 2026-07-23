@@ -1598,7 +1598,7 @@ describe("AgentsRoute layout contract", () => {
     expect(createPanelStyles.createAgentGrid).toBeTruthy();
     expect(routeSource).toContain("archiveAgentMutation");
     expect(routeSource).toContain("method: \"DELETE\"");
-    expect(routeSource).toContain("window.confirm");
+    expect(routeSource).not.toContain("window.confirm");
     expect(archiveZonePanelSource).toContain("copy.archiveAgent");
     expect(routeSource).toContain("archivedWorkspaceCache");
     expect(routeSource).toContain("purgedWorkspaceCache");

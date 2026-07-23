@@ -26,6 +26,9 @@ const styles = {
   reason: "col-span-2 min-w-0 break-words [font-size:var(--vui-font-xs)] leading-5 text-[var(--status-warning-fg)]",
   check: "shrink-0 text-[var(--accent-cool)]",
   empty: "px-3 py-8 text-center [font-size:var(--vui-font-xs)] text-[var(--fg-tertiary)]",
+  promoteFacts: "grid min-w-0 gap-1 [font-size:var(--vui-font-xs)] text-[var(--fg-secondary)]",
+  promoteFact: "min-w-0 break-all",
+  promoteFactLabel: "mr-1 font-semibold text-[var(--fg-tertiary)]",
 };
 
 export default styles;
