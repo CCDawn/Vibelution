@@ -382,9 +382,11 @@ describe("ToolsRoute layout contract", () => {
     expect(routeSource).toContain("bulkSetToolsEnabled");
     expect(routeSource).toContain("bulkDeleteTools");
     expect(routeSource).toContain("bulkCopy.deleteConfirm");
-    expect(routeSource).toContain("window.confirm(bulkCopy.deleteConfirm)");
+    expect(routeSource).toContain("VConfirmDialog");
+    expect(routeSource).toContain('setToolConfirm({ kind: "bulk-delete" })');
+    expect(routeSource).not.toContain("window.confirm(bulkCopy.deleteConfirm)");
     const bulkDeleteSection = routeSource.slice(routeSource.indexOf("async function bulkDeleteTools"));
-    expect(bulkDeleteSection.indexOf("window.confirm(bulkCopy.deleteConfirm)")).toBeLessThan(
+    expect(bulkDeleteSection.indexOf("setBulkToolPending(true)")).toBeLessThan(
       bulkDeleteSection.indexOf('fetchJson<ToolBulkMutationResponse>("/api/tools/bulk-delete"'),
     );
     expect(routeSource).toContain("bulkSelectionAnchorToolId");

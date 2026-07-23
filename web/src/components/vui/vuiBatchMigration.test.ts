@@ -127,7 +127,7 @@ const routeShellTargets = [
   },
   {
     path: "routes/MemoryRoute.tsx",
-    expected: ["VRouteHeader"],
+    expected: ["VDenseOpsPage"],
     forbidden: ["<header className={styles.header}"],
   },
   {

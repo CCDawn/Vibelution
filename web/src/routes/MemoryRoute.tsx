@@ -53,7 +53,7 @@ import {
   TeamKnowledgeBase,
 } from "../api/types";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
-import { VButton, VRouteHeader } from "../components/vui";
+import { VButton, VDenseOpsPage } from "../components/vui";
 import { useShellI18n } from "../i18n/useShellI18n";
 import { safeAgentCenterReturnToPath } from "./agentCenterRoutes";
 import { MemoryAgentMemoryPanel } from "./MemoryAgentMemoryPanel";
@@ -4452,32 +4452,33 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
         : styles.viewStack;
 
   return (
-    <section className={styles.route}>
-      <VRouteHeader
-        className={styles.header}
-        eyebrow={copy.eyebrow}
-        title={memoryViewLabel(copy, forcedView)}
-        meta={memoryViewSubtitle(copy, forcedView)}
-        actions={(
-          <div className={styles.headerActions}>
-            <VButton type="button" className={styles.refreshButton} onClick={refresh}>
-              <RefreshCw size={16} />
-              {copy.refresh}
-            </VButton>
-            {returnToPath ? (
-              <Link to={returnToPath} className={styles.returnButton}>
-                <ArrowLeft size={16} />
-                {returnToLabel}
-              </Link>
-            ) : null}
-          </div>
-        )}
-      />
-
-      <div className={styles.controlStrip}>
-        {renderSubnav()}
-      </div>
-
+    <VDenseOpsPage
+      className={styles.route}
+      headerClassName={styles.header}
+      ariaLabel={memoryViewLabel(copy, forcedView)}
+      eyebrow={copy.eyebrow}
+      title={memoryViewLabel(copy, forcedView)}
+      meta={memoryViewSubtitle(copy, forcedView)}
+      actions={(
+        <div className={styles.headerActions}>
+          <VButton type="button" className={styles.refreshButton} onClick={refresh}>
+            <RefreshCw size={16} />
+            {copy.refresh}
+          </VButton>
+          {returnToPath ? (
+            <Link to={returnToPath} className={styles.returnButton}>
+              <ArrowLeft size={16} />
+              {returnToLabel}
+            </Link>
+          ) : null}
+        </div>
+      )}
+      toolbarSlot={(
+        <div className={styles.controlStrip}>
+          {renderSubnav()}
+        </div>
+      )}
+    >
       <div className={viewStackClassName}>
         {forcedView === "overview"
           ? (
@@ -4510,6 +4511,6 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
                       ? createCleanupPanel()
                       : renderSourcesView()}
       </div>
-    </section>
+    </VDenseOpsPage>
   );
 }

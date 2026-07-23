@@ -10,6 +10,7 @@ import { queryKeys } from "../api/queryKeys";
 import { AgentInstance, PromptTemplate, PromptTemplateWorkspace } from "../api/types";
 import {
   VButton,
+  VConfirmDialog,
   VDenseToolbar,
   VIconButton,
   VListDetailPage,
@@ -226,6 +227,7 @@ export function PromptTemplatesRoute() {
   const [selectedTemplateIds, setSelectedTemplateIds] = useState<Set<string>>(() => new Set());
   const [bulkCategory, setBulkCategory] = useState("general");
   const [bulkPromptPending, setBulkPromptPending] = useState(false);
+  const [bulkConfirm, setBulkConfirm] = useState<null | "deactivate" | "reset">(null);
 
   const templatesQuery = useQuery({
     queryKey: queryKeys.promptTemplates(),
@@ -427,12 +429,7 @@ export function PromptTemplatesRoute() {
       setNotice(copy.bulkNoSelection);
       return;
     }
-    if (patch.status === "inactive") {
-      const confirmed = window.confirm(copy.bulkDeactivateConfirm);
-      if (!confirmed) {
-        return;
-      }
-    }
+    // Deactivate confirmation is handled by VConfirmDialog via bulkConfirm.
     setBulkPromptPending(true);
     let success = 0;
     let failed = 0;
@@ -464,10 +461,7 @@ export function PromptTemplatesRoute() {
       setNotice(copy.bulkNoSelection);
       return;
     }
-    const confirmed = window.confirm(copy.bulkResetConfirm);
-    if (!confirmed) {
-      return;
-    }
+    // Confirm UI lives in VConfirmDialog via bulkConfirm.
     setBulkPromptPending(true);
     let success = 0;
     let skipped = 0;
@@ -497,6 +491,7 @@ export function PromptTemplatesRoute() {
   }
 
   return (
+    <>
     <VListDetailPage
       className={styles.routeClass}
       headerClassName={styles.headerClass}
@@ -608,7 +603,7 @@ export function PromptTemplatesRoute() {
               icon={<RotateCcw size={14} />}
               isDisabled={!selectedTemplates.length || bulkPromptPending}
               disabledReason={bulkPromptPending ? copy.bulkWorking : copy.bulkNoSelection}
-              onPress={bulkResetTemplates}
+              onPress={() => setBulkConfirm("reset")}
             >
               {bulkPromptPending ? copy.bulkWorking : copy.bulkReset}
             </VButton>
@@ -618,7 +613,7 @@ export function PromptTemplatesRoute() {
               icon={<Archive size={14} />}
               isDisabled={!selectedTemplates.length || bulkPromptPending}
               disabledReason={bulkPromptPending ? copy.bulkWorking : copy.bulkNoSelection}
-              onPress={() => bulkPatchTemplates({ status: "inactive" }, copy.bulkDeactivateResult)}
+              onPress={() => setBulkConfirm("deactivate")}
             >
               {bulkPromptPending ? copy.bulkWorking : copy.bulkDeactivate}
             </VButton>
@@ -793,5 +788,29 @@ export function PromptTemplatesRoute() {
         </VSurface>
       )}
     />
+    <VConfirmDialog
+      open={Boolean(bulkConfirm)}
+      onOpenChange={(open) => {
+        if (!open) {
+          setBulkConfirm(null);
+        }
+      }}
+      title={bulkConfirm === "reset" ? copy.bulkReset : copy.bulkDeactivate}
+      description={bulkConfirm === "reset" ? copy.bulkResetConfirm : copy.bulkDeactivateConfirm}
+      tone={bulkConfirm === "deactivate" ? "danger" : "neutral"}
+      confirmLabel={bulkConfirm === "reset" ? copy.bulkReset : copy.bulkDeactivate}
+      cancelLabel={lang === "zh" ? "取消" : "Cancel"}
+      confirmPending={bulkPromptPending}
+      onConfirm={() => {
+        const kind = bulkConfirm;
+        setBulkConfirm(null);
+        if (kind === "reset") {
+          void bulkResetTemplates();
+        } else if (kind === "deactivate") {
+          void bulkPatchTemplates({ status: "inactive" }, copy.bulkDeactivateResult);
+        }
+      }}
+    />
+    </>
   );
 }

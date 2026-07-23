@@ -205,7 +205,7 @@ import {
   VNativeInput,
   VNativeSelect,
   VNativeTextarea,
-  VRouteHeader,
+  VDenseOpsPage,
   VSelect,
   VStateSurface,
   VStatusStrip,
@@ -9396,14 +9396,14 @@ export function TeamsRoute({
   }
 
   return (
-    <section className={styles.route}>
-      <VRouteHeader
-        className={styles.teamContextBar}
-        aria-label={selectedTeamContextTitle}
-        eyebrow={lang === "zh" ? "团队工作台 / 组织画布" : "Team Workspace / Canvas"}
-        title={lang === "zh" ? "团队组织画布" : "Team Organization Canvas"}
-        meta={teamContextMeta}
-        actions={(
+    <VDenseOpsPage
+      className={styles.route}
+      headerClassName={styles.teamContextBar}
+      ariaLabel={selectedTeamContextTitle}
+      eyebrow={lang === "zh" ? "团队工作台 / 组织画布" : "Team Workspace / Canvas"}
+      title={lang === "zh" ? "团队组织画布" : "Team Organization Canvas"}
+      meta={teamContextMeta}
+      actions={(
           <div className={styles.teamContextActions}>
             <div className={styles.teamSelectField}>
               <span className={styles.teamSelectPrefix}>{lang === "zh" ? "团队" : "Team"}</span>
@@ -9429,8 +9429,8 @@ export function TeamsRoute({
               onPress={() => void teamsQuery.refetch()}
             />
           </div>
-        )}
-      />
+      )}
+    >
       <VStatusStrip
         className={styles.teamContextChips}
         aria-label={lang === "zh" ? "团队概况" : "Team summary"}
@@ -10277,6 +10277,6 @@ export function TeamsRoute({
         </aside>
       </div>
       )}
-    </section>
+    </VDenseOpsPage>
   );
 }

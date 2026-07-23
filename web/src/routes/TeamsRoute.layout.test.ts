@@ -513,7 +513,7 @@ describe("TeamsRoute layout contract", () => {
   });
 
   it("renders a dense list canvas inspector workflow", () => {
-    expect(routeSource).toContain("VRouteHeader");
+    expect(routeSource).toContain("VDenseOpsPage");
     expect(routeSource).toContain("VSelect");
     expect(routeSource).toContain("VStatusStrip");
     expect(routeSource).toContain("VIconButton");

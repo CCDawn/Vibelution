@@ -123,8 +123,11 @@ describe("PromptTemplatesRoute layout contract", () => {
     expect(routeSource).toContain("bulkResetTemplates");
     expect(routeSource).toContain("copy.bulkDeactivateConfirm");
     expect(routeSource).toContain("copy.bulkResetConfirm");
-    expect(routeSource).toContain("window.confirm(copy.bulkDeactivateConfirm)");
-    expect(routeSource).toContain("window.confirm(copy.bulkResetConfirm)");
+    expect(routeSource).toContain("VConfirmDialog");
+    expect(routeSource).toContain('setBulkConfirm("reset")');
+    expect(routeSource).toContain('setBulkConfirm("deactivate")');
+    expect(routeSource).not.toContain("window.confirm(copy.bulkDeactivateConfirm)");
+    expect(routeSource).not.toContain("window.confirm(copy.bulkResetConfirm)");
     expect(routeSource).toContain("bulkActionBarClass");
     expect(routeSource).toContain("selectableRowClass");
     expect(routeSource).toContain("<VTooltip content={`${copy.bulkSelected}:");
