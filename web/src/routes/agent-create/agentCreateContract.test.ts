@@ -9,6 +9,8 @@ import {
   createDraftReady,
   createToolBundleSummary,
   firstAvailableModelId,
+  REQUIRED_SESSION_AGENT_ALLOWED_TOOLS,
+  REQUIRED_SESSION_AGENT_PREFERRED_TOOLS,
 } from "./agentCreateContract";
 
 function modelChoice(partial: Partial<AgentModelChoice> & Pick<AgentModelChoice, "modelId" | "providerId">): AgentModelChoice {
@@ -70,14 +72,27 @@ describe("agent create contract", () => {
       })],
       promptTemplates: [{ promptTemplateId: "prompt-chat-default", name: "Chat", category: "chat" }],
     }, bundles, "zh");
-    const summary = createToolBundleSummary(draft.selectedToolBundleIds, bundles, "zh");
+    const summary = createToolBundleSummary(
+      draft.selectedToolBundleIds,
+      bundles,
+      "zh",
+      REQUIRED_SESSION_AGENT_ALLOWED_TOOLS,
+      REQUIRED_SESSION_AGENT_PREFERRED_TOOLS,
+    );
     const payload = createAgentPayload(draft, bundles);
 
     expect(draft.primaryMode).toBe("chat");
     expect(draft.selectedToolBundleIds).toEqual(["core"]);
-    expect(summary.allowedTools).toEqual(["glob_tool", "grep_search_tool"]);
+    expect(summary.allowedTools).toEqual([
+      "agent_tool_permission_request_tool",
+      "exec_command",
+      "glob_tool",
+      "grep_search_tool",
+      "write_stdin",
+    ]);
     expect(payload.toolPolicy.allowedTools).toEqual(summary.allowedTools);
-    expect(payload.toolPolicy.preferredTools).toEqual(["grep_search_tool"]);
+    expect(payload.toolPolicy.preferredTools).toEqual(["exec_command", "grep_search_tool", "write_stdin"]);
+    expect(payload.toolPolicy.maxCallsPerTurn).toBe(32);
     expect(payload.metadata.creationChannel).toBe("agent_center");
   });
 
@@ -172,5 +187,24 @@ describe("agent create contract", () => {
     }, []);
 
     expect(payload.toolPolicy.preferredTools.every((tool) => payload.toolPolicy.allowedTools.includes(tool))).toBe(true);
+  });
+
+  it("does not widen research agents with session-only terminal tools", () => {
+    const payload = createAgentPayload({
+      displayName: "Research Agent",
+      llmBindings: { dialogue: { modelId: "provider/model" } },
+      primaryMode: "research",
+      roleKey: "research_assistant",
+      promptTemplateId: "prompt-research-default",
+      personaSummary: "Evidence first",
+      taskMission: "Research",
+      selectedToolBundleIds: ["core"],
+      allowedTools: "",
+    }, bundles);
+
+    expect(payload.toolPolicy.allowedTools).toEqual(["glob_tool", "grep_search_tool"]);
+    expect(payload.toolPolicy.allowedTools).not.toContain("exec_command");
+    expect(payload.toolPolicy.allowedTools).not.toContain("write_stdin");
+    expect(payload.toolPolicy.maxCallsPerTurn).toBe(8);
   });
 });
