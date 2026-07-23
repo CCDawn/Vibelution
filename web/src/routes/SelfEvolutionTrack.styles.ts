@@ -6,17 +6,18 @@ const controlSurface = "border border-vui-border-subtle bg-vui-control-muted hov
 export const selfEvolutionTrackStyles = {
   pageStack: "grid h-full max-h-full min-h-0 min-w-0 max-w-full overflow-hidden overflow-x-hidden rounded-[var(--radius-panel)] bg-vui-surface-panel max-[1180px]:overflow-visible max-[1180px]:overflow-x-hidden",
   trackShell:
-    "grid h-full max-h-full min-h-0 min-w-0 max-w-full grid-rows-[auto_minmax(0,1fr)] overflow-hidden overflow-x-hidden rounded-[var(--radius-panel)] border border-vui-border-subtle bg-vui-surface-panel p-3 max-[1180px]:h-auto max-[1180px]:overflow-visible max-[1180px]:overflow-x-hidden max-[760px]:p-2",
+    "grid h-full max-h-full min-h-0 min-w-0 max-w-full grid-rows-[auto_minmax(0,1fr)] items-stretch content-start overflow-hidden overflow-x-hidden rounded-[var(--radius-panel)] border border-vui-border-subtle bg-vui-surface-panel p-3 max-[1180px]:h-auto max-[1180px]:overflow-visible max-[1180px]:overflow-x-hidden max-[760px]:p-2",
   trackBody:
     "min-h-0 min-w-0 max-w-full overflow-hidden overflow-x-hidden pt-2 max-[1180px]:overflow-visible max-[1180px]:overflow-x-hidden",
+  // Header row must stay content-height (auto track) — never stretch into a tall empty band.
   pageTabsRow:
-    "grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2.5 border-b border-vui-border-subtle pb-2 max-[1180px]:grid-cols-1 max-[1180px]:items-stretch",
+    "grid min-w-0 w-full shrink-0 self-start grid-cols-[minmax(0,1fr)_auto] items-center gap-2.5 border-b border-vui-border-subtle pb-2 max-[1180px]:grid-cols-1 max-[1180px]:items-start",
   runActionBar:
-    "grid min-h-[42px] min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2.5 px-1 py-0 max-[900px]:grid-cols-1",
-  runActionMain: "grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-center gap-2.5",
-  runActionText: "grid min-w-0 gap-1 [&_strong]:overflow-wrap-anywhere [&_strong]:text-[1rem] [&_strong]:leading-tight [&_strong]:text-[var(--fg-primary)] [&>span]:line-clamp-2 [&>span]:[font-size:var(--vui-font-sm)] [&>span]:leading-normal [&>span]:text-[var(--fg-secondary)]",
+    "grid min-h-[42px] max-h-none min-w-0 self-start grid-cols-[minmax(0,1fr)_auto] items-center gap-2.5 px-1 py-0 max-[900px]:grid-cols-1",
+  runActionMain: "grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-center gap-2.5 self-center",
+  runActionText: "grid min-w-0 content-start gap-1 [&_strong]:overflow-wrap-anywhere [&_strong]:text-[1rem] [&_strong]:leading-tight [&_strong]:text-[var(--fg-primary)] [&>span]:line-clamp-2 [&>span]:[font-size:var(--vui-font-sm)] [&>span]:leading-normal [&>span]:text-[var(--fg-secondary)]",
   runActionMeta: "flex min-w-0 flex-wrap items-center gap-1.5",
-  runActionCluster: "flex flex-wrap items-center justify-end gap-2 max-[900px]:justify-start",
+  runActionCluster: "flex flex-wrap items-center justify-end gap-2 self-center max-[900px]:justify-start",
   primaryAction:
     "inline-flex min-h-8 w-fit max-w-full cursor-pointer items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--accent-cool)_28%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-cool)_12%,var(--vui-control-muted))] px-3 [font-size:var(--vui-font-sm)] font-semibold text-vui-fg-primary disabled:cursor-default disabled:opacity-50",
   dangerAction:

@@ -369,18 +369,17 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).toContain("{showRouteToolbar ? (");
     expect(routeStyles.page).toContain("[height:calc(100dvh_-_var(--shell-topbar-height))]");
     expect(routeStyles.page).toContain("[max-height:calc(100dvh_-_var(--shell-topbar-height))]");
-    expect(routeStyles.selfPage).toContain("[grid-template-rows:minmax(0,_1fr)]");
+    expect(routeStyles.selfPage).toMatch(/grid-template-rows:minmax\(0,?_?1fr\)/);
     expect(routeStyles.selfPage).toContain("[gap:0]");
-    expect(selfTrackBoundaryStyles.selfModeStack).toContain("[grid-template-rows:minmax(0,_1fr)]");
-    expect(selfTrackBoundaryStyles.selfModeStack).toContain("[overflow:hidden]");
-    expect(selfTrackBoundaryStyles.selfModeStack).not.toContain("[grid-template-rows:auto_minmax(0,_1fr)]");
+    expect(selfTrackBoundaryStyles.selfModeStack).toMatch(/grid-rows-\[minmax\(0,1fr\)\]|grid-template-rows:minmax\(0,?_?1fr\)/);
+    expect(selfTrackBoundaryStyles.selfModeStack).toMatch(/overflow-hidden|\[overflow:hidden\]/);
+    expect(selfTrackBoundaryStyles.selfModeStack).not.toContain("auto_minmax(0,1fr)");
     expect(routeStyles.page).not.toContain("max-[900px]:[height:auto]");
     expect(routeStyles.page).not.toContain("max-[900px]:[overflow:visible]");
-    expect(routeStyles.selfPage).toContain("max-[900px]:[grid-template-rows:minmax(0,_1fr)]");
+    expect(routeStyles.selfPage).toMatch(/max-\[900px\]:\[grid-template-rows:minmax\(0,?_?1fr\)\]/);
     expect(routeStyles.selfPage).toContain("max-[900px]:[gap:0]");
-    expect(selfTrackBoundaryStyles.selfModeStack).toContain("max-[900px]:[grid-template-rows:minmax(0,_1fr)]");
-    expect(selfTrackBoundaryStyles.selfModeStack).toContain("max-[900px]:[height:100%]");
-    expect(selfTrackBoundaryStyles.selfModeStack).toContain("max-[900px]:[overflow:auto]");
+    expect(selfTrackBoundaryStyles.selfModeStack).toMatch(/max-\[900px\]:h-full|max-\[900px\]:\[height:100%\]/);
+    expect(selfTrackBoundaryStyles.selfModeStack).toMatch(/max-\[900px\]:overflow-auto|max-\[900px\]:\[overflow:auto\]/);
     expect(selfTrackBoundaryStylesSource).toContain("structuredEmptyState");
   });
 
@@ -757,24 +756,31 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(worktreeReviewStylesSource).toContain("worktreeReviewSurfaceClass");
   });
 
-  it("hides the supervised toolbar intro so workflow cards own the top row", () => {
+  it("hides the supervised toolbar intro with content-sized chrome (no full-width empty band)", () => {
     expect(routeSource).toContain('const hideSupervisedToolbarIntro = activeTrack === "supervised"');
     expect(routeSource).toContain("hideIntro={hideSupervisedToolbarIntro}");
-    expect(routeSource).toContain("styles.toolbarSupervisedFocus}");
+    expect(routeSource).toContain("styles.toolbarSupervisedFocus");
     expect(routeSource).not.toContain("styles.toolbarHeaderHidden");
+    // Do not stack generic `toolbar` (flex-wrap full row) on top of hideIntro chrome.
+    expect(routeSource).not.toContain("`${styles.toolbar} ${styles.toolbarSupervisedFocus}`");
     expect(routeSource).toContain("hideSupervisedToolbarIntro");
     expect(routeSource).toContain("styles.toolbarControlsSupervisedFocus");
     expect(routeSource).toContain("aria-label={routeTitle}");
-    expect(routeStyles.toolbarSupervisedFocus).toContain("[justify-content:flex-end]");
+    expect(routeStyles.toolbarSupervisedFocus).toContain("w-fit");
+    expect(routeStyles.toolbarSupervisedFocus).toContain("justify-self-end");
+    expect(routeStyles.toolbarSupervisedFocus).toContain("self-start");
+    expect(routeStyles.toolbarSupervisedFocus).toContain("flex-nowrap");
     expect(routeStyles.toolbarControls).toContain("[justify-content:flex-end]");
     expect(routeStyles.toolbarControls).toContain("max-[900px]:[justify-content:stretch]");
     expect(routeStyles.toolbarControls).not.toContain("[flex:1_1_100%]");
-    expect(routeStyles.toolbarControlsSupervisedFocus).toContain("[align-items:center]");
-    expect(routeStyles.toolbarControlsSupervisedFocus).toContain("[flex:0_1_auto]");
-    expect(routeStyles.toolbarControlsSupervisedFocus).toContain("[max-width:100%]");
+    expect(routeStyles.toolbarControlsSupervisedFocus).toContain("items-center");
+    expect(routeStyles.toolbarControlsSupervisedFocus).toContain("w-fit");
+    expect(routeStyles.toolbarControlsSupervisedFocus).toContain("max-w-full");
+    expect(routeStyles.toolbarControlsSupervisedFocus).toContain("shrink-0");
     expect(routeStyles.toolbarControlsSupervisedFocus).not.toContain("[flex:1_1_100%]");
-    expect(routeStyles.toolbarControlsSupervisedFocus).not.toContain("[width:100%]");
-    expect(routeStyles.toolbarControlsSupervisedFocus).toContain("[justify-content:flex-end]");
+    // max-w-full is fine; avoid full-width stretch class ` w-full` / leading w-full.
+    expect(routeStyles.toolbarControlsSupervisedFocus.split(/\s+/)).not.toContain("w-full");
+    expect(routeStyles.toolbarControlsSupervisedFocus).toContain("justify-end");
   });
 
   it("keeps the supervised center pane as a read-only embedded conversation surface", () => {

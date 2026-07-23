@@ -2951,7 +2951,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
           hideIntro={hideSupervisedToolbarIntro}
           className={
             hideSupervisedToolbarIntro
-              ? `${styles.toolbar} ${styles.toolbarSupervisedFocus}`
+              ? styles.toolbarSupervisedFocus
               : styles.toolbar
           }
           eyebrow={routeEyebrow}
@@ -2961,7 +2961,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
             <div
             className={
               hideSupervisedToolbarIntro
-                ? `${styles.toolbarControls} ${styles.toolbarControlsSupervisedFocus}`
+                ? styles.toolbarControlsSupervisedFocus
                 : styles.toolbarControls
             }
           >
