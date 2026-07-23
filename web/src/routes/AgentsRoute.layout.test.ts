@@ -285,6 +285,15 @@ function expectBackgroundAwareClass(className: string, label: string): void {
   expect(className, `${label} should keep a hairline border`).toContain("[border:1px_solid");
 }
 
+function expectOpaqueSemanticSurface(className: string, label: string, token: string): void {
+  expect(className, `${label} should use its semantic VUI surface token`).toContain(token);
+  expect(className, `${label} should not restore the legacy wallpaper-through background mix`).not.toContain(
+    "color-mix(in_srgb,_var(--vui-surface",
+  );
+  expect(className, `${label} should not restack a legacy card wall`).not.toContain("var(--surface-card)");
+  expect(className, `${label} should not own route-level elevation`).not.toContain("box-shadow:var(--shadow");
+}
+
 function expectContentSizedVuiButtons(className: string, label: string): void {
   const tokens = className.split(/\s+/);
 
@@ -1750,7 +1759,7 @@ describe("AgentsRoute layout contract", () => {
     expect(selectedDetailContentPanelSource).toContain("<aside className={styles.overviewAside}>");
   });
 
-  it("keeps Agent Center route chrome background-aware instead of restacking opaque page surfaces", () => {
+  it("uses semantic opaque workspace and rail surfaces without legacy card walls", () => {
     expect(styles.route).toContain("max-w-full");
     expect(styles.route).toContain("[overflow:hidden]");
     expect(styles.route).not.toContain("[background:var(--bg-canvas)]");
@@ -1758,7 +1767,11 @@ describe("AgentsRoute layout contract", () => {
     expect(styles.route).not.toContain("[background:var(--surface-card)]");
     expect(styles.route).not.toContain("var(--surface-panel-strong)");
 
-    expect(workspaceLayoutStyles.workspace).not.toContain("[background:");
+    expect(workspaceLayoutStyles.workspace).toContain("bg-[var(--vui-surface-workspace)]");
+    expect(workspaceLayoutStyles.directory).toContain("bg-[var(--vui-surface-rail)]");
+    expect(workspaceLayoutStyles.main).toContain("!bg-[var(--vui-surface-workspace)]");
+    expect(workspaceLayoutStyles.inspector).toContain("bg-[var(--vui-surface-rail)]");
+    expect(workspaceLayoutStyles.workspace).not.toContain("bg-transparent");
     expect(workspaceLayoutStyles.workspace).not.toContain("var(--surface-card)");
     expect(workspaceLayoutStyles.workspace).not.toContain("var(--surface-panel-strong)");
     expect(workspaceLayoutStyles.workspace).not.toContain("box-shadow");
@@ -1783,17 +1796,14 @@ describe("AgentsRoute layout contract", () => {
     expect(styles.route).not.toContain("[&_[data-vui=\"button\"]]:[width:100%]");
   });
 
-  it("keeps route-level repeated Agent panels/cards transparent and hairline only", () => {
+  it("keeps legacy lightweight items hairline-only while core Agent surfaces remain opaque", () => {
     const repeatedSurfaceStyles: Array<keyof typeof styles> = [
       "activityTimelineItem",
       "advancedFilterSummary",
-      "agentRow",
       "avatarEditorPanel",
       "boundarySummaryGrid",
       "checkField",
       "configEditor",
-      "detailSection",
-      "groupButton",
       "inboxMessageItem",
       "policySummaryGrid",
       "roomCheckField",
@@ -1812,6 +1822,10 @@ describe("AgentsRoute layout contract", () => {
     for (const styleName of repeatedSurfaceStyles) {
       expectBackgroundAwareSurface(styleName);
     }
+
+    expectOpaqueSemanticSurface(styles.agentRow, "agentRow", "[background:var(--vui-surface-row)]");
+    expectOpaqueSemanticSurface(styles.detailSection, "detailSection", "[background:var(--vui-surface-panel)]");
+    expectOpaqueSemanticSurface(styles.groupButton, "groupButton", "[background:var(--vui-surface-row)]");
 
     expect(styles.agentRowActive).not.toContain("var(--surface-panel-strong)");
     expect(styles.agentRowBulkSelected).not.toContain("var(--surface-panel-strong)");
@@ -1845,13 +1859,8 @@ describe("AgentsRoute layout contract", () => {
     expect(returnBannerStyles.returnBannerButton).not.toContain("max-[860px]:[width:100%]");
   });
 
-  it("keeps extracted Agent detail panel surfaces lightweight and background-aware", () => {
+  it("keeps lightweight controls restrained while extracted Agent detail surfaces stay opaque", () => {
     const detailSurfaceStyles = [
-      [detailHeaderStyles.detailTabs, "AgentDetailHeader.detailTabs"],
-      [overviewStyles.factGrid, "AgentOverview.factGrid"],
-      [overviewStyles.detailSection, "AgentOverview.detailSection"],
-      [overviewStyles.boundarySummaryGrid, "AgentOverview.boundarySummaryGrid"],
-      [overviewStyles.policyGrid, "AgentOverview.policyGrid"],
       [createPanelStyles.createAgentPanel, "AgentCreate.createAgentPanel"],
       [createPanelStyles.createToolBundleOption, "AgentCreate.createToolBundleOption"],
       [createPanelStyles.createToolBundleSelected, "AgentCreate.createToolBundleSelected"],
@@ -1875,6 +1884,24 @@ describe("AgentsRoute layout contract", () => {
     for (const [className, label] of detailSurfaceStyles) {
       expectBackgroundAwareClass(className, label);
     }
+
+    expectOpaqueSemanticSurface(
+      detailHeaderStyles.detailTabs,
+      "AgentDetailHeader.detailTabs",
+      "bg-[var(--vui-surface-workspace)]",
+    );
+    expectOpaqueSemanticSurface(overviewStyles.factGrid, "AgentOverview.factGrid", "[background:var(--vui-surface-row)]");
+    expectOpaqueSemanticSurface(
+      overviewStyles.detailSection,
+      "AgentOverview.detailSection",
+      "[background:var(--vui-surface-panel)]",
+    );
+    expectOpaqueSemanticSurface(
+      overviewStyles.boundarySummaryGrid,
+      "AgentOverview.boundarySummaryGrid",
+      "[background:var(--vui-surface-row)]",
+    );
+    expectOpaqueSemanticSurface(overviewStyles.policyGrid, "AgentOverview.policyGrid", "[background:var(--vui-surface-row)]");
   });
 
   it("keeps short route-level actions content-sized and mobile-safe", () => {
@@ -2119,7 +2146,9 @@ describe("AgentsRoute layout contract", () => {
     expect(stylesSource).not.toContain(".bulkActionBar {");
     expect(stylesSource).not.toContain(".bulkSummary");
     expect(stylesSource).not.toContain(".bulkPromptPicker");
-    expect(styles.agentRowBulkSelected).toContain("[background:color-mix(in_srgb,_var(--accent-cool)_10%,_transparent)]");
+    expect(styles.agentRowBulkSelected).toContain(
+      "[background:color-mix(in_srgb,_var(--accent-cool)_10%,_var(--vui-surface-row))]",
+    );
     expect(bulkActionBarSource).toContain("!flex-nowrap items-center overflow-x-auto");
     expect(bulkActionBarSource).toContain("flex-[0_0_190px]");
     expect(bulkActionBarSource).toContain("min-h-[74px] overflow-hidden");
