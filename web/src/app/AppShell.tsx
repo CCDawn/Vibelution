@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { lazy, Suspense, type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, type CSSProperties, type MouseEvent as ReactMouseEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, NavLink, Outlet, useLocation, useNavigate, useNavigationType } from "react-router-dom";
 import {
   ArrowLeft,
@@ -109,6 +109,11 @@ function linkClassName({ isActive }: { isActive: boolean }) {
 
 function mobileLinkClassName({ isActive }: { isActive: boolean }) {
   return isActive ? `${styles.mobileRouteLink} ${styles.mobileRouteLinkActive}` : styles.mobileRouteLink;
+}
+
+/** True when the click should keep native browser behavior (new tab, etc.). */
+function isModifiedPrimaryNavClick(event: { metaKey: boolean; ctrlKey: boolean; shiftKey: boolean; altKey: boolean; button: number }): boolean {
+  return event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0;
 }
 
 let chatRoutePreloadPromise: Promise<unknown> | null = null;
@@ -927,8 +932,13 @@ export function AppShell() {
     );
   }, []);
 
+  // Keep the latest router location for desync recovery without stale closures on delayed timers.
+  const routerLocationRef = useRef(location);
+  routerLocationRef.current = location;
+
   const recoverRouterLocationDesync = useCallback((trigger: string) => {
-    const recovery = routerLocationDesyncRecoveryPlan(window.location, location);
+    const routerLocation = routerLocationRef.current;
+    const recovery = routerLocationDesyncRecoveryPlan(window.location, routerLocation);
     if (!recovery) {
       lastRouterLocationDesyncTargetRef.current = null;
       return;
@@ -944,9 +954,9 @@ export function AppShell() {
       browserPathnameBefore: window.location.pathname,
       browserSearchBefore: window.location.search,
       browserHashBefore: window.location.hash,
-      routerPathnameBefore: location.pathname,
-      routerSearchBefore: location.search,
-      routerHashBefore: location.hash,
+      routerPathnameBefore: routerLocation.pathname,
+      routerSearchBefore: routerLocation.search,
+      routerHashBefore: routerLocation.hash,
       restoreTarget: recovery.restoreTarget,
     };
     try {
@@ -969,7 +979,33 @@ export function AppShell() {
     } else {
       window.setTimeout(emitRecoveredTelemetry, 0);
     }
-  }, [emitBrowserTelemetry, location, navigate]);
+  }, [emitBrowserTelemetry, navigate]);
+
+  const handlePrimaryNavClick = useCallback(
+    (event: ReactMouseEvent<HTMLAnchorElement>, to: string) => {
+      if (isModifiedPrimaryNavClick(event)) {
+        return;
+      }
+      // Force SPA navigation so Electron/title-bar hit testing cannot leave a focused but inert link.
+      event.preventDefault();
+      emitBrowserTelemetry({
+        phase: "navigation",
+        eventCode: "browser.primary_nav.click",
+        message: `Primary navigation click to ${to}`,
+        fields: {
+          to,
+          fromPathname: routerLocationRef.current.pathname,
+        },
+      });
+      if (to === "/chat") {
+        preloadChatRouteForNav("click");
+      }
+      if (routeLocationKey(routerLocationRef.current) !== to) {
+        navigate(to);
+      }
+    },
+    [emitBrowserTelemetry, navigate],
+  );
 
   const cancelSupersededLifecycleCommand = useCallback((commandId: string, action: "shutdown" | "restart") => {
     const normalizedCommandId = commandId.trim();
@@ -1663,7 +1699,21 @@ export function AppShell() {
     const handleFocus = () => scheduleRecovery("window_focus");
     const handlePageShow = () => scheduleRecovery("pageshow");
     const handlePopState = () => scheduleRecovery("popstate");
-    const handleDocumentClick = () => scheduleRecovery("document_click");
+    const handleDocumentClick = (event: MouseEvent) => {
+      const target = event.target;
+      // Never fight intentional SPA navigation or shell controls — capture-phase
+      // desync recovery used to race NavLink clicks and snap the route back.
+      if (target instanceof Element) {
+        if (
+          target.closest(
+            '[data-shell-group="navigation"], [data-shell-group="mobile-navigation"], a[href], button, [role="link"], [role="button"]',
+          )
+        ) {
+          return;
+        }
+      }
+      scheduleRecovery("document_click");
+    };
     const handleVisibilityChange = () => {
       if (document.visibilityState === "visible") {
         scheduleRecovery("visibility_visible");
@@ -2218,50 +2268,58 @@ export function AppShell() {
           ) : null}
         </div>
 
-        <nav className={styles.nav} data-shell-group="navigation">
+        <nav className={styles.nav} data-shell-group="navigation" aria-label={lang === "en" ? "Primary navigation" : "主导航"}>
           {chatEnabled ? (
             <NavLink
               to="/chat"
               className={linkClassName}
               onPointerEnter={() => preloadChatRouteForNav("pointerenter")}
               onFocus={() => preloadChatRouteForNav("focus")}
-              onClick={() => preloadChatRouteForNav("click")}
+              onClick={(event) => handlePrimaryNavClick(event, "/chat")}
             >
               {t("navChat")}
             </NavLink>
           ) : (
-            <span className={`${styles.navLink} ${styles.navLinkDisabled}`} aria-disabled="true">
+            <span className={`${styles.navLink} ${styles.navLinkDisabled}`} aria-disabled="true" title={lang === "en" ? "Chat is disabled" : "对话未启用"}>
               {t("navChat")}
             </span>
           )}
           {supervisedEvolutionEnabled ? (
-            <NavLink to="/supervised-evolution" className={linkClassName}>
+            <NavLink
+              to="/supervised-evolution"
+              className={linkClassName}
+              onClick={(event) => handlePrimaryNavClick(event, "/supervised-evolution")}
+            >
               {t("navSupervisedEvolution")}
             </NavLink>
           ) : (
-            <span className={`${styles.navLink} ${styles.navLinkDisabled}`} aria-disabled="true">
+            <span className={`${styles.navLink} ${styles.navLinkDisabled}`} aria-disabled="true" title={lang === "en" ? "Supervised evolution is disabled" : "监督进化未启用"}>
               {t("navSupervisedEvolution")}
             </span>
           )}
           {selfEvolutionEnabled ? (
-            <NavLink to="/self-evolution" className={linkClassName}>
+            <NavLink
+              to="/self-evolution"
+              className={linkClassName}
+              onClick={(event) => handlePrimaryNavClick(event, "/self-evolution")}
+            >
               {t("navSelfEvolution")}
             </NavLink>
           ) : (
-            <span className={`${styles.navLink} ${styles.navLinkDisabled}`} aria-disabled="true">
+            <span className={`${styles.navLink} ${styles.navLinkDisabled}`} aria-disabled="true" title={lang === "en" ? "Self evolution is disabled" : "自进化未启用"}>
               {t("navSelfEvolution")}
             </span>
           )}
-          <NavLink to="/teams" className={linkClassName}>
+          <NavLink to="/teams" className={linkClassName} onClick={(event) => handlePrimaryNavClick(event, "/teams")}>
             {t("navTeams")}
           </NavLink>
-          <NavLink to="/kernel" className={linkClassName}>
+          <NavLink to="/kernel" className={linkClassName} onClick={(event) => handlePrimaryNavClick(event, "/kernel")}>
             Kernel
           </NavLink>
-          <NavLink to="/memory" className={linkClassName}>
+          <NavLink to="/memory" className={linkClassName} onClick={(event) => handlePrimaryNavClick(event, "/memory")}>
             {t("navMemory")}
           </NavLink>
-          <NavLink to="/agents" className={linkClassName}>
+          <NavLink to="/agents" className={linkClassName} onClick={(event) => handlePrimaryNavClick(event, "/agents")}>
             {t("navAgents")}
           </NavLink>
         </nav>

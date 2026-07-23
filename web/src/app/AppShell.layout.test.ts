@@ -69,11 +69,11 @@ describe("AppShell layout contract", () => {
     expect(shellStyles).toContain(".vui-app-appshell.topBar .navLink");
     expect(shellStyles).toContain("-webkit-app-region: no-drag !important");
 
-    // Window drag is limited to non-interactive brand/clock chrome on Electron.
-    expect(shellStyles).toContain(
+    // No extra Electron drag strips under the nav band (titleBarOverlay owns window chrome).
+    expect(shellStyles).not.toContain(
       ':where(.vui-app-appshell).shell[data-desktop-shell="electron"] .topBar .brandCopy',
     );
-    expect(shellStyles).toContain(
+    expect(shellStyles).not.toContain(
       ':where(.vui-app-appshell).shell[data-desktop-shell="electron"] .topBar .topClock',
     );
 
@@ -84,6 +84,13 @@ describe("AppShell layout contract", () => {
     expect(navBlock).toContain("pointer-events: auto");
     expect(navBlock).toContain("-webkit-app-region: no-drag");
     expect(navBlock).toContain("z-index: 3");
+
+    const navLinkBlock = shellStyles.slice(
+      shellStyles.indexOf(":where(.vui-app-appshell).navLink {"),
+      shellStyles.indexOf(":where(.vui-app-appshell).navLink:hover {"),
+    );
+    expect(navLinkBlock).toContain("color: var(--fg-primary)");
+    expect(navLinkBlock).not.toContain("color: var(--fg-secondary)");
   });
 
   it("renders one compact status summary chip while keeping the detailed guide panel", () => {
