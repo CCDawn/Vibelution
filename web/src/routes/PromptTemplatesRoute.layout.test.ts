@@ -133,7 +133,9 @@ describe("PromptTemplatesRoute layout contract", () => {
     expect(routeSource).toContain("listPanelClass");
     expect(stylesSource).toContain("grid-rows-[auto_auto_auto_auto_minmax(0,1fr)]");
     expect(routeSource).toContain("bulkActionBarClass");
-    expect(stylesSource).toContain("grid-cols-[auto_auto_minmax(118px,1fr)]");
+    expect(stylesSource).toContain("max-w-full flex-wrap items-center");
+    expect(stylesSource).toContain("flex-[1_1_118px]");
+    expect(stylesSource).not.toContain("grid-cols-[auto_auto_minmax(118px,1fr)]");
     expect(stylesSource).toContain("min-h-[26px]");
   });
 
