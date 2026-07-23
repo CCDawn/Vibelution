@@ -566,7 +566,7 @@ const styles = {
   toolbar:
     "flex [align-items:center] [justify-content:space-between] [gap:8px_12px] [flex-wrap:wrap] min-w-0 max-[1200px]:[align-items:flex-start] max-[900px]:grid max-[900px]:[grid-template-columns:1fr] max-[900px]:[gap:6px]",
   toolbarControls:
-    "flex [align-items:center] [justify-content:flex-end] [gap:6px] [flex-wrap:nowrap] [overflow:hidden] min-w-0 max-[1200px]:[min-width:min(500px,_100%)] max-[900px]:[justify-content:stretch] max-[900px]:min-w-0 max-[900px]:[width:100%] max-[900px]:[overflow-x:auto] max-[900px]:[scrollbar-width:thin] max-[640px]:[justify-content:flex-start]",
+    "flex [align-items:center] [justify-content:flex-end] [gap:6px] [flex-wrap:nowrap] min-w-0 max-w-full max-[1200px]:[min-width:min(500px,_100%)] max-[900px]:[justify-content:stretch] max-[900px]:min-w-0 max-[900px]:[width:100%] max-[900px]:[overflow-x:auto] max-[900px]:[scrollbar-width:thin] max-[640px]:[justify-content:flex-start]",
   toolbarControlsSupervisedFocus:
     "[align-items:center] [flex:0_1_auto] min-w-0 [max-width:100%] [justify-content:flex-end]",
   toolbarIntro:

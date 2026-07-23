@@ -114,7 +114,7 @@ export function SupervisedWorkspaceControls({
                 }
                 aria-pressed={currentIntakeMode === mode}
                 isDisabled={intakeModeMutation.isPending}
-                onClick={() => intakeModeMutation.mutate(mode)}
+                onPress={() => intakeModeMutation.mutate(mode)}
               >
                 {intakeModeLabel(mode)}
               </VButton>

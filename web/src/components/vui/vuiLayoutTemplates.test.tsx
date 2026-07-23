@@ -58,6 +58,22 @@ describe("VUI workbench layout templates", () => {
     expect(markup).toContain('aria-label="Config section details"');
   });
 
+  it("can hide the route-header intro so actions own the full row", () => {
+    const markup = renderToStaticMarkup(
+      <VRouteHeader
+        hideIntro
+        title="Hidden intro"
+        actions={<button type="button">Workflow</button>}
+      />,
+    );
+
+    expect(markup).toContain('data-vui="route-header"');
+    expect(markup).toContain('data-hide-intro="true"');
+    expect(markup).toContain("Workflow");
+    expect(markup).not.toContain("Hidden intro");
+    expect(markup).toContain("grid-cols-1");
+  });
+
   it("renders reusable route-level layout slots with stable data attributes", () => {
     const markup = renderToStaticMarkup(
       <VWorkbenchPage ariaLabel="Agent workbench">
