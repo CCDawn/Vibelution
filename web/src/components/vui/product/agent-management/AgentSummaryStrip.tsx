@@ -1,7 +1,7 @@
 import { ChevronDown } from "lucide-react";
 import { type ReactNode } from "react";
 
-import { type VuiTone } from "../../renderers/heroui/heroVariants";
+import { type VuiTone } from "../../renderers/shared/buttonVariants";
 import { VMetricStrip } from "../../index";
 
 export type AgentSummaryMetric = {

@@ -4,28 +4,35 @@ export type VSplitWorkspaceProps = Omit<ComponentPropsWithoutRef<"div">, "childr
   aside?: ReactNode;
   main: ReactNode;
   sidebar?: ReactNode;
+  /**
+   * Override the default column template.
+   * Pass `""` when `className` fully owns the grid columns (route style maps).
+   */
+  columnsClassName?: string;
 };
 
 export function VSplitWorkspace({
   aside,
   className,
+  columnsClassName,
   main,
   sidebar,
   ...props
 }: VSplitWorkspaceProps) {
-  const columns = aside
-    ? "grid-cols-[minmax(0,var(--vui-workspace-sidebar))_minmax(0,1fr)_minmax(0,var(--vui-workspace-aside))]"
-    : sidebar
-      ? "grid-cols-[minmax(0,var(--vui-workspace-sidebar))_minmax(0,1fr)]"
-      : "grid-cols-[minmax(0,1fr)]";
+  const columns =
+    columnsClassName !== undefined
+      ? columnsClassName
+      : aside
+        ? "grid-cols-[minmax(0,var(--vui-workspace-sidebar))_minmax(0,1fr)_minmax(0,var(--vui-workspace-aside))]"
+        : sidebar
+          ? "grid-cols-[minmax(0,var(--vui-workspace-sidebar))_minmax(0,1fr)]"
+          : "grid-cols-[minmax(0,1fr)]";
 
   return (
     <div
       {...props}
       data-vui="split-workspace"
-      className={["grid min-h-0 min-w-0 gap-2", columns, className]
-        .filter(Boolean)
-        .join(" ")}
+      className={["grid min-h-0 min-w-0 gap-2", columns, className].filter(Boolean).join(" ")}
     >
       {sidebar ? (
         <aside data-vui="split-sidebar" className="min-h-0 min-w-0">

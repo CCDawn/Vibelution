@@ -1,7 +1,8 @@
+import { useState } from "react";
 import { Archive, CheckCircle2, CheckSquare, Square, Trash2 } from "lucide-react";
 
 import { AgentBulkActionBar } from "../components/vui/product/agent-management";
-import { VButton, VHStack, VNativeSelect } from "../components/vui";
+import { VButton, VConfirmDialog, VHStack, VNativeSelect } from "../components/vui";
 import styles from "./AgentBulkOperationsPanel.styles";
 
 export type AgentBulkPromptTemplateOption = {
@@ -19,7 +20,12 @@ type AgentBulkOperationsCopy = {
   bulkArchive: string;
   bulkPurge: string;
   bulkWorking: string;
+  bulkArchiveConfirm: string;
+  bulkPurgeConfirm: string;
+  cancelCreate: string;
 };
+
+type ConfirmKind = "archive" | "purge" | null;
 
 type AgentBulkOperationsPanelProps = {
   copy: AgentBulkOperationsCopy;
@@ -52,6 +58,7 @@ export function AgentBulkOperationsPanel({
   onArchive,
   onPurge,
 }: AgentBulkOperationsPanelProps) {
+  const [confirmKind, setConfirmKind] = useState<ConfirmKind>(null);
   const hasSelection = selectedCount > 0;
   const hasVisibleAgents = visibleCount > 0;
   const workingLabel = pending ? copy.bulkWorking : undefined;
@@ -120,7 +127,7 @@ export function AgentBulkOperationsPanel({
         variant="secondary"
         icon={<Archive size={14} />}
         isDisabled={!hasSelection || pending}
-        onPress={onArchive}
+        onPress={() => setConfirmKind("archive")}
       >
         {workingLabel ?? copy.bulkArchive}
       </VButton>
@@ -132,41 +139,73 @@ export function AgentBulkOperationsPanel({
       variant="danger"
       icon={<Trash2 size={14} />}
       isDisabled={!hasSelection || pending}
-      onPress={onPurge}
+      onPress={() => setConfirmKind("purge")}
     >
       {workingLabel ?? copy.bulkPurge}
     </VButton>
   );
 
+  const confirmOpen = confirmKind !== null;
+  const confirmDialog = (
+    <VConfirmDialog
+      open={confirmOpen}
+      onOpenChange={(open) => {
+        if (!open) {
+          setConfirmKind(null);
+        }
+      }}
+      title={confirmKind === "purge" ? copy.bulkPurge : copy.bulkArchive}
+      description={confirmKind === "purge" ? copy.bulkPurgeConfirm : copy.bulkArchiveConfirm}
+      tone={confirmKind === "purge" ? "danger" : "neutral"}
+      confirmLabel={confirmKind === "purge" ? copy.bulkPurge : copy.bulkArchive}
+      cancelLabel={copy.cancelCreate}
+      confirmPending={pending}
+      onConfirm={() => {
+        if (confirmKind === "purge") {
+          onPurge();
+        } else if (confirmKind === "archive") {
+          onArchive();
+        }
+        setConfirmKind(null);
+      }}
+    />
+  );
+
   // Compact by default: only selection controls until the user picks agents.
   if (!hasSelection) {
     return (
-      <AgentBulkActionBar
-        ariaLabel={copy.bulkSelected}
-        summary={summary}
-        selectionActions={
-          <VButton
-            type="button"
-            variant="secondary"
-            icon={allVisibleSelected ? <Square size={14} /> : <CheckSquare size={14} />}
-            isDisabled={!hasVisibleAgents || pending}
-            onPress={allVisibleSelected ? onClearSelection : onSelectVisible}
-          >
-            {allVisibleSelected ? copy.bulkClear : copy.bulkSelectVisible}
-          </VButton>
-        }
-      />
+      <>
+        <AgentBulkActionBar
+          ariaLabel={copy.bulkSelected}
+          summary={summary}
+          selectionActions={
+            <VButton
+              type="button"
+              variant="secondary"
+              icon={allVisibleSelected ? <Square size={14} /> : <CheckSquare size={14} />}
+              isDisabled={!hasVisibleAgents || pending}
+              onPress={allVisibleSelected ? onClearSelection : onSelectVisible}
+            >
+              {allVisibleSelected ? copy.bulkClear : copy.bulkSelectVisible}
+            </VButton>
+          }
+        />
+        {confirmDialog}
+      </>
     );
   }
 
   return (
-    <AgentBulkActionBar
-      ariaLabel={copy.bulkSelected}
-      summary={summary}
-      selectionActions={selectionActions}
-      promptPicker={promptPicker}
-      mutationActions={mutationActions}
-      destructiveActions={destructiveActions}
-    />
+    <>
+      <AgentBulkActionBar
+        ariaLabel={copy.bulkSelected}
+        summary={summary}
+        selectionActions={selectionActions}
+        promptPicker={promptPicker}
+        mutationActions={mutationActions}
+        destructiveActions={destructiveActions}
+      />
+      {confirmDialog}
+    </>
   );
 }

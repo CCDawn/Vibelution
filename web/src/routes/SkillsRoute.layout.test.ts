@@ -18,12 +18,17 @@ describe("SkillsRoute layout contract", () => {
     expect(routerSource).not.toContain('to="/agents/skills" replace');
     expect(routeSource).toContain('<AgentManagementNav active="skills" className={styles.managementNavClass} />');
     expect(stylesSource).toContain("const managementNavClass");
+    expect(routeSource).toContain("VListDetailPage");
+    expect(routeSource).toContain("toolbar={(");
     expect(routeSource.indexOf('<AgentManagementNav active="skills" className={styles.managementNavClass} />')).toBeGreaterThan(
-      routeSource.indexOf("</VRouteHeader>"),
+      routeSource.indexOf("toolbar={("),
     );
     expect(routeSource.indexOf('<AgentManagementNav active="skills" className={styles.managementNavClass} />')).toBeLessThan(
       routeSource.indexOf("className={styles.summaryStripClass}"),
     );
+    expect(routeSource).toContain("workspaceClassName={styles.workspaceClass}");
+    expect(routeSource).toContain("list={(");
+    expect(routeSource).toContain("detail={(");
     expect(appShellSource).not.toContain('to="/skills"');
   });
 
@@ -151,7 +156,8 @@ describe("SkillsRoute layout contract", () => {
     expect(routeSource).toContain("VStatusChip");
     expect(routeSource).toContain("className={styles.summaryStripClass}");
     expect(routeSource).toContain("<VSurface");
-    expect(routeSource).toContain("as=\"aside\"");
+    expect(routeSource).toContain('as="section"');
+    expect(routeSource).toContain("VListDetailPage");
     expect(routeSource).toContain("as=\"section\"");
     expect(routeSource).toContain("<VDenseToolbar");
     expect(routeSource).toContain("<VStatusChip");

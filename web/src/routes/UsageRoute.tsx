@@ -8,7 +8,7 @@ import { queryKeys } from "../api/queryKeys";
 import type { TokenUsageBreakdownItem, TokenUsageRollup, UsageSource, UsageSummaryResponse } from "../api/types";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
 import { deriveQueryPresentation } from "../app/queryPresentation";
-import { VButton, VIconButton, VLoadingValue, VMetricStrip, VRouteHeader, VStateSurface, VStatusStrip, VSurface } from "../components/vui";
+import { VButton, VDenseOpsPage, VIconButton, VLoadingValue, VMetricStrip, VStateSurface, VStatusStrip, VSurface } from "../components/vui";
 import { useAppI18n } from "../i18n/useAppI18n";
 import styles from "./UsageRoute.styles";
 
@@ -195,36 +195,38 @@ export function UsageRoute() {
   );
 
   return (
-    <section className={styles.page} aria-busy={initialUsageLoading}>
-      <VRouteHeader
-        className={styles.header}
-        eyebrow="Token"
-        title={label(lang, "全局 Token 用量", "Global token usage")}
-        meta={label(lang, "按 Codex 风格展示最近一次、最近会话、最近 Agent、今日、七日和全局累计。", "Codex-style latest, latest session, latest agent, today, seven-day, and all-time usage.")}
-        actions={(
-          <VStatusStrip
-            className={styles.headerMeta}
-            items={[
-              { label: label(lang, "来源", "Source"), value: sourceStatus, tone: lastSource === "provider_usage" ? "success" : lastSource === "missing" ? "warning" : "info" },
-              { label: label(lang, "刷新", "Refresh"), value: usagePresentation === "refreshing" ? label(lang, "同步中", "Syncing") : label(lang, "自动", "Auto"), tone: usageQuery.isError ? "danger" : "neutral" },
-              { label: label(lang, "账本", "Ledger"), value: initialUsageLoading ? label(lang, "加载中", "Loading") : summary?.diagnostics?.source ?? "usage_ledger", tone: "info" },
-            ]}
-          />
-        )}
-      />
-
-      <VMetricStrip
-        ariaLabel={label(lang, "Token 用量概览", "Token usage overview")}
-        className={styles.overviewBand}
-        metrics={[
-          { id: "all-time", label: label(lang, "全局累计", "All time"), value: usageValue(usageValueState, allTime?.totalTokens, label(lang, "正在加载全局累计", "Loading all-time usage")) },
-          { id: "today", label: label(lang, "今日", "Today"), value: usageValue(usageValueState, today?.totalTokens, label(lang, "正在加载今日用量", "Loading today's usage")) },
-          { id: "last-seven-days", label: label(lang, "最近七日", "Last 7 days"), value: usageValue(usageValueState, last7Days?.totalTokens, label(lang, "正在加载七日用量", "Loading seven-day usage")) },
-          { id: "latest", label: label(lang, "最近一次", "Latest"), value: usageValue(usageValueState, lastTokenUsage?.totalTokens, label(lang, "正在加载最近用量", "Loading latest usage")), detail: initialUsageLoading ? label(lang, "加载中", "Loading") : formatTimestamp(lastTokenUsage?.recordedAt, lang) },
-        ]}
-        status={{ label: sourceStatus, tone: lastSource === "provider_usage" ? "success" : lastSource === "missing" ? "warning" : "info" }}
-      />
-
+    <VDenseOpsPage
+      className={styles.page}
+      headerClassName={styles.header}
+      ariaLabel={label(lang, "全局 Token 用量", "Global token usage")}
+      aria-busy={initialUsageLoading}
+      eyebrow="Token"
+      title={label(lang, "全局 Token 用量", "Global token usage")}
+      meta={label(lang, "按 Codex 风格展示最近一次、最近会话、最近 Agent、今日、七日和全局累计。", "Codex-style latest, latest session, latest agent, today, seven-day, and all-time usage.")}
+      actions={(
+        <VStatusStrip
+          className={styles.headerMeta}
+          items={[
+            { label: label(lang, "来源", "Source"), value: sourceStatus, tone: lastSource === "provider_usage" ? "success" : lastSource === "missing" ? "warning" : "info" },
+            { label: label(lang, "刷新", "Refresh"), value: usagePresentation === "refreshing" ? label(lang, "同步中", "Syncing") : label(lang, "自动", "Auto"), tone: usageQuery.isError ? "danger" : "neutral" },
+            { label: label(lang, "账本", "Ledger"), value: initialUsageLoading ? label(lang, "加载中", "Loading") : summary?.diagnostics?.source ?? "usage_ledger", tone: "info" },
+          ]}
+        />
+      )}
+      toolbarSlot={(
+        <VMetricStrip
+          ariaLabel={label(lang, "Token 用量概览", "Token usage overview")}
+          className={styles.overviewBand}
+          metrics={[
+            { id: "all-time", label: label(lang, "全局累计", "All time"), value: usageValue(usageValueState, allTime?.totalTokens, label(lang, "正在加载全局累计", "Loading all-time usage")) },
+            { id: "today", label: label(lang, "今日", "Today"), value: usageValue(usageValueState, today?.totalTokens, label(lang, "正在加载今日用量", "Loading today's usage")) },
+            { id: "last-seven-days", label: label(lang, "最近七日", "Last 7 days"), value: usageValue(usageValueState, last7Days?.totalTokens, label(lang, "正在加载七日用量", "Loading seven-day usage")) },
+            { id: "latest", label: label(lang, "最近一次", "Latest"), value: usageValue(usageValueState, lastTokenUsage?.totalTokens, label(lang, "正在加载最近用量", "Loading latest usage")), detail: initialUsageLoading ? label(lang, "加载中", "Loading") : formatTimestamp(lastTokenUsage?.recordedAt, lang) },
+          ]}
+          status={{ label: sourceStatus, tone: lastSource === "provider_usage" ? "success" : lastSource === "missing" ? "warning" : "info" }}
+        />
+      )}
+    >
       {usagePresentation === "error-with-data" ? (
         <VStateSurface
           actions={<VButton type="button" onPress={retry}>{label(lang, "重试", "Retry")}</VButton>}
@@ -399,6 +401,6 @@ export function UsageRoute() {
           {renderBreakdownList(summary?.breakdowns?.models ?? [], emptyBreakdownLabel)}</>}
         </VSurface>
       </div>
-    </section>
+    </VDenseOpsPage>
   );
 }

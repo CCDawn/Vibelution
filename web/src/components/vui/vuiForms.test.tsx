@@ -12,12 +12,12 @@ import {
   VSelect,
   VTextarea,
 } from "./index";
-import { VibelutionHeroProvider } from "./renderers/heroui/HeroProvider";
+import { VuiProvider } from "./VuiProvider";
 
 describe("VUI form primitives", () => {
   it("renders dense form controls through the VUI boundary", () => {
     const markup = renderToStaticMarkup(
-      <VibelutionHeroProvider>
+      <VuiProvider>
         <form data-test-id="vui-form">
           <VFieldRow label="Model" tooltip="Choose the model bound to this task">
             <VSelect
@@ -38,7 +38,7 @@ describe("VUI form primitives", () => {
           <VNativeTextarea aria-label="Native notes" value="Notes" readOnly minRows={2} />
           <VCheckbox isSelected>Running only</VCheckbox>
         </form>
-      </VibelutionHeroProvider>,
+      </VuiProvider>,
     );
 
     expect(markup).toContain('data-vui="field-row"');

@@ -3,13 +3,20 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
 import {
+  VButton,
+  VDenseOpsPage,
+  VDenseTable,
   VEmptyState,
   VEntityList,
+  VFieldRow,
+  VInput,
+  VListDetailPage,
   VLoadingValue,
   VMetricStrip,
   VPanelHeader,
   VRouteHeader,
   VSection,
+  VSettingsFormPage,
   VSplitWorkspace,
   VStateSurface,
   VStatusStrip,
@@ -118,5 +125,104 @@ describe("VUI workbench layout templates", () => {
     expect(markup).toContain('data-vui="empty-state"');
     expect(markup).toContain("Research Console");
     expect(markup).toContain("Source");
+  });
+
+  it("renders the list-detail page recipe with stable slots", () => {
+    const markup = renderToStaticMarkup(
+      <VListDetailPage
+        ariaLabel="Agents"
+        eyebrow="Directory"
+        title="Agent center"
+        list={<nav>List</nav>}
+        detail={<VEmptyState title="Select an agent" />}
+      />,
+    );
+
+    expect(markup).toContain('data-vui-recipe="list-detail-page"');
+    expect(markup).toContain('data-vui="workbench-page"');
+    expect(markup).toContain('data-vui="route-header"');
+    expect(markup).toContain('data-vui="split-workspace"');
+    expect(markup).toContain("Agent center");
+    expect(markup).toContain("Select an agent");
+  });
+
+  it("allows route style maps to own list-detail workspace columns", () => {
+    const markup = renderToStaticMarkup(
+      <VListDetailPage
+        title="Custom split"
+        workspaceClassName="workspace-contract-grid"
+        columnsClassName=""
+        list={<span>L</span>}
+        detail={<span>D</span>}
+      />,
+    );
+
+    expect(markup).toContain("workspace-contract-grid");
+    expect(markup).toContain('data-vui="split-sidebar"');
+    expect(markup).toContain('data-vui="split-main"');
+  });
+
+  it("renders the settings-form page recipe with sticky footer slot", () => {
+    const markup = renderToStaticMarkup(
+      <VSettingsFormPage
+        ariaLabel="Model settings"
+        title="Basics"
+        footer={<VButton type="button">Save</VButton>}
+      >
+        <VFieldRow label="Name">
+          <VInput aria-label="Name" defaultValue="gpt" />
+        </VFieldRow>
+      </VSettingsFormPage>,
+    );
+
+    expect(markup).toContain('data-vui-recipe="settings-form-page"');
+    expect(markup).toContain('data-vui="settings-form-body"');
+    expect(markup).toContain('data-vui="settings-form-footer"');
+    expect(markup).toContain('data-vui="field-row"');
+    expect(markup).toContain("Save");
+  });
+
+  it("renders the dense-ops page recipe with toolbar and empty state", () => {
+    const emptyMarkup = renderToStaticMarkup(
+      <VDenseOpsPage
+        ariaLabel="Queue"
+        title="Work queue"
+        toolbar={<button type="button">Refresh</button>}
+        isEmpty
+        empty={{ title: "No jobs", description: "Queue is idle" }}
+      />,
+    );
+
+    expect(emptyMarkup).toContain('data-vui-recipe="dense-ops-page"');
+    expect(emptyMarkup).toContain('data-vui-recipe="dense-ops-toolbar"');
+    expect(emptyMarkup).toContain('data-vui="toolbar"');
+    expect(emptyMarkup).toContain('data-vui="empty-state"');
+    expect(emptyMarkup).toContain("No jobs");
+
+    const bareToolbarMarkup = renderToStaticMarkup(
+      <VDenseOpsPage
+        title="Usage"
+        toolbarSlot={<div data-test-id="metric-slot">Metrics</div>}
+      >
+        <span>Body</span>
+      </VDenseOpsPage>,
+    );
+    expect(bareToolbarMarkup).toContain('data-vui-recipe="dense-ops-toolbar"');
+    expect(bareToolbarMarkup).toContain('data-test-id="metric-slot"');
+    expect(bareToolbarMarkup).not.toContain('data-vui="toolbar"');
+
+    const tableMarkup = renderToStaticMarkup(
+      <VDenseOpsPage ariaLabel="Queue" title="Work queue">
+        <VDenseTable
+          ariaLabel="Jobs"
+          getRowKey={(row) => row.id}
+          columns={[{ id: "name", header: "Name", render: (row) => row.name }]}
+          rows={[{ id: "1", name: "Job A" }]}
+        />
+      </VDenseOpsPage>,
+    );
+
+    expect(tableMarkup).toContain('data-vui="dense-table"');
+    expect(tableMarkup).toContain("Job A");
   });
 });

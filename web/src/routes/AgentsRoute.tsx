@@ -4817,10 +4817,7 @@ export function AgentsRoute() {
       setNotice({ tone: "error", text: copy.bulkNoSelection });
       return;
     }
-    const confirmed = window.confirm(copy.bulkArchiveConfirm);
-    if (!confirmed) {
-      return;
-    }
+    // Confirm UI lives in AgentBulkOperationsPanel (VConfirmDialog).
 
     setBulkAgentPending(true);
     const notes: string[] = [];
@@ -4886,10 +4883,7 @@ export function AgentsRoute() {
       setNotice({ tone: "error", text: copy.bulkNoSelection });
       return;
     }
-    const confirmed = window.confirm(copy.bulkPurgeConfirm);
-    if (!confirmed) {
-      return;
-    }
+    // Confirm UI lives in AgentBulkOperationsPanel (VConfirmDialog).
 
     setBulkAgentPending(true);
     const notes: string[] = [];
@@ -4955,10 +4949,7 @@ export function AgentsRoute() {
     if (!selectedAgent || !canArchiveAgent || selectedAgentArchivePending) {
       return;
     }
-    const confirmed = window.confirm(copy.archiveConfirm.replace("{name}", agentLabel(selectedAgent)));
-    if (!confirmed) {
-      return;
-    }
+    // Confirm UI lives in AgentArchiveZonePanel (VConfirmDialog).
     archiveAgentMutation.mutate({ agentId: selectedAgent.agentId });
   };
 
@@ -4966,10 +4957,7 @@ export function AgentsRoute() {
     if (!selectedAgent || !canPurgeAgent || selectedAgentPurgePending) {
       return;
     }
-    const confirmed = window.confirm(copy.purgeConfirm.replace("{name}", agentLabel(selectedAgent)));
-    if (!confirmed) {
-      return;
-    }
+    // Confirm UI lives in AgentArchiveZonePanel (VConfirmDialog).
     purgeAgentMutation.mutate({ agentId: selectedAgent.agentId });
   };
 
@@ -4981,10 +4969,7 @@ export function AgentsRoute() {
     if (!selectedAgent || !canResetAgent || resettingAgentIds.has(selectedAgent.agentId)) {
       return;
     }
-    const confirmed = window.confirm(copy.resetAgentConfirm.replace("{name}", agentLabel(selectedAgent)));
-    if (!confirmed) {
-      return;
-    }
+    // Confirm UI lives in AgentDebugResetPanel (VConfirmDialog).
     resetAgentMutation.mutate({ agentId: selectedAgent.agentId, options: resetOptions });
   };
 
@@ -5579,6 +5564,7 @@ export function AgentsRoute() {
       },
       archiveZone: {
         copy,
+        agentName: agentLabel(selectedAgent),
         status: selectedAgent.status,
         isProtected: selectedAgentProtected,
         canArchive: canArchiveAgent,
@@ -5590,6 +5576,7 @@ export function AgentsRoute() {
       },
       debugReset: selectedAgent.status !== "archived" ? {
         copy,
+        agentName: agentLabel(selectedAgent),
         options: resetOptions,
         canReset: canResetAgent,
         pending: selectedAgentResetPending,

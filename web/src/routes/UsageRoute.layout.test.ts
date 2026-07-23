@@ -116,6 +116,12 @@ describe("UsageRoute layout contract", () => {
     expect(styles.overviewBand).toContain("min-w-0");
   });
 
+  it("uses the dense-ops page recipe for the usage shell", () => {
+    expect(routeSource).toContain("VDenseOpsPage");
+    expect(routeSource).toContain("toolbarSlot");
+    expect(routeSource).toContain("headerClassName={styles.header}");
+  });
+
   it("keeps the usage page dense with shared hierarchy instead of hero or nested-card composition", () => {
     expect(styles.page).toBeTypeOf("string");
     expect(styles.overviewBand).toBeTypeOf("string");
