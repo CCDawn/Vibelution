@@ -12,11 +12,11 @@ import {
   VButton,
   VDenseToolbar,
   VIconButton,
+  VListDetailPage,
   VNativeInput,
   VNativeSelect,
   VNativeTextarea,
   VPanelHeader,
-  VRouteHeader,
   VStatusChip,
   VStatusStrip,
   VSurface,
@@ -497,48 +497,49 @@ export function PromptTemplatesRoute() {
   }
 
   return (
-    <section className={styles.routeClass}>
-      <VRouteHeader
-        className={styles.headerClass}
-        eyebrow={copy.eyebrow}
-        title={copy.title}
-        meta={copy.subtitle}
-        actions={(
-          <div className={styles.headerActionsClass}>
-            {returnToPath ? (
-              <Link className={styles.returnButtonClass} to={returnToPath}>
-                <ArrowLeft size={15} />
-                <span>{copy.returnToAgents}</span>
-              </Link>
-            ) : null}
-            <VIconButton
-              type="button"
-              className={styles.refreshButtonClass}
-              label={copy.refresh}
-              icon={<RefreshCw size={15} />}
-              isDisabled={templatesQuery.isFetching}
-              onPress={() => templatesQuery.refetch()}
-            />
-          </div>
-        )}
-      />
-
-      <div className={styles.controlStripClass}>
-        <AgentManagementNav active="prompts" className={styles.managementNavClass} />
-
-        <VStatusStrip
-          className={styles.summaryStripClass}
-          items={[
-            { label: copy.templates, value: <strong className={styles.summaryValueClass}>{templates.length}</strong> },
-            { label: copy.linkedAgents, value: <strong className={styles.summaryValueClass}>{agents.filter((agent) => agent.promptTemplateId).length}</strong> },
-            { label: copy.category, value: <strong className={styles.summaryValueClass}>{visibleFilters.length - 1}</strong> },
-            { label: copy.source, value: <strong className={styles.summaryValueClass}>{templatesQuery.data?.storagePath ?? templatesQuery.data?.path ?? "-"}</strong> },
-          ]}
-        />
-      </div>
-
-      <main className={styles.workspaceClass}>
-        <VSurface as="aside" className={styles.listPanelClass} ariaLabel={copy.templates} tone="panel" padding="compact">
+    <VListDetailPage
+      className={styles.routeClass}
+      headerClassName={styles.headerClass}
+      workspaceClassName={styles.workspaceClass}
+      columnsClassName=""
+      ariaLabel={copy.title}
+      eyebrow={copy.eyebrow}
+      title={copy.title}
+      meta={copy.subtitle}
+      actions={(
+        <div className={styles.headerActionsClass}>
+          {returnToPath ? (
+            <Link className={styles.returnButtonClass} to={returnToPath}>
+              <ArrowLeft size={15} />
+              <span>{copy.returnToAgents}</span>
+            </Link>
+          ) : null}
+          <VIconButton
+            type="button"
+            className={styles.refreshButtonClass}
+            label={copy.refresh}
+            icon={<RefreshCw size={15} />}
+            isDisabled={templatesQuery.isFetching}
+            onPress={() => templatesQuery.refetch()}
+          />
+        </div>
+      )}
+      toolbar={(
+        <div className={styles.controlStripClass}>
+          <AgentManagementNav active="prompts" className={styles.managementNavClass} />
+          <VStatusStrip
+            className={styles.summaryStripClass}
+            items={[
+              { label: copy.templates, value: <strong className={styles.summaryValueClass}>{templates.length}</strong> },
+              { label: copy.linkedAgents, value: <strong className={styles.summaryValueClass}>{agents.filter((agent) => agent.promptTemplateId).length}</strong> },
+              { label: copy.category, value: <strong className={styles.summaryValueClass}>{visibleFilters.length - 1}</strong> },
+              { label: copy.source, value: <strong className={styles.summaryValueClass}>{templatesQuery.data?.storagePath ?? templatesQuery.data?.path ?? "-"}</strong> },
+            ]}
+          />
+        </div>
+      )}
+      list={(
+        <VSurface as="section" className={styles.listPanelClass} ariaLabel={copy.templates} tone="panel" padding="compact">
           <VPanelHeader
             className={styles.panelHeaderClass}
             eyebrow={copy.templates}
@@ -681,6 +682,8 @@ export function PromptTemplatesRoute() {
           </div>
         </VSurface>
 
+      )}
+      detail={(
         <VSurface as="section" className={`${styles.editorPanelClass} ${focusTarget === "editor" ? styles.editorPanelFocusedClass : ""}`} ariaLabel={copy.editor} tone="panel" padding="compact">
           {editor && editableTemplate ? (
             <>
@@ -788,7 +791,7 @@ export function PromptTemplatesRoute() {
             <p className={styles.emptyStateClass}>{templatesQuery.isPending ? copy.loading : copy.emptyEditor}</p>
           )}
         </VSurface>
-      </main>
-    </section>
+      )}
+    />
   );
 }

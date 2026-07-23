@@ -3,7 +3,7 @@ import { type KeyboardEvent, useEffect, useMemo, useRef, useState } from "react"
 import { createPortal } from "react-dom";
 
 import type { AgentLlmSlotDefinition, AgentModelChoice } from "../api/types";
-import { VButton, VContextualHint, VNativeInput } from "../components/vui";
+import { VButton, VConfirmDialog, VContextualHint, VNativeInput } from "../components/vui";
 import styles from "./AgentModelPicker.styles";
 
 export type AgentModelCandidateGroup = {
@@ -138,6 +138,7 @@ export function AgentModelPicker({
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [activeModelRef, setActiveModelRef] = useState("");
+  const [pendingPromote, setPendingPromote] = useState<AgentModelChoice | null>(null);
   const groups = useMemo(
     () => groupAgentModelCandidates(candidates, slot.slot, query),
     [candidates, query, slot.slot],
@@ -171,11 +172,18 @@ export function AgentModelPicker({
     if (disabled || disabledReason(candidate)) return;
     if (candidate.runtimeSelectable) {
       onSelectPinned(candidate.modelRef);
-    } else {
-      onPromote(candidate);
+      setOpen(false);
+      setQuery("");
+      requestAnimationFrame(() => triggerRef.current?.focus());
+      return;
     }
+    setPendingPromote(candidate);
     setOpen(false);
     setQuery("");
+  }
+
+  function closePromoteConfirm() {
+    setPendingPromote(null);
     requestAnimationFrame(() => triggerRef.current?.focus());
   }
 
@@ -310,26 +318,67 @@ export function AgentModelPicker({
   );
 
   return (
-    <div className={styles.root}>
-      <VButton
-        ref={triggerRef}
-        type="button"
-        contentLayout="plain"
-        className={styles.trigger}
-        isDisabled={disabled}
-        aria-haspopup="dialog"
-        aria-expanded={open}
-        onPress={() => setOpen((value) => !value)}
-      >
-        <span className={styles.triggerCopy}>
-          <span className={styles.triggerLabel}>
-            {selected?.label || selectedModelRef || "选择模型"}
+    <>
+      <div className={styles.root}>
+        <VButton
+          ref={triggerRef}
+          type="button"
+          contentLayout="plain"
+          className={styles.trigger}
+          isDisabled={disabled}
+          aria-haspopup="dialog"
+          aria-expanded={open}
+          onPress={() => setOpen((value) => !value)}
+        >
+          <span className={styles.triggerCopy}>
+            <span className={styles.triggerLabel}>
+              {selected?.label || selectedModelRef || "选择模型"}
+            </span>
+            <span className={styles.triggerMeta}>{selected?.providerLabel || ""}</span>
           </span>
-          <span className={styles.triggerMeta}>{selected?.providerLabel || ""}</span>
-        </span>
-        <ChevronDown size={14} aria-hidden="true" />
-      </VButton>
-      {typeof document === "undefined" ? dialog : createPortal(dialog, document.body)}
-    </div>
+          <ChevronDown size={14} aria-hidden="true" />
+        </VButton>
+        {typeof document === "undefined" ? dialog : createPortal(dialog, document.body)}
+      </div>
+      <VConfirmDialog
+        open={Boolean(pendingPromote)}
+        onOpenChange={(nextOpen) => {
+          if (!nextOpen) {
+            closePromoteConfirm();
+          }
+        }}
+        title="固定后使用模型"
+        description="此操作将修改 operator config，并只更新当前 Agent 的模型绑定。"
+        tone="neutral"
+        confirmLabel="固定并绑定"
+        cancelLabel="取消"
+        confirmPending={Boolean(
+          pendingPromote && pendingModelRef && pendingPromote.modelRef === pendingModelRef,
+        )}
+        onConfirm={() => {
+          if (pendingPromote) {
+            onPromote(pendingPromote);
+          }
+          closePromoteConfirm();
+        }}
+      >
+        {pendingPromote ? (
+          <div className={styles.promoteFacts}>
+            <div className={styles.promoteFact}>
+              <strong className={styles.promoteFactLabel}>Provider：</strong>
+              {pendingPromote.providerLabel || pendingPromote.providerId}
+            </div>
+            <div className={styles.promoteFact}>
+              <strong className={styles.promoteFactLabel}>upstream ID：</strong>
+              {pendingPromote.upstreamId}
+            </div>
+            <div className={styles.promoteFact}>
+              <strong className={styles.promoteFactLabel}>modelRef：</strong>
+              {pendingPromote.modelRef}
+            </div>
+          </div>
+        ) : null}
+      </VConfirmDialog>
+    </>
   );
 }

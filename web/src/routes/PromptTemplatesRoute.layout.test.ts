@@ -11,12 +11,17 @@ describe("PromptTemplatesRoute layout contract", () => {
     expect(routerSource).toContain("<PromptTemplatesRoute />");
     expect(routeSource).toContain('<AgentManagementNav active="prompts" className={styles.managementNavClass} />');
     expect(stylesSource).toContain("const managementNavClass");
+    expect(routeSource).toContain("VListDetailPage");
+    expect(routeSource).toContain("toolbar={(");
     expect(routeSource.indexOf('<AgentManagementNav active="prompts" className={styles.managementNavClass} />')).toBeGreaterThan(
-      routeSource.indexOf("</VRouteHeader>"),
+      routeSource.indexOf("toolbar={("),
     );
     expect(routeSource.indexOf('<AgentManagementNav active="prompts" className={styles.managementNavClass} />')).toBeLessThan(
       routeSource.indexOf("className={styles.summaryStripClass}"),
     );
+    expect(routeSource).toContain("workspaceClassName={styles.workspaceClass}");
+    expect(routeSource).toContain("list={(");
+    expect(routeSource).toContain("detail={(");
   });
 
   it("uses shell language state without loading the full app dictionary", () => {
@@ -180,7 +185,8 @@ describe("PromptTemplatesRoute layout contract", () => {
     expect(routeSource).toContain("VStatusChip");
     expect(routeSource).toContain("className={styles.summaryStripClass}");
     expect(routeSource).toContain("<VSurface");
-    expect(routeSource).toContain("as=\"aside\"");
+    expect(routeSource).toContain('as="section"');
+    expect(routeSource).toContain("VListDetailPage");
     expect(routeSource).toContain("as=\"section\"");
     expect(routeSource).toContain("<VDenseToolbar");
     expect(routeSource).toContain("tone={hasDefault ? \"success\" : \"neutral\"}");
