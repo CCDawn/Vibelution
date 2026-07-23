@@ -251,12 +251,12 @@ describe("AppShell layout contract", () => {
     );
 
     expect(lightThemeBlock).toContain("--shell-page-end: var(--bg-canvas)");
-    expect(lightThemeBlock).toContain("--shell-surface: color-mix(in srgb, var(--surface-panel) 92%, transparent)");
-    expect(lightThemeBlock).not.toContain("--shell-surface: color-mix(in srgb, var(--fg-primary)");
-    expect(lightThemeBlock).not.toContain("--shell-panel: var(--fg-primary)");
-    expect(shellStyles).toContain('.shell[data-theme="light"] .topBar::before');
-    expect(shellStyles).toContain("color-mix(in srgb, var(--surface-panel) 68%, transparent)");
-    expect(shellStyles).not.toContain("background: color-mix(in srgb, var(--surface-panel) 86%, transparent)");
+    expect(shellStyles).toContain("--shell-surface: var(--vui-surface-rail)");
+    expect(shellStyles).toContain("--shell-panel: var(--vui-surface-panel)");
+    expect(shellStyles).toContain("--shell-card: var(--vui-surface-row)");
+    expect(shellStyles).toContain("var(--vui-gradient-route-soft),\n    var(--shell-surface)");
+    expect(shellStyles).not.toContain("color-mix(in srgb, var(--shell-panel)");
+    expect(shellStyles).not.toContain("color-mix(in srgb, var(--shell-card)");
     expect(shellStyles).toContain('grid-template-areas:\n    "brand version"\n    "subtle subtle";');
     expect(shellStyles).toContain("max-width: min(230px, 34vw)");
   });
