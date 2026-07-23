@@ -57,6 +57,71 @@ def _walk_json(value):
             yield from _walk_json(item)
 
 
+def test_provider_discovery_route_returns_only_controlled_failure_details(monkeypatch) -> None:
+    submitted = {
+        "llm": {
+            "schema_version": 2,
+            "providers": {
+                "relay_a": {
+                    "label": "Relay A",
+                    "service_class": "relay",
+                    "vendor": "multi_model",
+                    "driver": "openai",
+                    "base_url": "https://relay.example/v1",
+                    "auth_kind": "none",
+                    "credential_ref": "none",
+                    "requires_credential": False,
+                    "protocols": {"default": "responses", "allowed": ["responses"]},
+                    "discovery": {"mode": "auto", "adapter": "openai_compatible", "cache_ttl_seconds": 0},
+                    "models": {
+                        "model-a": {
+                            "upstream_id": "model-a",
+                            "label": "Model A",
+                            "enabled": True,
+                        }
+                    },
+                }
+            },
+            "profiles": {
+                "primary": {
+                    "model_ref": "relay_a/model-a",
+                    "overrides": {},
+                }
+            },
+            "model_aliases": {},
+        }
+    }
+    monkeypatch.setattr(provider_config_service, "load_public_config", lambda: copy.deepcopy(submitted))
+    monkeypatch.setattr(
+        provider_config_service,
+        "discover_provider_models",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            TimeoutError("secret-value https://relay.example/models?api_key=secret-value")
+        ),
+    )
+
+    response = client.post(
+        "/api/config/draft/providers/relay_a/discover",
+        json={
+            "publicConfig": submitted,
+            "draftMeta": {},
+            "baseHash": public_config_hash(submitted),
+            "providerId": "relay_a",
+            "credentialValue": "secret-value",
+        },
+    )
+
+    assert response.status_code == 422, response.text
+    assert response.json()["detail"] == {
+        "code": "provider_discovery_failed",
+        "providerId": "relay_a",
+        "reasonCode": "timeout",
+        "retryable": True,
+    }
+    assert "secret-value" not in response.text
+    assert "relay.example" not in response.text
+
+
 def _sensitive_model_reference_impact() -> dict:
     return {
         "modelId": "relay_a/model-a",

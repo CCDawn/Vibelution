@@ -664,7 +664,7 @@ def test_provider_draft_events_cover_mutations_and_failed_discovery(monkeypatch)
             )
         ),
     )
-    with pytest.raises(ValueError, match="^provider discovery failed$") as exc_info:
+    with pytest.raises(provider_config_service.ProviderDiscoveryFailure) as exc_info:
         provider_config_service.discover_draft_provider(
             updated["publicConfig"],
             draft_meta=updated["draftMeta"],
@@ -672,6 +672,9 @@ def test_provider_draft_events_cover_mutations_and_failed_discovery(monkeypatch)
             provider_id="relay_b",
             credential_value="secret-value",
         )
+    assert exc_info.value.provider_id == "relay_b"
+    assert exc_info.value.reason_code == "timeout"
+    assert exc_info.value.retryable is True
     assert "secret-value" not in str(exc_info.value)
     assert exc_info.value.__cause__ is None
     assert "relay.example" not in repr(exc_info.value)
@@ -686,6 +689,10 @@ def test_provider_draft_events_cover_mutations_and_failed_discovery(monkeypatch)
         "config.model.pinned",
         "config.model.unpinned",
     } <= event_codes
+    assert any(
+        kwargs.get("fields", {}).get("reasonCode") == "timeout"
+        for _args, kwargs in events
+    )
     serialized = json.dumps(events)
     for forbidden in (
         "secret-value",

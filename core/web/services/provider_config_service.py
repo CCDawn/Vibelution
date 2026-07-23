@@ -5,12 +5,15 @@ from __future__ import annotations
 import copy
 import hashlib
 import hmac
+import json
 import re
 import secrets
 import threading
 import time
 from pathlib import Path
 from typing import Any
+
+import httpx
 
 from config.llm_credentials import canonicalize_credential_ref
 from config.llm_identity import (
@@ -74,6 +77,44 @@ _PROVIDER_OPTION_STRING_LIMITS = {
     "service_class": 64,
     "vendor": 128,
 }
+
+
+class ProviderDiscoveryFailure(ValueError):
+    """A provider-scoped, redacted discovery failure suitable for the config API."""
+
+    def __init__(self, *, provider_id: str, reason_code: str, retryable: bool) -> None:
+        self.provider_id = validate_provider_id(provider_id)
+        self.reason_code = reason_code
+        self.retryable = retryable
+        super().__init__("provider discovery failed")
+
+
+def _provider_discovery_failure_details(exc: Exception) -> tuple[str, bool]:
+    """Reduce provider exceptions to stable UI-safe categories without error text."""
+    if isinstance(exc, httpx.HTTPStatusError):
+        status_code = exc.response.status_code
+        if status_code in {401, 403}:
+            return "credential_rejected", False
+        if status_code in {404, 405}:
+            return "protocol_mismatch", False
+        if status_code == 429:
+            return "rate_limited", True
+        return "upstream_rejected", status_code >= 500
+    if isinstance(exc, httpx.TimeoutException) or isinstance(exc, TimeoutError):
+        return "timeout", True
+    if isinstance(exc, httpx.RequestError):
+        return "network", True
+    if isinstance(exc, json.JSONDecodeError):
+        return "invalid_response", False
+    if isinstance(exc, ValueError):
+        message = str(exc).lower()
+        if "credential" in message or "api key" in message:
+            return "credential_missing", False
+        if "target" in message or "endpoint" in message or "base_url" in message:
+            return "endpoint_invalid", False
+    return "discovery_unavailable", True
+
+
 _CATALOG_PROVIDER_RESPONSE_FIELDS = (
     "catalogStale",
     "lastAttemptAt",
@@ -200,6 +241,7 @@ def _record_provider_event(
         "modelCount",
         "modelKey",
         "repairSummary",
+        "reasonCode",
         "routeChanged",
         "serviceClass",
         "status",
@@ -918,6 +960,7 @@ def discover_draft_provider(
             credential_override=str(credential_value or ""),
         )
     except Exception as exc:
+        reason_code, retryable = _provider_discovery_failure_details(exc)
         _record_provider_event(
             "config.provider.discovery_failed",
             provider_id=provider_id,
@@ -926,10 +969,15 @@ def discover_draft_provider(
             fields={
                 "elapsedMs": int((time.monotonic() - started_at) * 1000),
                 "errorType": type(exc).__name__,
+                "reasonCode": reason_code,
                 "status": "failed",
             },
         )
-        raise ValueError("provider discovery failed") from None
+        raise ProviderDiscoveryFailure(
+            provider_id=provider_id,
+            reason_code=reason_code,
+            retryable=retryable,
+        ) from None
     _record_provider_event(
         "config.provider.discovery_succeeded",
         provider_id=provider_id,
@@ -1357,6 +1405,7 @@ __all__ = [
     "project_llm_v2_migration_preview",
     "project_model_reference_impact",
     "project_model_reference_impacts",
+    "ProviderDiscoveryFailure",
     "project_provider_draft_response",
     "project_provider_route_preview_response",
     "suggest_draft_provider_id",

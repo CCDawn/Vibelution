@@ -123,6 +123,12 @@ type NoticeTone = "neutral" | "success" | "error";
 type ProviderWorkspaceMode = "quick" | "manage" | "advanced";
 type ConfigApplyDraftOverride = Pick<ConfigWorkspace, "publicConfig" | "draftMeta" | "baseHash">;
 
+type ProviderDiscoveryFailureDetail = {
+  providerId: string;
+  reasonCode: string;
+  retryable: boolean;
+};
+
 type ProviderRouteImpact = {
   modelRef?: string;
   liveReferenceCount?: number;
@@ -763,6 +769,39 @@ function formatJson(value: unknown): string {
 
 function readableErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function providerDiscoveryFailureDetail(error: unknown): ProviderDiscoveryFailureDetail | null {
+  const message = readableErrorMessage(error);
+  try {
+    const payload = JSON.parse(message) as { detail?: unknown };
+    const detail = asRecord(payload.detail);
+    if (detail.code !== "provider_discovery_failed" || !getString(detail.providerId) || !getString(detail.reasonCode)) {
+      return null;
+    }
+    return {
+      providerId: getString(detail.providerId),
+      reasonCode: getString(detail.reasonCode),
+      retryable: getBoolean(detail.retryable),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function providerDiscoveryFailureMessage(detail: ProviderDiscoveryFailureDetail | null): string {
+  switch (detail?.reasonCode) {
+    case "credential_missing": return "未配置 API Key；请先保存该 Provider 的凭据。";
+    case "credential_rejected": return "API Key 被上游拒绝；请检查凭据后重试。";
+    case "endpoint_invalid": return "服务地址无效或不允许访问；请检查端点配置。";
+    case "network": return "无法连接到服务地址；请检查网络、局域网服务或端口。";
+    case "timeout": return "服务响应超时；可稍后重试。";
+    case "protocol_mismatch": return "该端点不支持当前模型发现协议；请改用兼容接口或手动填写模型。";
+    case "invalid_response": return "服务返回的模型目录格式不兼容；请检查 Provider 协议。";
+    case "rate_limited": return "上游暂时限流；请稍后重试。";
+    case "upstream_rejected": return "上游服务拒绝了模型目录请求；请检查服务状态或协议。";
+    default: return "该 Provider 的模型发现暂不可用；请检查连接后重试。";
+  }
 }
 
 function getBoolean(value: unknown, fallback = false): boolean {
@@ -2153,7 +2192,6 @@ export function ConfigRoute() {
   const contentViewportRef = useRef<HTMLDivElement | null>(null);
   const modelEditorRef = useRef<HTMLDivElement | null>(null);
   const lastRequestedSectionRef = useRef("");
-  const autoRefreshAttemptedProviderIds = useRef(new Set<string>());
   const providerDraftRequestRef = useRef<{
     publicConfig: PublicConfigShape;
     draftMeta: ConfigDraftMeta;
@@ -2350,10 +2388,6 @@ export function ConfigRoute() {
   }, [providerCredentialEditId, selectedProviderId]);
 
   useEffect(() => {
-    autoRefreshAttemptedProviderIds.current.clear();
-  }, [workspaceQuery.data?.baseHash]);
-
-  useEffect(() => {
     if (!settingsGroups.length) {
       setActiveGroupId("");
       setActivePageId("");
@@ -2537,34 +2571,20 @@ export function ConfigRoute() {
       });
       return models;
     } catch (error) {
-      const message = readableErrorMessage(error).slice(0, 480);
+      const detail = providerDiscoveryFailureDetail(error);
+      const message = providerDiscoveryFailureMessage(detail).slice(0, 480);
+      try {
+        const refreshed = await requestJson<ConfigWorkspace>("/api/config/workspace", undefined, "GET");
+        syncWorkspace(refreshed, "neutral", { resetBase: false });
+      } catch {
+        // Preserve the scoped discovery failure; a workspace refresh is only a best-effort status reconciliation.
+      }
       setProviderActionFeedback({ kind: "discover", providerId, phase: "error", message });
-      markError(error);
-      throw error;
+      throw new Error(message);
     } finally {
       setBusyAction("");
     }
   }, [buildProviderDraftRequest]);
-
-  useEffect(() => {
-    if (activeGroup?.id !== "models-profiles" || activePage?.id !== "model-connection" || workspace?.schemaVersion !== 2) return;
-    let cancelled = false;
-    const refreshDueProviders = async () => {
-      for (const row of providerRows.filter((row) => row.refreshDue && row.driver !== "manual")) {
-        if (cancelled || autoRefreshAttemptedProviderIds.current.has(row.providerId)) continue;
-        autoRefreshAttemptedProviderIds.current.add(row.providerId);
-        try {
-          await handleDiscoverProvider(row.providerId);
-        } catch {
-          // The bounded route notice keeps the failure visible; later Providers still refresh sequentially.
-        }
-      }
-    };
-    void refreshDueProviders();
-    return () => {
-      cancelled = true;
-    };
-  }, [activeGroup?.id, activePage?.id, handleDiscoverProvider, providerRows, workspace?.schemaVersion]);
 
   async function handleSuggestProviderId(provider: Record<string, unknown>): Promise<string> {
     const response = await requestJson<{ suggestedProviderId: string }>(
