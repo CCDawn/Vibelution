@@ -1,7 +1,6 @@
 import { Archive, CheckCircle2, Play, RefreshCw, Search } from "lucide-react";
 import { type ReactNode } from "react";
 
-import { VNativeButton } from "../components/vui";
 import {
   TeamStageCard,
   TeamStageCommandBar,
@@ -103,17 +102,6 @@ export function TeamSourceCollectionStandaloneStagePanel({
             label={module.label}
             metric={module.metric}
             nextLabel={module.nextLabel}
-            actions={
-              <VNativeButton
-                type="button"
-                disabled={module.actionDisabled}
-                onClick={module.onAction}
-                title={module.actionTitle}
-              >
-                <TeamSourceCollectionStageActionIcon icon={module.actionIcon} />
-                {module.actionLabel}
-              </VNativeButton>
-            }
           />
         ))}
       </TeamStagePipeline>
