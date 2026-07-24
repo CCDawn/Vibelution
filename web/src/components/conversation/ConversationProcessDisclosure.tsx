@@ -39,9 +39,10 @@ function processLabel(cells: readonly CodexTranscriptCell[], language: "zh" | "e
   const labels = language === "zh"
     ? { completed: "已处理", failed: "处理已停止", running: "处理中" }
     : { completed: "Processed", failed: "Processing stopped", running: "Processing" };
+  const stateLabel = state === "failed" ? labels.completed : labels[state];
   const duration = processDuration(cells);
   return [
-    labels[state],
+    stateLabel,
     duration === null ? "" : formatCodexTranscriptDuration(duration),
   ].filter(Boolean).join(" ");
 }
