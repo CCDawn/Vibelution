@@ -100,6 +100,8 @@ import teamSourceCollectionPanelFrameStylesSource from "./TeamSourceCollectionPa
 import teamSourceCollectionResultControlsSource from "./TeamSourceCollectionResultControls.tsx?raw";
 import teamSourceCollectionRunSettingsPanelSource from "./TeamSourceCollectionRunSettingsPanel.tsx?raw";
 import teamSourceCollectionRunSettingsPanelStyles from "./TeamSourceCollectionRunSettingsPanel.styles";
+import teamSourceCollectionSearchBriefPanelSource from "./TeamSourceCollectionSearchBriefPanel.tsx?raw";
+import teamSourceCollectionSearchBriefPanelStyles from "./TeamSourceCollectionSearchBriefPanel.styles";
 import teamSourceCollectionScreeningPanelSource from "./TeamSourceCollectionScreeningPanel.tsx?raw";
 import teamSourceCollectionScreeningPanelStyles from "./TeamSourceCollectionScreeningPanel.styles";
 import teamSourceCollectionStageAgentsPanelSource from "./TeamSourceCollectionStageAgentsPanel.tsx?raw";
@@ -167,6 +169,7 @@ const sourceCollectionLocalStyles = {
   ...teamSourceCollectionPhaseCloseGatePanelStyles,
   ...teamSourceCollectionPanelFrameStyles,
   ...teamSourceCollectionRunSwitcherPanelStyles,
+  ...teamSourceCollectionSearchBriefPanelStyles,
   ...teamSourceCollectionScreeningPanelStyles,
   ...teamSourceCollectionSourceDetailPanelStyles,
   ...teamSourceCollectionStageAgentsPanelStyles,
@@ -1964,10 +1967,10 @@ describe("TeamsRoute layout contract", () => {
     expect(teamSourceCollectionActiveStagePanelStyles.sourceCollectionStageChatActions).toContain("grid-cols-[repeat(2,minmax(0,1fr))]");
     expect(routeStyles.sourceCollectionPageBody).toContain("!grid");
     expect(routeStyles.sourceCollectionPageBody).toContain("h-full");
-    expect(routeStyles.sourceCollectionPageBody).toContain("grid-cols-[clamp(228px,14vw,278px)_minmax(520px,1fr)_clamp(270px,17vw,338px)]");
-    expect(routeStyles.sourceCollectionPageBody).toContain("grid-rows-[auto_auto_minmax(0,1fr)]");
+    expect(routeStyles.sourceCollectionPageBody).toContain("grid-cols-[clamp(300px,20vw,348px)_minmax(520px,1fr)_clamp(270px,17vw,338px)]");
+    expect(routeStyles.sourceCollectionPageBody).toContain("grid-rows-[auto_minmax(0,1fr)]");
     expect(routeStyles.sourceCollectionPageBody).toContain("max-[1020px]:grid-cols-[minmax(0,1fr)]");
-    expect(routeStyles.sourceCollectionPageBody).toContain("max-[1020px]:grid-rows-[auto_auto_auto_auto]");
+    expect(routeStyles.sourceCollectionPageBody).toContain("max-[1020px]:grid-rows-[auto_auto_auto]");
     expect(routeStyles.sourceCollectionPageBody).toContain("w-full");
     expect(routeStyles.sourceCollectionPageBody).toContain("max-w-none");
     expect(routeStyles.sourceCollectionPageBody).not.toContain("mx-auto");
@@ -1976,10 +1979,18 @@ describe("TeamsRoute layout contract", () => {
     expect(routeStyles.sourceCollectionPageBody).toContain("p-[var(--team-workbench-gap)]");
     expect(teamSourceCollectionStandaloneStagePanelStyles.sourceCollectionPageBodyCompact).toBeTypeOf("string");
     expect(teamSourceCollectionStandaloneStagePanelStyles.sourceCollectionPageBodyCompact).toContain("!grid");
-    expect(teamSourceCollectionStandaloneStagePanelStyles.sourceCollectionPageBodyCompact).toContain("grid-cols-[clamp(228px,14vw,278px)_minmax(520px,1fr)_clamp(270px,17vw,338px)]");
+    expect(teamSourceCollectionStandaloneStagePanelStyles.sourceCollectionPageBodyCompact).toContain("grid-cols-[clamp(300px,20vw,348px)_minmax(520px,1fr)_clamp(270px,17vw,338px)]");
     expect(teamSourceCollectionStandaloneStagePanelStyles.sourceCollectionPageBodyCompact).toContain("overflow-hidden");
     expect(teamSourceCollectionStandaloneStagePanelStyles.sourceCollectionPageBodyCompact).toContain("max-[1020px]:overflow-auto");
     expect(teamSourceCollectionStandaloneStagePanelSource).toContain("compactActivePanel ? styles.sourceCollectionPageBodyCompact : styles.sourceCollectionPageBody");
+    expect(teamSourceCollectionStandaloneStagePanelSource).toContain("searchBrief?: ReactNode");
+    expect(teamSourceCollectionStandaloneStagePanelSource).toContain("styles.sourceCollectionLeftRail");
+    expect(teamSourceCollectionStandaloneStagePanelSource).toContain("styles.sourceCollectionRunHistory");
+    expect(teamSourceCollectionStandaloneStagePanelStyles.sourceCollectionLeftRail).toContain("overflow-y-auto");
+    expect(teamSourceCollectionStandaloneStagePanelStyles.sourceCollectionRunHistory).toContain("[&>summary]:cursor-pointer");
+    expect(teamSourceCollectionSearchBriefPanelSource).toContain('data-vui-product="source-collection-search-brief"');
+    expect(teamSourceCollectionSearchBriefPanelSource).toContain("先决定要研究什么");
+    expect(teamSourceCollectionSearchBriefPanelStyles.primaryAction).not.toContain("w-full");
     expect(teamSourceCollectionConversationPanelStyles.sourceCollectionConversationPanel).toContain("h-full");
     expect(teamSourceCollectionConversationPanelStyles.sourceCollectionConversationPanel).toContain("grid-rows-[auto_minmax(0,1fr)]");
     expect(teamSourceCollectionConversationPanelStyles.sourceCollectionConversationPanel).toContain("overflow-hidden");
@@ -3083,6 +3094,9 @@ describe("TeamsRoute layout contract", () => {
     expect(teamSourceCollectionPhaseCloseGatePanelSource).toContain('data-vui-product="source-collection-phase-close-gate"');
     expect(teamSourceCollectionPhaseCloseGatePanelSource).toContain("不会用全局历史统计替代");
     expect(teamSourceCollectionPhaseCloseGatePanelSource).toContain("onOpenStage(nextStage)");
+    expect(teamSourceCollectionPhaseCloseGatePanelSource).toContain('data-compact="true"');
+    expect(teamSourceCollectionPhaseCloseGatePanelSource).toContain("运行详情");
+    expect(teamSourceCollectionPhaseCloseGatePanelStyles.phaseCloseGateSteps).toContain("grid");
     expect(teamSourceCollectionPhaseCloseGatePanelStyles.phaseCloseGateAction).toContain("w-fit");
     expect(teamSourceCollectionPhaseCloseGatePanelStyles.phaseCloseGateHeader).toContain("max-[640px]");
   });

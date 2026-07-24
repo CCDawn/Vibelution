@@ -19,6 +19,7 @@ export { TeamSourceCollectionMemoryPanel } from "../TeamSourceCollectionMemoryPa
 export { TeamSourceCollectionScreeningPanel } from "../TeamSourceCollectionScreeningPanel";
 export { TeamSourceCollectionSourceDetailPanel } from "../TeamSourceCollectionSourceDetailPanel";
 export { TeamSourceCollectionStandaloneStagePanel } from "../TeamSourceCollectionStandaloneStagePanel";
+export { TeamSourceCollectionSearchBriefPanel } from "../TeamSourceCollectionSearchBriefPanel";
 export { TeamSourceCollectionRunSettingsPanel } from "../TeamSourceCollectionRunSettingsPanel";
 export {
   TeamSourceCollectionFilterBar,
