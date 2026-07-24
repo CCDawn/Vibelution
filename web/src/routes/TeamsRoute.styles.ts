@@ -404,6 +404,10 @@ const styles: Record<string, string> = {
     "text-[var(--state-success)]",
   researchExperimentMethodPending:
     "text-[var(--state-warning)]",
+  researchExperimentMethodReason:
+    "m-0 line-clamp-2 text-[var(--vui-font-xs)] leading-[var(--vui-line-readable)] text-[var(--fg-tertiary)]",
+  researchExperimentMethodAlternatives:
+    "researchExperimentMethodAlternatives flex min-w-0 flex-wrap items-center gap-1.5 border-t border-[var(--vui-border-subtle)] pt-2 [&>span]:mr-0.5 [&>span]:text-[var(--vui-font-xs)] [&>span]:font-semibold [&>span]:text-[var(--fg-secondary)] [&>button]:min-h-7 [&>button]:w-fit [&>button]:rounded-[var(--radius-control)] [&>button]:border [&>button]:border-[var(--vui-border-subtle)] [&>button]:bg-[var(--vui-surface-panel)] [&>button]:px-2 [&>button]:text-[var(--vui-font-xs)] [&>button]:font-semibold",
   researchStageHeroPanel: `researchStageHeroPanel min-w-0 ${vuiFlatPanelClass} p-2`,
   researchStageHeroStats:
     "researchStageHeroStats min-w-0 grid gap-2 !grid grid-cols-[repeat(3,minmax(0,1fr))] gap-2",
