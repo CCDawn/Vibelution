@@ -1,6 +1,9 @@
 /* Loaded with Evolution / Self-Evolution surfaces. */
 @import "tailwindcss" source(none);
 
+/* Shared recipe class literals (import constants are not followed by Tailwind). */
+@source "../vuiSurfaceRecipes.ts";
+
 @source "../../routes/EvolutionRoute.tsx";
 @source "../../routes/EvolutionRoute.styles.ts";
 @source "../../routes/Evolution*.tsx";

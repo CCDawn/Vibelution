@@ -11,7 +11,7 @@ describe("ChatCodingRoute left status panel layout contract", () => {
   it("uses one raised status rail with flat separator-based groups", () => {
     expect(styles.leftRail).toContain("rounded-none");
     expect(styles.leftRail).toContain("border-l");
-    expect(styles.leftRail).toContain("bg-[var(--vui-surface-rail)]");
+    expect(styles.leftRail).toMatch(/bg-vui-surface-rail|bg-\[var\(--vui-surface-rail\)\]/);
     expect(styles.leftRail).toContain("shadow-none");
     expect(styles.leftBlock).toContain("border-b");
     expect(styles.leftBlock).toContain("bg-transparent");

@@ -1,6 +1,9 @@
 /* Loaded with ConfigRoute — keep out of the shell CSS entry. */
 @import "tailwindcss" source(none);
 
+/* Shared recipe class literals (import constants are not followed by Tailwind). */
+@source "../vuiSurfaceRecipes.ts";
+
 @source "../../routes/ConfigRoute.tsx";
 @source "../../routes/ConfigRoute.styles.ts";
 @source "../../routes/Config*.tsx";

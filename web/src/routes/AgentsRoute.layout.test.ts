@@ -255,6 +255,8 @@ function expectBackgroundAwareSurface(styleName: keyof typeof styles): void {
   const usesOpaqueRecipe =
     className.includes("!bg-[var(--vui-surface-row)]")
     || className.includes("!bg-[var(--vui-surface-panel)]")
+    || className.includes("!bg-vui-surface-row")
+    || className.includes("!bg-vui-surface-panel")
     || className.includes("[background:var(--vui-surface-row)]")
     || className.includes("[background:var(--vui-surface-panel)]");
   if (usesOpaqueRecipe) {
@@ -294,8 +296,12 @@ function expectBackgroundAwareClass(className: string, label: string): void {
   const usesOpaqueRecipe =
     className.includes("!bg-[var(--vui-surface-row)]")
     || className.includes("!bg-[var(--vui-surface-panel)]")
+    || className.includes("!bg-vui-surface-row")
+    || className.includes("!bg-vui-surface-panel")
     || className.includes("var(--vui-surface-row)")
-    || className.includes("var(--vui-surface-panel)");
+    || className.includes("var(--vui-surface-panel)")
+    || className.includes("bg-vui-surface-row")
+    || className.includes("bg-vui-surface-panel");
   if (usesOpaqueRecipe) {
     expect(className, `${label} should use an opaque semantic surface after recipe migration`).toMatch(
       /vui-surface-(row|panel)/,
@@ -311,11 +317,27 @@ function expectBackgroundAwareClass(className: string, label: string): void {
 
 function expectOpaqueSemanticSurface(className: string, label: string, token: string): void {
   const accepted = [token];
-  if (token.includes("[background:var(--vui-surface-panel)]")) {
-    accepted.push("!bg-[var(--vui-surface-panel)]");
+  if (token.includes("surface-panel") || token.includes("vui-surface-panel")) {
+    accepted.push("!bg-[var(--vui-surface-panel)]", "!bg-vui-surface-panel", "bg-vui-surface-panel");
   }
-  if (token.includes("[background:var(--vui-surface-row)]")) {
-    accepted.push("!bg-[var(--vui-surface-row)]");
+  if (token.includes("surface-row") || token.includes("vui-surface-row")) {
+    accepted.push("!bg-[var(--vui-surface-row)]", "!bg-vui-surface-row", "bg-vui-surface-row");
+  }
+  if (token.includes("surface-workspace") || token.includes("vui-surface-workspace")) {
+    accepted.push(
+      "!bg-[var(--vui-surface-workspace)]",
+      "!bg-vui-surface-workspace",
+      "bg-vui-surface-workspace",
+      "bg-[var(--vui-surface-workspace)]",
+    );
+  }
+  if (token.includes("surface-rail") || token.includes("vui-surface-rail")) {
+    accepted.push(
+      "!bg-[var(--vui-surface-rail)]",
+      "!bg-vui-surface-rail",
+      "bg-vui-surface-rail",
+      "bg-[var(--vui-surface-rail)]",
+    );
   }
   expect(
     accepted.some((part) => className.includes(part)),
@@ -535,7 +557,7 @@ describe("AgentsRoute layout contract", () => {
     expect(managementHeaderPanelSource).not.toContain("<AgentSummaryStrip");
     expect(managementModuleBarStyles.managementNav).toBeTruthy();
     expect(managementModuleBarStyles.moduleBar).toBeTruthy();
-    expect(managementModuleBarStyles.moduleBar).toContain("bg-[var(--vui-surface-toolbar)]");
+    expect(managementModuleBarStyles.moduleBar).toMatch(/bg-vui-surface-toolbar|bg-\[var\(--vui-surface-toolbar\)\]/);
     expect(managementModuleBarStyles.moduleBar).not.toContain("transparent");
   });
 
@@ -1805,10 +1827,10 @@ describe("AgentsRoute layout contract", () => {
     expect(styles.route).not.toContain("[background:var(--surface-card)]");
     expect(styles.route).not.toContain("var(--surface-panel-strong)");
 
-    expect(workspaceLayoutStyles.workspace).toContain("bg-[var(--vui-surface-workspace)]");
-    expect(workspaceLayoutStyles.directory).toContain("bg-[var(--vui-surface-rail)]");
-    expect(workspaceLayoutStyles.main).toContain("!bg-[var(--vui-surface-workspace)]");
-    expect(workspaceLayoutStyles.inspector).toContain("bg-[var(--vui-surface-rail)]");
+    expect(workspaceLayoutStyles.workspace).toMatch(/bg-vui-surface-workspace|bg-\[var\(--vui-surface-workspace\)\]/);
+    expect(workspaceLayoutStyles.directory).toMatch(/bg-vui-surface-rail|bg-\[var\(--vui-surface-rail\)\]/);
+    expect(workspaceLayoutStyles.main).toMatch(/!bg-vui-surface-workspace|!bg-\[var\(--vui-surface-workspace\)\]/);
+    expect(workspaceLayoutStyles.inspector).toMatch(/bg-vui-surface-rail|bg-\[var\(--vui-surface-rail\)\]/);
     expect(workspaceLayoutStyles.workspace).not.toContain("bg-transparent");
     expect(workspaceLayoutStyles.workspace).not.toContain("var(--surface-card)");
     expect(workspaceLayoutStyles.workspace).not.toContain("var(--surface-panel-strong)");
@@ -1862,10 +1884,10 @@ describe("AgentsRoute layout contract", () => {
     }
 
     expectOpaqueSemanticSurface(styles.agentRow, "agentRow", "!bg-[var(--vui-surface-row)]");
-    expect(styles.agentRow).toContain("hover:bg-[var(--vui-surface-row-hover)]");
+    expect(styles.agentRow).toMatch(/hover:bg-vui-surface-row-hover|hover:bg-\[var\(--vui-surface-row-hover\)\]/);
     expectOpaqueSemanticSurface(styles.detailSection, "detailSection", "!bg-[var(--vui-surface-panel)]");
     expectOpaqueSemanticSurface(styles.groupButton, "groupButton", "!bg-[var(--vui-surface-row)]");
-    expect(styles.groupButton).toContain("hover:bg-[var(--vui-surface-row-hover)]");
+    expect(styles.groupButton).toMatch(/hover:bg-vui-surface-row-hover|hover:bg-\[var\(--vui-surface-row-hover\)\]/);
 
     expect(styles.agentRowActive).not.toContain("var(--surface-panel-strong)");
     expect(styles.agentRowBulkSelected).not.toContain("var(--surface-panel-strong)");
@@ -2192,7 +2214,7 @@ describe("AgentsRoute layout contract", () => {
     expect(styles.agentRowActive).toContain(
       "bg-[color-mix(in_srgb,var(--accent-warm)_9%,var(--vui-surface-row))]",
     );
-    expect(styles.agentRow).toContain("!bg-[var(--vui-surface-row)]");
+    expect(styles.agentRow).toMatch(/!bg-vui-surface-row|!bg-\[var\(--vui-surface-row\)\]/);
     expect(bulkActionBarSource).toContain("!flex-nowrap items-center overflow-x-auto");
     expect(bulkActionBarSource).toContain("flex-[0_0_190px]");
     expect(bulkActionBarSource).toContain("min-h-[74px] overflow-hidden");
