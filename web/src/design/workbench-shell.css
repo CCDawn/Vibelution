@@ -346,7 +346,7 @@
   display: grid;
   place-items: center;
   padding: 24px;
-  background: color-mix(in srgb, var(--surface-overlay) 86%, transparent);
+  background: color-mix(in srgb, var(--vui-surface-overlay) 86%, transparent);
   backdrop-filter: blur(12px);
 }
 

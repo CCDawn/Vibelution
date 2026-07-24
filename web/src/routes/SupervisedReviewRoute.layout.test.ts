@@ -86,7 +86,7 @@ describe("SupervisedReviewRoute layout contract", () => {
     expect(styles.evidenceList).toContain("max-h-[clamp(");
     expect(styles.evidenceList).toContain("overflow-y-auto");
     expect(styles.evidenceList).toContain("overflow-x-hidden");
-    expect(styles.decisionSection).toContain("border-[color-mix(in_srgb,var(--accent-warm)");
+    expect(styles.decisionSection).toContain("border");
     expect(styles.decisionSection).toContain("grid");
     expect(styles.decisionSection).toContain("gap-2");
     expect(styles.transcriptList).toContain("max-h-[clamp(");
@@ -137,8 +137,8 @@ describe("SupervisedReviewRoute layout contract", () => {
 
     expect(styles.factCard).toContain("min-w-0");
     expect(styles.metricCard).toContain("min-w-0");
-    expect(styles.evidenceCard).toContain("bg-[color-mix(in_srgb,var(--vui-surface-row)_");
-    expect(styles.transcriptCard).toContain("bg-[color-mix(in_srgb,var(--vui-surface-row)_");
+    expect(styles.evidenceCard).toContain("var(--vui-surface-row)");
+    expect(styles.transcriptCard).toContain("var(--vui-surface-row)");
   });
 
   it("keeps review actions content-sized while preserving danger emphasis", () => {

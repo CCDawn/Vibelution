@@ -11,8 +11,8 @@
   --vui-native-control-fg: var(--fg-secondary);
   --vui-native-control-fg-hover: var(--vui-control-hover-fg);
   --vui-native-control-shadow-hover: var(--vui-control-hover-shadow);
-  --vui-native-field-bg: var(--surface-input);
-  --vui-native-field-bg-hover: var(--surface-card);
+  --vui-native-field-bg: var(--vui-surface-input);
+  --vui-native-field-bg-hover: var(--vui-surface-card);
   --vui-native-field-fg: var(--fg-primary);
   --vui-native-field-placeholder: var(--fg-tertiary);
   --vui-native-control-padding-x: 8px;
@@ -197,7 +197,7 @@
 
 [data-vui-app] select[data-renderer="shadcn"] option,
 [data-vui-app] select[data-renderer="shadcn"] optgroup {
-  background-color: var(--surface-input);
+  background-color: var(--vui-surface-input);
   color: var(--fg-primary);
 }
 

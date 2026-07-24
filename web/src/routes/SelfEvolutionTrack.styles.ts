@@ -1,3 +1,7 @@
+import {
+  vuiOpaqueRowClass,
+} from "../design/vuiSurfaceRecipes";
+
 const panelSurface = "rounded-[var(--radius-panel)] border border-vui-border-subtle bg-vui-surface-panel/94 shadow-none";
 const rowSurface = "rounded-[var(--radius-control)] border border-vui-border-subtle bg-vui-surface-row";
 const rowSurfaceSoft = "rounded-[var(--radius-control)] border border-vui-border-subtle bg-[color-mix(in_srgb,var(--vui-surface-row)_84%,var(--vui-surface-panel))]";
@@ -184,13 +188,11 @@ export const selfEvolutionTrackStyles = {
   checkboxRow: "inline-flex items-center gap-2.5 text-[var(--fg-primary)] [&_input]:h-[15px] [&_input]:w-[15px]",
   transactionTitleStack:
     "grid min-w-0 gap-1 [&_span]:overflow-wrap-anywhere [&_span]:font-mono [&_span]:[font-size:var(--vui-font-xs)] [&_span]:leading-tight [&_span]:text-[var(--fg-tertiary)]",
-  transactionMetaGrid:
-    "grid grid-cols-4 gap-1.5 max-[1180px]:grid-cols-2 [&_span]:min-w-0 [&_span]:overflow-wrap-anywhere [&_span]:rounded-[var(--radius-control)] [&_span]:border [&_span]:border-[var(--border-hairline)] [&_span]:bg-[color-mix(in_srgb,var(--vui-surface-row)_72%,transparent)] [&_span]:px-2 [&_span]:py-1.5 [&_span]:[font-size:var(--vui-font-xs)] [&_span]:leading-tight [&_span]:text-[var(--fg-secondary)]",
+  transactionMetaGrid: `grid grid-cols-4 gap-1.5 max-[1180px]:grid-cols-2 [&_span]:min-w-0 [&_span]:overflow-wrap-anywhere [&_span]:rounded-[var(--radius-control)] [&_span]:border [&_span]:border-[var(--border-hairline)] [&_span]:${vuiOpaqueRowClass} [&_span]:px-2 [&_span]:py-1.5 [&_span]:[font-size:var(--vui-font-xs)] [&_span]:leading-tight [&_span]:text-[var(--fg-secondary)]`,
   transactionGoalPreview: "m-0 overflow-wrap-anywhere [font-size:var(--vui-font-xs)] leading-normal text-[var(--fg-secondary)]",
   previewText: "m-0 overflow-wrap-anywhere text-[0.92rem] leading-normal text-[var(--fg-primary)]",
   compactPreviewText: "m-0 line-clamp-2 overflow-wrap-anywhere [font-size:var(--vui-font-xs)] leading-normal text-[var(--fg-secondary)]",
-  rawBlock:
-    "overflow-auto rounded-[var(--radius-panel)] border border-[var(--border-hairline)] bg-[color-mix(in_srgb,var(--vui-surface-row)_72%,transparent)] p-3 font-mono [font-size:var(--vui-font-xs)] leading-relaxed text-[var(--fg-secondary)]",
+  rawBlock: `overflow-auto rounded-[var(--radius-panel)] border border-[var(--border-hairline)] ${vuiOpaqueRowClass} p-3 font-mono [font-size:var(--vui-font-xs)] leading-relaxed text-[var(--fg-secondary)]`,
   transactionDetailsPanel:
     `grid grid-cols-2 gap-2 p-[9px] max-[1180px]:grid-cols-1 ${rowSurfaceSoft}`,
   transactionDetailRow:

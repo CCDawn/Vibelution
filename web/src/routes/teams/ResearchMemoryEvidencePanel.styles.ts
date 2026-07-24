@@ -1,3 +1,7 @@
+import {
+  vuiFlatPanelClass,
+} from "../../design/vuiSurfaceRecipes";
+
 export const statusTone: Record<string, string> = {
   qualified: "border-[color-mix(in_srgb,var(--state-success)_30%,transparent)] bg-[var(--vui-status-success-bg)] text-[var(--vui-status-success-fg)]",
   unsupported: "border-[color-mix(in_srgb,var(--state-warning)_30%,transparent)] bg-[var(--vui-status-warning-bg)] text-[var(--vui-status-warning-fg)]",
@@ -36,8 +40,7 @@ const styles = {
   compactSummary: "cursor-pointer select-none font-semibold text-[var(--fg-secondary)]",
   compactBody: "mt-2 grid min-w-0 gap-2 border-t border-[var(--vui-border-subtle)] pt-2",
   previewClaim: "min-w-0 break-words text-[var(--fg-primary)]",
-  detailSection:
-    "grid min-w-0 gap-3 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] p-3 [font-size:var(--vui-font-sm)]",
+  detailSection: `grid min-w-0 gap-3 ${vuiFlatPanelClass} p-3 [font-size:var(--vui-font-sm)]`,
   detailHeader: "grid min-w-0 gap-1",
 } as const;
 

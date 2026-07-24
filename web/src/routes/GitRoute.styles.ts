@@ -1,9 +1,13 @@
+import {
+  vuiOpaqueRowClass,
+} from "../design/vuiSurfaceRecipes";
+
 const panelSurface =
-  "rounded-[var(--radius-panel)] border border-[color-mix(in_srgb,var(--vui-border-subtle)_76%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-panel)_72%,transparent)]";
+  "rounded-[var(--radius-panel)] border border-[color-mix(in_srgb,var(--vui-border-subtle)_76%,transparent)] !bg-[var(--vui-surface-panel)]";
 const rowSurface =
-  "rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--vui-border-subtle)_70%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-row)_78%,transparent)]";
+  "rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--vui-border-subtle)_70%,transparent)] !bg-[var(--vui-surface-row)]";
 const rowSurfaceHover =
-  "hover:border-[color-mix(in_srgb,var(--vui-border-soft)_88%,transparent)] hover:bg-[color-mix(in_srgb,var(--vui-surface-row-hover)_84%,transparent)]";
+  "hover:border-[color-mix(in_srgb,var(--vui-border-soft)_88%,transparent)] hover:!bg-[var(--vui-surface-row-hover)]";
 const mutedControl =
   "inline-flex h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--vui-border-soft)_76%,transparent)] bg-[color-mix(in_srgb,var(--vui-control-muted)_72%,transparent)] px-[9px] py-1.5 [font-size:var(--vui-font-xs)] text-vui-fg-secondary hover:border-[color-mix(in_srgb,var(--border-strong)_78%,transparent)] hover:bg-[color-mix(in_srgb,var(--vui-control-muted-hover)_82%,transparent)] hover:text-vui-fg-primary disabled:cursor-default disabled:opacity-55";
 const activeControl =
@@ -28,8 +32,7 @@ export const gitRouteStyles = {
   // ~320px and nested 本地提交|WORKTREE cards crush/overlap text.
   workspaceOverview:
     "!grid-cols-[minmax(360px,1fr)_minmax(0,1.2fr)_minmax(300px,0.85fr)] !gap-2 max-[1400px]:!grid-cols-[minmax(0,1fr)_minmax(300px,0.9fr)] max-[1400px]:!grid-rows-[minmax(240px,0.95fr)_minmax(220px,0.85fr)] max-[1400px]:!gap-y-2 max-[860px]:!grid-cols-[minmax(0,1fr)] max-[860px]:!grid-rows-none max-[860px]:!content-start max-[860px]:!gap-1.5",
-  resizeHandle:
-    "relative min-w-2.5 cursor-col-resize touch-none border-0 bg-transparent p-0 outline-none before:absolute before:inset-y-0 before:left-1/2 before:w-[3px] before:-translate-x-1/2 before:rounded-full before:bg-[color-mix(in_srgb,var(--vui-surface-row)_18%,transparent)] before:transition before:content-[''] hover:before:bg-[color-mix(in_srgb,var(--accent-warm)_52%,transparent)] hover:before:shadow-none focus-visible:before:bg-[color-mix(in_srgb,var(--accent-warm)_52%,transparent)] focus-visible:before:shadow-none max-[860px]:hidden",
+  resizeHandle: `relative min-w-2.5 cursor-col-resize touch-none border-0 bg-transparent p-0 outline-none before:absolute before:inset-y-0 before:left-1/2 before:w-[3px] before:-translate-x-1/2 before:rounded-full before:${vuiOpaqueRowClass} before:transition before:content-[''] hover:before:bg-[color-mix(in_srgb,var(--accent-warm)_52%,transparent)] hover:before:shadow-none focus-visible:before:bg-[color-mix(in_srgb,var(--accent-warm)_52%,transparent)] focus-visible:before:shadow-none max-[860px]:hidden`,
   changePanel:
     `grid min-h-0 grid-rows-[auto_auto_auto_minmax(0,1fr)] gap-1.5 ${panelSurface} p-2`,
   commitPanel:

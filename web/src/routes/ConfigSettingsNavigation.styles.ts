@@ -15,7 +15,7 @@ const styles = {
   groupButtonActive:
     "vui-routes-configsettingsnavigation groupButtonActive border-[color-mix(in_srgb,var(--accent-cool)_44%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-cool)_13%,var(--vui-surface-row))] text-vui-fg-primary shadow-[inset_3px_0_0_var(--accent-warm-2)]",
   pageTabs:
-    "vui-routes-configsettingsnavigation pageTabs flex min-w-0 items-center gap-2 overflow-x-auto border-b border-vui-border-subtle bg-[color-mix(in_srgb,var(--vui-surface-toolbar)_80%,transparent)] px-4 py-2 [scrollbar-width:thin]",
+    "vui-routes-configsettingsnavigation pageTabs flex min-w-0 items-center gap-2 overflow-x-auto border-b border-vui-border-subtle !bg-[var(--vui-surface-toolbar)] px-4 py-2 [scrollbar-width:thin]",
   pageButton:
     "vui-routes-configsettingsnavigation pageButton min-h-10 shrink-0 px-4 [font-size:var(--vui-font-sm)] font-bold",
   pageButtonActive:

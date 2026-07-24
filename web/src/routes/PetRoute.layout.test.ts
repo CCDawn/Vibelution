@@ -21,16 +21,17 @@ describe("PetRoute layout contract", () => {
     expect(routeSource).toContain('import styles from "./PetRoute.styles"');
   });
 
-  it("keeps PetRoute surfaces lightweight instead of opaque card chrome", () => {
+  it("keeps PetRoute surfaces on shared opaque VUI panel recipes", () => {
     for (const key of surfaceKeys) {
-      expect(styles[key]).toContain("border-vui-border-soft");
+      expect(styles[key]).toContain("var(--vui-surface-panel)");
+      expect(styles[key]).toContain("border-[var(--vui-border-subtle)]");
       expect(styles[key]).not.toContain("bg-[var(--surface-page)]");
       expect(styles[key]).not.toContain("bg-[var(--surface-panel)]");
       expect(styles[key]).not.toContain("bg-vui-surface-glass");
       expect(styles[key]).not.toContain("shadow-[var(--vui-shadow-hairline)]");
       expect(styles[key]).not.toContain("shadow-[var(--vui-shadow-soft)]");
     }
-    expect(styles.surfaceClass).toMatch(/bg-\[color-mix\(in_srgb,var\(--vui-surface-panel\)_\d+%,transparent\)\]/);
+    expect(styles.surfaceClass).toContain("!bg-[var(--vui-surface-panel)]");
   });
 
   it("keeps progress width on a Tailwind contract variable", () => {

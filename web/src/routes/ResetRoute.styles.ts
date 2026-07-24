@@ -1,5 +1,10 @@
+import {
+  vuiFlatPanelClass,
+  vuiOpaqueRowClass,
+} from "../design/vuiSurfaceRecipes";
+
 const routeClass = "grid h-full min-h-0 min-w-0 max-w-full grid-rows-[auto_minmax(0,1fr)] overflow-x-hidden";
-const panelSurface = "rounded-[var(--radius-panel)] border border-[color-mix(in_srgb,var(--vui-border-subtle)_72%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-panel)_62%,transparent)]";
+const panelSurface = `${vuiFlatPanelClass}`;
 const headerClass = "mx-2 mt-1.5 min-w-0 border-[color-mix(in_srgb,var(--vui-border-subtle)_78%,transparent)] bg-[var(--vui-gradient-route-soft),color-mix(in_srgb,var(--vui-surface-panel)_70%,transparent)]";
 const headerActionsClass = "flex flex-wrap items-center justify-end gap-2";
 const secondaryButtonClass = "inline-flex w-fit max-w-full min-h-8 items-center justify-center gap-[7px] rounded-[var(--radius-control)] border border-vui-border-soft bg-[color-mix(in_srgb,var(--vui-control-muted)_72%,transparent)] px-2.5 py-1.5 [font-size:var(--vui-font-xs)] text-vui-fg-secondary hover:border-[var(--border-strong)] hover:bg-[var(--vui-control-muted-hover)] hover:text-vui-fg-primary";
@@ -18,7 +23,7 @@ const copyTextClass = "m-0 min-w-0 break-words [overflow-wrap:anywhere] text-[va
 const actionRowClass = "flex min-w-0 flex-wrap items-center gap-2 pt-0.5";
 const actionMetaClass = "min-w-0 break-words [overflow-wrap:anywhere] [font-size:var(--vui-font-xs)] text-vui-fg-tertiary";
 const riskListClass = "grid max-h-[220px] min-w-0 content-start gap-1.5 overflow-auto [scrollbar-gutter:stable]";
-const riskItemClass = "grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-start gap-1.5 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--vui-border-subtle)_62%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-row)_58%,transparent)] px-2 py-1.5 text-vui-fg-secondary [&_svg]:mt-0.5 [&_svg]:shrink-0 [&_svg]:text-[var(--state-success)] [&_strong]:min-w-0 [&_strong]:break-words [&_strong]:[overflow-wrap:anywhere] [&_strong]:[font-size:var(--vui-font-xs)] [&_strong]:text-vui-fg-primary [&_small]:min-w-0 [&_small]:break-words [&_small]:[overflow-wrap:anywhere] [&_small]:[font-size:var(--vui-font-xs)] [&_small]:leading-[1.3] [&_small]:text-vui-fg-secondary";
+const riskItemClass = `grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-start gap-1.5 ${vuiOpaqueRowClass} px-2 py-1.5 text-vui-fg-secondary [&_svg]:mt-0.5 [&_svg]:shrink-0 [&_svg]:text-[var(--state-success)] [&_strong]:min-w-0 [&_strong]:break-words [&_strong]:[overflow-wrap:anywhere] [&_strong]:[font-size:var(--vui-font-xs)] [&_strong]:text-vui-fg-primary [&_small]:min-w-0 [&_small]:break-words [&_small]:[overflow-wrap:anywhere] [&_small]:[font-size:var(--vui-font-xs)] [&_small]:leading-[1.3] [&_small]:text-vui-fg-secondary`;
 const subtitleClass = "m-0 min-w-0 break-words [overflow-wrap:anywhere] text-[var(--route-topbar-subtitle-size)] leading-[1.25] text-vui-fg-secondary";
 
 const styles = {

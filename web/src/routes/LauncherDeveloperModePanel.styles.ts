@@ -1,5 +1,10 @@
-const panelSurface = "rounded-[var(--radius-panel)] border border-vui-border-subtle bg-[color-mix(in_srgb,var(--vui-surface-panel)_72%,transparent)]";
-const rowSurface = "rounded-[var(--radius-control)] border border-vui-border-subtle bg-[color-mix(in_srgb,var(--vui-surface-row)_72%,transparent)]";
+import {
+  vuiFlatPanelClass,
+  vuiOpaqueRowClass,
+} from "../design/vuiSurfaceRecipes";
+
+const panelSurface = `${vuiFlatPanelClass}`;
+const rowSurface = `${vuiOpaqueRowClass}`;
 const mutedControl =
   "inline-flex min-h-7 w-fit max-w-full flex-none items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-vui-border-soft bg-vui-control-muted px-2 [font-size:var(--vui-font-xs)] leading-none text-vui-fg-secondary no-underline hover:border-vui-border-soft hover:bg-vui-control-muted-hover hover:text-vui-fg-primary disabled:cursor-default disabled:opacity-55 [&[data-vui]]:min-w-0";
 const primaryControl =

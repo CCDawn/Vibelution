@@ -129,7 +129,7 @@ describe("UsageRoute layout contract", () => {
     expect(styles.metricBand).toBeTypeOf("string");
     expect(stylesSource).toContain("grid-cols-[minmax(0,1fr)_clamp(260px,24vw,360px)]");
     expect(stylesSource).toContain('from "../design/vuiSurfaceRecipes"');
-    expect(stylesSource).toContain("vuiOpaquePanelClass");
+    expect(stylesSource).toContain("vuiFlatPanelClass");
     expect(stylesSource).toContain("vuiOpaqueRowClass");
     expect(stylesSource).toContain("vuiDenseRowClass");
     expect(styles.compositionPanel).toContain("!bg-[var(--vui-surface-panel)]");

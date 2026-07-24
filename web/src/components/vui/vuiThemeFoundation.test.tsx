@@ -151,7 +151,7 @@ describe("VUI dual-theme foundation", () => {
     expect(formClassesSource).toContain("[color-scheme:inherit]");
     expect(nativeControlsSource).toContain('select[data-renderer="shadcn"] option');
     expect(nativeControlsSource).toContain("color-scheme: inherit");
-    expect(nativeControlsSource).toContain("background-color: var(--surface-input)");
+    expect(nativeControlsSource).toContain("background-color: var(--vui-surface-input)");
     expect(nativeControlsSource).toContain("color: var(--fg-primary)");
   });
 
@@ -183,12 +183,32 @@ describe("VUI dual-theme foundation", () => {
   it("exports shared opaque surface recipes for route style maps", () => {
     const recipesSource = readFileSync(resolve(designRoot, "vuiSurfaceRecipes.ts"), "utf8");
     expect(recipesSource).toContain("export const vuiOpaquePanelClass");
+    expect(recipesSource).toContain("export const vuiFlatPanelClass");
+    expect(recipesSource).toContain("export const vuiElevatedPanelClass");
     expect(recipesSource).toContain("export const vuiOpaqueRowClass");
     expect(recipesSource).toContain("export const vuiDenseRowClass");
+    expect(recipesSource).toContain("export const vuiGlassPanelClass");
     expect(recipesSource).toContain("!bg-[var(--vui-surface-panel)]");
     expect(recipesSource).toContain("!bg-[var(--vui-surface-row)]");
     expect(recipesSource).toContain("hover:bg-[var(--vui-surface-row-hover)]");
+    expect(recipesSource).toContain("shadow-[var(--vui-elevation-1)]");
+    expect(recipesSource).toContain("bg-[var(--vui-surface-glass)]");
     expect(recipesSource).not.toContain("var(--surface-");
+  });
+
+  it("keeps production CSS consumers on VUI surface tokens instead of legacy aliases", () => {
+    const baseSource = readFileSync(resolve(designRoot, "base.css"), "utf8");
+    const shellSource = readFileSync(resolve(designRoot, "workbench-shell.css"), "utf8");
+    const codeMirrorSource = readFileSync(resolve(designRoot, "codeMirrorTheme.ts"), "utf8");
+    expect(baseSource).toContain("var(--vui-surface-workspace)");
+    expect(baseSource).toContain("var(--vui-surface-input)");
+    expect(baseSource).not.toContain("var(--surface-");
+    expect(shellSource).toContain("var(--vui-surface-overlay)");
+    expect(shellSource).not.toContain("var(--surface-overlay)");
+    expect(codeMirrorSource).toContain("var(--vui-surface-workspace)");
+    expect(codeMirrorSource).not.toContain("var(--surface-code)");
+    expect(tokensSource).toContain("--vui-surface-input:");
+    expect(tokensSource).toContain("--vui-surface-overlay:");
   });
 
   it("defines the readable display scale as shared tokens instead of page-local micro text", () => {

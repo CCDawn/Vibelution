@@ -1,3 +1,7 @@
+import {
+  vuiFlatPanelClass,
+} from "../design/vuiSurfaceRecipes";
+
 const styles = {
   sourceCollectionExtractionPanels:
     "sourceCollectionExtractionPanels min-w-0 grid content-start gap-2 grid-cols-[minmax(0,1fr)]",
@@ -17,8 +21,7 @@ const styles = {
     "sourceCollectionStageWorkspace min-w-0 grid h-full min-h-[360px] max-w-full content-stretch gap-[var(--team-workbench-gap)] p-[var(--team-workbench-gap)] grid-rows-[auto_minmax(0,1fr)] overflow-hidden max-[760px]:!h-auto max-[760px]:min-h-0 max-[760px]:grid-rows-[auto_auto] max-[760px]:overflow-visible",
   sourceCollectionStageWorkspaceCompact:
     "sourceCollectionStageWorkspace sourceCollectionStageWorkspaceCompact min-w-0 grid h-auto min-h-0 shrink-0 max-w-full content-start gap-[var(--team-workbench-gap)] p-[var(--team-workbench-gap)] grid-rows-[auto_auto] overflow-visible",
-  sourceCollectionStageWorkspaceHeader:
-    "sourceCollectionStageWorkspaceHeader min-w-0 !grid grid-cols-[minmax(0,1fr)_minmax(260px,0.7fr)_max-content] items-start gap-2 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] p-2 max-[1180px]:grid-cols-[minmax(0,1fr)_auto] max-[760px]:grid-cols-[minmax(0,1fr)] [&>div]:min-w-0 [&>div:first-child]:grid [&>div:first-child]:gap-0.5 [&>div>strong]:min-w-0 [&>div>strong]:truncate [&>div>span]:min-w-0 [&>div>span]:break-words",
+  sourceCollectionStageWorkspaceHeader: `sourceCollectionStageWorkspaceHeader min-w-0 !grid grid-cols-[minmax(0,1fr)_minmax(260px,0.7fr)_max-content] items-start gap-2 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] ${vuiFlatPanelClass} p-2 max-[1180px]:grid-cols-[minmax(0,1fr)_auto] max-[760px]:grid-cols-[minmax(0,1fr)] [&>div]:min-w-0 [&>div:first-child]:grid [&>div:first-child]:gap-0.5 [&>div>strong]:min-w-0 [&>div>strong]:truncate [&>div>span]:min-w-0 [&>div>span]:break-words`,
 } as const;
 
 export default styles;

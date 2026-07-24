@@ -1,6 +1,9 @@
+import {
+  vuiFlatPanelClass,
+} from "../design/vuiSurfaceRecipes";
+
 const styles = {
-  sourceCollectionControlPanel:
-    "sourceCollectionControlPanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] p-2 !grid grid-cols-[minmax(0,1fr)] content-start gap-1.5 [&>*]:min-w-0",
+  sourceCollectionControlPanel: `sourceCollectionControlPanel min-w-0 ${vuiFlatPanelClass} p-2 !grid grid-cols-[minmax(0,1fr)] content-start gap-1.5 [&>*]:min-w-0`,
   workflowIngestionHeader:
     "workflowIngestionHeader min-w-0 !grid grid-cols-[minmax(0,1fr)_auto] items-start gap-2 max-[520px]:grid-cols-[minmax(0,1fr)] [&>div]:min-w-0 [&_strong]:block [&_strong]:truncate [&_span]:min-w-0 [&_span]:break-words",
   workflowTag:

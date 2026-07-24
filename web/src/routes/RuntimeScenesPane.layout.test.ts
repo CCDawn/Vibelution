@@ -5,13 +5,13 @@ import stylesSource from "./RuntimeScenesPane.styles.ts?raw";
 import paneSource from "./RuntimeScenesPane.tsx?raw";
 
 const backgroundTokens = (className: string) =>
-  className.split(/\s+/).filter((token) => token.startsWith("bg-[") || token.startsWith("[background:"));
+  className.split(/\s+/).filter((token) => token.startsWith("bg-[") || token.startsWith("!bg-[") || token.startsWith("!bg-[") || token.startsWith("[background:"));
 
 const expectBackgroundAware = (className: string) => {
   const tokens = backgroundTokens(className);
 
   expect(tokens.length).toBeGreaterThan(0);
-  expect(tokens.some((token) => token.includes("color-mix") && token.includes("transparent"))).toBe(true);
+  expect(tokens.some((token) => token.includes("vui-surface") || (token.includes("color-mix") && token.includes("transparent")))).toBe(true);
   expect(className).not.toContain("bg-[var(--vui-surface-glass)]");
   expect(className).not.toContain("shadow-[var(--vui-shadow-hairline)]");
 };

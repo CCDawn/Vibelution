@@ -1,12 +1,14 @@
+import {
+  vuiFlatPanelClass,
+} from "../design/vuiSurfaceRecipes";
+
 const styles = {
   countPill:
     "countPill min-w-0 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 [font-size:var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)]",
-  emptyDetail:
-    "emptyDetail min-w-0 grid min-h-[96px] content-center gap-1.5 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] p-2 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
+  emptyDetail: `emptyDetail min-w-0 grid min-h-[96px] content-center gap-1.5 ${vuiFlatPanelClass} p-2 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]`,
   panelEyebrow:
     "panelEyebrow min-w-0 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
-  ragContextCard:
-    "ragContextCard min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] p-2 border-[color-mix(in_srgb,var(--accent-warm)_24%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_8%,transparent)] text-[var(--accent-warm)]",
+  ragContextCard: `ragContextCard min-w-0 ${vuiFlatPanelClass} p-2 border-[color-mix(in_srgb,var(--accent-warm)_24%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_8%,transparent)] text-[var(--accent-warm)]`,
   ragContextList:
     "ragContextList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto border-[color-mix(in_srgb,var(--accent-warm)_24%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_8%,transparent)] text-[var(--accent-warm)]",
   ragContextMeta:
@@ -17,8 +19,7 @@ const styles = {
     "ragPolicyStrip min-w-0 flex flex-wrap items-center gap-1.5",
   ragPreviewHeader:
     "ragPreviewHeader min-w-0 flex flex-wrap items-center gap-1.5 px-1 py-0.5",
-  ragPreviewPanel:
-    "ragPreviewPanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] p-2",
+  ragPreviewPanel: `ragPreviewPanel min-w-0 ${vuiFlatPanelClass} p-2`,
 } as const;
 
 export default styles;

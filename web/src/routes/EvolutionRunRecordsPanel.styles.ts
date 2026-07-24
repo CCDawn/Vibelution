@@ -1,5 +1,9 @@
+import {
+  vuiOpaqueRowClass,
+} from "../design/vuiSurfaceRecipes";
+
 const rowSurface = "[border:1px_solid_var(--vui-border-subtle)] [border-radius:8px] [background:var(--vui-surface-row)]";
-const rowSurfaceSoft = "[border:1px_solid_var(--vui-border-subtle)] [border-radius:8px] [background:color-mix(in_srgb,_var(--vui-surface-row)_72%,_transparent)]";
+const rowSurfaceSoft = "[border:1px_solid_var(--vui-border-subtle)] [border-radius:8px] !bg-[var(--vui-surface-row)]";
 const actionSurface = "[border:1px_solid_var(--vui-border-subtle)] [border-radius:var(--radius-control)] [background:var(--vui-control-muted)] [color:var(--fg-primary)] [transition:border-color_140ms_ease,_background-color_140ms_ease,_color_140ms_ease] hover:[border-color:color-mix(in_srgb,_var(--accent-warm)_30%,_transparent)] hover:[background:var(--vui-control-muted-hover)]";
 
 const styles = {
@@ -99,8 +103,7 @@ const styles = {
     "flex [align-items:center] [justify-content:space-between] [gap:10px] [flex-wrap:wrap]",
   statusPill:
     "inline-flex [align-items:center] [justify-content:center] [max-width:100%] [min-height:28px] [padding:0_10px] [border-radius:999px] [border:1px_solid_var(--border-soft)] [font-size:var(--vui-font-xs)] [white-space:nowrap] [overflow:hidden] [text-overflow:ellipsis] [color:var(--accent-warm-2)] [background:color-mix(in_srgb,_var(--accent-warm)_12%,_transparent)]",
-  structuredEmptyState:
-    "grid [align-content:start] [gap:8px] [min-height:86px] [padding:10px_12px] [border-radius:8px] [border:1px_dashed_var(--vui-border-subtle)] [background:color-mix(in_srgb,_var(--vui-surface-row)_64%,_transparent)] [&_p]:[margin:0] [&_p]:[color:var(--fg-secondary)] [&_p]:[font-size:var(--vui-font-xs)] [&_p]:[line-height:1.36]",
+  structuredEmptyState: `grid [align-content:start] [gap:8px] [min-height:86px] [padding:10px_12px] [border-radius:8px] [border:1px_dashed_var(--vui-border-subtle)] ${vuiOpaqueRowClass} [&_p]:[margin:0] [&_p]:[color:var(--fg-secondary)] [&_p]:[font-size:var(--vui-font-xs)] [&_p]:[line-height:1.36]`,
   surface:
     "[border:1px_solid_var(--vui-border-subtle)] [border-radius:8px] [background:var(--vui-surface-panel)] [box-shadow:none]",
 };

@@ -122,10 +122,12 @@ function classTokenCount(className: string, token: string) {
 }
 
 function topLevelBackgroundTokenCount(className: string) {
-  return className.split(/\s+/).filter((item) => item.startsWith("bg-[")).length;
+  return className
+    .split(/\s+/)
+    .filter((item) => item.startsWith("bg-[") || item.startsWith("!bg-[")).length;
 }
 
-function expectOperationalSurface(className: string, surface = "bg-[var(--vui-surface-panel)]") {
+function expectOperationalSurface(className: string, surface = "var(--vui-surface-panel)") {
   expect(className).toContain(surface);
   expect(className).not.toContain("bg-[var(--vui-surface-glass)]");
   expect(className).not.toContain("shadow-[var(--vui-shadow-hairline)]");
@@ -433,7 +435,7 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("teamId: selectedTeam.teamId");
     expect(routeSource).toContain("teamId: selectedTeam?.teamId");
     expect(routeStyles.teamMemoryIndex).toContain("!flex-none");
-    expect(routeStyles.teamMemoryIndex).toContain("bg-[var(--vui-surface-panel)]");
+    expect(routeStyles.teamMemoryIndex).toContain("var(--vui-surface-panel)");
     expect(routeStyles.teamMemoryMemberTable).toContain("grid-cols-[minmax(0,1fr)]");
     expect(routeStyles.teamMemoryMemberTable).not.toContain("repeat(auto-fit");
     expect(routeStyles.teamMemoryMemberTable).not.toContain("repeat(auto-fill");
@@ -441,7 +443,7 @@ describe("TeamsRoute layout contract", () => {
     expect(routeStyles.teamMemoryMemberCard).not.toContain("bg-[var(--vui-surface-glass)]");
     expect(routeStyles.teamMemoryMemberCard).not.toContain("shadow-[var(--vui-shadow-hairline)]");
     expect(teamMemoryIndexPanelStyles.teamMemoryIndex).toContain("!flex-none");
-    expect(teamMemoryIndexPanelStyles.teamMemoryIndex).toContain("bg-[var(--vui-surface-panel)]");
+    expect(teamMemoryIndexPanelStyles.teamMemoryIndex).toContain("var(--vui-surface-panel)");
     expect(teamMemoryIndexPanelStyles.teamMemoryMemberTable).toContain("grid-cols-[minmax(0,1fr)]");
     expect(teamMemoryIndexPanelStyles.teamMemoryMemberTable).not.toContain("repeat(auto-fit");
     expect(teamMemoryIndexPanelStyles.teamMemoryMemberTable).not.toContain("repeat(auto-fill");
@@ -471,17 +473,17 @@ describe("TeamsRoute layout contract", () => {
   });
 
   it("keeps the research overview on a readable workbench surface instead of a transparent card wall", () => {
-    expect(routeStyles.workspaceResearch).toContain("bg-[var(--vui-surface-panel)]");
+    expect(routeStyles.workspaceResearch).toContain("var(--vui-surface-panel)");
     expect(routeStyles.workspaceResearch).toContain("rounded-none");
     expect(routeStyles.workspaceResearch).toContain("gap-2");
     expect(routeStyles.workspaceResearch).not.toContain("gap-[var(--team-workbench-gap)]");
 
-    expect(routeStyles.researchStageLauncher).toContain("bg-[var(--vui-surface-panel)]");
+    expect(routeStyles.researchStageLauncher).toContain("var(--vui-surface-panel)");
     expect(routeStyles.researchStageLauncher).toContain("rounded-[var(--radius-panel)]");
     expect(routeStyles.researchStageLauncher).toContain("grid");
     expect(routeStyles.researchStageLauncher).toContain("gap-3");
 
-    expect(routeStyles.teamMemoryIndex).toContain("bg-[var(--vui-surface-panel)]");
+    expect(routeStyles.teamMemoryIndex).toContain("var(--vui-surface-panel)");
     expect(routeStyles.teamMemoryIndex).toContain("rounded-[var(--radius-panel)]");
     expect(routeStyles.teamMemoryMemberTable).toContain("grid-cols-[minmax(0,1fr)]");
     expect(routeStyles.teamMemoryMemberTable).not.toContain("repeat(auto-fit");
@@ -2022,7 +2024,7 @@ describe("TeamsRoute layout contract", () => {
     expect(workflowGraphViewStyles.workflowGraphFrame).not.toContain("h-full");
     expect(workflowGraphViewStyles.workflowGraphFrame).toContain("overflow-auto");
     expect(routeStyles.canvasPanel).toContain("!flex");
-    expect(routeStyles.canvasPanel).not.toContain("bg-[var(--vui-surface-panel)]");
+    expect(routeStyles.canvasPanel).not.toContain("var(--vui-surface-panel)");
     expect(routeStyles.canvasPanel).not.toContain("bg-[var(--vui-surface-glass)]");
     expect(routeStyles.canvasPanel).not.toContain("shadow-[var(--vui-shadow-hairline)]");
     expect(routeStyles.canvas).toContain("bg-[var(--vui-surface-base)]");
@@ -2040,8 +2042,8 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain('elevation="panel"');
     expect(routeSource).not.toContain("<section className={styles.teamUnavailableCard}");
     expect(routeStyles.canvasPanel).not.toContain("rounded-[var(--radius-panel)]");
-    expect(routeStyles.canvasPanel).not.toContain("bg-[var(--vui-surface-panel)]");
-    expect(routeStyles.teamUnavailableSurface).not.toContain("bg-[var(--vui-surface-panel)]");
+    expect(routeStyles.canvasPanel).not.toContain("var(--vui-surface-panel)");
+    expect(routeStyles.teamUnavailableSurface).not.toContain("var(--vui-surface-panel)");
   });
 
   it("uses quiet workbench panels instead of nested glass card walls in the Team canvas", () => {
@@ -2058,9 +2060,9 @@ describe("TeamsRoute layout contract", () => {
       expect(routeStyles[key]).not.toContain("shadow-[var(--vui-shadow-hairline)]");
     }
 
-    expect(routeStyles.workflowPanel).toContain("bg-[var(--vui-surface-panel)]");
-    expect(routeStyles.teamRoundPanel).toContain("bg-[var(--vui-surface-panel)]");
-    expect(routeStyles.teamHistoryPanel).toContain("bg-[var(--vui-surface-panel)]");
+    expect(routeStyles.workflowPanel).toContain("var(--vui-surface-panel)");
+    expect(routeStyles.teamRoundPanel).toContain("var(--vui-surface-panel)");
+    expect(routeStyles.teamHistoryPanel).toContain("var(--vui-surface-panel)");
   });
 
   it("keeps Teams route-level research and workflow surfaces operational instead of decorative", () => {
@@ -2120,7 +2122,7 @@ describe("TeamsRoute layout contract", () => {
 
     for (const key of researchAgentCardToneKeys) {
       const composedClassName = `${routeStyles.researchStageAgentCard} ${routeStyles[key]}`;
-      expectOperationalSurface(composedClassName, "bg-[var(--vui-surface-row)]");
+      expectOperationalSurface(composedClassName, "var(--vui-surface-row)");
       expect(topLevelBackgroundTokenCount(composedClassName)).toBe(1);
       expect(composedClassName).not.toContain("bg-[color-mix");
     }
@@ -2184,7 +2186,7 @@ describe("TeamsRoute layout contract", () => {
       expectOperationalSurface(className);
     }
 
-    expect(teamSourceCollectionActiveStagePanelStyles.sourceCollectionStageWorkspaceHeader).toContain("bg-[var(--vui-surface-panel)]");
+    expect(teamSourceCollectionActiveStagePanelStyles.sourceCollectionStageWorkspaceHeader).toContain("var(--vui-surface-panel)");
     expect(teamSourceCollectionActiveStagePanelStyles.sourceCollectionStageWorkspaceHeader).not.toContain(
       "bg-[color:var(--source-workbench-card)]",
     );
@@ -2282,7 +2284,7 @@ describe("TeamsRoute layout contract", () => {
   });
 
   it("keeps Teams graph and candidate child panels light, text-safe, and mobile-fit", () => {
-    expect(teamWorkflowCandidatePreviewPanelStyles.workflowCandidateListPanel).toContain("bg-[var(--vui-surface-panel)]");
+    expect(teamWorkflowCandidatePreviewPanelStyles.workflowCandidateListPanel).toContain("var(--vui-surface-panel)");
     expect(teamWorkflowCandidatePreviewPanelStyles.workflowCandidateListPanel).toContain("overflow-hidden");
     expect(teamWorkflowCandidatePreviewPanelStyles.workflowCandidateListPanel).not.toContain("bg-[var(--vui-surface-glass)]");
     expect(teamWorkflowCandidatePreviewPanelStyles.workflowCandidateListPanel).not.toContain("shadow-[var(--vui-shadow-hairline)]");
@@ -2311,7 +2313,7 @@ describe("TeamsRoute layout contract", () => {
     expect(workflowGraphViewStyles.workflowGraphNode).not.toContain("shadow-[var(--vui-shadow-hairline)]");
 
     expect(teamSourceCollectionGraphPanelStyles.sourceCollectionGraphNodeListShell).toContain("max-w-full");
-    expect(teamSourceCollectionGraphPanelStyles.sourceCollectionGraphNodeListShell).toContain("bg-[var(--vui-surface-panel)]");
+    expect(teamSourceCollectionGraphPanelStyles.sourceCollectionGraphNodeListShell).toContain("var(--vui-surface-panel)");
     expect(teamSourceCollectionGraphPanelStyles.workflowCandidateList).toContain("[&_[data-vui-product=team-candidate-card]]:max-w-full");
     expect(teamSourceCollectionGraphPanelStyles.workflowCandidateList).toContain("[&_[data-vui=native-button]]:w-fit");
 

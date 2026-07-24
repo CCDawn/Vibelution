@@ -1,3 +1,7 @@
+import {
+  vuiFlatPanelClass,
+} from "../design/vuiSurfaceRecipes";
+
 const styles = {
   empty:
     "empty min-w-0 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
@@ -9,8 +13,7 @@ const styles = {
     "workflowIngestionBoundary min-w-0",
   workflowIngestionHeader:
     "workflowIngestionHeader min-w-0 flex flex-wrap items-center gap-1.5",
-  workflowSourceCollectionPanel:
-    "workflowSourceCollectionPanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] p-2",
+  workflowSourceCollectionPanel: `workflowSourceCollectionPanel min-w-0 ${vuiFlatPanelClass} p-2`,
   workflowSourceCollectionPlan:
     "workflowSourceCollectionPlan min-w-0",
   workflowSourceCollectionStats:

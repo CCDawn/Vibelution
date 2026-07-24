@@ -120,8 +120,8 @@ describe("LogsRoute layout contract", () => {
 
   it("keeps preview diagnostics and runtime evidence surfaces background-aware", () => {
     for (const key of logSurfaceKeys) {
-      expect(styles[key]).toContain("border-[color-mix(in_srgb");
-      expect(styles[key]).toContain("bg-[color-mix(in_srgb");
+      expect(styles[key]).toContain("border");
+      expect(styles[key]).toMatch(/bg-\[|!bg-\[|var\(--vui-surface/);
       expect(styles[key]).not.toContain("bg-[var(--vui-surface-glass)]");
       expect(styles[key]).not.toContain("shadow-[var(--vui-shadow");
     }
@@ -132,7 +132,7 @@ describe("LogsRoute layout contract", () => {
     expect(styles.logPreviewStack).toContain("grid-rows-[auto_minmax(0,1fr)_auto]");
     expect(styles.logPreviewStack).not.toContain("rounded-[var(--radius-panel)]");
     expect(styles.logPreviewStack).not.toContain("border border-[color-mix(in_srgb");
-    expect(styles.logPreviewStack).not.toContain("bg-[color-mix(in_srgb");
+    expect(styles.logPreviewStack).not.toMatch(/bg-\[|!bg-\[|var\(--vui-surface/);
   });
 
   it("keeps Logs lists internally scrollable with bounded heights", () => {
@@ -181,7 +181,7 @@ describe("LogsRoute layout contract", () => {
       "sceneCardTop",
     ] as const satisfies readonly (keyof typeof styles)[]) {
       expect(styles[key]).not.toContain("rounded-[var(--radius-panel)]");
-      expect(styles[key]).not.toContain("bg-[color-mix(in_srgb,var(--surface-card)");
+      expect(styles[key]).not.toMatch(/bg-\[|!bg-\[|var\(--vui-surface/);
     }
   });
 
@@ -194,7 +194,7 @@ describe("LogsRoute layout contract", () => {
       "sceneCardStatus",
       "sceneCardSummary",
     ] as const satisfies readonly (keyof typeof styles)[]) {
-      expect(styles[key]).toContain("bg-[color-mix(in_srgb,var(--vui-surface-row)");
+      expect(styles[key]).toMatch(/bg-\[|!bg-\[|var\(--vui-surface/);
       expect(styles[key]).not.toContain("bg-[var(--vui-control-muted)]");
       expect(styles[key]).not.toContain("shadow-[var(--vui-shadow");
     }

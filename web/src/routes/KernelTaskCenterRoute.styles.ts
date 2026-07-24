@@ -1,12 +1,17 @@
+import {
+  vuiFlatPanelClass,
+  vuiOpaqueRowClass,
+} from "../design/vuiSurfaceRecipes";
+
 const panelSurface =
-  "rounded-[var(--radius-panel)] border border-[color-mix(in_srgb,var(--vui-border-subtle)_82%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-panel)_64%,transparent)]";
+  `${vuiFlatPanelClass}`;
 const cardSurface =
-  "rounded-[var(--radius-panel)] border border-[color-mix(in_srgb,var(--vui-border-subtle)_68%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-panel)_56%,transparent)] p-2";
+  `${vuiFlatPanelClass} p-2`;
 const rowSurface =
-  "rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--vui-border-subtle)_58%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-row)_74%,transparent)] p-2";
+  `${vuiOpaqueRowClass} p-2`;
 
 const routeClass = "grid h-full min-h-0 min-w-0 max-w-full grid-rows-[auto_minmax(0,1fr)] overflow-hidden overflow-x-hidden";
-const headerClass = "mx-2 mt-1.5 min-w-0 border-[color-mix(in_srgb,var(--vui-border-subtle)_78%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-panel)_70%,transparent)]";
+const headerClass = `mx-2 mt-1.5 min-w-0 border-[color-mix(in_srgb,var(--vui-border-subtle)_78%,transparent)] ${vuiFlatPanelClass}`;
 const headerActionsClass = "flex flex-wrap items-center justify-end gap-2 max-[720px]:items-stretch max-[720px]:flex-col";
 const statusFilterClass = "flex w-fit max-w-full min-w-[210px] items-center gap-[7px] [font-size:var(--vui-font-xs)] text-vui-fg-secondary";
 const statusFilterLabelClass = "whitespace-nowrap [font-size:var(--vui-font-xs)] font-bold";
@@ -20,7 +25,7 @@ const panelHeaderClass = "flex items-center justify-between gap-2 border-b borde
 const eyebrowClass = "m-0 mb-0.5 [font-size:var(--vui-font-xs)] font-bold uppercase tracking-[0.08em] text-vui-fg-tertiary";
 const panelCountClass = "text-base text-vui-fg-primary";
 const taskListClass = "grid min-h-0 min-w-0 max-w-full content-start gap-[7px] overflow-auto overflow-x-hidden p-2 max-[1120px]:max-h-[min(38vh,320px)]";
-const taskRowClass = "grid !h-auto !min-h-[72px] w-full min-w-0 max-w-full content-start justify-self-stretch gap-1 overflow-hidden whitespace-normal rounded-[var(--radius-control)] border border-vui-border-soft bg-[color-mix(in_srgb,var(--vui-surface-row)_74%,transparent)] px-2 py-1.5 text-left text-vui-fg-primary hover:border-[var(--border-strong)] hover:bg-[color-mix(in_srgb,var(--vui-surface-row-hover)_84%,transparent)] [&_[data-slot=vui-button-content]]:grid [&_[data-slot=vui-button-content]]:min-w-0 [&_[data-slot=vui-button-content]]:w-full [&_[data-slot=vui-button-content]]:items-start [&_[data-slot=vui-button-content]]:justify-stretch [&_[data-slot=vui-button-content]]:gap-1 [&_[data-slot=vui-button-label]]:contents [&_[data-slot=vui-button-label]]:overflow-visible [&_[data-slot=vui-button-label]]:whitespace-normal";
+const taskRowClass = `grid !h-auto !min-h-[72px] w-full min-w-0 max-w-full content-start justify-self-stretch gap-1 overflow-hidden whitespace-normal ${vuiOpaqueRowClass} px-2 py-1.5 text-left text-vui-fg-primary hover:border-[var(--border-strong)] hover:!bg-[var(--vui-surface-row-hover)] [&_[data-slot=vui-button-content]]:grid [&_[data-slot=vui-button-content]]:min-w-0 [&_[data-slot=vui-button-content]]:w-full [&_[data-slot=vui-button-content]]:items-start [&_[data-slot=vui-button-content]]:justify-stretch [&_[data-slot=vui-button-content]]:gap-1 [&_[data-slot=vui-button-label]]:contents [&_[data-slot=vui-button-label]]:overflow-visible [&_[data-slot=vui-button-label]]:whitespace-normal`;
 const taskRowSelectedClass = "border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[var(--vui-surface-row-hover)] shadow-[var(--vui-shadow-inset-accent)]";
 const taskRowTopClass = "grid w-full min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2";
 const taskRowTitleClass = "block min-w-0 truncate";
@@ -38,11 +43,11 @@ const sectionHeaderClass = "flex items-center justify-between gap-2";
 const sectionTitleClass = "m-0 text-[0.9rem] text-vui-fg-primary";
 const sectionCountClass = "[font-size:var(--vui-font-xs)] text-vui-fg-tertiary";
 const deliveryGridClass = "grid min-h-0 min-w-0 max-w-full content-start gap-1.5 overflow-auto overflow-x-hidden pr-1";
-const deliveryRowClass = "grid min-w-0 max-w-full gap-1 rounded-[var(--radius-control)] bg-[color-mix(in_srgb,var(--vui-surface-row)_64%,transparent)] p-[7px]";
+const deliveryRowClass = `grid min-w-0 max-w-full gap-1 rounded-[var(--radius-control)] ${vuiOpaqueRowClass} p-[7px]`;
 const deliveryRowTopClass = "grid min-w-0 max-w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-2 [&>strong]:min-w-0 [&>strong]:truncate";
 const mutedLineClass = "min-w-0 break-words [font-size:var(--vui-font-xs)] leading-[1.35] text-vui-fg-secondary";
 const warningLineClass = "min-w-0 break-words [font-size:var(--vui-font-xs)] not-italic leading-[1.35] text-[var(--state-warning)]";
-const lifecycleSectionClass = "grid min-h-0 min-w-0 max-w-full grid-rows-[auto_minmax(0,1fr)] gap-[7px] overflow-hidden rounded-[var(--radius-panel)] border border-vui-border-soft bg-[color-mix(in_srgb,var(--vui-surface-panel)_72%,transparent)] p-2";
+const lifecycleSectionClass = `grid min-h-0 min-w-0 max-w-full grid-rows-[auto_minmax(0,1fr)] gap-[7px] overflow-hidden ${vuiFlatPanelClass} p-2`;
 const lifecycleTimelineClass = "grid min-h-0 min-w-0 max-w-full content-start gap-1.5 overflow-auto overflow-x-hidden pr-1";
 const lifecycleRowClass = `grid grid-cols-[14px_minmax(0,1fr)] gap-[7px] ${rowSurface}`;
 const lifecycleDotClass = "mt-[5px] h-[9px] w-[9px] rounded-full bg-vui-fg-tertiary";
@@ -55,7 +60,7 @@ const refListClass = "mt-[5px] flex min-w-0 max-w-full flex-wrap gap-[5px]";
 const evidenceRefListClass = "mt-[5px] flex min-w-0 max-w-full flex-wrap gap-[5px]";
 const emptyInlineClass = "[font-size:var(--vui-font-xs)] leading-[1.35] text-vui-fg-secondary";
 const statusPillBaseClass = "inline-flex min-h-[22px] items-center whitespace-nowrap rounded-full border border-vui-border-soft px-[7px] [font-size:var(--vui-font-xs)]";
-const emptyStateClass = "grid min-h-16 content-start gap-1 break-words rounded-[var(--radius-panel)] border border-dashed border-vui-border-soft bg-[color-mix(in_srgb,var(--vui-surface-row)_74%,transparent)] p-2.5";
+const emptyStateClass = `grid min-h-16 content-start gap-1 break-words rounded-[var(--radius-panel)] border border-dashed border-vui-border-soft ${vuiOpaqueRowClass} p-2.5`;
 
 const styles = {
   routeClass,

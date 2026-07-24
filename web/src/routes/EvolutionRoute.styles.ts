@@ -3,14 +3,19 @@
 // system). Declarations are Tailwind arbitrary properties
 // emitting byte-identical CSS; descendant .a .b rules were flattened onto the
 // child key. Edit values directly.
+import {
+  vuiFlatPanelClass,
+  vuiOpaqueRowClass,
+} from "../design/vuiSurfaceRecipes";
+
 const panelSurface =
   "[border:1px_solid_var(--vui-border-subtle)] [border-radius:var(--radius-panel)] [background:var(--vui-surface-panel)] [box-shadow:none]";
 const panelSurfaceSoft =
-  "[border:1px_solid_var(--vui-border-subtle)] [border-radius:8px] [background:color-mix(in_srgb,_var(--vui-surface-panel)_72%,_transparent)]";
+  "[border:1px_solid_var(--vui-border-subtle)] [border-radius:8px] !bg-[var(--vui-surface-panel)]";
 const rowSurface =
   "[border:1px_solid_var(--vui-border-subtle)] [border-radius:8px] [background:var(--vui-surface-row)]";
 const rowSurfaceSoft =
-  "[border:1px_solid_var(--vui-border-subtle)] [border-radius:8px] [background:color-mix(in_srgb,_var(--vui-surface-row)_72%,_transparent)]";
+  "[border:1px_solid_var(--vui-border-subtle)] [border-radius:8px] !bg-[var(--vui-surface-row)]";
 const actionSurface =
   "[border:1px_solid_var(--vui-border-subtle)] [border-radius:var(--radius-control)] [background:var(--vui-control-muted)] [color:var(--fg-primary)] [transition:border-color_140ms_ease,_background-color_140ms_ease,_color_140ms_ease] hover:[border-color:color-mix(in_srgb,_var(--accent-warm)_30%,_transparent)] hover:[background:var(--vui-control-muted-hover)]";
 const pillSurface =
@@ -61,8 +66,7 @@ const styles = {
     "grid [grid-template-columns:repeat(4,_minmax(0,_1fr))] [gap:8px] min-w-0 max-[640px]:[grid-template-columns:repeat(2,_minmax(0,_1fr))]",
   caseOverviewEvidenceItem:
     "grid [gap:3px] min-w-0 [padding-bottom:8px] [border-bottom:1px_solid_var(--border-hairline)] [&_span]:[color:var(--fg-tertiary)] [&_span]:[font-size:var(--vui-font-xs)] [&_span]:[font-weight:650] [&_strong]:min-w-0 [&_strong]:[color:var(--fg-primary)] [&_strong]:[font-size:var(--vui-font-xs)] [&_strong]:[line-height:1.3] [&_strong]:[overflow:hidden] [&_strong]:[text-overflow:ellipsis] [&_strong]:[white-space:nowrap]",
-  caseOverviewEmptyState:
-    "grid min-w-0 min-h-[120px] [place-items:center] [align-self:stretch] [padding:14px] [border:1px_dashed_var(--vui-border-subtle)] [border-radius:8px] [background:color-mix(in_srgb,_var(--vui-surface-row)_54%,_transparent)] [text-align:center] [&_strong]:min-w-0 [&_strong]:[max-width:100%] [&_strong]:[overflow:hidden] [&_strong]:[text-overflow:ellipsis] [&_strong]:[white-space:nowrap] [&_strong]:[color:var(--fg-primary)] [&_strong]:[font-size:var(--vui-font-sm)] [&_span]:[max-width:min(560px,_100%)] [&_span]:[color:var(--fg-secondary)] [&_span]:[font-size:var(--vui-font-xs)] [&_span]:[line-height:1.45] [&_span]:[overflow-wrap:anywhere]",
+  caseOverviewEmptyState: `grid min-w-0 min-h-[120px] [place-items:center] [align-self:stretch] [padding:14px] [border:1px_dashed_var(--vui-border-subtle)] [border-radius:8px] ${vuiOpaqueRowClass} [text-align:center] [&_strong]:min-w-0 [&_strong]:[max-width:100%] [&_strong]:[overflow:hidden] [&_strong]:[text-overflow:ellipsis] [&_strong]:[white-space:nowrap] [&_strong]:[color:var(--fg-primary)] [&_strong]:[font-size:var(--vui-font-sm)] [&_span]:[max-width:min(560px,_100%)] [&_span]:[color:var(--fg-secondary)] [&_span]:[font-size:var(--vui-font-xs)] [&_span]:[line-height:1.45] [&_span]:[overflow-wrap:anywhere]`,
   caseOverviewGrid:
     "grid [grid-template-columns:repeat(2,_minmax(0,_1fr))] [gap:8px] min-w-0 max-[640px]:[grid-template-columns:1fr]",
   caseOverviewItem:
@@ -71,8 +75,7 @@ const styles = {
     "grid [grid-template-rows:auto_minmax(120px,_1fr)] [align-content:stretch] [gap:10px] [flex:1_1_0] min-w-0 min-h-0 [height:100%] [padding:10px] [overflow:auto] bg-[var(--vui-surface-base)] [background-image:linear-gradient(to_right,color-mix(in_srgb,var(--vui-border-subtle)_24%,transparent)_1px,transparent_1px),linear-gradient(to_bottom,color-mix(in_srgb,var(--vui-border-subtle)_18%,transparent)_1px,transparent_1px)] [background-size:40px_40px]",
   casePreflightIssue:
     "grid [gap:5px] [padding:10px_11px] [border:1px_solid_color-mix(in_srgb,_var(--state-warning)_36%,_var(--border-hairline))] [border-radius:8px] [background:color-mix(in_srgb,_var(--state-warning)_9%,_var(--vui-surface-row))] [color:var(--fg-secondary)] [&_strong]:[color:var(--fg-primary)] [&_strong]:[font-size:var(--vui-font-xs)] [&_span]:[color:var(--fg-secondary)] [&_span]:[font-size:var(--vui-font-xs)] [&_span]:[line-height:1.4] [&_span]:[overflow-wrap:anywhere] [&_small]:[font-size:var(--vui-font-xs)] [&_small]:[line-height:1.4] [&_small]:[overflow-wrap:anywhere] [&_small]:[color:var(--fg-tertiary)]",
-  caseRawEvidence:
-    "[flex:0_0_auto] [overflow:auto] [background:color-mix(in_srgb,_var(--vui-surface-row)_70%,_transparent)] [max-height:none]",
+  caseRawEvidence: `[flex:0_0_auto] [overflow:auto] ${vuiOpaqueRowClass} [max-height:none]`,
   caseTraceBody:
     `grid [gap:8px] min-w-0 [margin:0_0_4px_33px] [padding:10px_11px] ${rowSurface}`,
   caseTraceChevron:
@@ -87,18 +90,15 @@ const styles = {
     "[display:-webkit-box] min-w-0 [overflow:hidden] [color:var(--fg-tertiary)] [font-size:var(--vui-font-xs)] [line-height:1.35] [-webkit-box-orient:vertical] [-webkit-line-clamp:2]",
   caseTraceSection:
     "grid [gap:5px] min-w-0 [&_span]:[color:var(--fg-tertiary)] [&_span]:[font-size:var(--vui-font-xs)] [&_span]:[font-weight:700] [&_span]:[letter-spacing:0.04em] [&_span]:[text-transform:uppercase] [&_pre]:[margin:0] [&_pre]:[white-space:pre-wrap] [&_pre]:[overflow-wrap:anywhere] [&_pre]:[max-height:360px] [&_pre]:[overflow:auto] [&_pre]:[color:var(--fg-secondary)] [&_pre]:[font-size:var(--vui-font-xs)] [&_pre]:[line-height:1.55]",
-  caseTraceSectionJson:
-    "[&_pre]:[padding:8px_9px] [&_pre]:[border-radius:6px] [&_pre]:[background:color-mix(in_srgb,_var(--vui-surface-panel)_82%,_transparent)] [&_pre]:[font-family:var(--font-mono)] [&_pre]:[font-size:var(--vui-font-xs)]",
+  caseTraceSectionJson: `[&_pre]:[padding:8px_9px] [&_pre]:[border-radius:6px] [&_pre]:${vuiFlatPanelClass} [&_pre]:[font-family:var(--font-mono)] [&_pre]:[font-size:var(--vui-font-xs)]`,
   caseTraceStack:
     "[position:relative] [z-index:1] flex [flex:1_1_auto] [flex-direction:column] [justify-content:flex-end] [gap:8px] min-w-0 [min-height:min-content]",
   caseTraceStateGrid:
     "grid [gap:7px] min-w-0",
   caseTraceStateRow:
     "[&_dd]:[margin:0] [&_dd]:[white-space:pre-wrap] [&_dd]:[overflow-wrap:anywhere] grid [gap:3px] min-w-0 [margin:0] [&_dt]:[color:var(--fg-tertiary)] [&_dt]:[font-size:var(--vui-font-xs)] [&_dt]:[font-weight:700] [&_dt]:[letter-spacing:0.04em] [&_dt]:[text-transform:uppercase] [&_dd]:[color:var(--fg-secondary)] [&_dd]:[font-size:var(--vui-font-xs)] [&_dd]:[line-height:1.55]",
-  caseTraceStatus:
-    "[color:var(--fg-tertiary)] [font-size:var(--vui-font-xs)] [white-space:nowrap] [padding:1px_5px] [border:1px_solid_color-mix(in_srgb,_var(--fg-tertiary)_14%,_transparent)] [border-radius:999px] [background:color-mix(in_srgb,_var(--vui-surface-panel)_78%,_transparent)]",
-  caseTraceSummary:
-    "grid w-full [grid-template-columns:26px_minmax(0,_1fr)_auto_18px] [gap:10px] [align-items:start] min-w-0 [min-height:48px] [padding:9px_8px_9px_0] [border:1px_solid_transparent] [border-radius:9px] [color:var(--fg-secondary)] [cursor:pointer] [font:inherit] [text-align:left] hover:[border-color:color-mix(in_srgb,_var(--accent-cool)_26%,_transparent)] hover:[background:color-mix(in_srgb,_var(--vui-surface-row)_88%,_transparent)] hover:[outline:none] focus-visible:[border-color:color-mix(in_srgb,_var(--accent-cool)_26%,_transparent)] focus-visible:[background:color-mix(in_srgb,_var(--vui-surface-row)_88%,_transparent)] focus-visible:[outline:none] [border-left-color:color-mix(in_srgb,_var(--state-error)_58%,_transparent)] [background:color-mix(in_srgb,_var(--state-error)_8%,_var(--vui-surface-row))]",
+  caseTraceStatus: `[color:var(--fg-tertiary)] [font-size:var(--vui-font-xs)] [white-space:nowrap] [padding:1px_5px] [border:1px_solid_color-mix(in_srgb,_var(--fg-tertiary)_14%,_transparent)] [border-radius:999px] ${vuiFlatPanelClass}`,
+  caseTraceSummary: `grid w-full [grid-template-columns:26px_minmax(0,_1fr)_auto_18px] [gap:10px] [align-items:start] min-w-0 [min-height:48px] [padding:9px_8px_9px_0] [border:1px_solid_transparent] [border-radius:9px] [color:var(--fg-secondary)] [cursor:pointer] [font:inherit] [text-align:left] hover:[border-color:color-mix(in_srgb,_var(--accent-cool)_26%,_transparent)] hover:${vuiOpaqueRowClass} hover:[outline:none] focus-visible:[border-color:color-mix(in_srgb,_var(--accent-cool)_26%,_transparent)] focus-visible:!bg-[var(--vui-surface-row)] focus-visible:[outline:none] [border-left-color:color-mix(in_srgb,_var(--state-error)_58%,_transparent)] [background:color-mix(in_srgb,_var(--state-error)_8%,_var(--vui-surface-row))]`,
   caseTraceTime:
     "[color:var(--fg-tertiary)] [font-size:var(--vui-font-xs)] [white-space:nowrap]",
   caseTraceTimeline:
@@ -111,8 +111,7 @@ const styles = {
     "[&_.caseTraceIcon]:[color:color-mix(in_srgb,_var(--accent-warm)_80%,_var(--fg-secondary))] [&_.caseTraceSummary]:[border-left-color:color-mix(in_srgb,_var(--accent-warm)_48%,_transparent)]",
   caseTraceTurn_error:
     "[&_.caseTraceIcon]:[color:var(--state-error)] [&_.caseTraceSummary]:[border-left-color:color-mix(in_srgb,_var(--state-error)_58%,_transparent)] [&_.caseTraceSummary]:[background:color-mix(in_srgb,_var(--state-error)_8%,_var(--vui-surface-row))]",
-  caseTraceTurn_input:
-    "[&_.caseTraceSummary]:[background:color-mix(in_srgb,_var(--vui-surface-panel)_46%,_transparent)]",
+  caseTraceTurn_input: `[&_.caseTraceSummary]:${vuiFlatPanelClass}`,
   caseTraceTurn_thought:
     "[&_.caseTraceIcon]:[color:color-mix(in_srgb,_var(--accent-warm)_80%,_var(--fg-secondary))] [&_.caseTraceSummary]:[border-left-color:color-mix(in_srgb,_var(--accent-warm)_48%,_transparent)]",
   caseTraceTurn_tool:
@@ -492,8 +491,7 @@ const styles = {
     "grid [align-content:start] [gap:8px] [height:100%] min-h-0 [padding:10px_12px_12px] max-[1360px]:[grid-column:1_/_-1]",
   stripItem:
     compactMetricSurface,
-  structuredEmptyState:
-    "grid [align-content:start] [gap:8px] [min-height:86px] [padding:10px_12px] [border-radius:8px] [border:1px_dashed_var(--vui-border-subtle)] [background:color-mix(in_srgb,_var(--vui-surface-row)_64%,_transparent)] [&_p]:[margin:0] [&_p]:[color:var(--fg-secondary)] [&_p]:[font-size:var(--vui-font-xs)] [&_p]:[line-height:1.36]",
+  structuredEmptyState: `grid [align-content:start] [gap:8px] [min-height:86px] [padding:10px_12px] [border-radius:8px] [border:1px_dashed_var(--vui-border-subtle)] ${vuiOpaqueRowClass} [&_p]:[margin:0] [&_p]:[color:var(--fg-secondary)] [&_p]:[font-size:var(--vui-font-xs)] [&_p]:[line-height:1.36]`,
   subtitle:
     "[margin:0] [max-width:none] [color:var(--fg-secondary)] [font-size:var(--route-topbar-subtitle-size)] [overflow:hidden] [text-overflow:ellipsis] [white-space:nowrap]",
   summaryMetricStrip:

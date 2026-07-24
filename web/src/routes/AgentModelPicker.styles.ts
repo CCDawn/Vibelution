@@ -1,19 +1,23 @@
+import {
+  vuiFlatPanelClass,
+} from "../design/vuiSurfaceRecipes";
+
 const styles = {
   contextualHintRow: "flex min-w-0 items-center gap-1.5",
   root: "relative grid min-w-0 gap-1.5",
-  trigger: "!flex !min-h-9 !w-full !justify-between !rounded-[10px] !border !border-[var(--vui-border-subtle)] !bg-[var(--vui-surface-panel)] !px-2.5 !text-left !shadow-none hover:!bg-[var(--vui-control-muted)] [&_[data-slot=vui-button-content]]:!w-full [&_[data-slot=vui-button-content]]:!justify-between",
+  trigger: `!flex !min-h-9 !w-full !justify-between !rounded-[10px] !border !border-[var(--vui-border-subtle)] ${vuiFlatPanelClass} !px-2.5 !text-left !shadow-none hover:!bg-[var(--vui-control-muted)] [&_[data-slot=vui-button-content]]:!w-full [&_[data-slot=vui-button-content]]:!justify-between`,
   triggerCopy: "flex min-w-0 flex-1 items-center gap-2",
   triggerLabel: "min-w-0 flex-1 truncate [font-size:var(--vui-font-sm)] text-[var(--fg-primary)]",
   triggerMeta: "shrink-0 [font-size:var(--vui-font-xs)] font-normal text-[var(--fg-tertiary)]",
   dialogLayer: "fixed inset-0 z-[100] grid place-items-start justify-items-center overflow-y-auto bg-[color-mix(in_srgb,var(--bg-canvas)_46%,transparent)] p-6 pt-[max(24px,8vh)]",
-  panel: "grid w-[min(760px,calc(100vw-48px))] max-h-[calc(100vh-48px)] min-w-0 [grid-template-rows:auto_auto_minmax(0,1fr)] gap-3 overflow-hidden rounded-[14px] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] p-3 shadow-[var(--vui-shadow-soft)]",
+  panel: `grid w-[min(760px,calc(100vw-48px))] max-h-[calc(100vh-48px)] min-w-0 [grid-template-rows:auto_auto_minmax(0,1fr)] gap-3 overflow-hidden rounded-[14px] border border-[var(--vui-border-subtle)] ${vuiFlatPanelClass} p-3 shadow-[var(--vui-shadow-soft)]`,
   panelHeader: "flex items-start justify-between gap-3 px-1 pt-0.5",
   panelTitle: "grid min-w-0 gap-0.5",
   panelTitleText: "[font-size:var(--vui-font-sm)] font-semibold text-[var(--fg-primary)]",
   search: "w-full",
   list: "grid min-h-0 min-w-0 gap-2 overflow-y-auto overflow-x-hidden pr-0.5",
   group: "grid min-w-0 gap-1",
-  groupHeader: "sticky top-0 z-[1] flex min-w-0 items-center justify-between gap-2 bg-[var(--vui-surface-panel)] px-1 py-1 [font-size:var(--vui-font-xs)] font-semibold text-[var(--fg-secondary)]",
+  groupHeader: `sticky top-0 z-[1] flex min-w-0 items-center justify-between gap-2 ${vuiFlatPanelClass} px-1 py-1 [font-size:var(--vui-font-xs)] font-semibold text-[var(--fg-secondary)]`,
   groupCount: "font-normal text-[var(--fg-tertiary)]",
   option: "!grid !h-auto !min-h-[54px] !w-full !min-w-0 !grid-cols-[minmax(0,1fr)_auto] !items-center !gap-3 !rounded-[10px] !border !border-transparent !bg-transparent !px-2.5 !py-2 !text-left !shadow-none hover:!border-[var(--vui-border-subtle)] hover:!bg-[var(--vui-control-muted)] focus-visible:!border-[var(--accent-cool)] [&_[data-slot=vui-button-content]]:contents",
   optionSelected: "!border-[color-mix(in_srgb,var(--accent-cool)_42%,transparent)] !bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)]",

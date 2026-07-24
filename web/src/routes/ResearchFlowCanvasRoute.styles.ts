@@ -9,6 +9,11 @@
 // coverage for dynamic `styles[`prefix_${tone}`]` lookups. Typed loosely as
 // Record<string, string> because those dynamic template indexes cannot index a
 // literal-keyed map; tightening is a follow-up, not Phase 0.
+import {
+  vuiFlatPanelClass,
+  vuiOpaqueRowClass,
+} from "../design/vuiSurfaceRecipes";
+
 const styles: Record<string, string> = {
   agentRoleTag:
     "agentRoleTag min-w-0 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 [font-size:var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)] border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
@@ -36,8 +41,7 @@ const styles: Record<string, string> = {
     "canvasPanning min-w-0 grid min-h-0 gap-2 p-2",
   canvasScroller:
     "canvasScroller min-w-0 grid h-full min-h-0 gap-2 overflow-auto p-2",
-  canvasShell:
-    "canvasShell min-w-0 max-w-full grid h-full min-h-0 grid-rows-[auto_auto_minmax(0,1fr)] overflow-hidden bg-[color-mix(in_srgb,var(--vui-surface-panel)_38%,transparent)] text-[var(--fg-primary)] gap-2 p-2 max-[430px]:p-1.5",
+  canvasShell: `canvasShell min-w-0 max-w-full grid h-full min-h-0 grid-rows-[auto_auto_minmax(0,1fr)] overflow-hidden ${vuiFlatPanelClass} text-[var(--fg-primary)] gap-2 p-2 max-[430px]:p-1.5`,
   canvasViewport:
     "canvasViewport min-w-0 grid min-h-full gap-2 p-2 w-[var(--research-flow-canvas-viewport-width)] h-[var(--research-flow-canvas-viewport-height)]",
   edge:
@@ -92,8 +96,7 @@ const styles: Record<string, string> = {
     "edgeType_general min-w-0",
   edgeType_human_handoff:
     "edgeType_human_handoff min-w-0",
-  edgeType_idle:
-    "edgeType_idle min-w-0 border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] text-[var(--fg-tertiary)]",
+  edgeType_idle: `edgeType_idle min-w-0 border-[var(--vui-border-subtle)] ${vuiOpaqueRowClass} text-[var(--fg-tertiary)]`,
   edgeType_info:
     "edgeType_info min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
   edgeType_memory:
@@ -146,8 +149,7 @@ const styles: Record<string, string> = {
     "edgeType_warning min-w-0 border-[color-mix(in_srgb,var(--state-warning)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_10%,transparent)] text-[var(--state-warning)]",
   edges:
     "edges min-w-0",
-  editorStack:
-    "editorStack min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[color-mix(in_srgb,var(--vui-surface-row)_58%,transparent)] p-2",
+  editorStack: `editorStack min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] ${vuiOpaqueRowClass} p-2`,
   emptyInspector:
     "emptyInspector min-w-0 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
   emptyState:
@@ -256,8 +258,7 @@ const styles: Record<string, string> = {
     "nodeStatus_general min-w-0",
   nodeStatus_human_handoff:
     "nodeStatus_human_handoff min-w-0",
-  nodeStatus_idle:
-    "nodeStatus_idle min-w-0 border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] text-[var(--fg-tertiary)]",
+  nodeStatus_idle: `nodeStatus_idle min-w-0 border-[var(--vui-border-subtle)] ${vuiOpaqueRowClass} text-[var(--fg-tertiary)]`,
   nodeStatus_info:
     "nodeStatus_info min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
   nodeStatus_memory:
@@ -376,8 +377,7 @@ const styles: Record<string, string> = {
     "route min-w-0 grid h-full min-h-0 grid-rows-[auto_auto_minmax(0,1fr)] overflow-hidden bg-transparent text-[var(--fg-primary)]",
   saveStatusError:
     "saveStatusError min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
-  saveStatusIdle:
-    "saveStatusIdle min-w-0 border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] text-[var(--fg-tertiary)]",
+  saveStatusIdle: `saveStatusIdle min-w-0 border-[var(--vui-border-subtle)] ${vuiOpaqueRowClass} text-[var(--fg-tertiary)]`,
   saveStatusSuccess:
     "saveStatusSuccess min-w-0 border-[color-mix(in_srgb,var(--state-success)_32%,transparent)] bg-[color-mix(in_srgb,var(--state-success)_9%,transparent)] text-[var(--state-success)]",
   saveStatusWarning:
@@ -412,8 +412,7 @@ const styles: Record<string, string> = {
     "status_general min-w-0",
   status_human_handoff:
     "status_human_handoff min-w-0",
-  status_idle:
-    "status_idle min-w-0 border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] text-[var(--fg-tertiary)]",
+  status_idle: `status_idle min-w-0 border-[var(--vui-border-subtle)] ${vuiOpaqueRowClass} text-[var(--fg-tertiary)]`,
   status_info:
     "status_info min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
   status_memory:
@@ -466,8 +465,7 @@ const styles: Record<string, string> = {
     "status_warning min-w-0 border-[color-mix(in_srgb,var(--state-warning)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_10%,transparent)] text-[var(--state-warning)]",
   twoColumns:
     "twoColumns min-w-0 grid gap-2 !grid grid-cols-[repeat(2,minmax(0,1fr))] gap-2.5 max-[430px]:grid-cols-1",
-  validationConnectionNotice:
-    "validationConnectionNotice min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[color-mix(in_srgb,var(--vui-surface-row)_58%,transparent)] p-2",
+  validationConnectionNotice: `validationConnectionNotice min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] ${vuiOpaqueRowClass} p-2`,
   validationIssue:
     "validationIssue min-w-0",
   validationIssueError:
