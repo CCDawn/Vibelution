@@ -997,7 +997,8 @@ const styles: Record<string, string> = {
   composerToolbar: composerToolbarShell,
   composerToolbarCodex: composerToolbarCodexShell,
   composerToolbarStart: "vui-components-conversationview composerToolbarStart flex min-w-0 items-center gap-1.5",
-  composerToolbarEnd: "vui-components-conversationview composerToolbarEnd ml-auto flex min-w-0 items-center justify-end gap-1",
+  // End cluster: inference control may shrink; send/stop stays shrink-0 and fully visible.
+  composerToolbarEnd: "vui-components-conversationview composerToolbarEnd ml-auto flex min-w-0 max-w-full items-center justify-end gap-1.5 [&_[data-testid=conversation-inference-control]]:min-w-0 [&_[data-testid=conversation-inference-control]]:max-w-[min(200px,42vw)]",
   inputCodex: "vui-components-conversationview inputCodex min-h-[36px] max-h-[180px] w-full resize-none overflow-y-auto !border-0 !bg-transparent !p-0 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-primary)] !shadow-none placeholder:text-[var(--fg-tertiary)] focus:!ring-0",
   sessionMeta:
     "vui-components-conversationview sessionMeta min-w-0 flex flex-wrap items-center gap-1.5",

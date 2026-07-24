@@ -21,9 +21,10 @@ type ConversationInferenceControlProps = {
   onReasoningEffortChange: (reasoningEffort: string) => void;
 };
 
-const MENU_WIDTH = 220;
-const MENU_GAP = 8;
+const MENU_WIDTH = 200;
+const MENU_GAP = 6;
 const VIEWPORT_PAD = 8;
+const MENU_MAX_HEIGHT = 260;
 
 export function resolveConversationInferenceEffort(
   model: SessionLlmModelOption | null,
@@ -41,20 +42,37 @@ export function resolveConversationInferenceEffort(
   };
 }
 
+type PlaceMenuInput = {
+  top: number;
+  bottom: number;
+  right: number;
+  left?: number;
+};
+
 /** Place the menu in viewport space so overflow:hidden composer shells cannot clip it. */
 export function placeInferenceMenu(
-  triggerRect: { top: number; bottom: number; right: number },
+  triggerRect: PlaceMenuInput,
   viewport: { width: number; height: number } = {
     width: typeof window !== "undefined" ? window.innerWidth : 1280,
     height: typeof window !== "undefined" ? window.innerHeight : 720,
   },
+  measuredHeight = 0,
 ): CSSProperties {
-  const width = Math.min(MENU_WIDTH, Math.max(160, viewport.width - VIEWPORT_PAD * 2));
-  const right = Math.max(VIEWPORT_PAD, viewport.width - triggerRect.right);
+  const width = Math.min(MENU_WIDTH, Math.max(156, viewport.width - VIEWPORT_PAD * 2));
+  // Prefer right-align to trigger; clamp so menu never leaves the viewport.
+  const idealRight = viewport.width - triggerRect.right;
+  const right = Math.min(
+    Math.max(VIEWPORT_PAD, idealRight),
+    Math.max(VIEWPORT_PAD, viewport.width - width - VIEWPORT_PAD),
+  );
   const spaceAbove = triggerRect.top - VIEWPORT_PAD - MENU_GAP;
   const spaceBelow = viewport.height - triggerRect.bottom - VIEWPORT_PAD - MENU_GAP;
-  const preferAbove = spaceAbove >= 120 || spaceAbove >= spaceBelow;
-  const maxHeight = Math.max(96, Math.min(280, preferAbove ? spaceAbove : spaceBelow));
+  const preferAbove = spaceAbove >= 96 || spaceAbove >= spaceBelow;
+  const available = preferAbove ? spaceAbove : spaceBelow;
+  const maxHeight = Math.max(
+    88,
+    Math.min(MENU_MAX_HEIGHT, available, measuredHeight > 0 ? measuredHeight : MENU_MAX_HEIGHT),
+  );
 
   if (preferAbove) {
     return {
@@ -98,12 +116,16 @@ export function ConversationInferenceControl({
     function place() {
       const rect = triggerRef.current?.getBoundingClientRect();
       if (!rect) return;
-      setMenuStyle(placeInferenceMenu(rect));
+      const measured = menuRef.current?.scrollHeight ?? 0;
+      setMenuStyle(placeInferenceMenu(rect, undefined, measured));
     }
     place();
+    // Second frame: menu is mounted — remeasure true height for tight maxHeight.
+    const frame = requestAnimationFrame(place);
     window.addEventListener("resize", place);
     window.addEventListener("scroll", place, true);
     return () => {
+      cancelAnimationFrame(frame);
       window.removeEventListener("resize", place);
       window.removeEventListener("scroll", place, true);
     };
@@ -148,31 +170,35 @@ export function ConversationInferenceControl({
         aria-label="选择推理强度"
         data-testid="conversation-inference-menu"
       >
-        {model.reasoningEffortOptions.map((option) => (
-          <VButton
-            key={option.value}
-            type="button"
-            contentLayout="plain"
-            className={styles.option}
-            role="option"
-            aria-selected={option.value === current.effort}
-            onPress={() => {
-              onReasoningEffortChange(option.value);
-              setOpen(false);
-              requestAnimationFrame(() => triggerRef.current?.focus());
-            }}
-          >
-            <span className={styles.optionCopy}>
-              <span className={styles.optionLabel}>{option.label || option.value}</span>
-              {option.description ? (
-                <small className={styles.optionDescription}>{option.description}</small>
-              ) : null}
-            </span>
-            {option.value === current.effort
-              ? <Check className={styles.check} size={14} aria-hidden="true" />
-              : <span className={styles.checkSlot} aria-hidden="true" />}
-          </VButton>
-        ))}
+        {model.reasoningEffortOptions.map((option) => {
+          const selected = option.value === current.effort;
+          return (
+            <VButton
+              key={option.value}
+              type="button"
+              contentLayout="plain"
+              className={styles.option}
+              role="option"
+              aria-selected={selected}
+              data-selected={selected ? "true" : "false"}
+              onPress={() => {
+                onReasoningEffortChange(option.value);
+                setOpen(false);
+                requestAnimationFrame(() => triggerRef.current?.focus());
+              }}
+            >
+              <span className={styles.optionCopy}>
+                <span className={styles.optionLabel}>{option.label || option.value}</span>
+                {option.description ? (
+                  <small className={styles.optionDescription}>{option.description}</small>
+                ) : null}
+              </span>
+              {selected
+                ? <Check className={styles.check} size={14} aria-hidden="true" />
+                : <span className={styles.checkSlot} aria-hidden="true" />}
+            </VButton>
+          );
+        })}
       </div>,
       document.body,
     )
@@ -188,13 +214,19 @@ export function ConversationInferenceControl({
         isDisabled={disabled || pending}
         aria-haspopup="listbox"
         aria-expanded={open}
+        data-open={open ? "true" : "false"}
         title={`${model.label || model.model} · ${current.option?.label || current.effort}`}
         onPress={() => setOpen((value) => !value)}
       >
         <span className={styles.triggerModel}>{model.label || model.model}</span>
         <span className={styles.triggerSeparator} aria-hidden="true">·</span>
         <span className={styles.triggerEffort}>{current.option?.label || current.effort}</span>
-        <ChevronDown className={styles.triggerChevron} size={13} aria-hidden="true" />
+        <ChevronDown
+          className={styles.triggerChevron}
+          size={13}
+          aria-hidden="true"
+          data-open={open ? "true" : "false"}
+        />
       </VButton>
       {menu}
     </div>
