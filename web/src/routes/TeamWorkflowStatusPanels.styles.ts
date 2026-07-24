@@ -1,12 +1,13 @@
 import {
   vuiFlatPanelClass,
+  vuiStateDangerSoftClass,
 } from "../design/vuiSurfaceRecipes";
 
 const styles = {
   empty:
     "empty min-w-0 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
   messageError:
-    "messageError min-w-0 break-words border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)] [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] [overflow-wrap:anywhere]",
+    `messageError min-w-0 break-words ${vuiStateDangerSoftClass} [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] [overflow-wrap:anywhere]`,
   workflowCoordinationBriefSummary: `workflowCoordinationBriefSummary min-w-0 ${vuiFlatPanelClass} p-2 [&_span]:min-w-0 [&_span]:break-words`,
   workflowCoordinationPanel: `workflowCoordinationPanel min-w-0 ${vuiFlatPanelClass} p-2`,
   workflowCoordinationQueue:
@@ -55,7 +56,7 @@ const styles = {
   workflowTag:
     "workflowTag min-w-0 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 truncate rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 [font-size:var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)]",
   workflowTagDanger:
-    "workflowTagDanger min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
+    `workflowTagDanger min-w-0 ${vuiStateDangerSoftClass}`,
   workflowTagNeutral:
     "workflowTagNeutral min-w-0",
   workflowTagReady:

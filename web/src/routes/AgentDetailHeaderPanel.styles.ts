@@ -1,4 +1,8 @@
 import {
+  vuiStateCoolInfoClass,
+  vuiStateDangerSoftClass,
+  vuiStateSuccessSoftClass,
+  vuiStateWarmSoftClass,
   vuiWorkspaceFillClass,
 } from "../design/vuiSurfaceRecipes";
 
@@ -17,13 +21,13 @@ const styles = {
   issuePill:
     "inline-flex min-h-[22px] max-w-full items-center justify-center truncate rounded-full border border-[var(--vui-border-subtle)] px-2 py-0.5 [font-size:var(--vui-font-xs)] font-semibold",
   issue_blocking:
-    "border-[color-mix(in_srgb,var(--state-error)_34%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_10%,transparent)] text-[var(--state-error)]",
+    `${vuiStateDangerSoftClass}`,
   issue_info:
-    "border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `${vuiStateCoolInfoClass}`,
   issue_ok:
-    "border-[color-mix(in_srgb,var(--state-success)_28%,transparent)] bg-[color-mix(in_srgb,var(--state-success)_9%,transparent)] text-[var(--state-success)]",
+    `${vuiStateSuccessSoftClass}`,
   issue_warning:
-    "border-[color-mix(in_srgb,var(--accent-warm)_30%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_10%,transparent)] text-[var(--accent-warm-2)]",
+    `${vuiStateWarmSoftClass}`,
   detailTabs: `flex min-w-0 items-end gap-6 overflow-x-auto [border:1px_solid_color-mix(in_srgb,var(--vui-border-subtle)_72%,transparent)] [border-left:0] [border-right:0] [border-top:0] ${vuiWorkspaceFillClass} px-0`,
   detailTab:
     "inline-flex min-h-10 w-fit min-w-max items-center justify-center gap-1.5 border-x-0 border-t-0 border-b-2 border-transparent bg-transparent px-0.5 [font-size:var(--vui-font-sm)] font-semibold text-[var(--fg-tertiary)] hover:border-[color-mix(in_srgb,var(--accent-cool)_36%,transparent)] hover:text-[var(--fg-primary)] [&_strong]:[font-size:var(--vui-font-xs)]",

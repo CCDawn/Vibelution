@@ -12,6 +12,9 @@
 import {
   vuiFlatPanelClass,
   vuiOpaqueRowClass,
+  vuiStateCoolSoftClass,
+  vuiStateDangerSoftClass,
+  vuiStateSelectedRowClass,
 } from "../design/vuiSurfaceRecipes";
 
 const styles: Record<string, string> = {
@@ -19,7 +22,7 @@ const styles: Record<string, string> = {
   aiSearchRunCard: `aiSearchRunCard min-w-0 ${vuiOpaqueRowClass} p-1.5`,
   aiSearchRunCardDegraded: `aiSearchRunCardDegraded min-w-0 ${vuiOpaqueRowClass} p-1.5`,
   aiSearchRunCardDetails: `aiSearchRunCardDetails min-w-0 ${vuiOpaqueRowClass} p-1.5`,
-  aiSearchRunCardFailed: `aiSearchRunCardFailed min-w-0 ${vuiFlatPanelClass} p-2 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]`,
+  aiSearchRunCardFailed: `aiSearchRunCardFailed min-w-0 ${vuiFlatPanelClass} p-2 ${vuiStateDangerSoftClass}`,
   aiSearchRunCardHeader: `aiSearchRunCardHeader min-w-0 ${vuiOpaqueRowClass} p-1.5 flex flex-wrap items-center gap-1.5`,
   aiSearchRunCardReview: `aiSearchRunCardReview min-w-0 ${vuiOpaqueRowClass} p-1.5`,
   aiSearchRunCards:
@@ -46,7 +49,7 @@ const styles: Record<string, string> = {
   aiSearchRunStatusCompleted:
     "aiSearchRunStatusCompleted min-w-0 border-[color-mix(in_srgb,var(--state-success)_32%,transparent)] bg-[color-mix(in_srgb,var(--state-success)_9%,transparent)] text-[var(--state-success)]",
   aiSearchRunStatusFailed:
-    "aiSearchRunStatusFailed min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
+    `aiSearchRunStatusFailed min-w-0 ${vuiStateDangerSoftClass}`,
   aiSearchRunStatusPartial:
     "aiSearchRunStatusPartial min-w-0 border-[color-mix(in_srgb,var(--state-warning)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_10%,transparent)] text-[var(--state-warning)]",
   aiSearchRunStatusRunning:
@@ -102,7 +105,7 @@ const styles: Record<string, string> = {
   canvasViewport:
     "canvasViewport min-w-0 grid min-h-0 gap-2 p-2 relative box-content h-[760px] w-[1180px] origin-top-left pl-[var(--canvas-offset-x,0px)] pt-[var(--canvas-offset-y,0px)] [transform:scale(var(--canvas-scale,1))]",
   dangerButton:
-    "dangerButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
+    `dangerButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55 ${vuiStateDangerSoftClass}`,
   deliveryList:
     "deliveryList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
   edgeCommunication:
@@ -194,22 +197,22 @@ const styles: Record<string, string> = {
   knowledgeCompletionFlowNodeBody:
     "knowledgeCompletionFlowNodeBody min-w-0 grid content-start gap-1 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] [&_b]:min-w-0 [&_b]:break-words [&_small]:min-w-0 [&_small]:break-words [&_em]:not-italic [&_p]:m-0 [&_p]:max-w-[min(100%,72ch)] [&_p]:break-words",
   knowledgeCompletionFlowNodeCurrent:
-    "knowledgeCompletionFlowNodeCurrent min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)]",
+    `knowledgeCompletionFlowNodeCurrent min-w-0 ${vuiStateCoolSoftClass}`,
   knowledgeCompletionFlowNodeHeader:
     "knowledgeCompletionFlowNodeHeader min-w-0 flex flex-wrap items-center gap-1.5 [&_strong]:shrink-0 [&_span]:min-w-0 [&_span]:truncate",
   knowledgeCompletionFlowNodes:
     "knowledgeCompletionFlowNodes min-w-0 !grid grid-cols-[repeat(auto-fit,minmax(280px,1fr))] items-stretch gap-2",
   knowledgeCompletionFlowPanel: `knowledgeCompletionFlowPanel min-w-0 grid gap-2 overflow-hidden ${vuiFlatPanelClass} p-2`,
   layerButtonActive:
-    "layerButtonActive min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
+    `layerButtonActive min-w-0 ${vuiStateSelectedRowClass}`,
   linkedRoomLine: `linkedRoomLine min-w-0 ${vuiOpaqueRowClass} p-2 inline-flex max-w-full flex-wrap items-center gap-1 px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--accent-cool)]`,
   messageError:
-    "messageError min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)] [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
+    `messageError min-w-0 ${vuiStateDangerSoftClass} [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]`,
   messageResult:
     "messageResult min-w-0 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
   node: `node min-w-0 !absolute left-[calc(var(--canvas-offset-x,0px)+var(--node-x,0px))] top-[calc(var(--canvas-offset-y,0px)+var(--node-y,0px))] z-[1] !grid h-[92px] w-[172px] cursor-grab select-none grid-cols-[20px_1fr] grid-rows-[auto_auto_auto] items-center gap-x-1.5 gap-y-0.5 ${vuiOpaqueRowClass} p-2 text-left text-[var(--fg-primary)] shadow-none touch-none [&_small]:truncate [&_span]:truncate [&_strong]:truncate`,
   nodeActive:
-    "nodeActive min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))] shadow-[var(--vui-shadow-inset-accent)]",
+    `nodeActive min-w-0 ${vuiStateSelectedRowClass} shadow-[var(--vui-shadow-inset-accent)]`,
   nodeBindingPlaceholder:
     "nodeBindingPlaceholder min-w-0",
   nodeBindingSection:
@@ -219,7 +222,7 @@ const styles: Record<string, string> = {
   nodeIcon:
     "nodeIcon min-w-0 shrink-0 text-[var(--fg-tertiary)] row-span-3 inline-flex h-5 w-5 items-center justify-center text-[var(--fg-tertiary)]",
   nodeOpen:
-    "nodeOpen min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-dashed",
+    `nodeOpen min-w-0 ${vuiStateCoolSoftClass} border-dashed`,
   nodeReadOnly:
     "nodeReadOnly min-w-0 cursor-pointer touch-manipulation",
   nodeRoleBadge:
@@ -231,7 +234,7 @@ const styles: Record<string, string> = {
   nodeRoleBadgeLead:
     "nodeRoleBadgeLead min-w-0 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] [--node-role-bg:color-mix(in_srgb,var(--state-success)_11%,var(--vui-surface-row))] [--node-role-border:color-mix(in_srgb,var(--state-success)_38%,var(--vui-border-subtle))] [--node-role-fg:var(--state-success)]",
   nodeRoleBadgeOpen:
-    "nodeRoleBadgeOpen min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] [--node-role-bg:var(--vui-control-muted)] [--node-role-border:var(--vui-border-subtle)] [--node-role-fg:var(--fg-tertiary)]",
+    `nodeRoleBadgeOpen min-w-0 ${vuiStateCoolSoftClass} [--node-role-bg:var(--vui-control-muted)] [--node-role-border:var(--vui-border-subtle)] [--node-role-fg:var(--fg-tertiary)]`,
   nodeRoleBadgeResearch:
     "nodeRoleBadgeResearch min-w-0 [--node-role-bg:color-mix(in_srgb,var(--accent-warm)_10%,var(--vui-surface-row))] [--node-role-border:color-mix(in_srgb,var(--accent-warm)_34%,var(--vui-border-subtle))] [--node-role-fg:var(--fg-secondary)]",
   nodeRoleBadgeSelf:
@@ -248,7 +251,7 @@ const styles: Record<string, string> = {
   researchInspector:
     "researchInspector min-w-0",
   researchLoopActive:
-    "researchLoopActive min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
+    `researchLoopActive min-w-0 ${vuiStateSelectedRowClass}`,
   researchLoopDecisionForm:
     "researchLoopDecisionForm min-w-0 grid gap-1 [font-size:var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full",
   researchLoopEvidenceForm:
@@ -419,11 +422,11 @@ const styles: Record<string, string> = {
   sourceCollectionRunBadge:
     "sourceCollectionRunBadge min-w-0 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 [font-size:var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)]",
   sourceCollectionStepActive:
-    "sourceCollectionStepActive min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))] [--source-step-color:var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_52%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-cool)_8%,var(--vui-surface-base))]",
+    `sourceCollectionStepActive min-w-0 ${vuiStateSelectedRowClass} [--source-step-color:var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_52%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-cool)_8%,var(--vui-surface-base))]`,
   sourceCollectionStepDone:
     "sourceCollectionStepDone min-w-0 [--source-step-color:var(--state-success)] border-[color-mix(in_srgb,var(--state-success)_48%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--state-success)_8%,var(--vui-surface-base))]",
   sourceCollectionStepFailed:
-    "sourceCollectionStepFailed min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)] [--source-step-color:var(--state-error)] border-[color-mix(in_srgb,var(--state-error)_50%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--state-error)_8%,var(--vui-surface-base))]",
+    `sourceCollectionStepFailed min-w-0 ${vuiStateDangerSoftClass} [--source-step-color:var(--state-error)] border-[color-mix(in_srgb,var(--state-error)_50%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--state-error)_8%,var(--vui-surface-base))]`,
   sourceCollectionStepIdle:
     "sourceCollectionStepIdle min-w-0 border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] text-[var(--fg-tertiary)] [--source-step-color:var(--fg-tertiary)] border-[color-mix(in_srgb,var(--fg-tertiary)_26%,var(--vui-border-subtle))] bg-[var(--vui-surface-base)]",
   sourceCollectionStepPending:
@@ -498,7 +501,7 @@ const styles: Record<string, string> = {
     "toolbarActions min-w-0 max-w-full flex-wrap items-center justify-end gap-1.5 overflow-visible max-[900px]:justify-start [&_a]:inline-flex [&_a]:min-h-[28px] [&_a]:w-fit [&_a]:max-w-full [&_a]:shrink-0 [&_a]:items-center [&_a]:justify-center [&_a]:gap-1.5 [&_a]:rounded-[var(--radius-control)] [&_a]:border [&_a]:border-[var(--vui-border-subtle)] [&_a]:bg-[var(--vui-control-muted)] [&_a]:px-2.5 [&_a]:[font-size:var(--vui-font-xs)] [&_a]:font-semibold [&_a]:leading-tight [&_a]:text-[var(--fg-secondary)] [&_a]:no-underline [&_a]:whitespace-nowrap [&_a:hover]:border-[var(--vui-control-hover-border)] [&_a:hover]:bg-[var(--vui-control-hover-bg)] [&_a:hover]:text-[var(--vui-control-hover-fg)] [&_[data-vui=native-button]]:inline-flex [&_[data-vui=native-button]]:min-h-[28px] [&_[data-vui=native-button]]:w-fit [&_[data-vui=native-button]]:max-w-full [&_[data-vui=native-button]]:shrink-0 [&_[data-vui=native-button]]:items-center [&_[data-vui=native-button]]:justify-center [&_[data-vui=native-button]]:gap-1.5 [&_[data-vui=native-button]]:rounded-[var(--radius-control)] [&_[data-vui=native-button]]:px-2.5 [&_[data-vui=native-button]]:[font-size:var(--vui-font-xs)] [&_[data-vui=native-button]]:font-semibold [&_[data-vui=native-button]]:leading-tight [&_[data-vui=native-button]]:whitespace-nowrap [&_[data-vui=native-button]:not(.dangerButton)]:border [&_[data-vui=native-button]:not(.dangerButton)]:border-[var(--vui-border-subtle)] [&_[data-vui=native-button]:not(.dangerButton)]:bg-[var(--vui-control-muted)] [&_[data-vui=native-button]:not(.dangerButton)]:text-[var(--fg-secondary)] [&_[data-vui=native-button]:not(.dangerButton):hover:not(:disabled)]:border-[var(--vui-control-hover-border)] [&_[data-vui=native-button]:not(.dangerButton):hover:not(:disabled)]:bg-[var(--vui-control-hover-bg)] [&_[data-vui=native-button]:not(.dangerButton):hover:not(:disabled)]:text-[var(--vui-control-hover-fg)] [&_[data-vui=native-button]:disabled]:cursor-default [&_[data-vui=native-button]:disabled]:opacity-55",
   toolbarLink:
     "toolbarLink min-w-0 inline-flex items-center justify-center gap-1.5",
-  workflowCandidateItemSelected: `workflowCandidateItemSelected min-w-0 ${vuiOpaqueRowClass} p-2 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)]`,
+  workflowCandidateItemSelected: `workflowCandidateItemSelected min-w-0 ${vuiOpaqueRowClass} p-2 ${vuiStateCoolSoftClass}`,
   workflowError:
     "workflowError min-w-0 break-words rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] px-2 py-1.5 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--state-error)]",
   workflowIngestionActions:
@@ -513,7 +516,7 @@ const styles: Record<string, string> = {
   workflowSourceQualityStats:
     "workflowSourceQualityStats min-w-0 grid gap-2 !grid grid-cols-[repeat(5,minmax(72px,1fr))] gap-[5px]",
   workflowStageActive:
-    "workflowStageActive min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
+    `workflowStageActive min-w-0 ${vuiStateSelectedRowClass}`,
   workflowStageList:
     "workflowStageList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
   workflowStats:
@@ -523,7 +526,7 @@ const styles: Record<string, string> = {
   workflowTag:
     "workflowTag min-w-0 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 [font-size:var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)]",
   workflowTagDanger:
-    "workflowTagDanger min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
+    `workflowTagDanger min-w-0 ${vuiStateDangerSoftClass}`,
   workflowTagNeutral:
     "workflowTagNeutral min-w-0",
   workflowTagReady:

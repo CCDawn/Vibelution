@@ -1,6 +1,9 @@
 import {
   vuiFlatPanelClass,
   vuiOpaqueRowClass,
+  vuiStateCoolInfoClass,
+  vuiStateDangerSoftClass,
+  vuiStateSelectedRowClass,
 } from "../design/vuiSurfaceRecipes";
 
 const panelSurface =
@@ -12,9 +15,9 @@ const buttonBase =
 const pillBase =
   "inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 [font-size:var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)]";
 const activeTone =
-  "border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))] text-[var(--accent-cool)]";
+  `${vuiStateSelectedRowClass}`;
 const errorTone =
-  "border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]";
+  `${vuiStateDangerSoftClass}`;
 const warningTone =
   "border-[color-mix(in_srgb,var(--state-warning)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_10%,transparent)] text-[var(--state-warning)]";
 const successTone =
@@ -33,9 +36,9 @@ const styles = {
   diagnosticPill:
     `diagnosticPill min-w-0 ${pillBase}`,
   diagnosticPillError:
-    "diagnosticPillError min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
+    `diagnosticPillError min-w-0 ${vuiStateDangerSoftClass}`,
   diagnosticPillInfo:
-    "diagnosticPillInfo min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `diagnosticPillInfo min-w-0 ${vuiStateCoolInfoClass}`,
   diagnosticPillWarning:
     "diagnosticPillWarning min-w-0 border-[color-mix(in_srgb,var(--state-warning)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_10%,transparent)] text-[var(--state-warning)]",
   diagnosticsHeader:
@@ -193,13 +196,13 @@ const styles = {
   sceneIndexKey:
     "sceneIndexKey min-w-0",
   sceneInfoCard:
-    `sceneInfoCard min-w-0 ${panelSurface} border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]`,
+    `sceneInfoCard min-w-0 ${panelSurface} ${vuiStateCoolInfoClass}`,
   sceneInfoGrid:
-    "sceneInfoGrid min-w-0 grid gap-2 grid-cols-[repeat(auto-fit,minmax(9rem,1fr))] border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `sceneInfoGrid min-w-0 grid gap-2 grid-cols-[repeat(auto-fit,minmax(9rem,1fr))] ${vuiStateCoolInfoClass}`,
   sceneIssueBadge:
     "sceneIssueBadge min-w-0 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 [font-size:var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)]",
   sceneIssueBadgeError:
-    "sceneIssueBadgeError min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
+    `sceneIssueBadgeError min-w-0 ${vuiStateDangerSoftClass}`,
   sceneIssueBadgeWarning:
     "sceneIssueBadgeWarning min-w-0 border-[color-mix(in_srgb,var(--state-warning)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_10%,transparent)] text-[var(--state-warning)]",
   scenePillRow:

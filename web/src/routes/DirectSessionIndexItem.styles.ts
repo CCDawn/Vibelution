@@ -1,5 +1,6 @@
 import {
   vuiOpaqueRowClass,
+  vuiStateCoolInfoClass,
 } from "../design/vuiSurfaceRecipes";
 
 const styles = {
@@ -8,8 +9,8 @@ const styles = {
   disabledReasonTitle:
     "vui-routes-chatcodingroute disabledReasonTitle text-vui-fg-primary",
   agentAvatarImage:
-    "vui-routes-chatcodingroute agentAvatarImage min-w-0 inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
-  agentMissingLine: `vui-routes-chatcodingroute agentMissingLine min-w-0 ${vuiOpaqueRowClass} p-2 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]`,
+    `vui-routes-chatcodingroute agentAvatarImage min-w-0 inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border ${vuiStateCoolInfoClass}`,
+  agentMissingLine: `vui-routes-chatcodingroute agentMissingLine min-w-0 ${vuiOpaqueRowClass} p-2 ${vuiStateCoolInfoClass}`,
   agentModelTag:
     "vui-routes-chatcodingroute agentModelTag inline-flex min-h-[18px] min-w-0 max-w-[96px] shrink items-center gap-0.5 overflow-hidden rounded-full border border-[color-mix(in_srgb,var(--accent-cool)_24%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-cool)_7%,transparent)] px-1.5 py-0 [font-size:var(--vui-font-xs)] font-semibold leading-none text-[var(--accent-cool)] [&_span]:min-w-0 [&_span]:truncate [&_svg]:shrink-0",
   agentModelTitleTag:
@@ -17,19 +18,19 @@ const styles = {
   agentRoleTag:
     "vui-routes-chatcodingroute agentRoleTag min-w-0 inline-flex min-h-[18px] w-fit max-w-full items-center justify-center gap-1 rounded-full border border-[color-mix(in_srgb,var(--accent-cool)_22%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_6%,transparent)] px-1.5 [font-size:var(--vui-font-xs)] font-medium leading-none text-[var(--accent-cool)]",
   agentRoleTag_chat:
-    "vui-routes-chatcodingroute agentRoleTag_chat min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `vui-routes-chatcodingroute agentRoleTag_chat min-w-0 ${vuiStateCoolInfoClass}`,
   agentRoleTag_general:
-    "vui-routes-chatcodingroute agentRoleTag_general min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `vui-routes-chatcodingroute agentRoleTag_general min-w-0 ${vuiStateCoolInfoClass}`,
   agentRoleTag_memory:
-    "vui-routes-chatcodingroute agentRoleTag_memory min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `vui-routes-chatcodingroute agentRoleTag_memory min-w-0 ${vuiStateCoolInfoClass}`,
   agentRoleTag_research:
-    "vui-routes-chatcodingroute agentRoleTag_research min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `vui-routes-chatcodingroute agentRoleTag_research min-w-0 ${vuiStateCoolInfoClass}`,
   agentRoleTag_self:
-    "vui-routes-chatcodingroute agentRoleTag_self min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `vui-routes-chatcodingroute agentRoleTag_self min-w-0 ${vuiStateCoolInfoClass}`,
   agentRoleTag_supervised:
-    "vui-routes-chatcodingroute agentRoleTag_supervised min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `vui-routes-chatcodingroute agentRoleTag_supervised min-w-0 ${vuiStateCoolInfoClass}`,
   agentRoleTag_tool:
-    "vui-routes-chatcodingroute agentRoleTag_tool min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `vui-routes-chatcodingroute agentRoleTag_tool min-w-0 ${vuiStateCoolInfoClass}`,
   childTopLevelSessionItem: `vui-routes-chatcodingroute childTopLevelSessionItem min-w-0 ${vuiOpaqueRowClass} p-2`,
   conversationAvatar:
     "vui-routes-chatcodingroute conversationAvatar min-w-0 inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)]",

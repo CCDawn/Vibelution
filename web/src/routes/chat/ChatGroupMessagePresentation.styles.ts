@@ -1,6 +1,10 @@
+import {
+  vuiStateCoolInfoClass,
+} from "../../design/vuiSurfaceRecipes";
+
 const styles = {
   agentMention:
-    "vui-routes-chatcodingroute agentMention min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `vui-routes-chatcodingroute agentMention min-w-0 ${vuiStateCoolInfoClass}`,
   groupBubbleBody:
     "vui-routes-chatcodingroute groupBubbleBody min-w-0 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
   groupBubbleBodyCollapsed:

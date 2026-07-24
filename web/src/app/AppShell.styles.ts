@@ -9,6 +9,10 @@
 import {
   vuiGlassPanelClass,
   vuiOpaqueRowClass,
+  vuiStateCoolInfoClass,
+  vuiStateCoolSoftClass,
+  vuiStateDangerSoftClass,
+  vuiStateSelectedRowClass,
   vuiToolbarFillClass,
   vuiWorkspaceFillClass,
 } from "../design/vuiSurfaceRecipes";
@@ -19,27 +23,27 @@ const styles = {
   actionIconButton:
     "vui-app-appshell actionIconButton h-[var(--vui-control-height-sm)] w-[var(--vui-control-height-sm)] min-w-[var(--vui-control-height-sm)]",
   activeWorkChip:
-    "vui-app-appshell activeWorkChip min-w-0 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 [font-size:var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)] border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))] relative h-8 min-h-8 flex-nowrap overflow-visible gap-1.5 whitespace-nowrap [&:focus-within_.activeWorkDetailPanel]:visible [&:focus-within_.activeWorkDetailPanel]:pointer-events-auto [&:focus-within_.activeWorkDetailPanel]:translate-y-0 [&:focus-within_.activeWorkDetailPanel]:opacity-100 [&:hover_.activeWorkDetailPanel]:visible [&:hover_.activeWorkDetailPanel]:pointer-events-auto [&:hover_.activeWorkDetailPanel]:translate-y-0 [&:hover_.activeWorkDetailPanel]:opacity-100",
-  activeWorkDetailCopy: `vui-app-appshell activeWorkDetailCopy min-w-0 ${vuiGlassPanelClass} p-2 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]`,
+    `vui-app-appshell activeWorkChip min-w-0 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 [font-size:var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)] ${vuiStateSelectedRowClass} relative h-8 min-h-8 flex-nowrap overflow-visible gap-1.5 whitespace-nowrap [&:focus-within_.activeWorkDetailPanel]:visible [&:focus-within_.activeWorkDetailPanel]:pointer-events-auto [&:focus-within_.activeWorkDetailPanel]:translate-y-0 [&:focus-within_.activeWorkDetailPanel]:opacity-100 [&:hover_.activeWorkDetailPanel]:visible [&:hover_.activeWorkDetailPanel]:pointer-events-auto [&:hover_.activeWorkDetailPanel]:translate-y-0 [&:hover_.activeWorkDetailPanel]:opacity-100`,
+  activeWorkDetailCopy: `vui-app-appshell activeWorkDetailCopy min-w-0 ${vuiGlassPanelClass} p-2 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] ${vuiStateSelectedRowClass}`,
   activeWorkDetailHeader:
     "vui-app-appshell activeWorkDetailHeader min-w-0 flex flex-wrap items-center gap-1.5 border-b border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] px-0.5 pb-1 text-[var(--accent-cool)]",
-  activeWorkDetailItem: `vui-app-appshell activeWorkDetailItem min-w-0 ${vuiGlassPanelClass} p-2 rounded-[var(--radius-control)] bg-[var(--vui-surface-row)] border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))] grid grid-cols-[max-content_minmax(0,1fr)] items-start`,
-  activeWorkDetailList: `vui-app-appshell activeWorkDetailList min-w-0 ${vuiGlassPanelClass} p-2 grid min-h-0 content-start gap-1.5 overflow-auto border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))] max-h-[260px] overflow-y-auto`,
+  activeWorkDetailItem: `vui-app-appshell activeWorkDetailItem min-w-0 ${vuiGlassPanelClass} p-2 rounded-[var(--radius-control)] bg-[var(--vui-surface-row)] ${vuiStateSelectedRowClass} grid grid-cols-[max-content_minmax(0,1fr)] items-start`,
+  activeWorkDetailList: `vui-app-appshell activeWorkDetailList min-w-0 ${vuiGlassPanelClass} p-2 grid min-h-0 content-start gap-1.5 overflow-auto ${vuiStateSelectedRowClass} max-h-[260px] overflow-y-auto`,
   activeWorkDetailLink:
     "vui-app-appshell activeWorkDetailLink block min-w-0 rounded-[var(--radius-control)] text-inherit no-underline outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_45%,transparent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--vui-surface-panel)]",
-  activeWorkDetailPanel: `vui-app-appshell activeWorkDetailPanel min-w-0 ${vuiGlassPanelClass} p-2 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))] invisible pointer-events-none absolute left-0 top-[calc(100%+8px)] z-[80] w-[min(480px,calc(100vw-2rem))] translate-y-1 opacity-0 transition-[opacity,transform,visibility] duration-150`,
-  activeWorkDetailTitle: `vui-app-appshell activeWorkDetailTitle min-w-0 ${vuiGlassPanelClass} p-2 [font-size:var(--vui-font-title)] font-semibold leading-tight text-[var(--fg-primary)] border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))] grid grid-cols-[minmax(0,1fr)_max-content] items-center gap-2`,
+  activeWorkDetailPanel: `vui-app-appshell activeWorkDetailPanel min-w-0 ${vuiGlassPanelClass} p-2 ${vuiStateSelectedRowClass} invisible pointer-events-none absolute left-0 top-[calc(100%+8px)] z-[80] w-[min(480px,calc(100vw-2rem))] translate-y-1 opacity-0 transition-[opacity,transform,visibility] duration-150`,
+  activeWorkDetailTitle: `vui-app-appshell activeWorkDetailTitle min-w-0 ${vuiGlassPanelClass} p-2 [font-size:var(--vui-font-title)] font-semibold leading-tight text-[var(--fg-primary)] ${vuiStateSelectedRowClass} grid grid-cols-[minmax(0,1fr)_max-content] items-center gap-2`,
   activeWorkInlineDetails:
     "vui-app-appshell activeWorkInlineDetails min-w-0",
   activeWorkInlineItem:
     "vui-app-appshell activeWorkInlineItem min-w-0",
   activeWorkKicker:
-    "vui-app-appshell activeWorkKicker min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
+    `vui-app-appshell activeWorkKicker min-w-0 ${vuiStateSelectedRowClass}`,
   activeWorkMore:
-    "vui-app-appshell activeWorkMore min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
+    `vui-app-appshell activeWorkMore min-w-0 ${vuiStateSelectedRowClass}`,
   activeWorkStatus:
-    "vui-app-appshell activeWorkStatus min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
-  activeWorkSummary: `vui-app-appshell activeWorkSummary min-w-0 ${vuiGlassPanelClass} p-2 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]`,
+    `vui-app-appshell activeWorkStatus min-w-0 ${vuiStateSelectedRowClass}`,
+  activeWorkSummary: `vui-app-appshell activeWorkSummary min-w-0 ${vuiGlassPanelClass} p-2 ${vuiStateSelectedRowClass}`,
   brand:
     "vui-app-appshell brand min-w-0",
   brandBlock:
@@ -85,8 +89,8 @@ const styles = {
   lifecycleMenuCluster:
     "vui-app-appshell lifecycleMenuCluster min-w-0",
   lifecycleMenuClusterOpen:
-    "vui-app-appshell lifecycleMenuClusterOpen min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)]",
-  lifecycleMenuDangerItem: `vui-app-appshell lifecycleMenuDangerItem min-w-0 ${vuiOpaqueRowClass} p-2 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]`,
+    `vui-app-appshell lifecycleMenuClusterOpen min-w-0 ${vuiStateCoolSoftClass}`,
+  lifecycleMenuDangerItem: `vui-app-appshell lifecycleMenuDangerItem min-w-0 ${vuiOpaqueRowClass} p-2 ${vuiStateDangerSoftClass}`,
   lifecycleMenuItem: `vui-app-appshell lifecycleMenuItem min-w-0 ${vuiOpaqueRowClass} p-2`,
   lifecycleMenuPanel: `vui-app-appshell lifecycleMenuPanel min-w-0 ${vuiGlassPanelClass} p-2`,
   lifecycleProofCard: `vui-app-appshell lifecycleProofCard min-w-0 ${vuiGlassPanelClass} p-2`,
@@ -107,14 +111,14 @@ const styles = {
   mobileRouteLink:
     "vui-app-appshell mobileRouteLink min-w-0 rounded-[var(--radius-control)] px-2 py-1.5 [font-size:var(--vui-font-sm)] font-semibold text-[var(--fg-secondary)] hover:bg-[var(--vui-control-muted-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-cool)]",
   mobileRouteLinkActive:
-    "vui-app-appshell mobileRouteLinkActive bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))] text-[var(--accent-cool)]",
+    `vui-app-appshell mobileRouteLinkActive ${vuiStateSelectedRowClass}`,
   mobileRouteMenu:
     "vui-app-appshell mobileRouteMenu hidden max-[639px]:grid absolute right-0 top-[calc(100%+4px)] z-[90] w-[min(88vw,320px)] gap-1 rounded-[var(--vui-radius-panel-soft)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] p-2 shadow-[var(--vui-elevation-panel)]",
   nav: `vui-app-appshell nav min-w-0 max-[639px]:hidden rounded-[var(--vui-radius-panel-soft)] border border-[var(--vui-border-subtle)] ${vuiToolbarFillClass} p-[3px] shadow-[var(--vui-elevation-panel)]`,
   navLink:
     "vui-app-appshell navLink relative z-[2] inline-flex min-h-[30px] min-w-0 cursor-pointer items-center justify-center rounded-[var(--radius-control)] px-2.5 [font-size:var(--vui-font-sm)] font-semibold text-[var(--fg-primary)] no-underline select-none",
   navLinkActive:
-    "vui-app-appshell navLinkActive relative z-[2] inline-flex min-h-[30px] min-w-0 cursor-pointer items-center justify-center rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))] px-2.5 [font-size:var(--vui-font-sm)] font-semibold text-[var(--accent-cool)] no-underline select-none",
+    `vui-app-appshell navLinkActive relative z-[2] inline-flex min-h-[30px] min-w-0 cursor-pointer items-center justify-center rounded-[var(--radius-control)] border ${vuiStateSelectedRowClass} px-2.5 [font-size:var(--vui-font-sm)] font-semibold text-[var(--accent-cool)] no-underline select-none`,
   navLinkDisabled:
     "vui-app-appshell navLinkDisabled relative inline-flex min-h-[30px] min-w-0 cursor-not-allowed items-center justify-center rounded-[var(--radius-control)] px-2.5 [font-size:var(--vui-font-sm)] font-semibold text-[var(--fg-tertiary)] opacity-55 select-none pointer-events-none",
   returnButton:
@@ -167,23 +171,23 @@ const styles = {
   statusSummaryChip: `vui-app-appshell statusSummaryChip min-w-0 ${vuiGlassPanelClass} p-2 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full bg-[var(--vui-control-muted)] px-2 [font-size:var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)] h-8 min-h-8 flex-nowrap gap-1.5 whitespace-nowrap`,
   statusSummaryCount: `vui-app-appshell statusSummaryCount min-w-0 ${vuiGlassPanelClass} p-2`,
   status_active:
-    "vui-app-appshell status_active min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
+    `vui-app-appshell status_active min-w-0 ${vuiStateSelectedRowClass}`,
   status_blocked:
     "vui-app-appshell status_blocked min-w-0 border-[color-mix(in_srgb,var(--state-warning)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_10%,transparent)] text-[var(--state-warning)]",
   status_caution:
     "vui-app-appshell status_caution text-[var(--state-warning)]",
   status_danger:
-    "vui-app-appshell status_danger min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
+    `vui-app-appshell status_danger min-w-0 ${vuiStateDangerSoftClass}`,
   status_done:
     "vui-app-appshell status_done min-w-0",
   status_error:
-    "vui-app-appshell status_error min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
+    `vui-app-appshell status_error min-w-0 ${vuiStateDangerSoftClass}`,
   status_failed:
     "vui-app-appshell status_failed text-[var(--state-error)]",
   status_idle:
     "vui-app-appshell status_idle text-[color-mix(in_srgb,var(--fg-tertiary)_74%,transparent)]",
   status_info:
-    "vui-app-appshell status_info min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `vui-app-appshell status_info min-w-0 ${vuiStateCoolInfoClass}`,
   status_mental:
     "vui-app-appshell status_mental min-w-0",
   status_missing:
@@ -222,7 +226,7 @@ const styles = {
   utilityButton:
     "vui-app-appshell utilityButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55",
   utilityButtonActive:
-    "vui-app-appshell utilityButtonActive min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
+    `vui-app-appshell utilityButtonActive min-w-0 ${vuiStateSelectedRowClass}`,
   utilityButtonGrid:
     "vui-app-appshell utilityButtonGrid min-w-0 grid gap-2 grid-cols-[repeat(auto-fit,minmax(9rem,1fr))]",
   utilityChevron:
@@ -230,11 +234,11 @@ const styles = {
   utilityCluster:
     "vui-app-appshell utilityCluster relative min-w-0 shrink-0",
   utilityClusterOpen:
-    "vui-app-appshell utilityClusterOpen min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)]",
+    `vui-app-appshell utilityClusterOpen min-w-0 ${vuiStateCoolSoftClass}`,
   utilityFileButton:
     "vui-app-appshell utilityFileButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55 grid [&_[data-slot=vui-button-content]]:w-full [&_[data-slot=vui-button-label]]:grid [&_[data-slot=vui-button-label]]:w-full [&_[data-slot=vui-button-label]]:grid-cols-[minmax(0,1fr)_auto] [&_[data-slot=vui-button-label]]:items-center [&_[data-slot=vui-button-label]]:gap-2",
   utilityFileButtonActive:
-    "vui-app-appshell utilityFileButtonActive min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))] grid [&_[data-slot=vui-button-content]]:w-full [&_[data-slot=vui-button-label]]:grid [&_[data-slot=vui-button-label]]:w-full [&_[data-slot=vui-button-label]]:grid-cols-[minmax(0,1fr)_auto] [&_[data-slot=vui-button-label]]:items-center [&_[data-slot=vui-button-label]]:gap-2",
+    `vui-app-appshell utilityFileButtonActive min-w-0 ${vuiStateSelectedRowClass} grid [&_[data-slot=vui-button-content]]:w-full [&_[data-slot=vui-button-label]]:grid [&_[data-slot=vui-button-label]]:w-full [&_[data-slot=vui-button-label]]:grid-cols-[minmax(0,1fr)_auto] [&_[data-slot=vui-button-label]]:items-center [&_[data-slot=vui-button-label]]:gap-2`,
   utilityFileChildren:
     "vui-app-appshell utilityFileChildren min-w-0",
   utilityFileDir:

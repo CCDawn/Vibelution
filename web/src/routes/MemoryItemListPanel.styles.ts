@@ -1,5 +1,6 @@
 import {
   vuiOpaqueRowClass,
+  vuiStateSelectedRowClass,
 } from "../design/vuiSurfaceRecipes";
 
 const styles = {
@@ -17,7 +18,7 @@ const styles = {
     "emptyState min-w-0 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
   itemBadges: `itemBadges min-w-0 ${vuiOpaqueRowClass} p-2`,
   itemButton: `itemButton !h-auto min-w-0 w-full max-w-full ${vuiOpaqueRowClass} p-2 text-left [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55 [&_[data-slot=vui-button-content]]:w-full [&_[data-slot=vui-button-label]]:grid [&_[data-slot=vui-button-label]]:w-full [&_[data-slot=vui-button-label]]:min-w-0 [&_[data-slot=vui-button-label]]:gap-1.5`,
-  itemButtonActive: `itemButtonActive min-w-0 ${vuiOpaqueRowClass} p-2 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]`,
+  itemButtonActive: `itemButtonActive min-w-0 ${vuiOpaqueRowClass} p-2 ${vuiStateSelectedRowClass}`,
   itemButtonCompact: `itemButtonCompact min-w-0 ${vuiOpaqueRowClass} p-2`,
   itemButtonDense: `itemButtonDense min-w-0 ${vuiOpaqueRowClass} p-2 min-h-[62px]`,
   itemContentButton: `itemContentButton min-w-0 w-full max-w-full ${vuiOpaqueRowClass} p-2 text-left [font-size:var(--vui-font-sm)] font-semibold leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55 [&_[data-slot=vui-button-content]]:w-full [&_[data-slot=vui-button-label]]:grid [&_[data-slot=vui-button-label]]:w-full [&_[data-slot=vui-button-label]]:min-w-0 [&_[data-slot=vui-button-label]]:gap-1.5`,
@@ -32,7 +33,7 @@ const styles = {
   manageItemBadges: `manageItemBadges min-w-0 ${vuiOpaqueRowClass} p-2 grid grid-cols-[repeat(auto-fit,minmax(82px,1fr))] max-h-[74px] [&>span]:truncate`,
   manageItemFooter: `manageItemFooter min-w-0 flex flex-wrap items-center gap-1.5 ${vuiOpaqueRowClass} p-2`,
   manageItemMeta: `manageItemMeta min-w-0 flex flex-wrap items-center gap-1.5 ${vuiOpaqueRowClass} p-2`,
-  manageItemPrimary: `manageItemPrimary min-w-0 ${vuiOpaqueRowClass} p-2 border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))] text-[var(--accent-cool)]`,
+  manageItemPrimary: `manageItemPrimary min-w-0 ${vuiOpaqueRowClass} p-2 ${vuiStateSelectedRowClass}`,
   manageItemSummary: `manageItemSummary min-w-0 line-clamp-2 ${vuiOpaqueRowClass} p-2`,
   statusPill:
     "statusPill min-w-0 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 [font-size:var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)]",

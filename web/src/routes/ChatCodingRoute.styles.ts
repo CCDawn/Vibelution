@@ -14,59 +14,63 @@ import {
   vuiGlassPanelClass,
   vuiOpaqueRowClass,
   vuiRailFillClass,
+  vuiStateCoolInfoClass,
+  vuiStateCoolSoftClass,
+  vuiStateDangerSoftClass,
+  vuiStateSelectedRowClass,
   vuiWorkspaceFillClass,
 } from "../design/vuiSurfaceRecipes";
 
 const styles: Record<string, string> = {
   activeSkillEyebrow:
-    "vui-routes-chatcodingroute activeSkillEyebrow min-w-0 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)] border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
+    `vui-routes-chatcodingroute activeSkillEyebrow min-w-0 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)] ${vuiStateSelectedRowClass}`,
   activeSkillIdentity:
-    "vui-routes-chatcodingroute activeSkillIdentity grid min-w-0 gap-1 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))] [&_strong]:min-w-0 [&_strong]:whitespace-normal [&_strong]:leading-tight [overflow-wrap:anywhere]",
+    `vui-routes-chatcodingroute activeSkillIdentity grid min-w-0 gap-1 ${vuiStateSelectedRowClass} [&_strong]:min-w-0 [&_strong]:whitespace-normal [&_strong]:leading-tight [overflow-wrap:anywhere]`,
   activeSkillMeta:
-    "vui-routes-chatcodingroute activeSkillMeta min-w-0 flex flex-wrap items-center gap-1.5 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))] [&_span]:min-w-0 [&_span]:whitespace-normal [overflow-wrap:anywhere]",
+    `vui-routes-chatcodingroute activeSkillMeta min-w-0 flex flex-wrap items-center gap-1.5 ${vuiStateSelectedRowClass} [&_span]:min-w-0 [&_span]:whitespace-normal [overflow-wrap:anywhere]`,
   activeSkillState:
-    "vui-routes-chatcodingroute activeSkillState min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
+    `vui-routes-chatcodingroute activeSkillState min-w-0 ${vuiStateSelectedRowClass}`,
   activeSkillStatus:
     "vui-routes-chatcodingroute activeSkillStatus min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_24%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_5%,var(--vui-surface-panel))] text-[var(--accent-cool)] !grid grid-cols-[minmax(0,1fr)] items-start gap-1 rounded-[var(--radius-control)] px-1.5 py-1 shadow-none",
   activeSkillStatus_active:
-    "vui-routes-chatcodingroute activeSkillStatus_active min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
+    `vui-routes-chatcodingroute activeSkillStatus_active min-w-0 ${vuiStateSelectedRowClass}`,
   activeSkillStatus_missing:
-    "vui-routes-chatcodingroute activeSkillStatus_missing min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
+    `vui-routes-chatcodingroute activeSkillStatus_missing min-w-0 ${vuiStateSelectedRowClass}`,
   activeSkillStatus_stale:
-    "vui-routes-chatcodingroute activeSkillStatus_stale min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
+    `vui-routes-chatcodingroute activeSkillStatus_stale min-w-0 ${vuiStateSelectedRowClass}`,
   agentAvatarImage:
-    "vui-routes-chatcodingroute agentAvatarImage min-w-0 inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `vui-routes-chatcodingroute agentAvatarImage min-w-0 inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] ${vuiStateCoolInfoClass}`,
   agentIndexAvatar:
-    "vui-routes-chatcodingroute agentIndexAvatar min-w-0 inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `vui-routes-chatcodingroute agentIndexAvatar min-w-0 inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] ${vuiStateCoolInfoClass}`,
   agentIndexCard:
     "vui-routes-chatcodingroute agentIndexCard min-w-0 overflow-hidden rounded-[var(--radius-panel)] border border-[color-mix(in_srgb,var(--accent-cool)_24%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-cool)_7%,var(--vui-surface-glass))] p-1.5 shadow-[var(--vui-shadow-hairline)]",
   agentIndexCopy:
     "vui-routes-chatcodingroute agentIndexCopy grid min-w-0 gap-0.5 overflow-hidden text-left [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-secondary)]",
   agentIndexDetails:
-    "vui-routes-chatcodingroute agentIndexDetails min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `vui-routes-chatcodingroute agentIndexDetails min-w-0 ${vuiStateCoolInfoClass}`,
   agentIndexEmptyState:
-    "vui-routes-chatcodingroute agentIndexEmptyState min-w-0 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)] border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `vui-routes-chatcodingroute agentIndexEmptyState min-w-0 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)] ${vuiStateCoolInfoClass}`,
   agentIndexExpandButton:
-    "vui-routes-chatcodingroute agentIndexExpandButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `vui-routes-chatcodingroute agentIndexExpandButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55 ${vuiStateCoolInfoClass}`,
   agentIndexHeader:
     "vui-routes-chatcodingroute agentIndexHeader min-w-0 !grid grid-cols-[18px_minmax(0,1fr)_fit-content(72px)] items-center gap-1.5",
   agentIndexList:
-    "vui-routes-chatcodingroute agentIndexList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `vui-routes-chatcodingroute agentIndexList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto ${vuiStateCoolInfoClass}`,
   agentIndexMentalBlock:
-    "vui-routes-chatcodingroute agentIndexMentalBlock min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `vui-routes-chatcodingroute agentIndexMentalBlock min-w-0 ${vuiStateCoolInfoClass}`,
   agentIndexNameLine:
     "vui-routes-chatcodingroute agentIndexNameLine !flex min-w-0 max-w-full items-center gap-1.5 [font-size:var(--vui-font-xs)] font-semibold leading-tight [color:var(--fg-primary)] [&_em]:shrink-0 [&_span]:min-w-0 [&_span]:truncate",
   agentIndexOpenButton:
     "vui-routes-chatcodingroute agentIndexOpenButton min-w-0 !grid !h-auto !min-h-[34px] !w-full max-w-full grid-cols-[30px_minmax(0,1fr)] items-center justify-start gap-1.5 overflow-hidden rounded-[var(--radius-control)] border border-transparent bg-transparent px-1 py-0.5 text-left [font-size:var(--vui-font-xs)] font-semibold leading-tight [color:var(--fg-secondary)] shadow-none hover:border-[color-mix(in_srgb,var(--accent-cool)_26%,var(--vui-border-subtle))] hover:bg-[color-mix(in_srgb,var(--accent-cool)_7%,var(--vui-surface-row))] hover:text-[var(--fg-primary)] disabled:cursor-default disabled:opacity-55 [&_[data-slot=vui-button-content]]:contents [&_[data-slot=vui-button-label]]:contents",
   agentIndexRoster:
-    "vui-routes-chatcodingroute agentIndexRoster min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `vui-routes-chatcodingroute agentIndexRoster min-w-0 ${vuiStateCoolInfoClass}`,
   agentIndexStatus:
     "vui-routes-chatcodingroute agentIndexStatus inline-flex min-w-0 max-w-[72px] justify-self-end overflow-hidden text-ellipsis whitespace-nowrap rounded-full border border-[color-mix(in_srgb,var(--accent-cool)_24%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] px-1.5 py-0.5 text-[10px] font-semibold leading-none text-[var(--accent-cool)]",
   agentMention:
-    "vui-routes-chatcodingroute agentMention min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `vui-routes-chatcodingroute agentMention min-w-0 ${vuiStateCoolInfoClass}`,
   agentMissingInline:
-    "vui-routes-chatcodingroute agentMissingInline min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
-  agentMissingLine: `vui-routes-chatcodingroute agentMissingLine min-w-0 ${vuiOpaqueRowClass} p-2 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]`,
+    `vui-routes-chatcodingroute agentMissingInline min-w-0 ${vuiStateCoolInfoClass}`,
+  agentMissingLine: `vui-routes-chatcodingroute agentMissingLine min-w-0 ${vuiOpaqueRowClass} p-2 ${vuiStateCoolInfoClass}`,
   agentModelLine:
     "vui-routes-chatcodingroute agentModelLine block min-w-0 truncate text-[10px] font-medium leading-tight text-[var(--fg-tertiary)]",
   agentModelTag:
@@ -74,65 +78,65 @@ const styles: Record<string, string> = {
   agentModelTitleTag:
     "vui-routes-chatcodingroute agentModelTitleTag max-w-[96px]",
   agentOptionAvatar:
-    "vui-routes-chatcodingroute agentOptionAvatar min-w-0 inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `vui-routes-chatcodingroute agentOptionAvatar min-w-0 inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] ${vuiStateCoolInfoClass}`,
   agentOptionMeta:
-    "vui-routes-chatcodingroute agentOptionMeta min-w-0 flex flex-wrap items-center gap-1.5 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `vui-routes-chatcodingroute agentOptionMeta min-w-0 flex flex-wrap items-center gap-1.5 ${vuiStateCoolInfoClass}`,
   agentRoleTag:
-    "vui-routes-chatcodingroute agentRoleTag min-w-0 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 [font-size:var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)] border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `vui-routes-chatcodingroute agentRoleTag min-w-0 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 [font-size:var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)] ${vuiStateCoolInfoClass}`,
   agentRoleTag_chat:
-    "vui-routes-chatcodingroute agentRoleTag_chat min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `vui-routes-chatcodingroute agentRoleTag_chat min-w-0 ${vuiStateCoolInfoClass}`,
   agentRoleTag_general:
-    "vui-routes-chatcodingroute agentRoleTag_general min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `vui-routes-chatcodingroute agentRoleTag_general min-w-0 ${vuiStateCoolInfoClass}`,
   agentRoleTag_memory:
-    "vui-routes-chatcodingroute agentRoleTag_memory min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `vui-routes-chatcodingroute agentRoleTag_memory min-w-0 ${vuiStateCoolInfoClass}`,
   agentRoleTag_research:
-    "vui-routes-chatcodingroute agentRoleTag_research min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `vui-routes-chatcodingroute agentRoleTag_research min-w-0 ${vuiStateCoolInfoClass}`,
   agentRoleTag_self:
-    "vui-routes-chatcodingroute agentRoleTag_self min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `vui-routes-chatcodingroute agentRoleTag_self min-w-0 ${vuiStateCoolInfoClass}`,
   agentRoleTag_supervised:
-    "vui-routes-chatcodingroute agentRoleTag_supervised min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `vui-routes-chatcodingroute agentRoleTag_supervised min-w-0 ${vuiStateCoolInfoClass}`,
   agentRoleTag_tool:
-    "vui-routes-chatcodingroute agentRoleTag_tool min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `vui-routes-chatcodingroute agentRoleTag_tool min-w-0 ${vuiStateCoolInfoClass}`,
   agentSessionTab:
-    "vui-routes-chatcodingroute agentSessionTab min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `vui-routes-chatcodingroute agentSessionTab min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55 ${vuiStateCoolInfoClass}`,
   agentSessionTabActive:
-    "vui-routes-chatcodingroute agentSessionTabActive min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
+    `vui-routes-chatcodingroute agentSessionTabActive min-w-0 ${vuiStateSelectedRowClass}`,
   agentSessionTabContextTarget:
-    "vui-routes-chatcodingroute agentSessionTabContextTarget min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))] text-[var(--accent-cool)]",
+    `vui-routes-chatcodingroute agentSessionTabContextTarget min-w-0 ${vuiStateSelectedRowClass}`,
   agentSessionTabChild:
-    "vui-routes-chatcodingroute agentSessionTabChild min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `vui-routes-chatcodingroute agentSessionTabChild min-w-0 ${vuiStateCoolInfoClass}`,
   agentSessionTabCli:
-    "vui-routes-chatcodingroute agentSessionTabCli min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `vui-routes-chatcodingroute agentSessionTabCli min-w-0 ${vuiStateCoolInfoClass}`,
   agentSessionTabClosable:
-    "vui-routes-chatcodingroute agentSessionTabClosable min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `vui-routes-chatcodingroute agentSessionTabClosable min-w-0 ${vuiStateCoolInfoClass}`,
   agentSessionTabCloseButton:
-    "vui-routes-chatcodingroute agentSessionTabCloseButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `vui-routes-chatcodingroute agentSessionTabCloseButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55 ${vuiStateCoolInfoClass}`,
   agentSessionTabCopy:
-    "vui-routes-chatcodingroute agentSessionTabCopy min-w-0 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `vui-routes-chatcodingroute agentSessionTabCopy min-w-0 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] ${vuiStateCoolInfoClass}`,
   agentSessionTabCopyCompact:
-    "vui-routes-chatcodingroute agentSessionTabCopyCompact min-w-0 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `vui-routes-chatcodingroute agentSessionTabCopyCompact min-w-0 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] ${vuiStateCoolInfoClass}`,
   agentSessionTabEditActions:
-    "vui-routes-chatcodingroute agentSessionTabEditActions min-w-0 flex flex-wrap items-center gap-1.5 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `vui-routes-chatcodingroute agentSessionTabEditActions min-w-0 flex flex-wrap items-center gap-1.5 ${vuiStateCoolInfoClass}`,
   agentSessionTabEditButton:
-    "vui-routes-chatcodingroute agentSessionTabEditButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `vui-routes-chatcodingroute agentSessionTabEditButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55 ${vuiStateCoolInfoClass}`,
   agentSessionTabEditing:
-    "vui-routes-chatcodingroute agentSessionTabEditing min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `vui-routes-chatcodingroute agentSessionTabEditing min-w-0 ${vuiStateCoolInfoClass}`,
   agentSessionTabGroup:
-    "vui-routes-chatcodingroute agentSessionTabGroup min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `vui-routes-chatcodingroute agentSessionTabGroup min-w-0 ${vuiStateCoolInfoClass}`,
   agentSessionTabIcon:
-    "vui-routes-chatcodingroute agentSessionTabIcon min-w-0 shrink-0 text-[var(--fg-tertiary)] border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `vui-routes-chatcodingroute agentSessionTabIcon min-w-0 shrink-0 text-[var(--fg-tertiary)] ${vuiStateCoolInfoClass}`,
   agentSessionTabKicker:
-    "vui-routes-chatcodingroute agentSessionTabKicker min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `vui-routes-chatcodingroute agentSessionTabKicker min-w-0 ${vuiStateCoolInfoClass}`,
   agentSessionTabMainAction:
-    "vui-routes-chatcodingroute agentSessionTabMainAction min-w-0 flex flex-wrap items-center gap-1.5 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `vui-routes-chatcodingroute agentSessionTabMainAction min-w-0 flex flex-wrap items-center gap-1.5 ${vuiStateCoolInfoClass}`,
   agentSessionTabMeta:
-    "vui-routes-chatcodingroute agentSessionTabMeta min-w-0 flex flex-wrap items-center gap-1.5 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `vui-routes-chatcodingroute agentSessionTabMeta min-w-0 flex flex-wrap items-center gap-1.5 ${vuiStateCoolInfoClass}`,
   agentSessionTabRoot:
-    "vui-routes-chatcodingroute agentSessionTabRoot min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `vui-routes-chatcodingroute agentSessionTabRoot min-w-0 ${vuiStateCoolInfoClass}`,
   agentSessionTabTitle:
-    "vui-routes-chatcodingroute agentSessionTabTitle min-w-0 [font-size:var(--vui-font-title)] font-semibold leading-tight text-[var(--fg-primary)] border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `vui-routes-chatcodingroute agentSessionTabTitle min-w-0 [font-size:var(--vui-font-title)] font-semibold leading-tight text-[var(--fg-primary)] ${vuiStateCoolInfoClass}`,
   agentSessionTabTitleInput:
-    "vui-routes-chatcodingroute agentSessionTabTitleInput min-w-0 grid gap-1 [font-size:var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full [font-size:var(--vui-font-title)] font-semibold leading-tight text-[var(--fg-primary)] border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `vui-routes-chatcodingroute agentSessionTabTitleInput min-w-0 grid gap-1 [font-size:var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full [font-size:var(--vui-font-title)] font-semibold leading-tight text-[var(--fg-primary)] ${vuiStateCoolInfoClass}`,
   blockEyebrow:
     "vui-routes-chatcodingroute blockEyebrow min-w-0 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-tertiary)]",
   sectionEyebrowRow:
@@ -180,7 +184,7 @@ const styles: Record<string, string> = {
   cacheDonutSegment:
     "vui-routes-chatcodingroute cacheDonutSegment min-w-0 fill-none stroke-[currentColor] [stroke-linecap:round] [stroke-linejoin:round] [vector-effect:non-scaling-stroke] opacity-90",
   cacheDonutSegmentAgent:
-    "vui-routes-chatcodingroute cacheDonutSegmentAgent min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)] stroke-[currentColor]",
+    `vui-routes-chatcodingroute cacheDonutSegmentAgent min-w-0 ${vuiStateCoolInfoClass} stroke-[currentColor]`,
   cacheDonutSegmentAttachments:
     "vui-routes-chatcodingroute cacheDonutSegmentAttachments min-w-0 text-[var(--accent-warm)] stroke-[currentColor]",
   cacheDonutSegmentCacheWrite:
@@ -231,26 +235,26 @@ const styles: Record<string, string> = {
     "vui-routes-chatcodingroute chatReturnLink min-w-0 [&_span]:truncate",
   childTopLevelSessionItem:
     `vui-routes-chatcodingroute childTopLevelSessionItem min-w-0 ${vuiOpaqueRowClass} p-2`,
-  cliAgentRunPanel: `vui-routes-chatcodingroute cliAgentRunPanel min-w-0 ${vuiGlassPanelClass} p-2 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]`,
-  cliAgentRunPanelHidden: `vui-routes-chatcodingroute cliAgentRunPanelHidden min-w-0 ${vuiGlassPanelClass} p-2 hidden border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)] hidden`,
+  cliAgentRunPanel: `vui-routes-chatcodingroute cliAgentRunPanel min-w-0 ${vuiGlassPanelClass} p-2 ${vuiStateCoolInfoClass}`,
+  cliAgentRunPanelHidden: `vui-routes-chatcodingroute cliAgentRunPanelHidden min-w-0 ${vuiGlassPanelClass} p-2 hidden ${vuiStateCoolInfoClass} hidden`,
   cliAgentTerminalAction:
-    "vui-routes-chatcodingroute cliAgentTerminalAction min-w-0 flex flex-wrap items-center gap-1.5 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `vui-routes-chatcodingroute cliAgentTerminalAction min-w-0 flex flex-wrap items-center gap-1.5 ${vuiStateCoolInfoClass}`,
   cliAgentTerminalCommand:
-    "vui-routes-chatcodingroute cliAgentTerminalCommand min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)] !grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2",
+    `vui-routes-chatcodingroute cliAgentTerminalCommand min-w-0 ${vuiStateCoolInfoClass} !grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2`,
   cliAgentTerminalFrame:
-    "vui-routes-chatcodingroute cliAgentTerminalFrame min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `vui-routes-chatcodingroute cliAgentTerminalFrame min-w-0 ${vuiStateCoolInfoClass}`,
   cliAgentTerminalOutput:
-    "vui-routes-chatcodingroute cliAgentTerminalOutput min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
-  cliAgentTerminalOutputShell: `vui-routes-chatcodingroute cliAgentTerminalOutputShell min-w-0 grid h-full min-h-0 content-start overflow-hidden ${vuiWorkspaceFillClass} text-[var(--fg-primary)] border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)] bg-[var(--bg-canvas)]`,
+    `vui-routes-chatcodingroute cliAgentTerminalOutput min-w-0 ${vuiStateCoolInfoClass}`,
+  cliAgentTerminalOutputShell: `vui-routes-chatcodingroute cliAgentTerminalOutputShell min-w-0 grid h-full min-h-0 content-start overflow-hidden ${vuiWorkspaceFillClass} text-[var(--fg-primary)] ${vuiStateCoolInfoClass} bg-[var(--bg-canvas)]`,
   cliAgentTerminalOverlay:
-    "vui-routes-chatcodingroute cliAgentTerminalOverlay min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `vui-routes-chatcodingroute cliAgentTerminalOverlay min-w-0 ${vuiStateCoolInfoClass}`,
   cliAgentTerminalStatus:
-    "vui-routes-chatcodingroute cliAgentTerminalStatus min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `vui-routes-chatcodingroute cliAgentTerminalStatus min-w-0 ${vuiStateCoolInfoClass}`,
   compactDetails: `vui-routes-chatcodingroute compactDetails grid min-w-0 max-h-[220px] gap-1 overflow-auto ${vuiOpaqueRowClass} px-1.5 py-1 [font-size:var(--vui-font-xs)] text-[var(--fg-secondary)] [scrollbar-gutter:stable] [&>summary]:grid [&>summary]:cursor-pointer [&>summary]:list-none [&>summary]:grid-cols-[14px_minmax(0,1fr)] [&>summary]:items-center [&>summary]:gap-1 [&>summary]:font-semibold [&>summary::-webkit-details-marker]:hidden [&>summary_svg]:transition-transform [&[open]>summary_svg]:rotate-90 [&_.compactDetailsOpenLabel]:hidden [&[open]_.compactDetailsOpenLabel]:inline [&[open]_.compactDetailsClosedLabel]:hidden`,
   compactDetailsClosedLabel:
     "vui-routes-chatcodingroute compactDetailsClosedLabel min-w-0 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
   compactDetailsOpenLabel:
-    "vui-routes-chatcodingroute compactDetailsOpenLabel min-w-0 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)] border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)]",
+    `vui-routes-chatcodingroute compactDetailsOpenLabel min-w-0 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)] ${vuiStateCoolSoftClass}`,
   companionBlock:
     "vui-routes-chatcodingroute companionBlock min-w-0 content-start overflow-visible",
   companionCompact:
@@ -260,7 +264,7 @@ const styles: Record<string, string> = {
   companionTopLine:
     "vui-routes-chatcodingroute companionTopLine !grid min-w-0 grid-cols-[minmax(0,1fr)] items-start gap-0.5 [font-size:var(--vui-font-xs)] leading-tight [&_strong]:min-w-0 [&_strong]:truncate [&_strong]:[font-size:var(--vui-font-sm)] [&_strong]:font-[760] [&_strong]:text-[var(--fg-primary)] [&_span]:min-w-0 [&_span]:truncate [&_span]:text-[var(--fg-tertiary)]",
   contextCompositionSegmentAgent:
-    "vui-routes-chatcodingroute contextCompositionSegmentAgent min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `vui-routes-chatcodingroute contextCompositionSegmentAgent min-w-0 ${vuiStateCoolInfoClass}`,
   contextCompositionSegmentAttachments:
     "vui-routes-chatcodingroute contextCompositionSegmentAttachments min-w-0 border-[color-mix(in_srgb,var(--accent-warm)_24%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_8%,transparent)] text-[var(--accent-warm)]",
   contextCompositionSegmentCacheWrite:
@@ -363,11 +367,11 @@ const styles: Record<string, string> = {
   featurePresetScope:
     "vui-routes-chatcodingroute featurePresetScope min-w-0 shrink-0 [font-size:10px] font-semibold leading-none text-[var(--fg-tertiary)]",
   groupAgentOption:
-    "vui-routes-chatcodingroute groupAgentOption min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)] !grid grid-cols-[auto_28px_minmax(0,1fr)] items-center gap-1.5",
+    `vui-routes-chatcodingroute groupAgentOption min-w-0 ${vuiStateCoolInfoClass} !grid grid-cols-[auto_28px_minmax(0,1fr)] items-center gap-1.5`,
   groupAgentOptionSelected:
-    "vui-routes-chatcodingroute groupAgentOptionSelected min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)]",
+    `vui-routes-chatcodingroute groupAgentOptionSelected min-w-0 ${vuiStateCoolSoftClass} border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)]`,
   groupAgentPicker:
-    "vui-routes-chatcodingroute groupAgentPicker min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `vui-routes-chatcodingroute groupAgentPicker min-w-0 ${vuiStateCoolInfoClass}`,
   groupApplyButton:
     "vui-routes-chatcodingroute groupApplyButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55",
   groupBubble:
@@ -384,7 +388,7 @@ const styles: Record<string, string> = {
     "vui-routes-chatcodingroute groupBubbleMeta min-w-0 flex flex-wrap items-center gap-1.5",
   groupBubbleRow:
     `vui-routes-chatcodingroute groupBubbleRow min-w-0 ${vuiOpaqueRowClass} p-2 !grid grid-cols-[30px_minmax(0,1fr)] items-start gap-[7px]`,
-  groupBubbleRowFailed: `vui-routes-chatcodingroute groupBubbleRowFailed min-w-0 ${vuiOpaqueRowClass} p-2 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]`,
+  groupBubbleRowFailed: `vui-routes-chatcodingroute groupBubbleRowFailed min-w-0 ${vuiOpaqueRowClass} p-2 ${vuiStateDangerSoftClass}`,
   groupBubbleRowPending:
     `vui-routes-chatcodingroute groupBubbleRowPending min-w-0 ${vuiOpaqueRowClass} p-2`,
   groupBubbleToggle:
@@ -402,7 +406,7 @@ const styles: Record<string, string> = {
   groupConversationHeader:
     "vui-routes-chatcodingroute groupConversationHeader min-w-0 !grid grid-cols-[minmax(0,1fr)_auto] items-start gap-2 border-b border-[var(--vui-border-subtle)] !bg-[var(--vui-surface-panel)] px-2 py-2 [&_div]:grid [&_div]:min-w-0 [&_div]:gap-0.5 [&_h2]:m-0 [&_h2]:min-w-0 [&_h2]:truncate [&_h2]:[font-size:var(--vui-font-title)] [&_h2]:font-semibold [&_h2]:leading-tight [&_h2]:text-[var(--fg-primary)] [&_p]:m-0 [&_p]:truncate [&_p]:text-[10px] [&_p]:font-medium [&_p]:leading-tight [&_p]:text-[var(--fg-tertiary)] [&_span]:min-w-0 [&_span]:truncate [&_span]:[font-size:var(--vui-font-xs)] [&_span]:leading-tight [&_span]:text-[var(--fg-secondary)]",
   groupDeleteButton:
-    "vui-routes-chatcodingroute groupDeleteButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
+    `vui-routes-chatcodingroute groupDeleteButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55 ${vuiStateDangerSoftClass}`,
   groupEmptyState:
     "vui-routes-chatcodingroute groupEmptyState grid min-h-[min(220px,calc(100dvh_-_260px))] min-w-0 place-items-center px-6 text-center [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)] [&_svg]:mb-2 [&_svg]:text-[var(--accent-cool)]",
   groupManagementActions:
@@ -422,7 +426,7 @@ const styles: Record<string, string> = {
   groupManagementPanel: `vui-routes-chatcodingroute groupManagementPanel min-w-0 ${vuiGlassPanelClass} p-2`,
   groupMemberChip: `vui-routes-chatcodingroute groupMemberChip min-w-0 !grid min-h-[34px] !w-full max-w-full grid-cols-[18px_26px_minmax(0,1fr)_auto] items-center gap-1.5 overflow-hidden ${vuiOpaqueRowClass} px-1.5 py-1 text-left [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)]`,
   groupMemberChipSelected:
-    "vui-routes-chatcodingroute groupMemberChipSelected min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)]",
+    `vui-routes-chatcodingroute groupMemberChipSelected min-w-0 ${vuiStateCoolSoftClass}`,
   groupMemberCopy:
     "vui-routes-chatcodingroute groupMemberCopy grid min-w-0 gap-0.5 overflow-hidden text-left [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-secondary)] [&_small]:min-w-0 [&_small]:truncate [&_strong]:min-w-0 [&_strong]:truncate",
   groupMemberPicker:
@@ -481,7 +485,7 @@ layout:
   mentalStateBadge:
     "vui-routes-chatcodingroute mentalStateBadge min-w-0 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 [font-size:var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)]",
   mentalStateBadge_active:
-    "vui-routes-chatcodingroute mentalStateBadge_active min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
+    `vui-routes-chatcodingroute mentalStateBadge_active min-w-0 ${vuiStateSelectedRowClass}`,
   mentalStateBadge_answering:
     "vui-routes-chatcodingroute mentalStateBadge_answering min-w-0",
   mentalStateBadge_blocked:
@@ -503,7 +507,7 @@ layout:
   mentalStateBadge_crab:
     "vui-routes-chatcodingroute mentalStateBadge_crab min-w-0",
   mentalStateBadge_danger:
-    "vui-routes-chatcodingroute mentalStateBadge_danger min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
+    `vui-routes-chatcodingroute mentalStateBadge_danger min-w-0 ${vuiStateDangerSoftClass}`,
   mentalStateBadge_default:
     "vui-routes-chatcodingroute mentalStateBadge_default min-w-0",
   mentalStateBadge_disoriented:
@@ -513,9 +517,9 @@ layout:
   mentalStateBadge_editing:
     "vui-routes-chatcodingroute mentalStateBadge_editing min-w-0",
   mentalStateBadge_error:
-    "vui-routes-chatcodingroute mentalStateBadge_error min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
+    `vui-routes-chatcodingroute mentalStateBadge_error min-w-0 ${vuiStateDangerSoftClass}`,
   mentalStateBadge_failed:
-    "vui-routes-chatcodingroute mentalStateBadge_failed min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
+    `vui-routes-chatcodingroute mentalStateBadge_failed min-w-0 ${vuiStateDangerSoftClass}`,
   mentalStateBadge_general:
     "vui-routes-chatcodingroute mentalStateBadge_general min-w-0",
   mentalStateBadge_healthy:
@@ -523,7 +527,7 @@ layout:
   mentalStateBadge_idle:
     "vui-routes-chatcodingroute mentalStateBadge_idle min-w-0 border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] text-[var(--fg-tertiary)]",
   mentalStateBadge_info:
-    "vui-routes-chatcodingroute mentalStateBadge_info min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `vui-routes-chatcodingroute mentalStateBadge_info min-w-0 ${vuiStateCoolInfoClass}`,
   mentalStateBadge_lobster:
     "vui-routes-chatcodingroute mentalStateBadge_lobster min-w-0",
   mentalStateBadge_looping:
@@ -643,7 +647,7 @@ layout:
   petShowcaseAvatar:
     "vui-routes-chatcodingroute petShowcaseAvatar min-w-0 inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)]",
   petShowcaseAvatar_active:
-    "vui-routes-chatcodingroute petShowcaseAvatar_active min-w-0 inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
+    `vui-routes-chatcodingroute petShowcaseAvatar_active min-w-0 inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] ${vuiStateSelectedRowClass}`,
   petShowcaseAvatar_answering:
     "vui-routes-chatcodingroute petShowcaseAvatar_answering min-w-0 inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)]",
   petShowcaseAvatar_blocked:
@@ -665,7 +669,7 @@ layout:
   petShowcaseAvatar_crab:
     "vui-routes-chatcodingroute petShowcaseAvatar_crab min-w-0 inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)]",
   petShowcaseAvatar_danger:
-    "vui-routes-chatcodingroute petShowcaseAvatar_danger min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)] inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)]",
+    `vui-routes-chatcodingroute petShowcaseAvatar_danger min-w-0 ${vuiStateDangerSoftClass} inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)]`,
   petShowcaseAvatar_default:
     "vui-routes-chatcodingroute petShowcaseAvatar_default min-w-0 inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)]",
   petShowcaseAvatar_disoriented:
@@ -675,9 +679,9 @@ layout:
   petShowcaseAvatar_editing:
     "vui-routes-chatcodingroute petShowcaseAvatar_editing min-w-0 inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)]",
   petShowcaseAvatar_error:
-    "vui-routes-chatcodingroute petShowcaseAvatar_error min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)] inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)]",
+    `vui-routes-chatcodingroute petShowcaseAvatar_error min-w-0 ${vuiStateDangerSoftClass} inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)]`,
   petShowcaseAvatar_failed:
-    "vui-routes-chatcodingroute petShowcaseAvatar_failed min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)] inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)]",
+    `vui-routes-chatcodingroute petShowcaseAvatar_failed min-w-0 ${vuiStateDangerSoftClass} inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)]`,
   petShowcaseAvatar_general:
     "vui-routes-chatcodingroute petShowcaseAvatar_general min-w-0 inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)]",
   petShowcaseAvatar_healthy:
@@ -685,7 +689,7 @@ layout:
   petShowcaseAvatar_idle:
     "vui-routes-chatcodingroute petShowcaseAvatar_idle min-w-0 inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] bg-[var(--vui-surface-row)] text-[var(--fg-tertiary)]",
   petShowcaseAvatar_info:
-    "vui-routes-chatcodingroute petShowcaseAvatar_info min-w-0 inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `vui-routes-chatcodingroute petShowcaseAvatar_info min-w-0 inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] ${vuiStateCoolInfoClass}`,
   petShowcaseAvatar_lobster:
     "vui-routes-chatcodingroute petShowcaseAvatar_lobster min-w-0 inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)]",
   petShowcaseAvatar_looping:
@@ -814,7 +818,7 @@ layout:
   rightIndexTab:
     "vui-routes-chatcodingroute rightIndexTab min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55",
   rightIndexTabActive:
-    "vui-routes-chatcodingroute rightIndexTabActive min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
+    `vui-routes-chatcodingroute rightIndexTabActive min-w-0 ${vuiStateSelectedRowClass}`,
   rightIndexTabs:
     "vui-routes-chatcodingroute rightIndexTabs min-w-0 !grid grid-cols-[repeat(2,minmax(0,1fr))] gap-1",
   rightPane: `vui-routes-chatcodingroute rightPane min-w-0 grid h-full min-h-0 gap-[var(--chat-workbench-gap)] overflow-hidden rounded-none border-0 border-r border-[var(--vui-border-subtle)] ${vuiRailFillClass} p-[var(--chat-workbench-gap)] shadow-none [grid-column:1] [grid-row:1]`,
@@ -843,7 +847,7 @@ layout:
   sessionBindingNotice: `vui-routes-chatcodingroute sessionBindingNotice min-w-0 ${vuiGlassPanelClass} p-2 !grid grid-cols-[minmax(0,1fr)_auto] items-center gap-1.5`,
   sessionContextMenu: `vui-routes-chatcodingroute sessionContextMenu fixed z-[80] grid w-[188px] max-w-[calc(100vw-24px)] content-start gap-1 ${vuiGlassPanelClass} p-1 text-[var(--fg-primary)] shadow-[var(--vui-shadow-hairline)] backdrop-blur`,
   sessionContextMenuDanger:
-    "vui-routes-chatcodingroute sessionContextMenuDanger min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
+    `vui-routes-chatcodingroute sessionContextMenuDanger min-w-0 ${vuiStateDangerSoftClass}`,
   sessionContextMenuItem: `vui-routes-chatcodingroute sessionContextMenuItem min-w-0 !w-full justify-start ${vuiOpaqueRowClass} px-2 py-1.5 text-left text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] [&_[data-slot=vui-button-content]]:contents [&_[data-slot=vui-button-label]]:contents [&_[data-slot=vui-button-label]]:col-span-full`,
   sessionCurrentBadge:
     "vui-routes-chatcodingroute sessionCurrentBadge !inline-flex !h-[22px] !min-h-[22px] !w-fit max-w-full shrink-0 items-center justify-center gap-1 overflow-hidden border-[color-mix(in_srgb,var(--accent-cool)_36%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,transparent)] px-1.5 [font-size:var(--vui-font-xs)] font-semibold leading-none text-[var(--accent-cool)] [&_span]:leading-none",
@@ -855,7 +859,7 @@ layout:
     "vui-routes-chatcodingroute sessionItemActive border-[color-mix(in_srgb,var(--accent-cool)_22%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_7%,var(--vui-surface-card))] shadow-[var(--vui-shadow-inset-accent)] before:opacity-100",
   sessionItemContextTarget:
     "vui-routes-chatcodingroute sessionItemContextTarget border-[color-mix(in_srgb,var(--accent-cool)_18%,transparent)] !bg-[var(--vui-surface-card)] shadow-[var(--vui-shadow-inset-accent)] before:opacity-70",
-  sessionItemError: `vui-routes-chatcodingroute sessionItemError min-w-0 ${vuiOpaqueRowClass} p-2 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]`,
+  sessionItemError: `vui-routes-chatcodingroute sessionItemError min-w-0 ${vuiOpaqueRowClass} p-2 ${vuiStateDangerSoftClass}`,
   sessionItemMain:
     "vui-routes-chatcodingroute sessionItemMain !grid !w-full min-h-[50px] min-w-0 appearance-none grid-cols-[27px_minmax(0,1fr)] items-center justify-stretch gap-1.5 rounded-none border-0 [border:0] bg-transparent !px-1.5 !py-1 text-left text-[var(--fg-primary)] shadow-none hover:border-transparent hover:bg-transparent hover:shadow-none focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)]",
   sessionItemNotice: `vui-routes-chatcodingroute sessionItemNotice min-w-0 ${vuiGlassPanelClass} p-2 rounded-[var(--radius-control)] bg-[var(--vui-surface-row)]`,
@@ -874,7 +878,7 @@ layout:
   sessionStatePill:
     "vui-routes-chatcodingroute sessionStatePill min-w-0 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 [font-size:var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)]",
   sessionStatePill_active:
-    "vui-routes-chatcodingroute sessionStatePill_active min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
+    `vui-routes-chatcodingroute sessionStatePill_active min-w-0 ${vuiStateSelectedRowClass}`,
   sessionStatePill_answering:
     "vui-routes-chatcodingroute sessionStatePill_answering min-w-0",
   sessionStatePill_blocked:
@@ -896,7 +900,7 @@ layout:
   sessionStatePill_crab:
     "vui-routes-chatcodingroute sessionStatePill_crab min-w-0",
   sessionStatePill_danger:
-    "vui-routes-chatcodingroute sessionStatePill_danger min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
+    `vui-routes-chatcodingroute sessionStatePill_danger min-w-0 ${vuiStateDangerSoftClass}`,
   sessionStatePill_default:
     "vui-routes-chatcodingroute sessionStatePill_default min-w-0",
   sessionStatePill_disoriented:
@@ -906,9 +910,9 @@ layout:
   sessionStatePill_editing:
     "vui-routes-chatcodingroute sessionStatePill_editing min-w-0",
   sessionStatePill_error:
-    "vui-routes-chatcodingroute sessionStatePill_error min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
+    `vui-routes-chatcodingroute sessionStatePill_error min-w-0 ${vuiStateDangerSoftClass}`,
   sessionStatePill_failed:
-    "vui-routes-chatcodingroute sessionStatePill_failed min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
+    `vui-routes-chatcodingroute sessionStatePill_failed min-w-0 ${vuiStateDangerSoftClass}`,
   sessionStatePill_general:
     "vui-routes-chatcodingroute sessionStatePill_general min-w-0",
   sessionStatePill_healthy:
@@ -916,7 +920,7 @@ layout:
   sessionStatePill_idle:
     "vui-routes-chatcodingroute sessionStatePill_idle min-w-0 border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] text-[var(--fg-tertiary)]",
   sessionStatePill_info:
-    "vui-routes-chatcodingroute sessionStatePill_info min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `vui-routes-chatcodingroute sessionStatePill_info min-w-0 ${vuiStateCoolInfoClass}`,
   sessionStatePill_lobster:
     "vui-routes-chatcodingroute sessionStatePill_lobster min-w-0",
   sessionStatePill_looping:
@@ -1022,7 +1026,7 @@ layout:
   tab:
     "vui-routes-chatcodingroute tab min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55",
   tabActive:
-    "vui-routes-chatcodingroute tabActive min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
+    `vui-routes-chatcodingroute tabActive min-w-0 ${vuiStateSelectedRowClass}`,
   tabStrip:
     "vui-routes-chatcodingroute tabStrip min-w-0 flex h-9 items-end gap-1 overflow-hidden border-b border-[var(--vui-border-subtle)] !bg-[var(--vui-surface-panel)] px-1 pt-1",
   teamTreeChild:
@@ -1049,7 +1053,7 @@ layout:
   tokenStatusMetricButton:
     "vui-routes-chatcodingroute tokenStatusMetricButton !grid !h-full !min-h-0 !w-full !border-0 !bg-transparent !p-0 !text-inherit !shadow-none [&_[data-slot=vui-button-content]]:contents [&_[data-slot=vui-button-label]]:contents",
   tokenStatusMetric_active:
-    "vui-routes-chatcodingroute tokenStatusMetric_active min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
+    `vui-routes-chatcodingroute tokenStatusMetric_active min-w-0 ${vuiStateSelectedRowClass}`,
   tokenStatusMetric_answering:
     "vui-routes-chatcodingroute tokenStatusMetric_answering min-w-0",
   tokenStatusMetric_blocked:
@@ -1071,7 +1075,7 @@ layout:
   tokenStatusMetric_crab:
     "vui-routes-chatcodingroute tokenStatusMetric_crab min-w-0",
   tokenStatusMetric_danger:
-    "vui-routes-chatcodingroute tokenStatusMetric_danger min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
+    `vui-routes-chatcodingroute tokenStatusMetric_danger min-w-0 ${vuiStateDangerSoftClass}`,
   tokenStatusMetric_default:
     "vui-routes-chatcodingroute tokenStatusMetric_default min-w-0",
   tokenStatusMetric_disoriented:
@@ -1081,9 +1085,9 @@ layout:
   tokenStatusMetric_editing:
     "vui-routes-chatcodingroute tokenStatusMetric_editing min-w-0",
   tokenStatusMetric_error:
-    "vui-routes-chatcodingroute tokenStatusMetric_error min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
+    `vui-routes-chatcodingroute tokenStatusMetric_error min-w-0 ${vuiStateDangerSoftClass}`,
   tokenStatusMetric_failed:
-    "vui-routes-chatcodingroute tokenStatusMetric_failed min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
+    `vui-routes-chatcodingroute tokenStatusMetric_failed min-w-0 ${vuiStateDangerSoftClass}`,
   tokenStatusMetric_general:
     "vui-routes-chatcodingroute tokenStatusMetric_general min-w-0",
   tokenStatusMetric_healthy:
@@ -1091,7 +1095,7 @@ layout:
   tokenStatusMetric_idle:
     "vui-routes-chatcodingroute tokenStatusMetric_idle min-w-0 border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] text-[var(--fg-tertiary)]",
   tokenStatusMetric_info:
-    "vui-routes-chatcodingroute tokenStatusMetric_info min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `vui-routes-chatcodingroute tokenStatusMetric_info min-w-0 ${vuiStateCoolInfoClass}`,
   tokenStatusMetric_lobster:
     "vui-routes-chatcodingroute tokenStatusMetric_lobster min-w-0",
   tokenStatusMetric_looping:

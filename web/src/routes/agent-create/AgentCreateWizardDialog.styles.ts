@@ -1,6 +1,7 @@
 import {
   vuiElevatedPanelClass,
   vuiOpaqueRowClass,
+  vuiStateWarningPanelClass,
 } from "../../design/vuiSurfaceRecipes";
 
 const styles = {
@@ -10,7 +11,7 @@ const styles = {
   heading: "grid min-w-0 gap-1 [&_h2]:m-0 [&_h2]:[font-size:var(--vui-font-lg)] [&_h2]:font-semibold [&_h2]:leading-tight [&_p]:m-0 [&_p]:[font-size:var(--vui-font-xs)] [&_p]:leading-relaxed [&_p]:text-[var(--fg-secondary)]",
   eyebrow: "text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--accent-cool)]",
   body: "min-h-0 overflow-y-auto px-5 py-4 max-[700px]:px-4 max-[700px]:py-3",
-  confirmation: "grid gap-3 rounded-[var(--radius-panel)] border border-[color-mix(in_srgb,var(--state-warning)_42%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--state-warning)_8%,var(--vui-surface-panel))] p-4 [&_p]:m-0 [&_p]:[font-size:var(--vui-font-sm)] [&_p]:text-[var(--fg-secondary)]",
+  confirmation: `grid gap-3 ${vuiStateWarningPanelClass} p-4 [&_p]:m-0 [&_p]:[font-size:var(--vui-font-sm)] [&_p]:text-[var(--fg-secondary)]`,
   confirmationActions: "flex flex-wrap justify-end gap-2",
   success: "grid min-h-[280px] content-center justify-items-start gap-3 px-3 py-6 [&>svg]:text-[var(--state-success)] [&_strong]:[font-size:var(--vui-font-lg)] [&_p]:m-0 [&_p]:text-[var(--fg-secondary)]",
   successActions: "flex flex-wrap gap-2 pt-2",

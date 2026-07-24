@@ -11,6 +11,10 @@
 // literal-keyed map; tightening is a follow-up, not Phase 0.
 import {
   vuiOpaqueRowClass,
+  vuiStateCoolInfoClass,
+  vuiStateCoolSoftClass,
+  vuiStateDangerSoftClass,
+  vuiStateSelectedRowClass,
 } from "../design/vuiSurfaceRecipes";
 
 const styles: Record<string, string> = {
@@ -21,13 +25,13 @@ const styles: Record<string, string> = {
   agentPanel:
     "agentPanel min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color:color-mix(in_srgb,var(--accent-cool)_7%,transparent)] p-2 text-[var(--accent-cool)]",
   agentReport:
-    "agentReport min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `agentReport min-w-0 ${vuiStateCoolInfoClass}`,
   agentReview:
-    "agentReview min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `agentReview min-w-0 ${vuiStateCoolInfoClass}`,
   agentTraceAvatar:
-    "agentTraceAvatar min-w-0 inline-grid h-7 w-7 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `agentTraceAvatar min-w-0 inline-grid h-7 w-7 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] ${vuiStateCoolInfoClass}`,
   agentTraceBubble:
-    "agentTraceBubble min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `agentTraceBubble min-w-0 ${vuiStateCoolInfoClass}`,
   agentTraceContent:
     "agentTraceContent min-w-0 max-w-full [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] [overflow-wrap:anywhere]",
   agentTraceControls:
@@ -45,7 +49,7 @@ const styles: Record<string, string> = {
   agentTraceHeader:
     "agentTraceHeader min-w-0 max-w-full flex flex-wrap items-center justify-between gap-1.5",
   agentTraceLivePill:
-    "agentTraceLivePill min-w-0 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 [font-size:var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)] border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `agentTraceLivePill min-w-0 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 [font-size:var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)] ${vuiStateCoolInfoClass}`,
   agentTraceMeta:
     "agentTraceMeta min-w-0 max-w-full flex flex-wrap items-center gap-1.5 text-[var(--fg-tertiary)] [&_strong]:text-[var(--fg-primary)]",
   agentTracePanel:
@@ -57,71 +61,71 @@ const styles: Record<string, string> = {
   agentTraceTurn:
     "agentTraceTurn min-w-0 max-w-full rounded-[var(--radius-control)] border border-[color:color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color:color-mix(in_srgb,var(--accent-cool)_8%,transparent)] p-1.5 text-[var(--accent-cool)] !grid grid-cols-[28px_minmax(0,1fr)] gap-2",
   agentTrace_active:
-    "agentTrace_active min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
+    `agentTrace_active min-w-0 ${vuiStateSelectedRowClass}`,
   agentTrace_agent:
-    "agentTrace_agent min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `agentTrace_agent min-w-0 ${vuiStateCoolInfoClass}`,
   agentTrace_blocked:
-    "agentTrace_blocked min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `agentTrace_blocked min-w-0 ${vuiStateCoolInfoClass}`,
   agentTrace_collapsed:
-    "agentTrace_collapsed min-w-0 hidden border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `agentTrace_collapsed min-w-0 hidden ${vuiStateCoolInfoClass}`,
   agentTrace_compact:
-    "agentTrace_compact min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `agentTrace_compact min-w-0 ${vuiStateCoolInfoClass}`,
   agentTrace_context:
-    "agentTrace_context min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `agentTrace_context min-w-0 ${vuiStateCoolInfoClass}`,
   agentTrace_danger:
-    "agentTrace_danger min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)] border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `agentTrace_danger min-w-0 ${vuiStateDangerSoftClass} ${vuiStateCoolInfoClass}`,
   agentTrace_done:
-    "agentTrace_done min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `agentTrace_done min-w-0 ${vuiStateCoolInfoClass}`,
   agentTrace_draft:
-    "agentTrace_draft min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `agentTrace_draft min-w-0 ${vuiStateCoolInfoClass}`,
   agentTrace_error:
-    "agentTrace_error min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)] border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `agentTrace_error min-w-0 ${vuiStateDangerSoftClass} ${vuiStateCoolInfoClass}`,
   agentTrace_failed:
-    "agentTrace_failed min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)] border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `agentTrace_failed min-w-0 ${vuiStateDangerSoftClass} ${vuiStateCoolInfoClass}`,
   agentTrace_idle:
-    "agentTrace_idle min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `agentTrace_idle min-w-0 ${vuiStateCoolInfoClass}`,
   agentTrace_info:
-    "agentTrace_info min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `agentTrace_info min-w-0 ${vuiStateCoolInfoClass}`,
   agentTrace_live:
-    "agentTrace_live min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `agentTrace_live min-w-0 ${vuiStateCoolInfoClass}`,
   agentTrace_medium:
-    "agentTrace_medium min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `agentTrace_medium min-w-0 ${vuiStateCoolInfoClass}`,
   agentTrace_mental:
-    "agentTrace_mental min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `agentTrace_mental min-w-0 ${vuiStateCoolInfoClass}`,
   agentTrace_missing:
-    "agentTrace_missing min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `agentTrace_missing min-w-0 ${vuiStateCoolInfoClass}`,
   agentTrace_muted:
-    "agentTrace_muted min-w-0 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)] border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `agentTrace_muted min-w-0 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)] ${vuiStateCoolInfoClass}`,
   agentTrace_neutral:
-    "agentTrace_neutral min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `agentTrace_neutral min-w-0 ${vuiStateCoolInfoClass}`,
   agentTrace_observation:
-    "agentTrace_observation min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `agentTrace_observation min-w-0 ${vuiStateCoolInfoClass}`,
   agentTrace_ok:
-    "agentTrace_ok min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `agentTrace_ok min-w-0 ${vuiStateCoolInfoClass}`,
   agentTrace_pending:
-    "agentTrace_pending min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `agentTrace_pending min-w-0 ${vuiStateCoolInfoClass}`,
   agentTrace_primary:
-    "agentTrace_primary min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)]",
+    `agentTrace_primary min-w-0 ${vuiStateSelectedRowClass} border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)]`,
   agentTrace_ready:
-    "agentTrace_ready min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `agentTrace_ready min-w-0 ${vuiStateCoolInfoClass}`,
   agentTrace_running:
-    "agentTrace_running min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `agentTrace_running min-w-0 ${vuiStateCoolInfoClass}`,
   agentTrace_selected:
-    "agentTrace_selected min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)]",
+    `agentTrace_selected min-w-0 ${vuiStateCoolSoftClass} border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)]`,
   agentTrace_status:
-    "agentTrace_status min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `agentTrace_status min-w-0 ${vuiStateCoolInfoClass}`,
   agentTrace_success:
-    "agentTrace_success min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `agentTrace_success min-w-0 ${vuiStateCoolInfoClass}`,
   agentTrace_tall:
-    "agentTrace_tall min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `agentTrace_tall min-w-0 ${vuiStateCoolInfoClass}`,
   agentTrace_thought:
-    "agentTrace_thought min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `agentTrace_thought min-w-0 ${vuiStateCoolInfoClass}`,
   agentTrace_tool:
-    "agentTrace_tool min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `agentTrace_tool min-w-0 ${vuiStateCoolInfoClass}`,
   agentTrace_warn:
-    "agentTrace_warn min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `agentTrace_warn min-w-0 ${vuiStateCoolInfoClass}`,
   agentTrace_warning:
-    "agentTrace_warning min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `agentTrace_warning min-w-0 ${vuiStateCoolInfoClass}`,
   cardActions:
     "cardActions min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] !bg-[var(--vui-surface-panel)] p-1.5 flex flex-wrap items-center gap-1",
   cardPreviewIntro:
@@ -135,7 +139,7 @@ const styles: Record<string, string> = {
   emptyText:
     "emptyText min-w-0 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
   errorText:
-    "errorText min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)] [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
+    `errorText min-w-0 ${vuiStateDangerSoftClass} [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]`,
   evidenceCard:
     "evidenceCard min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] !bg-[var(--vui-surface-panel)] p-1.5",
   evidenceHeader:
@@ -159,7 +163,7 @@ const styles: Record<string, string> = {
   intakeField_medium:
     "intakeField_medium min-w-0 grid gap-1 [font-size:var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full",
   intakeField_primary:
-    "intakeField_primary min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))] text-[var(--accent-cool)] grid gap-1 [font-size:var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full",
+    `intakeField_primary min-w-0 ${vuiStateSelectedRowClass} grid gap-1 [font-size:var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full`,
   intakeField_tall:
     "intakeField_tall min-w-0 grid gap-1 [font-size:var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full",
   intakeFields:
@@ -195,14 +199,14 @@ const styles: Record<string, string> = {
   sessionButton:
     "sessionButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55",
   sessionDeleteButton:
-    "sessionDeleteButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
+    `sessionDeleteButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55 ${vuiStateDangerSoftClass}`,
   sessionList:
     "sessionList min-w-0 max-w-full grid min-h-0 content-start gap-1 overflow-auto overflow-x-hidden",
   sessionRail:
     "sessionRail min-w-0 max-w-full grid min-h-0 content-start gap-1 overflow-auto overflow-x-hidden max-[980px]:grid-cols-[repeat(2,minmax(0,1fr))] max-[640px]:grid-cols-[minmax(0,1fr)]",
   sessionRow:
     "sessionRow min-w-0 max-w-full rounded-[var(--radius-control)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] !bg-[var(--vui-surface-panel)] p-1.5 !grid grid-cols-[minmax(0,1fr)_34px] items-stretch gap-0 rounded-[var(--radius-control)]",
-  sessionRow_active: `sessionRow_active min-w-0 ${vuiOpaqueRowClass} p-1.5 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]`,
+  sessionRow_active: `sessionRow_active min-w-0 ${vuiOpaqueRowClass} p-1.5 ${vuiStateSelectedRowClass}`,
   sideColumn:
     "sideColumn min-w-0 max-w-full",
   sourceBar:
@@ -246,9 +250,9 @@ const styles: Record<string, string> = {
   statePill:
     "statePill min-w-0 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 [font-size:var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)]",
   state_active:
-    "state_active min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
+    `state_active min-w-0 ${vuiStateSelectedRowClass}`,
   state_agent:
-    "state_agent min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `state_agent min-w-0 ${vuiStateCoolInfoClass}`,
   state_blocked:
     "state_blocked min-w-0 border-[color-mix(in_srgb,var(--state-warning)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_10%,transparent)] text-[var(--state-warning)]",
   state_collapsed:
@@ -258,19 +262,19 @@ const styles: Record<string, string> = {
   state_context:
     "state_context min-w-0 border-[color-mix(in_srgb,var(--accent-warm)_24%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_8%,transparent)] text-[var(--accent-warm)]",
   state_danger:
-    "state_danger min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
+    `state_danger min-w-0 ${vuiStateDangerSoftClass}`,
   state_done:
     "state_done min-w-0",
   state_draft:
     "state_draft min-w-0",
   state_error:
-    "state_error min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
+    `state_error min-w-0 ${vuiStateDangerSoftClass}`,
   state_failed:
-    "state_failed min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
+    `state_failed min-w-0 ${vuiStateDangerSoftClass}`,
   state_idle:
     "state_idle min-w-0 border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] text-[var(--fg-tertiary)]",
   state_info:
-    "state_info min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `state_info min-w-0 ${vuiStateCoolInfoClass}`,
   state_live:
     "state_live min-w-0 border-[color-mix(in_srgb,var(--state-success)_32%,transparent)] bg-[color-mix(in_srgb,var(--state-success)_9%,transparent)] text-[var(--state-success)]",
   state_medium:
@@ -290,13 +294,13 @@ const styles: Record<string, string> = {
   state_pending:
     "state_pending min-w-0",
   state_primary:
-    "state_primary min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))] text-[var(--accent-cool)]",
+    `state_primary min-w-0 ${vuiStateSelectedRowClass}`,
   state_ready:
     "state_ready min-w-0 border-[color-mix(in_srgb,var(--state-success)_32%,transparent)] bg-[color-mix(in_srgb,var(--state-success)_9%,transparent)] text-[var(--state-success)]",
   state_running:
     "state_running min-w-0 border-[color-mix(in_srgb,var(--state-success)_32%,transparent)] bg-[color-mix(in_srgb,var(--state-success)_9%,transparent)] text-[var(--state-success)]",
   state_selected:
-    "state_selected min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)]",
+    `state_selected min-w-0 ${vuiStateCoolSoftClass}`,
   state_status:
     "state_status min-w-0",
   state_success:
@@ -318,7 +322,7 @@ const styles: Record<string, string> = {
   subnavLink:
     "subnavLink min-w-0",
   subnavLinkActive:
-    "subnavLinkActive min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
+    `subnavLinkActive min-w-0 ${vuiStateSelectedRowClass}`,
   summaryCard:
     "summaryCard min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] !bg-[var(--vui-surface-panel)] px-2 py-1.5 !grid grid-cols-[auto_minmax(0,1fr)] items-baseline gap-1.5",
   summaryGrid:
@@ -365,7 +369,7 @@ const styles: Record<string, string> = {
   workflowModeButton:
     "workflowModeButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55",
   workflowModeButton_active:
-    "workflowModeButton_active min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
+    `workflowModeButton_active min-w-0 ${vuiStateSelectedRowClass}`,
   workflowModeControl:
     "workflowModeControl min-w-0 w-fit max-w-full flex flex-wrap items-center gap-1.5",
   workspace:
