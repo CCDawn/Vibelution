@@ -595,6 +595,55 @@ def test_start_source_collection_run_blocks_without_required_prompt_cache(tmp_pa
     else:
         raise AssertionError("source collection should block when required prompt cache is unsupported")
 
+
+def test_source_collection_prompt_cache_resolves_provider_first_schema_v2(monkeypatch):
+    monkeypatch.setattr(
+        team_workflow_orchestration_service,
+        "load_public_config",
+        lambda: {
+            "llm": {
+                "schema_version": 2,
+                "providers": {
+                    "relay_openai": {
+                        "label": "Relay OpenAI",
+                        "driver": "openai",
+                        "service_class": "relay",
+                        "credential_ref": "env:RELAY_OPENAI_API_KEY",
+                        "protocols": {"default": "responses", "supported": ["responses"]},
+                        "models": {
+                            "gpt-5.6-luna": {
+                                "label": "GPT-5.6 Luna",
+                                "upstream_id": "gpt-5.6-luna",
+                                "wire_protocol": "responses",
+                                "interaction_contract": "tool_chat",
+                                "defaults": {"prompt_cache": {"mode": "automatic"}},
+                            }
+                        },
+                    }
+                },
+                "profiles": {
+                    "primary": {
+                        "model_ref": "relay_openai/gpt-5.6-luna",
+                        "overrides": {},
+                    }
+                },
+            }
+        },
+    )
+
+    policy = team_workflow_orchestration_service._source_collection_prompt_cache_policy(
+        "research-team",
+        {},
+        ["source_finder"],
+    )
+
+    assert policy["modelId"] == "relay_openai/gpt-5.6-luna"
+    assert policy["promptCacheMode"] == "automatic"
+    assert policy["modelResolution"]["status"] == "auto"
+    assert policy["gate"]["status"] == "satisfied"
+    assert policy["gate"]["passed"] is True
+
+
 def test_start_source_collection_run_ignores_invalid_collection_roles(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     team = team_service.create_team(name="挑战杯科研团队")
