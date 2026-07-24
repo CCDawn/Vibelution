@@ -312,7 +312,7 @@ def load_execution_authorization(
     path: Path,
     bundle: QualificationBundle,
 ) -> dict[str, Any]:
-    authorization, _ = _read_json(path.resolve())
+    authorization, payload = _read_json(path.resolve())
     if authorization.get("schemaVersion") != AUTHORIZATION_SCHEMA:
         raise ValueError("formal execution authorization schema is invalid")
     if authorization.get("experimentId") != EXPERIMENT_ID:
@@ -327,8 +327,29 @@ def load_execution_authorization(
         raise ValueError("formal execution authorization changes the frozen asset order")
     if not str(authorization.get("authorizedBy", "")).strip():
         raise ValueError("formal execution authorization requires an accountable reviewer")
-    if not str(authorization.get("authorizedAt", "")).strip():
-        raise ValueError("formal execution authorization requires a timestamp")
+    authorized_at = str(authorization.get("authorizedAt", "")).strip()
+    try:
+        parsed_authorized_at = datetime.fromisoformat(
+            authorized_at.replace("Z", "+00:00")
+        )
+    except ValueError as exc:
+        raise ValueError(
+            "formal execution authorization requires a valid UTC timestamp"
+        ) from exc
+    utc_offset = parsed_authorized_at.utcoffset()
+    if (
+        parsed_authorized_at.tzinfo is None
+        or utc_offset is None
+        or utc_offset.total_seconds() != 0
+    ):
+        raise ValueError(
+            "formal execution authorization requires a valid UTC timestamp"
+        )
+    authorization = dict(authorization)
+    authorization["authorizedAt"] = (
+        parsed_authorized_at.astimezone(UTC).isoformat().replace("+00:00", "Z")
+    )
+    authorization["artifactSha256"] = hashlib.sha256(payload).hexdigest()
     return authorization
 
 
@@ -513,6 +534,7 @@ def run_multisession(
         "qualificationManifestSha256": bundle.manifest_sha256,
         "executionAuthorization": {
             "path": str(execution_authorization.resolve()),
+            "sha256": authorization["artifactSha256"],
             "authorizedBy": authorization["authorizedBy"],
             "authorizedAt": authorization["authorizedAt"],
         },

@@ -217,6 +217,108 @@ def test_formal_run_requires_independent_manifest_bound_authorization(
         )
 
 
+@pytest.mark.parametrize(
+    "authorized_at",
+    [
+        "not-a-timestamp",
+        "2026-07-24T01:00:00",
+        "2026-07-24T09:00:00+08:00",
+    ],
+)
+def test_authorization_requires_parseable_utc_timestamp(
+    tmp_path: Path,
+    authorized_at: str,
+) -> None:
+    module = _load_module()
+    manifest = _write_manifest(tmp_path / "manifest.json", module)
+    bundle = module.load_qualification_manifest(manifest)
+    authorization = tmp_path / "authorization.json"
+    authorization.write_text(
+        json.dumps(
+            {
+                "schemaVersion": module.AUTHORIZATION_SCHEMA,
+                "experimentId": module.EXPERIMENT_ID,
+                "qualificationManifestSha256": bundle.manifest_sha256,
+                "formalExperimentAuthorized": True,
+                "qualifiedSessionAssetIds": [
+                    session.asset_id for session in bundle.sessions
+                ],
+                "authorizedBy": "reviewer",
+                "authorizedAt": authorized_at,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="valid UTC timestamp"):
+        module.load_execution_authorization(authorization, bundle)
+
+
+def test_authorized_run_records_authorization_hash_and_frozen_session_order(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_module()
+    manifest = _write_manifest(tmp_path / "manifest.json", module)
+    bundle = module.load_qualification_manifest(manifest)
+    authorization = tmp_path / "authorization.json"
+    authorization.write_text(
+        json.dumps(
+            {
+                "schemaVersion": module.AUTHORIZATION_SCHEMA,
+                "experimentId": module.EXPERIMENT_ID,
+                "qualificationManifestSha256": bundle.manifest_sha256,
+                "formalExperimentAuthorized": True,
+                "qualifiedSessionAssetIds": [
+                    session.asset_id for session in bundle.sessions
+                ],
+                "authorizedBy": "reviewer",
+                "authorizedAt": "2026-07-24T01:00:00Z",
+            }
+        ),
+        encoding="utf-8",
+    )
+    local_assets = {
+        session.asset_id: tmp_path / f"{session.asset_id}.nwb"
+        for session in bundle.sessions
+    }
+    observed_order = []
+
+    def fake_run_session(session, path, config):
+        assert path == local_assets[session.asset_id]
+        observed_order.append(session.asset_id)
+        return _session_result(
+            session.subject,
+            interaction=0.10,
+            all_gates=True,
+        )
+
+    monkeypatch.setattr(module, "validate_local_assets", lambda *_: local_assets)
+    monkeypatch.setattr(module, "_run_session", fake_run_session)
+    monkeypatch.setattr(
+        module,
+        "_scientific_modules",
+        lambda: {
+            "np": type("Versioned", (), {"__version__": "test"})(),
+            "h5py": type("Versioned", (), {"__version__": "test"})(),
+            "sklearn": type("Versioned", (), {"__version__": "test"})(),
+        },
+    )
+
+    result = module.run_multisession(
+        qualification_manifest=manifest,
+        source_root=tmp_path / "source",
+        execution_authorization=authorization,
+    )
+
+    assert observed_order == [session.asset_id for session in bundle.sessions]
+    assert result["status"] == "formal_complete"
+    assert result["decision"]["decision"] == "CONTINUE"
+    assert result["executionAuthorization"]["sha256"] == hashlib.sha256(
+        authorization.read_bytes()
+    ).hexdigest()
+
+
 def test_runner_excludes_empty_unit_rows_and_binds_count_to_qualification() -> None:
     module = _load_module()
     expected = next(iter(module.FROZEN_ASSETS.items()))
