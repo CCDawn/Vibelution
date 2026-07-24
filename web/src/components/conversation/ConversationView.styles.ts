@@ -7,6 +7,9 @@ import {
   vuiStateCoolInfoClass,
   vuiStateDangerSoftClass,
   vuiStateSelectedRowClass,
+  vuiStateSuccessSoftClass,
+  vuiStateWarmSoftClass,
+  vuiStateWarningSoftClass,
 } from "../../design/vuiSurfaceRecipes";
 
 const conversationViewScope = "vui-components-conversationview";
@@ -111,7 +114,7 @@ const styles: Record<string, string> = {
   answerOnlyProcessGroup_answer:
     "vui-components-conversationview answerOnlyProcessGroup_answer min-w-0",
   answerOnlyProcessGroup_blocked:
-    "vui-components-conversationview answerOnlyProcessGroup_blocked min-w-0 border-[color-mix(in_srgb,var(--state-warning)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_10%,transparent)] text-[var(--state-warning)]",
+    `vui-components-conversationview answerOnlyProcessGroup_blocked min-w-0 ${vuiStateWarningSoftClass}`,
   answerOnlyProcessGroup_code:
     "vui-components-conversationview answerOnlyProcessGroup_code min-w-0 font-mono [font-size:var(--vui-font-xs)]",
   answerOnlyProcessGroup_commit:
@@ -167,7 +170,7 @@ const styles: Record<string, string> = {
   answerOnlyProcessGroup_warn:
     "vui-components-conversationview answerOnlyProcessGroup_warn min-w-0",
   answerOnlyProcessGroup_warning:
-    "vui-components-conversationview answerOnlyProcessGroup_warning min-w-0 border-[color-mix(in_srgb,var(--state-warning)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_10%,transparent)] text-[var(--state-warning)]",
+    `vui-components-conversationview answerOnlyProcessGroup_warning min-w-0 ${vuiStateWarningSoftClass}`,
   answerOnlyProcessIcon:
     "vui-components-conversationview answerOnlyProcessIcon min-w-0 shrink-0 text-[var(--fg-tertiary)]",
   answerOnlyProcessMeta:
@@ -195,7 +198,7 @@ const styles: Record<string, string> = {
   auxiliaryBlock_answer:
     "vui-components-conversationview auxiliaryBlock_answer min-w-0",
   auxiliaryBlock_blocked:
-    "vui-components-conversationview auxiliaryBlock_blocked min-w-0 border-[color-mix(in_srgb,var(--state-warning)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_10%,transparent)] text-[var(--state-warning)]",
+    `vui-components-conversationview auxiliaryBlock_blocked min-w-0 ${vuiStateWarningSoftClass}`,
   auxiliaryBlock_code:
     "vui-components-conversationview auxiliaryBlock_code min-w-0 font-mono [font-size:var(--vui-font-xs)]",
   auxiliaryBlock_commit:
@@ -229,21 +232,21 @@ const styles: Record<string, string> = {
   auxiliaryBlock_neutral:
     "vui-components-conversationview auxiliaryBlock_neutral min-w-0",
   auxiliaryBlock_ok:
-    "vui-components-conversationview auxiliaryBlock_ok min-w-0 border-[color-mix(in_srgb,var(--state-success)_32%,transparent)] bg-[color-mix(in_srgb,var(--state-success)_9%,transparent)] text-[var(--state-success)]",
+    `vui-components-conversationview auxiliaryBlock_ok min-w-0 ${vuiStateSuccessSoftClass}`,
   auxiliaryBlock_pending:
     "vui-components-conversationview auxiliaryBlock_pending min-w-0",
   auxiliaryBlock_ready:
-    "vui-components-conversationview auxiliaryBlock_ready min-w-0 border-[color-mix(in_srgb,var(--state-success)_32%,transparent)] bg-[color-mix(in_srgb,var(--state-success)_9%,transparent)] text-[var(--state-success)]",
+    `vui-components-conversationview auxiliaryBlock_ready min-w-0 ${vuiStateSuccessSoftClass}`,
   auxiliaryBlock_running:
-    "vui-components-conversationview auxiliaryBlock_running min-w-0 border-[color-mix(in_srgb,var(--state-success)_32%,transparent)] bg-[color-mix(in_srgb,var(--state-success)_9%,transparent)] text-[var(--state-success)]",
+    `vui-components-conversationview auxiliaryBlock_running min-w-0 ${vuiStateSuccessSoftClass}`,
   auxiliaryBlock_status:
     "vui-components-conversationview auxiliaryBlock_status min-w-0",
   auxiliaryBlock_success:
-    "vui-components-conversationview auxiliaryBlock_success min-w-0 border-[color-mix(in_srgb,var(--state-success)_32%,transparent)] bg-[color-mix(in_srgb,var(--state-success)_9%,transparent)] text-[var(--state-success)]",
+    `vui-components-conversationview auxiliaryBlock_success min-w-0 ${vuiStateSuccessSoftClass}`,
   auxiliaryBlock_thought:
     "vui-components-conversationview auxiliaryBlock_thought min-w-0",
   auxiliaryBlock_tool:
-    "vui-components-conversationview auxiliaryBlock_tool min-w-0 border-[color-mix(in_srgb,var(--accent-warm)_24%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_8%,transparent)] text-[var(--accent-warm)]",
+    `vui-components-conversationview auxiliaryBlock_tool min-w-0 ${vuiStateWarmSoftClass}`,
   auxiliaryBlock_verification:
     "vui-components-conversationview auxiliaryBlock_verification min-w-0",
   auxiliaryBlock_wake:
@@ -251,7 +254,7 @@ const styles: Record<string, string> = {
   auxiliaryBlock_warn:
     "vui-components-conversationview auxiliaryBlock_warn min-w-0",
   auxiliaryBlock_warning:
-    "vui-components-conversationview auxiliaryBlock_warning min-w-0 border-[color-mix(in_srgb,var(--state-warning)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_10%,transparent)] text-[var(--state-warning)]",
+    `vui-components-conversationview auxiliaryBlock_warning min-w-0 ${vuiStateWarningSoftClass}`,
   auxiliaryPanel: `vui-components-conversationview auxiliaryPanel min-w-0 ${vuiGlassPanelClass} p-2`,
   auxiliaryPanel_mental: `vui-components-conversationview auxiliaryPanel_mental min-w-0 ${vuiGlassPanelClass} p-2`,
   auxiliaryPanel_thought: `vui-components-conversationview auxiliaryPanel_thought min-w-0 ${vuiGlassPanelClass} p-2`,
@@ -576,7 +579,7 @@ const styles: Record<string, string> = {
   operationIcon_answer:
     "vui-components-conversationview operationIcon_answer min-w-0 shrink-0 text-[var(--fg-tertiary)]",
   operationIcon_blocked:
-    "vui-components-conversationview operationIcon_blocked min-w-0 shrink-0 text-[var(--fg-tertiary)] border-[color-mix(in_srgb,var(--state-warning)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_10%,transparent)] text-[var(--state-warning)]",
+    `vui-components-conversationview operationIcon_blocked min-w-0 shrink-0 text-[var(--fg-tertiary)] ${vuiStateWarningSoftClass}`,
   operationIcon_code:
     "vui-components-conversationview operationIcon_code min-w-0 shrink-0 text-[var(--fg-tertiary)] font-mono [font-size:var(--vui-font-xs)]",
   operationIcon_commit:
@@ -640,7 +643,7 @@ const styles: Record<string, string> = {
     "vui-components-conversationview operationItemWrap min-w-0 border-0 bg-transparent p-0 shadow-none",
   operationItem_active: `vui-components-conversationview operationItem_active min-w-0 ${vuiOpaqueRowClass} p-2 ${vuiStateSelectedRowClass}`,
   operationItem_answer: `vui-components-conversationview operationItem_answer min-w-0 ${vuiOpaqueRowClass} p-2`,
-  operationItem_blocked: `vui-components-conversationview operationItem_blocked min-w-0 ${vuiOpaqueRowClass} p-2 border-[color-mix(in_srgb,var(--state-warning)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_10%,transparent)] text-[var(--state-warning)]`,
+  operationItem_blocked: `vui-components-conversationview operationItem_blocked min-w-0 ${vuiOpaqueRowClass} p-2 ${vuiStateWarningSoftClass}`,
   operationItem_code: `vui-components-conversationview operationItem_code min-w-0 ${vuiOpaqueRowClass} p-2 font-mono [font-size:var(--vui-font-xs)]`,
   operationItem_commit: `vui-components-conversationview operationItem_commit min-w-0 ${vuiOpaqueRowClass} p-2`,
   operationItem_danger: `vui-components-conversationview operationItem_danger min-w-0 ${vuiOpaqueRowClass} p-2 ${vuiStateDangerSoftClass}`,
@@ -713,7 +716,7 @@ const styles: Record<string, string> = {
   reActOperationGroup_answer:
     "vui-components-conversationview reActOperationGroup_answer min-w-0",
   reActOperationGroup_blocked:
-    "vui-components-conversationview reActOperationGroup_blocked min-w-0 border-[color-mix(in_srgb,var(--state-warning)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_10%,transparent)] text-[var(--state-warning)]",
+    `vui-components-conversationview reActOperationGroup_blocked min-w-0 ${vuiStateWarningSoftClass}`,
   reActOperationGroup_code:
     "vui-components-conversationview reActOperationGroup_code min-w-0 font-mono [font-size:var(--vui-font-xs)]",
   reActOperationGroup_commit:
@@ -769,7 +772,7 @@ const styles: Record<string, string> = {
   reActOperationGroup_warn:
     "vui-components-conversationview reActOperationGroup_warn min-w-0",
   reActOperationGroup_warning:
-    "vui-components-conversationview reActOperationGroup_warning min-w-0 border-[color-mix(in_srgb,var(--state-warning)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_10%,transparent)] text-[var(--state-warning)]",
+    `vui-components-conversationview reActOperationGroup_warning min-w-0 ${vuiStateWarningSoftClass}`,
   reActOperationList:
     "vui-components-conversationview reActOperationList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
   reActOperationMeta:
@@ -817,7 +820,7 @@ const styles: Record<string, string> = {
   researchOrgChip_answer:
     "vui-components-conversationview researchOrgChip_answer min-w-0",
   researchOrgChip_blocked:
-    "vui-components-conversationview researchOrgChip_blocked min-w-0 border-[color-mix(in_srgb,var(--state-warning)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_10%,transparent)] text-[var(--state-warning)]",
+    `vui-components-conversationview researchOrgChip_blocked min-w-0 ${vuiStateWarningSoftClass}`,
   researchOrgChip_code:
     "vui-components-conversationview researchOrgChip_code min-w-0 font-mono [font-size:var(--vui-font-xs)]",
   researchOrgChip_commit:
@@ -851,21 +854,21 @@ const styles: Record<string, string> = {
   researchOrgChip_neutral:
     "vui-components-conversationview researchOrgChip_neutral min-w-0",
   researchOrgChip_ok:
-    "vui-components-conversationview researchOrgChip_ok min-w-0 border-[color-mix(in_srgb,var(--state-success)_32%,transparent)] bg-[color-mix(in_srgb,var(--state-success)_9%,transparent)] text-[var(--state-success)]",
+    `vui-components-conversationview researchOrgChip_ok min-w-0 ${vuiStateSuccessSoftClass}`,
   researchOrgChip_pending:
     "vui-components-conversationview researchOrgChip_pending min-w-0",
   researchOrgChip_ready:
-    "vui-components-conversationview researchOrgChip_ready min-w-0 border-[color-mix(in_srgb,var(--state-success)_32%,transparent)] bg-[color-mix(in_srgb,var(--state-success)_9%,transparent)] text-[var(--state-success)]",
+    `vui-components-conversationview researchOrgChip_ready min-w-0 ${vuiStateSuccessSoftClass}`,
   researchOrgChip_running:
-    "vui-components-conversationview researchOrgChip_running min-w-0 border-[color-mix(in_srgb,var(--state-success)_32%,transparent)] bg-[color-mix(in_srgb,var(--state-success)_9%,transparent)] text-[var(--state-success)]",
+    `vui-components-conversationview researchOrgChip_running min-w-0 ${vuiStateSuccessSoftClass}`,
   researchOrgChip_status:
     "vui-components-conversationview researchOrgChip_status min-w-0",
   researchOrgChip_success:
-    "vui-components-conversationview researchOrgChip_success min-w-0 border-[color-mix(in_srgb,var(--state-success)_32%,transparent)] bg-[color-mix(in_srgb,var(--state-success)_9%,transparent)] text-[var(--state-success)]",
+    `vui-components-conversationview researchOrgChip_success min-w-0 ${vuiStateSuccessSoftClass}`,
   researchOrgChip_thought:
     "vui-components-conversationview researchOrgChip_thought min-w-0",
   researchOrgChip_tool:
-    "vui-components-conversationview researchOrgChip_tool min-w-0 border-[color-mix(in_srgb,var(--accent-warm)_24%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_8%,transparent)] text-[var(--accent-warm)]",
+    `vui-components-conversationview researchOrgChip_tool min-w-0 ${vuiStateWarmSoftClass}`,
   researchOrgChip_verification:
     "vui-components-conversationview researchOrgChip_verification min-w-0",
   researchOrgChip_wake:
@@ -873,7 +876,7 @@ const styles: Record<string, string> = {
   researchOrgChip_warn:
     "vui-components-conversationview researchOrgChip_warn min-w-0",
   researchOrgChip_warning:
-    "vui-components-conversationview researchOrgChip_warning min-w-0 border-[color-mix(in_srgb,var(--state-warning)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_10%,transparent)] text-[var(--state-warning)]",
+    `vui-components-conversationview researchOrgChip_warning min-w-0 ${vuiStateWarningSoftClass}`,
   responseBlock:
     "vui-components-conversationview responseBlock min-w-0",
   responseBody: assistantResponseBody,
@@ -897,7 +900,7 @@ const styles: Record<string, string> = {
   responseSegment_answer:
     "vui-components-conversationview responseSegment_answer min-w-0 [&_.markdownBody]:max-w-[min(100%,128ch)] [&_.responseSegmentHeader]:hidden",
   responseSegment_blocked:
-    "vui-components-conversationview responseSegment_blocked min-w-0 border-[color-mix(in_srgb,var(--state-warning)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_10%,transparent)] text-[var(--state-warning)]",
+    `vui-components-conversationview responseSegment_blocked min-w-0 ${vuiStateWarningSoftClass}`,
   responseSegment_code:
     "vui-components-conversationview responseSegment_code min-w-0 font-mono [font-size:var(--vui-font-xs)]",
   responseSegment_commit:
@@ -945,7 +948,7 @@ const styles: Record<string, string> = {
   responseSegment_thought:
     "vui-components-conversationview responseSegment_thought min-w-0",
   responseSegment_tool:
-    "vui-components-conversationview responseSegment_tool min-w-0 border-[color-mix(in_srgb,var(--accent-warm)_24%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_8%,transparent)] text-[var(--accent-warm)]",
+    `vui-components-conversationview responseSegment_tool min-w-0 ${vuiStateWarmSoftClass}`,
   responseSegment_verification:
     "vui-components-conversationview responseSegment_verification min-w-0",
   responseSegment_wake:
@@ -953,7 +956,7 @@ const styles: Record<string, string> = {
   responseSegment_warn:
     "vui-components-conversationview responseSegment_warn min-w-0",
   responseSegment_warning:
-    "vui-components-conversationview responseSegment_warning min-w-0 border-[color-mix(in_srgb,var(--state-warning)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_10%,transparent)] text-[var(--state-warning)]",
+    `vui-components-conversationview responseSegment_warning min-w-0 ${vuiStateWarningSoftClass}`,
   responseToggle:
     "vui-components-conversationview responseToggle min-w-0 !grid !h-auto !w-full grid-cols-[auto_auto_minmax(0,1fr)] !items-center !justify-start gap-x-1.5 !border-0 !bg-transparent !p-0 !text-left text-[var(--fg-secondary)] !shadow-none hover:!border-transparent hover:!bg-transparent hover:!shadow-none [&_[data-slot=vui-button-content]]:contents [&_[data-slot=vui-button-label]]:contents",
   rolloutTraceDot:
@@ -997,7 +1000,7 @@ const styles: Record<string, string> = {
     "vui-components-conversationview statPill min-w-0 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 [font-size:var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)]",
   statRow: `vui-components-conversationview statRow min-w-0 ${vuiOpaqueRowClass} p-2`,
   statusRunningDot:
-    "vui-components-conversationview statusRunningDot min-w-0 inline-block h-2 w-2 rounded-full bg-current border-[color-mix(in_srgb,var(--state-success)_32%,transparent)] bg-[color-mix(in_srgb,var(--state-success)_9%,transparent)] text-[var(--state-success)]",
+    `vui-components-conversationview statusRunningDot min-w-0 inline-block h-2 w-2 rounded-full bg-current ${vuiStateSuccessSoftClass}`,
   slashCommandSuggestionButton:
     "vui-components-conversationview slashCommandSuggestionButton flex min-h-8 w-full min-w-0 items-center gap-2 px-2 py-1 text-left [font-size:var(--vui-font-xs)] text-[var(--fg-secondary)] hover:bg-[var(--vui-control-muted)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[var(--accent-cool)]",
   slashCommandSuggestionCode:
@@ -1098,7 +1101,7 @@ const styles: Record<string, string> = {
   title:
     "vui-components-conversationview title min-w-0 [font-size:var(--vui-font-title)] font-semibold leading-tight text-[var(--fg-primary)]",
   toolPill:
-    "vui-components-conversationview toolPill min-w-0 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 [font-size:var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)] border-[color-mix(in_srgb,var(--accent-warm)_24%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_8%,transparent)] text-[var(--accent-warm)]",
+    `vui-components-conversationview toolPill min-w-0 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 [font-size:var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)] ${vuiStateWarmSoftClass}`,
   toolRow:
     "vui-components-conversationview toolRow min-w-0 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--accent-warm)_22%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-warm)_5%,var(--vui-surface-panel))] px-2 py-1.5 text-[var(--accent-warm)] shadow-none",
   toolsBlock:

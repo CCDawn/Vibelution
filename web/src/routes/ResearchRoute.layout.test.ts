@@ -352,7 +352,7 @@ describe("ResearchRoute layout contract", () => {
       expect(backgroundToken, `${key} background should not restore the raw surface-card token`).not.toContain(
         "var(--surface-card)",
       );
-      expect(className).toContain("border-[color");
+      expect(className).toMatch(/border-\[(?:color:)?(?:color-mix|var\(--vui-border)/);
       expect(className).toMatch(/vui-surface-|color-mix\(in_srgb/);
       expect(className).not.toContain("bg-[var(--vui-surface-glass)]");
       expect(className).not.toContain("shadow-[var(--vui-shadow-hairline)]");
@@ -384,7 +384,9 @@ describe("ResearchRoute layout contract", () => {
       expect(styles[key]).not.toContain("border-[color-mix");
     }
 
-    expect(styles.agentTracePanel).toContain("bg-[color:color-mix(in_srgb,var(--accent-cool)_6%,transparent)]");
+    expect(styles.agentTracePanel).toMatch(
+      /bg-\[(?:color:)?color-mix\(in_srgb,var\(--accent-cool\)_\d+%,transparent\)\]/,
+    );
     expect(styles.agentTraceMeta).toContain("[&_strong]:text-[var(--fg-primary)]");
     expect(styles.primaryButton).toMatch(/bg-\[|!bg-\[|var\(--vui-surface/);
     expect(styles.primaryButton).not.toContain("var(--vui-surface-row)");

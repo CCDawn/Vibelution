@@ -54,6 +54,19 @@ export const vuiStateSelectedRowClass =
   "border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))] text-[var(--accent-cool)]";
 
 /**
+ * Fill-only cool selection wash (bulk multi-select, nested cells).
+ * Prefer full selected-row when the element owns its own border.
+ */
+export const vuiStateSelectedRowFillClass =
+  "bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]";
+
+/**
+ * Warm selected / active row (Agents list active uses product warm accent).
+ */
+export const vuiStateSelectedWarmRowClass =
+  "border-[color-mix(in_srgb,var(--accent-warm)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_9%,var(--vui-surface-row))]";
+
+/**
  * Soft cool chip / badge (transparent wash). Prefer selected-row when the
  * parent is an opaque product board; use this only for badges and transient chips.
  */
@@ -101,3 +114,9 @@ export const vuiStateSuccessSoftClass =
  */
 export const vuiStateWarmSoftClass =
   "border-[color-mix(in_srgb,var(--accent-warm)_30%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_10%,transparent)] text-[var(--accent-warm-2)]";
+
+/**
+ * Soft warning state chip (state-warning token).
+ */
+export const vuiStateWarningSoftClass =
+  "border-[color-mix(in_srgb,var(--state-warning)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_10%,transparent)] text-[var(--state-warning)]";

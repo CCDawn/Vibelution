@@ -15,6 +15,10 @@ import {
   vuiStateCoolSoftClass,
   vuiStateDangerSoftClass,
   vuiStateSelectedRowClass,
+  vuiStateSelectedRowFillClass,
+  vuiStateSuccessSoftClass,
+  vuiStateWarmSoftClass,
+  vuiStateWarningSoftClass,
 } from "../design/vuiSurfaceRecipes";
 
 const styles: Record<string, string> = {
@@ -47,13 +51,13 @@ const styles: Record<string, string> = {
   aiSearchRunStatus:
     "aiSearchRunStatus min-w-0",
   aiSearchRunStatusCompleted:
-    "aiSearchRunStatusCompleted min-w-0 border-[color-mix(in_srgb,var(--state-success)_32%,transparent)] bg-[color-mix(in_srgb,var(--state-success)_9%,transparent)] text-[var(--state-success)]",
+    `aiSearchRunStatusCompleted min-w-0 ${vuiStateSuccessSoftClass}`,
   aiSearchRunStatusFailed:
     `aiSearchRunStatusFailed min-w-0 ${vuiStateDangerSoftClass}`,
   aiSearchRunStatusPartial:
-    "aiSearchRunStatusPartial min-w-0 border-[color-mix(in_srgb,var(--state-warning)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_10%,transparent)] text-[var(--state-warning)]",
+    `aiSearchRunStatusPartial min-w-0 ${vuiStateWarningSoftClass}`,
   aiSearchRunStatusRunning:
-    "aiSearchRunStatusRunning min-w-0 border-[color-mix(in_srgb,var(--state-success)_32%,transparent)] bg-[color-mix(in_srgb,var(--state-success)_9%,transparent)] text-[var(--state-success)]",
+    `aiSearchRunStatusRunning min-w-0 ${vuiStateSuccessSoftClass}`,
   aiSearchRunStorage:
     "aiSearchRunStorage min-w-0",
   aiSearchRunSummary: `aiSearchRunSummary min-w-0 ${vuiFlatPanelClass} p-2`,
@@ -93,7 +97,7 @@ const styles: Record<string, string> = {
   canvasPanel:
     "canvasPanel min-w-0 !flex min-h-0 flex-col overflow-hidden",
   canvasReadOnlyBadge:
-    "canvasReadOnlyBadge min-w-0 grid min-h-0 gap-2 p-2 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 [font-size:var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)] min-h-[26px] border-[color-mix(in_srgb,var(--accent-cool)_36%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))] px-2 text-[var(--accent-cool)]",
+    `canvasReadOnlyBadge min-w-0 grid min-h-0 gap-2 p-2 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 [font-size:var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)] min-h-[26px] border-[color-mix(in_srgb,var(--accent-cool)_36%,var(--vui-border-subtle))] ${vuiStateSelectedRowFillClass} px-2 text-[var(--accent-cool)]`,
   canvasReadOnlyNode:
     "canvasReadOnlyNode min-w-0 grid min-h-0 gap-2 p-2 grid-cols-[repeat(2,minmax(0,1fr))]",
   canvasReadOnlyNodeWide:
@@ -356,7 +360,7 @@ const styles: Record<string, string> = {
   researchStageCard:
     "researchStageCard min-w-0 flex h-full flex-col gap-2 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-3",
   researchStageCardActive:
-    "researchStageCardActive min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_44%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
+    `researchStageCardActive min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_44%,var(--vui-border-subtle))] ${vuiStateSelectedRowFillClass}`,
   researchStageCardHead:
     "researchStageCardHead min-w-0 !grid grid-cols-[auto_minmax(0,1fr)] items-center gap-2.5 [&>small]:inline-flex [&>small]:h-7 [&>small]:w-7 [&>small]:items-center [&>small]:justify-center [&>small]:rounded-full [&>small]:bg-[var(--vui-control-muted)] [&>small]:font-[820] [&>small]:text-[var(--fg-muted)] [&>div]:grid [&>div]:gap-1",
   researchStageCardMetrics:
@@ -437,7 +441,7 @@ const styles: Record<string, string> = {
   teamContextBar:
     "teamContextBar min-w-0 mx-2 mt-1 !grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 px-2 py-1",
   teamContextChips:
-    "teamContextChips min-w-0 border-[color-mix(in_srgb,var(--accent-warm)_24%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_8%,transparent)] text-[var(--accent-warm)] mx-2 !grid grid-cols-[repeat(4,max-content)] justify-start gap-1.5 overflow-x-auto p-0 [scrollbar-width:thin]",
+    `teamContextChips min-w-0 ${vuiStateWarmSoftClass} mx-2 !grid grid-cols-[repeat(4,max-content)] justify-start gap-1.5 overflow-x-auto p-0 [scrollbar-width:thin]`,
   teamHistoryHeader:
     "teamHistoryHeader min-w-0 flex flex-wrap items-center gap-1.5",
   teamHistoryItem: `teamHistoryItem min-w-0 ${vuiOpaqueRowClass} p-2`,
@@ -522,7 +526,7 @@ const styles: Record<string, string> = {
   workflowStats:
     "workflowStats min-w-0 grid gap-2 !grid grid-cols-[repeat(3,minmax(0,1fr))] gap-1.5",
   workflowSuccess:
-    "workflowSuccess min-w-0 border-[color-mix(in_srgb,var(--state-success)_32%,transparent)] bg-[color-mix(in_srgb,var(--state-success)_9%,transparent)] text-[var(--state-success)]",
+    `workflowSuccess min-w-0 ${vuiStateSuccessSoftClass}`,
   workflowTag:
     "workflowTag min-w-0 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 [font-size:var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)]",
   workflowTagDanger:
@@ -530,9 +534,9 @@ const styles: Record<string, string> = {
   workflowTagNeutral:
     "workflowTagNeutral min-w-0",
   workflowTagReady:
-    "workflowTagReady min-w-0 border-[color-mix(in_srgb,var(--state-success)_32%,transparent)] bg-[color-mix(in_srgb,var(--state-success)_9%,transparent)] text-[var(--state-success)]",
+    `workflowTagReady min-w-0 ${vuiStateSuccessSoftClass}`,
   workflowTagWarning:
-    "workflowTagWarning min-w-0 border-[color-mix(in_srgb,var(--state-warning)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_10%,transparent)] text-[var(--state-warning)]",
+    `workflowTagWarning min-w-0 ${vuiStateWarningSoftClass}`,
   workflowValidation:
     "workflowValidation min-w-0",
   workspace:

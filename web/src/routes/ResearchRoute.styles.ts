@@ -10,20 +10,24 @@
 // Record<string, string> because those dynamic template indexes cannot index a
 // literal-keyed map; tightening is a follow-up, not Phase 0.
 import {
+  vuiOpaquePanelClass,
   vuiOpaqueRowClass,
   vuiStateCoolInfoClass,
   vuiStateCoolSoftClass,
   vuiStateDangerSoftClass,
   vuiStateSelectedRowClass,
+  vuiStateSuccessSoftClass,
+  vuiStateWarmSoftClass,
+  vuiStateWarningSoftClass,
 } from "../design/vuiSurfaceRecipes";
 
 const styles: Record<string, string> = {
   agentModeCard:
-    "agentModeCard min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color:color-mix(in_srgb,var(--accent-cool)_7%,transparent)] p-2 text-[var(--accent-cool)]",
+    `agentModeCard min-w-0 max-w-full rounded-[var(--radius-panel)] ${vuiStateCoolInfoClass} p-2 text-[var(--accent-cool)]`,
   agentModeCard_live:
-    "agentModeCard_live min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color:color-mix(in_srgb,var(--accent-cool)_7%,transparent)] p-2 text-[var(--accent-cool)]",
+    `agentModeCard_live min-w-0 max-w-full rounded-[var(--radius-panel)] ${vuiStateCoolInfoClass} p-2 text-[var(--accent-cool)]`,
   agentPanel:
-    "agentPanel min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color:color-mix(in_srgb,var(--accent-cool)_7%,transparent)] p-2 text-[var(--accent-cool)]",
+    `agentPanel min-w-0 max-w-full rounded-[var(--radius-panel)] ${vuiStateCoolInfoClass} p-2 text-[var(--accent-cool)]`,
   agentReport:
     `agentReport min-w-0 ${vuiStateCoolInfoClass}`,
   agentReview:
@@ -37,15 +41,15 @@ const styles: Record<string, string> = {
   agentTraceControls:
     "agentTraceControls min-w-0 max-w-full flex flex-wrap items-center justify-end gap-1.5",
   agentTraceDetailGroup:
-    "agentTraceDetailGroup min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] !bg-[var(--vui-surface-panel)] p-1.5 text-[var(--fg-secondary)]",
+    `agentTraceDetailGroup min-w-0 max-w-full ${vuiOpaquePanelClass} p-1.5 text-[var(--fg-secondary)]`,
   agentTraceDetailIcon:
-    "agentTraceDetailIcon min-w-0 max-w-full shrink-0 rounded-[var(--radius-control)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] !bg-[var(--vui-surface-row)] p-2 text-[var(--fg-tertiary)]",
+    `agentTraceDetailIcon min-w-0 max-w-full shrink-0 ${vuiOpaqueRowClass} p-2 text-[var(--fg-tertiary)]`,
   agentTraceDetailItem:
-    "agentTraceDetailItem min-w-0 max-w-full !grid grid-cols-[24px_minmax(0,1fr)] items-start gap-1.5 rounded-[var(--radius-control)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] !bg-[var(--vui-surface-panel)] p-1.5",
+    `agentTraceDetailItem min-w-0 max-w-full !grid grid-cols-[24px_minmax(0,1fr)] items-start gap-1.5 ${vuiOpaqueRowClass} p-1.5`,
   agentTraceDetailList:
-    "agentTraceDetailList min-w-0 max-w-full grid min-h-0 content-start gap-1 overflow-auto overflow-x-hidden rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] !bg-[var(--vui-surface-panel)] p-1.5 text-[var(--fg-secondary)]",
+    `agentTraceDetailList min-w-0 max-w-full grid min-h-0 content-start gap-1 overflow-auto overflow-x-hidden ${vuiOpaquePanelClass} p-1.5 text-[var(--fg-secondary)]`,
   agentTraceDetailSummary:
-    "agentTraceDetailSummary min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color:color-mix(in_srgb,var(--accent-cool)_7%,transparent)] p-1.5 text-[var(--accent-cool)]",
+    `agentTraceDetailSummary min-w-0 max-w-full rounded-[var(--radius-panel)] ${vuiStateCoolInfoClass} p-1.5 text-[var(--accent-cool)]`,
   agentTraceHeader:
     "agentTraceHeader min-w-0 max-w-full flex flex-wrap items-center justify-between gap-1.5",
   agentTraceLivePill:
@@ -53,13 +57,13 @@ const styles: Record<string, string> = {
   agentTraceMeta:
     "agentTraceMeta min-w-0 max-w-full flex flex-wrap items-center gap-1.5 text-[var(--fg-tertiary)] [&_strong]:text-[var(--fg-primary)]",
   agentTracePanel:
-    "agentTracePanel min-w-0 max-w-full overflow-hidden rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color:color-mix(in_srgb,var(--accent-cool)_6%,transparent)] p-1.5 text-[var(--accent-cool)]",
+    `agentTracePanel min-w-0 max-w-full overflow-hidden rounded-[var(--radius-panel)] ${vuiStateCoolInfoClass} p-1.5 text-[var(--accent-cool)]`,
   agentTracePanel_collapsed:
-    "agentTracePanel_collapsed min-w-0 max-w-full hidden overflow-hidden rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color:color-mix(in_srgb,var(--accent-cool)_6%,transparent)] p-1.5 text-[var(--accent-cool)]",
+    `agentTracePanel_collapsed min-w-0 max-w-full hidden overflow-hidden rounded-[var(--radius-panel)] ${vuiStateCoolInfoClass} p-1.5 text-[var(--accent-cool)]`,
   agentTraceTimeline:
     "agentTraceTimeline min-w-0 max-w-full grid min-h-0 content-start gap-1 overflow-auto overflow-x-hidden",
   agentTraceTurn:
-    "agentTraceTurn min-w-0 max-w-full rounded-[var(--radius-control)] border border-[color:color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color:color-mix(in_srgb,var(--accent-cool)_8%,transparent)] p-1.5 text-[var(--accent-cool)] !grid grid-cols-[28px_minmax(0,1fr)] gap-2",
+    `agentTraceTurn min-w-0 max-w-full rounded-[var(--radius-control)] ${vuiStateCoolInfoClass} p-1.5 text-[var(--accent-cool)] !grid grid-cols-[28px_minmax(0,1fr)] gap-2`,
   agentTrace_active:
     `agentTrace_active min-w-0 ${vuiStateSelectedRowClass}`,
   agentTrace_agent:
@@ -105,13 +109,13 @@ const styles: Record<string, string> = {
   agentTrace_pending:
     `agentTrace_pending min-w-0 ${vuiStateCoolInfoClass}`,
   agentTrace_primary:
-    `agentTrace_primary min-w-0 ${vuiStateSelectedRowClass} border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)]`,
+    `agentTrace_primary min-w-0 ${vuiStateSelectedRowClass}`,
   agentTrace_ready:
     `agentTrace_ready min-w-0 ${vuiStateCoolInfoClass}`,
   agentTrace_running:
     `agentTrace_running min-w-0 ${vuiStateCoolInfoClass}`,
   agentTrace_selected:
-    `agentTrace_selected min-w-0 ${vuiStateCoolSoftClass} border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)]`,
+    `agentTrace_selected min-w-0 ${vuiStateCoolSoftClass}`,
   agentTrace_status:
     `agentTrace_status min-w-0 ${vuiStateCoolInfoClass}`,
   agentTrace_success:
@@ -127,13 +131,13 @@ const styles: Record<string, string> = {
   agentTrace_warning:
     `agentTrace_warning min-w-0 ${vuiStateCoolInfoClass}`,
   cardActions:
-    "cardActions min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] !bg-[var(--vui-surface-panel)] p-1.5 flex flex-wrap items-center gap-1",
+    `cardActions min-w-0 max-w-full ${vuiOpaquePanelClass} p-1.5 flex flex-wrap items-center gap-1`,
   cardPreviewIntro:
-    "cardPreviewIntro min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] !bg-[var(--vui-surface-panel)] p-1.5",
+    `cardPreviewIntro min-w-0 max-w-full ${vuiOpaquePanelClass} p-1.5`,
   compactList:
     "compactList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
   compactList_warning:
-    "compactList_warning min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto border-[color-mix(in_srgb,var(--state-warning)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_10%,transparent)] text-[var(--state-warning)]",
+    `compactList_warning min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto ${vuiStateWarningSoftClass}`,
   countPill:
     "countPill min-w-0 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 [font-size:var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)]",
   emptyText:
@@ -141,23 +145,23 @@ const styles: Record<string, string> = {
   errorText:
     `errorText min-w-0 ${vuiStateDangerSoftClass} [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]`,
   evidenceCard:
-    "evidenceCard min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] !bg-[var(--vui-surface-panel)] p-1.5",
+    `evidenceCard min-w-0 max-w-full ${vuiOpaquePanelClass} p-1.5`,
   evidenceHeader:
     "evidenceHeader min-w-0 flex flex-wrap items-center gap-1.5",
   evidenceList:
     "evidenceList min-w-0 grid min-h-0 content-start gap-1 overflow-auto",
   evidencePanel:
-    "evidencePanel min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] !bg-[var(--vui-surface-panel)] p-1.5",
+    `evidencePanel min-w-0 max-w-full ${vuiOpaquePanelClass} p-1.5`,
   evidenceRequestPanel:
-    "evidenceRequestPanel min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color:color-mix(in_srgb,var(--accent-cool)_6%,transparent)] p-1.5",
+    `evidenceRequestPanel min-w-0 max-w-full rounded-[var(--radius-panel)] ${vuiStateCoolInfoClass} p-1.5`,
   guardrailPanel:
-    "guardrailPanel min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] !bg-[var(--vui-surface-panel)] p-1.5",
+    `guardrailPanel min-w-0 max-w-full ${vuiOpaquePanelClass} p-1.5`,
   header:
     "header min-w-0 flex flex-wrap items-center gap-1.5",
   headerActions:
     "headerActions min-w-0 flex flex-wrap items-center gap-1.5",
   historyPanel:
-    "historyPanel min-w-0 max-w-full overflow-hidden rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] !bg-[var(--vui-surface-panel)] p-1.5",
+    `historyPanel min-w-0 max-w-full overflow-hidden ${vuiOpaquePanelClass} p-1.5`,
   intakeField:
     "intakeField min-w-0 grid gap-1 [font-size:var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full",
   intakeField_medium:
@@ -169,11 +173,11 @@ const styles: Record<string, string> = {
   intakeFields:
     "intakeFields min-w-0",
   intakePanel:
-    "intakePanel min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] !bg-[var(--vui-surface-panel)] p-1.5",
+    `intakePanel min-w-0 max-w-full ${vuiOpaquePanelClass} p-1.5`,
   okText:
-    "okText min-w-0 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] border-[color-mix(in_srgb,var(--state-success)_32%,transparent)] bg-[color-mix(in_srgb,var(--state-success)_9%,transparent)] text-[var(--state-success)]",
+    `okText min-w-0 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] ${vuiStateSuccessSoftClass}`,
   outputPanel:
-    "outputPanel min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] !bg-[var(--vui-surface-panel)] p-1.5",
+    `outputPanel min-w-0 max-w-full ${vuiOpaquePanelClass} p-1.5`,
   panelEyebrow:
     "panelEyebrow min-w-0 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
   panelHeader:
@@ -181,11 +185,11 @@ const styles: Record<string, string> = {
   panelLead:
     "panelLead min-w-0 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
   pipelinePanel:
-    "pipelinePanel min-w-0 max-w-full overflow-hidden rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] !bg-[var(--vui-surface-panel)] p-1.5",
+    `pipelinePanel min-w-0 max-w-full overflow-hidden ${vuiOpaquePanelClass} p-1.5`,
   primaryButton:
-    "primaryButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55 border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,transparent)] text-[var(--accent-cool)]",
+    `primaryButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold leading-tight hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55 ${vuiStateCoolSoftClass}`,
   processPanel:
-    "processPanel min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] !bg-[var(--vui-surface-panel)] p-1.5",
+    `processPanel min-w-0 max-w-full ${vuiOpaquePanelClass} p-1.5`,
   questionText:
     "questionText min-w-0 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
   riskText:
@@ -205,7 +209,7 @@ const styles: Record<string, string> = {
   sessionRail:
     "sessionRail min-w-0 max-w-full grid min-h-0 content-start gap-1 overflow-auto overflow-x-hidden max-[980px]:grid-cols-[repeat(2,minmax(0,1fr))] max-[640px]:grid-cols-[minmax(0,1fr)]",
   sessionRow:
-    "sessionRow min-w-0 max-w-full rounded-[var(--radius-control)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] !bg-[var(--vui-surface-panel)] p-1.5 !grid grid-cols-[minmax(0,1fr)_34px] items-stretch gap-0 rounded-[var(--radius-control)]",
+    `sessionRow min-w-0 max-w-full ${vuiOpaqueRowClass} p-1.5 !grid grid-cols-[minmax(0,1fr)_34px] items-stretch gap-0 rounded-[var(--radius-control)]`,
   sessionRow_active: `sessionRow_active min-w-0 ${vuiOpaqueRowClass} p-1.5 ${vuiStateSelectedRowClass}`,
   sideColumn:
     "sideColumn min-w-0 max-w-full",
@@ -218,11 +222,11 @@ const styles: Record<string, string> = {
   stageBody:
     "stageBody min-w-0 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
   stageCard:
-    "stageCard min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] !bg-[var(--vui-surface-panel)] p-1.5",
+    `stageCard min-w-0 max-w-full ${vuiOpaquePanelClass} p-1.5`,
   stageCard_active:
-    "stageCard_active min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color:color-mix(in_srgb,var(--accent-cool)_10%,transparent)] p-1.5 text-[var(--accent-cool)]",
+    `stageCard_active min-w-0 max-w-full rounded-[var(--radius-panel)] ${vuiStateCoolSoftClass} p-1.5 text-[var(--accent-cool)]`,
   stageCard_compact:
-    "stageCard_compact min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] !bg-[var(--vui-surface-panel)] p-1.5",
+    `stageCard_compact min-w-0 max-w-full ${vuiOpaquePanelClass} p-1.5`,
   stageDescription:
     "stageDescription min-w-0 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
   stageHeader:
@@ -234,17 +238,17 @@ const styles: Record<string, string> = {
   stageOutput:
     "stageOutput min-w-0",
   stageOutputHeader:
-    "stageOutputHeader min-w-0 max-w-full flex flex-wrap items-center gap-1 !grid grid-cols-[22px_minmax(0,1fr)] items-start gap-1 px-1.5 py-1 rounded-[7px] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] !bg-[var(--vui-surface-panel)]",
+    `stageOutputHeader min-w-0 max-w-full flex flex-wrap items-center gap-1 !grid grid-cols-[22px_minmax(0,1fr)] items-start gap-1 px-1.5 py-1 ${vuiOpaquePanelClass}`,
   stageRail:
     "stageRail min-w-0 max-w-full grid min-h-0 content-start gap-1 overflow-y-auto overflow-x-hidden !grid grid-cols-[1fr] gap-1 pb-0",
   stageResult:
     "stageResult min-w-0",
   stageResultItem:
-    "stageResultItem min-w-0 max-w-full rounded-[var(--radius-control)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] !bg-[var(--vui-surface-panel)] p-1.5",
+    `stageResultItem min-w-0 max-w-full ${vuiOpaqueRowClass} p-1.5`,
   stageResultItems:
     "stageResultItems min-w-0 grid min-h-0 content-start gap-1 overflow-auto",
   stageResultSummary:
-    "stageResultSummary min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] !bg-[var(--vui-surface-panel)] p-1.5",
+    `stageResultSummary min-w-0 max-w-full ${vuiOpaquePanelClass} p-1.5`,
   stageSelectButton:
     "stageSelectButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55 grid gap-1 [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full",
   statePill:
@@ -254,13 +258,13 @@ const styles: Record<string, string> = {
   state_agent:
     `state_agent min-w-0 ${vuiStateCoolInfoClass}`,
   state_blocked:
-    "state_blocked min-w-0 border-[color-mix(in_srgb,var(--state-warning)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_10%,transparent)] text-[var(--state-warning)]",
+    `state_blocked min-w-0 ${vuiStateWarningSoftClass}`,
   state_collapsed:
     "state_collapsed min-w-0 hidden",
   state_compact:
     "state_compact min-w-0",
   state_context:
-    "state_context min-w-0 border-[color-mix(in_srgb,var(--accent-warm)_24%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_8%,transparent)] text-[var(--accent-warm)]",
+    `state_context min-w-0 ${vuiStateWarmSoftClass}`,
   state_danger:
     `state_danger min-w-0 ${vuiStateDangerSoftClass}`,
   state_done:
@@ -276,7 +280,7 @@ const styles: Record<string, string> = {
   state_info:
     `state_info min-w-0 ${vuiStateCoolInfoClass}`,
   state_live:
-    "state_live min-w-0 border-[color-mix(in_srgb,var(--state-success)_32%,transparent)] bg-[color-mix(in_srgb,var(--state-success)_9%,transparent)] text-[var(--state-success)]",
+    `state_live min-w-0 ${vuiStateSuccessSoftClass}`,
   state_medium:
     "state_medium min-w-0",
   state_mental:
@@ -290,31 +294,31 @@ const styles: Record<string, string> = {
   state_observation:
     "state_observation min-w-0",
   state_ok:
-    "state_ok min-w-0 border-[color-mix(in_srgb,var(--state-success)_32%,transparent)] bg-[color-mix(in_srgb,var(--state-success)_9%,transparent)] text-[var(--state-success)]",
+    `state_ok min-w-0 ${vuiStateSuccessSoftClass}`,
   state_pending:
     "state_pending min-w-0",
   state_primary:
     `state_primary min-w-0 ${vuiStateSelectedRowClass}`,
   state_ready:
-    "state_ready min-w-0 border-[color-mix(in_srgb,var(--state-success)_32%,transparent)] bg-[color-mix(in_srgb,var(--state-success)_9%,transparent)] text-[var(--state-success)]",
+    `state_ready min-w-0 ${vuiStateSuccessSoftClass}`,
   state_running:
-    "state_running min-w-0 border-[color-mix(in_srgb,var(--state-success)_32%,transparent)] bg-[color-mix(in_srgb,var(--state-success)_9%,transparent)] text-[var(--state-success)]",
+    `state_running min-w-0 ${vuiStateSuccessSoftClass}`,
   state_selected:
     `state_selected min-w-0 ${vuiStateCoolSoftClass}`,
   state_status:
     "state_status min-w-0",
   state_success:
-    "state_success min-w-0 border-[color-mix(in_srgb,var(--state-success)_32%,transparent)] bg-[color-mix(in_srgb,var(--state-success)_9%,transparent)] text-[var(--state-success)]",
+    `state_success min-w-0 ${vuiStateSuccessSoftClass}`,
   state_tall:
     "state_tall min-w-0",
   state_thought:
     "state_thought min-w-0",
   state_tool:
-    "state_tool min-w-0 border-[color-mix(in_srgb,var(--accent-warm)_24%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_8%,transparent)] text-[var(--accent-warm)]",
+    `state_tool min-w-0 ${vuiStateWarmSoftClass}`,
   state_warn:
     "state_warn min-w-0",
   state_warning:
-    "state_warning min-w-0 border-[color-mix(in_srgb,var(--state-warning)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_10%,transparent)] text-[var(--state-warning)]",
+    `state_warning min-w-0 ${vuiStateWarningSoftClass}`,
   statusSpinner:
     "statusSpinner min-w-0 animate-spin",
   subnav:
@@ -324,16 +328,16 @@ const styles: Record<string, string> = {
   subnavLinkActive:
     `subnavLinkActive min-w-0 ${vuiStateSelectedRowClass}`,
   summaryCard:
-    "summaryCard min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] !bg-[var(--vui-surface-panel)] px-2 py-1.5 !grid grid-cols-[auto_minmax(0,1fr)] items-baseline gap-1.5",
+    `summaryCard min-w-0 max-w-full ${vuiOpaquePanelClass} px-2 py-1.5 !grid grid-cols-[auto_minmax(0,1fr)] items-baseline gap-1.5`,
   summaryGrid:
     "summaryGrid min-w-0 max-w-full grid gap-1.5 grid-cols-[repeat(auto-fit,minmax(7.5rem,1fr))] overflow-x-hidden max-[480px]:grid-cols-[minmax(0,1fr)]",
   tagRow: `tagRow min-w-0 ${vuiOpaqueRowClass} p-2`,
   themeBody:
     "themeBody min-w-0 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
   themeCard:
-    "themeCard min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] !bg-[var(--vui-surface-panel)] p-1.5",
+    `themeCard min-w-0 max-w-full ${vuiOpaquePanelClass} p-1.5`,
   themeCard_selected:
-    "themeCard_selected min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color:color-mix(in_srgb,var(--accent-cool)_11%,transparent)] p-1.5 text-[var(--accent-cool)]",
+    `themeCard_selected min-w-0 max-w-full rounded-[var(--radius-panel)] ${vuiStateCoolSoftClass} p-1.5`,
   themeCompareActions:
     "themeCompareActions min-w-0 w-fit max-w-full flex flex-wrap items-center gap-1.5 max-[640px]:justify-start",
   themeCompareHeader:
@@ -349,9 +353,9 @@ const styles: Record<string, string> = {
   themeCompareReview:
     "themeCompareReview min-w-0",
   themeCompareRow:
-    "themeCompareRow min-w-0 max-w-full rounded-[var(--radius-control)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] !bg-[var(--vui-surface-panel)] p-1.5",
+    `themeCompareRow min-w-0 max-w-full ${vuiOpaqueRowClass} p-1.5`,
   themeCompareRow_selected:
-    "themeCompareRow_selected min-w-0 max-w-full rounded-[var(--radius-control)] border border-[color:color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color:color-mix(in_srgb,var(--accent-cool)_11%,transparent)] p-1.5 text-[var(--accent-cool)]",
+    `themeCompareRow_selected min-w-0 max-w-full rounded-[var(--radius-control)] ${vuiStateCoolSoftClass} p-1.5`,
   themeCompareTags:
     "themeCompareTags min-w-0",
   themeGrid:

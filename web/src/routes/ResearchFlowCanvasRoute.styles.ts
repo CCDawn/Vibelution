@@ -11,10 +11,14 @@
 // literal-keyed map; tightening is a follow-up, not Phase 0.
 import {
   vuiFlatPanelClass,
+  vuiOpaquePanelClass,
   vuiOpaqueRowClass,
   vuiStateCoolInfoClass,
   vuiStateDangerSoftClass,
   vuiStateSelectedRowClass,
+  vuiStateSuccessSoftClass,
+  vuiStateWarmSoftClass,
+  vuiStateWarningSoftClass,
 } from "../design/vuiSurfaceRecipes";
 
 const styles: Record<string, string> = {
@@ -80,7 +84,7 @@ const styles: Record<string, string> = {
   edgeType_approval_gate:
     "edgeType_approval_gate min-w-0",
   edgeType_blocked:
-    "edgeType_blocked min-w-0 border-[color-mix(in_srgb,var(--state-warning)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_10%,transparent)] text-[var(--state-warning)]",
+    `edgeType_blocked min-w-0 ${vuiStateWarningSoftClass}`,
   edgeType_chat:
     "edgeType_chat min-w-0",
   edgeType_danger:
@@ -119,15 +123,15 @@ const styles: Record<string, string> = {
   edgeType_neutral:
     "edgeType_neutral min-w-0",
   edgeType_ok:
-    "edgeType_ok min-w-0 border-[color-mix(in_srgb,var(--state-success)_32%,transparent)] bg-[color-mix(in_srgb,var(--state-success)_9%,transparent)] text-[var(--state-success)]",
+    `edgeType_ok min-w-0 ${vuiStateSuccessSoftClass}`,
   edgeType_pending:
     "edgeType_pending min-w-0",
   edgeType_ready:
-    "edgeType_ready min-w-0 border-[color-mix(in_srgb,var(--state-success)_32%,transparent)] bg-[color-mix(in_srgb,var(--state-success)_9%,transparent)] text-[var(--state-success)]",
+    `edgeType_ready min-w-0 ${vuiStateSuccessSoftClass}`,
   edgeType_research:
     "edgeType_research min-w-0",
   edgeType_running:
-    "edgeType_running min-w-0 border-[color-mix(in_srgb,var(--state-success)_32%,transparent)] bg-[color-mix(in_srgb,var(--state-success)_9%,transparent)] text-[var(--state-success)]",
+    `edgeType_running min-w-0 ${vuiStateSuccessSoftClass}`,
   edgeType_selection:
     "edgeType_selection min-w-0",
   edgeType_self:
@@ -139,17 +143,17 @@ const styles: Record<string, string> = {
   edgeType_status:
     "edgeType_status min-w-0",
   edgeType_success:
-    "edgeType_success min-w-0 border-[color-mix(in_srgb,var(--state-success)_32%,transparent)] bg-[color-mix(in_srgb,var(--state-success)_9%,transparent)] text-[var(--state-success)]",
+    `edgeType_success min-w-0 ${vuiStateSuccessSoftClass}`,
   edgeType_supervised:
     "edgeType_supervised min-w-0",
   edgeType_thought:
     "edgeType_thought min-w-0",
   edgeType_tool:
-    "edgeType_tool min-w-0 border-[color-mix(in_srgb,var(--accent-warm)_24%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_8%,transparent)] text-[var(--accent-warm)]",
+    `edgeType_tool min-w-0 ${vuiStateWarmSoftClass}`,
   edgeType_warn:
     "edgeType_warn min-w-0",
   edgeType_warning:
-    "edgeType_warning min-w-0 border-[color-mix(in_srgb,var(--state-warning)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_10%,transparent)] text-[var(--state-warning)]",
+    `edgeType_warning min-w-0 ${vuiStateWarningSoftClass}`,
   edges:
     "edges min-w-0",
   editorStack: `editorStack min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] ${vuiOpaqueRowClass} p-2`,
@@ -190,15 +194,15 @@ const styles: Record<string, string> = {
   inspectorTabs:
     "inspectorTabs min-w-0 min-h-0 overflow-auto",
   issueCard:
-    "issueCard min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] !bg-[var(--vui-surface-panel)] p-2",
+    `issueCard min-w-0 max-w-full ${vuiOpaquePanelClass} p-2`,
   issueCardBody:
-    "issueCardBody min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_70%,transparent)] !bg-[var(--vui-surface-panel)] p-2 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
+    `issueCardBody min-w-0 max-w-full ${vuiOpaquePanelClass} p-2 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]`,
   issueCardError:
     `issueCardError min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] p-2 ${vuiStateDangerSoftClass}`,
   issueCardHeader:
-    "issueCardHeader min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_70%,transparent)] !bg-[var(--vui-surface-panel)] p-2 flex flex-wrap items-center gap-1.5",
+    `issueCardHeader min-w-0 max-w-full ${vuiOpaquePanelClass} p-2 flex flex-wrap items-center gap-1.5`,
   issueCardWarning:
-    "issueCardWarning min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] p-2 border-[color-mix(in_srgb,var(--state-warning)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_10%,transparent)] text-[var(--state-warning)]",
+    `issueCardWarning min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] p-2 ${vuiStateWarningSoftClass}`,
   issueEmpty:
     "issueEmpty min-w-0 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
   issueFocusButton:
@@ -208,15 +212,15 @@ const styles: Record<string, string> = {
   issueMeta:
     "issueMeta min-w-0 flex flex-wrap items-center gap-1.5",
   issuePanel:
-    "issuePanel min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] !bg-[var(--vui-surface-panel)] p-2",
+    `issuePanel min-w-0 max-w-full ${vuiOpaquePanelClass} p-2`,
   issueSummary:
-    "issueSummary min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] !bg-[var(--vui-surface-panel)] p-2 !grid grid-cols-[repeat(2,minmax(0,1fr))] gap-2.5 max-[430px]:grid-cols-1",
+    `issueSummary min-w-0 max-w-full ${vuiOpaquePanelClass} p-2 !grid grid-cols-[repeat(2,minmax(0,1fr))] gap-2.5 max-[430px]:grid-cols-1`,
   issueSummaryError:
     `issueSummaryError min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] p-2 ${vuiStateDangerSoftClass}`,
   issueSummaryOk:
-    "issueSummaryOk min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] p-2 border-[color-mix(in_srgb,var(--state-success)_32%,transparent)] bg-[color-mix(in_srgb,var(--state-success)_9%,transparent)] text-[var(--state-success)]",
+    `issueSummaryOk min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] p-2 ${vuiStateSuccessSoftClass}`,
   issueSummaryWarning:
-    "issueSummaryWarning min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] p-2 border-[color-mix(in_srgb,var(--state-warning)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_10%,transparent)] text-[var(--state-warning)]",
+    `issueSummaryWarning min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] p-2 ${vuiStateWarningSoftClass}`,
   lockButtonActive:
     `lockButtonActive min-w-0 ${vuiStateSelectedRowClass}`,
   node:
@@ -228,7 +232,7 @@ const styles: Record<string, string> = {
   nodeIssueBadgeError:
     `nodeIssueBadgeError min-w-0 ${vuiStateDangerSoftClass}`,
   nodeIssueBadgeWarning:
-    "nodeIssueBadgeWarning min-w-0 border-[color-mix(in_srgb,var(--state-warning)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_10%,transparent)] text-[var(--state-warning)]",
+    `nodeIssueBadgeWarning min-w-0 ${vuiStateWarningSoftClass}`,
   nodeMeta:
     "nodeMeta min-w-0 flex flex-wrap items-center gap-1.5",
   nodeReconnectTarget:
@@ -242,7 +246,7 @@ const styles: Record<string, string> = {
   nodeStatus_approval_gate:
     "nodeStatus_approval_gate min-w-0",
   nodeStatus_blocked:
-    "nodeStatus_blocked min-w-0 border-[color-mix(in_srgb,var(--state-warning)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_10%,transparent)] text-[var(--state-warning)]",
+    `nodeStatus_blocked min-w-0 ${vuiStateWarningSoftClass}`,
   nodeStatus_chat:
     "nodeStatus_chat min-w-0",
   nodeStatus_danger:
@@ -281,15 +285,15 @@ const styles: Record<string, string> = {
   nodeStatus_neutral:
     "nodeStatus_neutral min-w-0",
   nodeStatus_ok:
-    "nodeStatus_ok min-w-0 border-[color-mix(in_srgb,var(--state-success)_32%,transparent)] bg-[color-mix(in_srgb,var(--state-success)_9%,transparent)] text-[var(--state-success)]",
+    `nodeStatus_ok min-w-0 ${vuiStateSuccessSoftClass}`,
   nodeStatus_pending:
     "nodeStatus_pending min-w-0",
   nodeStatus_ready:
-    "nodeStatus_ready min-w-0 border-[color-mix(in_srgb,var(--state-success)_32%,transparent)] bg-[color-mix(in_srgb,var(--state-success)_9%,transparent)] text-[var(--state-success)]",
+    `nodeStatus_ready min-w-0 ${vuiStateSuccessSoftClass}`,
   nodeStatus_research:
     "nodeStatus_research min-w-0",
   nodeStatus_running:
-    "nodeStatus_running min-w-0 border-[color-mix(in_srgb,var(--state-success)_32%,transparent)] bg-[color-mix(in_srgb,var(--state-success)_9%,transparent)] text-[var(--state-success)]",
+    `nodeStatus_running min-w-0 ${vuiStateSuccessSoftClass}`,
   nodeStatus_selection:
     "nodeStatus_selection min-w-0",
   nodeStatus_self:
@@ -301,17 +305,17 @@ const styles: Record<string, string> = {
   nodeStatus_status:
     "nodeStatus_status min-w-0",
   nodeStatus_success:
-    "nodeStatus_success min-w-0 border-[color-mix(in_srgb,var(--state-success)_32%,transparent)] bg-[color-mix(in_srgb,var(--state-success)_9%,transparent)] text-[var(--state-success)]",
+    `nodeStatus_success min-w-0 ${vuiStateSuccessSoftClass}`,
   nodeStatus_supervised:
     "nodeStatus_supervised min-w-0",
   nodeStatus_thought:
     "nodeStatus_thought min-w-0",
   nodeStatus_tool:
-    "nodeStatus_tool min-w-0 border-[color-mix(in_srgb,var(--accent-warm)_24%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_8%,transparent)] text-[var(--accent-warm)]",
+    `nodeStatus_tool min-w-0 ${vuiStateWarmSoftClass}`,
   nodeStatus_warn:
     "nodeStatus_warn min-w-0",
   nodeStatus_warning:
-    "nodeStatus_warning min-w-0 border-[color-mix(in_srgb,var(--state-warning)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_10%,transparent)] text-[var(--state-warning)]",
+    `nodeStatus_warning min-w-0 ${vuiStateWarningSoftClass}`,
   nodeTitleInput:
     "nodeTitleInput min-w-0 grid gap-1 [font-size:var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full [font-size:var(--vui-font-title)] font-semibold leading-tight text-[var(--fg-primary)]",
   nodeTopline:
@@ -325,7 +329,7 @@ const styles: Record<string, string> = {
   observerStatusActive:
     `observerStatusActive min-w-0 ${vuiStateSelectedRowClass}`,
   organizationActionRow:
-    "organizationActionRow min-w-0 max-w-full flex flex-wrap items-center gap-1.5 rounded-[var(--radius-control)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] !bg-[var(--vui-surface-panel)] p-2",
+    `organizationActionRow min-w-0 max-w-full flex flex-wrap items-center gap-1.5 ${vuiOpaqueRowClass} p-2`,
   organizationAgentCard:
     `organizationAgentCard min-w-0 rounded-[var(--radius-panel)] border p-2 ${vuiStateCoolInfoClass}`,
   organizationAgentList:
@@ -335,9 +339,9 @@ const styles: Record<string, string> = {
   organizationAuditAllowed:
     "organizationAuditAllowed min-w-0",
   organizationAuditBlocked:
-    "organizationAuditBlocked min-w-0 border-[color-mix(in_srgb,var(--state-warning)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_10%,transparent)] text-[var(--state-warning)]",
+    `organizationAuditBlocked min-w-0 ${vuiStateWarningSoftClass}`,
   organizationAuditCard:
-    "organizationAuditCard min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] !bg-[var(--vui-surface-panel)] p-2",
+    `organizationAuditCard min-w-0 max-w-full ${vuiOpaquePanelClass} p-2`,
   organizationAuditHeader:
     "organizationAuditHeader min-w-0 flex flex-wrap items-center gap-1.5",
   organizationAuditList:
@@ -345,33 +349,33 @@ const styles: Record<string, string> = {
   organizationBadge:
     "organizationBadge min-w-0 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 [font-size:var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)]",
   organizationBadgeBlocked:
-    "organizationBadgeBlocked min-w-0 border-[color-mix(in_srgb,var(--state-warning)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_10%,transparent)] text-[var(--state-warning)]",
+    `organizationBadgeBlocked min-w-0 ${vuiStateWarningSoftClass}`,
   organizationBadgeProtected:
     "organizationBadgeProtected min-w-0",
   organizationBadgeRow:
-    "organizationBadgeRow min-w-0 max-w-full rounded-[var(--radius-control)] border border-[color:color-mix(in_srgb,var(--border-soft)_68%,transparent)] !bg-[var(--vui-surface-panel)] p-2",
+    `organizationBadgeRow min-w-0 max-w-full ${vuiOpaqueRowClass} p-2`,
   organizationForm:
     "organizationForm min-w-0 grid gap-1 [font-size:var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full",
   organizationMessageList:
     "organizationMessageList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
   organizationMetric:
-    "organizationMetric min-w-0 max-w-full !grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-2 gap-y-1 p-2.5 rounded-[var(--radius-control)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] !bg-[var(--vui-surface-panel)]",
+    `organizationMetric min-w-0 max-w-full !grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-2 gap-y-1 p-2.5 ${vuiOpaqueRowClass}`,
   organizationPanel:
-    "organizationPanel min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] !bg-[var(--vui-surface-panel)] p-2",
+    `organizationPanel min-w-0 max-w-full ${vuiOpaquePanelClass} p-2`,
   organizationProposalCard:
-    "organizationProposalCard min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] !bg-[var(--vui-surface-panel)] p-2",
+    `organizationProposalCard min-w-0 max-w-full ${vuiOpaquePanelClass} p-2`,
   organizationProposalList:
     "organizationProposalList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
   organizationSectionHeader:
     "organizationSectionHeader min-w-0 flex flex-wrap items-center gap-1.5",
   organizationSummaryGrid:
-    "organizationSummaryGrid min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] !bg-[var(--vui-surface-panel)] p-2 grid gap-2 !grid grid-cols-[repeat(3,minmax(0,1fr))] gap-2 max-[430px]:grid-cols-1",
+    `organizationSummaryGrid min-w-0 max-w-full ${vuiOpaquePanelClass} p-2 grid gap-2 !grid grid-cols-[repeat(3,minmax(0,1fr))] gap-2 max-[430px]:grid-cols-1`,
   primaryButton:
     "primaryButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55 border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,transparent)] text-[var(--accent-cool)]",
   readonlyDescription:
     "readonlyDescription min-w-0 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
   readonlyDetailHeader:
-    "readonlyDetailHeader min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] !bg-[var(--vui-surface-panel)] p-2 flex flex-wrap items-center gap-1.5",
+    `readonlyDetailHeader min-w-0 max-w-full ${vuiOpaquePanelClass} p-2 flex flex-wrap items-center gap-1.5`,
   readonlySpecGrid:
     "readonlySpecGrid min-w-0 grid gap-2 !grid grid-cols-[auto_minmax(0,1fr)] gap-x-2.5 gap-y-[7px] p-2.5 rounded-[var(--radius-control)] border border-[var(--border-soft)] bg-[var(--vui-surface-base)]",
   reconnectHint:
@@ -382,13 +386,13 @@ const styles: Record<string, string> = {
     `saveStatusError min-w-0 ${vuiStateDangerSoftClass}`,
   saveStatusIdle: `saveStatusIdle min-w-0 border-[var(--vui-border-subtle)] ${vuiOpaqueRowClass} text-[var(--fg-tertiary)]`,
   saveStatusSuccess:
-    "saveStatusSuccess min-w-0 border-[color-mix(in_srgb,var(--state-success)_32%,transparent)] bg-[color-mix(in_srgb,var(--state-success)_9%,transparent)] text-[var(--state-success)]",
+    `saveStatusSuccess min-w-0 ${vuiStateSuccessSoftClass}`,
   saveStatusWarning:
-    "saveStatusWarning min-w-0 border-[color-mix(in_srgb,var(--state-warning)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_10%,transparent)] text-[var(--state-warning)]",
+    `saveStatusWarning min-w-0 ${vuiStateWarningSoftClass}`,
   secondaryButton:
     "secondaryButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55",
   selectionSummary:
-    "selectionSummary min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_70%,transparent)] !bg-[var(--vui-surface-panel)] p-2 [overflow-wrap:anywhere]",
+    `selectionSummary min-w-0 max-w-full ${vuiOpaquePanelClass} p-2 [overflow-wrap:anywhere]`,
   statusPill:
     "statusPill min-w-0 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 [font-size:var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)]",
   status_active:
@@ -396,7 +400,7 @@ const styles: Record<string, string> = {
   status_approval_gate:
     "status_approval_gate min-w-0",
   status_blocked:
-    "status_blocked min-w-0 border-[color-mix(in_srgb,var(--state-warning)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_10%,transparent)] text-[var(--state-warning)]",
+    `status_blocked min-w-0 ${vuiStateWarningSoftClass}`,
   status_chat:
     "status_chat min-w-0",
   status_danger:
@@ -435,15 +439,15 @@ const styles: Record<string, string> = {
   status_neutral:
     "status_neutral min-w-0",
   status_ok:
-    "status_ok min-w-0 border-[color-mix(in_srgb,var(--state-success)_32%,transparent)] bg-[color-mix(in_srgb,var(--state-success)_9%,transparent)] text-[var(--state-success)]",
+    `status_ok min-w-0 ${vuiStateSuccessSoftClass}`,
   status_pending:
     "status_pending min-w-0",
   status_ready:
-    "status_ready min-w-0 border-[color-mix(in_srgb,var(--state-success)_32%,transparent)] bg-[color-mix(in_srgb,var(--state-success)_9%,transparent)] text-[var(--state-success)]",
+    `status_ready min-w-0 ${vuiStateSuccessSoftClass}`,
   status_research:
     "status_research min-w-0",
   status_running:
-    "status_running min-w-0 border-[color-mix(in_srgb,var(--state-success)_32%,transparent)] bg-[color-mix(in_srgb,var(--state-success)_9%,transparent)] text-[var(--state-success)]",
+    `status_running min-w-0 ${vuiStateSuccessSoftClass}`,
   status_selection:
     "status_selection min-w-0",
   status_self:
@@ -455,17 +459,17 @@ const styles: Record<string, string> = {
   status_status:
     "status_status min-w-0",
   status_success:
-    "status_success min-w-0 border-[color-mix(in_srgb,var(--state-success)_32%,transparent)] bg-[color-mix(in_srgb,var(--state-success)_9%,transparent)] text-[var(--state-success)]",
+    `status_success min-w-0 ${vuiStateSuccessSoftClass}`,
   status_supervised:
     "status_supervised min-w-0",
   status_thought:
     "status_thought min-w-0",
   status_tool:
-    "status_tool min-w-0 border-[color-mix(in_srgb,var(--accent-warm)_24%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_8%,transparent)] text-[var(--accent-warm)]",
+    `status_tool min-w-0 ${vuiStateWarmSoftClass}`,
   status_warn:
     "status_warn min-w-0",
   status_warning:
-    "status_warning min-w-0 border-[color-mix(in_srgb,var(--state-warning)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_10%,transparent)] text-[var(--state-warning)]",
+    `status_warning min-w-0 ${vuiStateWarningSoftClass}`,
   twoColumns:
     "twoColumns min-w-0 grid gap-2 !grid grid-cols-[repeat(2,minmax(0,1fr))] gap-2.5 max-[430px]:grid-cols-1",
   validationConnectionNotice: `validationConnectionNotice min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] ${vuiOpaqueRowClass} p-2`,
@@ -474,7 +478,7 @@ const styles: Record<string, string> = {
   validationIssueError:
     `validationIssueError min-w-0 ${vuiStateDangerSoftClass}`,
   validationIssueWarning:
-    "validationIssueWarning min-w-0 border-[color-mix(in_srgb,var(--state-warning)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_10%,transparent)] text-[var(--state-warning)]",
+    `validationIssueWarning min-w-0 ${vuiStateWarningSoftClass}`,
   zoomControl:
     "zoomControl min-w-0 flex flex-wrap items-center gap-1.5",
 };
