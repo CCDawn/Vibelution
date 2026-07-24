@@ -454,6 +454,7 @@ const TeamSourceCollectionControlsWorkspacePanel = createLazyNamedTeamPanel(load
 const TeamSourceCollectionActiveStageWorkspacePanel = createLazyNamedTeamPanel(loadTeamSourceCollectionPanels, "TeamSourceCollectionActiveStageWorkspacePanel");
 const TeamSourceCollectionSourceDetailPanel = createLazyNamedTeamPanel(loadTeamSourceCollectionPanels, "TeamSourceCollectionSourceDetailPanel");
 const TeamSourceCollectionStandaloneStagePanel = createLazyNamedTeamPanel(loadTeamSourceCollectionPanels, "TeamSourceCollectionStandaloneStagePanel");
+const TeamSourceCollectionSearchBriefPanel = createLazyNamedTeamPanel(loadTeamSourceCollectionPanels, "TeamSourceCollectionSearchBriefPanel");
 const TeamSourceCollectionRunSettingsPanel = createLazyNamedTeamPanel(loadTeamSourceCollectionPanels, "TeamSourceCollectionRunSettingsPanel");
 const TeamSourceCollectionFilterBar = createLazyNamedTeamPanel(loadTeamSourceCollectionPanels, "TeamSourceCollectionFilterBar");
 const TeamSourceCollectionPagination = createLazyNamedTeamPanel(loadTeamSourceCollectionPanels, "TeamSourceCollectionPagination");
@@ -2502,6 +2503,29 @@ export function TeamsRoute({
           </label>
         ) : null}
       </>
+    );
+  }
+
+  function renderSourceCollectionSearchBrief() {
+    return (
+      <TeamSourceCollectionSearchBriefPanel
+        lang={lang}
+        draft={sourceCollectionDraft}
+        modeFields={renderSourceCollectionModeFields()}
+        hasExistingRun={Boolean(selectedSourceCollectionRun)}
+        canStart={sourceCollectionCanStart}
+        startPending={selectedTeamStartSourceCollectionPending}
+        onDraftChange={(patch) => setSourceCollectionDraft((current) => ({ ...current, ...patch }))}
+        onSubmit={() => {
+          if (!selectedTeam?.teamId || !sourceCollectionCanStart || selectedTeamStartSourceCollectionPending) {
+            return;
+          }
+          startSourceCollectionRunMutation.mutate({
+            teamId: selectedTeam.teamId,
+            draft: sourceCollectionDraft,
+          });
+        }}
+      />
     );
   }
 
@@ -5194,14 +5218,24 @@ export function TeamsRoute({
           <TeamSourceCollectionStandaloneStagePanel
             commandAriaLabel={lang === "zh" ? "知识搜集操作台" : "Knowledge collection command bar"}
             commandTone={sourceCollectionConsoleState}
-            commandTitle={sourceCollectionRunTitleLabel(selectedSourceCollectionRun?.title || sourceCollectionDraft.title, lang)}
-            commandSubtitle={sourceCollectionDecisionText}
+            commandTitle={
+              sourceCollectionDraft.topic.trim()
+              || String(selectedSourceCollectionRun?.scope?.topic || "").trim()
+              || sourceCollectionRunTitleLabel(selectedSourceCollectionRun?.title || sourceCollectionDraft.title, lang)
+            }
+            commandSubtitle={
+              lang === "zh"
+                ? `${compactSourceCollectionQuerySeeds(sourceCollectionDraft.topic, sourceCollectionDraft.querySeeds).length} 个搜索问题 · ${splitDraftList(sourceCollectionDraft.searchLanguages, 8).length || 1} 种语言 · ${splitDraftList(sourceCollectionDraft.sourceTypes, 12).length || 1} 类来源`
+                : `${compactSourceCollectionQuerySeeds(sourceCollectionDraft.topic, sourceCollectionDraft.querySeeds).length} queries · ${splitDraftList(sourceCollectionDraft.searchLanguages, 8).length || 1} languages · ${splitDraftList(sourceCollectionDraft.sourceTypes, 12).length || 1} source types`
+            }
             commandStats={[
               { key: "status", label: lang === "zh" ? "当前" : "status", value: sourceCollectionConsoleStatusText },
               { key: "next", label: lang === "zh" ? "下一步" : "next", value: sourceCollectionBoardNextStepLabel },
               { key: "sources", label: lang === "zh" ? "资料" : "sources", value: sourceCollectionCollectedCountLabel },
             ]}
+            searchBrief={renderSourceCollectionSearchBrief()}
             runSwitcher={renderSourceCollectionRunSwitcher()}
+            runHistoryLabel={lang === "zh" ? "切换历史批次" : "Switch historical run"}
             phaseCloseGate={(
               <TeamSourceCollectionPhaseCloseGatePanel
                 lang={lang}
@@ -5212,6 +5246,7 @@ export function TeamsRoute({
                   && sourceCollectionSummaryQuery.isPending
                   && !sourceCollectionSummaryQuery.data,
                 )}
+                compact
                 onOpenStage={selectSourceCollectionStage}
               />
             )}
