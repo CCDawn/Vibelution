@@ -35,7 +35,9 @@ type TeamSourceCollectionStandaloneStagePanelProps = {
   commandTitle: ReactNode;
   commandSubtitle: ReactNode;
   commandStats: TeamStageStat[];
+  searchBrief?: ReactNode;
   runSwitcher: ReactNode;
+  runHistoryLabel?: string;
   phaseCloseGate?: ReactNode;
   stagePipelineId: string;
   stagePipelineAriaLabel: string;
@@ -66,7 +68,9 @@ export function TeamSourceCollectionStandaloneStagePanel({
   commandTitle,
   commandSubtitle,
   commandStats,
+  searchBrief,
   runSwitcher,
+  runHistoryLabel = "切换历史批次",
   phaseCloseGate,
   stagePipelineId,
   stagePipelineAriaLabel,
@@ -83,28 +87,34 @@ export function TeamSourceCollectionStandaloneStagePanel({
         subtitle={commandSubtitle}
         stats={commandStats}
       />
-      {runSwitcher || phaseCloseGate ? (
-        <div className={styles.sourceCollectionRunContext}>
-          {runSwitcher}
-          {phaseCloseGate}
-        </div>
-      ) : null}
-      <TeamStagePipeline id={stagePipelineId} ariaLabel={stagePipelineAriaLabel}>
-        {modules.map((module, index) => (
-          <TeamStageCard
-            key={module.id}
-            index={index}
-            tone={module.tone}
-            selected={module.selected}
-            title={module.title}
-            onActivate={module.onDetail}
-            status={module.status}
-            label={module.label}
-            metric={module.metric}
-            nextLabel={module.nextLabel}
-          />
-        ))}
-      </TeamStagePipeline>
+      <aside className={styles.sourceCollectionLeftRail} aria-label={stagePipelineAriaLabel}>
+        {searchBrief}
+        {phaseCloseGate}
+        <TeamStagePipeline id={stagePipelineId} ariaLabel={stagePipelineAriaLabel}>
+          {modules.map((module, index) => (
+            <TeamStageCard
+              key={module.id}
+              index={index}
+              tone={module.tone}
+              selected={module.selected}
+              title={module.title}
+              onActivate={module.onDetail}
+              status={module.status}
+              label={module.label}
+              metric={module.metric}
+              nextLabel={module.nextLabel}
+            />
+          ))}
+        </TeamStagePipeline>
+        {runSwitcher ? (
+          <details className={styles.sourceCollectionRunHistory}>
+            <summary>{runHistoryLabel}</summary>
+            <div className={styles.sourceCollectionRunContext}>
+              {runSwitcher}
+            </div>
+          </details>
+        ) : null}
+      </aside>
       <div className={compactActivePanel ? styles.sourceCollectionPageGridCompact : styles.sourceCollectionPageGrid}>
         {activePanel}
       </div>
